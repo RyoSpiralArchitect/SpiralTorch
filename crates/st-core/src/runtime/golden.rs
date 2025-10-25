@@ -22,11 +22,14 @@
 // ============================================================================
 
 #![cfg(feature = "golden")]
+use std::convert::Infallible;
 use std::ops::{Deref, DerefMut};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::panic::{self, AssertUnwindSafe};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 
+use crossbeam_channel::{bounded, unbounded, Receiver, Sender};
 use st_tensor::{Tensor, TensorError};
 use thiserror::Error;
 
@@ -122,6 +125,19 @@ impl core::fmt::Display for GoldenRuntimeError {
 
 impl std::error::Error for GoldenRuntimeError {}
 
+#[derive(Debug, Error)]
+pub enum GoldenTaskError<E>
+where
+    E: std::fmt::Debug + std::fmt::Display,
+{
+    #[error("{0}")]
+    Task(E),
+    #[error("{0}")]
+    Runtime(#[from] GoldenRuntimeError),
+    #[error("golden runtime task panicked")]
+    Panic,
+}
+
 #[derive(Debug, Clone)]
 pub struct GoldenRuntimeConfig {
     pub worker_threads: usize,
@@ -140,40 +156,144 @@ impl Default for GoldenRuntimeConfig {
     }
 }
 
-/// Lightweight runtime that mimics Tokio/Rayon ergonomics using the standard
-/// library. Tasks are spawned onto named threads and can be joined later, while
-/// reduction helpers keep aggregation deterministic.
-#[derive(Clone)]
-pub struct GoldenRuntime {
+type ThreadResult<T, E> = Result<T, GoldenTaskError<E>>;
+
+enum GoldenTaskMessage {
+    Run(Box<dyn FnOnce() + Send + 'static>),
+    Shutdown,
+}
+
+struct GoldenRuntimeInner {
     workers: usize,
-    name: Arc<String>,
-    counter: Arc<AtomicUsize>,
+    name: String,
+    sender: Sender<GoldenTaskMessage>,
+    handles: Mutex<Vec<thread::JoinHandle<()>>>,
+    shutdown: AtomicBool,
+}
+
+impl GoldenRuntimeInner {
+    fn spawn_workers(
+        inner: &Arc<Self>,
+        receiver: Receiver<GoldenTaskMessage>,
+    ) -> Result<(), GoldenRuntimeError> {
+        let shared_receiver = Arc::new(receiver);
+        let mut handles = inner
+            .handles
+            .lock()
+            .expect("golden runtime worker handle mutex poisoned");
+        for idx in 0..inner.workers {
+            let name = format!("{}-{}", inner.name, idx);
+            let worker_receiver = shared_receiver.clone();
+            let handle = thread::Builder::new()
+                .name(name)
+                .spawn(move || worker_loop(worker_receiver))
+                .map_err(|err| {
+                    GoldenRuntimeError(format!("failed to spawn golden worker: {err}"))
+                })?;
+            handles.push(handle);
+        }
+        Ok(())
+    }
+
+    fn worker_count(&self) -> usize {
+        self.workers
+    }
+}
+
+impl Drop for GoldenRuntimeInner {
+    fn drop(&mut self) {
+        self.shutdown.store(true, Ordering::Release);
+        for _ in 0..self.workers {
+            let _ = self.sender.send(GoldenTaskMessage::Shutdown);
+        }
+        let mut handles = self
+            .handles
+            .lock()
+            .expect("golden runtime worker handle mutex poisoned");
+        while let Some(handle) = handles.pop() {
+            let _ = handle.join();
+        }
+    }
+}
+
+fn worker_loop(receiver: Arc<Receiver<GoldenTaskMessage>>) {
+    while let Ok(message) = receiver.recv() {
+        match message {
+            GoldenTaskMessage::Run(job) => job(),
+            GoldenTaskMessage::Shutdown => break,
+        }
+    }
+}
+
+pub struct GoldenJoinHandle<R, E>
+where
+    E: std::fmt::Debug + std::fmt::Display,
+{
+    receiver: Option<Receiver<ThreadResult<R, E>>>,
+}
+
+impl<R, E> GoldenJoinHandle<R, E>
+where
+    E: std::fmt::Debug + std::fmt::Display,
+{
+    pub fn join(self) -> Result<R, GoldenTaskError<E>> {
+        let receiver = self
+            .receiver
+            .expect("golden runtime join handle already consumed");
+        match receiver.recv() {
+            Ok(result) => result,
+            Err(_) => Err(GoldenTaskError::Runtime(GoldenRuntimeError(
+                "golden runtime worker dropped result".into(),
+            ))),
+        }
+    }
+}
+
+/// Lightweight runtime that mimics Tokio/Rayon ergonomics using the standard
+/// library. Tasks are scheduled on a small pool of reusable threads and can be
+/// joined later, while reduction helpers keep aggregation deterministic.
+pub struct GoldenRuntime {
+    inner: Arc<GoldenRuntimeInner>,
+}
+
+impl Clone for GoldenRuntime {
+    fn clone(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
+    }
 }
 
 impl GoldenRuntime {
     pub fn new(config: GoldenRuntimeConfig) -> Result<Self, GoldenRuntimeError> {
         let workers = config.worker_threads.max(1);
         let name = config.thread_name.unwrap_or_else(|| "golden".into());
-        Ok(Self {
+        let (sender, receiver) = unbounded::<GoldenTaskMessage>();
+        let inner = Arc::new(GoldenRuntimeInner {
             workers,
-            name: Arc::new(name),
-            counter: Arc::new(AtomicUsize::new(0)),
-        })
+            name,
+            sender,
+            handles: Mutex::new(Vec::with_capacity(workers)),
+            shutdown: AtomicBool::new(false),
+        });
+        GoldenRuntimeInner::spawn_workers(&inner, receiver)?;
+        Ok(Self { inner })
     }
 
     pub fn worker_count(&self) -> usize {
-        self.workers
+        self.inner.worker_count()
     }
 
-    pub fn execute<F, R>(&self, func: F) -> Result<R, GoldenRuntimeError>
+    pub fn execute<F, R, E>(&self, func: F) -> Result<R, GoldenTaskError<E>>
     where
-        F: FnOnce() -> R + Send + 'static,
+        F: FnOnce() -> Result<R, E> + Send + 'static,
         R: Send + 'static,
+        E: std::fmt::Debug + std::fmt::Display + Send + 'static,
     {
-        let handle = self.spawn_blocking(func)?;
-        handle
-            .join()
-            .map_err(|_| GoldenRuntimeError("golden runtime task panicked".into()))
+        let handle = self
+            .spawn_blocking(func)
+            .map_err(GoldenTaskError::Runtime)?;
+        handle.join()
     }
 
     pub fn tensor_random_uniform(
@@ -184,10 +304,8 @@ impl GoldenRuntime {
         max: f32,
         seed: Option<u64>,
     ) -> Result<Tensor, GoldenTensorError> {
-        let result = self
-            .execute(move || Tensor::random_uniform(rows, cols, min, max, seed))
-            .map_err(GoldenTensorError::from)?;
-        result.map_err(GoldenTensorError::from)
+        self.execute(move || Tensor::random_uniform(rows, cols, min, max, seed))
+            .map_err(GoldenTensorError::from)
     }
 
     pub fn tensor_random_normal(
@@ -198,57 +316,102 @@ impl GoldenRuntime {
         std: f32,
         seed: Option<u64>,
     ) -> Result<Tensor, GoldenTensorError> {
-        let result = self
-            .execute(move || Tensor::random_normal(rows, cols, mean, std, seed))
-            .map_err(GoldenTensorError::from)?;
-        result.map_err(GoldenTensorError::from)
+        self.execute(move || Tensor::random_normal(rows, cols, mean, std, seed))
+            .map_err(GoldenTensorError::from)
     }
 
-    pub fn spawn_blocking<F, R>(&self, func: F) -> Result<thread::JoinHandle<R>, GoldenRuntimeError>
+    pub fn spawn_blocking<F, R, E>(
+        &self,
+        func: F,
+    ) -> Result<GoldenJoinHandle<R, E>, GoldenRuntimeError>
     where
-        F: FnOnce() -> R + Send + 'static,
+        F: FnOnce() -> Result<R, E> + Send + 'static,
         R: Send + 'static,
+        E: std::fmt::Debug + std::fmt::Display + Send + 'static,
     {
-        let idx = self.counter.fetch_add(1, Ordering::Relaxed);
-        let label = format!("{}-{}", self.name, idx);
-        thread::Builder::new()
-            .name(label)
-            .spawn(func)
-            .map_err(|err| GoldenRuntimeError(format!("failed to spawn golden worker: {err}")))
+        if self.inner.shutdown.load(Ordering::Acquire) {
+            return Err(GoldenRuntimeError(
+                "golden runtime is shutting down and cannot accept new tasks".into(),
+            ));
+        }
+
+        let (result_tx, result_rx) = bounded::<ThreadResult<R, E>>(1);
+        let job = Box::new(move || {
+            let outcome = panic::catch_unwind(AssertUnwindSafe(func));
+            let result = match outcome {
+                Ok(inner) => inner.map_err(GoldenTaskError::Task),
+                Err(_) => Err(GoldenTaskError::Panic),
+            };
+            let _ = result_tx.send(result);
+        });
+
+        self.inner
+            .sender
+            .send(GoldenTaskMessage::Run(job))
+            .map_err(|_| {
+                GoldenRuntimeError(
+                    "golden runtime worker queue rejected task (runtime shutting down)".into(),
+                )
+            })?;
+
+        Ok(GoldenJoinHandle {
+            receiver: Some(result_rx),
+        })
     }
 
-    pub fn reduce<T, R, Map, Fold>(&self, data: &[T], map: Map, fold: Fold, identity: R) -> R
+    pub fn reduce<T, R, Map, Fold>(
+        &self,
+        data: &[T],
+        map: Map,
+        fold: Fold,
+        identity: R,
+    ) -> Result<R, GoldenTaskError<Infallible>>
     where
-        T: Sync,
-        R: Send + Sync + Clone,
-        Map: Fn(&T) -> R + Send + Sync,
-        Fold: Fn(R, R) -> R + Send + Sync,
+        T: Sync + 'static,
+        R: Send + Sync + Clone + 'static,
+        Map: Fn(&T) -> R + Send + Sync + 'static,
+        Fold: Fn(R, R) -> R + Send + Sync + 'static,
     {
-        if self.workers <= 1 || data.len() < 2 {
-            return data
-                .iter()
-                .map(&map)
-                .fold(identity.clone(), |acc, item| fold(acc, item));
+        let workers = self.worker_count();
+        if workers <= 1 || data.len() < 2 {
+            let mut acc = identity;
+            for item in data {
+                let mapped = map(item);
+                acc = fold(acc, mapped);
+            }
+            return Ok(acc);
         }
-        let chunk = (data.len() + self.workers - 1) / self.workers;
-        thread::scope(|scope| {
+
+        let chunk = ((data.len() + workers - 1) / workers).max(1);
+        let mut partials = Vec::new();
+        thread::scope(|scope| -> Result<(), GoldenTaskError<Infallible>> {
             let mut handles = Vec::new();
             for chunk_items in data.chunks(chunk) {
                 let identity_clone = identity.clone();
                 let map_ref = &map;
                 let fold_ref = &fold;
                 handles.push(scope.spawn(move || {
-                    chunk_items
-                        .iter()
-                        .map(map_ref)
-                        .fold(identity_clone, |acc, item| fold_ref(acc, item))
+                    chunk_items.iter().fold(identity_clone, |acc, item| {
+                        let mapped = map_ref(item);
+                        fold_ref(acc, mapped)
+                    })
                 }));
             }
-            handles
-                .into_iter()
-                .map(|handle| handle.join().unwrap_or_else(|_| identity.clone()))
-                .fold(identity.clone(), |acc, item| fold(acc, item))
-        })
+
+            for handle in handles {
+                let value = handle.join().map_err(|_| GoldenTaskError::Panic)?;
+                partials.push(value);
+            }
+
+            Ok(())
+        })?;
+
+        let mut acc = identity;
+        for value in partials {
+            acc = fold(acc, value);
+        }
+
+        Ok(acc)
     }
 }
 
@@ -260,6 +423,18 @@ pub enum GoldenTensorError {
     Tensor(#[from] TensorError),
 }
 
+impl From<GoldenTaskError<TensorError>> for GoldenTensorError {
+    fn from(err: GoldenTaskError<TensorError>) -> Self {
+        match err {
+            GoldenTaskError::Runtime(inner) => Self::Runtime(inner),
+            GoldenTaskError::Task(inner) => Self::Tensor(inner),
+            GoldenTaskError::Panic => {
+                Self::Runtime(GoldenRuntimeError("golden runtime task panicked".into()))
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -269,7 +444,11 @@ mod tests {
         let runtime = GoldenRuntime::new(GoldenRuntimeConfig::default()).expect("runtime");
         let mut handles = Vec::new();
         for idx in 0..runtime.worker_count() {
-            handles.push(runtime.spawn_blocking(move || idx * 2).expect("spawn"));
+            handles.push(
+                runtime
+                    .spawn_blocking(move || Ok::<usize, Infallible>(idx * 2))
+                    .expect("spawn"),
+            );
         }
         let mut total = 0usize;
         for handle in handles {
@@ -278,7 +457,9 @@ mod tests {
         assert!(total > 0);
 
         let numbers: Vec<u32> = (0..32).collect();
-        let reduced = runtime.reduce(&numbers, |value| *value as usize, |a, b| a + b, 0usize);
+        let reduced = runtime
+            .reduce(&numbers, |value| *value as usize, |a, b| a + b, 0usize)
+            .expect("reduce");
         assert_eq!(
             reduced,
             numbers.iter().copied().map(|v| v as usize).sum::<usize>()

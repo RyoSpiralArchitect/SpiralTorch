@@ -27,11 +27,17 @@ complete with:
 - a six-beat **Story Tour** that auto-plays the runtime journey;
 - spotlight toggles for **Graph node materialisation** and **Return handles**;
 - a **Storyboard timeline** you can click through at your own pace.
+- a psychedelic **Aurora mode** that soaks the diagram in a shimmering gradient;
+- glowing **Phase constellations** that group subsystems so you can trace each stage at a glance.
 
 ## Tips for exploration
 
 - Toggle the "Return handles" and "Graph node" focus modes to jump between
   execution phases without losing context.
+- Flip on **Aurora mode** whenever you want the psychedelic glow—the toggle lives
+  next to the spotlight buttons and remembers its state until you tap again.
+- Use the **Phase constellation** cards in the sidebar to highlight major runtime
+  stages, or simply watch them light up as the story tour advances.
 - Hover each node to reveal a concise description of the underlying runtime
   component and the data that flows through it.
 - Start the Story Tour to see SpiralTorch narrate the handoff automatically, or

@@ -8,6 +8,7 @@ pub mod mellin;
 pub mod mellin_types;
 #[cfg(feature = "wgpu")]
 pub mod mellin_wgpu;
+pub mod scale_stack;
 pub mod zspace;
 
 use ndarray::{ArrayD, Axis};

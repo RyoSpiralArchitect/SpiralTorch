@@ -8,15 +8,18 @@
       :root {
         color-scheme: dark;
         font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
-        --bg: #0f172a;
-        --panel: #111c34;
-        --panel-border: #1e293b;
-        --text: #e2e8f0;
+        --bg: #0b1120;
+        --panel: rgba(15, 23, 42, 0.78);
+        --panel-border: rgba(94, 234, 212, 0.25);
+        --text: #f1f5f9;
         --muted: #94a3b8;
         --accent: #38bdf8;
         --accent-strong: #0ea5e9;
         --highlight: #fbbf24;
-        --edge: #475569;
+        --edge: rgba(94, 234, 212, 0.45);
+        --phase-bg: rgba(13, 148, 136, 0.28);
+        --phase-border: rgba(125, 211, 252, 0.45);
+        --phase-glow: rgba(34, 211, 238, 0.85);
       }
 
       * {
@@ -31,64 +34,121 @@
         display: flex;
         justify-content: center;
         padding: 32px 24px 48px;
+        position: relative;
+        overflow-x: hidden;
+        overflow-y: auto;
+      }
+
+      body::before {
+        content: "";
+        position: fixed;
+        inset: -40%;
+        background:
+          radial-gradient(circle at 20% 25%, rgba(56, 189, 248, 0.25), transparent 55%),
+          radial-gradient(circle at 80% 10%, rgba(192, 132, 252, 0.22), transparent 60%),
+          conic-gradient(
+            from 120deg at 50% 50%,
+            rgba(59, 130, 246, 0.18),
+            rgba(236, 72, 153, 0.12),
+            rgba(16, 185, 129, 0.18),
+            rgba(59, 130, 246, 0.18)
+          );
+        mix-blend-mode: screen;
+        opacity: 0.5;
+        z-index: 0;
+        animation: drift 26s linear infinite;
+      }
+
+      body::after {
+        content: "";
+        position: fixed;
+        inset: -20%;
+        background-image: radial-gradient(rgba(255, 255, 255, 0.45) 0.8px, rgba(255, 255, 255, 0) 0.8px);
+        background-size: 90px 90px;
+        mix-blend-mode: screen;
+        opacity: 0.25;
+        z-index: 0;
+        animation: twinkle 14s ease-in-out infinite;
+      }
+
+      body.psychedelic {
+        background: radial-gradient(circle at 30% 10%, rgba(14, 165, 233, 0.28), rgba(30, 41, 59, 0.95) 45%, #020617 95%);
+      }
+
+      body.psychedelic::before {
+        opacity: 0.85;
+        filter: saturate(1.35) hue-rotate(28deg);
+        animation-duration: 18s;
+      }
+
+      body.psychedelic::after {
+        opacity: 0.55;
+        animation-duration: 10s;
       }
 
       .page {
-        width: min(1100px, 100%);
+        width: min(1120px, 100%);
         display: flex;
         flex-direction: column;
-        gap: 20px;
+        gap: 22px;
+        position: relative;
+        z-index: 1;
       }
 
       header {
-        background: linear-gradient(145deg, rgba(37, 99, 235, 0.18), rgba(6, 182, 212, 0.08));
-        border: 1px solid rgba(56, 189, 248, 0.25);
-        border-radius: 18px;
-        padding: 20px 24px;
-        box-shadow: 0 25px 45px rgba(15, 23, 42, 0.45);
+        background: linear-gradient(145deg, rgba(59, 130, 246, 0.15), rgba(14, 116, 144, 0.42), rgba(129, 140, 248, 0.2));
+        border: 1px solid rgba(125, 211, 252, 0.38);
+        border-radius: 20px;
+        padding: 22px 26px;
+        box-shadow: 0 25px 45px rgba(15, 23, 42, 0.55);
+        backdrop-filter: blur(16px);
       }
 
       header h1 {
         margin: 0 0 12px;
-        font-size: clamp(1.4rem, 2vw + 0.5rem, 1.9rem);
+        font-size: clamp(1.4rem, 2vw + 0.5rem, 1.95rem);
         letter-spacing: 0.03em;
       }
 
       header p {
         margin: 0;
-        color: var(--muted);
-        line-height: 1.5;
-        max-width: 820px;
+        color: rgba(224, 242, 254, 0.85);
+        line-height: 1.55;
+        max-width: 860px;
       }
 
       header p + p {
         margin-top: 10px;
-        color: #bae6fd;
+        color: rgba(186, 230, 253, 0.95);
         font-size: 0.95rem;
+      }
+
+      header p strong {
+        color: #f0f9ff;
       }
 
       .controls {
         display: flex;
         flex-wrap: wrap;
         gap: 12px;
-        margin-top: 16px;
+        margin-top: 18px;
       }
 
       button {
         appearance: none;
         background: rgba(30, 64, 175, 0.55);
-        border: 1px solid rgba(129, 140, 248, 0.35);
+        border: 1px solid rgba(129, 140, 248, 0.45);
         color: #eef2ff;
         padding: 10px 18px;
         border-radius: 12px;
         cursor: pointer;
         font-weight: 600;
         letter-spacing: 0.01em;
-        transition: transform 150ms ease, background 150ms ease;
+        transition: transform 150ms ease, background 150ms ease, box-shadow 150ms ease;
       }
 
       button:hover:not(:disabled) {
-        background: rgba(59, 130, 246, 0.65);
+        background: rgba(96, 165, 250, 0.65);
         transform: translateY(-1px);
       }
 
@@ -103,13 +163,24 @@
       }
 
       button.story {
-        background: rgba(6, 182, 212, 0.4);
-        border-color: rgba(45, 212, 191, 0.5);
+        background: rgba(6, 182, 212, 0.45);
+        border-color: rgba(45, 212, 191, 0.6);
         color: #ecfeff;
       }
 
       button.story:hover:not(:disabled) {
-        background: rgba(34, 211, 238, 0.6);
+        background: rgba(34, 211, 238, 0.65);
+      }
+
+      button.toggle {
+        background: rgba(124, 58, 237, 0.4);
+        border-color: rgba(196, 181, 253, 0.55);
+      }
+
+      button[aria-pressed="true"] {
+        background: rgba(244, 114, 182, 0.55);
+        border-color: rgba(251, 191, 36, 0.65);
+        box-shadow: 0 0 18px rgba(251, 191, 36, 0.25);
       }
 
       .workspace {
@@ -121,11 +192,12 @@
 
       .canvas-wrapper {
         position: relative;
-        background: var(--panel);
+        background: rgba(15, 23, 42, 0.72);
         border: 1px solid var(--panel-border);
-        border-radius: 18px;
+        border-radius: 20px;
         padding: 20px;
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 25px 45px rgba(15, 23, 42, 0.45);
+        backdrop-filter: blur(10px);
       }
 
       svg {
@@ -134,33 +206,37 @@
       }
 
       .node circle {
-        fill: rgba(15, 118, 110, 0.25);
-        stroke: rgba(94, 234, 212, 0.7);
+        fill: rgba(13, 148, 136, 0.28);
+        stroke: rgba(94, 234, 212, 0.75);
         stroke-width: 2;
-        transition: fill 180ms ease, stroke 180ms ease, transform 180ms ease;
+        transition: fill 180ms ease, stroke 180ms ease, transform 180ms ease, filter 180ms ease;
+        filter: drop-shadow(0 0 6px rgba(45, 212, 191, 0.25));
       }
 
       .node text {
         fill: #f8fafc;
         font-size: 13px;
         pointer-events: none;
+        letter-spacing: 0.02em;
       }
 
       .node:hover circle {
-        fill: rgba(20, 184, 166, 0.45);
+        fill: rgba(20, 184, 166, 0.48);
         stroke: rgba(16, 185, 129, 0.95);
       }
 
       .node.active circle {
-        fill: rgba(14, 165, 233, 0.45);
+        fill: rgba(14, 165, 233, 0.48);
         stroke: var(--accent-strong);
         stroke-width: 3.5;
         transform: scale(1.05);
+        filter: drop-shadow(0 0 14px rgba(14, 165, 233, 0.55));
+        animation: pulse 2.4s ease-in-out infinite;
       }
 
       .edge {
         stroke: var(--edge);
-        stroke-width: 2;
+        stroke-width: 2.5;
         opacity: 0.55;
         cursor: pointer;
         transition: stroke 160ms ease, opacity 160ms ease, stroke-width 160ms ease;
@@ -175,22 +251,26 @@
         stroke: var(--highlight);
         stroke-width: 4;
         opacity: 1;
+        stroke-dasharray: 6 10;
+        animation: dash 1.4s linear infinite;
       }
 
       .info-panel {
-        background: rgba(8, 47, 73, 0.65);
-        border: 1px solid rgba(14, 116, 144, 0.45);
-        border-radius: 18px;
+        background: rgba(12, 74, 110, 0.45);
+        border: 1px solid rgba(56, 189, 248, 0.4);
+        border-radius: 20px;
         padding: 24px;
         display: flex;
         flex-direction: column;
-        gap: 16px;
-        box-shadow: 0 16px 32px rgba(15, 23, 42, 0.45);
+        gap: 18px;
+        box-shadow: 0 18px 36px rgba(15, 23, 42, 0.55);
+        backdrop-filter: blur(14px);
       }
 
       .info-panel h2 {
         margin: 0;
-        font-size: 1.2rem;
+        font-size: 1.22rem;
+        letter-spacing: 0.02em;
       }
 
       .info-panel p {
@@ -199,12 +279,94 @@
         line-height: 1.55;
       }
 
-      .legend {
-        font-size: 0.85rem;
-        color: rgba(148, 163, 184, 0.85);
+      .phase-section {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .phase-section h3 {
+        margin: 0;
+        font-size: 1rem;
+        color: #f8fafc;
+        letter-spacing: 0.02em;
+      }
+
+      .phase-hint {
+        margin: 0;
+        font-size: 0.82rem;
+        color: rgba(191, 219, 254, 0.9);
+      }
+
+      .phase-deck {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      }
+
+      .phase-card {
+        position: relative;
+        border-radius: 14px;
+        border: 1px solid var(--phase-border);
+        background: var(--phase-bg);
+        padding: 12px 14px 14px;
         display: flex;
         flex-direction: column;
         gap: 6px;
+        cursor: pointer;
+        transition: transform 160ms ease, border 160ms ease, box-shadow 160ms ease, background 160ms ease;
+        overflow: hidden;
+      }
+
+      .phase-card::before {
+        content: "";
+        position: absolute;
+        inset: -40%;
+        background: radial-gradient(circle, rgba(34, 211, 238, 0.4), transparent 65%);
+        opacity: 0.45;
+        transform: translate3d(0, 0, 0);
+        animation: floaty 9s ease-in-out infinite;
+      }
+
+      .phase-card h4 {
+        margin: 0;
+        font-size: 0.95rem;
+        color: #f0fdf4;
+        letter-spacing: 0.01em;
+      }
+
+      .phase-card p {
+        margin: 0;
+        font-size: 0.8rem;
+        color: rgba(240, 249, 255, 0.85);
+        line-height: 1.4;
+      }
+
+      .phase-card small {
+        font-size: 0.7rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: rgba(224, 242, 254, 0.75);
+      }
+
+      .phase-card:hover {
+        transform: translateY(-2px);
+        border-color: rgba(165, 243, 252, 0.7);
+      }
+
+      .phase-card:focus-visible {
+        outline: 2px solid rgba(125, 211, 252, 0.9);
+        outline-offset: 3px;
+      }
+
+      .phase-card.active {
+        background: rgba(8, 145, 178, 0.6);
+        border-color: var(--phase-glow);
+        box-shadow: 0 12px 32px rgba(13, 148, 136, 0.45);
+      }
+
+      .phase-card.active::before {
+        opacity: 0.75;
       }
 
       .storyboard {
@@ -256,15 +418,15 @@
       }
 
       .storyboard li.active {
-        background: rgba(2, 132, 199, 0.55);
+        background: rgba(2, 132, 199, 0.6);
         border-color: rgba(125, 211, 252, 0.95);
-        box-shadow: 0 10px 25px rgba(14, 116, 144, 0.4);
+        box-shadow: 0 10px 25px rgba(14, 116, 144, 0.45);
       }
 
       .storyboard .step-index {
         font-weight: 700;
         font-size: 0.85rem;
-        background: rgba(34, 211, 238, 0.25);
+        background: rgba(34, 211, 238, 0.3);
         border-radius: 999px;
         padding: 4px 10px;
       }
@@ -278,6 +440,14 @@
         margin: 0;
         font-size: 0.8rem;
         color: rgba(191, 219, 254, 0.9);
+      }
+
+      .legend {
+        font-size: 0.85rem;
+        color: rgba(148, 163, 184, 0.85);
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
       }
 
       .legend span {
@@ -304,6 +474,10 @@
         .workspace {
           grid-template-columns: 1fr;
         }
+
+        .canvas-wrapper {
+          min-height: 420px;
+        }
       }
 
       @media (max-width: 720px) {
@@ -316,6 +490,53 @@
           width: 100%;
         }
       }
+
+      @keyframes drift {
+        from {
+          transform: rotate(0deg) scale(1.05);
+        }
+        to {
+          transform: rotate(360deg) scale(1.05);
+        }
+      }
+
+      @keyframes twinkle {
+        0%,
+        100% {
+          opacity: 0.25;
+        }
+        50% {
+          opacity: 0.4;
+        }
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          transform: scale(1.02);
+          filter: drop-shadow(0 0 10px rgba(14, 165, 233, 0.55));
+        }
+        50% {
+          transform: scale(1.08);
+          filter: drop-shadow(0 0 18px rgba(14, 165, 233, 0.75));
+        }
+      }
+
+      @keyframes dash {
+        to {
+          stroke-dashoffset: -32;
+        }
+      }
+
+      @keyframes floaty {
+        0%,
+        100% {
+          transform: translate3d(-6%, -4%, 0);
+        }
+        50% {
+          transform: translate3d(4%, 6%, 0);
+        }
+      }
     </style>
   </head>
   <body>
@@ -323,17 +544,18 @@
       <header>
         <h1>Graph node &amp; return handle handoff</h1>
         <p>
-          This interactive map replays the portion of the SpiralTorch runtime where bindings
-          materialise a <strong>graph node</strong> and later receive <strong>return handles</strong>.
-          Activate one of the spotlight flows or click individual nodes to inspect what each
-          component contributes during the dispatch.
+          This map now pulses like a neon constellation, replaying the SpiralTorch runtime moment
+          where bindings crystallise a <strong>graph node</strong> and route
+          <strong>return handles</strong> back to the caller. Follow the glow to see exactly which
+          subsystem moves the baton next.
         </p>
         <p>
-          Choose a spotlight to zoom into a phase, or jump into the story tour to feel the
-          choreography narrated beat by beat. Every stop adds a little lore so the runtime becomes
-          a playful map instead of a wall of text.
+          Toggle <strong>Aurora mode</strong> for a psychedelic shimmer, cruise through the story tour,
+          or tap the phase constellations in the side panel to watch subsystems light up precisely
+          when they steer the dispatch.
         </p>
         <div class="controls">
+          <button id="toggle-aurora" class="story toggle" aria-pressed="false">🌈 Aurora mode</button>
           <button id="flow-graph-node">Highlight graph node materialisation</button>
           <button id="flow-return-handles">Highlight return handles path</button>
           <button id="flow-reset">Reset view</button>
@@ -375,10 +597,18 @@
         <aside class="info-panel" aria-live="polite">
           <h2 id="info-title">Start exploring the flow</h2>
           <p id="info-body">
-            Use the spotlight buttons or the Story Tour to follow the two key handoffs. Click on a
-            node or edge anytime to learn how it supports execution, then hop back into the tour or
-            the README sequence diagram for broader context.
+            Kick off with the spotlights or drift into the Story Tour to follow the two key handoffs.
+            Phase constellations in the panel glow whenever their nodes light up, so you can feel how
+            SpiralTorch’s modules braid together.
           </p>
+          <div class="phase-section">
+            <h3>Phase constellations</h3>
+            <p class="phase-hint">
+              Each card bundles the subsystems that collaborate during a stage. Click one to
+              spotlight that constellation or watch them shimmer when the story visits their beat.
+            </p>
+            <div class="phase-deck" id="phase-list" role="list" aria-label="Phase constellations"></div>
+          </div>
           <div class="storyboard">
             <h3>Story beats</h3>
             <ol id="story-steps"></ol>
@@ -633,37 +863,48 @@
       const storyPlayButton = document.getElementById("story-play");
       const storyPrevButton = document.getElementById("story-prev");
       const storyNextButton = document.getElementById("story-next");
+      const auroraToggleButton = document.getElementById("toggle-aurora");
+      const phaseList = document.getElementById("phase-list");
 
       const defaultInfoTitle = "Start exploring the flow";
       const defaultInfoBody =
-        "Use the spotlight buttons or the Story Tour to follow the two key handoffs. Click on a node or edge anytime to learn how it supports execution, then hop back into the tour or the README sequence diagram for broader context.";
-      const defaultHint = "Press ▶ Story tour to autoplay the journey.";
+        "Follow the spotlights or the Story Tour to watch graph nodes crystallise and return handles glide home. The phase constellations glow whenever their subsystems take the lead.";
+      const defaultHint = "Press ▶ Story tour to autoplay the journey or pick a constellation to vibe manually.";
 
       const nodeById = new Map(nodes.map((node) => [node.id, node]));
       const nodeElements = new Map();
       const edgeElements = new Map();
       let storyTimer = null;
       let currentBeatIndex = null;
+      let auroraMode = false;
+      const currentActiveNodes = new Set();
+      const phaseElements = new Map();
 
-      const storyBeats = [
+      const phases = [
         {
-          title: "1. Spark the call",
-          body:
-            "A Python or TypeScript call leaps from the public API into the bindings. The FFI packs arguments, lifetimes, and metadata so Rust can take over without losing intent.",
+          id: "ingress",
+          title: "Ingress spark",
+          caption: "API incantations dive into the bindings marshaler.",
+          detail:
+            "Python or TypeScript callers hand their request to the FFI, which marshals arguments, lifetimes, and metadata so Rust receives the full intent intact.",
           nodes: ["API", "FFI"],
           edges: ["api-ffi"],
         },
         {
-          title: "2. Graph node crystallises",
-          body:
-            "Bindings deliver the marshalled request to st-core, which materialises a fresh graph node and registers it with the hypergrad tape. Autograd futures are now on standby.",
+          id: "crystal",
+          title: "Graph node crystal",
+          caption: "Bindings, core, and tape crystallise a fresh node.",
+          detail:
+            "Bindings feed the dispatcher, which materialises a graph node and registers it with the hypergrad tape so gradients already know where to land.",
           nodes: ["FFI", "Core", "Tape"],
           edges: ["ffi-core", "core-tape", "tape-core"],
         },
         {
-          title: "3. Schedulers spin the plan",
-          body:
-            "The dispatcher partners with the cooperative scheduler and planner. Together they survey device caps and the op registry (plus codegen if needed) to stage the perfect pipeline.",
+          id: "orchestrate",
+          title: "Planner kaleidoscope",
+          caption: "Schedulers, planners, caps, and registry choreograph the run.",
+          detail:
+            "st-core teams up with the cooperative scheduler, planner, device caps, and registry (plus KD codegen when needed) to assemble the perfect execution pipeline.",
           nodes: ["Core", "Sched", "Plan", "Caps", "Reg", "KD"],
           edges: [
             "core-sched",
@@ -677,21 +918,81 @@
           ],
         },
         {
-          title: "4. Backends light up",
-          body:
-            "Work packages stream into the selected backend runtime. Command buffers dance through device queues, and the autograd tape readies itself for new tensors.",
+          id: "execute",
+          title: "Backend ignition",
+          caption: "Planner handoff ignites the backend launchpad.",
+          detail:
+            "Work packages stream through the backend runtime, device queues, and the hypergrad tape so tensors and gradients materialise on schedule.",
           nodes: ["Plan", "BE", "Queue", "Tape"],
           edges: ["plan-be", "be-queue", "queue-be", "be-tape"],
         },
         {
-          title: "5. Telemetry keeps the vibe",
+          id: "afterglow",
+          title: "Telemetry afterglow",
+          caption: "Scheduler and telemetry keep the vibe in sync.",
+          detail:
+            "The backend updates the scheduler, streams spans into TLM, and PSI plus the bindings soak up warnings so operators stay in the loop.",
+          nodes: ["BE", "Sched", "TLM", "PSI", "FFI"],
+          edges: ["be-sched", "be-tlm", "tlm-psi", "tlm-ffi"],
+        },
+        {
+          id: "return",
+          title: "Return loop",
+          caption: "Handles boomerang back to the API surface.",
+          detail:
+            "st-core resolves the final tensor handles and passes them to the bindings so the original API call receives results without missing a beat.",
+          nodes: ["Core", "FFI", "API"],
+          edges: ["core-ffi", "ffi-api"],
+        },
+      ];
+
+      const storyBeats = [
+        {
+          title: "1. Spark the incantation",
+          body:
+            "A Python or TypeScript incantation leaps from the public API into the bindings. The FFI packs arguments, lifetimes, and metadata so Rust can take over without losing intent.",
+          nodes: ["API", "FFI"],
+          edges: ["api-ffi"],
+        },
+        {
+          title: "2. Graph node crystallises",
+          body:
+            "Bindings deliver the marshalled request to st-core, which materialises a neon graph node and registers it with the hypergrad tape. Autograd futures are now on standby.",
+          nodes: ["FFI", "Core", "Tape"],
+          edges: ["ffi-core", "core-tape", "tape-core"],
+        },
+        {
+          title: "3. Kaleidoscope planning",
+          body:
+            "The dispatcher partners with the cooperative scheduler and planner. Together they survey device caps and the op registry (plus codegen if needed) to stage the perfect kaleidoscopic pipeline.",
+          nodes: ["Core", "Sched", "Plan", "Caps", "Reg", "KD"],
+          edges: [
+            "core-sched",
+            "sched-plan",
+            "plan-caps",
+            "caps-plan",
+            "plan-reg",
+            "reg-plan",
+            "reg-kd",
+            "kd-reg",
+          ],
+        },
+        {
+          title: "4. Backends ignite",
+          body:
+            "Work packages stream into the selected backend runtime. Command buffers dance through device queues while the autograd tape readies itself for new tensors.",
+          nodes: ["Plan", "BE", "Queue", "Tape"],
+          edges: ["plan-be", "be-queue", "queue-be", "be-tape"],
+        },
+        {
+          title: "5. Telemetry weaves the afterglow",
           body:
             "As execution wraps, telemetry pulses outward. The backend updates the scheduler, streams spans to TLM, and PSI plus the bindings listen for fresh insights.",
           nodes: ["BE", "Sched", "TLM", "PSI", "FFI"],
           edges: ["be-sched", "be-tlm", "tlm-psi", "tlm-ffi"],
         },
         {
-          title: "6. Return handles land",
+          title: "6. Return handles loop home",
           body:
             "st-core resolves the final tensor handles and sends them back through the bindings. The original API call receives its results, ready for the next SpiralTorch experiment.",
           nodes: ["Core", "FFI", "API"],
@@ -754,7 +1055,7 @@
           currentBeatIndex = null;
           highlightStoryItem(null);
           setStoryHint(
-            "Free roam engaged! Press ▶ to replay the story or pick any beat to jump back in."
+            "Free roam engaged! Press ▶ to replay the story, pick any beat, or tap a constellation to jump back in."
           );
           updateStoryControls();
         }
@@ -765,7 +1066,7 @@
         stopStoryTimer();
         goToBeat(clampedIndex);
         setStoryHint(
-          "Manual step selected. Use Next/Previous to stroll or press ▶ to relaunch autoplay."
+          "Manual vibe engaged. Use Next/Previous or tap another constellation, then press ▶ to relaunch autoplay."
         );
         updateStoryControls();
       }
@@ -788,7 +1089,7 @@
         stopStoryTimer();
         goToBeat(0);
         setStoryHint(
-          "Tour in progress… enjoy the ride! Interact with the diagram at any time to pause."
+          "Tour in progress… enjoy the ride! Interact with the diagram or constellations anytime to pause."
         );
         storyTimer = setInterval(() => {
           if (currentBeatIndex === null) {
@@ -815,6 +1116,8 @@
             el.setAttribute("marker-end", "url(#arrow)");
           }
         });
+        currentActiveNodes.clear();
+        updatePhaseHighlights();
       }
 
       function activateNodes(nodeIds) {
@@ -823,7 +1126,9 @@
           if (el) {
             el.classList.add("active");
           }
+          currentActiveNodes.add(id);
         });
+        updatePhaseHighlights();
       }
 
       function activateEdges(edgeIds) {
@@ -869,6 +1174,58 @@
           edges: ["core-ffi", "ffi-api"],
         },
       };
+
+      function updatePhaseHighlights() {
+        phases.forEach((phase) => {
+          const card = phaseElements.get(phase.id);
+          if (!card) {
+            return;
+          }
+          const intersects = phase.nodes.some((nodeId) => currentActiveNodes.has(nodeId));
+          card.classList.toggle("active", intersects);
+          card.setAttribute("aria-pressed", intersects ? "true" : "false");
+        });
+      }
+
+      function showPhase(phase) {
+        breakStoryForManual();
+        clearActive();
+        activateNodes(phase.nodes);
+        activateEdges(phase.edges);
+        setInfo(phase.title, phase.detail);
+      }
+
+      phases.forEach((phase) => {
+        if (!phaseList) {
+          return;
+        }
+        const card = document.createElement("div");
+        card.className = "phase-card";
+        card.innerHTML = `
+          <h4>${phase.title}</h4>
+          <p>${phase.caption}</p>
+          <small>${phase.nodes.join(" • ")}</small>
+        `;
+        card.dataset.phaseId = phase.id;
+        card.setAttribute("role", "button");
+        card.setAttribute("tabindex", "0");
+        card.setAttribute("aria-label", `Phase constellation: ${phase.title}`);
+        card.setAttribute("aria-pressed", "false");
+        card.addEventListener("click", (event) => {
+          event.stopPropagation();
+          showPhase(phase);
+        });
+        card.addEventListener("keyup", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            showPhase(phase);
+          }
+        });
+        phaseList.appendChild(card);
+        phaseElements.set(phase.id, card);
+      });
+
+      updatePhaseHighlights();
 
       storyBeats.forEach((beat, index) => {
         const item = document.createElement("li");
@@ -976,6 +1333,32 @@
       document.getElementById("flow-return-handles").addEventListener("click", () => {
         runFlow(flows.returnHandles);
       });
+
+      function updateAuroraButton() {
+        if (!auroraToggleButton) {
+          return;
+        }
+        auroraToggleButton.textContent = auroraMode
+          ? "🌈 Aurora mode on ✨"
+          : "🌈 Aurora mode";
+        auroraToggleButton.setAttribute("aria-pressed", auroraMode ? "true" : "false");
+      }
+
+      if (auroraToggleButton) {
+        auroraToggleButton.addEventListener("click", (event) => {
+          event.stopPropagation();
+          auroraMode = !auroraMode;
+          document.body.classList.toggle("psychedelic", auroraMode);
+          updateAuroraButton();
+        });
+        auroraToggleButton.addEventListener("keyup", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            auroraToggleButton.click();
+          }
+        });
+        updateAuroraButton();
+      }
 
       storyPlayButton.addEventListener("click", () => {
         playStory();

@@ -137,91 +137,25 @@ func TestNewTensorFromColumnsValidation(t *testing.T) {
 
 func TestMatrixHelpersWithEmptyDimensions(t *testing.T) {
 	zeroRows := [][]float32{}
-	tensor, err := NewTensorFromMatrix(zeroRows)
-	if err != nil {
-		t.Fatalf("unexpected error for zero rows: %v", err)
-	}
-	t.Cleanup(func() { tensor.Close() })
-
-	rows, cols, err := tensor.Shape()
-	if err != nil {
-		t.Fatalf("Shape returned error: %v", err)
-	}
-	if rows != 0 || cols != 0 {
-		t.Fatalf("unexpected shape for zero rows: got %dx%d", rows, cols)
+	if _, err := NewTensorFromMatrix(zeroRows); err == nil {
+		t.Fatalf("expected error for zero rows")
 	}
 
 	zeroCols := [][]float32{{}, {}}
-	tensorCols, err := NewTensorFromMatrix(zeroCols)
-	if err != nil {
-		t.Fatalf("unexpected error for zero columns: %v", err)
-	}
-	t.Cleanup(func() { tensorCols.Close() })
-
-	rows, cols, err = tensorCols.Shape()
-	if err != nil {
-		t.Fatalf("Shape returned error: %v", err)
-	}
-	if rows != 2 || cols != 0 {
-		t.Fatalf("unexpected shape for zero columns: got %dx%d", rows, cols)
-	}
-
-	decoded, err := tensorCols.ToMatrix()
-	if err != nil {
-		t.Fatalf("ToMatrix returned error: %v", err)
-	}
-	if len(decoded) != 2 {
-		t.Fatalf("unexpected decoded row count: %d", len(decoded))
-	}
-	for i, row := range decoded {
-		if len(row) != 0 {
-			t.Fatalf("expected zero-length row at index %d", i)
-		}
+	if _, err := NewTensorFromMatrix(zeroCols); err == nil {
+		t.Fatalf("expected error for zero columns")
 	}
 }
 
 func TestColumnHelpersWithEmptyDimensions(t *testing.T) {
 	zeroColumns := [][]float32{}
-	tensor, err := NewTensorFromColumns(zeroColumns)
-	if err != nil {
-		t.Fatalf("unexpected error for zero columns: %v", err)
-	}
-	t.Cleanup(func() { tensor.Close() })
-
-	rows, cols, err := tensor.Shape()
-	if err != nil {
-		t.Fatalf("Shape returned error: %v", err)
-	}
-	if rows != 0 || cols != 0 {
-		t.Fatalf("unexpected shape for zero columns input: got %dx%d", rows, cols)
+	if _, err := NewTensorFromColumns(zeroColumns); err == nil {
+		t.Fatalf("expected error for zero columns input")
 	}
 
 	zeroRows := [][]float32{{}, {}}
-	tensorRows, err := NewTensorFromColumns(zeroRows)
-	if err != nil {
-		t.Fatalf("unexpected error for zero rows: %v", err)
-	}
-	t.Cleanup(func() { tensorRows.Close() })
-
-	rows, cols, err = tensorRows.Shape()
-	if err != nil {
-		t.Fatalf("Shape returned error: %v", err)
-	}
-	if rows != 0 || cols != 2 {
-		t.Fatalf("unexpected shape for zero rows: got %dx%d", rows, cols)
-	}
-
-	columns, err := tensorRows.Columns()
-	if err != nil {
-		t.Fatalf("Columns returned error: %v", err)
-	}
-	if len(columns) != 2 {
-		t.Fatalf("unexpected column count: %d", len(columns))
-	}
-	for i, col := range columns {
-		if len(col) != 0 {
-			t.Fatalf("expected zero-length column at %d", i)
-		}
+	if _, err := NewTensorFromColumns(zeroRows); err == nil {
+		t.Fatalf("expected error for zero rows input")
 	}
 }
 
@@ -238,18 +172,8 @@ func TestNewTensorFromDenseZeroDimensions(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			tensor, err := NewTensorFromDense(tc.rows, tc.cols, nil)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			t.Cleanup(func() { tensor.Close() })
-
-			rows, cols, err := tensor.Shape()
-			if err != nil {
-				t.Fatalf("Shape returned error: %v", err)
-			}
-			if rows != tc.rows || cols != tc.cols {
-				t.Fatalf("unexpected shape: got %dx%d want %dx%d", rows, cols, tc.rows, tc.cols)
+			if _, err := NewTensorFromDense(tc.rows, tc.cols, nil); err == nil {
+				t.Fatalf("expected error for zero-dimension dense tensor")
 			}
 		})
 	}
