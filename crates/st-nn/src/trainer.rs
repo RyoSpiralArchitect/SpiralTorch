@@ -38,6 +38,7 @@ use crate::roundtable::{
     HeurOpKind, HeurOpLog, MetaConductor, ModeratorMinutes, OutcomeBand, RoundtableNode,
 };
 use crate::schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedule};
+use crate::zspace_coherence::{CoherenceDiagnostics, CoherenceLabel, CoherenceObservation};
 use crate::{PureResult, Tensor};
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::backend::unison_heuristics::RankKind;
@@ -535,6 +536,19 @@ impl ModuleTrainer {
     pub fn disable_desire_roundtable_bridge(&mut self) {
         self.desire_roundtable_bridge = None;
         self.last_desire_roundtable_summary = None;
+    }
+
+    /// Surfaces the qualitative coherence observation so schedulers can react.
+    pub fn coherence_observation(
+        &self,
+        diagnostics: &CoherenceDiagnostics,
+    ) -> CoherenceObservation {
+        diagnostics.observation()
+    }
+
+    /// Converts coherence observations into semantic labels.
+    pub fn interpret_coherence(&self, diagnostics: &CoherenceDiagnostics) -> CoherenceLabel {
+        self.coherence_observation(diagnostics).lift_to_label()
     }
 
     /// Installs a curvature scheduler so the trainer can adapt its hyperbolic

@@ -1011,6 +1011,20 @@ class CoherenceChannelReport:
     descriptor: str | None
 
 
+class CoherenceSignature:
+    dominant_channel: int | None
+    energy_ratio: float
+    entropy: float
+    mean_coherence: float
+    swap_invariant: bool
+
+
+class CoherenceObservation:
+    is_signature: bool
+    label: str
+    signature: CoherenceSignature | None
+
+
 class CoherenceDiagnostics:
     channel_weights: List[float]
     normalized_weights: List[float]
@@ -1027,6 +1041,7 @@ class CoherenceDiagnostics:
     preserved_channels: int
     discarded_channels: int
     pre_discard: PreDiscardTelemetry | None
+    observation: CoherenceObservation
 
 
 class PreDiscardTelemetry:
@@ -1103,6 +1118,9 @@ class _ZSpaceCoherenceSequencer:
     def clear_pre_discard_snapshots(self) -> None: ...
 
     def __call__(self, x: Tensor) -> Tensor: ...
+
+
+def is_swap_invariant(arrangement: Sequence[float]) -> bool: ...
 
     def dim(self) -> int: ...
 
@@ -1354,6 +1372,59 @@ class ZPulseSnapshot:
 
     @property
     def latency_ms(self) -> float: ...
+
+
+class ContextualPulseFrame:
+    @property
+    def summary(self) -> str: ...
+
+    @property
+    def highlights(self) -> List[str]: ...
+
+    @property
+    def label(self) -> str | None: ...
+
+    @property
+    def lexical_weight(self) -> float: ...
+
+    @property
+    def signature(self) -> Tuple[int, int, int] | None: ...
+
+    @property
+    def support(self) -> int: ...
+
+    @property
+    def pulse(self) -> ZPulseSnapshot: ...
+
+
+class ContextualLagrangianGate:
+    def __init__(
+        self,
+        curvature: float,
+        temperature: float,
+        *,
+        gauge: str = ...,
+        tempo_normaliser: float | None = ...,
+        energy_gain: float = ...,
+        drift_gain: float = ...,
+        bias_gain: float = ...,
+        support_gain: float = ...,
+        scale: Tuple[float, float] | None = ...,
+        quality_floor: float = ...,
+        stderr_gain: float = ...,
+    ) -> None: ...
+
+    def project(
+        self,
+        placements: Sequence[int],
+        edges: Optional[Sequence[Tuple[int, int]]] = ...,
+        *,
+        gauge: str | None = ...,
+        ts: int = ...,
+    ) -> ContextualPulseFrame: ...
+
+    @property
+    def gauge(self) -> str: ...
 
 
 class ArnoldTonguePeak:
@@ -1985,6 +2056,8 @@ __all__ = [
     "fracdiff_gl_1d",
     "QueryPlan",
     "RecEpochReport",
+    "ContextualLagrangianGate",
+    "ContextualPulseFrame",
     "Recommender",
     "Agent",
     "AgentConfig",

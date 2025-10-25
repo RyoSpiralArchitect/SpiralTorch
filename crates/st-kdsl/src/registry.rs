@@ -340,6 +340,7 @@ mod tests {
             tile_k: 32,
             vector: 4,
             stages: 2,
+            segments: 1,
         };
         let mut log = TelemetryLog::new();
         log.push(TelemetrySample::new(85.0, 900.0, 0.78, Some(tile), false));
@@ -383,6 +384,7 @@ mod tests {
             tile_k: 32,
             vector: 4,
             stages: 2,
+            segments: 1,
         };
         let mut registry = AutotuneRegistry::with_capacity(2);
         registry.record(

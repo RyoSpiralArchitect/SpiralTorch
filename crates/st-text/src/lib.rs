@@ -31,6 +31,10 @@ use st_core::telemetry::atlas::AtlasFrame;
 use st_core::telemetry::chrono::{
     ChronoFrame, ChronoHarmonics, ChronoSummary, ResonanceTemporalMetrics,
 };
+use st_core::theory::zpulse::ZPulse;
+use st_logic::contextual_observation::{
+    Arrangement, LagrangianGate, MeaningProjection, OrientationGauge,
+};
 #[cfg(test)]
 use st_tensor::Tensor;
 use st_tensor::{DifferentialResonance, LanguageWaveEncoder, PureResult};
@@ -334,6 +338,71 @@ impl TextResonator {
             highlights.push(format!("curvature persistence {:.1}%", persistence * 100.0));
         }
         ResonanceNarrative::new(text, highlights)
+    }
+
+    /// Couples contextual arrangements with the resonance narrator.
+    pub fn describe_contextual_meaning(
+        &self,
+        arrangement: &Arrangement,
+        gauge: OrientationGauge,
+    ) -> PureResult<(ResonanceNarrative, MeaningProjection)> {
+        let projection = MeaningProjection::from_arrangement(arrangement, gauge)?;
+
+        let summary = match (projection.label, projection.signature.as_ref()) {
+            (Some(label), Some(_)) => format!(
+                "Context resolved toward {} with weight {:.3} across {} sites.",
+                label.as_str(),
+                projection.lexical_weight(),
+                projection.support
+            ),
+            (None, Some(signature)) => format!(
+                "Contextual signature spans {} sites with {} boundary edges but remains gauge-free.",
+                projection.support,
+                signature.boundary_edges
+            ),
+            (None, None) => format!(
+                "Pure arrangement over {} sites remains observationally silent.",
+                projection.support
+            ),
+            (Some(label), None) => format!(
+                "Gauge {:?} selected without signature over {} sites.",
+                label,
+                projection.support
+            ),
+        };
+
+        let mut highlights = Vec::new();
+        if let Some(signature) = &projection.signature {
+            highlights.push(format!("boundary {}", signature.boundary_edges));
+            highlights.push(format!(
+                "population |Δ| {}",
+                signature.absolute_population_imbalance
+            ));
+            highlights.push(format!("cluster imbalance {}", signature.cluster_imbalance));
+        }
+        if let Some(label) = projection.label {
+            highlights.push(format!("orientation {}", label.as_str()));
+        }
+        if let Some((bin, magnitude)) = projection.dominant_frequency_bin() {
+            highlights.push(format!("dominant freq bin {} {:.3}", bin, magnitude));
+        }
+        highlights.push(format!("lexical weight {:.3}", projection.lexical_weight()));
+
+        Ok((ResonanceNarrative::new(summary, highlights), projection))
+    }
+
+    /// Runs the contextual narrative through the Lagrangian gate and produces a
+    /// Z-space pulse alongside the description and projection.
+    pub fn gate_contextual_meaning(
+        &self,
+        arrangement: &Arrangement,
+        gauge: OrientationGauge,
+        gate: &LagrangianGate,
+        ts: u64,
+    ) -> PureResult<(ResonanceNarrative, MeaningProjection, ZPulse)> {
+        let (narrative, projection) = self.describe_contextual_meaning(arrangement, gauge)?;
+        let pulse = gate.emit(&projection, ts);
+        Ok((narrative, projection, pulse))
     }
 
     /// Produces a narrative describing the aggregated atlas frame.
@@ -1087,7 +1156,10 @@ fn curvature_persistence(frames: &[ChronoFrame]) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use st_core::telemetry::chrono::ChronoTimeline;
+    use st_core::{telemetry::chrono::ChronoTimeline, theory::zpulse::ZSource};
+    use st_logic::contextual_observation::{
+        Arrangement, Label, LagrangianGate, LagrangianGateConfig, OrientationGauge, PureAtom,
+    };
     use std::f32::consts::TAU;
 
     fn demo_tensor(values: &[f32]) -> Tensor {
@@ -1250,5 +1322,59 @@ mod tests {
             .highlights
             .iter()
             .any(|line| line.contains("curvature persistence")));
+    }
+
+    #[test]
+    fn contextual_meaning_pipeline_produces_narrative() {
+        let narrator = TextResonator::new(-0.5, 0.7).unwrap();
+        let arrangement =
+            Arrangement::from_line(vec![PureAtom::A, PureAtom::B, PureAtom::B, PureAtom::B]);
+        let (narrative, projection) = narrator
+            .describe_contextual_meaning(&arrangement, OrientationGauge::Preserve)
+            .unwrap();
+        assert!(narrative.summary.contains("Context resolved"));
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains("dominant freq")));
+        assert_eq!(projection.label, Some(Label::B));
+        assert!(projection.lexical_weight() > 0.0);
+    }
+
+    #[test]
+    fn contextual_meaning_handles_pure_arrangement() {
+        let narrator = TextResonator::new(-0.5, 0.7).unwrap();
+        let arrangement = Arrangement::from_line(vec![PureAtom::A; 4]);
+        let (narrative, projection) = narrator
+            .describe_contextual_meaning(&arrangement, OrientationGauge::Preserve)
+            .unwrap();
+        assert!(narrative.summary.contains("Pure arrangement"));
+        assert!(projection.signature.is_none());
+        assert!(projection.label.is_none());
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains("lexical weight")));
+    }
+
+    #[test]
+    fn contextual_gate_emits_zpulse() {
+        let narrator = TextResonator::new(-0.5, 0.7).unwrap();
+        let arrangement = Arrangement::from_line(vec![
+            PureAtom::A,
+            PureAtom::B,
+            PureAtom::B,
+            PureAtom::A,
+            PureAtom::B,
+        ]);
+        let gate = LagrangianGate::new(LagrangianGateConfig::default());
+        let (_narrative, projection, pulse) = narrator
+            .gate_contextual_meaning(&arrangement, OrientationGauge::Preserve, &gate, 144)
+            .unwrap();
+        assert_eq!(projection.label, Some(Label::B));
+        assert_eq!(pulse.source, ZSource::Other("contextual-lagrangian"));
+        assert_eq!(pulse.ts, 144);
+        assert!(pulse.total_energy() > 0.0);
+        assert!(pulse.support_mass() > 0.0);
     }
 }

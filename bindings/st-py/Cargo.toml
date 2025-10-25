@@ -29,7 +29,7 @@ collapse = ["psi"]
 nn = ["dep:st-nn"]
 spiral_rl = ["dep:st-spiral-rl"]
 rec = ["dep:st-rec", "dep:st-kdsl"]
-text = ["dep:st-text"]
+text = ["dep:st-text", "dep:st-logic"]
 selfsup = ["dep:spiral-selfsup"]
 golden = ["st-nn/golden", "st-core/golden"]
 
@@ -59,6 +59,7 @@ st-nn = { path = "../../crates/st-nn", optional = true, features = ["psychoid", 
 st-spiral-rl = { path = "../../crates/st-spiral-rl", optional = true }
 st-rec = { path = "../../crates/st-rec", optional = true }
 st-text = { path = "../../crates/st-text", optional = true }
+st-logic = { path = "../../crates/st-logic", optional = true }
 st-kdsl = { path = "../../crates/st-kdsl", optional = true }
 st-backend-hip = { path = "../../crates/st-backend-hip", default-features = false }
 st-frac = { path = "../../crates/st-frac" }

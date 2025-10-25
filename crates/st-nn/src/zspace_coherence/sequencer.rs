@@ -188,6 +188,123 @@ pub struct CoherenceDiagnostics {
     pre_discard: Option<PreDiscardTelemetry>,
 }
 
+/// Describes the qualitative state detected while analysing a coherence slice.
+#[derive(Clone, Debug, PartialEq)]
+pub enum CoherenceObservation {
+    /// No distinctive structure was detected – the background remains pure.
+    Undetermined,
+    /// A structural fluctuation was captured together with its signature.
+    Signature(CoherenceSignature),
+}
+
+/// Encodes salient invariants captured from a coherence fluctuation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CoherenceSignature {
+    dominant_channel: Option<usize>,
+    energy_ratio: f32,
+    entropy: f32,
+    mean_coherence: f32,
+    swap_invariant: bool,
+}
+
+impl CoherenceSignature {
+    /// Returns the dominant channel associated with the signature, if present.
+    pub fn dominant_channel(&self) -> Option<usize> {
+        self.dominant_channel
+    }
+
+    /// Ratio of the energy captured by the dominant channel.
+    pub fn energy_ratio(&self) -> f32 {
+        self.energy_ratio
+    }
+
+    /// Shannon entropy associated with the coherence distribution.
+    pub fn entropy(&self) -> f32 {
+        self.entropy
+    }
+
+    /// Mean coherence level associated with the observation.
+    pub fn mean_coherence(&self) -> f32 {
+        self.mean_coherence
+    }
+
+    /// Whether the underlying arrangement is invariant under channel swaps.
+    pub fn swap_invariant(&self) -> bool {
+        self.swap_invariant
+    }
+}
+
+/// Semantic label attached to a coherence observation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CoherenceLabel {
+    /// No structural event detected – continue treating it as background.
+    Background,
+    /// Symmetric fluctuation, typically indicating a stable pulse.
+    SymmetricPulse,
+    /// Highly concentrated energy that risks collapsing into a cascade.
+    CascadeImbalance,
+    /// Diffuse fluctuation signalling distributed drift.
+    DiffuseDrift,
+}
+
+impl CoherenceLabel {
+    fn as_str(self) -> &'static str {
+        match self {
+            CoherenceLabel::Background => "background",
+            CoherenceLabel::SymmetricPulse => "symmetric_pulse",
+            CoherenceLabel::CascadeImbalance => "cascade_imbalance",
+            CoherenceLabel::DiffuseDrift => "diffuse_drift",
+        }
+    }
+}
+
+impl std::fmt::Display for CoherenceLabel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl CoherenceObservation {
+    /// Lifts the observation into a semantic label that downstream systems can consume.
+    pub fn lift_to_label(&self) -> CoherenceLabel {
+        match self {
+            CoherenceObservation::Undetermined => CoherenceLabel::Background,
+            CoherenceObservation::Signature(signature) => {
+                if signature.swap_invariant {
+                    CoherenceLabel::SymmetricPulse
+                } else if signature.energy_ratio >= 0.7 && signature.mean_coherence >= 0.05 {
+                    CoherenceLabel::CascadeImbalance
+                } else {
+                    CoherenceLabel::DiffuseDrift
+                }
+            }
+        }
+    }
+}
+
+/// Returns whether the provided arrangement remains unchanged under pairwise swaps.
+pub fn is_swap_invariant(arrangement: &[f32]) -> bool {
+    if arrangement.len() <= 1 {
+        return true;
+    }
+
+    let filtered: Vec<f32> = arrangement
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite())
+        .collect();
+    if filtered.is_empty() {
+        return true;
+    }
+
+    let mut sorted = filtered.clone();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let first = sorted[0];
+    sorted
+        .iter()
+        .all(|value| (value - first).abs() <= (first.abs() * 1e-4).max(1e-6))
+}
+
 impl CoherenceDiagnostics {
     /// Returns the raw Maxwell coherence weights.
     pub fn channel_weights(&self) -> &[f32] {
@@ -271,6 +388,28 @@ impl CoherenceDiagnostics {
             .as_ref()
             .map(|telemetry| telemetry.discarded())
             .unwrap_or(0)
+    }
+
+    /// Detects structural events present in the coherence response.
+    pub fn observation(&self) -> CoherenceObservation {
+        if self.coherence.is_empty() {
+            return CoherenceObservation::Undetermined;
+        }
+
+        let swap_invariant = is_swap_invariant(&self.normalized_weights);
+        let signature = CoherenceSignature {
+            dominant_channel: self.dominant_channel,
+            energy_ratio: self.energy_ratio,
+            entropy: self.entropy,
+            mean_coherence: self.mean_coherence,
+            swap_invariant,
+        };
+
+        if signature.energy_ratio <= 1e-5 && signature.entropy <= 1e-5 {
+            CoherenceObservation::Undetermined
+        } else {
+            CoherenceObservation::Signature(signature)
+        }
     }
 
     /// Destructures the diagnostics into their core components.
@@ -2138,7 +2277,87 @@ impl Module for ZSpaceCoherenceSequencer {
 mod tests {
     use super::*;
     use crate::language::{MaxwellDesireBridge, SemanticBridge, SparseKernel};
+    use st_tensor::Tensor;
     use std::sync::{Arc, Mutex};
+
+    fn make_diagnostics(
+        coherence: Vec<f32>,
+        normalized: Vec<f32>,
+        energy_ratio: f32,
+        entropy: f32,
+        mean: f32,
+    ) -> CoherenceDiagnostics {
+        CoherenceDiagnostics {
+            channel_weights: coherence.clone(),
+            normalized_weights: normalized,
+            normalization: 1.0,
+            fractional_order: 1.0,
+            dominant_channel: coherence
+                .iter()
+                .enumerate()
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                .map(|(idx, _)| idx),
+            mean_coherence: mean,
+            z_bias: 0.0,
+            energy_ratio,
+            entropy,
+            aggregated: Tensor::zeros(1, coherence.len().max(1)).unwrap(),
+            coherence,
+            channel_reports: Vec::new(),
+            pre_discard: None,
+        }
+    }
+
+    #[test]
+    fn swap_invariance_detects_uniform_arrangements() {
+        assert!(is_swap_invariant(&[0.5, 0.5, 0.5]));
+        assert!(is_swap_invariant(&[f32::NAN, f32::NAN]));
+        assert!(!is_swap_invariant(&[0.5, 0.2, 0.5]));
+    }
+
+    #[test]
+    fn observation_marks_background_when_empty() {
+        let diagnostics = make_diagnostics(vec![], vec![], 0.0, 0.0, 0.0);
+        assert_eq!(
+            diagnostics.observation(),
+            CoherenceObservation::Undetermined
+        );
+        assert_eq!(
+            diagnostics.observation().lift_to_label(),
+            CoherenceLabel::Background
+        );
+    }
+
+    #[test]
+    fn observation_identifies_symmetric_signature() {
+        let diagnostics = make_diagnostics(
+            vec![0.2, 0.2, 0.2, 0.2],
+            vec![0.25, 0.25, 0.25, 0.25],
+            0.3,
+            1.0,
+            0.1,
+        );
+        let observation = diagnostics.observation();
+        assert!(matches!(observation, CoherenceObservation::Signature(_)));
+        assert_eq!(observation.lift_to_label(), CoherenceLabel::SymmetricPulse);
+    }
+
+    #[test]
+    fn observation_identifies_cascade_signature() {
+        let diagnostics = make_diagnostics(
+            vec![0.8, 0.05, 0.05, 0.05],
+            vec![0.8, 0.07, 0.07, 0.06],
+            0.85,
+            0.5,
+            0.2,
+        );
+        let observation = diagnostics.observation();
+        assert!(matches!(observation, CoherenceObservation::Signature(_)));
+        assert_eq!(
+            observation.lift_to_label(),
+            CoherenceLabel::CascadeImbalance
+        );
+    }
 
     #[test]
     fn sequencer_forward_preserves_shape() {

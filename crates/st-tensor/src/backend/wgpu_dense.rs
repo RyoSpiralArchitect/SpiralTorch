@@ -1727,7 +1727,7 @@ impl WeightBuffers {
 }
 
 fn generate_matmul_shader(key: &PipelineKey) -> String {
-    let enable_f16 = if key.use_f16 { "enable f16;\n" } else { "" };
+    let enable_f16 = "";
     let rhs_storage_type = match key.dtype {
         ScalarType::F32 => "array<f32>".to_string(),
         ScalarType::QuantizedI8 => "array<u32>".to_string(),
@@ -1746,13 +1746,10 @@ fn generate_matmul_shader(key: &PipelineKey) -> String {
             .to_string(),
     };
 
-    let fma_line = if key.use_f16 {
-        "let lhs16 = f16(lhs_val);
-            let rhs16 = f16(rhs_val);
-            acc = acc + f32(lhs16 * rhs16);"
-    } else {
-        "acc = acc + lhs_val * rhs_val;"
-    };
+    let fma_line = "acc = acc + lhs_val * rhs_val;";
+
+    let tile_mk = (key.tile_m as u64 * key.tile_k as u64) as u32;
+    let tile_nk = (key.tile_n as u64 * key.tile_k as u64) as u32;
 
     MATMUL_WGSL_TEMPLATE
         .replace("{f16_enable}", enable_f16)
@@ -1761,6 +1758,8 @@ fn generate_matmul_shader(key: &PipelineKey) -> String {
         .replace("{tile_m}", &key.tile_m.to_string())
         .replace("{tile_n}", &key.tile_n.to_string())
         .replace("{tile_k}", &key.tile_k.to_string())
+        .replace("{tile_mk}", &(tile_mk.to_string() + "u"))
+        .replace("{tile_nk}", &(tile_nk.to_string() + "u"))
         .replace("{workgroup_size_x}", &key.tile_n.to_string())
         .replace("{workgroup_size_y}", &key.tile_m.to_string())
         .replace("{fma_line}", fma_line)
@@ -3415,10 +3414,6 @@ fn fallback_tile_config(rows: usize, inner: usize, cols: usize) -> TileConfig {
     }
 
     TileConfig::new(16, 16, 16)
-}
-
-fn fallback_tile_config(rows: usize, inner: usize, cols: usize) -> TileConfig {
-    select_tile_config(rows, inner, cols)
 }
 
 const MATMUL_AUTOTUNE_REVISION: u64 = 1;
