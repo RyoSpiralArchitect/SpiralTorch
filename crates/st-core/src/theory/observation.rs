@@ -8,11 +8,12 @@
 //!
 //! The bridge inspects [`InterfaceZReport`] records emitted by the microlocal
 //! conductor, counts how many unique gauges and scale slices participate in the
-//! report, and pushes those counts through the [`ObservationalCoalgebra`].  The
-//! resulting [`ObservabilityAssessment`] exposes the efficiency `η` of each
-//! depth relative to the theoretical Pólya upper bound while the matched macro
-//! templates contribute their [`MicrolocalFeedback`] payloads.  Downstream
-//! controllers can therefore reason about structural observability and
+//! report, measures how many macroscopic drives fired, and pushes those counts
+//! through the [`ObservationalCoalgebra`].  The resulting
+//! [`ObservabilityAssessment`] exposes the efficiency `η` of each depth relative
+//! to the theoretical Pólya upper bound while the matched macro templates
+//! contribute their [`MicrolocalFeedback`] payloads.  Downstream controllers can
+//! therefore reason about structural observability, gauge coverage, and
 //! macroscopic feedback using a single snapshot.
 
 use std::collections::HashSet;
@@ -25,12 +26,88 @@ use crate::theory::observability::{
     ObservabilityAssessment, ObservabilityConfig, ObservationalCoalgebra,
 };
 
+/// Named observation counts grouped by coalgebra depth.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ObservationCounts {
+    /// Total number of gauges reported by the microlocal conductor.
+    pub total_gauges: u128,
+    /// Root occupancy flag (`1` when any interface was detected overall).
+    pub root_interfaces: u128,
+    /// Number of gauges that reported an active interface.
+    pub active_gauges: u128,
+    /// Number of distinct `(gauge id, radius, physical radius)` tuples with
+    /// active interfaces.
+    pub active_scale_slots: u128,
+    /// Number of macro drives triggered by the matched templates.
+    pub matched_macro_drives: u128,
+    /// Number of microlocal pulses that carried non-zero support.
+    pub active_pulses: u128,
+}
+
+impl ObservationCounts {
+    /// Returns the depth counts as a vector suitable for the observation coalgebra.
+    pub fn depths(&self) -> Vec<u128> {
+        vec![
+            self.root_interfaces,
+            self.active_gauges,
+            self.active_scale_slots,
+            self.matched_macro_drives,
+            self.active_pulses,
+        ]
+    }
+
+    /// Ratio of active gauges over the total gauges reported by the conductor.
+    pub fn coverage(&self) -> f32 {
+        if self.total_gauges == 0 {
+            0.0
+        } else {
+            (self.active_gauges as f32) / (self.total_gauges as f32)
+        }
+    }
+
+    /// Number of gauges that remained inactive during the report.
+    pub fn inactive_gauges(&self) -> u128 {
+        self.total_gauges.saturating_sub(self.active_gauges)
+    }
+}
+
+/// Summary describing the activity detected for a single gauge.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GaugeSummary {
+    /// Identifier reported by the microlocal conductor (or a synthetic fallback).
+    pub id: String,
+    /// Whether the gauge detected any interface cells.
+    pub active: bool,
+    /// Radius (in grid steps) used to analyse the gauge neighbourhood.
+    pub radius: isize,
+    /// Physical radius attached to the gauge neighbourhood.
+    pub physical_radius: f32,
+    /// Whether a macro template generated a drive for this gauge.
+    pub matched_template: bool,
+    /// Support carried by the microlocal pulse, if available.
+    pub pulse_support: Option<f32>,
+    /// Drift-corrected Z bias associated with the pulse.
+    pub z_bias: Option<f32>,
+    /// Quality hint emitted by the microlocal conductor.
+    pub quality: Option<f32>,
+}
+
+impl GaugeSummary {
+    /// Convenience helper exposing whether the gauge registered an interface.
+    pub fn is_active(&self) -> bool {
+        self.active
+    }
+}
+
 /// Snapshot returned after fusing microlocal telemetry with observation
 /// diagnostics.
 #[derive(Clone, Debug)]
 pub struct ObservationBridgeSnapshot {
-    /// Observed counts per depth (root, gauge ids, scale slices, macro drives).
-    pub observed_counts: Vec<u128>,
+    /// Observation counts grouped by coalgebra depth.
+    pub counts: ObservationCounts,
+    /// Observed counts per depth (root, gauge ids, scale slices, macro drives,
+    /// microlocal pulses).
+    pub depth_counts: Vec<u128>,
     /// Comparison between the observed counts and the theoretical upper bound.
     pub assessment: ObservabilityAssessment,
     /// Aggregated microlocal feedback emitted by the matched macro templates.
@@ -39,12 +116,19 @@ pub struct ObservationBridgeSnapshot {
     pub drives: GaugeBank<MacroDrive>,
     /// Softlogic feedback emitted by the microlocal conductor.
     pub softlogic_feedback: SoftlogicZFeedback,
+    /// Activity summary for every gauge reported by the microlocal conductor.
+    pub gauges: Vec<GaugeSummary>,
 }
 
 impl ObservationBridgeSnapshot {
     /// Returns `true` when at least one interface was detected at the microlocal level.
     pub fn has_interface(&self) -> bool {
-        self.observed_counts.first().copied().unwrap_or(0) > 0
+        self.counts.root_interfaces > 0
+    }
+
+    /// Returns the depth counts slice used for the coalgebra assessment.
+    pub fn observed_counts(&self) -> &[u128] {
+        &self.depth_counts
     }
 }
 
@@ -83,16 +167,20 @@ impl ObservationBridge {
     /// Ingests a microlocal [`InterfaceZReport`] and produces a fused snapshot.
     pub fn ingest(&mut self, report: &InterfaceZReport) -> ObservationBridgeSnapshot {
         let drives = self.templates.drive_matched(report);
+        let gauges = gauge_summaries(report, &drives);
+        let counts = observed_counts(report, &gauges, &drives);
+        let depth_counts = counts.depths();
+        let assessment = self.coalgebra.assess(&depth_counts);
         let microlocal_feedback = merge_feedback(&drives);
-        let counts = observed_counts(report, &drives);
-        let assessment = self.coalgebra.assess(&counts);
 
         ObservationBridgeSnapshot {
-            observed_counts: counts,
+            counts,
+            depth_counts,
             assessment,
             microlocal_feedback,
             drives,
             softlogic_feedback: report.feedback.clone(),
+            gauges,
         }
     }
 }
@@ -109,29 +197,64 @@ fn merge_feedback(drives: &GaugeBank<MacroDrive>) -> Option<MicrolocalFeedback> 
     combined
 }
 
-fn observed_counts(report: &InterfaceZReport, drives: &GaugeBank<MacroDrive>) -> Vec<u128> {
-    let root = if report.has_interface() { 1 } else { 0 };
-    let mut gauge_ids: HashSet<String> = HashSet::new();
+fn observed_counts(
+    report: &InterfaceZReport,
+    gauges: &[GaugeSummary],
+    drives: &GaugeBank<MacroDrive>,
+) -> ObservationCounts {
     let mut scale_slots: HashSet<(String, isize, u32)> = HashSet::new();
 
-    for (index, signature) in report.signatures.iter().enumerate() {
-        if !signature.has_interface() {
-            continue;
-        }
-        let id = report
-            .gauge_id(index)
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| format!("gauge#{index}"));
-        gauge_ids.insert(id.clone());
-        scale_slots.insert((id, signature.radius, signature.physical_radius.to_bits()));
+    for summary in gauges.iter().filter(|summary| summary.active) {
+        scale_slots.insert((
+            summary.id.clone(),
+            summary.radius,
+            summary.physical_radius.to_bits(),
+        ));
     }
 
-    vec![
-        root,
-        gauge_ids.len() as u128,
-        scale_slots.len() as u128,
-        drives.len() as u128,
-    ]
+    let active_pulses = report
+        .pulses
+        .iter()
+        .filter(|pulse| !pulse.is_empty())
+        .count() as u128;
+
+    ObservationCounts {
+        total_gauges: gauges.len() as u128,
+        root_interfaces: if report.has_interface() { 1 } else { 0 },
+        active_gauges: gauges.iter().filter(|summary| summary.active).count() as u128,
+        active_scale_slots: scale_slots.len() as u128,
+        matched_macro_drives: drives.len() as u128,
+        active_pulses,
+    }
+}
+
+fn gauge_summaries(report: &InterfaceZReport, drives: &GaugeBank<MacroDrive>) -> Vec<GaugeSummary> {
+    report
+        .signatures
+        .iter()
+        .enumerate()
+        .map(|(index, signature)| {
+            let id = report
+                .gauge_id(index)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| format!("gauge#{index}"));
+            let matched_template = drives.get(id.as_str()).is_some();
+            let pulse_support = report.pulses.get(index).map(|pulse| pulse.support);
+            let z_bias = report.pulses.get(index).map(|pulse| pulse.z_bias);
+            let quality = report.qualities.get(index).copied();
+
+            GaugeSummary {
+                id,
+                active: signature.has_interface(),
+                radius: signature.radius,
+                physical_radius: signature.physical_radius,
+                matched_template,
+                pulse_support,
+                z_bias,
+                quality,
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -247,11 +370,21 @@ mod tests {
         let report = report_with_signature(true);
         let snapshot = bridge.ingest(&report);
 
-        assert_eq!(snapshot.observed_counts, vec![1, 1, 1, 1]);
-        assert!(snapshot.assessment.expected.len() >= snapshot.observed_counts.len());
+        assert_eq!(snapshot.depth_counts, vec![1, 1, 1, 1, 1]);
+        assert_eq!(snapshot.counts.total_gauges, 1);
+        assert_eq!(snapshot.counts.active_gauges, 1);
+        assert_eq!(snapshot.counts.active_pulses, 1);
+        assert!(snapshot.assessment.expected.len() >= snapshot.depth_counts.len());
         assert!(snapshot.microlocal_feedback.is_some());
         assert_eq!(snapshot.drives.len(), 1);
         assert!(snapshot.has_interface());
+        assert!((snapshot.counts.coverage() - 1.0).abs() < f32::EPSILON);
+        assert_eq!(snapshot.gauges.len(), 1);
+        let gauge = &snapshot.gauges[0];
+        assert!(gauge.matched_template);
+        assert!(gauge.is_active());
+        assert_eq!(gauge.pulse_support, Some(1.0));
+        assert_eq!(gauge.quality, Some(0.9));
     }
 
     #[test]
@@ -262,9 +395,14 @@ mod tests {
         let report = report_with_signature(false);
         let snapshot = bridge.ingest(&report);
 
-        assert_eq!(snapshot.observed_counts, vec![0, 0, 0, 0]);
+        assert_eq!(snapshot.depth_counts, vec![0, 0, 0, 0, 0]);
+        assert_eq!(snapshot.counts.total_gauges, 1);
+        assert_eq!(snapshot.counts.active_gauges, 0);
         assert!(snapshot.microlocal_feedback.is_none());
         assert_eq!(snapshot.drives.len(), 0);
         assert!(!snapshot.has_interface());
+        assert_eq!(snapshot.counts.inactive_gauges(), 1);
+        assert_eq!(snapshot.gauges.len(), 1);
+        assert!(!snapshot.gauges[0].is_active());
     }
 }
