@@ -34,7 +34,8 @@ pub use gnn::{
     fold_into_roundtable, fold_with_band_energy, AggregationReducer, GraphActivation,
     GraphConsensusBridge, GraphConsensusDigest, GraphContext, GraphContextBuilder, GraphLayerSpec,
     GraphMonadExport, GraphNormalization, NeighborhoodAggregation, QuadBandEnergy,
-    ZSpaceGraphConvolution, ZSpaceGraphNetwork, ZSpaceGraphNetworkBuilder,
+    RoundtableBandInfluence, RoundtableBandSignal, ZSpaceGraphConvolution, ZSpaceGraphNetwork,
+    ZSpaceGraphNetworkBuilder,
 };
 #[cfg(feature = "golden")]
 pub use golden::{
@@ -77,7 +78,7 @@ pub use plan::RankPlanner;
 pub use roundtable::{
     simulate_proposal_locally, BlackcatModerator, BlackcatScore, DistConfig, DistMode,
     GlobalProposal, HeurOp, HeurOpKind, HeurOpLog, MetaConductor, MetaSummary, ModeratorMinutes,
-    OutcomeBand, RoundtableNode,
+    OutcomeBand, RoundtableGnnBridge, RoundtableNode,
 };
 pub use schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedule};
 pub use st_core::runtime::blackcat::{

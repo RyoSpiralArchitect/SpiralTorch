@@ -3,9 +3,13 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-use super::{GraphContext, NeighborhoodAggregation, ZSpaceGraphConvolution};
+use super::{
+    GraphContext, NeighborhoodAggregation, RoundtableBandInfluence, RoundtableBandSignal,
+    ZSpaceGraphConvolution,
+};
 use crate::layers::activation::Relu;
 use crate::module::{Module, Parameter};
+use crate::schedule::GradientBands;
 use crate::{PureResult, Tensor, TensorError};
 use st_core::telemetry::xai::GraphFlowTracer;
 use std::cell::RefCell;
@@ -151,6 +155,12 @@ struct GraphLayer {
     activation: GraphActivationRuntime,
 }
 
+impl GraphLayer {
+    fn set_roundtable(&mut self, influence: Option<RoundtableBandInfluence>) {
+        self.conv.set_roundtable_influence(influence);
+    }
+}
+
 #[derive(Debug)]
 enum GraphActivationRuntime {
     Identity,
@@ -293,11 +303,43 @@ impl Module for ZSpaceGraphNetwork {
         }
         Ok(())
     }
+
+    fn apply_roundtable_band(&mut self, signal: &RoundtableBandSignal) -> PureResult<()> {
+        let influence = RoundtableBandInfluence::from_signal(signal);
+        for layer in &mut self.layers {
+            layer.set_roundtable(Some(influence.clone()));
+        }
+        Ok(())
+    }
+
+    fn clear_roundtable_band(&mut self) -> PureResult<()> {
+        for layer in &mut self.layers {
+            layer.set_roundtable(None);
+        }
+        Ok(())
+    }
+
+    fn backward_bands(&mut self, input: &Tensor, bands: &GradientBands) -> PureResult<Tensor> {
+        let (rows, cols) = input.shape();
+        let mut total = Tensor::zeros(rows, cols)?;
+        for grad in bands.iter() {
+            if grad.squared_l2_norm() == 0.0 {
+                continue;
+            }
+            // Refresh the cache so each band sees the correct forward state.
+            let _ = self.forward(input)?;
+            let contribution = self.backward(input, grad)?;
+            total.add_scaled(&contribution, 1.0)?;
+        }
+        Ok(total)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gnn::RoundtableBandSignal;
+    use crate::BandEnergy;
     use st_core::telemetry::xai::GraphFlowTracer;
     use std::num::NonZeroUsize;
     use std::sync::{Arc, Mutex};
@@ -367,5 +409,46 @@ mod tests {
         assert_eq!(guard.layers()[0].layer, "stack_trace::layer0");
         assert_eq!(guard.layers()[1].layer, "stack_trace::layer1");
         assert!(guard.total_energy() > 0.0);
+    }
+
+    #[test]
+    fn stack_applies_roundtable_signal() {
+        let mut builder = ZSpaceGraphNetworkBuilder::new(
+            sample_context(),
+            NonZeroUsize::new(2).unwrap(),
+            -1.0,
+            0.05,
+        );
+        builder.push_layer(GraphLayerSpec::new(NonZeroUsize::new(2).unwrap()));
+        let mut network = builder.build("stack_rt").unwrap();
+        network
+            .visit_parameters_mut(&mut |param| {
+                if param.name().ends_with("weight") {
+                    let value = Tensor::from_vec(2, 2, vec![1.0, 0.0, 0.0, 1.0])?;
+                    param.load_value(&value)?;
+                } else if param.name().ends_with("bias") {
+                    let value = Tensor::zeros(1, 2)?;
+                    param.load_value(&value)?;
+                }
+                Ok(())
+            })
+            .unwrap();
+        let input = Tensor::from_vec(3, 2, vec![1.0, 0.25, 0.5, -0.5, -0.25, 1.0]).unwrap();
+        let baseline = network.forward(&input).unwrap();
+        let signal = RoundtableBandSignal::new(
+            BandEnergy {
+                above: 1.5,
+                here: 0.5,
+                beneath: 0.2,
+                drift: 0.3,
+            },
+            (2, 1, 1),
+        );
+        network.apply_roundtable_band(&signal).unwrap();
+        let adjusted = network.forward(&input).unwrap();
+        assert_ne!(baseline.data(), adjusted.data());
+        network.clear_roundtable_band().unwrap();
+        let restored = network.forward(&input).unwrap();
+        assert_eq!(baseline, restored);
     }
 }

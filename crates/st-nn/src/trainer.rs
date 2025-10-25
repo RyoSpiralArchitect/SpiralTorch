@@ -23,6 +23,7 @@
 
 use crate::cloud::CloudTargetSummary;
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
+use crate::gnn::RoundtableBandSignal;
 #[cfg(feature = "golden")]
 use crate::golden::{GoldenBlackcatPulse, GoldenCooperativeDirective, GoldenCouncilSnapshot};
 #[cfg(feature = "psi")]
@@ -35,7 +36,8 @@ use crate::module::Module;
 use crate::plan::RankPlanner;
 use crate::roundtable::{
     simulate_proposal_locally, BlackcatModerator, BlackcatScore, DistConfig, GlobalProposal,
-    HeurOpKind, HeurOpLog, MetaConductor, ModeratorMinutes, OutcomeBand, RoundtableNode,
+    HeurOpKind, HeurOpLog, MetaConductor, ModeratorMinutes, OutcomeBand, RoundtableGnnBridge,
+    RoundtableNode,
 };
 use crate::schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedule};
 use crate::zspace_coherence::{CoherenceDiagnostics, CoherenceLabel, CoherenceObservation};
@@ -241,6 +243,8 @@ pub struct ModuleTrainer {
     graph_bridge: Option<GraphConsensusBridge>,
     graph_pending: Option<GraphConsensusDigest>,
     graph_last_hint: Option<String>,
+    gnn_roundtable_bridge: Option<RoundtableGnnBridge>,
+    gnn_last_roundtable_signal: Option<RoundtableBandSignal>,
     curvature_scheduler: Option<CurvatureScheduler>,
     last_curvature_metrics: Option<CurvatureMetrics>,
     #[cfg(feature = "golden")]
@@ -495,6 +499,8 @@ impl ModuleTrainer {
             graph_bridge: None,
             graph_pending: None,
             graph_last_hint: None,
+            gnn_roundtable_bridge: None,
+            gnn_last_roundtable_signal: None,
             curvature_scheduler: None,
             last_curvature_metrics: None,
             #[cfg(feature = "golden")]
@@ -519,6 +525,23 @@ impl ModuleTrainer {
     pub fn enable_graph_feedback(&mut self, bridge: GraphConsensusBridge) {
         self.graph_bridge = Some(bridge);
         self.graph_pending = None;
+    }
+
+    /// Enables roundtable-driven adjustments for GNN modules.
+    pub fn enable_gnn_roundtable_bridge(&mut self, bridge: RoundtableGnnBridge) {
+        self.gnn_roundtable_bridge = Some(bridge);
+        self.gnn_last_roundtable_signal = None;
+    }
+
+    /// Disables any previously attached GNN roundtable bridge.
+    pub fn disable_gnn_roundtable_bridge(&mut self) {
+        self.gnn_roundtable_bridge = None;
+        self.gnn_last_roundtable_signal = None;
+    }
+
+    /// Returns the most recent roundtable signal broadcast to the GNN.
+    pub fn gnn_roundtable_signal(&self) -> Option<RoundtableBandSignal> {
+        self.gnn_last_roundtable_signal.clone()
     }
 
     /// Enables desire telemetry feedback so automation and training can share
@@ -1218,6 +1241,12 @@ impl ModuleTrainer {
             if let Some(rt) = self.blackcat.as_ref() {
                 band_energy.drift = rt.frac_penalty() as f32;
             }
+            let mut roundtable_signal = RoundtableBandSignal::from_schedule(schedule, band_energy);
+            if let Some(bridge) = self.gnn_roundtable_bridge.as_ref() {
+                roundtable_signal = bridge.publish(roundtable_signal.clone())?;
+            }
+            self.gnn_last_roundtable_signal = Some(roundtable_signal.clone());
+            module.apply_roundtable_band(&roundtable_signal)?;
             let mut bands: GradientBands = schedule.split(&grad_output)?;
             let mut weights = self.softlogic.prepare_weights(&band_energy);
             if let Some(ref impulse) = desire_impulse {
@@ -1293,6 +1322,7 @@ impl ModuleTrainer {
                 extra.insert("graph_layers".to_string(), digest.layer_count() as f64);
             }
             let _ = module.backward_bands(&input, &bands)?;
+            module.clear_roundtable_band()?;
             if let Some(bridge) = self.graph_bridge.as_ref() {
                 self.graph_pending = bridge.digest(&baseline_band_energy)?;
             }
@@ -2009,6 +2039,7 @@ impl IntoBatch for PureResult<(Tensor, Tensor)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gnn::{GraphActivation, GraphContext, GraphLayerSpec, ZSpaceGraphNetworkBuilder};
     use crate::language::{
         constant, warmup, ConceptHint, DesireAutomation, DesireLagrangian, DesirePipeline,
         DesireTrainerBridge, DesireTriggerBuffer, RepressionField, SemanticBridge, SparseKernel,
@@ -2019,6 +2050,7 @@ mod tests {
     use crate::layers::wave_gate::WaveGate;
     use crate::loss::MeanSquaredError;
     use crate::module::Parameter;
+    use crate::roundtable::RoundtableGnnBridge;
     use crate::roundtable::{HeurOp, HeurOpKind};
     use crate::schedule::RoundtableConfig;
     #[cfg(feature = "golden")]
@@ -2026,6 +2058,7 @@ mod tests {
     use st_core::runtime::blackcat::{bandit::SoftBanditMode, zmeta::ZMetaParams, ChoiceGroups};
     use st_tensor::topos::OpenCartesianTopos;
     use std::collections::HashMap;
+    use std::num::NonZeroUsize;
     use std::time::{Duration, Instant, SystemTime};
 
     fn build_language_geometry() -> SymbolGeometry {
@@ -2426,6 +2459,46 @@ mod tests {
         assert!(bridge.drain_summary().unwrap().is_none());
         let summary = trainer.desire_roundtable_summary();
         assert!(summary.is_some());
+    }
+
+    #[test]
+    fn trainer_emits_gnn_roundtable_signal() {
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        let adjacency = Tensor::from_vec(2, 2, vec![0.0, 1.0, 1.0, 0.0]).unwrap();
+        let context = GraphContext::from_adjacency(adjacency).unwrap();
+        let mut builder =
+            ZSpaceGraphNetworkBuilder::new(context, NonZeroUsize::new(2).unwrap(), -1.0, 0.05);
+        builder.push_layer(
+            GraphLayerSpec::new(NonZeroUsize::new(2).unwrap())
+                .with_activation(GraphActivation::Relu),
+        );
+        let mut model = builder.build("gnn_trainer").unwrap();
+        trainer.prepare(&mut model).unwrap();
+
+        let bridge = RoundtableGnnBridge::new();
+        trainer.enable_gnn_roundtable_bridge(bridge.clone());
+
+        let schedule = trainer.roundtable(2, 2, RoundtableConfig::default());
+        let dataset = vec![
+            (
+                Tensor::from_vec(2, 2, vec![1.0, 0.0, 0.5, -0.5]).unwrap(),
+                Tensor::from_vec(2, 2, vec![0.2, -0.1, 0.3, 0.4]).unwrap(),
+            ),
+            (
+                Tensor::from_vec(2, 2, vec![0.0, 1.0, -0.3, 0.8]).unwrap(),
+                Tensor::from_vec(2, 2, vec![0.1, 0.0, -0.2, 0.6]).unwrap(),
+            ),
+        ];
+        let mut loss = MeanSquaredError::new();
+        trainer
+            .train_epoch(&mut model, &mut loss, dataset, &schedule)
+            .unwrap();
+
+        assert!(trainer.gnn_roundtable_signal().is_some());
+        let latest = bridge.latest().unwrap();
+        assert!(latest.is_some());
+        assert!(bridge.len() >= 1);
     }
 
     #[cfg(feature = "golden")]
