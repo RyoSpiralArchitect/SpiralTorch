@@ -16,6 +16,12 @@ pub mod observability_impl;
 #[doc(inline)]
 pub use observability_impl as observability;
 
+#[path = "observation.rs"]
+#[doc(hidden)]
+pub mod observation_impl;
+#[doc(inline)]
+pub use observation_impl as observation;
+
 #[path = "microlocal.rs"]
 #[doc(hidden)]
 pub mod microlocal_impl;
