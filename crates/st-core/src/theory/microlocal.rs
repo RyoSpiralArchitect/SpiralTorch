@@ -430,6 +430,11 @@ impl EllipticWarp {
         self.sheet_count
     }
 
+    /// Returns the number of spin harmonics applied to the ν axis.
+    pub fn spin_harmonics(&self) -> usize {
+        self.spin_harmonics
+    }
+
     /// Maximum geodesic radius reachable on the warp.
     pub fn max_geodesic(&self) -> f32 {
         self.curvature_radius * PI
@@ -976,6 +981,9 @@ pub struct MicrolocalFeedback {
     pub smoothing: Option<f32>,
     pub tempo_hint: Option<f32>,
     pub stderr_hint: Option<f32>,
+    pub elliptic_radius: Option<f32>,
+    pub elliptic_sheet_count: Option<usize>,
+    pub elliptic_spin_harmonics: Option<usize>,
 }
 
 impl MicrolocalFeedback {
@@ -992,6 +1000,13 @@ impl MicrolocalFeedback {
             smoothing: other.smoothing.or(self.smoothing),
             tempo_hint: other.tempo_hint.or(self.tempo_hint),
             stderr_hint: other.stderr_hint.or(self.stderr_hint),
+            elliptic_radius: other.elliptic_radius.or(self.elliptic_radius),
+            elliptic_sheet_count: other
+                .elliptic_sheet_count
+                .or(self.elliptic_sheet_count),
+            elliptic_spin_harmonics: other
+                .elliptic_spin_harmonics
+                .or(self.elliptic_spin_harmonics),
         }
     }
 
@@ -1024,6 +1039,27 @@ impl MicrolocalFeedback {
     pub fn with_stderr_hint(mut self, stderr: f32) -> Self {
         if stderr >= 0.0 {
             self.stderr_hint = Some(stderr);
+        }
+        self
+    }
+
+    pub fn with_elliptic_radius(mut self, radius: f32) -> Self {
+        if radius.is_finite() && radius > 0.0 {
+            self.elliptic_radius = Some(radius);
+        }
+        self
+    }
+
+    pub fn with_elliptic_sheet_count(mut self, sheets: usize) -> Self {
+        if sheets > 0 {
+            self.elliptic_sheet_count = Some(sheets);
+        }
+        self
+    }
+
+    pub fn with_elliptic_spin_harmonics(mut self, harmonics: usize) -> Self {
+        if harmonics > 0 {
+            self.elliptic_spin_harmonics = Some(harmonics);
         }
         self
     }
@@ -1366,6 +1402,48 @@ impl InterfaceZConductor {
         if let Some(stderr) = feedback.stderr_hint {
             self.default_stderr_hint = Some(stderr.max(0.0));
         }
+
+        if feedback.elliptic_radius.is_some()
+            || feedback.elliptic_sheet_count.is_some()
+            || feedback.elliptic_spin_harmonics.is_some()
+        {
+            let current = self.lift.elliptic_warp().cloned();
+            let mut updated = if let Some(radius) = feedback.elliptic_radius {
+                if radius.is_finite() && radius > 0.0 {
+                    let mut warp = EllipticWarp::new(radius);
+                    if let Some(sheet) = feedback
+                        .elliptic_sheet_count
+                        .or_else(|| current.as_ref().map(|warp| warp.sheet_count()))
+                    {
+                        warp = warp.with_sheet_count(sheet);
+                    }
+                    if let Some(harmonics) = feedback
+                        .elliptic_spin_harmonics
+                        .or_else(|| current.as_ref().map(|warp| warp.spin_harmonics()))
+                    {
+                        warp = warp.with_spin_harmonics(harmonics);
+                    }
+                    Some(warp)
+                } else {
+                    current.clone()
+                }
+            } else {
+                current.clone().map(|warp| {
+                    let mut warp = warp;
+                    if let Some(sheet) = feedback.elliptic_sheet_count {
+                        warp = warp.with_sheet_count(sheet);
+                    }
+                    if let Some(harmonics) = feedback.elliptic_spin_harmonics {
+                        warp = warp.with_spin_harmonics(harmonics);
+                    }
+                    warp
+                })
+            };
+
+            if let Some(warp) = updated.take() {
+                self.lift.set_elliptic_warp(Some(warp));
+            }
+        }
     }
 
     #[cfg(test)]
@@ -1638,6 +1716,47 @@ mod tests {
             .events
             .iter()
             .any(|event| event.starts_with("elliptic.")));
+    }
+
+    #[test]
+    fn feedback_updates_elliptic_warp_parameters() {
+        let gauge = InterfaceGauge::new(1.0, 1.0);
+        let lift = InterfaceZLift::new(&[1.0], LeechProjector::new(24, 0.3))
+            .with_elliptic_warp(EllipticWarp::new(1.0).with_sheet_count(3).with_spin_harmonics(2));
+        let mut conductor = InterfaceZConductor::new(vec![gauge], lift);
+
+        let feedback = MicrolocalFeedback::default()
+            .with_elliptic_radius(2.0)
+            .with_elliptic_sheet_count(5)
+            .with_elliptic_spin_harmonics(4);
+        conductor.apply_feedback(&feedback);
+
+        let warp = conductor
+            .lift
+            .elliptic_warp()
+            .expect("elliptic warp should be present");
+        assert!((warp.curvature_radius() - 2.0).abs() < 1e-6);
+        assert_eq!(warp.sheet_count(), 5);
+        assert_eq!(warp.spin_harmonics(), 4);
+    }
+
+    #[test]
+    fn feedback_updates_existing_warp_without_radius() {
+        let gauge = InterfaceGauge::new(1.0, 1.0);
+        let lift = InterfaceZLift::new(&[1.0], LeechProjector::new(24, 0.3))
+            .with_elliptic_warp(EllipticWarp::new(1.2).with_sheet_count(4));
+        let mut conductor = InterfaceZConductor::new(vec![gauge], lift);
+
+        let feedback = MicrolocalFeedback::default().with_elliptic_spin_harmonics(3);
+        conductor.apply_feedback(&feedback);
+
+        let warp = conductor
+            .lift
+            .elliptic_warp()
+            .expect("elliptic warp should persist");
+        assert!((warp.curvature_radius() - 1.2).abs() < 1e-6);
+        assert_eq!(warp.sheet_count(), 4);
+        assert_eq!(warp.spin_harmonics(), 3);
     }
 
     #[test]

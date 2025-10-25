@@ -112,8 +112,8 @@ reintroduce microlocal calibration later if needed.
   signal is injected back into SpiralFlow.【F:crates/st-core/src/theory/macro.rs†L977-L980】
 - `MacroDrive::microlocal_feedback` emits a `MicrolocalFeedback` payload that
   tells the microlocal side how to retune gauge thresholds, Z-lift bias gains,
-  smoothing, and tempo hints based on the macro kinetics and dimensionless
-  regime.【F:crates/st-core/src/theory/macro.rs†L870-L984】
+  smoothing, tempo hints, and elliptic warp parameters so macro kinetics and
+  microlocal sensing stay aligned.【F:crates/st-core/src/theory/macro.rs†L870-L984】【F:crates/st-core/src/theory/microlocal.rs†L973-L1400】
 - `MacroZBridge::ingest_signature` now weights curvature estimates by the
   perimeter density and, whenever oriented normals are available, folds the
   card’s anisotropy specification into \(\kappa_\gamma\) before the velocity is
