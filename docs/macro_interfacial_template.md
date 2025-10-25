@@ -114,6 +114,10 @@ reintroduce microlocal calibration later if needed.
   tells the microlocal side how to retune gauge thresholds, Z-lift bias gains,
   smoothing, tempo hints, and elliptic warp parameters so macro kinetics and
   microlocal sensing stay aligned.【F:crates/st-core/src/theory/macro.rs†L870-L984】【F:crates/st-core/src/theory/microlocal.rs†L973-L1400】
+- Feedback now interprets the warp’s topological sectors, rotor fields, and
+  resonance heat to choose sheet counts, spin harmonics, smoothing, and tempo
+  hints dynamically, preserving consistency between Lie-transported microlocal
+  telemetry and macro kinetics.【F:crates/st-core/src/theory/macro.rs†L1190-L1260】【F:crates/st-core/src/theory/microlocal.rs†L444-L520】
 - `MacroZBridge::ingest_signature` now weights curvature estimates by the
   perimeter density and, whenever oriented normals are available, folds the
   card’s anisotropy specification into \(\kappa_\gamma\) before the velocity is

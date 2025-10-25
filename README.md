@@ -391,19 +391,30 @@ print("ST sees torch mul_:", a2.tolist())
 ### 4) Row softmax (GPU-accelerated when available)
 
 ```python
-import spiraltorch as st
+from spiraltorch import Axis, tensor, label_tensor
 
-logits = st.Tensor(2, 4, [3.0, 1.0, -2.0, 0.5, -0.25, 0.0, 1.5, -1.0])
-print("CPU row softmax:", logits.row_softmax().tolist())
+# Declare the axes that describe your data.
+time = Axis("time")
+feature = Axis("feature", 4)
 
-# Opt into the WGPU backend (falls back to CPU if the device lacks subgroups)
-print("WGPU row softmax:", logits.row_softmax(backend="wgpu").tolist())
+wave = tensor(
+    [
+        [0.20, 0.80, -0.10, 0.40],
+        [0.90, -0.30, 0.10, 0.50],
+    ],
+    axes=[time.with_size(2), feature],
+)
+
+print(wave.describe())
+softmax = wave.row_softmax()
+print(softmax.axis_names())  # ('time', 'feature')
 ```
 
 ### 5) rl.stAgent multi-armed bandit
 
 ```python
-import random
+import torch
+from torch.utils.dlpack import from_dlpack as torch_from_dlpack
 import spiraltorch as st
 
 Agent = getattr(st.rl, "stAgent", None)
@@ -511,15 +522,8 @@ for x, y in loader:
 import spiraltorch as st
 
 rec = st.Recommender(users=8, items=12, factors=4, learning_rate=0.05, regularization=0.002)
-rec.train_epoch([(0,0,5.0),(0,1,3.0),(1,0,4.0)])
+rec.train_epoch([(0, 0, 5.0), (0, 1, 3.0), (1, 0, 4.0)])
 print("top-k:", rec.recommend_top_k(0, k=3))
-
-# RL: use stAgent (DQN-like), PPO, SAC
-agent = st.stAgent(state_dim=4, action_dim=2, discount=0.99, learning_rate=1e-3)
-a = agent.select_action(0); agent.update(0, a, 1.0, 1)
-
-ppo = st.PpoAgent(state_dim=4, action_dim=2, learning_rate=3e-4, clip_range=0.2)
-sac = st.SacAgent(state_dim=4, action_dim=2, temperature=0.1)
 ```
 
 ### 10) Interop (PyTorch / JAX / TensorFlow)
@@ -532,17 +536,16 @@ xt = st.compat.torch.to_torch(x, dtype=torch.float32, device="cpu")
 x_back = st.compat.torch.from_torch(xt)
 ```
 
-### 10) Math & pacing helpers
+- `Axis(name, size=None)` creates a named dimension; call `axis.with_size(n)` when the
+  concrete length becomes known.
+- `tensor(data, axes=[...])` returns a backend-backed tensor and, if axes are provided,
+  a `LabeledTensor` wrapper that keeps names in sync across operations like
+  `row_softmax`, `transpose`, or matrix products.
+- `label_tensor(t, axes=[...])` applies the same annotation layer to tensors produced by
+  other SpiralTorch APIs.
+- `LabeledTensor.describe()` provides a quick dictionary with `shape`, `axes`, and
+  recorded sizes—handy when iterating inside notebooks.
 
-```python
-import spiraltorch as st
-st.set_global_seed(42)
-print(st.golden_ratio(), st.golden_angle())
-print(st.fibonacci_pacing(12))
-print(st.pack_tribonacci_chunks(20))
-```
-
----
 
 ## Backend Matrix
 

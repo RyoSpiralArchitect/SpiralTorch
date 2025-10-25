@@ -163,6 +163,12 @@ from .zspace_inference import (
     infer_weights_from_compat,
 )
 
+from .elliptic import (
+    EllipticWarpFunction,
+    elliptic_warp_autograd,
+    elliptic_warp_features,
+)
+
 # 追加API（Rust側でエクスポート済みのやつだけ拾う）
 _EXTRAS = [
     "golden_ratio","golden_angle","set_global_seed",
@@ -475,6 +481,8 @@ _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
         "Dataset": ("_NnDataset",),
         "DataLoader": ("_NnDataLoader",),
         "DataLoaderIter": ("_NnDataLoaderIter",),
+        "ZConv": ("PyZConv",),
+        "ZPooling": ("PyZPooling",),
         "from_samples": ("nn_from_samples", "dataset_from_samples"),
     },
     "compat": {
@@ -546,6 +554,224 @@ _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
     },
 }
 
+
+@_dataclass(frozen=True)
+class Axis:
+    """Named axis descriptor used by :class:`LabeledTensor`."""
+
+    name: str
+    size: int | None = None
+
+    def __post_init__(self) -> None:  # pragma: no cover - sanity guard
+        label = str(self.name).strip()
+        if not label:
+            raise ValueError("axis name must be a non-empty string")
+        object.__setattr__(self, "name", label)
+        if self.size is not None:
+            value = int(self.size)
+            if value <= 0:
+                raise ValueError("axis size must be positive")
+            object.__setattr__(self, "size", value)
+
+    def with_size(self, size: int) -> "Axis":
+        """Return a copy with the provided concrete size."""
+
+        if size <= 0:
+            raise ValueError("size must be positive")
+        return Axis(self.name, size)
+
+    def __str__(self) -> str:  # pragma: no cover - representation helper
+        suffix = self.size if self.size is not None else "?"
+        return f"{self.name}[{suffix}]"
+
+
+def _ensure_tensor_type() -> type:
+    tensor_type = globals().get("Tensor")
+    if tensor_type is None:
+        raise RuntimeError("Tensor export is unavailable in this build")
+    return tensor_type
+
+
+def _prepare_rows(data: _Any) -> _List[_List[float]]:
+    if hasattr(data, "tolist"):
+        data = data.tolist()
+    if not isinstance(data, _Sequence):
+        raise TypeError("tensor data must be a sequence")
+    if not data:
+        raise ValueError("tensor data must contain at least one row")
+    rows: _List[_List[float]] = []
+    if isinstance(data[0], _Sequence):  # type: ignore[index]
+        width: int | None = None
+        for row in data:  # type: ignore[assignment]
+            if hasattr(row, "tolist"):
+                row = row.tolist()
+            if not isinstance(row, _Sequence):
+                raise TypeError("tensor rows must be sequences of numbers")
+            values = [float(value) for value in row]
+            if not values:
+                raise ValueError("tensor rows cannot be empty")
+            if width is None:
+                width = len(values)
+            elif len(values) != width:
+                raise ValueError("all rows must share the same length")
+            rows.append(values)
+    else:
+        values = [float(value) for value in data]  # type: ignore[assignment]
+        if not values:
+            raise ValueError("tensor data must contain at least one element")
+        rows.append(values)
+    return rows
+
+
+def _tensor_from_data(data: _Any):
+    tensor_type = _ensure_tensor_type()
+    if isinstance(data, tensor_type):
+        return data
+    rows = _prepare_rows(data)
+    height = len(rows)
+    width = len(rows[0])
+    flat: _List[float] = [value for row in rows for value in row]
+    return tensor_type(height, width, flat)
+
+
+def _coerce_axis(axis: "Axis | str") -> Axis:
+    if isinstance(axis, Axis):
+        return axis
+    if isinstance(axis, str):
+        return Axis(axis)
+    raise TypeError("axes must be Axis instances or strings")
+
+
+def _resolve_axis_size(axis: Axis, size: int) -> Axis:
+    if size <= 0:
+        raise ValueError("tensor dimensions must be positive")
+    if axis.size is None:
+        return axis.with_size(size)
+    if axis.size != size:
+        raise ValueError(
+            f"axis '{axis.name}' expects size {axis.size}, received {size}"
+        )
+    return axis
+
+
+def _normalise_axes(axes: _Sequence["Axis | str"]) -> tuple[Axis, Axis]:
+    seq = list(axes)
+    if len(seq) != 2:
+        raise ValueError("exactly two axes are required for a 2D tensor")
+    first = _coerce_axis(seq[0])
+    second = _coerce_axis(seq[1])
+    return (first, second)
+
+
+class LabeledTensor:
+    """Tensor wrapper that carries human-readable axis annotations."""
+
+    def __init__(self, data: _Any, axes: _Sequence["Axis | str"]) -> None:
+        base = _tensor_from_data(data)
+        resolved = _normalise_axes(axes)
+        self._tensor = base
+        self._axes = (
+            _resolve_axis_size(resolved[0], base.rows),
+            _resolve_axis_size(resolved[1], base.cols),
+        )
+
+    @property
+    def tensor(self):
+        return self._tensor
+
+    @property
+    def axes(self) -> tuple[Axis, Axis]:
+        return self._axes
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        return (self.rows, self.cols)
+
+    @property
+    def rows(self) -> int:
+        return self._tensor.rows
+
+    @property
+    def cols(self) -> int:
+        return self._tensor.cols
+
+    def to_tensor(self):
+        return self._tensor
+
+    def tolist(self) -> _List[_List[float]]:
+        return self._tensor.tolist()
+
+    def rename(self, axes: _Sequence["Axis | str"]) -> "LabeledTensor":
+        return LabeledTensor(self._tensor, axes)
+
+    def with_axes(self, axes: _Sequence["Axis | str"]) -> "LabeledTensor":
+        return self.rename(axes)
+
+    def transpose(self) -> "LabeledTensor":
+        return LabeledTensor(self._tensor.transpose(), (self._axes[1], self._axes[0]))
+
+    def row_softmax(self, *, backend: str | None = None) -> "LabeledTensor":
+        return LabeledTensor(
+            self._tensor.row_softmax(backend=backend),
+            self._axes,
+        )
+
+    def __matmul__(self, other: "LabeledTensor") -> "LabeledTensor":
+        if not isinstance(other, LabeledTensor):
+            return NotImplemented
+        left_axis = self._axes[1]
+        right_axis = other._axes[0]
+        if left_axis.name != right_axis.name:
+            raise ValueError(
+                f"axis mismatch: cannot contract '{left_axis.name}' with '{right_axis.name}'"
+            )
+        if (
+            left_axis.size is not None
+            and right_axis.size is not None
+            and left_axis.size != right_axis.size
+        ):
+            raise ValueError(
+                f"axis '{left_axis.name}' expects size {left_axis.size}, received {right_axis.size}"
+            )
+        return LabeledTensor(
+            self._tensor.matmul(other._tensor),
+            (self._axes[0], other._axes[1]),
+        )
+
+    def describe(self) -> dict[str, _Any]:
+        return {
+            "axes": [axis.name for axis in self._axes],
+            "axis_sizes": [axis.size for axis in self._axes],
+            "shape": self.shape,
+        }
+
+    def axis_names(self) -> tuple[str, str]:
+        return (self._axes[0].name, self._axes[1].name)
+
+    def __iter__(self):  # pragma: no cover - simple iterator proxy
+        return iter(self.tolist())
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging helper
+        axis_repr = ", ".join(str(axis) for axis in self._axes)
+        return f"LabeledTensor(shape={self.shape}, axes=({axis_repr}))"
+
+def tensor(
+    data: _Any,
+    *,
+    axes: _Optional[_Sequence["Axis | str"]] = None,
+):
+    """Construct a :class:`Tensor` (optionally annotated with axes)."""
+
+    base = _tensor_from_data(data)
+    if axes is None:
+        return base
+    return LabeledTensor(base, axes)
+
+
+def label_tensor(tensor_obj: _Any, axes: _Sequence["Axis | str"]) -> LabeledTensor:
+    """Attach axis annotations to an existing tensor-like object."""
+
+    return LabeledTensor(tensor_obj, axes)
 
 @_dataclass
 class ZMetrics:
@@ -1388,6 +1614,8 @@ _mirror_into_module(
         "Dataset": ("_NnDataset",),
         "DataLoader": ("_NnDataLoader",),
         "DataLoaderIter": ("_NnDataLoaderIter",),
+        "ZConv": ("PyZConv",),
+        "ZPooling": ("PyZPooling",),
         "from_samples": ("nn_from_samples", "dataset_from_samples"),
     },
 )
@@ -1603,7 +1831,7 @@ _CORE_EXPORTS = [
     "SearchLoop",
     "QatObserver","QuantizationReport","StructuredPruningReport","CompressionReport",
     "structured_prune","compress_weights",
-    "ModuleTrainer","NonLiner","ZSpaceTrainer","ZSpaceCoherenceSequencer","PreDiscardTelemetry","PreDiscardPolicy",
+    "ModuleTrainer","NonLiner","ZConv","ZPooling","ZSpaceTrainer","ZSpaceCoherenceSequencer","PreDiscardTelemetry","PreDiscardPolicy",
     "CoherenceObservation","CoherenceSignature","CoherenceChannelReport","CoherenceDiagnostics","is_swap_invariant",
     "TemporalResonanceBuffer","SpiralTorchVision",
     "CanvasTransformer","CanvasSnapshot","apply_vision_update",
