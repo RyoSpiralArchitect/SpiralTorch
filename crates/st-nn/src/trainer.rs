@@ -33,6 +33,7 @@ use crate::language::{
 };
 use crate::loss::Loss;
 use crate::module::Module;
+use crate::optim::{LocalLearningRateAdapter, SpectralLrAdapter};
 use crate::plan::RankPlanner;
 use crate::roundtable::{
     simulate_proposal_locally, BlackcatModerator, BlackcatScore, DistConfig, GlobalProposal,
@@ -240,6 +241,7 @@ pub struct ModuleTrainer {
     heur_log: HeurOpLog,
     rewrite_budget: Option<RewriteBudget>,
     softlogic: SoftLogicFlex,
+    spectral_adapter: SpectralLrAdapter,
     desire_bridge: Option<DesireTrainerBridge>,
     desire_roundtable_bridge: Option<DesireRoundtableBridge>,
     last_desire_roundtable_summary: Option<DesireRoundtableSummary>,
@@ -1128,6 +1130,9 @@ impl ModuleTrainer {
         #[cfg(feature = "psi")]
         let psi = Self::init_psi_meter();
 
+        let mut spectral_adapter = SpectralLrAdapter::default().with_sheet_hint(8);
+        spectral_adapter.set_curvature_target(curvature);
+
         Self {
             planner: RankPlanner::new(caps),
             curvature,
@@ -1144,6 +1149,7 @@ impl ModuleTrainer {
             heur_log: HeurOpLog::default(),
             rewrite_budget: None,
             softlogic: SoftLogicFlex::new(),
+            spectral_adapter,
             desire_bridge: None,
             desire_roundtable_bridge: None,
             last_desire_roundtable_summary: None,
@@ -1264,12 +1270,14 @@ impl ModuleTrainer {
         scheduler.sync(self.curvature);
         self.curvature_scheduler = Some(scheduler);
         self.last_curvature_metrics = None;
+        self.spectral_adapter.set_curvature_target(self.curvature);
     }
 
     /// Disables any configured curvature scheduler and clears cached metrics.
     pub fn disable_curvature_scheduler(&mut self) {
         self.curvature_scheduler = None;
         self.last_curvature_metrics = None;
+        self.spectral_adapter.set_curvature_target(self.curvature);
     }
 
     /// Returns the most recently recorded curvature metrics emitted by the
@@ -1870,8 +1878,9 @@ impl ModuleTrainer {
     }
 
     /// Applies the parameter updates using either the hypergrad tape or the fallback rate.
-    pub fn step<M: Module>(&self, module: &mut M) -> PureResult<()> {
-        module.apply_step(self.fallback_learning_rate)
+    pub fn step<M: Module>(&mut self, module: &mut M) -> PureResult<()> {
+        let adapter: &mut dyn LocalLearningRateAdapter = &mut self.spectral_adapter;
+        module.apply_step_with_adapter(self.fallback_learning_rate, Some(adapter))
     }
 
     /// Runs a full epoch over the provided iterator of `(input, target)` pairs.
@@ -2432,6 +2441,8 @@ impl ModuleTrainer {
         if decision.changed {
             Self::retune_hypergrads(module, decision.curvature, self.hyper_learning_rate)?;
             self.curvature = decision.curvature;
+            self.spectral_adapter
+                .set_curvature_target(decision.curvature);
         }
         Ok(Some(decision))
     }
@@ -2687,7 +2698,19 @@ impl ModuleTrainer {
 
     #[cfg(feature = "collapse")]
     fn optimizer_mul_lr<M: Module>(&mut self, module: &mut M, factor: f32) -> PureResult<()> {
-        self.scale_learning_rates(module, factor)
+        if !factor.is_finite() || factor <= 0.0 {
+            return Ok(());
+        }
+        self.fallback_learning_rate *= factor;
+        self.hyper_learning_rate *= factor;
+        if let Some(rate) = self.real_learning_rate.as_mut() {
+            *rate *= factor;
+        }
+        self.spectral_adapter.on_global_scale(factor);
+        module.visit_parameters_mut(&mut |param| {
+            param.scale_learning_rate(factor);
+            Ok(())
+        })
     }
 
     #[cfg(feature = "psi")]
@@ -3025,10 +3048,58 @@ mod tests {
         }
     }
 
+    struct SpectralGradientModule {
+        param: Parameter,
+        grad: Vec<f32>,
+    }
+
+    impl SpectralGradientModule {
+        fn new(grad: Vec<f32>) -> Self {
+            let cols = grad.len();
+            let param = Parameter::new("spectral", Tensor::zeros(1, cols).unwrap());
+            Self { param, grad }
+        }
+
+        fn accumulate(&mut self) {
+            let update = Tensor::from_vec(1, self.grad.len(), self.grad.clone()).unwrap();
+            self.param.accumulate_euclidean(&update).unwrap();
+        }
+
+        fn weights(&self) -> &Tensor {
+            self.param.value()
+        }
+    }
+
+    impl Module for SpectralGradientModule {
+        fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+            Ok(input.clone())
+        }
+
+        fn backward(&mut self, _input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+            let update = Tensor::from_vec(1, self.grad.len(), self.grad.clone()).unwrap();
+            self.param.accumulate_euclidean(&update)?;
+            Ok(grad_output.clone())
+        }
+
+        fn visit_parameters(
+            &self,
+            visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+        ) -> PureResult<()> {
+            visitor(&self.param)
+        }
+
+        fn visit_parameters_mut(
+            &mut self,
+            visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
+        ) -> PureResult<()> {
+            visitor(&mut self.param)
+        }
+    }
+
     #[test]
     fn trainer_attaches_and_steps() {
         let caps = DeviceCaps::wgpu(32, true, 256);
-        let trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
         let mut layer = Linear::new("fc", 2, 1).unwrap();
         trainer.prepare(&mut layer).unwrap();
         let input = crate::Tensor::from_vec(1, 2, vec![1.0, -1.0]).unwrap();
@@ -3060,7 +3131,7 @@ mod tests {
     #[test]
     fn trainer_prepares_with_topos_for_wave_gate() {
         let caps = DeviceCaps::wgpu(64, true, 512);
-        let trainer = ModuleTrainer::new(caps, -0.9, 0.06, 0.02);
+        let mut trainer = ModuleTrainer::new(caps, -0.9, 0.06, 0.02);
         let encoder_curvature = trainer.curvature();
         let topos = OpenCartesianTopos::new(encoder_curvature, 1e-6, 1e4, 512, 16384).unwrap();
         let mut gate = WaveGate::with_topos(
@@ -3092,6 +3163,35 @@ mod tests {
                 Ok(())
             })
             .unwrap();
+    }
+
+    #[test]
+    fn spectral_adapter_scales_local_learning_rate() {
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        let grad = vec![0.8f32, -0.4, 0.6, -0.2];
+        let mut module = SpectralGradientModule::new(grad.clone());
+        module.accumulate();
+
+        let mut probe = SpectralLrAdapter::default().with_sheet_hint(8);
+        probe.set_curvature_target(trainer.curvature());
+        let features = st_core::ops::zspace_round::SpectralFeatureSample::from_slice(
+            &grad,
+            probe.sheet_hint(),
+        )
+        .unwrap();
+        let factor = probe.scale_factor("spectral", &features);
+
+        trainer.step(&mut module).unwrap();
+
+        let lr = trainer.fallback_learning_rate();
+        for (value, expected_grad) in module.weights().data().iter().zip(grad.iter()) {
+            let expected = -lr * factor * expected_grad;
+            assert!(
+                (value - expected).abs() < 1e-4,
+                "value {value} vs expected {expected}"
+            );
+        }
     }
 
     #[test]
