@@ -9,7 +9,9 @@ use pyo3::exceptions::PyValueError;
 #[cfg(feature = "nn")]
 use crate::pure::PyOpenCartesianTopos;
 #[cfg(feature = "nn")]
-use crate::tensor::{tensor_err_to_py, PyTensor};
+use crate::tensor::{tensor_err_to_py, tensor_to_torch, PyTensor};
+#[cfg(feature = "nn")]
+use crate::theory::PyZRelativityModel;
 
 #[cfg(feature = "nn")]
 use st_core::theory::zpulse::ZScale;
@@ -28,10 +30,10 @@ use st_nn::{
         CoherenceObservation, CoherenceSignature, LinguisticChannelReport, PreDiscardPolicy,
         PreDiscardSnapshot, PreDiscardTelemetry,
     },
-    DataLoader, Dataset, ZSpaceCoherenceSequencer,
+    DataLoader, Dataset, ZRelativityModule, ZSpaceCoherenceSequencer,
 };
 #[cfg(feature = "nn")]
-use st_tensor::OpenCartesianTopos;
+use st_tensor::{OpenCartesianTopos, Tensor};
 
 #[cfg(feature = "nn")]
 fn convert_samples(
@@ -939,6 +941,12 @@ pub(crate) struct PyZSpaceCoherenceSequencer {
 }
 
 #[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "ZRelativityModule", unsendable)]
+pub(crate) struct PyZRelativityModule {
+    pub(crate) inner: ZRelativityModule,
+}
+
+#[cfg(feature = "nn")]
 #[pymethods]
 impl PyZSpaceCoherenceSequencer {
     #[new]
@@ -1075,6 +1083,71 @@ impl PyZSpaceCoherenceSequencer {
 }
 
 #[cfg(feature = "nn")]
+#[pymethods]
+impl PyZRelativityModule {
+    #[new]
+    pub fn new(model: &PyZRelativityModel) -> PyResult<Self> {
+        let inner = ZRelativityModule::from_model(model.inner.clone()).map_err(tensor_err_to_py)?;
+        Ok(Self { inner })
+    }
+
+    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        let output = self.inner.forward(&input.inner).map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        let grad = self
+            .inner
+            .backward(&input.inner, &grad_output.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(grad))
+    }
+
+    pub fn parameter_tensor(&self) -> PyResult<PyTensor> {
+        let seed = Tensor::zeros(1, 1).map_err(tensor_err_to_py)?;
+        let output = self.inner.forward(&seed).map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn torch_parameters(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let seed = Tensor::zeros(1, 1).map_err(tensor_err_to_py)?;
+        let output = self.inner.forward(&seed).map_err(tensor_err_to_py)?;
+        tensor_to_torch(py, &output)
+    }
+
+    pub fn parameter_dimension(&self) -> usize {
+        self.inner.parameter_dimension()
+    }
+
+    pub fn model(&self) -> PyZRelativityModel {
+        PyZRelativityModel {
+            inner: self.inner.model().clone(),
+        }
+    }
+
+    pub fn zero_accumulators(&mut self) -> PyResult<()> {
+        self.inner.zero_accumulators().map_err(tensor_err_to_py)
+    }
+
+    pub fn apply_step(&mut self, fallback_lr: f32) -> PyResult<()> {
+        self.inner.apply_step(fallback_lr).map_err(tensor_err_to_py)
+    }
+
+    pub fn attach_realgrad(&mut self, learning_rate: f32) -> PyResult<()> {
+        self.inner
+            .attach_realgrad(learning_rate)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn attach_hypergrad(&mut self, curvature: f32, learning_rate: f32) -> PyResult<()> {
+        self.inner
+            .attach_hypergrad(curvature, learning_rate)
+            .map_err(tensor_err_to_py)
+    }
+}
+
+#[cfg(feature = "nn")]
 fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     let module = PyModule::new_bound(py, "nn")?;
     module.add("__doc__", "SpiralTorch neural network primitives")?;
@@ -1091,6 +1164,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyPreDiscardSnapshot>()?;
     module.add_class::<PyCoherenceDiagnostics>()?;
     module.add_class::<PyZSpaceCoherenceSequencer>()?;
+    module.add_class::<PyZRelativityModule>()?;
     module.add_function(wrap_pyfunction!(from_samples, &module)?)?;
     module.add(
         "__all__",
@@ -1105,6 +1179,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
             "PreDiscardPolicy",
             "PreDiscardSnapshot",
             "ZSpaceCoherenceSequencer",
+            "ZRelativityModule",
             "from_samples",
         ],
     )?;

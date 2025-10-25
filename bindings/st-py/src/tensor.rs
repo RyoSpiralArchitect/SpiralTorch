@@ -813,7 +813,7 @@ pub(crate) fn tensor_err_to_py(err: TensorError) -> PyErr {
     }
 }
 
-fn to_dlpack_impl(py: Python<'_>, tensor: &Tensor) -> PyResult<PyObject> {
+pub(crate) fn to_dlpack_impl(py: Python<'_>, tensor: &Tensor) -> PyResult<PyObject> {
     let managed = tensor.to_dlpack().map_err(tensor_err_to_py)?;
     unsafe {
         extern "C" fn drop_capsule(ptr: *mut ffi::PyObject) {
@@ -838,6 +838,15 @@ fn to_dlpack_impl(py: Python<'_>, tensor: &Tensor) -> PyResult<PyObject> {
         }
         Ok(PyObject::from_owned_ptr(py, capsule))
     }
+}
+
+pub(crate) fn tensor_to_torch(py: Python<'_>, tensor: &Tensor) -> PyResult<PyObject> {
+    let capsule = to_dlpack_impl(py, tensor)?;
+    let torch_dlpack = PyModule::import_bound(py, "torch.utils.dlpack").map_err(|_| {
+        PyValueError::new_err("import torch.utils.dlpack before requesting torch tensors")
+    })?;
+    let torch_tensor = torch_dlpack.call_method1("from_dlpack", (capsule,))?;
+    Ok(torch_tensor.into())
 }
 
 fn from_dlpack_impl(py: Python<'_>, capsule: &Bound<PyAny>) -> PyResult<PyTensor> {
