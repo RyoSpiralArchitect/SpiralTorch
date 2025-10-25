@@ -8,16 +8,22 @@ import pytest
 pytest.importorskip("spiraltorch")
 
 from spiraltorch import (
+    ZSpaceInferencePipeline,
     ZSpaceInferenceRuntime,
     ZSpacePosterior,
+    ZSpacePartialBundle,
     canvas_partial_from_snapshot,
+    canvas_coherence_partial,
     coherence_partial_from_diagnostics,
     compile_inference,
     decode_zspace_embedding,
+    blend_zspace_partials,
     infer_canvas_snapshot,
     infer_canvas_transformer,
     infer_coherence_diagnostics,
     infer_coherence_from_sequencer,
+    infer_canvas_with_coherence,
+    infer_with_partials,
     infer_from_partial,
 )
 
@@ -84,6 +90,42 @@ def test_runtime_without_accumulation_replaces_previous_observations():
     runtime.update({"speed": 0.6})
     runtime.update({"stab": 0.2})
     assert "speed" not in runtime.cached_observations
+
+
+def test_blend_partials_supports_weighted_mean_and_gradient():
+    blended = blend_zspace_partials(
+        [
+            {"speed": 0.2, "gradient": [0.1, -0.1]},
+            ZSpacePartialBundle({"speed": 0.6, "gradient": [0.5, 0.1]}, weight=2.0),
+        ]
+    )
+    assert math.isclose(blended["speed"], (0.2 + 0.6 * 2.0) / 3.0, rel_tol=1e-6)
+    assert math.isclose(blended["gradient"][0], (0.1 + 0.5 * 2.0) / 3.0, rel_tol=1e-6)
+    assert len(blended["gradient"]) == 2
+
+
+def test_infer_with_partials_honours_last_strategy():
+    vector = [0.4, -0.12, 0.33, -0.09]
+    result = infer_with_partials(
+        vector,
+        {"speed": 0.15},
+        {"speed": 0.9},
+        strategy="last",
+    )
+    assert math.isclose(result.metrics["speed"], 0.9)
+
+
+def test_pipeline_blends_and_clears_partials():
+    vector = [0.22, -0.11, 0.31, -0.07]
+    pipeline = ZSpaceInferencePipeline(vector, strategy="mean", smoothing=0.4)
+    pipeline.add_partial({"speed": 0.5})
+    pipeline.add_partial(ZSpacePartialBundle({"mem": -0.1}, weight=2.0))
+    first = pipeline.infer(clear=False)
+    assert math.isclose(first.metrics["speed"], 0.5, rel_tol=1e-6)
+    assert math.isclose(first.metrics["memory"], -0.1, rel_tol=1e-6)
+    second = pipeline.infer()
+    assert "speed" in second.metrics
+    assert pipeline.posterior is not None
 
 
 def test_compile_inference_wraps_callable():
@@ -175,6 +217,19 @@ def test_infer_canvas_transformer_uses_snapshot_method():
     assert math.isfinite(inference.metrics["canvas_mean"])
 
 
+def test_canvas_coherence_partial_combines_sources():
+    snapshot = _DummyCanvasSnapshot()
+    diagnostics = _DummyDiagnostics()
+    partial = canvas_coherence_partial(
+        snapshot,
+        diagnostics,
+        coherence=[0.6, 0.3, 0.1],
+        weights=(2.0, 1.0),
+    )
+    assert "canvas_energy" in partial
+    assert "coherence_mean" in partial
+
+
 class _DummyDiagnostics:
     def __init__(self) -> None:
         self.mean_coherence = 0.62
@@ -243,4 +298,19 @@ def test_infer_coherence_from_sequencer_can_return_outputs():
     )
     assert len(outputs) == 3
     assert ("contour", sample) in sequencer.calls
+    assert "coherence_mean" in inference.metrics
+
+
+def test_infer_canvas_with_coherence_projects_blended_partial():
+    snapshot = _DummyCanvasSnapshot()
+    diagnostics = _DummyDiagnostics()
+    vector = [0.25, -0.08, 0.34, -0.12]
+    inference = infer_canvas_with_coherence(
+        vector,
+        snapshot,
+        diagnostics,
+        coherence=[0.7, 0.2, 0.1],
+        strategy="mean",
+    )
+    assert "canvas_energy" in inference.metrics
     assert "coherence_mean" in inference.metrics
