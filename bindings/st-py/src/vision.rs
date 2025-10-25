@@ -5,10 +5,23 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict};
 use pyo3::{wrap_pyfunction, Bound, PyRefMut};
 
-use crate::tensor::PyTensor;
+use crate::tensor::{tensor_err_to_py, PyTensor};
+use crate::theory::PyZRelativityModel;
+use st_tensor::Tensor;
 
 const MIN_SMOOTHING: f32 = 0.0;
 const MAX_SMOOTHING: f32 = 0.999;
+
+fn tensor_to_rows(tensor: &Tensor) -> Vec<Vec<f32>> {
+    let (rows, cols) = tensor.shape();
+    let data = tensor.data();
+    let mut out = Vec::with_capacity(rows);
+    for row in 0..rows {
+        let start = row * cols;
+        out.push(data[start..start + cols].to_vec());
+    }
+    out
+}
 
 #[derive(Clone, Copy)]
 enum TapeTarget {
@@ -428,10 +441,35 @@ fn apply_vision_update(
     Ok(canvas_ref.snapshot_with_patch(patch_opt))
 }
 
+#[pyfunction]
+#[pyo3(signature = (model, field="block"))]
+pub fn zrelativity_heatmap(model: &PyZRelativityModel, field: &str) -> PyResult<Vec<Vec<f32>>> {
+    let bundle = model.inner.tensor_bundle().map_err(tensor_err_to_py)?;
+    let lower = field.to_ascii_lowercase();
+    let tensor = match lower.as_str() {
+        "block" => &bundle.block_metric,
+        "effective" => &bundle.effective_metric,
+        "gauge" => &bundle.gauge_field,
+        "moduli" => &bundle.scalar_moduli,
+        "field_equation" => &bundle.field_equation,
+        "warp" => bundle
+            .warp
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("warp factor not present on model"))?,
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "unknown ZRelativity field '{other}' (expected block/effective/gauge/moduli/field_equation/warp)"
+            )))
+        }
+    };
+    Ok(tensor_to_rows(tensor))
+}
+
 pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     parent.add_class::<PyCanvasTransformer>()?;
     parent.add_class::<PyCanvasSnapshot>()?;
     parent.add_function(wrap_pyfunction!(apply_vision_update, parent)?)?;
+    parent.add_function(wrap_pyfunction!(zrelativity_heatmap, parent)?)?;
     parent.add("__doc__", "Canvas transformer utilities")?;
     let _ = py;
     Ok(())
