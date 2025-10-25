@@ -66,7 +66,7 @@ pub use layers::sequential::Sequential;
 pub use layers::wave_gate::WaveGate;
 pub use layers::wave_rnn::WaveRnn;
 pub use layers::zspace_projector::ZSpaceProjector;
-pub use layers::{Gelu, LayerNorm, Relu, ToposResonator, ZSpaceMixer};
+pub use layers::{Dropout, Gelu, LayerNorm, Relu, ToposResonator, ZSpaceMixer};
 pub use lightning::{
     LightningBuilder, LightningConfig, LightningConfigBuilder, LightningEpoch, LightningReport,
     LightningStage, LightningStageReport, SpiralLightning,

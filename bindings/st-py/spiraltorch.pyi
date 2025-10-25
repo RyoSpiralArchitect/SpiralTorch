@@ -1004,6 +1004,108 @@ def generate_plan_batch_ex(
 ) -> List[object]: ...
 
 
+class _NnNonLiner:
+    def __init__(
+        self,
+        name: str,
+        features: int,
+        *,
+        activation: str = ...,
+        slope: float = ...,
+        gain: float = ...,
+        bias: float = ...,
+        curvature: float | None = ...,
+        z_scale: float | None = ...,
+        retention: float = ...,
+    ) -> None: ...
+
+    def forward(self, input: Tensor) -> Tensor: ...
+
+    def backward(self, input: Tensor, grad_output: Tensor) -> Tensor: ...
+
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+    def reset_metrics(self) -> None: ...
+
+    def configure_geometry(
+        self,
+        *,
+        curvature: float | None = ...,
+        z_scale: float | None = ...,
+        retention: float | None = ...,
+    ) -> None: ...
+
+    def attach_hypergrad(
+        self,
+        curvature: float,
+        learning_rate: float,
+        *,
+        topos: OpenCartesianTopos | None = ...,
+    ) -> None: ...
+
+    def attach_realgrad(self, learning_rate: float) -> None: ...
+
+    def zero_accumulators(self) -> None: ...
+
+    def apply_step(self, fallback_lr: float) -> None: ...
+
+    def state_dict(self) -> List[Tuple[str, Tensor]]: ...
+
+    def load_state_dict(self, state: Sequence[Tuple[str, Tensor]]) -> None: ...
+
+    @property
+    def activation(self) -> str: ...
+
+    @property
+    def curvature(self) -> float | None: ...
+
+    @property
+    def z_scale(self) -> float | None: ...
+
+    @property
+    def retention(self) -> float | None: ...
+
+    @property
+    def psi_drift(self) -> float | None: ...
+
+    @property
+    def last_hyperbolic_radius(self) -> float | None: ...
+
+    @property
+    def gain(self) -> Tensor: ...
+
+    @property
+    def slope(self) -> Tensor: ...
+
+    @property
+    def bias(self) -> Tensor: ...
+
+    def gradients(self) -> Tuple[Tensor | None, Tensor | None, Tensor | None]: ...
+
+
+class _NnDropout:
+    def __init__(self, probability: float, *, seed: int | None = ...) -> None: ...
+
+    def forward(self, input: Tensor) -> Tensor: ...
+
+    def backward(self, input: Tensor, grad_output: Tensor) -> Tensor: ...
+
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+    def train(self) -> None: ...
+
+    def eval(self) -> None: ...
+
+    @property
+    def probability(self) -> float: ...
+
+    @property
+    def training(self) -> bool: ...
+
+    @training.setter
+    def training(self, value: bool) -> None: ...
+
+
 class _NnDataset:
     def __init__(self) -> None: ...
 
@@ -1186,6 +1288,8 @@ def is_swap_invariant(arrangement: Sequence[float]) -> bool: ...
 
 
 class _NnModule(ModuleType):
+    NonLiner: type[_NnNonLiner]
+    Dropout: type[_NnDropout]
     Dataset: type[_NnDataset]
     DataLoader: type[_NnDataLoader]
     DataLoaderIter: type[_NnDataLoaderIter]
@@ -1199,6 +1303,14 @@ class _NnModule(ModuleType):
 
 
 nn: _NnModule
+
+
+class NonLiner(_NnNonLiner):
+    ...
+
+
+class Dropout(_NnDropout):
+    ...
 
 
 class ZSpaceCoherenceSequencer(_ZSpaceCoherenceSequencer):

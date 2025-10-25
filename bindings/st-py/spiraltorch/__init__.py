@@ -191,6 +191,8 @@ for _pub, _cands in _COMPAT_ALIAS.items():
 
 _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
     "nn": {
+        "NonLiner": ("NonLiner",),
+        "Dropout": ("Dropout",),
         "Dataset": ("_NnDataset",),
         "DataLoader": ("_NnDataLoader",),
         "DataLoaderIter": ("_NnDataLoaderIter",),
