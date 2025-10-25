@@ -6,9 +6,11 @@
 use crate::module::{Module, Parameter};
 use crate::schedule::GradientBands;
 use crate::{PureResult, Tensor, TensorError};
-use st_core::util::math::LeechProjector;
+use st_core::util::math::{ramanujan_pi, LeechProjector};
 #[cfg(feature = "wgpu")]
 use st_tensor::backend::wgpu_dense;
+#[cfg(feature = "wgpu")]
+use std::sync::OnceLock;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
@@ -46,6 +48,7 @@ const DEFAULT_CONV6DA_OFFSETS: [(isize, isize, isize); 7] = [
     (0, 0, 1),
     (0, 0, -1),
 ];
+const RAMANUJAN_PI_ORDER: usize = 6;
 
 fn shape_product(shape: &[usize]) -> PureResult<usize> {
     let mut product = 1usize;
@@ -937,6 +940,138 @@ impl Conv3d {
     fn kernel_volume(&self) -> PureResult<usize> {
         shape_product(&[self.kernel.0, self.kernel.1, self.kernel.2])
     }
+
+    #[cfg(feature = "wgpu")]
+    fn grad_output_to_matrix(
+        &self,
+        grad_output: &Tensor,
+        batch: usize,
+        od: usize,
+        oh: usize,
+        ow: usize,
+    ) -> PureResult<Tensor> {
+        let mut matrix = Tensor::zeros(batch * od * oh * ow, self.out_channels)?;
+        let grad_cols = grad_output.shape().1;
+        let spatial = od * oh * ow;
+        let grad_data = grad_output.data();
+        let matrix_data = matrix.data_mut();
+        for b in 0..batch {
+            let grad_row = &grad_data[b * grad_cols..(b + 1) * grad_cols];
+            for od_idx in 0..od {
+                for oh_idx in 0..oh {
+                    for ow_idx in 0..ow {
+                        let row_index = (((b * od) + od_idx) * oh + oh_idx) * ow + ow_idx;
+                        let offset = row_index * self.out_channels;
+                        for oc in 0..self.out_channels {
+                            let grad_idx = oc * spatial + od_idx * (oh * ow) + oh_idx * ow + ow_idx;
+                            matrix_data[offset + oc] = grad_row[grad_idx];
+                        }
+                    }
+                }
+            }
+        }
+        Ok(matrix)
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[allow(dead_code)]
+    fn try_grad_input_wgpu(
+        &self,
+        grad_output: &Tensor,
+        batch: usize,
+        od: usize,
+        oh: usize,
+        ow: usize,
+    ) -> PureResult<Option<Tensor>> {
+        if !wgpu_dense::is_available() {
+            return Ok(None);
+        }
+        let kernel_volume = self.kernel_volume()?;
+        let span =
+            self.in_channels
+                .checked_mul(kernel_volume)
+                .ok_or(TensorError::InvalidDimensions {
+                    rows: self.in_channels,
+                    cols: kernel_volume,
+                })?;
+        let rows = batch
+            .checked_mul(od)
+            .and_then(|value| value.checked_mul(oh))
+            .and_then(|value| value.checked_mul(ow))
+            .ok_or(TensorError::InvalidDimensions {
+                rows: batch,
+                cols: od * oh * ow,
+            })?;
+        let total_work = rows
+            .checked_mul(span)
+            .and_then(|value| value.checked_mul(self.out_channels))
+            .unwrap_or(usize::MAX);
+        if total_work < 4096 {
+            return Ok(None);
+        }
+        let pad_d = match i32::try_from(self.padding.0) {
+            Ok(value) => value,
+            Err(_) => return Ok(None),
+        };
+        let pad_h = match i32::try_from(self.padding.1) {
+            Ok(value) => value,
+            Err(_) => return Ok(None),
+        };
+        let pad_w = match i32::try_from(self.padding.2) {
+            Ok(value) => value,
+            Err(_) => return Ok(None),
+        };
+        let grad_matrix = self.grad_output_to_matrix(grad_output, batch, od, oh, ow)?;
+        let maybe = wgpu_dense::conv3d_grad_input_fused(
+            grad_matrix.data(),
+            self.weight.value().data(),
+            batch,
+            self.in_channels,
+            self.input_dhw.0,
+            self.input_dhw.1,
+            self.input_dhw.2,
+            self.kernel.0,
+            self.kernel.1,
+            self.kernel.2,
+            self.stride.0,
+            self.stride.1,
+            self.stride.2,
+            pad_d,
+            pad_h,
+            pad_w,
+            self.dilation.0,
+            self.dilation.1,
+            self.dilation.2,
+            od,
+            oh,
+            ow,
+            self.out_channels,
+        );
+        let buffer = match maybe {
+            Ok(buffer) => buffer,
+            Err(_) => return Ok(None),
+        };
+        Tensor::from_vec(
+            batch,
+            self.in_channels * self.input_dhw.0 * self.input_dhw.1 * self.input_dhw.2,
+            buffer,
+        )
+        .map(Some)
+        .or(Ok(None))
+    }
+
+    #[cfg(not(feature = "wgpu"))]
+    #[allow(dead_code)]
+    fn try_grad_input_wgpu(
+        &self,
+        _grad_output: &Tensor,
+        _batch: usize,
+        _od: usize,
+        _oh: usize,
+        _ow: usize,
+    ) -> PureResult<Option<Tensor>> {
+        Ok(None)
+    }
 }
 
 impl Module for Conv3d {
@@ -1066,15 +1201,90 @@ impl Module for Conv3d {
         let span = self.in_channels * kernel_volume;
         let mut grad_weight = Tensor::zeros(self.out_channels, span)?;
         let mut grad_bias = vec![0.0f32; self.out_channels];
-        let mut grad_input = Tensor::zeros(batch, cols)?;
+        #[cfg(feature = "wgpu")]
+        let (mut grad_input, gpu_grad_input) = {
+            let maybe = self.try_grad_input_wgpu(grad_output, batch, od, oh, ow)?;
+            match maybe {
+                Some(tensor) => (tensor, true),
+                None => (Tensor::zeros(batch, cols)?, false),
+            }
+        };
+        #[cfg(not(feature = "wgpu"))]
+        let (mut grad_input, gpu_grad_input) = (Tensor::zeros(batch, cols)?, false);
         let weight = self.weight.value();
         let weight_data = weight.data();
         let grad_out_cols = grad_output.shape().1;
-        let grad_input_cols = grad_input.shape().1;
         let plane = self.input_dhw.1 * self.input_dhw.2;
         let area = self.input_dhw.2;
-        {
+        if gpu_grad_input {
             let grad_weight_data = grad_weight.data_mut();
+            for b in 0..batch {
+                let row = &input.data()[b * cols..(b + 1) * cols];
+                let grad_row = &grad_output.data()[b * grad_out_cols..(b + 1) * grad_out_cols];
+                for oc in 0..self.out_channels {
+                    let _weight_row = &weight_data[oc * span..(oc + 1) * span];
+                    for od_idx in 0..od {
+                        for oh_idx in 0..oh {
+                            for ow_idx in 0..ow {
+                                let go = grad_row[oc * output_volume
+                                    + od_idx * (oh * ow)
+                                    + oh_idx * ow
+                                    + ow_idx];
+                                grad_bias[oc] += go;
+                                for ic in 0..self.in_channels {
+                                    let channel_offset = ic * volume;
+                                    for kd in 0..self.kernel.0 {
+                                        let pos_d = od_idx * self.stride.0 + kd * self.dilation.0;
+                                        if pos_d < self.padding.0 {
+                                            continue;
+                                        }
+                                        let idx_d = pos_d - self.padding.0;
+                                        if idx_d >= self.input_dhw.0 {
+                                            continue;
+                                        }
+                                        for kh in 0..self.kernel.1 {
+                                            let pos_h =
+                                                oh_idx * self.stride.1 + kh * self.dilation.1;
+                                            if pos_h < self.padding.1 {
+                                                continue;
+                                            }
+                                            let idx_h = pos_h - self.padding.1;
+                                            if idx_h >= self.input_dhw.1 {
+                                                continue;
+                                            }
+                                            for kw in 0..self.kernel.2 {
+                                                let pos_w =
+                                                    ow_idx * self.stride.2 + kw * self.dilation.2;
+                                                if pos_w < self.padding.2 {
+                                                    continue;
+                                                }
+                                                let idx_w = pos_w - self.padding.2;
+                                                if idx_w >= self.input_dhw.2 {
+                                                    continue;
+                                                }
+                                                let index = channel_offset
+                                                    + idx_d * plane
+                                                    + idx_h * area
+                                                    + idx_w;
+                                                let input_val = row[index];
+                                                let weight_idx = ic * kernel_volume
+                                                    + kd * (self.kernel.1 * self.kernel.2)
+                                                    + kh * self.kernel.2
+                                                    + kw;
+                                                grad_weight_data[oc * span + weight_idx] +=
+                                                    go * input_val;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            let grad_weight_data = grad_weight.data_mut();
+            let grad_input_cols = grad_input.shape().1;
             let grad_input_data = grad_input.data_mut();
             for b in 0..batch {
                 let row = &input.data()[b * cols..(b + 1) * cols];
@@ -1294,6 +1504,163 @@ impl Conv4d {
     fn kernel_volume(&self) -> PureResult<usize> {
         shape_product(&[self.kernel.0, self.kernel.1, self.kernel.2, self.kernel.3])
     }
+
+    #[cfg(feature = "wgpu")]
+    fn grad_output_to_matrix(
+        &self,
+        grad_output: &Tensor,
+        batch: usize,
+        od: usize,
+        oh: usize,
+        ow: usize,
+        ot: usize,
+    ) -> PureResult<Tensor> {
+        let mut matrix = Tensor::zeros(batch * od * oh * ow * ot, self.out_channels)?;
+        let grad_cols = grad_output.shape().1;
+        let spatial = od * oh * ow * ot;
+        let grad_data = grad_output.data();
+        let matrix_data = matrix.data_mut();
+        for b in 0..batch {
+            let grad_row = &grad_data[b * grad_cols..(b + 1) * grad_cols];
+            for od_idx in 0..od {
+                for oh_idx in 0..oh {
+                    for ow_idx in 0..ow {
+                        for ot_idx in 0..ot {
+                            let row_index =
+                                ((((b * od) + od_idx) * oh + oh_idx) * ow + ow_idx) * ot + ot_idx;
+                            let offset = row_index * self.out_channels;
+                            for oc in 0..self.out_channels {
+                                let grad_idx = oc * spatial
+                                    + od_idx * (oh * ow * ot)
+                                    + oh_idx * (ow * ot)
+                                    + ow_idx * ot
+                                    + ot_idx;
+                                matrix_data[offset + oc] = grad_row[grad_idx];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(matrix)
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[allow(dead_code)]
+    fn try_grad_input_wgpu(
+        &self,
+        grad_output: &Tensor,
+        batch: usize,
+        od: usize,
+        oh: usize,
+        ow: usize,
+        ot: usize,
+    ) -> PureResult<Option<Tensor>> {
+        if !wgpu_dense::is_available() {
+            return Ok(None);
+        }
+        let kernel_volume = self.kernel_volume()?;
+        let span =
+            self.in_channels
+                .checked_mul(kernel_volume)
+                .ok_or(TensorError::InvalidDimensions {
+                    rows: self.in_channels,
+                    cols: kernel_volume,
+                })?;
+        let rows = batch
+            .checked_mul(od)
+            .and_then(|value| value.checked_mul(oh))
+            .and_then(|value| value.checked_mul(ow))
+            .and_then(|value| value.checked_mul(ot))
+            .ok_or(TensorError::InvalidDimensions {
+                rows: batch,
+                cols: od * oh * ow * ot,
+            })?;
+        let total_work = rows
+            .checked_mul(span)
+            .and_then(|value| value.checked_mul(self.out_channels))
+            .unwrap_or(usize::MAX);
+        if total_work < 4096 {
+            return Ok(None);
+        }
+        let pad_d = match i32::try_from(self.padding.0) {
+            Ok(value) => value,
+            Err(_) => return Ok(None),
+        };
+        let pad_h = match i32::try_from(self.padding.1) {
+            Ok(value) => value,
+            Err(_) => return Ok(None),
+        };
+        let pad_w = match i32::try_from(self.padding.2) {
+            Ok(value) => value,
+            Err(_) => return Ok(None),
+        };
+        let pad_t = match i32::try_from(self.padding.3) {
+            Ok(value) => value,
+            Err(_) => return Ok(None),
+        };
+        let grad_matrix = self.grad_output_to_matrix(grad_output, batch, od, oh, ow, ot)?;
+        let maybe = wgpu_dense::conv4d_grad_input_fused(
+            grad_matrix.data(),
+            self.weight.value().data(),
+            batch,
+            self.in_channels,
+            self.input_dims.0,
+            self.input_dims.1,
+            self.input_dims.2,
+            self.input_dims.3,
+            self.kernel.0,
+            self.kernel.1,
+            self.kernel.2,
+            self.kernel.3,
+            self.stride.0,
+            self.stride.1,
+            self.stride.2,
+            self.stride.3,
+            pad_d,
+            pad_h,
+            pad_w,
+            pad_t,
+            self.dilation.0,
+            self.dilation.1,
+            self.dilation.2,
+            self.dilation.3,
+            od,
+            oh,
+            ow,
+            ot,
+            self.out_channels,
+        );
+        let buffer = match maybe {
+            Ok(buffer) => buffer,
+            Err(_) => return Ok(None),
+        };
+        Tensor::from_vec(
+            batch,
+            self.in_channels
+                * self.input_dims.0
+                * self.input_dims.1
+                * self.input_dims.2
+                * self.input_dims.3,
+            buffer,
+        )
+        .map(Some)
+        .or(Ok(None))
+    }
+
+    #[cfg(not(feature = "wgpu"))]
+    #[allow(dead_code)]
+    fn try_grad_input_wgpu(
+        &self,
+        _grad_output: &Tensor,
+        _batch: usize,
+        _od: usize,
+        _oh: usize,
+        _ow: usize,
+        _ot: usize,
+    ) -> PureResult<Option<Tensor>> {
+        Ok(None)
+    }
 }
 
 impl Module for Conv4d {
@@ -1444,16 +1811,110 @@ impl Module for Conv4d {
         let span = self.in_channels * kernel_volume;
         let mut grad_weight = Tensor::zeros(self.out_channels, span)?;
         let mut grad_bias = vec![0.0f32; self.out_channels];
-        let mut grad_input = Tensor::zeros(batch, cols)?;
+        #[cfg(feature = "wgpu")]
+        let (mut grad_input, gpu_grad_input) = {
+            let maybe = self.try_grad_input_wgpu(grad_output, batch, od, oh, ow, ot)?;
+            match maybe {
+                Some(tensor) => (tensor, true),
+                None => (Tensor::zeros(batch, cols)?, false),
+            }
+        };
+        #[cfg(not(feature = "wgpu"))]
+        let (mut grad_input, gpu_grad_input) = (Tensor::zeros(batch, cols)?, false);
         let weight = self.weight.value();
         let weight_data = weight.data();
         let grad_out_cols = grad_output.shape().1;
-        let grad_input_cols = grad_input.shape().1;
         let plane = self.input_dims.1 * self.input_dims.2 * self.input_dims.3;
         let area = self.input_dims.2 * self.input_dims.3;
         let line = self.input_dims.3;
-        {
+        if gpu_grad_input {
             let grad_weight_data = grad_weight.data_mut();
+            for b in 0..batch {
+                let row = &input.data()[b * cols..(b + 1) * cols];
+                let grad_row = &grad_output.data()[b * grad_out_cols..(b + 1) * grad_out_cols];
+                for oc in 0..self.out_channels {
+                    let _weight_row = &weight_data[oc * span..(oc + 1) * span];
+                    for od_idx in 0..od {
+                        for oh_idx in 0..oh {
+                            for ow_idx in 0..ow {
+                                for ot_idx in 0..ot {
+                                    let go = grad_row[oc * output_volume
+                                        + od_idx * (oh * ow * ot)
+                                        + oh_idx * (ow * ot)
+                                        + ow_idx * ot
+                                        + ot_idx];
+                                    grad_bias[oc] += go;
+                                    for ic in 0..self.in_channels {
+                                        let channel_offset = ic * volume;
+                                        for kd in 0..self.kernel.0 {
+                                            let pos_d =
+                                                od_idx * self.stride.0 + kd * self.dilation.0;
+                                            if pos_d < self.padding.0 {
+                                                continue;
+                                            }
+                                            let idx_d = pos_d - self.padding.0;
+                                            if idx_d >= self.input_dims.0 {
+                                                continue;
+                                            }
+                                            for kh in 0..self.kernel.1 {
+                                                let pos_h =
+                                                    oh_idx * self.stride.1 + kh * self.dilation.1;
+                                                if pos_h < self.padding.1 {
+                                                    continue;
+                                                }
+                                                let idx_h = pos_h - self.padding.1;
+                                                if idx_h >= self.input_dims.1 {
+                                                    continue;
+                                                }
+                                                for kw in 0..self.kernel.2 {
+                                                    let pos_w = ow_idx * self.stride.2
+                                                        + kw * self.dilation.2;
+                                                    if pos_w < self.padding.2 {
+                                                        continue;
+                                                    }
+                                                    let idx_w = pos_w - self.padding.2;
+                                                    if idx_w >= self.input_dims.2 {
+                                                        continue;
+                                                    }
+                                                    for kt in 0..self.kernel.3 {
+                                                        let pos_t = ot_idx * self.stride.3
+                                                            + kt * self.dilation.3;
+                                                        if pos_t < self.padding.3 {
+                                                            continue;
+                                                        }
+                                                        let idx_t = pos_t - self.padding.3;
+                                                        if idx_t >= self.input_dims.3 {
+                                                            continue;
+                                                        }
+                                                        let index = channel_offset
+                                                            + idx_d * plane
+                                                            + idx_h * area
+                                                            + idx_w * line
+                                                            + idx_t;
+                                                        let input_val = row[index];
+                                                        let weight_idx = ic * kernel_volume
+                                                            + kd * (self.kernel.1
+                                                                * self.kernel.2
+                                                                * self.kernel.3)
+                                                            + kh * (self.kernel.2 * self.kernel.3)
+                                                            + kw * self.kernel.3
+                                                            + kt;
+                                                        grad_weight_data[oc * span + weight_idx] +=
+                                                            go * input_val;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            let grad_weight_data = grad_weight.data_mut();
+            let grad_input_cols = grad_input.shape().1;
             let grad_input_data = grad_input.data_mut();
             for b in 0..batch {
                 let row = &input.data()[b * cols..(b + 1) * cols];
@@ -1589,6 +2050,28 @@ pub struct Conv6da {
 }
 
 impl Conv6da {
+    #[cfg(feature = "wgpu")]
+    fn ramanujan_pi_boost() -> f64 {
+        static BOOST: OnceLock<f64> = OnceLock::new();
+        *BOOST.get_or_init(|| {
+            if wgpu_dense::is_available() {
+                if let Ok(value) = wgpu_dense::ramanujan_pi_gpu(RAMANUJAN_PI_ORDER) {
+                    return value;
+                }
+            }
+            ramanujan_pi(RAMANUJAN_PI_ORDER)
+        })
+    }
+
+    #[cfg(not(feature = "wgpu"))]
+    fn ramanujan_pi_boost() -> f64 {
+        ramanujan_pi(RAMANUJAN_PI_ORDER)
+    }
+
+    fn ramanujan_pi_delta() -> f32 {
+        (Self::ramanujan_pi_boost() - std::f64::consts::PI) as f32
+    }
+
     pub fn new(
         name: impl Into<String>,
         in_channels: usize,
@@ -1742,7 +2225,8 @@ impl Module for Conv6da {
         for (row, out_row) in (&mut input_rows).zip(&mut out_rows) {
             for cell_index in 0..volume {
                 let geodesic = self.gather_neighbors(row, &mut neighbors, cell_index);
-                let density = self.leech_projector.enrich(geodesic) as f32;
+                let density =
+                    self.leech_projector.enrich(geodesic) as f32 + Self::ramanujan_pi_delta();
                 for (oc, weight_row) in weight_data.chunks_exact(span).enumerate() {
                     let mut acc = bias_data[oc] + density;
                     for (value, weight) in neighbors.iter().zip(weight_row.iter()) {
