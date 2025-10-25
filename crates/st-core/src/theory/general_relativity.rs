@@ -218,6 +218,17 @@ impl LorentzianMetric {
         })
     }
 
+    /// Builds a Lorentzian metric by uniformly scaling the supplied components before validation.
+    pub fn try_scaled(mut components: Matrix4<f64>, scale: f64) -> Result<Self, MetricError> {
+        components *= scale;
+        Self::try_new(components)
+    }
+
+    /// Returns a rescaled copy of the current metric.
+    pub fn scaled(&self, scale: f64) -> Result<Self, MetricError> {
+        Self::try_scaled(self.components.clone(), scale)
+    }
+
     /// Returns a reference to the metric matrix.
     pub fn components(&self) -> &Matrix4<f64> {
         &self.components
@@ -291,6 +302,11 @@ impl InternalMetric {
         })
     }
 
+    /// Volume density \(\sqrt{\det h}\) induced by the positive-definite internal metric.
+    pub fn volume_density(&self) -> f64 {
+        self.components.determinant().sqrt()
+    }
+
     /// Returns the internal dimension.
     pub fn dimension(&self) -> usize {
         self.components.nrows()
@@ -344,6 +360,42 @@ impl MixedBlock {
     }
 
     /// Immutable access to the underlying matrix.
+    pub fn components(&self) -> &DMatrix<f64> {
+        &self.components
+    }
+}
+
+/// Gauge potential extracted from the mixed block g_{μA}.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GaugeField {
+    components: DMatrix<f64>,
+}
+
+impl GaugeField {
+    /// Builds a gauge field ensuring it carries four spacetime rows and the expected internal legs.
+    pub fn try_new(components: DMatrix<f64>, internal_dim: usize) -> Result<Self, MetricError> {
+        if components.nrows() != DIM || components.ncols() != internal_dim {
+            return Err(MetricError::CrossTermShape {
+                expected_rows: DIM,
+                expected_cols: internal_dim,
+                found_rows: components.nrows(),
+                found_cols: components.ncols(),
+            });
+        }
+        Ok(Self { components })
+    }
+
+    /// Number of internal gauge legs.
+    pub fn internal_dimension(&self) -> usize {
+        self.components.ncols()
+    }
+
+    /// Accesses A_μ^{(a)}.
+    pub fn component(&self, mu: usize, a: usize) -> f64 {
+        self.components[(mu, a)]
+    }
+
+    /// Matrix representation of the gauge potential.
     pub fn components(&self) -> &DMatrix<f64> {
         &self.components
     }
@@ -455,6 +507,11 @@ impl ProductMetric {
         &self.internal
     }
 
+    /// Volume density contributed by the internal block.
+    pub fn internal_volume_density(&self) -> f64 {
+        self.internal.volume_density()
+    }
+
     /// Returns the mixed block g_{μA}.
     pub fn mixed(&self) -> &MixedBlock {
         &self.mixed
@@ -523,6 +580,11 @@ impl ProductGeometry {
         &self.metric
     }
 
+    /// Volume density induced by the internal block.
+    pub fn internal_volume_density(&self) -> f64 {
+        self.metric.internal_volume_density()
+    }
+
     /// Combined dimensionality of the product manifold.
     pub fn total_dimension(&self) -> usize {
         self.metric.total_dimension()
@@ -533,8 +595,8 @@ impl ProductGeometry {
 #[derive(Clone, Debug, PartialEq)]
 pub struct DimensionalReduction {
     effective_metric: LorentzianMetric,
-    gauge_potential: DMatrix<f64>,
-    scalar_moduli: DMatrix<f64>,
+    gauge_field: GaugeField,
+    scalar_moduli: InternalMetric,
     effective_newton_constant: f64,
 }
 
@@ -546,15 +608,17 @@ impl DimensionalReduction {
         internal_volume: f64,
     ) -> Result<Self, MetricError> {
         let effective_metric = geometry.metric().effective_base_metric()?;
-        let gauge_potential = geometry.metric().mixed().components().clone();
-        let scalar_moduli = geometry.metric().internal().components().clone();
+        let internal_dim = geometry.internal().dimension();
+        let gauge_potential =
+            GaugeField::try_new(geometry.metric().mixed().components().clone(), internal_dim)?;
+        let scalar_moduli = geometry.metric().internal().clone();
         let effective_newton_constant = geometry
             .metric()
             .effective_newton_constant(constants, internal_volume);
 
         Ok(Self {
             effective_metric,
-            gauge_potential,
+            gauge_field: gauge_potential,
             scalar_moduli,
             effective_newton_constant,
         })
@@ -566,23 +630,23 @@ impl DimensionalReduction {
     }
 
     /// Mixed gauge potential inherited from the g_{μA} block.
-    pub fn gauge_potential(&self) -> &DMatrix<f64> {
-        &self.gauge_potential
+    pub fn gauge_field(&self) -> &GaugeField {
+        &self.gauge_field
     }
 
     /// Returns a specific component of the gauge potential.
     pub fn gauge_component(&self, mu: usize, a: usize) -> f64 {
-        self.gauge_potential[(mu, a)]
+        self.gauge_field.component(mu, a)
     }
 
     /// Internal scalar moduli derived from the h_{AB} block.
-    pub fn scalar_moduli(&self) -> &DMatrix<f64> {
+    pub fn scalar_moduli(&self) -> &InternalMetric {
         &self.scalar_moduli
     }
 
     /// Returns a specific component of the scalar moduli matrix.
     pub fn modulus_component(&self, a: usize, b: usize) -> f64 {
-        self.scalar_moduli[(a, b)]
+        self.scalar_moduli.components()[(a, b)]
     }
 
     /// Effective Newton constant after compactification.
@@ -647,6 +711,11 @@ impl ZRelativityFieldEquation {
     /// Returns `G^I_J + Λ g^I_J` embedded in block form.
     pub fn lhs(&self) -> &DMatrix<f64> {
         &self.lhs
+    }
+
+    /// Coupling prefactor multiplying the stress-energy tensor.
+    pub fn prefactor(&self) -> f64 {
+        self.prefactor
     }
 
     /// Computes the residual against an extended energy-momentum tensor.
@@ -1543,7 +1612,28 @@ impl GeneralRelativityModel {
 mod tests {
     use super::*;
     use approx::assert_relative_eq;
-    use nalgebra::{DMatrix, Vector4};
+    use nalgebra::{DMatrix, DVector, Vector4};
+
+    #[test]
+    fn lorentzian_metric_supports_scaling() {
+        let base = Matrix4::from_diagonal(&Vector4::new(-1.0, 1.0, 1.0, 1.0));
+        let scaled = LorentzianMetric::try_scaled(base.clone(), 3.0).unwrap();
+        assert_relative_eq!(scaled.components()[(0, 0)], -3.0, epsilon = 1e-12);
+        assert_relative_eq!(scaled.components()[(2, 2)], 3.0, epsilon = 1e-12);
+
+        let metric = LorentzianMetric::try_new(base).unwrap();
+        let doubled = metric.scaled(2.0).unwrap();
+        assert_relative_eq!(doubled.components()[(1, 1)], 2.0, epsilon = 1e-12);
+    }
+
+    #[test]
+    fn internal_metric_volume_density_matches_determinant() {
+        let diag = DVector::from_vec(vec![1.0, 4.0, 9.0]);
+        let matrix = DMatrix::from_diagonal(&diag);
+        let internal = InternalMetric::try_new(matrix).unwrap();
+        let expected = (1.0_f64 * 4.0 * 9.0).sqrt();
+        assert_relative_eq!(internal.volume_density(), expected, epsilon = 1e-12);
+    }
 
     #[test]
     fn minkowski_vacuum_is_flat() {
@@ -1676,6 +1766,11 @@ mod tests {
             ProductMetric::try_new(base.clone(), internal.clone(), Some(mixed), Some(warp))
                 .unwrap();
         assert_eq!(geometry.total_dimension(), DIM + internal.dimension());
+        assert_relative_eq!(
+            geometry.internal_volume_density(),
+            internal.volume_density(),
+            epsilon = 1e-12
+        );
 
         let block = geometry.block_matrix();
         assert_eq!(block.nrows(), DIM + internal.dimension());
@@ -1716,6 +1811,11 @@ mod tests {
         assert_eq!(product.total_dimension(), DIM + internal.dimension());
         assert_eq!(product.spacetime().patches.len(), spacetime.patches.len());
         assert_eq!(product.internal().dimension(), internal_space.dimension());
+        assert_relative_eq!(
+            product.internal_volume_density(),
+            internal.volume_density(),
+            epsilon = 1e-12
+        );
         assert!(product.metric().warp().is_some());
     }
 
@@ -1744,6 +1844,8 @@ mod tests {
             ProductMetric::try_new(base_metric.clone(), internal.clone(), None, Some(warp))
                 .unwrap();
 
+        let scaled_metric = base_metric.scaled(warp.scale()).unwrap();
+
         let internal_space =
             InternalSpace::new("compact Z", InternalPatch::new("torus", vec!["ψ", "χ"]));
         let geometry = ProductGeometry::new(spacetime, internal_space, product_metric.clone());
@@ -1757,12 +1859,18 @@ mod tests {
             -3.0,
             epsilon = 1e-12
         );
+        assert_eq!(reduction.effective_metric(), &scaled_metric);
         assert_relative_eq!(
             reduction.effective_newton_constant(),
             constants.gravitational_constant / internal_volume,
             epsilon = 1e-16
         );
+        assert_eq!(
+            reduction.gauge_field().internal_dimension(),
+            internal.dimension()
+        );
         assert_relative_eq!(reduction.gauge_component(0, 0), 0.0, epsilon = 1e-12);
+        assert_eq!(reduction.scalar_moduli().dimension(), internal.dimension());
         assert_relative_eq!(reduction.modulus_component(1, 1), 1.0, epsilon = 1e-12);
 
         let zr_model = ZRelativityModel::assemble(
