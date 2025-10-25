@@ -100,16 +100,16 @@ fn main(
         partials[lane] = partial;
         workgroupBarrier();
 
-        var active = WORKGROUP_SIZE;
+        var active_lanes = WORKGROUP_SIZE;
         loop {
-            if (active <= 1u) {
+            if (active_lanes <= 1u) {
                 break;
             }
-            let half = (active + 1u) >> 1u;
-            if (lane < half && lane + half < active) {
+            let half = (active_lanes + 1u) >> 1u;
+            if (lane < half && lane + half < active_lanes) {
                 partials[lane] = partials[lane] + partials[lane + half];
             }
-            active = half;
+            active_lanes = half;
             workgroupBarrier();
         }
 

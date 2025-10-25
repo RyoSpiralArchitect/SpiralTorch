@@ -10,8 +10,9 @@ use crate::pure::{PackedB, PackedLayout};
 use crate::util::readback_f32;
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
-use st_kdsl::autotune_store::{lookup_best, record_best};
+use st_kdsl::autotune_store::{lookup_best, lookup_similar, record_best};
 use std::any::Any;
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::env;
@@ -26,8 +27,11 @@ use wgpu::{
 
 const MATMUL_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/dense_matmul.wgsl");
 const FUSED_CONV_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/fused_im2col_matmul.wgsl");
+const FUSED_GRAD_INPUT_WGSL_TEMPLATE: &str =
+    include_str!("../wgpu_shaders/fused_grad_input_col2im.wgsl");
 const FUSED_GELU_BACK_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/fused_gelu_back.wgsl");
 const REDUCE_DB_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/reduce_db.wgsl");
+const RAMANUJAN_PI_WGSL: &str = include_str!("../wgpu_shaders/ramanujan_pi.wgsl");
 const ROW_SOFTMAX_WGSL: &str =
     include_str!("../../../st-backend-wgpu/src/shaders/softmax_workgroup.wgsl");
 const FUSED_ATTENTION_WGSL_TEMPLATE: &str =
@@ -54,6 +58,31 @@ const QUANTIZATION_MIN_VOLUME: usize = 64 * 64;
 
 const FUSED_ATTENTION_FLAG_USE_Z_BIAS: u32 = 1 << 0;
 const FUSED_ATTENTION_FLAG_USE_ATTN_BIAS: u32 = 1 << 1;
+
+const GRAD_INPUT_TILE_X: u32 = 4;
+const GRAD_INPUT_TILE_Y: u32 = 4;
+const GRAD_INPUT_TILE_Z: u32 = 4;
+const RAMANUJAN_PI_ITERATIONS: usize = 6;
+
+fn ramanujan_pi(iterations: usize) -> f64 {
+    let iterations = iterations.max(1);
+    let mut sum = 0.0f64;
+    let mut factor = 1.0f64;
+    let base = 396f64.powi(4);
+    let prefactor = (2.0 * 2.0f64.sqrt()) / 9801.0;
+    for k in 0..iterations {
+        let kf = k as f64;
+        sum += factor * (1103.0 + 26390.0 * kf);
+        if k + 1 < iterations {
+            let next = kf + 1.0;
+            let numerator =
+                (4.0 * next - 3.0) * (4.0 * next - 2.0) * (4.0 * next - 1.0) * (4.0 * next);
+            let denominator = next.powi(4) * base;
+            factor *= numerator / denominator;
+        }
+    }
+    (prefactor * sum).recip()
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum ScalarType {
@@ -350,6 +379,7 @@ struct GpuContext {
     context: WgpuContext,
     pipeline_cache: PipelineCache,
     weights_cache: Mutex<HashMap<RhsCacheKey, Weak<GpuPackedRhs>>>,
+    autotune_cache: Mutex<HashMap<String, TileConfig>>,
     bind_layout: Arc<BindGroupLayout>,
     pipeline_layout: Arc<PipelineLayout>,
     zero_storage: OnceLock<Arc<Buffer>>,
@@ -367,7 +397,12 @@ struct GpuContext {
     fused_conv_layout: BindGroupLayout,
     fused_conv_pipeline_layout: PipelineLayout,
     fused_conv_pipelines: Mutex<HashMap<TileConfig, Arc<ComputePipeline>>>,
-    autotune_cache: Mutex<HashMap<String, TileConfig>>,
+    fused_grad_input_layout: BindGroupLayout,
+    fused_grad_input_pipeline_layout: PipelineLayout,
+    fused_grad_input_pipeline: OnceLock<Arc<ComputePipeline>>,
+    ramanujan_layout: BindGroupLayout,
+    ramanujan_pipeline_layout: PipelineLayout,
+    ramanujan_pipeline: OnceLock<Arc<ComputePipeline>>,
 }
 
 struct FusedAttentionKernel {
@@ -885,10 +920,96 @@ impl GpuContext {
                 push_constant_ranges: &[],
             });
 
+        let fused_grad_input_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("st.tensor.wgpu_dense.fused_grad_input.layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+        let fused_grad_input_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("st.tensor.wgpu_dense.fused_grad_input.pipeline_layout"),
+                bind_group_layouts: &[&fused_grad_input_layout],
+                push_constant_ranges: &[],
+            });
+
+        let ramanujan_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("st.tensor.wgpu_dense.ramanujan.layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let ramanujan_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("st.tensor.wgpu_dense.ramanujan.pipeline_layout"),
+                bind_group_layouts: &[&ramanujan_layout],
+                push_constant_ranges: &[],
+            });
+
         Ok(Self {
             context: WgpuContext::new(device.clone(), queue.clone()),
             pipeline_cache: PipelineCache::new(device.clone()),
             weights_cache: Mutex::new(HashMap::new()),
+            autotune_cache: Mutex::new(HashMap::new()),
             bind_layout,
             pipeline_layout,
             zero_storage: OnceLock::new(),
@@ -906,7 +1027,12 @@ impl GpuContext {
             fused_conv_layout,
             fused_conv_pipeline_layout,
             fused_conv_pipelines: Mutex::new(HashMap::new()),
-            autotune_cache: Mutex::new(HashMap::new()),
+            fused_grad_input_layout,
+            fused_grad_input_pipeline_layout,
+            fused_grad_input_pipeline: OnceLock::new(),
+            ramanujan_layout,
+            ramanujan_pipeline_layout,
+            ramanujan_pipeline: OnceLock::new(),
         })
     }
 
@@ -1244,6 +1370,108 @@ impl GpuContext {
             ],
         })
     }
+
+    fn fused_grad_input_pipeline(&self) -> Result<Arc<ComputePipeline>, String> {
+        if let Some(pipeline) = self.fused_grad_input_pipeline.get() {
+            return Ok(pipeline.clone());
+        }
+        let source = FUSED_GRAD_INPUT_WGSL_TEMPLATE
+            .replace("{tile_x}", &GRAD_INPUT_TILE_X.to_string())
+            .replace("{tile_y}", &GRAD_INPUT_TILE_Y.to_string())
+            .replace("{tile_z}", &GRAD_INPUT_TILE_Z.to_string())
+            .replace(
+                "{ramanujan_pi_6}",
+                &format!("{:.*}", 18, ramanujan_pi(RAMANUJAN_PI_ITERATIONS) as f32),
+            );
+        let shader = create_wgsl_module(
+            self.device(),
+            "st.tensor.wgpu_dense.fused_grad_input",
+            &source,
+        )
+        .map_err(|err| err.to_string())?;
+        let pipeline = Arc::new(self.device().create_compute_pipeline(
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("st.tensor.wgpu_dense.fused_grad_input.pipeline"),
+                layout: Some(&self.fused_grad_input_pipeline_layout),
+                module: &shader,
+                entry_point: "main",
+                compilation_options: Default::default(),
+            },
+        ));
+        let _ = self.fused_grad_input_pipeline.set(pipeline.clone());
+        Ok(pipeline)
+    }
+
+    fn fused_grad_input_bind_group(
+        &self,
+        grad_matrix: &Buffer,
+        weights: &Buffer,
+        output: &Buffer,
+        params: &Buffer,
+    ) -> BindGroup {
+        self.device().create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("st.tensor.wgpu_dense.fused_grad_input.bind_group"),
+            layout: &self.fused_grad_input_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: grad_matrix.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: weights.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: output.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: params.as_entire_binding(),
+                },
+            ],
+        })
+    }
+
+    fn ramanujan_pi_pipeline(&self) -> Result<Arc<ComputePipeline>, String> {
+        if let Some(pipeline) = self.ramanujan_pipeline.get() {
+            return Ok(pipeline.clone());
+        }
+        let shader = create_wgsl_module(
+            self.device(),
+            "st.tensor.wgpu_dense.ramanujan_pi",
+            RAMANUJAN_PI_WGSL,
+        )
+        .map_err(|err| err.to_string())?;
+        let pipeline = Arc::new(self.device().create_compute_pipeline(
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("st.tensor.wgpu_dense.ramanujan_pi.pipeline"),
+                layout: Some(&self.ramanujan_pipeline_layout),
+                module: &shader,
+                entry_point: "main",
+                compilation_options: Default::default(),
+            },
+        ));
+        let _ = self.ramanujan_pipeline.set(pipeline.clone());
+        Ok(pipeline)
+    }
+
+    fn ramanujan_pi_bind_group(&self, output: &Buffer, params: &Buffer) -> BindGroup {
+        self.device().create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("st.tensor.wgpu_dense.ramanujan_pi.bind_group"),
+            layout: &self.ramanujan_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: output.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: params.as_entire_binding(),
+                },
+            ],
+        })
+    }
 }
 
 fn instantiate_tile_template(template: &str, config: TileConfig) -> String {
@@ -1436,6 +1664,52 @@ struct ConvGemmParams {
     _pad3: u32,
 }
 
+#[repr(C, align(16))]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct GradInputParams {
+    batch: u32,
+    in_channels: u32,
+    input_d: u32,
+    input_h: u32,
+    input_w: u32,
+    input_t: u32,
+    kernel_d: u32,
+    kernel_h: u32,
+    kernel_w: u32,
+    kernel_t: u32,
+    stride_d: u32,
+    stride_h: u32,
+    stride_w: u32,
+    stride_t: u32,
+    pad_d: i32,
+    pad_h: i32,
+    pad_w: i32,
+    pad_t: i32,
+    dilation_d: u32,
+    dilation_h: u32,
+    dilation_w: u32,
+    dilation_t: u32,
+    out_d: u32,
+    out_h: u32,
+    out_w: u32,
+    out_t: u32,
+    out_channels: u32,
+    span: u32,
+    dims: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct RamanujanPiParams {
+    iterations: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+}
+
 struct WeightBuffers {
     buffer: Arc<Buffer>,
     dtype: ScalarType,
@@ -1453,7 +1727,7 @@ impl WeightBuffers {
 }
 
 fn generate_matmul_shader(key: &PipelineKey) -> String {
-    let enable_f16 = if key.use_f16 { "enable f16;\n" } else { "" };
+    let enable_f16 = "";
     let rhs_storage_type = match key.dtype {
         ScalarType::F32 => "array<f32>".to_string(),
         ScalarType::QuantizedI8 => "array<u32>".to_string(),
@@ -1472,13 +1746,10 @@ fn generate_matmul_shader(key: &PipelineKey) -> String {
             .to_string(),
     };
 
-    let fma_line = if key.use_f16 {
-        "let lhs16 = f16(lhs_val);
-            let rhs16 = f16(rhs_val);
-            acc = acc + f32(lhs16 * rhs16);"
-    } else {
-        "acc = acc + lhs_val * rhs_val;"
-    };
+    let fma_line = "acc = acc + lhs_val * rhs_val;";
+
+    let tile_mk = (key.tile_m as u64 * key.tile_k as u64) as u32;
+    let tile_nk = (key.tile_n as u64 * key.tile_k as u64) as u32;
 
     MATMUL_WGSL_TEMPLATE
         .replace("{f16_enable}", enable_f16)
@@ -1487,6 +1758,8 @@ fn generate_matmul_shader(key: &PipelineKey) -> String {
         .replace("{tile_m}", &key.tile_m.to_string())
         .replace("{tile_n}", &key.tile_n.to_string())
         .replace("{tile_k}", &key.tile_k.to_string())
+        .replace("{tile_mk}", &(tile_mk.to_string() + "u"))
+        .replace("{tile_nk}", &(tile_nk.to_string() + "u"))
         .replace("{workgroup_size_x}", &key.tile_n.to_string())
         .replace("{workgroup_size_y}", &key.tile_m.to_string())
         .replace("{fma_line}", fma_line)
@@ -2765,6 +3038,354 @@ pub fn conv_im2col_gemm(
     readback_f32(device, queue, &output_buf, rows * out_channels)
 }
 
+struct GradInputLaunch<'a> {
+    grad_matrix: &'a [f32],
+    weights: &'a [f32],
+    batch: usize,
+    in_channels: usize,
+    input: [usize; 4],
+    kernel: [usize; 4],
+    stride: [usize; 4],
+    pad: [i32; 4],
+    dilation: [usize; 4],
+    output: [usize; 4],
+    out_channels: usize,
+    dims: u32,
+}
+
+fn conv_grad_input_fused_common(config: GradInputLaunch<'_>) -> Result<Vec<f32>, String> {
+    let GradInputLaunch {
+        grad_matrix,
+        weights,
+        batch,
+        in_channels,
+        input,
+        kernel,
+        stride,
+        pad,
+        dilation,
+        output,
+        out_channels,
+        dims,
+    } = config;
+
+    if batch == 0
+        || in_channels == 0
+        || kernel.iter().product::<usize>() == 0
+        || out_channels == 0
+        || output.iter().product::<usize>() == 0
+    {
+        return Err("convolution dimensions must be positive".into());
+    }
+
+    let rows = batch
+        .checked_mul(output.iter().product::<usize>())
+        .ok_or_else(|| "output spatial overflow".to_string())?;
+    let span = in_channels
+        .checked_mul(kernel.iter().product::<usize>())
+        .ok_or_else(|| "kernel span overflow".to_string())?;
+
+    if grad_matrix.len() != rows * out_channels {
+        return Err("grad matrix length mismatch".into());
+    }
+    if weights.len() != out_channels * span {
+        return Err("weight buffer length mismatch".into());
+    }
+
+    let total_bc = batch
+        .checked_mul(in_channels)
+        .and_then(|value| value.checked_mul(input[0]))
+        .and_then(|value| value.checked_mul(input[3]))
+        .ok_or_else(|| "input channel volume overflow".to_string())?;
+    if total_bc > u32::MAX as usize {
+        return Err("input channel volume exceeds GPU limits".into());
+    }
+    let input_volume = total_bc
+        .checked_mul(input[1])
+        .and_then(|value| value.checked_mul(input[2]))
+        .ok_or_else(|| "input tensor volume overflow".to_string())?;
+
+    let exceeds_limit = [
+        rows,
+        span,
+        batch,
+        in_channels,
+        input[0],
+        input[1],
+        input[2],
+        input[3],
+        kernel[0],
+        kernel[1],
+        kernel[2],
+        kernel[3],
+        stride[0],
+        stride[1],
+        stride[2],
+        stride[3],
+        dilation[0],
+        dilation[1],
+        dilation[2],
+        dilation[3],
+        output[0],
+        output[1],
+        output[2],
+        output[3],
+        out_channels,
+    ]
+    .into_iter()
+    .any(|value| value > u32::MAX as usize);
+    if exceeds_limit {
+        return Err("convolution dimensions exceed GPU limits".into());
+    }
+
+    let ctx = dense_context()?;
+    let device = ctx.device();
+    let queue = ctx.queue();
+
+    let grad_matrix_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.conv.grad_matrix"),
+        contents: bytemuck::cast_slice(grad_matrix),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let weights_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.conv.grad_weights"),
+        contents: bytemuck::cast_slice(weights),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let output_buf = allocate_output(device, "st.tensor.wgpu_dense.conv.grad_input", input_volume);
+
+    let params = GradInputParams {
+        batch: batch as u32,
+        in_channels: in_channels as u32,
+        input_d: input[0] as u32,
+        input_h: input[1] as u32,
+        input_w: input[2] as u32,
+        input_t: input[3] as u32,
+        kernel_d: kernel[0] as u32,
+        kernel_h: kernel[1] as u32,
+        kernel_w: kernel[2] as u32,
+        kernel_t: kernel[3] as u32,
+        stride_d: stride[0] as u32,
+        stride_h: stride[1] as u32,
+        stride_w: stride[2] as u32,
+        stride_t: stride[3] as u32,
+        pad_d: pad[0],
+        pad_h: pad[1],
+        pad_w: pad[2],
+        pad_t: pad[3],
+        dilation_d: dilation[0] as u32,
+        dilation_h: dilation[1] as u32,
+        dilation_w: dilation[2] as u32,
+        dilation_t: dilation[3] as u32,
+        out_d: output[0] as u32,
+        out_h: output[1] as u32,
+        out_w: output[2] as u32,
+        out_t: output[3] as u32,
+        out_channels: out_channels as u32,
+        span: span as u32,
+        dims,
+        _pad0: 0,
+        _pad1: 0,
+        _pad2: 0,
+    };
+
+    let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.conv.grad_input.params"),
+        contents: bytemuck::bytes_of(&params),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("st.tensor.wgpu_dense.conv.grad_input.encoder"),
+    });
+
+    let pipeline = ctx.fused_grad_input_pipeline()?;
+    let bind_group =
+        ctx.fused_grad_input_bind_group(&grad_matrix_buf, &weights_buf, &output_buf, &params_buf);
+
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("st.tensor.wgpu_dense.conv.grad_input.pass"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(pipeline.as_ref());
+        let groups_x = ((input[2] as u32) + GRAD_INPUT_TILE_X - 1) / GRAD_INPUT_TILE_X;
+        let groups_y = ((input[1] as u32) + GRAD_INPUT_TILE_Y - 1) / GRAD_INPUT_TILE_Y;
+        let groups_z = ((total_bc as u32) + GRAD_INPUT_TILE_Z - 1) / GRAD_INPUT_TILE_Z;
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.dispatch_workgroups(groups_x.max(1), groups_y.max(1), groups_z.max(1));
+    }
+
+    queue.submit(Some(encoder.finish()));
+
+    readback_f32(device, queue, &output_buf, input_volume)
+}
+
+pub fn conv_grad_input_fused(
+    grad_matrix: &[f32],
+    weights: &[f32],
+    batch: usize,
+    in_channels: usize,
+    input_h: usize,
+    input_w: usize,
+    kernel_h: usize,
+    kernel_w: usize,
+    stride_h: usize,
+    stride_w: usize,
+    pad_h: i32,
+    pad_w: i32,
+    dilation_h: usize,
+    dilation_w: usize,
+    out_h: usize,
+    out_w: usize,
+    out_channels: usize,
+) -> Result<Vec<f32>, String> {
+    conv_grad_input_fused_common(GradInputLaunch {
+        grad_matrix,
+        weights,
+        batch,
+        in_channels,
+        input: [1, input_h, input_w, 1],
+        kernel: [1, kernel_h, kernel_w, 1],
+        stride: [1, stride_h, stride_w, 1],
+        pad: [0, pad_h, pad_w, 0],
+        dilation: [1, dilation_h, dilation_w, 1],
+        output: [1, out_h, out_w, 1],
+        out_channels,
+        dims: 2,
+    })
+}
+
+pub fn conv3d_grad_input_fused(
+    grad_matrix: &[f32],
+    weights: &[f32],
+    batch: usize,
+    in_channels: usize,
+    input_d: usize,
+    input_h: usize,
+    input_w: usize,
+    kernel_d: usize,
+    kernel_h: usize,
+    kernel_w: usize,
+    stride_d: usize,
+    stride_h: usize,
+    stride_w: usize,
+    pad_d: i32,
+    pad_h: i32,
+    pad_w: i32,
+    dilation_d: usize,
+    dilation_h: usize,
+    dilation_w: usize,
+    out_d: usize,
+    out_h: usize,
+    out_w: usize,
+    out_channels: usize,
+) -> Result<Vec<f32>, String> {
+    conv_grad_input_fused_common(GradInputLaunch {
+        grad_matrix,
+        weights,
+        batch,
+        in_channels,
+        input: [input_d, input_h, input_w, 1],
+        kernel: [kernel_d, kernel_h, kernel_w, 1],
+        stride: [stride_d, stride_h, stride_w, 1],
+        pad: [pad_d, pad_h, pad_w, 0],
+        dilation: [dilation_d, dilation_h, dilation_w, 1],
+        output: [out_d, out_h, out_w, 1],
+        out_channels,
+        dims: 3,
+    })
+}
+
+pub fn conv4d_grad_input_fused(
+    grad_matrix: &[f32],
+    weights: &[f32],
+    batch: usize,
+    in_channels: usize,
+    input_d: usize,
+    input_h: usize,
+    input_w: usize,
+    input_t: usize,
+    kernel_d: usize,
+    kernel_h: usize,
+    kernel_w: usize,
+    kernel_t: usize,
+    stride_d: usize,
+    stride_h: usize,
+    stride_w: usize,
+    stride_t: usize,
+    pad_d: i32,
+    pad_h: i32,
+    pad_w: i32,
+    pad_t: i32,
+    dilation_d: usize,
+    dilation_h: usize,
+    dilation_w: usize,
+    dilation_t: usize,
+    out_d: usize,
+    out_h: usize,
+    out_w: usize,
+    out_t: usize,
+    out_channels: usize,
+) -> Result<Vec<f32>, String> {
+    conv_grad_input_fused_common(GradInputLaunch {
+        grad_matrix,
+        weights,
+        batch,
+        in_channels,
+        input: [input_d, input_h, input_w, input_t],
+        kernel: [kernel_d, kernel_h, kernel_w, kernel_t],
+        stride: [stride_d, stride_h, stride_w, stride_t],
+        pad: [pad_d, pad_h, pad_w, pad_t],
+        dilation: [dilation_d, dilation_h, dilation_w, dilation_t],
+        output: [out_d, out_h, out_w, out_t],
+        out_channels,
+        dims: 4,
+    })
+}
+
+pub fn ramanujan_pi_gpu(iterations: usize) -> Result<f64, String> {
+    let iterations = iterations.max(1);
+    let ctx = dense_context()?;
+    let device = ctx.device();
+    let queue = ctx.queue();
+
+    let output_buf = allocate_output(device, "st.tensor.wgpu_dense.ramanujan_pi.output", 1);
+    let params = RamanujanPiParams {
+        iterations: iterations as u32,
+        _pad0: 0,
+        _pad1: 0,
+        _pad2: 0,
+    };
+    let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.ramanujan_pi.params"),
+        contents: bytemuck::bytes_of(&params),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("st.tensor.wgpu_dense.ramanujan_pi.encoder"),
+    });
+
+    let pipeline = ctx.ramanujan_pi_pipeline()?;
+    let bind_group = ctx.ramanujan_pi_bind_group(&output_buf, &params_buf);
+
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("st.tensor.wgpu_dense.ramanujan_pi.pass"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(pipeline.as_ref());
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.dispatch_workgroups(1, 1, 1);
+    }
+
+    queue.submit(Some(encoder.finish()));
+
+    let values = readback_f32(device, queue, &output_buf, 1)?;
+    Ok(values.get(0).copied().unwrap_or(0.0) as f64)
+}
+
 fn fallback_tile_config(rows: usize, inner: usize, cols: usize) -> TileConfig {
     let rows = rows as u32;
     let cols = cols as u32;
@@ -2846,7 +3467,24 @@ fn autotune_tile_config(
         return Some(tile);
     }
 
-    if let Some(entry) = lookup_best(path.as_path(), &key) {
+    let sample_rows = sample_dimension(bucket_rows);
+    let sample_inner = sample_dimension(bucket_inner);
+    let sample_cols = sample_dimension(bucket_cols);
+
+    let context = MatmulAutotuneContext {
+        rows: bucket_rows,
+        inner: bucket_inner,
+        cols: bucket_cols,
+        sample_rows: sample_rows.min(AUTOTUNE_SAMPLE_MAX_DIM),
+        sample_inner: sample_inner.min(AUTOTUNE_SAMPLE_MAX_DIM),
+        sample_cols: sample_cols.min(AUTOTUNE_SAMPLE_MAX_DIM),
+        revision: MATMUL_AUTOTUNE_REVISION,
+        runs: AUTOTUNE_SAMPLE_RUNS as u32,
+    };
+
+    let matches = lookup_similar(path.as_path(), &key, &context, 4);
+
+    if let Some(entry) = lookup_best(path.as_path(), &key, &context) {
         if let Ok(stored) = serde_json::from_value::<StoredTileConfig>(entry.params) {
             let tile: TileConfig = stored.into();
             if tile_supported(ctx.device(), tile) {
@@ -2859,9 +3497,6 @@ fn autotune_tile_config(
     }
 
     let device = ctx.device();
-    let sample_rows = sample_dimension(bucket_rows);
-    let sample_inner = sample_dimension(bucket_inner);
-    let sample_cols = sample_dimension(bucket_cols);
 
     let lhs_len = sample_rows.checked_mul(sample_inner)?;
     let rhs_len = sample_inner.checked_mul(sample_cols)?;
@@ -2874,7 +3509,17 @@ fn autotune_tile_config(
     let out_buf = allocate_output(device, "st.tensor.wgpu_dense.autotune.out", out_len);
 
     let mut best: Option<(TileConfig, f64)> = None;
-    for candidate in candidate_tiles(sample_rows, sample_inner, sample_cols) {
+    let seeds: Vec<(TileConfig, f64)> = matches
+        .iter()
+        .filter_map(|m| {
+            serde_json::from_value::<StoredTileConfig>(m.entry.params.clone())
+                .ok()
+                .map(|stored| (TileConfig::from(stored), m.entry.score))
+        })
+        .collect();
+    let mut candidates = candidate_tiles(sample_rows, sample_inner, sample_cols, &seeds);
+
+    for candidate in candidates.drain(..) {
         if !tile_supported(device, candidate) {
             continue;
         }
@@ -2905,7 +3550,7 @@ fn autotune_tile_config(
             cache.insert(key.clone(), tile);
         }
         let stored: StoredTileConfig = tile.into();
-        let _ = record_best(path.as_path(), &key, score, &stored);
+        let _ = record_best(path.as_path(), &key, &context, score, &stored);
         Some(tile)
     } else {
         None
@@ -2963,7 +3608,12 @@ fn tile_supported(device: &Device, tile: TileConfig) -> bool {
         && invocations <= limits.max_compute_invocations_per_workgroup
 }
 
-fn candidate_tiles(rows: usize, _inner: usize, cols: usize) -> Vec<TileConfig> {
+fn candidate_tiles(
+    rows: usize,
+    _inner: usize,
+    cols: usize,
+    seeds: &[(TileConfig, f64)],
+) -> Vec<TileConfig> {
     const BASE: [TileConfig; 12] = [
         TileConfig::new(8, 8, 8),
         TileConfig::new(8, 12, 16),
@@ -2988,12 +3638,56 @@ fn candidate_tiles(rows: usize, _inner: usize, cols: usize) -> Vec<TileConfig> {
         ordered.push(TileConfig::new(12, 24, 16));
     }
 
-    for candidate in BASE.iter().copied() {
-        if !ordered.contains(&candidate) {
-            ordered.push(candidate);
+    for (seed_cfg, _) in seeds {
+        if !ordered.contains(seed_cfg) {
+            ordered.insert(0, *seed_cfg);
         }
     }
-    ordered
+
+    let mut scored: Vec<(f64, TileConfig)> = ordered
+        .into_iter()
+        .map(|candidate| (score_candidate(candidate, seeds), candidate))
+        .collect();
+
+    scored.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(Ordering::Equal));
+    scored.into_iter().map(|(_, cfg)| cfg).collect()
+}
+
+fn score_candidate(candidate: TileConfig, seeds: &[(TileConfig, f64)]) -> f64 {
+    if seeds.is_empty() {
+        return 0.0;
+    }
+    seeds
+        .iter()
+        .map(|(seed_cfg, score)| score + tile_distance(candidate, *seed_cfg))
+        .fold(f64::INFINITY, f64::min)
+}
+
+fn tile_distance(a: TileConfig, b: TileConfig) -> f64 {
+    let mut delta = 0.0;
+    delta += rel_diff(a.tile_m(), b.tile_m());
+    delta += rel_diff(a.tile_n(), b.tile_n());
+    delta += rel_diff(a.tile_k(), b.tile_k());
+    delta
+}
+
+fn rel_diff(a: u32, b: u32) -> f64 {
+    let lhs = a as f64;
+    let rhs = b as f64;
+    let base = lhs.max(rhs).max(1.0);
+    (lhs - rhs).abs() / base
+}
+
+#[derive(Serialize)]
+struct MatmulAutotuneContext {
+    rows: usize,
+    inner: usize,
+    cols: usize,
+    sample_rows: usize,
+    sample_inner: usize,
+    sample_cols: usize,
+    revision: u64,
+    runs: u32,
 }
 
 fn microbenchmark_tile(

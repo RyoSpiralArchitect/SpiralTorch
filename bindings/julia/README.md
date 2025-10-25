@@ -55,3 +55,44 @@ inspect transient failures.
   Julia callers can reuse the cooperative worker pool. Methods such as
   `SpiralTorch.matmul(runtime, lhs, rhs)` and `SpiralTorch.scale(runtime, tensor,
   value)` dispatch work through the runtime instead of the direct blocking path.
+- `SpiralTorch.parallel_matmul`, `SpiralTorch.parallel_add`,
+  `SpiralTorch.parallel_hadamard`, and `SpiralTorch.parallel_scale` spread
+  batches of operations across Julia threads while respecting the runtime's
+  cooperative worker pool, making it easy to saturate heavy pipelines without
+  building your own task orchestration.
+- `SpiralTorch.roundtable_classify` mirrors the Rust roundtable heuristic so you
+  can split gradient magnitudes into Above/Here/Beneath bands and inspect the
+  aggregate energy carried by each.
+
+### Parallel helpers
+
+To fan out a batch of multiplications, combine Julia threading with the runtime
+helpers:
+
+```julia
+using SpiralTorch
+
+rt = SpiralTorch.Runtime()
+pairs = [(rand(Float32, 64, 64), rand(Float32, 64, 64)) for _ in 1:8]
+results = SpiralTorch.parallel_matmul(rt, first.(pairs), last.(pairs); threads=4)
+for tensor in results
+    display(size(SpiralTorch.to_array(tensor)))
+end
+```
+
+Pass `materialize=true` to `parallel_*` functions when you need eager Julia
+arrays instead of lazy tensors.
+
+### Roundtable classification
+
+Feed any gradient vector into `roundtable_classify` to inspect how the
+roundtable scheduler would split its mass:
+
+```julia
+using SpiralTorch
+
+gradient = [0.9f0, 0.1f0, 0.5f0, 0.05f0, 0.2f0, 0.8f0, 0.4f0, 0.02f0]
+bands, summary = SpiralTorch.roundtable_classify(gradient; above=2, here=3, beneath=2, tolerance=0.01f0)
+println(bands)
+println(summary)
+```

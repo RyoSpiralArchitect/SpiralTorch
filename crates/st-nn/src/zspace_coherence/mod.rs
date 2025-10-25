@@ -4,11 +4,22 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 pub mod coherence_engine;
+pub mod psi_synchro;
 pub mod sequencer;
 
 pub use coherence_engine::{
     BackendCapabilities, CoherenceBackend, CoherenceEngine, DomainConcept, DomainLinguisticProfile,
     LinguisticChannelReport, LinguisticContour,
+};
+#[cfg(feature = "psi")]
+pub use psi_synchro::BranchPsiReading;
+#[cfg(feature = "golden")]
+pub use psi_synchro::{heatmaps_to_golden_telemetry, PsiGoldenTelemetry};
+pub use psi_synchro::{
+    heatmaps_to_zpulses, run_multibranch_demo, run_zspace_learning_pass, ArnoldTongueSummary,
+    BranchAtlasFragment, CircleLockMapConfig, HeatmapAnalytics, HeatmapResult, MetaMembConfig,
+    MetaMembSampler, PsiBranchState, PsiSynchroConfig, PsiSynchroPulse, PsiSynchroResult,
+    PsiTelemetryConfig, SyncState, SynchroBus, SynchroEvent,
 };
 pub use sequencer::{
     CoherenceDiagnostics, PreDiscardPolicy, PreDiscardRegulator, PreDiscardSnapshot,
