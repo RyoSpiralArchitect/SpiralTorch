@@ -1080,6 +1080,8 @@ z = _ZSpaceNotation()
 
 _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
     "nn": {
+        "NonLiner": ("NonLiner",),
+        "Dropout": ("Dropout",),
         "Dataset": ("_NnDataset",),
         "DataLoader": ("_NnDataLoader",),
         "DataLoaderIter": ("_NnDataLoaderIter",),
