@@ -3,7 +3,7 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-#![cfg(feature = "wgpu")]
+#![cfg(feature = "wgpu_dense")]
 
 use std::sync::Arc;
 use wgpu::util::DeviceExt;

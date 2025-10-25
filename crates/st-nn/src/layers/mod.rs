@@ -23,3 +23,4 @@ pub use normalization::LayerNorm;
 pub use softmax::ZSpaceSoftmax;
 pub use topos_resonator::ToposResonator;
 pub use zspace_mixer::ZSpaceMixer;
+pub use zspace_projector::StableZSpaceProjector;

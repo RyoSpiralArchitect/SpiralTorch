@@ -558,6 +558,81 @@ class ZMetrics:
     gradient: Optional[Sequence[float]]
     drs: float
 
+class ZSpaceDecoded:
+    z_state: Tuple[float, ...]
+    metrics: Mapping[str, float]
+    gradient: Tuple[float, ...]
+    barycentric: Tuple[float, float, float]
+    energy: float
+    frac_energy: float
+
+    def as_dict(self) -> Dict[str, object]: ...
+
+
+class ZSpaceInference:
+    metrics: Mapping[str, float]
+    gradient: Tuple[float, ...]
+    barycentric: Tuple[float, float, float]
+    residual: float
+    confidence: float
+    prior: ZSpaceDecoded
+    applied: Mapping[str, object]
+
+    def as_dict(self) -> Dict[str, object]: ...
+
+
+class ZSpacePosterior:
+    def __init__(self, z_state: Sequence[float], *, alpha: float = ...) -> None: ...
+
+    @classmethod
+    def from_state(
+        cls,
+        source: object,
+        *,
+        alpha: float | None = ...,
+    ) -> ZSpacePosterior: ...
+
+    @property
+    def z_state(self) -> List[float]: ...
+
+    @property
+    def alpha(self) -> float: ...
+
+    def decode(self) -> ZSpaceDecoded: ...
+
+    def project(
+        self,
+        partial: Mapping[str, object] | None,
+        *,
+        smoothing: float = ...,
+    ) -> ZSpaceInference: ...
+
+
+def decode_zspace_embedding(
+    z_state: Sequence[float] | ZSpacePosterior | object,
+    *,
+    alpha: float = ...,
+) -> ZSpaceDecoded: ...
+
+
+def infer_from_partial(
+    z_state: Sequence[float] | ZSpacePosterior | object,
+    partial: Mapping[str, object] | None,
+    *,
+    alpha: float = ...,
+    smoothing: float = ...,
+) -> ZSpaceInference: ...
+
+
+def infer_with_trainer(
+    trainer: object,
+    partial: Mapping[str, object] | None,
+    *,
+    smoothing: float = ...,
+    alpha: float | None = ...,
+) -> ZSpaceInference: ...
+
+
 class ZSpaceTrainer:
     def __init__(
         self,

@@ -9,6 +9,8 @@ use crate::ops::hypergrad_gpu::{DeviceBuf, DeviceOps};
 
 #[cfg(all(feature = "wgpu", feature = "wgpu-rt"))]
 use super::wgpu_rt;
+#[cfg(all(feature = "wgpu", feature = "wgpu-rt"))]
+use std::time::Duration;
 
 #[cfg(all(feature = "wgpu", feature = "wgpu-rt"))]
 pub struct WgpuOps {
@@ -86,33 +88,27 @@ impl DeviceOps for WgpuOps {
             0,
             std::mem::size_of::<f32>() as u64,
         );
-        self.ctx.queue.submit(Some(encoder.finish()));
-        self.ctx.device.poll(wgpu::Maintain::Wait);
+        let cmd = encoder.finish();
+        let cmd_bufs = [cmd];
+        wgpu_rt::st_submit_with_timeout(
+            &self.ctx.device,
+            &self.ctx.queue,
+            &cmd_bufs,
+            Duration::from_secs(30),
+        )
+        .map_err(|e| e.to_string())?;
 
-        let slice = readback.slice(..std::mem::size_of::<f32>() as u64);
-        let (sender, receiver) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |res| {
-            let _ = sender.send(res);
-        });
-        self.ctx.device.poll(wgpu::Maintain::Wait);
+        let bytes = wgpu_rt::st_map_read_with_timeout(
+            &self.ctx.device,
+            &readback,
+            0..std::mem::size_of::<f32>() as u64,
+            Duration::from_secs(30),
+        )
+        .map_err(|e| e.to_string())?;
 
-        match receiver
-            .recv()
-            .map_err(|_| "failed to receive map completion".to_string())?
-        {
-            Ok(()) => {}
-            Err(e) => return Err(format!("map_async failed: {e:?}")),
-        }
-
-        let value = {
-            let data = slice.get_mapped_range();
-            let mut bytes = [0u8; std::mem::size_of::<f32>()];
-            bytes.copy_from_slice(&data[..std::mem::size_of::<f32>()]);
-            f32::from_ne_bytes(bytes)
-        };
-
-        readback.unmap();
-        Ok(value)
+        let mut buf = [0u8; std::mem::size_of::<f32>()];
+        buf.copy_from_slice(&bytes[..std::mem::size_of::<f32>()]);
+        Ok(f32::from_ne_bytes(buf))
     }
 
     fn axpy(&self, n: usize, alpha: f32, x: &DeviceBuf, y: &DeviceBuf, out: &DeviceBuf) -> Result<(), String> {
