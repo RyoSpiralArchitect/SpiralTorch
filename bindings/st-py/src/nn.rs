@@ -19,7 +19,10 @@ use st_nn::Module;
 use st_nn::{
     dataset::DataLoaderBatches,
     dataset_from_vec,
-    layers::{NonLiner, NonLinerActivation, NonLinerGeometry, NonLinerHyperbolicConfig},
+    layers::{
+        NonLiner, NonLinerActivation, NonLinerEllipticConfig, NonLinerGeometry,
+        NonLinerHyperbolicConfig,
+    },
     zspace_coherence::{
         is_swap_invariant as rust_is_swap_invariant, CoherenceDiagnostics, CoherenceLabel,
         CoherenceObservation, CoherenceSignature, LinguisticChannelReport, PreDiscardPolicy,
@@ -76,14 +79,25 @@ impl PyNonLiner {
     ) -> PyResult<Self> {
         let activation = parse_non_liner_activation(activation)?;
         let geometry = if let Some(curvature) = curvature {
+            if curvature == 0.0 {
+                return Err(PyValueError::new_err(
+                    "curvature must be non-zero for non-Euclidean geometry",
+                ));
+            }
             let scale = match z_scale {
                 Some(value) => ZScale::new(value)
                     .ok_or_else(|| PyValueError::new_err("z_scale must be positive and finite"))?,
                 None => ZScale::ONE,
             };
-            let config = NonLinerHyperbolicConfig::new(curvature, scale, retention)
-                .map_err(tensor_err_to_py)?;
-            NonLinerGeometry::hyperbolic(config)
+            if curvature < 0.0 {
+                let config = NonLinerHyperbolicConfig::new(curvature, scale, retention)
+                    .map_err(tensor_err_to_py)?;
+                NonLinerGeometry::hyperbolic(config)
+            } else {
+                let config = NonLinerEllipticConfig::new(curvature, scale, retention)
+                    .map_err(tensor_err_to_py)?;
+                NonLinerGeometry::elliptic(config)
+            }
         } else {
             if z_scale.is_some() {
                 return Err(PyValueError::new_err("z_scale requires curvature"));
@@ -129,6 +143,11 @@ impl PyNonLiner {
         retention: Option<f32>,
     ) -> PyResult<()> {
         let geometry = if let Some(curvature) = curvature {
+            if curvature == 0.0 {
+                return Err(PyValueError::new_err(
+                    "curvature must be non-zero for non-Euclidean geometry",
+                ));
+            }
             let base = self.inner.geometry();
             let scale = match z_scale {
                 Some(value) => ZScale::new(value)
@@ -136,9 +155,15 @@ impl PyNonLiner {
                 None => base.z_scale().unwrap_or(ZScale::ONE),
             };
             let retention = retention.unwrap_or_else(|| base.retention().unwrap_or(0.0));
-            let config = NonLinerHyperbolicConfig::new(curvature, scale, retention)
-                .map_err(tensor_err_to_py)?;
-            NonLinerGeometry::hyperbolic(config)
+            if curvature < 0.0 {
+                let config = NonLinerHyperbolicConfig::new(curvature, scale, retention)
+                    .map_err(tensor_err_to_py)?;
+                NonLinerGeometry::hyperbolic(config)
+            } else {
+                let config = NonLinerEllipticConfig::new(curvature, scale, retention)
+                    .map_err(tensor_err_to_py)?;
+                NonLinerGeometry::elliptic(config)
+            }
         } else {
             if z_scale.is_some() {
                 return Err(PyValueError::new_err("z_scale requires curvature"));
@@ -1057,7 +1082,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyDataset>()?;
     module.add_class::<PyDataLoader>()?;
     module.add_class::<PyDataLoaderIter>()?;
-    module.add_function(wrap_pyfunction!(py_is_swap_invariant, module)?)?;
+    module.add_function(wrap_pyfunction!(py_is_swap_invariant, &module)?)?;
     module.add_class::<PyCoherenceChannelReport>()?;
     module.add_class::<PyCoherenceSignature>()?;
     module.add_class::<PyCoherenceObservation>()?;

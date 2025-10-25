@@ -153,6 +153,7 @@ mod tests {
             scale: ZScale::new(0.25),
             events: Vec::new(),
             attributions: Vec::new(),
+            elliptic: None,
         };
         let warmed = controller.update(&distribution, Some(&micro_feedback));
         assert!(warmed > baseline);
@@ -166,6 +167,7 @@ mod tests {
             scale: ZScale::new(8.0),
             events: Vec::new(),
             attributions: Vec::new(),
+            elliptic: None,
         };
         let cooled = controller.update(&distribution, Some(&macro_feedback));
         assert!(cooled < warmed);

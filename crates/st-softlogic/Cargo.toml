@@ -9,10 +9,10 @@ description = "Shared soft logic primitives for SpiralTorch heuristics"
 [features]
 default = ["soft"]
 soft = []
-learn_store = ["dep:serde", "dep:serde_json"]
+learn_store = ["dep:serde_json"]
 
 [dependencies]
-serde = { version = "1", optional = true, features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", optional = true }
 
 [package.metadata.spiraltorch]

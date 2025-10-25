@@ -13,6 +13,8 @@ learn_store = ["st-logic/learn_store"]
 [dependencies]
 st-logic = { path = "../st-logic" }
 st-tensor = { path = "../st-tensor" }
+st-kdsl = { path = "../st-kdsl" }
+serde_json = "1"
 
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"
