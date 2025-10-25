@@ -6,7 +6,7 @@
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json;
-use st_kdsl::autotune_store::{lookup_best, lookup_similar, record_best, AutoTuneMatch};
+use st_kdsl::autotune_store::{load_best_typed, lookup_similar, record_best, AutoTuneMatch};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::env;
@@ -703,10 +703,18 @@ fn autotune_microkernel(
         runs: CPU_AUTOTUNE_SAMPLE_RUNS as u32,
     };
 
-    let matches = lookup_similar(path.as_path(), &key, &context, 4);
+    let autotune_enabled = autotune_env_enabled();
+    eprintln!("[autotune] key={key} apply={autotune_enabled}");
 
-    if let Some(entry) = lookup_best(path.as_path(), &key, &context) {
-        if let Ok(stored) = serde_json::from_value::<StoredCpuKernel>(entry.params) {
+    let matches = if autotune_enabled {
+        lookup_similar(path.as_path(), &key, &context, 4)
+    } else {
+        Vec::new()
+    };
+
+    if autotune_enabled {
+        let stored = load_best_typed(path.as_path(), &key, &context, None::<StoredCpuKernel>);
+        if let Some(stored) = stored {
             if let Some(index) = MICROKERNELS
                 .iter()
                 .position(|spec| spec.name == stored.kernel)
@@ -766,10 +774,12 @@ fn autotune_microkernel(
         {
             cache.insert(key.clone(), index);
         }
-        let stored = StoredCpuKernel {
-            kernel: MICROKERNELS[index].name.to_string(),
-        };
-        let _ = record_best(path.as_path(), &key, &context, score, &stored);
+        if autotune_enabled {
+            let stored = StoredCpuKernel {
+                kernel: MICROKERNELS[index].name.to_string(),
+            };
+            let _ = record_best(path.as_path(), &key, &context, score, &stored);
+        }
         MICROKERNELS.get(index)
     } else {
         None
@@ -904,6 +914,12 @@ fn cpu_autotune_key(rows: usize, inner: usize, cols: usize) -> Option<(String, P
         "cpu.matmul.v{CPU_AUTOTUNE_REVISION:02}|{arch}|{os}|{features}|{rows}x{inner}x{cols}|runs{CPU_AUTOTUNE_SAMPLE_RUNS}"
     );
     Some((key, path))
+}
+
+fn autotune_env_enabled() -> bool {
+    env::var("SPIRALTORCH_AUTOTUNE")
+        .map(|v| v != "0")
+        .unwrap_or(true)
 }
 
 fn autotune_store_path() -> Option<PathBuf> {

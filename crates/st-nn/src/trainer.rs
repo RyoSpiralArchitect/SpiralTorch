@@ -23,6 +23,7 @@
 
 use crate::cloud::CloudTargetSummary;
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
+use crate::gnn::RoundtableBandSignal;
 #[cfg(feature = "golden")]
 use crate::golden::{GoldenBlackcatPulse, GoldenCooperativeDirective, GoldenCouncilSnapshot};
 #[cfg(feature = "psi")]
@@ -32,10 +33,12 @@ use crate::language::{
 };
 use crate::loss::Loss;
 use crate::module::Module;
+use crate::optim::{LocalLearningRateAdapter, SpectralLrAdapter};
 use crate::plan::RankPlanner;
 use crate::roundtable::{
     simulate_proposal_locally, BlackcatModerator, BlackcatScore, DistConfig, GlobalProposal,
-    HeurOpKind, HeurOpLog, MetaConductor, ModeratorMinutes, OutcomeBand, RoundtableNode,
+    HeurOpKind, HeurOpLog, MetaConductor, ModeratorMinutes, OutcomeBand, RoundtableGnnBridge,
+    RoundtableNode,
 };
 use crate::schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedule};
 use crate::zspace_coherence::{CoherenceDiagnostics, CoherenceLabel, CoherenceObservation};
@@ -58,6 +61,11 @@ use st_core::telemetry::hub::{self, LoopbackEnvelope, SoftlogicZFeedback};
 use st_core::telemetry::psi::{PsiComponent, PsiConfig, PsiInput, PsiMeter, PsiReading};
 #[cfg(feature = "psychoid")]
 use st_core::telemetry::psychoid::{PsychoidConfig, PsychoidEvent, PsychoidMeter, PsychoidReading};
+use st_core::telemetry::region_visualizer::{RegionHeatmapCell, RegionHeatmapSnapshot};
+use st_core::telemetry::xai_report::AttributionReport;
+use st_core::telemetry::zspace_region::{
+    ZSpaceRadiusBand, ZSpaceRegionDescriptor, ZSpaceRegionKey, ZSpaceSpinBand,
+};
 use st_core::theory::zpulse::ZScale;
 use st_tensor::{topos::OpenCartesianTopos, GradientSummary};
 use std::collections::HashMap;
@@ -233,6 +241,7 @@ pub struct ModuleTrainer {
     heur_log: HeurOpLog,
     rewrite_budget: Option<RewriteBudget>,
     softlogic: SoftLogicFlex,
+    spectral_adapter: SpectralLrAdapter,
     desire_bridge: Option<DesireTrainerBridge>,
     desire_roundtable_bridge: Option<DesireRoundtableBridge>,
     last_desire_roundtable_summary: Option<DesireRoundtableSummary>,
@@ -241,8 +250,14 @@ pub struct ModuleTrainer {
     graph_bridge: Option<GraphConsensusBridge>,
     graph_pending: Option<GraphConsensusDigest>,
     graph_last_hint: Option<String>,
+    gnn_roundtable_bridge: Option<RoundtableGnnBridge>,
+    gnn_last_roundtable_signal: Option<RoundtableBandSignal>,
     curvature_scheduler: Option<CurvatureScheduler>,
     last_curvature_metrics: Option<CurvatureMetrics>,
+    loss_strategy: LossStrategy,
+    spectral_policy: Option<SpectralLearningRatePolicy>,
+    pending_coherence: Option<CoherenceDiagnostics>,
+    last_spectral_metrics: Option<SpectralAdjustmentMetrics>,
     #[cfg(feature = "golden")]
     golden_pulse: Option<GoldenBlackcatPulse>,
     #[cfg(feature = "golden")]
@@ -277,6 +292,392 @@ pub type BandWeightFn = fn(BandEnergy) -> (f32, f32, f32);
 
 fn append_cloud_targets(metadata: &mut HashMap<String, String>, targets: &[CloudConnector]) {
     CloudTargetSummary::from_targets(targets).extend_map(metadata);
+}
+
+/// Configures how regional Z-space weights influence the aggregated loss.
+#[derive(Clone, Debug)]
+pub struct RegionLossWeights {
+    default: f32,
+    overrides: HashMap<ZSpaceRegionKey, f32>,
+}
+
+impl RegionLossWeights {
+    /// Creates a weight table with the provided default multiplier.
+    pub fn new(default: f32) -> Self {
+        Self {
+            default: default.max(0.0),
+            overrides: HashMap::new(),
+        }
+    }
+
+    /// Inserts or replaces the multiplier for the supplied region key.
+    pub fn with_override(mut self, key: ZSpaceRegionKey, weight: f32) -> Self {
+        self.set_override(key, weight);
+        self
+    }
+
+    /// Updates the multiplier for the supplied region key.
+    pub fn set_override(&mut self, key: ZSpaceRegionKey, weight: f32) {
+        self.overrides.insert(key, weight.max(0.0));
+    }
+
+    /// Looks up the multiplier for the given key.
+    pub fn weight_for(&self, key: ZSpaceRegionKey) -> f32 {
+        self.overrides
+            .get(&key)
+            .copied()
+            .unwrap_or(self.default)
+            .max(0.0)
+    }
+
+    /// Returns the default multiplier applied when no overrides match.
+    pub fn default(&self) -> f32 {
+        self.default
+    }
+}
+
+impl Default for RegionLossWeights {
+    fn default() -> Self {
+        Self::new(1.0)
+    }
+}
+
+/// Optional thresholds controlling when region weights apply.
+#[derive(Clone, Debug, Default)]
+pub struct RegionLossCondition {
+    min_spin_magnitude: Option<f32>,
+    min_radius: Option<f32>,
+}
+
+impl RegionLossCondition {
+    /// Requires the absolute spin alignment to exceed the provided threshold.
+    pub fn with_min_spin_magnitude(mut self, threshold: f32) -> Self {
+        if threshold > 0.0 {
+            self.min_spin_magnitude = Some(threshold.min(1.0));
+        }
+        self
+    }
+
+    /// Requires the normalised radius to exceed the provided threshold.
+    pub fn with_min_radius(mut self, threshold: f32) -> Self {
+        if threshold > 0.0 {
+            self.min_radius = Some(threshold.clamp(0.0, 1.0));
+        }
+        self
+    }
+
+    fn satisfied(&self, descriptor: &ZSpaceRegionDescriptor) -> bool {
+        if let Some(threshold) = self.min_spin_magnitude {
+            if descriptor.spin_alignment.abs() < threshold {
+                return false;
+            }
+        }
+        if let Some(threshold) = self.min_radius {
+            if descriptor.normalized_radius < threshold {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Returns the minimum spin magnitude threshold, if configured.
+    pub fn min_spin_magnitude(&self) -> Option<f32> {
+        self.min_spin_magnitude
+    }
+
+    /// Returns the minimum radius threshold, if configured.
+    pub fn min_radius(&self) -> Option<f32> {
+        self.min_radius
+    }
+}
+
+/// Adaptive policy that adjusts regional multipliers based on observed losses.
+#[derive(Clone, Debug)]
+pub struct AdaptiveRegionWeighting {
+    learning_rate: f32,
+    min_samples: u32,
+    min_multiplier: f32,
+    max_multiplier: f32,
+    epsilon: f32,
+    global_loss: Option<f32>,
+    entries: HashMap<ZSpaceRegionKey, AdaptiveRegionEntry>,
+}
+
+impl AdaptiveRegionWeighting {
+    /// Builds a policy with sensible defaults for smoothing and bounds.
+    pub fn new() -> Self {
+        Self {
+            learning_rate: 0.1,
+            min_samples: 4,
+            min_multiplier: 0.25,
+            max_multiplier: 4.0,
+            epsilon: 1e-4,
+            global_loss: None,
+            entries: HashMap::new(),
+        }
+    }
+
+    /// Sets the learning rate used for EMA updates.
+    pub fn with_learning_rate(mut self, rate: f32) -> Self {
+        if rate.is_finite() && rate > 0.0 {
+            self.learning_rate = rate.clamp(0.01, 1.0);
+        }
+        self
+    }
+
+    /// Sets the minimum sample count required before adaptation kicks in.
+    pub fn with_min_samples(mut self, samples: u32) -> Self {
+        if samples > 0 {
+            self.min_samples = samples;
+        }
+        self
+    }
+
+    /// Sets the allowed multiplier bounds.
+    pub fn with_bounds(mut self, min: f32, max: f32) -> Self {
+        if min.is_finite() && max.is_finite() && min > 0.0 && max >= min {
+            self.min_multiplier = min;
+            self.max_multiplier = max;
+        }
+        self
+    }
+
+    /// Returns the last recorded global loss EMA.
+    pub fn global_loss(&self) -> Option<f32> {
+        self.global_loss
+    }
+
+    /// Returns the adaptive entry tracked for a specific region key.
+    pub fn entry_for(&self, key: ZSpaceRegionKey) -> Option<&AdaptiveRegionEntry> {
+        self.entries.get(&key)
+    }
+
+    fn observe_background(&mut self, loss: f32) {
+        let magnitude = loss.max(self.epsilon);
+        let reference = self.global_loss.unwrap_or(magnitude);
+        let next = reference + self.learning_rate * (magnitude - reference);
+        self.global_loss = Some(next);
+    }
+
+    fn observe_region(&mut self, key: ZSpaceRegionKey, loss: f32) -> f32 {
+        let magnitude = loss.max(self.epsilon);
+        let reference = self.global_loss.unwrap_or(magnitude);
+        let entry = self.entries.entry(key).or_default();
+        entry.samples = entry.samples.saturating_add(1);
+        if entry.samples == 1 {
+            entry.ema_loss = magnitude;
+        } else {
+            entry.ema_loss += self.learning_rate * (magnitude - entry.ema_loss);
+        }
+        let mut multiplier = 1.0;
+        if entry.samples >= self.min_samples && reference > self.epsilon {
+            multiplier =
+                (entry.ema_loss / reference).clamp(self.min_multiplier, self.max_multiplier);
+        }
+        entry.multiplier = multiplier;
+        let next_global = reference + self.learning_rate * (magnitude - reference);
+        self.global_loss = Some(next_global);
+        multiplier
+    }
+}
+
+impl Default for AdaptiveRegionWeighting {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct AdaptiveRegionEntry {
+    ema_loss: f32,
+    samples: u32,
+    multiplier: f32,
+}
+
+impl AdaptiveRegionEntry {
+    fn new() -> Self {
+        Self {
+            ema_loss: 0.0,
+            samples: 0,
+            multiplier: 1.0,
+        }
+    }
+
+    /// Returns the EMA of the regional loss.
+    pub fn ema_loss(&self) -> f32 {
+        self.ema_loss
+    }
+
+    /// Returns the number of samples accumulated for this region.
+    pub fn samples(&self) -> u32 {
+        self.samples
+    }
+
+    /// Returns the most recent adaptive multiplier.
+    pub fn multiplier(&self) -> f32 {
+        self.multiplier
+    }
+}
+
+impl Default for AdaptiveRegionEntry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Complete configuration describing how regional multipliers are applied.
+#[derive(Clone, Debug)]
+pub struct RegionLossConfig {
+    weights: RegionLossWeights,
+    condition: RegionLossCondition,
+    adaptive: Option<AdaptiveRegionWeighting>,
+}
+
+impl RegionLossConfig {
+    /// Creates a configuration with the supplied weight table and default condition.
+    pub fn new(weights: RegionLossWeights) -> Self {
+        Self {
+            weights,
+            condition: RegionLossCondition::default(),
+            adaptive: None,
+        }
+    }
+
+    /// Updates the condition controlling when region weights are used.
+    pub fn with_condition(mut self, condition: RegionLossCondition) -> Self {
+        self.condition = condition;
+        self
+    }
+
+    /// Attaches an adaptive weighting policy to the configuration.
+    pub fn with_adaptive(mut self, adaptive: AdaptiveRegionWeighting) -> Self {
+        self.adaptive = Some(adaptive);
+        self
+    }
+
+    fn region_factor(
+        &mut self,
+        feedback: &SoftlogicZFeedback,
+        base_loss: f32,
+    ) -> Option<(f32, ZSpaceRegionDescriptor)> {
+        let descriptor = match feedback.region_descriptor() {
+            Some(descriptor) => descriptor,
+            None => {
+                if let Some(adaptive) = self.adaptive.as_mut() {
+                    adaptive.observe_background(base_loss.abs());
+                }
+                return None;
+            }
+        };
+        if !self.condition.satisfied(&descriptor) {
+            if let Some(adaptive) = self.adaptive.as_mut() {
+                adaptive.observe_background(base_loss.abs());
+            }
+            return None;
+        }
+        let factor = self.weights.weight_for(descriptor.key());
+        let mut factor = factor;
+        if let Some(adaptive) = self.adaptive.as_mut() {
+            let multiplier = adaptive.observe_region(descriptor.key(), base_loss.abs());
+            factor *= multiplier;
+        }
+        Some((factor, descriptor))
+    }
+
+    /// Returns a reference to the underlying weights.
+    pub fn weights(&self) -> &RegionLossWeights {
+        &self.weights
+    }
+
+    /// Returns the configured condition.
+    pub fn condition(&self) -> &RegionLossCondition {
+        &self.condition
+    }
+
+    /// Returns the adaptive weighting policy, if one is configured.
+    pub fn adaptive(&self) -> Option<&AdaptiveRegionWeighting> {
+        self.adaptive.as_ref()
+    }
+
+    /// Captures a snapshot of all region multipliers for visualization.
+    pub fn snapshot(&self, highlight: Option<ZSpaceRegionDescriptor>) -> RegionHeatmapSnapshot {
+        let mut snapshot = RegionHeatmapSnapshot::new(self.weights.default())
+            .with_highlight(highlight)
+            .with_condition(
+                self.condition.min_spin_magnitude(),
+                self.condition.min_radius(),
+            );
+        if let Some(adaptive) = self.adaptive.as_ref() {
+            snapshot = snapshot.with_global_loss(adaptive.global_loss());
+        }
+        for spin in ZSpaceSpinBand::values() {
+            for radius in ZSpaceRadiusBand::values() {
+                let key = ZSpaceRegionKey::new(spin, radius);
+                let base_weight = self.weights.weight_for(key);
+                let (adaptive_multiplier, samples, ema_loss) = if let Some(adaptive) =
+                    self.adaptive.as_ref()
+                {
+                    adaptive
+                        .entry_for(key)
+                        .map(|entry| (entry.multiplier(), entry.samples(), Some(entry.ema_loss())))
+                        .unwrap_or((1.0, 0, None))
+                } else {
+                    (1.0, 0, None)
+                };
+                snapshot.insert_cell(RegionHeatmapCell::new(
+                    key,
+                    base_weight,
+                    adaptive_multiplier,
+                    samples,
+                    ema_loss,
+                ));
+            }
+        }
+        snapshot
+    }
+
+    /// Builds an attribution report summarising the configured region weights.
+    pub fn visualize(&self, highlight: Option<ZSpaceRegionDescriptor>) -> AttributionReport {
+        self.snapshot(highlight).into_report()
+    }
+}
+
+/// Loss aggregation strategies supported by [`ModuleTrainer`].
+#[derive(Clone, Debug)]
+pub enum LossStrategy {
+    /// Baseline behaviour using band weights only.
+    Baseline,
+    /// Applies additional region weights extracted from Softlogic feedback.
+    Region(RegionLossConfig),
+}
+
+impl Default for LossStrategy {
+    fn default() -> Self {
+        LossStrategy::Baseline
+    }
+}
+
+impl LossStrategy {
+    fn region_factor(
+        &mut self,
+        feedback: &SoftlogicZFeedback,
+        base_loss: f32,
+    ) -> Option<(f32, ZSpaceRegionDescriptor)> {
+        match self {
+            LossStrategy::Baseline => None,
+            LossStrategy::Region(config) => config.region_factor(feedback, base_loss),
+        }
+    }
+
+    fn region_report(
+        &self,
+        highlight: Option<ZSpaceRegionDescriptor>,
+    ) -> Option<AttributionReport> {
+        match self {
+            LossStrategy::Baseline => None,
+            LossStrategy::Region(config) => Some(config.visualize(highlight)),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -402,7 +803,18 @@ impl SoftLogicFlex {
             scale: scale_hint,
             events: Vec::new(),
             attributions: Vec::new(),
+            elliptic: None,
         };
+        let mut feedback = feedback;
+        if feedback.elliptic.is_none() {
+            if let Some(last) = self
+                .last_feedback
+                .as_ref()
+                .and_then(|sample| sample.elliptic)
+            {
+                feedback.elliptic = Some(last);
+            }
+        }
         self.last_feedback = Some(feedback.clone());
         feedback
     }
@@ -410,6 +822,254 @@ impl SoftLogicFlex {
     fn lerp(current: f32, target: f32, factor: f32) -> f32 {
         current + (target - current) * factor
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct SpectralLearningRatePolicy {
+    smoothing: f32,
+    coherence_gain: f32,
+    curvature_gain: f32,
+    sheet_gain: f32,
+    spin_gain: f32,
+    radius_gain: f32,
+    energy_gain: f32,
+    min_lr_scale: f32,
+    max_lr_scale: f32,
+    max_lr_step: f32,
+    min_band_scale: f32,
+    max_band_scale: f32,
+    band_state: (f32, f32, f32),
+    lr_state: f32,
+    applied_lr_scale: f32,
+    local_lr_state: (f32, f32, f32),
+}
+
+impl SpectralLearningRatePolicy {
+    pub fn new() -> Self {
+        Self {
+            smoothing: 0.2,
+            coherence_gain: 0.5,
+            curvature_gain: 0.15,
+            sheet_gain: 0.6,
+            spin_gain: 0.4,
+            radius_gain: 0.35,
+            energy_gain: 0.25,
+            min_lr_scale: 0.1,
+            max_lr_scale: 6.0,
+            max_lr_step: 1.4,
+            min_band_scale: 0.5,
+            max_band_scale: 2.75,
+            band_state: (1.0, 1.0, 1.0),
+            lr_state: 1.0,
+            applied_lr_scale: 1.0,
+            local_lr_state: (1.0, 1.0, 1.0),
+        }
+    }
+
+    pub fn with_smoothing(mut self, smoothing: f32) -> Self {
+        if smoothing.is_finite() && smoothing > 0.0 {
+            self.smoothing = smoothing.clamp(1.0e-3, 1.0);
+        }
+        self
+    }
+
+    pub fn with_coherence_gain(mut self, gain: f32) -> Self {
+        if gain.is_finite() {
+            self.coherence_gain = gain.max(0.0);
+        }
+        self
+    }
+
+    pub fn with_sheet_gain(mut self, gain: f32) -> Self {
+        if gain.is_finite() {
+            self.sheet_gain = gain.max(0.0);
+        }
+        self
+    }
+
+    pub fn with_spin_gain(mut self, gain: f32) -> Self {
+        if gain.is_finite() {
+            self.spin_gain = gain.max(0.0);
+        }
+        self
+    }
+
+    pub fn with_radius_gain(mut self, gain: f32) -> Self {
+        if gain.is_finite() {
+            self.radius_gain = gain.max(0.0);
+        }
+        self
+    }
+
+    pub fn with_energy_gain(mut self, gain: f32) -> Self {
+        if gain.is_finite() {
+            self.energy_gain = gain.max(0.0);
+        }
+        self
+    }
+
+    pub fn with_lr_bounds(mut self, min: f32, max: f32) -> Self {
+        if min.is_finite() && max.is_finite() && min > 0.0 && max > min {
+            self.min_lr_scale = min;
+            self.max_lr_scale = max;
+        }
+        self
+    }
+
+    pub fn with_band_bounds(mut self, min: f32, max: f32) -> Self {
+        if min.is_finite() && max.is_finite() && min > 0.0 && max > min {
+            self.min_band_scale = min;
+            self.max_band_scale = max;
+        }
+        self
+    }
+
+    pub fn with_max_lr_step(mut self, max_step: f32) -> Self {
+        if max_step.is_finite() && max_step > 0.0 {
+            self.max_lr_step = max_step.max(1.0);
+        }
+        self
+    }
+
+    pub fn observe(
+        &mut self,
+        diagnostics: Option<&CoherenceDiagnostics>,
+        curvature: f32,
+        band_energy: &BandEnergy,
+    ) -> Option<SpectralAdjustment> {
+        let diagnostics = diagnostics?;
+        let preserved = diagnostics.preserved_channels().max(1);
+        let dominant = diagnostics
+            .dominant_channel()
+            .unwrap_or(0)
+            .min(preserved - 1);
+        let sheet_ratio = (dominant as f32 + 0.5) / preserved as f32;
+        let sheet_bias = (sheet_ratio - 0.5) * self.sheet_gain;
+        let spin = diagnostics.z_bias().clamp(-1.0, 1.0);
+        let spin_bias = spin * self.spin_gain;
+        let spectral_radius = diagnostics.mean_coherence().abs();
+        let entropy = diagnostics.coherence_entropy().max(0.0);
+        let energy_ratio = diagnostics.energy_ratio().max(0.0);
+        let spectral_pressure = energy_ratio * (1.0 - entropy.tanh());
+        let curvature_term = if curvature < 0.0 {
+            (-curvature).sqrt() * self.curvature_gain
+        } else {
+            0.0
+        };
+        let radius_bias = (1.0 - spectral_radius.tanh()).clamp(0.0, 1.0) * self.radius_gain;
+
+        let base_above = 1.0
+            + sheet_bias.max(0.0)
+            + spin_bias.max(0.0)
+            + curvature_term * 0.25
+            + radius_bias * 0.5;
+        let base_here = 1.0
+            + (1.0 - sheet_bias.abs()).max(0.0) * 0.5 * self.sheet_gain
+            + curvature_term * 0.5
+            + (1.0 - radius_bias) * 0.25;
+        let base_beneath = 1.0
+            + (-sheet_bias).max(0.0)
+            + (-spin_bias).max(0.0)
+            + curvature_term * 0.25
+            + radius_bias * 0.5;
+
+        let energy_total =
+            (band_energy.above.abs() + band_energy.here.abs() + band_energy.beneath.abs())
+                .max(1e-5);
+        let energy_bias = (
+            (band_energy.above / energy_total).clamp(-1.0, 1.0),
+            (band_energy.here / energy_total).clamp(-1.0, 1.0),
+            (band_energy.beneath / energy_total).clamp(-1.0, 1.0),
+        );
+
+        let mut target_band = (
+            (base_above * (1.0 + energy_bias.0 * self.energy_gain))
+                .clamp(self.min_band_scale, self.max_band_scale),
+            (base_here * (1.0 + energy_bias.1 * self.energy_gain))
+                .clamp(self.min_band_scale, self.max_band_scale),
+            (base_beneath * (1.0 + energy_bias.2 * self.energy_gain))
+                .clamp(self.min_band_scale, self.max_band_scale),
+        );
+
+        self.band_state.0 = Self::smooth(self.band_state.0, target_band.0, self.smoothing);
+        self.band_state.1 = Self::smooth(self.band_state.1, target_band.1, self.smoothing);
+        self.band_state.2 = Self::smooth(self.band_state.2, target_band.2, self.smoothing);
+        target_band = self.band_state;
+
+        let mean_band = (target_band.0 + target_band.1 + target_band.2) / 3.0;
+        let coherence_boost = 1.0 + spectral_pressure * self.coherence_gain;
+        let mut target_lr =
+            (mean_band * coherence_boost).clamp(self.min_lr_scale, self.max_lr_scale);
+        self.lr_state = Self::smooth(self.lr_state, target_lr, self.smoothing);
+        target_lr = self.lr_state.clamp(self.min_lr_scale, self.max_lr_scale);
+
+        let mut target_local = (
+            (target_band.0 / mean_band).clamp(self.min_band_scale, self.max_band_scale),
+            (target_band.1 / mean_band).clamp(self.min_band_scale, self.max_band_scale),
+            (target_band.2 / mean_band).clamp(self.min_band_scale, self.max_band_scale),
+        );
+        self.local_lr_state.0 = Self::smooth(self.local_lr_state.0, target_local.0, self.smoothing);
+        self.local_lr_state.1 = Self::smooth(self.local_lr_state.1, target_local.1, self.smoothing);
+        self.local_lr_state.2 = Self::smooth(self.local_lr_state.2, target_local.2, self.smoothing);
+        target_local = self.local_lr_state;
+
+        let mut lr_multiplier = 1.0;
+        if self.applied_lr_scale.is_finite() && self.applied_lr_scale > 0.0 {
+            lr_multiplier =
+                (target_lr / self.applied_lr_scale).clamp(1.0 / self.max_lr_step, self.max_lr_step);
+        }
+        self.applied_lr_scale =
+            (self.applied_lr_scale * lr_multiplier).clamp(self.min_lr_scale, self.max_lr_scale);
+
+        Some(SpectralAdjustment {
+            band_scale: target_band,
+            lr_multiplier,
+            lr_scale: self.applied_lr_scale,
+            local_lr: target_local,
+            metrics: SpectralAdjustmentMetrics {
+                absolute_lr_scale: self.applied_lr_scale,
+                sheet_index: diagnostics.dominant_channel().map(|idx| idx as u32),
+                sheet_count: preserved as u32,
+                spin_alignment: spin,
+                spectral_radius,
+                spectral_entropy: entropy,
+                spectral_pressure,
+                energy_ratio,
+                band_scale: target_band,
+                local_lr: target_local,
+            },
+        })
+    }
+
+    fn smooth(previous: f32, target: f32, alpha: f32) -> f32 {
+        if !previous.is_finite() {
+            return target;
+        }
+        previous + (target - previous) * alpha
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SpectralAdjustment {
+    pub band_scale: (f32, f32, f32),
+    pub lr_multiplier: f32,
+    pub lr_scale: f32,
+    pub local_lr: (f32, f32, f32),
+    pub metrics: SpectralAdjustmentMetrics,
+}
+
+#[derive(Debug, Clone)]
+pub struct SpectralAdjustmentMetrics {
+    pub absolute_lr_scale: f32,
+    pub sheet_index: Option<u32>,
+    pub sheet_count: u32,
+    pub spin_alignment: f32,
+    pub spectral_radius: f32,
+    pub spectral_entropy: f32,
+    pub spectral_pressure: f32,
+    pub energy_ratio: f32,
+    pub band_scale: (f32, f32, f32),
+    pub local_lr: (f32, f32, f32),
 }
 
 #[derive(Debug, Clone)]
@@ -470,6 +1130,9 @@ impl ModuleTrainer {
         #[cfg(feature = "psi")]
         let psi = Self::init_psi_meter();
 
+        let mut spectral_adapter = SpectralLrAdapter::default().with_sheet_hint(8);
+        spectral_adapter.set_curvature_target(curvature);
+
         Self {
             planner: RankPlanner::new(caps),
             curvature,
@@ -486,6 +1149,7 @@ impl ModuleTrainer {
             heur_log: HeurOpLog::default(),
             rewrite_budget: None,
             softlogic: SoftLogicFlex::new(),
+            spectral_adapter,
             desire_bridge: None,
             desire_roundtable_bridge: None,
             last_desire_roundtable_summary: None,
@@ -494,8 +1158,14 @@ impl ModuleTrainer {
             graph_bridge: None,
             graph_pending: None,
             graph_last_hint: None,
+            gnn_roundtable_bridge: None,
+            gnn_last_roundtable_signal: None,
             curvature_scheduler: None,
             last_curvature_metrics: None,
+            loss_strategy: LossStrategy::default(),
+            spectral_policy: None,
+            pending_coherence: None,
+            last_spectral_metrics: None,
             #[cfg(feature = "golden")]
             golden_pulse: None,
             #[cfg(feature = "golden")]
@@ -520,6 +1190,23 @@ impl ModuleTrainer {
         self.graph_pending = None;
     }
 
+    /// Enables roundtable-driven adjustments for GNN modules.
+    pub fn enable_gnn_roundtable_bridge(&mut self, bridge: RoundtableGnnBridge) {
+        self.gnn_roundtable_bridge = Some(bridge);
+        self.gnn_last_roundtable_signal = None;
+    }
+
+    /// Disables any previously attached GNN roundtable bridge.
+    pub fn disable_gnn_roundtable_bridge(&mut self) {
+        self.gnn_roundtable_bridge = None;
+        self.gnn_last_roundtable_signal = None;
+    }
+
+    /// Returns the most recent roundtable signal broadcast to the GNN.
+    pub fn gnn_roundtable_signal(&self) -> Option<RoundtableBandSignal> {
+        self.gnn_last_roundtable_signal.clone()
+    }
+
     /// Enables desire telemetry feedback so automation and training can share
     /// aggregated summaries without bespoke glue.
     pub fn enable_desire_pipeline(&mut self, bridge: DesireTrainerBridge) {
@@ -536,6 +1223,32 @@ impl ModuleTrainer {
     pub fn disable_desire_roundtable_bridge(&mut self) {
         self.desire_roundtable_bridge = None;
         self.last_desire_roundtable_summary = None;
+    }
+
+    /// Returns a new trainer with the provided loss strategy.
+    pub fn with_loss_strategy(mut self, strategy: LossStrategy) -> Self {
+        self.loss_strategy = strategy;
+        self
+    }
+
+    /// Installs a loss strategy controlling how band losses are aggregated.
+    pub fn set_loss_strategy(&mut self, strategy: LossStrategy) {
+        self.loss_strategy = strategy;
+    }
+
+    /// Configures the trainer to apply region-aware loss weights.
+    pub fn enable_region_loss(&mut self, config: RegionLossConfig) {
+        self.loss_strategy = LossStrategy::Region(config);
+    }
+
+    /// Restores the baseline loss aggregation strategy.
+    pub fn disable_region_loss(&mut self) {
+        self.loss_strategy = LossStrategy::Baseline;
+    }
+
+    /// Returns the currently configured loss strategy.
+    pub fn loss_strategy(&self) -> &LossStrategy {
+        &self.loss_strategy
     }
 
     /// Surfaces the qualitative coherence observation so schedulers can react.
@@ -557,18 +1270,42 @@ impl ModuleTrainer {
         scheduler.sync(self.curvature);
         self.curvature_scheduler = Some(scheduler);
         self.last_curvature_metrics = None;
+        self.spectral_adapter.set_curvature_target(self.curvature);
     }
 
     /// Disables any configured curvature scheduler and clears cached metrics.
     pub fn disable_curvature_scheduler(&mut self) {
         self.curvature_scheduler = None;
         self.last_curvature_metrics = None;
+        self.spectral_adapter.set_curvature_target(self.curvature);
     }
 
     /// Returns the most recently recorded curvature metrics emitted by the
     /// scheduler, when available.
     pub fn curvature_metrics(&self) -> Option<CurvatureMetrics> {
         self.last_curvature_metrics
+    }
+
+    /// Enables the spectral learning rate adaptation policy driven by Z-space coherence.
+    pub fn enable_spectral_learning_rate(&mut self, policy: SpectralLearningRatePolicy) {
+        self.spectral_policy = Some(policy);
+        self.last_spectral_metrics = None;
+    }
+
+    /// Disables the spectral learning rate policy.
+    pub fn disable_spectral_learning_rate(&mut self) {
+        self.spectral_policy = None;
+        self.last_spectral_metrics = None;
+    }
+
+    /// Publishes fresh coherence diagnostics that will be consumed by the spectral policy.
+    pub fn push_coherence_diagnostics(&mut self, diagnostics: CoherenceDiagnostics) {
+        self.pending_coherence = Some(diagnostics);
+    }
+
+    /// Returns the last recorded spectral learning rate metrics when available.
+    pub fn spectral_metrics(&self) -> Option<&SpectralAdjustmentMetrics> {
+        self.last_spectral_metrics.as_ref()
     }
 
     #[cfg(feature = "psi")]
@@ -1141,8 +1878,9 @@ impl ModuleTrainer {
     }
 
     /// Applies the parameter updates using either the hypergrad tape or the fallback rate.
-    pub fn step<M: Module>(&self, module: &mut M) -> PureResult<()> {
-        module.apply_step(self.fallback_learning_rate)
+    pub fn step<M: Module>(&mut self, module: &mut M) -> PureResult<()> {
+        let adapter: &mut dyn LocalLearningRateAdapter = &mut self.spectral_adapter;
+        module.apply_step_with_adapter(self.fallback_learning_rate, Some(adapter))
     }
 
     /// Runs a full epoch over the provided iterator of `(input, target)` pairs.
@@ -1217,6 +1955,12 @@ impl ModuleTrainer {
             if let Some(rt) = self.blackcat.as_ref() {
                 band_energy.drift = rt.frac_penalty() as f32;
             }
+            let mut roundtable_signal = RoundtableBandSignal::from_schedule(schedule, band_energy);
+            if let Some(bridge) = self.gnn_roundtable_bridge.as_ref() {
+                roundtable_signal = bridge.publish(roundtable_signal.clone())?;
+            }
+            self.gnn_last_roundtable_signal = Some(roundtable_signal.clone());
+            module.apply_roundtable_band(&roundtable_signal)?;
             let mut bands: GradientBands = schedule.split(&grad_output)?;
             let mut weights = self.softlogic.prepare_weights(&band_energy);
             if let Some(ref impulse) = desire_impulse {
@@ -1235,14 +1979,93 @@ impl ModuleTrainer {
                 weights.1 *= override_weights.1;
                 weights.2 *= override_weights.2;
             }
+            let mut spectral_used = false;
+            let mut spectral_extra: Option<SpectralAdjustmentMetrics> = None;
+            let coherence_snapshot = self.pending_coherence.take();
+            if let Some(policy) = self.spectral_policy.as_mut() {
+                if let Some(adjustment) =
+                    policy.observe(coherence_snapshot.as_ref(), self.curvature, &band_energy)
+                {
+                    weights.0 *= adjustment.band_scale.0;
+                    weights.1 *= adjustment.band_scale.1;
+                    weights.2 *= adjustment.band_scale.2;
+                    if adjustment.lr_multiplier.is_finite()
+                        && (adjustment.lr_multiplier - 1.0).abs() > 1.0e-3
+                    {
+                        self.scale_learning_rates(module, adjustment.lr_multiplier)?;
+                    }
+                    spectral_extra = Some(adjustment.metrics.clone());
+                    self.last_spectral_metrics = Some(adjustment.metrics);
+                    spectral_used = coherence_snapshot.is_some();
+                }
+            }
+            if coherence_snapshot.is_some() && !spectral_used {
+                self.pending_coherence = coherence_snapshot;
+            }
             bands.scale_inplace(weights.0, weights.1, weights.2);
             let weight_mean = (weights.0 + weights.1 + weights.2) / 3.0;
-            let weighted_loss = step_loss * weight_mean.max(0.0);
-            total_loss += weighted_loss;
+            let weighted_loss_base = step_loss * weight_mean.max(0.0);
+            let mut weighted_loss = weighted_loss_base;
             let mut extra = HashMap::new();
             extra.insert("softlogic_w_above".to_string(), weights.0 as f64);
             extra.insert("softlogic_w_here".to_string(), weights.1 as f64);
             extra.insert("softlogic_w_beneath".to_string(), weights.2 as f64);
+            if let Some(metrics) = spectral_extra {
+                extra.insert(
+                    "spectral_lr_scale".to_string(),
+                    metrics.absolute_lr_scale as f64,
+                );
+                extra.insert(
+                    "spectral_band_above".to_string(),
+                    metrics.band_scale.0 as f64,
+                );
+                extra.insert(
+                    "spectral_band_here".to_string(),
+                    metrics.band_scale.1 as f64,
+                );
+                extra.insert(
+                    "spectral_band_beneath".to_string(),
+                    metrics.band_scale.2 as f64,
+                );
+                extra.insert(
+                    "spectral_local_lr_above".to_string(),
+                    metrics.local_lr.0 as f64,
+                );
+                extra.insert(
+                    "spectral_local_lr_here".to_string(),
+                    metrics.local_lr.1 as f64,
+                );
+                extra.insert(
+                    "spectral_local_lr_beneath".to_string(),
+                    metrics.local_lr.2 as f64,
+                );
+                extra.insert("spectral_spin".to_string(), metrics.spin_alignment as f64);
+                extra.insert(
+                    "spectral_radius".to_string(),
+                    metrics.spectral_radius as f64,
+                );
+                extra.insert(
+                    "spectral_entropy".to_string(),
+                    metrics.spectral_entropy as f64,
+                );
+                extra.insert(
+                    "spectral_pressure".to_string(),
+                    metrics.spectral_pressure as f64,
+                );
+                extra.insert(
+                    "spectral_energy_ratio".to_string(),
+                    metrics.energy_ratio as f64,
+                );
+                if let Some(index) = metrics.sheet_index {
+                    extra.insert("spectral_sheet_index".to_string(), index as f64);
+                }
+                extra.insert(
+                    "spectral_sheet_count".to_string(),
+                    metrics.sheet_count as f64,
+                );
+            } else {
+                self.last_spectral_metrics = None;
+            }
             if let Some(ref impulse) = desire_impulse {
                 extra.insert(
                     "desire_roundtable_multiplier_above".to_string(),
@@ -1292,6 +2115,7 @@ impl ModuleTrainer {
                 extra.insert("graph_layers".to_string(), digest.layer_count() as f64);
             }
             let _ = module.backward_bands(&input, &bands)?;
+            module.clear_roundtable_band()?;
             if let Some(bridge) = self.graph_bridge.as_ref() {
                 self.graph_pending = bridge.digest(&baseline_band_energy)?;
             }
@@ -1301,6 +2125,10 @@ impl ModuleTrainer {
             let mut psi_snapshot: Option<PsiReading> = None;
             #[cfg(feature = "psi")]
             {
+                let curvature_pos = self
+                    .curvature_metrics()
+                    .map(|metrics| metrics.curvature.max(0.0))
+                    .unwrap_or(0.0);
                 if let Some(meter) = self.psi.as_mut() {
                     let grad_l2 = Self::collect_grad_l2(module)?;
                     let act_drift = module.psi_probe().unwrap_or(0.0);
@@ -1311,6 +2139,7 @@ impl ModuleTrainer {
                         act_drift,
                         attn_entropy: 0.0,
                         band_energy: band_energy.l1() + band_energy.drift.abs(),
+                        curvature_pos,
                     };
                     let (reading, events) = meter.update(&input_snapshot);
                     psi_snapshot = Some(reading.clone());
@@ -1413,11 +2242,44 @@ impl ModuleTrainer {
                 }
             };
             let scale_hint = hub::get_softlogic_z().and_then(|feedback| feedback.scale);
-            let z_feedback =
+            let mut z_feedback =
                 self.softlogic
-                    .observe(&band_energy, weighted_loss, psi_total_opt, scale_hint);
+                    .observe(&band_energy, weighted_loss_base, psi_total_opt, scale_hint);
+            if z_feedback.elliptic.is_none() {
+                if let Some(previous) = hub::get_softlogic_z() {
+                    if let Some(sample) = previous.elliptic {
+                        z_feedback.elliptic = Some(sample);
+                    }
+                }
+            }
             hub::set_softlogic_z(z_feedback.clone());
             extra.insert("softlogic_z".to_string(), z_feedback.z_signal as f64);
+            let mut region_highlight = None;
+            if let Some((region_factor, region_descriptor)) = self
+                .loss_strategy
+                .region_factor(&z_feedback, weighted_loss_base)
+            {
+                let factor = region_factor.max(0.0);
+                if factor > 0.0 {
+                    weighted_loss *= factor;
+                }
+                extra.insert("loss_region_factor".to_string(), factor as f64);
+                extra.insert(
+                    "region_spin_alignment".to_string(),
+                    region_descriptor.spin_alignment as f64,
+                );
+                extra.insert(
+                    "region_normalized_radius".to_string(),
+                    region_descriptor.normalized_radius as f64,
+                );
+                region_highlight = Some(region_descriptor);
+            }
+            match self.loss_strategy.region_report(region_highlight) {
+                Some(report) => hub::set_region_loss_report(report),
+                None => hub::clear_region_loss_report(),
+            }
+            total_loss += weighted_loss;
+            extra.insert("loss_weighted_base".to_string(), weighted_loss_base as f64);
             let mut loop_broadcasted = false;
             if let Some(node) = self.distribution.as_mut() {
                 let outcome = OutcomeBand::from_weights(
@@ -1579,6 +2441,8 @@ impl ModuleTrainer {
         if decision.changed {
             Self::retune_hypergrads(module, decision.curvature, self.hyper_learning_rate)?;
             self.curvature = decision.curvature;
+            self.spectral_adapter
+                .set_curvature_target(decision.curvature);
         }
         Ok(Some(decision))
     }
@@ -1779,6 +2643,21 @@ impl ModuleTrainer {
         self.psychoid_log = schedule.psychoid_log();
     }
 
+    fn scale_learning_rates<M: Module>(&mut self, module: &mut M, factor: f32) -> PureResult<()> {
+        if !factor.is_finite() || factor <= 0.0 {
+            return Ok(());
+        }
+        self.fallback_learning_rate *= factor;
+        self.hyper_learning_rate *= factor;
+        if let Some(rate) = self.real_learning_rate.as_mut() {
+            *rate *= factor;
+        }
+        module.visit_parameters_mut(&mut |param| {
+            param.scale_learning_rate(factor);
+            Ok(())
+        })
+    }
+
     #[cfg(feature = "collapse")]
     fn bootstrap_collapse(&mut self, schedule: &RoundtableSchedule) {
         if self.collapse.is_some() || !schedule.collapse_enabled() {
@@ -1827,6 +2706,7 @@ impl ModuleTrainer {
         if let Some(rate) = self.real_learning_rate.as_mut() {
             *rate *= factor;
         }
+        self.spectral_adapter.on_global_scale(factor);
         module.visit_parameters_mut(&mut |param| {
             param.scale_learning_rate(factor);
             Ok(())
@@ -2003,6 +2883,7 @@ impl IntoBatch for PureResult<(Tensor, Tensor)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gnn::{GraphActivation, GraphContext, GraphLayerSpec, ZSpaceGraphNetworkBuilder};
     use crate::language::{
         constant, warmup, ConceptHint, DesireAutomation, DesireLagrangian, DesirePipeline,
         DesireTrainerBridge, DesireTriggerBuffer, RepressionField, SemanticBridge, SparseKernel,
@@ -2013,13 +2894,18 @@ mod tests {
     use crate::layers::wave_gate::WaveGate;
     use crate::loss::MeanSquaredError;
     use crate::module::Parameter;
+    use crate::roundtable::RoundtableGnnBridge;
     use crate::roundtable::{HeurOp, HeurOpKind};
     use crate::schedule::RoundtableConfig;
     #[cfg(feature = "golden")]
     use crate::CouncilEvidence;
     use st_core::runtime::blackcat::{bandit::SoftBanditMode, zmeta::ZMetaParams, ChoiceGroups};
+    use st_core::telemetry::hub::{SoftlogicEllipticSample, SoftlogicZFeedback};
+    use st_core::telemetry::zspace_region::{ZSpaceRadiusBand, ZSpaceRegionKey, ZSpaceSpinBand};
+    use st_core::theory::zpulse::ZSource;
     use st_tensor::topos::OpenCartesianTopos;
     use std::collections::HashMap;
+    use std::num::NonZeroUsize;
     use std::time::{Duration, Instant, SystemTime};
 
     fn build_language_geometry() -> SymbolGeometry {
@@ -2085,6 +2971,57 @@ mod tests {
         }
     }
 
+    struct IdentityModule;
+
+    impl Module for IdentityModule {
+        fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+            Ok(input.clone())
+        }
+
+        fn backward(&mut self, _input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+            Ok(grad_output.clone())
+        }
+
+        fn visit_parameters(
+            &self,
+            _visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+        ) -> PureResult<()> {
+            Ok(())
+        }
+
+        fn visit_parameters_mut(
+            &mut self,
+            _visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
+        ) -> PureResult<()> {
+            Ok(())
+        }
+    }
+
+    struct ConstantLoss {
+        value: f32,
+    }
+
+    impl ConstantLoss {
+        fn new(value: f32) -> Self {
+            Self { value }
+        }
+    }
+
+    impl Loss for ConstantLoss {
+        fn forward(&mut self, prediction: &Tensor, _target: &Tensor) -> PureResult<Tensor> {
+            let len = prediction.data().len();
+            Tensor::from_vec(
+                prediction.shape().0,
+                prediction.shape().1,
+                vec![self.value; len],
+            )
+        }
+
+        fn backward(&mut self, prediction: &Tensor, _target: &Tensor) -> PureResult<Tensor> {
+            Tensor::zeros(prediction.shape().0, prediction.shape().1)
+        }
+    }
+
     impl Module for FixedGradientModule {
         fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
             Ok(input.clone())
@@ -2111,10 +3048,58 @@ mod tests {
         }
     }
 
+    struct SpectralGradientModule {
+        param: Parameter,
+        grad: Vec<f32>,
+    }
+
+    impl SpectralGradientModule {
+        fn new(grad: Vec<f32>) -> Self {
+            let cols = grad.len();
+            let param = Parameter::new("spectral", Tensor::zeros(1, cols).unwrap());
+            Self { param, grad }
+        }
+
+        fn accumulate(&mut self) {
+            let update = Tensor::from_vec(1, self.grad.len(), self.grad.clone()).unwrap();
+            self.param.accumulate_euclidean(&update).unwrap();
+        }
+
+        fn weights(&self) -> &Tensor {
+            self.param.value()
+        }
+    }
+
+    impl Module for SpectralGradientModule {
+        fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+            Ok(input.clone())
+        }
+
+        fn backward(&mut self, _input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+            let update = Tensor::from_vec(1, self.grad.len(), self.grad.clone()).unwrap();
+            self.param.accumulate_euclidean(&update)?;
+            Ok(grad_output.clone())
+        }
+
+        fn visit_parameters(
+            &self,
+            visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+        ) -> PureResult<()> {
+            visitor(&self.param)
+        }
+
+        fn visit_parameters_mut(
+            &mut self,
+            visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
+        ) -> PureResult<()> {
+            visitor(&mut self.param)
+        }
+    }
+
     #[test]
     fn trainer_attaches_and_steps() {
         let caps = DeviceCaps::wgpu(32, true, 256);
-        let trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
         let mut layer = Linear::new("fc", 2, 1).unwrap();
         trainer.prepare(&mut layer).unwrap();
         let input = crate::Tensor::from_vec(1, 2, vec![1.0, -1.0]).unwrap();
@@ -2146,7 +3131,7 @@ mod tests {
     #[test]
     fn trainer_prepares_with_topos_for_wave_gate() {
         let caps = DeviceCaps::wgpu(64, true, 512);
-        let trainer = ModuleTrainer::new(caps, -0.9, 0.06, 0.02);
+        let mut trainer = ModuleTrainer::new(caps, -0.9, 0.06, 0.02);
         let encoder_curvature = trainer.curvature();
         let topos = OpenCartesianTopos::new(encoder_curvature, 1e-6, 1e4, 512, 16384).unwrap();
         let mut gate = WaveGate::with_topos(
@@ -2178,6 +3163,35 @@ mod tests {
                 Ok(())
             })
             .unwrap();
+    }
+
+    #[test]
+    fn spectral_adapter_scales_local_learning_rate() {
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        let grad = vec![0.8f32, -0.4, 0.6, -0.2];
+        let mut module = SpectralGradientModule::new(grad.clone());
+        module.accumulate();
+
+        let mut probe = SpectralLrAdapter::default().with_sheet_hint(8);
+        probe.set_curvature_target(trainer.curvature());
+        let features = st_core::ops::zspace_round::SpectralFeatureSample::from_slice(
+            &grad,
+            probe.sheet_hint(),
+        )
+        .unwrap();
+        let factor = probe.scale_factor("spectral", &features);
+
+        trainer.step(&mut module).unwrap();
+
+        let lr = trainer.fallback_learning_rate();
+        for (value, expected_grad) in module.weights().data().iter().zip(grad.iter()) {
+            let expected = -lr * factor * expected_grad;
+            assert!(
+                (value - expected).abs() < 1e-4,
+                "value {value} vs expected {expected}"
+            );
+        }
     }
 
     #[test]
@@ -2215,6 +3229,111 @@ mod tests {
             .unwrap();
         let after = model.forward(&input).unwrap();
         assert_ne!(before.data(), after.data());
+    }
+
+    #[test]
+    fn region_loss_strategy_scales_total_loss() {
+        let elliptic = SoftlogicEllipticSample {
+            curvature_radius: 1.0,
+            geodesic_radius: 0.9,
+            normalized_radius: 0.9,
+            spin_alignment: 0.9,
+            sheet_index: 1,
+            sheet_position: 0.0,
+            normal_bias: 0.0,
+            sheet_count: 4,
+            topological_sector: 2,
+            homology_index: 0,
+            rotor_field: [0.0; 3],
+            flow_vector: [0.0; 3],
+            curvature_tensor: [[0.0; 3]; 3],
+            resonance_heat: 0.0,
+            noise_density: 0.0,
+            quaternion: [0.0; 4],
+            rotation: [0.0; 9],
+        };
+        let seed_feedback = SoftlogicZFeedback {
+            psi_total: 0.0,
+            weighted_loss: 0.0,
+            band_energy: (0.0, 0.0, 0.0),
+            drift: 0.0,
+            z_signal: 0.0,
+            scale: None,
+            events: Vec::new(),
+            attributions: vec![(ZSource::Microlocal, 1.0)],
+            elliptic: Some(elliptic),
+        };
+
+        let weights = RegionLossWeights::new(1.0).with_override(
+            ZSpaceRegionKey::new(ZSpaceSpinBand::Leading, ZSpaceRadiusBand::Edge),
+            2.0,
+        );
+        let config = RegionLossConfig::new(weights);
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01)
+            .with_loss_strategy(LossStrategy::Region(config));
+        trainer.softlogic.last_feedback = Some(seed_feedback);
+        let mut module = IdentityModule;
+        trainer.prepare(&mut module).unwrap();
+        let schedule = trainer.roundtable(1, 1, RoundtableConfig::default());
+        let dataset = vec![(
+            Tensor::from_vec(1, 1, vec![0.0]).unwrap(),
+            Tensor::from_vec(1, 1, vec![0.0]).unwrap(),
+        )];
+        let mut loss = ConstantLoss::new(1.5);
+        let stats = trainer
+            .train_epoch(&mut module, &mut loss, dataset, &schedule)
+            .unwrap();
+        assert!((stats.total_loss - 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn adaptive_region_weighting_amplifies_high_loss_regions() {
+        let weights = RegionLossWeights::new(1.0);
+        let adaptive = AdaptiveRegionWeighting::new()
+            .with_learning_rate(1.0)
+            .with_min_samples(1)
+            .with_bounds(0.5, 8.0);
+        let mut config = RegionLossConfig::new(weights).with_adaptive(adaptive);
+
+        let elliptic = SoftlogicEllipticSample {
+            curvature_radius: 1.0,
+            geodesic_radius: 0.9,
+            normalized_radius: 0.9,
+            spin_alignment: 0.9,
+            sheet_index: 1,
+            sheet_position: 0.0,
+            normal_bias: 0.0,
+            sheet_count: 4,
+            topological_sector: 2,
+            homology_index: 0,
+            rotor_field: [0.0; 3],
+            flow_vector: [0.0; 3],
+            curvature_tensor: [[0.0; 3]; 3],
+            resonance_heat: 0.0,
+            noise_density: 0.0,
+            quaternion: [0.0; 4],
+            rotation: [0.0; 9],
+        };
+        let feedback = SoftlogicZFeedback {
+            psi_total: 0.0,
+            weighted_loss: 0.0,
+            band_energy: (0.0, 0.0, 0.0),
+            drift: 0.0,
+            z_signal: 0.0,
+            scale: None,
+            events: Vec::new(),
+            attributions: vec![(ZSource::Microlocal, 1.0)],
+            elliptic: Some(elliptic),
+        };
+
+        // Seed a low baseline loss before observing a large spike.
+        let _ = config.region_factor(&feedback, 0.1);
+        let result = config.region_factor(&feedback, 2.0).unwrap();
+        assert!(result.0 > 1.0);
+        let report = config.visualize(feedback.region_descriptor());
+        assert_eq!(report.shape(), (3, 3));
+        assert!(report.metadata.extras.contains_key("highlight"));
     }
 
     #[test]
@@ -2420,6 +3539,46 @@ mod tests {
         assert!(bridge.drain_summary().unwrap().is_none());
         let summary = trainer.desire_roundtable_summary();
         assert!(summary.is_some());
+    }
+
+    #[test]
+    fn trainer_emits_gnn_roundtable_signal() {
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        let adjacency = Tensor::from_vec(2, 2, vec![0.0, 1.0, 1.0, 0.0]).unwrap();
+        let context = GraphContext::from_adjacency(adjacency).unwrap();
+        let mut builder =
+            ZSpaceGraphNetworkBuilder::new(context, NonZeroUsize::new(2).unwrap(), -1.0, 0.05);
+        builder.push_layer(
+            GraphLayerSpec::new(NonZeroUsize::new(2).unwrap())
+                .with_activation(GraphActivation::Relu),
+        );
+        let mut model = builder.build("gnn_trainer").unwrap();
+        trainer.prepare(&mut model).unwrap();
+
+        let bridge = RoundtableGnnBridge::new();
+        trainer.enable_gnn_roundtable_bridge(bridge.clone());
+
+        let schedule = trainer.roundtable(2, 2, RoundtableConfig::default());
+        let dataset = vec![
+            (
+                Tensor::from_vec(2, 2, vec![1.0, 0.0, 0.5, -0.5]).unwrap(),
+                Tensor::from_vec(2, 2, vec![0.2, -0.1, 0.3, 0.4]).unwrap(),
+            ),
+            (
+                Tensor::from_vec(2, 2, vec![0.0, 1.0, -0.3, 0.8]).unwrap(),
+                Tensor::from_vec(2, 2, vec![0.1, 0.0, -0.2, 0.6]).unwrap(),
+            ),
+        ];
+        let mut loss = MeanSquaredError::new();
+        trainer
+            .train_epoch(&mut model, &mut loss, dataset, &schedule)
+            .unwrap();
+
+        assert!(trainer.gnn_roundtable_signal().is_some());
+        let latest = bridge.latest().unwrap();
+        assert!(latest.is_some());
+        assert!(bridge.len() >= 1);
     }
 
     #[cfg(feature = "golden")]

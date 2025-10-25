@@ -55,6 +55,7 @@ impl GraphFlowTracer {
             node_flows,
             weight_update_magnitude: None,
             bias_update_magnitude: None,
+            elliptic: None,
         });
     }
 
@@ -64,6 +65,13 @@ impl GraphFlowTracer {
         if let Some(report) = self.reports.last_mut() {
             report.weight_update_magnitude = Some(weight);
             report.bias_update_magnitude = bias;
+        }
+    }
+
+    /// Annotates the most recent layer with elliptic curvature telemetry.
+    pub fn annotate_elliptic(&mut self, sample: EllipticLayerSample) {
+        if let Some(report) = self.reports.last_mut() {
+            report.elliptic = Some(sample);
         }
     }
 
@@ -99,12 +107,34 @@ pub struct GraphLayerReport {
     pub weight_update_magnitude: Option<f32>,
     /// Optional magnitude of the bias update emitted during the backward pass.
     pub bias_update_magnitude: Option<f32>,
+    /// Optional elliptic geometry summary attached to the layer.
+    pub elliptic: Option<EllipticLayerSample>,
 }
 
 impl GraphLayerReport {
     /// Total energy transported by all node flows in this layer.
     pub fn total_flow_energy(&self) -> f32 {
         self.node_flows.iter().map(NodeFlowSample::energy).sum()
+    }
+}
+
+/// Summary describing elliptic geometry captured during a graph layer.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct EllipticLayerSample {
+    pub curvature_radius: f32,
+    pub mean_geodesic: f32,
+    pub sheet_bias: f32,
+    pub spin_alignment: f32,
+}
+
+impl EllipticLayerSample {
+    /// Returns the normalised geodesic radius within \([0, 1]\).
+    pub fn normalized_radius(&self) -> f32 {
+        if self.curvature_radius <= 0.0 {
+            0.0
+        } else {
+            (self.mean_geodesic / (self.curvature_radius * std::f32::consts::PI)).clamp(0.0, 1.0)
+        }
     }
 }
 
@@ -188,5 +218,21 @@ mod tests {
         assert!(tracer.total_energy() > 0.0);
         let report = tracer.layers()[0].clone();
         assert!((report.total_flow_energy() - tracer.total_energy()).abs() < 1e-6);
+    }
+
+    #[test]
+    fn tracer_accepts_elliptic_annotations() {
+        let mut tracer = GraphFlowTracer::new();
+        tracer.begin_layer("layer", 1.0, Vec::new());
+        tracer.annotate_elliptic(EllipticLayerSample {
+            curvature_radius: 1.5,
+            mean_geodesic: 1.2,
+            sheet_bias: 0.4,
+            spin_alignment: 0.1,
+        });
+        let report = tracer.layers()[0].clone();
+        let sample = report.elliptic.expect("elliptic sample");
+        assert!((sample.sheet_bias - 0.4).abs() < 1e-6);
+        assert!(sample.normalized_radius() > 0.0);
     }
 }

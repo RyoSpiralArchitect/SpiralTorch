@@ -256,6 +256,7 @@ mod tests {
             ],
             weight_update_magnitude: Some(0.1),
             bias_update_magnitude: Some(0.05),
+            elliptic: None,
         };
         let quad = fold_into_roundtable(&schedule, &gradient, &report).unwrap();
         let weights = quad.barycentric();
@@ -281,6 +282,7 @@ mod tests {
             }],
             weight_update_magnitude: Some(0.1),
             bias_update_magnitude: Some(0.05),
+            elliptic: None,
         };
         let quad = fold_with_band_energy(&base, &report);
         assert_eq!(quad.above, base.above);
