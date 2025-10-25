@@ -3416,6 +3416,10 @@ fn select_tile_config(rows: usize, inner: usize, cols: usize) -> TileConfig {
     TileConfig::new(16, 16, 16)
 }
 
+fn fallback_tile_config(rows: usize, inner: usize, cols: usize) -> TileConfig {
+    select_tile_config(rows, inner, cols)
+}
+
 const MATMUL_AUTOTUNE_REVISION: u64 = 1;
 const AUTOTUNE_SAMPLE_MAX_DIM: usize = 1024;
 const AUTOTUNE_MIN_VOLUME: usize = 32 * 32 * 32;
