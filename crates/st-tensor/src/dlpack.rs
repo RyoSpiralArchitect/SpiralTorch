@@ -9,6 +9,8 @@ use std::ptr::NonNull;
 use std::slice;
 use std::sync::Arc;
 
+use crate::memory::AlignedVec;
+
 /// Minimal subset of the DLPack data type codes required for CPU `f32` tensors.
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -132,7 +134,7 @@ impl ForeignTensor {
 
 #[derive(Clone, Debug)]
 pub enum ExportData {
-    Owned(Arc<Vec<f32>>),
+    Owned(Arc<AlignedVec>),
     Foreign(ForeignTensor),
 }
 
