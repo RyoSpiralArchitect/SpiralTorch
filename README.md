@@ -406,7 +406,33 @@ inline so you can bind a tape and guard in a single expression. You can still
 feed dictionaries or `(curvature, tolerance, saturation, depth, volume)` tuples
 directly into `topos=` when needed.
 
-### 4) Z-space encoders and metric normalisers
+### 4) Hypergrad sessions & operator hints
+
+```python
+import spiraltorch as st
+from spiral.hypergrad import hypergrad_session, hypergrad_summary_dict, suggest_hypergrad_operator
+
+weights = st.Tensor([[0.05, -0.15, 0.25]])
+targets = st.Tensor([[0.0, 1.0, 0.0]])
+
+with hypergrad_session(weights.shape(), learning_rate=0.03) as tape:
+    tape.accumulate_pair(weights, targets)
+    metrics = hypergrad_summary_dict(tape, include_gradient=True)
+    hints = suggest_hypergrad_operator(metrics)
+
+print("summary:", metrics["summary"])  # includes l1/l2/linf/mean_abs/rms stats
+print("wgsl operator hints:", hints)
+print("gradient sample:", metrics["gradient"][:3])
+```
+
+`hypergrad_session(...)` wraps `st.hypergrad(...)` so notebooks can accumulate,
+apply, and reset tapes without manual `try`/`finally` scaffolding. The
+`hypergrad_summary_dict(...)` helper converts native gradient summaries into a
+plain dictionary (optionally including the gradient vector), and
+`suggest_hypergrad_operator(...)` distils those metrics into shader-friendly mix
+and gain hints while preserving the underlying ratios for custom heuristics.
+
+### 5) Z-space encoders and metric normalisers
 
 ```python
 import spiraltorch as st
@@ -449,7 +475,7 @@ without touching the underlying map. Feed the partials directly into
 keyword arguments accept every Z-space alias exposed by the wheel so you can
 mix hypergrad, Canvas, or coherence-derived metrics inline.
 
-### 5) Zero-copy tensor exchange via DLPack
+### 6) Zero-copy tensor exchange via DLPack
 
 ```python
 import spiraltorch as st
@@ -471,7 +497,7 @@ t2.mul_(2)
 print("ST sees torch mul_:", a2.tolist())
 ```
 
-### 6) Row softmax (GPU-accelerated when available)
+### 7) Row softmax (GPU-accelerated when available)
 
 ```python
 from spiraltorch import Axis, tensor, label_tensor
@@ -493,7 +519,7 @@ softmax = wave.row_softmax()
 print(softmax.axis_names())  # ('time', 'feature')
 ```
 
-### 7) rl.stAgent multi-armed bandit
+### 8) rl.stAgent multi-armed bandit
 
 ```python
 import torch
@@ -539,7 +565,7 @@ for k in range(2):
     print(f"arm {k}: pulls={pulls[k]}, empirical p≈{rate:.3f}")
 ```
 
-### 8) Self-supervised losses
+### 9) Self-supervised losses
 
 ```python
 import spiraltorch as st
@@ -554,7 +580,7 @@ mask = [[1], [0]]  # mask by column indices per row
 print("masked_mse:", st.selfsup.masked_mse(pred, tgt, mask))
 ```
 
-### 9) Z-space trainer
+### 10) Z-space trainer
 
 ```python
 import spiraltorch as st
@@ -567,7 +593,7 @@ samples = [
 print("z:", st.step_many(trainer, samples))
 ```
 
-### 10) Vision × Canvas
+### 11) Vision × Canvas
 
 ```python
 import spiraltorch as st
@@ -585,7 +611,7 @@ print("canvas summary:", snap.summary)
 print("patch[0][:3]:", snap.patch[0][:3] if snap.patch else None)
 ```
 
-### 11) NN data utilities
+### 12) NN data utilities
 
 ```python
 import spiraltorch as st
@@ -599,7 +625,7 @@ for x, y in loader:
     pass
 ```
 
-### 12) Recommender & RL
+### 13) Recommender & RL
 
 ```python
 import spiraltorch as st
@@ -609,7 +635,7 @@ rec.train_epoch([(0, 0, 5.0), (0, 1, 3.0), (1, 0, 4.0)])
 print("top-k:", rec.recommend_top_k(0, k=3))
 ```
 
-### 13) Interop (PyTorch / JAX / TensorFlow)
+### 14) Interop (PyTorch / JAX / TensorFlow)
 
 ```python
 import spiraltorch as st, torch
@@ -619,7 +645,7 @@ xt = st.compat.torch.to_torch(x, dtype=torch.float32, device="cpu")
 x_back = st.compat.torch.from_torch(xt)
 ```
 
-### 14) Math & pacing helpers
+### 15) Math & pacing helpers
 
 ```python
 import spiraltorch as st
