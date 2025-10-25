@@ -422,9 +422,9 @@ impl MeaningEmergenceMetrics {
         let mut indeterminate = 0;
         let mut frequency_flux = 0.0;
         let mut frequency_pairs = 0;
-        let mut previous_orientation = None;
-        let mut previous_lexical = None;
-        let mut previous_frequency = None;
+        let mut previous_orientation: Option<f32> = None;
+        let mut previous_lexical: Option<f32> = None;
+        let mut previous_frequency: Option<f32> = None;
 
         for projection in projections {
             if projection.label.is_none() {
