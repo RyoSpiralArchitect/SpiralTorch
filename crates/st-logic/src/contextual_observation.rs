@@ -22,7 +22,12 @@
 //! implementation of the descriptive-to-existential duality highlighted
 //! in the accompanying memo.
 
+use std::cmp::Ordering;
 use std::collections::VecDeque;
+use std::f32::consts::TAU;
+
+use num_complex::Complex32;
+use st_tensor::{PureResult, Tensor};
 
 /// Latent pure atoms — the unobservable `Â` and `𝐵̂` units.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -158,6 +163,26 @@ impl Arrangement {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContextualSignature {
+    pub boundary_edges: usize,
+    pub absolute_population_imbalance: usize,
+    pub cluster_imbalance: isize,
+}
+
+impl ContextualSignature {
+    pub fn meaning_weight(&self) -> f32 {
+        let boundary = self.boundary_edges as f32;
+        let population = self.absolute_population_imbalance as f32;
+        let cluster = self.cluster_imbalance.abs() as f32;
+        if boundary == 0.0 && population == 0.0 && cluster == 0.0 {
+            0.0
+        } else {
+            boundary + 0.5 * population + 0.25 * cluster
+        }
+    }
+}
+
 impl PureAtom {
     fn index(self) -> usize {
         match self {
@@ -208,6 +233,22 @@ impl ContextObserver {
         let flipped = arrangement.flipped();
         Self::observe(arrangement) == Self::observe(&flipped)
     }
+
+    /// Returns the contextual signature when the observer detects a
+    /// distinguishable pattern.
+    pub fn signature(arrangement: &Arrangement) -> Option<ContextualSignature> {
+        match Self::observe(arrangement) {
+            Observation::Signature {
+                boundary_edges,
+                absolute_population_imbalance,
+            } => Some(ContextualSignature {
+                boundary_edges,
+                absolute_population_imbalance,
+                cluster_imbalance: arrangement.cluster_imbalance(),
+            }),
+            Observation::Undetermined => None,
+        }
+    }
 }
 
 /// Orientation preferences (`c′`) for lifting the invariant signature
@@ -243,6 +284,13 @@ impl Label {
             Label::B => Label::A,
         }
     }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Label::A => "a",
+            Label::B => "b",
+        }
+    }
 }
 
 /// Lift the symmetric observation into an oriented label when possible.
@@ -263,6 +311,118 @@ pub fn lift_to_label(arrangement: &Arrangement, gauge: OrientationGauge) -> Opti
         Label::A
     };
     Some(gauge.apply(base))
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MeaningBasis {
+    signal: Tensor,
+    spectrum: Tensor,
+}
+
+impl MeaningBasis {
+    pub fn from_arrangement(arrangement: &Arrangement) -> PureResult<Self> {
+        let signal_values = arrangement_signal_values(arrangement);
+        let spectrum = arrangement_spectrum_from_signal(&signal_values)?;
+        let signal = Tensor::from_vec(1, signal_values.len(), signal_values)?;
+        Ok(Self { signal, spectrum })
+    }
+
+    pub fn signal(&self) -> &Tensor {
+        &self.signal
+    }
+
+    pub fn spectrum(&self) -> &Tensor {
+        &self.spectrum
+    }
+
+    pub fn dominant_frequency(&self) -> Option<(usize, f32)> {
+        self.spectrum
+            .data()
+            .iter()
+            .enumerate()
+            .max_by(|(_, left), (_, right)| match left.partial_cmp(right) {
+                Some(ordering) => ordering,
+                None => Ordering::Equal,
+            })
+            .map(|(index, magnitude)| (index, *magnitude))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MeaningProjection {
+    pub observation: Observation,
+    pub signature: Option<ContextualSignature>,
+    pub label: Option<Label>,
+    pub basis: MeaningBasis,
+    pub support: usize,
+}
+
+impl MeaningProjection {
+    pub fn from_arrangement(
+        arrangement: &Arrangement,
+        gauge: OrientationGauge,
+    ) -> PureResult<Self> {
+        let observation = ContextObserver::observe(arrangement);
+        let signature = ContextObserver::signature(arrangement);
+        let label = lift_to_label(arrangement, gauge);
+        let basis = MeaningBasis::from_arrangement(arrangement)?;
+        Ok(Self {
+            observation,
+            signature,
+            label,
+            basis,
+            support: arrangement.len(),
+        })
+    }
+
+    pub fn lexical_weight(&self) -> f32 {
+        self.signature
+            .as_ref()
+            .map(|signature| {
+                let support = self.support.max(1) as f32;
+                signature.meaning_weight() / support
+            })
+            .unwrap_or(0.0)
+    }
+
+    pub fn dominant_frequency_bin(&self) -> Option<(usize, f32)> {
+        self.basis.dominant_frequency()
+    }
+}
+
+fn arrangement_signal_values(arrangement: &Arrangement) -> Vec<f32> {
+    let mut signal = Vec::with_capacity(arrangement.len());
+    for atom in arrangement.placements.iter().copied() {
+        let value = match atom {
+            PureAtom::A => -1.0,
+            PureAtom::B => 1.0,
+        };
+        signal.push(value);
+    }
+    signal
+}
+
+fn arrangement_spectrum_from_signal(signal: &[f32]) -> PureResult<Tensor> {
+    let magnitudes = compute_spectrum(signal);
+    Tensor::from_vec(1, magnitudes.len(), magnitudes)
+}
+
+fn compute_spectrum(signal: &[f32]) -> Vec<f32> {
+    let n = signal.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let mut spectrum = Vec::with_capacity(n);
+    let scale = 1.0 / n as f32;
+    for k in 0..n {
+        let mut accumulator = Complex32::new(0.0, 0.0);
+        for (t, &sample) in signal.iter().enumerate() {
+            let phase = -TAU * k as f32 * t as f32 / n as f32;
+            accumulator += Complex32::from_polar(1.0, phase) * sample;
+        }
+        spectrum.push(accumulator.norm() * scale);
+    }
+    spectrum
 }
 
 #[cfg(test)]
@@ -328,5 +488,40 @@ mod tests {
             lift_to_label(&arrangement, OrientationGauge::Preserve),
             None
         );
+    }
+
+    #[test]
+    fn contextual_signature_tracks_cluster_imbalance() {
+        let arrangement =
+            Arrangement::from_line(vec![PureAtom::A, PureAtom::B, PureAtom::B, PureAtom::B]);
+        let signature = ContextObserver::signature(&arrangement).expect("signature");
+        assert_eq!(signature.boundary_edges, 1);
+        assert_eq!(signature.absolute_population_imbalance, 2);
+        assert_eq!(signature.cluster_imbalance, 0);
+        assert!(signature.meaning_weight() > 0.0);
+    }
+
+    #[test]
+    fn meaning_basis_extracts_signal_and_spectrum() {
+        let arrangement =
+            Arrangement::from_line(vec![PureAtom::A, PureAtom::B, PureAtom::A, PureAtom::B]);
+        let basis = MeaningBasis::from_arrangement(&arrangement).expect("basis");
+        assert_eq!(basis.signal().data(), &[-1.0, 1.0, -1.0, 1.0]);
+        let (bin, magnitude) = basis.dominant_frequency().expect("dominant frequency");
+        assert_eq!(bin, 2);
+        assert!(magnitude > 0.9);
+    }
+
+    #[test]
+    fn meaning_projection_combines_label_and_spectrum() {
+        let arrangement =
+            Arrangement::from_line(vec![PureAtom::A, PureAtom::B, PureAtom::B, PureAtom::B]);
+        let projection =
+            MeaningProjection::from_arrangement(&arrangement, OrientationGauge::Preserve)
+                .expect("projection");
+        assert_eq!(projection.label, Some(Label::B));
+        assert_eq!(projection.support, 4);
+        assert!(projection.lexical_weight() > 0.0);
+        assert!(projection.dominant_frequency_bin().is_some());
     }
 }
