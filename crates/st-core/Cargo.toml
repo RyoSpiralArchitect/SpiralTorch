@@ -22,7 +22,7 @@ logic    = ["dep:st-softlogic"]
 "logic-learn" = ["logic", "st-softlogic/learn_store"]
 kdsl     = ["dep:st-kdsl", "logic"]
 kv-redis = ["st-kv/redis"]
-psi      = ["dep:bitflags", "dep:once_cell", "dep:parking_lot"]
+psi      = ["dep:bitflags", "dep:once_cell", "dep:parking_lot", "dep:plotters"]
 psychoid = ["dep:once_cell"]
 collapse = ["psi"]
 apply_zscale = []
@@ -54,6 +54,7 @@ pollster    = { version = "0.3",  optional = true }
 wgpu        = { version = "0.20", optional = true, default-features = false, features = ["wgsl"] }
 bitflags    = { version = "2.4", optional = true }
 parking_lot = { version = "0.12", optional = true }
+plotters    = { version = "0.3", optional = true, default-features = false, features = ["bitmap_backend", "bitmap_encoder"] }
 
 st-backend-hip = { path = "../st-backend-hip", optional = true }
 st-softlogic   = { path = "../st-softlogic",   optional = true }
