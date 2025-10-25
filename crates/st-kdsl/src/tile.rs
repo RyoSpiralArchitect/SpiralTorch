@@ -284,7 +284,6 @@ impl TemplateStats {
             rg_seg: range(template.segments.iter().copied()),
         }
     }
-    configs
 }
 
 #[derive(Clone, Debug, Default)]

@@ -399,6 +399,295 @@ impl MeaningProjection {
     }
 }
 
+/// Quantifies how two contextual meaning projections relate across turns.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MeaningCoherence {
+    /// Alignment between lexical weights (0 = disjoint, 1 = identical).
+    pub lexical_alignment: f32,
+    /// Stability of the oriented label between projections.
+    pub orientation_stability: f32,
+    /// Cosine-like overlap between the spectral bases (0 = inverted, 1 = identical).
+    pub spectral_overlap: f32,
+    /// Consolidated continuity score (0 = rupture, 1 = fully coherent).
+    pub continuity: f32,
+    /// Complement of continuity; high values signal emergent rupture.
+    pub rupture: f32,
+    /// Normalised magnitude of the orientation delta.
+    pub orientation_delta: f32,
+}
+
+impl MeaningCoherence {
+    /// Measures coherence between a previous and next projection.
+    pub fn between(previous: &MeaningProjection, next: &MeaningProjection) -> Self {
+        let lexical_alignment = lexical_alignment(previous.lexical_weight(), next.lexical_weight());
+        let orientation_delta = orientation_delta(previous, next);
+        let orientation_stability = 1.0 - orientation_delta;
+        let spectral_overlap = spectral_overlap(previous.basis.spectrum(), next.basis.spectrum());
+        let continuity = (lexical_alignment + orientation_stability + spectral_overlap) / 3.0;
+        let rupture = (1.0 - continuity).clamp(0.0, 1.0);
+        Self {
+            lexical_alignment,
+            orientation_stability,
+            spectral_overlap,
+            continuity,
+            rupture,
+            orientation_delta,
+        }
+    }
+}
+
+/// Sample captured by the meaning coherence tracker.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MeaningCoherenceSample {
+    /// Timestamp (arbitrary units) describing when the observation landed.
+    pub ts: u64,
+    /// Computed coherence metrics for the transition into this observation.
+    pub coherence: MeaningCoherence,
+    /// Support delta relative to the prior observation.
+    pub delta_support: i64,
+    /// Orientation sign of the most recent projection.
+    pub orientation: f32,
+}
+
+/// Rolling tracker that turns sequential projections into continuity analytics.
+#[derive(Clone, Debug)]
+pub struct MeaningCoherenceTracker {
+    max_history: usize,
+    last: Option<MeaningProjection>,
+    history: VecDeque<MeaningCoherenceSample>,
+}
+
+impl MeaningCoherenceTracker {
+    /// Constructs a tracker keeping at most `max_history` recent coherence samples.
+    pub fn new(max_history: usize) -> Self {
+        let capacity = max_history.max(1);
+        Self {
+            max_history: capacity,
+            last: None,
+            history: VecDeque::with_capacity(capacity),
+        }
+    }
+
+    /// Observes the next projection in the sequence. Returns a sample when a
+    /// previous projection exists to compare with; otherwise `None`.
+    pub fn observe(
+        &mut self,
+        ts: u64,
+        projection: MeaningProjection,
+    ) -> Option<MeaningCoherenceSample> {
+        let result = self.last.as_ref().map(|previous| MeaningCoherenceSample {
+            ts,
+            coherence: MeaningCoherence::between(previous, &projection),
+            delta_support: projection.support as i64 - previous.support as i64,
+            orientation: projection.orientation_sign(),
+        });
+
+        if let Some(sample) = result.clone() {
+            if self.history.len() == self.max_history {
+                self.history.pop_front();
+            }
+            self.history.push_back(sample);
+        }
+
+        self.last = Some(projection);
+        result
+    }
+
+    /// Clears the internal state and history.
+    pub fn reset(&mut self) {
+        self.last = None;
+        self.history.clear();
+    }
+
+    /// Returns an iterator over the stored coherence samples.
+    pub fn history(&self) -> impl Iterator<Item = &MeaningCoherenceSample> {
+        self.history.iter()
+    }
+
+    /// Mean continuity across the stored history (defaults to 1.0 when empty).
+    pub fn continuity_score(&self) -> f32 {
+        if self.history.is_empty() {
+            1.0
+        } else {
+            let total: f32 = self
+                .history
+                .iter()
+                .map(|sample| sample.coherence.continuity)
+                .sum();
+            total / self.history.len() as f32
+        }
+    }
+
+    /// Builds a consolidated report describing the recent loop dynamics.
+    pub fn report(&self) -> Option<MeaningLoopReport> {
+        if self.history.is_empty() {
+            return None;
+        }
+        let len = self.history.len() as f32;
+        let continuity = self
+            .history
+            .iter()
+            .map(|sample| sample.coherence.continuity)
+            .sum::<f32>()
+            / len;
+        let rupture = self
+            .history
+            .iter()
+            .map(|sample| sample.coherence.rupture)
+            .sum::<f32>()
+            / len;
+
+        let lexical: Vec<f32> = self
+            .history
+            .iter()
+            .map(|sample| sample.coherence.lexical_alignment)
+            .collect();
+        let spectral: Vec<f32> = self
+            .history
+            .iter()
+            .map(|sample| sample.coherence.spectral_overlap)
+            .collect();
+        let (lexical_mean, lexical_variance) = mean_and_variance(&lexical);
+        let (spectral_mean, spectral_variance) = mean_and_variance(&spectral);
+        let orientation_bias = self
+            .history
+            .iter()
+            .map(|sample| sample.orientation)
+            .sum::<f32>()
+            / len;
+        let support_drift = self
+            .history
+            .iter()
+            .map(|sample| sample.delta_support.abs() as f32)
+            .sum::<f32>()
+            / len;
+        let orientation_delta_mean = self
+            .history
+            .iter()
+            .map(|sample| sample.coherence.orientation_delta)
+            .sum::<f32>()
+            / len;
+
+        Some(MeaningLoopReport {
+            continuity,
+            rupture,
+            lexical_mean,
+            lexical_variance,
+            spectral_mean,
+            spectral_variance,
+            orientation_bias,
+            support_drift,
+            orientation_delta_mean,
+        })
+    }
+}
+
+impl Default for MeaningCoherenceTracker {
+    fn default() -> Self {
+        Self::new(16)
+    }
+}
+
+/// Aggregate report emphasising how meaning is cohering or rupturing over time.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MeaningLoopReport {
+    pub continuity: f32,
+    pub rupture: f32,
+    pub lexical_mean: f32,
+    pub lexical_variance: f32,
+    pub spectral_mean: f32,
+    pub spectral_variance: f32,
+    pub orientation_bias: f32,
+    pub support_drift: f32,
+    pub orientation_delta_mean: f32,
+}
+
+impl MeaningLoopReport {
+    /// Classifies the generative intent emerging from the latest loop.
+    pub fn generative_intent(&self) -> GenerativeIntent {
+        if self.rupture > 0.55 || self.orientation_delta_mean > 0.75 {
+            GenerativeIntent::Rupture
+        } else if self.lexical_variance + self.spectral_variance > 0.15 {
+            GenerativeIntent::Explore
+        } else if self.continuity > 0.75 {
+            GenerativeIntent::Stabilise
+        } else {
+            GenerativeIntent::Idle
+        }
+    }
+}
+
+/// Coarse modes of behaviour the loop can settle into.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GenerativeIntent {
+    /// Continuity dominates, the loop reinforces existing meaning.
+    Stabilise,
+    /// Coherence fluctuates without rupturing; exploration dominates.
+    Explore,
+    /// The loop is actively producing discontinuities.
+    Rupture,
+    /// Low-signal or transitional behaviour.
+    Idle,
+}
+
+fn lexical_alignment(previous: f32, next: f32) -> f32 {
+    if previous <= f32::EPSILON && next <= f32::EPSILON {
+        1.0
+    } else {
+        let max_weight = previous.abs().max(next.abs()).max(f32::EPSILON);
+        let diff = (previous - next).abs();
+        (1.0 - diff / max_weight).clamp(0.0, 1.0)
+    }
+}
+
+fn orientation_delta(previous: &MeaningProjection, next: &MeaningProjection) -> f32 {
+    (previous.orientation_sign() - next.orientation_sign())
+        .abs()
+        .min(2.0)
+        * 0.5
+}
+
+fn spectral_overlap(previous: &Tensor, next: &Tensor) -> f32 {
+    let left = previous.data();
+    let right = next.data();
+    let len = left.len().min(right.len());
+    if len == 0 {
+        return 1.0;
+    }
+    let mut dot = 0.0f32;
+    let mut norm_left = 0.0f32;
+    let mut norm_right = 0.0f32;
+    for idx in 0..len {
+        let l = left[idx];
+        let r = right[idx];
+        dot += l * r;
+        norm_left += l * l;
+        norm_right += r * r;
+    }
+    if norm_left <= f32::EPSILON || norm_right <= f32::EPSILON {
+        return 1.0;
+    }
+    let denom = norm_left.sqrt() * norm_right.sqrt();
+    let cosine = (dot / denom).clamp(-1.0, 1.0);
+    0.5 * (cosine + 1.0)
+}
+
+fn mean_and_variance(values: &[f32]) -> (f32, f32) {
+    if values.is_empty() {
+        return (0.0, 0.0);
+    }
+    let mean = values.iter().sum::<f32>() / values.len() as f32;
+    let variance = values
+        .iter()
+        .map(|value| {
+            let deviation = value - mean;
+            deviation * deviation
+        })
+        .sum::<f32>()
+        / values.len() as f32;
+    (mean, variance)
+}
+
 /// Configuration describing how contextual meaning should be pushed through the
 /// Desire Lagrangian gate and into Z-space.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -690,5 +979,99 @@ mod tests {
         assert!(pulse.total_energy() > 0.0);
         assert!(pulse.support_mass() > 0.0);
         assert!(pulse.quality >= 0.0);
+    }
+
+    #[test]
+    fn meaning_coherence_identifies_alignment() {
+        let arrangement = Arrangement::from_line(vec![
+            PureAtom::A,
+            PureAtom::A,
+            PureAtom::B,
+            PureAtom::B,
+            PureAtom::B,
+        ]);
+        let projection_a =
+            MeaningProjection::from_arrangement(&arrangement, OrientationGauge::Preserve)
+                .expect("projection_a");
+        let projection_b =
+            MeaningProjection::from_arrangement(&arrangement, OrientationGauge::Preserve)
+                .expect("projection_b");
+
+        let coherence = MeaningCoherence::between(&projection_a, &projection_b);
+        assert!(coherence.lexical_alignment > 0.99);
+        assert!(coherence.spectral_overlap > 0.99);
+        assert!(coherence.orientation_stability > 0.99);
+        assert!(coherence.rupture < 0.01);
+        assert!(coherence.continuity > 0.99);
+    }
+
+    #[test]
+    fn tracker_reports_stable_loop() {
+        let arrangement = Arrangement::from_line(vec![
+            PureAtom::A,
+            PureAtom::A,
+            PureAtom::B,
+            PureAtom::B,
+            PureAtom::B,
+        ]);
+        let projection_a =
+            MeaningProjection::from_arrangement(&arrangement, OrientationGauge::Preserve)
+                .expect("projection_a");
+        let projection_b =
+            MeaningProjection::from_arrangement(&arrangement, OrientationGauge::Preserve)
+                .expect("projection_b");
+
+        let mut tracker = MeaningCoherenceTracker::default();
+        assert!(tracker.observe(0, projection_a.clone()).is_none());
+        let sample = tracker
+            .observe(1, projection_b.clone())
+            .expect("coherence sample");
+        assert!(sample.coherence.continuity > 0.99);
+        assert_eq!(tracker.history().count(), 1);
+
+        let report = tracker.report().expect("report");
+        assert!(report.continuity > 0.99);
+        assert!(report.rupture < 0.01);
+        assert_eq!(report.generative_intent(), GenerativeIntent::Stabilise);
+    }
+
+    #[test]
+    fn tracker_detects_rupture_intent() {
+        let arrangement_a = Arrangement::from_line(vec![
+            PureAtom::A,
+            PureAtom::A,
+            PureAtom::B,
+            PureAtom::B,
+            PureAtom::B,
+        ]);
+        let arrangement_b = Arrangement::from_line(vec![
+            PureAtom::A,
+            PureAtom::B,
+            PureAtom::A,
+            PureAtom::B,
+            PureAtom::A,
+        ]);
+        let arrangement_c = arrangement_b.flipped();
+
+        let projection_a =
+            MeaningProjection::from_arrangement(&arrangement_a, OrientationGauge::Preserve)
+                .expect("projection_a");
+        let projection_b =
+            MeaningProjection::from_arrangement(&arrangement_b, OrientationGauge::Preserve)
+                .expect("projection_b");
+        let projection_c =
+            MeaningProjection::from_arrangement(&arrangement_c, OrientationGauge::Preserve)
+                .expect("projection_c");
+
+        let mut tracker = MeaningCoherenceTracker::new(4);
+        assert!(tracker.observe(0, projection_a).is_none());
+        tracker.observe(1, projection_b).expect("second sample");
+        tracker.observe(2, projection_c).expect("third sample");
+
+        let report = tracker.report().expect("report");
+        assert!(report.orientation_delta_mean > 0.9);
+        assert!(report.rupture > 0.3);
+        assert_eq!(report.generative_intent(), GenerativeIntent::Rupture);
+        assert!(report.support_drift >= 0.0);
     }
 }
