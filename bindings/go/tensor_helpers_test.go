@@ -362,3 +362,29 @@ func TestRuntimeParallelAddErrorPropagation(t *testing.T) {
 		t.Fatalf("expected error from ParallelAdd with mismatched shapes")
 	}
 }
+
+func TestRoundtableClassifyBatchesGradient(t *testing.T) {
+	gradient := []float32{0.9, 0.1, 0.5, 0.05, 0.2, 0.8, 0.4, 0.02}
+	bands, summary, err := RoundtableClassify(gradient, 2, 3, 2, 0.01)
+	if err != nil {
+		t.Fatalf("RoundtableClassify returned error: %v", err)
+	}
+	if len(bands) != len(gradient) {
+		t.Fatalf("expected %d bands but received %d", len(gradient), len(bands))
+	}
+	if summary.Above != 2 || summary.Beneath != 2 || summary.Here != len(gradient)-4 {
+		t.Fatalf("unexpected counts: %+v", summary)
+	}
+	if summary.EnergyAbove <= summary.EnergyBeneath {
+		t.Fatalf("expected Above energy to dominate Beneath: %+v", summary)
+	}
+	if bands[0] != RoundtableBandAbove {
+		t.Fatalf("expected first lane to land in Above but found %s", bands[0])
+	}
+}
+
+func TestRoundtableClassifyRequiresGradient(t *testing.T) {
+	if _, _, err := RoundtableClassify([]float32{}, 1, 1, 1, 0); err == nil {
+		t.Fatalf("expected error for empty gradient")
+	}
+}

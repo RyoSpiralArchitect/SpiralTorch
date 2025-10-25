@@ -359,7 +359,9 @@ impl HeurOpLog {
     /// are sorted by their declared weight and issuance timestamp so consumers
     /// can replay the most influential changes.
     pub fn top_winners(&self, limit: usize) -> Vec<HeurOp> {
-        use std::cmp::Ordering;
+        if limit == 0 {
+            return Vec::new();
+        }
 
         if limit == 0 {
             return Vec::new();

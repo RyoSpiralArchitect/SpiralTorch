@@ -2,14 +2,23 @@ use std::{f64::consts::PI, time::Duration};
 
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::PyModule;
+use pyo3::types::{PyDict, PyList, PyModule};
 use pyo3::{wrap_pyfunction, Bound};
 
+use st_core::telemetry::atlas::AtlasFragment;
+#[cfg(feature = "psi")]
+use st_core::telemetry::psi::PsiReading;
 use st_core::theory::zpulse::{ZPulse, ZScale, ZSource, ZSupport};
+#[cfg(feature = "golden")]
+use st_nn::golden::{GoldenBlackcatPulse, GoldenCooperativeDirective};
+#[cfg(feature = "psi")]
+use st_nn::zspace_coherence::psi_synchro::BranchPsiReading;
+#[cfg(feature = "golden")]
+use st_nn::zspace_coherence::psi_synchro::{heatmaps_to_golden_telemetry, PsiGoldenTelemetry};
 use st_nn::zspace_coherence::psi_synchro::{
-    heatmaps_to_zpulses, run_multibranch_demo as run_multibranch_demo_rs, ArnoldTongueSummary,
-    CircleLockMapConfig, HeatmapResult, MetaMembConfig, PsiBranchState, PsiSynchroConfig,
-    PsiSynchroPulse,
+    run_zspace_learning_pass as run_zspace_learning_rs, ArnoldTongueSummary, BranchAtlasFragment,
+    CircleLockMapConfig, HeatmapAnalytics, HeatmapResult, MetaMembConfig, PsiBranchState,
+    PsiSynchroConfig, PsiSynchroPulse, PsiSynchroResult, PsiTelemetryConfig,
 };
 
 fn vec3_or_default(values: Option<Vec<f64>>, default: [f64; 3], name: &str) -> PyResult<[f64; 3]> {
@@ -50,6 +59,39 @@ fn support_to_tuple(support: ZSupport) -> (f32, f32, f32) {
 
 fn scale_to_tuple(scale: Option<ZScale>) -> Option<(f32, f32)> {
     scale.map(|s| (s.physical_radius, s.log_radius))
+}
+
+fn atlas_fragment_to_py(py: Python<'_>, fragment: AtlasFragment) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("timestamp", fragment.timestamp)?;
+    dict.set_item("loop_support", fragment.loop_support)?;
+    dict.set_item("collapse_total", fragment.collapse_total)?;
+    dict.set_item("z_signal", fragment.z_signal)?;
+    dict.set_item("script_hint", fragment.script_hint)?;
+    let metrics = PyList::empty_bound(py);
+    for metric in fragment.metrics.iter() {
+        let metric_dict = PyDict::new_bound(py);
+        metric_dict.set_item("name", metric.name.clone())?;
+        metric_dict.set_item("value", metric.value)?;
+        metric_dict.set_item("district", metric.district.clone())?;
+        metrics.append(metric_dict)?;
+    }
+    dict.set_item("metrics", metrics)?;
+    dict.set_item("notes", fragment.notes.clone())?;
+    Ok(dict.into())
+}
+
+#[cfg(feature = "psi")]
+fn psi_reading_to_py(py: Python<'_>, reading: PsiReading) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("total", reading.total)?;
+    dict.set_item("step", reading.step)?;
+    let breakdown = PyDict::new_bound(py);
+    for (component, value) in reading.breakdown.iter() {
+        breakdown.set_item(component.to_string(), *value)?;
+    }
+    dict.set_item("breakdown", breakdown)?;
+    Ok(dict.into())
 }
 
 #[pyclass(module = "spiraltorch.psi", name = "MetaMembConfig")]
@@ -208,6 +250,150 @@ impl PyCircleLockMapConfig {
     }
 }
 
+#[pyclass(module = "spiraltorch.psi", name = "PsiTelemetryConfig")]
+#[derive(Clone)]
+pub(crate) struct PyPsiTelemetryConfig {
+    pub(crate) inner: PsiTelemetryConfig,
+}
+
+impl PyPsiTelemetryConfig {
+    fn from_config(inner: PsiTelemetryConfig) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PyPsiTelemetryConfig {
+    #[cfg(all(feature = "psi", feature = "golden"))]
+    #[new]
+    #[pyo3(
+        signature = (
+            *,
+            emit_atlas=true,
+            atlas_timestamp=None,
+            emit_psi=true,
+            psi_step_base=0,
+            emit_golden=true,
+            golden_baseline_interval=30.0,
+            golden_baseline_window=32,
+        )
+    )]
+    pub fn new(
+        emit_atlas: bool,
+        atlas_timestamp: Option<f32>,
+        emit_psi: bool,
+        psi_step_base: u64,
+        emit_golden: bool,
+        golden_baseline_interval: f64,
+        golden_baseline_window: usize,
+    ) -> Self {
+        let mut inner = PsiTelemetryConfig::default();
+        inner.emit_atlas = emit_atlas;
+        inner.atlas_timestamp = atlas_timestamp;
+        inner.emit_psi = emit_psi;
+        inner.psi_step_base = psi_step_base;
+        inner.emit_golden = emit_golden;
+        inner.golden_baseline_interval = Duration::from_secs_f64(golden_baseline_interval.max(0.0));
+        inner.golden_baseline_window = golden_baseline_window;
+        Self { inner }
+    }
+
+    #[cfg(all(feature = "psi", not(feature = "golden")))]
+    #[new]
+    #[pyo3(signature = (*, emit_atlas=true, atlas_timestamp=None, emit_psi=true, psi_step_base=0))]
+    pub fn new_no_golden(
+        emit_atlas: bool,
+        atlas_timestamp: Option<f32>,
+        emit_psi: bool,
+        psi_step_base: u64,
+    ) -> Self {
+        let mut inner = PsiTelemetryConfig::default();
+        inner.emit_atlas = emit_atlas;
+        inner.atlas_timestamp = atlas_timestamp;
+        inner.emit_psi = emit_psi;
+        inner.psi_step_base = psi_step_base;
+        Self { inner }
+    }
+
+    #[cfg(all(not(feature = "psi"), feature = "golden"))]
+    #[new]
+    #[pyo3(
+        signature = (
+            *,
+            emit_atlas=true,
+            atlas_timestamp=None,
+            emit_golden=true,
+            golden_baseline_interval=30.0,
+            golden_baseline_window=32,
+        )
+    )]
+    pub fn new_no_psi(
+        emit_atlas: bool,
+        atlas_timestamp: Option<f32>,
+        emit_golden: bool,
+        golden_baseline_interval: f64,
+        golden_baseline_window: usize,
+    ) -> Self {
+        let mut inner = PsiTelemetryConfig::default();
+        inner.emit_atlas = emit_atlas;
+        inner.atlas_timestamp = atlas_timestamp;
+        inner.emit_golden = emit_golden;
+        inner.golden_baseline_interval = Duration::from_secs_f64(golden_baseline_interval.max(0.0));
+        inner.golden_baseline_window = golden_baseline_window;
+        Self { inner }
+    }
+
+    #[cfg(all(not(feature = "psi"), not(feature = "golden")))]
+    #[new]
+    #[pyo3(signature = (*, emit_atlas=true, atlas_timestamp=None))]
+    pub fn new_minimal(emit_atlas: bool, atlas_timestamp: Option<f32>) -> Self {
+        let mut inner = PsiTelemetryConfig::default();
+        inner.emit_atlas = emit_atlas;
+        inner.atlas_timestamp = atlas_timestamp;
+        Self { inner }
+    }
+
+    #[getter]
+    pub fn emit_atlas(&self) -> bool {
+        self.inner.emit_atlas
+    }
+
+    #[getter]
+    pub fn atlas_timestamp(&self) -> Option<f32> {
+        self.inner.atlas_timestamp
+    }
+
+    #[cfg(feature = "psi")]
+    #[getter]
+    pub fn emit_psi(&self) -> bool {
+        self.inner.emit_psi
+    }
+
+    #[cfg(feature = "psi")]
+    #[getter]
+    pub fn psi_step_base(&self) -> u64 {
+        self.inner.psi_step_base
+    }
+
+    #[cfg(feature = "golden")]
+    #[getter]
+    pub fn emit_golden(&self) -> bool {
+        self.inner.emit_golden
+    }
+
+    #[cfg(feature = "golden")]
+    #[getter]
+    pub fn golden_baseline_interval(&self) -> f64 {
+        self.inner.golden_baseline_interval.as_secs_f64()
+    }
+
+    #[cfg(feature = "golden")]
+    #[getter]
+    pub fn golden_baseline_window(&self) -> usize {
+        self.inner.golden_baseline_window
+    }
+}
+
 #[pyclass(module = "spiraltorch.psi", name = "PsiSynchroConfig")]
 #[derive(Clone)]
 pub(crate) struct PyPsiSynchroConfig {
@@ -217,7 +403,7 @@ pub(crate) struct PyPsiSynchroConfig {
 #[pymethods]
 impl PyPsiSynchroConfig {
     #[new]
-    #[pyo3(signature = (step=0.01, samples=1000, ticker_interval=None, min_ident_points=600, max_ident_points=2400, metamemb=None, circle_map=None))]
+    #[pyo3(signature = (step=0.01, samples=1000, ticker_interval=None, min_ident_points=600, max_ident_points=2400, metamemb=None, circle_map=None, telemetry=None))]
     pub fn new(
         step: f64,
         samples: usize,
@@ -226,6 +412,7 @@ impl PyPsiSynchroConfig {
         max_ident_points: usize,
         metamemb: Option<&Bound<PyMetaMembConfig>>,
         circle_map: Option<&Bound<PyCircleLockMapConfig>>,
+        telemetry: Option<&Bound<PyPsiTelemetryConfig>>,
     ) -> PyResult<Self> {
         let mut inner = PsiSynchroConfig::default();
         inner.step = step;
@@ -238,6 +425,9 @@ impl PyPsiSynchroConfig {
         }
         if let Some(cfg) = circle_map {
             inner.circle_map = cfg.borrow().inner.clone();
+        }
+        if let Some(cfg) = telemetry {
+            inner.telemetry = Some(cfg.borrow().inner.clone());
         }
         Ok(Self { inner })
     }
@@ -282,6 +472,14 @@ impl PyPsiSynchroConfig {
     #[getter]
     pub fn circle_map(&self) -> PyCircleLockMapConfig {
         PyCircleLockMapConfig::from_config(self.inner.circle_map.clone())
+    }
+
+    #[getter]
+    pub fn telemetry(&self) -> Option<PyPsiTelemetryConfig> {
+        self.inner
+            .telemetry
+            .clone()
+            .map(PyPsiTelemetryConfig::from_config)
     }
 }
 
@@ -418,6 +616,119 @@ impl PyArnoldTongue {
     }
 }
 
+#[pyclass(module = "spiraltorch.psi", name = "HeatmapAnalytics")]
+#[derive(Clone)]
+pub(crate) struct PyHeatmapAnalytics {
+    inner: HeatmapAnalytics,
+}
+
+impl PyHeatmapAnalytics {
+    fn from_inner(inner: HeatmapAnalytics) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PyHeatmapAnalytics {
+    #[getter]
+    pub fn total_energy(&self) -> f64 {
+        self.inner.total_energy
+    }
+
+    #[getter]
+    pub fn leading_sum(&self) -> f64 {
+        self.inner.leading_sum
+    }
+
+    #[getter]
+    pub fn central_sum(&self) -> f64 {
+        self.inner.central_sum
+    }
+
+    #[getter]
+    pub fn trailing_sum(&self) -> f64 {
+        self.inner.trailing_sum
+    }
+
+    #[getter]
+    pub fn leading_norm(&self) -> f64 {
+        self.inner.leading_norm as f64
+    }
+
+    #[getter]
+    pub fn central_norm(&self) -> f64 {
+        self.inner.central_norm as f64
+    }
+
+    #[getter]
+    pub fn trailing_norm(&self) -> f64 {
+        self.inner.trailing_norm as f64
+    }
+
+    #[getter]
+    pub fn dominant_lam(&self) -> f64 {
+        self.inner.dominant_lam
+    }
+
+    #[getter]
+    pub fn dominant_wd(&self) -> f64 {
+        self.inner.dominant_wd
+    }
+
+    #[getter]
+    pub fn peak_value(&self) -> f64 {
+        self.inner.peak_value
+    }
+
+    #[getter]
+    pub fn peak_ratio(&self) -> f64 {
+        self.inner.peak_ratio as f64
+    }
+
+    #[getter]
+    pub fn radius(&self) -> f64 {
+        self.inner.radius as f64
+    }
+
+    #[getter]
+    pub fn log_radius(&self) -> f64 {
+        self.inner.log_radius as f64
+    }
+
+    #[getter]
+    pub fn bias(&self) -> f64 {
+        self.inner.bias as f64
+    }
+
+    #[getter]
+    pub fn drift(&self) -> f64 {
+        self.inner.drift as f64
+    }
+
+    #[getter]
+    pub fn quality(&self) -> f64 {
+        self.inner.quality as f64
+    }
+
+    #[getter]
+    pub fn stderr(&self) -> f64 {
+        self.inner.stderr as f64
+    }
+
+    #[getter]
+    pub fn entropy(&self) -> f64 {
+        self.inner.entropy as f64
+    }
+
+    pub fn band_energy(&self) -> (f64, f64, f64) {
+        (
+            self.inner.leading_norm as f64,
+            self.inner.central_norm as f64,
+            self.inner.trailing_norm as f64,
+        )
+    }
+}
+
 #[pyclass(module = "spiraltorch.psi", name = "HeatmapResult")]
 #[derive(Clone)]
 pub(crate) struct PyHeatmapResult {
@@ -477,6 +788,30 @@ impl PyHeatmapResult {
             .dominant_tongue()
             .cloned()
             .map(PyArnoldTongue::from_inner)
+    }
+
+    pub fn analyse(&self) -> Option<PyHeatmapAnalytics> {
+        self.inner.analyse().map(PyHeatmapAnalytics::from_inner)
+    }
+
+    #[pyo3(signature = (timestamp=None))]
+    pub fn to_atlas_fragment(
+        &self,
+        py: Python<'_>,
+        timestamp: Option<f32>,
+    ) -> PyResult<Option<PyObject>> {
+        match self.inner.to_atlas_fragment(timestamp) {
+            Some(fragment) => atlas_fragment_to_py(py, fragment).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    #[cfg(feature = "psi")]
+    pub fn to_psi_reading(&self, py: Python<'_>, step: u64) -> PyResult<Option<PyObject>> {
+        match self.inner.to_psi_reading(step) {
+            Some(reading) => psi_reading_to_py(py, reading).map(Some),
+            None => Ok(None),
+        }
     }
 
     pub fn to_zpulse(&self, ts: u64) -> PyZPulse {
@@ -583,16 +918,200 @@ impl PyPsiSynchroPulse {
     }
 }
 
+#[cfg(feature = "golden")]
+#[pyclass(module = "spiraltorch.psi", name = "GoldenPulse")]
+#[derive(Clone)]
+pub(crate) struct PyGoldenPulse {
+    inner: GoldenBlackcatPulse,
+}
+
+#[cfg(feature = "golden")]
+impl PyGoldenPulse {
+    fn from_pulse(inner: GoldenBlackcatPulse) -> Self {
+        Self { inner }
+    }
+}
+
+#[cfg(feature = "golden")]
+#[pymethods]
+impl PyGoldenPulse {
+    #[getter]
+    pub fn exploration_drive(&self) -> f32 {
+        self.inner.exploration_drive
+    }
+
+    #[getter]
+    pub fn optimization_gain(&self) -> f32 {
+        self.inner.optimization_gain
+    }
+
+    #[getter]
+    pub fn synergy_score(&self) -> f32 {
+        self.inner.synergy_score
+    }
+
+    #[getter]
+    pub fn reinforcement_weight(&self) -> f32 {
+        self.inner.reinforcement_weight
+    }
+
+    #[getter]
+    pub fn mean_support(&self) -> f32 {
+        self.inner.mean_support
+    }
+
+    #[getter]
+    pub fn mean_reward(&self) -> f64 {
+        self.inner.mean_reward
+    }
+
+    #[getter]
+    pub fn mean_psi(&self) -> f32 {
+        self.inner.mean_psi
+    }
+
+    #[getter]
+    pub fn mean_confidence(&self) -> f32 {
+        self.inner.mean_confidence
+    }
+
+    #[getter]
+    pub fn coverage(&self) -> usize {
+        self.inner.coverage
+    }
+
+    #[getter]
+    pub fn heuristics_contributions(&self) -> usize {
+        self.inner.heuristics_contributions
+    }
+
+    #[getter]
+    pub fn append_weight(&self) -> f32 {
+        self.inner.append_weight
+    }
+
+    #[getter]
+    pub fn retract_count(&self) -> usize {
+        self.inner.retract_count
+    }
+
+    #[getter]
+    pub fn annotate_count(&self) -> usize {
+        self.inner.annotate_count
+    }
+
+    #[getter]
+    pub fn dominant_plan(&self) -> Option<String> {
+        self.inner.dominant_plan.clone()
+    }
+
+    pub fn is_idle(&self) -> bool {
+        self.inner.is_idle()
+    }
+}
+
+#[cfg(feature = "golden")]
+#[pyclass(module = "spiraltorch.psi", name = "GoldenDirective")]
+#[derive(Clone)]
+pub(crate) struct PyGoldenDirective {
+    inner: GoldenCooperativeDirective,
+}
+
+#[cfg(feature = "golden")]
+impl PyGoldenDirective {
+    fn from_directive(inner: GoldenCooperativeDirective) -> Self {
+        Self { inner }
+    }
+}
+
+#[cfg(feature = "golden")]
+#[pymethods]
+impl PyGoldenDirective {
+    #[getter]
+    pub fn push_interval(&self) -> f64 {
+        self.inner.push_interval.as_secs_f64()
+    }
+
+    #[getter]
+    pub fn summary_window(&self) -> usize {
+        self.inner.summary_window
+    }
+
+    #[getter]
+    pub fn exploration_priority(&self) -> f32 {
+        self.inner.exploration_priority
+    }
+
+    #[getter]
+    pub fn reinforcement_weight(&self) -> f32 {
+        self.inner.reinforcement_weight
+    }
+}
+
+#[cfg(feature = "golden")]
+#[pyclass(module = "spiraltorch.psi", name = "GoldenPsiTelemetry")]
+#[derive(Clone)]
+pub(crate) struct PyGoldenPsiTelemetry {
+    inner: PsiGoldenTelemetry,
+}
+
+#[cfg(feature = "golden")]
+impl PyGoldenPsiTelemetry {
+    fn from_inner(inner: PsiGoldenTelemetry) -> Self {
+        Self { inner }
+    }
+}
+
+#[cfg(feature = "golden")]
+#[pymethods]
+impl PyGoldenPsiTelemetry {
+    #[getter]
+    pub fn branch_id(&self) -> &str {
+        &self.inner.branch_id
+    }
+
+    #[getter]
+    pub fn pulse(&self) -> PyGoldenPulse {
+        PyGoldenPulse::from_pulse(self.inner.pulse.clone())
+    }
+
+    #[getter]
+    pub fn directive(&self) -> PyGoldenDirective {
+        PyGoldenDirective::from_directive(self.inner.directive.clone())
+    }
+}
+
 #[pyclass(module = "spiraltorch.psi", name = "PsiSynchroResult")]
 #[derive(Clone)]
 pub(crate) struct PyPsiSynchroResult {
     heatmaps: Vec<HeatmapResult>,
     pulses: Vec<PsiSynchroPulse>,
+    atlas: Vec<BranchAtlasFragment>,
+    #[cfg(feature = "psi")]
+    psi: Vec<BranchPsiReading>,
+    #[cfg(feature = "golden")]
+    golden: Vec<PsiGoldenTelemetry>,
+    #[cfg(feature = "golden")]
+    golden_baseline_interval: f64,
+    #[cfg(feature = "golden")]
+    golden_baseline_window: usize,
 }
 
 impl PyPsiSynchroResult {
-    fn from_parts(heatmaps: Vec<HeatmapResult>, pulses: Vec<PsiSynchroPulse>) -> Self {
-        Self { heatmaps, pulses }
+    fn from_result(result: PsiSynchroResult) -> Self {
+        Self {
+            heatmaps: result.heatmaps,
+            pulses: result.pulses,
+            atlas: result.atlas_fragments,
+            #[cfg(feature = "psi")]
+            psi: result.psi_readings,
+            #[cfg(feature = "golden")]
+            golden: result.golden_telemetry,
+            #[cfg(feature = "golden")]
+            golden_baseline_interval: result.golden_baseline_interval.as_secs_f64(),
+            #[cfg(feature = "golden")]
+            golden_baseline_window: result.golden_baseline_window,
+        }
     }
 }
 
@@ -616,6 +1135,29 @@ impl PyPsiSynchroResult {
             .collect()
     }
 
+    pub fn atlas_fragments(&self, py: Python<'_>) -> PyResult<Vec<(String, PyObject)>> {
+        self.atlas
+            .iter()
+            .cloned()
+            .map(|entry| {
+                let fragment = atlas_fragment_to_py(py, entry.fragment)?;
+                Ok((entry.branch_id, fragment))
+            })
+            .collect()
+    }
+
+    #[cfg(feature = "psi")]
+    pub fn psi_readings(&self, py: Python<'_>) -> PyResult<Vec<(String, PyObject)>> {
+        self.psi
+            .iter()
+            .cloned()
+            .map(|entry| {
+                let reading = psi_reading_to_py(py, entry.reading)?;
+                Ok((entry.branch_id, reading))
+            })
+            .collect()
+    }
+
     pub fn by_branch(&self) -> Vec<(String, PyZPulse)> {
         self.pulses
             .iter()
@@ -626,6 +1168,69 @@ impl PyPsiSynchroResult {
             })
             .collect()
     }
+
+    #[cfg(feature = "golden")]
+    #[getter]
+    pub fn golden(&self) -> Vec<PyGoldenPsiTelemetry> {
+        self.golden
+            .iter()
+            .cloned()
+            .map(PyGoldenPsiTelemetry::from_inner)
+            .collect()
+    }
+
+    #[cfg(feature = "golden")]
+    #[getter]
+    pub fn golden_baseline_interval(&self) -> f64 {
+        self.golden_baseline_interval
+    }
+
+    #[cfg(feature = "golden")]
+    #[getter]
+    pub fn golden_baseline_window(&self) -> usize {
+        self.golden_baseline_window
+    }
+
+    #[cfg(feature = "golden")]
+    #[pyo3(signature = (baseline_interval=30.0, baseline_window=32))]
+    pub fn golden_telemetry(
+        &self,
+        baseline_interval: f64,
+        baseline_window: usize,
+    ) -> Vec<PyGoldenPsiTelemetry> {
+        let interval = Duration::from_secs_f64(baseline_interval.max(0.0));
+        if (baseline_interval - self.golden_baseline_interval).abs() <= f64::EPSILON
+            && baseline_window == self.golden_baseline_window
+        {
+            return self
+                .golden
+                .iter()
+                .cloned()
+                .map(PyGoldenPsiTelemetry::from_inner)
+                .collect();
+        }
+        heatmaps_to_golden_telemetry(&self.heatmaps, interval, baseline_window)
+            .into_iter()
+            .map(PyGoldenPsiTelemetry::from_inner)
+            .collect()
+    }
+}
+
+fn parse_branch_states(py: Python<'_>, branches: &Bound<PyAny>) -> PyResult<Vec<PsiBranchState>> {
+    let branch_objs: Vec<Py<PyPsiBranchState>> = branches.extract()?;
+    branch_objs
+        .into_iter()
+        .map(|branch| {
+            let guard = branch.borrow(py);
+            Ok(guard.inner.clone())
+        })
+        .collect()
+}
+
+fn resolve_synchro_config(config: Option<&Bound<PyPsiSynchroConfig>>) -> PsiSynchroConfig {
+    config
+        .map(|cfg| cfg.borrow().inner.clone())
+        .unwrap_or_else(PsiSynchroConfig::default)
 }
 
 #[pyfunction(name = "run_multibranch_demo")]
@@ -635,52 +1240,69 @@ pub fn run_multibranch_demo_py(
     branches: &Bound<PyAny>,
     config: Option<&Bound<PyPsiSynchroConfig>>,
 ) -> PyResult<Py<PyPsiSynchroResult>> {
-    let branch_objs: Vec<Py<PyPsiBranchState>> = branches.extract()?;
-    let branch_states: Vec<PsiBranchState> = branch_objs
-        .into_iter()
-        .map(|branch| {
-            let guard = branch.borrow(py);
-            Ok(guard.inner.clone())
-        })
-        .collect::<PyResult<_>>()?;
+    let branch_states = parse_branch_states(py, branches)?;
+    let config = resolve_synchro_config(config);
+    let result = run_zspace_learning_rs(config, branch_states);
+    Py::new(py, PyPsiSynchroResult::from_result(result))
+}
 
-    let config = match config {
-        Some(cfg) => cfg.borrow().inner.clone(),
-        None => PsiSynchroConfig::default(),
-    };
-
-    let heatmaps = run_multibranch_demo_rs(config, branch_states);
-    let pulses = heatmaps_to_zpulses(&heatmaps);
-    Py::new(py, PyPsiSynchroResult::from_parts(heatmaps, pulses))
+#[pyfunction(name = "run_zspace_learning")]
+#[pyo3(signature = (branches, config=None))]
+pub fn run_zspace_learning_py(
+    py: Python<'_>,
+    branches: &Bound<PyAny>,
+    config: Option<&Bound<PyPsiSynchroConfig>>,
+) -> PyResult<Py<PyPsiSynchroResult>> {
+    let branch_states = parse_branch_states(py, branches)?;
+    let config = resolve_synchro_config(config);
+    let result = run_zspace_learning_rs(config, branch_states);
+    Py::new(py, PyPsiSynchroResult::from_result(result))
 }
 
 pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     let module = PyModule::new_bound(py, "psi")?;
     module.add_class::<PyMetaMembConfig>()?;
     module.add_class::<PyCircleLockMapConfig>()?;
+    module.add_class::<PyPsiTelemetryConfig>()?;
     module.add_class::<PyPsiSynchroConfig>()?;
     module.add_class::<PyPsiBranchState>()?;
     module.add_class::<PyArnoldTongue>()?;
+    module.add_class::<PyHeatmapAnalytics>()?;
     module.add_class::<PyHeatmapResult>()?;
     module.add_class::<PyZPulse>()?;
     module.add_class::<PyPsiSynchroPulse>()?;
+    #[cfg(feature = "golden")]
+    module.add_class::<PyGoldenPulse>()?;
+    #[cfg(feature = "golden")]
+    module.add_class::<PyGoldenDirective>()?;
+    #[cfg(feature = "golden")]
+    module.add_class::<PyGoldenPsiTelemetry>()?;
     module.add_class::<PyPsiSynchroResult>()?;
     module.add_function(wrap_pyfunction!(run_multibranch_demo_py, &module)?)?;
-    module.add(
-        "__all__",
-        vec![
-            "MetaMembConfig",
-            "CircleLockMapConfig",
-            "PsiSynchroConfig",
-            "PsiBranchState",
-            "ArnoldTonguePeak",
-            "HeatmapResult",
-            "ZPulseSnapshot",
-            "PsiSynchroPulse",
-            "PsiSynchroResult",
-            "run_multibranch_demo",
-        ],
-    )?;
+    module.add_function(wrap_pyfunction!(run_zspace_learning_py, &module)?)?;
+    #[cfg_attr(not(feature = "golden"), allow(unused_mut))]
+    let mut exports = vec![
+        "MetaMembConfig",
+        "CircleLockMapConfig",
+        "PsiTelemetryConfig",
+        "PsiSynchroConfig",
+        "PsiBranchState",
+        "ArnoldTonguePeak",
+        "HeatmapAnalytics",
+        "HeatmapResult",
+        "ZPulseSnapshot",
+        "PsiSynchroPulse",
+        "PsiSynchroResult",
+        "run_multibranch_demo",
+        "run_zspace_learning",
+    ];
+    #[cfg(feature = "golden")]
+    {
+        exports.push("GoldenPulse");
+        exports.push("GoldenDirective");
+        exports.push("GoldenPsiTelemetry");
+    }
+    module.add("__all__", exports)?;
     parent.add_submodule(&module)?;
     Ok(())
 }

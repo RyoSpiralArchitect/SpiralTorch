@@ -90,4 +90,24 @@ func main() {
 			fmt.Printf("  %v\n", row)
 		}
 	}
+
+	// Collapse the first sum into a gradient vector and classify it across roundtable bands.
+	gradient := []float32{}
+	first, err := sums[0].ToMatrix()
+	if err != nil {
+		log.Fatalf("ToMatrix for roundtable gradient failed: %v", err)
+	}
+	for _, row := range first {
+		gradient = append(gradient, row...)
+	}
+
+	bands, summary, err := spiraltorch.RoundtableClassify(gradient, 2, 3, 2, 0.05)
+	if err != nil {
+		log.Fatalf("RoundtableClassify failed: %v", err)
+	}
+	fmt.Printf("roundtable counts: above=%d here=%d beneath=%d\n", summary.Above, summary.Here, summary.Beneath)
+	fmt.Printf("roundtable energy: above=%.3f here=%.3f beneath=%.3f\n", summary.EnergyAbove, summary.EnergyHere, summary.EnergyBeneath)
+	for idx, value := range gradient {
+		fmt.Printf("  lane %d (%.2f) -> %s\n", idx, value, bands[idx])
+	}
 }

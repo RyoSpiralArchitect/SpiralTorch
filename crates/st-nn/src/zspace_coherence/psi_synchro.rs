@@ -21,6 +21,14 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+#[cfg(feature = "golden")]
+use crate::golden::{GoldenBlackcatPulse, GoldenCooperativeDirective};
+use st_core::telemetry::atlas::AtlasFragment;
+use st_core::telemetry::hub::merge_atlas_fragment;
+#[cfg(feature = "psi")]
+use st_core::telemetry::hub::set_last_psi;
+#[cfg(feature = "psi")]
+use st_core::telemetry::psi::{PsiComponent, PsiReading};
 use st_core::theory::zpulse::{ZPulse, ZScale, ZSource, ZSupport};
 
 /// Per-branch dynamical parameters used to synthesise PSI samples.
@@ -379,6 +387,29 @@ impl ArnoldTongueSummary {
     }
 }
 
+/// Analytics derived from an Arnold tongue heatmap.
+#[derive(Clone, Debug)]
+pub struct HeatmapAnalytics {
+    pub total_energy: f64,
+    pub leading_sum: f64,
+    pub central_sum: f64,
+    pub trailing_sum: f64,
+    pub leading_norm: f32,
+    pub central_norm: f32,
+    pub trailing_norm: f32,
+    pub dominant_lam: f64,
+    pub dominant_wd: f64,
+    pub peak_value: f64,
+    pub peak_ratio: f32,
+    pub radius: f32,
+    pub log_radius: f32,
+    pub bias: f32,
+    pub drift: f32,
+    pub quality: f32,
+    pub stderr: f32,
+    pub entropy: f32,
+}
+
 /// Resulting heatmap for a particular branch.
 #[derive(Clone, Debug)]
 pub struct HeatmapResult {
@@ -401,18 +432,13 @@ impl HeatmapResult {
             })
     }
 
-    /// Converts the heatmap into a synthetic ZPulse snapshot for downstream Z-space consumers.
-    pub fn to_zpulse(&self, ts: u64) -> ZPulse {
-        let mut pulse = ZPulse::default();
-        pulse.source = ZSource::Other("psi");
-        pulse.ts = ts;
-
+    /// Computes aggregate analytics derived from the Arnold tongue matrix.
+    pub fn analyse(&self) -> Option<HeatmapAnalytics> {
         if self.matrix.is_empty() || self.matrix[0].is_empty() {
-            return pulse;
+            return None;
         }
 
         let lam_bins = self.matrix.len();
-
         let mut lam_profile = vec![0.0f64; lam_bins];
         let mut total_energy = 0.0f64;
         let mut max_value = f64::MIN;
@@ -437,7 +463,7 @@ impl HeatmapResult {
         }
 
         if !total_energy.is_finite() || total_energy <= f64::EPSILON {
-            return pulse;
+            return None;
         }
 
         let mut leading_sum = 0.0f64;
@@ -471,9 +497,6 @@ impl HeatmapResult {
         let central_norm = normalise(central_sum);
         let trailing_norm = normalise(trailing_sum);
 
-        pulse.band_energy = (leading_norm, central_norm, trailing_norm);
-        pulse.support = ZSupport::new(leading_norm, central_norm, trailing_norm);
-
         let (dominant_lam, dominant_wd, peak_value) = if let Some(tongue) = self.dominant_tongue() {
             (tongue.lam, tongue.wd, tongue.peak_strength)
         } else {
@@ -492,26 +515,184 @@ impl HeatmapResult {
             (lam, wd, max_value)
         };
 
-        let radius = (dominant_lam + 1.0).max(1e-3);
-        let scale =
-            ZScale::from_components(radius as f32, radius.ln() as f32).unwrap_or(ZScale::ONE);
-        pulse.scale = Some(scale);
-        pulse.tempo = dominant_wd as f32;
+        let radius = (dominant_lam + 1.0).max(1e-3) as f32;
+        let log_radius = radius.ln();
 
         let bias = if (leading_sum + trailing_sum).abs() <= f64::EPSILON {
             0.0
         } else {
             ((leading_sum - trailing_sum) / (leading_sum + trailing_sum)).clamp(-1.0, 1.0) as f32
         };
-        pulse.z_bias = bias;
-        pulse.drift = self.kappa_hat.tanh() as f32;
 
-        let quality = (peak_value / total_energy).clamp(0.0, 1.0) as f32;
-        pulse.quality = quality;
-        pulse.stderr = (1.0 - quality).clamp(0.0, 1.0);
+        let drift = self.kappa_hat.tanh() as f32;
+        let peak_ratio = (peak_value / total_energy).clamp(0.0, 1.0) as f32;
+        let quality = peak_ratio;
+        let stderr = (1.0 - quality).clamp(0.0, 1.0);
+
+        let mut entropy = 0.0f32;
+        let distribution = [leading_norm, central_norm, trailing_norm];
+        let normaliser = (distribution.len() as f32).ln().max(f32::EPSILON);
+        for &p in distribution.iter() {
+            if p > f32::EPSILON {
+                entropy -= p * p.ln();
+            }
+        }
+        entropy = (entropy / normaliser).clamp(0.0, 1.0);
+
+        Some(HeatmapAnalytics {
+            total_energy,
+            leading_sum,
+            central_sum,
+            trailing_sum,
+            leading_norm,
+            central_norm,
+            trailing_norm,
+            dominant_lam,
+            dominant_wd,
+            peak_value,
+            peak_ratio,
+            radius,
+            log_radius,
+            bias,
+            drift,
+            quality,
+            stderr,
+            entropy,
+        })
+    }
+
+    /// Converts the heatmap into a synthetic ZPulse snapshot for downstream Z-space consumers.
+    pub fn to_zpulse(&self, ts: u64) -> ZPulse {
+        let mut pulse = ZPulse::default();
+        pulse.source = ZSource::Other("psi");
+        pulse.ts = ts;
+
+        let Some(analytics) = self.analyse() else {
+            return pulse;
+        };
+
+        pulse.band_energy = (
+            analytics.leading_norm,
+            analytics.central_norm,
+            analytics.trailing_norm,
+        );
+        pulse.support = ZSupport::new(
+            analytics.leading_norm,
+            analytics.central_norm,
+            analytics.trailing_norm,
+        );
+        let scale =
+            ZScale::from_components(analytics.radius, analytics.log_radius).unwrap_or(ZScale::ONE);
+        pulse.scale = Some(scale);
+        pulse.tempo = analytics.dominant_wd as f32;
+        pulse.z_bias = analytics.bias;
+        pulse.drift = analytics.drift;
+        pulse.quality = analytics.quality;
+        pulse.stderr = analytics.stderr;
         pulse.latency_ms = 0.0;
-
         pulse
+    }
+
+    /// Builds an atlas fragment carrying the synchroniser metrics.
+    pub fn to_atlas_fragment(&self, timestamp: Option<f32>) -> Option<AtlasFragment> {
+        let analytics = self.analyse()?;
+        let mut fragment = AtlasFragment::default();
+        fragment.timestamp = timestamp;
+        fragment.push_metric_with_district("psi.synchro.gamma", self.gamma as f32, "psi");
+        fragment.push_metric_with_district("psi.synchro.kappa_hat", self.kappa_hat as f32, "psi");
+        fragment.push_metric_with_district(
+            "psi.synchro.energy.leading",
+            analytics.leading_norm,
+            "psi",
+        );
+        fragment.push_metric_with_district(
+            "psi.synchro.energy.central",
+            analytics.central_norm,
+            "psi",
+        );
+        fragment.push_metric_with_district(
+            "psi.synchro.energy.trailing",
+            analytics.trailing_norm,
+            "psi",
+        );
+        fragment.push_metric_with_district("psi.synchro.bias", analytics.bias, "psi");
+        fragment.push_metric_with_district("psi.synchro.drift", analytics.drift, "psi");
+        fragment.push_metric_with_district("psi.synchro.quality", analytics.quality, "psi");
+        fragment.push_metric_with_district("psi.synchro.entropy", analytics.entropy, "psi");
+        fragment.push_metric_with_district("psi.synchro.radius", analytics.radius, "psi");
+        fragment.push_metric_with_district("psi.synchro.log_radius", analytics.log_radius, "psi");
+        fragment.push_note(format!("psi.synchro.branch:{}", self.branch_id));
+        if let Some(tongue) = self.dominant_tongue() {
+            fragment.push_metric_with_district(
+                "psi.synchro.tongue.peak",
+                tongue.peak_strength as f32,
+                "psi",
+            );
+            fragment.push_metric_with_district(
+                "psi.synchro.tongue.error",
+                tongue.error as f32,
+                "psi",
+            );
+            fragment.push_metric_with_district(
+                "psi.synchro.tongue.rotation",
+                tongue.rotation as f32,
+                "psi",
+            );
+            fragment.push_note(format!(
+                "psi.synchro.tongue:{}:{}/{}",
+                self.branch_id, tongue.ratio_p, tongue.ratio_q
+            ));
+        }
+        Some(fragment)
+    }
+
+    #[cfg(feature = "psi")]
+    pub fn to_psi_reading(&self, step: u64) -> Option<PsiReading> {
+        let analytics = self.analyse()?;
+        let mut breakdown = HashMap::new();
+        breakdown.insert(PsiComponent::BAND_ENERGY, analytics.central_norm);
+        breakdown.insert(
+            PsiComponent::LOSS,
+            (1.0 - analytics.quality).clamp(0.0, 1.0),
+        );
+        breakdown.insert(PsiComponent::GRAD_NORM, analytics.drift.abs().min(1.0));
+        breakdown.insert(PsiComponent::UPDATE_RATIO, analytics.peak_ratio);
+        breakdown.insert(PsiComponent::ACT_DRIFT, analytics.bias.abs().min(1.0));
+        breakdown.insert(PsiComponent::ATTN_ENTROPY, analytics.entropy);
+        let total = breakdown.values().copied().sum::<f32>().max(f32::EPSILON);
+        Some(PsiReading {
+            total,
+            breakdown,
+            step,
+        })
+    }
+
+    #[cfg(feature = "golden")]
+    pub fn to_golden_pulse(&self) -> Option<GoldenBlackcatPulse> {
+        let analytics = self.analyse()?;
+        let coverage =
+            self.matrix.len() * self.matrix.first().map(|row| row.len()).unwrap_or_default();
+        let heuristics_contributions = self.tongues.len();
+        let dominant_plan = self
+            .dominant_tongue()
+            .map(|tongue| format!("{}:{}/{}", self.branch_id, tongue.ratio_p, tongue.ratio_q));
+
+        Some(GoldenBlackcatPulse {
+            exploration_drive: analytics.leading_norm,
+            optimization_gain: analytics.central_norm,
+            synergy_score: analytics.trailing_norm,
+            reinforcement_weight: analytics.quality,
+            mean_support: analytics.central_norm,
+            mean_reward: analytics.peak_ratio as f64,
+            mean_psi: analytics.drift,
+            mean_confidence: (1.0 - analytics.stderr).clamp(0.0, 1.0),
+            coverage,
+            heuristics_contributions,
+            append_weight: analytics.radius,
+            retract_count: 0,
+            annotate_count: heuristics_contributions,
+            dominant_plan,
+        })
     }
 }
 
@@ -522,6 +703,37 @@ pub struct PsiSynchroPulse {
     pub pulse: ZPulse,
 }
 
+/// Atlas fragment paired with the originating PSI branch.
+#[derive(Clone, Debug)]
+pub struct BranchAtlasFragment {
+    pub branch_id: String,
+    pub fragment: AtlasFragment,
+}
+
+/// PSI telemetry snapshot tagged with the source branch.
+#[cfg(feature = "psi")]
+#[derive(Clone, Debug)]
+pub struct BranchPsiReading {
+    pub branch_id: String,
+    pub reading: PsiReading,
+}
+
+/// Combined outputs from a multi-branch synchronisation run.
+#[derive(Clone, Debug)]
+pub struct PsiSynchroResult {
+    pub heatmaps: Vec<HeatmapResult>,
+    pub pulses: Vec<PsiSynchroPulse>,
+    pub atlas_fragments: Vec<BranchAtlasFragment>,
+    #[cfg(feature = "psi")]
+    pub psi_readings: Vec<BranchPsiReading>,
+    #[cfg(feature = "golden")]
+    pub golden_baseline_interval: Duration,
+    #[cfg(feature = "golden")]
+    pub golden_baseline_window: usize,
+    #[cfg(feature = "golden")]
+    pub golden_telemetry: Vec<PsiGoldenTelemetry>,
+}
+
 /// Converts heatmap outputs into ZPulse snapshots tagged with their originating branch.
 pub fn heatmaps_to_zpulses(heatmaps: &[HeatmapResult]) -> Vec<PsiSynchroPulse> {
     heatmaps
@@ -530,6 +742,34 @@ pub fn heatmaps_to_zpulses(heatmaps: &[HeatmapResult]) -> Vec<PsiSynchroPulse> {
         .map(|(idx, heatmap)| PsiSynchroPulse {
             branch_id: heatmap.branch_id.clone(),
             pulse: heatmap.to_zpulse(idx as u64),
+        })
+        .collect()
+}
+
+#[cfg(feature = "golden")]
+#[derive(Clone, Debug)]
+pub struct PsiGoldenTelemetry {
+    pub branch_id: String,
+    pub pulse: GoldenBlackcatPulse,
+    pub directive: GoldenCooperativeDirective,
+}
+
+#[cfg(feature = "golden")]
+pub fn heatmaps_to_golden_telemetry(
+    heatmaps: &[HeatmapResult],
+    baseline_interval: Duration,
+    baseline_window: usize,
+) -> Vec<PsiGoldenTelemetry> {
+    heatmaps
+        .iter()
+        .filter_map(|heatmap| {
+            let pulse = heatmap.to_golden_pulse()?;
+            let directive = pulse.directive(baseline_interval, baseline_window);
+            Some(PsiGoldenTelemetry {
+                branch_id: heatmap.branch_id.clone(),
+                pulse,
+                directive,
+            })
         })
         .collect()
 }
@@ -880,6 +1120,42 @@ impl HeatmapCollector {
     }
 }
 
+/// Controls how the synchroniser reports atlas/PSI telemetry.
+#[derive(Clone, Debug)]
+pub struct PsiTelemetryConfig {
+    pub emit_atlas: bool,
+    pub atlas_timestamp: Option<f32>,
+    #[cfg(feature = "psi")]
+    pub emit_psi: bool,
+    #[cfg(feature = "psi")]
+    pub psi_step_base: u64,
+    #[cfg(feature = "golden")]
+    pub emit_golden: bool,
+    #[cfg(feature = "golden")]
+    pub golden_baseline_interval: Duration,
+    #[cfg(feature = "golden")]
+    pub golden_baseline_window: usize,
+}
+
+impl Default for PsiTelemetryConfig {
+    fn default() -> Self {
+        Self {
+            emit_atlas: true,
+            atlas_timestamp: None,
+            #[cfg(feature = "psi")]
+            emit_psi: true,
+            #[cfg(feature = "psi")]
+            psi_step_base: 0,
+            #[cfg(feature = "golden")]
+            emit_golden: true,
+            #[cfg(feature = "golden")]
+            golden_baseline_interval: Duration::from_secs(30),
+            #[cfg(feature = "golden")]
+            golden_baseline_window: 32,
+        }
+    }
+}
+
 /// Orchestration parameters for the multi-branch synchroniser.
 #[derive(Clone, Debug)]
 pub struct PsiSynchroConfig {
@@ -890,6 +1166,7 @@ pub struct PsiSynchroConfig {
     pub max_ident_points: usize,
     pub metamemb: MetaMembConfig,
     pub circle_map: CircleLockMapConfig,
+    pub telemetry: Option<PsiTelemetryConfig>,
 }
 
 impl Default for PsiSynchroConfig {
@@ -902,6 +1179,7 @@ impl Default for PsiSynchroConfig {
             max_ident_points: 2_400,
             metamemb: MetaMembConfig::default(),
             circle_map: CircleLockMapConfig::default(),
+            telemetry: None,
         }
     }
 }
@@ -910,6 +1188,14 @@ impl Default for PsiSynchroConfig {
 pub fn run_multibranch_demo(
     config: PsiSynchroConfig,
     branches: Vec<PsiBranchState>,
+) -> Vec<HeatmapResult> {
+    let result = run_zspace_learning_pass(config, branches);
+    result.heatmaps
+}
+
+fn execute_multibranch(
+    config: &PsiSynchroConfig,
+    branches: &[PsiBranchState],
 ) -> Vec<HeatmapResult> {
     let bus = SynchroBus::new();
     bus.update_state(|state| {
@@ -946,4 +1232,89 @@ pub fn run_multibranch_demo(
     circle_map.join();
 
     collector.join()
+}
+
+/// Executes a PSI synchronisation pass and returns telemetry suitable for Z-space learning.
+pub fn run_zspace_learning_pass(
+    config: PsiSynchroConfig,
+    branches: Vec<PsiBranchState>,
+) -> PsiSynchroResult {
+    let telemetry_cfg = config.telemetry.clone();
+    let heatmaps = execute_multibranch(&config, &branches);
+    let pulses = heatmaps_to_zpulses(&heatmaps);
+
+    let atlas_fragments: Vec<BranchAtlasFragment> = heatmaps
+        .iter()
+        .filter_map(|heatmap| {
+            heatmap
+                .to_atlas_fragment(telemetry_cfg.as_ref().and_then(|cfg| cfg.atlas_timestamp))
+                .map(|fragment| BranchAtlasFragment {
+                    branch_id: heatmap.branch_id.clone(),
+                    fragment,
+                })
+        })
+        .collect();
+
+    #[cfg(feature = "psi")]
+    let psi_readings: Vec<BranchPsiReading> = {
+        let base = telemetry_cfg
+            .as_ref()
+            .map(|cfg| cfg.psi_step_base)
+            .unwrap_or(0);
+        heatmaps
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, heatmap)| {
+                heatmap
+                    .to_psi_reading(base + idx as u64)
+                    .map(|reading| BranchPsiReading {
+                        branch_id: heatmap.branch_id.clone(),
+                        reading,
+                    })
+            })
+            .collect()
+    };
+
+    #[cfg(feature = "golden")]
+    let (golden_baseline_interval, golden_baseline_window, golden_telemetry) = {
+        let baseline_interval = telemetry_cfg
+            .as_ref()
+            .map(|cfg| cfg.golden_baseline_interval)
+            .unwrap_or_else(|| Duration::from_secs(30));
+        let baseline_window = telemetry_cfg
+            .as_ref()
+            .map(|cfg| cfg.golden_baseline_window)
+            .unwrap_or(32);
+        let telemetry = heatmaps_to_golden_telemetry(&heatmaps, baseline_interval, baseline_window);
+        (baseline_interval, baseline_window, telemetry)
+    };
+
+    if let Some(cfg) = telemetry_cfg {
+        if cfg.emit_atlas {
+            for fragment in &atlas_fragments {
+                let atlas_fragment: AtlasFragment = fragment.fragment.clone();
+                merge_atlas_fragment(atlas_fragment);
+            }
+        }
+        #[cfg(feature = "psi")]
+        if cfg.emit_psi {
+            for reading in &psi_readings {
+                set_last_psi(&reading.reading);
+            }
+        }
+    }
+
+    PsiSynchroResult {
+        heatmaps,
+        pulses,
+        atlas_fragments,
+        #[cfg(feature = "psi")]
+        psi_readings,
+        #[cfg(feature = "golden")]
+        golden_baseline_interval,
+        #[cfg(feature = "golden")]
+        golden_baseline_window,
+        #[cfg(feature = "golden")]
+        golden_telemetry,
+    }
 }

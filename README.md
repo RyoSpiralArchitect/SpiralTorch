@@ -28,49 +28,85 @@ It’s not just an engine—it’s a **bridge** between the pragmatism of deep-l
 
 **Architecture Overview.**
 ```mermaid
+%%{init: {'themeVariables': {'fontSize': '20px', 'lineColor': '#7f8cfc'}, 'sequence': {'actorFontSize': 22, 'messageFontSize': 19, 'noteFontSize': 18}}}%%
 sequenceDiagram
   participant API as Python/TS API
-  participant FFI as Bindings (PyO3 / NAPI)
-  participant Core as st-core dispatcher
-  participant Tape as Hypergrad tape
-  participant Sched as Cooperative scheduler
-  participant Plan as Engine planner & timeline
-  participant Caps as Device caps profiler
+  participant Bridge as PyO3/wasm bindings
+  participant Session as Session manager
+  participant Core as st-core orchestrator
+  participant Planner as Graph planner + scheduler
+  participant Autodiff as Tape/autograd runtime
   participant Reg as Op registry
-  participant KD as st-kdsl codegen
-  participant BE as Backend runtimes (WGPU/CUDA/HIP/CPU)
-  participant Queue as Device queues & allocators
-  participant TLM as Telemetry hub
-  participant PSI as PSI / observability sinks
+  participant Caps as Capability DB
+  participant Layout as Layout strategist
+  participant KD as st-kdsl compiler
+  participant Cache as Kernel cache/tuner
+  participant Mem as Arena allocator
+  participant Stream as Stream graphifier
+  participant Queue as Command queue mgr
+  participant BE as Backend (WGPU/CUDA/CPU)
+  participant TLM as Telemetry/observability
+  participant Prof as Profiler/exporter
 
-  API->>FFI: st.op(x, y, ...)
-  FFI->>Core: marshal call & materialise graph node
-  Core->>Tape: register autograd edges
-  Tape-->>Core: gradient token
-  Core->>Sched: request execution window
-  Sched->>Plan: assemble execution timeline
-  Plan->>Caps: query capabilities (precision/layout)
-  Caps-->>Plan: caps + heuristics
-  Plan->>Reg: resolve op implementation
-  alt compiled pipeline cached
-    Reg-->>Plan: impl + schedule + pipeline handle
-  else kernel needs emission
-    Reg->>KD: generate kernel + specialise params
-    KD-->>Reg: tuned binary + layout metadata
-    Reg-->>Plan: impl + schedule + pipeline handle
+  API->>Bridge: op(x, y, ...) / launch async task
+  Bridge->>Session: hydrate handles / authz
+  Session->>Core: dispatch request (device scope)
+  Core->>Autodiff: capture gradients / tape guards
+  Autodiff-->>Core: differentiation plan
+  Core->>Planner: build execution graph (policy, determinism)
+  Planner->>Layout: negotiate layout / sharding
+  Layout-->>Planner: residency strategy + halo exchange
+  Planner->>Reg: request op impl (tensor traits, precision)
+  Reg->>Caps: verify backend + layout capabilities
+  Caps-->>Reg: supported modes / tiling hints
+  Reg->>Prof: emit planning span metadata
+  Prof-->>Reg: sampling budget / trace tokens
+  par cache probe vs compilation
+    Reg->>Cache: fetch tuned kernel handle
+    Cache-->>Reg: kernel + launch params
+  and
+    Reg->>KD: request codegen + schedule lowering
+    KD->>Cache: autotune + persist kernel artifact
+    Cache-->>Reg: kernel handle + tuning metadata
   end
-  Plan->>BE: stage work packages
-  BE->>Queue: enqueue command buffers
-  Queue-->>BE: completion fences & buffer handles
-  BE-->>Tape: materialise gradients / result tensors
-  BE-->>Sched: completion callbacks
-  Sched-->>Core: future resolves
-  Core-->>FFI: return handles / tensors
-  FFI-->>API: deliver result to caller
-  BE--)TLM: runtime spans + counters
-  TLM-->>PSI: stream metrics / psychoid events
-  TLM--)FFI: propagate warnings back upstream
+  Reg-->>Planner: impl + schedule + kernel handle
+  Planner->>Mem: acquire arenas / residency locks
+  Mem-->>Planner: buffer views + relocation plan
+  Planner->>Stream: expand passes → async stages
+  Stream-->>Planner: dependency DAG + replay guards
+  Planner-->>Core: executable pass graph
+  Core->>Queue: enqueue passes (async futures)
+  loop execution waves
+    Queue->>BE: submit pipelines / barriers
+    BE->>Mem: residency updates / reuse hints
+    BE->>Autodiff: gradient materialisation callbacks
+    BE-->>Queue: completion events + result buffers
+    Queue->>TLM: forward stage timings / counters
+  end
+  Queue-->>Core: ready futures / error states
+  Core->>Prof: flush spans + counter deltas
+  Prof-->>TLM: export traces / profile artefacts
+  Core--)TLM: spans / metrics / structured logs
+  Core-->>Session: promise handle / stream token
+  Session-->>Bridge: async completion signal
+  Bridge-->>API: awaitable result / telemetry hook
 ```
+
+### Explore the runtime interactively
+
+Prefer a guided walkthrough of the dispatcher flows? Open the
+[interactive runtime explorer](docs/interactive/README.md) for clickable
+diagrams, a narrated "story tour" of the runtime handoff, and playful
+spotlights on graph-node materialisation versus return-handle delivery:
+
+- 🎬 **Story tour.** Step through a six-beat mini adventure that explains
+  how a single API call ripples through SpiralTorch, from the first FFI
+  marshals to the triumphant return of tensor handles.
+- 🔍 **Focus toggles.** Snap to either the graph-node materialisation
+  path or the return-handle arc whenever you want to revisit a specific
+  phase.
+- 🧭 **Free roam.** Click any node or edge to read quick lore about the
+  component, then resume the story exactly where you left off.
 
 ### Explore the runtime interactively
 
@@ -114,6 +150,8 @@ spotlights on graph-node materialisation versus return-handle delivery:
 
 > **New — Z-space inference for imported checkpoints.** `spiraltorch.infer_weights_from_dlpack` and `spiraltorch.infer_with_psi` now project DLPack/compat weights, Canvas transformers, and PSI telemetry straight into the Z-space posterior. Warm-start inference can blend partial observations with live ψ health data so Rust sessions reuse PyTorch/JAX weights without leaving the SpiralTorch runtime.
 
+> **New — PSI synchroniser learning bundles.** Multi-branch MetaMEMB runs now deliver combined heatmaps, ZPulse snapshots, Atlas fragments, PSI component breakdowns, and Golden directives via `st.psi.run_zspace_learning(...)` so Z-space learners and distributed `golden` retrievers can coordinate straight from Rust or Python.
+
 **Licensing**
 
 SpiralTorch ships under a dual-license model:
@@ -146,7 +184,7 @@ SpiralTorch ships under a dual-license model:
 ## Code stats
 
 <!-- AUTOGEN: CODESTATS BEGIN -->
-_Last updated: 2025-10-25 06:52 UTC_
+_Last updated: 2025-10-25 03:04 UTC_
 
 ```text
 ===============================================================================
@@ -156,42 +194,46 @@ _Last updated: 2025-10-25 06:52 UTC_
  COBOL                   1          416          376            8           32
  C++                     1          327          286            3           38
  CSS                     1          160          137            0           23
- Go                      9         1742         1367          141          234
- HTML                    1          396          396            0            0
+ Go                     11         2222         1743          191          288
  JSON                    6          372          372            0            0
- Julia                   8         1077          938           14          125
- Python                 40         6600         5513           86         1001
+ Julia                   8         1335         1176           14          145
+ Python                 42         8770         7415           79         1276
  Shell                   4          194          172            4           18
  SVG                     3           60           60            0            0
  Plain Text              1          661            0          544          117
- TOML                   35          835          707           26          102
+ TOML                   35          865          734           27          104
  TypeScript              7         4898         4331          175          392
  YAML                    3           72           65            0            7
+-------------------------------------------------------------------------------
+ HTML                    2          482          482            0            0
+ |- CSS                  1          311          266            0           45
+ |- JavaScript           1          616          574            0           42
+ (Total)                           1409         1322            0           87
 -------------------------------------------------------------------------------
  Jupyter Notebooks       2            0            0            0            0
  |- Markdown             2            9            0            9            0
  |- Python               2           22           20            0            2
  (Total)                             31           20            9            2
 -------------------------------------------------------------------------------
- Markdown               55         5595            0         4415         1180
- |- BASH                12          123           94           17           12
+ Markdown               56         5765            0         4556         1209
+ |- BASH                13          124           95           17           12
  |- C                    1           21           16            0            5
  |- COBOL                1           30           30            0            0
  |- Dockerfile           1            6            6            0            0
  |- HTML                 1           18           18            0            0
  |- JavaScript           1           34           29            3            2
  |- JSON                 1           11           11            0            0
- |- Julia                1           15           14            0            1
+ |- Julia                1           29           26            0            3
  |- Python               6          726          609           20           97
  |- Rust                 5          741          652           15           74
  |- YAML                 2           62           62            0            0
- (Total)                           7382         1541         4470         1371
+ (Total)                           7567         1554         4611         1402
 -------------------------------------------------------------------------------
- Rust                  310       126953       113300         1573        12080
- |- Markdown           190         5014            0         4909          105
- (Total)                         131967       113300         6482        12185
+ Rust                  319       136457       121871         1628        12958
+ |- Markdown           196         5145            0         5036          109
+ (Total)                         141602       121871         6664        13067
 ===============================================================================
- Total                 488       150412       128072         6990        15350
+ Total                 503       163110       139272         7230        16608
 ===============================================================================
 ```
 ---
