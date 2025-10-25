@@ -1,4 +1,21 @@
 use crate::report::{OptimisationError, StructuredPruningReport};
+#[derive(Debug, Clone, Copy)]
+struct BlockRecord {
+    start: usize,
+    len: usize,
+    norm_sq: f32,
+}
+
+impl BlockRecord {
+    #[inline]
+    fn new(start: usize, len: usize, norm_sq: f32) -> Self {
+        Self {
+            start,
+            len,
+            norm_sq,
+        }
+    }
+}
 
 /// Configuration for channel/block structured pruning.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -35,6 +52,16 @@ impl StructuredPruner {
         weights: &mut [f32],
         config: StructuredPruningConfig,
     ) -> Result<StructuredPruningReport, OptimisationError> {
+        let mut workspace = StructuredPruningWorkspace::default();
+        self.apply_with_workspace(weights, config, &mut workspace)
+    }
+
+    pub fn apply_with_workspace(
+        &self,
+        weights: &mut [f32],
+        config: StructuredPruningConfig,
+        workspace: &mut StructuredPruningWorkspace,
+    ) -> Result<StructuredPruningReport, OptimisationError> {
         if config.block_size == 0 {
             return Err(OptimisationError::InvalidBlockSize);
         }
@@ -54,37 +81,42 @@ impl StructuredPruner {
             ));
         }
 
-        let mut block_norms = Vec::new();
+        let block_count = (weights.len() + config.block_size - 1) / config.block_size;
+        workspace.prepare(block_count);
+
         let mut offset = 0;
-        while offset < weights.len() {
-            let block_end = (offset + config.block_size).min(weights.len());
-            let block = &weights[offset..block_end];
-            let l2 = block.iter().map(|w| w * w).sum::<f32>().sqrt();
-            block_norms.push((offset, block_end, l2));
-            offset = block_end;
+        for chunk in weights.chunks(config.block_size) {
+            let norm_sq = chunk.iter().map(|w| *w * *w).sum::<f32>();
+            workspace
+                .block_norms
+                .push(BlockRecord::new(offset, chunk.len(), norm_sq));
+            offset += chunk.len();
         }
 
-        block_norms.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap());
-        let target_blocks = ((block_norms.len() as f32) * config.target_sparsity).floor() as usize;
+        workspace
+            .block_norms
+            .sort_unstable_by(|a, b| a.norm_sq.total_cmp(&b.norm_sq));
+        let target_blocks =
+            ((workspace.block_norms.len() as f32) * config.target_sparsity).floor() as usize;
         let mut pruned_blocks = 0;
-        let mut l2_error = 0.0;
+        let mut l2_error = 0.0f32;
+        let min_keep_sq = config.min_l2_keep * config.min_l2_keep;
 
-        for (idx, (start, end, norm)) in block_norms.iter().enumerate() {
-            if idx >= target_blocks && *norm >= config.min_l2_keep {
+        for (idx, block) in workspace.block_norms.iter().enumerate() {
+            if idx >= target_blocks && block.norm_sq >= min_keep_sq {
                 continue;
             }
-            for w in &mut weights[*start..*end] {
-                l2_error += *w * *w;
-                *w = 0.0;
-            }
+            let range = block.start..block.start + block.len;
+            l2_error += block.norm_sq;
+            weights[range].fill(0.0);
             pruned_blocks += 1;
         }
 
-        let kept_blocks = block_norms.len().saturating_sub(pruned_blocks);
-        let achieved_sparsity = if block_norms.is_empty() {
+        let kept_blocks = workspace.block_norms.len().saturating_sub(pruned_blocks);
+        let achieved_sparsity = if workspace.block_norms.is_empty() {
             0.0
         } else {
-            pruned_blocks as f32 / block_norms.len() as f32
+            pruned_blocks as f32 / workspace.block_norms.len() as f32
         };
         Ok(StructuredPruningReport::new(
             config.target_sparsity,
@@ -94,6 +126,33 @@ impl StructuredPruner {
             kept_blocks,
             l2_error.sqrt(),
         ))
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct StructuredPruningWorkspace {
+    block_norms: Vec<BlockRecord>,
+}
+
+impl StructuredPruningWorkspace {
+    pub fn new() -> Self {
+        Self {
+            block_norms: Vec::new(),
+        }
+    }
+
+    pub fn with_capacity(blocks: usize) -> Self {
+        Self {
+            block_norms: Vec::with_capacity(blocks),
+        }
+    }
+
+    fn prepare(&mut self, required_blocks: usize) {
+        if self.block_norms.capacity() < required_blocks {
+            self.block_norms
+                .reserve(required_blocks - self.block_norms.capacity());
+        }
+        self.block_norms.clear();
     }
 }
 
@@ -118,5 +177,55 @@ mod tests {
         assert_eq!(report.block_size, 4);
         assert_eq!(report.pruned_blocks + report.kept_blocks, 4);
         assert!(report.achieved_sparsity >= 0.25);
+    }
+
+    #[test]
+    fn workspace_reuse_matches_default() {
+        let mut weights_default = vec![1.0f32; 64];
+        let mut weights_workspace = weights_default.clone();
+        let pruner = StructuredPruner::new();
+        let config = StructuredPruningConfig {
+            block_size: 8,
+            target_sparsity: 0.25,
+            min_l2_keep: 0.0,
+        };
+
+        let report_default = pruner
+            .apply(&mut weights_default, config)
+            .expect("default application should succeed");
+
+        let mut workspace = StructuredPruningWorkspace::new();
+        let report_workspace = pruner
+            .apply_with_workspace(&mut weights_workspace, config, &mut workspace)
+            .expect("workspace application should succeed");
+
+        assert_eq!(weights_default, weights_workspace);
+        assert_eq!(report_default, report_workspace);
+    }
+
+    #[test]
+    fn l2_error_matches_pruned_energy() {
+        let mut weights = vec![1.0f32; 12];
+        let original = weights.clone();
+        let pruner = StructuredPruner::new();
+        let config = StructuredPruningConfig {
+            block_size: 4,
+            target_sparsity: 0.5,
+            min_l2_keep: 0.0,
+        };
+
+        let report = pruner
+            .apply(&mut weights, config)
+            .expect("pruning should succeed");
+
+        let observed_energy = original
+            .iter()
+            .zip(&weights)
+            .filter(|(_, &after)| after == 0.0)
+            .map(|(&before, _)| before * before)
+            .sum::<f32>()
+            .sqrt();
+
+        assert!((report.l2_error - observed_energy).abs() < 1e-6);
     }
 }
