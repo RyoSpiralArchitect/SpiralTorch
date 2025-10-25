@@ -1,21 +1,7 @@
-use crate::report::{OptimisationError, StructuredPruningReport};
-#[derive(Debug, Clone, Copy)]
-struct BlockRecord {
-    start: usize,
-    len: usize,
-    norm_sq: f32,
-}
-
-impl BlockRecord {
-    #[inline]
-    fn new(start: usize, len: usize, norm_sq: f32) -> Self {
-        Self {
-            start,
-            len,
-            norm_sq,
-        }
-    }
-}
+use crate::{
+    ops::block::{compute_block_norms, zero_block, BlockRecord},
+    report::{OptimisationError, StructuredPruningReport},
+};
 
 /// Configuration for channel/block structured pruning.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -83,15 +69,12 @@ impl StructuredPruner {
 
         let block_count = (weights.len() + config.block_size - 1) / config.block_size;
         workspace.prepare(block_count);
-
-        let mut offset = 0;
-        for chunk in weights.chunks(config.block_size) {
-            let norm_sq = chunk.iter().map(|w| *w * *w).sum::<f32>();
-            workspace
-                .block_norms
-                .push(BlockRecord::new(offset, chunk.len(), norm_sq));
-            offset += chunk.len();
-        }
+        compute_block_norms(
+            weights,
+            config.block_size,
+            block_count,
+            &mut workspace.block_norms,
+        );
 
         workspace
             .block_norms
@@ -106,9 +89,8 @@ impl StructuredPruner {
             if pruned_blocks >= target_blocks && block.norm_sq >= min_keep_sq {
                 continue;
             }
-            let range = block.start..block.start + block.len;
             l2_error += block.norm_sq;
-            weights[range].fill(0.0);
+            zero_block(weights, block);
             pruned_blocks += 1;
         }
 
