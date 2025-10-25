@@ -21,6 +21,11 @@ pub enum ZSpaceSpinBand {
 }
 
 impl ZSpaceSpinBand {
+    /// Ordered enumeration of all supported spin bands.
+    pub const fn values() -> [Self; 3] {
+        [Self::Leading, Self::Neutral, Self::Trailing]
+    }
+
     /// Classifies a raw spin alignment into a discrete band.
     pub fn classify(spin_alignment: f32) -> Self {
         if spin_alignment > 0.33 {
@@ -54,6 +59,11 @@ pub enum ZSpaceRadiusBand {
 }
 
 impl ZSpaceRadiusBand {
+    /// Ordered enumeration of all supported radius bands.
+    pub const fn values() -> [Self; 3] {
+        [Self::Core, Self::Mantle, Self::Edge]
+    }
+
     /// Classifies the normalised radius into a band.
     pub fn classify(normalized_radius: f32) -> Self {
         if normalized_radius < 0.33 {
@@ -175,6 +185,14 @@ mod tests {
         assert_eq!(ZSpaceSpinBand::classify(0.8), ZSpaceSpinBand::Leading);
         assert_eq!(ZSpaceSpinBand::classify(-0.9), ZSpaceSpinBand::Trailing);
         assert_eq!(ZSpaceSpinBand::classify(0.1), ZSpaceSpinBand::Neutral);
+        assert_eq!(
+            ZSpaceSpinBand::values(),
+            [
+                ZSpaceSpinBand::Leading,
+                ZSpaceSpinBand::Neutral,
+                ZSpaceSpinBand::Trailing,
+            ]
+        );
     }
 
     #[test]
@@ -182,6 +200,14 @@ mod tests {
         assert_eq!(ZSpaceRadiusBand::classify(0.1), ZSpaceRadiusBand::Core);
         assert_eq!(ZSpaceRadiusBand::classify(0.5), ZSpaceRadiusBand::Mantle);
         assert_eq!(ZSpaceRadiusBand::classify(0.9), ZSpaceRadiusBand::Edge);
+        assert_eq!(
+            ZSpaceRadiusBand::values(),
+            [
+                ZSpaceRadiusBand::Core,
+                ZSpaceRadiusBand::Mantle,
+                ZSpaceRadiusBand::Edge,
+            ]
+        );
     }
 
     #[test]
