@@ -1112,6 +1112,484 @@ class ZSpaceCoherenceSequencer(_ZSpaceCoherenceSequencer):
     ...
 
 
+class MetaMembConfig:
+    def __init__(
+        self,
+        *,
+        delta: Sequence[float] | None = ...,
+        omega: Sequence[float] | None = ...,
+        theta: Sequence[float] | None = ...,
+    ) -> None: ...
+
+    @staticmethod
+    def default() -> MetaMembConfig: ...
+
+    @property
+    def delta(self) -> Tuple[float, float, float]: ...
+
+    @property
+    def omega(self) -> Tuple[float, float, float]: ...
+
+    @property
+    def theta(self) -> Tuple[float, float, float]: ...
+
+
+class CircleLockMapConfig:
+    def __init__(
+        self,
+        *,
+        lam_min: float = ...,
+        lam_max: float = ...,
+        lam_bins: int = ...,
+        wd_min: float = ...,
+        wd_max: float = ...,
+        wd_bins: int = ...,
+        burn_in: int = ...,
+        samples: int = ...,
+        qmax: int = ...,
+    ) -> None: ...
+
+    @staticmethod
+    def default() -> CircleLockMapConfig: ...
+
+    @property
+    def lam_min(self) -> float: ...
+
+    @property
+    def lam_max(self) -> float: ...
+
+    @property
+    def lam_bins(self) -> int: ...
+
+    @property
+    def wd_min(self) -> float: ...
+
+    @property
+    def wd_max(self) -> float: ...
+
+    @property
+    def wd_bins(self) -> int: ...
+
+    @property
+    def burn_in(self) -> int: ...
+
+    @property
+    def samples(self) -> int: ...
+
+    @property
+    def qmax(self) -> int: ...
+
+
+class PsiTelemetryConfig:
+    def __init__(
+        self,
+        *,
+        emit_atlas: bool = ...,
+        atlas_timestamp: float | None = ...,
+        emit_psi: bool = ...,
+        psi_step_base: int = ...,
+        emit_golden: bool = ...,
+        golden_baseline_interval: float = ...,
+        golden_baseline_window: int = ...,
+    ) -> None: ...
+
+    @property
+    def emit_atlas(self) -> bool: ...
+
+    @property
+    def atlas_timestamp(self) -> float | None: ...
+
+    @property
+    def emit_psi(self) -> bool: ...
+
+    @property
+    def psi_step_base(self) -> int: ...
+
+    @property
+    def emit_golden(self) -> bool: ...
+
+    @property
+    def golden_baseline_interval(self) -> float: ...
+
+    @property
+    def golden_baseline_window(self) -> int: ...
+
+
+class PsiSynchroConfig:
+    def __init__(
+        self,
+        *,
+        step: float = ...,
+        samples: int = ...,
+        ticker_interval: float | None = ...,
+        min_ident_points: int = ...,
+        max_ident_points: int = ...,
+        metamemb: MetaMembConfig | None = ...,
+        circle_map: CircleLockMapConfig | None = ...,
+        telemetry: PsiTelemetryConfig | None = ...,
+    ) -> None: ...
+
+    @staticmethod
+    def default() -> PsiSynchroConfig: ...
+
+    @property
+    def step(self) -> float: ...
+
+    @property
+    def samples(self) -> int: ...
+
+    @property
+    def ticker_interval(self) -> float | None: ...
+
+    @property
+    def min_ident_points(self) -> int: ...
+
+    @property
+    def max_ident_points(self) -> int: ...
+
+    @property
+    def metamemb(self) -> MetaMembConfig: ...
+
+    @property
+    def circle_map(self) -> CircleLockMapConfig: ...
+
+    @property
+    def telemetry(self) -> PsiTelemetryConfig | None: ...
+
+
+class PsiBranchState:
+    def __init__(
+        self,
+        branch_id: str,
+        *,
+        gamma: float = ...,
+        lambda_: float = ...,
+        wd: float = ...,
+        omega0: float = ...,
+        drift_coupled: float = ...,
+        phase0: float = ...,
+    ) -> None: ...
+
+    @property
+    def branch_id(self) -> str: ...
+
+    @property
+    def gamma(self) -> float: ...
+
+    @property
+    def lambda_(self) -> float: ...
+
+    @property
+    def wd(self) -> float: ...
+
+    @property
+    def omega0(self) -> float: ...
+
+    @property
+    def drift_coupled(self) -> float: ...
+
+    @property
+    def phase0(self) -> float: ...
+
+    def poincare_period(self) -> float: ...
+
+
+class ZPulseSnapshot:
+    @property
+    def source(self) -> str: ...
+
+    @property
+    def ts(self) -> int: ...
+
+    @property
+    def tempo(self) -> float: ...
+
+    @property
+    def band_energy(self) -> Tuple[float, float, float]: ...
+
+    @property
+    def drift(self) -> float: ...
+
+    @property
+    def z_bias(self) -> float: ...
+
+    @property
+    def support(self) -> Tuple[float, float, float]: ...
+
+    @property
+    def scale(self) -> Tuple[float, float] | None: ...
+
+    @property
+    def quality(self) -> float: ...
+
+    @property
+    def stderr(self) -> float: ...
+
+    @property
+    def latency_ms(self) -> float: ...
+
+
+class ArnoldTonguePeak:
+    @property
+    def ratio_p(self) -> int: ...
+
+    @property
+    def ratio_q(self) -> int: ...
+
+    @property
+    def rotation(self) -> float: ...
+
+    @property
+    def lam(self) -> float: ...
+
+    @property
+    def wd(self) -> float: ...
+
+    @property
+    def strength(self) -> float: ...
+
+    @property
+    def peak_strength(self) -> float: ...
+
+    @property
+    def error(self) -> float: ...
+
+    @property
+    def ratio(self) -> float: ...
+
+
+class HeatmapAnalytics:
+    @property
+    def total_energy(self) -> float: ...
+
+    @property
+    def leading_sum(self) -> float: ...
+
+    @property
+    def central_sum(self) -> float: ...
+
+    @property
+    def trailing_sum(self) -> float: ...
+
+    @property
+    def leading_norm(self) -> float: ...
+
+    @property
+    def central_norm(self) -> float: ...
+
+    @property
+    def trailing_norm(self) -> float: ...
+
+    @property
+    def dominant_lam(self) -> float: ...
+
+    @property
+    def dominant_wd(self) -> float: ...
+
+    @property
+    def peak_value(self) -> float: ...
+
+    @property
+    def peak_ratio(self) -> float: ...
+
+    @property
+    def radius(self) -> float: ...
+
+    @property
+    def log_radius(self) -> float: ...
+
+    @property
+    def bias(self) -> float: ...
+
+    @property
+    def drift(self) -> float: ...
+
+    @property
+    def quality(self) -> float: ...
+
+    @property
+    def stderr(self) -> float: ...
+
+    @property
+    def entropy(self) -> float: ...
+
+    def band_energy(self) -> Tuple[float, float, float]: ...
+
+
+class HeatmapResult:
+    @property
+    def branch_id(self) -> str: ...
+
+    @property
+    def gamma(self) -> float: ...
+
+    @property
+    def kappa_hat(self) -> float: ...
+
+    @property
+    def lam_grid(self) -> List[float]: ...
+
+    @property
+    def wd_grid(self) -> List[float]: ...
+
+    @property
+    def matrix(self) -> List[List[float]]: ...
+
+    @property
+    def tongues(self) -> List[ArnoldTonguePeak]: ...
+
+    def dominant_tongue(self) -> ArnoldTonguePeak | None: ...
+
+    def analyse(self) -> HeatmapAnalytics | None: ...
+
+    def to_atlas_fragment(
+        self,
+        timestamp: float | None = ...,
+    ) -> Dict[str, Any] | None: ...
+
+    def to_psi_reading(self, step: int) -> Dict[str, Any] | None: ...
+
+    def to_zpulse(self, ts: int) -> ZPulseSnapshot: ...
+
+
+class PsiSynchroPulse:
+    @property
+    def branch_id(self) -> str: ...
+
+    @property
+    def pulse(self) -> ZPulseSnapshot: ...
+
+
+class GoldenPulse:
+    @property
+    def exploration_drive(self) -> float: ...
+
+    @property
+    def optimization_gain(self) -> float: ...
+
+    @property
+    def synergy_score(self) -> float: ...
+
+    @property
+    def reinforcement_weight(self) -> float: ...
+
+    @property
+    def mean_support(self) -> float: ...
+
+    @property
+    def mean_reward(self) -> float: ...
+
+    @property
+    def mean_psi(self) -> float: ...
+
+    @property
+    def mean_confidence(self) -> float: ...
+
+    @property
+    def coverage(self) -> int: ...
+
+    @property
+    def heuristics_contributions(self) -> int: ...
+
+    @property
+    def append_weight(self) -> float: ...
+
+    @property
+    def retract_count(self) -> int: ...
+
+    @property
+    def annotate_count(self) -> int: ...
+
+    @property
+    def dominant_plan(self) -> str | None: ...
+
+    def is_idle(self) -> bool: ...
+
+
+class GoldenDirective:
+    @property
+    def push_interval(self) -> float: ...
+
+    @property
+    def summary_window(self) -> int: ...
+
+    @property
+    def exploration_priority(self) -> float: ...
+
+    @property
+    def reinforcement_weight(self) -> float: ...
+
+
+class GoldenPsiTelemetry:
+    @property
+    def branch_id(self) -> str: ...
+
+    @property
+    def pulse(self) -> GoldenPulse: ...
+
+    @property
+    def directive(self) -> GoldenDirective: ...
+
+
+class PsiSynchroResult:
+    @property
+    def heatmaps(self) -> List[HeatmapResult]: ...
+
+    @property
+    def pulses(self) -> List[PsiSynchroPulse]: ...
+
+    def atlas_fragments(self) -> List[Tuple[str, Dict[str, object]]]: ...
+
+    def psi_readings(self) -> List[Tuple[str, Dict[str, object]]]: ...
+
+    def by_branch(self) -> List[Tuple[str, ZPulseSnapshot]]: ...
+
+    @property
+    def golden(self) -> List[GoldenPsiTelemetry]: ...
+
+    @property
+    def golden_baseline_interval(self) -> float: ...
+
+    @property
+    def golden_baseline_window(self) -> int: ...
+
+    def golden_telemetry(
+        self,
+        baseline_interval: float = ...,
+        baseline_window: int = ...,
+    ) -> List[GoldenPsiTelemetry]: ...
+
+
+class _PsiModule(ModuleType):
+    MetaMembConfig: type[MetaMembConfig]
+    CircleLockMapConfig: type[CircleLockMapConfig]
+    PsiTelemetryConfig: type[PsiTelemetryConfig]
+    PsiSynchroConfig: type[PsiSynchroConfig]
+    PsiBranchState: type[PsiBranchState]
+    ArnoldTonguePeak: type[ArnoldTonguePeak]
+    HeatmapAnalytics: type[HeatmapAnalytics]
+    HeatmapResult: type[HeatmapResult]
+    ZPulseSnapshot: type[ZPulseSnapshot]
+    PsiSynchroPulse: type[PsiSynchroPulse]
+    PsiSynchroResult: type[PsiSynchroResult]
+    GoldenPulse: type[GoldenPulse]
+    GoldenDirective: type[GoldenDirective]
+    GoldenPsiTelemetry: type[GoldenPsiTelemetry]
+
+    def run_multibranch_demo(
+        branches: Sequence[PsiBranchState],
+        config: PsiSynchroConfig | None = ...,
+    ) -> PsiSynchroResult: ...
+
+    def run_zspace_learning(
+        branches: Sequence[PsiBranchState],
+        config: PsiSynchroConfig | None = ...,
+    ) -> PsiSynchroResult: ...
+
+
+psi: _PsiModule
+
+
 class _FracModule(ModuleType):
     def gl_coeffs_adaptive(alpha: float, tol: float = ..., max_len: int = ...) -> List[float]: ...
 

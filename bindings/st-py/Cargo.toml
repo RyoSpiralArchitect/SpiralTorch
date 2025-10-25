@@ -31,6 +31,7 @@ spiral_rl = ["dep:st-spiral-rl"]
 rec = ["dep:st-rec", "dep:st-kdsl"]
 text = ["dep:st-text"]
 selfsup = ["dep:spiral-selfsup"]
+golden = ["st-nn/golden", "st-core/golden"]
 
 # Backend selection (mirrors the CLI surface expected by maturin builds)
 cpu = []
