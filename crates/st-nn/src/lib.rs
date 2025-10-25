@@ -66,7 +66,7 @@ pub use layers::sequential::Sequential;
 pub use layers::wave_gate::WaveGate;
 pub use layers::wave_rnn::WaveRnn;
 pub use layers::zspace_projector::ZSpaceProjector;
-pub use layers::{Gelu, LayerNorm, Relu, ToposResonator, ZSpaceMixer};
+pub use layers::{Gelu, LayerNorm, Relu, ToposResonator, ZRelativityModule, ZSpaceMixer};
 pub use lightning::{
     LightningBuilder, LightningConfig, LightningConfigBuilder, LightningEpoch, LightningReport,
     LightningStage, LightningStageReport, SpiralLightning,
@@ -83,7 +83,9 @@ pub use schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedu
 pub use st_core::runtime::blackcat::{
     BlackCatRuntime, BlackcatRuntimeStats, ChoiceGroups, StepMetrics,
 };
-pub use trainer::{EpochStats, ModuleTrainer};
+pub use trainer::{
+    EpochStats, ModuleTrainer, SpectralAdjustmentMetrics, SpectralLearningRatePolicy,
+};
 #[cfg(feature = "psi")]
 pub use zspace_coherence::BranchPsiReading;
 #[cfg(feature = "golden")]

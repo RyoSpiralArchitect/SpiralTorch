@@ -460,19 +460,30 @@ print("ST sees torch mul_:", a2.tolist())
 ### 6) Row softmax (GPU-accelerated when available)
 
 ```python
-import spiraltorch as st
+from spiraltorch import Axis, tensor, label_tensor
 
-logits = st.Tensor(2, 4, [3.0, 1.0, -2.0, 0.5, -0.25, 0.0, 1.5, -1.0])
-print("CPU row softmax:", logits.row_softmax().tolist())
+# Declare the axes that describe your data.
+time = Axis("time")
+feature = Axis("feature", 4)
 
-# Opt into the WGPU backend (falls back to CPU if the device lacks subgroups)
-print("WGPU row softmax:", logits.row_softmax(backend="wgpu").tolist())
+wave = tensor(
+    [
+        [0.20, 0.80, -0.10, 0.40],
+        [0.90, -0.30, 0.10, 0.50],
+    ],
+    axes=[time.with_size(2), feature],
+)
+
+print(wave.describe())
+softmax = wave.row_softmax()
+print(softmax.axis_names())  # ('time', 'feature')
 ```
 
 ### 7) rl.stAgent multi-armed bandit
 
 ```python
-import random
+import torch
+from torch.utils.dlpack import from_dlpack as torch_from_dlpack
 import spiraltorch as st
 
 Agent = getattr(st.rl, "stAgent", None)
@@ -580,15 +591,8 @@ for x, y in loader:
 import spiraltorch as st
 
 rec = st.Recommender(users=8, items=12, factors=4, learning_rate=0.05, regularization=0.002)
-rec.train_epoch([(0,0,5.0),(0,1,3.0),(1,0,4.0)])
+rec.train_epoch([(0, 0, 5.0), (0, 1, 3.0), (1, 0, 4.0)])
 print("top-k:", rec.recommend_top_k(0, k=3))
-
-# RL: use stAgent (DQN-like), PPO, SAC
-agent = st.stAgent(state_dim=4, action_dim=2, discount=0.99, learning_rate=1e-3)
-a = agent.select_action(0); agent.update(0, a, 1.0, 1)
-
-ppo = st.PpoAgent(state_dim=4, action_dim=2, learning_rate=3e-4, clip_range=0.2)
-sac = st.SacAgent(state_dim=4, action_dim=2, temperature=0.1)
 ```
 
 ### 13) Interop (PyTorch / JAX / TensorFlow)
@@ -603,15 +607,6 @@ x_back = st.compat.torch.from_torch(xt)
 
 ### 14) Math & pacing helpers
 
-```python
-import spiraltorch as st
-st.set_global_seed(42)
-print(st.golden_ratio(), st.golden_angle())
-print(st.fibonacci_pacing(12))
-print(st.pack_tribonacci_chunks(20))
-```
-
----
 
 ## Backend Matrix
 
@@ -628,23 +623,6 @@ print(st.pack_tribonacci_chunks(20))
 
 ---
 
-### Python façade design
-
-- **Deferred exposure:** `__getattr__` forwards unknown names to the Rust extension → no need to constantly sync `__init__.py`.  
-- **Namespaced mirrors:** `nn`, `selfsup`, `vision`, `canvas`, `compat.*` are *forwarding modules*; they resolve symbols from Rust on first access.  
-- **Renames for stability:** e.g., `DqnAgent` → **`stAgent`**; the façade preserves import stability while Rust internals evolve.
-
-### Coding guidelines
-
-- **Rust**
-  - Keep public APIs thin and **feature-gated** (group domain features under logical flags).
-  - Provide *facade functions* at crate boundary to avoid leaking complex types to PyO3.
-  - Long-running ops: wrap with `pyo3::allow_threads` to release the GIL.
-
-- **Python**
-  - For new Rust exports, prefer **top-level re-exports** + **namespaced mirrors** (e.g., `selfsup.*`).
-  - Update `spiraltorch.pyi` alongside Rust exports to document the surface.
-  - Avoid heavy dependencies; keep the package import-time light.
 
 ### Tests
 

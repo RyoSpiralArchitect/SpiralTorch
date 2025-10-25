@@ -66,6 +66,7 @@ pub mod models;
 pub mod xai;
 
 use std::cmp::min;
+use std::collections::VecDeque;
 use std::f32::consts::PI;
 use std::fmt;
 use std::sync::Arc;
@@ -197,6 +198,51 @@ impl ZSpaceStreamFrame {
     pub fn chrono_snapshot(&self) -> Option<&ChronoSnapshot> {
         self.chrono_snapshot.as_ref()
     }
+
+    /// Number of slices carried by the streaming frame.
+    pub fn depth(&self) -> usize {
+        self.slices.len()
+    }
+
+    /// Spatial shape shared by all slices contained in the frame.
+    pub fn slice_shape(&self) -> (usize, usize) {
+        self.slices
+            .first()
+            .map(|tensor| tensor.shape())
+            .unwrap_or((0, 0))
+    }
+
+    /// Clones the frame into a [`StreamedVolume`] without consuming it.
+    pub fn to_streamed_volume(&self) -> PureResult<StreamedVolume> {
+        let volume = ZSpaceVolume::from_slices(&self.slices)?;
+        Ok(StreamedVolume {
+            volume,
+            atlas_frame: self.atlas_frame.clone(),
+            chrono_snapshot: self.chrono_snapshot.clone(),
+        })
+    }
+
+    /// Consumes the frame producing a [`StreamedVolume`].
+    pub fn into_streamed_volume(self) -> PureResult<StreamedVolume> {
+        ZSpaceVolume::from_stream_frame(self)
+    }
+
+    /// Computes slice statistics describing the current streaming payload.
+    pub fn profile(&self) -> PureResult<ZSliceProfile> {
+        if self.slices.is_empty() {
+            return Err(TensorError::EmptyInput("z_stream_frame_slices"));
+        }
+        let mut means = Vec::with_capacity(self.slices.len());
+        let mut stds = Vec::with_capacity(self.slices.len());
+        let mut energies = Vec::with_capacity(self.slices.len());
+        for slice in &self.slices {
+            let (mean, std, energy) = compute_slice_statistics(slice.data());
+            means.push(mean);
+            stds.push(std);
+            energies.push(energy);
+        }
+        ZSliceProfile::new(means, stds, energies)
+    }
 }
 
 /// Result of converting a streaming frame into a concrete Z-space volume.
@@ -205,6 +251,251 @@ pub struct StreamedVolume {
     pub volume: ZSpaceVolume,
     pub atlas_frame: Option<AtlasFrame>,
     pub chrono_snapshot: Option<ChronoSnapshot>,
+}
+
+impl StreamedVolume {
+    /// Computes slice statistics for the contained volume.
+    pub fn profile(&self) -> PureResult<ZSliceProfile> {
+        self.volume.profile()
+    }
+}
+
+/// Incrementally builds streaming frames while preserving associated telemetry.
+#[derive(Clone, Debug, Default)]
+pub struct ZSpaceStreamFrameAggregator {
+    slices: VecDeque<Tensor>,
+    atlas_frame: Option<AtlasFrame>,
+    chrono_snapshot: Option<ChronoSnapshot>,
+    slice_shape: Option<(usize, usize)>,
+    max_depth: Option<usize>,
+}
+
+impl ZSpaceStreamFrameAggregator {
+    /// Creates an empty aggregator without depth limits.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Creates an aggregator enforcing a maximum depth once populated.
+    pub fn with_max_depth(max_depth: usize) -> PureResult<Self> {
+        if max_depth == 0 {
+            return Err(TensorError::InvalidDimensions { rows: 0, cols: 0 });
+        }
+        Ok(Self {
+            max_depth: Some(max_depth),
+            ..Self::default()
+        })
+    }
+
+    /// Returns the currently configured maximum depth.
+    pub fn max_depth(&self) -> Option<usize> {
+        self.max_depth
+    }
+
+    /// Updates the depth limit for the aggregator.
+    pub fn set_max_depth(&mut self, max_depth: Option<usize>) -> PureResult<()> {
+        if let Some(depth) = max_depth {
+            if depth == 0 {
+                return Err(TensorError::InvalidDimensions { rows: 0, cols: 0 });
+            }
+        }
+        self.max_depth = max_depth;
+        if let Some(depth) = self.max_depth {
+            while self.slices.len() > depth {
+                self.slices.pop_front();
+            }
+        }
+        Ok(())
+    }
+
+    /// Number of slices collected so far.
+    pub fn len(&self) -> usize {
+        self.slices.len()
+    }
+
+    /// Returns true when no slices have been accumulated.
+    pub fn is_empty(&self) -> bool {
+        self.slices.is_empty()
+    }
+
+    /// Spatial shape shared by all collected slices.
+    pub fn slice_shape(&self) -> Option<(usize, usize)> {
+        self.slice_shape
+    }
+
+    /// Extends the aggregator with a new frame, merging telemetry metadata.
+    pub fn extend(&mut self, frame: ZSpaceStreamFrame) -> PureResult<()> {
+        let ZSpaceStreamFrame {
+            slices,
+            atlas_frame,
+            chrono_snapshot,
+        } = frame;
+        if slices.is_empty() {
+            return Err(TensorError::EmptyInput("z_stream_frame_slices"));
+        }
+        let shape = slices[0].shape();
+        if let Some(existing) = self.slice_shape {
+            if existing != shape {
+                return Err(TensorError::ShapeMismatch {
+                    left: existing,
+                    right: shape,
+                });
+            }
+        } else {
+            self.slice_shape = Some(shape);
+        }
+        if let Some(atlas) = atlas_frame {
+            self.atlas_frame = Some(atlas);
+        }
+        if let Some(snapshot) = chrono_snapshot {
+            match &mut self.chrono_snapshot {
+                Some(existing) => merge_snapshot(existing, snapshot),
+                None => self.chrono_snapshot = Some(snapshot),
+            }
+        }
+        for slice in slices {
+            if slice.shape() != shape {
+                return Err(TensorError::ShapeMismatch {
+                    left: shape,
+                    right: slice.shape(),
+                });
+            }
+            self.slices.push_back(slice);
+        }
+        if let Some(depth) = self.max_depth {
+            while self.slices.len() > depth {
+                self.slices.pop_front();
+            }
+        }
+        Ok(())
+    }
+
+    /// Produces a clone of the aggregated frame when populated.
+    pub fn as_frame(&self) -> Option<ZSpaceStreamFrame> {
+        if self.slices.is_empty() {
+            return None;
+        }
+        let slices: Vec<Tensor> = self.slices.iter().cloned().collect();
+        Some(ZSpaceStreamFrame {
+            slices,
+            atlas_frame: self.atlas_frame.clone(),
+            chrono_snapshot: self.chrono_snapshot.clone(),
+        })
+    }
+
+    /// Consumes the aggregator returning the assembled frame.
+    pub fn into_frame(self) -> Option<ZSpaceStreamFrame> {
+        if self.slices.is_empty() {
+            return None;
+        }
+        Some(ZSpaceStreamFrame {
+            slices: self.slices.into_iter().collect(),
+            atlas_frame: self.atlas_frame,
+            chrono_snapshot: self.chrono_snapshot,
+        })
+    }
+}
+
+fn merge_snapshot(existing: &mut ChronoSnapshot, incoming: ChronoSnapshot) {
+    existing.timestamp = existing.timestamp.max(incoming.timestamp);
+    existing.dt += incoming.dt;
+    merge_chrono_summary(&mut existing.summary, &incoming.summary);
+    if incoming.summary.latest_timestamp > existing.summary.latest_timestamp {
+        existing.summary.latest_timestamp = incoming.summary.latest_timestamp;
+    }
+}
+
+fn merge_chrono_summary(target: &mut ChronoSummary, incoming: &ChronoSummary) {
+    if incoming.frames == 0 {
+        return;
+    }
+    if target.frames == 0 {
+        *target = incoming.clone();
+        return;
+    }
+    let target_frames = target.frames as f32;
+    let incoming_frames = incoming.frames as f32;
+    let total_frames = target_frames + incoming_frames;
+    if total_frames <= 0.0 {
+        return;
+    }
+
+    target.duration += incoming.duration;
+    target.frames += incoming.frames;
+    target.latest_timestamp = target.latest_timestamp.max(incoming.latest_timestamp);
+    target.min_energy = target.min_energy.min(incoming.min_energy);
+    target.max_energy = target.max_energy.max(incoming.max_energy);
+
+    let target_mean_energy = target.mean_energy;
+    let incoming_mean_energy = incoming.mean_energy;
+    let target_mean_drift = target.mean_drift;
+    let incoming_mean_drift = incoming.mean_drift;
+
+    target.mean_energy = (target_frames * target_mean_energy
+        + incoming_frames * incoming_mean_energy)
+        / total_frames;
+    target.mean_drift =
+        (target_frames * target_mean_drift + incoming_frames * incoming_mean_drift) / total_frames;
+    target.mean_abs_drift = (target_frames * target.mean_abs_drift
+        + incoming_frames * incoming.mean_abs_drift)
+        / total_frames;
+    target.mean_decay =
+        (target_frames * target.mean_decay + incoming_frames * incoming.mean_decay) / total_frames;
+
+    let energy_variance = combine_variance(
+        target_frames,
+        target_mean_energy,
+        target.energy_std.powi(2),
+        incoming_frames,
+        incoming_mean_energy,
+        incoming.energy_std.powi(2),
+        target.mean_energy,
+    );
+    let drift_variance = combine_variance(
+        target_frames,
+        target_mean_drift,
+        target.drift_std.powi(2),
+        incoming_frames,
+        incoming_mean_drift,
+        incoming.drift_std.powi(2),
+        target.mean_drift,
+    );
+    target.energy_std = energy_variance.max(0.0).sqrt();
+    target.drift_std = drift_variance.max(0.0).sqrt();
+}
+
+fn combine_variance(
+    count_a: f32,
+    mean_a: f32,
+    var_a: f32,
+    count_b: f32,
+    mean_b: f32,
+    var_b: f32,
+    combined_mean: f32,
+) -> f32 {
+    let total = count_a + count_b;
+    if total <= 0.0 {
+        return 0.0;
+    }
+    let delta_a = mean_a - combined_mean;
+    let delta_b = mean_b - combined_mean;
+    (count_a * (var_a + delta_a.powi(2)) + count_b * (var_b + delta_b.powi(2))) / total
+}
+
+fn compute_slice_statistics(data: &[f32]) -> (f32, f32, f32) {
+    let len = data.len() as f32;
+    if len <= 0.0 {
+        return (0.0, 0.0, 0.0);
+    }
+    let mean = data.iter().sum::<f32>() / len;
+    let mut variance = 0.0f32;
+    let mut energy = 0.0f32;
+    for &value in data {
+        let diff = value - mean;
+        variance += diff * diff;
+        energy += value * value;
+    }
+    (mean, (variance / len).max(0.0).sqrt(), energy / len)
 }
 
 pub mod video;
@@ -499,6 +790,26 @@ impl ZSpaceVolume {
     /// Returns the number of voxels contained in the volume.
     pub fn voxel_count(&self) -> usize {
         self.depth * self.height * self.width
+    }
+
+    /// Generates a [`ZSliceProfile`] describing the volumetric statistics.
+    pub fn profile(&self) -> PureResult<ZSliceProfile> {
+        if self.depth == 0 {
+            return Err(TensorError::EmptyInput("z_space_volume"));
+        }
+        let slice_len = self.height * self.width;
+        let mut means = Vec::with_capacity(self.depth);
+        let mut stds = Vec::with_capacity(self.depth);
+        let mut energies = Vec::with_capacity(self.depth);
+        for z in 0..self.depth {
+            let start = z * slice_len;
+            let end = start + slice_len;
+            let (mean, std, energy) = compute_slice_statistics(&self.voxels[start..end]);
+            means.push(mean);
+            stds.push(std);
+            energies.push(energy);
+        }
+        ZSliceProfile::new(means, stds, energies)
     }
 
     /// Ensures the harmonic buffer has the requested channel count, reallocating if required.
@@ -2986,6 +3297,33 @@ impl TransformPipeline {
         self
     }
 
+    /// Immutable view over the registered operations.
+    pub fn operations(&self) -> &[TransformOperation] {
+        &self.ops
+    }
+
+    /// Number of stages currently configured in the pipeline.
+    pub fn len(&self) -> usize {
+        self.ops.len()
+    }
+
+    /// Returns true when the pipeline has no operations registered.
+    pub fn is_empty(&self) -> bool {
+        self.ops.is_empty()
+    }
+
+    /// Indicates whether a GPU dispatcher has been attached.
+    pub fn has_gpu_dispatcher(&self) -> bool {
+        #[cfg(feature = "wgpu")]
+        {
+            self.dispatcher.is_some()
+        }
+        #[cfg(not(feature = "wgpu"))]
+        {
+            false
+        }
+    }
+
     #[cfg(feature = "wgpu")]
     pub fn with_gpu_dispatcher_arc(mut self, dispatcher: Arc<TransformDispatcher>) -> Self {
         self.dispatcher = Some(dispatcher);
@@ -3056,10 +3394,6 @@ impl TransformPipeline {
             }
         }
         Ok(())
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.ops.is_empty()
     }
 
     fn apply_resize(&mut self, op: &Resize, image: &mut ImageTensor) -> PureResult<()> {
@@ -4207,6 +4541,29 @@ mod tests {
         }
     }
 
+    fn build_summary(
+        frames: usize,
+        mean_energy: f32,
+        energy_std: f32,
+        mean_drift: f32,
+        drift_std: f32,
+        latest_timestamp: f32,
+    ) -> ChronoSummary {
+        ChronoSummary {
+            frames,
+            duration: frames as f32 * 0.05,
+            latest_timestamp,
+            mean_drift,
+            mean_abs_drift: mean_drift.abs(),
+            drift_std,
+            mean_energy,
+            energy_std,
+            mean_decay: -0.05,
+            min_energy: (mean_energy - energy_std).min(mean_energy),
+            max_energy: (mean_energy + energy_std).max(mean_energy),
+        }
+    }
+
     #[test]
     fn volume_zeros_with_temporal_allocates_expected_buffers() {
         let volume = ZSpaceVolume::zeros_with_temporal(2, 3, 4, 3).unwrap();
@@ -4229,6 +4586,82 @@ mod tests {
         assert_eq!(volume.width(), 2);
         let slice = volume.slice(1).unwrap();
         assert_eq!(slice.data(), slice_b.data());
+    }
+
+    #[test]
+    fn volume_profile_matches_slice_statistics() {
+        let slice_a = tensor_from(&[1.0, 2.0, 3.0, 4.0], 2, 2);
+        let slice_b = tensor_from(&[0.0, 1.0, 0.0, 1.0], 2, 2);
+        let volume = ZSpaceVolume::from_slices(&[slice_a, slice_b]).unwrap();
+        let profile = volume.profile().unwrap();
+        assert_eq!(profile.depth(), 2);
+        assert!((profile.mean(0) - 2.5).abs() < 1e-6);
+        assert!((profile.std(0) - 1.118034).abs() < 1e-5);
+        assert!((profile.energy(0) - 7.5).abs() < 1e-6);
+        assert!((profile.mean(1) - 0.5).abs() < 1e-6);
+        assert!((profile.std(1) - 0.5).abs() < 1e-6);
+        assert!((profile.energy(1) - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn stream_frame_aggregator_merges_metadata() {
+        let summary_a = build_summary(2, 1.0, 0.1, 0.05, 0.02, 0.5);
+        let summary_b = build_summary(4, 2.0, 0.3, 0.1, 0.04, 1.0);
+        let frame_a =
+            ZSpaceStreamFrame::new(vec![
+                Tensor::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0]).unwrap()
+            ])
+            .unwrap()
+            .with_atlas(AtlasFrame::new(0.5))
+            .with_snapshot(ChronoSnapshot::new(summary_a.clone(), 0.05));
+        let frame_b =
+            ZSpaceStreamFrame::new(vec![
+                Tensor::from_vec(2, 2, vec![5.0, 6.0, 7.0, 8.0]).unwrap()
+            ])
+            .unwrap()
+            .with_snapshot(ChronoSnapshot::new(summary_b.clone(), 0.1));
+        let mut aggregator = ZSpaceStreamFrameAggregator::new();
+        aggregator.extend(frame_a.clone()).unwrap();
+        aggregator.extend(frame_b.clone()).unwrap();
+        let combined = aggregator
+            .as_frame()
+            .expect("aggregator should yield frame");
+        assert_eq!(combined.depth(), 2);
+        assert_eq!(combined.slice_shape(), (2, 2));
+        let snapshot = combined
+            .chrono_snapshot()
+            .expect("merged frame must retain snapshot");
+        assert_eq!(snapshot.summary().frames, 6);
+        assert!((snapshot.dt() - 0.15).abs() < 1e-6);
+        let expected_mean_energy = (summary_a.frames as f32 * summary_a.mean_energy
+            + summary_b.frames as f32 * summary_b.mean_energy)
+            / (summary_a.frames + summary_b.frames) as f32;
+        assert!((snapshot.summary().mean_energy - expected_mean_energy).abs() < 1e-6);
+        assert_eq!(
+            snapshot.summary().duration,
+            summary_a.duration + summary_b.duration
+        );
+        let profile = combined.profile().unwrap();
+        assert_eq!(profile.depth(), 2);
+        let streamed = combined.clone().into_streamed_volume().unwrap();
+        let streamed_profile = streamed.profile().unwrap();
+        assert_eq!(profile.means(), streamed_profile.means());
+    }
+
+    #[test]
+    fn stream_frame_aggregator_respects_depth_limit() {
+        let slice_a = Tensor::from_vec(1, 1, vec![1.0]).unwrap();
+        let slice_b = Tensor::from_vec(1, 1, vec![2.0]).unwrap();
+        let mut aggregator = ZSpaceStreamFrameAggregator::with_max_depth(1).unwrap();
+        aggregator
+            .extend(ZSpaceStreamFrame::new(vec![slice_a.clone()]).unwrap())
+            .unwrap();
+        aggregator
+            .extend(ZSpaceStreamFrame::new(vec![slice_b.clone()]).unwrap())
+            .unwrap();
+        let combined = aggregator.as_frame().unwrap();
+        assert_eq!(combined.depth(), 1);
+        assert_eq!(combined.slices()[0].data(), slice_b.data());
     }
 
     #[test]
