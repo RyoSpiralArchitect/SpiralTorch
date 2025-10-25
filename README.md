@@ -8,6 +8,8 @@ _(Still under active repair while expanding — API changes hourly.)_
 
 Step into the paradigm shift from imitation to emergent meaning with the [SpiralTorch Manifesto](docs/spiraltorch_manifesto.md).
 
+🌌 **New to the manifold?** Explore how tensors, telemetry, and imported checkpoints share coordinates in [Navigating Z-space in SpiralTorch](docs/zspace_intro.md).
+
 📜 **Licensing at a glance:** SpiralTorch is AGPL-3.0-or-later by default with a commercial option for proprietary deployments. [Read the full policy.](docs/licensing.md)
 Unauthorized redistribution, scraping, or resale of this repository
 violates AGPL-3.0 and §13. Any commercial deployment requires a license.

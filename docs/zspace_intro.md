@@ -1,91 +1,136 @@
-# What is Z-space?
+# Navigating Z-space in SpiralTorch
 
-SpiralTorch revolves around a shared state-space called **Z-space**. When kernels
-emit tensors, gradients, or metadata they are always interpreted relative to this
-space. Understanding how Z-space is constructed helps you reason about
-SpiralTorch's scheduling, spectral operators, and topology-preserving buffers.
+Z-space is SpiralTorch's shared manifold for tensors, gradients, and telemetry. Every
+kernel, scheduler pass, and learning loop interprets data relative to a Z-frame so
+spectral structure, topology, and temporal echoes stay coherent across the stack.
+This document surveys how the implementation assembles that manifold, the APIs you
+use to work with it, and the surrounding tooling that keeps Z-space sessions
+inspectable and portable.
 
-## Motivating intuition
+## Core building blocks
 
-Z-space is a **hybrid spectral–topological manifold**. It begins as a
-frequency-aligned lattice (think Mellin wavelets stretched along golden-ratio
-intervals) and is then warped by the current task's resonance profile. The warp
-preserves orientation so that operators can compose safely, yet it keeps the
-spectrum locally stationary for fast FFT- and Mellin-family primitives.
+### Atlas, frames, and indices
 
-At runtime Z-space is represented as a stack of cells:
+The foundational types that describe the manifold live in the core crates:
 
-- **Spectral cells** hold band-limited activations. They are indexed by
-  `(band, orientation, resonance)`.
-- **Topological cells** track adjacency in the warped manifold. They store
-  winding numbers, branch cuts, and cross-link hints used by homotopy-aware
-  optimisers.
-- **Temporal cells** capture time-shifted echoes. These are optional but power
-  features such as differential resonance replay and multiframe fusion.
+- `ZAtlas`, `ZFrame`, and `ZIndex` in `crates/st-core` define the spectral bands,
+  sheet topology, and temporal echoes that constitute a session's coordinate
+  system.
+- The Python bindings forward those descriptors automatically. Tensors moving
+  through `spiraltorch` operations carry their frame metadata, so projecting back
+  into plain layouts (for example via `spiraltorch.nn.Conv2d` or
+  `ZSpaceProjector`) preserves alignment without manual bookkeeping.
 
-## Coordinate systems
+### Gradient roundtables
 
-All tensors flowing through SpiralTorch carry a **Z-frame** that defines how to
-interpret their axes.
+Gradients and metric streams are partitioned into Above/Here/Beneath bands with
+`st_core::ops::zspace_round`. The `SpectralFeatureSample` helper extracts sheet
+confidence, curvature, spin, and energy from Z-space slices before
+`RoundtableAssignment` feeds the cooperative scheduler. This keeps the banded
+roundtable that drives cooperative optimisation in sync with the latest spectral
+statistics.
 
-| Axis | Meaning | Typical range |
-| ---- | ------- | ------------- |
-| `μ` (mu) | Spectral band index | `0 … N_bands` |
-| `ν` (nu) | Orientation / spin | `-K … +K` |
-| `τ` (tau) | Temporal echo index | `0 … N_echoes` |
-| `χ` (chi) | Topological sheet selector | `0 … N_sheets` |
+### Coherence and sequencing
 
-The core libraries expose helpers (`ZFrame`, `ZIndex`, `ZAtlas`) to negotiate
-between frames. Downstream APIs—Python, Rust, and TypeScript—propagate Z-frames
-implicitly so user code can stay in tensor-first thinking.
+`st-nn` extends the core descriptors with Z-space-aware layers and sequencers.
+`StableZSpaceProjector`, `ZSpaceMixer`, and `ZSpaceCoherenceSequencer` expose
+forward/backward pipelines that understand warped lattices, while
+`zspace_coherence::run_zspace_learning_pass` powers PSI synchroniser learning
+from Rust and Python call-sites.
 
-## Relationship to tensors
+## Runtime state and caching
 
-Most modules expose familiar tensor signatures. Internally, operators lift
-inputs into Z-space, run topology-aware schedules, and then **project back** to
-your requested layout. The README callout about GPU-first convolution describes
-this flow: the WGPU backend expands the 5D activation volume on-device,
-performs batched GEMMs, then collapses the result back through the active
-Z-frame before returning a standard tensor.
+Each SpiralTorch session owns a Z-space atlas. When kernels lift activations into
+that space the runtime consults the frame signature to reuse tuned kernels,
+allocate residency, and emit telemetry. The cache keys incorporate Z-frame
+metadata so code generation, autotuning artefacts, and checkpointing remain
+compatible even as the atlas warps for a new task.
 
-When you request a `spiraltorch.nn.Conv2d` with `layout="NCHW"`, the following
-happens:
-
-1. Activations and filters are lifted into Z-space via the current `ZAtlas`.
-2. Spectral–topological kernels execute over the warped lattice.
-3. The result is projected into the layout you requested.
-
-## Persistence and caching
-
-Z-space shapes the runtime caches:
-
-- **Kernel caches** are keyed by Z-frame signatures. If two kernels operate over
-  identical Z-frames, codegen artifacts and tuning results are shared.
-- **Checkpointing** stores Z-frame metadata next to tensor values. This ensures
-  resuming a training run restores the same spectral orientation.
-- **Streaming** features pre-allocate Z-space volumes for upcoming frames so
-  multi-camera or sensor fusion jobs keep continuity.
-
-## Inspecting Z-space at runtime
-
-SpiralTorch includes lightweight probes to inspect the active Z-space atlas:
+Python callers can inspect the active state with `st.zspace.session()`:
 
 ```python
 import spiraltorch as st
 
 with st.zspace.session() as session:
-    print("active bands:", session.frame.bands)
-    print("sheet topology:", session.frame.sheets)
-    print("echo count:", session.frame.temporal.echo_count)
+    frame = session.frame
+    print("bands", frame.bands)
+    print("sheets", frame.sheets)
+    print("echoes", frame.temporal.echo_count)
 ```
 
-`st.zspace.render_atlas()` produces a quick Matplotlib overview of the current
-manifold. For deeper inspection, `st.zspace.sample_field()` lets you peek at the
-spectral density and homology classes assigned to each cell.
+`st.zspace.render_atlas()` renders a Matplotlib snapshot of the current atlas and
+`st.zspace.sample_field()` lets you probe spectral density and homology labels for
+individual cells, making warp changes visible during experiments.
+
+## Working with Z-space metrics
+
+### Encoding and decoding
+
+The convenience namespace `st.z[...]` routes text directly through the
+`LanguageWaveEncoder` so you can materialise Z-space tensors with one-liners. For
+structured results, `spiraltorch.decode_zspace_embedding` and
+`spiraltorch.zspace_eval` convert latent vectors or Mellin projections back into
+named metrics and diagnostic points.
+
+### Metrics, partials, and telemetry
+
+`spiraltorch.z_metrics` normalises speed, memory, stability, drift-response, and
+gradient series into canonical Z-space metrics. You can collect partial
+observations with `st.z.partial(...)` which emits `ZSpacePartialBundle`
+instances carrying weights, origin tags, and optional telemetry payloads.
+
+`blend_zspace_partials`, `infer_from_partial`, and `infer_with_partials` fuse
+partials with latent states, while `ZSpaceTrainer` and `stream_zspace_training`
+provide an optimiser-friendly wrapper that incrementally adapts a posterior to
+incoming metrics.
+
+The inference helpers accept structured telemetry. Pass dicts, `ZSpaceTelemetryFrame`
+instances, or the telemetry captured inside a `ZSpacePartialBundle`; everything
+is flattened and merged automatically before the posterior update so PSI health
+metrics and canvas energy stay aligned with the atlas.
+
+### Importing external weights
+
+Warm-starting from other ecosystems hinges on the DLPack bridges:
+
+- `spiraltorch.weights_partial_from_dlpack` and
+  `spiraltorch.weights_partial_from_compat` derive partial bundles from imported
+  tensors.
+- `spiraltorch.infer_weights_from_dlpack` projects those partials through the
+  posterior, blending optional PSI telemetry in the same step.
+
+These helpers integrate with the compat adapters advertised in the README so a
+PyTorch, TensorFlow, or JAX model can contribute to a Z-space session without
+rewriting the training loop.
+
+## PSI synchroniser learning
+
+The PSI module exposes multi-branch learning bundles tuned for Z-space coherence.
+`st.psi.run_zspace_learning(...)` funnels Atlas fragments, heatmaps, ZPulse
+snapshots, and Golden directives into the Rust sequencer. The resulting summary
+and telemetry keep distributed learners and `golden` retrievers aligned without
+leaving the cooperative runtime.
+
+## Canvas and vision feedback
+
+SpiralTorchVision exposes `CanvasProjector::emit_zspace_patch` so WebGPU canvases
+can fold their state back into the fractal scheduler. The projector returns both
+the RGBA buffer and Z-space-compatible patches, letting browser or Rust call-sites
+ship telemetry into the same atlas used by language and PSI modules. Pair it with
+`spiraltorch.z_space_barycenter` to blend canvas chart priors directly into the
+roundtable before handing gradients to `Hypergrad` or `Realgrad` tapes.
 
 ## Further reading
 
-- [SpiralTorchVision overview](docs/spiraltorchvision.md)
-- [Cloud Integration Guide](docs/cloud_integration.md)
-- `crates/st-core/src/zspace/` for Rust implementations of the atlas, frames,
-  and topological planners.
+- [Z-space drift-response linguistics](docs/drift_response_linguistics.md)
+- [General relativity couplings inside Z-space](docs/general_relativity_zspace.md)
+- [Z-space inference autopilot](docs/quantum_reality_acceleration.md)
+- Rust sources around Z-space operators:
+  - `crates/st-core/src/ops/zspace_round.rs`
+  - `crates/st-nn/src/layers/zspace_projector.rs`
+  - `crates/st-nn/src/zspace_coherence/`
+- Python inference helpers in `bindings/st-py/spiraltorch/zspace_inference.py`
+
+With these components in view you can inspect, extend, and stabilise Z-space
+pipelines while keeping imported checkpoints, PSI telemetry, and Canvas feedback
+aligned with SpiralTorch's cooperative scheduler.
