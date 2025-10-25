@@ -5,6 +5,7 @@
 
 pub mod activation;
 pub mod conv;
+pub mod dropout;
 pub mod gelu;
 pub mod linear;
 pub mod non_liner;
@@ -15,10 +16,12 @@ pub mod spiral_rnn;
 pub mod topos_resonator;
 pub mod wave_gate;
 pub mod wave_rnn;
+pub mod zrelativity;
 pub mod zspace_mixer;
 pub mod zspace_projector;
 
 pub use activation::Relu;
+pub use dropout::Dropout;
 pub use gelu::Gelu;
 pub use non_liner::{
     NonLiner, NonLinerActivation, NonLinerEllipticConfig, NonLinerGeometry,
@@ -27,5 +30,6 @@ pub use non_liner::{
 pub use normalization::LayerNorm;
 pub use softmax::ZSpaceSoftmax;
 pub use topos_resonator::ToposResonator;
+pub use zrelativity::ZRelativityModule;
 pub use zspace_mixer::ZSpaceMixer;
 pub use zspace_projector::StableZSpaceProjector;

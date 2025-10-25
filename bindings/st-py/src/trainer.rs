@@ -1,3 +1,5 @@
+#[cfg(feature = "nn")]
+use crate::nn::PyZRelativityModule;
 use crate::tensor::PyTensor;
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -7,6 +9,8 @@ use pyo3::Bound;
 use pyo3::Py;
 use pyo3::PyAny;
 
+#[cfg(feature = "nn")]
+use st_nn::Module;
 use st_tensor::{mean_squared_error, LinearModel, Tensor};
 
 #[pyclass(module = "spiraltorch", name = "ModuleTrainer")]
@@ -142,6 +146,23 @@ impl PyModuleTrainer {
             .forward(&inputs.inner)
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok(PyTensor::from_tensor(predictions))
+    }
+
+    #[cfg(feature = "nn")]
+    pub fn train_zrelativity_step(
+        &mut self,
+        module: &PyZRelativityModule,
+        targets: &PyTensor,
+        learning_rate: f32,
+    ) -> PyResult<f32> {
+        let seed = Tensor::zeros(1, 1).map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let params = module
+            .inner
+            .forward(&seed)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        self.model
+            .train_batch(&params, &targets.inner, learning_rate)
+            .map_err(|e| PyValueError::new_err(e.to_string()))
     }
 
     /// Return a snapshot of the current model weights.

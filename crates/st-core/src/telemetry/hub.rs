@@ -424,6 +424,15 @@ pub struct SoftlogicEllipticSample {
     pub sheet_position: f32,
     pub normal_bias: f32,
     pub sheet_count: u32,
+    pub topological_sector: u32,
+    pub homology_index: u32,
+    pub rotor_field: [f32; 3],
+    pub flow_vector: [f32; 3],
+    pub curvature_tensor: [[f32; 3]; 3],
+    pub resonance_heat: f32,
+    pub noise_density: f32,
+    pub quaternion: [f32; 4],
+    pub rotation: [f32; 9],
 }
 
 impl SoftlogicZFeedback {
