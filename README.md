@@ -28,48 +28,68 @@ It’s not just an engine—it’s a **bridge** between the pragmatism of deep-l
 
 **Architecture Overview.**
 ```mermaid
+%%{init: {'themeVariables': {'fontSize': '20px', 'lineColor': '#7f8cfc'}, 'sequence': {'actorFontSize': 22, 'messageFontSize': 19, 'noteFontSize': 18}}}%%
 sequenceDiagram
   participant API as Python/TS API
-  participant FFI as Bindings (PyO3 / NAPI)
-  participant Core as st-core dispatcher
-  participant Tape as Hypergrad tape
-  participant Sched as Cooperative scheduler
-  participant Plan as Engine planner & timeline
-  participant Caps as Device caps profiler
+  participant Bridge as PyO3/wasm bindings
+  participant Session as Session manager
+  participant Core as st-core orchestrator
+  participant Planner as Graph planner + scheduler
+  participant Autodiff as Tape/autograd runtime
   participant Reg as Op registry
-  participant KD as st-kdsl codegen
-  participant BE as Backend runtimes (WGPU/CUDA/HIP/CPU)
-  participant Queue as Device queues & allocators
-  participant TLM as Telemetry hub
-  participant PSI as PSI / observability sinks
+  participant Caps as Capability DB
+  participant Layout as Layout strategist
+  participant KD as st-kdsl compiler
+  participant Cache as Kernel cache/tuner
+  participant Mem as Arena allocator
+  participant Stream as Stream graphifier
+  participant Queue as Command queue mgr
+  participant BE as Backend (WGPU/CUDA/CPU)
+  participant TLM as Telemetry/observability
+  participant Prof as Profiler/exporter
 
-  API->>FFI: st.op(x, y, ...)
-  FFI->>Core: marshal call & materialise graph node
-  Core->>Tape: register autograd edges
-  Tape-->>Core: gradient token
-  Core->>Sched: request execution window
-  Sched->>Plan: assemble execution timeline
-  Plan->>Caps: query capabilities (precision/layout)
-  Caps-->>Plan: caps + heuristics
-  Plan->>Reg: resolve op implementation
-  alt compiled pipeline cached
-    Reg-->>Plan: impl + schedule + pipeline handle
-  else kernel needs emission
-    Reg->>KD: generate kernel + specialise params
-    KD-->>Reg: tuned binary + layout metadata
-    Reg-->>Plan: impl + schedule + pipeline handle
+  API->>Bridge: op(x, y, ...) / launch async task
+  Bridge->>Session: hydrate handles / authz
+  Session->>Core: dispatch request (device scope)
+  Core->>Autodiff: capture gradients / tape guards
+  Autodiff-->>Core: differentiation plan
+  Core->>Planner: build execution graph (policy, determinism)
+  Planner->>Layout: negotiate layout / sharding
+  Layout-->>Planner: residency strategy + halo exchange
+  Planner->>Reg: request op impl (tensor traits, precision)
+  Reg->>Caps: verify backend + layout capabilities
+  Caps-->>Reg: supported modes / tiling hints
+  Reg->>Prof: emit planning span metadata
+  Prof-->>Reg: sampling budget / trace tokens
+  par cache probe vs compilation
+    Reg->>Cache: fetch tuned kernel handle
+    Cache-->>Reg: kernel + launch params
+  and
+    Reg->>KD: request codegen + schedule lowering
+    KD->>Cache: autotune + persist kernel artifact
+    Cache-->>Reg: kernel handle + tuning metadata
   end
-  Plan->>BE: stage work packages
-  BE->>Queue: enqueue command buffers
-  Queue-->>BE: completion fences & buffer handles
-  BE-->>Tape: materialise gradients / result tensors
-  BE-->>Sched: completion callbacks
-  Sched-->>Core: future resolves
-  Core-->>FFI: return handles / tensors
-  FFI-->>API: deliver result to caller
-  BE--)TLM: runtime spans + counters
-  TLM-->>PSI: stream metrics / psychoid events
-  TLM--)FFI: propagate warnings back upstream
+  Reg-->>Planner: impl + schedule + kernel handle
+  Planner->>Mem: acquire arenas / residency locks
+  Mem-->>Planner: buffer views + relocation plan
+  Planner->>Stream: expand passes → async stages
+  Stream-->>Planner: dependency DAG + replay guards
+  Planner-->>Core: executable pass graph
+  Core->>Queue: enqueue passes (async futures)
+  loop execution waves
+    Queue->>BE: submit pipelines / barriers
+    BE->>Mem: residency updates / reuse hints
+    BE->>Autodiff: gradient materialisation callbacks
+    BE-->>Queue: completion events + result buffers
+    Queue->>TLM: forward stage timings / counters
+  end
+  Queue-->>Core: ready futures / error states
+  Core->>Prof: flush spans + counter deltas
+  Prof-->>TLM: export traces / profile artefacts
+  Core--)TLM: spans / metrics / structured logs
+  Core-->>Session: promise handle / stream token
+  Session-->>Bridge: async completion signal
+  Bridge-->>API: awaitable result / telemetry hook
 ```
 
 > **Update — GPU-first convolution.** `Conv2d` now routes through a WGPU im2col + GEMM path that expands the 5D activation volume entirely on the GPU before projection back into Z-space, accelerating large vision stacks on portable GPUs.
