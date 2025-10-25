@@ -7,6 +7,7 @@ pub mod activation;
 pub mod conv;
 pub mod gelu;
 pub mod linear;
+pub mod non_liner;
 pub mod normalization;
 pub mod sequential;
 pub mod softmax;
@@ -19,6 +20,7 @@ pub mod zspace_projector;
 
 pub use activation::Relu;
 pub use gelu::Gelu;
+pub use non_liner::{NonLiner, NonLinerActivation};
 pub use normalization::LayerNorm;
 pub use softmax::ZSpaceSoftmax;
 pub use topos_resonator::ToposResonator;
