@@ -23,10 +23,12 @@
 
 #![cfg(feature = "golden")]
 use std::ops::{Deref, DerefMut};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::panic::{self, AssertUnwindSafe};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 
+use crossbeam_channel::{bounded, unbounded, Receiver, Sender};
 use st_tensor::{Tensor, TensorError};
 use thiserror::Error;
 
@@ -140,29 +142,125 @@ impl Default for GoldenRuntimeConfig {
     }
 }
 
-/// Lightweight runtime that mimics Tokio/Rayon ergonomics using the standard
-/// library. Tasks are spawned onto named threads and can be joined later, while
-/// reduction helpers keep aggregation deterministic.
-#[derive(Clone)]
-pub struct GoldenRuntime {
+type ThreadResult<T> = thread::Result<T>;
+
+enum GoldenTaskMessage {
+    Run(Box<dyn FnOnce() + Send + 'static>),
+    Shutdown,
+}
+
+struct GoldenRuntimeInner {
     workers: usize,
-    name: Arc<String>,
-    counter: Arc<AtomicUsize>,
+    name: String,
+    sender: Sender<GoldenTaskMessage>,
+    handles: Mutex<Vec<thread::JoinHandle<()>>>,
+    shutdown: AtomicBool,
+}
+
+impl GoldenRuntimeInner {
+    fn spawn_workers(
+        inner: &Arc<Self>,
+        receiver: Receiver<GoldenTaskMessage>,
+    ) -> Result<(), GoldenRuntimeError> {
+        let shared_receiver = Arc::new(receiver);
+        let mut handles = inner
+            .handles
+            .lock()
+            .expect("golden runtime worker handle mutex poisoned");
+        for idx in 0..inner.workers {
+            let name = format!("{}-{}", inner.name, idx);
+            let worker_receiver = shared_receiver.clone();
+            let handle = thread::Builder::new()
+                .name(name)
+                .spawn(move || worker_loop(worker_receiver))
+                .map_err(|err| {
+                    GoldenRuntimeError(format!("failed to spawn golden worker: {err}"))
+                })?;
+            handles.push(handle);
+        }
+        Ok(())
+    }
+
+    fn worker_count(&self) -> usize {
+        self.workers
+    }
+}
+
+impl Drop for GoldenRuntimeInner {
+    fn drop(&mut self) {
+        self.shutdown.store(true, Ordering::Release);
+        for _ in 0..self.workers {
+            let _ = self.sender.send(GoldenTaskMessage::Shutdown);
+        }
+        let mut handles = self
+            .handles
+            .lock()
+            .expect("golden runtime worker handle mutex poisoned");
+        while let Some(handle) = handles.pop() {
+            let _ = handle.join();
+        }
+    }
+}
+
+fn worker_loop(receiver: Arc<Receiver<GoldenTaskMessage>>) {
+    while let Ok(message) = receiver.recv() {
+        match message {
+            GoldenTaskMessage::Run(job) => job(),
+            GoldenTaskMessage::Shutdown => break,
+        }
+    }
+}
+
+pub struct GoldenJoinHandle<R> {
+    receiver: Option<Receiver<ThreadResult<R>>>,
+}
+
+impl<R> GoldenJoinHandle<R> {
+    pub fn join(self) -> ThreadResult<R> {
+        let receiver = self
+            .receiver
+            .expect("golden runtime join handle already consumed");
+        match receiver.recv() {
+            Ok(result) => result,
+            Err(_) => Err(Box::new("golden runtime worker dropped result".to_string())
+                as Box<dyn std::any::Any + Send + 'static>),
+        }
+    }
+}
+
+/// Lightweight runtime that mimics Tokio/Rayon ergonomics using the standard
+/// library. Tasks are scheduled on a small pool of reusable threads and can be
+/// joined later, while reduction helpers keep aggregation deterministic.
+pub struct GoldenRuntime {
+    inner: Arc<GoldenRuntimeInner>,
+}
+
+impl Clone for GoldenRuntime {
+    fn clone(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
+    }
 }
 
 impl GoldenRuntime {
     pub fn new(config: GoldenRuntimeConfig) -> Result<Self, GoldenRuntimeError> {
         let workers = config.worker_threads.max(1);
         let name = config.thread_name.unwrap_or_else(|| "golden".into());
-        Ok(Self {
+        let (sender, receiver) = unbounded::<GoldenTaskMessage>();
+        let inner = Arc::new(GoldenRuntimeInner {
             workers,
-            name: Arc::new(name),
-            counter: Arc::new(AtomicUsize::new(0)),
-        })
+            name,
+            sender,
+            handles: Mutex::new(Vec::with_capacity(workers)),
+            shutdown: AtomicBool::new(false),
+        });
+        GoldenRuntimeInner::spawn_workers(&inner, receiver)?;
+        Ok(Self { inner })
     }
 
     pub fn worker_count(&self) -> usize {
-        self.workers
+        self.inner.worker_count()
     }
 
     pub fn execute<F, R>(&self, func: F) -> Result<R, GoldenRuntimeError>
@@ -204,17 +302,32 @@ impl GoldenRuntime {
         result.map_err(GoldenTensorError::from)
     }
 
-    pub fn spawn_blocking<F, R>(&self, func: F) -> Result<thread::JoinHandle<R>, GoldenRuntimeError>
+    pub fn spawn_blocking<F, R>(&self, func: F) -> Result<GoldenJoinHandle<R>, GoldenRuntimeError>
     where
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        let idx = self.counter.fetch_add(1, Ordering::Relaxed);
-        let label = format!("{}-{}", self.name, idx);
-        thread::Builder::new()
-            .name(label)
-            .spawn(func)
-            .map_err(|err| GoldenRuntimeError(format!("failed to spawn golden worker: {err}")))
+        if self.inner.shutdown.load(Ordering::Acquire) {
+            return Err(GoldenRuntimeError(
+                "golden runtime is shutting down and cannot accept new tasks".into(),
+            ));
+        }
+        let (result_tx, result_rx) = bounded::<ThreadResult<R>>(1);
+        let job = Box::new(move || {
+            let result = panic::catch_unwind(AssertUnwindSafe(func));
+            let _ = result_tx.send(result);
+        });
+        self.inner
+            .sender
+            .send(GoldenTaskMessage::Run(job))
+            .map_err(|_| {
+                GoldenRuntimeError(
+                    "golden runtime worker queue rejected task (runtime shutting down)".into(),
+                )
+            })?;
+        Ok(GoldenJoinHandle {
+            receiver: Some(result_rx),
+        })
     }
 
     pub fn reduce<T, R, Map, Fold>(&self, data: &[T], map: Map, fold: Fold, identity: R) -> R
@@ -224,13 +337,14 @@ impl GoldenRuntime {
         Map: Fn(&T) -> R + Send + Sync,
         Fold: Fn(R, R) -> R + Send + Sync,
     {
-        if self.workers <= 1 || data.len() < 2 {
+        let workers = self.worker_count();
+        if workers <= 1 || data.len() < 2 {
             return data
                 .iter()
                 .map(&map)
                 .fold(identity.clone(), |acc, item| fold(acc, item));
         }
-        let chunk = (data.len() + self.workers - 1) / self.workers;
+        let chunk = (data.len() + workers - 1) / workers;
         thread::scope(|scope| {
             let mut handles = Vec::new();
             for chunk_items in data.chunks(chunk) {
