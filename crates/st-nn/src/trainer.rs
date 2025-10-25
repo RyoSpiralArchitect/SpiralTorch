@@ -245,6 +245,9 @@ pub struct ModuleTrainer {
     curvature_scheduler: Option<CurvatureScheduler>,
     last_curvature_metrics: Option<CurvatureMetrics>,
     loss_strategy: LossStrategy,
+    spectral_policy: Option<SpectralLearningRatePolicy>,
+    pending_coherence: Option<CoherenceDiagnostics>,
+    last_spectral_metrics: Option<SpectralAdjustmentMetrics>,
     #[cfg(feature = "golden")]
     golden_pulse: Option<GoldenBlackcatPulse>,
     #[cfg(feature = "golden")]
@@ -585,6 +588,254 @@ impl SoftLogicFlex {
 }
 
 #[derive(Debug, Clone)]
+pub struct SpectralLearningRatePolicy {
+    smoothing: f32,
+    coherence_gain: f32,
+    curvature_gain: f32,
+    sheet_gain: f32,
+    spin_gain: f32,
+    radius_gain: f32,
+    energy_gain: f32,
+    min_lr_scale: f32,
+    max_lr_scale: f32,
+    max_lr_step: f32,
+    min_band_scale: f32,
+    max_band_scale: f32,
+    band_state: (f32, f32, f32),
+    lr_state: f32,
+    applied_lr_scale: f32,
+    local_lr_state: (f32, f32, f32),
+}
+
+impl SpectralLearningRatePolicy {
+    pub fn new() -> Self {
+        Self {
+            smoothing: 0.2,
+            coherence_gain: 0.5,
+            curvature_gain: 0.15,
+            sheet_gain: 0.6,
+            spin_gain: 0.4,
+            radius_gain: 0.35,
+            energy_gain: 0.25,
+            min_lr_scale: 0.1,
+            max_lr_scale: 6.0,
+            max_lr_step: 1.4,
+            min_band_scale: 0.5,
+            max_band_scale: 2.75,
+            band_state: (1.0, 1.0, 1.0),
+            lr_state: 1.0,
+            applied_lr_scale: 1.0,
+            local_lr_state: (1.0, 1.0, 1.0),
+        }
+    }
+
+    pub fn with_smoothing(mut self, smoothing: f32) -> Self {
+        if smoothing.is_finite() && smoothing > 0.0 {
+            self.smoothing = smoothing.clamp(1.0e-3, 1.0);
+        }
+        self
+    }
+
+    pub fn with_coherence_gain(mut self, gain: f32) -> Self {
+        if gain.is_finite() {
+            self.coherence_gain = gain.max(0.0);
+        }
+        self
+    }
+
+    pub fn with_sheet_gain(mut self, gain: f32) -> Self {
+        if gain.is_finite() {
+            self.sheet_gain = gain.max(0.0);
+        }
+        self
+    }
+
+    pub fn with_spin_gain(mut self, gain: f32) -> Self {
+        if gain.is_finite() {
+            self.spin_gain = gain.max(0.0);
+        }
+        self
+    }
+
+    pub fn with_radius_gain(mut self, gain: f32) -> Self {
+        if gain.is_finite() {
+            self.radius_gain = gain.max(0.0);
+        }
+        self
+    }
+
+    pub fn with_energy_gain(mut self, gain: f32) -> Self {
+        if gain.is_finite() {
+            self.energy_gain = gain.max(0.0);
+        }
+        self
+    }
+
+    pub fn with_lr_bounds(mut self, min: f32, max: f32) -> Self {
+        if min.is_finite() && max.is_finite() && min > 0.0 && max > min {
+            self.min_lr_scale = min;
+            self.max_lr_scale = max;
+        }
+        self
+    }
+
+    pub fn with_band_bounds(mut self, min: f32, max: f32) -> Self {
+        if min.is_finite() && max.is_finite() && min > 0.0 && max > min {
+            self.min_band_scale = min;
+            self.max_band_scale = max;
+        }
+        self
+    }
+
+    pub fn with_max_lr_step(mut self, max_step: f32) -> Self {
+        if max_step.is_finite() && max_step > 0.0 {
+            self.max_lr_step = max_step.max(1.0);
+        }
+        self
+    }
+
+    pub fn observe(
+        &mut self,
+        diagnostics: Option<&CoherenceDiagnostics>,
+        curvature: f32,
+        band_energy: &BandEnergy,
+    ) -> Option<SpectralAdjustment> {
+        let diagnostics = diagnostics?;
+        let preserved = diagnostics.preserved_channels().max(1);
+        let dominant = diagnostics
+            .dominant_channel()
+            .unwrap_or(0)
+            .min(preserved - 1);
+        let sheet_ratio = (dominant as f32 + 0.5) / preserved as f32;
+        let sheet_bias = (sheet_ratio - 0.5) * self.sheet_gain;
+        let spin = diagnostics.z_bias().clamp(-1.0, 1.0);
+        let spin_bias = spin * self.spin_gain;
+        let spectral_radius = diagnostics.mean_coherence().abs();
+        let entropy = diagnostics.coherence_entropy().max(0.0);
+        let energy_ratio = diagnostics.energy_ratio().max(0.0);
+        let spectral_pressure = energy_ratio * (1.0 - entropy.tanh());
+        let curvature_term = if curvature < 0.0 {
+            (-curvature).sqrt() * self.curvature_gain
+        } else {
+            0.0
+        };
+        let radius_bias = (1.0 - spectral_radius.tanh()).clamp(0.0, 1.0) * self.radius_gain;
+
+        let base_above = 1.0
+            + sheet_bias.max(0.0)
+            + spin_bias.max(0.0)
+            + curvature_term * 0.25
+            + radius_bias * 0.5;
+        let base_here = 1.0
+            + (1.0 - sheet_bias.abs()).max(0.0) * 0.5 * self.sheet_gain
+            + curvature_term * 0.5
+            + (1.0 - radius_bias) * 0.25;
+        let base_beneath = 1.0
+            + (-sheet_bias).max(0.0)
+            + (-spin_bias).max(0.0)
+            + curvature_term * 0.25
+            + radius_bias * 0.5;
+
+        let energy_total =
+            (band_energy.above.abs() + band_energy.here.abs() + band_energy.beneath.abs())
+                .max(1e-5);
+        let energy_bias = (
+            (band_energy.above / energy_total).clamp(-1.0, 1.0),
+            (band_energy.here / energy_total).clamp(-1.0, 1.0),
+            (band_energy.beneath / energy_total).clamp(-1.0, 1.0),
+        );
+
+        let mut target_band = (
+            (base_above * (1.0 + energy_bias.0 * self.energy_gain))
+                .clamp(self.min_band_scale, self.max_band_scale),
+            (base_here * (1.0 + energy_bias.1 * self.energy_gain))
+                .clamp(self.min_band_scale, self.max_band_scale),
+            (base_beneath * (1.0 + energy_bias.2 * self.energy_gain))
+                .clamp(self.min_band_scale, self.max_band_scale),
+        );
+
+        self.band_state.0 = Self::smooth(self.band_state.0, target_band.0, self.smoothing);
+        self.band_state.1 = Self::smooth(self.band_state.1, target_band.1, self.smoothing);
+        self.band_state.2 = Self::smooth(self.band_state.2, target_band.2, self.smoothing);
+        target_band = self.band_state;
+
+        let mean_band = (target_band.0 + target_band.1 + target_band.2) / 3.0;
+        let coherence_boost = 1.0 + spectral_pressure * self.coherence_gain;
+        let mut target_lr =
+            (mean_band * coherence_boost).clamp(self.min_lr_scale, self.max_lr_scale);
+        self.lr_state = Self::smooth(self.lr_state, target_lr, self.smoothing);
+        target_lr = self.lr_state.clamp(self.min_lr_scale, self.max_lr_scale);
+
+        let mut target_local = (
+            (target_band.0 / mean_band).clamp(self.min_band_scale, self.max_band_scale),
+            (target_band.1 / mean_band).clamp(self.min_band_scale, self.max_band_scale),
+            (target_band.2 / mean_band).clamp(self.min_band_scale, self.max_band_scale),
+        );
+        self.local_lr_state.0 = Self::smooth(self.local_lr_state.0, target_local.0, self.smoothing);
+        self.local_lr_state.1 = Self::smooth(self.local_lr_state.1, target_local.1, self.smoothing);
+        self.local_lr_state.2 = Self::smooth(self.local_lr_state.2, target_local.2, self.smoothing);
+        target_local = self.local_lr_state;
+
+        let mut lr_multiplier = 1.0;
+        if self.applied_lr_scale.is_finite() && self.applied_lr_scale > 0.0 {
+            lr_multiplier =
+                (target_lr / self.applied_lr_scale).clamp(1.0 / self.max_lr_step, self.max_lr_step);
+        }
+        self.applied_lr_scale =
+            (self.applied_lr_scale * lr_multiplier).clamp(self.min_lr_scale, self.max_lr_scale);
+
+        Some(SpectralAdjustment {
+            band_scale: target_band,
+            lr_multiplier,
+            lr_scale: self.applied_lr_scale,
+            local_lr: target_local,
+            metrics: SpectralAdjustmentMetrics {
+                absolute_lr_scale: self.applied_lr_scale,
+                sheet_index: diagnostics.dominant_channel().map(|idx| idx as u32),
+                sheet_count: preserved as u32,
+                spin_alignment: spin,
+                spectral_radius,
+                spectral_entropy: entropy,
+                spectral_pressure,
+                energy_ratio,
+                band_scale: target_band,
+                local_lr: target_local,
+            },
+        })
+    }
+
+    fn smooth(previous: f32, target: f32, alpha: f32) -> f32 {
+        if !previous.is_finite() {
+            return target;
+        }
+        previous + (target - previous) * alpha
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SpectralAdjustment {
+    pub band_scale: (f32, f32, f32),
+    pub lr_multiplier: f32,
+    pub lr_scale: f32,
+    pub local_lr: (f32, f32, f32),
+    pub metrics: SpectralAdjustmentMetrics,
+}
+
+#[derive(Debug, Clone)]
+pub struct SpectralAdjustmentMetrics {
+    pub absolute_lr_scale: f32,
+    pub sheet_index: Option<u32>,
+    pub sheet_count: u32,
+    pub spin_alignment: f32,
+    pub spectral_radius: f32,
+    pub spectral_entropy: f32,
+    pub spectral_pressure: f32,
+    pub energy_ratio: f32,
+    pub band_scale: (f32, f32, f32),
+    pub local_lr: (f32, f32, f32),
+}
+
+#[derive(Debug, Clone)]
 struct RewriteBudget {
     per_epoch: u32,
     cooldown: u32,
@@ -669,6 +920,9 @@ impl ModuleTrainer {
             curvature_scheduler: None,
             last_curvature_metrics: None,
             loss_strategy: LossStrategy::default(),
+            spectral_policy: None,
+            pending_coherence: None,
+            last_spectral_metrics: None,
             #[cfg(feature = "golden")]
             golden_pulse: None,
             #[cfg(feature = "golden")]
@@ -768,6 +1022,28 @@ impl ModuleTrainer {
     /// scheduler, when available.
     pub fn curvature_metrics(&self) -> Option<CurvatureMetrics> {
         self.last_curvature_metrics
+    }
+
+    /// Enables the spectral learning rate adaptation policy driven by Z-space coherence.
+    pub fn enable_spectral_learning_rate(&mut self, policy: SpectralLearningRatePolicy) {
+        self.spectral_policy = Some(policy);
+        self.last_spectral_metrics = None;
+    }
+
+    /// Disables the spectral learning rate policy.
+    pub fn disable_spectral_learning_rate(&mut self) {
+        self.spectral_policy = None;
+        self.last_spectral_metrics = None;
+    }
+
+    /// Publishes fresh coherence diagnostics that will be consumed by the spectral policy.
+    pub fn push_coherence_diagnostics(&mut self, diagnostics: CoherenceDiagnostics) {
+        self.pending_coherence = Some(diagnostics);
+    }
+
+    /// Returns the last recorded spectral learning rate metrics when available.
+    pub fn spectral_metrics(&self) -> Option<&SpectralAdjustmentMetrics> {
+        self.last_spectral_metrics.as_ref()
     }
 
     #[cfg(feature = "psi")]
@@ -1434,6 +1710,29 @@ impl ModuleTrainer {
                 weights.1 *= override_weights.1;
                 weights.2 *= override_weights.2;
             }
+            let mut spectral_used = false;
+            let mut spectral_extra: Option<SpectralAdjustmentMetrics> = None;
+            let coherence_snapshot = self.pending_coherence.take();
+            if let Some(policy) = self.spectral_policy.as_mut() {
+                if let Some(adjustment) =
+                    policy.observe(coherence_snapshot.as_ref(), self.curvature, &band_energy)
+                {
+                    weights.0 *= adjustment.band_scale.0;
+                    weights.1 *= adjustment.band_scale.1;
+                    weights.2 *= adjustment.band_scale.2;
+                    if adjustment.lr_multiplier.is_finite()
+                        && (adjustment.lr_multiplier - 1.0).abs() > 1.0e-3
+                    {
+                        self.scale_learning_rates(module, adjustment.lr_multiplier)?;
+                    }
+                    spectral_extra = Some(adjustment.metrics.clone());
+                    self.last_spectral_metrics = Some(adjustment.metrics);
+                    spectral_used = coherence_snapshot.is_some();
+                }
+            }
+            if coherence_snapshot.is_some() && !spectral_used {
+                self.pending_coherence = coherence_snapshot;
+            }
             bands.scale_inplace(weights.0, weights.1, weights.2);
             let weight_mean = (weights.0 + weights.1 + weights.2) / 3.0;
             let weighted_loss_base = step_loss * weight_mean.max(0.0);
@@ -1442,6 +1741,62 @@ impl ModuleTrainer {
             extra.insert("softlogic_w_above".to_string(), weights.0 as f64);
             extra.insert("softlogic_w_here".to_string(), weights.1 as f64);
             extra.insert("softlogic_w_beneath".to_string(), weights.2 as f64);
+            if let Some(metrics) = spectral_extra {
+                extra.insert(
+                    "spectral_lr_scale".to_string(),
+                    metrics.absolute_lr_scale as f64,
+                );
+                extra.insert(
+                    "spectral_band_above".to_string(),
+                    metrics.band_scale.0 as f64,
+                );
+                extra.insert(
+                    "spectral_band_here".to_string(),
+                    metrics.band_scale.1 as f64,
+                );
+                extra.insert(
+                    "spectral_band_beneath".to_string(),
+                    metrics.band_scale.2 as f64,
+                );
+                extra.insert(
+                    "spectral_local_lr_above".to_string(),
+                    metrics.local_lr.0 as f64,
+                );
+                extra.insert(
+                    "spectral_local_lr_here".to_string(),
+                    metrics.local_lr.1 as f64,
+                );
+                extra.insert(
+                    "spectral_local_lr_beneath".to_string(),
+                    metrics.local_lr.2 as f64,
+                );
+                extra.insert("spectral_spin".to_string(), metrics.spin_alignment as f64);
+                extra.insert(
+                    "spectral_radius".to_string(),
+                    metrics.spectral_radius as f64,
+                );
+                extra.insert(
+                    "spectral_entropy".to_string(),
+                    metrics.spectral_entropy as f64,
+                );
+                extra.insert(
+                    "spectral_pressure".to_string(),
+                    metrics.spectral_pressure as f64,
+                );
+                extra.insert(
+                    "spectral_energy_ratio".to_string(),
+                    metrics.energy_ratio as f64,
+                );
+                if let Some(index) = metrics.sheet_index {
+                    extra.insert("spectral_sheet_index".to_string(), index as f64);
+                }
+                extra.insert(
+                    "spectral_sheet_count".to_string(),
+                    metrics.sheet_count as f64,
+                );
+            } else {
+                self.last_spectral_metrics = None;
+            }
             if let Some(ref impulse) = desire_impulse {
                 extra.insert(
                     "desire_roundtable_multiplier_above".to_string(),
@@ -2009,6 +2364,21 @@ impl ModuleTrainer {
         self.psychoid_log = schedule.psychoid_log();
     }
 
+    fn scale_learning_rates<M: Module>(&mut self, module: &mut M, factor: f32) -> PureResult<()> {
+        if !factor.is_finite() || factor <= 0.0 {
+            return Ok(());
+        }
+        self.fallback_learning_rate *= factor;
+        self.hyper_learning_rate *= factor;
+        if let Some(rate) = self.real_learning_rate.as_mut() {
+            *rate *= factor;
+        }
+        module.visit_parameters_mut(&mut |param| {
+            param.scale_learning_rate(factor);
+            Ok(())
+        })
+    }
+
     #[cfg(feature = "collapse")]
     fn bootstrap_collapse(&mut self, schedule: &RoundtableSchedule) {
         if self.collapse.is_some() || !schedule.collapse_enabled() {
@@ -2049,18 +2419,7 @@ impl ModuleTrainer {
 
     #[cfg(feature = "collapse")]
     fn optimizer_mul_lr<M: Module>(&mut self, module: &mut M, factor: f32) -> PureResult<()> {
-        if !factor.is_finite() || factor <= 0.0 {
-            return Ok(());
-        }
-        self.fallback_learning_rate *= factor;
-        self.hyper_learning_rate *= factor;
-        if let Some(rate) = self.real_learning_rate.as_mut() {
-            *rate *= factor;
-        }
-        module.visit_parameters_mut(&mut |param| {
-            param.scale_learning_rate(factor);
-            Ok(())
-        })
+        self.scale_learning_rates(module, factor)
     }
 
     #[cfg(feature = "psi")]
