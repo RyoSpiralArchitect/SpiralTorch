@@ -713,7 +713,7 @@ fn autotune_microkernel(
     };
 
     if autotune_enabled {
-        let stored = load_best_typed(path.as_path(), &key, None::<StoredCpuKernel>);
+        let stored = load_best_typed(path.as_path(), &key, &context, None::<StoredCpuKernel>);
         if let Some(stored) = stored {
             if let Some(index) = MICROKERNELS
                 .iter()
