@@ -83,7 +83,9 @@ pub use schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedu
 pub use st_core::runtime::blackcat::{
     BlackCatRuntime, BlackcatRuntimeStats, ChoiceGroups, StepMetrics,
 };
-pub use trainer::{EpochStats, ModuleTrainer};
+pub use trainer::{
+    EpochStats, ModuleTrainer, SpectralAdjustmentMetrics, SpectralLearningRatePolicy,
+};
 #[cfg(feature = "psi")]
 pub use zspace_coherence::BranchPsiReading;
 #[cfg(feature = "golden")]
