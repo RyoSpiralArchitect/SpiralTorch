@@ -10,6 +10,11 @@ authors = ["SpiralTorch Contributors"]
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+default = []
+wgpu = ["st-tensor/wgpu"]
+hip = ["st-tensor/hip"]
+
 [dependencies]
 once_cell = "1.19"
 st-tensor = { path = "../../crates/st-tensor" }

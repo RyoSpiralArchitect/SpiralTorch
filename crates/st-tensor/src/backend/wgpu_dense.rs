@@ -9,13 +9,20 @@ use crate::backend::wgpu_util::WgpuContext;
 use crate::pure::{PackedB, PackedLayout};
 use crate::util::readback_f32;
 use anyhow::anyhow;
+use serde::{Deserialize, Serialize};
+use st_kdsl::autotune_store::{lookup_best, record_best};
 use std::any::Any;
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::env;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::time::{Duration, Instant};
 use wgpu::util::DeviceExt;
-use wgpu::{BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device, PipelineLayout, Queue};
+use wgpu::{
+    AdapterInfo, BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device, PipelineLayout, Queue,
+};
 
 const MATMUL_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/dense_matmul.wgsl");
 const FUSED_CONV_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/fused_im2col_matmul.wgsl");
@@ -355,6 +362,7 @@ struct GpuContext {
     zero_scales: OnceLock<Arc<Buffer>>,
     shader_f16: bool,
     supports_subgroup: bool,
+    adapter_info: AdapterInfo,
     softmax_layout: BindGroupLayout,
     softmax_pipeline: Option<Arc<ComputePipeline>>,
     fused_attention: Option<FusedAttentionKernel>,
@@ -390,6 +398,7 @@ impl GpuContext {
         })
         .ok_or_else(|| "no suitable WGPU adapter".to_string())?;
 
+        let adapter_info = adapter.get_info();
         let adapter_features = adapter.features();
         let mut requested_features = wgpu::Features::empty();
         let want_f16 = cfg!(feature = "wgpu_f16");
@@ -947,6 +956,7 @@ impl GpuContext {
             zero_scales: OnceLock::new(),
             shader_f16,
             supports_subgroup,
+            adapter_info,
             softmax_layout,
             softmax_pipeline,
             fused_attention,
@@ -969,6 +979,10 @@ impl GpuContext {
 
     fn queue(&self) -> &Queue {
         self.context.queue()
+    }
+
+    fn adapter_info(&self) -> &AdapterInfo {
+        &self.adapter_info
     }
 
     fn bind_layout(&self) -> &BindGroupLayout {
@@ -1015,6 +1029,11 @@ impl GpuContext {
 
     fn softmax_pipeline(&self) -> Option<Arc<ComputePipeline>> {
         self.softmax_pipeline.as_ref().map(Arc::clone)
+    }
+
+    fn select_tile_config(&self, rows: usize, inner: usize, cols: usize) -> TileConfig {
+        autotune_tile_config(self, rows, inner, cols)
+            .unwrap_or_else(|| fallback_tile_config(rows, inner, cols))
     }
 
     fn rhs_from_packed(
@@ -2076,7 +2095,7 @@ pub fn matmul(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("st.tensor.wgpu_dense.matmul.encoder"),
     });
-    let tile = select_tile_config(rows, inner, cols);
+    let tile = ctx.select_tile_config(rows, inner, cols);
     let (rhs_buffer, rhs_dtype, rhs_scales) = rhs_buf.as_binding();
     dispatch_matmul(
         &ctx,
@@ -2138,7 +2157,7 @@ pub fn matmul_prepacked(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("st.tensor.wgpu_dense.prepacked.encoder"),
     });
-    let requested_tile = select_tile_config(rows, inner, cols);
+    let requested_tile = ctx.select_tile_config(rows, inner, cols);
     let weights = ctx.rhs_from_packed(packed_rhs, requested_tile)?;
     let tile = weights.tile();
     let rhs_buffers = WeightBuffers {
@@ -2318,7 +2337,7 @@ fn matmul_with_bias_activation(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("st.tensor.wgpu_dense.fused.encoder"),
     });
-    let tile = select_tile_config(rows, inner, cols);
+    let tile = ctx.select_tile_config(rows, inner, cols);
     let mut fused_mask = 0u32;
     if let Some(act) = activation {
         match act {
@@ -2871,7 +2890,7 @@ pub fn conv_im2col_gemm(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("st.tensor.wgpu_dense.conv.encoder"),
     });
-    let tile_config = select_tile_config(rows, span, out_channels);
+    let tile_config = ctx.select_tile_config(rows, span, out_channels);
     let fused_pipeline = ctx.fused_conv_pipeline_for(tile_config)?;
     let fused_bind_group =
         ctx.fused_conv_bind_group(&input_buf, &weight_buf, &output_buf, &conv_params_buf);
@@ -3067,6 +3086,328 @@ fn select_tile_config(rows: usize, inner: usize, cols: usize) -> TileConfig {
     }
 
     TileConfig::new(16, 16, 16)
+}
+
+const MATMUL_AUTOTUNE_REVISION: u64 = 1;
+const AUTOTUNE_SAMPLE_MAX_DIM: usize = 1024;
+const AUTOTUNE_MIN_VOLUME: usize = 32 * 32 * 32;
+const AUTOTUNE_WARMUP_RUNS: usize = 1;
+const AUTOTUNE_SAMPLE_RUNS: usize = 3;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+struct StoredTileConfig {
+    tile_m: u32,
+    tile_n: u32,
+    tile_k: u32,
+}
+
+impl From<TileConfig> for StoredTileConfig {
+    fn from(tile: TileConfig) -> Self {
+        Self {
+            tile_m: tile.tile_m(),
+            tile_n: tile.tile_n(),
+            tile_k: tile.tile_k(),
+        }
+    }
+}
+
+impl From<StoredTileConfig> for TileConfig {
+    fn from(stored: StoredTileConfig) -> Self {
+        TileConfig::new(stored.tile_m, stored.tile_n, stored.tile_k)
+    }
+}
+
+fn autotune_tile_config(
+    ctx: &GpuContext,
+    rows: usize,
+    inner: usize,
+    cols: usize,
+) -> Option<TileConfig> {
+    if !should_autotune(rows, inner, cols) {
+        return None;
+    }
+
+    let (bucket_rows, bucket_inner, bucket_cols) = quantized_problem(rows, inner, cols);
+    let (key, path) = matmul_autotune_key(ctx, bucket_rows, bucket_inner, bucket_cols)?;
+
+    if let Some(tile) = ctx
+        .autotune_cache
+        .lock()
+        .ok()
+        .and_then(|guard| guard.get(&key).copied())
+    {
+        return Some(tile);
+    }
+
+    if let Some(entry) = lookup_best(path.as_path(), &key) {
+        if let Ok(stored) = serde_json::from_value::<StoredTileConfig>(entry.params) {
+            let tile: TileConfig = stored.into();
+            if tile_supported(ctx.device(), tile) {
+                if let Ok(mut cache) = ctx.autotune_cache.lock() {
+                    cache.insert(key.clone(), tile);
+                }
+                return Some(tile);
+            }
+        }
+    }
+
+    let device = ctx.device();
+    let sample_rows = sample_dimension(bucket_rows);
+    let sample_inner = sample_dimension(bucket_inner);
+    let sample_cols = sample_dimension(bucket_cols);
+
+    let lhs_len = sample_rows.checked_mul(sample_inner)?;
+    let rhs_len = sample_inner.checked_mul(sample_cols)?;
+    let out_len = sample_rows.checked_mul(sample_cols)?;
+
+    let lhs_data = vec![0.0f32; lhs_len];
+    let rhs_data = vec![0.0f32; rhs_len];
+    let lhs_buf = upload_lhs(device, "st.tensor.wgpu_dense.autotune.lhs", &lhs_data);
+    let rhs_buffers = upload_weights(device, &rhs_data, sample_inner, sample_cols);
+    let out_buf = allocate_output(device, "st.tensor.wgpu_dense.autotune.out", out_len);
+
+    let mut best: Option<(TileConfig, f64)> = None;
+    for candidate in candidate_tiles(sample_rows, sample_inner, sample_cols) {
+        if !tile_supported(device, candidate) {
+            continue;
+        }
+        match microbenchmark_tile(
+            ctx,
+            sample_rows,
+            sample_inner,
+            sample_cols,
+            candidate,
+            &lhs_buf,
+            &rhs_buffers,
+            &out_buf,
+        ) {
+            Ok(score) => {
+                let update = best
+                    .map(|(_, best_score)| score < best_score)
+                    .unwrap_or(true);
+                if update {
+                    best = Some((candidate, score));
+                }
+            }
+            Err(_) => continue,
+        }
+    }
+
+    if let Some((tile, score)) = best {
+        if let Ok(mut cache) = ctx.autotune_cache.lock() {
+            cache.insert(key.clone(), tile);
+        }
+        let stored: StoredTileConfig = tile.into();
+        let _ = record_best(path.as_path(), &key, score, &stored);
+        Some(tile)
+    } else {
+        None
+    }
+}
+
+fn should_autotune(rows: usize, inner: usize, cols: usize) -> bool {
+    if rows == 0 || inner == 0 || cols == 0 {
+        return false;
+    }
+    rows.checked_mul(inner)
+        .and_then(|volume| volume.checked_mul(cols))
+        .map(|volume| volume >= AUTOTUNE_MIN_VOLUME)
+        .unwrap_or(false)
+}
+
+fn quantized_problem(rows: usize, inner: usize, cols: usize) -> (usize, usize, usize) {
+    (
+        quantize_dimension(rows),
+        quantize_dimension(inner),
+        quantize_dimension(cols),
+    )
+}
+
+fn quantize_dimension(value: usize) -> usize {
+    if value == 0 {
+        return 0;
+    }
+    let step = if value <= 64 {
+        8
+    } else if value <= 256 {
+        16
+    } else if value <= 1024 {
+        32
+    } else {
+        64
+    };
+    let rounded = ((value + step / 2) / step).max(1) * step;
+    rounded
+}
+
+fn sample_dimension(value: usize) -> usize {
+    quantize_dimension(value)
+        .min(AUTOTUNE_SAMPLE_MAX_DIM)
+        .max(1)
+}
+
+fn tile_supported(device: &Device, tile: TileConfig) -> bool {
+    let limits = device.limits();
+    let wg_x = tile.tile_n();
+    let wg_y = tile.tile_m();
+    let invocations = wg_x.saturating_mul(wg_y);
+    wg_x <= limits.max_compute_workgroup_size_x
+        && wg_y <= limits.max_compute_workgroup_size_y
+        && invocations <= limits.max_compute_invocations_per_workgroup
+}
+
+fn candidate_tiles(rows: usize, _inner: usize, cols: usize) -> Vec<TileConfig> {
+    const BASE: [TileConfig; 12] = [
+        TileConfig::new(8, 8, 8),
+        TileConfig::new(8, 12, 16),
+        TileConfig::new(12, 8, 16),
+        TileConfig::new(16, 16, 8),
+        TileConfig::new(16, 16, 16),
+        TileConfig::new(32, 8, 8),
+        TileConfig::new(8, 32, 8),
+        TileConfig::new(24, 12, 16),
+        TileConfig::new(12, 24, 16),
+        TileConfig::new(32, 8, 16),
+        TileConfig::new(8, 32, 16),
+        TileConfig::new(16, 24, 16),
+    ];
+
+    let mut ordered = Vec::with_capacity(BASE.len());
+    if rows > cols.saturating_mul(2) {
+        ordered.push(TileConfig::new(32, 8, 16));
+        ordered.push(TileConfig::new(24, 12, 16));
+    } else if cols > rows.saturating_mul(2) {
+        ordered.push(TileConfig::new(8, 32, 16));
+        ordered.push(TileConfig::new(12, 24, 16));
+    }
+
+    for candidate in BASE.iter().copied() {
+        if !ordered.contains(&candidate) {
+            ordered.push(candidate);
+        }
+    }
+    ordered
+}
+
+fn microbenchmark_tile(
+    ctx: &GpuContext,
+    rows: usize,
+    inner: usize,
+    cols: usize,
+    tile: TileConfig,
+    lhs: &Buffer,
+    rhs: &WeightBuffers,
+    out: &Buffer,
+) -> Result<f64, String> {
+    let (rhs_buffer, rhs_dtype, rhs_scales) = rhs.as_binding();
+
+    for _ in 0..AUTOTUNE_WARMUP_RUNS {
+        let mut encoder = ctx
+            .device()
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("st.tensor.wgpu_dense.autotune.warmup"),
+            });
+        dispatch_matmul(
+            ctx,
+            &mut encoder,
+            lhs,
+            rhs_buffer,
+            rhs_dtype,
+            rhs_scales,
+            out,
+            rows,
+            inner,
+            cols,
+            tile,
+            false,
+            0,
+            None,
+            None,
+        )?;
+        ctx.queue().submit(Some(encoder.finish()));
+        ctx.device().poll(wgpu::Maintain::Wait);
+    }
+
+    let mut total = Duration::default();
+    for _ in 0..AUTOTUNE_SAMPLE_RUNS {
+        let mut encoder = ctx
+            .device()
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("st.tensor.wgpu_dense.autotune.sample"),
+            });
+        dispatch_matmul(
+            ctx,
+            &mut encoder,
+            lhs,
+            rhs_buffer,
+            rhs_dtype,
+            rhs_scales,
+            out,
+            rows,
+            inner,
+            cols,
+            tile,
+            false,
+            0,
+            None,
+            None,
+        )?;
+        let command = encoder.finish();
+        let start = Instant::now();
+        ctx.queue().submit(Some(command));
+        ctx.device().poll(wgpu::Maintain::Wait);
+        total += start.elapsed();
+    }
+
+    if AUTOTUNE_SAMPLE_RUNS == 0 {
+        return Ok(0.0);
+    }
+
+    Ok(total.as_secs_f64() / AUTOTUNE_SAMPLE_RUNS as f64)
+}
+
+fn encode_component(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| match ch {
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' => ch,
+            ' ' => '-',
+            _ => '_',
+        })
+        .collect()
+}
+
+fn matmul_autotune_key(
+    ctx: &GpuContext,
+    rows: usize,
+    inner: usize,
+    cols: usize,
+) -> Option<(String, PathBuf)> {
+    let path = autotune_store_path()?;
+    let info = ctx.adapter_info();
+    let backend = encode_component(&format!("{:?}", info.backend));
+    let driver = encode_component(&info.driver);
+    let driver_info = encode_component(&info.driver_info);
+    let name = encode_component(&info.name);
+    let key = format!(
+        "wgpu.matmul.v{MATMUL_AUTOTUNE_REVISION:02}|{name}|{vendor:04x}|{device:04x}|{backend}|{driver}|{driver_info}|{rows}x{inner}x{cols}|runs{AUTOTUNE_SAMPLE_RUNS}",
+        vendor = info.vendor,
+        device = info.device,
+    );
+    Some((key, path))
+}
+
+fn autotune_store_path() -> Option<PathBuf> {
+    if let Some(path) = env::var_os("SPIRALTORCH_AUTOTUNE_STORE") {
+        return Some(PathBuf::from(path));
+    }
+    if let Some(home) = env::var_os("HOME") {
+        let mut path = PathBuf::from(home);
+        path.push(".spiraltorch");
+        path.push("kernels.json");
+        return Some(path);
+    }
+    None
 }
 
 pub fn should_use(rows: usize, inner: usize, cols: usize) -> bool {
