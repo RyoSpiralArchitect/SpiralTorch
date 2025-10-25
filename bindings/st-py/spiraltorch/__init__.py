@@ -162,6 +162,12 @@ from .zspace_inference import (
     infer_weights_from_compat,
 )
 
+from .elliptic import (
+    EllipticWarpFunction,
+    elliptic_warp_autograd,
+    elliptic_warp_features,
+)
+
 # 追加API（Rust側でエクスポート済みのやつだけ拾う）
 _EXTRAS = [
     "golden_ratio","golden_angle","set_global_seed",
