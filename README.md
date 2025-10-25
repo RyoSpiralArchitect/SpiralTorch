@@ -371,18 +371,22 @@ print("from_torch matches torch.tolist():", from_torch.tolist() == torch_tensor.
 ```python
 import spiraltorch as st
 
-# Build a reusable OpenCartesianTopos with curvature-aware limits in one call.
-topos = st.hypergrad_topos(
-    curvature=-0.9,
-    tolerance=1e-3,
-    saturation=0.8,
-    max_depth=8,
-    max_volume=32,
+# Bind rows/cols or tensor shapes inline with the hg-DSL.
+weights = st.Tensor([[0.1, 0.2, 0.3]])
+tape = st.hg[weights](
+    learning_rate=0.02,
+    topos=st.hg.topos(
+        curvature=-0.9,
+        tolerance=1e-3,
+        saturation=0.8,
+        max_depth=8,
+        max_volume=32,
+    ),
 )
 
-# Accepts tuple shapes, tensors, or rows/cols without extra keywords.
-weights = st.Tensor([[0.1, 0.2, 0.3]])
-tape = st.hypergrad(weights, learning_rate=0.02, topos=topos)
+# Slice notation pinches rows/cols; `.with_topos(...)` inlines guard creation.
+aux = st.hg[1:3](curvature=-0.85)
+guarded = st.hg[weights].with_topos(curvature=-0.9, tolerance=2e-3, max_depth=6)
 
 prediction = st.Tensor([[0.25, 0.25, 0.25]])
 target = st.Tensor([[0.0, 1.0, 0.0]])
@@ -390,15 +394,17 @@ tape.accumulate_pair(prediction, target)
 tape.apply(weights)
 
 print("shape:", tape.shape(), "lr:", tape.learning_rate())
-print("summary l2:", tape.summary().l2())
+print("aux curvature:", aux.curvature())
+print("guard depth:", guarded.topos().max_depth())
 ```
 
-`st.hypergrad_topos(...)` instantiates an `OpenCartesianTopos` from keyword-only
-arguments (aliasing `depth`/`volume` automatically), while `st.hypergrad(...)`
-accepts tuple shapes, tensors, or `rows`/`cols` pairs so you can attach tapes
-without touching the native constructor. Pass dictionaries or `(curvature,
-tolerance, saturation, depth, volume)` tuples to `topos=` when you need a tape
-per module.
+`st.hg[...]` returns a callable that already knows its shape: pass tensors,
+tuples, or even slices (`st.hg[rows:cols]`) and the helper fills in
+`rows`/`cols` before calling into the native constructor. `st.hg.topos(...)`
+aliases `hypergrad_topos`, while `partial.with_topos(...)` wraps guard creation
+inline so you can bind a tape and guard in a single expression. You can still
+feed dictionaries or `(curvature, tolerance, saturation, depth, volume)` tuples
+directly into `topos=` when needed.
 
 ### 4) Z-space encoders and metric normalisers
 
@@ -406,10 +412,10 @@ per module.
 import spiraltorch as st
 
 # Encode desire text straight into the Z-space tensor manifold.
-z_vec = st.encode_zspace("Spin up the roundtable", temperature=0.4)
+z_vec = st.z["Spin up the roundtable", 0.4]
 
 # Normalise mixed telemetry aliases into a structured ZMetrics payload.
-metrics = st.z_metrics(
+metrics = st.z.metrics(
     velocity=0.55,
     mem=0.12,
     stab=0.78,
@@ -423,11 +429,11 @@ loss = trainer.step(metrics)
 print("z shape:", z_vec.shape(), "loss:", loss)
 ```
 
-`st.encode_zspace(...)` spins up a `LanguageWaveEncoder` on demand and returns a
-proper SpiralTorch tensor, so notebook prototypes never have to juggle encoder
-lifetimes. `st.z_metrics(...)` recognises common aliases (`velocity`, `mem`,
-`stab`, `drift`, `grad`) and emits the strongly typed `ZMetrics` container that
-`ZSpaceTrainer` expects.
+`st.z[...]` is shorthand for `encode_zspace`: strings go straight into the
+encoder, and you can append numbers, `(key, value)` pairs, or dictionaries to
+override temperature or other keyword arguments. `st.z.metrics(...)` recognises
+the common aliases (`velocity`, `mem`, `stab`, `drift`, `grad`) and emits the
+strongly typed `ZMetrics` container that `ZSpaceTrainer` expects.
 
 ### 5) Zero-copy tensor exchange via DLPack
 

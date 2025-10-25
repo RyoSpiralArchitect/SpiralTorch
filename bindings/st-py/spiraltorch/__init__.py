@@ -727,6 +727,119 @@ def z_metrics(
         drs=float(values.get("drs", 0.0) or 0.0),
     )
 
+
+class _HypergradPartial:
+    """Callable proxy that bakes a shape into :func:`hypergrad`."""
+
+    __slots__ = ("_args", "_kwargs")
+
+    def __init__(self, args: _Tuple[_Any, ...], kwargs: _Dict[str, _Any]) -> None:
+        self._args = args
+        self._kwargs = kwargs
+
+    def __call__(self, *args: _Any, **kwargs: _Any) -> _Any:
+        if args:
+            raise TypeError(
+                "hypergrad notation binds the shape already; pass configuration as keyword arguments"
+            )
+        merged: _Dict[str, _Any] = dict(self._kwargs)
+        for key in ("shape", "rows", "cols"):
+            if key in merged and key in kwargs:
+                raise TypeError(
+                    f"hypergrad() shape component '{key}' was provided by the notation and cannot be overridden"
+                )
+        merged.update(kwargs)
+        return hypergrad(*self._args, **merged)
+
+    def with_topos(self, *, topos: _Any | None = None, **kwargs: _Any) -> _Any:
+        """Return a tape while constructing (or reusing) a guard inline."""
+
+        if topos is not None:
+            if kwargs:
+                raise TypeError("with_topos() cannot mix 'topos=' with additional guard kwargs")
+            return self(topos=topos)
+        if not kwargs:
+            raise TypeError("with_topos() requires either 'topos=' or guard keyword arguments")
+        return self(topos=hypergrad_topos(**kwargs))
+
+
+class _HypergradNotation:
+    """Lightweight DSL that shortens hypergrad tape construction."""
+
+    __slots__ = ()
+
+    def __call__(self, *shape_args: _Any, **kwargs: _Any) -> _Any:
+        return hypergrad(*shape_args, **kwargs)
+
+    def __getitem__(self, selector: _Any) -> _HypergradPartial:
+        if isinstance(selector, slice):
+            if selector.step is not None:
+                raise TypeError("hypergrad slice notation does not support step")
+            base_kwargs: _Dict[str, _Any] = {}
+            if selector.start is not None:
+                base_kwargs["rows"] = _tensor_coerce_index(selector.start, "rows")
+            if selector.stop is not None:
+                base_kwargs["cols"] = _tensor_coerce_index(selector.stop, "cols")
+            if not base_kwargs:
+                raise TypeError("hypergrad[:] requires at least rows or cols")
+            return _HypergradPartial((), base_kwargs)
+        if isinstance(selector, tuple):
+            if not selector:
+                raise TypeError("hypergrad[] requires a shape or tensor")
+            if len(selector) == 1:
+                return _HypergradPartial((selector[0],), {})
+            if len(selector) == 2:
+                return _HypergradPartial((), {"shape": tuple(selector)})
+            raise TypeError("hypergrad[...] accepts at most two entries")
+        return _HypergradPartial((selector,), {})
+
+    def topos(self, **kwargs: _Any) -> _Any:
+        return hypergrad_topos(**kwargs)
+
+    guard = topos
+
+class _ZSpaceNotation:
+    """Syntactic sugar for encoding text and metrics into Z-space."""
+
+    __slots__ = ()
+
+    def __call__(self, text: str, **kwargs: _Any) -> _Any:
+        return encode_zspace(text, **kwargs)
+
+    def __getitem__(self, selector: _Any) -> _Any:
+        if isinstance(selector, str):
+            return encode_zspace(selector)
+        if isinstance(selector, tuple):
+            if not selector:
+                raise TypeError("z[] requires a text payload")
+            text = selector[0]
+            if not isinstance(text, str):
+                raise TypeError("z[...] expects the first element to be text")
+            options: _Dict[str, _Any] = {}
+            for extra in selector[1:]:
+                if isinstance(extra, _Mapping):
+                    options.update(extra)
+                elif isinstance(extra, (int, float)):
+                    if "temperature" in options:
+                        raise TypeError("temperature supplied multiple times in z[...] notation")
+                    options["temperature"] = float(extra)
+                elif isinstance(extra, tuple) and len(extra) == 2 and isinstance(extra[0], str):
+                    key, value = extra
+                    if key in options:
+                        raise TypeError(f"argument '{key}' supplied multiple times in z[...] notation")
+                    options[key] = value
+                else:
+                    raise TypeError("unsupported z[...] argument; use mappings, scalars, or (key, value) pairs")
+            return encode_zspace(text, **options)
+        raise TypeError("z[...] expects text or (text, …) tuples")
+
+    def metrics(self, **kwargs: _Any) -> ZMetrics:
+        return z_metrics(**kwargs)
+
+
+hg = _HypergradNotation()
+z = _ZSpaceNotation()
+
 _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
     "nn": {
         "Dataset": ("_NnDataset",),
@@ -2133,6 +2246,7 @@ _EXPORTED = {
     "nn","frac","dataset","linalg","spiral_rl","rec","telemetry","ecosystem",
     "selfsup","export","compat","hpo","inference","zspace","vision","canvas",
     "planner","spiralk",
+    "hg","z",
     "__version__",
 }
 _EXPORTED.update(
