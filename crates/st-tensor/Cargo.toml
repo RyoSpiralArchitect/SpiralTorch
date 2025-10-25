@@ -45,9 +45,12 @@ rand = { version = "0.8", default-features = false, features = ["std", "std_rng"
 rand_distr = { version = "0.4", default-features = false, features = ["std"] }
 # Fractional calculus + FFT helpers shared with the WASM canvas transformer.
 st-frac = { path = "../st-frac" }
+# Kernel DSL utilities shared with the autotuner.
+st-kdsl = { path = "../st-kdsl" }
 # Structured serialisation for gradient feedback packets shared across
 # automation layers and WASM bindings.
 serde = { version = "1.0", features = ["derive"], default-features = false }
+serde_json = "1.0"
 # High-performance SIMD dense linear algebra for CPU matmul acceleration.
 faer = { version = "0.18", default-features = false, features = ["std", "rayon"], optional = true }
 # Parallel execution for tiled CPU kernels.
