@@ -1871,7 +1871,9 @@ impl ModuleTrainer {
             }
         }
         for op in &proposal.ops {
-            self.heur_log.append(op.clone());
+            let mut applied = op.clone();
+            applied.issued_at = SystemTime::now();
+            self.heur_log.append(applied);
         }
         Ok(())
     }

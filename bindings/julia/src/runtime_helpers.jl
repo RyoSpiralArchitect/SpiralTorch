@@ -242,3 +242,182 @@ function random_normal(
     result = random_normal(runtime, dims[1], dims[2], mean, std; seed=seed)
     return _materialize(result, materialize, materialize_into)
 end
+
+function _normalize_thread_count(requested::Integer, tasks::Integer)
+    count = requested <= 0 ? Threads.nthreads() : Int(requested)
+    if tasks <= 0
+        return 0
+    end
+    return max(1, min(count, tasks))
+end
+
+function _parallel_binary(runtime::Runtime, lhs_list, rhs_list, op::Function; threads::Integer)
+    count = length(lhs_list)
+    if length(rhs_list) != count
+        throw(ArgumentError("lhs_list and rhs_list must have the same length"))
+    end
+    if count == 0
+        return Tensor[]
+    end
+
+    limit = _normalize_thread_count(threads, count)
+    results = Vector{Tensor}(undef, count)
+    err_ref = Ref{Any}(nothing)
+    bt_ref = Ref{Any}(nothing)
+    semaphore = Base.Semaphore(limit)
+
+    Threads.@sync begin
+        for idx in eachindex(lhs_list)
+            lhs = lhs_list[idx]
+            rhs = rhs_list[idx]
+            Threads.@spawn begin
+                Base.acquire(semaphore)
+                try
+                    if err_ref[] !== nothing
+                        return
+                    end
+                    results[idx] = op(lhs, rhs)
+                catch err
+                    if err_ref[] === nothing
+                        err_ref[] = err
+                        bt_ref[] = Base.catch_backtrace()
+                    end
+                finally
+                    Base.release(semaphore)
+                end
+            end
+        end
+    end
+
+    if err_ref[] !== nothing
+        Base.throw(err_ref[], bt_ref[])
+    end
+
+    return results
+end
+
+function _parallel_unary(n::Integer, exec::Function; threads::Integer)
+    if n == 0
+        return Tensor[]
+    end
+
+    limit = _normalize_thread_count(threads, n)
+    results = Vector{Tensor}(undef, n)
+    err_ref = Ref{Any}(nothing)
+    bt_ref = Ref{Any}(nothing)
+    semaphore = Base.Semaphore(limit)
+
+    Threads.@sync begin
+        for idx in 1:n
+            Threads.@spawn begin
+                Base.acquire(semaphore)
+                try
+                    if err_ref[] !== nothing
+                        return
+                    end
+                    results[idx] = exec(idx)
+                catch err
+                    if err_ref[] === nothing
+                        err_ref[] = err
+                        bt_ref[] = Base.catch_backtrace()
+                    end
+                finally
+                    Base.release(semaphore)
+                end
+            end
+        end
+    end
+
+    if err_ref[] !== nothing
+        Base.throw(err_ref[], bt_ref[])
+    end
+
+    return results
+end
+
+function _materialize_batch(results::Vector{Tensor}, materialize::Bool)
+    if !materialize
+        return results
+    end
+    materialized = Vector{Matrix{Float32}}(undef, length(results))
+    @inbounds for (idx, tensor) in enumerate(results)
+        materialized[idx] = to_array(tensor)
+    end
+    return materialized
+end
+
+"""
+    parallel_add(runtime, lhs_list, rhs_list; threads=Threads.nthreads(), materialize=false)
+
+Schedule element-wise additions for each pair in `lhs_list` and `rhs_list` on
+the cooperative runtime. Work is distributed across Julia threads (bounded by
+`threads`) so multiple additions can complete concurrently. Set
+`materialize=true` to receive a vector of `Matrix{Float32}` results.
+"""
+function parallel_add(
+    runtime::Runtime,
+    lhs_list::AbstractVector,
+    rhs_list::AbstractVector;
+    threads::Integer=Threads.nthreads(),
+    materialize::Bool=false,
+)
+    results = _parallel_binary(runtime, lhs_list, rhs_list, (lhs, rhs) -> add(runtime, lhs, rhs); threads=threads)
+    return _materialize_batch(results, materialize)
+end
+
+"""
+    parallel_hadamard(runtime, lhs_list, rhs_list; threads=Threads.nthreads(), materialize=false)
+
+Execute Hadamard products for each pair of tensors or matrices concurrently.
+When `materialize=true`, the resulting tensors are copied into Julia
+`Matrix{Float32}` values.
+"""
+function parallel_hadamard(
+    runtime::Runtime,
+    lhs_list::AbstractVector,
+    rhs_list::AbstractVector;
+    threads::Integer=Threads.nthreads(),
+    materialize::Bool=false,
+)
+    results = _parallel_binary(runtime, lhs_list, rhs_list, (lhs, rhs) -> hadamard(runtime, lhs, rhs); threads=threads)
+    return _materialize_batch(results, materialize)
+end
+
+"""
+    parallel_matmul(runtime, lhs_list, rhs_list; threads=Threads.nthreads(), materialize=false)
+
+Submit batched matrix multiplications to the runtime using Julia threads to
+drive each request. Results preserve input ordering and can be materialised to
+`Matrix{Float32}` values by setting `materialize=true`.
+"""
+function parallel_matmul(
+    runtime::Runtime,
+    lhs_list::AbstractVector,
+    rhs_list::AbstractVector;
+    threads::Integer=Threads.nthreads(),
+    materialize::Bool=false,
+)
+    results = _parallel_binary(runtime, lhs_list, rhs_list, (lhs, rhs) -> matmul(runtime, lhs, rhs); threads=threads)
+    return _materialize_batch(results, materialize)
+end
+
+"""
+    parallel_scale(runtime, data_list, values; threads=Threads.nthreads(), materialize=false)
+
+Scale each matrix or tensor in `data_list` by the corresponding scalar in
+`values`, executing the work in parallel. Use `materialize=true` to copy the
+results back into Julia arrays immediately.
+"""
+function parallel_scale(
+    runtime::Runtime,
+    data_list::AbstractVector,
+    values::AbstractVector{<:Real};
+    threads::Integer=Threads.nthreads(),
+    materialize::Bool=false,
+)
+    if length(data_list) != length(values)
+        throw(ArgumentError("data_list and values must be the same length"))
+    end
+    results = _parallel_unary(length(data_list), idx -> scale(runtime, data_list[idx], values[idx]); threads=threads)
+    return _materialize_batch(results, materialize)
+end

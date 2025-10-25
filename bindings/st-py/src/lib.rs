@@ -13,6 +13,7 @@ mod pure;
 mod planner;
 mod spiralk;
 mod frac;
+mod psi_synchro;
 mod selfsup;
 mod export;
 mod inference;
@@ -152,6 +153,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     pure::register(py, m)?;
     planner::register(py, m)?;
     spiralk::register(py, m)?;
+    psi_synchro::register(py, m)?;
     hpo::register(py, m)?;
     inference::register(py, m)?;
     frac::register(py, m)?;
@@ -195,7 +197,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "nn","frac","dataset","linalg","spiral_rl","rec","telemetry","ecosystem","hpo","inference","export",
         "LinearModel","ModuleTrainer","mean_squared_error",
         "CanvasTransformer","CanvasSnapshot","apply_vision_update",
-        "ZSpaceCoherenceSequencer",
+        "NonLiner","ZSpaceCoherenceSequencer",
         "golden_ratio","golden_angle","set_global_seed",
         "fibonacci_pacing","pack_nacci_chunks","pack_tribonacci_chunks","pack_tetranacci_chunks",
         "generate_plan_batch_ex",

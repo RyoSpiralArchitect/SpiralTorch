@@ -28,27 +28,85 @@ It’s not just an engine—it’s a **bridge** between the pragmatism of deep-l
 
 **Architecture Overview.**
 ```mermaid
+%%{init: {'themeVariables': {'fontSize': '20px', 'lineColor': '#7f8cfc'}, 'sequence': {'actorFontSize': 22, 'messageFontSize': 19, 'noteFontSize': 18}}}%%
 sequenceDiagram
   participant API as Python/TS API
-  participant Core as st-core
+  participant Bridge as PyO3/wasm bindings
+  participant Session as Session manager
+  participant Core as st-core orchestrator
+  participant Planner as Graph planner + scheduler
+  participant Autodiff as Tape/autograd runtime
   participant Reg as Op registry
-  participant KD as st-kdsl
+  participant Caps as Capability DB
+  participant Layout as Layout strategist
+  participant KD as st-kdsl compiler
+  participant Cache as Kernel cache/tuner
+  participant Mem as Arena allocator
+  participant Stream as Stream graphifier
+  participant Queue as Command queue mgr
   participant BE as Backend (WGPU/CUDA/CPU)
-  participant TLM as Telemetry
+  participant TLM as Telemetry/observability
+  participant Prof as Profiler/exporter
 
-  API->>Core: op(x, y, ...)
-  Core->>Reg: resolve impl/backend (caps/precision/layout)
-  alt cached kernel exists
-    Reg-->>Core: impl + schedule + kernel handle
-  else needs generation
-    Reg->>KD: codegen + parameterization
-    KD-->>Reg: kernel handle (tuned & cached)
-    Reg-->>Core: impl + schedule + kernel handle
+  API->>Bridge: op(x, y, ...) / launch async task
+  Bridge->>Session: hydrate handles / authz
+  Session->>Core: dispatch request (device scope)
+  Core->>Autodiff: capture gradients / tape guards
+  Autodiff-->>Core: differentiation plan
+  Core->>Planner: build execution graph (policy, determinism)
+  Planner->>Layout: negotiate layout / sharding
+  Layout-->>Planner: residency strategy + halo exchange
+  Planner->>Reg: request op impl (tensor traits, precision)
+  Reg->>Caps: verify backend + layout capabilities
+  Caps-->>Reg: supported modes / tiling hints
+  Reg->>Prof: emit planning span metadata
+  Prof-->>Reg: sampling budget / trace tokens
+  par cache probe vs compilation
+    Reg->>Cache: fetch tuned kernel handle
+    Cache-->>Reg: kernel + launch params
+  and
+    Reg->>KD: request codegen + schedule lowering
+    KD->>Cache: autotune + persist kernel artifact
+    Cache-->>Reg: kernel handle + tuning metadata
   end
-  Core->>BE: submit commands/pipeline (async)
-  BE-->>Core: completion events / result buffers
-  Core--)TLM: spans / metrics / logs
+  Reg-->>Planner: impl + schedule + kernel handle
+  Planner->>Mem: acquire arenas / residency locks
+  Mem-->>Planner: buffer views + relocation plan
+  Planner->>Stream: expand passes → async stages
+  Stream-->>Planner: dependency DAG + replay guards
+  Planner-->>Core: executable pass graph
+  Core->>Queue: enqueue passes (async futures)
+  loop execution waves
+    Queue->>BE: submit pipelines / barriers
+    BE->>Mem: residency updates / reuse hints
+    BE->>Autodiff: gradient materialisation callbacks
+    BE-->>Queue: completion events + result buffers
+    Queue->>TLM: forward stage timings / counters
+  end
+  Queue-->>Core: ready futures / error states
+  Core->>Prof: flush spans + counter deltas
+  Prof-->>TLM: export traces / profile artefacts
+  Core--)TLM: spans / metrics / structured logs
+  Core-->>Session: promise handle / stream token
+  Session-->>Bridge: async completion signal
+  Bridge-->>API: awaitable result / telemetry hook
 ```
+
+### Explore the runtime interactively
+
+Prefer a guided walkthrough of the dispatcher flows? Open the
+[interactive runtime explorer](docs/interactive/README.md) for clickable
+diagrams, a narrated "story tour" of the runtime handoff, and playful
+spotlights on graph-node materialisation versus return-handle delivery:
+
+- 🎬 **Story tour.** Step through a six-beat mini adventure that explains
+  how a single API call ripples through SpiralTorch, from the first FFI
+  marshals to the triumphant return of tensor handles.
+- 🔍 **Focus toggles.** Snap to either the graph-node materialisation
+  path or the return-handle arc whenever you want to revisit a specific
+  phase.
+- 🧭 **Free roam.** Click any node or edge to read quick lore about the
+  component, then resume the story exactly where you left off.
 
 > **Update — GPU-first convolution.** `Conv2d` now routes through a WGPU im2col + GEMM path that expands the 5D activation volume entirely on the GPU before projection back into Z-space, accelerating large vision stacks on portable GPUs.
 >
@@ -71,6 +129,8 @@ sequenceDiagram
 > **In flight — CUDA attention kernel.** The fused scaled dot-product path now supports causal masking, per-context sequence lengths, optional Z-bias/attention bias, and opt-in attention probability/logit readback so Z-space transformers can mix ragged batches without leaving the GPU hot path.
 
 > **New — Z-space inference for imported checkpoints.** `spiraltorch.infer_weights_from_dlpack` and `spiraltorch.infer_with_psi` now project DLPack/compat weights, Canvas transformers, and PSI telemetry straight into the Z-space posterior. Warm-start inference can blend partial observations with live ψ health data so Rust sessions reuse PyTorch/JAX weights without leaving the SpiralTorch runtime.
+
+> **New — PSI synchroniser learning bundles.** Multi-branch MetaMEMB runs now deliver combined heatmaps, ZPulse snapshots, Atlas fragments, PSI component breakdowns, and Golden directives via `st.psi.run_zspace_learning(...)` so Z-space learners and distributed `golden` retrievers can coordinate straight from Rust or Python.
 
 **Licensing**
 
