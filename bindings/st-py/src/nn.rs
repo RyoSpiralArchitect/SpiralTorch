@@ -22,16 +22,17 @@ use st_nn::{
     dataset::DataLoaderBatches,
     dataset_from_vec,
     layers::{
-        Dropout as RustDropout, NonLiner, NonLinerActivation, NonLinerEllipticConfig,
-        NonLinerGeometry, NonLinerHyperbolicConfig,
+        NonLiner, NonLinerActivation, NonLinerEllipticConfig, NonLinerGeometry,
+        NonLinerHyperbolicConfig,
     },
     zspace_coherence::{
         is_swap_invariant as rust_is_swap_invariant, CoherenceDiagnostics, CoherenceLabel,
         CoherenceObservation, CoherenceSignature, LinguisticChannelReport, PreDiscardPolicy,
         PreDiscardSnapshot, PreDiscardTelemetry,
     },
-    DataLoader, Dataset, ZRelativityModule, ZSpaceCoherenceSequencer,
+    AvgPool2d, DataLoader, Dataset, Dropout, MaxPool2d, ZSpaceCoherenceSequencer,
 };
+use st_nn::layers::ZRelativityModule;
 #[cfg(feature = "nn")]
 use st_tensor::{OpenCartesianTopos, Tensor, TensorError};
 
@@ -540,7 +541,7 @@ impl PyDropout {
     #[new]
     #[pyo3(signature = (probability, *, seed=None))]
     pub fn new(probability: f32, seed: Option<u64>) -> PyResult<Self> {
-        let inner = RustDropout::with_seed(probability, seed).map_err(tensor_err_to_py)?;
+        let inner = Dropout::with_seed(probability, seed).map_err(tensor_err_to_py)?;
         Ok(Self { inner })
     }
 
