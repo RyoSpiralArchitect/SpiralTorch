@@ -338,7 +338,7 @@ impl GoldenRuntime {
         let (result_tx, result_rx) = bounded::<ThreadResult<R, E>>(1);
         let job = Box::new(move || {
             let outcome = panic::catch_unwind(AssertUnwindSafe(func));
-            let result = match outcome {
+            let result: ThreadResult<R, E> = match outcome {
                 Ok(inner) => inner.map_err(GoldenTaskError::Task),
                 Err(_) => Err(GoldenTaskError::Panic),
             };
@@ -452,7 +452,8 @@ mod tests {
         }
         let mut total = 0usize;
         for handle in handles {
-            total += handle.join().expect("join");
+            let value: usize = handle.join().expect("join");
+            total += value;
         }
         assert!(total > 0);
 
