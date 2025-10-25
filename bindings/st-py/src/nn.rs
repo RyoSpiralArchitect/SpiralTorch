@@ -20,7 +20,7 @@ use st_nn::{
     dataset::DataLoaderBatches,
     dataset_from_vec,
     layers::{
-        NonLiner, NonLinerActivation, NonLinerEllipticConfig, NonLinerGeometry,
+        Dropout, NonLiner, NonLinerActivation, NonLinerEllipticConfig, NonLinerGeometry,
         NonLinerHyperbolicConfig,
     },
     zspace_coherence::{
@@ -299,6 +299,66 @@ impl PyNonLiner {
             .gradient()
             .map(|g| PyTensor::from_tensor(g.clone()));
         (gain, slope, bias)
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "Dropout", unsendable)]
+pub(crate) struct PyDropout {
+    inner: Dropout,
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyDropout {
+    #[new]
+    #[pyo3(signature = (probability, *, seed=None, training=true))]
+    pub fn new(probability: f32, seed: Option<u64>, training: bool) -> PyResult<Self> {
+        let mut inner = Dropout::with_seed(probability, seed).map_err(tensor_err_to_py)?;
+        if !training {
+            inner.eval();
+        }
+        Ok(Self { inner })
+    }
+
+    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        let output = self.inner.forward(&input.inner).map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        let grad = self
+            .inner
+            .backward(&input.inner, &grad_output.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(grad))
+    }
+
+    pub fn set_training(&mut self, training: bool) {
+        self.inner.set_training(training);
+    }
+
+    pub fn train(&mut self) {
+        self.inner.train();
+    }
+
+    pub fn eval(&mut self) {
+        self.inner.eval();
+    }
+
+    #[getter]
+    pub fn training(&self) -> bool {
+        self.inner.training()
+    }
+
+    #[getter]
+    pub fn probability(&self) -> f32 {
+        self.inner.probability()
+    }
+
+    #[pyo3(signature = (x))]
+    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(x)
     }
 }
 
@@ -1079,6 +1139,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     let module = PyModule::new_bound(py, "nn")?;
     module.add("__doc__", "SpiralTorch neural network primitives")?;
     module.add_class::<PyNonLiner>()?;
+    module.add_class::<PyDropout>()?;
     module.add_class::<PyDataset>()?;
     module.add_class::<PyDataLoader>()?;
     module.add_class::<PyDataLoaderIter>()?;
@@ -1096,6 +1157,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
         "__all__",
         vec![
             "NonLiner",
+            "Dropout",
             "Dataset",
             "DataLoader",
             "DataLoaderIter",
@@ -1111,6 +1173,9 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     parent.add_submodule(&module)?;
     if let Ok(non_liner) = module.getattr("NonLiner") {
         parent.add("NonLiner", non_liner)?;
+    }
+    if let Ok(dropout) = module.getattr("Dropout") {
+        parent.add("Dropout", dropout)?;
     }
     if let Ok(sequencer) = module.getattr("ZSpaceCoherenceSequencer") {
         parent.add("ZSpaceCoherenceSequencer", sequencer)?;
