@@ -19,6 +19,8 @@ use wgpu::{BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device, Pipeline
 
 const MATMUL_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/dense_matmul.wgsl");
 const FUSED_CONV_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/fused_im2col_matmul.wgsl");
+const FUSED_GRAD_INPUT_WGSL_TEMPLATE: &str =
+    include_str!("../wgpu_shaders/fused_grad_input_col2im.wgsl");
 const FUSED_GELU_BACK_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/fused_gelu_back.wgsl");
 const REDUCE_DB_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/reduce_db.wgsl");
 const ROW_SOFTMAX_WGSL: &str =
@@ -47,6 +49,10 @@ const QUANTIZATION_MIN_VOLUME: usize = 64 * 64;
 
 const FUSED_ATTENTION_FLAG_USE_Z_BIAS: u32 = 1 << 0;
 const FUSED_ATTENTION_FLAG_USE_ATTN_BIAS: u32 = 1 << 1;
+
+const GRAD_INPUT_TILE_X: u32 = 4;
+const GRAD_INPUT_TILE_Y: u32 = 4;
+const GRAD_INPUT_TILE_Z: u32 = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum ScalarType {
@@ -359,6 +365,9 @@ struct GpuContext {
     fused_conv_layout: BindGroupLayout,
     fused_conv_pipeline_layout: PipelineLayout,
     fused_conv_pipelines: Mutex<HashMap<TileConfig, Arc<ComputePipeline>>>,
+    fused_grad_input_layout: BindGroupLayout,
+    fused_grad_input_pipeline_layout: PipelineLayout,
+    fused_grad_input_pipeline: OnceLock<Arc<ComputePipeline>>,
 }
 
 struct FusedAttentionKernel {
@@ -875,6 +884,59 @@ impl GpuContext {
                 push_constant_ranges: &[],
             });
 
+        let fused_grad_input_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("st.tensor.wgpu_dense.fused_grad_input.layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+        let fused_grad_input_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("st.tensor.wgpu_dense.fused_grad_input.pipeline_layout"),
+                bind_group_layouts: &[&fused_grad_input_layout],
+                push_constant_ranges: &[],
+            });
+
         Ok(Self {
             context: WgpuContext::new(device.clone(), queue.clone()),
             pipeline_cache: PipelineCache::new(device.clone()),
@@ -895,6 +957,9 @@ impl GpuContext {
             fused_conv_layout,
             fused_conv_pipeline_layout,
             fused_conv_pipelines: Mutex::new(HashMap::new()),
+            fused_grad_input_layout,
+            fused_grad_input_pipeline_layout,
+            fused_grad_input_pipeline: OnceLock::new(),
         })
     }
 
@@ -1223,6 +1288,64 @@ impl GpuContext {
             ],
         })
     }
+
+    fn fused_grad_input_pipeline(&self) -> Result<Arc<ComputePipeline>, String> {
+        if let Some(pipeline) = self.fused_grad_input_pipeline.get() {
+            return Ok(pipeline.clone());
+        }
+        let source = FUSED_GRAD_INPUT_WGSL_TEMPLATE
+            .replace("{tile_x}", &GRAD_INPUT_TILE_X.to_string())
+            .replace("{tile_y}", &GRAD_INPUT_TILE_Y.to_string())
+            .replace("{tile_z}", &GRAD_INPUT_TILE_Z.to_string());
+        let shader = create_wgsl_module(
+            self.device(),
+            "st.tensor.wgpu_dense.fused_grad_input",
+            &source,
+        )
+        .map_err(|err| err.to_string())?;
+        let pipeline = Arc::new(self.device().create_compute_pipeline(
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("st.tensor.wgpu_dense.fused_grad_input.pipeline"),
+                layout: Some(&self.fused_grad_input_pipeline_layout),
+                module: &shader,
+                entry_point: "main",
+                compilation_options: Default::default(),
+            },
+        ));
+        let _ = self.fused_grad_input_pipeline.set(pipeline.clone());
+        Ok(pipeline)
+    }
+
+    fn fused_grad_input_bind_group(
+        &self,
+        grad_matrix: &Buffer,
+        weights: &Buffer,
+        output: &Buffer,
+        params: &Buffer,
+    ) -> BindGroup {
+        self.device().create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("st.tensor.wgpu_dense.fused_grad_input.bind_group"),
+            layout: &self.fused_grad_input_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: grad_matrix.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: weights.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: output.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: params.as_entire_binding(),
+                },
+            ],
+        })
+    }
 }
 
 fn instantiate_tile_template(template: &str, config: TileConfig) -> String {
@@ -1409,6 +1532,31 @@ struct ConvGemmParams {
     out_w: u32,
     span: u32,
     out_channels: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+    _pad3: u32,
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct GradInputParams {
+    batch: u32,
+    in_channels: u32,
+    input_h: u32,
+    input_w: u32,
+    kernel_h: u32,
+    kernel_w: u32,
+    stride_h: u32,
+    stride_w: u32,
+    pad_h: i32,
+    pad_w: i32,
+    dilation_h: u32,
+    dilation_w: u32,
+    out_h: u32,
+    out_w: u32,
+    out_channels: u32,
+    span: u32,
     _pad0: u32,
     _pad1: u32,
     _pad2: u32,
@@ -2742,6 +2890,153 @@ pub fn conv_im2col_gemm(
     queue.submit(Some(encoder.finish()));
 
     readback_f32(device, queue, &output_buf, rows * out_channels)
+}
+
+pub fn conv_grad_input_fused(
+    grad_matrix: &[f32],
+    weights: &[f32],
+    batch: usize,
+    in_channels: usize,
+    input_h: usize,
+    input_w: usize,
+    kernel_h: usize,
+    kernel_w: usize,
+    stride_h: usize,
+    stride_w: usize,
+    pad_h: i32,
+    pad_w: i32,
+    dilation_h: usize,
+    dilation_w: usize,
+    out_h: usize,
+    out_w: usize,
+    out_channels: usize,
+) -> Result<Vec<f32>, String> {
+    if batch == 0
+        || in_channels == 0
+        || kernel_h == 0
+        || kernel_w == 0
+        || out_channels == 0
+        || out_h == 0
+        || out_w == 0
+    {
+        return Err("convolution dimensions must be positive".into());
+    }
+
+    let rows = batch
+        .checked_mul(out_h)
+        .and_then(|value| value.checked_mul(out_w))
+        .ok_or_else(|| "output spatial overflow".to_string())?;
+    let span = in_channels
+        .checked_mul(kernel_h)
+        .and_then(|value| value.checked_mul(kernel_w))
+        .ok_or_else(|| "kernel span overflow".to_string())?;
+
+    if grad_matrix.len() != rows * out_channels {
+        return Err("grad matrix length mismatch".into());
+    }
+    if weights.len() != out_channels * span {
+        return Err("weight buffer length mismatch".into());
+    }
+
+    let total_bc = batch
+        .checked_mul(in_channels)
+        .ok_or_else(|| "input channel volume overflow".to_string())?;
+    if total_bc > u32::MAX as usize {
+        return Err("input channel volume exceeds GPU limits".into());
+    }
+    let input_volume = total_bc
+        .checked_mul(input_h)
+        .and_then(|value| value.checked_mul(input_w))
+        .ok_or_else(|| "input tensor volume overflow".to_string())?;
+
+    if rows > u32::MAX as usize
+        || span > u32::MAX as usize
+        || batch > u32::MAX as usize
+        || in_channels > u32::MAX as usize
+        || input_h > u32::MAX as usize
+        || input_w > u32::MAX as usize
+        || kernel_h > u32::MAX as usize
+        || kernel_w > u32::MAX as usize
+        || stride_h > u32::MAX as usize
+        || stride_w > u32::MAX as usize
+        || dilation_h > u32::MAX as usize
+        || dilation_w > u32::MAX as usize
+        || out_h > u32::MAX as usize
+        || out_w > u32::MAX as usize
+        || out_channels > u32::MAX as usize
+    {
+        return Err("convolution dimensions exceed GPU limits".into());
+    }
+
+    let ctx = dense_context()?;
+    let device = ctx.device();
+    let queue = ctx.queue();
+
+    let grad_matrix_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.conv.grad_matrix"),
+        contents: bytemuck::cast_slice(grad_matrix),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let weights_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.conv.grad_weights"),
+        contents: bytemuck::cast_slice(weights),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let output_buf = allocate_output(device, "st.tensor.wgpu_dense.conv.grad_input", input_volume);
+
+    let params = GradInputParams {
+        batch: batch as u32,
+        in_channels: in_channels as u32,
+        input_h: input_h as u32,
+        input_w: input_w as u32,
+        kernel_h: kernel_h as u32,
+        kernel_w: kernel_w as u32,
+        stride_h: stride_h as u32,
+        stride_w: stride_w as u32,
+        pad_h,
+        pad_w,
+        dilation_h: dilation_h as u32,
+        dilation_w: dilation_w as u32,
+        out_h: out_h as u32,
+        out_w: out_w as u32,
+        out_channels: out_channels as u32,
+        span: span as u32,
+        _pad0: 0,
+        _pad1: 0,
+        _pad2: 0,
+        _pad3: 0,
+    };
+
+    let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.conv.grad_input.params"),
+        contents: bytemuck::bytes_of(&params),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("st.tensor.wgpu_dense.conv.grad_input.encoder"),
+    });
+
+    let pipeline = ctx.fused_grad_input_pipeline()?;
+    let bind_group =
+        ctx.fused_grad_input_bind_group(&grad_matrix_buf, &weights_buf, &output_buf, &params_buf);
+
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("st.tensor.wgpu_dense.conv.grad_input.pass"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(pipeline.as_ref());
+        pass.set_bind_group(0, &bind_group, &[]);
+        let groups_x = ((input_w as u32) + GRAD_INPUT_TILE_X - 1) / GRAD_INPUT_TILE_X;
+        let groups_y = ((input_h as u32) + GRAD_INPUT_TILE_Y - 1) / GRAD_INPUT_TILE_Y;
+        let groups_z = ((total_bc as u32) + GRAD_INPUT_TILE_Z - 1) / GRAD_INPUT_TILE_Z;
+        pass.dispatch_workgroups(groups_x.max(1), groups_y.max(1), groups_z.max(1));
+    }
+
+    queue.submit(Some(encoder.finish()));
+
+    readback_f32(device, queue, &output_buf, input_volume)
 }
 
 fn select_tile_config(rows: usize, inner: usize, cols: usize) -> TileConfig {
