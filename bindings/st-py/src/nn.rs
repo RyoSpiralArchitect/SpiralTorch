@@ -1057,7 +1057,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyDataset>()?;
     module.add_class::<PyDataLoader>()?;
     module.add_class::<PyDataLoaderIter>()?;
-    module.add_function(wrap_pyfunction!(py_is_swap_invariant, module)?)?;
+    module.add_function(wrap_pyfunction!(py_is_swap_invariant, module.clone())?)?;
     module.add_class::<PyCoherenceChannelReport>()?;
     module.add_class::<PyCoherenceSignature>()?;
     module.add_class::<PyCoherenceObservation>()?;
