@@ -1,12 +1,14 @@
 # 🌀🕯️ SpiralTorch 🕯️🌀
 **trains where PyTorch can’t — inside the Z-space.**  
-_(Still under active repair while expanding — API changes hourly.)_
+_(Still under active expanding hourly.)_
 
 **Purpose.** A WGPU-first, research-grade ML/geometry runtime that fuses spectral operators, microlocal tools, and cooperative schedulers into a single stack. The goal: rival CUDA-centric ecosystems using portable GPUs (Metal/Vulkan/DX12) without sacrificing theory fidelity.
 
 ## 🌌 SpiralTorch Manifesto
 
 Step into the paradigm shift from imitation to emergent meaning with the [SpiralTorch Manifesto](docs/spiraltorch_manifesto.md).
+
+🌌 **New to the manifold?** Explore how tensors, telemetry, and imported checkpoints share coordinates in [Navigating Z-space in SpiralTorch](docs/zspace_intro.md).
 
 📜 **Licensing at a glance:** SpiralTorch is AGPL-3.0-or-later by default with a commercial option for proprietary deployments. [Read the full policy.](docs/licensing.md)
 Unauthorized redistribution, scraping, or resale of this repository
@@ -128,7 +130,7 @@ SpiralTorch ships under a dual-license model:
 ## Code stats
 
 <!-- AUTOGEN: CODESTATS BEGIN -->
-_Last updated: 2025-10-25 03:04 UTC_
+_Last updated: 2025-10-25 10:01 UTC_
 
 ```text
 ===============================================================================
@@ -138,29 +140,29 @@ _Last updated: 2025-10-25 03:04 UTC_
  COBOL                   1          416          376            8           32
  C++                     1          327          286            3           38
  CSS                     1          160          137            0           23
- Go                     11         2222         1743          191          288
+ Go                     11         2146         1674          191          281
  JSON                    6          372          372            0            0
  Julia                   8         1335         1176           14          145
- Python                 42         8770         7415           79         1276
+ Python                 48        10981         9268           79         1634
  Shell                   4          194          172            4           18
  SVG                     3           60           60            0            0
  Plain Text              1          661            0          544          117
- TOML                   35          865          734           27          104
+ TOML                   35          881          749           27          105
  TypeScript              7         4898         4331          175          392
  YAML                    3           72           65            0            7
 -------------------------------------------------------------------------------
- HTML                    2          482          482            0            0
- |- CSS                  1          311          266            0           45
- |- JavaScript           1          616          574            0           42
- (Total)                           1409         1322            0           87
+ HTML                    2          491          491            0            0
+ |- CSS                  1          532          460            0           72
+ |- JavaScript           1          769          720            0           49
+ (Total)                           1792         1671            0          121
 -------------------------------------------------------------------------------
  Jupyter Notebooks       2            0            0            0            0
  |- Markdown             2            9            0            9            0
  |- Python               2           22           20            0            2
  (Total)                             31           20            9            2
 -------------------------------------------------------------------------------
- Markdown               56         5765            0         4556         1209
- |- BASH                13          124           95           17           12
+ Markdown               58         5931            0         4665         1266
+ |- BASH                13          121           92           17           12
  |- C                    1           21           16            0            5
  |- COBOL                1           30           30            0            0
  |- Dockerfile           1            6            6            0            0
@@ -168,16 +170,16 @@ _Last updated: 2025-10-25 03:04 UTC_
  |- JavaScript           1           34           29            3            2
  |- JSON                 1           11           11            0            0
  |- Julia                1           29           26            0            3
- |- Python               6          726          609           20           97
+ |- Python               6          841          697           26          118
  |- Rust                 5          741          652           15           74
  |- YAML                 2           62           62            0            0
- (Total)                           7567         1554         4611         1402
+ (Total)                           7845         1639         4726         1480
 -------------------------------------------------------------------------------
- Rust                  319       136457       121871         1628        12958
- |- Markdown           196         5145            0         5036          109
- (Total)                         141602       121871         6664        13067
+ Rust                  340       151119       135026         1696        14397
+ |- Markdown           212         5934            0         5805          129
+ (Total)                         157053       135026         7501        14526
 ===============================================================================
- Total                 503       163110       139272         7230        16608
+ Total                 532       180098       154235         7407        18456
 ===============================================================================
 ```
 ---
@@ -303,9 +305,179 @@ pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
 
 ---
 
-## Python Examples
+## Python quickstart (wheel)
 
-### 1)　DLPack(You can Zero copy)
+> The snippets below run against the published `spiraltorch` wheel and showcase the new chat-notation helpers bundled with the Python bindings.
+
+### 1) Safety-aware generation with chat notation helpers
+
+```python
+from spiraltorch.inference import (
+    ChatMessage,
+    ChatPrompt,
+    InferenceClient,
+)
+
+client = InferenceClient(refusal_threshold=0.65)
+
+messages = ChatPrompt.from_messages(
+    [
+        ChatMessage.system("You are SpiralTorch's safety-tuned narrator."),
+        ChatMessage.user("Summarise why WGPU inference matters in two sentences."),
+    ]
+)
+
+result = client.chat(messages)
+
+if result.accepted:
+    print("model:", result.response)
+else:
+    print("refusal:", result.refusal_message)
+
+for event in client.audit_events():
+    verdict = event.verdict
+    print(f"[{event.timestamp}] {event.channel} → {verdict.dominant_risk} (score={verdict.score:.2f})")
+```
+
+`ChatMessage.system|user|assistant|tool` normalises role names, while `ChatPrompt` keeps separators and rendering styles consistent. When you only need the raw string, call `format_chat_prompt(...)` — `InferenceClient.generate(...)` now accepts plain strings, `ChatPrompt` objects, or any iterable of `(role, content)` pairs.
+
+### 2) Intuitive tensor constructors
+
+```python
+import spiraltorch as st
+import torch
+
+# Tuple-style shapes create zeroed tensors without extra keywords
+zeros = st.Tensor((2, 3))
+
+# Nested iterables flatten automatically in row-major order
+from_lists = st.Tensor([[1, 2, 3], [4, 5, 6]])
+
+# Any iterable of scalars can be reshaped via `shape=` or `rows=`/`cols=`
+from_range = st.Tensor(range(6), shape=(2, 3))
+
+# Interoperable inputs (Torch / NumPy / SpiralTorch tensors) just work
+torch_tensor = torch.arange(6, dtype=torch.float32).reshape(2, 3)
+from_torch = st.Tensor(torch_tensor)
+
+print("zeros shape:", zeros.shape())
+print("from_lists:", from_lists.tolist())
+print("from_range:", from_range.tolist())
+print("from_torch matches torch.tolist():", from_torch.tolist() == torch_tensor.tolist())
+```
+
+`st.Tensor` now accepts tuples, keyword-only shapes, nested Python iterables, DLPack-aware tensors, or anything with a `tolist()` method. The constructor infers shapes where possible and reshapes automatically when you provide the total element count.
+
+### 3) Hypergrad tapes without ceremony
+
+```python
+import spiraltorch as st
+
+# Bind rows/cols or tensor shapes inline with the hg-DSL.
+weights = st.Tensor([[0.1, 0.2, 0.3]])
+tape = st.hg[weights](
+    learning_rate=0.02,
+    topos=st.hg.topos(
+        curvature=-0.9,
+        tolerance=1e-3,
+        saturation=0.8,
+        max_depth=8,
+        max_volume=32,
+    ),
+)
+
+# Slice notation pinches rows/cols; `.with_topos(...)` inlines guard creation.
+aux = st.hg[1:3](curvature=-0.85)
+guarded = st.hg[weights].with_topos(curvature=-0.9, tolerance=2e-3, max_depth=6)
+
+prediction = st.Tensor([[0.25, 0.25, 0.25]])
+target = st.Tensor([[0.0, 1.0, 0.0]])
+tape.accumulate_pair(prediction, target)
+tape.apply(weights)
+
+print("shape:", tape.shape(), "lr:", tape.learning_rate())
+print("aux curvature:", aux.curvature())
+print("guard depth:", guarded.topos().max_depth())
+```
+
+`st.hg[...]` returns a callable that already knows its shape: pass tensors,
+tuples, or even slices (`st.hg[rows:cols]`) and the helper fills in
+`rows`/`cols` before calling into the native constructor. `st.hg.topos(...)`
+aliases `hypergrad_topos`, while `partial.with_topos(...)` wraps guard creation
+inline so you can bind a tape and guard in a single expression. You can still
+feed dictionaries or `(curvature, tolerance, saturation, depth, volume)` tuples
+directly into `topos=` when needed.
+
+### 4) Hypergrad sessions & operator hints
+
+```python
+import spiraltorch as st
+from spiral.hypergrad import hypergrad_session, hypergrad_summary_dict, suggest_hypergrad_operator
+
+weights = st.Tensor([[0.05, -0.15, 0.25]])
+targets = st.Tensor([[0.0, 1.0, 0.0]])
+
+with hypergrad_session(weights.shape(), learning_rate=0.03) as tape:
+    tape.accumulate_pair(weights, targets)
+    metrics = hypergrad_summary_dict(tape, include_gradient=True)
+    hints = suggest_hypergrad_operator(metrics)
+
+print("summary:", metrics["summary"])  # includes l1/l2/linf/mean_abs/rms stats
+print("wgsl operator hints:", hints)
+print("gradient sample:", metrics["gradient"][:3])
+```
+
+`hypergrad_session(...)` wraps `st.hypergrad(...)` so notebooks can accumulate,
+apply, and reset tapes without manual `try`/`finally` scaffolding. The
+`hypergrad_summary_dict(...)` helper converts native gradient summaries into a
+plain dictionary (optionally including the gradient vector), and
+`suggest_hypergrad_operator(...)` distils those metrics into shader-friendly mix
+and gain hints while preserving the underlying ratios for custom heuristics.
+
+### 5) Z-space encoders and metric normalisers
+
+```python
+import spiraltorch as st
+
+# Encode desire text straight into the Z-space tensor manifold.
+z_vec = st.z["Spin up the roundtable", 0.4]
+
+# Normalise mixed telemetry aliases into a structured ZMetrics payload.
+metrics = st.z.metrics(
+    velocity=0.55,
+    mem=0.12,
+    stab=0.78,
+    drift=0.05,
+    grad=[0.1, -0.2, 0.05],
+)
+
+roundtable = st.z.partial(
+    metrics,
+    origin="telemetry",
+    telemetry={"roundtable": {"mean": 0.44, "focus": 0.67}},
+)
+canvas_hint = st.z.partial(speed=0.35, memory=0.22, coherence_peak=0.61, weight=0.5)
+bundle = st.z.bundle(roundtable, canvas_hint)
+
+trainer = st.ZSpaceTrainer(z_dim=z_vec.shape()[1])
+loss = trainer.step(bundle)
+
+print("z shape:", z_vec.shape(), "loss:", loss)
+```
+
+`st.z[...]` is shorthand for `encode_zspace`: strings go straight into the
+encoder, and you can append numbers, `(key, value)` pairs, or dictionaries to
+override temperature or other keyword arguments. `st.z.metrics(...)` recognises
+the common aliases (`velocity`, `mem`, `stab`, `drift`, `grad`) and emits the
+strongly typed `ZMetrics` container that `ZSpaceTrainer` expects. `st.z.partial(...)`
+wraps those metrics (or raw mappings) into a `ZSpacePartialBundle`, flattens any
+telemetry dictionaries into dotted keys, and lets you override `weight`/`origin`
+without touching the underlying map. Feed the partials directly into
+`st.z.bundle(...)` (alias `st.z.blend`) to merge telemetry-aware observations—
+keyword arguments accept every Z-space alias exposed by the wheel so you can
+mix hypergrad, Canvas, or coherence-derived metrics inline.
+
+### 6) Zero-copy tensor exchange via DLPack
 
 ```python
 import spiraltorch as st
@@ -313,41 +485,52 @@ import torch
 from torch.utils.dlpack import from_dlpack as torch_from_dlpack
 
 # ST → Torch
-a = st.Tensor(2, 3, [1,2,3,4,5,6])
-caps = a.to_dlpack()
-t = torch_from_dlpack(caps)  
+a = st.Tensor(2, 3, [1, 2, 3, 4, 5, 6])
+capsule = a.to_dlpack()
+t = torch_from_dlpack(capsule)
 
 t += 10
-print("ST tolist after torch += 10:", a.tolist())  # ← [11,12,13,14,15,16] is okay
+print("ST after torch += 10:", a.tolist())
 
 # Torch → ST
-t2 = torch.arange(6, dtype=torch.float32).reshape(2,3)
-a2 = st.Tensor.from_dlpack(t2)      # same buffer
-t2.mul_(2)                          # in-place
-print("ST sees torch mul_:        ", a2.tolist())
+t2 = torch.arange(6, dtype=torch.float32).reshape(2, 3)
+a2 = st.Tensor.from_dlpack(t2)
+t2.mul_(2)
+print("ST sees torch mul_:", a2.tolist())
 ```
 
-### 2) Row softmax (GPU-accelerated when available)
+### 7) Row softmax (GPU-accelerated when available)
 
 ```python
-import spiraltorch as st
+from spiraltorch import Axis, tensor, label_tensor
 
-logits = st.Tensor(2, 4, [3.0, 1.0, -2.0, 0.5, -0.25, 0.0, 1.5, -1.0])
-print("CPU row softmax:", logits.row_softmax().tolist())
+# Declare the axes that describe your data.
+time = Axis("time")
+feature = Axis("feature", 4)
 
-# Opt into the WGPU backend (falls back to CPU if the device lacks subgroups)
-print("WGPU row softmax:", logits.row_softmax(backend="wgpu").tolist())
+wave = tensor(
+    [
+        [0.20, 0.80, -0.10, 0.40],
+        [0.90, -0.30, 0.10, 0.50],
+    ],
+    axes=[time.with_size(2), feature],
+)
+
+print(wave.describe())
+softmax = wave.row_softmax()
+print(softmax.axis_names())  # ('time', 'feature')
 ```
 
-### 3) rl.stAgent
+### 8) rl.stAgent multi-armed bandit
 
 ```python
-import random
+import torch
+from torch.utils.dlpack import from_dlpack as torch_from_dlpack
 import spiraltorch as st
 
 Agent = getattr(st.rl, "stAgent", None)
 if Agent is None:
-    raise SystemExit("st.rl.stAgent not available")
+    raise SystemExit("st.rl.stAgent not available in this build")
 
 def reward(action):
     p = 0.6 if action == 0 else 0.4
@@ -355,7 +538,7 @@ def reward(action):
 
 agent = Agent(state_dim=1, action_dim=2, discount=0.0, learning_rate=5e-2)
 
-T = 2000
+T = 2_000
 FORCE_EXPLORE = 200
 eps_hi, eps_lo = 0.3, 0.01
 
@@ -364,20 +547,19 @@ pulls = [0, 0]
 wins_by_arm = [0, 0]
 
 for t in range(1, T + 1):
-    # 最初は強制探索、それ以降は徐々にεを下げる
     if t <= FORCE_EXPLORE:
         a = t % 2
     else:
         frac = (t - FORCE_EXPLORE) / (T - FORCE_EXPLORE)
         eps = eps_hi + (eps_lo - eps_hi) * frac
         agent.set_epsilon(eps)
-        a = agent.select_action(0)   # 状態はダミー
+        a = agent.select_action(0)
 
     r = reward(a)
     wins += r
     pulls[a] += 1
     wins_by_arm[a] += r
-    agent.update(0, a, r, 0) 
+    agent.update(0, a, r, 0)
 
 print(f"total win rate: {wins / T:.3f}")
 for k in range(2):
@@ -385,22 +567,22 @@ for k in range(2):
     print(f"arm {k}: pulls={pulls[k]}, empirical p≈{rate:.3f}")
 ```
 
-### 4) Self-supervised
+### 9) Self-supervised losses
 
 ```python
 import spiraltorch as st
 
-anchors   = [[0.1, 0.9], [0.8, 0.2]]
+anchors = [[0.1, 0.9], [0.8, 0.2]]
 positives = [[0.12, 0.88], [0.79, 0.21]]
 print("info_nce:", st.selfsup.info_nce(anchors, positives, temperature=0.1, normalize=True))
 
 pred = [[0.2, 0.8], [0.6, 0.4]]
-tgt  = [[0.0, 1.0], [1.0, 0.0]]
+tgt = [[0.0, 1.0], [1.0, 0.0]]
 mask = [[1], [0]]  # mask by column indices per row
 print("masked_mse:", st.selfsup.masked_mse(pred, tgt, mask))
 ```
 
-### 5) Z-space trainer
+### 10) Z-space trainer
 
 ```python
 import spiraltorch as st
@@ -413,7 +595,7 @@ samples = [
 print("z:", st.step_many(trainer, samples))
 ```
 
-### 6) Vision × Canvas
+### 11) Vision × Canvas
 
 ```python
 import spiraltorch as st
@@ -431,7 +613,7 @@ print("canvas summary:", snap.summary)
 print("patch[0][:3]:", snap.patch[0][:3] if snap.patch else None)
 ```
 
-### 7) NN data utilities
+### 12) NN data utilities
 
 ```python
 import spiraltorch as st
@@ -445,24 +627,17 @@ for x, y in loader:
     pass
 ```
 
-### 8) Recommender & RL
+### 13) Recommender & RL
 
 ```python
 import spiraltorch as st
 
 rec = st.Recommender(users=8, items=12, factors=4, learning_rate=0.05, regularization=0.002)
-rec.train_epoch([(0,0,5.0),(0,1,3.0),(1,0,4.0)])
+rec.train_epoch([(0, 0, 5.0), (0, 1, 3.0), (1, 0, 4.0)])
 print("top-k:", rec.recommend_top_k(0, k=3))
-
-# RL: use stAgent (DQN-like), PPO, SAC
-agent = st.stAgent(state_dim=4, action_dim=2, discount=0.99, learning_rate=1e-3)
-a = agent.select_action(0); agent.update(0, a, 1.0, 1)
-
-ppo = st.PpoAgent(state_dim=4, action_dim=2, learning_rate=3e-4, clip_range=0.2)
-sac = st.SacAgent(state_dim=4, action_dim=2, temperature=0.1)
 ```
 
-### 9) Interop (PyTorch / JAX / TensorFlow)
+### 14) Interop (PyTorch / JAX / TensorFlow)
 
 ```python
 import spiraltorch as st, torch
@@ -472,7 +647,7 @@ xt = st.compat.torch.to_torch(x, dtype=torch.float32, device="cpu")
 x_back = st.compat.torch.from_torch(xt)
 ```
 
-### 10) Math & pacing helpers
+### 15) Math & pacing helpers
 
 ```python
 import spiraltorch as st
@@ -482,7 +657,6 @@ print(st.fibonacci_pacing(12))
 print(st.pack_tribonacci_chunks(20))
 ```
 
----
 
 ## Backend Matrix
 
@@ -499,23 +673,6 @@ print(st.pack_tribonacci_chunks(20))
 
 ---
 
-### Python façade design
-
-- **Deferred exposure:** `__getattr__` forwards unknown names to the Rust extension → no need to constantly sync `__init__.py`.  
-- **Namespaced mirrors:** `nn`, `selfsup`, `vision`, `canvas`, `compat.*` are *forwarding modules*; they resolve symbols from Rust on first access.  
-- **Renames for stability:** e.g., `DqnAgent` → **`stAgent`**; the façade preserves import stability while Rust internals evolve.
-
-### Coding guidelines
-
-- **Rust**
-  - Keep public APIs thin and **feature-gated** (group domain features under logical flags).
-  - Provide *facade functions* at crate boundary to avoid leaking complex types to PyO3.
-  - Long-running ops: wrap with `pyo3::allow_threads` to release the GIL.
-
-- **Python**
-  - For new Rust exports, prefer **top-level re-exports** + **namespaced mirrors** (e.g., `selfsup.*`).
-  - Update `spiraltorch.pyi` alongside Rust exports to document the surface.
-  - Avoid heavy dependencies; keep the package import-time light.
 
 ### Tests
 
@@ -959,12 +1116,26 @@ The new `st-qr-studio` crate spins up a **QuantumRealityStudio** that records
 Maxwell pulses, emits concept windows, and stitches narrative tags into VR/AR
 overlays. Signal capture sessions enforce which laboratory rigs may publish
 pulses, semantic taggers mirror the `MaxwellDesireBridge` lexicon, and overlay
-frames surface glyph/intensity pairs for immersive projection.【F:crates/st-qr-studio/src/lib.rs†L1-L234】 Storyboard exports drop
-directly into `tools/qr_storyboard.py`, which converts JSON/NDJSON captures into
-Markdown decks grouped by channel for Desire roundtables.【F:tools/qr_storyboard.py†L1-L96】 The
-companion [Quantum Reality Playbook](docs/qr_playbook/README.md) provides
-rituals, collaboration tips, and art-direction cues so research and cultural
-teams stay synchronised.【F:docs/qr_playbook/README.md†L1-L49】
+frames surface glyph/intensity pairs for immersive projection. The crate now
+re-exports `MaxwellPulse` (an alias for `MaxwellZPulse`) and ships overlay
+builders such as `OverlayFrame::from_pairs`/`::from_glyphs_and_intensities` so
+AR pipelines can zip glyph and intensity streams without writing manual
+plumbing.【F:crates/st-qr-studio/src/lib.rs†L1-L362】 Storyboard exports drop directly into
+`tools/qr_storyboard.py`, which converts JSON/NDJSON captures into Markdown decks
+grouped by channel for Desire roundtables.【F:tools/qr_storyboard.py†L1-L96】 The companion
+[Quantum Reality Playbook](docs/qr_playbook/README.md) provides rituals,
+collaboration tips, and art-direction cues so research and cultural teams stay
+synchronised.【F:docs/qr_playbook/README.md†L1-L49】
+
+Latest iterations expose `QuantumRealityStudio::record_pulse` so capture rigs can
+stash `RecordedPulse` snapshots prior to narration, while
+`infer_concept_window` and `emit_concept_window` transform either raw records or
+streamed frames into serialisable concept windows suited for AR overlays and
+Desire loops. `OverlayGlyph` powers `OverlayFrame::new`, while the new
+convenience constructors accept glyph/intensity pairs directly and the
+storyboard exporter now retains overlay stacks, narrative tags, and concept
+window weights so AR HUDs can replay exactly what collaborators saw without
+deriving those assets a second time.【F:crates/st-qr-studio/src/lib.rs†L94-L865】
 
 ### Semiotic suturing, desire control, and EGW bridges
 

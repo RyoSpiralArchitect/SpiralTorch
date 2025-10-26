@@ -9,21 +9,39 @@ use serde::{Deserialize, Serialize};
 use st_core::maxwell::MaxwellZPulse;
 use st_tensor::TensorError;
 use std::collections::HashMap;
+use std::fmt;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NarrativeHint {
     channel: String,
     tags: Vec<String>,
     intensity: f32,
+    #[serde(default)]
+    amplitude: f32,
+    #[serde(default)]
+    phase: f32,
+    #[serde(default = "NarrativeHint::default_coherence")]
+    coherence: f32,
+    #[serde(default)]
+    decoherence: f32,
+    #[serde(default)]
+    collapsed_tag: Option<String>,
 }
 
 impl NarrativeHint {
     pub fn new(channel: impl Into<String>, tags: Vec<String>, intensity: f32) -> Self {
-        Self {
+        let mut hint = Self {
             channel: channel.into(),
             tags,
             intensity,
-        }
+            amplitude: intensity,
+            phase: 0.0,
+            coherence: Self::default_coherence(),
+            decoherence: 0.0,
+            collapsed_tag: None,
+        };
+        hint.recompute_collapse();
+        hint
     }
 
     pub fn channel(&self) -> &str {
@@ -34,8 +52,164 @@ impl NarrativeHint {
         &self.tags
     }
 
+    /// Returns the dominant tag selected after performing the quantum collapse
+    /// heuristic. Falls back to the first configured tag when no collapse has
+    /// been computed yet.
+    pub fn dominant_tag(&self) -> Option<&str> {
+        self.collapsed_tag
+            .as_deref()
+            .or_else(|| self.tags.first().map(|tag| tag.as_str()))
+    }
+
     pub fn intensity(&self) -> f32 {
         self.intensity
+    }
+
+    pub fn amplitude(&self) -> f32 {
+        self.amplitude
+    }
+
+    pub fn phase(&self) -> f32 {
+        self.phase
+    }
+
+    pub fn coherence(&self) -> f32 {
+        self.coherence
+    }
+
+    pub fn decoherence(&self) -> f32 {
+        self.decoherence
+    }
+
+    pub fn collapsed_tag(&self) -> Option<&str> {
+        self.collapsed_tag.as_deref()
+    }
+
+    fn default_coherence() -> f32 {
+        1.0
+    }
+
+    fn recompute_collapse(&mut self) {
+        if self.tags.is_empty() {
+            self.collapsed_tag = None;
+            return;
+        }
+        let base = (1.0 - self.decoherence).max(0.0);
+        let mut best_tag = None;
+        let mut best_weight = f32::MIN;
+        for (idx, tag) in self.tags.iter().enumerate() {
+            let interference = ((self.phase + idx as f32 * 1.618_034).sin().abs() + 0.5).max(1e-3);
+            let weight = self.amplitude.abs() * self.coherence * base * interference;
+            if weight > best_weight {
+                best_weight = weight;
+                best_tag = Some(tag.clone());
+            }
+        }
+        if best_weight <= f32::MIN {
+            self.collapsed_tag = Some(self.tags[0].clone());
+        } else {
+            self.collapsed_tag = best_tag;
+        }
+    }
+
+    pub fn with_quantum_state(
+        mut self,
+        amplitude: f32,
+        phase: f32,
+        coherence: f32,
+        decoherence: f32,
+    ) -> Self {
+        self.amplitude = amplitude;
+        self.phase = phase;
+        self.coherence = coherence.clamp(0.0, 1.0);
+        self.decoherence = decoherence.clamp(0.0, 1.0);
+        self.recompute_collapse();
+        self
+    }
+
+    pub fn collapse(mut self) -> Self {
+        self.recompute_collapse();
+        self
+    }
+
+    /// Returns a scalar describing how strongly this hint should influence any
+    /// overlays or downstream control loops. The emphasis accounts for
+    /// amplitude, coherence, and decoherence so that noisy pulses do not
+    /// overwhelm calmer but more reliable readings.
+    pub fn quantum_emphasis(&self) -> f32 {
+        let amplitude = self.amplitude.abs().max(0.0);
+        if amplitude <= f32::EPSILON {
+            return 0.0;
+        }
+        let coherence = self.coherence.clamp(0.0, 1.0);
+        let decoherence = self.decoherence.clamp(0.0, 1.0);
+        amplitude * coherence * (1.0 - decoherence)
+    }
+
+    /// Produces a ready-to-render summary describing the current quantum
+    /// narrative state. This allows UI components to surface the same
+    /// information without having to duplicate collapse logic.
+    pub fn summary(&self) -> NarrativeSummary {
+        NarrativeSummary {
+            channel: self.channel.clone(),
+            dominant_tag: self.dominant_tag().map(|tag| tag.to_string()),
+            tags: self.tags.clone(),
+            intensity: self.intensity,
+            amplitude: self.amplitude,
+            phase: self.phase,
+            coherence: self.coherence,
+            decoherence: self.decoherence,
+            emphasis: self.quantum_emphasis(),
+        }
+    }
+}
+
+/// Human-readable roll-up describing the quantum metadata encoded in a
+/// [`NarrativeHint`]. Downstream systems can serialise this summary, display it
+/// directly, or stitch the values into narrative overlays without re-running the
+/// collapse heuristic.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct NarrativeSummary {
+    pub channel: String,
+    pub dominant_tag: Option<String>,
+    pub tags: Vec<String>,
+    pub intensity: f32,
+    pub amplitude: f32,
+    pub phase: f32,
+    pub coherence: f32,
+    pub decoherence: f32,
+    pub emphasis: f32,
+}
+
+impl NarrativeSummary {
+    /// Returns a short textual description that can be displayed in diagnostic
+    /// panels or logs.
+    pub fn describe(&self) -> String {
+        if let Some(tag) = &self.dominant_tag {
+            format!(
+                "[{channel}] tag `{tag}` emphasis {emphasis:.3} (amp {amp:.3}, coh {coh:.2}, deco {deco:.2})",
+                channel = self.channel,
+                emphasis = self.emphasis,
+                amp = self.amplitude,
+                coh = self.coherence,
+                deco = self.decoherence
+            )
+        } else {
+            format!(
+                "[{channel}] neutral emphasis {emphasis:.3} (amp {amp:.3}, coh {coh:.2}, deco {deco:.2})",
+                channel = self.channel,
+                emphasis = self.emphasis,
+                amp = self.amplitude,
+                coh = self.coherence,
+                deco = self.decoherence
+            )
+        }
+    }
+}
+
+impl fmt::Display for NarrativeSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.describe())
     }
 }
 
@@ -225,11 +399,19 @@ impl MaxwellDesireBridge {
         if intensity <= f32::EPSILON {
             return None;
         }
-        Some(NarrativeHint::new(
-            channel.as_ref(),
-            program.tags.clone(),
-            intensity,
-        ))
+        let phase = (pulse.z_score as f32).atan();
+        let band_total = program.tags.len().max(1) as f32;
+        let energy_total = pulse.band_energy.0 + pulse.band_energy.1 + pulse.band_energy.2 + 1e-6;
+        let coherence =
+            ((pulse.band_energy.0 + pulse.band_energy.2) / energy_total).clamp(0.0, 1.0);
+        let decoherence = ((pulse.standard_error.abs() as f32)
+            / (pulse.standard_error.abs() as f32 + 1.0))
+            .min(1.0);
+        let amplitude = intensity;
+        let hint = NarrativeHint::new(channel.as_ref(), program.tags.clone(), intensity)
+            .with_quantum_state(amplitude, phase * band_total, coherence, decoherence)
+            .collapse();
+        Some(hint)
     }
 
     pub fn emit(
@@ -376,6 +558,41 @@ mod tests {
         assert_eq!(narrative.channel(), "gamma");
         assert_eq!(narrative.tags().len(), 2);
         assert!(narrative.intensity() > 0.0);
+        assert!(narrative.amplitude() > 0.0);
+        assert!(narrative.coherence() >= 0.0 && narrative.coherence() <= 1.0);
+        assert!(narrative.decoherence() >= 0.0 && narrative.decoherence() <= 1.0);
+        assert!(narrative.collapsed_tag().is_some());
+    }
+
+    #[test]
+    fn narrative_hint_collapse_prefers_stronger_weight() {
+        let hint = NarrativeHint::new("alpha", vec!["a".into(), "b".into(), "c".into()], 0.8)
+            .with_quantum_state(0.8, 0.5, 0.9, 0.1)
+            .collapse();
+        let tag = hint.collapsed_tag().unwrap();
+        assert!(hint.tags().iter().any(|t| t == tag));
+    }
+
+    #[test]
+    fn narrative_hint_summary_formats_description() {
+        let hint = NarrativeHint::new("gamma", vec!["glimmer".into(), "braid".into()], 1.4)
+            .with_quantum_state(1.2, 0.3, 0.85, 0.2)
+            .collapse();
+        let summary = hint.summary();
+        assert_eq!(summary.channel, "gamma");
+        assert!(summary.emphasis > 0.0);
+        assert!(summary.describe().contains("glimmer") || summary.describe().contains("braid"));
+        assert!(!summary.tags.is_empty());
+    }
+
+    #[test]
+    fn dominant_tag_falls_back_to_first_tag() {
+        let single = NarrativeHint::new("delta", vec!["anchor".into()], 0.5);
+        assert_eq!(single.dominant_tag(), Some("anchor"));
+        let collapsed = NarrativeHint::new("delta", vec!["anchor".into(), "spire".into()], 0.5)
+            .with_quantum_state(1.0, 1.0, 0.7, 0.1)
+            .collapse();
+        assert_eq!(collapsed.dominant_tag(), collapsed.collapsed_tag());
     }
 
     #[test]

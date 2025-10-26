@@ -23,8 +23,12 @@
 
 use core::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
+use crate::gnn::RoundtableBandSignal;
+use crate::schedule::{BandEnergy, RoundtableSchedule};
+use crate::{PureResult, TensorError};
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ecosystem::CloudConnector;
 use st_core::runtime::blackcat::zmeta::ZMetaParams;
@@ -135,6 +139,107 @@ impl DistConfig {
     /// Returns the configured cloud targets.
     pub fn cloud_targets(&self) -> &[CloudConnector] {
         &self.cloud_targets
+    }
+}
+
+const ROUND_GNN_BRIDGE_ERR: &str = "roundtable gnn bridge poisoned";
+
+#[derive(Debug)]
+struct RoundtableGnnInner {
+    latest: Option<RoundtableBandSignal>,
+    history: Vec<RoundtableBandSignal>,
+    history_limit: usize,
+}
+
+impl Default for RoundtableGnnInner {
+    fn default() -> Self {
+        Self {
+            latest: None,
+            history: Vec::new(),
+            history_limit: 64,
+        }
+    }
+}
+
+/// Bridge that shares roundtable band signals with graph modules so they can
+/// adjust their message passing behaviour during training.
+#[derive(Clone, Debug, Default)]
+pub struct RoundtableGnnBridge {
+    inner: Arc<Mutex<RoundtableGnnInner>>,
+}
+
+impl RoundtableGnnBridge {
+    /// Creates a new bridge with a rolling history of the last 64 signals.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn guard(&self) -> PureResult<std::sync::MutexGuard<'_, RoundtableGnnInner>> {
+        self.inner.lock().map_err(|_| TensorError::InvalidValue {
+            label: ROUND_GNN_BRIDGE_ERR,
+        })
+    }
+
+    /// Overrides how many historic signals are retained.
+    pub fn set_history_limit(&self, limit: usize) -> PureResult<()> {
+        let mut guard = self.guard()?;
+        guard.history_limit = limit.max(1);
+        if guard.history.len() > guard.history_limit {
+            let excess = guard.history.len() - guard.history_limit;
+            guard.history.drain(0..excess);
+        }
+        Ok(())
+    }
+
+    fn push_signal(guard: &mut RoundtableGnnInner, signal: &RoundtableBandSignal) {
+        guard.latest = Some(signal.clone());
+        guard.history.push(signal.clone());
+        if guard.history.len() > guard.history_limit {
+            let excess = guard.history.len() - guard.history_limit;
+            guard.history.drain(0..excess);
+        }
+    }
+
+    /// Publishes an already prepared roundtable signal.
+    pub fn publish(&self, signal: RoundtableBandSignal) -> PureResult<RoundtableBandSignal> {
+        let mut guard = self.guard()?;
+        Self::push_signal(&mut guard, &signal);
+        Ok(signal)
+    }
+
+    /// Records a band energy measurement for the provided schedule.
+    pub fn record(
+        &self,
+        schedule: &RoundtableSchedule,
+        energy: &BandEnergy,
+    ) -> PureResult<RoundtableBandSignal> {
+        let signal = RoundtableBandSignal::from_schedule(schedule, *energy);
+        self.publish(signal)
+    }
+
+    /// Returns the most recently published signal.
+    pub fn latest(&self) -> PureResult<Option<RoundtableBandSignal>> {
+        let guard = self.guard()?;
+        Ok(guard.latest.clone())
+    }
+
+    /// Drains the stored history of signals.
+    pub fn drain(&self) -> PureResult<Vec<RoundtableBandSignal>> {
+        let mut guard = self.guard()?;
+        Ok(std::mem::take(&mut guard.history))
+    }
+
+    /// Returns the number of stored signals.
+    pub fn len(&self) -> usize {
+        match self.inner.lock() {
+            Ok(guard) => guard.history.len(),
+            Err(_) => 0,
+        }
+    }
+
+    /// Returns `true` if no signal has been recorded yet.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 
@@ -965,6 +1070,7 @@ impl BlackcatModerator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::RoundtableConfig;
     fn sample_op(origin: &str, script: &str, weight: f32, seconds: u64) -> HeurOp {
         HeurOp {
             origin: origin.to_string(),
@@ -1161,6 +1267,34 @@ mod tests {
         let proposal = conductor.ingest(summary_b).unwrap();
         assert_eq!(proposal.ops.len(), 1);
         assert_eq!(proposal.evidence.len(), 2);
+    }
+
+    #[test]
+    fn gnn_bridge_records_signals() {
+        use crate::plan::RankPlanner;
+        use st_core::backend::device_caps::DeviceCaps;
+
+        let bridge = RoundtableGnnBridge::new();
+        let planner = RankPlanner::new(DeviceCaps::wgpu(32, true, 256));
+        let schedule = RoundtableSchedule::new(&planner, 1, 4, RoundtableConfig::default());
+        let energy = BandEnergy {
+            above: 1.2,
+            here: 0.8,
+            beneath: 0.4,
+            drift: 0.1,
+        };
+
+        let signal = bridge.record(&schedule, &energy).unwrap();
+        assert_eq!(bridge.len(), 1);
+        assert_eq!(
+            signal.band_sizes(),
+            (schedule.above().k, schedule.here().k, schedule.beneath().k)
+        );
+        let latest = bridge.latest().unwrap().expect("signal stored");
+        assert!((latest.energy().above - energy.above).abs() < 1e-6);
+        let drained = bridge.drain().unwrap();
+        assert_eq!(drained.len(), 1);
+        assert!(bridge.is_empty());
     }
 
     fn demo_runtime() -> BlackCatRuntime {
