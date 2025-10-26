@@ -7,6 +7,7 @@ pub mod activation;
 pub mod continuous_wavelet;
 pub mod conv;
 pub mod dropout;
+pub mod dynamic_field;
 pub mod gelu;
 pub mod linear;
 pub mod non_liner;
@@ -24,6 +25,7 @@ pub mod zspace_projector;
 pub use activation::Relu;
 pub use continuous_wavelet::ContinuousWaveletTransform;
 pub use dropout::Dropout;
+pub use dynamic_field::{HamiltonJacobiFlow, KleinGordonPropagation, StochasticSchrodingerLayer};
 pub use gelu::Gelu;
 pub use non_liner::{
     NonLiner, NonLinerActivation, NonLinerEllipticConfig, NonLinerGeometry,

@@ -49,12 +49,26 @@ pub fn scale(tensor: &Tensor, factor: f32) -> PureResult<Tensor> {
     elementwise_unary(tensor, |value| value * factor)
 }
 
+pub fn clamp(tensor: &Tensor, min: f32, max: f32) -> PureResult<Tensor> {
+    elementwise_unary(tensor, |value| value.clamp(min, max))
+}
+
 pub fn accumulate_inplace(target: &mut Tensor, update: &Tensor) -> PureResult<()> {
     ensure_same_shape(target, update, "accumulate_inplace")?;
     for (dst, &src) in target.data_mut().iter_mut().zip(update.data().iter()) {
         *dst += src;
     }
     Ok(())
+}
+
+pub fn normalise_tensor(tensor: &Tensor, epsilon: f32) -> PureResult<Tensor> {
+    let mut values = tensor.data().to_vec();
+    normalise_unit_interval(&mut values, epsilon);
+    Tensor::from_vec(tensor.shape().0, tensor.shape().1, values)
+}
+
+pub fn threshold_mask(tensor: &Tensor, threshold: f32) -> PureResult<Tensor> {
+    elementwise_unary(tensor, |value| if value >= threshold { 1.0 } else { 0.0 })
 }
 
 pub fn normalise_unit_interval(values: &mut [f32], epsilon: f32) {
@@ -146,5 +160,15 @@ mod tests {
         for (value, expected) in blended.data().iter().zip(expected.iter()) {
             assert!((value - expected).abs() < 1e-6);
         }
+    }
+
+    #[test]
+    fn normalise_and_threshold() {
+        let tensor = Tensor::from_vec(1, 4, vec![0.0, 2.0, 4.0, 6.0]).unwrap();
+        let normalised = normalise_tensor(&tensor, 1e-6).unwrap();
+        let mask = threshold_mask(&normalised, 0.5).unwrap();
+        assert!(normalised.data()[0] <= 0.01);
+        assert_eq!(mask.data()[0], 0.0);
+        assert_eq!(mask.data()[3], 1.0);
     }
 }

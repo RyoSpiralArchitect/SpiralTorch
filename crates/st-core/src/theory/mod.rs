@@ -36,6 +36,12 @@ pub mod scale_persistence_impl;
 #[doc(inline)]
 pub use scale_persistence_impl as scale_persistence;
 
+#[path = "renormalization_flow.rs"]
+#[doc(hidden)]
+pub mod renormalization_flow_impl;
+#[doc(inline)]
+pub use renormalization_flow_impl as renormalization_flow;
+
 #[path = "macro.rs"]
 #[doc(hidden)]
 pub mod macro_impl;

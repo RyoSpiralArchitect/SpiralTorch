@@ -26,6 +26,78 @@ use std::f64::consts::PI;
 
 use num_complex::Complex64;
 
+/// Bundles the Mellin/Z-plane evaluations of the slow-roll background
+/// together with the assembled primordial power spectrum.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PrimordialProjection {
+    /// Starting value of the logarithmic lattice (\(\tau_0\)).
+    pub log_start: f64,
+    /// Step size of the logarithmic lattice (\(\Delta\tau\)).
+    pub log_step: f64,
+    /// Number of samples used when constructing the lattice in the time domain.
+    pub lattice_len: usize,
+    /// Mellin abscissa evaluation points.
+    pub s_values: Vec<Complex64>,
+    /// Corresponding points on the Z plane \(z = e^{s\Delta\tau}\).
+    pub z_points: Vec<Complex64>,
+    /// Z-transform of the Hubble parameter.
+    pub h_z: Vec<Complex64>,
+    /// Z-transform of the first slow-roll parameter.
+    pub epsilon_z: Vec<Complex64>,
+    /// Assembled primordial curvature power spectrum values.
+    pub spectrum: Vec<f64>,
+}
+
+impl PrimordialProjection {
+    /// Creates a new projection from the supplied Mellin/Z-plane channels.
+    ///
+    /// The Z points and background channels must already be evaluated at the
+    /// same set of Mellin abscissae.  The primordial spectrum is assembled on
+    /// creation so that downstream consumers can access the full bundle without
+    /// recomputing it.
+    pub fn new(
+        log_start: f64,
+        log_step: f64,
+        lattice_len: usize,
+        s_values: Vec<Complex64>,
+        z_points: Vec<Complex64>,
+        h_z: Vec<Complex64>,
+        epsilon_z: Vec<Complex64>,
+        planck_mass: f64,
+    ) -> Self {
+        assert!(log_step.is_sign_positive(), "log_step must be positive");
+        assert!(log_start.is_finite(), "log_start must be finite");
+        assert!(lattice_len >= 2, "lattice length must be at least 2");
+        let len = s_values.len();
+        assert_eq!(len, z_points.len(), "s_values/z_points length mismatch");
+        assert_eq!(len, h_z.len(), "s_values/H(z) length mismatch");
+        assert_eq!(len, epsilon_z.len(), "s_values/epsilon(z) length mismatch");
+
+        let spectrum = assemble_primordial_spectrum(&z_points, &h_z, &epsilon_z, planck_mass);
+
+        Self {
+            log_start,
+            log_step,
+            lattice_len,
+            s_values,
+            z_points,
+            h_z,
+            epsilon_z,
+            spectrum,
+        }
+    }
+
+    /// Returns the number of Mellin/Z evaluation points.
+    pub fn len(&self) -> usize {
+        self.s_values.len()
+    }
+
+    /// Indicates whether the projection is empty.
+    pub fn is_empty(&self) -> bool {
+        self.s_values.is_empty()
+    }
+}
+
 /// Discrete sampling of the logarithmic scale factor \(\tau = \ln a\).
 #[derive(Clone, Debug, PartialEq)]
 pub struct LogLattice {
@@ -46,9 +118,15 @@ impl LogLattice {
     /// initialised to a unit-sum trapezoidal rule so that integrating a constant
     /// sequence returns the constant value.
     pub fn from_samples(tau0: f64, delta_tau: f64, samples: Vec<f64>) -> Self {
-        assert!(delta_tau.is_finite() && delta_tau > 0.0, "delta_tau must be positive");
+        assert!(
+            delta_tau.is_finite() && delta_tau > 0.0,
+            "delta_tau must be positive"
+        );
         let n = samples.len();
-        assert!(n >= 2, "at least two samples are required for a trapezoidal rule");
+        assert!(
+            n >= 2,
+            "at least two samples are required for a trapezoidal rule"
+        );
 
         let mut weights = vec![1.0; n];
         weights[0] = 0.5;
@@ -97,7 +175,10 @@ impl LogLattice {
 
     /// Iterator over `(sample, weight)` pairs.
     pub fn iter(&self) -> impl ExactSizeIterator<Item = (f64, f64)> + '_ {
-        self.samples.iter().copied().zip(self.weights.iter().copied())
+        self.samples
+            .iter()
+            .copied()
+            .zip(self.weights.iter().copied())
     }
 }
 
@@ -118,12 +199,18 @@ fn hann_coefficient(index: usize, len: usize) -> f64 {
 /// \]
 /// where the weights and samples originate from a [`LogLattice`].
 pub fn z_transform(weights: &[f64], samples: &[f64], z: Complex64) -> Complex64 {
-    assert_eq!(weights.len(), samples.len(), "weights and samples must match");
+    assert_eq!(
+        weights.len(),
+        samples.len(),
+        "weights and samples must match"
+    );
     weights
         .iter()
         .zip(samples)
         .rev()
-        .fold(Complex64::new(0.0, 0.0), |acc, (&w, &x)| acc * z + Complex64::new(w * x, 0.0))
+        .fold(Complex64::new(0.0, 0.0), |acc, (&w, &x)| {
+            acc * z + Complex64::new(w * x, 0.0)
+        })
 }
 
 /// Combines the Z-domain background channels into the slow-roll power spectrum.
@@ -142,8 +229,15 @@ pub fn assemble_primordial_spectrum(
     planck_mass: f64,
 ) -> Vec<f64> {
     assert_eq!(z_points.len(), h_z.len(), "H(z) channel length mismatch");
-    assert_eq!(z_points.len(), epsilon_z.len(), "epsilon(z) channel length mismatch");
-    assert!(planck_mass.is_sign_positive(), "Planck mass must be positive");
+    assert_eq!(
+        z_points.len(),
+        epsilon_z.len(),
+        "epsilon(z) channel length mismatch"
+    );
+    assert!(
+        planck_mass.is_sign_positive(),
+        "Planck mass must be positive"
+    );
 
     z_points
         .iter()
@@ -209,5 +303,52 @@ mod tests {
         assert_relative_eq!(spectrum[0], spectrum[1], epsilon = 1e-24);
         let expected = (10.0 * 10.0) / (8.0 * PI * PI * 0.01 * 2.435e18 * 2.435e18);
         assert_relative_eq!(spectrum[0], expected, epsilon = 1e-24);
+    }
+
+    #[test]
+    fn primordial_projection_bundles_channels() {
+        let log_start = 0.0;
+        let log_step = 0.25;
+        let lattice_len = 4;
+        let s_values = vec![
+            Complex64::new(1.0, 0.0),
+            Complex64::new(1.0, 0.5),
+            Complex64::new(1.0, -0.5),
+        ];
+        let z_points: Vec<Complex64> = s_values
+            .iter()
+            .map(|s| (s * Complex64::new(log_step, 0.0)).exp())
+            .collect();
+        let h_z = vec![
+            Complex64::new(2.0, 0.0),
+            Complex64::new(2.0, 0.1),
+            Complex64::new(2.0, -0.1),
+        ];
+        let epsilon_z = vec![
+            Complex64::new(0.01, 0.0),
+            Complex64::new(0.02, 0.0),
+            Complex64::new(0.015, 0.0),
+        ];
+        let projection = PrimordialProjection::new(
+            log_start,
+            log_step,
+            lattice_len,
+            s_values.clone(),
+            z_points.clone(),
+            h_z.clone(),
+            epsilon_z.clone(),
+            2.435e18,
+        );
+
+        assert_eq!(projection.log_start, log_start);
+        assert_eq!(projection.log_step, log_step);
+        assert_eq!(projection.lattice_len, lattice_len);
+        assert_eq!(projection.s_values, s_values);
+        assert_eq!(projection.z_points, z_points);
+        assert_eq!(projection.h_z, h_z);
+        assert_eq!(projection.epsilon_z, epsilon_z);
+        assert_eq!(projection.len(), s_values.len());
+        assert!(!projection.is_empty());
+        assert_eq!(projection.spectrum.len(), s_values.len());
     }
 }
