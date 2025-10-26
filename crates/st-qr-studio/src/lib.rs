@@ -22,6 +22,10 @@ use thiserror::Error;
 
 pub use st_core::maxwell::MaxwellZPulse as MaxwellPulse;
 
+mod meta;
+
+pub use meta::{TemporalCausalAnnotation, TemporalLogicEngine, ToposLogicBridge};
+
 const DEFAULT_HISTORY: usize = 512;
 
 #[derive(Debug, Error)]
@@ -807,6 +811,10 @@ impl QuantumRealityStudio {
             frame_z_space = StudioZSpace::from(&resolved.z_space);
         }
         let record = self.record_pulse(channel, pulse, timestamp)?;
+        let concept_window = concept
+            .as_ref()
+            .and_then(|hint| ConceptWindow::from_hint(&record, hint));
+        let annotation = self.meta.observe(&record, concept_window.as_ref());
         let mut overlay = self.overlay.compose(
             &record,
             narrative.as_ref(),
@@ -817,6 +825,12 @@ impl QuantumRealityStudio {
         } else if let Some(fallback) = self.tagger.fallback_for(channel) {
             overlay = self.stitch_narrative_tags(overlay, fallback.iter().cloned());
         }
+        let temporal_tags = TemporalLogicEngine::temporal_tags(&annotation);
+        overlay = self.stitch_narrative_tags(overlay, temporal_tags.into_iter());
+        let sheaf_tags = self
+            .topos
+            .update(&record, concept_window.as_ref(), &annotation);
+        overlay = self.stitch_narrative_tags(overlay, sheaf_tags.into_iter());
         let frame = StudioFrame {
             record,
             concept,
@@ -838,6 +852,14 @@ impl QuantumRealityStudio {
 
     pub fn frames(&self) -> impl Iterator<Item = &StudioFrame> {
         self.frames.iter()
+    }
+
+    pub fn causal_snapshot(&self) -> Vec<TemporalCausalAnnotation> {
+        self.meta.snapshot()
+    }
+
+    pub fn meaning_sheaf(&self, channel: &str) -> Option<LogicZSpace> {
+        self.topos.meaning_sheaf(channel)
     }
 
     pub fn emit_concept_window(&self, frame: &StudioFrame) -> Option<ConceptWindow> {
@@ -911,6 +933,17 @@ impl QuantumRealityStudio {
                             "glyphs": frame.overlay.glyphs.clone(),
                         }),
                     );
+                    entry.insert(
+                        "causal".into(),
+                        serde_json::json!({
+                            "event_id": frame.causal.event_id,
+                            "ordinal": frame.causal.ordinal,
+                            "timestamp": frame.causal.timestamp,
+                            "depth": frame.causal.depth,
+                            "parents": frame.causal.parent_channels.clone(),
+                            "magnitude": frame.causal.magnitude,
+                        }),
+                    );
                     if let Some(narrative) = frame.narrative.as_ref() {
                         entry.insert(
                             "narrative".into(),
@@ -930,6 +963,14 @@ impl QuantumRealityStudio {
                             serde_json::json!({
                                 "weights": window.weights,
                                 "magnitude": window.magnitude,
+                            }),
+                        );
+                    }
+                    if let Some(sheaf) = self.meaning_sheaf(&frame.record.channel) {
+                        entry.insert(
+                            "meaning_sheaf".into(),
+                            serde_json::json!({
+                                "signature": sheaf.signature,
                             }),
                         );
                     }
@@ -1083,6 +1124,41 @@ mod tests {
     }
 
     #[test]
+    fn meta_layer_overrides_bridge_narrative() {
+        let bridge = MaxwellDesireBridge::new()
+            .with_channel("alpha", vec![(0, 1.0)])
+            .unwrap();
+        let mut layer = MetaNarrativeLayer::new();
+        layer
+            .engine_mut()
+            .insert_event(
+                "beat-1",
+                NarrativeBeat::new(Some("alpha".into()), "z-open", vec!["causal".into()])
+                    .with_intensity_scale(0.5)
+                    .with_floor(0.1)
+                    .with_sheaf_threshold(0.05),
+            )
+            .unwrap();
+        layer.bridge_mut().attach(
+            "beat-1",
+            MeaningSheaf::new().with_section(MeaningSection::for_open(
+                "z-open",
+                vec!["sheaf".into()],
+                0.2,
+            )),
+        );
+        let mut studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge)
+            .with_meta_layer(layer);
+        let frame = studio
+            .ingest(&bridge, "alpha", sample_pulse(), None)
+            .expect("ingest with meta");
+        let narrative = frame.narrative.expect("meta narrative");
+        assert!(narrative.tags().iter().any(|tag| tag == "causal"));
+        assert!(narrative.tags().iter().any(|tag| tag == "sheaf"));
+        assert!(narrative.intensity() > 0.0);
+    }
+
+    #[test]
     fn overlay_from_pairs_rejects_duplicates_and_empty_glyphs() {
         let timestamp = SystemTime::now();
         let overlay = OverlayFrame::from_pairs(
@@ -1208,6 +1284,14 @@ mod tests {
             .and_then(Value::as_array)
             .expect("glyph list");
         assert!(glyphs.len() >= 1);
+        let causal = entry
+            .get("causal")
+            .and_then(Value::as_object)
+            .expect("causal object");
+        assert_eq!(
+            causal.get("ordinal").and_then(Value::as_u64).unwrap() as usize,
+            frame.causal.ordinal
+        );
         let narrative = entry
             .get("narrative")
             .and_then(Value::as_object)
@@ -1226,6 +1310,37 @@ mod tests {
             .and_then(Value::as_array)
             .expect("weights array");
         assert!(!weights.is_empty());
+        let sheaf = entry
+            .get("meaning_sheaf")
+            .and_then(Value::as_object)
+            .expect("meaning sheaf object");
+        assert!(sheaf
+            .get("signature")
+            .and_then(Value::as_array)
+            .map(|values| !values.is_empty())
+            .unwrap_or(false));
+    }
+
+    #[test]
+    fn causal_snapshot_orders_events() {
+        let bridge = MaxwellDesireBridge::new()
+            .with_channel_and_narrative("alpha", vec![(0, 1.0)], vec!["braid".into()])
+            .unwrap();
+        let mut studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge);
+        studio
+            .ingest(&bridge, "alpha", sample_pulse(), None)
+            .expect("first ingest");
+        let mut second = sample_pulse();
+        second.z_score = 5.0;
+        studio
+            .ingest(&bridge, "alpha", second, None)
+            .expect("second ingest");
+
+        let snapshot = studio.causal_snapshot();
+        assert_eq!(snapshot.len(), 2);
+        assert!(snapshot[1].ordinal > snapshot[0].ordinal);
+        assert!(snapshot[1].depth >= snapshot[0].depth);
+        assert!(!snapshot[1].parents.is_empty());
     }
 
     #[test]
