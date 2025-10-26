@@ -9,7 +9,7 @@ use pyo3::exceptions::PyValueError;
 #[cfg(feature = "nn")]
 use crate::pure::PyOpenCartesianTopos;
 #[cfg(feature = "nn")]
-use crate::tensor::{tensor_err_to_py, PyTensor};
+use crate::tensor::{tensor_err_to_py, tensor_to_torch, PyTensor};
 #[cfg(feature = "nn")]
 use crate::theory::PyZRelativityModel;
 
@@ -30,7 +30,8 @@ use st_nn::{
         CoherenceObservation, CoherenceSignature, LinguisticChannelReport, PreDiscardPolicy,
         PreDiscardSnapshot, PreDiscardTelemetry,
     },
-    AvgPool2d, DataLoader, Dataset, MaxPool2d, ZSpaceCoherenceSequencer,
+    DataLoader, Dataset, ZRelativityModule,
+    AvgPool2d, MaxPool2d, ZSpaceCoherenceSequencer,
 };
 use st_nn::layers::ZRelativityModule;
 #[cfg(feature = "nn")]
@@ -101,6 +102,7 @@ enum PoolMode {
 }
 
 #[cfg(feature = "nn")]
+use st_tensor::{OpenCartesianTopos, Tensor};
 impl PoolMode {
     fn parse(label: &str) -> PyResult<Self> {
         match label.to_ascii_lowercase().as_str() {
@@ -1391,6 +1393,12 @@ impl PyZRelativityModule {
         let seed = Tensor::zeros(1, 1).map_err(tensor_err_to_py)?;
         let output = self.inner.forward(&seed).map_err(tensor_err_to_py)?;
         Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn torch_parameters(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let seed = Tensor::zeros(1, 1).map_err(tensor_err_to_py)?;
+        let output = self.inner.forward(&seed).map_err(tensor_err_to_py)?;
+        tensor_to_torch(py, &output)
     }
 
     pub fn parameter_dimension(&self) -> usize {

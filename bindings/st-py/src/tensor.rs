@@ -840,6 +840,15 @@ pub(crate) fn to_dlpack_impl(py: Python<'_>, tensor: &Tensor) -> PyResult<PyObje
     }
 }
 
+pub(crate) fn tensor_to_torch(py: Python<'_>, tensor: &Tensor) -> PyResult<PyObject> {
+    let capsule = to_dlpack_impl(py, tensor)?;
+    let torch_dlpack = PyModule::import_bound(py, "torch.utils.dlpack").map_err(|_| {
+        PyValueError::new_err("import torch.utils.dlpack before requesting torch tensors")
+    })?;
+    let torch_tensor = torch_dlpack.call_method1("from_dlpack", (capsule,))?;
+    Ok(torch_tensor.into())
+}
+
 fn from_dlpack_impl(py: Python<'_>, capsule: &Bound<PyAny>) -> PyResult<PyTensor> {
     let owned_capsule = ensure_dlpack_capsule(py, capsule)?;
     let capsule_ref = owned_capsule.bind(py);
