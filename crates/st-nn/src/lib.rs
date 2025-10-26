@@ -49,19 +49,19 @@ pub use injector::Injector;
 pub use io::{load_bincode, load_json, save_bincode, save_json};
 pub use language::entropy as desire_entropy;
 pub use language::{
-    constant, warmup, ConceptHint, DesireAutomatedStep, DesireAutomation, DesireAvoidanceReport,
-    DesireChannelSink, DesireGraphBridge, DesireGraphEvent, DesireGraphSummary, DesireLagrangian,
-    DesireLogRecord, DesireLogReplay, DesireLogbook, DesirePhase, DesirePipeline,
-    DesirePipelineBuilder, DesirePipelineEvent, DesirePipelineSink, DesireRewriteTrigger,
-    DesireRoundtableBridge, DesireRoundtableEvent, DesireRoundtableImpulse,
-    DesireRoundtableSummary, DesireSchedule, DesireSolution, DesireTelemetrySink,
-    DesireTrainerBridge, DesireTrainerEvent, DesireTrainerSummary, DesireTriggerBuffer,
-    DesireTriggerEvent, DesireWeights, DistanceMatrix, EntropicGwSolver, GeometryBiasConfig,
-    GeometryBiasContext, GeometryBiasMetrics, GeometryBiasSnapshot, GeometryBiasUpdate,
-    GeometryCoherenceSample,
-    LanguagePipeline, LanguagePipelineBuilder, MaxwellDesireBridge, NarrativeHint, PipelineError,
-    PipelineResult, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry,
-    TemperatureController,
+    compute_curvature_table, constant, warmup, ConceptDiffusion, ConceptHint, DesireAutomatedStep,
+    DesireAutomation, DesireAvoidanceReport, DesireChannelSink, DesireGraphBridge,
+    DesireGraphEvent, DesireGraphSummary, DesireLagrangian, DesireLogRecord, DesireLogReplay,
+    DesireLogbook, DesirePhase, DesirePipeline, DesirePipelineBuilder, DesirePipelineEvent,
+    DesirePipelineSink, DesireRewriteTrigger, DesireRoundtableBridge, DesireRoundtableEvent,
+    DesireRoundtableImpulse, DesireRoundtableSummary, DesireSchedule, DesireSolution,
+    DesireTelemetrySink, DesireTrainerBridge, DesireTrainerEvent, DesireTrainerSummary,
+    DesireTriggerBuffer, DesireTriggerEvent, DesireWeights, DiffusionStep, DistanceMatrix,
+    EntropicGwSolver, GeometryBiasConfig, GeometryBiasContext, GeometryBiasMetrics,
+    GeometryBiasSnapshot, GeometryBiasUpdate, GeometryCoherenceSample, InformationGeometryMetric,
+    LanguagePipeline, LanguagePipelineBuilder, MaxwellDesireBridge, NarrativeBridgeCurvature,
+    NarrativeHint, PipelineError, PipelineResult, RepressionField, SemanticBridge, SparseKernel,
+    SymbolGeometry, TemperatureController,
 };
 #[cfg(feature = "psi")]
 pub use language::{DesirePsiBridge, DesirePsiEvent, DesirePsiSummary};
@@ -101,9 +101,10 @@ pub use zspace_coherence::{
     ArnoldTongueSummary, BackendCapabilities, BranchAtlasFragment, CircleLockMapConfig,
     CoherenceBackend, CoherenceEngine, CoherenceLabel, CoherenceObservation, CoherenceSignature,
     DomainConcept, DomainLinguisticProfile, HeatmapAnalytics, HeatmapResult,
-    LinguisticChannelReport, LinguisticContour, MetaMembConfig, MetaMembSampler, PreDiscardPolicy,
-    PreDiscardRegulator, PsiBranchState, PsiSynchroConfig, PsiSynchroPulse, PsiSynchroResult,
-    PsiTelemetryConfig, SyncState, SynchroBus, SynchroEvent, ZSpaceCoherenceSequencer,
+    LinguisticChannelReport, LinguisticContour, MellinBasis, MetaMembConfig, MetaMembSampler,
+    PreDiscardPolicy, PreDiscardRegulator, PsiBranchState, PsiSynchroConfig, PsiSynchroPulse,
+    PsiSynchroResult, PsiTelemetryConfig, SyncState, SynchroBus, SynchroEvent,
+    ZSpaceCoherenceSequencer, ZSpaceVae, ZSpaceVaeState, ZSpaceVaeStats,
 };
 
 pub use st_core::telemetry::chrono::{ChronoFrame, ChronoSummary, ChronoTimeline};
