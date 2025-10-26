@@ -1362,11 +1362,13 @@ impl InterfaceZConductor {
         for (pulse, &quality) in pulses.iter().zip(&qualities) {
             let support = ZSupport::from_band_energy(pulse.band_energy);
             let stderr = pulse.standard_error.unwrap_or(stderr_base);
+            let band_energy = pulse.band_energy;
             zpulses.push(ZPulse {
                 source: pulse.source,
                 ts: now,
                 tempo: tempo_estimate,
-                band_energy: pulse.band_energy,
+                band_energy,
+                density_fluctuation: ZPulse::density_fluctuation_for(band_energy),
                 drift: pulse.drift,
                 z_bias: pulse.z_bias,
                 support,
@@ -1424,11 +1426,13 @@ impl InterfaceZConductor {
         } else {
             qualities.iter().copied().sum::<f32>() / qualities.len() as f32
         };
+        let band_energy = fused.band_energy;
         ZPulse {
             source: fused.source,
             ts: now,
             tempo,
-            band_energy: fused.band_energy,
+            band_energy,
+            density_fluctuation: ZPulse::density_fluctuation_for(band_energy),
             drift: fused.drift,
             z_bias: fused.z_bias,
             support,

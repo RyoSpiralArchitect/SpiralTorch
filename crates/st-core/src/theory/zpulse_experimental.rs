@@ -119,6 +119,7 @@ pub mod experimental {
         pub ts: u64,
         pub tempo: f32,
         pub band_energy: (f32, f32, f32),
+        pub density_fluctuation: f32,
         pub drift: f32,
         pub z_bias: f32,
         pub support: ZSupport,
@@ -138,6 +139,10 @@ pub mod experimental {
             a + h + b
         }
 
+        pub fn density_fluctuation(&self) -> f32 {
+            self.density_fluctuation
+        }
+
         pub fn normalised_drift(&self) -> f32 {
             let total = self.total_energy().max(1e-6);
             let (a, _, b) = self.band_energy;
@@ -151,6 +156,42 @@ pub mod experimental {
         fn support_strength(&self) -> f32 {
             self.support.total().max(0.0)
         }
+
+        pub fn density_fluctuation_for(band_energy: (f32, f32, f32)) -> f32 {
+            let (mut leading, mut central, mut trailing) = band_energy;
+            if !leading.is_finite() {
+                leading = 0.0;
+            }
+            if !central.is_finite() {
+                central = 0.0;
+            }
+            if !trailing.is_finite() {
+                trailing = 0.0;
+            }
+            leading = leading.max(0.0);
+            central = central.max(0.0);
+            trailing = trailing.max(0.0);
+
+            let total = leading + central + trailing;
+            if total <= f32::EPSILON {
+                return 0.0;
+            }
+
+            let mean = total / 3.0;
+            let variance = {
+                let dl = leading - mean;
+                let dc = central - mean;
+                let dt = trailing - mean;
+                (dl * dl + dc * dc + dt * dt) / 3.0
+            };
+
+            let fluctuation = (variance.sqrt() / (total + 1e-6)).clamp(0.0, 1.0);
+            if fluctuation.is_finite() {
+                fluctuation
+            } else {
+                0.0
+            }
+        }
     }
 
     impl Default for ZPulse {
@@ -160,6 +201,7 @@ pub mod experimental {
                 ts: 0,
                 tempo: 0.0,
                 band_energy: (0.0, 0.0, 0.0),
+                density_fluctuation: 0.0,
                 drift: 0.0,
                 z_bias: 0.0,
                 support: ZSupport::default(),
@@ -572,6 +614,7 @@ pub mod experimental {
         pub support: f32,
         pub drift: f32,
         pub quality: f32,
+        pub density_fluctuation: f32,
         pub events: Vec<String>,
         pub attributions: Vec<(ZSource, f32)>,
     }
@@ -686,6 +729,8 @@ pub mod experimental {
             let mut quality_weight = 0.0f32;
             let mut drift_weight = 0.0f32;
             let mut drift_sum = 0.0f32;
+            let mut density_sum = 0.0f32;
+            let mut density_weight = 0.0f32;
             let mut attributions: Vec<(ZSource, f32)> = Vec::new();
 
             for pulse in &ready {
@@ -701,6 +746,8 @@ pub mod experimental {
                 quality_weight += weight;
                 drift_sum += pulse.normalised_drift() * pulse.quality.max(1e-6);
                 drift_weight += pulse.quality.max(1e-6);
+                density_sum += pulse.density_fluctuation * support;
+                density_weight += support;
                 attributions.push((pulse.source, support));
             }
 
@@ -720,6 +767,11 @@ pub mod experimental {
                 },
                 quality: if quality_weight > 0.0 {
                     (weighted_quality / quality_weight).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                },
+                density_fluctuation: if density_weight > 0.0 {
+                    (density_sum / density_weight).clamp(0.0, 1.0)
                 } else {
                     0.0
                 },
@@ -765,6 +817,11 @@ pub mod experimental {
             target = target.clamp(-self.cfg.z_budget, self.cfg.z_budget);
             self.last_z = target;
             fused.z = target;
+            if fused.density_fluctuation > 0.45 {
+                fused
+                    .events
+                    .push(format!("density.fluctuation:{:.3}", fused.density_fluctuation));
+            }
 
             fused
         }
@@ -799,7 +856,8 @@ pub mod experimental {
         let support = pulse.support.total().max(1e-6);
         let stderr = pulse.stderr.abs() + 1e-6;
         let ratio = support / (support + stderr);
-        ratio.clamp(0.0, 1.0)
+        let penalty = 1.0 - pulse.density_fluctuation.clamp(0.0, 1.0) * 0.2;
+        (ratio * penalty).clamp(0.0, 1.0)
     }
 
     /// Registry used to poll multiple emitters and return their pending pulses.

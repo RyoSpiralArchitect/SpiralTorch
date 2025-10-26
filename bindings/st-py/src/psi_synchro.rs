@@ -864,6 +864,11 @@ impl PyZPulse {
     }
 
     #[getter]
+    pub fn density_fluctuation(&self) -> f32 {
+        self.inner.density_fluctuation
+    }
+
+    #[getter]
     pub fn support(&self) -> (f32, f32, f32) {
         support_to_tuple(self.inner.support)
     }

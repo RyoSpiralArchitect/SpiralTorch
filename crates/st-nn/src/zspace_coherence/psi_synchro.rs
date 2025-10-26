@@ -576,6 +576,7 @@ impl HeatmapResult {
             analytics.central_norm,
             analytics.trailing_norm,
         );
+        pulse.density_fluctuation = ZPulse::density_fluctuation_for(pulse.band_energy);
         pulse.support = ZSupport::new(
             analytics.leading_norm,
             analytics.central_norm,

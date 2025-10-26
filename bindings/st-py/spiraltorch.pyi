@@ -1760,6 +1760,9 @@ class ZPulseSnapshot:
     def z_bias(self) -> float: ...
 
     @property
+    def density_fluctuation(self) -> float: ...
+
+    @property
     def support(self) -> Tuple[float, float, float]: ...
 
     @property
