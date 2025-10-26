@@ -2339,6 +2339,122 @@ class DashboardRing:
     def latest(self) -> Optional[DashboardFrame]: ...
     def __iter__(self) -> Iterable[DashboardFrame]: ...
 
+class ZSpaceSpinBand:
+    name: str
+    label: str
+
+class ZSpaceRadiusBand:
+    name: str
+    label: str
+
+class ZSpaceRegionKey:
+    spin: ZSpaceSpinBand
+    radius: ZSpaceRadiusBand
+    label: str
+
+class ZSpaceRegionDescriptor:
+    spin_alignment: float
+    normalized_radius: float
+    curvature_radius: float
+    geodesic_radius: float
+    sheet_index: int
+    sheet_count: int
+    topological_sector: int
+    @property
+    def key(self) -> ZSpaceRegionKey: ...
+    @property
+    def spin_band(self) -> ZSpaceSpinBand: ...
+    @property
+    def radius_band(self) -> ZSpaceRadiusBand: ...
+    @property
+    def label(self) -> str: ...
+
+class SoftlogicEllipticSample:
+    curvature_radius: float
+    geodesic_radius: float
+    normalized_radius: float
+    spin_alignment: float
+    sheet_index: int
+    sheet_position: float
+    normal_bias: float
+    sheet_count: int
+    topological_sector: int
+    homology_index: int
+    rotor_field: tuple[float, float, float]
+    flow_vector: tuple[float, float, float]
+    curvature_tensor: tuple[tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]]
+    resonance_heat: float
+    noise_density: float
+    quaternion: tuple[float, float, float, float]
+    rotation: tuple[tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]]
+    def region_descriptor(self) -> ZSpaceRegionDescriptor: ...
+
+class SoftlogicZFeedback:
+    psi_total: float
+    weighted_loss: float
+    band_energy: tuple[float, float, float]
+    drift: float
+    z_signal: float
+    scale: tuple[float, float] | None
+    events: List[str]
+    attributions: List[tuple[str, float]]
+    elliptic: SoftlogicEllipticSample | None
+    region: ZSpaceRegionDescriptor | None
+    def has_event(self, tag: str) -> bool: ...
+    def spin_band(self) -> ZSpaceSpinBand | None: ...
+    def radius_band(self) -> ZSpaceRadiusBand | None: ...
+    def label(self) -> str | None: ...
+
+class CurvatureDecision:
+    raw_pressure: float
+    smoothed_pressure: float
+    curvature: float
+    changed: bool
+
+class CurvatureScheduler:
+    def __init__(
+        self,
+        *,
+        initial: float | None = ...,
+        min_curvature: float | None = ...,
+        max_curvature: float | None = ...,
+        min: float | None = ...,
+        max: float | None = ...,
+        target_pressure: float = ...,
+        step: float | None = ...,
+        tolerance: float | None = ...,
+        smoothing: float | None = ...,
+    ) -> None: ...
+    @property
+    def current(self) -> float: ...
+    @property
+    def min_curvature(self) -> float: ...
+    @property
+    def max_curvature(self) -> float: ...
+    @property
+    def target_pressure(self) -> float: ...
+    @property
+    def step(self) -> float: ...
+    @property
+    def tolerance(self) -> float: ...
+    @property
+    def smoothing(self) -> float: ...
+    @property
+    def last_pressure(self) -> float | None: ...
+    def set_bounds(self, min_curvature: float, max_curvature: float) -> None: ...
+    def set_target_pressure(self, target: float) -> None: ...
+    def set_step(self, step: float) -> None: ...
+    def set_tolerance(self, tolerance: float) -> None: ...
+    def set_smoothing(self, smoothing: float) -> None: ...
+    def sync(self, curvature: float) -> None: ...
+    def observe(self, summary: GradientSummary) -> CurvatureDecision: ...
+    def observe_pressure(self, raw_pressure: float) -> CurvatureDecision: ...
+
+def zspace_snapshot() -> Optional[ZSpaceRegionDescriptor]: ...
+def softlogic_feedback() -> Optional[SoftlogicZFeedback]: ...
+def describe_zspace(*, latest: bool = ..., feedback: bool = ...) -> Optional[object]: ...
+def softlogic_signal() -> Optional[dict[str, object]]: ...
+
 __all__ = [
     "Tensor",
     "ModuleTrainer",
@@ -2387,6 +2503,10 @@ __all__ = [
     "gl_coeffs_adaptive",
     "fracdiff_gl_1d",
     "zspace_eval",
+    "zspace_snapshot",
+    "softlogic_feedback",
+    "describe_zspace",
+    "softlogic_signal",
     "QueryPlan",
     "RecEpochReport",
     "ContextualLagrangianGate",
@@ -2398,6 +2518,14 @@ __all__ = [
     "Replay",
     "stAgent",
     "DqnAgent",
+    "CurvatureScheduler",
+    "CurvatureDecision",
+    "ZSpaceSpinBand",
+    "ZSpaceRadiusBand",
+    "ZSpaceRegionKey",
+    "ZSpaceRegionDescriptor",
+    "SoftlogicEllipticSample",
+    "SoftlogicZFeedback",
     "PpoAgent",
     "SacAgent",
     "TemporalResonanceBuffer",
