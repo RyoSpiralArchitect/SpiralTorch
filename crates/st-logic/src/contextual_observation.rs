@@ -756,6 +756,7 @@ impl LagrangianGate {
             (lexical + population * 0.25 + cluster.abs() * 0.1).max(0.0) * self.config.support_gain;
 
         pulse.band_energy = (above, central, beneath);
+        pulse.density_fluctuation = ZPulse::density_fluctuation_for(pulse.band_energy);
         pulse.support = ZSupport::new(leading_support, central_support, trailing_support);
         pulse.drift = drift;
         pulse.z_bias = orientation_bias;

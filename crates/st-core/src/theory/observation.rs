@@ -411,12 +411,14 @@ mod tests {
         } else {
             InterfaceZPulse::default()
         };
+        let band_energy = pulse.band_energy;
         let fused = InterfaceZFused {
             pulse: ZPulse {
                 source: ZSource::Microlocal,
                 ts: 0,
                 tempo: 1.0,
-                band_energy: pulse.band_energy,
+                band_energy,
+                density_fluctuation: ZPulse::density_fluctuation_for(band_energy),
                 drift: pulse.drift,
                 z_bias: pulse.z_bias,
                 support: ZSupport::from_band_energy(pulse.band_energy),
