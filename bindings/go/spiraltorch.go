@@ -21,7 +21,6 @@ void *spiraltorch_tensor_zeros(size_t rows, size_t cols);
 void *spiraltorch_tensor_from_dense(size_t rows, size_t cols, const float *data, size_t len);
 void spiraltorch_tensor_free(void *tensor);
 bool spiraltorch_tensor_shape(const void *tensor, size_t *rows, size_t *cols);
-size_t spiraltorch_tensor_elements(const void *tensor);
 bool spiraltorch_tensor_copy_data(const void *tensor, float *out, size_t len);
 bool spiraltorch_tensor_copy_row(const void *tensor, size_t index, float *out, size_t len);
 bool spiraltorch_tensor_copy_column(const void *tensor, size_t index, float *out, size_t len);
@@ -134,7 +133,10 @@ func clearError() {
 
 // Tensor owns a pointer to a tensor allocated by the SpiralTorch runtime.
 type Tensor struct {
-	handle unsafe.Pointer
+	handle     unsafe.Pointer
+	rows       int
+	cols       int
+	shapeKnown bool
 }
 
 func wrapTensor(ptr unsafe.Pointer, context string) (*Tensor, error) {
@@ -151,6 +153,30 @@ func wrapTensor(ptr unsafe.Pointer, context string) (*Tensor, error) {
 	})
 	clearError()
 	return tensor, nil
+}
+
+func (t *Tensor) setKnownShape(rows, cols int) {
+	t.rows = rows
+	t.cols = cols
+	t.shapeKnown = true
+}
+
+func (t *Tensor) cacheShape() error {
+	if t.shapeKnown {
+		return nil
+	}
+	var rows, cols C.size_t
+	ok := C.spiraltorch_tensor_shape(t.handle, &rows, &cols)
+	if !bool(ok) {
+		message := lastError()
+		if message == "" {
+			message = "tensor_shape failed"
+		}
+		return fmt.Errorf("spiraltorch: %s", message)
+	}
+	clearError()
+	t.setKnownShape(int(rows), int(cols))
+	return nil
 }
 
 // Runtime wraps the SpiralTorch golden runtime for scheduling tensor operations.
@@ -233,6 +259,10 @@ func (r *Runtime) Add(lhs, rhs *Tensor) (*Tensor, error) {
 	if err != nil {
 		return nil, err
 	}
+	rows, cols, err := lhs.Shape()
+	if err != nil {
+		return nil, err
+	}
 	left, err := requireTensorHandle(lhs, "runtime_tensor_add lhs")
 	if err != nil {
 		return nil, err
@@ -242,12 +272,21 @@ func (r *Runtime) Add(lhs, rhs *Tensor) (*Tensor, error) {
 		return nil, err
 	}
 	ptr := C.spiraltorch_runtime_tensor_add(handle, left, right)
-	return wrapTensor(ptr, "runtime_tensor_add")
+	tensor, err := wrapTensor(ptr, "runtime_tensor_add")
+	if err != nil {
+		return nil, err
+	}
+	tensor.setKnownShape(rows, cols)
+	return tensor, nil
 }
 
 // Sub schedules an element-wise subtraction on the runtime.
 func (r *Runtime) Sub(lhs, rhs *Tensor) (*Tensor, error) {
 	handle, err := r.requireHandle("runtime_tensor_sub")
+	if err != nil {
+		return nil, err
+	}
+	rows, cols, err := lhs.Shape()
 	if err != nil {
 		return nil, err
 	}
@@ -260,12 +299,21 @@ func (r *Runtime) Sub(lhs, rhs *Tensor) (*Tensor, error) {
 		return nil, err
 	}
 	ptr := C.spiraltorch_runtime_tensor_sub(handle, left, right)
-	return wrapTensor(ptr, "runtime_tensor_sub")
+	tensor, err := wrapTensor(ptr, "runtime_tensor_sub")
+	if err != nil {
+		return nil, err
+	}
+	tensor.setKnownShape(rows, cols)
+	return tensor, nil
 }
 
 // Hadamard schedules an element-wise product on the runtime.
 func (r *Runtime) Hadamard(lhs, rhs *Tensor) (*Tensor, error) {
 	handle, err := r.requireHandle("runtime_tensor_hadamard")
+	if err != nil {
+		return nil, err
+	}
+	rows, cols, err := lhs.Shape()
 	if err != nil {
 		return nil, err
 	}
@@ -278,12 +326,25 @@ func (r *Runtime) Hadamard(lhs, rhs *Tensor) (*Tensor, error) {
 		return nil, err
 	}
 	ptr := C.spiraltorch_runtime_tensor_hadamard(handle, left, right)
-	return wrapTensor(ptr, "runtime_tensor_hadamard")
+	tensor, err := wrapTensor(ptr, "runtime_tensor_hadamard")
+	if err != nil {
+		return nil, err
+	}
+	tensor.setKnownShape(rows, cols)
+	return tensor, nil
 }
 
 // Matmul schedules a matrix multiplication on the runtime.
 func (r *Runtime) Matmul(lhs, rhs *Tensor) (*Tensor, error) {
 	handle, err := r.requireHandle("runtime_tensor_matmul")
+	if err != nil {
+		return nil, err
+	}
+	lhsRows, _, err := lhs.Shape()
+	if err != nil {
+		return nil, err
+	}
+	_, rhsCols, err := rhs.Shape()
 	if err != nil {
 		return nil, err
 	}
@@ -296,7 +357,12 @@ func (r *Runtime) Matmul(lhs, rhs *Tensor) (*Tensor, error) {
 		return nil, err
 	}
 	ptr := C.spiraltorch_runtime_tensor_matmul(handle, left, right)
-	return wrapTensor(ptr, "runtime_tensor_matmul")
+	tensor, err := wrapTensor(ptr, "runtime_tensor_matmul")
+	if err != nil {
+		return nil, err
+	}
+	tensor.setKnownShape(lhsRows, rhsCols)
+	return tensor, nil
 }
 
 // RandomUniformTensor schedules construction of a tensor sampled from [min, max).
@@ -326,7 +392,12 @@ func (r *Runtime) RandomUniformTensor(rows, cols int, min, max float32, seed ...
 		seedValue,
 		hasSeed,
 	)
-	return wrapTensor(ptr, "runtime_tensor_random_uniform")
+	tensor, err := wrapTensor(ptr, "runtime_tensor_random_uniform")
+	if err != nil {
+		return nil, err
+	}
+	tensor.setKnownShape(rows, cols)
+	return tensor, nil
 }
 
 // RandomNormalTensor schedules construction of a tensor sampled from a normal distribution.
@@ -356,7 +427,12 @@ func (r *Runtime) RandomNormalTensor(rows, cols int, mean, std float32, seed ...
 		seedValue,
 		hasSeed,
 	)
-	return wrapTensor(ptr, "runtime_tensor_random_normal")
+	tensor, err := wrapTensor(ptr, "runtime_tensor_random_normal")
+	if err != nil {
+		return nil, err
+	}
+	tensor.setKnownShape(rows, cols)
+	return tensor, nil
 }
 
 // Scale multiplies all tensor elements by value on the runtime.
@@ -365,12 +441,21 @@ func (r *Runtime) Scale(t *Tensor, value float32) (*Tensor, error) {
 	if err != nil {
 		return nil, err
 	}
+	rows, cols, err := t.Shape()
+	if err != nil {
+		return nil, err
+	}
 	tensorHandle, err := requireTensorHandle(t, "runtime_tensor_scale tensor")
 	if err != nil {
 		return nil, err
 	}
 	ptr := C.spiraltorch_runtime_tensor_scale(handle, tensorHandle, C.float(value))
-	return wrapTensor(ptr, "runtime_tensor_scale")
+	tensor, err := wrapTensor(ptr, "runtime_tensor_scale")
+	if err != nil {
+		return nil, err
+	}
+	tensor.setKnownShape(rows, cols)
+	return tensor, nil
 }
 
 // Transpose schedules a transpose operation on the runtime.
@@ -379,12 +464,21 @@ func (r *Runtime) Transpose(t *Tensor) (*Tensor, error) {
 	if err != nil {
 		return nil, err
 	}
+	rows, cols, err := t.Shape()
+	if err != nil {
+		return nil, err
+	}
 	tensorHandle, err := requireTensorHandle(t, "runtime_tensor_transpose tensor")
 	if err != nil {
 		return nil, err
 	}
 	ptr := C.spiraltorch_runtime_tensor_transpose(handle, tensorHandle)
-	return wrapTensor(ptr, "runtime_tensor_transpose")
+	tensor, err := wrapTensor(ptr, "runtime_tensor_transpose")
+	if err != nil {
+		return nil, err
+	}
+	tensor.setKnownShape(cols, rows)
+	return tensor, nil
 }
 
 // Reshape schedules a reshape on the runtime.
@@ -406,13 +500,23 @@ func (r *Runtime) Reshape(t *Tensor, rows, cols int) (*Tensor, error) {
 		C.size_t(rows),
 		C.size_t(cols),
 	)
-	return wrapTensor(ptr, "runtime_tensor_reshape")
+	tensor, err := wrapTensor(ptr, "runtime_tensor_reshape")
+	if err != nil {
+		return nil, err
+	}
+	tensor.setKnownShape(rows, cols)
+	return tensor, nil
 }
 
 // NewZerosTensor constructs a tensor of the requested shape initialised with zeros.
 func NewZerosTensor(rows, cols int) (*Tensor, error) {
 	ptr := C.spiraltorch_tensor_zeros(C.size_t(rows), C.size_t(cols))
-	return wrapTensor(ptr, "tensor_zeros")
+	tensor, err := wrapTensor(ptr, "tensor_zeros")
+	if err != nil {
+		return nil, err
+	}
+	tensor.setKnownShape(rows, cols)
+	return tensor, nil
 }
 
 // NewTensorFromDense constructs a tensor from the provided row-major data slice.
@@ -438,7 +542,12 @@ func NewTensorFromDense(rows, cols int, data []float32) (*Tensor, error) {
 		(*C.float)(unsafe.Pointer(&data[0])),
 		C.size_t(len(data)),
 	)
-	return wrapTensor(ptr, "tensor_from_dense")
+	tensor, err := wrapTensor(ptr, "tensor_from_dense")
+	if err != nil {
+		return nil, err
+	}
+	tensor.setKnownShape(rows, cols)
+	return tensor, nil
 }
 
 // NewRandomUniformTensor constructs a tensor with values sampled from [min, max).
@@ -464,7 +573,12 @@ func NewRandomUniformTensor(rows, cols int, min, max float32, seed ...uint64) (*
 		seedValue,
 		hasSeed,
 	)
-	return wrapTensor(ptr, "tensor_random_uniform")
+	tensor, err := wrapTensor(ptr, "tensor_random_uniform")
+	if err != nil {
+		return nil, err
+	}
+	tensor.setKnownShape(rows, cols)
+	return tensor, nil
 }
 
 // NewRandomNormalTensor constructs a tensor with values sampled from a normal distribution.
@@ -490,7 +604,12 @@ func NewRandomNormalTensor(rows, cols int, mean, std float32, seed ...uint64) (*
 		seedValue,
 		hasSeed,
 	)
-	return wrapTensor(ptr, "tensor_random_normal")
+	tensor, err := wrapTensor(ptr, "tensor_random_normal")
+	if err != nil {
+		return nil, err
+	}
+	tensor.setKnownShape(rows, cols)
+	return tensor, nil
 }
 
 // Close releases the underlying tensor handle. Subsequent calls are safe.
@@ -508,13 +627,10 @@ func (t *Tensor) Shape() (int, int, error) {
 	if t == nil || t.handle == nil {
 		return 0, 0, fmt.Errorf("spiraltorch: tensor handle is nil")
 	}
-	var rows, cols C.size_t
-	ok := C.spiraltorch_tensor_shape(t.handle, &rows, &cols)
-	if !bool(ok) {
-		return 0, 0, fmt.Errorf("spiraltorch: %s", lastError())
+	if err := t.cacheShape(); err != nil {
+		return 0, 0, err
 	}
-	clearError()
-	return int(rows), int(cols), nil
+	return t.rows, t.cols, nil
 }
 
 // Elements returns the number of elements stored in the tensor.
@@ -522,14 +638,10 @@ func (t *Tensor) Elements() (int, error) {
 	if t == nil || t.handle == nil {
 		return 0, fmt.Errorf("spiraltorch: tensor handle is nil")
 	}
-	count := C.spiraltorch_tensor_elements(t.handle)
-	if count == 0 {
-		if err := lastError(); err != "" {
-			return 0, fmt.Errorf("spiraltorch: %s", err)
-		}
+	if err := t.cacheShape(); err != nil {
+		return 0, err
 	}
-	clearError()
-	return int(count), nil
+	return t.rows * t.cols, nil
 }
 
 // Data copies the tensor contents into a newly allocated slice.
@@ -678,30 +790,70 @@ func (t *Tensor) binaryOp(other *Tensor, op func(unsafe.Pointer, unsafe.Pointer)
 
 // Add performs element-wise addition and returns a new tensor.
 func (t *Tensor) Add(other *Tensor) (*Tensor, error) {
-	return t.binaryOp(other, func(lhs, rhs unsafe.Pointer) unsafe.Pointer {
+	rows, cols, err := t.Shape()
+	if err != nil {
+		return nil, err
+	}
+	result, err := t.binaryOp(other, func(lhs, rhs unsafe.Pointer) unsafe.Pointer {
 		return C.spiraltorch_tensor_add(lhs, rhs)
 	}, "tensor_add")
+	if err != nil {
+		return nil, err
+	}
+	result.setKnownShape(rows, cols)
+	return result, nil
 }
 
 // Sub performs element-wise subtraction and returns a new tensor.
 func (t *Tensor) Sub(other *Tensor) (*Tensor, error) {
-	return t.binaryOp(other, func(lhs, rhs unsafe.Pointer) unsafe.Pointer {
+	rows, cols, err := t.Shape()
+	if err != nil {
+		return nil, err
+	}
+	result, err := t.binaryOp(other, func(lhs, rhs unsafe.Pointer) unsafe.Pointer {
 		return C.spiraltorch_tensor_sub(lhs, rhs)
 	}, "tensor_sub")
+	if err != nil {
+		return nil, err
+	}
+	result.setKnownShape(rows, cols)
+	return result, nil
 }
 
 // Matmul performs matrix multiplication (`t @ other`).
 func (t *Tensor) Matmul(other *Tensor) (*Tensor, error) {
-	return t.binaryOp(other, func(lhs, rhs unsafe.Pointer) unsafe.Pointer {
+	rows, _, err := t.Shape()
+	if err != nil {
+		return nil, err
+	}
+	_, cols, err := other.Shape()
+	if err != nil {
+		return nil, err
+	}
+	result, err := t.binaryOp(other, func(lhs, rhs unsafe.Pointer) unsafe.Pointer {
 		return C.spiraltorch_tensor_matmul(lhs, rhs)
 	}, "tensor_matmul")
+	if err != nil {
+		return nil, err
+	}
+	result.setKnownShape(rows, cols)
+	return result, nil
 }
 
 // Hadamard performs element-wise multiplication and returns a new tensor.
 func (t *Tensor) Hadamard(other *Tensor) (*Tensor, error) {
-	return t.binaryOp(other, func(lhs, rhs unsafe.Pointer) unsafe.Pointer {
+	rows, cols, err := t.Shape()
+	if err != nil {
+		return nil, err
+	}
+	result, err := t.binaryOp(other, func(lhs, rhs unsafe.Pointer) unsafe.Pointer {
 		return C.spiraltorch_tensor_hadamard(lhs, rhs)
 	}, "tensor_hadamard")
+	if err != nil {
+		return nil, err
+	}
+	result.setKnownShape(rows, cols)
+	return result, nil
 }
 
 // Scale multiplies every element by the provided value.
@@ -709,8 +861,17 @@ func (t *Tensor) Scale(value float32) (*Tensor, error) {
 	if t == nil || t.handle == nil {
 		return nil, fmt.Errorf("spiraltorch: tensor handle is nil")
 	}
+	rows, cols, err := t.Shape()
+	if err != nil {
+		return nil, err
+	}
 	ptr := C.spiraltorch_tensor_scale(t.handle, C.float(value))
-	return wrapTensor(ptr, "tensor_scale")
+	result, err := wrapTensor(ptr, "tensor_scale")
+	if err != nil {
+		return nil, err
+	}
+	result.setKnownShape(rows, cols)
+	return result, nil
 }
 
 // Transpose returns a new tensor with flipped dimensions.
@@ -718,8 +879,17 @@ func (t *Tensor) Transpose() (*Tensor, error) {
 	if t == nil || t.handle == nil {
 		return nil, fmt.Errorf("spiraltorch: tensor handle is nil")
 	}
+	rows, cols, err := t.Shape()
+	if err != nil {
+		return nil, err
+	}
 	ptr := C.spiraltorch_tensor_transpose(t.handle)
-	return wrapTensor(ptr, "tensor_transpose")
+	result, err := wrapTensor(ptr, "tensor_transpose")
+	if err != nil {
+		return nil, err
+	}
+	result.setKnownShape(cols, rows)
+	return result, nil
 }
 
 // Reshape returns a tensor that views the same data with new `(rows, cols)` dimensions.
@@ -731,7 +901,12 @@ func (t *Tensor) Reshape(rows, cols int) (*Tensor, error) {
 		return nil, fmt.Errorf("spiraltorch: reshape dimensions must be non-negative")
 	}
 	ptr := C.spiraltorch_tensor_reshape(t.handle, C.size_t(rows), C.size_t(cols))
-	return wrapTensor(ptr, "tensor_reshape")
+	result, err := wrapTensor(ptr, "tensor_reshape")
+	if err != nil {
+		return nil, err
+	}
+	result.setKnownShape(rows, cols)
+	return result, nil
 }
 
 // RoundtableBand identifies which SpiralTorch roundtable band owns a gradient lane.
