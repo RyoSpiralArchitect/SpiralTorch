@@ -107,6 +107,8 @@ pub struct VideoPipelineOutput {
     pub resonance_envelope: Tensor,
     /// Derived Z-dynamics metadata (weights, per-depth energy, spectrum).
     pub z_dynamics: ZDynamicsAnnotation,
+    /// Digest capturing temporal statistics collected so far.
+    pub temporal_digest: TemporalDigest,
 }
 
 /// Video processing pipeline that decodes frames, fuses Z volumes, and emits atlas telemetry.
@@ -119,6 +121,7 @@ pub struct VideoPipeline<D: VideoDecoder> {
     resonance_envelope: ResonanceEnvelope,
     stats: TemporalStats,
     volume: Option<ZSpaceVolume>,
+    timeline: Vec<AtlasFrame>,
 }
 
 impl<D: VideoDecoder> VideoPipeline<D> {
@@ -134,6 +137,7 @@ impl<D: VideoDecoder> VideoPipeline<D> {
             resonance_envelope: ResonanceEnvelope::new(resonance_decay),
             stats: TemporalStats::default(),
             volume: None,
+            timeline: Vec::new(),
             config,
         }
     }
@@ -211,12 +215,15 @@ impl<D: VideoDecoder> VideoPipeline<D> {
         atlas.notes.push("video.pipeline.z_dynamics".to_string());
 
         streamed.atlas_frame = Some(atlas.clone());
+        self.timeline.push(atlas.clone());
 
         let z_dynamics = ZDynamicsAnnotation {
             smoothed_weights: smoothed_weights.clone(),
             per_depth_energy: per_depth,
             spectral_response,
         };
+
+        let digest = self.stats.digest();
 
         self.frame_index += 1;
 
@@ -227,8 +234,47 @@ impl<D: VideoDecoder> VideoPipeline<D> {
             motion_embedding: motion,
             resonance_envelope,
             z_dynamics,
+            temporal_digest: digest,
         }))
     }
+
+    /// Returns a reference to the latest fused Z-space volume, if available.
+    pub fn last_volume(&self) -> Option<&ZSpaceVolume> {
+        self.volume.as_ref()
+    }
+
+    /// Provides access to the accumulated atlas timeline for downstream reporting.
+    pub fn atlas_timeline(&self) -> &[AtlasFrame] {
+        &self.timeline
+    }
+
+    /// Exposes the most recent [`TemporalDigest`] without advancing the stream.
+    pub fn temporal_digest(&self) -> TemporalDigest {
+        self.stats.digest()
+    }
+}
+
+/// Aggregated telemetry summarising the temporal behaviour of the pipeline so far.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TemporalDigest {
+    /// Number of frames processed by the pipeline.
+    pub frames: usize,
+    /// Total stream duration in seconds.
+    pub duration: f32,
+    /// Mean motion energy accumulated from frame deltas.
+    pub mean_motion_energy: f32,
+    /// Standard deviation of the motion energy signal.
+    pub motion_std: f32,
+    /// Mean resonance energy collected from the Z volume envelope.
+    pub mean_resonance_energy: f32,
+    /// Standard deviation of the resonance energy signal.
+    pub resonance_std: f32,
+    /// Mean fractional decay between consecutive resonance measurements.
+    pub mean_resonance_decay: f32,
+    /// Minimum resonance energy observed so far.
+    pub min_resonance_energy: f32,
+    /// Maximum resonance energy observed so far.
+    pub max_resonance_energy: f32,
 }
 
 fn push_metric(atlas: &mut AtlasFrame, name: &str, value: f32) {
@@ -318,6 +364,8 @@ struct TemporalStats {
     sum_drift: f32,
     sum_abs_drift: f32,
     sum_drift_sq: f32,
+    sum_motion: f32,
+    sum_motion_sq: f32,
     sum_energy: f32,
     sum_energy_sq: f32,
     sum_decay: f32,
@@ -350,6 +398,9 @@ impl TemporalStats {
         self.sum_drift += drift;
         self.sum_abs_drift += drift.abs();
         self.sum_drift_sq += drift * drift;
+
+        self.sum_motion += motion_energy;
+        self.sum_motion_sq += motion_energy * motion_energy;
 
         self.sum_energy += resonance_energy;
         self.sum_energy_sq += resonance_energy * resonance_energy;
@@ -399,6 +450,28 @@ impl TemporalStats {
             max_energy: self.max_energy,
         };
         ChronoSnapshot::new(summary, dt)
+    }
+
+    fn digest(&self) -> TemporalDigest {
+        if self.frames == 0 {
+            return TemporalDigest::default();
+        }
+        let frames = self.frames as f32;
+        let mean_motion = self.sum_motion / frames;
+        let motion_var = (self.sum_motion_sq / frames) - mean_motion.powi(2);
+        let mean_resonance = self.sum_energy / frames;
+        let resonance_var = (self.sum_energy_sq / frames) - mean_resonance.powi(2);
+        TemporalDigest {
+            frames: self.frames,
+            duration: self.total_duration,
+            mean_motion_energy: mean_motion,
+            motion_std: motion_var.max(0.0).sqrt(),
+            mean_resonance_energy: mean_resonance,
+            resonance_std: resonance_var.max(0.0).sqrt(),
+            mean_resonance_decay: self.sum_decay / frames,
+            min_resonance_energy: self.min_energy,
+            max_resonance_energy: self.max_energy,
+        }
     }
 }
 
@@ -450,6 +523,9 @@ mod tests {
             .metrics
             .iter()
             .any(|metric| metric.name == "z.motion_energy"));
+        assert_eq!(first.temporal_digest.frames, 1);
+        assert!(pipeline.last_volume().is_some());
+        assert_eq!(pipeline.atlas_timeline().len(), 1);
         let second = pipeline.next().unwrap().unwrap();
         assert_eq!(second.frame_index, 1);
         assert!(second
@@ -457,6 +533,9 @@ mod tests {
             .metrics
             .iter()
             .any(|metric| metric.name == "z.weight_entropy"));
+        assert!(second.temporal_digest.frames >= 2);
+        assert!(pipeline.temporal_digest().frames >= 2);
+        assert_eq!(pipeline.atlas_timeline().len(), 2);
         assert!(pipeline.next().unwrap().is_none());
     }
 }

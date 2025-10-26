@@ -22,18 +22,245 @@ use st_nn::{
     dataset::DataLoaderBatches,
     dataset_from_vec,
     layers::{
-        NonLiner, NonLinerActivation, NonLinerEllipticConfig, NonLinerGeometry,
-        NonLinerHyperbolicConfig,
+        Dropout as RustDropout, NonLiner, NonLinerActivation, NonLinerEllipticConfig,
+        NonLinerGeometry, NonLinerHyperbolicConfig, ZRelativityModule,
     },
     zspace_coherence::{
         is_swap_invariant as rust_is_swap_invariant, CoherenceDiagnostics, CoherenceLabel,
         CoherenceObservation, CoherenceSignature, LinguisticChannelReport, PreDiscardPolicy,
         PreDiscardSnapshot, PreDiscardTelemetry,
     },
-    DataLoader, Dataset, ZRelativityModule, ZSpaceCoherenceSequencer,
+    DataLoader, Dataset, ZRelativityModule,
+    AvgPool2d, MaxPool2d, ZSpaceCoherenceSequencer,
 };
+use st_nn::layers::ZRelativityModule;
+#[cfg(feature = "nn")]
+use st_tensor::{OpenCartesianTopos, Tensor, TensorError};
+
+#[cfg(feature = "nn")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Layout2d {
+    Nchw,
+    Nhwc,
+}
+
+#[cfg(feature = "nn")]
+impl Layout2d {
+    fn parse(label: &str) -> PyResult<Self> {
+        match label.to_ascii_uppercase().as_str() {
+            "NCHW" => Ok(Self::Nchw),
+            "NHWC" => Ok(Self::Nhwc),
+            other => Err(PyValueError::new_err(format!(
+                "unsupported layout '{other}', expected 'NCHW' or 'NHWC'"
+            ))),
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Nchw => "NCHW",
+            Self::Nhwc => "NHWC",
+        }
+    }
+}
+
+#[cfg(feature = "nn")]
+#[derive(Clone, Copy, Debug)]
+struct Spatial2d {
+    channels: usize,
+    height: usize,
+    width: usize,
+}
+
+#[cfg(feature = "nn")]
+impl Spatial2d {
+    fn new(channels: usize, height: usize, width: usize) -> Self {
+        Self {
+            channels,
+            height,
+            width,
+        }
+    }
+
+    fn size(self) -> usize {
+        self.channels * self.height * self.width
+    }
+}
+
+#[cfg(feature = "nn")]
+#[derive(Clone, Copy)]
+enum LayoutDirection {
+    ToCanonical,
+    FromCanonical,
+}
+
+#[cfg(feature = "nn")]
+#[derive(Clone, Copy, Debug)]
+enum PoolMode {
+    Max,
+    Avg,
+}
+
 #[cfg(feature = "nn")]
 use st_tensor::{OpenCartesianTopos, Tensor};
+impl PoolMode {
+    fn parse(label: &str) -> PyResult<Self> {
+        match label.to_ascii_lowercase().as_str() {
+            "max" => Ok(Self::Max),
+            "avg" | "average" => Ok(Self::Avg),
+            other => Err(PyValueError::new_err(format!(
+                "unknown pooling mode '{other}', expected 'max' or 'avg'"
+            ))),
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Max => "max",
+            Self::Avg => "avg",
+        }
+    }
+}
+
+#[cfg(feature = "nn")]
+enum PoolModule {
+    Max(MaxPool2d),
+    Avg(AvgPool2d),
+}
+
+#[cfg(feature = "nn")]
+fn ensure_feature_shape(tensor: &Tensor, dims: Spatial2d) -> Result<(), TensorError> {
+    let cols = tensor.shape().1;
+    let expected = dims.size();
+    if cols != expected {
+        return Err(TensorError::ShapeMismatch {
+            left: (1, cols),
+            right: (1, expected),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(feature = "nn")]
+fn reorder_row_nhwc_to_canonical(row: &[f32], dst: &mut [f32], dims: Spatial2d) {
+    let Spatial2d {
+        channels,
+        height,
+        width,
+    } = dims;
+    for h in 0..height {
+        for w in 0..width {
+            for c in 0..channels {
+                let nhwc_idx = ((h * width + w) * channels) + c;
+                let canonical_idx = c * height * width + h * width + w;
+                dst[canonical_idx] = row[nhwc_idx];
+            }
+        }
+    }
+}
+
+#[cfg(feature = "nn")]
+fn reorder_row_canonical_to_nhwc(row: &[f32], dst: &mut [f32], dims: Spatial2d) {
+    let Spatial2d {
+        channels,
+        height,
+        width,
+    } = dims;
+    for c in 0..channels {
+        for h in 0..height {
+            for w in 0..width {
+                let canonical_idx = c * height * width + h * width + w;
+                let nhwc_idx = ((h * width + w) * channels) + c;
+                dst[nhwc_idx] = row[canonical_idx];
+            }
+        }
+    }
+}
+
+#[cfg(feature = "nn")]
+fn reorder_tensor_layout(
+    tensor: &Tensor,
+    dims: Spatial2d,
+    layout: Layout2d,
+    direction: LayoutDirection,
+) -> Result<Tensor, TensorError> {
+    ensure_feature_shape(tensor, dims)?;
+    match layout {
+        Layout2d::Nchw => Ok(tensor.clone()),
+        Layout2d::Nhwc => {
+            let (rows, cols) = tensor.shape();
+            let mut buffer = vec![0.0f32; rows * cols];
+            let src = tensor.data();
+            for row_idx in 0..rows {
+                let src_start = row_idx * cols;
+                let src_end = src_start + cols;
+                let dst_slice = &mut buffer[src_start..src_end];
+                let src_slice = &src[src_start..src_end];
+                match direction {
+                    LayoutDirection::ToCanonical => {
+                        reorder_row_nhwc_to_canonical(src_slice, dst_slice, dims)
+                    }
+                    LayoutDirection::FromCanonical => {
+                        reorder_row_canonical_to_nhwc(src_slice, dst_slice, dims)
+                    }
+                }
+            }
+            Tensor::from_vec(rows, cols, buffer)
+        }
+    }
+}
+
+#[cfg(feature = "nn")]
+fn dilated_extent(size: usize, dilation: usize) -> Result<usize, TensorError> {
+    size.checked_sub(1)
+        .and_then(|value| value.checked_mul(dilation))
+        .and_then(|value| value.checked_add(1))
+        .ok_or(TensorError::InvalidDimensions {
+            rows: size,
+            cols: dilation,
+        })
+}
+
+#[cfg(feature = "nn")]
+fn conv_output_hw(
+    input: (usize, usize),
+    kernel: (usize, usize),
+    stride: (usize, usize),
+    padding: (usize, usize),
+    dilation: (usize, usize),
+) -> Result<(usize, usize), TensorError> {
+    let eff_h = dilated_extent(kernel.0, dilation.0)?;
+    let eff_w = dilated_extent(kernel.1, dilation.1)?;
+    let (in_h, in_w) = input;
+    if in_h + 2 * padding.0 < eff_h || in_w + 2 * padding.1 < eff_w {
+        return Err(TensorError::InvalidDimensions {
+            rows: in_h + 2 * padding.0,
+            cols: eff_h.max(eff_w),
+        });
+    }
+    let out_h = (in_h + 2 * padding.0 - eff_h) / stride.0 + 1;
+    let out_w = (in_w + 2 * padding.1 - eff_w) / stride.1 + 1;
+    Ok((out_h, out_w))
+}
+
+#[cfg(feature = "nn")]
+fn pool_output_hw(
+    input: (usize, usize),
+    kernel: (usize, usize),
+    stride: (usize, usize),
+    padding: (usize, usize),
+) -> Result<(usize, usize), TensorError> {
+    let (in_h, in_w) = input;
+    if in_h + 2 * padding.0 < kernel.0 || in_w + 2 * padding.1 < kernel.1 {
+        return Err(TensorError::InvalidDimensions {
+            rows: in_h + 2 * padding.0,
+            cols: kernel.0.max(kernel.1),
+        });
+    }
+    let out_h = (in_h + 2 * padding.0 - kernel.0) / stride.0 + 1;
+    let out_w = (in_w + 2 * padding.1 - kernel.1) / stride.1 + 1;
+    Ok((out_h, out_w))
+}
 
 #[cfg(feature = "nn")]
 fn convert_samples(
@@ -301,6 +528,64 @@ impl PyNonLiner {
             .gradient()
             .map(|g| PyTensor::from_tensor(g.clone()));
         (gain, slope, bias)
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "Dropout", unsendable)]
+pub(crate) struct PyDropout {
+    inner: RustDropout,
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyDropout {
+    #[new]
+    #[pyo3(signature = (probability, *, seed=None))]
+    pub fn new(probability: f32, seed: Option<u64>) -> PyResult<Self> {
+        let inner = Dropout::with_seed(probability, seed).map_err(tensor_err_to_py)?;
+        Ok(Self { inner })
+    }
+
+    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        let output = self.inner.forward(&input.inner).map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        let grad = self
+            .inner
+            .backward(&input.inner, &grad_output.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(grad))
+    }
+
+    #[pyo3(signature = (x))]
+    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(x)
+    }
+
+    pub fn train(&mut self) {
+        self.inner.set_training(true);
+    }
+
+    pub fn eval(&mut self) {
+        self.inner.set_training(false);
+    }
+
+    #[getter]
+    pub fn probability(&self) -> f32 {
+        self.inner.probability()
+    }
+
+    #[getter]
+    pub fn training(&self) -> bool {
+        self.inner.training()
+    }
+
+    #[setter]
+    pub fn set_training(&mut self, training: bool) {
+        self.inner.set_training(training);
     }
 }
 
@@ -1152,6 +1437,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     let module = PyModule::new_bound(py, "nn")?;
     module.add("__doc__", "SpiralTorch neural network primitives")?;
     module.add_class::<PyNonLiner>()?;
+    module.add_class::<PyDropout>()?;
     module.add_class::<PyDataset>()?;
     module.add_class::<PyDataLoader>()?;
     module.add_class::<PyDataLoaderIter>()?;
@@ -1170,6 +1456,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
         "__all__",
         vec![
             "NonLiner",
+            "Dropout",
             "Dataset",
             "DataLoader",
             "DataLoaderIter",
@@ -1186,6 +1473,9 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     parent.add_submodule(&module)?;
     if let Ok(non_liner) = module.getattr("NonLiner") {
         parent.add("NonLiner", non_liner)?;
+    }
+    if let Ok(dropout) = module.getattr("Dropout") {
+        parent.add("Dropout", dropout)?;
     }
     if let Ok(sequencer) = module.getattr("ZSpaceCoherenceSequencer") {
         parent.add("ZSpaceCoherenceSequencer", sequencer)?;

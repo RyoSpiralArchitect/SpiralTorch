@@ -2731,6 +2731,7 @@ dependencies = [
 name = "spiral-opt"
 version = "0.1.0"
 dependencies = [
+ "rayon",
  "serde",
  "thiserror 1.0.69",
 ]
