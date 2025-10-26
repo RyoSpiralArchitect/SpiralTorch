@@ -308,6 +308,52 @@ impl PyZRelativityModel {
         Ok(dict.into())
     }
 
+    pub fn curvature_diagnostics(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        let diagnostics = &self.inner.base_model.diagnostics;
+        dict.set_item("scalar_curvature", diagnostics.scalar_curvature)?;
+        dict.set_item("ricci_square", diagnostics.ricci_square)?;
+        dict.set_item("kretschmann", diagnostics.kretschmann)?;
+        dict.set_item("weyl_self_dual_squared", diagnostics.weyl_self_dual_squared)?;
+        dict.set_item(
+            "weyl_anti_self_dual_squared",
+            diagnostics.weyl_anti_self_dual_squared,
+        )?;
+        dict.set_item(
+            "weyl_self_dual_matrix",
+            diagnostics
+                .weyl_self_dual_matrix
+                .iter()
+                .map(|row| row.to_vec())
+                .collect::<Vec<_>>(),
+        )?;
+        dict.set_item(
+            "weyl_anti_self_dual_matrix",
+            diagnostics
+                .weyl_anti_self_dual_matrix
+                .iter()
+                .map(|row| row.to_vec())
+                .collect::<Vec<_>>(),
+        )?;
+        dict.set_item(
+            "weyl_self_dual_invariant_i",
+            diagnostics.weyl_self_dual_invariant_i,
+        )?;
+        dict.set_item(
+            "weyl_self_dual_invariant_j",
+            diagnostics.weyl_self_dual_invariant_j,
+        )?;
+        dict.set_item(
+            "weyl_self_dual_discriminant",
+            diagnostics.weyl_self_dual_discriminant,
+        )?;
+        dict.set_item(
+            "weyl_self_dual_eigenvalues",
+            diagnostics.weyl_self_dual_eigenvalues.to_vec(),
+        )?;
+        Ok(dict.into())
+    }
+
     pub fn learnable_flags(&self) -> (bool, bool, bool) {
         let flags = self.inner.learnable_flags();
         (flags.warp, flags.mixed, flags.internal)
