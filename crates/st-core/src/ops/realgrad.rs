@@ -954,14 +954,16 @@ impl RealGradZProjector {
         let quality = spectral_quality(&projection.spectrum, band).max(self.quality_floor);
 
         let support = ZSupport::new(above, here, beneath);
+        let band_energy = (above, here, beneath);
         ZPulse {
             source: ZSource::RealGrad,
             ts: 0,
             tempo: z_energy,
+            band_energy,
+            density_fluctuation: ZPulse::density_fluctuation_for(band_energy),
             drift,
             z_bias,
             support,
-            band_energy: (above, here, beneath),
             scale: None,
             quality,
             stderr: 0.0,
