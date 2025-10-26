@@ -10,7 +10,7 @@ use st_frac::scale_stack::{ScaleStack, ScaleStackError, SemanticMetric};
 
 use super::zpulse::ZPulse;
 
-const FEATURE_DIM: usize = 7;
+const FEATURE_DIM: usize = 8;
 
 fn pulse_features(pulse: &ZPulse) -> [f32; FEATURE_DIM] {
     [
@@ -21,6 +21,7 @@ fn pulse_features(pulse: &ZPulse) -> [f32; FEATURE_DIM] {
         pulse.tempo,
         pulse.quality,
         pulse.latency_ms,
+        pulse.density_fluctuation(),
     ]
 }
 
@@ -73,11 +74,13 @@ mod tests {
     use st_frac::scale_stack::InterfaceMode;
 
     fn sample_pulse(drift: f32, energy: f32) -> ZPulse {
+        let band_energy = (energy, 0.0, 0.0);
         ZPulse {
             source: ZSource::Microlocal,
             ts: 0,
             tempo: 1.0,
-            band_energy: (energy, 0.0, 0.0),
+            band_energy,
+            density_fluctuation: ZPulse::density_fluctuation_for(band_energy),
             drift,
             z_bias: 0.0,
             support: ZSupport::default(),

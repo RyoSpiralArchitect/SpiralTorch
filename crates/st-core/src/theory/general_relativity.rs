@@ -1975,6 +1975,9 @@ impl CurvatureDiagnostics {
             scalar_curvature,
             ricci_square,
             kretschmann,
+            weyl_square: weyl_squared,
+            weyl_dual_contraction: dual_contract,
+            weyl_self_dual_squared,
             weyl_anti_self_dual_squared,
             weyl_self_dual_matrix,
             weyl_anti_self_dual_matrix,
@@ -1982,10 +1985,6 @@ impl CurvatureDiagnostics {
             weyl_self_dual_invariant_j,
             weyl_self_dual_discriminant,
             weyl_self_dual_eigenvalues,
-            weyl_square: weyl_squared,
-            weyl_dual_contraction: dual_contract,
-            weyl_self_dual_squared,
-            weyl_anti_self_dual_squared,
         }
     }
 }
@@ -2327,8 +2326,8 @@ mod tests {
         let mut riemann_lower = [[[[0.0; DIM]; DIM]; DIM]; DIM];
         let pairs = [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)];
         let values = [
-            0.125, -0.375, 0.25, -0.5, 0.625, -0.875, 1.0, -1.125, 1.25, -1.375, 1.5,
-            -1.625, 1.75, -1.875, 2.0, -2.125, 2.25, -2.375, 2.5, -2.625, 2.75,
+            0.125, -0.375, 0.25, -0.5, 0.625, -0.875, 1.0, -1.125, 1.25, -1.375, 1.5, -1.625, 1.75,
+            -1.875, 2.0, -2.125, 2.25, -2.375, 2.5, -2.625, 2.75,
         ];
         let mut idx = 0;
         for (i, &(mu, nu)) in pairs.iter().enumerate() {
@@ -2478,7 +2477,8 @@ mod tests {
             for nu in 0..DIM {
                 for rho in 0..DIM {
                     for sigma in 0..DIM {
-                        weyl_squared += weyl_lower[mu][nu][rho][sigma] * weyl_all_up[mu][nu][rho][sigma];
+                        weyl_squared +=
+                            weyl_lower[mu][nu][rho][sigma] * weyl_all_up[mu][nu][rho][sigma];
                         dual_contract +=
                             weyl_dual_lower[mu][nu][rho][sigma] * weyl_all_up[mu][nu][rho][sigma];
                     }
@@ -2489,7 +2489,11 @@ mod tests {
         let manual_self = 0.5 * (weyl_squared + dual_contract);
         let manual_anti = 0.5 * (weyl_squared - dual_contract);
 
-        assert_relative_eq!(diagnostics.weyl_self_dual_squared, manual_self, epsilon = 1e-9);
+        assert_relative_eq!(
+            diagnostics.weyl_self_dual_squared,
+            manual_self,
+            epsilon = 1e-9
+        );
         assert_relative_eq!(
             diagnostics.weyl_anti_self_dual_squared,
             manual_anti,

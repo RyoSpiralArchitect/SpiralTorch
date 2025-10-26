@@ -285,11 +285,13 @@ pub struct ZProjection {
 impl ZProjection {
     /// Materialises a [`ZPulse`] using the stored projection data.
     pub fn into_pulse(self, ts: u64, source: ZSource) -> ZPulse {
+        let band_energy = self.band_energy;
         ZPulse {
             source,
             ts,
             tempo: self.tempo,
-            band_energy: self.band_energy,
+            band_energy,
+            density_fluctuation: ZPulse::density_fluctuation_for(band_energy),
             drift: self.drift,
             z_bias: self.z_bias,
             support: self.support,
