@@ -58,10 +58,9 @@ pub use language::{
     DesireTrainerBridge, DesireTrainerEvent, DesireTrainerSummary, DesireTriggerBuffer,
     DesireTriggerEvent, DesireWeights, DistanceMatrix, EntropicGwSolver, GeometryBiasConfig,
     GeometryBiasContext, GeometryBiasMetrics, GeometryBiasSnapshot, GeometryBiasUpdate,
-    GeometryCoherenceSample,
-    LanguagePipeline, LanguagePipelineBuilder, MaxwellDesireBridge, NarrativeHint, PipelineError,
-    PipelineResult, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry,
-    TemperatureController,
+    GeometryCoherenceSample, LanguagePipeline, LanguagePipelineBuilder, MaxwellDesireBridge,
+    NarrativeHint, PipelineError, PipelineResult, RepressionField, SemanticBridge, SparseKernel,
+    SymbolGeometry, TemperatureController,
 };
 #[cfg(feature = "psi")]
 pub use language::{DesirePsiBridge, DesirePsiEvent, DesirePsiSummary};
@@ -71,7 +70,10 @@ pub use layers::sequential::Sequential;
 pub use layers::wave_gate::WaveGate;
 pub use layers::wave_rnn::WaveRnn;
 pub use layers::zspace_projector::ZSpaceProjector;
-pub use layers::{Dropout, Gelu, LayerNorm, Relu, ToposResonator, ZRelativityModule, ZSpaceMixer};
+pub use layers::{
+    Dropout, Gelu, HamiltonJacobiFlow, KleinGordonPropagation, LayerNorm, Relu,
+    StochasticSchrodingerLayer, ToposResonator, ZRelativityModule, ZSpaceMixer,
+};
 pub use lightning::{
     LightningBuilder, LightningConfig, LightningConfigBuilder, LightningEpoch, LightningReport,
     LightningStage, LightningStageReport, SpiralLightning,
