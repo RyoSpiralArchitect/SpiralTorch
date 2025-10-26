@@ -11,7 +11,7 @@ use pyo3::PyAny;
 
 #[cfg(feature = "nn")]
 use st_nn::Module;
-use st_tensor::{mean_squared_error, LinearModel, Tensor};
+use st_tensor::{mean_squared_error, LinearModel, Tensor, TensorError};
 
 #[pyclass(module = "spiraltorch", name = "ModuleTrainer")]
 pub(crate) struct PyModuleTrainer {
@@ -30,7 +30,7 @@ impl PyModuleTrainer {
             ));
         }
         let model = LinearModel::new(input_dim, output_dim)
-            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+            .map_err(|e: TensorError| PyValueError::new_err(e.to_string()))?;
         Ok(Self {
             model,
             input_dim,
@@ -83,13 +83,13 @@ impl PyModuleTrainer {
                 .flat_map(|r| r.iter().copied())
                 .collect();
             let x = Tensor::from_vec(batch_rows, self.input_dim, x)
-                .map_err(|e| PyValueError::new_err(e.to_string()))?;
+                .map_err(|e: TensorError| PyValueError::new_err(e.to_string()))?;
             let y = Tensor::from_vec(batch_rows, self.output_dim, y)
-                .map_err(|e| PyValueError::new_err(e.to_string()))?;
+                .map_err(|e: TensorError| PyValueError::new_err(e.to_string()))?;
             let loss = self
                 .model
                 .train_batch(&x, &y, learning_rate)
-                .map_err(|e| PyValueError::new_err(e.to_string()))?;
+                .map_err(|e: TensorError| PyValueError::new_err(e.to_string()))?;
             avg_loss += loss * batch_rows as f32;
             seen += batch_rows;
             start = end;
@@ -119,14 +119,14 @@ impl PyModuleTrainer {
         let x: Vec<f32> = inputs.iter().flat_map(|r| r.iter().copied()).collect();
         let y: Vec<f32> = targets.iter().flat_map(|r| r.iter().copied()).collect();
         let x = Tensor::from_vec(rows, self.input_dim, x)
-            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+            .map_err(|e: TensorError| PyValueError::new_err(e.to_string()))?;
         let y = Tensor::from_vec(rows, self.output_dim, y)
-            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+            .map_err(|e: TensorError| PyValueError::new_err(e.to_string()))?;
         let predictions = self
             .model
             .forward(&x)
-            .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        mean_squared_error(&predictions, &y).map_err(|e| PyValueError::new_err(e.to_string()))
+            .map_err(|e: TensorError| PyValueError::new_err(e.to_string()))?;
+        mean_squared_error(&predictions, &y).map_err(|e: TensorError| PyValueError::new_err(e.to_string()))
     }
 
     /// Convenience helper to run inference from nested Python lists.
@@ -135,7 +135,7 @@ impl PyModuleTrainer {
         let predictions = self
             .model
             .forward(&tensor_inputs)
-            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+            .map_err(|e: TensorError| PyValueError::new_err(e.to_string()))?;
         Ok(PyTensor::from_tensor(predictions))
     }
 
@@ -144,7 +144,7 @@ impl PyModuleTrainer {
         let predictions = self
             .model
             .forward(&inputs.inner)
-            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+            .map_err(|e: TensorError| PyValueError::new_err(e.to_string()))?;
         Ok(PyTensor::from_tensor(predictions))
     }
 
@@ -155,14 +155,14 @@ impl PyModuleTrainer {
         targets: &PyTensor,
         learning_rate: f32,
     ) -> PyResult<f32> {
-        let seed = Tensor::zeros(1, 1).map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let seed = Tensor::zeros(1, 1).map_err(|e: TensorError| PyValueError::new_err(e.to_string()))?;
         let params = module
             .inner
             .forward(&seed)
-            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+            .map_err(|e: TensorError| PyValueError::new_err(e.to_string()))?;
         self.model
             .train_batch(&params, &targets.inner, learning_rate)
-            .map_err(|e| PyValueError::new_err(e.to_string()))
+            .map_err(|e: TensorError| PyValueError::new_err(e.to_string()))
     }
 
     /// Return a snapshot of the current model weights.
@@ -199,7 +199,7 @@ impl PyLinearModel {
             ));
         }
         let inner = LinearModel::new(input_dim, output_dim)
-            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+            .map_err(|e: TensorError| PyValueError::new_err(e.to_string()))?;
         Ok(Self { inner })
     }
 
@@ -212,7 +212,7 @@ impl PyLinearModel {
                 let borrow = py_tensor.bind(py).borrow();
                 self.inner
                     .forward(&borrow.inner)
-                    .map_err(|e| PyValueError::new_err(e.to_string()))?
+                    .map_err(|e: TensorError| PyValueError::new_err(e.to_string()))?
             };
             return Ok(PyTensor::from_tensor(tensor));
         }
@@ -223,7 +223,7 @@ impl PyLinearModel {
             let tensor = self
                 .inner
                 .forward(&tensor_inputs)
-                .map_err(|e| PyValueError::new_err(e.to_string()))?;
+                .map_err(|e: TensorError| PyValueError::new_err(e.to_string()))?;
             return Ok(PyTensor::from_tensor(tensor));
         }
 
@@ -250,7 +250,7 @@ impl PyLinearModel {
         let tensor_targets = lists_to_tensor(&targets, output_dim, "targets")?;
         self.inner
             .train_batch(&tensor_inputs, &tensor_targets, learning_rate)
-            .map_err(|e| PyValueError::new_err(e.to_string()))
+            .map_err(|e: TensorError| PyValueError::new_err(e.to_string()))
     }
 
     #[pyo3(signature = (inputs, targets, learning_rate=1e-2))]
@@ -280,7 +280,7 @@ impl PyLinearModel {
         }
         self.inner
             .train_batch(&inputs.inner, &targets.inner, learning_rate)
-            .map_err(|e| PyValueError::new_err(e.to_string()))
+            .map_err(|e: TensorError| PyValueError::new_err(e.to_string()))
     }
 
     pub fn weights(&self) -> PyResult<PyTensor> {
@@ -312,7 +312,7 @@ impl PyLinearModel {
 #[pyo3(name = "mean_squared_error")]
 fn mean_squared_error_py(predictions: &PyTensor, targets: &PyTensor) -> PyResult<f32> {
     mean_squared_error(&predictions.inner, &targets.inner)
-        .map_err(|e| PyValueError::new_err(e.to_string()))
+        .map_err(|e: TensorError| PyValueError::new_err(e.to_string()))
 }
 
 pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
@@ -340,5 +340,5 @@ fn lists_to_tensor(rows: &[Vec<f32>], expected_cols: usize, label: &str) -> PyRe
         flat.extend_from_slice(row);
     }
     Tensor::from_vec(rows.len(), expected_cols, flat)
-        .map_err(|e| PyValueError::new_err(e.to_string()))
+        .map_err(|e: TensorError| PyValueError::new_err(e.to_string()))
 }

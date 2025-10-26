@@ -1,4 +1,4 @@
-use crate::tensor::{tensor_err_to_py, to_dlpack_impl, PyTensor};
+use crate::tensor::{tensor_err_to_py, tensor_to_torch, to_dlpack_impl, PyTensor};
 use nalgebra::{DMatrix, Matrix4};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -8,7 +8,7 @@ use st_core::theory::general_relativity::{
     BoundaryCondition, BoundaryConditionKind, GeneralRelativityModel, InternalMetric,
     InternalPatch, InternalSpace, LorentzianMetric, MetricDerivatives, MetricError,
     MetricSecondDerivatives, MixedBlock, PhysicalConstants, ProductGeometry, ProductMetric,
-    SymmetryAnsatz, Topology, WarpFactor, ZManifold, ZRelativityModel,
+    SymmetryAnsatz, Topology, WarpFactor, ZManifold, ZRelativityModel, ZRelativityTensorBundle,
 };
 use st_tensor::Tensor;
 
@@ -222,22 +222,57 @@ impl PyZRelativityModel {
 
     pub fn tensor_bundle(&self, py: Python<'_>) -> PyResult<PyObject> {
         let bundle = self.inner.tensor_bundle().map_err(tensor_err_to_py)?;
+        let ZRelativityTensorBundle {
+            block_metric,
+            effective_metric,
+            gauge_field,
+            scalar_moduli,
+            field_equation,
+            warp,
+            internal_volume_density,
+            field_prefactor,
+        } = bundle;
         let dict = PyDict::new_bound(py);
-        dict.set_item("block_metric", tensor_to_py(py, bundle.block_metric)?)?;
-        dict.set_item(
-            "effective_metric",
-            tensor_to_py(py, bundle.effective_metric)?,
-        )?;
-        dict.set_item("gauge_field", tensor_to_py(py, bundle.gauge_field)?)?;
-        dict.set_item("scalar_moduli", tensor_to_py(py, bundle.scalar_moduli)?)?;
-        dict.set_item("field_equation", tensor_to_py(py, bundle.field_equation)?)?;
-        if let Some(warp) = bundle.warp {
+        dict.set_item("block_metric", tensor_to_py(py, block_metric)?)?;
+        dict.set_item("effective_metric", tensor_to_py(py, effective_metric)?)?;
+        dict.set_item("gauge_field", tensor_to_py(py, gauge_field)?)?;
+        dict.set_item("scalar_moduli", tensor_to_py(py, scalar_moduli)?)?;
+        dict.set_item("field_equation", tensor_to_py(py, field_equation)?)?;
+        if let Some(warp) = warp {
             dict.set_item("warp", tensor_to_py(py, warp)?)?;
         } else {
             dict.set_item("warp", py.None())?;
         }
-        dict.set_item("internal_volume_density", bundle.internal_volume_density)?;
-        dict.set_item("field_prefactor", bundle.field_prefactor)?;
+        dict.set_item("internal_volume_density", internal_volume_density)?;
+        dict.set_item("field_prefactor", field_prefactor)?;
+        Ok(dict.into())
+    }
+
+    pub fn torch_bundle(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let bundle = self.inner.tensor_bundle().map_err(tensor_err_to_py)?;
+        let ZRelativityTensorBundle {
+            block_metric,
+            effective_metric,
+            gauge_field,
+            scalar_moduli,
+            field_equation,
+            warp,
+            internal_volume_density,
+            field_prefactor,
+        } = bundle;
+        let dict = PyDict::new_bound(py);
+        dict.set_item("block_metric", tensor_to_torch(py, &block_metric)?)?;
+        dict.set_item("effective_metric", tensor_to_torch(py, &effective_metric)?)?;
+        dict.set_item("gauge_field", tensor_to_torch(py, &gauge_field)?)?;
+        dict.set_item("scalar_moduli", tensor_to_torch(py, &scalar_moduli)?)?;
+        dict.set_item("field_equation", tensor_to_torch(py, &field_equation)?)?;
+        if let Some(ref warp) = warp {
+            dict.set_item("warp", tensor_to_torch(py, warp)?)?;
+        } else {
+            dict.set_item("warp", py.None())?;
+        }
+        dict.set_item("internal_volume_density", internal_volume_density)?;
+        dict.set_item("field_prefactor", field_prefactor)?;
         Ok(dict.into())
     }
 

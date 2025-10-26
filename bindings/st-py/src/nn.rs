@@ -9,7 +9,7 @@ use pyo3::exceptions::PyValueError;
 #[cfg(feature = "nn")]
 use crate::pure::PyOpenCartesianTopos;
 #[cfg(feature = "nn")]
-use crate::tensor::{tensor_err_to_py, PyTensor};
+use crate::tensor::{tensor_err_to_py, tensor_to_torch, PyTensor};
 #[cfg(feature = "nn")]
 use crate::theory::PyZRelativityModel;
 
@@ -22,16 +22,18 @@ use st_nn::{
     dataset::DataLoaderBatches,
     dataset_from_vec,
     layers::{
-        Dropout, NonLiner, NonLinerActivation, NonLinerEllipticConfig, NonLinerGeometry,
-        NonLinerHyperbolicConfig,
+        Dropout as RustDropout, NonLiner, NonLinerActivation, NonLinerEllipticConfig,
+        NonLinerGeometry, NonLinerHyperbolicConfig, ZRelativityModule,
     },
     zspace_coherence::{
         is_swap_invariant as rust_is_swap_invariant, CoherenceDiagnostics, CoherenceLabel,
         CoherenceObservation, CoherenceSignature, LinguisticChannelReport, PreDiscardPolicy,
         PreDiscardSnapshot, PreDiscardTelemetry,
     },
-    DataLoader, Dataset, ZRelativityModule, ZSpaceCoherenceSequencer,
+    DataLoader, Dataset, ZRelativityModule,
+    AvgPool2d, MaxPool2d, ZSpaceCoherenceSequencer,
 };
+use st_nn::layers::ZRelativityModule;
 #[cfg(feature = "nn")]
 use st_tensor::{OpenCartesianTopos, Tensor, TensorError};
 
@@ -100,6 +102,7 @@ enum PoolMode {
 }
 
 #[cfg(feature = "nn")]
+use st_tensor::{OpenCartesianTopos, Tensor};
 impl PoolMode {
     fn parse(label: &str) -> PyResult<Self> {
         match label.to_ascii_lowercase().as_str() {
@@ -531,19 +534,16 @@ impl PyNonLiner {
 #[cfg(feature = "nn")]
 #[pyclass(module = "spiraltorch.nn", name = "Dropout", unsendable)]
 pub(crate) struct PyDropout {
-    inner: Dropout,
+    inner: RustDropout,
 }
 
 #[cfg(feature = "nn")]
 #[pymethods]
 impl PyDropout {
     #[new]
-    #[pyo3(signature = (probability, *, seed=None, training=true))]
-    pub fn new(probability: f32, seed: Option<u64>, training: bool) -> PyResult<Self> {
-        let mut inner = Dropout::with_seed(probability, seed).map_err(tensor_err_to_py)?;
-        if !training {
-            inner.eval();
-        }
+    #[pyo3(signature = (probability, *, seed=None))]
+    pub fn new(probability: f32, seed: Option<u64>) -> PyResult<Self> {
+        let inner = Dropout::with_seed(probability, seed).map_err(tensor_err_to_py)?;
         Ok(Self { inner })
     }
 
@@ -560,21 +560,17 @@ impl PyDropout {
         Ok(PyTensor::from_tensor(grad))
     }
 
-    pub fn set_training(&mut self, training: bool) {
-        self.inner.set_training(training);
+    #[pyo3(signature = (x))]
+    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(x)
     }
 
     pub fn train(&mut self) {
-        self.inner.train();
+        self.inner.set_training(true);
     }
 
     pub fn eval(&mut self) {
-        self.inner.eval();
-    }
-
-    #[getter]
-    pub fn training(&self) -> bool {
-        self.inner.training()
+        self.inner.set_training(false);
     }
 
     #[getter]
@@ -582,9 +578,14 @@ impl PyDropout {
         self.inner.probability()
     }
 
-    #[pyo3(signature = (x))]
-    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
-        self.forward(x)
+    #[getter]
+    pub fn training(&self) -> bool {
+        self.inner.training()
+    }
+
+    #[setter]
+    pub fn set_training(&mut self, training: bool) {
+        self.inner.set_training(training);
     }
 }
 
@@ -1392,6 +1393,12 @@ impl PyZRelativityModule {
         let seed = Tensor::zeros(1, 1).map_err(tensor_err_to_py)?;
         let output = self.inner.forward(&seed).map_err(tensor_err_to_py)?;
         Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn torch_parameters(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let seed = Tensor::zeros(1, 1).map_err(tensor_err_to_py)?;
+        let output = self.inner.forward(&seed).map_err(tensor_err_to_py)?;
+        tensor_to_torch(py, &output)
     }
 
     pub fn parameter_dimension(&self) -> usize {

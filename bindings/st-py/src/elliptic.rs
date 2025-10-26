@@ -52,6 +52,7 @@ impl PyEllipticWarp {
         self.warp.spin_harmonics()
     }
 
+    #[pyo3(signature = (sheet_count=None, spin_harmonics=None))]
     fn configure(&mut self, sheet_count: Option<usize>, spin_harmonics: Option<usize>) {
         if let Some(sheets) = sheet_count {
             self.warp = self.warp.clone().with_sheet_count(sheets);
@@ -180,7 +181,7 @@ impl PyEllipticTelemetry {
     }
 
     fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let dict = PyDict::new(py);
+        let dict = PyDict::new_bound(py);
         dict.set_item("curvature_radius", self.inner.curvature_radius)?;
         dict.set_item("geodesic_radius", self.inner.geodesic_radius)?;
         dict.set_item("normalized_radius", self.inner.normalized_radius())?;

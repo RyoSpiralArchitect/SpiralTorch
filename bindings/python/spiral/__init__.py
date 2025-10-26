@@ -8,6 +8,11 @@ from .data.augment import (
     random_mask,
     solarize,
 )
+from .hypergrad import (
+    hypergrad_session,
+    hypergrad_summary_dict,
+    suggest_hypergrad_operator,
+)
 from .inference import (
     AuditEvent,
     AuditLog,
@@ -38,4 +43,7 @@ __all__ = [
     "SafetyVerdict",
     "SafetyViolation",
     "format_chat_prompt",
+    "hypergrad_session",
+    "hypergrad_summary_dict",
+    "suggest_hypergrad_operator",
 ]
