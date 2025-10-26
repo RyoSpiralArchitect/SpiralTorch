@@ -61,7 +61,9 @@ use st_core::telemetry::hub::{self, LoopbackEnvelope, SoftlogicZFeedback};
 use st_core::telemetry::psi::{PsiComponent, PsiConfig, PsiInput, PsiMeter, PsiReading};
 #[cfg(feature = "psychoid")]
 use st_core::telemetry::psychoid::{PsychoidConfig, PsychoidEvent, PsychoidMeter, PsychoidReading};
-use st_core::telemetry::region_visualizer::{RegionHeatmapCell, RegionHeatmapSnapshot};
+use st_core::telemetry::region_visualizer::{
+    RegionHeatmapCell, RegionHeatmapHistory, RegionHeatmapSnapshot,
+};
 use st_core::telemetry::xai_report::AttributionReport;
 use st_core::telemetry::zspace_region::{
     ZSpaceRadiusBand, ZSpaceRegionDescriptor, ZSpaceRegionKey, ZSpaceSpinBand,
@@ -531,6 +533,7 @@ pub struct RegionLossConfig {
     weights: RegionLossWeights,
     condition: RegionLossCondition,
     adaptive: Option<AdaptiveRegionWeighting>,
+    history: Option<RegionHeatmapHistory>,
 }
 
 impl RegionLossConfig {
@@ -540,6 +543,7 @@ impl RegionLossConfig {
             weights,
             condition: RegionLossCondition::default(),
             adaptive: None,
+            history: None,
         }
     }
 
@@ -552,6 +556,14 @@ impl RegionLossConfig {
     /// Attaches an adaptive weighting policy to the configuration.
     pub fn with_adaptive(mut self, adaptive: AdaptiveRegionWeighting) -> Self {
         self.adaptive = Some(adaptive);
+        self
+    }
+
+    /// Enables temporal aggregation over a rolling window of snapshots.
+    pub fn with_history_window(mut self, window: usize) -> Self {
+        if window >= 2 {
+            self.history = Some(RegionHeatmapHistory::new(window));
+        }
         self
     }
 
@@ -599,6 +611,11 @@ impl RegionLossConfig {
         self.adaptive.as_ref()
     }
 
+    /// Returns the configured history buffer, if enabled.
+    pub fn history(&self) -> Option<&RegionHeatmapHistory> {
+        self.history.as_ref()
+    }
+
     /// Captures a snapshot of all region multipliers for visualization.
     pub fn snapshot(&self, highlight: Option<ZSpaceRegionDescriptor>) -> RegionHeatmapSnapshot {
         let mut snapshot = RegionHeatmapSnapshot::new(self.weights.default())
@@ -636,6 +653,25 @@ impl RegionLossConfig {
         snapshot
     }
 
+    /// Builds a bundle of reports, updating the history buffer when enabled.
+    pub fn reports(
+        &mut self,
+        highlight: Option<ZSpaceRegionDescriptor>,
+        step: u64,
+    ) -> RegionReportBundle {
+        let snapshot = self.snapshot(highlight);
+        let mut bundle = RegionReportBundle {
+            snapshot: Some(snapshot.clone().into_report()),
+            ..RegionReportBundle::default()
+        };
+        if let Some(history) = self.history.as_mut() {
+            history.push(step, snapshot);
+            bundle.trend = history.delta_report();
+            bundle.volatility = history.volatility_report();
+        }
+        bundle
+    }
+
     /// Builds an attribution report summarising the configured region weights.
     pub fn visualize(&self, highlight: Option<ZSpaceRegionDescriptor>) -> AttributionReport {
         self.snapshot(highlight).into_report()
@@ -669,15 +705,24 @@ impl LossStrategy {
         }
     }
 
-    fn region_report(
-        &self,
+    fn region_reports(
+        &mut self,
         highlight: Option<ZSpaceRegionDescriptor>,
-    ) -> Option<AttributionReport> {
+        step: u64,
+    ) -> RegionReportBundle {
         match self {
-            LossStrategy::Baseline => None,
-            LossStrategy::Region(config) => Some(config.visualize(highlight)),
+            LossStrategy::Baseline => RegionReportBundle::default(),
+            LossStrategy::Region(config) => config.reports(highlight, step),
         }
     }
+}
+
+/// Container bundling the available region visualization reports.
+#[derive(Default, Clone, Debug)]
+pub struct RegionReportBundle {
+    pub snapshot: Option<AttributionReport>,
+    pub trend: Option<AttributionReport>,
+    pub volatility: Option<AttributionReport>,
 }
 
 #[derive(Debug, Clone)]
@@ -2274,9 +2319,20 @@ impl ModuleTrainer {
                 );
                 region_highlight = Some(region_descriptor);
             }
-            match self.loss_strategy.region_report(region_highlight) {
+            let region_bundle = self
+                .loss_strategy
+                .region_reports(region_highlight, steps as u64);
+            match region_bundle.snapshot {
                 Some(report) => hub::set_region_loss_report(report),
                 None => hub::clear_region_loss_report(),
+            }
+            match region_bundle.trend {
+                Some(report) => hub::set_region_loss_trend_report(report),
+                None => hub::clear_region_loss_trend_report(),
+            }
+            match region_bundle.volatility {
+                Some(report) => hub::set_region_loss_volatility_report(report),
+                None => hub::clear_region_loss_volatility_report(),
             }
             total_loss += weighted_loss;
             extra.insert("loss_weighted_base".to_string(), weighted_loss_base as f64);
@@ -3294,7 +3350,9 @@ mod tests {
             .with_learning_rate(1.0)
             .with_min_samples(1)
             .with_bounds(0.5, 8.0);
-        let mut config = RegionLossConfig::new(weights).with_adaptive(adaptive);
+        let mut config = RegionLossConfig::new(weights)
+            .with_adaptive(adaptive)
+            .with_history_window(4);
 
         let elliptic = SoftlogicEllipticSample {
             curvature_radius: 1.0,
@@ -3331,9 +3389,15 @@ mod tests {
         let _ = config.region_factor(&feedback, 0.1);
         let result = config.region_factor(&feedback, 2.0).unwrap();
         assert!(result.0 > 1.0);
-        let report = config.visualize(feedback.region_descriptor());
+        let first_bundle = config.reports(feedback.region_descriptor(), 0);
+        let report = first_bundle
+            .snapshot
+            .expect("snapshot report should always be present");
         assert_eq!(report.shape(), (3, 3));
         assert!(report.metadata.extras.contains_key("highlight"));
+        let second_bundle = config.reports(feedback.region_descriptor(), 1);
+        assert!(second_bundle.trend.is_some());
+        assert!(second_bundle.volatility.is_some());
     }
 
     #[test]
