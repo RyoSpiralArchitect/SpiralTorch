@@ -54,6 +54,26 @@ fn scalar_to_tensor(value: f64) -> PureResult<Tensor> {
     Tensor::from_vec(1, 1, vec![value as f32])
 }
 
+fn levi_civita_symbol(indices: [usize; 4]) -> f64 {
+    let mut seen = [false; DIM];
+    for &index in &indices {
+        if index >= DIM || seen[index] {
+            return 0.0;
+        }
+        seen[index] = true;
+    }
+
+    let mut sign = 1.0;
+    for i in 0..DIM {
+        for j in (i + 1)..DIM {
+            if indices[i] > indices[j] {
+                sign = -sign;
+            }
+        }
+    }
+    sign
+}
+
 /// Error raised when the supplied metric fails the Lorentzian checks.
 #[derive(Debug, Error, PartialEq)]
 pub enum MetricError {
@@ -1285,6 +1305,11 @@ impl RiemannTensor {
         Self { components }
     }
 
+    #[cfg(test)]
+    pub(crate) fn from_components(components: [[[[f64; DIM]; DIM]; DIM]; DIM]) -> Self {
+        Self { components }
+    }
+
     /// Returns R^σ_{ μ ν ρ }.
     pub fn component(&self, sigma: usize, mu: usize, nu: usize, rho: usize) -> f64 {
         self.components[sigma][mu][nu][rho]
@@ -1633,6 +1658,10 @@ pub struct CurvatureDiagnostics {
     pub ricci_square: f64,
     /// Kretschmann invariant R_{μνρσ} R^{μνρσ}.
     pub kretschmann: f64,
+    /// Weyl self-dual channel squared norm ½(C·C + C·⋆C).
+    pub weyl_self_dual_squared: f64,
+    /// Weyl anti-self-dual channel squared norm ½(C·C − C·⋆C).
+    pub weyl_anti_self_dual_squared: f64,
 }
 
 impl CurvatureDiagnostics {
@@ -1688,6 +1717,53 @@ impl CurvatureDiagnostics {
             }
         }
 
+        // Construct the Weyl tensor with all indices lowered.
+        let mut weyl_lower = [[[[0.0; DIM]; DIM]; DIM]; DIM];
+        for mu in 0..DIM {
+            for nu in 0..DIM {
+                for rho in 0..DIM {
+                    for sigma in 0..DIM {
+                        let term = riemann_lower[mu][nu][rho][sigma];
+                        let trace_adjustment = 0.5
+                            * (g[(mu, rho)] * ricci.component(nu, sigma)
+                                - g[(mu, sigma)] * ricci.component(nu, rho)
+                                - g[(nu, rho)] * ricci.component(mu, sigma)
+                                + g[(nu, sigma)] * ricci.component(mu, rho));
+                        let scalar_adjustment = (scalar_curvature / 6.0)
+                            * (g[(mu, rho)] * g[(nu, sigma)] - g[(mu, sigma)] * g[(nu, rho)]);
+                        weyl_lower[mu][nu][rho][sigma] =
+                            term - trace_adjustment + scalar_adjustment;
+                    }
+                }
+            }
+        }
+
+        // Raise indices to obtain C^{μνρσ}.
+        let mut weyl_all_up = [[[[0.0; DIM]; DIM]; DIM]; DIM];
+        for mu in 0..DIM {
+            for nu in 0..DIM {
+                for rho in 0..DIM {
+                    for sigma in 0..DIM {
+                        let mut sum = 0.0;
+                        for alpha in 0..DIM {
+                            for beta in 0..DIM {
+                                for gamma in 0..DIM {
+                                    for delta in 0..DIM {
+                                        sum += g_inv[(mu, alpha)]
+                                            * g_inv[(nu, beta)]
+                                            * g_inv[(rho, gamma)]
+                                            * g_inv[(sigma, delta)]
+                                            * weyl_lower[alpha][beta][gamma][delta];
+                                    }
+                                }
+                            }
+                        }
+                        weyl_all_up[mu][nu][rho][sigma] = sum;
+                    }
+                }
+            }
+        }
+
         let mut kretschmann = 0.0;
         for mu in 0..DIM {
             for nu in 0..DIM {
@@ -1700,12 +1776,85 @@ impl CurvatureDiagnostics {
             }
         }
 
+        let det = metric.determinant();
+        let volume = metric
+            .volume_element()
+            .unwrap_or_else(|| det.abs().sqrt());
+
+        let mut epsilon_lower = [[[[0.0; DIM]; DIM]; DIM]; DIM];
+        for mu in 0..DIM {
+            for nu in 0..DIM {
+                for rho in 0..DIM {
+                    for sigma in 0..DIM {
+                        epsilon_lower[mu][nu][rho][sigma] =
+                            volume * levi_civita_symbol([mu, nu, rho, sigma]);
+                    }
+                }
+            }
+        }
+
+        let mut epsilon_mixed = [[[[0.0; DIM]; DIM]; DIM]; DIM];
+        for mu in 0..DIM {
+            for nu in 0..DIM {
+                for alpha in 0..DIM {
+                    for beta in 0..DIM {
+                        let mut sum = 0.0;
+                        for rho in 0..DIM {
+                            for sigma in 0..DIM {
+                                sum += epsilon_lower[mu][nu][rho][sigma]
+                                    * g_inv[(rho, alpha)]
+                                    * g_inv[(sigma, beta)];
+                            }
+                        }
+                        epsilon_mixed[mu][nu][alpha][beta] = sum;
+                    }
+                }
+            }
+        }
+
+        let mut weyl_dual_lower = [[[[0.0; DIM]; DIM]; DIM]; DIM];
+        for mu in 0..DIM {
+            for nu in 0..DIM {
+                for rho in 0..DIM {
+                    for sigma in 0..DIM {
+                        let mut sum = 0.0;
+                        for alpha in 0..DIM {
+                            for beta in 0..DIM {
+                                sum += epsilon_mixed[mu][nu][alpha][beta]
+                                    * weyl_lower[alpha][beta][rho][sigma];
+                            }
+                        }
+                        weyl_dual_lower[mu][nu][rho][sigma] = 0.5 * sum;
+                    }
+                }
+            }
+        }
+
+        let mut weyl_squared = 0.0;
+        let mut dual_contract = 0.0;
+        for mu in 0..DIM {
+            for nu in 0..DIM {
+                for rho in 0..DIM {
+                    for sigma in 0..DIM {
+                        weyl_squared +=
+                            weyl_lower[mu][nu][rho][sigma] * weyl_all_up[mu][nu][rho][sigma];
+                        dual_contract +=
+                            weyl_dual_lower[mu][nu][rho][sigma] * weyl_all_up[mu][nu][rho][sigma];
+                    }
+                }
+            }
+        }
+
+        let weyl_self_dual_squared = 0.5 * (weyl_squared + dual_contract);
+        let weyl_anti_self_dual_squared = 0.5 * (weyl_squared - dual_contract);
         let ricci_square = ricci.contracted_square(metric);
 
         Self {
             scalar_curvature,
             ricci_square,
             kretschmann,
+            weyl_self_dual_squared,
+            weyl_anti_self_dual_squared,
         }
     }
 }
@@ -1775,6 +1924,24 @@ mod tests {
     use super::*;
     use approx::assert_relative_eq;
     use nalgebra::{DMatrix, DVector, Vector4};
+
+    fn assign_riemann_component(
+        tensor: &mut [[[[f64; DIM]; DIM]; DIM]; DIM],
+        mu: usize,
+        nu: usize,
+        rho: usize,
+        sigma: usize,
+        value: f64,
+    ) {
+        tensor[mu][nu][rho][sigma] = value;
+        tensor[nu][mu][rho][sigma] = -value;
+        tensor[mu][nu][sigma][rho] = -value;
+        tensor[nu][mu][sigma][rho] = value;
+        tensor[rho][sigma][mu][nu] = value;
+        tensor[sigma][rho][mu][nu] = -value;
+        tensor[rho][sigma][nu][mu] = -value;
+        tensor[sigma][rho][nu][mu] = value;
+    }
 
     #[test]
     fn lorentzian_metric_supports_scaling() {
@@ -1865,6 +2032,12 @@ mod tests {
         assert_relative_eq!(diagnostics.kretschmann, 0.0, epsilon = 1e-12);
         assert_relative_eq!(diagnostics.ricci_square, 0.0, epsilon = 1e-12);
         assert_relative_eq!(diagnostics.scalar_curvature, 0.0, epsilon = 1e-12);
+        assert_relative_eq!(diagnostics.weyl_self_dual_squared, 0.0, epsilon = 1e-12);
+        assert_relative_eq!(
+            diagnostics.weyl_anti_self_dual_squared,
+            0.0,
+            epsilon = 1e-12
+        );
 
         let field_equation = FieldEquation::vacuum(&einstein, 0.0, &metric);
         let constants = PhysicalConstants::new(6.67430e-11, 299_792_458.0);
@@ -1902,6 +2075,185 @@ mod tests {
 
         let topo = Topology::R3xS1;
         assert_eq!(topo.to_string(), "ℝ^3 × S^1");
+    }
+
+    #[test]
+    fn weyl_self_dual_invariants_match_manual_split() {
+        let metric =
+            LorentzianMetric::try_new(Matrix4::from_diagonal(&Vector4::new(-1.0, 1.0, 1.0, 1.0)))
+                .unwrap();
+
+        let mut riemann_lower = [[[[0.0; DIM]; DIM]; DIM]; DIM];
+        let pairs = [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)];
+        let values = [
+            0.125, -0.375, 0.25, -0.5, 0.625, -0.875, 1.0, -1.125, 1.25, -1.375, 1.5,
+            -1.625, 1.75, -1.875, 2.0, -2.125, 2.25, -2.375, 2.5, -2.625, 2.75,
+        ];
+        let mut idx = 0;
+        for (i, &(mu, nu)) in pairs.iter().enumerate() {
+            for &(rho, sigma) in pairs.iter().skip(i) {
+                assign_riemann_component(&mut riemann_lower, mu, nu, rho, sigma, values[idx]);
+                idx += 1;
+            }
+        }
+
+        let g_inv = metric.inverse();
+        let mut riemann_components = [[[[0.0; DIM]; DIM]; DIM]; DIM];
+        for sigma in 0..DIM {
+            for mu in 0..DIM {
+                for nu in 0..DIM {
+                    for rho in 0..DIM {
+                        let mut sum = 0.0;
+                        for alpha in 0..DIM {
+                            sum += g_inv[(sigma, alpha)] * riemann_lower[alpha][mu][nu][rho];
+                        }
+                        riemann_components[sigma][mu][nu][rho] = sum;
+                    }
+                }
+            }
+        }
+
+        let riemann = RiemannTensor::from_components(riemann_components);
+        let ricci = RicciTensor::from_riemann(&riemann);
+        let scalar = ricci.scalar_curvature(&metric);
+        let diagnostics = CurvatureDiagnostics::from_fields(&riemann, &metric, &ricci, scalar);
+
+        let g = metric.components();
+        let mut riemann_lower_manual = [[[[0.0; DIM]; DIM]; DIM]; DIM];
+        for mu in 0..DIM {
+            for nu in 0..DIM {
+                for rho in 0..DIM {
+                    for sigma in 0..DIM {
+                        let mut sum = 0.0;
+                        for alpha in 0..DIM {
+                            sum += g[(mu, alpha)] * riemann.component(alpha, nu, rho, sigma);
+                        }
+                        riemann_lower_manual[mu][nu][rho][sigma] = sum;
+                    }
+                }
+            }
+        }
+
+        let mut weyl_lower = [[[[0.0; DIM]; DIM]; DIM]; DIM];
+        for mu in 0..DIM {
+            for nu in 0..DIM {
+                for rho in 0..DIM {
+                    for sigma in 0..DIM {
+                        let term = riemann_lower_manual[mu][nu][rho][sigma];
+                        let trace_adjustment = 0.5
+                            * (g[(mu, rho)] * ricci.component(nu, sigma)
+                                - g[(mu, sigma)] * ricci.component(nu, rho)
+                                - g[(nu, rho)] * ricci.component(mu, sigma)
+                                + g[(nu, sigma)] * ricci.component(mu, rho));
+                        let scalar_adjustment = (scalar / 6.0)
+                            * (g[(mu, rho)] * g[(nu, sigma)] - g[(mu, sigma)] * g[(nu, rho)]);
+                        weyl_lower[mu][nu][rho][sigma] =
+                            term - trace_adjustment + scalar_adjustment;
+                    }
+                }
+            }
+        }
+
+        let mut weyl_all_up = [[[[0.0; DIM]; DIM]; DIM]; DIM];
+        for mu in 0..DIM {
+            for nu in 0..DIM {
+                for rho in 0..DIM {
+                    for sigma in 0..DIM {
+                        let mut sum = 0.0;
+                        for alpha in 0..DIM {
+                            for beta in 0..DIM {
+                                for gamma in 0..DIM {
+                                    for delta in 0..DIM {
+                                        sum += g_inv[(mu, alpha)]
+                                            * g_inv[(nu, beta)]
+                                            * g_inv[(rho, gamma)]
+                                            * g_inv[(sigma, delta)]
+                                            * weyl_lower[alpha][beta][gamma][delta];
+                                    }
+                                }
+                            }
+                        }
+                        weyl_all_up[mu][nu][rho][sigma] = sum;
+                    }
+                }
+            }
+        }
+
+        let volume = metric
+            .volume_element()
+            .unwrap_or_else(|| metric.determinant().abs().sqrt());
+        let mut epsilon_lower = [[[[0.0; DIM]; DIM]; DIM]; DIM];
+        for mu in 0..DIM {
+            for nu in 0..DIM {
+                for rho in 0..DIM {
+                    for sigma in 0..DIM {
+                        epsilon_lower[mu][nu][rho][sigma] =
+                            volume * levi_civita_symbol([mu, nu, rho, sigma]);
+                    }
+                }
+            }
+        }
+
+        let mut epsilon_mixed = [[[[0.0; DIM]; DIM]; DIM]; DIM];
+        for mu in 0..DIM {
+            for nu in 0..DIM {
+                for alpha in 0..DIM {
+                    for beta in 0..DIM {
+                        let mut sum = 0.0;
+                        for rho in 0..DIM {
+                            for sigma in 0..DIM {
+                                sum += epsilon_lower[mu][nu][rho][sigma]
+                                    * g_inv[(rho, alpha)]
+                                    * g_inv[(sigma, beta)];
+                            }
+                        }
+                        epsilon_mixed[mu][nu][alpha][beta] = sum;
+                    }
+                }
+            }
+        }
+
+        let mut weyl_dual_lower = [[[[0.0; DIM]; DIM]; DIM]; DIM];
+        for mu in 0..DIM {
+            for nu in 0..DIM {
+                for rho in 0..DIM {
+                    for sigma in 0..DIM {
+                        let mut sum = 0.0;
+                        for alpha in 0..DIM {
+                            for beta in 0..DIM {
+                                sum += epsilon_mixed[mu][nu][alpha][beta]
+                                    * weyl_lower[alpha][beta][rho][sigma];
+                            }
+                        }
+                        weyl_dual_lower[mu][nu][rho][sigma] = 0.5 * sum;
+                    }
+                }
+            }
+        }
+
+        let mut weyl_squared = 0.0;
+        let mut dual_contract = 0.0;
+        for mu in 0..DIM {
+            for nu in 0..DIM {
+                for rho in 0..DIM {
+                    for sigma in 0..DIM {
+                        weyl_squared += weyl_lower[mu][nu][rho][sigma] * weyl_all_up[mu][nu][rho][sigma];
+                        dual_contract +=
+                            weyl_dual_lower[mu][nu][rho][sigma] * weyl_all_up[mu][nu][rho][sigma];
+                    }
+                }
+            }
+        }
+
+        let manual_self = 0.5 * (weyl_squared + dual_contract);
+        let manual_anti = 0.5 * (weyl_squared - dual_contract);
+
+        assert_relative_eq!(diagnostics.weyl_self_dual_squared, manual_self, epsilon = 1e-9);
+        assert_relative_eq!(
+            diagnostics.weyl_anti_self_dual_squared,
+            manual_anti,
+            epsilon = 1e-9
+        );
     }
 
     #[test]
