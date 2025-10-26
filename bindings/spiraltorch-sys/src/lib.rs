@@ -288,6 +288,75 @@ pub unsafe extern "C" fn spiraltorch_tensor_copy_data(
     result.is_ok()
 }
 
+/// Copies a single row into the provided buffer. Returns `true` on success.
+#[no_mangle]
+pub unsafe extern "C" fn spiraltorch_tensor_copy_row(
+    handle: *const Tensor,
+    index: usize,
+    out: *mut f32,
+    len: usize,
+) -> bool {
+    let result = with_tensor(handle, |tensor| {
+        let (rows, cols) = tensor.shape();
+        if index >= rows {
+            return err(format!(
+                "tensor_copy_row index {index} out of range for {rows} rows"
+            ));
+        }
+        if cols != len {
+            return err(format!(
+                "tensor_copy_row expected buffer length {cols} but received {len}"
+            ));
+        }
+        if cols == 0 {
+            return ok(());
+        }
+        let out_ptr = require_non_null_mut(out, "out")?;
+        let data = tensor.data();
+        let offset = index * cols;
+        unsafe {
+            ptr::copy_nonoverlapping(data[offset..].as_ptr(), out_ptr, cols);
+        }
+        ok(())
+    });
+    result.is_ok()
+}
+
+/// Copies a single column into the provided buffer. Returns `true` on success.
+#[no_mangle]
+pub unsafe extern "C" fn spiraltorch_tensor_copy_column(
+    handle: *const Tensor,
+    index: usize,
+    out: *mut f32,
+    len: usize,
+) -> bool {
+    let result = with_tensor(handle, |tensor| {
+        let (rows, cols) = tensor.shape();
+        if index >= cols {
+            return err(format!(
+                "tensor_copy_column index {index} out of range for {cols} columns"
+            ));
+        }
+        if rows != len {
+            return err(format!(
+                "tensor_copy_column expected buffer length {rows} but received {len}"
+            ));
+        }
+        if rows == 0 {
+            return ok(());
+        }
+        let out_ptr = require_non_null_mut(out, "out")?;
+        let data = tensor.data();
+        // SAFETY: we validated that `out_ptr` is non-null and that `len == rows`.
+        let out_slice = unsafe { slice::from_raw_parts_mut(out_ptr, rows) };
+        for r in 0..rows {
+            out_slice[r] = data[r * cols + index];
+        }
+        ok(())
+    });
+    result.is_ok()
+}
+
 /// Exports the tensor as a managed DLPack tensor. Returns `NULL` on failure.
 #[no_mangle]
 pub extern "C" fn spiraltorch_tensor_to_dlpack(handle: *const Tensor) -> *mut DLManagedTensor {
