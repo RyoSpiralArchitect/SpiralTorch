@@ -232,6 +232,78 @@ func TestTensorCopyDataInto(t *testing.T) {
 	}
 }
 
+func TestTensorCopyRowInto(t *testing.T) {
+	tensor, err := NewTensorFromDense(3, 2, []float32{1, 2, 3, 4, 5, 6})
+	if err != nil {
+		t.Fatalf("NewTensorFromDense returned error: %v", err)
+	}
+	t.Cleanup(func() { tensor.Close() })
+
+	dest := make([]float32, 2)
+	if err := tensor.CopyRowInto(1, dest); err != nil {
+		t.Fatalf("CopyRowInto returned error: %v", err)
+	}
+	expected := []float32{3, 4}
+	for i, v := range expected {
+		if dest[i] != v {
+			t.Fatalf("unexpected row[%d]: got %v want %v", i, dest[i], v)
+		}
+	}
+
+	if err := tensor.CopyRowInto(5, dest); err == nil {
+		t.Fatalf("expected error for out-of-range row index")
+	}
+
+	if err := tensor.CopyRowInto(1, make([]float32, 1)); err == nil {
+		t.Fatalf("expected error for undersized row destination")
+	}
+
+	zeroCols, err := NewZerosTensor(4, 0)
+	if err != nil {
+		t.Fatalf("NewZerosTensor returned error: %v", err)
+	}
+	t.Cleanup(func() { zeroCols.Close() })
+	if err := zeroCols.CopyRowInto(2, nil); err != nil {
+		t.Fatalf("CopyRowInto for zero-column tensor returned error: %v", err)
+	}
+}
+
+func TestTensorCopyColumnInto(t *testing.T) {
+	tensor, err := NewTensorFromDense(2, 3, []float32{1, 2, 3, 4, 5, 6})
+	if err != nil {
+		t.Fatalf("NewTensorFromDense returned error: %v", err)
+	}
+	t.Cleanup(func() { tensor.Close() })
+
+	dest := make([]float32, 2)
+	if err := tensor.CopyColumnInto(2, dest); err != nil {
+		t.Fatalf("CopyColumnInto returned error: %v", err)
+	}
+	expected := []float32{3, 6}
+	for i, v := range expected {
+		if dest[i] != v {
+			t.Fatalf("unexpected column[%d]: got %v want %v", i, dest[i], v)
+		}
+	}
+
+	if err := tensor.CopyColumnInto(5, dest); err == nil {
+		t.Fatalf("expected error for out-of-range column index")
+	}
+
+	if err := tensor.CopyColumnInto(2, make([]float32, 1)); err == nil {
+		t.Fatalf("expected error for undersized column destination")
+	}
+
+	zeroRows, err := NewZerosTensor(0, 5)
+	if err != nil {
+		t.Fatalf("NewZerosTensor returned error: %v", err)
+	}
+	t.Cleanup(func() { zeroRows.Close() })
+	if err := zeroRows.CopyColumnInto(3, nil); err != nil {
+		t.Fatalf("CopyColumnInto for zero-row tensor returned error: %v", err)
+	}
+}
+
 func TestRuntimeParallelMatmul(t *testing.T) {
 	runtime := requireRuntime(t)
 

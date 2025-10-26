@@ -79,19 +79,19 @@ func (t *Tensor) ToMatrix() ([][]float32, error) {
 		return nil, err
 	}
 	if rows == 0 || cols == 0 {
-		return make([][]float32, rows), nil
-	}
-
-	flat, err := t.Data()
-	if err != nil {
-		return nil, err
+		matrix := make([][]float32, rows)
+		for r := range matrix {
+			matrix[r] = make([]float32, cols)
+		}
+		return matrix, nil
 	}
 
 	matrix := make([][]float32, rows)
 	for r := 0; r < rows; r++ {
-		start := r * cols
 		row := make([]float32, cols)
-		copy(row, flat[start:start+cols])
+		if err := t.copyRowInto(r, cols, row); err != nil {
+			return nil, err
+		}
 		matrix[r] = row
 	}
 	return matrix, nil
@@ -117,15 +117,10 @@ func (t *Tensor) Columns() ([][]float32, error) {
 		return result, nil
 	}
 
-	flat, err := t.Data()
-	if err != nil {
-		return nil, err
-	}
-
 	for c := 0; c < cols; c++ {
 		column := make([]float32, rows)
-		for r := 0; r < rows; r++ {
-			column[r] = flat[r*cols+c]
+		if err := t.copyColumnInto(c, rows, column); err != nil {
+			return nil, err
 		}
 		result[c] = column
 	}
@@ -150,14 +145,10 @@ func (t *Tensor) Row(index int) ([]float32, error) {
 		return make([]float32, 0), nil
 	}
 
-	flat, err := t.Data()
-	if err != nil {
+	row := make([]float32, cols)
+	if err := t.copyRowInto(index, cols, row); err != nil {
 		return nil, err
 	}
-
-	start := index * cols
-	row := make([]float32, cols)
-	copy(row, flat[start:start+cols])
 	return row, nil
 }
 
@@ -179,14 +170,9 @@ func (t *Tensor) Column(index int) ([]float32, error) {
 		return make([]float32, 0), nil
 	}
 
-	flat, err := t.Data()
-	if err != nil {
-		return nil, err
-	}
-
 	column := make([]float32, rows)
-	for r := 0; r < rows; r++ {
-		column[r] = flat[r*cols+index]
+	if err := t.copyColumnInto(index, rows, column); err != nil {
+		return nil, err
 	}
 	return column, nil
 }
