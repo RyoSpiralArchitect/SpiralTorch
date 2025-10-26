@@ -12,6 +12,7 @@ use st_frac::zspace::{
     evaluate_weighted_series, mellin_log_lattice_prefactor, prepare_weighted_series,
     trapezoidal_weights,
 };
+use st_logic::meta_layer::MetaNarrativeLayer;
 use st_logic::quantum_reality::ZSpace as LogicZSpace;
 use st_nn::{ConceptHint, MaxwellDesireBridge, NarrativeHint};
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -711,6 +712,19 @@ impl QuantumRealityStudio {
         self
     }
 
+    pub fn with_meta_layer(mut self, layer: MetaNarrativeLayer) -> Self {
+        self.meta = Some(layer);
+        self
+    }
+
+    pub fn set_meta_layer(&mut self, layer: MetaNarrativeLayer) {
+        self.meta = Some(layer);
+    }
+
+    pub fn clear_meta_layer(&mut self) {
+        self.meta = None;
+    }
+
     pub fn register_sink<S: StudioSink + 'static>(&mut self, sink: S) {
         self.outlet.register(sink);
     }
@@ -744,6 +758,10 @@ impl QuantumRealityStudio {
         timestamp: Option<SystemTime>,
     ) -> Result<StudioFrame, StudioError> {
         let channel = channel.as_ref();
+        let meta = self
+            .meta
+            .as_mut()
+            .and_then(|layer| layer.next_with_pulse(channel, &pulse));
         let emission = bridge.emit(channel, &pulse);
         let (concept, narrative) = match emission {
             Some((concept, narrative)) => {
@@ -751,6 +769,14 @@ impl QuantumRealityStudio {
             }
             None => (None, None),
         };
+        let mut narrative = narrative;
+        if let Some(resolved) = meta {
+            narrative = Some(NarrativeHint::new(
+                resolved.channel,
+                resolved.tags,
+                resolved.intensity,
+            ));
+        }
         let record = self.record_pulse(channel, pulse, timestamp)?;
         let concept_window = concept
             .as_ref()
@@ -982,6 +1008,7 @@ impl QuantumRealityStudio {
 mod tests {
     use super::*;
     use serde_json::Value;
+    use st_logic::meta_layer::{MeaningSection, MeaningSheaf, MetaNarrativeLayer, NarrativeBeat};
     use std::sync::{Arc, Mutex};
 
     fn sample_pulse() -> MaxwellZPulse {
@@ -1024,6 +1051,41 @@ mod tests {
         assert_eq!(frame.overlay.glyph, "braid");
         assert!(frame.overlay.intensity > 0.0);
         assert!(frame.overlay.glyphs().len() >= 1);
+    }
+
+    #[test]
+    fn meta_layer_overrides_bridge_narrative() {
+        let bridge = MaxwellDesireBridge::new()
+            .with_channel("alpha", vec![(0, 1.0)])
+            .unwrap();
+        let mut layer = MetaNarrativeLayer::new();
+        layer
+            .engine_mut()
+            .insert_event(
+                "beat-1",
+                NarrativeBeat::new(Some("alpha".into()), "z-open", vec!["causal".into()])
+                    .with_intensity_scale(0.5)
+                    .with_floor(0.1)
+                    .with_sheaf_threshold(0.05),
+            )
+            .unwrap();
+        layer.bridge_mut().attach(
+            "beat-1",
+            MeaningSheaf::new().with_section(MeaningSection::for_open(
+                "z-open",
+                vec!["sheaf".into()],
+                0.2,
+            )),
+        );
+        let mut studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge)
+            .with_meta_layer(layer);
+        let frame = studio
+            .ingest(&bridge, "alpha", sample_pulse(), None)
+            .expect("ingest with meta");
+        let narrative = frame.narrative.expect("meta narrative");
+        assert!(narrative.tags().iter().any(|tag| tag == "causal"));
+        assert!(narrative.tags().iter().any(|tag| tag == "sheaf"));
+        assert!(narrative.intensity() > 0.0);
     }
 
     #[test]
