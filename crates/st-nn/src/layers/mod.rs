@@ -4,6 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 pub mod activation;
+pub mod continuous_wavelet;
 pub mod conv;
 pub mod dropout;
 pub mod dynamic_field;
@@ -22,6 +23,7 @@ pub mod zspace_mixer;
 pub mod zspace_projector;
 
 pub use activation::Relu;
+pub use continuous_wavelet::ContinuousWaveletTransformLayer;
 pub use dropout::Dropout;
 pub use dynamic_field::{HamiltonJacobiFlow, KleinGordonPropagation, StochasticSchrodingerLayer};
 pub use gelu::Gelu;

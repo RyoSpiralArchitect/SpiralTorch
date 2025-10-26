@@ -2918,6 +2918,7 @@ dependencies = [
  "ndarray",
  "num-complex",
  "pollster",
+ "rand",
  "thiserror 1.0.69",
  "wgpu",
 ]
