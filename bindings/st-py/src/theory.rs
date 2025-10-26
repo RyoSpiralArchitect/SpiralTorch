@@ -318,6 +318,8 @@ impl PyZRelativityModel {
         dict.set_item("scalar_curvature", diagnostics.scalar_curvature)?;
         dict.set_item("ricci_square", diagnostics.ricci_square)?;
         dict.set_item("kretschmann", diagnostics.kretschmann)?;
+        dict.set_item("weyl_square", diagnostics.weyl_square)?;
+        dict.set_item("weyl_dual_contraction", diagnostics.weyl_dual_contraction)?;
         dict.set_item("weyl_self_dual_squared", diagnostics.weyl_self_dual_squared)?;
         dict.set_item(
             "weyl_anti_self_dual_squared",
