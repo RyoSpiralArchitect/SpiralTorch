@@ -1117,6 +1117,7 @@ _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
         "DataLoader": ("_NnDataLoader",),
         "DataLoaderIter": ("_NnDataLoaderIter",),
         "ZConv": ("PyZConv",),
+        "ZConv6DA": ("PyZConv6DA",),
         "ZPooling": ("PyZPooling",),
         "from_samples": ("nn_from_samples", "dataset_from_samples"),
         "CurvatureScheduler": ("CurvatureScheduler",),
