@@ -23,14 +23,17 @@
 //! geometries without having to re-derive the symbolic machinery.
 
 use core::fmt;
+use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::f64::consts::PI;
+use std::f64::consts::{FRAC_1_SQRT_2, PI};
 
-use nalgebra::{DMatrix, Matrix4, SymmetricEigen};
+use nalgebra::{DMatrix, Matrix3, Matrix4, SymmetricEigen, Vector3};
+use num_complex::Complex64;
 use st_tensor::{dlpack::DLManagedTensor, PureResult, Tensor};
 use thiserror::Error;
 
 const DIM: usize = 4;
+const BIVECTOR_BASIS: [(usize, usize); 6] = [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)];
 
 fn matrix4_to_tensor(matrix: &Matrix4<f64>) -> PureResult<Tensor> {
     let mut data = Vec::with_capacity(DIM * DIM);
@@ -1666,6 +1669,18 @@ pub struct CurvatureDiagnostics {
     pub weyl_self_dual_squared: f64,
     /// Weyl anti-self-dual channel squared norm ½(C·C − C·⋆C).
     pub weyl_anti_self_dual_squared: f64,
+    /// Weyl tensor represented on the self-dual bivector basis.
+    pub weyl_self_dual_matrix: [[Complex64; 3]; 3],
+    /// Weyl tensor represented on the anti-self-dual bivector basis.
+    pub weyl_anti_self_dual_matrix: [[Complex64; 3]; 3],
+    /// Complex Weyl invariant \(I = \tfrac{1}{2} \mathrm{tr}(C^2)\).
+    pub weyl_self_dual_invariant_i: Complex64,
+    /// Complex Weyl invariant \(J = -\tfrac{1}{6} \mathrm{tr}(C^3)\).
+    pub weyl_self_dual_invariant_j: Complex64,
+    /// Algebraic discriminant \(\Delta = I^3 - 27 J^2\) diagnosing Petrov degeneracy.
+    pub weyl_self_dual_discriminant: Complex64,
+    /// Eigenvalues of the self-dual Weyl matrix on the bivector basis.
+    pub weyl_self_dual_eigenvalues: [Complex64; 3],
 }
 
 impl CurvatureDiagnostics {
@@ -1780,6 +1795,8 @@ impl CurvatureDiagnostics {
             }
         }
 
+        let det = metric.determinant();
+        let volume = det.abs().sqrt();
         let volume = metric
             .volume_element()
             .unwrap_or_else(|| metric.determinant().abs().sqrt());
@@ -1850,12 +1867,121 @@ impl CurvatureDiagnostics {
 
         let weyl_self_dual_squared = 0.5 * (weyl_squared + dual_contract);
         let weyl_anti_self_dual_squared = 0.5 * (weyl_squared - dual_contract);
+
+        let mut weyl_bivector = [[0.0; 6]; 6];
+        for (a, &(mu, nu)) in BIVECTOR_BASIS.iter().enumerate() {
+            for (b, &(rho, sigma)) in BIVECTOR_BASIS.iter().enumerate() {
+                weyl_bivector[a][b] = 0.5 * weyl_lower[mu][nu][rho][sigma];
+            }
+        }
+
+        let mut weyl_bivector_complex = [[Complex64::new(0.0, 0.0); 6]; 6];
+        for row in 0..6 {
+            for col in 0..6 {
+                weyl_bivector_complex[row][col] = Complex64::new(weyl_bivector[row][col], 0.0);
+            }
+        }
+
+        let inv_sqrt_two = FRAC_1_SQRT_2;
+        let i = Complex64::new(0.0, 1.0);
+
+        let mut projector_plus = [[Complex64::new(0.0, 0.0); 3]; 6];
+        projector_plus[0][0] = Complex64::new(inv_sqrt_two, 0.0);
+        projector_plus[5][0] = i * inv_sqrt_two;
+        projector_plus[1][1] = Complex64::new(inv_sqrt_two, 0.0);
+        projector_plus[4][1] = -i * inv_sqrt_two;
+        projector_plus[2][2] = Complex64::new(inv_sqrt_two, 0.0);
+        projector_plus[3][2] = i * inv_sqrt_two;
+
+        let mut projector_minus = [[Complex64::new(0.0, 0.0); 3]; 6];
+        projector_minus[0][0] = Complex64::new(inv_sqrt_two, 0.0);
+        projector_minus[5][0] = -i * inv_sqrt_two;
+        projector_minus[1][1] = Complex64::new(inv_sqrt_two, 0.0);
+        projector_minus[4][1] = i * inv_sqrt_two;
+        projector_minus[2][2] = Complex64::new(inv_sqrt_two, 0.0);
+        projector_minus[3][2] = -i * inv_sqrt_two;
+
+        let mut temp_plus = [[Complex64::new(0.0, 0.0); 3]; 6];
+        let mut temp_minus = [[Complex64::new(0.0, 0.0); 3]; 6];
+        for row in 0..6 {
+            for col in 0..3 {
+                let mut sum_plus = Complex64::new(0.0, 0.0);
+                let mut sum_minus = Complex64::new(0.0, 0.0);
+                for k in 0..6 {
+                    sum_plus += weyl_bivector_complex[row][k] * projector_plus[k][col];
+                    sum_minus += weyl_bivector_complex[row][k] * projector_minus[k][col];
+                }
+                temp_plus[row][col] = sum_plus;
+                temp_minus[row][col] = sum_minus;
+            }
+        }
+
+        let mut weyl_self_dual_matrix = [[Complex64::new(0.0, 0.0); 3]; 3];
+        let mut weyl_anti_self_dual_matrix = [[Complex64::new(0.0, 0.0); 3]; 3];
+        for row in 0..3 {
+            for col in 0..3 {
+                let mut sum_plus = Complex64::new(0.0, 0.0);
+                let mut sum_minus = Complex64::new(0.0, 0.0);
+                for k in 0..6 {
+                    sum_plus += projector_plus[k][row].conj() * temp_plus[k][col];
+                    sum_minus += projector_minus[k][row].conj() * temp_minus[k][col];
+                }
+                weyl_self_dual_matrix[row][col] = sum_plus;
+                weyl_anti_self_dual_matrix[row][col] = sum_minus;
+            }
+        }
+
+        for row in 0..3 {
+            for col in row + 1..3 {
+                let sym_plus =
+                    0.5 * (weyl_self_dual_matrix[row][col] + weyl_self_dual_matrix[col][row]);
+                let sym_minus = 0.5
+                    * (weyl_anti_self_dual_matrix[row][col] + weyl_anti_self_dual_matrix[col][row]);
+                weyl_self_dual_matrix[row][col] = sym_plus;
+                weyl_self_dual_matrix[col][row] = sym_plus;
+                weyl_anti_self_dual_matrix[row][col] = sym_minus;
+                weyl_anti_self_dual_matrix[col][row] = sym_minus;
+            }
+        }
+
+        let weyl_self_dual_matrix_mat =
+            Matrix3::from_fn(|row, col| weyl_self_dual_matrix[row][col]);
+        let weyl_self_dual_square = weyl_self_dual_matrix_mat * weyl_self_dual_matrix_mat;
+        let weyl_self_dual_invariant_i = Complex64::new(0.5, 0.0) * weyl_self_dual_square.trace();
+        let weyl_self_dual_cube = weyl_self_dual_square * weyl_self_dual_matrix_mat;
+        let weyl_self_dual_invariant_j =
+            Complex64::new(-1.0 / 6.0, 0.0) * weyl_self_dual_cube.trace();
+        let weyl_self_dual_discriminant = weyl_self_dual_invariant_i
+            * weyl_self_dual_invariant_i
+            * weyl_self_dual_invariant_i
+            - Complex64::new(27.0, 0.0) * weyl_self_dual_invariant_j * weyl_self_dual_invariant_j;
+        let eigenvalues_vec = weyl_self_dual_matrix_mat
+            .eigenvalues()
+            .unwrap_or_else(|| Vector3::repeat(Complex64::new(0.0, 0.0)));
+        let mut weyl_self_dual_eigenvalues = [Complex64::new(0.0, 0.0); 3];
+        for index in 0..3 {
+            weyl_self_dual_eigenvalues[index] = eigenvalues_vec[index];
+        }
+        weyl_self_dual_eigenvalues.sort_by(|lhs, rhs| {
+            lhs.re
+                .partial_cmp(&rhs.re)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| lhs.im.partial_cmp(&rhs.im).unwrap_or(Ordering::Equal))
+        });
+
         let ricci_square = ricci.contracted_square(metric);
 
         Self {
             scalar_curvature,
             ricci_square,
             kretschmann,
+            weyl_anti_self_dual_squared,
+            weyl_self_dual_matrix,
+            weyl_anti_self_dual_matrix,
+            weyl_self_dual_invariant_i,
+            weyl_self_dual_invariant_j,
+            weyl_self_dual_discriminant,
+            weyl_self_dual_eigenvalues,
             weyl_square: weyl_squared,
             weyl_dual_contraction: dual_contract,
             weyl_self_dual_squared,
@@ -1928,7 +2054,8 @@ impl GeneralRelativityModel {
 mod tests {
     use super::*;
     use approx::assert_relative_eq;
-    use nalgebra::{DMatrix, DVector, Vector4};
+    use nalgebra::{DMatrix, DVector, Matrix4, Vector4};
+    use num_complex::Complex64;
 
     fn assign_riemann_component(
         tensor: &mut [[[[f64; DIM]; DIM]; DIM]; DIM],
@@ -2053,6 +2180,113 @@ mod tests {
             for nu in 0..DIM {
                 assert_relative_eq!(residual[mu][nu], 0.0, epsilon = 1e-12);
             }
+        }
+    }
+
+    #[test]
+    fn self_dual_decomposition_matches_electric_mode() {
+        let metric =
+            LorentzianMetric::try_new(Matrix4::from_diagonal(&Vector4::new(-1.0, 1.0, 1.0, 1.0)))
+                .unwrap();
+
+        let expected = [2.0, -1.0, -1.0];
+        let mut bivector_operator = [[0.0; 6]; 6];
+        for index in 0..6 {
+            bivector_operator[index][index] = expected[index % 3];
+        }
+
+        let mut weyl_lower = [[[[0.0; DIM]; DIM]; DIM]; DIM];
+        for (a, &(mu, nu)) in BIVECTOR_BASIS.iter().enumerate() {
+            for (b, &(rho, sigma)) in BIVECTOR_BASIS.iter().enumerate() {
+                let value = 2.0 * bivector_operator[a][b];
+                weyl_lower[mu][nu][rho][sigma] = value;
+                weyl_lower[nu][mu][rho][sigma] = -value;
+                weyl_lower[mu][nu][sigma][rho] = -value;
+                weyl_lower[nu][mu][sigma][rho] = value;
+                weyl_lower[rho][sigma][mu][nu] = value;
+                weyl_lower[sigma][rho][mu][nu] = -value;
+                weyl_lower[rho][sigma][nu][mu] = -value;
+                weyl_lower[sigma][rho][nu][mu] = value;
+            }
+        }
+
+        let inverse = metric.inverse();
+        let mut components = [[[[0.0; DIM]; DIM]; DIM]; DIM];
+        for sigma in 0..DIM {
+            for mu in 0..DIM {
+                for nu in 0..DIM {
+                    for rho in 0..DIM {
+                        let mut sum = 0.0;
+                        for alpha in 0..DIM {
+                            sum += inverse[(sigma, alpha)] * weyl_lower[alpha][mu][nu][rho];
+                        }
+                        components[sigma][mu][nu][rho] = sum;
+                    }
+                }
+            }
+        }
+
+        let riemann = RiemannTensor { components };
+        let ricci = RicciTensor {
+            components: [[0.0; DIM]; DIM],
+        };
+        let scalar = 0.0;
+
+        let diagnostics = CurvatureDiagnostics::from_fields(&riemann, &metric, &ricci, scalar);
+
+        for row in 0..3 {
+            for col in 0..3 {
+                let self_diff = diagnostics.weyl_self_dual_matrix[row][col]
+                    - diagnostics.weyl_self_dual_matrix[col][row];
+                assert!(self_diff.norm() <= 1e-12);
+                let anti_diff = diagnostics.weyl_anti_self_dual_matrix[row][col]
+                    - diagnostics.weyl_anti_self_dual_matrix[col][row];
+                assert!(anti_diff.norm() <= 1e-12);
+            }
+        }
+
+        let mut self_dual_norm = 0.0;
+        let mut anti_self_dual_norm = 0.0;
+        for row in 0..3 {
+            for col in 0..3 {
+                let self_entry = diagnostics.weyl_self_dual_matrix[row][col];
+                let anti_entry = diagnostics.weyl_anti_self_dual_matrix[row][col];
+                self_dual_norm += (self_entry.conj() * self_entry).re;
+                anti_self_dual_norm += (anti_entry.conj() * anti_entry).re;
+            }
+        }
+
+        assert_relative_eq!(
+            diagnostics.weyl_self_dual_squared,
+            64.0 * self_dual_norm,
+            epsilon = 1e-12
+        );
+        assert_relative_eq!(
+            diagnostics.weyl_anti_self_dual_squared,
+            64.0 * anti_self_dual_norm,
+            epsilon = 1e-12
+        );
+
+        let expected_i = Complex64::new(0.75, 0.0);
+        let expected_j = Complex64::new(0.125, 0.0);
+        assert!((diagnostics.weyl_self_dual_invariant_i - expected_i).norm() <= 1e-12);
+        assert!((diagnostics.weyl_self_dual_invariant_j - expected_j).norm() <= 1e-12);
+        assert!(diagnostics.weyl_self_dual_discriminant.norm() <= 1e-12);
+
+        let mut eigenvalues = diagnostics.weyl_self_dual_eigenvalues;
+        eigenvalues.sort_by(|lhs, rhs| {
+            lhs.re
+                .partial_cmp(&rhs.re)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| lhs.im.partial_cmp(&rhs.im).unwrap_or(Ordering::Equal))
+        });
+        let expected_eigenvalues = [
+            Complex64::new(-1.0, 0.0),
+            Complex64::new(0.5, 0.0),
+            Complex64::new(0.5, 0.0),
+        ];
+        for (value, expected) in eigenvalues.iter().zip(expected_eigenvalues.iter()) {
+            assert!((*value - *expected).norm() <= 1e-12);
         }
     }
 

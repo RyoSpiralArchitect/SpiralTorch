@@ -7,6 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 use st_core::maxwell::MaxwellZPulse;
+use st_core::theory::inflaton_zspace::PrimordialProjection;
 use st_frac::mellin_types::ComplexScalar;
 use st_frac::zspace::{
     evaluate_weighted_series, mellin_log_lattice_prefactor, prepare_weighted_series,
@@ -21,6 +22,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
 pub use st_core::maxwell::MaxwellZPulse as MaxwellPulse;
+
+mod meta;
+
+pub use meta::{TemporalCausalAnnotation, TemporalLogicEngine, ToposLogicBridge};
 
 const DEFAULT_HISTORY: usize = 512;
 
@@ -224,6 +229,100 @@ impl OverlayFrame {
             self.glyph = self.channel.clone();
             self.intensity = 0.0;
         }
+    }
+
+    pub fn new(
+        channel: impl Into<String>,
+        timestamp: SystemTime,
+        glyphs: Vec<OverlayGlyph>,
+    ) -> Self {
+        let channel = channel.into();
+        let mut filtered: Vec<OverlayGlyph> = glyphs
+            .into_iter()
+            .filter(|glyph| !glyph.glyph.trim().is_empty())
+            .collect();
+        if filtered.is_empty() {
+            filtered.push(OverlayGlyph::new(channel.clone(), 0.0));
+        }
+        let mut frame = Self {
+            channel,
+            glyph: String::new(),
+            intensity: 0.0,
+            timestamp,
+            glyphs: Vec::new(),
+        };
+        for glyph in filtered {
+            frame.push_glyph(glyph);
+        }
+        frame.refresh_primary();
+        frame
+    }
+
+    pub fn from_pairs<I, S>(channel: impl Into<String>, timestamp: SystemTime, pairs: I) -> Self
+    where
+        I: IntoIterator<Item = (S, f32)>,
+        S: Into<String>,
+    {
+        let glyphs = pairs
+            .into_iter()
+            .map(|(glyph, intensity)| OverlayGlyph::new(glyph, intensity))
+            .collect();
+        Self::new(channel, timestamp, glyphs)
+    }
+
+    pub fn from_glyphs_and_intensities<G, IG, II>(
+        channel: impl Into<String>,
+        timestamp: SystemTime,
+        glyphs: IG,
+        intensities: II,
+    ) -> Self
+    where
+        IG: IntoIterator<Item = G>,
+        G: Into<String>,
+        II: IntoIterator<Item = f32>,
+    {
+        let mut glyph_iter = glyphs.into_iter();
+        let mut intensity_iter = intensities.into_iter();
+        let pairs = std::iter::from_fn(move || {
+            let glyph = glyph_iter.next()?;
+            let intensity = intensity_iter.next().unwrap_or(0.0);
+            Some((glyph, intensity))
+        });
+        Self::from_pairs(channel, timestamp, pairs)
+    }
+
+    pub fn push_glyph(&mut self, glyph: OverlayGlyph) {
+        if glyph.glyph.trim().is_empty() {
+            return;
+        }
+        if self
+            .glyphs
+            .iter()
+            .any(|existing| existing.glyph == glyph.glyph)
+        {
+            return;
+        }
+        self.glyphs.push(glyph);
+        self.refresh_primary();
+    }
+
+    pub fn extend_tags<I>(&mut self, tags: I, base_intensity: f32)
+    where
+        I: IntoIterator,
+        I::Item: Into<String>,
+    {
+        for (idx, tag) in tags.into_iter().enumerate() {
+            let glyph = tag.into();
+            if glyph.trim().is_empty() {
+                continue;
+            }
+            let falloff = base_intensity * 0.75_f32.powi((idx + 1) as i32);
+            self.push_glyph(OverlayGlyph::new(glyph, falloff));
+        }
+    }
+
+    pub fn glyphs(&self) -> &[OverlayGlyph] {
+        &self.glyphs
     }
 
     pub fn new(
@@ -598,6 +697,79 @@ impl ZSpaceSink {
             .collect()
     }
 
+    /// Injects a pre-computed slow-roll background projection straight into the sink.
+    pub fn ingest_primordial_projection(
+        &self,
+        channel: impl Into<String>,
+        projection: &PrimordialProjection,
+    ) -> Result<(), StudioSinkError> {
+        if projection.is_empty() {
+            return Ok(());
+        }
+
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| self.failure("state mutex poisoned"))?;
+        guard.log_start = projection.log_start as f32;
+        guard.log_step = projection.log_step as f32;
+        guard.s_values = projection
+            .s_values
+            .iter()
+            .map(|value| ComplexScalar::new(value.re as f32, value.im as f32))
+            .collect();
+
+        let root_channel = channel.into();
+        let mut projections = Vec::new();
+        for (suffix, values) in [
+            (
+                "",
+                projection
+                    .spectrum
+                    .iter()
+                    .map(|&v| (v as f32, 0.0))
+                    .collect::<Vec<_>>(),
+            ),
+            (
+                "::H",
+                projection
+                    .h_z
+                    .iter()
+                    .map(|value| (value.re as f32, value.im as f32))
+                    .collect::<Vec<_>>(),
+            ),
+            (
+                "::epsilon",
+                projection
+                    .epsilon_z
+                    .iter()
+                    .map(|value| (value.re as f32, value.im as f32))
+                    .collect::<Vec<_>>(),
+            ),
+        ] {
+            let channel_name = format!("{}{}", root_channel, suffix);
+            let mut evaluations = Vec::with_capacity(projection.len());
+            for idx in 0..projection.len() {
+                let s = &projection.s_values[idx];
+                let z = &projection.z_points[idx];
+                let (value_re, value_im) = values[idx];
+                evaluations.push(ZSpaceEvaluation {
+                    s: (s.re as f32, s.im as f32),
+                    z: (z.re as f32, z.im as f32),
+                    value: (value_re, value_im),
+                });
+            }
+            projections.push(ZSpaceProjection {
+                channel: channel_name,
+                lattice_len: projection.lattice_len,
+                evaluations,
+            });
+        }
+
+        guard.projections.extend(projections);
+        Ok(())
+    }
+
     fn failure(&self, reason: impl Into<String>) -> StudioSinkError {
         StudioSinkError::Transmission {
             sink: self.name.clone(),
@@ -838,6 +1010,21 @@ impl QuantumRealityStudio {
             meta_details = Some(meta_narrative);
         }
         let record = self.record_pulse(channel, pulse, timestamp)?;
+        let mut narrative = narrative;
+        let mut frame_z_space = StudioZSpace::from(LogicZSpace::from(pulse.clone()));
+        if let Some(resolved) = meta {
+            narrative = Some(NarrativeHint::new(
+                resolved.channel,
+                resolved.tags,
+                resolved.intensity,
+            ));
+            frame_z_space = StudioZSpace::from(&resolved.z_space);
+        }
+        let record = self.record_pulse(channel, pulse, timestamp)?;
+        let concept_window = concept
+            .as_ref()
+            .and_then(|hint| ConceptWindow::from_hint(&record, hint));
+        let annotation = self.meta.observe(&record, concept_window.as_ref());
         let mut overlay = self.overlay.compose(
             &record,
             narrative.as_ref(),
@@ -848,6 +1035,12 @@ impl QuantumRealityStudio {
         } else if let Some(fallback) = self.tagger.fallback_for(channel) {
             overlay = self.stitch_narrative_tags(overlay, fallback.iter().cloned());
         }
+        let temporal_tags = TemporalLogicEngine::temporal_tags(&annotation);
+        overlay = self.stitch_narrative_tags(overlay, temporal_tags.into_iter());
+        let sheaf_tags = self
+            .topos
+            .update(&record, concept_window.as_ref(), &annotation);
+        overlay = self.stitch_narrative_tags(overlay, sheaf_tags.into_iter());
         let frame = StudioFrame {
             record,
             concept,
@@ -870,6 +1063,14 @@ impl QuantumRealityStudio {
 
     pub fn frames(&self) -> impl Iterator<Item = &StudioFrame> {
         self.frames.iter()
+    }
+
+    pub fn causal_snapshot(&self) -> Vec<TemporalCausalAnnotation> {
+        self.meta.snapshot()
+    }
+
+    pub fn meaning_sheaf(&self, channel: &str) -> Option<LogicZSpace> {
+        self.topos.meaning_sheaf(channel)
     }
 
     pub fn emit_concept_window(&self, frame: &StudioFrame) -> Option<ConceptWindow> {
@@ -904,6 +1105,10 @@ impl QuantumRealityStudio {
         overlay
     }
 
+    pub fn export_storyboard(&self) -> serde_json::Value {
+        if !self.frames.is_empty() {
+            let frames: Vec<serde_json::Value> = self
+                .frames
     fn storyboard_entries(&self) -> Vec<serde_json::Value> {
         if !self.frames.is_empty() {
             self.frames
@@ -943,6 +1148,17 @@ impl QuantumRealityStudio {
                             "glyphs": frame.overlay.glyphs.clone(),
                         }),
                     );
+                    entry.insert(
+                        "causal".into(),
+                        serde_json::json!({
+                            "event_id": frame.causal.event_id,
+                            "ordinal": frame.causal.ordinal,
+                            "timestamp": frame.causal.timestamp,
+                            "depth": frame.causal.depth,
+                            "parents": frame.causal.parent_channels.clone(),
+                            "magnitude": frame.causal.magnitude,
+                        }),
+                    );
                     if let Some(narrative) = frame.narrative.as_ref() {
                         entry.insert(
                             "narrative".into(),
@@ -977,6 +1193,14 @@ impl QuantumRealityStudio {
                             }),
                         );
                     }
+                    if let Some(sheaf) = self.meaning_sheaf(&frame.record.channel) {
+                        entry.insert(
+                            "meaning_sheaf".into(),
+                            serde_json::json!({
+                                "signature": sheaf.signature,
+                            }),
+                        );
+                    }
                     serde_json::Value::Object(entry)
                 })
                 .collect()
@@ -998,6 +1222,9 @@ impl QuantumRealityStudio {
                         "z_bias": record.pulse.z_bias,
                     })
                 })
+                .collect();
+            serde_json::json!({ "frames": frames })
+        }
                 .collect()
         }
     }
@@ -1043,7 +1270,9 @@ impl QuantumRealityStudio {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use num_complex::Complex64;
     use serde_json::Value;
+    use st_core::theory::inflaton_zspace::{z_transform, LogLattice, PrimordialProjection};
     use st_logic::meta_layer::{MeaningSection, MeaningSheaf, MetaNarrativeLayer, NarrativeBeat};
     use std::sync::{Arc, Mutex};
 
@@ -1144,6 +1373,43 @@ mod tests {
         );
         assert!(narrative.intensity() > 0.0);
         assert!((frame.z_space.signature()[3] - 4.2).abs() < 1e-6);
+        assert!(narrative.intensity() > 0.0);
+        assert!((frame.z_space.signature()[3] - 4.2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn meta_layer_overrides_bridge_narrative() {
+        let bridge = MaxwellDesireBridge::new()
+            .with_channel("alpha", vec![(0, 1.0)])
+            .unwrap();
+        let mut layer = MetaNarrativeLayer::new();
+        layer
+            .engine_mut()
+            .insert_event(
+                "beat-1",
+                NarrativeBeat::new(Some("alpha".into()), "z-open", vec!["causal".into()])
+                    .with_intensity_scale(0.5)
+                    .with_floor(0.1)
+                    .with_sheaf_threshold(0.05),
+            )
+            .unwrap();
+        layer.bridge_mut().attach(
+            "beat-1",
+            MeaningSheaf::new().with_section(MeaningSection::for_open(
+                "z-open",
+                vec!["sheaf".into()],
+                0.2,
+            )),
+        );
+        let mut studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge)
+            .with_meta_layer(layer);
+        let frame = studio
+            .ingest(&bridge, "alpha", sample_pulse(), None)
+            .expect("ingest with meta");
+        let narrative = frame.narrative.expect("meta narrative");
+        assert!(narrative.tags().iter().any(|tag| tag == "causal"));
+        assert!(narrative.tags().iter().any(|tag| tag == "sheaf"));
+        assert!(narrative.intensity() > 0.0);
     }
 
     #[test]
@@ -1272,6 +1538,14 @@ mod tests {
             .and_then(Value::as_array)
             .expect("glyph list");
         assert!(glyphs.len() >= 1);
+        let causal = entry
+            .get("causal")
+            .and_then(Value::as_object)
+            .expect("causal object");
+        assert_eq!(
+            causal.get("ordinal").and_then(Value::as_u64).unwrap() as usize,
+            frame.causal.ordinal
+        );
         let narrative = entry
             .get("narrative")
             .and_then(Value::as_object)
@@ -1290,6 +1564,37 @@ mod tests {
             .and_then(Value::as_array)
             .expect("weights array");
         assert!(!weights.is_empty());
+        let sheaf = entry
+            .get("meaning_sheaf")
+            .and_then(Value::as_object)
+            .expect("meaning sheaf object");
+        assert!(sheaf
+            .get("signature")
+            .and_then(Value::as_array)
+            .map(|values| !values.is_empty())
+            .unwrap_or(false));
+    }
+
+    #[test]
+    fn causal_snapshot_orders_events() {
+        let bridge = MaxwellDesireBridge::new()
+            .with_channel_and_narrative("alpha", vec![(0, 1.0)], vec!["braid".into()])
+            .unwrap();
+        let mut studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge);
+        studio
+            .ingest(&bridge, "alpha", sample_pulse(), None)
+            .expect("first ingest");
+        let mut second = sample_pulse();
+        second.z_score = 5.0;
+        studio
+            .ingest(&bridge, "alpha", second, None)
+            .expect("second ingest");
+
+        let snapshot = studio.causal_snapshot();
+        assert_eq!(snapshot.len(), 2);
+        assert!(snapshot[1].ordinal > snapshot[0].ordinal);
+        assert!(snapshot[1].depth >= snapshot[0].depth);
+        assert!(!snapshot[1].parents.is_empty());
     }
 
     #[test]
@@ -1449,6 +1754,73 @@ mod tests {
         assert!(stitched.glyphs().len() >= 2);
         let intensities: Vec<f32> = stitched.glyphs().iter().map(|g| g.intensity).collect();
         assert!(intensities[0] >= intensities[1]);
+    }
+
+    #[test]
+    fn zspace_sink_ingests_primordial_projection_bundle() {
+        let log_start = 0.0;
+        let log_step = 0.25;
+        let hubble_samples = vec![12.0, 11.5, 11.0, 10.5];
+        let epsilon_samples = vec![0.01, 0.011, 0.012, 0.013];
+        let hubble_lattice = LogLattice::from_samples(log_start, log_step, hubble_samples.clone());
+        let epsilon_lattice =
+            LogLattice::from_samples(log_start, log_step, epsilon_samples.clone());
+        let s_values = vec![
+            Complex64::new(1.0, 0.0),
+            Complex64::new(1.0, 0.5),
+            Complex64::new(1.0, -0.5),
+        ];
+        let z_points: Vec<Complex64> = s_values
+            .iter()
+            .map(|s| (s * Complex64::new(log_step, 0.0)).exp())
+            .collect();
+        let h_z: Vec<Complex64> = z_points
+            .iter()
+            .map(|&z| z_transform(&hubble_lattice.weights, &hubble_lattice.samples, z))
+            .collect();
+        let epsilon_z: Vec<Complex64> = z_points
+            .iter()
+            .map(|&z| z_transform(&epsilon_lattice.weights, &epsilon_lattice.samples, z))
+            .collect();
+        let projection = PrimordialProjection::new(
+            log_start,
+            log_step,
+            hubble_lattice.len(),
+            s_values.clone(),
+            z_points.clone(),
+            h_z.clone(),
+            epsilon_z.clone(),
+            2.435e18,
+        );
+
+        let sink = ZSpaceSink::new(
+            "inflation",
+            log_start as f32,
+            log_step as f32,
+            s_values
+                .iter()
+                .map(|s| ComplexScalar::new(s.re as f32, s.im as f32))
+                .collect(),
+        );
+        sink.ingest_primordial_projection("inflation", &projection)
+            .expect("ingest projection");
+        let projections = sink.take_projections();
+        assert_eq!(projections.len(), 3);
+        let mut channels: Vec<String> = projections.iter().map(|p| p.channel.clone()).collect();
+        channels.sort();
+        assert_eq!(
+            channels,
+            vec!["inflation", "inflation::H", "inflation::epsilon"]
+        );
+        let spectrum_projection = projections
+            .into_iter()
+            .find(|p| p.channel == "inflation")
+            .expect("spectrum channel");
+        assert_eq!(spectrum_projection.evaluations.len(), projection.len());
+        for eval in spectrum_projection.evaluations {
+            assert!(eval.value.0.is_finite());
+            assert_eq!(eval.value.1, 0.0);
+        }
     }
 
     #[test]
