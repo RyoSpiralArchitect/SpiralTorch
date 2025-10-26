@@ -325,6 +325,38 @@ impl PyZRelativityModel {
             "weyl_anti_self_dual_squared",
             diagnostics.weyl_anti_self_dual_squared,
         )?;
+        dict.set_item(
+            "weyl_self_dual_matrix",
+            diagnostics
+                .weyl_self_dual_matrix
+                .iter()
+                .map(|row| row.to_vec())
+                .collect::<Vec<_>>(),
+        )?;
+        dict.set_item(
+            "weyl_anti_self_dual_matrix",
+            diagnostics
+                .weyl_anti_self_dual_matrix
+                .iter()
+                .map(|row| row.to_vec())
+                .collect::<Vec<_>>(),
+        )?;
+        dict.set_item(
+            "weyl_self_dual_invariant_i",
+            diagnostics.weyl_self_dual_invariant_i,
+        )?;
+        dict.set_item(
+            "weyl_self_dual_invariant_j",
+            diagnostics.weyl_self_dual_invariant_j,
+        )?;
+        dict.set_item(
+            "weyl_self_dual_discriminant",
+            diagnostics.weyl_self_dual_discriminant,
+        )?;
+        dict.set_item(
+            "weyl_self_dual_eigenvalues",
+            diagnostics.weyl_self_dual_eigenvalues.to_vec(),
+        )?;
         Ok(dict.into())
     }
 
