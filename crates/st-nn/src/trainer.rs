@@ -141,9 +141,34 @@ impl CurvatureScheduler {
         self.current
     }
 
+    /// Returns the minimum curvature allowed by the scheduler.
+    pub fn min_curvature(&self) -> f32 {
+        self.min_curvature
+    }
+
+    /// Returns the maximum curvature allowed by the scheduler.
+    pub fn max_curvature(&self) -> f32 {
+        self.max_curvature
+    }
+
     /// Returns the configured target pressure.
     pub fn target_pressure(&self) -> f32 {
         self.target_pressure
+    }
+
+    /// Returns the maximum curvature delta applied per observation.
+    pub fn step_size(&self) -> f32 {
+        self.step
+    }
+
+    /// Returns the tolerated pressure band before adjustments.
+    pub fn tolerance(&self) -> f32 {
+        self.tolerance
+    }
+
+    /// Returns the smoothing factor applied to the pressure EMA.
+    pub fn smoothing(&self) -> f32 {
+        self.alpha
     }
 
     /// Returns the last smoothed pressure observation, if available.
@@ -160,10 +185,56 @@ impl CurvatureScheduler {
         self.ema_pressure = None;
     }
 
+    /// Adjusts the curvature bounds while keeping the current value within range.
+    pub fn set_bounds(&mut self, min_curvature: f32, max_curvature: f32) {
+        let mut min_curvature = min_curvature.min(-1e-6);
+        let mut max_curvature = max_curvature.min(-1e-6);
+        if min_curvature > max_curvature {
+            core::mem::swap(&mut min_curvature, &mut max_curvature);
+        }
+        self.min_curvature = min_curvature;
+        self.max_curvature = max_curvature;
+        self.current = self
+            .current
+            .clamp(self.min_curvature, self.max_curvature)
+            .min(-1e-6);
+    }
+
+    /// Adjusts the target pressure for future observations.
+    pub fn set_target_pressure(&mut self, target_pressure: f32) {
+        self.target_pressure = target_pressure.max(0.0);
+    }
+
+    /// Adjusts the maximum step a single observation may move the curvature by.
+    pub fn set_step(&mut self, step: f32) {
+        if step.is_finite() && step > 0.0 {
+            self.step = step;
+        }
+    }
+
+    /// Adjusts the tolerated pressure band before the curvature is nudged.
+    pub fn set_tolerance(&mut self, tolerance: f32) {
+        if tolerance.is_finite() && tolerance >= 0.0 {
+            self.tolerance = tolerance;
+        }
+    }
+
+    /// Adjusts the smoothing factor applied to the pressure EMA.
+    pub fn set_smoothing(&mut self, alpha: f32) {
+        if alpha.is_finite() && alpha > 0.0 {
+            self.alpha = alpha.clamp(0.01, 1.0);
+        }
+    }
+
     /// Records a gradient summary returning the raw/smoothed pressure alongside
     /// the curvature chosen for the next step.
     pub fn observe(&mut self, summary: GradientSummary) -> CurvatureDecision {
         let raw_pressure = summary.mean_abs();
+        self.observe_pressure(raw_pressure)
+    }
+
+    /// Records a raw pressure observation without requiring a full gradient summary.
+    pub fn observe_pressure(&mut self, raw_pressure: f32) -> CurvatureDecision {
         let smoothed = match self.ema_pressure {
             Some(prev) => prev + self.alpha * (raw_pressure - prev),
             None => raw_pressure,

@@ -89,3 +89,9 @@ pub use stv_impl as stv;
 pub mod general_relativity_impl;
 #[doc(inline)]
 pub use general_relativity_impl as general_relativity;
+
+#[path = "inflaton_zspace.rs"]
+#[doc(hidden)]
+pub mod inflaton_zspace_impl;
+#[doc(inline)]
+pub use inflaton_zspace_impl as inflaton_zspace;

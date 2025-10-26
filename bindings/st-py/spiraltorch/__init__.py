@@ -953,6 +953,9 @@ class _ZSpaceNotation:
     def __call__(self, text: str, **kwargs: _Any) -> _Any:
         return encode_zspace(text, **kwargs)
 
+    def _module(self) -> _types.ModuleType:
+        return _ensure_submodule("zspace")
+
     def __getitem__(self, selector: _Any) -> _Any:
         if isinstance(selector, str):
             return encode_zspace(selector)
@@ -982,6 +985,34 @@ class _ZSpaceNotation:
 
     def metrics(self, **kwargs: _Any) -> ZMetrics:
         return z_metrics(**kwargs)
+
+    def describe(self, *, latest: bool = True, feedback: bool = False) -> _Any:
+        module = self._module()
+        describe = _safe_getattr(module, "describe") or _safe_getattr(module, "describe_zspace")
+        if describe is None:
+            raise RuntimeError("z.describe() is unavailable in this build")
+        return describe(latest=latest, feedback=feedback)
+
+    def feedback(self) -> _Any:
+        module = self._module()
+        feedback = _safe_getattr(module, "feedback") or _safe_getattr(module, "softlogic_feedback")
+        if feedback is None:
+            raise RuntimeError("z.feedback() is unavailable in this build")
+        return feedback()
+
+    def snapshot(self) -> _Any:
+        module = self._module()
+        snapshot = _safe_getattr(module, "snapshot") or _safe_getattr(module, "zspace_snapshot")
+        if snapshot is None:
+            raise RuntimeError("z.snapshot() is unavailable in this build")
+        return snapshot()
+
+    def signal(self) -> _Any:
+        module = self._module()
+        signal = _safe_getattr(module, "softlogic_signal")
+        if signal is None:
+            raise RuntimeError("z.signal() is unavailable in this build")
+        return signal()
 
     def partial(
         self,
@@ -1088,6 +1119,9 @@ _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
         "ZConv": ("PyZConv",),
         "ZPooling": ("PyZPooling",),
         "from_samples": ("nn_from_samples", "dataset_from_samples"),
+        "CurvatureScheduler": ("CurvatureScheduler",),
+        "CurvatureDecision": ("CurvatureDecision",),
+        "softlogic_signal": ("softlogic_signal",),
     },
     "compat": {
         "capture": ("capture",),
@@ -1140,6 +1174,21 @@ _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
         "DashboardFrame": ("PyDashboardFrame",),
         "DashboardRing": ("PyDashboardRing",),
         "DashboardRingIter": ("PyDashboardRingIter",),
+        "current": ("current",),
+        "SoftlogicZFeedback": ("SoftlogicZFeedback",),
+        "ZSpaceRegionDescriptor": ("ZSpaceRegionDescriptor",),
+    },
+    "zspace": {
+        "ZSpaceSpinBand": ("ZSpaceSpinBand",),
+        "ZSpaceRadiusBand": ("ZSpaceRadiusBand",),
+        "ZSpaceRegionKey": ("ZSpaceRegionKey",),
+        "ZSpaceRegionDescriptor": ("ZSpaceRegionDescriptor",),
+        "SoftlogicEllipticSample": ("SoftlogicEllipticSample",),
+        "SoftlogicZFeedback": ("SoftlogicZFeedback",),
+        "snapshot": ("snapshot", "zspace_snapshot"),
+        "feedback": ("feedback", "softlogic_feedback"),
+        "describe": ("describe", "describe_zspace"),
+        "softlogic_signal": ("softlogic_signal",),
     },
     "export": {
         "QatObserver": ("PyQatObserver",),

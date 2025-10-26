@@ -7,7 +7,7 @@ use pyo3::wrap_pyfunction;
 use pyo3::exceptions::PyValueError;
 
 #[cfg(feature = "nn")]
-use crate::pure::PyOpenCartesianTopos;
+use crate::pure::{PyGradientSummary, PyOpenCartesianTopos};
 #[cfg(feature = "nn")]
 use crate::tensor::{tensor_err_to_py, tensor_to_torch, PyTensor};
 #[cfg(feature = "nn")]
@@ -15,6 +15,10 @@ use crate::theory::PyZRelativityModel;
 
 #[cfg(feature = "nn")]
 use st_core::theory::zpulse::ZScale;
+#[cfg(feature = "nn")]
+use st_nn::trainer::{
+    CurvatureDecision as RustCurvatureDecision, CurvatureScheduler as RustCurvatureScheduler,
+};
 #[cfg(feature = "nn")]
 use st_nn::Module;
 #[cfg(feature = "nn")]
@@ -30,8 +34,7 @@ use st_nn::{
         CoherenceObservation, CoherenceSignature, LinguisticChannelReport, PreDiscardPolicy,
         PreDiscardSnapshot, PreDiscardTelemetry,
     },
-    DataLoader, Dataset, ZRelativityModule,
-    AvgPool2d, MaxPool2d, ZSpaceCoherenceSequencer,
+    AvgPool2d, DataLoader, Dataset, MaxPool2d, ZRelativityModule, ZSpaceCoherenceSequencer,
 };
 #[cfg(feature = "nn")]
 use st_tensor::{OpenCartesianTopos, Tensor, TensorError};
@@ -94,6 +97,19 @@ enum LayoutDirection {
 }
 
 #[cfg(feature = "nn")]
+impl LayoutDirection {
+    fn parse(label: &str) -> PyResult<Self> {
+        match label.to_ascii_lowercase().as_str() {
+            "to_canonical" | "to-canonical" | "to" => Ok(Self::ToCanonical),
+            "from_canonical" | "from-canonical" | "from" => Ok(Self::FromCanonical),
+            other => Err(PyValueError::new_err(format!(
+                "unknown layout direction '{other}', expected 'to_canonical' or 'from_canonical'"
+            ))),
+        }
+    }
+}
+
+#[cfg(feature = "nn")]
 #[derive(Clone, Copy, Debug)]
 enum PoolMode {
     Max,
@@ -120,9 +136,215 @@ impl PoolMode {
 }
 
 #[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "CurvatureDecision")]
+#[derive(Clone, Copy)]
+pub(crate) struct PyCurvatureDecision {
+    inner: RustCurvatureDecision,
+}
+
+#[cfg(feature = "nn")]
+impl From<RustCurvatureDecision> for PyCurvatureDecision {
+    fn from(inner: RustCurvatureDecision) -> Self {
+        Self { inner }
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyCurvatureDecision {
+    #[getter]
+    pub fn raw_pressure(&self) -> f32 {
+        self.inner.raw_pressure
+    }
+
+    #[getter]
+    pub fn smoothed_pressure(&self) -> f32 {
+        self.inner.smoothed_pressure
+    }
+
+    #[getter]
+    pub fn curvature(&self) -> f32 {
+        self.inner.curvature
+    }
+
+    #[getter]
+    pub fn changed(&self) -> bool {
+        self.inner.changed
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "CurvatureDecision(raw_pressure={:.4}, smoothed_pressure={:.4}, curvature={:.4}, changed={})",
+            self.inner.raw_pressure,
+            self.inner.smoothed_pressure,
+            self.inner.curvature,
+            self.inner.changed
+        )
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "CurvatureScheduler", unsendable)]
+pub(crate) struct PyCurvatureScheduler {
+    inner: RustCurvatureScheduler,
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyCurvatureScheduler {
+    #[new]
+    #[pyo3(
+        signature = (
+            *,
+            initial=None,
+            min_curvature=None,
+            max_curvature=None,
+            min=None,
+            max=None,
+            target_pressure=0.05,
+            step=None,
+            tolerance=None,
+            smoothing=None
+        )
+    )]
+    pub fn new(
+        initial: Option<f32>,
+        min_curvature: Option<f32>,
+        max_curvature: Option<f32>,
+        min: Option<f32>,
+        max: Option<f32>,
+        target_pressure: f32,
+        step: Option<f32>,
+        tolerance: Option<f32>,
+        smoothing: Option<f32>,
+    ) -> Self {
+        let min_bound = min.or(min_curvature).unwrap_or(-1.5);
+        let max_bound = max.or(max_curvature).unwrap_or(-0.2);
+        let seed = initial.unwrap_or((min_bound + max_bound) * 0.5);
+        let mut inner = RustCurvatureScheduler::new(seed, min_bound, max_bound, target_pressure);
+        if let Some(value) = step {
+            inner.set_step(value);
+        }
+        if let Some(value) = tolerance {
+            inner.set_tolerance(value);
+        }
+        if let Some(value) = smoothing {
+            inner.set_smoothing(value);
+        }
+        Self { inner }
+    }
+
+    #[getter]
+    pub fn current(&self) -> f32 {
+        self.inner.current()
+    }
+
+    #[getter]
+    pub fn min_curvature(&self) -> f32 {
+        self.inner.min_curvature()
+    }
+
+    #[getter]
+    pub fn max_curvature(&self) -> f32 {
+        self.inner.max_curvature()
+    }
+
+    #[getter]
+    pub fn target_pressure(&self) -> f32 {
+        self.inner.target_pressure()
+    }
+
+    #[getter]
+    pub fn step(&self) -> f32 {
+        self.inner.step_size()
+    }
+
+    #[getter]
+    pub fn tolerance(&self) -> f32 {
+        self.inner.tolerance()
+    }
+
+    #[getter]
+    pub fn smoothing(&self) -> f32 {
+        self.inner.smoothing()
+    }
+
+    #[getter]
+    pub fn last_pressure(&self) -> Option<f32> {
+        self.inner.last_pressure()
+    }
+
+    pub fn set_bounds(&mut self, min_curvature: f32, max_curvature: f32) {
+        self.inner.set_bounds(min_curvature, max_curvature);
+    }
+
+    pub fn set_target_pressure(&mut self, target: f32) {
+        self.inner.set_target_pressure(target);
+    }
+
+    pub fn set_step(&mut self, step: f32) {
+        self.inner.set_step(step);
+    }
+
+    pub fn set_tolerance(&mut self, tolerance: f32) {
+        self.inner.set_tolerance(tolerance);
+    }
+
+    pub fn set_smoothing(&mut self, smoothing: f32) {
+        self.inner.set_smoothing(smoothing);
+    }
+
+    pub fn sync(&mut self, curvature: f32) {
+        self.inner.sync(curvature);
+    }
+
+    pub fn observe(&mut self, summary: &PyGradientSummary) -> PyCurvatureDecision {
+        PyCurvatureDecision::from(self.inner.observe(summary.as_inner()))
+    }
+
+    pub fn observe_pressure(&mut self, raw_pressure: f32) -> PyCurvatureDecision {
+        PyCurvatureDecision::from(self.inner.observe_pressure(raw_pressure))
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "CurvatureScheduler(current={:.4}, min={:.4}, max={:.4}, target_pressure={:.4})",
+            self.inner.current(),
+            self.inner.min_curvature(),
+            self.inner.max_curvature(),
+            self.inner.target_pressure()
+        )
+    }
+}
+
+#[cfg(feature = "nn")]
 enum PoolModule {
     Max(MaxPool2d),
     Avg(AvgPool2d),
+}
+
+#[cfg(feature = "nn")]
+impl PoolModule {
+    fn forward(&self, tensor: &Tensor) -> Result<Tensor, TensorError> {
+        match self {
+            Self::Max(module) => module.forward(tensor),
+            Self::Avg(module) => module.forward(tensor),
+        }
+    }
+
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> Result<Tensor, TensorError> {
+        match self {
+            Self::Max(module) => module.backward(input, grad_output),
+            Self::Avg(module) => module.backward(input, grad_output),
+        }
+    }
+
+    fn mode(&self) -> PoolMode {
+        match self {
+            Self::Max(_) => PoolMode::Max,
+            Self::Avg(_) => PoolMode::Avg,
+        }
+    }
 }
 
 #[cfg(feature = "nn")]
@@ -257,6 +479,223 @@ fn pool_output_hw(
     let out_h = (in_h + 2 * padding.0 - kernel.0) / stride.0 + 1;
     let out_w = (in_w + 2 * padding.1 - kernel.1) / stride.1 + 1;
     Ok((out_h, out_w))
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "Pool2d", unsendable)]
+pub(crate) struct PyPool2d {
+    inner: PoolModule,
+    layout: Layout2d,
+    input_dims: Spatial2d,
+    kernel: (usize, usize),
+    stride: (usize, usize),
+    padding: (usize, usize),
+}
+
+#[cfg(feature = "nn")]
+impl PyPool2d {
+    fn output_dims(&self) -> Result<Spatial2d, TensorError> {
+        let spatial_in = (self.input_dims.height, self.input_dims.width);
+        let (out_h, out_w) = pool_output_hw(spatial_in, self.kernel, self.stride, self.padding)?;
+        Ok(Spatial2d::new(self.input_dims.channels, out_h, out_w))
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyPool2d {
+    #[new]
+    #[pyo3(signature = (mode, channels, height, width, kernel, *, stride=None, padding=None, layout="NCHW"))]
+    pub fn new(
+        mode: &str,
+        channels: usize,
+        height: usize,
+        width: usize,
+        kernel: (usize, usize),
+        stride: Option<(usize, usize)>,
+        padding: Option<(usize, usize)>,
+        layout: &str,
+    ) -> PyResult<Self> {
+        let stride = stride.unwrap_or(kernel);
+        let padding = padding.unwrap_or((0, 0));
+        let layout = Layout2d::parse(layout)?;
+        let dims = Spatial2d::new(channels, height, width);
+        let mode = PoolMode::parse(mode)?;
+        let inner = match mode {
+            PoolMode::Max => PoolModule::Max(
+                MaxPool2d::new(channels, kernel, stride, padding, (height, width))
+                    .map_err(tensor_err_to_py)?,
+            ),
+            PoolMode::Avg => PoolModule::Avg(
+                AvgPool2d::new(channels, kernel, stride, padding, (height, width))
+                    .map_err(tensor_err_to_py)?,
+            ),
+        };
+        Ok(Self {
+            inner,
+            layout,
+            input_dims: dims,
+            kernel,
+            stride,
+            padding,
+        })
+    }
+
+    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        let canonical = reorder_tensor_layout(
+            &input.inner,
+            self.input_dims,
+            self.layout,
+            LayoutDirection::ToCanonical,
+        )
+        .map_err(tensor_err_to_py)?;
+        let output = self.inner.forward(&canonical).map_err(tensor_err_to_py)?;
+        let out_dims = self.output_dims().map_err(tensor_err_to_py)?;
+        let restored = reorder_tensor_layout(
+            &output,
+            out_dims,
+            self.layout,
+            LayoutDirection::FromCanonical,
+        )
+        .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(restored))
+    }
+
+    pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        let canonical_input = reorder_tensor_layout(
+            &input.inner,
+            self.input_dims,
+            self.layout,
+            LayoutDirection::ToCanonical,
+        )
+        .map_err(tensor_err_to_py)?;
+        let out_dims = self.output_dims().map_err(tensor_err_to_py)?;
+        let canonical_grad = reorder_tensor_layout(
+            &grad_output.inner,
+            out_dims,
+            self.layout,
+            LayoutDirection::ToCanonical,
+        )
+        .map_err(tensor_err_to_py)?;
+        let grad_input = self
+            .inner
+            .backward(&canonical_input, &canonical_grad)
+            .map_err(tensor_err_to_py)?;
+        let restored = reorder_tensor_layout(
+            &grad_input,
+            self.input_dims,
+            self.layout,
+            LayoutDirection::FromCanonical,
+        )
+        .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(restored))
+    }
+
+    #[pyo3(signature = (x))]
+    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(x)
+    }
+
+    #[getter]
+    pub fn mode(&self) -> &'static str {
+        self.inner.mode().as_str()
+    }
+
+    #[getter]
+    pub fn layout(&self) -> &'static str {
+        self.layout.as_str()
+    }
+
+    #[getter]
+    pub fn kernel(&self) -> (usize, usize) {
+        self.kernel
+    }
+
+    #[getter]
+    pub fn stride(&self) -> (usize, usize) {
+        self.stride
+    }
+
+    #[getter]
+    pub fn padding(&self) -> (usize, usize) {
+        self.padding
+    }
+
+    #[getter]
+    pub fn input_shape(&self) -> (usize, usize, usize) {
+        (
+            self.input_dims.channels,
+            self.input_dims.height,
+            self.input_dims.width,
+        )
+    }
+
+    #[getter]
+    pub fn output_shape(&self) -> PyResult<(usize, usize, usize)> {
+        let dims = self.output_dims().map_err(tensor_err_to_py)?;
+        Ok((dims.channels, dims.height, dims.width))
+    }
+
+    pub fn set_layout(&mut self, layout: &str) -> PyResult<()> {
+        self.layout = Layout2d::parse(layout)?;
+        Ok(())
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyfunction]
+#[pyo3(signature = (tensor, channels, height, width, *, layout="NCHW", direction="to_canonical"))]
+fn reorder_feature_tensor(
+    tensor: &PyTensor,
+    channels: usize,
+    height: usize,
+    width: usize,
+    layout: &str,
+    direction: &str,
+) -> PyResult<PyTensor> {
+    let layout = Layout2d::parse(layout)?;
+    let direction = LayoutDirection::parse(direction)?;
+    let dims = Spatial2d::new(channels, height, width);
+    let reordered =
+        reorder_tensor_layout(&tensor.inner, dims, layout, direction).map_err(tensor_err_to_py)?;
+    Ok(PyTensor::from_tensor(reordered))
+}
+
+#[cfg(feature = "nn")]
+#[pyfunction]
+#[pyo3(signature = (
+    input_hw,
+    kernel_hw,
+    *,
+    stride=None,
+    padding=None,
+    dilation=None,
+))]
+fn conv_output_shape(
+    input_hw: (usize, usize),
+    kernel_hw: (usize, usize),
+    stride: Option<(usize, usize)>,
+    padding: Option<(usize, usize)>,
+    dilation: Option<(usize, usize)>,
+) -> PyResult<(usize, usize)> {
+    let stride = stride.unwrap_or((1, 1));
+    let padding = padding.unwrap_or((0, 0));
+    let dilation = dilation.unwrap_or((1, 1));
+    conv_output_hw(input_hw, kernel_hw, stride, padding, dilation).map_err(tensor_err_to_py)
+}
+
+#[cfg(feature = "nn")]
+#[pyfunction]
+#[pyo3(signature = (input_hw, kernel_hw, *, stride=None, padding=None))]
+fn pool_output_shape(
+    input_hw: (usize, usize),
+    kernel_hw: (usize, usize),
+    stride: Option<(usize, usize)>,
+    padding: Option<(usize, usize)>,
+) -> PyResult<(usize, usize)> {
+    let stride = stride.unwrap_or(kernel_hw);
+    let padding = padding.unwrap_or((0, 0));
+    pool_output_hw(input_hw, kernel_hw, stride, padding).map_err(tensor_err_to_py)
 }
 
 #[cfg(feature = "nn")]
@@ -1435,10 +1874,14 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add("__doc__", "SpiralTorch neural network primitives")?;
     module.add_class::<PyNonLiner>()?;
     module.add_class::<PyDropout>()?;
+    module.add_class::<PyPool2d>()?;
     module.add_class::<PyDataset>()?;
     module.add_class::<PyDataLoader>()?;
     module.add_class::<PyDataLoaderIter>()?;
     module.add_function(wrap_pyfunction!(py_is_swap_invariant, &module)?)?;
+    module.add_function(wrap_pyfunction!(reorder_feature_tensor, &module)?)?;
+    module.add_function(wrap_pyfunction!(conv_output_shape, &module)?)?;
+    module.add_function(wrap_pyfunction!(pool_output_shape, &module)?)?;
     module.add_class::<PyCoherenceChannelReport>()?;
     module.add_class::<PyCoherenceSignature>()?;
     module.add_class::<PyCoherenceObservation>()?;
@@ -1448,12 +1891,15 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyCoherenceDiagnostics>()?;
     module.add_class::<PyZSpaceCoherenceSequencer>()?;
     module.add_class::<PyZRelativityModule>()?;
+    module.add_class::<PyCurvatureScheduler>()?;
+    module.add_class::<PyCurvatureDecision>()?;
     module.add_function(wrap_pyfunction!(from_samples, &module)?)?;
     module.add(
         "__all__",
         vec![
             "NonLiner",
             "Dropout",
+            "Pool2d",
             "Dataset",
             "DataLoader",
             "DataLoaderIter",
@@ -1464,7 +1910,12 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
             "PreDiscardSnapshot",
             "ZSpaceCoherenceSequencer",
             "ZRelativityModule",
+            "CurvatureScheduler",
+            "CurvatureDecision",
             "from_samples",
+            "reorder_feature_tensor",
+            "conv_output_shape",
+            "pool_output_shape",
         ],
     )?;
     parent.add_submodule(&module)?;
@@ -1474,8 +1925,14 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     if let Ok(dropout) = module.getattr("Dropout") {
         parent.add("Dropout", dropout)?;
     }
+    if let Ok(pool2d) = module.getattr("Pool2d") {
+        parent.add("Pool2d", pool2d)?;
+    }
     if let Ok(sequencer) = module.getattr("ZSpaceCoherenceSequencer") {
         parent.add("ZSpaceCoherenceSequencer", sequencer)?;
+    }
+    if let Ok(scheduler) = module.getattr("CurvatureScheduler") {
+        parent.add("CurvatureScheduler", scheduler)?;
     }
     Ok(())
 }

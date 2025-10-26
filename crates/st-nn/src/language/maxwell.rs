@@ -15,15 +15,32 @@ pub struct NarrativeHint {
     channel: String,
     tags: Vec<String>,
     intensity: f32,
+    #[serde(default)]
+    amplitude: f32,
+    #[serde(default)]
+    phase: f32,
+    #[serde(default = "NarrativeHint::default_coherence")]
+    coherence: f32,
+    #[serde(default)]
+    decoherence: f32,
+    #[serde(default)]
+    collapsed_tag: Option<String>,
 }
 
 impl NarrativeHint {
     pub fn new(channel: impl Into<String>, tags: Vec<String>, intensity: f32) -> Self {
-        Self {
+        let mut hint = Self {
             channel: channel.into(),
             tags,
             intensity,
-        }
+            amplitude: intensity,
+            phase: 0.0,
+            coherence: Self::default_coherence(),
+            decoherence: 0.0,
+            collapsed_tag: None,
+        };
+        hint.recompute_collapse();
+        hint
     }
 
     pub fn channel(&self) -> &str {
@@ -36,6 +53,73 @@ impl NarrativeHint {
 
     pub fn intensity(&self) -> f32 {
         self.intensity
+    }
+
+    pub fn amplitude(&self) -> f32 {
+        self.amplitude
+    }
+
+    pub fn phase(&self) -> f32 {
+        self.phase
+    }
+
+    pub fn coherence(&self) -> f32 {
+        self.coherence
+    }
+
+    pub fn decoherence(&self) -> f32 {
+        self.decoherence
+    }
+
+    pub fn collapsed_tag(&self) -> Option<&str> {
+        self.collapsed_tag.as_deref()
+    }
+
+    fn default_coherence() -> f32 {
+        1.0
+    }
+
+    fn recompute_collapse(&mut self) {
+        if self.tags.is_empty() {
+            self.collapsed_tag = None;
+            return;
+        }
+        let base = (1.0 - self.decoherence).max(0.0);
+        let mut best_tag = None;
+        let mut best_weight = f32::MIN;
+        for (idx, tag) in self.tags.iter().enumerate() {
+            let interference = ((self.phase + idx as f32 * 1.618_034).sin().abs() + 0.5).max(1e-3);
+            let weight = self.amplitude.abs() * self.coherence * base * interference;
+            if weight > best_weight {
+                best_weight = weight;
+                best_tag = Some(tag.clone());
+            }
+        }
+        if best_weight <= f32::MIN {
+            self.collapsed_tag = Some(self.tags[0].clone());
+        } else {
+            self.collapsed_tag = best_tag;
+        }
+    }
+
+    pub fn with_quantum_state(
+        mut self,
+        amplitude: f32,
+        phase: f32,
+        coherence: f32,
+        decoherence: f32,
+    ) -> Self {
+        self.amplitude = amplitude;
+        self.phase = phase;
+        self.coherence = coherence.clamp(0.0, 1.0);
+        self.decoherence = decoherence.clamp(0.0, 1.0);
+        self.recompute_collapse();
+        self
+    }
+
+    pub fn collapse(mut self) -> Self {
+        self.recompute_collapse();
+        self
     }
 }
 
@@ -225,11 +309,19 @@ impl MaxwellDesireBridge {
         if intensity <= f32::EPSILON {
             return None;
         }
-        Some(NarrativeHint::new(
-            channel.as_ref(),
-            program.tags.clone(),
-            intensity,
-        ))
+        let phase = (pulse.z_score as f32).atan();
+        let band_total = program.tags.len().max(1) as f32;
+        let energy_total = pulse.band_energy.0 + pulse.band_energy.1 + pulse.band_energy.2 + 1e-6;
+        let coherence =
+            ((pulse.band_energy.0 + pulse.band_energy.2) / energy_total).clamp(0.0, 1.0);
+        let decoherence = ((pulse.standard_error.abs() as f32)
+            / (pulse.standard_error.abs() as f32 + 1.0))
+            .min(1.0);
+        let amplitude = intensity;
+        let hint = NarrativeHint::new(channel.as_ref(), program.tags.clone(), intensity)
+            .with_quantum_state(amplitude, phase * band_total, coherence, decoherence)
+            .collapse();
+        Some(hint)
     }
 
     pub fn emit(
@@ -376,6 +468,19 @@ mod tests {
         assert_eq!(narrative.channel(), "gamma");
         assert_eq!(narrative.tags().len(), 2);
         assert!(narrative.intensity() > 0.0);
+        assert!(narrative.amplitude() > 0.0);
+        assert!(narrative.coherence() >= 0.0 && narrative.coherence() <= 1.0);
+        assert!(narrative.decoherence() >= 0.0 && narrative.decoherence() <= 1.0);
+        assert!(narrative.collapsed_tag().is_some());
+    }
+
+    #[test]
+    fn narrative_hint_collapse_prefers_stronger_weight() {
+        let hint = NarrativeHint::new("alpha", vec!["a".into(), "b".into(), "c".into()], 0.8)
+            .with_quantum_state(0.8, 0.5, 0.9, 0.1)
+            .collapse();
+        let tag = hint.collapsed_tag().unwrap();
+        assert!(hint.tags().iter().any(|t| t == tag));
     }
 
     #[test]
