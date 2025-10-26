@@ -1116,10 +1116,6 @@ impl QuantumRealityStudio {
         overlay
     }
 
-    pub fn export_storyboard(&self) -> serde_json::Value {
-        if !self.frames.is_empty() {
-            let frames: Vec<serde_json::Value> = self
-                .frames
     fn storyboard_entries(&self) -> Vec<serde_json::Value> {
         if !self.frames.is_empty() {
             self.frames
@@ -1233,9 +1229,6 @@ impl QuantumRealityStudio {
                         "z_bias": record.pulse.z_bias,
                     })
                 })
-                .collect();
-            serde_json::json!({ "frames": frames })
-        }
                 .collect()
         }
     }
