@@ -100,9 +100,9 @@ impl StructuredPruner {
             // Partition blocks so the `target_blocks` smallest norms occupy the front without the
             // `O(n log n)` cost of a full sort.
             let nth_index = target_blocks - 1;
-            workspace.block_norms.select_nth_unstable_by(nth_index, |a, b| {
-                a.norm_sq.total_cmp(&b.norm_sq)
-            });
+            workspace
+                .block_norms
+                .select_nth_unstable_by(nth_index, |a, b| a.norm_sq.total_cmp(&b.norm_sq));
             let (to_prune, remainder) = workspace.block_norms.split_at_mut(target_blocks);
 
             for block in to_prune.iter() {
@@ -269,8 +269,8 @@ mod tests {
     fn zero_target_only_prunes_below_threshold() {
         let mut weights = vec![
             0.05, 0.05, // weak block 0
-            0.2, 0.2,   // weak block 1
-            2.0, 2.0,   // strong block 2
+            0.2, 0.2, // weak block 1
+            2.0, 2.0, // strong block 2
         ];
         let pruner = StructuredPruner::new();
         let config = StructuredPruningConfig {

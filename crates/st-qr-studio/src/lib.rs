@@ -1117,9 +1117,10 @@ impl QuantumRealityStudio {
     }
 
     pub fn export_storyboard(&self) -> serde_json::Value {
-        if !self.frames.is_empty() {
-            let frames: Vec<serde_json::Value> = self
-                .frames
+        let frames = self.storyboard_entries();
+        serde_json::json!({ "frames": frames })
+    }
+
     fn storyboard_entries(&self) -> Vec<serde_json::Value> {
         if !self.frames.is_empty() {
             self.frames
@@ -1233,16 +1234,8 @@ impl QuantumRealityStudio {
                         "z_bias": record.pulse.z_bias,
                     })
                 })
-                .collect();
-            serde_json::json!({ "frames": frames })
-        }
                 .collect()
         }
-    }
-
-    pub fn export_storyboard(&self) -> serde_json::Value {
-        let frames = self.storyboard_entries();
-        serde_json::json!({ "frames": frames })
     }
 
     pub fn export_storyboard_grouped(&self) -> serde_json::Value {

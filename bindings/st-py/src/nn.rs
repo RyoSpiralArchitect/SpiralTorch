@@ -30,10 +30,9 @@ use st_nn::{
     dataset_from_vec,
     layers::{
         conv::{AvgPool2d, Conv2d, Conv6da, MaxPool2d},
-        NonLiner, NonLinerActivation, NonLinerEllipticConfig, NonLinerGeometry,
-        NonLinerHyperbolicConfig,
-        Dropout as RustDropout, NonLiner, NonLinerActivation, NonLinerEllipticConfig,
-        NonLinerGeometry, NonLinerHyperbolicConfig,
+        Dropout as RustDropout, NonLiner, NonLiner, NonLinerActivation, NonLinerActivation,
+        NonLinerEllipticConfig, NonLinerEllipticConfig, NonLinerGeometry, NonLinerGeometry,
+        NonLinerHyperbolicConfig, NonLinerHyperbolicConfig,
     },
     zspace_coherence::{
         is_swap_invariant as rust_is_swap_invariant, CoherenceDiagnostics, CoherenceLabel,
@@ -384,31 +383,6 @@ fn ensure_feature_shape(tensor: &Tensor, dims: Spatial2d) -> Result<(), TensorEr
 
 #[cfg(feature = "nn")]
 fn ensure_feature_shape_3d(tensor: &Tensor, dims: Spatial3d) -> Result<(), TensorError> {
-impl PoolModule {
-    fn forward(&self, tensor: &Tensor) -> Result<Tensor, TensorError> {
-        match self {
-            Self::Max(module) => module.forward(tensor),
-            Self::Avg(module) => module.forward(tensor),
-        }
-    }
-
-    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> Result<Tensor, TensorError> {
-        match self {
-            Self::Max(module) => module.backward(input, grad_output),
-            Self::Avg(module) => module.backward(input, grad_output),
-        }
-    }
-
-    fn mode(&self) -> PoolMode {
-        match self {
-            Self::Max(_) => PoolMode::Max,
-            Self::Avg(_) => PoolMode::Avg,
-        }
-    }
-}
-
-#[cfg(feature = "nn")]
-fn ensure_feature_shape(tensor: &Tensor, dims: Spatial2d) -> Result<(), TensorError> {
     let cols = tensor.shape().1;
     let expected = dims.size();
     if cols != expected {
@@ -1112,6 +1086,116 @@ pub(crate) struct PyDropout {
 
 #[cfg(feature = "nn")]
 #[pymethods]
+impl PyDropout {
+    #[new]
+    #[pyo3(signature = (probability, *, seed=None, training=true))]
+    pub fn new(probability: f32, seed: Option<u64>, training: bool) -> PyResult<Self> {
+        let mut inner = RustDropout::with_seed(probability, seed).map_err(tensor_err_to_py)?;
+        if !training {
+            inner.eval();
+        }
+        Ok(Self { inner })
+    }
+
+    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        let output = self.inner.forward(&input.inner).map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        let grad = self
+            .inner
+            .backward(&input.inner, &grad_output.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(grad))
+    }
+
+    pub fn set_training(&mut self, training: bool) {
+        self.inner.set_training(training);
+    }
+
+    pub fn train(&mut self) {
+        self.inner.train();
+    }
+
+    pub fn eval(&mut self) {
+        self.inner.eval();
+    }
+
+    #[getter]
+    pub fn training(&self) -> bool {
+        self.inner.training()
+    }
+
+    #[getter]
+    pub fn probability(&self) -> f32 {
+        self.inner.probability()
+    }
+
+    #[pyo3(signature = (x))]
+    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(x)
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "ZConv6DA", unsendable)]
+pub(crate) struct PyZConv6DA {
+    inner: Conv6da,
+    layout: Layout3d,
+    input_dims: Spatial3d,
+    output_dims: Spatial3d,
+    grid: (usize, usize, usize),
+    leech_rank: usize,
+    leech_weight: f64,
+    neighbor_offsets: Vec<(isize, isize, isize)>,
+}
+
+#[cfg(feature = "nn")]
+impl PyZConv6DA {
+    fn input_to_canonical(&self, tensor: &Tensor) -> Result<Tensor, TensorError> {
+        reorder_tensor_layout_3d(
+            tensor,
+            self.input_dims,
+            self.layout,
+            LayoutDirection::ToCanonical,
+        )
+    }
+
+    fn input_from_canonical(&self, tensor: &Tensor) -> Result<Tensor, TensorError> {
+        reorder_tensor_layout_3d(
+            tensor,
+            self.input_dims,
+            self.layout,
+            LayoutDirection::FromCanonical,
+        )
+    }
+
+    fn output_to_canonical(&self, tensor: &Tensor) -> Result<Tensor, TensorError> {
+        reorder_tensor_layout_3d(
+            tensor,
+            self.output_dims,
+            self.layout,
+            LayoutDirection::ToCanonical,
+        )
+    }
+
+    fn output_from_canonical(&self, tensor: &Tensor) -> Result<Tensor, TensorError> {
+        reorder_tensor_layout_3d(
+            tensor,
+            self.output_dims,
+            self.layout,
+            LayoutDirection::FromCanonical,
+        )
+    }
+
+    fn leech_projector(&self) -> LeechProjector {
+        LeechProjector::new(self.leech_rank, self.leech_weight)
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
 impl PyZConv6DA {
     #[new]
     #[pyo3(signature = (name, in_channels, out_channels, grid, *, leech_rank=24, leech_weight=1.0, layout="NCDHW", neighbors=None))]
@@ -1172,16 +1256,6 @@ impl PyZConv6DA {
         let output = self
             .output_from_canonical(&canonical_output)
             .map_err(tensor_err_to_py)?;
-impl PyDropout {
-    #[new]
-    #[pyo3(signature = (probability, *, seed=None))]
-    pub fn new(probability: f32, seed: Option<u64>) -> PyResult<Self> {
-        let inner = RustDropout::with_seed(probability, seed).map_err(tensor_err_to_py)?;
-        Ok(Self { inner })
-    }
-
-    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
-        let output = self.inner.forward(&input.inner).map_err(tensor_err_to_py)?;
         Ok(PyTensor::from_tensor(output))
     }
 
@@ -1461,11 +1535,6 @@ impl PyZPooling {
             .input_from_canonical(&grad_input)
             .map_err(tensor_err_to_py)?;
         Ok(PyTensor::from_tensor(restored))
-        let grad = self
-            .inner
-            .backward(&input.inner, &grad_output.inner)
-            .map_err(tensor_err_to_py)?;
-        Ok(PyTensor::from_tensor(grad))
     }
 
     #[pyo3(signature = (x))]
@@ -1511,27 +1580,6 @@ impl PyZPooling {
     #[getter]
     pub fn padding(&self) -> (usize, usize) {
         self.padding
-    pub fn train(&mut self) {
-        self.inner.set_training(true);
-    }
-
-    pub fn eval(&mut self) {
-        self.inner.set_training(false);
-    }
-
-    #[getter]
-    pub fn probability(&self) -> f32 {
-        self.inner.probability()
-    }
-
-    #[getter]
-    pub fn training(&self) -> bool {
-        self.inner.training()
-    }
-
-    #[setter]
-    pub fn set_training(&mut self, training: bool) {
-        self.inner.set_training(training);
     }
 }
 
@@ -2446,6 +2494,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     }
     if let Ok(zpool) = module.getattr("ZPooling") {
         parent.add("ZPooling", zpool)?;
+    }
     if let Ok(dropout) = module.getattr("Dropout") {
         parent.add("Dropout", dropout)?;
     }
