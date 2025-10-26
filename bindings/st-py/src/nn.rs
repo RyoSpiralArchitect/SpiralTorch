@@ -23,7 +23,7 @@ use st_nn::{
     dataset_from_vec,
     layers::{
         Dropout as RustDropout, NonLiner, NonLinerActivation, NonLinerEllipticConfig,
-        NonLinerGeometry, NonLinerHyperbolicConfig, ZRelativityModule,
+        NonLinerGeometry, NonLinerHyperbolicConfig,
     },
     zspace_coherence::{
         is_swap_invariant as rust_is_swap_invariant, CoherenceDiagnostics, CoherenceLabel,
@@ -33,7 +33,6 @@ use st_nn::{
     DataLoader, Dataset, ZRelativityModule,
     AvgPool2d, MaxPool2d, ZSpaceCoherenceSequencer,
 };
-use st_nn::layers::ZRelativityModule;
 #[cfg(feature = "nn")]
 use st_tensor::{OpenCartesianTopos, Tensor, TensorError};
 
@@ -101,8 +100,6 @@ enum PoolMode {
     Avg,
 }
 
-#[cfg(feature = "nn")]
-use st_tensor::{OpenCartesianTopos, Tensor};
 impl PoolMode {
     fn parse(label: &str) -> PyResult<Self> {
         match label.to_ascii_lowercase().as_str() {
@@ -543,7 +540,7 @@ impl PyDropout {
     #[new]
     #[pyo3(signature = (probability, *, seed=None))]
     pub fn new(probability: f32, seed: Option<u64>) -> PyResult<Self> {
-        let inner = Dropout::with_seed(probability, seed).map_err(tensor_err_to_py)?;
+        let inner = RustDropout::with_seed(probability, seed).map_err(tensor_err_to_py)?;
         Ok(Self { inner })
     }
 
