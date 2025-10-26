@@ -1,6 +1,6 @@
 # 🌀🕯️ SpiralTorch 🕯️🌀
 **trains where PyTorch can’t — inside the Z-space.**  
-_(Still under active repair while expanding — API changes hourly.)_
+_(Still under active expanding hourly.)_
 
 **Purpose.** A WGPU-first, research-grade ML/geometry runtime that fuses spectral operators, microlocal tools, and cooperative schedulers into a single stack. The goal: rival CUDA-centric ecosystems using portable GPUs (Metal/Vulkan/DX12) without sacrificing theory fidelity.
 
