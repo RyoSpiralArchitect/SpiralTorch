@@ -23,17 +23,15 @@ use st_nn::{
     dataset_from_vec,
     layers::{
         Dropout as RustDropout, NonLiner, NonLinerActivation, NonLinerEllipticConfig,
-        NonLinerGeometry, NonLinerHyperbolicConfig, ZRelativityModule,
+        NonLinerGeometry, NonLinerHyperbolicConfig,
     },
     zspace_coherence::{
         is_swap_invariant as rust_is_swap_invariant, CoherenceDiagnostics, CoherenceLabel,
         CoherenceObservation, CoherenceSignature, LinguisticChannelReport, PreDiscardPolicy,
         PreDiscardSnapshot, PreDiscardTelemetry,
     },
-    DataLoader, Dataset, ZRelativityModule,
-    AvgPool2d, MaxPool2d, ZSpaceCoherenceSequencer,
+    AvgPool2d, DataLoader, Dataset, MaxPool2d, ZRelativityModule, ZSpaceCoherenceSequencer,
 };
-use st_nn::layers::ZRelativityModule;
 #[cfg(feature = "nn")]
 use st_tensor::{OpenCartesianTopos, Tensor, TensorError};
 
@@ -95,14 +93,25 @@ enum LayoutDirection {
 }
 
 #[cfg(feature = "nn")]
+impl LayoutDirection {
+    fn parse(label: &str) -> PyResult<Self> {
+        match label.to_ascii_lowercase().as_str() {
+            "to_canonical" | "to-canonical" | "to" => Ok(Self::ToCanonical),
+            "from_canonical" | "from-canonical" | "from" => Ok(Self::FromCanonical),
+            other => Err(PyValueError::new_err(format!(
+                "unknown layout direction '{other}', expected 'to_canonical' or 'from_canonical'"
+            ))),
+        }
+    }
+}
+
+#[cfg(feature = "nn")]
 #[derive(Clone, Copy, Debug)]
 enum PoolMode {
     Max,
     Avg,
 }
 
-#[cfg(feature = "nn")]
-use st_tensor::{OpenCartesianTopos, Tensor};
 impl PoolMode {
     fn parse(label: &str) -> PyResult<Self> {
         match label.to_ascii_lowercase().as_str() {
@@ -126,6 +135,30 @@ impl PoolMode {
 enum PoolModule {
     Max(MaxPool2d),
     Avg(AvgPool2d),
+}
+
+#[cfg(feature = "nn")]
+impl PoolModule {
+    fn forward(&self, tensor: &Tensor) -> Result<Tensor, TensorError> {
+        match self {
+            Self::Max(module) => module.forward(tensor),
+            Self::Avg(module) => module.forward(tensor),
+        }
+    }
+
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> Result<Tensor, TensorError> {
+        match self {
+            Self::Max(module) => module.backward(input, grad_output),
+            Self::Avg(module) => module.backward(input, grad_output),
+        }
+    }
+
+    fn mode(&self) -> PoolMode {
+        match self {
+            Self::Max(_) => PoolMode::Max,
+            Self::Avg(_) => PoolMode::Avg,
+        }
+    }
 }
 
 #[cfg(feature = "nn")]
@@ -260,6 +293,223 @@ fn pool_output_hw(
     let out_h = (in_h + 2 * padding.0 - kernel.0) / stride.0 + 1;
     let out_w = (in_w + 2 * padding.1 - kernel.1) / stride.1 + 1;
     Ok((out_h, out_w))
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "Pool2d", unsendable)]
+pub(crate) struct PyPool2d {
+    inner: PoolModule,
+    layout: Layout2d,
+    input_dims: Spatial2d,
+    kernel: (usize, usize),
+    stride: (usize, usize),
+    padding: (usize, usize),
+}
+
+#[cfg(feature = "nn")]
+impl PyPool2d {
+    fn output_dims(&self) -> Result<Spatial2d, TensorError> {
+        let spatial_in = (self.input_dims.height, self.input_dims.width);
+        let (out_h, out_w) = pool_output_hw(spatial_in, self.kernel, self.stride, self.padding)?;
+        Ok(Spatial2d::new(self.input_dims.channels, out_h, out_w))
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyPool2d {
+    #[new]
+    #[pyo3(signature = (mode, channels, height, width, kernel, *, stride=None, padding=None, layout="NCHW"))]
+    pub fn new(
+        mode: &str,
+        channels: usize,
+        height: usize,
+        width: usize,
+        kernel: (usize, usize),
+        stride: Option<(usize, usize)>,
+        padding: Option<(usize, usize)>,
+        layout: &str,
+    ) -> PyResult<Self> {
+        let stride = stride.unwrap_or(kernel);
+        let padding = padding.unwrap_or((0, 0));
+        let layout = Layout2d::parse(layout)?;
+        let dims = Spatial2d::new(channels, height, width);
+        let mode = PoolMode::parse(mode)?;
+        let inner = match mode {
+            PoolMode::Max => PoolModule::Max(
+                MaxPool2d::new(channels, kernel, stride, padding, (height, width))
+                    .map_err(tensor_err_to_py)?,
+            ),
+            PoolMode::Avg => PoolModule::Avg(
+                AvgPool2d::new(channels, kernel, stride, padding, (height, width))
+                    .map_err(tensor_err_to_py)?,
+            ),
+        };
+        Ok(Self {
+            inner,
+            layout,
+            input_dims: dims,
+            kernel,
+            stride,
+            padding,
+        })
+    }
+
+    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        let canonical = reorder_tensor_layout(
+            &input.inner,
+            self.input_dims,
+            self.layout,
+            LayoutDirection::ToCanonical,
+        )
+        .map_err(tensor_err_to_py)?;
+        let output = self.inner.forward(&canonical).map_err(tensor_err_to_py)?;
+        let out_dims = self.output_dims().map_err(tensor_err_to_py)?;
+        let restored = reorder_tensor_layout(
+            &output,
+            out_dims,
+            self.layout,
+            LayoutDirection::FromCanonical,
+        )
+        .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(restored))
+    }
+
+    pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        let canonical_input = reorder_tensor_layout(
+            &input.inner,
+            self.input_dims,
+            self.layout,
+            LayoutDirection::ToCanonical,
+        )
+        .map_err(tensor_err_to_py)?;
+        let out_dims = self.output_dims().map_err(tensor_err_to_py)?;
+        let canonical_grad = reorder_tensor_layout(
+            &grad_output.inner,
+            out_dims,
+            self.layout,
+            LayoutDirection::ToCanonical,
+        )
+        .map_err(tensor_err_to_py)?;
+        let grad_input = self
+            .inner
+            .backward(&canonical_input, &canonical_grad)
+            .map_err(tensor_err_to_py)?;
+        let restored = reorder_tensor_layout(
+            &grad_input,
+            self.input_dims,
+            self.layout,
+            LayoutDirection::FromCanonical,
+        )
+        .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(restored))
+    }
+
+    #[pyo3(signature = (x))]
+    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(x)
+    }
+
+    #[getter]
+    pub fn mode(&self) -> &'static str {
+        self.inner.mode().as_str()
+    }
+
+    #[getter]
+    pub fn layout(&self) -> &'static str {
+        self.layout.as_str()
+    }
+
+    #[getter]
+    pub fn kernel(&self) -> (usize, usize) {
+        self.kernel
+    }
+
+    #[getter]
+    pub fn stride(&self) -> (usize, usize) {
+        self.stride
+    }
+
+    #[getter]
+    pub fn padding(&self) -> (usize, usize) {
+        self.padding
+    }
+
+    #[getter]
+    pub fn input_shape(&self) -> (usize, usize, usize) {
+        (
+            self.input_dims.channels,
+            self.input_dims.height,
+            self.input_dims.width,
+        )
+    }
+
+    #[getter]
+    pub fn output_shape(&self) -> PyResult<(usize, usize, usize)> {
+        let dims = self.output_dims().map_err(tensor_err_to_py)?;
+        Ok((dims.channels, dims.height, dims.width))
+    }
+
+    pub fn set_layout(&mut self, layout: &str) -> PyResult<()> {
+        self.layout = Layout2d::parse(layout)?;
+        Ok(())
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyfunction]
+#[pyo3(signature = (tensor, channels, height, width, *, layout="NCHW", direction="to_canonical"))]
+fn reorder_feature_tensor(
+    tensor: &PyTensor,
+    channels: usize,
+    height: usize,
+    width: usize,
+    layout: &str,
+    direction: &str,
+) -> PyResult<PyTensor> {
+    let layout = Layout2d::parse(layout)?;
+    let direction = LayoutDirection::parse(direction)?;
+    let dims = Spatial2d::new(channels, height, width);
+    let reordered =
+        reorder_tensor_layout(&tensor.inner, dims, layout, direction).map_err(tensor_err_to_py)?;
+    Ok(PyTensor::from_tensor(reordered))
+}
+
+#[cfg(feature = "nn")]
+#[pyfunction]
+#[pyo3(signature = (
+    input_hw,
+    kernel_hw,
+    *,
+    stride=None,
+    padding=None,
+    dilation=None,
+))]
+fn conv_output_shape(
+    input_hw: (usize, usize),
+    kernel_hw: (usize, usize),
+    stride: Option<(usize, usize)>,
+    padding: Option<(usize, usize)>,
+    dilation: Option<(usize, usize)>,
+) -> PyResult<(usize, usize)> {
+    let stride = stride.unwrap_or((1, 1));
+    let padding = padding.unwrap_or((0, 0));
+    let dilation = dilation.unwrap_or((1, 1));
+    conv_output_hw(input_hw, kernel_hw, stride, padding, dilation).map_err(tensor_err_to_py)
+}
+
+#[cfg(feature = "nn")]
+#[pyfunction]
+#[pyo3(signature = (input_hw, kernel_hw, *, stride=None, padding=None))]
+fn pool_output_shape(
+    input_hw: (usize, usize),
+    kernel_hw: (usize, usize),
+    stride: Option<(usize, usize)>,
+    padding: Option<(usize, usize)>,
+) -> PyResult<(usize, usize)> {
+    let stride = stride.unwrap_or(kernel_hw);
+    let padding = padding.unwrap_or((0, 0));
+    pool_output_hw(input_hw, kernel_hw, stride, padding).map_err(tensor_err_to_py)
 }
 
 #[cfg(feature = "nn")]
@@ -543,7 +793,7 @@ impl PyDropout {
     #[new]
     #[pyo3(signature = (probability, *, seed=None))]
     pub fn new(probability: f32, seed: Option<u64>) -> PyResult<Self> {
-        let inner = Dropout::with_seed(probability, seed).map_err(tensor_err_to_py)?;
+        let inner = RustDropout::with_seed(probability, seed).map_err(tensor_err_to_py)?;
         Ok(Self { inner })
     }
 
@@ -1438,10 +1688,14 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add("__doc__", "SpiralTorch neural network primitives")?;
     module.add_class::<PyNonLiner>()?;
     module.add_class::<PyDropout>()?;
+    module.add_class::<PyPool2d>()?;
     module.add_class::<PyDataset>()?;
     module.add_class::<PyDataLoader>()?;
     module.add_class::<PyDataLoaderIter>()?;
     module.add_function(wrap_pyfunction!(py_is_swap_invariant, &module)?)?;
+    module.add_function(wrap_pyfunction!(reorder_feature_tensor, &module)?)?;
+    module.add_function(wrap_pyfunction!(conv_output_shape, &module)?)?;
+    module.add_function(wrap_pyfunction!(pool_output_shape, &module)?)?;
     module.add_class::<PyCoherenceChannelReport>()?;
     module.add_class::<PyCoherenceSignature>()?;
     module.add_class::<PyCoherenceObservation>()?;
@@ -1457,6 +1711,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
         vec![
             "NonLiner",
             "Dropout",
+            "Pool2d",
             "Dataset",
             "DataLoader",
             "DataLoaderIter",
@@ -1468,6 +1723,9 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
             "ZSpaceCoherenceSequencer",
             "ZRelativityModule",
             "from_samples",
+            "reorder_feature_tensor",
+            "conv_output_shape",
+            "pool_output_shape",
         ],
     )?;
     parent.add_submodule(&module)?;
@@ -1476,6 +1734,9 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     }
     if let Ok(dropout) = module.getattr("Dropout") {
         parent.add("Dropout", dropout)?;
+    }
+    if let Ok(pool2d) = module.getattr("Pool2d") {
+        parent.add("Pool2d", pool2d)?;
     }
     if let Ok(sequencer) = module.getattr("ZSpaceCoherenceSequencer") {
         parent.add("ZSpaceCoherenceSequencer", sequencer)?;

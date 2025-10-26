@@ -6,7 +6,6 @@
 use super::GraphContext;
 #[cfg(feature = "psi")]
 use super::PsiCoherenceAdaptor;
-use super::GraphContext;
 use crate::RoundtableBandInfluence;
 use crate::module::{Module, Parameter};
 use crate::{PureResult, Tensor, TensorError};
@@ -263,13 +262,16 @@ impl ZSpaceGraphConvolution {
     }
 
     fn aggregate_support(&self, input: &Tensor) -> PureResult<AggregatedSupport> {
-        let mut weights = self.aggregation.weights()?;
         #[cfg(feature = "psi")]
-        {
+        let weights = {
+            let mut weights = self.aggregation.weights()?;
             if let Ok(mut adaptor) = self.coherence.lock() {
                 weights = adaptor.cohere_weights(weights);
             }
-        }
+            weights
+        };
+        #[cfg(not(feature = "psi"))]
+        let weights = self.aggregation.weights()?;
         let (rows, cols) = input.shape();
         let mut support = Tensor::zeros(rows, cols)?;
         let mut current = input.clone();

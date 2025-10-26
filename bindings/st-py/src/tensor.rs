@@ -94,7 +94,7 @@ impl TensorOutPtr {
 
 #[pyclass(module = "spiraltorch", name = "CpuSimdPackedRhs")]
 #[derive(Clone)]
-pub(crate) struct PyCpuSimdPackedRhs {
+pub struct PyCpuSimdPackedRhs {
     inner: usize,
     cols: usize,
     data: Arc<[f32]>,
@@ -143,7 +143,7 @@ const USED_DLPACK_CAPSULE_NAME: &CStr =
 
 #[pyclass(module = "spiraltorch", name = "Tensor")]
 #[derive(Clone)]
-pub(crate) struct PyTensor {
+pub struct PyTensor {
     pub(crate) inner: Tensor,
 }
 

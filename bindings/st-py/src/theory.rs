@@ -199,6 +199,10 @@ impl PyZRelativityModel {
         Ok(PyTensor::from_tensor(tensor))
     }
 
+    pub fn internal_metric_components(&self) -> Vec<Vec<f64>> {
+        dmatrix_to_py(self.inner.geometry.metric().internal().components())
+    }
+
     pub fn gauge_tensor(&self) -> PyResult<PyTensor> {
         let tensor = self.inner.gauge_tensor().map_err(tensor_err_to_py)?;
         Ok(PyTensor::from_tensor(tensor))

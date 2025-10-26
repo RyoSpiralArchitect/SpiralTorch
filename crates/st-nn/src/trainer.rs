@@ -670,6 +670,8 @@ impl RegionLossConfig {
             bundle.volatility = history.volatility_report();
         }
         bundle
+    }
+
     /// Builds an attribution report summarising the configured region weights.
     pub fn visualize(&self, highlight: Option<ZSpaceRegionDescriptor>) -> AttributionReport {
         self.snapshot(highlight).into_report()
