@@ -1116,12 +1116,30 @@ The new `st-qr-studio` crate spins up a **QuantumRealityStudio** that records
 Maxwell pulses, emits concept windows, and stitches narrative tags into VR/AR
 overlays. Signal capture sessions enforce which laboratory rigs may publish
 pulses, semantic taggers mirror the `MaxwellDesireBridge` lexicon, and overlay
-frames surface glyph/intensity pairs for immersive projection.【F:crates/st-qr-studio/src/lib.rs†L1-L234】 Storyboard exports drop
-directly into `tools/qr_storyboard.py`, which converts JSON/NDJSON captures into
-Markdown decks grouped by channel for Desire roundtables.【F:tools/qr_storyboard.py†L1-L96】 The
-companion [Quantum Reality Playbook](docs/qr_playbook/README.md) provides
-rituals, collaboration tips, and art-direction cues so research and cultural
-teams stay synchronised.【F:docs/qr_playbook/README.md†L1-L49】
+frames surface glyph/intensity pairs for immersive projection. The crate now
+re-exports `MaxwellPulse` (an alias for `MaxwellZPulse`) and ships overlay
+builders such as `OverlayFrame::from_pairs`/`::from_glyphs_and_intensities` so
+AR pipelines can zip glyph and intensity streams without writing manual
+plumbing.【F:crates/st-qr-studio/src/lib.rs†L1-L362】 Storyboard exports drop directly into
+`tools/qr_storyboard.py`, which converts JSON/NDJSON captures into Markdown decks
+grouped by channel for Desire roundtables.【F:tools/qr_storyboard.py†L1-L96】 The companion
+[Quantum Reality Playbook](docs/qr_playbook/README.md) provides rituals,
+collaboration tips, and art-direction cues so research and cultural teams stay
+synchronised.【F:docs/qr_playbook/README.md†L1-L49】
+
+Latest iterations expose `QuantumRealityStudio::record_pulse` so capture rigs can
+stash `RecordedPulse` snapshots prior to narration, while
+`infer_concept_window` and `emit_concept_window` transform either raw records or
+streamed frames into serialisable concept windows suited for AR overlays and
+Desire loops. `OverlayGlyph` powers `OverlayFrame::new`, while the new
+convenience constructors accept glyph/intensity pairs directly and the
+storyboard exporter now retains overlay stacks, narrative tags, and concept
+window weights so AR HUDs can replay exactly what collaborators saw without
+deriving those assets a second time.【F:crates/st-qr-studio/src/lib.rs†L94-L951】 Need the
+same capture grouped per channel or streamed line-by-line? Call
+`export_storyboard_grouped` for a channel-indexed export, or
+`export_storyboard_ndjson` to emit newline-delimited JSON ready for WASM HUDs and
+log forwarders.【F:crates/st-qr-studio/src/lib.rs†L732-L833】
 
 Latest iterations expose `QuantumRealityStudio::record_pulse` so capture rigs can
 stash `RecordedPulse` snapshots prior to narration, while
