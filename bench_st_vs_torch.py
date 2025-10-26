@@ -149,7 +149,7 @@ def main():
     parser.add_argument(
         "--st-backend",
         default="auto",
-        help="auto|faer|naive|wgpu",
+        help="auto|faer|cpu-simd|python-simd|naive|wgpu",
     )
     args = parser.parse_args()
 
