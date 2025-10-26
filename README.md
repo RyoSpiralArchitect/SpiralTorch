@@ -1,6 +1,6 @@
 # 🌀🕯️ SpiralTorch 🕯️🌀
 **trains where PyTorch can’t — inside the Z-space.**  
-_(Still under active repair while expanding — API changes hourly.)_
+_(Still under active expanding hourly.)_
 
 **Purpose.** A WGPU-first, research-grade ML/geometry runtime that fuses spectral operators, microlocal tools, and cooperative schedulers into a single stack. The goal: rival CUDA-centric ecosystems using portable GPUs (Metal/Vulkan/DX12) without sacrificing theory fidelity.
 
@@ -1116,12 +1116,26 @@ The new `st-qr-studio` crate spins up a **QuantumRealityStudio** that records
 Maxwell pulses, emits concept windows, and stitches narrative tags into VR/AR
 overlays. Signal capture sessions enforce which laboratory rigs may publish
 pulses, semantic taggers mirror the `MaxwellDesireBridge` lexicon, and overlay
-frames surface glyph/intensity pairs for immersive projection.【F:crates/st-qr-studio/src/lib.rs†L1-L234】 Storyboard exports drop
-directly into `tools/qr_storyboard.py`, which converts JSON/NDJSON captures into
-Markdown decks grouped by channel for Desire roundtables.【F:tools/qr_storyboard.py†L1-L96】 The
-companion [Quantum Reality Playbook](docs/qr_playbook/README.md) provides
-rituals, collaboration tips, and art-direction cues so research and cultural
-teams stay synchronised.【F:docs/qr_playbook/README.md†L1-L49】
+frames surface glyph/intensity pairs for immersive projection. The crate now
+re-exports `MaxwellPulse` (an alias for `MaxwellZPulse`) and ships overlay
+builders such as `OverlayFrame::from_pairs`/`::from_glyphs_and_intensities` so
+AR pipelines can zip glyph and intensity streams without writing manual
+plumbing.【F:crates/st-qr-studio/src/lib.rs†L1-L362】 Storyboard exports drop directly into
+`tools/qr_storyboard.py`, which converts JSON/NDJSON captures into Markdown decks
+grouped by channel for Desire roundtables.【F:tools/qr_storyboard.py†L1-L96】 The companion
+[Quantum Reality Playbook](docs/qr_playbook/README.md) provides rituals,
+collaboration tips, and art-direction cues so research and cultural teams stay
+synchronised.【F:docs/qr_playbook/README.md†L1-L49】
+
+Latest iterations expose `QuantumRealityStudio::record_pulse` so capture rigs can
+stash `RecordedPulse` snapshots prior to narration, while
+`infer_concept_window` and `emit_concept_window` transform either raw records or
+streamed frames into serialisable concept windows suited for AR overlays and
+Desire loops. `OverlayGlyph` powers `OverlayFrame::new`, while the new
+convenience constructors accept glyph/intensity pairs directly and the
+storyboard exporter now retains overlay stacks, narrative tags, and concept
+window weights so AR HUDs can replay exactly what collaborators saw without
+deriving those assets a second time.【F:crates/st-qr-studio/src/lib.rs†L94-L865】
 
 ### Semiotic suturing, desire control, and EGW bridges
 

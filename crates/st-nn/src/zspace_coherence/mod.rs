@@ -6,6 +6,7 @@
 pub mod coherence_engine;
 pub mod psi_synchro;
 pub mod sequencer;
+pub mod vae;
 
 pub use coherence_engine::{
     BackendCapabilities, CoherenceBackend, CoherenceEngine, DomainConcept, DomainLinguisticProfile,
@@ -26,3 +27,4 @@ pub use sequencer::{
     CoherenceSignature, PreDiscardPolicy, PreDiscardRegulator, PreDiscardSnapshot,
     PreDiscardTelemetry, ZSpaceCoherenceSequencer, ZSpaceSequencerPlugin, ZSpaceSequencerStage,
 };
+pub use vae::{MellinBasis, ZSpaceVae, ZSpaceVaeState, ZSpaceVaeStats};
