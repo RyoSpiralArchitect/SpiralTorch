@@ -1135,20 +1135,7 @@ Desire loops. `OverlayGlyph` powers `OverlayFrame::new`, while the new
 convenience constructors accept glyph/intensity pairs directly and the
 storyboard exporter now retains overlay stacks, narrative tags, and concept
 window weights so AR HUDs can replay exactly what collaborators saw without
-deriving those assets a second time.【F:crates/st-qr-studio/src/lib.rs†L94-L951】 Need the
-same capture grouped per channel or streamed line-by-line? Call
-`export_storyboard_grouped` for a channel-indexed export, or
-`export_storyboard_ndjson` to emit newline-delimited JSON ready for WASM HUDs and
-log forwarders.【F:crates/st-qr-studio/src/lib.rs†L732-L833】
-
-Latest iterations expose `QuantumRealityStudio::record_pulse` so capture rigs can
-stash `RecordedPulse` snapshots prior to narration, while
-`infer_concept_window` and `emit_concept_window` transform either raw records or
-streamed frames into serialisable concept windows suited for AR overlays and
-Desire loops. A new `OverlayGlyph` struct powers `OverlayFrame::new` so callers
-can feed bespoke glyph/intensity trails, and `stitch_narrative_tags` extends
-overlays with falloff-weighted tag sequences for AR canvases without rewriting
-the composer.【F:crates/st-qr-studio/src/lib.rs†L94-L235】【F:crates/st-qr-studio/src/lib.rs†L498-L635】
+deriving those assets a second time.【F:crates/st-qr-studio/src/lib.rs†L94-L865】
 
 ### Semiotic suturing, desire control, and EGW bridges
 

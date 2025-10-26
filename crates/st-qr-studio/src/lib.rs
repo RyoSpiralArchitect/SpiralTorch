@@ -323,6 +323,100 @@ impl OverlayFrame {
     pub fn glyphs(&self) -> &[OverlayGlyph] {
         &self.glyphs
     }
+
+    pub fn new(
+        channel: impl Into<String>,
+        timestamp: SystemTime,
+        glyphs: Vec<OverlayGlyph>,
+    ) -> Self {
+        let channel = channel.into();
+        let mut filtered: Vec<OverlayGlyph> = glyphs
+            .into_iter()
+            .filter(|glyph| !glyph.glyph.trim().is_empty())
+            .collect();
+        if filtered.is_empty() {
+            filtered.push(OverlayGlyph::new(channel.clone(), 0.0));
+        }
+        let mut frame = Self {
+            channel,
+            glyph: String::new(),
+            intensity: 0.0,
+            timestamp,
+            glyphs: Vec::new(),
+        };
+        for glyph in filtered {
+            frame.push_glyph(glyph);
+        }
+        frame.refresh_primary();
+        frame
+    }
+
+    pub fn from_pairs<I, S>(channel: impl Into<String>, timestamp: SystemTime, pairs: I) -> Self
+    where
+        I: IntoIterator<Item = (S, f32)>,
+        S: Into<String>,
+    {
+        let glyphs = pairs
+            .into_iter()
+            .map(|(glyph, intensity)| OverlayGlyph::new(glyph, intensity))
+            .collect();
+        Self::new(channel, timestamp, glyphs)
+    }
+
+    pub fn from_glyphs_and_intensities<G, IG, II>(
+        channel: impl Into<String>,
+        timestamp: SystemTime,
+        glyphs: IG,
+        intensities: II,
+    ) -> Self
+    where
+        IG: IntoIterator<Item = G>,
+        G: Into<String>,
+        II: IntoIterator<Item = f32>,
+    {
+        let mut glyph_iter = glyphs.into_iter();
+        let mut intensity_iter = intensities.into_iter();
+        let pairs = std::iter::from_fn(move || {
+            let glyph = glyph_iter.next()?;
+            let intensity = intensity_iter.next().unwrap_or(0.0);
+            Some((glyph, intensity))
+        });
+        Self::from_pairs(channel, timestamp, pairs)
+    }
+
+    pub fn push_glyph(&mut self, glyph: OverlayGlyph) {
+        if glyph.glyph.trim().is_empty() {
+            return;
+        }
+        if self
+            .glyphs
+            .iter()
+            .any(|existing| existing.glyph == glyph.glyph)
+        {
+            return;
+        }
+        self.glyphs.push(glyph);
+        self.refresh_primary();
+    }
+
+    pub fn extend_tags<I>(&mut self, tags: I, base_intensity: f32)
+    where
+        I: IntoIterator,
+        I::Item: Into<String>,
+    {
+        for (idx, tag) in tags.into_iter().enumerate() {
+            let glyph = tag.into();
+            if glyph.trim().is_empty() {
+                continue;
+            }
+            let falloff = base_intensity * 0.75_f32.powi((idx + 1) as i32);
+            self.push_glyph(OverlayGlyph::new(glyph, falloff));
+        }
+    }
+
+    pub fn glyphs(&self) -> &[OverlayGlyph] {
+        &self.glyphs
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -800,6 +894,7 @@ impl QuantumRealityStudio {
             }
             None => (None, None),
         };
+        let record = self.record_pulse(channel, pulse, timestamp)?;
         let mut narrative = narrative;
         let mut frame_z_space = StudioZSpace::from(LogicZSpace::from(pulse.clone()));
         if let Some(resolved) = meta {
@@ -894,6 +989,10 @@ impl QuantumRealityStudio {
         overlay
     }
 
+    pub fn export_storyboard(&self) -> serde_json::Value {
+        if !self.frames.is_empty() {
+            let frames: Vec<serde_json::Value> = self
+                .frames
     fn storyboard_entries(&self) -> Vec<serde_json::Value> {
         if !self.frames.is_empty() {
             self.frames
@@ -995,6 +1094,9 @@ impl QuantumRealityStudio {
                         "z_bias": record.pulse.z_bias,
                     })
                 })
+                .collect();
+            serde_json::json!({ "frames": frames })
+        }
                 .collect()
         }
     }
