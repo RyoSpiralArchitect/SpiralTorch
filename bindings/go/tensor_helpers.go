@@ -20,19 +20,14 @@ func NewTensorFromMatrix(matrix [][]float32) (*Tensor, error) {
 	}
 
 	cols := len(matrix[0])
-	for i := 1; i < rows; i++ {
-		if len(matrix[i]) != cols {
-			return nil, fmt.Errorf("spiraltorch: matrix row %d has length %d, expected %d", i, len(matrix[i]), cols)
+	data := make([]float32, rows*cols)
+	offset := 0
+	for i, row := range matrix {
+		if len(row) != cols {
+			return nil, fmt.Errorf("spiraltorch: matrix row %d has length %d, expected %d", i, len(row), cols)
 		}
-	}
-
-	if cols == 0 {
-		return NewZerosTensor(rows, 0)
-	}
-
-	data := make([]float32, 0, rows*cols)
-	for _, row := range matrix {
-		data = append(data, row...)
+		copy(data[offset:offset+cols], row)
+		offset += cols
 	}
 	return NewTensorFromDense(rows, cols, data)
 }
@@ -62,10 +57,10 @@ func NewTensorFromColumns(columns [][]float32) (*Tensor, error) {
 	}
 
 	data := make([]float32, rows*cols)
-	for c := 0; c < cols; c++ {
-		column := columns[c]
-		for r := 0; r < rows; r++ {
-			data[r*cols+c] = column[r]
+	for r := 0; r < rows; r++ {
+		base := r * cols
+		for c := 0; c < cols; c++ {
+			data[base+c] = columns[c][r]
 		}
 	}
 	return NewTensorFromDense(rows, cols, data)
@@ -84,19 +79,19 @@ func (t *Tensor) ToMatrix() ([][]float32, error) {
 		return nil, err
 	}
 	if rows == 0 || cols == 0 {
-		return make([][]float32, rows), nil
-	}
-
-	flat, err := t.Data()
-	if err != nil {
-		return nil, err
+		matrix := make([][]float32, rows)
+		for r := range matrix {
+			matrix[r] = make([]float32, cols)
+		}
+		return matrix, nil
 	}
 
 	matrix := make([][]float32, rows)
 	for r := 0; r < rows; r++ {
-		start := r * cols
 		row := make([]float32, cols)
-		copy(row, flat[start:start+cols])
+		if err := t.copyRowInto(r, cols, row); err != nil {
+			return nil, err
+		}
 		matrix[r] = row
 	}
 	return matrix, nil
@@ -122,15 +117,10 @@ func (t *Tensor) Columns() ([][]float32, error) {
 		return result, nil
 	}
 
-	flat, err := t.Data()
-	if err != nil {
-		return nil, err
-	}
-
 	for c := 0; c < cols; c++ {
 		column := make([]float32, rows)
-		for r := 0; r < rows; r++ {
-			column[r] = flat[r*cols+c]
+		if err := t.copyColumnInto(c, rows, column); err != nil {
+			return nil, err
 		}
 		result[c] = column
 	}
@@ -155,14 +145,10 @@ func (t *Tensor) Row(index int) ([]float32, error) {
 		return make([]float32, 0), nil
 	}
 
-	flat, err := t.Data()
-	if err != nil {
+	row := make([]float32, cols)
+	if err := t.copyRowInto(index, cols, row); err != nil {
 		return nil, err
 	}
-
-	start := index * cols
-	row := make([]float32, cols)
-	copy(row, flat[start:start+cols])
 	return row, nil
 }
 
@@ -184,14 +170,9 @@ func (t *Tensor) Column(index int) ([]float32, error) {
 		return make([]float32, 0), nil
 	}
 
-	flat, err := t.Data()
-	if err != nil {
-		return nil, err
-	}
-
 	column := make([]float32, rows)
-	for r := 0; r < rows; r++ {
-		column[r] = flat[r*cols+index]
+	if err := t.copyColumnInto(index, rows, column); err != nil {
+		return nil, err
 	}
 	return column, nil
 }

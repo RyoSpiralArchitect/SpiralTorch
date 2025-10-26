@@ -23,6 +23,8 @@ void spiraltorch_tensor_free(void *tensor);
 bool spiraltorch_tensor_shape(const void *tensor, size_t *rows, size_t *cols);
 size_t spiraltorch_tensor_elements(const void *tensor);
 bool spiraltorch_tensor_copy_data(const void *tensor, float *out, size_t len);
+bool spiraltorch_tensor_copy_row(const void *tensor, size_t index, float *out, size_t len);
+bool spiraltorch_tensor_copy_column(const void *tensor, size_t index, float *out, size_t len);
 void *spiraltorch_tensor_add(const void *lhs, const void *rhs);
 void *spiraltorch_tensor_sub(const void *lhs, const void *rhs);
 void *spiraltorch_tensor_scale(const void *tensor, float value);
@@ -532,25 +534,135 @@ func (t *Tensor) Elements() (int, error) {
 
 // Data copies the tensor contents into a newly allocated slice.
 func (t *Tensor) Data() ([]float32, error) {
-	rows, cols, err := t.Shape()
+	length, err := t.Elements()
 	if err != nil {
 		return nil, err
 	}
-	length := rows * cols
 	if length == 0 {
 		return []float32{}, nil
 	}
 	buffer := make([]float32, length)
+	if err := t.copyDataInto(buffer); err != nil {
+		return nil, err
+	}
+	return buffer, nil
+}
+
+func (t *Tensor) copyDataInto(buffer []float32) error {
+	if t == nil || t.handle == nil {
+		return fmt.Errorf("spiraltorch: tensor handle is nil")
+	}
+	if len(buffer) == 0 {
+		return nil
+	}
 	ok := C.spiraltorch_tensor_copy_data(
 		t.handle,
 		(*C.float)(unsafe.Pointer(&buffer[0])),
-		C.size_t(length),
+		C.size_t(len(buffer)),
 	)
 	if !bool(ok) {
-		return nil, fmt.Errorf("spiraltorch: %s", lastError())
+		return fmt.Errorf("spiraltorch: %s", lastError())
 	}
 	clearError()
-	return buffer, nil
+	return nil
+}
+
+func (t *Tensor) copyRowInto(index, cols int, dest []float32) error {
+	if t == nil || t.handle == nil {
+		return fmt.Errorf("spiraltorch: tensor handle is nil")
+	}
+	if len(dest) < cols {
+		return fmt.Errorf("spiraltorch: destination length %d insufficient for %d columns", len(dest), cols)
+	}
+	if cols == 0 {
+		return nil
+	}
+	ok := C.spiraltorch_tensor_copy_row(
+		t.handle,
+		C.size_t(index),
+		(*C.float)(unsafe.Pointer(&dest[0])),
+		C.size_t(cols),
+	)
+	if !bool(ok) {
+		return fmt.Errorf("spiraltorch: %s", lastError())
+	}
+	clearError()
+	return nil
+}
+
+// CopyRowInto copies the requested row into `dest`, reusing the caller-provided
+// storage when it is large enough.
+func (t *Tensor) CopyRowInto(index int, dest []float32) error {
+	if index < 0 {
+		return fmt.Errorf("spiraltorch: row index %d cannot be negative", index)
+	}
+	rows, cols, err := t.Shape()
+	if err != nil {
+		return err
+	}
+	if index >= rows {
+		return fmt.Errorf("spiraltorch: row index %d out of range [0,%d)", index, rows)
+	}
+	return t.copyRowInto(index, cols, dest)
+}
+
+func (t *Tensor) copyColumnInto(index, rows int, dest []float32) error {
+	if t == nil || t.handle == nil {
+		return fmt.Errorf("spiraltorch: tensor handle is nil")
+	}
+	if len(dest) < rows {
+		return fmt.Errorf("spiraltorch: destination length %d insufficient for %d rows", len(dest), rows)
+	}
+	if rows == 0 {
+		return nil
+	}
+	ok := C.spiraltorch_tensor_copy_column(
+		t.handle,
+		C.size_t(index),
+		(*C.float)(unsafe.Pointer(&dest[0])),
+		C.size_t(rows),
+	)
+	if !bool(ok) {
+		return fmt.Errorf("spiraltorch: %s", lastError())
+	}
+	clearError()
+	return nil
+}
+
+// CopyColumnInto copies the requested column into `dest`, reusing the
+// caller-provided storage when it is large enough.
+func (t *Tensor) CopyColumnInto(index int, dest []float32) error {
+	if index < 0 {
+		return fmt.Errorf("spiraltorch: column index %d cannot be negative", index)
+	}
+	rows, cols, err := t.Shape()
+	if err != nil {
+		return err
+	}
+	if index >= cols {
+		return fmt.Errorf("spiraltorch: column index %d out of range [0,%d)", index, cols)
+	}
+	return t.copyColumnInto(index, rows, dest)
+}
+
+// CopyDataInto copies the tensor contents into the provided slice, reusing the
+// caller's storage when it is sufficiently large. The number of elements
+// written is returned so callers can reslice the buffer as needed.
+func (t *Tensor) CopyDataInto(dest []float32) (int, error) {
+	length, err := t.Elements()
+	if err != nil {
+		return 0, err
+	}
+	if length == 0 {
+		return 0, nil
+	}
+	if len(dest) < length {
+		return length, fmt.Errorf("spiraltorch: destination length %d insufficient for %d elements", len(dest), length)
+	}
+	if err := t.copyDataInto(dest[:length]); err != nil {
+		return 0, err
+	}
+	return length, nil
 }
 
 func (t *Tensor) binaryOp(other *Tensor, op func(unsafe.Pointer, unsafe.Pointer) unsafe.Pointer, label string) (*Tensor, error) {

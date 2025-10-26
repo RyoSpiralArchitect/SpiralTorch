@@ -1975,6 +1975,9 @@ impl CurvatureDiagnostics {
             scalar_curvature,
             ricci_square,
             kretschmann,
+            weyl_square: weyl_squared,
+            weyl_dual_contraction: dual_contract,
+            weyl_self_dual_squared,
             weyl_anti_self_dual_squared,
             weyl_self_dual_matrix,
             weyl_anti_self_dual_matrix,
@@ -1982,10 +1985,6 @@ impl CurvatureDiagnostics {
             weyl_self_dual_invariant_j,
             weyl_self_dual_discriminant,
             weyl_self_dual_eigenvalues,
-            weyl_square: weyl_squared,
-            weyl_dual_contraction: dual_contract,
-            weyl_self_dual_squared,
-            weyl_anti_self_dual_squared,
         }
     }
 }
