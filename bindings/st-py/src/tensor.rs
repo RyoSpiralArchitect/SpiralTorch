@@ -271,6 +271,15 @@ impl PyTensor {
         self.inner.shape()
     }
 
+    /// Return an opaque token representing the underlying storage buffer.
+    ///
+    /// The token value is derived from the base pointer of the tensor's
+    /// storage. It is stable for the lifetime of the allocation and changes
+    /// whenever the tensor reallocates or is rebound to a different buffer.
+    pub fn storage_token(&self) -> usize {
+        self.inner.data().as_ptr() as usize
+    }
+
     pub fn tolist(&self) -> Vec<Vec<f32>> {
         let (rows, cols) = self.inner.shape();
         let data = self.inner.data();
