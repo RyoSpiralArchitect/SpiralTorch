@@ -1,12 +1,15 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
+use pyo3::wrap_pyfunction;
 use pyo3::{Bound, Py};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::introspect::PySoftlogicZFeedback;
 use st_core::telemetry::dashboard::{
     DashboardEvent, DashboardFrame, DashboardMetric, DashboardRing, EventSeverity,
 };
+use st_core::telemetry::hub;
 
 fn severity_from_str(value: &str) -> PyResult<EventSeverity> {
     match value.to_ascii_lowercase().as_str() {
@@ -265,6 +268,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyDashboardFrame>()?;
     module.add_class::<PyDashboardRing>()?;
     module.add_class::<PyDashboardRingIter>()?;
+    module.add_function(wrap_pyfunction!(current, &module)?)?;
     module.add(
         "__all__",
         vec![
@@ -272,6 +276,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
             "DashboardEvent",
             "DashboardFrame",
             "DashboardRing",
+            "current",
         ],
     )?;
     parent.add_submodule(&module)?;
@@ -279,9 +284,25 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     parent.add("DashboardEvent", module.getattr("DashboardEvent")?)?;
     parent.add("DashboardFrame", module.getattr("DashboardFrame")?)?;
     parent.add("DashboardRing", module.getattr("DashboardRing")?)?;
+    if let Ok(zspace) = parent.getattr("zspace") {
+        if let Ok(feedback_cls) = zspace.getattr("SoftlogicZFeedback") {
+            module.add("SoftlogicZFeedback", feedback_cls)?;
+        }
+        if let Ok(descriptor_cls) = zspace.getattr("ZSpaceRegionDescriptor") {
+            module.add("ZSpaceRegionDescriptor", descriptor_cls)?;
+        }
+    }
     Ok(())
 }
 
 pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     register_impl(py, parent)
+}
+
+#[pyfunction]
+fn current(py: Python<'_>) -> PyResult<Option<Py<PySoftlogicZFeedback>>> {
+    Ok(hub::get_softlogic_z()
+        .map(PySoftlogicZFeedback::from_feedback)
+        .map(|feedback| Py::new(py, feedback))
+        .transpose()?)
 }

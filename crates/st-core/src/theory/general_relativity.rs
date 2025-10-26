@@ -1658,6 +1658,10 @@ pub struct CurvatureDiagnostics {
     pub ricci_square: f64,
     /// Kretschmann invariant R_{μνρσ} R^{μνρσ}.
     pub kretschmann: f64,
+    /// Quadratic Weyl invariant C_{μνρσ} C^{μνρσ}.
+    pub weyl_square: f64,
+    /// Pseudoscalar Weyl invariant C_{μνρσ} (⋆C)^{μνρσ}.
+    pub weyl_dual_contraction: f64,
     /// Weyl self-dual channel squared norm ½(C·C + C·⋆C).
     pub weyl_self_dual_squared: f64,
     /// Weyl anti-self-dual channel squared norm ½(C·C − C·⋆C).
@@ -1776,10 +1780,9 @@ impl CurvatureDiagnostics {
             }
         }
 
-        let det = metric.determinant();
         let volume = metric
             .volume_element()
-            .unwrap_or_else(|| det.abs().sqrt());
+            .unwrap_or_else(|| metric.determinant().abs().sqrt());
 
         let mut epsilon_lower = [[[[0.0; DIM]; DIM]; DIM]; DIM];
         for mu in 0..DIM {
@@ -1793,20 +1796,20 @@ impl CurvatureDiagnostics {
             }
         }
 
-        let mut epsilon_mixed = [[[[0.0; DIM]; DIM]; DIM]; DIM];
-        for mu in 0..DIM {
-            for nu in 0..DIM {
+        let mut epsilon_last_pair_raised = [[[[0.0; DIM]; DIM]; DIM]; DIM];
+        for rho in 0..DIM {
+            for sigma in 0..DIM {
                 for alpha in 0..DIM {
                     for beta in 0..DIM {
                         let mut sum = 0.0;
-                        for rho in 0..DIM {
-                            for sigma in 0..DIM {
-                                sum += epsilon_lower[mu][nu][rho][sigma]
-                                    * g_inv[(rho, alpha)]
-                                    * g_inv[(sigma, beta)];
+                        for gamma in 0..DIM {
+                            for delta in 0..DIM {
+                                sum += epsilon_lower[rho][sigma][gamma][delta]
+                                    * g_inv[(gamma, alpha)]
+                                    * g_inv[(delta, beta)];
                             }
                         }
-                        epsilon_mixed[mu][nu][alpha][beta] = sum;
+                        epsilon_last_pair_raised[rho][sigma][alpha][beta] = sum;
                     }
                 }
             }
@@ -1820,8 +1823,8 @@ impl CurvatureDiagnostics {
                         let mut sum = 0.0;
                         for alpha in 0..DIM {
                             for beta in 0..DIM {
-                                sum += epsilon_mixed[mu][nu][alpha][beta]
-                                    * weyl_lower[alpha][beta][rho][sigma];
+                                sum += epsilon_last_pair_raised[rho][sigma][alpha][beta]
+                                    * weyl_lower[mu][nu][alpha][beta];
                             }
                         }
                         weyl_dual_lower[mu][nu][rho][sigma] = 0.5 * sum;
@@ -1853,6 +1856,8 @@ impl CurvatureDiagnostics {
             scalar_curvature,
             ricci_square,
             kretschmann,
+            weyl_square: weyl_squared,
+            weyl_dual_contraction: dual_contract,
             weyl_self_dual_squared,
             weyl_anti_self_dual_squared,
         }
@@ -2032,6 +2037,8 @@ mod tests {
         assert_relative_eq!(diagnostics.kretschmann, 0.0, epsilon = 1e-12);
         assert_relative_eq!(diagnostics.ricci_square, 0.0, epsilon = 1e-12);
         assert_relative_eq!(diagnostics.scalar_curvature, 0.0, epsilon = 1e-12);
+        assert_relative_eq!(diagnostics.weyl_square, 0.0, epsilon = 1e-12);
+        assert_relative_eq!(diagnostics.weyl_dual_contraction, 0.0, epsilon = 1e-12);
         assert_relative_eq!(diagnostics.weyl_self_dual_squared, 0.0, epsilon = 1e-12);
         assert_relative_eq!(
             diagnostics.weyl_anti_self_dual_squared,
