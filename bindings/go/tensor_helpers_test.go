@@ -194,6 +194,44 @@ func TestNewTensorFromDenseValidation(t *testing.T) {
 	}
 }
 
+func TestTensorCopyDataInto(t *testing.T) {
+	tensor, err := NewTensorFromDense(2, 2, []float32{1, 2, 3, 4})
+	if err != nil {
+		t.Fatalf("NewTensorFromDense returned error: %v", err)
+	}
+	t.Cleanup(func() { tensor.Close() })
+
+	dest := make([]float32, 6)
+	written, err := tensor.CopyDataInto(dest)
+	if err != nil {
+		t.Fatalf("CopyDataInto returned error: %v", err)
+	}
+	if written != 4 {
+		t.Fatalf("unexpected element count: got %d want 4", written)
+	}
+	expected := []float32{1, 2, 3, 4}
+	for i, value := range expected {
+		if dest[i] != value {
+			t.Fatalf("unexpected dest[%d]: got %v want %v", i, dest[i], value)
+		}
+	}
+
+	if _, err := tensor.CopyDataInto(make([]float32, 3)); err == nil {
+		t.Fatalf("expected error for undersized destination buffer")
+	}
+
+	zero, err := NewZerosTensor(0, 5)
+	if err != nil {
+		t.Fatalf("NewZerosTensor returned error: %v", err)
+	}
+	t.Cleanup(func() { zero.Close() })
+	if written, err := zero.CopyDataInto(nil); err != nil {
+		t.Fatalf("CopyDataInto on zero tensor returned error: %v", err)
+	} else if written != 0 {
+		t.Fatalf("unexpected elements written for zero tensor: %d", written)
+	}
+}
+
 func TestRuntimeParallelMatmul(t *testing.T) {
 	runtime := requireRuntime(t)
 
