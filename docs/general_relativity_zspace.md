@@ -58,6 +58,7 @@ By following this workflow you can transplant the geometric framework of general
 - **Extended field equations:** Embed the four-dimensional Einstein tensor into the higher-dimensional block structure via `ZRelativityModel::assemble`. The resulting `ZRelativityFieldEquation` packages \(G^I_{\;J} + \Lambda g^I_{\;J}\) together with the appropriate coupling prefactor for comparison against an extended stress-energy tensor.
 - **Energy-momentum on \(M \times Z\):** Use `ExtendedStressEnergy` to encode symmetric sources that live on the full block metric. Its residual with the assembled field equation diagnoses how the Z-space sector back-reacts on the four-dimensional spacetime.
 - **Python access:** The `spiraltorch` module now exposes `lorentzian_metric_scaled` for quick metric rescaling diagnostics, `assemble_zrelativity_model` to run the full Kaluza–Klein style reduction (effective metric, gauge field, moduli, and field-equation residuals) directly from Python-native lists, and `ZRelativityModel.torch_bundle()` for instant `torch.Tensor` conversions when PyTorch is available.
+- **Self-dual curvature splits:** `CurvatureDiagnostics` reports the pure invariants `weyl_square` and `weyl_dual_contraction` alongside the SD/ASD norms `weyl_self_dual_squared` and `weyl_anti_self_dual_squared`, quantifying both the Lorentzian pseudoscalar and the parity-resolved curvature channels. Surface them from Python through `PyZRelativityModel.curvature_diagnostics()` when steering coupled GR/Z pipelines.
 
 ## 9. Bridging Z-Relativity to Tensor Workflows
 
