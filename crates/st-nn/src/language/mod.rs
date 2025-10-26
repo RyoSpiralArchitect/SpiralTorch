@@ -28,7 +28,7 @@ pub use info_geometry::{
     compute_curvature_table, InformationGeometryMetric, NarrativeBridgeCurvature,
 };
 pub use logbook::{DesireLogRecord, DesireLogReplay, DesireLogbook};
-pub use maxwell::{MaxwellDesireBridge, NarrativeHint};
+pub use maxwell::{MaxwellDesireBridge, NarrativeHint, NarrativeSummary};
 pub use pipeline::{
     DesireChannelSink, DesireGraphBridge, DesireGraphEvent, DesireGraphSummary, DesirePipeline,
     DesirePipelineBuilder, DesirePipelineEvent, DesirePipelineSink, DesireRoundtableBridge,

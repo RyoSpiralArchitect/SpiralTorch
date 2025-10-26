@@ -3,191 +3,178 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-//! Fractal noise generators tailored for Z-space lattices.
+//! Fractal field generators that weave self-similar structure into the Z-lattice.
 //!
-//! The helpers in this module synthesise self-similar fields on logarithmic
-//! lattices so Mellin-aware models can inject narrative-style branching or
-//! cosmological texture into their flows. The implementation keeps the output
-//! deterministic for a given seed, making it suitable for reproducible research
-//! experiments and unit tests alike.
+//! The routines exposed here build deterministic, Mandelbrot-inspired perturbations
+//! over the log lattices used by SpiralTorch’s Mellin tooling.  They provide a
+//! controllable way to inject “branching cosmos” energy into Mellin grids so that
+//! downstream Z-space operators can explore scale-invariant narratives.
 
-use core::f32::consts::TAU;
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use crate::mellin::MellinLogGrid;
+use crate::mellin_types::{ComplexScalar, MellinError, Scalar};
 use thiserror::Error;
 
-/// Errors emitted by the fractal field generator.
+/// Result type produced by the fractal field helpers.
+pub type FractalFieldResult<T> = Result<T, FractalFieldError>;
+
+/// Errors emitted while synthesising fractal fields.
 #[derive(Debug, Error)]
 pub enum FractalFieldError {
-    /// The generator was asked to operate on an empty or zero-dimensional field.
-    #[error("dimension must be greater than zero")]
-    Dimension,
-    /// The requested lattice depth must be positive.
-    #[error("lattice depth must be greater than zero")]
-    Depth,
-    /// Encountered a non-finite scale while building the lattice.
-    #[error("scale[{index}] is not finite: {value}")]
-    NonFiniteScale { index: usize, value: f32 },
+    #[error("log_step must be positive and finite")]
+    InvalidLogStep,
+    #[error("log_start must be finite")]
+    InvalidLogStart,
+    #[error("at least one lattice sample is required")]
+    EmptyLattice,
+    #[error("octaves must be at least 1")]
+    InvalidOctaves,
+    #[error("lacunarity must be > 1.0")]
+    InvalidLacunarity,
+    #[error("gain must be positive")]
+    InvalidGain,
+    #[error("iteration count must be at least 1")]
+    InvalidIterations,
+    #[error(transparent)]
+    Mellin(#[from] MellinError),
 }
 
-/// Self-similar samples indexed by `(scale_index, feature_index)`.
-#[derive(Clone, Debug)]
-pub struct FractalField {
-    scales: Vec<f32>,
-    dimension: usize,
-    samples: Vec<f32>,
-}
-
-impl FractalField {
-    fn offset(&self, scale_index: usize, feature: usize) -> usize {
-        scale_index * self.dimension + feature
-    }
-
-    /// Returns the log-scale lattice used to generate the field.
-    pub fn scales(&self) -> &[f32] {
-        &self.scales
-    }
-
-    /// Number of independent fractal channels carried by the field.
-    pub fn dimension(&self) -> usize {
-        self.dimension
-    }
-
-    /// Number of log-lattice samples.
-    pub fn depth(&self) -> usize {
-        self.scales.len()
-    }
-
-    /// Returns the raw amplitude at `(scale_index, feature)`.
-    pub fn sample(&self, scale_index: usize, feature: usize) -> Option<f32> {
-        self.samples.get(self.offset(scale_index, feature)).copied()
-    }
-
-    /// Mean amplitude across all features at the supplied scale.
-    pub fn mean_amplitude(&self, scale_index: usize) -> Option<f32> {
-        if scale_index >= self.depth() {
-            return None;
-        }
-        let start = self.offset(scale_index, 0);
-        let end = start + self.dimension;
-        let slice = &self.samples[start..end];
-        let sum: f32 = slice.iter().copied().sum();
-        Some(sum / self.dimension as f32)
-    }
-
-    /// Returns an iterator over the field samples grouped by scale.
-    pub fn iter_scales(&self) -> impl Iterator<Item = &[f32]> {
-        self.samples.chunks(self.dimension)
-    }
-}
-
-/// Deterministic fractal generator operating on log-uniform lattices.
+/// Deterministic fractal field synthesiser over the Z-lattice.
 #[derive(Clone, Debug)]
 pub struct FractalFieldGenerator {
-    dimension: usize,
-    spectral_exponent: f32,
-    octaves: usize,
-    persistence: f32,
-    seed: u64,
+    octaves: u32,
+    lacunarity: f32,
+    gain: f32,
+    iterations: u32,
 }
 
 impl FractalFieldGenerator {
-    /// Creates a generator with the provided spectral exponent and RNG seed.
+    /// Creates a new generator with the provided hyper-parameters.
     pub fn new(
-        dimension: usize,
-        spectral_exponent: f32,
-        seed: u64,
-    ) -> Result<Self, FractalFieldError> {
-        if dimension == 0 {
-            return Err(FractalFieldError::Dimension);
+        octaves: u32,
+        lacunarity: f32,
+        gain: f32,
+        iterations: u32,
+    ) -> FractalFieldResult<Self> {
+        if octaves == 0 {
+            return Err(FractalFieldError::InvalidOctaves);
         }
-        let octaves = 6usize;
+        if !(lacunarity.is_finite() && lacunarity > 1.0) {
+            return Err(FractalFieldError::InvalidLacunarity);
+        }
+        if !(gain.is_finite() && gain > 0.0) {
+            return Err(FractalFieldError::InvalidGain);
+        }
+        if iterations == 0 {
+            return Err(FractalFieldError::InvalidIterations);
+        }
         Ok(Self {
-            dimension,
-            spectral_exponent: spectral_exponent.max(0.0),
             octaves,
-            persistence: 0.65,
-            seed,
+            lacunarity,
+            gain,
+            iterations,
         })
     }
 
-    /// Configures the number of octaves used when synthesising the field.
-    pub fn with_octaves(mut self, octaves: usize) -> Self {
-        self.octaves = octaves.max(1);
-        self
-    }
-
-    /// Adjusts the persistence factor (how quickly the amplitude decays per octave).
-    pub fn with_persistence(mut self, persistence: f32) -> Self {
-        self.persistence = persistence.clamp(0.0, 1.0);
-        self
-    }
-
-    /// Generates a fractal field on a log-uniform lattice described by `(log_start, log_step, depth)`.
-    pub fn generate(
+    /// Builds the branching field sampled on a log-lattice.
+    pub fn branching_field(
         &self,
-        log_start: f32,
-        log_step: f32,
-        depth: usize,
-    ) -> Result<FractalField, FractalFieldError> {
-        if depth == 0 {
-            return Err(FractalFieldError::Depth);
+        log_start: Scalar,
+        log_step: Scalar,
+        len: usize,
+    ) -> FractalFieldResult<Vec<ComplexScalar>> {
+        if !(log_start.is_finite()) {
+            return Err(FractalFieldError::InvalidLogStart);
         }
-        let mut scales = Vec::with_capacity(depth);
-        for i in 0..depth {
-            scales.push(log_start + log_step * i as f32);
+        if !(log_step.is_finite() && log_step > 0.0) {
+            return Err(FractalFieldError::InvalidLogStep);
         }
-        self.generate_for_scales(&scales)
+        if len == 0 {
+            return Err(FractalFieldError::EmptyLattice);
+        }
+        let mut field = Vec::with_capacity(len);
+        for i in 0..len {
+            let coord = log_start + log_step * i as Scalar;
+            field.push(self.sample(coord));
+        }
+        Ok(field)
     }
 
-    /// Generates a fractal field on top of an existing lattice.
-    pub fn generate_for_scales(&self, scales: &[f32]) -> Result<FractalField, FractalFieldError> {
-        if scales.is_empty() {
-            return Err(FractalFieldError::Depth);
-        }
-        for (index, &scale) in scales.iter().enumerate() {
-            if !scale.is_finite() {
-                return Err(FractalFieldError::NonFiniteScale {
-                    index,
-                    value: scale,
-                });
-            }
-        }
+    /// Generates a Mellin grid seeded with a fractal branching field.
+    pub fn spawn_grid(
+        &self,
+        log_start: Scalar,
+        log_step: Scalar,
+        len: usize,
+    ) -> FractalFieldResult<MellinLogGrid> {
+        let samples = self.branching_field(log_start, log_step, len)?;
+        Ok(MellinLogGrid::new(log_start, log_step, samples)?)
+    }
 
-        let mut samples = Vec::with_capacity(scales.len() * self.dimension);
-        for (s_idx, &scale) in scales.iter().enumerate() {
-            for feature in 0..self.dimension {
-                let mut rng =
-                    StdRng::seed_from_u64(self.seed ^ ((s_idx as u64) << 32) ^ feature as u64);
-                samples.push(self.fractal_value(scale, feature, &mut rng));
-            }
+    /// Adds a fractal branching field on top of an existing Mellin grid.
+    pub fn weave_with_grid(&self, base: &MellinLogGrid) -> FractalFieldResult<MellinLogGrid> {
+        let mut samples = base.samples().to_vec();
+        let branch = self.branching_field(base.log_start(), base.log_step(), base.len())?;
+        for (sample, perturbation) in samples.iter_mut().zip(branch.iter()) {
+            *sample += *perturbation;
         }
-
-        Ok(FractalField {
-            scales: scales.to_vec(),
-            dimension: self.dimension,
+        Ok(MellinLogGrid::new(
+            base.log_start(),
+            base.log_step(),
             samples,
-        })
+        )?)
     }
 
-    fn fractal_value(&self, scale: f32, feature: usize, rng: &mut StdRng) -> f32 {
+    /// Returns the configured number of octaves.
+    pub fn octaves(&self) -> u32 {
+        self.octaves
+    }
+
+    /// Lacunarity parameter used by the generator.
+    pub fn lacunarity(&self) -> f32 {
+        self.lacunarity
+    }
+
+    /// Gain applied between octaves.
+    pub fn gain(&self) -> f32 {
+        self.gain
+    }
+
+    /// Iteration count used for the Mandelbrot-style loop.
+    pub fn iterations(&self) -> u32 {
+        self.iterations
+    }
+
+    fn sample(&self, coord: Scalar) -> ComplexScalar {
         let mut frequency = 1.0f32;
-        let mut amplitude = 0.0f32;
-        let mut weight_sum = 0.0f32;
-        let persistence = self.persistence.clamp(1e-3, 0.999);
-        let mut octave_gain = 1.0f32;
+        let mut amplitude = 1.0f32;
+        let mut total = ComplexScalar::new(0.0, 0.0);
+        let mut normaliser = 0.0f32;
+
         for _ in 0..self.octaves {
-            let weight = frequency.powf(-self.spectral_exponent) * octave_gain;
-            let phase = rng.gen::<f32>() * TAU;
-            let drift = ((feature as f32 + 1.0) * scale * frequency).sin();
-            amplitude += weight * (phase + drift).sin();
-            weight_sum += weight;
-            frequency *= 2.0;
-            octave_gain *= persistence;
+            let angle = coord * frequency;
+            let c = ComplexScalar::new(angle.cos(), angle.sin());
+            let mut z = ComplexScalar::new(0.0, 0.0);
+            let mut escape_it = self.iterations;
+            for iter in 0..self.iterations {
+                z = z * z + c;
+                if z.norm_sqr() > 4.0 {
+                    escape_it = iter + 1;
+                    break;
+                }
+            }
+            let escape = escape_it as f32 / self.iterations as f32;
+            let envelope = (-0.5 * (coord * frequency).powi(2)).exp();
+            let contribution = c * (escape * envelope * amplitude);
+            total += contribution;
+            normaliser += amplitude;
+            frequency *= self.lacunarity;
+            amplitude *= self.gain;
         }
-        if weight_sum <= 0.0 {
-            0.0
+
+        if normaliser > 0.0 {
+            total * (1.0 / normaliser)
         } else {
-            amplitude / weight_sum
+            total
         }
     }
 }
@@ -197,25 +184,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn generator_is_deterministic() {
-        let gen = FractalFieldGenerator::new(3, 1.0, 0x5A5A).unwrap();
-        let field_a = gen.generate(0.0, 0.25, 5).unwrap();
-        let field_b = gen.generate(0.0, 0.25, 5).unwrap();
-        assert_eq!(field_a.samples, field_b.samples);
+    fn generates_branching_field() {
+        let generator = FractalFieldGenerator::new(3, 2.0, 0.5, 16).unwrap();
+        let field = generator.branching_field(-2.0, 0.25, 12).unwrap();
+        assert_eq!(field.len(), 12);
+        assert!(field.iter().any(|c| c.re.abs() > 0.0));
+        assert!(field.iter().any(|c| c.im.abs() > 0.0));
     }
 
     #[test]
-    fn mean_amplitude_matches_manual_average() {
-        let gen = FractalFieldGenerator::new(4, 0.5, 42).unwrap();
-        let field = gen.generate(-1.0, 0.5, 3).unwrap();
-        for scale_idx in 0..field.depth() {
-            let mean = field.mean_amplitude(scale_idx).unwrap();
-            let mut manual = 0.0;
-            for feature in 0..field.dimension() {
-                manual += field.sample(scale_idx, feature).unwrap();
-            }
-            manual /= field.dimension() as f32;
-            assert!((mean - manual).abs() < 1e-6);
-        }
+    fn weaves_with_existing_grid() {
+        let base = MellinLogGrid::from_function(-1.0, 0.2, 6, |x| {
+            let amp = (x.exp()).sin();
+            ComplexScalar::new(amp, 0.0)
+        })
+        .unwrap();
+        let generator = FractalFieldGenerator::new(2, 2.0, 0.6, 12).unwrap();
+        let woven = generator.weave_with_grid(&base).unwrap();
+        assert_eq!(woven.len(), base.len());
+        let diff: Vec<_> = woven
+            .samples()
+            .iter()
+            .zip(base.samples().iter())
+            .map(|(lhs, rhs)| (*lhs - *rhs).norm())
+            .collect();
+        assert!(diff.iter().any(|v| *v > 0.0));
     }
 }

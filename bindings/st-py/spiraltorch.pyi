@@ -1361,6 +1361,74 @@ class ZConv:
     def psi_drift(self) -> float | None: ...
 
 
+class ZConv6DA:
+    def __init__(
+        self,
+        name: str,
+        in_channels: int,
+        out_channels: int,
+        grid: Tuple[int, int, int],
+        *,
+        leech_rank: int = ...,
+        leech_weight: float = ...,
+        layout: Literal["NCDHW", "NDHWC"] = ...,
+        neighbors: Sequence[Tuple[int, int, int]] | None = ...,
+    ) -> None: ...
+
+    def forward(self, x: Tensor) -> Tensor: ...
+    def backward(self, x: Tensor, grad_output: Tensor) -> Tensor: ...
+    def __call__(self, x: Tensor) -> Tensor: ...
+    def attach_hypergrad(
+        self,
+        curvature: float,
+        learning_rate: float,
+        *,
+        topos: OpenCartesianTopos | None = ...,
+    ) -> None: ...
+    def attach_realgrad(self, learning_rate: float) -> None: ...
+    def zero_accumulators(self) -> None: ...
+    def apply_step(self, fallback_lr: float) -> None: ...
+    def state_dict(self) -> List[Tuple[str, Tensor]]: ...
+    def load_state_dict(self, state: Sequence[Tuple[str, Tensor]]) -> None: ...
+    def leech_enrich(self, geodesic: float) -> float: ...
+
+    @staticmethod
+    def ramanujan_pi_boost() -> float: ...
+
+    @property
+    def layout(self) -> Literal["NCDHW", "NDHWC"]: ...
+
+    @property
+    def grid(self) -> Tuple[int, int, int]: ...
+
+    @property
+    def in_channels(self) -> int: ...
+
+    @property
+    def out_channels(self) -> int: ...
+
+    @property
+    def neighbor_count(self) -> int: ...
+
+    @property
+    def neighbor_offsets(self) -> List[Tuple[int, int, int]]: ...
+
+    @property
+    def leech_rank(self) -> int: ...
+
+    @property
+    def leech_weight(self) -> float: ...
+
+    @property
+    def input_shape(self) -> Tuple[int, int, int, int]: ...
+
+    @property
+    def output_shape(self) -> Tuple[int, int, int, int]: ...
+
+    @property
+    def ramanujan_pi_delta(self) -> float: ...
+
+
 class ZPooling:
     def __init__(
         self,
@@ -2476,6 +2544,7 @@ __all__ = [
     "step_many",
     "stream_zspace_training",
     "ZConv",
+    "ZConv6DA",
     "ZPooling",
     "compat",
     "capture",

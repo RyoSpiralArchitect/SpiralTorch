@@ -42,6 +42,11 @@ impl LieFrame {
         Self::from_quaternion(quaternion)
     }
 
+    pub fn from_matrix(matrix: [f32; 9]) -> Self {
+        let quaternion = matrix_to_quaternion(matrix);
+        Self::from_quaternion(quaternion)
+    }
+
     pub fn from_quaternion(mut quaternion: [f32; 4]) -> Self {
         let mut norm = 0.0f32;
         for q in &quaternion {
@@ -81,6 +86,76 @@ impl LieFrame {
             self.rotation[3] * v[0] + self.rotation[4] * v[1] + self.rotation[5] * v[2],
             self.rotation[6] * v[0] + self.rotation[7] * v[1] + self.rotation[8] * v[2],
         ]
+    }
+
+    pub fn apply_inverse(&self, v: [f32; 3]) -> [f32; 3] {
+        [
+            self.rotation[0] * v[0] + self.rotation[3] * v[1] + self.rotation[6] * v[2],
+            self.rotation[1] * v[0] + self.rotation[4] * v[1] + self.rotation[7] * v[2],
+            self.rotation[2] * v[0] + self.rotation[5] * v[1] + self.rotation[8] * v[2],
+        ]
+    }
+
+    pub fn inverse(&self) -> Self {
+        let [w, x, y, z] = self.quaternion;
+        let quaternion = [w, -x, -y, -z];
+        let rotation = [
+            self.rotation[0],
+            self.rotation[3],
+            self.rotation[6],
+            self.rotation[1],
+            self.rotation[4],
+            self.rotation[7],
+            self.rotation[2],
+            self.rotation[5],
+            self.rotation[8],
+        ];
+        Self {
+            quaternion,
+            rotation,
+        }
+    }
+
+    pub fn compose(&self, other: &LieFrame) -> Self {
+        let [w1, x1, y1, z1] = self.quaternion;
+        let [w2, x2, y2, z2] = other.quaternion;
+        let quaternion = [
+            w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+            w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+            w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+            w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+        ];
+        Self::from_quaternion(quaternion)
+    }
+
+    pub fn relative_to(&self, reference: &LieFrame) -> Self {
+        reference.inverse().compose(self)
+    }
+
+    pub fn log(&self) -> [f32; 3] {
+        let [w, x, y, z] = self.quaternion;
+        let norm_v = (x * x + y * y + z * z).sqrt();
+        if norm_v <= EPSILON {
+            return [0.0, 0.0, 0.0];
+        }
+        let angle = 2.0 * norm_v.atan2(w);
+        let scale = angle / norm_v;
+        [x * scale, y * scale, z * scale]
+    }
+
+    pub fn exp(tangent: [f32; 3]) -> Self {
+        let theta =
+            (tangent[0] * tangent[0] + tangent[1] * tangent[1] + tangent[2] * tangent[2]).sqrt();
+        if theta <= EPSILON {
+            return Self::identity();
+        }
+        let axis = [tangent[0] / theta, tangent[1] / theta, tangent[2] / theta];
+        Self::from_axis_angle(axis, theta)
+    }
+
+    pub fn transport(&self, vector: [f32; 3], target: &LieFrame) -> [f32; 3] {
+        let world = self.apply(vector);
+        target.apply_inverse(world)
     }
 }
 
@@ -236,6 +311,7 @@ impl EllipticWarp {
             base[0] * dir[1] - base[1] * dir[0],
         ];
         let lie_frame = LieFrame::from_axis_angle(axis, polar);
+        let lie_log = lie_frame.log();
         let flow_vector = lie_frame.apply([1.0, 0.0, 0.0]);
 
         let curvature_tensor = curvature_tensor_from_direction(dir, self.curvature_radius);
@@ -269,6 +345,7 @@ impl EllipticWarp {
         let topological_sector = ((sheet_index as u32) << 1) | orientation_parity;
         let homology_index =
             compute_homology_index(sheet_index, sheet_count, spin_alignment, normalized_radius);
+        let rotor_transport = lie_frame.apply_inverse(rotor_field);
 
         let features = [
             geodesic_radius,
@@ -398,6 +475,8 @@ impl EllipticWarp {
             resonance_heat,
             noise_density,
             lie_frame,
+            lie_log,
+            rotor_transport,
         };
 
         (telemetry, differential)
@@ -423,6 +502,8 @@ pub struct EllipticTelemetry {
     pub resonance_heat: f32,
     pub noise_density: f32,
     pub lie_frame: LieFrame,
+    pub lie_log: [f32; 3],
+    pub rotor_transport: [f32; 3],
 }
 
 impl Default for EllipticTelemetry {
@@ -444,6 +525,8 @@ impl Default for EllipticTelemetry {
             resonance_heat: 0.0,
             noise_density: 0.0,
             lie_frame: LieFrame::identity(),
+            lie_log: [0.0; 3],
+            rotor_transport: [0.0; 3],
         }
     }
 }
@@ -476,6 +559,13 @@ impl EllipticTelemetry {
         for i in 0..3 {
             rotor_field[i] = super::lerp(self.rotor_field[i], other.rotor_field[i], clamped);
             flow_vector[i] = super::lerp(self.flow_vector[i], other.flow_vector[i], clamped);
+        }
+        let mut lie_log = [0.0; 3];
+        let mut rotor_transport = [0.0; 3];
+        for i in 0..3 {
+            lie_log[i] = super::lerp(self.lie_log[i], other.lie_log[i], clamped);
+            rotor_transport[i] =
+                super::lerp(self.rotor_transport[i], other.rotor_transport[i], clamped);
         }
         let mut curvature_tensor = [[0.0; 3]; 3];
         for i in 0..3 {
@@ -518,6 +608,8 @@ impl EllipticTelemetry {
             noise_density: super::lerp(self.noise_density, other.noise_density, clamped)
                 .clamp(0.0, 1.0),
             lie_frame,
+            lie_log,
+            rotor_transport,
         }
     }
 
@@ -553,6 +645,8 @@ impl From<&EllipticTelemetry> for SoftlogicEllipticSample {
             noise_density: telemetry.noise_density,
             quaternion: telemetry.lie_frame.quaternion(),
             rotation: telemetry.lie_frame.rotation_matrix(),
+            lie_log: telemetry.lie_log,
+            rotor_transport: telemetry.rotor_transport,
         }
     }
 }
@@ -567,6 +661,8 @@ pub(crate) struct EllipticAccumulator {
     sheet_sum: f32,
     rotor_sum: [f32; 3],
     flow_sum: [f32; 3],
+    lie_log_sum: [f32; 3],
+    transport_sum: [f32; 3],
     tensor_sum: [[f32; 3]; 3],
     heat_sum: f32,
     noise_sum: f32,
@@ -593,6 +689,8 @@ impl EllipticAccumulator {
         for i in 0..3 {
             self.rotor_sum[i] += telemetry.rotor_field[i] * weight;
             self.flow_sum[i] += telemetry.flow_vector[i] * weight;
+            self.lie_log_sum[i] += telemetry.lie_log[i] * weight;
+            self.transport_sum[i] += telemetry.rotor_transport[i] * weight;
         }
         for i in 0..3 {
             for j in 0..3 {
@@ -638,9 +736,13 @@ impl EllipticAccumulator {
         let lie_frame = LieFrame::from_quaternion(quaternion);
         let mut rotor_field = [0.0f32; 3];
         let mut flow_vector = [0.0f32; 3];
+        let mut lie_log = [0.0f32; 3];
+        let mut rotor_transport = [0.0f32; 3];
         for i in 0..3 {
             rotor_field[i] = self.rotor_sum[i] / self.weight;
             flow_vector[i] = self.flow_sum[i] / self.weight;
+            lie_log[i] = self.lie_log_sum[i] / self.weight;
+            rotor_transport[i] = self.transport_sum[i] / self.weight;
         }
         let mut curvature_tensor = [[0.0f32; 3]; 3];
         for i in 0..3 {
@@ -665,6 +767,8 @@ impl EllipticAccumulator {
             resonance_heat: self.heat_sum / self.weight,
             noise_density: (self.noise_sum / self.weight).clamp(0.0, 1.0),
             lie_frame,
+            lie_log,
+            rotor_transport,
         })
     }
 }
@@ -694,6 +798,37 @@ fn quaternion_to_matrix(q: [f32; 4]) -> [f32; 9] {
         2.0 * (y * z + x * w),
         1.0 - 2.0 * (x * x + y * y),
     ]
+}
+
+fn matrix_to_quaternion(m: [f32; 9]) -> [f32; 4] {
+    let trace = m[0] + m[4] + m[8];
+    let mut q = [0.0f32; 4];
+    if trace > 0.0 {
+        let s = (trace + 1.0).sqrt().max(EPSILON) * 2.0;
+        q[0] = 0.25 * s;
+        q[1] = (m[7] - m[5]) / s;
+        q[2] = (m[2] - m[6]) / s;
+        q[3] = (m[3] - m[1]) / s;
+    } else if m[0] > m[4] && m[0] > m[8] {
+        let s = (1.0 + m[0] - m[4] - m[8]).sqrt().max(EPSILON) * 2.0;
+        q[0] = (m[7] - m[5]) / s;
+        q[1] = 0.25 * s;
+        q[2] = (m[1] + m[3]) / s;
+        q[3] = (m[2] + m[6]) / s;
+    } else if m[4] > m[8] {
+        let s = (1.0 + m[4] - m[0] - m[8]).sqrt().max(EPSILON) * 2.0;
+        q[0] = (m[2] - m[6]) / s;
+        q[1] = (m[1] + m[3]) / s;
+        q[2] = 0.25 * s;
+        q[3] = (m[5] + m[7]) / s;
+    } else {
+        let s = (1.0 + m[8] - m[0] - m[4]).sqrt().max(EPSILON) * 2.0;
+        q[0] = (m[3] - m[1]) / s;
+        q[1] = (m[2] + m[6]) / s;
+        q[2] = (m[5] + m[7]) / s;
+        q[3] = 0.25 * s;
+    }
+    q
 }
 
 fn curvature_tensor_from_direction(dir: [f32; 3], radius: f32) -> [[f32; 3]; 3] {

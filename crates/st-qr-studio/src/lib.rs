@@ -15,7 +15,7 @@ use st_frac::zspace::{
 };
 use st_logic::meta_layer::{MetaNarrativeLayer, ResolvedNarrative};
 use st_logic::quantum_reality::ZSpace as LogicZSpace;
-use st_nn::{ConceptHint, MaxwellDesireBridge, NarrativeHint};
+use st_nn::{ConceptHint, MaxwellDesireBridge, NarrativeHint, NarrativeSummary};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -425,6 +425,8 @@ pub struct StudioFrame {
     pub record: RecordedPulse,
     pub concept: Option<StudioConceptHint>,
     pub narrative: Option<NarrativeHint>,
+    #[serde(default)]
+    pub narrative_summary: Option<NarrativeSummary>,
     pub overlay: OverlayFrame,
     pub z_space: StudioZSpace,
     pub meta: Option<MetaNarrative>,
@@ -530,11 +532,18 @@ impl OverlayComposer {
         fallback: Option<&[String]>,
     ) -> OverlayFrame {
         let glyph = narrative
-            .and_then(|hint| hint.tags().first().cloned())
+            .and_then(|hint| hint.dominant_tag().map(|tag| tag.to_string()))
             .or_else(|| fallback.and_then(|tags| tags.first().cloned()))
             .unwrap_or_else(|| record.channel.clone());
         let intensity = narrative
-            .map(|hint| hint.intensity())
+            .map(|hint| {
+                let emphasis = hint.quantum_emphasis();
+                if emphasis > f32::EPSILON {
+                    emphasis
+                } else {
+                    hint.intensity().max(record.pulse.magnitude())
+                }
+            })
             .unwrap_or_else(|| record.pulse.magnitude());
         OverlayFrame::from_record(record, glyph, intensity)
     }
@@ -1035,6 +1044,7 @@ impl QuantumRealityStudio {
         } else if let Some(fallback) = self.tagger.fallback_for(channel) {
             overlay = self.stitch_narrative_tags(overlay, fallback.iter().cloned());
         }
+        let summary = narrative.as_ref().map(|hint| hint.summary());
         let temporal_tags = TemporalLogicEngine::temporal_tags(&annotation);
         overlay = self.stitch_narrative_tags(overlay, temporal_tags.into_iter());
         let sheaf_tags = self
@@ -1045,6 +1055,7 @@ impl QuantumRealityStudio {
             record,
             concept,
             narrative,
+            narrative_summary: summary,
             overlay,
             z_space: frame_z_space,
             meta: meta_details,
@@ -1103,6 +1114,11 @@ impl QuantumRealityStudio {
             .max(1e-6);
         overlay.extend_tags(tags, base);
         overlay
+    }
+
+    pub fn export_storyboard(&self) -> serde_json::Value {
+        let frames = self.storyboard_entries();
+        serde_json::json!({ "frames": frames })
     }
 
     fn storyboard_entries(&self) -> Vec<serde_json::Value> {
@@ -1222,11 +1238,6 @@ impl QuantumRealityStudio {
         }
     }
 
-    pub fn export_storyboard(&self) -> serde_json::Value {
-        let frames = self.storyboard_entries();
-        serde_json::json!({ "frames": frames })
-    }
-
     pub fn export_storyboard_grouped(&self) -> serde_json::Value {
         let mut grouped: BTreeMap<String, Vec<serde_json::Value>> = BTreeMap::new();
         for entry in self.storyboard_entries() {
@@ -1306,7 +1317,12 @@ mod tests {
             .expect("ingest");
         assert!(frame.concept.is_some());
         assert!(frame.narrative.is_some());
-        assert_eq!(frame.overlay.glyph, "braid");
+        let expected = frame
+            .narrative
+            .as_ref()
+            .and_then(|hint| hint.dominant_tag())
+            .unwrap();
+        assert_eq!(frame.overlay.glyph, expected);
         assert!(frame.overlay.intensity > 0.0);
         assert!(frame.overlay.glyphs().len() >= 1);
         assert_eq!(frame.z_space.signature().len(), 8);
@@ -1487,10 +1503,15 @@ mod tests {
             .ingest(&bridge, "alpha", sample_pulse(), None)
             .expect("ingest");
         assert_eq!(studio.sink_count(), 1);
-        assert_eq!(frame.overlay.glyph, "braid");
+        let expected = frame
+            .narrative
+            .as_ref()
+            .and_then(|hint| hint.dominant_tag())
+            .unwrap();
+        assert_eq!(frame.overlay.glyph, expected);
         let stored = frames.lock().expect("mutex poisoned");
         assert_eq!(stored.len(), 1);
-        assert_eq!(stored[0].overlay.glyph, "braid");
+        assert_eq!(stored[0].overlay.glyph, expected);
         assert!(stored[0].overlay.glyphs().len() >= 1);
     }
 
@@ -1525,7 +1546,15 @@ mod tests {
             .get("overlay")
             .and_then(Value::as_object)
             .expect("overlay object");
-        assert_eq!(overlay.get("glyph").and_then(Value::as_str), Some("braid"));
+        let expected_glyph = frame
+            .narrative_summary
+            .as_ref()
+            .and_then(|summary| summary.dominant_tag.clone())
+            .unwrap();
+        assert_eq!(
+            overlay.get("glyph").and_then(Value::as_str),
+            Some(expected_glyph.as_str())
+        );
         let glyphs = overlay
             .get("glyphs")
             .and_then(Value::as_array)
@@ -1722,6 +1751,10 @@ mod tests {
         assert_eq!(window.channel, "alpha");
         assert!(window.magnitude > 0.0);
         assert!(window.weights.len() >= 1);
+        assert!(frame.narrative_summary.is_some());
+        let summary = frame.narrative_summary.clone().unwrap();
+        assert_eq!(summary.channel, "alpha");
+        assert!(summary.emphasis >= 0.0);
     }
 
     #[test]

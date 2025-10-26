@@ -59,6 +59,8 @@ fn pipeline_emits_temporal_z_dynamics() {
             temporal_alpha: 0.5,
             resonance_decay: 0.3,
             motion_gain: 1.0,
+            digest_window: 2,
+            quiescence_threshold: 0.05,
         },
     );
 
@@ -93,6 +95,8 @@ fn pipeline_emits_temporal_z_dynamics() {
         let (rows, cols) = output.resonance_envelope.shape();
         assert_eq!(rows, 2);
         assert_eq!(cols, 4);
+        assert!(output.temporal_digest.frames >= idx + 1);
+        assert!(output.window_digest.frames >= 1);
     }
 
     let motion_zero = outputs[0].motion_embedding.data();
@@ -106,4 +110,5 @@ fn pipeline_emits_temporal_z_dynamics() {
         .find(|metric| metric.name == "z.weight_entropy")
         .expect("entropy metric");
     assert!(entropy_metric.value.is_finite());
+    assert!(pipeline.temporal_digest_window(2).frames >= 1);
 }

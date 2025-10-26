@@ -611,6 +611,8 @@ pub struct SoftlogicEllipticSample {
     pub noise_density: f32,
     pub quaternion: [f32; 4],
     pub rotation: [f32; 9],
+    pub lie_log: [f32; 3],
+    pub rotor_transport: [f32; 3],
 }
 
 impl SoftlogicZFeedback {

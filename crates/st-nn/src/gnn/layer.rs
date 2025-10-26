@@ -6,8 +6,8 @@
 use super::GraphContext;
 #[cfg(feature = "psi")]
 use super::PsiCoherenceAdaptor;
-use crate::RoundtableBandInfluence;
 use crate::module::{Module, Parameter};
+use crate::RoundtableBandInfluence;
 use crate::{PureResult, Tensor, TensorError};
 use st_core::telemetry::xai::{GraphFlowTracer, NodeFlowSample};
 use std::num::NonZeroUsize;

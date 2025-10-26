@@ -83,6 +83,12 @@ pub mod psi_sync_impl;
 #[doc(inline)]
 pub use psi_sync_impl as psi_sync;
 
+#[path = "rg_flow.rs"]
+#[doc(hidden)]
+pub mod rg_flow_impl;
+#[doc(inline)]
+pub use rg_flow_impl as rg_flow;
+
 #[path = "stv.rs"]
 #[doc(hidden)]
 pub mod stv_impl;

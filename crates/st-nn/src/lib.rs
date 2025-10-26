@@ -59,8 +59,8 @@ pub use language::{
     DesireTriggerEvent, DesireWeights, DistanceMatrix, EntropicGwSolver, GeometryBiasConfig,
     GeometryBiasContext, GeometryBiasMetrics, GeometryBiasSnapshot, GeometryBiasUpdate,
     GeometryCoherenceSample, LanguagePipeline, LanguagePipelineBuilder, MaxwellDesireBridge,
-    NarrativeHint, PipelineError, PipelineResult, RepressionField, SemanticBridge, SparseKernel,
-    SymbolGeometry, TemperatureController,
+    NarrativeHint, NarrativeSummary, PipelineError, PipelineResult, RepressionField,
+    SemanticBridge, SparseKernel, SymbolGeometry, TemperatureController,
 };
 #[cfg(feature = "psi")]
 pub use language::{DesirePsiBridge, DesirePsiEvent, DesirePsiSummary};

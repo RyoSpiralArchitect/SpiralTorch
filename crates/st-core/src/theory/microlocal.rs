@@ -1473,6 +1473,67 @@ mod tests {
     }
 
     #[test]
+    fn lie_frame_log_exp_transport_consistency() {
+        use std::f32::consts::{FRAC_PI_4, FRAC_PI_6};
+
+        let frame_a = LieFrame::from_axis_angle([0.0, 1.0, 0.0], FRAC_PI_4);
+        let frame_b = LieFrame::from_axis_angle([0.0, 0.0, 1.0], FRAC_PI_6);
+        let composed = frame_a.compose(&frame_b);
+        let relative = composed.relative_to(&frame_a);
+        let expected = frame_b.quaternion();
+        let actual = relative.quaternion();
+        for i in 0..4 {
+            assert!((expected[i] - actual[i]).abs() < 1e-5);
+        }
+
+        let tangent = composed.log();
+        let reconstructed = LieFrame::exp(tangent);
+        let composed_q = composed.quaternion();
+        let reconstructed_q = reconstructed.quaternion();
+        for i in 0..4 {
+            assert!((composed_q[i] - reconstructed_q[i]).abs() < 1e-5);
+        }
+
+        let vector = [0.0, 1.0, 0.0];
+        let transported = composed.transport(vector, &frame_a);
+        let manual = frame_a.apply_inverse(composed.apply(vector));
+        for i in 0..3 {
+            assert!((transported[i] - manual[i]).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn elliptic_telemetry_exposes_lie_transport() {
+        let warp = EllipticWarp::new(1.5)
+            .with_sheet_count(3)
+            .with_spin_harmonics(2);
+        let orientation = [0.2f32, 0.3, 0.9];
+        let telemetry = warp
+            .map_orientation(&orientation)
+            .expect("telemetry should be generated");
+
+        let lie_from_log = LieFrame::exp(telemetry.lie_log);
+        let expected = telemetry.lie_frame.quaternion();
+        let reconstructed = lie_from_log.quaternion();
+        for i in 0..4 {
+            assert!((expected[i] - reconstructed[i]).abs() < 1e-5);
+        }
+
+        let rotor_world = telemetry.rotor_field;
+        let rotor_local = telemetry.rotor_transport;
+        let roundtrip = telemetry.lie_frame.apply(rotor_local);
+        for i in 0..3 {
+            assert!((rotor_world[i] - roundtrip[i]).abs() < 1e-5);
+        }
+
+        let lie_norm = (telemetry.lie_log[0] * telemetry.lie_log[0]
+            + telemetry.lie_log[1] * telemetry.lie_log[1]
+            + telemetry.lie_log[2] * telemetry.lie_log[2])
+            .sqrt();
+        assert!(lie_norm > 0.0);
+    }
+
+    #[test]
     fn detects_boundary_presence() {
         let mask = array![[0.0, 0.0, 0.0], [0.0, 1.0, 1.0], [0.0, 1.0, 1.0]].into_dyn();
         let gauge = InterfaceGauge::new(1.0, 1.0);

@@ -13,6 +13,8 @@ pub mod mellin_wgpu;
 pub mod scale_stack;
 pub mod zspace;
 
+pub use fractal_field::{FractalFieldError, FractalFieldGenerator, FractalFieldResult};
+
 use ndarray::{ArrayD, Axis};
 use thiserror::Error;
 

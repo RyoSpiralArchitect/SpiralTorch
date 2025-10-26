@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import cmath as _cmath
 import math as _math
+import threading as _threading
 import types as _types
 import sys
+import weakref as _weakref
 from collections import deque as _deque
 from collections.abc import Iterable as _IterableABC, Sequence as _SequenceABC
 from dataclasses import dataclass as _dataclass
@@ -476,7 +478,124 @@ if _TENSOR_BASE is not None:
 
     Tensor.__module__ = __name__
     globals()["Tensor"] = Tensor
+    _TensorFastType = Tensor
 
+else:
+    _TensorFastType = globals().get("Tensor")
+
+
+if isinstance(_TensorFastType, type):
+    _native_tensor_matmul = getattr(_TensorFastType, "matmul", None)
+    _tensor_matmul_simd_prepacked = getattr(
+        _TensorFastType, "matmul_simd_prepacked", None
+    )
+    _tensor_storage_token = getattr(_TensorFastType, "storage_token", None)
+    _cpu_simd_prepack_rhs = globals().get("cpu_simd_prepack_rhs")
+
+    if (
+        callable(_native_tensor_matmul)
+        and callable(_tensor_matmul_simd_prepacked)
+        and callable(_tensor_storage_token)
+        and callable(_cpu_simd_prepack_rhs)
+    ):
+
+        @_dataclass
+        class _SimdPackEntry:
+            pack: _Any
+            shape: _Tuple[int, int]
+            token: int
+
+
+        class _SimdPackCache:
+            __slots__ = ("_packs", "_lock")
+
+            def __init__(self) -> None:
+                self._packs: "_weakref.WeakKeyDictionary[_Any, _SimdPackEntry]" = (
+                    _weakref.WeakKeyDictionary()
+                )
+                self._lock = _threading.RLock()
+
+            def fetch(self, rhs: _Any) -> _SimdPackEntry | None:
+                try:
+                    shape = rhs.shape()
+                    token = int(_tensor_storage_token(rhs))
+                except Exception:
+                    return None
+
+                with self._lock:
+                    cached = self._packs.get(rhs)
+                    if (
+                        cached is not None
+                        and cached.shape == shape
+                        and cached.token == token
+                    ):
+                        return cached
+
+                try:
+                    pack = _cpu_simd_prepack_rhs(rhs)
+                except Exception:
+                    return None
+
+                entry = _SimdPackEntry(pack=pack, shape=shape, token=token)
+                with self._lock:
+                    existing = self._packs.get(rhs)
+                    if (
+                        existing is not None
+                        and existing.shape == shape
+                        and existing.token == token
+                    ):
+                        return existing
+                    self._packs[rhs] = entry
+                return entry
+
+            def invalidate(self, rhs: _Any) -> None:
+                with self._lock:
+                    self._packs.pop(rhs, None)
+
+            def clear(self) -> None:
+                with self._lock:
+                    self._packs.clear()
+
+
+        _SIMD_PACK_CACHE = _SimdPackCache()
+        _SIMD_FAST_LABELS = {"python-simd", "cpu-simd-prepack", "cpu-simd", "simd"}
+
+        def _tensor_matmul_fastpath(
+            self: _Any,
+            other: _Any,
+            *,
+            backend: str | None = None,
+            out: _Any = None,
+        ) -> _Any:
+            label = backend or "auto"
+            fallback_backend = backend
+
+            if label in {"python-simd", "cpu-simd-prepack"}:
+                fallback_backend = "cpu-simd"
+
+            if label in _SIMD_FAST_LABELS:
+                entry = _SIMD_PACK_CACHE.fetch(other)
+                if entry is not None:
+                    try:
+                        if out is None:
+                            return _tensor_matmul_simd_prepacked(self, entry.pack)
+                        return _tensor_matmul_simd_prepacked(self, entry.pack, out=out)
+                    except Exception:
+                        _SIMD_PACK_CACHE.invalidate(other)
+
+            return _native_tensor_matmul(self, other, backend=fallback_backend, out=out)
+
+
+        _TensorFastType.matmul = _tensor_matmul_fastpath  # type: ignore[assignment]
+
+        def clear_simd_prepack_cache() -> None:
+            """Evict cached SIMD RHS packs used by the Python fast-path."""
+
+            _SIMD_PACK_CACHE.clear()
+
+
+        globals()["clear_simd_prepack_cache"] = clear_simd_prepack_cache
+        _EXTRAS.append("clear_simd_prepack_cache")
 
 def _extract_shape_like(candidate: _Any, label: str) -> tuple[int, int] | None:
     if isinstance(candidate, globals().get("Tensor", ())):
@@ -1117,6 +1236,7 @@ _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
         "DataLoader": ("_NnDataLoader",),
         "DataLoaderIter": ("_NnDataLoaderIter",),
         "ZConv": ("PyZConv",),
+        "ZConv6DA": ("PyZConv6DA",),
         "ZPooling": ("PyZPooling",),
         "from_samples": ("nn_from_samples", "dataset_from_samples"),
         "CurvatureScheduler": ("CurvatureScheduler",),
