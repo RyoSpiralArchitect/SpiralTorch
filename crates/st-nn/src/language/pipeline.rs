@@ -658,8 +658,10 @@ impl GeometryBiasHook {
             return None;
         }
         let z_energy = Self::signal_energy(self.z_signal.as_deref(), self.config.z_weight);
-        let roundtable_energy =
-            Self::signal_energy(self.roundtable_signal.as_deref(), self.config.roundtable_weight);
+        let roundtable_energy = Self::signal_energy(
+            self.roundtable_signal.as_deref(),
+            self.config.roundtable_weight,
+        );
         if z_energy <= f32::EPSILON && roundtable_energy <= f32::EPSILON {
             return None;
         }
