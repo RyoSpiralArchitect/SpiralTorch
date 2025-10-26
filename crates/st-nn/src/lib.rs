@@ -103,9 +103,10 @@ pub use zspace_coherence::{
     ArnoldTongueSummary, BackendCapabilities, BranchAtlasFragment, CircleLockMapConfig,
     CoherenceBackend, CoherenceEngine, CoherenceLabel, CoherenceObservation, CoherenceSignature,
     DomainConcept, DomainLinguisticProfile, HeatmapAnalytics, HeatmapResult,
-    LinguisticChannelReport, LinguisticContour, MetaMembConfig, MetaMembSampler, PreDiscardPolicy,
-    PreDiscardRegulator, PsiBranchState, PsiSynchroConfig, PsiSynchroPulse, PsiSynchroResult,
-    PsiTelemetryConfig, SyncState, SynchroBus, SynchroEvent, ZSpaceCoherenceSequencer,
+    LinguisticChannelReport, LinguisticContour, MellinBasis, MetaMembConfig, MetaMembSampler,
+    PreDiscardPolicy, PreDiscardRegulator, PsiBranchState, PsiSynchroConfig, PsiSynchroPulse,
+    PsiSynchroResult, PsiTelemetryConfig, SyncState, SynchroBus, SynchroEvent,
+    ZSpaceCoherenceSequencer, ZSpaceVae, ZSpaceVaeState, ZSpaceVaeStats,
 };
 
 pub use st_core::telemetry::chrono::{ChronoFrame, ChronoSummary, ChronoTimeline};
