@@ -51,7 +51,6 @@ pub mod maxwell_impl;
 #[doc(inline)]
 pub use maxwell_impl as maxwell;
 
-
 #[path = "zpulse.rs"]
 #[doc(hidden)]
 pub mod zpulse_impl;
@@ -77,6 +76,12 @@ pub mod psi_sync_impl;
 #[cfg(feature = "psi")]
 #[doc(inline)]
 pub use psi_sync_impl as psi_sync;
+
+#[path = "rg_flow.rs"]
+#[doc(hidden)]
+pub mod rg_flow_impl;
+#[doc(inline)]
+pub use rg_flow_impl as rg_flow;
 
 #[path = "stv.rs"]
 #[doc(hidden)]
