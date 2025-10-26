@@ -49,17 +49,16 @@ pub use injector::Injector;
 pub use io::{load_bincode, load_json, save_bincode, save_json};
 pub use language::entropy as desire_entropy;
 pub use language::{
-    compute_curvature_table, constant, warmup, ConceptDiffusion, ConceptHint, DesireAutomatedStep,
-    DesireAutomation, DesireAvoidanceReport, DesireChannelSink, DesireGraphBridge,
-    DesireGraphEvent, DesireGraphSummary, DesireLagrangian, DesireLogRecord, DesireLogReplay,
-    DesireLogbook, DesirePhase, DesirePipeline, DesirePipelineBuilder, DesirePipelineEvent,
-    DesirePipelineSink, DesireRewriteTrigger, DesireRoundtableBridge, DesireRoundtableEvent,
-    DesireRoundtableImpulse, DesireRoundtableSummary, DesireSchedule, DesireSolution,
-    DesireTelemetrySink, DesireTrainerBridge, DesireTrainerEvent, DesireTrainerSummary,
-    DesireTriggerBuffer, DesireTriggerEvent, DesireWeights, DiffusionStep, DistanceMatrix,
-    EntropicGwSolver, GeometryBiasConfig, GeometryBiasContext, GeometryBiasMetrics,
-    GeometryBiasSnapshot, GeometryBiasUpdate, GeometryCoherenceSample, InformationGeometryMetric,
-    LanguagePipeline, LanguagePipelineBuilder, MaxwellDesireBridge, NarrativeBridgeCurvature,
+    constant, warmup, ConceptHint, DesireAutomatedStep, DesireAutomation, DesireAvoidanceReport,
+    DesireChannelSink, DesireGraphBridge, DesireGraphEvent, DesireGraphSummary, DesireLagrangian,
+    DesireLogRecord, DesireLogReplay, DesireLogbook, DesirePhase, DesirePipeline,
+    DesirePipelineBuilder, DesirePipelineEvent, DesirePipelineSink, DesireRewriteTrigger,
+    DesireRoundtableBridge, DesireRoundtableEvent, DesireRoundtableImpulse,
+    DesireRoundtableSummary, DesireSchedule, DesireSolution, DesireTelemetrySink,
+    DesireTrainerBridge, DesireTrainerEvent, DesireTrainerSummary, DesireTriggerBuffer,
+    DesireTriggerEvent, DesireWeights, DistanceMatrix, EntropicGwSolver, GeometryBiasConfig,
+    GeometryBiasContext, GeometryBiasMetrics, GeometryBiasSnapshot, GeometryBiasUpdate,
+    GeometryCoherenceSample, LanguagePipeline, LanguagePipelineBuilder, MaxwellDesireBridge,
     NarrativeHint, PipelineError, PipelineResult, RepressionField, SemanticBridge, SparseKernel,
     SymbolGeometry, TemperatureController,
 };
@@ -71,7 +70,10 @@ pub use layers::sequential::Sequential;
 pub use layers::wave_gate::WaveGate;
 pub use layers::wave_rnn::WaveRnn;
 pub use layers::zspace_projector::ZSpaceProjector;
-pub use layers::{Dropout, Gelu, LayerNorm, Relu, ToposResonator, ZRelativityModule, ZSpaceMixer};
+pub use layers::{
+    Dropout, Gelu, HamiltonJacobiFlow, KleinGordonPropagation, LayerNorm, Relu,
+    StochasticSchrodingerLayer, ToposResonator, ZRelativityModule, ZSpaceMixer,
+};
 pub use lightning::{
     LightningBuilder, LightningConfig, LightningConfigBuilder, LightningEpoch, LightningReport,
     LightningStage, LightningStageReport, SpiralLightning,
