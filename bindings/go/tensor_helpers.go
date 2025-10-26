@@ -20,19 +20,14 @@ func NewTensorFromMatrix(matrix [][]float32) (*Tensor, error) {
 	}
 
 	cols := len(matrix[0])
-	for i := 1; i < rows; i++ {
-		if len(matrix[i]) != cols {
-			return nil, fmt.Errorf("spiraltorch: matrix row %d has length %d, expected %d", i, len(matrix[i]), cols)
+	data := make([]float32, rows*cols)
+	offset := 0
+	for i, row := range matrix {
+		if len(row) != cols {
+			return nil, fmt.Errorf("spiraltorch: matrix row %d has length %d, expected %d", i, len(row), cols)
 		}
-	}
-
-	if cols == 0 {
-		return NewZerosTensor(rows, 0)
-	}
-
-	data := make([]float32, 0, rows*cols)
-	for _, row := range matrix {
-		data = append(data, row...)
+		copy(data[offset:offset+cols], row)
+		offset += cols
 	}
 	return NewTensorFromDense(rows, cols, data)
 }
@@ -62,10 +57,10 @@ func NewTensorFromColumns(columns [][]float32) (*Tensor, error) {
 	}
 
 	data := make([]float32, rows*cols)
-	for c := 0; c < cols; c++ {
-		column := columns[c]
-		for r := 0; r < rows; r++ {
-			data[r*cols+c] = column[r]
+	for r := 0; r < rows; r++ {
+		base := r * cols
+		for c := 0; c < cols; c++ {
+			data[base+c] = columns[c][r]
 		}
 	}
 	return NewTensorFromDense(rows, cols, data)

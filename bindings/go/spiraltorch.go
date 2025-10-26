@@ -532,25 +532,57 @@ func (t *Tensor) Elements() (int, error) {
 
 // Data copies the tensor contents into a newly allocated slice.
 func (t *Tensor) Data() ([]float32, error) {
-	rows, cols, err := t.Shape()
+	length, err := t.Elements()
 	if err != nil {
 		return nil, err
 	}
-	length := rows * cols
 	if length == 0 {
 		return []float32{}, nil
 	}
 	buffer := make([]float32, length)
+	if err := t.copyDataInto(buffer); err != nil {
+		return nil, err
+	}
+	return buffer, nil
+}
+
+func (t *Tensor) copyDataInto(buffer []float32) error {
+	if t == nil || t.handle == nil {
+		return fmt.Errorf("spiraltorch: tensor handle is nil")
+	}
+	if len(buffer) == 0 {
+		return nil
+	}
 	ok := C.spiraltorch_tensor_copy_data(
 		t.handle,
 		(*C.float)(unsafe.Pointer(&buffer[0])),
-		C.size_t(length),
+		C.size_t(len(buffer)),
 	)
 	if !bool(ok) {
-		return nil, fmt.Errorf("spiraltorch: %s", lastError())
+		return fmt.Errorf("spiraltorch: %s", lastError())
 	}
 	clearError()
-	return buffer, nil
+	return nil
+}
+
+// CopyDataInto copies the tensor contents into the provided slice, reusing the
+// caller's storage when it is sufficiently large. The number of elements
+// written is returned so callers can reslice the buffer as needed.
+func (t *Tensor) CopyDataInto(dest []float32) (int, error) {
+	length, err := t.Elements()
+	if err != nil {
+		return 0, err
+	}
+	if length == 0 {
+		return 0, nil
+	}
+	if len(dest) < length {
+		return length, fmt.Errorf("spiraltorch: destination length %d insufficient for %d elements", len(dest), length)
+	}
+	if err := t.copyDataInto(dest[:length]); err != nil {
+		return 0, err
+	}
+	return length, nil
 }
 
 func (t *Tensor) binaryOp(other *Tensor, op func(unsafe.Pointer, unsafe.Pointer) unsafe.Pointer, label string) (*Tensor, error) {
