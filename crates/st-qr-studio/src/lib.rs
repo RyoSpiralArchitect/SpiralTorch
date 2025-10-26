@@ -7,6 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 use st_core::maxwell::MaxwellZPulse;
+use st_core::theory::inflaton_zspace::PrimordialProjection;
 use st_frac::mellin_types::ComplexScalar;
 use st_frac::zspace::{
     evaluate_weighted_series, mellin_log_lattice_prefactor, prepare_weighted_series,
@@ -668,6 +669,79 @@ impl ZSpaceSink {
             .collect()
     }
 
+    /// Injects a pre-computed slow-roll background projection straight into the sink.
+    pub fn ingest_primordial_projection(
+        &self,
+        channel: impl Into<String>,
+        projection: &PrimordialProjection,
+    ) -> Result<(), StudioSinkError> {
+        if projection.is_empty() {
+            return Ok(());
+        }
+
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| self.failure("state mutex poisoned"))?;
+        guard.log_start = projection.log_start as f32;
+        guard.log_step = projection.log_step as f32;
+        guard.s_values = projection
+            .s_values
+            .iter()
+            .map(|value| ComplexScalar::new(value.re as f32, value.im as f32))
+            .collect();
+
+        let root_channel = channel.into();
+        let mut projections = Vec::new();
+        for (suffix, values) in [
+            (
+                "",
+                projection
+                    .spectrum
+                    .iter()
+                    .map(|&v| (v as f32, 0.0))
+                    .collect::<Vec<_>>(),
+            ),
+            (
+                "::H",
+                projection
+                    .h_z
+                    .iter()
+                    .map(|value| (value.re as f32, value.im as f32))
+                    .collect::<Vec<_>>(),
+            ),
+            (
+                "::epsilon",
+                projection
+                    .epsilon_z
+                    .iter()
+                    .map(|value| (value.re as f32, value.im as f32))
+                    .collect::<Vec<_>>(),
+            ),
+        ] {
+            let channel_name = format!("{}{}", root_channel, suffix);
+            let mut evaluations = Vec::with_capacity(projection.len());
+            for idx in 0..projection.len() {
+                let s = &projection.s_values[idx];
+                let z = &projection.z_points[idx];
+                let (value_re, value_im) = values[idx];
+                evaluations.push(ZSpaceEvaluation {
+                    s: (s.re as f32, s.im as f32),
+                    z: (z.re as f32, z.im as f32),
+                    value: (value_re, value_im),
+                });
+            }
+            projections.push(ZSpaceProjection {
+                channel: channel_name,
+                lattice_len: projection.lattice_len,
+                evaluations,
+            });
+        }
+
+        guard.projections.extend(projections);
+        Ok(())
+    }
+
     fn failure(&self, reason: impl Into<String>) -> StudioSinkError {
         StudioSinkError::Transmission {
             sink: self.name.clone(),
@@ -1142,7 +1216,9 @@ impl QuantumRealityStudio {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use num_complex::Complex64;
     use serde_json::Value;
+    use st_core::theory::inflaton_zspace::{z_transform, LogLattice, PrimordialProjection};
     use st_logic::meta_layer::{MeaningSection, MeaningSheaf, MetaNarrativeLayer, NarrativeBeat};
     use std::sync::{Arc, Mutex};
 
@@ -1602,6 +1678,73 @@ mod tests {
         assert!(stitched.glyphs().len() >= 2);
         let intensities: Vec<f32> = stitched.glyphs().iter().map(|g| g.intensity).collect();
         assert!(intensities[0] >= intensities[1]);
+    }
+
+    #[test]
+    fn zspace_sink_ingests_primordial_projection_bundle() {
+        let log_start = 0.0;
+        let log_step = 0.25;
+        let hubble_samples = vec![12.0, 11.5, 11.0, 10.5];
+        let epsilon_samples = vec![0.01, 0.011, 0.012, 0.013];
+        let hubble_lattice = LogLattice::from_samples(log_start, log_step, hubble_samples.clone());
+        let epsilon_lattice =
+            LogLattice::from_samples(log_start, log_step, epsilon_samples.clone());
+        let s_values = vec![
+            Complex64::new(1.0, 0.0),
+            Complex64::new(1.0, 0.5),
+            Complex64::new(1.0, -0.5),
+        ];
+        let z_points: Vec<Complex64> = s_values
+            .iter()
+            .map(|s| (s * Complex64::new(log_step, 0.0)).exp())
+            .collect();
+        let h_z: Vec<Complex64> = z_points
+            .iter()
+            .map(|&z| z_transform(&hubble_lattice.weights, &hubble_lattice.samples, z))
+            .collect();
+        let epsilon_z: Vec<Complex64> = z_points
+            .iter()
+            .map(|&z| z_transform(&epsilon_lattice.weights, &epsilon_lattice.samples, z))
+            .collect();
+        let projection = PrimordialProjection::new(
+            log_start,
+            log_step,
+            hubble_lattice.len(),
+            s_values.clone(),
+            z_points.clone(),
+            h_z.clone(),
+            epsilon_z.clone(),
+            2.435e18,
+        );
+
+        let sink = ZSpaceSink::new(
+            "inflation",
+            log_start as f32,
+            log_step as f32,
+            s_values
+                .iter()
+                .map(|s| ComplexScalar::new(s.re as f32, s.im as f32))
+                .collect(),
+        );
+        sink.ingest_primordial_projection("inflation", &projection)
+            .expect("ingest projection");
+        let projections = sink.take_projections();
+        assert_eq!(projections.len(), 3);
+        let mut channels: Vec<String> = projections.iter().map(|p| p.channel.clone()).collect();
+        channels.sort();
+        assert_eq!(
+            channels,
+            vec!["inflation", "inflation::H", "inflation::epsilon"]
+        );
+        let spectrum_projection = projections
+            .into_iter()
+            .find(|p| p.channel == "inflation")
+            .expect("spectrum channel");
+        assert_eq!(spectrum_projection.evaluations.len(), projection.len());
+        for eval in spectrum_projection.evaluations {
+            assert!(eval.value.0.is_finite());
+            assert_eq!(eval.value.1, 0.0);
+        }
     }
 
     #[test]
