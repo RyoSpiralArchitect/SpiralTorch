@@ -12,6 +12,7 @@ use st_frac::zspace::{
     evaluate_weighted_series, mellin_log_lattice_prefactor, prepare_weighted_series,
     trapezoidal_weights,
 };
+use st_logic::meta_layer::{MetaNarrativeLayer, ResolvedNarrative};
 use st_logic::quantum_reality::ZSpace as LogicZSpace;
 use st_nn::{ConceptHint, MaxwellDesireBridge, NarrativeHint};
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -318,67 +319,6 @@ impl OverlayFrame {
     pub fn glyphs(&self) -> &[OverlayGlyph] {
         &self.glyphs
     }
-
-    pub fn new(
-        channel: impl Into<String>,
-        timestamp: SystemTime,
-        glyphs: Vec<OverlayGlyph>,
-    ) -> Self {
-        let channel = channel.into();
-        let mut filtered: Vec<OverlayGlyph> = glyphs
-            .into_iter()
-            .filter(|glyph| !glyph.glyph.trim().is_empty())
-            .collect();
-        if filtered.is_empty() {
-            filtered.push(OverlayGlyph::new(channel.clone(), 0.0));
-        }
-        let mut frame = Self {
-            channel,
-            glyph: String::new(),
-            intensity: 0.0,
-            timestamp,
-            glyphs: Vec::new(),
-        };
-        for glyph in filtered {
-            frame.push_glyph(glyph);
-        }
-        frame.refresh_primary();
-        frame
-    }
-
-    pub fn push_glyph(&mut self, glyph: OverlayGlyph) {
-        if glyph.glyph.trim().is_empty() {
-            return;
-        }
-        if self
-            .glyphs
-            .iter()
-            .any(|existing| existing.glyph == glyph.glyph)
-        {
-            return;
-        }
-        self.glyphs.push(glyph);
-        self.refresh_primary();
-    }
-
-    pub fn extend_tags<I>(&mut self, tags: I, base_intensity: f32)
-    where
-        I: IntoIterator,
-        I::Item: Into<String>,
-    {
-        for (idx, tag) in tags.into_iter().enumerate() {
-            let glyph = tag.into();
-            if glyph.trim().is_empty() {
-                continue;
-            }
-            let falloff = base_intensity * 0.75_f32.powi((idx + 1) as i32);
-            self.push_glyph(OverlayGlyph::new(glyph, falloff));
-        }
-    }
-
-    pub fn glyphs(&self) -> &[OverlayGlyph] {
-        &self.glyphs
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -387,6 +327,35 @@ pub struct StudioFrame {
     pub concept: Option<StudioConceptHint>,
     pub narrative: Option<NarrativeHint>,
     pub overlay: OverlayFrame,
+    pub z_space: StudioZSpace,
+    pub meta: Option<MetaNarrative>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MetaNarrative {
+    pub event_id: String,
+    pub channel: String,
+    pub tags: Vec<String>,
+    pub intensity: f32,
+    pub z_space: StudioZSpace,
+}
+
+impl MetaNarrative {
+    pub fn signature(&self) -> &[f64] {
+        self.z_space.signature()
+    }
+}
+
+impl From<&ResolvedNarrative> for MetaNarrative {
+    fn from(narrative: &ResolvedNarrative) -> Self {
+        Self {
+            event_id: narrative.event_id.clone(),
+            channel: narrative.channel.clone(),
+            tags: narrative.tags.clone(),
+            intensity: narrative.intensity,
+            z_space: StudioZSpace::from(&narrative.z_space),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -528,6 +497,39 @@ impl From<&ZSpaceProjection> for LogicZSpace {
 impl From<ZSpaceProjection> for LogicZSpace {
     fn from(projection: ZSpaceProjection) -> Self {
         LogicZSpace::from(&projection)
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StudioZSpace {
+    signature: Vec<f64>,
+}
+
+impl StudioZSpace {
+    pub fn signature(&self) -> &[f64] {
+        &self.signature
+    }
+}
+
+impl From<&LogicZSpace> for StudioZSpace {
+    fn from(space: &LogicZSpace) -> Self {
+        Self {
+            signature: space.signature.clone(),
+        }
+    }
+}
+
+impl From<LogicZSpace> for StudioZSpace {
+    fn from(space: LogicZSpace) -> Self {
+        StudioZSpace::from(&space)
+    }
+}
+
+impl From<StudioZSpace> for LogicZSpace {
+    fn from(space: StudioZSpace) -> Self {
+        LogicZSpace {
+            signature: space.signature,
+        }
     }
 }
 
@@ -744,6 +746,7 @@ pub struct QuantumRealityStudio {
     overlay: OverlayComposer,
     outlet: StudioOutlet,
     frames: VecDeque<StudioFrame>,
+    meta: Option<MetaNarrativeLayer>,
 }
 
 impl QuantumRealityStudio {
@@ -755,12 +758,26 @@ impl QuantumRealityStudio {
             overlay: OverlayComposer::default(),
             outlet: StudioOutlet::default(),
             frames: VecDeque::with_capacity(history_limit),
+            meta: None,
         }
     }
 
     pub fn with_sink<S: StudioSink + 'static>(mut self, sink: S) -> Self {
         self.outlet.register(sink);
         self
+    }
+
+    pub fn with_meta_layer(mut self, layer: MetaNarrativeLayer) -> Self {
+        self.meta = Some(layer);
+        self
+    }
+
+    pub fn set_meta_layer(&mut self, layer: MetaNarrativeLayer) {
+        self.meta = Some(layer);
+    }
+
+    pub fn clear_meta_layer(&mut self) {
+        self.meta = None;
     }
 
     pub fn register_sink<S: StudioSink + 'static>(&mut self, sink: S) {
@@ -796,6 +813,10 @@ impl QuantumRealityStudio {
         timestamp: Option<SystemTime>,
     ) -> Result<StudioFrame, StudioError> {
         let channel = channel.as_ref();
+        let meta = self
+            .meta
+            .as_mut()
+            .and_then(|layer| layer.next_with_pulse(channel, &pulse));
         let emission = bridge.emit(channel, &pulse);
         let (concept, narrative) = match emission {
             Some((concept, narrative)) => {
@@ -803,6 +824,19 @@ impl QuantumRealityStudio {
             }
             None => (None, None),
         };
+        let mut narrative = narrative;
+        let mut frame_z_space = StudioZSpace::from(LogicZSpace::from(pulse.clone()));
+        let mut meta_details = None;
+        if let Some(resolved) = meta {
+            let meta_narrative = MetaNarrative::from(&resolved);
+            frame_z_space = meta_narrative.z_space.clone();
+            narrative = Some(NarrativeHint::new(
+                meta_narrative.channel.clone(),
+                meta_narrative.tags.clone(),
+                meta_narrative.intensity,
+            ));
+            meta_details = Some(meta_narrative);
+        }
         let record = self.record_pulse(channel, pulse, timestamp)?;
         let mut overlay = self.overlay.compose(
             &record,
@@ -819,6 +853,8 @@ impl QuantumRealityStudio {
             concept,
             narrative,
             overlay,
+            z_space: frame_z_space,
+            meta: meta_details,
         };
         self.outlet.broadcast(&frame)?;
         self.frames.push_back(frame.clone());
@@ -916,6 +952,18 @@ impl QuantumRealityStudio {
                             }),
                         );
                     }
+                    if let Some(meta) = frame.meta.as_ref() {
+                        entry.insert(
+                            "meta".into(),
+                            serde_json::json!({
+                                "event_id": meta.event_id.clone(),
+                                "channel": meta.channel.clone(),
+                                "tags": meta.tags.clone(),
+                                "intensity": meta.intensity,
+                                "signature": meta.signature(),
+                            }),
+                        );
+                    }
                     if let Some(window) = frame
                         .concept
                         .as_ref()
@@ -996,6 +1044,7 @@ impl QuantumRealityStudio {
 mod tests {
     use super::*;
     use serde_json::Value;
+    use st_logic::meta_layer::{MeaningSection, MeaningSheaf, MetaNarrativeLayer, NarrativeBeat};
     use std::sync::{Arc, Mutex};
 
     fn sample_pulse() -> MaxwellZPulse {
@@ -1038,6 +1087,63 @@ mod tests {
         assert_eq!(frame.overlay.glyph, "braid");
         assert!(frame.overlay.intensity > 0.0);
         assert!(frame.overlay.glyphs().len() >= 1);
+        assert_eq!(frame.z_space.signature().len(), 8);
+    }
+
+    #[test]
+    fn meta_layer_overrides_bridge_narrative() {
+        let bridge = MaxwellDesireBridge::new()
+            .with_channel("alpha", vec![(0, 1.0)])
+            .unwrap();
+        let mut layer = MetaNarrativeLayer::new();
+        layer
+            .engine_mut()
+            .insert_event(
+                "beat-1",
+                NarrativeBeat::new(Some("alpha".into()), "z-open", vec!["causal".into()])
+                    .with_intensity_scale(0.5)
+                    .with_floor(0.1)
+                    .with_sheaf_threshold(0.05),
+            )
+            .unwrap();
+        layer.bridge_mut().attach(
+            "beat-1",
+            MeaningSheaf::new().with_section(MeaningSection::for_open(
+                "z-open",
+                vec!["sheaf".into()],
+                0.2,
+            )),
+        );
+        let mut studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge)
+            .with_meta_layer(layer);
+        let frame = studio
+            .ingest(&bridge, "alpha", sample_pulse(), None)
+            .expect("ingest with meta");
+        let narrative = frame.narrative.expect("meta narrative");
+        assert!(narrative.tags().iter().any(|tag| tag == "causal"));
+        assert!(narrative.tags().iter().any(|tag| tag == "sheaf"));
+        let meta = frame.meta.as_ref().expect("meta telemetry");
+        assert_eq!(meta.event_id, "beat-1");
+        assert_eq!(meta.channel, "alpha");
+        assert!(meta.tags.iter().any(|tag| tag == "causal"));
+        assert!(meta.tags.iter().any(|tag| tag == "sheaf"));
+        assert!(!meta.signature().is_empty());
+
+        let export = studio.export_storyboard();
+        let meta_json = export
+            .get("frames")
+            .and_then(Value::as_array)
+            .and_then(|frames| frames.get(0))
+            .and_then(Value::as_object)
+            .and_then(|frame| frame.get("meta"))
+            .and_then(Value::as_object)
+            .expect("meta entry in storyboard");
+        assert_eq!(
+            meta_json.get("event_id").and_then(Value::as_str),
+            Some("beat-1")
+        );
+        assert!(narrative.intensity() > 0.0);
+        assert!((frame.z_space.signature()[3] - 4.2).abs() < 1e-6);
     }
 
     #[test]
