@@ -194,6 +194,9 @@ _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
         "Dataset": ("_NnDataset",),
         "DataLoader": ("_NnDataLoader",),
         "DataLoaderIter": ("_NnDataLoaderIter",),
+        "ZConv": ("PyZConv",),
+        "ZConv6DA": ("PyZConv6DA",),
+        "ZPooling": ("PyZPooling",),
         "from_samples": ("nn_from_samples", "dataset_from_samples"),
     },
     "compat": {
@@ -1107,6 +1110,8 @@ _mirror_into_module(
         "Dataset": ("_NnDataset",),
         "DataLoader": ("_NnDataLoader",),
         "DataLoaderIter": ("_NnDataLoaderIter",),
+        "ZConv": ("PyZConv",),
+        "ZPooling": ("PyZPooling",),
         "from_samples": ("nn_from_samples", "dataset_from_samples"),
     },
 )
@@ -1322,7 +1327,7 @@ _CORE_EXPORTS = [
     "SearchLoop",
     "QatObserver","QuantizationReport","StructuredPruningReport","CompressionReport",
     "structured_prune","compress_weights",
-    "ModuleTrainer","NonLiner","ZSpaceTrainer","ZSpaceCoherenceSequencer","PreDiscardTelemetry","PreDiscardPolicy",
+    "ModuleTrainer","NonLiner","ZConv","ZPooling","ZSpaceTrainer","ZSpaceCoherenceSequencer","PreDiscardTelemetry","PreDiscardPolicy",
     "CoherenceObservation","CoherenceSignature","CoherenceChannelReport","CoherenceDiagnostics","is_swap_invariant",
     "TemporalResonanceBuffer","SpiralTorchVision",
     "CanvasTransformer","CanvasSnapshot","apply_vision_update",
