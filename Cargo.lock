@@ -2927,6 +2927,7 @@ dependencies = [
  "ndarray",
  "num-complex",
  "pollster",
+ "rand",
  "thiserror 1.0.69",
  "wgpu",
 ]
@@ -2973,8 +2974,10 @@ version = "0.1.0"
 dependencies = [
  "bincode",
  "futures",
+ "nalgebra 0.32.6",
  "num-complex",
  "rand",
+ "rand_distr",
  "serde",
  "serde_json",
  "st-core",

@@ -1,5 +1,10 @@
 # Introducing General Relativity on an Abstract Z-Space Manifold
 
+> Looking for higher-form deformations and fluxes? See the companion guide
+> [sD/AsD Extension of Z-Space Relativity](sd_asd_zspace_extension.md) for the
+> symmetric/antisymmetric dilation sector and its coupling to the Einstein
+> equations discussed below.
+
 > **Assumption:** "Z-space" is not a standard construct in differential geometry or physics. We therefore treat it as an abstract smooth manifold and import the geometric toolkit of general relativity (GR) into that setting.
 
 ## 1. Establish the Mathematical Structure of Z-Space
@@ -57,4 +62,15 @@ By following this workflow you can transplant the geometric framework of general
 - **Dimensional reduction helpers:** Once a product manifold \(M \times Z\) has been specified, call `theory::general_relativity::DimensionalReduction::project` to obtain the warp-adjusted effective metric, the mixed `GaugeField` encoding \(g_{\mu A}\), the internal moduli `InternalMetric`, and the compactification-adjusted Newton constant. The new `ProductMetric::internal_volume_density` (also surfaced on `ProductGeometry`) exposes \(\sqrt{\det h}\) so every compactification stage can reuse a consistent volume element.
 - **Extended field equations:** Embed the four-dimensional Einstein tensor into the higher-dimensional block structure via `ZRelativityModel::assemble`. The resulting `ZRelativityFieldEquation` packages \(G^I_{\;J} + \Lambda g^I_{\;J}\) together with the appropriate coupling prefactor for comparison against an extended stress-energy tensor.
 - **Energy-momentum on \(M \times Z\):** Use `ExtendedStressEnergy` to encode symmetric sources that live on the full block metric. Its residual with the assembled field equation diagnoses how the Z-space sector back-reacts on the four-dimensional spacetime.
-- **Python access:** The `spiraltorch` module now exposes `lorentzian_metric_scaled` for quick metric rescaling diagnostics and `assemble_zrelativity_model` to run the full Kaluza–Klein style reduction (effective metric, gauge field, moduli, and field-equation residuals) directly from Python-native lists.
+- **Python access:** The `spiraltorch` module now exposes `lorentzian_metric_scaled` for quick metric rescaling diagnostics, `assemble_zrelativity_model` to run the full Kaluza–Klein style reduction (effective metric, gauge field, moduli, and field-equation residuals) directly from Python-native lists, and `ZRelativityModel.torch_bundle()` for instant `torch.Tensor` conversions when PyTorch is available.
+- **Self-dual curvature splits:** `CurvatureDiagnostics` reports `weyl_self_dual_squared` and `weyl_anti_self_dual_squared` alongside the full complex `weyl_self_dual_matrix`/`weyl_anti_self_dual_matrix`, quantifying the SD/ASD decomposition of the Weyl tensor so Z-space experiments can track parity-refined curvature channels. Surface them from Python through `PyZRelativityModel.curvature_diagnostics()` when steering coupled GR/Z pipelines.
+- **Petrov diagnostics:** The curvature bundle now carries the complex invariants `weyl_self_dual_invariant_i` and `weyl_self_dual_invariant_j`, their discriminant `weyl_self_dual_discriminant`, and the ordered eigenvalues `weyl_self_dual_eigenvalues`, enabling algebraic classification of the spacetime directly from Python.
+
+## 9. Bridging Z-Relativity to Tensor Workflows
+
+- **Tensor exports:** `ZRelativityModel::as_tensor`, `gauge_tensor`, `scalar_moduli_tensor`, and `field_equation_tensor` provide native `st::Tensor` views over every block. Call `to_dlpack()` for zero-copy hand-offs into PyTorch, JAX, or CuPy.
+- **Bundle access:** `ZRelativityModel::tensor_bundle` aggregates block metrics, gauge data, scalar moduli, field-equation matrices, and compactification scalars (warp, internal volume density, coupling prefactor) in one shot.
+- **Torch-ready exports:** Call `ZRelativityModel::torch_bundle()` or `spiraltorch.nn.ZRelativityModule.torch_parameters()` after importing `torch.utils.dlpack` to receive zero-copy `torch.Tensor` views over every component, keeping Kaluza–Klein reductions wired into PyTorch loops without manual capsule handling.
+- **Learnable blocks:** `InternalMetric`, `MixedBlock`, and `WarpFactor` accept `.with_learnable(true)` so optimisation stacks know which components participate in gradient descent. The aggregated flags surface via `ZRelativityModel::learnable_flags`.
+- **Neural module:** `st_nn::ZRelativityModule` lifts a `ZRelativityModel` into a full `nn::Module`. Python gains `spiraltorch.nn.ZRelativityModule`, exposing forward/backward passes, hyper/realgrad attachment, and a `parameter_tensor()` helper for trainer integration. Use `trainer.ModuleTrainer.train_zrelativity_step` to couple the parameter vector with conventional optimisation loops.
+- **Visual diagnostics:** `spiraltorch.vision.zrelativity_heatmap(model, field="block")` renders block metrics, gauge matrices, moduli, or the field-equation residual as heatmaps for dashboards.

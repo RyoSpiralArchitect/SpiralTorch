@@ -186,6 +186,12 @@ impl From<GradientSummary> for PyGradientSummary {
     }
 }
 
+impl PyGradientSummary {
+    pub(crate) fn as_inner(&self) -> GradientSummary {
+        self.inner
+    }
+}
+
 #[pymethods]
 impl PyGradientSummary {
     pub fn l1(&self) -> f32 {

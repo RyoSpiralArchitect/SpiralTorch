@@ -248,6 +248,47 @@ impl<D: VideoDecoder> VideoPipeline<D> {
             window_digest,
         }))
     }
+        }))
+    }
+
+    /// Returns a reference to the latest fused Z-space volume, if available.
+    pub fn last_volume(&self) -> Option<&ZSpaceVolume> {
+        self.volume.as_ref()
+    }
+
+    /// Provides access to the accumulated atlas timeline for downstream reporting.
+    pub fn atlas_timeline(&self) -> &[AtlasFrame] {
+        &self.timeline
+    }
+
+    /// Exposes the most recent [`TemporalDigest`] without advancing the stream.
+    pub fn temporal_digest(&self) -> TemporalDigest {
+        self.stats.digest()
+    }
+}
+
+/// Aggregated telemetry summarising the temporal behaviour of the pipeline so far.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TemporalDigest {
+    /// Number of frames processed by the pipeline.
+    pub frames: usize,
+    /// Total stream duration in seconds.
+    pub duration: f32,
+    /// Mean motion energy accumulated from frame deltas.
+    pub mean_motion_energy: f32,
+    /// Standard deviation of the motion energy signal.
+    pub motion_std: f32,
+    /// Mean resonance energy collected from the Z volume envelope.
+    pub mean_resonance_energy: f32,
+    /// Standard deviation of the resonance energy signal.
+    pub resonance_std: f32,
+    /// Mean fractional decay between consecutive resonance measurements.
+    pub mean_resonance_decay: f32,
+    /// Minimum resonance energy observed so far.
+    pub min_resonance_energy: f32,
+    /// Maximum resonance energy observed so far.
+    pub max_resonance_energy: f32,
+}
 
     /// Returns a reference to the latest fused Z-space volume, if available.
     pub fn last_volume(&self) -> Option<&ZSpaceVolume> {
@@ -668,6 +709,8 @@ fn weight_entropy(weights: &[f32]) -> f32 {
         .filter(|weight| weight.is_finite() && **weight > f32::EPSILON)
         .map(|weight| -weight * weight.ln())
         .sum()
+        }
+    }
 }
 
 #[cfg(test)]
