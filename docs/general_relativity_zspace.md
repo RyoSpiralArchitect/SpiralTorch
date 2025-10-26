@@ -1,5 +1,10 @@
 # Introducing General Relativity on an Abstract Z-Space Manifold
 
+> Looking for higher-form deformations and fluxes? See the companion guide
+> [sD/AsD Extension of Z-Space Relativity](sd_asd_zspace_extension.md) for the
+> symmetric/antisymmetric dilation sector and its coupling to the Einstein
+> equations discussed below.
+
 > **Assumption:** "Z-space" is not a standard construct in differential geometry or physics. We therefore treat it as an abstract smooth manifold and import the geometric toolkit of general relativity (GR) into that setting.
 
 ## 1. Establish the Mathematical Structure of Z-Space

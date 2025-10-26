@@ -25,6 +25,7 @@ mod scale_stack;
 mod zspace;
 mod elliptic;
 mod theory;
+mod introspect;
 
 mod extras {
     use super::*;
@@ -216,6 +217,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "generate_plan_batch_ex",
         "gl_coeffs_adaptive","fracdiff_gl_1d",
         "zspace_eval",
+        "zspace_snapshot","softlogic_feedback","describe_zspace","softlogic_signal",
         "SpiralKFftPlan","MaxwellSpiralKBridge","MaxwellSpiralKHint",
         "SpiralKContext","SpiralKWilsonMetrics","SpiralKHeuristicHint",
         "wilson_lower_bound","should_rewrite","synthesize_program","rewrite_with_wilson",

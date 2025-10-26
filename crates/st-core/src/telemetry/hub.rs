@@ -664,6 +664,8 @@ impl SoftlogicZFeedback {
 
 static LAST_SOFTLOGIC_Z: OnceLock<RwLock<Option<SoftlogicZFeedback>>> = OnceLock::new();
 static LAST_REGION_REPORT: OnceLock<RwLock<Option<AttributionReport>>> = OnceLock::new();
+static LAST_REGION_TREND_REPORT: OnceLock<RwLock<Option<AttributionReport>>> = OnceLock::new();
+static LAST_REGION_VOLATILITY_REPORT: OnceLock<RwLock<Option<AttributionReport>>> = OnceLock::new();
 
 fn softlogic_z_cell() -> &'static RwLock<Option<SoftlogicZFeedback>> {
     LAST_SOFTLOGIC_Z.get_or_init(|| RwLock::new(None))
@@ -671,6 +673,14 @@ fn softlogic_z_cell() -> &'static RwLock<Option<SoftlogicZFeedback>> {
 
 fn region_report_cell() -> &'static RwLock<Option<AttributionReport>> {
     LAST_REGION_REPORT.get_or_init(|| RwLock::new(None))
+}
+
+fn region_trend_report_cell() -> &'static RwLock<Option<AttributionReport>> {
+    LAST_REGION_TREND_REPORT.get_or_init(|| RwLock::new(None))
+}
+
+fn region_volatility_report_cell() -> &'static RwLock<Option<AttributionReport>> {
+    LAST_REGION_VOLATILITY_REPORT.get_or_init(|| RwLock::new(None))
 }
 
 #[cfg(feature = "psi")]
@@ -945,6 +955,62 @@ pub fn clear_region_loss_report() {
 /// Returns the last stored region heatmap report, if any.
 pub fn get_region_loss_report() -> Option<AttributionReport> {
     region_report_cell()
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().cloned())
+}
+
+/// Stores the latest region-weighted delta heatmap.
+pub fn set_region_loss_trend_report(report: AttributionReport) {
+    match region_trend_report_cell().write() {
+        Ok(mut guard) => {
+            *guard = Some(report);
+        }
+        Err(poisoned) => {
+            let mut guard = poisoned.into_inner();
+            *guard = Some(report);
+        }
+    }
+}
+
+/// Clears the stored region delta heatmap.
+pub fn clear_region_loss_trend_report() {
+    if let Ok(mut guard) = region_trend_report_cell().write() {
+        guard.take();
+    }
+}
+
+/// Returns the latest region delta heatmap, if available.
+pub fn get_region_loss_trend_report() -> Option<AttributionReport> {
+    region_trend_report_cell()
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().cloned())
+}
+
+/// Stores the latest region volatility heatmap derived from the history window.
+pub fn set_region_loss_volatility_report(report: AttributionReport) {
+    match region_volatility_report_cell().write() {
+        Ok(mut guard) => {
+            *guard = Some(report);
+        }
+        Err(poisoned) => {
+            let mut guard = poisoned.into_inner();
+            *guard = Some(report);
+        }
+    }
+}
+
+/// Clears the stored region volatility heatmap.
+pub fn clear_region_loss_volatility_report() {
+    if let Ok(mut guard) = region_volatility_report_cell().write() {
+        guard.take();
+    }
+}
+
+/// Returns the latest region volatility heatmap, if present.
+pub fn get_region_loss_volatility_report() -> Option<AttributionReport> {
+    region_volatility_report_cell()
         .read()
         .ok()
         .and_then(|guard| guard.as_ref().cloned())
