@@ -22,6 +22,10 @@ use thiserror::Error;
 
 pub use st_core::maxwell::MaxwellZPulse as MaxwellPulse;
 
+mod meta;
+
+pub use meta::{TemporalCausalAnnotation, TemporalLogicEngine, ToposLogicBridge};
+
 const DEFAULT_HISTORY: usize = 512;
 
 #[derive(Debug, Error)]
@@ -327,6 +331,7 @@ pub struct StudioFrame {
     pub concept: Option<StudioConceptHint>,
     pub narrative: Option<NarrativeHint>,
     pub overlay: OverlayFrame,
+    pub causal: TemporalCausalAnnotation,
 }
 
 #[derive(Clone, Debug)]
@@ -684,7 +689,8 @@ pub struct QuantumRealityStudio {
     overlay: OverlayComposer,
     outlet: StudioOutlet,
     frames: VecDeque<StudioFrame>,
-    meta: Option<MetaNarrativeLayer>,
+    meta: TemporalLogicEngine,
+    topos: ToposLogicBridge,
 }
 
 impl QuantumRealityStudio {
@@ -696,7 +702,8 @@ impl QuantumRealityStudio {
             overlay: OverlayComposer::default(),
             outlet: StudioOutlet::default(),
             frames: VecDeque::with_capacity(history_limit),
-            meta: None,
+            meta: TemporalLogicEngine::new(),
+            topos: ToposLogicBridge::new(),
         }
     }
 
@@ -771,6 +778,10 @@ impl QuantumRealityStudio {
             ));
         }
         let record = self.record_pulse(channel, pulse, timestamp)?;
+        let concept_window = concept
+            .as_ref()
+            .and_then(|hint| ConceptWindow::from_hint(&record, hint));
+        let annotation = self.meta.observe(&record, concept_window.as_ref());
         let mut overlay = self.overlay.compose(
             &record,
             narrative.as_ref(),
@@ -781,11 +792,18 @@ impl QuantumRealityStudio {
         } else if let Some(fallback) = self.tagger.fallback_for(channel) {
             overlay = self.stitch_narrative_tags(overlay, fallback.iter().cloned());
         }
+        let temporal_tags = TemporalLogicEngine::temporal_tags(&annotation);
+        overlay = self.stitch_narrative_tags(overlay, temporal_tags.into_iter());
+        let sheaf_tags = self
+            .topos
+            .update(&record, concept_window.as_ref(), &annotation);
+        overlay = self.stitch_narrative_tags(overlay, sheaf_tags.into_iter());
         let frame = StudioFrame {
             record,
             concept,
             narrative,
             overlay,
+            causal: annotation,
         };
         self.outlet.broadcast(&frame)?;
         self.frames.push_back(frame.clone());
@@ -801,6 +819,14 @@ impl QuantumRealityStudio {
 
     pub fn frames(&self) -> impl Iterator<Item = &StudioFrame> {
         self.frames.iter()
+    }
+
+    pub fn causal_snapshot(&self) -> Vec<TemporalCausalAnnotation> {
+        self.meta.snapshot()
+    }
+
+    pub fn meaning_sheaf(&self, channel: &str) -> Option<LogicZSpace> {
+        self.topos.meaning_sheaf(channel)
     }
 
     pub fn emit_concept_window(&self, frame: &StudioFrame) -> Option<ConceptWindow> {
@@ -874,6 +900,17 @@ impl QuantumRealityStudio {
                             "glyphs": frame.overlay.glyphs.clone(),
                         }),
                     );
+                    entry.insert(
+                        "causal".into(),
+                        serde_json::json!({
+                            "event_id": frame.causal.event_id,
+                            "ordinal": frame.causal.ordinal,
+                            "timestamp": frame.causal.timestamp,
+                            "depth": frame.causal.depth,
+                            "parents": frame.causal.parent_channels.clone(),
+                            "magnitude": frame.causal.magnitude,
+                        }),
+                    );
                     if let Some(narrative) = frame.narrative.as_ref() {
                         entry.insert(
                             "narrative".into(),
@@ -893,6 +930,14 @@ impl QuantumRealityStudio {
                             serde_json::json!({
                                 "weights": window.weights,
                                 "magnitude": window.magnitude,
+                            }),
+                        );
+                    }
+                    if let Some(sheaf) = self.meaning_sheaf(&frame.record.channel) {
+                        entry.insert(
+                            "meaning_sheaf".into(),
+                            serde_json::json!({
+                                "signature": sheaf.signature,
                             }),
                         );
                     }
@@ -1169,6 +1214,14 @@ mod tests {
             .and_then(Value::as_array)
             .expect("glyph list");
         assert!(glyphs.len() >= 1);
+        let causal = entry
+            .get("causal")
+            .and_then(Value::as_object)
+            .expect("causal object");
+        assert_eq!(
+            causal.get("ordinal").and_then(Value::as_u64).unwrap() as usize,
+            frame.causal.ordinal
+        );
         let narrative = entry
             .get("narrative")
             .and_then(Value::as_object)
@@ -1187,6 +1240,37 @@ mod tests {
             .and_then(Value::as_array)
             .expect("weights array");
         assert!(!weights.is_empty());
+        let sheaf = entry
+            .get("meaning_sheaf")
+            .and_then(Value::as_object)
+            .expect("meaning sheaf object");
+        assert!(sheaf
+            .get("signature")
+            .and_then(Value::as_array)
+            .map(|values| !values.is_empty())
+            .unwrap_or(false));
+    }
+
+    #[test]
+    fn causal_snapshot_orders_events() {
+        let bridge = MaxwellDesireBridge::new()
+            .with_channel_and_narrative("alpha", vec![(0, 1.0)], vec!["braid".into()])
+            .unwrap();
+        let mut studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge);
+        studio
+            .ingest(&bridge, "alpha", sample_pulse(), None)
+            .expect("first ingest");
+        let mut second = sample_pulse();
+        second.z_score = 5.0;
+        studio
+            .ingest(&bridge, "alpha", second, None)
+            .expect("second ingest");
+
+        let snapshot = studio.causal_snapshot();
+        assert_eq!(snapshot.len(), 2);
+        assert!(snapshot[1].ordinal > snapshot[0].ordinal);
+        assert!(snapshot[1].depth >= snapshot[0].depth);
+        assert!(!snapshot[1].parents.is_empty());
     }
 
     #[test]
