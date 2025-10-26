@@ -8,6 +8,52 @@ import spiraltorch as st
 import torch
 
 
+class SafeMatmulRunner:
+    """Invoke ``Tensor.matmul`` while gracefully falling back on backend errors."""
+
+    def __init__(self, requested_backend: str, fallback_backend: str = "faer"):
+        self.requested_backend = requested_backend
+        self._active_backend = requested_backend
+        self._fallback_backend = fallback_backend
+        self._chain = [requested_backend]
+
+    def __call__(self, a: st.Tensor, b: st.Tensor):
+        backend_to_try = self._active_backend
+        try:
+            return a.matmul(b, backend=backend_to_try)
+        except RuntimeError as err:
+            fallback = self._choose_fallback(err, backend_to_try)
+            if fallback is None or fallback == backend_to_try:
+                raise
+
+            err_msg = str(err).strip().splitlines()[0]
+            print(
+                f"[SpiralTorch] backend '{backend_to_try}' unavailable ({err_msg}). "
+                f"Falling back to '{fallback}'."
+            )
+            self._active_backend = fallback
+            if self._chain[-1] != fallback:
+                self._chain.append(fallback)
+            return a.matmul(b, backend=self._active_backend)
+
+    def _choose_fallback(self, err: RuntimeError, backend: str):
+        message = str(err).lower()
+        if backend in {"wgpu", "auto"} and (
+            "wgpu backend failure" in message or "wgpu adapter" in message
+        ):
+            return self._fallback_backend
+        return None
+
+    @property
+    def active_backend(self) -> str:
+        return self._active_backend
+
+    def describe_backend(self) -> str:
+        if len(self._chain) == 1:
+            return self._chain[0]
+        return "->".join(self._chain)
+
+
 def sync_torch(device: torch.device):
     if device.type == "cuda":
         torch.cuda.synchronize()
@@ -134,8 +180,9 @@ def main():
         a_th = torch_tensor(m, k, device, seed=0)
         b_th = torch_tensor(k, n, device, seed=1)
 
+        matmul_runner = SafeMatmulRunner(args.st_backend)
         res_st = bench_once(
-            lambda: a_st.matmul(b_st, backend=args.st_backend),
+            lambda: matmul_runner(a_st, b_st),
             iters=args.iters,
             warmup=args.warmup,
             sync=None,
@@ -146,7 +193,8 @@ def main():
             warmup=args.warmup,
             sync=(lambda: sync_torch(device)),
         )
-        print(f"SpiralTorch.matmul[{args.st_backend:>5}]  -> {fmt(res_st)}")
+        backend_label = matmul_runner.describe_backend()
+        print(f"SpiralTorch.matmul[{backend_label:>5}]  -> {fmt(res_st)}")
         print(f"Torch.mm[{device.type:>4}]               -> {fmt(res_th)}")
 
         if has_hadamard:
