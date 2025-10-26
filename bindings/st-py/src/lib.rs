@@ -23,6 +23,7 @@ mod trainer;
 mod vision;
 mod scale_stack;
 mod zspace;
+mod elliptic;
 
 mod extras {
     use super::*;
@@ -165,6 +166,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     trainer::register(py, m)?;
     vision::register(py, m)?;
     zspace::register(py, m)?;
+    elliptic::register(py, m)?;
 
     // 2) サブモジュール（空でも import 可）
     nn::register(py, m)?;
@@ -198,6 +200,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "ComplexTensor","OpenCartesianTopos","LanguageWaveEncoder","Hypergrad","TensorBiome","GradientSummary",
         "ZSpaceBarycenter","BarycenterIntermediate","z_space_barycenter",
         "RankPlan","plan","plan_topk","describe_device","hip_probe",
+        "EllipticWarp","EllipticTelemetry",
         "spiralk",
         "nn","frac","selfsup","dataset","linalg","spiral_rl","rec","telemetry","ecosystem",
         "nn","frac","dataset","linalg","spiral_rl","rec","telemetry","ecosystem","hpo","inference","export",
