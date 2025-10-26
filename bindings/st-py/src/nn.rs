@@ -7,7 +7,7 @@ use pyo3::wrap_pyfunction;
 use pyo3::exceptions::PyValueError;
 
 #[cfg(feature = "nn")]
-use crate::pure::PyOpenCartesianTopos;
+use crate::pure::{PyGradientSummary, PyOpenCartesianTopos};
 #[cfg(feature = "nn")]
 use crate::tensor::{tensor_err_to_py, tensor_to_torch, PyTensor};
 #[cfg(feature = "nn")]
@@ -15,6 +15,10 @@ use crate::theory::PyZRelativityModel;
 
 #[cfg(feature = "nn")]
 use st_core::theory::zpulse::ZScale;
+#[cfg(feature = "nn")]
+use st_nn::trainer::{
+    CurvatureDecision as RustCurvatureDecision, CurvatureScheduler as RustCurvatureScheduler,
+};
 #[cfg(feature = "nn")]
 use st_nn::Module;
 #[cfg(feature = "nn")]
@@ -128,6 +132,188 @@ impl PoolMode {
             Self::Max => "max",
             Self::Avg => "avg",
         }
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "CurvatureDecision")]
+#[derive(Clone, Copy)]
+pub(crate) struct PyCurvatureDecision {
+    inner: RustCurvatureDecision,
+}
+
+#[cfg(feature = "nn")]
+impl From<RustCurvatureDecision> for PyCurvatureDecision {
+    fn from(inner: RustCurvatureDecision) -> Self {
+        Self { inner }
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyCurvatureDecision {
+    #[getter]
+    pub fn raw_pressure(&self) -> f32 {
+        self.inner.raw_pressure
+    }
+
+    #[getter]
+    pub fn smoothed_pressure(&self) -> f32 {
+        self.inner.smoothed_pressure
+    }
+
+    #[getter]
+    pub fn curvature(&self) -> f32 {
+        self.inner.curvature
+    }
+
+    #[getter]
+    pub fn changed(&self) -> bool {
+        self.inner.changed
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "CurvatureDecision(raw_pressure={:.4}, smoothed_pressure={:.4}, curvature={:.4}, changed={})",
+            self.inner.raw_pressure,
+            self.inner.smoothed_pressure,
+            self.inner.curvature,
+            self.inner.changed
+        )
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "CurvatureScheduler", unsendable)]
+pub(crate) struct PyCurvatureScheduler {
+    inner: RustCurvatureScheduler,
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyCurvatureScheduler {
+    #[new]
+    #[pyo3(
+        signature = (
+            *,
+            initial=None,
+            min_curvature=None,
+            max_curvature=None,
+            min=None,
+            max=None,
+            target_pressure=0.05,
+            step=None,
+            tolerance=None,
+            smoothing=None
+        )
+    )]
+    pub fn new(
+        initial: Option<f32>,
+        min_curvature: Option<f32>,
+        max_curvature: Option<f32>,
+        min: Option<f32>,
+        max: Option<f32>,
+        target_pressure: f32,
+        step: Option<f32>,
+        tolerance: Option<f32>,
+        smoothing: Option<f32>,
+    ) -> Self {
+        let min_bound = min.or(min_curvature).unwrap_or(-1.5);
+        let max_bound = max.or(max_curvature).unwrap_or(-0.2);
+        let seed = initial.unwrap_or((min_bound + max_bound) * 0.5);
+        let mut inner = RustCurvatureScheduler::new(seed, min_bound, max_bound, target_pressure);
+        if let Some(value) = step {
+            inner.set_step(value);
+        }
+        if let Some(value) = tolerance {
+            inner.set_tolerance(value);
+        }
+        if let Some(value) = smoothing {
+            inner.set_smoothing(value);
+        }
+        Self { inner }
+    }
+
+    #[getter]
+    pub fn current(&self) -> f32 {
+        self.inner.current()
+    }
+
+    #[getter]
+    pub fn min_curvature(&self) -> f32 {
+        self.inner.min_curvature()
+    }
+
+    #[getter]
+    pub fn max_curvature(&self) -> f32 {
+        self.inner.max_curvature()
+    }
+
+    #[getter]
+    pub fn target_pressure(&self) -> f32 {
+        self.inner.target_pressure()
+    }
+
+    #[getter]
+    pub fn step(&self) -> f32 {
+        self.inner.step_size()
+    }
+
+    #[getter]
+    pub fn tolerance(&self) -> f32 {
+        self.inner.tolerance()
+    }
+
+    #[getter]
+    pub fn smoothing(&self) -> f32 {
+        self.inner.smoothing()
+    }
+
+    #[getter]
+    pub fn last_pressure(&self) -> Option<f32> {
+        self.inner.last_pressure()
+    }
+
+    pub fn set_bounds(&mut self, min_curvature: f32, max_curvature: f32) {
+        self.inner.set_bounds(min_curvature, max_curvature);
+    }
+
+    pub fn set_target_pressure(&mut self, target: f32) {
+        self.inner.set_target_pressure(target);
+    }
+
+    pub fn set_step(&mut self, step: f32) {
+        self.inner.set_step(step);
+    }
+
+    pub fn set_tolerance(&mut self, tolerance: f32) {
+        self.inner.set_tolerance(tolerance);
+    }
+
+    pub fn set_smoothing(&mut self, smoothing: f32) {
+        self.inner.set_smoothing(smoothing);
+    }
+
+    pub fn sync(&mut self, curvature: f32) {
+        self.inner.sync(curvature);
+    }
+
+    pub fn observe(&mut self, summary: &PyGradientSummary) -> PyCurvatureDecision {
+        PyCurvatureDecision::from(self.inner.observe(summary.as_inner()))
+    }
+
+    pub fn observe_pressure(&mut self, raw_pressure: f32) -> PyCurvatureDecision {
+        PyCurvatureDecision::from(self.inner.observe_pressure(raw_pressure))
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "CurvatureScheduler(current={:.4}, min={:.4}, max={:.4}, target_pressure={:.4})",
+            self.inner.current(),
+            self.inner.min_curvature(),
+            self.inner.max_curvature(),
+            self.inner.target_pressure()
+        )
     }
 }
 
@@ -1705,6 +1891,8 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyCoherenceDiagnostics>()?;
     module.add_class::<PyZSpaceCoherenceSequencer>()?;
     module.add_class::<PyZRelativityModule>()?;
+    module.add_class::<PyCurvatureScheduler>()?;
+    module.add_class::<PyCurvatureDecision>()?;
     module.add_function(wrap_pyfunction!(from_samples, &module)?)?;
     module.add(
         "__all__",
@@ -1722,6 +1910,8 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
             "PreDiscardSnapshot",
             "ZSpaceCoherenceSequencer",
             "ZRelativityModule",
+            "CurvatureScheduler",
+            "CurvatureDecision",
             "from_samples",
             "reorder_feature_tensor",
             "conv_output_shape",
@@ -1740,6 +1930,9 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     }
     if let Ok(sequencer) = module.getattr("ZSpaceCoherenceSequencer") {
         parent.add("ZSpaceCoherenceSequencer", sequencer)?;
+    }
+    if let Ok(scheduler) = module.getattr("CurvatureScheduler") {
+        parent.add("CurvatureScheduler", scheduler)?;
     }
     Ok(())
 }
