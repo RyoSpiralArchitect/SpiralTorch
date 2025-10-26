@@ -52,7 +52,6 @@ impl PyEllipticWarp {
         self.warp.spin_harmonics()
     }
 
-    #[pyo3(signature = (sheet_count=None, spin_harmonics=None))]
     fn configure(&mut self, sheet_count: Option<usize>, spin_harmonics: Option<usize>) {
         if let Some(sheets) = sheet_count {
             self.warp = self.warp.clone().with_sheet_count(sheets);
@@ -168,6 +167,16 @@ impl PyEllipticTelemetry {
         self.inner.noise_density
     }
 
+    #[getter]
+    fn lie_log(&self) -> [f32; 3] {
+        self.inner.lie_log
+    }
+
+    #[getter]
+    fn rotor_transport(&self) -> [f32; 3] {
+        self.inner.rotor_transport
+    }
+
     fn lie_quaternion(&self) -> [f32; 4] {
         self.inner.lie_frame.quaternion()
     }
@@ -181,7 +190,7 @@ impl PyEllipticTelemetry {
     }
 
     fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         dict.set_item("curvature_radius", self.inner.curvature_radius)?;
         dict.set_item("geodesic_radius", self.inner.geodesic_radius)?;
         dict.set_item("normalized_radius", self.inner.normalized_radius())?;
@@ -197,6 +206,8 @@ impl PyEllipticTelemetry {
         dict.set_item("curvature_tensor", self.inner.curvature_tensor)?;
         dict.set_item("resonance_heat", self.inner.resonance_heat)?;
         dict.set_item("noise_density", self.inner.noise_density)?;
+        dict.set_item("lie_log", self.inner.lie_log)?;
+        dict.set_item("rotor_transport", self.inner.rotor_transport)?;
         dict.set_item("lie_quaternion", self.inner.lie_frame.quaternion())?;
         dict.set_item("lie_rotation", self.inner.lie_frame.rotation_matrix())?;
         dict.set_item("event_tags", self.inner.event_tags().to_vec())?;
