@@ -19,6 +19,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+use crate::quantum_reality::ZSpace;
 use st_core::maxwell::MaxwellZPulse;
 use thiserror::Error;
 
@@ -302,6 +303,8 @@ pub struct MeaningSection {
     cover: Vec<String>,
     tags: Vec<String>,
     weight: f32,
+    zspace_signature: Option<Vec<f64>>,
+    min_similarity: f32,
 }
 
 impl MeaningSection {
@@ -326,6 +329,8 @@ impl MeaningSection {
             cover,
             tags,
             weight: weight.max(0.0),
+            zspace_signature: None,
+            min_similarity: 0.0,
         }
     }
 
@@ -334,9 +339,34 @@ impl MeaningSection {
         Self::new(vec![open.into()], tags, weight)
     }
 
+    /// Attaches a Z-space signature that must be matched before the section
+    /// contributes to the collapsed sheaf.
+    pub fn with_zspace_signature(mut self, signature: Vec<f64>, min_similarity: f32) -> Self {
+        self.zspace_signature = Some(signature);
+        self.min_similarity = min_similarity.clamp(0.0, 1.0);
+        self
+    }
+
     fn supports(&self, open: &str) -> bool {
         self.cover.iter().any(|label| label == "*" || label == open)
     }
+}
+
+fn signature_similarity(expected: &[f64], observed: &ZSpace) -> f64 {
+    let expected_norm = expected
+        .iter()
+        .fold(0.0, |acc, value| acc + value * value)
+        .sqrt();
+    let observed_norm = observed.norm();
+    if expected_norm <= f64::EPSILON || observed_norm <= f64::EPSILON {
+        return 0.0;
+    }
+    let dot = expected
+        .iter()
+        .zip(observed.signature.iter())
+        .map(|(lhs, rhs)| lhs * rhs)
+        .sum::<f64>();
+    (dot / (expected_norm * observed_norm)).clamp(-1.0, 1.0)
 }
 
 /// Sheaf of meanings assigned to a causal event.
@@ -364,14 +394,34 @@ impl MeaningSheaf {
 
     /// Collapses the sheaf over `open`, returning the induced tags and their
     /// aggregated weights.
-    pub fn collapse(&self, open: &str, threshold: f32) -> (Vec<(String, f32)>, f32) {
+    pub fn collapse(
+        &self,
+        open: &str,
+        threshold: f32,
+        zspace: Option<&ZSpace>,
+    ) -> (Vec<(String, f32)>, f32) {
         let mut aggregated: BTreeMap<String, f32> = BTreeMap::new();
         for section in &self.sections {
             if !section.supports(open) {
                 continue;
             }
+            let mut weight = section.weight;
+            if let Some(expected) = section.zspace_signature.as_ref() {
+                let observed = match zspace {
+                    Some(observed) => observed,
+                    None => continue,
+                };
+                let similarity = signature_similarity(expected, observed);
+                if similarity < section.min_similarity as f64 {
+                    continue;
+                }
+                weight *= similarity as f32;
+            }
+            if weight <= 0.0 {
+                continue;
+            }
             for tag in &section.tags {
-                *aggregated.entry(tag.clone()).or_insert(0.0) += section.weight;
+                *aggregated.entry(tag.clone()).or_insert(0.0) += weight;
             }
         }
         let mut entries: Vec<(String, f32)> = aggregated
@@ -402,10 +452,16 @@ impl ToposLogicBridge {
     }
 
     /// Returns the collapsed tags for the event over the specified open.
-    pub fn resolve(&self, event_id: &str, open: &str, threshold: f32) -> (Vec<(String, f32)>, f32) {
+    pub fn resolve(
+        &self,
+        event_id: &str,
+        open: &str,
+        threshold: f32,
+        zspace: Option<&ZSpace>,
+    ) -> (Vec<(String, f32)>, f32) {
         self.sheaves
             .get(event_id)
-            .map(|sheaf| sheaf.collapse(open, threshold))
+            .map(|sheaf| sheaf.collapse(open, threshold, zspace))
             .unwrap_or_default()
     }
 }
@@ -422,6 +478,8 @@ pub struct ResolvedNarrative {
     pub tags: Vec<String>,
     /// Intensity computed from the pulse and sheaf weights.
     pub intensity: f32,
+    /// Z-space signature observed when the beat was resolved.
+    pub z_space: ZSpace,
 }
 
 /// Description of a narrative beat stored inside the causal set.
@@ -433,6 +491,7 @@ pub struct NarrativeBeat {
     intensity_scale: f32,
     floor: f32,
     sheaf_threshold: f32,
+    zspace_gate: Option<ZSpaceGate>,
 }
 
 impl NarrativeBeat {
@@ -456,6 +515,7 @@ impl NarrativeBeat {
             intensity_scale: 1.0,
             floor: 0.0,
             sheaf_threshold: 0.0,
+            zspace_gate: None,
         }
     }
 
@@ -483,11 +543,61 @@ impl NarrativeBeat {
         self
     }
 
+    /// Restricts the beat to pulses whose Z-space signature matches the
+    /// provided prototype.
+    pub fn with_zspace_gate(
+        mut self,
+        signature: Vec<f64>,
+        min_similarity: f32,
+        min_norm: f32,
+    ) -> Self {
+        self.zspace_gate = Some(ZSpaceGate::new(signature, min_similarity, min_norm));
+        self
+    }
+
     fn matches_channel(&self, channel: &str) -> bool {
         self.channel
             .as_deref()
             .map(|expected| expected == channel)
             .unwrap_or(true)
+    }
+
+    fn allows_zspace(&self, zspace: &ZSpace) -> bool {
+        self.zspace_gate
+            .as_ref()
+            .map(|gate| gate.allows(zspace))
+            .unwrap_or(true)
+    }
+
+    fn matches(&self, channel: &str, zspace: &ZSpace) -> bool {
+        self.matches_channel(channel) && self.allows_zspace(zspace)
+    }
+}
+
+/// Gate that restricts a narrative beat to Z-space signatures matching the
+/// provided prototype.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ZSpaceGate {
+    signature: Vec<f64>,
+    min_similarity: f32,
+    min_norm: f32,
+}
+
+impl ZSpaceGate {
+    /// Creates a new gate with the provided prototype and thresholds.
+    pub fn new(signature: Vec<f64>, min_similarity: f32, min_norm: f32) -> Self {
+        Self {
+            signature,
+            min_similarity: min_similarity.clamp(0.0, 1.0),
+            min_norm: min_norm.max(0.0),
+        }
+    }
+
+    /// Returns true when the observed signature satisfies the gate.
+    pub fn allows(&self, observed: &ZSpace) -> bool {
+        let similarity = signature_similarity(&self.signature, observed);
+        let norm = observed.norm();
+        similarity >= self.min_similarity as f64 && norm >= self.min_norm as f64
     }
 }
 
@@ -530,14 +640,18 @@ impl MetaNarrativeLayer {
         pulse: &MaxwellZPulse,
     ) -> Option<ResolvedNarrative> {
         let magnitude = pulse.magnitude() as f32;
+        let observed_zspace = ZSpace::from(pulse);
         self.engine
-            .next_matching(|beat| beat.matches_channel(channel))
+            .next_matching(|beat| beat.matches(channel, &observed_zspace))
             .map(|(event_id, beat)| {
                 let target_channel = beat.channel.clone().unwrap_or_else(|| channel.to_string());
                 let base_intensity = (magnitude * beat.intensity_scale).max(beat.floor);
-                let (sheaf_tags, sheaf_weight) =
-                    self.bridge
-                        .resolve(&event_id, &beat.context, beat.sheaf_threshold);
+                let (sheaf_tags, sheaf_weight) = self.bridge.resolve(
+                    &event_id,
+                    &beat.context,
+                    beat.sheaf_threshold,
+                    Some(&observed_zspace),
+                );
                 let mut tags = beat.base_tags.clone();
                 for (tag, _) in &sheaf_tags {
                     if !tags.iter().any(|existing| existing == tag) {
@@ -555,6 +669,7 @@ impl MetaNarrativeLayer {
                     channel: target_channel,
                     tags,
                     intensity,
+                    z_space: observed_zspace.clone(),
                 }
             })
     }
@@ -621,11 +736,11 @@ mod tests {
             )
             .unwrap();
         let mut bridge = ToposLogicBridge::new();
-        let sheaf = MeaningSheaf::new().with_section(MeaningSection::for_open(
-            "canvas",
-            vec!["extra".into(), "base".into()],
-            0.2,
-        ));
+        let signature = ZSpace::from(sample_pulse(3.2)).signature;
+        let sheaf = MeaningSheaf::new().with_section(
+            MeaningSection::for_open("canvas", vec!["extra".into(), "base".into()], 0.2)
+                .with_zspace_signature(signature, 0.6),
+        );
         bridge.attach("beat", sheaf);
         let mut layer = MetaNarrativeLayer::from_parts(engine, bridge);
         let resolved = layer
@@ -635,5 +750,31 @@ mod tests {
         assert!(resolved.tags.contains(&"base".into()));
         assert!(resolved.tags.contains(&"extra".into()));
         assert!(resolved.intensity > 0.0);
+        assert!((resolved.z_space.signature[3] - 3.2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn meta_layer_respects_zspace_gate() {
+        let mut engine = TemporalLogicEngine::new();
+        engine
+            .insert_event(
+                "blocked",
+                NarrativeBeat::new(Some("alpha".into()), "canvas", vec!["base".into()])
+                    .with_zspace_gate(vec![0.0, 0.0, 0.0, -10.0], 0.9, 0.1),
+            )
+            .unwrap();
+        engine
+            .insert_event(
+                "allowed",
+                NarrativeBeat::new(Some("alpha".into()), "canvas", vec!["pass".into()])
+                    .with_zspace_gate(vec![16.0, 0.12, 0.05, 3.2], 0.5, 0.1),
+            )
+            .unwrap();
+        let mut layer = MetaNarrativeLayer::from_parts(engine, ToposLogicBridge::new());
+        let resolved = layer
+            .next_with_pulse("alpha", &sample_pulse(3.2))
+            .expect("gate should admit second beat");
+        assert_eq!(resolved.event_id, "allowed");
+        assert!(resolved.tags.contains(&"pass".into()));
     }
 }

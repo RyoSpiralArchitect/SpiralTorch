@@ -331,7 +331,7 @@ pub struct StudioFrame {
     pub concept: Option<StudioConceptHint>,
     pub narrative: Option<NarrativeHint>,
     pub overlay: OverlayFrame,
-    pub causal: TemporalCausalAnnotation,
+    pub z_space: StudioZSpace,
 }
 
 #[derive(Clone, Debug)]
@@ -473,6 +473,39 @@ impl From<&ZSpaceProjection> for LogicZSpace {
 impl From<ZSpaceProjection> for LogicZSpace {
     fn from(projection: ZSpaceProjection) -> Self {
         LogicZSpace::from(&projection)
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StudioZSpace {
+    signature: Vec<f64>,
+}
+
+impl StudioZSpace {
+    pub fn signature(&self) -> &[f64] {
+        &self.signature
+    }
+}
+
+impl From<&LogicZSpace> for StudioZSpace {
+    fn from(space: &LogicZSpace) -> Self {
+        Self {
+            signature: space.signature.clone(),
+        }
+    }
+}
+
+impl From<LogicZSpace> for StudioZSpace {
+    fn from(space: LogicZSpace) -> Self {
+        StudioZSpace::from(&space)
+    }
+}
+
+impl From<StudioZSpace> for LogicZSpace {
+    fn from(space: StudioZSpace) -> Self {
+        LogicZSpace {
+            signature: space.signature,
+        }
     }
 }
 
@@ -689,8 +722,7 @@ pub struct QuantumRealityStudio {
     overlay: OverlayComposer,
     outlet: StudioOutlet,
     frames: VecDeque<StudioFrame>,
-    meta: TemporalLogicEngine,
-    topos: ToposLogicBridge,
+    meta: Option<MetaNarrativeLayer>,
 }
 
 impl QuantumRealityStudio {
@@ -702,8 +734,7 @@ impl QuantumRealityStudio {
             overlay: OverlayComposer::default(),
             outlet: StudioOutlet::default(),
             frames: VecDeque::with_capacity(history_limit),
-            meta: TemporalLogicEngine::new(),
-            topos: ToposLogicBridge::new(),
+            meta: None,
         }
     }
 
@@ -770,12 +801,14 @@ impl QuantumRealityStudio {
             None => (None, None),
         };
         let mut narrative = narrative;
+        let mut frame_z_space = StudioZSpace::from(LogicZSpace::from(pulse.clone()));
         if let Some(resolved) = meta {
             narrative = Some(NarrativeHint::new(
                 resolved.channel,
                 resolved.tags,
                 resolved.intensity,
             ));
+            frame_z_space = StudioZSpace::from(&resolved.z_space);
         }
         let record = self.record_pulse(channel, pulse, timestamp)?;
         let concept_window = concept
@@ -803,7 +836,7 @@ impl QuantumRealityStudio {
             concept,
             narrative,
             overlay,
-            causal: annotation,
+            z_space: frame_z_space,
         };
         self.outlet.broadcast(&frame)?;
         self.frames.push_back(frame.clone());
@@ -1051,6 +1084,43 @@ mod tests {
         assert_eq!(frame.overlay.glyph, "braid");
         assert!(frame.overlay.intensity > 0.0);
         assert!(frame.overlay.glyphs().len() >= 1);
+        assert_eq!(frame.z_space.signature().len(), 8);
+    }
+
+    #[test]
+    fn meta_layer_overrides_bridge_narrative() {
+        let bridge = MaxwellDesireBridge::new()
+            .with_channel("alpha", vec![(0, 1.0)])
+            .unwrap();
+        let mut layer = MetaNarrativeLayer::new();
+        layer
+            .engine_mut()
+            .insert_event(
+                "beat-1",
+                NarrativeBeat::new(Some("alpha".into()), "z-open", vec!["causal".into()])
+                    .with_intensity_scale(0.5)
+                    .with_floor(0.1)
+                    .with_sheaf_threshold(0.05),
+            )
+            .unwrap();
+        layer.bridge_mut().attach(
+            "beat-1",
+            MeaningSheaf::new().with_section(MeaningSection::for_open(
+                "z-open",
+                vec!["sheaf".into()],
+                0.2,
+            )),
+        );
+        let mut studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge)
+            .with_meta_layer(layer);
+        let frame = studio
+            .ingest(&bridge, "alpha", sample_pulse(), None)
+            .expect("ingest with meta");
+        let narrative = frame.narrative.expect("meta narrative");
+        assert!(narrative.tags().iter().any(|tag| tag == "causal"));
+        assert!(narrative.tags().iter().any(|tag| tag == "sheaf"));
+        assert!(narrative.intensity() > 0.0);
+        assert!((frame.z_space.signature()[3] - 4.2).abs() < 1e-6);
     }
 
     #[test]
