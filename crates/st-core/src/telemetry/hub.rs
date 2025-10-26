@@ -24,6 +24,7 @@
 use super::atlas::{AtlasFragment, AtlasFrame, AtlasRoute, AtlasRouteSummary};
 use super::dashboard::{DashboardFrame, DashboardRing};
 use super::maintainer::MaintainerReport;
+use super::xai_report::AttributionReport;
 #[cfg(any(feature = "psi", feature = "psychoid"))]
 use once_cell::sync::Lazy;
 #[cfg(feature = "psi")]
@@ -85,6 +86,135 @@ fn psi_lock() -> &'static ReentrantMutex<()> {
 #[must_use]
 pub fn psi_telemetry_guard() -> ReentrantMutexGuard<'static, ()> {
     psi_lock().lock()
+}
+
+#[cfg(feature = "psi")]
+#[derive(Clone, Debug, Default)]
+pub struct PsiMetricsFrame {
+    pub reading: Option<PsiReading>,
+    pub events: Vec<PsiEvent>,
+    pub spiral: Option<PsiSpiralAdvisory>,
+    pub tuning: Option<PsiSpiralTuning>,
+}
+
+#[cfg(feature = "psi")]
+#[derive(Clone)]
+struct PsiMetricsSubscriber {
+    id: usize,
+    frame: Arc<RwLock<PsiMetricsFrame>>,
+}
+
+#[cfg(feature = "psi")]
+static PSI_METRIC_SUBSCRIBERS: OnceLock<RwLock<Vec<PsiMetricsSubscriber>>> = OnceLock::new();
+
+#[cfg(feature = "psi")]
+static NEXT_PSI_METRIC_SUBSCRIBER_ID: AtomicUsize = AtomicUsize::new(1);
+
+#[cfg(feature = "psi")]
+fn psi_metric_subscribers_cell() -> &'static RwLock<Vec<PsiMetricsSubscriber>> {
+    PSI_METRIC_SUBSCRIBERS.get_or_init(|| RwLock::new(Vec::new()))
+}
+
+#[cfg(feature = "psi")]
+fn current_psi_metrics_frame() -> PsiMetricsFrame {
+    let _guard = psi_lock().lock();
+    let reading = LAST_PSI
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().cloned());
+    let events = LAST_PSI_EVENTS
+        .read()
+        .map(|guard| guard.clone())
+        .unwrap_or_default();
+    let spiral = LAST_PSI_SPIRAL
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().cloned());
+    let tuning = LAST_PSI_SPIRAL_TUNING
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().cloned());
+    PsiMetricsFrame {
+        reading,
+        events,
+        spiral,
+        tuning,
+    }
+}
+
+#[cfg(feature = "psi")]
+fn update_psi_metric_subscribers<F>(mut apply: F)
+where
+    F: FnMut(&mut PsiMetricsFrame),
+{
+    let frames: Vec<Arc<RwLock<PsiMetricsFrame>>> = match psi_metric_subscribers_cell().read() {
+        Ok(guard) => guard
+            .iter()
+            .map(|subscriber| subscriber.frame.clone())
+            .collect(),
+        Err(poisoned) => {
+            let guard = poisoned.into_inner();
+            guard
+                .iter()
+                .map(|subscriber| subscriber.frame.clone())
+                .collect()
+        }
+    };
+    for frame in frames {
+        if let Ok(mut guard) = frame.write() {
+            apply(&mut guard);
+        }
+    }
+}
+
+#[cfg(feature = "psi")]
+#[derive(Clone)]
+pub struct PsiMetricsSubscription {
+    id: usize,
+    frame: Arc<RwLock<PsiMetricsFrame>>,
+}
+
+#[cfg(feature = "psi")]
+impl fmt::Debug for PsiMetricsSubscription {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PsiMetricsSubscription")
+            .field("id", &self.id)
+            .finish()
+    }
+}
+
+#[cfg(feature = "psi")]
+impl PsiMetricsSubscription {
+    pub fn snapshot(&self) -> PsiMetricsFrame {
+        self.frame
+            .read()
+            .map(|guard| guard.clone())
+            .unwrap_or_default()
+    }
+}
+
+#[cfg(feature = "psi")]
+impl Drop for PsiMetricsSubscription {
+    fn drop(&mut self) {
+        if let Ok(mut guard) = psi_metric_subscribers_cell().write() {
+            guard.retain(|subscriber| subscriber.id != self.id);
+        }
+    }
+}
+
+#[cfg(feature = "psi")]
+pub fn subscribe_psi_metrics() -> PsiMetricsSubscription {
+    let id = NEXT_PSI_METRIC_SUBSCRIBER_ID.fetch_add(1, Ordering::Relaxed);
+    let frame = Arc::new(RwLock::new(current_psi_metrics_frame()));
+    let entry = PsiMetricsSubscriber {
+        id,
+        frame: frame.clone(),
+    };
+    match psi_metric_subscribers_cell().write() {
+        Ok(mut guard) => guard.push(entry),
+        Err(poisoned) => poisoned.into_inner().push(entry),
+    }
+    PsiMetricsSubscription { id, frame }
 }
 
 static CONFIG_DIFF_EVENTS: OnceLock<RwLock<Vec<ConfigDiffEvent>>> = OnceLock::new();
@@ -201,12 +331,17 @@ pub struct ConfigDiffEvent {
 
 #[cfg(feature = "psi")]
 pub fn set_last_psi(reading: &PsiReading) {
+    let reading_snapshot = reading.clone();
     {
         let _guard = psi_lock().lock();
         if let Ok(mut guard) = LAST_PSI.write() {
             *guard = Some(reading.clone());
         }
     }
+    #[cfg(feature = "psi")]
+    update_psi_metric_subscribers(|frame| {
+        frame.reading = Some(reading_snapshot.clone());
+    });
     let mut fragment = AtlasFragment::new();
     if let Some(timestamp) = psi_step_timestamp(reading.step) {
         fragment.timestamp = Some(timestamp);
@@ -232,10 +367,14 @@ pub fn clear_last_psi() {
     if let Ok(mut guard) = LAST_PSI.write() {
         *guard = None;
     }
+    update_psi_metric_subscribers(|frame| {
+        frame.reading = None;
+    });
 }
 
 #[cfg(feature = "psi")]
 pub fn set_last_psi_events(events: &[PsiEvent]) {
+    let events_snapshot: Vec<PsiEvent> = events.iter().cloned().collect();
     {
         let _guard = psi_lock().lock();
         if let Ok(mut guard) = LAST_PSI_EVENTS.write() {
@@ -243,6 +382,10 @@ pub fn set_last_psi_events(events: &[PsiEvent]) {
             guard.extend(events.iter().cloned());
         }
     }
+    #[cfg(feature = "psi")]
+    update_psi_metric_subscribers(|frame| {
+        frame.events = events_snapshot.clone();
+    });
     if events.is_empty() {
         return;
     }
@@ -268,16 +411,24 @@ pub fn clear_last_psi_events() {
     if let Ok(mut guard) = LAST_PSI_EVENTS.write() {
         guard.clear();
     }
+    update_psi_metric_subscribers(|frame| {
+        frame.events.clear();
+    });
 }
 
 #[cfg(feature = "psi")]
 pub fn set_last_psi_spiral(advisory: &PsiSpiralAdvisory) {
+    let advisory_snapshot = advisory.clone();
     {
         let _guard = psi_lock().lock();
         if let Ok(mut guard) = LAST_PSI_SPIRAL.write() {
             *guard = Some(advisory.clone());
         }
     }
+    #[cfg(feature = "psi")]
+    update_psi_metric_subscribers(|frame| {
+        frame.spiral = Some(advisory_snapshot.clone());
+    });
     let mut fragment = AtlasFragment::new();
     fragment.push_metric("psi.spiral.mu_eff0", advisory.mu_eff0);
     fragment.push_metric("psi.spiral.alpha3", advisory.alpha3);
@@ -307,12 +458,17 @@ pub fn get_last_psi_spiral() -> Option<PsiSpiralAdvisory> {
 
 #[cfg(feature = "psi")]
 pub fn set_last_psi_spiral_tuning(tuning: &PsiSpiralTuning) {
+    let tuning_snapshot = tuning.clone();
     {
         let _guard = psi_lock().lock();
         if let Ok(mut guard) = LAST_PSI_SPIRAL_TUNING.write() {
             *guard = Some(tuning.clone());
         }
     }
+    #[cfg(feature = "psi")]
+    update_psi_metric_subscribers(|frame| {
+        frame.tuning = Some(tuning_snapshot.clone());
+    });
     let mut fragment = AtlasFragment::new();
     fragment.push_metric("psi.spiral.tuning.stability", tuning.stability_score);
     let mut required = 0u32;
@@ -346,6 +502,28 @@ pub fn get_last_psi_spiral_tuning() -> Option<PsiSpiralTuning> {
         .read()
         .ok()
         .and_then(|guard| guard.as_ref().cloned())
+}
+
+#[cfg(feature = "psi")]
+pub fn clear_last_psi_spiral() {
+    let _guard = psi_lock().lock();
+    if let Ok(mut guard) = LAST_PSI_SPIRAL.write() {
+        *guard = None;
+    }
+    update_psi_metric_subscribers(|frame| {
+        frame.spiral = None;
+    });
+}
+
+#[cfg(feature = "psi")]
+pub fn clear_last_psi_spiral_tuning() {
+    let _guard = psi_lock().lock();
+    if let Ok(mut guard) = LAST_PSI_SPIRAL_TUNING.write() {
+        *guard = None;
+    }
+    update_psi_metric_subscribers(|frame| {
+        frame.tuning = None;
+    });
 }
 
 /// Records the most recent configuration diff events produced when loading
@@ -475,12 +653,36 @@ impl SoftlogicZFeedback {
                 .map(|(source, weight)| (source, weight.max(0.0))),
         );
     }
+
+    /// Returns the parsed Z-space region descriptor when elliptic telemetry is present.
+    pub fn region_descriptor(
+        &self,
+    ) -> Option<crate::telemetry::zspace_region::ZSpaceRegionDescriptor> {
+        self.elliptic
+            .as_ref()
+            .map(crate::telemetry::zspace_region::ZSpaceRegionDescriptor::from)
+    }
 }
 
 static LAST_SOFTLOGIC_Z: OnceLock<RwLock<Option<SoftlogicZFeedback>>> = OnceLock::new();
+static LAST_REGION_REPORT: OnceLock<RwLock<Option<AttributionReport>>> = OnceLock::new();
+static LAST_REGION_TREND_REPORT: OnceLock<RwLock<Option<AttributionReport>>> = OnceLock::new();
+static LAST_REGION_VOLATILITY_REPORT: OnceLock<RwLock<Option<AttributionReport>>> = OnceLock::new();
 
 fn softlogic_z_cell() -> &'static RwLock<Option<SoftlogicZFeedback>> {
     LAST_SOFTLOGIC_Z.get_or_init(|| RwLock::new(None))
+}
+
+fn region_report_cell() -> &'static RwLock<Option<AttributionReport>> {
+    LAST_REGION_REPORT.get_or_init(|| RwLock::new(None))
+}
+
+fn region_trend_report_cell() -> &'static RwLock<Option<AttributionReport>> {
+    LAST_REGION_TREND_REPORT.get_or_init(|| RwLock::new(None))
+}
+
+fn region_volatility_report_cell() -> &'static RwLock<Option<AttributionReport>> {
+    LAST_REGION_VOLATILITY_REPORT.get_or_init(|| RwLock::new(None))
 }
 
 #[cfg(feature = "psi")]
@@ -730,6 +932,90 @@ pub fn set_softlogic_z(feedback: SoftlogicZFeedback) {
 
     let fragment = fragment_from_softlogic(&feedback);
     merge_atlas_fragment(fragment);
+}
+
+/// Stores the most recent region-weighted loss heatmap for explainability.
+pub fn set_region_loss_report(report: AttributionReport) {
+    match region_report_cell().write() {
+        Ok(mut guard) => {
+            *guard = Some(report);
+        }
+        Err(poisoned) => {
+            let mut guard = poisoned.into_inner();
+            *guard = Some(report);
+        }
+    }
+}
+
+/// Clears the stored region-weighted loss report.
+pub fn clear_region_loss_report() {
+    if let Ok(mut guard) = region_report_cell().write() {
+        guard.take();
+    }
+}
+
+/// Returns the last stored region heatmap report, if any.
+pub fn get_region_loss_report() -> Option<AttributionReport> {
+    region_report_cell()
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().cloned())
+}
+
+/// Stores the latest region-weighted delta heatmap.
+pub fn set_region_loss_trend_report(report: AttributionReport) {
+    match region_trend_report_cell().write() {
+        Ok(mut guard) => {
+            *guard = Some(report);
+        }
+        Err(poisoned) => {
+            let mut guard = poisoned.into_inner();
+            *guard = Some(report);
+        }
+    }
+}
+
+/// Clears the stored region delta heatmap.
+pub fn clear_region_loss_trend_report() {
+    if let Ok(mut guard) = region_trend_report_cell().write() {
+        guard.take();
+    }
+}
+
+/// Returns the latest region delta heatmap, if available.
+pub fn get_region_loss_trend_report() -> Option<AttributionReport> {
+    region_trend_report_cell()
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().cloned())
+}
+
+/// Stores the latest region volatility heatmap derived from the history window.
+pub fn set_region_loss_volatility_report(report: AttributionReport) {
+    match region_volatility_report_cell().write() {
+        Ok(mut guard) => {
+            *guard = Some(report);
+        }
+        Err(poisoned) => {
+            let mut guard = poisoned.into_inner();
+            *guard = Some(report);
+        }
+    }
+}
+
+/// Clears the stored region volatility heatmap.
+pub fn clear_region_loss_volatility_report() {
+    if let Ok(mut guard) = region_volatility_report_cell().write() {
+        guard.take();
+    }
+}
+
+/// Returns the latest region volatility heatmap, if present.
+pub fn get_region_loss_volatility_report() -> Option<AttributionReport> {
+    region_volatility_report_cell()
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().cloned())
 }
 
 /// Returns the latest SoftLogic Z feedback sample if one has been recorded.
@@ -1584,6 +1870,10 @@ mod tests {
     use crate::telemetry::chrono::{ChronoHarmonics, ChronoPeak, ChronoSummary};
     use crate::telemetry::dashboard::DashboardMetric;
     use crate::telemetry::maintainer::MaintainerStatus;
+    #[cfg(feature = "psi")]
+    use crate::theory::spiral_dynamics::HopfRegime;
+    #[cfg(feature = "psi")]
+    use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock};
     use std::time::SystemTime;
 
@@ -1952,5 +2242,80 @@ mod tests {
             .iter()
             .flat_map(|district| district.focus.iter())
             .any(|focus| focus.name.starts_with("maintainer.")));
+    }
+
+    #[cfg(feature = "psi")]
+    #[test]
+    fn psi_subscription_tracks_updates() {
+        let _guard = atlas_test_lock().lock().unwrap();
+        clear_last_psi();
+        clear_last_psi_events();
+        clear_last_psi_spiral();
+        clear_last_psi_spiral_tuning();
+
+        let subscription = subscribe_psi_metrics();
+        let initial = subscription.snapshot();
+        assert!(initial.reading.is_none());
+        assert!(initial.events.is_empty());
+        assert!(initial.spiral.is_none());
+        assert!(initial.tuning.is_none());
+
+        let mut breakdown = HashMap::new();
+        breakdown.insert(PsiComponent::LOSS, 0.5);
+        breakdown.insert(PsiComponent::ATTN_ENTROPY, 0.3);
+        let reading = PsiReading {
+            total: 0.8,
+            breakdown: breakdown.clone(),
+            step: 42,
+        };
+        set_last_psi(&reading);
+
+        let event = PsiEvent::ThresholdCross {
+            component: PsiComponent::LOSS,
+            value: 0.8,
+            threshold: 0.6,
+            up: true,
+            step: 42,
+        };
+        set_last_psi_events(&[event]);
+
+        let advisory = PsiSpiralAdvisory {
+            regime: HopfRegime::Supercritical,
+            mu_eff0: -0.2,
+            alpha3: 0.4,
+            audit_container_gap: 0.1,
+            audit_cluster: 0.3,
+            container_cluster: 0.25,
+        };
+        set_last_psi_spiral(&advisory);
+
+        let mut weight_increments = HashMap::new();
+        weight_increments.insert(PsiComponent::LOSS, 0.1);
+        let tuning = PsiSpiralTuning {
+            stability_score: 0.7,
+            required_components: PsiComponent::LOSS,
+            weight_increments,
+            threshold_shifts: HashMap::new(),
+        };
+        set_last_psi_spiral_tuning(&tuning);
+
+        let snapshot = subscription.snapshot();
+        assert_eq!(snapshot.reading.unwrap().step, 42);
+        assert_eq!(snapshot.events.len(), 1);
+        if let Some(spiral) = snapshot.spiral {
+            assert!((spiral.audit_cluster - advisory.audit_cluster).abs() < f32::EPSILON);
+        } else {
+            panic!("missing spiral advisory in snapshot");
+        }
+        if let Some(frame_tuning) = snapshot.tuning {
+            assert!((frame_tuning.stability_score - tuning.stability_score).abs() < f32::EPSILON);
+        } else {
+            panic!("missing spiral tuning in snapshot");
+        }
+
+        clear_last_psi();
+        clear_last_psi_events();
+        clear_last_psi_spiral();
+        clear_last_psi_spiral_tuning();
     }
 }

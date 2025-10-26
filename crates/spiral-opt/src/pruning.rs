@@ -1,21 +1,7 @@
-use crate::report::{OptimisationError, StructuredPruningReport};
-#[derive(Debug, Clone, Copy)]
-struct BlockRecord {
-    start: usize,
-    len: usize,
-    norm_sq: f32,
-}
-
-impl BlockRecord {
-    #[inline]
-    fn new(start: usize, len: usize, norm_sq: f32) -> Self {
-        Self {
-            start,
-            len,
-            norm_sq,
-        }
-    }
-}
+use crate::{
+    ops::block::{compute_block_norms, zero_block, BlockRecord},
+    report::{OptimisationError, StructuredPruningReport},
+};
 
 /// Configuration for channel/block structured pruning.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -83,33 +69,55 @@ impl StructuredPruner {
 
         let block_count = (weights.len() + config.block_size - 1) / config.block_size;
         workspace.prepare(block_count);
+        compute_block_norms(
+            weights,
+            config.block_size,
+            block_count,
+            &mut workspace.block_norms,
+        );
 
-        let mut offset = 0;
-        for chunk in weights.chunks(config.block_size) {
-            let norm_sq = chunk.iter().map(|w| *w * *w).sum::<f32>();
-            workspace
-                .block_norms
-                .push(BlockRecord::new(offset, chunk.len(), norm_sq));
-            offset += chunk.len();
-        }
-
-        workspace
-            .block_norms
-            .sort_unstable_by(|a, b| a.norm_sq.total_cmp(&b.norm_sq));
-        let target_blocks =
-            ((workspace.block_norms.len() as f32) * config.target_sparsity).floor() as usize;
+        let block_total = workspace.block_norms.len();
+        let target_blocks = (block_total as f32 * config.target_sparsity).floor() as usize;
         let mut pruned_blocks = 0;
         let mut l2_error = 0.0f32;
         let min_keep_sq = config.min_l2_keep * config.min_l2_keep;
 
-        for block in &workspace.block_norms {
-            if pruned_blocks >= target_blocks && block.norm_sq >= min_keep_sq {
-                continue;
+        if target_blocks == 0 {
+            for block in &workspace.block_norms {
+                if block.norm_sq < min_keep_sq {
+                    l2_error += block.norm_sq;
+                    zero_block(weights, block);
+                    pruned_blocks += 1;
+                }
             }
-            let range = block.start..block.start + block.len;
-            l2_error += block.norm_sq;
-            weights[range].fill(0.0);
-            pruned_blocks += 1;
+        } else if target_blocks >= block_total {
+            for block in &workspace.block_norms {
+                l2_error += block.norm_sq;
+                zero_block(weights, block);
+                pruned_blocks += 1;
+            }
+        } else {
+            // Partition blocks so the `target_blocks` smallest norms occupy the front without the
+            // `O(n log n)` cost of a full sort.
+            let nth_index = target_blocks - 1;
+            workspace.block_norms.select_nth_unstable_by(nth_index, |a, b| {
+                a.norm_sq.total_cmp(&b.norm_sq)
+            });
+            let (to_prune, remainder) = workspace.block_norms.split_at_mut(target_blocks);
+
+            for block in to_prune.iter() {
+                l2_error += block.norm_sq;
+                zero_block(weights, block);
+                pruned_blocks += 1;
+            }
+
+            for block in remainder.iter() {
+                if block.norm_sq < min_keep_sq {
+                    l2_error += block.norm_sq;
+                    zero_block(weights, block);
+                    pruned_blocks += 1;
+                }
+            }
         }
 
         let kept_blocks = workspace.block_norms.len().saturating_sub(pruned_blocks);
@@ -255,5 +263,57 @@ mod tests {
         assert!((report.achieved_sparsity - 0.5).abs() < 1e-6);
         let expected_error = (0.1f32 * 0.1 * 2.0 + 0.2 * 0.2 * 2.0).sqrt();
         assert!((report.l2_error - expected_error).abs() < 1e-6);
+    }
+
+    #[test]
+    fn zero_target_only_prunes_below_threshold() {
+        let mut weights = vec![
+            0.05, 0.05, // weak block 0
+            0.2, 0.2,   // weak block 1
+            2.0, 2.0,   // strong block 2
+        ];
+        let pruner = StructuredPruner::new();
+        let config = StructuredPruningConfig {
+            block_size: 2,
+            target_sparsity: 0.0,
+            min_l2_keep: 0.3,
+        };
+
+        let report = pruner
+            .apply(&mut weights, config)
+            .expect("pruning should succeed");
+
+        assert_eq!(&weights[..4], &[0.0, 0.0, 0.0, 0.0]);
+        assert_eq!(&weights[4..], &[2.0, 2.0]);
+        assert_eq!(report.pruned_blocks, 2);
+        assert_eq!(report.kept_blocks, 1);
+        assert!((report.achieved_sparsity - 2.0 / 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn partitioning_removes_smallest_blocks_first() {
+        let mut weights = vec![
+            5.0, 5.0, // block 0
+            4.0, 4.0, // block 1
+            3.0, 3.0, // block 2
+            2.0, 2.0, // block 3
+            1.0, 1.0, // block 4
+        ];
+        let pruner = StructuredPruner::new();
+        let config = StructuredPruningConfig {
+            block_size: 2,
+            target_sparsity: 0.4, // prune floor(5 * 0.4) == 2 blocks
+            min_l2_keep: 0.0,
+        };
+
+        let report = pruner
+            .apply(&mut weights, config)
+            .expect("pruning should succeed");
+
+        assert_eq!(&weights[..6], &[5.0, 5.0, 4.0, 4.0, 3.0, 3.0]);
+        assert_eq!(&weights[6..], &[0.0, 0.0, 0.0, 0.0]);
+        assert_eq!(report.pruned_blocks, 2);
+        assert_eq!(report.kept_blocks, 3);
+        assert!((report.achieved_sparsity - 0.4).abs() < 1e-6);
     }
 }

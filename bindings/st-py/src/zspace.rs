@@ -1,10 +1,13 @@
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
+use pyo3::types::PyModule;
 use pyo3::wrap_pyfunction;
 use st_frac::mellin_types::ComplexScalar;
 use st_frac::zspace::{
     evaluate_weighted_series_many, prepare_weighted_series, trapezoidal_weights,
 };
+
+use crate::introspect;
 
 fn pyerr<E: std::fmt::Display>(e: E) -> PyErr {
     PyRuntimeError::new_err(e.to_string())
@@ -54,7 +57,25 @@ fn zspace_eval(
     Ok(out)
 }
 
-pub fn register(_py: Python<'_>, module: &Bound<PyModule>) -> PyResult<()> {
+pub fn register(py: Python<'_>, module: &Bound<PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(zspace_eval, module)?)?;
+    introspect::register_top_level(py, module)?;
+
+    let zspace_module = PyModule::new_bound(py, "zspace")?;
+    zspace_module.add_function(wrap_pyfunction!(zspace_eval, &zspace_module)?)?;
+    introspect::register_submodule(py, &zspace_module)?;
+    module.add_submodule(&zspace_module)?;
+    for attr in [
+        "ZSpaceSpinBand",
+        "ZSpaceRadiusBand",
+        "ZSpaceRegionKey",
+        "ZSpaceRegionDescriptor",
+        "SoftlogicEllipticSample",
+        "SoftlogicZFeedback",
+    ] {
+        if let Ok(value) = zspace_module.getattr(attr) {
+            module.add(attr, value)?;
+        }
+    }
     Ok(())
 }

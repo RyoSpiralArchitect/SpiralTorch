@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use nalgebra::{DMatrix, DVector, SymmetricEigen};
 use num_complex::Complex64;
+use st_core::maxwell::MaxwellZPulse;
 
 /// Convenience alias for scalar-valued time functions.
 pub type TimeFn = Arc<dyn Fn(f64) -> f64 + Send + Sync + 'static>;
@@ -965,9 +966,61 @@ pub struct MonadBiome {
 }
 
 /// Z-space descriptor.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ZSpace {
     pub signature: Vec<f64>,
+}
+
+impl ZSpace {
+    /// Creates a descriptor from the provided signature vector.
+    pub fn new(signature: Vec<f64>) -> Self {
+        Self { signature }
+    }
+
+    /// Returns the Euclidean norm of the signature.
+    pub fn norm(&self) -> f64 {
+        self.signature
+            .iter()
+            .fold(0.0, |acc, value| acc + value * value)
+            .sqrt()
+    }
+
+    /// Computes the cosine similarity between two signatures.
+    pub fn cosine_similarity(&self, other: &Self) -> f64 {
+        let a = self.norm();
+        let b = other.norm();
+        if a <= f64::EPSILON || b <= f64::EPSILON {
+            return 0.0;
+        }
+        let dot = self
+            .signature
+            .iter()
+            .zip(other.signature.iter())
+            .map(|(lhs, rhs)| lhs * rhs)
+            .sum::<f64>();
+        (dot / (a * b)).clamp(-1.0, 1.0)
+    }
+}
+
+impl From<&MaxwellZPulse> for ZSpace {
+    fn from(pulse: &MaxwellZPulse) -> Self {
+        let mut signature = Vec::with_capacity(8);
+        signature.push(pulse.blocks as f64);
+        signature.push(pulse.mean);
+        signature.push(pulse.standard_error);
+        signature.push(pulse.z_score);
+        signature.push(pulse.band_energy.0 as f64);
+        signature.push(pulse.band_energy.1 as f64);
+        signature.push(pulse.band_energy.2 as f64);
+        signature.push(pulse.z_bias as f64);
+        Self { signature }
+    }
+}
+
+impl From<MaxwellZPulse> for ZSpace {
+    fn from(pulse: MaxwellZPulse) -> Self {
+        ZSpace::from(&pulse)
+    }
 }
 
 /// Result of linking Z-space and Monad biomes.

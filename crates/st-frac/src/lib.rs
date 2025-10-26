@@ -3,7 +3,9 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+pub mod cosmology;
 pub mod fft;
+pub mod fractal_field;
 pub mod mellin;
 pub mod mellin_types;
 #[cfg(feature = "wgpu")]

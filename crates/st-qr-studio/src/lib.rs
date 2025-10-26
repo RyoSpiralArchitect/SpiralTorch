@@ -7,17 +7,25 @@
 
 use serde::{Deserialize, Serialize};
 use st_core::maxwell::MaxwellZPulse;
+use st_core::theory::inflaton_zspace::PrimordialProjection;
 use st_frac::mellin_types::ComplexScalar;
 use st_frac::zspace::{
     evaluate_weighted_series, mellin_log_lattice_prefactor, prepare_weighted_series,
     trapezoidal_weights,
 };
+use st_logic::meta_layer::{MetaNarrativeLayer, ResolvedNarrative};
 use st_logic::quantum_reality::ZSpace as LogicZSpace;
 use st_nn::{ConceptHint, MaxwellDesireBridge, NarrativeHint};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
+
+pub use st_core::maxwell::MaxwellZPulse as MaxwellPulse;
+
+mod meta;
+
+pub use meta::{TemporalCausalAnnotation, TemporalLogicEngine, ToposLogicBridge};
 
 const DEFAULT_HISTORY: usize = 512;
 
@@ -89,6 +97,19 @@ impl From<&MaxwellZPulse> for PulseSnapshot {
     }
 }
 
+impl From<&PulseSnapshot> for MaxwellZPulse {
+    fn from(snapshot: &PulseSnapshot) -> Self {
+        MaxwellZPulse {
+            blocks: snapshot.blocks,
+            mean: snapshot.mean,
+            standard_error: snapshot.standard_error,
+            z_score: snapshot.z_score,
+            band_energy: snapshot.band_energy,
+            z_bias: snapshot.z_bias,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RecordedPulse {
     pub channel: String,
@@ -119,6 +140,63 @@ impl StudioConceptHint {
             ConceptHint::Window(window) => StudioConceptHint::Window(window),
         }
     }
+
+    fn as_weighted_window(&self) -> Vec<(usize, f32)> {
+        match self {
+            StudioConceptHint::Distribution(dist) => dist
+                .iter()
+                .copied()
+                .enumerate()
+                .filter(|(_, weight)| *weight > f32::EPSILON)
+                .map(|(idx, weight)| (idx, weight))
+                .collect(),
+            StudioConceptHint::Window(window) => window
+                .iter()
+                .copied()
+                .filter(|(_, weight)| *weight > f32::EPSILON)
+                .collect(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ConceptWindow {
+    pub channel: String,
+    pub timestamp: SystemTime,
+    pub weights: Vec<(usize, f32)>,
+    pub magnitude: f32,
+}
+
+impl ConceptWindow {
+    fn from_hint(record: &RecordedPulse, hint: &StudioConceptHint) -> Option<Self> {
+        let mut weights = hint.as_weighted_window();
+        if weights.is_empty() {
+            return None;
+        }
+        weights.sort_by(|a, b| a.0.cmp(&b.0));
+        let magnitude = record.pulse.magnitude();
+        Some(Self {
+            channel: record.channel.clone(),
+            timestamp: record.timestamp,
+            weights,
+            magnitude,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OverlayGlyph {
+    pub glyph: String,
+    pub intensity: f32,
+}
+
+impl OverlayGlyph {
+    pub fn new(glyph: impl Into<String>, intensity: f32) -> Self {
+        Self {
+            glyph: glyph.into(),
+            intensity: intensity.max(0.0),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -127,16 +205,218 @@ pub struct OverlayFrame {
     pub glyph: String,
     pub intensity: f32,
     pub timestamp: SystemTime,
+    pub glyphs: Vec<OverlayGlyph>,
 }
 
 impl OverlayFrame {
-    fn new(record: &RecordedPulse, glyph: String, intensity: f32) -> Self {
-        Self {
+    fn from_record(record: &RecordedPulse, glyph: String, intensity: f32) -> Self {
+        let mut frame = Self {
             channel: record.channel.clone(),
-            glyph,
+            glyph: glyph.clone(),
             intensity,
             timestamp: record.timestamp,
+            glyphs: vec![OverlayGlyph::new(glyph, intensity)],
+        };
+        frame.refresh_primary();
+        frame
+    }
+
+    fn refresh_primary(&mut self) {
+        if let Some(primary) = self.glyphs.first() {
+            self.glyph = primary.glyph.clone();
+            self.intensity = primary.intensity;
+        } else {
+            self.glyph = self.channel.clone();
+            self.intensity = 0.0;
         }
+    }
+
+    pub fn new(
+        channel: impl Into<String>,
+        timestamp: SystemTime,
+        glyphs: Vec<OverlayGlyph>,
+    ) -> Self {
+        let channel = channel.into();
+        let mut filtered: Vec<OverlayGlyph> = glyphs
+            .into_iter()
+            .filter(|glyph| !glyph.glyph.trim().is_empty())
+            .collect();
+        if filtered.is_empty() {
+            filtered.push(OverlayGlyph::new(channel.clone(), 0.0));
+        }
+        let mut frame = Self {
+            channel,
+            glyph: String::new(),
+            intensity: 0.0,
+            timestamp,
+            glyphs: Vec::new(),
+        };
+        for glyph in filtered {
+            frame.push_glyph(glyph);
+        }
+        frame.refresh_primary();
+        frame
+    }
+
+    pub fn from_pairs<I, S>(channel: impl Into<String>, timestamp: SystemTime, pairs: I) -> Self
+    where
+        I: IntoIterator<Item = (S, f32)>,
+        S: Into<String>,
+    {
+        let glyphs = pairs
+            .into_iter()
+            .map(|(glyph, intensity)| OverlayGlyph::new(glyph, intensity))
+            .collect();
+        Self::new(channel, timestamp, glyphs)
+    }
+
+    pub fn from_glyphs_and_intensities<G, IG, II>(
+        channel: impl Into<String>,
+        timestamp: SystemTime,
+        glyphs: IG,
+        intensities: II,
+    ) -> Self
+    where
+        IG: IntoIterator<Item = G>,
+        G: Into<String>,
+        II: IntoIterator<Item = f32>,
+    {
+        let mut glyph_iter = glyphs.into_iter();
+        let mut intensity_iter = intensities.into_iter();
+        let pairs = std::iter::from_fn(move || {
+            let glyph = glyph_iter.next()?;
+            let intensity = intensity_iter.next().unwrap_or(0.0);
+            Some((glyph, intensity))
+        });
+        Self::from_pairs(channel, timestamp, pairs)
+    }
+
+    pub fn push_glyph(&mut self, glyph: OverlayGlyph) {
+        if glyph.glyph.trim().is_empty() {
+            return;
+        }
+        if self
+            .glyphs
+            .iter()
+            .any(|existing| existing.glyph == glyph.glyph)
+        {
+            return;
+        }
+        self.glyphs.push(glyph);
+        self.refresh_primary();
+    }
+
+    pub fn extend_tags<I>(&mut self, tags: I, base_intensity: f32)
+    where
+        I: IntoIterator,
+        I::Item: Into<String>,
+    {
+        for (idx, tag) in tags.into_iter().enumerate() {
+            let glyph = tag.into();
+            if glyph.trim().is_empty() {
+                continue;
+            }
+            let falloff = base_intensity * 0.75_f32.powi((idx + 1) as i32);
+            self.push_glyph(OverlayGlyph::new(glyph, falloff));
+        }
+    }
+
+    pub fn glyphs(&self) -> &[OverlayGlyph] {
+        &self.glyphs
+    }
+
+    pub fn new(
+        channel: impl Into<String>,
+        timestamp: SystemTime,
+        glyphs: Vec<OverlayGlyph>,
+    ) -> Self {
+        let channel = channel.into();
+        let mut filtered: Vec<OverlayGlyph> = glyphs
+            .into_iter()
+            .filter(|glyph| !glyph.glyph.trim().is_empty())
+            .collect();
+        if filtered.is_empty() {
+            filtered.push(OverlayGlyph::new(channel.clone(), 0.0));
+        }
+        let mut frame = Self {
+            channel,
+            glyph: String::new(),
+            intensity: 0.0,
+            timestamp,
+            glyphs: Vec::new(),
+        };
+        for glyph in filtered {
+            frame.push_glyph(glyph);
+        }
+        frame.refresh_primary();
+        frame
+    }
+
+    pub fn from_pairs<I, S>(channel: impl Into<String>, timestamp: SystemTime, pairs: I) -> Self
+    where
+        I: IntoIterator<Item = (S, f32)>,
+        S: Into<String>,
+    {
+        let glyphs = pairs
+            .into_iter()
+            .map(|(glyph, intensity)| OverlayGlyph::new(glyph, intensity))
+            .collect();
+        Self::new(channel, timestamp, glyphs)
+    }
+
+    pub fn from_glyphs_and_intensities<G, IG, II>(
+        channel: impl Into<String>,
+        timestamp: SystemTime,
+        glyphs: IG,
+        intensities: II,
+    ) -> Self
+    where
+        IG: IntoIterator<Item = G>,
+        G: Into<String>,
+        II: IntoIterator<Item = f32>,
+    {
+        let mut glyph_iter = glyphs.into_iter();
+        let mut intensity_iter = intensities.into_iter();
+        let pairs = std::iter::from_fn(move || {
+            let glyph = glyph_iter.next()?;
+            let intensity = intensity_iter.next().unwrap_or(0.0);
+            Some((glyph, intensity))
+        });
+        Self::from_pairs(channel, timestamp, pairs)
+    }
+
+    pub fn push_glyph(&mut self, glyph: OverlayGlyph) {
+        if glyph.glyph.trim().is_empty() {
+            return;
+        }
+        if self
+            .glyphs
+            .iter()
+            .any(|existing| existing.glyph == glyph.glyph)
+        {
+            return;
+        }
+        self.glyphs.push(glyph);
+        self.refresh_primary();
+    }
+
+    pub fn extend_tags<I>(&mut self, tags: I, base_intensity: f32)
+    where
+        I: IntoIterator,
+        I::Item: Into<String>,
+    {
+        for (idx, tag) in tags.into_iter().enumerate() {
+            let glyph = tag.into();
+            if glyph.trim().is_empty() {
+                continue;
+            }
+            let falloff = base_intensity * 0.75_f32.powi((idx + 1) as i32);
+            self.push_glyph(OverlayGlyph::new(glyph, falloff));
+        }
+    }
+
+    pub fn glyphs(&self) -> &[OverlayGlyph] {
+        &self.glyphs
     }
 }
 
@@ -146,6 +426,35 @@ pub struct StudioFrame {
     pub concept: Option<StudioConceptHint>,
     pub narrative: Option<NarrativeHint>,
     pub overlay: OverlayFrame,
+    pub z_space: StudioZSpace,
+    pub meta: Option<MetaNarrative>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MetaNarrative {
+    pub event_id: String,
+    pub channel: String,
+    pub tags: Vec<String>,
+    pub intensity: f32,
+    pub z_space: StudioZSpace,
+}
+
+impl MetaNarrative {
+    pub fn signature(&self) -> &[f64] {
+        self.z_space.signature()
+    }
+}
+
+impl From<&ResolvedNarrative> for MetaNarrative {
+    fn from(narrative: &ResolvedNarrative) -> Self {
+        Self {
+            event_id: narrative.event_id.clone(),
+            channel: narrative.channel.clone(),
+            tags: narrative.tags.clone(),
+            intensity: narrative.intensity,
+            z_space: StudioZSpace::from(&narrative.z_space),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -182,6 +491,10 @@ impl SignalCaptureSession {
 
     pub fn records(&self) -> impl Iterator<Item = &RecordedPulse> {
         self.history.iter()
+    }
+
+    fn history_limit(&self) -> usize {
+        self.config.history_limit
     }
 }
 
@@ -223,7 +536,7 @@ impl OverlayComposer {
         let intensity = narrative
             .map(|hint| hint.intensity())
             .unwrap_or_else(|| record.pulse.magnitude());
-        OverlayFrame::new(record, glyph, intensity)
+        OverlayFrame::from_record(record, glyph, intensity)
     }
 }
 
@@ -283,6 +596,39 @@ impl From<&ZSpaceProjection> for LogicZSpace {
 impl From<ZSpaceProjection> for LogicZSpace {
     fn from(projection: ZSpaceProjection) -> Self {
         LogicZSpace::from(&projection)
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StudioZSpace {
+    signature: Vec<f64>,
+}
+
+impl StudioZSpace {
+    pub fn signature(&self) -> &[f64] {
+        &self.signature
+    }
+}
+
+impl From<&LogicZSpace> for StudioZSpace {
+    fn from(space: &LogicZSpace) -> Self {
+        Self {
+            signature: space.signature.clone(),
+        }
+    }
+}
+
+impl From<LogicZSpace> for StudioZSpace {
+    fn from(space: LogicZSpace) -> Self {
+        StudioZSpace::from(&space)
+    }
+}
+
+impl From<StudioZSpace> for LogicZSpace {
+    fn from(space: StudioZSpace) -> Self {
+        LogicZSpace {
+            signature: space.signature,
+        }
     }
 }
 
@@ -349,6 +695,79 @@ impl ZSpaceSink {
                 (channel, signature)
             })
             .collect()
+    }
+
+    /// Injects a pre-computed slow-roll background projection straight into the sink.
+    pub fn ingest_primordial_projection(
+        &self,
+        channel: impl Into<String>,
+        projection: &PrimordialProjection,
+    ) -> Result<(), StudioSinkError> {
+        if projection.is_empty() {
+            return Ok(());
+        }
+
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| self.failure("state mutex poisoned"))?;
+        guard.log_start = projection.log_start as f32;
+        guard.log_step = projection.log_step as f32;
+        guard.s_values = projection
+            .s_values
+            .iter()
+            .map(|value| ComplexScalar::new(value.re as f32, value.im as f32))
+            .collect();
+
+        let root_channel = channel.into();
+        let mut projections = Vec::new();
+        for (suffix, values) in [
+            (
+                "",
+                projection
+                    .spectrum
+                    .iter()
+                    .map(|&v| (v as f32, 0.0))
+                    .collect::<Vec<_>>(),
+            ),
+            (
+                "::H",
+                projection
+                    .h_z
+                    .iter()
+                    .map(|value| (value.re as f32, value.im as f32))
+                    .collect::<Vec<_>>(),
+            ),
+            (
+                "::epsilon",
+                projection
+                    .epsilon_z
+                    .iter()
+                    .map(|value| (value.re as f32, value.im as f32))
+                    .collect::<Vec<_>>(),
+            ),
+        ] {
+            let channel_name = format!("{}{}", root_channel, suffix);
+            let mut evaluations = Vec::with_capacity(projection.len());
+            for idx in 0..projection.len() {
+                let s = &projection.s_values[idx];
+                let z = &projection.z_points[idx];
+                let (value_re, value_im) = values[idx];
+                evaluations.push(ZSpaceEvaluation {
+                    s: (s.re as f32, s.im as f32),
+                    z: (z.re as f32, z.im as f32),
+                    value: (value_re, value_im),
+                });
+            }
+            projections.push(ZSpaceProjection {
+                channel: channel_name,
+                lattice_len: projection.lattice_len,
+                evaluations,
+            });
+        }
+
+        guard.projections.extend(projections);
+        Ok(())
     }
 
     fn failure(&self, reason: impl Into<String>) -> StudioSinkError {
@@ -498,21 +917,39 @@ pub struct QuantumRealityStudio {
     tagger: SemanticTagger,
     overlay: OverlayComposer,
     outlet: StudioOutlet,
+    frames: VecDeque<StudioFrame>,
+    meta: Option<MetaNarrativeLayer>,
 }
 
 impl QuantumRealityStudio {
     pub fn new(config: SignalCaptureConfig, bridge: &MaxwellDesireBridge) -> Self {
+        let history_limit = config.history_limit;
         Self {
             capture: SignalCaptureSession::new(config),
             tagger: SemanticTagger::from_bridge(bridge),
             overlay: OverlayComposer::default(),
             outlet: StudioOutlet::default(),
+            frames: VecDeque::with_capacity(history_limit),
+            meta: None,
         }
     }
 
     pub fn with_sink<S: StudioSink + 'static>(mut self, sink: S) -> Self {
         self.outlet.register(sink);
         self
+    }
+
+    pub fn with_meta_layer(mut self, layer: MetaNarrativeLayer) -> Self {
+        self.meta = Some(layer);
+        self
+    }
+
+    pub fn set_meta_layer(&mut self, layer: MetaNarrativeLayer) {
+        self.meta = Some(layer);
+    }
+
+    pub fn clear_meta_layer(&mut self) {
+        self.meta = None;
     }
 
     pub fn register_sink<S: StudioSink + 'static>(&mut self, sink: S) {
@@ -527,6 +964,19 @@ impl QuantumRealityStudio {
         self.outlet.flush().map_err(StudioError::from)
     }
 
+    pub fn record_pulse(
+        &mut self,
+        channel: impl AsRef<str>,
+        pulse: MaxwellZPulse,
+        timestamp: Option<SystemTime>,
+    ) -> Result<RecordedPulse, StudioError> {
+        self.capture.ingest(
+            channel.as_ref(),
+            pulse,
+            timestamp.unwrap_or_else(SystemTime::now),
+        )
+    }
+
     pub fn ingest(
         &mut self,
         bridge: &MaxwellDesireBridge,
@@ -535,6 +985,10 @@ impl QuantumRealityStudio {
         timestamp: Option<SystemTime>,
     ) -> Result<StudioFrame, StudioError> {
         let channel = channel.as_ref();
+        let meta = self
+            .meta
+            .as_mut()
+            .and_then(|layer| layer.next_with_pulse(channel, &pulse));
         let emission = bridge.emit(channel, &pulse);
         let (concept, narrative) = match emission {
             Some((concept, narrative)) => {
@@ -542,21 +996,64 @@ impl QuantumRealityStudio {
             }
             None => (None, None),
         };
-        let record =
-            self.capture
-                .ingest(channel, pulse, timestamp.unwrap_or_else(SystemTime::now))?;
-        let overlay = self.overlay.compose(
+        let mut narrative = narrative;
+        let mut frame_z_space = StudioZSpace::from(LogicZSpace::from(pulse.clone()));
+        let mut meta_details = None;
+        if let Some(resolved) = meta {
+            let meta_narrative = MetaNarrative::from(&resolved);
+            frame_z_space = meta_narrative.z_space.clone();
+            narrative = Some(NarrativeHint::new(
+                meta_narrative.channel.clone(),
+                meta_narrative.tags.clone(),
+                meta_narrative.intensity,
+            ));
+            meta_details = Some(meta_narrative);
+        }
+        let record = self.record_pulse(channel, pulse, timestamp)?;
+        let mut narrative = narrative;
+        let mut frame_z_space = StudioZSpace::from(LogicZSpace::from(pulse.clone()));
+        if let Some(resolved) = meta {
+            narrative = Some(NarrativeHint::new(
+                resolved.channel,
+                resolved.tags,
+                resolved.intensity,
+            ));
+            frame_z_space = StudioZSpace::from(&resolved.z_space);
+        }
+        let record = self.record_pulse(channel, pulse, timestamp)?;
+        let concept_window = concept
+            .as_ref()
+            .and_then(|hint| ConceptWindow::from_hint(&record, hint));
+        let annotation = self.meta.observe(&record, concept_window.as_ref());
+        let mut overlay = self.overlay.compose(
             &record,
             narrative.as_ref(),
             self.tagger.fallback_for(channel),
         );
+        if let Some(narrative) = narrative.as_ref() {
+            overlay = self.stitch_narrative_tags(overlay, narrative.tags().iter().cloned());
+        } else if let Some(fallback) = self.tagger.fallback_for(channel) {
+            overlay = self.stitch_narrative_tags(overlay, fallback.iter().cloned());
+        }
+        let temporal_tags = TemporalLogicEngine::temporal_tags(&annotation);
+        overlay = self.stitch_narrative_tags(overlay, temporal_tags.into_iter());
+        let sheaf_tags = self
+            .topos
+            .update(&record, concept_window.as_ref(), &annotation);
+        overlay = self.stitch_narrative_tags(overlay, sheaf_tags.into_iter());
         let frame = StudioFrame {
             record,
             concept,
             narrative,
             overlay,
+            z_space: frame_z_space,
+            meta: meta_details,
         };
         self.outlet.broadcast(&frame)?;
+        self.frames.push_back(frame.clone());
+        while self.frames.len() > self.capture.history_limit() {
+            self.frames.pop_front();
+        }
         Ok(frame)
     }
 
@@ -564,33 +1061,219 @@ impl QuantumRealityStudio {
         self.capture.records()
     }
 
+    pub fn frames(&self) -> impl Iterator<Item = &StudioFrame> {
+        self.frames.iter()
+    }
+
+    pub fn causal_snapshot(&self) -> Vec<TemporalCausalAnnotation> {
+        self.meta.snapshot()
+    }
+
+    pub fn meaning_sheaf(&self, channel: &str) -> Option<LogicZSpace> {
+        self.topos.meaning_sheaf(channel)
+    }
+
+    pub fn emit_concept_window(&self, frame: &StudioFrame) -> Option<ConceptWindow> {
+        frame
+            .concept
+            .as_ref()
+            .and_then(|hint| ConceptWindow::from_hint(&frame.record, hint))
+    }
+
+    pub fn infer_concept_window(
+        &self,
+        bridge: &MaxwellDesireBridge,
+        record: &RecordedPulse,
+    ) -> Option<ConceptWindow> {
+        let pulse = MaxwellZPulse::from(&record.pulse);
+        bridge
+            .hint_for(&record.channel, &pulse)
+            .map(StudioConceptHint::from_concept)
+            .and_then(|hint| ConceptWindow::from_hint(record, &hint))
+    }
+
+    pub fn stitch_narrative_tags<I>(&self, mut overlay: OverlayFrame, tags: I) -> OverlayFrame
+    where
+        I: IntoIterator,
+        I::Item: Into<String>,
+    {
+        let base = overlay
+            .intensity
+            .max(overlay.glyphs().first().map(|g| g.intensity).unwrap_or(1.0))
+            .max(1e-6);
+        overlay.extend_tags(tags, base);
+        overlay
+    }
+
     pub fn export_storyboard(&self) -> serde_json::Value {
-        let frames: Vec<serde_json::Value> = self
-            .records()
-            .enumerate()
-            .map(|(ordinal, record)| {
-                let ts = record
-                    .timestamp
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs_f64();
-                serde_json::json!({
-                    "ordinal": ordinal,
-                    "channel": record.channel,
-                    "timestamp": ts,
-                    "z_score": record.pulse.z_score,
-                    "band_energy": record.pulse.band_energy,
-                    "z_bias": record.pulse.z_bias,
+        if !self.frames.is_empty() {
+            let frames: Vec<serde_json::Value> = self
+                .frames
+    fn storyboard_entries(&self) -> Vec<serde_json::Value> {
+        if !self.frames.is_empty() {
+            self.frames
+                .iter()
+                .enumerate()
+                .map(|(ordinal, frame)| {
+                    let ts = frame
+                        .record
+                        .timestamp
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs_f64();
+                    let mut entry = serde_json::Map::new();
+                    entry.insert("ordinal".into(), serde_json::json!(ordinal));
+                    entry.insert(
+                        "channel".into(),
+                        serde_json::json!(frame.record.channel.clone()),
+                    );
+                    entry.insert("timestamp".into(), serde_json::json!(ts));
+                    entry.insert(
+                        "z_score".into(),
+                        serde_json::json!(frame.record.pulse.z_score),
+                    );
+                    entry.insert(
+                        "band_energy".into(),
+                        serde_json::json!(frame.record.pulse.band_energy),
+                    );
+                    entry.insert(
+                        "z_bias".into(),
+                        serde_json::json!(frame.record.pulse.z_bias),
+                    );
+                    entry.insert(
+                        "overlay".into(),
+                        serde_json::json!({
+                            "glyph": frame.overlay.glyph.clone(),
+                            "intensity": frame.overlay.intensity,
+                            "glyphs": frame.overlay.glyphs.clone(),
+                        }),
+                    );
+                    entry.insert(
+                        "causal".into(),
+                        serde_json::json!({
+                            "event_id": frame.causal.event_id,
+                            "ordinal": frame.causal.ordinal,
+                            "timestamp": frame.causal.timestamp,
+                            "depth": frame.causal.depth,
+                            "parents": frame.causal.parent_channels.clone(),
+                            "magnitude": frame.causal.magnitude,
+                        }),
+                    );
+                    if let Some(narrative) = frame.narrative.as_ref() {
+                        entry.insert(
+                            "narrative".into(),
+                            serde_json::json!({
+                                "tags": narrative.tags(),
+                                "intensity": narrative.intensity(),
+                            }),
+                        );
+                    }
+                    if let Some(meta) = frame.meta.as_ref() {
+                        entry.insert(
+                            "meta".into(),
+                            serde_json::json!({
+                                "event_id": meta.event_id.clone(),
+                                "channel": meta.channel.clone(),
+                                "tags": meta.tags.clone(),
+                                "intensity": meta.intensity,
+                                "signature": meta.signature(),
+                            }),
+                        );
+                    }
+                    if let Some(window) = frame
+                        .concept
+                        .as_ref()
+                        .and_then(|hint| ConceptWindow::from_hint(&frame.record, hint))
+                    {
+                        entry.insert(
+                            "concept_window".into(),
+                            serde_json::json!({
+                                "weights": window.weights,
+                                "magnitude": window.magnitude,
+                            }),
+                        );
+                    }
+                    if let Some(sheaf) = self.meaning_sheaf(&frame.record.channel) {
+                        entry.insert(
+                            "meaning_sheaf".into(),
+                            serde_json::json!({
+                                "signature": sheaf.signature,
+                            }),
+                        );
+                    }
+                    serde_json::Value::Object(entry)
                 })
-            })
-            .collect();
+                .collect()
+        } else {
+            self.records()
+                .enumerate()
+                .map(|(ordinal, record)| {
+                    let ts = record
+                        .timestamp
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs_f64();
+                    serde_json::json!({
+                        "ordinal": ordinal,
+                        "channel": record.channel,
+                        "timestamp": ts,
+                        "z_score": record.pulse.z_score,
+                        "band_energy": record.pulse.band_energy,
+                        "z_bias": record.pulse.z_bias,
+                    })
+                })
+                .collect();
+            serde_json::json!({ "frames": frames })
+        }
+                .collect()
+        }
+    }
+
+    pub fn export_storyboard(&self) -> serde_json::Value {
+        let frames = self.storyboard_entries();
         serde_json::json!({ "frames": frames })
+    }
+
+    pub fn export_storyboard_grouped(&self) -> serde_json::Value {
+        let mut grouped: BTreeMap<String, Vec<serde_json::Value>> = BTreeMap::new();
+        for entry in self.storyboard_entries() {
+            let channel = entry
+                .get("channel")
+                .and_then(|value| value.as_str())
+                .unwrap_or("unknown")
+                .to_string();
+            grouped.entry(channel).or_default().push(entry);
+        }
+        let channels =
+            grouped
+                .into_iter()
+                .fold(serde_json::Map::new(), |mut acc, (channel, frames)| {
+                    acc.insert(channel, serde_json::Value::Array(frames));
+                    acc
+                });
+        serde_json::Value::Object({
+            let mut root = serde_json::Map::new();
+            root.insert("channels".into(), serde_json::Value::Object(channels));
+            root
+        })
+    }
+
+    pub fn export_storyboard_ndjson(&self) -> String {
+        self.storyboard_entries()
+            .into_iter()
+            .map(|value| serde_json::to_string(&value).unwrap_or_else(|_| "{}".into()))
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use num_complex::Complex64;
+    use serde_json::Value;
+    use st_core::theory::inflaton_zspace::{z_transform, LogLattice, PrimordialProjection};
+    use st_logic::meta_layer::{MeaningSection, MeaningSheaf, MetaNarrativeLayer, NarrativeBeat};
     use std::sync::{Arc, Mutex};
 
     fn sample_pulse() -> MaxwellZPulse {
@@ -632,6 +1315,115 @@ mod tests {
         assert!(frame.narrative.is_some());
         assert_eq!(frame.overlay.glyph, "braid");
         assert!(frame.overlay.intensity > 0.0);
+        assert!(frame.overlay.glyphs().len() >= 1);
+        assert_eq!(frame.z_space.signature().len(), 8);
+    }
+
+    #[test]
+    fn meta_layer_overrides_bridge_narrative() {
+        let bridge = MaxwellDesireBridge::new()
+            .with_channel("alpha", vec![(0, 1.0)])
+            .unwrap();
+        let mut layer = MetaNarrativeLayer::new();
+        layer
+            .engine_mut()
+            .insert_event(
+                "beat-1",
+                NarrativeBeat::new(Some("alpha".into()), "z-open", vec!["causal".into()])
+                    .with_intensity_scale(0.5)
+                    .with_floor(0.1)
+                    .with_sheaf_threshold(0.05),
+            )
+            .unwrap();
+        layer.bridge_mut().attach(
+            "beat-1",
+            MeaningSheaf::new().with_section(MeaningSection::for_open(
+                "z-open",
+                vec!["sheaf".into()],
+                0.2,
+            )),
+        );
+        let mut studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge)
+            .with_meta_layer(layer);
+        let frame = studio
+            .ingest(&bridge, "alpha", sample_pulse(), None)
+            .expect("ingest with meta");
+        let narrative = frame.narrative.expect("meta narrative");
+        assert!(narrative.tags().iter().any(|tag| tag == "causal"));
+        assert!(narrative.tags().iter().any(|tag| tag == "sheaf"));
+        let meta = frame.meta.as_ref().expect("meta telemetry");
+        assert_eq!(meta.event_id, "beat-1");
+        assert_eq!(meta.channel, "alpha");
+        assert!(meta.tags.iter().any(|tag| tag == "causal"));
+        assert!(meta.tags.iter().any(|tag| tag == "sheaf"));
+        assert!(!meta.signature().is_empty());
+
+        let export = studio.export_storyboard();
+        let meta_json = export
+            .get("frames")
+            .and_then(Value::as_array)
+            .and_then(|frames| frames.get(0))
+            .and_then(Value::as_object)
+            .and_then(|frame| frame.get("meta"))
+            .and_then(Value::as_object)
+            .expect("meta entry in storyboard");
+        assert_eq!(
+            meta_json.get("event_id").and_then(Value::as_str),
+            Some("beat-1")
+        );
+        assert!(narrative.intensity() > 0.0);
+        assert!((frame.z_space.signature()[3] - 4.2).abs() < 1e-6);
+        assert!(narrative.intensity() > 0.0);
+        assert!((frame.z_space.signature()[3] - 4.2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn meta_layer_overrides_bridge_narrative() {
+        let bridge = MaxwellDesireBridge::new()
+            .with_channel("alpha", vec![(0, 1.0)])
+            .unwrap();
+        let mut layer = MetaNarrativeLayer::new();
+        layer
+            .engine_mut()
+            .insert_event(
+                "beat-1",
+                NarrativeBeat::new(Some("alpha".into()), "z-open", vec!["causal".into()])
+                    .with_intensity_scale(0.5)
+                    .with_floor(0.1)
+                    .with_sheaf_threshold(0.05),
+            )
+            .unwrap();
+        layer.bridge_mut().attach(
+            "beat-1",
+            MeaningSheaf::new().with_section(MeaningSection::for_open(
+                "z-open",
+                vec!["sheaf".into()],
+                0.2,
+            )),
+        );
+        let mut studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge)
+            .with_meta_layer(layer);
+        let frame = studio
+            .ingest(&bridge, "alpha", sample_pulse(), None)
+            .expect("ingest with meta");
+        let narrative = frame.narrative.expect("meta narrative");
+        assert!(narrative.tags().iter().any(|tag| tag == "causal"));
+        assert!(narrative.tags().iter().any(|tag| tag == "sheaf"));
+        assert!(narrative.intensity() > 0.0);
+    }
+
+    #[test]
+    fn overlay_from_pairs_rejects_duplicates_and_empty_glyphs() {
+        let timestamp = SystemTime::now();
+        let overlay = OverlayFrame::from_pairs(
+            "alpha",
+            timestamp,
+            vec![("", 1.0), ("braid", 0.8), ("braid", 0.2), ("tunnel", 0.6)],
+        );
+        assert_eq!(overlay.channel, "alpha");
+        assert_eq!(overlay.glyph, "braid");
+        assert_eq!(overlay.glyphs().len(), 2);
+        assert!(overlay.glyphs().iter().any(|glyph| glyph.glyph == "tunnel"));
     }
 
     struct SharedSink {
@@ -706,6 +1498,103 @@ mod tests {
         let stored = frames.lock().expect("mutex poisoned");
         assert_eq!(stored.len(), 1);
         assert_eq!(stored[0].overlay.glyph, "braid");
+        assert!(stored[0].overlay.glyphs().len() >= 1);
+    }
+
+    #[test]
+    fn storyboard_export_includes_overlay_and_narrative_details() {
+        let bridge = MaxwellDesireBridge::new()
+            .with_channel_and_narrative(
+                "alpha",
+                vec![(3, 0.4), (5, 0.6)],
+                vec!["glimmer".into(), "braid".into()],
+            )
+            .unwrap();
+        let mut studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge);
+        let frame = studio
+            .ingest(&bridge, "alpha", sample_pulse(), None)
+            .expect("ingest");
+        assert_eq!(studio.frames().count(), 1);
+
+        let export = studio.export_storyboard();
+        let frames = export
+            .get("frames")
+            .and_then(Value::as_array)
+            .expect("frames array");
+        assert_eq!(frames.len(), 1);
+        let entry = &frames[0];
+        assert_eq!(entry.get("channel").and_then(Value::as_str), Some("alpha"));
+        assert_eq!(
+            entry.get("z_score").and_then(Value::as_f64).unwrap() as f32,
+            frame.record.pulse.z_score as f32
+        );
+        let overlay = entry
+            .get("overlay")
+            .and_then(Value::as_object)
+            .expect("overlay object");
+        assert_eq!(overlay.get("glyph").and_then(Value::as_str), Some("braid"));
+        let glyphs = overlay
+            .get("glyphs")
+            .and_then(Value::as_array)
+            .expect("glyph list");
+        assert!(glyphs.len() >= 1);
+        let causal = entry
+            .get("causal")
+            .and_then(Value::as_object)
+            .expect("causal object");
+        assert_eq!(
+            causal.get("ordinal").and_then(Value::as_u64).unwrap() as usize,
+            frame.causal.ordinal
+        );
+        let narrative = entry
+            .get("narrative")
+            .and_then(Value::as_object)
+            .expect("narrative object");
+        let tags = narrative
+            .get("tags")
+            .and_then(Value::as_array)
+            .expect("tags array");
+        assert!(tags.iter().any(|tag| tag.as_str() == Some("glimmer")));
+        let concept_window = entry
+            .get("concept_window")
+            .and_then(Value::as_object)
+            .expect("concept window object");
+        let weights = concept_window
+            .get("weights")
+            .and_then(Value::as_array)
+            .expect("weights array");
+        assert!(!weights.is_empty());
+        let sheaf = entry
+            .get("meaning_sheaf")
+            .and_then(Value::as_object)
+            .expect("meaning sheaf object");
+        assert!(sheaf
+            .get("signature")
+            .and_then(Value::as_array)
+            .map(|values| !values.is_empty())
+            .unwrap_or(false));
+    }
+
+    #[test]
+    fn causal_snapshot_orders_events() {
+        let bridge = MaxwellDesireBridge::new()
+            .with_channel_and_narrative("alpha", vec![(0, 1.0)], vec!["braid".into()])
+            .unwrap();
+        let mut studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge);
+        studio
+            .ingest(&bridge, "alpha", sample_pulse(), None)
+            .expect("first ingest");
+        let mut second = sample_pulse();
+        second.z_score = 5.0;
+        studio
+            .ingest(&bridge, "alpha", second, None)
+            .expect("second ingest");
+
+        let snapshot = studio.causal_snapshot();
+        assert_eq!(snapshot.len(), 2);
+        assert!(snapshot[1].ordinal > snapshot[0].ordinal);
+        assert!(snapshot[1].depth >= snapshot[0].depth);
+        assert!(!snapshot[1].parents.is_empty());
     }
 
     #[test]
@@ -800,5 +1689,193 @@ mod tests {
         assert_eq!(channel, "alpha");
         assert_eq!(signature.signature.len(), 24);
         assert!(signature.signature.iter().any(|value| value.abs() > 0.0));
+    }
+
+    #[test]
+    fn record_and_infer_concept_window() {
+        let bridge = MaxwellDesireBridge::new()
+            .with_channel_and_narrative(
+                "alpha",
+                vec![(0, 0.6), (1, 0.4)],
+                vec!["glimmer".into(), "braid".into()],
+            )
+            .unwrap();
+        let mut studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge);
+        let record = studio
+            .record_pulse("alpha", sample_pulse(), None)
+            .expect("record");
+        let window = studio
+            .infer_concept_window(&bridge, &record)
+            .expect("window");
+        assert_eq!(window.channel, "alpha");
+        assert!(window.magnitude > 0.0);
+        assert!(!window.weights.is_empty());
+    }
+
+    #[test]
+    fn emit_window_from_frame() {
+        let bridge = MaxwellDesireBridge::new()
+            .with_channel_and_narrative(
+                "alpha",
+                vec![(0, 0.8), (1, 0.2)],
+                vec!["glimmer".into(), "braid".into()],
+            )
+            .unwrap();
+        let mut studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge);
+        let frame = studio
+            .ingest(&bridge, "alpha", sample_pulse(), None)
+            .expect("ingest");
+        let window = studio.emit_concept_window(&frame).expect("window");
+        assert_eq!(window.channel, "alpha");
+        assert!(window.magnitude > 0.0);
+        assert!(window.weights.len() >= 1);
+    }
+
+    #[test]
+    fn stitching_appends_tags_with_falloff() {
+        let bridge = MaxwellDesireBridge::new()
+            .with_channel_and_narrative("alpha", vec![(0, 1.0)], vec!["braid".into()])
+            .unwrap();
+        let studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge);
+        let overlay = OverlayFrame::new(
+            "alpha",
+            SystemTime::now(),
+            vec![OverlayGlyph::new("braid", 1.0)],
+        );
+        let stitched = studio.stitch_narrative_tags(
+            overlay,
+            vec![
+                "braid".to_string(),
+                "tunnel".to_string(),
+                "spire".to_string(),
+            ],
+        );
+        assert_eq!(stitched.glyph, "braid");
+        assert!(stitched.glyphs().len() >= 2);
+        let intensities: Vec<f32> = stitched.glyphs().iter().map(|g| g.intensity).collect();
+        assert!(intensities[0] >= intensities[1]);
+    }
+
+    #[test]
+    fn zspace_sink_ingests_primordial_projection_bundle() {
+        let log_start = 0.0;
+        let log_step = 0.25;
+        let hubble_samples = vec![12.0, 11.5, 11.0, 10.5];
+        let epsilon_samples = vec![0.01, 0.011, 0.012, 0.013];
+        let hubble_lattice = LogLattice::from_samples(log_start, log_step, hubble_samples.clone());
+        let epsilon_lattice =
+            LogLattice::from_samples(log_start, log_step, epsilon_samples.clone());
+        let s_values = vec![
+            Complex64::new(1.0, 0.0),
+            Complex64::new(1.0, 0.5),
+            Complex64::new(1.0, -0.5),
+        ];
+        let z_points: Vec<Complex64> = s_values
+            .iter()
+            .map(|s| (s * Complex64::new(log_step, 0.0)).exp())
+            .collect();
+        let h_z: Vec<Complex64> = z_points
+            .iter()
+            .map(|&z| z_transform(&hubble_lattice.weights, &hubble_lattice.samples, z))
+            .collect();
+        let epsilon_z: Vec<Complex64> = z_points
+            .iter()
+            .map(|&z| z_transform(&epsilon_lattice.weights, &epsilon_lattice.samples, z))
+            .collect();
+        let projection = PrimordialProjection::new(
+            log_start,
+            log_step,
+            hubble_lattice.len(),
+            s_values.clone(),
+            z_points.clone(),
+            h_z.clone(),
+            epsilon_z.clone(),
+            2.435e18,
+        );
+
+        let sink = ZSpaceSink::new(
+            "inflation",
+            log_start as f32,
+            log_step as f32,
+            s_values
+                .iter()
+                .map(|s| ComplexScalar::new(s.re as f32, s.im as f32))
+                .collect(),
+        );
+        sink.ingest_primordial_projection("inflation", &projection)
+            .expect("ingest projection");
+        let projections = sink.take_projections();
+        assert_eq!(projections.len(), 3);
+        let mut channels: Vec<String> = projections.iter().map(|p| p.channel.clone()).collect();
+        channels.sort();
+        assert_eq!(
+            channels,
+            vec!["inflation", "inflation::H", "inflation::epsilon"]
+        );
+        let spectrum_projection = projections
+            .into_iter()
+            .find(|p| p.channel == "inflation")
+            .expect("spectrum channel");
+        assert_eq!(spectrum_projection.evaluations.len(), projection.len());
+        for eval in spectrum_projection.evaluations {
+            assert!(eval.value.0.is_finite());
+            assert_eq!(eval.value.1, 0.0);
+        }
+    }
+
+    #[test]
+    fn storyboard_grouped_collects_channels() {
+        let mut bridge = MaxwellDesireBridge::new();
+        bridge
+            .register_channel_with_narrative(
+                "alpha",
+                vec![(0, 1.0)],
+                vec!["braid".into(), "glimmer".into()],
+            )
+            .unwrap();
+        bridge
+            .register_channel_with_narrative("beta", vec![(1, 1.0)], vec!["tunnel".into()])
+            .unwrap();
+        let mut studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge);
+        studio
+            .ingest(&bridge, "alpha", sample_pulse(), None)
+            .expect("ingest alpha");
+        let mut beta = sample_pulse();
+        beta.z_score = 2.1;
+        studio
+            .ingest(&bridge, "beta", beta, None)
+            .expect("ingest beta");
+
+        let export = studio.export_storyboard_grouped();
+        let channels = export
+            .get("channels")
+            .and_then(Value::as_object)
+            .expect("channels map");
+        assert_eq!(channels.len(), 2);
+        for (channel, frames) in channels {
+            let frames = frames
+                .as_array()
+                .unwrap_or_else(|| panic!("frames array missing for channel `{}`", channel));
+            assert!(!frames.is_empty());
+            let first = frames[0]
+                .get("channel")
+                .and_then(Value::as_str)
+                .expect("channel string");
+            assert_eq!(first, channel);
+        }
+    }
+
+    #[test]
+    fn ndjson_export_emits_valid_lines() {
+        let bridge = MaxwellDesireBridge::new();
+        let mut studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge);
+        studio
+            .record_pulse("alpha", sample_pulse(), None)
+            .expect("record alpha");
+        let ndjson = studio.export_storyboard_ndjson();
+        let lines: Vec<&str> = ndjson.lines().collect();
+        assert_eq!(lines.len(), 1);
+        let parsed: Value = serde_json::from_str(lines[0]).expect("valid json line");
+        assert_eq!(parsed.get("channel").and_then(Value::as_str), Some("alpha"));
     }
 }
