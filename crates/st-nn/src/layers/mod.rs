@@ -23,7 +23,7 @@ pub mod zspace_mixer;
 pub mod zspace_projector;
 
 pub use activation::Relu;
-pub use continuous_wavelet::ContinuousWaveletTransformLayer;
+pub use continuous_wavelet::ContinuousWaveletTransform;
 pub use dropout::Dropout;
 pub use dynamic_field::{HamiltonJacobiFlow, KleinGordonPropagation, StochasticSchrodingerLayer};
 pub use gelu::Gelu;
