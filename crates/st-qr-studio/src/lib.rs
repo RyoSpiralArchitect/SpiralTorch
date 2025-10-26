@@ -13,7 +13,7 @@ use st_frac::zspace::{
     evaluate_weighted_series, mellin_log_lattice_prefactor, prepare_weighted_series,
     trapezoidal_weights,
 };
-use st_logic::meta_layer::MetaNarrativeLayer;
+use st_logic::meta_layer::{MetaNarrativeLayer, ResolvedNarrative};
 use st_logic::quantum_reality::ZSpace as LogicZSpace;
 use st_nn::{ConceptHint, MaxwellDesireBridge, NarrativeHint};
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -427,6 +427,34 @@ pub struct StudioFrame {
     pub narrative: Option<NarrativeHint>,
     pub overlay: OverlayFrame,
     pub z_space: StudioZSpace,
+    pub meta: Option<MetaNarrative>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MetaNarrative {
+    pub event_id: String,
+    pub channel: String,
+    pub tags: Vec<String>,
+    pub intensity: f32,
+    pub z_space: StudioZSpace,
+}
+
+impl MetaNarrative {
+    pub fn signature(&self) -> &[f64] {
+        self.z_space.signature()
+    }
+}
+
+impl From<&ResolvedNarrative> for MetaNarrative {
+    fn from(narrative: &ResolvedNarrative) -> Self {
+        Self {
+            event_id: narrative.event_id.clone(),
+            channel: narrative.channel.clone(),
+            tags: narrative.tags.clone(),
+            intensity: narrative.intensity,
+            z_space: StudioZSpace::from(&narrative.z_space),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -968,6 +996,19 @@ impl QuantumRealityStudio {
             }
             None => (None, None),
         };
+        let mut narrative = narrative;
+        let mut frame_z_space = StudioZSpace::from(LogicZSpace::from(pulse.clone()));
+        let mut meta_details = None;
+        if let Some(resolved) = meta {
+            let meta_narrative = MetaNarrative::from(&resolved);
+            frame_z_space = meta_narrative.z_space.clone();
+            narrative = Some(NarrativeHint::new(
+                meta_narrative.channel.clone(),
+                meta_narrative.tags.clone(),
+                meta_narrative.intensity,
+            ));
+            meta_details = Some(meta_narrative);
+        }
         let record = self.record_pulse(channel, pulse, timestamp)?;
         let mut narrative = narrative;
         let mut frame_z_space = StudioZSpace::from(LogicZSpace::from(pulse.clone()));
@@ -1006,6 +1047,7 @@ impl QuantumRealityStudio {
             narrative,
             overlay,
             z_space: frame_z_space,
+            meta: meta_details,
         };
         self.outlet.broadcast(&frame)?;
         self.frames.push_back(frame.clone());
@@ -1123,6 +1165,18 @@ impl QuantumRealityStudio {
                             serde_json::json!({
                                 "tags": narrative.tags(),
                                 "intensity": narrative.intensity(),
+                            }),
+                        );
+                    }
+                    if let Some(meta) = frame.meta.as_ref() {
+                        entry.insert(
+                            "meta".into(),
+                            serde_json::json!({
+                                "event_id": meta.event_id.clone(),
+                                "channel": meta.channel.clone(),
+                                "tags": meta.tags.clone(),
+                                "intensity": meta.intensity,
+                                "signature": meta.signature(),
                             }),
                         );
                     }
@@ -1297,6 +1351,28 @@ mod tests {
         let narrative = frame.narrative.expect("meta narrative");
         assert!(narrative.tags().iter().any(|tag| tag == "causal"));
         assert!(narrative.tags().iter().any(|tag| tag == "sheaf"));
+        let meta = frame.meta.as_ref().expect("meta telemetry");
+        assert_eq!(meta.event_id, "beat-1");
+        assert_eq!(meta.channel, "alpha");
+        assert!(meta.tags.iter().any(|tag| tag == "causal"));
+        assert!(meta.tags.iter().any(|tag| tag == "sheaf"));
+        assert!(!meta.signature().is_empty());
+
+        let export = studio.export_storyboard();
+        let meta_json = export
+            .get("frames")
+            .and_then(Value::as_array)
+            .and_then(|frames| frames.get(0))
+            .and_then(Value::as_object)
+            .and_then(|frame| frame.get("meta"))
+            .and_then(Value::as_object)
+            .expect("meta entry in storyboard");
+        assert_eq!(
+            meta_json.get("event_id").and_then(Value::as_str),
+            Some("beat-1")
+        );
+        assert!(narrative.intensity() > 0.0);
+        assert!((frame.z_space.signature()[3] - 4.2).abs() < 1e-6);
         assert!(narrative.intensity() > 0.0);
         assert!((frame.z_space.signature()[3] - 4.2).abs() < 1e-6);
     }
