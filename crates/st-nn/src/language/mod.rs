@@ -6,8 +6,10 @@
 pub use pipeline::{LanguagePipeline, LanguagePipelineBuilder, PipelineError, PipelineResult};
 mod automation;
 mod desire;
+mod diffusion;
 mod geometry;
 mod gw;
+mod info_geometry;
 mod logbook;
 mod maxwell;
 mod pipeline;
@@ -19,8 +21,12 @@ pub use desire::{
     constant, warmup, DesireAvoidanceReport, DesireLagrangian, DesirePhase, DesireSchedule,
     DesireSolution, DesireWeights,
 };
+pub use diffusion::{ConceptDiffusion, DiffusionStep};
 pub use geometry::{ConceptHint, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry};
 pub use gw::{DistanceMatrix, EntropicGwSolver};
+pub use info_geometry::{
+    compute_curvature_table, InformationGeometryMetric, NarrativeBridgeCurvature,
+};
 pub use logbook::{DesireLogRecord, DesireLogReplay, DesireLogbook};
 pub use maxwell::{MaxwellDesireBridge, NarrativeHint, NarrativeSummary};
 pub use pipeline::{

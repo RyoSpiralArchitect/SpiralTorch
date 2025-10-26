@@ -9,6 +9,7 @@ pub use st_softlogic::{apply_softmode, beam_select, Ctx, SoftMode, SoftRule, Sol
 pub use st_softlogic::learn;
 
 pub mod contextual_observation;
+pub mod meta_layer;
 #[cfg(feature = "nerf")]
 pub mod nerf_trainer;
 pub mod quantum_reality;

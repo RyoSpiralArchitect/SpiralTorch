@@ -36,6 +36,12 @@ pub mod scale_persistence_impl;
 #[doc(inline)]
 pub use scale_persistence_impl as scale_persistence;
 
+#[path = "renormalization_flow.rs"]
+#[doc(hidden)]
+pub mod renormalization_flow_impl;
+#[doc(inline)]
+pub use renormalization_flow_impl as renormalization_flow;
+
 #[path = "macro.rs"]
 #[doc(hidden)]
 pub mod macro_impl;
@@ -50,7 +56,6 @@ pub mod microlocal_experimental;
 pub mod maxwell_impl;
 #[doc(inline)]
 pub use maxwell_impl as maxwell;
-
 
 #[path = "zpulse.rs"]
 #[doc(hidden)]
