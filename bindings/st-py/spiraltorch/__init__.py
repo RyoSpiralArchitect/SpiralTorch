@@ -145,12 +145,16 @@ def build_manifest() -> dict[str, _Any]:
     return dict(BUILD_MANIFEST)
 
 from .zspace_inference import (
+    ZMetrics,
     ZSpaceDecoded,
     ZSpaceInference,
     ZSpacePosterior,
     ZSpacePartialBundle,
     ZSpaceTelemetryFrame,
     ZSpaceInferencePipeline,
+    inference_to_mapping,
+    inference_to_zmetrics,
+    prepare_trainer_step_payload,
     canvas_partial_from_snapshot,
     canvas_coherence_partial,
     elliptic_partial_from_telemetry,
@@ -1475,80 +1479,6 @@ def label_tensor(tensor_obj: _Any, axes: _Sequence["Axis | str"]) -> LabeledTens
     """Attach axis annotations to an existing tensor-like object."""
 
     return LabeledTensor(tensor_obj, axes)
-
-@_dataclass
-class ZMetrics:
-    """Typed metrics container fed into :class:`ZSpaceTrainer`."""
-
-    speed: float
-    memory: float
-    stability: float
-    gradient: _Optional[_Sequence[float]] = None
-    drs: float = 0.0
-
-
-def inference_to_zmetrics(
-    inference: "ZSpaceInference", *, prefer_applied: bool = True
-) -> ZMetrics:
-    """Convert a :class:`ZSpaceInference` result into :class:`ZMetrics`.
-
-    Args:
-        inference: Inference result produced by :class:`ZSpaceInferencePipeline`
-            or :func:`infer_with_partials`.
-        prefer_applied: When ``True`` (default), prefer values from
-            :attr:`ZSpaceInference.applied` when a metric was explicitly
-            rewritten by a partial observation. Falling back to
-            :attr:`ZSpaceInference.metrics` preserves the decoded baseline.
-
-    Returns:
-        A :class:`ZMetrics` instance populated with canonical speed, memory,
-        stability, DRS and gradient signals extracted from the inference.
-    """
-
-    if not isinstance(inference, ZSpaceInference):
-        raise TypeError("inference must be a ZSpaceInference instance")
-
-    merged: dict[str, float] = {}
-
-    def _merge(source: _Mapping[str, _Any]) -> None:
-        for key, value in source.items():
-            try:
-                merged[key.lower()] = float(value)
-            except (TypeError, ValueError):
-                continue
-
-    metrics_mapping = dict(inference.metrics)
-    _merge(metrics_mapping)
-    if prefer_applied and inference.applied:
-        _merge(inference.applied)
-
-    def _resolve(default: float, *aliases: str) -> float:
-        for name in aliases:
-            value = merged.get(name.lower())
-            if value is not None:
-                return value
-        return float(default)
-
-    gradient_seq: list[float] = list(inference.gradient)
-    if not gradient_seq:
-        gradient_payload = metrics_mapping.get("gradient")
-        if isinstance(gradient_payload, _Iterable):
-            try:
-                gradient_seq = [float(entry) for entry in gradient_payload]
-            except (TypeError, ValueError):
-                gradient_seq = []
-
-    drs_value = _resolve(0.0, "drs", "drift")
-    gradient_resolved: _Optional[_Sequence[float]] = gradient_seq if gradient_seq else None
-
-    return ZMetrics(
-        speed=_resolve(0.0, "speed", "velocity"),
-        memory=_resolve(0.0, "memory", "mem"),
-        stability=_resolve(0.0, "stability", "stab"),
-        gradient=gradient_resolved,
-        drs=drs_value,
-    )
-
 
 def _clone_volume(volume: _Sequence[_Sequence[_Sequence[float]]]) -> _List[_List[_List[float]]]:
     return [[list(row) for row in slice_] for slice_ in volume]

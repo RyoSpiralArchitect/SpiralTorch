@@ -5,13 +5,27 @@ from __future__ import annotations
 import math
 import sys
 from dataclasses import dataclass
-from collections.abc import Iterable
-from typing import Any, Dict, Mapping, Sequence
+from collections.abc import Iterable, Mapping as MappingABC
+import inspect
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Mapping,
+    MutableMapping,
+    Sequence,
+    get_origin,
+    Union,
+)
 from types import MappingProxyType
 
-from ._zspace_aliases import ZSPACE_METRIC_ALIASES
+from ._zspace_aliases import (
+    ZSPACE_METRIC_ALIASES,
+    PRIMARY_ZSPACE_METRIC_ALIASES,
+)
 
 __all__ = [
+    "ZMetrics",
     "ZSpaceDecoded",
     "ZSpaceInference",
     "ZSpacePosterior",
@@ -19,6 +33,9 @@ __all__ = [
     "ZSpaceTelemetryFrame",
     "ZSpaceInferenceRuntime",
     "ZSpaceInferencePipeline",
+    "inference_to_mapping",
+    "inference_to_zmetrics",
+    "prepare_trainer_step_payload",
     "decode_zspace_embedding",
     "infer_from_partial",
     "infer_with_partials",
@@ -38,6 +55,28 @@ __all__ = [
     "infer_weights_from_dlpack",
     "infer_weights_from_compat",
 ]
+
+
+@dataclass(slots=True)
+class ZMetrics:
+    """Typed metrics container fed into :class:`ZSpaceTrainer`."""
+
+    speed: float
+    memory: float
+    stability: float
+    gradient: Sequence[float] | None = None
+    drs: float = 0.0
+    telemetry: Mapping[str, float] | None = None
+
+
+_PRIMARY_ALIAS_GROUPS: Mapping[str, tuple[str, ...]] = MappingProxyType(
+    {
+        canonical: tuple(
+            alias for alias, target in PRIMARY_ZSPACE_METRIC_ALIASES.items() if target == canonical
+        )
+        for canonical in {"speed", "memory", "stability", "drs", "gradient"}
+    }
+)
 
 
 _METRIC_ALIASES: Mapping[str, str] = MappingProxyType(
@@ -133,6 +172,302 @@ _METRIC_ALIASES: Mapping[str, str] = MappingProxyType(
     }
 )
 _METRIC_ALIASES: Mapping[str, str] = ZSPACE_METRIC_ALIASES
+
+
+def _normalise_metric_name(name: str) -> str:
+    alias = _METRIC_ALIASES.get(name.lower())
+    return alias if alias is not None else name.lower()
+
+
+def _coerce_float(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_gradient(value: Any) -> list[float] | None:
+    if value is None:
+        return None
+    if isinstance(value, ZMetrics):
+        return _coerce_gradient(value.gradient)
+    if isinstance(value, MappingABC):
+        value = value.values()
+    if isinstance(value, (str, bytes, bytearray, memoryview)):
+        return None
+    try:
+        gradient = [float(entry) for entry in value]  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return gradient
+
+
+def _flatten_telemetry_payload(payload: Any) -> dict[str, float]:
+    if payload is None:
+        return {}
+    if isinstance(payload, ZSpaceTelemetryFrame):
+        return dict(payload.payload)
+    if isinstance(payload, MappingABC):
+        return _flatten_telemetry(payload)
+    if hasattr(payload, "payload"):
+        inner = getattr(payload, "payload")
+        if isinstance(inner, MappingABC):
+            return dict(inner)
+    if hasattr(payload, "as_dict") and callable(payload.as_dict):
+        try:
+            mapping = payload.as_dict()
+        except Exception:  # pragma: no cover - defensive fallback
+            return {}
+        inner = mapping.get("payload") if isinstance(mapping, MappingABC) else None
+        if isinstance(inner, MappingABC):
+            return _flatten_telemetry(inner)
+    return {}
+
+
+def _normalise_metrics_mapping(
+    source: Mapping[str, Any] | None,
+) -> tuple[dict[str, float], list[float] | None]:
+    if source is None:
+        return {}, None
+    metrics: dict[str, float] = {}
+    gradient: list[float] | None = None
+    for key, raw_value in source.items():
+        canonical = _normalise_metric_name(str(key))
+        if canonical == "gradient":
+            candidate = _coerce_gradient(raw_value)
+            if candidate is not None:
+                gradient = candidate
+            continue
+        converted = _coerce_float(raw_value)
+        if converted is not None:
+            metrics[canonical] = converted
+    return metrics, gradient
+
+
+def _collect_inference_payload(
+    inference: Any,
+    *,
+    prefer_applied: bool,
+) -> tuple[dict[str, float], list[float] | None, dict[str, float] | None]:
+    if isinstance(inference, ZMetrics):
+        metrics = {
+            "speed": float(inference.speed),
+            "memory": float(inference.memory),
+            "stability": float(inference.stability),
+            "drs": float(inference.drs),
+        }
+        gradient = _coerce_gradient(inference.gradient)
+        telemetry = dict(inference.telemetry) if inference.telemetry else None
+        return metrics, gradient, telemetry
+
+    if isinstance(inference, MappingABC):
+        metrics, gradient = _normalise_metrics_mapping(inference)
+        if gradient is not None:
+            metrics.pop("gradient", None)
+        return metrics, gradient, None
+
+    base_metrics, gradient = _normalise_metrics_mapping(getattr(inference, "metrics", None))
+    telemetry = None
+
+    if prefer_applied:
+        applied_metrics, applied_gradient = _normalise_metrics_mapping(
+            getattr(inference, "applied", None)
+        )
+        if applied_metrics:
+            base_metrics.update(applied_metrics)
+        if applied_gradient is not None:
+            gradient = applied_gradient
+
+    attr_gradient = _coerce_gradient(getattr(inference, "gradient", None))
+    if attr_gradient is not None:
+        gradient = attr_gradient
+
+    telemetry = _flatten_telemetry_payload(getattr(inference, "telemetry", None)) or None
+
+    if gradient is not None and "gradient" in base_metrics:
+        base_metrics.pop("gradient", None)
+
+    return base_metrics, gradient, telemetry
+
+
+def _resolve_primary(metrics: Mapping[str, float], canonical: str) -> float:
+    value = metrics.get(canonical)
+    if value is not None:
+        return float(value)
+    for alias in _PRIMARY_ALIAS_GROUPS.get(canonical, ()):  # type: ignore[arg-type]
+        alias_value = metrics.get(_normalise_metric_name(alias))
+        if alias_value is not None:
+            return float(alias_value)
+    return 0.0
+
+
+def inference_to_mapping(
+    inference: Any,
+    *,
+    prefer_applied: bool = True,
+    canonical: bool = True,
+    include_gradient: bool = True,
+) -> dict[str, Any]:
+    """Convert inference-like payloads into canonical metric dictionaries."""
+
+    metrics, gradient, _ = _collect_inference_payload(
+        inference, prefer_applied=prefer_applied
+    )
+
+    if canonical:
+        resolved: dict[str, Any] = {
+            _normalise_metric_name(key): float(value) for key, value in metrics.items()
+        }
+    else:
+        resolved = dict(metrics)
+
+    if include_gradient and gradient is not None:
+        resolved["gradient"] = list(gradient)
+
+    return resolved
+
+
+def inference_to_zmetrics(
+    inference: Any,
+    *,
+    prefer_applied: bool = True,
+    include_telemetry: bool = False,
+) -> ZMetrics:
+    """Convert inference-like payloads into :class:`ZMetrics`."""
+
+    metrics, gradient, telemetry = _collect_inference_payload(
+        inference, prefer_applied=prefer_applied
+    )
+
+    telemetry_payload = telemetry if include_telemetry else None
+
+    gradient_seq = gradient if gradient else None
+
+    return ZMetrics(
+        speed=_resolve_primary(metrics, "speed"),
+        memory=_resolve_primary(metrics, "memory"),
+        stability=_resolve_primary(metrics, "stability"),
+        gradient=gradient_seq,
+        drs=_resolve_primary(metrics, "drs"),
+        telemetry=telemetry_payload,
+    )
+
+
+_PayloadMode = Union[
+    None,
+    str,
+    Callable[["ZSpaceInference"], Any],
+]
+
+
+def _annotation_mode(annotation: Any) -> str | None:
+    if annotation is inspect._empty:
+        return None
+    if isinstance(annotation, str):
+        lower = annotation.lower()
+        if "zmetrics" in lower:
+            return "zmetrics"
+        if "mapping" in lower or "dict" in lower:
+            return "mapping"
+        if "inference" in lower:
+            return "inference"
+        return None
+
+    origin = get_origin(annotation)
+    if origin is not None:
+        if origin in {dict, Dict, MutableMapping, MappingABC, Mapping}:
+            return "mapping"
+    if annotation in {Mapping, MutableMapping, dict}:
+        return "mapping"
+    if getattr(annotation, "__name__", "") == "ZMetrics":
+        return "zmetrics"
+    if getattr(annotation, "__qualname__", "") == "ZSpaceInference":
+        return "inference"
+    return None
+
+
+def _detect_payload_mode(step: Callable[..., Any]) -> str | None:
+    try:
+        signature = inspect.signature(step)
+    except (TypeError, ValueError):
+        return None
+
+    parameters = list(signature.parameters.values())
+    if not parameters:
+        return None
+
+    parameter = parameters[0]
+    annotation = parameter.annotation
+    mode = _annotation_mode(annotation)
+    if mode is not None:
+        return mode
+
+    annotations = getattr(step, "__annotations__", {})
+    if annotations:
+        alt = annotations.get(parameter.name)
+        if alt is not None:
+            mode = _annotation_mode(alt)
+            if mode is not None:
+                return mode
+    return None
+
+
+def prepare_trainer_step_payload(
+    trainer: Any,
+    inference: "ZSpaceInference",
+    *,
+    payload: _PayloadMode = None,
+    prefer_applied: bool = True,
+    canonical_mapping: bool = True,
+) -> Any:
+    """Prepare the payload passed to a trainer's ``step`` method."""
+
+    step = getattr(trainer, "step", None)
+    if not callable(step):
+        raise TypeError("trainer must provide a callable 'step' method")
+
+    if callable(payload):
+        return payload(inference)
+
+    mode: str | None
+    if payload is None:
+        mode = None
+    else:
+        mode = str(payload).lower()
+
+    if mode in {None, "inference"}:
+        chosen = "inference"
+    elif mode in {"zmetrics", "metrics"}:
+        chosen = "zmetrics"
+    elif mode in {"mapping", "dict"}:
+        chosen = "mapping"
+    elif mode == "auto":
+        detected = None
+        for hint in (
+            getattr(trainer, "__zspace_step_mode__", None),
+            getattr(trainer, "zspace_step_mode", None),
+        ):
+            if hint is not None:
+                detected = str(hint).lower()
+                break
+        if detected is None:
+            detected = _detect_payload_mode(step)
+        chosen = detected or "inference"
+    else:
+        raise ValueError(
+            "payload must be one of None, 'inference', 'zmetrics', 'mapping', 'auto', or a callable"
+        )
+
+    if chosen == "zmetrics":
+        return inference_to_zmetrics(inference, prefer_applied=prefer_applied, include_telemetry=True)
+    if chosen == "mapping":
+        return inference_to_mapping(
+            inference,
+            prefer_applied=prefer_applied,
+            canonical=canonical_mapping,
+            include_gradient=True,
+        )
+    return inference
 
 
 def _softplus(value: float) -> float:
@@ -1387,6 +1722,9 @@ class ZSpaceInferencePipeline:
         weights: Sequence[float] | None = None,
         clear: bool = True,
         telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None = None,
+        payload: _PayloadMode = None,
+        prefer_applied: bool = True,
+        canonical_mapping: bool = True,
     ) -> tuple[ZSpaceInference, float]:
         """Run :meth:`infer` and immediately feed the result into a trainer."""
 
@@ -1400,7 +1738,14 @@ class ZSpaceInferencePipeline:
             clear=clear,
             telemetry=telemetry,
         )
-        loss = step(inference)
+        argument = prepare_trainer_step_payload(
+            trainer,
+            inference,
+            payload=payload,
+            prefer_applied=prefer_applied,
+            canonical_mapping=canonical_mapping,
+        )
+        loss = step(argument)
         return inference, float(loss)
 
 
