@@ -2766,7 +2766,7 @@ dependencies = [
 
 [[package]]
 name = "spiraltorch-py"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "nalgebra 0.32.6",
  "ndarray",
@@ -2992,6 +2992,7 @@ dependencies = [
 name = "st-qr-studio"
 version = "0.1.0"
 dependencies = [
+ "num-complex",
  "serde",
  "serde_json",
  "st-core",
