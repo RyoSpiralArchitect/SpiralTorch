@@ -67,10 +67,34 @@ impl ModuleCacheKey {
     }
 }
 
-static SHADER_MODULE_CACHE: OnceLock<Mutex<HashMap<ModuleCacheKey, Arc<wgpu::ShaderModule>>>> =
+#[derive(Default)]
+struct ModuleCacheEntry {
+    module: OnceLock<Arc<wgpu::ShaderModule>>,
+    build: Mutex<()>,
+}
+
+impl ModuleCacheEntry {
+    fn new() -> Self {
+        Self::default()
+    }
+}
+
+#[derive(Default)]
+struct PipelineCacheEntry {
+    pipeline: OnceLock<Arc<ComputePipeline>>,
+    build: Mutex<()>,
+}
+
+impl PipelineCacheEntry {
+    fn new() -> Self {
+        Self::default()
+    }
+}
+
+static SHADER_MODULE_CACHE: OnceLock<Mutex<HashMap<ModuleCacheKey, Arc<ModuleCacheEntry>>>> =
     OnceLock::new();
 
-fn module_cache() -> &'static Mutex<HashMap<ModuleCacheKey, Arc<wgpu::ShaderModule>>> {
+fn module_cache() -> &'static Mutex<HashMap<ModuleCacheKey, Arc<ModuleCacheEntry>>> {
     SHADER_MODULE_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -135,11 +159,23 @@ fn compile_cached_module(
     source: Arc<str>,
     context: Option<String>,
 ) -> Result<Arc<wgpu::ShaderModule>, ShaderLoadError> {
-    {
+    let entry = {
         let cache = module_cache();
-        if let Some(module) = cache.lock().unwrap().get(&key) {
-            return Ok(Arc::clone(module));
-        }
+        let mut cache = cache.lock().unwrap();
+        Arc::clone(
+            cache
+                .entry(key.clone())
+                .or_insert_with(|| Arc::new(ModuleCacheEntry::new())),
+        )
+    };
+
+    if let Some(module) = entry.module.get() {
+        return Ok(Arc::clone(module));
+    }
+
+    let _guard = entry.build.lock().unwrap();
+    if let Some(module) = entry.module.get() {
+        return Ok(Arc::clone(module));
     }
 
     let module = catch_unwind(AssertUnwindSafe(|| {
@@ -154,9 +190,9 @@ fn compile_cached_module(
         source: Box::new(ShaderCompileError(panic_payload_to_string(payload))),
     })?;
 
-    let cache = module_cache();
     let module = Arc::new(module);
-    cache.lock().unwrap().insert(key, Arc::clone(&module));
+    // Ignore the error if another thread raced to populate the entry after we compiled.
+    let _ = entry.module.set(Arc::clone(&module));
     Ok(module)
 }
 
@@ -217,7 +253,7 @@ pub struct ShaderCache {
 struct ShaderCacheInner {
     shader_dir: PathBuf,
     sources: RwLock<HashMap<PathBuf, Arc<str>>>,
-    pipelines: Mutex<HashMap<PipelineCacheKey, Arc<ComputePipeline>>>,
+    pipelines: Mutex<HashMap<PipelineCacheKey, Arc<PipelineCacheEntry>>>,
 }
 
 impl ShaderCache {
@@ -308,7 +344,21 @@ impl ShaderCache {
         let module_key = cache_key_for_file(device, file, overrides);
         let pipeline_key = PipelineCacheKey::new(module_key.clone(), entry_point, layout);
 
-        if let Some(pipeline) = self.inner.pipelines.lock().unwrap().get(&pipeline_key) {
+        let entry = {
+            let mut pipelines = self.inner.pipelines.lock().unwrap();
+            Arc::clone(
+                pipelines
+                    .entry(pipeline_key.clone())
+                    .or_insert_with(|| Arc::new(PipelineCacheEntry::new())),
+            )
+        };
+
+        if let Some(pipeline) = entry.pipeline.get() {
+            return Ok(Arc::clone(pipeline));
+        }
+
+        let _guard = entry.build.lock().unwrap();
+        if let Some(pipeline) = entry.pipeline.get() {
             return Ok(Arc::clone(pipeline));
         }
 
@@ -321,19 +371,14 @@ impl ShaderCache {
         let context = self.inner.shader_dir.join(file).display().to_string();
         let module =
             compile_cached_module(device, label, module_key.clone(), source, Some(context))?;
-        let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+        let pipeline = Arc::new(device.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some(label),
             layout,
             module: module.as_ref(),
             entry_point,
             compilation_options: Default::default(),
-        });
-        let pipeline = Arc::new(pipeline);
-        self.inner
-            .pipelines
-            .lock()
-            .unwrap()
-            .insert(pipeline_key, Arc::clone(&pipeline));
+        }));
+        let _ = entry.pipeline.set(Arc::clone(&pipeline));
         Ok(pipeline)
     }
 
