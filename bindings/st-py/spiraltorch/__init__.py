@@ -145,12 +145,16 @@ def build_manifest() -> dict[str, _Any]:
     return dict(BUILD_MANIFEST)
 
 from .zspace_inference import (
+    ZMetrics,
     ZSpaceDecoded,
     ZSpaceInference,
     ZSpacePosterior,
     ZSpacePartialBundle,
     ZSpaceTelemetryFrame,
     ZSpaceInferencePipeline,
+    inference_to_mapping,
+    inference_to_zmetrics,
+    prepare_trainer_step_payload,
     canvas_partial_from_snapshot,
     canvas_coherence_partial,
     elliptic_partial_from_telemetry,
@@ -1476,17 +1480,6 @@ def label_tensor(tensor_obj: _Any, axes: _Sequence["Axis | str"]) -> LabeledTens
 
     return LabeledTensor(tensor_obj, axes)
 
-@_dataclass
-class ZMetrics:
-    """Typed metrics container fed into :class:`ZSpaceTrainer`."""
-
-    speed: float
-    memory: float
-    stability: float
-    gradient: _Optional[_Sequence[float]] = None
-    drs: float = 0.0
-
-
 def _clone_volume(volume: _Sequence[_Sequence[_Sequence[float]]]) -> _List[_List[_List[float]]]:
     return [[list(row) for row in slice_] for slice_ in volume]
 
@@ -2037,7 +2030,12 @@ class ZSpaceTrainer:
             v_hat = self._v[i] / (1.0 - self._beta2 ** self._t)
             self._z[i] -= self._lr * m_hat / (_math.sqrt(v_hat) + self._eps)
 
-    def step(self, metrics: _Mapping[str, float] | ZMetrics) -> float:
+    def step(
+        self, metrics: _Mapping[str, float] | ZMetrics | "ZSpaceInference"
+    ) -> float:
+        if isinstance(metrics, ZSpaceInference):
+            metrics = inference_to_zmetrics(metrics)
+
         if isinstance(metrics, ZMetrics):
             speed = float(metrics.speed)
             memory = float(metrics.memory)
@@ -2068,7 +2066,10 @@ class ZSpaceTrainer:
         return loss
 
 
-def step_many(trainer: ZSpaceTrainer, samples: _Iterable[_Mapping[str, float] | ZMetrics]) -> _List[float]:
+def step_many(
+    trainer: ZSpaceTrainer,
+    samples: _Iterable[_Mapping[str, float] | ZMetrics | ZSpaceInference],
+) -> _List[float]:
     for metrics in samples:
         trainer.step(metrics)
     return trainer.state
@@ -2076,7 +2077,7 @@ def step_many(trainer: ZSpaceTrainer, samples: _Iterable[_Mapping[str, float] | 
 
 def stream_zspace_training(
     trainer: ZSpaceTrainer,
-    samples: _Iterable[_Mapping[str, float] | ZMetrics],
+    samples: _Iterable[_Mapping[str, float] | ZMetrics | ZSpaceInference],
     *,
     on_step: _Optional[_Callable[[int, _List[float], float], None]] = None,
 ) -> _List[float]:
