@@ -1191,6 +1191,43 @@ mod tests {
         }
     }
 
+    struct MetaLayerTestContext {
+        frame: StudioFrame,
+        storyboard: Value,
+    }
+
+    fn meta_layer_test_context() -> MetaLayerTestContext {
+        let bridge = MaxwellDesireBridge::new()
+            .with_channel("alpha", vec![(0, 1.0)])
+            .unwrap();
+        let mut layer = MetaNarrativeLayer::new();
+        layer
+            .engine_mut()
+            .insert_event(
+                "beat-1",
+                NarrativeBeat::new(Some("alpha".into()), "z-open", vec!["causal".into()])
+                    .with_intensity_scale(0.5)
+                    .with_floor(0.1)
+                    .with_sheaf_threshold(0.05),
+            )
+            .unwrap();
+        layer.bridge_mut().attach(
+            "beat-1",
+            MeaningSheaf::new().with_section(MeaningSection::for_open(
+                "z-open",
+                vec!["sheaf".into()],
+                0.2,
+            )),
+        );
+        let mut studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge)
+            .with_meta_layer(layer);
+        let frame = studio
+            .ingest(&bridge, "alpha", sample_pulse(), None)
+            .expect("ingest with meta");
+        let storyboard = studio.export_storyboard();
+        MetaLayerTestContext { frame, storyboard }
+    }
+
     #[test]
     fn capture_rejects_unknown_channels() {
         let mut session = SignalCaptureSession::new(
@@ -1230,34 +1267,8 @@ mod tests {
 
     #[test]
     fn meta_layer_overrides_bridge_narrative() {
-        let bridge = MaxwellDesireBridge::new()
-            .with_channel("alpha", vec![(0, 1.0)])
-            .unwrap();
-        let mut layer = MetaNarrativeLayer::new();
-        layer
-            .engine_mut()
-            .insert_event(
-                "beat-1",
-                NarrativeBeat::new(Some("alpha".into()), "z-open", vec!["causal".into()])
-                    .with_intensity_scale(0.5)
-                    .with_floor(0.1)
-                    .with_sheaf_threshold(0.05),
-            )
-            .unwrap();
-        layer.bridge_mut().attach(
-            "beat-1",
-            MeaningSheaf::new().with_section(MeaningSection::for_open(
-                "z-open",
-                vec!["sheaf".into()],
-                0.2,
-            )),
-        );
-        let mut studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge)
-            .with_meta_layer(layer);
-        let frame = studio
-            .ingest(&bridge, "alpha", sample_pulse(), None)
-            .expect("ingest with meta");
-        let narrative = frame.narrative.expect("meta narrative");
+        let MetaLayerTestContext { frame, storyboard } = meta_layer_test_context();
+        let narrative = frame.narrative.as_ref().expect("meta narrative");
         assert!(narrative.tags().iter().any(|tag| tag == "causal"));
         assert!(narrative.tags().iter().any(|tag| tag == "sheaf"));
         let meta = frame.meta.as_ref().expect("meta telemetry");
@@ -1267,8 +1278,7 @@ mod tests {
         assert!(meta.tags.iter().any(|tag| tag == "sheaf"));
         assert!(!meta.signature().is_empty());
 
-        let export = studio.export_storyboard();
-        let meta_json = export
+        let meta_json = storyboard
             .get("frames")
             .and_then(Value::as_array)
             .and_then(|frames| frames.get(0))
@@ -1282,43 +1292,19 @@ mod tests {
         );
         assert!(narrative.intensity() > 0.0);
         assert!((frame.z_space.signature()[3] - 4.2).abs() < 1e-6);
-        assert!(narrative.intensity() > 0.0);
-        assert!((frame.z_space.signature()[3] - 4.2).abs() < 1e-6);
     }
 
     #[test]
-    fn meta_layer_overrides_bridge_narrative() {
-        let bridge = MaxwellDesireBridge::new()
-            .with_channel("alpha", vec![(0, 1.0)])
-            .unwrap();
-        let mut layer = MetaNarrativeLayer::new();
-        layer
-            .engine_mut()
-            .insert_event(
-                "beat-1",
-                NarrativeBeat::new(Some("alpha".into()), "z-open", vec!["causal".into()])
-                    .with_intensity_scale(0.5)
-                    .with_floor(0.1)
-                    .with_sheaf_threshold(0.05),
-            )
-            .unwrap();
-        layer.bridge_mut().attach(
-            "beat-1",
-            MeaningSheaf::new().with_section(MeaningSection::for_open(
-                "z-open",
-                vec!["sheaf".into()],
-                0.2,
-            )),
-        );
-        let mut studio = QuantumRealityStudio::new(SignalCaptureConfig::new(48000.0), &bridge)
-            .with_meta_layer(layer);
-        let frame = studio
-            .ingest(&bridge, "alpha", sample_pulse(), None)
-            .expect("ingest with meta");
-        let narrative = frame.narrative.expect("meta narrative");
+    fn meta_layer_enriches_narrative_tags() {
+        let MetaLayerTestContext { frame, .. } = meta_layer_test_context();
+        let narrative = frame.narrative.as_ref().expect("meta narrative");
         assert!(narrative.tags().iter().any(|tag| tag == "causal"));
         assert!(narrative.tags().iter().any(|tag| tag == "sheaf"));
         assert!(narrative.intensity() > 0.0);
+        let meta = frame.meta.as_ref().expect("meta telemetry");
+        assert_eq!(meta.channel, "alpha");
+        assert!(meta.tags.iter().any(|tag| tag == "causal"));
+        assert!(meta.tags.iter().any(|tag| tag == "sheaf"));
     }
 
     #[test]
