@@ -88,8 +88,8 @@ impl<'a> Builder<'a> {
     }
 
     /// Borrow the underlying cache for manual control.
-    pub fn cache_mut(&mut self) -> &mut ShaderCache {
-        &mut self.cache
+    pub fn cache_mut(&self) -> &ShaderCache {
+        &self.cache
     }
 
     /// Consume the builder and return the cache without constructing pipelines.
@@ -110,7 +110,7 @@ impl<'a> Builder<'a> {
         self
     }
 
-    fn assemble(&mut self) -> Result<Pipelines, ShaderLoadError> {
+    fn assemble(&self) -> Result<Pipelines, ShaderLoadError> {
         let keepk_workgroup = self.cache.load_compute_pipeline(
             self.device,
             "topk_keepk_workgroup.wgsl",
@@ -161,12 +161,12 @@ impl<'a> Builder<'a> {
     }
 
     /// Consume the builder, load the requested shaders and produce pipeline handles.
-    pub fn build(mut self) -> Result<Pipelines, ShaderLoadError> {
+    pub fn build(self) -> Result<Pipelines, ShaderLoadError> {
         self.assemble()
     }
 
     /// Build pipelines while returning the underlying [`ShaderCache`] for reuse.
-    pub fn build_with_cache(mut self) -> Result<(Pipelines, ShaderCache), ShaderLoadError> {
+    pub fn build_with_cache(self) -> Result<(Pipelines, ShaderCache), ShaderLoadError> {
         let pipelines = self.assemble()?;
         Ok((pipelines, self.cache))
     }

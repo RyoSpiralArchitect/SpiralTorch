@@ -253,8 +253,8 @@ impl<'a> Builder<'a> {
         Self { device, cache }
     }
 
-    pub fn cache_mut(&mut self) -> &mut ShaderCache {
-        &mut self.cache
+    pub fn cache_mut(&self) -> &ShaderCache {
+        &self.cache
     }
 
     pub fn into_cache(self) -> ShaderCache {
@@ -268,7 +268,7 @@ impl<'a> Builder<'a> {
     }
 
     pub fn build_with_geometry(
-        mut self,
+        self,
         geometry: Geometry,
     ) -> Result<(Pipelines, ShaderCache), ShaderLoadError> {
         let fused_bind_layout = self

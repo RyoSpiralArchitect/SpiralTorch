@@ -165,7 +165,7 @@ impl Pipelines {
         });
 
         let shader_root = shader_dir.as_ref();
-        let mut cache = ShaderCache::new(shader_root);
+        let cache = ShaderCache::new(shader_root);
         cache.prefetch([
             "resize.wgsl",
             "center_crop.wgsl",

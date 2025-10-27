@@ -69,15 +69,15 @@ impl<'a> Builder<'a> {
         self
     }
 
-    pub fn cache_mut(&mut self) -> &mut ShaderCache {
-        &mut self.cache
+    pub fn cache_mut(&self) -> &ShaderCache {
+        &self.cache
     }
 
     pub fn into_cache(self) -> ShaderCache {
         self.cache
     }
 
-    pub fn build(mut self) -> Result<(Pipelines, ShaderCache), ShaderLoadError> {
+    pub fn build(self) -> Result<(Pipelines, ShaderCache), ShaderLoadError> {
         let bind_layout = self
             .device
             .create_bind_group_layout(&BindGroupLayoutDescriptor {

@@ -480,8 +480,8 @@ impl<'a> Builder<'a> {
     }
 
     /// Borrow the underlying cache for prefetching or manual shader control.
-    pub fn cache_mut(&mut self) -> &mut ShaderCache {
-        &mut self.cache
+    pub fn cache_mut(&self) -> &ShaderCache {
+        &self.cache
     }
 
     /// Consume the builder and return the cache without building pipelines.
@@ -489,7 +489,7 @@ impl<'a> Builder<'a> {
         self.cache
     }
 
-    fn assemble(&mut self) -> Result<Pipelines, ShaderLoadError> {
+    fn assemble(&self) -> Result<Pipelines, ShaderLoadError> {
         let scan_tiles = self.cache.load_compute_pipeline(
             self.device,
             "midk_bottomk_compaction.wgsl",
@@ -543,12 +543,12 @@ impl<'a> Builder<'a> {
     }
 
     /// Build the requested pipelines.
-    pub fn build(mut self) -> Result<Pipelines, ShaderLoadError> {
+    pub fn build(self) -> Result<Pipelines, ShaderLoadError> {
         self.assemble()
     }
 
     /// Build pipelines while returning the [`ShaderCache`] for reuse.
-    pub fn build_with_cache(mut self) -> Result<(Pipelines, ShaderCache), ShaderLoadError> {
+    pub fn build_with_cache(self) -> Result<(Pipelines, ShaderCache), ShaderLoadError> {
         let pipelines = self.assemble()?;
         Ok((pipelines, self.cache))
     }
