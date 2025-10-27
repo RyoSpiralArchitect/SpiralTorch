@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import inspect
 import math
 import sys
+import typing as _typing
 from dataclasses import dataclass
 from collections.abc import Iterable
-from typing import Any, Dict, Mapping, Sequence
+from typing import Any, Dict, Mapping, Sequence, get_args, get_origin
 from types import MappingProxyType
+
+if _typing.TYPE_CHECKING:
+    from . import ZMetrics
 
 from ._zspace_aliases import ZSPACE_METRIC_ALIASES
 
@@ -19,6 +24,7 @@ __all__ = [
     "ZSpaceTelemetryFrame",
     "ZSpaceInferenceRuntime",
     "ZSpaceInferencePipeline",
+    "deliver_inference_to_trainer",
     "decode_zspace_embedding",
     "infer_from_partial",
     "infer_with_partials",
@@ -1195,6 +1201,198 @@ class ZSpaceInferenceRuntime:
         return self.update(partial, telemetry=telemetry)
 
 
+_HOOK_NAMES = ("consume_inference", "observe_inference", "on_inference")
+
+
+def _name_matches(obj: Any, candidates: set[str]) -> bool:
+    if obj is None:
+        return False
+    if isinstance(obj, str):
+        tail = obj.rsplit(".", 1)[-1].lower()
+        return tail in candidates
+    name = getattr(obj, "__name__", None) or getattr(obj, "__qualname__", None)
+    if not name:
+        return False
+    return name.split(".")[-1].lower() in candidates
+
+
+def _annotation_contains(annotation: Any, *candidates: str) -> bool:
+    candidate_set = {candidate.lower() for candidate in candidates if candidate}
+    if not candidate_set or annotation is None:
+        return False
+    if isinstance(annotation, str):
+        return _name_matches(annotation, candidate_set)
+    forward = getattr(annotation, "__forward_arg__", None)
+    if isinstance(forward, str) and _name_matches(forward, candidate_set):
+        return True
+    if annotation in {_typing.Any, object}:
+        return False
+    if _name_matches(annotation, candidate_set):
+        return True
+    origin = get_origin(annotation)
+    if origin is None:
+        return False
+    if _name_matches(origin, candidate_set):
+        return True
+    annotated = getattr(_typing, "Annotated", None)
+    if annotated is not None and origin is annotated:
+        args = get_args(annotation)
+        if args:
+            return _annotation_contains(args[0], *candidate_set)
+        return False
+    return any(_annotation_contains(arg, *candidate_set) for arg in get_args(annotation))
+
+
+def _step_parameter_annotation(step: Any) -> Any | None:
+    target = getattr(step, "__func__", step)
+    annotations = getattr(target, "__annotations__", None) or {}
+    for name in ("metrics", "sample", "payload", "observation", "data"):
+        if name in annotations:
+            return annotations[name]
+    for key, value in annotations.items():
+        if key != "return":
+            return value
+    try:
+        globalns = getattr(target, "__globals__", {})
+        module = sys.modules.get(getattr(target, "__module__", ""))
+        localns = getattr(module, "__dict__", None) if module else None
+        hints = _typing.get_type_hints(target, globalns=globalns, localns=localns)
+    except Exception:
+        return None
+    for name in ("metrics", "sample", "payload", "observation", "data"):
+        if name in hints:
+            return hints[name]
+    for key, value in hints.items():
+        if key != "return":
+            return value
+    return None
+
+
+def _step_accepts_inference(step: Any) -> bool:
+    annotation = _step_parameter_annotation(step)
+    return _annotation_contains(annotation, "ZSpaceInference")
+
+
+def _step_accepts_zmetrics(step: Any) -> bool:
+    annotation = _step_parameter_annotation(step)
+    return _annotation_contains(annotation, "ZMetrics")
+
+
+def _step_accepts_mapping(step: Any) -> bool:
+    annotation = _step_parameter_annotation(step)
+    return _annotation_contains(annotation, "Mapping", "MutableMapping", "Dict", "dict")
+
+
+def _invoke_trainer_hook(
+    hook: Any, inference: "ZSpaceInference", metrics: "ZMetrics"
+) -> None:
+    try:
+        signature = inspect.signature(hook)
+    except (TypeError, ValueError):
+        hook(inference)
+        return
+
+    params = list(signature.parameters.values())
+    positional = [
+        param
+        for param in params
+        if param.kind in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        )
+    ]
+    var_positional = any(
+        param.kind == inspect.Parameter.VAR_POSITIONAL for param in params
+    )
+    if positional and positional[0].name == "self":
+        positional = positional[1:]
+
+    if not positional and not var_positional:
+        hook()
+        return
+
+    if var_positional or len(positional) >= 2:
+        hook(inference, metrics)
+        return
+
+    param = positional[0]
+    annotation = param.annotation
+    if annotation is not inspect._empty:
+        if _annotation_contains(annotation, "ZMetrics", "Mapping", "Dict"):
+            hook(metrics)
+            return
+        if _annotation_contains(annotation, "ZSpaceInference"):
+            hook(inference)
+            return
+
+    if param.name.lower() in {"metrics", "payload", "values"}:
+        hook(metrics)
+        return
+
+    hook(inference)
+
+
+def _notify_trainer_hooks(
+    trainer: Any,
+    inference: "ZSpaceInference",
+    metrics: "ZMetrics",
+    *,
+    names: tuple[str, ...] = _HOOK_NAMES,
+) -> None:
+    for name in names:
+        hook = getattr(trainer, name, None)
+        if callable(hook):
+            _invoke_trainer_hook(hook, inference, metrics)
+
+
+def deliver_inference_to_trainer(
+    trainer: Any,
+    inference: "ZSpaceInference",
+    *,
+    prefer_applied: bool = True,
+    notify_hooks: bool = True,
+) -> float:
+    """Route a :class:`ZSpaceInference` result into an arbitrary trainer."""
+
+    if not isinstance(inference, ZSpaceInference):
+        raise TypeError("inference must be a ZSpaceInference instance")
+
+    step = getattr(trainer, "step", None)
+    if not callable(step):
+        raise TypeError("trainer must provide a callable 'step' method")
+
+    from . import _metrics_to_mapping, inference_to_zmetrics  # local import to avoid cycles
+
+    metrics = inference_to_zmetrics(inference, prefer_applied=prefer_applied)
+
+    if notify_hooks:
+        _notify_trainer_hooks(trainer, inference, metrics)
+
+    accepts_inference = _step_accepts_inference(step)
+    accepts_zmetrics = _step_accepts_zmetrics(step)
+    accepts_mapping = _step_accepts_mapping(step)
+
+    if accepts_inference:
+        result = step(inference)
+    else:
+        mapping_payload: Dict[str, float] | None = None
+        attempt_metrics = accepts_zmetrics or not accepts_mapping
+        if attempt_metrics:
+            try:
+                result = step(metrics)
+            except TypeError as exc:
+                mapping_payload = _metrics_to_mapping(metrics)
+                try:
+                    result = step(mapping_payload)
+                except TypeError:
+                    raise exc
+        else:
+            mapping_payload = _metrics_to_mapping(metrics)
+            result = step(mapping_payload)
+
+    return float(result)
+
+
 class ZSpaceInferencePipeline:
     """Composable pipeline that blends heterogeneous partials before inference."""
 
@@ -1378,6 +1576,33 @@ class ZSpaceInferencePipeline:
         if clear:
             self.clear()
         return inference
+
+    def infer_and_step(
+        self,
+        trainer: Any,
+        *,
+        strategy: str | None = None,
+        weights: Sequence[float] | None = None,
+        clear: bool = True,
+        telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None = None,
+        prefer_applied: bool = True,
+        notify_hooks: bool = True,
+    ) -> tuple[ZSpaceInference, float]:
+        """Run :meth:`infer` and immediately feed the result into a trainer."""
+
+        inference = self.infer(
+            strategy=strategy,
+            weights=weights,
+            clear=clear,
+            telemetry=telemetry,
+        )
+        loss = deliver_inference_to_trainer(
+            trainer,
+            inference,
+            prefer_applied=prefer_applied,
+            notify_hooks=notify_hooks,
+        )
+        return inference, loss
 
 
 def decode_zspace_embedding(z_state: Sequence[float], *, alpha: float = 0.35) -> ZSpaceDecoded:

@@ -469,7 +469,10 @@ print("z shape:", z_vec.shape(), "loss:", loss)
 encoder, and you can append numbers, `(key, value)` pairs, or dictionaries to
 override temperature or other keyword arguments. `st.z.metrics(...)` recognises
 the common aliases (`velocity`, `mem`, `stab`, `drift`, `grad`) and emits the
-strongly typed `ZMetrics` container that `ZSpaceTrainer` expects. `st.z.partial(...)`
+strongly typed `ZMetrics` container that `ZSpaceTrainer` expects. When the
+metrics come from an inference pass (via `st.inference_to_zmetrics(...)`) the
+container preserves barycentric, residual, telemetry, and override metadata so
+custom trainers or callbacks can react to the raw posterior. `st.z.partial(...)`
 wraps those metrics (or raw mappings) into a `ZSpacePartialBundle`, flattens any
 telemetry dictionaries into dotted keys, and lets you override `weight`/`origin`
 without touching the underlying map. Feed the partials directly into

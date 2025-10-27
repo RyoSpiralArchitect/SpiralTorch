@@ -7,7 +7,11 @@ import types as _types
 import sys
 import weakref as _weakref
 from collections import deque as _deque
-from collections.abc import Iterable as _IterableABC, Sequence as _SequenceABC
+from collections.abc import (
+    Iterable as _IterableABC,
+    Mapping as _MappingABC,
+    Sequence as _SequenceABC,
+)
 from dataclasses import dataclass as _dataclass
 from importlib import import_module
 from typing import (
@@ -23,6 +27,7 @@ from typing import (
     Tuple as _Tuple,
 )
 from importlib.metadata import version as _pkg_version, PackageNotFoundError
+from types import MappingProxyType as _MappingProxyType
 
 from ._meta import (
     BUILD_FINGERPRINT,
@@ -151,6 +156,7 @@ from .zspace_inference import (
     ZSpacePartialBundle,
     ZSpaceTelemetryFrame,
     ZSpaceInferencePipeline,
+    deliver_inference_to_trainer,
     canvas_partial_from_snapshot,
     canvas_coherence_partial,
     elliptic_partial_from_telemetry,
@@ -799,6 +805,11 @@ def encode_zspace(
 
 
 _Z_METRIC_ALIAS = PRIMARY_ZSPACE_METRIC_ALIASES
+
+
+_PRIMARY_METRICS = frozenset(
+    name for name in _Z_METRIC_ALIAS.values() if name != "gradient"
+)
 
 
 _Z_PARTIAL_ALIAS = ZSPACE_METRIC_ALIASES
@@ -1485,6 +1496,175 @@ class ZMetrics:
     stability: float
     gradient: _Optional[_Sequence[float]] = None
     drs: float = 0.0
+    residual: float | None = None
+    confidence: float | None = None
+    barycentric: _Optional[_Tuple[float, float, float]] = None
+    telemetry: _Optional[_Mapping[str, float]] = None
+    baseline: _Optional[_Mapping[str, float]] = None
+    applied: _Optional[_Mapping[str, float]] = None
+    overrides: _Tuple[str, ...] = ()
+
+
+def inference_to_zmetrics(
+    inference: "ZSpaceInference", *, prefer_applied: bool = True
+) -> ZMetrics:
+    """Convert a :class:`ZSpaceInference` result into :class:`ZMetrics`.
+
+    Besides the primary optimisation signals (speed, memory, stability, DRS and
+    gradient) this helper preserves provenance details such as the
+    barycentric/residual trio and any telemetry payload published by the
+    inference runtime.  Trainers that only understand scalar metrics can ignore
+    the extra attributes, while richer feedback loops can use
+    :attr:`ZMetrics.telemetry` or :attr:`ZMetrics.applied` to reconstruct the
+    exact overrides that were fused into the posterior.
+
+    Args:
+        inference:
+            Inference result produced by :class:`ZSpaceInferencePipeline` or
+            :func:`infer_with_partials`.
+        prefer_applied:
+            When ``True`` (default), prefer values from
+            :attr:`ZSpaceInference.applied` when a metric was explicitly
+            rewritten by a partial observation. Falling back to
+            :attr:`ZSpaceInference.metrics` preserves the decoded baseline.
+
+    Returns:
+        A :class:`ZMetrics` instance populated with canonical optimisation
+        signals plus auxiliary inference metadata.
+    """
+
+    if not isinstance(inference, ZSpaceInference):
+        raise TypeError("inference must be a ZSpaceInference instance")
+
+    def _normalise_source(
+        source: _Mapping[str, _Any] | None,
+    ) -> tuple[dict[str, float], dict[str, float], list[float] | None]:
+        if not source:
+            return {}, {}, None
+        primary: dict[str, float] = {}
+        scalars: dict[str, float] = {}
+        gradient_values: list[float] | None = None
+        for key, value in source.items():
+            alias = _Z_PARTIAL_ALIAS.get(str(key).lower())
+            if alias is None:
+                continue
+            if alias == "gradient":
+                try:
+                    gradient_values = _coerce_gradient_values(value)
+                except TypeError:
+                    gradient_values = None
+                continue
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                continue
+            scalars[alias] = numeric
+            if alias in _PRIMARY_METRICS or alias == "drs":
+                primary[alias] = numeric
+        return primary, scalars, gradient_values
+
+    metrics_primary, metrics_scalars, metrics_gradient = _normalise_source(
+        inference.metrics
+    )
+    applied_primary, applied_scalars, applied_gradient = _normalise_source(
+        inference.applied
+    )
+
+    overrides: set[str] = set()
+
+    def _select_metric(name: str) -> float:
+        base = metrics_primary.get(name)
+        override = applied_primary.get(name)
+        if prefer_applied:
+            if override is not None:
+                if base is None or base != override:
+                    overrides.add(name)
+                return float(override)
+            if base is not None:
+                return float(base)
+        else:
+            if base is not None:
+                return float(base)
+            if override is not None:
+                overrides.add(name)
+                return float(override)
+        return 0.0
+
+    gradient_values: list[float] = list(inference.gradient)
+    gradient_from_applied = False
+    if not gradient_values:
+        candidate: list[float] | None = None
+        if prefer_applied and applied_gradient:
+            candidate = applied_gradient
+            gradient_from_applied = True
+        elif applied_gradient:
+            candidate = applied_gradient
+            gradient_from_applied = True
+        elif metrics_gradient:
+            candidate = metrics_gradient
+        if candidate:
+            gradient_values = [float(entry) for entry in candidate]
+
+    if gradient_from_applied and gradient_values:
+        overrides.add("gradient")
+
+    telemetry_payload: _Mapping[str, float] | None = None
+    if inference.telemetry is not None:
+        payload = getattr(inference.telemetry, "payload", None)
+        if isinstance(payload, _MappingABC):
+            data: dict[str, float] = {}
+            for key, value in payload.items():
+                try:
+                    data[str(key)] = float(value)
+                except (TypeError, ValueError):
+                    continue
+            telemetry_payload = data
+        elif isinstance(inference.telemetry, _MappingABC):
+            data = {}
+            for key, value in inference.telemetry.items():
+                try:
+                    data[str(key)] = float(value)
+                except (TypeError, ValueError):
+                    continue
+            telemetry_payload = data
+
+    baseline_payload = {key: float(value) for key, value in metrics_scalars.items()}
+    applied_payload = {key: float(value) for key, value in applied_scalars.items()}
+
+    barycentric = tuple(float(value) for value in inference.barycentric)
+    residual = float(inference.residual)
+    confidence = float(inference.confidence)
+
+    gradient_resolved: _Optional[_Sequence[float]] = (
+        tuple(gradient_values) if gradient_values else None
+    )
+
+    telemetry_proxy = (
+        _MappingProxyType(dict(telemetry_payload)) if telemetry_payload else None
+    )
+    baseline_proxy = (
+        _MappingProxyType(dict(baseline_payload)) if baseline_payload else None
+    )
+    applied_proxy = (
+        _MappingProxyType(dict(applied_payload)) if applied_payload else None
+    )
+
+    overrides_tuple = tuple(sorted(overrides))
+
+    return ZMetrics(
+        speed=_select_metric("speed"),
+        memory=_select_metric("memory"),
+        stability=_select_metric("stability"),
+        gradient=gradient_resolved,
+        drs=_select_metric("drs"),
+        residual=residual,
+        confidence=confidence,
+        barycentric=barycentric,
+        telemetry=telemetry_proxy,
+        baseline=baseline_proxy,
+        applied=applied_proxy,
+        overrides=overrides_tuple,
+    )
 
 
 def _clone_volume(volume: _Sequence[_Sequence[_Sequence[float]]]) -> _List[_List[_List[float]]]:
@@ -2037,7 +2217,12 @@ class ZSpaceTrainer:
             v_hat = self._v[i] / (1.0 - self._beta2 ** self._t)
             self._z[i] -= self._lr * m_hat / (_math.sqrt(v_hat) + self._eps)
 
-    def step(self, metrics: _Mapping[str, float] | ZMetrics) -> float:
+    def step(
+        self, metrics: _Mapping[str, float] | ZMetrics | "ZSpaceInference"
+    ) -> float:
+        if isinstance(metrics, ZSpaceInference):
+            metrics = inference_to_zmetrics(metrics)
+
         if isinstance(metrics, ZMetrics):
             speed = float(metrics.speed)
             memory = float(metrics.memory)
@@ -2068,7 +2253,10 @@ class ZSpaceTrainer:
         return loss
 
 
-def step_many(trainer: ZSpaceTrainer, samples: _Iterable[_Mapping[str, float] | ZMetrics]) -> _List[float]:
+def step_many(
+    trainer: ZSpaceTrainer,
+    samples: _Iterable[_Mapping[str, float] | ZMetrics | ZSpaceInference],
+) -> _List[float]:
     for metrics in samples:
         trainer.step(metrics)
     return trainer.state
@@ -2076,7 +2264,7 @@ def step_many(trainer: ZSpaceTrainer, samples: _Iterable[_Mapping[str, float] | 
 
 def stream_zspace_training(
     trainer: ZSpaceTrainer,
-    samples: _Iterable[_Mapping[str, float] | ZMetrics],
+    samples: _Iterable[_Mapping[str, float] | ZMetrics | ZSpaceInference],
     *,
     on_step: _Optional[_Callable[[int, _List[float], float], None]] = None,
 ) -> _List[float]:
@@ -2509,6 +2697,7 @@ _EXTRAS.extend(
         "decode_zspace_embedding",
         "infer_from_partial",
         "compile_inference",
+        "deliver_inference_to_trainer",
     ]
 )
 

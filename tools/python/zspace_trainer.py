@@ -17,7 +17,7 @@ from __future__ import annotations
 import cmath
 import math
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 
 @dataclass
@@ -27,6 +27,13 @@ class ZMetrics:
     stability: float
     gradient: Optional[Sequence[float]] = None
     drs: float = 0.0
+    residual: Optional[float] = None
+    confidence: Optional[float] = None
+    barycentric: Optional[Tuple[float, float, float]] = None
+    telemetry: Optional[Dict[str, float]] = None
+    baseline: Optional[Dict[str, float]] = None
+    applied: Optional[Dict[str, float]] = None
+    overrides: Tuple[str, ...] = ()
 
 
 class ZSpaceTrainer:

@@ -683,6 +683,13 @@ class ZMetrics:
     stability: float
     gradient: Optional[Sequence[float]]
     drs: float
+    residual: Optional[float]
+    confidence: Optional[float]
+    barycentric: Optional[Tuple[float, float, float]]
+    telemetry: Optional[Mapping[str, float]]
+    baseline: Optional[Mapping[str, float]]
+    applied: Optional[Mapping[str, float]]
+    overrides: Tuple[str, ...]
 
 class ZSpaceDecoded:
     z_state: Tuple[float, ...]
@@ -703,6 +710,7 @@ class ZSpaceInference:
     confidence: float
     prior: ZSpaceDecoded
     applied: Mapping[str, object]
+    telemetry: ZSpaceTelemetryFrame | None
 
     def as_dict(self) -> Dict[str, object]: ...
 
@@ -741,6 +749,11 @@ def decode_zspace_embedding(
 ) -> ZSpaceDecoded: ...
 
 
+def inference_to_zmetrics(
+    inference: ZSpaceInference, *, prefer_applied: bool = ...
+) -> ZMetrics: ...
+
+
 def infer_from_partial(
     z_state: Sequence[float] | ZSpacePosterior | object,
     partial: Mapping[str, object] | None,
@@ -777,20 +790,36 @@ class ZSpaceTrainer:
     ) -> None: ...
     @property
     def state(self) -> List[float]: ...
-    def step(self, metrics: Mapping[str, float] | ZMetrics) -> float: ...
+    def step(
+        self, metrics: Mapping[str, float] | ZMetrics | ZSpaceInference
+    ) -> float: ...
     def reset(self) -> None: ...
     def state_dict(self) -> Dict[str, object]: ...
     def load_state_dict(self, state: Dict[str, object], *, strict: bool = ...) -> None: ...
-    def step_batch(self, metrics: Iterable[Mapping[str, float] | ZMetrics]) -> List[float]: ...
+    def step_batch(
+        self, metrics: Iterable[Mapping[str, float] | ZMetrics | ZSpaceInference]
+    ) -> List[float]: ...
 
-def step_many(trainer: ZSpaceTrainer, samples: Iterable[Mapping[str, float] | ZMetrics]) -> List[float]: ...
+def step_many(
+    trainer: ZSpaceTrainer,
+    samples: Iterable[Mapping[str, float] | ZMetrics | ZSpaceInference],
+) -> List[float]: ...
 
 def stream_zspace_training(
     trainer: ZSpaceTrainer,
-    samples: Iterable[Mapping[str, float] | ZMetrics],
+    samples: Iterable[Mapping[str, float] | ZMetrics | ZSpaceInference],
     *,
-    on_step: Optional[Callable[[int, List[float], float], None]] = ...,
+    on_step: Optional[Callable[[int, List[float], float], None]] = ..., 
 ) -> List[float]: ...
+
+
+def deliver_inference_to_trainer(
+    trainer: object,
+    inference: ZSpaceInference,
+    *,
+    prefer_applied: bool = ...,
+    notify_hooks: bool = ...,
+) -> float: ...
 
 class RankPlan:
     kind: str
