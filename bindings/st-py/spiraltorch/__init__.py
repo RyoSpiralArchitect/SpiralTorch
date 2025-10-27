@@ -393,7 +393,8 @@ if _TENSOR_BASE is not None:
             )
 
         if not items:
-            raise ValueError("Tensor data cannot be empty")
+            # Allow callers to explicitly describe zero-length tensors.
+            return 0, 0, []
 
         head = items[0]
         if isinstance(head, _TENSOR_BASE):
@@ -406,11 +407,11 @@ if _TENSOR_BASE is not None:
             cols: int | None = None
             flat: list[float] = []
             for row in items:
-                normalized = _tensor_normalize_row(row, allow_empty=rows == 0)
+                # Allow empty rows; downstream shape checks ensure that only
+                # tensors with zero columns make it through.
+                normalized = _tensor_normalize_row(row, allow_empty=True)
                 if cols is None:
                     cols = len(normalized)
-                    if cols == 0 and rows != 0:
-                        raise ValueError("Tensor rows must not be empty")
                 elif len(normalized) != cols:
                     raise ValueError("Tensor rows must all share the same length")
                 flat.extend(normalized)
@@ -508,36 +509,31 @@ if _TENSOR_BASE is not None:
         inferred_rows, inferred_cols, flat = _tensor_flatten_data(data_value)
         total = len(flat)
 
+        def _infer_missing_dimension(
+            total_elems: int, known: int, *, known_label: str
+        ) -> int:
+            """Derive the complementary dimension from a known axis length."""
+
+            if known == 0:
+                if total_elems != 0:
+                    raise ValueError(
+                        f"Tensor data of length {total_elems} cannot fill ({known}) {known_label}"
+                    )
+                return 0
+            if total_elems % known != 0:
+                raise ValueError(
+                    f"Tensor data of length {total_elems} cannot fill ({known}) {known_label}"
+                )
+            return total_elems // known
+
         if rows is None and cols is None:
             rows, cols = inferred_rows, inferred_cols
         elif rows is None:
             if cols is None:
                 raise TypeError("Tensor() could not determine rows from provided inputs")
-            if cols == 0:
-                if total != 0:
-                    raise ValueError(
-                        f"Tensor data of length {total} cannot fill ({cols}) columns"
-                    )
-                rows = 0
-            else:
-                if total % cols != 0:
-                    raise ValueError(
-                        f"Tensor data of length {total} cannot fill ({cols}) columns"
-                    )
-                rows = total // cols
+            rows = _infer_missing_dimension(total, cols, known_label="columns")
         elif cols is None:
-            if rows == 0:
-                if total != 0:
-                    raise ValueError(
-                        f"Tensor data of length {total} cannot fill ({rows}) rows"
-                    )
-                cols = 0
-            else:
-                if total % rows != 0:
-                    raise ValueError(
-                        f"Tensor data of length {total} cannot fill ({rows}) rows"
-                    )
-                cols = total // rows
+            cols = _infer_missing_dimension(total, rows, known_label="rows")
         else:
             if rows * cols != total:
                 raise ValueError(
