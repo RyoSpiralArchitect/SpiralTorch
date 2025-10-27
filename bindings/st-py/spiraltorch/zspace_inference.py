@@ -1379,6 +1379,30 @@ class ZSpaceInferencePipeline:
             self.clear()
         return inference
 
+    def infer_and_step(
+        self,
+        trainer: Any,
+        *,
+        strategy: str | None = None,
+        weights: Sequence[float] | None = None,
+        clear: bool = True,
+        telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None = None,
+    ) -> tuple[ZSpaceInference, float]:
+        """Run :meth:`infer` and immediately feed the result into a trainer."""
+
+        step = getattr(trainer, "step", None)
+        if not callable(step):
+            raise TypeError("trainer must provide a callable 'step' method")
+
+        inference = self.infer(
+            strategy=strategy,
+            weights=weights,
+            clear=clear,
+            telemetry=telemetry,
+        )
+        loss = step(inference)
+        return inference, float(loss)
+
 
 def decode_zspace_embedding(z_state: Sequence[float], *, alpha: float = 0.35) -> ZSpaceDecoded:
     """Decode latent coordinates into a structured metric bundle."""
