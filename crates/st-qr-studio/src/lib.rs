@@ -1229,7 +1229,7 @@ mod tests {
     }
 
     #[test]
-    fn meta_layer_overrides_bridge_narrative() {
+    fn meta_layer_overrides_bridge_narrative_minimal() {
         let bridge = MaxwellDesireBridge::new()
             .with_channel("alpha", vec![(0, 1.0)])
             .unwrap();

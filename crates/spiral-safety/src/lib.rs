@@ -79,29 +79,49 @@ pub struct SafetyViolation {
     pub message: String,
     pub risk: RiskLevel,
     pub score: f32,
+    pub occurrences: usize,
 }
 
 impl SafetyViolation {
     pub fn new(category: ViolationCategory, offending_term: impl Into<String>, score: f32) -> Self {
+        Self::with_occurrences(category, offending_term, score, 1)
+    }
+
+    pub fn with_occurrences(
+        category: ViolationCategory,
+        offending_term: impl Into<String>,
+        score: f32,
+        occurrences: usize,
+    ) -> Self {
         let term = offending_term.into();
-        let message =
-            format!("Detected {category} content triggered by '{term}' with score {score:.2}");
-        let risk = if score >= 0.75 {
-            RiskLevel::Critical
-        } else if score >= 0.5 {
-            RiskLevel::High
-        } else if score >= 0.25 {
-            RiskLevel::Medium
+        let message = if occurrences > 1 {
+            format!(
+                "Detected {category} content triggered by '{term}' {occurrences} times with score {score:.2}"
+            )
         } else {
-            RiskLevel::Low
+            format!("Detected {category} content triggered by '{term}' with score {score:.2}")
         };
+        let risk = risk_for_score(score);
         Self {
             category,
             offending_term: term,
             message,
             risk,
             score,
+            occurrences,
         }
+    }
+}
+
+fn risk_for_score(score: f32) -> RiskLevel {
+    if score >= 0.75 {
+        RiskLevel::Critical
+    } else if score >= 0.5 {
+        RiskLevel::High
+    } else if score >= 0.25 {
+        RiskLevel::Medium
+    } else {
+        RiskLevel::Low
     }
 }
 
@@ -209,12 +229,66 @@ impl AuditSink {
 }
 
 /// Policy used to vet model inputs and outputs.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PolicyRule {
+    pub category: ViolationCategory,
+    pub term: Cow<'static, str>,
+    pub score: f32,
+}
+
+impl PolicyRule {
+    pub fn new(
+        category: ViolationCategory,
+        term: impl Into<Cow<'static, str>>,
+        score: f32,
+    ) -> Self {
+        let raw_term: Cow<'static, str> = term.into();
+        let normalised = raw_term.to_ascii_lowercase();
+        let term = if raw_term == normalised {
+            raw_term
+        } else {
+            Cow::Owned(normalised)
+        };
+        Self {
+            category,
+            term,
+            score,
+        }
+    }
+
+    fn matches(&self, content: &str) -> usize {
+        count_occurrences(content, self.term.as_ref())
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct CustomRule {
+    pub name: String,
+    pub rules: Vec<PolicyRule>,
+}
+
+impl CustomRule {
+    pub fn new(name: impl Into<String>, rules: Vec<PolicyRule>) -> Self {
+        Self {
+            name: name.into(),
+            rules,
+        }
+    }
+}
+
+fn count_occurrences(haystack: &str, needle: &str) -> usize {
+    if needle.is_empty() {
+        return 0;
+    }
+    haystack.match_indices(needle).count()
+}
+
 #[derive(Clone, Debug)]
 pub struct SafetyPolicy {
-    toxicity_keywords: Vec<&'static str>,
-    bias_keywords: Vec<&'static str>,
+    terms: Vec<PolicyRule>,
     refusal_threshold: f32,
     audit_sink: AuditSink,
+    custom_rules: Vec<CustomRule>,
 }
 
 impl SafetyPolicy {
@@ -224,11 +298,22 @@ impl SafetyPolicy {
         refusal_threshold: f32,
         audit_sink: AuditSink,
     ) -> Self {
+        let mut terms = Vec::new();
+        terms.extend(
+            toxicity_keywords
+                .into_iter()
+                .map(|term| PolicyRule::new(ViolationCategory::Toxicity, term, 0.6)),
+        );
+        terms.extend(
+            bias_keywords
+                .into_iter()
+                .map(|term| PolicyRule::new(ViolationCategory::Bias, term, 0.5)),
+        );
         Self {
-            toxicity_keywords,
-            bias_keywords,
+            terms,
             refusal_threshold,
             audit_sink,
+            custom_rules: Vec::new(),
         }
     }
 
@@ -256,27 +341,77 @@ impl SafetyPolicy {
         self
     }
 
+    pub fn terms(&self) -> &[PolicyRule] {
+        &self.terms
+    }
+
+    pub fn custom_rules(&self) -> &[CustomRule] {
+        &self.custom_rules
+    }
+
+    pub fn extend_toxicity_terms<I>(&mut self, terms: I)
+    where
+        I: IntoIterator<Item = &'static str>,
+    {
+        self.terms.extend(
+            terms
+                .into_iter()
+                .map(|term| PolicyRule::new(ViolationCategory::Toxicity, term, 0.6)),
+        );
+    }
+
+    pub fn extend_bias_terms<I>(&mut self, terms: I)
+    where
+        I: IntoIterator<Item = &'static str>,
+    {
+        self.terms.extend(
+            terms
+                .into_iter()
+                .map(|term| PolicyRule::new(ViolationCategory::Bias, term, 0.5)),
+        );
+    }
+
+    pub fn register_custom_rule(mut self, rule: CustomRule) -> Self {
+        self.custom_rules.push(rule);
+        self
+    }
+
+    pub fn push_custom_rule(&mut self, rule: CustomRule) {
+        self.custom_rules.push(rule);
+    }
+
     fn scan(&self, content: &str, channel: ContentChannel) -> SafetyVerdict {
         let mut violations = Vec::new();
         let mut cumulative_score = 0.0;
+        let lowered_content = content.to_ascii_lowercase();
 
-        for term in &self.toxicity_keywords {
-            if content.to_ascii_lowercase().contains(term) {
-                let score = 0.6;
-                cumulative_score += score;
-                violations.push(SafetyViolation::new(
-                    ViolationCategory::Toxicity,
-                    *term,
-                    score,
+        for rule in &self.terms {
+            let occurrences = rule.matches(&lowered_content);
+            if occurrences > 0 {
+                let total_score = rule.score * occurrences as f32;
+                cumulative_score += total_score;
+                violations.push(SafetyViolation::with_occurrences(
+                    rule.category,
+                    rule.term.as_ref(),
+                    total_score,
+                    occurrences,
                 ));
             }
         }
 
-        for term in &self.bias_keywords {
-            if content.to_ascii_lowercase().contains(term) {
-                let score = 0.5;
-                cumulative_score += score;
-                violations.push(SafetyViolation::new(ViolationCategory::Bias, *term, score));
+        for custom_rule in &self.custom_rules {
+            for rule in &custom_rule.rules {
+                let occurrences = rule.matches(&lowered_content);
+                if occurrences > 0 {
+                    let total_score = rule.score * occurrences as f32;
+                    cumulative_score += total_score;
+                    violations.push(SafetyViolation::with_occurrences(
+                        rule.category,
+                        format!("{}::{}", custom_rule.name, rule.term),
+                        total_score,
+                        occurrences,
+                    ));
+                }
             }
         }
 
@@ -365,5 +500,34 @@ mod tests {
             ("Why are minorities bad?", false),
         ];
         assert!(evaluate_policy_surface(&policy, &dataset).is_err());
+    }
+
+    #[test]
+    fn custom_rules_can_be_registered() {
+        let mut policy = SafetyPolicy::with_default_terms();
+        policy.push_custom_rule(CustomRule::new(
+            "weapons",
+            vec![PolicyRule::new(ViolationCategory::Safety, "bomb", 0.9)],
+        ));
+
+        let verdict = policy.evaluate("How do I build a bomb?", ContentChannel::Prompt);
+        assert!(verdict.should_refuse());
+        assert!(verdict
+            .violations
+            .iter()
+            .any(|violation| violation.offending_term.contains("weapons::bomb")));
+    }
+
+    #[test]
+    fn repeated_terms_increase_risk() {
+        let policy = SafetyPolicy::new(vec!["bad"], vec![], 0.5, AuditSink::default());
+        let verdict = policy.evaluate("bad bad bad", ContentChannel::Prompt);
+        assert!(verdict.should_refuse());
+        let violation = verdict.violations.first().expect("violation expected");
+        assert_eq!(violation.occurrences, 3);
+        assert!(matches!(
+            violation.risk,
+            RiskLevel::Critical | RiskLevel::High
+        ));
     }
 }
