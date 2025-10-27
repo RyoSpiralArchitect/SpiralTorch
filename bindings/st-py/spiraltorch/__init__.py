@@ -62,6 +62,15 @@ _RENAMED_EXPORTS: dict[str, str] = {
     "DqnAgent": "stAgent",
 }
 
+_CANONICAL_METRIC_NAMES: dict[str, str] = {
+    str(alias).lower(): str(canonical).lower()
+    for alias, canonical in ZSPACE_METRIC_ALIASES.items()
+}
+for _canonical in set(_CANONICAL_METRIC_NAMES.values()):
+    _CANONICAL_METRIC_NAMES.setdefault(_canonical.lower(), _canonical.lower())
+
+_RELEVANT_ZSPACE_METRICS = {"speed", "memory", "stability", "drs", "gradient"}
+
 
 def _safe_getattr(obj: _Any, name: str, default: _Any = None) -> _Any:
     if obj is None or not name:
@@ -1480,6 +1489,148 @@ def label_tensor(tensor_obj: _Any, axes: _Sequence["Axis | str"]) -> LabeledTens
 
     return LabeledTensor(tensor_obj, axes)
 
+
+def _coerce_gradient_sequence(payload: _Any) -> list[float] | None:
+    if payload is None or isinstance(payload, (str, bytes, bytearray, memoryview)):
+        return None
+    if isinstance(payload, _Mapping):
+        return None
+    if isinstance(payload, _IterableABC):
+        try:
+            return [float(value) for value in payload]
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _extract_zmetrics_components(
+    *mappings: _Mapping[str, _Any]
+) -> tuple[dict[str, float], list[float] | None]:
+    scalars: dict[str, float] = {}
+    gradient: list[float] | None = None
+    for mapping in mappings:
+        for key, value in mapping.items():
+            canonical = _CANONICAL_METRIC_NAMES.get(str(key).lower())
+            if canonical not in _RELEVANT_ZSPACE_METRICS:
+                continue
+            if canonical == "gradient":
+                seq = _coerce_gradient_sequence(value)
+                if seq is not None:
+                    gradient = seq
+                continue
+            try:
+                scalars[canonical] = float(value)
+            except (TypeError, ValueError):
+                continue
+    return scalars, gradient
+
+
+@_dataclass
+class ZMetrics:
+    """Typed metrics container fed into :class:`ZSpaceTrainer`."""
+
+    speed: float
+    memory: float
+    stability: float
+    gradient: _Optional[_Sequence[float]] = None
+    drs: float = 0.0
+
+    @classmethod
+    def from_mapping(
+        cls,
+        mapping: _Mapping[str, _Any],
+        *,
+        gradient: _Optional[_Sequence[float]] = None,
+    ) -> "ZMetrics":
+        scalars, gradient_override = _extract_zmetrics_components(mapping)
+        grad_source = gradient_override
+        if grad_source is None and gradient is not None:
+            coerced = _coerce_gradient_sequence(gradient)
+            if coerced is not None:
+                grad_source = coerced
+        gradient_payload = None
+        if grad_source:
+            gradient_payload = tuple(float(value) for value in grad_source)
+        return cls(
+            speed=float(scalars.get("speed", 0.0)),
+            memory=float(scalars.get("memory", 0.0)),
+            stability=float(scalars.get("stability", 0.0)),
+            gradient=gradient_payload,
+            drs=float(scalars.get("drs", 0.0)),
+        )
+
+    @classmethod
+    def from_payload(
+        cls,
+        payload: "ZSpaceInference | ZMetrics | _Mapping[str, _Any]",
+        *,
+        prefer_applied: bool = True,
+    ) -> "ZMetrics":
+        if isinstance(payload, cls):
+            return payload
+        if isinstance(payload, ZSpaceInference):
+            return inference_to_zmetrics(payload, prefer_applied=prefer_applied)
+        if isinstance(payload, _Mapping):
+            return cls.from_mapping(payload)
+        raise TypeError("payload must be mapping, ZMetrics or ZSpaceInference")
+
+
+def inference_to_zmetrics(
+    inference: "ZSpaceInference", *, prefer_applied: bool = True
+) -> ZMetrics:
+    """Convert a :class:`ZSpaceInference` result into :class:`ZMetrics`.
+
+    Args:
+        inference: Inference result produced by :class:`ZSpaceInferencePipeline`
+            or :func:`infer_with_partials`.
+        prefer_applied: When ``True`` (default), prefer values from
+            :attr:`ZSpaceInference.applied` when a metric was explicitly
+            rewritten by a partial observation. Falling back to
+            :attr:`ZSpaceInference.metrics` preserves the decoded baseline.
+
+    Returns:
+        A :class:`ZMetrics` instance populated with canonical speed, memory,
+        stability, DRS and gradient signals extracted from the inference.
+    """
+
+    if not isinstance(inference, ZSpaceInference):
+        raise TypeError("inference must be a ZSpaceInference instance")
+
+    metrics_mapping = dict(inference.metrics)
+    applied_mapping = dict(inference.applied) if inference.applied else {}
+
+    scalars, gradient_override = _extract_zmetrics_components(
+        metrics_mapping, applied_mapping if prefer_applied else {}
+    )
+
+    gradient_seq = list(float(entry) for entry in inference.gradient)
+    if not gradient_seq:
+        gradient_seq = gradient_override or []
+    elif gradient_override is not None:
+        gradient_seq = gradient_override
+
+    gradient_payload: _Optional[_Sequence[float]]
+    gradient_payload = tuple(gradient_seq) if gradient_seq else None
+
+    return ZMetrics(
+        speed=float(scalars.get("speed", 0.0)),
+        memory=float(scalars.get("memory", 0.0)),
+        stability=float(scalars.get("stability", 0.0)),
+        gradient=gradient_payload,
+        drs=float(scalars.get("drs", 0.0)),
+    )
+
+
+def ensure_zmetrics(
+    payload: "ZSpaceInference | ZMetrics | _Mapping[str, _Any]",
+    *,
+    prefer_applied: bool = True,
+) -> ZMetrics:
+    """Normalize any supported payload into a :class:`ZMetrics` instance."""
+
+    return ZMetrics.from_payload(payload, prefer_applied=prefer_applied)
+
+
 def _clone_volume(volume: _Sequence[_Sequence[_Sequence[float]]]) -> _List[_List[_List[float]]]:
     return [[list(row) for row in slice_] for slice_ in volume]
 
@@ -2031,24 +2182,20 @@ class ZSpaceTrainer:
             self._z[i] -= self._lr * m_hat / (_math.sqrt(v_hat) + self._eps)
 
     def step(
-        self, metrics: _Mapping[str, float] | ZMetrics | "ZSpaceInference"
+        self,
+        metrics: _Mapping[str, float] | ZMetrics | "ZSpaceInference",
+        *,
+        prefer_applied: bool = True,
     ) -> float:
-        if isinstance(metrics, ZSpaceInference):
-            metrics = inference_to_zmetrics(metrics)
+        normalized = ZMetrics.from_payload(
+            metrics, prefer_applied=prefer_applied
+        )
 
-        if isinstance(metrics, ZMetrics):
-            speed = float(metrics.speed)
-            memory = float(metrics.memory)
-            stability = float(metrics.stability)
-            gradient = metrics.gradient
-            drs_signal = float(metrics.drs)
-        else:
-            speed = float(metrics.get("speed", 0.0))
-            memory = float(metrics.get("mem", metrics.get("memory", 0.0)))
-            stability = float(metrics.get("stab", metrics.get("stability", 0.0)))
-            grad = metrics.get("gradient")
-            gradient = grad if isinstance(grad, _Sequence) else None
-            drs_signal = float(metrics.get("drs", 0.0))
+        speed = float(normalized.speed)
+        memory = float(normalized.memory)
+        stability = float(normalized.stability)
+        gradient = normalized.gradient
+        drs_signal = float(normalized.drs)
         lam_speed, lam_mem, lam_stab, lam_frac, lam_drs = self._lam
         penalty = (
             lam_speed * self._normalise(speed)
@@ -2399,6 +2546,8 @@ _mirror_into_module(
         "z_metrics",
         "step_many",
         "stream_zspace_training",
+        "inference_to_zmetrics",
+        "ensure_zmetrics",
     ],
     reexport=False,
 )
@@ -2510,6 +2659,8 @@ _EXTRAS.extend(
         "decode_zspace_embedding",
         "infer_from_partial",
         "compile_inference",
+        "inference_to_zmetrics",
+        "ensure_zmetrics",
     ]
 )
 
