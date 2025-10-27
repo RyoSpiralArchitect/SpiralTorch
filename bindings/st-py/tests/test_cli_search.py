@@ -104,3 +104,17 @@ def test_cli_surfaces_resource_errors(tmp_path: Path) -> None:
             "--max-trials",
             "1",
         ])
+
+
+def test_cli_rejects_non_mapping_config(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps([{"foo": "bar"}]))
+
+    with pytest.raises(TypeError, match=r"top-level must be an object \(mapping\)"):
+        cli_main([
+            "search",
+            "--config",
+            str(config_path),
+            "--max-trials",
+            "1",
+        ])
