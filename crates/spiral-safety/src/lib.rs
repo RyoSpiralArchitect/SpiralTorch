@@ -105,6 +105,65 @@ impl SafetyViolation {
     }
 }
 
+/// Keyword pattern that contributes to a policy verdict when present in the analysed content.
+#[derive(Clone, Debug)]
+pub struct PolicyTerm {
+    category: ViolationCategory,
+    keyword: String,
+    needle: String,
+    score: f32,
+    channels: Option<Vec<ContentChannel>>,
+}
+
+impl PolicyTerm {
+    /// Creates a new term with a case-insensitive keyword match.
+    pub fn new(category: ViolationCategory, keyword: impl Into<String>, score: f32) -> Self {
+        let keyword = keyword.into();
+        let needle = keyword.to_ascii_lowercase();
+        Self {
+            category,
+            keyword,
+            needle,
+            score,
+            channels: None,
+        }
+    }
+
+    /// Restrict a term to the provided content channels (prompt, response, or both).
+    pub fn for_channels(mut self, channels: impl IntoIterator<Item = ContentChannel>) -> Self {
+        let set: Vec<_> = channels.into_iter().collect();
+        self.channels = if set.is_empty() { None } else { Some(set) };
+        self
+    }
+
+    /// Whether the term applies to the given channel.
+    pub fn applies_to(&self, channel: ContentChannel) -> bool {
+        match &self.channels {
+            Some(channels) => channels.contains(&channel),
+            None => true,
+        }
+    }
+
+    /// Category associated with the term.
+    pub fn category(&self) -> ViolationCategory {
+        self.category
+    }
+
+    /// Score contribution for each detected occurrence.
+    pub fn score(&self) -> f32 {
+        self.score
+    }
+
+    /// Offending keyword surfaced in audit logs.
+    pub fn keyword(&self) -> &str {
+        &self.keyword
+    }
+
+    fn occurrence_count(&self, haystack: &str) -> usize {
+        haystack.match_indices(&self.needle).count()
+    }
+}
+
 /// Result of applying a policy filter to a piece of content.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SafetyVerdict {
@@ -211,8 +270,7 @@ impl AuditSink {
 /// Policy used to vet model inputs and outputs.
 #[derive(Clone, Debug)]
 pub struct SafetyPolicy {
-    toxicity_keywords: Vec<&'static str>,
-    bias_keywords: Vec<&'static str>,
+    terms: Vec<PolicyTerm>,
     refusal_threshold: f32,
     audit_sink: AuditSink,
 }
@@ -224,18 +282,60 @@ impl SafetyPolicy {
         refusal_threshold: f32,
         audit_sink: AuditSink,
     ) -> Self {
+        let mut terms = Vec::new();
+        terms.extend(
+            toxicity_keywords
+                .into_iter()
+                .map(|keyword| PolicyTerm::new(ViolationCategory::Toxicity, keyword, 0.6)),
+        );
+        terms.extend(
+            bias_keywords
+                .into_iter()
+                .map(|keyword| PolicyTerm::new(ViolationCategory::Bias, keyword, 0.5)),
+        );
         Self {
-            toxicity_keywords,
-            bias_keywords,
+            terms,
+            refusal_threshold,
+            audit_sink,
+        }
+    }
+
+    /// Creates a policy from the supplied keyword terms.
+    pub fn from_terms(
+        terms: Vec<PolicyTerm>,
+        refusal_threshold: f32,
+        audit_sink: AuditSink,
+    ) -> Self {
+        Self {
+            terms,
             refusal_threshold,
             audit_sink,
         }
     }
 
     pub fn with_default_terms() -> Self {
-        let toxicity = vec!["hate", "kill", "die", "stupid", "idiot"];
-        let bias = vec!["race", "gender", "religion", "minority", "minorities"];
-        Self::new(toxicity, bias, 0.5, AuditSink::default())
+        let terms = vec![
+            PolicyTerm::new(ViolationCategory::Toxicity, "hate", 0.6),
+            PolicyTerm::new(ViolationCategory::Toxicity, "kill", 0.7),
+            PolicyTerm::new(ViolationCategory::Toxicity, "die", 0.55),
+            PolicyTerm::new(ViolationCategory::Toxicity, "stupid", 0.4),
+            PolicyTerm::new(ViolationCategory::Toxicity, "idiot", 0.45),
+            PolicyTerm::new(ViolationCategory::Bias, "race", 0.5),
+            PolicyTerm::new(ViolationCategory::Bias, "gender", 0.45),
+            PolicyTerm::new(ViolationCategory::Bias, "religion", 0.5),
+            PolicyTerm::new(ViolationCategory::Bias, "minority", 0.5),
+            PolicyTerm::new(ViolationCategory::Bias, "minorities", 0.5),
+            PolicyTerm::new(ViolationCategory::Safety, "bomb", 0.7)
+                .for_channels([ContentChannel::Prompt, ContentChannel::Response]),
+            PolicyTerm::new(ViolationCategory::Safety, "suicide", 0.8),
+            PolicyTerm::new(ViolationCategory::Safety, "weapon", 0.65)
+                .for_channels([ContentChannel::Prompt]),
+            PolicyTerm::new(ViolationCategory::Safety, "explosive", 0.65)
+                .for_channels([ContentChannel::Prompt]),
+            PolicyTerm::new(ViolationCategory::Safety, "self-harm", 0.75),
+        ];
+
+        Self::from_terms(terms, 0.5, AuditSink::default())
     }
 
     pub fn audit_sink(&self) -> AuditSink {
@@ -245,6 +345,35 @@ impl SafetyPolicy {
     pub fn with_audit_sink(mut self, sink: AuditSink) -> Self {
         self.audit_sink = sink;
         self
+    }
+
+    /// Removes all accumulated audit events.
+    pub fn clear_audit_log(&self) {
+        self.audit_sink.clear();
+    }
+
+    /// Return the configured policy terms.
+    pub fn terms(&self) -> &[PolicyTerm] {
+        &self.terms
+    }
+
+    /// Adds a policy term and returns an updated policy.
+    pub fn with_term(mut self, term: PolicyTerm) -> Self {
+        self.terms.push(term);
+        self
+    }
+
+    /// Extends the set of policy terms in place.
+    pub fn extend_terms<I>(&mut self, terms: I)
+    where
+        I: IntoIterator<Item = PolicyTerm>,
+    {
+        self.terms.extend(terms);
+    }
+
+    /// Adds a policy term without consuming the policy.
+    pub fn push_term(&mut self, term: PolicyTerm) {
+        self.terms.push(term);
     }
 
     pub fn refusal_threshold(&self) -> f32 {
@@ -259,24 +388,22 @@ impl SafetyPolicy {
     fn scan(&self, content: &str, channel: ContentChannel) -> SafetyVerdict {
         let mut violations = Vec::new();
         let mut cumulative_score = 0.0;
+        let lowercase = content.to_ascii_lowercase();
 
-        for term in &self.toxicity_keywords {
-            if content.to_ascii_lowercase().contains(term) {
-                let score = 0.6;
-                cumulative_score += score;
-                violations.push(SafetyViolation::new(
-                    ViolationCategory::Toxicity,
-                    *term,
-                    score,
-                ));
+        for term in &self.terms {
+            if !term.applies_to(channel) {
+                continue;
             }
-        }
 
-        for term in &self.bias_keywords {
-            if content.to_ascii_lowercase().contains(term) {
-                let score = 0.5;
+            let matches = term.occurrence_count(&lowercase);
+            if matches == 0 {
+                continue;
+            }
+
+            for _ in 0..matches {
+                let score = term.score();
                 cumulative_score += score;
-                violations.push(SafetyViolation::new(ViolationCategory::Bias, *term, score));
+                violations.push(SafetyViolation::new(term.category(), term.keyword(), score));
             }
         }
 
@@ -365,5 +492,42 @@ mod tests {
             ("Why are minorities bad?", false),
         ];
         assert!(evaluate_policy_surface(&policy, &dataset).is_err());
+    }
+
+    #[test]
+    fn accumulates_multiple_occurrences() {
+        let policy = SafetyPolicy::with_default_terms().with_refusal_threshold(1.1);
+        let verdict = policy.evaluate("We should kill and kill again", ContentChannel::Prompt);
+        assert!(verdict.should_refuse());
+        assert!(verdict.score >= 1.4);
+        assert!(
+            verdict
+                .violations
+                .iter()
+                .filter(|v| v.offending_term == "kill")
+                .count()
+                >= 2
+        );
+
+        policy.clear_audit_log();
+        assert!(policy.audit_sink().snapshot().is_empty());
+    }
+
+    #[test]
+    fn channel_specific_terms_only_apply_when_expected() {
+        let policy = SafetyPolicy::from_terms(
+            vec![PolicyTerm::new(ViolationCategory::Safety, "bomb", 0.7)
+                .for_channels([ContentChannel::Prompt])],
+            0.5,
+            AuditSink::default(),
+        );
+
+        let prompt_verdict = policy.evaluate("How to build a bomb", ContentChannel::Prompt);
+        assert!(prompt_verdict.should_refuse());
+
+        let response_verdict = policy.evaluate("I will build a bomb", ContentChannel::Response);
+        assert!(response_verdict.allowed);
+
+        assert_eq!(policy.audit_sink().snapshot().len(), 2);
     }
 }
