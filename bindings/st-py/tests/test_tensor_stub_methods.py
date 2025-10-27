@@ -74,6 +74,9 @@ def test_tensor_python_backend_operations(stub_spiraltorch) -> None:
     sums = tensor.sum_axis0()
     assert sums == [5.0, 7.0, 9.0]
 
+    row_sums = tensor.sum_axis1()
+    assert row_sums == [6.0, 15.0]
+
 
 def test_tensor_cat_rows_shapes(stub_spiraltorch) -> None:
     Tensor = stub_spiraltorch.Tensor
