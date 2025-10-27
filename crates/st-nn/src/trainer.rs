@@ -3378,6 +3378,8 @@ mod tests {
             noise_density: 0.0,
             quaternion: [0.0; 4],
             rotation: [0.0; 9],
+            lie_log: [0.0; 3],
+            rotor_transport: [0.0; 3],
         };
         let seed_feedback = SoftlogicZFeedback {
             psi_total: 0.0,
@@ -3443,6 +3445,8 @@ mod tests {
             noise_density: 0.0,
             quaternion: [0.0; 4],
             rotation: [0.0; 9],
+            lie_log: [0.0; 3],
+            rotor_transport: [0.0; 3],
         };
         let feedback = SoftlogicZFeedback {
             psi_total: 0.0,
