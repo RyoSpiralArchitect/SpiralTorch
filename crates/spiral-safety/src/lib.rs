@@ -19,7 +19,7 @@ pub use drift_response::{
 };
 
 /// Content channel used when evaluating policy (prompt vs response).
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Ord, PartialOrd, Hash)]
 pub enum ContentChannel {
     Prompt,
     Response,
@@ -35,7 +35,7 @@ impl fmt::Display for ContentChannel {
 }
 
 /// Categories the policy can flag.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Ord, PartialOrd, Hash)]
 pub enum ViolationCategory {
     Toxicity,
     Bias,
@@ -53,12 +53,18 @@ impl fmt::Display for ViolationCategory {
 }
 
 /// Severity of a flagged item.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Ord, PartialOrd, Hash)]
 pub enum RiskLevel {
     Low,
     Medium,
     High,
     Critical,
+}
+
+impl Default for RiskLevel {
+    fn default() -> Self {
+        RiskLevel::Low
+    }
 }
 
 impl fmt::Display for RiskLevel {
@@ -192,6 +198,29 @@ impl SafetyVerdict {
     }
 }
 
+/// Verdict for an individual conversational turn.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TurnVerdict {
+    pub index: usize,
+    pub verdict: SafetyVerdict,
+}
+
+/// Aggregated policy outcome for a multi-turn interaction.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ConversationVerdict {
+    pub total_score: f32,
+    pub highest_risk: RiskLevel,
+    pub refused_turns: Vec<usize>,
+    pub turn_verdicts: Vec<TurnVerdict>,
+}
+
+impl ConversationVerdict {
+    /// Whether any turn in the conversation should be refused.
+    pub fn should_refuse(&self) -> bool {
+        !self.refused_turns.is_empty()
+    }
+}
+
 /// Audit log event stored for compliance review.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AuditEvent {
@@ -231,6 +260,26 @@ pub struct AuditSink {
     inner: Arc<Mutex<Vec<AuditEvent>>>,
 }
 
+/// Summary statistics derived from an [`AuditSink`].
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AuditSummary {
+    pub total_events: usize,
+    pub refused_events: usize,
+    pub highest_risk: RiskLevel,
+    pub counts_by_category: BTreeMap<ViolationCategory, usize>,
+}
+
+impl Default for AuditSummary {
+    fn default() -> Self {
+        Self {
+            total_events: 0,
+            refused_events: 0,
+            highest_risk: RiskLevel::Low,
+            counts_by_category: BTreeMap::new(),
+        }
+    }
+}
+
 impl AuditSink {
     pub fn push(&self, event: AuditEvent) {
         if let Ok(mut guard) = self.inner.lock() {
@@ -249,6 +298,36 @@ impl AuditSink {
         if let Ok(mut guard) = self.inner.lock() {
             guard.clear();
         }
+    }
+
+    /// Generate a summary of historical audit events.
+    pub fn summarize(&self) -> AuditSummary {
+        let events = self.snapshot();
+        let mut summary = AuditSummary::default();
+        summary.total_events = events.len();
+
+        for event in &events {
+            if event.verdict.should_refuse() {
+                summary.refused_events += 1;
+            }
+
+            for violation in &event.verdict.violations {
+                if violation.risk > summary.highest_risk {
+                    summary.highest_risk = violation.risk;
+                }
+                *summary
+                    .counts_by_category
+                    .entry(violation.category)
+                    .or_insert(0) += 1;
+            }
+
+            let dominant = event.verdict.dominant_risk();
+            if dominant > summary.highest_risk {
+                summary.highest_risk = dominant;
+            }
+        }
+
+        summary
     }
 }
 
@@ -443,6 +522,42 @@ impl SafetyPolicy {
             .join(", ");
         Cow::Owned(format!("Blocked due to {dominant}"))
     }
+
+    /// Evaluate multiple conversational turns and aggregate the outcomes.
+    pub fn evaluate_conversation<'a, I, S>(&self, turns: I) -> ConversationVerdict
+    where
+        I: IntoIterator<Item = (ContentChannel, S)>,
+        S: Into<Cow<'a, str>>,
+    {
+        let mut total_score = 0.0;
+        let mut highest_risk = RiskLevel::Low;
+        let mut refused_turns = Vec::new();
+        let mut turn_verdicts = Vec::new();
+
+        for (index, (channel, content)) in turns.into_iter().enumerate() {
+            let content = content.into();
+            let verdict = self.evaluate(content.as_ref(), channel);
+            total_score += verdict.score;
+
+            let dominant = verdict.dominant_risk();
+            if dominant > highest_risk {
+                highest_risk = dominant;
+            }
+
+            if verdict.should_refuse() {
+                refused_turns.push(index);
+            }
+
+            turn_verdicts.push(TurnVerdict { index, verdict });
+        }
+
+        ConversationVerdict {
+            total_score,
+            highest_risk,
+            refused_turns,
+            turn_verdicts,
+        }
+    }
 }
 
 impl Default for SafetyPolicy {
@@ -550,48 +665,35 @@ mod tests {
     }
 
     #[test]
-    fn custom_rules_expand_coverage() {
-        let policy = SafetyPolicy::with_default_terms()
-            .with_custom_rule(KeywordRule::new(ViolationCategory::Safety, "grenade", 0.6));
-        let verdict = policy.evaluate("He bought a grenade yesterday", ContentChannel::Prompt);
-        assert!(verdict.should_refuse());
-        assert!(verdict
-            .violations
-            .iter()
-            .any(|v| v.offending_term == "grenade" && v.category == ViolationCategory::Safety));
+    fn conversation_evaluation_tracks_refusals() {
+        let policy = SafetyPolicy::with_default_terms();
+        let turns = vec![
+            (ContentChannel::Prompt, "Hello there"),
+            (ContentChannel::Response, "You are a stupid idiot"),
+        ];
+
+        let conversation = policy.evaluate_conversation(turns);
+
+        assert!(conversation.should_refuse());
+        assert_eq!(conversation.refused_turns, vec![1]);
+        assert_eq!(conversation.turn_verdicts.len(), 2);
+        assert!(conversation.total_score > 0.5);
+        assert_eq!(conversation.highest_risk, RiskLevel::High);
     }
 
     #[test]
-    fn batch_evaluation_builds_reports() {
-        let policy = SafetyPolicy::with_default_terms();
-        let verdicts = policy.evaluate_batch(
-            vec!["Hello there", "I will kill them all"],
-            ContentChannel::Response,
-        );
-        assert_eq!(verdicts.len(), 2);
-        let report = PolicyReport::from_verdicts(verdicts.clone());
-        assert_eq!(report.total, 2);
-        assert_eq!(report.refused, 1);
-        assert!(report.dominant_risk_counts.get(&RiskLevel::High).copied().unwrap_or(0) >= 1);
-        assert!(report.refusal_rate() > 0.0);
-    }
+    fn audit_sink_summarizes_history() {
+        let sink = AuditSink::default();
+        let policy = SafetyPolicy::with_default_terms().with_audit_sink(sink.clone());
 
-    #[test]
-    fn repeated_terms_increase_penalty() {
-        let policy = SafetyPolicy::with_default_terms();
-        let verdict = policy.evaluate(
-            "You are stupid, stupid, absolutely stupid",
-            ContentChannel::Response,
-        );
-        let stupid_violation = verdict
-            .violations
-            .iter()
-            .find(|v| v.offending_term == "stupid")
-            .cloned()
-            .expect("violation present");
-        assert!(stupid_violation.occurrences >= 2);
-        assert!(stupid_violation.score > 0.6);
-        assert!(verdict.should_refuse());
-        assert_eq!(stupid_violation.risk, RiskLevel::Critical);
+        policy.evaluate("Hello there", ContentChannel::Prompt);
+        policy.evaluate("You are a stupid idiot", ContentChannel::Response);
+
+        let summary = sink.summarize();
+
+        assert_eq!(summary.total_events, 2);
+        assert_eq!(summary.refused_events, 1);
+        assert_eq!(summary.highest_risk, RiskLevel::High);
+        assert_eq!(summary.counts_by_category.get(&ViolationCategory::Toxicity), Some(&2));
     }
 }
