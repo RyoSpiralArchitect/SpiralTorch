@@ -2537,6 +2537,20 @@ impl Tensor {
         sums
     }
 
+    /// Returns the sum over columns for each row.
+    pub fn sum_axis1(&self) -> Vec<f32> {
+        let mut sums = vec![0.0; self.rows];
+        for r in 0..self.rows {
+            let offset = r * self.cols;
+            let mut total = 0.0f32;
+            for c in 0..self.cols {
+                total += self.data[offset + c];
+            }
+            sums[r] = total;
+        }
+        sums
+    }
+
     /// Concatenates tensors row-wise producing a new tensor whose row count is the sum
     /// of the inputs while preserving the shared column dimension.
     pub fn cat_rows(tensors: &[Tensor]) -> PureResult<Tensor> {

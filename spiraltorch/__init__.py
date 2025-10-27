@@ -610,6 +610,24 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
                     totals[c] += flat[base + c]
             return totals
 
+        def sum_axis1(self) -> list[float]:
+            rows = self._rows
+            if rows == 0:
+                return []
+            if self._backend == "numpy":
+                summed = self._to_numpy(copy=False).sum(axis=1)
+                return [float(value) for value in summed.tolist()]
+            cols = self._cols
+            totals = [0.0] * rows
+            flat = self._row_major_python()
+            for r in range(rows):
+                base = r * cols
+                row_total = 0.0
+                for c in range(cols):
+                    row_total += flat[base + c]
+                totals[r] = row_total
+            return totals
+
         def tolist(self):
             rows, cols = self._rows, self._cols
             if self._backend == "python":
