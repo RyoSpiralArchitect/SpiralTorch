@@ -11,6 +11,7 @@
 
 use std::cmp;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
 use wgpu::{
@@ -219,18 +220,18 @@ impl ReduceUniforms {
 pub struct Pipelines {
     pub fused_bind_layout: BindGroupLayout,
     pub reduce_bind_layout: BindGroupLayout,
-    pub fused: ComputePipeline,
-    pub reduce: ComputePipeline,
+    pub fused: Arc<ComputePipeline>,
+    pub reduce: Arc<ComputePipeline>,
     pub geometry: Geometry,
 }
 
 impl Pipelines {
     pub fn fused_dispatch<'a>(&'a self) -> &'a ComputePipeline {
-        &self.fused
+        self.fused.as_ref()
     }
 
     pub fn reduce_dispatch<'a>(&'a self) -> &'a ComputePipeline {
-        &self.reduce
+        self.reduce.as_ref()
     }
 
     pub fn geometry(&self) -> Geometry {

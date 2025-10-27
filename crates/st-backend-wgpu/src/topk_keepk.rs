@@ -7,6 +7,7 @@
 //! This is a scaffold; integrate with your existing WGPU backend device/queue management.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use wgpu::{ComputePipeline, Device};
 
@@ -21,10 +22,10 @@ pub enum MergeKind {
 
 #[derive(Debug)]
 pub struct Pipelines {
-    pub keepk_subgroup: Option<ComputePipeline>,
-    pub keepk_workgroup: ComputePipeline,
-    pub keepk_subgroup_1ce: Option<ComputePipeline>,
-    pub keepk_subgroup_1ce_large: Option<ComputePipeline>,
+    pub keepk_subgroup: Option<Arc<ComputePipeline>>,
+    pub keepk_workgroup: Arc<ComputePipeline>,
+    pub keepk_subgroup_1ce: Option<Arc<ComputePipeline>>,
+    pub keepk_subgroup_1ce_large: Option<Arc<ComputePipeline>>,
 }
 
 impl Pipelines {
@@ -39,14 +40,14 @@ impl Pipelines {
             MergeKind::Bitonic | MergeKind::Shared | MergeKind::Warp => {
                 if prefer_large {
                     self.keepk_subgroup_1ce_large
-                        .as_ref()
-                        .or_else(|| self.keepk_subgroup_1ce.as_ref())
-                        .or(self.keepk_subgroup.as_ref())
+                        .as_deref()
+                        .or_else(|| self.keepk_subgroup_1ce.as_deref())
+                        .or_else(|| self.keepk_subgroup.as_deref())
                 } else {
                     self.keepk_subgroup_1ce
-                        .as_ref()
-                        .or_else(|| self.keepk_subgroup_1ce_large.as_ref())
-                        .or(self.keepk_subgroup.as_ref())
+                        .as_deref()
+                        .or_else(|| self.keepk_subgroup_1ce_large.as_deref())
+                        .or_else(|| self.keepk_subgroup.as_deref())
                 }
             }
         }

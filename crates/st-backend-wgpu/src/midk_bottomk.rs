@@ -6,6 +6,7 @@
 //! Pipeline assembly helpers for MidK/BottomK compaction kernels.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
 use thiserror::Error;
@@ -18,19 +19,19 @@ use crate::{ShaderCache, ShaderLoadError};
 
 #[derive(Debug)]
 pub struct Pipelines {
-    pub scan_tiles: ComputePipeline,
-    pub row_prefix: ComputePipeline,
-    pub apply_fallback: ComputePipeline,
-    pub apply_subgroup: Option<ComputePipeline>,
-    pub apply_subgroup_v2: Option<ComputePipeline>,
+    pub scan_tiles: Arc<ComputePipeline>,
+    pub row_prefix: Arc<ComputePipeline>,
+    pub apply_fallback: Arc<ComputePipeline>,
+    pub apply_subgroup: Option<Arc<ComputePipeline>>,
+    pub apply_subgroup_v2: Option<Arc<ComputePipeline>>,
 }
 
 impl Pipelines {
     /// Pick the best available subgroup variant, falling back to the portable pipeline.
     pub fn best_subgroup(&self) -> Option<&ComputePipeline> {
         self.apply_subgroup_v2
-            .as_ref()
-            .or(self.apply_subgroup.as_ref())
+            .as_deref()
+            .or_else(|| self.apply_subgroup.as_deref())
     }
 }
 
@@ -177,7 +178,7 @@ pub fn encode_into(
     encode_stage(
         device,
         encoder,
-        &pipelines.scan_tiles,
+        pipelines.scan_tiles.as_ref(),
         &params_buffer,
         &args,
         tiles_x,
@@ -186,7 +187,7 @@ pub fn encode_into(
     encode_stage(
         device,
         encoder,
-        &pipelines.row_prefix,
+        pipelines.row_prefix.as_ref(),
         &params_buffer,
         &args,
         tiles_x,
@@ -300,19 +301,19 @@ fn select_apply_pipeline<'a>(
     strategy: ApplyStrategy,
 ) -> &'a ComputePipeline {
     match strategy {
-        ApplyStrategy::Fallback => &pipelines.apply_fallback,
+        ApplyStrategy::Fallback => pipelines.apply_fallback.as_ref(),
         ApplyStrategy::Subgroup => pipelines
             .apply_subgroup
-            .as_ref()
-            .unwrap_or(&pipelines.apply_fallback),
+            .as_deref()
+            .unwrap_or(pipelines.apply_fallback.as_ref()),
         ApplyStrategy::SubgroupV2 => pipelines
             .apply_subgroup_v2
-            .as_ref()
-            .or(pipelines.apply_subgroup.as_ref())
-            .unwrap_or(&pipelines.apply_fallback),
+            .as_deref()
+            .or_else(|| pipelines.apply_subgroup.as_deref())
+            .unwrap_or(pipelines.apply_fallback.as_ref()),
         ApplyStrategy::Auto => pipelines
             .best_subgroup()
-            .unwrap_or(&pipelines.apply_fallback),
+            .unwrap_or(pipelines.apply_fallback.as_ref()),
     }
 }
 
