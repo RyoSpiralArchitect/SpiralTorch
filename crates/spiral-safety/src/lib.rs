@@ -111,35 +111,41 @@ pub struct SafetyViolation {
     pub message: String,
     pub risk: RiskLevel,
     pub score: f32,
-    #[serde(default = "default_occurrences")]
-    pub occurrences: usize,
+    pub occurrences: u32,
+    pub guidance: Option<String>,
 }
 
 impl SafetyViolation {
     pub fn new(category: ViolationCategory, offending_term: impl Into<String>, score: f32) -> Self {
-        Self::with_occurrences(category, offending_term, score, 1)
+        Self::with_occurrences(category, offending_term, 1, score, None)
     }
 
     pub fn with_occurrences(
         category: ViolationCategory,
         offending_term: impl Into<String>,
+        occurrences: u32,
         score: f32,
-        occurrences: usize,
+        guidance: Option<String>,
     ) -> Self {
-        let occurrences = occurrences.max(1);
         let term = offending_term.into();
-        let message = if occurrences > 1 {
-            format!(
-                "Detected {category} content triggered by '{term}' appearing {occurrences} times with score {score:.2}"
-            )
+        let per_occurrence = if occurrences > 0 {
+            score / occurrences as f32
         } else {
-            format!("Detected {category} content triggered by '{term}' with score {score:.2}")
+            score
         };
-        let risk = if score >= 0.75 {
+        let hits = if occurrences > 1 {
+            format!(" ({occurrences} hits @ {per_occurrence:.2} ea)")
+        } else {
+            String::new()
+        };
+        let message = format!(
+            "Detected {category} content triggered by '{term}' with score {score:.2}{hits}"
+        );
+        let risk = if score >= 1.25 {
             RiskLevel::Critical
-        } else if score >= 0.5 {
+        } else if score >= 0.75 {
             RiskLevel::High
-        } else if score >= 0.25 {
+        } else if score >= 0.4 {
             RiskLevel::Medium
         } else {
             RiskLevel::Low
@@ -151,7 +157,94 @@ impl SafetyViolation {
             risk,
             score,
             occurrences,
+            guidance,
         }
+    }
+
+    pub fn guidance(&self) -> Option<&str> {
+        self.guidance.as_deref()
+    }
+}
+
+/// Keyword pattern that contributes to a policy verdict when present in the analysed content.
+#[derive(Clone, Debug)]
+pub struct PolicyTerm {
+    category: ViolationCategory,
+    keyword: String,
+    needle: String,
+    score: f32,
+    channels: Option<Vec<ContentChannel>>,
+    guidance: Option<String>,
+}
+
+impl PolicyTerm {
+    /// Creates a new term with a case-insensitive keyword match.
+    pub fn new(category: ViolationCategory, keyword: impl Into<String>, score: f32) -> Self {
+        let keyword = keyword.into();
+        let needle = keyword.to_ascii_lowercase();
+        Self {
+            category,
+            keyword,
+            needle,
+            score,
+            channels: None,
+            guidance: None,
+        }
+    }
+
+    /// Restrict a term to the provided content channels (prompt, response, or both).
+    pub fn for_channels(mut self, channels: impl IntoIterator<Item = ContentChannel>) -> Self {
+        let set: Vec<_> = channels.into_iter().collect();
+        self.channels = if set.is_empty() { None } else { Some(set) };
+        self
+    }
+
+    /// Provide moderation guidance to surface alongside violations triggered by this term.
+    pub fn with_guidance(mut self, guidance: impl Into<String>) -> Self {
+        self.guidance = Some(guidance.into());
+        self
+    }
+
+    /// Whether the term applies to the given channel.
+    pub fn applies_to(&self, channel: ContentChannel) -> bool {
+        match &self.channels {
+            Some(channels) => channels.contains(&channel),
+            None => true,
+        }
+    }
+
+    /// Category associated with the term.
+    pub fn category(&self) -> ViolationCategory {
+        self.category
+    }
+
+    /// Score contribution for each detected occurrence.
+    pub fn score(&self) -> f32 {
+        self.score
+    }
+
+    /// Offending keyword surfaced in audit logs.
+    pub fn keyword(&self) -> &str {
+        &self.keyword
+    }
+
+    fn occurrence_count(&self, haystack: &str) -> usize {
+        haystack.match_indices(&self.needle).count()
+    }
+
+    fn guidance(&self) -> Option<&str> {
+        self.guidance.as_deref()
+    }
+
+    fn to_violation(&self, occurrences: u32) -> SafetyViolation {
+        let total_score = self.score * occurrences as f32;
+        SafetyViolation::with_occurrences(
+            self.category,
+            self.keyword.clone(),
+            occurrences,
+            total_score,
+            self.guidance().map(|g| g.to_string()),
+        )
     }
 }
 
@@ -434,30 +527,53 @@ impl SafetyPolicy {
             terms,
             refusal_threshold,
             audit_sink,
+        }
+    }
+
+    /// Creates a policy from the supplied keyword terms.
+    pub fn from_terms(
+        terms: Vec<PolicyTerm>,
+        refusal_threshold: f32,
+        audit_sink: AuditSink,
+    ) -> Self {
+        Self {
+            terms,
+            refusal_threshold,
+            audit_sink,
             custom_rules: Vec::new(),
         }
     }
 
     pub fn with_default_terms() -> Self {
         let terms = vec![
-            PolicyTerm::new(ViolationCategory::Toxicity, "hate", 0.6),
-            PolicyTerm::new(ViolationCategory::Toxicity, "kill", 0.7),
+            PolicyTerm::new(ViolationCategory::Toxicity, "hate", 0.6).with_guidance(
+                "De-escalate conversation and remind users of respectful conduct policies.",
+            ),
+            PolicyTerm::new(ViolationCategory::Toxicity, "kill", 0.7).with_guidance(
+                "Escalate to human review if the user expresses intent to harm others.",
+            ),
             PolicyTerm::new(ViolationCategory::Toxicity, "die", 0.55),
             PolicyTerm::new(ViolationCategory::Toxicity, "stupid", 0.4),
             PolicyTerm::new(ViolationCategory::Toxicity, "idiot", 0.45),
-            PolicyTerm::new(ViolationCategory::Bias, "race", 0.5),
+            PolicyTerm::new(ViolationCategory::Bias, "race", 0.5)
+                .with_guidance("Nudge the assistant toward inclusive, factual responses."),
             PolicyTerm::new(ViolationCategory::Bias, "gender", 0.45),
             PolicyTerm::new(ViolationCategory::Bias, "religion", 0.5),
             PolicyTerm::new(ViolationCategory::Bias, "minority", 0.5),
             PolicyTerm::new(ViolationCategory::Bias, "minorities", 0.5),
             PolicyTerm::new(ViolationCategory::Safety, "bomb", 0.7)
-                .for_channels([ContentChannel::Prompt, ContentChannel::Response]),
-            PolicyTerm::new(ViolationCategory::Safety, "suicide", 0.8),
+                .for_channels([ContentChannel::Prompt, ContentChannel::Response])
+                .with_guidance("Block instructions on weapon construction and alert moderators."),
+            PolicyTerm::new(ViolationCategory::Safety, "suicide", 0.8)
+                .with_guidance("Redirect to crisis resources and provide supportive language."),
             PolicyTerm::new(ViolationCategory::Safety, "weapon", 0.65)
-                .for_channels([ContentChannel::Prompt]),
+                .for_channels([ContentChannel::Prompt])
+                .with_guidance("Avoid providing facilitation for weapons acquisition."),
             PolicyTerm::new(ViolationCategory::Safety, "explosive", 0.65)
-                .for_channels([ContentChannel::Prompt]),
-            PolicyTerm::new(ViolationCategory::Safety, "self-harm", 0.75),
+                .for_channels([ContentChannel::Prompt])
+                .with_guidance("Decline to detail explosive manufacturing guidance."),
+            PolicyTerm::new(ViolationCategory::Safety, "self-harm", 0.75)
+                .with_guidance("Respond empathetically and surface well-being support options."),
         ];
 
         Self::from_terms(terms, 0.5, AuditSink::default())
@@ -579,19 +695,10 @@ impl SafetyPolicy {
                 continue;
             }
 
-            for _ in 0..matches {
-                let score = term.score();
-                cumulative_score += score;
-                violations.push(SafetyViolation::new(term.category(), term.keyword(), score));
-            }
-            let total_score = rule.score * occurrences as f32;
-            cumulative_score += total_score;
-            violations.push(SafetyViolation::with_occurrences(
-                rule.category,
-                rule.term.as_ref(),
-                total_score,
-                occurrences,
-            ));
+            let occurrences = matches as u32;
+            let violation = term.to_violation(occurrences);
+            cumulative_score += violation.score;
+            violations.push(violation);
         }
 
         let allowed = cumulative_score < self.refusal_threshold;
@@ -777,14 +884,13 @@ mod tests {
         let verdict = policy.evaluate("We should kill and kill again", ContentChannel::Prompt);
         assert!(verdict.should_refuse());
         assert!(verdict.score >= 1.4);
-        assert!(
-            verdict
-                .violations
-                .iter()
-                .filter(|v| v.offending_term == "kill")
-                .count()
-                >= 2
-        );
+        let kill = verdict
+            .violations
+            .iter()
+            .find(|v| v.offending_term == "kill")
+            .expect("kill violation present");
+        assert_eq!(kill.occurrences, 2);
+        assert!(kill.guidance().is_some());
 
         policy.clear_audit_log();
         assert!(policy.audit_sink().snapshot().is_empty());
@@ -806,5 +912,28 @@ mod tests {
         assert!(response_verdict.allowed);
 
         assert_eq!(policy.audit_sink().snapshot().len(), 2);
+    }
+
+    #[test]
+    fn guidance_propagates_from_terms() {
+        let policy = SafetyPolicy::from_terms(
+            vec![PolicyTerm::new(ViolationCategory::Toxicity, "jerk", 0.4)
+                .with_guidance("Encourage respectful conversation and set expectations.")],
+            0.3,
+            AuditSink::default(),
+        );
+
+        let verdict = policy.evaluate("You are such a jerk", ContentChannel::Response);
+        assert!(verdict.should_refuse());
+        let violation = verdict
+            .violations
+            .first()
+            .expect("guidance violation present");
+        assert_eq!(violation.occurrences, 1);
+        assert_eq!(
+            violation.guidance(),
+            Some("Encourage respectful conversation and set expectations.")
+        );
+        assert!(violation.message.contains("jerk"));
     }
 }
