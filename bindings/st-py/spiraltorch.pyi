@@ -683,6 +683,7 @@ class ZMetrics:
     stability: float
     gradient: Optional[Sequence[float]]
     drs: float
+    telemetry: Optional[Mapping[str, float]]
 
 class ZSpaceDecoded:
     z_state: Tuple[float, ...]
@@ -703,6 +704,7 @@ class ZSpaceInference:
     confidence: float
     prior: ZSpaceDecoded
     applied: Mapping[str, object]
+    telemetry: Optional[ZSpaceTelemetryFrame]
 
     def as_dict(self) -> Dict[str, object]: ...
 
@@ -757,6 +759,33 @@ def infer_with_trainer(
     smoothing: float = ...,
     alpha: float | None = ...,
 ) -> ZSpaceInference: ...
+
+
+def inference_to_mapping(
+    inference: ZSpaceInference | Mapping[str, object] | ZMetrics,
+    *,
+    prefer_applied: bool = ...,
+    canonical: bool = ...,
+    include_gradient: bool = ...,
+) -> Dict[str, object]: ...
+
+
+def inference_to_zmetrics(
+    inference: ZSpaceInference | Mapping[str, object] | ZMetrics,
+    *,
+    prefer_applied: bool = ...,
+    include_telemetry: bool = ...,
+) -> ZMetrics: ...
+
+
+def prepare_trainer_step_payload(
+    trainer: object,
+    inference: ZSpaceInference,
+    *,
+    payload: None | str | Callable[[ZSpaceInference], object] = ...,
+    prefer_applied: bool = ...,
+    canonical_mapping: bool = ...,
+) -> object: ...
 
 
 class ZSpaceTrainer:

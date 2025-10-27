@@ -5,8 +5,11 @@ when meanings shift.  SpiralTorch now includes a Python helper and Z-space
 training hooks so you can surface existential load, frame hazards, and safe
 radii directly in language optimisation loops.
 
-This note unifies the conceptual sketch shared during research discussions with
-the concrete API available in `tools/python/drift_response_semantics.py`.
+Historically the helper lived in `tools/python/drift_response_semantics.py`,
+while the newer Drift-Response Linguistics (DRL) module evolved richer
+diagnostics.  The semantics helper is now a thin adapter over the DRL engine, so
+imports keep working while sharing the same data classes and computations.
+【F:tools/python/drift_response_semantics.py†L1-L122】【F:tools/python/drift_response_linguistics.py†L6-L198】
 
 ## 1. Objects and Frames
 
@@ -27,7 +30,9 @@ For every frame the helper expects:
 
 In code these appear as `FrameState` fields, while the word-level container
 holds the definition entropy \(H_{\text{def}}(w)\), timing signal, and the
-trade-off constant \(\lambda\).【F:tools/python/drift_response_semantics.py†L61-L113】
+trade-off constant \(\lambda\). Both the semantics shim and linguistics module
+share the same dataclasses, so downstream code can mix and match imports without
+conversion.【F:tools/python/drift_response_linguistics.py†L71-L134】
 
 ## 2. Existential Load and Safe Radius
 
@@ -48,14 +53,16 @@ The helper calculates two core quantities:
 
 These metrics emerge from `analyse_word`, which also measures the hazard count
 \(\mathrm{CHI}_w\) and toggles strict mode when multiple frames flare up or the
-safe radius collapses.【F:tools/python/drift_response_semantics.py†L115-L191】
+safe radius collapses.  Passing optional `direction_queries` now unlocks the
+directional signature machinery introduced in the DRL stack without changing the
+semantics interface.【F:tools/python/drift_response_semantics.py†L64-L122】【F:tools/python/drift_response_linguistics.py†L339-L420】
 
 ## 3. Triple-Product Amplifier
 
 To capture the “曖昧 × 含意 × 時勢” amplification, each frame hazard is scaled by
 \(\exp(\beta H_{\text{def}} \phi_{w,f} s_w)\).  When timing is calm the
 multiplier becomes 1.  Large timing spikes stay bounded via a \(\pm 30\)
-clamp, matching the *三重積アンプリファイア* described in the field notes.【F:tools/python/drift_response_semantics.py†L96-L111】
+clamp, matching the *三重積アンプリファイア* described in the field notes.【F:tools/python/drift_response_linguistics.py†L200-L242】
 
 ## 4. Aggregation for Training
 
@@ -72,7 +79,7 @@ The penalty adds the existential load, frame count, and a radius surcharge when
 radii dip below the configured tolerance.  Strict mode applies a 1.25× boost so
 schedulers can flip into hardened policies without rewiring the trainer.
 Aggregating multiple words is a simple sum via `aggregate_penalty`.
-【F:tools/python/drift_response_semantics.py†L193-L224】
+【F:tools/python/drift_response_linguistics.py†L420-L478】
 
 Rust services tap the exact same flow through
 `spiral_safety::drift_response`, which mirrors the helper with serde-friendly

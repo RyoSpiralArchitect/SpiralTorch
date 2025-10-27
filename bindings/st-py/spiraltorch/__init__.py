@@ -154,12 +154,16 @@ def build_manifest() -> dict[str, _Any]:
     return dict(BUILD_MANIFEST)
 
 from .zspace_inference import (
+    ZMetrics,
     ZSpaceDecoded,
     ZSpaceInference,
     ZSpacePosterior,
     ZSpacePartialBundle,
     ZSpaceTelemetryFrame,
     ZSpaceInferencePipeline,
+    inference_to_mapping,
+    inference_to_zmetrics,
+    prepare_trainer_step_payload,
     canvas_partial_from_snapshot,
     canvas_coherence_partial,
     elliptic_partial_from_telemetry,
