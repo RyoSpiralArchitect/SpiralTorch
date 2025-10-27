@@ -541,14 +541,12 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             return self._backend
 
         def tolist(self):
-            rows, cols = self.shape()
+            rows, cols = self._rows, self._cols
             if self._backend == "python":
                 flat = list(self._data)
-            else:
-                flat = self._data.reshape(-1).tolist()
-            if rows == 0 or cols == 0:
-                return [[] for _ in range(rows)]
-            return [flat[i * cols : (i + 1) * cols] for i in range(rows)]
+                matrix = (flat[r * cols : (r + 1) * cols] for r in range(rows))
+                return [row[:] for row in matrix]
+            return self._data.reshape(rows, cols).tolist()
 
         def __matmul__(self, other) -> "Tensor":  # pragma: no cover - convenience wrapper
             if isinstance(other, Tensor):
