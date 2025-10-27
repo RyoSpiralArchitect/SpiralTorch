@@ -104,12 +104,82 @@ for _name, _doc in _PREDECLARED_SUBMODULES:
     setattr(_parent_module, _name, _module)
     globals()[_name] = _module
 
-if "spiral_rl" not in sys.modules:
-    _shim = _types.ModuleType("spiral_rl")
-    # 参照される両方の候補名を用意しておく（実体は後で本物に差し替え）
-    _shim.DqnAgent = type("DqnAgent", (), {})  # placeholder
-    _shim.PyDqnAgent = type("PyDqnAgent", (), {})  # placeholder
-    sys.modules["spiral_rl"] = _shim
+_STUB_GUIDANCE = (
+    "SpiralTorch reinforcement learning components require the native extension. "
+    "Please build the native extension (for example via `maturin develop` or by "
+    "installing a wheel that bundles it)."
+)
+
+
+def _raise_native_extension_required(member: str) -> None:
+    raise RuntimeError(
+        f"`{member}` is a stub shim: {_STUB_GUIDANCE}"
+    )
+
+
+class _SpiralRLAgentStub:
+    """Stub implementation exposed when the SpiralTorch RL extension is missing."""
+
+    __slots__ = ()
+    __module__ = "spiral_rl"
+
+    def __init__(self, *_args: _Any, **_kwargs: _Any) -> None:
+        _raise_native_extension_required("spiral_rl.stAgent.__init__")
+
+    def select_action(self, *_args: _Any, **_kwargs: _Any) -> _Any:
+        _raise_native_extension_required("spiral_rl.stAgent.select_action")
+
+    def select_actions(self, *_args: _Any, **_kwargs: _Any) -> _Any:
+        _raise_native_extension_required("spiral_rl.stAgent.select_actions")
+
+    def update(self, *_args: _Any, **_kwargs: _Any) -> None:
+        _raise_native_extension_required("spiral_rl.stAgent.update")
+
+    def update_batch(self, *_args: _Any, **_kwargs: _Any) -> None:
+        _raise_native_extension_required("spiral_rl.stAgent.update_batch")
+
+    @property
+    def epsilon(self) -> float:
+        _raise_native_extension_required("spiral_rl.stAgent.epsilon")
+
+    def set_epsilon(self, *_args: _Any, **_kwargs: _Any) -> None:
+        _raise_native_extension_required("spiral_rl.stAgent.set_epsilon")
+
+    def set_exploration(self, *_args: _Any, **_kwargs: _Any) -> None:
+        _raise_native_extension_required("spiral_rl.stAgent.set_exploration")
+
+    def state_dict(self) -> dict[str, _Any]:
+        _raise_native_extension_required("spiral_rl.stAgent.state_dict")
+
+    def load_state_dict(self, *_args: _Any, **_kwargs: _Any) -> None:
+        _raise_native_extension_required("spiral_rl.stAgent.load_state_dict")
+
+
+class _SpiralRLStubModule(_types.ModuleType):
+    __all__ = ("stAgent", "DqnAgent", "PyDqnAgent")
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            name,
+            "Stub module for SpiralTorch reinforcement learning components. "
+            "Build the native extension to enable the real implementation.",
+        )
+        self.stAgent = _SpiralRLAgentStub
+        self.DqnAgent = _SpiralRLAgentStub
+        self.PyDqnAgent = _SpiralRLAgentStub
+
+
+def _install_spiral_rl_stub() -> None:
+    module_name = f"{__name__}.spiral_rl"
+    stub = _SpiralRLStubModule(module_name)
+    globals()["spiral_rl"] = stub
+    sys.modules[module_name] = stub
+    sys.modules.setdefault("spiral_rl", stub)
+
+
+if "spiral_rl" not in sys.modules or not hasattr(globals().get("spiral_rl"), "stAgent"):
+    _install_spiral_rl_stub()
+# 参照される両方の候補名を用意しておく（実体は後で本物に差し替え）
 # ついでに第三者パッケージの `rl` が入り込む事故を防止
 if "rl" not in sys.modules:
     sys.modules["rl"] = _types.ModuleType("rl")
@@ -121,8 +191,18 @@ except ModuleNotFoundError as exc:
         raise
     try:
         _rs = import_module("spiraltorch.spiraltorch_native")
-    except ModuleNotFoundError:
-        _rs = import_module("spiraltorch_native")
+    except ModuleNotFoundError as _native_exc:
+        try:
+            _rs = import_module("spiraltorch_native")
+        except ModuleNotFoundError as _final_exc:
+            if _native_exc.name not in {
+                "spiraltorch.spiraltorch_native",
+                "spiraltorch_native",
+            }:
+                raise
+            if _final_exc.name not in {"spiraltorch.spiraltorch_native", "spiraltorch_native"}:
+                raise
+            _rs = None
 
 # --- begin: promote real rl submodule & alias DqnAgent->stAgent ---
 try:
