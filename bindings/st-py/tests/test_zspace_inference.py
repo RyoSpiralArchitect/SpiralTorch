@@ -67,6 +67,17 @@ def test_infer_from_partial_overrides_requested_metrics(partial):
     assert math.isclose(sum(result.barycentric), 1.0, rel_tol=1e-6)
 
 
+def test_infer_from_partial_accepts_mapping_proxy():
+    vector = [0.18, -0.07, 0.29, -0.14]
+    gradient_mapping = types.MappingProxyType({0: 0.3, 1: -0.15, 2: 0.05, 3: -0.02})
+    partial = types.MappingProxyType({"stab": 0.55, "gradient": gradient_mapping})
+
+    result = infer_from_partial(vector, partial)
+
+    assert math.isclose(result.metrics["stability"], 0.55)
+    assert result.gradient == [0.3, -0.15, 0.05, -0.02]
+
+
 def test_posterior_project_matches_helper():
     vector = [0.42, 0.1, -0.25, 0.08]
     partial = {"speed": 0.1, "mem": 0.05}
