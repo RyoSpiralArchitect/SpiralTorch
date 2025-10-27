@@ -26,6 +26,7 @@ __all__ = [
     "blend_zspace_partials",
     "canvas_partial_from_snapshot",
     "canvas_coherence_partial",
+    "elliptic_partial_from_telemetry",
     "infer_canvas_snapshot",
     "infer_canvas_transformer",
     "coherence_partial_from_diagnostics",
@@ -37,6 +38,100 @@ __all__ = [
     "infer_weights_from_dlpack",
     "infer_weights_from_compat",
 ]
+
+
+_METRIC_ALIASES: Mapping[str, str] = MappingProxyType(
+    {
+        "speed": "speed",
+        "velocity": "speed",
+        "mem": "memory",
+        "memory": "memory",
+        "stab": "stability",
+        "stability": "stability",
+        "frac": "frac",
+        "frac_reg": "frac",
+        "fractality": "frac",
+        "drs": "drs",
+        "drift": "drs",
+        "gradient": "gradient",
+        "canvas_energy": "canvas_energy",
+        "canvas_mean": "canvas_mean",
+        "canvas_peak": "canvas_peak",
+        "canvas_balance": "canvas_balance",
+        "canvas_l1": "canvas_l1",
+        "canvas_l2": "canvas_l2",
+        "canvas_linf": "canvas_linf",
+        "canvas_pixels": "canvas_pixels",
+        "canvas_patch_energy": "canvas_patch_energy",
+        "canvas_patch_mean": "canvas_patch_mean",
+        "canvas_patch_peak": "canvas_patch_peak",
+        "canvas_patch_pixels": "canvas_patch_pixels",
+        "canvas_patch_balance": "canvas_patch_balance",
+        "hypergrad_norm": "hypergrad_norm",
+        "hypergrad_balance": "hypergrad_balance",
+        "hypergrad_mean": "hypergrad_mean",
+        "hypergrad_l1": "hypergrad_l1",
+        "hypergrad_l2": "hypergrad_l2",
+        "hypergrad_linf": "hypergrad_linf",
+        "realgrad_norm": "realgrad_norm",
+        "realgrad_balance": "realgrad_balance",
+        "realgrad_mean": "realgrad_mean",
+        "realgrad_l1": "realgrad_l1",
+        "realgrad_l2": "realgrad_l2",
+        "realgrad_linf": "realgrad_linf",
+        "coherence_mean": "coherence_mean",
+        "coherence_entropy": "coherence_entropy",
+        "coherence_energy_ratio": "coherence_energy_ratio",
+        "coherence_z_bias": "coherence_z_bias",
+        "coherence_fractional_order": "coherence_fractional_order",
+        "coherence_channels": "coherence_channels",
+        "coherence_preserved": "coherence_preserved",
+        "coherence_discarded": "coherence_discarded",
+        "coherence_dominant": "coherence_dominant",
+        "coherence_peak": "coherence_peak",
+        "coherence_weight_entropy": "coherence_weight_entropy",
+        "coherence_response_peak": "coherence_response_peak",
+        "coherence_response_mean": "coherence_response_mean",
+        "coherence_strength": "coherence_strength",
+        "coherence_prosody": "coherence_prosody",
+        "coherence_articulation": "coherence_articulation",
+        "import_l1": "import_l1",
+        "import_l2": "import_l2",
+        "import_linf": "import_linf",
+        "import_mean": "import_mean",
+        "import_variance": "import_variance",
+        "import_energy": "import_energy",
+        "import_count": "import_count",
+        "import_amplitude": "import_amplitude",
+        "import_balance": "import_balance",
+        "import_focus": "import_focus",
+        "elliptic_curvature": "elliptic_curvature",
+        "curvature_radius": "elliptic_curvature",
+        "elliptic_curvature_radius": "elliptic_curvature",
+        "elliptic_geodesic": "elliptic_geodesic",
+        "geodesic_radius": "elliptic_geodesic",
+        "elliptic_normalized": "elliptic_normalized",
+        "normalized_radius": "elliptic_normalized",
+        "elliptic_alignment": "elliptic_alignment",
+        "spin_alignment": "elliptic_alignment",
+        "elliptic_bias": "elliptic_bias",
+        "normal_bias": "elliptic_bias",
+        "elliptic_sheet_position": "elliptic_sheet_position",
+        "sheet_position": "elliptic_sheet_position",
+        "elliptic_sheet_index": "elliptic_sheet_index",
+        "sheet_index": "elliptic_sheet_index",
+        "elliptic_sheet_count": "elliptic_sheet_count",
+        "sheet_count": "elliptic_sheet_count",
+        "elliptic_sector": "elliptic_sector",
+        "topological_sector": "elliptic_sector",
+        "elliptic_homology": "elliptic_homology",
+        "homology_index": "elliptic_homology",
+        "elliptic_resonance": "elliptic_resonance",
+        "resonance_heat": "elliptic_resonance",
+        "elliptic_noise": "elliptic_noise",
+        "noise_density": "elliptic_noise",
+    }
+)
 _METRIC_ALIASES: Mapping[str, str] = ZSPACE_METRIC_ALIASES
 
 
@@ -131,6 +226,131 @@ def _merge_telemetry_payloads(
         if mapping:
             merged.update(mapping)
     return merged
+
+
+_ELLIPTIC_SAMPLE_KEYS = {
+    "curvature_radius",
+    "geodesic_radius",
+    "normalized_radius",
+    "spin_alignment",
+    "sheet_index",
+    "sheet_position",
+    "normal_bias",
+    "rotor_transport",
+}
+
+_ELLIPTIC_ATTRIBUTE_NAMES = (
+    "curvature_radius",
+    "geodesic_radius",
+    "normalized_radius",
+    "spin_alignment",
+    "sheet_index",
+    "sheet_position",
+    "normal_bias",
+    "sheet_count",
+    "topological_sector",
+    "homology_index",
+    "resonance_heat",
+    "noise_density",
+    "rotor_transport",
+    "flow_vector",
+    "lie_log",
+)
+
+_ELLIPTIC_METRIC_SOURCES = {
+    "elliptic_curvature": "curvature_radius",
+    "elliptic_geodesic": "geodesic_radius",
+    "elliptic_normalized": "normalized_radius",
+    "elliptic_alignment": "spin_alignment",
+    "elliptic_bias": "normal_bias",
+    "elliptic_sheet_position": "sheet_position",
+    "elliptic_sheet_index": "sheet_index",
+    "elliptic_sheet_count": "sheet_count",
+    "elliptic_sector": "topological_sector",
+    "elliptic_homology": "homology_index",
+    "elliptic_resonance": "resonance_heat",
+    "elliptic_noise": "noise_density",
+}
+
+_ELLIPTIC_VECTOR_CANDIDATES = (
+    "rotor_transport",
+    "flow_vector",
+    "lie_log",
+)
+
+
+def _iter_elliptic_samples(candidate: Any) -> Iterable[Any]:
+    stack = [candidate]
+    while stack:
+        current = stack.pop()
+        if current is None:
+            continue
+        if isinstance(current, (str, bytes, bytearray)):
+            continue
+        if isinstance(current, Mapping):
+            if any(key in current for key in _ELLIPTIC_SAMPLE_KEYS):
+                yield current
+            else:
+                stack.extend(current.values())
+            continue
+        if hasattr(current, "curvature_radius") or hasattr(current, "as_dict"):
+            yield current
+            continue
+        if isinstance(current, Iterable):
+            stack.extend(current)
+
+
+def _elliptic_payload_mapping(sample: Any) -> dict[str, Any]:
+    if isinstance(sample, Mapping):
+        return dict(sample)
+    as_dict = getattr(sample, "as_dict", None)
+    if callable(as_dict):
+        try:
+            payload = as_dict()
+            if isinstance(payload, Mapping):
+                return dict(payload)
+        except Exception:
+            pass
+    payload: dict[str, Any] = {}
+    for name in _ELLIPTIC_ATTRIBUTE_NAMES:
+        if hasattr(sample, name):
+            try:
+                value = getattr(sample, name)
+            except Exception:
+                continue
+            payload[name] = value
+    return payload
+
+
+def _coerce_float_list(candidate: Any) -> list[float]:
+    if candidate is None:
+        return []
+    if hasattr(candidate, "tolist"):
+        try:
+            return _coerce_float_list(candidate.tolist())
+        except Exception:
+            pass
+    if hasattr(candidate, "numpy"):
+        try:
+            return _coerce_float_list(candidate.numpy())
+        except Exception:
+            pass
+    if isinstance(candidate, (bytes, bytearray, str)):
+        return []
+    if isinstance(candidate, Mapping):
+        iterable = candidate.values()
+    else:
+        try:
+            iterable = iter(candidate)
+        except TypeError:
+            return []
+    result: list[float] = []
+    for value in iterable:
+        try:
+            result.append(float(value))
+        except (TypeError, ValueError):
+            return []
+    return result
 
 
 def _collect_bundle_telemetry(
@@ -549,6 +769,129 @@ def blend_zspace_partials(
     return merged
 
 
+def _aggregate_values(values: Sequence[float], mode: str) -> float:
+    if not values:
+        return 0.0
+    if mode == "max":
+        return max(values)
+    if mode == "min":
+        return min(values)
+    if mode == "last":
+        return values[-1]
+    if mode == "median":
+        ordered = sorted(values)
+        mid = len(ordered) // 2
+        if len(ordered) % 2:
+            return ordered[mid]
+        return 0.5 * (ordered[mid - 1] + ordered[mid])
+    if mode == "sum":
+        return sum(values)
+    return sum(values) / len(values)
+
+
+def elliptic_partial_from_telemetry(
+    telemetry: Any,
+    *,
+    bundle_weight: float = 1.0,
+    origin: str | None = "elliptic",
+    telemetry_prefix: str = "elliptic",
+    aggregate: str = "mean",
+    gradient_source: str = "rotor_transport",
+    extra_telemetry: Mapping[str, Any] | None = None,
+) -> ZSpacePartialBundle:
+    """Convert elliptic telemetry samples into a :class:`ZSpacePartialBundle`."""
+
+    samples = [
+        mapping
+        for sample in _iter_elliptic_samples(telemetry)
+        for mapping in [_elliptic_payload_mapping(sample)]
+        if mapping
+    ]
+    if not samples:
+        raise ValueError("elliptic telemetry payload is empty")
+
+    mode = aggregate.lower()
+    if mode not in {"mean", "max", "min", "last", "median", "sum"}:
+        raise ValueError(f"unsupported aggregate mode '{aggregate}' for elliptic telemetry")
+
+    metric_values: dict[str, list[float]] = {key: [] for key in _ELLIPTIC_METRIC_SOURCES}
+    gradient_vectors: list[list[float]] = []
+
+    for payload in samples:
+        for canonical, source in _ELLIPTIC_METRIC_SOURCES.items():
+            value = payload.get(source)
+            if value is None:
+                continue
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                continue
+            metric_values[canonical].append(numeric)
+
+        vector_candidate: Any | None = payload.get(gradient_source) if gradient_source else None
+        if vector_candidate is None:
+            for candidate in _ELLIPTIC_VECTOR_CANDIDATES:
+                vector_candidate = payload.get(candidate)
+                if vector_candidate is not None:
+                    break
+        gradient = _coerce_float_list(vector_candidate)
+        if gradient:
+            gradient_vectors.append(gradient)
+
+    partial: dict[str, Any] = {}
+    summary_values: list[float] = []
+    for key, values in metric_values.items():
+        if not values:
+            continue
+        summary_values.extend(values)
+        partial[key] = _aggregate_values(values, mode)
+
+    if not partial:
+        raise ValueError("no elliptic metrics could be derived from telemetry")
+
+    if gradient_vectors:
+        length = max(len(vector) for vector in gradient_vectors)
+        if length > 0:
+            accumulator = [0.0] * length
+            for vector in gradient_vectors:
+                for idx in range(length):
+                    value = vector[idx] if idx < len(vector) else 0.0
+                    accumulator[idx] += value
+            count = len(gradient_vectors)
+            partial["gradient"] = [accumulator[idx] / count for idx in range(length)]
+
+    telemetry_sources: list[Mapping[str, Any]] = list(samples)
+    if extra_telemetry is not None:
+        telemetry_sources.append(extra_telemetry)
+
+    telemetry_map: dict[str, float] = {}
+    if telemetry_sources:
+        merged = _merge_telemetry_payloads(*telemetry_sources)
+        if telemetry_prefix:
+            telemetry_map = {f"{telemetry_prefix}.{key}": value for key, value in merged.items()}
+        else:
+            telemetry_map = dict(merged)
+
+    if summary_values:
+        stats = _vector_stats(summary_values)
+        prefix = telemetry_prefix or "elliptic"
+        telemetry_map.setdefault(f"{prefix}.mean", stats["mean"])
+        telemetry_map.setdefault(f"{prefix}.variance", stats["variance"])
+        telemetry_map.setdefault(f"{prefix}.energy", stats["energy"])
+        telemetry_map.setdefault(f"{prefix}.amplitude", stats["amplitude"])
+        telemetry_map.setdefault(f"{prefix}.balance", stats["balance"])
+        telemetry_map.setdefault(f"{prefix}.focus", stats["focus"])
+        telemetry_map.setdefault(f"{prefix}.count", stats["count"])
+
+    weight = max(0.0, float(bundle_weight))
+    return ZSpacePartialBundle(
+        partial,
+        weight=weight,
+        origin=origin,
+        telemetry=telemetry_map or None,
+    )
+
+
 def _barycentric_from_metrics(metrics: Mapping[str, float]) -> tuple[float, float, float]:
     speed = float(metrics.get("speed", 0.0))
     memory = float(metrics.get("memory", 0.0))
@@ -913,6 +1256,64 @@ class ZSpaceInferencePipeline:
             )
         self._partials.append(bundle)
         return bundle
+
+    def add_elliptic_telemetry(
+        self,
+        telemetry: Any,
+        *,
+        bundle_weight: float = 1.0,
+        origin: str | None = "elliptic",
+        telemetry_prefix: str = "elliptic",
+        aggregate: str = "mean",
+        gradient_source: str = "rotor_transport",
+        extra_telemetry: Mapping[str, Any] | None = None,
+    ) -> ZSpacePartialBundle:
+        """Register elliptic telemetry samples as a partial observation."""
+
+        bundle = elliptic_partial_from_telemetry(
+            telemetry,
+            bundle_weight=bundle_weight,
+            origin=origin,
+            telemetry_prefix=telemetry_prefix,
+            aggregate=aggregate,
+            gradient_source=gradient_source,
+            extra_telemetry=extra_telemetry,
+        )
+        return self.add_partial(bundle)
+
+    def add_elliptic_autograd(
+        self,
+        warp: Any,
+        orientation: Any,
+        *,
+        bundle_weight: float = 1.0,
+        origin: str | None = "elliptic",
+        telemetry_prefix: str = "elliptic",
+        aggregate: str = "mean",
+        gradient_source: str = "rotor_transport",
+        extra_telemetry: Mapping[str, Any] | None = None,
+        return_features: bool = False,
+    ) -> ZSpacePartialBundle | tuple[Any, ZSpacePartialBundle]:
+        """Run the elliptic warp and queue its bundle for inference."""
+
+        from .elliptic import elliptic_warp_partial
+
+        result = elliptic_warp_partial(
+            warp,
+            orientation,
+            bundle_weight=bundle_weight,
+            origin=origin,
+            telemetry_prefix=telemetry_prefix,
+            aggregate=aggregate,
+            gradient_source=gradient_source,
+            extra_telemetry=extra_telemetry,
+            return_features=return_features,
+        )
+        if return_features:
+            features, bundle = result
+            self.add_partial(bundle)
+            return features, bundle
+        return self.add_partial(result)
 
     def add_canvas_snapshot(self, snapshot: Any, **kwargs: Any) -> ZSpacePartialBundle:
         """Derive and register metrics from a Canvas snapshot."""

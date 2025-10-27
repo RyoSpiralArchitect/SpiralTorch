@@ -153,6 +153,7 @@ from .zspace_inference import (
     ZSpaceInferencePipeline,
     canvas_partial_from_snapshot,
     canvas_coherence_partial,
+    elliptic_partial_from_telemetry,
     coherence_partial_from_diagnostics,
     decode_zspace_embedding,
     blend_zspace_partials,
@@ -173,6 +174,7 @@ from .elliptic import (
     EllipticWarpFunction,
     elliptic_warp_autograd,
     elliptic_warp_features,
+    elliptic_warp_partial,
 )
 
 # 追加API（Rust側でエクスポート済みのやつだけ拾う）
