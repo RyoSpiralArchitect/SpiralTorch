@@ -98,10 +98,18 @@ impl KeywordRule {
             score,
         }
     }
-}
 
-fn default_occurrences() -> usize {
-    1
+    fn needle(&self) -> Cow<'_, str> {
+        match &self.term {
+            Cow::Borrowed(term) => Cow::Owned(term.to_ascii_lowercase()),
+            Cow::Owned(term) => Cow::Owned(term.to_ascii_lowercase()),
+        }
+    }
+
+    fn occurrence_count(&self, haystack: &str) -> usize {
+        let needle = self.needle();
+        haystack.match_indices(needle.as_ref()).count()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -245,65 +253,6 @@ impl PolicyTerm {
             total_score,
             self.guidance().map(|g| g.to_string()),
         )
-    }
-}
-
-/// Keyword pattern that contributes to a policy verdict when present in the analysed content.
-#[derive(Clone, Debug)]
-pub struct PolicyTerm {
-    category: ViolationCategory,
-    keyword: String,
-    needle: String,
-    score: f32,
-    channels: Option<Vec<ContentChannel>>,
-}
-
-impl PolicyTerm {
-    /// Creates a new term with a case-insensitive keyword match.
-    pub fn new(category: ViolationCategory, keyword: impl Into<String>, score: f32) -> Self {
-        let keyword = keyword.into();
-        let needle = keyword.to_ascii_lowercase();
-        Self {
-            category,
-            keyword,
-            needle,
-            score,
-            channels: None,
-        }
-    }
-
-    /// Restrict a term to the provided content channels (prompt, response, or both).
-    pub fn for_channels(mut self, channels: impl IntoIterator<Item = ContentChannel>) -> Self {
-        let set: Vec<_> = channels.into_iter().collect();
-        self.channels = if set.is_empty() { None } else { Some(set) };
-        self
-    }
-
-    /// Whether the term applies to the given channel.
-    pub fn applies_to(&self, channel: ContentChannel) -> bool {
-        match &self.channels {
-            Some(channels) => channels.contains(&channel),
-            None => true,
-        }
-    }
-
-    /// Category associated with the term.
-    pub fn category(&self) -> ViolationCategory {
-        self.category
-    }
-
-    /// Score contribution for each detected occurrence.
-    pub fn score(&self) -> f32 {
-        self.score
-    }
-
-    /// Offending keyword surfaced in audit logs.
-    pub fn keyword(&self) -> &str {
-        &self.keyword
-    }
-
-    fn occurrence_count(&self, haystack: &str) -> usize {
-        haystack.match_indices(&self.needle).count()
     }
 }
 
@@ -514,19 +463,7 @@ impl SafetyPolicy {
             terms,
             refusal_threshold,
             audit_sink,
-        }
-    }
-
-    /// Creates a policy from the supplied keyword terms.
-    pub fn from_terms(
-        terms: Vec<PolicyTerm>,
-        refusal_threshold: f32,
-        audit_sink: AuditSink,
-    ) -> Self {
-        Self {
-            terms,
-            refusal_threshold,
-            audit_sink,
+            custom_rules: Vec::new(),
         }
     }
 
@@ -630,7 +567,11 @@ impl SafetyPolicy {
     where
         I: IntoIterator<Item = &'static str>,
     {
-        self.toxicity_keywords.extend(terms);
+        self.terms.extend(
+            terms
+                .into_iter()
+                .map(|keyword| PolicyTerm::new(ViolationCategory::Toxicity, keyword, 0.6)),
+        );
         self
     }
 
@@ -638,7 +579,11 @@ impl SafetyPolicy {
     where
         I: IntoIterator<Item = &'static str>,
     {
-        self.bias_keywords.extend(terms);
+        self.terms.extend(
+            terms
+                .into_iter()
+                .map(|keyword| PolicyTerm::new(ViolationCategory::Bias, keyword, 0.5)),
+        );
         self
     }
 
@@ -657,27 +602,6 @@ impl SafetyPolicy {
 
     pub fn custom_rules(&self) -> &[KeywordRule] {
         &self.custom_rules
-    }
-
-    fn record_violation(
-        violations: &mut Vec<SafetyViolation>,
-        cumulative_score: &mut f32,
-        category: ViolationCategory,
-        term: &str,
-        base_score: f32,
-        occurrences: usize,
-    ) {
-        if occurrences == 0 {
-            return;
-        }
-        let total_score = base_score * occurrences as f32;
-        *cumulative_score += total_score;
-        violations.push(SafetyViolation::with_occurrences(
-            category,
-            term,
-            total_score,
-            occurrences,
-        ));
     }
 
     fn scan(&self, content: &str, channel: ContentChannel) -> SafetyVerdict {
@@ -699,6 +623,24 @@ impl SafetyPolicy {
             let violation = term.to_violation(occurrences);
             cumulative_score += violation.score;
             violations.push(violation);
+        }
+
+        for rule in &self.custom_rules {
+            let matches = rule.occurrence_count(&lowercase);
+            if matches == 0 {
+                continue;
+            }
+
+            let occurrences = matches as u32;
+            let total_score = rule.score * occurrences as f32;
+            cumulative_score += total_score;
+            violations.push(SafetyViolation::with_occurrences(
+                rule.category,
+                rule.term.as_ref(),
+                occurrences,
+                total_score,
+                None,
+            ));
         }
 
         let allowed = cumulative_score < self.refusal_threshold;
