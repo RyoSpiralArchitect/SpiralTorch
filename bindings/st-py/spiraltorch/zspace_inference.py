@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import inspect
 import math
 import sys
 from dataclasses import dataclass
 from collections.abc import Iterable
-from typing import Any, Dict, Mapping, Sequence
+from typing import Any, Callable, Dict, Mapping, Sequence
 from types import MappingProxyType
 
 from ._zspace_aliases import ZSPACE_METRIC_ALIASES
@@ -1378,6 +1379,62 @@ class ZSpaceInferencePipeline:
         if clear:
             self.clear()
         return inference
+
+    def infer_and_step(
+        self,
+        trainer: Any,
+        *,
+        strategy: str | None = None,
+        weights: Sequence[float] | None = None,
+        clear: bool = True,
+        telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None = None,
+        prefer_applied: bool = True,
+        adapter: Callable[[ZSpaceInference], Any] | None = None,
+    ) -> tuple[ZSpaceInference, float]:
+        """Run :meth:`infer` and immediately feed the result into a trainer.
+
+        Args:
+            trainer: Object exposing a ``step`` method.
+            strategy: Optional blend strategy override.
+            weights: Optional blend weights.
+            clear: Whether to clear buffered partials after inference.
+            telemetry: Additional telemetry forwarded to the runtime.
+            prefer_applied: Forward preference for applied overrides when the
+                trainer supports the ``prefer_applied`` keyword (e.g. the
+                Python :class:`~spiraltorch.ZSpaceTrainer`).
+            adapter: Optional callable that receives the inference result and
+                returns the payload passed into ``trainer.step``.
+        """
+
+        step = getattr(trainer, "step", None)
+        if not callable(step):
+            raise TypeError("trainer must provide a callable 'step' method")
+
+        inference = self.infer(
+            strategy=strategy,
+            weights=weights,
+            clear=clear,
+            telemetry=telemetry,
+        )
+        payload = adapter(inference) if adapter is not None else inference
+
+        call_kwargs: Dict[str, Any] = {}
+        if adapter is None:
+            try:
+                signature = inspect.signature(step)
+            except (TypeError, ValueError):
+                signature = None
+            if signature is not None and "prefer_applied" in signature.parameters:
+                call_kwargs["prefer_applied"] = prefer_applied
+
+        try:
+            loss = step(payload, **call_kwargs)
+        except TypeError as exc:
+            if call_kwargs and "unexpected keyword" in str(exc).lower():
+                loss = step(payload)
+            else:
+                raise exc
+        return inference, float(loss)
 
 
 def decode_zspace_embedding(z_state: Sequence[float], *, alpha: float = 0.35) -> ZSpaceDecoded:
