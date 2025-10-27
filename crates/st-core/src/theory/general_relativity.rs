@@ -1796,10 +1796,9 @@ impl CurvatureDiagnostics {
         }
 
         let det = metric.determinant();
-        let volume = det.abs().sqrt();
         let volume = metric
             .volume_element()
-            .unwrap_or_else(|| metric.determinant().abs().sqrt());
+            .unwrap_or_else(|| det.abs().sqrt());
 
         let mut epsilon_lower = [[[[0.0; DIM]; DIM]; DIM]; DIM];
         for mu in 0..DIM {
