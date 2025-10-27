@@ -5,9 +5,11 @@
 
 use crate::plan::RankPlanner;
 use crate::{PureResult, Tensor};
+use st_core::backend::unison_heuristics::Choice;
 use st_core::ops::rank_entry::RankPlan;
 use st_core::ops::zspace_round::{self, RoundtableBand, RoundtableError};
 use st_tensor::TensorError;
+use std::collections::HashMap;
 
 /// Configuration used to derive the A/B/C roundtable schedule.
 #[derive(Debug, Clone, Copy)]
@@ -148,6 +150,55 @@ impl RoundtableSchedule {
         }
     }
 
+    /// Applies knob overrides produced by the Autopilot runtime.
+    ///
+    /// Keys may optionally be scoped to a specific band using prefixes such as
+    /// `"above."`, `"here."`, or `"beneath."`. Unscoped keys are applied to all
+    /// bands. Unknown keys are ignored so manual overrides can mix with future
+    /// knob additions without breaking older builds.
+    pub fn apply_knob_overrides(&mut self, overrides: &HashMap<String, String>) {
+        if overrides.is_empty() {
+            return;
+        }
+
+        for (raw_key, raw_value) in overrides {
+            let value = raw_value.trim();
+            if value.is_empty() {
+                continue;
+            }
+
+            let key_lower = raw_key.trim().to_ascii_lowercase();
+            let (targets, knob_key) = if let Some(rest) = key_lower.strip_prefix("above.") {
+                (OverrideTarget::specific(OverrideBand::Above), rest)
+            } else if let Some(rest) = key_lower.strip_prefix("here.") {
+                (OverrideTarget::specific(OverrideBand::Here), rest)
+            } else if let Some(rest) = key_lower.strip_prefix("beneath.") {
+                (OverrideTarget::specific(OverrideBand::Beneath), rest)
+            } else {
+                (OverrideTarget::all(), key_lower.as_str())
+            };
+
+            let canonical = canonical_knob_key(knob_key);
+            if canonical.is_empty() {
+                continue;
+            }
+
+            for band in targets.into_iter() {
+                match band {
+                    OverrideBand::Above => {
+                        apply_choice_override(&mut self.above.choice, &canonical, value)
+                    }
+                    OverrideBand::Here => {
+                        apply_choice_override(&mut self.here.choice, &canonical, value)
+                    }
+                    OverrideBand::Beneath => {
+                        apply_choice_override(&mut self.beneath.choice, &canonical, value)
+                    }
+                }
+            }
+        }
+    }
+
     /// Returns the TopK plan (Above band).
     pub fn above(&self) -> &RankPlan {
         &self.above
@@ -263,6 +314,138 @@ impl RoundtableSchedule {
     #[cfg(feature = "collapse")]
     pub fn collapse_enabled(&self) -> bool {
         self.collapse_enabled
+    }
+}
+
+#[derive(Clone, Copy)]
+enum OverrideBand {
+    Above,
+    Here,
+    Beneath,
+}
+
+struct OverrideTarget(Vec<OverrideBand>);
+
+impl OverrideTarget {
+    fn all() -> Self {
+        Self(vec![
+            OverrideBand::Above,
+            OverrideBand::Here,
+            OverrideBand::Beneath,
+        ])
+    }
+
+    fn specific(band: OverrideBand) -> Self {
+        Self(vec![band])
+    }
+}
+
+impl IntoIterator for OverrideTarget {
+    type Item = OverrideBand;
+    type IntoIter = std::vec::IntoIter<OverrideBand>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+fn canonical_knob_key(key: &str) -> String {
+    key.chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .collect::<String>()
+}
+
+fn apply_choice_override(choice: &mut Choice, key: &str, value: &str) {
+    match key {
+        "wg" | "workgroup" => {
+            if let Some(parsed) = parse_u32(value) {
+                choice.wg = parsed.max(1);
+            }
+        }
+        "kl" | "lanes" => {
+            if let Some(parsed) = parse_u32(value) {
+                choice.kl = parsed.max(1);
+            }
+        }
+        "ch" | "channelstride" => {
+            if let Some(parsed) = parse_u32(value) {
+                choice.ch = parsed;
+            }
+        }
+        "mk" | "mergekind" => {
+            if let Some(parsed) = parse_merge_kind(value) {
+                choice.mk = parsed;
+            }
+        }
+        "mkd" | "mergedetail" => {
+            if let Some(parsed) = parse_merge_detail(value) {
+                choice.mkd = parsed;
+            }
+        }
+        "tile" | "topktile" | "toptile" => {
+            if let Some(parsed) = parse_u32(value) {
+                choice.tile = parsed.max(1);
+            }
+        }
+        "ctile" | "compactiontile" | "midtile" | "bottomtile" => {
+            if let Some(parsed) = parse_u32(value) {
+                choice.ctile = parsed.max(1);
+            }
+        }
+        "subgroup" => {
+            if let Some(parsed) = parse_bool(value) {
+                choice.subgroup = parsed;
+            }
+        }
+        "ffttile" | "ffttilecols" | "fftcolumns" => {
+            if let Some(parsed) = parse_u32(value) {
+                choice.fft_tile = parsed.max(1);
+            }
+        }
+        "fftradix" => {
+            if let Some(parsed) = parse_u32(value) {
+                choice.fft_radix = parsed.clamp(2, 4);
+            }
+        }
+        "fftsegments" | "fftseg" => {
+            if let Some(parsed) = parse_u32(value) {
+                choice.fft_segments = parsed.max(1);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn parse_u32(value: &str) -> Option<u32> {
+    value.trim().parse::<u32>().ok()
+}
+
+fn parse_bool(value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+fn parse_merge_kind(value: &str) -> Option<u32> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "bitonic" => Some(0),
+        "shared" => Some(1),
+        "warp" => Some(2),
+        other => other.parse::<u32>().ok(),
+    }
+}
+
+fn parse_merge_detail(value: &str) -> Option<u32> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "auto" => Some(0),
+        "heap" => Some(1),
+        "kway" => Some(2),
+        "bitonic" => Some(3),
+        "warpheap" | "warp_heap" => Some(4),
+        "warpbitonic" | "warp_bitonic" => Some(5),
+        other => other.parse::<u32>().ok(),
     }
 }
 

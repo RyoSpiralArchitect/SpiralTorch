@@ -47,6 +47,19 @@ mod model {
         pub latency_p95: f32,
     }
 
+    impl BenchmarkStats {
+        /// Relative throughput speedup compared to `baseline`.
+        pub fn throughput_speedup(&self, baseline: &BenchmarkStats) -> f32 {
+            let denom = baseline.throughput_mean.max(f32::EPSILON);
+            self.throughput_mean / denom
+        }
+
+        /// Mean latency delta (positive values indicate slower execution than `baseline`).
+        pub fn latency_delta(&self, baseline: &BenchmarkStats) -> f32 {
+            self.latency_mean - baseline.latency_mean
+        }
+    }
+
     /// Report summarising all simulated backend runs.
     #[derive(Clone, Debug, PartialEq)]
     pub struct BenchmarkReport {
@@ -100,6 +113,54 @@ mod model {
 
             summaries.sort_by(|a, b| a.backend.cmp(&b.backend));
             summaries
+        }
+
+        /// Returns the backend with the highest average throughput, if any samples exist.
+        pub fn best_backend(&self) -> Option<BenchmarkStats> {
+            self.throughput_leaderboard().into_iter().next()
+        }
+
+        /// Returns the backend with the highest mean latency, if any samples exist.
+        pub fn slowest_backend(&self) -> Option<BenchmarkStats> {
+            self.latency_leaderboard().into_iter().rev().next()
+        }
+
+        /// Returns summaries sorted by descending throughput.
+        pub fn throughput_leaderboard(&self) -> Vec<BenchmarkStats> {
+            let mut summaries = self.summaries();
+            summaries.sort_by(|a, b| b.throughput_mean.total_cmp(&a.throughput_mean));
+            summaries
+        }
+
+        /// Returns summaries sorted by ascending mean latency.
+        pub fn latency_leaderboard(&self) -> Vec<BenchmarkStats> {
+            let mut summaries = self.summaries();
+            summaries.sort_by(|a, b| a.latency_mean.total_cmp(&b.latency_mean));
+            summaries
+        }
+
+        /// Computes relative throughput speedups compared to `baseline`.
+        pub fn throughput_speedups(&self, baseline: &str) -> Vec<(String, f32)> {
+            let summaries = self.summaries();
+            let Some(reference) = summaries
+                .iter()
+                .find(|stats| stats.backend.eq_ignore_ascii_case(baseline))
+            else {
+                return Vec::new();
+            };
+
+            let baseline_throughput = reference.throughput_mean.max(f32::EPSILON);
+            let mut comparisons: Vec<(String, f32)> = summaries
+                .into_iter()
+                .map(|stats| {
+                    let name = stats.backend.clone();
+                    let speedup = stats.throughput_mean / baseline_throughput;
+                    (name, speedup)
+                })
+                .collect();
+
+            comparisons.sort_by(|a, b| b.1.total_cmp(&a.1));
+            comparisons
         }
     }
 }
@@ -274,5 +335,93 @@ mod tests {
         for backend in Backend::ALL {
             assert!(probes.iter().any(|probe| probe.name == backend.as_str()));
         }
+    }
+
+    #[test]
+    fn report_speedup_sorted_by_throughput() {
+        let report = BenchmarkReport {
+            samples: vec![
+                BenchmarkSample {
+                    backend: "CPU".to_string(),
+                    throughput: 10.0,
+                    latency_ms: 8.0,
+                },
+                BenchmarkSample {
+                    backend: "GPU".to_string(),
+                    throughput: 25.0,
+                    latency_ms: 5.0,
+                },
+                BenchmarkSample {
+                    backend: "MPS".to_string(),
+                    throughput: 15.0,
+                    latency_ms: 6.0,
+                },
+            ],
+        };
+
+        let speedups = report.throughput_speedups("cpu");
+        assert_eq!(speedups.len(), 3);
+        assert_eq!(speedups[0].0, "GPU");
+        assert!(speedups[0].1 > speedups[1].1);
+        let cpu_entry = speedups
+            .iter()
+            .find(|(backend, _)| backend == "CPU")
+            .expect("cpu entry present");
+        assert!((cpu_entry.1 - 1.0).abs() <= f32::EPSILON);
+    }
+
+    #[test]
+    fn best_backend_prefers_highest_throughput() {
+        let report = BenchmarkReport {
+            samples: vec![
+                BenchmarkSample {
+                    backend: "CPU".into(),
+                    throughput: 11.0,
+                    latency_ms: 9.0,
+                },
+                BenchmarkSample {
+                    backend: "CUDA".into(),
+                    throughput: 29.0,
+                    latency_ms: 4.5,
+                },
+            ],
+        };
+
+        let best = report.best_backend().expect("best backend present");
+        assert_eq!(best.backend, "CUDA");
+        let slowest = report.slowest_backend().expect("slowest backend present");
+        assert_eq!(slowest.backend, "CPU");
+    }
+
+    #[test]
+    fn latency_leaderboard_orders_fastest_first() {
+        let report = BenchmarkReport {
+            samples: vec![
+                BenchmarkSample {
+                    backend: "CPU".into(),
+                    throughput: 10.0,
+                    latency_ms: 9.5,
+                },
+                BenchmarkSample {
+                    backend: "WGPU".into(),
+                    throughput: 18.0,
+                    latency_ms: 6.5,
+                },
+                BenchmarkSample {
+                    backend: "CUDA".into(),
+                    throughput: 26.0,
+                    latency_ms: 4.0,
+                },
+            ],
+        };
+
+        let leaderboard = report.latency_leaderboard();
+        assert_eq!(leaderboard.first().unwrap().backend, "CUDA");
+        assert_eq!(leaderboard.last().unwrap().backend, "CPU");
+        let slowest = report.slowest_backend().unwrap();
+        assert_eq!(
+            slowest.latency_mean,
+            leaderboard.last().unwrap().latency_mean
+        );
     }
 }

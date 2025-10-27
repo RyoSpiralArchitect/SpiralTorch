@@ -27,6 +27,7 @@ class ZMetrics:
     stability: float
     gradient: Optional[Sequence[float]] = None
     drs: float = 0.0
+    telemetry: Optional[Dict[str, float]] = None
 
 
 class ZSpaceTrainer:
