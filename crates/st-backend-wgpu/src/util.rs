@@ -74,6 +74,37 @@ fn module_cache() -> &'static Mutex<HashMap<ModuleCacheKey, Arc<wgpu::ShaderModu
     SHADER_MODULE_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+#[derive(Clone, Hash, PartialEq, Eq)]
+struct PipelineCacheKey {
+    module: ModuleCacheKey,
+    entry_point: String,
+    layout: Option<usize>,
+}
+
+impl fmt::Debug for PipelineCacheKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PipelineCacheKey")
+            .field("module", &self.module)
+            .field("entry_point", &self.entry_point)
+            .field("layout", &self.layout)
+            .finish()
+    }
+}
+
+impl PipelineCacheKey {
+    fn new(
+        module: ModuleCacheKey,
+        entry_point: impl Into<String>,
+        layout: Option<&wgpu::PipelineLayout>,
+    ) -> Self {
+        Self {
+            module,
+            entry_point: entry_point.into(),
+            layout: layout.map(|layout| layout as *const wgpu::PipelineLayout as usize),
+        }
+    }
+}
+
 fn cache_key_for_file(device: &Device, file: &str, overrides: &[(&str, u32)]) -> ModuleCacheKey {
     let mut key = String::from(file);
     if !overrides.is_empty() {
@@ -165,17 +196,22 @@ pub fn read_wgsl(shader_dir: impl AsRef<Path>, file: &str) -> Result<String, Sha
     fs::read_to_string(&path).map_err(|source| ShaderLoadError::Io { source, path })
 }
 
-/// Lightweight cache for WGSL shader sources stored on disk.
+/// Lightweight cache for WGSL shader sources stored on disk and the compute
+/// pipelines derived from them.
 ///
 /// Many of SpiralTorch's compute pipelines are composed of multiple entry
 /// points that live in separate shader files. When bootstrapping the backend
 /// we often need to read several of these files in quick succession. The cache
 /// keeps the decoded UTF-8 source in memory so subsequent pipeline
-/// construction avoids touching the filesystem again.
-#[derive(Debug, Default)]
+/// construction avoids touching the filesystem again. Additionally, fully
+/// constructed [`wgpu::ComputePipeline`] objects are memoized so repeated
+/// kernel invocations avoid redundant pipeline creation work on the same
+/// device and layout.
+#[derive(Default)]
 pub struct ShaderCache {
     shader_dir: PathBuf,
     sources: HashMap<PathBuf, String>,
+    pipelines: HashMap<PipelineCacheKey, Arc<ComputePipeline>>,
 }
 
 impl ShaderCache {
@@ -184,6 +220,7 @@ impl ShaderCache {
         Self {
             shader_dir: shader_dir.into(),
             sources: HashMap::new(),
+            pipelines: HashMap::new(),
         }
     }
 
@@ -195,6 +232,7 @@ impl ShaderCache {
     /// Drop all cached shader sources.
     pub fn clear(&mut self) {
         self.sources.clear();
+        self.pipelines.clear();
     }
 
     /// Retrieve the WGSL source for `file`, reading it from disk if necessary.
@@ -219,7 +257,7 @@ impl ShaderCache {
         file: &str,
         label: &str,
         entry_point: &str,
-    ) -> Result<ComputePipeline, ShaderLoadError> {
+    ) -> Result<Arc<ComputePipeline>, ShaderLoadError> {
         self.load_compute_pipeline_with_layout(device, file, label, entry_point, None)
     }
 
@@ -231,7 +269,7 @@ impl ShaderCache {
         label: &str,
         entry_point: &str,
         layout: Option<&wgpu::PipelineLayout>,
-    ) -> Result<ComputePipeline, ShaderLoadError> {
+    ) -> Result<Arc<ComputePipeline>, ShaderLoadError> {
         self.load_compute_pipeline_with_layout_and_overrides(
             device,
             file,
@@ -251,27 +289,32 @@ impl ShaderCache {
         entry_point: &str,
         layout: Option<&wgpu::PipelineLayout>,
         overrides: &[(&str, u32)],
-    ) -> Result<ComputePipeline, ShaderLoadError> {
+    ) -> Result<Arc<ComputePipeline>, ShaderLoadError> {
+        let module_key = cache_key_for_file(device, file, overrides);
+        let pipeline_key = PipelineCacheKey::new(module_key.clone(), entry_point, layout);
+
+        if let Some(pipeline) = self.pipelines.get(&pipeline_key) {
+            return Ok(Arc::clone(pipeline));
+        }
+
         let source = if overrides.is_empty() {
             self.source(file)?.to_string()
         } else {
             apply_overrides(self.source(file)?, file, overrides)?
         };
         let context = self.shader_dir.join(file).display().to_string();
-        let module = compile_cached_module(
-            device,
-            label,
-            cache_key_for_file(device, file, overrides),
-            source,
-            Some(context),
-        )?;
-        Ok(device.create_compute_pipeline(&ComputePipelineDescriptor {
+        let module =
+            compile_cached_module(device, label, module_key.clone(), source, Some(context))?;
+        let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some(label),
             layout,
             module: module.as_ref(),
             entry_point,
             compilation_options: Default::default(),
-        }))
+        });
+        let pipeline = Arc::new(pipeline);
+        self.pipelines.insert(pipeline_key, Arc::clone(&pipeline));
+        Ok(pipeline)
     }
 
     /// Ensure that all `files` are loaded into the cache.
@@ -284,6 +327,16 @@ impl ShaderCache {
             self.source(file.as_ref())?;
         }
         Ok(())
+    }
+}
+
+impl fmt::Debug for ShaderCache {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ShaderCache")
+            .field("shader_dir", &self.shader_dir)
+            .field("sources", &self.sources.keys().collect::<Vec<_>>())
+            .field("pipelines", &self.pipelines.len())
+            .finish()
     }
 }
 

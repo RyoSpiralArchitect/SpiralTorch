@@ -114,10 +114,10 @@ pub struct ColorJitterConfig {
 
 struct Pipelines {
     bind_layout: BindGroupLayout,
-    resize: ComputePipeline,
-    center_crop: ComputePipeline,
-    horizontal_flip: ComputePipeline,
-    color_jitter: ComputePipeline,
+    resize: Arc<ComputePipeline>,
+    center_crop: Arc<ComputePipeline>,
+    horizontal_flip: Arc<ComputePipeline>,
+    color_jitter: Arc<ComputePipeline>,
 }
 
 impl Pipelines {
@@ -822,7 +822,7 @@ fn gpu_color_jitter(
             label: Some("st.backend.transform.jitter.pass"),
             timestamp_writes: None,
         });
-        pass.set_pipeline(&ctx.pipelines.color_jitter);
+        pass.set_pipeline(ctx.pipelines.color_jitter.as_ref());
         pass.set_bind_group(0, &bind_group, &[]);
         let (gx, gy, gz) = workgroup_dims(config.width, config.height, config.channels, 16, 16, 1);
         pass.dispatch_workgroups(gx, gy, gz);
@@ -869,7 +869,7 @@ fn dispatch_resize_buffer(
             label: Some("st.backend.transform.resize.seq.pass"),
             timestamp_writes: None,
         });
-        pass.set_pipeline(&ctx.pipelines.resize);
+        pass.set_pipeline(ctx.pipelines.resize.as_ref());
         pass.set_bind_group(0, &bind_group, &[]);
         let (gx, gy, gz) = workgroup_dims(
             config.dst_width,
@@ -923,7 +923,7 @@ fn dispatch_center_crop_buffer(
             label: Some("st.backend.transform.crop.seq.pass"),
             timestamp_writes: None,
         });
-        pass.set_pipeline(&ctx.pipelines.center_crop);
+        pass.set_pipeline(ctx.pipelines.center_crop.as_ref());
         pass.set_bind_group(0, &bind_group, &[]);
         let (gx, gy, gz) = workgroup_dims(
             config.crop_width,
@@ -973,7 +973,7 @@ fn dispatch_horizontal_flip_buffer(
             label: Some("st.backend.transform.flip.seq.pass"),
             timestamp_writes: None,
         });
-        pass.set_pipeline(&ctx.pipelines.horizontal_flip);
+        pass.set_pipeline(ctx.pipelines.horizontal_flip.as_ref());
         pass.set_bind_group(0, &bind_group, &[]);
         let (gx, gy, gz) = workgroup_dims(config.width, config.height, config.channels, 16, 16, 1);
         pass.dispatch_workgroups(gx, gy, gz);
