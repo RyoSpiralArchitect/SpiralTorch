@@ -2867,6 +2867,7 @@ name = "st-bench"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "pyo3",
  "rand",
  "serde",
  "serde_json",
