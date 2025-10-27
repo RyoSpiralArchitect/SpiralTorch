@@ -8,8 +8,10 @@ when the compiled extension has not been built yet.
 
 from __future__ import annotations
 
+from array import array
 import importlib.machinery
 import importlib.util
+import math
 import pathlib
 import sys
 import warnings
@@ -59,6 +61,10 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
         stacklevel=2,
     )
 
+    PY_STUB_MATMUL_INNER_TILE = 64
+    PY_STUB_MATMUL_COL_TILE = 64
+    PY_STUB_FMA = getattr(math, "fma", None)
+
     try:  # Prefer a NumPy-backed shim when available for better performance.
         import numpy as _np  # type: ignore
     except ModuleNotFoundError:  # pragma: no cover - optional dependency
@@ -83,10 +89,11 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             if rows < 0 or cols < 0:
                 raise ValueError("tensor dimensions must be non-negative")
 
-            # ``data`` is expected to be a flat iterable of length rows*cols.  Convert once
-            # so we can verify the length while remaining agnostic to the original container.
-            flat_data = list(data)
-            if rows * cols != len(flat_data):
+            if isinstance(data, array) and data.typecode == "d":
+                canonical = array("d", data)
+            else:
+                canonical = array("d", (float(x) for x in data))
+            if rows * cols != len(canonical):
                 raise ValueError("data length does not match matrix dimensions")
 
             self._rows = rows
@@ -94,11 +101,15 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
 
             preferred_backend = backend_hint or ("numpy" if NUMPY_AVAILABLE else "python")
             if preferred_backend == "numpy":
-                arr = _np.asarray(flat_data, dtype=_np.float64).reshape(rows, cols)
+                arr = (
+                    _np.frombuffer(canonical, dtype=_np.float64, count=rows * cols)
+                    .reshape(rows, cols)
+                    .copy()
+                )
                 self._data = arr
                 self._backend = "numpy"
             else:
-                self._data = [float(x) for x in flat_data]
+                self._data = canonical
                 self._backend = "python"
 
         # noqa: D401 - mirror real signature from the native extension
@@ -120,19 +131,61 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
 
         def _matmul_python(self, other: "Tensor") -> "Tensor":
             rows, cols, inner = self._rows, other._cols, self._cols
-            out = [0.0] * (rows * cols)
+            if rows == 0 or cols == 0:
+                return Tensor._from_python_array(rows, cols, array("d"))
+            if inner == 0:
+                return Tensor._from_python_array(rows, cols, array("d", [0.0]) * (rows * cols))
+
+            out = array("d", [0.0]) * (rows * cols)
             left = self._row_major_python()
             right = other._row_major_python()
+            col_tile = PY_STUB_MATMUL_COL_TILE
+            if col_tile > cols:
+                col_tile = cols
+            inner_tile = PY_STUB_MATMUL_INNER_TILE
+            if inner_tile > inner:
+                inner_tile = inner
+            fma = PY_STUB_FMA
+
             for i in range(rows):
-                for k in range(inner):
-                    aik = left[i * inner + k]
-                    if aik == 0.0:
-                        continue
-                    row_offset = k * cols
-                    out_offset = i * cols
-                    for j in range(cols):
-                        out[out_offset + j] += aik * right[row_offset + j]
-            return Tensor(rows, cols, out, backend="python")
+                lhs_row_base = i * inner
+                out_row_base = i * cols
+                for col_start in range(0, cols, col_tile):
+                    col_end = min(col_start + col_tile, cols)
+                    block_width = col_end - col_start
+                    for k_start in range(0, inner, inner_tile):
+                        k_end = min(k_start + inner_tile, inner)
+                        for k in range(k_start, k_end):
+                            scale = left[lhs_row_base + k]
+                            if scale == 0.0:
+                                continue
+                            rhs_base = k * cols + col_start
+                            out_base = out_row_base + col_start
+                            full = block_width - (block_width % 4)
+                            offset = 0
+                            while offset < full:
+                                rhs_index = rhs_base + offset
+                                out_index = out_base + offset
+                                if fma is not None:
+                                    out[out_index] = fma(scale, right[rhs_index], out[out_index])
+                                    out[out_index + 1] = fma(scale, right[rhs_index + 1], out[out_index + 1])
+                                    out[out_index + 2] = fma(scale, right[rhs_index + 2], out[out_index + 2])
+                                    out[out_index + 3] = fma(scale, right[rhs_index + 3], out[out_index + 3])
+                                else:
+                                    out[out_index] += scale * right[rhs_index]
+                                    out[out_index + 1] += scale * right[rhs_index + 1]
+                                    out[out_index + 2] += scale * right[rhs_index + 2]
+                                    out[out_index + 3] += scale * right[rhs_index + 3]
+                                offset += 4
+                            for tail in range(full, block_width):
+                                idx = out_base + tail
+                                rhs_idx = rhs_base + tail
+                                if fma is not None:
+                                    out[idx] = fma(scale, right[rhs_idx], out[idx])
+                                else:
+                                    out[idx] += scale * right[rhs_idx]
+
+            return Tensor._from_python_array(rows, cols, out)
 
         def _matmul_numpy(self, other: "Tensor") -> "Tensor":
             result = self._to_numpy(copy=False) @ other._to_numpy(copy=False)
@@ -146,8 +199,14 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             if NUMPY_AVAILABLE:
                 product = self._to_numpy(copy=False) * other._to_numpy(copy=False)
                 return Tensor._from_numpy_array(product)
-            out = [a * b for a, b in zip(self._row_major_python(), other._row_major_python())]
-            return Tensor(self._rows, self._cols, out, backend="python")
+            data = array(
+                "d",
+                (
+                    a * b
+                    for a, b in zip(self._row_major_python(), other._row_major_python())
+                ),
+            )
+            return Tensor._from_python_array(self._rows, self._cols, data)
 
         def numpy(self, *, copy: bool = True):
             if not NUMPY_AVAILABLE:
@@ -159,13 +218,14 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
                 raise RuntimeError("NumPy is not available in the stub bindings")
             if self._backend == "numpy":
                 return self._data.copy() if copy else self._data
-            return _np.asarray(self._data, dtype=_np.float64).reshape(self._rows, self._cols)
+            array_view = _np.frombuffer(self._data, dtype=_np.float64, count=self._rows * self._cols)
+            matrix = array_view.reshape(self._rows, self._cols)
+            return matrix.copy() if copy else matrix
 
         def _row_major_python(self):
             if self._backend == "python":
                 return self._data
-            # ``tolist`` returns a new Python list which is ideal for nested loops.
-            return self._data.reshape(-1).tolist()
+            return array("d", self._data.reshape(-1))
 
         @classmethod
         def _from_numpy_array(cls, array: "_np.ndarray") -> "Tensor":
@@ -179,6 +239,19 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             instance._cols = int(matrix.shape[1])
             instance._data = matrix.copy()
             instance._backend = "numpy"
+            return instance
+
+        @classmethod
+        def _from_python_array(cls, rows: int, cols: int, buffer: array) -> "Tensor":
+            if buffer.typecode != "d":
+                raise TypeError("python backend tensors must use array('d') storage")
+            if len(buffer) != rows * cols:
+                raise ValueError("buffer does not match requested tensor shape")
+            instance = cls.__new__(cls)
+            instance._rows = int(rows)
+            instance._cols = int(cols)
+            instance._data = buffer
+            instance._backend = "python"
             return instance
 
         @property

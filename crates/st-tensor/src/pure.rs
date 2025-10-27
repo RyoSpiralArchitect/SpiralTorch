@@ -51,7 +51,7 @@ use rand::rngs::StdRng;
 use rand::SeedableRng;
 #[allow(unused_imports)]
 use rand_distr::StandardNormal;
-use rayon::prelude::*;
+use rayon::{current_num_threads, prelude::*};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::convert::TryFrom;
@@ -4238,9 +4238,15 @@ impl AmegaRealgrad {
 }
 
 const PARALLEL_GEMM_THRESHOLD: usize = 32 * 32 * 32;
+const MATMUL_BLOCK_INNER: usize = 64;
+const MATMUL_BLOCK_COLS: usize = 128;
+const PACKED_MATMUL_COL_BLOCK: usize = 4;
 
 #[inline]
 fn should_parallelize(rows: usize, inner: usize, cols: usize) -> bool {
+    if current_num_threads() <= 1 {
+        return false;
+    }
     rows.saturating_mul(inner).saturating_mul(cols) >= PARALLEL_GEMM_THRESHOLD
 }
 
@@ -4268,14 +4274,35 @@ fn fused_axpy(dst: &mut [f32], rhs: &[f32], scale: f32) {
 }
 
 #[inline]
+fn matmul_row(dst_row: &mut [f32], lhs_row: &[f32], rhs: &[f32], inner: usize, cols: usize) {
+    dst_row.fill(0.0);
+    let col_block = MATMUL_BLOCK_COLS.max(1);
+    let inner_block = MATMUL_BLOCK_INNER.max(1);
+    let mut col_start = 0;
+    while col_start < cols {
+        let col_end = (col_start + col_block).min(cols);
+        let dst_block = &mut dst_row[col_start..col_end];
+        let mut k_start = 0;
+        while k_start < inner {
+            let k_end = (k_start + inner_block).min(inner);
+            for k in k_start..k_end {
+                let scale = lhs_row[k];
+                if scale == 0.0 {
+                    continue;
+                }
+                let rhs_slice = &rhs[k * cols + col_start..k * cols + col_end];
+                fused_axpy(dst_block, rhs_slice, scale);
+            }
+            k_start = k_end;
+        }
+        col_start = col_end;
+    }
+}
+
+#[inline]
 fn matmul_naive_serial(dst: &mut [f32], lhs: &[f32], rhs: &[f32], inner: usize, cols: usize) {
     for (dst_row, lhs_row) in dst.chunks_mut(cols).zip(lhs.chunks(inner)) {
-        dst_row.fill(0.0);
-        for k in 0..inner {
-            let scale = lhs_row[k];
-            let rhs_row = &rhs[k * cols..(k + 1) * cols];
-            fused_axpy(dst_row, rhs_row, scale);
-        }
+        matmul_row(dst_row, lhs_row, rhs, inner, cols);
     }
 }
 
@@ -4283,14 +4310,7 @@ fn matmul_naive_serial(dst: &mut [f32], lhs: &[f32], rhs: &[f32], inner: usize, 
 fn matmul_naive_parallel(dst: &mut [f32], lhs: &[f32], rhs: &[f32], inner: usize, cols: usize) {
     dst.par_chunks_mut(cols)
         .zip(lhs.par_chunks(inner))
-        .for_each(|(dst_row, lhs_row)| {
-            dst_row.fill(0.0);
-            for k in 0..inner {
-                let scale = lhs_row[k];
-                let rhs_row = &rhs[k * cols..(k + 1) * cols];
-                fused_axpy(dst_row, rhs_row, scale);
-            }
-        });
+        .for_each(|(dst_row, lhs_row)| matmul_row(dst_row, lhs_row, rhs, inner, cols));
 }
 
 #[inline]
@@ -4318,6 +4338,78 @@ fn dot_unrolled(lhs: &[f32], rhs: &[f32]) -> f32 {
 }
 
 #[inline]
+fn matmul_naive_packed_row(
+    dst_row: &mut [f32],
+    lhs_row: &[f32],
+    inner: usize,
+    cols: usize,
+    rhs: &[f32],
+) {
+    let mut col = 0;
+    while col + PACKED_MATMUL_COL_BLOCK <= cols {
+        let base0 = col * inner;
+        let base1 = base0 + inner;
+        let base2 = base1 + inner;
+        let base3 = base2 + inner;
+        let mut acc0 = 0.0f32;
+        let mut acc1 = 0.0f32;
+        let mut acc2 = 0.0f32;
+        let mut acc3 = 0.0f32;
+
+        let mut k = 0;
+        while k + 4 <= inner {
+            let l0 = lhs_row[k];
+            let l1 = lhs_row[k + 1];
+            let l2 = lhs_row[k + 2];
+            let l3 = lhs_row[k + 3];
+
+            acc0 += l0 * rhs[base0 + k];
+            acc1 += l0 * rhs[base1 + k];
+            acc2 += l0 * rhs[base2 + k];
+            acc3 += l0 * rhs[base3 + k];
+
+            acc0 += l1 * rhs[base0 + k + 1];
+            acc1 += l1 * rhs[base1 + k + 1];
+            acc2 += l1 * rhs[base2 + k + 1];
+            acc3 += l1 * rhs[base3 + k + 1];
+
+            acc0 += l2 * rhs[base0 + k + 2];
+            acc1 += l2 * rhs[base1 + k + 2];
+            acc2 += l2 * rhs[base2 + k + 2];
+            acc3 += l2 * rhs[base3 + k + 2];
+
+            acc0 += l3 * rhs[base0 + k + 3];
+            acc1 += l3 * rhs[base1 + k + 3];
+            acc2 += l3 * rhs[base2 + k + 3];
+            acc3 += l3 * rhs[base3 + k + 3];
+
+            k += 4;
+        }
+
+        while k < inner {
+            let lhs_val = lhs_row[k];
+            acc0 += lhs_val * rhs[base0 + k];
+            acc1 += lhs_val * rhs[base1 + k];
+            acc2 += lhs_val * rhs[base2 + k];
+            acc3 += lhs_val * rhs[base3 + k];
+            k += 1;
+        }
+
+        dst_row[col] = acc0;
+        dst_row[col + 1] = acc1;
+        dst_row[col + 2] = acc2;
+        dst_row[col + 3] = acc3;
+        col += PACKED_MATMUL_COL_BLOCK;
+    }
+    while col < cols {
+        let base = col * inner;
+        let column = &rhs[base..base + inner];
+        dst_row[col] = dot_unrolled(lhs_row, column);
+        col += 1;
+    }
+}
+
+#[inline]
 fn matmul_naive_packed_serial(
     dst: &mut [f32],
     lhs: &[f32],
@@ -4326,10 +4418,7 @@ fn matmul_naive_packed_serial(
     rhs: &[f32],
 ) {
     for (dst_row, lhs_row) in dst.chunks_mut(cols).zip(lhs.chunks(inner)) {
-        for (col_idx, dst_value) in dst_row.iter_mut().enumerate() {
-            let column = &rhs[col_idx * inner..(col_idx + 1) * inner];
-            *dst_value = dot_unrolled(lhs_row, column);
-        }
+        matmul_naive_packed_row(dst_row, lhs_row, inner, cols, rhs);
     }
 }
 
@@ -4344,10 +4433,7 @@ fn matmul_naive_packed_parallel(
     dst.par_chunks_mut(cols)
         .zip(lhs.par_chunks(inner))
         .for_each(|(dst_row, lhs_row)| {
-            for (col_idx, dst_value) in dst_row.iter_mut().enumerate() {
-                let column = &rhs[col_idx * inner..(col_idx + 1) * inner];
-                *dst_value = dot_unrolled(lhs_row, column);
-            }
+            matmul_naive_packed_row(dst_row, lhs_row, inner, cols, rhs);
         });
 }
 
