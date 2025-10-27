@@ -36,13 +36,18 @@ LOGGER = logging.getLogger("spiral.cli")
 def load_config(path: Path) -> Dict[str, Any]:
     text = path.read_text()
     try:
-        return json.loads(text)
+        config = json.loads(text)
     except json.JSONDecodeError:
         if yaml is None:
             raise RuntimeError(
                 f"{path} is not valid JSON and PyYAML is unavailable for YAML parsing"
             )
-        return yaml.safe_load(text)
+        config = yaml.safe_load(text)
+    if not isinstance(config, dict):
+        raise TypeError(
+            "Configuration top-level must be an object (mapping)"
+        )
+    return config
 
 
 def parse_tracker_specs(specs: Iterable[str]) -> List[Tuple[str, Dict[str, Any]]]:
