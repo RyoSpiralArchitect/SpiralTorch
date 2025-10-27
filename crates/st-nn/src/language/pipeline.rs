@@ -1879,6 +1879,65 @@ impl DesirePsiSummary {
     }
 }
 
+#[derive(Clone, Default)]
+pub struct DesireTelemetryBundle {
+    trainer: Option<DesireTrainerBridge>,
+    roundtable: Option<DesireRoundtableBridge>,
+    #[cfg(feature = "psi")]
+    psi: Option<DesirePsiBridge>,
+}
+
+impl DesireTelemetryBundle {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_trainer_bridge(mut self, bridge: &DesireTrainerBridge) -> Self {
+        self.trainer = Some(bridge.clone());
+        self
+    }
+
+    pub fn with_roundtable_bridge(mut self, bridge: &DesireRoundtableBridge) -> Self {
+        self.roundtable = Some(bridge.clone());
+        self
+    }
+
+    #[cfg(feature = "psi")]
+    pub fn with_psi_bridge(mut self, bridge: &DesirePsiBridge) -> Self {
+        self.psi = Some(bridge.clone());
+        self
+    }
+
+    pub fn trainer_bridge(&self) -> Option<&DesireTrainerBridge> {
+        self.trainer.as_ref()
+    }
+
+    pub fn roundtable_bridge(&self) -> Option<&DesireRoundtableBridge> {
+        self.roundtable.as_ref()
+    }
+
+    #[cfg(feature = "psi")]
+    pub fn psi_bridge(&self) -> Option<&DesirePsiBridge> {
+        self.psi.as_ref()
+    }
+}
+
+impl DesirePipelineBuilder {
+    pub fn with_telemetry_bundle(mut self, bundle: &DesireTelemetryBundle) -> Self {
+        if let Some(bridge) = bundle.trainer_bridge() {
+            self = self.with_trainer_bridge(bridge);
+        }
+        if let Some(bridge) = bundle.roundtable_bridge() {
+            self = self.with_roundtable_bridge(bridge);
+        }
+        #[cfg(feature = "psi")]
+        if let Some(bridge) = bundle.psi_bridge() {
+            self = self.with_psi_bridge(bridge);
+        }
+        self
+    }
+}
+
 mod language_pipeline {
     use super::GeometryBiasMetrics;
     use crate::roundtable::RoundtableNode;
