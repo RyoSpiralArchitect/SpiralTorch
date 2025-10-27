@@ -6,7 +6,7 @@ import inspect
 import math
 import sys
 from dataclasses import dataclass
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping as MappingABC, MutableMapping
 from typing import Any, Callable, Dict, Mapping, Sequence, Union
 from types import MappingProxyType
 

@@ -9,6 +9,7 @@ when the compiled extension has not been built yet.
 from __future__ import annotations
 
 from array import array
+from collections.abc import Iterable, Sequence
 import importlib.machinery
 import importlib.util
 import math
@@ -51,6 +52,15 @@ def _load_native_package() -> None:
             _install_stub_bindings(module, exc)
             return
         raise
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        warnings.warn(
+            "Failed to load the native SpiralTorch bindings; falling back to the Python stub.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        placeholder = ModuleNotFoundError("spiraltorch", name="spiraltorch")
+        _install_stub_bindings(module, placeholder)
+        module.__dict__["__native_import_error__"] = exc
 
 
 def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
@@ -111,6 +121,7 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             backend: str | None = None,
         ):
             backend_hint = backend
+            rows, cols, payload = _normalize_tensor_ctor_args(*args, **kwargs)
             if backend_hint is not None and backend_hint not in {"numpy", "python"}:
                 raise ValueError("backend must be 'numpy', 'python', or None")
             if backend_hint == "numpy" and not NUMPY_AVAILABLE:
@@ -134,10 +145,13 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             if rows < 0 or cols < 0:
                 raise ValueError("tensor dimensions must be non-negative")
 
-            if isinstance(data, array) and data.typecode == "d":
-                canonical = array("d", data)
+            if payload is _TENSOR_NO_DATA:
+                total = rows * cols
+                canonical = array("d") if total == 0 else array("d", [0.0]) * total
+            elif isinstance(payload, array) and payload.typecode == "d":
+                canonical = array("d", payload)
             else:
-                canonical = array("d", (float(x) for x in data))
+                canonical = array("d", (float(x) for x in payload))
             if rows * cols != len(canonical):
                 raise ValueError("data length does not match matrix dimensions")
 
@@ -308,9 +322,12 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             return self._backend
 
         def tolist(self):
+            rows, cols = self._rows, self._cols
             if self._backend == "python":
-                return list(self._data)
-            return self._data.reshape(-1).tolist()
+                flat = list(self._data)
+                matrix = (flat[r * cols : (r + 1) * cols] for r in range(rows))
+                return [row[:] for row in matrix]
+            return self._data.reshape(rows, cols).tolist()
 
         def __matmul__(self, other) -> "Tensor":  # pragma: no cover - convenience wrapper
             if isinstance(other, Tensor):
@@ -331,7 +348,7 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             return self._to_numpy(copy=True)
 
         def __repr__(self) -> str:  # pragma: no cover - debugging helper
-            return f"Tensor(shape={self.shape}, backend='{self._backend}')"
+            return f"Tensor(shape={self.shape()}, backend='{self._backend}')"
 
     Tensor.__module__ = module.__name__
 
