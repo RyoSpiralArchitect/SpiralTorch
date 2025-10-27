@@ -1487,6 +1487,119 @@ class ZMetrics:
     drs: float = 0.0
 
 
+_PRIMARY_CANONICAL_METRICS = frozenset({"speed", "memory", "stability", "drs", "gradient"})
+_PRIMARY_GRADIENT_ALIASES = tuple(
+    alias for alias, target in PRIMARY_ZSPACE_METRIC_ALIASES.items() if target == "gradient"
+)
+
+
+def _canonical_primary_metric_name(name: _Any) -> str | None:
+    if not isinstance(name, str):
+        try:
+            name = str(name)
+        except Exception:
+            return None
+    key = name.lower()
+    canonical = PRIMARY_ZSPACE_METRIC_ALIASES.get(key, key)
+    return canonical if canonical in _PRIMARY_CANONICAL_METRICS else None
+
+
+def _coerce_gradient_sequence(payload: _Any) -> list[float]:
+    if payload is None:
+        return []
+    if isinstance(payload, _Sequence):
+        try:
+            return [float(value) for value in payload]
+        except (TypeError, ValueError):
+            return []
+    if hasattr(payload, "tolist"):
+        try:
+            values = payload.tolist()
+        except Exception:
+            return []
+        if isinstance(values, _Sequence):
+            try:
+                return [float(value) for value in values]
+            except (TypeError, ValueError):
+                return []
+    return []
+
+
+def _canonicalise_primary_metrics(payload: _Mapping[str, _Any]) -> dict[str, _Any]:
+    canonical: dict[str, _Any] = {}
+    for key, value in payload.items():
+        name = _canonical_primary_metric_name(key)
+        if name is None:
+            continue
+        canonical[name] = value
+    return canonical
+
+
+def inference_to_zmetrics(
+    inference: "ZSpaceInference", *, prefer_applied: bool = True
+) -> ZMetrics:
+    """Convert a :class:`ZSpaceInference` result into :class:`ZMetrics`.
+
+    Args:
+        inference: Inference result produced by :class:`ZSpaceInferencePipeline`
+            or :func:`infer_with_partials`.
+        prefer_applied: When ``True`` (default), prefer values from
+            :attr:`ZSpaceInference.applied` when a metric was explicitly
+            rewritten by a partial observation. Falling back to
+            :attr:`ZSpaceInference.metrics` preserves the decoded baseline.
+
+    Returns:
+        A :class:`ZMetrics` instance populated with canonical speed, memory,
+        stability, DRS and gradient signals extracted from the inference.
+    """
+
+    if not isinstance(inference, ZSpaceInference):
+        raise TypeError("inference must be a ZSpaceInference instance")
+
+    canonical_scalars: dict[str, float] = {}
+    payloads: list[_Mapping[str, _Any]] = []
+
+    metrics_mapping = inference.metrics
+    if isinstance(metrics_mapping, _Mapping):
+        payloads.append(metrics_mapping)
+
+    applied = inference.applied if prefer_applied else None
+    if prefer_applied and applied:
+        payloads.append(applied)
+
+    for source in payloads:
+        for key, value in source.items():
+            name = _canonical_primary_metric_name(key)
+            if name is None or name == "gradient":
+                continue
+            try:
+                canonical_scalars[name] = float(value)
+            except (TypeError, ValueError):
+                continue
+
+    gradient_seq: list[float] = list(inference.gradient)
+    if not gradient_seq:
+        # Walk payloads in reverse so that applied metrics win when present.
+        for source in reversed(payloads):
+            for alias in _PRIMARY_GRADIENT_ALIASES:
+                payload = source.get(alias)
+                gradient_seq = _coerce_gradient_sequence(payload)
+                if gradient_seq:
+                    break
+            if gradient_seq:
+                break
+
+    gradient_resolved: _Optional[_Sequence[float]] = gradient_seq if gradient_seq else None
+
+    return ZMetrics(
+        speed=canonical_scalars.get("speed", 0.0),
+        memory=canonical_scalars.get("memory", 0.0),
+        stability=canonical_scalars.get("stability", 0.0),
+        gradient=gradient_resolved,
+        drs=canonical_scalars.get("drs", 0.0),
+    )
+
+
 def _clone_volume(volume: _Sequence[_Sequence[_Sequence[float]]]) -> _List[_List[_List[float]]]:
     return [[list(row) for row in slice_] for slice_ in volume]
 
@@ -1967,7 +2080,7 @@ class ZSpaceTrainer:
 
     def step_batch(
         self,
-        metrics: _Iterable[_Mapping[str, float] | ZMetrics],
+        metrics: _Iterable[_Mapping[str, float] | ZMetrics | "ZSpaceInference"],
     ) -> _List[float]:
         losses: _List[float] = []
         for sample in metrics:
@@ -2037,7 +2150,12 @@ class ZSpaceTrainer:
             v_hat = self._v[i] / (1.0 - self._beta2 ** self._t)
             self._z[i] -= self._lr * m_hat / (_math.sqrt(v_hat) + self._eps)
 
-    def step(self, metrics: _Mapping[str, float] | ZMetrics) -> float:
+    def step(
+        self, metrics: _Mapping[str, float] | ZMetrics | "ZSpaceInference"
+    ) -> float:
+        if isinstance(metrics, ZSpaceInference):
+            metrics = inference_to_zmetrics(metrics)
+
         if isinstance(metrics, ZMetrics):
             speed = float(metrics.speed)
             memory = float(metrics.memory)
@@ -2045,12 +2163,14 @@ class ZSpaceTrainer:
             gradient = metrics.gradient
             drs_signal = float(metrics.drs)
         else:
-            speed = float(metrics.get("speed", 0.0))
-            memory = float(metrics.get("mem", metrics.get("memory", 0.0)))
-            stability = float(metrics.get("stab", metrics.get("stability", 0.0)))
-            grad = metrics.get("gradient")
-            gradient = grad if isinstance(grad, _Sequence) else None
-            drs_signal = float(metrics.get("drs", 0.0))
+            canonical = _canonicalise_primary_metrics(metrics)
+            speed = float(canonical.get("speed", 0.0))
+            memory = float(canonical.get("memory", 0.0))
+            stability = float(canonical.get("stability", 0.0))
+            grad_payload = canonical.get("gradient")
+            gradient_seq = _coerce_gradient_sequence(grad_payload)
+            gradient = gradient_seq if gradient_seq else None
+            drs_signal = float(canonical.get("drs", 0.0))
         lam_speed, lam_mem, lam_stab, lam_frac, lam_drs = self._lam
         penalty = (
             lam_speed * self._normalise(speed)
@@ -2068,7 +2188,10 @@ class ZSpaceTrainer:
         return loss
 
 
-def step_many(trainer: ZSpaceTrainer, samples: _Iterable[_Mapping[str, float] | ZMetrics]) -> _List[float]:
+def step_many(
+    trainer: ZSpaceTrainer,
+    samples: _Iterable[_Mapping[str, float] | ZMetrics | ZSpaceInference],
+) -> _List[float]:
     for metrics in samples:
         trainer.step(metrics)
     return trainer.state
@@ -2076,7 +2199,7 @@ def step_many(trainer: ZSpaceTrainer, samples: _Iterable[_Mapping[str, float] | 
 
 def stream_zspace_training(
     trainer: ZSpaceTrainer,
-    samples: _Iterable[_Mapping[str, float] | ZMetrics],
+    samples: _Iterable[_Mapping[str, float] | ZMetrics | ZSpaceInference],
     *,
     on_step: _Optional[_Callable[[int, _List[float], float], None]] = None,
 ) -> _List[float]:

@@ -684,6 +684,12 @@ class ZMetrics:
     gradient: Optional[Sequence[float]]
     drs: float
 
+
+def inference_to_zmetrics(
+    inference: ZSpaceInference, *, prefer_applied: bool = ...
+) -> ZMetrics: ...
+
+
 class ZSpaceDecoded:
     z_state: Tuple[float, ...]
     metrics: Mapping[str, float]
@@ -759,6 +765,143 @@ def infer_with_trainer(
 ) -> ZSpaceInference: ...
 
 
+class ZSpaceTelemetryFrame:
+    ...
+
+
+class ZSpacePartialBundle:
+    ...
+
+
+class ZSpaceInferenceRuntime:
+    def __init__(
+        self,
+        z_state: Sequence[float],
+        *,
+        alpha: float = ...,
+        smoothing: float = ...,
+        accumulate: bool = ...,
+        telemetry: Mapping[str, object] | None = ...,
+    ) -> None: ...
+
+    @property
+    def posterior(self) -> ZSpacePosterior: ...
+
+    @property
+    def smoothing(self) -> float: ...
+
+    def set_telemetry(
+        self, telemetry: Mapping[str, object] | ZSpaceTelemetryFrame | None
+    ) -> None: ...
+
+    def update(
+        self,
+        partial: Mapping[str, object] | ZSpacePartialBundle | None,
+        *,
+        telemetry: Mapping[str, object] | ZSpaceTelemetryFrame | None = ...,
+    ) -> ZSpaceInference: ...
+
+    def infer(
+        self,
+        partial: Mapping[str, object] | ZSpacePartialBundle | None = ...,
+        *,
+        telemetry: Mapping[str, object] | ZSpaceTelemetryFrame | None = ...,
+    ) -> ZSpaceInference: ...
+
+
+class ZSpaceInferencePipeline:
+    def __init__(
+        self,
+        z_state: Sequence[float],
+        *,
+        alpha: float = ...,
+        smoothing: float = ...,
+        strategy: str = ...,
+        telemetry: Mapping[str, object] | None = ...,
+    ) -> None: ...
+
+    @property
+    def strategy(self) -> str: ...
+
+    @property
+    def posterior(self) -> ZSpacePosterior: ...
+
+    @property
+    def smoothing(self) -> float: ...
+
+    def add_partial(
+        self,
+        partial: Mapping[str, object] | ZSpacePartialBundle,
+        *,
+        weight: float | None = ...,
+        origin: str | None = ...,
+        telemetry: Mapping[str, object] | None = ...,
+    ) -> ZSpacePartialBundle: ...
+
+    def add_elliptic_telemetry(
+        self,
+        telemetry: object,
+        *,
+        bundle_weight: float = ...,
+        origin: str | None = ...,
+        telemetry_prefix: str = ...,
+        aggregate: str = ...,
+        gradient_source: str = ...,
+        extra_telemetry: Mapping[str, object] | None = ...,
+    ) -> ZSpacePartialBundle: ...
+
+    def add_elliptic_autograd(
+        self,
+        warp: object,
+        orientation: object,
+        *,
+        bundle_weight: float = ...,
+        origin: str | None = ...,
+        telemetry_prefix: str = ...,
+        aggregate: str = ...,
+        gradient_source: str = ...,
+        extra_telemetry: Mapping[str, object] | None = ...,
+        return_features: bool = ...,
+    ) -> ZSpacePartialBundle | Tuple[object, ZSpacePartialBundle]: ...
+
+    def add_canvas_snapshot(self, snapshot: object, **kwargs: object) -> ZSpacePartialBundle: ...
+
+    def add_coherence_diagnostics(
+        self, diagnostics: object, **kwargs: object
+    ) -> ZSpacePartialBundle: ...
+
+    def add_dlpack_weights(self, weights: object, **kwargs: object) -> ZSpacePartialBundle: ...
+
+    def add_compat_weights(
+        self, weights: object, *, adapter: str | None = ..., **kwargs: object
+    ) -> ZSpacePartialBundle: ...
+
+    def clear(self) -> None: ...
+
+    def set_telemetry(
+        self, telemetry: Mapping[str, object] | ZSpaceTelemetryFrame | None
+    ) -> None: ...
+
+    def infer(
+        self,
+        *,
+        strategy: str | None = ...,
+        weights: Sequence[float] | None = ...,
+        clear: bool = ...,
+        telemetry: Mapping[str, object] | ZSpaceTelemetryFrame | None = ...,
+    ) -> ZSpaceInference: ...
+
+    def infer_and_step(
+        self,
+        trainer: object,
+        *,
+        strategy: str | None = ...,
+        weights: Sequence[float] | None = ...,
+        clear: bool = ...,
+        telemetry: Mapping[str, object] | ZSpaceTelemetryFrame | None = ...,
+    ) -> Tuple[ZSpaceInference, float]: ...
+
+
 class ZSpaceTrainer:
     def __init__(
         self,
@@ -777,17 +920,26 @@ class ZSpaceTrainer:
     ) -> None: ...
     @property
     def state(self) -> List[float]: ...
-    def step(self, metrics: Mapping[str, float] | ZMetrics) -> float: ...
+    def step(
+        self, metrics: Mapping[str, float] | ZMetrics | ZSpaceInference
+    ) -> float: ...
     def reset(self) -> None: ...
     def state_dict(self) -> Dict[str, object]: ...
     def load_state_dict(self, state: Dict[str, object], *, strict: bool = ...) -> None: ...
-    def step_batch(self, metrics: Iterable[Mapping[str, float] | ZMetrics]) -> List[float]: ...
+    def step_batch(
+        self, metrics: Iterable[Mapping[str, float] | ZMetrics | ZSpaceInference]
+    ) -> List[float]: ...
 
-def step_many(trainer: ZSpaceTrainer, samples: Iterable[Mapping[str, float] | ZMetrics]) -> List[float]: ...
+
+def step_many(
+    trainer: ZSpaceTrainer,
+    samples: Iterable[Mapping[str, float] | ZMetrics | ZSpaceInference],
+) -> List[float]: ...
+
 
 def stream_zspace_training(
     trainer: ZSpaceTrainer,
-    samples: Iterable[Mapping[str, float] | ZMetrics],
+    samples: Iterable[Mapping[str, float] | ZMetrics | ZSpaceInference],
     *,
     on_step: Optional[Callable[[int, List[float], float], None]] = ...,
 ) -> List[float]: ...
