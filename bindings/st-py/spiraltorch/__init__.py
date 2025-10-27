@@ -1487,6 +1487,69 @@ class ZMetrics:
     drs: float = 0.0
 
 
+def inference_to_zmetrics(
+    inference: "ZSpaceInference", *, prefer_applied: bool = True
+) -> ZMetrics:
+    """Convert a :class:`ZSpaceInference` result into :class:`ZMetrics`.
+
+    Args:
+        inference: Inference result produced by :class:`ZSpaceInferencePipeline`
+            or :func:`infer_with_partials`.
+        prefer_applied: When ``True`` (default), prefer values from
+            :attr:`ZSpaceInference.applied` when a metric was explicitly
+            rewritten by a partial observation. Falling back to
+            :attr:`ZSpaceInference.metrics` preserves the decoded baseline.
+
+    Returns:
+        A :class:`ZMetrics` instance populated with canonical speed, memory,
+        stability, DRS and gradient signals extracted from the inference.
+    """
+
+    if not isinstance(inference, ZSpaceInference):
+        raise TypeError("inference must be a ZSpaceInference instance")
+
+    merged: dict[str, float] = {}
+
+    def _merge(source: _Mapping[str, _Any]) -> None:
+        for key, value in source.items():
+            try:
+                merged[key.lower()] = float(value)
+            except (TypeError, ValueError):
+                continue
+
+    metrics_mapping = dict(inference.metrics)
+    _merge(metrics_mapping)
+    if prefer_applied and inference.applied:
+        _merge(inference.applied)
+
+    def _resolve(default: float, *aliases: str) -> float:
+        for name in aliases:
+            value = merged.get(name.lower())
+            if value is not None:
+                return value
+        return float(default)
+
+    gradient_seq: list[float] = list(inference.gradient)
+    if not gradient_seq:
+        gradient_payload = metrics_mapping.get("gradient")
+        if isinstance(gradient_payload, _Iterable):
+            try:
+                gradient_seq = [float(entry) for entry in gradient_payload]
+            except (TypeError, ValueError):
+                gradient_seq = []
+
+    drs_value = _resolve(0.0, "drs", "drift")
+    gradient_resolved: _Optional[_Sequence[float]] = gradient_seq if gradient_seq else None
+
+    return ZMetrics(
+        speed=_resolve(0.0, "speed", "velocity"),
+        memory=_resolve(0.0, "memory", "mem"),
+        stability=_resolve(0.0, "stability", "stab"),
+        gradient=gradient_resolved,
+        drs=drs_value,
+    )
+
+
 def _clone_volume(volume: _Sequence[_Sequence[_Sequence[float]]]) -> _List[_List[_List[float]]]:
     return [[list(row) for row in slice_] for slice_ in volume]
 
@@ -2037,7 +2100,12 @@ class ZSpaceTrainer:
             v_hat = self._v[i] / (1.0 - self._beta2 ** self._t)
             self._z[i] -= self._lr * m_hat / (_math.sqrt(v_hat) + self._eps)
 
-    def step(self, metrics: _Mapping[str, float] | ZMetrics) -> float:
+    def step(
+        self, metrics: _Mapping[str, float] | ZMetrics | "ZSpaceInference"
+    ) -> float:
+        if isinstance(metrics, ZSpaceInference):
+            metrics = inference_to_zmetrics(metrics)
+
         if isinstance(metrics, ZMetrics):
             speed = float(metrics.speed)
             memory = float(metrics.memory)
@@ -2068,7 +2136,10 @@ class ZSpaceTrainer:
         return loss
 
 
-def step_many(trainer: ZSpaceTrainer, samples: _Iterable[_Mapping[str, float] | ZMetrics]) -> _List[float]:
+def step_many(
+    trainer: ZSpaceTrainer,
+    samples: _Iterable[_Mapping[str, float] | ZMetrics | ZSpaceInference],
+) -> _List[float]:
     for metrics in samples:
         trainer.step(metrics)
     return trainer.state
@@ -2076,7 +2147,7 @@ def step_many(trainer: ZSpaceTrainer, samples: _Iterable[_Mapping[str, float] | 
 
 def stream_zspace_training(
     trainer: ZSpaceTrainer,
-    samples: _Iterable[_Mapping[str, float] | ZMetrics],
+    samples: _Iterable[_Mapping[str, float] | ZMetrics | ZSpaceInference],
     *,
     on_step: _Optional[_Callable[[int, _List[float], float], None]] = None,
 ) -> _List[float]:

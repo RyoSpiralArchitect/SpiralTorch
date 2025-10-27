@@ -2615,7 +2615,7 @@ let projector = ZSpaceProjector::new(topos.clone(), encoder.clone())?;
 let text = projector.encode_text("SpiralTorch keeps the open topos alive")?;
 
 let mut gate = WaveGate::with_topos("gate", text.shape().1, encoder, topos.clone())?;
-let trainer = ModuleTrainer::new(DeviceCaps::wgpu(32, true, 256), -0.9, 0.05, 0.01);
+let mut trainer = ModuleTrainer::new(DeviceCaps::wgpu(32, true, 256), -0.9, 0.05, 0.01);
 trainer.prepare_with_topos(&mut gate, topos)?;
 
 let forward = gate.forward(&text)?;

@@ -1,9 +1,9 @@
 """Shared alias tables for Z-space metrics.
 
 These mappings are consumed by both the public Python API shim and the
-inference helpers so that the accepted aliases stay in lockstep.  Historically
+inference helpers so that the accepted aliases stay in lockstep. Historically
 each module maintained its own copy and they inevitably drifted as new metrics
-were added in one place but not the other.  Centralising the definitions keeps
+were added in one place but not the other. Centralising the definitions keeps
 the mapping coherent and makes it easier to extend Z-space diagnostics without
 chasing down duplicate tables.
 """
@@ -84,6 +84,31 @@ _ALIAS_ENTRIES = {
     "import_amplitude": "import_amplitude",
     "import_balance": "import_balance",
     "import_focus": "import_focus",
+    "elliptic_curvature": "elliptic_curvature",
+    "curvature_radius": "elliptic_curvature",
+    "elliptic_curvature_radius": "elliptic_curvature",
+    "elliptic_geodesic": "elliptic_geodesic",
+    "geodesic_radius": "elliptic_geodesic",
+    "elliptic_normalized": "elliptic_normalized",
+    "normalized_radius": "elliptic_normalized",
+    "elliptic_alignment": "elliptic_alignment",
+    "spin_alignment": "elliptic_alignment",
+    "elliptic_bias": "elliptic_bias",
+    "normal_bias": "elliptic_bias",
+    "elliptic_sheet_position": "elliptic_sheet_position",
+    "sheet_position": "elliptic_sheet_position",
+    "elliptic_sheet_index": "elliptic_sheet_index",
+    "sheet_index": "elliptic_sheet_index",
+    "elliptic_sheet_count": "elliptic_sheet_count",
+    "sheet_count": "elliptic_sheet_count",
+    "elliptic_sector": "elliptic_sector",
+    "topological_sector": "elliptic_sector",
+    "elliptic_homology": "elliptic_homology",
+    "homology_index": "elliptic_homology",
+    "elliptic_resonance": "elliptic_resonance",
+    "resonance_heat": "elliptic_resonance",
+    "elliptic_noise": "elliptic_noise",
+    "noise_density": "elliptic_noise",
 }
 
 
