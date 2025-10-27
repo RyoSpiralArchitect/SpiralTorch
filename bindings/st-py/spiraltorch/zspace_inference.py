@@ -7,7 +7,7 @@ import math
 import sys
 from dataclasses import dataclass
 from collections.abc import Iterable
-from typing import Any, Callable, Dict, Mapping, Sequence
+from typing import Any, Callable, Dict, Mapping, Sequence, Union
 from types import MappingProxyType
 
 from ._zspace_aliases import (
