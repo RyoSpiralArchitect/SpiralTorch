@@ -121,8 +121,18 @@ except ModuleNotFoundError as exc:
         raise
     try:
         _rs = import_module("spiraltorch.spiraltorch_native")
-    except ModuleNotFoundError:
-        _rs = import_module("spiraltorch_native")
+    except ModuleNotFoundError as _native_exc:
+        try:
+            _rs = import_module("spiraltorch_native")
+        except ModuleNotFoundError as _final_exc:
+            if _native_exc.name not in {
+                "spiraltorch.spiraltorch_native",
+                "spiraltorch_native",
+            }:
+                raise
+            if _final_exc.name not in {"spiraltorch.spiraltorch_native", "spiraltorch_native"}:
+                raise
+            _rs = None
 
 # --- begin: promote real rl submodule & alias DqnAgent->stAgent ---
 try:
