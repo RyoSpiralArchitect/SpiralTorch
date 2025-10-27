@@ -1734,8 +1734,28 @@ impl ModuleTrainer {
     }
 
     /// Produces a roundtable schedule for the provided output dimensions.
-    pub fn roundtable(&self, rows: u32, cols: u32, config: RoundtableConfig) -> RoundtableSchedule {
-        let schedule = RoundtableSchedule::new(&self.planner, rows, cols, config);
+    ///
+    /// When an Autopilot runtime is attached the planner suggestions are
+    /// overridden with the latest contextual picks before the schedule is
+    /// emitted.
+    pub fn roundtable(
+        &mut self,
+        rows: u32,
+        cols: u32,
+        config: RoundtableConfig,
+    ) -> RoundtableSchedule {
+        let mut schedule = RoundtableSchedule::new(&self.planner, rows, cols, config);
+        if self.autopilot.is_some() {
+            let depth = schedule.above().k + schedule.here().k + schedule.beneath().k;
+            let device_load = self.estimate_device_load();
+            if let Some(ap) = self.autopilot.as_mut() {
+                let context = ap.build_context(rows, cols, depth, device_load, &[]);
+                let picks = ap.suggest(context).clone();
+                if !picks.is_empty() {
+                    schedule.apply_knob_overrides(&picks);
+                }
+            }
+        }
         self.emit_roundtable_summary(rows, cols, config, &schedule);
         schedule
     }
@@ -3042,6 +3062,7 @@ mod tests {
     use crate::schedule::RoundtableConfig;
     #[cfg(feature = "golden")]
     use crate::CouncilEvidence;
+    use st_core::runtime::autopilot::{AutoConfig, AutoMode};
     use st_core::runtime::blackcat::{bandit::SoftBanditMode, zmeta::ZMetaParams, ChoiceGroups};
     use st_core::telemetry::hub::{SoftlogicEllipticSample, SoftlogicZFeedback};
     use st_core::telemetry::zspace_region::{ZSpaceRadiusBand, ZSpaceRegionKey, ZSpaceSpinBand};
@@ -3372,6 +3393,36 @@ mod tests {
             .unwrap();
         let after = model.forward(&input).unwrap();
         assert_ne!(before.data(), after.data());
+    }
+
+    #[test]
+    fn roundtable_applies_autopilot_overrides() {
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let mut groups = HashMap::new();
+        groups.insert("wg".to_string(), vec!["64".to_string()]);
+        groups.insert("here.tile".to_string(), vec!["42".to_string()]);
+        groups.insert("beneath.subgroup".to_string(), vec!["false".to_string()]);
+        let runtime = BlackCatRuntime::new(
+            ZMetaParams::default(),
+            ChoiceGroups { groups },
+            4,
+            SoftBanditMode::TS,
+            None,
+        );
+        let autopilot = Autopilot::new(
+            caps,
+            AutoConfig {
+                feat_dim: 4,
+                mode: AutoMode::Auto,
+                ..AutoConfig::default()
+            },
+            runtime,
+        );
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01).with_autopilot(autopilot);
+        let schedule = trainer.roundtable(8, 16, RoundtableConfig::default());
+        assert_eq!(schedule.above().choice.wg, 64);
+        assert_eq!(schedule.here().choice.tile, 42);
+        assert!(!schedule.beneath().choice.subgroup);
     }
 
     #[test]
