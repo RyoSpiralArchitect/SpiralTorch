@@ -9,6 +9,8 @@ from collections.abc import Iterable
 from typing import Any, Dict, Mapping, Sequence
 from types import MappingProxyType
 
+from ._zspace_aliases import ZSPACE_METRIC_ALIASES
+
 __all__ = [
     "ZSpaceDecoded",
     "ZSpaceInference",
@@ -35,75 +37,7 @@ __all__ = [
     "infer_weights_from_dlpack",
     "infer_weights_from_compat",
 ]
-
-
-_METRIC_ALIASES: Mapping[str, str] = MappingProxyType(
-    {
-        "speed": "speed",
-        "velocity": "speed",
-        "mem": "memory",
-        "memory": "memory",
-        "stab": "stability",
-        "stability": "stability",
-        "frac": "frac",
-        "frac_reg": "frac",
-        "fractality": "frac",
-        "drs": "drs",
-        "drift": "drs",
-        "gradient": "gradient",
-        "canvas_energy": "canvas_energy",
-        "canvas_mean": "canvas_mean",
-        "canvas_peak": "canvas_peak",
-        "canvas_balance": "canvas_balance",
-        "canvas_l1": "canvas_l1",
-        "canvas_l2": "canvas_l2",
-        "canvas_linf": "canvas_linf",
-        "canvas_pixels": "canvas_pixels",
-        "canvas_patch_energy": "canvas_patch_energy",
-        "canvas_patch_mean": "canvas_patch_mean",
-        "canvas_patch_peak": "canvas_patch_peak",
-        "canvas_patch_pixels": "canvas_patch_pixels",
-        "canvas_patch_balance": "canvas_patch_balance",
-        "hypergrad_norm": "hypergrad_norm",
-        "hypergrad_balance": "hypergrad_balance",
-        "hypergrad_mean": "hypergrad_mean",
-        "hypergrad_l1": "hypergrad_l1",
-        "hypergrad_l2": "hypergrad_l2",
-        "hypergrad_linf": "hypergrad_linf",
-        "realgrad_norm": "realgrad_norm",
-        "realgrad_balance": "realgrad_balance",
-        "realgrad_mean": "realgrad_mean",
-        "realgrad_l1": "realgrad_l1",
-        "realgrad_l2": "realgrad_l2",
-        "realgrad_linf": "realgrad_linf",
-        "coherence_mean": "coherence_mean",
-        "coherence_entropy": "coherence_entropy",
-        "coherence_energy_ratio": "coherence_energy_ratio",
-        "coherence_z_bias": "coherence_z_bias",
-        "coherence_fractional_order": "coherence_fractional_order",
-        "coherence_channels": "coherence_channels",
-        "coherence_preserved": "coherence_preserved",
-        "coherence_discarded": "coherence_discarded",
-        "coherence_dominant": "coherence_dominant",
-        "coherence_peak": "coherence_peak",
-        "coherence_weight_entropy": "coherence_weight_entropy",
-        "coherence_response_peak": "coherence_response_peak",
-        "coherence_response_mean": "coherence_response_mean",
-        "coherence_strength": "coherence_strength",
-        "coherence_prosody": "coherence_prosody",
-        "coherence_articulation": "coherence_articulation",
-        "import_l1": "import_l1",
-        "import_l2": "import_l2",
-        "import_linf": "import_linf",
-        "import_mean": "import_mean",
-        "import_variance": "import_variance",
-        "import_energy": "import_energy",
-        "import_count": "import_count",
-        "import_amplitude": "import_amplitude",
-        "import_balance": "import_balance",
-        "import_focus": "import_focus",
-    }
-)
+_METRIC_ALIASES: Mapping[str, str] = ZSPACE_METRIC_ALIASES
 
 
 def _softplus(value: float) -> float:
