@@ -27,7 +27,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::f64::consts::{FRAC_1_SQRT_2, PI};
 
-use nalgebra::{DMatrix, Matrix3, Matrix4, SymmetricEigen, Vector3};
+use nalgebra::{DMatrix, Matrix3, Matrix4, SymmetricEigen};
 use num_complex::Complex64;
 use st_tensor::{dlpack::DLManagedTensor, PureResult, Tensor};
 use thiserror::Error;
@@ -75,6 +75,139 @@ fn levi_civita_symbol(indices: [usize; 4]) -> f64 {
         }
     }
     sign
+}
+
+fn raise_all_indices(
+    tensor: &[[[[f64; DIM]; DIM]; DIM]; DIM],
+    g_inv: &Matrix4<f64>,
+) -> [[[[f64; DIM]; DIM]; DIM]; DIM] {
+    let mut raised_mu = [[[[0.0; DIM]; DIM]; DIM]; DIM];
+    for mu in 0..DIM {
+        for nu in 0..DIM {
+            for rho in 0..DIM {
+                for sigma in 0..DIM {
+                    let mut sum = 0.0;
+                    for alpha in 0..DIM {
+                        sum += g_inv[(mu, alpha)] * tensor[alpha][nu][rho][sigma];
+                    }
+                    raised_mu[mu][nu][rho][sigma] = sum;
+                }
+            }
+        }
+    }
+
+    let mut raised_nu = [[[[0.0; DIM]; DIM]; DIM]; DIM];
+    for mu in 0..DIM {
+        for nu in 0..DIM {
+            for rho in 0..DIM {
+                for sigma in 0..DIM {
+                    let mut sum = 0.0;
+                    for beta in 0..DIM {
+                        sum += g_inv[(nu, beta)] * raised_mu[mu][beta][rho][sigma];
+                    }
+                    raised_nu[mu][nu][rho][sigma] = sum;
+                }
+            }
+        }
+    }
+
+    let mut raised_rho = [[[[0.0; DIM]; DIM]; DIM]; DIM];
+    for mu in 0..DIM {
+        for nu in 0..DIM {
+            for rho in 0..DIM {
+                for sigma in 0..DIM {
+                    let mut sum = 0.0;
+                    for gamma in 0..DIM {
+                        sum += g_inv[(rho, gamma)] * raised_nu[mu][nu][gamma][sigma];
+                    }
+                    raised_rho[mu][nu][rho][sigma] = sum;
+                }
+            }
+        }
+    }
+
+    let mut raised_sigma = [[[[0.0; DIM]; DIM]; DIM]; DIM];
+    for mu in 0..DIM {
+        for nu in 0..DIM {
+            for rho in 0..DIM {
+                for sigma in 0..DIM {
+                    let mut sum = 0.0;
+                    for delta in 0..DIM {
+                        sum += g_inv[(sigma, delta)] * raised_rho[mu][nu][rho][delta];
+                    }
+                    raised_sigma[mu][nu][rho][sigma] = sum;
+                }
+            }
+        }
+    }
+
+    raised_sigma
+}
+
+fn raise_last_pair(
+    tensor: &[[[[f64; DIM]; DIM]; DIM]; DIM],
+    g_inv: &Matrix4<f64>,
+) -> [[[[f64; DIM]; DIM]; DIM]; DIM] {
+    let mut raised_gamma = [[[[0.0; DIM]; DIM]; DIM]; DIM];
+    for first in 0..DIM {
+        for second in 0..DIM {
+            for alpha in 0..DIM {
+                for delta in 0..DIM {
+                    let mut sum = 0.0;
+                    for gamma in 0..DIM {
+                        sum += g_inv[(gamma, alpha)] * tensor[first][second][gamma][delta];
+                    }
+                    raised_gamma[first][second][alpha][delta] = sum;
+                }
+            }
+        }
+    }
+
+    let mut raised_delta = [[[[0.0; DIM]; DIM]; DIM]; DIM];
+    for first in 0..DIM {
+        for second in 0..DIM {
+            for alpha in 0..DIM {
+                for beta in 0..DIM {
+                    let mut sum = 0.0;
+                    for delta in 0..DIM {
+                        sum += g_inv[(delta, beta)] * raised_gamma[first][second][alpha][delta];
+                    }
+                    raised_delta[first][second][alpha][beta] = sum;
+                }
+            }
+        }
+    }
+
+    raised_delta
+}
+
+fn complex_cbrt(z: Complex64) -> Complex64 {
+    if z == Complex64::new(0.0, 0.0) {
+        Complex64::new(0.0, 0.0)
+    } else {
+        z.powf(1.0 / 3.0)
+    }
+}
+
+fn solve_self_dual_eigenvalues(i: Complex64, j: Complex64) -> [Complex64; 3] {
+    let p = -i;
+    let q = Complex64::new(2.0, 0.0) * j;
+    let half_q = q * Complex64::new(0.5, 0.0);
+    let p_over_three = p * Complex64::new(1.0 / 3.0, 0.0);
+    let discriminant = half_q * half_q + p_over_three * p_over_three * p_over_three;
+    let sqrt_disc = discriminant.sqrt();
+    let u_cubed = -half_q + sqrt_disc;
+    let v_cubed = -half_q - sqrt_disc;
+    let u = complex_cbrt(u_cubed);
+    let v = complex_cbrt(v_cubed);
+    let omega = Complex64::new(-0.5, (3.0f64).sqrt() / 2.0);
+    let omega_conj = omega.conj();
+
+    let root1 = u + v;
+    let root2 = omega * u + omega_conj * v;
+    let root3 = omega_conj * u + omega * v;
+
+    [root1, root2, root3]
 }
 
 /// Error raised when the supplied metric fails the Lorentzian checks.
@@ -1322,6 +1455,22 @@ impl RiemannTensor {
     pub fn components(&self) -> &[[[[f64; DIM]; DIM]; DIM]; DIM] {
         &self.components
     }
+
+    /// Checks whether every component is within a tolerance of zero.
+    pub fn is_near_zero(&self, tolerance: f64) -> bool {
+        for sigma in 0..DIM {
+            for mu in 0..DIM {
+                for nu in 0..DIM {
+                    for rho in 0..DIM {
+                        if self.components[sigma][mu][nu][rho].abs() > tolerance {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+        true
+    }
 }
 /// Ricci tensor R_{μν} obtained by contracting the Riemann tensor.
 #[derive(Clone, Debug, PartialEq)]
@@ -1353,6 +1502,18 @@ impl RicciTensor {
     /// Immutable access to the raw matrix.
     pub fn components(&self) -> &[[f64; DIM]; DIM] {
         &self.components
+    }
+
+    /// Returns whether every component is close to zero within the provided tolerance.
+    pub fn is_near_zero(&self, tolerance: f64) -> bool {
+        for mu in 0..DIM {
+            for nu in 0..DIM {
+                if self.components[mu][nu].abs() > tolerance {
+                    return false;
+                }
+            }
+        }
+        true
     }
 
     /// Computes the scalar curvature R = g^{μν} R_{μν}.
@@ -1691,6 +1852,28 @@ impl CurvatureDiagnostics {
         ricci: &RicciTensor,
         scalar_curvature: f64,
     ) -> Self {
+        const FLAT_TOLERANCE: f64 = 1e-12;
+        if riemann.is_near_zero(FLAT_TOLERANCE)
+            && ricci.is_near_zero(FLAT_TOLERANCE)
+            && scalar_curvature.abs() <= FLAT_TOLERANCE
+        {
+            return Self {
+                scalar_curvature,
+                ricci_square: 0.0,
+                kretschmann: 0.0,
+                weyl_square: 0.0,
+                weyl_dual_contraction: 0.0,
+                weyl_self_dual_squared: 0.0,
+                weyl_anti_self_dual_squared: 0.0,
+                weyl_self_dual_matrix: [[Complex64::new(0.0, 0.0); 3]; 3],
+                weyl_anti_self_dual_matrix: [[Complex64::new(0.0, 0.0); 3]; 3],
+                weyl_self_dual_invariant_i: Complex64::new(0.0, 0.0),
+                weyl_self_dual_invariant_j: Complex64::new(0.0, 0.0),
+                weyl_self_dual_discriminant: Complex64::new(0.0, 0.0),
+                weyl_self_dual_eigenvalues: [Complex64::new(0.0, 0.0); 3],
+            };
+        }
+
         let g = metric.components();
         let g_inv = metric.inverse();
 
@@ -1711,30 +1894,7 @@ impl CurvatureDiagnostics {
         }
 
         // Raise all indices to compute R^{μνρσ}.
-        let mut riemann_all_up = [[[[0.0; DIM]; DIM]; DIM]; DIM];
-        for mu in 0..DIM {
-            for nu in 0..DIM {
-                for rho in 0..DIM {
-                    for sigma in 0..DIM {
-                        let mut sum = 0.0;
-                        for alpha in 0..DIM {
-                            for beta in 0..DIM {
-                                for gamma in 0..DIM {
-                                    for delta in 0..DIM {
-                                        sum += g_inv[(mu, alpha)]
-                                            * g_inv[(nu, beta)]
-                                            * g_inv[(rho, gamma)]
-                                            * g_inv[(sigma, delta)]
-                                            * riemann_lower[alpha][beta][gamma][delta];
-                                    }
-                                }
-                            }
-                        }
-                        riemann_all_up[mu][nu][rho][sigma] = sum;
-                    }
-                }
-            }
-        }
+        let riemann_all_up = raise_all_indices(&riemann_lower, g_inv);
 
         // Construct the Weyl tensor with all indices lowered.
         let mut weyl_lower = [[[[0.0; DIM]; DIM]; DIM]; DIM];
@@ -1758,30 +1918,7 @@ impl CurvatureDiagnostics {
         }
 
         // Raise indices to obtain C^{μνρσ}.
-        let mut weyl_all_up = [[[[0.0; DIM]; DIM]; DIM]; DIM];
-        for mu in 0..DIM {
-            for nu in 0..DIM {
-                for rho in 0..DIM {
-                    for sigma in 0..DIM {
-                        let mut sum = 0.0;
-                        for alpha in 0..DIM {
-                            for beta in 0..DIM {
-                                for gamma in 0..DIM {
-                                    for delta in 0..DIM {
-                                        sum += g_inv[(mu, alpha)]
-                                            * g_inv[(nu, beta)]
-                                            * g_inv[(rho, gamma)]
-                                            * g_inv[(sigma, delta)]
-                                            * weyl_lower[alpha][beta][gamma][delta];
-                                    }
-                                }
-                            }
-                        }
-                        weyl_all_up[mu][nu][rho][sigma] = sum;
-                    }
-                }
-            }
-        }
+        let weyl_all_up = raise_all_indices(&weyl_lower, g_inv);
 
         let mut kretschmann = 0.0;
         for mu in 0..DIM {
@@ -1796,9 +1933,7 @@ impl CurvatureDiagnostics {
         }
 
         let det = metric.determinant();
-        let volume = metric
-            .volume_element()
-            .unwrap_or_else(|| det.abs().sqrt());
+        let volume = metric.volume_element().unwrap_or_else(|| det.abs().sqrt());
 
         let mut epsilon_lower = [[[[0.0; DIM]; DIM]; DIM]; DIM];
         for mu in 0..DIM {
@@ -1812,24 +1947,7 @@ impl CurvatureDiagnostics {
             }
         }
 
-        let mut epsilon_last_pair_raised = [[[[0.0; DIM]; DIM]; DIM]; DIM];
-        for rho in 0..DIM {
-            for sigma in 0..DIM {
-                for alpha in 0..DIM {
-                    for beta in 0..DIM {
-                        let mut sum = 0.0;
-                        for gamma in 0..DIM {
-                            for delta in 0..DIM {
-                                sum += epsilon_lower[rho][sigma][gamma][delta]
-                                    * g_inv[(gamma, alpha)]
-                                    * g_inv[(delta, beta)];
-                            }
-                        }
-                        epsilon_last_pair_raised[rho][sigma][alpha][beta] = sum;
-                    }
-                }
-            }
-        }
+        let epsilon_last_pair_raised = raise_last_pair(&epsilon_lower, g_inv);
 
         let mut weyl_dual_lower = [[[[0.0; DIM]; DIM]; DIM]; DIM];
         for mu in 0..DIM {
@@ -1954,13 +2072,8 @@ impl CurvatureDiagnostics {
             * weyl_self_dual_invariant_i
             * weyl_self_dual_invariant_i
             - Complex64::new(27.0, 0.0) * weyl_self_dual_invariant_j * weyl_self_dual_invariant_j;
-        let eigenvalues_vec = weyl_self_dual_matrix_mat
-            .eigenvalues()
-            .unwrap_or_else(|| Vector3::repeat(Complex64::new(0.0, 0.0)));
-        let mut weyl_self_dual_eigenvalues = [Complex64::new(0.0, 0.0); 3];
-        for index in 0..3 {
-            weyl_self_dual_eigenvalues[index] = eigenvalues_vec[index];
-        }
+        let mut weyl_self_dual_eigenvalues =
+            solve_self_dual_eigenvalues(weyl_self_dual_invariant_i, weyl_self_dual_invariant_j);
         weyl_self_dual_eigenvalues.sort_by(|lhs, rhs| {
             lhs.re
                 .partial_cmp(&rhs.re)
