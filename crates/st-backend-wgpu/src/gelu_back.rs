@@ -11,6 +11,7 @@
 
 use std::cmp;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
 use wgpu::{
@@ -219,18 +220,18 @@ impl ReduceUniforms {
 pub struct Pipelines {
     pub fused_bind_layout: BindGroupLayout,
     pub reduce_bind_layout: BindGroupLayout,
-    pub fused: ComputePipeline,
-    pub reduce: ComputePipeline,
+    pub fused: Arc<ComputePipeline>,
+    pub reduce: Arc<ComputePipeline>,
     pub geometry: Geometry,
 }
 
 impl Pipelines {
     pub fn fused_dispatch<'a>(&'a self) -> &'a ComputePipeline {
-        &self.fused
+        self.fused.as_ref()
     }
 
     pub fn reduce_dispatch<'a>(&'a self) -> &'a ComputePipeline {
-        &self.reduce
+        self.reduce.as_ref()
     }
 
     pub fn geometry(&self) -> Geometry {
@@ -252,8 +253,8 @@ impl<'a> Builder<'a> {
         Self { device, cache }
     }
 
-    pub fn cache_mut(&mut self) -> &mut ShaderCache {
-        &mut self.cache
+    pub fn cache_mut(&self) -> &ShaderCache {
+        &self.cache
     }
 
     pub fn into_cache(self) -> ShaderCache {
@@ -267,7 +268,7 @@ impl<'a> Builder<'a> {
     }
 
     pub fn build_with_geometry(
-        mut self,
+        self,
         geometry: Geometry,
     ) -> Result<(Pipelines, ShaderCache), ShaderLoadError> {
         let fused_bind_layout = self
