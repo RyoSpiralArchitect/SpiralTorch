@@ -521,17 +521,11 @@ func NewZerosTensor(rows, cols int) (*Tensor, error) {
 
 // NewTensorFromDense constructs a tensor from the provided row-major data slice.
 //
-// The data length must match rows*cols. Zero-sized tensors are permitted and are
-// created via the same zero allocator used by NewZerosTensor.
+// The data length must match rows*cols and both dimensions must be positive.
+// For zero-sized tensors prefer NewZerosTensor.
 func NewTensorFromDense(rows, cols int, data []float32) (*Tensor, error) {
-	if rows < 0 || cols < 0 {
-		return nil, fmt.Errorf("spiraltorch: dimensions must be non-negative")
-	}
-	if rows == 0 || cols == 0 {
-		if len(data) != 0 {
-			return nil, fmt.Errorf("spiraltorch: data length %d does not match shape %dx%d", len(data), rows, cols)
-		}
-		return NewZerosTensor(rows, cols)
+	if rows <= 0 || cols <= 0 {
+		return nil, fmt.Errorf("spiraltorch: dimensions must be positive")
 	}
 	if rows*cols != len(data) {
 		return nil, fmt.Errorf("spiraltorch: data length %d does not match shape %dx%d", len(data), rows, cols)
