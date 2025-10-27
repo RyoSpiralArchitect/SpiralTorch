@@ -1122,7 +1122,9 @@ builders such as `OverlayFrame::from_pairs`/`::from_glyphs_and_intensities` so
 AR pipelines can zip glyph and intensity streams without writing manual
 plumbing.【F:crates/st-qr-studio/src/lib.rs†L1-L362】 Storyboard exports drop directly into
 `tools/qr_storyboard.py`, which converts JSON/NDJSON captures into Markdown decks
-grouped by channel for Desire roundtables.【F:tools/qr_storyboard.py†L1-L96】 The companion
+grouped by channel for Desire roundtables while weaving overlay glyph stacks,
+meta-narrative tags, causal ancestry, concept windows, and meaning-sheaf
+signatures into a highlights column for reviewers.【F:tools/qr_storyboard.py†L1-L190】 The companion
 [Quantum Reality Playbook](docs/qr_playbook/README.md) provides rituals,
 collaboration tips, and art-direction cues so research and cultural teams stay
 synchronised.【F:docs/qr_playbook/README.md†L1-L49】
