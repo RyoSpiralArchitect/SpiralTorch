@@ -1055,7 +1055,8 @@ impl SpiralSession {
 
     /// Creates a roundtable schedule for the provided configuration.
     pub fn roundtable(&self, rows: u32, cols: u32, config: RoundtableConfig) -> RoundtableSchedule {
-        self.trainer().roundtable(rows, cols, config)
+        let mut trainer = self.trainer();
+        trainer.roundtable(rows, cols, config)
     }
 }
 

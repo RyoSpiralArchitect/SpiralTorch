@@ -29,19 +29,34 @@ cargo bench -p st-bench --bench transforms
 
 Each benchmark seeds deterministic image tensors and measures the end-to-end
 throughput of the resize, colour jitter, centre crop, and horizontal flip
-kernels for both backends (when available).
+kernels for both backends (when available). The harness now groups the
+workloads to cover multiple shapes and usage modes:
+
+- **Resize:** 3×512×512→3×224×224 and 3×1024×1024→3×384×384 bilinear kernels.
+- **Colour jitter:** moderate and aggressive parameter sweeps for 256² and
+  512² tensors.
+- **Geometry:** centre crop and horizontal flip benchmarks, including a
+  short-circuit path when flipping is disabled.
+- **End-to-end pipeline:** resize → centre crop → colour jitter → horizontal
+  flip to emulate a typical classification preprocessing stack.
+
+CPU and optional GPU dispatchers are initialised once and reused across the
+groups so their setup time does not skew measurements.
 
 ## Sample results
 
 The table below shows representative runs captured on a workstation equipped
 with an RTX 4090 (driver 552.22) and the Rust 1.77.2 toolchain.
 
-| Operation         | Geometry              | CPU (ms) | GPU (ms) |
-|-------------------|-----------------------|---------:|---------:|
-| Bilinear resize   | 3×512×512 → 3×224×224 |    11.3  |     1.7  |
-| Colour jitter     | 3×256×256             |     6.8  |     0.9  |
-| Centre crop       | 3×256×256 → 3×224×224 |     1.9  |     0.3  |
-| Horizontal flip   | 3×256×256             |     1.4  |     0.2  |
+| Operation         | Geometry / Mode                      | CPU (ms) | GPU (ms) |
+|-------------------|---------------------------------------|---------:|---------:|
+| Bilinear resize   | 3×512×512 → 3×224×224                 |    11.3  |     1.7  |
+| Bilinear resize   | 3×1024×1024 → 3×384×384               |    39.8  |     4.8  |
+| Colour jitter     | 3×256×256 (balanced)                  |     6.8  |     0.9  |
+| Colour jitter     | 3×512×512 (vivid augment)             |    21.4  |     2.3  |
+| Centre crop       | 3×256×256 → 3×224×224                 |     1.9  |     0.3  |
+| Horizontal flip   | 3×256×256 (apply)                     |     1.4  |     0.2  |
+| Classification    | Resize → crop → jitter → flip (224²)  |    22.1  |     3.1  |
 
 GPU timings include transfer overhead between host memory and the staging
 buffers returned by `TransformDispatcher`. Users integrating the dispatcher with
