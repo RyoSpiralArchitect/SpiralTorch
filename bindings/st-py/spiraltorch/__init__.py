@@ -5,6 +5,8 @@ import math as _math
 import threading as _threading
 import types as _types
 import sys
+import importlib.abc as _importlib_abc
+import importlib.util as _importlib_util
 import weakref as _weakref
 from collections import deque as _deque
 from collections.abc import Iterable as _IterableABC, Sequence as _SequenceABC
@@ -109,10 +111,8 @@ if "spiral_rl" not in sys.modules:
     # 参照される両方の候補名を用意しておく（実体は後で本物に差し替え）
     _shim.DqnAgent = type("DqnAgent", (), {})  # placeholder
     _shim.PyDqnAgent = type("PyDqnAgent", (), {})  # placeholder
+    _shim.__spiraltorch_placeholder__ = True
     sys.modules["spiral_rl"] = _shim
-# ついでに第三者パッケージの `rl` が入り込む事故を防止
-if "rl" not in sys.modules:
-    sys.modules["rl"] = _types.ModuleType("rl")
 
 try:
     _rs = import_module("spiraltorch.spiraltorch")
@@ -133,6 +133,79 @@ try:
             setattr(_spiral_rl, "DqnAgent", getattr(_spiral_rl, "stAgent"))
 except Exception:
     pass
+
+
+def _is_valid_rl_module(module: _types.ModuleType | None) -> bool:
+    return bool(
+        isinstance(module, _types.ModuleType)
+        and not getattr(module, "__spiraltorch_placeholder__", False)
+        and hasattr(module, "stAgent")
+    )
+
+
+def _spiraltorch_rl_module(*, load: bool) -> _types.ModuleType | None:
+    parent = sys.modules.get(__name__)
+    module = _safe_getattr(parent, "rl")
+    if _is_valid_rl_module(module):
+        return module
+    for cached in ("spiraltorch.rl", "spiraltorch.spiral_rl"):
+        candidate = sys.modules.get(cached)
+        if _is_valid_rl_module(candidate):
+            return candidate
+    if load:
+        for candidate in ("spiraltorch.rl", "spiraltorch.spiral_rl"):
+            try:
+                resolved = import_module(candidate)
+            except ModuleNotFoundError:
+                continue
+            if _is_valid_rl_module(resolved):
+                return resolved
+    return None
+
+
+class _SpiralTorchRLLazyLoader(_importlib_abc.Loader):
+    def create_module(self, spec):  # type: ignore[override]
+        module = _spiraltorch_rl_module(load=True)
+        if module is None:
+            raise ModuleNotFoundError("spiraltorch.rl module is unavailable")
+        sys.modules.setdefault(spec.name, module)
+        return module
+
+    def exec_module(self, module):  # type: ignore[override]
+        sys.modules.setdefault("rl", module)
+
+
+class _SpiralTorchRLAliasFinder(_importlib_abc.MetaPathFinder):
+    def __init__(self) -> None:
+        self._loader = _SpiralTorchRLLazyLoader()
+
+    def find_spec(self, fullname, path, target=None):  # type: ignore[override]
+        if fullname != "rl" or fullname in sys.modules:
+            return None
+        if _spiraltorch_rl_module(load=False) is None:
+            return None
+        return _importlib_util.spec_from_loader(fullname, self._loader, origin="spiraltorch")
+
+
+_RL_ALIAS_FINDER: _SpiralTorchRLAliasFinder | None = None
+
+
+def _ensure_rl_lazy_alias() -> None:
+    global _RL_ALIAS_FINDER
+    if "rl" in sys.modules:
+        return
+    if _spiraltorch_rl_module(load=False) is None:
+        return
+    if _RL_ALIAS_FINDER is None:
+        _RL_ALIAS_FINDER = _SpiralTorchRLAliasFinder()
+    for finder in sys.meta_path:
+        if finder is _RL_ALIAS_FINDER:
+            break
+    else:
+        sys.meta_path.insert(0, _RL_ALIAS_FINDER)
+
+
+_ensure_rl_lazy_alias()
 try:
     __version__ = _pkg_version("spiraltorch")
 except PackageNotFoundError:

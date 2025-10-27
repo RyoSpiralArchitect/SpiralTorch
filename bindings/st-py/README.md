@@ -272,6 +272,15 @@ Python notebooks can lean on SpiralTorchRL without reimplementing Z-space
 plumbing. Policies keep their weight updates inside hypergrad tapes and expose
 the discounted-return baseline used during training.
 
+### Legacy `rl` imports
+
+Older notebooks sometimes `import rl` directly. The Python binding now
+discovers whether the native wheel exposes `spiraltorch.rl` before wiring a
+lazy import hook. If another library has already populated `sys.modules["rl"]`
+we leave it untouched; otherwise importing `rl` defers to the SpiralTorch
+module on demand. Wheels built without SpiralTorchRL skip the hook entirely so
+third-party modules remain unaffected.
+
 ```python
 from spiraltorch import Tensor
 from spiraltorch.spiral_rl import PolicyGradient
