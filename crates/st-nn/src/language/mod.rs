@@ -32,10 +32,10 @@ pub use maxwell::{MaxwellDesireBridge, NarrativeHint, NarrativeSummary};
 pub use pipeline::{
     DesireChannelSink, DesireGraphBridge, DesireGraphEvent, DesireGraphSummary, DesirePipeline,
     DesirePipelineBuilder, DesirePipelineEvent, DesirePipelineSink, DesireRoundtableBridge,
-    DesireRoundtableEvent, DesireRoundtableImpulse, DesireRoundtableSummary, DesireTelemetrySink,
-    DesireTrainerBridge, DesireTrainerEvent, DesireTrainerSummary, DesireTriggerBuffer,
-    DesireTriggerEvent, GeometryBiasConfig, GeometryBiasContext, GeometryBiasMetrics,
-    GeometryBiasSnapshot, GeometryBiasUpdate, GeometryCoherenceSample,
+    DesireRoundtableEvent, DesireRoundtableImpulse, DesireRoundtableSummary, DesireTelemetryBundle,
+    DesireTelemetrySink, DesireTrainerBridge, DesireTrainerEvent, DesireTrainerSummary,
+    DesireTriggerBuffer, DesireTriggerEvent, GeometryBiasConfig, GeometryBiasContext,
+    GeometryBiasMetrics, GeometryBiasSnapshot, GeometryBiasUpdate, GeometryCoherenceSample,
 };
 #[cfg(feature = "psi")]
 pub use pipeline::{DesirePsiBridge, DesirePsiEvent, DesirePsiSummary};

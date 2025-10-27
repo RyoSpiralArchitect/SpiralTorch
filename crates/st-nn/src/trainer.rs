@@ -29,7 +29,8 @@ use crate::golden::{GoldenBlackcatPulse, GoldenCooperativeDirective, GoldenCounc
 #[cfg(feature = "psi")]
 use crate::language::{DesirePsiBridge, DesirePsiSummary};
 use crate::language::{
-    DesireRoundtableBridge, DesireRoundtableSummary, DesireTrainerBridge, DesireTrainerSummary,
+    DesireRoundtableBridge, DesireRoundtableSummary, DesireTelemetryBundle, DesireTrainerBridge,
+    DesireTrainerSummary,
 };
 use crate::loss::Loss;
 use crate::module::Module;
@@ -1333,6 +1334,21 @@ impl ModuleTrainer {
     /// A/B/C consensus without bespoke glue.
     pub fn enable_desire_roundtable_bridge(&mut self, bridge: DesireRoundtableBridge) {
         self.desire_roundtable_bridge = Some(bridge);
+    }
+
+    /// Bundles desire trainer, roundtable, and ψ bridges so experiments can
+    /// attach every compatible telemetry stream in one call.
+    pub fn enable_desire_telemetry(&mut self, bundle: &DesireTelemetryBundle) {
+        if let Some(bridge) = bundle.trainer_bridge() {
+            self.enable_desire_pipeline(bridge.clone());
+        }
+        if let Some(bridge) = bundle.roundtable_bridge() {
+            self.enable_desire_roundtable_bridge(bridge.clone());
+        }
+        #[cfg(feature = "psi")]
+        if let Some(bridge) = bundle.psi_bridge() {
+            self.enable_desire_psi_bridge(bridge.clone());
+        }
     }
 
     /// Clears any attached roundtable desire bridge.
@@ -3378,6 +3394,8 @@ mod tests {
             noise_density: 0.0,
             quaternion: [0.0; 4],
             rotation: [0.0; 9],
+            lie_log: [0.0; 3],
+            rotor_transport: [0.0; 3],
         };
         let seed_feedback = SoftlogicZFeedback {
             psi_total: 0.0,
@@ -3443,6 +3461,8 @@ mod tests {
             noise_density: 0.0,
             quaternion: [0.0; 4],
             rotation: [0.0; 9],
+            lie_log: [0.0; 3],
+            rotor_transport: [0.0; 3],
         };
         let feedback = SoftlogicZFeedback {
             psi_total: 0.0,
@@ -3674,6 +3694,61 @@ mod tests {
         assert!(bridge.drain_summary().unwrap().is_none());
         let summary = trainer.desire_roundtable_summary();
         assert!(summary.is_some());
+    }
+
+    #[test]
+    fn trainer_enables_desire_bundle() {
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        let mut model = Sequential::new();
+        model.push(Linear::new("lin", 2, 1).unwrap());
+        trainer.prepare(&mut model).unwrap();
+
+        let automation = build_language_automation();
+        let trainer_bridge = DesireTrainerBridge::new();
+        let roundtable_bridge = DesireRoundtableBridge::new();
+        let bundle = DesireTelemetryBundle::new()
+            .with_trainer_bridge(&trainer_bridge)
+            .with_roundtable_bridge(&roundtable_bridge);
+
+        let mut pipeline = DesirePipeline::builder(automation)
+            .with_telemetry_bundle(&bundle)
+            .with_sink(DesireTriggerBuffer::new())
+            .build();
+
+        let logits = vec![2.2, 0.5];
+        let concept = ConceptHint::Distribution(vec![0.6, 0.4]);
+        let start = Instant::now();
+        let anchor = SystemTime::now();
+        for step in 0..6 {
+            let now = start + Duration::from_millis((step * 120) as u64);
+            let timestamp = anchor + Duration::from_millis((step * 120) as u64);
+            pipeline
+                .step_at(&logits, step % 2, &concept, now, timestamp)
+                .unwrap();
+        }
+
+        trainer.enable_desire_telemetry(&bundle);
+
+        let schedule = trainer.roundtable(1, 1, RoundtableConfig::default());
+        let dataset = vec![
+            (
+                Tensor::from_vec(1, 2, vec![0.0, 1.0]).unwrap(),
+                Tensor::from_vec(1, 1, vec![1.0]).unwrap(),
+            ),
+            (
+                Tensor::from_vec(1, 2, vec![1.0, 0.0]).unwrap(),
+                Tensor::from_vec(1, 1, vec![0.0]).unwrap(),
+            ),
+        ];
+        let mut loss = MeanSquaredError::new();
+        trainer
+            .train_epoch(&mut model, &mut loss, dataset, &schedule)
+            .unwrap();
+
+        assert!(trainer_bridge.is_empty());
+        assert!(roundtable_bridge.is_empty());
+        assert!(trainer.desire_roundtable_summary().is_some());
     }
 
     #[test]
