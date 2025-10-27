@@ -1539,6 +1539,31 @@ Every optimisation step now reports `desire_roundtable_*` metrics, while
 `ModuleTrainer::desire_roundtable_summary()` returns the most recent aggregate so
 Python notebooks can watch the unconscious drift in real time.【F:crates/st-nn/src/trainer.rs†L240-L392】【F:crates/st-nn/src/trainer.rs†L780-L905】
 
+Need all three braids at once? `DesireTelemetryBundle` wires the trainer,
+roundtable, and ψ bridges together so experiments can attach a single bundle to
+both the pipeline and optimiser.【F:crates/st-nn/src/language/pipeline.rs†L1808-L1853】【F:crates/st-nn/src/trainer.rs†L1352-L1383】
+
+```rust
+use st_nn::language::{
+    DesirePipeline, DesirePsiBridge, DesireRoundtableBridge, DesireTelemetryBundle,
+    DesireTrainerBridge,
+};
+
+let trainer_bridge = DesireTrainerBridge::new();
+let roundtable_bridge = DesireRoundtableBridge::new();
+let psi_bridge = DesirePsiBridge::new();
+let bundle = DesireTelemetryBundle::new()
+    .with_trainer_bridge(&trainer_bridge)
+    .with_roundtable_bridge(&roundtable_bridge)
+    .with_psi_bridge(&psi_bridge);
+
+let mut pipeline = DesirePipeline::builder(automation)
+    .with_telemetry_bundle(&bundle)
+    .build();
+
+trainer.enable_desire_telemetry(&bundle);
+```
+
 ```python
 import spiraltorch
 

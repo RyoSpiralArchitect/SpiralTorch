@@ -9,6 +9,8 @@ from collections.abc import Iterable
 from typing import Any, Dict, Mapping, Sequence
 from types import MappingProxyType
 
+from ._zspace_aliases import ZSPACE_METRIC_ALIASES
+
 __all__ = [
     "ZSpaceDecoded",
     "ZSpaceInference",
@@ -130,6 +132,7 @@ _METRIC_ALIASES: Mapping[str, str] = MappingProxyType(
         "noise_density": "elliptic_noise",
     }
 )
+_METRIC_ALIASES: Mapping[str, str] = ZSPACE_METRIC_ALIASES
 
 
 def _softplus(value: float) -> float:
