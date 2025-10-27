@@ -126,7 +126,8 @@ impl PyModuleTrainer {
             .model
             .forward(&x)
             .map_err(|e: TensorError| PyValueError::new_err(e.to_string()))?;
-        mean_squared_error(&predictions, &y).map_err(|e: TensorError| PyValueError::new_err(e.to_string()))
+        mean_squared_error(&predictions, &y)
+            .map_err(|e: TensorError| PyValueError::new_err(e.to_string()))
     }
 
     /// Convenience helper to run inference from nested Python lists.
@@ -155,7 +156,8 @@ impl PyModuleTrainer {
         targets: &PyTensor,
         learning_rate: f32,
     ) -> PyResult<f32> {
-        let seed = Tensor::zeros(1, 1).map_err(|e: TensorError| PyValueError::new_err(e.to_string()))?;
+        let seed =
+            Tensor::zeros(1, 1).map_err(|e: TensorError| PyValueError::new_err(e.to_string()))?;
         let params = module
             .inner
             .forward(&seed)

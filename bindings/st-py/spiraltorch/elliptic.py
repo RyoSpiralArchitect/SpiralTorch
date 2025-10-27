@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 try:  # pragma: no cover - torch optional during build
     import torch
@@ -20,6 +20,7 @@ __all__ = [
     "EllipticWarpFunction",
     "elliptic_warp_autograd",
     "elliptic_warp_features",
+    "elliptic_warp_partial",
 ]
 
 
@@ -149,3 +150,57 @@ def elliptic_warp_features(
         telemetry, features, _jac = result
         results.append((features, telemetry.as_dict() if as_dict else telemetry))
     return results
+
+
+def elliptic_warp_partial(
+    warp: "_EllipticWarp",
+    orientation: "torch.Tensor",
+    *,
+    bundle_weight: float = 1.0,
+    origin: str | None = "elliptic",
+    telemetry_prefix: str = "elliptic",
+    aggregate: str = "mean",
+    gradient_source: str = "rotor_transport",
+    extra_telemetry: Mapping[str, Any] | None = None,
+    return_features: bool = False,
+):
+    """Run the elliptic warp and convert its telemetry into a Z-space bundle.
+
+    This helper stitches the autograd-enabled warp with the Z-space inference
+    pipeline by translating the generated telemetry into a
+    :class:`~spiraltorch.zspace_inference.ZSpacePartialBundle`.
+
+    Args:
+        warp: Rust-backed :class:`EllipticWarp` instance.
+        orientation: Orientation tensor provided to :func:`elliptic_warp_autograd`.
+        bundle_weight: Weight assigned to the resulting partial bundle.
+        origin: Optional origin label recorded on the partial bundle.
+        telemetry_prefix: Prefix applied to flattened telemetry payload keys.
+        aggregate: Reduction strategy (``"mean"``, ``"max"``, ``"min"`` or
+            ``"last"``) applied when multiple telemetry samples are provided.
+        gradient_source: Telemetry vector used to seed the gradient channel;
+            defaults to ``rotor_transport``.
+        extra_telemetry: Additional telemetry mapping merged into the bundle.
+        return_features: When ``True``, also return the raw feature tensor.
+
+    Returns:
+        Either the constructed :class:`ZSpacePartialBundle` or a tuple of the
+        feature tensor and bundle when ``return_features`` is ``True``.
+    """
+
+    _require_torch()
+    features, telemetry = elliptic_warp_autograd(warp, orientation, return_telemetry=True)
+    from .zspace_inference import elliptic_partial_from_telemetry
+
+    bundle = elliptic_partial_from_telemetry(
+        telemetry,
+        bundle_weight=bundle_weight,
+        origin=origin,
+        telemetry_prefix=telemetry_prefix,
+        aggregate=aggregate,
+        gradient_source=gradient_source,
+        extra_telemetry=extra_telemetry,
+    )
+    if return_features:
+        return features, bundle
+    return bundle

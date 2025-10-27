@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import cmath as _cmath
 import math as _math
+import threading as _threading
 import types as _types
 import sys
+import weakref as _weakref
 from collections import deque as _deque
 from collections.abc import Iterable as _IterableABC, Sequence as _SequenceABC
 from dataclasses import dataclass as _dataclass
@@ -27,6 +29,10 @@ from ._meta import (
     BUILD_ID,
     BUILD_MANIFEST,
     BUILD_MANIFEST_JSON,
+)
+from ._zspace_aliases import (
+    PRIMARY_ZSPACE_METRIC_ALIASES,
+    ZSPACE_METRIC_ALIASES,
 )
 
 _rs: _types.ModuleType | None = None
@@ -147,6 +153,7 @@ from .zspace_inference import (
     ZSpaceInferencePipeline,
     canvas_partial_from_snapshot,
     canvas_coherence_partial,
+    elliptic_partial_from_telemetry,
     coherence_partial_from_diagnostics,
     decode_zspace_embedding,
     blend_zspace_partials,
@@ -167,6 +174,7 @@ from .elliptic import (
     EllipticWarpFunction,
     elliptic_warp_autograd,
     elliptic_warp_features,
+    elliptic_warp_partial,
 )
 
 # 追加API（Rust側でエクスポート済みのやつだけ拾う）
@@ -476,7 +484,124 @@ if _TENSOR_BASE is not None:
 
     Tensor.__module__ = __name__
     globals()["Tensor"] = Tensor
+    _TensorFastType = Tensor
 
+else:
+    _TensorFastType = globals().get("Tensor")
+
+
+if isinstance(_TensorFastType, type):
+    _native_tensor_matmul = getattr(_TensorFastType, "matmul", None)
+    _tensor_matmul_simd_prepacked = getattr(
+        _TensorFastType, "matmul_simd_prepacked", None
+    )
+    _tensor_storage_token = getattr(_TensorFastType, "storage_token", None)
+    _cpu_simd_prepack_rhs = globals().get("cpu_simd_prepack_rhs")
+
+    if (
+        callable(_native_tensor_matmul)
+        and callable(_tensor_matmul_simd_prepacked)
+        and callable(_tensor_storage_token)
+        and callable(_cpu_simd_prepack_rhs)
+    ):
+
+        @_dataclass
+        class _SimdPackEntry:
+            pack: _Any
+            shape: _Tuple[int, int]
+            token: int
+
+
+        class _SimdPackCache:
+            __slots__ = ("_packs", "_lock")
+
+            def __init__(self) -> None:
+                self._packs: "_weakref.WeakKeyDictionary[_Any, _SimdPackEntry]" = (
+                    _weakref.WeakKeyDictionary()
+                )
+                self._lock = _threading.RLock()
+
+            def fetch(self, rhs: _Any) -> _SimdPackEntry | None:
+                try:
+                    shape = rhs.shape()
+                    token = int(_tensor_storage_token(rhs))
+                except Exception:
+                    return None
+
+                with self._lock:
+                    cached = self._packs.get(rhs)
+                    if (
+                        cached is not None
+                        and cached.shape == shape
+                        and cached.token == token
+                    ):
+                        return cached
+
+                try:
+                    pack = _cpu_simd_prepack_rhs(rhs)
+                except Exception:
+                    return None
+
+                entry = _SimdPackEntry(pack=pack, shape=shape, token=token)
+                with self._lock:
+                    existing = self._packs.get(rhs)
+                    if (
+                        existing is not None
+                        and existing.shape == shape
+                        and existing.token == token
+                    ):
+                        return existing
+                    self._packs[rhs] = entry
+                return entry
+
+            def invalidate(self, rhs: _Any) -> None:
+                with self._lock:
+                    self._packs.pop(rhs, None)
+
+            def clear(self) -> None:
+                with self._lock:
+                    self._packs.clear()
+
+
+        _SIMD_PACK_CACHE = _SimdPackCache()
+        _SIMD_FAST_LABELS = {"python-simd", "cpu-simd-prepack", "cpu-simd", "simd"}
+
+        def _tensor_matmul_fastpath(
+            self: _Any,
+            other: _Any,
+            *,
+            backend: str | None = None,
+            out: _Any = None,
+        ) -> _Any:
+            label = backend or "auto"
+            fallback_backend = backend
+
+            if label in {"python-simd", "cpu-simd-prepack"}:
+                fallback_backend = "cpu-simd"
+
+            if label in _SIMD_FAST_LABELS:
+                entry = _SIMD_PACK_CACHE.fetch(other)
+                if entry is not None:
+                    try:
+                        if out is None:
+                            return _tensor_matmul_simd_prepacked(self, entry.pack)
+                        return _tensor_matmul_simd_prepacked(self, entry.pack, out=out)
+                    except Exception:
+                        _SIMD_PACK_CACHE.invalidate(other)
+
+            return _native_tensor_matmul(self, other, backend=fallback_backend, out=out)
+
+
+        _TensorFastType.matmul = _tensor_matmul_fastpath  # type: ignore[assignment]
+
+        def clear_simd_prepack_cache() -> None:
+            """Evict cached SIMD RHS packs used by the Python fast-path."""
+
+            _SIMD_PACK_CACHE.clear()
+
+
+        globals()["clear_simd_prepack_cache"] = clear_simd_prepack_cache
+        _EXTRAS.append("clear_simd_prepack_cache")
 
 def _extract_shape_like(candidate: _Any, label: str) -> tuple[int, int] | None:
     if isinstance(candidate, globals().get("Tensor", ())):
@@ -673,86 +798,10 @@ def encode_zspace(
     return tensor
 
 
-_Z_METRIC_ALIAS = {
-    "speed": "speed",
-    "velocity": "speed",
-    "mem": "memory",
-    "memory": "memory",
-    "stab": "stability",
-    "stability": "stability",
-    "drs": "drs",
-    "drift": "drs",
-    "gradient": "gradient",
-    "grad": "gradient",
-}
+_Z_METRIC_ALIAS = PRIMARY_ZSPACE_METRIC_ALIASES
 
 
-_Z_PARTIAL_ALIAS = {
-    "speed": "speed",
-    "velocity": "speed",
-    "mem": "memory",
-    "memory": "memory",
-    "stab": "stability",
-    "stability": "stability",
-    "frac": "frac",
-    "frac_reg": "frac",
-    "fractality": "frac",
-    "drs": "drs",
-    "drift": "drs",
-    "gradient": "gradient",
-    "grad": "gradient",
-    "canvas_energy": "canvas_energy",
-    "canvas_mean": "canvas_mean",
-    "canvas_peak": "canvas_peak",
-    "canvas_balance": "canvas_balance",
-    "canvas_l1": "canvas_l1",
-    "canvas_l2": "canvas_l2",
-    "canvas_linf": "canvas_linf",
-    "canvas_pixels": "canvas_pixels",
-    "canvas_patch_energy": "canvas_patch_energy",
-    "canvas_patch_mean": "canvas_patch_mean",
-    "canvas_patch_peak": "canvas_patch_peak",
-    "canvas_patch_pixels": "canvas_patch_pixels",
-    "canvas_patch_balance": "canvas_patch_balance",
-    "hypergrad_norm": "hypergrad_norm",
-    "hypergrad_balance": "hypergrad_balance",
-    "hypergrad_mean": "hypergrad_mean",
-    "hypergrad_l1": "hypergrad_l1",
-    "hypergrad_l2": "hypergrad_l2",
-    "hypergrad_linf": "hypergrad_linf",
-    "realgrad_norm": "realgrad_norm",
-    "realgrad_balance": "realgrad_balance",
-    "realgrad_mean": "realgrad_mean",
-    "realgrad_l1": "realgrad_l1",
-    "realgrad_l2": "realgrad_l2",
-    "realgrad_linf": "realgrad_linf",
-    "coherence_mean": "coherence_mean",
-    "coherence_entropy": "coherence_entropy",
-    "coherence_energy_ratio": "coherence_energy_ratio",
-    "coherence_z_bias": "coherence_z_bias",
-    "coherence_fractional_order": "coherence_fractional_order",
-    "coherence_channels": "coherence_channels",
-    "coherence_preserved": "coherence_preserved",
-    "coherence_discarded": "coherence_discarded",
-    "coherence_dominant": "coherence_dominant",
-    "coherence_peak": "coherence_peak",
-    "coherence_weight_entropy": "coherence_weight_entropy",
-    "coherence_response_peak": "coherence_response_peak",
-    "coherence_response_mean": "coherence_response_mean",
-    "coherence_strength": "coherence_strength",
-    "coherence_prosody": "coherence_prosody",
-    "coherence_articulation": "coherence_articulation",
-    "import_l1": "import_l1",
-    "import_l2": "import_l2",
-    "import_linf": "import_linf",
-    "import_mean": "import_mean",
-    "import_variance": "import_variance",
-    "import_energy": "import_energy",
-    "import_count": "import_count",
-    "import_amplitude": "import_amplitude",
-    "import_balance": "import_balance",
-    "import_focus": "import_focus",
-}
+_Z_PARTIAL_ALIAS = ZSPACE_METRIC_ALIASES
 
 
 def _coerce_gradient_values(value: _Any) -> list[float] | None:

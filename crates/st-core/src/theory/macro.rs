@@ -1174,6 +1174,21 @@ impl MacroZBridge {
             0.3
         };
 
+        let density_fluct = pulse.density_fluctuation();
+        if density_fluct > 0.45 {
+            let severity = (density_fluct - 0.45).clamp(0.0, 0.55);
+            let damping = (1.0 - severity * 0.3).max(0.65);
+            threshold_scale *= damping;
+            smoothing = smoothing.max(0.55 + severity * 0.5);
+            threshold_scale = threshold_scale.max(0.25);
+        } else if density_fluct < 0.25 {
+            let relief = (0.25 - density_fluct).clamp(0.0, 0.25);
+            let loosen = 1.0 + relief * 0.5;
+            threshold_scale *= loosen;
+            let relaxation = (0.75 - relief * 0.2).clamp(0.4, 0.9);
+            smoothing = (smoothing * relaxation).clamp(0.15, 0.8);
+        }
+
         if let Some(anisotropic) = contributions.anisotropic_curvature {
             if anisotropic.abs() > contributions.mean_curvature.abs() {
                 smoothing = (smoothing + 0.1).min(0.9);
@@ -1195,10 +1210,26 @@ impl MacroZBridge {
             bias_gain *= 0.85;
         }
 
+        if density_fluct > 0.45 {
+            let severity = (density_fluct - 0.45).clamp(0.0, 0.55);
+            bias_gain *= (1.0 - severity * 0.25).max(0.65);
+        } else if density_fluct < 0.25 {
+            let relief = (0.25 - density_fluct).clamp(0.0, 0.25);
+            bias_gain *= 1.0 + relief * 0.4;
+        }
+
+        let mut tempo_hint = vel_mag.max(0.01);
+        if density_fluct > 0.45 {
+            tempo_hint = tempo_hint.max(0.45 + density_fluct * 0.9);
+        } else if density_fluct < 0.25 {
+            let relief = (0.25 - density_fluct).clamp(0.0, 0.25);
+            tempo_hint = (tempo_hint * (0.85 - relief * 0.2)).max(0.01);
+        }
+
         let mut feedback = MicrolocalFeedback::default()
             .with_bias_gain(bias_gain)
             .with_smoothing(smoothing)
-            .with_tempo_hint(vel_mag.max(0.01));
+            .with_tempo_hint(tempo_hint);
 
         let stderr = contributions.forcing.abs() as f32;
         if stderr > 0.0 {
@@ -1412,11 +1443,49 @@ pub struct ContactCardConfig {
 mod tests {
     use super::*;
     use crate::theory::microlocal::{
-        InterfaceGauge, InterfaceSignature, InterfaceZConductor, InterfaceZLift,
+        InterfaceGauge, InterfaceSignature, InterfaceZConductor, InterfaceZLift, InterfaceZPulse,
         MicrolocalGaugeBank,
     };
+    use crate::theory::zpulse::{ZScale, ZSource};
     use crate::util::math::LeechProjector;
     use ndarray::{array, ArrayD, IxDyn};
+
+    fn sample_bridge() -> MacroZBridge {
+        let config = MinimalCardConfig {
+            phase_pair: PhasePair::new("A", "B"),
+            sigma: 0.2,
+            mobility: 1.0,
+            volume: None,
+            physical_scales: None,
+        };
+        let template = MacroModelTemplate::from_card(MacroCard::Minimal(config));
+        let lift = InterfaceZLift::new(&[1.0], LeechProjector::new(24, 0.0));
+        MacroZBridge::new(template, lift)
+    }
+
+    fn sample_contributions() -> CurvatureContributions {
+        CurvatureContributions {
+            mean_curvature: 1.0,
+            anisotropic_curvature: None,
+            bending_operator: None,
+            forcing: 0.0,
+        }
+    }
+
+    fn sample_pulse(band_energy: (f32, f32, f32)) -> InterfaceZPulse {
+        InterfaceZPulse {
+            source: ZSource::Microlocal,
+            support: 1.0,
+            interface_cells: 8.0,
+            band_energy,
+            scale: Some(ZScale::ONE),
+            drift: 0.1,
+            z_bias: 0.0,
+            quality_hint: Some(0.7),
+            standard_error: Some(0.05),
+            elliptic: None,
+        }
+    }
 
     #[test]
     fn template_bank_registers_and_couples_templates() {
@@ -1566,6 +1635,36 @@ mod tests {
         assert!(feedback.smoothing.unwrap() >= 0.2);
         assert!(feedback.tempo_hint.unwrap() > 0.0);
         assert!(feedback.threshold_scale.unwrap() < 1.0);
+    }
+
+    #[test]
+    fn high_density_fluctuation_tightens_controls() {
+        let bridge = sample_bridge();
+        let contributions = sample_contributions();
+        let velocity = bridge.template().kinetics.evaluate_velocity(&contributions);
+        let pulse = sample_pulse((2.0, 0.0, 0.0));
+        assert!(pulse.density_fluctuation() > 0.45);
+
+        let feedback = bridge.derive_feedback(&contributions, velocity, &pulse);
+        assert!(feedback.threshold_scale.unwrap() < 1.0);
+        assert!(feedback.smoothing.unwrap() >= 0.55);
+        assert!(feedback.bias_gain.unwrap() < 1.0);
+        assert!(feedback.tempo_hint.unwrap() >= velocity as f32);
+    }
+
+    #[test]
+    fn low_density_fluctuation_relaxes_controls() {
+        let bridge = sample_bridge();
+        let contributions = sample_contributions();
+        let velocity = bridge.template().kinetics.evaluate_velocity(&contributions);
+        let pulse = sample_pulse((0.5, 0.5, 0.5));
+        assert!(pulse.density_fluctuation() < 0.25);
+
+        let feedback = bridge.derive_feedback(&contributions, velocity, &pulse);
+        assert!(feedback.threshold_scale.unwrap() > 1.0);
+        assert!(feedback.smoothing.unwrap() < 0.3);
+        assert!(feedback.bias_gain.unwrap() > 1.0);
+        assert!(feedback.tempo_hint.unwrap() < velocity as f32);
     }
 
     #[test]
