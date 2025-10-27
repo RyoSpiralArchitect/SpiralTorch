@@ -72,17 +72,62 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
 
     NUMPY_AVAILABLE = _np is not None
 
+    class _ShapeView(tuple):
+        def __new__(cls, tensor: "Tensor", getter):
+            rows, cols = getter(tensor)
+            obj = super().__new__(cls, (rows, cols))
+            obj._tensor = tensor
+            obj._getter = getter
+            return obj
+
+        def __call__(self) -> tuple[int, int]:
+            return self._getter(self._tensor)
+
+
+    class _ShapeDescriptor:
+        __slots__ = ("_func", "__doc__")
+
+        def __init__(self, func):
+            self._func = func
+            self.__doc__ = getattr(func, "__doc__", None)
+
+        def __get__(self, instance, owner):
+            if instance is None:
+                return self._func
+            return _ShapeView(instance, self._func)
+
+
     class Tensor:
         """Featureful stand-in for the Rust ``Tensor`` exposed by the stub bindings."""
 
         __slots__ = ("_rows", "_cols", "_data", "_backend")
 
-        def __init__(self, rows: int, cols: int, data, *, backend: str | None = None):
+        def __init__(
+            self,
+            rows: int | tuple[int, int],
+            cols: int | None = None,
+            data=None,
+            *,
+            backend: str | None = None,
+        ):
             backend_hint = backend
             if backend_hint is not None and backend_hint not in {"numpy", "python"}:
                 raise ValueError("backend must be 'numpy', 'python', or None")
             if backend_hint == "numpy" and not NUMPY_AVAILABLE:
                 raise RuntimeError("NumPy backend requested but NumPy is not installed")
+
+            if isinstance(rows, tuple) and cols is None and data is None:
+                if len(rows) != 2:
+                    raise ValueError("shape tuple must describe a 2D tensor")
+                inferred_rows, inferred_cols = rows
+                rows = int(inferred_rows)
+                cols = int(inferred_cols)
+                data = [0.0] * (rows * cols)
+
+            if cols is None or data is None:
+                raise TypeError(
+                    "Tensor constructor expects rows, cols, and data or a shape tuple"
+                )
 
             rows = int(rows)
             cols = int(cols)
@@ -254,8 +299,8 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             instance._backend = "python"
             return instance
 
-        @property
-        def shape(self):
+        @_ShapeDescriptor
+        def shape(self) -> tuple[int, int]:
             return (self._rows, self._cols)
 
         @property
