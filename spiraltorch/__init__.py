@@ -13,6 +13,7 @@ from collections.abc import Iterable, Sequence
 import importlib.machinery
 import importlib.util
 import math
+import random
 import pathlib
 import sys
 import warnings
@@ -318,8 +319,63 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             return (self._rows, self._cols)
 
         @property
+        def rows(self) -> int:
+            return self._rows
+
+        @property
+        def cols(self) -> int:
+            return self._cols
+
+        @property
         def backend(self) -> str:
             return self._backend
+
+        def reshape(self, rows: int, cols: int) -> "Tensor":
+            rows = int(rows)
+            cols = int(cols)
+            if rows < 0 or cols < 0:
+                raise ValueError("tensor dimensions must be non-negative")
+            total = rows * cols
+            if total != self._rows * self._cols:
+                raise ValueError(
+                    "Tensor data of length {} cannot be reshaped to ({}, {})".format(
+                        self._rows * self._cols, rows, cols
+                    )
+                )
+            if self._backend == "numpy":
+                matrix = self._to_numpy(copy=False).reshape(rows, cols).copy()
+                return Tensor._from_numpy_array(matrix)
+            flat = self._row_major_python()
+            return Tensor._from_python_array(rows, cols, array("d", flat))
+
+        def transpose(self) -> "Tensor":
+            rows, cols = self._rows, self._cols
+            if self._backend == "numpy":
+                matrix = self._to_numpy(copy=False).transpose().copy()
+                return Tensor._from_numpy_array(matrix)
+            flat = self._row_major_python()
+            total = rows * cols
+            transposed = array("d", [0.0]) * total if total else array("d")
+            for r in range(rows):
+                row_offset = r * cols
+                for c in range(cols):
+                    transposed[c * rows + r] = flat[row_offset + c]
+            return Tensor._from_python_array(cols, rows, transposed)
+
+        def sum_axis0(self) -> list[float]:
+            cols = self._cols
+            if cols == 0:
+                return []
+            if self._backend == "numpy":
+                summed = self._to_numpy(copy=False).sum(axis=0)
+                return [float(value) for value in summed.tolist()]
+            totals = [0.0] * cols
+            flat = self._row_major_python()
+            for r in range(self._rows):
+                base = r * cols
+                for c in range(cols):
+                    totals[c] += flat[base + c]
+            return totals
 
         def tolist(self):
             rows, cols = self._rows, self._cols
@@ -328,6 +384,93 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
                 matrix = (flat[r * cols : (r + 1) * cols] for r in range(rows))
                 return [row[:] for row in matrix]
             return self._data.reshape(rows, cols).tolist()
+
+        @staticmethod
+        def zeros(rows: int, cols: int) -> "Tensor":
+            rows = int(rows)
+            cols = int(cols)
+            if rows < 0 or cols < 0:
+                raise ValueError("tensor dimensions must be non-negative")
+            total = rows * cols
+            if NUMPY_AVAILABLE:
+                matrix = _np.zeros((rows, cols), dtype=_np.float64)
+                return Tensor._from_numpy_array(matrix)
+            buffer = array("d", [0.0]) * total if total else array("d")
+            return Tensor._from_python_array(rows, cols, buffer)
+
+        @staticmethod
+        def randn(
+            rows: int,
+            cols: int,
+            mean: float = 0.0,
+            std: float = 1.0,
+            seed: int | None = None,
+        ) -> "Tensor":
+            rows = int(rows)
+            cols = int(cols)
+            if rows < 0 or cols < 0:
+                raise ValueError("tensor dimensions must be non-negative")
+            total = rows * cols
+            if NUMPY_AVAILABLE:
+                rng = _np.random.default_rng(seed)
+                matrix = rng.normal(loc=mean, scale=std, size=(rows, cols)).astype(
+                    _np.float64
+                )
+                return Tensor._from_numpy_array(matrix)
+            rng = random.Random(seed)
+            values = [rng.gauss(mean, std) for _ in range(total)]
+            buffer = array("d", values)
+            return Tensor._from_python_array(rows, cols, buffer)
+
+        @staticmethod
+        def rand(
+            rows: int,
+            cols: int,
+            min: float = 0.0,
+            max: float = 1.0,
+            seed: int | None = None,
+        ) -> "Tensor":
+            rows = int(rows)
+            cols = int(cols)
+            if rows < 0 or cols < 0:
+                raise ValueError("tensor dimensions must be non-negative")
+            if max < min:
+                raise ValueError("max must be greater than or equal to min")
+            total = rows * cols
+            if NUMPY_AVAILABLE:
+                rng = _np.random.default_rng(seed)
+                matrix = rng.uniform(low=min, high=max, size=(rows, cols)).astype(
+                    _np.float64
+                )
+                return Tensor._from_numpy_array(matrix)
+            rng = random.Random(seed)
+            values = [rng.uniform(min, max) for _ in range(total)]
+            buffer = array("d", values)
+            return Tensor._from_python_array(rows, cols, buffer)
+
+        @staticmethod
+        def cat_rows(tensors: Sequence["Tensor"]) -> "Tensor":
+            tensors = list(tensors)
+            if not tensors:
+                raise ValueError("cat_rows requires at least one tensor")
+            if not all(isinstance(tensor, Tensor) for tensor in tensors):
+                raise TypeError("cat_rows expects a sequence of Tensor instances")
+            cols = tensors[0]._cols
+            for tensor in tensors:
+                if tensor._cols != cols:
+                    raise ValueError("all tensors must have the same number of columns")
+            total_rows = sum(tensor._rows for tensor in tensors)
+            use_numpy = NUMPY_AVAILABLE and any(
+                tensor._backend == "numpy" for tensor in tensors
+            )
+            if use_numpy:
+                matrices = [tensor._to_numpy(copy=False) for tensor in tensors]
+                concatenated = _np.concatenate(matrices, axis=0)
+                return Tensor._from_numpy_array(concatenated)
+            data = array("d")
+            for tensor in tensors:
+                data.extend(tensor._row_major_python())
+            return Tensor._from_python_array(total_rows, cols, data)
 
         def __matmul__(self, other) -> "Tensor":  # pragma: no cover - convenience wrapper
             if isinstance(other, Tensor):
