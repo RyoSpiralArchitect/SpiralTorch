@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import pathlib
 import sys
@@ -35,6 +36,30 @@ def stub_spiraltorch(monkeypatch: pytest.MonkeyPatch):
     assert spec.loader is not None
     monkeypatch.setitem(sys.modules, "spiraltorch", module)
     spec.loader.exec_module(module)
+    if hasattr(module, "_install_stub_bindings"):
+        module._install_stub_bindings(module, ModuleNotFoundError("spiraltorch"))
+    return module
+
+
+@pytest.fixture
+def shim_spiraltorch(monkeypatch: pytest.MonkeyPatch):
+    module_names = (
+        "spiraltorch",
+        "spiraltorch.spiraltorch",
+        "spiraltorch.spiraltorch_native",
+        "spiraltorch_native",
+    )
+    for name in module_names:
+        monkeypatch.delitem(sys.modules, name, raising=False)
+
+    monkeypatch.syspath_prepend(str(REPO_ROOT))
+
+    if "torch" not in sys.modules:
+        torch_stub = types.ModuleType("torch")
+        torch_stub.autograd = types.SimpleNamespace(Function=object)
+        monkeypatch.setitem(sys.modules, "torch", torch_stub)
+
+    module = importlib.import_module("spiraltorch")
     if hasattr(module, "_install_stub_bindings"):
         module._install_stub_bindings(module, ModuleNotFoundError("spiraltorch"))
     return module
@@ -91,3 +116,20 @@ def test_tensor_cat_rows_shapes(stub_spiraltorch) -> None:
     python_combined = Tensor.cat_rows([python_first, python_second])
     assert python_combined.shape() == (2, 2)
     assert python_combined.backend == "python"
+
+
+def test_shim_tensor_constructor_variants(shim_spiraltorch) -> None:
+    Tensor = shim_spiraltorch.Tensor
+
+    direct = Tensor(2, 3, [1, 2, 3, 4, 5, 6])
+    assert direct.shape() == (2, 3)
+
+    nested = Tensor(2, 3, [[1, 2, 3], [4, 5, 6]])
+    assert nested.shape() == (2, 3)
+
+    keyword_data = Tensor((2, 3), data=[1, 2, 3, 4, 5, 6])
+    assert keyword_data.shape() == (2, 3)
+
+    zero_sized = Tensor(0, 3, [])
+    assert zero_sized.shape() == (0, 3)
+    assert zero_sized.tolist() == []
