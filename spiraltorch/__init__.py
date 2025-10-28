@@ -16,8 +16,9 @@ import math
 import random
 import pathlib
 import sys
+import types
 import warnings
-from typing import Any
+from typing import Any, NoReturn
 
 
 _TENSOR_NO_DATA = object()
@@ -1066,6 +1067,11 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
 
         __slots__ = ("_rows", "_cols", "_data", "_backend")
 
+        #: str: Message guiding users to enable DLPack interoperability.
+        DLPACK_UNAVAILABLE_MESSAGE = (
+            "DLPack interoperability requires NumPy support in the stub Tensor backend."
+        )
+
         def __init__(
             self,
             rows=_UNSET,
@@ -1236,6 +1242,65 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             matrix = array_view.reshape(self._rows, self._cols)
             return matrix.copy() if copy else matrix
 
+        @classmethod
+        def _raise_dlpack_unavailable(cls) -> NoReturn:
+            """DLPack interoperability requires NumPy support in the stub Tensor backend."""
+
+            raise RuntimeError(cls.DLPACK_UNAVAILABLE_MESSAGE)
+
+        @classmethod
+        def from_dlpack(cls, capsule: Any) -> "Tensor":
+            """Create a ``Tensor`` from a DLPack capsule.
+
+            Raises:
+                RuntimeError: DLPack interoperability requires NumPy support in the stub
+                    Tensor backend.
+            """
+
+            if not NUMPY_AVAILABLE or _np is None or not hasattr(_np, "from_dlpack"):
+                cls._raise_dlpack_unavailable()
+            matrix = _np.from_dlpack(capsule)
+            matrix = _np.asarray(matrix, dtype=_np.float64)
+            if matrix.ndim != 2:
+                raise ValueError("Tensor expects a 2D array")
+            return cls._from_numpy_array(matrix)
+
+        def to_dlpack(self) -> Any:
+            """Export the tensor data as a DLPack capsule.
+
+            Raises:
+                RuntimeError: DLPack interoperability requires NumPy support in the stub
+                    Tensor backend.
+            """
+
+            if not NUMPY_AVAILABLE or _np is None:
+                self._raise_dlpack_unavailable()
+            array = self._to_numpy(copy=False)
+            dlpack = getattr(array, "__dlpack__", None)
+            if dlpack is None:
+                self._raise_dlpack_unavailable()
+            return dlpack()
+
+        def __dlpack__(self, stream: Any | None = None) -> Any:
+            if not NUMPY_AVAILABLE or _np is None:
+                self._raise_dlpack_unavailable()
+            array = self._to_numpy(copy=False)
+            dlpack = getattr(array, "__dlpack__", None)
+            if dlpack is None:
+                self._raise_dlpack_unavailable()
+            if stream is None:
+                return dlpack()
+            return dlpack(stream=stream)
+
+        def __dlpack_device__(self) -> tuple[int, int]:
+            if not NUMPY_AVAILABLE or _np is None:
+                self._raise_dlpack_unavailable()
+            array = self._to_numpy(copy=False)
+            dlpack_device = getattr(array, "__dlpack_device__", None)
+            if dlpack_device is None:
+                self._raise_dlpack_unavailable()
+            return dlpack_device()
+
         def _row_major_python(self):
             """Return the matrix data flattened row-major into an ``array('d')`` buffer."""
             if self._backend == "python":
@@ -1362,8 +1427,11 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
                 return [[] for _ in range(rows)]
 
             if self._backend == "numpy":
-                matrix = self._to_numpy(copy=False).reshape(rows, cols)
-                return matrix.tolist()
+                matrix = self._to_numpy(copy=False)
+                return [
+                    [float(matrix[r, c]) for c in range(cols)]
+                    for r in range(rows)
+                ]
 
             flat = self._row_major_python()
             return [
@@ -1836,6 +1904,122 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
         if symbol not in all_exports:
             all_exports.append(symbol)
     module.__dict__.setdefault("__version__", "0.0.0+stub")
+
+    def _stub_runtime_error(feature: str) -> RuntimeError:
+        return RuntimeError(
+            "The SpiralTorch stub bindings cannot provide "
+            f"{feature!r}; build the native extension ("
+            "`maturin develop -m bindings/st-py/Cargo.toml`) for full functionality."
+        )
+
+    def _register_stub_module(name: str, *, doc: str | None = None) -> types.ModuleType:
+        qualname = f"{module.__name__}.{name}"
+        stub_module = types.ModuleType(qualname, doc)
+
+        def _stub_getattr(attribute: str, *, _qualname: str = qualname):
+            raise _stub_runtime_error(f"{_qualname}.{attribute}")
+
+        stub_module.__getattr__ = _stub_getattr  # type: ignore[attr-defined]
+        sys.modules[qualname] = stub_module
+        setattr(module, name, stub_module)
+        if name not in all_exports:
+            all_exports.append(name)
+        return stub_module
+
+    _PLACEHOLDER_MODULES = {
+        "dataset": "Datasets & loaders are only available once the SpiralTorch native extension is built.",
+        "linalg": "Linear algebra helpers require the SpiralTorch native extension.",
+        "rec": "Signal reconstruction tools require the SpiralTorch native extension.",
+        "telemetry": "Telemetry integrations require the SpiralTorch native extension.",
+        "ecosystem": "Ecosystem integrations require the SpiralTorch native extension.",
+    }
+
+    for _name, _doc in _PLACEHOLDER_MODULES.items():
+        _register_stub_module(_name, doc=_doc)
+
+    def _install_spiral_rl_stub() -> types.ModuleType:
+        stub = _register_stub_module(
+            "spiral_rl",
+            doc=(
+                "Stub reinforcement learning harness. Build the native SpiralTorch extension "
+                "to access training agents."
+            ),
+        )
+        sys.modules["spiral_rl"] = stub
+        module_name = f"{module.__name__}.spiral_rl"
+
+        class _StubAgent:
+            """Stub placeholder for SpiralTorch reinforcement learning agents."""
+
+            __slots__ = ()
+
+            def __init__(self, *args, **kwargs):
+                raise _stub_runtime_error(f"{module_name}.stAgent")
+
+            def _fail(self) -> None:
+                raise _stub_runtime_error(f"{module_name}.stAgent")
+
+            def select_action(self, *args, **kwargs):
+                self._fail()
+
+            def select_actions(self, *args, **kwargs):
+                self._fail()
+
+            def update(self, *args, **kwargs):
+                self._fail()
+
+            def update_batch(self, *args, **kwargs):
+                self._fail()
+
+            @property
+            def epsilon(self):
+                self._fail()
+
+            def set_epsilon(self, *args, **kwargs):
+                self._fail()
+
+            def set_exploration(self, *args, **kwargs):
+                self._fail()
+
+            def state_dict(self):
+                self._fail()
+
+            def load_state_dict(self, *args, **kwargs):
+                self._fail()
+
+        _StubAgent.__name__ = "stAgent"
+        _StubAgent.__module__ = "spiral_rl"
+
+        class _PpoAgent(_StubAgent):
+            __name__ = "PpoAgent"
+
+            def __init__(self, *args, **kwargs):
+                raise _stub_runtime_error(f"{module_name}.PpoAgent")
+
+        _PpoAgent.__module__ = "spiral_rl"
+
+        class _SacAgent(_StubAgent):
+            __name__ = "SacAgent"
+
+            def __init__(self, *args, **kwargs):
+                raise _stub_runtime_error(f"{module_name}.SacAgent")
+
+        _SacAgent.__module__ = "spiral_rl"
+
+        stub.stAgent = _StubAgent
+        stub.DqnAgent = _StubAgent
+        stub.PyDqnAgent = _StubAgent
+        stub.PpoAgent = _PpoAgent
+        stub.SacAgent = _SacAgent
+        stub.__all__ = ["stAgent", "DqnAgent", "PyDqnAgent", "PpoAgent", "SacAgent"]
+
+        def _spiral_rl_getattr(attribute: str, *, _module_name: str = module_name):
+            raise _stub_runtime_error(f"{_module_name}.{attribute}")
+
+        stub.__getattr__ = _spiral_rl_getattr  # type: ignore[attr-defined]
+        return stub
+
+    _install_spiral_rl_stub()
 
     def _missing_attr(name: str):
         raise AttributeError(
