@@ -11,7 +11,7 @@ mod prepared;
 use super::{CommandFragment, JsonExpiry, JsonSetCondition};
 use crate::{KvErr, KvResult};
 pub use builder::JsonSetOptionsBuilder;
-pub use prepared::PreparedJsonSetOptions;
+pub use prepared::{AutomatedJsonSetOptions, PreparedJsonSetOptions};
 use std::time::{Duration, SystemTime};
 
 const ERR_EXPLICIT_AND_KEEP_TTL: &str = "cannot set both explicit expiry and KEEPTTL";
@@ -222,5 +222,10 @@ impl JsonSetOptions {
     /// Returns a lazily cached prepared fragment set for these options.
     pub fn automated(self) -> KvResult<&'static PreparedJsonSetOptions> {
         PreparedJsonSetOptions::automated(self)
+    }
+
+    /// Returns a reusable automated wrapper around the cached fragments.
+    pub fn automated_owned(self) -> KvResult<AutomatedJsonSetOptions> {
+        prepared::AutomatedJsonSetOptions::from_options(self)
     }
 }
