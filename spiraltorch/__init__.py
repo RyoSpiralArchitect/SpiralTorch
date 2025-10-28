@@ -1066,6 +1066,28 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
 
         __slots__ = ("_rows", "_cols", "_data", "_backend")
 
+        @staticmethod
+        def _resolve_backend(label: str | None, *, allow_gpu: bool = False) -> str:
+            """Normalize backend labels to the internal python/numpy choices."""
+
+            if label is None:
+                return "numpy" if NUMPY_AVAILABLE else "python"
+
+            normalized = str(label).lower()
+            if normalized == "auto":
+                return "numpy" if NUMPY_AVAILABLE else "python"
+            if normalized in {"numpy"}:
+                if not NUMPY_AVAILABLE:
+                    raise RuntimeError("NumPy backend requested but NumPy is not installed")
+                return "numpy"
+            if normalized in {"python", "cpu"}:
+                return "python"
+            if allow_gpu and normalized in {"wgpu", "gpu"}:
+                return "numpy" if NUMPY_AVAILABLE else "python"
+            raise ValueError(
+                "backend must be one of 'auto', 'numpy', 'python', 'cpu', or None"
+            )
+
         def __init__(
             self,
             rows=_UNSET,
@@ -1143,6 +1165,186 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
                 return self._matmul_numpy(other)
             return self._matmul_python(other)
 
+        def row_softmax(self, *, backend: str | None = None) -> "Tensor":
+            """Compute the row-wise softmax of the tensor."""
+
+            target_backend = self._resolve_backend(backend)
+            cls = type(self)
+
+            if target_backend == "numpy":
+                matrix = self._to_numpy(copy=False)
+                if matrix.size == 0 or matrix.shape[1] == 0:
+                    return cls._from_numpy_array(matrix.copy())
+                max_per_row = matrix.max(axis=1, keepdims=True)
+                shifted = matrix - max_per_row
+                exps = _np.exp(shifted)
+                sums = exps.sum(axis=1, keepdims=True)
+                weights = _np.divide(exps, sums, out=_np.zeros_like(exps), where=sums != 0.0)
+                return cls._from_numpy_array(weights)
+
+            rows, cols = self._rows, self._cols
+            total = rows * cols
+            buffer = array("d", [0.0]) * total if total else array("d")
+            if cols == 0 or total == 0:
+                return cls._from_python_array(rows, cols, buffer)
+
+            flat = self._row_major_python()
+            for r in range(rows):
+                offset = r * cols
+                row_slice = [float(flat[offset + c]) for c in range(cols)]
+                max_value = max(row_slice)
+                exps = [math.exp(value - max_value) for value in row_slice]
+                denom = sum(exps)
+                inv = 1.0 / denom if denom > 0.0 else 0.0
+                for c, exp_value in enumerate(exps):
+                    buffer[offset + c] = exp_value * inv
+            return cls._from_python_array(rows, cols, buffer)
+
+        def scaled_dot_attention(
+            self,
+            keys: "Tensor",
+            values: "Tensor",
+            *,
+            contexts: int,
+            sequence: int,
+            scale: float,
+            z_bias: "Tensor" | None = None,
+            attn_bias: "Tensor" | None = None,
+            backend: str | None = None,
+        ) -> "Tensor":
+            """Compute fused scaled dot-product attention with optional biases."""
+
+            if not isinstance(keys, Tensor) or not isinstance(values, Tensor):
+                raise TypeError("scaled_dot_attention expects Tensor inputs for keys and values")
+            if z_bias is not None and not isinstance(z_bias, Tensor):
+                raise TypeError("z_bias must be a Tensor when provided")
+            if attn_bias is not None and not isinstance(attn_bias, Tensor):
+                raise TypeError("attn_bias must be a Tensor when provided")
+
+            contexts = int(contexts)
+            sequence = int(sequence)
+            if contexts <= 0 or sequence <= 0:
+                raise ValueError("contexts and sequence must be positive integers")
+            head_dim = self._cols
+            if head_dim <= 0:
+                raise ValueError("scaled_dot_attention requires tensors with at least one column")
+
+            expected_rows = contexts * sequence
+            if (
+                self._rows != expected_rows
+                or keys._rows != expected_rows
+                or values._rows != expected_rows
+            ):
+                raise ValueError("query, key, and value tensors must have contexts*sequence rows")
+            if keys._cols != head_dim or values._cols != head_dim:
+                raise ValueError("query, key, and value tensors must share the same column count")
+
+            if z_bias is not None and z_bias.shape() != (contexts, sequence):
+                raise ValueError("z_bias must have shape (contexts, sequence)")
+            if attn_bias is not None and attn_bias.shape() != (expected_rows, sequence):
+                raise ValueError("attn_bias must have shape (contexts*sequence, sequence)")
+
+            target_backend = self._resolve_backend(backend, allow_gpu=True)
+            cls = type(self)
+            scale_value = float(scale)
+
+            if target_backend == "numpy":
+                queries = self._to_numpy(copy=False).reshape(contexts, sequence, head_dim)
+                keys_arr = keys._to_numpy(copy=False).reshape(contexts, sequence, head_dim)
+                values_arr = values._to_numpy(copy=False).reshape(contexts, sequence, head_dim)
+                logits = _np.matmul(queries, keys_arr.transpose(0, 2, 1)) * scale_value
+                if z_bias is not None:
+                    zb = z_bias._to_numpy(copy=False).reshape(contexts, 1, sequence)
+                    logits = logits + zb
+                if attn_bias is not None:
+                    ab = attn_bias._to_numpy(copy=False).reshape(contexts, sequence, sequence)
+                    logits = logits + ab
+                max_logits = logits.max(axis=2, keepdims=True)
+                shifted = logits - max_logits
+                weights = _np.exp(shifted)
+                sums = weights.sum(axis=2, keepdims=True)
+                weights = _np.divide(weights, sums, out=_np.zeros_like(weights), where=sums != 0.0)
+                output = weights @ values_arr
+                return cls._from_numpy_array(output.reshape(expected_rows, head_dim))
+
+            buffer = self._scaled_dot_attention_python(
+                keys,
+                values,
+                contexts=contexts,
+                sequence=sequence,
+                scale=scale_value,
+                z_bias=z_bias,
+                attn_bias=attn_bias,
+            )
+            return cls._from_python_array(expected_rows, head_dim, buffer)
+
+        def _scaled_dot_attention_python(
+            self,
+            keys: "Tensor",
+            values: "Tensor",
+            *,
+            contexts: int,
+            sequence: int,
+            scale: float,
+            z_bias: "Tensor" | None,
+            attn_bias: "Tensor" | None,
+        ) -> array:
+            rows = contexts * sequence
+            head_dim = self._cols
+            total = rows * head_dim
+            out = array("d", [0.0]) * total if total else array("d")
+
+            if total == 0:
+                return out
+
+            queries = self._row_major_python()
+            keys_flat = keys._row_major_python()
+            values_flat = values._row_major_python()
+            z_bias_flat = None if z_bias is None else z_bias._row_major_python()
+            attn_bias_flat = None if attn_bias is None else attn_bias._row_major_python()
+
+            for context in range(contexts):
+                context_offset = context * sequence
+                for query_idx in range(sequence):
+                    query_row = context_offset + query_idx
+                    query_offset = query_row * head_dim
+                    running_max = -1.0e30
+                    running_sum = 0.0
+                    accum = [0.0] * head_dim
+                    for key_idx in range(sequence):
+                        key_row = context_offset + key_idx
+                        key_offset = key_row * head_dim
+                        dot = 0.0
+                        for dim in range(head_dim):
+                            dot += queries[query_offset + dim] * keys_flat[key_offset + dim]
+
+                        logit = dot * scale
+                        if z_bias_flat is not None:
+                            logit += z_bias_flat[context_offset + key_idx]
+                        if attn_bias_flat is not None:
+                            logit += attn_bias_flat[query_row * sequence + key_idx]
+
+                        new_max = running_max if running_max > logit else logit
+                        scaled_sum = (
+                            running_sum * math.exp(running_max - new_max)
+                            if running_sum > 0.0
+                            else 0.0
+                        )
+                        exp_curr = math.exp(logit - new_max)
+                        denom = scaled_sum + exp_curr
+                        alpha = scaled_sum / denom if denom > 0.0 else 0.0
+                        weight = exp_curr / denom if denom > 0.0 else 0.0
+                        running_max = new_max
+                        running_sum = denom
+
+                        for dim in range(head_dim):
+                            accum[dim] = accum[dim] * alpha + weight * values_flat[key_offset + dim]
+
+                    for dim in range(head_dim):
+                        out[query_offset + dim] = accum[dim]
+
+            return out
+
         def _matmul_python(self, other: "Tensor") -> "Tensor":
             rows, cols, inner = self._rows, other._cols, self._cols
             if rows == 0 or cols == 0:
@@ -1205,6 +1407,66 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             result = self._to_numpy(copy=False) @ other._to_numpy(copy=False)
             return Tensor._from_numpy_array(result)
 
+        def add(self, other: "Tensor") -> "Tensor":
+            """Element-wise addition."""
+
+            if not isinstance(other, Tensor):
+                raise TypeError("add expects another Tensor instance")
+            if self.shape() != other.shape():
+                raise ValueError("tensor shapes must match for addition")
+
+            cls = type(self)
+            if NUMPY_AVAILABLE and (
+                self._backend == "numpy" or other._backend == "numpy"
+            ):
+                result = self._to_numpy(copy=False) + other._to_numpy(copy=False)
+                return cls._from_numpy_array(result)
+
+            data = array(
+                "d",
+                (
+                    a + b
+                    for a, b in zip(self._row_major_python(), other._row_major_python())
+                ),
+            )
+            return cls._from_python_array(self._rows, self._cols, data)
+
+        def sub(self, other: "Tensor") -> "Tensor":
+            """Element-wise subtraction."""
+
+            if not isinstance(other, Tensor):
+                raise TypeError("sub expects another Tensor instance")
+            if self.shape() != other.shape():
+                raise ValueError("tensor shapes must match for subtraction")
+
+            cls = type(self)
+            if NUMPY_AVAILABLE and (
+                self._backend == "numpy" or other._backend == "numpy"
+            ):
+                result = self._to_numpy(copy=False) - other._to_numpy(copy=False)
+                return cls._from_numpy_array(result)
+
+            data = array(
+                "d",
+                (
+                    a - b
+                    for a, b in zip(self._row_major_python(), other._row_major_python())
+                ),
+            )
+            return cls._from_python_array(self._rows, self._cols, data)
+
+        def scale(self, value: float) -> "Tensor":
+            """Return a new tensor with every element scaled by ``value``."""
+
+            scalar = float(value)
+            cls = type(self)
+            if NUMPY_AVAILABLE and self._backend == "numpy":
+                scaled = self._to_numpy(copy=False) * scalar
+                return cls._from_numpy_array(scaled)
+
+            data = array("d", (elem * scalar for elem in self._row_major_python()))
+            return cls._from_python_array(self._rows, self._cols, data)
+
         def hadamard(self, other: "Tensor") -> "Tensor":
             if not isinstance(other, Tensor):
                 raise TypeError("hadamard expects another Tensor instance")
@@ -1221,6 +1483,45 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
                 ),
             )
             return Tensor._from_python_array(self._rows, self._cols, data)
+
+        def add_scaled_(self, other: "Tensor", scale: float) -> None:
+            """Add ``scale * other`` to this tensor in-place."""
+
+            if not isinstance(other, Tensor):
+                raise TypeError("add_scaled_ expects another Tensor instance")
+            if self.shape() != other.shape():
+                raise ValueError("tensor shapes must match for add_scaled_")
+
+            factor = float(scale)
+            if NUMPY_AVAILABLE and self._backend == "numpy":
+                self._data += factor * other._to_numpy(copy=False)
+                return
+
+            data = self._row_major_python()
+            other_flat = other._row_major_python()
+            for idx in range(len(data)):
+                data[idx] += factor * other_flat[idx]
+
+        def add_row_inplace(self, bias: Sequence[float]) -> None:
+            """Add the provided row vector to each row of the tensor."""
+
+            normalized = _tensor_normalize_row(bias, allow_empty=self._cols == 0)
+            if len(normalized) != self._cols:
+                raise ValueError("bias length must match the tensor column count")
+
+            if NUMPY_AVAILABLE and self._backend == "numpy":
+                row = _np.asarray(normalized, dtype=_np.float64)
+                if row.size == 0:
+                    return
+                self._data += row
+                return
+
+            data = self._row_major_python()
+            cols = self._cols
+            for r in range(self._rows):
+                offset = r * cols
+                for c in range(cols):
+                    data[offset + c] += normalized[c]
 
         def numpy(self, *, copy: bool = True):
             if not NUMPY_AVAILABLE:
@@ -1352,6 +1653,97 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
                     row_total += flat[base + c]
                 totals[r] = row_total
             return totals
+
+        def squared_l2_norm(self) -> float:
+            """Return the squared L2 norm of the tensor."""
+
+            if NUMPY_AVAILABLE and self._backend == "numpy":
+                matrix = self._to_numpy(copy=False)
+                return float(_np.sum(matrix * matrix))
+
+            total = 0.0
+            for value in self._row_major_python():
+                total += value * value
+            return float(total)
+
+        def project_to_poincare(self, curvature: float) -> "Tensor":
+            """Project each row onto the Poincaré ball for the given curvature."""
+
+            if curvature >= 0.0:
+                raise ValueError("curvature must be negative for hyperbolic projection")
+            scale = math.sqrt(-float(curvature))
+            cls = type(self)
+
+            if NUMPY_AVAILABLE and self._backend == "numpy":
+                matrix = self._to_numpy(copy=False)
+                if matrix.size == 0:
+                    return cls._from_numpy_array(matrix.copy())
+                norms = _np.linalg.norm(matrix, axis=1, keepdims=True)
+                clipped = _np.tanh(
+                    _np.divide(norms, scale, out=_np.zeros_like(norms), where=norms != 0.0)
+                )
+                factors = _np.divide(
+                    clipped,
+                    norms,
+                    out=_np.ones_like(norms),
+                    where=norms != 0.0,
+                )
+                projected = matrix * factors
+                return cls._from_numpy_array(projected)
+
+            rows, cols = self._rows, self._cols
+            total = rows * cols
+            data = self._row_major_python()
+            buffer = array("d", [0.0]) * total if total else array("d")
+            if cols == 0 or total == 0:
+                return cls._from_python_array(rows, cols, buffer)
+            for r in range(rows):
+                offset = r * cols
+                segment = [float(data[offset + c]) for c in range(cols)]
+                norm = math.sqrt(sum(value * value for value in segment))
+                if norm > 0.0:
+                    clip = math.tanh(norm / scale)
+                    factor = clip / norm
+                    for c in range(cols):
+                        buffer[offset + c] = segment[c] * factor
+                else:
+                    for c in range(cols):
+                        buffer[offset + c] = segment[c]
+            return cls._from_python_array(rows, cols, buffer)
+
+        def hyperbolic_distance(self, other: "Tensor", curvature: float) -> float:
+            """Estimate the hyperbolic distance between two projected points."""
+
+            if not isinstance(other, Tensor):
+                raise TypeError("hyperbolic_distance expects another Tensor instance")
+            if self.shape() != other.shape():
+                raise ValueError("tensor shapes must match for hyperbolic distance")
+            if curvature >= 0.0:
+                raise ValueError("curvature must be negative for hyperbolic distance")
+
+            scale = math.sqrt(-float(curvature))
+
+            if NUMPY_AVAILABLE and (
+                self._backend == "numpy" or other._backend == "numpy"
+            ):
+                a = self._to_numpy(copy=False) / scale
+                b = other._to_numpy(copy=False) / scale
+                diff = a - b
+                sum_norm = float(_np.sum(diff * diff))
+                sum_inner = float(_np.sum((1.0 - a * a) * (1.0 - b * b)))
+                denom = math.sqrt(max(sum_inner, 1e-6))
+                return float(2.0 * math.acosh(1.0 + sum_norm / denom))
+
+            sum_norm = 0.0
+            sum_inner = 0.0
+            for lhs, rhs in zip(self._row_major_python(), other._row_major_python()):
+                pa = lhs / scale
+                pb = rhs / scale
+                diff = pa - pb
+                sum_norm += diff * diff
+                sum_inner += (1.0 - pa * pa) * (1.0 - pb * pb)
+            denom = math.sqrt(max(sum_inner, 1e-6))
+            return float(2.0 * math.acosh(1.0 + sum_norm / denom))
 
         def tolist(self):
             rows, cols = self._rows, self._cols
