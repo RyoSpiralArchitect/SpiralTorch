@@ -6,6 +6,8 @@ use std::collections::HashMap;
 use std::time::Duration;
 use thiserror::Error;
 
+pub mod analysis;
+
 pub mod space {
     use super::*;
 
@@ -133,6 +135,7 @@ pub mod space {
     }
 }
 
+pub use analysis::TrialSummary;
 pub use space::{ParamSpec, ParamValue, SearchSpace, TrialSuggestion};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -168,6 +171,13 @@ impl Objective {
         match self {
             Objective::Minimize => lhs.total_cmp(&rhs),
             Objective::Maximize => rhs.total_cmp(&lhs),
+        }
+    }
+
+    pub fn prefers(&self, candidate: f64, incumbent: f64) -> bool {
+        match self {
+            Objective::Minimize => candidate < incumbent,
+            Objective::Maximize => candidate > incumbent,
         }
     }
 }
@@ -597,7 +607,7 @@ fn now_ms() -> u128 {
         .as_millis()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TrialRecord {
     pub id: usize,
     pub suggestion: TrialSuggestion,
@@ -764,6 +774,14 @@ impl SearchLoop {
     pub fn objective(&self) -> Objective {
         self.state.objective
     }
+
+    pub fn best_trial(&self) -> Option<TrialRecord> {
+        crate::analysis::best_trial(self.state.completed.as_slice(), self.state.objective).cloned()
+    }
+
+    pub fn summary(&self) -> crate::analysis::TrialSummary {
+        crate::analysis::TrialSummary::from_state(&self.state)
+    }
 }
 
 #[cfg(test)]
@@ -898,5 +916,62 @@ mod tests {
     fn objective_ordering_matches_direction() {
         assert_eq!(Objective::Minimize.ordering(0.1, 0.5), Ordering::Less);
         assert_eq!(Objective::Maximize.ordering(0.1, 0.5), Ordering::Greater);
+    }
+
+    #[test]
+    fn search_loop_best_trial_respects_objective() {
+        let mut loop_min = SearchLoop::new(
+            SPACE.clone(),
+            Strategy::Bayesian(BayesianStrategy::new(0, 0.3)),
+            ResourceConfig::default(),
+            Objective::Minimize,
+            no_tracker(),
+        )
+        .unwrap();
+        let t1 = loop_min.suggest().unwrap();
+        loop_min.observe(t1.id, 0.5).unwrap();
+        let t2 = loop_min.suggest().unwrap();
+        loop_min.observe(t2.id, 0.2).unwrap();
+        let best_min = loop_min.best_trial().unwrap();
+        assert_eq!(best_min.id, t2.id);
+
+        let mut loop_max = SearchLoop::new(
+            SPACE.clone(),
+            Strategy::Bayesian(BayesianStrategy::new(1, 0.3)),
+            ResourceConfig::default(),
+            Objective::Maximize,
+            no_tracker(),
+        )
+        .unwrap();
+        let a = loop_max.suggest().unwrap();
+        loop_max.observe(a.id, 0.1).unwrap();
+        let b = loop_max.suggest().unwrap();
+        loop_max.observe(b.id, 0.9).unwrap();
+        let best_max = loop_max.best_trial().unwrap();
+        assert_eq!(best_max.id, b.id);
+    }
+
+    #[test]
+    fn summary_reflects_current_state() {
+        let mut loop_min = SearchLoop::new(
+            SPACE.clone(),
+            Strategy::Bayesian(BayesianStrategy::new(0, 0.3)),
+            ResourceConfig::default(),
+            Objective::Minimize,
+            no_tracker(),
+        )
+        .unwrap();
+        let trial = loop_min.suggest().unwrap();
+        let summary = loop_min.summary();
+        assert_eq!(summary.pending_trials, 1);
+        assert_eq!(summary.completed_trials, 0);
+        assert!(!summary.has_best());
+
+        loop_min.observe(trial.id, 0.4).unwrap();
+        let summary = loop_min.summary();
+        assert_eq!(summary.pending_trials, 0);
+        assert_eq!(summary.completed_trials, 1);
+        assert!(summary.has_best());
+        assert_eq!(summary.best_trial.unwrap().id, trial.id);
     }
 }
