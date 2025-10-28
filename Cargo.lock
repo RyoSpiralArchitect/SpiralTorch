@@ -2761,6 +2761,7 @@ name = "spiral-selfsup"
 version = "0.1.0"
 dependencies = [
  "rand",
+ "st-tensor",
  "thiserror 1.0.69",
 ]
 
