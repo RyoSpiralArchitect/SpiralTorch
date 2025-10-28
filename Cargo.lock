@@ -2761,7 +2761,11 @@ name = "spiral-selfsup"
 version = "0.1.0"
 dependencies = [
  "rand",
+ "serde",
+ "st-tensor",
+ "st-vision",
  "thiserror 1.0.69",
+ "toml",
 ]
 
 [[package]]

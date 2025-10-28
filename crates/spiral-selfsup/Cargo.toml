@@ -6,8 +6,17 @@ authors = ["SpiralTorch Contributors"]
 description = "Self-supervised learning objectives for SpiralTorch"
 license = "AGPL-3.0-or-later"
 
+[features]
+default = ["cpu"]
+cpu = ["st-tensor/cpu"]
+wgpu = ["cpu", "st-tensor/wgpu_dense"]
+
 [dependencies]
+rand = { version = "0.8", features = ["std", "std_rng"] }
+serde = { version = "1", features = ["derive"] }
+st-tensor = { path = "../st-tensor" }
+st-vision = { path = "../st-vision" }
 thiserror = "1"
+toml = "0.8"
 
 [dev-dependencies]
-rand = { version = "0.8", features = ["std", "std_rng"] }
