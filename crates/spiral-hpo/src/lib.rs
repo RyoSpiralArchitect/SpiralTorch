@@ -1,9 +1,12 @@
 use rand::prelude::*;
 use rand_distr::StandardNormal;
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::time::Duration;
 use thiserror::Error;
+
+pub mod analysis;
 
 pub mod space {
     use super::*;
@@ -132,7 +135,52 @@ pub mod space {
     }
 }
 
+pub use analysis::TrialSummary;
 pub use space::{ParamSpec, ParamValue, SearchSpace, TrialSuggestion};
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Objective {
+    Minimize,
+    Maximize,
+}
+
+impl Default for Objective {
+    fn default() -> Self {
+        Objective::Minimize
+    }
+}
+
+impl Objective {
+    pub fn from_maximize(maximize: bool) -> Self {
+        if maximize {
+            Objective::Maximize
+        } else {
+            Objective::Minimize
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Objective::Minimize => "minimize",
+            Objective::Maximize => "maximize",
+        }
+    }
+
+    pub fn ordering(&self, lhs: f64, rhs: f64) -> Ordering {
+        match self {
+            Objective::Minimize => lhs.total_cmp(&rhs),
+            Objective::Maximize => rhs.total_cmp(&lhs),
+        }
+    }
+
+    pub fn prefers(&self, candidate: f64, incumbent: f64) -> bool {
+        match self {
+            Objective::Minimize => candidate < incumbent,
+            Objective::Maximize => candidate > incumbent,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Observation {
@@ -183,7 +231,7 @@ pub mod strategies {
             rng
         }
 
-        pub fn suggest(&mut self, space: &SearchSpace) -> TrialSuggestion {
+        pub fn suggest(&mut self, space: &SearchSpace, objective: Objective) -> TrialSuggestion {
             let draws = space.draws_per_suggestion();
             let mut rng = self.rng_for(draws);
             // advance RNG state for this call so that the checkpointed state remains deterministic
@@ -203,7 +251,7 @@ pub mod strategies {
                 .state
                 .observations
                 .iter()
-                .min_by(|a, b| a.metric.total_cmp(&b.metric))
+                .min_by(|a, b| objective.ordering(a.metric, b.metric))
                 .map(|obs| obs.suggestion.clone());
             if let Some(best) = best {
                 suggestion = best;
@@ -243,8 +291,11 @@ pub mod strategies {
             suggestion
         }
 
-        pub fn observe(&mut self, observation: Observation) {
+        pub fn observe(&mut self, observation: Observation, objective: Objective) {
             self.state.observations.push(observation);
+            self.state
+                .observations
+                .sort_by(|a, b| objective.ordering(a.metric, b.metric));
         }
 
         pub fn state(&self) -> BayesianState {
@@ -299,7 +350,7 @@ pub mod strategies {
             rng
         }
 
-        pub fn suggest(&mut self, space: &SearchSpace) -> TrialSuggestion {
+        pub fn suggest(&mut self, space: &SearchSpace, objective: Objective) -> TrialSuggestion {
             let draws = space.draws_per_suggestion();
             let mut rng = self.rng_for(draws);
             self.state.suggestion_count += 1;
@@ -313,7 +364,7 @@ pub mod strategies {
                 (self.state.population_size as f64 * self.state.elite_fraction).ceil() as usize;
             let elite_count = elite_count.max(1).min(self.state.population.len());
             let mut sorted = self.state.population.clone();
-            sorted.sort_by(|a, b| a.metric.total_cmp(&b.metric));
+            sorted.sort_by(|a, b| objective.ordering(a.metric, b.metric));
             let elite = &sorted[..elite_count];
 
             let parent_idx = rng.gen_range(0..elite.len());
@@ -353,13 +404,18 @@ pub mod strategies {
             suggestion
         }
 
-        pub fn observe(&mut self, observation: Observation) {
+        pub fn observe(&mut self, observation: Observation, objective: Objective) {
             self.state.population.push(observation);
             if self.state.population.len() > self.state.population_size {
                 self.state
                     .population
-                    .sort_by(|a, b| a.metric.total_cmp(&b.metric));
+                    .sort_by(|a, b| objective.ordering(a.metric, b.metric));
                 self.state.population.truncate(self.state.population_size);
+            }
+            if self.state.population.len() <= self.state.population_size {
+                self.state
+                    .population
+                    .sort_by(|a, b| objective.ordering(a.metric, b.metric));
             }
         }
 
@@ -389,17 +445,17 @@ impl Strategy {
         }
     }
 
-    pub fn suggest(&mut self, space: &SearchSpace) -> TrialSuggestion {
+    pub fn suggest(&mut self, space: &SearchSpace, objective: Objective) -> TrialSuggestion {
         match self {
-            Strategy::Bayesian(strategy) => strategy.suggest(space),
-            Strategy::Population(strategy) => strategy.suggest(space),
+            Strategy::Bayesian(strategy) => strategy.suggest(space, objective),
+            Strategy::Population(strategy) => strategy.suggest(space, objective),
         }
     }
 
-    pub fn observe(&mut self, observation: Observation) {
+    pub fn observe(&mut self, observation: Observation, objective: Objective) {
         match self {
-            Strategy::Bayesian(strategy) => strategy.observe(observation),
-            Strategy::Population(strategy) => strategy.observe(observation),
+            Strategy::Bayesian(strategy) => strategy.observe(observation, objective),
+            Strategy::Population(strategy) => strategy.observe(observation, objective),
         }
     }
 
@@ -498,7 +554,7 @@ fn now_ms() -> u128 {
         .as_millis()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TrialRecord {
     pub id: usize,
     pub suggestion: TrialSuggestion,
@@ -514,6 +570,8 @@ pub struct SearchLoopState {
     pub next_trial_id: usize,
     pub draws_per_suggestion: usize,
     pub resource: ResourceConfig,
+    #[serde(default)]
+    pub objective: Objective,
 }
 
 #[derive(Debug, Error)]
@@ -548,6 +606,7 @@ impl SearchLoop {
         space: SearchSpace,
         strategy: Strategy,
         resource: ResourceConfig,
+        objective: Objective,
         tracker: Box<dyn ExperimentTracker>,
     ) -> Result<Self, SearchError> {
         if space.is_empty() {
@@ -567,6 +626,7 @@ impl SearchLoop {
                 next_trial_id: 0,
                 draws_per_suggestion: draws,
                 resource,
+                objective,
             },
             space,
             strategy,
@@ -595,7 +655,7 @@ impl SearchLoop {
         if !self.scheduler.try_reserve() {
             return Err(SearchError::NoAvailableSlot);
         }
-        let suggestion = self.strategy.suggest(&self.space);
+        let suggestion = self.strategy.suggest(&self.space, self.state.objective);
         let trial = TrialRecord {
             id: self.state.next_trial_id,
             suggestion,
@@ -618,10 +678,13 @@ impl SearchLoop {
             let mut trial = self.state.pending.remove(idx);
             self.scheduler.release();
             trial.metric = Some(metric);
-            self.strategy.observe(Observation {
-                suggestion: trial.suggestion.clone(),
-                metric,
-            });
+            self.strategy.observe(
+                Observation {
+                    suggestion: trial.suggestion.clone(),
+                    metric,
+                },
+                self.state.objective,
+            );
             self.state.completed.push(trial.clone());
             self.tracker.on_trial_end(&trial, metric);
             self.snapshot_strategy();
@@ -653,6 +716,18 @@ impl SearchLoop {
 
     pub fn space(&self) -> &SearchSpace {
         &self.space
+    }
+
+    pub fn objective(&self) -> Objective {
+        self.state.objective
+    }
+
+    pub fn best_trial(&self) -> Option<TrialRecord> {
+        crate::analysis::best_trial(self.state.completed.as_slice(), self.state.objective).cloned()
+    }
+
+    pub fn summary(&self) -> crate::analysis::TrialSummary {
+        crate::analysis::TrialSummary::from_state(&self.state)
     }
 }
 
@@ -691,6 +766,7 @@ mod tests {
             SPACE.clone(),
             strategy,
             ResourceConfig::default(),
+            Objective::Minimize,
             no_tracker(),
         )
         .unwrap();
@@ -722,6 +798,7 @@ mod tests {
                 max_concurrent: 1,
                 min_interval: None,
             },
+            Objective::Minimize,
             no_tracker(),
         )
         .unwrap();
@@ -732,5 +809,87 @@ mod tests {
         ));
         loop_a.observe(t1.id, 1.0).unwrap();
         assert!(loop_a.suggest().is_ok());
+    }
+
+    #[test]
+    fn objective_controls_population_ordering() {
+        let mut strategy = strategies::PopulationStrategy::new(0, 4, 0.5, 0.0);
+        let mut suggestion = TrialSuggestion::new();
+        suggestion.insert("param".into(), ParamValue::Float(0.0));
+        let obs = |metric: f64| Observation {
+            suggestion: suggestion.clone(),
+            metric,
+        };
+
+        strategy.observe(obs(0.5), Objective::Minimize);
+        strategy.observe(obs(0.1), Objective::Minimize);
+        assert!(strategy.state.population[0].metric <= strategy.state.population[1].metric);
+
+        strategy.observe(obs(0.9), Objective::Maximize);
+        strategy.observe(obs(0.2), Objective::Maximize);
+        assert!(strategy.state.population[0].metric >= strategy.state.population[1].metric);
+    }
+
+    #[test]
+    fn objective_ordering_matches_direction() {
+        assert_eq!(Objective::Minimize.ordering(0.1, 0.5), Ordering::Less);
+        assert_eq!(Objective::Maximize.ordering(0.1, 0.5), Ordering::Greater);
+    }
+
+    #[test]
+    fn search_loop_best_trial_respects_objective() {
+        let mut loop_min = SearchLoop::new(
+            SPACE.clone(),
+            Strategy::Bayesian(BayesianStrategy::new(0, 0.3)),
+            ResourceConfig::default(),
+            Objective::Minimize,
+            no_tracker(),
+        )
+        .unwrap();
+        let t1 = loop_min.suggest().unwrap();
+        loop_min.observe(t1.id, 0.5).unwrap();
+        let t2 = loop_min.suggest().unwrap();
+        loop_min.observe(t2.id, 0.2).unwrap();
+        let best_min = loop_min.best_trial().unwrap();
+        assert_eq!(best_min.id, t2.id);
+
+        let mut loop_max = SearchLoop::new(
+            SPACE.clone(),
+            Strategy::Bayesian(BayesianStrategy::new(1, 0.3)),
+            ResourceConfig::default(),
+            Objective::Maximize,
+            no_tracker(),
+        )
+        .unwrap();
+        let a = loop_max.suggest().unwrap();
+        loop_max.observe(a.id, 0.1).unwrap();
+        let b = loop_max.suggest().unwrap();
+        loop_max.observe(b.id, 0.9).unwrap();
+        let best_max = loop_max.best_trial().unwrap();
+        assert_eq!(best_max.id, b.id);
+    }
+
+    #[test]
+    fn summary_reflects_current_state() {
+        let mut loop_min = SearchLoop::new(
+            SPACE.clone(),
+            Strategy::Bayesian(BayesianStrategy::new(0, 0.3)),
+            ResourceConfig::default(),
+            Objective::Minimize,
+            no_tracker(),
+        )
+        .unwrap();
+        let trial = loop_min.suggest().unwrap();
+        let summary = loop_min.summary();
+        assert_eq!(summary.pending_trials, 1);
+        assert_eq!(summary.completed_trials, 0);
+        assert!(!summary.has_best());
+
+        loop_min.observe(trial.id, 0.4).unwrap();
+        let summary = loop_min.summary();
+        assert_eq!(summary.pending_trials, 0);
+        assert_eq!(summary.completed_trials, 1);
+        assert!(summary.has_best());
+        assert_eq!(summary.best_trial.unwrap().id, trial.id);
     }
 }
