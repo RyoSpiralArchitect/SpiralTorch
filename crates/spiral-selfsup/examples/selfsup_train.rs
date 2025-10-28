@@ -43,9 +43,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         step_metrics.mem_peak_mb = rng.gen_range(256.0..640.0);
         step_metrics.retry_rate = rng.gen_range(0.0..0.05);
         for (descriptor, value) in evaluate_registered_info_nce(&result) {
-            if let st_metrics::registry::MetricValue::Scalar(v) = value {
-                step_metrics.extra.insert(descriptor.name.to_string(), v);
-            }
+            step_metrics
+                .extra
+                .insert(descriptor.name.to_string(), f64::from(value.value));
         }
 
         let reward = 1.0 - f64::from(info_summary.loss);

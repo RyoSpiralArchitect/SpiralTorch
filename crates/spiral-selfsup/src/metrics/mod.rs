@@ -7,6 +7,7 @@
 //! examples and tutorials: registering well-known descriptors and producing
 //! gauge values for InfoNCE epochs.
 
+use crate::contrastive::InfoNCEResult;
 use once_cell::sync::Lazy;
 use std::sync::RwLock;
 
@@ -49,7 +50,10 @@ pub fn register_descriptors(descriptors: &[MetricDescriptor]) {
         .write()
         .expect("metric registry write lock should not be poisoned");
     for descriptor in descriptors {
-        if registry.iter().all(|existing| existing.name != descriptor.name) {
+        if registry
+            .iter()
+            .all(|existing| existing.name != descriptor.name)
+        {
             registry.push(*descriptor);
         }
     }
@@ -68,45 +72,125 @@ pub const INFO_NCE_DESCRIPTORS: &[MetricDescriptor] = &[
     MetricDescriptor {
         name: "selfsup.info_nce.loss",
         unit: MetricUnit::Scalar,
-        description: "Mean InfoNCE loss observed during the epoch.",
+        description: "Mean InfoNCE loss observed across a batch.",
     },
     MetricDescriptor {
-        name: "selfsup.info_nce.batches",
-        unit: MetricUnit::Count,
-        description: "Total number of batches processed in the epoch.",
+        name: "selfsup.info_nce.top1_accuracy",
+        unit: MetricUnit::Scalar,
+        description: "Share of anchors whose positives win the top-1 logit.",
+    },
+    MetricDescriptor {
+        name: "selfsup.info_nce.margin",
+        unit: MetricUnit::Scalar,
+        description: "Mean margin between positive and hardest negative logits.",
+    },
+    MetricDescriptor {
+        name: "selfsup.info_nce.positive_log_prob",
+        unit: MetricUnit::Scalar,
+        description: "Mean log probability of the positives (nats).",
     },
 ];
 
 /// Convenience wrapper that registers the built-in InfoNCE descriptors.
-pub fn register_info_nce_descriptors() {
+pub fn register_info_nce_metrics() {
     register_descriptors(INFO_NCE_DESCRIPTORS);
 }
 
-/// Metric payload summarising an InfoNCE epoch.
+/// Summary statistics derived from an [`InfoNCEResult`].
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct InfoNCEEpochMetrics {
-    /// Mean InfoNCE loss recorded for the epoch.
-    pub mean_loss: f32,
-    /// Total number of batches seen in the epoch.
-    pub batches: usize,
+pub struct InfoNCEMetricSummary {
+    /// Mean InfoNCE loss recorded for the batch.
+    pub loss: f32,
+    /// Ratio of anchors whose positive sample achieved the top-1 logit.
+    pub top1_accuracy: f32,
+    /// Mean margin between the positive logit and the hardest negative.
+    pub mean_positive_margin: f32,
+    /// Mean log probability assigned to the positives.
+    pub mean_positive_log_probability: f32,
 }
 
-impl InfoNCEEpochMetrics {
-    /// Builds gauge values suitable for publishing to the telemetry layer.
-    pub fn to_values(self) -> [MetricValue; 2] {
-        [
-            MetricValue {
-                name: "selfsup.info_nce.loss",
-                value: self.mean_loss,
-                unit: MetricUnit::Scalar,
-            },
-            MetricValue {
-                name: "selfsup.info_nce.batches",
-                value: self.batches as f32,
-                unit: MetricUnit::Count,
-            },
-        ]
+impl InfoNCEMetricSummary {
+    /// Builds the summary from a raw InfoNCE evaluation result.
+    pub fn from_result(result: &InfoNCEResult) -> Self {
+        let batch = result.batch.max(1);
+        let mut top1_hits = 0usize;
+        let mut margin_sum = 0.0f32;
+        let mut log_prob_sum = 0.0f32;
+
+        for anchor in 0..result.batch {
+            let row = &result.logits[anchor * result.batch..(anchor + 1) * result.batch];
+            let positive_logit = row[anchor];
+
+            let mut hardest_negative = f32::NEG_INFINITY;
+            for (idx, &logit) in row.iter().enumerate() {
+                if idx != anchor {
+                    hardest_negative = hardest_negative.max(logit);
+                }
+            }
+            if hardest_negative.is_finite() {
+                margin_sum += positive_logit - hardest_negative;
+            }
+
+            if row
+                .iter()
+                .enumerate()
+                .all(|(idx, &logit)| idx == anchor || positive_logit >= logit)
+            {
+                top1_hits += 1;
+            }
+
+            let max_logit = row.iter().fold(f32::NEG_INFINITY, |acc, &v| acc.max(v));
+            let exp_sum: f32 = row
+                .iter()
+                .map(|&v| ((v - max_logit) as f64).exp() as f32)
+                .sum();
+            if exp_sum > 0.0 {
+                let positive_log_prob = positive_logit - max_logit - exp_sum.ln();
+                log_prob_sum += positive_log_prob;
+            }
+        }
+
+        let batch_f32 = batch as f32;
+        Self {
+            loss: result.loss,
+            top1_accuracy: top1_hits as f32 / batch_f32,
+            mean_positive_margin: margin_sum / batch_f32,
+            mean_positive_log_probability: log_prob_sum / batch_f32,
+        }
     }
+}
+
+/// Evaluate the registered InfoNCE descriptors against a result.
+pub fn evaluate_registered_info_nce(
+    result: &InfoNCEResult,
+) -> Vec<(MetricDescriptor, MetricValue)> {
+    let summary = InfoNCEMetricSummary::from_result(result);
+    let mut values = Vec::new();
+    for (name, value) in [
+        ("selfsup.info_nce.loss", summary.loss),
+        ("selfsup.info_nce.top1_accuracy", summary.top1_accuracy),
+        ("selfsup.info_nce.margin", summary.mean_positive_margin),
+        (
+            "selfsup.info_nce.positive_log_prob",
+            summary.mean_positive_log_probability,
+        ),
+    ] {
+        if let Some(descriptor) = INFO_NCE_DESCRIPTORS
+            .iter()
+            .copied()
+            .find(|descriptor| descriptor.name == name)
+        {
+            values.push((
+                descriptor,
+                MetricValue {
+                    name: descriptor.name,
+                    value,
+                    unit: descriptor.unit,
+                },
+            ));
+        }
+    }
+    values
 }
 
 #[cfg(test)]
@@ -115,25 +199,38 @@ mod tests {
 
     #[test]
     fn registering_descriptors_is_idempotent() {
-        register_info_nce_descriptors();
-        register_info_nce_descriptors();
+        register_info_nce_metrics();
+        register_info_nce_metrics();
         let registered = descriptors();
         assert_eq!(registered.len(), INFO_NCE_DESCRIPTORS.len());
-        assert!(registered.iter().any(|descriptor| descriptor.name == "selfsup.info_nce.loss"));
+        assert!(registered
+            .iter()
+            .any(|descriptor| descriptor.name == "selfsup.info_nce.loss"));
     }
 
     #[test]
-    fn epoch_metrics_convert_to_values() {
-        let metrics = InfoNCEEpochMetrics {
-            mean_loss: 0.42,
-            batches: 17,
+    fn summary_matches_expected_values() {
+        let result = InfoNCEResult {
+            loss: 0.5,
+            logits: vec![
+                2.0, 0.5, 1.0, // anchor 0
+                0.1, 1.5, 0.4, // anchor 1
+                0.3, 0.2, 1.2, // anchor 2
+            ],
+            labels: vec![0, 1, 2],
+            batch: 3,
         };
-        let values = metrics.to_values();
-        assert_eq!(values[0].name, "selfsup.info_nce.loss");
-        assert_eq!(values[0].value, 0.42);
-        assert_eq!(values[0].unit, MetricUnit::Scalar);
-        assert_eq!(values[1].name, "selfsup.info_nce.batches");
-        assert_eq!(values[1].value, 17.0);
-        assert_eq!(values[1].unit, MetricUnit::Count);
+
+        let summary = InfoNCEMetricSummary::from_result(&result);
+        assert!((summary.loss - 0.5).abs() < 1e-6);
+        assert!((summary.top1_accuracy - 1.0).abs() < 1e-6);
+        assert!(summary.mean_positive_margin > 0.0);
+        assert!(summary.mean_positive_log_probability < 0.0);
+
+        let evaluated = evaluate_registered_info_nce(&result);
+        assert_eq!(evaluated.len(), 4);
+        assert!(evaluated.iter().any(|(descriptor, value)| descriptor.name
+            == "selfsup.info_nce.loss"
+            && value.value == 0.5));
     }
 }
