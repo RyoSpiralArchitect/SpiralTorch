@@ -3,7 +3,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList, PySequence};
 use pyo3::IntoPy;
 use spiral_hpo::{
-    self as hpo, ExperimentTracker, NoOpTracker, ParamSpec, ParamValue, ResourceConfig,
+    self as hpo, ExperimentTracker, NoOpTracker, Objective, ParamSpec, ParamValue, ResourceConfig,
     SearchError, SearchLoop, SearchLoopState, SearchSpace, Strategy, TrialRecord,
 };
 use std::sync::Mutex;
@@ -261,20 +261,22 @@ impl PySearchLoop {
 #[pymethods]
 impl PySearchLoop {
     #[staticmethod]
-    #[pyo3(signature = (space, strategy, resource=None, tracker=None))]
+    #[pyo3(signature = (space, strategy, resource=None, tracker=None, maximize=false))]
     pub fn create(
         space: &Bound<'_, PyAny>,
         strategy: &Bound<'_, PyDict>,
         resource: Option<&Bound<'_, PyDict>>,
         tracker: Option<Py<PyAny>>,
+        maximize: bool,
     ) -> PyResult<Self> {
         Python::with_gil(|_py| {
             let space = parse_space(space)?;
             let strategy = parse_strategy(strategy)?;
             let resource = parse_resource_config(resource)?;
             let tracker = tracker_from_py(tracker);
-            let loop_inner =
-                SearchLoop::new(space, strategy, resource, tracker).map_err(search_error_to_py)?;
+            let objective = Objective::from_maximize(maximize);
+            let loop_inner = SearchLoop::new(space, strategy, resource, objective, tracker)
+                .map_err(search_error_to_py)?;
             Ok(PySearchLoop::new(loop_inner))
         })
     }
@@ -331,6 +333,39 @@ impl PySearchLoop {
             list.append(entry.bind(py))?;
         }
         Ok(list.into())
+    }
+
+    pub fn objective(&self) -> PyResult<String> {
+        let guard = self.inner.lock().unwrap();
+        Ok(guard.objective().as_str().to_string())
+    }
+
+    pub fn best_trial(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        let guard = self.inner.lock().unwrap();
+        Ok(guard
+            .best_trial()
+            .map(|record| trial_to_dict(py, &record))
+            .transpose()?)
+    }
+
+    pub fn summary(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let guard = self.inner.lock().unwrap();
+        let summary = guard.summary();
+        let dict = PyDict::new_bound(py);
+        dict.set_item("objective", summary.objective.as_str())?;
+        dict.set_item("total_trials", summary.total_trials)?;
+        dict.set_item("completed_trials", summary.completed_trials)?;
+        dict.set_item("pending_trials", summary.pending_trials)?;
+        match summary.best_trial {
+            Some(best) => {
+                let best_obj = trial_to_dict(py, &best)?;
+                dict.set_item("best_trial", best_obj)?;
+            }
+            None => {
+                dict.set_item("best_trial", py.None())?;
+            }
+        }
+        Ok(dict.into_py(py))
     }
 }
 
