@@ -2762,8 +2762,11 @@ version = "0.1.0"
 dependencies = [
  "once_cell",
  "rand",
+ "serde",
  "st-tensor",
+ "st-vision",
  "thiserror 1.0.69",
+ "toml",
 ]
 
 [[package]]
@@ -2984,6 +2987,7 @@ dependencies = [
  "rand_distr",
  "serde",
  "serde_json",
+ "spiral-selfsup",
  "st-core",
  "st-frac",
  "st-tensor",

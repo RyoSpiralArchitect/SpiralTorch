@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from array import array
 from collections.abc import Iterable, Sequence
+import importlib
 import importlib.machinery
 import importlib.util
 import math
@@ -804,7 +805,13 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
     except ModuleNotFoundError:  # pragma: no cover - optional dependency
         _np = None  # type: ignore
 
+    try:  # pragma: no cover - optional dependency
+        from . import _blas as _blas_impl
+    except Exception:  # pragma: no cover - best-effort optional import
+        _blas_impl = None  # type: ignore
+
     NUMPY_AVAILABLE = _np is not None
+    BLAS_AVAILABLE = bool(_blas_impl and _blas_impl.blas_available())
 
     def _resolve_stub_backend(
         requested, *, op: str, allow_numpy: bool = True
@@ -1147,10 +1154,12 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             ctor_args = (*positional_head, *args)
 
             rows, cols, payload = _normalize_tensor_ctor_args(*ctor_args, **ctor_kwargs)
-            if backend_hint is not None and backend_hint not in {"numpy", "python"}:
-                raise ValueError("backend must be 'numpy', 'python', or None")
+            if backend_hint is not None and backend_hint not in {"numpy", "python", "blas"}:
+                raise ValueError("backend must be 'numpy', 'python', 'blas', or None")
             if backend_hint == "numpy" and not NUMPY_AVAILABLE:
                 raise RuntimeError("NumPy backend requested but NumPy is not installed")
+            if backend_hint == "blas" and not BLAS_AVAILABLE:
+                raise RuntimeError("BLAS backend requested but no BLAS library was detected")
             rows = int(rows)
             cols = int(cols)
 
@@ -1167,7 +1176,9 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             self._rows = rows
             self._cols = cols
 
-            preferred_backend = backend_hint or ("numpy" if NUMPY_AVAILABLE else "python")
+            preferred_backend = backend_hint or (
+                "blas" if BLAS_AVAILABLE else ("numpy" if NUMPY_AVAILABLE else "python")
+            )
             if preferred_backend == "numpy":
                 arr = (
                     _np.frombuffer(canonical, dtype=_np.float64, count=rows * cols)
@@ -1178,7 +1189,7 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
                 self._backend = "numpy"
             else:
                 self._data = canonical
-                self._backend = "python"
+                self._backend = "blas" if preferred_backend == "blas" else "python"
 
         # noqa: D401 - mirror real signature from the native extension
         def matmul(self, other: "Tensor", *, backend: str | None = None):
@@ -1187,16 +1198,36 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             if self._cols != other._rows:
                 raise ValueError("inner dimensions do not match for matmul")
 
-            if backend is not None and backend not in {"numpy", "python"}:
-                raise ValueError("backend must be 'numpy', 'python', or None")
-            target_backend = backend or ("numpy" if NUMPY_AVAILABLE else "python")
+            if backend is not None and backend not in {"numpy", "python", "blas"}:
+                raise ValueError("backend must be 'numpy', 'python', 'blas', or None")
+            target_backend = backend or (
+                "blas" if BLAS_AVAILABLE else ("numpy" if NUMPY_AVAILABLE else "python")
+            )
 
             if target_backend == "numpy":
                 if not NUMPY_AVAILABLE:
                     raise RuntimeError("NumPy backend requested but NumPy is not installed")
                 return self._matmul_numpy(other)
+            if target_backend == "blas":
+                if not BLAS_AVAILABLE:
+                    raise RuntimeError("BLAS backend requested but no BLAS library was detected")
+                return self._matmul_blas(other)
             return self._matmul_python(other)
 
+        def _matmul_blas(self, other: "Tensor") -> "Tensor":
+            rows, cols, inner = self._rows, other._cols, self._cols
+            if rows == 0 or cols == 0:
+                return Tensor._from_python_array(rows, cols, array("d"), backend="blas")
+            if inner == 0:
+                return Tensor._from_python_array(
+                    rows, cols, array("d", [0.0]) * (rows * cols), backend="blas"
+                )
+
+            out = array("d", [0.0]) * (rows * cols)
+            left = self._row_major_python()
+            right = other._row_major_python()
+            _blas_impl.dgemm(rows, cols, inner, left, right, out)  # type: ignore[union-attr]
+            return Tensor._from_python_array(rows, cols, out, backend="blas")
         def row_softmax(self, *, backend: str | None = None) -> "Tensor":
             """Compute the row-wise softmax of the tensor."""
 
@@ -1514,7 +1545,15 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
                     for a, b in zip(self._row_major_python(), other._row_major_python())
                 ),
             )
-            return Tensor._from_python_array(self._rows, self._cols, data)
+            backend = (
+                "blas"
+                if BLAS_AVAILABLE
+                and (self._backend == "blas" or other._backend == "blas")
+                else "python"
+            )
+            return Tensor._from_python_array(
+                self._rows, self._cols, data, backend=backend
+            )
 
         def row_softmax(self, *, backend: str | None = None) -> "Tensor":
             rows, cols = self._rows, self._cols
@@ -1890,7 +1929,11 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             return dlpack_device()
 
         def _row_major_python(self):
-            """Return the matrix data flattened row-major into an ``array('d')`` buffer."""
+            """Return the tensor data as a row-major ``array('d')`` buffer.
+
+            The returned buffer always contains ``self._rows * self._cols`` floating
+            point values.
+            """
             if self._backend == "python":
                 return self._data
             return array("d", self._data.reshape(-1))
@@ -1910,16 +1953,20 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             return instance
 
         @classmethod
-        def _from_python_array(cls, rows: int, cols: int, buffer: array) -> "Tensor":
+        def _from_python_array(
+            cls, rows: int, cols: int, buffer: array, *, backend: str = "python"
+        ) -> "Tensor":
             if buffer.typecode != "d":
                 raise TypeError("python backend tensors must use array('d') storage")
             if len(buffer) != rows * cols:
                 raise ValueError("buffer does not match requested tensor shape")
+            if backend not in {"python", "blas"}:
+                raise ValueError("python array tensors must have 'python' or 'blas' backend")
             instance = cls.__new__(cls)
             instance._rows = int(rows)
             instance._cols = int(cols)
             instance._data = buffer
-            instance._backend = "python"
+            instance._backend = backend
             return instance
 
         @_ShapeDescriptor
@@ -1956,7 +2003,8 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
                 return cls._from_numpy_array(matrix)
             flat = self._row_major_python()
             buffer = array("d", flat)
-            return cls._from_python_array(rows, cols, buffer)
+            backend = "blas" if self._backend == "blas" else "python"
+            return cls._from_python_array(rows, cols, buffer, backend=backend)
 
         def transpose(self) -> "Tensor":
             rows, cols = self._rows, self._cols
@@ -1971,7 +2019,8 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
                 row_offset = r * cols
                 for c in range(cols):
                     transposed[c * rows + r] = flat[row_offset + c]
-            return cls._from_python_array(cols, rows, transposed)
+            backend = "blas" if self._backend == "blas" else "python"
+            return cls._from_python_array(cols, rows, transposed, backend=backend)
 
         def sum_axis0(self) -> list[float]:
             cols = self._cols
@@ -2106,11 +2155,8 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
                 return [[] for _ in range(rows)]
 
             if self._backend == "numpy":
-                matrix = self._to_numpy(copy=False)
-                return [
-                    [float(matrix[r, c]) for c in range(cols)]
-                    for r in range(rows)
-                ]
+                matrix = self._to_numpy(copy=False).reshape(rows, cols)
+                return [[float(value) for value in row] for row in matrix]
 
             flat = self._row_major_python()
             return [
@@ -2120,16 +2166,15 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
 
         @staticmethod
         def zeros(rows: int, cols: int) -> "Tensor":
-            rows = int(rows)
-            cols = int(cols)
-            if rows < 0 or cols < 0:
-                raise ValueError("tensor dimensions must be non-negative")
+            rows = _tensor_coerce_index(rows, "rows")
+            cols = _tensor_coerce_index(cols, "cols")
             total = rows * cols
             if NUMPY_AVAILABLE:
                 matrix = _np.zeros((rows, cols), dtype=_np.float64)
                 return Tensor._from_numpy_array(matrix)
             buffer = array("d", [0.0]) * total if total else array("d")
-            return Tensor._from_python_array(rows, cols, buffer)
+            backend = "blas" if BLAS_AVAILABLE else "python"
+            return Tensor._from_python_array(rows, cols, buffer, backend=backend)
 
         @staticmethod
         def randn(
@@ -2139,10 +2184,8 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             std: float = 1.0,
             seed: int | None = None,
         ) -> "Tensor":
-            rows = int(rows)
-            cols = int(cols)
-            if rows < 0 or cols < 0:
-                raise ValueError("tensor dimensions must be non-negative")
+            rows = _tensor_coerce_index(rows, "rows")
+            cols = _tensor_coerce_index(cols, "cols")
             total = rows * cols
             if NUMPY_AVAILABLE:
                 rng = _np.random.default_rng(seed)
@@ -2153,7 +2196,8 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             rng = random.Random(seed)
             values = [rng.gauss(mean, std) for _ in range(total)]
             buffer = array("d", values)
-            return Tensor._from_python_array(rows, cols, buffer)
+            backend = "blas" if BLAS_AVAILABLE else "python"
+            return Tensor._from_python_array(rows, cols, buffer, backend=backend)
 
         @staticmethod
         def rand(
@@ -2163,10 +2207,8 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             max: float = 1.0,
             seed: int | None = None,
         ) -> "Tensor":
-            rows = int(rows)
-            cols = int(cols)
-            if rows < 0 or cols < 0:
-                raise ValueError("tensor dimensions must be non-negative")
+            rows = _tensor_coerce_index(rows, "rows")
+            cols = _tensor_coerce_index(cols, "cols")
             if max < min:
                 raise ValueError("max must be greater than or equal to min")
             total = rows * cols
@@ -2179,7 +2221,8 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             rng = random.Random(seed)
             values = [rng.uniform(min, max) for _ in range(total)]
             buffer = array("d", values)
-            return Tensor._from_python_array(rows, cols, buffer)
+            backend = "blas" if BLAS_AVAILABLE else "python"
+            return Tensor._from_python_array(rows, cols, buffer, backend=backend)
 
         @staticmethod
         def cat_rows(tensors: Sequence["Tensor"]) -> "Tensor":
@@ -2199,11 +2242,15 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             if use_numpy:
                 matrices = [tensor._to_numpy(copy=False) for tensor in tensors]
                 concatenated = _np.concatenate(matrices, axis=0)
-                return Tensor._from_numpy_array(concatenated)
+                cls = type(tensors[0])
+                return cls._from_numpy_array(concatenated)
+            cls = type(tensors[0])
             data = array("d")
             for tensor in tensors:
                 data.extend(tensor._row_major_python())
-            return Tensor._from_python_array(total_rows, cols, data)
+            return cls._from_python_array(total_rows, cols, data)
+            backend = "blas" if BLAS_AVAILABLE else "python"
+            return Tensor._from_python_array(total_rows, cols, data, backend=backend)
 
         def __matmul__(self, other) -> "Tensor":  # pragma: no cover - convenience wrapper
             if isinstance(other, Tensor):
@@ -2229,11 +2276,21 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
     Tensor.__module__ = module.__name__
 
     def available_stub_backends() -> tuple[str, ...]:
-        return ("numpy", "python") if NUMPY_AVAILABLE else ("python",)
+        options: list[str] = []
+        if BLAS_AVAILABLE:
+            options.append("blas")
+        if NUMPY_AVAILABLE:
+            options.append("numpy")
+        options.append("python")
+        return tuple(options)
 
     module.Tensor = Tensor
     module.available_stub_backends = available_stub_backends
-    module.default_stub_backend = "numpy" if NUMPY_AVAILABLE else "python"
+    module.default_stub_backend = (
+        "blas"
+        if BLAS_AVAILABLE
+        else ("numpy" if NUMPY_AVAILABLE else "python")
+    )
 
     class Axis:
         """Named axis descriptor used by :class:`LabeledTensor` in the stub runtime."""
@@ -2699,6 +2756,93 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
         return stub
 
     _install_spiral_rl_stub()
+
+    def _bridge_pure_python_namespace() -> None:
+        base_dir = pathlib.Path(__file__).resolve().parents[1] / "bindings" / "python" / "spiral"
+        init_py = base_dir / "__init__.py"
+        if not init_py.exists():
+            return
+
+        if importlib.util.find_spec("numpy") is None:
+            return
+
+        bridge_name = "_spiraltorch_stub_py_bridge"
+        spec = importlib.util.spec_from_file_location(
+            bridge_name,
+            init_py,
+            submodule_search_locations=[str(base_dir)],
+        )
+        if spec is None or spec.loader is None:
+            return
+
+        bridge_module = importlib.util.module_from_spec(spec)
+        bridge_module.__package__ = bridge_name
+        bridge_module.__path__ = [str(base_dir)]
+        sys.modules[bridge_name] = bridge_module
+        try:
+            spec.loader.exec_module(bridge_module)
+        except ModuleNotFoundError:
+            sys.modules.pop(bridge_name, None)
+            return
+
+        def _register(name: str, value: object) -> None:
+            if name.startswith("_"):
+                return
+            module.__dict__[name] = value
+            exports = module.__dict__.setdefault("__all__", [])
+            if name not in exports:
+                exports.append(name)
+
+        def _merge_public_members(source: types.ModuleType) -> None:
+            exports: Iterable[str] | None = getattr(source, "__all__", None)
+            if not exports:
+                exports = (name for name in dir(source) if not name.startswith("_"))
+            for name in exports:
+                value = getattr(source, name, None)
+                if value is not None:
+                    _register(name, value)
+
+        def _rebind_module(submodule: types.ModuleType, *, relative_name: str) -> None:
+            target_name = f"{module.__name__}.{relative_name}"
+            submodule.__name__ = target_name
+            if "." in relative_name:
+                submodule.__package__ = f"{module.__name__}.{relative_name.rsplit('.', 1)[0]}"
+            else:
+                submodule.__package__ = module.__name__
+            sys.modules[target_name] = submodule
+            head, _, tail = relative_name.partition(".")
+            if not tail:
+                setattr(module, head, submodule)
+                _register(head, submodule)
+
+        _merge_public_members(bridge_module)
+
+        prefix = f"{bridge_name}."
+        for name, value in list(sys.modules.items()):
+            if name == bridge_name or not name.startswith(prefix):
+                continue
+            if not isinstance(value, types.ModuleType):
+                continue
+            relative_name = name[len(prefix) :]
+            _rebind_module(value, relative_name=relative_name)
+
+        for submodule in ("data", "hypergrad", "inference"):
+            target = f"{bridge_name}.{submodule}"
+            loaded: types.ModuleType | None
+            if target in sys.modules:
+                candidate = sys.modules[target]
+                loaded = candidate if isinstance(candidate, types.ModuleType) else None
+            else:
+                spec = importlib.util.find_spec(target)
+                if spec is None:
+                    continue
+                candidate = importlib.import_module(target)
+                loaded = candidate if isinstance(candidate, types.ModuleType) else None
+            if loaded is None:
+                continue
+            _rebind_module(loaded, relative_name=submodule)
+
+    _bridge_pure_python_namespace()
 
     def _missing_attr(name: str):
         raise AttributeError(
