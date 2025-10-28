@@ -2277,9 +2277,12 @@ class ZSpaceTrainer:
                     if value is None
                 ]
                 raise KeyError(f"missing keys in state: {missing}")
-            z = z or self._z
-            moment = moment or self._m
-            velocity = velocity or self._v
+            if z is None:
+                z = self._z
+            if moment is None:
+                moment = self._m
+            if velocity is None:
+                velocity = self._v
         self._assign_vector(self._z, z, strict)
         self._assign_vector(self._m, moment, strict)
         self._assign_vector(self._v, velocity, strict)
