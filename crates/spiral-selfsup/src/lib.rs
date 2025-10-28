@@ -4,6 +4,7 @@ pub mod contrastive;
 pub mod dataset;
 pub mod masked;
 pub mod metrics;
+pub mod trainer;
 
 use st_tensor::TensorError;
 use thiserror::Error;
