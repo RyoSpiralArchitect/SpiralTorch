@@ -2854,6 +2854,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "naga",
+ "once_cell",
  "pollster",
  "rand",
  "st-tensor",
