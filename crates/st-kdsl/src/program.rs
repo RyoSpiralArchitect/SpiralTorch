@@ -9,6 +9,10 @@ use crate::{Ctx, Err, Hard, Out, SoftRule};
 
 use std::collections::HashMap;
 
+mod pattern;
+
+use pattern::{MatchArm, MatchPattern};
+
 /// Compiled representation of a SpiralK DSL program.
 #[derive(Clone, Debug)]
 pub struct Program {
@@ -43,13 +47,14 @@ impl Program {
         let mut soft = Vec::<SoftRule>::new();
         let mut locals = vec![Value::default(); self.locals];
 
-        let signal = Self::execute_block(&self.stmts, ctx, &mut locals, &mut hard, &mut soft);
+        let signal = self.execute_block(&self.stmts, ctx, &mut locals, &mut hard, &mut soft);
         debug_assert_eq!(signal, FlowSignal::None, "top-level control flow escape");
 
         Out { hard, soft }
     }
 
     fn execute_block(
+        &self,
         block: &[Stmt],
         ctx: &Ctx,
         locals: &mut [Value],
@@ -59,37 +64,37 @@ impl Program {
         for stmt in block {
             let signal = match stmt {
                 Stmt::Assign(assign) => {
-                    assign.apply(ctx, locals, hard);
+                    assign.apply(self, ctx, locals, hard);
                     FlowSignal::None
                 }
                 Stmt::Let(binding) => {
-                    binding.store(ctx, locals);
+                    binding.store(self, ctx, locals);
                     FlowSignal::None
                 }
                 Stmt::Set(update) => {
-                    update.store(ctx, locals);
+                    update.store(self, ctx, locals);
                     FlowSignal::None
                 }
                 Stmt::Soft(rule) => {
-                    rule.apply(ctx, locals, soft);
+                    rule.apply(self, ctx, locals, soft);
                     FlowSignal::None
                 }
                 Stmt::If(branch) => {
                     let cond = branch
                         .const_cond
-                        .unwrap_or_else(|| branch.cond.evaluate(ctx, locals).as_bool());
+                        .unwrap_or_else(|| branch.cond.evaluate(self, ctx, locals).as_bool());
                     if cond {
-                        Self::execute_block(&branch.then_branch, ctx, locals, hard, soft)
+                        self.execute_block(&branch.then_branch, ctx, locals, hard, soft)
                     } else {
-                        Self::execute_block(&branch.else_branch, ctx, locals, hard, soft)
+                        self.execute_block(&branch.else_branch, ctx, locals, hard, soft)
                     }
                 }
                 Stmt::While(loop_stmt) => {
-                    loop_stmt.run(ctx, locals, hard, soft);
+                    loop_stmt.run(self, ctx, locals, hard, soft);
                     FlowSignal::None
                 }
                 Stmt::For(loop_stmt) => {
-                    loop_stmt.run(ctx, locals, hard, soft);
+                    loop_stmt.run(self, ctx, locals, hard, soft);
                     FlowSignal::None
                 }
                 Stmt::Break => FlowSignal::Break,
@@ -126,10 +131,10 @@ struct AssignStmt {
 }
 
 impl AssignStmt {
-    fn apply(&self, ctx: &Ctx, locals: &[Value], hard: &mut Hard) {
+    fn apply(&self, program: &Program, ctx: &Ctx, locals: &[Value], hard: &mut Hard) {
         let value = self
             .const_value
-            .unwrap_or_else(|| self.expr.evaluate(ctx, locals));
+            .unwrap_or_else(|| self.expr.evaluate(program, ctx, locals));
         match self.field {
             Field::U2 => hard.use_2ce = Some(value.as_bool()),
             Field::Wg => hard.wg = Some(value.as_u32()),
@@ -154,10 +159,10 @@ struct LetStmt {
 }
 
 impl LetStmt {
-    fn store(&self, ctx: &Ctx, locals: &mut [Value]) {
+    fn store(&self, program: &Program, ctx: &Ctx, locals: &mut [Value]) {
         let value = self
             .const_value
-            .unwrap_or_else(|| self.expr.evaluate(ctx, locals));
+            .unwrap_or_else(|| self.expr.evaluate(program, ctx, locals));
         locals[self.id] = value;
     }
 }
@@ -170,10 +175,10 @@ struct SetStmt {
 }
 
 impl SetStmt {
-    fn store(&self, ctx: &Ctx, locals: &mut [Value]) {
+    fn store(&self, program: &Program, ctx: &Ctx, locals: &mut [Value]) {
         let value = self
             .const_value
-            .unwrap_or_else(|| self.expr.evaluate(ctx, locals));
+            .unwrap_or_else(|| self.expr.evaluate(program, ctx, locals));
         locals[self.id] = value;
     }
 }
@@ -190,20 +195,20 @@ struct SoftStmt {
 }
 
 impl SoftStmt {
-    fn apply(&self, ctx: &Ctx, locals: &mut [Value], soft: &mut Vec<SoftRule>) {
+    fn apply(&self, program: &Program, ctx: &Ctx, locals: &[Value], soft: &mut Vec<SoftRule>) {
         let should_apply = self
             .const_cond
-            .unwrap_or_else(|| self.cond_expr.evaluate(ctx, locals).as_bool());
+            .unwrap_or_else(|| self.cond_expr.evaluate(program, ctx, locals).as_bool());
         if !should_apply {
             return;
         }
 
         let value = self
             .const_value
-            .unwrap_or_else(|| self.value_expr.evaluate(ctx, locals));
+            .unwrap_or_else(|| self.value_expr.evaluate(program, ctx, locals));
         let weight = self
             .const_weight
-            .unwrap_or_else(|| self.weight_expr.evaluate(ctx, locals).as_f64() as f32);
+            .unwrap_or_else(|| self.weight_expr.evaluate(program, ctx, locals).as_f64() as f32);
 
         match self.field {
             Field::U2 => soft.push(SoftRule::U2 {
@@ -270,7 +275,14 @@ struct WhileStmt {
 }
 
 impl WhileStmt {
-    fn run(&self, ctx: &Ctx, locals: &mut [Value], hard: &mut Hard, soft: &mut Vec<SoftRule>) {
+    fn run(
+        &self,
+        program: &Program,
+        ctx: &Ctx,
+        locals: &mut [Value],
+        hard: &mut Hard,
+        soft: &mut Vec<SoftRule>,
+    ) {
         if matches!(self.const_cond, Some(false)) {
             return;
         }
@@ -285,12 +297,12 @@ impl WhileStmt {
         loop {
             let cond = self
                 .const_cond
-                .unwrap_or_else(|| self.cond.evaluate(ctx, locals).as_bool());
+                .unwrap_or_else(|| self.cond.evaluate(program, ctx, locals).as_bool());
             if !cond {
                 break;
             }
 
-            let signal = Program::execute_block(&self.body, ctx, locals, hard, soft);
+            let signal = program.execute_block(&self.body, ctx, locals, hard, soft);
             iterations += 1;
             if iterations >= MAX_LOOP_ITERATIONS {
                 debug_assert!(
@@ -321,14 +333,21 @@ struct ForStmt {
 }
 
 impl ForStmt {
-    fn run(&self, ctx: &Ctx, locals: &mut [Value], hard: &mut Hard, soft: &mut Vec<SoftRule>) {
+    fn run(
+        &self,
+        program: &Program,
+        ctx: &Ctx,
+        locals: &mut [Value],
+        hard: &mut Hard,
+        soft: &mut Vec<SoftRule>,
+    ) {
         let start = self
             .const_start
-            .unwrap_or_else(|| self.start.evaluate(ctx, locals))
+            .unwrap_or_else(|| self.start.evaluate(program, ctx, locals))
             .as_i64();
         let end = self
             .const_end
-            .unwrap_or_else(|| self.end.evaluate(ctx, locals))
+            .unwrap_or_else(|| self.end.evaluate(program, ctx, locals))
             .as_i64();
 
         let mut current = start;
@@ -353,7 +372,7 @@ impl ForStmt {
             }
 
             locals[self.id] = Value::from_f64(current as f64);
-            let signal = Program::execute_block(&self.body, ctx, locals, hard, soft);
+            let signal = program.execute_block(&self.body, ctx, locals, hard, soft);
             iterations += 1;
             if iterations >= MAX_LOOP_ITERATIONS {
                 debug_assert!(
@@ -639,6 +658,94 @@ impl Parser {
         result
     }
 
+    fn parse_match_expr(&mut self) -> Result<ExprNode, Err> {
+        let scrutinee = self.parse_expr()?;
+        self.expect(Token::LBrace)?;
+        let mut arms = Vec::new();
+        let mut saw_wildcard = false;
+
+        while !matches!(self.peek(), Some(Token::RBrace)) {
+            if saw_wildcard {
+                return Err(Err::Parse(self.index));
+            }
+            let arm = self.parse_match_arm()?;
+            saw_wildcard |= arm.has_wildcard();
+            arms.push(arm);
+            if matches!(self.peek(), Some(Token::Comma)) {
+                self.next();
+                if matches!(self.peek(), Some(Token::RBrace)) {
+                    continue;
+                }
+            }
+        }
+
+        self.expect(Token::RBrace)?;
+        if !saw_wildcard {
+            return Err(Err::Parse(self.index.saturating_sub(1)));
+        }
+
+        Ok(ExprNode::match_expr(scrutinee, arms))
+    }
+
+    fn parse_match_arm(&mut self) -> Result<MatchArm, Err> {
+        let mut patterns = Vec::new();
+        loop {
+            patterns.push(self.parse_match_pattern()?);
+            if matches!(self.peek(), Some(Token::Pipe)) {
+                self.next();
+                continue;
+            }
+            break;
+        }
+
+        let guard = if matches!(self.peek(), Some(Token::If)) {
+            self.next();
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
+
+        self.expect(Token::FatArrow)?;
+        let expr = self.parse_expr()?;
+
+        Ok(MatchArm {
+            patterns,
+            guard,
+            expr,
+        })
+    }
+
+    fn parse_match_pattern(&mut self) -> Result<MatchPattern, Err> {
+        if let Some(Token::Id(name)) = self.peek() {
+            if name == "_" {
+                self.next();
+                return Ok(MatchPattern::Wildcard);
+            }
+        }
+
+        let start = self.parse_expr()?;
+        if matches!(self.peek(), Some(Token::Range)) {
+            self.next();
+            let end = self.parse_expr()?;
+            return Ok(MatchPattern::Range {
+                start,
+                end,
+                inclusive: false,
+            });
+        }
+        if matches!(self.peek(), Some(Token::RangeEq)) {
+            self.next();
+            let end = self.parse_expr()?;
+            return Ok(MatchPattern::Range {
+                start,
+                end,
+                inclusive: true,
+            });
+        }
+
+        Ok(MatchPattern::Expr(start))
+    }
+
     fn parse_field(&mut self) -> Result<Field, Err> {
         match self.next().ok_or(Err::Tok)? {
             Token::Id(id) if id == "u2" => Ok(Field::U2),
@@ -779,6 +886,7 @@ impl Parser {
                     Err(Err::Tok)
                 }
             }
+            Token::Match => self.parse_match_expr(),
             Token::Lp => {
                 let expr = self.parse_expr()?;
                 self.expect(Token::Rp)?;
@@ -969,10 +1077,13 @@ enum Token {
     While,
     For,
     In,
+    Match,
     Range,
     RangeEq,
     Break,
     Continue,
+    FatArrow,
+    Pipe,
     Op(Operator),
 }
 
@@ -1115,6 +1226,10 @@ enum ExprNode {
         rhs: Box<ExprNode>,
     },
     Call(Function, Vec<ExprNode>),
+    Match {
+        scrutinee: Box<ExprNode>,
+        arms: Vec<MatchArm>,
+    },
 }
 
 impl ExprNode {
@@ -1153,6 +1268,14 @@ impl ExprNode {
 
     fn call(function: Function, args: Vec<ExprNode>) -> Self {
         ExprNode::Call(function, args).fold()
+    }
+
+    fn match_expr(scrutinee: ExprNode, arms: Vec<MatchArm>) -> Self {
+        ExprNode::Match {
+            scrutinee: Box::new(scrutinee),
+            arms,
+        }
+        .fold()
     }
 
     fn fold(self) -> Self {
@@ -1207,6 +1330,15 @@ impl ExprNode {
 
                 Call(function, folded_args)
             }
+            Match { scrutinee, arms } => {
+                let scrutinee = scrutinee.fold();
+                let folded_arms = arms.into_iter().map(MatchArm::fold).collect();
+                let node = ExprNode::Match {
+                    scrutinee: Box::new(scrutinee),
+                    arms: folded_arms,
+                };
+                node.const_value().map_or(node, ExprNode::from_value)
+            }
         }
     }
 
@@ -1239,42 +1371,60 @@ impl ExprNode {
                     .collect::<Option<Vec<_>>>()?;
                 Some(function.eval(&values))
             }
+            Match { scrutinee, arms } => {
+                let value = scrutinee.const_value()?;
+                for arm in arms {
+                    if let Some(result) = arm.const_result(value) {
+                        return Some(result);
+                    }
+                }
+                None
+            }
         }
     }
 
-    fn evaluate(&self, ctx: &Ctx, locals: &[Value]) -> Value {
+    fn evaluate(&self, program: &Program, ctx: &Ctx, locals: &[Value]) -> Value {
         use ExprNode::*;
         match self {
             Number(n) => Value::from_f64(*n),
             Bool(b) => Value::from_bool(*b),
             Field(field) => field.read(ctx),
             Local(id) => locals[*id],
-            UnaryNeg(expr) => Value::from_f64(-expr.evaluate(ctx, locals).as_f64()),
-            UnaryNot(expr) => Value::from_bool(!expr.evaluate(ctx, locals).as_bool()),
+            UnaryNeg(expr) => Value::from_f64(-expr.evaluate(program, ctx, locals).as_f64()),
+            UnaryNot(expr) => Value::from_bool(!expr.evaluate(program, ctx, locals).as_bool()),
             Binary { op, lhs, rhs } => match op {
                 BinaryOp::And => {
-                    let left = lhs.evaluate(ctx, locals);
+                    let left = lhs.evaluate(program, ctx, locals);
                     if !left.as_bool() {
                         Value::from_bool(false)
                     } else {
-                        Value::from_bool(rhs.evaluate(ctx, locals).as_bool())
+                        Value::from_bool(rhs.evaluate(program, ctx, locals).as_bool())
                     }
                 }
                 BinaryOp::Or => {
-                    let left = lhs.evaluate(ctx, locals);
+                    let left = lhs.evaluate(program, ctx, locals);
                     if left.as_bool() {
                         Value::from_bool(true)
                     } else {
-                        Value::from_bool(rhs.evaluate(ctx, locals).as_bool())
+                        Value::from_bool(rhs.evaluate(program, ctx, locals).as_bool())
                     }
                 }
                 _ => {
-                    let l = lhs.evaluate(ctx, locals);
-                    let r = rhs.evaluate(ctx, locals);
+                    let l = lhs.evaluate(program, ctx, locals);
+                    let r = rhs.evaluate(program, ctx, locals);
                     op.apply(l, r)
                 }
             },
-            Call(function, args) => function.eval_runtime(ctx, locals, args),
+            Call(function, args) => function.eval_runtime(program, ctx, locals, args),
+            Match { scrutinee, arms } => {
+                let value = scrutinee.evaluate(program, ctx, locals);
+                for arm in arms {
+                    if arm.matches(program, ctx, locals, value) {
+                        return arm.evaluate(program, ctx, locals);
+                    }
+                }
+                panic!("non-exhaustive match expression");
+            }
         }
     }
 
@@ -1326,6 +1476,15 @@ impl Value {
 
     fn as_u8(self) -> u8 {
         self.as_f64().round() as u8
+    }
+
+    fn equals(self, other: Value) -> bool {
+        match (self, other) {
+            (Value::B(lhs), Value::B(rhs)) => lhs == rhs,
+            (Value::F(lhs), Value::F(rhs)) => lhs == rhs,
+            (Value::F(lhs), Value::B(rhs)) => lhs == if rhs { 1.0 } else { 0.0 },
+            (Value::B(lhs), Value::F(rhs)) => (if lhs { 1.0 } else { 0.0 }) == rhs,
+        }
     }
 }
 
@@ -1409,30 +1568,36 @@ impl Function {
         }
     }
 
-    fn eval_runtime(&self, ctx: &Ctx, locals: &[Value], args: &[ExprNode]) -> Value {
+    fn eval_runtime(
+        &self,
+        program: &Program,
+        ctx: &Ctx,
+        locals: &[Value],
+        args: &[ExprNode],
+    ) -> Value {
         match self {
             Function::Select => {
-                let cond = args[0].evaluate(ctx, locals);
+                let cond = args[0].evaluate(program, ctx, locals);
                 if cond.as_bool() {
-                    args[1].evaluate(ctx, locals)
+                    args[1].evaluate(program, ctx, locals)
                 } else {
-                    args[2].evaluate(ctx, locals)
+                    args[2].evaluate(program, ctx, locals)
                 }
             }
             Function::Clamp => {
-                let v = args[0].evaluate(ctx, locals).as_f64();
-                let lo = args[1].evaluate(ctx, locals).as_f64();
-                let hi = args[2].evaluate(ctx, locals).as_f64();
+                let v = args[0].evaluate(program, ctx, locals).as_f64();
+                let lo = args[1].evaluate(program, ctx, locals).as_f64();
+                let hi = args[2].evaluate(program, ctx, locals).as_f64();
                 Value::from_f64(v.max(lo).min(hi))
             }
             Function::Min => {
                 let mut iter = args.iter();
                 let mut best = iter
                     .next()
-                    .map(|expr| expr.evaluate(ctx, locals).as_f64())
+                    .map(|expr| expr.evaluate(program, ctx, locals).as_f64())
                     .unwrap();
                 for expr in iter {
-                    best = best.min(expr.evaluate(ctx, locals).as_f64());
+                    best = best.min(expr.evaluate(program, ctx, locals).as_f64());
                 }
                 Value::from_f64(best)
             }
@@ -1440,10 +1605,10 @@ impl Function {
                 let mut iter = args.iter();
                 let mut best = iter
                     .next()
-                    .map(|expr| expr.evaluate(ctx, locals).as_f64())
+                    .map(|expr| expr.evaluate(program, ctx, locals).as_f64())
                     .unwrap();
                 for expr in iter {
-                    best = best.max(expr.evaluate(ctx, locals).as_f64());
+                    best = best.max(expr.evaluate(program, ctx, locals).as_f64());
                 }
                 Value::from_f64(best)
             }
@@ -1453,7 +1618,7 @@ impl Function {
             | Function::Ceil
             | Function::Round
             | Function::Sqrt => {
-                let value = args[0].evaluate(ctx, locals).as_f64();
+                let value = args[0].evaluate(program, ctx, locals).as_f64();
                 match self {
                     Function::Log2 => Value::from_f64(value.log2()),
                     Function::Abs => Value::from_f64(value.abs()),
@@ -1465,8 +1630,8 @@ impl Function {
                 }
             }
             Function::Pow => {
-                let base = args[0].evaluate(ctx, locals).as_f64();
-                let exp = args[1].evaluate(ctx, locals).as_f64();
+                let base = args[0].evaluate(program, ctx, locals).as_f64();
+                let exp = args[1].evaluate(program, ctx, locals).as_f64();
                 Value::from_f64(base.powf(exp))
             }
         }
@@ -1516,7 +1681,10 @@ fn lex(src: &str) -> Result<Vec<Token>, Err> {
                 index += 1;
             }
             b'=' => {
-                if index + 1 < bytes.len() && bytes[index + 1] == b'=' {
+                if index + 1 < bytes.len() && bytes[index + 1] == b'>' {
+                    tokens.push(Token::FatArrow);
+                    index += 2;
+                } else if index + 1 < bytes.len() && bytes[index + 1] == b'=' {
                     tokens.push(Token::Op(Operator::Eq));
                     index += 2;
                 } else {
@@ -1530,6 +1698,15 @@ fn lex(src: &str) -> Result<Vec<Token>, Err> {
                     index += 2;
                 } else {
                     tokens.push(Token::Bang);
+                    index += 1;
+                }
+            }
+            b'|' => {
+                if index + 1 < bytes.len() && bytes[index + 1] == b'|' {
+                    tokens.push(Token::Op(Operator::Or));
+                    index += 2;
+                } else {
+                    tokens.push(Token::Pipe);
                     index += 1;
                 }
             }
@@ -1608,6 +1785,7 @@ fn lex(src: &str) -> Result<Vec<Token>, Err> {
                     "while" => tokens.push(Token::While),
                     "for" => tokens.push(Token::For),
                     "in" => tokens.push(Token::In),
+                    "match" => tokens.push(Token::Match),
                     "break" => tokens.push(Token::Break),
                     "continue" => tokens.push(Token::Continue),
                     _ => tokens.push(Token::Id(ident)),
@@ -1911,5 +2089,70 @@ mod tests {
     fn rejects_break_and_continue_outside_loops() {
         assert!(Program::parse("break;").is_err());
         assert!(Program::parse("continue;").is_err());
+    }
+
+    #[test]
+    fn match_expressions_drive_assignments() {
+        let script = r#"
+            let size = match r {
+                0..512 => 1,
+                512..=1024 => 2,
+                _ => 4,
+            };
+            wg: size;
+        "#;
+
+        let program = Program::parse(script).unwrap();
+        let out = program.evaluate(&ctx());
+        assert_eq!(out.hard.wg, Some(2));
+
+        let mut bigger = ctx();
+        bigger.r = 1536;
+        let out_big = program.evaluate(&bigger);
+        assert_eq!(out_big.hard.wg, Some(4));
+    }
+
+    #[test]
+    fn match_guards_and_pipes_work() {
+        let script = r#"
+            let tuned = match sg {
+                true if r > 2048 => 9,
+                true | false if k > 256 => 7,
+                _ => 1,
+            };
+            wg: tuned;
+        "#;
+
+        let program = Program::parse(script).unwrap();
+        let mut rich = ctx();
+        rich.sg = true;
+        rich.r = 4096;
+        let out_rich = program.evaluate(&rich);
+        assert_eq!(out_rich.hard.wg, Some(9));
+
+        let mut mid = ctx();
+        mid.sg = false;
+        mid.k = 512;
+        let out_mid = program.evaluate(&mid);
+        assert_eq!(out_mid.hard.wg, Some(7));
+
+        let mut poor = ctx();
+        poor.sg = false;
+        poor.k = 64;
+        let out_poor = program.evaluate(&poor);
+        assert_eq!(out_poor.hard.wg, Some(1));
+    }
+
+    #[test]
+    fn match_requires_wildcard_arm() {
+        let script = r#"
+            let size = match r {
+                0..512 => 1,
+                512..=1024 => 2,
+            };
+            wg: size;
+        "#;
+
+        assert!(Program::parse(script).is_err());
     }
 }
