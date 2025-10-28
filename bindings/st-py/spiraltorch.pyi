@@ -1555,7 +1555,18 @@ def is_swap_invariant(arrangement: Sequence[float]) -> bool: ...
     def topos(self) -> OpenCartesianTopos: ...
 
 
+class _NnIdentity:
+    def __init__(self) -> None: ...
+
+    def forward(self, input: Tensor) -> Tensor: ...
+
+    def backward(self, input: Tensor, grad_output: Tensor) -> Tensor: ...
+
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+
 class _NnModule(ModuleType):
+    Identity: type[_NnIdentity]
     NonLiner: type[_NnNonLiner]
     Dropout: type[_NnDropout]
     Dataset: type[_NnDataset]
@@ -1574,6 +1585,10 @@ class _NnModule(ModuleType):
 
 
 nn: _NnModule
+
+
+class Identity(_NnIdentity):
+    ...
 
 
 class NonLiner(_NnNonLiner):

@@ -1360,9 +1360,8 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
                     for r in range(rows)
                 ]
 
-            matrix = self._to_numpy(copy=False)
             return [
-                [float(matrix[r, c]) for c in range(cols)]
+                [float(flat[r * cols + c]) for c in range(cols)]
                 for r in range(rows)
             ]
 

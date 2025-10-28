@@ -30,7 +30,7 @@ use st_nn::{
     dataset_from_vec,
     layers::{
         conv::{Conv2d, Conv6da},
-        Dropout as RustDropout, NonLiner, NonLinerActivation, NonLinerEllipticConfig,
+        Dropout as RustDropout, Identity, NonLiner, NonLinerActivation, NonLinerEllipticConfig,
         NonLinerGeometry, NonLinerHyperbolicConfig,
     },
     zspace_coherence::{
@@ -864,6 +864,41 @@ fn parse_non_liner_activation(name: &str) -> PyResult<NonLinerActivation> {
         other => Err(PyValueError::new_err(format!(
             "unknown activation '{other}', expected 'tanh', 'sigmoid', or 'softsign'"
         ))),
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "Identity", unsendable)]
+pub(crate) struct PyIdentity {
+    inner: Identity,
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyIdentity {
+    #[new]
+    pub fn new() -> Self {
+        Self {
+            inner: Identity::new(),
+        }
+    }
+
+    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        let output = self.inner.forward(&input.inner).map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        let grad = self
+            .inner
+            .backward(&input.inner, &grad_output.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(grad))
+    }
+
+    #[pyo3(signature = (x))]
+    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(x)
     }
 }
 
@@ -2719,6 +2754,7 @@ impl PyZRelativityModule {
 fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     let module = PyModule::new_bound(py, "nn")?;
     module.add("__doc__", "SpiralTorch neural network primitives")?;
+    module.add_class::<PyIdentity>()?;
     module.add_class::<PyNonLiner>()?;
     module.add_class::<PyZConv>()?;
     module.add_class::<PyZConv6DA>()?;
@@ -2747,6 +2783,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add(
         "__all__",
         vec![
+            "Identity",
             "NonLiner",
             "ZConv",
             "ZConv6DA",
@@ -2772,6 +2809,9 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
         ],
     )?;
     parent.add_submodule(&module)?;
+    if let Ok(identity) = module.getattr("Identity") {
+        parent.add("Identity", identity)?;
+    }
     if let Ok(non_liner) = module.getattr("NonLiner") {
         parent.add("NonLiner", non_liner)?;
     }
