@@ -2987,7 +2987,6 @@ dependencies = [
  "rand_distr",
  "serde",
  "serde_json",
- "spiral-selfsup",
  "st-core",
  "st-frac",
  "st-tensor",
