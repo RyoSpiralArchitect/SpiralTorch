@@ -23,6 +23,7 @@ from typing import (
     Optional as _Optional,
     Sequence as _Sequence,
     Tuple as _Tuple,
+    NoReturn as _NoReturn,
 )
 from importlib.metadata import version as _pkg_version, PackageNotFoundError
 
@@ -38,6 +39,111 @@ from ._zspace_aliases import (
 )
 
 _rs: _types.ModuleType | None = None
+
+
+def _install_spiral_rl_stub() -> None:
+    """Populate the public reinforcement-learning namespace with a friendly stub."""
+
+    module = sys.modules.get("spiral_rl")
+    if module is None:
+        module = _types.ModuleType("spiral_rl")
+        sys.modules["spiral_rl"] = module
+
+    module.__doc__ = (
+        "SpiralTorch reinforcement learning stub (native extension unavailable)."
+    )
+    module.__spiraltorch_placeholder__ = True
+
+    def _rl_stub_error(feature: str) -> RuntimeError:
+        raise RuntimeError(
+            "SpiralTorch reinforcement learning stub: "
+            f"'{feature}' requires the native extension. "
+            "Install a wheel with compiled components or build the native module from source."
+        )
+
+    class _RLStubBase:
+        """Base for RL stubs that consistently signal the missing native extension."""
+
+        __slots__ = ()
+
+        def __init__(self, *args: _Any, **kwargs: _Any) -> None:
+            _rl_stub_error(f"{self.__class__.__name__}()")
+
+        def _missing(self, feature: str) -> _NoReturn:
+            _rl_stub_error(f"{self.__class__.__name__}.{feature}")
+
+        def select_action(self, *args: _Any, **kwargs: _Any) -> _NoReturn:  # pragma: no cover - exercised via tests
+            self._missing("select_action")
+
+        def select_actions(self, *args: _Any, **kwargs: _Any) -> _NoReturn:  # pragma: no cover - exercised via tests
+            self._missing("select_actions")
+
+        def update(self, *args: _Any, **kwargs: _Any) -> _NoReturn:  # pragma: no cover - exercised via tests
+            self._missing("update")
+
+        def update_batch(self, *args: _Any, **kwargs: _Any) -> _NoReturn:  # pragma: no cover - exercised via tests
+            self._missing("update_batch")
+
+        @property
+        def epsilon(self) -> float:
+            self._missing("epsilon")
+
+        def set_epsilon(self, *args: _Any, **kwargs: _Any) -> _NoReturn:
+            self._missing("set_epsilon")
+
+        def set_exploration(self, *args: _Any, **kwargs: _Any) -> _NoReturn:
+            self._missing("set_exploration")
+
+        def state_dict(self) -> _Dict[str, _Any]:
+            self._missing("state_dict")
+
+        def load_state_dict(self, *args: _Any, **kwargs: _Any) -> _NoReturn:
+            self._missing("load_state_dict")
+
+    class stAgent(_RLStubBase):
+        """Stub implementation for :class:`spiral_rl.stAgent`."""
+
+    class PpoAgent(_RLStubBase):
+        """Stub implementation for :class:`spiral_rl.PpoAgent`."""
+
+        def score_actions(self, *args: _Any, **kwargs: _Any) -> _NoReturn:
+            self._missing("score_actions")
+
+        def value(self, *args: _Any, **kwargs: _Any) -> _NoReturn:
+            self._missing("value")
+
+    class SacAgent(_RLStubBase):
+        """Stub implementation for :class:`spiral_rl.SacAgent`."""
+
+        def sample_action(self, *args: _Any, **kwargs: _Any) -> _NoReturn:
+            self._missing("sample_action")
+
+        def jitter(self, *args: _Any, **kwargs: _Any) -> _NoReturn:
+            self._missing("jitter")
+
+    exports = {
+        "stAgent": stAgent,
+        "DqnAgent": stAgent,
+        "PyDqnAgent": stAgent,
+        "PpoAgent": PpoAgent,
+        "SacAgent": SacAgent,
+    }
+
+    for name, value in exports.items():
+        value.__module__ = "spiral_rl"
+        setattr(module, name, value)
+        globals()[name] = value
+
+    module.__all__ = sorted(exports)
+
+    spiraltorch_module = globals().get("spiral_rl")
+    if isinstance(spiraltorch_module, _types.ModuleType):
+        spiraltorch_module.__doc__ = module.__doc__
+        forward_exports = set(getattr(spiraltorch_module, "__all__", ()))
+        forward_exports.update(exports)
+        spiraltorch_module.__all__ = sorted(forward_exports)
+        for name, value in exports.items():
+            setattr(spiraltorch_module, name, value)
 
 _PREDECLARED_SUBMODULES: list[tuple[str, str]] = [
     ("nn", "SpiralTorch neural network primitives"),
@@ -133,6 +239,9 @@ except ModuleNotFoundError as exc:
             if _final_exc.name not in {"spiraltorch.spiraltorch_native", "spiraltorch_native"}:
                 raise
             _rs = None
+
+if _rs is None:
+    _install_spiral_rl_stub()
 
 # --- begin: promote real rl submodule & alias DqnAgent->stAgent ---
 try:
