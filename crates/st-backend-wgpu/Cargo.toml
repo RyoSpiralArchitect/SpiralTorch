@@ -13,6 +13,7 @@ bytemuck = { version = "1", features = ["derive"] }
 rand = "0.8"
 st-tensor = { path = "../st-tensor", features = ["wgpu"] }
 pollster = "0.3"
+once_cell = "1"
 
 [dev-dependencies]
 st-vision = { path = "../st-vision", features = ["wgpu"] }
