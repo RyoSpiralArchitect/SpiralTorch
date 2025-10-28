@@ -14,6 +14,9 @@ wgpu = ["cpu", "st-tensor/wgpu_dense"]
 [dependencies]
 thiserror = "1"
 st-tensor = { path = "../st-tensor", default-features = false }
+st-metrics = { path = "../st-metrics" }
 
 [dev-dependencies]
 rand = { version = "0.8", features = ["std", "std_rng"] }
+st-core = { path = "../st-core" }
+tensorboard-rs = "0.5.9"

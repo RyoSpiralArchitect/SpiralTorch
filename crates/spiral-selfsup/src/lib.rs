@@ -2,6 +2,7 @@
 
 pub mod contrastive;
 pub mod masked;
+pub mod metrics;
 
 use thiserror::Error;
 
