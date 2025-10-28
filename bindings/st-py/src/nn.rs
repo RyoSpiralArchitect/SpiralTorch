@@ -1376,7 +1376,9 @@ impl PyZConv {
     }
 
     pub fn set_dilation(&mut self, dilation: (usize, usize)) -> PyResult<()> {
-        self.inner.set_dilation(dilation).map_err(tensor_err_to_py)?;
+        self.inner
+            .set_dilation(dilation)
+            .map_err(tensor_err_to_py)?;
         self.dilation = dilation;
         self.refresh_output_dims().map_err(tensor_err_to_py)
     }

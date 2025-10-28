@@ -6,8 +6,8 @@ import inspect
 import math
 import sys
 from dataclasses import dataclass
-from collections.abc import Iterable
-from typing import Any, Callable, Dict, Mapping, Sequence, Union
+from collections.abc import Iterable, Mapping as MappingABC, MutableMapping
+from typing import TYPE_CHECKING, Any, Callable, Dict, Mapping, Sequence, Union
 from types import MappingProxyType
 
 from ._zspace_aliases import (
@@ -344,11 +344,18 @@ def inference_to_zmetrics(
     )
 
 
-_PayloadMode = Union[
-    None,
-    str,
-    Callable[["ZSpaceInference"], Any],
-]
+if TYPE_CHECKING:
+    _PayloadMode = Union[
+        None,
+        str,
+        Callable[["ZSpaceInference"], Any],
+    ]
+else:
+    _PayloadMode = Union[
+        None,
+        str,
+        Callable[[Any], Any],
+    ]
 
 
 def _annotation_mode(annotation: Any) -> str | None:

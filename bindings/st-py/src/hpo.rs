@@ -3,7 +3,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList, PySequence};
 use pyo3::IntoPy;
 use spiral_hpo::{
-    self as hpo, ExperimentTracker, NoOpTracker, ParamSpec, ParamValue, ResourceConfig,
+    self as hpo, ExperimentTracker, NoOpTracker, Objective, ParamSpec, ParamValue, ResourceConfig,
     SearchError, SearchLoop, SearchLoopState, SearchSpace, Strategy, TrialRecord,
 };
 use std::sync::Mutex;
@@ -261,20 +261,22 @@ impl PySearchLoop {
 #[pymethods]
 impl PySearchLoop {
     #[staticmethod]
-    #[pyo3(signature = (space, strategy, resource=None, tracker=None))]
+    #[pyo3(signature = (space, strategy, resource=None, tracker=None, maximize=false))]
     pub fn create(
         space: &Bound<'_, PyAny>,
         strategy: &Bound<'_, PyDict>,
         resource: Option<&Bound<'_, PyDict>>,
         tracker: Option<Py<PyAny>>,
+        maximize: bool,
     ) -> PyResult<Self> {
         Python::with_gil(|_py| {
             let space = parse_space(space)?;
             let strategy = parse_strategy(strategy)?;
             let resource = parse_resource_config(resource)?;
             let tracker = tracker_from_py(tracker);
-            let loop_inner =
-                SearchLoop::new(space, strategy, resource, tracker).map_err(search_error_to_py)?;
+            let objective = Objective::from_maximize(maximize);
+            let loop_inner = SearchLoop::new(space, strategy, resource, objective, tracker)
+                .map_err(search_error_to_py)?;
             Ok(PySearchLoop::new(loop_inner))
         })
     }
@@ -331,6 +333,11 @@ impl PySearchLoop {
             list.append(entry.bind(py))?;
         }
         Ok(list.into())
+    }
+
+    pub fn objective(&self) -> PyResult<String> {
+        let guard = self.inner.lock().unwrap();
+        Ok(guard.objective().as_str().to_string())
     }
 }
 
