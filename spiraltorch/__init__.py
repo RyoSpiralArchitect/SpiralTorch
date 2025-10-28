@@ -17,7 +17,7 @@ import random
 import pathlib
 import sys
 import warnings
-from typing import Any
+from typing import Any, NoReturn
 
 
 _TENSOR_NO_DATA = object()
@@ -1066,6 +1066,11 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
 
         __slots__ = ("_rows", "_cols", "_data", "_backend")
 
+        #: str: Message guiding users to enable DLPack interoperability.
+        DLPACK_UNAVAILABLE_MESSAGE = (
+            "DLPack interoperability requires NumPy support in the stub Tensor backend."
+        )
+
         def __init__(
             self,
             rows=_UNSET,
@@ -1235,6 +1240,65 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             array_view = _np.frombuffer(self._data, dtype=_np.float64, count=self._rows * self._cols)
             matrix = array_view.reshape(self._rows, self._cols)
             return matrix.copy() if copy else matrix
+
+        @classmethod
+        def _raise_dlpack_unavailable(cls) -> NoReturn:
+            """DLPack interoperability requires NumPy support in the stub Tensor backend."""
+
+            raise RuntimeError(cls.DLPACK_UNAVAILABLE_MESSAGE)
+
+        @classmethod
+        def from_dlpack(cls, capsule: Any) -> "Tensor":
+            """Create a ``Tensor`` from a DLPack capsule.
+
+            Raises:
+                RuntimeError: DLPack interoperability requires NumPy support in the stub
+                    Tensor backend.
+            """
+
+            if not NUMPY_AVAILABLE or _np is None or not hasattr(_np, "from_dlpack"):
+                cls._raise_dlpack_unavailable()
+            matrix = _np.from_dlpack(capsule)
+            matrix = _np.asarray(matrix, dtype=_np.float64)
+            if matrix.ndim != 2:
+                raise ValueError("Tensor expects a 2D array")
+            return cls._from_numpy_array(matrix)
+
+        def to_dlpack(self) -> Any:
+            """Export the tensor data as a DLPack capsule.
+
+            Raises:
+                RuntimeError: DLPack interoperability requires NumPy support in the stub
+                    Tensor backend.
+            """
+
+            if not NUMPY_AVAILABLE or _np is None:
+                self._raise_dlpack_unavailable()
+            array = self._to_numpy(copy=False)
+            dlpack = getattr(array, "__dlpack__", None)
+            if dlpack is None:
+                self._raise_dlpack_unavailable()
+            return dlpack()
+
+        def __dlpack__(self, stream: Any | None = None) -> Any:
+            if not NUMPY_AVAILABLE or _np is None:
+                self._raise_dlpack_unavailable()
+            array = self._to_numpy(copy=False)
+            dlpack = getattr(array, "__dlpack__", None)
+            if dlpack is None:
+                self._raise_dlpack_unavailable()
+            if stream is None:
+                return dlpack()
+            return dlpack(stream=stream)
+
+        def __dlpack_device__(self) -> tuple[int, int]:
+            if not NUMPY_AVAILABLE or _np is None:
+                self._raise_dlpack_unavailable()
+            array = self._to_numpy(copy=False)
+            dlpack_device = getattr(array, "__dlpack_device__", None)
+            if dlpack_device is None:
+                self._raise_dlpack_unavailable()
+            return dlpack_device()
 
         def _row_major_python(self):
             """Return the matrix data flattened row-major into an ``array('d')`` buffer."""
