@@ -328,60 +328,51 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
     NUMPY_AVAILABLE = _np is not None
 
     _TENSOR_NO_DATA = object()
-    _SCALAR_SEQUENCE_TYPES = (str, bytes, bytearray)
 
-    STUB_TENSOR_TYPES: tuple[type, ...] = ()
-
-    def _tensor_is_sequence(value) -> bool:
-        return isinstance(value, Sequence) and not isinstance(
-            value, _SCALAR_SEQUENCE_TYPES
+    def _tensor_is_sequence(obj) -> bool:
+        return isinstance(obj, Sequence) and not isinstance(
+            obj, (str, bytes, bytearray, memoryview)
         )
 
-    def _tensor_is_iterable(value) -> bool:
-        return isinstance(value, Iterable) and not isinstance(
-            value, _SCALAR_SEQUENCE_TYPES
+    def _tensor_is_iterable(obj) -> bool:
+        return isinstance(obj, Iterable) and not isinstance(
+            obj, (str, bytes, bytearray, memoryview)
         )
 
     def _tensor_coerce_index(value, label: str) -> int:
         try:
             index = int(value)
-        except (TypeError, ValueError) as exc:  # pragma: no cover - defensive
-            raise TypeError(f"{label} must be an integer") from exc
+        except Exception as exc:  # noqa: BLE001 - mirror native error surface
+            raise TypeError(f"Tensor {label} must be an integer, got {value!r}") from exc
         if index < 0:
-            raise ValueError(f"{label} must be non-negative")
+            raise ValueError(f"Tensor {label} must be non-negative, got {index}")
         return index
 
-    def _tensor_coerce_shape(candidate, label: str) -> tuple[int, int]:
-        if not _tensor_is_sequence(candidate):
-            raise TypeError(f"{label} must be a sequence of length 2")
-        items = list(candidate)
-        if len(items) != 2:
-            raise ValueError(f"{label} must describe a 2D tensor")
-        rows = _tensor_coerce_index(items[0], f"{label}[0]")
-        cols = _tensor_coerce_index(items[1], f"{label}[1]")
+    def _tensor_coerce_shape(value, label: str) -> tuple[int, int]:
+        if not _tensor_is_sequence(value):
+            raise TypeError(f"Tensor {label} must be a sequence of two integers")
+        dims = list(value)
+        if len(dims) != 2:
+            raise ValueError(
+                f"Tensor {label} must contain exactly two dimensions, got {len(dims)}"
+            )
+        rows = _tensor_coerce_index(dims[0], f"{label}[0]")
+        cols = _tensor_coerce_index(dims[1], f"{label}[1]")
         return rows, cols
 
-    def _tensor_maybe_shape(candidate) -> tuple[int, int] | None:
-        if isinstance(candidate, STUB_TENSOR_TYPES):
-            rows, cols = candidate.shape()
-            return int(rows), int(cols)
-        if hasattr(candidate, "shape"):
-            shape_attr = candidate.shape
-            dims = shape_attr() if callable(shape_attr) else shape_attr
-            if _tensor_is_sequence(dims):
-                try:
-                    return _tensor_coerce_shape(dims, "shape")
-                except (TypeError, ValueError):
-                    return None
-        if _tensor_is_sequence(candidate):
-            try:
-                return _tensor_coerce_shape(candidate, "shape")
-            except (TypeError, ValueError):
-                return None
-        return None
+    def _tensor_maybe_shape(value) -> tuple[int, int] | None:
+        if not _tensor_is_sequence(value):
+            return None
+        dims = list(value)
+        if len(dims) != 2:
+            return None
+        try:
+            return _tensor_coerce_shape(dims, "shape")
+        except (TypeError, ValueError):
+            return None
 
     def _tensor_normalize_row(row, *, allow_empty: bool) -> list[float]:
-        if isinstance(row, STUB_TENSOR_TYPES):
+        if isinstance(row, Tensor):
             row = row.tolist()
         elif hasattr(row, "tolist") and not _tensor_is_sequence(row):
             row = row.tolist()
@@ -396,8 +387,8 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
         return [float(value) for value in seq]
 
     def _tensor_flatten_data(data):
-        if isinstance(data, STUB_TENSOR_TYPES):
-            rows, cols = data.shape()
+        if isinstance(data, Tensor):
+            rows, cols = (int(dim) for dim in data.shape())
             nested = data.tolist()
             flat = [float(value) for row in nested for value in row]
             return rows, cols, flat
@@ -418,7 +409,7 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             return 0, 0, []
 
         head = items[0]
-        if isinstance(head, STUB_TENSOR_TYPES):
+        if isinstance(head, Tensor):
             head = head.tolist()
         elif hasattr(head, "tolist") and not _tensor_is_sequence(head):
             head = head.tolist()
@@ -434,7 +425,7 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
                 elif len(normalized) != cols:
                     raise ValueError("Tensor rows must all share the same length")
                 flat.extend(normalized)
-            return rows, (0 if cols is None else cols), flat
+            return rows, 0 if cols is None else cols, flat
 
         flat = [float(value) for value in items]
         return 1, len(flat), flat
@@ -469,12 +460,13 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
         if len(positional) == 1:
             candidate = positional[0]
             maybe_shape = (
-                None
-                if rows is not None or cols is not None
-                else _tensor_maybe_shape(candidate)
+                None if rows is not None or cols is not None else _tensor_maybe_shape(candidate)
             )
             if maybe_shape is not None:
                 rows, cols = maybe_shape
+                if data_value is not _TENSOR_NO_DATA:
+                    raise TypeError("Tensor() got multiple values for data")
+                data_value = _TENSOR_NO_DATA
             else:
                 if data_value is not _TENSOR_NO_DATA:
                     raise TypeError("Tensor() got multiple values for data")
@@ -482,9 +474,7 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
         elif len(positional) == 2:
             first, second = positional
             maybe_shape = (
-                None
-                if rows is not None or cols is not None
-                else _tensor_maybe_shape(first)
+                None if rows is not None or cols is not None else _tensor_maybe_shape(first)
             )
             if maybe_shape is not None:
                 rows, cols = maybe_shape
@@ -496,13 +486,11 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
                 inferred_cols = _tensor_coerce_index(second, "cols")
                 if rows is not None and rows != inferred_rows:
                     raise ValueError(
-                        "Tensor rows argument conflicts with shape: "
-                        f"{rows} != {inferred_rows}"
+                        f"Tensor rows argument conflicts with shape: {rows} != {inferred_rows}"
                     )
                 if cols is not None and cols != inferred_cols:
                     raise ValueError(
-                        "Tensor cols argument conflicts with shape: "
-                        f"{cols} != {inferred_cols}"
+                        f"Tensor cols argument conflicts with shape: {cols} != {inferred_cols}"
                     )
                 rows = inferred_rows
                 cols = inferred_cols
@@ -512,13 +500,11 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             inferred_cols = _tensor_coerce_index(second, "cols")
             if rows is not None and rows != inferred_rows:
                 raise ValueError(
-                    "Tensor rows argument conflicts with shape: "
-                    f"{rows} != {inferred_rows}"
+                    f"Tensor rows argument conflicts with shape: {rows} != {inferred_rows}"
                 )
             if cols is not None and cols != inferred_cols:
                 raise ValueError(
-                    "Tensor cols argument conflicts with shape: "
-                    f"{cols} != {inferred_cols}"
+                    f"Tensor cols argument conflicts with shape: {cols} != {inferred_cols}"
                 )
             rows = inferred_rows
             cols = inferred_cols
@@ -540,42 +526,32 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
         total = len(flat)
 
         def _infer_missing_dimension(total_elems: int, known: int, *, known_label: str) -> int:
+            """Derive the complementary dimension from a known axis length."""
+
             if known == 0:
                 if total_elems != 0:
                     raise ValueError(
-                        "Tensor data of length "
-                        f"{total_elems} cannot fill ({known}) {known_label}"
+                        f"Tensor data of length {total_elems} cannot fill ({known}) {known_label}"
                     )
                 return 0
             if total_elems % known != 0:
                 raise ValueError(
-                    "Tensor data of length "
-                    f"{total_elems} cannot fill ({known}) {known_label}"
+                    f"Tensor data of length {total_elems} is incompatible with "
+                    f"{known_label}={known}"
                 )
             return total_elems // known
 
         if rows is None and cols is None:
-            rows, cols = inferred_rows, inferred_cols
+            rows = inferred_rows
+            cols = inferred_cols
         elif rows is None:
-            if cols is None:
-                raise TypeError("Tensor() could not determine rows from provided inputs")
-            rows = _infer_missing_dimension(total, cols, known_label="columns")
+            rows = _infer_missing_dimension(total, cols, known_label="cols")
         elif cols is None:
             cols = _infer_missing_dimension(total, rows, known_label="rows")
-        else:
-            if rows * cols != total:
-                raise ValueError(
-                    f"Tensor data of length {total} cannot be reshaped to ({rows}, {cols})"
-                )
 
-        if rows is None or cols is None:
-            raise TypeError(
-                "Tensor() could not determine both rows and cols from the provided data"
-            )
-
-        if (rows == 0 or cols == 0) and total != 0:
+        if rows * cols != total:
             raise ValueError(
-                f"Tensor shape ({rows}, {cols}) is incompatible with {total} data elements"
+                f"Tensor data of length {total} cannot fill a {rows}x{cols} tensor"
             )
 
         return rows, cols, flat
@@ -610,12 +586,7 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
 
         __slots__ = ("_rows", "_cols", "_data", "_backend")
 
-        def __init__(
-            self,
-            *args: Any,
-            backend: str | None = None,
-            **kwargs: Any,
-        ):
+        def __init__(self, *args, backend: str | None = None, **kwargs):
             backend_hint = backend
             if backend_hint is None and "backend" in kwargs:
                 backend_hint = kwargs.pop("backend")
@@ -767,6 +738,7 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             return matrix.copy() if copy else matrix
 
         def _row_major_python(self):
+            """Return the tensor data as a 1D row-major ``array('d')`` buffer."""
             if self._backend == "python":
                 return self._data
             return array("d", self._data.reshape(-1))
@@ -881,11 +853,19 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
 
         def tolist(self):
             rows, cols = self._rows, self._cols
+
             if self._backend == "python":
-                flat = list(self._data)
-                matrix = (flat[r * cols : (r + 1) * cols] for r in range(rows))
-                return [row[:] for row in matrix]
-            return self._data.reshape(rows, cols).tolist()
+                flat = self._data
+                return [
+                    [float(flat[r * cols + c]) for c in range(cols)]
+                    for r in range(rows)
+                ]
+
+            matrix = self._to_numpy(copy=False)
+            return [
+                [float(matrix[r, c]) for c in range(cols)]
+                for r in range(rows)
+            ]
 
         @staticmethod
         def zeros(rows: int, cols: int) -> "Tensor":

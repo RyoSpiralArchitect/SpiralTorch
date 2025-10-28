@@ -55,6 +55,13 @@ def _expected_matrix(rows: int, cols: int) -> list[list[float]]:
     return [data[r * cols : (r + 1) * cols] for r in range(rows)]
 
 
+def _expected_range_matrix() -> list[list[float]]:
+    return [
+        [float(value) for value in range(start, start + 3)]
+        for start in (0, 3)
+    ]
+
+
 @pytest.mark.parametrize(
     "rows, cols",
     [
@@ -73,6 +80,18 @@ def test_stub_tensor_tolist_matches_expected(rows: int, cols: int) -> None:
     if "numpy" in module.available_stub_backends():  # type: ignore[attr-defined]
         tensor_np = module.Tensor(rows, cols, payload, backend="numpy")  # type: ignore[attr-defined]
         assert tensor_np.tolist() == _expected_matrix(rows, cols)
+
+
+def test_stub_tensor_tolist_from_range_is_nested() -> None:
+    module = _load_stub_module()
+    expected = _expected_range_matrix()
+
+    tensor_python = module.Tensor(2, 3, range(6), backend="python")  # type: ignore[attr-defined]
+    assert tensor_python.tolist() == expected
+
+    if "numpy" in module.available_stub_backends():  # type: ignore[attr-defined]
+        tensor_numpy = module.Tensor(2, 3, range(6), backend="numpy")  # type: ignore[attr-defined]
+        assert tensor_numpy.tolist() == expected
 
 
 @pytest.mark.parametrize(
