@@ -6,7 +6,11 @@
 #[cfg(feature = "redis")]
 mod command;
 #[cfg(feature = "redis")]
-mod options;
+mod condition;
+#[cfg(feature = "redis")]
+mod expiry;
+#[cfg(feature = "redis")]
+pub mod options;
 
 #[cfg(all(test, feature = "redis"))]
 mod tests;
@@ -14,4 +18,8 @@ mod tests;
 #[cfg(feature = "redis")]
 pub(crate) use command::CommandFragment;
 #[cfg(feature = "redis")]
-pub use options::{JsonExpiry, JsonSetCondition, JsonSetOptions, JsonSetOptionsBuilder};
+pub use condition::JsonSetCondition;
+#[cfg(feature = "redis")]
+pub use expiry::JsonExpiry;
+#[cfg(feature = "redis")]
+pub use options::{JsonSetOptions, JsonSetOptionsBuilder, PreparedJsonSetOptions};
