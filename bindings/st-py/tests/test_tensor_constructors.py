@@ -4,6 +4,7 @@ import importlib.util
 import pathlib
 import sys
 import types
+from typing import Iterable
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -36,19 +37,7 @@ if not hasattr(st, "Tensor") and hasattr(st, "_install_stub_bindings"):
 import pytest
 
 
-@pytest.fixture
-def spiraltorch_module(monkeypatch: pytest.MonkeyPatch):
-    """Load the Python Tensor front-end with a lightweight stub backend.
-
-    The real bindings expect to inherit from the compiled ``Tensor`` type.  For
-    unit tests we emulate the minimal surface required by the constructor logic
-    so that shape inference runs in pure Python.
-    """
-
-    for name in list(sys.modules):
-        if name == "spiraltorch" or name.startswith("spiraltorch."):
-            monkeypatch.delitem(sys.modules, name, raising=False)
-
+def _install_stub_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     class _StubTensorBase:
         """Very small stand-in for the native tensor type used in tests."""
 
@@ -75,6 +64,14 @@ def spiraltorch_module(monkeypatch: pytest.MonkeyPatch):
 
         def shape(self) -> tuple[int, int]:
             return self._rows, self._cols
+
+        @property
+        def rows(self) -> int:
+            return self._rows
+
+        @property
+        def cols(self) -> int:
+            return self._cols
 
         def tolist(self) -> list[list[float]]:
             rows, cols = self._rows, self._cols
@@ -170,6 +167,22 @@ def spiraltorch_module(monkeypatch: pytest.MonkeyPatch):
     elliptic_stub.elliptic_warp_partial = lambda *args, **kwargs: None
     monkeypatch.setitem(sys.modules, "spiraltorch.elliptic", elliptic_stub)
 
+
+@pytest.fixture
+def spiraltorch_module(monkeypatch: pytest.MonkeyPatch):
+    """Load the Python Tensor front-end with a lightweight stub backend.
+
+    The real bindings expect to inherit from the compiled ``Tensor`` type.  For
+    unit tests we emulate the minimal surface required by the constructor logic
+    so that shape inference runs in pure Python.
+    """
+
+    for name in list(sys.modules):
+        if name == "spiraltorch" or name.startswith("spiraltorch."):
+            monkeypatch.delitem(sys.modules, name, raising=False)
+
+    _install_stub_environment(monkeypatch)
+
     impl_path = pathlib.Path(__file__).resolve().parents[1] / "spiraltorch" / "__init__.py"
     spec = importlib.util.spec_from_file_location("spiraltorch", impl_path)
     module = importlib.util.module_from_spec(spec)
@@ -219,6 +232,36 @@ def test_tensor_supports_zero_dimensional_shapes(spiraltorch_module) -> None:
     assert three_by_zero.shape() == (3, 0)
     assert three_by_zero.tolist() == [[], [], []]
 
+    explicit_zero = st.Tensor([], rows=0, cols=0)
+    assert explicit_zero.shape() == (0, 0)
+    assert explicit_zero.tolist() == []
+
     zero_square = zero_by_three.matmul(st.Tensor(3, 0, []))
     assert zero_square.shape() == (0, 0)
     assert zero_square.tolist() == []
+
+    zero_self_product = explicit_zero.matmul(explicit_zero)
+    assert zero_self_product.shape() == (0, 0)
+    assert zero_self_product.tolist() == []
+
+
+def test_labeled_tensor_supports_zero_sized_axes(spiraltorch_module) -> None:
+    st = spiraltorch_module
+
+    left = st.tensor([], axes=(st.Axis("rows"), st.Axis("shared")))
+    right = st.tensor([], axes=(st.Axis("shared"), st.Axis("cols")))
+
+    assert left.shape == (0, 0)
+    assert right.shape == (0, 0)
+    assert left.tolist() == []
+    assert right.tolist() == []
+    assert left.axes[0].size == 0
+    assert left.axes[1].size == 0
+    assert right.axes[0].size == 0
+    assert right.axes[1].size == 0
+
+    product = left @ right
+    assert product.shape == (0, 0)
+    assert product.tolist() == []
+    assert product.axes[0].size == 0
+    assert product.axes[1].size == 0
