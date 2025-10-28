@@ -1956,8 +1956,11 @@ class SpiralTorchVision:
             volume = volume.tolist()
         if len(volume) != self.depth:
             raise ValueError(f"expected {self.depth} slices, received {len(volume)}")
-        w = max(0.0, float(weight))
-        alpha = self._alpha * (w if w else 1.0)
+        weight = float(weight)
+        if weight < 0.0:
+            raise ValueError("weight must be non-negative")
+        # A zero weight should skip the EMA update entirely instead of reusing self._alpha.
+        alpha = 0.0 if weight <= 0.0 else self._alpha * weight
         for idx, slice_data in enumerate(volume):
             rows = _coerce_slice(slice_data, self.height, self.width)
             for r_idx, row in enumerate(rows):
