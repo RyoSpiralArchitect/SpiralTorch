@@ -7,110 +7,264 @@ use std::fmt;
 
 use crate::{Ctx, Err, Hard, Out, SoftRule};
 
+use std::collections::HashMap;
+
 /// Compiled representation of a SpiralK DSL program.
 #[derive(Clone, Debug)]
 pub struct Program {
     stmts: Vec<Stmt>,
+    locals: usize,
 }
+
+const MAX_LOOP_ITERATIONS: usize = 65_536;
 
 impl Program {
     /// Parses the provided source string into a [`Program`].
     pub fn parse(src: &str) -> Result<Self, Err> {
         let toks = lex(src)?;
-        let mut parser = Parser {
-            tokens: toks,
-            index: 0,
-        };
-        let stmts = parser.parse_program()?;
-        Ok(Self { stmts })
+        let mut parser = Parser::new(toks);
+        let output = parser.parse_program()?;
+        Ok(Self {
+            stmts: output.stmts,
+            locals: output.locals,
+        })
     }
 
     /// Evaluates the program for the given [`Ctx`].
     pub fn evaluate(&self, ctx: &Ctx) -> Out {
         let mut hard = Hard::default();
         let mut soft = Vec::<SoftRule>::new();
+        let mut locals = vec![Value::default(); self.locals];
 
-        for stmt in &self.stmts {
+        Self::execute_block(&self.stmts, ctx, &mut locals, &mut hard, &mut soft);
+
+        Out { hard, soft }
+    }
+
+    fn execute_block(
+        block: &[Stmt],
+        ctx: &Ctx,
+        locals: &mut [Value],
+        hard: &mut Hard,
+        soft: &mut Vec<SoftRule>,
+    ) {
+        for stmt in block {
             match stmt {
-                Stmt::Assign(field, expr) => {
-                    let value = expr.evaluate(ctx);
-                    match field {
-                        Field::U2 => hard.use_2ce = Some(value.as_bool()),
-                        Field::Wg => hard.wg = Some(value.as_u32()),
-                        Field::Kl => hard.kl = Some(value.as_u32()),
-                        Field::Ch => hard.ch = Some(value.as_u32()),
-                        Field::Algo => hard.algo = Some(value.as_u8()),
-                        Field::Midk => hard.midk = Some(value.as_u8()),
-                        Field::Bottomk => hard.bottomk = Some(value.as_u8()),
-                        Field::Ctile => hard.ctile = Some(value.as_u32()),
-                        Field::TileCols => hard.tile_cols = Some(value.as_u32()),
-                        Field::Radix => hard.radix = Some(value.as_u32()),
-                        Field::Segments => hard.segments = Some(value.as_u32()),
+                Stmt::Assign(assign) => assign.apply(ctx, locals, hard),
+                Stmt::Let(binding) => binding.store(ctx, locals),
+                Stmt::Set(update) => update.store(ctx, locals),
+                Stmt::Soft(rule) => rule.apply(ctx, locals, soft),
+                Stmt::If(branch) => {
+                    let cond = branch
+                        .const_cond
+                        .unwrap_or_else(|| branch.cond.evaluate(ctx, locals).as_bool());
+                    if cond {
+                        Self::execute_block(&branch.then_branch, ctx, locals, hard, soft);
+                    } else {
+                        Self::execute_block(&branch.else_branch, ctx, locals, hard, soft);
                     }
                 }
-                Stmt::Soft(field, value_expr, weight_expr, cond_expr) => {
-                    if cond_expr.evaluate(ctx).as_bool() {
-                        let value = value_expr.evaluate(ctx);
-                        let weight = weight_expr.evaluate(ctx).as_f64() as f32;
-                        match field {
-                            Field::U2 => soft.push(SoftRule::U2 {
-                                val: value.as_bool(),
-                                w: weight,
-                            }),
-                            Field::Wg => soft.push(SoftRule::Wg {
-                                val: value.as_u32(),
-                                w: weight,
-                            }),
-                            Field::Kl => soft.push(SoftRule::Kl {
-                                val: value.as_u32(),
-                                w: weight,
-                            }),
-                            Field::Ch => soft.push(SoftRule::Ch {
-                                val: value.as_u32(),
-                                w: weight,
-                            }),
-                            Field::Algo => soft.push(SoftRule::Algo {
-                                val: value.as_u8(),
-                                w: weight,
-                            }),
-                            Field::Midk => soft.push(SoftRule::Midk {
-                                val: value.as_u8(),
-                                w: weight,
-                            }),
-                            Field::Bottomk => soft.push(SoftRule::Bottomk {
-                                val: value.as_u8(),
-                                w: weight,
-                            }),
-                            Field::Ctile => soft.push(SoftRule::Ctile {
-                                val: value.as_u32(),
-                                w: weight,
-                            }),
-                            Field::TileCols => soft.push(SoftRule::TileCols {
-                                val: value.as_u32(),
-                                w: weight,
-                            }),
-                            Field::Radix => soft.push(SoftRule::Radix {
-                                val: value.as_u32(),
-                                w: weight,
-                            }),
-                            Field::Segments => soft.push(SoftRule::Segments {
-                                val: value.as_u32(),
-                                w: weight,
-                            }),
-                        }
-                    }
+                Stmt::While(loop_stmt) => {
+                    loop_stmt.run(ctx, locals, hard, soft);
                 }
             }
         }
-
-        Out { hard, soft }
     }
 }
 
 #[derive(Clone, Debug)]
 enum Stmt {
-    Assign(Field, ExprNode),
-    Soft(Field, ExprNode, ExprNode, ExprNode),
+    Assign(AssignStmt),
+    Let(LetStmt),
+    Set(SetStmt),
+    Soft(SoftStmt),
+    If(IfStmt),
+    While(WhileStmt),
+}
+
+#[derive(Clone, Debug)]
+struct AssignStmt {
+    field: Field,
+    expr: ExprNode,
+    const_value: Option<Value>,
+}
+
+impl AssignStmt {
+    fn apply(&self, ctx: &Ctx, locals: &[Value], hard: &mut Hard) {
+        let value = self
+            .const_value
+            .unwrap_or_else(|| self.expr.evaluate(ctx, locals));
+        match self.field {
+            Field::U2 => hard.use_2ce = Some(value.as_bool()),
+            Field::Wg => hard.wg = Some(value.as_u32()),
+            Field::Kl => hard.kl = Some(value.as_u32()),
+            Field::Ch => hard.ch = Some(value.as_u32()),
+            Field::Algo => hard.algo = Some(value.as_u8()),
+            Field::Midk => hard.midk = Some(value.as_u8()),
+            Field::Bottomk => hard.bottomk = Some(value.as_u8()),
+            Field::Ctile => hard.ctile = Some(value.as_u32()),
+            Field::TileCols => hard.tile_cols = Some(value.as_u32()),
+            Field::Radix => hard.radix = Some(value.as_u32()),
+            Field::Segments => hard.segments = Some(value.as_u32()),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct LetStmt {
+    id: usize,
+    expr: ExprNode,
+    const_value: Option<Value>,
+}
+
+impl LetStmt {
+    fn store(&self, ctx: &Ctx, locals: &mut [Value]) {
+        let value = self
+            .const_value
+            .unwrap_or_else(|| self.expr.evaluate(ctx, locals));
+        locals[self.id] = value;
+    }
+}
+
+#[derive(Clone, Debug)]
+struct SetStmt {
+    id: usize,
+    expr: ExprNode,
+    const_value: Option<Value>,
+}
+
+impl SetStmt {
+    fn store(&self, ctx: &Ctx, locals: &mut [Value]) {
+        let value = self
+            .const_value
+            .unwrap_or_else(|| self.expr.evaluate(ctx, locals));
+        locals[self.id] = value;
+    }
+}
+
+#[derive(Clone, Debug)]
+struct SoftStmt {
+    field: Field,
+    value_expr: ExprNode,
+    weight_expr: ExprNode,
+    cond_expr: ExprNode,
+    const_value: Option<Value>,
+    const_weight: Option<f32>,
+    const_cond: Option<bool>,
+}
+
+impl SoftStmt {
+    fn apply(&self, ctx: &Ctx, locals: &mut [Value], soft: &mut Vec<SoftRule>) {
+        let should_apply = self
+            .const_cond
+            .unwrap_or_else(|| self.cond_expr.evaluate(ctx, locals).as_bool());
+        if !should_apply {
+            return;
+        }
+
+        let value = self
+            .const_value
+            .unwrap_or_else(|| self.value_expr.evaluate(ctx, locals));
+        let weight = self
+            .const_weight
+            .unwrap_or_else(|| self.weight_expr.evaluate(ctx, locals).as_f64() as f32);
+
+        match self.field {
+            Field::U2 => soft.push(SoftRule::U2 {
+                val: value.as_bool(),
+                w: weight,
+            }),
+            Field::Wg => soft.push(SoftRule::Wg {
+                val: value.as_u32(),
+                w: weight,
+            }),
+            Field::Kl => soft.push(SoftRule::Kl {
+                val: value.as_u32(),
+                w: weight,
+            }),
+            Field::Ch => soft.push(SoftRule::Ch {
+                val: value.as_u32(),
+                w: weight,
+            }),
+            Field::Algo => soft.push(SoftRule::Algo {
+                val: value.as_u8(),
+                w: weight,
+            }),
+            Field::Midk => soft.push(SoftRule::Midk {
+                val: value.as_u8(),
+                w: weight,
+            }),
+            Field::Bottomk => soft.push(SoftRule::Bottomk {
+                val: value.as_u8(),
+                w: weight,
+            }),
+            Field::Ctile => soft.push(SoftRule::Ctile {
+                val: value.as_u32(),
+                w: weight,
+            }),
+            Field::TileCols => soft.push(SoftRule::TileCols {
+                val: value.as_u32(),
+                w: weight,
+            }),
+            Field::Radix => soft.push(SoftRule::Radix {
+                val: value.as_u32(),
+                w: weight,
+            }),
+            Field::Segments => soft.push(SoftRule::Segments {
+                val: value.as_u32(),
+                w: weight,
+            }),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct IfStmt {
+    cond: ExprNode,
+    const_cond: Option<bool>,
+    then_branch: Vec<Stmt>,
+    else_branch: Vec<Stmt>,
+}
+
+#[derive(Clone, Debug)]
+struct WhileStmt {
+    cond: ExprNode,
+    const_cond: Option<bool>,
+    body: Vec<Stmt>,
+}
+
+impl WhileStmt {
+    fn run(&self, ctx: &Ctx, locals: &mut [Value], hard: &mut Hard, soft: &mut Vec<SoftRule>) {
+        if matches!(self.const_cond, Some(false)) {
+            return;
+        }
+
+        debug_assert_ne!(
+            self.const_cond,
+            Some(true),
+            "constant-true while loops are rejected at parse time"
+        );
+
+        let mut iterations = 0usize;
+        loop {
+            let cond = self
+                .const_cond
+                .unwrap_or_else(|| self.cond.evaluate(ctx, locals).as_bool());
+            if !cond {
+                break;
+            }
+
+            Program::execute_block(&self.body, ctx, locals, hard, soft);
+            iterations += 1;
+            if iterations >= MAX_LOOP_ITERATIONS {
+                debug_assert!(
+                    iterations < MAX_LOOP_ITERATIONS,
+                    "while loop iteration cap reached"
+                );
+                break;
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -132,18 +286,37 @@ enum Field {
 struct Parser {
     tokens: Vec<Token>,
     index: usize,
+    locals: Vec<String>,
+    scopes: Vec<HashMap<String, usize>>,
+}
+
+#[derive(Default)]
+struct ParseOutput {
+    stmts: Vec<Stmt>,
+    locals: usize,
 }
 
 impl Parser {
-    fn parse_program(&mut self) -> Result<Vec<Stmt>, Err> {
-        let mut stmts = Vec::new();
+    fn new(tokens: Vec<Token>) -> Self {
+        Self {
+            tokens,
+            index: 0,
+            locals: Vec::new(),
+            scopes: vec![HashMap::new()],
+        }
+    }
+
+    fn parse_program(&mut self) -> Result<ParseOutput, Err> {
+        let mut output = ParseOutput::default();
         while self.peek().is_some() {
-            stmts.push(self.parse_stmt()?);
+            let stmt = self.parse_stmt()?;
+            output.stmts.push(stmt);
             if matches!(self.peek(), Some(Token::Semi)) {
                 self.next();
             }
         }
-        Ok(stmts)
+        output.locals = self.locals.len();
+        Ok(output)
     }
 
     fn parse_stmt(&mut self) -> Result<Stmt, Err> {
@@ -154,15 +327,134 @@ impl Parser {
             self.expect(Token::Comma)?;
             let weight_expr = self.parse_expr()?;
             self.expect(Token::Comma)?;
-            let condition_expr = self.parse_expr()?;
+            let cond_expr = self.parse_expr()?;
             self.expect(Token::Rp)?;
-            return Ok(Stmt::Soft(field, value_expr, weight_expr, condition_expr));
+
+            let const_value = value_expr.const_value();
+            let const_weight = weight_expr.const_value().map(|v| v.as_f64() as f32);
+            let const_cond = cond_expr.const_value().map(|v| v.as_bool());
+
+            return Ok(Stmt::Soft(SoftStmt {
+                field,
+                value_expr,
+                weight_expr,
+                cond_expr,
+                const_value,
+                const_weight,
+                const_cond,
+            }));
+        }
+
+        if self.consume_let()? {
+            let name = match self.next().ok_or(Err::Tok)? {
+                Token::Id(id) => id,
+                _ => return Err(Err::Tok),
+            };
+            self.expect(Token::Assign)?;
+            let expr = self.parse_expr()?;
+            let const_value = expr.const_value();
+            let id = self.define_local(name)?;
+            return Ok(Stmt::Let(LetStmt {
+                id,
+                expr,
+                const_value,
+            }));
+        }
+
+        if self.consume_set()? {
+            let name = match self.next().ok_or(Err::Tok)? {
+                Token::Id(id) => id,
+                _ => return Err(Err::Tok),
+            };
+            let id = self
+                .lookup_local(&name)
+                .ok_or_else(|| Err::Parse(self.index.saturating_sub(1)))?;
+            self.expect(Token::Assign)?;
+            let expr = self.parse_expr()?;
+            let const_value = expr.const_value();
+            return Ok(Stmt::Set(SetStmt {
+                id,
+                expr,
+                const_value,
+            }));
+        }
+
+        if self.consume_if()? {
+            return self.parse_if_stmt();
+        }
+
+        if self.consume_while()? {
+            return self.parse_while_stmt();
         }
 
         let field = self.parse_field()?;
         self.expect(Token::Colon)?;
         let expr = self.parse_expr()?;
-        Ok(Stmt::Assign(field, expr))
+        let const_value = expr.const_value();
+        Ok(Stmt::Assign(AssignStmt {
+            field,
+            expr,
+            const_value,
+        }))
+    }
+
+    fn parse_if_stmt(&mut self) -> Result<Stmt, Err> {
+        let cond = self.parse_expr()?;
+        let const_cond = cond.const_value().map(|v| v.as_bool());
+        let then_branch = self.parse_block()?;
+
+        let else_branch = if self.consume_else()? {
+            if self.consume_if()? {
+                match self.parse_if_stmt()? {
+                    Stmt::If(branch) => vec![Stmt::If(branch)],
+                    _ => unreachable!(),
+                }
+            } else {
+                self.parse_block()?
+            }
+        } else {
+            Vec::new()
+        };
+
+        Ok(Stmt::If(IfStmt {
+            cond,
+            const_cond,
+            then_branch,
+            else_branch,
+        }))
+    }
+
+    fn parse_while_stmt(&mut self) -> Result<Stmt, Err> {
+        let cond = self.parse_expr()?;
+        let const_cond = cond.const_value().map(|v| v.as_bool());
+        if matches!(const_cond, Some(true)) {
+            return Err(Err::Parse(self.index.saturating_sub(1)));
+        }
+        let body = self.parse_block()?;
+        Ok(Stmt::While(WhileStmt {
+            cond,
+            const_cond,
+            body,
+        }))
+    }
+
+    fn parse_block(&mut self) -> Result<Vec<Stmt>, Err> {
+        self.expect(Token::LBrace)?;
+        self.push_scope();
+        let result = (|| {
+            let mut stmts = Vec::new();
+            while !matches!(self.peek(), Some(Token::RBrace)) {
+                let stmt = self.parse_stmt()?;
+                stmts.push(stmt);
+                if matches!(self.peek(), Some(Token::Semi)) {
+                    self.next();
+                }
+            }
+            self.expect(Token::RBrace)?;
+            Ok(stmts)
+        })();
+        self.pop_scope();
+        result
     }
 
     fn parse_field(&mut self) -> Result<Field, Err> {
@@ -248,6 +540,7 @@ impl Parser {
             let op = match self.peek() {
                 Some(Token::Op(Operator::Mul)) => BinaryOp::Mul,
                 Some(Token::Op(Operator::Div)) => BinaryOp::Div,
+                Some(Token::Op(Operator::Mod)) => BinaryOp::Mod,
                 _ => break,
             };
             self.next();
@@ -262,6 +555,11 @@ impl Parser {
             self.next();
             let expr = self.parse_unary()?;
             return Ok(ExprNode::neg(expr));
+        }
+        if matches!(self.peek(), Some(Token::Bang)) {
+            self.next();
+            let expr = self.parse_unary()?;
+            return Ok(ExprNode::not(expr));
         }
         self.parse_atom()
     }
@@ -281,39 +579,57 @@ impl Parser {
             Token::Id(id) if id == "tile_cols" => Ok(ExprNode::field(FieldRef::TileCols)),
             Token::Id(id) if id == "radix" => Ok(ExprNode::field(FieldRef::Radix)),
             Token::Id(id) if id == "segments" => Ok(ExprNode::field(FieldRef::Segments)),
-            Token::Id(id) if id == "log2" => {
-                self.expect(Token::Lp)?;
-                let expr = self.parse_expr()?;
-                self.expect(Token::Rp)?;
-                Ok(ExprNode::log2(expr))
-            }
-            Token::Id(id) if id == "sel" => {
-                self.expect(Token::Lp)?;
-                let cond = self.parse_expr()?;
-                self.expect(Token::Comma)?;
-                let when_true = self.parse_expr()?;
-                self.expect(Token::Comma)?;
-                let when_false = self.parse_expr()?;
-                self.expect(Token::Rp)?;
-                Ok(ExprNode::select(cond, when_true, when_false))
-            }
-            Token::Id(id) if id == "clamp" => {
-                self.expect(Token::Lp)?;
-                let value = self.parse_expr()?;
-                self.expect(Token::Comma)?;
-                let lo = self.parse_expr()?;
-                self.expect(Token::Comma)?;
-                let hi = self.parse_expr()?;
-                self.expect(Token::Rp)?;
-                Ok(ExprNode::clamp(value, lo, hi))
+            Token::Id(id) if id == "log2" => self.parse_function_call(Function::Log2),
+            Token::Id(id) if id == "sel" => self.parse_function_call(Function::Select),
+            Token::Id(id) if id == "clamp" => self.parse_function_call(Function::Clamp),
+            Token::Id(id) if id == "min" => self.parse_function_call(Function::Min),
+            Token::Id(id) if id == "max" => self.parse_function_call(Function::Max),
+            Token::Id(id) if id == "abs" => self.parse_function_call(Function::Abs),
+            Token::Id(id) if id == "floor" => self.parse_function_call(Function::Floor),
+            Token::Id(id) if id == "ceil" => self.parse_function_call(Function::Ceil),
+            Token::Id(id) if id == "round" => self.parse_function_call(Function::Round),
+            Token::Id(id) if id == "sqrt" => self.parse_function_call(Function::Sqrt),
+            Token::Id(id) if id == "pow" => self.parse_function_call(Function::Pow),
+            Token::Id(id) => {
+                if let Some(index) = self.lookup_local(&id) {
+                    Ok(ExprNode::local(index))
+                } else {
+                    Err(Err::Tok)
+                }
             }
             Token::Lp => {
                 let expr = self.parse_expr()?;
                 self.expect(Token::Rp)?;
                 Ok(expr)
             }
+            Token::LBrace => {
+                let expr = self.parse_expr()?;
+                self.expect(Token::RBrace)?;
+                Ok(expr)
+            }
             _ => Err(Err::Tok),
         }
+    }
+
+    fn parse_function_call(&mut self, function: Function) -> Result<ExprNode, Err> {
+        self.expect(Token::Lp)?;
+        let mut args = Vec::new();
+        if !matches!(self.peek(), Some(Token::Rp)) {
+            loop {
+                args.push(self.parse_expr()?);
+                if matches!(self.peek(), Some(Token::Comma)) {
+                    self.next();
+                    continue;
+                }
+                break;
+            }
+        }
+        self.expect(Token::Rp)?;
+        let (min, max) = function.arity();
+        if args.len() < min || max.map(|limit| args.len() > limit).unwrap_or(false) {
+            return Err(Err::Parse(self.index));
+        }
+        Ok(ExprNode::call(function, args))
     }
 
     fn peek(&self) -> Option<&Token> {
@@ -338,14 +654,83 @@ impl Parser {
     }
 
     fn consume_soft(&mut self) -> Result<bool, Err> {
-        if let Some(Token::Id(id)) = self.peek() {
-            if id == "soft" {
-                self.next();
-                self.expect(Token::Lp)?;
-                return Ok(true);
-            }
+        if matches!(self.peek(), Some(Token::Soft)) {
+            self.next();
+            self.expect(Token::Lp)?;
+            return Ok(true);
         }
         Ok(false)
+    }
+
+    fn consume_let(&mut self) -> Result<bool, Err> {
+        if matches!(self.peek(), Some(Token::Let)) {
+            self.next();
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    fn consume_set(&mut self) -> Result<bool, Err> {
+        if matches!(self.peek(), Some(Token::Set)) {
+            self.next();
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    fn consume_if(&mut self) -> Result<bool, Err> {
+        if matches!(self.peek(), Some(Token::If)) {
+            self.next();
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    fn consume_while(&mut self) -> Result<bool, Err> {
+        if matches!(self.peek(), Some(Token::While)) {
+            self.next();
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    fn consume_else(&mut self) -> Result<bool, Err> {
+        if matches!(self.peek(), Some(Token::Else)) {
+            self.next();
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    fn push_scope(&mut self) {
+        self.scopes.push(HashMap::new());
+    }
+
+    fn pop_scope(&mut self) {
+        self.scopes.pop().expect("scope underflow");
+    }
+
+    fn define_local(&mut self, name: String) -> Result<usize, Err> {
+        if let Some(scope) = self.scopes.last_mut() {
+            if scope.contains_key(&name) {
+                return Err(Err::Parse(self.index));
+            }
+            let id = self.locals.len();
+            self.locals.push(name.clone());
+            scope.insert(name, id);
+            Ok(id)
+        } else {
+            Err(Err::Parse(self.index))
+        }
+    }
+
+    fn lookup_local(&self, name: &str) -> Option<usize> {
+        for scope in self.scopes.iter().rev() {
+            if let Some(id) = scope.get(name) {
+                return Some(*id);
+            }
+        }
+        None
     }
 }
 
@@ -357,9 +742,19 @@ enum Token {
     False,
     Lp,
     Rp,
+    LBrace,
+    RBrace,
     Comma,
     Semi,
     Colon,
+    Assign,
+    Bang,
+    Soft,
+    Let,
+    Set,
+    If,
+    Else,
+    While,
     Op(Operator),
 }
 
@@ -369,6 +764,7 @@ enum Operator {
     Sub,
     Mul,
     Div,
+    Mod,
     Less,
     LessEq,
     Greater,
@@ -387,6 +783,7 @@ impl Operator {
             (b'-', _) => Some((Sub, 1)),
             (b'*', _) => Some((Mul, 1)),
             (b'/', _) => Some((Div, 1)),
+            (b'%', _) => Some((Mod, 1)),
             (b'<', Some(b'=')) => Some((LessEq, 2)),
             (b'<', _) => Some((Less, 1)),
             (b'>', Some(b'=')) => Some((GreaterEq, 2)),
@@ -406,6 +803,7 @@ enum BinaryOp {
     Sub,
     Mul,
     Div,
+    Mod,
     Less,
     LessEq,
     Greater,
@@ -423,6 +821,7 @@ impl From<Operator> for BinaryOp {
             Operator::Sub => BinaryOp::Sub,
             Operator::Mul => BinaryOp::Mul,
             Operator::Div => BinaryOp::Div,
+            Operator::Mod => BinaryOp::Mod,
             Operator::Less => BinaryOp::Less,
             Operator::LessEq => BinaryOp::LessEq,
             Operator::Greater => BinaryOp::Greater,
@@ -443,6 +842,7 @@ impl BinaryOp {
             Sub => Value::from_f64(lhs.as_f64() - rhs.as_f64()),
             Mul => Value::from_f64(lhs.as_f64() * rhs.as_f64()),
             Div => Value::from_f64(lhs.as_f64() / rhs.as_f64()),
+            Mod => Value::from_f64(lhs.as_f64() % rhs.as_f64()),
             Less => Value::from_bool(lhs.as_f64() < rhs.as_f64()),
             LessEq => Value::from_bool(lhs.as_f64() <= rhs.as_f64()),
             Greater => Value::from_bool(lhs.as_f64() > rhs.as_f64()),
@@ -468,28 +868,35 @@ enum FieldRef {
     Segments,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Function {
+    Log2,
+    Select,
+    Clamp,
+    Min,
+    Max,
+    Abs,
+    Floor,
+    Ceil,
+    Round,
+    Sqrt,
+    Pow,
+}
+
 #[derive(Clone, Debug)]
 enum ExprNode {
     Number(f64),
     Bool(bool),
     Field(FieldRef),
+    Local(usize),
     UnaryNeg(Box<ExprNode>),
+    UnaryNot(Box<ExprNode>),
     Binary {
         op: BinaryOp,
         lhs: Box<ExprNode>,
         rhs: Box<ExprNode>,
     },
-    Log2(Box<ExprNode>),
-    Select {
-        cond: Box<ExprNode>,
-        when_true: Box<ExprNode>,
-        when_false: Box<ExprNode>,
-    },
-    Clamp {
-        value: Box<ExprNode>,
-        lo: Box<ExprNode>,
-        hi: Box<ExprNode>,
-    },
+    Call(Function, Vec<ExprNode>),
 }
 
 impl ExprNode {
@@ -505,8 +912,16 @@ impl ExprNode {
         ExprNode::Field(field)
     }
 
+    fn local(id: usize) -> Self {
+        ExprNode::Local(id)
+    }
+
     fn neg(expr: ExprNode) -> Self {
         ExprNode::UnaryNeg(Box::new(expr)).fold()
+    }
+
+    fn not(expr: ExprNode) -> Self {
+        ExprNode::UnaryNot(Box::new(expr)).fold()
     }
 
     fn binary(op: BinaryOp, lhs: ExprNode, rhs: ExprNode) -> Self {
@@ -518,35 +933,22 @@ impl ExprNode {
         .fold()
     }
 
-    fn log2(expr: ExprNode) -> Self {
-        ExprNode::Log2(Box::new(expr)).fold()
-    }
-
-    fn select(cond: ExprNode, when_true: ExprNode, when_false: ExprNode) -> Self {
-        ExprNode::Select {
-            cond: Box::new(cond),
-            when_true: Box::new(when_true),
-            when_false: Box::new(when_false),
-        }
-        .fold()
-    }
-
-    fn clamp(value: ExprNode, lo: ExprNode, hi: ExprNode) -> Self {
-        ExprNode::Clamp {
-            value: Box::new(value),
-            lo: Box::new(lo),
-            hi: Box::new(hi),
-        }
-        .fold()
+    fn call(function: Function, args: Vec<ExprNode>) -> Self {
+        ExprNode::Call(function, args).fold()
     }
 
     fn fold(self) -> Self {
         use ExprNode::*;
         match self {
-            Number(_) | Bool(_) | Field(_) => self,
+            Number(_) | Bool(_) | Field(_) | Local(_) => self,
             UnaryNeg(expr) => {
                 let expr = expr.fold();
                 let node = UnaryNeg(Box::new(expr));
+                node.const_value().map_or(node, ExprNode::from_value)
+            }
+            UnaryNot(expr) => {
+                let expr = expr.fold();
+                let node = UnaryNot(Box::new(expr));
                 node.const_value().map_or(node, ExprNode::from_value)
             }
             Binary { op, lhs, rhs } => {
@@ -561,48 +963,31 @@ impl ExprNode {
                     rhs: Box::new(rhs),
                 }
             }
-            Log2(expr) => {
-                let expr = expr.fold();
-                let node = Log2(Box::new(expr));
-                node.const_value().map_or(node, ExprNode::from_value)
-            }
-            Select {
-                cond,
-                when_true,
-                when_false,
-            } => {
-                let cond = cond.fold();
-                let when_true = when_true.fold();
-                let when_false = when_false.fold();
-                if let Some(cond_val) = cond.const_value() {
-                    if cond_val.as_bool() {
-                        return when_true;
-                    } else {
-                        return when_false;
+            Call(function, args) => {
+                let mut folded_args = Vec::with_capacity(args.len());
+                for arg in args {
+                    folded_args.push(arg.fold());
+                }
+
+                if function == Function::Select {
+                    if let Some(cond) = folded_args[0].const_value() {
+                        return if cond.as_bool() {
+                            folded_args[1].clone()
+                        } else {
+                            folded_args[2].clone()
+                        };
                     }
                 }
-                let node = Select {
-                    cond: Box::new(cond),
-                    when_true: Box::new(when_true),
-                    when_false: Box::new(when_false),
-                };
-                node.const_value().map_or(node, ExprNode::from_value)
-            }
-            Clamp { value, lo, hi } => {
-                let value = value.fold();
-                let lo = lo.fold();
-                let hi = hi.fold();
-                if let (Some(v), Some(l), Some(h)) =
-                    (value.const_value(), lo.const_value(), hi.const_value())
+
+                if let Some(values) = folded_args
+                    .iter()
+                    .map(ExprNode::const_value)
+                    .collect::<Option<Vec<_>>>()
                 {
-                    let clamped = v.as_f64().max(l.as_f64()).min(h.as_f64());
-                    return ExprNode::number(clamped);
+                    return ExprNode::from_value(function.eval(&values));
                 }
-                Clamp {
-                    value: Box::new(value),
-                    lo: Box::new(lo),
-                    hi: Box::new(hi),
-                }
+
+                Call(function, folded_args)
             }
         }
     }
@@ -612,69 +997,66 @@ impl ExprNode {
         match self {
             Number(n) => Some(Value::from_f64(*n)),
             Bool(b) => Some(Value::from_bool(*b)),
-            Field(_) => None,
+            Field(_) | Local(_) => None,
             UnaryNeg(expr) => expr.const_value().map(|v| Value::from_f64(-v.as_f64())),
+            UnaryNot(expr) => expr.const_value().map(|v| Value::from_bool(!v.as_bool())),
             Binary { op, lhs, rhs } => {
                 let l = lhs.const_value()?;
                 let r = rhs.const_value()?;
                 Some(op.apply(l, r))
             }
-            Log2(expr) => expr
-                .const_value()
-                .map(|v| Value::from_f64(v.as_f64().log2())),
-            Select {
-                cond,
-                when_true,
-                when_false,
-            } => {
-                let cond = cond.const_value()?;
-                if cond.as_bool() {
-                    when_true.const_value()
-                } else {
-                    when_false.const_value()
+            Call(function, args) => {
+                if function == &Function::Select {
+                    let cond = args[0].const_value()?;
+                    if cond.as_bool() {
+                        return args[1].const_value();
+                    } else {
+                        return args[2].const_value();
+                    }
                 }
-            }
-            Clamp { value, lo, hi } => {
-                let v = value.const_value()?;
-                let lo = lo.const_value()?;
-                let hi = hi.const_value()?;
-                Some(Value::from_f64(
-                    v.as_f64().max(lo.as_f64()).min(hi.as_f64()),
-                ))
+
+                let values = args
+                    .iter()
+                    .map(ExprNode::const_value)
+                    .collect::<Option<Vec<_>>>()?;
+                Some(function.eval(&values))
             }
         }
     }
 
-    fn evaluate(&self, ctx: &Ctx) -> Value {
+    fn evaluate(&self, ctx: &Ctx, locals: &[Value]) -> Value {
         use ExprNode::*;
         match self {
             Number(n) => Value::from_f64(*n),
             Bool(b) => Value::from_bool(*b),
             Field(field) => field.read(ctx),
-            UnaryNeg(expr) => Value::from_f64(-expr.evaluate(ctx).as_f64()),
-            Binary { op, lhs, rhs } => {
-                let l = lhs.evaluate(ctx);
-                let r = rhs.evaluate(ctx);
-                op.apply(l, r)
-            }
-            Log2(expr) => Value::from_f64(expr.evaluate(ctx).as_f64().log2()),
-            Select {
-                cond,
-                when_true,
-                when_false,
-            } => {
-                if cond.evaluate(ctx).as_bool() {
-                    when_true.evaluate(ctx)
-                } else {
-                    when_false.evaluate(ctx)
+            Local(id) => locals[*id],
+            UnaryNeg(expr) => Value::from_f64(-expr.evaluate(ctx, locals).as_f64()),
+            UnaryNot(expr) => Value::from_bool(!expr.evaluate(ctx, locals).as_bool()),
+            Binary { op, lhs, rhs } => match op {
+                BinaryOp::And => {
+                    let left = lhs.evaluate(ctx, locals);
+                    if !left.as_bool() {
+                        Value::from_bool(false)
+                    } else {
+                        Value::from_bool(rhs.evaluate(ctx, locals).as_bool())
+                    }
                 }
-            }
-            Clamp { value, lo, hi } => {
-                let val = value.evaluate(ctx).as_f64();
-                let lo_v = lo.evaluate(ctx).as_f64();
-                let hi_v = hi.evaluate(ctx).as_f64();
-                Value::from_f64(val.max(lo_v).min(hi_v))
-            }
+                BinaryOp::Or => {
+                    let left = lhs.evaluate(ctx, locals);
+                    if left.as_bool() {
+                        Value::from_bool(true)
+                    } else {
+                        Value::from_bool(rhs.evaluate(ctx, locals).as_bool())
+                    }
+                }
+                _ => {
+                    let l = lhs.evaluate(ctx, locals);
+                    let r = rhs.evaluate(ctx, locals);
+                    op.apply(l, r)
+                }
+            },
+            Call(function, args) => function.eval_runtime(ctx, locals, args),
         }
     }
 
@@ -725,6 +1107,12 @@ impl Value {
     }
 }
 
+impl Default for Value {
+    fn default() -> Self {
+        Value::F(0.0)
+    }
+}
+
 impl FieldRef {
     fn read(self, ctx: &Ctx) -> Value {
         match self {
@@ -737,6 +1125,128 @@ impl FieldRef {
             FieldRef::TileCols => Value::from_f64(ctx.tile_cols as f64),
             FieldRef::Radix => Value::from_f64(ctx.radix as f64),
             FieldRef::Segments => Value::from_f64(ctx.segments as f64),
+        }
+    }
+}
+
+impl Function {
+    fn arity(self) -> (usize, Option<usize>) {
+        match self {
+            Function::Log2
+            | Function::Abs
+            | Function::Floor
+            | Function::Ceil
+            | Function::Round
+            | Function::Sqrt => (1, Some(1)),
+            Function::Pow => (2, Some(2)),
+            Function::Select | Function::Clamp => (3, Some(3)),
+            Function::Min | Function::Max => (2, None),
+        }
+    }
+
+    fn eval(&self, values: &[Value]) -> Value {
+        match self {
+            Function::Log2 => Value::from_f64(values[0].as_f64().log2()),
+            Function::Select => {
+                if values[0].as_bool() {
+                    values[1]
+                } else {
+                    values[2]
+                }
+            }
+            Function::Clamp => {
+                let v = values[0].as_f64();
+                let lo = values[1].as_f64();
+                let hi = values[2].as_f64();
+                Value::from_f64(v.max(lo).min(hi))
+            }
+            Function::Min => {
+                let mut iter = values.iter();
+                let first = iter.next().copied().unwrap();
+                let mut best = first.as_f64();
+                for v in iter {
+                    best = best.min(v.as_f64());
+                }
+                Value::from_f64(best)
+            }
+            Function::Max => {
+                let mut iter = values.iter();
+                let first = iter.next().copied().unwrap();
+                let mut best = first.as_f64();
+                for v in iter {
+                    best = best.max(v.as_f64());
+                }
+                Value::from_f64(best)
+            }
+            Function::Abs => Value::from_f64(values[0].as_f64().abs()),
+            Function::Floor => Value::from_f64(values[0].as_f64().floor()),
+            Function::Ceil => Value::from_f64(values[0].as_f64().ceil()),
+            Function::Round => Value::from_f64(values[0].as_f64().round()),
+            Function::Sqrt => Value::from_f64(values[0].as_f64().sqrt()),
+            Function::Pow => Value::from_f64(values[0].as_f64().powf(values[1].as_f64())),
+        }
+    }
+
+    fn eval_runtime(&self, ctx: &Ctx, locals: &[Value], args: &[ExprNode]) -> Value {
+        match self {
+            Function::Select => {
+                let cond = args[0].evaluate(ctx, locals);
+                if cond.as_bool() {
+                    args[1].evaluate(ctx, locals)
+                } else {
+                    args[2].evaluate(ctx, locals)
+                }
+            }
+            Function::Clamp => {
+                let v = args[0].evaluate(ctx, locals).as_f64();
+                let lo = args[1].evaluate(ctx, locals).as_f64();
+                let hi = args[2].evaluate(ctx, locals).as_f64();
+                Value::from_f64(v.max(lo).min(hi))
+            }
+            Function::Min => {
+                let mut iter = args.iter();
+                let mut best = iter
+                    .next()
+                    .map(|expr| expr.evaluate(ctx, locals).as_f64())
+                    .unwrap();
+                for expr in iter {
+                    best = best.min(expr.evaluate(ctx, locals).as_f64());
+                }
+                Value::from_f64(best)
+            }
+            Function::Max => {
+                let mut iter = args.iter();
+                let mut best = iter
+                    .next()
+                    .map(|expr| expr.evaluate(ctx, locals).as_f64())
+                    .unwrap();
+                for expr in iter {
+                    best = best.max(expr.evaluate(ctx, locals).as_f64());
+                }
+                Value::from_f64(best)
+            }
+            Function::Log2
+            | Function::Abs
+            | Function::Floor
+            | Function::Ceil
+            | Function::Round
+            | Function::Sqrt => {
+                let value = args[0].evaluate(ctx, locals).as_f64();
+                match self {
+                    Function::Log2 => Value::from_f64(value.log2()),
+                    Function::Abs => Value::from_f64(value.abs()),
+                    Function::Floor => Value::from_f64(value.floor()),
+                    Function::Ceil => Value::from_f64(value.ceil()),
+                    Function::Round => Value::from_f64(value.round()),
+                    Function::Sqrt => Value::from_f64(value.sqrt()),
+                    _ => unreachable!(),
+                }
+            }
+            Function::Pow => {
+                let base = args[0].evaluate(ctx, locals).as_f64();
+                let exp = args[1].evaluate(ctx, locals).as_f64();
+                Value::from_f64(base.powf(exp))
+            }
         }
     }
 }
@@ -763,6 +1273,14 @@ fn lex(src: &str) -> Result<Vec<Token>, Err> {
                 tokens.push(Token::Rp);
                 index += 1;
             }
+            b'{' => {
+                tokens.push(Token::LBrace);
+                index += 1;
+            }
+            b'}' => {
+                tokens.push(Token::RBrace);
+                index += 1;
+            }
             b',' => {
                 tokens.push(Token::Comma);
                 index += 1;
@@ -774,6 +1292,24 @@ fn lex(src: &str) -> Result<Vec<Token>, Err> {
             b':' => {
                 tokens.push(Token::Colon);
                 index += 1;
+            }
+            b'=' => {
+                if index + 1 < bytes.len() && bytes[index + 1] == b'=' {
+                    tokens.push(Token::Op(Operator::Eq));
+                    index += 2;
+                } else {
+                    tokens.push(Token::Assign);
+                    index += 1;
+                }
+            }
+            b'!' => {
+                if index + 1 < bytes.len() && bytes[index + 1] == b'=' {
+                    tokens.push(Token::Op(Operator::NotEq));
+                    index += 2;
+                } else {
+                    tokens.push(Token::Bang);
+                    index += 1;
+                }
             }
             b'0'..=b'9' | b'.' => {
                 let start = index;
@@ -805,6 +1341,12 @@ fn lex(src: &str) -> Result<Vec<Token>, Err> {
                 match ident.as_str() {
                     "true" => tokens.push(Token::True),
                     "false" => tokens.push(Token::False),
+                    "soft" => tokens.push(Token::Soft),
+                    "let" => tokens.push(Token::Let),
+                    "set" => tokens.push(Token::Set),
+                    "if" => tokens.push(Token::If),
+                    "else" => tokens.push(Token::Else),
+                    "while" => tokens.push(Token::While),
                     _ => tokens.push(Token::Id(ident)),
                 }
             }
@@ -835,6 +1377,7 @@ impl fmt::Display for Operator {
             Sub => "-",
             Mul => "*",
             Div => "/",
+            Mod => "%",
             Less => "<",
             LessEq => "<=",
             Greater => ">",
@@ -887,5 +1430,119 @@ mod tests {
         let program = Program::parse(script).unwrap();
         let out = program.evaluate(&ctx());
         assert_eq!(out.soft.len(), 1);
+    }
+
+    #[test]
+    fn supports_locals_and_modulo() {
+        let script = "let base = r / 4; wg: base; soft (wg, base, 0.5, base % 2 == 0);";
+        let program = Program::parse(script).unwrap();
+        let out = program.evaluate(&ctx());
+        assert_eq!(out.hard.wg, Some(256));
+        assert_eq!(out.soft.len(), 1);
+    }
+
+    #[test]
+    fn advanced_math_functions_fold() {
+        let script = "radix: max(min(pow(2, 3), sqrt(64)), abs(-4));";
+        let program = Program::parse(script).unwrap();
+        let out = program.evaluate(&ctx());
+        assert_eq!(out.hard.radix, Some(8));
+    }
+
+    #[test]
+    fn conditionals_and_unary_not_work() {
+        let script = r#"
+            let base = r / 4;
+            if base % 2 == 0 {
+                wg: base;
+            } else {
+                wg: 1;
+            }
+
+            if !sg {
+                soft (wg, base, 0.25, true);
+            } else {
+                soft (wg, base * 2, 0.5, true);
+            }
+        "#;
+
+        let program = Program::parse(script).unwrap();
+
+        let out = program.evaluate(&ctx());
+        assert_eq!(out.hard.wg, Some(256));
+        assert_eq!(out.soft.len(), 1);
+        match &out.soft[0] {
+            SoftRule::Wg { val, w } => {
+                assert_eq!(*val, 512);
+                assert!((*w - 0.5).abs() < f32::EPSILON);
+            }
+            _ => panic!("expected wg soft rule"),
+        }
+
+        let mut alt_ctx = ctx();
+        alt_ctx.sg = false;
+        let out_alt = program.evaluate(&alt_ctx);
+        assert_eq!(out_alt.hard.wg, Some(256));
+        assert_eq!(out_alt.soft.len(), 1);
+        match &out_alt.soft[0] {
+            SoftRule::Wg { val, w } => {
+                assert_eq!(*val, 256);
+                assert!((*w - 0.25).abs() < f32::EPSILON);
+            }
+            _ => panic!("expected wg soft rule"),
+        }
+    }
+
+    #[test]
+    fn block_scopes_shadow_cleanly() {
+        let script = r#"
+            let base = 4;
+            if true {
+                let base = 8;
+                soft (wg, base, 1.0, true);
+            }
+            soft (wg, base, 1.0, true);
+        "#;
+
+        let program = Program::parse(script).unwrap();
+        let out = program.evaluate(&ctx());
+        assert_eq!(out.soft.len(), 2);
+        match &out.soft[0] {
+            SoftRule::Wg { val, w } => {
+                assert_eq!(*val, 8);
+                assert!((*w - 1.0).abs() < f32::EPSILON);
+            }
+            _ => panic!("expected wg soft rule"),
+        }
+        match &out.soft[1] {
+            SoftRule::Wg { val, w } => {
+                assert_eq!(*val, 4);
+                assert!((*w - 1.0).abs() < f32::EPSILON);
+            }
+            _ => panic!("expected wg soft rule"),
+        }
+    }
+
+    #[test]
+    fn while_loops_and_set_statements_work() {
+        let script = r#"
+            let acc = 1;
+            let i = 0;
+            while i < 3 {
+                set acc = acc * 2;
+                set i = i + 1;
+            }
+            wg: acc;
+        "#;
+
+        let program = Program::parse(script).unwrap();
+        let out = program.evaluate(&ctx());
+        assert_eq!(out.hard.wg, Some(8));
+    }
+
+    #[test]
+    fn rejects_constant_true_while_loops() {
+        let script = "while true { wg: 1; }";
+        assert!(Program::parse(script).is_err());
     }
 }
