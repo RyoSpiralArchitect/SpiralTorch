@@ -50,6 +50,18 @@ def test_tensor_constructor_and_shape_in_stub_environment() -> None:
         assert tensor.shape() == (2, 3)
         assert tuple(tensor.shape) == (2, 3)
         assert tensor.tolist() == [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
+
+        eager_values = [float(i) for i in range(6)]
+        constructed = [
+            tensor,
+            st_module.Tensor(2, 3),
+            st_module.Tensor(2, 3, eager_values),
+            st_module.Tensor(rows=2, cols=3),
+            st_module.Tensor(rows=2, cols=3, data=eager_values),
+            st_module.Tensor(shape=(2, 3)),
+        ]
+        for created in constructed:
+            assert created.shape() == (2, 3)
     finally:
         for name in list(sys.modules):
             if name not in preexisting and name.startswith("spiraltorch"):
