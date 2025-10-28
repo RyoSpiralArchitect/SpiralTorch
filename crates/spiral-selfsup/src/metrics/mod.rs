@@ -49,7 +49,10 @@ pub fn register_descriptors(descriptors: &[MetricDescriptor]) {
         .write()
         .expect("metric registry write lock should not be poisoned");
     for descriptor in descriptors {
-        if registry.iter().all(|existing| existing.name != descriptor.name) {
+        if registry
+            .iter()
+            .all(|existing| existing.name != descriptor.name)
+        {
             registry.push(*descriptor);
         }
     }
@@ -119,7 +122,9 @@ mod tests {
         register_info_nce_descriptors();
         let registered = descriptors();
         assert_eq!(registered.len(), INFO_NCE_DESCRIPTORS.len());
-        assert!(registered.iter().any(|descriptor| descriptor.name == "selfsup.info_nce.loss"));
+        assert!(registered
+            .iter()
+            .any(|descriptor| descriptor.name == "selfsup.info_nce.loss"));
     }
 
     #[test]
