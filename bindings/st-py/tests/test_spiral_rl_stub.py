@@ -6,13 +6,7 @@ import types
 import pytest
 
 
-if "torch" not in sys.modules:
-    torch_stub = types.ModuleType("torch")
-    torch_stub.autograd = types.SimpleNamespace(Function=object)
-    sys.modules["torch"] = torch_stub
-
-
-def test_spiral_rl_stub_module_is_exposed():
+def test_spiral_rl_stub_module_is_exposed(spiraltorch_stub):
     from spiraltorch import spiral_rl
 
     assert isinstance(spiral_rl, types.ModuleType)
@@ -22,7 +16,7 @@ def test_spiral_rl_stub_module_is_exposed():
         assert hasattr(spiral_rl, name)
 
 
-def test_st_agent_stub_signals_missing_extension():
+def test_st_agent_stub_signals_missing_extension(spiraltorch_stub):
     from spiraltorch import spiral_rl
 
     stub_cls = spiral_rl.stAgent

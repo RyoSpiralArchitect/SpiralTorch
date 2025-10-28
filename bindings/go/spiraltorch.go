@@ -510,6 +510,9 @@ func (r *Runtime) Reshape(t *Tensor, rows, cols int) (*Tensor, error) {
 
 // NewZerosTensor constructs a tensor of the requested shape initialised with zeros.
 func NewZerosTensor(rows, cols int) (*Tensor, error) {
+	if rows < 0 || cols < 0 {
+		return nil, fmt.Errorf("spiraltorch: dimensions must be non-negative")
+	}
 	ptr := C.spiraltorch_tensor_zeros(C.size_t(rows), C.size_t(cols))
 	tensor, err := wrapTensor(ptr, "tensor_zeros")
 	if err != nil {
@@ -548,6 +551,9 @@ func NewTensorFromDense(rows, cols int, data []float32) (*Tensor, error) {
 //
 // When seed is provided the distribution becomes deterministic.
 func NewRandomUniformTensor(rows, cols int, min, max float32, seed ...uint64) (*Tensor, error) {
+	if rows < 0 || cols < 0 {
+		return nil, fmt.Errorf("spiraltorch: dimensions must be non-negative")
+	}
 	var (
 		seedValue C.uint64_t
 		hasSeed   C.bool
@@ -579,6 +585,9 @@ func NewRandomUniformTensor(rows, cols int, min, max float32, seed ...uint64) (*
 //
 // When seed is provided the sampling becomes deterministic.
 func NewRandomNormalTensor(rows, cols int, mean, std float32, seed ...uint64) (*Tensor, error) {
+	if rows < 0 || cols < 0 {
+		return nil, fmt.Errorf("spiraltorch: dimensions must be non-negative")
+	}
 	var (
 		seedValue C.uint64_t
 		hasSeed   C.bool
