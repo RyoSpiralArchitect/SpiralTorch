@@ -1275,11 +1275,11 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
 
         @property
         def rows(self) -> int:
-            return self._rows
+            return int(self._rows)
 
         @property
         def cols(self) -> int:
-            return self._cols
+            return int(self._cols)
 
         @property
         def backend(self) -> str:
@@ -1297,17 +1297,20 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
                         self._rows * self._cols, rows, cols
                     )
                 )
+            cls = type(self)
             if self._backend == "numpy":
                 matrix = self._to_numpy(copy=False).reshape(rows, cols).copy()
-                return Tensor._from_numpy_array(matrix)
+                return cls._from_numpy_array(matrix)
             flat = self._row_major_python()
-            return Tensor._from_python_array(rows, cols, array("d", flat))
+            buffer = array("d", flat)
+            return cls._from_python_array(rows, cols, buffer)
 
         def transpose(self) -> "Tensor":
             rows, cols = self._rows, self._cols
+            cls = type(self)
             if self._backend == "numpy":
                 matrix = self._to_numpy(copy=False).transpose().copy()
-                return Tensor._from_numpy_array(matrix)
+                return cls._from_numpy_array(matrix)
             flat = self._row_major_python()
             total = rows * cols
             transposed = array("d", [0.0]) * total if total else array("d")
@@ -1315,7 +1318,7 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
                 row_offset = r * cols
                 for c in range(cols):
                     transposed[c * rows + r] = flat[row_offset + c]
-            return Tensor._from_python_array(cols, rows, transposed)
+            return cls._from_python_array(cols, rows, transposed)
 
         def sum_axis0(self) -> list[float]:
             cols = self._cols
