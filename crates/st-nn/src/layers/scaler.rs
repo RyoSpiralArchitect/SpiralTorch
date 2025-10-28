@@ -22,8 +22,24 @@ impl Scaler {
             });
         }
         let gains = Tensor::from_vec(1, features, vec![1.0; features])?;
+        Self::from_gain(name, gains)
+    }
+
+    /// Constructs a scaler from an explicit gain tensor.
+    pub fn from_gain(name: impl Into<String>, gain: Tensor) -> PureResult<Self> {
+        let name = name.into();
+        let (rows, cols) = gain.shape();
+        if cols == 0 {
+            return Err(TensorError::InvalidDimensions { rows, cols });
+        }
+        if rows != 1 {
+            return Err(TensorError::ShapeMismatch {
+                left: (rows, cols),
+                right: (1, cols),
+            });
+        }
         Ok(Self {
-            gain: Parameter::new(format!("{}::gain", name.into()), gains),
+            gain: Parameter::new(format!("{name}::gain"), gain),
         })
     }
 
@@ -94,14 +110,25 @@ impl Module for Scaler {
         &self,
         visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
     ) -> PureResult<()> {
-        visitor(&self.gain)
+        visitor(&self.gain)?;
+        Ok(())
     }
 
     fn visit_parameters_mut(
         &mut self,
         visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
     ) -> PureResult<()> {
-        visitor(&mut self.gain)
+        visitor(&mut self.gain)?;
+        Ok(())
+    }
+
+    fn psi_probe(&self) -> Option<f32> {
+        let gains = self.gain.value().data();
+        if gains.is_empty() {
+            return None;
+        }
+        let drift = gains.iter().map(|g| (g - 1.0).abs()).sum::<f32>() / gains.len() as f32;
+        Some(drift)
     }
 }
 
@@ -140,5 +167,45 @@ mod tests {
         )
         .unwrap();
         assert_eq!(grads, &expected);
+    }
+
+    #[test]
+    fn scaler_from_gain_validates_shape() {
+        let gain = Tensor::from_vec(1, 3, vec![1.0, 2.0, 3.0]).unwrap();
+        let layer = Scaler::from_gain("scale", gain.clone()).unwrap();
+        assert_eq!(layer.gain().value(), &gain);
+
+        let err = Scaler::from_gain("scale", Tensor::from_vec(2, 3, vec![0.0; 6]).unwrap());
+        assert!(matches!(err, Err(TensorError::ShapeMismatch { .. })));
+    }
+
+    #[test]
+    fn scaler_psi_probe_reflects_gain_drift() {
+        let mut layer = Scaler::new("scale", 3).unwrap();
+        assert_eq!(layer.psi_probe(), Some(0.0));
+
+        {
+            let values = layer.gain.value_mut();
+            let data = values.data_mut();
+            data.copy_from_slice(&[1.0, 0.5, 1.5]);
+        }
+
+        let drift = layer.psi_probe().unwrap();
+        assert!((drift - 0.333_333_34).abs() < 1e-6);
+    }
+
+    #[test]
+    fn scaler_state_dict_round_trips_gain() {
+        let mut source = Scaler::new("scale", 2).unwrap();
+        {
+            let values = source.gain.value_mut();
+            let data = values.data_mut();
+            data.copy_from_slice(&[1.25, 0.75]);
+        }
+        let state = source.state_dict().unwrap();
+
+        let mut target = Scaler::new("scale", 2).unwrap();
+        target.load_state_dict(&state).unwrap();
+        assert_eq!(target.gain().value().data(), &[1.25, 0.75]);
     }
 }

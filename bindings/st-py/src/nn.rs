@@ -1164,6 +1164,12 @@ impl PyScaler {
         Ok(Self { inner })
     }
 
+    #[staticmethod]
+    pub fn from_gain(name: &str, gain: &PyTensor) -> PyResult<Self> {
+        let inner = Scaler::from_gain(name, gain.inner.clone()).map_err(tensor_err_to_py)?;
+        Ok(Self { inner })
+    }
+
     pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
         let output = self.inner.forward(&input.inner).map_err(tensor_err_to_py)?;
         Ok(PyTensor::from_tensor(output))
@@ -1243,6 +1249,17 @@ impl PyScaler {
     #[getter]
     pub fn gain(&self) -> PyTensor {
         PyTensor::from_tensor(self.inner.gain().value().clone())
+    }
+
+    pub fn gradient(&self) -> Option<PyTensor> {
+        self.inner
+            .gain()
+            .gradient()
+            .map(|g| PyTensor::from_tensor(g.clone()))
+    }
+
+    pub fn psi_probe(&self) -> Option<f32> {
+        self.inner.psi_probe()
     }
 }
 
