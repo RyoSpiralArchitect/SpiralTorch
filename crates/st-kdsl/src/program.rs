@@ -18,6 +18,13 @@ pub struct Program {
 
 const MAX_LOOP_ITERATIONS: usize = 65_536;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FlowSignal {
+    None,
+    Break,
+    Continue,
+}
+
 impl Program {
     /// Parses the provided source string into a [`Program`].
     pub fn parse(src: &str) -> Result<Self, Err> {
@@ -36,7 +43,8 @@ impl Program {
         let mut soft = Vec::<SoftRule>::new();
         let mut locals = vec![Value::default(); self.locals];
 
-        Self::execute_block(&self.stmts, ctx, &mut locals, &mut hard, &mut soft);
+        let signal = Self::execute_block(&self.stmts, ctx, &mut locals, &mut hard, &mut soft);
+        debug_assert_eq!(signal, FlowSignal::None, "top-level control flow escape");
 
         Out { hard, soft }
     }
@@ -47,28 +55,49 @@ impl Program {
         locals: &mut [Value],
         hard: &mut Hard,
         soft: &mut Vec<SoftRule>,
-    ) {
+    ) -> FlowSignal {
         for stmt in block {
-            match stmt {
-                Stmt::Assign(assign) => assign.apply(ctx, locals, hard),
-                Stmt::Let(binding) => binding.store(ctx, locals),
-                Stmt::Set(update) => update.store(ctx, locals),
-                Stmt::Soft(rule) => rule.apply(ctx, locals, soft),
+            let signal = match stmt {
+                Stmt::Assign(assign) => {
+                    assign.apply(ctx, locals, hard);
+                    FlowSignal::None
+                }
+                Stmt::Let(binding) => {
+                    binding.store(ctx, locals);
+                    FlowSignal::None
+                }
+                Stmt::Set(update) => {
+                    update.store(ctx, locals);
+                    FlowSignal::None
+                }
+                Stmt::Soft(rule) => {
+                    rule.apply(ctx, locals, soft);
+                    FlowSignal::None
+                }
                 Stmt::If(branch) => {
                     let cond = branch
                         .const_cond
                         .unwrap_or_else(|| branch.cond.evaluate(ctx, locals).as_bool());
                     if cond {
-                        Self::execute_block(&branch.then_branch, ctx, locals, hard, soft);
+                        Self::execute_block(&branch.then_branch, ctx, locals, hard, soft)
                     } else {
-                        Self::execute_block(&branch.else_branch, ctx, locals, hard, soft);
+                        Self::execute_block(&branch.else_branch, ctx, locals, hard, soft)
                     }
                 }
                 Stmt::While(loop_stmt) => {
                     loop_stmt.run(ctx, locals, hard, soft);
+                    FlowSignal::None
                 }
+                Stmt::Break => FlowSignal::Break,
+                Stmt::Continue => FlowSignal::Continue,
+            };
+
+            match signal {
+                FlowSignal::None => {}
+                FlowSignal::Break | FlowSignal::Continue => return signal,
             }
         }
+        FlowSignal::None
     }
 }
 
@@ -80,6 +109,8 @@ enum Stmt {
     Soft(SoftStmt),
     If(IfStmt),
     While(WhileStmt),
+    Break,
+    Continue,
 }
 
 #[derive(Clone, Debug)]
@@ -254,7 +285,7 @@ impl WhileStmt {
                 break;
             }
 
-            Program::execute_block(&self.body, ctx, locals, hard, soft);
+            let signal = Program::execute_block(&self.body, ctx, locals, hard, soft);
             iterations += 1;
             if iterations >= MAX_LOOP_ITERATIONS {
                 debug_assert!(
@@ -262,6 +293,12 @@ impl WhileStmt {
                     "while loop iteration cap reached"
                 );
                 break;
+            }
+
+            match signal {
+                FlowSignal::None => {}
+                FlowSignal::Continue => continue,
+                FlowSignal::Break => break,
             }
         }
     }
@@ -288,6 +325,7 @@ struct Parser {
     index: usize,
     locals: Vec<String>,
     scopes: Vec<HashMap<String, usize>>,
+    loop_depth: usize,
 }
 
 #[derive(Default)]
@@ -303,6 +341,7 @@ impl Parser {
             index: 0,
             locals: Vec::new(),
             scopes: vec![HashMap::new()],
+            loop_depth: 0,
         }
     }
 
@@ -387,6 +426,14 @@ impl Parser {
             return self.parse_while_stmt();
         }
 
+        if self.consume_break()? {
+            return Ok(Stmt::Break);
+        }
+
+        if self.consume_continue()? {
+            return Ok(Stmt::Continue);
+        }
+
         let field = self.parse_field()?;
         self.expect(Token::Colon)?;
         let expr = self.parse_expr()?;
@@ -430,7 +477,10 @@ impl Parser {
         if matches!(const_cond, Some(true)) {
             return Err(Err::Parse(self.index.saturating_sub(1)));
         }
-        let body = self.parse_block()?;
+        self.loop_depth += 1;
+        let body_result = self.parse_block();
+        self.loop_depth -= 1;
+        let body = body_result?;
         Ok(Stmt::While(WhileStmt {
             cond,
             const_cond,
@@ -702,6 +752,28 @@ impl Parser {
         Ok(false)
     }
 
+    fn consume_break(&mut self) -> Result<bool, Err> {
+        if matches!(self.peek(), Some(Token::Break)) {
+            if self.loop_depth == 0 {
+                return Err(Err::Parse(self.index));
+            }
+            self.next();
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    fn consume_continue(&mut self) -> Result<bool, Err> {
+        if matches!(self.peek(), Some(Token::Continue)) {
+            if self.loop_depth == 0 {
+                return Err(Err::Parse(self.index));
+            }
+            self.next();
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
     fn push_scope(&mut self) {
         self.scopes.push(HashMap::new());
     }
@@ -755,6 +827,8 @@ enum Token {
     If,
     Else,
     While,
+    Break,
+    Continue,
     Op(Operator),
 }
 
@@ -1347,6 +1421,8 @@ fn lex(src: &str) -> Result<Vec<Token>, Err> {
                     "if" => tokens.push(Token::If),
                     "else" => tokens.push(Token::Else),
                     "while" => tokens.push(Token::While),
+                    "break" => tokens.push(Token::Break),
+                    "continue" => tokens.push(Token::Continue),
                     _ => tokens.push(Token::Id(ident)),
                 }
             }
@@ -1541,8 +1617,54 @@ mod tests {
     }
 
     #[test]
+    fn break_statements_exit_loops() {
+        let script = r#"
+            let acc = 0;
+            let i = 0;
+            while i < 10 {
+                if i == 5 {
+                    break;
+                }
+                set acc = acc + i;
+                set i = i + 1;
+            }
+            wg: acc;
+        "#;
+
+        let program = Program::parse(script).unwrap();
+        let out = program.evaluate(&ctx());
+        assert_eq!(out.hard.wg, Some(10));
+    }
+
+    #[test]
+    fn continue_skips_to_next_iteration() {
+        let script = r#"
+            let acc = 0;
+            let i = 0;
+            while i < 5 {
+                set i = i + 1;
+                if i % 2 == 0 {
+                    continue;
+                }
+                set acc = acc + i;
+            }
+            wg: acc;
+        "#;
+
+        let program = Program::parse(script).unwrap();
+        let out = program.evaluate(&ctx());
+        assert_eq!(out.hard.wg, Some(9));
+    }
+
+    #[test]
     fn rejects_constant_true_while_loops() {
         let script = "while true { wg: 1; }";
         assert!(Program::parse(script).is_err());
+    }
+
+    #[test]
+    fn rejects_break_and_continue_outside_loops() {
+        assert!(Program::parse("break;").is_err());
+        assert!(Program::parse("continue;").is_err());
     }
 }
