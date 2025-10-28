@@ -476,8 +476,10 @@ impl RedisKv {
     }
 
     pub fn set_json<T: Serialize>(&mut self, key: &str, value: &T) -> KvResult<()> {
-        let payload = serde_json::to_string(value)?;
-        self.set(key, payload)
+        let options = JsonSetOptions::default();
+        let inserted = self.set_json_with_options(key, value, &options)?;
+        debug_assert!(inserted, "unconditional JSON SET should not return Nil");
+        Ok(())
     }
 
     pub fn set_json_with_options<T>(
@@ -520,16 +522,18 @@ impl RedisKv {
     where
         T: Serialize,
     {
-        let payload = serde_json::to_string(value)?;
-        self.set_ex(key, payload, seconds)
+        let options = JsonSetOptions::new().with_expiry_seconds(seconds as u64);
+        let inserted = self.set_json_with_options(key, value, &options)?;
+        debug_assert!(inserted, "unconditional JSON SET EX should not return Nil");
+        Ok(())
     }
 
     pub fn set_json_nx<T>(&mut self, key: &str, value: &T) -> KvResult<bool>
     where
         T: Serialize,
     {
-        let payload = serde_json::to_string(value)?;
-        self.set_nx(key, payload)
+        let options = JsonSetOptions::new().nx();
+        self.set_json_with_options(key, value, &options)
     }
 
     fn set_json_payload_with_options(
