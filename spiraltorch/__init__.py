@@ -1832,10 +1832,8 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
 
         @staticmethod
         def zeros(rows: int, cols: int) -> "Tensor":
-            rows = int(rows)
-            cols = int(cols)
-            if rows < 0 or cols < 0:
-                raise ValueError("tensor dimensions must be non-negative")
+            rows = _tensor_coerce_index(rows, "rows")
+            cols = _tensor_coerce_index(cols, "cols")
             total = rows * cols
             if NUMPY_AVAILABLE:
                 matrix = _np.zeros((rows, cols), dtype=_np.float64)
@@ -1851,10 +1849,8 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             std: float = 1.0,
             seed: int | None = None,
         ) -> "Tensor":
-            rows = int(rows)
-            cols = int(cols)
-            if rows < 0 or cols < 0:
-                raise ValueError("tensor dimensions must be non-negative")
+            rows = _tensor_coerce_index(rows, "rows")
+            cols = _tensor_coerce_index(cols, "cols")
             total = rows * cols
             if NUMPY_AVAILABLE:
                 rng = _np.random.default_rng(seed)
@@ -1875,10 +1871,8 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             max: float = 1.0,
             seed: int | None = None,
         ) -> "Tensor":
-            rows = int(rows)
-            cols = int(cols)
-            if rows < 0 or cols < 0:
-                raise ValueError("tensor dimensions must be non-negative")
+            rows = _tensor_coerce_index(rows, "rows")
+            cols = _tensor_coerce_index(cols, "cols")
             if max < min:
                 raise ValueError("max must be greater than or equal to min")
             total = rows * cols
@@ -1911,11 +1905,13 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             if use_numpy:
                 matrices = [tensor._to_numpy(copy=False) for tensor in tensors]
                 concatenated = _np.concatenate(matrices, axis=0)
-                return Tensor._from_numpy_array(concatenated)
+                cls = type(tensors[0])
+                return cls._from_numpy_array(concatenated)
+            cls = type(tensors[0])
             data = array("d")
             for tensor in tensors:
                 data.extend(tensor._row_major_python())
-            return Tensor._from_python_array(total_rows, cols, data)
+            return cls._from_python_array(total_rows, cols, data)
 
         def __matmul__(self, other) -> "Tensor":  # pragma: no cover - convenience wrapper
             if isinstance(other, Tensor):
