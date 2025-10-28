@@ -804,7 +804,40 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
     except ModuleNotFoundError:  # pragma: no cover - optional dependency
         _np = None  # type: ignore
 
+    try:  # pragma: no cover - optional dependency
+        from . import _blas as _blas_impl
+    except Exception:  # pragma: no cover - best-effort optional import
+        _blas_impl = None  # type: ignore
+
     NUMPY_AVAILABLE = _np is not None
+    BLAS_AVAILABLE = bool(_blas_impl and _blas_impl.blas_available())
+
+    def _resolve_stub_backend(
+        requested, *, op: str, allow_numpy: bool = True
+    ) -> str:
+        """Normalize backend hints for the Python stub implementation."""
+
+        if requested is None:
+            return "numpy" if allow_numpy and NUMPY_AVAILABLE else "python"
+
+        normalized = str(requested).lower()
+        if normalized == "auto":
+            return "numpy" if allow_numpy and NUMPY_AVAILABLE else "python"
+        if normalized in {"python", "cpu"}:
+            return "python"
+        if normalized == "numpy":
+            if not allow_numpy:
+                raise ValueError(f"{op} does not support the NumPy backend")
+            if not NUMPY_AVAILABLE:
+                raise RuntimeError(
+                    f"NumPy backend requested for {op} but NumPy is not installed"
+                )
+            return "numpy"
+        if normalized in {"gpu", "wgpu"}:
+            raise RuntimeError(
+                f"{op} backend '{requested}' is unavailable in the stub bindings"
+            )
+        raise ValueError(f"Unsupported backend '{requested}' for {op}")
 
     _TENSOR_NO_DATA = object()
 
@@ -1120,10 +1153,12 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             ctor_args = (*positional_head, *args)
 
             rows, cols, payload = _normalize_tensor_ctor_args(*ctor_args, **ctor_kwargs)
-            if backend_hint is not None and backend_hint not in {"numpy", "python"}:
-                raise ValueError("backend must be 'numpy', 'python', or None")
+            if backend_hint is not None and backend_hint not in {"numpy", "python", "blas"}:
+                raise ValueError("backend must be 'numpy', 'python', 'blas', or None")
             if backend_hint == "numpy" and not NUMPY_AVAILABLE:
                 raise RuntimeError("NumPy backend requested but NumPy is not installed")
+            if backend_hint == "blas" and not BLAS_AVAILABLE:
+                raise RuntimeError("BLAS backend requested but no BLAS library was detected")
             rows = int(rows)
             cols = int(cols)
 
@@ -1140,7 +1175,9 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             self._rows = rows
             self._cols = cols
 
-            preferred_backend = backend_hint or ("numpy" if NUMPY_AVAILABLE else "python")
+            preferred_backend = backend_hint or (
+                "blas" if BLAS_AVAILABLE else ("numpy" if NUMPY_AVAILABLE else "python")
+            )
             if preferred_backend == "numpy":
                 arr = (
                     _np.frombuffer(canonical, dtype=_np.float64, count=rows * cols)
@@ -1151,7 +1188,7 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
                 self._backend = "numpy"
             else:
                 self._data = canonical
-                self._backend = "python"
+                self._backend = "blas" if preferred_backend == "blas" else "python"
 
         # noqa: D401 - mirror real signature from the native extension
         def matmul(self, other: "Tensor", *, backend: str | None = None):
@@ -1160,16 +1197,36 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             if self._cols != other._rows:
                 raise ValueError("inner dimensions do not match for matmul")
 
-            if backend is not None and backend not in {"numpy", "python"}:
-                raise ValueError("backend must be 'numpy', 'python', or None")
-            target_backend = backend or ("numpy" if NUMPY_AVAILABLE else "python")
+            if backend is not None and backend not in {"numpy", "python", "blas"}:
+                raise ValueError("backend must be 'numpy', 'python', 'blas', or None")
+            target_backend = backend or (
+                "blas" if BLAS_AVAILABLE else ("numpy" if NUMPY_AVAILABLE else "python")
+            )
 
             if target_backend == "numpy":
                 if not NUMPY_AVAILABLE:
                     raise RuntimeError("NumPy backend requested but NumPy is not installed")
                 return self._matmul_numpy(other)
+            if target_backend == "blas":
+                if not BLAS_AVAILABLE:
+                    raise RuntimeError("BLAS backend requested but no BLAS library was detected")
+                return self._matmul_blas(other)
             return self._matmul_python(other)
 
+        def _matmul_blas(self, other: "Tensor") -> "Tensor":
+            rows, cols, inner = self._rows, other._cols, self._cols
+            if rows == 0 or cols == 0:
+                return Tensor._from_python_array(rows, cols, array("d"), backend="blas")
+            if inner == 0:
+                return Tensor._from_python_array(
+                    rows, cols, array("d", [0.0]) * (rows * cols), backend="blas"
+                )
+
+            out = array("d", [0.0]) * (rows * cols)
+            left = self._row_major_python()
+            right = other._row_major_python()
+            _blas_impl.dgemm(rows, cols, inner, left, right, out)  # type: ignore[union-attr]
+            return Tensor._from_python_array(rows, cols, out, backend="blas")
         def row_softmax(self, *, backend: str | None = None) -> "Tensor":
             """Compute the row-wise softmax of the tensor."""
 
@@ -1487,46 +1544,315 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
                     for a, b in zip(self._row_major_python(), other._row_major_python())
                 ),
             )
+            backend = (
+                "blas"
+                if BLAS_AVAILABLE
+                and (self._backend == "blas" or other._backend == "blas")
+                else "python"
+            )
+            return Tensor._from_python_array(
+                self._rows, self._cols, data, backend=backend
+            )
+
+        def row_softmax(self, *, backend: str | None = None) -> "Tensor":
+            rows, cols = self._rows, self._cols
+            target_backend = _resolve_stub_backend(backend, op="row_softmax")
+
+            if target_backend == "numpy":
+                matrix = self._to_numpy(copy=False)
+                if cols == 0:
+                    result = _np.empty((rows, 0), dtype=_np.float64)
+                else:
+                    shifted = matrix - matrix.max(axis=1, keepdims=True)
+                    exp = _np.exp(shifted)
+                    sums = exp.sum(axis=1, keepdims=True)
+                    result = _np.divide(
+                        exp,
+                        sums,
+                        out=_np.zeros_like(exp),
+                        where=sums > 0.0,
+                    )
+                return Tensor._from_numpy_array(result)
+
+            total = rows * cols
+            buffer = array("d") if total == 0 else array("d", [0.0]) * total
+            data = self._row_major_python()
+            for r in range(rows):
+                offset = r * cols
+                if cols == 0:
+                    continue
+                row_slice = data[offset : offset + cols]
+                max_value = max(row_slice) if row_slice else 0.0
+                running_sum = 0.0
+                for c in range(cols):
+                    value = math.exp(row_slice[c] - max_value)
+                    buffer[offset + c] = value
+                    running_sum += value
+                scale = (1.0 / running_sum) if running_sum > 0.0 else 0.0
+                for c in range(cols):
+                    buffer[offset + c] *= scale
+            return Tensor._from_python_array(rows, cols, buffer)
+
+        def scaled_dot_attention(
+            self,
+            keys: "Tensor",
+            values: "Tensor",
+            *,
+            contexts: int,
+            sequence: int,
+            scale: float,
+            z_bias: "Tensor" | None = None,
+            attn_bias: "Tensor" | None = None,
+            backend: str | None = None,
+        ) -> "Tensor":
+            if not isinstance(keys, Tensor) or not isinstance(values, Tensor):
+                raise TypeError("scaled_dot_attention expects Tensor inputs")
+
+            contexts = int(contexts)
+            sequence = int(sequence)
+            if contexts <= 0 or sequence <= 0:
+                raise ValueError("contexts and sequence must be positive integers")
+
+            head_dim = self._cols
+            expected_rows = contexts * sequence
+            if self._rows != expected_rows:
+                raise ValueError(
+                    "query tensor has shape {} but expected ({} * {}, {})".format(
+                        self.shape(), contexts, sequence, head_dim
+                    )
+                )
+            if keys._rows != expected_rows or keys._cols != head_dim:
+                raise ValueError("keys tensor must match query shape")
+            if values._rows != expected_rows or values._cols != head_dim:
+                raise ValueError("values tensor must match query shape")
+
+            z_bias_buffer = None
+            if z_bias is not None:
+                if not isinstance(z_bias, Tensor):
+                    raise TypeError("z_bias must be a Tensor or None")
+                if z_bias.shape() != (contexts, sequence):
+                    raise ValueError("z_bias must have shape (contexts, sequence)")
+                z_bias_buffer = z_bias._row_major_python()
+
+            attn_bias_buffer = None
+            if attn_bias is not None:
+                if not isinstance(attn_bias, Tensor):
+                    raise TypeError("attn_bias must be a Tensor or None")
+                if attn_bias.shape() != (expected_rows, sequence):
+                    raise ValueError(
+                        "attn_bias must have shape (contexts * sequence, sequence)"
+                    )
+                attn_bias_buffer = attn_bias._row_major_python()
+
+            target_backend = _resolve_stub_backend(
+                backend, op="scaled_dot_attention"
+            )
+
+            queries = self._row_major_python()
+            keys_buffer = keys._row_major_python()
+            values_buffer = values._row_major_python()
+            total = expected_rows * head_dim
+            buffer = array("d") if total == 0 else array("d", [0.0]) * total
+            accum = [0.0] * head_dim
+            scale_value = float(scale)
+
+            for context in range(contexts):
+                context_offset = context * sequence
+                for query_idx in range(sequence):
+                    query_row = context_offset + query_idx
+                    query_offset = query_row * head_dim
+                    if head_dim:
+                        accum[:] = [0.0] * head_dim
+                    logits: list[float] = []
+                    for key_idx in range(sequence):
+                        key_row = context_offset + key_idx
+                        key_offset = key_row * head_dim
+                        dot = 0.0
+                        for dim in range(head_dim):
+                            dot += (
+                                queries[query_offset + dim]
+                                * keys_buffer[key_offset + dim]
+                            )
+                        logit = dot * scale_value
+                        if z_bias_buffer is not None:
+                            logit += z_bias_buffer[context_offset + key_idx]
+                        if attn_bias_buffer is not None:
+                            logit += attn_bias_buffer[query_row * sequence + key_idx]
+                        logits.append(logit)
+
+                    if logits:
+                        max_logit = max(logits)
+                        exp_values = [math.exp(value - max_logit) for value in logits]
+                        denom = sum(exp_values)
+                        if denom > 0.0:
+                            weights = [value / denom for value in exp_values]
+                        else:
+                            weights = [0.0] * len(exp_values)
+                    else:
+                        weights = []
+
+                    for key_idx, weight in enumerate(weights):
+                        if weight == 0.0:
+                            continue
+                        key_row = context_offset + key_idx
+                        key_offset = key_row * head_dim
+                        for dim in range(head_dim):
+                            accum[dim] += weight * values_buffer[key_offset + dim]
+
+                    out_offset = query_offset
+                    for dim in range(head_dim):
+                        buffer[out_offset + dim] = accum[dim]
+
+            if target_backend == "numpy":
+                matrix = _np.asarray(buffer, dtype=_np.float64).reshape(
+                    expected_rows, head_dim
+                )
+                return Tensor._from_numpy_array(matrix)
+            return Tensor._from_python_array(expected_rows, head_dim, buffer)
+
+        def add(self, other: "Tensor") -> "Tensor":
+            if not isinstance(other, Tensor):
+                raise TypeError("add expects another Tensor instance")
+            if self.shape != other.shape:
+                raise ValueError("tensor shapes must match for add")
+            if NUMPY_AVAILABLE and self._backend == "numpy" and other._backend == "numpy":
+                result = self._data + other._data
+                return Tensor._from_numpy_array(result)
+            left = self._row_major_python()
+            right = other._row_major_python()
+            data = array("d", (a + b for a, b in zip(left, right)))
             return Tensor._from_python_array(self._rows, self._cols, data)
 
-        def add_scaled_(self, other: "Tensor", scale: float) -> None:
-            """Add ``scale * other`` to this tensor in-place."""
+        def sub(self, other: "Tensor") -> "Tensor":
+            if not isinstance(other, Tensor):
+                raise TypeError("sub expects another Tensor instance")
+            if self.shape != other.shape:
+                raise ValueError("tensor shapes must match for sub")
+            if NUMPY_AVAILABLE and self._backend == "numpy" and other._backend == "numpy":
+                result = self._data - other._data
+                return Tensor._from_numpy_array(result)
+            left = self._row_major_python()
+            right = other._row_major_python()
+            data = array("d", (a - b for a, b in zip(left, right)))
+            return Tensor._from_python_array(self._rows, self._cols, data)
 
+        def scale(self, value: float) -> "Tensor":
+            factor = float(value)
+            if NUMPY_AVAILABLE and self._backend == "numpy":
+                result = self._data * factor
+                return Tensor._from_numpy_array(result)
+            data = self._row_major_python()
+            buffer = array("d", (factor * elem for elem in data))
+            return Tensor._from_python_array(self._rows, self._cols, buffer)
+
+        def add_scaled_(self, other: "Tensor", scale: float) -> None:
             if not isinstance(other, Tensor):
                 raise TypeError("add_scaled_ expects another Tensor instance")
-            if self.shape() != other.shape():
+            if self.shape != other.shape:
                 raise ValueError("tensor shapes must match for add_scaled_")
-
             factor = float(scale)
             if NUMPY_AVAILABLE and self._backend == "numpy":
-                self._data += factor * other._to_numpy(copy=False)
+                other_matrix = other._to_numpy(copy=False)
+                self._data += other_matrix * factor
                 return
-
-            data = self._row_major_python()
-            other_flat = other._row_major_python()
-            for idx in range(len(data)):
-                data[idx] += factor * other_flat[idx]
+            dest = self._data
+            other_data = other._row_major_python()
+            for index, value in enumerate(other_data):
+                dest[index] += factor * value
 
         def add_row_inplace(self, bias: Sequence[float]) -> None:
-            """Add the provided row vector to each row of the tensor."""
-
-            normalized = _tensor_normalize_row(bias, allow_empty=self._cols == 0)
-            if len(normalized) != self._cols:
-                raise ValueError("bias length must match the tensor column count")
-
-            if NUMPY_AVAILABLE and self._backend == "numpy":
-                row = _np.asarray(normalized, dtype=_np.float64)
-                if row.size == 0:
-                    return
-                self._data += row
+            bias_values = [float(value) for value in bias]
+            if len(bias_values) != self._cols:
+                raise ValueError("bias length must match tensor columns")
+            if self._rows == 0 or self._cols == 0:
                 return
-
-            data = self._row_major_python()
+            if NUMPY_AVAILABLE and self._backend == "numpy":
+                self._data += _np.asarray(bias_values, dtype=_np.float64)
+                return
             cols = self._cols
+            dest = self._data
             for r in range(self._rows):
+                base = r * cols
+                for c, value in enumerate(bias_values):
+                    dest[base + c] += value
+
+        def squared_l2_norm(self) -> float:
+            if NUMPY_AVAILABLE and self._backend == "numpy":
+                return float(_np.square(self._data).sum())
+            total = 0.0
+            for value in self._row_major_python():
+                total += value * value
+            return total
+
+        def project_to_poincare(self, curvature: float) -> "Tensor":
+            curvature = float(curvature)
+            if curvature >= 0.0:
+                raise ValueError("curvature must be negative for Poincaré projection")
+            rows, cols = self._rows, self._cols
+            data = self._row_major_python()
+            total = rows * cols
+            buffer = array("d") if total == 0 else array("d", [0.0]) * total
+            scale = math.sqrt(-curvature)
+            for r in range(rows):
                 offset = r * cols
-                for c in range(cols):
-                    data[offset + c] += normalized[c]
+                row_slice = data[offset : offset + cols]
+                norm_sq = sum(value * value for value in row_slice)
+                norm = math.sqrt(norm_sq)
+                if norm > 0.0:
+                    clip = math.tanh(norm / scale)
+                    factor = clip / norm
+                    for c in range(cols):
+                        buffer[offset + c] = row_slice[c] * factor
+                else:
+                    for c in range(cols):
+                        buffer[offset + c] = row_slice[c]
+            if self._backend == "numpy" and NUMPY_AVAILABLE:
+                matrix = _np.asarray(buffer, dtype=_np.float64).reshape(rows, cols)
+                return Tensor._from_numpy_array(matrix)
+            return Tensor._from_python_array(rows, cols, buffer)
+
+        def hyperbolic_distance(
+            self, other: "Tensor", curvature: float
+        ) -> float:
+            if not isinstance(other, Tensor):
+                raise TypeError("hyperbolic_distance expects another Tensor instance")
+            if self.shape != other.shape:
+                raise ValueError("tensor shapes must match for hyperbolic distance")
+            curvature = float(curvature)
+            if curvature >= 0.0:
+                raise ValueError("curvature must be negative for hyperbolic distance")
+            scale = math.sqrt(-curvature)
+            sum_norm = 0.0
+            sum_inner = 0.0
+            for a, b in zip(self._row_major_python(), other._row_major_python()):
+                pa = a / scale
+                pb = b / scale
+                diff = pa - pb
+                sum_norm += diff * diff
+                sum_inner += (1.0 - pa * pa) * (1.0 - pb * pb)
+            denom = math.sqrt(max(sum_inner, 1e-6))
+            return float(2.0 * math.acosh(1.0 + (sum_norm / denom)))
+
+        @staticmethod
+        def from_dlpack(_: object) -> "Tensor":
+            raise RuntimeError(
+                "DLPack interchange is unavailable in the SpiralTorch stub bindings."
+            )
+
+        def to_dlpack(self) -> object:
+            raise RuntimeError(
+                "DLPack interchange is unavailable in the SpiralTorch stub bindings."
+            )
+
+        def __dlpack__(self, *, stream=None):  # pragma: no cover - interoperability hook
+            raise RuntimeError(
+                "DLPack interchange is unavailable in the SpiralTorch stub bindings."
+            )
+
+        def __dlpack_device__(self):  # pragma: no cover - interoperability hook
+            raise RuntimeError(
+                "DLPack interchange is unavailable in the SpiralTorch stub bindings."
+            )
 
         def numpy(self, *, copy: bool = True):
             if not NUMPY_AVAILABLE:
@@ -1626,16 +1952,20 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             return instance
 
         @classmethod
-        def _from_python_array(cls, rows: int, cols: int, buffer: array) -> "Tensor":
+        def _from_python_array(
+            cls, rows: int, cols: int, buffer: array, *, backend: str = "python"
+        ) -> "Tensor":
             if buffer.typecode != "d":
                 raise TypeError("python backend tensors must use array('d') storage")
             if len(buffer) != rows * cols:
                 raise ValueError("buffer does not match requested tensor shape")
+            if backend not in {"python", "blas"}:
+                raise ValueError("python array tensors must have 'python' or 'blas' backend")
             instance = cls.__new__(cls)
             instance._rows = int(rows)
             instance._cols = int(cols)
             instance._data = buffer
-            instance._backend = "python"
+            instance._backend = backend
             return instance
 
         @_ShapeDescriptor
@@ -1672,7 +2002,8 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
                 return cls._from_numpy_array(matrix)
             flat = self._row_major_python()
             buffer = array("d", flat)
-            return cls._from_python_array(rows, cols, buffer)
+            backend = "blas" if self._backend == "blas" else "python"
+            return cls._from_python_array(rows, cols, buffer, backend=backend)
 
         def transpose(self) -> "Tensor":
             rows, cols = self._rows, self._cols
@@ -1687,7 +2018,8 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
                 row_offset = r * cols
                 for c in range(cols):
                     transposed[c * rows + r] = flat[row_offset + c]
-            return cls._from_python_array(cols, rows, transposed)
+            backend = "blas" if self._backend == "blas" else "python"
+            return cls._from_python_array(cols, rows, transposed, backend=backend)
 
         def sum_axis0(self) -> list[float]:
             cols = self._cols
@@ -1842,7 +2174,8 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
                 matrix = _np.zeros((rows, cols), dtype=_np.float64)
                 return Tensor._from_numpy_array(matrix)
             buffer = array("d", [0.0]) * total if total else array("d")
-            return Tensor._from_python_array(rows, cols, buffer)
+            backend = "blas" if BLAS_AVAILABLE else "python"
+            return Tensor._from_python_array(rows, cols, buffer, backend=backend)
 
         @staticmethod
         def randn(
@@ -1866,7 +2199,8 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             rng = random.Random(seed)
             values = [rng.gauss(mean, std) for _ in range(total)]
             buffer = array("d", values)
-            return Tensor._from_python_array(rows, cols, buffer)
+            backend = "blas" if BLAS_AVAILABLE else "python"
+            return Tensor._from_python_array(rows, cols, buffer, backend=backend)
 
         @staticmethod
         def rand(
@@ -1892,7 +2226,8 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             rng = random.Random(seed)
             values = [rng.uniform(min, max) for _ in range(total)]
             buffer = array("d", values)
-            return Tensor._from_python_array(rows, cols, buffer)
+            backend = "blas" if BLAS_AVAILABLE else "python"
+            return Tensor._from_python_array(rows, cols, buffer, backend=backend)
 
         @staticmethod
         def cat_rows(tensors: Sequence["Tensor"]) -> "Tensor":
@@ -1916,7 +2251,8 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             data = array("d")
             for tensor in tensors:
                 data.extend(tensor._row_major_python())
-            return Tensor._from_python_array(total_rows, cols, data)
+            backend = "blas" if BLAS_AVAILABLE else "python"
+            return Tensor._from_python_array(total_rows, cols, data, backend=backend)
 
         def __matmul__(self, other) -> "Tensor":  # pragma: no cover - convenience wrapper
             if isinstance(other, Tensor):
@@ -1942,11 +2278,21 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
     Tensor.__module__ = module.__name__
 
     def available_stub_backends() -> tuple[str, ...]:
-        return ("numpy", "python") if NUMPY_AVAILABLE else ("python",)
+        options: list[str] = []
+        if BLAS_AVAILABLE:
+            options.append("blas")
+        if NUMPY_AVAILABLE:
+            options.append("numpy")
+        options.append("python")
+        return tuple(options)
 
     module.Tensor = Tensor
     module.available_stub_backends = available_stub_backends
-    module.default_stub_backend = "numpy" if NUMPY_AVAILABLE else "python"
+    module.default_stub_backend = (
+        "blas"
+        if BLAS_AVAILABLE
+        else ("numpy" if NUMPY_AVAILABLE else "python")
+    )
 
     class Axis:
         """Named axis descriptor used by :class:`LabeledTensor` in the stub runtime."""

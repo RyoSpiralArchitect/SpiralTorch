@@ -2,17 +2,19 @@ from __future__ import annotations
 
 import math
 
-import spiraltorch as st
+from .test_tensor_stub_api import spiraltorch_stub
 
 
-def test_row_softmax_rows_sum_to_one() -> None:
+def test_row_softmax_rows_sum_to_one(spiraltorch_stub) -> None:
+    st = spiraltorch_stub
     tensor = st.Tensor(2, 3, [1.0, -1.5, 0.25, 0.5, 0.0, -2.0])
     softmax = tensor.row_softmax()
     for row in softmax.tolist():
         assert math.isclose(sum(row), 1.0, rel_tol=1e-6, abs_tol=1e-6)
 
 
-def test_row_softmax_cpu_backend_matches_auto() -> None:
+def test_row_softmax_cpu_backend_matches_auto(spiraltorch_stub) -> None:
+    st = spiraltorch_stub
     tensor = st.Tensor(
         3,
         4,
