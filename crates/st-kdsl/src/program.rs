@@ -18,9 +18,17 @@ use pattern::{MatchArm, MatchPattern};
 pub struct Program {
     stmts: Vec<Stmt>,
     locals: usize,
+    functions: Vec<FunctionDef>,
 }
 
 const MAX_LOOP_ITERATIONS: usize = 65_536;
+
+#[derive(Clone, Debug)]
+struct FunctionDef {
+    params: usize,
+    expr: ExprNode,
+    const_value: Option<Value>,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FlowSignal {
@@ -38,6 +46,7 @@ impl Program {
         Ok(Self {
             stmts: output.stmts,
             locals: output.locals,
+            functions: output.functions,
         })
     }
 
@@ -107,6 +116,25 @@ impl Program {
             }
         }
         FlowSignal::None
+    }
+
+    fn evaluate_user_function(
+        &self,
+        index: usize,
+        ctx: &Ctx,
+        caller_locals: &[Value],
+        args: &[ExprNode],
+    ) -> Value {
+        let def = &self.functions[index];
+        if def.params == 0 {
+            return def.eval(self, ctx, &[]);
+        }
+
+        let mut values = Vec::with_capacity(def.params);
+        for expr in args {
+            values.push(expr.evaluate(self, ctx, caller_locals));
+        }
+        def.eval(self, ctx, &values)
     }
 }
 
@@ -417,12 +445,15 @@ struct Parser {
     locals: Vec<String>,
     scopes: Vec<HashMap<String, usize>>,
     loop_depth: usize,
+    functions: Vec<FunctionDef>,
+    function_lookup: HashMap<String, usize>,
 }
 
 #[derive(Default)]
 struct ParseOutput {
     stmts: Vec<Stmt>,
     locals: usize,
+    functions: Vec<FunctionDef>,
 }
 
 impl Parser {
@@ -433,12 +464,19 @@ impl Parser {
             locals: Vec::new(),
             scopes: vec![HashMap::new()],
             loop_depth: 0,
+            functions: Vec::new(),
+            function_lookup: HashMap::new(),
         }
     }
 
     fn parse_program(&mut self) -> Result<ParseOutput, Err> {
         let mut output = ParseOutput::default();
-        while self.peek().is_some() {
+        while let Some(token) = self.peek() {
+            if matches!(token, Token::Fn) {
+                self.next();
+                self.parse_function_decl()?;
+                continue;
+            }
             let stmt = self.parse_stmt()?;
             output.stmts.push(stmt);
             if matches!(self.peek(), Some(Token::Semi)) {
@@ -446,7 +484,80 @@ impl Parser {
             }
         }
         output.locals = self.locals.len();
+        output.functions = std::mem::take(&mut self.functions);
         Ok(output)
+    }
+
+    fn parse_function_decl(&mut self) -> Result<(), Err> {
+        let name = match self.next().ok_or(Err::Tok)? {
+            Token::Id(id) => id,
+            _ => return Err(Err::Tok),
+        };
+
+        if Self::is_reserved_ident(&name) || self.function_lookup.contains_key(&name) {
+            return Err(Err::Parse(self.index.saturating_sub(1)));
+        }
+
+        self.expect(Token::Lp)?;
+        let mut params = Vec::new();
+        if !matches!(self.peek(), Some(Token::Rp)) {
+            loop {
+                match self.next().ok_or(Err::Tok)? {
+                    Token::Id(id) => {
+                        if Self::is_reserved_ident(&id) || params.contains(&id) {
+                            return Err(Err::Parse(self.index.saturating_sub(1)));
+                        }
+                        params.push(id);
+                    }
+                    _ => return Err(Err::Tok),
+                }
+                if matches!(self.peek(), Some(Token::Comma)) {
+                    self.next();
+                    continue;
+                }
+                break;
+            }
+        }
+        self.expect(Token::Rp)?;
+        self.expect(Token::FatArrow)?;
+
+        let index = self.functions.len();
+        self.function_lookup.insert(name.clone(), index);
+        self.functions.push(FunctionDef::placeholder(params.len()));
+
+        let expr = match self.parse_function_expr(&params) {
+            Ok(expr) => expr,
+            Err(err) => {
+                self.functions.pop();
+                self.function_lookup.remove(&name);
+                return Err(err);
+            }
+        };
+
+        self.functions[index] = FunctionDef::new(params.len(), expr);
+        self.expect(Token::Semi)?;
+        Ok(())
+    }
+
+    fn parse_function_expr(&mut self, params: &[String]) -> Result<ExprNode, Err> {
+        let saved_locals = std::mem::take(&mut self.locals);
+        let saved_scopes = std::mem::take(&mut self.scopes);
+        let saved_loop_depth = self.loop_depth;
+        self.locals = Vec::new();
+        self.scopes = vec![HashMap::new()];
+        self.loop_depth = 0;
+
+        let result = (|| {
+            for param in params {
+                self.define_local(param.clone())?;
+            }
+            self.parse_expr()
+        })();
+
+        self.locals = saved_locals;
+        self.scopes = saved_scopes;
+        self.loop_depth = saved_loop_depth;
+        result
     }
 
     fn parse_stmt(&mut self) -> Result<Stmt, Err> {
@@ -880,8 +991,16 @@ impl Parser {
             Token::Id(id) if id == "sqrt" => self.parse_function_call(Function::Sqrt),
             Token::Id(id) if id == "pow" => self.parse_function_call(Function::Pow),
             Token::Id(id) => {
+                if matches!(self.peek(), Some(Token::Lp)) {
+                    if let Some(&index) = self.function_lookup.get(&id) {
+                        return self.parse_user_function_call(index);
+                    }
+                }
+
                 if let Some(index) = self.lookup_local(&id) {
                     Ok(ExprNode::local(index))
+                } else if self.function_lookup.contains_key(&id) {
+                    Err(Err::Parse(self.index))
                 } else {
                     Err(Err::Tok)
                 }
@@ -919,7 +1038,33 @@ impl Parser {
         if args.len() < min || max.map(|limit| args.len() > limit).unwrap_or(false) {
             return Err(Err::Parse(self.index));
         }
-        Ok(ExprNode::call(function, args))
+        Ok(ExprNode::call(CallTarget::Intrinsic(function), args))
+    }
+
+    fn parse_user_function_call(&mut self, index: usize) -> Result<ExprNode, Err> {
+        let expected = self
+            .functions
+            .get(index)
+            .map(|function| function.params)
+            .ok_or(Err::Parse(self.index))?;
+
+        self.expect(Token::Lp)?;
+        let mut args = Vec::new();
+        if !matches!(self.peek(), Some(Token::Rp)) {
+            loop {
+                args.push(self.parse_expr()?);
+                if matches!(self.peek(), Some(Token::Comma)) {
+                    self.next();
+                    continue;
+                }
+                break;
+            }
+        }
+        self.expect(Token::Rp)?;
+        if args.len() != expected {
+            return Err(Err::Parse(self.index));
+        }
+        Ok(ExprNode::call(CallTarget::User(index), args))
     }
 
     fn peek(&self) -> Option<&Token> {
@@ -1031,6 +1176,9 @@ impl Parser {
     }
 
     fn define_local(&mut self, name: String) -> Result<usize, Err> {
+        if Self::is_reserved_ident(&name) {
+            return Err(Err::Parse(self.index));
+        }
         if let Some(scope) = self.scopes.last_mut() {
             if scope.contains_key(&name) {
                 return Err(Err::Parse(self.index));
@@ -1052,6 +1200,31 @@ impl Parser {
         }
         None
     }
+
+    fn is_reserved_ident(name: &str) -> bool {
+        matches!(
+            name,
+            "r" | "c"
+                | "k"
+                | "sg"
+                | "sgc"
+                | "kc"
+                | "tile_cols"
+                | "radix"
+                | "segments"
+                | "log2"
+                | "sel"
+                | "clamp"
+                | "min"
+                | "max"
+                | "abs"
+                | "floor"
+                | "ceil"
+                | "round"
+                | "sqrt"
+                | "pow"
+        )
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1072,6 +1245,7 @@ enum Token {
     Soft,
     Let,
     Set,
+    Fn,
     If,
     Else,
     While,
@@ -1212,6 +1386,12 @@ enum Function {
     Pow,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CallTarget {
+    Intrinsic(Function),
+    User(usize),
+}
+
 #[derive(Clone, Debug)]
 enum ExprNode {
     Number(f64),
@@ -1225,7 +1405,7 @@ enum ExprNode {
         lhs: Box<ExprNode>,
         rhs: Box<ExprNode>,
     },
-    Call(Function, Vec<ExprNode>),
+    Call(CallTarget, Vec<ExprNode>),
     Match {
         scrutinee: Box<ExprNode>,
         arms: Vec<MatchArm>,
@@ -1266,8 +1446,8 @@ impl ExprNode {
         .fold()
     }
 
-    fn call(function: Function, args: Vec<ExprNode>) -> Self {
-        ExprNode::Call(function, args).fold()
+    fn call(target: CallTarget, args: Vec<ExprNode>) -> Self {
+        ExprNode::Call(target, args).fold()
     }
 
     fn match_expr(scrutinee: ExprNode, arms: Vec<MatchArm>) -> Self {
@@ -1304,31 +1484,36 @@ impl ExprNode {
                     rhs: Box::new(rhs),
                 }
             }
-            Call(function, args) => {
+            Call(target, args) => {
                 let mut folded_args = Vec::with_capacity(args.len());
                 for arg in args {
                     folded_args.push(arg.fold());
                 }
 
-                if function == Function::Select {
-                    if let Some(cond) = folded_args[0].const_value() {
-                        return if cond.as_bool() {
-                            folded_args[1].clone()
-                        } else {
-                            folded_args[2].clone()
-                        };
+                match target {
+                    CallTarget::Intrinsic(function) => {
+                        if function == Function::Select {
+                            if let Some(cond) = folded_args[0].const_value() {
+                                return if cond.as_bool() {
+                                    folded_args[1].clone()
+                                } else {
+                                    folded_args[2].clone()
+                                };
+                            }
+                        }
+
+                        if let Some(values) = folded_args
+                            .iter()
+                            .map(ExprNode::const_value)
+                            .collect::<Option<Vec<_>>>()
+                        {
+                            return ExprNode::from_value(function.eval(&values));
+                        }
+
+                        Call(CallTarget::Intrinsic(function), folded_args)
                     }
+                    CallTarget::User(index) => Call(CallTarget::User(index), folded_args),
                 }
-
-                if let Some(values) = folded_args
-                    .iter()
-                    .map(ExprNode::const_value)
-                    .collect::<Option<Vec<_>>>()
-                {
-                    return ExprNode::from_value(function.eval(&values));
-                }
-
-                Call(function, folded_args)
             }
             Match { scrutinee, arms } => {
                 let scrutinee = scrutinee.fold();
@@ -1355,22 +1540,25 @@ impl ExprNode {
                 let r = rhs.const_value()?;
                 Some(op.apply(l, r))
             }
-            Call(function, args) => {
-                if function == &Function::Select {
-                    let cond = args[0].const_value()?;
-                    if cond.as_bool() {
-                        return args[1].const_value();
-                    } else {
-                        return args[2].const_value();
+            Call(target, args) => match target {
+                CallTarget::Intrinsic(function) => {
+                    if function == &Function::Select {
+                        let cond = args[0].const_value()?;
+                        if cond.as_bool() {
+                            return args[1].const_value();
+                        } else {
+                            return args[2].const_value();
+                        }
                     }
-                }
 
-                let values = args
-                    .iter()
-                    .map(ExprNode::const_value)
-                    .collect::<Option<Vec<_>>>()?;
-                Some(function.eval(&values))
-            }
+                    let values = args
+                        .iter()
+                        .map(ExprNode::const_value)
+                        .collect::<Option<Vec<_>>>()?;
+                    Some(function.eval(&values))
+                }
+                CallTarget::User(_) => None,
+            },
             Match { scrutinee, arms } => {
                 let value = scrutinee.const_value()?;
                 for arm in arms {
@@ -1415,7 +1603,14 @@ impl ExprNode {
                     op.apply(l, r)
                 }
             },
-            Call(function, args) => function.eval_runtime(program, ctx, locals, args),
+            Call(target, args) => match target {
+                CallTarget::Intrinsic(function) => {
+                    function.eval_runtime(program, ctx, locals, args)
+                }
+                CallTarget::User(index) => {
+                    program.evaluate_user_function(*index, ctx, locals, args)
+                }
+            },
             Match { scrutinee, arms } => {
                 let value = scrutinee.evaluate(program, ctx, locals);
                 for arm in arms {
@@ -1638,6 +1833,41 @@ impl Function {
     }
 }
 
+impl FunctionDef {
+    fn new(params: usize, expr: ExprNode) -> Self {
+        let const_value = if params == 0 {
+            expr.const_value()
+        } else {
+            None
+        };
+        Self {
+            params,
+            expr,
+            const_value,
+        }
+    }
+
+    fn placeholder(params: usize) -> Self {
+        Self {
+            params,
+            expr: ExprNode::number(0.0),
+            const_value: None,
+        }
+    }
+
+    fn eval(&self, program: &Program, ctx: &Ctx, locals: &[Value]) -> Value {
+        if self.params == 0 {
+            if let Some(value) = self.const_value {
+                return value;
+            }
+            debug_assert!(locals.is_empty());
+        } else {
+            debug_assert_eq!(locals.len(), self.params);
+        }
+        self.expr.evaluate(program, ctx, locals)
+    }
+}
+
 fn lex(src: &str) -> Result<Vec<Token>, Err> {
     let bytes = src.as_bytes();
     let mut tokens = Vec::new();
@@ -1780,6 +2010,7 @@ fn lex(src: &str) -> Result<Vec<Token>, Err> {
                     "soft" => tokens.push(Token::Soft),
                     "let" => tokens.push(Token::Let),
                     "set" => tokens.push(Token::Set),
+                    "fn" => tokens.push(Token::Fn),
                     "if" => tokens.push(Token::If),
                     "else" => tokens.push(Token::Else),
                     "while" => tokens.push(Token::While),
@@ -2154,5 +2385,48 @@ mod tests {
         "#;
 
         assert!(Program::parse(script).is_err());
+    }
+
+    #[test]
+    fn user_function_invocation() {
+        let script = r#"
+            fn tuned(val) => sel(val > 2048, 9, 7);
+            wg: tuned(r);
+        "#;
+
+        let program = Program::parse(script).unwrap();
+        let mut rich = ctx();
+        rich.r = 4096;
+        let out_rich = program.evaluate(&rich);
+        assert_eq!(out_rich.hard.wg, Some(9));
+
+        let mut modest = ctx();
+        modest.r = 1024;
+        let out_modest = program.evaluate(&modest);
+        assert_eq!(out_modest.hard.wg, Some(7));
+    }
+
+    #[test]
+    fn recursive_function_support() {
+        let script = r#"
+            fn fact(n) => sel(n <= 1, 1, n * fact(n - 1));
+            radix: fact(4);
+        "#;
+
+        let program = Program::parse(script).unwrap();
+        let out = program.evaluate(&ctx());
+        assert_eq!(out.hard.radix, Some(24));
+    }
+
+    #[test]
+    fn zero_arity_function_returns_constant() {
+        let script = r#"
+            fn fallback() => 13;
+            wg: fallback();
+        "#;
+
+        let program = Program::parse(script).unwrap();
+        let out = program.evaluate(&ctx());
+        assert_eq!(out.hard.wg, Some(13));
     }
 }
