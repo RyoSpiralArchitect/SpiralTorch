@@ -16,6 +16,7 @@ import math
 import random
 import pathlib
 import sys
+import types
 import warnings
 from typing import Any
 
@@ -1492,6 +1493,122 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
         if symbol not in all_exports:
             all_exports.append(symbol)
     module.__dict__.setdefault("__version__", "0.0.0+stub")
+
+    def _stub_runtime_error(feature: str) -> RuntimeError:
+        return RuntimeError(
+            "The SpiralTorch stub bindings cannot provide "
+            f"{feature!r}; build the native extension ("
+            "`maturin develop -m bindings/st-py/Cargo.toml`) for full functionality."
+        )
+
+    def _register_stub_module(name: str, *, doc: str | None = None) -> types.ModuleType:
+        qualname = f"{module.__name__}.{name}"
+        stub_module = types.ModuleType(qualname, doc)
+
+        def _stub_getattr(attribute: str, *, _qualname: str = qualname):
+            raise _stub_runtime_error(f"{_qualname}.{attribute}")
+
+        stub_module.__getattr__ = _stub_getattr  # type: ignore[attr-defined]
+        sys.modules[qualname] = stub_module
+        setattr(module, name, stub_module)
+        if name not in all_exports:
+            all_exports.append(name)
+        return stub_module
+
+    _PLACEHOLDER_MODULES = {
+        "dataset": "Datasets & loaders are only available once the SpiralTorch native extension is built.",
+        "linalg": "Linear algebra helpers require the SpiralTorch native extension.",
+        "rec": "Signal reconstruction tools require the SpiralTorch native extension.",
+        "telemetry": "Telemetry integrations require the SpiralTorch native extension.",
+        "ecosystem": "Ecosystem integrations require the SpiralTorch native extension.",
+    }
+
+    for _name, _doc in _PLACEHOLDER_MODULES.items():
+        _register_stub_module(_name, doc=_doc)
+
+    def _install_spiral_rl_stub() -> types.ModuleType:
+        stub = _register_stub_module(
+            "spiral_rl",
+            doc=(
+                "Stub reinforcement learning harness. Build the native SpiralTorch extension "
+                "to access training agents."
+            ),
+        )
+        sys.modules["spiral_rl"] = stub
+        module_name = f"{module.__name__}.spiral_rl"
+
+        class _StubAgent:
+            """Stub placeholder for SpiralTorch reinforcement learning agents."""
+
+            __slots__ = ()
+
+            def __init__(self, *args, **kwargs):
+                raise _stub_runtime_error(f"{module_name}.stAgent")
+
+            def _fail(self) -> None:
+                raise _stub_runtime_error(f"{module_name}.stAgent")
+
+            def select_action(self, *args, **kwargs):
+                self._fail()
+
+            def select_actions(self, *args, **kwargs):
+                self._fail()
+
+            def update(self, *args, **kwargs):
+                self._fail()
+
+            def update_batch(self, *args, **kwargs):
+                self._fail()
+
+            @property
+            def epsilon(self):
+                self._fail()
+
+            def set_epsilon(self, *args, **kwargs):
+                self._fail()
+
+            def set_exploration(self, *args, **kwargs):
+                self._fail()
+
+            def state_dict(self):
+                self._fail()
+
+            def load_state_dict(self, *args, **kwargs):
+                self._fail()
+
+        _StubAgent.__name__ = "stAgent"
+        _StubAgent.__module__ = "spiral_rl"
+
+        class _PpoAgent(_StubAgent):
+            __name__ = "PpoAgent"
+
+            def __init__(self, *args, **kwargs):
+                raise _stub_runtime_error(f"{module_name}.PpoAgent")
+
+        _PpoAgent.__module__ = "spiral_rl"
+
+        class _SacAgent(_StubAgent):
+            __name__ = "SacAgent"
+
+            def __init__(self, *args, **kwargs):
+                raise _stub_runtime_error(f"{module_name}.SacAgent")
+
+        _SacAgent.__module__ = "spiral_rl"
+
+        stub.stAgent = _StubAgent
+        stub.DqnAgent = _StubAgent
+        stub.PyDqnAgent = _StubAgent
+        stub.PpoAgent = _PpoAgent
+        stub.SacAgent = _SacAgent
+        stub.__all__ = ["stAgent", "DqnAgent", "PyDqnAgent", "PpoAgent", "SacAgent"]
+
+        def _spiral_rl_getattr(attribute: str, *, _module_name: str = module_name):
+            raise _stub_runtime_error(f"{_module_name}.{attribute}")
+
+        stub.__getattr__ = _spiral_rl_getattr  # type: ignore[attr-defined]
+        return stub
+
+    _install_spiral_rl_stub()
 
     def _missing_attr(name: str):
         raise AttributeError(
