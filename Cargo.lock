@@ -2889,12 +2889,14 @@ dependencies = [
 name = "spiral-selfsup"
 version = "0.1.0"
 dependencies = [
+ "once_cell",
  "rand",
  "st-core",
  "st-metrics",
  "st-tensor",
  "tensorboard-rs",
  "thiserror 1.0.69",
+ "toml",
 ]
 
 [[package]]
@@ -3119,6 +3121,7 @@ dependencies = [
  "rand_distr",
  "serde",
  "serde_json",
+ "spiral-selfsup",
  "st-core",
  "st-frac",
  "st-tensor",
