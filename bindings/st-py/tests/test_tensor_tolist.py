@@ -86,12 +86,17 @@ def test_stub_tensor_tolist_from_range_is_nested() -> None:
     module = _load_stub_module()
     expected = _expected_range_matrix()
 
+    tensor_default = module.Tensor(2, 3, range(6))  # type: ignore[attr-defined]
+    assert tensor_default.tolist() == expected
+
     tensor_python = module.Tensor(2, 3, range(6), backend="python")  # type: ignore[attr-defined]
     assert tensor_python.tolist() == expected
+    assert tensor_python.tolist() == tensor_default.tolist()
 
     if "numpy" in module.available_stub_backends():  # type: ignore[attr-defined]
         tensor_numpy = module.Tensor(2, 3, range(6), backend="numpy")  # type: ignore[attr-defined]
         assert tensor_numpy.tolist() == expected
+        assert tensor_numpy.tolist() == tensor_default.tolist()
 
 
 @pytest.mark.parametrize(
