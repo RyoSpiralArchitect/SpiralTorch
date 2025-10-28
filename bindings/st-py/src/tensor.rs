@@ -717,6 +717,10 @@ impl PyTensor {
         self.inner.sum_axis0()
     }
 
+    pub fn sum_axis1(&self) -> Vec<f32> {
+        self.inner.sum_axis1()
+    }
+
     pub fn squared_l2_norm(&self) -> f32 {
         self.inner.squared_l2_norm()
     }

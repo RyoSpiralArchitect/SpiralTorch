@@ -45,7 +45,8 @@ def load_config(path: Path) -> Dict[str, Any]:
         config = yaml.safe_load(text)
     if not isinstance(config, dict):
         raise TypeError(
-            "Configuration top-level must be an object (mapping)"
+            "Configuration top-level must be an object (mapping), "
+            f"got {type(config).__name__}"
         )
     return config
 
