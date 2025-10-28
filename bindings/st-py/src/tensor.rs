@@ -1,7 +1,9 @@
-use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyOverflowError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::ffi;
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyList, PyModule};
+use pyo3::types::{
+    PyAny, PyByteArray, PyBytes, PyDict, PyList, PyMemoryView, PyModule, PyString, PyTuple,
+};
 use pyo3::wrap_pyfunction;
 use pyo3::{Bound, PyRef, PyRefMut};
 #[cfg(feature = "hip")]
@@ -65,6 +67,53 @@ fn parse_attention_backend(label: Option<&str>) -> AttentionBackend {
                 "unknown attention backend label, falling back to auto",
             );
             AttentionBackend::Auto
+        }
+    }
+}
+
+#[derive(Default)]
+struct TensorCtorDims {
+    rows: Option<usize>,
+    cols: Option<usize>,
+}
+
+enum TensorDataArg {
+    Unspecified,
+    ExplicitNone,
+    Provided(PyObject),
+}
+
+impl TensorDataArg {
+    fn is_set(&self) -> bool {
+        !matches!(self, Self::Unspecified)
+    }
+
+    fn from_object(obj: &Bound<PyAny>) -> Self {
+        if obj.is_none() {
+            Self::ExplicitNone
+        } else {
+            Self::Provided(obj.clone().unbind())
+        }
+    }
+
+    fn into_option(self) -> Option<PyObject> {
+        match self {
+            Self::Unspecified | Self::ExplicitNone => None,
+            Self::Provided(obj) => Some(obj),
+        }
+    }
+}
+
+enum CollectContext {
+    Data,
+    Row,
+}
+
+impl CollectContext {
+    fn type_error_message(&self) -> &'static str {
+        match self {
+            Self::Data => "Tensor data must be an iterable of floats or nested iterables",
+            Self::Row => "Tensor rows must be sequences of numbers",
         }
     }
 }
@@ -158,6 +207,243 @@ impl PyTensor {
     }
 }
 
+fn ensure_dim_matches(slot: &mut Option<usize>, value: usize, label: &str) -> PyResult<()> {
+    if let Some(existing) = slot {
+        if *existing != value {
+            return Err(PyValueError::new_err(format!(
+                "Tensor {label} argument conflicts with shape: {existing} != {value}"
+            )));
+        }
+    } else {
+        *slot = Some(value);
+    }
+    Ok(())
+}
+
+fn object_repr(any: &Bound<PyAny>) -> String {
+    any.repr()
+        .map(|s| s.to_string())
+        .unwrap_or_else(|_| "<object>".to_owned())
+}
+
+fn is_string_like(any: &Bound<PyAny>) -> bool {
+    any.downcast::<PyString>().is_ok()
+        || any.downcast::<PyBytes>().is_ok()
+        || any.downcast::<PyByteArray>().is_ok()
+        || any.downcast::<PyMemoryView>().is_ok()
+}
+
+fn is_sequence_like(any: &Bound<PyAny>) -> bool {
+    if is_string_like(any) {
+        return false;
+    }
+    unsafe { ffi::PySequence_Check(any.as_ptr()) == 1 }
+}
+
+fn collect_iterable(any: &Bound<PyAny>, context: CollectContext) -> PyResult<Vec<PyObject>> {
+    if is_string_like(any) {
+        return Err(PyTypeError::new_err(context.type_error_message()));
+    }
+    let iter = any
+        .iter()
+        .map_err(|_| PyTypeError::new_err(context.type_error_message()))?;
+    let mut out = Vec::new();
+    for item in iter {
+        out.push(item?.unbind());
+    }
+    Ok(out)
+}
+
+fn coerce_index(_: Python<'_>, any: &Bound<PyAny>, label: &str) -> PyResult<usize> {
+    let repr = object_repr(any);
+    let int_obj = match any.call_method0("__int__") {
+        Ok(obj) => obj,
+        Err(_) => any.call_method0("__index__").map_err(|_| {
+            PyTypeError::new_err(format!("Tensor {label} must be an integer, got {repr}"))
+        })?,
+    };
+    let value: i128 = int_obj.extract().map_err(|_| {
+        PyTypeError::new_err(format!("Tensor {label} must be an integer, got {repr}"))
+    })?;
+    if value < 0 {
+        return Err(PyValueError::new_err(format!(
+            "Tensor {label} must be non-negative, got {value}"
+        )));
+    }
+    usize::try_from(value).map_err(|_| PyOverflowError::new_err("tensor dimension overflowed"))
+}
+
+fn coerce_shape(py: Python<'_>, any: &Bound<PyAny>, label: &str) -> PyResult<(usize, usize)> {
+    if !is_sequence_like(any) {
+        return Err(PyTypeError::new_err(format!(
+            "Tensor {label} must be a sequence of two integers"
+        )));
+    }
+    let mut collected = Vec::with_capacity(2);
+    for item in any.iter().map_err(|_| {
+        PyTypeError::new_err(format!("Tensor {label} must be a sequence of two integers"))
+    })? {
+        collected.push(item?.unbind());
+    }
+    if collected.len() != 2 {
+        return Err(PyValueError::new_err(format!(
+            "Tensor {label} must contain exactly two dimensions, got {}",
+            collected.len()
+        )));
+    }
+    let rows = coerce_index(py, &collected[0].bind(py), "shape[0]")?;
+    let cols = coerce_index(py, &collected[1].bind(py), "shape[1]")?;
+    Ok((rows, cols))
+}
+
+fn maybe_shape(py: Python<'_>, any: &Bound<PyAny>) -> PyResult<Option<(usize, usize)>> {
+    if !is_sequence_like(any) {
+        return Ok(None);
+    }
+    let mut collected = Vec::with_capacity(2);
+    let iter = match any.iter() {
+        Ok(iter) => iter,
+        Err(_) => return Ok(None),
+    };
+    for item in iter {
+        let obj = match item {
+            Ok(obj) => obj,
+            Err(_) => return Ok(None),
+        };
+        collected.push(obj.unbind());
+    }
+    if collected.len() != 2 {
+        return Ok(None);
+    }
+    let rows = match coerce_index(py, &collected[0].bind(py), "shape[0]") {
+        Ok(value) => value,
+        Err(_) => return Ok(None),
+    };
+    let cols = match coerce_index(py, &collected[1].bind(py), "shape[1]") {
+        Ok(value) => value,
+        Err(_) => return Ok(None),
+    };
+    Ok(Some((rows, cols)))
+}
+
+fn normalize_row(py: Python<'_>, row: &Bound<PyAny>) -> PyResult<Vec<f32>> {
+    if let Ok(py_tensor) = row.extract::<PyRef<PyTensor>>() {
+        let (rows, cols) = py_tensor.inner.shape();
+        if rows > 1 {
+            return Err(PyTypeError::new_err(
+                "Tensor rows must be sequences of numbers",
+            ));
+        }
+        let data = py_tensor.inner.data();
+        let slice = if rows == 0 { &[][..] } else { &data[..cols] };
+        return Ok(slice.to_vec());
+    }
+
+    if !is_sequence_like(row) && row.hasattr("tolist")? {
+        let converted = row.call_method0("tolist")?;
+        return normalize_row(py, &converted);
+    }
+
+    let items = collect_iterable(row, CollectContext::Row)?;
+    let mut values = Vec::with_capacity(items.len());
+    for item in items {
+        let value = item
+            .bind(py)
+            .extract::<f32>()
+            .map_err(|_| PyTypeError::new_err("Tensor rows must be sequences of numbers"))?;
+        values.push(value);
+    }
+    Ok(values)
+}
+
+fn is_row_container(py: Python<'_>, any: &Bound<PyAny>) -> PyResult<bool> {
+    if any.extract::<PyRef<PyTensor>>().is_ok() {
+        return Ok(true);
+    }
+    if !is_sequence_like(any) && any.hasattr("tolist")? {
+        let converted = any.call_method0("tolist")?;
+        return is_row_container(py, &converted);
+    }
+    if is_sequence_like(any) {
+        return Ok(true);
+    }
+    if is_string_like(any) {
+        return Ok(false);
+    }
+    Ok(any.iter().is_ok())
+}
+
+fn flatten_tensor_data(py: Python<'_>, data: &Bound<PyAny>) -> PyResult<(usize, usize, Vec<f32>)> {
+    if let Ok(py_tensor) = data.extract::<PyRef<PyTensor>>() {
+        let (rows, cols) = py_tensor.inner.shape();
+        return Ok((rows, cols, py_tensor.inner.data().to_vec()));
+    }
+
+    if !is_sequence_like(data) && data.hasattr("tolist")? {
+        let converted = data.call_method0("tolist")?;
+        return flatten_tensor_data(py, &converted);
+    }
+
+    let items = collect_iterable(data, CollectContext::Data)?;
+    if items.is_empty() {
+        return Ok((0, 0, Vec::new()));
+    }
+
+    let treat_as_rows = is_row_container(py, &items[0].bind(py))?;
+    if treat_as_rows {
+        let mut cols: Option<usize> = None;
+        let mut flat = Vec::new();
+        for item in &items {
+            let normalized = normalize_row(py, &item.bind(py))?;
+            if let Some(expected) = cols {
+                if expected != normalized.len() {
+                    return Err(PyValueError::new_err(
+                        "Tensor rows must all share the same length",
+                    ));
+                }
+            } else {
+                cols = Some(normalized.len());
+            }
+            flat.extend(normalized);
+        }
+        let cols = cols.unwrap_or(0);
+        let rows = if cols == 0 {
+            items.len()
+        } else {
+            flat.len() / cols
+        };
+        Ok((rows, cols, flat))
+    } else {
+        let mut flat = Vec::with_capacity(items.len());
+        for item in &items {
+            let value = item.bind(py).extract::<f32>().map_err(|_| {
+                PyTypeError::new_err(
+                    "Tensor data must be an iterable of floats or nested iterables",
+                )
+            })?;
+            flat.push(value);
+        }
+        Ok((1, flat.len(), flat))
+    }
+}
+
+fn infer_missing_dimension(total: usize, known: usize, label: &str) -> PyResult<usize> {
+    if known == 0 {
+        if total != 0 {
+            return Err(PyValueError::new_err(format!(
+                "Tensor data of length {total} cannot fill ({known}) {label}"
+            )));
+        }
+        return Ok(0);
+    }
+    if total % known != 0 {
+        return Err(PyValueError::new_err(format!(
+            "Tensor data of length {total} cannot fill ({known}) {label}"
+        )));
+    }
+    Ok(total / known)
+}
+
 impl F32Input {
     fn from_py(any: &Bound<PyAny>) -> PyResult<Self> {
         if let Ok(py_tensor) = any.extract::<PyRef<PyTensor>>() {
@@ -186,13 +472,230 @@ impl F32Input {
 #[pymethods]
 impl PyTensor {
     #[new]
-    #[pyo3(signature = (rows, cols, data=None))]
-    fn new(rows: usize, cols: usize, data: Option<Vec<f32>>) -> PyResult<Self> {
-        let tensor = match data {
-            Some(buffer) => Tensor::from_vec(rows, cols, buffer),
-            None => Tensor::zeros(rows, cols),
+    #[pyo3(signature = (*args, **kwargs))]
+    fn new(
+        py: Python<'_>,
+        args: &Bound<PyTuple>,
+        kwargs: Option<&Bound<PyDict>>,
+    ) -> PyResult<Self> {
+        let mut dims = TensorCtorDims::default();
+        let mut data_kw = TensorDataArg::Unspecified;
+        let mut shape_kw: Option<PyObject> = None;
+        let mut rows_kw: Option<PyObject> = None;
+        let mut cols_kw: Option<PyObject> = None;
+        let mut backend_kw: Option<PyObject> = None;
+        let mut unexpected = Vec::new();
+
+        if let Some(kwargs) = kwargs {
+            for (key, value) in kwargs.iter() {
+                let key = key
+                    .downcast::<PyString>()
+                    .map_err(|_| PyTypeError::new_err("Tensor() keyword names must be strings"))?;
+                let label = key.to_string();
+                match label.as_str() {
+                    "data" => {
+                        if data_kw.is_set() {
+                            return Err(PyTypeError::new_err(
+                                "Tensor() got multiple values for data",
+                            ));
+                        }
+                        data_kw = TensorDataArg::from_object(&value);
+                    }
+                    "shape" => {
+                        shape_kw = Some(value.unbind());
+                    }
+                    "rows" => {
+                        rows_kw = Some(value.unbind());
+                    }
+                    "cols" => {
+                        cols_kw = Some(value.unbind());
+                    }
+                    "backend" => {
+                        backend_kw = Some(value.unbind());
+                    }
+                    other => unexpected.push(other.to_owned()),
+                }
+            }
         }
-        .map_err(tensor_err_to_py)?;
+
+        if !unexpected.is_empty() {
+            unexpected.sort();
+            return Err(PyTypeError::new_err(format!(
+                "Tensor() got unexpected keyword arguments: {}",
+                unexpected.join(", ")
+            )));
+        }
+
+        if let Some(shape_obj) = shape_kw {
+            let shape_bound = shape_obj.bind(py);
+            let (rows, cols) = coerce_shape(py, &shape_bound, "shape")?;
+            dims.rows = Some(rows);
+            dims.cols = Some(cols);
+        }
+
+        if let Some(rows_obj) = rows_kw {
+            let rows_bound = rows_obj.bind(py);
+            let rows = coerce_index(py, &rows_bound, "rows")?;
+            ensure_dim_matches(&mut dims.rows, rows, "rows")?;
+        }
+
+        if let Some(cols_obj) = cols_kw {
+            let cols_bound = cols_obj.bind(py);
+            let cols = coerce_index(py, &cols_bound, "cols")?;
+            ensure_dim_matches(&mut dims.cols, cols, "cols")?;
+        }
+
+        let mut positional: Vec<PyObject> = args.iter().map(|item| item.unbind()).collect();
+
+        match positional.len() {
+            0 => {}
+            1 => {
+                let candidate = positional.pop().unwrap();
+                let candidate_bound = candidate.bind(py);
+                if dims.rows.is_none() && dims.cols.is_none() {
+                    if let Some((rows, cols)) = maybe_shape(py, &candidate_bound)? {
+                        dims.rows = Some(rows);
+                        dims.cols = Some(cols);
+                    } else {
+                        if data_kw.is_set() {
+                            return Err(PyTypeError::new_err(
+                                "Tensor() got multiple values for data",
+                            ));
+                        }
+                        data_kw = TensorDataArg::from_object(&candidate_bound);
+                    }
+                } else {
+                    if data_kw.is_set() {
+                        return Err(PyTypeError::new_err(
+                            "Tensor() got multiple values for data",
+                        ));
+                    }
+                    data_kw = TensorDataArg::from_object(&candidate_bound);
+                }
+            }
+            2 => {
+                let second = positional.pop().unwrap();
+                let first = positional.pop().unwrap();
+                let first_bound = first.bind(py);
+                if dims.rows.is_none() && dims.cols.is_none() {
+                    if let Some((rows, cols)) = maybe_shape(py, &first_bound)? {
+                        dims.rows = Some(rows);
+                        dims.cols = Some(cols);
+                        if data_kw.is_set() {
+                            return Err(PyTypeError::new_err(
+                                "Tensor() got multiple values for data",
+                            ));
+                        }
+                        data_kw = TensorDataArg::from_object(&second.bind(py));
+                    } else {
+                        let inferred_rows = coerce_index(py, &first_bound, "rows")?;
+                        let inferred_cols = coerce_index(py, &second.bind(py), "cols")?;
+                        ensure_dim_matches(&mut dims.rows, inferred_rows, "rows")?;
+                        ensure_dim_matches(&mut dims.cols, inferred_cols, "cols")?;
+                    }
+                } else {
+                    let inferred_rows = coerce_index(py, &first_bound, "rows")?;
+                    ensure_dim_matches(&mut dims.rows, inferred_rows, "rows")?;
+                    let inferred_cols = coerce_index(py, &second.bind(py), "cols")?;
+                    ensure_dim_matches(&mut dims.cols, inferred_cols, "cols")?;
+                }
+            }
+            3 => {
+                let third = positional.pop().unwrap();
+                let second = positional.pop().unwrap();
+                let first = positional.pop().unwrap();
+                let rows_val = coerce_index(py, &first.bind(py), "rows")?;
+                ensure_dim_matches(&mut dims.rows, rows_val, "rows")?;
+                let cols_val = coerce_index(py, &second.bind(py), "cols")?;
+                ensure_dim_matches(&mut dims.cols, cols_val, "cols")?;
+                if data_kw.is_set() {
+                    return Err(PyTypeError::new_err(
+                        "Tensor() got multiple values for data",
+                    ));
+                }
+                data_kw = TensorDataArg::from_object(&third.bind(py));
+            }
+            n => {
+                return Err(PyTypeError::new_err(format!(
+                    "Tensor() takes at most 3 positional arguments but {n} were given",
+                )));
+            }
+        }
+
+        if let Some(obj) = backend_kw {
+            let bound = obj.bind(py);
+            if !bound.is_none() {
+                let label: String = bound
+                    .extract()
+                    .map_err(|_| PyTypeError::new_err("backend must be a string or None"))?;
+                if label != "numpy" && label != "python" {
+                    return Err(PyValueError::new_err(
+                        "backend must be 'numpy', 'python', or None",
+                    ));
+                }
+                warn!(
+                    backend = label.as_str(),
+                    "Tensor constructor backend hint ignored; using default storage",
+                );
+            }
+        }
+
+        let tensor = if let Some(data_obj) = data_kw.into_option() {
+            let data_bound = data_obj.bind(py);
+            let (inferred_rows, inferred_cols, flat) = flatten_tensor_data(py, &data_bound)?;
+            let total = flat.len();
+
+            let rows = match dims.rows {
+                Some(rows) => rows,
+                None => {
+                    if let Some(cols) = dims.cols {
+                        infer_missing_dimension(total, cols, "columns")?
+                    } else {
+                        inferred_rows
+                    }
+                }
+            };
+
+            let cols = match dims.cols {
+                Some(cols) => cols,
+                None => {
+                    if let Some(rows) = dims.rows {
+                        infer_missing_dimension(total, rows, "rows")?
+                    } else {
+                        inferred_cols
+                    }
+                }
+            };
+
+            if rows == 0 || cols == 0 {
+                if total != 0 {
+                    return Err(PyValueError::new_err(format!(
+                        "Tensor shape ({rows}, {cols}) is incompatible with {total} data elements",
+                    )));
+                }
+            } else if rows
+                .checked_mul(cols)
+                .ok_or_else(|| PyOverflowError::new_err("tensor dimensions overflowed"))?
+                != total
+            {
+                return Err(PyValueError::new_err(format!(
+                    "Tensor data of length {total} cannot be reshaped to ({rows}, {cols})",
+                )));
+            }
+
+            Tensor::from_vec(rows, cols, flat).map_err(tensor_err_to_py)?
+        } else {
+            let (rows, cols) = match (dims.rows, dims.cols) {
+                (Some(r), Some(c)) => (r, c),
+                _ => {
+                    return Err(PyTypeError::new_err(
+                        "Tensor() requires a shape when data is omitted",
+                    ));
+                }
+            };
+            Tensor::zeros(rows, cols).map_err(tensor_err_to_py)?
+        };
+
         Ok(Self { inner: tensor })
     }
 
@@ -717,6 +1220,10 @@ impl PyTensor {
         self.inner.sum_axis0()
     }
 
+    pub fn sum_axis1(&self) -> Vec<f32> {
+        self.inner.sum_axis1()
+    }
+
     pub fn squared_l2_norm(&self) -> f32 {
         self.inner.squared_l2_norm()
     }
@@ -915,7 +1422,9 @@ mod tests {
     #[test]
     fn dlpack_roundtrip_shares_buffer() {
         Python::with_gil(|py| {
-            let tensor = PyTensor::new(2, 3, Some(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0])).unwrap();
+            let tensor = PyTensor::from_tensor(
+                Tensor::from_vec(2, 3, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap(),
+            );
             let capsule = tensor.to_dlpack(py).unwrap();
             let restored = PyTensor::from_dlpack(py, capsule).unwrap();
             assert_eq!(

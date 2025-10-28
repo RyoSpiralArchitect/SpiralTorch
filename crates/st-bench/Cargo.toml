@@ -16,6 +16,7 @@ st-backend-wgpu = { path = "../st-backend-wgpu" }
 
 [dev-dependencies]
 criterion = "0.5"
+pyo3 = { version = "0.22", features = ["auto-initialize"] }
 
 [[bench]]
 name = "linear_epoch"
@@ -23,4 +24,8 @@ harness = false
 
 [[bench]]
 name = "transforms"
+harness = false
+
+[[bench]]
+name = "python_bindings"
 harness = false

@@ -5,6 +5,8 @@ import math as _math
 import threading as _threading
 import types as _types
 import sys
+import importlib.abc as _importlib_abc
+import importlib.util as _importlib_util
 import weakref as _weakref
 from collections import deque as _deque
 from collections.abc import Iterable as _IterableABC, Sequence as _SequenceABC
@@ -21,6 +23,7 @@ from typing import (
     Optional as _Optional,
     Sequence as _Sequence,
     Tuple as _Tuple,
+    NoReturn as _NoReturn,
 )
 from importlib.metadata import version as _pkg_version, PackageNotFoundError
 
@@ -36,6 +39,111 @@ from ._zspace_aliases import (
 )
 
 _rs: _types.ModuleType | None = None
+
+
+def _install_spiral_rl_stub() -> None:
+    """Populate the public reinforcement-learning namespace with a friendly stub."""
+
+    module = sys.modules.get("spiral_rl")
+    if module is None:
+        module = _types.ModuleType("spiral_rl")
+        sys.modules["spiral_rl"] = module
+
+    module.__doc__ = (
+        "SpiralTorch reinforcement learning stub (native extension unavailable)."
+    )
+    module.__spiraltorch_placeholder__ = True
+
+    def _rl_stub_error(feature: str) -> RuntimeError:
+        raise RuntimeError(
+            "SpiralTorch reinforcement learning stub: "
+            f"'{feature}' requires the native extension. "
+            "Install a wheel with compiled components or build the native module from source."
+        )
+
+    class _RLStubBase:
+        """Base for RL stubs that consistently signal the missing native extension."""
+
+        __slots__ = ()
+
+        def __init__(self, *args: _Any, **kwargs: _Any) -> None:
+            _rl_stub_error(f"{self.__class__.__name__}()")
+
+        def _missing(self, feature: str) -> _NoReturn:
+            _rl_stub_error(f"{self.__class__.__name__}.{feature}")
+
+        def select_action(self, *args: _Any, **kwargs: _Any) -> _NoReturn:  # pragma: no cover - exercised via tests
+            self._missing("select_action")
+
+        def select_actions(self, *args: _Any, **kwargs: _Any) -> _NoReturn:  # pragma: no cover - exercised via tests
+            self._missing("select_actions")
+
+        def update(self, *args: _Any, **kwargs: _Any) -> _NoReturn:  # pragma: no cover - exercised via tests
+            self._missing("update")
+
+        def update_batch(self, *args: _Any, **kwargs: _Any) -> _NoReturn:  # pragma: no cover - exercised via tests
+            self._missing("update_batch")
+
+        @property
+        def epsilon(self) -> float:
+            self._missing("epsilon")
+
+        def set_epsilon(self, *args: _Any, **kwargs: _Any) -> _NoReturn:
+            self._missing("set_epsilon")
+
+        def set_exploration(self, *args: _Any, **kwargs: _Any) -> _NoReturn:
+            self._missing("set_exploration")
+
+        def state_dict(self) -> _Dict[str, _Any]:
+            self._missing("state_dict")
+
+        def load_state_dict(self, *args: _Any, **kwargs: _Any) -> _NoReturn:
+            self._missing("load_state_dict")
+
+    class stAgent(_RLStubBase):
+        """Stub implementation for :class:`spiral_rl.stAgent`."""
+
+    class PpoAgent(_RLStubBase):
+        """Stub implementation for :class:`spiral_rl.PpoAgent`."""
+
+        def score_actions(self, *args: _Any, **kwargs: _Any) -> _NoReturn:
+            self._missing("score_actions")
+
+        def value(self, *args: _Any, **kwargs: _Any) -> _NoReturn:
+            self._missing("value")
+
+    class SacAgent(_RLStubBase):
+        """Stub implementation for :class:`spiral_rl.SacAgent`."""
+
+        def sample_action(self, *args: _Any, **kwargs: _Any) -> _NoReturn:
+            self._missing("sample_action")
+
+        def jitter(self, *args: _Any, **kwargs: _Any) -> _NoReturn:
+            self._missing("jitter")
+
+    exports = {
+        "stAgent": stAgent,
+        "DqnAgent": stAgent,
+        "PyDqnAgent": stAgent,
+        "PpoAgent": PpoAgent,
+        "SacAgent": SacAgent,
+    }
+
+    for name, value in exports.items():
+        value.__module__ = "spiral_rl"
+        setattr(module, name, value)
+        globals()[name] = value
+
+    module.__all__ = sorted(exports)
+
+    spiraltorch_module = globals().get("spiral_rl")
+    if isinstance(spiraltorch_module, _types.ModuleType):
+        spiraltorch_module.__doc__ = module.__doc__
+        forward_exports = set(getattr(spiraltorch_module, "__all__", ()))
+        forward_exports.update(exports)
+        spiraltorch_module.__all__ = sorted(forward_exports)
+        for name, value in exports.items():
+            setattr(spiraltorch_module, name, value)
 
 _PREDECLARED_SUBMODULES: list[tuple[str, str]] = [
     ("nn", "SpiralTorch neural network primitives"),
@@ -61,6 +169,15 @@ _PREDECLARED_SUBMODULES: list[tuple[str, str]] = [
 _RENAMED_EXPORTS: dict[str, str] = {
     "DqnAgent": "stAgent",
 }
+
+_CANONICAL_METRIC_NAMES: dict[str, str] = {
+    str(alias).lower(): str(canonical).lower()
+    for alias, canonical in ZSPACE_METRIC_ALIASES.items()
+}
+for _canonical in set(_CANONICAL_METRIC_NAMES.values()):
+    _CANONICAL_METRIC_NAMES.setdefault(_canonical.lower(), _canonical.lower())
+
+_RELEVANT_ZSPACE_METRICS = {"speed", "memory", "stability", "drs", "gradient"}
 
 
 def _safe_getattr(obj: _Any, name: str, default: _Any = None) -> _Any:
@@ -100,10 +217,8 @@ if "spiral_rl" not in sys.modules:
     # 参照される両方の候補名を用意しておく（実体は後で本物に差し替え）
     _shim.DqnAgent = type("DqnAgent", (), {})  # placeholder
     _shim.PyDqnAgent = type("PyDqnAgent", (), {})  # placeholder
+    _shim.__spiraltorch_placeholder__ = True
     sys.modules["spiral_rl"] = _shim
-# ついでに第三者パッケージの `rl` が入り込む事故を防止
-if "rl" not in sys.modules:
-    sys.modules["rl"] = _types.ModuleType("rl")
 
 try:
     _rs = import_module("spiraltorch.spiraltorch")
@@ -112,8 +227,21 @@ except ModuleNotFoundError as exc:
         raise
     try:
         _rs = import_module("spiraltorch.spiraltorch_native")
-    except ModuleNotFoundError:
-        _rs = import_module("spiraltorch_native")
+    except ModuleNotFoundError as _native_exc:
+        try:
+            _rs = import_module("spiraltorch_native")
+        except ModuleNotFoundError as _final_exc:
+            if _native_exc.name not in {
+                "spiraltorch.spiraltorch_native",
+                "spiraltorch_native",
+            }:
+                raise
+            if _final_exc.name not in {"spiraltorch.spiraltorch_native", "spiraltorch_native"}:
+                raise
+            _rs = None
+
+if _rs is None:
+    _install_spiral_rl_stub()
 
 # --- begin: promote real rl submodule & alias DqnAgent->stAgent ---
 try:
@@ -124,6 +252,79 @@ try:
             setattr(_spiral_rl, "DqnAgent", getattr(_spiral_rl, "stAgent"))
 except Exception:
     pass
+
+
+def _is_valid_rl_module(module: _types.ModuleType | None) -> bool:
+    return bool(
+        isinstance(module, _types.ModuleType)
+        and not getattr(module, "__spiraltorch_placeholder__", False)
+        and hasattr(module, "stAgent")
+    )
+
+
+def _spiraltorch_rl_module(*, load: bool) -> _types.ModuleType | None:
+    parent = sys.modules.get(__name__)
+    module = _safe_getattr(parent, "rl")
+    if _is_valid_rl_module(module):
+        return module
+    for cached in ("spiraltorch.rl", "spiraltorch.spiral_rl"):
+        candidate = sys.modules.get(cached)
+        if _is_valid_rl_module(candidate):
+            return candidate
+    if load:
+        for candidate in ("spiraltorch.rl", "spiraltorch.spiral_rl"):
+            try:
+                resolved = import_module(candidate)
+            except ModuleNotFoundError:
+                continue
+            if _is_valid_rl_module(resolved):
+                return resolved
+    return None
+
+
+class _SpiralTorchRLLazyLoader(_importlib_abc.Loader):
+    def create_module(self, spec):  # type: ignore[override]
+        module = _spiraltorch_rl_module(load=True)
+        if module is None:
+            raise ModuleNotFoundError("spiraltorch.rl module is unavailable")
+        sys.modules.setdefault(spec.name, module)
+        return module
+
+    def exec_module(self, module):  # type: ignore[override]
+        sys.modules.setdefault("rl", module)
+
+
+class _SpiralTorchRLAliasFinder(_importlib_abc.MetaPathFinder):
+    def __init__(self) -> None:
+        self._loader = _SpiralTorchRLLazyLoader()
+
+    def find_spec(self, fullname, path, target=None):  # type: ignore[override]
+        if fullname != "rl" or fullname in sys.modules:
+            return None
+        if _spiraltorch_rl_module(load=False) is None:
+            return None
+        return _importlib_util.spec_from_loader(fullname, self._loader, origin="spiraltorch")
+
+
+_RL_ALIAS_FINDER: _SpiralTorchRLAliasFinder | None = None
+
+
+def _ensure_rl_lazy_alias() -> None:
+    global _RL_ALIAS_FINDER
+    if "rl" in sys.modules:
+        return
+    if _spiraltorch_rl_module(load=False) is None:
+        return
+    if _RL_ALIAS_FINDER is None:
+        _RL_ALIAS_FINDER = _SpiralTorchRLAliasFinder()
+    for finder in sys.meta_path:
+        if finder is _RL_ALIAS_FINDER:
+            break
+    else:
+        sys.meta_path.insert(0, _RL_ALIAS_FINDER)
+
+
+_ensure_rl_lazy_alias()
 try:
     __version__ = _pkg_version("spiraltorch")
 except PackageNotFoundError:
@@ -145,12 +346,16 @@ def build_manifest() -> dict[str, _Any]:
     return dict(BUILD_MANIFEST)
 
 from .zspace_inference import (
+    ZMetrics,
     ZSpaceDecoded,
     ZSpaceInference,
     ZSpacePosterior,
     ZSpacePartialBundle,
     ZSpaceTelemetryFrame,
     ZSpaceInferencePipeline,
+    inference_to_mapping,
+    inference_to_zmetrics,
+    prepare_trainer_step_payload,
     canvas_partial_from_snapshot,
     canvas_coherence_partial,
     elliptic_partial_from_telemetry,
@@ -297,7 +502,8 @@ if _TENSOR_BASE is not None:
             )
 
         if not items:
-            raise ValueError("Tensor data cannot be empty")
+            # Allow callers to explicitly describe zero-length tensors.
+            return 0, 0, []
 
         head = items[0]
         if isinstance(head, _TENSOR_BASE):
@@ -310,11 +516,11 @@ if _TENSOR_BASE is not None:
             cols: int | None = None
             flat: list[float] = []
             for row in items:
-                normalized = _tensor_normalize_row(row, allow_empty=rows == 0)
+                # Allow empty rows; downstream shape checks ensure that only
+                # tensors with zero columns make it through.
+                normalized = _tensor_normalize_row(row, allow_empty=True)
                 if cols is None:
                     cols = len(normalized)
-                    if cols == 0 and rows != 0:
-                        raise ValueError("Tensor rows must not be empty")
                 elif len(normalized) != cols:
                     raise ValueError("Tensor rows must all share the same length")
                 flat.extend(normalized)
@@ -412,36 +618,31 @@ if _TENSOR_BASE is not None:
         inferred_rows, inferred_cols, flat = _tensor_flatten_data(data_value)
         total = len(flat)
 
+        def _infer_missing_dimension(
+            total_elems: int, known: int, *, known_label: str
+        ) -> int:
+            """Derive the complementary dimension from a known axis length."""
+
+            if known == 0:
+                if total_elems != 0:
+                    raise ValueError(
+                        f"Tensor data of length {total_elems} cannot fill ({known}) {known_label}"
+                    )
+                return 0
+            if total_elems % known != 0:
+                raise ValueError(
+                    f"Tensor data of length {total_elems} cannot fill ({known}) {known_label}"
+                )
+            return total_elems // known
+
         if rows is None and cols is None:
             rows, cols = inferred_rows, inferred_cols
         elif rows is None:
             if cols is None:
                 raise TypeError("Tensor() could not determine rows from provided inputs")
-            if cols == 0:
-                if total != 0:
-                    raise ValueError(
-                        f"Tensor data of length {total} cannot fill ({cols}) columns"
-                    )
-                rows = 0
-            else:
-                if total % cols != 0:
-                    raise ValueError(
-                        f"Tensor data of length {total} cannot fill ({cols}) columns"
-                    )
-                rows = total // cols
+            rows = _infer_missing_dimension(total, cols, known_label="columns")
         elif cols is None:
-            if rows == 0:
-                if total != 0:
-                    raise ValueError(
-                        f"Tensor data of length {total} cannot fill ({rows}) rows"
-                    )
-                cols = 0
-            else:
-                if total % rows != 0:
-                    raise ValueError(
-                        f"Tensor data of length {total} cannot fill ({rows}) rows"
-                    )
-                cols = total // rows
+            cols = _infer_missing_dimension(total, rows, known_label="rows")
         else:
             if rows * cols != total:
                 raise ValueError(
@@ -1160,6 +1361,8 @@ z = _ZSpaceNotation()
 
 _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
     "nn": {
+        "Identity": ("Identity",),
+        "Scaler": ("Scaler",),
         "NonLiner": ("NonLiner",),
         "Dropout": ("Dropout",),
         "Dataset": ("_NnDataset",),
@@ -1273,14 +1476,21 @@ class Axis:
         if self.size is not None:
             value = int(self.size)
             if value <= 0:
+                # Axis declarations require a concrete positive size; zero is only
+                # permitted when inferred from a tensor at runtime.
                 raise ValueError("axis size must be positive")
             object.__setattr__(self, "size", value)
 
     def with_size(self, size: int) -> "Axis":
         """Return a copy with the provided concrete size."""
 
-        if size <= 0:
-            raise ValueError("size must be positive")
+        size = int(size)
+        if size < 0:
+            raise ValueError("size must be non-negative")
+        if size == 0:
+            clone = Axis(self.name)
+            object.__setattr__(clone, "size", 0)
+            return clone
         return Axis(self.name, size)
 
     def __str__(self) -> str:  # pragma: no cover - representation helper
@@ -1301,7 +1511,7 @@ def _prepare_rows(data: _Any) -> _List[_List[float]]:
     if not isinstance(data, _Sequence):
         raise TypeError("tensor data must be a sequence")
     if not data:
-        raise ValueError("tensor data must contain at least one row")
+        return []
     rows: _List[_List[float]] = []
     if isinstance(data[0], _Sequence):  # type: ignore[index]
         width: int | None = None
@@ -1311,8 +1521,6 @@ def _prepare_rows(data: _Any) -> _List[_List[float]]:
             if not isinstance(row, _Sequence):
                 raise TypeError("tensor rows must be sequences of numbers")
             values = [float(value) for value in row]
-            if not values:
-                raise ValueError("tensor rows cannot be empty")
             if width is None:
                 width = len(values)
             elif len(values) != width:
@@ -1320,8 +1528,6 @@ def _prepare_rows(data: _Any) -> _List[_List[float]]:
             rows.append(values)
     else:
         values = [float(value) for value in data]  # type: ignore[assignment]
-        if not values:
-            raise ValueError("tensor data must contain at least one element")
         rows.append(values)
     return rows
 
@@ -1332,7 +1538,7 @@ def _tensor_from_data(data: _Any):
         return data
     rows = _prepare_rows(data)
     height = len(rows)
-    width = len(rows[0])
+    width = len(rows[0]) if rows else 0
     flat: _List[float] = [value for row in rows for value in row]
     return tensor_type(height, width, flat)
 
@@ -1346,8 +1552,16 @@ def _coerce_axis(axis: "Axis | str") -> Axis:
 
 
 def _resolve_axis_size(axis: Axis, size: int) -> Axis:
-    if size <= 0:
-        raise ValueError("tensor dimensions must be positive")
+    if size < 0:
+        raise ValueError("tensor dimensions must be non-negative")
+    if size == 0:
+        if axis.size is None:
+            return axis.with_size(0)
+        if axis.size != 0:
+            raise ValueError(
+                f"axis '{axis.name}' expects size {axis.size}, received {size}"
+            )
+        return axis
     if axis.size is None:
         return axis.with_size(size)
     if axis.size != size:
@@ -1476,6 +1690,42 @@ def label_tensor(tensor_obj: _Any, axes: _Sequence["Axis | str"]) -> LabeledTens
 
     return LabeledTensor(tensor_obj, axes)
 
+
+def _coerce_gradient_sequence(payload: _Any) -> list[float] | None:
+    if payload is None or isinstance(payload, (str, bytes, bytearray, memoryview)):
+        return None
+    if isinstance(payload, _Mapping):
+        return None
+    if isinstance(payload, _IterableABC):
+        try:
+            return [float(value) for value in payload]
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _extract_zmetrics_components(
+    *mappings: _Mapping[str, _Any]
+) -> tuple[dict[str, float], list[float] | None]:
+    scalars: dict[str, float] = {}
+    gradient: list[float] | None = None
+    for mapping in mappings:
+        for key, value in mapping.items():
+            canonical = _CANONICAL_METRIC_NAMES.get(str(key).lower())
+            if canonical not in _RELEVANT_ZSPACE_METRICS:
+                continue
+            if canonical == "gradient":
+                seq = _coerce_gradient_sequence(value)
+                if seq is not None:
+                    gradient = seq
+                continue
+            try:
+                scalars[canonical] = float(value)
+            except (TypeError, ValueError):
+                continue
+    return scalars, gradient
+
+
 @_dataclass
 class ZMetrics:
     """Typed metrics container fed into :class:`ZSpaceTrainer`."""
@@ -1485,6 +1735,101 @@ class ZMetrics:
     stability: float
     gradient: _Optional[_Sequence[float]] = None
     drs: float = 0.0
+
+    @classmethod
+    def from_mapping(
+        cls,
+        mapping: _Mapping[str, _Any],
+        *,
+        gradient: _Optional[_Sequence[float]] = None,
+    ) -> "ZMetrics":
+        scalars, gradient_override = _extract_zmetrics_components(mapping)
+        grad_source = gradient_override
+        if grad_source is None and gradient is not None:
+            coerced = _coerce_gradient_sequence(gradient)
+            if coerced is not None:
+                grad_source = coerced
+        gradient_payload = None
+        if grad_source:
+            gradient_payload = tuple(float(value) for value in grad_source)
+        return cls(
+            speed=float(scalars.get("speed", 0.0)),
+            memory=float(scalars.get("memory", 0.0)),
+            stability=float(scalars.get("stability", 0.0)),
+            gradient=gradient_payload,
+            drs=float(scalars.get("drs", 0.0)),
+        )
+
+    @classmethod
+    def from_payload(
+        cls,
+        payload: "ZSpaceInference | ZMetrics | _Mapping[str, _Any]",
+        *,
+        prefer_applied: bool = True,
+    ) -> "ZMetrics":
+        if isinstance(payload, cls):
+            return payload
+        if isinstance(payload, ZSpaceInference):
+            return inference_to_zmetrics(payload, prefer_applied=prefer_applied)
+        if isinstance(payload, _Mapping):
+            return cls.from_mapping(payload)
+        raise TypeError("payload must be mapping, ZMetrics or ZSpaceInference")
+
+
+def inference_to_zmetrics(
+    inference: "ZSpaceInference", *, prefer_applied: bool = True
+) -> ZMetrics:
+    """Convert a :class:`ZSpaceInference` result into :class:`ZMetrics`.
+
+    Args:
+        inference: Inference result produced by :class:`ZSpaceInferencePipeline`
+            or :func:`infer_with_partials`.
+        prefer_applied: When ``True`` (default), prefer values from
+            :attr:`ZSpaceInference.applied` when a metric was explicitly
+            rewritten by a partial observation. Falling back to
+            :attr:`ZSpaceInference.metrics` preserves the decoded baseline.
+
+    Returns:
+        A :class:`ZMetrics` instance populated with canonical speed, memory,
+        stability, DRS and gradient signals extracted from the inference.
+    """
+
+    if not isinstance(inference, ZSpaceInference):
+        raise TypeError("inference must be a ZSpaceInference instance")
+
+    metrics_mapping = dict(inference.metrics)
+    applied_mapping = dict(inference.applied) if inference.applied else {}
+
+    scalars, gradient_override = _extract_zmetrics_components(
+        metrics_mapping, applied_mapping if prefer_applied else {}
+    )
+
+    gradient_seq = list(float(entry) for entry in inference.gradient)
+    if not gradient_seq:
+        gradient_seq = gradient_override or []
+    elif gradient_override is not None:
+        gradient_seq = gradient_override
+
+    gradient_payload: _Optional[_Sequence[float]]
+    gradient_payload = tuple(gradient_seq) if gradient_seq else None
+
+    return ZMetrics(
+        speed=float(scalars.get("speed", 0.0)),
+        memory=float(scalars.get("memory", 0.0)),
+        stability=float(scalars.get("stability", 0.0)),
+        gradient=gradient_payload,
+        drs=float(scalars.get("drs", 0.0)),
+    )
+
+
+def ensure_zmetrics(
+    payload: "ZSpaceInference | ZMetrics | _Mapping[str, _Any]",
+    *,
+    prefer_applied: bool = True,
+) -> ZMetrics:
+    """Normalize any supported payload into a :class:`ZMetrics` instance."""
+
+    return ZMetrics.from_payload(payload, prefer_applied=prefer_applied)
 
 
 def _clone_volume(volume: _Sequence[_Sequence[_Sequence[float]]]) -> _List[_List[_List[float]]]:
@@ -1731,8 +2076,11 @@ class SpiralTorchVision:
             volume = volume.tolist()
         if len(volume) != self.depth:
             raise ValueError(f"expected {self.depth} slices, received {len(volume)}")
-        w = max(0.0, float(weight))
-        alpha = self._alpha * (w if w else 1.0)
+        weight = float(weight)
+        if weight < 0.0:
+            raise ValueError("weight must be non-negative")
+        # A zero weight should skip the EMA update entirely instead of reusing self._alpha.
+        alpha = 0.0 if weight <= 0.0 else self._alpha * weight
         for idx, slice_data in enumerate(volume):
             rows = _coerce_slice(slice_data, self.height, self.width)
             for r_idx, row in enumerate(rows):
@@ -1932,9 +2280,12 @@ class ZSpaceTrainer:
                     if value is None
                 ]
                 raise KeyError(f"missing keys in state: {missing}")
-            z = z or self._z
-            moment = moment or self._m
-            velocity = velocity or self._v
+            if z is None:
+                z = self._z
+            if moment is None:
+                moment = self._m
+            if velocity is None:
+                velocity = self._v
         self._assign_vector(self._z, z, strict)
         self._assign_vector(self._m, moment, strict)
         self._assign_vector(self._v, velocity, strict)
@@ -2037,20 +2388,21 @@ class ZSpaceTrainer:
             v_hat = self._v[i] / (1.0 - self._beta2 ** self._t)
             self._z[i] -= self._lr * m_hat / (_math.sqrt(v_hat) + self._eps)
 
-    def step(self, metrics: _Mapping[str, float] | ZMetrics) -> float:
-        if isinstance(metrics, ZMetrics):
-            speed = float(metrics.speed)
-            memory = float(metrics.memory)
-            stability = float(metrics.stability)
-            gradient = metrics.gradient
-            drs_signal = float(metrics.drs)
-        else:
-            speed = float(metrics.get("speed", 0.0))
-            memory = float(metrics.get("mem", metrics.get("memory", 0.0)))
-            stability = float(metrics.get("stab", metrics.get("stability", 0.0)))
-            grad = metrics.get("gradient")
-            gradient = grad if isinstance(grad, _Sequence) else None
-            drs_signal = float(metrics.get("drs", 0.0))
+    def step(
+        self,
+        metrics: _Mapping[str, float] | ZMetrics | "ZSpaceInference",
+        *,
+        prefer_applied: bool = True,
+    ) -> float:
+        normalized = ZMetrics.from_payload(
+            metrics, prefer_applied=prefer_applied
+        )
+
+        speed = float(normalized.speed)
+        memory = float(normalized.memory)
+        stability = float(normalized.stability)
+        gradient = normalized.gradient
+        drs_signal = float(normalized.drs)
         lam_speed, lam_mem, lam_stab, lam_frac, lam_drs = self._lam
         penalty = (
             lam_speed * self._normalise(speed)
@@ -2068,7 +2420,10 @@ class ZSpaceTrainer:
         return loss
 
 
-def step_many(trainer: ZSpaceTrainer, samples: _Iterable[_Mapping[str, float] | ZMetrics]) -> _List[float]:
+def step_many(
+    trainer: ZSpaceTrainer,
+    samples: _Iterable[_Mapping[str, float] | ZMetrics | ZSpaceInference],
+) -> _List[float]:
     for metrics in samples:
         trainer.step(metrics)
     return trainer.state
@@ -2076,7 +2431,7 @@ def step_many(trainer: ZSpaceTrainer, samples: _Iterable[_Mapping[str, float] | 
 
 def stream_zspace_training(
     trainer: ZSpaceTrainer,
-    samples: _Iterable[_Mapping[str, float] | ZMetrics],
+    samples: _Iterable[_Mapping[str, float] | ZMetrics | ZSpaceInference],
     *,
     on_step: _Optional[_Callable[[int, _List[float], float], None]] = None,
 ) -> _List[float]:
@@ -2398,6 +2753,8 @@ _mirror_into_module(
         "z_metrics",
         "step_many",
         "stream_zspace_training",
+        "inference_to_zmetrics",
+        "ensure_zmetrics",
     ],
     reexport=False,
 )
@@ -2509,6 +2866,8 @@ _EXTRAS.extend(
         "decode_zspace_embedding",
         "infer_from_partial",
         "compile_inference",
+        "inference_to_zmetrics",
+        "ensure_zmetrics",
     ]
 )
 
@@ -2535,7 +2894,7 @@ _CORE_EXPORTS = [
     "SearchLoop",
     "QatObserver","QuantizationReport","StructuredPruningReport","CompressionReport",
     "structured_prune","compress_weights",
-    "ModuleTrainer","NonLiner","ZConv","ZPooling","ZSpaceTrainer","ZSpaceCoherenceSequencer","PreDiscardTelemetry","PreDiscardPolicy",
+    "ModuleTrainer","Identity","Scaler","NonLiner","ZConv","ZPooling","ZSpaceTrainer","ZSpaceCoherenceSequencer","PreDiscardTelemetry","PreDiscardPolicy",
     "CoherenceObservation","CoherenceSignature","CoherenceChannelReport","CoherenceDiagnostics","is_swap_invariant",
     "TemporalResonanceBuffer","SpiralTorchVision",
     "CanvasTransformer","CanvasSnapshot","apply_vision_update",
