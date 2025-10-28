@@ -71,7 +71,7 @@ pub use layers::wave_gate::WaveGate;
 pub use layers::wave_rnn::WaveRnn;
 pub use layers::zspace_projector::ZSpaceProjector;
 pub use layers::{
-    Dropout, Gelu, HamiltonJacobiFlow, KleinGordonPropagation, LayerNorm, Relu,
+    Dropout, Gelu, HamiltonJacobiFlow, KleinGordonPropagation, LayerNorm, Relu, Scaler,
     StochasticSchrodingerLayer, ToposResonator, ZRelativityModule, ZSpaceMixer,
 };
 pub use lightning::{
