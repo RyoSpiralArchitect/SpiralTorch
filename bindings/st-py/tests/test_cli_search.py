@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import copy
+import importlib
+import json
+import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -104,3 +107,40 @@ def test_cli_surfaces_resource_errors(tmp_path: Path) -> None:
             "--max-trials",
             "1",
         ])
+
+
+def test_cli_handles_missing_tracking_module(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    config_path = write_config(tmp_path, CONFIG_TEMPLATE)
+    output_path = tmp_path / "best.json"
+
+    monkeypatch.delitem(sys.modules, "spiral.cli", raising=False)
+    monkeypatch.delitem(sys.modules, "tools.tracking", raising=False)
+    monkeypatch.delitem(sys.modules, "tools.tracking.base", raising=False)
+    monkeypatch.setitem(sys.modules, "tools", types.ModuleType("tools"))
+
+    with caplog.at_level("WARNING", logger="spiral.cli"):
+        cli_module = importlib.import_module("spiral.cli")
+        assert not getattr(cli_module, "TRACKING_AVAILABLE")
+
+        cli_module.main(
+            [
+                "search",
+                "--config",
+                str(config_path),
+                "--max-trials",
+                "1",
+                "--tracker",
+                "console",
+                "--output",
+                str(output_path),
+            ]
+        )
+
+    assert output_path.exists()
+    best = read_json(output_path)
+    assert "metric" in best
+    assert any(
+        "Tracking support is unavailable" in message for message in caplog.messages
+    )
