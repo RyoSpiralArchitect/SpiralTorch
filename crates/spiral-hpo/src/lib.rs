@@ -182,10 +182,59 @@ pub struct Observation {
 pub enum StrategyState {
     Bayesian(crate::strategies::BayesianState),
     Population(crate::strategies::PopulationState),
+    Random(crate::strategies::RandomState),
 }
 
 pub mod strategies {
     use super::*;
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct RandomState {
+        pub seed: u64,
+        pub suggestion_count: u64,
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct RandomStrategy {
+        pub(crate) state: RandomState,
+    }
+
+    impl RandomStrategy {
+        pub fn new(seed: u64) -> Self {
+            Self {
+                state: RandomState {
+                    seed,
+                    suggestion_count: 0,
+                },
+            }
+        }
+
+        fn rng_for(&self, draws: usize) -> StdRng {
+            let mut rng = StdRng::seed_from_u64(self.state.seed);
+            let skips = self.state.suggestion_count as usize * draws;
+            for _ in 0..skips {
+                let _: f64 = rng.gen();
+            }
+            rng
+        }
+
+        pub fn suggest(&mut self, space: &SearchSpace) -> TrialSuggestion {
+            let draws = space.draws_per_suggestion();
+            let mut rng = self.rng_for(draws);
+            self.state.suggestion_count += 1;
+            space.sample(&mut rng)
+        }
+
+        pub fn observe(&mut self, _observation: Observation) {}
+
+        pub fn state(&self) -> RandomState {
+            self.state.clone()
+        }
+
+        pub fn restore(state: RandomState) -> Self {
+            Self { state }
+        }
+    }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct BayesianState {
@@ -419,12 +468,13 @@ pub mod strategies {
     }
 }
 
-use strategies::{BayesianStrategy, PopulationStrategy};
+use strategies::{BayesianStrategy, PopulationStrategy, RandomStrategy};
 
 #[derive(Debug, Clone)]
 pub enum Strategy {
     Bayesian(BayesianStrategy),
     Population(PopulationStrategy),
+    Random(RandomStrategy),
 }
 
 impl Strategy {
@@ -432,6 +482,7 @@ impl Strategy {
         match self {
             Strategy::Bayesian(_) => "bayesian",
             Strategy::Population(_) => "population",
+            Strategy::Random(_) => "random",
         }
     }
 
@@ -453,6 +504,7 @@ impl Strategy {
         match self {
             Strategy::Bayesian(strategy) => StrategyState::Bayesian(strategy.state()),
             Strategy::Population(strategy) => StrategyState::Population(strategy.state()),
+            Strategy::Random(strategy) => StrategyState::Random(strategy.state()),
         }
     }
 
@@ -462,6 +514,7 @@ impl Strategy {
             StrategyState::Population(state) => {
                 Strategy::Population(PopulationStrategy::restore(state))
             }
+            StrategyState::Random(state) => Strategy::Random(RandomStrategy::restore(state)),
         }
     }
 }
@@ -763,6 +816,35 @@ mod tests {
 
         loop_b.observe(next_b.id, 0.3).unwrap();
         loop_a.observe(next_a.id, 0.3).unwrap();
+        let resume_state = loop_b.checkpoint();
+        assert_eq!(
+            checkpoint.draws_per_suggestion,
+            resume_state.draws_per_suggestion
+        );
+    }
+
+    #[test]
+    fn deterministic_resume_random() {
+        let strategy = Strategy::Random(RandomStrategy::new(1337));
+        let mut loop_a = SearchLoop::new(
+            SPACE.clone(),
+            strategy,
+            ResourceConfig::default(),
+            no_tracker(),
+        )
+        .unwrap();
+
+        let t1 = loop_a.suggest().unwrap();
+        loop_a.observe(t1.id, 1.23).unwrap();
+        let checkpoint = loop_a.checkpoint();
+
+        let mut loop_b = SearchLoop::from_state(SPACE.clone(), checkpoint.clone(), no_tracker());
+        let next_a = loop_a.suggest().unwrap();
+        let next_b = loop_b.suggest().unwrap();
+        assert_eq!(next_a.suggestion, next_b.suggestion);
+
+        loop_b.observe(next_b.id, 0.7).unwrap();
+        loop_a.observe(next_a.id, 0.7).unwrap();
         let resume_state = loop_b.checkpoint();
         assert_eq!(
             checkpoint.draws_per_suggestion,
