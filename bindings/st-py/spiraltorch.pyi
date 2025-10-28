@@ -74,7 +74,7 @@ def semantic_scale_stack(
 ) -> ScaleStack: ...
 
 class Tensor:
-    def __init__(self, rows: int, cols: int, data: Optional[Sequence[float]] = ...) -> None: ...
+    def __init__(self, *args: object, **kwargs: object) -> None: ...
     @staticmethod
     def zeros(rows: int, cols: int) -> Tensor: ...
     @staticmethod
@@ -127,6 +127,7 @@ class Tensor:
     def transpose(self) -> Tensor: ...
     def reshape(self, rows: int, cols: int) -> Tensor: ...
     def sum_axis0(self) -> List[float]: ...
+    def sum_axis1(self) -> List[float]: ...
     def squared_l2_norm(self) -> float: ...
     def project_to_poincare(self, curvature: float) -> Tensor: ...
     def hyperbolic_distance(self, other: Tensor, curvature: float) -> float: ...
@@ -683,6 +684,7 @@ class ZMetrics:
     stability: float
     gradient: Optional[Sequence[float]]
     drs: float
+    telemetry: Optional[Mapping[str, float]]
 
 class ZSpaceDecoded:
     z_state: Tuple[float, ...]
@@ -703,6 +705,7 @@ class ZSpaceInference:
     confidence: float
     prior: ZSpaceDecoded
     applied: Mapping[str, object]
+    telemetry: Optional[ZSpaceTelemetryFrame]
 
     def as_dict(self) -> Dict[str, object]: ...
 
@@ -757,6 +760,33 @@ def infer_with_trainer(
     smoothing: float = ...,
     alpha: float | None = ...,
 ) -> ZSpaceInference: ...
+
+
+def inference_to_mapping(
+    inference: ZSpaceInference | Mapping[str, object] | ZMetrics,
+    *,
+    prefer_applied: bool = ...,
+    canonical: bool = ...,
+    include_gradient: bool = ...,
+) -> Dict[str, object]: ...
+
+
+def inference_to_zmetrics(
+    inference: ZSpaceInference | Mapping[str, object] | ZMetrics,
+    *,
+    prefer_applied: bool = ...,
+    include_telemetry: bool = ...,
+) -> ZMetrics: ...
+
+
+def prepare_trainer_step_payload(
+    trainer: object,
+    inference: ZSpaceInference,
+    *,
+    payload: None | str | Callable[[ZSpaceInference], object] = ...,
+    prefer_applied: bool = ...,
+    canonical_mapping: bool = ...,
+) -> object: ...
 
 
 class ZSpaceTrainer:
@@ -1525,7 +1555,64 @@ def is_swap_invariant(arrangement: Sequence[float]) -> bool: ...
     def topos(self) -> OpenCartesianTopos: ...
 
 
+class _NnIdentity:
+    def __init__(self) -> None: ...
+
+    def forward(self, input: Tensor) -> Tensor: ...
+
+    def backward(self, input: Tensor, grad_output: Tensor) -> Tensor: ...
+
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+
+class _NnScaler:
+    def __init__(self, name: str, features: int) -> None: ...
+
+    @staticmethod
+    def from_gain(name: str, gain: Tensor) -> _NnScaler: ...
+
+    def forward(self, input: Tensor) -> Tensor: ...
+
+    def backward(self, input: Tensor, grad_output: Tensor) -> Tensor: ...
+
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+    def calibrate(self, samples: Tensor, epsilon: float) -> None: ...
+
+    def attach_hypergrad(self, curvature: float, learning_rate: float) -> None: ...
+
+    def attach_hypergrad_with_topos(
+        self,
+        curvature: float,
+        learning_rate: float,
+        *,
+        topos: OpenCartesianTopos | None = ...,
+    ) -> None: ...
+
+    def attach_realgrad(self, learning_rate: float) -> None: ...
+
+    def zero_accumulators(self) -> None: ...
+
+    def apply_step(self, fallback_lr: float) -> None: ...
+
+    def state_dict(self) -> List[Tuple[str, Tensor]]: ...
+
+    def load_state_dict(self, state: Sequence[Tuple[str, Tensor]]) -> None: ...
+
+    @property
+    def gain(self) -> Tensor: ...
+
+    @property
+    def baseline(self) -> Tensor: ...
+
+    def gradient(self) -> Tensor | None: ...
+
+    def psi_probe(self) -> float | None: ...
+
+
 class _NnModule(ModuleType):
+    Identity: type[_NnIdentity]
+    Scaler: type[_NnScaler]
     NonLiner: type[_NnNonLiner]
     Dropout: type[_NnDropout]
     Dataset: type[_NnDataset]
@@ -1544,6 +1631,14 @@ class _NnModule(ModuleType):
 
 
 nn: _NnModule
+
+
+class Identity(_NnIdentity):
+    ...
+
+
+class Scaler(_NnScaler):
+    ...
 
 
 class NonLiner(_NnNonLiner):

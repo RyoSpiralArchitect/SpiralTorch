@@ -3,6 +3,19 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+mod error;
+pub use error::KvErr;
+
+/// Result alias specialised for key-value helper routines.
+pub type KvResult<T> = std::result::Result<T, KvErr>;
+
+#[cfg(feature = "redis")]
+mod json;
+#[cfg(feature = "redis")]
+pub use json::{
+    JsonExpiry, JsonSetCondition, JsonSetOptions, JsonSetOptionsBuilder, PreparedJsonSetOptions,
+};
+
 #[cfg(feature = "redis")]
 use redis::{Commands, FromRedisValue, Pipeline, ToRedisArgs, Value};
 #[cfg(feature = "redis")]
@@ -11,40 +24,12 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "redis")]
 use std::collections::HashMap;
-#[cfg(feature = "redis")]
-use std::time::Duration;
-use thiserror::Error;
-
-/// Result alias specialised for key-value helper routines.
-pub type KvResult<T> = std::result::Result<T, KvErr>;
-
-#[derive(Error, Debug)]
-pub enum KvErr {
-    #[error("redis error: {0}")]
-    Redis(String),
-    #[cfg(feature = "redis")]
-    #[error("serde error: {0}")]
-    Serde(String),
-}
-
-#[cfg(feature = "redis")]
-impl From<redis::RedisError> for KvErr {
-    fn from(err: redis::RedisError) -> Self {
-        KvErr::Redis(err.to_string())
-    }
-}
-
-#[cfg(feature = "redis")]
-impl From<serde_json::Error> for KvErr {
-    fn from(err: serde_json::Error) -> Self {
-        KvErr::Serde(err.to_string())
-    }
-}
 
 #[cfg(feature = "redis")]
 pub fn redis_get_raw(url: &str, key: &str) -> KvResult<Option<String>> {
     with_redis(url, |kv| kv.get(key))
 }
+
 #[cfg(feature = "redis")]
 pub fn redis_lrange(url: &str, key: &str, start: isize, stop: isize) -> KvResult<Vec<String>> {
     with_redis(url, |kv| kv.lrange(key, start, stop))
@@ -168,167 +153,6 @@ pub fn redis_set_json_nx<T: Serialize>(url: &str, key: &str, value: &T) -> KvRes
 }
 
 #[cfg(feature = "redis")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-/// Controls conditional write behaviour for Redis `SET`.
-pub enum JsonSetCondition {
-    /// Always perform the write, regardless of key existence.
-    Always,
-    /// Only write when the key does not yet exist (`NX`).
-    Nx,
-    /// Only write when the key already exists (`XX`).
-    Xx,
-}
-
-#[cfg(feature = "redis")]
-impl Default for JsonSetCondition {
-    fn default() -> Self {
-        Self::Always
-    }
-}
-
-#[cfg(feature = "redis")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-/// Expiry semantics for Redis `SET`.
-pub enum JsonExpiry {
-    /// Expire the key after the provided number of seconds (`EX`).
-    Seconds(u64),
-    /// Expire the key after the provided number of milliseconds (`PX`).
-    Milliseconds(u64),
-}
-
-#[cfg(feature = "redis")]
-impl JsonExpiry {
-    /// Returns the raw command keyword + value pair for the expiry.
-    fn as_argument(self) -> (&'static str, u64) {
-        match self {
-            JsonExpiry::Seconds(secs) => ("EX", secs),
-            JsonExpiry::Milliseconds(ms) => ("PX", ms),
-        }
-    }
-
-    /// Creates an expiry representing seconds.
-    pub const fn seconds(secs: u64) -> Self {
-        Self::Seconds(secs)
-    }
-
-    /// Creates an expiry representing milliseconds.
-    pub const fn milliseconds(ms: u64) -> Self {
-        Self::Milliseconds(ms)
-    }
-
-    /// Converts a [`Duration`] into an expiry, favouring millisecond precision.
-    pub fn from_duration(duration: Duration) -> Self {
-        if duration.subsec_millis() == 0 {
-            Self::Seconds(duration.as_secs())
-        } else {
-            match duration
-                .as_secs()
-                .checked_mul(1000)
-                .and_then(|base| base.checked_add(duration.subsec_millis() as u64))
-            {
-                Some(total) => Self::Milliseconds(total),
-                None => Self::Seconds(duration.as_secs()),
-            }
-        }
-    }
-}
-
-#[cfg(feature = "redis")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-/// Configures Redis `SET` behaviour for JSON helpers.
-pub struct JsonSetOptions {
-    pub expiry: Option<JsonExpiry>,
-    pub keep_ttl: bool,
-    pub condition: JsonSetCondition,
-}
-
-#[cfg(feature = "redis")]
-impl Default for JsonSetOptions {
-    fn default() -> Self {
-        Self {
-            expiry: None,
-            keep_ttl: false,
-            condition: JsonSetCondition::Always,
-        }
-    }
-}
-
-#[cfg(feature = "redis")]
-impl JsonSetOptions {
-    /// Creates an empty option set.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Applies an explicit expiry.
-    pub fn with_expiry<E: Into<JsonExpiry>>(mut self, expiry: E) -> Self {
-        self.expiry = Some(expiry.into());
-        self
-    }
-
-    /// Applies an expiry in seconds.
-    pub fn with_expiry_seconds(self, seconds: u64) -> Self {
-        self.with_expiry(JsonExpiry::seconds(seconds))
-    }
-
-    /// Applies an expiry in milliseconds.
-    pub fn with_expiry_milliseconds(self, milliseconds: u64) -> Self {
-        self.with_expiry(JsonExpiry::milliseconds(milliseconds))
-    }
-
-    /// Applies an expiry derived from a [`Duration`].
-    pub fn with_duration(self, duration: Duration) -> Self {
-        self.with_expiry(JsonExpiry::from_duration(duration))
-    }
-
-    /// Clears any explicit expiry.
-    pub fn without_expiry(mut self) -> Self {
-        self.expiry = None;
-        self
-    }
-
-    /// Overrides the write condition.
-    pub fn with_condition(mut self, condition: JsonSetCondition) -> Self {
-        self.condition = condition;
-        self
-    }
-
-    /// Retains the existing TTL of the key (`KEEPTTL`).
-    pub fn keep_ttl(mut self) -> Self {
-        self.keep_ttl = true;
-        self
-    }
-
-    /// Applies the `NX` condition (only write when absent).
-    pub fn nx(self) -> Self {
-        self.with_condition(JsonSetCondition::Nx)
-    }
-
-    /// Applies the `XX` condition (only write when present).
-    pub fn xx(self) -> Self {
-        self.with_condition(JsonSetCondition::Xx)
-    }
-
-    /// Verifies that the selected options are valid for Redis.
-    fn validate(&self) -> KvResult<()> {
-        if self.keep_ttl && self.expiry.is_some() {
-            return Err(KvErr::Redis(
-                "cannot set both explicit expiry and KEEPTTL".to_string(),
-            ));
-        }
-
-        Ok(())
-    }
-}
-
-#[cfg(feature = "redis")]
-impl From<Duration> for JsonExpiry {
-    fn from(duration: Duration) -> Self {
-        JsonExpiry::from_duration(duration)
-    }
-}
-
-#[cfg(feature = "redis")]
 pub fn redis_set_json_with_options<T: Serialize>(
     url: &str,
     key: &str,
@@ -336,6 +160,18 @@ pub fn redis_set_json_with_options<T: Serialize>(
     options: &JsonSetOptions,
 ) -> KvResult<bool> {
     with_redis(url, |kv| kv.set_json_with_options(key, value, options))
+}
+
+#[cfg(feature = "redis")]
+pub fn redis_set_json_with_prepared_options<T: Serialize>(
+    url: &str,
+    key: &str,
+    value: &T,
+    prepared: &PreparedJsonSetOptions,
+) -> KvResult<bool> {
+    with_redis(url, |kv| {
+        kv.set_json_with_prepared_options(key, value, prepared)
+    })
 }
 
 #[cfg(feature = "redis")]
@@ -360,6 +196,22 @@ where
 {
     with_redis(url, |kv| {
         kv.get_or_set_json_with_options(key, default, options)
+    })
+}
+
+#[cfg(feature = "redis")]
+pub fn redis_get_or_set_json_with_prepared_options<T, F>(
+    url: &str,
+    key: &str,
+    default: F,
+    prepared: &PreparedJsonSetOptions,
+) -> KvResult<T>
+where
+    T: Serialize + DeserializeOwned,
+    F: FnOnce() -> T,
+{
+    with_redis(url, |kv| {
+        kv.get_or_set_json_with_prepared_options(key, default, prepared)
     })
 }
 
@@ -524,98 +376,33 @@ impl RedisKv {
         Ok(Self { conn })
     }
 
-    pub fn raw_connection(&mut self) -> &mut redis::Connection {
-        &mut self.conn
+    pub fn into_inner(self) -> redis::Connection {
+        self.conn
     }
 
-    pub fn get<T>(&mut self, key: &str) -> KvResult<Option<T>>
-    where
-        T: FromRedisValue,
-    {
-        let value = self.conn.get(key)?;
-        Ok(value)
+    pub fn get<T: FromRedisValue>(&mut self, key: &str) -> KvResult<Option<T>> {
+        Ok(self.conn.get(key)?)
     }
 
-    pub fn set<V>(&mut self, key: &str, value: V) -> KvResult<()>
-    where
-        V: ToRedisArgs,
-    {
-        self.conn.set::<_, _, ()>(key, value)?;
-        Ok(())
-    }
-
-    pub fn set_ex<V>(&mut self, key: &str, value: V, seconds: usize) -> KvResult<()>
-    where
-        V: ToRedisArgs,
-    {
-        self.conn.set_ex::<_, _, ()>(key, value, seconds)?;
-        Ok(())
-    }
-
-    pub fn set_nx<V>(&mut self, key: &str, value: V) -> KvResult<bool>
-    where
-        V: ToRedisArgs,
-    {
-        let written = self.conn.set_nx(key, value)?;
-        Ok(written)
-    }
-
-    pub fn getset<T, V>(&mut self, key: &str, value: V) -> KvResult<Option<T>>
-    where
-        T: FromRedisValue,
-        V: ToRedisArgs,
-    {
-        let previous = self.conn.getset(key, value)?;
-        Ok(previous)
-    }
-
-    pub fn del(&mut self, key: &str) -> KvResult<usize> {
-        Ok(self.conn.del(key)?)
-    }
-
-    pub fn exists(&mut self, key: &str) -> KvResult<bool> {
-        Ok(self.conn.exists(key)?)
-    }
-
-    pub fn expire(&mut self, key: &str, seconds: usize) -> KvResult<bool> {
-        Ok(self.conn.expire(key, seconds)?)
-    }
-
-    pub fn ttl(&mut self, key: &str) -> KvResult<isize> {
-        Ok(self.conn.ttl(key)?)
-    }
-
-    pub fn incr_by<N>(&mut self, key: &str, amount: N) -> KvResult<N>
-    where
-        N: ToRedisArgs + FromRedisValue,
-    {
-        Ok(self.conn.incr(key, amount)?)
-    }
-
-    pub fn lrange<T>(&mut self, key: &str, start: isize, stop: isize) -> KvResult<Vec<T>>
-    where
-        T: FromRedisValue,
-    {
+    pub fn lrange<T: FromRedisValue>(
+        &mut self,
+        key: &str,
+        start: isize,
+        stop: isize,
+    ) -> KvResult<Vec<T>> {
         Ok(self.conn.lrange(key, start, stop)?)
     }
 
-    pub fn lpush<V>(&mut self, key: &str, values: V) -> KvResult<usize>
-    where
-        V: ToRedisArgs,
-    {
+    pub fn lpush<V: ToRedisArgs>(&mut self, key: &str, values: V) -> KvResult<usize> {
         Ok(self.conn.lpush(key, values)?)
     }
 
-    pub fn rpush<V>(&mut self, key: &str, values: V) -> KvResult<usize>
-    where
-        V: ToRedisArgs,
-    {
+    pub fn rpush<V: ToRedisArgs>(&mut self, key: &str, values: V) -> KvResult<usize> {
         Ok(self.conn.rpush(key, values)?)
     }
 
     pub fn ltrim(&mut self, key: &str, start: isize, stop: isize) -> KvResult<()> {
-        self.conn.ltrim::<_, ()>(key, start, stop)?;
-        Ok(())
+        Ok(self.conn.ltrim(key, start, stop)?)
     }
 
     pub fn lpush_json<T>(&mut self, key: &str, value: &T) -> KvResult<usize>
@@ -645,10 +432,50 @@ impl RedisKv {
             .collect()
     }
 
-    pub fn set_json<T>(&mut self, key: &str, value: &T) -> KvResult<()>
+    pub fn set<V: ToRedisArgs>(&mut self, key: &str, value: V) -> KvResult<()> {
+        Ok(self.conn.set(key, value)?)
+    }
+
+    pub fn set_ex<V: ToRedisArgs>(&mut self, key: &str, value: V, seconds: usize) -> KvResult<()> {
+        Ok(self.conn.set_ex(key, value, seconds)?)
+    }
+
+    pub fn set_nx<V: ToRedisArgs>(&mut self, key: &str, value: V) -> KvResult<bool> {
+        Ok(self.conn.set_nx(key, value)?)
+    }
+
+    pub fn getset<T, V>(&mut self, key: &str, value: V) -> KvResult<Option<T>>
     where
-        T: Serialize,
+        T: FromRedisValue,
+        V: ToRedisArgs,
     {
+        Ok(self.conn.getset(key, value)?)
+    }
+
+    pub fn del(&mut self, key: &str) -> KvResult<usize> {
+        Ok(self.conn.del(key)?)
+    }
+
+    pub fn exists(&mut self, key: &str) -> KvResult<bool> {
+        Ok(self.conn.exists(key)?)
+    }
+
+    pub fn expire(&mut self, key: &str, seconds: usize) -> KvResult<bool> {
+        Ok(self.conn.expire(key, seconds)?)
+    }
+
+    pub fn ttl(&mut self, key: &str) -> KvResult<isize> {
+        Ok(self.conn.ttl(key)?)
+    }
+
+    pub fn incr_by<N>(&mut self, key: &str, amount: N) -> KvResult<N>
+    where
+        N: ToRedisArgs + FromRedisValue,
+    {
+        Ok(self.conn.incr(key, amount)?)
+    }
+
+    pub fn set_json<T: Serialize>(&mut self, key: &str, value: &T) -> KvResult<()> {
         let payload = serde_json::to_string(value)?;
         self.set(key, payload)
     }
@@ -664,6 +491,19 @@ impl RedisKv {
     {
         let payload = serde_json::to_string(value)?;
         self.set_json_payload_with_options(key, payload, options)
+    }
+
+    pub fn set_json_with_prepared_options<T>(
+        &mut self,
+        key: &str,
+        value: &T,
+        prepared: &PreparedJsonSetOptions,
+    ) -> KvResult<bool>
+    where
+        T: Serialize,
+    {
+        let payload = serde_json::to_string(value)?;
+        self.set_json_payload_with_prepared_options(key, payload, prepared)
     }
 
     pub fn get_json<T>(&mut self, key: &str) -> KvResult<Option<T>>
@@ -698,37 +538,35 @@ impl RedisKv {
         payload: String,
         options: &JsonSetOptions,
     ) -> KvResult<bool> {
-        options.validate()?;
-
         let mut cmd = redis::cmd("SET");
         cmd.arg(key).arg(payload);
 
-        if let Some(expiry) = options.expiry {
-            let (keyword, value) = expiry.as_argument();
-            cmd.arg(keyword).arg(value);
-        }
+        options.apply_to_command(&mut cmd)?;
+        self.finish_json_set(&mut cmd)
+    }
 
-        if options.keep_ttl {
-            cmd.arg("KEEPTTL");
-        }
+    fn set_json_payload_with_prepared_options(
+        &mut self,
+        key: &str,
+        payload: String,
+        prepared: &PreparedJsonSetOptions,
+    ) -> KvResult<bool> {
+        let mut cmd = redis::cmd("SET");
+        cmd.arg(key).arg(payload);
 
-        match options.condition {
-            JsonSetCondition::Always => {}
-            JsonSetCondition::Nx => {
-                cmd.arg("NX");
-            }
-            JsonSetCondition::Xx => {
-                cmd.arg("XX");
-            }
-        }
+        prepared.apply(&mut cmd);
+        self.finish_json_set(&mut cmd)
+    }
 
+    fn finish_json_set(&mut self, cmd: &mut redis::Cmd) -> KvResult<bool> {
         let response: Value = cmd.query(&mut self.conn)?;
         match response {
             Value::Nil => Ok(false),
             Value::Okay | Value::Status(_) | Value::Data(_) => Ok(true),
-            other => Err(KvErr::Redis(format!(
-                "unexpected response from SET: {other:?}"
-            ))),
+            other => Err(KvErr::UnexpectedResponse {
+                command: "SET",
+                response: other,
+            }),
         }
     }
 
@@ -762,6 +600,34 @@ impl RedisKv {
 
         let value = default();
         let inserted = self.set_json_with_options(key, &value, options)?;
+
+        if inserted {
+            return Ok(value);
+        }
+
+        if let Some(existing) = self.get_json(key)? {
+            Ok(existing)
+        } else {
+            Ok(value)
+        }
+    }
+
+    pub fn get_or_set_json_with_prepared_options<T, F>(
+        &mut self,
+        key: &str,
+        default: F,
+        prepared: &PreparedJsonSetOptions,
+    ) -> KvResult<T>
+    where
+        T: Serialize + DeserializeOwned,
+        F: FnOnce() -> T,
+    {
+        if let Some(existing) = self.get_json(key)? {
+            return Ok(existing);
+        }
+
+        let value = default();
+        let inserted = self.set_json_with_prepared_options(key, &value, prepared)?;
 
         if inserted {
             return Ok(value);
@@ -820,5 +686,52 @@ impl RedisKv {
     {
         let pipeline = build(redis::pipe());
         self.execute_pipeline(pipeline)
+    }
+}
+
+#[cfg(all(test, feature = "redis"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn json_expiry_from_duration_prefers_seconds_for_whole_seconds() {
+        let expiry = JsonExpiry::from_duration(Duration::from_secs(5));
+        assert_eq!(expiry, JsonExpiry::Seconds(5));
+    }
+
+    #[test]
+    fn json_expiry_from_duration_keeps_millisecond_precision() {
+        let expiry = JsonExpiry::from_duration(Duration::from_millis(1500));
+        assert_eq!(expiry, JsonExpiry::Milliseconds(1500));
+    }
+
+    #[test]
+    fn json_expiry_from_duration_rounds_up_sub_millisecond_values() {
+        let expiry = JsonExpiry::from_duration(Duration::from_micros(500));
+        assert_eq!(expiry, JsonExpiry::Milliseconds(1));
+    }
+
+    #[test]
+    fn json_expiry_from_duration_falls_back_to_seconds_when_overflowing() {
+        let duration = Duration::from_secs(u64::MAX);
+        let expiry = JsonExpiry::from_duration(duration);
+        assert_eq!(expiry, JsonExpiry::Seconds(u64::MAX));
+    }
+
+    #[test]
+    fn json_set_options_validate_rejects_conflicting_ttl_rules() {
+        let options = JsonSetOptions::new().with_expiry_seconds(5).keep_ttl();
+
+        let err = options.validate().expect_err("expected validation failure");
+        assert!(matches!(err, KvErr::InvalidOptions(_)));
+    }
+
+    #[test]
+    fn json_set_options_helpers_update_condition() {
+        let nx = JsonSetOptions::new().nx();
+        assert_eq!(nx.condition, JsonSetCondition::Nx);
+
+        let xx = JsonSetOptions::new().xx();
+        assert_eq!(xx.condition, JsonSetCondition::Xx);
     }
 }
