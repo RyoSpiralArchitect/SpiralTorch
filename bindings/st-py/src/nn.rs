@@ -1188,6 +1188,12 @@ impl PyScaler {
         self.forward(x)
     }
 
+    pub fn calibrate(&mut self, samples: &PyTensor, epsilon: f32) -> PyResult<()> {
+        self.inner
+            .calibrate(&samples.inner, epsilon)
+            .map_err(tensor_err_to_py)
+    }
+
     pub fn attach_hypergrad(&mut self, curvature: f32, learning_rate: f32) -> PyResult<()> {
         self.inner
             .attach_hypergrad(curvature, learning_rate)
@@ -1249,6 +1255,11 @@ impl PyScaler {
     #[getter]
     pub fn gain(&self) -> PyTensor {
         PyTensor::from_tensor(self.inner.gain().value().clone())
+    }
+
+    #[getter]
+    pub fn baseline(&self) -> PyTensor {
+        PyTensor::from_tensor(self.inner.baseline().clone())
     }
 
     pub fn gradient(&self) -> Option<PyTensor> {
