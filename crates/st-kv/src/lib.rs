@@ -12,7 +12,9 @@ pub type KvResult<T> = std::result::Result<T, KvErr>;
 #[cfg(feature = "redis")]
 mod json;
 #[cfg(feature = "redis")]
-pub use json::{JsonExpiry, JsonSetCondition, JsonSetOptions, JsonSetOptionsBuilder};
+pub use json::{
+    JsonExpiry, JsonSetCondition, JsonSetOptions, JsonSetOptionsBuilder, PreparedJsonSetOptions,
+};
 
 #[cfg(feature = "redis")]
 use redis::{Commands, FromRedisValue, Pipeline, ToRedisArgs, Value};
@@ -161,6 +163,18 @@ pub fn redis_set_json_with_options<T: Serialize>(
 }
 
 #[cfg(feature = "redis")]
+pub fn redis_set_json_with_prepared_options<T: Serialize>(
+    url: &str,
+    key: &str,
+    value: &T,
+    prepared: &PreparedJsonSetOptions,
+) -> KvResult<bool> {
+    with_redis(url, |kv| {
+        kv.set_json_with_prepared_options(key, value, prepared)
+    })
+}
+
+#[cfg(feature = "redis")]
 pub fn redis_get_or_set_json<T, F>(url: &str, key: &str, default: F) -> KvResult<T>
 where
     T: Serialize + DeserializeOwned,
@@ -182,6 +196,22 @@ where
 {
     with_redis(url, |kv| {
         kv.get_or_set_json_with_options(key, default, options)
+    })
+}
+
+#[cfg(feature = "redis")]
+pub fn redis_get_or_set_json_with_prepared_options<T, F>(
+    url: &str,
+    key: &str,
+    default: F,
+    prepared: &PreparedJsonSetOptions,
+) -> KvResult<T>
+where
+    T: Serialize + DeserializeOwned,
+    F: FnOnce() -> T,
+{
+    with_redis(url, |kv| {
+        kv.get_or_set_json_with_prepared_options(key, default, prepared)
     })
 }
 
@@ -446,8 +476,10 @@ impl RedisKv {
     }
 
     pub fn set_json<T: Serialize>(&mut self, key: &str, value: &T) -> KvResult<()> {
-        let payload = serde_json::to_string(value)?;
-        self.set(key, payload)
+        let options = JsonSetOptions::default();
+        let inserted = self.set_json_with_options(key, value, &options)?;
+        debug_assert!(inserted, "unconditional JSON SET should not return Nil");
+        Ok(())
     }
 
     pub fn set_json_with_options<T>(
@@ -461,6 +493,19 @@ impl RedisKv {
     {
         let payload = serde_json::to_string(value)?;
         self.set_json_payload_with_options(key, payload, options)
+    }
+
+    pub fn set_json_with_prepared_options<T>(
+        &mut self,
+        key: &str,
+        value: &T,
+        prepared: &PreparedJsonSetOptions,
+    ) -> KvResult<bool>
+    where
+        T: Serialize,
+    {
+        let payload = serde_json::to_string(value)?;
+        self.set_json_payload_with_prepared_options(key, payload, prepared)
     }
 
     pub fn get_json<T>(&mut self, key: &str) -> KvResult<Option<T>>
@@ -477,16 +522,18 @@ impl RedisKv {
     where
         T: Serialize,
     {
-        let payload = serde_json::to_string(value)?;
-        self.set_ex(key, payload, seconds)
+        let options = JsonSetOptions::new().with_expiry_seconds(seconds as u64);
+        let inserted = self.set_json_with_options(key, value, &options)?;
+        debug_assert!(inserted, "unconditional JSON SET EX should not return Nil");
+        Ok(())
     }
 
     pub fn set_json_nx<T>(&mut self, key: &str, value: &T) -> KvResult<bool>
     where
         T: Serialize,
     {
-        let payload = serde_json::to_string(value)?;
-        self.set_nx(key, payload)
+        let options = JsonSetOptions::new().nx();
+        self.set_json_with_options(key, value, &options)
     }
 
     fn set_json_payload_with_options(
@@ -499,7 +546,23 @@ impl RedisKv {
         cmd.arg(key).arg(payload);
 
         options.apply_to_command(&mut cmd)?;
+        self.finish_json_set(&mut cmd)
+    }
 
+    fn set_json_payload_with_prepared_options(
+        &mut self,
+        key: &str,
+        payload: String,
+        prepared: &PreparedJsonSetOptions,
+    ) -> KvResult<bool> {
+        let mut cmd = redis::cmd("SET");
+        cmd.arg(key).arg(payload);
+
+        prepared.apply(&mut cmd);
+        self.finish_json_set(&mut cmd)
+    }
+
+    fn finish_json_set(&mut self, cmd: &mut redis::Cmd) -> KvResult<bool> {
         let response: Value = cmd.query(&mut self.conn)?;
         match response {
             Value::Nil => Ok(false),
@@ -541,6 +604,34 @@ impl RedisKv {
 
         let value = default();
         let inserted = self.set_json_with_options(key, &value, options)?;
+
+        if inserted {
+            return Ok(value);
+        }
+
+        if let Some(existing) = self.get_json(key)? {
+            Ok(existing)
+        } else {
+            Ok(value)
+        }
+    }
+
+    pub fn get_or_set_json_with_prepared_options<T, F>(
+        &mut self,
+        key: &str,
+        default: F,
+        prepared: &PreparedJsonSetOptions,
+    ) -> KvResult<T>
+    where
+        T: Serialize + DeserializeOwned,
+        F: FnOnce() -> T,
+    {
+        if let Some(existing) = self.get_json(key)? {
+            return Ok(existing);
+        }
+
+        let value = default();
+        let inserted = self.set_json_with_prepared_options(key, &value, prepared)?;
 
         if inserted {
             return Ok(value);

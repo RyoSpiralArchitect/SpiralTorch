@@ -23,6 +23,7 @@ from typing import (
     Optional as _Optional,
     Sequence as _Sequence,
     Tuple as _Tuple,
+    NoReturn as _NoReturn,
 )
 from importlib.metadata import version as _pkg_version, PackageNotFoundError
 
@@ -38,6 +39,111 @@ from ._zspace_aliases import (
 )
 
 _rs: _types.ModuleType | None = None
+
+
+def _install_spiral_rl_stub() -> None:
+    """Populate the public reinforcement-learning namespace with a friendly stub."""
+
+    module = sys.modules.get("spiral_rl")
+    if module is None:
+        module = _types.ModuleType("spiral_rl")
+        sys.modules["spiral_rl"] = module
+
+    module.__doc__ = (
+        "SpiralTorch reinforcement learning stub (native extension unavailable)."
+    )
+    module.__spiraltorch_placeholder__ = True
+
+    def _rl_stub_error(feature: str) -> RuntimeError:
+        raise RuntimeError(
+            "SpiralTorch reinforcement learning stub: "
+            f"'{feature}' requires the native extension. "
+            "Install a wheel with compiled components or build the native module from source."
+        )
+
+    class _RLStubBase:
+        """Base for RL stubs that consistently signal the missing native extension."""
+
+        __slots__ = ()
+
+        def __init__(self, *args: _Any, **kwargs: _Any) -> None:
+            _rl_stub_error(f"{self.__class__.__name__}()")
+
+        def _missing(self, feature: str) -> _NoReturn:
+            _rl_stub_error(f"{self.__class__.__name__}.{feature}")
+
+        def select_action(self, *args: _Any, **kwargs: _Any) -> _NoReturn:  # pragma: no cover - exercised via tests
+            self._missing("select_action")
+
+        def select_actions(self, *args: _Any, **kwargs: _Any) -> _NoReturn:  # pragma: no cover - exercised via tests
+            self._missing("select_actions")
+
+        def update(self, *args: _Any, **kwargs: _Any) -> _NoReturn:  # pragma: no cover - exercised via tests
+            self._missing("update")
+
+        def update_batch(self, *args: _Any, **kwargs: _Any) -> _NoReturn:  # pragma: no cover - exercised via tests
+            self._missing("update_batch")
+
+        @property
+        def epsilon(self) -> float:
+            self._missing("epsilon")
+
+        def set_epsilon(self, *args: _Any, **kwargs: _Any) -> _NoReturn:
+            self._missing("set_epsilon")
+
+        def set_exploration(self, *args: _Any, **kwargs: _Any) -> _NoReturn:
+            self._missing("set_exploration")
+
+        def state_dict(self) -> _Dict[str, _Any]:
+            self._missing("state_dict")
+
+        def load_state_dict(self, *args: _Any, **kwargs: _Any) -> _NoReturn:
+            self._missing("load_state_dict")
+
+    class stAgent(_RLStubBase):
+        """Stub implementation for :class:`spiral_rl.stAgent`."""
+
+    class PpoAgent(_RLStubBase):
+        """Stub implementation for :class:`spiral_rl.PpoAgent`."""
+
+        def score_actions(self, *args: _Any, **kwargs: _Any) -> _NoReturn:
+            self._missing("score_actions")
+
+        def value(self, *args: _Any, **kwargs: _Any) -> _NoReturn:
+            self._missing("value")
+
+    class SacAgent(_RLStubBase):
+        """Stub implementation for :class:`spiral_rl.SacAgent`."""
+
+        def sample_action(self, *args: _Any, **kwargs: _Any) -> _NoReturn:
+            self._missing("sample_action")
+
+        def jitter(self, *args: _Any, **kwargs: _Any) -> _NoReturn:
+            self._missing("jitter")
+
+    exports = {
+        "stAgent": stAgent,
+        "DqnAgent": stAgent,
+        "PyDqnAgent": stAgent,
+        "PpoAgent": PpoAgent,
+        "SacAgent": SacAgent,
+    }
+
+    for name, value in exports.items():
+        value.__module__ = "spiral_rl"
+        setattr(module, name, value)
+        globals()[name] = value
+
+    module.__all__ = sorted(exports)
+
+    spiraltorch_module = globals().get("spiral_rl")
+    if isinstance(spiraltorch_module, _types.ModuleType):
+        spiraltorch_module.__doc__ = module.__doc__
+        forward_exports = set(getattr(spiraltorch_module, "__all__", ()))
+        forward_exports.update(exports)
+        spiraltorch_module.__all__ = sorted(forward_exports)
+        for name, value in exports.items():
+            setattr(spiraltorch_module, name, value)
 
 _PREDECLARED_SUBMODULES: list[tuple[str, str]] = [
     ("nn", "SpiralTorch neural network primitives"),
@@ -133,6 +239,9 @@ except ModuleNotFoundError as exc:
             if _final_exc.name not in {"spiraltorch.spiraltorch_native", "spiraltorch_native"}:
                 raise
             _rs = None
+
+if _rs is None:
+    _install_spiral_rl_stub()
 
 # --- begin: promote real rl submodule & alias DqnAgent->stAgent ---
 try:
@@ -1367,14 +1476,21 @@ class Axis:
         if self.size is not None:
             value = int(self.size)
             if value <= 0:
+                # Axis declarations require a concrete positive size; zero is only
+                # permitted when inferred from a tensor at runtime.
                 raise ValueError("axis size must be positive")
             object.__setattr__(self, "size", value)
 
     def with_size(self, size: int) -> "Axis":
         """Return a copy with the provided concrete size."""
 
-        if size <= 0:
-            raise ValueError("size must be positive")
+        size = int(size)
+        if size < 0:
+            raise ValueError("size must be non-negative")
+        if size == 0:
+            clone = Axis(self.name)
+            object.__setattr__(clone, "size", 0)
+            return clone
         return Axis(self.name, size)
 
     def __str__(self) -> str:  # pragma: no cover - representation helper
@@ -1395,7 +1511,7 @@ def _prepare_rows(data: _Any) -> _List[_List[float]]:
     if not isinstance(data, _Sequence):
         raise TypeError("tensor data must be a sequence")
     if not data:
-        raise ValueError("tensor data must contain at least one row")
+        return []
     rows: _List[_List[float]] = []
     if isinstance(data[0], _Sequence):  # type: ignore[index]
         width: int | None = None
@@ -1405,8 +1521,6 @@ def _prepare_rows(data: _Any) -> _List[_List[float]]:
             if not isinstance(row, _Sequence):
                 raise TypeError("tensor rows must be sequences of numbers")
             values = [float(value) for value in row]
-            if not values:
-                raise ValueError("tensor rows cannot be empty")
             if width is None:
                 width = len(values)
             elif len(values) != width:
@@ -1414,8 +1528,6 @@ def _prepare_rows(data: _Any) -> _List[_List[float]]:
             rows.append(values)
     else:
         values = [float(value) for value in data]  # type: ignore[assignment]
-        if not values:
-            raise ValueError("tensor data must contain at least one element")
         rows.append(values)
     return rows
 
@@ -1426,7 +1538,7 @@ def _tensor_from_data(data: _Any):
         return data
     rows = _prepare_rows(data)
     height = len(rows)
-    width = len(rows[0])
+    width = len(rows[0]) if rows else 0
     flat: _List[float] = [value for row in rows for value in row]
     return tensor_type(height, width, flat)
 
@@ -1440,8 +1552,16 @@ def _coerce_axis(axis: "Axis | str") -> Axis:
 
 
 def _resolve_axis_size(axis: Axis, size: int) -> Axis:
-    if size <= 0:
-        raise ValueError("tensor dimensions must be positive")
+    if size < 0:
+        raise ValueError("tensor dimensions must be non-negative")
+    if size == 0:
+        if axis.size is None:
+            return axis.with_size(0)
+        if axis.size != 0:
+            raise ValueError(
+                f"axis '{axis.name}' expects size {axis.size}, received {size}"
+            )
+        return axis
     if axis.size is None:
         return axis.with_size(size)
     if axis.size != size:
@@ -1956,8 +2076,11 @@ class SpiralTorchVision:
             volume = volume.tolist()
         if len(volume) != self.depth:
             raise ValueError(f"expected {self.depth} slices, received {len(volume)}")
-        w = max(0.0, float(weight))
-        alpha = self._alpha * (w if w else 1.0)
+        weight = float(weight)
+        if weight < 0.0:
+            raise ValueError("weight must be non-negative")
+        # A zero weight should skip the EMA update entirely instead of reusing self._alpha.
+        alpha = 0.0 if weight <= 0.0 else self._alpha * weight
         for idx, slice_data in enumerate(volume):
             rows = _coerce_slice(slice_data, self.height, self.width)
             for r_idx, row in enumerate(rows):
@@ -2157,9 +2280,12 @@ class ZSpaceTrainer:
                     if value is None
                 ]
                 raise KeyError(f"missing keys in state: {missing}")
-            z = z or self._z
-            moment = moment or self._m
-            velocity = velocity or self._v
+            if z is None:
+                z = self._z
+            if moment is None:
+                moment = self._m
+            if velocity is None:
+                velocity = self._v
         self._assign_vector(self._z, z, strict)
         self._assign_vector(self._m, moment, strict)
         self._assign_vector(self._v, velocity, strict)

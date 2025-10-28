@@ -18,6 +18,8 @@ pub enum KvErr {
     Serde(#[from] serde_json::Error),
     #[error("invalid Redis SET options: {0}")]
     InvalidOptions(&'static str),
+    #[error("invalid expiry: {0}")]
+    InvalidExpiry(&'static str),
     #[error("unexpected response from {command}: {response:?}")]
     UnexpectedResponse {
         command: &'static str,
