@@ -10,6 +10,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 try:
@@ -86,7 +87,7 @@ except ModuleNotFoundError:
     )
 
 
-def load_config(path: Path) -> Dict[str, Any]:
+def load_config(path: Path) -> Mapping[str, Any]:
     text = path.read_text()
     try:
         config = json.loads(text)
@@ -96,7 +97,7 @@ def load_config(path: Path) -> Dict[str, Any]:
                 f"{path} is not valid JSON and PyYAML is unavailable for YAML parsing"
             )
         config = yaml.safe_load(text)
-    if not isinstance(config, dict):
+    if not isinstance(config, Mapping):
         raise TypeError(
             "Configuration top-level must be an object (mapping) - "
             "トップレベルはオブジェクト（マッピング）でなければならない; "
