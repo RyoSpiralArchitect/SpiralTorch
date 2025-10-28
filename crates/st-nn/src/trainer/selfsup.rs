@@ -1,8 +1,8 @@
+use self::contrastive::InfoNCEResult;
 use crate::lightning::LightningConfig;
 use crate::loss::Loss;
 use crate::trainer::{EpochStats, IntoBatch};
 use crate::{PureResult, Tensor};
-use self::contrastive::InfoNCEResult;
 use st_core::telemetry::atlas::AtlasFragment;
 use st_core::telemetry::hub;
 use std::fmt;
@@ -281,8 +281,7 @@ pub enum SelfSupObjective {
     InfoNCE(InfoNCEConfig),
 }
 
-impl SelfSupObjective {
-}
+impl SelfSupObjective {}
 
 #[derive(Debug, Clone)]
 pub struct SelfSupStage {
@@ -555,8 +554,11 @@ impl Loss for InfoNCELoss {
         let (anchors, positives) = self.split_predictions(prediction)?;
         let (anchor_hat, anchor_norms) = self.normalise_batch(&anchors);
         let (positive_hat, positive_norms) = self.normalise_batch(&positives);
-        let result = contrastive::info_nce_loss(&anchor_hat, &positive_hat, self.temperature, false)
-            .map_err(|_| crate::TensorError::InvalidValue { label: "selfsup.info_nce" })?;
+        let result =
+            contrastive::info_nce_loss(&anchor_hat, &positive_hat, self.temperature, false)
+                .map_err(|_| crate::TensorError::InvalidValue {
+                    label: "selfsup.info_nce",
+                })?;
         self.cache = Some(InfoNCECache {
             anchor_hat,
             positive_hat,

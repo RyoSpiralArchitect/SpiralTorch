@@ -79,10 +79,7 @@ impl ModuleCacheEntry {
         self.module.get().map(Arc::clone)
     }
 
-    fn get_or_try_init<F>(
-        &self,
-        init: F,
-    ) -> Result<Arc<wgpu::ShaderModule>, ShaderLoadError>
+    fn get_or_try_init<F>(&self, init: F) -> Result<Arc<wgpu::ShaderModule>, ShaderLoadError>
     where
         F: FnOnce() -> Result<Arc<wgpu::ShaderModule>, ShaderLoadError>,
     {
