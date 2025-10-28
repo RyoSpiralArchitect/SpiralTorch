@@ -79,7 +79,10 @@ impl ModuleCacheEntry {
         self.module.get().map(Arc::clone)
     }
 
-    fn get_or_try_init<F>(&self, init: F) -> Result<Arc<wgpu::ShaderModule>, ShaderLoadError>
+    fn get_or_try_init<F>(
+        &self,
+        init: F,
+    ) -> Result<Arc<wgpu::ShaderModule>, ShaderLoadError>
     where
         F: FnOnce() -> Result<Arc<wgpu::ShaderModule>, ShaderLoadError>,
     {
@@ -160,31 +163,33 @@ fn compile_cached_module<F>(
 where
     F: Fn() -> Result<Arc<str>, ShaderLoadError>,
 {
+    let context = context.unwrap_or_else(|| "inline".to_string());
     let entry = {
         let mut cache = module_cache().lock().unwrap();
-        Arc::clone(cache.entry(key).or_insert_with(Default::default))
+        Arc::clone(
+            cache
+                .entry(key)
+                .or_insert_with(|| Arc::new(ModuleCacheEntry::default())),
+        )
     };
 
     if let Some(module) = entry.get() {
         return Ok(module);
     }
 
-    let context = context.unwrap_or_else(|| "inline".to_string());
-    let label = label.to_string();
     entry.get_or_try_init(|| {
         let source = source()?;
         let module = catch_unwind(AssertUnwindSafe(|| {
             device.create_shader_module(ShaderModuleDescriptor {
-                label: Some(label.as_str()),
+                label: Some(label),
                 source: ShaderSource::Wgsl(Cow::Borrowed(&source)),
             })
         }))
         .map_err(|payload| ShaderLoadError::Compile {
-            label: label.clone(),
+            label: label.to_string(),
             context: context.clone(),
             source: Box::new(ShaderCompileError(panic_payload_to_string(payload))),
         })?;
-
         Ok(Arc::new(module))
     })
 }
