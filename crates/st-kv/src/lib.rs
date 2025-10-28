@@ -188,18 +188,6 @@ pub fn redis_set_json_with_prepared_options<T: Serialize>(
 }
 
 #[cfg(feature = "redis")]
-pub fn redis_set_json_with_prepared_options<T: Serialize>(
-    url: &str,
-    key: &str,
-    value: &T,
-    prepared: &PreparedJsonSetOptions,
-) -> KvResult<bool> {
-    with_redis(url, |kv| {
-        kv.set_json_with_prepared_options(key, value, prepared)
-    })
-}
-
-#[cfg(feature = "redis")]
 pub fn redis_get_or_set_json<T, F>(url: &str, key: &str, default: F) -> KvResult<T>
 where
     T: Serialize + DeserializeOwned,
@@ -836,6 +824,7 @@ impl RedisKv {
 #[cfg(all(test, feature = "redis"))]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn json_expiry_from_duration_prefers_seconds_for_whole_seconds() {
