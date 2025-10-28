@@ -18,7 +18,7 @@ const ERR_EXPLICIT_AND_KEEP_TTL: &str = "cannot set both explicit expiry and KEE
 const ERR_PERSIST_WITH_EXPIRY: &str = "cannot use PERSIST alongside an explicit expiry";
 const ERR_PERSIST_WITH_KEEP_TTL: &str = "cannot combine PERSIST with KEEPTTL";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// Configures Redis `SET` behaviour for JSON helpers.
 pub struct JsonSetOptions {
     pub expiry: Option<JsonExpiry>,
@@ -219,11 +219,8 @@ impl JsonSetOptions {
         PreparedJsonSetOptions::from_options(self)
     }
 
-    pub(crate) fn apply_to_command(&self, cmd: &mut redis::Cmd) -> KvResult<()> {
-        for fragment in self.command_fragments()? {
-            fragment.apply(cmd);
-        }
-
-        Ok(())
+    /// Returns a lazily cached prepared fragment set for these options.
+    pub fn automated(self) -> KvResult<&'static PreparedJsonSetOptions> {
+        PreparedJsonSetOptions::automated(self)
     }
 }

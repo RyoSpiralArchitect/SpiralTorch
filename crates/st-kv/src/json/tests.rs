@@ -304,3 +304,23 @@ fn builder_optional_deadline_handles_none() {
     assert!(options.expiry.is_none());
     assert!(options.keep_ttl);
 }
+
+#[test]
+fn automated_prepared_options_cache_reuses_instances() {
+    let options = JsonSetOptions::new().nx();
+
+    let first = PreparedJsonSetOptions::automated(options).expect("automation should prepare");
+    let second = PreparedJsonSetOptions::automated(options).expect("automation should reuse");
+
+    assert!(std::ptr::eq(first, second));
+    assert_eq!(first.fragments(), &[CommandFragment::Keyword("NX")]);
+}
+
+#[test]
+fn automated_prepared_options_respects_validation() {
+    let options = JsonSetOptions::new().with_expiry_seconds(5).keep_ttl();
+
+    let err =
+        PreparedJsonSetOptions::automated(options).expect_err("invalid options should be rejected");
+    assert!(matches!(err, KvErr::InvalidOptions(_)));
+}

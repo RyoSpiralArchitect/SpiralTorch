@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 const ERR_SYSTEM_TIME_BEFORE_EPOCH: &str = "system time occurs before the Unix epoch";
 
 /// Expiry semantics for Redis `SET`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum JsonExpiry {
     /// Expire the key after the provided number of seconds (`EX`).
     Seconds(u64),

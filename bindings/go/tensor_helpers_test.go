@@ -194,6 +194,58 @@ func TestNewTensorFromDenseValidation(t *testing.T) {
 	}
 }
 
+func TestNewZerosTensorValidation(t *testing.T) {
+	if _, err := NewZerosTensor(-1, 3); err == nil {
+		t.Fatalf("expected error for negative rows")
+	}
+	if _, err := NewZerosTensor(2, -4); err == nil {
+		t.Fatalf("expected error for negative cols")
+	}
+}
+
+func TestRandomTensorDimensionValidation(t *testing.T) {
+	if _, err := NewRandomUniformTensor(-1, 2, 0, 1); err == nil {
+		t.Fatalf("expected error for negative rows in uniform")
+	}
+	if _, err := NewRandomUniformTensor(1, -2, 0, 1); err == nil {
+		t.Fatalf("expected error for negative cols in uniform")
+	}
+	if _, err := NewRandomNormalTensor(-3, 1, 0, 1); err == nil {
+		t.Fatalf("expected error for negative rows in normal")
+	}
+	if _, err := NewRandomNormalTensor(3, -1, 0, 1); err == nil {
+		t.Fatalf("expected error for negative cols in normal")
+	}
+}
+
+func TestRandomTensorZeroDimensions(t *testing.T) {
+	uniform, err := NewRandomUniformTensor(0, 5, -1, 1)
+	if err != nil {
+		t.Fatalf("NewRandomUniformTensor returned error for zero rows: %v", err)
+	}
+	t.Cleanup(func() { uniform.Close() })
+	rows, cols, err := uniform.Shape()
+	if err != nil {
+		t.Fatalf("Shape returned error for uniform tensor: %v", err)
+	}
+	if rows != 0 || cols != 5 {
+		t.Fatalf("unexpected uniform shape: %dx%d", rows, cols)
+	}
+
+	normal, err := NewRandomNormalTensor(4, 0, 0, 1)
+	if err != nil {
+		t.Fatalf("NewRandomNormalTensor returned error for zero cols: %v", err)
+	}
+	t.Cleanup(func() { normal.Close() })
+	rows, cols, err = normal.Shape()
+	if err != nil {
+		t.Fatalf("Shape returned error for normal tensor: %v", err)
+	}
+	if rows != 4 || cols != 0 {
+		t.Fatalf("unexpected normal shape: %dx%d", rows, cols)
+	}
+}
+
 func TestTensorCopyDataInto(t *testing.T) {
 	tensor, err := NewTensorFromDense(2, 2, []float32{1, 2, 3, 4})
 	if err != nil {
