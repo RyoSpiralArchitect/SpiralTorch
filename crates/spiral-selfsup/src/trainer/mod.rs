@@ -3,7 +3,7 @@
 mod device;
 mod distributed;
 
-pub use device::{CpuDevice, DistributedDevice, MetricReduce, TrainingDevice};
+pub use device::{CpuDevice, DistributedDevice, MetricReduce, TrainingDevice, TrainingDeviceError};
 
 #[cfg(test)]
 mod tests;

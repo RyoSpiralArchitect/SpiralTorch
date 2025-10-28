@@ -19,6 +19,5 @@ st-vision = { path = "../st-vision" }
 thiserror = "1"
 st-tensor = { path = "../st-tensor", default-features = false }
 once_cell = "1"
-toml = "0.8"
 
 [dev-dependencies]

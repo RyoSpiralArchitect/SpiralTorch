@@ -19,9 +19,12 @@ fn gradients_are_synchronized_via_all_reduce() {
     for rank in 0..world_size {
         let group_name = group.clone();
         handles.push(std::thread::spawn(move || {
-            let device = DistributedDevice::new(group_name, rank, world_size);
+            let device = DistributedDevice::new(group_name, rank, world_size)
+                .expect("rendezvous should succeed");
             let mut gradients = vec![rank as f32 + 1.0, 0.25 * rank as f32];
-            device.synchronize_gradients(&mut gradients);
+            device
+                .synchronize_gradients(&mut gradients)
+                .expect("all-reduce should succeed");
             gradients
         }));
     }
@@ -50,9 +53,12 @@ fn metrics_are_aggregated_across_workers() {
     for rank in 0..world_size {
         let group_name = group.clone();
         handles.push(std::thread::spawn(move || {
-            let device = DistributedDevice::new(group_name, rank, world_size);
+            let device = DistributedDevice::new(group_name, rank, world_size)
+                .expect("rendezvous should succeed");
             let mut metrics = vec![rank as f32, (rank as f32).powi(2)];
-            device.aggregate_metrics(&mut metrics, MetricReduce::Mean);
+            device
+                .aggregate_metrics(&mut metrics, MetricReduce::Mean)
+                .expect("metric reduction should succeed");
             metrics
         }));
     }
@@ -81,9 +87,12 @@ fn sum_reduction_keeps_total_metric() {
     for rank in 0..world_size {
         let group_name = group.clone();
         handles.push(std::thread::spawn(move || {
-            let device = DistributedDevice::new(group_name, rank, world_size);
+            let device = DistributedDevice::new(group_name, rank, world_size)
+                .expect("rendezvous should succeed");
             let mut metrics = vec![rank as f32 + 2.0];
-            device.aggregate_metrics(&mut metrics, MetricReduce::Sum);
+            device
+                .aggregate_metrics(&mut metrics, MetricReduce::Sum)
+                .expect("metric reduction should succeed");
             metrics
         }));
     }
