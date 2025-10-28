@@ -173,8 +173,13 @@ def run_search(args: argparse.Namespace) -> None:
     loop = (
         spiraltorch.hpo.SearchLoop.from_checkpoint(space, checkpoint_text, tracker)
         if checkpoint_text
-        else spiraltorch.hpo.SearchLoop.create(space, strategy, resource, tracker)
+        else spiraltorch.hpo.SearchLoop.create(
+            space, strategy, resource, tracker, maximize=maximize
+        )
     )
+
+    loop_objective = loop.objective()
+    loop_maximize = loop_objective.lower() == "maximize"
 
     completed_records = [dict(record) for record in loop.completed()]
     best_compare: Optional[float] = None
@@ -183,7 +188,13 @@ def run_search(args: argparse.Namespace) -> None:
         if "metric" not in record or record["metric"] is None:
             continue
         compare = float(record["metric"])
-        if best_compare is None or compare < best_compare:
+        if best_compare is None:
+            best_compare = compare
+            best_record = record
+            continue
+        if (loop_maximize and compare > best_compare) or (
+            not loop_maximize and compare < best_compare
+        ):
             best_compare = compare
             best_record = record
 
@@ -209,20 +220,23 @@ def run_search(args: argparse.Namespace) -> None:
             if not isinstance(metric, (int, float)):
                 raise TypeError("Objective function must return a numeric metric")
             metric_value = float(metric)
-            observed_value = -metric_value if maximize else metric_value
-            loop.observe(trial_id, observed_value)
+            loop.observe(trial_id, metric_value)
             if checkpoint_path:
                 write_checkpoint(loop, checkpoint_path)
-            if best_compare is None or observed_value < best_compare:
-                best_compare = observed_value
-                best_record = {"id": trial_id, "params": params, "metric": observed_value}
+            if best_compare is None:
+                best_compare = metric_value
+                best_record = {"id": trial_id, "params": params, "metric": metric_value}
+            elif (loop_maximize and metric_value > best_compare) or (
+                not loop_maximize and metric_value < best_compare
+            ):
+                best_compare = metric_value
+                best_record = {"id": trial_id, "params": params, "metric": metric_value}
             LOGGER.info("Trial %s metric=%s", trial_id, metric_value)
 
     if best_record:
-        reported_metric = -best_compare if maximize else best_compare
         best_output = {
             "id": best_record["id"],
-            "metric": reported_metric,
+            "metric": best_compare,
             "params": best_record.get("params", {}),
         }
         LOGGER.info("Best trial %s metric=%s", best_output["id"], best_output["metric"])
