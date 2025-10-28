@@ -185,11 +185,72 @@ fn complex_cbrt(z: Complex64) -> Complex64 {
     if z == Complex64::new(0.0, 0.0) {
         Complex64::new(0.0, 0.0)
     } else {
-        z.powf(1.0 / 3.0)
+        let magnitude = z.norm();
+        let angle = z.arg();
+        let root_mag = magnitude.powf(1.0 / 3.0);
+        let root_angle = angle / 3.0;
+        Complex64::from_polar(root_mag, root_angle)
     }
 }
 
 fn solve_self_dual_eigenvalues(i: Complex64, j: Complex64) -> [Complex64; 3] {
+    const REAL_TOL: f64 = 1e-12;
+
+    if i.im.abs() <= REAL_TOL && j.im.abs() <= REAL_TOL {
+        let p = -i.re;
+        let q = 2.0 * j.re;
+        let discriminant = q * q / 4.0 + p * p * p / 27.0;
+
+        if discriminant.abs() <= REAL_TOL {
+            let u = (-q / 2.0).cbrt();
+            let root1 = 2.0 * u;
+            let root2 = -u;
+            return [
+                Complex64::new(root1, 0.0),
+                Complex64::new(root2, 0.0),
+                Complex64::new(root2, 0.0),
+            ];
+        } else if discriminant > 0.0 {
+            let sqrt_disc = discriminant.sqrt();
+            let u = (-q / 2.0 + sqrt_disc).cbrt();
+            let v = if u.abs() > REAL_TOL {
+                -p / (3.0 * u)
+            } else {
+                (-q / 2.0 - sqrt_disc).cbrt()
+            };
+            let real_root = u + v;
+            let shared_real = -0.5 * (u + v);
+            let imag = (3.0f64).sqrt() * 0.5 * (u - v);
+            return [
+                Complex64::new(real_root, 0.0),
+                Complex64::new(shared_real, imag),
+                Complex64::new(shared_real, -imag),
+            ];
+        } else {
+            let base = (-p / 3.0).max(0.0);
+            if base <= REAL_TOL {
+                let root = (-q / 2.0).cbrt();
+                return [
+                    Complex64::new(root, 0.0),
+                    Complex64::new(root, 0.0),
+                    Complex64::new(root, 0.0),
+                ];
+            }
+            let r = base.sqrt();
+            let denominator = 2.0 * r.powi(3);
+            let cos_argument = (-q / denominator).clamp(-1.0, 1.0);
+            let phi = cos_argument.acos();
+            let root1 = 2.0 * r * (phi / 3.0).cos();
+            let root2 = 2.0 * r * ((phi + 2.0 * PI) / 3.0).cos();
+            let root3 = 2.0 * r * ((phi + 4.0 * PI) / 3.0).cos();
+            return [
+                Complex64::new(root1, 0.0),
+                Complex64::new(root2, 0.0),
+                Complex64::new(root3, 0.0),
+            ];
+        }
+    }
+
     let p = -i;
     let q = Complex64::new(2.0, 0.0) * j;
     let half_q = q * Complex64::new(0.5, 0.0);
@@ -199,7 +260,11 @@ fn solve_self_dual_eigenvalues(i: Complex64, j: Complex64) -> [Complex64; 3] {
     let u_cubed = -half_q + sqrt_disc;
     let v_cubed = -half_q - sqrt_disc;
     let u = complex_cbrt(u_cubed);
-    let v = complex_cbrt(v_cubed);
+    let v = if u.norm() <= 1e-24 {
+        complex_cbrt(v_cubed)
+    } else {
+        -p_over_three / u
+    };
     let omega = Complex64::new(-0.5, (3.0f64).sqrt() / 2.0);
     let omega_conj = omega.conj();
 
