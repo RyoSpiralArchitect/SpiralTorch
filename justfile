@@ -45,3 +45,6 @@ go-lint:
 
 go-test:
     ./scripts/run_go_checks.sh test
+
+selfsup-info-nce:
+    cargo run -p st-nn --example selfsup_info_nce
