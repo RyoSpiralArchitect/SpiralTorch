@@ -1,5 +1,8 @@
 use crate::{ObjectiveError, Result};
-use st_tensor::Tensor;
+use st_tensor::{backend::cpu_dense, Layout, Tensor};
+
+#[cfg(feature = "wgpu")]
+use st_tensor::backend::wgpu_dense;
 
 /// Result container for the InfoNCE contrastive objective.
 #[derive(Debug, Clone, PartialEq)]
@@ -117,18 +120,17 @@ pub fn info_nce_loss(
         }
     }
 
-    let mut logits = vec![0.0f32; batch * batch];
-    for i in 0..batch {
-        for j in 0..batch {
-            let mut dot = 0.0f32;
-            for k in 0..feature_dim {
-                dot += anchors[i][k] * positives[j][k];
-            }
-            if normalize {
-                dot /= anchor_norms[i] * positive_norms[j];
-            }
-            logits[i * batch + j] = dot / temperature;
-        }
+    let anchors_flat = flatten_row_major(anchors, feature_dim);
+    let positives_t = transpose_to_row_major(positives, batch, feature_dim);
+
+    let mut logits = compute_logits(&anchors_flat, &positives_t, batch, feature_dim)?;
+
+    if normalize {
+        apply_normalization(&mut logits, &anchor_norms, &positive_norms, batch);
+    }
+
+    for value in &mut logits {
+        *value /= temperature;
     }
 
     let mut loss = 0.0f32;
@@ -224,4 +226,101 @@ pub fn info_nce_loss_tensor(
         labels: labels_tensor,
         batch,
     })
+fn flatten_row_major(rows: &[Vec<f32>], cols: usize) -> Vec<f32> {
+    let mut data = Vec::with_capacity(rows.len() * cols);
+    for row in rows {
+        debug_assert_eq!(row.len(), cols);
+        data.extend_from_slice(row);
+    }
+    data
+}
+
+fn transpose_to_row_major(rows: &[Vec<f32>], batch: usize, feature_dim: usize) -> Vec<f32> {
+    let mut transposed = vec![0.0f32; feature_dim * batch];
+    for (row_idx, row) in rows.iter().enumerate() {
+        for (col_idx, &value) in row.iter().enumerate() {
+            transposed[col_idx * batch + row_idx] = value;
+        }
+    }
+    transposed
+}
+
+fn apply_normalization(
+    logits: &mut [f32],
+    anchor_norms: &[f32],
+    positive_norms: &[f32],
+    batch: usize,
+) {
+    for i in 0..batch {
+        for j in 0..batch {
+            let denom = anchor_norms[i] * positive_norms[j];
+            if denom > 0.0 {
+                logits[i * batch + j] /= denom;
+            }
+        }
+    }
+}
+
+fn compute_logits(
+    anchors_flat: &[f32],
+    positives_t: &[f32],
+    batch: usize,
+    feature_dim: usize,
+) -> Result<Vec<f32>> {
+    #[cfg(feature = "wgpu")]
+    {
+        if let Ok(buffer) = wgpu_dense::matmul(anchors_flat, positives_t, batch, feature_dim, batch)
+        {
+            return Ok(buffer);
+        }
+    }
+
+    let mut logits = vec![0.0f32; batch * batch];
+    cpu_dense::matmul_into(
+        &mut logits,
+        anchors_flat,
+        positives_t,
+        batch,
+        feature_dim,
+        batch,
+    )
+    .map_err(|message| ObjectiveError::Shape(message))?;
+    Ok(logits)
+}
+
+/// Compute the InfoNCE loss using [`Tensor`] operands.
+pub fn info_nce_loss_tensor(
+    anchors: &Tensor,
+    positives: &Tensor,
+    temperature: f32,
+    normalize: bool,
+) -> Result<InfoNCEResult> {
+    let (anchor_rows, anchor_cols) = anchors.shape();
+    let (positive_rows, positive_cols) = positives.shape();
+    if anchor_rows != positive_rows || anchor_cols != positive_cols {
+        return Err(ObjectiveError::Shape(format!(
+            "tensor batch mismatch (anchors={}x{}, positives={}x{})",
+            anchor_rows, anchor_cols, positive_rows, positive_cols
+        )));
+    }
+
+    let anchors_rm = anchors
+        .to_layout(Layout::RowMajor)
+        .map_err(|err| ObjectiveError::InvalidArgument(err.to_string()))?;
+    let positives_rm = positives
+        .to_layout(Layout::RowMajor)
+        .map_err(|err| ObjectiveError::InvalidArgument(err.to_string()))?;
+
+    let anchors_vec = anchors_rm
+        .data()
+        .chunks(anchor_cols)
+        .map(|chunk| chunk.to_vec())
+        .collect::<Vec<_>>();
+    let positives_vec = positives_rm
+        .data()
+        .chunks(positive_cols)
+        .map(|chunk| chunk.to_vec())
+        .collect::<Vec<_>>();
+
+    info_nce_loss(&anchors_vec, &positives_vec, temperature, normalize)
 }

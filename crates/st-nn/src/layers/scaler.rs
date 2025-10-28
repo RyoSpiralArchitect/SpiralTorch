@@ -57,6 +57,24 @@ impl Scaler {
         &self.baseline
     }
 
+    /// Returns the absolute drift per feature compared to the baseline gain.
+    pub fn psi_components(&self) -> PureResult<Option<Tensor>> {
+        let gain = self.gain.value();
+        let (rows, cols) = gain.shape();
+        if rows * cols == 0 {
+            return Ok(None);
+        }
+
+        let drift = gain
+            .data()
+            .iter()
+            .zip(self.baseline.data().iter())
+            .map(|(gain, reference)| (gain - reference).abs())
+            .collect::<Vec<_>>();
+
+        Tensor::from_vec(rows, cols, drift).map(Some)
+    }
+
     /// Calibrates the scaler gains against the provided samples.
     ///
     /// The layer computes the per-feature standard deviation and updates the
@@ -199,18 +217,13 @@ impl Module for Scaler {
     }
 
     fn psi_probe(&self) -> Option<f32> {
-        let gains = self.gain.value().data();
-        if gains.is_empty() {
-            return None;
-        }
-        let baseline = self.baseline.data();
-        let drift = gains
-            .iter()
-            .zip(baseline.iter())
-            .map(|(gain, reference)| (gain - reference).abs())
-            .sum::<f32>()
-            / gains.len() as f32;
-        Some(drift)
+        let components = match self.psi_components() {
+            Ok(Some(components)) => components,
+            Ok(None) | Err(_) => return None,
+        };
+        let data = components.data();
+        let mean = data.iter().sum::<f32>() / data.len() as f32;
+        Some(mean)
     }
 
     fn load_state_dict(&mut self, state: &HashMap<String, Tensor>) -> PureResult<()> {
@@ -295,6 +308,45 @@ mod tests {
         let drift = layer.psi_probe().unwrap();
         let expected = (0.1f32.abs() + 0.2f32.abs() + 0.3f32.abs()) / 3.0;
         assert!((drift - expected).abs() < 1e-6);
+    }
+
+    #[test]
+    fn scaler_psi_components_match_individual_feature_drift() {
+        let mut layer = Scaler::new("scale", 4).unwrap();
+        let samples = Tensor::from_vec(
+            3,
+            4,
+            vec![
+                1.0, 2.0, 3.0, 4.0, // sample 1
+                0.5, 1.0, 1.5, 2.0, // sample 2
+                -1.0, -2.0, -3.0, -4.0, // sample 3
+            ],
+        )
+        .unwrap();
+        layer.calibrate(&samples, 1e-3).unwrap();
+        assert!(layer.psi_components().unwrap().is_some());
+
+        let baseline = layer.baseline().data().to_vec();
+        {
+            let values = layer.gain.value_mut();
+            let data = values.data_mut();
+            data.copy_from_slice(&[
+                baseline[0] + 0.05,
+                baseline[1] - 0.10,
+                baseline[2] + 0.15,
+                baseline[3] - 0.20,
+            ]);
+        }
+
+        let components = layer.psi_components().unwrap().unwrap();
+        let data = components.data();
+        let expected = [0.05f32, 0.10, 0.15, 0.20];
+        for (observed, expected) in data.iter().zip(expected.iter()) {
+            assert!((observed - expected).abs() < 1e-6);
+        }
+
+        let mean = data.iter().sum::<f32>() / data.len() as f32;
+        assert!((mean - layer.psi_probe().unwrap()).abs() < 1e-6);
     }
 
     #[test]

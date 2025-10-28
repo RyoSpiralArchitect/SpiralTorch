@@ -6,7 +6,7 @@
 #![cfg(feature = "redis")]
 
 /// Controls conditional write behaviour for Redis `SET`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum JsonSetCondition {
     /// Always perform the write, regardless of key existence.
     Always,
