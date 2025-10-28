@@ -1059,16 +1059,40 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             return _ShapeView(instance, self._func)
 
 
+    _UNSET = object()
+
     class Tensor:
         """Featureful stand-in for the Rust ``Tensor`` exposed by the stub bindings."""
 
         __slots__ = ("_rows", "_cols", "_data", "_backend")
 
-        def __init__(self, *args, backend: str | None = None, **kwargs):
+        def __init__(
+            self,
+            rows=_UNSET,
+            cols=_UNSET,
+            data=_UNSET,
+            *args,
+            backend: str | None = None,
+            **kwargs,
+        ):
             backend_hint = backend
             if "backend" in kwargs:
                 raise TypeError("Tensor() got multiple values for keyword argument 'backend'")
-            rows, cols, payload = _normalize_tensor_ctor_args(*args, **kwargs)
+            positional_head: list[Any] = []
+            explicit_pairs = (("rows", rows), ("cols", cols), ("data", data))
+            for name, value in explicit_pairs:
+                if value is _UNSET:
+                    break
+                positional_head.append(value)
+
+            ctor_kwargs = dict(kwargs)
+            for name, value in explicit_pairs[len(positional_head) :]:
+                if value is not _UNSET:
+                    ctor_kwargs[name] = value
+
+            ctor_args = (*positional_head, *args)
+
+            rows, cols, payload = _normalize_tensor_ctor_args(*ctor_args, **ctor_kwargs)
             if backend_hint is not None and backend_hint not in {"numpy", "python"}:
                 raise ValueError("backend must be 'numpy', 'python', or None")
             if backend_hint == "numpy" and not NUMPY_AVAILABLE:
