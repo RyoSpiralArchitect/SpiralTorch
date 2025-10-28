@@ -18,27 +18,27 @@ use thiserror::Error;
 /// Result alias specialised for key-value helper routines.
 pub type KvResult<T> = std::result::Result<T, KvErr>;
 
+#[cfg(feature = "redis")]
 #[derive(Error, Debug)]
 pub enum KvErr {
     #[error("redis error: {0}")]
-    Redis(String),
-    #[cfg(feature = "redis")]
+    Redis(#[from] redis::RedisError),
     #[error("serde error: {0}")]
-    Serde(String),
+    Serde(#[from] serde_json::Error),
+    #[error("invalid Redis SET options: {0}")]
+    InvalidOptions(&'static str),
+    #[error("unexpected response from {command}: {response:?}")]
+    UnexpectedResponse {
+        command: &'static str,
+        response: Value,
+    },
 }
 
-#[cfg(feature = "redis")]
-impl From<redis::RedisError> for KvErr {
-    fn from(err: redis::RedisError) -> Self {
-        KvErr::Redis(err.to_string())
-    }
-}
-
-#[cfg(feature = "redis")]
-impl From<serde_json::Error> for KvErr {
-    fn from(err: serde_json::Error) -> Self {
-        KvErr::Serde(err.to_string())
-    }
+#[cfg(not(feature = "redis"))]
+#[derive(Error, Debug)]
+pub enum KvErr {
+    #[error("redis feature not enabled")]
+    MissingRedisFeature,
 }
 
 #[cfg(feature = "redis")]
@@ -207,28 +207,43 @@ impl JsonExpiry {
     }
 
     /// Creates an expiry representing seconds.
+    #[must_use]
     pub const fn seconds(secs: u64) -> Self {
         Self::Seconds(secs)
     }
 
     /// Creates an expiry representing milliseconds.
+    #[must_use]
     pub const fn milliseconds(ms: u64) -> Self {
         Self::Milliseconds(ms)
     }
 
     /// Converts a [`Duration`] into an expiry, favouring millisecond precision.
+    ///
+    /// Durations that do not cleanly map to milliseconds are rounded up to the
+    /// nearest millisecond so that very small values (e.g. microseconds) still
+    /// produce a non-zero expiry.
     pub fn from_duration(duration: Duration) -> Self {
-        if duration.subsec_millis() == 0 {
-            Self::Seconds(duration.as_secs())
+        if duration.is_zero() {
+            return Self::Milliseconds(0);
+        }
+
+        let millis = duration.as_millis();
+
+        if millis == 0 {
+            return Self::Milliseconds(1);
+        }
+
+        if millis > u64::MAX as u128 {
+            return Self::Seconds(duration.as_secs());
+        }
+
+        let millis_u64 = millis as u64;
+
+        if millis % 1000 == 0 {
+            Self::Seconds((millis / 1000) as u64)
         } else {
-            match duration
-                .as_secs()
-                .checked_mul(1000)
-                .and_then(|base| base.checked_add(duration.subsec_millis() as u64))
-            {
-                Some(total) => Self::Milliseconds(total),
-                None => Self::Seconds(duration.as_secs()),
-            }
+            Self::Milliseconds(millis_u64)
         }
     }
 }
@@ -256,64 +271,74 @@ impl Default for JsonSetOptions {
 #[cfg(feature = "redis")]
 impl JsonSetOptions {
     /// Creates an empty option set.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Applies an explicit expiry.
+    #[must_use]
     pub fn with_expiry<E: Into<JsonExpiry>>(mut self, expiry: E) -> Self {
         self.expiry = Some(expiry.into());
         self
     }
 
     /// Applies an expiry in seconds.
+    #[must_use]
     pub fn with_expiry_seconds(self, seconds: u64) -> Self {
         self.with_expiry(JsonExpiry::seconds(seconds))
     }
 
     /// Applies an expiry in milliseconds.
+    #[must_use]
     pub fn with_expiry_milliseconds(self, milliseconds: u64) -> Self {
         self.with_expiry(JsonExpiry::milliseconds(milliseconds))
     }
 
     /// Applies an expiry derived from a [`Duration`].
+    #[must_use]
     pub fn with_duration(self, duration: Duration) -> Self {
         self.with_expiry(JsonExpiry::from_duration(duration))
     }
 
     /// Clears any explicit expiry.
+    #[must_use]
     pub fn without_expiry(mut self) -> Self {
         self.expiry = None;
         self
     }
 
     /// Overrides the write condition.
+    #[must_use]
     pub fn with_condition(mut self, condition: JsonSetCondition) -> Self {
         self.condition = condition;
         self
     }
 
     /// Retains the existing TTL of the key (`KEEPTTL`).
+    #[must_use]
     pub fn keep_ttl(mut self) -> Self {
         self.keep_ttl = true;
         self
     }
 
     /// Applies the `NX` condition (only write when absent).
+    #[must_use]
     pub fn nx(self) -> Self {
         self.with_condition(JsonSetCondition::Nx)
     }
 
     /// Applies the `XX` condition (only write when present).
+    #[must_use]
     pub fn xx(self) -> Self {
         self.with_condition(JsonSetCondition::Xx)
     }
 
     /// Verifies that the selected options are valid for Redis.
-    fn validate(&self) -> KvResult<()> {
+    pub(crate) fn validate(&self) -> KvResult<()> {
         if self.keep_ttl && self.expiry.is_some() {
-            return Err(KvErr::Redis(
-                "cannot set both explicit expiry and KEEPTTL".to_string(),
+            return Err(KvErr::InvalidOptions(
+                "cannot set both explicit expiry and KEEPTTL",
             ));
         }
 
@@ -726,9 +751,10 @@ impl RedisKv {
         match response {
             Value::Nil => Ok(false),
             Value::Okay | Value::Status(_) | Value::Data(_) => Ok(true),
-            other => Err(KvErr::Redis(format!(
-                "unexpected response from SET: {other:?}"
-            ))),
+            other => Err(KvErr::UnexpectedResponse {
+                command: "SET",
+                response: other,
+            }),
         }
     }
 
@@ -820,5 +846,52 @@ impl RedisKv {
     {
         let pipeline = build(redis::pipe());
         self.execute_pipeline(pipeline)
+    }
+}
+
+#[cfg(all(test, feature = "redis"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn json_expiry_from_duration_prefers_seconds_for_whole_seconds() {
+        let expiry = JsonExpiry::from_duration(Duration::from_secs(5));
+        assert_eq!(expiry, JsonExpiry::Seconds(5));
+    }
+
+    #[test]
+    fn json_expiry_from_duration_keeps_millisecond_precision() {
+        let expiry = JsonExpiry::from_duration(Duration::from_millis(1500));
+        assert_eq!(expiry, JsonExpiry::Milliseconds(1500));
+    }
+
+    #[test]
+    fn json_expiry_from_duration_rounds_up_sub_millisecond_values() {
+        let expiry = JsonExpiry::from_duration(Duration::from_micros(500));
+        assert_eq!(expiry, JsonExpiry::Milliseconds(1));
+    }
+
+    #[test]
+    fn json_expiry_from_duration_falls_back_to_seconds_when_overflowing() {
+        let duration = Duration::from_secs(u64::MAX);
+        let expiry = JsonExpiry::from_duration(duration);
+        assert_eq!(expiry, JsonExpiry::Seconds(u64::MAX));
+    }
+
+    #[test]
+    fn json_set_options_validate_rejects_conflicting_ttl_rules() {
+        let options = JsonSetOptions::new().with_expiry_seconds(5).keep_ttl();
+
+        let err = options.validate().expect_err("expected validation failure");
+        assert!(matches!(err, KvErr::InvalidOptions(_)));
+    }
+
+    #[test]
+    fn json_set_options_helpers_update_condition() {
+        let nx = JsonSetOptions::new().nx();
+        assert_eq!(nx.condition, JsonSetCondition::Nx);
+
+        let xx = JsonSetOptions::new().xx();
+        assert_eq!(xx.condition, JsonSetCondition::Xx);
     }
 }
