@@ -45,3 +45,7 @@ go-lint:
 
 go-test:
     ./scripts/run_go_checks.sh test
+
+distributed-selfsup config="configs/selfsup_distributed.toml":
+    echo "Launching distributed self-supervised trainer with config: {{config}}" && \
+    cargo test --manifest-path crates/spiral-selfsup/Cargo.toml --test distributed_selfsup -- --ignored
