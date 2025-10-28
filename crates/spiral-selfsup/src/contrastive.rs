@@ -226,6 +226,7 @@ pub fn info_nce_loss_tensor(
         labels: labels_tensor,
         batch,
     })
+}
 fn flatten_row_major(rows: &[Vec<f32>], cols: usize) -> Vec<f32> {
     let mut data = Vec::with_capacity(rows.len() * cols);
     for row in rows {
@@ -288,8 +289,8 @@ fn compute_logits(
     Ok(logits)
 }
 
-/// Compute the InfoNCE loss using [`Tensor`] operands.
-pub fn info_nce_loss_tensor(
+/// Compute the InfoNCE loss using [`Tensor`] operands and return the vector-form result.
+pub fn info_nce_loss_tensor_as_result(
     anchors: &Tensor,
     positives: &Tensor,
     temperature: f32,

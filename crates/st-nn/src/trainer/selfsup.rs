@@ -2,11 +2,197 @@ use crate::lightning::LightningConfig;
 use crate::loss::Loss;
 use crate::trainer::{EpochStats, IntoBatch};
 use crate::{PureResult, Tensor};
-use spiral_selfsup::contrastive::{self, InfoNCEResult};
+use self::contrastive::InfoNCEResult;
 use st_core::telemetry::atlas::AtlasFragment;
 use st_core::telemetry::hub;
 use std::fmt;
 use std::mem;
+
+mod contrastive {
+    use std::f32::EPSILON;
+
+    #[derive(Debug, Clone)]
+    pub struct InfoNCEResult {
+        pub loss: f32,
+        pub logits: Vec<f32>,
+        pub labels: Vec<usize>,
+        pub batch: usize,
+    }
+
+    #[derive(Debug)]
+    pub(super) enum InfoNCEError {
+        Shape,
+        InvalidArgument,
+    }
+
+    pub fn info_nce_loss(
+        anchors: &[Vec<f32>],
+        positives: &[Vec<f32>],
+        temperature: f32,
+        normalize: bool,
+    ) -> Result<InfoNCEResult, InfoNCEError> {
+        if !temperature.is_finite() || temperature <= 0.0 {
+            return Err(InfoNCEError::InvalidArgument);
+        }
+
+        let (batch, feature_dim) = validate_batches(anchors, positives)?;
+        let mut anchor_norms = vec![1.0f32; batch];
+        let mut positive_norms = vec![1.0f32; batch];
+
+        let mut anchors_flat = flatten_row_major(anchors, feature_dim);
+        let mut positives_t = transpose_to_row_major(positives, batch, feature_dim);
+
+        if normalize {
+            normalise_rows(&mut anchors_flat, feature_dim, &mut anchor_norms);
+            normalise_cols(&mut positives_t, batch, feature_dim, &mut positive_norms);
+        }
+
+        let mut logits = compute_logits(&anchors_flat, &positives_t, batch, feature_dim);
+
+        if normalize {
+            apply_normalization(&mut logits, &anchor_norms, &positive_norms, batch);
+        }
+
+        for value in &mut logits {
+            *value /= temperature;
+        }
+
+        let mut loss = 0.0f32;
+        for i in 0..batch {
+            let row = &logits[i * batch..(i + 1) * batch];
+            let max_logit = row.iter().fold(f32::NEG_INFINITY, |acc, &v| acc.max(v));
+            let exp_sum: f32 = row
+                .iter()
+                .map(|&v| ((v - max_logit) as f64).exp() as f32)
+                .sum();
+            if exp_sum <= 0.0 || !exp_sum.is_finite() {
+                return Err(InfoNCEError::InvalidArgument);
+            }
+            let positive_logit = row[i];
+            loss += -(positive_logit - max_logit - exp_sum.ln());
+        }
+        loss /= batch as f32;
+
+        Ok(InfoNCEResult {
+            loss,
+            logits,
+            labels: (0..batch).collect(),
+            batch,
+        })
+    }
+
+    fn validate_batches(
+        anchors: &[Vec<f32>],
+        positives: &[Vec<f32>],
+    ) -> Result<(usize, usize), InfoNCEError> {
+        if anchors.is_empty() || positives.is_empty() {
+            return Err(InfoNCEError::InvalidArgument);
+        }
+        if anchors.len() != positives.len() {
+            return Err(InfoNCEError::Shape);
+        }
+        let feature_dim = anchors[0].len();
+        if feature_dim == 0 {
+            return Err(InfoNCEError::InvalidArgument);
+        }
+        for row in anchors.iter() {
+            if row.len() != feature_dim {
+                return Err(InfoNCEError::Shape);
+            }
+        }
+        for row in positives.iter() {
+            if row.len() != feature_dim {
+                return Err(InfoNCEError::Shape);
+            }
+        }
+        Ok((anchors.len(), feature_dim))
+    }
+
+    fn flatten_row_major(rows: &[Vec<f32>], feature_dim: usize) -> Vec<f32> {
+        let mut flat = Vec::with_capacity(rows.len() * feature_dim);
+        for row in rows {
+            flat.extend_from_slice(row);
+        }
+        flat
+    }
+
+    fn transpose_to_row_major(rows: &[Vec<f32>], batch: usize, feature_dim: usize) -> Vec<f32> {
+        let mut transposed = vec![0.0f32; batch * feature_dim];
+        for (row_idx, row) in rows.iter().enumerate() {
+            for (col_idx, &value) in row.iter().enumerate() {
+                transposed[col_idx * batch + row_idx] = value;
+            }
+        }
+        transposed
+    }
+
+    fn normalise_rows(data: &mut [f32], feature_dim: usize, norms: &mut [f32]) {
+        for (row_idx, chunk) in data.chunks_exact_mut(feature_dim).enumerate() {
+            let norm = chunk
+                .iter()
+                .map(|&v| (v as f64).powi(2))
+                .sum::<f64>()
+                .sqrt() as f32;
+            let norm = norm.max(EPSILON);
+            norms[row_idx] = norm;
+            for value in chunk.iter_mut() {
+                *value /= norm;
+            }
+        }
+    }
+
+    fn normalise_cols(data: &mut [f32], batch: usize, feature_dim: usize, norms: &mut [f32]) {
+        for col_idx in 0..batch {
+            let mut norm_sq = 0.0f64;
+            for row_idx in 0..feature_dim {
+                let value = data[row_idx * batch + col_idx];
+                norm_sq += (value as f64).powi(2);
+            }
+            let norm = norm_sq.sqrt() as f32;
+            let norm = norm.max(EPSILON);
+            norms[col_idx] = norm;
+            for row_idx in 0..feature_dim {
+                let idx = row_idx * batch + col_idx;
+                data[idx] /= norm;
+            }
+        }
+    }
+
+    fn compute_logits(
+        anchors_flat: &[f32],
+        positives_t: &[f32],
+        batch: usize,
+        feature_dim: usize,
+    ) -> Vec<f32> {
+        let mut logits = vec![0.0f32; batch * batch];
+        for i in 0..batch {
+            let anchor = &anchors_flat[i * feature_dim..(i + 1) * feature_dim];
+            for j in 0..batch {
+                let mut dot = 0.0f32;
+                for k in 0..feature_dim {
+                    dot += anchor[k] * positives_t[k * batch + j];
+                }
+                logits[i * batch + j] = dot;
+            }
+        }
+        logits
+    }
+
+    fn apply_normalization(
+        logits: &mut [f32],
+        anchor_norms: &[f32],
+        positive_norms: &[f32],
+        batch: usize,
+    ) {
+        for i in 0..batch {
+            let a = anchor_norms[i].max(EPSILON);
+            for j in 0..batch {
+                let idx = i * batch + j;
+                logits[idx] /= a * positive_norms[j].max(EPSILON);
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct SelfSupBatch {
