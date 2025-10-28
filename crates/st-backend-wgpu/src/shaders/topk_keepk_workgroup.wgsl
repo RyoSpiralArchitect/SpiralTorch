@@ -16,8 +16,8 @@ fn unpack_at(base:u32)->vec2<u32>{
 fn f32_from_hi(hi: u32) -> f32 { return bitcast<f32>(hi); }
 fn i32_from_lo(lo: u32) -> i32 { return bitcast<i32>(lo); }
 
-var<workgroup> svals: array<f32, 256*4>;
-var<workgroup> sidx:  array<i32, 256*4>;
+var<workgroup> svals: array<f32, 1024u>;
+var<workgroup> sidx:  array<i32, 1024u>;
 
 @compute @workgroup_size(256)
 fn main_cs(@builtin(global_invocation_id) gid: vec3<u32>,

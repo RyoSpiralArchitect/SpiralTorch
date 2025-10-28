@@ -15,7 +15,9 @@ studio tooling introduced in this iteration.
 ### Remote Collaboration
 - Export `QuantumRealityStudio::export_storyboard` snapshots at the end of each
   run. Drop the JSON into `tools/qr_storyboard.py` to generate Markdown decks
-  for asynchronous review.
+  for asynchronous review—the script now braids overlay glyphs, narrative/meta
+  tags, concept windows, causal ancestry, and meaning-sheaf signatures into a
+  single highlights column so reviewers can trace how the story evolved.
 - Feed the resulting deck into Desire roundtables so remote moderators can
   replay the exact glyph, intensity, and Z-bias sequence.
 - Register at least one `StudioSink` on every remote session so live frames can

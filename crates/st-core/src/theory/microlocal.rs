@@ -592,6 +592,10 @@ impl InterfaceZPulse {
         a + h + b
     }
 
+    pub fn density_fluctuation(&self) -> f32 {
+        ZPulse::density_fluctuation_for(self.band_energy)
+    }
+
     pub fn is_empty(&self) -> bool {
         self.support <= f32::EPSILON && self.total_energy() <= f32::EPSILON
     }

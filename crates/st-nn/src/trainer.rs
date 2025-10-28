@@ -29,7 +29,8 @@ use crate::golden::{GoldenBlackcatPulse, GoldenCooperativeDirective, GoldenCounc
 #[cfg(feature = "psi")]
 use crate::language::{DesirePsiBridge, DesirePsiSummary};
 use crate::language::{
-    DesireRoundtableBridge, DesireRoundtableSummary, DesireTrainerBridge, DesireTrainerSummary,
+    DesireRoundtableBridge, DesireRoundtableSummary, DesireTelemetryBundle, DesireTrainerBridge,
+    DesireTrainerSummary,
 };
 use crate::loss::Loss;
 use crate::module::Module;
@@ -1335,6 +1336,21 @@ impl ModuleTrainer {
         self.desire_roundtable_bridge = Some(bridge);
     }
 
+    /// Bundles desire trainer, roundtable, and ψ bridges so experiments can
+    /// attach every compatible telemetry stream in one call.
+    pub fn enable_desire_telemetry(&mut self, bundle: &DesireTelemetryBundle) {
+        if let Some(bridge) = bundle.trainer_bridge() {
+            self.enable_desire_pipeline(bridge.clone());
+        }
+        if let Some(bridge) = bundle.roundtable_bridge() {
+            self.enable_desire_roundtable_bridge(bridge.clone());
+        }
+        #[cfg(feature = "psi")]
+        if let Some(bridge) = bundle.psi_bridge() {
+            self.enable_desire_psi_bridge(bridge.clone());
+        }
+    }
+
     /// Clears any attached roundtable desire bridge.
     pub fn disable_desire_roundtable_bridge(&mut self) {
         self.desire_roundtable_bridge = None;
@@ -1718,8 +1734,28 @@ impl ModuleTrainer {
     }
 
     /// Produces a roundtable schedule for the provided output dimensions.
-    pub fn roundtable(&self, rows: u32, cols: u32, config: RoundtableConfig) -> RoundtableSchedule {
-        let schedule = RoundtableSchedule::new(&self.planner, rows, cols, config);
+    ///
+    /// When an Autopilot runtime is attached the planner suggestions are
+    /// overridden with the latest contextual picks before the schedule is
+    /// emitted.
+    pub fn roundtable(
+        &mut self,
+        rows: u32,
+        cols: u32,
+        config: RoundtableConfig,
+    ) -> RoundtableSchedule {
+        let mut schedule = RoundtableSchedule::new(&self.planner, rows, cols, config);
+        if self.autopilot.is_some() {
+            let depth = schedule.above().k + schedule.here().k + schedule.beneath().k;
+            let device_load = self.estimate_device_load();
+            if let Some(ap) = self.autopilot.as_mut() {
+                let context = ap.build_context(rows, cols, depth, device_load, &[]);
+                let picks = ap.suggest(context).clone();
+                if !picks.is_empty() {
+                    schedule.apply_knob_overrides(&picks);
+                }
+            }
+        }
         self.emit_roundtable_summary(rows, cols, config, &schedule);
         schedule
     }
@@ -3026,6 +3062,7 @@ mod tests {
     use crate::schedule::RoundtableConfig;
     #[cfg(feature = "golden")]
     use crate::CouncilEvidence;
+    use st_core::runtime::autopilot::{AutoConfig, AutoMode};
     use st_core::runtime::blackcat::{bandit::SoftBanditMode, zmeta::ZMetaParams, ChoiceGroups};
     use st_core::telemetry::hub::{SoftlogicEllipticSample, SoftlogicZFeedback};
     use st_core::telemetry::zspace_region::{ZSpaceRadiusBand, ZSpaceRegionKey, ZSpaceSpinBand};
@@ -3359,6 +3396,36 @@ mod tests {
     }
 
     #[test]
+    fn roundtable_applies_autopilot_overrides() {
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let mut groups = HashMap::new();
+        groups.insert("wg".to_string(), vec!["64".to_string()]);
+        groups.insert("here.tile".to_string(), vec!["42".to_string()]);
+        groups.insert("beneath.subgroup".to_string(), vec!["false".to_string()]);
+        let runtime = BlackCatRuntime::new(
+            ZMetaParams::default(),
+            ChoiceGroups { groups },
+            4,
+            SoftBanditMode::TS,
+            None,
+        );
+        let autopilot = Autopilot::new(
+            caps,
+            AutoConfig {
+                feat_dim: 4,
+                mode: AutoMode::Auto,
+                ..AutoConfig::default()
+            },
+            runtime,
+        );
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01).with_autopilot(autopilot);
+        let schedule = trainer.roundtable(8, 16, RoundtableConfig::default());
+        assert_eq!(schedule.above().choice.wg, 64);
+        assert_eq!(schedule.here().choice.tile, 42);
+        assert!(!schedule.beneath().choice.subgroup);
+    }
+
+    #[test]
     fn region_loss_strategy_scales_total_loss() {
         let elliptic = SoftlogicEllipticSample {
             curvature_radius: 1.0,
@@ -3378,6 +3445,8 @@ mod tests {
             noise_density: 0.0,
             quaternion: [0.0; 4],
             rotation: [0.0; 9],
+            lie_log: [0.0; 3],
+            rotor_transport: [0.0; 3],
         };
         let seed_feedback = SoftlogicZFeedback {
             psi_total: 0.0,
@@ -3443,6 +3512,8 @@ mod tests {
             noise_density: 0.0,
             quaternion: [0.0; 4],
             rotation: [0.0; 9],
+            lie_log: [0.0; 3],
+            rotor_transport: [0.0; 3],
         };
         let feedback = SoftlogicZFeedback {
             psi_total: 0.0,
@@ -3674,6 +3745,61 @@ mod tests {
         assert!(bridge.drain_summary().unwrap().is_none());
         let summary = trainer.desire_roundtable_summary();
         assert!(summary.is_some());
+    }
+
+    #[test]
+    fn trainer_enables_desire_bundle() {
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        let mut model = Sequential::new();
+        model.push(Linear::new("lin", 2, 1).unwrap());
+        trainer.prepare(&mut model).unwrap();
+
+        let automation = build_language_automation();
+        let trainer_bridge = DesireTrainerBridge::new();
+        let roundtable_bridge = DesireRoundtableBridge::new();
+        let bundle = DesireTelemetryBundle::new()
+            .with_trainer_bridge(&trainer_bridge)
+            .with_roundtable_bridge(&roundtable_bridge);
+
+        let mut pipeline = DesirePipeline::builder(automation)
+            .with_telemetry_bundle(&bundle)
+            .with_sink(DesireTriggerBuffer::new())
+            .build();
+
+        let logits = vec![2.2, 0.5];
+        let concept = ConceptHint::Distribution(vec![0.6, 0.4]);
+        let start = Instant::now();
+        let anchor = SystemTime::now();
+        for step in 0..6 {
+            let now = start + Duration::from_millis((step * 120) as u64);
+            let timestamp = anchor + Duration::from_millis((step * 120) as u64);
+            pipeline
+                .step_at(&logits, step % 2, &concept, now, timestamp)
+                .unwrap();
+        }
+
+        trainer.enable_desire_telemetry(&bundle);
+
+        let schedule = trainer.roundtable(1, 1, RoundtableConfig::default());
+        let dataset = vec![
+            (
+                Tensor::from_vec(1, 2, vec![0.0, 1.0]).unwrap(),
+                Tensor::from_vec(1, 1, vec![1.0]).unwrap(),
+            ),
+            (
+                Tensor::from_vec(1, 2, vec![1.0, 0.0]).unwrap(),
+                Tensor::from_vec(1, 1, vec![0.0]).unwrap(),
+            ),
+        ];
+        let mut loss = MeanSquaredError::new();
+        trainer
+            .train_epoch(&mut model, &mut loss, dataset, &schedule)
+            .unwrap();
+
+        assert!(trainer_bridge.is_empty());
+        assert!(roundtable_bridge.is_empty());
+        assert!(trainer.desire_roundtable_summary().is_some());
     }
 
     #[test]

@@ -21,8 +21,8 @@
 //  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 // ============================================================================
 
-use crate::optim::LocalLearningRateAdapter;
 use crate::gnn::RoundtableBandSignal;
+use crate::optim::LocalLearningRateAdapter;
 use crate::schedule::GradientBands;
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::ops::zspace_round::SpectralFeatureSample;

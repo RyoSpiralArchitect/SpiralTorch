@@ -1319,7 +1319,7 @@ mod tests {
     #[test]
     fn golden_retriever_trains_in_parallel() {
         let caps = DeviceCaps::wgpu(16, true, 128);
-        let trainers = vec![
+        let mut trainers = vec![
             ModuleTrainer::new(caps, -1.0, 0.05, 0.01),
             ModuleTrainer::new(caps, -1.0, 0.05, 0.01),
         ];
@@ -1327,7 +1327,7 @@ mod tests {
         let mut schedules = Vec::new();
         let mut losses = Vec::new();
         let mut loaders = Vec::new();
-        for trainer in trainers.iter() {
+        for trainer in trainers.iter_mut() {
             let mut layer = Linear::new("lin", 2, 1).unwrap();
             trainer.prepare(&mut layer).unwrap();
             let schedule = trainer.roundtable(1, 1, RoundtableConfig::default());
@@ -1366,7 +1366,7 @@ mod tests {
     #[test]
     fn golden_retriever_reports_cooperative_pulse() {
         let caps = DeviceCaps::wgpu(16, true, 128);
-        let trainers = vec![
+        let mut trainers = vec![
             ModuleTrainer::new(caps, -1.0, 0.05, 0.01),
             ModuleTrainer::new(caps, -1.0, 0.05, 0.01),
         ];
@@ -1374,7 +1374,7 @@ mod tests {
         let mut schedules = Vec::new();
         let mut losses = Vec::new();
         let mut loaders = Vec::new();
-        for trainer in trainers.iter() {
+        for trainer in trainers.iter_mut() {
             let mut layer = Linear::new("lin", 2, 1).unwrap();
             trainer.prepare(&mut layer).unwrap();
             let schedule = trainer.roundtable(1, 1, RoundtableConfig::default());
@@ -1426,7 +1426,7 @@ mod tests {
     #[test]
     fn golden_retriever_reports_council_snapshot() {
         let caps = DeviceCaps::wgpu(32, true, 128);
-        let trainers = vec![
+        let mut trainers = vec![
             ModuleTrainer::new(caps, -1.0, 0.05, 0.01),
             ModuleTrainer::new(caps, -1.0, 0.05, 0.01),
         ];
@@ -1434,7 +1434,7 @@ mod tests {
         let mut schedules = Vec::new();
         let mut losses = Vec::new();
         let mut loaders = Vec::new();
-        for trainer in trainers.iter() {
+        for trainer in trainers.iter_mut() {
             let mut layer = Linear::new("lin", 2, 1).unwrap();
             trainer.prepare(&mut layer).unwrap();
             let schedule = trainer.roundtable(1, 1, RoundtableConfig::default());
@@ -1486,7 +1486,7 @@ mod tests {
     #[test]
     fn golden_retriever_broadcasts_council_digest() {
         let caps = DeviceCaps::wgpu(32, true, 128);
-        let trainers = vec![
+        let mut trainers = vec![
             ModuleTrainer::new(caps, -1.0, 0.05, 0.01),
             ModuleTrainer::new(caps, -1.0, 0.05, 0.01),
         ];
@@ -1494,7 +1494,7 @@ mod tests {
         let mut schedules = Vec::new();
         let mut losses = Vec::new();
         let mut loaders = Vec::new();
-        for trainer in trainers.iter() {
+        for trainer in trainers.iter_mut() {
             let mut layer = Linear::new("lin", 2, 1).unwrap();
             trainer.prepare(&mut layer).unwrap();
             let schedule = trainer.roundtable(1, 1, RoundtableConfig::default());
@@ -1533,7 +1533,7 @@ mod tests {
     #[test]
     fn golden_retriever_self_rewrites_biases() {
         let caps = DeviceCaps::wgpu(32, true, 256);
-        let trainers = vec![
+        let mut trainers = vec![
             ModuleTrainer::new(caps, -1.0, 0.05, 0.01),
             ModuleTrainer::new(caps, -1.0, 0.05, 0.01),
         ];
@@ -1541,7 +1541,7 @@ mod tests {
         let mut schedules = Vec::new();
         let mut losses = Vec::new();
         let mut loaders = Vec::new();
-        for trainer in trainers.iter() {
+        for trainer in trainers.iter_mut() {
             let mut layer = Linear::new("lin", 4, 2).unwrap();
             trainer.prepare(&mut layer).unwrap();
             let schedule = trainer.roundtable(
@@ -1595,7 +1595,7 @@ mod tests {
     #[test]
     fn golden_config_rewrites_via_scheduler() {
         let caps = DeviceCaps::wgpu(32, true, 256);
-        let trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
         let schedule = trainer.roundtable(
             1,
             64,
@@ -1624,7 +1624,7 @@ mod tests {
     #[test]
     fn golden_retriever_requires_success_without_dropout() {
         let caps = DeviceCaps::wgpu(16, true, 128);
-        let trainers = vec![
+        let mut trainers = vec![
             ModuleTrainer::new(caps, -1.0, 0.05, 0.01),
             ModuleTrainer::new(caps, -1.0, 0.05, 0.01),
         ];
@@ -1632,7 +1632,7 @@ mod tests {
         let mut schedules = Vec::new();
         let mut losses = Vec::new();
         let mut loaders = Vec::new();
-        for (idx, trainer) in trainers.iter().enumerate() {
+        for (idx, trainer) in trainers.iter_mut().enumerate() {
             let mut layer = Linear::new("lin", 2, 1).unwrap();
             trainer.prepare(&mut layer).unwrap();
             let schedule = trainer.roundtable(1, 1, RoundtableConfig::default());
@@ -1671,7 +1671,7 @@ mod tests {
     #[test]
     fn golden_retriever_tolerates_single_dropout() {
         let caps = DeviceCaps::wgpu(16, true, 128);
-        let trainers = vec![
+        let mut trainers = vec![
             ModuleTrainer::new(caps, -1.0, 0.05, 0.01),
             ModuleTrainer::new(caps, -1.0, 0.05, 0.01),
         ];
@@ -1679,7 +1679,7 @@ mod tests {
         let mut schedules = Vec::new();
         let mut losses = Vec::new();
         let mut loaders = Vec::new();
-        for (idx, trainer) in trainers.iter().enumerate() {
+        for (idx, trainer) in trainers.iter_mut().enumerate() {
             let mut layer = Linear::new("lin", 2, 1).unwrap();
             trainer.prepare(&mut layer).unwrap();
             let schedule = trainer.roundtable(1, 1, RoundtableConfig::default());
@@ -1719,7 +1719,7 @@ mod tests {
     #[test]
     fn golden_retriever_enforces_minimum_successes() {
         let caps = DeviceCaps::wgpu(16, true, 128);
-        let trainers = vec![
+        let mut trainers = vec![
             ModuleTrainer::new(caps, -1.0, 0.05, 0.01),
             ModuleTrainer::new(caps, -1.0, 0.05, 0.01),
         ];
@@ -1727,7 +1727,7 @@ mod tests {
         let mut schedules = Vec::new();
         let mut losses = Vec::new();
         let mut loaders = Vec::new();
-        for (idx, trainer) in trainers.iter().enumerate() {
+        for (idx, trainer) in trainers.iter_mut().enumerate() {
             let mut layer = Linear::new("lin", 2, 1).unwrap();
             trainer.prepare(&mut layer).unwrap();
             let schedule = trainer.roundtable(1, 1, RoundtableConfig::default());

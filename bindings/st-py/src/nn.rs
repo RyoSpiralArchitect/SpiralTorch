@@ -29,11 +29,9 @@ use st_nn::{
     dataset::DataLoaderBatches,
     dataset_from_vec,
     layers::{
-        conv::{AvgPool2d, Conv2d, Conv6da, MaxPool2d},
-        NonLiner, NonLinerActivation, NonLinerEllipticConfig, NonLinerGeometry,
-        NonLinerHyperbolicConfig,
-        Dropout as RustDropout, NonLiner, NonLinerActivation, NonLinerEllipticConfig,
-        NonLinerGeometry, NonLinerHyperbolicConfig,
+        conv::{Conv2d, Conv6da},
+        Dropout as RustDropout, Identity, NonLiner, NonLinerActivation, NonLinerEllipticConfig,
+        NonLinerGeometry, NonLinerHyperbolicConfig, Scaler,
     },
     zspace_coherence::{
         is_swap_invariant as rust_is_swap_invariant, CoherenceDiagnostics, CoherenceLabel,
@@ -125,6 +123,19 @@ impl Spatial3d {
 enum LayoutDirection {
     ToCanonical,
     FromCanonical,
+}
+
+#[cfg(feature = "nn")]
+impl LayoutDirection {
+    fn parse(label: &str) -> PyResult<Self> {
+        match label.to_ascii_lowercase().as_str() {
+            "to_canonical" | "to" => Ok(Self::ToCanonical),
+            "from_canonical" | "from" => Ok(Self::FromCanonical),
+            other => Err(PyValueError::new_err(format!(
+                "unknown direction '{other}', expected 'to_canonical' or 'from_canonical'"
+            ))),
+        }
+    }
 }
 
 #[cfg(feature = "nn")]
@@ -370,25 +381,11 @@ enum PoolModule {
 }
 
 #[cfg(feature = "nn")]
-fn ensure_feature_shape(tensor: &Tensor, dims: Spatial2d) -> Result<(), TensorError> {
-    let cols = tensor.shape().1;
-    let expected = dims.size();
-    if cols != expected {
-        return Err(TensorError::ShapeMismatch {
-            left: (1, cols),
-            right: (1, expected),
-        });
-    }
-    Ok(())
-}
-
-#[cfg(feature = "nn")]
-fn ensure_feature_shape_3d(tensor: &Tensor, dims: Spatial3d) -> Result<(), TensorError> {
 impl PoolModule {
-    fn forward(&self, tensor: &Tensor) -> Result<Tensor, TensorError> {
+    fn forward(&self, input: &Tensor) -> Result<Tensor, TensorError> {
         match self {
-            Self::Max(module) => module.forward(tensor),
-            Self::Avg(module) => module.forward(tensor),
+            Self::Max(module) => module.forward(input),
+            Self::Avg(module) => module.forward(input),
         }
     }
 
@@ -409,6 +406,19 @@ impl PoolModule {
 
 #[cfg(feature = "nn")]
 fn ensure_feature_shape(tensor: &Tensor, dims: Spatial2d) -> Result<(), TensorError> {
+    let cols = tensor.shape().1;
+    let expected = dims.size();
+    if cols != expected {
+        return Err(TensorError::ShapeMismatch {
+            left: (1, cols),
+            right: (1, expected),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(feature = "nn")]
+fn ensure_feature_shape_3d(tensor: &Tensor, dims: Spatial3d) -> Result<(), TensorError> {
     let cols = tensor.shape().1;
     let expected = dims.size();
     if cols != expected {
@@ -858,6 +868,41 @@ fn parse_non_liner_activation(name: &str) -> PyResult<NonLinerActivation> {
 }
 
 #[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "Identity", unsendable)]
+pub(crate) struct PyIdentity {
+    inner: Identity,
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyIdentity {
+    #[new]
+    pub fn new() -> Self {
+        Self {
+            inner: Identity::new(),
+        }
+    }
+
+    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        let output = self.inner.forward(&input.inner).map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        let grad = self
+            .inner
+            .backward(&input.inner, &grad_output.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(grad))
+    }
+
+    #[pyo3(signature = (x))]
+    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(x)
+    }
+}
+
+#[cfg(feature = "nn")]
 #[pyclass(module = "spiraltorch.nn", name = "NonLiner", unsendable)]
 pub(crate) struct PyNonLiner {
     inner: NonLiner,
@@ -1105,9 +1150,499 @@ impl PyNonLiner {
 }
 
 #[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "Scaler", unsendable)]
+pub(crate) struct PyScaler {
+    inner: Scaler,
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyScaler {
+    #[new]
+    pub fn new(name: &str, features: usize) -> PyResult<Self> {
+        let inner = Scaler::new(name, features).map_err(tensor_err_to_py)?;
+        Ok(Self { inner })
+    }
+
+    #[staticmethod]
+    pub fn from_gain(name: &str, gain: &PyTensor) -> PyResult<Self> {
+        let inner = Scaler::from_gain(name, gain.inner.clone()).map_err(tensor_err_to_py)?;
+        Ok(Self { inner })
+    }
+
+    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        let output = self.inner.forward(&input.inner).map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        let grad = self
+            .inner
+            .backward(&input.inner, &grad_output.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(grad))
+    }
+
+    #[pyo3(signature = (x))]
+    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(x)
+    }
+
+    pub fn calibrate(&mut self, samples: &PyTensor, epsilon: f32) -> PyResult<()> {
+        self.inner
+            .calibrate(&samples.inner, epsilon)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn attach_hypergrad(&mut self, curvature: f32, learning_rate: f32) -> PyResult<()> {
+        self.inner
+            .attach_hypergrad(curvature, learning_rate)
+            .map_err(tensor_err_to_py)
+    }
+
+    #[pyo3(signature = (curvature, learning_rate, *, topos=None))]
+    pub fn attach_hypergrad_with_topos(
+        &mut self,
+        curvature: f32,
+        learning_rate: f32,
+        topos: Option<&PyOpenCartesianTopos>,
+    ) -> PyResult<()> {
+        if let Some(topos) = topos {
+            self.inner
+                .attach_hypergrad_with_topos(curvature, learning_rate, topos.inner.clone())
+                .map_err(tensor_err_to_py)
+        } else {
+            self.attach_hypergrad(curvature, learning_rate)
+        }
+    }
+
+    pub fn attach_realgrad(&mut self, learning_rate: f32) -> PyResult<()> {
+        self.inner
+            .attach_realgrad(learning_rate)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn zero_accumulators(&mut self) -> PyResult<()> {
+        self.inner.zero_accumulators().map_err(tensor_err_to_py)
+    }
+
+    pub fn apply_step(&mut self, fallback_lr: f32) -> PyResult<()> {
+        self.inner.apply_step(fallback_lr).map_err(tensor_err_to_py)
+    }
+
+    pub fn state_dict(&self) -> PyResult<Vec<(String, PyTensor)>> {
+        let mut entries: Vec<_> = self
+            .inner
+            .state_dict()
+            .map_err(tensor_err_to_py)?
+            .into_iter()
+            .collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(entries
+            .into_iter()
+            .map(|(name, tensor)| (name, PyTensor::from_tensor(tensor)))
+            .collect())
+    }
+
+    pub fn load_state_dict(&mut self, state: Vec<(String, PyTensor)>) -> PyResult<()> {
+        let mut map = std::collections::HashMap::new();
+        for (name, tensor) in state {
+            map.insert(name, tensor.inner.clone());
+        }
+        self.inner.load_state_dict(&map).map_err(tensor_err_to_py)
+    }
+
+    #[getter]
+    pub fn gain(&self) -> PyTensor {
+        PyTensor::from_tensor(self.inner.gain().value().clone())
+    }
+
+    #[getter]
+    pub fn baseline(&self) -> PyTensor {
+        PyTensor::from_tensor(self.inner.baseline().clone())
+    }
+
+    pub fn gradient(&self) -> Option<PyTensor> {
+        self.inner
+            .gain()
+            .gradient()
+            .map(|g| PyTensor::from_tensor(g.clone()))
+    }
+
+    pub fn psi_probe(&self) -> Option<f32> {
+        self.inner.psi_probe()
+    }
+}
+
+#[cfg(feature = "nn")]
 #[pyclass(module = "spiraltorch.nn", name = "Dropout", unsendable)]
 pub(crate) struct PyDropout {
     inner: RustDropout,
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyDropout {
+    #[new]
+    #[pyo3(signature = (probability, *, seed=None, training=true))]
+    pub fn new(probability: f32, seed: Option<u64>, training: bool) -> PyResult<Self> {
+        let mut inner = RustDropout::with_seed(probability, seed).map_err(tensor_err_to_py)?;
+        if !training {
+            inner.eval();
+        }
+        Ok(Self { inner })
+    }
+
+    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        let output = self.inner.forward(&input.inner).map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        let grad = self
+            .inner
+            .backward(&input.inner, &grad_output.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(grad))
+    }
+
+    pub fn set_training(&mut self, training: bool) {
+        self.inner.set_training(training);
+    }
+
+    pub fn train(&mut self) {
+        self.inner.train();
+    }
+
+    pub fn eval(&mut self) {
+        self.inner.eval();
+    }
+
+    #[getter]
+    pub fn training(&self) -> bool {
+        self.inner.training()
+    }
+
+    #[getter]
+    pub fn probability(&self) -> f32 {
+        self.inner.probability()
+    }
+
+    #[pyo3(signature = (x))]
+    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(x)
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "ZConv", unsendable)]
+pub(crate) struct PyZConv {
+    inner: Conv2d,
+    layout: Layout2d,
+    input_dims: Spatial2d,
+    output_dims: Spatial2d,
+    input_hw: (usize, usize),
+    kernel: (usize, usize),
+    stride: (usize, usize),
+    padding: (usize, usize),
+    dilation: (usize, usize),
+}
+
+#[cfg(feature = "nn")]
+impl PyZConv {
+    fn input_to_canonical(&self, tensor: &Tensor) -> Result<Tensor, TensorError> {
+        reorder_tensor_layout(
+            tensor,
+            self.input_dims,
+            self.layout,
+            LayoutDirection::ToCanonical,
+        )
+    }
+
+    fn input_from_canonical(&self, tensor: &Tensor) -> Result<Tensor, TensorError> {
+        reorder_tensor_layout(
+            tensor,
+            self.input_dims,
+            self.layout,
+            LayoutDirection::FromCanonical,
+        )
+    }
+
+    fn output_to_canonical(&self, tensor: &Tensor) -> Result<Tensor, TensorError> {
+        reorder_tensor_layout(
+            tensor,
+            self.output_dims,
+            self.layout,
+            LayoutDirection::ToCanonical,
+        )
+    }
+
+    fn output_from_canonical(&self, tensor: &Tensor) -> Result<Tensor, TensorError> {
+        reorder_tensor_layout(
+            tensor,
+            self.output_dims,
+            self.layout,
+            LayoutDirection::FromCanonical,
+        )
+    }
+
+    fn refresh_output_dims(&mut self) -> Result<(), TensorError> {
+        let (out_h, out_w) = conv_output_hw(
+            self.input_hw,
+            self.kernel,
+            self.stride,
+            self.padding,
+            self.dilation,
+        )?;
+        self.output_dims = Spatial2d::new(self.output_dims.channels, out_h, out_w);
+        Ok(())
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyZConv {
+    #[new]
+    #[pyo3(signature = (name, in_channels, out_channels, input_hw, kernel, *, stride=None, padding=(0, 0), dilation=(1, 1), layout="NCHW"))]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        name: &str,
+        in_channels: usize,
+        out_channels: usize,
+        input_hw: (usize, usize),
+        kernel: (usize, usize),
+        stride: Option<(usize, usize)>,
+        padding: (usize, usize),
+        dilation: (usize, usize),
+        layout: &str,
+    ) -> PyResult<Self> {
+        let stride = stride.unwrap_or((1, 1));
+        let layout = Layout2d::parse(layout)?;
+        let inner = Conv2d::new(
+            name,
+            in_channels,
+            out_channels,
+            kernel,
+            stride,
+            padding,
+            dilation,
+            input_hw,
+        )
+        .map_err(tensor_err_to_py)?;
+        let (out_h, out_w) = conv_output_hw(input_hw, kernel, stride, padding, dilation)
+            .map_err(tensor_err_to_py)?;
+        Ok(Self {
+            layout,
+            input_dims: Spatial2d::new(in_channels, input_hw.0, input_hw.1),
+            output_dims: Spatial2d::new(out_channels, out_h, out_w),
+            input_hw,
+            kernel,
+            stride,
+            padding,
+            dilation,
+            inner,
+        })
+    }
+
+    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        let canonical_input = self
+            .input_to_canonical(&input.inner)
+            .map_err(tensor_err_to_py)?;
+        let canonical_output = self
+            .inner
+            .forward(&canonical_input)
+            .map_err(tensor_err_to_py)?;
+        let output = self
+            .output_from_canonical(&canonical_output)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        let canonical_input = self
+            .input_to_canonical(&input.inner)
+            .map_err(tensor_err_to_py)?;
+        let canonical_grad_output = self
+            .output_to_canonical(&grad_output.inner)
+            .map_err(tensor_err_to_py)?;
+        let grad_input = self
+            .inner
+            .backward(&canonical_input, &canonical_grad_output)
+            .map_err(tensor_err_to_py)?;
+        let restored = self
+            .input_from_canonical(&grad_input)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(restored))
+    }
+
+    #[pyo3(signature = (x))]
+    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(x)
+    }
+
+    #[pyo3(signature = (curvature, learning_rate, *, topos=None))]
+    pub fn attach_hypergrad(
+        &mut self,
+        curvature: f32,
+        learning_rate: f32,
+        topos: Option<&PyOpenCartesianTopos>,
+    ) -> PyResult<()> {
+        if let Some(topos) = topos {
+            self.inner
+                .attach_hypergrad_with_topos(curvature, learning_rate, topos.inner.clone())
+                .map_err(tensor_err_to_py)
+        } else {
+            self.inner
+                .attach_hypergrad(curvature, learning_rate)
+                .map_err(tensor_err_to_py)
+        }
+    }
+
+    pub fn attach_realgrad(&mut self, learning_rate: f32) -> PyResult<()> {
+        self.inner
+            .attach_realgrad(learning_rate)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn zero_accumulators(&mut self) -> PyResult<()> {
+        self.inner.zero_accumulators().map_err(tensor_err_to_py)
+    }
+
+    pub fn apply_step(&mut self, fallback_lr: f32) -> PyResult<()> {
+        self.inner.apply_step(fallback_lr).map_err(tensor_err_to_py)
+    }
+
+    pub fn state_dict(&self) -> PyResult<Vec<(String, PyTensor)>> {
+        let mut entries: Vec<_> = self
+            .inner
+            .state_dict()
+            .map_err(tensor_err_to_py)?
+            .into_iter()
+            .collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(entries
+            .into_iter()
+            .map(|(name, tensor)| (name, PyTensor::from_tensor(tensor)))
+            .collect())
+    }
+
+    pub fn load_state_dict(&mut self, state: Vec<(String, PyTensor)>) -> PyResult<()> {
+        let mut map = std::collections::HashMap::new();
+        for (name, tensor) in state {
+            map.insert(name, tensor.inner.clone());
+        }
+        self.inner.load_state_dict(&map).map_err(tensor_err_to_py)?;
+        self.refresh_output_dims().map_err(tensor_err_to_py)
+    }
+
+    pub fn set_dilation(&mut self, dilation: (usize, usize)) -> PyResult<()> {
+        self.inner
+            .set_dilation(dilation)
+            .map_err(tensor_err_to_py)?;
+        self.dilation = dilation;
+        self.refresh_output_dims().map_err(tensor_err_to_py)
+    }
+
+    #[getter]
+    pub fn layout(&self) -> &'static str {
+        self.layout.as_str()
+    }
+
+    #[getter]
+    pub fn in_channels(&self) -> usize {
+        self.input_dims.channels
+    }
+
+    #[getter]
+    pub fn out_channels(&self) -> usize {
+        self.output_dims.channels
+    }
+
+    #[getter]
+    pub fn input_hw(&self) -> (usize, usize) {
+        self.input_hw
+    }
+
+    #[getter]
+    pub fn output_hw(&self) -> (usize, usize) {
+        (self.output_dims.height, self.output_dims.width)
+    }
+
+    #[getter]
+    pub fn kernel(&self) -> (usize, usize) {
+        self.kernel
+    }
+
+    #[getter]
+    pub fn stride(&self) -> (usize, usize) {
+        self.stride
+    }
+
+    #[getter]
+    pub fn padding(&self) -> (usize, usize) {
+        self.padding
+    }
+
+    #[getter]
+    pub fn dilation(&self) -> (usize, usize) {
+        self.dilation
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "ZConv6DA", unsendable)]
+pub(crate) struct PyZConv6DA {
+    inner: Conv6da,
+    layout: Layout3d,
+    input_dims: Spatial3d,
+    output_dims: Spatial3d,
+    grid: (usize, usize, usize),
+    leech_rank: usize,
+    leech_weight: f64,
+    neighbor_offsets: Vec<(isize, isize, isize)>,
+}
+
+#[cfg(feature = "nn")]
+impl PyZConv6DA {
+    fn input_to_canonical(&self, tensor: &Tensor) -> Result<Tensor, TensorError> {
+        reorder_tensor_layout_3d(
+            tensor,
+            self.input_dims,
+            self.layout,
+            LayoutDirection::ToCanonical,
+        )
+    }
+
+    fn input_from_canonical(&self, tensor: &Tensor) -> Result<Tensor, TensorError> {
+        reorder_tensor_layout_3d(
+            tensor,
+            self.input_dims,
+            self.layout,
+            LayoutDirection::FromCanonical,
+        )
+    }
+
+    fn output_to_canonical(&self, tensor: &Tensor) -> Result<Tensor, TensorError> {
+        reorder_tensor_layout_3d(
+            tensor,
+            self.output_dims,
+            self.layout,
+            LayoutDirection::ToCanonical,
+        )
+    }
+
+    fn output_from_canonical(&self, tensor: &Tensor) -> Result<Tensor, TensorError> {
+        reorder_tensor_layout_3d(
+            tensor,
+            self.output_dims,
+            self.layout,
+            LayoutDirection::FromCanonical,
+        )
+    }
+
+    fn leech_projector(&self) -> LeechProjector {
+        LeechProjector::new(self.leech_rank, self.leech_weight)
+    }
 }
 
 #[cfg(feature = "nn")]
@@ -1172,16 +1707,6 @@ impl PyZConv6DA {
         let output = self
             .output_from_canonical(&canonical_output)
             .map_err(tensor_err_to_py)?;
-impl PyDropout {
-    #[new]
-    #[pyo3(signature = (probability, *, seed=None))]
-    pub fn new(probability: f32, seed: Option<u64>) -> PyResult<Self> {
-        let inner = RustDropout::with_seed(probability, seed).map_err(tensor_err_to_py)?;
-        Ok(Self { inner })
-    }
-
-    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
-        let output = self.inner.forward(&input.inner).map_err(tensor_err_to_py)?;
         Ok(PyTensor::from_tensor(output))
     }
 
@@ -1434,11 +1959,10 @@ impl PyZPooling {
         let canonical_input = self
             .input_to_canonical(&input.inner)
             .map_err(tensor_err_to_py)?;
-        let canonical_output = match &self.inner {
-            PoolModule::Max(module) => module.forward(&canonical_input),
-            PoolModule::Avg(module) => module.forward(&canonical_input),
-        }
-        .map_err(tensor_err_to_py)?;
+        let canonical_output = self
+            .inner
+            .forward(&canonical_input)
+            .map_err(tensor_err_to_py)?;
         let output = self
             .output_from_canonical(&canonical_output)
             .map_err(tensor_err_to_py)?;
@@ -1452,20 +1976,14 @@ impl PyZPooling {
         let canonical_grad_output = self
             .output_to_canonical(&grad_output.inner)
             .map_err(tensor_err_to_py)?;
-        let grad_input = match &mut self.inner {
-            PoolModule::Max(module) => module.backward(&canonical_input, &canonical_grad_output),
-            PoolModule::Avg(module) => module.backward(&canonical_input, &canonical_grad_output),
-        }
-        .map_err(tensor_err_to_py)?;
+        let grad_input = self
+            .inner
+            .backward(&canonical_input, &canonical_grad_output)
+            .map_err(tensor_err_to_py)?;
         let restored = self
             .input_from_canonical(&grad_input)
             .map_err(tensor_err_to_py)?;
         Ok(PyTensor::from_tensor(restored))
-        let grad = self
-            .inner
-            .backward(&input.inner, &grad_output.inner)
-            .map_err(tensor_err_to_py)?;
-        Ok(PyTensor::from_tensor(grad))
     }
 
     #[pyo3(signature = (x))]
@@ -1511,27 +2029,6 @@ impl PyZPooling {
     #[getter]
     pub fn padding(&self) -> (usize, usize) {
         self.padding
-    pub fn train(&mut self) {
-        self.inner.set_training(true);
-    }
-
-    pub fn eval(&mut self) {
-        self.inner.set_training(false);
-    }
-
-    #[getter]
-    pub fn probability(&self) -> f32 {
-        self.inner.probability()
-    }
-
-    #[getter]
-    pub fn training(&self) -> bool {
-        self.inner.training()
-    }
-
-    #[setter]
-    pub fn set_training(&mut self, training: bool) {
-        self.inner.set_training(training);
     }
 }
 
@@ -2382,7 +2879,9 @@ impl PyZRelativityModule {
 fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     let module = PyModule::new_bound(py, "nn")?;
     module.add("__doc__", "SpiralTorch neural network primitives")?;
+    module.add_class::<PyIdentity>()?;
     module.add_class::<PyNonLiner>()?;
+    module.add_class::<PyScaler>()?;
     module.add_class::<PyZConv>()?;
     module.add_class::<PyZConv6DA>()?;
     module.add_class::<PyZPooling>()?;
@@ -2410,7 +2909,9 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add(
         "__all__",
         vec![
+            "Identity",
             "NonLiner",
+            "Scaler",
             "ZConv",
             "ZConv6DA",
             "ZPooling",
@@ -2435,8 +2936,14 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
         ],
     )?;
     parent.add_submodule(&module)?;
+    if let Ok(identity) = module.getattr("Identity") {
+        parent.add("Identity", identity)?;
+    }
     if let Ok(non_liner) = module.getattr("NonLiner") {
         parent.add("NonLiner", non_liner)?;
+    }
+    if let Ok(scaler) = module.getattr("Scaler") {
+        parent.add("Scaler", scaler)?;
     }
     if let Ok(zconv) = module.getattr("ZConv") {
         parent.add("ZConv", zconv)?;
@@ -2446,6 +2953,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     }
     if let Ok(zpool) = module.getattr("ZPooling") {
         parent.add("ZPooling", zpool)?;
+    }
     if let Ok(dropout) = module.getattr("Dropout") {
         parent.add("Dropout", dropout)?;
     }

@@ -130,7 +130,7 @@ SpiralTorch ships under a dual-license model:
 ## Code stats
 
 <!-- AUTOGEN: CODESTATS BEGIN -->
-_Last updated: 2025-10-25 10:01 UTC_
+_Last updated: 2025-10-27 10:48 UTC_
 
 ```text
 ===============================================================================
@@ -140,14 +140,14 @@ _Last updated: 2025-10-25 10:01 UTC_
  COBOL                   1          416          376            8           32
  C++                     1          327          286            3           38
  CSS                     1          160          137            0           23
- Go                     11         2146         1674          191          281
+ Go                     11         2521         2025          200          296
  JSON                    6          372          372            0            0
  Julia                   8         1335         1176           14          145
- Python                 48        10981         9268           79         1634
+ Python                 58        13886        11718           95         2073
  Shell                   4          194          172            4           18
  SVG                     3           60           60            0            0
  Plain Text              1          661            0          544          117
- TOML                   35          881          749           27          105
+ TOML                   35          892          758           27          107
  TypeScript              7         4898         4331          175          392
  YAML                    3           72           65            0            7
 -------------------------------------------------------------------------------
@@ -161,8 +161,8 @@ _Last updated: 2025-10-25 10:01 UTC_
  |- Python               2           22           20            0            2
  (Total)                             31           20            9            2
 -------------------------------------------------------------------------------
- Markdown               58         5931            0         4665         1266
- |- BASH                13          121           92           17           12
+ Markdown               60         6141            0         4827         1314
+ |- BASH                14          122           93           17           12
  |- C                    1           21           16            0            5
  |- COBOL                1           30           30            0            0
  |- Dockerfile           1            6            6            0            0
@@ -170,16 +170,16 @@ _Last updated: 2025-10-25 10:01 UTC_
  |- JavaScript           1           34           29            3            2
  |- JSON                 1           11           11            0            0
  |- Julia                1           29           26            0            3
- |- Python               6          841          697           26          118
- |- Rust                 5          741          652           15           74
+ |- Python               7          840          702           20          118
+ |- Rust                 5          759          667           15           77
  |- YAML                 2           62           62            0            0
- (Total)                           7845         1639         4726         1480
+ (Total)                           8073         1660         4882         1531
 -------------------------------------------------------------------------------
- Rust                  340       151119       135026         1696        14397
- |- Markdown           212         5934            0         5805          129
- (Total)                         157053       135026         7501        14526
+ Rust                  354       162592       145349         1758        15485
+ |- Markdown           223         6440            0         6290          150
+ (Total)                         169032       145349         8048        15635
 ===============================================================================
- Total                 532       180098       154235         7407        18456
+ Total                 558       195072       167368         7656        20048
 ===============================================================================
 ```
 ---
@@ -230,7 +230,7 @@ tensor shims, no translation layers, and no tracebacks.
     transcripts, and ψ telemetry double as explainability artifacts, enabling
     decision-path inspection without leaving the Z-space calculus.
     
-**Current release:** `spiraltorch==0.2.6` (abi3 wheel, Python ≥3.8)  
+**Current release:** `spiraltorch==0.2.7` (abi3 wheel, Python ≥3.8)  
 **Targets:** CPU (always), MPS, Vulkan/DX (WGPU), CUDA, HIP/ROCm
 
 ---
@@ -238,7 +238,7 @@ tensor shims, no translation layers, and no tracebacks.
 ## Install (pip)
 
 ```bash
-pip install -U spiraltorch==0.2.6
+pip install -U spiraltorch==0.2. 7
 ```
 
 - Wheels are **abi3**; you can use any CPython ≥ 3.8.
@@ -312,7 +312,7 @@ pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
 ### 1) Safety-aware generation with chat notation helpers
 
 ```python
-from spiraltorch.inference import (
+from spiral.inference import (
     ChatMessage,
     ChatPrompt,
     InferenceClient,
@@ -327,7 +327,7 @@ messages = ChatPrompt.from_messages(
     ]
 )
 
-result = client.chat(messages)
+result = client.chat(messages, candidate="Portable GPUs keep attention fast without CUDA lock-in.")
 
 if result.accepted:
     print("model:", result.response)
@@ -339,74 +339,61 @@ for event in client.audit_events():
     print(f"[{event.timestamp}] {event.channel} → {verdict.dominant_risk} (score={verdict.score:.2f})")
 ```
 
-`ChatMessage.system|user|assistant|tool` normalises role names, while `ChatPrompt` keeps separators and rendering styles consistent. When you only need the raw string, call `format_chat_prompt(...)` — `InferenceClient.generate(...)` now accepts plain strings, `ChatPrompt` objects, or any iterable of `(role, content)` pairs.
+The `spiral.inference` helpers ship alongside the wheel and wrap the native
+`spiraltorch.inference` runtime with ergonomic dataclasses. Build chat prompts
+with `ChatMessage`/`ChatPrompt`, or hand `InferenceClient.generate(...)` a plain
+string — the client normalises either form, applies safety policy checks, and
+records every verdict in the audit log.
 
-### 2) Intuitive tensor constructors
+### 2) Practical tensor constructors (and axis labels)
 
 ```python
 import spiraltorch as st
-import torch
 
-# Tuple-style shapes create zeroed tensors without extra keywords
-zeros = st.Tensor((2, 3))
+zeros = st.Tensor(2, 3)  # rows, cols → zero-initialised
+from_rows = st.tensor([[1, 2, 3], [4, 5, 6]])
+labeled = st.tensor(
+    [[0.2, 0.8], [0.4, 0.6]],
+    axes=[st.Axis("batch", 2), st.Axis("feature", 2)],
+)
 
-# Nested iterables flatten automatically in row-major order
-from_lists = st.Tensor([[1, 2, 3], [4, 5, 6]])
-
-# Any iterable of scalars can be reshaped via `shape=` or `rows=`/`cols=`
-from_range = st.Tensor(range(6), shape=(2, 3))
-
-# Interoperable inputs (Torch / NumPy / SpiralTorch tensors) just work
-torch_tensor = torch.arange(6, dtype=torch.float32).reshape(2, 3)
-from_torch = st.Tensor(torch_tensor)
-
-print("zeros shape:", zeros.shape())
-print("from_lists:", from_lists.tolist())
-print("from_range:", from_range.tolist())
-print("from_torch matches torch.tolist():", from_torch.tolist() == torch_tensor.tolist())
+print("zeros:", zeros.tolist())
+print("from_rows shape:", from_rows.shape())
+print("labeled axis names:", labeled.axis_names())
 ```
 
-`st.Tensor` now accepts tuples, keyword-only shapes, nested Python iterables, DLPack-aware tensors, or anything with a `tolist()` method. The constructor infers shapes where possible and reshapes automatically when you provide the total element count.
+`Tensor(rows, cols, data=None)` mirrors the Rust constructor exactly, while
+`st.tensor(...)` accepts any nested iterable (or existing SpiralTorch/Torch
+tensor) and flattens it for you. Attach human-readable dimensions with
+`Axis`/`LabeledTensor` so downstream planning and visualisation stay in sync.
 
 ### 3) Hypergrad tapes without ceremony
 
 ```python
 import spiraltorch as st
 
-# Bind rows/cols or tensor shapes inline with the hg-DSL.
-weights = st.Tensor([[0.1, 0.2, 0.3]])
+weights = st.Tensor(1, 3, [0.1, 0.2, 0.3])
 tape = st.hg[weights](
+    curvature=-0.9,
     learning_rate=0.02,
-    topos=st.hg.topos(
-        curvature=-0.9,
-        tolerance=1e-3,
-        saturation=0.8,
-        max_depth=8,
-        max_volume=32,
-    ),
 )
 
-# Slice notation pinches rows/cols; `.with_topos(...)` inlines guard creation.
-aux = st.hg[1:3](curvature=-0.85)
-guarded = st.hg[weights].with_topos(curvature=-0.9, tolerance=2e-3, max_depth=6)
+guarded = st.hg[weights].with_topos(tolerance=1e-3, saturation=0.8, max_depth=8)
 
-prediction = st.Tensor([[0.25, 0.25, 0.25]])
-target = st.Tensor([[0.0, 1.0, 0.0]])
+prediction = st.Tensor(1, 3, [0.25, 0.25, 0.25])
+target = st.Tensor(1, 3, [0.0, 1.0, 0.0])
 tape.accumulate_pair(prediction, target)
 tape.apply(weights)
 
 print("shape:", tape.shape(), "lr:", tape.learning_rate())
-print("aux curvature:", aux.curvature())
+print("guard curvature:", guarded.curvature())
 print("guard depth:", guarded.topos().max_depth())
 ```
 
-`st.hg[...]` returns a callable that already knows its shape: pass tensors,
-tuples, or even slices (`st.hg[rows:cols]`) and the helper fills in
-`rows`/`cols` before calling into the native constructor. `st.hg.topos(...)`
-aliases `hypergrad_topos`, while `partial.with_topos(...)` wraps guard creation
-inline so you can bind a tape and guard in a single expression. You can still
-feed dictionaries or `(curvature, tolerance, saturation, depth, volume)` tuples
-directly into `topos=` when needed.
+The `st.hg[...]` DSL infers shapes from tensors, tuples, or slice notation
+(`st.hg[rows:cols]`) and forwards the result into `spiraltorch.hypergrad`. Chain
+`.with_topos(...)` to construct open-cartesian guards inline, or pass
+`st.hg.topos(...)` directly when you already have a reusable guard object.
 
 ### 4) Hypergrad sessions & operator hints
 
@@ -414,41 +401,38 @@ directly into `topos=` when needed.
 import spiraltorch as st
 from spiral.hypergrad import hypergrad_session, hypergrad_summary_dict, suggest_hypergrad_operator
 
-weights = st.Tensor([[0.05, -0.15, 0.25]])
-targets = st.Tensor([[0.0, 1.0, 0.0]])
+weights = st.Tensor(1, 3, [0.05, -0.15, 0.25])
+targets = st.Tensor(1, 3, [0.0, 1.0, 0.0])
 
-with hypergrad_session(weights.shape(), learning_rate=0.03) as tape:
+with hypergrad_session(weights, learning_rate=0.03, curvature=-0.85) as tape:
     tape.accumulate_pair(weights, targets)
     metrics = hypergrad_summary_dict(tape, include_gradient=True)
     hints = suggest_hypergrad_operator(metrics)
 
-print("summary:", metrics["summary"])  # includes l1/l2/linf/mean_abs/rms stats
+print("summary:", metrics["summary"])  # l1/l2/linf/mean_abs/rms stats
 print("wgsl operator hints:", hints)
-print("gradient sample:", metrics["gradient"][:3])
+print("gradient sample:", metrics.get("gradient", [])[:3])
 ```
 
-`hypergrad_session(...)` wraps `st.hypergrad(...)` so notebooks can accumulate,
-apply, and reset tapes without manual `try`/`finally` scaffolding. The
-`hypergrad_summary_dict(...)` helper converts native gradient summaries into a
-plain dictionary (optionally including the gradient vector), and
-`suggest_hypergrad_operator(...)` distils those metrics into shader-friendly mix
-and gain hints while preserving the underlying ratios for custom heuristics.
+`hypergrad_session(...)` wraps `st.hypergrad(...)` in a context manager so
+weights can accumulate, apply, and reset without manual `try`/`finally`
+scaffolding. Feed the resulting tape to `hypergrad_summary_dict(...)` and
+`suggest_hypergrad_operator(...)` to translate gradient telemetry into WGSL mix
+and gain hints for shader authors.
 
 ### 5) Z-space encoders and metric normalisers
 
 ```python
 import spiraltorch as st
 
-# Encode desire text straight into the Z-space tensor manifold.
 z_vec = st.z["Spin up the roundtable", 0.4]
 
-# Normalise mixed telemetry aliases into a structured ZMetrics payload.
 metrics = st.z.metrics(
-    velocity=0.55,
-    mem=0.12,
-    stab=0.78,
-    drift=0.05,
-    grad=[0.1, -0.2, 0.05],
+    speed=0.55,
+    memory=0.12,
+    stability=0.78,
+    drs=0.05,
+    gradient=[0.1, -0.2, 0.05],
 )
 
 roundtable = st.z.partial(
@@ -465,17 +449,11 @@ loss = trainer.step(bundle)
 print("z shape:", z_vec.shape(), "loss:", loss)
 ```
 
-`st.z[...]` is shorthand for `encode_zspace`: strings go straight into the
-encoder, and you can append numbers, `(key, value)` pairs, or dictionaries to
-override temperature or other keyword arguments. `st.z.metrics(...)` recognises
-the common aliases (`velocity`, `mem`, `stab`, `drift`, `grad`) and emits the
-strongly typed `ZMetrics` container that `ZSpaceTrainer` expects. `st.z.partial(...)`
-wraps those metrics (or raw mappings) into a `ZSpacePartialBundle`, flattens any
-telemetry dictionaries into dotted keys, and lets you override `weight`/`origin`
-without touching the underlying map. Feed the partials directly into
-`st.z.bundle(...)` (alias `st.z.blend`) to merge telemetry-aware observations—
-keyword arguments accept every Z-space alias exposed by the wheel so you can
-mix hypergrad, Canvas, or coherence-derived metrics inline.
+`st.z[...]` is shorthand for `encode_zspace`, letting you blend text, temperature
+overrides, or `(key, value)` tweaks inline. `st.z.metrics(...)` canonicalises the
+wheel’s metric aliases, `st.z.partial(...)` captures telemetry/weights in a
+`ZSpacePartialBundle`, and `st.z.bundle(...)` (alias `st.z.blend`) merges those
+partials before handing them to `ZSpaceTrainer`.
 
 ### 6) Zero-copy tensor exchange via DLPack
 
@@ -484,27 +462,30 @@ import spiraltorch as st
 import torch
 from torch.utils.dlpack import from_dlpack as torch_from_dlpack
 
-# ST → Torch
+# SpiralTorch → Torch
 a = st.Tensor(2, 3, [1, 2, 3, 4, 5, 6])
 capsule = a.to_dlpack()
 t = torch_from_dlpack(capsule)
 
 t += 10
-print("ST after torch += 10:", a.tolist())
+print("SpiralTorch after torch += 10:", a.tolist())
 
-# Torch → ST
+# Torch → SpiralTorch
 t2 = torch.arange(6, dtype=torch.float32).reshape(2, 3)
 a2 = st.Tensor.from_dlpack(t2)
 t2.mul_(2)
-print("ST sees torch mul_:", a2.tolist())
+print("SpiralTorch sees torch mul_:", a2.tolist())
 ```
+
+The wheel exposes both `Tensor.to_dlpack()` and `Tensor.from_dlpack(...)` so you
+can move data between SpiralTorch, PyTorch, NumPy (via CuPy), or any other
+DLPack-aware runtime without copies.
 
 ### 7) Row softmax (GPU-accelerated when available)
 
 ```python
-from spiraltorch import Axis, tensor, label_tensor
+from spiraltorch import Axis, tensor
 
-# Declare the axes that describe your data.
 time = Axis("time")
 feature = Axis("feature", 4)
 
@@ -520,6 +501,10 @@ print(wave.describe())
 softmax = wave.row_softmax()
 print(softmax.axis_names())  # ('time', 'feature')
 ```
+
+`Axis`/`tensor` build `LabeledTensor` instances that remember semantic
+dimensions. `row_softmax()` automatically dispatches to the best backend
+available (WGPU/MPS/CPU) and keeps the axis metadata intact.
 
 ### 8) rl.stAgent multi-armed bandit
 
@@ -1122,7 +1107,9 @@ builders such as `OverlayFrame::from_pairs`/`::from_glyphs_and_intensities` so
 AR pipelines can zip glyph and intensity streams without writing manual
 plumbing.【F:crates/st-qr-studio/src/lib.rs†L1-L362】 Storyboard exports drop directly into
 `tools/qr_storyboard.py`, which converts JSON/NDJSON captures into Markdown decks
-grouped by channel for Desire roundtables.【F:tools/qr_storyboard.py†L1-L96】 The companion
+grouped by channel for Desire roundtables while weaving overlay glyph stacks,
+meta-narrative tags, causal ancestry, concept windows, and meaning-sheaf
+signatures into a highlights column for reviewers.【F:tools/qr_storyboard.py†L1-L190】 The companion
 [Quantum Reality Playbook](docs/qr_playbook/README.md) provides rituals,
 collaboration tips, and art-direction cues so research and cultural teams stay
 synchronised.【F:docs/qr_playbook/README.md†L1-L49】
@@ -1538,6 +1525,31 @@ trainer.enable_desire_roundtable_bridge(bridge.clone());
 Every optimisation step now reports `desire_roundtable_*` metrics, while
 `ModuleTrainer::desire_roundtable_summary()` returns the most recent aggregate so
 Python notebooks can watch the unconscious drift in real time.【F:crates/st-nn/src/trainer.rs†L240-L392】【F:crates/st-nn/src/trainer.rs†L780-L905】
+
+Need all three braids at once? `DesireTelemetryBundle` wires the trainer,
+roundtable, and ψ bridges together so experiments can attach a single bundle to
+both the pipeline and optimiser.【F:crates/st-nn/src/language/pipeline.rs†L1808-L1853】【F:crates/st-nn/src/trainer.rs†L1352-L1383】
+
+```rust
+use st_nn::language::{
+    DesirePipeline, DesirePsiBridge, DesireRoundtableBridge, DesireTelemetryBundle,
+    DesireTrainerBridge,
+};
+
+let trainer_bridge = DesireTrainerBridge::new();
+let roundtable_bridge = DesireRoundtableBridge::new();
+let psi_bridge = DesirePsiBridge::new();
+let bundle = DesireTelemetryBundle::new()
+    .with_trainer_bridge(&trainer_bridge)
+    .with_roundtable_bridge(&roundtable_bridge)
+    .with_psi_bridge(&psi_bridge);
+
+let mut pipeline = DesirePipeline::builder(automation)
+    .with_telemetry_bundle(&bundle)
+    .build();
+
+trainer.enable_desire_telemetry(&bundle);
+```
 
 ```python
 import spiraltorch
@@ -2588,7 +2600,7 @@ let projector = ZSpaceProjector::new(topos.clone(), encoder.clone())?;
 let text = projector.encode_text("SpiralTorch keeps the open topos alive")?;
 
 let mut gate = WaveGate::with_topos("gate", text.shape().1, encoder, topos.clone())?;
-let trainer = ModuleTrainer::new(DeviceCaps::wgpu(32, true, 256), -0.9, 0.05, 0.01);
+let mut trainer = ModuleTrainer::new(DeviceCaps::wgpu(32, true, 256), -0.9, 0.05, 0.01);
 trainer.prepare_with_topos(&mut gate, topos)?;
 
 let forward = gate.forward(&text)?;

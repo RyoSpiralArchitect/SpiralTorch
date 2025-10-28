@@ -7,8 +7,8 @@ use crate::module::Module;
 use crate::{PureResult, Tensor};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use std::cell::RefCell;
 use st_tensor::TensorError;
+use std::cell::RefCell;
 
 /// Stochastic dropout layer that scales retained activations during training
 /// and becomes a no-op when evaluation mode is enabled.

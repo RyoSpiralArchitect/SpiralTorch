@@ -10,7 +10,11 @@ pub struct BlockRecord {
 impl BlockRecord {
     #[inline]
     pub fn new(start: usize, len: usize, norm_sq: f32) -> Self {
-        Self { start, len, norm_sq }
+        Self {
+            start,
+            len,
+            norm_sq,
+        }
     }
 
     #[inline]
@@ -23,7 +27,12 @@ impl BlockRecord {
 const PARALLEL_THRESHOLD: usize = 256;
 
 #[inline]
-fn block_len(total_elems: usize, block_size: usize, block_index: usize, block_count: usize) -> usize {
+fn block_len(
+    total_elems: usize,
+    block_size: usize,
+    block_index: usize,
+    block_count: usize,
+) -> usize {
     if block_index + 1 == block_count {
         total_elems - block_index * block_size
     } else {
@@ -32,7 +41,13 @@ fn block_len(total_elems: usize, block_size: usize, block_index: usize, block_co
 }
 
 #[cfg(feature = "parallel")]
-fn fill_record(record: &mut BlockRecord, block_index: usize, block_size: usize, weights: &[f32], block_count: usize) {
+fn fill_record(
+    record: &mut BlockRecord,
+    block_index: usize,
+    block_size: usize,
+    weights: &[f32],
+    block_count: usize,
+) {
     let start = block_index * block_size;
     let len = block_len(weights.len(), block_size, block_index, block_count);
     let slice = &weights[start..start + len];
@@ -82,7 +97,9 @@ pub(crate) fn compute_block_norms(
             block_norms
                 .par_iter_mut()
                 .enumerate()
-                .for_each(|(index, record)| fill_record(record, index, block_size, weights, block_count));
+                .for_each(|(index, record)| {
+                    fill_record(record, index, block_size, weights, block_count)
+                });
             return;
         }
     }

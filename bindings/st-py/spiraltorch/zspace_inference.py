@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+import inspect
 import math
 import sys
 from dataclasses import dataclass
-from collections.abc import Iterable
-from typing import Any, Dict, Mapping, Sequence
+from collections.abc import Iterable, Mapping as MappingABC, MutableMapping
+from typing import TYPE_CHECKING, Any, Callable, Dict, Mapping, Sequence, Union
 from types import MappingProxyType
 
+from ._zspace_aliases import (
+    ZSPACE_METRIC_ALIASES,
+    PRIMARY_ZSPACE_METRIC_ALIASES,
+)
+
 __all__ = [
+    "ZMetrics",
     "ZSpaceDecoded",
     "ZSpaceInference",
     "ZSpacePosterior",
@@ -17,6 +24,9 @@ __all__ = [
     "ZSpaceTelemetryFrame",
     "ZSpaceInferenceRuntime",
     "ZSpaceInferencePipeline",
+    "inference_to_mapping",
+    "inference_to_zmetrics",
+    "prepare_trainer_step_payload",
     "decode_zspace_embedding",
     "infer_from_partial",
     "infer_with_partials",
@@ -24,6 +34,7 @@ __all__ = [
     "blend_zspace_partials",
     "canvas_partial_from_snapshot",
     "canvas_coherence_partial",
+    "elliptic_partial_from_telemetry",
     "infer_canvas_snapshot",
     "infer_canvas_transformer",
     "coherence_partial_from_diagnostics",
@@ -35,6 +46,28 @@ __all__ = [
     "infer_weights_from_dlpack",
     "infer_weights_from_compat",
 ]
+
+
+@dataclass(slots=True)
+class ZMetrics:
+    """Typed metrics container fed into :class:`ZSpaceTrainer`."""
+
+    speed: float
+    memory: float
+    stability: float
+    gradient: Sequence[float] | None = None
+    drs: float = 0.0
+    telemetry: Mapping[str, float] | None = None
+
+
+_PRIMARY_ALIAS_GROUPS: Mapping[str, tuple[str, ...]] = MappingProxyType(
+    {
+        canonical: tuple(
+            alias for alias, target in PRIMARY_ZSPACE_METRIC_ALIASES.items() if target == canonical
+        )
+        for canonical in {"speed", "memory", "stability", "drs", "gradient"}
+    }
+)
 
 
 _METRIC_ALIASES: Mapping[str, str] = MappingProxyType(
@@ -102,8 +135,337 @@ _METRIC_ALIASES: Mapping[str, str] = MappingProxyType(
         "import_amplitude": "import_amplitude",
         "import_balance": "import_balance",
         "import_focus": "import_focus",
+        "elliptic_curvature": "elliptic_curvature",
+        "curvature_radius": "elliptic_curvature",
+        "elliptic_curvature_radius": "elliptic_curvature",
+        "elliptic_geodesic": "elliptic_geodesic",
+        "geodesic_radius": "elliptic_geodesic",
+        "elliptic_normalized": "elliptic_normalized",
+        "normalized_radius": "elliptic_normalized",
+        "elliptic_alignment": "elliptic_alignment",
+        "spin_alignment": "elliptic_alignment",
+        "elliptic_bias": "elliptic_bias",
+        "normal_bias": "elliptic_bias",
+        "elliptic_sheet_position": "elliptic_sheet_position",
+        "sheet_position": "elliptic_sheet_position",
+        "elliptic_sheet_index": "elliptic_sheet_index",
+        "sheet_index": "elliptic_sheet_index",
+        "elliptic_sheet_count": "elliptic_sheet_count",
+        "sheet_count": "elliptic_sheet_count",
+        "elliptic_sector": "elliptic_sector",
+        "topological_sector": "elliptic_sector",
+        "elliptic_homology": "elliptic_homology",
+        "homology_index": "elliptic_homology",
+        "elliptic_resonance": "elliptic_resonance",
+        "resonance_heat": "elliptic_resonance",
+        "elliptic_noise": "elliptic_noise",
+        "noise_density": "elliptic_noise",
     }
 )
+_METRIC_ALIASES: Mapping[str, str] = ZSPACE_METRIC_ALIASES
+
+
+def _normalise_metric_name(name: str) -> str:
+    alias = _METRIC_ALIASES.get(name.lower())
+    return alias if alias is not None else name.lower()
+
+
+def _coerce_float(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_gradient(value: Any) -> list[float] | None:
+    if value is None:
+        return None
+    if isinstance(value, ZMetrics):
+        return _coerce_gradient(value.gradient)
+    if isinstance(value, MappingABC):
+        value = value.values()
+    if isinstance(value, (str, bytes, bytearray, memoryview)):
+        return None
+    try:
+        gradient = [float(entry) for entry in value]  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return gradient
+
+
+def _flatten_telemetry_payload(payload: Any) -> dict[str, float]:
+    if payload is None:
+        return {}
+    if isinstance(payload, ZSpaceTelemetryFrame):
+        return dict(payload.payload)
+    if isinstance(payload, MappingABC):
+        return _flatten_telemetry(payload)
+    if hasattr(payload, "payload"):
+        inner = getattr(payload, "payload")
+        if isinstance(inner, MappingABC):
+            return dict(inner)
+    if hasattr(payload, "as_dict") and callable(payload.as_dict):
+        try:
+            mapping = payload.as_dict()
+        except Exception:  # pragma: no cover - defensive fallback
+            return {}
+        inner = mapping.get("payload") if isinstance(mapping, MappingABC) else None
+        if isinstance(inner, MappingABC):
+            return _flatten_telemetry(inner)
+    return {}
+
+
+def _normalise_metrics_mapping(
+    source: Mapping[str, Any] | None,
+) -> tuple[dict[str, float], list[float] | None]:
+    if source is None:
+        return {}, None
+    metrics: dict[str, float] = {}
+    gradient: list[float] | None = None
+    for key, raw_value in source.items():
+        canonical = _normalise_metric_name(str(key))
+        if canonical == "gradient":
+            candidate = _coerce_gradient(raw_value)
+            if candidate is not None:
+                gradient = candidate
+            continue
+        converted = _coerce_float(raw_value)
+        if converted is not None:
+            metrics[canonical] = converted
+    return metrics, gradient
+
+
+def _collect_inference_payload(
+    inference: Any,
+    *,
+    prefer_applied: bool,
+) -> tuple[dict[str, float], list[float] | None, dict[str, float] | None]:
+    if isinstance(inference, ZMetrics):
+        metrics = {
+            "speed": float(inference.speed),
+            "memory": float(inference.memory),
+            "stability": float(inference.stability),
+            "drs": float(inference.drs),
+        }
+        gradient = _coerce_gradient(inference.gradient)
+        telemetry = dict(inference.telemetry) if inference.telemetry else None
+        return metrics, gradient, telemetry
+
+    if isinstance(inference, MappingABC):
+        metrics, gradient = _normalise_metrics_mapping(inference)
+        if gradient is not None:
+            metrics.pop("gradient", None)
+        return metrics, gradient, None
+
+    base_metrics, gradient = _normalise_metrics_mapping(getattr(inference, "metrics", None))
+    telemetry = None
+
+    if prefer_applied:
+        applied_metrics, applied_gradient = _normalise_metrics_mapping(
+            getattr(inference, "applied", None)
+        )
+        if applied_metrics:
+            base_metrics.update(applied_metrics)
+        if applied_gradient is not None:
+            gradient = applied_gradient
+
+    attr_gradient = _coerce_gradient(getattr(inference, "gradient", None))
+    if attr_gradient is not None:
+        gradient = attr_gradient
+
+    telemetry = _flatten_telemetry_payload(getattr(inference, "telemetry", None)) or None
+
+    if gradient is not None and "gradient" in base_metrics:
+        base_metrics.pop("gradient", None)
+
+    return base_metrics, gradient, telemetry
+
+
+def _resolve_primary(metrics: Mapping[str, float], canonical: str) -> float:
+    value = metrics.get(canonical)
+    if value is not None:
+        return float(value)
+    for alias in _PRIMARY_ALIAS_GROUPS.get(canonical, ()):  # type: ignore[arg-type]
+        alias_value = metrics.get(_normalise_metric_name(alias))
+        if alias_value is not None:
+            return float(alias_value)
+    return 0.0
+
+
+def inference_to_mapping(
+    inference: Any,
+    *,
+    prefer_applied: bool = True,
+    canonical: bool = True,
+    include_gradient: bool = True,
+) -> dict[str, Any]:
+    """Convert inference-like payloads into canonical metric dictionaries."""
+
+    metrics, gradient, _ = _collect_inference_payload(
+        inference, prefer_applied=prefer_applied
+    )
+
+    if canonical:
+        resolved: dict[str, Any] = {
+            _normalise_metric_name(key): float(value) for key, value in metrics.items()
+        }
+    else:
+        resolved = dict(metrics)
+
+    if include_gradient and gradient is not None:
+        resolved["gradient"] = list(gradient)
+
+    return resolved
+
+
+def inference_to_zmetrics(
+    inference: Any,
+    *,
+    prefer_applied: bool = True,
+    include_telemetry: bool = False,
+) -> ZMetrics:
+    """Convert inference-like payloads into :class:`ZMetrics`."""
+
+    metrics, gradient, telemetry = _collect_inference_payload(
+        inference, prefer_applied=prefer_applied
+    )
+
+    telemetry_payload = telemetry if include_telemetry else None
+
+    gradient_seq = gradient if gradient else None
+
+    return ZMetrics(
+        speed=_resolve_primary(metrics, "speed"),
+        memory=_resolve_primary(metrics, "memory"),
+        stability=_resolve_primary(metrics, "stability"),
+        gradient=gradient_seq,
+        drs=_resolve_primary(metrics, "drs"),
+        telemetry=telemetry_payload,
+    )
+
+
+if TYPE_CHECKING:
+    _PayloadMode = Union[
+        None,
+        str,
+        Callable[["ZSpaceInference"], Any],
+    ]
+else:
+    _PayloadMode = Union[
+        None,
+        str,
+        Callable[[Any], Any],
+    ]
+
+
+def _annotation_mode(annotation: Any) -> str | None:
+    if annotation is inspect._empty:
+        return None
+    if isinstance(annotation, str):
+        lower = annotation.lower()
+        if "zmetrics" in lower:
+            return "zmetrics"
+        if "mapping" in lower or "dict" in lower:
+            return "mapping"
+        if "inference" in lower:
+            return "inference"
+        return None
+
+    origin = get_origin(annotation)
+    if origin is not None:
+        if origin in {dict, Dict, MutableMapping, MappingABC, Mapping}:
+            return "mapping"
+    if annotation in {Mapping, MutableMapping, dict}:
+        return "mapping"
+    if getattr(annotation, "__name__", "") == "ZMetrics":
+        return "zmetrics"
+    if getattr(annotation, "__qualname__", "") == "ZSpaceInference":
+        return "inference"
+    return None
+
+
+def _detect_payload_mode(step: Callable[..., Any]) -> str | None:
+    try:
+        signature = inspect.signature(step)
+    except (TypeError, ValueError):
+        return None
+
+    parameters = list(signature.parameters.values())
+    if not parameters:
+        return None
+
+    parameter = parameters[0]
+    annotation = parameter.annotation
+    mode = _annotation_mode(annotation)
+    if mode is not None:
+        return mode
+
+    annotations = getattr(step, "__annotations__", {})
+    if annotations:
+        alt = annotations.get(parameter.name)
+        if alt is not None:
+            mode = _annotation_mode(alt)
+            if mode is not None:
+                return mode
+    return None
+
+
+def prepare_trainer_step_payload(
+    trainer: Any,
+    inference: "ZSpaceInference",
+    *,
+    payload: _PayloadMode = None,
+    prefer_applied: bool = True,
+    canonical_mapping: bool = True,
+) -> Any:
+    """Prepare the payload passed to a trainer's ``step`` method."""
+
+    step = getattr(trainer, "step", None)
+    if not callable(step):
+        raise TypeError("trainer must provide a callable 'step' method")
+
+    if callable(payload):
+        return payload(inference)
+
+    mode: str | None
+    if payload is None:
+        mode = None
+    else:
+        mode = str(payload).lower()
+
+    if mode in {None, "inference"}:
+        chosen = "inference"
+    elif mode in {"zmetrics", "metrics"}:
+        chosen = "zmetrics"
+    elif mode in {"mapping", "dict"}:
+        chosen = "mapping"
+    elif mode == "auto":
+        detected = None
+        for hint in (
+            getattr(trainer, "__zspace_step_mode__", None),
+            getattr(trainer, "zspace_step_mode", None),
+        ):
+            if hint is not None:
+                detected = str(hint).lower()
+                break
+        if detected is None:
+            detected = _detect_payload_mode(step)
+        chosen = detected or "inference"
+    else:
+        raise ValueError(
+            "payload must be one of None, 'inference', 'zmetrics', 'mapping', 'auto', or a callable"
+        )
+
+    if chosen == "zmetrics":
+        return inference_to_zmetrics(inference, prefer_applied=prefer_applied, include_telemetry=True)
+    if chosen == "mapping":
+        return inference_to_mapping(
+            inference,
+            prefer_applied=prefer_applied,
+            canonical=canonical_mapping,
+            include_gradient=True,
+        )
+    return inference
 
 
 def _softplus(value: float) -> float:
@@ -197,6 +559,131 @@ def _merge_telemetry_payloads(
         if mapping:
             merged.update(mapping)
     return merged
+
+
+_ELLIPTIC_SAMPLE_KEYS = {
+    "curvature_radius",
+    "geodesic_radius",
+    "normalized_radius",
+    "spin_alignment",
+    "sheet_index",
+    "sheet_position",
+    "normal_bias",
+    "rotor_transport",
+}
+
+_ELLIPTIC_ATTRIBUTE_NAMES = (
+    "curvature_radius",
+    "geodesic_radius",
+    "normalized_radius",
+    "spin_alignment",
+    "sheet_index",
+    "sheet_position",
+    "normal_bias",
+    "sheet_count",
+    "topological_sector",
+    "homology_index",
+    "resonance_heat",
+    "noise_density",
+    "rotor_transport",
+    "flow_vector",
+    "lie_log",
+)
+
+_ELLIPTIC_METRIC_SOURCES = {
+    "elliptic_curvature": "curvature_radius",
+    "elliptic_geodesic": "geodesic_radius",
+    "elliptic_normalized": "normalized_radius",
+    "elliptic_alignment": "spin_alignment",
+    "elliptic_bias": "normal_bias",
+    "elliptic_sheet_position": "sheet_position",
+    "elliptic_sheet_index": "sheet_index",
+    "elliptic_sheet_count": "sheet_count",
+    "elliptic_sector": "topological_sector",
+    "elliptic_homology": "homology_index",
+    "elliptic_resonance": "resonance_heat",
+    "elliptic_noise": "noise_density",
+}
+
+_ELLIPTIC_VECTOR_CANDIDATES = (
+    "rotor_transport",
+    "flow_vector",
+    "lie_log",
+)
+
+
+def _iter_elliptic_samples(candidate: Any) -> Iterable[Any]:
+    stack = [candidate]
+    while stack:
+        current = stack.pop()
+        if current is None:
+            continue
+        if isinstance(current, (str, bytes, bytearray)):
+            continue
+        if isinstance(current, Mapping):
+            if any(key in current for key in _ELLIPTIC_SAMPLE_KEYS):
+                yield current
+            else:
+                stack.extend(current.values())
+            continue
+        if hasattr(current, "curvature_radius") or hasattr(current, "as_dict"):
+            yield current
+            continue
+        if isinstance(current, Iterable):
+            stack.extend(current)
+
+
+def _elliptic_payload_mapping(sample: Any) -> dict[str, Any]:
+    if isinstance(sample, Mapping):
+        return dict(sample)
+    as_dict = getattr(sample, "as_dict", None)
+    if callable(as_dict):
+        try:
+            payload = as_dict()
+            if isinstance(payload, Mapping):
+                return dict(payload)
+        except Exception:
+            pass
+    payload: dict[str, Any] = {}
+    for name in _ELLIPTIC_ATTRIBUTE_NAMES:
+        if hasattr(sample, name):
+            try:
+                value = getattr(sample, name)
+            except Exception:
+                continue
+            payload[name] = value
+    return payload
+
+
+def _coerce_float_list(candidate: Any) -> list[float]:
+    if candidate is None:
+        return []
+    if hasattr(candidate, "tolist"):
+        try:
+            return _coerce_float_list(candidate.tolist())
+        except Exception:
+            pass
+    if hasattr(candidate, "numpy"):
+        try:
+            return _coerce_float_list(candidate.numpy())
+        except Exception:
+            pass
+    if isinstance(candidate, (bytes, bytearray, str)):
+        return []
+    if isinstance(candidate, Mapping):
+        iterable = candidate.values()
+    else:
+        try:
+            iterable = iter(candidate)
+        except TypeError:
+            return []
+    result: list[float] = []
+    for value in iterable:
+        try:
+            result.append(float(value))
+        except (TypeError, ValueError):
+            return []
+    return result
 
 
 def _collect_bundle_telemetry(
@@ -615,6 +1102,129 @@ def blend_zspace_partials(
     return merged
 
 
+def _aggregate_values(values: Sequence[float], mode: str) -> float:
+    if not values:
+        return 0.0
+    if mode == "max":
+        return max(values)
+    if mode == "min":
+        return min(values)
+    if mode == "last":
+        return values[-1]
+    if mode == "median":
+        ordered = sorted(values)
+        mid = len(ordered) // 2
+        if len(ordered) % 2:
+            return ordered[mid]
+        return 0.5 * (ordered[mid - 1] + ordered[mid])
+    if mode == "sum":
+        return sum(values)
+    return sum(values) / len(values)
+
+
+def elliptic_partial_from_telemetry(
+    telemetry: Any,
+    *,
+    bundle_weight: float = 1.0,
+    origin: str | None = "elliptic",
+    telemetry_prefix: str = "elliptic",
+    aggregate: str = "mean",
+    gradient_source: str = "rotor_transport",
+    extra_telemetry: Mapping[str, Any] | None = None,
+) -> ZSpacePartialBundle:
+    """Convert elliptic telemetry samples into a :class:`ZSpacePartialBundle`."""
+
+    samples = [
+        mapping
+        for sample in _iter_elliptic_samples(telemetry)
+        for mapping in [_elliptic_payload_mapping(sample)]
+        if mapping
+    ]
+    if not samples:
+        raise ValueError("elliptic telemetry payload is empty")
+
+    mode = aggregate.lower()
+    if mode not in {"mean", "max", "min", "last", "median", "sum"}:
+        raise ValueError(f"unsupported aggregate mode '{aggregate}' for elliptic telemetry")
+
+    metric_values: dict[str, list[float]] = {key: [] for key in _ELLIPTIC_METRIC_SOURCES}
+    gradient_vectors: list[list[float]] = []
+
+    for payload in samples:
+        for canonical, source in _ELLIPTIC_METRIC_SOURCES.items():
+            value = payload.get(source)
+            if value is None:
+                continue
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                continue
+            metric_values[canonical].append(numeric)
+
+        vector_candidate: Any | None = payload.get(gradient_source) if gradient_source else None
+        if vector_candidate is None:
+            for candidate in _ELLIPTIC_VECTOR_CANDIDATES:
+                vector_candidate = payload.get(candidate)
+                if vector_candidate is not None:
+                    break
+        gradient = _coerce_float_list(vector_candidate)
+        if gradient:
+            gradient_vectors.append(gradient)
+
+    partial: dict[str, Any] = {}
+    summary_values: list[float] = []
+    for key, values in metric_values.items():
+        if not values:
+            continue
+        summary_values.extend(values)
+        partial[key] = _aggregate_values(values, mode)
+
+    if not partial:
+        raise ValueError("no elliptic metrics could be derived from telemetry")
+
+    if gradient_vectors:
+        length = max(len(vector) for vector in gradient_vectors)
+        if length > 0:
+            accumulator = [0.0] * length
+            for vector in gradient_vectors:
+                for idx in range(length):
+                    value = vector[idx] if idx < len(vector) else 0.0
+                    accumulator[idx] += value
+            count = len(gradient_vectors)
+            partial["gradient"] = [accumulator[idx] / count for idx in range(length)]
+
+    telemetry_sources: list[Mapping[str, Any]] = list(samples)
+    if extra_telemetry is not None:
+        telemetry_sources.append(extra_telemetry)
+
+    telemetry_map: dict[str, float] = {}
+    if telemetry_sources:
+        merged = _merge_telemetry_payloads(*telemetry_sources)
+        if telemetry_prefix:
+            telemetry_map = {f"{telemetry_prefix}.{key}": value for key, value in merged.items()}
+        else:
+            telemetry_map = dict(merged)
+
+    if summary_values:
+        stats = _vector_stats(summary_values)
+        prefix = telemetry_prefix or "elliptic"
+        telemetry_map.setdefault(f"{prefix}.mean", stats["mean"])
+        telemetry_map.setdefault(f"{prefix}.variance", stats["variance"])
+        telemetry_map.setdefault(f"{prefix}.energy", stats["energy"])
+        telemetry_map.setdefault(f"{prefix}.amplitude", stats["amplitude"])
+        telemetry_map.setdefault(f"{prefix}.balance", stats["balance"])
+        telemetry_map.setdefault(f"{prefix}.focus", stats["focus"])
+        telemetry_map.setdefault(f"{prefix}.count", stats["count"])
+
+    weight = max(0.0, float(bundle_weight))
+    return ZSpacePartialBundle(
+        partial,
+        weight=weight,
+        origin=origin,
+        telemetry=telemetry_map or None,
+    )
+
+
 def _barycentric_from_metrics(metrics: Mapping[str, float]) -> tuple[float, float, float]:
     speed = float(metrics.get("speed", 0.0))
     memory = float(metrics.get("memory", 0.0))
@@ -980,6 +1590,64 @@ class ZSpaceInferencePipeline:
         self._partials.append(bundle)
         return bundle
 
+    def add_elliptic_telemetry(
+        self,
+        telemetry: Any,
+        *,
+        bundle_weight: float = 1.0,
+        origin: str | None = "elliptic",
+        telemetry_prefix: str = "elliptic",
+        aggregate: str = "mean",
+        gradient_source: str = "rotor_transport",
+        extra_telemetry: Mapping[str, Any] | None = None,
+    ) -> ZSpacePartialBundle:
+        """Register elliptic telemetry samples as a partial observation."""
+
+        bundle = elliptic_partial_from_telemetry(
+            telemetry,
+            bundle_weight=bundle_weight,
+            origin=origin,
+            telemetry_prefix=telemetry_prefix,
+            aggregate=aggregate,
+            gradient_source=gradient_source,
+            extra_telemetry=extra_telemetry,
+        )
+        return self.add_partial(bundle)
+
+    def add_elliptic_autograd(
+        self,
+        warp: Any,
+        orientation: Any,
+        *,
+        bundle_weight: float = 1.0,
+        origin: str | None = "elliptic",
+        telemetry_prefix: str = "elliptic",
+        aggregate: str = "mean",
+        gradient_source: str = "rotor_transport",
+        extra_telemetry: Mapping[str, Any] | None = None,
+        return_features: bool = False,
+    ) -> ZSpacePartialBundle | tuple[Any, ZSpacePartialBundle]:
+        """Run the elliptic warp and queue its bundle for inference."""
+
+        from .elliptic import elliptic_warp_partial
+
+        result = elliptic_warp_partial(
+            warp,
+            orientation,
+            bundle_weight=bundle_weight,
+            origin=origin,
+            telemetry_prefix=telemetry_prefix,
+            aggregate=aggregate,
+            gradient_source=gradient_source,
+            extra_telemetry=extra_telemetry,
+            return_features=return_features,
+        )
+        if return_features:
+            features, bundle = result
+            self.add_partial(bundle)
+            return features, bundle
+        return self.add_partial(result)
+
     def add_canvas_snapshot(self, snapshot: Any, **kwargs: Any) -> ZSpacePartialBundle:
         """Derive and register metrics from a Canvas snapshot."""
 
@@ -1043,6 +1711,62 @@ class ZSpaceInferencePipeline:
         if clear:
             self.clear()
         return inference
+
+    def infer_and_step(
+        self,
+        trainer: Any,
+        *,
+        strategy: str | None = None,
+        weights: Sequence[float] | None = None,
+        clear: bool = True,
+        telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None = None,
+        prefer_applied: bool = True,
+        adapter: Callable[[ZSpaceInference], Any] | None = None,
+    ) -> tuple[ZSpaceInference, float]:
+        """Run :meth:`infer` and immediately feed the result into a trainer.
+
+        Args:
+            trainer: Object exposing a ``step`` method.
+            strategy: Optional blend strategy override.
+            weights: Optional blend weights.
+            clear: Whether to clear buffered partials after inference.
+            telemetry: Additional telemetry forwarded to the runtime.
+            prefer_applied: Forward preference for applied overrides when the
+                trainer supports the ``prefer_applied`` keyword (e.g. the
+                Python :class:`~spiraltorch.ZSpaceTrainer`).
+            adapter: Optional callable that receives the inference result and
+                returns the payload passed into ``trainer.step``.
+        """
+
+        step = getattr(trainer, "step", None)
+        if not callable(step):
+            raise TypeError("trainer must provide a callable 'step' method")
+
+        inference = self.infer(
+            strategy=strategy,
+            weights=weights,
+            clear=clear,
+            telemetry=telemetry,
+        )
+        payload = adapter(inference) if adapter is not None else inference
+
+        call_kwargs: Dict[str, Any] = {}
+        if adapter is None:
+            try:
+                signature = inspect.signature(step)
+            except (TypeError, ValueError):
+                signature = None
+            if signature is not None and "prefer_applied" in signature.parameters:
+                call_kwargs["prefer_applied"] = prefer_applied
+
+        try:
+            loss = step(payload, **call_kwargs)
+        except TypeError as exc:
+            if call_kwargs and "unexpected keyword" in str(exc).lower():
+                loss = step(payload)
+            else:
+                raise exc
+        return inference, float(loss)
 
 
 def decode_zspace_embedding(z_state: Sequence[float], *, alpha: float = 0.35) -> ZSpaceDecoded:

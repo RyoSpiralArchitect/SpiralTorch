@@ -446,7 +446,7 @@ impl SpiralLightning {
     /// Builds a new harness for the provided configuration.
     pub fn with_config(session: SpiralSession, mut config: LightningConfig) -> Self {
         config.clamp_shape();
-        let trainer = session.trainer();
+        let mut trainer = session.trainer();
         let schedule = trainer.roundtable(config.rows, config.cols, config.roundtable);
         Self {
             session,
