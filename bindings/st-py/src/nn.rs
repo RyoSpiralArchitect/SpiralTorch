@@ -1272,6 +1272,13 @@ impl PyScaler {
     pub fn psi_probe(&self) -> Option<f32> {
         self.inner.psi_probe()
     }
+
+    pub fn psi_components(&self) -> PyResult<Option<PyTensor>> {
+        self.inner
+            .psi_components()
+            .map(|maybe| maybe.map(PyTensor::from_tensor))
+            .map_err(tensor_err_to_py)
+    }
 }
 
 #[cfg(feature = "nn")]

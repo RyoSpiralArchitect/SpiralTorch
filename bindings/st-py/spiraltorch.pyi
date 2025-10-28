@@ -1609,6 +1609,8 @@ class _NnScaler:
 
     def psi_probe(self) -> float | None: ...
 
+    def psi_components(self) -> Tensor | None: ...
+
 
 class _NnModule(ModuleType):
     Identity: type[_NnIdentity]
