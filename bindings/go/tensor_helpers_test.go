@@ -194,6 +194,168 @@ func TestNewTensorFromDenseValidation(t *testing.T) {
 	}
 }
 
+func TestNewZerosTensorValidation(t *testing.T) {
+	if _, err := NewZerosTensor(-1, 3); err == nil {
+		t.Fatalf("expected error for negative rows")
+	}
+	if _, err := NewZerosTensor(2, -4); err == nil {
+		t.Fatalf("expected error for negative cols")
+	}
+}
+
+func TestRandomTensorDimensionValidation(t *testing.T) {
+	if _, err := NewRandomUniformTensor(-1, 2, 0, 1); err == nil {
+		t.Fatalf("expected error for negative rows in uniform")
+	}
+	if _, err := NewRandomUniformTensor(1, -2, 0, 1); err == nil {
+		t.Fatalf("expected error for negative cols in uniform")
+	}
+	if _, err := NewRandomNormalTensor(-3, 1, 0, 1); err == nil {
+		t.Fatalf("expected error for negative rows in normal")
+	}
+	if _, err := NewRandomNormalTensor(3, -1, 0, 1); err == nil {
+		t.Fatalf("expected error for negative cols in normal")
+	}
+}
+
+func TestRandomTensorZeroDimensions(t *testing.T) {
+	uniform, err := NewRandomUniformTensor(0, 5, -1, 1)
+	if err != nil {
+		t.Fatalf("NewRandomUniformTensor returned error for zero rows: %v", err)
+	}
+	t.Cleanup(func() { uniform.Close() })
+	rows, cols, err := uniform.Shape()
+	if err != nil {
+		t.Fatalf("Shape returned error for uniform tensor: %v", err)
+	}
+	if rows != 0 || cols != 5 {
+		t.Fatalf("unexpected uniform shape: %dx%d", rows, cols)
+	}
+
+	normal, err := NewRandomNormalTensor(4, 0, 0, 1)
+	if err != nil {
+		t.Fatalf("NewRandomNormalTensor returned error for zero cols: %v", err)
+	}
+	t.Cleanup(func() { normal.Close() })
+	rows, cols, err = normal.Shape()
+	if err != nil {
+		t.Fatalf("Shape returned error for normal tensor: %v", err)
+	}
+	if rows != 4 || cols != 0 {
+		t.Fatalf("unexpected normal shape: %dx%d", rows, cols)
+	}
+}
+
+func TestTensorCopyDataInto(t *testing.T) {
+	tensor, err := NewTensorFromDense(2, 2, []float32{1, 2, 3, 4})
+	if err != nil {
+		t.Fatalf("NewTensorFromDense returned error: %v", err)
+	}
+	t.Cleanup(func() { tensor.Close() })
+
+	dest := make([]float32, 6)
+	written, err := tensor.CopyDataInto(dest)
+	if err != nil {
+		t.Fatalf("CopyDataInto returned error: %v", err)
+	}
+	if written != 4 {
+		t.Fatalf("unexpected element count: got %d want 4", written)
+	}
+	expected := []float32{1, 2, 3, 4}
+	for i, value := range expected {
+		if dest[i] != value {
+			t.Fatalf("unexpected dest[%d]: got %v want %v", i, dest[i], value)
+		}
+	}
+
+	if _, err := tensor.CopyDataInto(make([]float32, 3)); err == nil {
+		t.Fatalf("expected error for undersized destination buffer")
+	}
+
+	zero, err := NewZerosTensor(0, 5)
+	if err != nil {
+		t.Fatalf("NewZerosTensor returned error: %v", err)
+	}
+	t.Cleanup(func() { zero.Close() })
+	if written, err := zero.CopyDataInto(nil); err != nil {
+		t.Fatalf("CopyDataInto on zero tensor returned error: %v", err)
+	} else if written != 0 {
+		t.Fatalf("unexpected elements written for zero tensor: %d", written)
+	}
+}
+
+func TestTensorCopyRowInto(t *testing.T) {
+	tensor, err := NewTensorFromDense(3, 2, []float32{1, 2, 3, 4, 5, 6})
+	if err != nil {
+		t.Fatalf("NewTensorFromDense returned error: %v", err)
+	}
+	t.Cleanup(func() { tensor.Close() })
+
+	dest := make([]float32, 2)
+	if err := tensor.CopyRowInto(1, dest); err != nil {
+		t.Fatalf("CopyRowInto returned error: %v", err)
+	}
+	expected := []float32{3, 4}
+	for i, v := range expected {
+		if dest[i] != v {
+			t.Fatalf("unexpected row[%d]: got %v want %v", i, dest[i], v)
+		}
+	}
+
+	if err := tensor.CopyRowInto(5, dest); err == nil {
+		t.Fatalf("expected error for out-of-range row index")
+	}
+
+	if err := tensor.CopyRowInto(1, make([]float32, 1)); err == nil {
+		t.Fatalf("expected error for undersized row destination")
+	}
+
+	zeroCols, err := NewZerosTensor(4, 0)
+	if err != nil {
+		t.Fatalf("NewZerosTensor returned error: %v", err)
+	}
+	t.Cleanup(func() { zeroCols.Close() })
+	if err := zeroCols.CopyRowInto(2, nil); err != nil {
+		t.Fatalf("CopyRowInto for zero-column tensor returned error: %v", err)
+	}
+}
+
+func TestTensorCopyColumnInto(t *testing.T) {
+	tensor, err := NewTensorFromDense(2, 3, []float32{1, 2, 3, 4, 5, 6})
+	if err != nil {
+		t.Fatalf("NewTensorFromDense returned error: %v", err)
+	}
+	t.Cleanup(func() { tensor.Close() })
+
+	dest := make([]float32, 2)
+	if err := tensor.CopyColumnInto(2, dest); err != nil {
+		t.Fatalf("CopyColumnInto returned error: %v", err)
+	}
+	expected := []float32{3, 6}
+	for i, v := range expected {
+		if dest[i] != v {
+			t.Fatalf("unexpected column[%d]: got %v want %v", i, dest[i], v)
+		}
+	}
+
+	if err := tensor.CopyColumnInto(5, dest); err == nil {
+		t.Fatalf("expected error for out-of-range column index")
+	}
+
+	if err := tensor.CopyColumnInto(2, make([]float32, 1)); err == nil {
+		t.Fatalf("expected error for undersized column destination")
+	}
+
+	zeroRows, err := NewZerosTensor(0, 5)
+	if err != nil {
+		t.Fatalf("NewZerosTensor returned error: %v", err)
+	}
+	t.Cleanup(func() { zeroRows.Close() })
+	if err := zeroRows.CopyColumnInto(3, nil); err != nil {
+		t.Fatalf("CopyColumnInto for zero-row tensor returned error: %v", err)
+	}
+}
+
 func TestRuntimeParallelMatmul(t *testing.T) {
 	runtime := requireRuntime(t)
 

@@ -8,64 +8,62 @@ import "fmt"
 
 // NewTensorFromMatrix constructs a tensor from a rectangular matrix represented
 // as a slice of rows. The matrix must be rectangular (all rows have the same
-// length). Empty matrices are supported and will yield tensors with either zero
-// rows, zero columns, or both.
+// length) and contain at least one row and one column. For zero-sized tensors
+// prefer NewZerosTensor.
 func NewTensorFromMatrix(matrix [][]float32) (*Tensor, error) {
 	if matrix == nil {
 		return nil, fmt.Errorf("spiraltorch: matrix cannot be nil")
 	}
 	rows := len(matrix)
 	if rows == 0 {
-		return NewZerosTensor(0, 0)
+		return nil, fmt.Errorf("spiraltorch: matrix must contain at least one row")
 	}
 
 	cols := len(matrix[0])
-	for i := 1; i < rows; i++ {
-		if len(matrix[i]) != cols {
-			return nil, fmt.Errorf("spiraltorch: matrix row %d has length %d, expected %d", i, len(matrix[i]), cols)
-		}
-	}
-
 	if cols == 0 {
-		return NewZerosTensor(rows, 0)
+		return nil, fmt.Errorf("spiraltorch: matrix must contain at least one column")
 	}
-
-	data := make([]float32, 0, rows*cols)
-	for _, row := range matrix {
-		data = append(data, row...)
+	data := make([]float32, rows*cols)
+	offset := 0
+	for i, row := range matrix {
+		if len(row) != cols {
+			return nil, fmt.Errorf("spiraltorch: matrix row %d has length %d, expected %d", i, len(row), cols)
+		}
+		copy(data[offset:offset+cols], row)
+		offset += cols
 	}
 	return NewTensorFromDense(rows, cols, data)
 }
 
 // NewTensorFromColumns constructs a tensor from a slice of equally sized column
 // vectors. The columns are interpreted in column-major order and converted to
-// the row-major layout expected by SpiralTorch. Empty column sets are
-// supported and will yield zero-sized tensors.
+// the row-major layout expected by SpiralTorch. The input must contain at least
+// one column and each column must have at least one element. For zero-sized
+// tensors prefer NewZerosTensor.
 func NewTensorFromColumns(columns [][]float32) (*Tensor, error) {
 	if columns == nil {
 		return nil, fmt.Errorf("spiraltorch: columns cannot be nil")
 	}
 	cols := len(columns)
 	if cols == 0 {
-		return NewZerosTensor(0, 0)
+		return nil, fmt.Errorf("spiraltorch: columns must contain at least one column")
 	}
 
 	rows := len(columns[0])
+	if rows == 0 {
+		return nil, fmt.Errorf("spiraltorch: columns must contain at least one row")
+	}
 	for i := 1; i < cols; i++ {
 		if len(columns[i]) != rows {
 			return nil, fmt.Errorf("spiraltorch: column %d has length %d, expected %d", i, len(columns[i]), rows)
 		}
 	}
 
-	if rows == 0 {
-		return NewZerosTensor(0, cols)
-	}
-
 	data := make([]float32, rows*cols)
-	for c := 0; c < cols; c++ {
-		column := columns[c]
-		for r := 0; r < rows; r++ {
-			data[r*cols+c] = column[r]
+	for r := 0; r < rows; r++ {
+		base := r * cols
+		for c := 0; c < cols; c++ {
+			data[base+c] = columns[c][r]
 		}
 	}
 	return NewTensorFromDense(rows, cols, data)
@@ -84,19 +82,19 @@ func (t *Tensor) ToMatrix() ([][]float32, error) {
 		return nil, err
 	}
 	if rows == 0 || cols == 0 {
-		return make([][]float32, rows), nil
-	}
-
-	flat, err := t.Data()
-	if err != nil {
-		return nil, err
+		matrix := make([][]float32, rows)
+		for r := range matrix {
+			matrix[r] = make([]float32, cols)
+		}
+		return matrix, nil
 	}
 
 	matrix := make([][]float32, rows)
 	for r := 0; r < rows; r++ {
-		start := r * cols
 		row := make([]float32, cols)
-		copy(row, flat[start:start+cols])
+		if err := t.copyRowInto(r, cols, row); err != nil {
+			return nil, err
+		}
 		matrix[r] = row
 	}
 	return matrix, nil
@@ -122,15 +120,10 @@ func (t *Tensor) Columns() ([][]float32, error) {
 		return result, nil
 	}
 
-	flat, err := t.Data()
-	if err != nil {
-		return nil, err
-	}
-
 	for c := 0; c < cols; c++ {
 		column := make([]float32, rows)
-		for r := 0; r < rows; r++ {
-			column[r] = flat[r*cols+c]
+		if err := t.copyColumnInto(c, rows, column); err != nil {
+			return nil, err
 		}
 		result[c] = column
 	}
@@ -155,14 +148,10 @@ func (t *Tensor) Row(index int) ([]float32, error) {
 		return make([]float32, 0), nil
 	}
 
-	flat, err := t.Data()
-	if err != nil {
+	row := make([]float32, cols)
+	if err := t.copyRowInto(index, cols, row); err != nil {
 		return nil, err
 	}
-
-	start := index * cols
-	row := make([]float32, cols)
-	copy(row, flat[start:start+cols])
 	return row, nil
 }
 
@@ -184,14 +173,9 @@ func (t *Tensor) Column(index int) ([]float32, error) {
 		return make([]float32, 0), nil
 	}
 
-	flat, err := t.Data()
-	if err != nil {
-		return nil, err
-	}
-
 	column := make([]float32, rows)
-	for r := 0; r < rows; r++ {
-		column[r] = flat[r*cols+index]
+	if err := t.copyColumnInto(index, rows, column); err != nil {
+		return nil, err
 	}
 	return column, nil
 }
