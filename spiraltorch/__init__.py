@@ -1354,10 +1354,10 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             rows, cols = self._rows, self._cols
 
             if self._backend == "numpy":
-                matrix = self._to_numpy(copy=False)
-                return matrix.tolist()
+                flat = self._to_numpy(copy=False).reshape(-1)
+            else:
+                flat = self._row_major_python()
 
-            flat = self._row_major_python()
             return [
                 [float(flat[r * cols + c]) for c in range(cols)]
                 for r in range(rows)
