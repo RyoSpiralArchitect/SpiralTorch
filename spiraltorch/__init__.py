@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from array import array
 from collections.abc import Iterable, Sequence
+import importlib
 import importlib.machinery
 import importlib.util
 import math
@@ -2758,6 +2759,93 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
         return stub
 
     _install_spiral_rl_stub()
+
+    def _bridge_pure_python_namespace() -> None:
+        base_dir = pathlib.Path(__file__).resolve().parents[1] / "bindings" / "python" / "spiral"
+        init_py = base_dir / "__init__.py"
+        if not init_py.exists():
+            return
+
+        if importlib.util.find_spec("numpy") is None:
+            return
+
+        bridge_name = "_spiraltorch_stub_py_bridge"
+        spec = importlib.util.spec_from_file_location(
+            bridge_name,
+            init_py,
+            submodule_search_locations=[str(base_dir)],
+        )
+        if spec is None or spec.loader is None:
+            return
+
+        bridge_module = importlib.util.module_from_spec(spec)
+        bridge_module.__package__ = bridge_name
+        bridge_module.__path__ = [str(base_dir)]
+        sys.modules[bridge_name] = bridge_module
+        try:
+            spec.loader.exec_module(bridge_module)
+        except ModuleNotFoundError:
+            sys.modules.pop(bridge_name, None)
+            return
+
+        def _register(name: str, value: object) -> None:
+            if name.startswith("_"):
+                return
+            module.__dict__[name] = value
+            exports = module.__dict__.setdefault("__all__", [])
+            if name not in exports:
+                exports.append(name)
+
+        def _merge_public_members(source: types.ModuleType) -> None:
+            exports: Iterable[str] | None = getattr(source, "__all__", None)
+            if not exports:
+                exports = (name for name in dir(source) if not name.startswith("_"))
+            for name in exports:
+                value = getattr(source, name, None)
+                if value is not None:
+                    _register(name, value)
+
+        def _rebind_module(submodule: types.ModuleType, *, relative_name: str) -> None:
+            target_name = f"{module.__name__}.{relative_name}"
+            submodule.__name__ = target_name
+            if "." in relative_name:
+                submodule.__package__ = f"{module.__name__}.{relative_name.rsplit('.', 1)[0]}"
+            else:
+                submodule.__package__ = module.__name__
+            sys.modules[target_name] = submodule
+            head, _, tail = relative_name.partition(".")
+            if not tail:
+                setattr(module, head, submodule)
+                _register(head, submodule)
+
+        _merge_public_members(bridge_module)
+
+        prefix = f"{bridge_name}."
+        for name, value in list(sys.modules.items()):
+            if name == bridge_name or not name.startswith(prefix):
+                continue
+            if not isinstance(value, types.ModuleType):
+                continue
+            relative_name = name[len(prefix) :]
+            _rebind_module(value, relative_name=relative_name)
+
+        for submodule in ("data", "hypergrad", "inference"):
+            target = f"{bridge_name}.{submodule}"
+            loaded: types.ModuleType | None
+            if target in sys.modules:
+                candidate = sys.modules[target]
+                loaded = candidate if isinstance(candidate, types.ModuleType) else None
+            else:
+                spec = importlib.util.find_spec(target)
+                if spec is None:
+                    continue
+                candidate = importlib.import_module(target)
+                loaded = candidate if isinstance(candidate, types.ModuleType) else None
+            if loaded is None:
+                continue
+            _rebind_module(loaded, relative_name=submodule)
+
+    _bridge_pure_python_namespace()
 
     def _missing_attr(name: str):
         raise AttributeError(
