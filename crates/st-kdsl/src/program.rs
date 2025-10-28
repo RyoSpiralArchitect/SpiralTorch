@@ -18,6 +18,13 @@ pub struct Program {
 
 const MAX_LOOP_ITERATIONS: usize = 65_536;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FlowSignal {
+    None,
+    Break,
+    Continue,
+}
+
 impl Program {
     /// Parses the provided source string into a [`Program`].
     pub fn parse(src: &str) -> Result<Self, Err> {
@@ -36,7 +43,8 @@ impl Program {
         let mut soft = Vec::<SoftRule>::new();
         let mut locals = vec![Value::default(); self.locals];
 
-        Self::execute_block(&self.stmts, ctx, &mut locals, &mut hard, &mut soft);
+        let signal = Self::execute_block(&self.stmts, ctx, &mut locals, &mut hard, &mut soft);
+        debug_assert_eq!(signal, FlowSignal::None, "top-level control flow escape");
 
         Out { hard, soft }
     }
@@ -47,28 +55,53 @@ impl Program {
         locals: &mut [Value],
         hard: &mut Hard,
         soft: &mut Vec<SoftRule>,
-    ) {
+    ) -> FlowSignal {
         for stmt in block {
-            match stmt {
-                Stmt::Assign(assign) => assign.apply(ctx, locals, hard),
-                Stmt::Let(binding) => binding.store(ctx, locals),
-                Stmt::Set(update) => update.store(ctx, locals),
-                Stmt::Soft(rule) => rule.apply(ctx, locals, soft),
+            let signal = match stmt {
+                Stmt::Assign(assign) => {
+                    assign.apply(ctx, locals, hard);
+                    FlowSignal::None
+                }
+                Stmt::Let(binding) => {
+                    binding.store(ctx, locals);
+                    FlowSignal::None
+                }
+                Stmt::Set(update) => {
+                    update.store(ctx, locals);
+                    FlowSignal::None
+                }
+                Stmt::Soft(rule) => {
+                    rule.apply(ctx, locals, soft);
+                    FlowSignal::None
+                }
                 Stmt::If(branch) => {
                     let cond = branch
                         .const_cond
                         .unwrap_or_else(|| branch.cond.evaluate(ctx, locals).as_bool());
                     if cond {
-                        Self::execute_block(&branch.then_branch, ctx, locals, hard, soft);
+                        Self::execute_block(&branch.then_branch, ctx, locals, hard, soft)
                     } else {
-                        Self::execute_block(&branch.else_branch, ctx, locals, hard, soft);
+                        Self::execute_block(&branch.else_branch, ctx, locals, hard, soft)
                     }
                 }
                 Stmt::While(loop_stmt) => {
                     loop_stmt.run(ctx, locals, hard, soft);
+                    FlowSignal::None
                 }
+                Stmt::For(loop_stmt) => {
+                    loop_stmt.run(ctx, locals, hard, soft);
+                    FlowSignal::None
+                }
+                Stmt::Break => FlowSignal::Break,
+                Stmt::Continue => FlowSignal::Continue,
+            };
+
+            match signal {
+                FlowSignal::None => {}
+                FlowSignal::Break | FlowSignal::Continue => return signal,
             }
         }
+        FlowSignal::None
     }
 }
 
@@ -80,6 +113,9 @@ enum Stmt {
     Soft(SoftStmt),
     If(IfStmt),
     While(WhileStmt),
+    For(ForStmt),
+    Break,
+    Continue,
 }
 
 #[derive(Clone, Debug)]
@@ -254,7 +290,7 @@ impl WhileStmt {
                 break;
             }
 
-            Program::execute_block(&self.body, ctx, locals, hard, soft);
+            let signal = Program::execute_block(&self.body, ctx, locals, hard, soft);
             iterations += 1;
             if iterations >= MAX_LOOP_ITERATIONS {
                 debug_assert!(
@@ -262,6 +298,79 @@ impl WhileStmt {
                     "while loop iteration cap reached"
                 );
                 break;
+            }
+
+            match signal {
+                FlowSignal::None => {}
+                FlowSignal::Continue => continue,
+                FlowSignal::Break => break,
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct ForStmt {
+    id: usize,
+    start: ExprNode,
+    end: ExprNode,
+    const_start: Option<Value>,
+    const_end: Option<Value>,
+    inclusive: bool,
+    body: Vec<Stmt>,
+}
+
+impl ForStmt {
+    fn run(&self, ctx: &Ctx, locals: &mut [Value], hard: &mut Hard, soft: &mut Vec<SoftRule>) {
+        let start = self
+            .const_start
+            .unwrap_or_else(|| self.start.evaluate(ctx, locals))
+            .as_i64();
+        let end = self
+            .const_end
+            .unwrap_or_else(|| self.end.evaluate(ctx, locals))
+            .as_i64();
+
+        let mut current = start;
+        let mut iterations = 0usize;
+        let step = if start <= end { 1 } else { -1 };
+
+        loop {
+            let in_range = if step > 0 {
+                if self.inclusive {
+                    current <= end
+                } else {
+                    current < end
+                }
+            } else if self.inclusive {
+                current >= end
+            } else {
+                current > end
+            };
+
+            if !in_range {
+                break;
+            }
+
+            locals[self.id] = Value::from_f64(current as f64);
+            let signal = Program::execute_block(&self.body, ctx, locals, hard, soft);
+            iterations += 1;
+            if iterations >= MAX_LOOP_ITERATIONS {
+                debug_assert!(
+                    iterations < MAX_LOOP_ITERATIONS,
+                    "for loop iteration cap reached"
+                );
+                break;
+            }
+
+            if matches!(signal, FlowSignal::Break) {
+                break;
+            }
+
+            current += step;
+
+            if matches!(signal, FlowSignal::Continue) {
+                continue;
             }
         }
     }
@@ -288,6 +397,7 @@ struct Parser {
     index: usize,
     locals: Vec<String>,
     scopes: Vec<HashMap<String, usize>>,
+    loop_depth: usize,
 }
 
 #[derive(Default)]
@@ -303,6 +413,7 @@ impl Parser {
             index: 0,
             locals: Vec::new(),
             scopes: vec![HashMap::new()],
+            loop_depth: 0,
         }
     }
 
@@ -387,6 +498,18 @@ impl Parser {
             return self.parse_while_stmt();
         }
 
+        if self.consume_for()? {
+            return self.parse_for_stmt();
+        }
+
+        if self.consume_break()? {
+            return Ok(Stmt::Break);
+        }
+
+        if self.consume_continue()? {
+            return Ok(Stmt::Continue);
+        }
+
         let field = self.parse_field()?;
         self.expect(Token::Colon)?;
         let expr = self.parse_expr()?;
@@ -430,10 +553,69 @@ impl Parser {
         if matches!(const_cond, Some(true)) {
             return Err(Err::Parse(self.index.saturating_sub(1)));
         }
-        let body = self.parse_block()?;
+        self.loop_depth += 1;
+        let body_result = self.parse_block();
+        self.loop_depth -= 1;
+        let body = body_result?;
         Ok(Stmt::While(WhileStmt {
             cond,
             const_cond,
+            body,
+        }))
+    }
+
+    fn parse_for_stmt(&mut self) -> Result<Stmt, Err> {
+        let name = match self.next().ok_or(Err::Tok)? {
+            Token::Id(id) => id,
+            _ => return Err(Err::Tok),
+        };
+        self.expect(Token::In)?;
+        let start = self.parse_expr()?;
+        let const_start = start.const_value();
+        let inclusive = match self.next().ok_or(Err::Tok)? {
+            Token::Range => false,
+            Token::RangeEq => true,
+            _ => return Err(Err::Tok),
+        };
+        let end = self.parse_expr()?;
+        let const_end = end.const_value();
+
+        self.loop_depth += 1;
+        let for_body = (|| {
+            self.expect(Token::LBrace)?;
+            self.push_scope();
+            let id = match self.define_local(name) {
+                Ok(id) => id,
+                Err(err) => {
+                    self.pop_scope();
+                    return Err(err);
+                }
+            };
+            let body_result = (|| {
+                let mut stmts = Vec::new();
+                while !matches!(self.peek(), Some(Token::RBrace)) {
+                    let stmt = self.parse_stmt()?;
+                    stmts.push(stmt);
+                    if matches!(self.peek(), Some(Token::Semi)) {
+                        self.next();
+                    }
+                }
+                self.expect(Token::RBrace)?;
+                Ok(stmts)
+            })();
+            self.pop_scope();
+            body_result.map(|body| (id, body))
+        })();
+        self.loop_depth -= 1;
+        let (id, body) = for_body?;
+
+        Ok(Stmt::For(ForStmt {
+            id,
+            start,
+            end,
+            const_start,
+            const_end,
+            inclusive,
             body,
         }))
     }
@@ -694,8 +876,38 @@ impl Parser {
         Ok(false)
     }
 
+    fn consume_for(&mut self) -> Result<bool, Err> {
+        if matches!(self.peek(), Some(Token::For)) {
+            self.next();
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
     fn consume_else(&mut self) -> Result<bool, Err> {
         if matches!(self.peek(), Some(Token::Else)) {
+            self.next();
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    fn consume_break(&mut self) -> Result<bool, Err> {
+        if matches!(self.peek(), Some(Token::Break)) {
+            if self.loop_depth == 0 {
+                return Err(Err::Parse(self.index));
+            }
+            self.next();
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    fn consume_continue(&mut self) -> Result<bool, Err> {
+        if matches!(self.peek(), Some(Token::Continue)) {
+            if self.loop_depth == 0 {
+                return Err(Err::Parse(self.index));
+            }
             self.next();
             return Ok(true);
         }
@@ -755,6 +967,12 @@ enum Token {
     If,
     Else,
     While,
+    For,
+    In,
+    Range,
+    RangeEq,
+    Break,
+    Continue,
     Op(Operator),
 }
 
@@ -1098,6 +1316,10 @@ impl Value {
         }
     }
 
+    fn as_i64(self) -> i64 {
+        self.as_f64().round() as i64
+    }
+
     fn as_u32(self) -> u32 {
         self.as_f64().round() as u32
     }
@@ -1311,12 +1533,49 @@ fn lex(src: &str) -> Result<Vec<Token>, Err> {
                     index += 1;
                 }
             }
-            b'0'..=b'9' | b'.' => {
+            b'.' => {
+                if index + 1 < bytes.len() && bytes[index + 1] == b'.' {
+                    if index + 2 < bytes.len() && bytes[index + 2] == b'=' {
+                        tokens.push(Token::RangeEq);
+                        index += 3;
+                    } else {
+                        tokens.push(Token::Range);
+                        index += 2;
+                    }
+                    continue;
+                }
+
                 let start = index;
                 index += 1;
-                while index < bytes.len() && (bytes[index].is_ascii_digit() || bytes[index] == b'.')
-                {
+                if index >= bytes.len() || !bytes[index].is_ascii_digit() {
+                    return Err(Err::Parse(start));
+                }
+                while index < bytes.len() && bytes[index].is_ascii_digit() {
                     index += 1;
+                }
+                let token = std::str::from_utf8(&bytes[start..index])
+                    .map_err(|_| Err::Parse(start))?
+                    .parse::<f64>()
+                    .map_err(|_| Err::Parse(start))?;
+                tokens.push(Token::Num(token));
+            }
+            b'0'..=b'9' => {
+                let start = index;
+                index += 1;
+                while index < bytes.len() && bytes[index].is_ascii_digit() {
+                    index += 1;
+                }
+                if index < bytes.len() && bytes[index] == b'.' {
+                    if index + 1 < bytes.len() && bytes[index + 1].is_ascii_digit() {
+                        index += 1;
+                        while index < bytes.len() && bytes[index].is_ascii_digit() {
+                            index += 1;
+                        }
+                    } else if index + 1 < bytes.len() && bytes[index + 1] == b'.' {
+                        // leave the dot for the range operator
+                    } else {
+                        index += 1;
+                    }
                 }
                 let token = std::str::from_utf8(&bytes[start..index])
                     .map_err(|_| Err::Parse(start))?
@@ -1347,6 +1606,10 @@ fn lex(src: &str) -> Result<Vec<Token>, Err> {
                     "if" => tokens.push(Token::If),
                     "else" => tokens.push(Token::Else),
                     "while" => tokens.push(Token::While),
+                    "for" => tokens.push(Token::For),
+                    "in" => tokens.push(Token::In),
+                    "break" => tokens.push(Token::Break),
+                    "continue" => tokens.push(Token::Continue),
                     _ => tokens.push(Token::Id(ident)),
                 }
             }
@@ -1422,6 +1685,64 @@ mod tests {
         let program = Program::parse("radix: clamp(16, 2, 8);").unwrap();
         let out = program.evaluate(&ctx());
         assert_eq!(out.hard.radix, Some(8));
+    }
+
+    #[test]
+    fn for_loop_accumulates_exclusive() {
+        let program = Program::parse(
+            "
+            let total = 0;
+            for i in 0..4 {
+                set total = total + i;
+            }
+            radix: total;
+            ",
+        )
+        .unwrap();
+        let out = program.evaluate(&ctx());
+        assert_eq!(out.hard.radix, Some(6));
+    }
+
+    #[test]
+    fn for_loop_inclusive_and_descending() {
+        let program = Program::parse(
+            "
+            let up = 0;
+            for i in 2..=4 {
+                set up = up + i;
+            }
+            let down = 0;
+            for j in 4..0 {
+                set down = down + j;
+            }
+            radix: up + down;
+            ",
+        )
+        .unwrap();
+        let out = program.evaluate(&ctx());
+        assert_eq!(out.hard.radix, Some(19));
+    }
+
+    #[test]
+    fn for_loop_break_and_continue() {
+        let program = Program::parse(
+            "
+            let total = 0;
+            for i in 0..10 {
+                if i == 6 {
+                    break;
+                }
+                if i % 2 == 0 {
+                    continue;
+                }
+                set total = total + i;
+            }
+            radix: total;
+            ",
+        )
+        .unwrap();
+        let out = program.evaluate(&ctx());
+        assert_eq!(out.hard.radix, Some(9));
     }
 
     #[test]
@@ -1541,8 +1862,54 @@ mod tests {
     }
 
     #[test]
+    fn break_statements_exit_loops() {
+        let script = r#"
+            let acc = 0;
+            let i = 0;
+            while i < 10 {
+                if i == 5 {
+                    break;
+                }
+                set acc = acc + i;
+                set i = i + 1;
+            }
+            wg: acc;
+        "#;
+
+        let program = Program::parse(script).unwrap();
+        let out = program.evaluate(&ctx());
+        assert_eq!(out.hard.wg, Some(10));
+    }
+
+    #[test]
+    fn continue_skips_to_next_iteration() {
+        let script = r#"
+            let acc = 0;
+            let i = 0;
+            while i < 5 {
+                set i = i + 1;
+                if i % 2 == 0 {
+                    continue;
+                }
+                set acc = acc + i;
+            }
+            wg: acc;
+        "#;
+
+        let program = Program::parse(script).unwrap();
+        let out = program.evaluate(&ctx());
+        assert_eq!(out.hard.wg, Some(9));
+    }
+
+    #[test]
     fn rejects_constant_true_while_loops() {
         let script = "while true { wg: 1; }";
         assert!(Program::parse(script).is_err());
+    }
+
+    #[test]
+    fn rejects_break_and_continue_outside_loops() {
+        assert!(Program::parse("break;").is_err());
+        assert!(Program::parse("continue;").is_err());
     }
 }
