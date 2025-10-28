@@ -1928,8 +1928,12 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             return dlpack_device()
 
         def _row_major_python(self):
-            """Return the matrix data flattened row-major into an ``array('d')`` buffer."""
-            if self._backend in {"python", "blas"}:
+            """Return the tensor data as a row-major ``array('d')`` buffer.
+
+            The returned buffer always contains ``self._rows * self._cols`` floating
+            point values.
+            """
+            if self._backend == "python":
                 return self._data
             return array("d", self._data.reshape(-1))
 
@@ -2150,11 +2154,8 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
                 return [[] for _ in range(rows)]
 
             if self._backend == "numpy":
-                matrix = self._to_numpy(copy=False)
-                return [
-                    [float(matrix[r, c]) for c in range(cols)]
-                    for r in range(rows)
-                ]
+                matrix = self._to_numpy(copy=False).reshape(rows, cols)
+                return [[float(value) for value in row] for row in matrix]
 
             flat = self._row_major_python()
             return [

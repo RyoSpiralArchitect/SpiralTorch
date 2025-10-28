@@ -99,6 +99,26 @@ def test_stub_tensor_tolist_from_range_is_nested() -> None:
         assert tensor_numpy.tolist() == tensor_default.tolist()
 
 
+def test_stub_tensor_tolist_range_backend_parity() -> None:
+    module = _load_stub_module()
+    expected = [
+        [0.0, 1.0, 2.0],
+        [3.0, 4.0, 5.0],
+    ]
+
+    results = [module.Tensor(2, 3, range(6)).tolist()]  # type: ignore[attr-defined]
+    results.append(module.Tensor(2, 3, range(6), backend="python").tolist())  # type: ignore[attr-defined]
+
+    if "numpy" in module.available_stub_backends():  # type: ignore[attr-defined]
+        results.append(
+            module.Tensor(2, 3, range(6), backend="numpy").tolist()  # type: ignore[attr-defined]
+        )
+
+    for matrix in results:
+        assert matrix == expected
+        assert all(isinstance(row, list) for row in matrix)
+
+
 def test_stub_tensor_tolist_uses_python_scalars() -> None:
     module = _load_stub_module()
 
