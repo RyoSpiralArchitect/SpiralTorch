@@ -601,3 +601,50 @@ impl RedisKv {
         self.execute_pipeline(pipeline)
     }
 }
+
+#[cfg(all(test, feature = "redis"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn json_expiry_from_duration_prefers_seconds_for_whole_seconds() {
+        let expiry = JsonExpiry::from_duration(Duration::from_secs(5));
+        assert_eq!(expiry, JsonExpiry::Seconds(5));
+    }
+
+    #[test]
+    fn json_expiry_from_duration_keeps_millisecond_precision() {
+        let expiry = JsonExpiry::from_duration(Duration::from_millis(1500));
+        assert_eq!(expiry, JsonExpiry::Milliseconds(1500));
+    }
+
+    #[test]
+    fn json_expiry_from_duration_rounds_up_sub_millisecond_values() {
+        let expiry = JsonExpiry::from_duration(Duration::from_micros(500));
+        assert_eq!(expiry, JsonExpiry::Milliseconds(1));
+    }
+
+    #[test]
+    fn json_expiry_from_duration_falls_back_to_seconds_when_overflowing() {
+        let duration = Duration::from_secs(u64::MAX);
+        let expiry = JsonExpiry::from_duration(duration);
+        assert_eq!(expiry, JsonExpiry::Seconds(u64::MAX));
+    }
+
+    #[test]
+    fn json_set_options_validate_rejects_conflicting_ttl_rules() {
+        let options = JsonSetOptions::new().with_expiry_seconds(5).keep_ttl();
+
+        let err = options.validate().expect_err("expected validation failure");
+        assert!(matches!(err, KvErr::InvalidOptions(_)));
+    }
+
+    #[test]
+    fn json_set_options_helpers_update_condition() {
+        let nx = JsonSetOptions::new().nx();
+        assert_eq!(nx.condition, JsonSetCondition::Nx);
+
+        let xx = JsonSetOptions::new().xx();
+        assert_eq!(xx.condition, JsonSetCondition::Xx);
+    }
+}

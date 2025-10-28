@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
@@ -15,6 +16,8 @@ try:
     import yaml  # type: ignore
 except Exception:  # pragma: no cover - optional dependency
     yaml = None
+
+LOGGER = logging.getLogger("spiral.cli")
 
 try:
     import spiraltorch
@@ -28,9 +31,59 @@ for _ in range(4):
 if _REPO_ROOT.exists() and str(_REPO_ROOT) not in sys.path:
     sys.path.append(str(_REPO_ROOT))
 
-from tools.tracking import base as tracking_base  # type: ignore
+try:
+    from tools.tracking import base as tracking_base  # type: ignore
+    TRACKING_AVAILABLE = True
+except ModuleNotFoundError:
+    TRACKING_AVAILABLE = False
 
-LOGGER = logging.getLogger("spiral.cli")
+    class _StubTrackingCallback:
+        """Fallback tracker that performs no operations."""
+
+        def on_trial_start(self, trial: "_StubTrialEvent") -> None:  # pragma: no cover - stub
+            return
+
+        def on_trial_end(self, trial: "_StubTrialEvent") -> None:  # pragma: no cover - stub
+            return
+
+        def on_checkpoint(self, checkpoint_json: str) -> None:  # pragma: no cover - stub
+            return
+
+    @dataclass
+    class _StubTrialEvent:
+        id: int
+        params: Dict[str, Any]
+        metric: Optional[float] = None
+
+    class _StubCompositeTracker(_StubTrackingCallback):
+        def __init__(self, callbacks: Iterable[_StubTrackingCallback]) -> None:
+            self._callbacks = list(callbacks)
+
+        def on_trial_start(self, trial: "_StubTrialEvent") -> None:
+            for callback in self._callbacks:
+                callback.on_trial_start(trial)
+
+        def on_trial_end(self, trial: "_StubTrialEvent") -> None:
+            for callback in self._callbacks:
+                callback.on_trial_end(trial)
+
+        def on_checkpoint(self, checkpoint_json: str) -> None:
+            for callback in self._callbacks:
+                callback.on_checkpoint(checkpoint_json)
+
+    class _StubTrackingModule:
+        TrackingCallback = _StubTrackingCallback
+        TrialEvent = _StubTrialEvent
+        CompositeTracker = _StubCompositeTracker
+
+        @staticmethod
+        def build_tracker(name: str, **_: Any) -> None:
+            return None
+
+    tracking_base = _StubTrackingModule()  # type: ignore
+    LOGGER.warning(
+        "Experiment tracking modules are unavailable; tracker arguments will be ignored."
+    )
 
 
 def load_config(path: Path) -> Dict[str, Any]:
@@ -118,6 +171,15 @@ class TrackerAdapter:
 
 def build_tracker(specs: Iterable[str]):
     parsed = parse_tracker_specs(specs)
+    if not parsed:
+        return None
+    if not TRACKING_AVAILABLE:
+        requested = ", ".join(name for name, _ in parsed)
+        LOGGER.warning(
+            "Tracking support is unavailable; ignoring tracker specification(s): %s",
+            requested,
+        )
+        return None
     callbacks = []
     for name, params in parsed:
         tracker = tracking_base.build_tracker(name, **params)
@@ -173,8 +235,13 @@ def run_search(args: argparse.Namespace) -> None:
     loop = (
         spiraltorch.hpo.SearchLoop.from_checkpoint(space, checkpoint_text, tracker)
         if checkpoint_text
-        else spiraltorch.hpo.SearchLoop.create(space, strategy, resource, tracker)
+        else spiraltorch.hpo.SearchLoop.create(
+            space, strategy, resource, tracker, maximize=maximize
+        )
     )
+
+    loop_objective = loop.objective()
+    loop_maximize = loop_objective.lower() == "maximize"
 
     completed_records = [dict(record) for record in loop.completed()]
     best_compare: Optional[float] = None
@@ -183,7 +250,13 @@ def run_search(args: argparse.Namespace) -> None:
         if "metric" not in record or record["metric"] is None:
             continue
         compare = float(record["metric"])
-        if best_compare is None or compare < best_compare:
+        if best_compare is None:
+            best_compare = compare
+            best_record = record
+            continue
+        if (loop_maximize and compare > best_compare) or (
+            not loop_maximize and compare < best_compare
+        ):
             best_compare = compare
             best_record = record
 
@@ -209,20 +282,23 @@ def run_search(args: argparse.Namespace) -> None:
             if not isinstance(metric, (int, float)):
                 raise TypeError("Objective function must return a numeric metric")
             metric_value = float(metric)
-            observed_value = -metric_value if maximize else metric_value
-            loop.observe(trial_id, observed_value)
+            loop.observe(trial_id, metric_value)
             if checkpoint_path:
                 write_checkpoint(loop, checkpoint_path)
-            if best_compare is None or observed_value < best_compare:
-                best_compare = observed_value
-                best_record = {"id": trial_id, "params": params, "metric": observed_value}
+            if best_compare is None:
+                best_compare = metric_value
+                best_record = {"id": trial_id, "params": params, "metric": metric_value}
+            elif (loop_maximize and metric_value > best_compare) or (
+                not loop_maximize and metric_value < best_compare
+            ):
+                best_compare = metric_value
+                best_record = {"id": trial_id, "params": params, "metric": metric_value}
             LOGGER.info("Trial %s metric=%s", trial_id, metric_value)
 
     if best_record:
-        reported_metric = -best_compare if maximize else best_compare
         best_output = {
             "id": best_record["id"],
-            "metric": reported_metric,
+            "metric": best_compare,
             "params": best_record.get("params", {}),
         }
         LOGGER.info("Best trial %s metric=%s", best_output["id"], best_output["metric"])
