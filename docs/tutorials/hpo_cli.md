@@ -10,7 +10,7 @@ with resource-aware scheduling.
 Create a configuration file in JSON or YAML format. The file describes four components:
 
 - `space`: a list of parameter definitions (`float`, `int`, or `categorical`).
-- `strategy`: which search strategy to use (`bayesian` or `population`) and any
+- `strategy`: which search strategy to use (`random`, `bayesian`, or `population`) and any
   strategy-specific knobs (e.g., exploration rate or population size).
 - `objective`: Python callable that receives the suggestion dictionary and returns a metric.
 - `resource` (optional): resource scheduling hints (maximum concurrency and minimum interval).
@@ -34,7 +34,9 @@ max_trials: 12
 ```
 
 The objective callable may return any numeric metric. Set `maximize: true` if the metric should be
-maximised; the CLI converts it internally so that the Rust strategies always minimise.
+maximised; the CLI converts it internally so that the Rust strategies always minimise. When you
+want a lightweight baseline, choose `name: random` to draw uniformly from the search space while
+still benefiting from deterministic resume and scheduler checkpoints.
 
 ## 2. Running the search loop
 
