@@ -91,6 +91,10 @@ pub use schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedu
 pub use st_core::runtime::blackcat::{
     BlackCatRuntime, BlackcatRuntimeStats, ChoiceGroups, StepMetrics,
 };
+pub use trainer::selfsup::{
+    InfoNCEConfig, InfoNCEEpochMetrics, SelfSupBatch, SelfSupEpoch, SelfSupEpochReport,
+    SelfSupEpochTelemetry, SelfSupObjective, SelfSupPlanReport, SelfSupStage, SelfSupStageReport,
+};
 pub use trainer::{
     EpochStats, ModuleTrainer, SpectralAdjustmentMetrics, SpectralLearningRatePolicy,
 };
