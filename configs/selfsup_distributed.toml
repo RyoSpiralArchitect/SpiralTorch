@@ -1,0 +1,11 @@
+[nodes]
+count = 2
+per_node_devices = 4
+
+[synchronization]
+strategy = "all_reduce"
+rendezvous = "memory://selfsup"
+
+[trainer]
+objective = "masked_language_model"
+learning_rate = 1e-3

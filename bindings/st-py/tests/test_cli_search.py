@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
-import json
 import copy
+import importlib
+import json
+import sys
+import types
 from pathlib import Path
 
 import pytest
 
-pytest.importorskip("spiraltorch")
+try:
+    pytest.importorskip("spiraltorch")
+except AttributeError as exc:  # pragma: no cover - environment-specific
+    pytest.skip(
+        f"spiraltorch import failed because torch is unavailable: {exc}",
+        allow_module_level=True,
+    )
 
 from spiral.cli import main as cli_main
 
@@ -110,7 +119,10 @@ def test_cli_rejects_non_mapping_config(tmp_path: Path) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps([{"foo": "bar"}]))
 
-    with pytest.raises(TypeError, match=r"top-level must be an object \(mapping\).*got list"):
+    with pytest.raises(
+        TypeError,
+        match=r"トップレベルはオブジェクト（マッピング）でなければならない; got list",
+    ):
         cli_main([
             "search",
             "--config",
@@ -118,3 +130,34 @@ def test_cli_rejects_non_mapping_config(tmp_path: Path) -> None:
             "--max-trials",
             "1",
         ])
+
+
+def test_cli_writes_summary(tmp_path: Path) -> None:
+    config_path = write_config(tmp_path, CONFIG_TEMPLATE)
+    summary_path = tmp_path / "summary.json"
+    output_path = tmp_path / "best.json"
+
+    cli_main(
+        [
+            "search",
+            "--config",
+            str(config_path),
+            "--max-trials",
+            "3",
+            "--summary",
+            str(summary_path),
+            "--output",
+            str(output_path),
+        ]
+    )
+
+    summary = read_json(summary_path)
+    best = summary.get("best_trial")
+    assert summary["objective"] == "minimize"
+    assert summary["completed_trials"] == 3
+    assert best is not None
+    assert "metric" in best
+
+    output = read_json(output_path)
+    assert output["id"] == best["id"]
+    assert output["metric"] == best["metric"]
