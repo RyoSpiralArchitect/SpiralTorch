@@ -6,6 +6,7 @@
 use crate::dataset::DataLoaderBatches;
 use crate::highlevel::SpiralSession;
 use crate::schedule::{RoundtableConfig, RoundtableSchedule};
+#[cfg(feature = "selfsup")]
 use crate::trainer::selfsup::{
     publish_selfsup_metrics, InfoNCEEpochMetrics, InfoNCELoss, SelfSupEpochReport,
     SelfSupEpochTelemetry, SelfSupObjective, SelfSupPlanReport, SelfSupStage, SelfSupStageReport,
@@ -613,6 +614,7 @@ impl SpiralLightning {
         Ok(LightningReport::new(reports))
     }
 
+    #[cfg(feature = "selfsup")]
     /// Executes a self-supervised training plan leveraging the native lightning trainer.
     pub fn fit_selfsup_plan<M, It>(
         &mut self,

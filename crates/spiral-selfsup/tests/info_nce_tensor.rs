@@ -36,8 +36,15 @@ fn tensor_wrapper_matches_vector_api() {
     let vector_result = contrastive::info_nce_loss(&anchors, &positives, 0.2, true).unwrap();
 
     assert!((tensor_result.loss - vector_result.loss).abs() < 1e-6);
-    assert_eq!(tensor_result.logits, vector_result.logits);
-    assert_eq!(tensor_result.labels, vector_result.labels);
+    let tensor_logits = tensor_result.logits.data().to_vec();
+    assert_eq!(tensor_logits, vector_result.logits);
+    let tensor_labels: Vec<usize> = tensor_result
+        .labels
+        .data()
+        .iter()
+        .map(|&value| value.round() as usize)
+        .collect();
+    assert_eq!(tensor_labels, vector_result.labels);
 }
 
 #[cfg(not(feature = "wgpu"))]
@@ -57,8 +64,15 @@ fn cpu_backend_matches_reference() {
     let vector_result = contrastive::info_nce_loss(&anchors, &positives, 0.5, false).unwrap();
 
     assert!((tensor_result.loss - vector_result.loss).abs() < 1e-6);
-    assert_eq!(tensor_result.logits, vector_result.logits);
-    assert_eq!(tensor_result.labels, vector_result.labels);
+    let tensor_logits = tensor_result.logits.data().to_vec();
+    assert_eq!(tensor_logits, vector_result.logits);
+    let tensor_labels: Vec<usize> = tensor_result
+        .labels
+        .data()
+        .iter()
+        .map(|&value| value.round() as usize)
+        .collect();
+    assert_eq!(tensor_labels, vector_result.labels);
 }
 
 #[cfg(feature = "wgpu")]
@@ -78,6 +92,13 @@ fn wgpu_feature_path_matches_reference() {
     let vector_result = contrastive::info_nce_loss(&anchors, &positives, 0.3, true).unwrap();
 
     assert!((tensor_result.loss - vector_result.loss).abs() < 1e-6);
-    assert_eq!(tensor_result.logits, vector_result.logits);
-    assert_eq!(tensor_result.labels, vector_result.labels);
+    let tensor_logits = tensor_result.logits.data().to_vec();
+    assert_eq!(tensor_logits, vector_result.logits);
+    let tensor_labels: Vec<usize> = tensor_result
+        .labels
+        .data()
+        .iter()
+        .map(|&value| value.round() as usize)
+        .collect();
+    assert_eq!(tensor_labels, vector_result.labels);
 }
