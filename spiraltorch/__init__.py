@@ -1237,7 +1237,7 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             return matrix.copy() if copy else matrix
 
         def _row_major_python(self):
-            """Return the tensor data as a 1D row-major ``array('d')`` buffer."""
+            """Return the matrix data flattened row-major into an ``array('d')`` buffer."""
             if self._backend == "python":
                 return self._data
             return array("d", self._data.reshape(-1))
@@ -1353,17 +1353,19 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
         def tolist(self):
             rows, cols = self._rows, self._cols
 
-            if self._backend == "python":
-                flat = self._data
-                return [
-                    [float(flat[r * cols + c]) for c in range(cols)]
-                    for r in range(rows)
-                ]
+            if rows == 0:
+                return []
+            if cols == 0:
+                return [[] for _ in range(rows)]
 
-            matrix = self._to_numpy(copy=False)
+            if self._backend == "numpy":
+                matrix = self._to_numpy(copy=False).reshape(rows, cols)
+                return matrix.tolist()
+
+            flat = self._row_major_python()
             return [
-                [float(matrix[r, c]) for c in range(cols)]
-                for r in range(rows)
+                [float(flat[row_offset + c]) for c in range(cols)]
+                for row_offset in range(0, rows * cols, cols)
             ]
 
         @staticmethod
