@@ -1565,8 +1565,42 @@ class _NnIdentity:
     def __call__(self, x: Tensor) -> Tensor: ...
 
 
+class _NnScaler:
+    def __init__(self, name: str, features: int) -> None: ...
+
+    def forward(self, input: Tensor) -> Tensor: ...
+
+    def backward(self, input: Tensor, grad_output: Tensor) -> Tensor: ...
+
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+    def attach_hypergrad(self, curvature: float, learning_rate: float) -> None: ...
+
+    def attach_hypergrad_with_topos(
+        self,
+        curvature: float,
+        learning_rate: float,
+        *,
+        topos: OpenCartesianTopos | None = ...,
+    ) -> None: ...
+
+    def attach_realgrad(self, learning_rate: float) -> None: ...
+
+    def zero_accumulators(self) -> None: ...
+
+    def apply_step(self, fallback_lr: float) -> None: ...
+
+    def state_dict(self) -> List[Tuple[str, Tensor]]: ...
+
+    def load_state_dict(self, state: Sequence[Tuple[str, Tensor]]) -> None: ...
+
+    @property
+    def gain(self) -> Tensor: ...
+
+
 class _NnModule(ModuleType):
     Identity: type[_NnIdentity]
+    Scaler: type[_NnScaler]
     NonLiner: type[_NnNonLiner]
     Dropout: type[_NnDropout]
     Dataset: type[_NnDataset]
@@ -1588,6 +1622,10 @@ nn: _NnModule
 
 
 class Identity(_NnIdentity):
+    ...
+
+
+class Scaler(_NnScaler):
     ...
 
 

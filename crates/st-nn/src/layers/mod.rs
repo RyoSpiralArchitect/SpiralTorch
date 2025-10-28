@@ -13,6 +13,7 @@ pub mod identity;
 pub mod linear;
 pub mod non_liner;
 pub mod normalization;
+pub mod scaler;
 pub mod sequential;
 pub mod softmax;
 pub mod spiral_rnn;
@@ -34,6 +35,7 @@ pub use non_liner::{
     NonLinerHyperbolicConfig,
 };
 pub use normalization::LayerNorm;
+pub use scaler::Scaler;
 pub use softmax::ZSpaceSoftmax;
 pub use topos_resonator::ToposResonator;
 pub use zrelativity::ZRelativityModule;

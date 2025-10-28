@@ -31,7 +31,7 @@ use st_nn::{
     layers::{
         conv::{Conv2d, Conv6da},
         Dropout as RustDropout, Identity, NonLiner, NonLinerActivation, NonLinerEllipticConfig,
-        NonLinerGeometry, NonLinerHyperbolicConfig,
+        NonLinerGeometry, NonLinerHyperbolicConfig, Scaler,
     },
     zspace_coherence::{
         is_swap_invariant as rust_is_swap_invariant, CoherenceDiagnostics, CoherenceLabel,
@@ -1146,6 +1146,103 @@ impl PyNonLiner {
             .gradient()
             .map(|g| PyTensor::from_tensor(g.clone()));
         (gain, slope, bias)
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "Scaler", unsendable)]
+pub(crate) struct PyScaler {
+    inner: Scaler,
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyScaler {
+    #[new]
+    pub fn new(name: &str, features: usize) -> PyResult<Self> {
+        let inner = Scaler::new(name, features).map_err(tensor_err_to_py)?;
+        Ok(Self { inner })
+    }
+
+    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        let output = self.inner.forward(&input.inner).map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        let grad = self
+            .inner
+            .backward(&input.inner, &grad_output.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(grad))
+    }
+
+    #[pyo3(signature = (x))]
+    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(x)
+    }
+
+    pub fn attach_hypergrad(&mut self, curvature: f32, learning_rate: f32) -> PyResult<()> {
+        self.inner
+            .attach_hypergrad(curvature, learning_rate)
+            .map_err(tensor_err_to_py)
+    }
+
+    #[pyo3(signature = (curvature, learning_rate, *, topos=None))]
+    pub fn attach_hypergrad_with_topos(
+        &mut self,
+        curvature: f32,
+        learning_rate: f32,
+        topos: Option<&PyOpenCartesianTopos>,
+    ) -> PyResult<()> {
+        if let Some(topos) = topos {
+            self.inner
+                .attach_hypergrad_with_topos(curvature, learning_rate, topos.inner.clone())
+                .map_err(tensor_err_to_py)
+        } else {
+            self.attach_hypergrad(curvature, learning_rate)
+        }
+    }
+
+    pub fn attach_realgrad(&mut self, learning_rate: f32) -> PyResult<()> {
+        self.inner
+            .attach_realgrad(learning_rate)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn zero_accumulators(&mut self) -> PyResult<()> {
+        self.inner.zero_accumulators().map_err(tensor_err_to_py)
+    }
+
+    pub fn apply_step(&mut self, fallback_lr: f32) -> PyResult<()> {
+        self.inner.apply_step(fallback_lr).map_err(tensor_err_to_py)
+    }
+
+    pub fn state_dict(&self) -> PyResult<Vec<(String, PyTensor)>> {
+        let mut entries: Vec<_> = self
+            .inner
+            .state_dict()
+            .map_err(tensor_err_to_py)?
+            .into_iter()
+            .collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(entries
+            .into_iter()
+            .map(|(name, tensor)| (name, PyTensor::from_tensor(tensor)))
+            .collect())
+    }
+
+    pub fn load_state_dict(&mut self, state: Vec<(String, PyTensor)>) -> PyResult<()> {
+        let mut map = std::collections::HashMap::new();
+        for (name, tensor) in state {
+            map.insert(name, tensor.inner.clone());
+        }
+        self.inner.load_state_dict(&map).map_err(tensor_err_to_py)
+    }
+
+    #[getter]
+    pub fn gain(&self) -> PyTensor {
+        PyTensor::from_tensor(self.inner.gain().value().clone())
     }
 }
 
@@ -2756,6 +2853,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add("__doc__", "SpiralTorch neural network primitives")?;
     module.add_class::<PyIdentity>()?;
     module.add_class::<PyNonLiner>()?;
+    module.add_class::<PyScaler>()?;
     module.add_class::<PyZConv>()?;
     module.add_class::<PyZConv6DA>()?;
     module.add_class::<PyZPooling>()?;
@@ -2785,6 +2883,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
         vec![
             "Identity",
             "NonLiner",
+            "Scaler",
             "ZConv",
             "ZConv6DA",
             "ZPooling",
@@ -2814,6 +2913,9 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     }
     if let Ok(non_liner) = module.getattr("NonLiner") {
         parent.add("NonLiner", non_liner)?;
+    }
+    if let Ok(scaler) = module.getattr("Scaler") {
+        parent.add("Scaler", scaler)?;
     }
     if let Ok(zconv) = module.getattr("ZConv") {
         parent.add("ZConv", zconv)?;
