@@ -5,7 +5,9 @@
 
 #![cfg(test)]
 
-use super::{CommandFragment, JsonExpiry, JsonSetOptions, PreparedJsonSetOptions};
+use super::{
+    AutomatedJsonSetOptions, CommandFragment, JsonExpiry, JsonSetOptions, PreparedJsonSetOptions,
+};
 use crate::KvErr;
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -322,5 +324,41 @@ fn automated_prepared_options_respects_validation() {
 
     let err =
         PreparedJsonSetOptions::automated(options).expect_err("invalid options should be rejected");
+    assert!(matches!(err, KvErr::InvalidOptions(_)));
+}
+
+#[test]
+fn automated_json_set_options_wrap_cached_prepared_instances() {
+    let options = JsonSetOptions::new().xx();
+    let automated = options
+        .automated_owned()
+        .expect("automated options should prepare");
+    let prepared = PreparedJsonSetOptions::automated(options).expect("prepared cache should exist");
+
+    assert!(std::ptr::eq(automated.prepared(), prepared));
+    assert_eq!(automated.fragments(), &[CommandFragment::Keyword("XX")]);
+    assert!(!automated.is_empty());
+}
+
+#[test]
+fn automated_json_set_options_apply_delegates_to_fragments() {
+    let options = JsonSetOptions::new().persist();
+    let automated = AutomatedJsonSetOptions::from_options(options)
+        .expect("automation should succeed for persist");
+
+    let mut cmd = redis::cmd("SET");
+    automated.apply(&mut cmd);
+
+    let packed = cmd.get_packed_command();
+    let as_string = String::from_utf8(packed).expect("command should be valid utf8");
+    assert!(as_string.contains("PERSIST"));
+}
+
+#[test]
+fn automated_owned_respects_validation_rules() {
+    let invalid = JsonSetOptions::new().with_expiry_seconds(30).keep_ttl();
+    let err = invalid
+        .automated_owned()
+        .expect_err("invalid automated options should error");
     assert!(matches!(err, KvErr::InvalidOptions(_)));
 }
