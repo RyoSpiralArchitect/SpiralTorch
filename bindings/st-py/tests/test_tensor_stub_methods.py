@@ -91,3 +91,16 @@ def test_tensor_cat_rows_shapes(stub_spiraltorch) -> None:
     python_combined = Tensor.cat_rows([python_first, python_second])
     assert python_combined.shape() == (2, 2)
     assert python_combined.backend == "python"
+
+
+def test_tensor_subclass_preserves_type(stub_spiraltorch) -> None:
+    class CustomTensor(stub_spiraltorch.Tensor):
+        pass
+
+    tensor = CustomTensor(shape=(2, 2), data=[[1.0, 2.0], [3.0, 4.0]], backend="python")
+
+    reshaped = tensor.reshape(1, 4)
+    assert type(reshaped) is CustomTensor
+
+    transposed = tensor.transpose()
+    assert type(transposed) is CustomTensor
