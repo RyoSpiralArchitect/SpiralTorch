@@ -1067,6 +1067,10 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
 
         __slots__ = ("_rows", "_cols", "_data", "_backend")
 
+        #: str: Message guiding users to enable DLPack interoperability.
+        DLPACK_UNAVAILABLE_MESSAGE = (
+            "DLPack interoperability requires NumPy support in the stub Tensor backend."
+        )
         @staticmethod
         def _resolve_backend(label: str | None, *, allow_gpu: bool = False) -> str:
             """Normalize backend labels to the internal python/numpy choices."""
