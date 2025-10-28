@@ -91,6 +91,7 @@ pub use schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedu
 pub use st_core::runtime::blackcat::{
     BlackCatRuntime, BlackcatRuntimeStats, ChoiceGroups, StepMetrics,
 };
+#[cfg(feature = "selfsup")]
 pub use trainer::selfsup::{
     InfoNCEConfig, InfoNCEEpochMetrics, SelfSupBatch, SelfSupEpoch, SelfSupEpochReport,
     SelfSupEpochTelemetry, SelfSupObjective, SelfSupPlanReport, SelfSupStage, SelfSupStageReport,

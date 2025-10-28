@@ -500,6 +500,7 @@ impl Strategy {
         match self {
             Strategy::Bayesian(strategy) => strategy.suggest(space, objective),
             Strategy::Population(strategy) => strategy.suggest(space, objective),
+            Strategy::Random(strategy) => strategy.suggest(space),
         }
     }
 
@@ -507,6 +508,7 @@ impl Strategy {
         match self {
             Strategy::Bayesian(strategy) => strategy.observe(observation, objective),
             Strategy::Population(strategy) => strategy.observe(observation, objective),
+            Strategy::Random(strategy) => strategy.observe(observation),
         }
     }
 
@@ -848,6 +850,7 @@ mod tests {
             SPACE.clone(),
             strategy,
             ResourceConfig::default(),
+            Objective::Minimize,
             no_tracker(),
         )
         .unwrap();
