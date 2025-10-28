@@ -1356,14 +1356,19 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
         def tolist(self):
             rows, cols = self._rows, self._cols
 
-            if self._backend == "numpy":
-                flat = self._to_numpy(copy=False).reshape(-1)
-            else:
-                flat = self._row_major_python()
+            if rows == 0:
+                return []
+            if cols == 0:
+                return [[] for _ in range(rows)]
 
+            if self._backend == "numpy":
+                matrix = self._to_numpy(copy=False).reshape(rows, cols)
+                return matrix.tolist()
+
+            flat = self._row_major_python()
             return [
-                [float(flat[r * cols + c]) for c in range(cols)]
-                for r in range(rows)
+                [float(flat[row_offset + c]) for c in range(cols)]
+                for row_offset in range(0, rows * cols, cols)
             ]
 
         @staticmethod
