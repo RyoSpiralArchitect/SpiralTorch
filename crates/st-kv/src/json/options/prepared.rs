@@ -74,3 +74,43 @@ impl PreparedJsonSetOptions {
         }
     }
 }
+
+/// Wrapper around a cached [`PreparedJsonSetOptions`] that can be cheaply copied
+/// and reapplied without re-validating the originating [`JsonSetOptions`].
+#[derive(Debug, Clone, Copy)]
+pub struct AutomatedJsonSetOptions {
+    prepared: &'static PreparedJsonSetOptions,
+}
+
+impl AutomatedJsonSetOptions {
+    pub(crate) fn new(prepared: &'static PreparedJsonSetOptions) -> Self {
+        Self { prepared }
+    }
+
+    /// Automates the provided options into a cached prepared sequence.
+    pub fn from_options(options: JsonSetOptions) -> KvResult<Self> {
+        PreparedJsonSetOptions::automated(options).map(Self::new)
+    }
+
+    /// Returns the cached prepared configuration backing this automation.
+    pub fn prepared(self) -> &'static PreparedJsonSetOptions {
+        self.prepared
+    }
+
+    /// Returns the cached fragments without incurring additional validation.
+    #[must_use]
+    pub fn fragments(self) -> &'static [CommandFragment] {
+        self.prepared.fragments()
+    }
+
+    /// Returns whether this automated configuration would append any fragments.
+    #[must_use]
+    pub fn is_empty(self) -> bool {
+        self.prepared.is_empty()
+    }
+
+    /// Applies the cached fragments to the provided Redis command.
+    pub fn apply(self, cmd: &mut redis::Cmd) {
+        self.prepared.apply(cmd);
+    }
+}

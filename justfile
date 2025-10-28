@@ -23,6 +23,12 @@ stack:
     cargo build -p st-spiral-rl --release && \
     cargo build -p st-rec --release
 
+selfsup-train:
+    cargo run -p spiral-selfsup --example selfsup_train --release
+
+selfsup-eval:
+    cargo test -p spiral-selfsup -- --nocapture
+
 safety-suite:
     cargo test --manifest-path crates/spiral-safety/Cargo.toml
 
