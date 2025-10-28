@@ -46,5 +46,6 @@ go-lint:
 go-test:
     ./scripts/run_go_checks.sh test
 
-selfsup-info-nce:
-    cargo run -p st-nn --example selfsup_info_nce
+distributed-selfsup config="configs/selfsup_distributed.toml":
+    echo "Launching distributed self-supervised trainer with config: {{config}}" && \
+    cargo test --manifest-path crates/spiral-selfsup/Cargo.toml --test distributed_selfsup -- --ignored
