@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-pytest.importorskip("spiraltorch")
+try:
+    pytest.importorskip("spiraltorch")
+except AttributeError as exc:  # pragma: no cover - environment-specific
+    pytest.skip(
+        f"spiraltorch import failed because torch is unavailable: {exc}",
+        allow_module_level=True,
+    )
 
 from spiraltorch.hpo import SearchLoop
 

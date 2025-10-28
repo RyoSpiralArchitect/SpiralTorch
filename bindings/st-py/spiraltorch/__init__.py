@@ -1361,6 +1361,8 @@ z = _ZSpaceNotation()
 
 _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
     "nn": {
+        "Identity": ("Identity",),
+        "Scaler": ("Scaler",),
         "NonLiner": ("NonLiner",),
         "Dropout": ("Dropout",),
         "Dataset": ("_NnDataset",),
@@ -1474,14 +1476,21 @@ class Axis:
         if self.size is not None:
             value = int(self.size)
             if value <= 0:
+                # Axis declarations require a concrete positive size; zero is only
+                # permitted when inferred from a tensor at runtime.
                 raise ValueError("axis size must be positive")
             object.__setattr__(self, "size", value)
 
     def with_size(self, size: int) -> "Axis":
         """Return a copy with the provided concrete size."""
 
-        if size <= 0:
-            raise ValueError("size must be positive")
+        size = int(size)
+        if size < 0:
+            raise ValueError("size must be non-negative")
+        if size == 0:
+            clone = Axis(self.name)
+            object.__setattr__(clone, "size", 0)
+            return clone
         return Axis(self.name, size)
 
     def __str__(self) -> str:  # pragma: no cover - representation helper
@@ -1502,7 +1511,7 @@ def _prepare_rows(data: _Any) -> _List[_List[float]]:
     if not isinstance(data, _Sequence):
         raise TypeError("tensor data must be a sequence")
     if not data:
-        raise ValueError("tensor data must contain at least one row")
+        return []
     rows: _List[_List[float]] = []
     if isinstance(data[0], _Sequence):  # type: ignore[index]
         width: int | None = None
@@ -1512,8 +1521,6 @@ def _prepare_rows(data: _Any) -> _List[_List[float]]:
             if not isinstance(row, _Sequence):
                 raise TypeError("tensor rows must be sequences of numbers")
             values = [float(value) for value in row]
-            if not values:
-                raise ValueError("tensor rows cannot be empty")
             if width is None:
                 width = len(values)
             elif len(values) != width:
@@ -1521,8 +1528,6 @@ def _prepare_rows(data: _Any) -> _List[_List[float]]:
             rows.append(values)
     else:
         values = [float(value) for value in data]  # type: ignore[assignment]
-        if not values:
-            raise ValueError("tensor data must contain at least one element")
         rows.append(values)
     return rows
 
@@ -1533,7 +1538,7 @@ def _tensor_from_data(data: _Any):
         return data
     rows = _prepare_rows(data)
     height = len(rows)
-    width = len(rows[0])
+    width = len(rows[0]) if rows else 0
     flat: _List[float] = [value for row in rows for value in row]
     return tensor_type(height, width, flat)
 
@@ -1547,8 +1552,16 @@ def _coerce_axis(axis: "Axis | str") -> Axis:
 
 
 def _resolve_axis_size(axis: Axis, size: int) -> Axis:
-    if size <= 0:
-        raise ValueError("tensor dimensions must be positive")
+    if size < 0:
+        raise ValueError("tensor dimensions must be non-negative")
+    if size == 0:
+        if axis.size is None:
+            return axis.with_size(0)
+        if axis.size != 0:
+            raise ValueError(
+                f"axis '{axis.name}' expects size {axis.size}, received {size}"
+            )
+        return axis
     if axis.size is None:
         return axis.with_size(size)
     if axis.size != size:
@@ -2063,8 +2076,11 @@ class SpiralTorchVision:
             volume = volume.tolist()
         if len(volume) != self.depth:
             raise ValueError(f"expected {self.depth} slices, received {len(volume)}")
-        w = max(0.0, float(weight))
-        alpha = self._alpha * (w if w else 1.0)
+        weight = float(weight)
+        if weight < 0.0:
+            raise ValueError("weight must be non-negative")
+        # A zero weight should skip the EMA update entirely instead of reusing self._alpha.
+        alpha = 0.0 if weight <= 0.0 else self._alpha * weight
         for idx, slice_data in enumerate(volume):
             rows = _coerce_slice(slice_data, self.height, self.width)
             for r_idx, row in enumerate(rows):
@@ -2264,9 +2280,12 @@ class ZSpaceTrainer:
                     if value is None
                 ]
                 raise KeyError(f"missing keys in state: {missing}")
-            z = z or self._z
-            moment = moment or self._m
-            velocity = velocity or self._v
+            if z is None:
+                z = self._z
+            if moment is None:
+                moment = self._m
+            if velocity is None:
+                velocity = self._v
         self._assign_vector(self._z, z, strict)
         self._assign_vector(self._m, moment, strict)
         self._assign_vector(self._v, velocity, strict)
@@ -2875,7 +2894,7 @@ _CORE_EXPORTS = [
     "SearchLoop",
     "QatObserver","QuantizationReport","StructuredPruningReport","CompressionReport",
     "structured_prune","compress_weights",
-    "ModuleTrainer","NonLiner","ZConv","ZPooling","ZSpaceTrainer","ZSpaceCoherenceSequencer","PreDiscardTelemetry","PreDiscardPolicy",
+    "ModuleTrainer","Identity","Scaler","NonLiner","ZConv","ZPooling","ZSpaceTrainer","ZSpaceCoherenceSequencer","PreDiscardTelemetry","PreDiscardPolicy",
     "CoherenceObservation","CoherenceSignature","CoherenceChannelReport","CoherenceDiagnostics","is_swap_invariant",
     "TemporalResonanceBuffer","SpiralTorchVision",
     "CanvasTransformer","CanvasSnapshot","apply_vision_update",

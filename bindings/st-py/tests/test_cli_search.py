@@ -11,7 +11,13 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("spiraltorch")
+try:
+    pytest.importorskip("spiraltorch")
+except AttributeError as exc:  # pragma: no cover - environment-specific
+    pytest.skip(
+        f"spiraltorch import failed because torch is unavailable: {exc}",
+        allow_module_level=True,
+    )
 
 from spiral.cli import main as cli_main
 
@@ -113,7 +119,10 @@ def test_cli_rejects_non_mapping_config(tmp_path: Path) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps([{"foo": "bar"}]))
 
-    with pytest.raises(TypeError, match=r"top-level must be an object \(mapping\).*got list"):
+    with pytest.raises(
+        TypeError,
+        match=r"トップレベルはオブジェクト（マッピング）でなければならない; got list",
+    ):
         cli_main([
             "search",
             "--config",

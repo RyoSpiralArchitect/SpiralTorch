@@ -16,8 +16,9 @@ import math
 import random
 import pathlib
 import sys
+import types
 import warnings
-from typing import Any
+from typing import Any, NoReturn
 
 
 _TENSOR_NO_DATA = object()
@@ -1093,6 +1094,32 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
 
         __slots__ = ("_rows", "_cols", "_data", "_backend")
 
+        #: str: Message guiding users to enable DLPack interoperability.
+        DLPACK_UNAVAILABLE_MESSAGE = (
+            "DLPack interoperability requires NumPy support in the stub Tensor backend."
+        )
+        @staticmethod
+        def _resolve_backend(label: str | None, *, allow_gpu: bool = False) -> str:
+            """Normalize backend labels to the internal python/numpy choices."""
+
+            if label is None:
+                return "numpy" if NUMPY_AVAILABLE else "python"
+
+            normalized = str(label).lower()
+            if normalized == "auto":
+                return "numpy" if NUMPY_AVAILABLE else "python"
+            if normalized in {"numpy"}:
+                if not NUMPY_AVAILABLE:
+                    raise RuntimeError("NumPy backend requested but NumPy is not installed")
+                return "numpy"
+            if normalized in {"python", "cpu"}:
+                return "python"
+            if allow_gpu and normalized in {"wgpu", "gpu"}:
+                return "numpy" if NUMPY_AVAILABLE else "python"
+            raise ValueError(
+                "backend must be one of 'auto', 'numpy', 'python', 'cpu', or None"
+            )
+
         def __init__(
             self,
             rows=_UNSET,
@@ -1170,6 +1197,186 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
                 return self._matmul_numpy(other)
             return self._matmul_python(other)
 
+        def row_softmax(self, *, backend: str | None = None) -> "Tensor":
+            """Compute the row-wise softmax of the tensor."""
+
+            target_backend = self._resolve_backend(backend)
+            cls = type(self)
+
+            if target_backend == "numpy":
+                matrix = self._to_numpy(copy=False)
+                if matrix.size == 0 or matrix.shape[1] == 0:
+                    return cls._from_numpy_array(matrix.copy())
+                max_per_row = matrix.max(axis=1, keepdims=True)
+                shifted = matrix - max_per_row
+                exps = _np.exp(shifted)
+                sums = exps.sum(axis=1, keepdims=True)
+                weights = _np.divide(exps, sums, out=_np.zeros_like(exps), where=sums != 0.0)
+                return cls._from_numpy_array(weights)
+
+            rows, cols = self._rows, self._cols
+            total = rows * cols
+            buffer = array("d", [0.0]) * total if total else array("d")
+            if cols == 0 or total == 0:
+                return cls._from_python_array(rows, cols, buffer)
+
+            flat = self._row_major_python()
+            for r in range(rows):
+                offset = r * cols
+                row_slice = [float(flat[offset + c]) for c in range(cols)]
+                max_value = max(row_slice)
+                exps = [math.exp(value - max_value) for value in row_slice]
+                denom = sum(exps)
+                inv = 1.0 / denom if denom > 0.0 else 0.0
+                for c, exp_value in enumerate(exps):
+                    buffer[offset + c] = exp_value * inv
+            return cls._from_python_array(rows, cols, buffer)
+
+        def scaled_dot_attention(
+            self,
+            keys: "Tensor",
+            values: "Tensor",
+            *,
+            contexts: int,
+            sequence: int,
+            scale: float,
+            z_bias: "Tensor" | None = None,
+            attn_bias: "Tensor" | None = None,
+            backend: str | None = None,
+        ) -> "Tensor":
+            """Compute fused scaled dot-product attention with optional biases."""
+
+            if not isinstance(keys, Tensor) or not isinstance(values, Tensor):
+                raise TypeError("scaled_dot_attention expects Tensor inputs for keys and values")
+            if z_bias is not None and not isinstance(z_bias, Tensor):
+                raise TypeError("z_bias must be a Tensor when provided")
+            if attn_bias is not None and not isinstance(attn_bias, Tensor):
+                raise TypeError("attn_bias must be a Tensor when provided")
+
+            contexts = int(contexts)
+            sequence = int(sequence)
+            if contexts <= 0 or sequence <= 0:
+                raise ValueError("contexts and sequence must be positive integers")
+            head_dim = self._cols
+            if head_dim <= 0:
+                raise ValueError("scaled_dot_attention requires tensors with at least one column")
+
+            expected_rows = contexts * sequence
+            if (
+                self._rows != expected_rows
+                or keys._rows != expected_rows
+                or values._rows != expected_rows
+            ):
+                raise ValueError("query, key, and value tensors must have contexts*sequence rows")
+            if keys._cols != head_dim or values._cols != head_dim:
+                raise ValueError("query, key, and value tensors must share the same column count")
+
+            if z_bias is not None and z_bias.shape() != (contexts, sequence):
+                raise ValueError("z_bias must have shape (contexts, sequence)")
+            if attn_bias is not None and attn_bias.shape() != (expected_rows, sequence):
+                raise ValueError("attn_bias must have shape (contexts*sequence, sequence)")
+
+            target_backend = self._resolve_backend(backend, allow_gpu=True)
+            cls = type(self)
+            scale_value = float(scale)
+
+            if target_backend == "numpy":
+                queries = self._to_numpy(copy=False).reshape(contexts, sequence, head_dim)
+                keys_arr = keys._to_numpy(copy=False).reshape(contexts, sequence, head_dim)
+                values_arr = values._to_numpy(copy=False).reshape(contexts, sequence, head_dim)
+                logits = _np.matmul(queries, keys_arr.transpose(0, 2, 1)) * scale_value
+                if z_bias is not None:
+                    zb = z_bias._to_numpy(copy=False).reshape(contexts, 1, sequence)
+                    logits = logits + zb
+                if attn_bias is not None:
+                    ab = attn_bias._to_numpy(copy=False).reshape(contexts, sequence, sequence)
+                    logits = logits + ab
+                max_logits = logits.max(axis=2, keepdims=True)
+                shifted = logits - max_logits
+                weights = _np.exp(shifted)
+                sums = weights.sum(axis=2, keepdims=True)
+                weights = _np.divide(weights, sums, out=_np.zeros_like(weights), where=sums != 0.0)
+                output = weights @ values_arr
+                return cls._from_numpy_array(output.reshape(expected_rows, head_dim))
+
+            buffer = self._scaled_dot_attention_python(
+                keys,
+                values,
+                contexts=contexts,
+                sequence=sequence,
+                scale=scale_value,
+                z_bias=z_bias,
+                attn_bias=attn_bias,
+            )
+            return cls._from_python_array(expected_rows, head_dim, buffer)
+
+        def _scaled_dot_attention_python(
+            self,
+            keys: "Tensor",
+            values: "Tensor",
+            *,
+            contexts: int,
+            sequence: int,
+            scale: float,
+            z_bias: "Tensor" | None,
+            attn_bias: "Tensor" | None,
+        ) -> array:
+            rows = contexts * sequence
+            head_dim = self._cols
+            total = rows * head_dim
+            out = array("d", [0.0]) * total if total else array("d")
+
+            if total == 0:
+                return out
+
+            queries = self._row_major_python()
+            keys_flat = keys._row_major_python()
+            values_flat = values._row_major_python()
+            z_bias_flat = None if z_bias is None else z_bias._row_major_python()
+            attn_bias_flat = None if attn_bias is None else attn_bias._row_major_python()
+
+            for context in range(contexts):
+                context_offset = context * sequence
+                for query_idx in range(sequence):
+                    query_row = context_offset + query_idx
+                    query_offset = query_row * head_dim
+                    running_max = -1.0e30
+                    running_sum = 0.0
+                    accum = [0.0] * head_dim
+                    for key_idx in range(sequence):
+                        key_row = context_offset + key_idx
+                        key_offset = key_row * head_dim
+                        dot = 0.0
+                        for dim in range(head_dim):
+                            dot += queries[query_offset + dim] * keys_flat[key_offset + dim]
+
+                        logit = dot * scale
+                        if z_bias_flat is not None:
+                            logit += z_bias_flat[context_offset + key_idx]
+                        if attn_bias_flat is not None:
+                            logit += attn_bias_flat[query_row * sequence + key_idx]
+
+                        new_max = running_max if running_max > logit else logit
+                        scaled_sum = (
+                            running_sum * math.exp(running_max - new_max)
+                            if running_sum > 0.0
+                            else 0.0
+                        )
+                        exp_curr = math.exp(logit - new_max)
+                        denom = scaled_sum + exp_curr
+                        alpha = scaled_sum / denom if denom > 0.0 else 0.0
+                        weight = exp_curr / denom if denom > 0.0 else 0.0
+                        running_max = new_max
+                        running_sum = denom
+
+                        for dim in range(head_dim):
+                            accum[dim] = accum[dim] * alpha + weight * values_flat[key_offset + dim]
+
+                    for dim in range(head_dim):
+                        out[query_offset + dim] = accum[dim]
+
+            return out
+
         def _matmul_python(self, other: "Tensor") -> "Tensor":
             rows, cols, inner = self._rows, other._cols, self._cols
             if rows == 0 or cols == 0:
@@ -1231,6 +1438,66 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
         def _matmul_numpy(self, other: "Tensor") -> "Tensor":
             result = self._to_numpy(copy=False) @ other._to_numpy(copy=False)
             return Tensor._from_numpy_array(result)
+
+        def add(self, other: "Tensor") -> "Tensor":
+            """Element-wise addition."""
+
+            if not isinstance(other, Tensor):
+                raise TypeError("add expects another Tensor instance")
+            if self.shape() != other.shape():
+                raise ValueError("tensor shapes must match for addition")
+
+            cls = type(self)
+            if NUMPY_AVAILABLE and (
+                self._backend == "numpy" or other._backend == "numpy"
+            ):
+                result = self._to_numpy(copy=False) + other._to_numpy(copy=False)
+                return cls._from_numpy_array(result)
+
+            data = array(
+                "d",
+                (
+                    a + b
+                    for a, b in zip(self._row_major_python(), other._row_major_python())
+                ),
+            )
+            return cls._from_python_array(self._rows, self._cols, data)
+
+        def sub(self, other: "Tensor") -> "Tensor":
+            """Element-wise subtraction."""
+
+            if not isinstance(other, Tensor):
+                raise TypeError("sub expects another Tensor instance")
+            if self.shape() != other.shape():
+                raise ValueError("tensor shapes must match for subtraction")
+
+            cls = type(self)
+            if NUMPY_AVAILABLE and (
+                self._backend == "numpy" or other._backend == "numpy"
+            ):
+                result = self._to_numpy(copy=False) - other._to_numpy(copy=False)
+                return cls._from_numpy_array(result)
+
+            data = array(
+                "d",
+                (
+                    a - b
+                    for a, b in zip(self._row_major_python(), other._row_major_python())
+                ),
+            )
+            return cls._from_python_array(self._rows, self._cols, data)
+
+        def scale(self, value: float) -> "Tensor":
+            """Return a new tensor with every element scaled by ``value``."""
+
+            scalar = float(value)
+            cls = type(self)
+            if NUMPY_AVAILABLE and self._backend == "numpy":
+                scaled = self._to_numpy(copy=False) * scalar
+                return cls._from_numpy_array(scaled)
+
+            data = array("d", (elem * scalar for elem in self._row_major_python()))
+            return cls._from_python_array(self._rows, self._cols, data)
 
         def hadamard(self, other: "Tensor") -> "Tensor":
             if not isinstance(other, Tensor):
@@ -1563,8 +1830,67 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             matrix = array_view.reshape(self._rows, self._cols)
             return matrix.copy() if copy else matrix
 
+        @classmethod
+        def _raise_dlpack_unavailable(cls) -> NoReturn:
+            """DLPack interoperability requires NumPy support in the stub Tensor backend."""
+
+            raise RuntimeError(cls.DLPACK_UNAVAILABLE_MESSAGE)
+
+        @classmethod
+        def from_dlpack(cls, capsule: Any) -> "Tensor":
+            """Create a ``Tensor`` from a DLPack capsule.
+
+            Raises:
+                RuntimeError: DLPack interoperability requires NumPy support in the stub
+                    Tensor backend.
+            """
+
+            if not NUMPY_AVAILABLE or _np is None or not hasattr(_np, "from_dlpack"):
+                cls._raise_dlpack_unavailable()
+            matrix = _np.from_dlpack(capsule)
+            matrix = _np.asarray(matrix, dtype=_np.float64)
+            if matrix.ndim != 2:
+                raise ValueError("Tensor expects a 2D array")
+            return cls._from_numpy_array(matrix)
+
+        def to_dlpack(self) -> Any:
+            """Export the tensor data as a DLPack capsule.
+
+            Raises:
+                RuntimeError: DLPack interoperability requires NumPy support in the stub
+                    Tensor backend.
+            """
+
+            if not NUMPY_AVAILABLE or _np is None:
+                self._raise_dlpack_unavailable()
+            array = self._to_numpy(copy=False)
+            dlpack = getattr(array, "__dlpack__", None)
+            if dlpack is None:
+                self._raise_dlpack_unavailable()
+            return dlpack()
+
+        def __dlpack__(self, stream: Any | None = None) -> Any:
+            if not NUMPY_AVAILABLE or _np is None:
+                self._raise_dlpack_unavailable()
+            array = self._to_numpy(copy=False)
+            dlpack = getattr(array, "__dlpack__", None)
+            if dlpack is None:
+                self._raise_dlpack_unavailable()
+            if stream is None:
+                return dlpack()
+            return dlpack(stream=stream)
+
+        def __dlpack_device__(self) -> tuple[int, int]:
+            if not NUMPY_AVAILABLE or _np is None:
+                self._raise_dlpack_unavailable()
+            array = self._to_numpy(copy=False)
+            dlpack_device = getattr(array, "__dlpack_device__", None)
+            if dlpack_device is None:
+                self._raise_dlpack_unavailable()
+            return dlpack_device()
+
         def _row_major_python(self):
-            """Return the tensor data as a 1D row-major ``array('d')`` buffer."""
+            """Return the matrix data flattened row-major into an ``array('d')`` buffer."""
             if self._backend == "python":
                 return self._data
             return array("d", self._data.reshape(-1))
@@ -1602,11 +1928,11 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
 
         @property
         def rows(self) -> int:
-            return self._rows
+            return int(self._rows)
 
         @property
         def cols(self) -> int:
-            return self._cols
+            return int(self._cols)
 
         @property
         def backend(self) -> str:
@@ -1624,17 +1950,20 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
                         self._rows * self._cols, rows, cols
                     )
                 )
+            cls = type(self)
             if self._backend == "numpy":
                 matrix = self._to_numpy(copy=False).reshape(rows, cols).copy()
-                return Tensor._from_numpy_array(matrix)
+                return cls._from_numpy_array(matrix)
             flat = self._row_major_python()
-            return Tensor._from_python_array(rows, cols, array("d", flat))
+            buffer = array("d", flat)
+            return cls._from_python_array(rows, cols, buffer)
 
         def transpose(self) -> "Tensor":
             rows, cols = self._rows, self._cols
+            cls = type(self)
             if self._backend == "numpy":
                 matrix = self._to_numpy(copy=False).transpose().copy()
-                return Tensor._from_numpy_array(matrix)
+                return cls._from_numpy_array(matrix)
             flat = self._row_major_python()
             total = rows * cols
             transposed = array("d", [0.0]) * total if total else array("d")
@@ -1642,7 +1971,7 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
                 row_offset = r * cols
                 for c in range(cols):
                     transposed[c * rows + r] = flat[row_offset + c]
-            return Tensor._from_python_array(cols, rows, transposed)
+            return cls._from_python_array(cols, rows, transposed)
 
         def sum_axis0(self) -> list[float]:
             cols = self._cols
@@ -1677,20 +2006,116 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
                 totals[r] = row_total
             return totals
 
+        def squared_l2_norm(self) -> float:
+            """Return the squared L2 norm of the tensor."""
+
+            if NUMPY_AVAILABLE and self._backend == "numpy":
+                matrix = self._to_numpy(copy=False)
+                return float(_np.sum(matrix * matrix))
+
+            total = 0.0
+            for value in self._row_major_python():
+                total += value * value
+            return float(total)
+
+        def project_to_poincare(self, curvature: float) -> "Tensor":
+            """Project each row onto the Poincaré ball for the given curvature."""
+
+            if curvature >= 0.0:
+                raise ValueError("curvature must be negative for hyperbolic projection")
+            scale = math.sqrt(-float(curvature))
+            cls = type(self)
+
+            if NUMPY_AVAILABLE and self._backend == "numpy":
+                matrix = self._to_numpy(copy=False)
+                if matrix.size == 0:
+                    return cls._from_numpy_array(matrix.copy())
+                norms = _np.linalg.norm(matrix, axis=1, keepdims=True)
+                clipped = _np.tanh(
+                    _np.divide(norms, scale, out=_np.zeros_like(norms), where=norms != 0.0)
+                )
+                factors = _np.divide(
+                    clipped,
+                    norms,
+                    out=_np.ones_like(norms),
+                    where=norms != 0.0,
+                )
+                projected = matrix * factors
+                return cls._from_numpy_array(projected)
+
+            rows, cols = self._rows, self._cols
+            total = rows * cols
+            data = self._row_major_python()
+            buffer = array("d", [0.0]) * total if total else array("d")
+            if cols == 0 or total == 0:
+                return cls._from_python_array(rows, cols, buffer)
+            for r in range(rows):
+                offset = r * cols
+                segment = [float(data[offset + c]) for c in range(cols)]
+                norm = math.sqrt(sum(value * value for value in segment))
+                if norm > 0.0:
+                    clip = math.tanh(norm / scale)
+                    factor = clip / norm
+                    for c in range(cols):
+                        buffer[offset + c] = segment[c] * factor
+                else:
+                    for c in range(cols):
+                        buffer[offset + c] = segment[c]
+            return cls._from_python_array(rows, cols, buffer)
+
+        def hyperbolic_distance(self, other: "Tensor", curvature: float) -> float:
+            """Estimate the hyperbolic distance between two projected points."""
+
+            if not isinstance(other, Tensor):
+                raise TypeError("hyperbolic_distance expects another Tensor instance")
+            if self.shape() != other.shape():
+                raise ValueError("tensor shapes must match for hyperbolic distance")
+            if curvature >= 0.0:
+                raise ValueError("curvature must be negative for hyperbolic distance")
+
+            scale = math.sqrt(-float(curvature))
+
+            if NUMPY_AVAILABLE and (
+                self._backend == "numpy" or other._backend == "numpy"
+            ):
+                a = self._to_numpy(copy=False) / scale
+                b = other._to_numpy(copy=False) / scale
+                diff = a - b
+                sum_norm = float(_np.sum(diff * diff))
+                sum_inner = float(_np.sum((1.0 - a * a) * (1.0 - b * b)))
+                denom = math.sqrt(max(sum_inner, 1e-6))
+                return float(2.0 * math.acosh(1.0 + sum_norm / denom))
+
+            sum_norm = 0.0
+            sum_inner = 0.0
+            for lhs, rhs in zip(self._row_major_python(), other._row_major_python()):
+                pa = lhs / scale
+                pb = rhs / scale
+                diff = pa - pb
+                sum_norm += diff * diff
+                sum_inner += (1.0 - pa * pa) * (1.0 - pb * pb)
+            denom = math.sqrt(max(sum_inner, 1e-6))
+            return float(2.0 * math.acosh(1.0 + sum_norm / denom))
+
         def tolist(self):
             rows, cols = self._rows, self._cols
 
-            if self._backend == "python":
-                flat = self._data
+            if rows == 0:
+                return []
+            if cols == 0:
+                return [[] for _ in range(rows)]
+
+            if self._backend == "numpy":
+                matrix = self._to_numpy(copy=False)
                 return [
-                    [float(flat[r * cols + c]) for c in range(cols)]
+                    [float(matrix[r, c]) for c in range(cols)]
                     for r in range(rows)
                 ]
 
-            matrix = self._to_numpy(copy=False)
+            flat = self._row_major_python()
             return [
-                [float(matrix[r, c]) for c in range(cols)]
-                for r in range(rows)
+                [float(flat[row_offset + c]) for c in range(cols)]
+                for row_offset in range(0, rows * cols, cols)
             ]
 
         @staticmethod
@@ -1809,11 +2234,471 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
     module.Tensor = Tensor
     module.available_stub_backends = available_stub_backends
     module.default_stub_backend = "numpy" if NUMPY_AVAILABLE else "python"
+
+    class Axis:
+        """Named axis descriptor used by :class:`LabeledTensor` in the stub runtime."""
+
+        __slots__ = ("name", "size")
+
+        def __init__(self, name: Any, size: int | None = None) -> None:
+            label = str(name).strip()
+            if not label:
+                raise ValueError("axis name must be a non-empty string")
+            self.name = label
+            if size is None:
+                self.size = None
+            else:
+                value = int(size)
+                if value <= 0:
+                    raise ValueError("axis size must be positive")
+                self.size = value
+
+        def with_size(self, size: int) -> "Axis":
+            value = int(size)
+            if value <= 0:
+                raise ValueError("size must be positive")
+            return Axis(self.name, value)
+
+        def __repr__(self) -> str:  # pragma: no cover - debugging helper
+            suffix = self.size if self.size is not None else "?"
+            return f"Axis(name={self.name!r}, size={suffix})"
+
+    def _ensure_tensor_type() -> type[Tensor]:
+        tensor_type = module.__dict__.get("Tensor")
+        if tensor_type is None:
+            raise RuntimeError("Tensor export is unavailable in this build")
+        return tensor_type
+
+    def _prepare_rows(data: Any) -> list[list[float]]:
+        if hasattr(data, "tolist") and not _tensor_is_sequence(data):
+            data = data.tolist()
+        if isinstance(data, _ensure_tensor_type()):
+            rows = data.tolist()
+            return [[float(value) for value in row] for row in rows]
+        if not _tensor_is_sequence(data):
+            raise TypeError("tensor data must be a sequence")
+        if not data:
+            raise ValueError("tensor data must contain at least one row")
+        rows: list[list[float]] = []
+        head = data[0]
+        if hasattr(head, "tolist") and not _tensor_is_sequence(head):
+            head = head.tolist()
+        if _tensor_is_sequence(head):
+            width: int | None = None
+            for row in data:  # type: ignore[assignment]
+                if hasattr(row, "tolist") and not _tensor_is_sequence(row):
+                    row = row.tolist()
+                if not _tensor_is_sequence(row):
+                    raise TypeError("tensor rows must be sequences of numbers")
+                values = [float(value) for value in row]
+                if not values:
+                    raise ValueError("tensor rows cannot be empty")
+                if width is None:
+                    width = len(values)
+                elif len(values) != width:
+                    raise ValueError("all rows must share the same length")
+                rows.append(values)
+            return rows
+        values = [float(value) for value in data]
+        if not values:
+            raise ValueError("tensor data must contain at least one element")
+        return [values]
+
+    def _tensor_from_data(data: Any):
+        tensor_type = _ensure_tensor_type()
+        if isinstance(data, tensor_type):
+            return data
+        rows = _prepare_rows(data)
+        height = len(rows)
+        width = len(rows[0])
+        flat: list[float] = [value for row in rows for value in row]
+        return tensor_type(height, width, flat)
+
+    def _coerce_axis(axis: Axis | str) -> Axis:
+        if isinstance(axis, Axis):
+            return axis
+        if isinstance(axis, str):
+            return Axis(axis)
+        raise TypeError("axes must be Axis instances or strings")
+
+    def _resolve_axis_size(axis: Axis, size: int) -> Axis:
+        if size <= 0:
+            raise ValueError("tensor dimensions must be positive")
+        if axis.size is None:
+            return axis.with_size(size)
+        if axis.size != size:
+            raise ValueError(
+                f"axis '{axis.name}' expects size {axis.size}, received {size}"
+            )
+        return axis
+
+    def _normalise_axes(axes: Sequence[Axis | str]) -> tuple[Axis, Axis]:
+        seq = list(axes)
+        if len(seq) != 2:
+            raise ValueError("exactly two axes are required for a 2D tensor")
+        first = _coerce_axis(seq[0])
+        second = _coerce_axis(seq[1])
+        return (first, second)
+
+    class LabeledTensor:
+        """Tensor wrapper that carries human-readable axis annotations."""
+
+        def __init__(self, data: Any, axes: Sequence[Axis | str]) -> None:
+            base = _tensor_from_data(data)
+            resolved = _normalise_axes(axes)
+            self._tensor = base
+            self._axes = (
+                _resolve_axis_size(resolved[0], base.rows),
+                _resolve_axis_size(resolved[1], base.cols),
+            )
+
+        @property
+        def tensor(self):
+            return self._tensor
+
+        @property
+        def axes(self) -> tuple[Axis, Axis]:
+            return self._axes
+
+        @property
+        def shape(self) -> tuple[int, int]:
+            return (self.rows, self.cols)
+
+        @property
+        def rows(self) -> int:
+            return self._tensor.rows
+
+        @property
+        def cols(self) -> int:
+            return self._tensor.cols
+
+        def to_tensor(self):
+            return self._tensor
+
+        def tolist(self) -> list[list[float]]:
+            return self._tensor.tolist()
+
+        def rename(self, axes: Sequence[Axis | str]) -> "LabeledTensor":
+            return LabeledTensor(self._tensor, axes)
+
+        def with_axes(self, axes: Sequence[Axis | str]) -> "LabeledTensor":
+            return self.rename(axes)
+
+        def transpose(self) -> "LabeledTensor":
+            return LabeledTensor(self._tensor.transpose(), (self._axes[1], self._axes[0]))
+
+        def row_softmax(self, *, backend: str | None = None) -> "LabeledTensor":
+            return LabeledTensor(
+                self._tensor.row_softmax(backend=backend),
+                self._axes,
+            )
+
+        def __matmul__(self, other: "LabeledTensor") -> "LabeledTensor":
+            if not isinstance(other, LabeledTensor):
+                return NotImplemented
+            left_axis = self._axes[1]
+            right_axis = other._axes[0]
+            if left_axis.name != right_axis.name:
+                raise ValueError(
+                    f"axis mismatch: cannot contract '{left_axis.name}' with '{right_axis.name}'"
+                )
+            if (
+                left_axis.size is not None
+                and right_axis.size is not None
+                and left_axis.size != right_axis.size
+            ):
+                raise ValueError(
+                    f"axis '{left_axis.name}' expects size {left_axis.size}, received {right_axis.size}"
+                )
+            return LabeledTensor(
+                self._tensor.matmul(other._tensor),
+                (self._axes[0], other._axes[1]),
+            )
+
+        def describe(self) -> dict[str, Any]:
+            return {
+                "axes": [axis.name for axis in self._axes],
+                "axis_sizes": [axis.size for axis in self._axes],
+                "shape": self.shape,
+            }
+
+        def axis_names(self) -> tuple[str, str]:
+            return (self._axes[0].name, self._axes[1].name)
+
+        def __iter__(self):  # pragma: no cover - simple iterator proxy
+            return iter(self.tolist())
+
+        def __repr__(self) -> str:  # pragma: no cover - debugging helper
+            axis_repr = ", ".join(str(axis) for axis in self._axes)
+            return f"LabeledTensor(shape={self.shape}, axes=({axis_repr}))"
+
+    def tensor(
+        data: Any,
+        *,
+        axes: Sequence[Axis | str] | None = None,
+    ):
+        base = _tensor_from_data(data)
+        if axes is None:
+            return base
+        return LabeledTensor(base, axes)
+
+    def label_tensor(tensor_obj: Any, axes: Sequence[Axis | str]) -> LabeledTensor:
+        return LabeledTensor(tensor_obj, axes)
+
+    _SCALESTACK_STUB_MESSAGE = (
+        "ScaleStack is unavailable in the stub bindings. Build the native extension "
+        "via `maturin develop -m bindings/st-py/Cargo.toml`."
+    )
+
+    class ScaleStack:
+        """Placeholder implementation for the native :class:`ScaleStack`.
+
+        Build the native extension via ``maturin develop -m bindings/st-py/Cargo.toml``
+        to access the full feature set.
+        """
+
+        __slots__ = ("_mode", "_threshold", "_meta")
+
+        def __init__(self, *, mode: str, threshold: float, meta: dict[str, Any] | None = None) -> None:
+            self._mode = str(mode)
+            self._threshold = float(threshold)
+            self._meta = dict(meta or {})
+
+        @property
+        def threshold(self) -> float:
+            return self._threshold
+
+        @property
+        def mode(self) -> str:
+            return self._mode
+
+        @property
+        def meta(self) -> dict[str, Any]:
+            """Return metadata captured when constructing the stub stack."""
+
+            return dict(self._meta)
+
+        def _raise_unavailable(self, method: str) -> None:
+            raise RuntimeError(
+                f"ScaleStack.{method} is unavailable in the stub bindings. "
+                "Build the native extension via `maturin develop -m bindings/st-py/Cargo.toml`."
+            )
+
+        def samples(self) -> list[tuple[float, float]]:
+            self._raise_unavailable("samples")
+
+        def persistence(self) -> list[tuple[float, float, float]]:
+            self._raise_unavailable("persistence")
+
+        def interface_density(self) -> float | None:
+            self._raise_unavailable("interface_density")
+
+        def moment(self, order: int) -> float:
+            self._raise_unavailable("moment")
+
+        def boundary_dimension(self, ambient_dim: float, window: int) -> float | None:
+            self._raise_unavailable("boundary_dimension")
+
+        def coherence_break_scale(self, level: float) -> float | None:
+            self._raise_unavailable("coherence_break_scale")
+
+        def coherence_profile(self, levels: Sequence[float]) -> list[float | None]:
+            self._raise_unavailable("coherence_profile")
+
+        def __repr__(self) -> str:  # pragma: no cover - debugging helper
+            return f"ScaleStack(mode={self._mode!r}, threshold={self._threshold!r}, stub=True)"
+
+    def _coerce_float_sequence(values: Any, label: str) -> list[float]:
+        if not _tensor_is_iterable(values):
+            raise TypeError(f"{label} must be an iterable of numbers")
+        sequence = [float(value) for value in values]
+        if not sequence:
+            raise ValueError(f"{label} must not be empty")
+        return sequence
+
+    def scalar_scale_stack(
+        field: Sequence[float],
+        shape: Sequence[int],
+        scales: Sequence[float],
+        threshold: float,
+    ) -> ScaleStack:
+        rows, cols = _tensor_coerce_shape(shape, "shape")
+        field_values = _coerce_float_sequence(field, "field")
+        if len(field_values) != rows * cols:
+            raise ValueError(
+                "field length does not match the provided shape in the stub bindings"
+            )
+        scale_values = _coerce_float_sequence(scales, "scales")
+        return ScaleStack(
+            mode="scalar",
+            threshold=float(threshold),
+            meta={
+                "shape": (rows, cols),
+                "field": tuple(field_values),
+                "scales": tuple(scale_values),
+            },
+        )
+
+    def semantic_scale_stack(
+        embeddings: Sequence[Sequence[float]],
+        scales: Sequence[float],
+        threshold: float,
+        metric: str = "cosine",
+    ) -> ScaleStack:
+        if not _tensor_is_sequence(embeddings):
+            raise TypeError("embeddings must be a sequence of sequences")
+        prepared = _prepare_rows(embeddings)
+        scale_values = _coerce_float_sequence(scales, "scales")
+        return ScaleStack(
+            mode="semantic",
+            threshold=float(threshold),
+            meta={
+                "shape": (len(prepared), len(prepared[0])),
+                "scales": tuple(scale_values),
+                "metric": str(metric),
+            },
+        )
+
+    module.Axis = Axis
+    module.LabeledTensor = LabeledTensor
+    module.tensor = tensor
+    module.label_tensor = label_tensor
+    module.ScaleStack = ScaleStack
+    module.scalar_scale_stack = scalar_scale_stack
+    module.semantic_scale_stack = semantic_scale_stack
+
     all_exports = module.__dict__.setdefault("__all__", [])
-    for symbol in {"Tensor", "available_stub_backends", "default_stub_backend"}:
+    for symbol in {
+        "Tensor",
+        "available_stub_backends",
+        "default_stub_backend",
+        "Axis",
+        "LabeledTensor",
+        "tensor",
+        "label_tensor",
+        "ScaleStack",
+        "scalar_scale_stack",
+        "semantic_scale_stack",
+    }:
         if symbol not in all_exports:
             all_exports.append(symbol)
     module.__dict__.setdefault("__version__", "0.0.0+stub")
+
+    def _stub_runtime_error(feature: str) -> RuntimeError:
+        return RuntimeError(
+            "The SpiralTorch stub bindings cannot provide "
+            f"{feature!r}; build the native extension ("
+            "`maturin develop -m bindings/st-py/Cargo.toml`) for full functionality."
+        )
+
+    def _register_stub_module(name: str, *, doc: str | None = None) -> types.ModuleType:
+        qualname = f"{module.__name__}.{name}"
+        stub_module = types.ModuleType(qualname, doc)
+
+        def _stub_getattr(attribute: str, *, _qualname: str = qualname):
+            raise _stub_runtime_error(f"{_qualname}.{attribute}")
+
+        stub_module.__getattr__ = _stub_getattr  # type: ignore[attr-defined]
+        sys.modules[qualname] = stub_module
+        setattr(module, name, stub_module)
+        if name not in all_exports:
+            all_exports.append(name)
+        return stub_module
+
+    _PLACEHOLDER_MODULES = {
+        "dataset": "Datasets & loaders are only available once the SpiralTorch native extension is built.",
+        "linalg": "Linear algebra helpers require the SpiralTorch native extension.",
+        "rec": "Signal reconstruction tools require the SpiralTorch native extension.",
+        "telemetry": "Telemetry integrations require the SpiralTorch native extension.",
+        "ecosystem": "Ecosystem integrations require the SpiralTorch native extension.",
+    }
+
+    for _name, _doc in _PLACEHOLDER_MODULES.items():
+        _register_stub_module(_name, doc=_doc)
+
+    def _install_spiral_rl_stub() -> types.ModuleType:
+        stub = _register_stub_module(
+            "spiral_rl",
+            doc=(
+                "Stub reinforcement learning harness. Build the native SpiralTorch extension "
+                "to access training agents."
+            ),
+        )
+        sys.modules["spiral_rl"] = stub
+        module_name = f"{module.__name__}.spiral_rl"
+
+        class _StubAgent:
+            """Stub placeholder for SpiralTorch reinforcement learning agents."""
+
+            __slots__ = ()
+
+            def __init__(self, *args, **kwargs):
+                raise _stub_runtime_error(f"{module_name}.stAgent")
+
+            def _fail(self) -> None:
+                raise _stub_runtime_error(f"{module_name}.stAgent")
+
+            def select_action(self, *args, **kwargs):
+                self._fail()
+
+            def select_actions(self, *args, **kwargs):
+                self._fail()
+
+            def update(self, *args, **kwargs):
+                self._fail()
+
+            def update_batch(self, *args, **kwargs):
+                self._fail()
+
+            @property
+            def epsilon(self):
+                self._fail()
+
+            def set_epsilon(self, *args, **kwargs):
+                self._fail()
+
+            def set_exploration(self, *args, **kwargs):
+                self._fail()
+
+            def state_dict(self):
+                self._fail()
+
+            def load_state_dict(self, *args, **kwargs):
+                self._fail()
+
+        _StubAgent.__name__ = "stAgent"
+        _StubAgent.__module__ = "spiral_rl"
+
+        class _PpoAgent(_StubAgent):
+            __name__ = "PpoAgent"
+
+            def __init__(self, *args, **kwargs):
+                raise _stub_runtime_error(f"{module_name}.PpoAgent")
+
+        _PpoAgent.__module__ = "spiral_rl"
+
+        class _SacAgent(_StubAgent):
+            __name__ = "SacAgent"
+
+            def __init__(self, *args, **kwargs):
+                raise _stub_runtime_error(f"{module_name}.SacAgent")
+
+        _SacAgent.__module__ = "spiral_rl"
+
+        stub.stAgent = _StubAgent
+        stub.DqnAgent = _StubAgent
+        stub.PyDqnAgent = _StubAgent
+        stub.PpoAgent = _PpoAgent
+        stub.SacAgent = _SacAgent
+        stub.__all__ = ["stAgent", "DqnAgent", "PyDqnAgent", "PpoAgent", "SacAgent"]
+
+        def _spiral_rl_getattr(attribute: str, *, _module_name: str = module_name):
+            raise _stub_runtime_error(f"{_module_name}.{attribute}")
+
+        stub.__getattr__ = _spiral_rl_getattr  # type: ignore[attr-defined]
+        return stub
+
+    _install_spiral_rl_stub()
 
     def _missing_attr(name: str):
         raise AttributeError(
