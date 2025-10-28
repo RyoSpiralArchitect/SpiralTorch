@@ -1793,6 +1793,12 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
         def mode(self) -> str:
             return self._mode
 
+        @property
+        def meta(self) -> dict[str, Any]:
+            """Return metadata captured when constructing the stub stack."""
+
+            return dict(self._meta)
+
         def _raise_unavailable(self, method: str) -> None:
             raise RuntimeError(
                 f"ScaleStack.{method} is unavailable in the stub bindings. "

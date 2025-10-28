@@ -29,5 +29,7 @@ def test_scalar_scale_stack_stub_samples_error(stub_spiraltorch):
     assert isinstance(stack, stub_spiraltorch.ScaleStack)
     assert stack.mode == "scalar"
     assert pytest.approx(stack.threshold) == 0.1
+    assert stack.meta["shape"] == (1, 2)
+    assert stack.meta["scales"] == (0.5,)
     with pytest.raises(RuntimeError, match="maturin develop -m bindings/st-py/Cargo.toml"):
         stack.samples()
