@@ -6,6 +6,7 @@
 //! WGPU softmax kernels with optional subgroup acceleration.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
 use wgpu::{
@@ -33,14 +34,14 @@ impl Params {
 #[derive(Debug)]
 pub struct Pipelines {
     pub bind_layout: BindGroupLayout,
-    pub workgroup: ComputePipeline,
-    pub subgroup: Option<ComputePipeline>,
+    pub workgroup: Arc<ComputePipeline>,
+    pub subgroup: Option<Arc<ComputePipeline>>,
 }
 
 impl Pipelines {
     /// Pick the best available pipeline depending on subgroup support.
     pub fn best(&self) -> &ComputePipeline {
-        self.subgroup.as_ref().unwrap_or(&self.workgroup)
+        self.subgroup.as_deref().unwrap_or(self.workgroup.as_ref())
     }
 }
 
@@ -68,15 +69,15 @@ impl<'a> Builder<'a> {
         self
     }
 
-    pub fn cache_mut(&mut self) -> &mut ShaderCache {
-        &mut self.cache
+    pub fn cache_mut(&self) -> &ShaderCache {
+        &self.cache
     }
 
     pub fn into_cache(self) -> ShaderCache {
         self.cache
     }
 
-    pub fn build(mut self) -> Result<(Pipelines, ShaderCache), ShaderLoadError> {
+    pub fn build(self) -> Result<(Pipelines, ShaderCache), ShaderLoadError> {
         let bind_layout = self
             .device
             .create_bind_group_layout(&BindGroupLayoutDescriptor {
