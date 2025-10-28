@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import copy
+import importlib
+import json
+import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -116,7 +119,10 @@ def test_cli_rejects_non_mapping_config(tmp_path: Path) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps([{"foo": "bar"}]))
 
-    with pytest.raises(TypeError, match=r"top-level must be an object \(mapping\).*got list"):
+    with pytest.raises(
+        TypeError,
+        match=r"トップレベルはオブジェクト（マッピング）でなければならない; got list",
+    ):
         cli_main([
             "search",
             "--config",

@@ -8,13 +8,17 @@ import json
 import logging
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 try:
     import yaml  # type: ignore
 except Exception:  # pragma: no cover - optional dependency
     yaml = None
+
+LOGGER = logging.getLogger("spiral.cli")
 
 try:
     import spiraltorch
@@ -28,12 +32,62 @@ for _ in range(4):
 if _REPO_ROOT.exists() and str(_REPO_ROOT) not in sys.path:
     sys.path.append(str(_REPO_ROOT))
 
-from tools.tracking import base as tracking_base  # type: ignore
+try:
+    from tools.tracking import base as tracking_base  # type: ignore
+    TRACKING_AVAILABLE = True
+except ModuleNotFoundError:
+    TRACKING_AVAILABLE = False
 
-LOGGER = logging.getLogger("spiral.cli")
+    class _StubTrackingCallback:
+        """Fallback tracker that performs no operations."""
+
+        def on_trial_start(self, trial: "_StubTrialEvent") -> None:  # pragma: no cover - stub
+            return
+
+        def on_trial_end(self, trial: "_StubTrialEvent") -> None:  # pragma: no cover - stub
+            return
+
+        def on_checkpoint(self, checkpoint_json: str) -> None:  # pragma: no cover - stub
+            return
+
+    @dataclass
+    class _StubTrialEvent:
+        id: int
+        params: Dict[str, Any]
+        metric: Optional[float] = None
+
+    class _StubCompositeTracker(_StubTrackingCallback):
+        def __init__(self, callbacks: Iterable[_StubTrackingCallback]) -> None:
+            self._callbacks = list(callbacks)
+
+        def on_trial_start(self, trial: "_StubTrialEvent") -> None:
+            for callback in self._callbacks:
+                callback.on_trial_start(trial)
+
+        def on_trial_end(self, trial: "_StubTrialEvent") -> None:
+            for callback in self._callbacks:
+                callback.on_trial_end(trial)
+
+        def on_checkpoint(self, checkpoint_json: str) -> None:
+            for callback in self._callbacks:
+                callback.on_checkpoint(checkpoint_json)
+
+    class _StubTrackingModule:
+        TrackingCallback = _StubTrackingCallback
+        TrialEvent = _StubTrialEvent
+        CompositeTracker = _StubCompositeTracker
+
+        @staticmethod
+        def build_tracker(name: str, **_: Any) -> None:
+            return None
+
+    tracking_base = _StubTrackingModule()  # type: ignore
+    LOGGER.warning(
+        "Experiment tracking modules are unavailable; tracker arguments will be ignored."
+    )
 
 
-def load_config(path: Path) -> Dict[str, Any]:
+def load_config(path: Path) -> Mapping[str, Any]:
     text = path.read_text()
     try:
         config = json.loads(text)
@@ -43,9 +97,10 @@ def load_config(path: Path) -> Dict[str, Any]:
                 f"{path} is not valid JSON and PyYAML is unavailable for YAML parsing"
             )
         config = yaml.safe_load(text)
-    if not isinstance(config, dict):
+    if not isinstance(config, Mapping):
         raise TypeError(
-            "Configuration top-level must be an object (mapping), "
+            "Configuration top-level must be an object (mapping) - "
+            "トップレベルはオブジェクト（マッピング）でなければならない; "
             f"got {type(config).__name__}"
         )
     return config
@@ -118,6 +173,15 @@ class TrackerAdapter:
 
 def build_tracker(specs: Iterable[str]):
     parsed = parse_tracker_specs(specs)
+    if not parsed:
+        return None
+    if not TRACKING_AVAILABLE:
+        requested = ", ".join(name for name, _ in parsed)
+        LOGGER.warning(
+            "Tracking support is unavailable; ignoring tracker specification(s): %s",
+            requested,
+        )
+        return None
     callbacks = []
     for name, params in parsed:
         tracker = tracking_base.build_tracker(name, **params)
@@ -177,6 +241,9 @@ def run_search(args: argparse.Namespace) -> None:
             space, strategy, resource, tracker, maximize=maximize
         )
     )
+
+    loop_objective = loop.objective()
+    loop_maximize = loop_objective.lower() == "maximize"
 
     completed_records = [dict(record) for record in loop.completed()]
     loop_objective = loop.objective()
