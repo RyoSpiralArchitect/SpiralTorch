@@ -1,0 +1,21 @@
+[package]
+name = "spiral-config"
+version = "0.1.0"
+edition = "2021"
+authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
+description = "Shared runtime configuration helpers for SpiralTorch"
+license = "AGPL-3.0-or-later"
+
+[features]
+default = []
+tracing = ["dep:tracing", "dep:tracing-subscriber", "dep:tracing-chrome"]
+
+[dependencies]
+rand = { version = "0.8", default-features = false, features = ["std", "std_rng"] }
+thiserror = "1"
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", optional = true, features = ["fmt", "env-filter", "registry"] }
+tracing-chrome = { version = "0.7", optional = true }
+
+[package.metadata.spiraltorch]
+copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"

@@ -8,11 +8,13 @@ use std::time::{Duration, Instant};
 
 use bandit::{SoftBandit, SoftBanditMode};
 use rewrite::HeurStore;
+use spiral_config::determinism;
 use st_frac::FracBackend;
+use tracing::{debug, instrument};
 use wilson::wilson_lower;
 use zmeta::{ZMetaES, ZMetaParams};
 
-use crate::telemetry::monitoring::MonitoringHub;
+use crate::telemetry::{monitoring::MonitoringHub, trace_init};
 
 /// Metrics reported by a training loop back into the runtime.
 #[derive(Clone, Debug, Default)]
@@ -117,6 +119,7 @@ pub struct BlackCatRuntime {
 
 impl BlackCatRuntime {
     #[allow(clippy::too_many_arguments)]
+    #[instrument(skip(groups, heur_path), fields(feat_dim = feat_dim, bandit_mode = ?mode))]
     pub fn new(
         z_params: ZMetaParams,
         groups: ChoiceGroups,
@@ -124,11 +127,17 @@ impl BlackCatRuntime {
         mode: SoftBanditMode,
         heur_path: Option<String>,
     ) -> Self {
+        trace_init::init_tracing();
+        let mut params = z_params;
+        let cfg = determinism::config();
+        if cfg.enabled {
+            params.seed = cfg.seed_for("st-core/blackcat/zmeta");
+        }
         let bandits = MultiBandit::new(&groups, feat_dim, mode);
         let heur = HeurStore::new(heur_path);
         let stats_alpha = 0.2;
-        Self {
-            z: ZMetaES::new(z_params),
+        let runtime = Self {
+            z: ZMetaES::new(params),
             bandits,
             heur,
             reward: RewardCfg::default(),
@@ -145,10 +154,13 @@ impl BlackCatRuntime {
             frac_penalty_ema: RollingEma::new(stats_alpha),
             extra_ema: HashMap::new(),
             monitoring: MonitoringHub::default(),
-        }
+        };
+        debug!("blackcat runtime initialised");
+        runtime
     }
 
     /// Call at the beginning of a training step.
+    #[instrument(skip(self))]
     pub fn begin_step(&mut self) {
         self.last_step_start = Some(Instant::now());
     }
@@ -189,15 +201,18 @@ impl BlackCatRuntime {
     }
 
     /// Choose all groups at once, storing the picks and context internally.
+    #[instrument(skip(self, context), fields(context_len = context.len()))]
     pub fn choose(&mut self, context: Vec<f64>) -> HashMap<String, String> {
         let picks = self.bandits.select_all(&context);
         self.context_dim = context.len().max(1);
         self.last_context = context;
         self.last_picks = picks.clone();
+        debug!(picks = ?self.last_picks, "blackcat bandit picks");
         picks
     }
 
     /// Update both the ES search and contextual bandits after a step.
+    #[instrument(skip(self, metrics), fields(step_time = metrics.step_time_ms, retry_rate = metrics.retry_rate))]
     pub fn post_step(&mut self, metrics: &StepMetrics) -> f64 {
         let curr_penalty = self.z.frac_penalty();
         let reward_current = self.reward.score(metrics, curr_penalty);
@@ -218,6 +233,11 @@ impl BlackCatRuntime {
             .temp_schedule(metrics.retry_rate, grad_norm, loss_var);
         self.bandits.update_all(&self.last_context, reward_current);
         self.stats_steps = self.stats_steps.saturating_add(1);
+        debug!(
+            reward = reward_current,
+            frac_penalty = curr_penalty,
+            "blackcat step complete"
+        );
         let delta = reward_current - self.reward_mean;
         if self.stats_steps == 1 {
             self.reward_mean = reward_current;
