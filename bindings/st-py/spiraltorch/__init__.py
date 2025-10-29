@@ -660,30 +660,33 @@ if _TENSOR_BASE is not None:
         return rows, cols, flat
 
 
-    class TensorMeta(type(_TENSOR_BASE)):
-        def __instancecheck__(cls, instance: _Any) -> bool:  # noqa: D401 - delegated check
-            return isinstance(instance, _TENSOR_BASE)
+    try:
+        class TensorMeta(type(_TENSOR_BASE)):
+            def __instancecheck__(cls, instance: _Any) -> bool:  # noqa: D401 - delegated check
+                return isinstance(instance, _TENSOR_BASE)
 
-        def __subclasscheck__(cls, subclass: _Any) -> bool:  # noqa: D401 - delegated check
-            try:
-                return issubclass(subclass, _TENSOR_BASE)
-            except TypeError:
-                return False
-
-
-    class Tensor(_TENSOR_BASE, metaclass=TensorMeta):
-        """Flexible front-end wrapper around the native SpiralTorch tensor."""
-
-        __doc__ = getattr(_TENSOR_BASE, "__doc__", None)
-
-        def __new__(cls, *args: _Any, **kwargs: _Any):
-            rows, cols, payload = _normalize_tensor_ctor_args(*args, **kwargs)
-            if payload is _TENSOR_NO_DATA:
-                return super().__new__(cls, rows, cols)
-            return super().__new__(cls, rows, cols, payload)
+            def __subclasscheck__(cls, subclass: _Any) -> bool:  # noqa: D401 - delegated check
+                try:
+                    return issubclass(subclass, _TENSOR_BASE)
+                except TypeError:
+                    return False
 
 
-    Tensor.__module__ = __name__
+        class Tensor(_TENSOR_BASE, metaclass=TensorMeta):
+            """Flexible front-end wrapper around the native SpiralTorch tensor."""
+
+            __doc__ = getattr(_TENSOR_BASE, "__doc__", None)
+
+            def __new__(cls, *args: _Any, **kwargs: _Any):
+                rows, cols, payload = _normalize_tensor_ctor_args(*args, **kwargs)
+                if payload is _TENSOR_NO_DATA:
+                    return super().__new__(cls, rows, cols)
+                return super().__new__(cls, rows, cols, payload)
+
+
+        Tensor.__module__ = __name__
+    except TypeError:
+        Tensor = _TENSOR_BASE
     globals()["Tensor"] = Tensor
     _TensorFastType = Tensor
 
