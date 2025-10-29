@@ -15,7 +15,7 @@ jobs:
         feat: ['wgpu', 'wgpu,hip', 'wgpu,cuda']
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.py }}
       - name: Install Rust
