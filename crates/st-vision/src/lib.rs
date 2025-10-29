@@ -98,7 +98,8 @@ pub mod datasets;
 #[cfg(feature = "nerf")]
 pub mod nerf;
 pub mod transforms;
-const RESONANCE_FEATURES_PER_SLICE: usize = 10;
+/// Default number of conditioning features encoded for each Z-space slice.
+pub const RESONANCE_FEATURES_PER_SLICE: usize = 10;
 /// Streaming chrono snapshot associated with a batch of Z-space slices.
 #[derive(Clone, Debug)]
 pub struct ChronoSnapshot {
