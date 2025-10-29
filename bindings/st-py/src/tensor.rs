@@ -1363,6 +1363,16 @@ fn describe_wgpu_softmax_variants(py: Python<'_>) -> PyResult<Option<Vec<PyObjec
             }
             dict.set_item("zspace", zspace_dict)?;
         }
+        if let Some(bayesian) = entry.bayesian() {
+            let bayes_dict = PyDict::new_bound(py);
+            bayes_dict.set_item("posterior_ms", bayesian.posterior_ms)?;
+            bayes_dict.set_item("prior_ms", bayesian.prior_ms)?;
+            bayes_dict.set_item("uplift_ms", bayesian.uplift_ms)?;
+            bayes_dict.set_item("confidence", bayesian.confidence)?;
+            bayes_dict.set_item("credible_low_ms", bayesian.credible_low_ms)?;
+            bayes_dict.set_item("credible_high_ms", bayesian.credible_high_ms)?;
+            dict.set_item("bayesian", bayes_dict)?;
+        }
         out.push(dict.unbind().into());
     }
 

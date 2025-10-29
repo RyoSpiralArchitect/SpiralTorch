@@ -1288,18 +1288,33 @@ impl GpuContext {
         }
 
         let autotune_enabled = autotune_env_enabled() && store_path.is_some();
-        let mut best: Option<(SoftmaxVariant, f64, Option<SoftmaxZProjectMetrics>)> = None;
+        let mut best: Option<(
+            SoftmaxVariant,
+            f64,
+            Option<SoftmaxZProjectMetrics>,
+            Option<SoftmaxBayesEvidence>,
+            f64,
+        )> = None;
         for &candidate in &[SoftmaxVariant::Workgroup, SoftmaxVariant::Subgroup] {
             let Some(pipeline) = self.softmax_pipeline_variant(candidate) else {
                 continue;
             };
             match self.microbenchmark_softmax(pipeline.as_ref(), rows, cols, layout) {
                 Ok((score_s, projection)) => {
+                    let score_ms = score_s * 1_000.0;
+                    let bayes = self.bayesian_refine_softmax_score(
+                        candidate,
+                        score_ms,
+                        projection.as_ref(),
+                    );
+                    let effective_ms = bayes
+                        .map(|evidence| evidence.posterior_ms)
+                        .unwrap_or(score_ms);
                     let update = best
-                        .map(|(_, best_score, _)| score_s < best_score)
+                        .map(|(_, _, _, _, best_ms)| effective_ms < best_ms)
                         .unwrap_or(true);
                     if update {
-                        best = Some((candidate, score_s, projection));
+                        best = Some((candidate, score_s, projection, bayes, effective_ms));
                     }
                 }
                 Err(_) => continue,
@@ -1307,7 +1322,8 @@ impl GpuContext {
         }
 
         let measured = best.is_some();
-        let (variant, score_s, projection) = best.unwrap_or((SoftmaxVariant::Workgroup, 0.0, None));
+        let (variant, score_s, projection, bayes, _) =
+            best.unwrap_or((SoftmaxVariant::Workgroup, 0.0, None, None, f64::MAX));
         let pipeline = self
             .softmax_pipeline_variant(variant)
             .ok_or_else(|| "row softmax pipeline unavailable".to_string())?;
@@ -1327,6 +1343,7 @@ impl GpuContext {
                     score_ms: score_s * 1_000.0,
                     samples: SOFTMAX_AUTOTUNE_SAMPLES,
                     zmetrics: projection,
+                    bayes,
                 });
                 let len = history.len();
                 if len > SOFTMAX_HISTORY_LIMIT {
@@ -1777,6 +1794,76 @@ impl GpuContext {
         let flux = ((drift + swirl.abs()) * harmonic).powf(1.0 / GOLDEN_RATIO);
         Some(SoftmaxZProjectMetrics::new(
             focus, above, here, beneath, swirl, flux,
+        ))
+    }
+
+    fn bayesian_refine_softmax_score(
+        &self,
+        variant: SoftmaxVariant,
+        raw_ms: f64,
+        projection: Option<&SoftmaxZProjectMetrics>,
+    ) -> Option<SoftmaxBayesEvidence> {
+        let history = self.softmax_history.lock().ok()?.clone();
+        let mut weight = 0.0f64;
+        let mut sum = 0.0f64;
+        let mut sum_sq = 0.0f64;
+        for (index, record) in history
+            .iter()
+            .rev()
+            .filter(|entry| entry.variant == variant)
+            .take(SOFTMAX_HISTORY_LIMIT)
+            .enumerate()
+        {
+            let decay = (f64::from(GOLDEN_RATIO)).powf(-(index as f64) / 2.0);
+            let z_bias = record
+                .zmetrics
+                .map(|metrics| {
+                    1.0 + (metrics.spiral_flux as f64) * 0.5 + (metrics.focus as f64) * 0.25
+                })
+                .unwrap_or(1.0);
+            let w = decay * z_bias;
+            weight += w;
+            sum += record.score_ms * w;
+            sum_sq += record.score_ms * record.score_ms * w;
+        }
+
+        if weight <= f64::EPSILON {
+            weight = f64::from(GOLDEN_RATIO);
+            sum = raw_ms * weight;
+            sum_sq = raw_ms * raw_ms * weight;
+        }
+
+        let prior_ms = (sum / weight).max(0.0);
+        let mut prior_var = (sum_sq / weight) - prior_ms * prior_ms;
+        prior_var = prior_var.max((prior_ms * 0.05).max(0.05).powi(2));
+
+        let focus_boost = projection
+            .map(|metrics| (metrics.focus as f64 + metrics.spiral_flux as f64).max(0.0))
+            .unwrap_or(0.0);
+        let sample_weight = (f64::from(GOLDEN_RATIO) + focus_boost).max(1.0);
+        let measurement_var = (raw_ms * 0.08).max(0.05).powi(2);
+        let posterior_precision = weight / prior_var + sample_weight / measurement_var;
+        let posterior_var = if posterior_precision <= f64::EPSILON {
+            prior_var
+        } else {
+            posterior_precision.recip()
+        };
+        let posterior_ms = (prior_ms * weight / prior_var
+            + raw_ms * sample_weight / measurement_var)
+            * posterior_var;
+        let deviation = posterior_var.sqrt();
+        let credible_low_ms = (posterior_ms - deviation).max(0.0);
+        let credible_high_ms = posterior_ms + deviation;
+        let combined_weight = weight + sample_weight;
+        let confidence =
+            (combined_weight / (combined_weight + f64::from(GOLDEN_RATIO))).clamp(0.0, 1.0) as f32;
+
+        Some(SoftmaxBayesEvidence::new(
+            posterior_ms,
+            prior_ms,
+            confidence,
+            credible_low_ms,
+            credible_high_ms,
         ))
     }
 
@@ -2247,6 +2334,41 @@ impl SoftmaxZProjectMetrics {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SoftmaxBayesEvidence {
+    pub posterior_ms: f64,
+    pub prior_ms: f64,
+    pub confidence: f32,
+    pub uplift_ms: f64,
+    pub credible_low_ms: f64,
+    pub credible_high_ms: f64,
+}
+
+impl SoftmaxBayesEvidence {
+    fn new(
+        posterior_ms: f64,
+        prior_ms: f64,
+        confidence: f32,
+        credible_low_ms: f64,
+        credible_high_ms: f64,
+    ) -> Self {
+        let confidence = confidence.clamp(0.0, 1.0);
+        let (credible_low_ms, credible_high_ms) = if credible_low_ms <= credible_high_ms {
+            (credible_low_ms.max(0.0), credible_high_ms)
+        } else {
+            (credible_high_ms.max(0.0), credible_low_ms)
+        };
+        Self {
+            posterior_ms,
+            prior_ms,
+            confidence,
+            uplift_ms: prior_ms - posterior_ms,
+            credible_low_ms,
+            credible_high_ms,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 struct SoftmaxSelectionRecord {
     key: String,
@@ -2254,6 +2376,7 @@ struct SoftmaxSelectionRecord {
     score_ms: f64,
     samples: usize,
     zmetrics: Option<SoftmaxZProjectMetrics>,
+    bayes: Option<SoftmaxBayesEvidence>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -2422,6 +2545,7 @@ pub struct SoftmaxSelectionSnapshot {
     pub samples: usize,
     pub telemetry: Option<SoftmaxTelemetrySummary>,
     pub zspace: Option<SoftmaxZSpaceHint>,
+    bayesian: Option<SoftmaxBayesEvidence>,
 }
 
 impl SoftmaxSelectionSnapshot {
@@ -2439,6 +2563,10 @@ impl SoftmaxSelectionSnapshot {
 
     pub fn projection(&self) -> Option<&SoftmaxZProjectMetrics> {
         self.zspace.as_ref().and_then(|hint| hint.projection())
+    }
+
+    pub fn bayesian(&self) -> Option<&SoftmaxBayesEvidence> {
+        self.bayesian.as_ref()
     }
 
     fn from_record(
@@ -2463,6 +2591,7 @@ impl SoftmaxSelectionSnapshot {
             samples: record.samples,
             telemetry,
             zspace,
+            bayesian: record.bayes,
         }
     }
 }
