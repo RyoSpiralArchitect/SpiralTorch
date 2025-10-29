@@ -68,7 +68,7 @@ anyhow = { version = "1.0", optional = true }
 # Used in tests to validate conversions against ndarray utilities.
 ndarray = { version = "0.15" }
 # Criterion + Plotters power the tensor initialisation benchmarks.
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.7", features = ["html_reports"] }
 plotters = { version = "0.3" }
 naga = { version = "0.20", default-features = false, features = ["wgsl-in"] }
 

@@ -15,7 +15,7 @@ rand = "0.8"
 st-backend-wgpu = { path = "../st-backend-wgpu" }
 
 [dev-dependencies]
-criterion = "0.5"
+criterion = "0.7"
 pyo3 = { version = "0.22", features = ["auto-initialize"] }
 
 [[bench]]
