@@ -8,7 +8,13 @@ struct Params {
     cols: u32,
     in_stride: u32,
     out_stride: u32,
+    chimera_tile: u32,
+    chimera_stripes: u32,
+    flags: u32,
+    _pad: u32,
 };
+
+const FLAG_CHIMERA: u32 = 1u;
 
 @group(0) @binding(0)
 var<storage, read> input: array<f32>;
@@ -23,6 +29,13 @@ var<workgroup> shared_max: array<f32, MAX_SUBGROUPS>;
 var<workgroup> shared_sum: array<f32, MAX_SUBGROUPS>;
 
 fn row_offset(row: u32, stride: u32, idx: u32) -> u32 {
+    if ((params.flags & FLAG_CHIMERA) != 0u) {
+        let tile = max(params.chimera_tile, 1u);
+        let stripes = max(params.chimera_stripes, 1u);
+        let stripe = idx / tile;
+        let within = idx % tile;
+        return row * stride + within * stripes + stripe;
+    }
     return row * stride + idx;
 }
 
