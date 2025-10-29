@@ -74,7 +74,9 @@ use std::f32::EPSILON;
 use std::fmt;
 use std::sync::Arc;
 
-pub use st_tensor::wasm_canvas::{CanvasProjector, FractalCanvas};
+pub use st_tensor::wasm_canvas::{
+    CanvasProjector, CanvasTrailPoint, CanvasWasmTrail, FractalCanvas,
+};
 
 use st_core::telemetry::atlas::AtlasFrame;
 use st_core::telemetry::chrono::ChronoSummary;

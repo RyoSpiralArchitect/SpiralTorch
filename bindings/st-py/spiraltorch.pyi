@@ -421,6 +421,41 @@ class SpiralKHeuristicHint:
     @property
     def condition_expr(self) -> str: ...
 
+class SpiralKAiRewriteConfig:
+    def __init__(
+        self,
+        model: str,
+        max_hints: int | None = ...,
+        default_weight: float | None = ...,
+        eta_floor: float | None = ...,
+    ) -> None: ...
+    @property
+    def model(self) -> str: ...
+    @property
+    def max_hints(self) -> int: ...
+    @property
+    def default_weight(self) -> float: ...
+    @property
+    def eta_floor(self) -> float: ...
+
+class SpiralKAiRewritePrompt:
+    def __init__(
+        self,
+        base_program: str,
+        ctx: SpiralKContext,
+        eta_bar: float = ...,
+        device_guard: str | None = ...,
+    ) -> None: ...
+    def set_metrics(self, metrics: SpiralKWilsonMetrics) -> None: ...
+    def clear_metrics(self) -> None: ...
+    def add_note(self, note: str) -> None: ...
+    @property
+    def base_program(self) -> str: ...
+    @property
+    def eta_bar(self) -> float: ...
+    @property
+    def device_guard(self) -> str | None: ...
+
 def wilson_lower_bound(wins: int, trials: int, z: float) -> float: ...
 
 def should_rewrite(
@@ -442,6 +477,18 @@ def rewrite_with_wilson(
     min_gain: float = ...,
     min_confidence: float = ...,
 ) -> tuple[Dict[str, object], str]: ...
+
+def rewrite_with_ai(
+    base_src: str,
+    ctx: SpiralKContext,
+    config: SpiralKAiRewriteConfig,
+    prompt: SpiralKAiRewritePrompt,
+    generator: Callable[
+        [SpiralKAiRewriteConfig, SpiralKAiRewritePrompt],
+        Sequence[SpiralKHeuristicHint],
+    ]
+    | None = ...,
+) -> tuple[Dict[str, object], str, Sequence[SpiralKHeuristicHint]]: ...
 
     def predict(self, inputs: Sequence[Sequence[float]]) -> Tensor: ...
 
