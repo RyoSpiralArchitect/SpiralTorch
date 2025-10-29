@@ -1293,6 +1293,7 @@ impl GpuContext {
             f64,
             Option<SoftmaxZProjectMetrics>,
             Option<SoftmaxBayesEvidence>,
+            Option<SoftmaxMetropolisEvidence>,
             f64,
         )> = None;
         for &candidate in &[SoftmaxVariant::Workgroup, SoftmaxVariant::Subgroup] {
@@ -1307,14 +1308,27 @@ impl GpuContext {
                         score_ms,
                         projection.as_ref(),
                     );
-                    let effective_ms = bayes
-                        .map(|evidence| evidence.posterior_ms)
-                        .unwrap_or(score_ms);
+                    let metropolis =
+                        self.metropolis_multi_try_softmax(candidate, score_ms, projection.as_ref());
+                    let mut effective_ms = score_ms;
+                    if let Some(ref evidence) = bayes {
+                        effective_ms = effective_ms.min(evidence.posterior_ms);
+                    }
+                    if let Some(ref mtm) = metropolis {
+                        effective_ms = effective_ms.min(mtm.expected_ms);
+                    }
                     let update = best
-                        .map(|(_, _, _, _, best_ms)| effective_ms < best_ms)
+                        .map(|(_, _, _, _, _, best_ms)| effective_ms < best_ms)
                         .unwrap_or(true);
                     if update {
-                        best = Some((candidate, score_s, projection, bayes, effective_ms));
+                        best = Some((
+                            candidate,
+                            score_s,
+                            projection,
+                            bayes,
+                            metropolis,
+                            effective_ms,
+                        ));
                     }
                 }
                 Err(_) => continue,
@@ -1322,8 +1336,8 @@ impl GpuContext {
         }
 
         let measured = best.is_some();
-        let (variant, score_s, projection, bayes, _) =
-            best.unwrap_or((SoftmaxVariant::Workgroup, 0.0, None, None, f64::MAX));
+        let (variant, score_s, projection, bayes, metropolis, _) =
+            best.unwrap_or((SoftmaxVariant::Workgroup, 0.0, None, None, None, f64::MAX));
         let pipeline = self
             .softmax_pipeline_variant(variant)
             .ok_or_else(|| "row softmax pipeline unavailable".to_string())?;
@@ -1344,6 +1358,7 @@ impl GpuContext {
                     samples: SOFTMAX_AUTOTUNE_SAMPLES,
                     zmetrics: projection,
                     bayes,
+                    metropolis,
                 });
                 let len = history.len();
                 if len > SOFTMAX_HISTORY_LIMIT {
@@ -1867,6 +1882,89 @@ impl GpuContext {
         ))
     }
 
+    fn metropolis_multi_try_softmax(
+        &self,
+        variant: SoftmaxVariant,
+        raw_ms: f64,
+        projection: Option<&SoftmaxZProjectMetrics>,
+    ) -> Option<SoftmaxMetropolisEvidence> {
+        let history = self.softmax_history.lock().ok()?.clone();
+        let candidate_focus = projection.map(|m| m.focus).unwrap_or(0.5);
+        let candidate_flux = projection.map(|m| m.spiral_flux).unwrap_or(0.0);
+        if history.is_empty() {
+            return Some(SoftmaxMetropolisEvidence::identity(
+                raw_ms,
+                candidate_focus,
+                candidate_flux,
+            ));
+        }
+
+        let mut proposals = Vec::new();
+        let norm_base = (raw_ms.abs() + SOFTMAX_METROPOLIS_TEMPERATURE).max(1.0);
+        for record in history.into_iter().rev() {
+            let metrics = match record.zmetrics {
+                Some(metrics) => metrics,
+                None => continue,
+            };
+            let affinity = zspace_affinity(projection, &metrics, variant == record.variant);
+            let delta_ms = record.score_ms - raw_ms;
+            let exponent = (-(delta_ms / norm_base)).clamp(-20.0, 20.0);
+            let base = exponent.exp();
+            let weight = base * (0.25 + 0.75 * affinity as f64);
+            proposals.push((record.score_ms, metrics, weight, affinity as f64));
+        }
+
+        if proposals.is_empty() {
+            return Some(SoftmaxMetropolisEvidence::identity(
+                raw_ms,
+                candidate_focus,
+                candidate_flux,
+            ));
+        }
+
+        proposals.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(Ordering::Equal));
+        proposals.truncate(SOFTMAX_METROPOLIS_TRIES);
+        let tries = proposals.len() as u32;
+
+        let mut total_weight = 1.0f64;
+        let mut weighted_ms = raw_ms;
+        let mut focus_sum = candidate_focus as f64;
+        let mut flux_sum = candidate_flux as f64;
+        let mut acceptance_sum = 0.0f64;
+        for (score_ms, metrics, weight, affinity) in proposals.iter() {
+            total_weight += *weight;
+            weighted_ms += *weight * *score_ms;
+            focus_sum += *weight * metrics.focus as f64;
+            flux_sum += *weight * metrics.spiral_flux as f64;
+            let delta_ms = raw_ms - *score_ms;
+            let exponent = (delta_ms / norm_base).clamp(-20.0, 20.0);
+            let logistic = 1.0 / (1.0 + (-exponent).exp());
+            let component = logistic * (0.5 + 0.5 * affinity);
+            acceptance_sum += component;
+        }
+
+        if tries == 0 {
+            return Some(SoftmaxMetropolisEvidence::identity(
+                raw_ms,
+                candidate_focus,
+                candidate_flux,
+            ));
+        }
+
+        let acceptance = (acceptance_sum / tries as f64).clamp(0.0, 1.0) as f32;
+        let expected_ms = (weighted_ms / total_weight).max(0.0);
+        let proposal_focus = (focus_sum / total_weight).clamp(0.0, 1.0) as f32;
+        let proposal_flux = (flux_sum / total_weight).clamp(0.0, 1.0) as f32;
+
+        Some(SoftmaxMetropolisEvidence::new(
+            acceptance,
+            expected_ms,
+            tries,
+            proposal_focus,
+            proposal_flux,
+        ))
+    }
+
     fn fused_gelu_back_bind_group(
         &self,
         z: &Buffer,
@@ -2249,6 +2347,8 @@ const SOFTMAX_AUTOTUNE_REVISION: u64 = 1;
 const SOFTMAX_AUTOTUNE_WARMUP: usize = 1;
 const SOFTMAX_AUTOTUNE_SAMPLES: usize = 3;
 const SOFTMAX_HISTORY_LIMIT: usize = 32;
+const SOFTMAX_METROPOLIS_TRIES: usize = 4;
+const SOFTMAX_METROPOLIS_TEMPERATURE: f64 = 3.5;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 enum SoftmaxVariant {
@@ -2369,6 +2469,49 @@ impl SoftmaxBayesEvidence {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SoftmaxMetropolisEvidence {
+    pub acceptance: f32,
+    pub expected_ms: f64,
+    pub tries: u32,
+    pub proposal_focus: f32,
+    pub proposal_flux: f32,
+}
+
+impl SoftmaxMetropolisEvidence {
+    fn new(acceptance: f32, expected_ms: f64, tries: u32, focus: f32, flux: f32) -> Self {
+        Self {
+            acceptance: acceptance.clamp(0.0, 1.0),
+            expected_ms: expected_ms.max(0.0),
+            tries,
+            proposal_focus: focus.clamp(0.0, 1.0),
+            proposal_flux: flux.clamp(0.0, 1.0),
+        }
+    }
+
+    fn identity(raw_ms: f64, focus: f32, flux: f32) -> Self {
+        Self::new(0.0, raw_ms.max(0.0), 0, focus, flux)
+    }
+}
+
+fn zspace_affinity(
+    reference: Option<&SoftmaxZProjectMetrics>,
+    proposal: &SoftmaxZProjectMetrics,
+    same_variant: bool,
+) -> f32 {
+    let base = if let Some(current) = reference {
+        let focus = 1.0 - (current.focus - proposal.focus).abs();
+        let flux = 1.0 - (current.spiral_flux - proposal.spiral_flux).abs();
+        let swirl_delta = (current.swirl - proposal.swirl).abs();
+        let swirl = 1.0 - (swirl_delta * 0.5).min(1.0);
+        ((focus + flux + swirl) / 3.0).clamp(0.0, 1.0)
+    } else {
+        ((proposal.focus + proposal.spiral_flux) * 0.5).clamp(0.0, 1.0)
+    };
+    let bonus = if same_variant { 0.1 } else { 0.0 };
+    (base + bonus).clamp(0.0, 1.0)
+}
+
 #[derive(Clone, Debug)]
 struct SoftmaxSelectionRecord {
     key: String,
@@ -2377,6 +2520,7 @@ struct SoftmaxSelectionRecord {
     samples: usize,
     zmetrics: Option<SoftmaxZProjectMetrics>,
     bayes: Option<SoftmaxBayesEvidence>,
+    metropolis: Option<SoftmaxMetropolisEvidence>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -2546,6 +2690,7 @@ pub struct SoftmaxSelectionSnapshot {
     pub telemetry: Option<SoftmaxTelemetrySummary>,
     pub zspace: Option<SoftmaxZSpaceHint>,
     bayesian: Option<SoftmaxBayesEvidence>,
+    metropolis: Option<SoftmaxMetropolisEvidence>,
 }
 
 impl SoftmaxSelectionSnapshot {
@@ -2567,6 +2712,10 @@ impl SoftmaxSelectionSnapshot {
 
     pub fn bayesian(&self) -> Option<&SoftmaxBayesEvidence> {
         self.bayesian.as_ref()
+    }
+
+    pub fn metropolis(&self) -> Option<&SoftmaxMetropolisEvidence> {
+        self.metropolis.as_ref()
     }
 
     fn from_record(
@@ -2592,6 +2741,7 @@ impl SoftmaxSelectionSnapshot {
             telemetry,
             zspace,
             bayesian: record.bayes,
+            metropolis: record.metropolis,
         }
     }
 }

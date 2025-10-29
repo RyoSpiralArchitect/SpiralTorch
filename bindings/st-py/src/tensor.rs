@@ -1373,6 +1373,15 @@ fn describe_wgpu_softmax_variants(py: Python<'_>) -> PyResult<Option<Vec<PyObjec
             bayes_dict.set_item("credible_high_ms", bayesian.credible_high_ms)?;
             dict.set_item("bayesian", bayes_dict)?;
         }
+        if let Some(metropolis) = entry.metropolis() {
+            let mtm_dict = PyDict::new_bound(py);
+            mtm_dict.set_item("acceptance", metropolis.acceptance)?;
+            mtm_dict.set_item("expected_ms", metropolis.expected_ms)?;
+            mtm_dict.set_item("tries", metropolis.tries)?;
+            mtm_dict.set_item("proposal_focus", metropolis.proposal_focus)?;
+            mtm_dict.set_item("proposal_flux", metropolis.proposal_flux)?;
+            dict.set_item("metropolis", mtm_dict)?;
+        }
         out.push(dict.unbind().into());
     }
 
