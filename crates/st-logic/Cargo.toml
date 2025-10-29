@@ -11,7 +11,7 @@ learn_store = ["dep:serde", "dep:serde_json", "st-softlogic/learn_store"]
 nerf = []
 
 [dependencies]
-thiserror = "1"
+thiserror = "2"
 rand = "0.8"
 num-complex = "0.4"
 nalgebra = "0.32"
