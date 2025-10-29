@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   wheels:
@@ -41,7 +42,13 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
+      - name: Sign release artifacts with Sigstore
+        uses: sigstore/gh-action-sigstore@v2.3.1
+        with:
+          inputs: |
+            dist/**/*.whl
       - name: Create/Update GitHub Release with assets
         uses: softprops/action-gh-release@v1
         with:
-          files: dist/**/* 
+          files: |
+            dist/**/*
