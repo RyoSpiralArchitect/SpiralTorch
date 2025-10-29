@@ -14,7 +14,7 @@ hip-real = ["libloading"]
 cc = "1"
 
 [dependencies]
-thiserror = "1"
+thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 base64 = "0.21"
 libloading = { version = "0.8", optional = true }
