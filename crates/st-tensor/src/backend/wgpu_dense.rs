@@ -72,6 +72,8 @@ const RAMANUJAN_PI_ITERATIONS: usize = 6;
 const SOFTMAX_WORKGROUP_SIZE: f32 = 256.0;
 const SOFTMAX_FLOPS_PER_ELEMENT: f64 = 5.0;
 const SOFTMAX_BYTES_PER_ELEMENT: f64 = 12.0;
+const GOLDEN_RATIO: f32 = 1.618_033_988_749_894_8_f32;
+const GOLDEN_ANGLE_DEG: f32 = 137.507_764_05_f32;
 
 fn global_autotune_registry() -> &'static Mutex<AutotuneRegistry> {
     static REGISTRY: OnceLock<Mutex<AutotuneRegistry>> = OnceLock::new();
@@ -2032,6 +2034,112 @@ impl From<TelemetrySummary> for SoftmaxTelemetrySummary {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct RoundtableBandHint {
+    pub above: f32,
+    pub here: f32,
+    pub beneath: f32,
+    pub drift: f32,
+}
+
+impl RoundtableBandHint {
+    fn new(above: f32, here: f32, beneath: f32, drift: f32) -> Self {
+        let above = above.max(0.0);
+        let here = here.max(0.0);
+        let beneath = beneath.max(0.0);
+        let total = above + here + beneath;
+        if total <= f32::EPSILON {
+            return Self {
+                above: 1.0 / 3.0,
+                here: 1.0 / 3.0,
+                beneath: 1.0 / 3.0,
+                drift,
+            };
+        }
+        let inv = total.recip();
+        Self {
+            above: (above * inv).clamp(0.0, 1.0),
+            here: (here * inv).clamp(0.0, 1.0),
+            beneath: (beneath * inv).clamp(0.0, 1.0),
+            drift,
+        }
+    }
+
+    fn from_summary(summary: SoftmaxTelemetrySummary, variant: SoftmaxVariant) -> Self {
+        let occupancy = summary.avg_occupancy.clamp(0.0, 1.0);
+        let regression = summary.regression_rate.clamp(0.0, 1.0);
+        let variant_bias = match variant {
+            SoftmaxVariant::Workgroup => 1.0,
+            SoftmaxVariant::Subgroup => GOLDEN_RATIO,
+        };
+        let above = summary.avg_tflops.max(0.0) * variant_bias;
+        let here = summary.avg_bandwidth_gbps.max(0.0) * (1.0 + 0.5 * occupancy);
+        let beneath = occupancy * (1.0 + (1.0 - regression) / GOLDEN_RATIO);
+        let drift = 1.0 - 2.0 * regression;
+        Self::new(above, here, beneath, drift)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct GoldenPulseHint {
+    pub ratio_bias: f32,
+    pub angle_bias_deg: f32,
+    pub cooperative_weight: f32,
+}
+
+impl GoldenPulseHint {
+    fn from_summary(summary: SoftmaxTelemetrySummary, variant: SoftmaxVariant) -> Self {
+        let occupancy = summary.avg_occupancy.clamp(0.0, 1.0);
+        let regression = summary.regression_rate.clamp(0.0, 1.0);
+        let ratio = (summary.avg_tflops.max(1e-6) / summary.avg_bandwidth_gbps.max(1e-6)).ln()
+            / GOLDEN_RATIO;
+        let ratio_bias = ratio.clamp(-GOLDEN_RATIO, GOLDEN_RATIO);
+        let variant_factor = match variant {
+            SoftmaxVariant::Workgroup => 0.75,
+            SoftmaxVariant::Subgroup => 1.0,
+        };
+        let angle_bias_deg = GOLDEN_ANGLE_DEG * occupancy * variant_factor;
+        let energy = summary.avg_tflops.max(0.0) + summary.avg_bandwidth_gbps.max(0.0);
+        let cooperative_weight = if energy <= f32::EPSILON {
+            0.0
+        } else {
+            let spectral_share = (summary.avg_tflops.max(0.0) / energy).clamp(0.0, 1.0);
+            (spectral_share.powf(1.0 / GOLDEN_RATIO) * (1.0 - regression)).clamp(0.0, 1.0)
+        };
+        Self {
+            ratio_bias,
+            angle_bias_deg,
+            cooperative_weight,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SoftmaxZSpaceHint {
+    pub focus: f32,
+    pub roundtable: RoundtableBandHint,
+    pub golden: GoldenPulseHint,
+}
+
+impl SoftmaxZSpaceHint {
+    fn from_summary(summary: SoftmaxTelemetrySummary, variant: SoftmaxVariant) -> Self {
+        let occupancy = summary.avg_occupancy.clamp(0.0, 1.0);
+        let regression = summary.regression_rate.clamp(0.0, 1.0);
+        let harmonic = (summary.avg_tflops.max(0.0) * summary.avg_bandwidth_gbps.max(0.0)).sqrt();
+        let focus_raw = harmonic * occupancy;
+        let focus = if focus_raw <= f32::EPSILON {
+            0.0
+        } else {
+            (focus_raw / (focus_raw + GOLDEN_RATIO + regression)).clamp(0.0, 1.0)
+        };
+        Self {
+            focus,
+            roundtable: RoundtableBandHint::from_summary(summary, variant),
+            golden: GoldenPulseHint::from_summary(summary, variant),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SoftmaxSelectionSnapshot {
     pub key: String,
@@ -2039,6 +2147,7 @@ pub struct SoftmaxSelectionSnapshot {
     pub score_ms: f64,
     pub samples: usize,
     pub telemetry: Option<SoftmaxTelemetrySummary>,
+    pub zspace: Option<SoftmaxZSpaceHint>,
 }
 
 impl SoftmaxSelectionSnapshot {
@@ -2050,9 +2159,14 @@ impl SoftmaxSelectionSnapshot {
         self.telemetry.as_ref()
     }
 
+    pub fn zspace(&self) -> Option<&SoftmaxZSpaceHint> {
+        self.zspace.as_ref()
+    }
+
     fn from_record(
         record: SoftmaxSelectionRecord,
         telemetry: Option<SoftmaxTelemetrySummary>,
+        zspace: Option<SoftmaxZSpaceHint>,
     ) -> Self {
         Self {
             key: record.key,
@@ -2060,6 +2174,7 @@ impl SoftmaxSelectionSnapshot {
             score_ms: record.score_ms,
             samples: record.samples,
             telemetry,
+            zspace,
         }
     }
 }
@@ -3318,7 +3433,12 @@ pub fn softmax_autotune_snapshot() -> Option<Vec<SoftmaxSelectionSnapshot>> {
                     .and_then(|registry| registry.summary(autokey))
             })
             .map(SoftmaxTelemetrySummary::from);
-        snapshots.push(SoftmaxSelectionSnapshot::from_record(record, telemetry));
+        let zspace = telemetry
+            .as_ref()
+            .map(|summary| SoftmaxZSpaceHint::from_summary(*summary, record.variant));
+        snapshots.push(SoftmaxSelectionSnapshot::from_record(
+            record, telemetry, zspace,
+        ));
     }
 
     Some(snapshots)

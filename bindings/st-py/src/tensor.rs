@@ -1336,6 +1336,22 @@ fn describe_wgpu_softmax_variants(py: Python<'_>) -> PyResult<Option<Vec<PyObjec
             telemetry.set_item("regression_rate", summary.regression_rate)?;
             dict.set_item("telemetry", telemetry)?;
         }
+        if let Some(zspace) = entry.zspace() {
+            let zspace_dict = PyDict::new_bound(py);
+            zspace_dict.set_item("focus", zspace.focus)?;
+            let roundtable = PyDict::new_bound(py);
+            roundtable.set_item("above", zspace.roundtable.above)?;
+            roundtable.set_item("here", zspace.roundtable.here)?;
+            roundtable.set_item("beneath", zspace.roundtable.beneath)?;
+            roundtable.set_item("drift", zspace.roundtable.drift)?;
+            zspace_dict.set_item("roundtable", roundtable)?;
+            let golden = PyDict::new_bound(py);
+            golden.set_item("ratio_bias", zspace.golden.ratio_bias)?;
+            golden.set_item("angle_bias_deg", zspace.golden.angle_bias_deg)?;
+            golden.set_item("cooperative_weight", zspace.golden.cooperative_weight)?;
+            zspace_dict.set_item("golden", golden)?;
+            dict.set_item("zspace", zspace_dict)?;
+        }
         out.push(dict.unbind().into());
     }
 
