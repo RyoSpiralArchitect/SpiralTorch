@@ -1339,6 +1339,7 @@ fn describe_wgpu_softmax_variants(py: Python<'_>) -> PyResult<Option<Vec<PyObjec
         if let Some(zspace) = entry.zspace() {
             let zspace_dict = PyDict::new_bound(py);
             zspace_dict.set_item("focus", zspace.focus)?;
+            zspace_dict.set_item("spiral_flux", zspace.spiral_flux)?;
             let roundtable = PyDict::new_bound(py);
             roundtable.set_item("above", zspace.roundtable.above)?;
             roundtable.set_item("here", zspace.roundtable.here)?;
@@ -1350,6 +1351,16 @@ fn describe_wgpu_softmax_variants(py: Python<'_>) -> PyResult<Option<Vec<PyObjec
             golden.set_item("angle_bias_deg", zspace.golden.angle_bias_deg)?;
             golden.set_item("cooperative_weight", zspace.golden.cooperative_weight)?;
             zspace_dict.set_item("golden", golden)?;
+            if let Some(projection) = entry.projection() {
+                let projection_dict = PyDict::new_bound(py);
+                projection_dict.set_item("focus", projection.focus)?;
+                projection_dict.set_item("above", projection.above)?;
+                projection_dict.set_item("here", projection.here)?;
+                projection_dict.set_item("beneath", projection.beneath)?;
+                projection_dict.set_item("swirl", projection.swirl)?;
+                projection_dict.set_item("spiral_flux", projection.spiral_flux)?;
+                zspace_dict.set_item("projection", projection_dict)?;
+            }
             dict.set_item("zspace", zspace_dict)?;
         }
         out.push(dict.unbind().into());
