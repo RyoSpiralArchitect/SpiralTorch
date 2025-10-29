@@ -2884,7 +2884,7 @@ name = "spiral-config"
 version = "0.1.0"
 dependencies = [
  "rand",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tracing",
  "tracing-chrome",
  "tracing-subscriber",
@@ -2900,7 +2900,7 @@ dependencies = [
  "serde",
  "serde_json",
  "smallvec",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -2909,7 +2909,7 @@ version = "0.1.0"
 dependencies = [
  "rayon",
  "serde",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -2919,7 +2919,7 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tracing",
 ]
 
@@ -2935,7 +2935,7 @@ dependencies = [
  "st-tensor",
  "st-vision",
  "tensorboard-rs",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "toml",
 ]
 
@@ -3020,7 +3020,7 @@ dependencies = [
  "libloading 0.8.9",
  "serde",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -3034,7 +3034,7 @@ dependencies = [
  "rand",
  "st-tensor",
  "st-vision",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "wgpu",
 ]
 
@@ -3088,7 +3088,7 @@ dependencies = [
  "st-softlogic",
  "st-tensor",
  "statrs",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "toml",
  "tracing",
  "ureq",
@@ -3119,7 +3119,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -3129,7 +3129,7 @@ dependencies = [
  "redis",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -3144,7 +3144,7 @@ dependencies = [
  "st-core",
  "st-softlogic",
  "st-tensor",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -3170,7 +3170,7 @@ dependencies = [
  "st-tensor",
  "st-text",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -3184,7 +3184,7 @@ dependencies = [
  "st-frac",
  "st-logic",
  "st-nn",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
