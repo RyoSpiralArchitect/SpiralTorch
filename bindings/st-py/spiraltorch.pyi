@@ -1210,8 +1210,11 @@ class QuantumRealityStudio:
         packing_bias: float = ...,
         leech_shells: int = ...,
     ) -> None: ...
+    @property
+    def config(self) -> QuantumOverlayConfig: ...
     def configure(
         self,
+        *,
         curvature: Optional[float] = ...,
         qubits: Optional[int] = ...,
         packing_bias: Optional[float] = ...,
@@ -1222,6 +1225,7 @@ class QuantumRealityStudio:
     def record_quantum_policy(
         self,
         pulses: Sequence[MaxwellPulse],
+        *,
         threshold: float = ...,
     ) -> QuantumMeasurement: ...
 
