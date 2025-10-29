@@ -39,9 +39,23 @@ jobs:
     needs: wheels
     runs-on: ubuntu-22.04
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           path: dist
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Generate manifest, SBOM, and verification bundle
+        run: |
+          python scripts/prepare_release_artifacts.py \
+            --dist dist \
+            --manifest dist/RELEASE_MANIFEST.json \
+            --checksums dist/CHECKSUMS.sha256 \
+            --sbom dist/SBOM.json \
+            --verify-doc dist/VERIFYING.md
       - name: Generate SLSA provenance for wheels
         uses: actions/attest-build-provenance@v1
         with:
@@ -51,6 +65,10 @@ jobs:
         with:
           inputs: |
             dist/**/*.whl
+            dist/CHECKSUMS.sha256
+            dist/RELEASE_MANIFEST.json
+            dist/SBOM.json
+            dist/VERIFYING.md
       - name: Create/Update GitHub Release with assets
         uses: softprops/action-gh-release@v1
         with:
