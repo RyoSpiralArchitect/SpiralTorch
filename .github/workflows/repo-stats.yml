@@ -19,7 +19,7 @@ jobs:
   stats:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Rust (for tokei and cargo metadata)
         uses: dtolnay/rust-toolchain@stable

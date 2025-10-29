@@ -10,7 +10,7 @@ jobs:
     name: Julia checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install Julia
         uses: julia-actions/setup-julia@v2
         with:
@@ -32,7 +32,7 @@ jobs:
     name: Go checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install Go
         uses: actions/setup-go@v5
         with:
