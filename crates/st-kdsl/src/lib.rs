@@ -14,6 +14,11 @@ pub mod query;
 pub mod registry;
 pub mod tile;
 
+pub use auto::{
+    rewrite_with_ai, rewrite_with_wilson, should_rewrite, synthesize_program, wilson_lower_bound,
+    AiHintGenerator, AiRewriteConfig, AiRewriteError, AiRewritePrompt, HeuristicHint,
+    TemplateAiGenerator, WilsonMetrics,
+};
 pub use ir::{Expr, ScalarType, SubgroupModule, SubgroupOp, SubgroupStmt};
 pub use program::Program;
 pub use query::{compile as compile_query, Filter, OrderDirection, QueryPlan};
