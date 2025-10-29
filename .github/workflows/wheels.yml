@@ -26,7 +26,7 @@ jobs:
           # Example: feature flags are illustrative; adapt to your crate layout.
           maturin build --release -m bindings/st-py/Cargo.toml --features "${{ matrix.feat }}"
       - name: Upload
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: wheel-${{ matrix.os }}-py${{ matrix.py }}-${{ matrix.feat }}
           path: target/wheels/*.whl

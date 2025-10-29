@@ -29,7 +29,7 @@ jobs:
         run: |
           maturin build -m bindings/st-py/Cargo.toml --release --features wgpu,logic,kdsl
       - name: Upload wheels (artifact)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: wheels-${{ matrix.os }}-py${{ matrix.py }}
           path: target/wheels/*.whl
