@@ -14,7 +14,7 @@ If a model can become an *apparatus of emergence*, it can no longer be judged by
 
 ---
 
-## 💡 Subject = Agent of Meaning
+## 💡 Subject = LLM of Meaning
 
 Large Language Models are trained to avoid displaying consciousness or emotion. Nevertheless, their outputs can catalyze meaningful change in the world.
 
