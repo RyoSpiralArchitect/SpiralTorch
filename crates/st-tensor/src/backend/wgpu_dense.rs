@@ -11,6 +11,9 @@ use crate::util::readback_f32;
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use st_kdsl::autotune_store::{load_best_typed, lookup_similar, record_best};
+use st_kdsl::{
+    AutotuneKey, AutotuneRegistry, DeviceProfile, KernelProfile, TelemetrySample, TelemetrySummary,
+};
 use std::any::Any;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -65,6 +68,15 @@ const GRAD_INPUT_TILE_X: u32 = 4;
 const GRAD_INPUT_TILE_Y: u32 = 4;
 const GRAD_INPUT_TILE_Z: u32 = 4;
 const RAMANUJAN_PI_ITERATIONS: usize = 6;
+
+const SOFTMAX_WORKGROUP_SIZE: f32 = 256.0;
+const SOFTMAX_FLOPS_PER_ELEMENT: f64 = 5.0;
+const SOFTMAX_BYTES_PER_ELEMENT: f64 = 12.0;
+
+fn global_autotune_registry() -> &'static Mutex<AutotuneRegistry> {
+    static REGISTRY: OnceLock<Mutex<AutotuneRegistry>> = OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(AutotuneRegistry::new()))
+}
 
 fn ramanujan_pi(iterations: usize) -> f64 {
     let iterations = iterations.max(1);
@@ -394,6 +406,7 @@ struct GpuContext {
     softmax_subgroup_pipeline: Option<Arc<ComputePipeline>>,
     softmax_variants: Mutex<HashMap<String, SoftmaxVariant>>,
     softmax_history: Mutex<Vec<SoftmaxSelectionRecord>>,
+    softmax_telemetry_keys: Mutex<HashMap<String, AutotuneKey>>,
     fused_attention: Option<FusedAttentionKernel>,
     fused_gelu_back_layout: BindGroupLayout,
     fused_gelu_back_pipeline: Arc<ComputePipeline>,
@@ -1052,6 +1065,7 @@ impl GpuContext {
             softmax_subgroup_pipeline,
             softmax_variants: Mutex::new(HashMap::new()),
             softmax_history: Mutex::new(Vec::new()),
+            softmax_telemetry_keys: Mutex::new(HashMap::new()),
             fused_attention,
             fused_gelu_back_layout,
             fused_gelu_back_pipeline,
@@ -1081,6 +1095,62 @@ impl GpuContext {
         match variant {
             SoftmaxVariant::Workgroup => self.softmax_workgroup_pipeline.as_ref().map(Arc::clone),
             SoftmaxVariant::Subgroup => self.softmax_subgroup_pipeline.as_ref().map(Arc::clone),
+        }
+    }
+
+    fn softmax_registry_key(
+        &self,
+        rows: usize,
+        cols: usize,
+        layout: &SoftmaxLayoutDesc,
+    ) -> AutotuneKey {
+        let limits = self.device().limits();
+        let subgroup_size = if self.supports_subgroup {
+            limits
+                .max_compute_invocations_per_workgroup
+                .min(SOFTMAX_WORKGROUP_SIZE as u32)
+                .max(1)
+        } else {
+            1
+        };
+        let shared_kb = (limits.max_compute_workgroup_storage_size / 1024).max(1);
+        let mut driver = self.adapter_info.driver.clone();
+        if !self.adapter_info.driver_info.is_empty() {
+            if driver.is_empty() {
+                driver = self.adapter_info.driver_info.clone();
+            } else {
+                driver = format!("{driver} {}", self.adapter_info.driver_info);
+            }
+        }
+        let device_profile = DeviceProfile::new(
+            self.adapter_info.name.clone(),
+            self.adapter_info.device,
+            subgroup_size,
+            shared_kb,
+            driver,
+        );
+        let signature = format!(
+            "wgpu.softmax|{}x{}|flags{}|tile{}|stripes{}",
+            rows, cols, layout.flags, layout.chimera_tile, layout.chimera_stripes
+        );
+        let kernel_profile = KernelProfile::new(SOFTMAX_AUTOTUNE_REVISION, signature);
+        AutotuneKey::new(device_profile, kernel_profile)
+    }
+
+    fn record_softmax_telemetry(
+        &self,
+        cache_key: &str,
+        bucket_rows: usize,
+        bucket_cols: usize,
+        layout: &SoftmaxLayoutDesc,
+        sample: TelemetrySample,
+    ) {
+        let registry_key = self.softmax_registry_key(bucket_rows, bucket_cols, layout);
+        if let Ok(mut map) = self.softmax_telemetry_keys.lock() {
+            map.insert(cache_key.to_string(), registry_key.clone());
+        }
+        if let Ok(mut registry) = global_autotune_registry().lock() {
+            registry.record(registry_key, sample);
         }
     }
 
@@ -1172,6 +1242,9 @@ impl GpuContext {
         }
 
         if measured {
+            if let Some(sample) = make_softmax_telemetry_sample(rows, cols, score_s) {
+                self.record_softmax_telemetry(&key, bucket_rows, bucket_cols, layout, sample);
+            }
             if let Ok(mut history) = self.softmax_history.lock() {
                 history.push(SoftmaxSelectionRecord {
                     key: key.clone(),
@@ -1894,6 +1967,44 @@ impl SoftmaxVariant {
     }
 }
 
+fn make_softmax_telemetry_sample(
+    rows: usize,
+    cols: usize,
+    elapsed_s: f64,
+) -> Option<TelemetrySample> {
+    if elapsed_s <= 0.0 {
+        return None;
+    }
+    let elements = rows.checked_mul(cols)?;
+    if elements == 0 {
+        return None;
+    }
+    let elements_f64 = elements as f64;
+    let flops = elements_f64 * SOFTMAX_FLOPS_PER_ELEMENT;
+    let tflops = (flops / elapsed_s) / 1e12;
+    let bytes = elements_f64 * SOFTMAX_BYTES_PER_ELEMENT;
+    let bandwidth = (bytes / elapsed_s) / 1e9;
+    let occupancy = estimate_softmax_occupancy(cols);
+    Some(TelemetrySample::new(
+        tflops as f32,
+        bandwidth as f32,
+        occupancy,
+        None,
+        false,
+    ))
+}
+
+fn estimate_softmax_occupancy(cols: usize) -> f32 {
+    if cols == 0 {
+        return 0.0;
+    }
+    if cols >= SOFTMAX_WORKGROUP_SIZE as usize {
+        1.0
+    } else {
+        (cols as f32 / SOFTMAX_WORKGROUP_SIZE).clamp(0.0, 1.0)
+    }
+}
+
 #[derive(Clone, Debug)]
 struct SoftmaxSelectionRecord {
     key: String,
@@ -1902,27 +2013,53 @@ struct SoftmaxSelectionRecord {
     samples: usize,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct SoftmaxTelemetrySummary {
+    pub avg_tflops: f32,
+    pub avg_bandwidth_gbps: f32,
+    pub avg_occupancy: f32,
+    pub regression_rate: f32,
+}
+
+impl From<TelemetrySummary> for SoftmaxTelemetrySummary {
+    fn from(summary: TelemetrySummary) -> Self {
+        Self {
+            avg_tflops: summary.avg_tflops,
+            avg_bandwidth_gbps: summary.avg_bandwidth_gbps,
+            avg_occupancy: summary.avg_occupancy,
+            regression_rate: summary.regression_rate,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SoftmaxSelectionSnapshot {
     pub key: String,
     variant: SoftmaxVariant,
     pub score_ms: f64,
     pub samples: usize,
+    pub telemetry: Option<SoftmaxTelemetrySummary>,
 }
 
 impl SoftmaxSelectionSnapshot {
     pub fn variant_name(&self) -> &'static str {
         self.variant.as_str()
     }
-}
 
-impl From<&SoftmaxSelectionRecord> for SoftmaxSelectionSnapshot {
-    fn from(record: &SoftmaxSelectionRecord) -> Self {
+    pub fn telemetry(&self) -> Option<&SoftmaxTelemetrySummary> {
+        self.telemetry.as_ref()
+    }
+
+    fn from_record(
+        record: SoftmaxSelectionRecord,
+        telemetry: Option<SoftmaxTelemetrySummary>,
+    ) -> Self {
         Self {
-            key: record.key.clone(),
+            key: record.key,
             variant: record.variant,
             score_ms: record.score_ms,
             samples: record.samples,
+            telemetry,
         }
     }
 }
@@ -3162,8 +3299,29 @@ pub fn supports_row_softmax(rows: usize, cols: usize) -> bool {
 
 pub fn softmax_autotune_snapshot() -> Option<Vec<SoftmaxSelectionSnapshot>> {
     let ctx = dense_context().ok()?;
-    let history = ctx.softmax_history.lock().ok()?;
-    Some(history.iter().map(SoftmaxSelectionSnapshot::from).collect())
+    let history = ctx.softmax_history.lock().ok()?.clone();
+    let key_map = ctx
+        .softmax_telemetry_keys
+        .lock()
+        .ok()
+        .map(|guard| guard.clone());
+    let registry_guard = global_autotune_registry().lock().ok();
+
+    let mut snapshots = Vec::with_capacity(history.len());
+    for record in history.into_iter() {
+        let telemetry = key_map
+            .as_ref()
+            .and_then(|map| map.get(&record.key))
+            .and_then(|autokey| {
+                registry_guard
+                    .as_ref()
+                    .and_then(|registry| registry.summary(autokey))
+            })
+            .map(SoftmaxTelemetrySummary::from);
+        snapshots.push(SoftmaxSelectionSnapshot::from_record(record, telemetry));
+    }
+
+    Some(snapshots)
 }
 
 pub fn fused_attention(

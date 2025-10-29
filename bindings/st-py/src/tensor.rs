@@ -1328,6 +1328,14 @@ fn describe_wgpu_softmax_variants(py: Python<'_>) -> PyResult<Option<Vec<PyObjec
         dict.set_item("variant", entry.variant_name())?;
         dict.set_item("score_ms", entry.score_ms)?;
         dict.set_item("samples", entry.samples)?;
+        if let Some(summary) = entry.telemetry() {
+            let telemetry = PyDict::new_bound(py);
+            telemetry.set_item("avg_tflops", summary.avg_tflops)?;
+            telemetry.set_item("avg_bandwidth_gbps", summary.avg_bandwidth_gbps)?;
+            telemetry.set_item("avg_occupancy", summary.avg_occupancy)?;
+            telemetry.set_item("regression_rate", summary.regression_rate)?;
+            dict.set_item("telemetry", telemetry)?;
+        }
         out.push(dict.unbind().into());
     }
 
