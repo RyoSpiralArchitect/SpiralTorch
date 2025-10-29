@@ -1307,6 +1307,63 @@ fn init_backend(label: &str) -> PyResult<bool> {
     }
 }
 
+#[cfg(feature = "wgpu")]
+#[pyfunction]
+fn describe_wgpu_softmax_variants(py: Python<'_>) -> PyResult<Option<Vec<PyObject>>> {
+    use st_tensor::backend::wgpu_dense;
+
+    if !wgpu_dense::is_available() {
+        return Ok(None);
+    }
+
+    let snapshot = match wgpu_dense::softmax_autotune_snapshot() {
+        Some(entries) if !entries.is_empty() => entries,
+        _ => return Ok(None),
+    };
+
+    let mut out = Vec::with_capacity(snapshot.len());
+    for entry in snapshot {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("key", entry.key)?;
+        dict.set_item("variant", entry.variant_name())?;
+        dict.set_item("score_ms", entry.score_ms)?;
+        dict.set_item("samples", entry.samples)?;
+        if let Some(summary) = entry.telemetry() {
+            let telemetry = PyDict::new_bound(py);
+            telemetry.set_item("avg_tflops", summary.avg_tflops)?;
+            telemetry.set_item("avg_bandwidth_gbps", summary.avg_bandwidth_gbps)?;
+            telemetry.set_item("avg_occupancy", summary.avg_occupancy)?;
+            telemetry.set_item("regression_rate", summary.regression_rate)?;
+            dict.set_item("telemetry", telemetry)?;
+        }
+        if let Some(zspace) = entry.zspace() {
+            let zspace_dict = PyDict::new_bound(py);
+            zspace_dict.set_item("focus", zspace.focus)?;
+            let roundtable = PyDict::new_bound(py);
+            roundtable.set_item("above", zspace.roundtable.above)?;
+            roundtable.set_item("here", zspace.roundtable.here)?;
+            roundtable.set_item("beneath", zspace.roundtable.beneath)?;
+            roundtable.set_item("drift", zspace.roundtable.drift)?;
+            zspace_dict.set_item("roundtable", roundtable)?;
+            let golden = PyDict::new_bound(py);
+            golden.set_item("ratio_bias", zspace.golden.ratio_bias)?;
+            golden.set_item("angle_bias_deg", zspace.golden.angle_bias_deg)?;
+            golden.set_item("cooperative_weight", zspace.golden.cooperative_weight)?;
+            zspace_dict.set_item("golden", golden)?;
+            dict.set_item("zspace", zspace_dict)?;
+        }
+        out.push(dict.unbind().into());
+    }
+
+    Ok(Some(out))
+}
+
+#[cfg(not(feature = "wgpu"))]
+#[pyfunction]
+fn describe_wgpu_softmax_variants(_py: Python<'_>) -> PyResult<Option<Vec<PyObject>>> {
+    Ok(None)
+}
+
 pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_class::<PyTensor>()?;
     m.add_class::<PyCpuSimdPackedRhs>()?;
@@ -1314,6 +1371,7 @@ pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(tensor_to_dlpack, m)?)?;
     m.add_function(wrap_pyfunction!(cpu_simd_prepack_rhs, m)?)?;
     m.add_function(wrap_pyfunction!(init_backend, m)?)?;
+    m.add_function(wrap_pyfunction!(describe_wgpu_softmax_variants, m)?)?;
     m.add("__doc__", "Tensor helpers and DLPack interop.")?;
     let _ = py;
     Ok(())
