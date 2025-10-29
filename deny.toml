@@ -1,0 +1,21 @@
+[advisories]
+audit-as-crates-io = true
+vulnerability = "deny"
+unmaintained = "warn"
+yanked = "warn"
+notice = "warn"
+
+[bans]
+multiple-versions = "allow"
+wildcards = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "warn"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
+
+[licenses]
+allow = ["*"]
+confidence-threshold = 0.8
+unlicensed = "allow"
