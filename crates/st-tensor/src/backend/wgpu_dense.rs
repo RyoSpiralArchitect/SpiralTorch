@@ -6,16 +6,20 @@
 #![cfg(feature = "wgpu_dense")]
 
 use crate::backend::wgpu_util::WgpuContext;
-use crate::pure::{PackedB, PackedLayout};
+use crate::pure::{Layout, PackedB, PackedLayout};
 use crate::util::readback_f32;
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use st_kdsl::autotune_store::{load_best_typed, lookup_similar, record_best};
+use st_kdsl::{
+    AutotuneKey, AutotuneRegistry, DeviceProfile, KernelProfile, TelemetrySample, TelemetrySummary,
+};
 use std::any::Any;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::env;
+use std::f32::consts::PI;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
@@ -34,6 +38,10 @@ const REDUCE_DB_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/reduce_db.wg
 const RAMANUJAN_PI_WGSL: &str = include_str!("../wgpu_shaders/ramanujan_pi.wgsl");
 const ROW_SOFTMAX_WGSL: &str =
     include_str!("../../../st-backend-wgpu/src/shaders/softmax_workgroup.wgsl");
+const ROW_SOFTMAX_SUBGROUP_WGSL: &str =
+    include_str!("../../../st-backend-wgpu/src/shaders/softmax_subgroup.wgsl");
+const SOFTMAX_ZSPACE_WGSL: &str =
+    include_str!("../../../st-backend-wgpu/src/shaders/softmax_zspace_projection.wgsl");
 const FUSED_ATTENTION_WGSL_TEMPLATE: &str =
     include_str!("../../../st-backend-wgpu/src/shaders/fused_attention_online.wgsl");
 
@@ -63,6 +71,19 @@ const GRAD_INPUT_TILE_X: u32 = 4;
 const GRAD_INPUT_TILE_Y: u32 = 4;
 const GRAD_INPUT_TILE_Z: u32 = 4;
 const RAMANUJAN_PI_ITERATIONS: usize = 6;
+
+const SOFTMAX_WORKGROUP_SIZE: f32 = 256.0;
+const SOFTMAX_FLOPS_PER_ELEMENT: f64 = 5.0;
+const SOFTMAX_BYTES_PER_ELEMENT: f64 = 12.0;
+const GOLDEN_RATIO: f32 = 1.618_033_988_749_894_8_f32;
+const GOLDEN_ANGLE_DEG: f32 = 137.507_764_05_f32;
+const GOLDEN_ANGLE_RAD: f32 = GOLDEN_ANGLE_DEG * (PI / 180.0);
+const ZSPACE_MIN_ENERGY: f32 = 1e-6;
+
+fn global_autotune_registry() -> &'static Mutex<AutotuneRegistry> {
+    static REGISTRY: OnceLock<Mutex<AutotuneRegistry>> = OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(AutotuneRegistry::new()))
+}
 
 fn ramanujan_pi(iterations: usize) -> f64 {
     let iterations = iterations.max(1);
@@ -388,7 +409,13 @@ struct GpuContext {
     supports_subgroup: bool,
     adapter_info: AdapterInfo,
     softmax_layout: BindGroupLayout,
-    softmax_pipeline: Option<Arc<ComputePipeline>>,
+    softmax_workgroup_pipeline: Option<Arc<ComputePipeline>>,
+    softmax_subgroup_pipeline: Option<Arc<ComputePipeline>>,
+    softmax_zspace_layout: Option<BindGroupLayout>,
+    softmax_zspace_pipeline: Option<Arc<ComputePipeline>>,
+    softmax_variants: Mutex<HashMap<String, SoftmaxVariant>>,
+    softmax_history: Mutex<Vec<SoftmaxSelectionRecord>>,
+    softmax_telemetry_keys: Mutex<HashMap<String, AutotuneKey>>,
     fused_attention: Option<FusedAttentionKernel>,
     fused_gelu_back_layout: BindGroupLayout,
     fused_gelu_back_pipeline: Arc<ComputePipeline>,
@@ -433,7 +460,10 @@ impl GpuContext {
         if shader_f16 {
             requested_features |= wgpu::Features::SHADER_F16;
         }
-        let supports_subgroup = false;
+        let supports_subgroup = adapter_features.contains(wgpu::Features::SUBGROUP);
+        if supports_subgroup {
+            requested_features |= wgpu::Features::SUBGROUP;
+        }
 
         let (device, queue) = pollster::block_on(async {
             adapter
@@ -581,7 +611,7 @@ impl GpuContext {
                 push_constant_ranges: &[],
             });
 
-        let softmax_pipeline = create_wgsl_module(
+        let softmax_workgroup_pipeline = create_wgsl_module(
             device.as_ref(),
             "st.tensor.wgpu_dense.softmax",
             ROW_SOFTMAX_WGSL,
@@ -591,6 +621,90 @@ impl GpuContext {
                 device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                     label: Some("st.tensor.wgpu_dense.softmax"),
                     layout: Some(&softmax_pipeline_layout),
+                    module: &shader,
+                    entry_point: "main_cs",
+                    compilation_options: Default::default(),
+                }),
+            )
+        })
+        .ok();
+
+        let softmax_subgroup_pipeline = if supports_subgroup {
+            create_wgsl_module(
+                device.as_ref(),
+                "st.tensor.wgpu_dense.softmax.subgroup",
+                ROW_SOFTMAX_SUBGROUP_WGSL,
+            )
+            .map(|shader| {
+                Arc::new(
+                    device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                        label: Some("st.tensor.wgpu_dense.softmax.subgroup"),
+                        layout: Some(&softmax_pipeline_layout),
+                        module: &shader,
+                        entry_point: "main_cs",
+                        compilation_options: Default::default(),
+                    }),
+                )
+            })
+            .ok()
+        } else {
+            None
+        };
+
+        let softmax_zspace_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("st.tensor.wgpu_dense.softmax_zspace.layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let softmax_zspace_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("st.tensor.wgpu_dense.softmax_zspace.pipeline_layout"),
+                bind_group_layouts: &[&softmax_zspace_layout],
+                push_constant_ranges: &[],
+            });
+
+        let softmax_zspace_pipeline = create_wgsl_module(
+            device.as_ref(),
+            "st.tensor.wgpu_dense.softmax_zspace",
+            SOFTMAX_ZSPACE_WGSL,
+        )
+        .map(|shader| {
+            Arc::new(
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("st.tensor.wgpu_dense.softmax_zspace"),
+                    layout: Some(&softmax_zspace_pipeline_layout),
                     module: &shader,
                     entry_point: "main_cs",
                     compilation_options: Default::default(),
@@ -1018,7 +1132,11 @@ impl GpuContext {
             supports_subgroup,
             adapter_info,
             softmax_layout,
-            softmax_pipeline,
+            softmax_workgroup_pipeline,
+            softmax_subgroup_pipeline,
+            softmax_variants: Mutex::new(HashMap::new()),
+            softmax_history: Mutex::new(Vec::new()),
+            softmax_telemetry_keys: Mutex::new(HashMap::new()),
             fused_attention,
             fused_gelu_back_layout,
             fused_gelu_back_pipeline,
@@ -1033,6 +1151,10 @@ impl GpuContext {
             ramanujan_layout,
             ramanujan_pipeline_layout,
             ramanujan_pipeline: OnceLock::new(),
+            softmax_zspace_layout: softmax_zspace_pipeline
+                .as_ref()
+                .map(|_| softmax_zspace_layout),
+            softmax_zspace_pipeline,
         })
     }
 
@@ -1042,6 +1164,296 @@ impl GpuContext {
 
     fn queue(&self) -> &Queue {
         self.context.queue()
+    }
+
+    fn softmax_pipeline_variant(&self, variant: SoftmaxVariant) -> Option<Arc<ComputePipeline>> {
+        match variant {
+            SoftmaxVariant::Workgroup => self.softmax_workgroup_pipeline.as_ref().map(Arc::clone),
+            SoftmaxVariant::Subgroup => self.softmax_subgroup_pipeline.as_ref().map(Arc::clone),
+        }
+    }
+
+    fn softmax_registry_key(
+        &self,
+        rows: usize,
+        cols: usize,
+        layout: &SoftmaxLayoutDesc,
+    ) -> AutotuneKey {
+        let limits = self.device().limits();
+        let subgroup_size = if self.supports_subgroup {
+            limits
+                .max_compute_invocations_per_workgroup
+                .min(SOFTMAX_WORKGROUP_SIZE as u32)
+                .max(1)
+        } else {
+            1
+        };
+        let shared_kb = (limits.max_compute_workgroup_storage_size / 1024).max(1);
+        let mut driver = self.adapter_info.driver.clone();
+        if !self.adapter_info.driver_info.is_empty() {
+            if driver.is_empty() {
+                driver = self.adapter_info.driver_info.clone();
+            } else {
+                driver = format!("{driver} {}", self.adapter_info.driver_info);
+            }
+        }
+        let device_profile = DeviceProfile::new(
+            self.adapter_info.name.clone(),
+            self.adapter_info.device,
+            subgroup_size,
+            shared_kb,
+            driver,
+        );
+        let signature = format!(
+            "wgpu.softmax|{}x{}|flags{}|tile{}|stripes{}",
+            rows, cols, layout.flags, layout.chimera_tile, layout.chimera_stripes
+        );
+        let kernel_profile = KernelProfile::new(SOFTMAX_AUTOTUNE_REVISION, signature);
+        AutotuneKey::new(device_profile, kernel_profile)
+    }
+
+    fn record_softmax_telemetry(
+        &self,
+        cache_key: &str,
+        bucket_rows: usize,
+        bucket_cols: usize,
+        layout: &SoftmaxLayoutDesc,
+        sample: TelemetrySample,
+    ) {
+        let registry_key = self.softmax_registry_key(bucket_rows, bucket_cols, layout);
+        if let Ok(mut map) = self.softmax_telemetry_keys.lock() {
+            map.insert(cache_key.to_string(), registry_key.clone());
+        }
+        if let Ok(mut registry) = global_autotune_registry().lock() {
+            registry.record(registry_key, sample);
+        }
+    }
+
+    fn select_softmax_pipeline(
+        &self,
+        rows: usize,
+        cols: usize,
+        layout: &SoftmaxLayoutDesc,
+    ) -> Result<(Arc<ComputePipeline>, SoftmaxVariant), String> {
+        let workgroup_pipeline = self
+            .softmax_pipeline_variant(SoftmaxVariant::Workgroup)
+            .ok_or_else(|| "row softmax pipeline unavailable".to_string())?;
+
+        if !self.supports_subgroup {
+            return Ok((workgroup_pipeline, SoftmaxVariant::Workgroup));
+        }
+
+        if self
+            .softmax_pipeline_variant(SoftmaxVariant::Subgroup)
+            .is_none()
+        {
+            return Ok((workgroup_pipeline, SoftmaxVariant::Workgroup));
+        }
+
+        let bucket_rows = quantize_dimension(rows);
+        let bucket_cols = quantize_dimension(cols);
+        let key = softmax_cache_key(self, bucket_rows, bucket_cols, layout);
+        let store_path = autotune_store_path();
+
+        if let Ok(cache) = self.softmax_variants.lock() {
+            if let Some(&variant) = cache.get(&key) {
+                if let Some(pipeline) = self.softmax_pipeline_variant(variant) {
+                    return Ok((pipeline, variant));
+                }
+            }
+        }
+
+        let context = SoftmaxAutoContext {
+            rows: bucket_rows,
+            cols: bucket_cols,
+            layout_flags: layout.flags,
+            chimera_tile: layout.chimera_tile,
+            chimera_stripes: layout.chimera_stripes,
+            has_subgroup: true,
+        };
+
+        if let Some(path) = store_path.as_ref() {
+            if let Some(stored) =
+                load_best_typed(path.as_path(), &key, &context, None::<StoredSoftmaxVariant>)
+            {
+                if let Some(stored_variant) = SoftmaxVariant::from_str(&stored.variant) {
+                    if let Some(pipeline) = self.softmax_pipeline_variant(stored_variant) {
+                        if let Ok(mut cache) = self.softmax_variants.lock() {
+                            cache.insert(key.clone(), stored_variant);
+                        }
+                        return Ok((pipeline, stored_variant));
+                    }
+                }
+            }
+        }
+
+        let autotune_enabled = autotune_env_enabled() && store_path.is_some();
+        let mut best: Option<(SoftmaxVariant, f64, Option<SoftmaxZProjectMetrics>)> = None;
+        for &candidate in &[SoftmaxVariant::Workgroup, SoftmaxVariant::Subgroup] {
+            let Some(pipeline) = self.softmax_pipeline_variant(candidate) else {
+                continue;
+            };
+            match self.microbenchmark_softmax(pipeline.as_ref(), rows, cols, layout) {
+                Ok((score_s, projection)) => {
+                    let update = best
+                        .map(|(_, best_score, _)| score_s < best_score)
+                        .unwrap_or(true);
+                    if update {
+                        best = Some((candidate, score_s, projection));
+                    }
+                }
+                Err(_) => continue,
+            }
+        }
+
+        let measured = best.is_some();
+        let (variant, score_s, projection) = best.unwrap_or((SoftmaxVariant::Workgroup, 0.0, None));
+        let pipeline = self
+            .softmax_pipeline_variant(variant)
+            .ok_or_else(|| "row softmax pipeline unavailable".to_string())?;
+
+        if let Ok(mut cache) = self.softmax_variants.lock() {
+            cache.insert(key.clone(), variant);
+        }
+
+        if measured {
+            if let Some(sample) = make_softmax_telemetry_sample(rows, cols, score_s) {
+                self.record_softmax_telemetry(&key, bucket_rows, bucket_cols, layout, sample);
+            }
+            if let Ok(mut history) = self.softmax_history.lock() {
+                history.push(SoftmaxSelectionRecord {
+                    key: key.clone(),
+                    variant,
+                    score_ms: score_s * 1_000.0,
+                    samples: SOFTMAX_AUTOTUNE_SAMPLES,
+                    zmetrics: projection,
+                });
+                let len = history.len();
+                if len > SOFTMAX_HISTORY_LIMIT {
+                    let remove = len - SOFTMAX_HISTORY_LIMIT;
+                    history.drain(0..remove);
+                }
+            }
+
+            if let (true, Some(path)) = (autotune_enabled, store_path.as_ref()) {
+                let stored = StoredSoftmaxVariant {
+                    variant: variant.as_str().to_string(),
+                };
+                let _ = record_best(path.as_path(), &key, &context, score_s, &stored);
+            }
+        }
+
+        Ok((pipeline, variant))
+    }
+
+    fn microbenchmark_softmax(
+        &self,
+        pipeline: &ComputePipeline,
+        rows: usize,
+        cols: usize,
+        layout: &SoftmaxLayoutDesc,
+    ) -> Result<(f64, Option<SoftmaxZProjectMetrics>), String> {
+        if rows == 0 || cols == 0 {
+            return Err("rows and cols must be positive".into());
+        }
+
+        let rows_u32 = u32::try_from(rows).map_err(|_| "rows exceed u32::MAX".to_string())?;
+        let cols_u32 = u32::try_from(cols).map_err(|_| "cols exceed u32::MAX".to_string())?;
+
+        let total = rows
+            .checked_mul(cols)
+            .ok_or_else(|| "matrix dimensions overflow".to_string())?;
+
+        let device = self.device();
+        let queue = self.queue();
+
+        let input_data = vec![0.0f32; total];
+        let input_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("st.tensor.wgpu_dense.softmax.autotune.input"),
+            contents: bytemuck::cast_slice(&input_data),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let output_buf = allocate_output(
+            device,
+            "st.tensor.wgpu_dense.softmax.autotune.output",
+            total,
+        );
+
+        let params = RowSoftmaxParams {
+            rows: rows_u32,
+            cols: cols_u32,
+            in_stride: layout.in_stride,
+            out_stride: layout.out_stride,
+            chimera_tile: layout.chimera_tile,
+            chimera_stripes: layout.chimera_stripes,
+            flags: layout.flags,
+            _pad: 0,
+        };
+        let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("st.tensor.wgpu_dense.softmax.autotune.params"),
+            contents: bytemuck::bytes_of(&params),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("st.tensor.wgpu_dense.softmax.autotune.bg"),
+            layout: &self.softmax_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: input_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: output_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: params_buf.as_entire_binding(),
+                },
+            ],
+        });
+
+        for _ in 0..SOFTMAX_AUTOTUNE_WARMUP {
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("st.tensor.wgpu_dense.softmax.autotune.warmup"),
+            });
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("st.tensor.wgpu_dense.softmax.autotune.warmup.pass"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.dispatch_workgroups(rows_u32, 1, 1);
+            }
+            queue.submit(Some(encoder.finish()));
+            device.poll(wgpu::Maintain::Wait);
+        }
+
+        let mut total = 0.0f64;
+        for _ in 0..SOFTMAX_AUTOTUNE_SAMPLES {
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("st.tensor.wgpu_dense.softmax.autotune"),
+            });
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("st.tensor.wgpu_dense.softmax.autotune.pass"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.dispatch_workgroups(rows_u32, 1, 1);
+            }
+            let start = Instant::now();
+            queue.submit(Some(encoder.finish()));
+            device.poll(wgpu::Maintain::Wait);
+            total += start.elapsed().as_secs_f64();
+        }
+
+        let avg = total / SOFTMAX_AUTOTUNE_SAMPLES as f64;
+        let projection = self.project_softmax_zspace(rows, cols, layout, &output_buf);
+        Ok((avg, projection))
     }
 
     fn adapter_info(&self) -> &AdapterInfo {
@@ -1087,11 +1499,7 @@ impl GpuContext {
     }
 
     fn supports_softmax(&self) -> bool {
-        self.softmax_pipeline.is_some()
-    }
-
-    fn softmax_pipeline(&self) -> Option<Arc<ComputePipeline>> {
-        self.softmax_pipeline.as_ref().map(Arc::clone)
+        self.softmax_workgroup_pipeline.is_some()
     }
 
     fn select_tile_config(&self, rows: usize, inner: usize, cols: usize) -> TileConfig {
@@ -1242,6 +1650,134 @@ impl GpuContext {
                 },
             ],
         })
+    }
+
+    fn softmax_zspace_bind_group(
+        &self,
+        output: &Buffer,
+        metrics: &Buffer,
+        params: &Buffer,
+    ) -> Option<BindGroup> {
+        let layout = self.softmax_zspace_layout.as_ref()?;
+        Some(self.device().create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("st.tensor.wgpu_dense.softmax_zspace.bind_group"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: output.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: metrics.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: params.as_entire_binding(),
+                },
+            ],
+        }))
+    }
+
+    fn project_softmax_zspace(
+        &self,
+        rows: usize,
+        cols: usize,
+        layout: &SoftmaxLayoutDesc,
+        output: &Buffer,
+    ) -> Option<SoftmaxZProjectMetrics> {
+        let pipeline = self.softmax_zspace_pipeline.as_ref()?;
+        if rows == 0 || cols == 0 {
+            return None;
+        }
+        let rows_u32 = u32::try_from(rows).ok()?;
+        let cols_u32 = u32::try_from(cols).ok()?;
+        let metrics_len = rows.checked_mul(4)?;
+        let metrics_size = (metrics_len * std::mem::size_of::<f32>()) as u64;
+        let device = self.device();
+        let queue = self.queue();
+
+        let metrics_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("st.tensor.wgpu_dense.softmax_zspace.metrics"),
+            size: metrics_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let params = SoftmaxZSpaceParams {
+            rows: rows_u32,
+            cols: cols_u32,
+            stride: layout.out_stride,
+            _pad: 0,
+            golden_ratio: GOLDEN_RATIO,
+            golden_angle: GOLDEN_ANGLE_RAD,
+            min_energy: ZSPACE_MIN_ENERGY,
+            _pad1: 0.0,
+        };
+        let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("st.tensor.wgpu_dense.softmax_zspace.params"),
+            contents: bytemuck::bytes_of(&params),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+
+        let bind_group = self.softmax_zspace_bind_group(output, &metrics_buf, &params_buf)?;
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("st.tensor.wgpu_dense.softmax_zspace.encoder"),
+        });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("st.tensor.wgpu_dense.softmax_zspace.pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(pipeline.as_ref());
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.dispatch_workgroups(rows_u32, 1, 1);
+        }
+        queue.submit(Some(encoder.finish()));
+
+        let values = readback_f32(device, queue, &metrics_buf, metrics_len).ok()?;
+        if values.len() != metrics_len {
+            return None;
+        }
+
+        let rows_f32 = rows as f32;
+        let inv_rows = rows_f32.recip();
+        let mut sum_focus = 0.0;
+        let mut sum_above = 0.0;
+        let mut sum_here = 0.0;
+        let mut sum_swirl = 0.0;
+        for chunk in values.chunks_exact(4) {
+            sum_focus += chunk[0].max(0.0);
+            sum_above += chunk[1].clamp(0.0, 1.0);
+            sum_here += chunk[2].clamp(0.0, 1.0);
+            sum_swirl += chunk[3].clamp(-1.0, 1.0);
+        }
+
+        let mut focus = (sum_focus * inv_rows).clamp(0.0, 1.0);
+        let mut above = (sum_above * inv_rows).clamp(0.0, 1.0);
+        let mut here = (sum_here * inv_rows).clamp(0.0, 1.0);
+        let mut beneath = (1.0 - (above + here)).clamp(0.0, 1.0);
+        let total = above + here + beneath;
+        if total > f32::EPSILON {
+            let inv = total.recip();
+            above *= inv;
+            here *= inv;
+            beneath *= inv;
+        } else {
+            above = 1.0 / 3.0;
+            here = 1.0 / 3.0;
+            beneath = 1.0 / 3.0;
+        }
+
+        focus = focus.clamp(0.0, 1.0);
+        let swirl = (sum_swirl * inv_rows).clamp(-1.0, 1.0);
+        let drift = (above - beneath).abs();
+        let harmonic = (focus * (here + GOLDEN_RATIO.recip())).clamp(0.0, 1.0);
+        let flux = ((drift + swirl.abs()) * harmonic).powf(1.0 / GOLDEN_RATIO);
+        Some(SoftmaxZProjectMetrics::new(
+            focus, above, here, beneath, swirl, flux,
+        ))
     }
 
     fn fused_gelu_back_bind_group(
@@ -1602,6 +2138,423 @@ struct RowSoftmaxParams {
     cols: u32,
     in_stride: u32,
     out_stride: u32,
+    chimera_tile: u32,
+    chimera_stripes: u32,
+    flags: u32,
+    _pad: u32,
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct SoftmaxZSpaceParams {
+    rows: u32,
+    cols: u32,
+    stride: u32,
+    _pad: u32,
+    golden_ratio: f32,
+    golden_angle: f32,
+    min_energy: f32,
+    _pad1: f32,
+}
+
+const LAYOUT_FLAG_CHIMERA: u32 = 1 << 0;
+const SOFTMAX_AUTOTUNE_REVISION: u64 = 1;
+const SOFTMAX_AUTOTUNE_WARMUP: usize = 1;
+const SOFTMAX_AUTOTUNE_SAMPLES: usize = 3;
+const SOFTMAX_HISTORY_LIMIT: usize = 32;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+enum SoftmaxVariant {
+    Workgroup,
+    Subgroup,
+}
+
+impl SoftmaxVariant {
+    fn as_str(&self) -> &'static str {
+        match self {
+            SoftmaxVariant::Workgroup => "workgroup",
+            SoftmaxVariant::Subgroup => "subgroup",
+        }
+    }
+
+    fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "workgroup" => Some(SoftmaxVariant::Workgroup),
+            "subgroup" => Some(SoftmaxVariant::Subgroup),
+            _ => None,
+        }
+    }
+}
+
+fn make_softmax_telemetry_sample(
+    rows: usize,
+    cols: usize,
+    elapsed_s: f64,
+) -> Option<TelemetrySample> {
+    if elapsed_s <= 0.0 {
+        return None;
+    }
+    let elements = rows.checked_mul(cols)?;
+    if elements == 0 {
+        return None;
+    }
+    let elements_f64 = elements as f64;
+    let flops = elements_f64 * SOFTMAX_FLOPS_PER_ELEMENT;
+    let tflops = (flops / elapsed_s) / 1e12;
+    let bytes = elements_f64 * SOFTMAX_BYTES_PER_ELEMENT;
+    let bandwidth = (bytes / elapsed_s) / 1e9;
+    let occupancy = estimate_softmax_occupancy(cols);
+    Some(TelemetrySample::new(
+        tflops as f32,
+        bandwidth as f32,
+        occupancy,
+        None,
+        false,
+    ))
+}
+
+fn estimate_softmax_occupancy(cols: usize) -> f32 {
+    if cols == 0 {
+        return 0.0;
+    }
+    if cols >= SOFTMAX_WORKGROUP_SIZE as usize {
+        1.0
+    } else {
+        (cols as f32 / SOFTMAX_WORKGROUP_SIZE).clamp(0.0, 1.0)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SoftmaxZProjectMetrics {
+    pub focus: f32,
+    pub above: f32,
+    pub here: f32,
+    pub beneath: f32,
+    pub swirl: f32,
+    pub spiral_flux: f32,
+}
+
+impl SoftmaxZProjectMetrics {
+    fn new(focus: f32, above: f32, here: f32, beneath: f32, swirl: f32, flux: f32) -> Self {
+        Self {
+            focus: focus.clamp(0.0, 1.0),
+            above: above.clamp(0.0, 1.0),
+            here: here.clamp(0.0, 1.0),
+            beneath: beneath.clamp(0.0, 1.0),
+            swirl: swirl.clamp(-1.0, 1.0),
+            spiral_flux: flux.clamp(0.0, 1.0),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct SoftmaxSelectionRecord {
+    key: String,
+    variant: SoftmaxVariant,
+    score_ms: f64,
+    samples: usize,
+    zmetrics: Option<SoftmaxZProjectMetrics>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SoftmaxTelemetrySummary {
+    pub avg_tflops: f32,
+    pub avg_bandwidth_gbps: f32,
+    pub avg_occupancy: f32,
+    pub regression_rate: f32,
+}
+
+impl From<TelemetrySummary> for SoftmaxTelemetrySummary {
+    fn from(summary: TelemetrySummary) -> Self {
+        Self {
+            avg_tflops: summary.avg_tflops,
+            avg_bandwidth_gbps: summary.avg_bandwidth_gbps,
+            avg_occupancy: summary.avg_occupancy,
+            regression_rate: summary.regression_rate,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct RoundtableBandHint {
+    pub above: f32,
+    pub here: f32,
+    pub beneath: f32,
+    pub drift: f32,
+}
+
+impl RoundtableBandHint {
+    fn new(above: f32, here: f32, beneath: f32, drift: f32) -> Self {
+        let above = above.max(0.0);
+        let here = here.max(0.0);
+        let beneath = beneath.max(0.0);
+        let total = above + here + beneath;
+        if total <= f32::EPSILON {
+            return Self {
+                above: 1.0 / 3.0,
+                here: 1.0 / 3.0,
+                beneath: 1.0 / 3.0,
+                drift,
+            };
+        }
+        let inv = total.recip();
+        Self {
+            above: (above * inv).clamp(0.0, 1.0),
+            here: (here * inv).clamp(0.0, 1.0),
+            beneath: (beneath * inv).clamp(0.0, 1.0),
+            drift,
+        }
+    }
+
+    fn from_summary(summary: SoftmaxTelemetrySummary, variant: SoftmaxVariant) -> Self {
+        let occupancy = summary.avg_occupancy.clamp(0.0, 1.0);
+        let regression = summary.regression_rate.clamp(0.0, 1.0);
+        let variant_bias = match variant {
+            SoftmaxVariant::Workgroup => 1.0,
+            SoftmaxVariant::Subgroup => GOLDEN_RATIO,
+        };
+        let above = summary.avg_tflops.max(0.0) * variant_bias;
+        let here = summary.avg_bandwidth_gbps.max(0.0) * (1.0 + 0.5 * occupancy);
+        let beneath = occupancy * (1.0 + (1.0 - regression) / GOLDEN_RATIO);
+        let drift = 1.0 - 2.0 * regression;
+        Self::new(above, here, beneath, drift)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct GoldenPulseHint {
+    pub ratio_bias: f32,
+    pub angle_bias_deg: f32,
+    pub cooperative_weight: f32,
+}
+
+impl GoldenPulseHint {
+    fn from_summary(summary: SoftmaxTelemetrySummary, variant: SoftmaxVariant) -> Self {
+        let occupancy = summary.avg_occupancy.clamp(0.0, 1.0);
+        let regression = summary.regression_rate.clamp(0.0, 1.0);
+        let ratio = (summary.avg_tflops.max(1e-6) / summary.avg_bandwidth_gbps.max(1e-6)).ln()
+            / GOLDEN_RATIO;
+        let ratio_bias = ratio.clamp(-GOLDEN_RATIO, GOLDEN_RATIO);
+        let variant_factor = match variant {
+            SoftmaxVariant::Workgroup => 0.75,
+            SoftmaxVariant::Subgroup => 1.0,
+        };
+        let angle_bias_deg = GOLDEN_ANGLE_DEG * occupancy * variant_factor;
+        let energy = summary.avg_tflops.max(0.0) + summary.avg_bandwidth_gbps.max(0.0);
+        let cooperative_weight = if energy <= f32::EPSILON {
+            0.0
+        } else {
+            let spectral_share = (summary.avg_tflops.max(0.0) / energy).clamp(0.0, 1.0);
+            (spectral_share.powf(1.0 / GOLDEN_RATIO) * (1.0 - regression)).clamp(0.0, 1.0)
+        };
+        Self {
+            ratio_bias,
+            angle_bias_deg,
+            cooperative_weight,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SoftmaxZSpaceHint {
+    pub focus: f32,
+    pub spiral_flux: f32,
+    pub roundtable: RoundtableBandHint,
+    pub golden: GoldenPulseHint,
+    projection: Option<SoftmaxZProjectMetrics>,
+}
+
+impl SoftmaxZSpaceHint {
+    fn from_observations(
+        summary: SoftmaxTelemetrySummary,
+        projection: Option<SoftmaxZProjectMetrics>,
+        variant: SoftmaxVariant,
+    ) -> Self {
+        let occupancy = summary.avg_occupancy.clamp(0.0, 1.0);
+        let regression = summary.regression_rate.clamp(0.0, 1.0);
+        let harmonic = (summary.avg_tflops.max(0.0) * summary.avg_bandwidth_gbps.max(0.0)).sqrt();
+        let fallback_focus = if harmonic <= f32::EPSILON {
+            0.0
+        } else {
+            let focus_raw = harmonic * occupancy;
+            (focus_raw / (focus_raw + GOLDEN_RATIO + regression)).clamp(0.0, 1.0)
+        };
+        let focus = projection.map(|m| m.focus).unwrap_or(fallback_focus);
+        let flux = projection
+            .map(|m| m.spiral_flux)
+            .unwrap_or_else(|| (focus * occupancy).clamp(0.0, 1.0));
+        Self {
+            focus,
+            spiral_flux: flux,
+            roundtable: RoundtableBandHint::from_summary(summary, variant),
+            golden: GoldenPulseHint::from_summary(summary, variant),
+            projection,
+        }
+    }
+
+    fn from_projection(projection: SoftmaxZProjectMetrics, variant: SoftmaxVariant) -> Self {
+        let pseudo = SoftmaxTelemetrySummary {
+            avg_tflops: projection.focus,
+            avg_bandwidth_gbps: projection.here,
+            avg_occupancy: (projection.above + projection.here + projection.beneath)
+                .clamp(0.0, 1.0),
+            regression_rate: (1.0 - projection.focus).clamp(0.0, 1.0),
+        };
+        Self {
+            focus: projection.focus,
+            spiral_flux: projection.spiral_flux,
+            roundtable: RoundtableBandHint::from_summary(pseudo, variant),
+            golden: GoldenPulseHint::from_summary(pseudo, variant),
+            projection: Some(projection),
+        }
+    }
+
+    pub fn projection(&self) -> Option<&SoftmaxZProjectMetrics> {
+        self.projection.as_ref()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SoftmaxSelectionSnapshot {
+    pub key: String,
+    variant: SoftmaxVariant,
+    pub score_ms: f64,
+    pub samples: usize,
+    pub telemetry: Option<SoftmaxTelemetrySummary>,
+    pub zspace: Option<SoftmaxZSpaceHint>,
+}
+
+impl SoftmaxSelectionSnapshot {
+    pub fn variant_name(&self) -> &'static str {
+        self.variant.as_str()
+    }
+
+    pub fn telemetry(&self) -> Option<&SoftmaxTelemetrySummary> {
+        self.telemetry.as_ref()
+    }
+
+    pub fn zspace(&self) -> Option<&SoftmaxZSpaceHint> {
+        self.zspace.as_ref()
+    }
+
+    pub fn projection(&self) -> Option<&SoftmaxZProjectMetrics> {
+        self.zspace.as_ref().and_then(|hint| hint.projection())
+    }
+
+    fn from_record(
+        record: SoftmaxSelectionRecord,
+        telemetry: Option<SoftmaxTelemetrySummary>,
+    ) -> Self {
+        let zspace = match (telemetry, record.zmetrics) {
+            (Some(summary), metrics) => Some(SoftmaxZSpaceHint::from_observations(
+                summary,
+                metrics,
+                record.variant,
+            )),
+            (None, Some(metrics)) => {
+                Some(SoftmaxZSpaceHint::from_projection(metrics, record.variant))
+            }
+            (None, None) => None,
+        };
+        Self {
+            key: record.key,
+            variant: record.variant,
+            score_ms: record.score_ms,
+            samples: record.samples,
+            telemetry,
+            zspace,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SoftmaxLayoutDesc {
+    in_stride: u32,
+    out_stride: u32,
+    chimera_tile: u32,
+    chimera_stripes: u32,
+    flags: u32,
+}
+
+impl SoftmaxLayoutDesc {
+    fn from_layout(layout: Layout, rows: usize, cols: usize) -> Result<Self, String> {
+        match layout {
+            Layout::RowMajor => Ok(Self {
+                in_stride: cols
+                    .try_into()
+                    .map_err(|_| "cols exceed u32::MAX for softmax".to_string())?,
+                out_stride: cols
+                    .try_into()
+                    .map_err(|_| "cols exceed u32::MAX for softmax".to_string())?,
+                chimera_tile: 0,
+                chimera_stripes: 0,
+                flags: 0,
+            }),
+            Layout::Chimera { stripes, tile } => {
+                if stripes == 0 || tile == 0 {
+                    return Err("chimera layout requires positive stripes and tile".into());
+                }
+                let stripes_usize = stripes as usize;
+                let tile_usize = tile as usize;
+                if stripes_usize * tile_usize != cols {
+                    return Err("chimera layout must satisfy stripes * tile == cols".into());
+                }
+                Ok(Self {
+                    in_stride: cols
+                        .try_into()
+                        .map_err(|_| "cols exceed u32::MAX for softmax".to_string())?,
+                    out_stride: cols
+                        .try_into()
+                        .map_err(|_| "cols exceed u32::MAX for softmax".to_string())?,
+                    chimera_tile: tile,
+                    chimera_stripes: stripes,
+                    flags: LAYOUT_FLAG_CHIMERA,
+                })
+            }
+            Layout::ColMajor | Layout::Tiled { .. } => Err(format!(
+                "softmax does not support layout {:?} for {}x{} tensors",
+                layout, rows, cols
+            )),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct StoredSoftmaxVariant {
+    variant: String,
+}
+
+fn softmax_cache_key(
+    ctx: &GpuContext,
+    rows: usize,
+    cols: usize,
+    layout: &SoftmaxLayoutDesc,
+) -> String {
+    let info = ctx.adapter_info();
+    let backend = encode_component(&format!("{:?}", info.backend));
+    let driver = encode_component(&info.driver);
+    let driver_info = encode_component(&info.driver_info);
+    let name = encode_component(&info.name);
+    format!(
+        "wgpu.softmax.v{SOFTMAX_AUTOTUNE_REVISION:02}|{name}|{vendor:04x}|{device:04x}|{backend}|{driver}|{driver_info}|{rows}x{cols}|flags{flags}|tile{tile}|stripes{stripes}|samples{SOFTMAX_AUTOTUNE_SAMPLES}",
+        vendor = info.vendor,
+        device = info.device,
+        rows = rows,
+        cols = cols,
+        flags = layout.flags,
+        tile = layout.chimera_tile,
+        stripes = layout.chimera_stripes,
+    )
+}
+
+#[derive(Serialize)]
+struct SoftmaxAutoContext {
+    rows: usize,
+    cols: usize,
+    layout_flags: u32,
+    chimera_tile: u32,
+    chimera_stripes: u32,
+    has_subgroup: bool,
 }
 
 #[repr(C, align(16))]
@@ -2659,7 +3612,12 @@ pub fn gelu_backward(
     Ok(gz)
 }
 
-pub fn row_softmax(input: &[f32], rows: usize, cols: usize) -> Result<Vec<f32>, String> {
+pub fn row_softmax(
+    input: &[f32],
+    rows: usize,
+    cols: usize,
+    layout: Layout,
+) -> Result<Vec<f32>, String> {
     if rows == 0 || cols == 0 {
         return Err("matrix dimensions must be positive".into());
     }
@@ -2679,6 +3637,7 @@ pub fn row_softmax(input: &[f32], rows: usize, cols: usize) -> Result<Vec<f32>, 
         return Err("wgpu device lacks subgroup row softmax support".into());
     }
 
+    let layout_desc = SoftmaxLayoutDesc::from_layout(layout, rows, cols)?;
     let device = ctx.device();
     let queue = ctx.queue();
 
@@ -2691,8 +3650,12 @@ pub fn row_softmax(input: &[f32], rows: usize, cols: usize) -> Result<Vec<f32>, 
     let params = RowSoftmaxParams {
         rows: rows_u32,
         cols: cols_u32,
-        in_stride: cols_u32,
-        out_stride: cols_u32,
+        in_stride: layout_desc.in_stride,
+        out_stride: layout_desc.out_stride,
+        chimera_tile: layout_desc.chimera_tile,
+        chimera_stripes: layout_desc.chimera_stripes,
+        flags: layout_desc.flags,
+        _pad: 0,
     };
     let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("st.tensor.wgpu_dense.softmax.params"),
@@ -2700,9 +3663,7 @@ pub fn row_softmax(input: &[f32], rows: usize, cols: usize) -> Result<Vec<f32>, 
         usage: wgpu::BufferUsages::UNIFORM,
     });
     let bind_group = ctx.softmax_bind_group(&input_buf, &output_buf, &params_buf);
-    let pipeline = ctx
-        .softmax_pipeline()
-        .ok_or_else(|| "row softmax pipeline unavailable".to_string())?;
+    let (pipeline, _) = ctx.select_softmax_pipeline(rows, cols, &layout_desc)?;
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("st.tensor.wgpu_dense.softmax.encoder"),
@@ -2737,6 +3698,33 @@ pub fn supports_row_softmax(rows: usize, cols: usize) -> bool {
     } else {
         false
     }
+}
+
+pub fn softmax_autotune_snapshot() -> Option<Vec<SoftmaxSelectionSnapshot>> {
+    let ctx = dense_context().ok()?;
+    let history = ctx.softmax_history.lock().ok()?.clone();
+    let key_map = ctx
+        .softmax_telemetry_keys
+        .lock()
+        .ok()
+        .map(|guard| guard.clone());
+    let registry_guard = global_autotune_registry().lock().ok();
+
+    let mut snapshots = Vec::with_capacity(history.len());
+    for record in history.into_iter() {
+        let telemetry = key_map
+            .as_ref()
+            .and_then(|map| map.get(&record.key))
+            .and_then(|autokey| {
+                registry_guard
+                    .as_ref()
+                    .and_then(|registry| registry.summary(autokey))
+            })
+            .map(SoftmaxTelemetrySummary::from);
+        snapshots.push(SoftmaxSelectionSnapshot::from_record(record, telemetry));
+    }
+
+    Some(snapshots)
 }
 
 pub fn fused_attention(

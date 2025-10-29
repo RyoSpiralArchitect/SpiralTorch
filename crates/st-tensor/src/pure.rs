@@ -454,6 +454,7 @@ pub enum Layout {
     RowMajor,
     ColMajor,
     Tiled { tm: u32, tn: u32, tk: u32 },
+    Chimera { stripes: u32, tile: u32 },
 }
 
 impl Layout {
@@ -474,6 +475,9 @@ impl Layout {
             Layout::ColMajor => Ok(faer_dense::DenseLayout::ColMajor),
             Layout::Tiled { .. } => Err(TensorError::UnsupportedLayout {
                 label: "tiled layout is not yet supported by the dense kernels",
+            }),
+            Layout::Chimera { .. } => Err(TensorError::UnsupportedLayout {
+                label: "chimera layout cannot be treated as dense",
             }),
         }
     }
@@ -530,6 +534,9 @@ impl PackedB {
             Layout::Tiled { .. } => Err(TensorError::UnsupportedLayout {
                 label: "packing tiled tensors is not yet supported",
             }),
+            Layout::Chimera { .. } => Err(TensorError::UnsupportedLayout {
+                label: "convert chimera tensors to row major before packing",
+            }),
         }
     }
 
@@ -575,6 +582,9 @@ impl PackedB {
             Layout::ColMajor => Self::from_col_major_transpose(tensor, tile),
             Layout::Tiled { .. } => Err(TensorError::UnsupportedLayout {
                 label: "packing tiled tensors is not yet supported",
+            }),
+            Layout::Chimera { .. } => Err(TensorError::UnsupportedLayout {
+                label: "convert chimera tensors to row major before packing",
             }),
         }
     }
@@ -783,6 +793,9 @@ impl Tensor {
             Layout::Tiled { .. } => Err(TensorError::UnsupportedLayout {
                 label: "tiled layout does not expose uniform strides",
             }),
+            Layout::Chimera { .. } => Err(TensorError::UnsupportedLayout {
+                label: "chimera layout does not have uniform row/col strides",
+            }),
         }
     }
 
@@ -838,10 +851,118 @@ impl Tensor {
                 }
                 Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)
             }
+            (Layout::RowMajor, Layout::Chimera { stripes, tile }) => {
+                Self::convert_row_major_to_chimera(self, stripes, tile)
+            }
+            (Layout::Chimera { stripes, tile }, Layout::RowMajor) => {
+                Self::convert_chimera_to_row_major(self, stripes, tile)
+            }
+            (Layout::Chimera { stripes, tile }, Layout::ColMajor) => {
+                Self::convert_chimera_to_row_major(self, stripes, tile)?.to_layout(layout)
+            }
+            (Layout::ColMajor, Layout::Chimera { .. }) => {
+                self.to_layout(Layout::RowMajor)?.to_layout(layout)
+            }
+            (
+                Layout::Chimera {
+                    stripes: src_stripes,
+                    tile: src_tile,
+                },
+                Layout::Chimera {
+                    stripes: dst_stripes,
+                    tile: dst_tile,
+                },
+            ) => {
+                if src_stripes == dst_stripes && src_tile == dst_tile {
+                    Ok(self.clone())
+                } else {
+                    Self::convert_chimera_to_row_major(self, src_stripes, src_tile)?
+                        .to_layout(layout)
+                }
+            }
             _ => Err(TensorError::UnsupportedLayout {
                 label: "layout conversion requires row- or col-major tensors",
             }),
         }
+    }
+
+    fn convert_row_major_to_chimera(
+        tensor: &Tensor,
+        stripes: u32,
+        tile: u32,
+    ) -> PureResult<Tensor> {
+        if stripes == 0 || tile == 0 {
+            return Err(TensorError::UnsupportedLayout {
+                label: "chimera layout requires positive stripes and tile",
+            });
+        }
+
+        let stripes = stripes as usize;
+        let tile = tile as usize;
+        if stripes * tile != tensor.cols {
+            return Err(TensorError::UnsupportedLayout {
+                label: "chimera layout expects stripes * tile to equal the column count",
+            });
+        }
+
+        let mut data = aligned_zeroed(tensor.len());
+        let source = tensor.data();
+        for r in 0..tensor.rows {
+            let src_row_offset = r * tensor.cols;
+            let dst_row_offset = r * tensor.cols;
+            for c in 0..tensor.cols {
+                let stripe = c / tile;
+                let within = c % tile;
+                let dst_index = dst_row_offset + within * stripes + stripe;
+                data[dst_index] = source[src_row_offset + c];
+            }
+        }
+
+        Tensor::from_aligned(
+            tensor.rows,
+            tensor.cols,
+            data,
+            Layout::Chimera {
+                stripes: stripes as u32,
+                tile: tile as u32,
+            },
+        )
+    }
+
+    fn convert_chimera_to_row_major(
+        tensor: &Tensor,
+        stripes: u32,
+        tile: u32,
+    ) -> PureResult<Tensor> {
+        if stripes == 0 || tile == 0 {
+            return Err(TensorError::UnsupportedLayout {
+                label: "chimera layout requires positive stripes and tile",
+            });
+        }
+
+        let stripes = stripes as usize;
+        let tile = tile as usize;
+        if stripes * tile != tensor.cols {
+            return Err(TensorError::UnsupportedLayout {
+                label: "chimera layout expects stripes * tile to equal the column count",
+            });
+        }
+
+        let mut data = aligned_zeroed(tensor.len());
+        let source = tensor.data();
+        for r in 0..tensor.rows {
+            let dst_row_offset = r * tensor.cols;
+            let src_row_offset = r * tensor.cols;
+            for stripe in 0..stripes {
+                for within in 0..tile {
+                    let c = stripe * tile + within;
+                    let src_index = src_row_offset + within * stripes + stripe;
+                    data[dst_row_offset + c] = source[src_index];
+                }
+            }
+        }
+
+        Tensor::from_aligned(tensor.rows, tensor.cols, data, Layout::RowMajor)
     }
 
     /// Returns a read-only view of the underlying buffer.
@@ -1452,12 +1573,12 @@ impl Tensor {
             }
             #[cfg(feature = "wgpu")]
             SoftmaxBackend::GpuWgpu => {
-                let data = wgpu_dense::row_softmax(self.data(), rows, cols).map_err(|message| {
-                    TensorError::BackendFailure {
+                let data = wgpu_dense::row_softmax(self.data(), rows, cols, self.layout).map_err(
+                    |message| TensorError::BackendFailure {
                         backend: "wgpu",
                         message,
-                    }
-                })?;
+                    },
+                )?;
                 Tensor::from_vec(rows, cols, data)
             }
         }
@@ -1467,7 +1588,7 @@ impl Tensor {
         #[cfg(feature = "wgpu")]
         {
             if wgpu_dense::is_available() && wgpu_dense::supports_row_softmax(rows, cols) {
-                if let Ok(buffer) = wgpu_dense::row_softmax(self.data(), rows, cols) {
+                if let Ok(buffer) = wgpu_dense::row_softmax(self.data(), rows, cols, self.layout) {
                     return Tensor::from_vec(rows, cols, buffer);
                 }
             }
