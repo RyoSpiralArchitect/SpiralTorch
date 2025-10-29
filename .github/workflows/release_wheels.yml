@@ -42,6 +42,10 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
+      - name: Generate SLSA provenance for wheels
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: 'dist/**/*.whl'
       - name: Sign release artifacts with Sigstore
         uses: sigstore/gh-action-sigstore@v2.3.1
         with:
