@@ -2943,6 +2943,7 @@ dependencies = [
 name = "spiraltorch-py"
 version = "0.2.8"
 dependencies = [
+ "julia-ffi-poc",
  "nalgebra 0.32.6",
  "ndarray",
  "num-complex",
@@ -2959,6 +2960,7 @@ dependencies = [
  "st-kdsl",
  "st-logic",
  "st-nn",
+ "st-qr-studio",
  "st-rec",
  "st-spiral-rl",
  "st-tensor",
