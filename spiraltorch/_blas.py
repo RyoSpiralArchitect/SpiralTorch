@@ -6,7 +6,9 @@ wider environment so callers can coordinate BLAS parallelism with the rest of
 the system.  Beyond the CPU the routines now integrate with the WGPU autotuning
 artefacts emitted by the Rust runtime, allowing SpiralTorch to reserve host
 threads for GPU command submission so compute on both sides can progress
-without contending for the same CPU cores.
+without contending for the same CPU cores.  The system-facing helpers also
+interrogate Linux control groups so container limits and CPU reservations are
+captured before tuning decisions are made.
 """
 
 from __future__ import annotations
@@ -35,6 +37,8 @@ __all__ = [
     "blas_vendor",
     "wgpu_adapter_info",
     "gpu_host_thread_reservation",
+    "process_cpu_budget",
+    "cgroup_cpu_quota",
     "dgemm",
 ]
 
@@ -62,6 +66,12 @@ _GPU_HOST_HINT_VAR = "SPIRALTORCH_WGPU_HOST_THREADS"
 _WGPU_ADAPTER_INFO: dict[str, object] | None = None
 _GPU_HOST_RESERVATION: int | None = None
 _GPU_HOST_RESERVATION_BUDGET: int | None = None
+
+_CPU_BUDGET_CACHE: dict[str, object] | None = None
+
+_CGROUP_SELF_CACHE: dict[str, str] | None = None
+_CGROUP_QUOTA_CACHE: tuple[int, float | None] | None = None
+_CGROUP_CPUSET_CACHE: tuple[int, int | None] | None = None
 
 _INTEGRATED_GPU_VENDORS = {
     0x8086,  # Intel
@@ -498,6 +508,228 @@ def wgpu_adapter_info() -> dict[str, object] | None:
     return dict(info)
 
 
+def _read_text_file(path: str) -> str | None:
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            return handle.read().strip()
+    except (FileNotFoundError, OSError):
+        return None
+
+
+def _self_cgroup_paths(*, refresh: bool = False) -> dict[str, str]:
+    global _CGROUP_SELF_CACHE
+    if _CGROUP_SELF_CACHE is not None and not refresh:
+        return dict(_CGROUP_SELF_CACHE)
+
+    mapping: dict[str, str] = {}
+    try:
+        with open("/proc/self/cgroup", "r", encoding="utf-8") as handle:
+            for line in handle:
+                parts = line.strip().split(":", 2)
+                if len(parts) != 3:
+                    continue
+                _, controllers, path = parts
+                mapping[controllers] = path or "/"
+    except (FileNotFoundError, OSError):
+        mapping = {}
+
+    _CGROUP_SELF_CACHE = dict(mapping)
+    return mapping
+
+
+def _resolve_cgroup_path(base: str, relative: str) -> str:
+    rel = relative.lstrip("/")
+    if not rel:
+        return base
+    return os.path.join(base, rel)
+
+
+def _parse_cpu_quota(quota: str, period: str | None) -> float | None:
+    try:
+        quota_value = int(quota)
+    except (TypeError, ValueError):
+        return None
+    if quota_value <= 0:
+        return None
+
+    if period is None:
+        period_value = 100000
+    else:
+        try:
+            period_value = int(period)
+        except (TypeError, ValueError):
+            return None
+        if period_value <= 0:
+            return None
+
+    return quota_value / period_value
+
+
+def _cgroup_v2_cpu_quota(paths: dict[str, str]) -> float | None:
+    relative = paths.get("")
+    if relative is None:
+        return None
+
+    base = _resolve_cgroup_path("/sys/fs/cgroup", relative)
+    data = _read_text_file(os.path.join(base, "cpu.max"))
+    if not data:
+        return None
+
+    parts = data.split()
+    if not parts or parts[0] == "max":
+        return None
+
+    period = parts[1] if len(parts) > 1 else None
+    return _parse_cpu_quota(parts[0], period)
+
+
+_CGROUP_V1_CPU_BASES: tuple[str, ...] = (
+    "/sys/fs/cgroup/cpu",
+    "/sys/fs/cgroup/cpuacct",
+    "/sys/fs/cgroup/cpu,cpuacct",
+    "/sys/fs/cgroup/cpuacct,cpu",
+)
+
+
+def _cgroup_v1_cpu_quota(paths: dict[str, str]) -> float | None:
+    candidates = []
+    for controllers, relative in paths.items():
+        if not controllers:
+            continue
+        controller_set = {token.strip() for token in controllers.split(",") if token.strip()}
+        if "cpu" not in controller_set:
+            continue
+        for base in _CGROUP_V1_CPU_BASES:
+            full_base = _resolve_cgroup_path(base, relative)
+            if os.path.exists(full_base):
+                candidates.append(full_base)
+                break
+        else:
+            for base in _CGROUP_V1_CPU_BASES:
+                if os.path.exists(base):
+                    candidates.append(base)
+                    break
+
+    for candidate in candidates:
+        quota_path = os.path.join(candidate, "cpu.cfs_quota_us")
+        period_path = os.path.join(candidate, "cpu.cfs_period_us")
+        quota_raw = _read_text_file(quota_path)
+        period_raw = _read_text_file(period_path)
+        if quota_raw is None or period_raw is None:
+            continue
+        quota_raw = quota_raw.strip()
+        if quota_raw == "-1":
+            continue
+        quota = _parse_cpu_quota(quota_raw, period_raw.strip())
+        if quota is not None:
+            return quota
+    return None
+
+
+def _cgroup_cpu_quota_raw(*, refresh: bool = False) -> float | None:
+    global _CGROUP_QUOTA_CACHE
+    if not refresh and _CGROUP_QUOTA_CACHE is not None:
+        cached_pid, cached = _CGROUP_QUOTA_CACHE
+        if cached_pid == os.getpid():
+            return cached
+
+    paths = _self_cgroup_paths(refresh=refresh)
+    quota = _cgroup_v2_cpu_quota(paths)
+    if quota is None:
+        quota = _cgroup_v1_cpu_quota(paths)
+
+    _CGROUP_QUOTA_CACHE = (os.getpid(), quota)  # PID ensures cache scoped to process
+    return quota
+
+
+def _parse_cpuset_list(spec: str) -> int | None:
+    total = 0
+    for segment in spec.split(","):
+        segment = segment.strip()
+        if not segment:
+            continue
+        if "-" in segment:
+            start_str, end_str = segment.split("-", 1)
+            try:
+                start = int(start_str)
+                end = int(end_str)
+            except ValueError:
+                return None
+            if end < start:
+                return None
+            total += end - start + 1
+        else:
+            try:
+                int(segment)
+            except ValueError:
+                return None
+            total += 1
+    if total <= 0:
+        return None
+    return total
+
+
+_CGROUP_V1_CPUSET_BASES: tuple[str, ...] = (
+    "/sys/fs/cgroup/cpuset",
+    "/sys/fs/cgroup/cpuset,cpu",
+)
+
+
+def _cgroup_cpuset_count(paths: dict[str, str], *, refresh: bool = False) -> int | None:
+    global _CGROUP_CPUSET_CACHE
+    if not refresh and _CGROUP_CPUSET_CACHE is not None:
+        cached_pid, cached = _CGROUP_CPUSET_CACHE
+        if cached_pid == os.getpid():
+            return cached
+
+    # cgroup v2 exposes cpuset files alongside cpu.max
+    relative_v2 = paths.get("")
+    cpuset_paths: list[str] = []
+    if relative_v2 is not None:
+        base = _resolve_cgroup_path("/sys/fs/cgroup", relative_v2)
+        for name in ("cpuset.cpus.effective", "cpuset.cpus"):
+            candidate = os.path.join(base, name)
+            if os.path.exists(candidate):
+                cpuset_paths.append(candidate)
+
+    # cgroup v1 cpuset controller
+    for controllers, relative in paths.items():
+        controller_set = {token.strip() for token in controllers.split(",") if token.strip()}
+        if "cpuset" not in controller_set:
+            continue
+        for base in _CGROUP_V1_CPUSET_BASES:
+            full_base = _resolve_cgroup_path(base, relative)
+            if os.path.exists(full_base):
+                for name in ("cpuset.cpus.effective", "cpuset.cpus"):
+                    candidate = os.path.join(full_base, name)
+                    if os.path.exists(candidate):
+                        cpuset_paths.append(candidate)
+                break
+
+    for path in cpuset_paths:
+        data = _read_text_file(path)
+        if not data:
+            continue
+        count = _parse_cpuset_list(data)
+        if count is not None:
+            _CGROUP_CPUSET_CACHE = (os.getpid(), count)
+            return count
+
+    _CGROUP_CPUSET_CACHE = (os.getpid(), None)
+    return None
+
+
+def cgroup_cpu_quota(*, refresh: bool = False) -> float | None:
+    """Return the CPU quota imposed by control groups, if any.
+
+    The returned value represents the number of CPU cores available to the
+    process according to cgroup ``cpu.max`` or ``cpu.cfs_*`` limits.  A ``None``
+    result indicates that no quota could be detected or the quota is unlimited.
+    """
+
+    return _cgroup_cpu_quota_raw(refresh=refresh)
+
+
 def _system_affinity_size() -> int | None:
     try:
         affinity = os.sched_getaffinity(0)
@@ -508,16 +740,59 @@ def _system_affinity_size() -> int | None:
     return len(affinity)
 
 
+def process_cpu_budget(*, refresh: bool = False) -> dict[str, object]:
+    """Return a snapshot of CPU availability signals for the current process.
+
+    The returned dictionary contains the raw system CPU count (``"system"``),
+    the size of the POSIX affinity mask (``"affinity"``), any detected cgroup
+    quota expressed both as a float (``"cgroup_quota"``) and clamped integer
+    limit (``"cgroup_quota_limit"``), the number of CPUs exposed through cgroup
+    cpuset files (``"cgroup_cpuset"``) and the final minimum of the available
+    signals (``"effective"``).
+    """
+
+    global _CPU_BUDGET_CACHE
+    if _CPU_BUDGET_CACHE is not None and not refresh:
+        return dict(_CPU_BUDGET_CACHE)
+
+    affinity = _system_affinity_size()
+    system_total = os.cpu_count()
+    system_total = system_total if isinstance(system_total, int) and system_total > 0 else None
+
+    paths = _self_cgroup_paths(refresh=refresh)
+    quota = _cgroup_cpu_quota_raw(refresh=refresh)
+    quota_limit: int | None
+    if quota is None:
+        quota_limit = None
+    else:
+        quota_limit = max(1, int(math.floor(quota))) if quota >= 1 else 1
+
+    cpuset = _cgroup_cpuset_count(paths, refresh=refresh)
+
+    candidates = [value for value in (affinity, quota_limit, cpuset, system_total) if value]
+    effective: int | None = None
+    if candidates:
+        effective = max(1, min(candidates))
+
+    budget = {
+        "system": system_total,
+        "affinity": affinity,
+        "cgroup_quota": quota,
+        "cgroup_quota_limit": quota_limit,
+        "cgroup_cpuset": cpuset,
+        "effective": effective,
+    }
+
+    _CPU_BUDGET_CACHE = dict(budget)
+    return budget
+
+
 def system_cpu_count() -> int | None:
     """Return the best-effort number of CPUs available to the process."""
 
-    affinity = _system_affinity_size()
-    if affinity:
-        return affinity
-    count = os.cpu_count()
-    if isinstance(count, int) and count > 0:
-        return count
-    return None
+    budget = process_cpu_budget()
+    effective = budget.get("effective")
+    return int(effective) if isinstance(effective, int) else None
 
 
 def recommended_thread_count(
