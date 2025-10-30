@@ -15,6 +15,14 @@ fn write_tensor(path: &std::path::Path, tensor: &DiskTensor) {
     fs::write(path, serde_json::to_string(tensor).unwrap()).unwrap();
 }
 
+#[derive(serde::Deserialize)]
+struct StatisticsFile {
+    min: f32,
+    max: f32,
+    mean: f32,
+    entropy: f32,
+}
+
 fn run_cli(args: &[&str]) {
     let status = Command::new(env!("CARGO_BIN_EXE_st-xai-cli"))
         .args(args)
@@ -254,6 +262,62 @@ fn grad_cam_cli_applies_post_processing_and_focus_mask() {
         .data
         .iter()
         .all(|value| (*value - 1.0).abs() < 1e-6 || value.abs() < 1e-6));
+}
+
+#[test]
+fn grad_cam_cli_emits_heatmap_and_statistics_files() {
+    let dir = tempdir().unwrap();
+    let activations_path = dir.path().join("activations.json");
+    let gradients_path = dir.path().join("gradients.json");
+    let report_path = dir.path().join("report.json");
+    let heatmap_path = dir.path().join("heatmap.json");
+    let stats_path = dir.path().join("stats.json");
+
+    let activations = DiskTensor {
+        rows: 2,
+        cols: 4,
+        data: vec![1.0, 0.5, 0.25, 0.75, 0.8, 0.2, 0.3, 0.6],
+    };
+    let gradients = DiskTensor {
+        rows: 2,
+        cols: 4,
+        data: vec![0.2, 0.4, 0.6, 0.8, 1.0, 0.8, 0.6, 0.4],
+    };
+
+    write_tensor(&activations_path, &activations);
+    write_tensor(&gradients_path, &gradients);
+
+    run_cli(&[
+        "--heatmap-out",
+        heatmap_path.to_str().unwrap(),
+        "--stats-out",
+        stats_path.to_str().unwrap(),
+        "grad-cam",
+        "--activations",
+        activations_path.to_str().unwrap(),
+        "--gradients",
+        gradients_path.to_str().unwrap(),
+        "--height",
+        "2",
+        "--width",
+        "2",
+        "--output",
+        report_path.to_str().unwrap(),
+    ]);
+
+    let heatmap: DiskTensor =
+        serde_json::from_str(&fs::read_to_string(&heatmap_path).unwrap()).unwrap();
+    assert_eq!(heatmap.rows * heatmap.cols, heatmap.data.len());
+    assert!(heatmap
+        .data
+        .iter()
+        .any(|value| (*value - heatmap.data[0]).abs() > 1e-6));
+
+    let stats: StatisticsFile =
+        serde_json::from_str(&fs::read_to_string(&stats_path).unwrap()).unwrap();
+    assert!(stats.max >= stats.min);
+    assert!(stats.mean.is_finite());
+    assert!(stats.entropy.is_finite());
 }
 
 #[test]

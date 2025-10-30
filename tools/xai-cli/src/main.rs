@@ -75,6 +75,14 @@ struct Cli {
     #[arg(long, global = true, value_hint = ValueHint::FilePath)]
     metadata_out: Option<PathBuf>,
 
+    /// Write the processed heatmap tensor as a DiskTensor JSON payload
+    #[arg(long, global = true, value_hint = ValueHint::FilePath)]
+    heatmap_out: Option<PathBuf>,
+
+    /// Emit attribution statistics to a standalone JSON document for downstream tooling
+    #[arg(long, global = true, value_hint = ValueHint::FilePath)]
+    stats_out: Option<PathBuf>,
+
     /// Apply an odd-sized box blur to smooth the final heatmap before emitting it
     #[arg(long, global = true, value_hint = ValueHint::Other)]
     smooth_kernel: Option<usize>,
@@ -197,12 +205,14 @@ fn try_main() -> Result<()> {
             finalise_output(&cli, output, &args.output)
         }
     }
+
+    Ok(output)
 }
 
 fn finalise_output(cli: &Cli, mut output: AttributionOutput, destination: &Path) -> Result<()> {
     output = apply_post_processing(cli, output)?;
 
-    let statistics = if cli.include_stats || cli.print_stats {
+    let statistics = if cli.include_stats || cli.print_stats || cli.stats_out.is_some() {
         Some(output.statistics())
     } else {
         None
@@ -222,6 +232,16 @@ fn finalise_output(cli: &Cli, mut output: AttributionOutput, destination: &Path)
 
     if let Some(path) = cli.metadata_out.as_ref() {
         write_metadata(&output.metadata, path)?;
+    }
+
+    if let Some(path) = cli.heatmap_out.as_ref() {
+        write_tensor_json(&output.map, path)?;
+    }
+
+    if let Some(path) = cli.stats_out.as_ref() {
+        if let Some(stats) = statistics.as_ref() {
+            write_statistics(stats, path)?;
+        }
     }
 
     if let Some(mask_path) = cli.focus_mask_out.as_ref() {
@@ -410,6 +430,32 @@ fn write_tensor_json(tensor: &Tensor, path: &Path) -> Result<()> {
     ensure_parent_dir(path)?;
     let disk = DiskTensor::from_tensor(tensor);
     let payload = serde_json::to_string_pretty(&disk)?;
+    fs::write(path, payload)?;
+    Ok(())
+}
+
+#[derive(Serialize)]
+struct StatisticsFile {
+    min: f32,
+    max: f32,
+    mean: f32,
+    entropy: f32,
+}
+
+impl From<&AttributionStatistics> for StatisticsFile {
+    fn from(stats: &AttributionStatistics) -> Self {
+        Self {
+            min: stats.min,
+            max: stats.max,
+            mean: stats.mean,
+            entropy: stats.entropy,
+        }
+    }
+}
+
+fn write_statistics(stats: &AttributionStatistics, path: &Path) -> Result<()> {
+    ensure_parent_dir(path)?;
+    let payload = serde_json::to_string_pretty(&StatisticsFile::from(stats))?;
     fs::write(path, payload)?;
     Ok(())
 }
