@@ -1322,6 +1322,49 @@ class PolicyGradient:
     @property
     def last_quantum_update(self) -> Optional[Dict[str, float]]: ...
 
+class FractalQuantumTrainer:
+    base_rate: float
+    threshold: float
+    eta_scale: float
+    window: int
+
+    def __init__(
+        self,
+        studio: QuantumRealityStudio,
+        policy: PolicyGradient,
+        *,
+        threshold: float = ...,
+        eta_scale: float = ...,
+        base_rate: float = ...,
+        window: int = ...,
+    ) -> None: ...
+    @property
+    def session(self) -> FractalQuantumSession: ...
+    @property
+    def last_update(self) -> Optional[Dict[str, float]]: ...
+    @property
+    def last_measurement(self) -> Optional[QuantumMeasurement]: ...
+    def ingest_patch(
+        self,
+        patch: InfiniteZSpacePatch,
+        *,
+        weight: float = ...,
+    ) -> ZResonance: ...
+    def accumulate_returns(self, values: Sequence[float]) -> None: ...
+    @property
+    def golden_feedback(self) -> Dict[str, float]: ...
+    def peek_resonance(self) -> ZResonance: ...
+    def flush(self, *, baseline: float = ...) -> Dict[str, float]: ...
+    def summary(self) -> Dict[str, object]: ...
+    def reconfigure(
+        self,
+        *,
+        threshold: Optional[float] = ...,
+        eta_scale: Optional[float] = ...,
+        base_rate: Optional[float] = ...,
+        window: Optional[int] = ...,
+    ) -> None: ...
+
 class ZTigerOptim:
     def __init__(self, curvature: float = ...) -> None: ...
     @property
@@ -3034,6 +3077,7 @@ __all__ = [
     "QuantumMeasurement",
     "QuantumRealityStudio",
     "FractalQuantumSession",
+    "FractalQuantumTrainer",
     "resonance_from_fractal_patch",
     "quantum_measurement_from_fractal",
     "quantum_measurement_from_fractal_sequence",
