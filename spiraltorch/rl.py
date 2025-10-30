@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from typing import Iterable, Optional
+from typing import Iterable, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .qr import QuantumMeasurement
 
 
 @dataclass
@@ -40,6 +43,7 @@ class PolicyGradient:
     def __init__(self) -> None:
         self._hyper_trigger: LossStdTrigger | None = None
         self._geometry_feedback: dict[str, float] | None = None
+        self._last_quantum: dict[str, float] | None = None
 
     def attach_hyper_surprise(self, trigger: LossStdTrigger) -> None:
         self._hyper_trigger = trigger
@@ -62,3 +66,52 @@ class PolicyGradient:
             learning_rate *= self._geometry_feedback.get("min_learning_rate_scale", 1.0)
             gauge *= self._geometry_feedback.get("max_learning_rate_scale", 1.0)
         return {"learning_rate": learning_rate, "gauge": gauge}
+
+    def update_from_quantum(
+        self,
+        measurement: "QuantumMeasurement",
+        *,
+        base_rate: float = 1.0,
+        returns: Iterable[float] | None = None,
+        baseline: float = 0.0,
+    ) -> dict[str, float]:
+        eta = float(getattr(measurement, "eta_bar", 0.0))
+        packing = float(getattr(measurement, "packing_pressure", 0.0))
+        activation_density = float(
+            getattr(measurement, "activation_density", lambda: 0.0)()
+            if hasattr(measurement, "activation_density")
+            else 0.0
+        )
+        geometry_feedback = {
+            "min_learning_rate_scale": 1.0 + max(activation_density, 0.0),
+            "max_learning_rate_scale": 1.0 + max(eta, 0.0),
+        }
+        self._geometry_feedback = geometry_feedback
+        if self._hyper_trigger is not None:
+            self._hyper_trigger.geometry_eta = eta
+            self._hyper_trigger.geometry_curvature = -abs(packing) if packing != 0.0 else -1.0
+        update: dict[str, float]
+        if hasattr(measurement, "to_policy_update"):
+            raw_update = measurement.to_policy_update(base_rate=base_rate)
+            update = {key: float(value) for key, value in raw_update.items()}
+        else:
+            novelty = abs(eta) + abs(packing) * 0.5
+            update = {
+                "learning_rate": max(float(base_rate), 0.0) + novelty,
+                "gauge": max(float(base_rate), 0.0) + activation_density,
+                "eta_bar": eta,
+                "packing_pressure": packing,
+                "activation_density": activation_density,
+            }
+        if returns is not None:
+            rl_update = self.step(returns, baseline=baseline)
+            update["learning_rate"] *= rl_update.get("learning_rate", 1.0)
+            update["gauge"] *= rl_update.get("gauge", 1.0)
+        self._last_quantum = dict(update)
+        return update
+
+    @property
+    def last_quantum_update(self) -> dict[str, float] | None:
+        if self._last_quantum is None:
+            return None
+        return dict(self._last_quantum)

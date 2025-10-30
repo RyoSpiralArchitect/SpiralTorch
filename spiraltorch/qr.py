@@ -133,6 +133,47 @@ class QuantumMeasurement:
     policy_logits: list[float]
     packing_pressure: float
 
+    def top_qubits(self, count: int | None = None) -> list[tuple[int, float]]:
+        """Return the top-``count`` qubits ranked by their policy logits."""
+
+        ranked = sorted(
+            enumerate(self.policy_logits),
+            key=lambda item: item[1],
+            reverse=True,
+        )
+        if count is not None:
+            count = max(int(count), 1)
+            ranked = ranked[:count]
+        return [(index, float(weight)) for index, weight in ranked]
+
+    def activation_density(self) -> float:
+        """Compute the proportion of active qubits relative to total logits."""
+
+        total = len(self.policy_logits)
+        if total == 0:
+            return 0.0
+        active = len(self.active_qubits)
+        return min(1.0, max(0.0, active / total))
+
+    def to_policy_update(self, *, base_rate: float = 1.0) -> dict[str, float]:
+        """Summarise the measurement as policy update scalars."""
+
+        base = max(float(base_rate), 0.0)
+        top = self.top_qubits(len(self.active_qubits) or None)
+        if top:
+            active_mean = sum(abs(weight) for _, weight in top) / len(top)
+        else:
+            active_mean = 0.0
+        activation = self.activation_density()
+        novelty = abs(float(self.eta_bar)) + abs(float(self.packing_pressure)) * 0.5
+        return {
+            "learning_rate": base + max(novelty, 0.0),
+            "gauge": base + activation + active_mean,
+            "eta_bar": float(self.eta_bar),
+            "packing_pressure": float(self.packing_pressure),
+            "activation_density": activation,
+        }
+
 
 class ZOverlayCircuit:
     """Hyperbolic overlay synthesised from a resonance snapshot."""

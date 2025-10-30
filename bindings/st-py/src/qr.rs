@@ -7,6 +7,8 @@ use crate::spiralk::PyMaxwellPulse;
 
 use st_core::maxwell::MaxwellZPulse;
 use st_qr_studio::{QuantumMeasurement, QuantumOverlayConfig, ZOverlayCircuit, ZResonance};
+use std::cmp::Ordering;
+use std::collections::HashMap;
 
 fn pulses_from_any(py: Python<'_>, pulses: &Bound<'_, PyAny>) -> PyResult<Vec<MaxwellZPulse>> {
     if let Ok(single) = pulses.extract::<Py<PyMaxwellPulse>>() {
@@ -220,6 +222,17 @@ impl From<QuantumMeasurement> for PyQuantumMeasurement {
     }
 }
 
+fn sorted_logits(measurement: &QuantumMeasurement) -> Vec<(usize, f32)> {
+    let mut enumerated: Vec<(usize, f32)> = measurement
+        .policy_logits()
+        .iter()
+        .copied()
+        .enumerate()
+        .collect();
+    enumerated.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
+    enumerated
+}
+
 #[pymethods]
 impl PyQuantumMeasurement {
     #[getter]
@@ -240,6 +253,56 @@ impl PyQuantumMeasurement {
     #[getter]
     pub fn packing_pressure(&self) -> f32 {
         self.inner.packing_pressure()
+    }
+
+    #[pyo3(signature = (count=None))]
+    pub fn top_qubits(&self, count: Option<usize>) -> Vec<(usize, f32)> {
+        let mut ranked = sorted_logits(&self.inner);
+        if let Some(limit) = count {
+            let limit = limit.max(1);
+            if ranked.len() > limit {
+                ranked.truncate(limit);
+            }
+        }
+        ranked
+    }
+
+    pub fn activation_density(&self) -> f32 {
+        let total = self.inner.policy_logits().len();
+        if total == 0 {
+            return 0.0;
+        }
+        let active = self.inner.active_qubits().len();
+        (active as f32 / total as f32).clamp(0.0, 1.0)
+    }
+
+    #[pyo3(signature = (base_rate=1.0))]
+    pub fn to_policy_update(&self, base_rate: f32) -> HashMap<String, f32> {
+        let mut ranked = sorted_logits(&self.inner);
+        let active = self.inner.active_qubits().len().max(1);
+        if ranked.len() > active {
+            ranked.truncate(active);
+        }
+        let active_mean = if ranked.is_empty() {
+            0.0
+        } else {
+            ranked.iter().map(|(_, weight)| weight.abs()).sum::<f32>() / ranked.len() as f32
+        };
+        let activation = self.activation_density();
+        let eta = self.inner.eta_bar().abs();
+        let pressure = self.inner.packing_pressure().abs();
+        let novelty = eta + pressure * 0.5;
+        let base = base_rate.max(0.0);
+        let mut update = HashMap::with_capacity(5);
+        update.insert("learning_rate".to_string(), base + novelty.max(0.0));
+        update.insert("gauge".to_string(), base + activation + active_mean);
+        update.insert("eta_bar".to_string(), self.inner.eta_bar());
+        update.insert(
+            "packing_pressure".to_string(),
+            self.inner.packing_pressure(),
+        );
+        update.insert("activation_density".to_string(), activation);
+        update
     }
 }
 
