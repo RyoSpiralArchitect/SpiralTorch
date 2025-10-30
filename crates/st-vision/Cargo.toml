@@ -7,15 +7,16 @@ description = "Z-space native vision utilities for SpiralTorch"
 license = "AGPL-3.0-or-later"
 
 [features]
-default = []
+default = ["nn"]
 wgpu = ["dep:st-backend-wgpu"]
-nerf = []
+nerf = ["nn"]
+nn = ["dep:st-nn"]
 
 [dependencies]
 st-core = { path = "../st-core" }
 st-tensor = { path = "../st-tensor" }
 st-logic = { path = "../st-logic" }
-st-nn = { path = "../st-nn" }
+st-nn = { path = "../st-nn", optional = true }
 rand = "0.8"
 st-backend-wgpu = { path = "../st-backend-wgpu", optional = true }
 st-frac = { path = "../st-frac" }
