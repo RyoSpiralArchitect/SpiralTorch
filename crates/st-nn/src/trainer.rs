@@ -3000,7 +3000,10 @@ pub struct EpochStats {
 #[derive(Default)]
 struct CurvatureGradientAccumulator {
     l1: f64,
+    sum: f64,
     sum_squares: f64,
+    sum_cubes: f64,
+    sum_quartic: f64,
     linf: f32,
     count: usize,
 }
@@ -3008,7 +3011,10 @@ struct CurvatureGradientAccumulator {
 impl CurvatureGradientAccumulator {
     fn accumulate(&mut self, summary: GradientSummary) {
         self.l1 += summary.l1() as f64;
+        self.sum += summary.sum() as f64;
         self.sum_squares += summary.sum_squares() as f64;
+        self.sum_cubes += summary.sum_cubes() as f64;
+        self.sum_quartic += summary.sum_quartic() as f64;
         self.linf = self.linf.max(summary.linf());
         self.count += summary.count();
     }
@@ -3017,9 +3023,12 @@ impl CurvatureGradientAccumulator {
         if self.count == 0 {
             GradientSummary::default()
         } else {
-            GradientSummary::from_moments(
+            GradientSummary::from_extended_moments(
                 self.l1 as f32,
+                self.sum as f32,
                 self.sum_squares as f32,
+                self.sum_cubes as f32,
+                self.sum_quartic as f32,
                 self.linf,
                 self.count,
             )

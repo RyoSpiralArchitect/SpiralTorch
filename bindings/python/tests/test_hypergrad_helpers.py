@@ -10,7 +10,25 @@ from spiral.hypergrad import (
 
 
 class _FakeSummary:
-    def __init__(self, *, l1=1.0, l2=0.5, linf=0.8, mean_abs=0.3, rms=0.4, count=12, sum_squares=0.2):
+    def __init__(
+        self,
+        *,
+        l1: float = 1.0,
+        l2: float = 0.5,
+        linf: float = 0.8,
+        mean_abs: float = 0.3,
+        rms: float = 0.4,
+        count: int = 12,
+        sum_squares: float = 0.2,
+        total: float = 0.1,
+        sum_cubes: float = 0.05,
+        sum_quartic: float = 0.025,
+        mean: float = 0.02,
+        variance: float = 0.015,
+        std: float = 0.122474487,
+        skewness: float = 0.1,
+        kurtosis: float = 3.0,
+    ) -> None:
         self._values = {
             "l1": float(l1),
             "l2": float(l2),
@@ -19,6 +37,14 @@ class _FakeSummary:
             "rms": float(rms),
             "count": int(count),
             "sum_squares": float(sum_squares),
+            "sum": float(total),
+            "sum_cubes": float(sum_cubes),
+            "sum_quartic": float(sum_quartic),
+            "mean": float(mean),
+            "variance": float(variance),
+            "std": float(std),
+            "skewness": float(skewness),
+            "kurtosis": float(kurtosis),
         }
 
     def l1(self) -> float:
@@ -41,6 +67,30 @@ class _FakeSummary:
 
     def sum_squares(self) -> float:
         return self._values["sum_squares"]
+
+    def sum(self) -> float:
+        return self._values["sum"]
+
+    def sum_cubes(self) -> float:
+        return self._values["sum_cubes"]
+
+    def sum_quartic(self) -> float:
+        return self._values["sum_quartic"]
+
+    def mean(self) -> float:
+        return self._values["mean"]
+
+    def variance(self) -> float:
+        return self._values["variance"]
+
+    def std(self) -> float:
+        return self._values["std"]
+
+    def skewness(self) -> float:
+        return self._values["skewness"]
+
+    def kurtosis(self) -> float:
+        return self._values["kurtosis"]
 
 
 class _FakeHypergrad:
@@ -97,6 +147,8 @@ def test_hypergrad_summary_dict_includes_gradient_and_extra_metrics() -> None:
     assert metrics["learning_rate"] == 0.05
     assert metrics["summary"]["hypergrad_norm"] == 0.42
     assert metrics["gradient"] == fake.gradient()
+    assert "std" in metrics["summary"]
+    assert "skewness" in metrics["summary"]
 
 
 def test_suggest_hypergrad_operator_clamps_when_requested() -> None:
@@ -115,6 +167,8 @@ def test_suggest_hypergrad_operator_clamps_when_requested() -> None:
     assert hints["gain"] == 3.0
     assert hints["count"] == 16.0
     assert hints["spread"] > 0.0
+    assert "std" in hints
+    assert "kurtosis" in hints
 
 
 def test_suggest_hypergrad_operator_accepts_tape_instances() -> None:
@@ -124,3 +178,4 @@ def test_suggest_hypergrad_operator_accepts_tape_instances() -> None:
     assert 0.0 < hints["ratio"]
     assert hints["mix"] == hints["ratio"]
     assert hints["count"] == float(fake.summary().count())
+    assert "skewness" in hints

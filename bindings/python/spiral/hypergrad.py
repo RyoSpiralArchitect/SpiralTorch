@@ -99,8 +99,31 @@ def hypergrad_summary_dict(
             "rms": float(_callable_attr(summary, "rms")()),
             "count": int(_callable_attr(summary, "count")()),
             "sum_squares": float(_callable_attr(summary, "sum_squares")()),
+            "sum": float(_callable_attr(summary, "sum")()),
+            "sum_cubes": float(_callable_attr(summary, "sum_cubes")()),
+            "sum_quartic": float(_callable_attr(summary, "sum_quartic")()),
+            "mean": float(_callable_attr(summary, "mean")()),
+            "variance": float(_callable_attr(summary, "variance")()),
+            "std": float(_callable_attr(summary, "std")()),
+            "skewness": float(_callable_attr(summary, "skewness")()),
+            "kurtosis": float(_callable_attr(summary, "kurtosis")()),
         },
     }
+
+    telemetry_attr = getattr(tape, "telemetry", None)
+    if callable(telemetry_attr):
+        telemetry = telemetry_attr()
+        metrics["telemetry"] = {
+            "shape": tuple(int(value) for value in _callable_attr(telemetry, "shape")()),
+            "volume": int(_callable_attr(telemetry, "volume")()),
+            "curvature": float(_callable_attr(telemetry, "curvature")()),
+            "learning_rate": float(_callable_attr(telemetry, "learning_rate")()),
+            "saturation": float(_callable_attr(telemetry, "saturation")()),
+            "porosity": float(_callable_attr(telemetry, "porosity")()),
+            "tolerance": float(_callable_attr(telemetry, "tolerance")()),
+            "max_depth": int(_callable_attr(telemetry, "max_depth")()),
+            "max_volume": int(_callable_attr(telemetry, "max_volume")()),
+        }
 
     if include_gradient:
         gradient = _callable_attr(tape, "gradient")()
@@ -134,14 +157,19 @@ def suggest_hypergrad_operator(
 
     rms = float(summary.get("rms", 0.0))
     mean_abs = float(summary.get("mean_abs", 0.0))
+    std = float(summary.get("std", rms))
+    skewness = float(summary.get("skewness", 0.0))
+    kurtosis = float(summary.get("kurtosis", 3.0))
     l2 = float(summary.get("l2", 0.0))
     linf = float(summary.get("linf", 0.0))
     count = max(1, int(summary.get("count", 0)))
 
     ratio = mean_abs / (rms + 1e-6)
     spread = linf / (mean_abs + 1e-6)
-    mix = ratio
-    gain = rms / (l2 + 1e-6)
+    tail = max(0.0, kurtosis - 3.0)
+    skew_factor = 1.0 + min(2.0, abs(skewness)) * 0.1
+    mix = ratio / (1.0 + 0.25 * tail)
+    gain = (std / (l2 + 1e-6)) * skew_factor
 
     if clamp:
         mix = min(max_mix, max(min_mix, mix))
@@ -152,5 +180,8 @@ def suggest_hypergrad_operator(
         "gain": float(gain),
         "ratio": float(ratio),
         "spread": float(spread),
+        "std": float(std),
+        "skewness": float(skewness),
+        "kurtosis": float(kurtosis),
         "count": float(count),
     }
