@@ -1232,6 +1232,30 @@ class QuantumRealityStudio:
         threshold: float = ...,
     ) -> QuantumMeasurement: ...
 
+class FractalQuantumSession:
+    def __init__(
+        self,
+        studio: QuantumRealityStudio,
+        *,
+        threshold: float = ...,
+        eta_scale: float = ...,
+    ) -> None: ...
+    @property
+    def threshold(self) -> float: ...
+    @property
+    def eta_scale(self) -> float: ...
+    @property
+    def ingested(self) -> int: ...
+    def ingest(
+        self,
+        patch: InfiniteZSpacePatch,
+        *,
+        weight: float = ...,
+    ) -> ZResonance: ...
+    def resonance(self) -> ZResonance: ...
+    def measure(self, *, threshold: Optional[float] = ...) -> QuantumMeasurement: ...
+    def clear(self) -> None: ...
+
 def resonance_from_fractal_patch(
     patch: InfiniteZSpacePatch,
     eta_scale: float = ...,
@@ -1240,6 +1264,15 @@ def resonance_from_fractal_patch(
 def quantum_measurement_from_fractal(
     studio: QuantumRealityStudio,
     patch: InfiniteZSpacePatch,
+    threshold: float = ...,
+    eta_scale: float = ...,
+) -> QuantumMeasurement: ...
+
+def quantum_measurement_from_fractal_sequence(
+    studio: QuantumRealityStudio,
+    patches: Sequence[InfiniteZSpacePatch],
+    *,
+    weights: Optional[Sequence[float]] = ...,
     threshold: float = ...,
     eta_scale: float = ...,
 ) -> QuantumMeasurement: ...
@@ -1267,6 +1300,25 @@ class PolicyGradient:
         returns: Optional[Sequence[float]] = ...,
         baseline: float = ...,
     ) -> Dict[str, float]: ...
+    def build_fractal_session(
+        self,
+        studio: QuantumRealityStudio,
+        *,
+        threshold: float = ...,
+        eta_scale: float = ...,
+    ) -> FractalQuantumSession: ...
+    def update_from_fractal_stream(
+        self,
+        studio: QuantumRealityStudio,
+        patches: Sequence[InfiniteZSpacePatch],
+        *,
+        weights: Optional[Sequence[float]] = ...,
+        base_rate: float = ...,
+        threshold: float = ...,
+        eta_scale: float = ...,
+        returns: Optional[Sequence[float]] = ...,
+        baseline: float = ...,
+    ) -> Dict[str, float]: ...
     @property
     def last_quantum_update(self) -> Optional[Dict[str, float]]: ...
 
@@ -1279,6 +1331,31 @@ class ZTigerOptim:
     def update(self, lora_pid: float, resonance: Sequence[float]) -> float: ...
 
 def tempo_latency_score(tile: int, slack: int) -> float: ...
+
+def update_policy_from_fractal(
+    policy: PolicyGradient,
+    studio: QuantumRealityStudio,
+    patch: InfiniteZSpacePatch,
+    *,
+    base_rate: float = ...,
+    threshold: float = ...,
+    eta_scale: float = ...,
+    returns: Optional[Sequence[float]] = ...,
+    baseline: float = ...,
+) -> Dict[str, float]: ...
+
+def update_policy_from_fractal_stream(
+    policy: PolicyGradient,
+    studio: QuantumRealityStudio,
+    patches: Sequence[InfiniteZSpacePatch],
+    *,
+    weights: Optional[Sequence[float]] = ...,
+    base_rate: float = ...,
+    threshold: float = ...,
+    eta_scale: float = ...,
+    returns: Optional[Sequence[float]] = ...,
+    baseline: float = ...,
+) -> Dict[str, float]: ...
 
 def apply_vision_update(
     vision: SpiralTorchVision,
@@ -2956,8 +3033,12 @@ __all__ = [
     "ZOverlayCircuit",
     "QuantumMeasurement",
     "QuantumRealityStudio",
+    "FractalQuantumSession",
     "resonance_from_fractal_patch",
     "quantum_measurement_from_fractal",
+    "quantum_measurement_from_fractal_sequence",
+    "update_policy_from_fractal",
+    "update_policy_from_fractal_stream",
     "ZTigerOptim",
     "tempo_latency_score",
     "apply_vision_update",

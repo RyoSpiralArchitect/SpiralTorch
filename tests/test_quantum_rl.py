@@ -112,6 +112,73 @@ class FractalQuantumBridgeTests(unittest.TestCase):
         self.assertIn("learning_rate", update)
         self.assertIn("gauge", update)
 
+    def test_fractal_session_accumulates_multiple_patches(self) -> None:
+        session = qr.FractalQuantumSession(
+            self.studio,
+            threshold=0.05,
+            eta_scale=1.3,
+        )
+        second = self.canvas.emit_infinite_z(zoom=128.0, steps=16)
+        session.ingest(self.patch)
+        session.ingest(second, weight=2.0)
+        self.assertGreaterEqual(session.ingested, 2)
+        measurement = session.measure()
+        self.assertIsInstance(measurement, QuantumMeasurement)
+        session.clear()
+        self.assertEqual(session.ingested, 0)
+
+    def test_quantum_measurement_from_fractal_sequence(self) -> None:
+        second = self.canvas.emit_infinite_z(zoom=128.0, steps=18)
+        session = qr.FractalQuantumSession(
+            self.studio,
+            threshold=0.05,
+            eta_scale=1.1,
+        )
+        session.ingest(self.patch, weight=0.75)
+        session.ingest(second, weight=1.25)
+        manual = session.measure()
+        aggregated = qr.quantum_measurement_from_fractal_sequence(
+            self.studio,
+            [self.patch, second],
+            weights=[0.75, 1.25],
+            threshold=0.05,
+            eta_scale=1.1,
+        )
+        self.assertIsInstance(aggregated, QuantumMeasurement)
+        self.assertEqual(len(aggregated.policy_logits), len(manual.policy_logits))
+
+    def test_policy_updates_from_fractal_stream(self) -> None:
+        second = self.canvas.emit_infinite_z(zoom=64.0, steps=20)
+        policy = PolicyGradient()
+        policy.attach_hyper_surprise(LossStdTrigger(std_threshold=0.05, warmup=0))
+        update = policy.update_from_fractal_stream(
+            self.studio,
+            [self.patch, second],
+            weights=[1.0, 1.5],
+            base_rate=1.05,
+            threshold=0.04,
+            eta_scale=1.15,
+            returns=[0.2, -0.1, 0.05],
+            baseline=0.0,
+        )
+        self.assertIn("learning_rate", update)
+        self.assertIn("gauge", update)
+        stream_update = rl.update_policy_from_fractal_stream(
+            policy,
+            self.studio,
+            [self.patch, second],
+            weights=[1.0, 1.5],
+            base_rate=1.05,
+            threshold=0.04,
+            eta_scale=1.15,
+            returns=[0.2, -0.1, 0.05],
+        )
+        self.assertAlmostEqual(
+            update["learning_rate"],
+            stream_update["learning_rate"],
+            places=6,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

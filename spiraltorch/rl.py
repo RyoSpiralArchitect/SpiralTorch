@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from .vision import InfiniteZPatch
 
 
-def _resolve_quantum_fractal_bridge():
+def _resolve_quantum_module():
     candidates: list[str] = []
     if "." in __name__:
         base = __name__.rsplit(".", 1)[0]
@@ -28,10 +28,32 @@ def _resolve_quantum_fractal_bridge():
                 module = importlib.import_module(name)
             except Exception:  # noqa: BLE001 - optional import path
                 continue
-        bridge = getattr(module, "quantum_measurement_from_fractal", None)
-        if bridge is not None:
-            return bridge
-    raise ImportError("quantum_measurement_from_fractal bridge is unavailable")
+        return module
+    raise ImportError("quantum overlay module is unavailable")
+
+
+def _resolve_quantum_fractal_bridge():
+    module = _resolve_quantum_module()
+    bridge = getattr(module, "quantum_measurement_from_fractal", None)
+    if bridge is None:
+        raise ImportError("quantum_measurement_from_fractal bridge is unavailable")
+    return bridge
+
+
+def _resolve_quantum_fractal_sequence_bridge():
+    module = _resolve_quantum_module()
+    bridge = getattr(module, "quantum_measurement_from_fractal_sequence", None)
+    if bridge is None:
+        raise ImportError("quantum_measurement_from_fractal_sequence bridge is unavailable")
+    return bridge
+
+
+def _resolve_fractal_session_cls():
+    module = _resolve_quantum_module()
+    session = getattr(module, "FractalQuantumSession", None)
+    if session is None:
+        raise ImportError("FractalQuantumSession is unavailable")
+    return session
 
 
 @dataclass
@@ -135,6 +157,45 @@ class PolicyGradient:
         self._last_quantum = dict(update)
         return update
 
+    def build_fractal_session(
+        self,
+        studio: "QuantumRealityStudio",
+        *,
+        threshold: float = 0.0,
+        eta_scale: float = 1.0,
+    ):
+        session_cls = _resolve_fractal_session_cls()
+        return session_cls(studio, threshold=threshold, eta_scale=eta_scale)
+
+    def update_from_fractal_stream(
+        self,
+        studio: "QuantumRealityStudio",
+        patches: Iterable["InfiniteZPatch"],
+        *,
+        weights: Iterable[float] | None = None,
+        base_rate: float = 1.0,
+        threshold: float = 0.0,
+        eta_scale: float = 1.0,
+        returns: Iterable[float] | None = None,
+        baseline: float = 0.0,
+    ) -> dict[str, float]:
+        measurement_fn = _resolve_quantum_fractal_sequence_bridge()
+        patch_seq = tuple(patches)
+        weights_seq = None if weights is None else tuple(float(value) for value in weights)
+        measurement = measurement_fn(
+            studio,
+            patch_seq,
+            weights=weights_seq,
+            threshold=threshold,
+            eta_scale=eta_scale,
+        )
+        return self.update_from_quantum(
+            measurement,
+            base_rate=base_rate,
+            returns=returns,
+            baseline=baseline,
+        )
+
     @property
     def last_quantum_update(self) -> dict[str, float] | None:
         if self._last_quantum is None:
@@ -165,6 +226,32 @@ def update_policy_from_fractal(
     return policy.update_from_quantum(
         measurement,
         base_rate=base_rate,
+        returns=returns,
+        baseline=baseline,
+    )
+
+
+def update_policy_from_fractal_stream(
+    policy: "PolicyGradient",
+    studio: "QuantumRealityStudio",
+    patches: Iterable["InfiniteZPatch"],
+    *,
+    weights: Iterable[float] | None = None,
+    base_rate: float = 1.0,
+    threshold: float = 0.0,
+    eta_scale: float = 1.0,
+    returns: Iterable[float] | None = None,
+    baseline: float = 0.0,
+) -> dict[str, float]:
+    """Aggregate fractal patches before updating the policy from quantum feedback."""
+
+    return policy.update_from_fractal_stream(
+        studio,
+        patches,
+        weights=weights,
+        base_rate=base_rate,
+        threshold=threshold,
+        eta_scale=eta_scale,
         returns=returns,
         baseline=baseline,
     )
