@@ -19,6 +19,8 @@ use super::{
 };
 use core::f32::consts::PI;
 use st_frac::fft::{self, Complex32};
+use st_frac::mellin::MellinLogGrid;
+use st_frac::mellin_types::ComplexScalar;
 
 /// Streaming Z-space normaliser that keeps canvas updates stable even when the
 /// underlying tensor swings across vastly different value ranges.
@@ -214,6 +216,93 @@ pub struct ColorVectorField {
     vectors: Vec<[f32; 4]>,
 }
 
+/// Sample emitted by [`CanvasWasmTrail`]. Each point captures the projected
+/// position of a Z-space vector alongside its energy/chroma payload so WebGPU
+/// clients can reconstruct particle traces without recomputing FFTs in
+/// JavaScript.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CanvasTrailPoint {
+    position: [f32; 3],
+    energy: f32,
+    chroma: [f32; 3],
+}
+
+impl CanvasTrailPoint {
+    pub fn position(&self) -> [f32; 3] {
+        self.position
+    }
+
+    pub fn energy(&self) -> f32 {
+        self.energy
+    }
+
+    pub fn chroma(&self) -> [f32; 3] {
+        self.chroma
+    }
+}
+
+/// Flattened AR-ready packet containing a dense sampling of the canvas vector
+/// field. The payload is pre-normalised so WASM callers can stream it straight
+/// into WebGPU or WebXR pipelines.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CanvasWasmTrail {
+    curvature: f32,
+    width: usize,
+    height: usize,
+    samples: Vec<CanvasTrailPoint>,
+}
+
+impl CanvasWasmTrail {
+    pub fn new(
+        curvature: f32,
+        width: usize,
+        height: usize,
+        samples: Vec<CanvasTrailPoint>,
+    ) -> Self {
+        Self {
+            curvature,
+            width,
+            height,
+            samples,
+        }
+    }
+
+    pub fn curvature(&self) -> f32 {
+        self.curvature
+    }
+
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
+    pub fn height(&self) -> usize {
+        self.height
+    }
+
+    pub fn samples(&self) -> &[CanvasTrailPoint] {
+        &self.samples
+    }
+
+    /// Returns a flattened view of the trail suitable for uploading into a
+    /// WebGPU storage buffer. Each sample contributes seven floats ordered as
+    /// `(x, y, z, energy, r, g, b)`.
+    pub fn as_f32_slice(&self) -> Vec<f32> {
+        let mut flat = Vec::with_capacity(self.samples.len() * 7);
+        for sample in &self.samples {
+            let [x, y, z] = sample.position;
+            flat.push(x);
+            flat.push(y);
+            flat.push(z);
+            flat.push(sample.energy);
+            let [r, g, b] = sample.chroma;
+            flat.push(r);
+            flat.push(g);
+            flat.push(b);
+        }
+        flat
+    }
+}
+
 impl ColorVectorField {
     const FFT_CHANNELS: usize = 4;
     const FFT_COMPLEX_STRIDE: usize = 2;
@@ -268,6 +357,26 @@ impl ColorVectorField {
 
     pub fn iter(&self) -> impl Iterator<Item = [f32; 4]> + '_ {
         self.vectors.iter().copied()
+    }
+
+    pub fn to_wasm_trail(&self, curvature: f32) -> CanvasWasmTrail {
+        let width = self.width.max(1);
+        let height = self.height.max(1);
+        let mut samples = Vec::with_capacity(self.vectors.len());
+        for (idx, vector) in self.vectors.iter().enumerate() {
+            let row = idx / width;
+            let col = idx % width;
+            let x = (col as f32 + 0.5) / width as f32;
+            let y = (row as f32 + 0.5) / height as f32;
+            let curvature_scale = curvature.tanh();
+            let z = curvature_scale * vector[0];
+            samples.push(CanvasTrailPoint {
+                position: [x, y, z],
+                energy: vector[0],
+                chroma: [vector[1], vector[2], vector[3]],
+            });
+        }
+        CanvasWasmTrail::new(curvature, self.width, self.height, samples)
     }
 
     pub fn as_tensor(&self) -> PureResult<Tensor> {
@@ -1393,6 +1502,46 @@ pub struct FractalCanvas {
     height: usize,
 }
 
+#[derive(Clone, Debug)]
+pub struct InfiniteZSpacePatch {
+    dimension: f32,
+    zoom: f32,
+    support: (f32, f32),
+    mellin_weights: Vec<f32>,
+    density: Vec<f32>,
+}
+
+impl InfiniteZSpacePatch {
+    pub fn dimension(&self) -> f32 {
+        self.dimension
+    }
+
+    pub fn zoom(&self) -> f32 {
+        self.zoom
+    }
+
+    pub fn support(&self) -> (f32, f32) {
+        self.support
+    }
+
+    pub fn mellin_weights(&self) -> &[f32] {
+        &self.mellin_weights
+    }
+
+    pub fn density(&self) -> &[f32] {
+        &self.density
+    }
+
+    pub fn eta_bar(&self) -> f32 {
+        if self.density.is_empty() {
+            return 0.0;
+        }
+        let total: f32 = self.density.iter().copied().sum();
+        let mean = total / self.density.len() as f32;
+        mean.tanh().abs()
+    }
+}
+
 impl FractalCanvas {
     /// Construct a projector-backed canvas with the requested queue capacity.
     pub fn new(capacity: usize, width: usize, height: usize) -> PureResult<Self> {
@@ -1460,6 +1609,58 @@ impl FractalCanvas {
     ) -> PureResult<()> {
         let patch = FractalPatch::new(relation, coherence, tension, depth)?;
         self.projector.scheduler().push(patch)
+    }
+
+    pub fn emit_zspace_patch(
+        &self,
+        dimension: f32,
+        zoom: f32,
+        steps: usize,
+    ) -> PureResult<InfiniteZSpacePatch> {
+        if !dimension.is_finite() {
+            return Err(TensorError::InvalidValue { label: "dimension" });
+        }
+        let dimension = dimension.max(0.5);
+        let steps = steps.max(4);
+        let zoom = if zoom.is_finite() {
+            zoom.max(1.0)
+        } else {
+            1024.0
+        };
+        let log_start = -zoom.abs().ln();
+        let log_step = (zoom.abs().ln().abs() + 1.0) / steps as f32;
+        let grid = MellinLogGrid::from_function(log_start, log_step, steps, |t| {
+            let radius = (dimension + t.abs()).sqrt();
+            let phase = (dimension * t).tanh();
+            ComplexScalar::new(radius.cos(), phase)
+        })
+        .map_err(|err| TensorError::BackendFailure {
+            backend: "mellin",
+            message: err.to_string(),
+        })?;
+        let support = grid.support();
+        let mut density = Vec::with_capacity(steps);
+        for (idx, sample) in grid.samples().iter().enumerate() {
+            let magnitude = (sample.re.powi(2) + sample.im.powi(2)).sqrt() as f32;
+            let scale = ((idx + 1) as f32 / steps as f32).powf(dimension / 2.0);
+            density.push(magnitude * scale);
+        }
+        let mellin_weights: Vec<f32> = grid.weights().iter().copied().collect();
+        Ok(InfiniteZSpacePatch {
+            dimension,
+            zoom,
+            support,
+            mellin_weights,
+            density,
+        })
+    }
+
+    pub fn emit_zspace_infinite(&self, dimension: f32) -> PureResult<InfiniteZSpacePatch> {
+        self.emit_zspace_patch(dimension, f32::INFINITY, 96)
+    }
+
+    pub fn emit_infinite_z(&self, dimension: f32, zoom: f32) -> PureResult<InfiniteZSpacePatch> {
+        self.emit_zspace_patch(dimension, zoom, 96)
     }
 }
 
@@ -1570,6 +1771,15 @@ impl CanvasProjector {
     pub fn refresh_vector_field(&mut self) -> PureResult<&ColorVectorField> {
         self.render()?;
         Ok(&self.vectors)
+    }
+
+    /// Refresh the canvas and emit an AR-ready packet capturing the vector
+    /// field as particle trail samples. The result keeps track of the curvature
+    /// used to bend the Z axis so downstream consumers can reconstruct the
+    /// hyperbolic geometry directly in WebGPU.
+    pub fn emit_wasm_trail(&mut self, curvature: f32) -> PureResult<CanvasWasmTrail> {
+        self.render()?;
+        Ok(self.vectors.to_wasm_trail(curvature))
     }
 
     /// Last computed vector field without forcing a refresh.
@@ -2650,6 +2860,17 @@ mod tests {
     fn tensor_with_shape(rows: usize, cols: usize, values: &[f32]) -> Tensor {
         assert_eq!(rows * cols, values.len());
         Tensor::from_vec(rows, cols, values.to_vec()).unwrap()
+    }
+
+    #[test]
+    fn emit_zspace_infinite_emits_density() {
+        let canvas = FractalCanvas::new(4, 32, 32).expect("canvas");
+        let patch = canvas
+            .emit_zspace_infinite(2.618)
+            .expect("infinite z patch");
+        assert!(patch.eta_bar() >= 0.0);
+        assert_eq!(patch.mellin_weights().len(), patch.density().len());
+        assert!(patch.density().iter().any(|value| value.is_finite()));
     }
 
     #[test]

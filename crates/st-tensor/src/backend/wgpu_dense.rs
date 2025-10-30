@@ -1763,7 +1763,7 @@ impl GpuContext {
                     resource: mask_binding.as_entire_binding(),
                 },
             ],
-        })
+        }))
     }
 
     fn softmax_zspace_bind_group(

@@ -26,6 +26,19 @@ These metrics power internal components under `crates/st-core/src/telemetry/`, i
 
 Alerts are retained in a bounded log accessible via `BlackCatRuntime::monitoring()` for debugging or CI validation. Operators can tune thresholds at runtime by calling `MonitoringHub::reconfigure`.
 
+## Tracing subscribers & Chrome traces
+
+Rust components now emit structured `tracing` spans. Calling `spiral_config::tracing::init_tracing()` (performed automatically by the runtime boot sequence) configures a human-readable subscriber; adjust verbosity with `RUST_LOG`. Setting `SPIRAL_TRACE_CHROME=/path/to/trace.json` enables a Chrome Trace sink that can be opened in `chrome://tracing` for timeline analysis.
+
+## Deterministic execution controls
+
+Set `SPIRAL_DETERMINISTIC=1` to seed all runtime RNGs from a shared base seed (`SPIRAL_DETERMINISTIC_SEED`, default `42`). Deterministic mode also honours:
+
+- `SPIRAL_DETERMINISTIC_SCHEDULER` – freezes adaptive schedulers (defaults to `1` when determinism is enabled).
+- `SPIRAL_DETERMINISTIC_REDUCTION` – enforces sequential reductions and hints Rayon to a single worker (defaults to `1` when determinism is enabled).
+
+When enabled the process publishes `SPIRAL_DETERMINISTIC_ACTIVE=1` so external tooling can detect deterministic runs.
+
 ### Exporters
 
 The monitoring hub supports optional exporters:
