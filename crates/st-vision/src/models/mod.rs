@@ -3,7 +3,7 @@ pub mod resnet;
 pub mod vit;
 
 pub use convnext::{ConvNeXtBackbone, ConvNeXtConfig};
-pub use resnet::{ResNetBackbone, ResNetConfig};
+pub use resnet::{ResNet56WithSkip, ResNet56WithSkipConfig, ResNetBackbone, ResNetConfig};
 pub use vit::{ViTBackbone, ViTConfig};
 
 use std::collections::HashMap;
