@@ -190,7 +190,7 @@ fn borrow_f32_argument(any: &Bound<PyAny>) -> PyResult<Vec<f32>> {
 const USED_DLPACK_CAPSULE_NAME: &CStr =
     unsafe { CStr::from_bytes_with_nul_unchecked(b"used_dltensor\0") };
 
-#[pyclass(module = "spiraltorch", name = "Tensor")]
+#[pyclass(module = "spiraltorch", name = "Tensor", subclass)]
 #[derive(Clone)]
 pub struct PyTensor {
     pub(crate) inner: Tensor,
