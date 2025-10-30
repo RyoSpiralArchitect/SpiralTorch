@@ -61,6 +61,7 @@ _GPU_HOST_HINT_VAR = "SPIRALTORCH_WGPU_HOST_THREADS"
 
 _WGPU_ADAPTER_INFO: dict[str, object] | None = None
 _GPU_HOST_RESERVATION: int | None = None
+_GPU_HOST_RESERVATION_BUDGET: int | None = None
 
 _INTEGRATED_GPU_VENDORS = {
     0x8086,  # Intel
@@ -455,13 +456,36 @@ def _propagate_gpu_host_hint(reservation: int | None) -> None:
     os.environ[_GPU_HOST_HINT_VAR] = str(int(reservation))
 
 
-def gpu_host_thread_reservation(*, refresh: bool = False) -> int | None:
-    """Return the number of CPU threads reserved for GPU host work."""
+def gpu_host_thread_reservation(
+    cpu_budget: int | None = None, *, refresh: bool = False
+) -> int | None:
+    """Return the number of CPU threads reserved for GPU host work.
 
-    global _GPU_HOST_RESERVATION
-    if refresh or _GPU_HOST_RESERVATION is None:
-        cpu_budget = system_cpu_count()
-        _GPU_HOST_RESERVATION = _compute_gpu_host_reservation(cpu_budget)
+    Parameters
+    ----------
+    cpu_budget:
+        Optional upper bound on the CPU threads that should remain available to
+        BLAS workloads.  When provided the reservation heuristic scales its
+        result relative to this limit instead of the raw system CPU count.
+    refresh:
+        Force a recomputation of the cached reservation value even when the
+        inputs have not changed.
+    """
+
+    global _GPU_HOST_RESERVATION, _GPU_HOST_RESERVATION_BUDGET
+
+    if cpu_budget is not None:
+        try:
+            budget = max(0, int(cpu_budget))
+        except (TypeError, ValueError):
+            budget = None
+    else:
+        budget = system_cpu_count()
+
+    if refresh or _GPU_HOST_RESERVATION is None or _GPU_HOST_RESERVATION_BUDGET != budget:
+        _GPU_HOST_RESERVATION = _compute_gpu_host_reservation(budget)
+        _GPU_HOST_RESERVATION_BUDGET = budget
+
     return _GPU_HOST_RESERVATION
 
 
@@ -519,25 +543,36 @@ def recommended_thread_count(
         room for GPU command submission.
     """
 
-    cpu_budget = system_cpu_count()
-    if cpu_budget is None:
-        return None
+    system_threads = system_cpu_count()
 
-    reservation = _compute_gpu_host_reservation(cpu_budget if consider_gpu else None)
-    global _GPU_HOST_RESERVATION
-    _GPU_HOST_RESERVATION = reservation
-    if consider_gpu and reservation is not None and reservation > 0:
-        cpu_budget = max(1, cpu_budget - min(reservation, cpu_budget - 1))
-
-    # Honour explicit hints when they restrict the process.
+    env_limit: int | None = None
     if clamp_to_env:
         hints = [_read_int_env(var) for var in _THREAD_HINT_SOURCES]
         hints = [hint for hint in hints if hint is not None and hint > 0]
         if hints:
-            cpu_budget = min(cpu_budget, min(hints))
+            env_limit = min(hints)
+
+    if system_threads is None and env_limit is None:
+        return None
+
+    available = system_threads if system_threads is not None else env_limit
+    if env_limit is not None:
+        available = min(available, env_limit) if available is not None else env_limit
+
+    if available is None:
+        return None
+
+    if consider_gpu:
+        reservation = gpu_host_thread_reservation(available, refresh=True)
+        if reservation is not None and available > 0:
+            deductible = available - 1 if available > 1 else 0
+            if deductible > 0:
+                available = max(1, available - min(reservation, deductible))
+
+    available = max(1, int(available))
 
     if not problem_size:
-        return cpu_budget
+        return available
 
     m, n, k = (max(0, int(d)) for d in problem_size)
     if m == 0 or n == 0 or k == 0:
@@ -551,8 +586,8 @@ def recommended_thread_count(
     work_estimate = max(1, m * n * k)
     tile_capacity = max(m, n, k)
     dynamic_budget = max(1, int(math.sqrt(work_estimate)) // max(1, min(m, n, k)))
-    proposed = max(1, min(tile_capacity, cpu_budget, dynamic_budget or 1))
-    return max(1, min(cpu_budget, proposed))
+    proposed = max(1, min(tile_capacity, available, dynamic_budget or 1))
+    return max(1, min(available, proposed))
 
 
 def _determine_thread_hint() -> tuple[int | None, str | None]:
@@ -600,7 +635,9 @@ def synchronise_thread_hints(*, propagate: bool = False) -> int | None:
 
     if propagate:
         _propagate_thread_hint(hint)
-        _propagate_gpu_host_hint(gpu_host_thread_reservation(refresh=True))
+        _propagate_gpu_host_hint(
+            gpu_host_thread_reservation(hint, refresh=True)
+        )
     return hint
 
 
@@ -637,7 +674,9 @@ def auto_tune_threads(
 
     if propagate:
         _propagate_thread_hint(recommendation)
-        _propagate_gpu_host_hint(gpu_host_thread_reservation())
+        _propagate_gpu_host_hint(
+            gpu_host_thread_reservation(recommendation, refresh=True)
+        )
     return recommendation
 
 
