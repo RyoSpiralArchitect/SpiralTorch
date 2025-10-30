@@ -97,25 +97,75 @@ pub fn ramanujan_pi_with_tolerance(tolerance: f64, max_iterations: usize) -> (f6
 pub struct LeechProjector {
     sqrt_rank: f64,
     weight: f64,
+    ramanujan_iterations: usize,
+    ramanujan_pi: f64,
+    ramanujan_normalizer: f64,
 }
 
 impl LeechProjector {
     /// Creates a projector for the provided Z-space rank and weighting factor.
     pub fn new(rank: usize, weight: f64) -> Self {
+        Self::with_ramanujan_iterations(rank, weight, 0)
+    }
+
+    /// Creates a projector that incorporates the provided Ramanujan π
+    /// approximation order as a normalising factor. An iteration count of zero
+    /// disables the Ramanujan weighting and behaves identically to [`Self::new`].
+    pub fn with_ramanujan_iterations(rank: usize, weight: f64, iterations: usize) -> Self {
+        let sqrt_rank = (rank.max(1) as f64).sqrt();
+        let weight = weight.max(0.0);
+        let iterations = iterations;
+        let (ramanujan_pi, ramanujan_normalizer) = if iterations == 0 {
+            (PI, 1.0)
+        } else {
+            let approximation = ramanujan_pi(iterations).max(f64::EPSILON);
+            let ratio = PI / approximation;
+            (approximation, ratio)
+        };
         Self {
-            sqrt_rank: (rank.max(1) as f64).sqrt(),
-            weight: weight.max(0.0),
+            sqrt_rank,
+            weight,
+            ramanujan_iterations: iterations,
+            ramanujan_pi,
+            ramanujan_normalizer,
         }
     }
 
+    /// Returns the number of Ramanujan iterations baked into this projector.
+    pub fn ramanujan_iterations(&self) -> usize {
+        self.ramanujan_iterations
+    }
+
+    /// Returns the Ramanujan π approximation associated with this projector.
+    pub fn ramanujan_pi(&self) -> f64 {
+        self.ramanujan_pi
+    }
+
+    /// Returns the multiplicative normaliser derived from the Ramanujan π
+    /// approximation (π / approximation). When Ramanujan weighting is disabled
+    /// this value is `1.0`.
+    pub fn ramanujan_ratio(&self) -> f64 {
+        self.ramanujan_normalizer
+    }
+
+    /// Returns the absolute deviation of the Ramanujan approximation from π.
+    pub fn ramanujan_delta(&self) -> f64 {
+        (self.ramanujan_pi - PI).abs()
+    }
+
     /// Projects the provided geodesic magnitude into a density correction using
-    /// the Leech lattice baseline. When the projector weight is zero the result
-    /// is short-circuited to avoid unnecessary floating point work.
+    /// the Leech lattice baseline blended with the Ramanujan normaliser. When
+    /// the projector weight or geodesic magnitude are effectively zero the
+    /// result is short-circuited to avoid unnecessary floating point work.
     pub fn enrich(&self, geodesic: f64) -> f64 {
-        if self.weight <= f64::EPSILON {
+        if self.weight <= f64::EPSILON || geodesic <= f64::EPSILON {
             0.0
         } else {
-            self.weight * LEECH_PACKING_DENSITY * geodesic * self.sqrt_rank
+            self.weight
+                * LEECH_PACKING_DENSITY
+                * geodesic
+                * self.sqrt_rank
+                * self.ramanujan_normalizer
         }
     }
 }
@@ -146,5 +196,14 @@ mod tests {
         assert!(enriched > 0.0);
         let zero_weight = LeechProjector::new(24, 0.0);
         assert_eq!(zero_weight.enrich(10.0), 0.0);
+    }
+
+    #[test]
+    fn leech_projector_ramanujan_weighting_scales() {
+        let vanilla = LeechProjector::new(24, 1.0);
+        let weighted = LeechProjector::with_ramanujan_iterations(24, 1.0, 4);
+        assert!(weighted.ramanujan_ratio() >= 1.0);
+        assert!(weighted.enrich(1.0) >= vanilla.enrich(1.0));
+        assert!(weighted.ramanujan_delta() >= 0.0);
     }
 }
