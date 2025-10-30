@@ -102,6 +102,54 @@ def hypergrad_summary_dict(
         },
     }
 
+    momentum_summary_attr = getattr(tape, "momentum_summary", None)
+    if callable(momentum_summary_attr):
+        momentum_summary = momentum_summary_attr()
+        metrics["momentum"] = {
+            "beta": float(_callable_attr(tape, "momentum_beta")()),
+            "summary": {
+                "l1": float(_callable_attr(momentum_summary, "l1")()),
+                "l2": float(_callable_attr(momentum_summary, "l2")()),
+                "linf": float(_callable_attr(momentum_summary, "linf")()),
+                "mean_abs": float(_callable_attr(momentum_summary, "mean_abs")()),
+                "rms": float(_callable_attr(momentum_summary, "rms")()),
+                "count": int(_callable_attr(momentum_summary, "count")()),
+                "sum_squares": float(_callable_attr(momentum_summary, "sum_squares")()),
+            },
+            "transport_energy": float(_callable_attr(tape, "transport_energy")()),
+            "transport_samples": int(_callable_attr(tape, "transport_samples")()),
+        }
+
+    telemetry_attr = getattr(tape, "telemetry", None)
+    if callable(telemetry_attr):
+        telemetry = telemetry_attr()
+        metrics["telemetry"] = {
+            "shape": tuple(int(value) for value in _callable_attr(telemetry, "shape")()),
+            "volume": int(_callable_attr(telemetry, "volume")()),
+            "curvature": float(_callable_attr(telemetry, "curvature")()),
+            "learning_rate": float(_callable_attr(telemetry, "learning_rate")()),
+            "saturation": float(_callable_attr(telemetry, "saturation")()),
+            "porosity": float(_callable_attr(telemetry, "porosity")()),
+            "tolerance": float(_callable_attr(telemetry, "tolerance")()),
+            "max_depth": int(_callable_attr(telemetry, "max_depth")()),
+            "max_volume": int(_callable_attr(telemetry, "max_volume")()),
+            "momentum_beta": float(_callable_attr(telemetry, "momentum_beta")()),
+            "transport_energy": float(_callable_attr(telemetry, "transport_energy")()),
+            "transport_samples": int(_callable_attr(telemetry, "transport_samples")()),
+        }
+        telemetry_momentum_attr = getattr(telemetry, "momentum_summary", None)
+        if callable(telemetry_momentum_attr):
+            telemetry_momentum = telemetry_momentum_attr()
+            metrics["telemetry"]["momentum"] = {
+                "l1": float(_callable_attr(telemetry_momentum, "l1")()),
+                "l2": float(_callable_attr(telemetry_momentum, "l2")()),
+                "linf": float(_callable_attr(telemetry_momentum, "linf")()),
+                "mean_abs": float(_callable_attr(telemetry_momentum, "mean_abs")()),
+                "rms": float(_callable_attr(telemetry_momentum, "rms")()),
+                "count": int(_callable_attr(telemetry_momentum, "count")()),
+                "sum_squares": float(_callable_attr(telemetry_momentum, "sum_squares")()),
+            }
+
     if include_gradient:
         gradient = _callable_attr(tape, "gradient")()
         metrics["gradient"] = [float(value) for value in gradient]

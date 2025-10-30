@@ -3496,12 +3496,106 @@ impl LanguageWaveEncoder {
 /// integrate Euclidean tensors, complex waves, or direct text streams emitted
 /// by [`LanguageWaveEncoder`]. Every update is projected back onto the
 /// Poincaré ball so state never escapes the non-Euclidean manifold.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HypergradTelemetry {
+    summary: GradientSummary,
+    momentum: GradientSummary,
+    curvature: f32,
+    learning_rate: f32,
+    saturation: f32,
+    porosity: f32,
+    tolerance: f32,
+    max_depth: usize,
+    max_volume: usize,
+    rows: usize,
+    cols: usize,
+    momentum_beta: f32,
+    transport_energy: f32,
+    transport_samples: usize,
+}
+
+impl HypergradTelemetry {
+    #[inline]
+    pub fn summary(&self) -> GradientSummary {
+        self.summary
+    }
+
+    #[inline]
+    pub fn momentum_summary(&self) -> GradientSummary {
+        self.momentum
+    }
+
+    #[inline]
+    pub fn curvature(&self) -> f32 {
+        self.curvature
+    }
+
+    #[inline]
+    pub fn learning_rate(&self) -> f32 {
+        self.learning_rate
+    }
+
+    #[inline]
+    pub fn saturation(&self) -> f32 {
+        self.saturation
+    }
+
+    #[inline]
+    pub fn porosity(&self) -> f32 {
+        self.porosity
+    }
+
+    #[inline]
+    pub fn tolerance(&self) -> f32 {
+        self.tolerance
+    }
+
+    #[inline]
+    pub fn max_depth(&self) -> usize {
+        self.max_depth
+    }
+
+    #[inline]
+    pub fn max_volume(&self) -> usize {
+        self.max_volume
+    }
+
+    #[inline]
+    pub fn shape(&self) -> (usize, usize) {
+        (self.rows, self.cols)
+    }
+
+    #[inline]
+    pub fn volume(&self) -> usize {
+        self.rows.saturating_mul(self.cols)
+    }
+
+    #[inline]
+    pub fn momentum_beta(&self) -> f32 {
+        self.momentum_beta
+    }
+
+    #[inline]
+    pub fn transport_energy(&self) -> f32 {
+        self.transport_energy
+    }
+
+    #[inline]
+    pub fn transport_samples(&self) -> usize {
+        self.transport_samples
+    }
+}
+
 pub struct AmegaHypergrad {
     curvature: f32,
     learning_rate: f32,
     rows: usize,
     cols: usize,
     gradient: Vec<f32>,
+    momentum: Vec<f32>,
+    momentum_beta: f32,
+    transport_energy: f32,
+    transport_samples: usize,
     topos: topos::OpenCartesianTopos,
 }
 
@@ -4396,6 +4490,10 @@ impl AmegaHypergrad {
             rows,
             cols,
             gradient: vec![0.0; rows * cols],
+            momentum: vec![0.0; rows * cols],
+            momentum_beta: 0.0,
+            transport_energy: 0.0,
+            transport_samples: 0,
             topos,
         })
     }
@@ -4433,6 +4531,10 @@ impl AmegaHypergrad {
             rows,
             cols,
             gradient: vec![0.0; capacity],
+            momentum: vec![0.0; capacity],
+            momentum_beta: 0.0,
+            transport_energy: 0.0,
+            transport_samples: 0,
             topos,
         })
     }
@@ -4465,6 +4567,99 @@ impl AmegaHypergrad {
     /// Summarise the accumulated gradient using basic norm statistics.
     pub fn summary(&self) -> GradientSummary {
         GradientSummary::from_slice(&self.gradient)
+    }
+
+    /// Returns the summary of the internal hyperbolic momentum buffer.
+    pub fn momentum_summary(&self) -> GradientSummary {
+        GradientSummary::from_slice(&self.momentum)
+    }
+
+    /// Returns the exponential smoothing factor used for the momentum buffer.
+    pub fn momentum_beta(&self) -> f32 {
+        self.momentum_beta
+    }
+
+    /// Configures the smoothing factor used by the hypergradient momentum.
+    pub fn configure_momentum(&mut self, beta: f32) -> PureResult<()> {
+        if !beta.is_finite() || beta < 0.0 || beta >= 1.0 {
+            return Err(TensorError::InvalidValue {
+                label: "hypergrad_momentum_beta",
+            });
+        }
+        self.momentum_beta = beta;
+        if beta == 0.0 {
+            self.reset_momentum();
+        }
+        Ok(())
+    }
+
+    /// Clears the accumulated momentum envelope and transport diagnostics.
+    pub fn reset_momentum(&mut self) {
+        for value in &mut self.momentum {
+            *value = 0.0;
+        }
+        self.transport_energy = 0.0;
+        self.transport_samples = 0;
+    }
+
+    /// Returns the exponentially averaged conformal energy observed during
+    /// transport steps.
+    pub fn transport_energy(&self) -> f32 {
+        self.transport_energy
+    }
+
+    /// Number of transport samples that contributed to the energy estimate.
+    pub fn transport_samples(&self) -> usize {
+        self.transport_samples
+    }
+
+    fn telemetry_snapshot(&self) -> HypergradTelemetry {
+        let guard = self.topos();
+        HypergradTelemetry {
+            summary: self.summary(),
+            momentum: self.momentum_summary(),
+            curvature: self.curvature,
+            learning_rate: self.learning_rate,
+            saturation: guard.saturation(),
+            porosity: guard.porosity(),
+            tolerance: guard.tolerance(),
+            max_depth: guard.max_depth(),
+            max_volume: guard.max_volume(),
+            rows: self.rows,
+            cols: self.cols,
+            momentum_beta: self.momentum_beta,
+            transport_energy: self.transport_energy,
+            transport_samples: self.transport_samples,
+        }
+    }
+
+    /// Returns a telemetry bundle that mirrors the tape's guard envelope and
+    /// accumulated statistics. Automation layers use the payload to translate
+    /// hypergrad magnitudes into Desire feedback and WGSL operator hints.
+    pub fn telemetry(&self) -> HypergradTelemetry {
+        self.telemetry_snapshot()
+    }
+
+    /// Builds a Desire gradient interpretation by pairing the hypergrad tape's
+    /// summary with the provided Euclidean gradient statistics.
+    pub fn desire_interpretation(&self, real: GradientSummary) -> DesireGradientInterpretation {
+        DesireGradientInterpretation::from_summaries(self.summary(), real)
+    }
+
+    /// Derives a Desire control packet scaled by `gain` using the tape's
+    /// telemetry and the supplied Euclidean gradient summary.
+    pub fn desire_control_with_gain(
+        &self,
+        real: GradientSummary,
+        gain: f32,
+    ) -> DesireGradientControl {
+        DesireGradientControl::from_interpretation_with_gain(self.desire_interpretation(real), gain)
+    }
+
+    /// Convenience wrapper over [`desire_control_with_gain`] that applies the
+    /// recommended gain of `1.0`.
+    pub fn desire_control(&self, real: GradientSummary) -> DesireGradientControl {
+        self.desire_control_with_gain(real, 1.0)
     }
 
     /// Returns the guard topos enforcing open-cartesian safety constraints.
@@ -4502,6 +4697,7 @@ impl AmegaHypergrad {
         self.learning_rate = learning_rate;
         self.topos = topos;
         self.reset();
+        self.reset_momentum();
         Ok(())
     }
 
@@ -4588,11 +4784,43 @@ impl AmegaHypergrad {
         let tolerance = self.topos.tolerance();
         {
             let data = weights.data_mut();
-            for (value, grad) in data.iter_mut().zip(self.gradient.iter()) {
+            let use_momentum = self.momentum_beta > 0.0;
+            let beta = self.momentum_beta;
+            let one_minus = 1.0 - beta;
+            let mut energy_sample = 0.0f32;
+            let mut sample_count = 0usize;
+            for ((value, grad), momentum) in data
+                .iter_mut()
+                .zip(self.gradient.iter())
+                .zip(self.momentum.iter_mut())
+            {
+                let effective_grad = if use_momentum {
+                    *momentum = beta * *momentum + one_minus * *grad;
+                    *momentum
+                } else {
+                    *grad
+                };
+                if effective_grad.is_finite() {
+                    energy_sample += effective_grad * effective_grad;
+                    sample_count += 1;
+                }
                 let denom = 1.0 - self.curvature * (*value) * (*value);
                 let step = self.learning_rate / denom.abs().max(tolerance);
-                let updated = *value - step * *grad;
+                let updated = *value - step * effective_grad;
                 *value = self.topos.saturate(updated);
+            }
+            if sample_count > 0 {
+                let sample_norm = energy_sample / sample_count as f32;
+                if sample_norm.is_finite() {
+                    self.transport_samples = self.transport_samples.saturating_add(1);
+                    if self.transport_samples == 1 {
+                        self.transport_energy = sample_norm;
+                    } else {
+                        let alpha = 0.1f32;
+                        self.transport_energy =
+                            (1.0 - alpha) * self.transport_energy + alpha * sample_norm;
+                    }
+                }
             }
         }
         let projected = weights.project_to_poincare(self.curvature)?;
@@ -5491,6 +5719,40 @@ mod tests {
             .gradient()
             .iter()
             .any(|value| value.abs() > f32::EPSILON));
+    }
+
+    #[test]
+    fn amega_hypergrad_telemetry_reports_guard_state() {
+        let mut hypergrad = AmegaHypergrad::new(-1.1, 0.03, 1, 4).unwrap();
+        let tensor = Tensor::from_vec(1, 4, vec![0.5, -0.25, 0.75, -0.125]).unwrap();
+        hypergrad.accumulate_wave(&tensor).unwrap();
+        let telemetry = hypergrad.telemetry();
+        assert_eq!(telemetry.shape(), (1, 4));
+        assert_eq!(telemetry.volume(), 4);
+        assert_eq!(telemetry.curvature(), -1.1);
+        assert_eq!(telemetry.learning_rate(), 0.03);
+        let summary = telemetry.summary();
+        assert_eq!(summary.count(), 4);
+        assert!(summary.l1() > 0.0);
+        assert!(telemetry.saturation() > 0.0);
+        assert!(telemetry.tolerance() > 0.0);
+        assert!(telemetry.max_volume() >= telemetry.volume());
+        assert!(telemetry.max_depth() > 0);
+    }
+
+    #[test]
+    fn amega_hypergrad_desire_control_matches_gain() {
+        let mut hypergrad = AmegaHypergrad::new(-0.95, 0.04, 1, 3).unwrap();
+        let tensor = Tensor::from_vec(1, 3, vec![0.8, -0.4, 0.2]).unwrap();
+        hypergrad.accumulate_wave(&tensor).unwrap();
+        let real = GradientSummary::from_slice(&[0.4, -0.2, 0.1]);
+        let interpretation = hypergrad.desire_interpretation(real);
+        assert!(interpretation.hyper_pressure() > interpretation.real_pressure());
+        let neutral = hypergrad.desire_control(real);
+        let tempered = hypergrad.desire_control_with_gain(real, 0.5);
+        assert!(neutral.penalty_gain() >= tempered.penalty_gain());
+        assert!(neutral.hyper_rate_scale() >= tempered.hyper_rate_scale());
+        assert!(neutral.events().bits() != 0);
     }
 
     #[test]

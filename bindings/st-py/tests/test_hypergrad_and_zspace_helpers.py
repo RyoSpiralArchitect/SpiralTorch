@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 import spiraltorch as st
 
 
@@ -34,6 +35,54 @@ def test_hypergrad_helper_accepts_mapping_topos() -> None:
     assert guard.curvature() == -0.9
     assert guard.max_depth() == 4
     assert guard.max_volume() == 16
+
+
+def test_hypergrad_telemetry_reports_metrics() -> None:
+    tape = st.hypergrad(1, 3, curvature=-0.95, learning_rate=0.04)
+    tensor = st.Tensor((1, 3), data=[0.5, -0.25, 0.75])
+    tape.accumulate_wave(tensor)
+    telemetry = tape.telemetry()
+    assert telemetry.shape() == (1, 3)
+    assert telemetry.volume() == 3
+    assert telemetry.curvature() == -0.95
+    assert telemetry.learning_rate() == 0.04
+    summary = telemetry.summary()
+    assert summary.count() == 3
+    assert telemetry.tolerance() > 0.0
+    assert telemetry.saturation() > 0.0
+    assert telemetry.max_volume() >= telemetry.volume()
+
+
+def test_hypergrad_momentum_and_transport_metrics() -> None:
+    tape = st.hypergrad(1, 3, curvature=-0.9, learning_rate=0.05)
+    tape.configure_momentum(0.6)
+    tensor = st.Tensor((1, 3), data=[0.2, -0.1, 0.05])
+    weights = st.Tensor((1, 3), data=[0.05, -0.02, 0.01])
+    tape.accumulate_wave(tensor)
+    tape.apply(weights)
+    telemetry = tape.telemetry()
+    assert pytest.approx(tape.momentum_beta()) == 0.6
+    assert telemetry.momentum_beta() == pytest.approx(0.6)
+    momentum_summary = telemetry.momentum_summary()
+    assert momentum_summary.count() == 3
+    assert telemetry.transport_samples() >= 1
+    assert telemetry.transport_energy() >= 0.0
+    local_momentum = tape.momentum_summary()
+    assert local_momentum.count() == 3
+
+
+def test_hypergrad_desire_feedback_interfaces() -> None:
+    tape = st.hypergrad(1, 2, curvature=-0.9, learning_rate=0.05)
+    tensor = st.Tensor((1, 2), data=[0.7, -0.3])
+    tape.accumulate_wave(tensor)
+    real = st.GradientSummary.from_values([0.35, -0.15])
+    interpretation = tape.desire_interpretation(real)
+    assert interpretation.hyper_pressure() > interpretation.real_pressure()
+    control = tape.desire_control(real)
+    damped = tape.desire_control(real, gain=0.5)
+    assert control.penalty_gain() >= damped.penalty_gain()
+    assert control.hyper_rate_scale() >= damped.hyper_rate_scale()
+    assert "lr" in " ".join(control.events())
 
 
 def test_hypergrad_topos_factory_returns_guard() -> None:
