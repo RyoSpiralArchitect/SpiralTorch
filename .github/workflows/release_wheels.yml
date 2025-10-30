@@ -6,7 +6,9 @@ on:
       - 'v*'
 
 permissions:
+  actions: read
   contents: write
+  id-token: write
 
 jobs:
   wheels:
@@ -41,7 +43,30 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
+      - name: Generate checksums for release wheels
+        run: |
+          set -euo pipefail
+          find dist -type f -name '*.whl' -print0 | sort -z | xargs -0 sha256sum > dist/wheels.sha256
+          find dist -type f -name '*.whl' -print0 | sort -z | xargs -0 sha512sum > dist/wheels.sha512
+      - name: Generate SBOM for release payload
+        uses: anchore/sbom-action@v0.16.0
+        with:
+          path: dist
+          format: cyclonedx-json
+          output-file: dist/spiraltorch-${{ github.ref_name }}-sbom.cdx.json
+          artifact-name: spiraltorch-${{ github.ref_name }}-sbom
+          upload-release-assets: false
+      - name: Generate SLSA provenance for wheels
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: 'dist/**/*.whl'
+      - name: Sign release artifacts with Sigstore
+        uses: sigstore/gh-action-sigstore@v2.3.1
+        with:
+          inputs: |
+            dist/**/*.whl
       - name: Create/Update GitHub Release with assets
         uses: softprops/action-gh-release@v1
         with:
-          files: dist/**/* 
+          files: |
+            dist/**/*
