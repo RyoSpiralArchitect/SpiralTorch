@@ -1142,6 +1142,20 @@ impl PyTensor {
         Ok(PyTensor { inner: tensor })
     }
 
+    /// Row-wise softmax probabilities paired with hardmax mask.
+    #[pyo3(signature = (*, backend=None))]
+    pub fn row_softmax_hardmax(
+        &self,
+        backend: Option<&str>,
+        py: Python<'_>,
+    ) -> PyResult<(PyTensor, PyTensor)> {
+        let backend = parse_softmax_backend(backend);
+        let (softmax, hardmax) = py
+            .allow_threads(|| self.inner.row_softmax_hardmax_with_backend(backend))
+            .map_err(tensor_err_to_py)?;
+        Ok((PyTensor { inner: softmax }, PyTensor { inner: hardmax }))
+    }
+
     /// Row-wise hardmax with optional backend override.
     #[pyo3(signature = (*, backend=None))]
     pub fn row_hardmax(&self, backend: Option<&str>, py: Python<'_>) -> PyResult<PyTensor> {

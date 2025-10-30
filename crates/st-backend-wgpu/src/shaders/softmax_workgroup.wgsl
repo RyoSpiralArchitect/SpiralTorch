@@ -8,11 +8,12 @@ struct Params {
     chimera_tile: u32,
     chimera_stripes: u32,
     flags: u32,
-    _pad: u32,
+    mask_stride: u32,
 };
 
 const FLAG_CHIMERA: u32 = 1u;
-const FLAG_HARDMAX: u32 = 1u << 1u;
+const FLAG_HARDMAX_ONLY: u32 = 1u << 1u;
+const FLAG_HARDMAX_MASK: u32 = 1u << 2u;
 
 @group(0) @binding(0)
 var<storage, read> input: array<f32>;
@@ -22,6 +23,9 @@ var<storage, read_write> output: array<f32>;
 
 @group(0) @binding(2)
 var<uniform> params: Params;
+
+@group(0) @binding(3)
+var<storage, read_write> mask_output: array<f32>;
 
 var<workgroup> shared_max: array<f32, WORKGROUP_SIZE>;
 var<workgroup> shared_sum: array<f32, WORKGROUP_SIZE>;
@@ -107,7 +111,10 @@ fn main_cs(
 
     let row_max = shared_max[0];
 
-    if ((params.flags & FLAG_HARDMAX) != 0u) {
+    let wants_mask = (params.flags & FLAG_HARDMAX_MASK) != 0u;
+    let hardmax_only = (params.flags & FLAG_HARDMAX_ONLY) != 0u;
+
+    if (hardmax_only) {
         idx = tid;
         loop {
             if (idx >= cols) {
@@ -116,7 +123,11 @@ fn main_cs(
             let offset = row_offset(row, in_stride, idx);
             let value = input[offset];
             let is_peak = select(0.0, 1.0, value == row_max);
-            output[row_offset(row, out_stride, idx)] = is_peak;
+            let out_index = row_offset(row, out_stride, idx);
+            output[out_index] = is_peak;
+            if (wants_mask) {
+                mask_output[row_offset(row, params.mask_stride, idx)] = is_peak;
+            }
             idx += WORKGROUP_SIZE;
         }
         return;
@@ -151,5 +162,19 @@ fn main_cs(
         let offset = row_offset(row, out_stride, idx);
         output[offset] = output[offset] * inv_sum;
         idx += WORKGROUP_SIZE;
+    }
+
+    if (wants_mask) {
+        idx = tid;
+        loop {
+            if (idx >= cols) {
+                break;
+            }
+            let offset = row_offset(row, in_stride, idx);
+            let value = input[offset];
+            let is_peak = select(0.0, 1.0, value == row_max);
+            mask_output[row_offset(row, params.mask_stride, idx)] = is_peak;
+            idx += WORKGROUP_SIZE;
+        }
     }
 }
