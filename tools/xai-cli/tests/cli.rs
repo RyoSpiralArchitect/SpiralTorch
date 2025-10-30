@@ -15,6 +15,10 @@ fn write_tensor(path: &std::path::Path, tensor: &DiskTensor) {
     fs::write(path, serde_json::to_string(tensor).unwrap()).unwrap();
 }
 
+fn read_tensor(path: &std::path::Path) -> DiskTensor {
+    serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap()
+}
+
 #[derive(serde::Deserialize)]
 struct StatisticsFile {
     min: f32,
@@ -262,6 +266,89 @@ fn grad_cam_cli_applies_post_processing_and_focus_mask() {
         .data
         .iter()
         .all(|value| (*value - 1.0).abs() < 1e-6 || value.abs() < 1e-6));
+}
+
+#[test]
+fn grad_cam_cli_emits_overlays() {
+    let dir = tempdir().unwrap();
+    let activations_path = dir.path().join("activations.json");
+    let gradients_path = dir.path().join("gradients.json");
+    let output_path = dir.path().join("report_overlay.json");
+    let base_path = dir.path().join("base.json");
+    let overlay_path = dir.path().join("overlay.json");
+    let gated_overlay_path = dir.path().join("gated_overlay.json");
+
+    let activations = DiskTensor {
+        rows: 2,
+        cols: 4,
+        data: vec![1.0, 1.0, 1.0, 1.0, 0.5, 1.0, 1.5, 2.0],
+    };
+    let gradients = DiskTensor {
+        rows: 2,
+        cols: 4,
+        data: vec![1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.4],
+    };
+    let base = DiskTensor {
+        rows: 2,
+        cols: 2,
+        data: vec![0.1, 0.3, 0.5, 0.7],
+    };
+
+    write_tensor(&activations_path, &activations);
+    write_tensor(&gradients_path, &gradients);
+    write_tensor(&base_path, &base);
+
+    run_cli(&[
+        "--overlay-base",
+        base_path.to_str().unwrap(),
+        "--overlay-alpha",
+        "0.25",
+        "--overlay-out",
+        overlay_path.to_str().unwrap(),
+        "--gated-overlay-out",
+        gated_overlay_path.to_str().unwrap(),
+        "--focus-threshold",
+        "0.6",
+        "grad-cam",
+        "--activations",
+        activations_path.to_str().unwrap(),
+        "--gradients",
+        gradients_path.to_str().unwrap(),
+        "--height",
+        "2",
+        "--width",
+        "2",
+        "--output",
+        output_path.to_str().unwrap(),
+    ]);
+
+    let report: AttributionReport =
+        serde_json::from_str(&fs::read_to_string(&output_path).unwrap()).unwrap();
+    let overlay_disk = read_tensor(&overlay_path);
+    let gated_overlay_disk = read_tensor(&gated_overlay_path);
+
+    assert_eq!(overlay_disk.rows, report.shape().0);
+    assert_eq!(overlay_disk.cols, report.shape().1);
+    assert_eq!(gated_overlay_disk.rows, report.shape().0);
+    assert_eq!(gated_overlay_disk.cols, report.shape().1);
+
+    let alpha = 0.25f32;
+    for ((&heatmap, (&base_value, &overlay_value)), &gated_value) in report
+        .values
+        .iter()
+        .zip(base.data.iter().zip(overlay_disk.data.iter()))
+        .zip(gated_overlay_disk.data.iter())
+    {
+        let expected_overlay = base_value * (1.0 - alpha) + heatmap * alpha;
+        assert!((overlay_value - expected_overlay).abs() < 1e-5);
+
+        let mask = if heatmap >= 0.6 { 1.0 } else { 0.0 };
+        let gated = heatmap * mask;
+        let combined = base_value * (1.0 - alpha) + gated * alpha;
+        let emphasised = heatmap.clamp(0.0, 1.0);
+        let expected_gated = combined * (1.0 - alpha) + emphasised * alpha;
+        assert!((gated_value - expected_gated).abs() < 1e-5);
+    }
 }
 
 #[test]

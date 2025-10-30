@@ -83,6 +83,22 @@ struct Cli {
     #[arg(long, global = true, value_hint = ValueHint::FilePath)]
     stats_out: Option<PathBuf>,
 
+    /// Base tensor used when constructing overlay artefacts from the generated heatmap
+    #[arg(long, global = true, value_hint = ValueHint::FilePath)]
+    overlay_base: Option<PathBuf>,
+
+    /// Alpha applied when blending the generated heatmap with the provided base tensor
+    #[arg(long, global = true, default_value_t = 0.35)]
+    overlay_alpha: f32,
+
+    /// Destination for the blended heatmap overlay artefact
+    #[arg(long, global = true, value_hint = ValueHint::FilePath)]
+    overlay_out: Option<PathBuf>,
+
+    /// Destination for the threshold-gated overlay artefact
+    #[arg(long, global = true, value_hint = ValueHint::FilePath)]
+    gated_overlay_out: Option<PathBuf>,
+
     /// Apply an odd-sized box blur to smooth the final heatmap before emitting it
     #[arg(long, global = true, value_hint = ValueHint::Other)]
     smooth_kernel: Option<usize>,
@@ -212,6 +228,24 @@ fn try_main() -> Result<()> {
 fn finalise_output(cli: &Cli, mut output: AttributionOutput, destination: &Path) -> Result<()> {
     output = apply_post_processing(cli, output)?;
 
+    let overlay_requested = cli.overlay_out.is_some() || cli.gated_overlay_out.is_some();
+
+    if overlay_requested && cli.overlay_base.is_none() {
+        return Err(Box::new(io::Error::new(
+            ErrorKind::InvalidInput,
+            "--overlay-base is required when emitting overlay artefacts",
+        )));
+    }
+
+    if (overlay_requested || cli.overlay_base.is_some())
+        && (!(0.0..=1.0).contains(&cli.overlay_alpha) || !cli.overlay_alpha.is_finite())
+    {
+        return Err(Box::new(io::Error::new(
+            ErrorKind::InvalidInput,
+            "--overlay-alpha must be between 0.0 and 1.0",
+        )));
+    }
+
     let statistics = if cli.include_stats || cli.print_stats || cli.stats_out.is_some() {
         Some(output.statistics())
     } else {
@@ -236,6 +270,31 @@ fn finalise_output(cli: &Cli, mut output: AttributionOutput, destination: &Path)
 
     if let Some(path) = cli.heatmap_out.as_ref() {
         write_tensor_json(&output.map, path)?;
+    }
+
+    let overlay_base = if overlay_requested {
+        Some(read_tensor(
+            cli.overlay_base
+                .as_ref()
+                .expect("overlay base checked above"),
+        )?)
+    } else {
+        None
+    };
+
+    if let (Some(base), Some(path)) = (overlay_base.as_ref(), cli.overlay_out.as_ref()) {
+        let overlay = output
+            .overlay(base, cli.overlay_alpha)
+            .map_err(|err| Box::new(err) as DynError)?;
+        write_tensor_json(&overlay, path)?;
+    }
+
+    if let (Some(base), Some(path)) = (overlay_base.as_ref(), cli.gated_overlay_out.as_ref()) {
+        let threshold = resolve_focus_threshold(cli).unwrap_or(0.5);
+        let overlay = output
+            .gated_overlay(base, threshold, cli.overlay_alpha)
+            .map_err(|err| Box::new(err) as DynError)?;
+        write_tensor_json(&overlay, path)?;
     }
 
     if let Some(path) = cli.stats_out.as_ref() {
@@ -303,8 +362,13 @@ fn apply_post_processing(cli: &Cli, output: AttributionOutput) -> Result<Attribu
 }
 
 fn resolve_focus_threshold(cli: &Cli) -> Option<f32> {
-    cli.focus_threshold
-        .or_else(|| cli.focus_mask_out.as_ref().map(|_| 0.5))
+    cli.focus_threshold.or_else(|| {
+        if cli.focus_mask_out.is_some() || cli.gated_overlay_out.is_some() {
+            Some(0.5)
+        } else {
+            None
+        }
+    })
 }
 
 fn run_grad_cam(args: &GradCamArgs) -> Result<AttributionOutput> {
