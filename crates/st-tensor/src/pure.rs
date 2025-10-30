@@ -41,6 +41,7 @@ use crate::dlpack::{
     call_managed_deleter, drop_exported_state, DLDataType, DLDataTypeCode, DLDevice, DLDeviceType,
     DLManagedTensor, DLTensor, ExportData, ForeignTensor, ManagedTensorState,
 };
+use crate::hardmax::{HardmaxBackend, HardmaxFusionPlan, HardmaxFusionResult, HardmaxMode};
 use crate::memory::{
     aligned_from_slice, aligned_from_vec, aligned_with_capacity, aligned_zeroed, is_ptr_aligned,
     AlignedVec,
@@ -333,6 +334,166 @@ impl fmt::Display for SoftmaxBackend {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.label())
     }
+}
+
+const SPIRAL_PROJECTOR_RANK: usize = 24;
+const SPIRAL_PROJECTOR_WEIGHT: f64 = 0.75;
+const SPIRAL_PROJECTOR_RAMANUJAN_ITERS: usize = 6;
+const SPIRAL_LEECH_PACKING_DENSITY: f64 = 0.001_929_574_309_403_922_5;
+const GOLDEN_RATIO: f64 = 1.618_033_988_749_894_8;
+const GOLDEN_RATIO_CONJUGATE: f64 = 0.618_033_988_749_894_8;
+const GOLDEN_RATIO_BIAS: f64 = 0.381_966_011_250_105_1;
+
+/// Aggregate telemetry captured while building the spiral consensus weights.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SpiralConsensusStats {
+    /// The golden ratio φ used for the fusion.
+    pub phi: f64,
+    /// The conjugate of φ (1/φ) scaling the softmax contribution.
+    pub phi_conjugate: f64,
+    /// Complementary bias (1 - 1/φ) applied to the hardmax mask.
+    pub phi_bias: f64,
+    /// Ratio between π and the Ramanujan approximation employed.
+    pub ramanujan_ratio: f64,
+    /// Absolute deviation between the approximation and true π.
+    pub ramanujan_delta: f64,
+    /// Average enrichment contributed by the Leech lattice weighting.
+    pub average_enrichment: f64,
+    /// Mean Shannon entropy observed in the softmax rows.
+    pub mean_entropy: f64,
+    /// Mean cardinality of the hardmax mask per row.
+    pub mean_hardmass: f64,
+    /// Average per-row coherence balancing entropy, hardmass, and enrichment.
+    pub spiral_coherence: f64,
+}
+
+/// Combined softmax, hardmax, and spiral consensus payload returned by
+/// [`Tensor::row_softmax_hardmax_spiral`].
+#[derive(Clone, Debug)]
+pub struct SpiralSoftmaxHardmax {
+    /// Softmax probabilities.
+    pub softmax: Tensor,
+    /// Hardmax mask (argmax indicators).
+    pub hardmax: Tensor,
+    /// Spiral consensus weights blending soft and hard responses.
+    pub spiral: Tensor,
+    /// Aggregated telemetry describing the consensus fusion.
+    pub metrics: SpiralConsensusStats,
+}
+
+impl SpiralSoftmaxHardmax {
+    /// Decomposes the payload into its constituent parts.
+    pub fn into_parts(self) -> (Tensor, Tensor, Tensor, SpiralConsensusStats) {
+        (self.softmax, self.hardmax, self.spiral, self.metrics)
+    }
+}
+
+fn ramanujan_pi(iterations: usize) -> f64 {
+    let iterations = iterations.max(1);
+    let base = 396_f64.powi(4);
+    let prefactor = (2.0 * 2.0_f64.sqrt()) / 9801.0;
+    let mut sum = 0.0_f64;
+    let mut factor = 1.0_f64;
+    for k in 0..iterations {
+        let kf = k as f64;
+        sum += factor * (1103.0 + 26390.0 * kf);
+        if k + 1 < iterations {
+            let next = kf + 1.0;
+            let numerator =
+                (4.0 * next - 3.0) * (4.0 * next - 2.0) * (4.0 * next - 1.0) * (4.0 * next);
+            let denominator = next.powi(4) * base;
+            factor *= numerator / denominator;
+        }
+    }
+    (prefactor * sum).recip()
+}
+
+pub(crate) fn spiral_softmax_hardmax_consensus(
+    softmax: &[f32],
+    hardmax: &[f32],
+    rows: usize,
+    cols: usize,
+) -> (Vec<f32>, SpiralConsensusStats) {
+    let expected = rows.saturating_mul(cols);
+    if expected == 0 || softmax.len() != expected || hardmax.len() != expected {
+        return (vec![0.0; expected], SpiralConsensusStats::default());
+    }
+
+    let approximation = ramanujan_pi(SPIRAL_PROJECTOR_RAMANUJAN_ITERS);
+    let pi = std::f64::consts::PI;
+    let ramanujan_ratio = if approximation > f64::EPSILON {
+        pi / approximation
+    } else {
+        1.0
+    };
+    let ramanujan_delta = (approximation - pi).abs();
+    let sqrt_rank = (SPIRAL_PROJECTOR_RANK as f64).sqrt();
+    let leech_scale =
+        SPIRAL_PROJECTOR_WEIGHT * SPIRAL_LEECH_PACKING_DENSITY * sqrt_rank * ramanujan_ratio;
+
+    let mut fused = vec![0.0; expected];
+    let mut total_entropy = 0.0_f64;
+    let mut total_hardmass = 0.0_f64;
+    let mut total_enrichment = 0.0_f64;
+    let mut total_coherence = 0.0_f64;
+
+    for row in 0..rows {
+        let offset = row * cols;
+        let row_soft = &softmax[offset..offset + cols];
+        let row_hard = &hardmax[offset..offset + cols];
+
+        let mut entropy = 0.0_f64;
+        let mut hardmass = 0.0_f64;
+
+        for (&prob, &mask) in row_soft.iter().zip(row_hard.iter()) {
+            let p = f64::from(prob.max(0.0));
+            if p > 0.0 {
+                entropy -= p * p.ln();
+            }
+            hardmass += f64::from(mask.max(0.0));
+        }
+
+        let geodesic = entropy * ramanujan_ratio + hardmass * GOLDEN_RATIO;
+        let enrichment = if geodesic > f64::EPSILON {
+            leech_scale * geodesic
+        } else {
+            0.0
+        };
+        let scale = (1.0 + enrichment) as f32;
+        total_entropy += entropy;
+        total_hardmass += hardmass;
+        total_enrichment += enrichment;
+
+        let entropy_norm = (entropy / (entropy + 1.0)).clamp(0.0, 1.0);
+        let hardmass_norm = (hardmass / cols as f64).clamp(0.0, 1.0);
+        let enrichment_norm = (enrichment / (1.0 + enrichment.abs())).clamp(0.0, 1.0);
+        total_coherence += (entropy_norm + hardmass_norm + enrichment_norm) / 3.0;
+
+        for (index, (&prob, &mask)) in row_soft.iter().zip(row_hard.iter()).enumerate() {
+            let fused_value =
+                (GOLDEN_RATIO_CONJUGATE as f32) * prob + (GOLDEN_RATIO_BIAS as f32) * mask;
+            fused[offset + index] = scale * fused_value;
+        }
+    }
+
+    if rows == 0 {
+        return (fused, SpiralConsensusStats::default());
+    }
+
+    let rows_f64 = rows as f64;
+    let stats = SpiralConsensusStats {
+        phi: GOLDEN_RATIO,
+        phi_conjugate: GOLDEN_RATIO_CONJUGATE,
+        phi_bias: GOLDEN_RATIO_BIAS,
+        ramanujan_ratio,
+        ramanujan_delta,
+        average_enrichment: total_enrichment / rows_f64,
+        mean_entropy: total_entropy / rows_f64,
+        mean_hardmass: total_hardmass / rows_f64,
+        spiral_coherence: total_coherence / rows_f64,
+    };
+
+    (fused, stats)
 }
 
 /// Explicit backend selection for fused attention.
@@ -1581,6 +1742,110 @@ impl Tensor {
         }
     }
 
+    /// Row-wise softmax probabilities with accompanying hardmax mask using automatic backend selection.
+    pub fn row_softmax_hardmax(&self) -> PureResult<(Tensor, Tensor)> {
+        self.row_softmax_hardmax_with_backend(SoftmaxBackend::Auto)
+    }
+
+    /// Row-wise softmax and hardmax pair with explicit backend control.
+    pub fn row_softmax_hardmax_with_backend(
+        &self,
+        backend: SoftmaxBackend,
+    ) -> PureResult<(Tensor, Tensor)> {
+        let rows = self.rows;
+        let cols = self.cols;
+
+        match backend {
+            SoftmaxBackend::Auto => self.row_softmax_hardmax_auto(rows, cols),
+            SoftmaxBackend::Cpu => {
+                let result = self.hardmax_fusion(
+                    rows,
+                    cols,
+                    HardmaxBackend::Cpu,
+                    HardmaxMode::SoftmaxAndMask,
+                )?;
+                self.fusion_pair_to_tensors(rows, cols, result)
+            }
+            #[cfg(feature = "wgpu")]
+            SoftmaxBackend::GpuWgpu => {
+                let result = self.hardmax_fusion(
+                    rows,
+                    cols,
+                    HardmaxBackend::GpuWgpu,
+                    HardmaxMode::SoftmaxAndMask,
+                )?;
+                self.fusion_pair_to_tensors(rows, cols, result)
+            }
+        }
+    }
+
+    /// Row-wise softmax, hardmax, and spiral consensus payload using automatic backend selection.
+    pub fn row_softmax_hardmax_spiral(&self) -> PureResult<SpiralSoftmaxHardmax> {
+        self.row_softmax_hardmax_spiral_with_backend(SoftmaxBackend::Auto)
+    }
+
+    /// Row-wise softmax/hardmax/spiral payload with explicit backend control.
+    pub fn row_softmax_hardmax_spiral_with_backend(
+        &self,
+        backend: SoftmaxBackend,
+    ) -> PureResult<SpiralSoftmaxHardmax> {
+        let rows = self.rows;
+        let cols = self.cols;
+
+        match backend {
+            SoftmaxBackend::Auto => self.row_softmax_hardmax_spiral_auto(rows, cols),
+            SoftmaxBackend::Cpu => {
+                let result = self.hardmax_fusion(
+                    rows,
+                    cols,
+                    HardmaxBackend::Cpu,
+                    HardmaxMode::SoftmaxAndMask,
+                )?;
+                self.fusion_pair_to_spiral(rows, cols, result)
+            }
+            #[cfg(feature = "wgpu")]
+            SoftmaxBackend::GpuWgpu => {
+                let result = self.hardmax_fusion(
+                    rows,
+                    cols,
+                    HardmaxBackend::GpuWgpu,
+                    HardmaxMode::SoftmaxAndMask,
+                )?;
+                self.fusion_pair_to_spiral(rows, cols, result)
+            }
+        }
+    }
+
+    /// Row-wise hardmax using automatic backend selection.
+    pub fn row_hardmax(&self) -> PureResult<Tensor> {
+        self.row_hardmax_with_backend(HardmaxBackend::Auto)
+    }
+
+    /// Row-wise hardmax with explicit backend control.
+    pub fn row_hardmax_with_backend(&self, backend: HardmaxBackend) -> PureResult<Tensor> {
+        let rows = self.rows;
+        let cols = self.cols;
+
+        match backend {
+            HardmaxBackend::Auto => self.row_hardmax_auto(rows, cols),
+            HardmaxBackend::Cpu => {
+                let result =
+                    self.hardmax_fusion(rows, cols, HardmaxBackend::Cpu, HardmaxMode::MaskOnly)?;
+                Tensor::from_vec(rows, cols, result.hardmax)
+            }
+            #[cfg(feature = "wgpu")]
+            HardmaxBackend::GpuWgpu => {
+                let result = self.hardmax_fusion(
+                    rows,
+                    cols,
+                    HardmaxBackend::GpuWgpu,
+                    HardmaxMode::MaskOnly,
+                )?;
+                Tensor::from_vec(rows, cols, result.hardmax)
+            }
+        }
+    }
+
     fn row_softmax_auto(&self, rows: usize, cols: usize) -> PureResult<Tensor> {
         #[cfg(feature = "wgpu")]
         {
@@ -1593,6 +1858,119 @@ impl Tensor {
 
         let buffer = row_softmax_cpu(self.data(), rows, cols);
         Tensor::from_vec(rows, cols, buffer)
+    }
+
+    fn row_softmax_hardmax_auto(&self, rows: usize, cols: usize) -> PureResult<(Tensor, Tensor)> {
+        let result = self.hardmax_fusion(
+            rows,
+            cols,
+            HardmaxBackend::Auto,
+            HardmaxMode::SoftmaxAndMask,
+        )?;
+        self.fusion_pair_to_tensors(rows, cols, result)
+    }
+
+    fn row_softmax_hardmax_spiral_auto(
+        &self,
+        rows: usize,
+        cols: usize,
+    ) -> PureResult<SpiralSoftmaxHardmax> {
+        let result = self.hardmax_fusion(
+            rows,
+            cols,
+            HardmaxBackend::Auto,
+            HardmaxMode::SoftmaxAndMask,
+        )?;
+        self.fusion_pair_to_spiral(rows, cols, result)
+    }
+
+    fn row_hardmax_auto(&self, rows: usize, cols: usize) -> PureResult<Tensor> {
+        let result =
+            self.hardmax_fusion(rows, cols, HardmaxBackend::Auto, HardmaxMode::MaskOnly)?;
+        Tensor::from_vec(rows, cols, result.hardmax)
+    }
+
+    fn hardmax_fusion(
+        &self,
+        rows: usize,
+        cols: usize,
+        backend: HardmaxBackend,
+        mode: HardmaxMode,
+    ) -> PureResult<HardmaxFusionResult> {
+        HardmaxFusionPlan::new(self.data(), rows, cols)
+            .layout(self.layout)
+            .backend(backend)
+            .mode(mode)
+            .execute()
+    }
+
+    fn fusion_pair_to_tensors(
+        &self,
+        rows: usize,
+        cols: usize,
+        result: HardmaxFusionResult,
+    ) -> PureResult<(Tensor, Tensor)> {
+        let soft = result.softmax.ok_or_else(|| TensorError::BackendFailure {
+            backend: "hardmax",
+            message: "fusion result missing softmax payload".into(),
+        })?;
+        let soft_tensor = Tensor::from_vec(rows, cols, soft)?;
+        let hard_tensor = Tensor::from_vec(rows, cols, result.hardmax)?;
+        Ok((soft_tensor, hard_tensor))
+    }
+
+    fn fusion_pair_to_spiral(
+        &self,
+        rows: usize,
+        cols: usize,
+        result: HardmaxFusionResult,
+    ) -> PureResult<SpiralSoftmaxHardmax> {
+        let HardmaxFusionResult {
+            softmax,
+            hardmax,
+            dp_reductions,
+            einsum,
+            fused_ops,
+        } = result;
+
+        let soft = softmax.ok_or_else(|| TensorError::BackendFailure {
+            backend: "hardmax",
+            message: "fusion result missing softmax payload".into(),
+        })?;
+        let hard = hardmax;
+        let (spiral, mut metrics) = spiral_softmax_hardmax_consensus(&soft, &hard, rows, cols);
+
+        if rows > 0 && cols > 0 {
+            let total = (rows as f64) * (cols as f64);
+            if total.is_finite() && total > 0.0 {
+                let dp_ratio = (dp_reductions as f64) / total;
+                let blended = (metrics.spiral_coherence + dp_ratio.clamp(0.0, 1.0)) * 0.5;
+                metrics.spiral_coherence = blended;
+
+                let fused_bias = if fused_ops.contains("wgpu") {
+                    0.25
+                } else if fused_ops.contains("par") {
+                    0.18
+                } else {
+                    0.1
+                };
+                metrics.average_enrichment *= 1.0 + fused_bias * dp_ratio;
+
+                if einsum.contains("argmax") {
+                    metrics.mean_hardmass = metrics.mean_hardmass.max(dp_ratio);
+                }
+            }
+        }
+
+        let soft_tensor = Tensor::from_vec(rows, cols, soft)?;
+        let hard_tensor = Tensor::from_vec(rows, cols, hard)?;
+        let spiral_tensor = Tensor::from_vec(rows, cols, spiral)?;
+        Ok(SpiralSoftmaxHardmax {
+            softmax: soft_tensor,
+            hardmax: hard_tensor,
+            spiral: spiral_tensor,
+            metrics,
+        })
     }
 
     /// Scaled dot-product attention using automatic backend selection.
@@ -3118,6 +3496,72 @@ impl LanguageWaveEncoder {
 /// integrate Euclidean tensors, complex waves, or direct text streams emitted
 /// by [`LanguageWaveEncoder`]. Every update is projected back onto the
 /// Poincaré ball so state never escapes the non-Euclidean manifold.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HypergradTelemetry {
+    summary: GradientSummary,
+    curvature: f32,
+    learning_rate: f32,
+    saturation: f32,
+    porosity: f32,
+    tolerance: f32,
+    max_depth: usize,
+    max_volume: usize,
+    rows: usize,
+    cols: usize,
+}
+
+impl HypergradTelemetry {
+    #[inline]
+    pub fn summary(&self) -> GradientSummary {
+        self.summary
+    }
+
+    #[inline]
+    pub fn curvature(&self) -> f32 {
+        self.curvature
+    }
+
+    #[inline]
+    pub fn learning_rate(&self) -> f32 {
+        self.learning_rate
+    }
+
+    #[inline]
+    pub fn saturation(&self) -> f32 {
+        self.saturation
+    }
+
+    #[inline]
+    pub fn porosity(&self) -> f32 {
+        self.porosity
+    }
+
+    #[inline]
+    pub fn tolerance(&self) -> f32 {
+        self.tolerance
+    }
+
+    #[inline]
+    pub fn max_depth(&self) -> usize {
+        self.max_depth
+    }
+
+    #[inline]
+    pub fn max_volume(&self) -> usize {
+        self.max_volume
+    }
+
+    #[inline]
+    pub fn shape(&self) -> (usize, usize) {
+        (self.rows, self.cols)
+    }
+
+    #[inline]
+    pub fn volume(&self) -> usize {
+        self.rows.saturating_mul(self.cols)
+    }
+}
+
 pub struct AmegaHypergrad {
     curvature: f32,
     learning_rate: f32,
@@ -3134,31 +3578,46 @@ pub struct GradientSummary {
     l1: f32,
     l2: f32,
     linf: f32,
+    sum: f32,
+    sum_squares: f32,
+    sum_cubes: f32,
+    sum_quartic: f32,
     count: usize,
 }
 
 impl GradientSummary {
     #[inline]
     pub fn from_slice(values: &[f32]) -> Self {
-        let mut l1 = 0.0f32;
-        let mut sum_squares = 0.0f32;
-        let mut linf = 0.0f32;
+        let mut l1 = 0.0f64;
+        let mut sum = 0.0f64;
+        let mut sum_squares = 0.0f64;
+        let mut sum_cubes = 0.0f64;
+        let mut sum_quartic = 0.0f64;
+        let mut linf = 0.0f64;
         let mut count = 0usize;
         for &value in values {
             if !value.is_finite() {
                 continue;
             }
+            let value = value as f64;
             let abs = value.abs();
             l1 += abs;
-            sum_squares += value * value;
+            sum += value;
+            let square = value * value;
+            sum_squares += square;
+            sum_cubes += square * value;
+            sum_quartic += square * square;
             linf = linf.max(abs);
             count += 1;
         }
-        let l2 = sum_squares.sqrt();
         Self {
-            l1,
-            l2,
-            linf,
+            l1: l1 as f32,
+            l2: (sum_squares as f32).sqrt(),
+            linf: linf as f32,
+            sum: sum as f32,
+            sum_squares: sum_squares as f32,
+            sum_cubes: sum_cubes as f32,
+            sum_quartic: sum_quartic as f32,
             count,
         }
     }
@@ -3169,9 +3628,37 @@ impl GradientSummary {
     /// many samples contributed to the summary.
     #[inline]
     pub fn from_moments(l1: f32, sum_squares: f32, linf: f32, count: usize) -> Self {
+        Self::from_extended_moments(l1, 0.0, sum_squares, 0.0, 0.0, linf, count)
+    }
+
+    /// Builds a summary from the provided raw power sums. `sum` is the first
+    /// raw moment, `sum_squares`/`sum_cubes`/`sum_quartic` capture the higher
+    /// power accumulators.
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_extended_moments(
+        l1: f32,
+        sum: f32,
+        sum_squares: f32,
+        sum_cubes: f32,
+        sum_quartic: f32,
+        linf: f32,
+        count: usize,
+    ) -> Self {
         let l1 = if l1.is_finite() { l1.max(0.0) } else { 0.0 };
+        let sum = if sum.is_finite() { sum } else { 0.0 };
         let sum_squares = if sum_squares.is_finite() {
             sum_squares.max(0.0)
+        } else {
+            0.0
+        };
+        let sum_cubes = if sum_cubes.is_finite() {
+            sum_cubes
+        } else {
+            0.0
+        };
+        let sum_quartic = if sum_quartic.is_finite() {
+            sum_quartic.max(0.0)
         } else {
             0.0
         };
@@ -3180,6 +3667,10 @@ impl GradientSummary {
             l1,
             l2: sum_squares.sqrt(),
             linf,
+            sum,
+            sum_squares,
+            sum_cubes,
+            sum_quartic,
             count,
         }
     }
@@ -3204,6 +3695,12 @@ impl GradientSummary {
         self.count
     }
 
+    /// Returns the signed sum of the gradient entries.
+    #[inline]
+    pub fn sum(&self) -> f32 {
+        self.sum
+    }
+
     #[inline]
     pub fn mean_abs(&self) -> f32 {
         if self.count == 0 {
@@ -3225,7 +3722,90 @@ impl GradientSummary {
     /// Returns the accumulated sum of squares captured by the summary.
     #[inline]
     pub fn sum_squares(&self) -> f32 {
-        self.l2 * self.l2
+        self.sum_squares
+    }
+
+    /// Returns the accumulated sum of cubes captured by the summary.
+    #[inline]
+    pub fn sum_cubes(&self) -> f32 {
+        self.sum_cubes
+    }
+
+    /// Returns the accumulated sum of fourth powers captured by the summary.
+    #[inline]
+    pub fn sum_quartic(&self) -> f32 {
+        self.sum_quartic
+    }
+
+    /// Population mean of the gradient distribution.
+    #[inline]
+    pub fn mean(&self) -> f32 {
+        if self.count == 0 {
+            0.0
+        } else {
+            self.sum / self.count as f32
+        }
+    }
+
+    /// Population variance of the gradient distribution.
+    #[inline]
+    pub fn variance(&self) -> f32 {
+        if self.count == 0 {
+            return 0.0;
+        }
+        let n = self.count as f32;
+        let mean = self.mean();
+        let mean_square = self.sum_squares / n;
+        (mean_square - mean * mean).max(0.0)
+    }
+
+    /// Standard deviation derived from the population variance.
+    #[inline]
+    pub fn std(&self) -> f32 {
+        self.variance().sqrt()
+    }
+
+    /// Fisher-Pearson coefficient of skewness derived from the raw moments.
+    #[inline]
+    pub fn skewness(&self) -> f32 {
+        if self.count < 2 {
+            return 0.0;
+        }
+        let n = self.count as f32;
+        let mean = self.mean();
+        let mean_square = self.sum_squares / n;
+        let variance = (mean_square - mean * mean).max(0.0);
+        if variance <= 1e-12 {
+            return 0.0;
+        }
+        let mean_cube = self.sum_cubes / n;
+        let central_moment3 = mean_cube - 3.0 * mean * mean_square + 2.0 * mean * mean * mean;
+        (central_moment3 / variance.powf(1.5)).clamp(-1e6, 1e6)
+    }
+
+    /// Kurtosis (non-excess) derived from the raw moments.
+    #[inline]
+    pub fn kurtosis(&self) -> f32 {
+        if self.count < 2 {
+            return 0.0;
+        }
+        let n = self.count as f32;
+        let mean = self.mean();
+        let mean_square = self.sum_squares / n;
+        let variance = (mean_square - mean * mean).max(0.0);
+        if variance <= 1e-12 {
+            return 0.0;
+        }
+        let mean_cube = self.sum_cubes / n;
+        let mean_quartic = self.sum_quartic / n;
+        let central_moment4 = mean_quartic - 4.0 * mean * mean_cube
+            + 6.0 * mean * mean * mean_square
+            - 3.0 * mean.powi(4);
+        if central_moment4 <= 0.0 {
+            0.0
+        } else {
+            (central_moment4 / (variance * variance)).max(0.0)
+        }
     }
 }
 
@@ -3235,6 +3815,10 @@ impl Default for GradientSummary {
             l1: 0.0,
             l2: 0.0,
             linf: 0.0,
+            sum: 0.0,
+            sum_squares: 0.0,
+            sum_cubes: 0.0,
+            sum_quartic: 0.0,
             count: 0,
         }
     }
@@ -3249,6 +3833,9 @@ pub struct DesireGradientInterpretation {
     balance: f32,
     stability: f32,
     saturation: f32,
+    hyper_std: f32,
+    real_std: f32,
+    sharpness: f32,
 }
 
 impl DesireGradientInterpretation {
@@ -3269,6 +3856,14 @@ impl DesireGradientInterpretation {
         } else {
             1.0
         };
+        let hyper_std = hyper.std();
+        let real_std = real.std();
+        let hyper_kurtosis = hyper.kurtosis();
+        let sharpness = if hyper_std > Self::EPS {
+            (hyper_kurtosis - 3.0).abs().min(4.0)
+        } else {
+            0.0
+        };
         let stability_raw = 1.0
             - (hyper_pressure - real_pressure).abs() / (hyper_pressure + real_pressure + Self::EPS);
         let stability = stability_raw.clamp(0.0, 1.0);
@@ -3279,6 +3874,9 @@ impl DesireGradientInterpretation {
             balance,
             stability,
             saturation,
+            hyper_std,
+            real_std,
+            sharpness,
         }
     }
 
@@ -3313,19 +3911,39 @@ impl DesireGradientInterpretation {
         self.saturation
     }
 
+    /// Standard deviation of the hypergradient summary.
+    #[inline]
+    pub fn hyper_std(&self) -> f32 {
+        self.hyper_std
+    }
+
+    /// Standard deviation of the Euclidean gradient summary.
+    #[inline]
+    pub fn real_std(&self) -> f32 {
+        self.real_std
+    }
+
+    /// Magnitude of the hypergradient's excess kurtosis.
+    #[inline]
+    pub fn sharpness(&self) -> f32 {
+        self.sharpness
+    }
+
     /// Gain factor for hypergradient penalties when the two tapes disagree.
     #[inline]
     pub fn penalty_gain(&self) -> f32 {
         let imbalance = (self.balance - 1.0).abs().min(2.0);
         let instability = (1.0 - self.stability).min(1.0);
-        (1.0 + 0.5 * imbalance + 0.5 * instability).clamp(1.0, 2.5)
+        let sharpness = (self.sharpness * 0.25).min(1.0);
+        (1.0 + 0.4 * imbalance + 0.4 * instability + 0.2 * sharpness).clamp(1.0, 3.0)
     }
 
     /// Mixing factor used when blending Desire bias updates – drops towards zero
     /// when the gradients disagree so the automation can tread lightly.
     #[inline]
     pub fn bias_mix(&self) -> f32 {
-        (0.25 + 0.75 * self.stability).clamp(0.1, 1.0)
+        let softness = (1.0 / (1.0 + 0.5 * self.sharpness)).clamp(0.25, 1.0);
+        (0.25 + 0.75 * self.stability * softness).clamp(0.1, 1.0)
     }
 
     /// Gain used when accumulating avoidance reports during the observation
@@ -3333,7 +3951,8 @@ impl DesireGradientInterpretation {
     #[inline]
     pub fn observation_gain(&self) -> f32 {
         let saturation = self.saturation.tanh().clamp(0.0, 1.0);
-        (0.5 + 0.5 * (1.0 - saturation)).clamp(0.25, 1.0)
+        let sharpness = (self.sharpness * 0.25).min(1.0);
+        (0.5 + 0.5 * (1.0 - saturation) * (1.0 - 0.25 * sharpness)).clamp(0.25, 1.0)
     }
 
     /// Damping factor that can shrink epsilon-like tolerances when gradients
@@ -3369,6 +3988,9 @@ impl Default for DesireGradientInterpretation {
             balance: 1.0,
             stability: 1.0,
             saturation: 0.0,
+            hyper_std: 0.0,
+            real_std: 0.0,
+            sharpness: 0.0,
         }
     }
 }
@@ -4089,6 +4711,51 @@ impl AmegaHypergrad {
         GradientSummary::from_slice(&self.gradient)
     }
 
+    fn telemetry_snapshot(&self) -> HypergradTelemetry {
+        let guard = self.topos();
+        HypergradTelemetry {
+            summary: self.summary(),
+            curvature: self.curvature,
+            learning_rate: self.learning_rate,
+            saturation: guard.saturation(),
+            porosity: guard.porosity(),
+            tolerance: guard.tolerance(),
+            max_depth: guard.max_depth(),
+            max_volume: guard.max_volume(),
+            rows: self.rows,
+            cols: self.cols,
+        }
+    }
+
+    /// Returns a telemetry bundle that mirrors the tape's guard envelope and
+    /// accumulated statistics. Automation layers use the payload to translate
+    /// hypergrad magnitudes into Desire feedback and WGSL operator hints.
+    pub fn telemetry(&self) -> HypergradTelemetry {
+        self.telemetry_snapshot()
+    }
+
+    /// Builds a Desire gradient interpretation by pairing the hypergrad tape's
+    /// summary with the provided Euclidean gradient statistics.
+    pub fn desire_interpretation(&self, real: GradientSummary) -> DesireGradientInterpretation {
+        DesireGradientInterpretation::from_summaries(self.summary(), real)
+    }
+
+    /// Derives a Desire control packet scaled by `gain` using the tape's
+    /// telemetry and the supplied Euclidean gradient summary.
+    pub fn desire_control_with_gain(
+        &self,
+        real: GradientSummary,
+        gain: f32,
+    ) -> DesireGradientControl {
+        DesireGradientControl::from_interpretation_with_gain(self.desire_interpretation(real), gain)
+    }
+
+    /// Convenience wrapper over [`desire_control_with_gain`] that applies the
+    /// recommended gain of `1.0`.
+    pub fn desire_control(&self, real: GradientSummary) -> DesireGradientControl {
+        self.desire_control_with_gain(real, 1.0)
+    }
+
     /// Returns the guard topos enforcing open-cartesian safety constraints.
     pub fn topos(&self) -> &topos::OpenCartesianTopos {
         &self.topos
@@ -4691,31 +5358,17 @@ fn fused_attention_cpu(
 }
 
 fn row_softmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
-    let mut out = vec![0.0; rows * cols];
-    if cols == 0 {
-        return out;
+    match HardmaxFusionPlan::new(data, rows, cols)
+        .layout(Layout::RowMajor)
+        .backend(HardmaxBackend::Cpu)
+        .mode(HardmaxMode::SoftmaxAndMask)
+        .execute()
+    {
+        Ok(result) => result
+            .softmax
+            .unwrap_or_else(|| vec![0.0; rows.saturating_mul(cols)]),
+        Err(_) => vec![0.0; rows.saturating_mul(cols)],
     }
-    for r in 0..rows {
-        let offset = r * cols;
-        let row_slice = &data[offset..offset + cols];
-        let mut max_value = -1.0e30_f32;
-        for &value in row_slice {
-            if value > max_value {
-                max_value = value;
-            }
-        }
-        let mut sum = 0.0_f32;
-        for c in 0..cols {
-            let exp_value = (row_slice[c] - max_value).exp();
-            out[offset + c] = exp_value;
-            sum += exp_value;
-        }
-        let inv_sum = if sum > 0.0 { 1.0 / sum } else { 0.0 };
-        for c in 0..cols {
-            out[offset + c] *= inv_sum;
-        }
-    }
-    out
 }
 
 fn add_bias_relu_inplace(data: &mut [f32], rows: usize, cols: usize, bias: &[f32]) {
@@ -5130,6 +5783,40 @@ mod tests {
     }
 
     #[test]
+    fn amega_hypergrad_telemetry_reports_guard_state() {
+        let mut hypergrad = AmegaHypergrad::new(-1.1, 0.03, 1, 4).unwrap();
+        let tensor = Tensor::from_vec(1, 4, vec![0.5, -0.25, 0.75, -0.125]).unwrap();
+        hypergrad.accumulate_wave(&tensor).unwrap();
+        let telemetry = hypergrad.telemetry();
+        assert_eq!(telemetry.shape(), (1, 4));
+        assert_eq!(telemetry.volume(), 4);
+        assert_eq!(telemetry.curvature(), -1.1);
+        assert_eq!(telemetry.learning_rate(), 0.03);
+        let summary = telemetry.summary();
+        assert_eq!(summary.count(), 4);
+        assert!(summary.l1() > 0.0);
+        assert!(telemetry.saturation() > 0.0);
+        assert!(telemetry.tolerance() > 0.0);
+        assert!(telemetry.max_volume() >= telemetry.volume());
+        assert!(telemetry.max_depth() > 0);
+    }
+
+    #[test]
+    fn amega_hypergrad_desire_control_matches_gain() {
+        let mut hypergrad = AmegaHypergrad::new(-0.95, 0.04, 1, 3).unwrap();
+        let tensor = Tensor::from_vec(1, 3, vec![0.8, -0.4, 0.2]).unwrap();
+        hypergrad.accumulate_wave(&tensor).unwrap();
+        let real = GradientSummary::from_slice(&[0.4, -0.2, 0.1]);
+        let interpretation = hypergrad.desire_interpretation(real);
+        assert!(interpretation.hyper_pressure() > interpretation.real_pressure());
+        let neutral = hypergrad.desire_control(real);
+        let tempered = hypergrad.desire_control_with_gain(real, 0.5);
+        assert!(neutral.penalty_gain() >= tempered.penalty_gain());
+        assert!(neutral.hyper_rate_scale() >= tempered.hyper_rate_scale());
+        assert!(neutral.events().bits() != 0);
+    }
+
+    #[test]
     fn desire_gradient_control_respects_balance() {
         let hyper = GradientSummary::from_slice(&[0.8, -0.6, 0.4, -0.2]);
         let real = GradientSummary::from_slice(&[0.1, -0.05, 0.02, -0.01]);
@@ -5275,6 +5962,11 @@ mod tests {
         let expected_rms = expected_l2 / (4.0f32).sqrt();
         assert!((summary.rms() - expected_rms).abs() < 1e-6);
         assert_eq!(summary.linf(), 3.0);
+        assert!((summary.sum() - 2.0).abs() < 1e-6);
+        assert!((summary.mean() - 0.5).abs() < 1e-6);
+        assert!(summary.variance() > 0.0);
+        assert!(summary.std() > 0.0);
+        assert!(summary.kurtosis() >= 0.0);
     }
 
     #[test]
@@ -5289,6 +5981,28 @@ mod tests {
     }
 
     #[test]
+    fn gradient_summary_extended_moments_matches_slice() {
+        let values: [f32; 4] = [1.0, -2.0, 0.0, 3.0];
+        let from_slice = GradientSummary::from_slice(&values);
+        let sum: f32 = values.iter().sum();
+        let sum_squares: f32 = values.iter().map(|v| v * v).sum();
+        let sum_cubes: f32 = values.iter().map(|v| v * v * v).sum();
+        let sum_quartic: f32 = values.iter().map(|v| v * v * v * v).sum();
+        let from_moments = GradientSummary::from_extended_moments(
+            6.0,
+            sum,
+            sum_squares,
+            sum_cubes,
+            sum_quartic,
+            3.0,
+            values.len(),
+        );
+        assert!((from_slice.sum() - from_moments.sum()).abs() < 1e-6);
+        assert!((from_slice.skewness() - from_moments.skewness()).abs() < 1e-6);
+        assert!((from_slice.kurtosis() - from_moments.kurtosis()).abs() < 1e-6);
+    }
+
+    #[test]
     fn desire_gradient_interpretation_balances_metrics() {
         let hyper = GradientSummary::from_slice(&[1.0, -0.5, 0.25, 0.75]);
         let real = GradientSummary::from_slice(&[0.05, -0.1, 0.0, 0.1]);
@@ -5299,6 +6013,8 @@ mod tests {
         assert!(stable.stability() > interpretation.stability());
         assert!(stable.bias_mix() > interpretation.bias_mix());
         assert!(stable.observation_gain() >= interpretation.observation_gain());
+        assert!(interpretation.hyper_std() > 0.0);
+        assert!(interpretation.sharpness() >= 0.0);
     }
 
     #[test]

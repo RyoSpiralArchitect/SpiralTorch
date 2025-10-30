@@ -10,8 +10,8 @@ use pyo3::{Bound, PyRef, PyRefMut};
 use st_backend_hip as hip_backend;
 use st_tensor::dlpack::{drop_exported_state, DLManagedTensor, DLPACK_CAPSULE_NAME};
 use st_tensor::{
-    backend::cpu_dense, AttentionBackend, Layout, MatmulBackend, SoftmaxBackend, Tensor,
-    TensorError,
+    backend::cpu_dense, AttentionBackend, HardmaxBackend, Layout, MatmulBackend, SoftmaxBackend,
+    Tensor, TensorError,
 };
 use std::ffi::{c_void, CStr};
 use std::sync::Arc;
@@ -51,6 +51,22 @@ fn parse_softmax_backend(label: Option<&str>) -> SoftmaxBackend {
                 "unknown softmax backend label, falling back to auto"
             );
             SoftmaxBackend::Auto
+        }
+    }
+}
+
+fn parse_hardmax_backend(label: Option<&str>) -> HardmaxBackend {
+    match label.unwrap_or("auto") {
+        "auto" => HardmaxBackend::Auto,
+        "cpu" => HardmaxBackend::Cpu,
+        #[cfg(feature = "wgpu")]
+        "wgpu" => HardmaxBackend::GpuWgpu,
+        other => {
+            warn!(
+                backend = other,
+                "unknown hardmax backend label, falling back to auto"
+            );
+            HardmaxBackend::Auto
         }
     }
 }
@@ -1126,6 +1142,60 @@ impl PyTensor {
         Ok(PyTensor { inner: tensor })
     }
 
+    /// Row-wise softmax probabilities paired with hardmax mask.
+    #[pyo3(signature = (*, backend=None))]
+    pub fn row_softmax_hardmax(
+        &self,
+        backend: Option<&str>,
+        py: Python<'_>,
+    ) -> PyResult<(PyTensor, PyTensor)> {
+        let backend = parse_softmax_backend(backend);
+        let (softmax, hardmax) = py
+            .allow_threads(|| self.inner.row_softmax_hardmax_with_backend(backend))
+            .map_err(tensor_err_to_py)?;
+        Ok((PyTensor { inner: softmax }, PyTensor { inner: hardmax }))
+    }
+
+    /// Row-wise softmax, hardmax, and spiral consensus payload.
+    #[pyo3(signature = (*, backend=None))]
+    pub fn row_softmax_hardmax_spiral(
+        &self,
+        backend: Option<&str>,
+        py: Python<'_>,
+    ) -> PyResult<(PyTensor, PyTensor, PyTensor, PyObject)> {
+        let backend = parse_softmax_backend(backend);
+        let report = py
+            .allow_threads(|| self.inner.row_softmax_hardmax_spiral_with_backend(backend))
+            .map_err(tensor_err_to_py)?;
+        let (softmax, hardmax, spiral, metrics) = report.into_parts();
+        let metrics_dict = PyDict::new(py);
+        metrics_dict.set_item("phi", metrics.phi)?;
+        metrics_dict.set_item("phi_conjugate", metrics.phi_conjugate)?;
+        metrics_dict.set_item("phi_bias", metrics.phi_bias)?;
+        metrics_dict.set_item("ramanujan_ratio", metrics.ramanujan_ratio)?;
+        metrics_dict.set_item("ramanujan_delta", metrics.ramanujan_delta)?;
+        metrics_dict.set_item("average_enrichment", metrics.average_enrichment)?;
+        metrics_dict.set_item("mean_entropy", metrics.mean_entropy)?;
+        metrics_dict.set_item("mean_hardmass", metrics.mean_hardmass)?;
+        metrics_dict.set_item("spiral_coherence", metrics.spiral_coherence)?;
+        Ok((
+            PyTensor { inner: softmax },
+            PyTensor { inner: hardmax },
+            PyTensor { inner: spiral },
+            metrics_dict.into(),
+        ))
+    }
+
+    /// Row-wise hardmax with optional backend override.
+    #[pyo3(signature = (*, backend=None))]
+    pub fn row_hardmax(&self, backend: Option<&str>, py: Python<'_>) -> PyResult<PyTensor> {
+        let backend = parse_hardmax_backend(backend);
+        let tensor = py
+            .allow_threads(|| self.inner.row_hardmax_with_backend(backend))
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor { inner: tensor })
+    }
+
     #[pyo3(signature = (keys, values, *, contexts, sequence, scale, z_bias=None, attn_bias=None, backend=None))]
     pub fn scaled_dot_attention(
         &self,
@@ -1340,6 +1410,10 @@ fn describe_wgpu_softmax_variants(py: Python<'_>) -> PyResult<Option<Vec<PyObjec
             let zspace_dict = PyDict::new_bound(py);
             zspace_dict.set_item("focus", zspace.focus)?;
             zspace_dict.set_item("spiral_flux", zspace.spiral_flux)?;
+            zspace_dict.set_item("leech_enrichment", zspace.leech_enrichment)?;
+            zspace_dict.set_item("ramanujan_ratio", zspace.ramanujan_ratio)?;
+            zspace_dict.set_item("ramanujan_delta", zspace.ramanujan_delta)?;
+            zspace_dict.set_item("ramanujan_iterations", zspace.ramanujan_iterations)?;
             let roundtable = PyDict::new_bound(py);
             roundtable.set_item("above", zspace.roundtable.above)?;
             roundtable.set_item("here", zspace.roundtable.here)?;
@@ -1359,6 +1433,11 @@ fn describe_wgpu_softmax_variants(py: Python<'_>) -> PyResult<Option<Vec<PyObjec
                 projection_dict.set_item("beneath", projection.beneath)?;
                 projection_dict.set_item("swirl", projection.swirl)?;
                 projection_dict.set_item("spiral_flux", projection.spiral_flux)?;
+                projection_dict.set_item("leech_enrichment", projection.leech_enrichment)?;
+                projection_dict.set_item("ramanujan_ratio", projection.ramanujan_ratio)?;
+                projection_dict.set_item("ramanujan_delta", projection.ramanujan_delta)?;
+                projection_dict
+                    .set_item("ramanujan_iterations", projection.ramanujan_iterations)?;
                 zspace_dict.set_item("projection", projection_dict)?;
             }
             dict.set_item("zspace", zspace_dict)?;
