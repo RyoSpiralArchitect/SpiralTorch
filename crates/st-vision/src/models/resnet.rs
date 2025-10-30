@@ -488,6 +488,26 @@ impl ResNetBlock {
         let out = self.activation2.forward(&summed)?;
         Ok((out, summed, conv2_out, act1_out, conv1_out))
     }
+
+    fn slip_factor(&self) -> f32 {
+        self.slip_factor
+    }
+
+    fn set_slip_factor(&mut self, slip: f32) -> PureResult<()> {
+        if !slip.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "resnet_skip_slip_factor",
+                value: slip,
+            });
+        }
+        if slip < 0.0 {
+            return Err(TensorError::InvalidValue {
+                label: "resnet_skip_slip_factor",
+            });
+        }
+        self.slip_factor = slip;
+        Ok(())
+    }
 }
 
 impl Module for ResNetBlock {
@@ -586,6 +606,7 @@ pub struct ResNetBackbone {
     output_channels: usize,
     output_hw: (usize, usize),
     tokens_per_stage: Vec<(usize, (usize, usize))>,
+    block_depths: Vec<usize>,
 }
 
 impl ResNetBackbone {
@@ -711,6 +732,7 @@ impl ResNetBackbone {
             output_channels: current_channels,
             output_hw: current_hw,
             tokens_per_stage,
+            block_depths: config.block_depths.clone(),
         })
     }
 
@@ -728,6 +750,63 @@ impl ResNetBackbone {
 
     pub fn stage_shapes(&self) -> &Vec<(usize, (usize, usize))> {
         &self.tokens_per_stage
+    }
+
+    pub fn block_depths(&self) -> &[usize] {
+        &self.block_depths
+    }
+
+    pub fn skip_slip_factors(&self) -> Vec<Vec<f32>> {
+        let mut factors = Vec::with_capacity(self.block_depths.len());
+        let mut global_idx = 0usize;
+        for &depth in &self.block_depths {
+            let mut stage = Vec::with_capacity(depth);
+            for _ in 0..depth {
+                let block = self
+                    .blocks
+                    .get(global_idx)
+                    .expect("skip slip factors align with block layout");
+                stage.push(block.slip_factor());
+                global_idx += 1;
+            }
+            factors.push(stage);
+        }
+        factors
+    }
+
+    pub fn set_skip_slip(&mut self, schedule: Option<SkipSlipSchedule>) -> PureResult<()> {
+        match schedule {
+            Some(schedule) => {
+                schedule.validate()?;
+                let total_blocks: usize = self.block_depths.iter().sum();
+                debug_assert_eq!(self.blocks.len(), total_blocks);
+                let mut global_block_idx = 0usize;
+                let mut block_iter = self.blocks.iter_mut();
+                for (stage_idx, &depth) in self.block_depths.iter().enumerate() {
+                    for block_idx in 0..depth {
+                        let slip = schedule.factor(
+                            stage_idx,
+                            block_idx,
+                            depth,
+                            global_block_idx,
+                            total_blocks,
+                        );
+                        let block = block_iter
+                            .next()
+                            .expect("skip slip schedule length matches blocks");
+                        block.set_slip_factor(slip)?;
+                        global_block_idx += 1;
+                    }
+                }
+                debug_assert!(block_iter.next().is_none());
+            }
+            None => {
+                for block in &mut self.blocks {
+                    block.set_slip_factor(1.0)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn load_weights_json<P: AsRef<std::path::Path>>(&mut self, path: P) -> PureResult<()> {

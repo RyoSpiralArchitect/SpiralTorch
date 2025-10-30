@@ -76,3 +76,43 @@ Treat any mismatched digest, missing signature, or verification failure as a
 sign that the artifact may have been tampered with or repackaged. Contact the
 maintainers immediately so we can investigate before malicious mirrors can
 propagate compromised binaries.
+
+## Locking down repository clones
+
+Bad actors sometimes try to republish the entire SpiralTorch repository with
+the AGPL removed or altered. To make that effectively impossible, we ship a
+signed manifest of the Git tree itself and require every tracked package to
+declare the AGPL-3.0-or-later terms.
+
+- The `Repository License Manifest` workflow runs on every push to `main` and
+  on demand. It refuses to execute if the working tree is dirty, verifies that
+  the canonical `LICENSE .txt` still hashes to the official digest, checks that
+  `NOTICE` explicitly mentions the AGPL, and inspects every `Cargo.toml` and
+  `pyproject.toml` to ensure the license metadata still points at
+  AGPL-3.0-or-later. Once these invariants pass, it publishes a
+  `spiraltorch-repo-license-manifest.json` file and signs it with Sigstore.
+- The manifest captures a SHA-256 and SHA-512 digest for every tracked file in
+  the repository, along with the license declaration extracted from each Rust
+  crate and Python distribution. Any attempt to ship a fork with license text
+  removed will change the digests and be immediately detectable.
+- Use `scripts/security/verify_repo_clone.py` together with a trusted copy of
+  the signed manifest to audit a clone:
+
+  ```bash
+  pip install sigstore
+  sigstore verify github \
+    --certificate spiraltorch-repo-license-manifest.json.crt \
+    --signature spiraltorch-repo-license-manifest.json.sig \
+    --repository SpiralTorch/SpiralTorch \
+    --ref refs/heads/main \
+    --name "Repository License Manifest" \
+    --trigger push \
+    spiraltorch-repo-license-manifest.json
+  python scripts/security/verify_repo_clone.py \
+    --manifest spiraltorch-repo-license-manifest.json \
+    --repo-root /path/to/clone
+  ```
+
+  If the verification script reports a mismatch, treat the clone as
+  compromised—either the AGPL has been stripped, or the repository has been
+  tampered with in a way that breaks the signed manifest.
