@@ -26,7 +26,7 @@ pub struct Params {
     pub chimera_tile: u32,
     pub chimera_stripes: u32,
     pub flags: u32,
-    pub _pad: u32,
+    pub mask_stride: u32,
 }
 
 impl Params {
@@ -112,6 +112,16 @@ impl<'a> Builder<'a> {
                         visibility: ShaderStages::COMPUTE,
                         ty: BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
                             has_dynamic_offset: false,
                             min_binding_size: None,
                         },

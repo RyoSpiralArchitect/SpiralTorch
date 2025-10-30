@@ -1,12 +1,24 @@
-"""Minimal BLAS wrapper used by the SpiralTorch stub runtime."""
+"""Minimal BLAS wrapper used by the SpiralTorch stub runtime.
+
+The helpers in this module have gradually expanded beyond merely loading a
+``dgemm`` symbol.  The thread-tuning primitives we expose are now aware of the
+wider environment so callers can coordinate BLAS parallelism with the rest of
+the system.  Beyond the CPU the routines now integrate with the WGPU autotuning
+artefacts emitted by the Rust runtime, allowing SpiralTorch to reserve host
+threads for GPU command submission so compute on both sides can progress
+without contending for the same CPU cores.
+"""
 
 from __future__ import annotations
 
 import ctypes
 import ctypes.util
+import json
 import os
+import math
 import warnings
 from array import array
+from contextlib import contextmanager
 from threading import Lock
 from typing import Iterable
 
@@ -14,6 +26,15 @@ __all__ = [
     "blas_available",
     "configure_threads",
     "current_thread_count",
+    "thread_controls_available",
+    "temporary_thread_count",
+    "system_cpu_count",
+    "recommended_thread_count",
+    "synchronise_thread_hints",
+    "auto_tune_threads",
+    "blas_vendor",
+    "wgpu_adapter_info",
+    "gpu_host_thread_reservation",
     "dgemm",
 ]
 
@@ -26,6 +47,39 @@ _THREAD_SETTER: ctypes._CFuncPtr | None = None  # type: ignore[attr-defined]
 _THREAD_GETTER: ctypes._CFuncPtr | None = None  # type: ignore[attr-defined]
 _ERROR: BaseException | None = None
 _LOCK = Lock()
+_VENDOR: str | None = None
+_THREAD_LAST_SET: int | None = None
+_THREAD_HINT_SOURCES: tuple[str, ...] = (
+    "SPIRALTORCH_BLAS_THREADS",
+    "SPIRALTORCH_THREADS",
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+)
+_GPU_HOST_HINT_VAR = "SPIRALTORCH_WGPU_HOST_THREADS"
+
+_WGPU_ADAPTER_INFO: dict[str, object] | None = None
+_GPU_HOST_RESERVATION: int | None = None
+
+_INTEGRATED_GPU_VENDORS = {
+    0x8086,  # Intel
+    0x106B,  # Apple
+    0x13B5,  # ARM
+    0x5143,  # Qualcomm
+    0x1AF4,  # virtio
+    0x1010,  # Imagination Technologies
+}
+_SOFTWARE_GPU_VENDORS = {
+    0x1414,  # Microsoft (WARP)
+}
+
+_SOFTWARE_GPU_KEYWORDS = {
+    "swiftshader",
+    "llvmpipe",
+    "software",
+    "warp",
+}
 
 
 def _candidate_paths() -> Iterable[str]:
@@ -36,6 +90,7 @@ def _candidate_paths() -> Iterable[str]:
             if entry:
                 yield entry
     for name in (
+        "spiraltorch_blas",  # allow custom builds to be hinted first
         "openblas",
         "blas",
         "cblas",
@@ -74,6 +129,10 @@ def _locate_thread_controls(lib: ctypes.CDLL) -> None:
         ("MKL_Set_Num_Threads_Loc", ctypes.c_int),
         ("MKL_Set_Num_Threads_Local", ctypes.c_int),
         ("bli_thread_set_num_threads", ctypes.c_int),
+        ("flexiblas_set_num_threads", ctypes.c_int),
+        ("goto_set_num_threads", ctypes.c_int),
+        ("veclib_set_num_threads", ctypes.c_int),
+        ("omp_set_num_threads", ctypes.c_int),
     )
 
     getter_candidates: tuple[tuple[str, type[ctypes._SimpleCData]], ...] = (
@@ -81,6 +140,11 @@ def _locate_thread_controls(lib: ctypes.CDLL) -> None:
         ("openblas_get_num_threads", ctypes.c_int),
         ("cblas_get_num_threads", ctypes.c_int),
         ("MKL_Get_Max_Threads", ctypes.c_int),
+        ("bli_thread_get_num_threads", ctypes.c_int),
+        ("flexiblas_get_num_threads", ctypes.c_int),
+        ("goto_get_num_threads", ctypes.c_int),
+        ("veclib_get_num_threads", ctypes.c_int),
+        ("omp_get_max_threads", ctypes.c_int),
     )
 
     for name, argtype in setter_candidates:
@@ -110,28 +174,480 @@ def _locate_thread_controls(lib: ctypes.CDLL) -> None:
         break
 
 
-def _configure_threads_from_env() -> None:
-    value = os.environ.get("SPIRALTORCH_BLAS_THREADS")
+def _decode_bytes(value: bytes | None) -> str | None:
     if not value:
-        return
+        return None
     try:
-        requested = int(value)
-    except ValueError:
-        warnings.warn(
-            "Ignoring invalid SPIRALTORCH_BLAS_THREADS value; expected an integer",
-            RuntimeWarning,
-        )
+        return value.decode("utf-8").strip()
+    except UnicodeDecodeError:
+        return value.decode("latin1", "ignore").strip()
+
+
+def _identify_vendor(lib: ctypes.CDLL) -> None:
+    global _VENDOR
+
+    # OpenBLAS exposes detailed build configuration strings.
+    try:
+        get_config = getattr(lib, "openblas_get_config")
+        get_config.argtypes = []
+        get_config.restype = ctypes.c_char_p
+        config = _decode_bytes(get_config())
+        if config:
+            corename: str | None = None
+            try:
+                get_core = getattr(lib, "openblas_get_corename")
+                get_core.argtypes = []
+                get_core.restype = ctypes.c_char_p
+                corename = _decode_bytes(get_core())
+            except AttributeError:
+                corename = None
+            if corename:
+                _VENDOR = f"OpenBLAS ({corename}; {config})"
+            else:
+                _VENDOR = f"OpenBLAS ({config})"
+            return
+    except AttributeError:
+        pass
+
+    # BLIS publishes its version through the info helper.
+    try:
+        get_blis_version = getattr(lib, "bli_info_get_version_str")
+        get_blis_version.argtypes = []
+        get_blis_version.restype = ctypes.c_char_p
+        version = _decode_bytes(get_blis_version())
+        if version:
+            _VENDOR = f"BLIS ({version})"
+            return
+    except AttributeError:
+        pass
+
+    # FlexiBLAS provides indirection over multiple backends and exposes helper APIs.
+    try:
+        get_backend = getattr(lib, "flexiblas_get_current_backend")
+        get_backend.argtypes = []
+        get_backend.restype = ctypes.c_char_p
+        backend = _decode_bytes(get_backend())
+
+        get_version = getattr(lib, "flexiblas_get_version")
+        get_version.argtypes = []
+        get_version.restype = ctypes.c_char_p
+        version = _decode_bytes(get_version())
+
+        details = backend or "unknown backend"
+        if version:
+            details = f"{details}; {version}"
+        _VENDOR = f"FlexiBLAS ({details})"
         return
+    except AttributeError:
+        pass
+
+    # Intel MKL provides a descriptive version string via MKL_Get_Version_String.
+    try:
+        get_mkl_version = getattr(lib, "MKL_Get_Version_String")
+        get_mkl_version.argtypes = [ctypes.c_char_p, ctypes.c_int]
+        get_mkl_version.restype = None
+        buffer = ctypes.create_string_buffer(512)
+        get_mkl_version(buffer, ctypes.sizeof(buffer))
+        version = _decode_bytes(buffer.value)
+        if version:
+            _VENDOR = f"Intel MKL ({version})"
+            return
+    except AttributeError:
+        pass
+    except OSError:
+        # Some MKL builds lazily resolve symbols; ignore failures and fall through.
+        pass
+
+    # Apple's Accelerate / vecLib stack does not expose query helpers, but
+    # the shared library name is often descriptive enough.
+    libname = getattr(lib, "_name", None)
+    if isinstance(libname, str):
+        if "Accelerate" in libname:
+            _VENDOR = "Apple Accelerate"
+            return
+        if "vecLib" in libname:
+            _VENDOR = "Apple vecLib"
+            return
+        if "spiraltorch" in libname:
+            _VENDOR = "SpiralTorch custom BLAS"
+            return
+
+    # Fall back to a generic identifier if nothing more specific is available.
+    if not _VENDOR:
+        _VENDOR = "generic BLAS"
+
+
+def _read_int_env(variable: str) -> int | None:
+    value = os.environ.get(variable)
+    if not value:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        if variable.startswith("SPIRALTORCH"):
+            warnings.warn(
+                f"Ignoring invalid {variable} value; expected an integer",
+                RuntimeWarning,
+            )
+        return None
+
+
+def _normalise_wgpu_token(value: str | None) -> str | None:
+    if not value:
+        return None
+    cleaned = value.replace("_", " ").replace("-", " ")
+    while "  " in cleaned:
+        cleaned = cleaned.replace("  ", " ")
+    result = cleaned.strip()
+    return result or None
+
+
+def _classify_wgpu_adapter(
+    vendor: int | None, *, backend: str | None, name: str | None
+) -> str:
+    lowered_name = (name or "").lower()
+    if vendor is not None:
+        if vendor in _SOFTWARE_GPU_VENDORS:
+            return "software"
+        if vendor in _INTEGRATED_GPU_VENDORS:
+            return "integrated"
+    if any(keyword in lowered_name for keyword in _SOFTWARE_GPU_KEYWORDS):
+        return "software"
+    backend_lower = (backend or "").lower()
+    if vendor is None:
+        if backend_lower in {"gl", "gles"}:
+            return "integrated"
+        if lowered_name:
+            return "unknown"
+    if backend_lower in {"metal", "vulkan"} and vendor in _INTEGRATED_GPU_VENDORS:
+        return "integrated"
+    if vendor is None:
+        return "unknown"
+    return "discrete"
+
+
+def _parse_wgpu_autotune_key(key: str) -> dict[str, object] | None:
+    if not key.startswith("wgpu."):
+        return None
+    parts = key.split("|")
+    if len(parts) < 4:
+        return None
+    name_token = parts[1] if len(parts) > 1 else None
+    vendor_token = parts[2] if len(parts) > 2 else None
+    device_token = parts[3] if len(parts) > 3 else None
+    backend = parts[4] if len(parts) > 4 else None
+    driver = parts[5] if len(parts) > 5 else None
+    driver_info = parts[6] if len(parts) > 6 else None
 
     try:
-        configure_threads(requested)
-    except RuntimeError as exc:
+        vendor = int(vendor_token, 16) if vendor_token else None
+    except ValueError:
+        vendor = None
+    try:
+        device = int(device_token, 16) if device_token else None
+    except ValueError:
+        device = None
+
+    name = _normalise_wgpu_token(name_token)
+    classification = _classify_wgpu_adapter(vendor, backend=backend, name=name)
+
+    return {
+        "name": name,
+        "vendor_id": vendor,
+        "vendor_hex": vendor_token,
+        "device_id": device,
+        "device_hex": device_token,
+        "backend": backend,
+        "driver": _normalise_wgpu_token(driver),
+        "driver_info": _normalise_wgpu_token(driver_info),
+        "classification": classification,
+        "key": key,
+    }
+
+
+def _autotune_store_candidates() -> Iterable[str]:
+    seen: set[str] = set()
+    env_path = os.environ.get("SPIRALTORCH_AUTOTUNE_STORE")
+    if env_path:
+        env_path = env_path.strip()
+        if env_path:
+            seen.add(env_path)
+            yield env_path
+    home = os.environ.get("HOME")
+    if home:
+        default_path = os.path.join(home, ".spiraltorch", "kernels.json")
+        if default_path not in seen:
+            yield default_path
+
+
+def _load_wgpu_adapter_from_store() -> dict[str, object] | None:
+    for candidate in _autotune_store_candidates():
+        try:
+            with open(candidate, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (FileNotFoundError, OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        items = list(data.items())
+        for key, _ in reversed(items):
+            info = _parse_wgpu_autotune_key(str(key))
+            if info:
+                info["source"] = candidate
+                return info
+    return None
+
+
+def _detect_wgpu_adapter() -> dict[str, object] | None:
+    global _WGPU_ADAPTER_INFO
+    if _WGPU_ADAPTER_INFO is not None:
+        return _WGPU_ADAPTER_INFO
+
+    env_hint = os.environ.get("SPIRALTORCH_WGPU_ADAPTER_INFO")
+    if env_hint:
+        parsed: dict[str, object] | None
+        try:
+            maybe = json.loads(env_hint)
+            parsed = maybe if isinstance(maybe, dict) else None
+        except json.JSONDecodeError:
+            parsed = None
+        if parsed is None:
+            parsed = _parse_wgpu_autotune_key(env_hint)
+        if parsed is not None:
+            _WGPU_ADAPTER_INFO = parsed
+            return _WGPU_ADAPTER_INFO
+
+    _WGPU_ADAPTER_INFO = _load_wgpu_adapter_from_store()
+    return _WGPU_ADAPTER_INFO
+
+
+def _compute_gpu_host_reservation(cpu_budget: int | None) -> int | None:
+    explicit = _read_int_env(_GPU_HOST_HINT_VAR)
+    if explicit is not None:
+        return max(0, explicit)
+
+    info = _detect_wgpu_adapter()
+    if not info:
+        return None
+
+    classification = str(info.get("classification", "unknown"))
+    if classification == "software":
+        return None
+    if classification == "integrated":
+        if cpu_budget is None or cpu_budget <= 2:
+            return 1
+        return min(2, max(1, cpu_budget // 4))
+    if classification == "discrete":
+        if cpu_budget is not None and cpu_budget >= 8:
+            return 2
+        return 1
+    if classification == "unknown":
+        if cpu_budget is None or cpu_budget <= 1:
+            return None
+        return 1
+    return None
+
+
+def _propagate_gpu_host_hint(reservation: int | None) -> None:
+    if reservation is None:
+        os.environ.pop(_GPU_HOST_HINT_VAR, None)
+        return
+    os.environ[_GPU_HOST_HINT_VAR] = str(int(reservation))
+
+
+def gpu_host_thread_reservation(*, refresh: bool = False) -> int | None:
+    """Return the number of CPU threads reserved for GPU host work."""
+
+    global _GPU_HOST_RESERVATION
+    if refresh or _GPU_HOST_RESERVATION is None:
+        cpu_budget = system_cpu_count()
+        _GPU_HOST_RESERVATION = _compute_gpu_host_reservation(cpu_budget)
+    return _GPU_HOST_RESERVATION
+
+
+def wgpu_adapter_info() -> dict[str, object] | None:
+    """Return metadata describing the detected WGPU adapter, if any."""
+
+    info = _detect_wgpu_adapter()
+    if info is None:
+        return None
+    return dict(info)
+
+
+def _system_affinity_size() -> int | None:
+    try:
+        affinity = os.sched_getaffinity(0)
+    except (AttributeError, OSError):
+        return None
+    if not affinity:
+        return None
+    return len(affinity)
+
+
+def system_cpu_count() -> int | None:
+    """Return the best-effort number of CPUs available to the process."""
+
+    affinity = _system_affinity_size()
+    if affinity:
+        return affinity
+    count = os.cpu_count()
+    if isinstance(count, int) and count > 0:
+        return count
+    return None
+
+
+def recommended_thread_count(
+    problem_size: tuple[int, int, int] | None = None,
+    *,
+    clamp_to_env: bool = True,
+    consider_gpu: bool = True,
+) -> int | None:
+    """Return a recommended thread count based on the system and workload.
+
+    Parameters
+    ----------
+    problem_size:
+        Optional ``(m, n, k)`` triple describing the GEMM dimensions.  When
+        provided we balance the recommendation against the matrix sizes so small
+        problems do not consume the entire machine.
+    clamp_to_env:
+        When ``True`` (the default) the result honours stricter environment
+        hints such as ``OMP_NUM_THREADS`` if they are already configured.
+    consider_gpu:
+        When ``True`` (the default) host thread reservations derived from the
+        active WGPU adapter are respected so CPU BLAS workloads leave breathing
+        room for GPU command submission.
+    """
+
+    cpu_budget = system_cpu_count()
+    if cpu_budget is None:
+        return None
+
+    reservation = _compute_gpu_host_reservation(cpu_budget if consider_gpu else None)
+    global _GPU_HOST_RESERVATION
+    _GPU_HOST_RESERVATION = reservation
+    if consider_gpu and reservation is not None and reservation > 0:
+        cpu_budget = max(1, cpu_budget - min(reservation, cpu_budget - 1))
+
+    # Honour explicit hints when they restrict the process.
+    if clamp_to_env:
+        hints = [_read_int_env(var) for var in _THREAD_HINT_SOURCES]
+        hints = [hint for hint in hints if hint is not None and hint > 0]
+        if hints:
+            cpu_budget = min(cpu_budget, min(hints))
+
+    if not problem_size:
+        return cpu_budget
+
+    m, n, k = (max(0, int(d)) for d in problem_size)
+    if m == 0 or n == 0 or k == 0:
+        return 1
+
+    # The heuristic balances against the number of independent tiles implied by
+    # the operands: we avoid spawning more threads than there are rows/columns to
+    # process while still scaling for tall or wide matrices.  The square root of
+    # the total work keeps cubic workloads from immediately consuming the entire
+    # CPU budget for tiny matrices.
+    work_estimate = max(1, m * n * k)
+    tile_capacity = max(m, n, k)
+    dynamic_budget = max(1, int(math.sqrt(work_estimate)) // max(1, min(m, n, k)))
+    proposed = max(1, min(tile_capacity, cpu_budget, dynamic_budget or 1))
+    return max(1, min(cpu_budget, proposed))
+
+
+def _determine_thread_hint() -> tuple[int | None, str | None]:
+    for variable in _THREAD_HINT_SOURCES:
+        hint = _read_int_env(variable)
+        if hint and hint > 0:
+            return hint, variable
+
+    policy = os.environ.get("SPIRALTORCH_BLAS_AUTOTUNE", "").strip().lower()
+    if policy in {"1", "true", "yes", "auto"}:
+        recommended = recommended_thread_count()
+        if recommended:
+            return recommended, "system_cpu"
+    return None, None
+
+
+def _propagate_thread_hint(threads: int) -> None:
+    for variable in _THREAD_HINT_SOURCES[2:]:
+        os.environ[variable] = str(threads)
+
+
+def synchronise_thread_hints(*, propagate: bool = False) -> int | None:
+    """Apply the strongest thread hint and optionally mirror it to the env.
+
+    The function inspects common environment variables (``OMP_NUM_THREADS`` and
+    friends) to determine how many threads the process *should* run with.  When
+    a usable hint exists the BLAS backend is configured accordingly and the last
+    set thread count is returned.  When ``propagate`` is ``True`` the resolved
+    value is written back to the ecosystem variables so future subprocesses and
+    OpenMP runtimes see a consistent value.
+    """
+
+    hint, source = _determine_thread_hint()
+    if not hint:
+        return None
+
+    try:
+        configure_threads(hint)
+    except (RuntimeError, ValueError) as exc:
         warnings.warn(
-            f"Unable to configure BLAS thread count: {exc}",
+            f"Unable to honour thread hint from {source or 'environment'}: {exc}",
             RuntimeWarning,
         )
-    except ValueError as exc:
-        warnings.warn(str(exc), RuntimeWarning)
+        return None
+
+    if propagate:
+        _propagate_thread_hint(hint)
+        _propagate_gpu_host_hint(gpu_host_thread_reservation(refresh=True))
+    return hint
+
+
+def auto_tune_threads(
+    problem_size: tuple[int, int, int] | None = None,
+    *,
+    clamp_to_env: bool = True,
+    propagate: bool = False,
+) -> int | None:
+    """Automatically configure BLAS threads according to the workload.
+
+    The routine combines :func:`recommended_thread_count` with
+    :func:`configure_threads` and mirrors the result to environment hints when
+    requested.  It returns the configured thread count or ``None`` when BLAS is
+    unavailable or the heuristics could not determine an appropriate value.
+    """
+
+    try:
+        recommendation = recommended_thread_count(problem_size, clamp_to_env=clamp_to_env)
+    except Exception:
+        recommendation = None
+
+    if not recommendation:
+        return synchronise_thread_hints(propagate=propagate)
+
+    try:
+        configure_threads(recommendation)
+    except (RuntimeError, ValueError) as exc:
+        warnings.warn(
+            f"Unable to apply recommended BLAS thread count {recommendation}: {exc}",
+            RuntimeWarning,
+        )
+        return None
+
+    if propagate:
+        _propagate_thread_hint(recommendation)
+        _propagate_gpu_host_hint(gpu_host_thread_reservation())
+    return recommendation
+
+
+def _configure_threads_from_env() -> None:
+    if synchronise_thread_hints() is not None:
+        return
+
+    policy = os.environ.get("SPIRALTORCH_BLAS_AUTOTUNE", "").strip().lower()
+    if policy in {"1", "true", "yes", "auto"}:
+        auto_tune_threads()
 
 
 def _initialise() -> None:
@@ -167,6 +683,7 @@ def _initialise() -> None:
     func.restype = None
 
     _locate_thread_controls(lib)
+    _identify_vendor(lib)
 
     _LIB = lib
     _DGEMM = func
@@ -186,6 +703,8 @@ def blas_available() -> bool:
 def configure_threads(threads: int) -> None:
     """Configure the number of threads used by the underlying BLAS library."""
 
+    global _THREAD_LAST_SET
+
     if not blas_available():
         raise RuntimeError("BLAS backend is unavailable")
 
@@ -196,18 +715,77 @@ def configure_threads(threads: int) -> None:
         raise RuntimeError("loaded BLAS library does not expose thread control APIs")
 
     _THREAD_SETTER(int(threads))  # type: ignore[misc]
+    _THREAD_LAST_SET = int(threads)
 
 
 def current_thread_count() -> int | None:
     """Return the current BLAS thread count, or ``None`` if unavailable."""
 
+    global _THREAD_LAST_SET
+
     if not blas_available():
         raise RuntimeError("BLAS backend is unavailable")
 
     if _THREAD_GETTER is None:
-        return None
+        return _THREAD_LAST_SET
 
-    return int(_THREAD_GETTER())
+    current = int(_THREAD_GETTER())
+    _THREAD_LAST_SET = current
+    return current
+
+
+def thread_controls_available() -> bool:
+    """Return ``True`` when the loaded BLAS exposes thread control helpers."""
+
+    if not blas_available():
+        raise RuntimeError("BLAS backend is unavailable")
+
+    return _THREAD_SETTER is not None
+
+
+@contextmanager
+def temporary_thread_count(threads: int):
+    """Temporarily override the BLAS thread count within the managed context."""
+
+    target = int(threads)
+
+    if target <= 0:
+        raise ValueError("thread count must be a positive integer")
+
+    if not thread_controls_available():
+        raise RuntimeError("loaded BLAS library does not expose thread control APIs")
+
+    previous: int | None
+    try:
+        previous = current_thread_count()
+    except RuntimeError:
+        previous = None
+
+    if previous == target:
+        yield
+        return
+
+    configure_threads(target)
+    try:
+        yield
+    finally:
+        if previous is not None and previous > 0:
+            try:
+                configure_threads(previous)
+            except Exception as exc:  # pragma: no cover - defensive fallback
+                warnings.warn(
+                    f"Failed to restore previous BLAS thread count: {exc}",
+                    RuntimeWarning,
+                )
+
+
+def blas_vendor() -> str:
+    """Return a descriptive string for the detected BLAS implementation."""
+
+    if not blas_available():
+        raise RuntimeError("BLAS backend is unavailable")
+
+    return _VENDOR or "generic BLAS"
 
 
 def _as_double_buffer(buffer: array) -> ctypes.Array[ctypes.c_double]:

@@ -221,6 +221,8 @@ fn try_main() -> Result<()> {
             finalise_output(&cli, output, &args.output)
         }
     }
+
+    Ok(output)
 }
 
 fn finalise_output(cli: &Cli, mut output: AttributionOutput, destination: &Path) -> Result<()> {
