@@ -6,7 +6,8 @@
 use crate::module::Module;
 use crate::{PureResult, Tensor};
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::Rng;
+use spiral_config::determinism;
 use st_tensor::TensorError;
 use std::cell::RefCell;
 
@@ -38,10 +39,7 @@ impl Dropout {
                 label: "dropout_probability",
             });
         }
-        let rng = match seed {
-            Some(value) => StdRng::seed_from_u64(value),
-            None => StdRng::from_entropy(),
-        };
+        let rng = determinism::rng_from_optional(seed, "st-nn/layers/dropout");
         Ok(Self {
             probability,
             training: true,

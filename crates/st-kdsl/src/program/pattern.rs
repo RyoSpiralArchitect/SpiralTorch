@@ -29,7 +29,7 @@ impl MatchArm {
         program: &Program,
         ctx: &Ctx,
         locals: &[Value],
-        scrutinee: Value,
+        scrutinee: &Value,
     ) -> bool {
         let pattern_match = self
             .patterns
@@ -47,7 +47,7 @@ impl MatchArm {
         }
     }
 
-    pub(super) fn const_result(&self, scrutinee: Value) -> Option<Value> {
+    pub(super) fn const_result(&self, scrutinee: &Value) -> Option<Value> {
         let mut matched = false;
         for pattern in &self.patterns {
             match pattern.const_matches(scrutinee) {
@@ -112,7 +112,7 @@ impl MatchPattern {
         }
     }
 
-    fn matches(&self, program: &Program, ctx: &Ctx, locals: &[Value], scrutinee: Value) -> bool {
+    fn matches(&self, program: &Program, ctx: &Ctx, locals: &[Value], scrutinee: &Value) -> bool {
         match self {
             MatchPattern::Wildcard => true,
             MatchPattern::Expr(expr) => {
@@ -136,7 +136,7 @@ impl MatchPattern {
         }
     }
 
-    fn const_matches(&self, scrutinee: Value) -> Option<bool> {
+    fn const_matches(&self, scrutinee: &Value) -> Option<bool> {
         match self {
             MatchPattern::Wildcard => Some(true),
             MatchPattern::Expr(expr) => {

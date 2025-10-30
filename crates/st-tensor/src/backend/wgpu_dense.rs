@@ -2347,6 +2347,547 @@ impl GpuContext {
         if let Some(pipeline) = pipelines.get(&config) {
             return Ok(pipeline.clone());
         }
+        let rows_u32 = u32::try_from(rows).ok()?;
+        let cols_u32 = u32::try_from(cols).ok()?;
+        let metrics_len = rows.checked_mul(4)?;
+        let metrics_size = (metrics_len * std::mem::size_of::<f32>()) as u64;
+        let device = self.device();
+        let queue = self.queue();
+
+        let metrics_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("st.tensor.wgpu_dense.softmax_zspace.metrics"),
+            size: metrics_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let params = SoftmaxZSpaceParams {
+            rows: rows_u32,
+            cols: cols_u32,
+            stride: layout.out_stride,
+            _pad: 0,
+            golden_ratio: GOLDEN_RATIO,
+            golden_angle: GOLDEN_ANGLE_RAD,
+            min_energy: ZSPACE_MIN_ENERGY,
+            _pad1: 0.0,
+        };
+        let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("st.tensor.wgpu_dense.softmax_zspace.params"),
+            contents: bytemuck::bytes_of(&params),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+
+        let bind_group = self.softmax_zspace_bind_group(output, &metrics_buf, &params_buf)?;
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("st.tensor.wgpu_dense.softmax_zspace.encoder"),
+        });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("st.tensor.wgpu_dense.softmax_zspace.pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(pipeline.as_ref());
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.dispatch_workgroups(rows_u32, 1, 1);
+        }
+        queue.submit(Some(encoder.finish()));
+
+        let values = readback_f32(device, queue, &metrics_buf, metrics_len).ok()?;
+        if values.len() != metrics_len {
+            return None;
+        }
+
+        let rows_f32 = rows as f32;
+        let inv_rows = rows_f32.recip();
+        let mut sum_focus = 0.0;
+        let mut sum_above = 0.0;
+        let mut sum_here = 0.0;
+        let mut sum_swirl = 0.0;
+        for chunk in values.chunks_exact(4) {
+            sum_focus += chunk[0].max(0.0);
+            sum_above += chunk[1].clamp(0.0, 1.0);
+            sum_here += chunk[2].clamp(0.0, 1.0);
+            sum_swirl += chunk[3].clamp(-1.0, 1.0);
+        }
+
+        let mut focus = (sum_focus * inv_rows).clamp(0.0, 1.0);
+        let mut above = (sum_above * inv_rows).clamp(0.0, 1.0);
+        let mut here = (sum_here * inv_rows).clamp(0.0, 1.0);
+        let mut beneath = (1.0 - (above + here)).clamp(0.0, 1.0);
+        let total = above + here + beneath;
+        if total > f32::EPSILON {
+            let inv = total.recip();
+            above *= inv;
+            here *= inv;
+            beneath *= inv;
+        } else {
+            above = 1.0 / 3.0;
+            here = 1.0 / 3.0;
+            beneath = 1.0 / 3.0;
+        }
+
+        focus = focus.clamp(0.0, 1.0);
+        let swirl = (sum_swirl * inv_rows).clamp(-1.0, 1.0);
+        let drift = (above - beneath).abs();
+        let harmonic = (focus * (here + GOLDEN_RATIO.recip())).clamp(0.0, 1.0);
+        let flux = ((drift + swirl.abs()) * harmonic).powf(1.0 / GOLDEN_RATIO);
+        let geodesic =
+            f64::from(focus.max(ZSPACE_MIN_ENERGY)) + f64::from(harmonic.max(ZSPACE_MIN_ENERGY));
+        let sqrt_rank = (SOFTMAX_ZSPACE_LEECH_RANK.max(1) as f64).sqrt();
+        let ramanujan_value = ramanujan_pi(SOFTMAX_ZSPACE_RAMANUJAN_ITERS).max(f64::EPSILON);
+        let ramanujan_ratio_f64 = std::f64::consts::PI / ramanujan_value;
+        let ramanujan_ratio = ramanujan_ratio_f64 as f32;
+        let ramanujan_delta = (ramanujan_value - std::f64::consts::PI).abs() as f32;
+        let ramanujan_iterations = SOFTMAX_ZSPACE_RAMANUJAN_ITERS as u32;
+        let leech_raw = SOFTMAX_ZSPACE_LEECH_WEIGHT
+            * LEECH_PACKING_DENSITY
+            * geodesic
+            * sqrt_rank
+            * ramanujan_ratio_f64;
+        let leech_enrichment = (leech_raw / SOFTMAX_ZSPACE_LEECH_SCALE).clamp(0.0, 1.0) as f32;
+        Some(SoftmaxZProjectMetrics::new(
+            focus,
+            above,
+            here,
+            beneath,
+            swirl,
+            flux,
+            leech_enrichment,
+            ramanujan_ratio,
+            ramanujan_delta,
+            ramanujan_iterations,
+        ))
+    }
+
+    fn bayesian_refine_softmax_score(
+        &self,
+        variant: SoftmaxVariant,
+        raw_ms: f64,
+        projection: Option<&SoftmaxZProjectMetrics>,
+    ) -> Option<SoftmaxBayesEvidence> {
+        let history = self.softmax_history.lock().ok()?.clone();
+        let mut weight = 0.0f64;
+        let mut sum = 0.0f64;
+        let mut sum_sq = 0.0f64;
+        for (index, record) in history
+            .iter()
+            .rev()
+            .filter(|entry| entry.variant == variant)
+            .take(SOFTMAX_HISTORY_LIMIT)
+            .enumerate()
+        {
+            let decay = (f64::from(GOLDEN_RATIO)).powf(-(index as f64) / 2.0);
+            let z_bias = record
+                .zmetrics
+                .map(|metrics| {
+                    let ratio_bias = 1.0 - (metrics.ramanujan_ratio as f64 - 1.0).abs().min(1.0);
+                    1.0 + (metrics.spiral_flux as f64) * 0.5
+                        + (metrics.focus as f64) * 0.25
+                        + (metrics.leech_enrichment as f64) * 0.25
+                        + ratio_bias * 0.2
+                })
+                .unwrap_or(1.0);
+            let w = decay * z_bias;
+            weight += w;
+            sum += record.score_ms * w;
+            sum_sq += record.score_ms * record.score_ms * w;
+        }
+
+        if weight <= f64::EPSILON {
+            weight = f64::from(GOLDEN_RATIO);
+            sum = raw_ms * weight;
+            sum_sq = raw_ms * raw_ms * weight;
+        }
+
+        let prior_ms = (sum / weight).max(0.0);
+        let mut prior_var = (sum_sq / weight) - prior_ms * prior_ms;
+        prior_var = prior_var.max((prior_ms * 0.05).max(0.05).powi(2));
+
+        let focus_boost = projection
+            .map(|metrics| (metrics.focus as f64 + metrics.spiral_flux as f64).max(0.0))
+            .unwrap_or(0.0);
+        let leech_boost = projection
+            .map(|metrics| metrics.leech_enrichment as f64)
+            .unwrap_or(0.0);
+        let ratio_harmonic = projection
+            .map(|metrics| 1.0 - (metrics.ramanujan_ratio as f64 - 1.0).abs().min(1.0))
+            .unwrap_or(0.0);
+        let sample_weight =
+            (f64::from(GOLDEN_RATIO) + focus_boost + leech_boost + ratio_harmonic).max(1.0);
+        let measurement_var = (raw_ms * 0.08).max(0.05).powi(2);
+        let posterior_precision = weight / prior_var + sample_weight / measurement_var;
+        let posterior_var = if posterior_precision <= f64::EPSILON {
+            prior_var
+        } else {
+            posterior_precision.recip()
+        };
+        let posterior_ms = (prior_ms * weight / prior_var
+            + raw_ms * sample_weight / measurement_var)
+            * posterior_var;
+        let deviation = posterior_var.sqrt();
+        let credible_low_ms = (posterior_ms - deviation).max(0.0);
+        let credible_high_ms = posterior_ms + deviation;
+        let combined_weight = weight + sample_weight;
+        let confidence =
+            (combined_weight / (combined_weight + f64::from(GOLDEN_RATIO))).clamp(0.0, 1.0) as f32;
+
+        Some(SoftmaxBayesEvidence::new(
+            posterior_ms,
+            prior_ms,
+            confidence,
+            credible_low_ms,
+            credible_high_ms,
+        ))
+    }
+
+    fn metropolis_multi_try_softmax(
+        &self,
+        variant: SoftmaxVariant,
+        raw_ms: f64,
+        projection: Option<&SoftmaxZProjectMetrics>,
+    ) -> Option<SoftmaxMetropolisEvidence> {
+        let history = self.softmax_history.lock().ok()?.clone();
+        let candidate_focus = projection.map(|m| m.focus).unwrap_or(0.5);
+        let candidate_flux = projection.map(|m| m.spiral_flux).unwrap_or(0.0);
+        if history.is_empty() {
+            return Some(SoftmaxMetropolisEvidence::identity(
+                raw_ms,
+                candidate_focus,
+                candidate_flux,
+            ));
+        }
+
+        let mut proposals = Vec::new();
+        let norm_base = (raw_ms.abs() + SOFTMAX_METROPOLIS_TEMPERATURE).max(1.0);
+        for record in history.into_iter().rev() {
+            let metrics = match record.zmetrics {
+                Some(metrics) => metrics,
+                None => continue,
+            };
+            let affinity = zspace_affinity(projection, &metrics, variant == record.variant);
+            let delta_ms = record.score_ms - raw_ms;
+            let exponent = (-(delta_ms / norm_base)).clamp(-20.0, 20.0);
+            let base = exponent.exp();
+            let weight = base * (0.25 + 0.75 * affinity as f64);
+            proposals.push((record.score_ms, metrics, weight, affinity as f64));
+        }
+
+        if proposals.is_empty() {
+            return Some(SoftmaxMetropolisEvidence::identity(
+                raw_ms,
+                candidate_focus,
+                candidate_flux,
+            ));
+        }
+
+        proposals.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(Ordering::Equal));
+        proposals.truncate(SOFTMAX_METROPOLIS_TRIES);
+        let tries = proposals.len() as u32;
+
+        let mut total_weight = 1.0f64;
+        let mut weighted_ms = raw_ms;
+        let mut focus_sum = candidate_focus as f64;
+        let mut flux_sum = candidate_flux as f64;
+        let mut acceptance_sum = 0.0f64;
+        for (score_ms, metrics, weight, affinity) in proposals.iter() {
+            total_weight += *weight;
+            weighted_ms += *weight * *score_ms;
+            focus_sum += *weight * metrics.focus as f64;
+            flux_sum += *weight * metrics.spiral_flux as f64;
+            let delta_ms = raw_ms - *score_ms;
+            let exponent = (delta_ms / norm_base).clamp(-20.0, 20.0);
+            let logistic = 1.0 / (1.0 + (-exponent).exp());
+            let component = logistic * (0.5 + 0.5 * affinity);
+            acceptance_sum += component;
+        }
+
+        if tries == 0 {
+            return Some(SoftmaxMetropolisEvidence::identity(
+                raw_ms,
+                candidate_focus,
+                candidate_flux,
+            ));
+        }
+
+        let acceptance = (acceptance_sum / tries as f64).clamp(0.0, 1.0) as f32;
+        let expected_ms = (weighted_ms / total_weight).max(0.0);
+        let proposal_focus = (focus_sum / total_weight).clamp(0.0, 1.0) as f32;
+        let proposal_flux = (flux_sum / total_weight).clamp(0.0, 1.0) as f32;
+
+        Some(SoftmaxMetropolisEvidence::new(
+            acceptance,
+            expected_ms,
+            tries,
+            proposal_focus,
+            proposal_flux,
+        ))
+    }
+
+    fn spiral_anneal_softmax(
+        &self,
+        variant: SoftmaxVariant,
+        raw_ms: f64,
+        projection: Option<&SoftmaxZProjectMetrics>,
+        bayes: Option<&SoftmaxBayesEvidence>,
+        metropolis: Option<&SoftmaxMetropolisEvidence>,
+    ) -> Option<SoftmaxSpiralAnnealEvidence> {
+        let history = self.softmax_history.lock().ok()?.clone();
+        let base_ms = bayes.map(|b| b.posterior_ms).unwrap_or(raw_ms);
+        let focus = projection.map(|m| m.focus).unwrap_or(0.5);
+        let flux = projection.map(|m| m.spiral_flux).unwrap_or(0.0);
+        let swirl = projection.map(|m| m.swirl.abs()).unwrap_or(0.0);
+        let leech = projection.map(|m| m.leech_enrichment).unwrap_or(0.0);
+        let ratio_harmony = projection
+            .map(|m| 1.0 - (m.ramanujan_ratio - 1.0).abs().min(1.0))
+            .unwrap_or(0.5);
+        let ratio_delta = projection.map(|m| m.ramanujan_delta).unwrap_or(0.0);
+        let acceptance = metropolis.map(|m| m.acceptance).unwrap_or(0.0);
+        let refreshes = metropolis.map(|m| m.tries).unwrap_or(0);
+
+        let mut weighted_delta = 0.0f64;
+        let mut weight_sum = 0.0f64;
+        let mut dispersion = 0.0f64;
+        let mut dispersion_weight = 0.0f64;
+
+        for (index, record) in history
+            .iter()
+            .rev()
+            .take(SOFTMAX_ANNEAL_HISTORY)
+            .enumerate()
+        {
+            let decay = (f64::from(GOLDEN_RATIO)).powf(-(index as f64) / 1.5);
+            let affinity = if record.variant == variant {
+                1.0
+            } else {
+                record
+                    .zmetrics
+                    .map(|metrics| zspace_affinity(projection, &metrics, false) as f64)
+                    .unwrap_or(0.35)
+            };
+            let weight = decay * (0.5 + 0.5 * affinity);
+            weighted_delta += weight * (record.score_ms - base_ms);
+            weight_sum += weight;
+
+            if record.variant == variant {
+                dispersion += weight * (record.score_ms - base_ms).abs();
+                dispersion_weight += weight;
+            }
+        }
+
+        if weight_sum <= f64::EPSILON {
+            return Some(SoftmaxSpiralAnnealEvidence::identity(base_ms));
+        }
+
+        let drift = weighted_delta / weight_sum;
+        let variant_dispersion = if dispersion_weight > f64::EPSILON {
+            (dispersion / dispersion_weight).max(0.0)
+        } else {
+            0.0
+        };
+
+        let acceptance_factor =
+            (0.6 + 0.4 * f64::from(acceptance) + 0.2 * f64::from(leech)).clamp(0.4, 1.2);
+        let swirl_factor = (1.0 + f64::from(swirl).min(1.0) * 0.75).clamp(1.0, 1.75);
+        let ratio_factor =
+            (1.0 + ratio_harmony as f64 * 0.2 - f64::from(ratio_delta) * 0.1).clamp(0.8, 1.2);
+        let focus_cool = (1.0 - f64::from(focus).clamp(0.0, 1.0)).clamp(0.0, 1.0);
+
+        let base_temp = SOFTMAX_ANNEAL_MIN_TEMP
+            + (SOFTMAX_ANNEAL_MAX_TEMP - SOFTMAX_ANNEAL_MIN_TEMP) * focus_cool;
+        let temp = (base_temp * swirl_factor * acceptance_factor * ratio_factor)
+            .clamp(SOFTMAX_ANNEAL_MIN_TEMP, SOFTMAX_ANNEAL_MAX_TEMP);
+
+        let flux_correction =
+            1.0 - (f64::from(flux).clamp(0.0, 1.0) * 0.3 + f64::from(leech).clamp(0.0, 1.0) * 0.2);
+        let annealed_ms = (base_ms + drift * flux_correction).max(0.0);
+
+        let exploration_mass = ((focus_cool
+            + f64::from(flux).clamp(0.0, 1.0) * 0.5
+            + f64::from(swirl).min(1.0) * 0.25
+            + f64::from(leech).clamp(0.0, 1.0) * 0.2
+            + ratio_harmony as f64 * 0.2)
+            .clamp(0.0, 1.6))
+        .min(1.0) as f32;
+
+        let entropy = ((variant_dispersion / (base_ms + 1e-6)) * 0.6
+            + f64::from(flux).clamp(0.0, 1.0) * 0.25
+            + f64::from(leech).clamp(0.0, 1.0) * 0.1
+            + f64::from(ratio_delta.min(1.0)) * 0.15)
+            .clamp(0.0, 1.0) as f32;
+
+        Some(SoftmaxSpiralAnnealEvidence::new(
+            temp as f32,
+            annealed_ms,
+            exploration_mass,
+            entropy,
+            refreshes,
+        ))
+    }
+
+    fn spiral_consensus_softmax(
+        &self,
+        variant: SoftmaxVariant,
+        raw_ms: f64,
+        projection: Option<&SoftmaxZProjectMetrics>,
+        bayes: Option<&SoftmaxBayesEvidence>,
+        metropolis: Option<&SoftmaxMetropolisEvidence>,
+        anneal: Option<&SoftmaxSpiralAnnealEvidence>,
+    ) -> Option<SoftmaxSpiralConsensusEvidence> {
+        let history = self.softmax_history.lock().ok()?.clone();
+        let focus = projection.map(|m| m.focus).unwrap_or(0.5);
+        let flux = projection.map(|m| m.spiral_flux).unwrap_or(0.0);
+        let swirl = projection.map(|m| m.swirl).unwrap_or(0.0);
+        let leech = projection.map(|m| m.leech_enrichment).unwrap_or(0.0);
+        let ratio_alignment = projection
+            .map(|m| 1.0 - (m.ramanujan_ratio - 1.0).abs().min(1.0))
+            .unwrap_or(0.5);
+        let ratio_delta = projection.map(|m| m.ramanujan_delta).unwrap_or(0.0);
+
+        let mut harmony_sum = 0.0f64;
+        let mut harmony_weight = 0.0f64;
+        for (index, record) in history
+            .iter()
+            .rev()
+            .take(SOFTMAX_CONSENSUS_HISTORY)
+            .enumerate()
+        {
+            let decay = (f64::from(GOLDEN_RATIO)).powf(-(index as f64) / 3.0);
+            let affinity = record
+                .zmetrics
+                .map(|metrics| {
+                    zspace_affinity(projection, &metrics, record.variant == variant) as f64
+                })
+                .unwrap_or(0.5);
+            harmony_sum += decay * affinity;
+            harmony_weight += decay;
+        }
+
+        let harmony = if harmony_weight > f64::EPSILON {
+            (harmony_sum / harmony_weight).clamp(0.0, 1.0) as f32
+        } else {
+            ((focus + flux + leech + ratio_alignment) * 0.25).clamp(0.0, 1.0)
+        };
+
+        let raw_weight =
+            0.35 + 0.25 * f64::from(focus) + 0.2 * f64::from(leech) + 0.15 * ratio_alignment as f64;
+        let mut weighted_ms = raw_ms.max(0.0) * raw_weight;
+        let mut total_weight = raw_weight;
+        let mut bayes_w = 0.0f64;
+        let mut metro_w = 0.0f64;
+        let mut anneal_w = 0.0f64;
+
+        if let Some(bayes) = bayes {
+            let w = 0.45 + 0.5 * f64::from(harmony) + 0.15 * ratio_alignment as f64;
+            weighted_ms += bayes.posterior_ms.max(0.0) * w;
+            total_weight += w;
+            bayes_w = w;
+        }
+
+        if let Some(mtm) = metropolis {
+            let w = 0.3 + 0.4 * f64::from(mtm.acceptance) + 0.2 * f64::from(leech);
+            weighted_ms += mtm.expected_ms.max(0.0) * w;
+            total_weight += w;
+            metro_w = w;
+        }
+
+        if let Some(anneal) = anneal {
+            let w = 0.25 + 0.3 * f64::from(anneal.exploration_mass) + 0.15 * ratio_alignment as f64;
+            weighted_ms += anneal.annealed_ms.max(0.0) * w;
+            total_weight += w;
+            anneal_w = w;
+        }
+
+        if total_weight <= f64::EPSILON {
+            return Some(SoftmaxSpiralConsensusEvidence::identity(
+                raw_ms, focus, flux,
+            ));
+        }
+
+        let consensus_ms = (weighted_ms / total_weight).max(0.0);
+        let synergy = ((focus + flux + harmony + leech + ratio_alignment) / 5.0).clamp(0.0, 1.0);
+        let z_bias = ((focus + flux + swirl.abs() + leech) * 0.25 + ratio_alignment * 0.2
+            - ratio_delta.min(1.0) * 0.1)
+            .clamp(0.0, 1.0);
+
+        Some(SoftmaxSpiralConsensusEvidence::new(
+            consensus_ms,
+            synergy,
+            z_bias,
+            (bayes_w / total_weight) as f32,
+            (metro_w / total_weight) as f32,
+            (anneal_w / total_weight) as f32,
+            harmony,
+        ))
+    }
+
+    fn fused_gelu_back_bind_group(
+        &self,
+        z: &Buffer,
+        g: &Buffer,
+        gz_out: &Buffer,
+        dr: &Buffer,
+        partials: &Buffer,
+        uniforms: &Buffer,
+    ) -> BindGroup {
+        self.device().create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("st.tensor.wgpu_dense.fused_gelu_back.bind_group"),
+            layout: &self.fused_gelu_back_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: z.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: g.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: gz_out.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: dr.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: partials.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: uniforms.as_entire_binding(),
+                },
+            ],
+        })
+    }
+
+    fn reduce_db_bind_group(&self, partials: &Buffer, db: &Buffer, uniforms: &Buffer) -> BindGroup {
+        self.device().create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("st.tensor.wgpu_dense.reduce_db.bind_group"),
+            layout: &self.reduce_db_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: partials.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: db.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: uniforms.as_entire_binding(),
+                },
+            ],
+        })
+    }
+
+    fn fused_conv_pipeline_for(&self, config: TileConfig) -> Result<Arc<ComputePipeline>, String> {
+        let mut pipelines = self.fused_conv_pipelines.lock().unwrap();
+        if let Some(pipeline) = pipelines.get(&config) {
+            return Ok(pipeline.clone());
+        }
 
         let shader_source = instantiate_tile_template(FUSED_CONV_WGSL_TEMPLATE, config);
         let shader_label = format!(
