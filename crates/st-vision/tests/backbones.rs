@@ -136,6 +136,58 @@ fn resnet_skip_slip_scales_learnable_gate_gradients() {
 }
 
 #[test]
+fn resnet56_cifar_only_slips_learnable_skips() {
+    let learnable = ResNetConfig::resnet56_cifar(true);
+    assert!(learnable.skip_slip.is_some());
+
+    let fixed = ResNetConfig::resnet56_cifar(false);
+    assert!(fixed.skip_slip.is_none());
+}
+
+#[test]
+fn skip_slip_schedule_preview_matches_formula() {
+    let per_stage_schedule = SkipSlipSchedule::linear(0.25, 1.0)
+        .with_power(2.0)
+        .per_stage();
+    let per_stage_depths = [3usize, 2];
+    let preview = per_stage_schedule.preview(&per_stage_depths).unwrap();
+    for (&depth, stage_preview) in per_stage_depths.iter().zip(preview.iter()) {
+        assert_eq!(stage_preview.len(), depth);
+        let denominator = if depth > 1 { (depth - 1) as f32 } else { 1.0 };
+        for (block_idx, &value) in stage_preview.iter().enumerate() {
+            let progress = if denominator <= f32::EPSILON {
+                0.0
+            } else {
+                (block_idx as f32 / denominator).clamp(0.0, 1.0)
+            };
+            let target = 0.25 + (1.0 - 0.25) * progress.powf(2.0);
+            let tolerance = target.abs() * 1.0e-5 + 1.0e-6;
+            assert!((value - target).abs() <= tolerance);
+        }
+    }
+
+    let global_schedule = SkipSlipSchedule::linear(0.1, 0.9).with_power(1.5);
+    let global_depths = [2usize, 1, 2];
+    let global_preview = global_schedule.preview(&global_depths).unwrap();
+    let total_blocks: usize = global_depths.iter().sum();
+    let mut global_index = 0usize;
+    for (&depth, stage_preview) in global_depths.iter().zip(global_preview.iter()) {
+        assert_eq!(stage_preview.len(), depth);
+        for &value in stage_preview {
+            let progress = if total_blocks > 1 {
+                (global_index as f32) / ((total_blocks - 1) as f32)
+            } else {
+                0.0
+            };
+            let target = 0.1 + (0.9 - 0.1) * progress.powf(1.5);
+            let tolerance = target.abs() * 1.0e-5 + 1.0e-6;
+            assert!((value - target).abs() <= tolerance);
+            global_index += 1;
+        }
+    }
+}
+
+#[test]
 fn vit_cls_token_shape_and_json_reload() {
     let mut config = ViTConfig::default();
     config.image_hw = (32, 32);

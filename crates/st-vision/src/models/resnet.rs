@@ -98,6 +98,15 @@ impl Default for ResNetConfig {
 impl ResNetConfig {
     /// Returns a CIFAR-oriented ResNet-56 configuration with optional learnable skip scaling.
     pub fn resnet56_cifar(skip_learnable: bool) -> Self {
+        let skip_slip = if skip_learnable {
+            Some(
+                SkipSlipSchedule::linear(0.35, 1.0)
+                    .with_power(1.5)
+                    .per_stage(),
+            )
+        } else {
+            None
+        };
         Self {
             input_channels: 3,
             input_hw: (32, 32),
@@ -112,11 +121,7 @@ impl ResNetConfig {
             global_pool: true,
             skip_init: 1.0,
             skip_learnable,
-            skip_slip: Some(
-                SkipSlipSchedule::linear(0.35, 1.0)
-                    .with_power(1.5)
-                    .per_stage(),
-            ),
+            skip_slip,
         }
     }
 
@@ -157,6 +162,29 @@ impl SkipSlipSchedule {
     pub fn per_stage(mut self) -> Self {
         self.per_stage = true;
         self
+    }
+
+    /// Returns the slip factors that would be applied to a sequence of stages.
+    ///
+    /// Each element in the returned vector corresponds to a stage and contains
+    /// one slip factor per residual block in that stage. The schedule is
+    /// validated before previewing.
+    pub fn preview(&self, block_depths: &[usize]) -> PureResult<Vec<Vec<f32>>> {
+        self.validate()?;
+        let total_blocks: usize = block_depths.iter().sum();
+        let mut preview = Vec::with_capacity(block_depths.len());
+        let mut global_block_idx = 0usize;
+        for (stage_idx, &depth) in block_depths.iter().enumerate() {
+            let mut stage_factors = Vec::with_capacity(depth);
+            for block_idx in 0..depth {
+                let factor =
+                    self.factor(stage_idx, block_idx, depth, global_block_idx, total_blocks);
+                stage_factors.push(factor);
+                global_block_idx += 1;
+            }
+            preview.push(stage_factors);
+        }
+        Ok(preview)
     }
 
     fn validate(&self) -> PureResult<()> {
