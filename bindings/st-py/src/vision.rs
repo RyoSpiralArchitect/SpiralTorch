@@ -7,6 +7,9 @@ use pyo3::{wrap_pyfunction, Bound, PyRefMut};
 
 use crate::tensor::{tensor_err_to_py, PyTensor};
 use crate::theory::PyZRelativityModel;
+use st_tensor::wasm_canvas::{
+    FractalCanvas as PureFractalCanvas, InfiniteZSpacePatch as PureInfiniteZSpacePatch,
+};
 use st_tensor::Tensor;
 
 const MIN_SMOOTHING: f32 = 0.0;
@@ -418,6 +421,117 @@ fn matrix_summary(data: &[f32]) -> HashMap<String, f32> {
     summary
 }
 
+#[pyclass(module = "spiraltorch.vision", name = "InfiniteZSpacePatch")]
+#[derive(Clone)]
+pub(crate) struct PyInfiniteZSpacePatch {
+    inner: PureInfiniteZSpacePatch,
+}
+
+impl From<PureInfiniteZSpacePatch> for PyInfiniteZSpacePatch {
+    fn from(inner: PureInfiniteZSpacePatch) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PyInfiniteZSpacePatch {
+    #[getter]
+    pub fn dimension(&self) -> f32 {
+        self.inner.dimension()
+    }
+
+    #[getter]
+    pub fn zoom(&self) -> f32 {
+        self.inner.zoom()
+    }
+
+    #[getter]
+    pub fn support(&self) -> (f32, f32) {
+        self.inner.support()
+    }
+
+    #[getter]
+    pub fn mellin_weights(&self) -> Vec<f32> {
+        self.inner.mellin_weights().to_vec()
+    }
+
+    #[getter]
+    pub fn density(&self) -> Vec<f32> {
+        self.inner.density().to_vec()
+    }
+
+    pub fn eta_bar(&self) -> f32 {
+        self.inner.eta_bar()
+    }
+}
+
+#[pyclass(module = "spiraltorch.vision", name = "FractalCanvas")]
+#[derive(Clone)]
+pub(crate) struct PyFractalCanvas {
+    inner: PureFractalCanvas,
+    dimension: f32,
+}
+
+#[pymethods]
+impl PyFractalCanvas {
+    #[new]
+    #[pyo3(signature = (dimension=2.0, capacity=32, width=64, height=64))]
+    pub fn new(dimension: f32, capacity: usize, width: usize, height: usize) -> PyResult<Self> {
+        let canvas = PureFractalCanvas::new(capacity.max(4), width.max(1), height.max(1))
+            .map_err(tensor_err_to_py)?;
+        Ok(Self {
+            inner: canvas,
+            dimension,
+        })
+    }
+
+    #[getter]
+    pub fn dimension(&self) -> f32 {
+        self.dimension
+    }
+
+    pub fn set_dimension(&mut self, dimension: f32) {
+        self.dimension = dimension;
+    }
+
+    #[pyo3(signature = (dimension=None, zoom=None, steps=None))]
+    pub fn emit_zspace_patch(
+        &self,
+        dimension: Option<f32>,
+        zoom: Option<f32>,
+        steps: Option<usize>,
+    ) -> PyResult<PyInfiniteZSpacePatch> {
+        let dim = dimension.unwrap_or(self.dimension);
+        let zoom_value = zoom.unwrap_or(f32::INFINITY);
+        let step_value = steps.unwrap_or(96);
+        let patch = self
+            .inner
+            .emit_zspace_patch(dim, zoom_value, step_value)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyInfiniteZSpacePatch::from(patch))
+    }
+
+    #[pyo3(signature = (dimension=None))]
+    pub fn emit_zspace_infinite(&self, dimension: Option<f32>) -> PyResult<PyInfiniteZSpacePatch> {
+        let dim = dimension.unwrap_or(self.dimension);
+        let patch = self
+            .inner
+            .emit_zspace_infinite(dim)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyInfiniteZSpacePatch::from(patch))
+    }
+
+    #[pyo3(signature = (zoom=None, steps=None, dimension=None))]
+    pub fn emit_infinite_z(
+        &self,
+        zoom: Option<f32>,
+        steps: Option<usize>,
+        dimension: Option<f32>,
+    ) -> PyResult<PyInfiniteZSpacePatch> {
+        self.emit_zspace_patch(dimension, zoom, steps)
+    }
+}
+
 #[pyfunction]
 #[pyo3(signature = (vision, canvas, *, hypergrad=None, realgrad=None, weight=1.0, include_patch=false))]
 fn apply_vision_update(
@@ -468,6 +582,8 @@ pub fn zrelativity_heatmap(model: &PyZRelativityModel, field: &str) -> PyResult<
 pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     parent.add_class::<PyCanvasTransformer>()?;
     parent.add_class::<PyCanvasSnapshot>()?;
+    parent.add_class::<PyFractalCanvas>()?;
+    parent.add_class::<PyInfiniteZSpacePatch>()?;
     parent.add_function(wrap_pyfunction!(apply_vision_update, parent)?)?;
     parent.add_function(wrap_pyfunction!(zrelativity_heatmap, parent)?)?;
     parent.add("__doc__", "Canvas transformer utilities")?;
