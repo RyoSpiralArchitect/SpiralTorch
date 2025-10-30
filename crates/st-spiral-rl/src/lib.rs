@@ -5,17 +5,20 @@
 
 use std::fmt;
 
+use hyper_surprise::{HyperSurpriseController, HyperSurpriseOutcome};
 use st_core::telemetry::hub;
 use st_tensor::{AmegaHypergrad, DifferentialResonance, Tensor, TensorError};
 
 pub mod algorithms;
 mod geometry;
+mod hyper_surprise;
 pub mod schedules;
 
 pub use algorithms::{DqnAgent, PpoAgent, SacAgent};
 pub use geometry::{
     GeometryFeedback, GeometryFeedbackConfig, GeometryFeedbackSignal, GeometryTelemetry,
 };
+pub use hyper_surprise::{HyperSurpriseConfig, HyperSurpriseSignal, LossStdTrigger};
 
 /// Reinforcement learning specific error wrapper so callers can surface
 /// meaningful diagnostics without inspecting tensor internals.
@@ -129,6 +132,8 @@ pub struct EpisodeReport {
     pub steps: usize,
     /// Flag describing whether a hypergrad tape applied the update.
     pub hypergrad_applied: bool,
+    /// HyperSurprise signal emitted after fusing loss variance with η̄ control.
+    pub hyper_surprise: Option<HyperSurpriseSignal>,
 }
 
 /// Snapshot of trainer diagnostics for external telemetry collectors.
@@ -152,6 +157,7 @@ pub struct SpiralPolicyGradient {
     episode: Vec<Transition>,
     hypergrad: Option<AmegaHypergrad>,
     geometry_feedback: Option<GeometryFeedback>,
+    hyper_surprise: Option<HyperSurpriseController>,
 }
 
 impl SpiralPolicyGradient {
@@ -195,6 +201,7 @@ impl SpiralPolicyGradient {
             episode: Vec::new(),
             hypergrad: None,
             geometry_feedback: None,
+            hyper_surprise: None,
         })
     }
 
@@ -216,6 +223,28 @@ impl SpiralPolicyGradient {
         self.geometry_feedback = Some(feedback);
     }
 
+    /// Attaches the HyperSurprise controller so loss variance injects curated
+    /// surprise pulses into the policy update.
+    pub fn attach_hyper_surprise(&mut self, trigger: LossStdTrigger) {
+        self.attach_hyper_surprise_with_config(trigger, HyperSurpriseConfig::default());
+    }
+
+    /// Attaches a HyperSurprise controller with an explicit configuration.
+    pub fn attach_hyper_surprise_with_config(
+        &mut self,
+        trigger: LossStdTrigger,
+        config: HyperSurpriseConfig,
+    ) {
+        self.hyper_surprise = Some(HyperSurpriseController::new(trigger, config));
+    }
+
+    /// Detaches the HyperSurprise controller returning the owned trigger.
+    pub fn detach_hyper_surprise(&mut self) -> Option<LossStdTrigger> {
+        self.hyper_surprise
+            .take()
+            .map(|controller| controller.into_trigger())
+    }
+
     /// Detaches the currently configured geometric feedback controller.
     pub fn detach_geometry_feedback(&mut self) -> Option<GeometryFeedback> {
         self.geometry_feedback.take()
@@ -226,6 +255,13 @@ impl SpiralPolicyGradient {
         self.geometry_feedback
             .as_ref()
             .and_then(|feedback| feedback.last_signal())
+    }
+
+    /// Returns the latest HyperSurprise packet, if any.
+    pub fn last_hyper_surprise(&self) -> Option<&HyperSurpriseSignal> {
+        self.hyper_surprise
+            .as_ref()
+            .and_then(|controller| controller.last_signal())
     }
 
     /// Returns rolling telemetry so trainers can monitor rank/pressure drift.
@@ -382,6 +418,20 @@ impl SpiralPolicyGradient {
         let returns = self.discounted_returns();
         let baseline = returns.iter().sum::<f32>() / returns.len() as f32;
 
+        let HyperSurpriseOutcome {
+            learning_rate: effective_rate,
+            gauge: hyper_gauge,
+            signal: hyper_signal,
+        } = if let Some(controller) = self.hyper_surprise.as_mut() {
+            controller.update(&returns, baseline, learning_rate)
+        } else {
+            HyperSurpriseOutcome {
+                learning_rate,
+                gauge: 1.0,
+                signal: None,
+            }
+        };
+
         let mut weight_grad = vec![0.0f32; self.state_dim * self.action_dim];
         let mut bias_grad = vec![0.0f32; self.action_dim];
         let mut total_reward = 0.0f32;
@@ -392,12 +442,21 @@ impl SpiralPolicyGradient {
             for action in 0..self.action_dim {
                 let prob = step.probs[action];
                 let indicator = if action == step.action { 1.0 } else { 0.0 };
-                let grad_coeff = (indicator - prob) * advantage * learning_rate;
+                let grad_coeff = (indicator - prob) * advantage * effective_rate;
                 bias_grad[action] += grad_coeff;
                 for feature in 0..self.state_dim {
                     let idx = feature * self.action_dim + action;
                     weight_grad[idx] += step.state.data()[feature] * grad_coeff;
                 }
+            }
+        }
+
+        if (hyper_gauge - 1.0).abs() > f32::EPSILON {
+            for grad in weight_grad.iter_mut() {
+                *grad *= hyper_gauge;
+            }
+            for grad in bias_grad.iter_mut() {
+                *grad *= hyper_gauge;
             }
         }
 
@@ -425,6 +484,7 @@ impl SpiralPolicyGradient {
             mean_return: baseline,
             steps: returns.len(),
             hypergrad_applied,
+            hyper_surprise: hyper_signal,
         })
     }
 
@@ -489,6 +549,22 @@ mod tests {
         let broadcast = drained.last().unwrap();
         assert_eq!(broadcast.source.as_deref(), Some("st-spiral-rl.policy"));
         assert!(broadcast.z_signal.is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn hyper_surprise_emits_signal() -> Result<(), SpiralRlError> {
+        let mut policy = SpiralPolicyGradient::new(2, 2, 0.05, 0.8)?;
+        let trigger = LossStdTrigger::new(0.01).with_warmup(0).with_decay(0.0);
+        policy.attach_hyper_surprise(trigger);
+        let state = Tensor::from_vec(1, 2, vec![0.6, -0.4]).unwrap();
+        policy.record_transition(state.clone(), 0, 1.0)?;
+        policy.record_transition(state.clone(), 1, -1.0)?;
+        let report = policy.finish_episode()?;
+        assert!(report.hyper_surprise.is_some());
+        let signal = report.hyper_surprise.unwrap();
+        assert!(signal.inject_ratio >= 0.0);
+        assert!(signal.eta_bar > 0.0);
         Ok(())
     }
 }

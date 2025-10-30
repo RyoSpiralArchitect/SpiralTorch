@@ -3264,6 +3264,1272 @@ struct StoredSoftmaxVariant {
     variant: String,
 }
 
+#[repr(C, align(16))]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct RowSoftmaxParams {
+    rows: u32,
+    cols: u32,
+    in_stride: u32,
+    out_stride: u32,
+    chimera_tile: u32,
+    chimera_stripes: u32,
+    flags: u32,
+    mask_stride: u32,
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct SoftmaxZSpaceParams {
+    rows: u32,
+    cols: u32,
+    stride: u32,
+    _pad: u32,
+    golden_ratio: f32,
+    golden_angle: f32,
+    min_energy: f32,
+    _pad1: f32,
+}
+
+const LAYOUT_FLAG_CHIMERA: u32 = 1 << 0;
+const SOFTMAX_FLAG_HARDMAX_ONLY: u32 = 1 << 1;
+const SOFTMAX_FLAG_HARDMAX_MASK: u32 = 1 << 2;
+const SOFTMAX_AUTOTUNE_REVISION: u64 = 2;
+const SOFTMAX_AUTOTUNE_WARMUP: usize = 1;
+const SOFTMAX_AUTOTUNE_SAMPLES: usize = 3;
+const SOFTMAX_HISTORY_LIMIT: usize = 32;
+const SOFTMAX_METROPOLIS_TRIES: usize = 4;
+const SOFTMAX_METROPOLIS_TEMPERATURE: f64 = 3.5;
+const SOFTMAX_ANNEAL_MIN_TEMP: f64 = 0.35;
+const SOFTMAX_ANNEAL_MAX_TEMP: f64 = 2.75;
+const SOFTMAX_ANNEAL_HISTORY: usize = 12;
+const SOFTMAX_CONSENSUS_HISTORY: usize = 24;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+enum SoftmaxVariant {
+    Workgroup,
+    Subgroup,
+}
+
+impl SoftmaxVariant {
+    fn as_str(&self) -> &'static str {
+        match self {
+            SoftmaxVariant::Workgroup => "workgroup",
+            SoftmaxVariant::Subgroup => "subgroup",
+        }
+    }
+
+    fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "workgroup" => Some(SoftmaxVariant::Workgroup),
+            "subgroup" => Some(SoftmaxVariant::Subgroup),
+            _ => None,
+        }
+    }
+}
+
+fn make_softmax_telemetry_sample(
+    rows: usize,
+    cols: usize,
+    elapsed_s: f64,
+) -> Option<TelemetrySample> {
+    if elapsed_s <= 0.0 {
+        return None;
+    }
+    let elements = rows.checked_mul(cols)?;
+    if elements == 0 {
+        return None;
+    }
+    let elements_f64 = elements as f64;
+    let flops = elements_f64 * SOFTMAX_FLOPS_PER_ELEMENT;
+    let tflops = (flops / elapsed_s) / 1e12;
+    let bytes = elements_f64 * SOFTMAX_BYTES_PER_ELEMENT;
+    let bandwidth = (bytes / elapsed_s) / 1e9;
+    let occupancy = estimate_softmax_occupancy(cols);
+    Some(TelemetrySample::new(
+        tflops as f32,
+        bandwidth as f32,
+        occupancy,
+        None,
+        false,
+    ))
+}
+
+fn estimate_softmax_occupancy(cols: usize) -> f32 {
+    if cols == 0 {
+        return 0.0;
+    }
+    if cols >= SOFTMAX_WORKGROUP_SIZE as usize {
+        1.0
+    } else {
+        (cols as f32 / SOFTMAX_WORKGROUP_SIZE).clamp(0.0, 1.0)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SoftmaxZProjectMetrics {
+    pub focus: f32,
+    pub above: f32,
+    pub here: f32,
+    pub beneath: f32,
+    pub swirl: f32,
+    pub spiral_flux: f32,
+    pub leech_enrichment: f32,
+    pub ramanujan_ratio: f32,
+    pub ramanujan_delta: f32,
+    pub ramanujan_iterations: u32,
+}
+
+impl SoftmaxZProjectMetrics {
+    fn new(
+        focus: f32,
+        above: f32,
+        here: f32,
+        beneath: f32,
+        swirl: f32,
+        flux: f32,
+        leech_enrichment: f32,
+        ramanujan_ratio: f32,
+        ramanujan_delta: f32,
+        ramanujan_iterations: u32,
+    ) -> Self {
+        Self {
+            focus: focus.clamp(0.0, 1.0),
+            above: above.clamp(0.0, 1.0),
+            here: here.clamp(0.0, 1.0),
+            beneath: beneath.clamp(0.0, 1.0),
+            swirl: swirl.clamp(-1.0, 1.0),
+            spiral_flux: flux.clamp(0.0, 1.0),
+            leech_enrichment: leech_enrichment.clamp(0.0, 1.0),
+            ramanujan_ratio: ramanujan_ratio.clamp(0.0, 2.0),
+            ramanujan_delta: ramanujan_delta.max(0.0),
+            ramanujan_iterations,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SoftmaxBayesEvidence {
+    pub posterior_ms: f64,
+    pub prior_ms: f64,
+    pub confidence: f32,
+    pub uplift_ms: f64,
+    pub credible_low_ms: f64,
+    pub credible_high_ms: f64,
+}
+
+impl SoftmaxBayesEvidence {
+    fn new(
+        posterior_ms: f64,
+        prior_ms: f64,
+        confidence: f32,
+        credible_low_ms: f64,
+        credible_high_ms: f64,
+    ) -> Self {
+        let confidence = confidence.clamp(0.0, 1.0);
+        let (credible_low_ms, credible_high_ms) = if credible_low_ms <= credible_high_ms {
+            (credible_low_ms.max(0.0), credible_high_ms)
+        } else {
+            (credible_high_ms.max(0.0), credible_low_ms)
+        };
+        Self {
+            posterior_ms,
+            prior_ms,
+            confidence,
+            uplift_ms: prior_ms - posterior_ms,
+            credible_low_ms,
+            credible_high_ms,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SoftmaxMetropolisEvidence {
+    pub acceptance: f32,
+    pub expected_ms: f64,
+    pub tries: u32,
+    pub proposal_focus: f32,
+    pub proposal_flux: f32,
+}
+
+impl SoftmaxMetropolisEvidence {
+    fn new(acceptance: f32, expected_ms: f64, tries: u32, focus: f32, flux: f32) -> Self {
+        Self {
+            acceptance: acceptance.clamp(0.0, 1.0),
+            expected_ms: expected_ms.max(0.0),
+            tries,
+            proposal_focus: focus.clamp(0.0, 1.0),
+            proposal_flux: flux.clamp(0.0, 1.0),
+        }
+    }
+
+    fn identity(raw_ms: f64, focus: f32, flux: f32) -> Self {
+        Self::new(0.0, raw_ms.max(0.0), 0, focus, flux)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SoftmaxSpiralAnnealEvidence {
+    pub temperature: f32,
+    pub annealed_ms: f64,
+    pub exploration_mass: f32,
+    pub entropy: f32,
+    pub refreshes: u32,
+}
+
+impl SoftmaxSpiralAnnealEvidence {
+    fn new(
+        temperature: f32,
+        annealed_ms: f64,
+        exploration_mass: f32,
+        entropy: f32,
+        refreshes: u32,
+    ) -> Self {
+        Self {
+            temperature: temperature.clamp(
+                SOFTMAX_ANNEAL_MIN_TEMP as f32,
+                SOFTMAX_ANNEAL_MAX_TEMP as f32,
+            ),
+            annealed_ms: annealed_ms.max(0.0),
+            exploration_mass: exploration_mass.clamp(0.0, 1.0),
+            entropy: entropy.clamp(0.0, 1.0),
+            refreshes,
+        }
+    }
+
+    fn identity(raw_ms: f64) -> Self {
+        Self::new(SOFTMAX_ANNEAL_MIN_TEMP as f32, raw_ms.max(0.0), 0.0, 0.0, 0)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SoftmaxSpiralConsensusEvidence {
+    pub consensus_ms: f64,
+    pub synergy: f32,
+    pub z_bias: f32,
+    pub bayes_weight: f32,
+    pub metropolis_weight: f32,
+    pub anneal_weight: f32,
+    pub harmony: f32,
+}
+
+impl SoftmaxSpiralConsensusEvidence {
+    fn new(
+        consensus_ms: f64,
+        synergy: f32,
+        z_bias: f32,
+        bayes_weight: f32,
+        metropolis_weight: f32,
+        anneal_weight: f32,
+        harmony: f32,
+    ) -> Self {
+        Self {
+            consensus_ms: consensus_ms.max(0.0),
+            synergy: synergy.clamp(0.0, 1.0),
+            z_bias: z_bias.clamp(0.0, 1.0),
+            bayes_weight: bayes_weight.clamp(0.0, 1.0),
+            metropolis_weight: metropolis_weight.clamp(0.0, 1.0),
+            anneal_weight: anneal_weight.clamp(0.0, 1.0),
+            harmony: harmony.clamp(0.0, 1.0),
+        }
+    }
+
+    fn identity(raw_ms: f64, focus: f32, flux: f32) -> Self {
+        let synergy = ((focus + flux) * 0.5).clamp(0.0, 1.0);
+        let z_bias = ((focus + flux) * 0.5).clamp(0.0, 1.0);
+        let harmony = ((focus + flux) * 0.5).clamp(0.0, 1.0);
+        Self::new(raw_ms.max(0.0), synergy, z_bias, 0.0, 0.0, 0.0, harmony)
+    }
+}
+
+fn zspace_affinity(
+    reference: Option<&SoftmaxZProjectMetrics>,
+    proposal: &SoftmaxZProjectMetrics,
+    same_variant: bool,
+) -> f32 {
+    let base = if let Some(current) = reference {
+        let focus = 1.0 - (current.focus - proposal.focus).abs();
+        let flux = 1.0 - (current.spiral_flux - proposal.spiral_flux).abs();
+        let swirl_delta = (current.swirl - proposal.swirl).abs();
+        let swirl = 1.0 - (swirl_delta * 0.5).min(1.0);
+        let ratio = 1.0
+            - (current.ramanujan_ratio - proposal.ramanujan_ratio)
+                .abs()
+                .min(1.0);
+        let leech = 1.0
+            - (current.leech_enrichment - proposal.leech_enrichment)
+                .abs()
+                .min(1.0);
+        ((focus + flux + swirl + ratio + leech) / 5.0).clamp(0.0, 1.0)
+    } else {
+        let ratio = 1.0 - (proposal.ramanujan_ratio - 1.0).abs().min(1.0);
+        let leech = proposal.leech_enrichment;
+        ((proposal.focus + proposal.spiral_flux + ratio + leech) * 0.25).clamp(0.0, 1.0)
+    };
+    let bonus = if same_variant { 0.1 } else { 0.0 };
+    (base + bonus).clamp(0.0, 1.0)
+}
+
+#[derive(Clone, Debug)]
+struct SoftmaxSelectionRecord {
+    key: String,
+    variant: SoftmaxVariant,
+    score_ms: f64,
+    samples: usize,
+    zmetrics: Option<SoftmaxZProjectMetrics>,
+    bayes: Option<SoftmaxBayesEvidence>,
+    metropolis: Option<SoftmaxMetropolisEvidence>,
+    anneal: Option<SoftmaxSpiralAnnealEvidence>,
+    consensus: Option<SoftmaxSpiralConsensusEvidence>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SoftmaxTelemetrySummary {
+    pub avg_tflops: f32,
+    pub avg_bandwidth_gbps: f32,
+    pub avg_occupancy: f32,
+    pub regression_rate: f32,
+}
+
+impl From<TelemetrySummary> for SoftmaxTelemetrySummary {
+    fn from(summary: TelemetrySummary) -> Self {
+        Self {
+            avg_tflops: summary.avg_tflops,
+            avg_bandwidth_gbps: summary.avg_bandwidth_gbps,
+            avg_occupancy: summary.avg_occupancy,
+            regression_rate: summary.regression_rate,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct RoundtableBandHint {
+    pub above: f32,
+    pub here: f32,
+    pub beneath: f32,
+    pub drift: f32,
+}
+
+impl RoundtableBandHint {
+    fn new(above: f32, here: f32, beneath: f32, drift: f32) -> Self {
+        let above = above.max(0.0);
+        let here = here.max(0.0);
+        let beneath = beneath.max(0.0);
+        let total = above + here + beneath;
+        if total <= f32::EPSILON {
+            return Self {
+                above: 1.0 / 3.0,
+                here: 1.0 / 3.0,
+                beneath: 1.0 / 3.0,
+                drift,
+            };
+        }
+        let inv = total.recip();
+        Self {
+            above: (above * inv).clamp(0.0, 1.0),
+            here: (here * inv).clamp(0.0, 1.0),
+            beneath: (beneath * inv).clamp(0.0, 1.0),
+            drift,
+        }
+    }
+
+    fn from_summary(summary: SoftmaxTelemetrySummary, variant: SoftmaxVariant) -> Self {
+        let occupancy = summary.avg_occupancy.clamp(0.0, 1.0);
+        let regression = summary.regression_rate.clamp(0.0, 1.0);
+        let variant_bias = match variant {
+            SoftmaxVariant::Workgroup => 1.0,
+            SoftmaxVariant::Subgroup => GOLDEN_RATIO,
+        };
+        let above = summary.avg_tflops.max(0.0) * variant_bias;
+        let here = summary.avg_bandwidth_gbps.max(0.0) * (1.0 + 0.5 * occupancy);
+        let beneath = occupancy * (1.0 + (1.0 - regression) / GOLDEN_RATIO);
+        let drift = 1.0 - 2.0 * regression;
+        Self::new(above, here, beneath, drift)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct GoldenPulseHint {
+    pub ratio_bias: f32,
+    pub angle_bias_deg: f32,
+    pub cooperative_weight: f32,
+}
+
+impl GoldenPulseHint {
+    fn from_summary(summary: SoftmaxTelemetrySummary, variant: SoftmaxVariant) -> Self {
+        let occupancy = summary.avg_occupancy.clamp(0.0, 1.0);
+        let regression = summary.regression_rate.clamp(0.0, 1.0);
+        let ratio = (summary.avg_tflops.max(1e-6) / summary.avg_bandwidth_gbps.max(1e-6)).ln()
+            / GOLDEN_RATIO;
+        let ratio_bias = ratio.clamp(-GOLDEN_RATIO, GOLDEN_RATIO);
+        let variant_factor = match variant {
+            SoftmaxVariant::Workgroup => 0.75,
+            SoftmaxVariant::Subgroup => 1.0,
+        };
+        let angle_bias_deg = GOLDEN_ANGLE_DEG * occupancy * variant_factor;
+        let energy = summary.avg_tflops.max(0.0) + summary.avg_bandwidth_gbps.max(0.0);
+        let cooperative_weight = if energy <= f32::EPSILON {
+            0.0
+        } else {
+            let spectral_share = (summary.avg_tflops.max(0.0) / energy).clamp(0.0, 1.0);
+            (spectral_share.powf(1.0 / GOLDEN_RATIO) * (1.0 - regression)).clamp(0.0, 1.0)
+        };
+        Self {
+            ratio_bias,
+            angle_bias_deg,
+            cooperative_weight,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SoftmaxZSpaceHint {
+    pub focus: f32,
+    pub spiral_flux: f32,
+    pub roundtable: RoundtableBandHint,
+    pub golden: GoldenPulseHint,
+    pub leech_enrichment: f32,
+    pub ramanujan_ratio: f32,
+    pub ramanujan_delta: f32,
+    pub ramanujan_iterations: u32,
+    projection: Option<SoftmaxZProjectMetrics>,
+}
+
+impl SoftmaxZSpaceHint {
+    fn from_observations(
+        summary: SoftmaxTelemetrySummary,
+        projection: Option<SoftmaxZProjectMetrics>,
+        variant: SoftmaxVariant,
+    ) -> Self {
+        let occupancy = summary.avg_occupancy.clamp(0.0, 1.0);
+        let regression = summary.regression_rate.clamp(0.0, 1.0);
+        let harmonic = (summary.avg_tflops.max(0.0) * summary.avg_bandwidth_gbps.max(0.0)).sqrt();
+        let fallback_focus = if harmonic <= f32::EPSILON {
+            0.0
+        } else {
+            let focus_raw = harmonic * occupancy;
+            (focus_raw / (focus_raw + GOLDEN_RATIO + regression)).clamp(0.0, 1.0)
+        };
+        let focus = projection.map(|m| m.focus).unwrap_or(fallback_focus);
+        let flux = projection
+            .map(|m| m.spiral_flux)
+            .unwrap_or_else(|| (focus * occupancy).clamp(0.0, 1.0));
+        let (leech_enrichment, ramanujan_ratio, ramanujan_delta, ramanujan_iterations) =
+            if let Some(metrics) = projection {
+                (
+                    metrics.leech_enrichment,
+                    metrics.ramanujan_ratio,
+                    metrics.ramanujan_delta,
+                    metrics.ramanujan_iterations,
+                )
+            } else {
+                (0.0, 1.0, 0.0, 0)
+            };
+        Self {
+            focus,
+            spiral_flux: flux,
+            roundtable: RoundtableBandHint::from_summary(summary, variant),
+            golden: GoldenPulseHint::from_summary(summary, variant),
+            leech_enrichment,
+            ramanujan_ratio,
+            ramanujan_delta,
+            ramanujan_iterations,
+            projection,
+        }
+    }
+
+    fn from_projection(projection: SoftmaxZProjectMetrics, variant: SoftmaxVariant) -> Self {
+        let pseudo = SoftmaxTelemetrySummary {
+            avg_tflops: projection.focus,
+            avg_bandwidth_gbps: projection.here,
+            avg_occupancy: (projection.above + projection.here + projection.beneath)
+                .clamp(0.0, 1.0),
+            regression_rate: (1.0 - projection.focus).clamp(0.0, 1.0),
+        };
+        Self {
+            focus: projection.focus,
+            spiral_flux: projection.spiral_flux,
+            roundtable: RoundtableBandHint::from_summary(pseudo, variant),
+            golden: GoldenPulseHint::from_summary(pseudo, variant),
+            leech_enrichment: projection.leech_enrichment,
+            ramanujan_ratio: projection.ramanujan_ratio,
+            ramanujan_delta: projection.ramanujan_delta,
+            ramanujan_iterations: projection.ramanujan_iterations,
+            projection: Some(projection),
+        }
+    }
+
+    pub fn projection(&self) -> Option<&SoftmaxZProjectMetrics> {
+        self.projection.as_ref()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SoftmaxSelectionSnapshot {
+    pub key: String,
+    variant: SoftmaxVariant,
+    pub score_ms: f64,
+    pub samples: usize,
+    pub telemetry: Option<SoftmaxTelemetrySummary>,
+    pub zspace: Option<SoftmaxZSpaceHint>,
+    bayesian: Option<SoftmaxBayesEvidence>,
+    metropolis: Option<SoftmaxMetropolisEvidence>,
+    anneal: Option<SoftmaxSpiralAnnealEvidence>,
+    consensus: Option<SoftmaxSpiralConsensusEvidence>,
+}
+
+impl SoftmaxSelectionSnapshot {
+    pub fn variant_name(&self) -> &'static str {
+        self.variant.as_str()
+    }
+
+    pub fn telemetry(&self) -> Option<&SoftmaxTelemetrySummary> {
+        self.telemetry.as_ref()
+    }
+
+    pub fn zspace(&self) -> Option<&SoftmaxZSpaceHint> {
+        self.zspace.as_ref()
+    }
+
+    pub fn projection(&self) -> Option<&SoftmaxZProjectMetrics> {
+        self.zspace.as_ref().and_then(|hint| hint.projection())
+    }
+
+    pub fn bayesian(&self) -> Option<&SoftmaxBayesEvidence> {
+        self.bayesian.as_ref()
+    }
+
+    pub fn metropolis(&self) -> Option<&SoftmaxMetropolisEvidence> {
+        self.metropolis.as_ref()
+    }
+
+    pub fn anneal(&self) -> Option<&SoftmaxSpiralAnnealEvidence> {
+        self.anneal.as_ref()
+    }
+
+    pub fn consensus(&self) -> Option<&SoftmaxSpiralConsensusEvidence> {
+        self.consensus.as_ref()
+    }
+
+    fn from_record(
+        record: SoftmaxSelectionRecord,
+        telemetry: Option<SoftmaxTelemetrySummary>,
+    ) -> Self {
+        let zspace = match (telemetry, record.zmetrics) {
+            (Some(summary), metrics) => Some(SoftmaxZSpaceHint::from_observations(
+                summary,
+                metrics,
+                record.variant,
+            )),
+            (None, Some(metrics)) => {
+                Some(SoftmaxZSpaceHint::from_projection(metrics, record.variant))
+            }
+            (None, None) => None,
+        };
+        Self {
+            key: record.key,
+            variant: record.variant,
+            score_ms: record.score_ms,
+            samples: record.samples,
+            telemetry,
+            zspace,
+            bayesian: record.bayes,
+            metropolis: record.metropolis,
+            anneal: record.anneal,
+            consensus: record.consensus,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SoftmaxLayoutDesc {
+    in_stride: u32,
+    out_stride: u32,
+    chimera_tile: u32,
+    chimera_stripes: u32,
+    flags: u32,
+}
+
+impl SoftmaxLayoutDesc {
+    fn from_layout(layout: Layout, rows: usize, cols: usize) -> Result<Self, String> {
+        match layout {
+            Layout::RowMajor => Ok(Self {
+                in_stride: cols
+                    .try_into()
+                    .map_err(|_| "cols exceed u32::MAX for softmax".to_string())?,
+                out_stride: cols
+                    .try_into()
+                    .map_err(|_| "cols exceed u32::MAX for softmax".to_string())?,
+                chimera_tile: 0,
+                chimera_stripes: 0,
+                flags: 0,
+            }),
+            Layout::Chimera { stripes, tile } => {
+                if stripes == 0 || tile == 0 {
+                    return Err("chimera layout requires positive stripes and tile".into());
+                }
+                let stripes_usize = stripes as usize;
+                let tile_usize = tile as usize;
+                if stripes_usize * tile_usize != cols {
+                    return Err("chimera layout must satisfy stripes * tile == cols".into());
+                }
+                Ok(Self {
+                    in_stride: cols
+                        .try_into()
+                        .map_err(|_| "cols exceed u32::MAX for softmax".to_string())?,
+                    out_stride: cols
+                        .try_into()
+                        .map_err(|_| "cols exceed u32::MAX for softmax".to_string())?,
+                    chimera_tile: tile,
+                    chimera_stripes: stripes,
+                    flags: LAYOUT_FLAG_CHIMERA,
+                })
+            }
+            Layout::ColMajor | Layout::Tiled { .. } => Err(format!(
+                "softmax does not support layout {:?} for {}x{} tensors",
+                layout, rows, cols
+            )),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct StoredSoftmaxVariant {
+    variant: String,
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct RowSoftmaxParams {
+    rows: u32,
+    cols: u32,
+    in_stride: u32,
+    out_stride: u32,
+    chimera_tile: u32,
+    chimera_stripes: u32,
+    flags: u32,
+    mask_stride: u32,
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct SoftmaxZSpaceParams {
+    rows: u32,
+    cols: u32,
+    stride: u32,
+    _pad: u32,
+    golden_ratio: f32,
+    golden_angle: f32,
+    min_energy: f32,
+    _pad1: f32,
+}
+
+const LAYOUT_FLAG_CHIMERA: u32 = 1 << 0;
+const SOFTMAX_FLAG_HARDMAX_ONLY: u32 = 1 << 1;
+const SOFTMAX_FLAG_HARDMAX_MASK: u32 = 1 << 2;
+const SOFTMAX_AUTOTUNE_REVISION: u64 = 2;
+const SOFTMAX_AUTOTUNE_WARMUP: usize = 1;
+const SOFTMAX_AUTOTUNE_SAMPLES: usize = 3;
+const SOFTMAX_HISTORY_LIMIT: usize = 32;
+const SOFTMAX_METROPOLIS_TRIES: usize = 4;
+const SOFTMAX_METROPOLIS_TEMPERATURE: f64 = 3.5;
+const SOFTMAX_ANNEAL_MIN_TEMP: f64 = 0.35;
+const SOFTMAX_ANNEAL_MAX_TEMP: f64 = 2.75;
+const SOFTMAX_ANNEAL_HISTORY: usize = 12;
+const SOFTMAX_CONSENSUS_HISTORY: usize = 24;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+enum SoftmaxVariant {
+    Workgroup,
+    Subgroup,
+}
+
+impl SoftmaxVariant {
+    fn as_str(&self) -> &'static str {
+        match self {
+            SoftmaxVariant::Workgroup => "workgroup",
+            SoftmaxVariant::Subgroup => "subgroup",
+        }
+    }
+
+    fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "workgroup" => Some(SoftmaxVariant::Workgroup),
+            "subgroup" => Some(SoftmaxVariant::Subgroup),
+            _ => None,
+        }
+    }
+}
+
+fn make_softmax_telemetry_sample(
+    rows: usize,
+    cols: usize,
+    elapsed_s: f64,
+) -> Option<TelemetrySample> {
+    if elapsed_s <= 0.0 {
+        return None;
+    }
+    let elements = rows.checked_mul(cols)?;
+    if elements == 0 {
+        return None;
+    }
+    let elements_f64 = elements as f64;
+    let flops = elements_f64 * SOFTMAX_FLOPS_PER_ELEMENT;
+    let tflops = (flops / elapsed_s) / 1e12;
+    let bytes = elements_f64 * SOFTMAX_BYTES_PER_ELEMENT;
+    let bandwidth = (bytes / elapsed_s) / 1e9;
+    let occupancy = estimate_softmax_occupancy(cols);
+    Some(TelemetrySample::new(
+        tflops as f32,
+        bandwidth as f32,
+        occupancy,
+        None,
+        false,
+    ))
+}
+
+fn estimate_softmax_occupancy(cols: usize) -> f32 {
+    if cols == 0 {
+        return 0.0;
+    }
+    if cols >= SOFTMAX_WORKGROUP_SIZE as usize {
+        1.0
+    } else {
+        (cols as f32 / SOFTMAX_WORKGROUP_SIZE).clamp(0.0, 1.0)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SoftmaxZProjectMetrics {
+    pub focus: f32,
+    pub above: f32,
+    pub here: f32,
+    pub beneath: f32,
+    pub swirl: f32,
+    pub spiral_flux: f32,
+    pub leech_enrichment: f32,
+    pub ramanujan_ratio: f32,
+    pub ramanujan_delta: f32,
+    pub ramanujan_iterations: u32,
+}
+
+impl SoftmaxZProjectMetrics {
+    fn new(
+        focus: f32,
+        above: f32,
+        here: f32,
+        beneath: f32,
+        swirl: f32,
+        flux: f32,
+        leech_enrichment: f32,
+        ramanujan_ratio: f32,
+        ramanujan_delta: f32,
+        ramanujan_iterations: u32,
+    ) -> Self {
+        Self {
+            focus: focus.clamp(0.0, 1.0),
+            above: above.clamp(0.0, 1.0),
+            here: here.clamp(0.0, 1.0),
+            beneath: beneath.clamp(0.0, 1.0),
+            swirl: swirl.clamp(-1.0, 1.0),
+            spiral_flux: flux.clamp(0.0, 1.0),
+            leech_enrichment: leech_enrichment.clamp(0.0, 1.0),
+            ramanujan_ratio: ramanujan_ratio.clamp(0.0, 2.0),
+            ramanujan_delta: ramanujan_delta.max(0.0),
+            ramanujan_iterations,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SoftmaxBayesEvidence {
+    pub posterior_ms: f64,
+    pub prior_ms: f64,
+    pub confidence: f32,
+    pub uplift_ms: f64,
+    pub credible_low_ms: f64,
+    pub credible_high_ms: f64,
+}
+
+impl SoftmaxBayesEvidence {
+    fn new(
+        posterior_ms: f64,
+        prior_ms: f64,
+        confidence: f32,
+        credible_low_ms: f64,
+        credible_high_ms: f64,
+    ) -> Self {
+        let confidence = confidence.clamp(0.0, 1.0);
+        let (credible_low_ms, credible_high_ms) = if credible_low_ms <= credible_high_ms {
+            (credible_low_ms.max(0.0), credible_high_ms)
+        } else {
+            (credible_high_ms.max(0.0), credible_low_ms)
+        };
+        Self {
+            posterior_ms,
+            prior_ms,
+            confidence,
+            uplift_ms: prior_ms - posterior_ms,
+            credible_low_ms,
+            credible_high_ms,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SoftmaxMetropolisEvidence {
+    pub acceptance: f32,
+    pub expected_ms: f64,
+    pub tries: u32,
+    pub proposal_focus: f32,
+    pub proposal_flux: f32,
+}
+
+impl SoftmaxMetropolisEvidence {
+    fn new(acceptance: f32, expected_ms: f64, tries: u32, focus: f32, flux: f32) -> Self {
+        Self {
+            acceptance: acceptance.clamp(0.0, 1.0),
+            expected_ms: expected_ms.max(0.0),
+            tries,
+            proposal_focus: focus.clamp(0.0, 1.0),
+            proposal_flux: flux.clamp(0.0, 1.0),
+        }
+    }
+
+    fn identity(raw_ms: f64, focus: f32, flux: f32) -> Self {
+        Self::new(0.0, raw_ms.max(0.0), 0, focus, flux)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SoftmaxSpiralAnnealEvidence {
+    pub temperature: f32,
+    pub annealed_ms: f64,
+    pub exploration_mass: f32,
+    pub entropy: f32,
+    pub refreshes: u32,
+}
+
+impl SoftmaxSpiralAnnealEvidence {
+    fn new(
+        temperature: f32,
+        annealed_ms: f64,
+        exploration_mass: f32,
+        entropy: f32,
+        refreshes: u32,
+    ) -> Self {
+        Self {
+            temperature: temperature.clamp(
+                SOFTMAX_ANNEAL_MIN_TEMP as f32,
+                SOFTMAX_ANNEAL_MAX_TEMP as f32,
+            ),
+            annealed_ms: annealed_ms.max(0.0),
+            exploration_mass: exploration_mass.clamp(0.0, 1.0),
+            entropy: entropy.clamp(0.0, 1.0),
+            refreshes,
+        }
+    }
+
+    fn identity(raw_ms: f64) -> Self {
+        Self::new(SOFTMAX_ANNEAL_MIN_TEMP as f32, raw_ms.max(0.0), 0.0, 0.0, 0)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SoftmaxSpiralConsensusEvidence {
+    pub consensus_ms: f64,
+    pub synergy: f32,
+    pub z_bias: f32,
+    pub bayes_weight: f32,
+    pub metropolis_weight: f32,
+    pub anneal_weight: f32,
+    pub harmony: f32,
+}
+
+impl SoftmaxSpiralConsensusEvidence {
+    fn new(
+        consensus_ms: f64,
+        synergy: f32,
+        z_bias: f32,
+        bayes_weight: f32,
+        metropolis_weight: f32,
+        anneal_weight: f32,
+        harmony: f32,
+    ) -> Self {
+        Self {
+            consensus_ms: consensus_ms.max(0.0),
+            synergy: synergy.clamp(0.0, 1.0),
+            z_bias: z_bias.clamp(0.0, 1.0),
+            bayes_weight: bayes_weight.clamp(0.0, 1.0),
+            metropolis_weight: metropolis_weight.clamp(0.0, 1.0),
+            anneal_weight: anneal_weight.clamp(0.0, 1.0),
+            harmony: harmony.clamp(0.0, 1.0),
+        }
+    }
+
+    fn identity(raw_ms: f64, focus: f32, flux: f32) -> Self {
+        let synergy = ((focus + flux) * 0.5).clamp(0.0, 1.0);
+        let z_bias = ((focus + flux) * 0.5).clamp(0.0, 1.0);
+        let harmony = ((focus + flux) * 0.5).clamp(0.0, 1.0);
+        Self::new(raw_ms.max(0.0), synergy, z_bias, 0.0, 0.0, 0.0, harmony)
+    }
+}
+
+fn zspace_affinity(
+    reference: Option<&SoftmaxZProjectMetrics>,
+    proposal: &SoftmaxZProjectMetrics,
+    same_variant: bool,
+) -> f32 {
+    let base = if let Some(current) = reference {
+        let focus = 1.0 - (current.focus - proposal.focus).abs();
+        let flux = 1.0 - (current.spiral_flux - proposal.spiral_flux).abs();
+        let swirl_delta = (current.swirl - proposal.swirl).abs();
+        let swirl = 1.0 - (swirl_delta * 0.5).min(1.0);
+        let ratio = 1.0
+            - (current.ramanujan_ratio - proposal.ramanujan_ratio)
+                .abs()
+                .min(1.0);
+        let leech = 1.0
+            - (current.leech_enrichment - proposal.leech_enrichment)
+                .abs()
+                .min(1.0);
+        ((focus + flux + swirl + ratio + leech) / 5.0).clamp(0.0, 1.0)
+    } else {
+        let ratio = 1.0 - (proposal.ramanujan_ratio - 1.0).abs().min(1.0);
+        let leech = proposal.leech_enrichment;
+        ((proposal.focus + proposal.spiral_flux + ratio + leech) * 0.25).clamp(0.0, 1.0)
+    };
+    let bonus = if same_variant { 0.1 } else { 0.0 };
+    (base + bonus).clamp(0.0, 1.0)
+}
+
+#[derive(Clone, Debug)]
+struct SoftmaxSelectionRecord {
+    key: String,
+    variant: SoftmaxVariant,
+    score_ms: f64,
+    samples: usize,
+    zmetrics: Option<SoftmaxZProjectMetrics>,
+    bayes: Option<SoftmaxBayesEvidence>,
+    metropolis: Option<SoftmaxMetropolisEvidence>,
+    anneal: Option<SoftmaxSpiralAnnealEvidence>,
+    consensus: Option<SoftmaxSpiralConsensusEvidence>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SoftmaxTelemetrySummary {
+    pub avg_tflops: f32,
+    pub avg_bandwidth_gbps: f32,
+    pub avg_occupancy: f32,
+    pub regression_rate: f32,
+}
+
+impl From<TelemetrySummary> for SoftmaxTelemetrySummary {
+    fn from(summary: TelemetrySummary) -> Self {
+        Self {
+            avg_tflops: summary.avg_tflops,
+            avg_bandwidth_gbps: summary.avg_bandwidth_gbps,
+            avg_occupancy: summary.avg_occupancy,
+            regression_rate: summary.regression_rate,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct RoundtableBandHint {
+    pub above: f32,
+    pub here: f32,
+    pub beneath: f32,
+    pub drift: f32,
+}
+
+impl RoundtableBandHint {
+    fn new(above: f32, here: f32, beneath: f32, drift: f32) -> Self {
+        let above = above.max(0.0);
+        let here = here.max(0.0);
+        let beneath = beneath.max(0.0);
+        let total = above + here + beneath;
+        if total <= f32::EPSILON {
+            return Self {
+                above: 1.0 / 3.0,
+                here: 1.0 / 3.0,
+                beneath: 1.0 / 3.0,
+                drift,
+            };
+        }
+        let inv = total.recip();
+        Self {
+            above: (above * inv).clamp(0.0, 1.0),
+            here: (here * inv).clamp(0.0, 1.0),
+            beneath: (beneath * inv).clamp(0.0, 1.0),
+            drift,
+        }
+    }
+
+    fn from_summary(summary: SoftmaxTelemetrySummary, variant: SoftmaxVariant) -> Self {
+        let occupancy = summary.avg_occupancy.clamp(0.0, 1.0);
+        let regression = summary.regression_rate.clamp(0.0, 1.0);
+        let variant_bias = match variant {
+            SoftmaxVariant::Workgroup => 1.0,
+            SoftmaxVariant::Subgroup => GOLDEN_RATIO,
+        };
+        let above = summary.avg_tflops.max(0.0) * variant_bias;
+        let here = summary.avg_bandwidth_gbps.max(0.0) * (1.0 + 0.5 * occupancy);
+        let beneath = occupancy * (1.0 + (1.0 - regression) / GOLDEN_RATIO);
+        let drift = 1.0 - 2.0 * regression;
+        Self::new(above, here, beneath, drift)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct GoldenPulseHint {
+    pub ratio_bias: f32,
+    pub angle_bias_deg: f32,
+    pub cooperative_weight: f32,
+}
+
+impl GoldenPulseHint {
+    fn from_summary(summary: SoftmaxTelemetrySummary, variant: SoftmaxVariant) -> Self {
+        let occupancy = summary.avg_occupancy.clamp(0.0, 1.0);
+        let regression = summary.regression_rate.clamp(0.0, 1.0);
+        let ratio = (summary.avg_tflops.max(1e-6) / summary.avg_bandwidth_gbps.max(1e-6)).ln()
+            / GOLDEN_RATIO;
+        let ratio_bias = ratio.clamp(-GOLDEN_RATIO, GOLDEN_RATIO);
+        let variant_factor = match variant {
+            SoftmaxVariant::Workgroup => 0.75,
+            SoftmaxVariant::Subgroup => 1.0,
+        };
+        let angle_bias_deg = GOLDEN_ANGLE_DEG * occupancy * variant_factor;
+        let energy = summary.avg_tflops.max(0.0) + summary.avg_bandwidth_gbps.max(0.0);
+        let cooperative_weight = if energy <= f32::EPSILON {
+            0.0
+        } else {
+            let spectral_share = (summary.avg_tflops.max(0.0) / energy).clamp(0.0, 1.0);
+            (spectral_share.powf(1.0 / GOLDEN_RATIO) * (1.0 - regression)).clamp(0.0, 1.0)
+        };
+        Self {
+            ratio_bias,
+            angle_bias_deg,
+            cooperative_weight,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SoftmaxZSpaceHint {
+    pub focus: f32,
+    pub spiral_flux: f32,
+    pub roundtable: RoundtableBandHint,
+    pub golden: GoldenPulseHint,
+    pub leech_enrichment: f32,
+    pub ramanujan_ratio: f32,
+    pub ramanujan_delta: f32,
+    pub ramanujan_iterations: u32,
+    projection: Option<SoftmaxZProjectMetrics>,
+}
+
+impl SoftmaxZSpaceHint {
+    fn from_observations(
+        summary: SoftmaxTelemetrySummary,
+        projection: Option<SoftmaxZProjectMetrics>,
+        variant: SoftmaxVariant,
+    ) -> Self {
+        let occupancy = summary.avg_occupancy.clamp(0.0, 1.0);
+        let regression = summary.regression_rate.clamp(0.0, 1.0);
+        let harmonic = (summary.avg_tflops.max(0.0) * summary.avg_bandwidth_gbps.max(0.0)).sqrt();
+        let fallback_focus = if harmonic <= f32::EPSILON {
+            0.0
+        } else {
+            let focus_raw = harmonic * occupancy;
+            (focus_raw / (focus_raw + GOLDEN_RATIO + regression)).clamp(0.0, 1.0)
+        };
+        let focus = projection.map(|m| m.focus).unwrap_or(fallback_focus);
+        let flux = projection
+            .map(|m| m.spiral_flux)
+            .unwrap_or_else(|| (focus * occupancy).clamp(0.0, 1.0));
+        let (leech_enrichment, ramanujan_ratio, ramanujan_delta, ramanujan_iterations) =
+            if let Some(metrics) = projection {
+                (
+                    metrics.leech_enrichment,
+                    metrics.ramanujan_ratio,
+                    metrics.ramanujan_delta,
+                    metrics.ramanujan_iterations,
+                )
+            } else {
+                (0.0, 1.0, 0.0, 0)
+            };
+        Self {
+            focus,
+            spiral_flux: flux,
+            roundtable: RoundtableBandHint::from_summary(summary, variant),
+            golden: GoldenPulseHint::from_summary(summary, variant),
+            leech_enrichment,
+            ramanujan_ratio,
+            ramanujan_delta,
+            ramanujan_iterations,
+            projection,
+        }
+    }
+
+    fn from_projection(projection: SoftmaxZProjectMetrics, variant: SoftmaxVariant) -> Self {
+        let pseudo = SoftmaxTelemetrySummary {
+            avg_tflops: projection.focus,
+            avg_bandwidth_gbps: projection.here,
+            avg_occupancy: (projection.above + projection.here + projection.beneath)
+                .clamp(0.0, 1.0),
+            regression_rate: (1.0 - projection.focus).clamp(0.0, 1.0),
+        };
+        Self {
+            focus: projection.focus,
+            spiral_flux: projection.spiral_flux,
+            roundtable: RoundtableBandHint::from_summary(pseudo, variant),
+            golden: GoldenPulseHint::from_summary(pseudo, variant),
+            leech_enrichment: projection.leech_enrichment,
+            ramanujan_ratio: projection.ramanujan_ratio,
+            ramanujan_delta: projection.ramanujan_delta,
+            ramanujan_iterations: projection.ramanujan_iterations,
+            projection: Some(projection),
+        }
+    }
+
+    pub fn projection(&self) -> Option<&SoftmaxZProjectMetrics> {
+        self.projection.as_ref()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SoftmaxSelectionSnapshot {
+    pub key: String,
+    variant: SoftmaxVariant,
+    pub score_ms: f64,
+    pub samples: usize,
+    pub telemetry: Option<SoftmaxTelemetrySummary>,
+    pub zspace: Option<SoftmaxZSpaceHint>,
+    bayesian: Option<SoftmaxBayesEvidence>,
+    metropolis: Option<SoftmaxMetropolisEvidence>,
+    anneal: Option<SoftmaxSpiralAnnealEvidence>,
+    consensus: Option<SoftmaxSpiralConsensusEvidence>,
+}
+
+impl SoftmaxSelectionSnapshot {
+    pub fn variant_name(&self) -> &'static str {
+        self.variant.as_str()
+    }
+
+    pub fn telemetry(&self) -> Option<&SoftmaxTelemetrySummary> {
+        self.telemetry.as_ref()
+    }
+
+    pub fn zspace(&self) -> Option<&SoftmaxZSpaceHint> {
+        self.zspace.as_ref()
+    }
+
+    pub fn projection(&self) -> Option<&SoftmaxZProjectMetrics> {
+        self.zspace.as_ref().and_then(|hint| hint.projection())
+    }
+
+    pub fn bayesian(&self) -> Option<&SoftmaxBayesEvidence> {
+        self.bayesian.as_ref()
+    }
+
+    pub fn metropolis(&self) -> Option<&SoftmaxMetropolisEvidence> {
+        self.metropolis.as_ref()
+    }
+
+    pub fn anneal(&self) -> Option<&SoftmaxSpiralAnnealEvidence> {
+        self.anneal.as_ref()
+    }
+
+    pub fn consensus(&self) -> Option<&SoftmaxSpiralConsensusEvidence> {
+        self.consensus.as_ref()
+    }
+
+    fn from_record(
+        record: SoftmaxSelectionRecord,
+        telemetry: Option<SoftmaxTelemetrySummary>,
+    ) -> Self {
+        let zspace = match (telemetry, record.zmetrics) {
+            (Some(summary), metrics) => Some(SoftmaxZSpaceHint::from_observations(
+                summary,
+                metrics,
+                record.variant,
+            )),
+            (None, Some(metrics)) => {
+                Some(SoftmaxZSpaceHint::from_projection(metrics, record.variant))
+            }
+            (None, None) => None,
+        };
+        Self {
+            key: record.key,
+            variant: record.variant,
+            score_ms: record.score_ms,
+            samples: record.samples,
+            telemetry,
+            zspace,
+            bayesian: record.bayes,
+            metropolis: record.metropolis,
+            anneal: record.anneal,
+            consensus: record.consensus,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SoftmaxLayoutDesc {
+    in_stride: u32,
+    out_stride: u32,
+    chimera_tile: u32,
+    chimera_stripes: u32,
+    flags: u32,
+}
+
+impl SoftmaxLayoutDesc {
+    fn from_layout(layout: Layout, rows: usize, cols: usize) -> Result<Self, String> {
+        match layout {
+            Layout::RowMajor => Ok(Self {
+                in_stride: cols
+                    .try_into()
+                    .map_err(|_| "cols exceed u32::MAX for softmax".to_string())?,
+                out_stride: cols
+                    .try_into()
+                    .map_err(|_| "cols exceed u32::MAX for softmax".to_string())?,
+                chimera_tile: 0,
+                chimera_stripes: 0,
+                flags: 0,
+            }),
+            Layout::Chimera { stripes, tile } => {
+                if stripes == 0 || tile == 0 {
+                    return Err("chimera layout requires positive stripes and tile".into());
+                }
+                let stripes_usize = stripes as usize;
+                let tile_usize = tile as usize;
+                if stripes_usize * tile_usize != cols {
+                    return Err("chimera layout must satisfy stripes * tile == cols".into());
+                }
+                Ok(Self {
+                    in_stride: cols
+                        .try_into()
+                        .map_err(|_| "cols exceed u32::MAX for softmax".to_string())?,
+                    out_stride: cols
+                        .try_into()
+                        .map_err(|_| "cols exceed u32::MAX for softmax".to_string())?,
+                    chimera_tile: tile,
+                    chimera_stripes: stripes,
+                    flags: LAYOUT_FLAG_CHIMERA,
+                })
+            }
+            Layout::ColMajor | Layout::Tiled { .. } => Err(format!(
+                "softmax does not support layout {:?} for {}x{} tensors",
+                layout, rows, cols
+            )),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct StoredSoftmaxVariant {
+    variant: String,
+}
+
 fn softmax_cache_key(
     ctx: &GpuContext,
     rows: usize,
