@@ -7,6 +7,7 @@ import ctypes.util
 import os
 import warnings
 from array import array
+from contextlib import contextmanager
 from threading import Lock
 from typing import Iterable
 
@@ -14,6 +15,8 @@ __all__ = [
     "blas_available",
     "configure_threads",
     "current_thread_count",
+    "thread_controls_available",
+    "temporary_thread_count",
     "blas_vendor",
     "dgemm",
 ]
@@ -78,6 +81,8 @@ def _locate_thread_controls(lib: ctypes.CDLL) -> None:
         ("MKL_Set_Num_Threads_Loc", ctypes.c_int),
         ("MKL_Set_Num_Threads_Local", ctypes.c_int),
         ("bli_thread_set_num_threads", ctypes.c_int),
+        ("flexiblas_set_num_threads", ctypes.c_int),
+        ("goto_set_num_threads", ctypes.c_int),
         ("veclib_set_num_threads", ctypes.c_int),
         ("omp_set_num_threads", ctypes.c_int),
     )
@@ -88,6 +93,8 @@ def _locate_thread_controls(lib: ctypes.CDLL) -> None:
         ("cblas_get_num_threads", ctypes.c_int),
         ("MKL_Get_Max_Threads", ctypes.c_int),
         ("bli_thread_get_num_threads", ctypes.c_int),
+        ("flexiblas_get_num_threads", ctypes.c_int),
+        ("goto_get_num_threads", ctypes.c_int),
         ("veclib_get_num_threads", ctypes.c_int),
         ("omp_get_max_threads", ctypes.c_int),
     )
@@ -163,6 +170,26 @@ def _identify_vendor(lib: ctypes.CDLL) -> None:
         if version:
             _VENDOR = f"BLIS ({version})"
             return
+    except AttributeError:
+        pass
+
+    # FlexiBLAS provides indirection over multiple backends and exposes helper APIs.
+    try:
+        get_backend = getattr(lib, "flexiblas_get_current_backend")
+        get_backend.argtypes = []
+        get_backend.restype = ctypes.c_char_p
+        backend = _decode_bytes(get_backend())
+
+        get_version = getattr(lib, "flexiblas_get_version")
+        get_version.argtypes = []
+        get_version.restype = ctypes.c_char_p
+        version = _decode_bytes(get_version())
+
+        details = backend or "unknown backend"
+        if version:
+            details = f"{details}; {version}"
+        _VENDOR = f"FlexiBLAS ({details})"
+        return
     except AttributeError:
         pass
 
@@ -308,6 +335,51 @@ def current_thread_count() -> int | None:
     current = int(_THREAD_GETTER())
     _THREAD_LAST_SET = current
     return current
+
+
+def thread_controls_available() -> bool:
+    """Return ``True`` when the loaded BLAS exposes thread control helpers."""
+
+    if not blas_available():
+        raise RuntimeError("BLAS backend is unavailable")
+
+    return _THREAD_SETTER is not None
+
+
+@contextmanager
+def temporary_thread_count(threads: int):
+    """Temporarily override the BLAS thread count within the managed context."""
+
+    target = int(threads)
+
+    if target <= 0:
+        raise ValueError("thread count must be a positive integer")
+
+    if not thread_controls_available():
+        raise RuntimeError("loaded BLAS library does not expose thread control APIs")
+
+    previous: int | None
+    try:
+        previous = current_thread_count()
+    except RuntimeError:
+        previous = None
+
+    if previous == target:
+        yield
+        return
+
+    configure_threads(target)
+    try:
+        yield
+    finally:
+        if previous is not None and previous > 0:
+            try:
+                configure_threads(previous)
+            except Exception as exc:  # pragma: no cover - defensive fallback
+                warnings.warn(
+                    f"Failed to restore previous BLAS thread count: {exc}",
+                    RuntimeWarning,
+                )
 
 
 def blas_vendor() -> str:
