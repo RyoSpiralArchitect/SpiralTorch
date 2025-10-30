@@ -54,7 +54,7 @@ use rand_distr::StandardNormal;
 use rayon::{current_num_threads, prelude::*};
 use serde::{Deserialize, Serialize};
 use spiral_config::determinism;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::convert::TryFrom;
 use std::error::Error;
 use std::f32::consts::PI;
@@ -3568,6 +3568,10 @@ pub struct AmegaHypergrad {
     rows: usize,
     cols: usize,
     gradient: Vec<f32>,
+    summary: Cell<GradientSummary>,
+    min_dirty: Cell<bool>,
+    max_dirty: Cell<bool>,
+    linf_dirty: Cell<bool>,
     topos: topos::OpenCartesianTopos,
 }
 
@@ -4923,12 +4927,18 @@ impl AmegaHypergrad {
             rows.saturating_mul(cols).saturating_mul(4).max(8),
             rows.saturating_mul(cols),
         )?;
+        let gradient = vec![0.0; rows * cols];
+        let summary = GradientSummary::from_slice(&gradient);
         Ok(Self {
             curvature,
             learning_rate,
             rows,
             cols,
-            gradient: vec![0.0; rows * cols],
+            gradient,
+            summary: Cell::new(summary),
+            min_dirty: Cell::new(false),
+            max_dirty: Cell::new(false),
+            linf_dirty: Cell::new(false),
             topos,
         })
     }
@@ -4960,12 +4970,18 @@ impl AmegaHypergrad {
                 max_volume: topos.max_volume(),
             });
         }
+        let gradient = vec![0.0; capacity];
+        let summary = GradientSummary::from_slice(&gradient);
         Ok(Self {
             curvature,
             learning_rate,
             rows,
             cols,
-            gradient: vec![0.0; capacity],
+            gradient,
+            summary: Cell::new(summary),
+            min_dirty: Cell::new(false),
+            max_dirty: Cell::new(false),
+            linf_dirty: Cell::new(false),
             topos,
         })
     }
@@ -4997,7 +5013,174 @@ impl AmegaHypergrad {
 
     /// Summarise the accumulated gradient using basic norm statistics.
     pub fn summary(&self) -> GradientSummary {
-        GradientSummary::from_slice(&self.gradient)
+        self.ensure_summary_extrema()
+    }
+
+    #[inline]
+    fn ensure_summary_extrema(&self) -> GradientSummary {
+        if self.min_dirty.get() || self.max_dirty.get() || self.linf_dirty.get() {
+            let mut summary = self.summary.get();
+            let mut min = f32::INFINITY;
+            let mut max = f32::NEG_INFINITY;
+            let mut linf = 0.0f32;
+            let mut any_finite = false;
+            for &value in &self.gradient {
+                if !value.is_finite() {
+                    continue;
+                }
+                if !any_finite {
+                    any_finite = true;
+                    min = value;
+                    max = value;
+                    linf = value.abs();
+                } else {
+                    min = min.min(value);
+                    max = max.max(value);
+                    linf = linf.max(value.abs());
+                }
+            }
+            if !any_finite {
+                min = 0.0;
+                max = 0.0;
+                linf = 0.0;
+            }
+            summary.min = min;
+            summary.max = max;
+            summary.linf = linf;
+            self.summary.set(summary);
+            self.min_dirty.set(false);
+            self.max_dirty.set(false);
+            self.linf_dirty.set(false);
+        }
+        self.summary.get()
+    }
+
+    #[inline]
+    fn rebuild_summary(&self) {
+        let summary = GradientSummary::from_slice(&self.gradient);
+        self.summary.set(summary);
+        self.min_dirty.set(false);
+        self.max_dirty.set(false);
+        self.linf_dirty.set(false);
+    }
+
+    fn record_transition(&self, old: f32, new: f32) {
+        if old.to_bits() == new.to_bits() {
+            return;
+        }
+        if !old.is_finite() || !new.is_finite() {
+            self.rebuild_summary();
+            return;
+        }
+        let mut summary = self.summary.get();
+        let old64 = old as f64;
+        let new64 = new as f64;
+        let mut l1 = summary.l1 as f64 + new64.abs() - old64.abs();
+        if l1 < 0.0 {
+            l1 = 0.0;
+        }
+        summary.l1 = l1 as f32;
+        summary.sum = (summary.sum as f64 + new64 - old64) as f32;
+        let old_sq = old64 * old64;
+        let new_sq = new64 * new64;
+        let mut sum_squares = summary.sum_squares as f64 + new_sq - old_sq;
+        if sum_squares < 0.0 {
+            sum_squares = 0.0;
+        }
+        summary.sum_squares = sum_squares as f32;
+        summary.l2 = summary.sum_squares.sqrt();
+        let old_cubic = old_sq * old64;
+        let new_cubic = new_sq * new64;
+        summary.sum_cubes = (summary.sum_cubes as f64 + new_cubic - old_cubic) as f32;
+        let old_quartic = old_sq * old_sq;
+        let new_quartic = new_sq * new_sq;
+        let mut sum_quartic = summary.sum_quartic as f64 + new_quartic - old_quartic;
+        if sum_quartic < 0.0 {
+            sum_quartic = 0.0;
+        }
+        summary.sum_quartic = sum_quartic as f32;
+
+        if old > 0.0 {
+            summary.positive_count = summary.positive_count.saturating_sub(1);
+        } else if old < 0.0 {
+            summary.negative_count = summary.negative_count.saturating_sub(1);
+        }
+        if new > 0.0 {
+            summary.positive_count = summary.positive_count.saturating_add(1).min(summary.count);
+        } else if new < 0.0 {
+            summary.negative_count = summary.negative_count.saturating_add(1).min(summary.count);
+        }
+        if old.abs() <= GradientSummary::NEAR_ZERO_EPS {
+            summary.near_zero_count = summary.near_zero_count.saturating_sub(1);
+        }
+        if new.abs() <= GradientSummary::NEAR_ZERO_EPS {
+            summary.near_zero_count = summary.near_zero_count.saturating_add(1).min(summary.count);
+        }
+        if new < summary.min {
+            summary.min = new;
+        } else if old <= summary.min && new > old {
+            self.min_dirty.set(true);
+        }
+        if new > summary.max {
+            summary.max = new;
+        } else if old >= summary.max && new < old {
+            self.max_dirty.set(true);
+        }
+        let new_abs = new.abs();
+        if new_abs > summary.linf {
+            summary.linf = new_abs;
+        } else {
+            let old_abs = old.abs();
+            if old_abs >= summary.linf && new_abs < old_abs {
+                self.linf_dirty.set(true);
+            }
+        }
+        self.summary.set(summary);
+    }
+
+    fn telemetry_snapshot(&self) -> HypergradTelemetry {
+        let guard = self.topos();
+        HypergradTelemetry {
+            summary: self.summary(),
+            curvature: self.curvature,
+            learning_rate: self.learning_rate,
+            saturation: guard.saturation(),
+            porosity: guard.porosity(),
+            tolerance: guard.tolerance(),
+            max_depth: guard.max_depth(),
+            max_volume: guard.max_volume(),
+            rows: self.rows,
+            cols: self.cols,
+        }
+    }
+
+    /// Returns a telemetry bundle that mirrors the tape's guard envelope and
+    /// accumulated statistics. Automation layers use the payload to translate
+    /// hypergrad magnitudes into Desire feedback and WGSL operator hints.
+    pub fn telemetry(&self) -> HypergradTelemetry {
+        self.telemetry_snapshot()
+    }
+
+    /// Builds a Desire gradient interpretation by pairing the hypergrad tape's
+    /// summary with the provided Euclidean gradient statistics.
+    pub fn desire_interpretation(&self, real: GradientSummary) -> DesireGradientInterpretation {
+        DesireGradientInterpretation::from_summaries(self.summary(), real)
+    }
+
+    /// Derives a Desire control packet scaled by `gain` using the tape's
+    /// telemetry and the supplied Euclidean gradient summary.
+    pub fn desire_control_with_gain(
+        &self,
+        real: GradientSummary,
+        gain: f32,
+    ) -> DesireGradientControl {
+        DesireGradientControl::from_interpretation_with_gain(self.desire_interpretation(real), gain)
+    }
+
+    /// Convenience wrapper over [`desire_control_with_gain`] that applies the
+    /// recommended gain of `1.0`.
+    pub fn desire_control(&self, real: GradientSummary) -> DesireGradientControl {
+        self.desire_control_with_gain(real, 1.0)
     }
 
     fn telemetry_snapshot(&self) -> HypergradTelemetry {
@@ -5095,8 +5278,15 @@ impl AmegaHypergrad {
 
     /// Clears the accumulated gradient back to zero.
     pub fn reset(&mut self) {
-        for g in self.gradient.iter_mut() {
-            *g = 0.0;
+        for idx in 0..self.gradient.len() {
+            let old = self.gradient[idx];
+            let new = 0.0f32;
+            if old.to_bits() != new.to_bits() {
+                self.gradient[idx] = new;
+                self.record_transition(old, new);
+            } else {
+                self.gradient[idx] = new;
+            }
         }
     }
 
@@ -5106,10 +5296,20 @@ impl AmegaHypergrad {
         self.assert_tensor_shape(tensor)?;
         self.topos.guard_tensor("hypergrad_wave", tensor)?;
         let tolerance = self.topos.tolerance();
-        for (grad, value) in self.gradient.iter_mut().zip(tensor.data().iter()) {
+        let values = tensor.data();
+        for idx in 0..self.gradient.len() {
+            let value = values[idx];
             let denom = 1.0 - self.curvature * value * value;
-            let update = *value / denom.abs().max(tolerance);
-            *grad = self.topos.saturate(*grad + update);
+            let update = value / denom.abs().max(tolerance);
+            let old = self.gradient[idx];
+            let candidate = old + update;
+            let new = self.topos.saturate(candidate);
+            if old.to_bits() != new.to_bits() {
+                self.gradient[idx] = new;
+                self.record_transition(old, new);
+            } else {
+                self.gradient[idx] = new;
+            }
         }
         Ok(())
     }
@@ -5145,14 +5345,19 @@ impl AmegaHypergrad {
         self.topos
             .guard_tensor("hypergrad_prediction", prediction)?;
         self.topos.guard_tensor("hypergrad_target", target)?;
-        for ((grad, pred), tgt) in self
-            .gradient
-            .iter_mut()
-            .zip(prediction.data().iter())
-            .zip(target.data().iter())
-        {
-            let delta = pred - tgt;
-            *grad = self.topos.saturate(*grad + delta);
+        let prediction_data = prediction.data();
+        let target_data = target.data();
+        for idx in 0..self.gradient.len() {
+            let delta = prediction_data[idx] - target_data[idx];
+            let old = self.gradient[idx];
+            let candidate = old + delta;
+            let new = self.topos.saturate(candidate);
+            if old.to_bits() != new.to_bits() {
+                self.gradient[idx] = new;
+                self.record_transition(old, new);
+            } else {
+                self.gradient[idx] = new;
+            }
         }
         Ok(())
     }
@@ -5751,6 +5956,23 @@ mod tests {
     use super::*;
     use ndarray::Array2;
 
+    fn assert_summary_close(actual: GradientSummary, expected: GradientSummary) {
+        const EPS: f32 = 1e-5;
+        assert!((actual.l1() - expected.l1()).abs() < EPS);
+        assert!((actual.l2() - expected.l2()).abs() < EPS);
+        assert!((actual.linf() - expected.linf()).abs() < EPS);
+        assert!((actual.sum() - expected.sum()).abs() < EPS);
+        assert!((actual.sum_squares() - expected.sum_squares()).abs() < EPS);
+        assert!((actual.sum_cubes() - expected.sum_cubes()).abs() < EPS);
+        assert!((actual.sum_quartic() - expected.sum_quartic()).abs() < EPS);
+        assert_eq!(actual.count(), expected.count());
+        assert_eq!(actual.positive_count(), expected.positive_count());
+        assert_eq!(actual.negative_count(), expected.negative_count());
+        assert_eq!(actual.near_zero_count(), expected.near_zero_count());
+        assert!((actual.min() - expected.min()).abs() < EPS);
+        assert!((actual.max() - expected.max()).abs() < EPS);
+    }
+
     #[test]
     fn matmul_bias_relu_matches_scalar_pipeline() {
         let lhs = Tensor::from_vec(2, 3, vec![1.0, -2.0, 0.5, 0.25, 1.5, -0.75]).unwrap();
@@ -6346,6 +6568,33 @@ mod tests {
         assert_eq!(real_summary.count(), 3);
         let expected_l1: f32 = tensor.data().iter().map(|value| value.abs()).sum();
         assert!((real_summary.l1() - expected_l1).abs() < 1e-6);
+    }
+
+    #[test]
+    fn hypergrad_summary_stays_in_sync_with_updates() {
+        let mut tape = AmegaHypergrad::new(-1.0, 0.05, 2, 2).unwrap();
+        let wave = Tensor::from_vec(2, 2, vec![0.5, -0.25, 1.2, -0.9]).unwrap();
+        tape.accumulate_wave(&wave).unwrap();
+        let after_wave = tape.summary();
+        let expected_wave = GradientSummary::from_slice(tape.gradient());
+        assert_summary_close(after_wave, expected_wave);
+
+        let prediction = Tensor::from_vec(2, 2, vec![0.8, -0.6, 0.3, -0.1]).unwrap();
+        let target = Tensor::from_vec(2, 2, vec![0.2, -0.3, 0.05, -0.15]).unwrap();
+        tape.accumulate_pair(&prediction, &target).unwrap();
+        let after_pair = tape.summary();
+        let expected_pair = GradientSummary::from_slice(tape.gradient());
+        assert_summary_close(after_pair, expected_pair);
+
+        let mut weights = Tensor::from_vec(2, 2, vec![0.05, -0.05, 0.1, -0.1]).unwrap();
+        tape.apply(&mut weights).unwrap();
+        let reset = tape.summary();
+        assert_eq!(reset.count(), 4);
+        assert!(reset.l1() <= 1e-5);
+        assert!(reset.l2() <= 1e-5);
+        assert_eq!(reset.near_zero_count(), reset.count());
+        assert!(reset.min().abs() <= 1e-6);
+        assert!(reset.max().abs() <= 1e-6);
     }
 
     #[test]
