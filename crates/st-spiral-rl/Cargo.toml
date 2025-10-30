@@ -10,6 +10,7 @@ authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
 st-tensor = { path = "../st-tensor" }
 st-core   = { path = "../st-core" }
 rand      = "0.8"
+spiral-config = { path = "../spiral-config" }
 
 [features]
 collapse = []
