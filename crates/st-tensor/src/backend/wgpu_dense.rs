@@ -79,6 +79,11 @@ const GOLDEN_RATIO: f32 = 1.618_033_988_749_894_8_f32;
 const GOLDEN_ANGLE_DEG: f32 = 137.507_764_05_f32;
 const GOLDEN_ANGLE_RAD: f32 = GOLDEN_ANGLE_DEG * (PI / 180.0);
 const ZSPACE_MIN_ENERGY: f32 = 1e-6;
+const LEECH_PACKING_DENSITY: f64 = 0.001_929_574_309_403_922_5;
+const SOFTMAX_ZSPACE_LEECH_RANK: usize = 24;
+const SOFTMAX_ZSPACE_LEECH_WEIGHT: f64 = 0.75;
+const SOFTMAX_ZSPACE_RAMANUJAN_ITERS: usize = 6;
+const SOFTMAX_ZSPACE_LEECH_SCALE: f64 = 0.05;
 
 fn global_autotune_registry() -> &'static Mutex<AutotuneRegistry> {
     static REGISTRY: OnceLock<Mutex<AutotuneRegistry>> = OnceLock::new();
@@ -596,6 +601,16 @@ impl GpuContext {
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
@@ -1446,6 +1461,15 @@ impl GpuContext {
             "st.tensor.wgpu_dense.softmax.autotune.output",
             total,
         );
+        let mask_buf = if (layout.flags & SOFTMAX_FLAG_HARDMAX_MASK) != 0 {
+            Some(allocate_output(
+                device,
+                "st.tensor.wgpu_dense.softmax.autotune.mask",
+                total,
+            ))
+        } else {
+            None
+        };
 
         let params = RowSoftmaxParams {
             rows: rows_u32,
@@ -1455,13 +1479,18 @@ impl GpuContext {
             chimera_tile: layout.chimera_tile,
             chimera_stripes: layout.chimera_stripes,
             flags: layout.flags,
-            _pad: 0,
+            mask_stride: layout.out_stride,
         };
         let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("st.tensor.wgpu_dense.softmax.autotune.params"),
             contents: bytemuck::bytes_of(&params),
             usage: wgpu::BufferUsages::UNIFORM,
         });
+
+        let mask_binding = mask_buf
+            .as_ref()
+            .map(|buffer| buffer.as_entire_binding())
+            .unwrap_or_else(|| output_buf.as_entire_binding());
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("st.tensor.wgpu_dense.softmax.autotune.bg"),
@@ -1478,6 +1507,10 @@ impl GpuContext {
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: params_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: mask_binding,
                 },
             ],
         });
@@ -1699,7 +1732,14 @@ impl GpuContext {
         })
     }
 
-    fn softmax_bind_group(&self, input: &Buffer, output: &Buffer, params: &Buffer) -> BindGroup {
+    fn softmax_bind_group(
+        &self,
+        input: &Buffer,
+        output: &Buffer,
+        mask: Option<&Buffer>,
+        params: &Buffer,
+    ) -> BindGroup {
+        let mask_binding = mask.unwrap_or(output);
         self.device().create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("st.tensor.wgpu_dense.softmax.bind_group"),
             layout: &self.softmax_layout,
@@ -1716,8 +1756,12 @@ impl GpuContext {
                     binding: 2,
                     resource: params.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: mask_binding.as_entire_binding(),
+                },
             ],
-        })
+        }))
     }
 
     fn softmax_zspace_bind_group(
@@ -1843,8 +1887,31 @@ impl GpuContext {
         let drift = (above - beneath).abs();
         let harmonic = (focus * (here + GOLDEN_RATIO.recip())).clamp(0.0, 1.0);
         let flux = ((drift + swirl.abs()) * harmonic).powf(1.0 / GOLDEN_RATIO);
+        let geodesic =
+            f64::from(focus.max(ZSPACE_MIN_ENERGY)) + f64::from(harmonic.max(ZSPACE_MIN_ENERGY));
+        let sqrt_rank = (SOFTMAX_ZSPACE_LEECH_RANK.max(1) as f64).sqrt();
+        let ramanujan_value = ramanujan_pi(SOFTMAX_ZSPACE_RAMANUJAN_ITERS).max(f64::EPSILON);
+        let ramanujan_ratio_f64 = std::f64::consts::PI / ramanujan_value;
+        let ramanujan_ratio = ramanujan_ratio_f64 as f32;
+        let ramanujan_delta = (ramanujan_value - std::f64::consts::PI).abs() as f32;
+        let ramanujan_iterations = SOFTMAX_ZSPACE_RAMANUJAN_ITERS as u32;
+        let leech_raw = SOFTMAX_ZSPACE_LEECH_WEIGHT
+            * LEECH_PACKING_DENSITY
+            * geodesic
+            * sqrt_rank
+            * ramanujan_ratio_f64;
+        let leech_enrichment = (leech_raw / SOFTMAX_ZSPACE_LEECH_SCALE).clamp(0.0, 1.0) as f32;
         Some(SoftmaxZProjectMetrics::new(
-            focus, above, here, beneath, swirl, flux,
+            focus,
+            above,
+            here,
+            beneath,
+            swirl,
+            flux,
+            leech_enrichment,
+            ramanujan_ratio,
+            ramanujan_delta,
+            ramanujan_iterations,
         ))
     }
 
@@ -1869,7 +1936,11 @@ impl GpuContext {
             let z_bias = record
                 .zmetrics
                 .map(|metrics| {
-                    1.0 + (metrics.spiral_flux as f64) * 0.5 + (metrics.focus as f64) * 0.25
+                    let ratio_bias = 1.0 - (metrics.ramanujan_ratio as f64 - 1.0).abs().min(1.0);
+                    1.0 + (metrics.spiral_flux as f64) * 0.5
+                        + (metrics.focus as f64) * 0.25
+                        + (metrics.leech_enrichment as f64) * 0.25
+                        + ratio_bias * 0.2
                 })
                 .unwrap_or(1.0);
             let w = decay * z_bias;
@@ -1891,7 +1962,14 @@ impl GpuContext {
         let focus_boost = projection
             .map(|metrics| (metrics.focus as f64 + metrics.spiral_flux as f64).max(0.0))
             .unwrap_or(0.0);
-        let sample_weight = (f64::from(GOLDEN_RATIO) + focus_boost).max(1.0);
+        let leech_boost = projection
+            .map(|metrics| metrics.leech_enrichment as f64)
+            .unwrap_or(0.0);
+        let ratio_harmonic = projection
+            .map(|metrics| 1.0 - (metrics.ramanujan_ratio as f64 - 1.0).abs().min(1.0))
+            .unwrap_or(0.0);
+        let sample_weight =
+            (f64::from(GOLDEN_RATIO) + focus_boost + leech_boost + ratio_harmonic).max(1.0);
         let measurement_var = (raw_ms * 0.08).max(0.05).powi(2);
         let posterior_precision = weight / prior_var + sample_weight / measurement_var;
         let posterior_var = if posterior_precision <= f64::EPSILON {
@@ -2014,6 +2092,11 @@ impl GpuContext {
         let focus = projection.map(|m| m.focus).unwrap_or(0.5);
         let flux = projection.map(|m| m.spiral_flux).unwrap_or(0.0);
         let swirl = projection.map(|m| m.swirl.abs()).unwrap_or(0.0);
+        let leech = projection.map(|m| m.leech_enrichment).unwrap_or(0.0);
+        let ratio_harmony = projection
+            .map(|m| 1.0 - (m.ramanujan_ratio - 1.0).abs().min(1.0))
+            .unwrap_or(0.5);
+        let ratio_delta = projection.map(|m| m.ramanujan_delta).unwrap_or(0.0);
         let acceptance = metropolis.map(|m| m.acceptance).unwrap_or(0.0);
         let refreshes = metropolis.map(|m| m.tries).unwrap_or(0);
 
@@ -2058,26 +2141,34 @@ impl GpuContext {
             0.0
         };
 
-        let acceptance_factor = (0.6 + 0.4 * f64::from(acceptance)).clamp(0.4, 1.0);
+        let acceptance_factor =
+            (0.6 + 0.4 * f64::from(acceptance) + 0.2 * f64::from(leech)).clamp(0.4, 1.2);
         let swirl_factor = (1.0 + f64::from(swirl).min(1.0) * 0.75).clamp(1.0, 1.75);
+        let ratio_factor =
+            (1.0 + ratio_harmony as f64 * 0.2 - f64::from(ratio_delta) * 0.1).clamp(0.8, 1.2);
         let focus_cool = (1.0 - f64::from(focus).clamp(0.0, 1.0)).clamp(0.0, 1.0);
 
         let base_temp = SOFTMAX_ANNEAL_MIN_TEMP
             + (SOFTMAX_ANNEAL_MAX_TEMP - SOFTMAX_ANNEAL_MIN_TEMP) * focus_cool;
-        let temp = (base_temp * swirl_factor * acceptance_factor)
+        let temp = (base_temp * swirl_factor * acceptance_factor * ratio_factor)
             .clamp(SOFTMAX_ANNEAL_MIN_TEMP, SOFTMAX_ANNEAL_MAX_TEMP);
 
-        let flux_correction = 1.0 - (f64::from(flux).clamp(0.0, 1.0) * 0.35);
+        let flux_correction =
+            1.0 - (f64::from(flux).clamp(0.0, 1.0) * 0.3 + f64::from(leech).clamp(0.0, 1.0) * 0.2);
         let annealed_ms = (base_ms + drift * flux_correction).max(0.0);
 
         let exploration_mass = ((focus_cool
             + f64::from(flux).clamp(0.0, 1.0) * 0.5
-            + f64::from(swirl).min(1.0) * 0.25)
-            .clamp(0.0, 1.5))
+            + f64::from(swirl).min(1.0) * 0.25
+            + f64::from(leech).clamp(0.0, 1.0) * 0.2
+            + ratio_harmony as f64 * 0.2)
+            .clamp(0.0, 1.6))
         .min(1.0) as f32;
 
-        let entropy = ((variant_dispersion / (base_ms + 1e-6)) * 0.7
-            + f64::from(flux).clamp(0.0, 1.0) * 0.3)
+        let entropy = ((variant_dispersion / (base_ms + 1e-6)) * 0.6
+            + f64::from(flux).clamp(0.0, 1.0) * 0.25
+            + f64::from(leech).clamp(0.0, 1.0) * 0.1
+            + f64::from(ratio_delta.min(1.0)) * 0.15)
             .clamp(0.0, 1.0) as f32;
 
         Some(SoftmaxSpiralAnnealEvidence::new(
@@ -2102,6 +2193,11 @@ impl GpuContext {
         let focus = projection.map(|m| m.focus).unwrap_or(0.5);
         let flux = projection.map(|m| m.spiral_flux).unwrap_or(0.0);
         let swirl = projection.map(|m| m.swirl).unwrap_or(0.0);
+        let leech = projection.map(|m| m.leech_enrichment).unwrap_or(0.0);
+        let ratio_alignment = projection
+            .map(|m| 1.0 - (m.ramanujan_ratio - 1.0).abs().min(1.0))
+            .unwrap_or(0.5);
+        let ratio_delta = projection.map(|m| m.ramanujan_delta).unwrap_or(0.0);
 
         let mut harmony_sum = 0.0f64;
         let mut harmony_weight = 0.0f64;
@@ -2125,10 +2221,11 @@ impl GpuContext {
         let harmony = if harmony_weight > f64::EPSILON {
             (harmony_sum / harmony_weight).clamp(0.0, 1.0) as f32
         } else {
-            ((focus + flux) * 0.5).clamp(0.0, 1.0)
+            ((focus + flux + leech + ratio_alignment) * 0.25).clamp(0.0, 1.0)
         };
 
-        let raw_weight = 0.4 + 0.3 * f64::from(focus);
+        let raw_weight =
+            0.35 + 0.25 * f64::from(focus) + 0.2 * f64::from(leech) + 0.15 * ratio_alignment as f64;
         let mut weighted_ms = raw_ms.max(0.0) * raw_weight;
         let mut total_weight = raw_weight;
         let mut bayes_w = 0.0f64;
@@ -2136,21 +2233,21 @@ impl GpuContext {
         let mut anneal_w = 0.0f64;
 
         if let Some(bayes) = bayes {
-            let w = 0.5 + 0.5 * f64::from(harmony);
+            let w = 0.45 + 0.5 * f64::from(harmony) + 0.15 * ratio_alignment as f64;
             weighted_ms += bayes.posterior_ms.max(0.0) * w;
             total_weight += w;
             bayes_w = w;
         }
 
         if let Some(mtm) = metropolis {
-            let w = 0.35 + 0.4 * f64::from(mtm.acceptance);
+            let w = 0.3 + 0.4 * f64::from(mtm.acceptance) + 0.2 * f64::from(leech);
             weighted_ms += mtm.expected_ms.max(0.0) * w;
             total_weight += w;
             metro_w = w;
         }
 
         if let Some(anneal) = anneal {
-            let w = 0.25 + 0.35 * f64::from(anneal.exploration_mass);
+            let w = 0.25 + 0.3 * f64::from(anneal.exploration_mass) + 0.15 * ratio_alignment as f64;
             weighted_ms += anneal.annealed_ms.max(0.0) * w;
             total_weight += w;
             anneal_w = w;
@@ -2163,8 +2260,10 @@ impl GpuContext {
         }
 
         let consensus_ms = (weighted_ms / total_weight).max(0.0);
-        let synergy = ((focus + flux + harmony) / 3.0).clamp(0.0, 1.0);
-        let z_bias = ((focus + flux + swirl.abs()) / 3.0).clamp(0.0, 1.0);
+        let synergy = ((focus + flux + harmony + leech + ratio_alignment) / 5.0).clamp(0.0, 1.0);
+        let z_bias = ((focus + flux + swirl.abs() + leech) * 0.25 + ratio_alignment * 0.2
+            - ratio_delta.min(1.0) * 0.1)
+            .clamp(0.0, 1.0);
 
         Some(SoftmaxSpiralConsensusEvidence::new(
             consensus_ms,
@@ -2538,7 +2637,7 @@ struct RowSoftmaxParams {
     chimera_tile: u32,
     chimera_stripes: u32,
     flags: u32,
-    _pad: u32,
+    mask_stride: u32,
 }
 
 #[repr(C, align(16))]
@@ -2555,6 +2654,8 @@ struct SoftmaxZSpaceParams {
 }
 
 const LAYOUT_FLAG_CHIMERA: u32 = 1 << 0;
+const SOFTMAX_FLAG_HARDMAX_ONLY: u32 = 1 << 1;
+const SOFTMAX_FLAG_HARDMAX_MASK: u32 = 1 << 2;
 const SOFTMAX_AUTOTUNE_REVISION: u64 = 2;
 const SOFTMAX_AUTOTUNE_WARMUP: usize = 1;
 const SOFTMAX_AUTOTUNE_SAMPLES: usize = 3;
@@ -2635,10 +2736,25 @@ pub struct SoftmaxZProjectMetrics {
     pub beneath: f32,
     pub swirl: f32,
     pub spiral_flux: f32,
+    pub leech_enrichment: f32,
+    pub ramanujan_ratio: f32,
+    pub ramanujan_delta: f32,
+    pub ramanujan_iterations: u32,
 }
 
 impl SoftmaxZProjectMetrics {
-    fn new(focus: f32, above: f32, here: f32, beneath: f32, swirl: f32, flux: f32) -> Self {
+    fn new(
+        focus: f32,
+        above: f32,
+        here: f32,
+        beneath: f32,
+        swirl: f32,
+        flux: f32,
+        leech_enrichment: f32,
+        ramanujan_ratio: f32,
+        ramanujan_delta: f32,
+        ramanujan_iterations: u32,
+    ) -> Self {
         Self {
             focus: focus.clamp(0.0, 1.0),
             above: above.clamp(0.0, 1.0),
@@ -2646,6 +2762,10 @@ impl SoftmaxZProjectMetrics {
             beneath: beneath.clamp(0.0, 1.0),
             swirl: swirl.clamp(-1.0, 1.0),
             spiral_flux: flux.clamp(0.0, 1.0),
+            leech_enrichment: leech_enrichment.clamp(0.0, 1.0),
+            ramanujan_ratio: ramanujan_ratio.clamp(0.0, 2.0),
+            ramanujan_delta: ramanujan_delta.max(0.0),
+            ramanujan_iterations,
         }
     }
 }
@@ -2794,9 +2914,19 @@ fn zspace_affinity(
         let flux = 1.0 - (current.spiral_flux - proposal.spiral_flux).abs();
         let swirl_delta = (current.swirl - proposal.swirl).abs();
         let swirl = 1.0 - (swirl_delta * 0.5).min(1.0);
-        ((focus + flux + swirl) / 3.0).clamp(0.0, 1.0)
+        let ratio = 1.0
+            - (current.ramanujan_ratio - proposal.ramanujan_ratio)
+                .abs()
+                .min(1.0);
+        let leech = 1.0
+            - (current.leech_enrichment - proposal.leech_enrichment)
+                .abs()
+                .min(1.0);
+        ((focus + flux + swirl + ratio + leech) / 5.0).clamp(0.0, 1.0)
     } else {
-        ((proposal.focus + proposal.spiral_flux) * 0.5).clamp(0.0, 1.0)
+        let ratio = 1.0 - (proposal.ramanujan_ratio - 1.0).abs().min(1.0);
+        let leech = proposal.leech_enrichment;
+        ((proposal.focus + proposal.spiral_flux + ratio + leech) * 0.25).clamp(0.0, 1.0)
     };
     let bonus = if same_variant { 0.1 } else { 0.0 };
     (base + bonus).clamp(0.0, 1.0)
@@ -2920,6 +3050,10 @@ pub struct SoftmaxZSpaceHint {
     pub spiral_flux: f32,
     pub roundtable: RoundtableBandHint,
     pub golden: GoldenPulseHint,
+    pub leech_enrichment: f32,
+    pub ramanujan_ratio: f32,
+    pub ramanujan_delta: f32,
+    pub ramanujan_iterations: u32,
     projection: Option<SoftmaxZProjectMetrics>,
 }
 
@@ -2942,11 +3076,26 @@ impl SoftmaxZSpaceHint {
         let flux = projection
             .map(|m| m.spiral_flux)
             .unwrap_or_else(|| (focus * occupancy).clamp(0.0, 1.0));
+        let (leech_enrichment, ramanujan_ratio, ramanujan_delta, ramanujan_iterations) =
+            if let Some(metrics) = projection {
+                (
+                    metrics.leech_enrichment,
+                    metrics.ramanujan_ratio,
+                    metrics.ramanujan_delta,
+                    metrics.ramanujan_iterations,
+                )
+            } else {
+                (0.0, 1.0, 0.0, 0)
+            };
         Self {
             focus,
             spiral_flux: flux,
             roundtable: RoundtableBandHint::from_summary(summary, variant),
             golden: GoldenPulseHint::from_summary(summary, variant),
+            leech_enrichment,
+            ramanujan_ratio,
+            ramanujan_delta,
+            ramanujan_iterations,
             projection,
         }
     }
@@ -2964,6 +3113,10 @@ impl SoftmaxZSpaceHint {
             spiral_flux: projection.spiral_flux,
             roundtable: RoundtableBandHint::from_summary(pseudo, variant),
             golden: GoldenPulseHint::from_summary(pseudo, variant),
+            leech_enrichment: projection.leech_enrichment,
+            ramanujan_ratio: projection.ramanujan_ratio,
+            ramanujan_delta: projection.ramanujan_delta,
+            ramanujan_iterations: projection.ramanujan_iterations,
             projection: Some(projection),
         }
     }
@@ -4238,14 +4391,14 @@ pub fn row_softmax(
         chimera_tile: layout_desc.chimera_tile,
         chimera_stripes: layout_desc.chimera_stripes,
         flags: layout_desc.flags,
-        _pad: 0,
+        mask_stride: layout_desc.out_stride,
     };
     let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("st.tensor.wgpu_dense.softmax.params"),
         contents: bytemuck::bytes_of(&params),
         usage: wgpu::BufferUsages::UNIFORM,
     });
-    let bind_group = ctx.softmax_bind_group(&input_buf, &output_buf, &params_buf);
+    let bind_group = ctx.softmax_bind_group(&input_buf, &output_buf, None, &params_buf);
     let (pipeline, _) = ctx.select_softmax_pipeline(rows, cols, &layout_desc)?;
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -4254,6 +4407,161 @@ pub fn row_softmax(
     {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("st.tensor.wgpu_dense.softmax.pass"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(pipeline.as_ref());
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.dispatch_workgroups(rows_u32, 1, 1);
+    }
+    queue.submit(Some(encoder.finish()));
+
+    readback_f32(device, queue, &output_buf, rows * cols)
+}
+
+pub fn row_softmax_hardmax(
+    input: &[f32],
+    rows: usize,
+    cols: usize,
+    layout: Layout,
+) -> Result<(Vec<f32>, Vec<f32>), String> {
+    if rows == 0 || cols == 0 {
+        return Err("matrix dimensions must be positive".into());
+    }
+    if input.len() != rows * cols {
+        return Err(format!(
+            "input length mismatch: expected {} elements, got {}",
+            rows * cols,
+            input.len()
+        ));
+    }
+
+    let rows_u32 = u32::try_from(rows).map_err(|_| "rows exceed u32::MAX".to_string())?;
+    let cols_u32 = u32::try_from(cols).map_err(|_| "cols exceed u32::MAX".to_string())?;
+
+    let ctx = dense_context()?;
+    if !ctx.supports_softmax() {
+        return Err("wgpu device lacks subgroup row softmax support".into());
+    }
+
+    let mut layout_desc = SoftmaxLayoutDesc::from_layout(layout, rows, cols)?;
+    layout_desc.flags |= SOFTMAX_FLAG_HARDMAX_MASK;
+
+    let device = ctx.device();
+    let queue = ctx.queue();
+
+    let input_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.softmax_hardmax.input"),
+        contents: bytemuck::cast_slice(input),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let softmax_buf = allocate_output(
+        device,
+        "st.tensor.wgpu_dense.softmax_hardmax.softmax",
+        rows * cols,
+    );
+    let mask_buf = allocate_output(
+        device,
+        "st.tensor.wgpu_dense.softmax_hardmax.mask",
+        rows * cols,
+    );
+    let params = RowSoftmaxParams {
+        rows: rows_u32,
+        cols: cols_u32,
+        in_stride: layout_desc.in_stride,
+        out_stride: layout_desc.out_stride,
+        chimera_tile: layout_desc.chimera_tile,
+        chimera_stripes: layout_desc.chimera_stripes,
+        flags: layout_desc.flags,
+        mask_stride: layout_desc.out_stride,
+    };
+    let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.softmax_hardmax.params"),
+        contents: bytemuck::bytes_of(&params),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+    let bind_group = ctx.softmax_bind_group(&input_buf, &softmax_buf, Some(&mask_buf), &params_buf);
+    let (pipeline, _) = ctx.select_softmax_pipeline(rows, cols, &layout_desc)?;
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("st.tensor.wgpu_dense.softmax_hardmax.encoder"),
+    });
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("st.tensor.wgpu_dense.softmax_hardmax.pass"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(pipeline.as_ref());
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.dispatch_workgroups(rows_u32, 1, 1);
+    }
+    queue.submit(Some(encoder.finish()));
+
+    let softmax = readback_f32(device, queue, &softmax_buf, rows * cols)?;
+    let mask = readback_f32(device, queue, &mask_buf, rows * cols)?;
+    Ok((softmax, mask))
+}
+
+pub fn row_hardmax(
+    input: &[f32],
+    rows: usize,
+    cols: usize,
+    layout: Layout,
+) -> Result<Vec<f32>, String> {
+    if rows == 0 || cols == 0 {
+        return Err("matrix dimensions must be positive".into());
+    }
+    if input.len() != rows * cols {
+        return Err(format!(
+            "input length mismatch: expected {} elements, got {}",
+            rows * cols,
+            input.len()
+        ));
+    }
+
+    let rows_u32 = u32::try_from(rows).map_err(|_| "rows exceed u32::MAX".to_string())?;
+    let cols_u32 = u32::try_from(cols).map_err(|_| "cols exceed u32::MAX".to_string())?;
+
+    let ctx = dense_context()?;
+    if !ctx.supports_softmax() {
+        return Err("wgpu device lacks subgroup row softmax support".into());
+    }
+
+    let mut layout_desc = SoftmaxLayoutDesc::from_layout(layout, rows, cols)?;
+    layout_desc.flags |= SOFTMAX_FLAG_HARDMAX_ONLY;
+
+    let device = ctx.device();
+    let queue = ctx.queue();
+
+    let input_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.hardmax.input"),
+        contents: bytemuck::cast_slice(input),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let output_buf = allocate_output(device, "st.tensor.wgpu_dense.hardmax.output", rows * cols);
+    let params = RowSoftmaxParams {
+        rows: rows_u32,
+        cols: cols_u32,
+        in_stride: layout_desc.in_stride,
+        out_stride: layout_desc.out_stride,
+        chimera_tile: layout_desc.chimera_tile,
+        chimera_stripes: layout_desc.chimera_stripes,
+        flags: layout_desc.flags,
+        mask_stride: layout_desc.out_stride,
+    };
+    let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.hardmax.params"),
+        contents: bytemuck::bytes_of(&params),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+    let bind_group = ctx.softmax_bind_group(&input_buf, &output_buf, None, &params_buf);
+    let (pipeline, _) = ctx.select_softmax_pipeline(rows, cols, &layout_desc)?;
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("st.tensor.wgpu_dense.hardmax.encoder"),
+    });
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("st.tensor.wgpu_dense.hardmax.pass"),
             timestamp_writes: None,
         });
         pass.set_pipeline(pipeline.as_ref());
@@ -4281,6 +4589,14 @@ pub fn supports_row_softmax(rows: usize, cols: usize) -> bool {
     } else {
         false
     }
+}
+
+pub fn supports_row_softmax_hardmax(rows: usize, cols: usize) -> bool {
+    supports_row_softmax(rows, cols)
+}
+
+pub fn supports_row_hardmax(rows: usize, cols: usize) -> bool {
+    supports_row_softmax(rows, cols)
 }
 
 pub fn softmax_autotune_snapshot() -> Option<Vec<SoftmaxSelectionSnapshot>> {
