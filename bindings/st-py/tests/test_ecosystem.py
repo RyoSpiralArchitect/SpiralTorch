@@ -170,3 +170,113 @@ def test_cupy_roundtrip_uses_dlpack(stub_spiraltorch, monkeypatch):
 
     restored = ecosystem.cupy_to_tensor(types.SimpleNamespace(toDlpack=lambda: ("dlpack", 42)))
     assert restored == ("from_dlpack", ("dlpack", 42))
+
+
+def test_cupy_roundtrip_accepts_stream(stub_spiraltorch, monkeypatch):
+    fake_cupy = types.ModuleType("cupy")
+
+    stream_calls: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+
+    def from_dlpack(capsule, *, stream=None):
+        stream_calls.append(("from", (capsule,), {"stream": stream}))
+        return ("from_dlpack", capsule, stream)
+
+    fake_cupy.from_dlpack = from_dlpack
+
+    monkeypatch.setitem(sys.modules, "cupy", fake_cupy)
+
+    ecosystem = _load_ecosystem(stub_spiraltorch, monkeypatch)
+    Tensor = stub_spiraltorch.Tensor
+
+    tensor = Tensor(1, 1, [0.5])
+    capsule = object()
+    monkeypatch.setattr(Tensor, "to_dlpack", lambda self: capsule)
+    monkeypatch.setattr(
+        Tensor,
+        "from_dlpack",
+        classmethod(lambda cls, cap: ("from_dlpack", cap)),
+    )
+
+    stream = object()
+
+    cupy_array = ecosystem.tensor_to_cupy(tensor, stream=stream)
+    assert cupy_array == ("from_dlpack", capsule, stream)
+
+    class Array:
+        def __init__(self):
+            self.calls: list[object | None] = []
+
+        def toDlpack(self, stream=None):
+            self.calls.append(stream)
+            return ("dlpack", stream)
+
+    array = Array()
+
+    restored = ecosystem.cupy_to_tensor(array, stream=stream)
+    assert restored == ("from_dlpack", ("dlpack", stream))
+
+    assert stream_calls[0] == ("from", (capsule,), {"stream": stream})
+    assert array.calls == [stream]
+
+
+def test_cupy_to_tensor_prefers_dunder_dlpack(stub_spiraltorch, monkeypatch):
+    fake_cupy = types.ModuleType("cupy")
+
+    def to_dlpack(array, *, stream=None):  # pragma: no cover - fallback guard
+        raise AssertionError("module-level exporters should not be used when __dlpack__ exists")
+
+    fake_cupy.toDlpack = to_dlpack
+    fake_cupy.to_dlpack = to_dlpack
+
+    monkeypatch.setitem(sys.modules, "cupy", fake_cupy)
+
+    ecosystem = _load_ecosystem(stub_spiraltorch, monkeypatch)
+
+    Tensor = stub_spiraltorch.Tensor
+    capsule = object()
+    monkeypatch.setattr(
+        Tensor,
+        "from_dlpack",
+        classmethod(lambda cls, cap: ("from_dlpack", cap)),
+    )
+
+    class Array:
+        def __dlpack__(self, *, stream=None):
+            return ("dlpack", stream)
+
+    restored = ecosystem.cupy_to_tensor(Array(), stream="stream-token")
+    assert restored == ("from_dlpack", ("dlpack", "stream-token"))
+
+
+def test_cupy_to_tensor_uses_module_level_exporter_when_needed(
+    stub_spiraltorch, monkeypatch
+):
+    fake_cupy = types.ModuleType("cupy")
+
+    called: dict[str, tuple[object, object | None]] = {}
+
+    def to_dlpack(array, *, stream=None):
+        called["args"] = (array, stream)
+        return ("dlpack", stream)
+
+    fake_cupy.to_dlpack = to_dlpack
+
+    monkeypatch.setitem(sys.modules, "cupy", fake_cupy)
+
+    ecosystem = _load_ecosystem(stub_spiraltorch, monkeypatch)
+    Tensor = stub_spiraltorch.Tensor
+
+    monkeypatch.setattr(
+        Tensor,
+        "from_dlpack",
+        classmethod(lambda cls, cap: ("from_dlpack", cap)),
+    )
+
+    class Array:
+        pass
+
+    stream = object()
+    result = ecosystem.cupy_to_tensor(Array(), stream=stream)
+    assert result == ("from_dlpack", ("dlpack", stream))
+    assert isinstance(called["args"][0], Array)
+    assert called["args"][1] is stream
