@@ -47,6 +47,37 @@ struct AuditReportFile {
     self_checks: Vec<AuditCheckFile>,
 }
 
+#[allow(dead_code)]
+#[derive(serde::Deserialize)]
+struct StageDifferenceFile {
+    stage: String,
+    recorded: usize,
+    recomputed: usize,
+}
+
+#[allow(dead_code)]
+#[derive(serde::Deserialize)]
+struct AuditCheckComparisonFile {
+    name: String,
+    matches: bool,
+    #[serde(default)]
+    recorded_passed: Option<bool>,
+    #[serde(default)]
+    recomputed_passed: Option<bool>,
+}
+
+#[derive(serde::Deserialize)]
+struct AuditReviewFileOutput {
+    observed_events: usize,
+    summary_matches: bool,
+    #[serde(default)]
+    stage_differences: Vec<StageDifferenceFile>,
+    #[serde(default)]
+    issues: Vec<String>,
+    #[serde(default)]
+    check_comparisons: Vec<AuditCheckComparisonFile>,
+}
+
 fn run_cli(args: &[&str]) {
     let status = Command::new(env!("CARGO_BIN_EXE_st-xai-cli"))
         .args(args)
@@ -501,6 +532,63 @@ fn grad_cam_cli_writes_audit_report_and_summary() {
         .iter()
         .any(|check| check.name == "cli_parsed"));
     assert!(audit_report.self_checks.iter().all(|check| check.passed));
+}
+
+#[test]
+fn audit_review_cli_reports_matches() {
+    let dir = tempdir().unwrap();
+    let activations_path = dir.path().join("activations.json");
+    let gradients_path = dir.path().join("gradients.json");
+    let report_path = dir.path().join("report.json");
+    let audit_path = dir.path().join("audit.json");
+    let review_path = dir.path().join("review.json");
+
+    let activations = DiskTensor {
+        rows: 2,
+        cols: 4,
+        data: vec![1.0, 0.8, 0.6, 0.4, 0.2, 0.1, 0.0, 0.3],
+    };
+    let gradients = DiskTensor {
+        rows: 2,
+        cols: 4,
+        data: vec![0.1, 0.2, 0.3, 0.4, 0.2, 0.1, 0.0, 0.5],
+    };
+
+    write_tensor(&activations_path, &activations);
+    write_tensor(&gradients_path, &gradients);
+
+    run_cli(&[
+        "--audit-out",
+        audit_path.to_str().unwrap(),
+        "grad-cam",
+        "--activations",
+        activations_path.to_str().unwrap(),
+        "--gradients",
+        gradients_path.to_str().unwrap(),
+        "--height",
+        "2",
+        "--width",
+        "2",
+        "--output",
+        report_path.to_str().unwrap(),
+    ]);
+
+    run_cli(&[
+        "audit-review",
+        "--input",
+        audit_path.to_str().unwrap(),
+        "--output",
+        review_path.to_str().unwrap(),
+    ]);
+
+    let review: AuditReviewFileOutput =
+        serde_json::from_str(&fs::read_to_string(&review_path).unwrap()).unwrap();
+
+    assert!(review.observed_events > 0);
+    assert!(review.summary_matches);
+    assert!(review.stage_differences.is_empty());
+    assert!(review.issues.is_empty());
+    assert!(review.check_comparisons.iter().all(|check| check.matches));
 }
 
 #[test]

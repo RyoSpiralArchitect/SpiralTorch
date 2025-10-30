@@ -1,21 +1,21 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AuditEvent {
     pub stage: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<Value>,
 }
 
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AuditSummary {
     pub total_events: usize,
     pub stages: BTreeMap<String, usize>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AuditCheckResult {
     pub name: String,
     pub passed: bool,
@@ -23,11 +23,44 @@ pub struct AuditCheckResult {
     pub message: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct AuditBundle {
     pub events: Vec<AuditEvent>,
     pub summary: AuditSummary,
     pub self_checks: Vec<AuditCheckResult>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StageDifference {
+    pub stage: String,
+    pub recorded: usize,
+    pub recomputed: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AuditCheckComparison {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recorded_passed: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recorded_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recomputed_passed: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recomputed_message: Option<String>,
+    pub matches: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AuditReviewReport {
+    pub observed_events: usize,
+    pub summary_matches: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stage_differences: Vec<StageDifference>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub issues: Vec<String>,
+    #[serde(default)]
+    pub check_comparisons: Vec<AuditCheckComparison>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -158,5 +191,88 @@ fn require_stage(events: &[AuditEvent], stage: &str, name: &str) -> AuditCheckRe
         } else {
             Some(format!("missing required stage `{stage}`"))
         },
+    }
+}
+
+pub fn review_bundle(bundle: &AuditBundle) -> AuditReviewReport {
+    let recomputed_summary = build_summary(&bundle.events);
+    let summary_matches = recomputed_summary == bundle.summary;
+
+    let mut stage_differences = Vec::new();
+    let mut issues = Vec::new();
+
+    if recomputed_summary.total_events != bundle.summary.total_events {
+        issues.push(format!(
+            "summary.total_events recorded {} but recomputed {}",
+            bundle.summary.total_events, recomputed_summary.total_events
+        ));
+    }
+
+    let mut stage_names: BTreeSet<String> = bundle.summary.stages.keys().cloned().collect();
+    stage_names.extend(recomputed_summary.stages.keys().cloned());
+
+    for stage in stage_names {
+        let recorded = *bundle.summary.stages.get(&stage).unwrap_or(&0);
+        let recomputed = *recomputed_summary.stages.get(&stage).unwrap_or(&0);
+        if recorded != recomputed {
+            stage_differences.push(StageDifference {
+                stage: stage.clone(),
+                recorded,
+                recomputed,
+            });
+            issues.push(format!(
+                "summary stage `{stage}` recorded {recorded} but recomputed {recomputed}"
+            ));
+        }
+    }
+
+    let recomputed_checks = build_self_checks(&bundle.events, &recomputed_summary);
+    let mut recomputed_map = BTreeMap::new();
+    for check in recomputed_checks {
+        recomputed_map.insert(check.name.clone(), check);
+    }
+
+    let mut recorded_map = BTreeMap::new();
+    for check in &bundle.self_checks {
+        recorded_map.insert(check.name.clone(), check.clone());
+    }
+
+    let mut check_comparisons = Vec::new();
+    let mut names = BTreeSet::new();
+    names.extend(recorded_map.keys().cloned());
+    names.extend(recomputed_map.keys().cloned());
+
+    for name in names {
+        let recorded = recorded_map.get(&name);
+        let recomputed = recomputed_map.get(&name);
+
+        let matches = match (recorded, recomputed) {
+            (Some(recorded), Some(recomputed)) => {
+                recorded.passed == recomputed.passed && recorded.message == recomputed.message
+            }
+            (None, None) => true,
+            _ => false,
+        };
+
+        if !matches {
+            issues.push(format!("self-check `{name}` did not match recorded state"));
+        }
+
+        check_comparisons.push(AuditCheckComparison {
+            name: name.clone(),
+            recorded_passed: recorded.map(|check| check.passed),
+            recorded_message: recorded.and_then(|check| check.message.clone()),
+            recomputed_passed: recomputed.map(|check| check.passed),
+            recomputed_message: recomputed.and_then(|check| check.message.clone()),
+            matches,
+        });
+    }
+
+    AuditReviewReport {
+        observed_events: bundle.events.len(),
+        summary_matches,
+        stage_differences,
+        issues,
+        check_comparisons,
     }
 }

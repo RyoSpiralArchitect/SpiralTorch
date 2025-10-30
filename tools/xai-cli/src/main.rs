@@ -138,6 +138,9 @@ enum Command {
 
     /// Run Integrated Gradients using an optional linear probe
     IntegratedGradients(IntegratedGradientsArgs),
+
+    /// Review an existing audit bundle and verify its self-checks
+    AuditReview(AuditReviewArgs),
 }
 
 #[derive(Args)]
@@ -214,6 +217,21 @@ struct IntegratedGradientsArgs {
     output: PathBuf,
 }
 
+#[derive(Args)]
+struct AuditReviewArgs {
+    /// Path to the audit bundle JSON file to review
+    #[arg(long, value_hint = ValueHint::FilePath)]
+    input: PathBuf,
+
+    /// Optional destination to write the review report as JSON (defaults to STDOUT)
+    #[arg(long, value_hint = ValueHint::FilePath)]
+    output: Option<PathBuf>,
+
+    /// Pretty-print the review JSON when writing to STDOUT or disk
+    #[arg(long)]
+    pretty: bool,
+}
+
 fn main() {
     if let Err(err) = try_main() {
         eprintln!("error: {err}");
@@ -275,12 +293,53 @@ fn try_main() -> Result<()> {
             let output = run_integrated_gradients_cli(args, &mut audit)?;
             finalise_output(&cli, output, &args.output, &mut audit)?;
         }
+        Command::AuditReview(args) => {
+            audit.record_with_value(
+                "cli.command",
+                json!({
+                    "name": "audit-review",
+                    "input": args.input,
+                    "output": args.output,
+                    "pretty": args.pretty,
+                }),
+            );
+            run_audit_review(args, &mut audit)?;
+        }
     }
 
     let bundle = audit.finish();
 
     if let Some(path) = cli.audit_out.as_ref() {
         write_audit_report(&bundle, path)?;
+    }
+
+    Ok(())
+}
+
+fn run_audit_review(args: &AuditReviewArgs, audit: &mut AuditTrail) -> Result<()> {
+    let bundle = read_audit_bundle(&args.input, audit)?;
+    let review = audit::review_bundle(&bundle);
+    audit.record_with_value(
+        "audit.review.summary",
+        json!({
+            "matches": review.summary_matches,
+            "issues": review.issues.len(),
+        }),
+    );
+
+    let payload = if args.pretty {
+        serde_json::to_string_pretty(&review)?
+    } else {
+        serde_json::to_string(&review)?
+    };
+
+    if let Some(path) = args.output.as_ref() {
+        ensure_parent_dir(path)?;
+        fs::write(path, &payload)?;
+        audit.record_with_value("io.write.audit_review", json!({ "path": path }));
+    } else {
+        println!("{payload}");
+        audit.record("audit.review.stdout_emitted");
     }
 
     Ok(())
@@ -732,6 +791,20 @@ fn write_audit_report(bundle: &AuditBundle, path: &Path) -> Result<()> {
     let payload = serde_json::to_string_pretty(bundle)?;
     fs::write(path, payload)?;
     Ok(())
+}
+
+fn read_audit_bundle(path: &Path, audit: &mut AuditTrail) -> Result<AuditBundle> {
+    audit.record_with_value("io.read.audit", json!({ "path": path }));
+    let contents = fs::read_to_string(path)?;
+    let bundle: AuditBundle = serde_json::from_str(&contents)?;
+    audit.record_with_value(
+        "audit.review.bundle_loaded",
+        json!({
+            "events": bundle.events.len(),
+            "recorded_self_checks": bundle.self_checks.len(),
+        }),
+    );
+    Ok(bundle)
 }
 
 fn ensure_parent_dir(path: &Path) -> io::Result<()> {
