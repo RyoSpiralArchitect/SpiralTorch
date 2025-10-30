@@ -1177,6 +1177,7 @@ impl PyTensor {
         metrics_dict.set_item("average_enrichment", metrics.average_enrichment)?;
         metrics_dict.set_item("mean_entropy", metrics.mean_entropy)?;
         metrics_dict.set_item("mean_hardmass", metrics.mean_hardmass)?;
+        metrics_dict.set_item("spiral_coherence", metrics.spiral_coherence)?;
         Ok((
             PyTensor { inner: softmax },
             PyTensor { inner: hardmax },
