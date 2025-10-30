@@ -105,6 +105,9 @@ pub struct HyperSurpriseConfig {
     pub eta_floor: f32,
     pub lr_floor: f32,
     pub smoothing: f32,
+    pub relaxation: f32,
+    pub ratio_smoothing: f32,
+    pub cooldown_steps: usize,
 }
 
 impl HyperSurpriseConfig {
@@ -156,6 +159,25 @@ impl HyperSurpriseConfig {
         }
         self
     }
+
+    pub fn with_relaxation(mut self, relaxation: f32) -> Self {
+        if relaxation.is_finite() {
+            self.relaxation = relaxation.clamp(0.0, 1.0);
+        }
+        self
+    }
+
+    pub fn with_ratio_smoothing(mut self, ratio_smoothing: f32) -> Self {
+        if ratio_smoothing.is_finite() {
+            self.ratio_smoothing = ratio_smoothing.clamp(0.0, 1.0);
+        }
+        self
+    }
+
+    pub fn with_cooldown_steps(mut self, cooldown_steps: usize) -> Self {
+        self.cooldown_steps = cooldown_steps;
+        self
+    }
 }
 
 impl Default for HyperSurpriseConfig {
@@ -168,6 +190,9 @@ impl Default for HyperSurpriseConfig {
             eta_floor: 0.0,
             lr_floor: 1e-6,
             smoothing: 0.0,
+            relaxation: 0.5,
+            ratio_smoothing: 0.0,
+            cooldown_steps: 0,
         }
     }
 }
@@ -198,6 +223,8 @@ pub struct HyperSurpriseController {
     config: HyperSurpriseConfig,
     last_signal: Option<HyperSurpriseSignal>,
     last_gauge: f32,
+    smoothed_ratio: f32,
+    cooldown: usize,
 }
 
 impl HyperSurpriseController {
@@ -207,6 +234,8 @@ impl HyperSurpriseController {
             config,
             last_signal: None,
             last_gauge: 1.0,
+            smoothed_ratio: 0.0,
+            cooldown: 0,
         }
     }
 
@@ -225,7 +254,9 @@ impl HyperSurpriseController {
         learning_rate: f32,
     ) -> HyperSurpriseOutcome {
         let std = loss_std(returns, baseline);
-        if let Some(ratio) = self.trigger.observe(std) {
+        let candidate_ratio = self.trigger.observe(std);
+        let ratio = self.pop_ratio(candidate_ratio);
+        if let Some(ratio) = ratio {
             let clamped_ratio = ratio.clamp(0.0, self.config.max_gauge);
             let gauge_ceiling = self.config.max_gauge.max(self.config.min_gauge);
             let raw_gauge = 1.0 + clamped_ratio * self.config.curvature.tanh().abs();
@@ -260,9 +291,9 @@ impl HyperSurpriseController {
                 signal: Some(signal),
             }
         } else {
-            let smoothing = self.config.smoothing.clamp(0.0, 1.0);
-            let gauge = if smoothing > 0.0 {
-                let relaxed = smoothing * self.last_gauge + (1.0 - smoothing);
+            let relaxation = self.config.relaxation.clamp(0.0, 1.0);
+            let gauge = if relaxation > 0.0 {
+                let relaxed = relaxation * self.last_gauge + (1.0 - relaxation);
                 self.last_gauge = relaxed;
                 relaxed
             } else {
@@ -275,6 +306,38 @@ impl HyperSurpriseController {
                 gauge,
                 signal: None,
             }
+        }
+    }
+
+    fn pop_ratio(&mut self, candidate: Option<f32>) -> Option<f32> {
+        let accepted = if let Some(ratio) = candidate {
+            if self.cooldown == 0 {
+                self.cooldown = self.config.cooldown_steps.saturating_add(1);
+                ratio.max(0.0)
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        };
+
+        if self.cooldown > 0 {
+            self.cooldown = self.cooldown.saturating_sub(1);
+        }
+
+        let smoothing = self.config.ratio_smoothing.clamp(0.0, 1.0);
+        if smoothing > 0.0 {
+            self.smoothed_ratio =
+                smoothing * self.smoothed_ratio + (1.0 - smoothing) * accepted;
+        } else {
+            self.smoothed_ratio = accepted;
+        }
+
+        if self.smoothed_ratio > 1e-6 {
+            Some(self.smoothed_ratio)
+        } else {
+            self.smoothed_ratio = 0.0;
+            None
         }
     }
 }
@@ -332,5 +395,63 @@ mod tests {
         let signal = controller.last_signal().unwrap();
         assert!(signal.learning_rate >= 1e-3);
         assert!(signal.eta_bar >= 0.2);
+    }
+
+    #[test]
+    fn ratio_smoothing_decays_residual_pulse() {
+        let trigger = LossStdTrigger::new(0.2)
+            .with_warmup(0)
+            .with_max_ratio(4.0)
+            .with_decay(0.1);
+        let config = HyperSurpriseConfig::default()
+            .with_ratio_smoothing(0.6)
+            .with_relaxation(0.4)
+            .with_smoothing(0.0);
+        let mut controller = HyperSurpriseController::new(trigger, config);
+
+        let spike = controller.update(&constant_returns(0.5), 0.0, 0.1);
+        let first_ratio = spike.signal.unwrap().inject_ratio;
+        assert!(first_ratio > 0.0);
+
+        let trailing = controller.update(&constant_returns(0.0), 0.0, 0.1);
+        let mut last = trailing.signal.unwrap().inject_ratio;
+        assert!(last < first_ratio);
+        assert!(last > 0.0);
+
+        let mut steps = 0;
+        while steps < 48 {
+            let decay = controller.update(&constant_returns(0.0), 0.0, 0.1);
+            if let Some(signal) = decay.signal {
+                assert!(signal.inject_ratio < last);
+                last = signal.inject_ratio;
+            } else {
+                last = 0.0;
+                break;
+            }
+            steps += 1;
+        }
+        assert!(last <= 1e-6, "ratio smoothing failed to decay to baseline");
+    }
+
+    #[test]
+    fn cooldown_blocks_back_to_back_spikes() {
+        let trigger = LossStdTrigger::new(0.05).with_warmup(0).with_max_ratio(4.0);
+        let config = HyperSurpriseConfig::default()
+            .with_cooldown_steps(2)
+            .with_ratio_smoothing(0.0)
+            .with_smoothing(0.0);
+        let mut controller = HyperSurpriseController::new(trigger, config);
+
+        let burst_one = controller.update(&constant_returns(0.5), 0.0, 0.05);
+        assert!(burst_one.signal.is_some());
+
+        let burst_two = controller.update(&constant_returns(0.5), 0.0, 0.05);
+        assert!(burst_two.signal.is_none());
+
+        let idle = controller.update(&constant_returns(0.0), 0.0, 0.05);
+        assert!(idle.signal.is_none());
+
+        let rebound = controller.update(&constant_returns(0.5), 0.0, 0.05);
+        assert!(rebound.signal.is_some());
     }
 }
