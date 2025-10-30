@@ -1294,6 +1294,7 @@ impl GpuContext {
             Option<SoftmaxZProjectMetrics>,
             Option<SoftmaxBayesEvidence>,
             Option<SoftmaxMetropolisEvidence>,
+            Option<SoftmaxSpiralAnnealEvidence>,
             f64,
         )> = None;
         for &candidate in &[SoftmaxVariant::Workgroup, SoftmaxVariant::Subgroup] {
@@ -1310,6 +1311,13 @@ impl GpuContext {
                     );
                     let metropolis =
                         self.metropolis_multi_try_softmax(candidate, score_ms, projection.as_ref());
+                    let anneal = self.spiral_anneal_softmax(
+                        candidate,
+                        score_ms,
+                        projection.as_ref(),
+                        bayes.as_ref(),
+                        metropolis.as_ref(),
+                    );
                     let mut effective_ms = score_ms;
                     if let Some(ref evidence) = bayes {
                         effective_ms = effective_ms.min(evidence.posterior_ms);
@@ -1317,8 +1325,11 @@ impl GpuContext {
                     if let Some(ref mtm) = metropolis {
                         effective_ms = effective_ms.min(mtm.expected_ms);
                     }
+                    if let Some(ref anneal) = anneal {
+                        effective_ms = effective_ms.min(anneal.annealed_ms);
+                    }
                     let update = best
-                        .map(|(_, _, _, _, _, best_ms)| effective_ms < best_ms)
+                        .map(|(_, _, _, _, _, _, best_ms)| effective_ms < best_ms)
                         .unwrap_or(true);
                     if update {
                         best = Some((
@@ -1327,6 +1338,7 @@ impl GpuContext {
                             projection,
                             bayes,
                             metropolis,
+                            anneal,
                             effective_ms,
                         ));
                     }
@@ -1336,8 +1348,15 @@ impl GpuContext {
         }
 
         let measured = best.is_some();
-        let (variant, score_s, projection, bayes, metropolis, _) =
-            best.unwrap_or((SoftmaxVariant::Workgroup, 0.0, None, None, None, f64::MAX));
+        let (variant, score_s, projection, bayes, metropolis, anneal, _) = best.unwrap_or((
+            SoftmaxVariant::Workgroup,
+            0.0,
+            None,
+            None,
+            None,
+            None,
+            f64::MAX,
+        ));
         let pipeline = self
             .softmax_pipeline_variant(variant)
             .ok_or_else(|| "row softmax pipeline unavailable".to_string())?;
@@ -1359,6 +1378,7 @@ impl GpuContext {
                     zmetrics: projection,
                     bayes,
                     metropolis,
+                    anneal,
                 });
                 let len = history.len();
                 if len > SOFTMAX_HISTORY_LIMIT {
@@ -1965,6 +1985,94 @@ impl GpuContext {
         ))
     }
 
+    fn spiral_anneal_softmax(
+        &self,
+        variant: SoftmaxVariant,
+        raw_ms: f64,
+        projection: Option<&SoftmaxZProjectMetrics>,
+        bayes: Option<&SoftmaxBayesEvidence>,
+        metropolis: Option<&SoftmaxMetropolisEvidence>,
+    ) -> Option<SoftmaxSpiralAnnealEvidence> {
+        let history = self.softmax_history.lock().ok()?.clone();
+        let base_ms = bayes.map(|b| b.posterior_ms).unwrap_or(raw_ms);
+        let focus = projection.map(|m| m.focus).unwrap_or(0.5);
+        let flux = projection.map(|m| m.spiral_flux).unwrap_or(0.0);
+        let swirl = projection.map(|m| m.swirl.abs()).unwrap_or(0.0);
+        let acceptance = metropolis.map(|m| m.acceptance).unwrap_or(0.0);
+        let refreshes = metropolis.map(|m| m.tries).unwrap_or(0);
+
+        let mut weighted_delta = 0.0f64;
+        let mut weight_sum = 0.0f64;
+        let mut dispersion = 0.0f64;
+        let mut dispersion_weight = 0.0f64;
+
+        for (index, record) in history
+            .iter()
+            .rev()
+            .take(SOFTMAX_ANNEAL_HISTORY)
+            .enumerate()
+        {
+            let decay = (f64::from(GOLDEN_RATIO)).powf(-(index as f64) / 1.5);
+            let affinity = if record.variant == variant {
+                1.0
+            } else {
+                record
+                    .zmetrics
+                    .map(|metrics| zspace_affinity(projection, &metrics, false) as f64)
+                    .unwrap_or(0.35)
+            };
+            let weight = decay * (0.5 + 0.5 * affinity);
+            weighted_delta += weight * (record.score_ms - base_ms);
+            weight_sum += weight;
+
+            if record.variant == variant {
+                dispersion += weight * (record.score_ms - base_ms).abs();
+                dispersion_weight += weight;
+            }
+        }
+
+        if weight_sum <= f64::EPSILON {
+            return Some(SoftmaxSpiralAnnealEvidence::identity(base_ms));
+        }
+
+        let drift = weighted_delta / weight_sum;
+        let variant_dispersion = if dispersion_weight > f64::EPSILON {
+            (dispersion / dispersion_weight).max(0.0)
+        } else {
+            0.0
+        };
+
+        let acceptance_factor = (0.6 + 0.4 * f64::from(acceptance)).clamp(0.4, 1.0);
+        let swirl_factor = (1.0 + f64::from(swirl).min(1.0) * 0.75).clamp(1.0, 1.75);
+        let focus_cool = (1.0 - f64::from(focus).clamp(0.0, 1.0)).clamp(0.0, 1.0);
+
+        let base_temp = SOFTMAX_ANNEAL_MIN_TEMP
+            + (SOFTMAX_ANNEAL_MAX_TEMP - SOFTMAX_ANNEAL_MIN_TEMP) * focus_cool;
+        let temp = (base_temp * swirl_factor * acceptance_factor)
+            .clamp(SOFTMAX_ANNEAL_MIN_TEMP, SOFTMAX_ANNEAL_MAX_TEMP);
+
+        let flux_correction = 1.0 - (f64::from(flux).clamp(0.0, 1.0) * 0.35);
+        let annealed_ms = (base_ms + drift * flux_correction).max(0.0);
+
+        let exploration_mass = ((focus_cool
+            + f64::from(flux).clamp(0.0, 1.0) * 0.5
+            + f64::from(swirl).min(1.0) * 0.25)
+            .clamp(0.0, 1.5))
+        .min(1.0) as f32;
+
+        let entropy = ((variant_dispersion / (base_ms + 1e-6)) * 0.7
+            + f64::from(flux).clamp(0.0, 1.0) * 0.3)
+            .clamp(0.0, 1.0) as f32;
+
+        Some(SoftmaxSpiralAnnealEvidence::new(
+            temp as f32,
+            annealed_ms,
+            exploration_mass,
+            entropy,
+            refreshes,
+        ))
+    }
+
     fn fused_gelu_back_bind_group(
         &self,
         z: &Buffer,
@@ -2349,6 +2457,9 @@ const SOFTMAX_AUTOTUNE_SAMPLES: usize = 3;
 const SOFTMAX_HISTORY_LIMIT: usize = 32;
 const SOFTMAX_METROPOLIS_TRIES: usize = 4;
 const SOFTMAX_METROPOLIS_TEMPERATURE: f64 = 3.5;
+const SOFTMAX_ANNEAL_MIN_TEMP: f64 = 0.35;
+const SOFTMAX_ANNEAL_MAX_TEMP: f64 = 2.75;
+const SOFTMAX_ANNEAL_HISTORY: usize = 12;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 enum SoftmaxVariant {
@@ -2494,6 +2605,40 @@ impl SoftmaxMetropolisEvidence {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SoftmaxSpiralAnnealEvidence {
+    pub temperature: f32,
+    pub annealed_ms: f64,
+    pub exploration_mass: f32,
+    pub entropy: f32,
+    pub refreshes: u32,
+}
+
+impl SoftmaxSpiralAnnealEvidence {
+    fn new(
+        temperature: f32,
+        annealed_ms: f64,
+        exploration_mass: f32,
+        entropy: f32,
+        refreshes: u32,
+    ) -> Self {
+        Self {
+            temperature: temperature.clamp(
+                SOFTMAX_ANNEAL_MIN_TEMP as f32,
+                SOFTMAX_ANNEAL_MAX_TEMP as f32,
+            ),
+            annealed_ms: annealed_ms.max(0.0),
+            exploration_mass: exploration_mass.clamp(0.0, 1.0),
+            entropy: entropy.clamp(0.0, 1.0),
+            refreshes,
+        }
+    }
+
+    fn identity(raw_ms: f64) -> Self {
+        Self::new(SOFTMAX_ANNEAL_MIN_TEMP as f32, raw_ms.max(0.0), 0.0, 0.0, 0)
+    }
+}
+
 fn zspace_affinity(
     reference: Option<&SoftmaxZProjectMetrics>,
     proposal: &SoftmaxZProjectMetrics,
@@ -2521,6 +2666,7 @@ struct SoftmaxSelectionRecord {
     zmetrics: Option<SoftmaxZProjectMetrics>,
     bayes: Option<SoftmaxBayesEvidence>,
     metropolis: Option<SoftmaxMetropolisEvidence>,
+    anneal: Option<SoftmaxSpiralAnnealEvidence>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -2691,6 +2837,7 @@ pub struct SoftmaxSelectionSnapshot {
     pub zspace: Option<SoftmaxZSpaceHint>,
     bayesian: Option<SoftmaxBayesEvidence>,
     metropolis: Option<SoftmaxMetropolisEvidence>,
+    anneal: Option<SoftmaxSpiralAnnealEvidence>,
 }
 
 impl SoftmaxSelectionSnapshot {
@@ -2718,6 +2865,10 @@ impl SoftmaxSelectionSnapshot {
         self.metropolis.as_ref()
     }
 
+    pub fn anneal(&self) -> Option<&SoftmaxSpiralAnnealEvidence> {
+        self.anneal.as_ref()
+    }
+
     fn from_record(
         record: SoftmaxSelectionRecord,
         telemetry: Option<SoftmaxTelemetrySummary>,
@@ -2742,6 +2893,7 @@ impl SoftmaxSelectionSnapshot {
             zspace,
             bayesian: record.bayes,
             metropolis: record.metropolis,
+            anneal: record.anneal,
         }
     }
 }

@@ -1382,6 +1382,15 @@ fn describe_wgpu_softmax_variants(py: Python<'_>) -> PyResult<Option<Vec<PyObjec
             mtm_dict.set_item("proposal_flux", metropolis.proposal_flux)?;
             dict.set_item("metropolis", mtm_dict)?;
         }
+        if let Some(anneal) = entry.anneal() {
+            let anneal_dict = PyDict::new_bound(py);
+            anneal_dict.set_item("temperature", anneal.temperature)?;
+            anneal_dict.set_item("annealed_ms", anneal.annealed_ms)?;
+            anneal_dict.set_item("exploration_mass", anneal.exploration_mass)?;
+            anneal_dict.set_item("entropy", anneal.entropy)?;
+            anneal_dict.set_item("refreshes", anneal.refreshes)?;
+            dict.set_item("anneal", anneal_dict)?;
+        }
         out.push(dict.unbind().into());
     }
 
