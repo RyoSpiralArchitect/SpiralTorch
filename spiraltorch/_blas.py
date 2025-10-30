@@ -65,10 +65,9 @@ def _locate_thread_controls(lib: ctypes.CDLL) -> None:
     global _THREAD_SETTER, _THREAD_GETTER
 
     setter_candidates: tuple[tuple[str, type[ctypes._SimpleCData]], ...] = (
-        ("openblas_set_num_threads64_", ctypes.c_int),
-        ("openblas_set_num_threads64", ctypes.c_int),
+        ("openblas_set_num_threads64", ctypes.c_longlong),
+        ("openblas_set_num_threads64_v2", ctypes.c_longlong),
         ("openblas_set_num_threads", ctypes.c_int),
-        ("openblas_set_num_threads64_v2", ctypes.c_int),
         ("openblas_set_num_threads_v2", ctypes.c_int),
         ("cblas_set_num_threads", ctypes.c_int),
         ("MKL_Set_Num_Threads", ctypes.c_int),
@@ -78,8 +77,7 @@ def _locate_thread_controls(lib: ctypes.CDLL) -> None:
     )
 
     getter_candidates: tuple[tuple[str, type[ctypes._SimpleCData]], ...] = (
-        ("openblas_get_num_threads64_", ctypes.c_int),
-        ("openblas_get_num_threads64", ctypes.c_int),
+        ("openblas_get_num_threads64", ctypes.c_longlong),
         ("openblas_get_num_threads", ctypes.c_int),
         ("cblas_get_num_threads", ctypes.c_int),
         ("MKL_Get_Max_Threads", ctypes.c_int),
