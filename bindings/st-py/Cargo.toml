@@ -1,6 +1,6 @@
 [package]
 name = "spiraltorch-py"
-version = "0.2.7"
+version = "0.2.8"
 edition = "2021"
 description = "Python bindings for SpiralTorch heuristics"
 license = "AGPL-3.0-or-later"
@@ -63,6 +63,8 @@ st-logic = { path = "../../crates/st-logic", optional = true }
 st-kdsl = { path = "../../crates/st-kdsl", optional = true }
 st-backend-hip = { path = "../../crates/st-backend-hip", default-features = false }
 st-frac = { path = "../../crates/st-frac" }
+st-qr-studio = { path = "../../crates/st-qr-studio" }
+julia-ffi-poc = { path = "../../crates/julia-ffi-poc" }
 spiral-selfsup = { path = "../../crates/spiral-selfsup", optional = true }
 spiral-opt = { path = "../../crates/spiral-opt" }
 spiral-hpo = { path = "../../crates/spiral-hpo" }

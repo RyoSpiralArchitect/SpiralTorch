@@ -1,0 +1,9 @@
+[package]
+name = "st-metrics"
+version = "0.1.0"
+edition = "2021"
+authors = ["SpiralTorch Contributors"]
+description = "Lightweight registry for SpiralTorch training metrics"
+license = "AGPL-3.0-or-later"
+
+[dependencies]

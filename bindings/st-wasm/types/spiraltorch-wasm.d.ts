@@ -112,6 +112,7 @@ declare module "spiraltorch-wasm" {
         pixels(): Uint8Array;
         vector_field(): Float32Array;
         vectorFieldFft(inverse: boolean): Float32Array;
+        emitWasmTrail(curvature: number): Float32Array;
         relation(): Float32Array;
         hypergradWave(curvature: number): Float32Array;
         realgradWave(): Float32Array;
