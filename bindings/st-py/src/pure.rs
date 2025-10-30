@@ -250,6 +250,62 @@ impl PyGradientSummary {
         self.inner.mean()
     }
 
+    pub fn min(&self) -> f32 {
+        self.inner.min()
+    }
+
+    pub fn max(&self) -> f32 {
+        self.inner.max()
+    }
+
+    pub fn support_width(&self) -> f32 {
+        self.inner.support_width()
+    }
+
+    pub fn positive_count(&self) -> usize {
+        self.inner.positive_count()
+    }
+
+    pub fn negative_count(&self) -> usize {
+        self.inner.negative_count()
+    }
+
+    pub fn zero_count(&self) -> usize {
+        self.inner.zero_count()
+    }
+
+    pub fn near_zero_count(&self) -> usize {
+        self.inner.near_zero_count()
+    }
+
+    pub fn positive_fraction(&self) -> f32 {
+        self.inner.positive_fraction()
+    }
+
+    pub fn negative_fraction(&self) -> f32 {
+        self.inner.negative_fraction()
+    }
+
+    pub fn zero_fraction(&self) -> f32 {
+        self.inner.zero_fraction()
+    }
+
+    pub fn near_zero_fraction(&self) -> f32 {
+        self.inner.near_zero_fraction()
+    }
+
+    pub fn activation(&self) -> f32 {
+        self.inner.activation()
+    }
+
+    pub fn sign_lean(&self) -> f32 {
+        self.inner.sign_lean()
+    }
+
+    pub fn sign_entropy(&self) -> f32 {
+        self.inner.sign_entropy()
+    }
+
     pub fn variance(&self) -> f32 {
         self.inner.variance()
     }
@@ -374,6 +430,18 @@ impl PyDesireGradientInterpretation {
 
     pub fn penalty_gain(&self) -> f32 {
         self.inner.penalty_gain()
+    }
+
+    pub fn activation(&self) -> f32 {
+        self.inner.activation()
+    }
+
+    pub fn sign_alignment(&self) -> f32 {
+        self.inner.sign_alignment()
+    }
+
+    pub fn sign_entropy(&self) -> f32 {
+        self.inner.sign_entropy()
     }
 }
 

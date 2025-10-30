@@ -55,6 +55,8 @@ def test_hypergrad_telemetry_reports_metrics() -> None:
     assert summary.std() > 0.0
     assert summary.variance() > 0.0
     assert summary.kurtosis() >= 0.0
+    assert summary.activation() > 0.0
+    assert summary.support_width() > 0.0
 
 
 def test_hypergrad_desire_feedback_interfaces() -> None:
@@ -67,6 +69,9 @@ def test_hypergrad_desire_feedback_interfaces() -> None:
     assert interpretation.hyper_std() > 0.0
     assert interpretation.real_std() >= 0.0
     assert interpretation.sharpness() >= 0.0
+    assert interpretation.activation() > 0.0
+    assert interpretation.sign_alignment() >= 0.0
+    assert interpretation.sign_entropy() >= 0.0
     control = tape.desire_control(real)
     damped = tape.desire_control(real, gain=0.5)
     assert control.penalty_gain() >= damped.penalty_gain()
@@ -84,10 +89,13 @@ def test_hypergrad_summary_dict_reports_moments() -> None:
     assert "skewness" in summary
     assert "kurtosis" in summary
     assert summary["sum_cubes"] != 0.0
+    assert "activation" in summary
+    assert "sign_entropy" in summary
     operator = suggest_hypergrad_operator(payload)
     assert "std" in operator
     assert "skewness" in operator
     assert "kurtosis" in operator
+    assert "activation" in operator
 
 
 def test_hypergrad_topos_factory_returns_guard() -> None:
