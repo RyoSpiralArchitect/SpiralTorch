@@ -52,6 +52,8 @@ NumPy, no PyTorch, and no shim layers.
   TorchServe models, persist BentoML runners, explore hyperparameters with
   Optuna or Ray Tune, and export trained modules to ONNX—all behind ergonomic
   Python call sites.
+- Ecosystem helpers via `spiraltorch.ecosystem` to shuttle tensors between
+  PyTorch, JAX, CuPy, and TensorFlow through zero-copy DLPack bridges.
 - Reinforcement learning harness via `spiraltorch.spiral_rl`—SpiralTorchRL keeps
   policy gradients inside Z-space tensors, exposes hypergrad-enabled updates,
   and streams geometric rewards without leaving Rust.
@@ -125,6 +127,41 @@ bary = session.barycenter(densities)
 hyper = session.hypergrad(*bary.density.shape())
 session.align_hypergrad(hyper, bary)
 print(bary.objective, hyper.gradient())
+```
+
+### Ecosystem bridges
+
+SpiralTorch tensors can flow into PyTorch or JAX without copies thanks to the
+`spiraltorch.ecosystem` helpers. CuPy round-trips also accept optional CUDA
+streams so you can coordinate asynchronous pipelines:
+
+```python
+import spiraltorch as st
+from spiraltorch.ecosystem import (
+    tensor_to_torch,
+    torch_to_tensor,
+    tensor_to_jax,
+    jax_to_tensor,
+    tensor_to_cupy,
+    cupy_to_tensor,
+    tensor_to_tensorflow,
+    tensorflow_to_tensor,
+)
+
+spiral = st.Tensor(2, 2, [1.0, 2.0, 3.0, 4.0])
+
+torch_tensor = tensor_to_torch(spiral, dtype="float32")
+roundtrip = torch_to_tensor(torch_tensor)
+
+jax_array = tensor_to_jax(spiral)
+spiral_again = jax_to_tensor(jax_array)
+
+cupy_stream = object()  # replace with cupy.cuda.Stream() when CuPy is available
+cupy_array = tensor_to_cupy(spiral, stream=cupy_stream)
+spiral_from_cupy = cupy_to_tensor(cupy_array, stream=cupy_stream)
+
+tf_tensor = tensor_to_tensorflow(spiral)
+spiral_from_tf = tensorflow_to_tensor(tf_tensor)
 ```
 
 ```python
