@@ -61,6 +61,7 @@
 //! streamed through [`AtlasFrame`] snapshots.
 
 use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
+use spiral_config::determinism;
 pub mod analysis;
 #[cfg(feature = "nn")]
 pub mod models;
@@ -3306,10 +3307,8 @@ impl<D: VisionDataset> DataLoader<D> {
         }
         let len = dataset.len();
         let order: Vec<usize> = (0..len).collect();
-        let shuffle_rng = match seed {
-            Some(value) => StdRng::seed_from_u64(value),
-            None => StdRng::from_entropy(),
-        };
+        let label = format!("st-vision/dataloader:{}:{}", len, batch_size);
+        let shuffle_rng = determinism::rng_from_optional(seed, &label);
         Ok(Self {
             dataset,
             batch_size,
@@ -3450,7 +3449,7 @@ impl TransformPipeline {
     pub fn new() -> Self {
         Self {
             ops: Vec::new(),
-            rng: StdRng::from_entropy(),
+            rng: determinism::rng_from_label("st-vision/transform_pipeline"),
             #[cfg(feature = "wgpu")]
             dispatcher: None,
         }
@@ -4525,10 +4524,7 @@ impl SimpleCnn {
                 label: "model_kind",
             },
         )?;
-        let mut rng = match seed {
-            Some(value) => StdRng::seed_from_u64(value),
-            None => StdRng::from_entropy(),
-        };
+        let mut rng = determinism::rng_from_optional(seed, "st-vision/models/simple_cnn");
         let metadata = ModelMetadata::from_descriptor(descriptor, num_classes);
         let (conv1_out, conv2_out, hidden) = match kind {
             ModelKind::ResNet18 | ModelKind::ResNet50 => (32, 64, 128),
