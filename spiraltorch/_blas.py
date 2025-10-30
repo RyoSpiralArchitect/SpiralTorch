@@ -8,7 +8,9 @@ artefacts emitted by the Rust runtime, allowing SpiralTorch to reserve host
 threads for GPU command submission so compute on both sides can progress
 without contending for the same CPU cores.  The system-facing helpers also
 interrogate Linux control groups so container limits and CPU reservations are
-captured before tuning decisions are made.
+captured before tuning decisions are made.  WGSL kernel metadata persisted in
+the autotune store is also summarised so GPU dispatch characteristics can feed
+back into the CPU reservation heuristic.
 """
 
 from __future__ import annotations
@@ -16,8 +18,9 @@ from __future__ import annotations
 import ctypes
 import ctypes.util
 import json
-import os
 import math
+import os
+import time
 import warnings
 from array import array
 from contextlib import contextmanager
@@ -36,6 +39,7 @@ __all__ = [
     "auto_tune_threads",
     "blas_vendor",
     "wgpu_adapter_info",
+    "wgpu_kernel_profiles",
     "gpu_host_thread_reservation",
     "process_cpu_budget",
     "cgroup_cpu_quota",
@@ -64,6 +68,7 @@ _THREAD_HINT_SOURCES: tuple[str, ...] = (
 _GPU_HOST_HINT_VAR = "SPIRALTORCH_WGPU_HOST_THREADS"
 
 _WGPU_ADAPTER_INFO: dict[str, object] | None = None
+_WGPU_KERNEL_PROFILES: dict[str, object] | None = None
 _GPU_HOST_RESERVATION: int | None = None
 _GPU_HOST_RESERVATION_BUDGET: int | None = None
 
@@ -91,6 +96,10 @@ _SOFTWARE_GPU_KEYWORDS = {
     "software",
     "warp",
 }
+
+_WGPU_PROFILE_STALE_SECONDS = 90 * 24 * 60 * 60
+_WGPU_HEAVY_WORKGROUP_THRESHOLD = 256
+_WGPU_HEAVY_VOLUME_THRESHOLD = 2_000_000
 
 
 def _candidate_paths() -> Iterable[str]:
@@ -432,6 +441,225 @@ def _detect_wgpu_adapter() -> dict[str, object] | None:
     return _WGPU_ADAPTER_INFO
 
 
+def _coerce_positive_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return None
+        rounded = int(value)
+        return rounded if rounded >= 0 and abs(value - rounded) < 1e-6 else None
+    if isinstance(value, str):
+        candidate = value.strip()
+        if not candidate:
+            return None
+        try:
+            parsed = int(candidate, 0)
+        except ValueError:
+            return None
+        return parsed if parsed >= 0 else None
+    return None
+
+
+def _estimate_context_volume(context: object) -> int | None:
+    if not isinstance(context, dict):
+        return None
+    dims: list[int] = []
+    for key, raw in context.items():
+        if not isinstance(key, str):
+            continue
+        lowered = key.lower()
+        if any(token in lowered for token in ("rows", "cols", "inner", "m", "n", "k", "width", "height", "depth", "size", "len", "length", "volume")):
+            value = _coerce_positive_int(raw)
+            if value:
+                dims.append(value)
+    dims = [value for value in dims if value]
+    if not dims:
+        return None
+    dims.sort(reverse=True)
+    volume = 1
+    for value in dims[:3]:
+        volume *= value
+    return volume
+
+
+def _estimate_workgroup_size(params: object) -> int | None:
+    if not isinstance(params, dict):
+        return None
+    direct = _coerce_positive_int(params.get("workgroup_size"))
+    if direct:
+        return direct
+    tile_m = _coerce_positive_int(params.get("tile_m"))
+    tile_n = _coerce_positive_int(params.get("tile_n"))
+    tile_k = _coerce_positive_int(params.get("tile_k"))
+    if tile_m and tile_n:
+        if tile_k and tile_k > 1:
+            return tile_m * tile_n * tile_k
+        return tile_m * tile_n
+    axes: list[int] = []
+    for key in ("workgroup_x", "workgroup_y", "workgroup_z", "local_size_x", "local_size_y", "local_size_z", "wg_rows", "wg_cols"):
+        value = _coerce_positive_int(params.get(key))
+        if value:
+            axes.append(value)
+    if axes:
+        size = 1
+        for axis in axes:
+            size *= axis
+        return size
+    for key, raw in params.items():
+        if not isinstance(key, str):
+            continue
+        lowered = key.lower()
+        if lowered.endswith("_workgroup") or lowered.endswith("_workgroup_size"):
+            value = _coerce_positive_int(raw)
+            if value:
+                return value
+    return None
+
+
+def _summarise_wgpu_buckets(store: object) -> dict[str, object] | None:
+    if not isinstance(store, dict):
+        return None
+    kernels: dict[str, dict[str, object]] = {}
+    latest: int | None = None
+    total_entries = 0
+    for raw_key, bucket in store.items():
+        key = str(raw_key)
+        if not key.startswith("wgpu."):
+            continue
+        info = _parse_wgpu_autotune_key(key)
+        kernel_prefix = key.split("|", 1)[0]
+        parts = kernel_prefix.split(".")
+        kernel_name = parts[1] if len(parts) > 1 else kernel_prefix
+        entries: list[dict[str, object]] = []
+        if isinstance(bucket, dict):
+            maybe_entries = bucket.get("entries")
+            if isinstance(maybe_entries, list):
+                entries = [entry for entry in maybe_entries if isinstance(entry, dict)]
+            elif {"params", "score", "updated_unix"}.issubset(bucket.keys()):
+                entries = [bucket]
+        elif isinstance(bucket, list):
+            entries = [entry for entry in bucket if isinstance(entry, dict)]
+        if not entries:
+            continue
+        summary = kernels.setdefault(
+            kernel_name,
+            {
+                "entries": 0,
+                "max_workgroup": 0,
+                "max_volume": 0,
+                "recent_update": None,
+                "prefix": kernel_prefix,
+            },
+        )
+        if info:
+            summary.setdefault("adapter", info.get("name"))
+            summary.setdefault("backend", info.get("backend"))
+            summary.setdefault("classification", info.get("classification"))
+        for entry in entries:
+            total_entries += 1
+            summary["entries"] = int(summary.get("entries", 0)) + 1
+            updated = _coerce_positive_int(entry.get("updated_unix"))
+            if updated is not None:
+                summary["recent_update"] = max(summary.get("recent_update") or 0, updated)
+                if latest is None or updated > latest:
+                    latest = updated
+            context = entry.get("context")
+            volume = _estimate_context_volume(context)
+            if volume is not None:
+                summary["max_volume"] = max(int(summary.get("max_volume", 0)), volume)
+            params = entry.get("params")
+            workgroup = _estimate_workgroup_size(params)
+            if workgroup is not None:
+                summary["max_workgroup"] = max(int(summary.get("max_workgroup", 0)), workgroup)
+        summary["entries"] = int(summary.get("entries", 0))
+        summary["max_workgroup"] = int(summary.get("max_workgroup", 0))
+        summary["max_volume"] = int(summary.get("max_volume", 0))
+        if summary.get("recent_update") is None:
+            summary.pop("recent_update", None)
+    if not kernels:
+        return None
+    profile: dict[str, object] = {
+        "kernels": kernels,
+        "entries": total_entries,
+    }
+    if latest is not None:
+        profile["most_recent"] = latest
+    return profile
+
+
+def _collect_wgpu_kernel_profiles() -> dict[str, object] | None:
+    for candidate in _autotune_store_candidates():
+        try:
+            with open(candidate, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (FileNotFoundError, OSError, json.JSONDecodeError):
+            continue
+        profile = _summarise_wgpu_buckets(data)
+        if profile:
+            profile["source"] = candidate
+            return profile
+    return None
+
+
+def wgpu_kernel_profiles(*, refresh: bool = False) -> dict[str, object] | None:
+    """Return aggregated metadata about autotuned WGPU/WGSL kernels."""
+
+    global _WGPU_KERNEL_PROFILES
+    if _WGPU_KERNEL_PROFILES is not None and not refresh:
+        return dict(_WGPU_KERNEL_PROFILES)
+
+    profile = _collect_wgpu_kernel_profiles()
+    _WGPU_KERNEL_PROFILES = dict(profile) if profile is not None else None
+    return dict(profile) if profile is not None else None
+
+
+def _wgpu_kernel_pressure_details() -> tuple[bool, int, int]:
+    profile = wgpu_kernel_profiles()
+    if not profile:
+        return False, 0, 0
+    kernels = profile.get("kernels")
+    if not isinstance(kernels, dict):
+        return False, 0, 0
+    max_workgroup = 0
+    max_volume = 0
+    for stats in kernels.values():
+        if not isinstance(stats, dict):
+            continue
+        workgroup = _coerce_positive_int(stats.get("max_workgroup"))
+        if workgroup is not None:
+            max_workgroup = max(max_workgroup, workgroup)
+        volume = _coerce_positive_int(stats.get("max_volume"))
+        if volume is not None:
+            max_volume = max(max_volume, volume)
+    stale = False
+    most_recent = profile.get("most_recent")
+    if isinstance(most_recent, (int, float)):
+        try:
+            stale = (time.time() - float(most_recent)) > _WGPU_PROFILE_STALE_SECONDS
+        except OverflowError:
+            stale = False
+    heavy = False
+    if not stale:
+        if max_workgroup >= _WGPU_HEAVY_WORKGROUP_THRESHOLD:
+            heavy = True
+        elif max_volume >= _WGPU_HEAVY_VOLUME_THRESHOLD:
+            heavy = True
+    return heavy, max_workgroup, max_volume
+
+
+def _apply_budget_cap(reservation: int, budget: int | None) -> int:
+    reservation = max(0, reservation)
+    if budget is None:
+        return reservation
+    cap = max(0, budget - 1)
+    if cap == 0:
+        return 0
+    return min(reservation, cap)
+
+
 def _compute_gpu_host_reservation(cpu_budget: int | None) -> int | None:
     explicit = _read_int_env(_GPU_HOST_HINT_VAR)
     if explicit is not None:
@@ -441,21 +669,46 @@ def _compute_gpu_host_reservation(cpu_budget: int | None) -> int | None:
     if not info:
         return None
 
+    heavy_gpu, max_workgroup, max_volume = _wgpu_kernel_pressure_details()
     classification = str(info.get("classification", "unknown"))
     if classification == "software":
         return None
     if classification == "integrated":
         if cpu_budget is None or cpu_budget <= 2:
-            return 1
-        return min(2, max(1, cpu_budget // 4))
+            reservation = 1
+        else:
+            reservation = min(2, max(1, cpu_budget // 4))
+        if heavy_gpu:
+            target = max(reservation + 1, 2)
+            if max_volume >= (_WGPU_HEAVY_VOLUME_THRESHOLD * 2):
+                target = max(target, reservation + 2)
+            reservation = _apply_budget_cap(target, cpu_budget)
+            if reservation < 1:
+                reservation = 1
+        return reservation
     if classification == "discrete":
         if cpu_budget is not None and cpu_budget >= 8:
-            return 2
-        return 1
+            reservation = 2
+        else:
+            reservation = 1
+        if heavy_gpu:
+            target = reservation + 1
+            if max_workgroup >= _WGPU_HEAVY_WORKGROUP_THRESHOLD * 2:
+                target = max(target, 3)
+            reservation = _apply_budget_cap(target, cpu_budget)
+            if reservation < 1 and (cpu_budget is None or cpu_budget > 1):
+                reservation = 1
+        return reservation
     if classification == "unknown":
         if cpu_budget is None or cpu_budget <= 1:
             return None
-        return 1
+        reservation = 1
+        if heavy_gpu:
+            target = reservation + 1
+            reservation = _apply_budget_cap(target, cpu_budget)
+            if reservation < 1:
+                reservation = 1
+        return reservation
     return None
 
 
