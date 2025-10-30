@@ -24,6 +24,7 @@ vision = _load_module("spiraltorch_fallback_vision", "vision.py")
 QuantumMeasurement = qr.QuantumMeasurement
 LossStdTrigger = rl.LossStdTrigger
 PolicyGradient = rl.PolicyGradient
+FractalQuantumTrainer = rl.FractalQuantumTrainer
 FractalCanvas = vision.FractalCanvas
 
 
@@ -178,6 +179,50 @@ class FractalQuantumBridgeTests(unittest.TestCase):
             stream_update["learning_rate"],
             places=6,
         )
+
+
+class FractalQuantumTrainerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.canvas = FractalCanvas(dim=2.25)
+        self.studio = qr.QuantumRealityStudio(curvature=-0.9, qubits=16)
+        self.policy = PolicyGradient()
+        self.trainer = FractalQuantumTrainer(
+            self.studio,
+            self.policy,
+            threshold=0.04,
+            eta_scale=1.25,
+            base_rate=1.05,
+            window=3,
+        )
+
+    def test_trainer_flushes_with_golden_feedback(self) -> None:
+        first = self.canvas.emit_infinite_z(zoom=196.0, steps=20)
+        second = self.canvas.emit_infinite_z(zoom=128.0, steps=18)
+        self.trainer.ingest_patch(first)
+        self.trainer.ingest_patch(second, weight=0.5)
+        self.trainer.accumulate_returns([0.15, -0.05, 0.08])
+        update = self.trainer.flush(baseline=0.0)
+        self.assertIn("learning_rate", update)
+        self.assertIsNotNone(self.trainer.last_measurement)
+        golden = self.trainer.golden_feedback
+        self.assertGreater(golden.get("learning_rate", 0.0), 0.0)
+        summary = self.trainer.summary()
+        self.assertEqual(summary["pending"], 0)
+        self.assertIn("history", summary)
+        self.assertEqual(len(summary["returns"]), 0)
+        self.assertIsNotNone(summary["last_measurement"])
+
+    def test_reconfigure_rebuilds_session(self) -> None:
+        patch = self.canvas.emit_infinite_z(zoom=64.0, steps=16)
+        self.trainer.ingest_patch(patch)
+        self.trainer.reconfigure(threshold=0.02, eta_scale=1.4, base_rate=1.2, window=4)
+        self.assertAlmostEqual(self.trainer.threshold, 0.02)
+        self.assertAlmostEqual(self.trainer.eta_scale, 1.4)
+        self.assertAlmostEqual(self.trainer.base_rate, 1.2)
+        self.assertEqual(self.trainer.summary()["pending"], 0)
+        resonance = self.trainer.peek_resonance()
+        self.assertTrue(hasattr(resonance, "spectrum"))
+
 
 
 if __name__ == "__main__":
