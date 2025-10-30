@@ -25,6 +25,14 @@ pub struct SelfRewriteEngine<G: AiHintGenerator> {
     eta_floor: f32,
     max_history: usize,
     eta_history: VecDeque<f32>,
+    cache_limit: usize,
+    hint_cache: VecDeque<CachedHint>,
+}
+
+#[derive(Clone)]
+struct CachedHint {
+    hints: Vec<HeuristicHint>,
+    eta: f32,
 }
 
 impl<G: AiHintGenerator> SelfRewriteEngine<G> {
@@ -37,6 +45,8 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
             eta_floor,
             max_history: 16,
             eta_history: VecDeque::new(),
+            cache_limit: 3,
+            hint_cache: VecDeque::new(),
         }
     }
 
@@ -51,6 +61,15 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
     /// Set the number of historic η̄ samples retained for smoothing.
     pub fn with_history(mut self, window: usize) -> Self {
         self.max_history = window.max(1);
+        self
+    }
+
+    /// Adjust the number of cached hint sets retained for low-latency rewrites.
+    pub fn with_cache_limit(mut self, limit: usize) -> Self {
+        self.cache_limit = limit.max(1);
+        while self.hint_cache.len() > self.cache_limit {
+            self.hint_cache.pop_back();
+        }
         self
     }
 
@@ -77,6 +96,12 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
             return Ok(None);
         }
 
+        if let Some(event) = self.try_cached(base_src, ctx, observed_eta)? {
+            let eta_bar = event.eta_bar;
+            self.record_eta(eta_bar);
+            return Ok(Some(event));
+        }
+
         let mut prompt =
             AiRewritePrompt::new(base_src.to_string(), *ctx).with_eta_bar(observed_eta);
         if let Some(metrics) = metrics {
@@ -90,18 +115,11 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         if hints.len() > self.config.max_hints {
             return Err(AiRewriteError::TooManyHints(hints.len()));
         }
-        let script = synthesize_program(base_src, &hints);
-        let out = eval_program(&script, ctx).map_err(AiRewriteError::Dsl)?;
+        let event = self.eval_hints(base_src, ctx, &hints)?;
+        self.record_eta(event.eta_bar);
+        self.push_cache(event.eta_bar, event.hints.clone());
 
-        let eta_bar = self.eta_from_out(&out);
-        self.record_eta(eta_bar);
-
-        Ok(Some(SelfRewriteEvent {
-            script,
-            hints,
-            eta_bar,
-            out,
-        }))
+        Ok(Some(event))
     }
 
     fn record_eta(&mut self, eta: f32) {
@@ -109,6 +127,66 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         while self.eta_history.len() > self.max_history {
             self.eta_history.pop_front();
         }
+    }
+
+    fn try_cached(
+        &mut self,
+        base_src: &str,
+        ctx: &Ctx,
+        observed_eta: f32,
+    ) -> Result<Option<SelfRewriteEvent>, AiRewriteError> {
+        for idx in 0..self.hint_cache.len() {
+            let Some(entry) = self.hint_cache.get(idx).cloned() else {
+                continue;
+            };
+            if entry.eta <= observed_eta {
+                continue;
+            }
+            let event = self.eval_hints(base_src, ctx, &entry.hints)?;
+            if event.eta_bar <= observed_eta {
+                continue;
+            }
+            self.touch_cache(idx, event.eta_bar, event.hints.clone());
+            return Ok(Some(event));
+        }
+        Ok(None)
+    }
+
+    fn touch_cache(&mut self, idx: usize, eta: f32, hints: Vec<HeuristicHint>) {
+        if let Some(mut cached) = self.hint_cache.remove(idx) {
+            cached.eta = eta;
+            cached.hints = hints;
+            self.hint_cache.push_front(cached);
+        } else {
+            self.hint_cache.push_front(CachedHint { hints, eta });
+        }
+        while self.hint_cache.len() > self.cache_limit {
+            self.hint_cache.pop_back();
+        }
+    }
+
+    fn push_cache(&mut self, eta: f32, hints: Vec<HeuristicHint>) {
+        self.hint_cache.push_front(CachedHint { hints, eta });
+        while self.hint_cache.len() > self.cache_limit {
+            self.hint_cache.pop_back();
+        }
+    }
+
+    fn eval_hints(
+        &mut self,
+        base_src: &str,
+        ctx: &Ctx,
+        hints: &[HeuristicHint],
+    ) -> Result<SelfRewriteEvent, AiRewriteError> {
+        let script = synthesize_program(base_src, hints);
+        let out = eval_program(&script, ctx).map_err(AiRewriteError::Dsl)?;
+        let eta_bar = self.eta_from_out(&out);
+        Ok(SelfRewriteEvent {
+            script,
+            hints: hints.to_vec(),
+            eta_bar,
+            out,
+        })
     }
 
     fn eta_from_out(&self, out: &Out) -> f32 {
@@ -181,5 +259,40 @@ mod tests {
         assert!(event.script.contains("soft"));
         assert!(event.eta_bar > 0.0);
         assert_eq!(event.hints.len(), 1);
+    }
+
+    #[test]
+    fn reuses_cached_hints_before_invoking_ai() {
+        use std::cell::Cell;
+
+        let calls = Cell::new(0usize);
+        let mut generator = |_: &AiRewriteConfig, _: &AiRewritePrompt| {
+            calls.set(calls.get() + 1);
+            Ok(vec![HeuristicHint::new(
+                "tile_cols",
+                "tile_cols * 2",
+                0.9,
+                "true",
+            )])
+        };
+        let ctx = sample_ctx();
+        let config = AiRewriteConfig::new("mock");
+        let mut engine = SelfRewriteEngine::new(&mut generator, config)
+            .with_eta_floor(0.75)
+            .with_cache_limit(2);
+
+        let first = engine
+            .tick("algo: 1;", &ctx, None, 0.3)
+            .expect("tick")
+            .expect("event");
+        assert!(first.eta_bar > 0.0);
+        assert_eq!(calls.get(), 1);
+
+        let second = engine
+            .tick("algo: 1;", &ctx, None, 0.4)
+            .expect("tick")
+            .expect("event");
+        assert!(second.eta_bar > 0.0);
+        assert_eq!(calls.get(), 1);
     }
 }

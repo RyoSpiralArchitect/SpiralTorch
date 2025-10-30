@@ -1,6 +1,7 @@
-use pyo3::exceptions::PyTypeError;
+use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyAny;
+use pyo3::types::PyIterator;
 use pyo3::wrap_pyfunction;
 use pyo3::{Bound, PyRef};
 
@@ -440,6 +441,163 @@ impl PyQuantumRealityStudio {
     }
 }
 
+#[pyclass(module = "spiraltorch.qr", name = "FractalQuantumSession")]
+pub(crate) struct PyFractalQuantumSession {
+    config: QuantumOverlayConfig,
+    threshold: f64,
+    eta_scale: f64,
+    weight: f64,
+    eta_acc: f64,
+    spectrum: Vec<f64>,
+    shells: Vec<f64>,
+    ingested: usize,
+}
+
+impl PyFractalQuantumSession {
+    fn from_config(config: QuantumOverlayConfig, threshold: f64, eta_scale: f64) -> Self {
+        Self {
+            config,
+            threshold,
+            eta_scale: eta_scale.max(0.0),
+            weight: 0.0,
+            eta_acc: 0.0,
+            spectrum: Vec::new(),
+            shells: Vec::new(),
+            ingested: 0,
+        }
+    }
+
+    fn ensure_shells(resonance: &ZResonance) -> Vec<f64> {
+        if !resonance.shell_weights.is_empty() {
+            return resonance
+                .shell_weights
+                .iter()
+                .map(|value| value.abs())
+                .collect();
+        }
+        if resonance.spectrum.is_empty() {
+            return vec![1.0];
+        }
+        resonance
+            .spectrum
+            .iter()
+            .enumerate()
+            .map(|(idx, value)| value.abs() * (idx as f64 + 1.0))
+            .collect()
+    }
+
+    fn accumulate(&mut self, resonance: &ZResonance, weight: f64) {
+        if weight <= 0.0 {
+            return;
+        }
+        if self.spectrum.len() < resonance.spectrum.len() {
+            self.spectrum.resize(resonance.spectrum.len(), 0.0);
+        }
+        let shells = Self::ensure_shells(resonance);
+        if self.shells.len() < shells.len() {
+            self.shells.resize(shells.len(), 0.0);
+        }
+        for (idx, value) in resonance.spectrum.iter().enumerate() {
+            self.spectrum[idx] += value * weight;
+        }
+        for (idx, value) in shells.iter().enumerate() {
+            self.shells[idx] += value * weight;
+        }
+        self.weight += weight;
+        self.eta_acc += resonance.eta_hint as f64 * weight;
+        self.ingested += 1;
+    }
+
+    fn aggregated_resonance(&self) -> ZResonance {
+        if self.weight <= 0.0 || self.spectrum.is_empty() {
+            return ZResonance::from_spectrum(Vec::new(), 0.0);
+        }
+        let scale = 1.0 / self.weight;
+        let spectrum: Vec<f64> = self.spectrum.iter().map(|value| value * scale).collect();
+        let mut shell_weights: Vec<f64> = self.shells.iter().map(|value| value * scale).collect();
+        if shell_weights.is_empty() && !spectrum.is_empty() {
+            shell_weights = spectrum
+                .iter()
+                .enumerate()
+                .map(|(idx, value)| value.abs() * (idx as f64 + 1.0))
+                .collect();
+        }
+        ZResonance {
+            spectrum,
+            eta_hint: (self.eta_acc * scale) as f32,
+            shell_weights,
+        }
+    }
+
+    fn ingest_patch(&mut self, patch: &Bound<'_, PyAny>, weight: f64) -> ZResonance {
+        let pulses = fractal_patch_to_pulses(patch, self.eta_scale);
+        let resonance = ZResonance::from_pulses(&pulses);
+        self.accumulate(&resonance, weight.max(0.0));
+        resonance
+    }
+
+    fn measure_internal(&self, threshold: Option<f64>) -> PyQuantumMeasurement {
+        let resonance = self.aggregated_resonance();
+        let circuit = ZOverlayCircuit::synthesize(&self.config, &resonance);
+        let value = threshold.unwrap_or(self.threshold);
+        PyQuantumMeasurement::from(circuit.measure(value))
+    }
+
+    fn reset(&mut self) {
+        self.spectrum.clear();
+        self.shells.clear();
+        self.weight = 0.0;
+        self.eta_acc = 0.0;
+        self.ingested = 0;
+    }
+}
+
+#[pymethods]
+impl PyFractalQuantumSession {
+    #[new]
+    #[pyo3(signature = (studio, threshold=0.0, eta_scale=1.0))]
+    pub fn new(studio: PyRef<PyQuantumRealityStudio>, threshold: f64, eta_scale: f64) -> Self {
+        Self::from_config(studio.config.clone(), threshold, eta_scale)
+    }
+
+    #[getter]
+    pub fn threshold(&self) -> f64 {
+        self.threshold
+    }
+
+    #[getter]
+    pub fn eta_scale(&self) -> f64 {
+        self.eta_scale
+    }
+
+    #[getter]
+    pub fn ingested(&self) -> usize {
+        self.ingested
+    }
+
+    #[pyo3(signature = (patch, weight=1.0))]
+    pub fn ingest(&mut self, patch: &Bound<'_, PyAny>, weight: f64) -> PyZResonance {
+        PyZResonance {
+            inner: self.ingest_patch(patch, weight),
+        }
+    }
+
+    pub fn resonance(&self) -> PyZResonance {
+        PyZResonance {
+            inner: self.aggregated_resonance(),
+        }
+    }
+
+    #[pyo3(signature = (*, threshold=None))]
+    pub fn measure(&self, threshold: Option<f64>) -> PyQuantumMeasurement {
+        self.measure_internal(threshold)
+    }
+
+    pub fn clear(&mut self) {
+        self.reset();
+    }
+}
+
 #[pyfunction(name = "resonance_from_fractal_patch")]
 #[pyo3(signature = (patch, eta_scale=1.0))]
 fn resonance_from_fractal_patch_py(patch: &Bound<'_, PyAny>, eta_scale: f64) -> PyZResonance {
@@ -461,6 +619,48 @@ fn quantum_measurement_from_fractal_py(
     PyQuantumMeasurement::from(circuit.measure(threshold))
 }
 
+#[pyfunction(name = "quantum_measurement_from_fractal_sequence")]
+#[pyo3(signature = (studio, patches, *, weights=None, threshold=0.0, eta_scale=1.0))]
+fn quantum_measurement_from_fractal_sequence_py(
+    py: Python<'_>,
+    studio: PyRef<PyQuantumRealityStudio>,
+    patches: &Bound<'_, PyAny>,
+    weights: Option<&Bound<'_, PyAny>>,
+    threshold: f64,
+    eta_scale: f64,
+) -> PyResult<PyQuantumMeasurement> {
+    let mut session =
+        PyFractalQuantumSession::from_config(studio.config.clone(), threshold, eta_scale);
+    if let Some(weight_obj) = weights {
+        let mut patch_iter = PyIterator::from_object(py, patches)?;
+        let mut weight_iter = PyIterator::from_object(py, weight_obj)?;
+        loop {
+            let patch_next = patch_iter.next();
+            let weight_next = weight_iter.next();
+            match (patch_next, weight_next) {
+                (None, None) => break,
+                (Some(Ok(patch)), Some(Ok(weight))) => {
+                    let w: f64 = weight.extract()?;
+                    session.ingest_patch(&patch, w);
+                }
+                (Some(Err(err)), _) => return Err(err),
+                (_, Some(Err(err))) => return Err(err),
+                (None, Some(_)) | (Some(_), None) => {
+                    return Err(PyValueError::new_err(
+                        "patches and weights must have the same length",
+                    ));
+                }
+            }
+        }
+    } else {
+        for patch in PyIterator::from_object(py, patches)? {
+            let patch = patch?;
+            session.ingest_patch(&patch, 1.0);
+        }
+    }
+    Ok(session.measure_internal(Some(threshold)))
+}
+
 pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     let module = PyModule::new_bound(py, "qr")?;
     module.add("__doc__", "Quantum overlay helpers")?;
@@ -469,9 +669,14 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
     module.add_class::<PyZOverlayCircuit>()?;
     module.add_class::<PyQuantumMeasurement>()?;
     module.add_class::<PyQuantumRealityStudio>()?;
+    module.add_class::<PyFractalQuantumSession>()?;
     module.add_function(wrap_pyfunction!(resonance_from_fractal_patch_py, &module)?)?;
     module.add_function(wrap_pyfunction!(
         quantum_measurement_from_fractal_py,
+        &module
+    )?)?;
+    module.add_function(wrap_pyfunction!(
+        quantum_measurement_from_fractal_sequence_py,
         &module
     )?)?;
     module.add(
@@ -482,8 +687,10 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
             "ZOverlayCircuit",
             "QuantumMeasurement",
             "QuantumRealityStudio",
+            "FractalQuantumSession",
             "resonance_from_fractal_patch",
             "quantum_measurement_from_fractal",
+            "quantum_measurement_from_fractal_sequence",
         ],
     )?;
 
@@ -497,8 +704,10 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
         "ZOverlayCircuit",
         "QuantumMeasurement",
         "QuantumRealityStudio",
+        "FractalQuantumSession",
         "resonance_from_fractal_patch",
         "quantum_measurement_from_fractal",
+        "quantum_measurement_from_fractal_sequence",
     ] {
         let attr = module.getattr(name)?;
         parent.add(name, attr.to_object(py))?;
