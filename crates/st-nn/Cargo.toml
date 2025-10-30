@@ -25,7 +25,6 @@ st-tensor = { path = "../st-tensor" }
 st-core = { path = "../st-core" }
 st-frac = { path = "../st-frac" }
 st-text = { path = "../st-text" }
-spiral-config = { path = "../spiral-config" }
 futures = "0.3"
 rand = "0.8"
 rand_distr = "0.4"
