@@ -16,6 +16,8 @@ pub struct LossStdTrigger {
     ema: f32,
     warmup: usize,
     seen: usize,
+    geometry_eta: f32,
+    geometry_curvature: f32,
 }
 
 impl LossStdTrigger {
@@ -28,6 +30,8 @@ impl LossStdTrigger {
             ema: 0.0,
             warmup: 4,
             seen: 0,
+            geometry_eta: 0.0,
+            geometry_curvature: -1.0,
         }
     }
 
@@ -54,6 +58,16 @@ impl LossStdTrigger {
         self
     }
 
+    pub fn with_geometry_injection(mut self, eta: f32, curvature: f32) -> Self {
+        if eta.is_finite() && eta >= 0.0 {
+            self.geometry_eta = eta;
+        }
+        if curvature.is_finite() {
+            self.geometry_curvature = curvature;
+        }
+        self
+    }
+
     /// Observes the latest loss standard deviation and returns a suggested
     /// injection ratio when the measurement exceeds the configured threshold.
     pub fn observe(&mut self, std: f32) -> Option<f32> {
@@ -72,7 +86,11 @@ impl LossStdTrigger {
         if self.ema <= self.std_threshold {
             return None;
         }
-        let ratio = (self.ema / self.std_threshold) - 1.0;
+        let mut ratio = (self.ema / self.std_threshold) - 1.0;
+        if self.geometry_eta > 0.0 {
+            let curvature_boost = self.geometry_curvature.tanh().abs() as f32;
+            ratio *= 1.0 + self.geometry_eta * 0.5 + curvature_boost;
+        }
         Some(ratio.clamp(0.0, self.max_ratio))
     }
 }
@@ -185,4 +203,19 @@ fn loss_std(values: &[f32], baseline: f32) -> f32 {
         variance += delta * delta;
     }
     (variance / values.len() as f32).sqrt()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn geometry_injection_scales_ratio() {
+        let mut trigger = LossStdTrigger::new(0.1)
+            .with_warmup(1)
+            .with_geometry_injection(0.6, -1.5);
+        assert!(trigger.observe(0.05).is_none());
+        let boosted = trigger.observe(0.4).expect("boosted ratio");
+        assert!(boosted > 0.0);
+    }
 }
