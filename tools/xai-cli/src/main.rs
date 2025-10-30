@@ -45,6 +45,15 @@ impl DiskTensor {
         }
         Tensor::from_vec(self.rows, self.cols, self.data).map_err(|err| Box::new(err) as DynError)
     }
+
+    fn from_tensor(tensor: &Tensor) -> Self {
+        let (rows, cols) = tensor.shape();
+        Self {
+            rows,
+            cols,
+            data: tensor.data().to_vec(),
+        }
+    }
 }
 
 #[derive(Parser)]
@@ -65,6 +74,22 @@ struct Cli {
     /// Emit the metadata component to a separate JSON file in addition to the main report
     #[arg(long, global = true, value_hint = ValueHint::FilePath)]
     metadata_out: Option<PathBuf>,
+
+    /// Apply an odd-sized box blur to smooth the final heatmap before emitting it
+    #[arg(long, global = true, value_hint = ValueHint::Other)]
+    smooth_kernel: Option<usize>,
+
+    /// Normalise the heatmap values to the unit interval prior to writing them out
+    #[arg(long, global = true)]
+    normalise_output: bool,
+
+    /// Threshold used when emitting a binary focus mask; stored as metadata even without output
+    #[arg(long, global = true, value_hint = ValueHint::Other)]
+    focus_threshold: Option<f32>,
+
+    /// Destination file for a binary focus mask derived from the generated heatmap
+    #[arg(long, global = true, value_hint = ValueHint::FilePath)]
+    focus_mask_out: Option<PathBuf>,
 
     #[command(subcommand)]
     command: Command,
@@ -175,6 +200,8 @@ fn try_main() -> Result<()> {
 }
 
 fn finalise_output(cli: &Cli, mut output: AttributionOutput, destination: &Path) -> Result<()> {
+    output = apply_post_processing(cli, output)?;
+
     let statistics = if cli.include_stats || cli.print_stats {
         Some(output.statistics())
     } else {
@@ -197,7 +224,67 @@ fn finalise_output(cli: &Cli, mut output: AttributionOutput, destination: &Path)
         write_metadata(&output.metadata, path)?;
     }
 
+    if let Some(mask_path) = cli.focus_mask_out.as_ref() {
+        let threshold = resolve_focus_threshold(cli).unwrap_or(0.5);
+        let mask = output
+            .focus_mask(threshold)
+            .map_err(|err| Box::new(err) as DynError)?;
+        write_tensor_json(&mask, mask_path)?;
+    }
+
     Ok(())
+}
+
+fn apply_post_processing(cli: &Cli, output: AttributionOutput) -> Result<AttributionOutput> {
+    if let Some(threshold) = resolve_focus_threshold(cli) {
+        if !threshold.is_finite() {
+            return Err(Box::new(io::Error::new(
+                ErrorKind::InvalidInput,
+                "--focus-threshold must be a finite number",
+            )));
+        }
+    }
+
+    let mut output = output;
+
+    if let Some(kernel) = cli.smooth_kernel {
+        if kernel == 0 || kernel % 2 == 0 {
+            return Err(Box::new(io::Error::new(
+                ErrorKind::InvalidInput,
+                "--smooth-kernel must be an odd, positive integer",
+            )));
+        }
+        let mut smoothed = output
+            .smoothed(kernel)
+            .map_err(|err| Box::new(err) as DynError)?;
+        smoothed
+            .metadata
+            .insert_extra_number("smooth_kernel", kernel as f64);
+        output = smoothed;
+    }
+
+    if cli.normalise_output {
+        let mut normalised = output
+            .normalised()
+            .map_err(|err| Box::new(err) as DynError)?;
+        normalised
+            .metadata
+            .insert_extra_flag("normalised_output", true);
+        output = normalised;
+    }
+
+    if let Some(threshold) = resolve_focus_threshold(cli) {
+        output
+            .metadata
+            .insert_extra_number("focus_threshold", threshold as f64);
+    }
+
+    Ok(output)
+}
+
+fn resolve_focus_threshold(cli: &Cli) -> Option<f32> {
+    cli.focus_threshold
+        .or_else(|| cli.focus_mask_out.as_ref().map(|_| 0.5))
 }
 
 fn run_grad_cam(args: &GradCamArgs) -> Result<AttributionOutput> {
@@ -315,6 +402,14 @@ fn write_report(report: &AttributionReport, path: &Path) -> Result<()> {
 fn write_metadata(metadata: &AttributionMetadata, path: &Path) -> Result<()> {
     ensure_parent_dir(path)?;
     let payload = serde_json::to_string_pretty(metadata)?;
+    fs::write(path, payload)?;
+    Ok(())
+}
+
+fn write_tensor_json(tensor: &Tensor, path: &Path) -> Result<()> {
+    ensure_parent_dir(path)?;
+    let disk = DiskTensor::from_tensor(tensor);
+    let payload = serde_json::to_string_pretty(&disk)?;
     fs::write(path, payload)?;
     Ok(())
 }

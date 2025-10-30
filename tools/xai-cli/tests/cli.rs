@@ -4,7 +4,7 @@ use std::process::Command;
 use st_core::telemetry::xai_report::{AttributionMetadata, AttributionReport};
 use tempfile::tempdir;
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 struct DiskTensor {
     rows: usize,
     cols: usize,
@@ -176,6 +176,84 @@ fn grad_cam_cli_writes_metadata_with_stats() {
         assert!(extras.contains_key("heatmap_mean"));
         assert!(extras.contains_key("heatmap_entropy"));
     }
+}
+
+#[test]
+fn grad_cam_cli_applies_post_processing_and_focus_mask() {
+    let dir = tempdir().unwrap();
+    let activations_path = dir.path().join("activations.json");
+    let gradients_path = dir.path().join("gradients.json");
+    let output_path = dir.path().join("report_processed.json");
+    let mask_path = dir.path().join("mask.json");
+
+    let activations = DiskTensor {
+        rows: 2,
+        cols: 4,
+        data: vec![1.0, 1.0, 1.0, 1.0, 0.5, 1.0, 1.5, 2.0],
+    };
+    let gradients = DiskTensor {
+        rows: 2,
+        cols: 4,
+        data: vec![1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.4],
+    };
+
+    write_tensor(&activations_path, &activations);
+    write_tensor(&gradients_path, &gradients);
+
+    run_cli(&[
+        "--smooth-kernel",
+        "3",
+        "--normalise-output",
+        "--focus-mask-out",
+        mask_path.to_str().unwrap(),
+        "--focus-threshold",
+        "0.0",
+        "grad-cam",
+        "--activations",
+        activations_path.to_str().unwrap(),
+        "--gradients",
+        gradients_path.to_str().unwrap(),
+        "--height",
+        "2",
+        "--width",
+        "2",
+        "--output",
+        output_path.to_str().unwrap(),
+    ]);
+
+    let report: AttributionReport =
+        serde_json::from_str(&fs::read_to_string(&output_path).unwrap()).unwrap();
+    let smooth_kernel = report
+        .metadata
+        .extras
+        .get("smooth_kernel")
+        .and_then(|value| value.as_f64())
+        .unwrap();
+    assert!((smooth_kernel - 3.0).abs() < 1e-6);
+    assert_eq!(
+        report
+            .metadata
+            .extras
+            .get("normalised_output")
+            .and_then(|value| value.as_bool()),
+        Some(true)
+    );
+    let threshold = report
+        .metadata
+        .extras
+        .get("focus_threshold")
+        .and_then(|value| value.as_f64())
+        .unwrap();
+    assert!(threshold.abs() < 1e-6);
+
+    let mask: DiskTensor = serde_json::from_str(&fs::read_to_string(&mask_path).unwrap()).unwrap();
+    assert_eq!(mask.rows, 2);
+    assert_eq!(mask.cols, 2);
+    assert!(mask.data.iter().any(|value| (*value - 1.0).abs() < 1e-6));
+    assert!(mask
+        .data
+        .iter()
+        .all(|value| (*value - 1.0).abs() < 1e-6 || value.abs() < 1e-6));
 }
 
 #[test]
