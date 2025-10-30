@@ -23,6 +23,12 @@ stack:
     cargo build -p st-spiral-rl --release && \
     cargo build -p st-rec --release
 
+selfsup-train:
+    cargo run -p spiral-selfsup --example selfsup_train --release
+
+selfsup-eval:
+    cargo test -p spiral-selfsup -- --nocapture
+
 safety-suite:
     cargo test --manifest-path crates/spiral-safety/Cargo.toml
 
@@ -45,3 +51,7 @@ go-lint:
 
 go-test:
     ./scripts/run_go_checks.sh test
+
+distributed-selfsup config="configs/selfsup_distributed.toml":
+    echo "Launching distributed self-supervised trainer with config: {{config}}" && \
+    cargo test --manifest-path crates/spiral-selfsup/Cargo.toml --test distributed_selfsup -- --ignored

@@ -61,8 +61,11 @@
 //! streamed through [`AtlasFrame`] snapshots.
 
 use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
+use spiral_config::determinism;
 pub mod analysis;
+#[cfg(feature = "nn")]
 pub mod models;
+#[cfg(feature = "nn")]
 pub mod xai;
 
 use std::cmp::min;
@@ -72,12 +75,16 @@ use std::f32::EPSILON;
 use std::fmt;
 use std::sync::Arc;
 
-pub use st_tensor::wasm_canvas::{CanvasProjector, FractalCanvas};
+pub use st_tensor::wasm_canvas::{
+    CanvasProjector, CanvasTrailPoint, CanvasWasmTrail, FractalCanvas,
+};
 
 use st_core::telemetry::atlas::AtlasFrame;
 use st_core::telemetry::chrono::ChronoSummary;
 use st_logic::temporal_dynamics::TemporalVolume;
+#[cfg(feature = "nn")]
 use st_nn::layers::spiral_rnn::SpiralRnn;
+#[cfg(feature = "nn")]
 use st_nn::module::Module;
 use st_tensor::{DifferentialResonance, PureResult, Tensor, TensorError};
 
@@ -91,9 +98,11 @@ use st_backend_wgpu::{
 };
 
 pub mod datasets;
+#[cfg(feature = "nerf")]
 pub mod nerf;
 pub mod transforms;
-const RESONANCE_FEATURES_PER_SLICE: usize = 10;
+/// Default number of conditioning features encoded for each Z-space slice.
+pub const RESONANCE_FEATURES_PER_SLICE: usize = 10;
 /// Streaming chrono snapshot associated with a batch of Z-space slices.
 #[derive(Clone, Debug)]
 pub struct ChronoSnapshot {
@@ -1527,6 +1536,7 @@ impl ZDiffuser {
 }
 
 /// Synthesises differential resonances using a [`SpiralRnn`] conditioned on Z-space telemetry.
+#[cfg(feature = "nn")]
 #[derive(Debug)]
 pub struct ResonanceGenerator {
     rnn: SpiralRnn,
@@ -1535,6 +1545,7 @@ pub struct ResonanceGenerator {
     hidden_dim: usize,
 }
 
+#[cfg(feature = "nn")]
 impl ResonanceGenerator {
     /// Creates a generator that uses the default feature set per slice.
     pub fn new(name: impl Into<String>, hidden_dim: usize, steps: usize) -> PureResult<Self> {
@@ -1872,6 +1883,7 @@ impl ZDecoder {
 }
 
 /// Streams Z-space volumes while generating resonances and temporal projections.
+#[cfg(feature = "nn")]
 pub struct VideoStreamProjector {
     projector: VisionProjector,
     generator: ResonanceGenerator,
@@ -1881,6 +1893,7 @@ pub struct VideoStreamProjector {
     super_resolution: Option<(InterpolationMethod, usize)>,
 }
 
+#[cfg(feature = "nn")]
 impl VideoStreamProjector {
     /// Creates a new video stream projector with the desired smoothing decay.
     pub fn new(projector: VisionProjector, generator: ResonanceGenerator, decay: f32) -> Self {
@@ -3294,10 +3307,8 @@ impl<D: VisionDataset> DataLoader<D> {
         }
         let len = dataset.len();
         let order: Vec<usize> = (0..len).collect();
-        let shuffle_rng = match seed {
-            Some(value) => StdRng::seed_from_u64(value),
-            None => StdRng::from_entropy(),
-        };
+        let label = format!("st-vision/dataloader:{}:{}", len, batch_size);
+        let shuffle_rng = determinism::rng_from_optional(seed, &label);
         Ok(Self {
             dataset,
             batch_size,
@@ -3438,7 +3449,7 @@ impl TransformPipeline {
     pub fn new() -> Self {
         Self {
             ops: Vec::new(),
-            rng: StdRng::from_entropy(),
+            rng: determinism::rng_from_label("st-vision/transform_pipeline"),
             #[cfg(feature = "wgpu")]
             dispatcher: None,
         }
@@ -4513,10 +4524,7 @@ impl SimpleCnn {
                 label: "model_kind",
             },
         )?;
-        let mut rng = match seed {
-            Some(value) => StdRng::seed_from_u64(value),
-            None => StdRng::from_entropy(),
-        };
+        let mut rng = determinism::rng_from_optional(seed, "st-vision/models/simple_cnn");
         let metadata = ModelMetadata::from_descriptor(descriptor, num_classes);
         let (conv1_out, conv2_out, hidden) = match kind {
             ModelKind::ResNet18 | ModelKind::ResNet50 => (32, 64, 128),
@@ -5161,6 +5169,7 @@ mod tests {
         assert!((profile.energy(1) - energy1).abs() < 1e-6);
     }
 
+    #[cfg(feature = "nn")]
     #[test]
     fn resonance_generator_produces_projectable_resonance() {
         let slices = vec![
@@ -5189,6 +5198,7 @@ mod tests {
         assert_eq!(projection.shape(), (volume.height(), volume.width()));
     }
 
+    #[cfg(feature = "nn")]
     #[test]
     fn resonance_generator_respects_feedback_history() {
         let slices = vec![
@@ -5267,6 +5277,7 @@ mod tests {
         assert_eq!(volume_a.voxels(), volume_b.voxels());
     }
 
+    #[cfg(feature = "nn")]
     #[test]
     fn video_stream_projector_handles_sequences() {
         let frame_a = vec![

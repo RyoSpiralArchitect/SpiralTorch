@@ -11,13 +11,14 @@ name = "st_nn"
 path = "src/lib.rs"
 
 [features]
-default = []
+default = ["selfsup"]
 psi = ["st-core/psi"]
 psychoid = ["st-core/psychoid"]
 collapse = ["psi", "st-core/collapse"]
 golden = ["st-core/golden"]
 kdsl = ["st-core/kdsl"]
 wgpu = ["st-core/wgpu", "st-tensor/wgpu"]
+selfsup = []
 
 [dependencies]
 st-tensor = { path = "../st-tensor" }
@@ -27,10 +28,11 @@ st-text = { path = "../st-text" }
 futures = "0.3"
 rand = "0.8"
 rand_distr = "0.4"
+rand_chacha = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 bincode = "1"
-thiserror = "1"
+thiserror = "2"
 num-complex = "0.4"
 nalgebra = "0.32"
 

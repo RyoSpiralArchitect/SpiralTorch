@@ -339,6 +339,34 @@ impl PySearchLoop {
         let guard = self.inner.lock().unwrap();
         Ok(guard.objective().as_str().to_string())
     }
+
+    pub fn best_trial(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        let guard = self.inner.lock().unwrap();
+        Ok(guard
+            .best_trial()
+            .map(|record| trial_to_dict(py, &record))
+            .transpose()?)
+    }
+
+    pub fn summary(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let guard = self.inner.lock().unwrap();
+        let summary = guard.summary();
+        let dict = PyDict::new_bound(py);
+        dict.set_item("objective", summary.objective.as_str())?;
+        dict.set_item("total_trials", summary.total_trials)?;
+        dict.set_item("completed_trials", summary.completed_trials)?;
+        dict.set_item("pending_trials", summary.pending_trials)?;
+        match summary.best_trial {
+            Some(best) => {
+                let best_obj = trial_to_dict(py, &best)?;
+                dict.set_item("best_trial", best_obj)?;
+            }
+            None => {
+                dict.set_item("best_trial", py.None())?;
+            }
+        }
+        Ok(dict.into_py(py))
+    }
 }
 
 pub fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {

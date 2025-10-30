@@ -10,6 +10,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 try:
@@ -86,7 +87,7 @@ except ModuleNotFoundError:
     )
 
 
-def load_config(path: Path) -> Dict[str, Any]:
+def load_config(path: Path) -> Mapping[str, Any]:
     text = path.read_text()
     try:
         config = json.loads(text)
@@ -96,9 +97,10 @@ def load_config(path: Path) -> Dict[str, Any]:
                 f"{path} is not valid JSON and PyYAML is unavailable for YAML parsing"
             )
         config = yaml.safe_load(text)
-    if not isinstance(config, dict):
+    if not isinstance(config, Mapping):
         raise TypeError(
-            "Configuration top-level must be an object (mapping), "
+            "Configuration top-level must be an object (mapping) - "
+            "トップレベルはオブジェクト（マッピング）でなければならない; "
             f"got {type(config).__name__}"
         )
     return config
@@ -244,21 +246,8 @@ def run_search(args: argparse.Namespace) -> None:
     loop_maximize = loop_objective.lower() == "maximize"
 
     completed_records = [dict(record) for record in loop.completed()]
-    best_compare: Optional[float] = None
-    best_record: Optional[Dict[str, Any]] = None
-    for record in completed_records:
-        if "metric" not in record or record["metric"] is None:
-            continue
-        compare = float(record["metric"])
-        if best_compare is None:
-            best_compare = compare
-            best_record = record
-            continue
-        if (loop_maximize and compare > best_compare) or (
-            not loop_maximize and compare < best_compare
-        ):
-            best_compare = compare
-            best_record = record
+    loop_objective = loop.objective()
+    LOGGER.info("Search objective: %s", loop_objective)
 
     max_trials = args.max_trials or config.get("max_trials")
     if max_trials is None:
@@ -285,26 +274,31 @@ def run_search(args: argparse.Namespace) -> None:
             loop.observe(trial_id, metric_value)
             if checkpoint_path:
                 write_checkpoint(loop, checkpoint_path)
-            if best_compare is None:
-                best_compare = metric_value
-                best_record = {"id": trial_id, "params": params, "metric": metric_value}
-            elif (loop_maximize and metric_value > best_compare) or (
-                not loop_maximize and metric_value < best_compare
-            ):
-                best_compare = metric_value
-                best_record = {"id": trial_id, "params": params, "metric": metric_value}
             LOGGER.info("Trial %s metric=%s", trial_id, metric_value)
 
-    if best_record:
-        best_output = {
-            "id": best_record["id"],
-            "metric": best_compare,
-            "params": best_record.get("params", {}),
-        }
-        LOGGER.info("Best trial %s metric=%s", best_output["id"], best_output["metric"])
+    summary = loop.summary()
+    best_record = summary.get("best_trial") if isinstance(summary, dict) else None
+    if isinstance(best_record, dict):
+        metric_value = best_record.get("metric")
+        LOGGER.info("Best trial %s metric=%s", best_record.get("id"), metric_value)
         if args.output:
+            best_output = {
+                "id": best_record.get("id"),
+                "metric": metric_value,
+                "params": dict(best_record.get("params", {})),
+            }
             ensure_directory(Path(args.output))
             Path(args.output).write_text(json.dumps(best_output, indent=2))
+    else:
+        LOGGER.info("No completed trials with recorded metrics")
+        if args.output:
+            LOGGER.warning(
+                "Skipping --output write because no trial produced a numeric metric yet"
+            )
+
+    if args.summary:
+        ensure_directory(Path(args.summary))
+        Path(args.summary).write_text(json.dumps(summary, indent=2))
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -318,6 +312,10 @@ def create_parser() -> argparse.ArgumentParser:
     search.add_argument("--resume", help="Resume from a checkpoint")
     search.add_argument("--tracker", action="append", help="Enable tracker(s), e.g. mlflow or wandb")
     search.add_argument("--output", help="Write the best trial JSON to this path")
+    search.add_argument(
+        "--summary",
+        help="Write an aggregate search summary (including best trial) to this path",
+    )
     search.set_defaults(func=run_search)
 
     return parser

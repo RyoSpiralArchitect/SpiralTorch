@@ -1,8 +1,12 @@
 //! Self-supervised learning objectives used throughout SpiralTorch.
 
 pub mod contrastive;
+pub mod dataset;
 pub mod masked;
+pub mod metrics;
+pub mod trainer;
 
+use st_tensor::TensorError;
 use thiserror::Error;
 
 /// Errors surfaced by the self-supervised objectives crate.
@@ -17,3 +21,20 @@ pub enum ObjectiveError {
 }
 
 pub type Result<T> = std::result::Result<T, ObjectiveError>;
+
+impl From<TensorError> for ObjectiveError {
+    fn from(err: TensorError) -> Self {
+        match err {
+            TensorError::InvalidDimensions { rows, cols } => {
+                ObjectiveError::Shape(format!("invalid tensor dimensions: {rows}x{cols}"))
+            }
+            TensorError::DataLength { expected, got } => ObjectiveError::Shape(format!(
+                "data length mismatch: expected {expected}, got {got}"
+            )),
+            TensorError::ShapeMismatch { left, right } => {
+                ObjectiveError::Shape(format!("shape mismatch: left={left:?}, right={right:?}"))
+            }
+            other => ObjectiveError::InvalidArgument(other.to_string()),
+        }
+    }
+}

@@ -548,6 +548,18 @@ impl FractalCanvas {
         Ok(Float32Array::from(spectrum.as_slice()))
     }
 
+    /// Refresh the projector and emit the AR particle trail for the current
+    /// vector field. Each particle contributes `(x, y, z, energy, r, g, b)` so
+    /// WebGPU/WebXR callers can upload the buffer without additional packing.
+    #[wasm_bindgen(js_name = emitWasmTrail)]
+    pub fn emit_wasm_trail(&mut self, curvature: f32) -> Result<Float32Array, JsValue> {
+        let trail = self
+            .projector
+            .emit_wasm_trail(curvature)
+            .map_err(js_error)?;
+        Ok(Float32Array::from(trail.as_f32_slice().as_slice()))
+    }
+
     /// Refresh the projector and expose the raw relation tensor feeding the canvas.
     pub fn relation(&mut self) -> Result<Float32Array, JsValue> {
         let tensor = self.projector.refresh_tensor().map_err(js_error)?;

@@ -30,10 +30,12 @@ use crate::roundtable::{HeurOp, HeurOpKind, HeurOpLog, ModeratorMinutes};
 use crate::schedule::RoundtableSchedule;
 use crate::trainer::{EpochStats, ModuleTrainer};
 use crate::PureResult;
+use st_core::backend::{device_caps::DeviceCaps, unison_heuristics::RankKind};
+use st_core::ops::rank_entry::plan_rank;
 use st_core::runtime::golden::{
     GoldenRuntime, GoldenRuntimeConfig, GoldenRuntimeError, GoldenTaskError, SpiralMutex,
 };
-use st_tensor::TensorError;
+use st_tensor::{Tensor, TensorError};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{mpsc, Arc, Mutex};
@@ -705,6 +707,58 @@ impl GoldenRetriever {
             subscribers.push(sender);
         }
         receiver
+    }
+
+    pub fn install_blackcat_moderator(&mut self, threshold: f32, participants: usize) {
+        for worker in &self.workers {
+            let mut trainer = worker.trainer.lock();
+            trainer.install_blackcat_moderator(threshold, participants);
+        }
+        self.coordinate_blackcat = true;
+    }
+
+    pub fn sync_z_barycenter(&mut self, partials: &[Tensor], rank: u32) -> PureResult<Tensor> {
+        if partials.is_empty() {
+            return Err(TensorError::EmptyInput("golden_z_barycenter"));
+        }
+        let (rows, cols) = partials[0].shape();
+        for tensor in partials.iter().skip(1) {
+            if tensor.shape() != (rows, cols) {
+                return Err(TensorError::ShapeMismatch {
+                    left: (rows, cols),
+                    right: tensor.shape(),
+                });
+            }
+        }
+
+        let mut accum = vec![0.0f32; rows * cols];
+        for tensor in partials {
+            for (dst, src) in accum.iter_mut().zip(tensor.data()) {
+                *dst += *src;
+            }
+        }
+        let count = partials.len() as f32;
+        let normaliser = if count > 0.0 { 1.0 / count } else { 1.0 };
+        for value in accum.iter_mut() {
+            *value *= normaliser;
+        }
+
+        let rank = rank.max(1);
+        let plan = plan_rank(
+            RankKind::TopK,
+            rows as u32,
+            cols as u32,
+            rank,
+            DeviceCaps::wgpu(32, true, 256),
+        );
+        let leech_bias = (plan.fft_plan().tile_cols.max(1) as f32).log2();
+        let curvature = 1.0 / rank as f32;
+        let guard = (leech_bias * curvature).tanh();
+        for value in accum.iter_mut() {
+            *value *= 1.0 + guard;
+        }
+
+        Tensor::from_vec(rows, cols, accum)
     }
 
     pub fn absorb_digest(&mut self, digest: CouncilDigest) -> PureResult<()> {
@@ -1763,5 +1817,23 @@ mod tests {
             other => panic!("unexpected result: {other:?}"),
         }
         assert_eq!(retriever.last_dropouts().len(), 1);
+    }
+
+    #[test]
+    fn sync_z_barycenter_blends_partials() {
+        let caps = DeviceCaps::wgpu(16, true, 128);
+        let trainers = vec![ModuleTrainer::new(caps, -1.0, 0.05, 0.01)];
+        let mut retriever =
+            GoldenRetriever::new(GoldenRetrieverConfig::default(), trainers).unwrap();
+        let partials = vec![
+            Tensor::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0]).unwrap(),
+            Tensor::from_vec(2, 2, vec![2.0, 1.0, 0.5, 0.25]).unwrap(),
+        ];
+        let bary = retriever.sync_z_barycenter(&partials, 8).unwrap();
+        assert_eq!(bary.shape(), (2, 2));
+        let data = bary.data();
+        assert_eq!(data.len(), 4);
+        let avg = (partials[0].data()[0] + partials[1].data()[0]) / 2.0;
+        assert!(data[0] >= avg * 0.9);
     }
 }

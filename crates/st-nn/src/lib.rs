@@ -71,7 +71,7 @@ pub use layers::wave_gate::WaveGate;
 pub use layers::wave_rnn::WaveRnn;
 pub use layers::zspace_projector::ZSpaceProjector;
 pub use layers::{
-    Dropout, Gelu, HamiltonJacobiFlow, KleinGordonPropagation, LayerNorm, Relu,
+    Dropout, Gelu, HamiltonJacobiFlow, KleinGordonPropagation, LayerNorm, Relu, Scaler,
     StochasticSchrodingerLayer, ToposResonator, ZRelativityModule, ZSpaceMixer,
 };
 pub use lightning::{
@@ -90,6 +90,11 @@ pub use roundtable::{
 pub use schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedule};
 pub use st_core::runtime::blackcat::{
     BlackCatRuntime, BlackcatRuntimeStats, ChoiceGroups, StepMetrics,
+};
+#[cfg(feature = "selfsup")]
+pub use trainer::selfsup::{
+    InfoNCEConfig, InfoNCEEpochMetrics, SelfSupBatch, SelfSupEpoch, SelfSupEpochReport,
+    SelfSupEpochTelemetry, SelfSupObjective, SelfSupPlanReport, SelfSupStage, SelfSupStageReport,
 };
 pub use trainer::{
     EpochStats, ModuleTrainer, SpectralAdjustmentMetrics, SpectralLearningRatePolicy,

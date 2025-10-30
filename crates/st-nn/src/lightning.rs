@@ -6,6 +6,11 @@
 use crate::dataset::DataLoaderBatches;
 use crate::highlevel::SpiralSession;
 use crate::schedule::{RoundtableConfig, RoundtableSchedule};
+#[cfg(feature = "selfsup")]
+use crate::trainer::selfsup::{
+    publish_selfsup_metrics, InfoNCEEpochMetrics, InfoNCELoss, SelfSupEpochReport,
+    SelfSupEpochTelemetry, SelfSupObjective, SelfSupPlanReport, SelfSupStage, SelfSupStageReport,
+};
 use crate::trainer::{EpochStats, IntoBatch, ModuleTrainer};
 use crate::{Loss, Module, PureResult, Tensor};
 use std::cmp::Ordering;
@@ -607,6 +612,41 @@ impl SpiralLightning {
             reports.push(LightningStageReport::new(config, label, epoch_stats));
         }
         Ok(LightningReport::new(reports))
+    }
+
+    #[cfg(feature = "selfsup")]
+    /// Executes a self-supervised training plan leveraging the native lightning trainer.
+    pub fn fit_selfsup_plan<M, It>(
+        &mut self,
+        module: &mut M,
+        stages: It,
+    ) -> PureResult<SelfSupPlanReport>
+    where
+        M: Module,
+        It: IntoIterator<Item = SelfSupStage>,
+    {
+        let mut stage_reports = Vec::new();
+        for stage in stages {
+            let (config, objective, epochs, label) = stage.into_parts();
+            let config_clone = config.clone();
+            self.reconfigure(config_clone);
+            let mut loss = match objective {
+                SelfSupObjective::InfoNCE(cfg) => InfoNCELoss::new(cfg.temperature, cfg.normalize),
+            };
+            let mut epoch_reports = Vec::with_capacity(epochs.len());
+            for epoch in epochs {
+                let batches = epoch.into_supervised()?;
+                let stats = self.train_epoch(module, &mut loss, batches)?;
+                let results = loss.take_epoch_metrics();
+                let telemetry = InfoNCEEpochMetrics::from_batches(&results).map(|metrics| {
+                    publish_selfsup_metrics(label.as_deref(), &metrics);
+                    SelfSupEpochTelemetry::InfoNCE(metrics)
+                });
+                epoch_reports.push(SelfSupEpochReport::new(stats, telemetry));
+            }
+            stage_reports.push(SelfSupStageReport::new(config, label, epoch_reports));
+        }
+        Ok(SelfSupPlanReport::new(stage_reports))
     }
 
     /// Resets the prepared module registry so the next call reattaches tapes.

@@ -532,9 +532,10 @@ mod geometry_bias_tests {
     #[test]
     fn language_pipeline_records_geometry_bias_metrics() {
         let _lock = registry_guard().lock().unwrap();
-        let registry = EcosystemRegistry::global();
-        registry.drain();
-        let pipeline = LanguagePipeline::builder("geometry-metrics").build();
+        let registry = Box::leak(Box::new(EcosystemRegistry::default()));
+        let pipeline = LanguagePipeline::builder("geometry-metrics")
+            .with_registry_for_tests(registry)
+            .build();
         let metrics = GeometryBiasMetrics {
             accuracy_mean: 0.82,
             fairness_mean: 0.9,
@@ -1969,6 +1970,7 @@ mod language_pipeline {
         ramanujan_iterations: usize,
         leech_rank: usize,
         leech_weight: f64,
+        registry: Option<&'static EcosystemRegistry>,
     }
 
     #[derive(Clone)]
@@ -1990,6 +1992,7 @@ mod language_pipeline {
                 ramanujan_iterations: 3,
                 leech_rank: 24,
                 leech_weight: 0.35,
+                registry: None,
             }
         }
 
@@ -2000,6 +2003,12 @@ mod language_pipeline {
 
         pub fn with_encoder(mut self, encoder: LanguageWaveEncoder) -> Self {
             self.encoder = Some(encoder);
+            self
+        }
+
+        #[cfg(test)]
+        pub fn with_registry_for_tests(mut self, registry: &'static EcosystemRegistry) -> Self {
+            self.registry = Some(registry);
             self
         }
 
@@ -2019,7 +2028,7 @@ mod language_pipeline {
             let leech_projector = LeechProjector::new(self.leech_rank, self.leech_weight);
             LanguagePipeline {
                 name: self.name,
-                registry: EcosystemRegistry::global(),
+                registry: self.registry.unwrap_or_else(EcosystemRegistry::global),
                 tags: self.tags,
                 encoder: self.encoder,
                 ramanujan_pi,

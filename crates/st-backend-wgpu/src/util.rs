@@ -14,6 +14,8 @@ use std::{
     sync::{Arc, Mutex, OnceLock, RwLock},
 };
 
+use once_cell::sync::OnceCell;
+
 use thiserror::Error;
 use wgpu::{
     ComputePipeline, ComputePipelineDescriptor, Device, ShaderModuleDescriptor, ShaderSource,
@@ -69,25 +71,21 @@ impl ModuleCacheKey {
 
 #[derive(Default)]
 struct ModuleCacheEntry {
-    module: OnceLock<Arc<wgpu::ShaderModule>>,
-    build: Mutex<()>,
+    module: OnceCell<Arc<wgpu::ShaderModule>>,
 }
 
 impl ModuleCacheEntry {
-    fn new() -> Self {
-        Self::default()
+    fn get(&self) -> Option<Arc<wgpu::ShaderModule>> {
+        self.module.get().map(Arc::clone)
     }
-}
 
-#[derive(Default)]
-struct PipelineCacheEntry {
-    pipeline: OnceLock<Arc<ComputePipeline>>,
-    build: Mutex<()>,
-}
-
-impl PipelineCacheEntry {
-    fn new() -> Self {
-        Self::default()
+    fn get_or_try_init<F>(&self, init: F) -> Result<Arc<wgpu::ShaderModule>, ShaderLoadError>
+    where
+        F: FnOnce() -> Result<Arc<wgpu::ShaderModule>, ShaderLoadError>,
+    {
+        self.module
+            .get_or_try_init(init)
+            .map(|module| Arc::clone(module))
     }
 }
 
@@ -152,48 +150,45 @@ fn cache_key_for_inline(device: &Device, label: &str, source: &str) -> ModuleCac
     ModuleCacheKey::new(device, format!("{label}#{hash:x}"))
 }
 
-fn compile_cached_module(
+fn compile_cached_module<F>(
     device: &Device,
     label: &str,
     key: ModuleCacheKey,
-    source: Arc<str>,
+    source: F,
     context: Option<String>,
-) -> Result<Arc<wgpu::ShaderModule>, ShaderLoadError> {
+) -> Result<Arc<wgpu::ShaderModule>, ShaderLoadError>
+where
+    F: Fn() -> Result<Arc<str>, ShaderLoadError>,
+{
+    let context = context.unwrap_or_else(|| "inline".to_string());
     let entry = {
-        let cache = module_cache();
-        let mut cache = cache.lock().unwrap();
+        let mut cache = module_cache().lock().unwrap();
         Arc::clone(
             cache
-                .entry(key.clone())
-                .or_insert_with(|| Arc::new(ModuleCacheEntry::new())),
+                .entry(key)
+                .or_insert_with(|| Arc::new(ModuleCacheEntry::default())),
         )
     };
 
-    if let Some(module) = entry.module.get() {
-        return Ok(Arc::clone(module));
+    if let Some(module) = entry.get() {
+        return Ok(module);
     }
 
-    let _guard = entry.build.lock().unwrap();
-    if let Some(module) = entry.module.get() {
-        return Ok(Arc::clone(module));
-    }
-
-    let module = catch_unwind(AssertUnwindSafe(|| {
-        device.create_shader_module(ShaderModuleDescriptor {
-            label: Some(label),
-            source: ShaderSource::Wgsl(Cow::Borrowed(&source)),
-        })
-    }))
-    .map_err(|payload| ShaderLoadError::Compile {
-        label: label.to_string(),
-        context: context.unwrap_or_else(|| "inline".to_string()),
-        source: Box::new(ShaderCompileError(panic_payload_to_string(payload))),
-    })?;
-
-    let module = Arc::new(module);
-    // Ignore the error if another thread raced to populate the entry after we compiled.
-    let _ = entry.module.set(Arc::clone(&module));
-    Ok(module)
+    entry.get_or_try_init(|| {
+        let source = source()?;
+        let module = catch_unwind(AssertUnwindSafe(|| {
+            device.create_shader_module(ShaderModuleDescriptor {
+                label: Some(label),
+                source: ShaderSource::Wgsl(Cow::Borrowed(&source)),
+            })
+        }))
+        .map_err(|payload| ShaderLoadError::Compile {
+            label: label.to_string(),
+            context: context.clone(),
+            source: Box::new(ShaderCompileError(panic_payload_to_string(payload))),
+        })?;
+        Ok(Arc::new(module))
+    })
 }
 
 #[derive(Debug)]
@@ -222,9 +217,18 @@ pub fn create_inline_module(
     label: &str,
     source: String,
 ) -> Result<Arc<wgpu::ShaderModule>, ShaderLoadError> {
+    let key = cache_key_for_inline(device, label, &source);
     let source_arc: Arc<str> = Arc::from(source);
-    let key = cache_key_for_inline(device, label, &source_arc);
-    compile_cached_module(device, label, key, source_arc, None)
+    compile_cached_module(
+        device,
+        label,
+        key,
+        {
+            let source_arc = source_arc;
+            move || Ok(Arc::clone(&source_arc))
+        },
+        None,
+    )
 }
 
 /// Read a WGSL shader relative to `shader_dir` and return the source string.
@@ -254,6 +258,26 @@ struct ShaderCacheInner {
     shader_dir: PathBuf,
     sources: RwLock<HashMap<PathBuf, Arc<str>>>,
     pipelines: Mutex<HashMap<PipelineCacheKey, Arc<PipelineCacheEntry>>>,
+}
+
+#[derive(Default)]
+struct PipelineCacheEntry {
+    pipeline: OnceCell<Arc<ComputePipeline>>,
+}
+
+impl PipelineCacheEntry {
+    fn get(&self) -> Option<Arc<ComputePipeline>> {
+        self.pipeline.get().map(Arc::clone)
+    }
+
+    fn get_or_try_init<F>(&self, init: F) -> Result<Arc<ComputePipeline>, ShaderLoadError>
+    where
+        F: FnOnce() -> Result<Arc<ComputePipeline>, ShaderLoadError>,
+    {
+        self.pipeline
+            .get_or_try_init(init)
+            .map(|pipeline| Arc::clone(pipeline))
+    }
 }
 
 impl ShaderCache {
@@ -348,38 +372,41 @@ impl ShaderCache {
             let mut pipelines = self.inner.pipelines.lock().unwrap();
             Arc::clone(
                 pipelines
-                    .entry(pipeline_key.clone())
-                    .or_insert_with(|| Arc::new(PipelineCacheEntry::new())),
+                    .entry(pipeline_key)
+                    .or_insert_with(Default::default),
             )
         };
 
-        if let Some(pipeline) = entry.pipeline.get() {
-            return Ok(Arc::clone(pipeline));
+        if let Some(pipeline) = entry.get() {
+            return Ok(pipeline);
         }
 
-        let _guard = entry.build.lock().unwrap();
-        if let Some(pipeline) = entry.pipeline.get() {
-            return Ok(Arc::clone(pipeline));
-        }
+        entry.get_or_try_init(|| {
+            let context = self.inner.shader_dir.join(file).display().to_string();
+            let module = compile_cached_module(
+                device,
+                label,
+                module_key.clone(),
+                || {
+                    let base = self.source(file)?;
+                    if overrides.is_empty() {
+                        Ok(base)
+                    } else {
+                        apply_overrides(&base, file, overrides)
+                    }
+                },
+                Some(context),
+            )?;
 
-        let base_source = self.source(file)?;
-        let source = if overrides.is_empty() {
-            Arc::clone(&base_source)
-        } else {
-            apply_overrides(&base_source, file, overrides)?
-        };
-        let context = self.inner.shader_dir.join(file).display().to_string();
-        let module =
-            compile_cached_module(device, label, module_key.clone(), source, Some(context))?;
-        let pipeline = Arc::new(device.create_compute_pipeline(&ComputePipelineDescriptor {
-            label: Some(label),
-            layout,
-            module: module.as_ref(),
-            entry_point,
-            compilation_options: Default::default(),
-        }));
-        let _ = entry.pipeline.set(Arc::clone(&pipeline));
-        Ok(pipeline)
+            let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+                label: Some(label),
+                layout,
+                module: module.as_ref(),
+                entry_point,
+                compilation_options: Default::default(),
+            });
+            Ok(Arc::new(pipeline))
+        })
     }
 
     /// Ensure that all `files` are loaded into the cache.
@@ -440,13 +467,15 @@ pub fn load_compute_pipeline_with_layout(
     layout: Option<&wgpu::PipelineLayout>,
 ) -> Result<ComputePipeline, ShaderLoadError> {
     let dir = shader_dir.as_ref();
-    let source = read_wgsl(dir, file)?;
     let context = dir.join(file).display().to_string();
     let module = compile_cached_module(
         device,
         label,
         cache_key_for_file(device, file, &[]),
-        Arc::<str>::from(source),
+        || {
+            let source = read_wgsl(dir, file)?;
+            Ok(Arc::<str>::from(source))
+        },
         Some(context),
     )?;
     Ok(device.create_compute_pipeline(&ComputePipelineDescriptor {

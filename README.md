@@ -130,9 +130,10 @@ SpiralTorch ships under a dual-license model:
 ## Code stats
 
 <!-- AUTOGEN: CODESTATS BEGIN -->
-_Last updated: 2025-10-27 10:48 UTC_
+_Last updated: 2025-10-29 04:56 UTC_
 
 ```text
+
 ===============================================================================
  Language            Files        Lines         Code     Comments       Blanks
 ===============================================================================
@@ -140,15 +141,15 @@ _Last updated: 2025-10-27 10:48 UTC_
  COBOL                   1          416          376            8           32
  C++                     1          327          286            3           38
  CSS                     1          160          137            0           23
- Go                     11         2521         2025          200          296
+ Go                     11         2582         2082          200          300
  JSON                    6          372          372            0            0
  Julia                   8         1335         1176           14          145
- Python                 58        13886        11718           95         2073
+ Python                 77        18800        15825          103         2872
  Shell                   4          194          172            4           18
  SVG                     3           60           60            0            0
  Plain Text              1          661            0          544          117
- TOML                   35          892          758           27          107
- TypeScript              7         4898         4331          175          392
+ TOML                   39          983          839           27          117
+ TypeScript              7         4899         4332          175          392
  YAML                    3           72           65            0            7
 -------------------------------------------------------------------------------
  HTML                    2          491          491            0            0
@@ -161,8 +162,8 @@ _Last updated: 2025-10-27 10:48 UTC_
  |- Python               2           22           20            0            2
  (Total)                             31           20            9            2
 -------------------------------------------------------------------------------
- Markdown               60         6141            0         4827         1314
- |- BASH                14          122           93           17           12
+ Markdown               63         6393            0         5015         1378
+ |- BASH                17          131          102           17           12
  |- C                    1           21           16            0            5
  |- COBOL                1           30           30            0            0
  |- Dockerfile           1            6            6            0            0
@@ -171,16 +172,17 @@ _Last updated: 2025-10-27 10:48 UTC_
  |- JSON                 1           11           11            0            0
  |- Julia                1           29           26            0            3
  |- Python               7          840          702           20          118
- |- Rust                 5          759          667           15           77
+ |- Rust                 5          777          683           16           78
  |- YAML                 2           62           62            0            0
- (Total)                           8073         1660         4882         1531
+ (Total)                           8352         1685         5071         1596
 -------------------------------------------------------------------------------
- Rust                  354       162592       145349         1758        15485
- |- Markdown           223         6440            0         6290          150
- (Total)                         169032       145349         8048        15635
+ Rust                  392       174257       155659         1840        16758
+ |- Markdown           247         6653            0         6499          154
+ (Total)                         180910       155659         8339        16912
 ===============================================================================
- Total                 558       195072       167368         7656        20048
+ Total                 622       212056       181924         7934        22198
 ===============================================================================
+
 ```
 ---
 
@@ -230,7 +232,7 @@ tensor shims, no translation layers, and no tracebacks.
     transcripts, and ψ telemetry double as explainability artifacts, enabling
     decision-path inspection without leaving the Z-space calculus.
     
-**Current release:** `spiraltorch==0.2.7` (abi3 wheel, Python ≥3.8)  
+**Current release:** `spiraltorch==0.2.8` (abi3 wheel, Python ≥3.8)  
 **Targets:** CPU (always), MPS, Vulkan/DX (WGPU), CUDA, HIP/ROCm
 
 ---
@@ -238,7 +240,7 @@ tensor shims, no translation layers, and no tracebacks.
 ## Install (pip)
 
 ```bash
-pip install -U spiraltorch==0.2. 7
+pip install -U spiraltorch==0.2.8
 ```
 
 - Wheels are **abi3**; you can use any CPython ≥ 3.8.
@@ -775,6 +777,14 @@ spotlights on graph-node materialisation versus return-handle delivery:
 - `FractalCanvas::vectorFieldFft(false)` surfaces the per-row FFT spectrum as
   interleaved energy/chroma pairs so Canvas Transformer pipelines can ingest
   frequency features without leaving Rust.
+- `FractalCanvas::emitWasmTrail(curvature)` packages the live vector field into
+  `(x, y, z, energy, r, g, b)` samples so WebGPU/WebXR experiences can stream
+  Z-space particle trails without reconstructing curvature or FFT passes in
+  JavaScript.
+- `FractalCanvas::emitWasmTrail(curvature)` packages the live vector field into
+  `(x, y, z, energy, r, g, b)` samples so WebGPU/WebXR experiences can stream
+  Z-space particle trails without reconstructing curvature or FFT passes in
+  JavaScript.
 - `CanvasProjector::accumulate_hypergrad` and
   `CanvasProjector::accumulate_realgrad` stream the refreshed canvas tensor
   directly into SpiralTorch's Riemannian or Euclidean optimisers without
@@ -1890,6 +1900,14 @@ let report = retriever.run_epoch(modules, losses, loaders, schedules)?;
 println!("workers={} avg_loss={}", report.workers, report.average_loss);
 ```
 
+Need curvature-aware consensus from multiple Z-space patches? Call
+`GoldenRetriever::sync_z_barycenter(&partials, rank)` to fold worker tensors
+into a single Leech-biased barycenter before broadcasting the result back to the
+fleet. Pair it with `GoldenRetriever::install_blackcat_moderator(threshold,
+participants)` to seed cooperative moderators on every trainer without touching
+individual mutexes—perfect for multi-node runs where you want Redis-backed
+guards and SpiralK hints to stay aligned.
+
 GoldenRetriever keeps each trainer behind a poison-resistant mutex, launches the
 epoch bodies on the shared runtime, and reduces the per-worker metrics using the
 built-in parallel reducer so the roundtable stays deterministic. No additional
@@ -2110,6 +2128,37 @@ if let Some(geo) = telemetry.geometry {
     println!("rank~{:.1} pressure~{:.4} scalē~{:.2}", geo.rolling_rank, geo.rolling_pressure, geo.rolling_scale);
 }
 ```
+
+Hypergradient loops can now fuse loss variance with the geometric controller via
+the **HyperSurprise** pipeline. Attach a `LossStdTrigger` and SpiralTorch injects
+η̄ pulses whenever the episode's return standard deviation breaches the guard:
+
+```rust
+use st_spiral_rl::{LossStdTrigger, SpiralPolicyGradient};
+
+let mut policy = SpiralPolicyGradient::new(4, 2, 0.05, 0.9)?;
+policy.attach_hyper_surprise(
+    LossStdTrigger::new(0.12)
+        .with_warmup(2)
+        .with_max_ratio(2.5),
+);
+// ...record transitions...
+let report = policy.finish_episode()?;
+if let Some(surprise) = &report.hyper_surprise {
+    println!(
+        "σ={:.3} inject={:.2} η̄={:.3}",
+        surprise.loss_std,
+        surprise.inject_ratio,
+        surprise.eta_bar
+    );
+}
+```
+
+`LossStdTrigger` keeps an EMA of the observed loss standard deviation, clamps
+surprise pulses, and modulates both the learning-rate and gradient gauge inside
+the episode update. `SpiralPolicyGradient::last_hyper_surprise()` exposes the
+latest packet so telemetry dashboards can correlate η̄ spikes with emergent
+behaviour.
 
 The controller now threads Ramanujan's π synthesis and the Λ₂₄ packing density
 into its smoothing loop while auto-rewriting its own clamps. Rank, packing
@@ -2860,7 +2909,7 @@ SpiralK is a tiny runtime DSL for device-aware choices. Flip it on, then shape t
 
 ```bash
 export SPIRAL_HEUR_SOFT=1
-export SPIRAL_HEUR_K='
+export SPIRAL_HEUR_K=' 
   # mk: 0=bitonic, 1=shared, 2=warp (subgroup path on WGPU)
   mk:   sel(sg && (k<=128), 2, sel(k<=2048, 1, 0));
   # mkd: sub-strategy (auto/heap/kway/bitonic/warp_heap/warp_bitonic)
@@ -2879,6 +2928,21 @@ export SPIRAL_HEUR_K='
   soft(tile, 1024, 0.15, (log2(c)>13.0)&&(log2(c)<=15.0));
 '
 ```
+
+Need LLM-assisted rewrites without leaving Rust? Build an
+`AiRewritePrompt`/`AiRewriteConfig` pair and call `rewrite_with_ai(...)` to let
+the Grok-style template generator emit `soft(...)` rules based on Wilson metrics
+and device guards. Python bindings expose the same surface via
+`spiraltorch.spiralk.rewrite_with_ai`, returning both the rewritten program and
+the generated `SpiralKHeuristicHint` objects so you can audit or persist the
+AI-authored tweaks before baking them into tuner tables.
+
+Prefer to bring your own LLM or heuristic engine? Pass a `generator=` callable
+to `spiraltorch.spiralk.rewrite_with_ai` and SpiralTorch will hand your function
+fresh `SpiralKAiRewriteConfig`/`SpiralKAiRewritePrompt` clones. Return a list of
+`SpiralKHeuristicHint` objects to drive the rewrite pipeline while preserving
+the same safety checks (`max_hints`, Wilson guards, DSL parsing) enforced by the
+Rust core.
 
 **How the final choice is made (three-way roundtable)**
 

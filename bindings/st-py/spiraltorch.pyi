@@ -421,6 +421,41 @@ class SpiralKHeuristicHint:
     @property
     def condition_expr(self) -> str: ...
 
+class SpiralKAiRewriteConfig:
+    def __init__(
+        self,
+        model: str,
+        max_hints: int | None = ...,
+        default_weight: float | None = ...,
+        eta_floor: float | None = ...,
+    ) -> None: ...
+    @property
+    def model(self) -> str: ...
+    @property
+    def max_hints(self) -> int: ...
+    @property
+    def default_weight(self) -> float: ...
+    @property
+    def eta_floor(self) -> float: ...
+
+class SpiralKAiRewritePrompt:
+    def __init__(
+        self,
+        base_program: str,
+        ctx: SpiralKContext,
+        eta_bar: float = ...,
+        device_guard: str | None = ...,
+    ) -> None: ...
+    def set_metrics(self, metrics: SpiralKWilsonMetrics) -> None: ...
+    def clear_metrics(self) -> None: ...
+    def add_note(self, note: str) -> None: ...
+    @property
+    def base_program(self) -> str: ...
+    @property
+    def eta_bar(self) -> float: ...
+    @property
+    def device_guard(self) -> str | None: ...
+
 def wilson_lower_bound(wins: int, trials: int, z: float) -> float: ...
 
 def should_rewrite(
@@ -442,6 +477,18 @@ def rewrite_with_wilson(
     min_gain: float = ...,
     min_confidence: float = ...,
 ) -> tuple[Dict[str, object], str]: ...
+
+def rewrite_with_ai(
+    base_src: str,
+    ctx: SpiralKContext,
+    config: SpiralKAiRewriteConfig,
+    prompt: SpiralKAiRewritePrompt,
+    generator: Callable[
+        [SpiralKAiRewriteConfig, SpiralKAiRewritePrompt],
+        Sequence[SpiralKHeuristicHint],
+    ]
+    | None = ...,
+) -> tuple[Dict[str, object], str, Sequence[SpiralKHeuristicHint]]: ...
 
     def predict(self, inputs: Sequence[Sequence[float]]) -> Tensor: ...
 
@@ -1056,6 +1103,183 @@ class CanvasSnapshot:
     summary: Dict[str, Dict[str, float]]
     patch: Optional[List[List[float]]]
 
+class InfiniteZSpacePatch:
+    @property
+    def dimension(self) -> float: ...
+    @property
+    def zoom(self) -> float: ...
+    @property
+    def support(self) -> Tuple[float, float]: ...
+    @property
+    def mellin_weights(self) -> List[float]: ...
+    @property
+    def density(self) -> List[float]: ...
+    def eta_bar(self) -> float: ...
+
+class FractalCanvas:
+    def __init__(
+        self,
+        dimension: float = ...,
+        capacity: int = ...,
+        width: int = ...,
+        height: int = ...,
+    ) -> None: ...
+    @property
+    def dimension(self) -> float: ...
+    def set_dimension(self, dimension: float) -> None: ...
+    def emit_zspace_patch(
+        self,
+        dimension: Optional[float] = ...,
+        zoom: Optional[float] = ...,
+        steps: Optional[int] = ...,
+    ) -> InfiniteZSpacePatch: ...
+    def emit_zspace_infinite(
+        self,
+        dimension: Optional[float] = ...,
+    ) -> InfiniteZSpacePatch: ...
+    def emit_infinite_z(
+        self,
+        zoom: Optional[float] = ...,
+        steps: Optional[int] = ...,
+        dimension: Optional[float] = ...,
+    ) -> InfiniteZSpacePatch: ...
+
+class QuantumOverlayConfig:
+    def __init__(
+        self,
+        curvature: float = ...,
+        qubits: int = ...,
+        packing_bias: float = ...,
+        leech_shells: int = ...,
+    ) -> None: ...
+    @property
+    def curvature(self) -> float: ...
+    def set_curvature(self, curvature: float) -> None: ...
+    @property
+    def qubits(self) -> int: ...
+    def set_qubits(self, qubits: int) -> None: ...
+    @property
+    def packing_bias(self) -> float: ...
+    def set_packing_bias(self, packing_bias: float) -> None: ...
+    @property
+    def leech_shells(self) -> int: ...
+    def set_leech_shells(self, leech_shells: int) -> None: ...
+
+class ZResonance:
+    def __init__(
+        self,
+        spectrum: Optional[Sequence[float]] = ...,
+        eta_hint: float = ...,
+        shell_weights: Optional[Sequence[float]] = ...,
+    ) -> None: ...
+    @staticmethod
+    def from_spectrum(
+        spectrum: Sequence[float],
+        eta_hint: Optional[float] = ...,
+    ) -> ZResonance: ...
+    @staticmethod
+    def from_pulses(pulses: Sequence[MaxwellPulse]) -> ZResonance: ...
+    @property
+    def spectrum(self) -> List[float]: ...
+    @property
+    def eta_hint(self) -> float: ...
+    @property
+    def shell_weights(self) -> List[float]: ...
+
+class QuantumMeasurement:
+    @property
+    def active_qubits(self) -> List[int]: ...
+    @property
+    def eta_bar(self) -> float: ...
+    @property
+    def policy_logits(self) -> List[float]: ...
+    @property
+    def packing_pressure(self) -> float: ...
+    def top_qubits(self, count: Optional[int] = ...) -> List[Tuple[int, float]]: ...
+    def activation_density(self) -> float: ...
+    def to_policy_update(self, base_rate: float = ...) -> Dict[str, float]: ...
+
+class ZOverlayCircuit:
+    def weights(self) -> List[float]: ...
+    def eta_bar(self) -> float: ...
+    def packing_pressure(self) -> float: ...
+    def measure(self, threshold: float = ...) -> QuantumMeasurement: ...
+
+class QuantumRealityStudio:
+    def __init__(
+        self,
+        curvature: float = ...,
+        qubits: int = ...,
+        packing_bias: float = ...,
+        leech_shells: int = ...,
+    ) -> None: ...
+    @property
+    def config(self) -> QuantumOverlayConfig: ...
+    def configure(
+        self,
+        *,
+        curvature: Optional[float] = ...,
+        qubits: Optional[int] = ...,
+        packing_bias: Optional[float] = ...,
+        leech_shells: Optional[int] = ...,
+    ) -> None: ...
+    def overlay_zspace(self, resonance: ZResonance) -> ZOverlayCircuit: ...
+    def overlay(self, resonance: ZResonance) -> ZOverlayCircuit: ...
+    def record_quantum_policy(
+        self,
+        pulses: Sequence[MaxwellPulse],
+        *,
+        threshold: float = ...,
+    ) -> QuantumMeasurement: ...
+
+def resonance_from_fractal_patch(
+    patch: InfiniteZSpacePatch,
+    eta_scale: float = ...,
+) -> ZResonance: ...
+
+def quantum_measurement_from_fractal(
+    studio: QuantumRealityStudio,
+    patch: InfiniteZSpacePatch,
+    threshold: float = ...,
+    eta_scale: float = ...,
+) -> QuantumMeasurement: ...
+
+class LossStdTrigger:
+    std_threshold: float
+    decay: float
+    max_ratio: float
+    warmup: int
+    geometry_eta: float
+    geometry_curvature: float
+
+    def observe(self, value: float) -> Optional[float]: ...
+
+class PolicyGradient:
+    def __init__(self) -> None: ...
+    def attach_hyper_surprise(self, trigger: LossStdTrigger) -> None: ...
+    def attach_geometry_feedback(self, feedback: Dict[str, float]) -> None: ...
+    def step(self, returns: Sequence[float], baseline: float = ...) -> Dict[str, float]: ...
+    def update_from_quantum(
+        self,
+        measurement: QuantumMeasurement,
+        *,
+        base_rate: float = ...,
+        returns: Optional[Sequence[float]] = ...,
+        baseline: float = ...,
+    ) -> Dict[str, float]: ...
+    @property
+    def last_quantum_update(self) -> Optional[Dict[str, float]]: ...
+
+class ZTigerOptim:
+    def __init__(self, curvature: float = ...) -> None: ...
+    @property
+    def curvature(self) -> float: ...
+    @property
+    def gain(self) -> float: ...
+    def update(self, lora_pid: float, resonance: Sequence[float]) -> float: ...
+
+def tempo_latency_score(tile: int, slack: int) -> float: ...
+
 def apply_vision_update(
     vision: SpiralTorchVision,
     canvas: CanvasTransformer,
@@ -1555,7 +1779,66 @@ def is_swap_invariant(arrangement: Sequence[float]) -> bool: ...
     def topos(self) -> OpenCartesianTopos: ...
 
 
+class _NnIdentity:
+    def __init__(self) -> None: ...
+
+    def forward(self, input: Tensor) -> Tensor: ...
+
+    def backward(self, input: Tensor, grad_output: Tensor) -> Tensor: ...
+
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+
+class _NnScaler:
+    def __init__(self, name: str, features: int) -> None: ...
+
+    @staticmethod
+    def from_gain(name: str, gain: Tensor) -> _NnScaler: ...
+
+    def forward(self, input: Tensor) -> Tensor: ...
+
+    def backward(self, input: Tensor, grad_output: Tensor) -> Tensor: ...
+
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+    def calibrate(self, samples: Tensor, epsilon: float) -> None: ...
+
+    def attach_hypergrad(self, curvature: float, learning_rate: float) -> None: ...
+
+    def attach_hypergrad_with_topos(
+        self,
+        curvature: float,
+        learning_rate: float,
+        *,
+        topos: OpenCartesianTopos | None = ...,
+    ) -> None: ...
+
+    def attach_realgrad(self, learning_rate: float) -> None: ...
+
+    def zero_accumulators(self) -> None: ...
+
+    def apply_step(self, fallback_lr: float) -> None: ...
+
+    def state_dict(self) -> List[Tuple[str, Tensor]]: ...
+
+    def load_state_dict(self, state: Sequence[Tuple[str, Tensor]]) -> None: ...
+
+    @property
+    def gain(self) -> Tensor: ...
+
+    @property
+    def baseline(self) -> Tensor: ...
+
+    def gradient(self) -> Tensor | None: ...
+
+    def psi_probe(self) -> float | None: ...
+
+    def psi_components(self) -> Tensor | None: ...
+
+
 class _NnModule(ModuleType):
+    Identity: type[_NnIdentity]
+    Scaler: type[_NnScaler]
     NonLiner: type[_NnNonLiner]
     Dropout: type[_NnDropout]
     Dataset: type[_NnDataset]
@@ -1574,6 +1857,14 @@ class _NnModule(ModuleType):
 
 
 nn: _NnModule
+
+
+class Identity(_NnIdentity):
+    ...
+
+
+class Scaler(_NnScaler):
+    ...
 
 
 class NonLiner(_NnNonLiner):
@@ -2160,6 +2451,8 @@ class _VisionModule(ModuleType):
     SpiralTorchVision: type[SpiralTorchVision]
     TemporalResonanceBuffer: type[TemporalResonanceBuffer]
     SliceProfile: type[SliceProfile]
+    FractalCanvas: type[FractalCanvas]
+    InfiniteZSpacePatch: type[InfiniteZSpacePatch]
 
 vision: _VisionModule
 
@@ -2178,6 +2471,22 @@ class _CanvasModule(ModuleType):
     ) -> CanvasSnapshot: ...
 
 canvas: _CanvasModule
+
+class _QrModule(ModuleType):
+    QuantumOverlayConfig: type[QuantumOverlayConfig]
+    ZResonance: type[ZResonance]
+    ZOverlayCircuit: type[ZOverlayCircuit]
+    QuantumMeasurement: type[QuantumMeasurement]
+    QuantumRealityStudio: type[QuantumRealityStudio]
+
+qr: _QrModule
+
+class _JuliaModule(ModuleType):
+    ZTigerOptim: type[ZTigerOptim]
+
+    def tempo_latency_score(self, tile: int, slack: int) -> float: ...
+
+julia: _JuliaModule
 
 class _SelfSupModule(ModuleType):
     def info_nce(
@@ -2594,6 +2903,8 @@ __all__ = [
     "zspace",
     "vision",
     "canvas",
+    "qr",
+    "julia",
     "compat",
     "set_global_seed",
     "golden_ratio",
@@ -2638,6 +2949,17 @@ __all__ = [
     "SliceProfile",
     "CanvasTransformer",
     "CanvasSnapshot",
+    "FractalCanvas",
+    "InfiniteZSpacePatch",
+    "QuantumOverlayConfig",
+    "ZResonance",
+    "ZOverlayCircuit",
+    "QuantumMeasurement",
+    "QuantumRealityStudio",
+    "resonance_from_fractal_patch",
+    "quantum_measurement_from_fractal",
+    "ZTigerOptim",
+    "tempo_latency_score",
     "apply_vision_update",
     "DashboardMetric",
     "DashboardEvent",
