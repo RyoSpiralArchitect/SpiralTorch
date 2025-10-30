@@ -1232,6 +1232,18 @@ class QuantumRealityStudio:
         threshold: float = ...,
     ) -> QuantumMeasurement: ...
 
+def resonance_from_fractal_patch(
+    patch: InfiniteZSpacePatch,
+    eta_scale: float = ...,
+) -> ZResonance: ...
+
+def quantum_measurement_from_fractal(
+    studio: QuantumRealityStudio,
+    patch: InfiniteZSpacePatch,
+    threshold: float = ...,
+    eta_scale: float = ...,
+) -> QuantumMeasurement: ...
+
 class LossStdTrigger:
     std_threshold: float
     decay: float
@@ -2944,6 +2956,8 @@ __all__ = [
     "ZOverlayCircuit",
     "QuantumMeasurement",
     "QuantumRealityStudio",
+    "resonance_from_fractal_patch",
+    "quantum_measurement_from_fractal",
     "ZTigerOptim",
     "tempo_latency_score",
     "apply_vision_update",

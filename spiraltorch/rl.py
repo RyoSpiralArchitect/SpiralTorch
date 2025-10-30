@@ -2,11 +2,36 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import importlib
+import sys
 import math
 from typing import Iterable, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .qr import QuantumMeasurement
+    from .qr import QuantumRealityStudio
+    from .vision import InfiniteZPatch
+
+
+def _resolve_quantum_fractal_bridge():
+    candidates: list[str] = []
+    if "." in __name__:
+        base = __name__.rsplit(".", 1)[0]
+        candidates.append(f"{base}.qr")
+    if __name__.endswith("rl"):
+        candidates.append(f"{__name__[:-2]}qr")
+    candidates.append("spiraltorch.qr")
+    for name in candidates:
+        module = sys.modules.get(name)
+        if module is None:
+            try:
+                module = importlib.import_module(name)
+            except Exception:  # noqa: BLE001 - optional import path
+                continue
+        bridge = getattr(module, "quantum_measurement_from_fractal", None)
+        if bridge is not None:
+            return bridge
+    raise ImportError("quantum_measurement_from_fractal bridge is unavailable")
 
 
 @dataclass
@@ -115,3 +140,31 @@ class PolicyGradient:
         if self._last_quantum is None:
             return None
         return dict(self._last_quantum)
+
+
+def update_policy_from_fractal(
+    policy: "PolicyGradient",
+    studio: "QuantumRealityStudio",
+    patch: "InfiniteZPatch",
+    *,
+    base_rate: float = 1.0,
+    threshold: float = 0.0,
+    eta_scale: float = 1.0,
+    returns: Iterable[float] | None = None,
+    baseline: float = 0.0,
+) -> dict[str, float]:
+    """Route a fractal patch through the quantum studio and update the policy."""
+
+    measurement_fn = _resolve_quantum_fractal_bridge()
+    measurement = measurement_fn(
+        studio,
+        patch,
+        threshold=threshold,
+        eta_scale=eta_scale,
+    )
+    return policy.update_from_quantum(
+        measurement,
+        base_rate=base_rate,
+        returns=returns,
+        baseline=baseline,
+    )

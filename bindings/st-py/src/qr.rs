@@ -1,7 +1,8 @@
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::PyAny;
-use pyo3::Bound;
+use pyo3::wrap_pyfunction;
+use pyo3::{Bound, PyRef};
 
 use crate::spiralk::PyMaxwellPulse;
 
@@ -27,6 +28,76 @@ fn pulses_from_any(py: Python<'_>, pulses: &Bound<'_, PyAny>) -> PyResult<Vec<Ma
     Err(PyTypeError::new_err(
         "pulses must be iterables of spiraltorch.spiralk.MaxwellPulse",
     ))
+}
+
+fn fractal_patch_to_pulses(patch: &Bound<'_, PyAny>, eta_scale: f64) -> Vec<MaxwellZPulse> {
+    let density: Vec<f64> = patch
+        .getattr("density")
+        .and_then(|obj| obj.extract())
+        .unwrap_or_default();
+    let support: (f64, f64) = patch
+        .getattr("support")
+        .and_then(|obj| obj.extract())
+        .unwrap_or((0.0, 1.0));
+    let mut start = support.0.min(support.1);
+    let mut end = support.0.max(support.1);
+    if !start.is_finite() {
+        start = 0.0;
+    }
+    if !end.is_finite() || (end - start).abs() < 1e-6 {
+        end = start + 1.0;
+    }
+    let span = (end - start).abs().max(1e-6);
+    let dimension = patch
+        .getattr("dimension")
+        .and_then(|obj| obj.extract::<f64>())
+        .unwrap_or(2.0)
+        .abs()
+        .max(1.0);
+    let zoom = patch
+        .getattr("zoom")
+        .and_then(|obj| obj.extract::<f64>())
+        .unwrap_or(1.0)
+        .abs()
+        .max(1e-6);
+    let eta_scale = eta_scale.max(0.0);
+    let limit = density.len();
+    let steps = if limit > 1 { (limit - 1) as f64 } else { 1.0 };
+    let mut pulses = Vec::with_capacity(limit.max(1));
+    for (index, raw) in density.into_iter().enumerate() {
+        let amplitude = if raw.is_finite() { raw.abs() } else { 0.0 };
+        let phase = if limit <= 1 {
+            0.0
+        } else {
+            index as f64 / steps
+        };
+        let mean = start + span * phase;
+        let standard_error = (1.0 / (index as f64 + 1.0)).sqrt();
+        let spectral = amplitude * (dimension + 1.0);
+        let radial = amplitude * (phase * span + 1.0);
+        let axial = amplitude * (index as f64 + 1.0);
+        let z_score = amplitude * zoom * (dimension + phase);
+        let z_bias = (z_score * eta_scale).tanh() as f32;
+        pulses.push(MaxwellZPulse {
+            blocks: index as u64,
+            mean,
+            standard_error,
+            z_score,
+            band_energy: (spectral as f32, radial as f32, axial as f32),
+            z_bias,
+        });
+    }
+    if pulses.is_empty() {
+        pulses.push(MaxwellZPulse {
+            blocks: 0,
+            mean: start,
+            standard_error: 1.0,
+            z_score: 0.0,
+            band_energy: (0.0, 0.0, 0.0),
+            z_bias: 0.0,
+        });
+    }
+    pulses
 }
 
 #[pyclass(module = "spiraltorch.qr", name = "QuantumOverlayConfig")]
@@ -369,6 +440,27 @@ impl PyQuantumRealityStudio {
     }
 }
 
+#[pyfunction(name = "resonance_from_fractal_patch")]
+#[pyo3(signature = (patch, eta_scale=1.0))]
+fn resonance_from_fractal_patch_py(patch: &Bound<'_, PyAny>, eta_scale: f64) -> PyZResonance {
+    PyZResonance {
+        inner: ZResonance::from_pulses(&fractal_patch_to_pulses(patch, eta_scale)),
+    }
+}
+
+#[pyfunction(name = "quantum_measurement_from_fractal")]
+#[pyo3(signature = (studio, patch, threshold=0.0, eta_scale=1.0))]
+fn quantum_measurement_from_fractal_py(
+    studio: PyRef<PyQuantumRealityStudio>,
+    patch: &Bound<'_, PyAny>,
+    threshold: f64,
+    eta_scale: f64,
+) -> PyQuantumMeasurement {
+    let resonance = ZResonance::from_pulses(&fractal_patch_to_pulses(patch, eta_scale));
+    let circuit = ZOverlayCircuit::synthesize(&studio.config, &resonance);
+    PyQuantumMeasurement::from(circuit.measure(threshold))
+}
+
 pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     let module = PyModule::new_bound(py, "qr")?;
     module.add("__doc__", "Quantum overlay helpers")?;
@@ -377,6 +469,11 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
     module.add_class::<PyZOverlayCircuit>()?;
     module.add_class::<PyQuantumMeasurement>()?;
     module.add_class::<PyQuantumRealityStudio>()?;
+    module.add_function(wrap_pyfunction!(resonance_from_fractal_patch_py, &module)?)?;
+    module.add_function(wrap_pyfunction!(
+        quantum_measurement_from_fractal_py,
+        &module
+    )?)?;
     module.add(
         "__all__",
         vec![
@@ -385,6 +482,8 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
             "ZOverlayCircuit",
             "QuantumMeasurement",
             "QuantumRealityStudio",
+            "resonance_from_fractal_patch",
+            "quantum_measurement_from_fractal",
         ],
     )?;
 
@@ -398,6 +497,8 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
         "ZOverlayCircuit",
         "QuantumMeasurement",
         "QuantumRealityStudio",
+        "resonance_from_fractal_patch",
+        "quantum_measurement_from_fractal",
     ] {
         let attr = module.getattr(name)?;
         parent.add(name, attr.to_object(py))?;

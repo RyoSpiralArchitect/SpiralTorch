@@ -12,7 +12,14 @@ __all__ = [
     "QuantumRealityStudio",
     "ZOverlayCircuit",
     "ZResonance",
+    "quantum_measurement_from_fractal",
+    "resonance_from_fractal_patch",
 ]
+
+try:  # pragma: no cover - optional runtime dependency
+    from spiraltorch.spiralk import MaxwellPulse as _MaxwellPulse
+except Exception:  # noqa: BLE001 - import-time optional binding
+    _MaxwellPulse = None
 
 
 def _clamp_unit(value: float, *, default: float = 0.0) -> float:
@@ -296,3 +303,116 @@ class QuantumRealityStudio:
         resonance = ZResonance.from_pulses(pulses)
         circuit = self.overlay_zspace(resonance)
         return circuit.measure(threshold)
+
+
+def _fractal_density(patch: object) -> list[float]:
+    candidate = getattr(patch, "density", None)
+    if isinstance(candidate, Sequence):
+        return [abs(_float_or_default(value)) for value in candidate]
+    if isinstance(candidate, Iterable):
+        return [abs(_float_or_default(value)) for value in list(candidate)]
+    return []
+
+
+def _fractal_support(patch: object) -> tuple[float, float]:
+    support = getattr(patch, "support", None)
+    if isinstance(support, Sequence) and len(support) >= 2:
+        start = _float_or_default(support[0])
+        end = _float_or_default(support[1])
+    else:
+        start = 0.0
+        end = 1.0
+    if start > end:
+        start, end = end, start
+    if not math.isfinite(end - start) or abs(end - start) < 1e-6:
+        end = start + 1.0
+    return float(start), float(end)
+
+
+def _fractal_dimension(patch: object) -> float:
+    return abs(_float_or_default(getattr(patch, "dimension", 2.0), default=2.0)) or 1.0
+
+
+def _fractal_zoom(patch: object) -> float:
+    zoom = abs(_float_or_default(getattr(patch, "zoom", 1.0), default=1.0))
+    if zoom <= 0.0 or not math.isfinite(zoom):
+        return 1.0
+    return zoom
+
+
+def _fractal_pulses(patch: object, *, eta_scale: float = 1.0) -> list[object]:
+    density = _fractal_density(patch)
+    if not density:
+        if _MaxwellPulse is not None:
+            return [
+                _MaxwellPulse(0, 0.0, 1.0, 0.0, (0.0, 0.0, 0.0), 0.0),
+            ]
+        return [
+            {"mean": 0.0, "band_energy": [0.0, 0.0, 0.0], "z_bias": 0.0},
+        ]
+    start, end = _fractal_support(patch)
+    span = abs(end - start)
+    dimension = _fractal_dimension(patch)
+    zoom = _fractal_zoom(patch)
+    limit = len(density)
+    steps = max(limit - 1, 1)
+    pulses: list[object] = []
+    for index, raw in enumerate(density):
+        amplitude = abs(_float_or_default(raw))
+        phase = 0.0 if limit == 1 else index / steps
+        mean = start + span * phase
+        standard_error = math.sqrt(1.0 / (index + 1.0))
+        spectral = amplitude * (dimension + 1.0)
+        radial = amplitude * (phase * span + 1.0)
+        axial = amplitude * (index + 1.0)
+        z_score = amplitude * zoom * (dimension + phase)
+        z_bias = math.tanh(z_score * max(float(eta_scale), 0.0))
+        if _MaxwellPulse is not None:
+            pulses.append(
+                _MaxwellPulse(
+                    int(index),
+                    float(mean),
+                    float(standard_error),
+                    float(z_score),
+                    (
+                        float(spectral),
+                        float(radial),
+                        float(axial),
+                    ),
+                    float(z_bias),
+                )
+            )
+        else:
+            pulses.append(
+                {
+                    "mean": float(mean),
+                    "band_energy": [
+                        float(spectral),
+                        float(radial),
+                        float(axial),
+                    ],
+                    "z_bias": float(z_bias),
+                }
+            )
+    return pulses
+
+
+def resonance_from_fractal_patch(patch: object, *, eta_scale: float = 1.0) -> ZResonance:
+    """Construct a :class:`ZResonance` directly from a fractal Z-space patch."""
+
+    pulses = _fractal_pulses(patch, eta_scale=eta_scale)
+    return ZResonance.from_pulses(pulses)
+
+
+def quantum_measurement_from_fractal(
+    studio: QuantumRealityStudio,
+    patch: object,
+    *,
+    threshold: float = 0.0,
+    eta_scale: float = 1.0,
+) -> QuantumMeasurement:
+    """Measure a fractal patch by routing it through the quantum overlay studio."""
+
+    resonance = resonance_from_fractal_patch(patch, eta_scale=eta_scale)
+    circuit = studio.overlay_zspace(resonance)
+    return circuit.measure(threshold)
