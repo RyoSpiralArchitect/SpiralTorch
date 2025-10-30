@@ -1,10 +1,19 @@
-"""Minimal BLAS wrapper used by the SpiralTorch stub runtime."""
+"""Minimal BLAS wrapper used by the SpiralTorch stub runtime.
+
+The helpers in this module have gradually expanded beyond merely loading a
+``dgemm`` symbol.  The thread-tuning primitives we expose are now aware of the
+wider environment so callers can coordinate BLAS parallelism with the rest of
+the system.  The goal is to give higher level SpiralTorch components a single
+place to interrogate *and* influence how many worker threads a vendor library
+spawns without having to reach into implementation specific knobs.
+"""
 
 from __future__ import annotations
 
 import ctypes
 import ctypes.util
 import os
+import math
 import warnings
 from array import array
 from contextlib import contextmanager
@@ -17,6 +26,10 @@ __all__ = [
     "current_thread_count",
     "thread_controls_available",
     "temporary_thread_count",
+    "system_cpu_count",
+    "recommended_thread_count",
+    "synchronise_thread_hints",
+    "auto_tune_threads",
     "blas_vendor",
     "dgemm",
 ]
@@ -32,6 +45,14 @@ _ERROR: BaseException | None = None
 _LOCK = Lock()
 _VENDOR: str | None = None
 _THREAD_LAST_SET: int | None = None
+_THREAD_HINT_SOURCES: tuple[str, ...] = (
+    "SPIRALTORCH_BLAS_THREADS",
+    "SPIRALTORCH_THREADS",
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+)
 
 
 def _candidate_paths() -> Iterable[str]:
@@ -229,28 +250,182 @@ def _identify_vendor(lib: ctypes.CDLL) -> None:
         _VENDOR = "generic BLAS"
 
 
-def _configure_threads_from_env() -> None:
-    value = os.environ.get("SPIRALTORCH_BLAS_THREADS")
+def _read_int_env(variable: str) -> int | None:
+    value = os.environ.get(variable)
     if not value:
-        return
+        return None
     try:
-        requested = int(value)
+        return int(value)
     except ValueError:
-        warnings.warn(
-            "Ignoring invalid SPIRALTORCH_BLAS_THREADS value; expected an integer",
-            RuntimeWarning,
-        )
-        return
+        if variable.startswith("SPIRALTORCH"):
+            warnings.warn(
+                f"Ignoring invalid {variable} value; expected an integer",
+                RuntimeWarning,
+            )
+        return None
+
+
+def _system_affinity_size() -> int | None:
+    try:
+        affinity = os.sched_getaffinity(0)
+    except (AttributeError, OSError):
+        return None
+    if not affinity:
+        return None
+    return len(affinity)
+
+
+def system_cpu_count() -> int | None:
+    """Return the best-effort number of CPUs available to the process."""
+
+    affinity = _system_affinity_size()
+    if affinity:
+        return affinity
+    count = os.cpu_count()
+    if isinstance(count, int) and count > 0:
+        return count
+    return None
+
+
+def recommended_thread_count(
+    problem_size: tuple[int, int, int] | None = None,
+    *,
+    clamp_to_env: bool = True,
+) -> int | None:
+    """Return a recommended thread count based on the system and workload.
+
+    Parameters
+    ----------
+    problem_size:
+        Optional ``(m, n, k)`` triple describing the GEMM dimensions.  When
+        provided we balance the recommendation against the matrix sizes so small
+        problems do not consume the entire machine.
+    clamp_to_env:
+        When ``True`` (the default) the result honours stricter environment
+        hints such as ``OMP_NUM_THREADS`` if they are already configured.
+    """
+
+    cpu_budget = system_cpu_count()
+    if cpu_budget is None:
+        return None
+
+    # Honour explicit hints when they restrict the process.
+    if clamp_to_env:
+        hints = [_read_int_env(var) for var in _THREAD_HINT_SOURCES]
+        hints = [hint for hint in hints if hint is not None and hint > 0]
+        if hints:
+            cpu_budget = min(cpu_budget, min(hints))
+
+    if not problem_size:
+        return cpu_budget
+
+    m, n, k = (max(0, int(d)) for d in problem_size)
+    if m == 0 or n == 0 or k == 0:
+        return 1
+
+    # The heuristic balances against the number of independent tiles implied by
+    # the operands: we avoid spawning more threads than there are rows/columns to
+    # process while still scaling for tall or wide matrices.  The square root of
+    # the total work keeps cubic workloads from immediately consuming the entire
+    # CPU budget for tiny matrices.
+    work_estimate = max(1, m * n * k)
+    tile_capacity = max(m, n, k)
+    dynamic_budget = max(1, int(math.sqrt(work_estimate)) // max(1, min(m, n, k)))
+    proposed = max(1, min(tile_capacity, cpu_budget, dynamic_budget or 1))
+    return max(1, min(cpu_budget, proposed))
+
+
+def _determine_thread_hint() -> tuple[int | None, str | None]:
+    for variable in _THREAD_HINT_SOURCES:
+        hint = _read_int_env(variable)
+        if hint and hint > 0:
+            return hint, variable
+
+    policy = os.environ.get("SPIRALTORCH_BLAS_AUTOTUNE", "").strip().lower()
+    if policy in {"1", "true", "yes", "auto"}:
+        recommended = recommended_thread_count()
+        if recommended:
+            return recommended, "system_cpu"
+    return None, None
+
+
+def _propagate_thread_hint(threads: int) -> None:
+    for variable in _THREAD_HINT_SOURCES[2:]:
+        os.environ[variable] = str(threads)
+
+
+def synchronise_thread_hints(*, propagate: bool = False) -> int | None:
+    """Apply the strongest thread hint and optionally mirror it to the env.
+
+    The function inspects common environment variables (``OMP_NUM_THREADS`` and
+    friends) to determine how many threads the process *should* run with.  When
+    a usable hint exists the BLAS backend is configured accordingly and the last
+    set thread count is returned.  When ``propagate`` is ``True`` the resolved
+    value is written back to the ecosystem variables so future subprocesses and
+    OpenMP runtimes see a consistent value.
+    """
+
+    hint, source = _determine_thread_hint()
+    if not hint:
+        return None
 
     try:
-        configure_threads(requested)
-    except RuntimeError as exc:
+        configure_threads(hint)
+    except (RuntimeError, ValueError) as exc:
         warnings.warn(
-            f"Unable to configure BLAS thread count: {exc}",
+            f"Unable to honour thread hint from {source or 'environment'}: {exc}",
             RuntimeWarning,
         )
-    except ValueError as exc:
-        warnings.warn(str(exc), RuntimeWarning)
+        return None
+
+    if propagate:
+        _propagate_thread_hint(hint)
+    return hint
+
+
+def auto_tune_threads(
+    problem_size: tuple[int, int, int] | None = None,
+    *,
+    clamp_to_env: bool = True,
+    propagate: bool = False,
+) -> int | None:
+    """Automatically configure BLAS threads according to the workload.
+
+    The routine combines :func:`recommended_thread_count` with
+    :func:`configure_threads` and mirrors the result to environment hints when
+    requested.  It returns the configured thread count or ``None`` when BLAS is
+    unavailable or the heuristics could not determine an appropriate value.
+    """
+
+    try:
+        recommendation = recommended_thread_count(problem_size, clamp_to_env=clamp_to_env)
+    except Exception:
+        recommendation = None
+
+    if not recommendation:
+        return synchronise_thread_hints(propagate=propagate)
+
+    try:
+        configure_threads(recommendation)
+    except (RuntimeError, ValueError) as exc:
+        warnings.warn(
+            f"Unable to apply recommended BLAS thread count {recommendation}: {exc}",
+            RuntimeWarning,
+        )
+        return None
+
+    if propagate:
+        _propagate_thread_hint(recommendation)
+    return recommendation
+
+
+def _configure_threads_from_env() -> None:
+    if synchronise_thread_hints() is not None:
+        return
+
+    policy = os.environ.get("SPIRALTORCH_BLAS_AUTOTUNE", "").strip().lower()
+    if policy in {"1", "true", "yes", "auto"}:
+        auto_tune_threads()
 
 
 def _initialise() -> None:
