@@ -23,6 +23,10 @@ pub struct Params {
     pub cols: u32,
     pub in_stride: u32,
     pub out_stride: u32,
+    pub chimera_tile: u32,
+    pub chimera_stripes: u32,
+    pub flags: u32,
+    pub _pad: u32,
 }
 
 impl Params {
@@ -197,8 +201,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn params_layout_is_16_bytes() {
-        assert_eq!(std::mem::size_of::<Params>(), 16);
+    fn params_layout_is_32_bytes() {
+        assert_eq!(std::mem::size_of::<Params>(), 32);
     }
 
     #[test]
