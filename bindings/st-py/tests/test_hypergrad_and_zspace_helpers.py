@@ -36,6 +36,36 @@ def test_hypergrad_helper_accepts_mapping_topos() -> None:
     assert guard.max_volume() == 16
 
 
+def test_hypergrad_telemetry_reports_metrics() -> None:
+    tape = st.hypergrad(1, 3, curvature=-0.95, learning_rate=0.04)
+    tensor = st.Tensor((1, 3), data=[0.5, -0.25, 0.75])
+    tape.accumulate_wave(tensor)
+    telemetry = tape.telemetry()
+    assert telemetry.shape() == (1, 3)
+    assert telemetry.volume() == 3
+    assert telemetry.curvature() == -0.95
+    assert telemetry.learning_rate() == 0.04
+    summary = telemetry.summary()
+    assert summary.count() == 3
+    assert telemetry.tolerance() > 0.0
+    assert telemetry.saturation() > 0.0
+    assert telemetry.max_volume() >= telemetry.volume()
+
+
+def test_hypergrad_desire_feedback_interfaces() -> None:
+    tape = st.hypergrad(1, 2, curvature=-0.9, learning_rate=0.05)
+    tensor = st.Tensor((1, 2), data=[0.7, -0.3])
+    tape.accumulate_wave(tensor)
+    real = st.GradientSummary.from_values([0.35, -0.15])
+    interpretation = tape.desire_interpretation(real)
+    assert interpretation.hyper_pressure() > interpretation.real_pressure()
+    control = tape.desire_control(real)
+    damped = tape.desire_control(real, gain=0.5)
+    assert control.penalty_gain() >= damped.penalty_gain()
+    assert control.hyper_rate_scale() >= damped.hyper_rate_scale()
+    assert "lr" in " ".join(control.events())
+
+
 def test_hypergrad_topos_factory_returns_guard() -> None:
     guard = st.hypergrad_topos(
         curvature=-0.8,

@@ -102,6 +102,21 @@ def hypergrad_summary_dict(
         },
     }
 
+    telemetry_attr = getattr(tape, "telemetry", None)
+    if callable(telemetry_attr):
+        telemetry = telemetry_attr()
+        metrics["telemetry"] = {
+            "shape": tuple(int(value) for value in _callable_attr(telemetry, "shape")()),
+            "volume": int(_callable_attr(telemetry, "volume")()),
+            "curvature": float(_callable_attr(telemetry, "curvature")()),
+            "learning_rate": float(_callable_attr(telemetry, "learning_rate")()),
+            "saturation": float(_callable_attr(telemetry, "saturation")()),
+            "porosity": float(_callable_attr(telemetry, "porosity")()),
+            "tolerance": float(_callable_attr(telemetry, "tolerance")()),
+            "max_depth": int(_callable_attr(telemetry, "max_depth")()),
+            "max_volume": int(_callable_attr(telemetry, "max_volume")()),
+        }
+
     if include_gradient:
         gradient = _callable_attr(tape, "gradient")()
         metrics["gradient"] = [float(value) for value in gradient]
