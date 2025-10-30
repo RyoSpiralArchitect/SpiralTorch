@@ -1,11 +1,12 @@
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 #[cfg(feature = "kdsl")]
-use pyo3::types::{PyDict, PyList};
+use pyo3::types::{PyAny, PyDict, PyIterator, PyList};
 use pyo3::wrap_pyfunction;
-use pyo3::Bound;
 #[cfg(feature = "kdsl")]
 use pyo3::PyRef;
+#[cfg(feature = "kdsl")]
+use pyo3::{Bound, Py, PyCell};
 
 use crate::planner::PyRankPlan;
 
@@ -17,7 +18,10 @@ use st_core::theory::maxwell::{
 };
 #[cfg(feature = "kdsl")]
 use st_kdsl::{
-    auto::{self, HeuristicHint, WilsonMetrics},
+    auto::{
+        self, AiRewriteConfig, AiRewriteError, AiRewritePrompt, HeuristicHint, TemplateAiGenerator,
+        WilsonMetrics,
+    },
     Ctx as SpiralKCtx, Err as SpiralKErr, Out as SpiralKOut, SoftRule as SpiralKSoftRule,
 };
 
@@ -84,6 +88,19 @@ pub(crate) fn spiralk_err_to_py(err: SpiralKErr) -> PyErr {
     match err {
         SpiralKErr::Parse(pos) => PyValueError::new_err(format!("parse error at pos {pos}")),
         SpiralKErr::Tok => PyValueError::new_err("unexpected token"),
+    }
+}
+
+#[cfg(feature = "kdsl")]
+fn spiralk_ai_err_to_py(err: AiRewriteError) -> PyErr {
+    use pyo3::exceptions::{PyRuntimeError, PyValueError};
+    match err {
+        AiRewriteError::Empty => PyRuntimeError::new_err("AI rewrite returned no hints"),
+        AiRewriteError::TooManyHints(count) => PyValueError::new_err(format!(
+            "AI rewrite generated {count} hints exceeding the configured maximum"
+        )),
+        AiRewriteError::Dsl(err) => spiralk_err_to_py(err),
+        AiRewriteError::Generator(message) => PyRuntimeError::new_err(message),
     }
 }
 
@@ -412,6 +429,123 @@ impl PySpiralKWilsonMetrics {
 }
 
 #[cfg(feature = "kdsl")]
+#[pyclass(module = "spiraltorch.spiralk", name = "SpiralKAiRewriteConfig")]
+pub(crate) struct PySpiralKAiRewriteConfig {
+    inner: AiRewriteConfig,
+}
+
+#[cfg(feature = "kdsl")]
+#[pymethods]
+impl PySpiralKAiRewriteConfig {
+    #[new]
+    #[pyo3(signature = (model, max_hints=None, default_weight=None, eta_floor=None))]
+    pub fn new(
+        model: String,
+        max_hints: Option<usize>,
+        default_weight: Option<f32>,
+        eta_floor: Option<f32>,
+    ) -> Self {
+        let mut inner = AiRewriteConfig::new(model);
+        if let Some(max_hints) = max_hints {
+            inner = inner.with_max_hints(max_hints);
+        }
+        if let Some(weight) = default_weight {
+            inner = inner.with_default_weight(weight);
+        }
+        if let Some(floor) = eta_floor {
+            inner = inner.with_eta_floor(floor);
+        }
+        Self { inner }
+    }
+
+    #[getter]
+    fn model(&self) -> &str {
+        &self.inner.model
+    }
+
+    #[getter]
+    fn max_hints(&self) -> usize {
+        self.inner.max_hints
+    }
+
+    #[getter]
+    fn default_weight(&self) -> f32 {
+        self.inner.default_weight
+    }
+
+    #[getter]
+    fn eta_floor(&self) -> f32 {
+        self.inner.eta_floor
+    }
+}
+
+#[cfg(feature = "kdsl")]
+impl PySpiralKAiRewriteConfig {
+    pub(crate) fn inner(&self) -> &AiRewriteConfig {
+        &self.inner
+    }
+}
+
+#[cfg(feature = "kdsl")]
+#[pyclass(module = "spiraltorch.spiralk", name = "SpiralKAiRewritePrompt")]
+pub(crate) struct PySpiralKAiRewritePrompt {
+    inner: AiRewritePrompt,
+}
+
+#[cfg(feature = "kdsl")]
+#[pymethods]
+impl PySpiralKAiRewritePrompt {
+    #[new]
+    #[pyo3(signature = (base_program, ctx, eta_bar=0.5, device_guard=None))]
+    pub fn new(
+        base_program: String,
+        ctx: &PySpiralKContext,
+        eta_bar: f32,
+        device_guard: Option<String>,
+    ) -> Self {
+        let mut inner = AiRewritePrompt::new(base_program, ctx.inner).with_eta_bar(eta_bar);
+        if let Some(guard) = device_guard {
+            inner = inner.with_device_guard(guard);
+        }
+        Self { inner }
+    }
+
+    pub fn set_metrics(&mut self, metrics: &PySpiralKWilsonMetrics) {
+        self.inner.metrics = Some(metrics.inner());
+    }
+
+    pub fn clear_metrics(&mut self) {
+        self.inner.metrics = None;
+    }
+
+    pub fn add_note(&mut self, note: String) {
+        self.inner.push_note(note);
+    }
+
+    #[getter]
+    fn base_program(&self) -> &str {
+        &self.inner.base_program
+    }
+
+    #[getter]
+    fn eta_bar(&self) -> f32 {
+        self.inner.eta_bar
+    }
+
+    #[getter]
+    fn device_guard(&self) -> Option<&str> {
+        self.inner.device_guard.as_deref()
+    }
+}
+
+#[cfg(feature = "kdsl")]
+impl PySpiralKAiRewritePrompt {
+    pub(crate) fn inner(&self) -> &AiRewritePrompt {
+        &self.inner
+    }
+}
+
+#[cfg(feature = "kdsl")]
 #[pyfunction]
 fn wilson_lower_bound(wins: u32, trials: u32, z: f32) -> f32 {
     auto::wilson_lower_bound(wins, trials, z)
@@ -460,6 +594,119 @@ fn rewrite_with_wilson(
     .map_err(spiralk_err_to_py)?;
     let py_out = spiralk_out_to_dict(py, &out)?;
     Ok((py_out, script))
+}
+
+#[cfg(feature = "kdsl")]
+#[pyfunction]
+#[pyo3(signature = (base_src, ctx, config, prompt, generator=None))]
+fn rewrite_with_ai(
+    py: Python<'_>,
+    base_src: &str,
+    ctx: &PySpiralKContext,
+    config: &PySpiralKAiRewriteConfig,
+    prompt: &PySpiralKAiRewritePrompt,
+    generator: Option<Bound<'_, PyAny>>,
+) -> PyResult<(PyObject, String, PyObject)> {
+    let result = if let Some(custom) = generator {
+        let python_generator = PythonAiHintGenerator::new(&custom);
+        auto::rewrite_with_ai(
+            base_src,
+            &ctx.inner,
+            config.inner(),
+            prompt.inner(),
+            python_generator,
+        )
+    } else {
+        let template = TemplateAiGenerator;
+        auto::rewrite_with_ai(
+            base_src,
+            &ctx.inner,
+            config.inner(),
+            prompt.inner(),
+            template,
+        )
+    };
+    let (out, script, hints) = result.map_err(spiralk_ai_err_to_py)?;
+    let py_out = spiralk_out_to_dict(py, &out)?;
+    let list = PyList::empty_bound(py);
+    for hint in hints {
+        let hint_obj = Py::new(py, PySpiralKHeuristicHint { inner: hint })?;
+        list.append(hint_obj)?;
+    }
+    Ok((py_out, script, list.into()))
+}
+
+#[cfg(feature = "kdsl")]
+struct PythonAiHintGenerator {
+    callable: Py<PyAny>,
+}
+
+#[cfg(feature = "kdsl")]
+impl PythonAiHintGenerator {
+    fn new(callable: &Bound<'_, PyAny>) -> Self {
+        Self {
+            callable: callable.to_object(callable.py()),
+        }
+    }
+}
+
+#[cfg(feature = "kdsl")]
+impl AiHintGenerator for PythonAiHintGenerator {
+    fn generate_hints(
+        &mut self,
+        config: &AiRewriteConfig,
+        prompt: &AiRewritePrompt,
+    ) -> Result<Vec<HeuristicHint>, AiRewriteError> {
+        Python::with_gil(|py| {
+            let callable = self.callable.bind(py);
+            let config_obj = Py::new(
+                py,
+                PySpiralKAiRewriteConfig {
+                    inner: config.clone(),
+                },
+            )
+            .map_err(|err| AiRewriteError::Generator(err.to_string()))?;
+            let prompt_obj = Py::new(
+                py,
+                PySpiralKAiRewritePrompt {
+                    inner: prompt.clone(),
+                },
+            )
+            .map_err(|err| AiRewriteError::Generator(err.to_string()))?;
+            let args = (config_obj.to_object(py), prompt_obj.to_object(py));
+            let value = callable
+                .call1(args)
+                .map_err(|err| AiRewriteError::Generator(err.to_string()))?;
+            let bound = value.bind(py);
+            extract_python_hints(py, &bound)
+        })
+    }
+}
+
+#[cfg(feature = "kdsl")]
+fn extract_python_hints(
+    py: Python<'_>,
+    value: &Bound<'_, PyAny>,
+) -> Result<Vec<HeuristicHint>, AiRewriteError> {
+    let iterator = PyIterator::from_object(py, value.as_ref()).map_err(|_| {
+        AiRewriteError::Generator(
+            "AI generator must return an iterable of SpiralKHeuristicHint".to_string(),
+        )
+    })?;
+    let mut hints = Vec::new();
+    for item in iterator {
+        let object = item
+            .map_err(|err| AiRewriteError::Generator(err.to_string()))?
+            .bind(py);
+        let cell: &PyCell<PySpiralKHeuristicHint> = object.downcast().map_err(|_| {
+            AiRewriteError::Generator(
+                "AI generator must yield SpiralKHeuristicHint instances".to_string(),
+            )
+        })?;
+        let borrowed = cell.borrow();
+        hints.push(borrowed.inner().clone());
+    }
+    Ok(hints)
 }
 
 #[pyclass(module = "spiraltorch.spiralk", name = "MaxwellHint")]
@@ -773,6 +1020,19 @@ impl From<MaxwellZPulse> for PyMaxwellPulse {
     }
 }
 
+impl PyMaxwellPulse {
+    pub(crate) fn to_pulse(&self) -> MaxwellZPulse {
+        MaxwellZPulse {
+            blocks: self.inner.blocks,
+            mean: self.inner.mean,
+            standard_error: self.inner.standard_error,
+            z_score: self.inner.z_score,
+            band_energy: self.inner.band_energy,
+            z_bias: self.inner.z_bias,
+        }
+    }
+}
+
 #[pymethods]
 impl PyMaxwellPulse {
     #[new]
@@ -914,6 +1174,8 @@ pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
         module.add_class::<PySpiralKContext>()?;
         module.add_class::<PySpiralKHeuristicHint>()?;
         module.add_class::<PySpiralKWilsonMetrics>()?;
+        module.add_class::<PySpiralKAiRewriteConfig>()?;
+        module.add_class::<PySpiralKAiRewritePrompt>()?;
     }
     module.add_class::<PyMaxwellSpiralKHint>()?;
     module.add_class::<PyMaxwellSpiralKBridge>()?;
@@ -929,6 +1191,7 @@ pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
         module.add_function(wrap_pyfunction!(should_rewrite, &module)?)?;
         module.add_function(wrap_pyfunction!(synthesize_program, &module)?)?;
         module.add_function(wrap_pyfunction!(rewrite_with_wilson, &module)?)?;
+        module.add_function(wrap_pyfunction!(rewrite_with_ai, &module)?)?;
     }
     module.add("__doc__", "SpiralK DSL helpers & Maxwell bridges")?;
     let exports = {
@@ -950,10 +1213,13 @@ pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
                 "SpiralKContext",
                 "SpiralKHeuristicHint",
                 "SpiralKWilsonMetrics",
+                "SpiralKAiRewriteConfig",
+                "SpiralKAiRewritePrompt",
                 "wilson_lower_bound",
                 "should_rewrite",
                 "synthesize_program",
                 "rewrite_with_wilson",
+                "rewrite_with_ai",
             ]);
         }
         list

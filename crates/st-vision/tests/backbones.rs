@@ -9,7 +9,8 @@ use st_tensor::Tensor;
 use tempfile::tempdir;
 
 use st_vision::models::{
-    ConvNeXtBackbone, ConvNeXtConfig, ResNetBackbone, ResNetConfig, ViTBackbone, ViTConfig,
+    ConvNeXtBackbone, ConvNeXtConfig, ResNet56WithSkip, ResNet56WithSkipConfig, ResNetBackbone,
+    ResNetConfig, ViTBackbone, ViTConfig,
 };
 
 fn sample_input(channels: usize, hw: (usize, usize), seed: u64) -> Tensor {
@@ -36,6 +37,33 @@ fn resnet_produces_expected_shape_and_state_roundtrip() {
     let mut restored = ResNetBackbone::new(config).unwrap();
     restored.load_weights_bincode(&path).unwrap();
     assert_eq!(resnet.state_dict().unwrap(), restored.state_dict().unwrap());
+}
+
+#[test]
+fn resnet56_skip_gate_accumulates_gradients() {
+    let mut config = ResNetConfig::resnet56_cifar(true);
+    config.skip_init = 0.9;
+    let mut resnet = ResNetBackbone::new(config.clone()).unwrap();
+    let input = sample_input(config.input_channels, config.input_hw, 17);
+    let output = resnet.forward(&input).unwrap();
+    assert_eq!(output.shape(), (1, resnet.output_features()));
+
+    let grad_output =
+        Tensor::random_normal(1, resnet.output_features(), 0.0, 1.0, Some(23)).unwrap();
+    let _ = resnet.backward(&input, &grad_output).unwrap();
+
+    let mut skip_params = 0usize;
+    resnet
+        .visit_parameters(|param| {
+            if param.name().contains("skip_gate") {
+                skip_params += 1;
+                let gradient = param.gradient().expect("skip gate gradient present");
+                assert_eq!(gradient.shape(), (1, 1));
+            }
+            Ok(())
+        })
+        .unwrap();
+    assert!(skip_params > 0, "expected at least one learnable skip gate");
 }
 
 #[test]

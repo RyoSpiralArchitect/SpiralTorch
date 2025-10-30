@@ -47,6 +47,16 @@ assert_eq!(embedding.shape().1, backbone.output_features());
 
 The `ViTBackbone` exports `load_weights_json`/`load_weights_bincode` helpers, accepts patch/grid tweaks, and emits CLS-token embeddings by default. `ConvNeXtBackbone` mirrors ConvNeXt-T style stage depths, returning flattened feature maps ready for detection heads or Z-space projection.
 
+Need a CIFAR-style network? `ResNetConfig::resnet56_cifar(true)` wires a 56-layer backbone with SpiralTorch's learnable skip scalers so you can gate residual energy per block while staying compatible with the `Module` trait:
+
+```rust
+let mut config = ResNetConfig::resnet56_cifar(true);
+config.skip_init = 0.95; // softly dampen residuals at init
+let mut resnet56 = ResNetBackbone::new(config)?;
+let logits = resnet56.forward(&input)?;
+// gradients propagate into each skip gate when calling backward(...)
+```
+
 ### Temporal resonance accumulation
 
 Temporal continuity lets SpiralTorchVision respond to motion and lingering cues without reprocessing an entire video buffer. Each frame updates a `ZSpaceVolume` in-place with `accumulate`, applying an exponential moving average (`alpha` near `0.2` preserves the past, `alpha` near `1.0` chases the latest frame). The resulting volume feeds a `TemporalResonanceBuffer`, which smooths the depth attention profile before collapse:
