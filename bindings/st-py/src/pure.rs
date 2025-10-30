@@ -9,7 +9,8 @@ use st_tensor::measure::{
     z_space_barycenter as z_space_barycenter_rs, BarycenterIntermediate, ZSpaceBarycenter,
 };
 use st_tensor::{
-    AmegaHypergrad, Complex32 as StComplex32, ComplexTensor, GradientSummary, LanguageWaveEncoder,
+    AmegaHypergrad, Complex32 as StComplex32, ComplexTensor, DesireGradientControl,
+    DesireGradientInterpretation, GradientSummary, HypergradTelemetry, LanguageWaveEncoder,
     OpenCartesianTopos, Tensor, TensorBiome,
 };
 
@@ -124,6 +125,10 @@ impl PyOpenCartesianTopos {
         self.inner.saturation()
     }
 
+    pub fn porosity(&self) -> f32 {
+        self.inner.porosity()
+    }
+
     pub fn max_depth(&self) -> usize {
         self.inner.max_depth()
     }
@@ -194,6 +199,13 @@ impl PyGradientSummary {
 
 #[pymethods]
 impl PyGradientSummary {
+    #[staticmethod]
+    pub fn from_values(values: Vec<f32>) -> Self {
+        Self {
+            inner: GradientSummary::from_slice(&values),
+        }
+    }
+
     pub fn l1(&self) -> f32 {
         self.inner.l1()
     }
@@ -210,6 +222,10 @@ impl PyGradientSummary {
         self.inner.count()
     }
 
+    pub fn sum(&self) -> f32 {
+        self.inner.sum()
+    }
+
     pub fn mean_abs(&self) -> f32 {
         self.inner.mean_abs()
     }
@@ -220,6 +236,319 @@ impl PyGradientSummary {
 
     pub fn sum_squares(&self) -> f32 {
         self.inner.sum_squares()
+    }
+
+    pub fn sum_cubes(&self) -> f32 {
+        self.inner.sum_cubes()
+    }
+
+    pub fn sum_quartic(&self) -> f32 {
+        self.inner.sum_quartic()
+    }
+
+    pub fn mean(&self) -> f32 {
+        self.inner.mean()
+    }
+
+    pub fn min(&self) -> f32 {
+        self.inner.min()
+    }
+
+    pub fn max(&self) -> f32 {
+        self.inner.max()
+    }
+
+    pub fn support_width(&self) -> f32 {
+        self.inner.support_width()
+    }
+
+    pub fn positive_count(&self) -> usize {
+        self.inner.positive_count()
+    }
+
+    pub fn negative_count(&self) -> usize {
+        self.inner.negative_count()
+    }
+
+    pub fn zero_count(&self) -> usize {
+        self.inner.zero_count()
+    }
+
+    pub fn near_zero_count(&self) -> usize {
+        self.inner.near_zero_count()
+    }
+
+    pub fn positive_fraction(&self) -> f32 {
+        self.inner.positive_fraction()
+    }
+
+    pub fn negative_fraction(&self) -> f32 {
+        self.inner.negative_fraction()
+    }
+
+    pub fn zero_fraction(&self) -> f32 {
+        self.inner.zero_fraction()
+    }
+
+    pub fn near_zero_fraction(&self) -> f32 {
+        self.inner.near_zero_fraction()
+    }
+
+    pub fn activation(&self) -> f32 {
+        self.inner.activation()
+    }
+
+    pub fn sign_lean(&self) -> f32 {
+        self.inner.sign_lean()
+    }
+
+    pub fn sign_entropy(&self) -> f32 {
+        self.inner.sign_entropy()
+    }
+
+    pub fn variance(&self) -> f32 {
+        self.inner.variance()
+    }
+
+    pub fn std(&self) -> f32 {
+        self.inner.std()
+    }
+
+    pub fn skewness(&self) -> f32 {
+        self.inner.skewness()
+    }
+
+    pub fn kurtosis(&self) -> f32 {
+        self.inner.kurtosis()
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "HypergradTelemetry")]
+#[derive(Clone, Copy)]
+pub(crate) struct PyHypergradTelemetry {
+    inner: HypergradTelemetry,
+}
+
+impl From<HypergradTelemetry> for PyHypergradTelemetry {
+    fn from(inner: HypergradTelemetry) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PyHypergradTelemetry {
+    pub fn summary(&self) -> PyGradientSummary {
+        self.inner.summary().into()
+    }
+
+    pub fn curvature(&self) -> f32 {
+        self.inner.curvature()
+    }
+
+    pub fn learning_rate(&self) -> f32 {
+        self.inner.learning_rate()
+    }
+
+    pub fn saturation(&self) -> f32 {
+        self.inner.saturation()
+    }
+
+    pub fn porosity(&self) -> f32 {
+        self.inner.porosity()
+    }
+
+    pub fn tolerance(&self) -> f32 {
+        self.inner.tolerance()
+    }
+
+    pub fn max_depth(&self) -> usize {
+        self.inner.max_depth()
+    }
+
+    pub fn max_volume(&self) -> usize {
+        self.inner.max_volume()
+    }
+
+    pub fn shape(&self) -> (usize, usize) {
+        self.inner.shape()
+    }
+
+    pub fn volume(&self) -> usize {
+        self.inner.volume()
+    }
+}
+
+#[pyclass(
+    module = "spiraltorch",
+    name = "DesireGradientInterpretation",
+    unsendable
+)]
+#[derive(Clone, Copy)]
+pub(crate) struct PyDesireGradientInterpretation {
+    inner: DesireGradientInterpretation,
+}
+
+impl From<DesireGradientInterpretation> for PyDesireGradientInterpretation {
+    fn from(inner: DesireGradientInterpretation) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PyDesireGradientInterpretation {
+    pub fn hyper_pressure(&self) -> f32 {
+        self.inner.hyper_pressure()
+    }
+
+    pub fn real_pressure(&self) -> f32 {
+        self.inner.real_pressure()
+    }
+
+    pub fn balance(&self) -> f32 {
+        self.inner.balance()
+    }
+
+    pub fn stability(&self) -> f32 {
+        self.inner.stability()
+    }
+
+    pub fn saturation(&self) -> f32 {
+        self.inner.saturation()
+    }
+
+    pub fn hyper_std(&self) -> f32 {
+        self.inner.hyper_std()
+    }
+
+    pub fn real_std(&self) -> f32 {
+        self.inner.real_std()
+    }
+
+    pub fn sharpness(&self) -> f32 {
+        self.inner.sharpness()
+    }
+
+    pub fn penalty_gain(&self) -> f32 {
+        self.inner.penalty_gain()
+    }
+
+    pub fn activation(&self) -> f32 {
+        self.inner.activation()
+    }
+
+    pub fn sign_alignment(&self) -> f32 {
+        self.inner.sign_alignment()
+    }
+
+    pub fn sign_entropy(&self) -> f32 {
+        self.inner.sign_entropy()
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "DesireGradientControl", unsendable)]
+#[derive(Clone, Copy)]
+pub(crate) struct PyDesireGradientControl {
+    inner: DesireGradientControl,
+}
+
+impl From<DesireGradientControl> for PyDesireGradientControl {
+    fn from(inner: DesireGradientControl) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PyDesireGradientControl {
+    pub fn penalty_gain(&self) -> f32 {
+        self.inner.penalty_gain()
+    }
+
+    pub fn bias_mix(&self) -> f32 {
+        self.inner.bias_mix()
+    }
+
+    pub fn observation_gain(&self) -> f32 {
+        self.inner.observation_gain()
+    }
+
+    pub fn damping(&self) -> f32 {
+        self.inner.damping()
+    }
+
+    pub fn hyper_rate_scale(&self) -> f32 {
+        self.inner.hyper_rate_scale()
+    }
+
+    pub fn real_rate_scale(&self) -> f32 {
+        self.inner.real_rate_scale()
+    }
+
+    pub fn operator_mix(&self) -> f32 {
+        self.inner.operator_mix()
+    }
+
+    pub fn operator_gain(&self) -> f32 {
+        self.inner.operator_gain()
+    }
+
+    pub fn tuning_gain(&self) -> f32 {
+        self.inner.tuning_gain()
+    }
+
+    pub fn target_entropy(&self) -> f32 {
+        self.inner.target_entropy()
+    }
+
+    pub fn learning_rate_eta(&self) -> f32 {
+        self.inner.learning_rate_eta()
+    }
+
+    pub fn learning_rate_min(&self) -> f32 {
+        self.inner.learning_rate_min()
+    }
+
+    pub fn learning_rate_max(&self) -> f32 {
+        self.inner.learning_rate_max()
+    }
+
+    pub fn learning_rate_slew(&self) -> f32 {
+        self.inner.learning_rate_slew()
+    }
+
+    pub fn clip_norm(&self) -> f32 {
+        self.inner.clip_norm()
+    }
+
+    pub fn clip_floor(&self) -> f32 {
+        self.inner.clip_floor()
+    }
+
+    pub fn clip_ceiling(&self) -> f32 {
+        self.inner.clip_ceiling()
+    }
+
+    pub fn clip_ema(&self) -> f32 {
+        self.inner.clip_ema()
+    }
+
+    pub fn temperature_kappa(&self) -> f32 {
+        self.inner.temperature_kappa()
+    }
+
+    pub fn temperature_slew(&self) -> f32 {
+        self.inner.temperature_slew()
+    }
+
+    pub fn quality_gain(&self) -> f32 {
+        self.inner.quality_gain()
+    }
+
+    pub fn quality_bias(&self) -> f32 {
+        self.inner.quality_bias()
+    }
+
+    pub fn events(&self) -> Vec<&'static str> {
+        self.inner.events().labels()
     }
 }
 
@@ -271,6 +600,10 @@ impl PyHypergrad {
 
     pub fn summary(&self) -> PyGradientSummary {
         self.inner.summary().into()
+    }
+
+    pub fn telemetry(&self) -> PyHypergradTelemetry {
+        self.inner.telemetry().into()
     }
 
     pub fn scale_learning_rate(&mut self, factor: f32) {
@@ -335,6 +668,25 @@ impl PyHypergrad {
 
     pub fn topos(&self) -> PyOpenCartesianTopos {
         PyOpenCartesianTopos::from_topos(self.inner.topos().clone())
+    }
+
+    #[pyo3(signature = (real, gain=None))]
+    pub fn desire_control(
+        &self,
+        real: &PyGradientSummary,
+        gain: Option<f32>,
+    ) -> PyDesireGradientControl {
+        let factor = gain.unwrap_or(1.0);
+        self.inner
+            .desire_control_with_gain(real.as_inner(), factor)
+            .into()
+    }
+
+    pub fn desire_interpretation(
+        &self,
+        real: &PyGradientSummary,
+    ) -> PyDesireGradientInterpretation {
+        self.inner.desire_interpretation(real.as_inner()).into()
     }
 }
 
@@ -529,6 +881,9 @@ pub(crate) fn register(_py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_class::<PyOpenCartesianTopos>()?;
     m.add_class::<PyLanguageWaveEncoder>()?;
     m.add_class::<PyGradientSummary>()?;
+    m.add_class::<PyHypergradTelemetry>()?;
+    m.add_class::<PyDesireGradientInterpretation>()?;
+    m.add_class::<PyDesireGradientControl>()?;
     m.add_class::<PyHypergrad>()?;
     m.add_class::<PyTensorBiome>()?;
     m.add_class::<PyBarycenterIntermediate>()?;
