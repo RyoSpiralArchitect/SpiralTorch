@@ -3,15 +3,17 @@
 The helpers in this module have gradually expanded beyond merely loading a
 ``dgemm`` symbol.  The thread-tuning primitives we expose are now aware of the
 wider environment so callers can coordinate BLAS parallelism with the rest of
-the system.  The goal is to give higher level SpiralTorch components a single
-place to interrogate *and* influence how many worker threads a vendor library
-spawns without having to reach into implementation specific knobs.
+the system.  Beyond the CPU the routines now integrate with the WGPU autotuning
+artefacts emitted by the Rust runtime, allowing SpiralTorch to reserve host
+threads for GPU command submission so compute on both sides can progress
+without contending for the same CPU cores.
 """
 
 from __future__ import annotations
 
 import ctypes
 import ctypes.util
+import json
 import os
 import math
 import warnings
@@ -31,6 +33,8 @@ __all__ = [
     "synchronise_thread_hints",
     "auto_tune_threads",
     "blas_vendor",
+    "wgpu_adapter_info",
+    "gpu_host_thread_reservation",
     "dgemm",
 ]
 
@@ -53,6 +57,29 @@ _THREAD_HINT_SOURCES: tuple[str, ...] = (
     "MKL_NUM_THREADS",
     "VECLIB_MAXIMUM_THREADS",
 )
+_GPU_HOST_HINT_VAR = "SPIRALTORCH_WGPU_HOST_THREADS"
+
+_WGPU_ADAPTER_INFO: dict[str, object] | None = None
+_GPU_HOST_RESERVATION: int | None = None
+
+_INTEGRATED_GPU_VENDORS = {
+    0x8086,  # Intel
+    0x106B,  # Apple
+    0x13B5,  # ARM
+    0x5143,  # Qualcomm
+    0x1AF4,  # virtio
+    0x1010,  # Imagination Technologies
+}
+_SOFTWARE_GPU_VENDORS = {
+    0x1414,  # Microsoft (WARP)
+}
+
+_SOFTWARE_GPU_KEYWORDS = {
+    "swiftshader",
+    "llvmpipe",
+    "software",
+    "warp",
+}
 
 
 def _candidate_paths() -> Iterable[str]:
@@ -265,6 +292,188 @@ def _read_int_env(variable: str) -> int | None:
         return None
 
 
+def _normalise_wgpu_token(value: str | None) -> str | None:
+    if not value:
+        return None
+    cleaned = value.replace("_", " ").replace("-", " ")
+    while "  " in cleaned:
+        cleaned = cleaned.replace("  ", " ")
+    result = cleaned.strip()
+    return result or None
+
+
+def _classify_wgpu_adapter(
+    vendor: int | None, *, backend: str | None, name: str | None
+) -> str:
+    lowered_name = (name or "").lower()
+    if vendor is not None:
+        if vendor in _SOFTWARE_GPU_VENDORS:
+            return "software"
+        if vendor in _INTEGRATED_GPU_VENDORS:
+            return "integrated"
+    if any(keyword in lowered_name for keyword in _SOFTWARE_GPU_KEYWORDS):
+        return "software"
+    backend_lower = (backend or "").lower()
+    if vendor is None:
+        if backend_lower in {"gl", "gles"}:
+            return "integrated"
+        if lowered_name:
+            return "unknown"
+    if backend_lower in {"metal", "vulkan"} and vendor in _INTEGRATED_GPU_VENDORS:
+        return "integrated"
+    if vendor is None:
+        return "unknown"
+    return "discrete"
+
+
+def _parse_wgpu_autotune_key(key: str) -> dict[str, object] | None:
+    if not key.startswith("wgpu."):
+        return None
+    parts = key.split("|")
+    if len(parts) < 4:
+        return None
+    name_token = parts[1] if len(parts) > 1 else None
+    vendor_token = parts[2] if len(parts) > 2 else None
+    device_token = parts[3] if len(parts) > 3 else None
+    backend = parts[4] if len(parts) > 4 else None
+    driver = parts[5] if len(parts) > 5 else None
+    driver_info = parts[6] if len(parts) > 6 else None
+
+    try:
+        vendor = int(vendor_token, 16) if vendor_token else None
+    except ValueError:
+        vendor = None
+    try:
+        device = int(device_token, 16) if device_token else None
+    except ValueError:
+        device = None
+
+    name = _normalise_wgpu_token(name_token)
+    classification = _classify_wgpu_adapter(vendor, backend=backend, name=name)
+
+    return {
+        "name": name,
+        "vendor_id": vendor,
+        "vendor_hex": vendor_token,
+        "device_id": device,
+        "device_hex": device_token,
+        "backend": backend,
+        "driver": _normalise_wgpu_token(driver),
+        "driver_info": _normalise_wgpu_token(driver_info),
+        "classification": classification,
+        "key": key,
+    }
+
+
+def _autotune_store_candidates() -> Iterable[str]:
+    seen: set[str] = set()
+    env_path = os.environ.get("SPIRALTORCH_AUTOTUNE_STORE")
+    if env_path:
+        env_path = env_path.strip()
+        if env_path:
+            seen.add(env_path)
+            yield env_path
+    home = os.environ.get("HOME")
+    if home:
+        default_path = os.path.join(home, ".spiraltorch", "kernels.json")
+        if default_path not in seen:
+            yield default_path
+
+
+def _load_wgpu_adapter_from_store() -> dict[str, object] | None:
+    for candidate in _autotune_store_candidates():
+        try:
+            with open(candidate, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (FileNotFoundError, OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        items = list(data.items())
+        for key, _ in reversed(items):
+            info = _parse_wgpu_autotune_key(str(key))
+            if info:
+                info["source"] = candidate
+                return info
+    return None
+
+
+def _detect_wgpu_adapter() -> dict[str, object] | None:
+    global _WGPU_ADAPTER_INFO
+    if _WGPU_ADAPTER_INFO is not None:
+        return _WGPU_ADAPTER_INFO
+
+    env_hint = os.environ.get("SPIRALTORCH_WGPU_ADAPTER_INFO")
+    if env_hint:
+        parsed: dict[str, object] | None
+        try:
+            maybe = json.loads(env_hint)
+            parsed = maybe if isinstance(maybe, dict) else None
+        except json.JSONDecodeError:
+            parsed = None
+        if parsed is None:
+            parsed = _parse_wgpu_autotune_key(env_hint)
+        if parsed is not None:
+            _WGPU_ADAPTER_INFO = parsed
+            return _WGPU_ADAPTER_INFO
+
+    _WGPU_ADAPTER_INFO = _load_wgpu_adapter_from_store()
+    return _WGPU_ADAPTER_INFO
+
+
+def _compute_gpu_host_reservation(cpu_budget: int | None) -> int | None:
+    explicit = _read_int_env(_GPU_HOST_HINT_VAR)
+    if explicit is not None:
+        return max(0, explicit)
+
+    info = _detect_wgpu_adapter()
+    if not info:
+        return None
+
+    classification = str(info.get("classification", "unknown"))
+    if classification == "software":
+        return None
+    if classification == "integrated":
+        if cpu_budget is None or cpu_budget <= 2:
+            return 1
+        return min(2, max(1, cpu_budget // 4))
+    if classification == "discrete":
+        if cpu_budget is not None and cpu_budget >= 8:
+            return 2
+        return 1
+    if classification == "unknown":
+        if cpu_budget is None or cpu_budget <= 1:
+            return None
+        return 1
+    return None
+
+
+def _propagate_gpu_host_hint(reservation: int | None) -> None:
+    if reservation is None:
+        os.environ.pop(_GPU_HOST_HINT_VAR, None)
+        return
+    os.environ[_GPU_HOST_HINT_VAR] = str(int(reservation))
+
+
+def gpu_host_thread_reservation(*, refresh: bool = False) -> int | None:
+    """Return the number of CPU threads reserved for GPU host work."""
+
+    global _GPU_HOST_RESERVATION
+    if refresh or _GPU_HOST_RESERVATION is None:
+        cpu_budget = system_cpu_count()
+        _GPU_HOST_RESERVATION = _compute_gpu_host_reservation(cpu_budget)
+    return _GPU_HOST_RESERVATION
+
+
+def wgpu_adapter_info() -> dict[str, object] | None:
+    """Return metadata describing the detected WGPU adapter, if any."""
+
+    info = _detect_wgpu_adapter()
+    if info is None:
+        return None
+    return dict(info)
+
+
 def _system_affinity_size() -> int | None:
     try:
         affinity = os.sched_getaffinity(0)
@@ -291,6 +500,7 @@ def recommended_thread_count(
     problem_size: tuple[int, int, int] | None = None,
     *,
     clamp_to_env: bool = True,
+    consider_gpu: bool = True,
 ) -> int | None:
     """Return a recommended thread count based on the system and workload.
 
@@ -303,11 +513,21 @@ def recommended_thread_count(
     clamp_to_env:
         When ``True`` (the default) the result honours stricter environment
         hints such as ``OMP_NUM_THREADS`` if they are already configured.
+    consider_gpu:
+        When ``True`` (the default) host thread reservations derived from the
+        active WGPU adapter are respected so CPU BLAS workloads leave breathing
+        room for GPU command submission.
     """
 
     cpu_budget = system_cpu_count()
     if cpu_budget is None:
         return None
+
+    reservation = _compute_gpu_host_reservation(cpu_budget if consider_gpu else None)
+    global _GPU_HOST_RESERVATION
+    _GPU_HOST_RESERVATION = reservation
+    if consider_gpu and reservation is not None and reservation > 0:
+        cpu_budget = max(1, cpu_budget - min(reservation, cpu_budget - 1))
 
     # Honour explicit hints when they restrict the process.
     if clamp_to_env:
@@ -380,6 +600,7 @@ def synchronise_thread_hints(*, propagate: bool = False) -> int | None:
 
     if propagate:
         _propagate_thread_hint(hint)
+        _propagate_gpu_host_hint(gpu_host_thread_reservation(refresh=True))
     return hint
 
 
@@ -416,6 +637,7 @@ def auto_tune_threads(
 
     if propagate:
         _propagate_thread_hint(recommendation)
+        _propagate_gpu_host_hint(gpu_host_thread_reservation())
     return recommendation
 
 
