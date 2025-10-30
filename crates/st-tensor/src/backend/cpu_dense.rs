@@ -14,6 +14,8 @@ use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use spiral_config::determinism;
+
 const L2_TARGET_BYTES: usize = 64 * 1024;
 
 #[cfg(feature = "simd")]
@@ -186,29 +188,38 @@ fn compute_with_packed_block(
             let dst_prefix = &mut dst[..prefix_rows * cols];
             let row_tile = row_tile_size(prefix_rows, inner, tm);
 
-            dst_prefix
-                .par_chunks_mut(cols * row_tile)
-                .zip(lhs_prefix.par_chunks(row_tile * inner))
-                .for_each(|(dst_chunk, lhs_chunk)| {
-                    let local_rows = lhs_chunk.len() / inner;
-                    let mut packed_a = vec![0.0f32; tm * inner];
+            let apply = |(dst_chunk, lhs_chunk): (&mut [f32], &[f32])| {
+                let local_rows = lhs_chunk.len() / inner;
+                let mut packed_a = vec![0.0f32; tm * inner];
 
-                    for offset in (0..local_rows).step_by(tm) {
-                        let lhs_panel = &lhs_chunk[offset * inner..(offset + tm) * inner];
-                        pack_a_block(lhs_panel, inner, tm, &mut packed_a);
-                        unsafe {
-                            kernel(
-                                packed_a.as_ptr(),
-                                packed_block.as_ptr(),
-                                dst_chunk.as_mut_ptr().add(offset * cols + col_start),
-                                tm,
-                                inner,
-                                cols,
-                                inner,
-                            );
-                        }
+                for offset in (0..local_rows).step_by(tm) {
+                    let lhs_panel = &lhs_chunk[offset * inner..(offset + tm) * inner];
+                    pack_a_block(lhs_panel, inner, tm, &mut packed_a);
+                    unsafe {
+                        kernel(
+                            packed_a.as_ptr(),
+                            packed_block.as_ptr(),
+                            dst_chunk.as_mut_ptr().add(offset * cols + col_start),
+                            tm,
+                            inner,
+                            cols,
+                            inner,
+                        );
                     }
-                });
+                }
+            };
+
+            if determinism::lock_reduction_order() {
+                dst_prefix
+                    .chunks_mut(cols * row_tile)
+                    .zip(lhs_prefix.chunks(row_tile * inner))
+                    .for_each(|(dst_chunk, lhs_chunk)| apply((dst_chunk, lhs_chunk)));
+            } else {
+                dst_prefix
+                    .par_chunks_mut(cols * row_tile)
+                    .zip(lhs_prefix.par_chunks(row_tile * inner))
+                    .for_each(|(dst_chunk, lhs_chunk)| apply((dst_chunk, lhs_chunk)));
+            }
         }
 
         let processed_rows = (rows / tm) * tm;

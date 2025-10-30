@@ -1761,6 +1761,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "matchers"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1525a2a28c7f4fa0fc98bb91ae755d1e2d1505079e05539e35bc876b5d65ae9"
+dependencies = [
+ "regex-automata",
+]
+
+[[package]]
 name = "matrixcompare"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1942,6 +1951,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c196769dd60fd4f363e11d948139556a344e79d451aeb2fa2fd040738ef7691"
 dependencies = [
  "jni-sys",
+]
+
+[[package]]
+name = "nu-ansi-term"
+version = "0.50.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
+dependencies = [
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2784,6 +2802,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sharded-slab"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f40ca3c46823713e0d4209592e8d6e826aa57e928f09752619fc696c499637f6"
+dependencies = [
+ "lazy_static",
+]
+
+[[package]]
 name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2853,6 +2880,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "spiral-config"
+version = "0.1.0"
+dependencies = [
+ "rand",
+ "thiserror 2.0.17",
+ "tracing",
+ "tracing-chrome",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "spiral-hpo"
 version = "0.1.0"
 dependencies = [
@@ -2862,7 +2900,7 @@ dependencies = [
  "serde",
  "serde_json",
  "smallvec",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -2871,7 +2909,7 @@ version = "0.1.0"
 dependencies = [
  "rayon",
  "serde",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -2881,7 +2919,7 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tracing",
 ]
 
@@ -2892,18 +2930,20 @@ dependencies = [
  "once_cell",
  "rand",
  "serde",
+ "spiral-config",
  "st-core",
  "st-tensor",
  "st-vision",
  "tensorboard-rs",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "toml",
 ]
 
 [[package]]
 name = "spiraltorch-py"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
+ "julia-ffi-poc",
  "nalgebra 0.32.6",
  "ndarray",
  "num-complex",
@@ -2920,6 +2960,7 @@ dependencies = [
  "st-kdsl",
  "st-logic",
  "st-nn",
+ "st-qr-studio",
  "st-rec",
  "st-spiral-rl",
  "st-tensor",
@@ -2981,7 +3022,7 @@ dependencies = [
  "libloading 0.8.9",
  "serde",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -2995,7 +3036,7 @@ dependencies = [
  "rand",
  "st-tensor",
  "st-vision",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "wgpu",
 ]
 
@@ -3041,6 +3082,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "spiral-config",
  "st-backend-hip",
  "st-frac",
  "st-kdsl",
@@ -3048,8 +3090,9 @@ dependencies = [
  "st-softlogic",
  "st-tensor",
  "statrs",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "toml",
+ "tracing",
  "ureq",
  "uuid",
  "wgpu",
@@ -3078,7 +3121,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -3088,7 +3131,7 @@ dependencies = [
  "redis",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -3103,7 +3146,7 @@ dependencies = [
  "st-core",
  "st-softlogic",
  "st-tensor",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -3128,7 +3171,7 @@ dependencies = [
  "st-tensor",
  "st-text",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -3142,7 +3185,7 @@ dependencies = [
  "st-frac",
  "st-logic",
  "st-nn",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -3150,6 +3193,7 @@ name = "st-rec"
 version = "0.1.0"
 dependencies = [
  "rand",
+ "spiral-config",
  "st-kdsl",
  "st-spiral-rl",
  "st-tensor",
@@ -3168,6 +3212,7 @@ name = "st-spiral-rl"
 version = "0.1.0"
 dependencies = [
  "rand",
+ "spiral-config",
  "st-core",
  "st-tensor",
 ]
@@ -3192,6 +3237,7 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
+ "spiral-config",
  "st-frac",
  "st-kdsl",
  "wgpu",
@@ -3215,6 +3261,7 @@ dependencies = [
  "ndarray",
  "ordered-float",
  "rand",
+ "spiral-config",
  "st-backend-wgpu",
  "st-core",
  "st-frac",
@@ -3411,6 +3458,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "thread_local"
+version = "1.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f60246a4944f24f6e018aa17cdeffb7818b76356965d03b07d6a9886e8962185"
+dependencies = [
+ "cfg-if",
+]
+
+[[package]]
 name = "tiff"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3536,12 +3592,53 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-chrome"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf0a738ed5d6450a9fb96e86a23ad808de2b727fd1394585da5cdd6788ffe724"
+dependencies = [
+ "serde_json",
+ "tracing-core",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "tracing-core"
 version = "0.1.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9d12581f227e93f094d3af2ae690a574abb8a2b9b7a96e7cfe9647b2b617678"
 dependencies = [
  "once_cell",
+ "valuable",
+]
+
+[[package]]
+name = "tracing-log"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee855f1f400bd0e5c02d150ae5de3840039a3f54b025156404e34c23c03f47c3"
+dependencies = [
+ "log",
+ "once_cell",
+ "tracing-core",
+]
+
+[[package]]
+name = "tracing-subscriber"
+version = "0.3.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2054a14f5307d601f88daf0553e1cbf472acc4f2c51afab632431cdcd72124d5"
+dependencies = [
+ "matchers",
+ "nu-ansi-term",
+ "once_cell",
+ "regex-automata",
+ "sharded-slab",
+ "smallvec",
+ "thread_local",
+ "tracing",
+ "tracing-core",
+ "tracing-log",
 ]
 
 [[package]]
@@ -3648,6 +3745,12 @@ dependencies = [
  "js-sys",
  "wasm-bindgen",
 ]
+
+[[package]]
+name = "valuable"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
 name = "version_check"
