@@ -1,5 +1,9 @@
+mod audit;
+
+use audit::{AuditBundle, AuditTrail};
 use clap::{ArgAction, Args, Parser, Subcommand, ValueHint};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use st_core::telemetry::xai_report::{AttributionMetadata, AttributionReport};
 use st_nn::module::Module;
 use st_tensor::{PureResult, Tensor};
@@ -75,6 +79,38 @@ struct Cli {
     #[arg(long, global = true, value_hint = ValueHint::FilePath)]
     metadata_out: Option<PathBuf>,
 
+    /// Write the processed heatmap tensor as a DiskTensor JSON payload
+    #[arg(long, global = true, value_hint = ValueHint::FilePath)]
+    heatmap_out: Option<PathBuf>,
+
+    /// Emit attribution statistics to a standalone JSON document for downstream tooling
+    #[arg(long, global = true, value_hint = ValueHint::FilePath)]
+    stats_out: Option<PathBuf>,
+
+    /// Base tensor used when constructing overlay artefacts from the generated heatmap
+    #[arg(long, global = true, value_hint = ValueHint::FilePath)]
+    overlay_base: Option<PathBuf>,
+
+    /// Alpha applied when blending the generated heatmap with the provided base tensor
+    #[arg(long, global = true, default_value_t = 0.35)]
+    overlay_alpha: f32,
+
+    /// Destination for the blended heatmap overlay artefact
+    #[arg(long, global = true, value_hint = ValueHint::FilePath)]
+    overlay_out: Option<PathBuf>,
+
+    /// Destination for the threshold-gated overlay artefact
+    #[arg(long, global = true, value_hint = ValueHint::FilePath)]
+    gated_overlay_out: Option<PathBuf>,
+
+    /// Write a structured audit trail describing the CLI execution plan
+    #[arg(long, global = true, value_hint = ValueHint::FilePath)]
+    audit_out: Option<PathBuf>,
+
+    /// Embed an audit summary and self-check results into the attribution metadata
+    #[arg(long, global = true)]
+    embed_audit_summary: bool,
+
     /// Apply an odd-sized box blur to smooth the final heatmap before emitting it
     #[arg(long, global = true, value_hint = ValueHint::Other)]
     smooth_kernel: Option<usize>,
@@ -102,6 +138,9 @@ enum Command {
 
     /// Run Integrated Gradients using an optional linear probe
     IntegratedGradients(IntegratedGradientsArgs),
+
+    /// Review an existing audit bundle and verify its self-checks
+    AuditReview(AuditReviewArgs),
 }
 
 #[derive(Args)]
@@ -178,6 +217,21 @@ struct IntegratedGradientsArgs {
     output: PathBuf,
 }
 
+#[derive(Args)]
+struct AuditReviewArgs {
+    /// Path to the audit bundle JSON file to review
+    #[arg(long, value_hint = ValueHint::FilePath)]
+    input: PathBuf,
+
+    /// Optional destination to write the review report as JSON (defaults to STDOUT)
+    #[arg(long, value_hint = ValueHint::FilePath)]
+    output: Option<PathBuf>,
+
+    /// Pretty-print the review JSON when writing to STDOUT or disk
+    #[arg(long)]
+    pretty: bool,
+}
+
 fn main() {
     if let Err(err) = try_main() {
         eprintln!("error: {err}");
@@ -187,23 +241,148 @@ fn main() {
 
 fn try_main() -> Result<()> {
     let cli = Cli::parse();
+    let mut audit = AuditTrail::new();
+    audit.record_with_value(
+        "cli.parsed",
+        json!({
+            "include_stats": cli.include_stats,
+            "print_stats": cli.print_stats,
+            "metadata_out": cli.metadata_out.is_some(),
+            "heatmap_out": cli.heatmap_out.is_some(),
+            "stats_out": cli.stats_out.is_some(),
+            "overlay_base": cli.overlay_base.is_some(),
+            "overlay_out": cli.overlay_out.is_some(),
+            "gated_overlay_out": cli.gated_overlay_out.is_some(),
+            "focus_mask_out": cli.focus_mask_out.is_some(),
+            "smooth_kernel": cli.smooth_kernel,
+            "normalise_output": cli.normalise_output,
+            "focus_threshold": cli.focus_threshold,
+            "audit_out": cli.audit_out.is_some(),
+            "embed_audit_summary": cli.embed_audit_summary,
+        }),
+    );
+
+    if let Some(path) = cli.audit_out.as_ref() {
+        audit.record_with_value("io.write.audit", json!({ "path": path }));
+    }
+
     match &cli.command {
         Command::GradCam(args) => {
-            let output = run_grad_cam(args)?;
-            finalise_output(&cli, output, &args.output)
+            audit.record_with_value(
+                "cli.command",
+                json!({
+                    "name": "grad-cam",
+                    "layer": args.layer,
+                    "height": args.height,
+                    "width": args.width,
+                }),
+            );
+            let output = run_grad_cam(args, &mut audit)?;
+            finalise_output(&cli, output, &args.output, &mut audit)?;
         }
         Command::IntegratedGradients(args) => {
-            let output = run_integrated_gradients_cli(args)?;
-            finalise_output(&cli, output, &args.output)
+            audit.record_with_value(
+                "cli.command",
+                json!({
+                    "name": "integrated-gradients",
+                    "layer": args.layer,
+                    "steps": args.steps,
+                    "target": args.target,
+                }),
+            );
+            let output = run_integrated_gradients_cli(args, &mut audit)?;
+            finalise_output(&cli, output, &args.output, &mut audit)?;
+        }
+        Command::AuditReview(args) => {
+            audit.record_with_value(
+                "cli.command",
+                json!({
+                    "name": "audit-review",
+                    "input": args.input,
+                    "output": args.output,
+                    "pretty": args.pretty,
+                }),
+            );
+            run_audit_review(args, &mut audit)?;
         }
     }
+
+    let bundle = audit.finish();
+
+    if let Some(path) = cli.audit_out.as_ref() {
+        write_audit_report(&bundle, path)?;
+    }
+
+    Ok(())
 }
 
-fn finalise_output(cli: &Cli, mut output: AttributionOutput, destination: &Path) -> Result<()> {
-    output = apply_post_processing(cli, output)?;
+fn run_audit_review(args: &AuditReviewArgs, audit: &mut AuditTrail) -> Result<()> {
+    let bundle = read_audit_bundle(&args.input, audit)?;
+    let review = audit::review_bundle(&bundle);
+    audit.record_with_value(
+        "audit.review.summary",
+        json!({
+            "matches": review.summary_matches,
+            "issues": review.issues.len(),
+        }),
+    );
 
-    let statistics = if cli.include_stats || cli.print_stats {
-        Some(output.statistics())
+    let payload = if args.pretty {
+        serde_json::to_string_pretty(&review)?
+    } else {
+        serde_json::to_string(&review)?
+    };
+
+    if let Some(path) = args.output.as_ref() {
+        ensure_parent_dir(path)?;
+        fs::write(path, &payload)?;
+        audit.record_with_value("io.write.audit_review", json!({ "path": path }));
+    } else {
+        println!("{payload}");
+        audit.record("audit.review.stdout_emitted");
+    }
+
+    Ok(())
+}
+
+fn finalise_output(
+    cli: &Cli,
+    mut output: AttributionOutput,
+    destination: &Path,
+    audit: &mut AuditTrail,
+) -> Result<()> {
+    output = apply_post_processing(cli, output, audit)?;
+
+    let overlay_requested = cli.overlay_out.is_some() || cli.gated_overlay_out.is_some();
+
+    if overlay_requested && cli.overlay_base.is_none() {
+        return Err(Box::new(io::Error::new(
+            ErrorKind::InvalidInput,
+            "--overlay-base is required when emitting overlay artefacts",
+        )));
+    }
+
+    if (overlay_requested || cli.overlay_base.is_some())
+        && (!(0.0..=1.0).contains(&cli.overlay_alpha) || !cli.overlay_alpha.is_finite())
+    {
+        return Err(Box::new(io::Error::new(
+            ErrorKind::InvalidInput,
+            "--overlay-alpha must be between 0.0 and 1.0",
+        )));
+    }
+
+    let statistics = if cli.include_stats || cli.print_stats || cli.stats_out.is_some() {
+        let stats = output.statistics();
+        audit.record_with_value(
+            "statistics.computed",
+            json!({
+                "min": stats.min,
+                "max": stats.max,
+                "mean": stats.mean,
+                "entropy": stats.entropy,
+            }),
+        );
+        Some(stats)
     } else {
         None
     };
@@ -211,10 +390,119 @@ fn finalise_output(cli: &Cli, mut output: AttributionOutput, destination: &Path)
     if let Some(stats) = statistics.as_ref() {
         if cli.include_stats {
             attach_statistics(&mut output.metadata, stats);
+            audit.record("metadata.statistics_embedded");
         }
         if cli.print_stats {
             print_statistics(stats, &output.metadata);
+            audit.record("statistics.printed");
         }
+    }
+
+    let overlay_base = if overlay_requested {
+        audit.record("overlay.requested");
+        Some(read_tensor(
+            audit,
+            "io.read.overlay_base",
+            cli.overlay_base
+                .as_ref()
+                .expect("overlay base checked above"),
+        )?)
+    } else {
+        None
+    };
+
+    let overlay_tensor =
+        if let (Some(base), Some(path)) = (overlay_base.as_ref(), cli.overlay_out.as_ref()) {
+            let overlay = output
+                .overlay(base, cli.overlay_alpha)
+                .map_err(|err| Box::new(err) as DynError)?;
+            audit.record_with_value(
+                "overlay.generated",
+                json!({ "path": path, "alpha": cli.overlay_alpha }),
+            );
+            Some((overlay, path.clone()))
+        } else {
+            None
+        };
+
+    let gated_overlay_tensor =
+        if let (Some(base), Some(path)) = (overlay_base.as_ref(), cli.gated_overlay_out.as_ref()) {
+            let threshold = resolve_focus_threshold(cli).unwrap_or(0.5);
+            let overlay = output
+                .gated_overlay(base, threshold, cli.overlay_alpha)
+                .map_err(|err| Box::new(err) as DynError)?;
+            audit.record_with_value(
+                "overlay.gated_generated",
+                json!({
+                    "path": path,
+                    "alpha": cli.overlay_alpha,
+                    "threshold": threshold,
+                }),
+            );
+            Some((overlay, path.clone()))
+        } else {
+            None
+        };
+
+    let focus_mask = if let Some(mask_path) = cli.focus_mask_out.as_ref() {
+        let threshold = resolve_focus_threshold(cli).unwrap_or(0.5);
+        audit.record("focus_mask.requested");
+        let mask = output
+            .focus_mask(threshold)
+            .map_err(|err| Box::new(err) as DynError)?;
+        audit.record_with_value(
+            "focus_mask.generated",
+            json!({ "threshold": threshold, "path": mask_path }),
+        );
+        Some((mask, mask_path.clone()))
+    } else {
+        None
+    };
+
+    if statistics.is_some() {
+        if let Some(path) = cli.stats_out.as_ref() {
+            audit.record_with_value("io.write.stats", json!({ "path": path }));
+        }
+    }
+
+    if let Some(path) = cli.heatmap_out.as_ref() {
+        audit.record_with_value("io.write.heatmap", json!({ "path": path }));
+    }
+
+    if let Some(path) = cli.metadata_out.as_ref() {
+        audit.record_with_value("io.write.metadata", json!({ "path": path }));
+    }
+
+    if let Some((_, path)) = overlay_tensor.as_ref() {
+        audit.record_with_value("io.write.overlay", json!({ "path": path }));
+    }
+
+    if let Some((_, path)) = gated_overlay_tensor.as_ref() {
+        audit.record_with_value("io.write.gated_overlay", json!({ "path": path }));
+    }
+
+    if let Some((_, path)) = focus_mask.as_ref() {
+        audit.record_with_value("io.write.focus_mask", json!({ "path": path }));
+    }
+
+    audit.record_with_value("io.write.report", json!({ "path": destination }));
+
+    let review = audit.review();
+    if cli.embed_audit_summary {
+        output
+            .metadata
+            .insert_extra("audit_summary", serde_json::to_value(&review.summary)?);
+        output.metadata.insert_extra(
+            "audit_self_checks",
+            serde_json::to_value(&review.self_checks)?,
+        );
+        audit.record_with_value(
+            "metadata.audit_summary_embedded",
+            json!({
+                "total_events": review.summary.total_events,
+                "checks": review.self_checks.len(),
+            }),
+        );
     }
 
     let report = output.to_report();
@@ -224,18 +512,38 @@ fn finalise_output(cli: &Cli, mut output: AttributionOutput, destination: &Path)
         write_metadata(&output.metadata, path)?;
     }
 
-    if let Some(mask_path) = cli.focus_mask_out.as_ref() {
-        let threshold = resolve_focus_threshold(cli).unwrap_or(0.5);
-        let mask = output
-            .focus_mask(threshold)
-            .map_err(|err| Box::new(err) as DynError)?;
-        write_tensor_json(&mask, mask_path)?;
+    if let Some(path) = cli.heatmap_out.as_ref() {
+        write_tensor_json(&output.map, path)?;
     }
+
+    if let Some((overlay, path)) = overlay_tensor.as_ref() {
+        write_tensor_json(overlay, path)?;
+    }
+
+    if let Some((overlay, path)) = gated_overlay_tensor.as_ref() {
+        write_tensor_json(overlay, path)?;
+    }
+
+    if let Some(stats) = statistics.as_ref() {
+        if let Some(path) = cli.stats_out.as_ref() {
+            write_statistics(stats, path)?;
+        }
+    }
+
+    if let Some((mask, path)) = focus_mask.as_ref() {
+        write_tensor_json(mask, path)?;
+    }
+
+    audit.record("finalise.completed");
 
     Ok(())
 }
 
-fn apply_post_processing(cli: &Cli, output: AttributionOutput) -> Result<AttributionOutput> {
+fn apply_post_processing(
+    cli: &Cli,
+    output: AttributionOutput,
+    audit: &mut AuditTrail,
+) -> Result<AttributionOutput> {
     if let Some(threshold) = resolve_focus_threshold(cli) {
         if !threshold.is_finite() {
             return Err(Box::new(io::Error::new(
@@ -243,6 +551,7 @@ fn apply_post_processing(cli: &Cli, output: AttributionOutput) -> Result<Attribu
                 "--focus-threshold must be a finite number",
             )));
         }
+        audit.record_with_value("postprocess.focus_threshold", json!({ "value": threshold }));
     }
 
     let mut output = output;
@@ -261,6 +570,7 @@ fn apply_post_processing(cli: &Cli, output: AttributionOutput) -> Result<Attribu
             .metadata
             .insert_extra_number("smooth_kernel", kernel as f64);
         output = smoothed;
+        audit.record_with_value("postprocess.smoothed", json!({ "kernel": kernel }));
     }
 
     if cli.normalise_output {
@@ -271,6 +581,7 @@ fn apply_post_processing(cli: &Cli, output: AttributionOutput) -> Result<Attribu
             .metadata
             .insert_extra_flag("normalised_output", true);
         output = normalised;
+        audit.record("postprocess.normalised");
     }
 
     if let Some(threshold) = resolve_focus_threshold(cli) {
@@ -283,11 +594,16 @@ fn apply_post_processing(cli: &Cli, output: AttributionOutput) -> Result<Attribu
 }
 
 fn resolve_focus_threshold(cli: &Cli) -> Option<f32> {
-    cli.focus_threshold
-        .or_else(|| cli.focus_mask_out.as_ref().map(|_| 0.5))
+    cli.focus_threshold.or_else(|| {
+        if cli.focus_mask_out.is_some() || cli.gated_overlay_out.is_some() {
+            Some(0.5)
+        } else {
+            None
+        }
+    })
 }
 
-fn run_grad_cam(args: &GradCamArgs) -> Result<AttributionOutput> {
+fn run_grad_cam(args: &GradCamArgs, audit: &mut AuditTrail) -> Result<AttributionOutput> {
     if args.height == 0 {
         return Err(Box::new(io::Error::new(
             ErrorKind::InvalidInput,
@@ -300,8 +616,8 @@ fn run_grad_cam(args: &GradCamArgs) -> Result<AttributionOutput> {
             "--width must be greater than zero",
         )));
     }
-    let activations = read_tensor(&args.activations)?;
-    let gradients = read_tensor(&args.gradients)?;
+    let activations = read_tensor(audit, "io.read.activations", &args.activations)?;
+    let gradients = read_tensor(audit, "io.read.gradients", &args.gradients)?;
     let config = GradCamConfig {
         height: args.height,
         width: args.width,
@@ -320,20 +636,31 @@ fn run_grad_cam(args: &GradCamArgs) -> Result<AttributionOutput> {
     metadata.insert_extra_flag("apply_relu", config.apply_relu);
     metadata.insert_extra_number("epsilon", config.epsilon as f64);
     metadata.insert_extra_flag("normalise", config.normalise);
+    audit.record_with_value(
+        "grad_cam.completed",
+        json!({
+            "height": args.height,
+            "width": args.width,
+            "apply_relu": config.apply_relu,
+        }),
+    );
     Ok(AttributionOutput::new(heatmap, metadata))
 }
 
-fn run_integrated_gradients_cli(args: &IntegratedGradientsArgs) -> Result<AttributionOutput> {
+fn run_integrated_gradients_cli(
+    args: &IntegratedGradientsArgs,
+    audit: &mut AuditTrail,
+) -> Result<AttributionOutput> {
     if args.steps == 0 {
         return Err(Box::new(io::Error::new(
             ErrorKind::InvalidInput,
             "--steps must be greater than zero",
         )));
     }
-    let input = read_tensor(&args.input)?;
-    let baseline = read_tensor(&args.baseline)?;
+    let input = read_tensor(audit, "io.read.input", &args.input)?;
+    let baseline = read_tensor(audit, "io.read.baseline", &args.baseline)?;
     let weights = match &args.weights {
-        Some(path) => Some(read_tensor(path)?),
+        Some(path) => Some(read_tensor(audit, "io.read.weights", path)?),
         None => None,
     };
     let mut model = CliModel::from_weights(weights)?;
@@ -357,6 +684,15 @@ fn run_integrated_gradients_cli(args: &IntegratedGradientsArgs) -> Result<Attrib
         } else {
             "identity"
         },
+    );
+
+    audit.record_with_value(
+        "integrated_gradients.completed",
+        json!({
+            "steps": args.steps,
+            "target": args.target,
+            "target_label": args.target_label,
+        }),
     );
 
     Ok(attribution)
@@ -386,10 +722,20 @@ fn print_statistics(stats: &AttributionStatistics, metadata: &AttributionMetadat
     );
 }
 
-fn read_tensor(path: &Path) -> Result<Tensor> {
+fn read_tensor(audit: &mut AuditTrail, stage: &str, path: &Path) -> Result<Tensor> {
     let contents = fs::read_to_string(path)?;
     let disk: DiskTensor = serde_json::from_str(&contents)?;
-    disk.into_tensor()
+    let tensor = disk.into_tensor()?;
+    let (rows, cols) = tensor.shape();
+    audit.record_with_value(
+        stage,
+        json!({
+            "path": path,
+            "rows": rows,
+            "cols": cols,
+        }),
+    );
+    Ok(tensor)
 }
 
 fn write_report(report: &AttributionReport, path: &Path) -> Result<()> {
@@ -412,6 +758,53 @@ fn write_tensor_json(tensor: &Tensor, path: &Path) -> Result<()> {
     let payload = serde_json::to_string_pretty(&disk)?;
     fs::write(path, payload)?;
     Ok(())
+}
+
+#[derive(Serialize)]
+struct StatisticsFile {
+    min: f32,
+    max: f32,
+    mean: f32,
+    entropy: f32,
+}
+
+impl From<&AttributionStatistics> for StatisticsFile {
+    fn from(stats: &AttributionStatistics) -> Self {
+        Self {
+            min: stats.min,
+            max: stats.max,
+            mean: stats.mean,
+            entropy: stats.entropy,
+        }
+    }
+}
+
+fn write_statistics(stats: &AttributionStatistics, path: &Path) -> Result<()> {
+    ensure_parent_dir(path)?;
+    let payload = serde_json::to_string_pretty(&StatisticsFile::from(stats))?;
+    fs::write(path, payload)?;
+    Ok(())
+}
+
+fn write_audit_report(bundle: &AuditBundle, path: &Path) -> Result<()> {
+    ensure_parent_dir(path)?;
+    let payload = serde_json::to_string_pretty(bundle)?;
+    fs::write(path, payload)?;
+    Ok(())
+}
+
+fn read_audit_bundle(path: &Path, audit: &mut AuditTrail) -> Result<AuditBundle> {
+    audit.record_with_value("io.read.audit", json!({ "path": path }));
+    let contents = fs::read_to_string(path)?;
+    let bundle: AuditBundle = serde_json::from_str(&contents)?;
+    audit.record_with_value(
+        "audit.review.bundle_loaded",
+        json!({
+            "events": bundle.events.len(),
+            "recorded_self_checks": bundle.self_checks.len(),
+        }),
+    );
+    Ok(bundle)
 }
 
 fn ensure_parent_dir(path: &Path) -> io::Result<()> {
