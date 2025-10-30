@@ -19,6 +19,8 @@ use super::{
 };
 use core::f32::consts::PI;
 use st_frac::fft::{self, Complex32};
+use st_frac::mellin::MellinLogGrid;
+use st_frac::mellin_types::ComplexScalar;
 
 /// Streaming Z-space normaliser that keeps canvas updates stable even when the
 /// underlying tensor swings across vastly different value ranges.
@@ -1500,6 +1502,46 @@ pub struct FractalCanvas {
     height: usize,
 }
 
+#[derive(Clone, Debug)]
+pub struct InfiniteZSpacePatch {
+    dimension: f32,
+    zoom: f32,
+    support: (f32, f32),
+    mellin_weights: Vec<f32>,
+    density: Vec<f32>,
+}
+
+impl InfiniteZSpacePatch {
+    pub fn dimension(&self) -> f32 {
+        self.dimension
+    }
+
+    pub fn zoom(&self) -> f32 {
+        self.zoom
+    }
+
+    pub fn support(&self) -> (f32, f32) {
+        self.support
+    }
+
+    pub fn mellin_weights(&self) -> &[f32] {
+        &self.mellin_weights
+    }
+
+    pub fn density(&self) -> &[f32] {
+        &self.density
+    }
+
+    pub fn eta_bar(&self) -> f32 {
+        if self.density.is_empty() {
+            return 0.0;
+        }
+        let total: f32 = self.density.iter().copied().sum();
+        let mean = total / self.density.len() as f32;
+        mean.tanh().abs()
+    }
+}
+
 impl FractalCanvas {
     /// Construct a projector-backed canvas with the requested queue capacity.
     pub fn new(capacity: usize, width: usize, height: usize) -> PureResult<Self> {
@@ -1567,6 +1609,58 @@ impl FractalCanvas {
     ) -> PureResult<()> {
         let patch = FractalPatch::new(relation, coherence, tension, depth)?;
         self.projector.scheduler().push(patch)
+    }
+
+    pub fn emit_zspace_patch(
+        &self,
+        dimension: f32,
+        zoom: f32,
+        steps: usize,
+    ) -> PureResult<InfiniteZSpacePatch> {
+        if !dimension.is_finite() {
+            return Err(TensorError::InvalidValue { label: "dimension" });
+        }
+        let dimension = dimension.max(0.5);
+        let steps = steps.max(4);
+        let zoom = if zoom.is_finite() {
+            zoom.max(1.0)
+        } else {
+            1024.0
+        };
+        let log_start = -zoom.abs().ln();
+        let log_step = (zoom.abs().ln().abs() + 1.0) / steps as f32;
+        let grid = MellinLogGrid::from_function(log_start, log_step, steps, |t| {
+            let radius = (dimension + t.abs()).sqrt();
+            let phase = (dimension * t).tanh();
+            ComplexScalar::new(radius.cos(), phase)
+        })
+        .map_err(|err| TensorError::BackendFailure {
+            backend: "mellin",
+            message: err.to_string(),
+        })?;
+        let support = grid.support();
+        let mut density = Vec::with_capacity(steps);
+        for (idx, sample) in grid.samples().iter().enumerate() {
+            let magnitude = (sample.re.powi(2) + sample.im.powi(2)).sqrt() as f32;
+            let scale = ((idx + 1) as f32 / steps as f32).powf(dimension / 2.0);
+            density.push(magnitude * scale);
+        }
+        let mellin_weights: Vec<f32> = grid.weights().iter().copied().collect();
+        Ok(InfiniteZSpacePatch {
+            dimension,
+            zoom,
+            support,
+            mellin_weights,
+            density,
+        })
+    }
+
+    pub fn emit_zspace_infinite(&self, dimension: f32) -> PureResult<InfiniteZSpacePatch> {
+        self.emit_zspace_patch(dimension, f32::INFINITY, 96)
+    }
+
+    pub fn emit_infinite_z(&self, dimension: f32, zoom: f32) -> PureResult<InfiniteZSpacePatch> {
+        self.emit_zspace_patch(dimension, zoom, 96)
     }
 }
 
@@ -2766,6 +2860,17 @@ mod tests {
     fn tensor_with_shape(rows: usize, cols: usize, values: &[f32]) -> Tensor {
         assert_eq!(rows * cols, values.len());
         Tensor::from_vec(rows, cols, values.to_vec()).unwrap()
+    }
+
+    #[test]
+    fn emit_zspace_infinite_emits_density() {
+        let canvas = FractalCanvas::new(4, 32, 32).expect("canvas");
+        let patch = canvas
+            .emit_zspace_infinite(2.618)
+            .expect("infinite z patch");
+        assert!(patch.eta_bar() >= 0.0);
+        assert_eq!(patch.mellin_weights().len(), patch.density().len());
+        assert!(patch.density().iter().any(|value| value.is_finite()));
     }
 
     #[test]

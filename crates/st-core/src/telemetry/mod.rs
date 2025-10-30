@@ -28,6 +28,7 @@ pub mod hub;
 pub mod maintainer;
 pub mod monitoring;
 pub mod region_visualizer;
+pub mod trace_init;
 pub mod xai_report;
 pub mod zspace_region;
 
