@@ -47,6 +47,33 @@ assert_eq!(embedding.shape().1, backbone.output_features());
 
 The `ViTBackbone` exports `load_weights_json`/`load_weights_bincode` helpers, accepts patch/grid tweaks, and emits CLS-token embeddings by default. `ConvNeXtBackbone` mirrors ConvNeXt-T style stage depths, returning flattened feature maps ready for detection heads or Z-space projection.
 
+Need a CIFAR-style network? `ResNetConfig::resnet56_cifar(true)` wires a 56-layer backbone with SpiralTorch's learnable skip scalers and a default **slip schedule** that eases each residual bridge in before letting it run at full strength. If you opt out of the learnable gates, the helper leaves skip slip disabled so the baseline topology stays untouched. Override the schedule to taste by swapping in your own `SkipSlipSchedule`:
+
+```rust
+use st_vision::models::{ResNetConfig, ResNetBackbone, SkipSlipSchedule};
+
+let mut config = ResNetConfig::resnet56_cifar(true);
+config.skip_slip = Some(
+    SkipSlipSchedule::linear(0.25, 1.0)
+        .per_stage()
+        .with_power(1.2),
+);
+config.skip_init = 0.95; // softly dampen residuals at init
+let mut resnet56 = ResNetBackbone::new(config)?;
+let logits = resnet56.forward(&input)?;
+// gradients propagate into each skip gate when calling backward(...)
+```
+
+Curious about the exact slip ramp? `SkipSlipSchedule::preview` reveals the factors that will be applied to every block, grouped by stage:
+
+```rust
+let preview = SkipSlipSchedule::linear(0.2, 1.0)
+    .per_stage()
+    .preview(&[9, 9, 9])?;
+assert_eq!(preview[0][0], 0.2); // first block in stage 0 starts softly
+assert!((preview.last().unwrap().last().unwrap() - 1.0).abs() < 1e-6);
+```
+
 ### Temporal resonance accumulation
 
 Temporal continuity lets SpiralTorchVision respond to motion and lingering cues without reprocessing an entire video buffer. Each frame updates a `ZSpaceVolume` in-place with `accumulate`, applying an exponential moving average (`alpha` near `0.2` preserves the past, `alpha` near `1.0` chases the latest frame). The resulting volume feeds a `TemporalResonanceBuffer`, which smooths the depth attention profile before collapse:
