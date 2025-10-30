@@ -10,6 +10,9 @@ use std::path::PathBuf;
 
 use crate::backend::device_caps::{BackendKind, DeviceCaps};
 use crate::runtime::blackcat::{BlackCatRuntime, StepMetrics};
+use crate::telemetry::trace_init;
+use spiral_config::determinism;
+use tracing::{debug, info, instrument};
 
 /// Autopilot operating modes controlling how aggressively tuning overrides
 /// user supplied hints.
@@ -71,23 +74,33 @@ pub struct Autopilot {
 }
 
 impl Autopilot {
+    #[instrument(skip(runtime, cfg), fields(device = ?caps.backend, feat_dim = cfg.feat_dim))]
     pub fn new(caps: DeviceCaps, cfg: AutoConfig, runtime: BlackCatRuntime) -> Self {
+        trace_init::init_tracing();
         let key = make_key(&caps);
         let profile = load_profile(&key).unwrap_or_default();
-        Self {
+        let mode = if determinism::lock_scheduler() && cfg.mode == AutoMode::Auto {
+            AutoMode::Hint
+        } else {
+            cfg.mode
+        };
+        let autopilot = Self {
             caps,
             runtime,
             profile_key: key,
             profile,
             picks: HashMap::new(),
-            mode: cfg.mode,
+            mode,
             feat_dim: cfg.feat_dim.max(1),
-        }
+        };
+        info!(profile_key = %autopilot.profile_key, mode = ?autopilot.mode, "autopilot initialised");
+        autopilot
     }
 
     /// Builds a contextual feature vector that joins workload statistics with
     /// device properties. The vector is padded or truncated to the configured
     /// feature dimension.
+    #[instrument(skip(self, extras), fields(batch = batch, tiles = tiles, depth = depth))]
     pub fn build_context(
         &self,
         batch: u32,
@@ -115,6 +128,7 @@ impl Autopilot {
     }
 
     /// Suggests knob values for the provided context.
+    #[instrument(skip(self, context))]
     pub fn suggest(&mut self, context: Vec<f64>) -> &HashMap<String, String> {
         if self.mode == AutoMode::Off {
             self.picks.clear();
@@ -129,11 +143,13 @@ impl Autopilot {
                     .or_insert_with(|| choice.clone());
             }
         }
+        debug!(picks = ?self.picks, "autopilot suggestions updated");
         &self.picks
     }
 
     /// Reports the observed metrics back to the runtime and persists an update
     /// to the on-disk profile.
+    #[instrument(skip(self, metrics), fields(step_time = metrics.step_time_ms, mem_peak = metrics.mem_peak_mb, retry_rate = metrics.retry_rate))]
     pub fn report(&mut self, metrics: &StepMetrics) {
         if self.mode == AutoMode::Off {
             return;
@@ -142,6 +158,7 @@ impl Autopilot {
         update_profile_stats(&mut self.profile, metrics);
         self.profile.chosen = self.picks.clone();
         let _ = save_profile(&self.profile_key, &self.profile);
+        debug!(profile_key = %self.profile_key, "autopilot metrics reported");
     }
 
     /// Exposes the underlying runtime for advanced integrations.
