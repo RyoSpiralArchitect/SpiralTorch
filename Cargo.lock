@@ -2930,12 +2930,11 @@ dependencies = [
  "once_cell",
  "rand",
  "serde",
- "spiral-config",
  "st-core",
  "st-tensor",
  "st-vision",
  "tensorboard-rs",
- "thiserror 2.0.17",
+ "thiserror 1.0.69",
  "toml",
 ]
 
@@ -3166,6 +3165,7 @@ dependencies = [
  "rand_distr",
  "serde",
  "serde_json",
+ "spiral-config",
  "st-core",
  "st-frac",
  "st-tensor",
