@@ -9,6 +9,7 @@ pub mod fractional;
 
 pub mod backend;
 pub mod dlpack;
+mod hardmax;
 mod memory;
 
 #[cfg(feature = "wgpu_frac")]
@@ -26,6 +27,9 @@ mod pure;
 
 #[doc = "Re-exported for convenience."]
 pub use pure::*;
+
+#[doc = "Expose the hardmax backend selector."]
+pub use hardmax::HardmaxBackend;
 
 #[doc = "Re-exported for convenience."]
 pub use pure::wasm_canvas;
