@@ -2134,22 +2134,30 @@ the **HyperSurprise** pipeline. Attach a `LossStdTrigger` and SpiralTorch inject
 η̄ pulses whenever the episode's return standard deviation breaches the guard:
 
 ```rust
-use st_spiral_rl::{LossStdTrigger, SpiralPolicyGradient};
+use st_spiral_rl::{HyperSurpriseConfig, LossStdTrigger, SpiralPolicyGradient};
 
 let mut policy = SpiralPolicyGradient::new(4, 2, 0.05, 0.9)?;
-policy.attach_hyper_surprise(
+policy.attach_hyper_surprise_with_config(
     LossStdTrigger::new(0.12)
         .with_warmup(2)
         .with_max_ratio(2.5),
+    HyperSurpriseConfig::default()
+        .with_smoothing(0.35)
+        .with_relaxation(0.45)
+        .with_lr_floor(1e-4)
+        .with_ratio_smoothing(0.55)
+        .with_cooldown_steps(3),
 );
 // ...record transitions...
 let report = policy.finish_episode()?;
 if let Some(surprise) = &report.hyper_surprise {
     println!(
-        "σ={:.3} inject={:.2} η̄={:.3}",
+        "σ={:.3} inject={:.2} η̄={:.3} gauge={:.2} lr={:.4}",
         surprise.loss_std,
         surprise.inject_ratio,
-        surprise.eta_bar
+        surprise.eta_bar,
+        surprise.gauge,
+        surprise.learning_rate
     );
 }
 ```
@@ -2160,14 +2168,19 @@ the episode update. `SpiralPolicyGradient::last_hyper_surprise()` exposes the
 latest packet so telemetry dashboards can correlate η̄ spikes with emergent
 behaviour.
 
-The controller now threads Ramanujan's π synthesis and the Λ₂₄ packing density
-into its smoothing loop while auto-rewriting its own clamps. Rank, packing
-pressure, and scale histories sit on rolling windows so noisy small-batch runs
-settle quickly, and the `trainer.telemetry()` surface mirrors the same values to
-spot drift. `GeometryFeedback` keeps `max_scale` inside the recommended `[2, 3]`
-band, raises the floor when rank collapses, and eases the Leech density weight
-if pressure over-saturates—giving you a self-tuning geometric metronome instead
-of a static multiplier.
+`HyperSurpriseConfig` now includes builder helpers for smoothing, relaxation
+back to the baseline gauge, ratio smoothing, cooldown windows, gauge floors, and
+floor clamps on both η̄ and the learning rate. These guards keep legacy
+pipelines untouched (defaults mirror the previous behaviour) while unlocking
+telemetry-rich packets via `HyperSurpriseSignal::gauge` and
+`HyperSurpriseSignal::learning_rate`.
+
+The controller uses the ratio smoother to bleed off residual pulses instead of
+snapping gauge/η̄ immediately back to baseline, and the cooldown window prevents
+short bursts of volatility from hammering the learner every frame. Relaxation
+lets you pick how gently the gauge returns to neutral once the surprise subsides
+so you can trade responsiveness for smoothness depending on your training
+regime.
 
 Chrono loop signals now feed directly into the controller: every
 `SpiralSession::resonate_over_time` call plants a `ChronoLoopSignal` in the
