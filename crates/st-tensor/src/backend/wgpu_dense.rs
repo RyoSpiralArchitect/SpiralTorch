@@ -2615,6 +2615,7 @@ struct SoftmaxZSpaceParams {
 }
 
 const LAYOUT_FLAG_CHIMERA: u32 = 1 << 0;
+const SOFTMAX_FLAG_HARDMAX: u32 = 1 << 1;
 const SOFTMAX_AUTOTUNE_REVISION: u64 = 2;
 const SOFTMAX_AUTOTUNE_WARMUP: usize = 1;
 const SOFTMAX_AUTOTUNE_SAMPLES: usize = 3;
@@ -4377,6 +4378,78 @@ pub fn row_softmax(
     readback_f32(device, queue, &output_buf, rows * cols)
 }
 
+pub fn row_hardmax(
+    input: &[f32],
+    rows: usize,
+    cols: usize,
+    layout: Layout,
+) -> Result<Vec<f32>, String> {
+    if rows == 0 || cols == 0 {
+        return Err("matrix dimensions must be positive".into());
+    }
+    if input.len() != rows * cols {
+        return Err(format!(
+            "input length mismatch: expected {} elements, got {}",
+            rows * cols,
+            input.len()
+        ));
+    }
+
+    let rows_u32 = u32::try_from(rows).map_err(|_| "rows exceed u32::MAX".to_string())?;
+    let cols_u32 = u32::try_from(cols).map_err(|_| "cols exceed u32::MAX".to_string())?;
+
+    let ctx = dense_context()?;
+    if !ctx.supports_softmax() {
+        return Err("wgpu device lacks subgroup row softmax support".into());
+    }
+
+    let mut layout_desc = SoftmaxLayoutDesc::from_layout(layout, rows, cols)?;
+    layout_desc.flags |= SOFTMAX_FLAG_HARDMAX;
+
+    let device = ctx.device();
+    let queue = ctx.queue();
+
+    let input_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.hardmax.input"),
+        contents: bytemuck::cast_slice(input),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let output_buf = allocate_output(device, "st.tensor.wgpu_dense.hardmax.output", rows * cols);
+    let params = RowSoftmaxParams {
+        rows: rows_u32,
+        cols: cols_u32,
+        in_stride: layout_desc.in_stride,
+        out_stride: layout_desc.out_stride,
+        chimera_tile: layout_desc.chimera_tile,
+        chimera_stripes: layout_desc.chimera_stripes,
+        flags: layout_desc.flags,
+        _pad: 0,
+    };
+    let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.hardmax.params"),
+        contents: bytemuck::bytes_of(&params),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+    let bind_group = ctx.softmax_bind_group(&input_buf, &output_buf, &params_buf);
+    let (pipeline, _) = ctx.select_softmax_pipeline(rows, cols, &layout_desc)?;
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("st.tensor.wgpu_dense.hardmax.encoder"),
+    });
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("st.tensor.wgpu_dense.hardmax.pass"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(pipeline.as_ref());
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.dispatch_workgroups(rows_u32, 1, 1);
+    }
+    queue.submit(Some(encoder.finish()));
+
+    readback_f32(device, queue, &output_buf, rows * cols)
+}
+
 pub fn is_available() -> bool {
     dense_context().is_ok()
 }
@@ -4393,6 +4466,10 @@ pub fn supports_row_softmax(rows: usize, cols: usize) -> bool {
     } else {
         false
     }
+}
+
+pub fn supports_row_hardmax(rows: usize, cols: usize) -> bool {
+    supports_row_softmax(rows, cols)
 }
 
 pub fn softmax_autotune_snapshot() -> Option<Vec<SoftmaxSelectionSnapshot>> {

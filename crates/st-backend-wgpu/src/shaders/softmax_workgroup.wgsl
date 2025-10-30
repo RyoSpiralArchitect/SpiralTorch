@@ -12,6 +12,7 @@ struct Params {
 };
 
 const FLAG_CHIMERA: u32 = 1u;
+const FLAG_HARDMAX: u32 = 1u << 1u;
 
 @group(0) @binding(0)
 var<storage, read> input: array<f32>;
@@ -105,6 +106,21 @@ fn main_cs(
     reduce_max(tid, WORKGROUP_SIZE);
 
     let row_max = shared_max[0];
+
+    if ((params.flags & FLAG_HARDMAX) != 0u) {
+        idx = tid;
+        loop {
+            if (idx >= cols) {
+                break;
+            }
+            let offset = row_offset(row, in_stride, idx);
+            let value = input[offset];
+            let is_peak = select(0.0, 1.0, value == row_max);
+            output[row_offset(row, out_stride, idx)] = is_peak;
+            idx += WORKGROUP_SIZE;
+        }
+        return;
+    }
 
     var local_sum = 0.0;
     idx = tid;
