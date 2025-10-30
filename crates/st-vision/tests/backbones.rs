@@ -40,24 +40,30 @@ fn resnet_produces_expected_shape_and_state_roundtrip() {
 }
 
 #[test]
-fn resnet56_skip_forward_backward_is_consistent() {
-    let mut config = ResNet56WithSkipConfig::default();
-    config.skip_scale = 0.75;
-    config.base.stage_channels = vec![8, 16, 32];
-    config.base.block_depths = vec![2, 2, 2];
-    let mut model = ResNet56WithSkip::new(config.clone()).unwrap();
-    let input = sample_input(config.base.input_channels, config.base.input_hw, 5);
-    let output = model.forward(&input).unwrap();
-    assert_eq!(output.shape(), (1, model.output_features()));
-    assert_eq!(model.stage_shapes().len(), config.base.stage_channels.len());
-    let grad_output = Tensor::random_normal(1, output.shape().1, 0.0, 1.0, Some(17)).unwrap();
-    let grad_input = model.backward(&input, &grad_output).unwrap();
-    assert_eq!(grad_input.shape(), input.shape());
+fn resnet56_skip_gate_accumulates_gradients() {
+    let mut config = ResNetConfig::resnet56_cifar(true);
+    config.skip_init = 0.9;
+    let mut resnet = ResNetBackbone::new(config.clone()).unwrap();
+    let input = sample_input(config.input_channels, config.input_hw, 17);
+    let output = resnet.forward(&input).unwrap();
+    assert_eq!(output.shape(), (1, resnet.output_features()));
 
-    let dir = tempdir().unwrap();
-    let path = dir.path().join("resnet56_skip.json");
-    io::save_json(&model, &path).unwrap();
-    model.load_weights_json(&path).unwrap();
+    let grad_output =
+        Tensor::random_normal(1, resnet.output_features(), 0.0, 1.0, Some(23)).unwrap();
+    let _ = resnet.backward(&input, &grad_output).unwrap();
+
+    let mut skip_params = 0usize;
+    resnet
+        .visit_parameters(|param| {
+            if param.name().contains("skip_gate") {
+                skip_params += 1;
+                let gradient = param.gradient().expect("skip gate gradient present");
+                assert_eq!(gradient.shape(), (1, 1));
+            }
+            Ok(())
+        })
+        .unwrap();
+    assert!(skip_params > 0, "expected at least one learnable skip gate");
 }
 
 #[test]

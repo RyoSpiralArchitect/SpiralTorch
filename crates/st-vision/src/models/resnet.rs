@@ -69,6 +69,8 @@ pub struct ResNetConfig {
     pub epsilon: f32,
     pub use_max_pool: bool,
     pub global_pool: bool,
+    pub skip_init: f32,
+    pub skip_learnable: bool,
 }
 
 impl Default for ResNetConfig {
@@ -85,7 +87,108 @@ impl Default for ResNetConfig {
             epsilon: 1.0e-5,
             use_max_pool: true,
             global_pool: true,
+            skip_init: 1.0,
+            skip_learnable: false,
         }
+    }
+}
+
+impl ResNetConfig {
+    /// Returns a CIFAR-oriented ResNet-56 configuration with optional learnable skip scaling.
+    pub fn resnet56_cifar(skip_learnable: bool) -> Self {
+        Self {
+            input_channels: 3,
+            input_hw: (32, 32),
+            stage_channels: vec![16, 32, 64],
+            block_depths: vec![9, 9, 9],
+            stem_kernel: (3, 3),
+            stem_stride: (1, 1),
+            stem_padding: (1, 1),
+            curvature: -1.0,
+            epsilon: 1.0e-5,
+            use_max_pool: false,
+            global_pool: true,
+            skip_init: 1.0,
+            skip_learnable,
+        }
+    }
+}
+
+#[derive(Debug)]
+enum SkipStyle {
+    Identity,
+    Fixed(f32),
+    Learnable(Parameter),
+}
+
+impl SkipStyle {
+    fn from_config(name: &str, skip_init: f32, skip_learnable: bool) -> PureResult<Self> {
+        if skip_learnable {
+            let tensor = Tensor::from_vec(1, 1, vec![skip_init])?;
+            Ok(Self::Learnable(Parameter::new(
+                format!("{name}.skip_gate"),
+                tensor,
+            )))
+        } else if (skip_init - 1.0).abs() > f32::EPSILON {
+            Ok(Self::Fixed(skip_init))
+        } else {
+            Ok(Self::Identity)
+        }
+    }
+
+    fn apply_forward(&self, residual: &Tensor) -> PureResult<Tensor> {
+        match self {
+            SkipStyle::Identity => Ok(residual.clone()),
+            SkipStyle::Fixed(scale) => residual.scale(*scale),
+            SkipStyle::Learnable(param) => {
+                let scale = param.value().data()[0];
+                residual.scale(scale)
+            }
+        }
+    }
+
+    fn propagate_backward(
+        &mut self,
+        residual_pre: &Tensor,
+        grad_scaled: &Tensor,
+    ) -> PureResult<Tensor> {
+        match self {
+            SkipStyle::Identity => Ok(grad_scaled.clone()),
+            SkipStyle::Fixed(scale) => grad_scaled.scale(*scale),
+            SkipStyle::Learnable(param) => {
+                let scale = param.value().data()[0];
+                let grad_residual = grad_scaled.scale(scale)?;
+                let grad_value = grad_scaled
+                    .data()
+                    .iter()
+                    .zip(residual_pre.data().iter())
+                    .map(|(g, r)| g * r)
+                    .sum::<f32>();
+                let grad_tensor = Tensor::from_vec(1, 1, vec![grad_value])?;
+                param.accumulate_euclidean(&grad_tensor)?;
+                Ok(grad_residual)
+            }
+        }
+    }
+
+    fn visit_parameters(
+        &self,
+        visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        if let SkipStyle::Learnable(param) = self {
+            visitor(param)?;
+        }
+        Ok(())
+    }
+
+    fn visit_parameters_mut(
+        &mut self,
+        visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        if let SkipStyle::Learnable(param) = self {
+            visitor(param)?;
+        }
+        Ok(())
     }
 }
 
@@ -99,6 +202,7 @@ struct ResNetBlock {
     activation2: Relu,
     downsample: Option<(Conv2d, LayerNorm)>,
     output_hw: (usize, usize),
+    skip_style: SkipStyle,
 }
 
 impl ResNetBlock {
@@ -111,6 +215,8 @@ impl ResNetBlock {
         input_hw: (usize, usize),
         curvature: f32,
         epsilon: f32,
+        skip_init: f32,
+        skip_learnable: bool,
     ) -> PureResult<Self> {
         let conv1 = Conv2d::new(
             format!("{name}.conv1"),
@@ -170,6 +276,7 @@ impl ResNetBlock {
         } else {
             None
         };
+        let skip_style = SkipStyle::from_config(name, skip_init, skip_learnable)?;
         Ok(Self {
             conv1,
             norm1,
@@ -179,6 +286,7 @@ impl ResNetBlock {
             activation2,
             downsample,
             output_hw: conv2_hw,
+            skip_style,
         })
     }
 
@@ -194,6 +302,7 @@ impl ResNetBlock {
         } else {
             input.clone()
         };
+        let residual = self.skip_style.apply_forward(&residual)?;
         let conv1_out = self.conv1.forward(input)?;
         let norm1_out = self.norm1.forward(&conv1_out)?;
         let act1_out = self.activation1.forward(&norm1_out)?;
@@ -223,22 +332,29 @@ impl Module for ResNetBlock {
         let act1_out = self.activation1.forward(&norm1_out)?;
         let conv2_out = self.conv2.forward(&act1_out)?;
         let norm2_out = self.norm2.forward(&conv2_out)?;
-        let summed = norm2_out.add(&residual_pre)?;
+        let residual_scaled = {
+            let skip_style = &self.skip_style;
+            skip_style.apply_forward(&residual_pre)?
+        };
+        let summed = norm2_out.add(&residual_scaled)?;
         let grad = self.activation2.backward(&summed, grad_output)?;
-        let grad_residual = grad.clone();
+        let grad_residual_scaled = grad.clone();
         let mut grad_main = grad;
         grad_main = self.norm2.backward(&conv2_out, &grad_main)?;
         grad_main = self.conv2.backward(&act1_out, &grad_main)?;
         grad_main = self.activation1.backward(&norm1_out, &grad_main)?;
         grad_main = self.norm1.backward(&conv1_out, &grad_main)?;
         let mut grad_input = self.conv1.backward(input, &grad_main)?;
+        let grad_residual_pre = self
+            .skip_style
+            .propagate_backward(&residual_pre, &grad_residual_scaled)?;
         if let Some((down_conv, down_norm)) = &mut self.downsample {
             let down_out = down_conv.forward(input)?;
-            let grad_down = down_norm.backward(&down_out, &grad_residual)?;
+            let grad_down = down_norm.backward(&down_out, &grad_residual_pre)?;
             let grad_skip = down_conv.backward(input, &grad_down)?;
             grad_input = grad_input.add(&grad_skip)?;
         } else {
-            grad_input = grad_input.add(&grad_residual)?;
+            grad_input = grad_input.add(&grad_residual_pre)?;
         }
         Ok(grad_input)
     }
@@ -251,6 +367,7 @@ impl Module for ResNetBlock {
         self.norm1.visit_parameters(visitor)?;
         self.conv2.visit_parameters(visitor)?;
         self.norm2.visit_parameters(visitor)?;
+        self.skip_style.visit_parameters(visitor)?;
         if let Some((down_conv, down_norm)) = &self.downsample {
             down_conv.visit_parameters(visitor)?;
             down_norm.visit_parameters(visitor)?;
@@ -266,6 +383,7 @@ impl Module for ResNetBlock {
         self.norm1.visit_parameters_mut(visitor)?;
         self.conv2.visit_parameters_mut(visitor)?;
         self.norm2.visit_parameters_mut(visitor)?;
+        self.skip_style.visit_parameters_mut(visitor)?;
         if let Some((down_conv, down_norm)) = &mut self.downsample {
             down_conv.visit_parameters_mut(visitor)?;
             down_norm.visit_parameters_mut(visitor)?;
@@ -307,6 +425,12 @@ impl ResNetBackbone {
             return Err(TensorError::NonFiniteValue {
                 label: "resnet_layernorm_epsilon",
                 value: config.epsilon,
+            });
+        }
+        if !config.skip_init.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "resnet_skip_init",
+                value: config.skip_init,
             });
         }
         let stem_out_channels = config.stage_channels[0];
@@ -364,6 +488,8 @@ impl ResNetBackbone {
                     current_hw,
                     config.curvature,
                     config.epsilon,
+                    config.skip_init,
+                    config.skip_learnable,
                 )?;
                 tokens_per_stage.push((channels, block.output_hw()));
                 current_hw = block.output_hw();
