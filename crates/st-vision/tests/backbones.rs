@@ -9,7 +9,8 @@ use st_tensor::Tensor;
 use tempfile::tempdir;
 
 use st_vision::models::{
-    ConvNeXtBackbone, ConvNeXtConfig, ResNetBackbone, ResNetConfig, ViTBackbone, ViTConfig,
+    ConvNeXtBackbone, ConvNeXtConfig, ResNet56WithSkip, ResNet56WithSkipConfig, ResNetBackbone,
+    ResNetConfig, ViTBackbone, ViTConfig,
 };
 
 fn sample_input(channels: usize, hw: (usize, usize), seed: u64) -> Tensor {
@@ -36,6 +37,27 @@ fn resnet_produces_expected_shape_and_state_roundtrip() {
     let mut restored = ResNetBackbone::new(config).unwrap();
     restored.load_weights_bincode(&path).unwrap();
     assert_eq!(resnet.state_dict().unwrap(), restored.state_dict().unwrap());
+}
+
+#[test]
+fn resnet56_skip_forward_backward_is_consistent() {
+    let mut config = ResNet56WithSkipConfig::default();
+    config.skip_scale = 0.75;
+    config.base.stage_channels = vec![8, 16, 32];
+    config.base.block_depths = vec![2, 2, 2];
+    let mut model = ResNet56WithSkip::new(config.clone()).unwrap();
+    let input = sample_input(config.base.input_channels, config.base.input_hw, 5);
+    let output = model.forward(&input).unwrap();
+    assert_eq!(output.shape(), (1, model.output_features()));
+    assert_eq!(model.stage_shapes().len(), config.base.stage_channels.len());
+    let grad_output = Tensor::random_normal(1, output.shape().1, 0.0, 1.0, Some(17)).unwrap();
+    let grad_input = model.backward(&input, &grad_output).unwrap();
+    assert_eq!(grad_input.shape(), input.shape());
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("resnet56_skip.json");
+    io::save_json(&model, &path).unwrap();
+    model.load_weights_json(&path).unwrap();
 }
 
 #[test]
