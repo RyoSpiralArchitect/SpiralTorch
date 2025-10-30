@@ -10,8 +10,8 @@ use pyo3::{Bound, PyRef, PyRefMut};
 use st_backend_hip as hip_backend;
 use st_tensor::dlpack::{drop_exported_state, DLManagedTensor, DLPACK_CAPSULE_NAME};
 use st_tensor::{
-    backend::cpu_dense, AttentionBackend, Layout, MatmulBackend, SoftmaxBackend, Tensor,
-    TensorError,
+    backend::cpu_dense, AttentionBackend, HardmaxBackend, Layout, MatmulBackend, SoftmaxBackend,
+    Tensor, TensorError,
 };
 use std::ffi::{c_void, CStr};
 use std::sync::Arc;
@@ -51,6 +51,22 @@ fn parse_softmax_backend(label: Option<&str>) -> SoftmaxBackend {
                 "unknown softmax backend label, falling back to auto"
             );
             SoftmaxBackend::Auto
+        }
+    }
+}
+
+fn parse_hardmax_backend(label: Option<&str>) -> HardmaxBackend {
+    match label.unwrap_or("auto") {
+        "auto" => HardmaxBackend::Auto,
+        "cpu" => HardmaxBackend::Cpu,
+        #[cfg(feature = "wgpu")]
+        "wgpu" => HardmaxBackend::GpuWgpu,
+        other => {
+            warn!(
+                backend = other,
+                "unknown hardmax backend label, falling back to auto"
+            );
+            HardmaxBackend::Auto
         }
     }
 }
@@ -1126,6 +1142,30 @@ impl PyTensor {
         Ok(PyTensor { inner: tensor })
     }
 
+    /// Row-wise softmax probabilities paired with hardmax mask.
+    #[pyo3(signature = (*, backend=None))]
+    pub fn row_softmax_hardmax(
+        &self,
+        backend: Option<&str>,
+        py: Python<'_>,
+    ) -> PyResult<(PyTensor, PyTensor)> {
+        let backend = parse_softmax_backend(backend);
+        let (softmax, hardmax) = py
+            .allow_threads(|| self.inner.row_softmax_hardmax_with_backend(backend))
+            .map_err(tensor_err_to_py)?;
+        Ok((PyTensor { inner: softmax }, PyTensor { inner: hardmax }))
+    }
+
+    /// Row-wise hardmax with optional backend override.
+    #[pyo3(signature = (*, backend=None))]
+    pub fn row_hardmax(&self, backend: Option<&str>, py: Python<'_>) -> PyResult<PyTensor> {
+        let backend = parse_hardmax_backend(backend);
+        let tensor = py
+            .allow_threads(|| self.inner.row_hardmax_with_backend(backend))
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor { inner: tensor })
+    }
+
     #[pyo3(signature = (keys, values, *, contexts, sequence, scale, z_bias=None, attn_bias=None, backend=None))]
     pub fn scaled_dot_attention(
         &self,
@@ -1307,6 +1347,122 @@ fn init_backend(label: &str) -> PyResult<bool> {
     }
 }
 
+#[cfg(feature = "wgpu")]
+#[pyfunction]
+fn describe_wgpu_softmax_variants(py: Python<'_>) -> PyResult<Option<Vec<PyObject>>> {
+    use st_tensor::backend::wgpu_dense;
+
+    if !wgpu_dense::is_available() {
+        return Ok(None);
+    }
+
+    let snapshot = match wgpu_dense::softmax_autotune_snapshot() {
+        Some(entries) if !entries.is_empty() => entries,
+        _ => return Ok(None),
+    };
+
+    let mut out = Vec::with_capacity(snapshot.len());
+    for entry in snapshot {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("key", entry.key)?;
+        dict.set_item("variant", entry.variant_name())?;
+        dict.set_item("score_ms", entry.score_ms)?;
+        dict.set_item("samples", entry.samples)?;
+        if let Some(summary) = entry.telemetry() {
+            let telemetry = PyDict::new_bound(py);
+            telemetry.set_item("avg_tflops", summary.avg_tflops)?;
+            telemetry.set_item("avg_bandwidth_gbps", summary.avg_bandwidth_gbps)?;
+            telemetry.set_item("avg_occupancy", summary.avg_occupancy)?;
+            telemetry.set_item("regression_rate", summary.regression_rate)?;
+            dict.set_item("telemetry", telemetry)?;
+        }
+        if let Some(zspace) = entry.zspace() {
+            let zspace_dict = PyDict::new_bound(py);
+            zspace_dict.set_item("focus", zspace.focus)?;
+            zspace_dict.set_item("spiral_flux", zspace.spiral_flux)?;
+            zspace_dict.set_item("leech_enrichment", zspace.leech_enrichment)?;
+            zspace_dict.set_item("ramanujan_ratio", zspace.ramanujan_ratio)?;
+            zspace_dict.set_item("ramanujan_delta", zspace.ramanujan_delta)?;
+            zspace_dict.set_item("ramanujan_iterations", zspace.ramanujan_iterations)?;
+            let roundtable = PyDict::new_bound(py);
+            roundtable.set_item("above", zspace.roundtable.above)?;
+            roundtable.set_item("here", zspace.roundtable.here)?;
+            roundtable.set_item("beneath", zspace.roundtable.beneath)?;
+            roundtable.set_item("drift", zspace.roundtable.drift)?;
+            zspace_dict.set_item("roundtable", roundtable)?;
+            let golden = PyDict::new_bound(py);
+            golden.set_item("ratio_bias", zspace.golden.ratio_bias)?;
+            golden.set_item("angle_bias_deg", zspace.golden.angle_bias_deg)?;
+            golden.set_item("cooperative_weight", zspace.golden.cooperative_weight)?;
+            zspace_dict.set_item("golden", golden)?;
+            if let Some(projection) = entry.projection() {
+                let projection_dict = PyDict::new_bound(py);
+                projection_dict.set_item("focus", projection.focus)?;
+                projection_dict.set_item("above", projection.above)?;
+                projection_dict.set_item("here", projection.here)?;
+                projection_dict.set_item("beneath", projection.beneath)?;
+                projection_dict.set_item("swirl", projection.swirl)?;
+                projection_dict.set_item("spiral_flux", projection.spiral_flux)?;
+                projection_dict.set_item("leech_enrichment", projection.leech_enrichment)?;
+                projection_dict.set_item("ramanujan_ratio", projection.ramanujan_ratio)?;
+                projection_dict.set_item("ramanujan_delta", projection.ramanujan_delta)?;
+                projection_dict
+                    .set_item("ramanujan_iterations", projection.ramanujan_iterations)?;
+                zspace_dict.set_item("projection", projection_dict)?;
+            }
+            dict.set_item("zspace", zspace_dict)?;
+        }
+        if let Some(bayesian) = entry.bayesian() {
+            let bayes_dict = PyDict::new_bound(py);
+            bayes_dict.set_item("posterior_ms", bayesian.posterior_ms)?;
+            bayes_dict.set_item("prior_ms", bayesian.prior_ms)?;
+            bayes_dict.set_item("uplift_ms", bayesian.uplift_ms)?;
+            bayes_dict.set_item("confidence", bayesian.confidence)?;
+            bayes_dict.set_item("credible_low_ms", bayesian.credible_low_ms)?;
+            bayes_dict.set_item("credible_high_ms", bayesian.credible_high_ms)?;
+            dict.set_item("bayesian", bayes_dict)?;
+        }
+        if let Some(metropolis) = entry.metropolis() {
+            let mtm_dict = PyDict::new_bound(py);
+            mtm_dict.set_item("acceptance", metropolis.acceptance)?;
+            mtm_dict.set_item("expected_ms", metropolis.expected_ms)?;
+            mtm_dict.set_item("tries", metropolis.tries)?;
+            mtm_dict.set_item("proposal_focus", metropolis.proposal_focus)?;
+            mtm_dict.set_item("proposal_flux", metropolis.proposal_flux)?;
+            dict.set_item("metropolis", mtm_dict)?;
+        }
+        if let Some(anneal) = entry.anneal() {
+            let anneal_dict = PyDict::new_bound(py);
+            anneal_dict.set_item("temperature", anneal.temperature)?;
+            anneal_dict.set_item("annealed_ms", anneal.annealed_ms)?;
+            anneal_dict.set_item("exploration_mass", anneal.exploration_mass)?;
+            anneal_dict.set_item("entropy", anneal.entropy)?;
+            anneal_dict.set_item("refreshes", anneal.refreshes)?;
+            dict.set_item("anneal", anneal_dict)?;
+        }
+        if let Some(consensus) = entry.consensus() {
+            let consensus_dict = PyDict::new_bound(py);
+            consensus_dict.set_item("consensus_ms", consensus.consensus_ms)?;
+            consensus_dict.set_item("synergy", consensus.synergy)?;
+            consensus_dict.set_item("z_bias", consensus.z_bias)?;
+            consensus_dict.set_item("bayes_weight", consensus.bayes_weight)?;
+            consensus_dict.set_item("metropolis_weight", consensus.metropolis_weight)?;
+            consensus_dict.set_item("anneal_weight", consensus.anneal_weight)?;
+            consensus_dict.set_item("harmony", consensus.harmony)?;
+            dict.set_item("consensus", consensus_dict)?;
+        }
+        out.push(dict.unbind().into());
+    }
+
+    Ok(Some(out))
+}
+
+#[cfg(not(feature = "wgpu"))]
+#[pyfunction]
+fn describe_wgpu_softmax_variants(_py: Python<'_>) -> PyResult<Option<Vec<PyObject>>> {
+    Ok(None)
+}
+
 pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_class::<PyTensor>()?;
     m.add_class::<PyCpuSimdPackedRhs>()?;
@@ -1314,6 +1470,7 @@ pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(tensor_to_dlpack, m)?)?;
     m.add_function(wrap_pyfunction!(cpu_simd_prepack_rhs, m)?)?;
     m.add_function(wrap_pyfunction!(init_backend, m)?)?;
+    m.add_function(wrap_pyfunction!(describe_wgpu_softmax_variants, m)?)?;
     m.add("__doc__", "Tensor helpers and DLPack interop.")?;
     let _ = py;
     Ok(())
