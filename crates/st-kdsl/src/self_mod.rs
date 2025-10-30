@@ -6,6 +6,9 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, VecDeque};
 
+const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+const FNV_PRIME: u64 = 0x1000_0000_01b3;
+
 use crate::auto::{
     AiHintGenerator, AiRewriteConfig, AiRewriteError, AiRewritePrompt, HeuristicHint, WilsonMetrics,
 };
@@ -29,12 +32,18 @@ pub struct SelfRewriteEngine<G: AiHintGenerator> {
     cache_limit: usize,
     hint_cache: VecDeque<CachedHint>,
     hint_stats: HashMap<String, HintPerformance>,
+    ctx_sensitivity: f32,
+    staleness_half_life: u32,
+    max_staleness: u32,
 }
 
 #[derive(Clone)]
 struct CachedHint {
+    key: String,
     hints: Vec<HeuristicHint>,
     eta: f32,
+    ctx_signature: u64,
+    staleness: u32,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -44,6 +53,7 @@ struct HintPerformance {
     total_gain: f32,
     best_gain: f32,
     last_eta: f32,
+    last_affinity: f32,
 }
 
 impl HintPerformance {
@@ -58,7 +68,8 @@ impl HintPerformance {
     fn score(&self) -> f32 {
         let mean = self.mean_gain();
         let penalty = self.failures as f32 * 0.05;
-        self.best_gain * 0.7 + mean * 0.3 - penalty
+        let affinity = self.last_affinity * 0.2;
+        self.best_gain * 0.6 + mean * 0.3 + affinity - penalty
     }
 }
 
@@ -71,6 +82,7 @@ pub struct HintStatSnapshot {
     pub best_gain: f32,
     pub mean_gain: f32,
     pub last_eta: f32,
+    pub last_affinity: f32,
 }
 
 impl<G: AiHintGenerator> SelfRewriteEngine<G> {
@@ -86,6 +98,9 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
             cache_limit: 3,
             hint_cache: VecDeque::new(),
             hint_stats: HashMap::new(),
+            ctx_sensitivity: 0.55,
+            staleness_half_life: 8,
+            max_staleness: 24,
         }
     }
 
@@ -109,6 +124,26 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         while self.hint_cache.len() > self.cache_limit {
             self.hint_cache.pop_back();
         }
+        self
+    }
+
+    /// Adjust how strictly cached hints must match the incoming context signature.
+    pub fn with_context_sensitivity(mut self, sensitivity: f32) -> Self {
+        if sensitivity.is_finite() {
+            self.ctx_sensitivity = sensitivity.clamp(0.0, 1.0);
+        }
+        self
+    }
+
+    /// Configure how quickly cached hints lose priority as they age.
+    pub fn with_staleness_half_life(mut self, half_life: u32) -> Self {
+        self.staleness_half_life = half_life.max(1);
+        self
+    }
+
+    /// Limit how long stale entries are retained before being discarded.
+    pub fn with_max_staleness(mut self, max_steps: u32) -> Self {
+        self.max_staleness = max_steps.max(1);
         self
     }
 
@@ -138,6 +173,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
                 best_gain: perf.best_gain,
                 mean_gain: perf.mean_gain(),
                 last_eta: perf.last_eta,
+                last_affinity: perf.last_affinity,
             })
             .collect();
         stats.sort_by(|a, b| {
@@ -156,13 +192,16 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         metrics: Option<WilsonMetrics>,
         observed_eta: f32,
     ) -> Result<Option<SelfRewriteEvent>, AiRewriteError> {
+        self.age_cache();
         if observed_eta >= self.eta_floor
             && self.smoothed_eta().unwrap_or(observed_eta) >= self.eta_floor
         {
             return Ok(None);
         }
 
-        if let Some(event) = self.try_cached(base_src, ctx, observed_eta)? {
+        let ctx_signature = Self::ctx_signature(ctx);
+
+        if let Some(event) = self.try_cached(base_src, ctx, observed_eta, ctx_signature)? {
             let eta_bar = event.eta_bar;
             self.record_eta(eta_bar);
             self.auto_tune_eta();
@@ -184,8 +223,8 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         }
         let event = self.eval_hints(base_src, ctx, &hints)?;
         self.record_eta(event.eta_bar);
-        self.push_cache(event.eta_bar, event.hints.clone());
-        self.record_hint_success(&event.hints, observed_eta, event.eta_bar);
+        self.push_cache(event.eta_bar, event.hints.clone(), ctx_signature);
+        self.record_hint_success(&event.hints, observed_eta, event.eta_bar, 1.0);
         self.auto_tune_eta();
 
         Ok(Some(event))
@@ -203,11 +242,12 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         base_src: &str,
         ctx: &Ctx,
         observed_eta: f32,
+        ctx_signature: u64,
     ) -> Result<Option<SelfRewriteEvent>, AiRewriteError> {
         let mut indices: Vec<usize> = (0..self.hint_cache.len()).collect();
         indices.sort_by(|a, b| {
-            let sa = self.cache_priority_index(*a);
-            let sb = self.cache_priority_index(*b);
+            let sa = self.cache_priority_index(*a, ctx_signature);
+            let sb = self.cache_priority_index(*b, ctx_signature);
             sb.partial_cmp(&sa).unwrap_or(Ordering::Equal)
         });
 
@@ -215,6 +255,11 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
             let Some(entry) = self.hint_cache.get(idx).cloned() else {
                 continue;
             };
+            let affinity = self.context_affinity(entry.ctx_signature, ctx_signature);
+            if affinity < self.ctx_sensitivity {
+                self.penalize_hint(&entry.hints);
+                continue;
+            }
             if entry.eta <= observed_eta {
                 self.penalize_hint(&entry.hints);
                 continue;
@@ -224,48 +269,64 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
                 self.penalize_hint(&entry.hints);
                 continue;
             }
-            self.record_hint_success(&event.hints, observed_eta, event.eta_bar);
-            self.touch_cache(idx, event.eta_bar, event.hints.clone());
+            self.record_hint_success(&event.hints, observed_eta, event.eta_bar, affinity);
+            self.touch_cache(idx, event.eta_bar, event.hints.clone(), ctx_signature);
             return Ok(Some(event));
         }
         Ok(None)
     }
 
-    fn touch_cache(&mut self, idx: usize, eta: f32, hints: Vec<HeuristicHint>) {
+    fn touch_cache(&mut self, idx: usize, eta: f32, hints: Vec<HeuristicHint>, ctx_signature: u64) {
         if let Some(mut cached) = self.hint_cache.remove(idx) {
             cached.eta = eta;
             cached.hints = hints;
+            cached.ctx_signature = ctx_signature;
+            cached.key = Self::hint_key(&cached.hints);
+            cached.staleness = 0;
             self.hint_cache.push_front(cached);
         } else {
-            self.hint_cache.push_front(CachedHint { hints, eta });
+            self.hint_cache.push_front(CachedHint {
+                key: Self::hint_key(&hints),
+                hints,
+                eta,
+                ctx_signature,
+                staleness: 0,
+            });
         }
         while self.hint_cache.len() > self.cache_limit {
             self.hint_cache.pop_back();
         }
     }
 
-    fn push_cache(&mut self, eta: f32, hints: Vec<HeuristicHint>) {
-        self.hint_cache.push_front(CachedHint { hints, eta });
+    fn push_cache(&mut self, eta: f32, hints: Vec<HeuristicHint>, ctx_signature: u64) {
+        self.hint_cache.push_front(CachedHint {
+            key: Self::hint_key(&hints),
+            hints,
+            eta,
+            ctx_signature,
+            staleness: 0,
+        });
         while self.hint_cache.len() > self.cache_limit {
             self.hint_cache.pop_back();
         }
     }
 
-    fn cache_priority_index(&self, idx: usize) -> f32 {
+    fn cache_priority_index(&self, idx: usize, ctx_signature: u64) -> f32 {
         self.hint_cache
             .get(idx)
-            .map(|entry| self.cache_priority(entry))
+            .map(|entry| self.cache_priority(entry, ctx_signature))
             .unwrap_or(0.0)
     }
 
-    fn cache_priority(&self, entry: &CachedHint) -> f32 {
-        let key = Self::hint_key(&entry.hints);
+    fn cache_priority(&self, entry: &CachedHint, ctx_signature: u64) -> f32 {
         let score = self
             .hint_stats
-            .get(&key)
+            .get(&entry.key)
             .map(|perf| perf.score())
             .unwrap_or(entry.eta * 0.5);
-        entry.eta + score
+        let affinity = self.context_affinity(entry.ctx_signature, ctx_signature);
+        let decay = self.staleness_decay(entry.staleness);
+        (entry.eta + score) * affinity * decay
     }
 
     fn eval_hints(
@@ -323,7 +384,13 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
             .join("|")
     }
 
-    fn record_hint_success(&mut self, hints: &[HeuristicHint], observed: f32, eta: f32) {
+    fn record_hint_success(
+        &mut self,
+        hints: &[HeuristicHint],
+        observed: f32,
+        eta: f32,
+        affinity: f32,
+    ) {
         let gain = (eta - observed).max(0.0);
         let key = Self::hint_key(hints);
         let entry = self.hint_stats.entry(key).or_default();
@@ -331,13 +398,16 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         entry.total_gain += gain;
         entry.best_gain = entry.best_gain.max(gain);
         entry.last_eta = eta;
+        entry.last_affinity = affinity;
     }
 
     fn penalize_hint(&mut self, hints: &[HeuristicHint]) {
         let key = Self::hint_key(hints);
-        let entry = self.hint_stats.entry(key).or_default();
+        let entry = self.hint_stats.entry(key.clone()).or_default();
         entry.failures += 1;
         entry.total_gain *= 0.5;
+        entry.last_affinity *= 0.5;
+        self.degrade_cache_entry(&key);
     }
 
     fn auto_tune_eta(&mut self) {
@@ -353,6 +423,49 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         }
         let new_floor = (self.eta_floor + delta).clamp(0.05, 0.995);
         self.eta_floor = new_floor;
+    }
+
+    fn staleness_decay(&self, staleness: u32) -> f32 {
+        0.5f32.powf(staleness as f32 / self.staleness_half_life.max(1) as f32)
+    }
+
+    fn age_cache(&mut self) {
+        for entry in self.hint_cache.iter_mut() {
+            entry.staleness = entry.staleness.saturating_add(1);
+        }
+        let max_staleness = self.max_staleness;
+        self.hint_cache
+            .retain(|entry| entry.staleness <= max_staleness);
+    }
+
+    fn degrade_cache_entry(&mut self, key: &str) {
+        if let Some(entry) = self.hint_cache.iter_mut().find(|entry| entry.key == key) {
+            entry.staleness = entry.staleness.saturating_add(2);
+        }
+    }
+
+    fn context_affinity(&self, cached: u64, current: u64) -> f32 {
+        let diff = (cached ^ current).count_ones() as f32;
+        (1.0 - diff / 64.0).clamp(0.0, 1.0)
+    }
+
+    fn ctx_signature(ctx: &Ctx) -> u64 {
+        let mut hash = FNV_OFFSET_BASIS;
+        hash = Self::fnv_mix(hash, ctx.r as u64);
+        hash = Self::fnv_mix(hash, ctx.c as u64);
+        hash = Self::fnv_mix(hash, ctx.k as u64);
+        hash = Self::fnv_mix(hash, ctx.sg as u64);
+        hash = Self::fnv_mix(hash, ctx.sgc as u64);
+        hash = Self::fnv_mix(hash, ctx.kc as u64);
+        hash = Self::fnv_mix(hash, ctx.tile_cols as u64);
+        hash = Self::fnv_mix(hash, ctx.radix as u64);
+        Self::fnv_mix(hash, ctx.segments as u64)
+    }
+
+    fn fnv_mix(mut hash: u64, val: u64) -> u64 {
+        hash ^= val;
+        hash = hash.wrapping_mul(FNV_PRIME);
+        hash
     }
 }
 
@@ -467,6 +580,7 @@ mod tests {
         assert!(stat.best_gain > 0.0);
         assert!(stat.mean_gain > 0.0);
         assert_eq!(stat.failures, 0);
+        assert!(stat.last_affinity >= 0.0);
     }
 
     #[test]
@@ -491,5 +605,68 @@ mod tests {
         let tuned = engine.eta_floor();
         assert!(tuned > baseline);
         assert!(tuned <= 0.995);
+    }
+
+    #[test]
+    fn skips_cached_hints_when_context_diverges() {
+        use std::cell::Cell;
+
+        let calls = Cell::new(0usize);
+        let mut generator = |_: &AiRewriteConfig, _: &AiRewritePrompt| {
+            calls.set(calls.get() + 1);
+            Ok(vec![HeuristicHint::new("radix", "radix * 2", 0.9, "true")])
+        };
+        let ctx_a = sample_ctx();
+        let mut ctx_b = sample_ctx();
+        ctx_b.r = ctx_a.r + 512;
+        ctx_b.c = ctx_a.c + 128;
+        ctx_b.tile_cols = ctx_a.tile_cols * 2;
+
+        let mut engine = SelfRewriteEngine::new(&mut generator, AiRewriteConfig::new("mock"))
+            .with_eta_floor(0.7)
+            .with_context_sensitivity(0.95);
+
+        engine
+            .tick("algo: 1;", &ctx_a, None, 0.2)
+            .expect("tick")
+            .expect("event");
+        assert_eq!(calls.get(), 1);
+
+        engine
+            .tick("algo: 1;", &ctx_b, None, 0.25)
+            .expect("tick")
+            .expect("event");
+        assert_eq!(calls.get(), 2, "generator invoked for divergent context");
+    }
+
+    #[test]
+    fn purges_cache_entries_that_age_out() {
+        let mut generator = |_: &AiRewriteConfig, _: &AiRewritePrompt| {
+            Ok(vec![HeuristicHint::new(
+                "segments",
+                "segments + 1",
+                0.8,
+                "true",
+            )])
+        };
+        let ctx = sample_ctx();
+        let mut engine = SelfRewriteEngine::new(&mut generator, AiRewriteConfig::new("mock"))
+            .with_eta_floor(0.65)
+            .with_cache_limit(2)
+            .with_staleness_half_life(1)
+            .with_max_staleness(2);
+
+        engine
+            .tick("algo: 1;", &ctx, None, 0.2)
+            .expect("tick")
+            .expect("event");
+        assert_eq!(engine.hint_cache.len(), 1);
+
+        // Age the cache without triggering a rewrite so the entry decays naturally.
+        engine.tick("algo: 1;", &ctx, None, 0.9).expect("tick");
+        engine.tick("algo: 1;", &ctx, None, 0.9).expect("tick");
+        engine.tick("algo: 1;", &ctx, None, 0.9).expect("tick");
+
+        assert!(engine.hint_cache.is_empty(), "stale entries were purged");
     }
 }
