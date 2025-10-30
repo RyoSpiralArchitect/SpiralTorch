@@ -48,11 +48,11 @@ use crate::memory::{
 use core::fmt;
 use rand::distributions::{Distribution, Uniform};
 use rand::rngs::StdRng;
-use rand::SeedableRng;
 #[allow(unused_imports)]
 use rand_distr::StandardNormal;
 use rayon::{current_num_threads, prelude::*};
 use serde::{Deserialize, Serialize};
+use spiral_config::determinism;
 use std::cell::RefCell;
 use std::convert::TryFrom;
 use std::error::Error;
@@ -711,11 +711,8 @@ impl Tensor {
         })
     }
 
-    fn seedable_rng(seed: Option<u64>) -> StdRng {
-        match seed {
-            Some(value) => StdRng::seed_from_u64(value),
-            None => StdRng::from_entropy(),
-        }
+    fn seedable_rng(seed: Option<u64>, label: &str) -> StdRng {
+        determinism::rng_from_optional(seed, label)
     }
 
     /// Create a tensor filled with zeros.
@@ -750,7 +747,7 @@ impl Tensor {
                 label: "random_uniform_bounds",
             });
         }
-        let mut rng = Self::seedable_rng(seed);
+        let mut rng = Self::seedable_rng(seed, "st-tensor/tensor/uniform");
         let distribution = Uniform::new(min, max);
         let mut data = aligned_with_capacity(rows * cols);
         for _ in 0..rows * cols {
@@ -776,7 +773,7 @@ impl Tensor {
                 label: "random_normal_std",
             });
         }
-        let mut rng = Self::seedable_rng(seed);
+        let mut rng = Self::seedable_rng(seed, "st-tensor/tensor/normal");
         let gaussian = StandardNormal;
         let mut data = aligned_with_capacity(rows * cols);
         for _ in 0..rows * cols {
@@ -4714,7 +4711,8 @@ fn matmul_naive_into(
         dst.fill(0.0);
         return;
     }
-    if should_parallelize(rows, inner, cols) {
+    let parallel = should_parallelize(rows, inner, cols) && !determinism::lock_reduction_order();
+    if parallel {
         matmul_naive_parallel(dst, lhs, rhs, inner, cols);
     } else {
         matmul_naive_serial(dst, lhs, rhs, inner, cols);
@@ -4739,7 +4737,9 @@ fn matmul_naive_packed_into(
     let rhs = packed.as_slice();
     match packed.layout() {
         PackedLayout::ColMajor | PackedLayout::Tiled { .. } => {
-            if should_parallelize(rows, inner, cols) {
+            let parallel =
+                should_parallelize(rows, inner, cols) && !determinism::lock_reduction_order();
+            if parallel {
                 matmul_naive_packed_parallel(dst, lhs, inner, cols, rhs);
             } else {
                 matmul_naive_packed_serial(dst, lhs, inner, cols, rhs);
@@ -4856,6 +4856,28 @@ fn row_softmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
 
 fn row_hardmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
     row_softmax_hardmax_cpu(data, rows, cols).1
+}
+
+fn row_hardmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+    let mut out = vec![0.0; rows * cols];
+    if cols == 0 {
+        return out;
+    }
+    for r in 0..rows {
+        let offset = r * cols;
+        let row_slice = &data[offset..offset + cols];
+        let mut max_value = f32::NEG_INFINITY;
+        for &value in row_slice {
+            if value > max_value {
+                max_value = value;
+            }
+        }
+        for c in 0..cols {
+            let value = row_slice[c];
+            out[offset + c] = if value == max_value { 1.0 } else { 0.0 };
+        }
+    }
+    out
 }
 
 fn add_bias_relu_inplace(data: &mut [f32], rows: usize, cols: usize, bias: &[f32]) {
