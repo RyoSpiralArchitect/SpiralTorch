@@ -9,7 +9,8 @@ use st_tensor::Tensor;
 use tempfile::tempdir;
 
 use st_vision::models::{
-    ConvNeXtBackbone, ConvNeXtConfig, ResNetBackbone, ResNetConfig, ViTBackbone, ViTConfig,
+    ConvNeXtBackbone, ConvNeXtConfig, ResNet56WithSkip, ResNet56WithSkipConfig, ResNetBackbone,
+    ResNetConfig, ViTBackbone, ViTConfig,
 };
 
 fn sample_input(channels: usize, hw: (usize, usize), seed: u64) -> Tensor {

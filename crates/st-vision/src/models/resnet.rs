@@ -620,3 +620,462 @@ impl Module for ResNetBackbone {
         Ok(())
     }
 }
+
+#[derive(Debug)]
+struct SkipBridge {
+    projection: Conv2d,
+    norm: LayerNorm,
+    activation: Relu,
+}
+
+impl SkipBridge {
+    fn new(
+        name: &str,
+        in_channels: usize,
+        in_hw: (usize, usize),
+        out_channels: usize,
+        out_hw: (usize, usize),
+        curvature: f32,
+        epsilon: f32,
+    ) -> PureResult<Self> {
+        if out_hw.0 == 0 || out_hw.1 == 0 {
+            return Err(TensorError::InvalidDimensions {
+                rows: out_hw.0,
+                cols: out_hw.1,
+            });
+        }
+        if in_hw.0 % out_hw.0 != 0 || in_hw.1 % out_hw.1 != 0 {
+            return Err(TensorError::InvalidDimensions {
+                rows: in_hw.0,
+                cols: in_hw.1,
+            });
+        }
+        let stride = (in_hw.0 / out_hw.0, in_hw.1 / out_hw.1);
+        let projection = Conv2d::new(
+            format!("{name}.proj"),
+            in_channels,
+            out_channels,
+            (1, 1),
+            stride,
+            (0, 0),
+            (1, 1),
+            in_hw,
+        )?;
+        let projected_hw = conv_output_hw(in_hw, (1, 1), stride, (0, 0), (1, 1))?;
+        if projected_hw != out_hw {
+            return Err(TensorError::InvalidDimensions {
+                rows: projected_hw.0,
+                cols: projected_hw.1,
+            });
+        }
+        let norm = LayerNorm::new(
+            format!("{name}.ln"),
+            out_channels * out_hw.0 * out_hw.1,
+            curvature,
+            epsilon,
+        )?;
+        let activation = Relu::new();
+        Ok(Self {
+            projection,
+            norm,
+            activation,
+        })
+    }
+
+    fn forward_impl(&self, input: &Tensor) -> PureResult<(Tensor, Tensor, Tensor)> {
+        let conv = self.projection.forward(input)?;
+        let norm = self.norm.forward(&conv)?;
+        let act = self.activation.forward(&norm)?;
+        Ok((act, norm, conv))
+    }
+}
+
+impl Module for SkipBridge {
+    fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+        let (out, _, _) = self.forward_impl(input)?;
+        Ok(out)
+    }
+
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        let conv = self.projection.forward(input)?;
+        let norm = self.norm.forward(&conv)?;
+        let mut grad = self.activation.backward(&norm, grad_output)?;
+        grad = self.norm.backward(&conv, &grad)?;
+        let grad_input = self.projection.backward(input, &grad)?;
+        Ok(grad_input)
+    }
+
+    fn visit_parameters(
+        &self,
+        visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        self.projection.visit_parameters(visitor)?;
+        self.norm.visit_parameters(visitor)?;
+        Ok(())
+    }
+
+    fn visit_parameters_mut(
+        &mut self,
+        visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        self.projection.visit_parameters_mut(visitor)?;
+        self.norm.visit_parameters_mut(visitor)?;
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ResNet56WithSkipConfig {
+    pub base: ResNetConfig,
+    pub skip_scale: f32,
+}
+
+impl Default for ResNet56WithSkipConfig {
+    fn default() -> Self {
+        let mut base = ResNetConfig::default();
+        base.input_hw = (32, 32);
+        base.stage_channels = vec![16, 32, 64];
+        base.block_depths = vec![9, 9, 9];
+        base.stem_kernel = (3, 3);
+        base.stem_stride = (1, 1);
+        base.stem_padding = (1, 1);
+        base.use_max_pool = false;
+        base.global_pool = true;
+        Self {
+            base,
+            skip_scale: 0.5,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ResNet56WithSkip {
+    stem_conv: Conv2d,
+    stem_norm: LayerNorm,
+    stem_activation: Relu,
+    stem_pool: Option<MaxPool2d>,
+    stages: Vec<Vec<ResNetBlock>>,
+    stage_shapes: Vec<(usize, (usize, usize))>,
+    skip_bridges: Vec<SkipBridge>,
+    fusion_norm: LayerNorm,
+    fusion_activation: Relu,
+    global_pool: Option<AvgPool2d>,
+    output_channels: usize,
+    output_hw: (usize, usize),
+    skip_scale: f32,
+}
+
+impl ResNet56WithSkip {
+    pub fn new(config: ResNet56WithSkipConfig) -> PureResult<Self> {
+        if !config.skip_scale.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "resnet56_skip_scale",
+                value: config.skip_scale,
+            });
+        }
+        let base = config.base;
+        if base.stage_channels.is_empty() {
+            return Err(TensorError::EmptyInput("resnet56_stage_channels"));
+        }
+        if base.stage_channels.len() != base.block_depths.len() {
+            return Err(TensorError::InvalidDimensions {
+                rows: base.stage_channels.len(),
+                cols: base.block_depths.len(),
+            });
+        }
+        let stem_out_channels = base.stage_channels[0];
+        let stem_conv = Conv2d::new(
+            "resnet56.stem",
+            base.input_channels,
+            stem_out_channels,
+            base.stem_kernel,
+            base.stem_stride,
+            base.stem_padding,
+            (1, 1),
+            base.input_hw,
+        )?;
+        let mut current_hw = conv_output_hw(
+            base.input_hw,
+            base.stem_kernel,
+            base.stem_stride,
+            base.stem_padding,
+            (1, 1),
+        )?;
+        let stem_norm = LayerNorm::new(
+            "resnet56.stem_ln",
+            stem_out_channels * current_hw.0 * current_hw.1,
+            base.curvature,
+            base.epsilon,
+        )?;
+        let stem_activation = Relu::new();
+        let stem_pool = if base.use_max_pool {
+            let pool = MaxPool2d::new(stem_out_channels, (3, 3), (2, 2), (1, 1), current_hw)?;
+            current_hw = pool_output_hw(current_hw, (3, 3), (2, 2), (1, 1))?;
+            Some(pool)
+        } else {
+            None
+        };
+        let mut stages = Vec::new();
+        let mut stage_shapes = Vec::new();
+        let mut current_channels = stem_out_channels;
+        for (stage_idx, (&channels, &depth)) in base
+            .stage_channels
+            .iter()
+            .zip(base.block_depths.iter())
+            .enumerate()
+        {
+            let mut blocks = Vec::new();
+            for block_idx in 0..depth {
+                let stride = if stage_idx > 0 && block_idx == 0 {
+                    (2, 2)
+                } else {
+                    (1, 1)
+                };
+                let block = ResNetBlock::new(
+                    &format!("resnet56.stage{stage_idx}.block{block_idx}"),
+                    current_channels,
+                    channels,
+                    stride,
+                    current_hw,
+                    base.curvature,
+                    base.epsilon,
+                )?;
+                current_hw = block.output_hw();
+                current_channels = channels;
+                blocks.push(block);
+            }
+            stage_shapes.push((current_channels, current_hw));
+            stages.push(blocks);
+        }
+        let Some(&(final_channels, final_hw)) = stage_shapes.last() else {
+            return Err(TensorError::EmptyInput("resnet56_stages"));
+        };
+        let fusion_norm = LayerNorm::new(
+            "resnet56.fusion_ln",
+            final_channels * final_hw.0 * final_hw.1,
+            base.curvature,
+            base.epsilon,
+        )?;
+        let fusion_activation = Relu::new();
+        let mut skip_bridges = Vec::new();
+        if stage_shapes.len() > 1 {
+            for (idx, &(stage_channels, stage_hw)) in
+                stage_shapes.iter().enumerate().take(stage_shapes.len() - 1)
+            {
+                let bridge = SkipBridge::new(
+                    &format!("resnet56.skip.stage{idx}"),
+                    stage_channels,
+                    stage_hw,
+                    final_channels,
+                    final_hw,
+                    base.curvature,
+                    base.epsilon,
+                )?;
+                skip_bridges.push(bridge);
+            }
+        }
+        let global_pool = if base.global_pool {
+            let pool = AvgPool2d::new(final_channels, final_hw, (1, 1), (0, 0), final_hw)?;
+            Some(pool)
+        } else {
+            None
+        };
+        let output_hw = if base.global_pool { (1, 1) } else { final_hw };
+        Ok(Self {
+            stem_conv,
+            stem_norm,
+            stem_activation,
+            stem_pool,
+            stages,
+            stage_shapes,
+            skip_bridges,
+            fusion_norm,
+            fusion_activation,
+            global_pool,
+            output_channels: final_channels,
+            output_hw,
+            skip_scale: config.skip_scale,
+        })
+    }
+
+    pub fn output_channels(&self) -> usize {
+        self.output_channels
+    }
+
+    pub fn output_hw(&self) -> (usize, usize) {
+        self.output_hw
+    }
+
+    pub fn output_features(&self) -> usize {
+        self.output_channels * self.output_hw.0 * self.output_hw.1
+    }
+
+    pub fn stage_shapes(&self) -> &Vec<(usize, (usize, usize))> {
+        &self.stage_shapes
+    }
+
+    pub fn load_weights_json<P: AsRef<std::path::Path>>(&mut self, path: P) -> PureResult<()> {
+        io::load_json(self, path)
+    }
+
+    pub fn load_weights_bincode<P: AsRef<std::path::Path>>(&mut self, path: P) -> PureResult<()> {
+        io::load_bincode(self, path)
+    }
+}
+
+impl Module for ResNet56WithSkip {
+    fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+        let stem_out = self.stem_conv.forward(input)?;
+        let stem_norm = self.stem_norm.forward(&stem_out)?;
+        let mut activ = self.stem_activation.forward(&stem_norm)?;
+        if let Some(pool) = &self.stem_pool {
+            activ = pool.forward(&activ)?;
+        }
+        let mut stage_outputs = Vec::with_capacity(self.stages.len());
+        for stage in &self.stages {
+            for block in stage {
+                activ = block.forward(&activ)?;
+            }
+            stage_outputs.push(activ.clone());
+        }
+        let mut fused = stage_outputs
+            .last()
+            .cloned()
+            .ok_or(TensorError::EmptyInput("resnet56_forward_stage"))?;
+        for (idx, bridge) in self.skip_bridges.iter().enumerate() {
+            let skip = bridge.forward(&stage_outputs[idx])?;
+            let scaled = skip.scale(self.skip_scale)?;
+            fused = fused.add(&scaled)?;
+        }
+        let fusion_norm = self.fusion_norm.forward(&fused)?;
+        let mut output = self.fusion_activation.forward(&fusion_norm)?;
+        if let Some(pool) = &self.global_pool {
+            output = pool.forward(&output)?;
+        }
+        Ok(output)
+    }
+
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        let stem_out = self.stem_conv.forward(input)?;
+        let stem_norm = self.stem_norm.forward(&stem_out)?;
+        let stem_act = self.stem_activation.forward(&stem_norm)?;
+        let stem_pool_out = if let Some(pool) = &self.stem_pool {
+            pool.forward(&stem_act)?
+        } else {
+            stem_act.clone()
+        };
+        let mut stage_inputs: Vec<Vec<Tensor>> = Vec::with_capacity(self.stages.len());
+        let mut stage_outputs: Vec<Tensor> = Vec::with_capacity(self.stages.len());
+        let mut activ = stem_pool_out.clone();
+        for stage in &self.stages {
+            let mut block_inputs = Vec::with_capacity(stage.len());
+            for block in stage {
+                block_inputs.push(activ.clone());
+                activ = block.forward(&activ)?;
+            }
+            stage_inputs.push(block_inputs);
+            stage_outputs.push(activ.clone());
+        }
+        let mut fused = stage_outputs
+            .last()
+            .cloned()
+            .ok_or(TensorError::EmptyInput("resnet56_backward_stage"))?;
+        for (idx, bridge) in self.skip_bridges.iter().enumerate() {
+            let skip = bridge.forward(&stage_outputs[idx])?;
+            let scaled = skip.scale(self.skip_scale)?;
+            fused = fused.add(&scaled)?;
+        }
+        let fusion_norm = self.fusion_norm.forward(&fused)?;
+        let fusion_act = self.fusion_activation.forward(&fusion_norm)?;
+        let mut grad = if let Some(pool) = &mut self.global_pool {
+            pool.backward(&fusion_act, grad_output)?
+        } else {
+            grad_output.clone()
+        };
+        grad = self.fusion_activation.backward(&fusion_norm, &grad)?;
+        grad = self.fusion_norm.backward(&fused, &grad)?;
+        let stage_count = self.stages.len();
+        let mut stage_output_grads: Vec<Option<Tensor>> = vec![None; stage_count];
+        let last_idx = stage_count - 1;
+        stage_output_grads[last_idx] = Some(grad.clone());
+        for (idx, bridge) in self.skip_bridges.iter_mut().enumerate() {
+            let grad_branch = grad.scale(self.skip_scale)?;
+            let grad_in = bridge.backward(&stage_outputs[idx], &grad_branch)?;
+            match &mut stage_output_grads[idx] {
+                Some(existing) => {
+                    *existing = existing.add(&grad_in)?;
+                }
+                None => {
+                    stage_output_grads[idx] = Some(grad_in);
+                }
+            }
+        }
+        let mut next_grad = stage_output_grads[last_idx]
+            .take()
+            .ok_or(TensorError::EmptyInput("resnet56_final_grad"))?;
+        for stage_idx in (0..stage_count).rev() {
+            let blocks = &mut self.stages[stage_idx];
+            let block_inputs = &stage_inputs[stage_idx];
+            for (block, block_input) in blocks.iter_mut().rev().zip(block_inputs.iter().rev()) {
+                next_grad = block.backward(block_input, &next_grad)?;
+            }
+            if stage_idx > 0 {
+                let entry = &mut stage_output_grads[stage_idx - 1];
+                match entry.take() {
+                    Some(existing) => {
+                        let combined = existing.add(&next_grad)?;
+                        *entry = Some(combined.clone());
+                        next_grad = combined;
+                    }
+                    None => {
+                        *entry = Some(next_grad.clone());
+                    }
+                }
+            }
+        }
+        let mut grad_input = next_grad;
+        if let Some(pool) = &mut self.stem_pool {
+            grad_input = pool.backward(&stem_act, &grad_input)?;
+        }
+        grad_input = self.stem_activation.backward(&stem_norm, &grad_input)?;
+        grad_input = self.stem_norm.backward(&stem_out, &grad_input)?;
+        grad_input = self.stem_conv.backward(input, &grad_input)?;
+        Ok(grad_input)
+    }
+
+    fn visit_parameters(
+        &self,
+        visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        self.stem_conv.visit_parameters(visitor)?;
+        self.stem_norm.visit_parameters(visitor)?;
+        for stage in &self.stages {
+            for block in stage {
+                block.visit_parameters(visitor)?;
+            }
+        }
+        self.fusion_norm.visit_parameters(visitor)?;
+        for bridge in &self.skip_bridges {
+            bridge.visit_parameters(visitor)?;
+        }
+        Ok(())
+    }
+
+    fn visit_parameters_mut(
+        &mut self,
+        visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        self.stem_conv.visit_parameters_mut(visitor)?;
+        self.stem_norm.visit_parameters_mut(visitor)?;
+        for stage in &mut self.stages {
+            for block in stage {
+                block.visit_parameters_mut(visitor)?;
+            }
+        }
+        self.fusion_norm.visit_parameters_mut(visitor)?;
+        for bridge in &mut self.skip_bridges {
+            bridge.visit_parameters_mut(visitor)?;
+        }
+        Ok(())
+    }
+}

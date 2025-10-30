@@ -1340,6 +1340,10 @@ fn describe_wgpu_softmax_variants(py: Python<'_>) -> PyResult<Option<Vec<PyObjec
             let zspace_dict = PyDict::new_bound(py);
             zspace_dict.set_item("focus", zspace.focus)?;
             zspace_dict.set_item("spiral_flux", zspace.spiral_flux)?;
+            zspace_dict.set_item("leech_enrichment", zspace.leech_enrichment)?;
+            zspace_dict.set_item("ramanujan_ratio", zspace.ramanujan_ratio)?;
+            zspace_dict.set_item("ramanujan_delta", zspace.ramanujan_delta)?;
+            zspace_dict.set_item("ramanujan_iterations", zspace.ramanujan_iterations)?;
             let roundtable = PyDict::new_bound(py);
             roundtable.set_item("above", zspace.roundtable.above)?;
             roundtable.set_item("here", zspace.roundtable.here)?;
@@ -1359,6 +1363,11 @@ fn describe_wgpu_softmax_variants(py: Python<'_>) -> PyResult<Option<Vec<PyObjec
                 projection_dict.set_item("beneath", projection.beneath)?;
                 projection_dict.set_item("swirl", projection.swirl)?;
                 projection_dict.set_item("spiral_flux", projection.spiral_flux)?;
+                projection_dict.set_item("leech_enrichment", projection.leech_enrichment)?;
+                projection_dict.set_item("ramanujan_ratio", projection.ramanujan_ratio)?;
+                projection_dict.set_item("ramanujan_delta", projection.ramanujan_delta)?;
+                projection_dict
+                    .set_item("ramanujan_iterations", projection.ramanujan_iterations)?;
                 zspace_dict.set_item("projection", projection_dict)?;
             }
             dict.set_item("zspace", zspace_dict)?;
