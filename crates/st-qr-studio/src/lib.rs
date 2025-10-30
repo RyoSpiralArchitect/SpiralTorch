@@ -24,8 +24,10 @@ use thiserror::Error;
 pub use st_core::maxwell::MaxwellZPulse as MaxwellPulse;
 
 mod meta;
+mod quantum_overlay;
 
 pub use meta::{TemporalCausalAnnotation, TemporalLogicEngine, ToposLogicBridge};
+pub use quantum_overlay::{QuantumMeasurement, QuantumOverlayConfig, ZOverlayCircuit, ZResonance};
 
 const DEFAULT_HISTORY: usize = 512;
 
@@ -837,6 +839,7 @@ pub struct QuantumRealityStudio {
     meta_layer: Option<MetaNarrativeLayer>,
     temporal: TemporalLogicEngine,
     topos: ToposLogicBridge,
+    quantum_overlay: QuantumOverlayConfig,
 }
 
 impl QuantumRealityStudio {
@@ -851,11 +854,17 @@ impl QuantumRealityStudio {
             meta_layer: None,
             temporal: TemporalLogicEngine::new(),
             topos: ToposLogicBridge::new(),
+            quantum_overlay: QuantumOverlayConfig::default(),
         }
     }
 
     pub fn with_sink<S: StudioSink + 'static>(mut self, sink: S) -> Self {
         self.outlet.register(sink);
+        self
+    }
+
+    pub fn with_quantum_overlay(mut self, config: QuantumOverlayConfig) -> Self {
+        self.quantum_overlay = config;
         self
     }
 
@@ -870,6 +879,10 @@ impl QuantumRealityStudio {
 
     pub fn clear_meta_layer(&mut self) {
         self.meta_layer = None;
+    }
+
+    pub fn set_quantum_overlay(&mut self, config: QuantumOverlayConfig) {
+        self.quantum_overlay = config;
     }
 
     pub fn register_sink<S: StudioSink + 'static>(&mut self, sink: S) {
@@ -1168,6 +1181,14 @@ impl QuantumRealityStudio {
             .map(|value| serde_json::to_string(&value).unwrap_or_else(|_| "{}".into()))
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    pub fn overlay_zspace(&self, resonance: &ZResonance) -> ZOverlayCircuit {
+        ZOverlayCircuit::from_config(&self.quantum_overlay, resonance)
+    }
+
+    pub fn overlay(&self, resonance: &ZResonance) -> ZOverlayCircuit {
+        self.overlay_zspace(resonance)
     }
 }
 
