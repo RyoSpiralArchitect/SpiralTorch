@@ -3,7 +3,8 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-use std::collections::VecDeque;
+use std::cmp::Ordering;
+use std::collections::{HashMap, VecDeque};
 
 use crate::auto::{
     AiHintGenerator, AiRewriteConfig, AiRewriteError, AiRewritePrompt, HeuristicHint, WilsonMetrics,
@@ -27,12 +28,49 @@ pub struct SelfRewriteEngine<G: AiHintGenerator> {
     eta_history: VecDeque<f32>,
     cache_limit: usize,
     hint_cache: VecDeque<CachedHint>,
+    hint_stats: HashMap<String, HintPerformance>,
 }
 
 #[derive(Clone)]
 struct CachedHint {
     hints: Vec<HeuristicHint>,
     eta: f32,
+}
+
+#[derive(Clone, Debug, Default)]
+struct HintPerformance {
+    uses: u32,
+    failures: u32,
+    total_gain: f32,
+    best_gain: f32,
+    last_eta: f32,
+}
+
+impl HintPerformance {
+    fn mean_gain(&self) -> f32 {
+        if self.uses == 0 {
+            0.0
+        } else {
+            self.total_gain / self.uses as f32
+        }
+    }
+
+    fn score(&self) -> f32 {
+        let mean = self.mean_gain();
+        let penalty = self.failures as f32 * 0.05;
+        self.best_gain * 0.7 + mean * 0.3 - penalty
+    }
+}
+
+/// Snapshot of a cached hint's historic performance.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HintStatSnapshot {
+    pub key: String,
+    pub uses: u32,
+    pub failures: u32,
+    pub best_gain: f32,
+    pub mean_gain: f32,
+    pub last_eta: f32,
 }
 
 impl<G: AiHintGenerator> SelfRewriteEngine<G> {
@@ -47,6 +85,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
             eta_history: VecDeque::new(),
             cache_limit: 3,
             hint_cache: VecDeque::new(),
+            hint_stats: HashMap::new(),
         }
     }
 
@@ -82,6 +121,33 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         }
     }
 
+    /// Returns the current η̄ floor after any adaptive tuning.
+    pub fn eta_floor(&self) -> f32 {
+        self.eta_floor
+    }
+
+    /// Exposes cached hint statistics for monitoring and debugging.
+    pub fn hint_statistics(&self) -> Vec<HintStatSnapshot> {
+        let mut stats: Vec<_> = self
+            .hint_stats
+            .iter()
+            .map(|(key, perf)| HintStatSnapshot {
+                key: key.clone(),
+                uses: perf.uses,
+                failures: perf.failures,
+                best_gain: perf.best_gain,
+                mean_gain: perf.mean_gain(),
+                last_eta: perf.last_eta,
+            })
+            .collect();
+        stats.sort_by(|a, b| {
+            b.best_gain
+                .partial_cmp(&a.best_gain)
+                .unwrap_or(Ordering::Equal)
+        });
+        stats
+    }
+
     /// Attempt a self-rewrite. Returns `Ok(None)` when no rewrite is required.
     pub fn tick(
         &mut self,
@@ -99,6 +165,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         if let Some(event) = self.try_cached(base_src, ctx, observed_eta)? {
             let eta_bar = event.eta_bar;
             self.record_eta(eta_bar);
+            self.auto_tune_eta();
             return Ok(Some(event));
         }
 
@@ -118,6 +185,8 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         let event = self.eval_hints(base_src, ctx, &hints)?;
         self.record_eta(event.eta_bar);
         self.push_cache(event.eta_bar, event.hints.clone());
+        self.record_hint_success(&event.hints, observed_eta, event.eta_bar);
+        self.auto_tune_eta();
 
         Ok(Some(event))
     }
@@ -135,17 +204,27 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         ctx: &Ctx,
         observed_eta: f32,
     ) -> Result<Option<SelfRewriteEvent>, AiRewriteError> {
-        for idx in 0..self.hint_cache.len() {
+        let mut indices: Vec<usize> = (0..self.hint_cache.len()).collect();
+        indices.sort_by(|a, b| {
+            let sa = self.cache_priority_index(*a);
+            let sb = self.cache_priority_index(*b);
+            sb.partial_cmp(&sa).unwrap_or(Ordering::Equal)
+        });
+
+        for idx in indices {
             let Some(entry) = self.hint_cache.get(idx).cloned() else {
                 continue;
             };
             if entry.eta <= observed_eta {
+                self.penalize_hint(&entry.hints);
                 continue;
             }
             let event = self.eval_hints(base_src, ctx, &entry.hints)?;
             if event.eta_bar <= observed_eta {
+                self.penalize_hint(&entry.hints);
                 continue;
             }
+            self.record_hint_success(&event.hints, observed_eta, event.eta_bar);
             self.touch_cache(idx, event.eta_bar, event.hints.clone());
             return Ok(Some(event));
         }
@@ -170,6 +249,23 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         while self.hint_cache.len() > self.cache_limit {
             self.hint_cache.pop_back();
         }
+    }
+
+    fn cache_priority_index(&self, idx: usize) -> f32 {
+        self.hint_cache
+            .get(idx)
+            .map(|entry| self.cache_priority(entry))
+            .unwrap_or(0.0)
+    }
+
+    fn cache_priority(&self, entry: &CachedHint) -> f32 {
+        let key = Self::hint_key(&entry.hints);
+        let score = self
+            .hint_stats
+            .get(&key)
+            .map(|perf| perf.score())
+            .unwrap_or(entry.eta * 0.5);
+        entry.eta + score
     }
 
     fn eval_hints(
@@ -212,6 +308,51 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         }
         let mean_weight = score / out.soft.len() as f32;
         (self.eta_floor + mean_weight).tanh().abs()
+    }
+
+    fn hint_key(hints: &[HeuristicHint]) -> String {
+        hints
+            .iter()
+            .map(|hint| {
+                format!(
+                    "{}:{}:{}:{}",
+                    hint.field, hint.value_expr, hint.weight_expr, hint.condition_expr
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("|")
+    }
+
+    fn record_hint_success(&mut self, hints: &[HeuristicHint], observed: f32, eta: f32) {
+        let gain = (eta - observed).max(0.0);
+        let key = Self::hint_key(hints);
+        let entry = self.hint_stats.entry(key).or_default();
+        entry.uses += 1;
+        entry.total_gain += gain;
+        entry.best_gain = entry.best_gain.max(gain);
+        entry.last_eta = eta;
+    }
+
+    fn penalize_hint(&mut self, hints: &[HeuristicHint]) {
+        let key = Self::hint_key(hints);
+        let entry = self.hint_stats.entry(key).or_default();
+        entry.failures += 1;
+        entry.total_gain *= 0.5;
+    }
+
+    fn auto_tune_eta(&mut self) {
+        if self.eta_history.len() < self.max_history || self.max_history < 3 {
+            return;
+        }
+        let Some(mean) = self.smoothed_eta() else {
+            return;
+        };
+        let delta = (mean - self.eta_floor) * 0.2;
+        if delta.abs() < 1e-3 {
+            return;
+        }
+        let new_floor = (self.eta_floor + delta).clamp(0.05, 0.995);
+        self.eta_floor = new_floor;
     }
 }
 
@@ -294,5 +435,61 @@ mod tests {
             .expect("event");
         assert!(second.eta_bar > 0.0);
         assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn records_hint_statistics_for_cached_successes() {
+        let mut generator = |_: &AiRewriteConfig, _: &AiRewritePrompt| {
+            Ok(vec![HeuristicHint::new(
+                "tile_cols",
+                "tile_cols * 2",
+                0.9,
+                "true",
+            )])
+        };
+        let ctx = sample_ctx();
+        let mut engine = SelfRewriteEngine::new(&mut generator, AiRewriteConfig::new("mock"))
+            .with_eta_floor(0.6)
+            .with_history(4);
+
+        for _ in 0..3 {
+            let event = engine
+                .tick("algo: 1;", &ctx, None, 0.2)
+                .expect("tick")
+                .expect("event");
+            assert!(event.eta_bar > 0.0);
+        }
+
+        let stats = engine.hint_statistics();
+        assert_eq!(stats.len(), 1);
+        let stat = &stats[0];
+        assert!(stat.uses >= 3);
+        assert!(stat.best_gain > 0.0);
+        assert!(stat.mean_gain > 0.0);
+        assert_eq!(stat.failures, 0);
+    }
+
+    #[test]
+    fn auto_tunes_eta_floor_when_history_full() {
+        let mut generator = |_: &AiRewriteConfig, _: &AiRewritePrompt| {
+            Ok(vec![HeuristicHint::new("radix", "radix * 2", 0.85, "true")])
+        };
+        let ctx = sample_ctx();
+        let mut engine = SelfRewriteEngine::new(&mut generator, AiRewriteConfig::new("mock"))
+            .with_eta_floor(0.3)
+            .with_history(3);
+
+        let baseline = engine.eta_floor();
+        for _ in 0..3 {
+            let event = engine
+                .tick("algo: 1;", &ctx, None, 0.1)
+                .expect("tick")
+                .expect("event");
+            assert!(event.eta_bar > 0.0);
+        }
+
+        let tuned = engine.eta_floor();
+        assert!(tuned > baseline);
+        assert!(tuned <= 0.995);
     }
 }
