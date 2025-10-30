@@ -8,9 +8,11 @@ artefacts emitted by the Rust runtime, allowing SpiralTorch to reserve host
 threads for GPU command submission so compute on both sides can progress
 without contending for the same CPU cores.  The system-facing helpers also
 interrogate Linux control groups so container limits and CPU reservations are
-captured before tuning decisions are made.  WGSL kernel metadata persisted in
-the autotune store is also summarised so GPU dispatch characteristics can feed
-back into the CPU reservation heuristic.
+captured before tuning decisions are made.  The expanded system snapshot now
+records CPU topology from ``/sys/devices/system/cpu`` so physical cores can be
+weighed against logical CPUs when scheduling work alongside GPU pipelines.
+WGSL kernel metadata persisted in the autotune store is also summarised so GPU
+dispatch characteristics can feed back into the CPU reservation heuristic.
 """
 
 from __future__ import annotations
@@ -34,6 +36,7 @@ __all__ = [
     "thread_controls_available",
     "temporary_thread_count",
     "system_cpu_count",
+    "system_cpu_topology",
     "recommended_thread_count",
     "synchronise_thread_hints",
     "auto_tune_threads",
@@ -73,6 +76,7 @@ _GPU_HOST_RESERVATION: int | None = None
 _GPU_HOST_RESERVATION_BUDGET: int | None = None
 
 _CPU_BUDGET_CACHE: dict[str, object] | None = None
+_CPU_TOPOLOGY_CACHE: tuple[int, tuple[int, ...] | None, dict[str, object]] | None = None
 
 _CGROUP_SELF_CACHE: dict[str, str] | None = None
 _CGROUP_QUOTA_CACHE: tuple[int, float | None] | None = None
@@ -769,6 +773,69 @@ def _read_text_file(path: str) -> str | None:
         return None
 
 
+def _cpu_topology_from_sysfs(affinity_filter: set[int] | None) -> dict[str, object] | None:
+    base = "/sys/devices/system/cpu"
+    try:
+        entries = os.listdir(base)
+    except (FileNotFoundError, NotADirectoryError, PermissionError, OSError):
+        return None
+
+    logical_ids: list[int] = []
+    cores: dict[tuple[int, int], int] = {}
+    packages: set[int] = set()
+
+    for name in entries:
+        if not name.startswith("cpu"):
+            continue
+        suffix = name[3:]
+        if not suffix.isdigit():
+            continue
+        cpu_id = int(suffix)
+        if affinity_filter is not None and cpu_id not in affinity_filter:
+            continue
+
+        topology_dir = os.path.join(base, name, "topology")
+        core_id_text = _read_text_file(os.path.join(topology_dir, "core_id"))
+        package_id_text = _read_text_file(os.path.join(topology_dir, "physical_package_id"))
+
+        try:
+            core_id = int(core_id_text) if core_id_text is not None else None
+        except ValueError:
+            core_id = None
+        try:
+            package_id = int(package_id_text) if package_id_text is not None else None
+        except ValueError:
+            package_id = None
+
+        key: tuple[int, int] | None = None
+        if core_id is not None and package_id is not None:
+            key = (package_id, core_id)
+        elif core_id is not None:
+            key = (-1, core_id)
+        elif package_id is not None:
+            key = (package_id, -1)
+
+        logical_ids.append(cpu_id)
+        if package_id is not None:
+            packages.add(package_id)
+        if key is not None:
+            cores[key] = cores.get(key, 0) + 1
+
+    if not logical_ids:
+        return None
+
+    physical_cores = len(cores) if cores else None
+    packages_count = len(packages) if packages else None
+    threads_per_core = max(cores.values()) if cores else None
+
+    return {
+        "logical_ids": logical_ids,
+        "physical_cores": physical_cores,
+        "packages": packages_count,
+        "threads_per_core": threads_per_core,
+    }
+
+
 def _self_cgroup_paths(*, refresh: bool = False) -> dict[str, str]:
     global _CGROUP_SELF_CACHE
     if _CGROUP_SELF_CACHE is not None and not refresh:
@@ -1048,6 +1115,65 @@ def system_cpu_count() -> int | None:
     return int(effective) if isinstance(effective, int) else None
 
 
+def system_cpu_topology(*, refresh: bool = False) -> dict[str, object]:
+    """Return detected CPU topology details scoped to the current process.
+
+    The returned dictionary exposes the logical CPU count seen by the system
+    (``"logical_cpus"``), the number of logical CPUs currently available via the
+    affinity mask (``"available_logical_cpus"``) and the effective limit that
+    considers affinity, cpusets and cgroup quotas (``"effective_logical_cpus"``).
+    When the host exposes topology metadata through ``/sys/devices/system/cpu``
+    additional keys describe the number of physical cores (``"physical_cores"``),
+    CPU packages (``"packages"``) and threads per core
+    (``"threads_per_core"``).  A boolean ``"smt_active"`` key indicates whether
+    symmetric multithreading appears to be enabled for the accessible CPUs.
+    """
+
+    global _CPU_TOPOLOGY_CACHE
+
+    try:
+        affinity_members = set(os.sched_getaffinity(0))  # type: ignore[arg-type]
+    except (AttributeError, OSError):
+        affinity_members = None
+
+    signature: tuple[int, ...] | None
+    if affinity_members is None:
+        signature = None
+    else:
+        signature = tuple(sorted(affinity_members))
+
+    if (
+        not refresh
+        and _CPU_TOPOLOGY_CACHE is not None
+        and _CPU_TOPOLOGY_CACHE[0] == os.getpid()
+        and _CPU_TOPOLOGY_CACHE[1] == signature
+    ):
+        return dict(_CPU_TOPOLOGY_CACHE[2])
+
+    budget = process_cpu_budget(refresh=refresh)
+    logical_total = budget.get("system")
+    affinity_total = budget.get("affinity")
+    effective = budget.get("effective")
+
+    topology = _cpu_topology_from_sysfs(affinity_members)
+    physical_cores = topology.get("physical_cores") if topology else None
+    packages = topology.get("packages") if topology else None
+    threads_per_core = topology.get("threads_per_core") if topology else None
+
+    result = {
+        "logical_cpus": logical_total if isinstance(logical_total, int) else None,
+        "available_logical_cpus": affinity_total if isinstance(affinity_total, int) else None,
+        "effective_logical_cpus": effective if isinstance(effective, int) else None,
+        "physical_cores": physical_cores if isinstance(physical_cores, int) else None,
+        "packages": packages if isinstance(packages, int) else None,
+        "threads_per_core": threads_per_core if isinstance(threads_per_core, int) else None,
+        "smt_active": bool(threads_per_core and isinstance(threads_per_core, int) and threads_per_core > 1),
+    }
+
+    _CPU_TOPOLOGY_CACHE = (os.getpid(), signature, dict(result))
+    return result
+
+
 def recommended_thread_count(
     problem_size: tuple[int, int, int] | None = None,
     *,
@@ -1096,6 +1222,19 @@ def recommended_thread_count(
             deductible = available - 1 if available > 1 else 0
             if deductible > 0:
                 available = max(1, available - min(reservation, deductible))
+
+        topology = system_cpu_topology()
+        physical = topology.get("physical_cores") if topology else None
+        threads_per_core = topology.get("threads_per_core") if topology else None
+        if (
+            isinstance(physical, int)
+            and physical > 0
+            and isinstance(threads_per_core, int)
+            and threads_per_core > 1
+            and reservation is not None
+            and reservation > 0
+        ):
+            available = max(1, min(available, physical))
 
     available = max(1, int(available))
 
