@@ -39,6 +39,33 @@ fn resnet_produces_expected_shape_and_state_roundtrip() {
 }
 
 #[test]
+fn resnet56_skip_gate_accumulates_gradients() {
+    let mut config = ResNetConfig::resnet56_cifar(true);
+    config.skip_init = 0.9;
+    let mut resnet = ResNetBackbone::new(config.clone()).unwrap();
+    let input = sample_input(config.input_channels, config.input_hw, 17);
+    let output = resnet.forward(&input).unwrap();
+    assert_eq!(output.shape(), (1, resnet.output_features()));
+
+    let grad_output =
+        Tensor::random_normal(1, resnet.output_features(), 0.0, 1.0, Some(23)).unwrap();
+    let _ = resnet.backward(&input, &grad_output).unwrap();
+
+    let mut skip_params = 0usize;
+    resnet
+        .visit_parameters(|param| {
+            if param.name().contains("skip_gate") {
+                skip_params += 1;
+                let gradient = param.gradient().expect("skip gate gradient present");
+                assert_eq!(gradient.shape(), (1, 1));
+            }
+            Ok(())
+        })
+        .unwrap();
+    assert!(skip_params > 0, "expected at least one learnable skip gate");
+}
+
+#[test]
 fn vit_cls_token_shape_and_json_reload() {
     let mut config = ViTConfig::default();
     config.image_hw = (32, 32);
