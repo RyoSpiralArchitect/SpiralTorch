@@ -78,6 +78,46 @@ struct AuditReviewFileOutput {
     check_comparisons: Vec<AuditCheckComparisonFile>,
 }
 
+#[derive(serde::Deserialize)]
+struct AuditAnomalyFile {
+    severity: String,
+    message: String,
+}
+
+#[derive(serde::Deserialize)]
+struct StageTransitionMetricFile {
+    from: Option<String>,
+    to: String,
+    count: usize,
+}
+
+#[derive(serde::Deserialize)]
+struct AuditIntrospectionFile {
+    total_events: usize,
+    unique_stages: usize,
+    entropy: f64,
+    #[serde(default)]
+    loops: Vec<String>,
+    #[serde(default)]
+    transitions: Vec<StageTransitionMetricFile>,
+    #[serde(default)]
+    anomalies: Vec<AuditAnomalyFile>,
+}
+
+#[derive(serde::Deserialize)]
+struct AuditIntrospectEntryFile {
+    label: String,
+    introspection: AuditIntrospectionFile,
+}
+
+#[derive(serde::Deserialize)]
+struct AuditIntrospectReportFile {
+    bundles: usize,
+    aggregated: AuditIntrospectionFile,
+    #[serde(default)]
+    per_bundle: Vec<AuditIntrospectEntryFile>,
+}
+
 fn run_cli(args: &[&str]) {
     let status = Command::new(env!("CARGO_BIN_EXE_st-xai-cli"))
         .args(args)
@@ -589,6 +629,99 @@ fn audit_review_cli_reports_matches() {
     assert!(review.stage_differences.is_empty());
     assert!(review.issues.is_empty());
     assert!(review.check_comparisons.iter().all(|check| check.matches));
+}
+
+#[test]
+fn audit_introspect_reports_structural_metrics() {
+    let dir = tempdir().unwrap();
+    let activations_path = dir.path().join("activations.json");
+    let gradients_path = dir.path().join("gradients.json");
+    let report_path = dir.path().join("report.json");
+    let audit_path = dir.path().join("audit.json");
+    let introspect_path = dir.path().join("introspect.json");
+
+    let activations = DiskTensor {
+        rows: 2,
+        cols: 4,
+        data: vec![1.0, 1.0, 1.0, 1.0, 0.5, 1.0, 1.5, 2.0],
+    };
+    let gradients = DiskTensor {
+        rows: 2,
+        cols: 4,
+        data: vec![1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.4],
+    };
+
+    write_tensor(&activations_path, &activations);
+    write_tensor(&gradients_path, &gradients);
+
+    run_cli(&[
+        "--audit-out",
+        audit_path.to_str().unwrap(),
+        "grad-cam",
+        "--activations",
+        activations_path.to_str().unwrap(),
+        "--gradients",
+        gradients_path.to_str().unwrap(),
+        "--height",
+        "2",
+        "--width",
+        "2",
+        "--output",
+        report_path.to_str().unwrap(),
+    ]);
+
+    run_cli(&[
+        "audit-introspect",
+        "--input",
+        audit_path.to_str().unwrap(),
+        "--per-bundle",
+        "--output",
+        introspect_path.to_str().unwrap(),
+    ]);
+
+    let report: AuditIntrospectReportFile =
+        serde_json::from_str(&fs::read_to_string(&introspect_path).unwrap()).unwrap();
+
+    assert_eq!(report.bundles, 1);
+    assert!(report.aggregated.total_events > 0);
+    assert!(report.aggregated.unique_stages > 0);
+    assert!(!report.aggregated.transitions.is_empty());
+    assert!(report.aggregated.entropy >= 0.0);
+    assert!(report
+        .aggregated
+        .transitions
+        .iter()
+        .all(|transition| transition.count > 0));
+    assert!(report
+        .aggregated
+        .transitions
+        .iter()
+        .any(|transition| transition.from.is_none()));
+    assert!(report
+        .aggregated
+        .transitions
+        .iter()
+        .any(|transition| !transition.to.is_empty()));
+    for stage in &report.aggregated.loops {
+        assert!(!stage.is_empty());
+    }
+    assert!(report
+        .aggregated
+        .anomalies
+        .iter()
+        .all(|anomaly| {
+            if anomaly.severity == "critical" {
+                false
+            } else {
+                anomaly.message.is_empty() || !anomaly.message.trim().is_empty()
+            }
+        }));
+    assert_eq!(report.per_bundle.len(), 1);
+    assert_eq!(report.per_bundle[0].label, audit_path.to_str().unwrap());
+    assert_eq!(
+        report.per_bundle[0].introspection.total_events,
+        report.aggregated.total_events
+    );
 }
 
 #[test]
