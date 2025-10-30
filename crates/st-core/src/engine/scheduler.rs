@@ -5,6 +5,8 @@
 
 use std::fmt;
 
+use spiral_config::determinism;
+
 /// Density summary emitted by runtime observers.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Density {
@@ -50,6 +52,9 @@ impl Scheduler {
     /// Ingests density metrics and nudges the scheduler parameters toward more
     /// stable configurations.
     pub fn feed_density(&mut self, density: Density) {
+        if determinism::lock_scheduler() {
+            return;
+        }
         let d = density.clamp();
         let dense_act = d.act;
         let sparse_grad = 1.0 - d.grad;

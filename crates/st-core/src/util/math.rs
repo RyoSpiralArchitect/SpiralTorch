@@ -282,6 +282,102 @@ pub fn spiral_softmax_hardmax_consensus(
     (fused, stats)
 }
 
+/// Aggregate telemetry captured when fusing softmax and hardmax outputs into a
+/// spiral consensus weighting. The fields are intentionally exposed so callers
+/// across the stack (Rust, Python, telemetry exporters) can stitch the values
+/// into their preferred diagnostics pipelines.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SpiralConsensusStats {
+    /// The golden ratio φ used for the fusion.
+    pub phi: f64,
+    /// The conjugate of φ (1/φ) that scales the softmax contribution.
+    pub phi_conjugate: f64,
+    /// The complementary bias (1 - 1/φ) applied to the hardmax mask.
+    pub phi_bias: f64,
+    /// Ratio between π and the Ramanujan approximation baked into the projector.
+    pub ramanujan_ratio: f64,
+    /// Absolute deviation of the Ramanujan approximation from π.
+    pub ramanujan_delta: f64,
+    /// Average enrichment factor injected by the Leech projector across rows.
+    pub average_enrichment: f64,
+    /// Mean Shannon entropy of the softmax distributions prior to fusion.
+    pub mean_entropy: f64,
+    /// Mean hardmax mass (number of winning entries) observed per row.
+    pub mean_hardmass: f64,
+}
+
+/// Computes a spiral consensus weighting that blends softmax probabilities,
+/// hardmax masks, Ramanujan π normalisation, and Leech lattice enrichment.
+///
+/// The returned vector matches the input dimensionality and can be surfaced
+/// directly as a tensor while the accompanying [`SpiralConsensusStats`]
+/// captures aggregated telemetry useful for debugging or adaptive scheduling.
+pub fn spiral_softmax_hardmax_consensus(
+    softmax: &[f32],
+    hardmax: &[f32],
+    rows: usize,
+    cols: usize,
+    projector: &LeechProjector,
+) -> (Vec<f32>, SpiralConsensusStats) {
+    let expected = rows.saturating_mul(cols);
+    if expected == 0 || softmax.len() != expected || hardmax.len() != expected {
+        return (vec![0.0; expected], SpiralConsensusStats::default());
+    }
+
+    let mut fused = vec![0.0; expected];
+    let mut total_entropy = 0.0_f64;
+    let mut total_hardmass = 0.0_f64;
+    let mut total_enrichment = 0.0_f64;
+
+    for row in 0..rows {
+        let offset = row * cols;
+        let row_soft = &softmax[offset..offset + cols];
+        let row_hard = &hardmax[offset..offset + cols];
+
+        let mut entropy = 0.0_f64;
+        let mut hardmass = 0.0_f64;
+
+        for (&prob, &mask) in row_soft.iter().zip(row_hard.iter()) {
+            let p = f64::from(prob.max(0.0));
+            if p > 0.0 {
+                entropy -= p * p.ln();
+            }
+            hardmass += f64::from(mask);
+        }
+
+        let geodesic = entropy * projector.ramanujan_ratio() + hardmass * GOLDEN_RATIO;
+        let enrichment = projector.enrich(geodesic.abs());
+        let scale = (1.0 + enrichment) as f32;
+        total_entropy += entropy;
+        total_hardmass += hardmass;
+        total_enrichment += enrichment;
+
+        for (index, (&prob, &mask)) in row_soft.iter().zip(row_hard.iter()).enumerate() {
+            let fused_value =
+                (GOLDEN_RATIO_CONJUGATE as f32) * prob + (GOLDEN_RATIO_BIAS as f32) * mask;
+            fused[offset + index] = scale * fused_value;
+        }
+    }
+
+    if rows == 0 {
+        return (fused, SpiralConsensusStats::default());
+    }
+
+    let rows_f64 = rows as f64;
+    let stats = SpiralConsensusStats {
+        phi: GOLDEN_RATIO,
+        phi_conjugate: GOLDEN_RATIO_CONJUGATE,
+        phi_bias: GOLDEN_RATIO_BIAS,
+        ramanujan_ratio: projector.ramanujan_ratio(),
+        ramanujan_delta: projector.ramanujan_delta(),
+        average_enrichment: total_enrichment / rows_f64,
+        mean_entropy: total_entropy / rows_f64,
+        mean_hardmass: total_hardmass / rows_f64,
+    };
+
+    (fused, stats)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

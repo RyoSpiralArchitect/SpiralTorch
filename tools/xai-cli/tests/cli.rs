@@ -1,14 +1,38 @@
 use std::fs;
 use std::process::Command;
 
-use st_core::telemetry::xai_report::AttributionReport;
+use st_core::telemetry::xai_report::{AttributionMetadata, AttributionReport};
 use tempfile::tempdir;
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 struct DiskTensor {
     rows: usize,
     cols: usize,
     data: Vec<f32>,
+}
+
+fn write_tensor(path: &std::path::Path, tensor: &DiskTensor) {
+    fs::write(path, serde_json::to_string(tensor).unwrap()).unwrap();
+}
+
+fn read_tensor(path: &std::path::Path) -> DiskTensor {
+    serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap()
+}
+
+#[derive(serde::Deserialize)]
+struct StatisticsFile {
+    min: f32,
+    max: f32,
+    mean: f32,
+    entropy: f32,
+}
+
+fn run_cli(args: &[&str]) {
+    let status = Command::new(env!("CARGO_BIN_EXE_st-xai-cli"))
+        .args(args)
+        .status()
+        .unwrap();
+    assert!(status.success());
 }
 
 #[test]
@@ -29,33 +53,24 @@ fn grad_cam_cli_generates_report() {
         data: vec![1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.4],
     };
 
-    fs::write(
-        &activations_path,
-        serde_json::to_string(&activations).unwrap(),
-    )
-    .unwrap();
-    fs::write(&gradients_path, serde_json::to_string(&gradients).unwrap()).unwrap();
+    write_tensor(&activations_path, &activations);
+    write_tensor(&gradients_path, &gradients);
 
-    let status = Command::new(env!("CARGO_BIN_EXE_st-xai-cli"))
-        .args([
-            "--algorithm",
-            "grad-cam",
-            "--activations",
-            activations_path.to_str().unwrap(),
-            "--gradients",
-            gradients_path.to_str().unwrap(),
-            "--height",
-            "2",
-            "--width",
-            "2",
-            "--layer",
-            "conv1",
-            "--output",
-            output_path.to_str().unwrap(),
-        ])
-        .status()
-        .unwrap();
-    assert!(status.success());
+    run_cli(&[
+        "grad-cam",
+        "--activations",
+        activations_path.to_str().unwrap(),
+        "--gradients",
+        gradients_path.to_str().unwrap(),
+        "--height",
+        "2",
+        "--width",
+        "2",
+        "--layer",
+        "conv1",
+        "--output",
+        output_path.to_str().unwrap(),
+    ]);
 
     let report: AttributionReport =
         serde_json::from_str(&fs::read_to_string(&output_path).unwrap()).unwrap();
@@ -83,34 +98,25 @@ fn grad_cam_cli_raw_heatmap() {
         data: vec![1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.4],
     };
 
-    fs::write(
-        &activations_path,
-        serde_json::to_string(&activations).unwrap(),
-    )
-    .unwrap();
-    fs::write(&gradients_path, serde_json::to_string(&gradients).unwrap()).unwrap();
+    write_tensor(&activations_path, &activations);
+    write_tensor(&gradients_path, &gradients);
 
-    let status = Command::new(env!("CARGO_BIN_EXE_st-xai-cli"))
-        .args([
-            "--algorithm",
-            "grad-cam",
-            "--activations",
-            activations_path.to_str().unwrap(),
-            "--gradients",
-            gradients_path.to_str().unwrap(),
-            "--height",
-            "2",
-            "--width",
-            "2",
-            "--layer",
-            "conv1",
-            "--raw-heatmap",
-            "--output",
-            output_path.to_str().unwrap(),
-        ])
-        .status()
-        .unwrap();
-    assert!(status.success());
+    run_cli(&[
+        "grad-cam",
+        "--activations",
+        activations_path.to_str().unwrap(),
+        "--gradients",
+        gradients_path.to_str().unwrap(),
+        "--height",
+        "2",
+        "--width",
+        "2",
+        "--layer",
+        "conv1",
+        "--raw-heatmap",
+        "--output",
+        output_path.to_str().unwrap(),
+    ]);
 
     let report: AttributionReport =
         serde_json::from_str(&fs::read_to_string(&output_path).unwrap()).unwrap();
@@ -133,6 +139,275 @@ fn grad_cam_cli_raw_heatmap() {
 }
 
 #[test]
+fn grad_cam_cli_writes_metadata_with_stats() {
+    let dir = tempdir().unwrap();
+    let activations_path = dir.path().join("activations.json");
+    let gradients_path = dir.path().join("gradients.json");
+    let output_path = dir.path().join("report_stats.json");
+    let metadata_path = dir.path().join("metadata.json");
+
+    let activations = DiskTensor {
+        rows: 2,
+        cols: 4,
+        data: vec![1.0, 1.0, 1.0, 1.0, 0.5, 1.0, 1.5, 2.0],
+    };
+    let gradients = DiskTensor {
+        rows: 2,
+        cols: 4,
+        data: vec![1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.4],
+    };
+
+    write_tensor(&activations_path, &activations);
+    write_tensor(&gradients_path, &gradients);
+
+    run_cli(&[
+        "--include-stats",
+        "--metadata-out",
+        metadata_path.to_str().unwrap(),
+        "grad-cam",
+        "--activations",
+        activations_path.to_str().unwrap(),
+        "--gradients",
+        gradients_path.to_str().unwrap(),
+        "--height",
+        "2",
+        "--width",
+        "2",
+        "--output",
+        output_path.to_str().unwrap(),
+    ]);
+
+    let report: AttributionReport =
+        serde_json::from_str(&fs::read_to_string(&output_path).unwrap()).unwrap();
+    let metadata: AttributionMetadata =
+        serde_json::from_str(&fs::read_to_string(&metadata_path).unwrap()).unwrap();
+
+    for extras in [&report.metadata.extras, &metadata.extras] {
+        assert!(extras.contains_key("heatmap_min"));
+        assert!(extras.contains_key("heatmap_max"));
+        assert!(extras.contains_key("heatmap_mean"));
+        assert!(extras.contains_key("heatmap_entropy"));
+    }
+}
+
+#[test]
+fn grad_cam_cli_applies_post_processing_and_focus_mask() {
+    let dir = tempdir().unwrap();
+    let activations_path = dir.path().join("activations.json");
+    let gradients_path = dir.path().join("gradients.json");
+    let output_path = dir.path().join("report_processed.json");
+    let mask_path = dir.path().join("mask.json");
+
+    let activations = DiskTensor {
+        rows: 2,
+        cols: 4,
+        data: vec![1.0, 1.0, 1.0, 1.0, 0.5, 1.0, 1.5, 2.0],
+    };
+    let gradients = DiskTensor {
+        rows: 2,
+        cols: 4,
+        data: vec![1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.4],
+    };
+
+    write_tensor(&activations_path, &activations);
+    write_tensor(&gradients_path, &gradients);
+
+    run_cli(&[
+        "--smooth-kernel",
+        "3",
+        "--normalise-output",
+        "--focus-mask-out",
+        mask_path.to_str().unwrap(),
+        "--focus-threshold",
+        "0.0",
+        "grad-cam",
+        "--activations",
+        activations_path.to_str().unwrap(),
+        "--gradients",
+        gradients_path.to_str().unwrap(),
+        "--height",
+        "2",
+        "--width",
+        "2",
+        "--output",
+        output_path.to_str().unwrap(),
+    ]);
+
+    let report: AttributionReport =
+        serde_json::from_str(&fs::read_to_string(&output_path).unwrap()).unwrap();
+    let smooth_kernel = report
+        .metadata
+        .extras
+        .get("smooth_kernel")
+        .and_then(|value| value.as_f64())
+        .unwrap();
+    assert!((smooth_kernel - 3.0).abs() < 1e-6);
+    assert_eq!(
+        report
+            .metadata
+            .extras
+            .get("normalised_output")
+            .and_then(|value| value.as_bool()),
+        Some(true)
+    );
+    let threshold = report
+        .metadata
+        .extras
+        .get("focus_threshold")
+        .and_then(|value| value.as_f64())
+        .unwrap();
+    assert!(threshold.abs() < 1e-6);
+
+    let mask: DiskTensor = serde_json::from_str(&fs::read_to_string(&mask_path).unwrap()).unwrap();
+    assert_eq!(mask.rows, 2);
+    assert_eq!(mask.cols, 2);
+    assert!(mask.data.iter().any(|value| (*value - 1.0).abs() < 1e-6));
+    assert!(mask
+        .data
+        .iter()
+        .all(|value| (*value - 1.0).abs() < 1e-6 || value.abs() < 1e-6));
+}
+
+#[test]
+fn grad_cam_cli_emits_overlays() {
+    let dir = tempdir().unwrap();
+    let activations_path = dir.path().join("activations.json");
+    let gradients_path = dir.path().join("gradients.json");
+    let output_path = dir.path().join("report_overlay.json");
+    let base_path = dir.path().join("base.json");
+    let overlay_path = dir.path().join("overlay.json");
+    let gated_overlay_path = dir.path().join("gated_overlay.json");
+
+    let activations = DiskTensor {
+        rows: 2,
+        cols: 4,
+        data: vec![1.0, 1.0, 1.0, 1.0, 0.5, 1.0, 1.5, 2.0],
+    };
+    let gradients = DiskTensor {
+        rows: 2,
+        cols: 4,
+        data: vec![1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.4],
+    };
+    let base = DiskTensor {
+        rows: 2,
+        cols: 2,
+        data: vec![0.1, 0.3, 0.5, 0.7],
+    };
+
+    write_tensor(&activations_path, &activations);
+    write_tensor(&gradients_path, &gradients);
+    write_tensor(&base_path, &base);
+
+    run_cli(&[
+        "--overlay-base",
+        base_path.to_str().unwrap(),
+        "--overlay-alpha",
+        "0.25",
+        "--overlay-out",
+        overlay_path.to_str().unwrap(),
+        "--gated-overlay-out",
+        gated_overlay_path.to_str().unwrap(),
+        "--focus-threshold",
+        "0.6",
+        "grad-cam",
+        "--activations",
+        activations_path.to_str().unwrap(),
+        "--gradients",
+        gradients_path.to_str().unwrap(),
+        "--height",
+        "2",
+        "--width",
+        "2",
+        "--output",
+        output_path.to_str().unwrap(),
+    ]);
+
+    let report: AttributionReport =
+        serde_json::from_str(&fs::read_to_string(&output_path).unwrap()).unwrap();
+    let overlay_disk = read_tensor(&overlay_path);
+    let gated_overlay_disk = read_tensor(&gated_overlay_path);
+
+    assert_eq!(overlay_disk.rows, report.shape().0);
+    assert_eq!(overlay_disk.cols, report.shape().1);
+    assert_eq!(gated_overlay_disk.rows, report.shape().0);
+    assert_eq!(gated_overlay_disk.cols, report.shape().1);
+
+    let alpha = 0.25f32;
+    for ((&heatmap, (&base_value, &overlay_value)), &gated_value) in report
+        .values
+        .iter()
+        .zip(base.data.iter().zip(overlay_disk.data.iter()))
+        .zip(gated_overlay_disk.data.iter())
+    {
+        let expected_overlay = base_value * (1.0 - alpha) + heatmap * alpha;
+        assert!((overlay_value - expected_overlay).abs() < 1e-5);
+
+        let mask = if heatmap >= 0.6 { 1.0 } else { 0.0 };
+        let gated = heatmap * mask;
+        let combined = base_value * (1.0 - alpha) + gated * alpha;
+        let emphasised = heatmap.clamp(0.0, 1.0);
+        let expected_gated = combined * (1.0 - alpha) + emphasised * alpha;
+        assert!((gated_value - expected_gated).abs() < 1e-5);
+    }
+}
+
+#[test]
+fn grad_cam_cli_emits_heatmap_and_statistics_files() {
+    let dir = tempdir().unwrap();
+    let activations_path = dir.path().join("activations.json");
+    let gradients_path = dir.path().join("gradients.json");
+    let report_path = dir.path().join("report.json");
+    let heatmap_path = dir.path().join("heatmap.json");
+    let stats_path = dir.path().join("stats.json");
+
+    let activations = DiskTensor {
+        rows: 2,
+        cols: 4,
+        data: vec![1.0, 0.5, 0.25, 0.75, 0.8, 0.2, 0.3, 0.6],
+    };
+    let gradients = DiskTensor {
+        rows: 2,
+        cols: 4,
+        data: vec![0.2, 0.4, 0.6, 0.8, 1.0, 0.8, 0.6, 0.4],
+    };
+
+    write_tensor(&activations_path, &activations);
+    write_tensor(&gradients_path, &gradients);
+
+    run_cli(&[
+        "--heatmap-out",
+        heatmap_path.to_str().unwrap(),
+        "--stats-out",
+        stats_path.to_str().unwrap(),
+        "grad-cam",
+        "--activations",
+        activations_path.to_str().unwrap(),
+        "--gradients",
+        gradients_path.to_str().unwrap(),
+        "--height",
+        "2",
+        "--width",
+        "2",
+        "--output",
+        report_path.to_str().unwrap(),
+    ]);
+
+    let heatmap: DiskTensor =
+        serde_json::from_str(&fs::read_to_string(&heatmap_path).unwrap()).unwrap();
+    assert_eq!(heatmap.rows * heatmap.cols, heatmap.data.len());
+    assert!(heatmap
+        .data
+        .iter()
+        .any(|value| (*value - heatmap.data[0]).abs() > 1e-6));
+
+    let stats: StatisticsFile =
+        serde_json::from_str(&fs::read_to_string(&stats_path).unwrap()).unwrap();
+    assert!(stats.max >= stats.min);
+    assert!(stats.mean.is_finite());
+    assert!(stats.entropy.is_finite());
+}
+
+#[test]
 fn integrated_gradients_cli_identity_model() {
     let dir = tempdir().unwrap();
     let input_path = dir.path().join("input.json");
@@ -150,29 +425,24 @@ fn integrated_gradients_cli_identity_model() {
         data: vec![0.25, 0.75],
     };
 
-    fs::write(&baseline_path, serde_json::to_string(&baseline).unwrap()).unwrap();
-    fs::write(&input_path, serde_json::to_string(&input).unwrap()).unwrap();
+    write_tensor(&baseline_path, &baseline);
+    write_tensor(&input_path, &input);
 
-    let status = Command::new(env!("CARGO_BIN_EXE_st-xai-cli"))
-        .args([
-            "--algorithm",
-            "integrated-gradients",
-            "--input",
-            input_path.to_str().unwrap(),
-            "--baseline",
-            baseline_path.to_str().unwrap(),
-            "--steps",
-            "8",
-            "--target",
-            "0",
-            "--target-label",
-            "class0",
-            "--output",
-            output_path.to_str().unwrap(),
-        ])
-        .status()
-        .unwrap();
-    assert!(status.success());
+    run_cli(&[
+        "integrated-gradients",
+        "--input",
+        input_path.to_str().unwrap(),
+        "--baseline",
+        baseline_path.to_str().unwrap(),
+        "--steps",
+        "8",
+        "--target",
+        "0",
+        "--target-label",
+        "class0",
+        "--output",
+        output_path.to_str().unwrap(),
+    ]);
 
     let report: AttributionReport =
         serde_json::from_str(&fs::read_to_string(&output_path).unwrap()).unwrap();

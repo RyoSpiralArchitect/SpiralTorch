@@ -6,7 +6,10 @@
 use std::fmt;
 
 use rand::distributions::{Distribution, WeightedIndex};
+use rand::rngs::StdRng;
 use rand::thread_rng;
+use rand::SeedableRng;
+use spiral_config::determinism;
 use st_spiral_rl::{
     EpisodeReport, GeometryFeedback, GeometryFeedbackSignal, PolicyTelemetry, SpiralPolicyGradient,
     SpiralRlError,
@@ -320,8 +323,22 @@ impl RecBanditController {
 
     fn sample_action(probabilities: &[f32]) -> RecRlResult<usize> {
         let distribution = WeightedIndex::new(probabilities)?;
-        let mut rng = thread_rng();
-        Ok(distribution.sample(&mut rng))
+        if determinism::config().enabled {
+            use std::collections::hash_map::DefaultHasher;
+            use std::hash::{Hash, Hasher};
+
+            let mut hasher = DefaultHasher::new();
+            "st-rec/rl_bridge/sample_action".hash(&mut hasher);
+            for prob in probabilities {
+                prob.to_bits().hash(&mut hasher);
+            }
+            let seed = determinism::config().seed_for(hasher.finish());
+            let mut rng = StdRng::seed_from_u64(seed);
+            Ok(distribution.sample(&mut rng))
+        } else {
+            let mut rng = thread_rng();
+            Ok(distribution.sample(&mut rng))
+        }
     }
 
     /// Records the observed reward for the provided transition.
