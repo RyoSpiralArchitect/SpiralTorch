@@ -11,124 +11,6 @@ import pytest
 _BINDINGS_DIR = Path(__file__).resolve().parents[1] / "spiraltorch"
 
 
-def _install_fake_torch(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
-    fake_torch = types.ModuleType("torch")
-
-    class FakeTensor:
-        def __init__(self, payload):
-            self.payload = payload
-
-        def to(self, **kwargs):
-            return FakeTensor((self.payload, kwargs))
-
-        def clone(self):
-            return FakeTensor(("clone", self.payload))
-
-    fake_utils = types.ModuleType("torch.utils")
-    fake_dlpack = types.ModuleType("torch.utils.dlpack")
-
-    def from_dlpack(capsule):
-        return FakeTensor(("from_dlpack", capsule))
-
-    def to_dlpack(tensor):
-        return ("to_dlpack", tensor.payload)
-
-    fake_dlpack.from_dlpack = from_dlpack
-    fake_dlpack.to_dlpack = to_dlpack
-    fake_utils.dlpack = fake_dlpack
-
-    fake_autograd = types.SimpleNamespace(Function=type("Function", (), {}))
-
-    fake_torch.Tensor = FakeTensor
-    fake_torch.utils = fake_utils
-    fake_torch.autograd = fake_autograd
-
-    monkeypatch.setitem(sys.modules, "torch", fake_torch)
-    monkeypatch.setitem(sys.modules, "torch.utils", fake_utils)
-    monkeypatch.setitem(sys.modules, "torch.utils.dlpack", fake_dlpack)
-
-    return fake_torch
-
-
-def _install_fake_jax(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
-    fake_jax = types.ModuleType("jax")
-
-    def device_put(array, device=None):
-        return ("device_put", array, device)
-
-    fake_jax.device_put = device_put
-
-    fake_dlpack = types.ModuleType("jax.dlpack")
-
-    def from_dlpack(capsule):
-        return ("from_dlpack", capsule)
-
-    def to_dlpack(array):
-        return ("to_dlpack", array)
-
-    fake_dlpack.from_dlpack = from_dlpack
-    fake_dlpack.to_dlpack = to_dlpack
-
-    monkeypatch.setitem(sys.modules, "jax", fake_jax)
-    monkeypatch.setitem(sys.modules, "jax.dlpack", fake_dlpack)
-
-    return fake_jax
-
-
-def _install_fake_cupy(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
-    fake_cupy = types.ModuleType("cupy")
-
-    def from_dlpack(capsule):
-        return ("cupy.from_dlpack", capsule)
-
-    def to_dlpack(array):
-        return ("cupy.to_dlpack", array)
-
-    fake_cupy.from_dlpack = from_dlpack
-    fake_cupy.toDlpack = to_dlpack
-    fake_cupy.to_dlpack = to_dlpack
-
-    class FakeArray:
-        def __init__(self, payload):
-            self.payload = payload
-
-        def toDlpack(self):
-            return ("array.toDlpack", self.payload)
-
-    fake_cupy.ndarray = FakeArray
-
-    monkeypatch.setitem(sys.modules, "cupy", fake_cupy)
-
-    return fake_cupy
-
-
-def _install_fake_tensorflow(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
-    fake_tf = types.ModuleType("tensorflow")
-    fake_experimental = types.SimpleNamespace()
-    fake_dlpack = types.SimpleNamespace()
-
-    def from_dlpack(capsule):
-        return ("tf.from_dlpack", capsule)
-
-    def to_dlpack(tensor):
-        return ("tf.to_dlpack", tensor)
-
-    fake_dlpack.from_dlpack = from_dlpack
-    fake_dlpack.to_dlpack = to_dlpack
-    fake_experimental.dlpack = fake_dlpack
-    fake_tf.experimental = fake_experimental
-
-    class FakeTensor:
-        def __init__(self, payload):
-            self.payload = payload
-
-    fake_tf.Tensor = FakeTensor
-
-    monkeypatch.setitem(sys.modules, "tensorflow", fake_tf)
-
-    return fake_tf
-
-
 def _load_ecosystem(stub_spiraltorch, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delitem(sys.modules, "spiraltorch.ecosystem", raising=False)
     package_paths = list(getattr(stub_spiraltorch, "__path__", []))
@@ -139,125 +21,152 @@ def _load_ecosystem(stub_spiraltorch, monkeypatch: pytest.MonkeyPatch):
     return importlib.import_module("spiraltorch.ecosystem")
 
 
-def test_tensor_to_torch_uses_dlpack(
-    stub_spiraltorch, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _install_fake_torch(monkeypatch)
+def test_tensor_to_torch_and_back_use_compat(stub_spiraltorch, monkeypatch):
+    calls: dict[str, tuple[object, dict[str, object]]] = {}
+
+    def to_torch(tensor, **kwargs):
+        calls["to_torch"] = (tensor, kwargs)
+        return "torch-tensor"
+
+    def from_torch(tensor, **kwargs):
+        calls["from_torch"] = (tensor, kwargs)
+        return "spiral-tensor"
+
+    torch_namespace = types.SimpleNamespace(to_torch=to_torch, from_torch=from_torch)
+    monkeypatch.setattr(stub_spiraltorch.compat, "torch", torch_namespace, raising=False)
 
     ecosystem = _load_ecosystem(stub_spiraltorch, monkeypatch)
     Tensor = stub_spiraltorch.Tensor
 
     tensor = Tensor(1, 1, [0.0])
 
-    capsule = object()
-    monkeypatch.setattr(Tensor, "to_dlpack", lambda self: capsule)
+    result = ecosystem.tensor_to_torch(
+        tensor,
+        dtype="float32",
+        device="cuda:0",
+        requires_grad=True,
+        copy=True,
+        memory_format="contiguous_format",
+    )
+    assert result == "torch-tensor"
+    assert calls["to_torch"] == (
+        tensor,
+        {
+            "dtype": "float32",
+            "device": "cuda:0",
+            "requires_grad": True,
+            "copy": True,
+            "memory_format": "contiguous_format",
+        },
+    )
 
-    torch_tensor = ecosystem.tensor_to_torch(tensor)
-    assert torch_tensor.payload == ("from_dlpack", capsule)
-
-    moved = ecosystem.tensor_to_torch(tensor, device="meta", dtype="float32", copy=True)
-    assert moved.payload == (
-        ("from_dlpack", capsule),
-        {"device": "meta", "dtype": "float32", "copy": True},
+    back = ecosystem.torch_to_tensor(
+        "torch-tensor",
+        dtype="float16",
+        device="cpu",
+        ensure_cpu=False,
+        copy=True,
+        require_contiguous=False,
+    )
+    assert back == "spiral-tensor"
+    assert calls["from_torch"] == (
+        "torch-tensor",
+        {
+            "dtype": "float16",
+            "device": "cpu",
+            "ensure_cpu": False,
+            "copy": True,
+            "require_contiguous": False,
+        },
     )
 
 
-def test_torch_to_tensor_uses_dlpack(
-    stub_spiraltorch, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    fake_torch = _install_fake_torch(monkeypatch)
+def test_jax_and_tensorflow_bridge_use_compat(stub_spiraltorch, monkeypatch):
+    jax_calls: dict[str, object] = {}
+    tf_calls: dict[str, object] = {}
 
-    ecosystem = _load_ecosystem(stub_spiraltorch, monkeypatch)
-    Tensor = stub_spiraltorch.Tensor
+    def to_jax(tensor):
+        jax_calls["to"] = tensor
+        return "jax-array"
 
-    captured = {}
+    def from_jax(array):
+        jax_calls["from"] = array
+        return "jax->spiral"
 
-    def fake_from_dlpack(cls, capsule):
-        captured["capsule"] = capsule
-        return ("tensor", capsule)
+    def to_tf(tensor):
+        tf_calls["to"] = tensor
+        return "tf-tensor"
 
-    monkeypatch.setattr(Tensor, "from_dlpack", classmethod(fake_from_dlpack))
+    def from_tf(value):
+        tf_calls["from"] = value
+        return "tf->spiral"
 
-    torch_tensor = fake_torch.Tensor("payload")
-
-    result = ecosystem.torch_to_tensor(torch_tensor, clone=True)
-    assert result == ("tensor", ("to_dlpack", ("clone", "payload")))
-    assert captured["capsule"] == ("to_dlpack", ("clone", "payload"))
-
-    with pytest.raises(TypeError):
-        ecosystem.torch_to_tensor("not_a_tensor")
-
-
-def test_tensor_to_jax_and_back(
-    stub_spiraltorch, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _install_fake_jax(monkeypatch)
-
-    ecosystem = _load_ecosystem(stub_spiraltorch, monkeypatch)
-    Tensor = stub_spiraltorch.Tensor
-
-    tensor = Tensor(1, 1, [1.0])
-    capsule = object()
-
-    monkeypatch.setattr(Tensor, "to_dlpack", lambda self: capsule)
     monkeypatch.setattr(
-        Tensor,
-        "from_dlpack",
-        classmethod(lambda cls, capsule: ("tensor", capsule)),
+        stub_spiraltorch.compat,
+        "jax",
+        types.SimpleNamespace(to_jax=to_jax, from_jax=from_jax),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        stub_spiraltorch.compat,
+        "tensorflow",
+        types.SimpleNamespace(to_tensorflow=to_tf, from_tensorflow=from_tf),
+        raising=False,
     )
 
-    jax_array = ecosystem.tensor_to_jax(tensor, device="TPU")
-    assert jax_array == ("device_put", ("from_dlpack", capsule), "TPU")
+    ecosystem = _load_ecosystem(stub_spiraltorch, monkeypatch)
+    Tensor = stub_spiraltorch.Tensor
+    tensor = Tensor(1, 1, [1.0])
 
-    restored = ecosystem.jax_to_tensor(("array", 1))
-    assert restored == ("tensor", ("to_dlpack", ("array", 1)))
+    assert ecosystem.tensor_to_jax(tensor) == "jax-array"
+    assert jax_calls["to"] is tensor
+    assert ecosystem.jax_to_tensor("jax-array") == "jax->spiral"
+    assert jax_calls["from"] == "jax-array"
+
+    assert ecosystem.tensor_to_tensorflow(tensor) == "tf-tensor"
+    assert tf_calls["to"] is tensor
+    assert ecosystem.tensorflow_to_tensor("tf-tensor") == "tf->spiral"
+    assert tf_calls["from"] == "tf-tensor"
 
 
-def test_tensor_to_cupy_and_back(
-    stub_spiraltorch, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _install_fake_cupy(monkeypatch)
+def test_missing_compat_namespace_raises_helpful_error(stub_spiraltorch, monkeypatch):
+    monkeypatch.delattr(stub_spiraltorch.compat, "torch", raising=False)
+    ecosystem = _load_ecosystem(stub_spiraltorch, monkeypatch)
+    tensor = stub_spiraltorch.Tensor(1, 1, [0.0])
+
+    with pytest.raises(RuntimeError, match=r"compat\.torch"):
+        ecosystem.tensor_to_torch(tensor)
+
+
+def test_cupy_roundtrip_uses_dlpack(stub_spiraltorch, monkeypatch):
+    fake_cupy = types.ModuleType("cupy")
+
+    def from_dlpack(capsule):
+        return ("from_dlpack", capsule)
+
+    def to_dlpack(array):
+        return ("to_dlpack", array)
+
+    fake_cupy.from_dlpack = from_dlpack
+    fake_cupy.toDlpack = to_dlpack
+    fake_cupy.to_dlpack = to_dlpack
+
+    monkeypatch.setitem(sys.modules, "cupy", fake_cupy)
 
     ecosystem = _load_ecosystem(stub_spiraltorch, monkeypatch)
     Tensor = stub_spiraltorch.Tensor
 
     tensor = Tensor(1, 1, [0.5])
     capsule = object()
-
     monkeypatch.setattr(Tensor, "to_dlpack", lambda self: capsule)
     monkeypatch.setattr(
         Tensor,
         "from_dlpack",
-        classmethod(lambda cls, capsule: ("tensor", capsule)),
+        classmethod(lambda cls, cap: ("from_dlpack", cap)),
     )
 
     cupy_array = ecosystem.tensor_to_cupy(tensor)
-    assert cupy_array == ("cupy.from_dlpack", capsule)
+    assert cupy_array == ("from_dlpack", capsule)
 
     restored = ecosystem.cupy_to_tensor(types.SimpleNamespace(toDlpack=lambda: ("dlpack", 42)))
-    assert restored == ("tensor", ("dlpack", 42))
-
-
-def test_tensor_to_tensorflow_and_back(
-    stub_spiraltorch, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _install_fake_tensorflow(monkeypatch)
-
-    ecosystem = _load_ecosystem(stub_spiraltorch, monkeypatch)
-    Tensor = stub_spiraltorch.Tensor
-
-    tensor = Tensor(1, 1, [0.25])
-    capsule = object()
-
-    monkeypatch.setattr(Tensor, "to_dlpack", lambda self: capsule)
-    monkeypatch.setattr(
-        Tensor,
-        "from_dlpack",
-        classmethod(lambda cls, capsule: ("tensor", capsule)),
-    )
-
-    tf_tensor = ecosystem.tensor_to_tensorflow(tensor)
-    assert tf_tensor == ("tf.from_dlpack", capsule)
-
-    restored = ecosystem.tensorflow_to_tensor("fake_tf_tensor")
-    assert restored == ("tensor", ("tf.to_dlpack", "fake_tf_tensor"))
+    assert restored == ("from_dlpack", ("dlpack", 42))

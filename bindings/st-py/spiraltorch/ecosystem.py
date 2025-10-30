@@ -1,19 +1,10 @@
-"""Interoperability helpers for popular ML ecosystems.
-
-These helpers rely on DLPack interchange to bridge SpiralTorch tensors with
-external frameworks without materialising data copies when possible.
-"""
+"""Convenience wrappers around SpiralTorch's ecosystem bridges."""
 
 from __future__ import annotations
 
-import importlib
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
-from . import Tensor
-
-if TYPE_CHECKING:  # pragma: no cover - optional dependency hints
-    import torch  # noqa: F401
-    import jax  # noqa: F401
+from . import Tensor, compat
 
 __all__ = [
     "tensor_to_torch",
@@ -26,128 +17,123 @@ __all__ = [
     "tensorflow_to_tensor",
 ]
 
+_NATIVE_EXTENSION_HINT = (
+    "Build the SpiralTorch native extension (e.g. `maturin develop -m "
+    "bindings/st-py/Cargo.toml`) to enable spiraltorch.compat helpers."
+)
 
-def _require_module(name: str) -> Any:
-    """Import *name* or raise a descriptive runtime error."""
+
+def _compat_namespace(name: str) -> Any:
+    """Return a compat child module or raise a descriptive error."""
 
     try:
-        return importlib.import_module(name)
-    except ModuleNotFoundError as exc:  # pragma: no cover - exercised indirectly in tests
+        module = getattr(compat, name)
+    except AttributeError as exc:  # pragma: no cover - exercised via tests
         raise RuntimeError(
-            f"Optional dependency '{name}' is required for this interoperability helper."
+            f"spiraltorch.compat.{name} is unavailable. {_NATIVE_EXTENSION_HINT}"
         ) from exc
+    return module
+
+
+def _compat_call(namespace: str, attr: str, *args: Any, **kwargs: Any) -> Any:
+    module = _compat_namespace(namespace)
+    try:
+        func = getattr(module, attr)
+    except AttributeError as exc:  # pragma: no cover - exercised via tests
+        raise RuntimeError(
+            f"spiraltorch.compat.{namespace}.{attr} is unavailable. {_NATIVE_EXTENSION_HINT}"
+        ) from exc
+    return func(*args, **kwargs)
 
 
 def tensor_to_torch(
     tensor: Tensor,
     *,
-    device: Any | None = None,
     dtype: Any | None = None,
+    device: Any | None = None,
+    requires_grad: bool | None = None,
     copy: bool | None = None,
+    memory_format: Any | None = None,
 ) -> Any:
-    """Convert a :class:`~spiraltorch.Tensor` into a ``torch.Tensor``.
+    """Share a :class:`~spiraltorch.Tensor` with PyTorch."""
 
-    Args:
-        tensor: The SpiralTorch tensor to convert.
-        device: Optional device placement forwarded to ``torch.Tensor.to``.
-        dtype: Optional dtype forwarded to ``torch.Tensor.to``.
-        copy: If provided, forwarded to ``torch.Tensor.to``'s ``copy`` argument.
-
-    Returns:
-        A ``torch.Tensor`` sharing storage with the SpiralTorch tensor whenever
-        the backend supports zero-copy DLPack interchange.
-    """
-
-    torch = _require_module("torch")
-    utils = getattr(torch, "utils", None)
-    dlpack_mod = getattr(utils, "dlpack", None) if utils is not None else None
-    if dlpack_mod is None or not hasattr(dlpack_mod, "from_dlpack"):
-        raise RuntimeError("torch.utils.dlpack.from_dlpack is unavailable")
-
-    capsule = tensor.to_dlpack()
-    torch_tensor = dlpack_mod.from_dlpack(capsule)
-
-    kwargs: dict[str, Any] = {}
-    if device is not None:
-        kwargs["device"] = device
-    if dtype is not None:
-        kwargs["dtype"] = dtype
-    if copy is not None:
-        kwargs["copy"] = copy
-    if kwargs:
-        torch_tensor = torch_tensor.to(**kwargs)
-    return torch_tensor
+    return _compat_call(
+        "torch",
+        "to_torch",
+        tensor,
+        dtype=dtype,
+        device=device,
+        requires_grad=requires_grad,
+        copy=copy,
+        memory_format=memory_format,
+    )
 
 
-def torch_to_tensor(tensor: Any, *, clone: bool = False) -> Tensor:
-    """Convert a ``torch.Tensor`` into a :class:`~spiraltorch.Tensor`.
+def torch_to_tensor(
+    tensor: Any,
+    *,
+    dtype: Any | None = None,
+    device: Any | None = None,
+    ensure_cpu: bool | None = None,
+    copy: bool | None = None,
+    require_contiguous: bool | None = None,
+) -> Tensor:
+    """Convert a ``torch.Tensor`` into a SpiralTorch tensor."""
 
-    Args:
-        tensor: The source ``torch.Tensor`` instance.
-        clone: Whether to clone the PyTorch tensor before exporting to DLPack.
-
-    Returns:
-        A SpiralTorch :class:`~spiraltorch.Tensor` containing the same values.
-    """
-
-    torch = _require_module("torch")
-    if not isinstance(tensor, getattr(torch, "Tensor", ())):
-        raise TypeError("torch_to_tensor expects a torch.Tensor instance")
-
-    utils = getattr(torch, "utils", None)
-    dlpack_mod = getattr(utils, "dlpack", None) if utils is not None else None
-    if dlpack_mod is None:
-        raise RuntimeError("torch.utils.dlpack is unavailable")
-
-    candidate = tensor.clone() if clone else tensor
-
-    if hasattr(dlpack_mod, "to_dlpack"):
-        capsule = dlpack_mod.to_dlpack(candidate)
-    elif hasattr(candidate, "to_dlpack"):
-        capsule = candidate.to_dlpack()
-    elif hasattr(candidate, "__dlpack__"):
-        capsule = candidate.__dlpack__()
-    else:  # pragma: no cover - defensive guard
-        raise RuntimeError("Torch tensor does not expose a DLPack exporter")
-
-    return Tensor.from_dlpack(capsule)
+    return _compat_call(
+        "torch",
+        "from_torch",
+        tensor,
+        dtype=dtype,
+        device=device,
+        ensure_cpu=ensure_cpu,
+        copy=copy,
+        require_contiguous=require_contiguous,
+    )
 
 
-def tensor_to_jax(tensor: Tensor, *, device: Any | None = None) -> Any:
-    """Convert a :class:`~spiraltorch.Tensor` into a ``jax.Array``."""
+def tensor_to_jax(tensor: Tensor) -> Any:
+    """Share a :class:`~spiraltorch.Tensor` with JAX."""
 
-    jax_dlpack = _require_module("jax.dlpack")
-    capsule = tensor.to_dlpack()
-    jax_array = jax_dlpack.from_dlpack(capsule)
-    if device is None:
-        return jax_array
-
-    jax = _require_module("jax")
-    return jax.device_put(jax_array, device)
+    return _compat_call("jax", "to_jax", tensor)
 
 
 def jax_to_tensor(array: Any) -> Tensor:
     """Convert a ``jax.Array`` (or compatible object) into a SpiralTorch tensor."""
 
-    jax_dlpack = _require_module("jax.dlpack")
-    if hasattr(jax_dlpack, "to_dlpack"):
-        capsule = jax_dlpack.to_dlpack(array)
-    elif hasattr(array, "__dlpack__"):
-        capsule = array.__dlpack__()
-    else:  # pragma: no cover - defensive guard
-        raise TypeError("Object does not expose a DLPack-compatible exporter")
-    return Tensor.from_dlpack(capsule)
+    return _compat_call("jax", "from_jax", array)
+
+
+def tensor_to_tensorflow(tensor: Tensor) -> Any:
+    """Share a :class:`~spiraltorch.Tensor` with TensorFlow."""
+
+    return _compat_call("tensorflow", "to_tensorflow", tensor)
+
+
+def tensorflow_to_tensor(value: Any) -> Tensor:
+    """Convert a ``tf.Tensor`` (or compatible object) into a SpiralTorch tensor."""
+
+    return _compat_call("tensorflow", "from_tensorflow", value)
+
+
+def _require_module(name: str) -> Any:
+    try:
+        return __import__(name)
+    except ModuleNotFoundError as exc:  # pragma: no cover - exercised via tests
+        raise RuntimeError(
+            f"Optional dependency '{name}' is required for this interoperability helper."
+        ) from exc
 
 
 def tensor_to_cupy(tensor: Tensor) -> Any:
-    """Convert a :class:`~spiraltorch.Tensor` into a ``cupy.ndarray``."""
+    """Share a :class:`~spiraltorch.Tensor` with CuPy via DLPack."""
 
     cupy = _require_module("cupy")
-    if not hasattr(cupy, "from_dlpack"):
+    exporter = getattr(cupy, "from_dlpack", None)
+    if exporter is None:  # pragma: no cover - defensive guard
         raise RuntimeError("cupy.from_dlpack is unavailable")
-
     capsule = tensor.to_dlpack()
-    return cupy.from_dlpack(capsule)
+    return exporter(capsule)
 
 
 def cupy_to_tensor(array: Any) -> Tensor:
@@ -155,7 +141,7 @@ def cupy_to_tensor(array: Any) -> Tensor:
 
     cupy = _require_module("cupy")
     if hasattr(array, "toDlpack"):
-        capsule = array.toDlpack()  # legacy CuPy exporter name
+        capsule = array.toDlpack()
     elif hasattr(array, "to_dlpack"):
         capsule = array.to_dlpack()
     elif hasattr(cupy, "toDlpack"):
@@ -164,35 +150,6 @@ def cupy_to_tensor(array: Any) -> Tensor:
         capsule = cupy.to_dlpack(array)
     elif hasattr(array, "__dlpack__"):
         capsule = array.__dlpack__()
-    else:  # pragma: no cover - defensive guard
-        raise TypeError("Object does not expose a DLPack-compatible exporter")
-    return Tensor.from_dlpack(capsule)
-
-
-def tensor_to_tensorflow(tensor: Tensor) -> Any:
-    """Convert a :class:`~spiraltorch.Tensor` into a ``tf.Tensor``."""
-
-    tf = _require_module("tensorflow")
-    dlpack = getattr(tf.experimental, "dlpack", None)
-    if dlpack is None or not hasattr(dlpack, "from_dlpack"):
-        raise RuntimeError("tensorflow.experimental.dlpack.from_dlpack is unavailable")
-
-    capsule = tensor.to_dlpack()
-    return dlpack.from_dlpack(capsule)
-
-
-def tensorflow_to_tensor(tensor: Any) -> Tensor:
-    """Convert a ``tf.Tensor`` (or compatible object) into a SpiralTorch tensor."""
-
-    tf = _require_module("tensorflow")
-    dlpack = getattr(tf.experimental, "dlpack", None)
-    if dlpack is None:
-        raise RuntimeError("tensorflow.experimental.dlpack is unavailable")
-
-    if hasattr(dlpack, "to_dlpack"):
-        capsule = dlpack.to_dlpack(tensor)
-    elif hasattr(tensor, "__dlpack__"):
-        capsule = tensor.__dlpack__()
     else:  # pragma: no cover - defensive guard
         raise TypeError("Object does not expose a DLPack-compatible exporter")
     return Tensor.from_dlpack(capsule)
