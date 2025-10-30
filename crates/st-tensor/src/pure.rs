@@ -335,6 +335,35 @@ impl fmt::Display for SoftmaxBackend {
     }
 }
 
+/// Explicit backend selection for row-wise hardmax.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HardmaxBackend {
+    /// Allow SpiralTorch to pick the most appropriate backend.
+    Auto,
+    /// Force the pure Rust implementation.
+    Cpu,
+    /// Execute on the WGPU accelerator backend when available.
+    #[cfg(feature = "wgpu")]
+    GpuWgpu,
+}
+
+impl HardmaxBackend {
+    fn label(self) -> &'static str {
+        match self {
+            HardmaxBackend::Auto => "auto",
+            HardmaxBackend::Cpu => "cpu",
+            #[cfg(feature = "wgpu")]
+            HardmaxBackend::GpuWgpu => "wgpu",
+        }
+    }
+}
+
+impl fmt::Display for HardmaxBackend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
 /// Explicit backend selection for fused attention.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AttentionBackend {
@@ -1581,6 +1610,72 @@ impl Tensor {
         }
     }
 
+    /// Row-wise softmax probabilities with accompanying hardmax mask using automatic backend selection.
+    pub fn row_softmax_hardmax(&self) -> PureResult<(Tensor, Tensor)> {
+        self.row_softmax_hardmax_with_backend(SoftmaxBackend::Auto)
+    }
+
+    /// Row-wise softmax and hardmax pair with explicit backend control.
+    pub fn row_softmax_hardmax_with_backend(
+        &self,
+        backend: SoftmaxBackend,
+    ) -> PureResult<(Tensor, Tensor)> {
+        let rows = self.rows;
+        let cols = self.cols;
+
+        match backend {
+            SoftmaxBackend::Auto => self.row_softmax_hardmax_auto(rows, cols),
+            SoftmaxBackend::Cpu => {
+                let (soft, hard) = row_softmax_hardmax_cpu(self.data(), rows, cols);
+                let soft_tensor = Tensor::from_vec(rows, cols, soft)?;
+                let hard_tensor = Tensor::from_vec(rows, cols, hard)?;
+                Ok((soft_tensor, hard_tensor))
+            }
+            #[cfg(feature = "wgpu")]
+            SoftmaxBackend::GpuWgpu => {
+                let (soft, hard) =
+                    wgpu_dense::row_softmax_hardmax(self.data(), rows, cols, self.layout).map_err(
+                        |message| TensorError::BackendFailure {
+                            backend: "wgpu",
+                            message,
+                        },
+                    )?;
+                let soft_tensor = Tensor::from_vec(rows, cols, soft)?;
+                let hard_tensor = Tensor::from_vec(rows, cols, hard)?;
+                Ok((soft_tensor, hard_tensor))
+            }
+        }
+    }
+
+    /// Row-wise hardmax using automatic backend selection.
+    pub fn row_hardmax(&self) -> PureResult<Tensor> {
+        self.row_hardmax_with_backend(HardmaxBackend::Auto)
+    }
+
+    /// Row-wise hardmax with explicit backend control.
+    pub fn row_hardmax_with_backend(&self, backend: HardmaxBackend) -> PureResult<Tensor> {
+        let rows = self.rows;
+        let cols = self.cols;
+
+        match backend {
+            HardmaxBackend::Auto => self.row_hardmax_auto(rows, cols),
+            HardmaxBackend::Cpu => {
+                let buffer = row_hardmax_cpu(self.data(), rows, cols);
+                Tensor::from_vec(rows, cols, buffer)
+            }
+            #[cfg(feature = "wgpu")]
+            HardmaxBackend::GpuWgpu => {
+                let data = wgpu_dense::row_hardmax(self.data(), rows, cols, self.layout).map_err(
+                    |message| TensorError::BackendFailure {
+                        backend: "wgpu",
+                        message,
+                    },
+                )?;
+                Tensor::from_vec(rows, cols, data)
+            }
+        }
+    }
+
     fn row_softmax_auto(&self, rows: usize, cols: usize) -> PureResult<Tensor> {
         #[cfg(feature = "wgpu")]
         {
@@ -1592,6 +1687,40 @@ impl Tensor {
         }
 
         let buffer = row_softmax_cpu(self.data(), rows, cols);
+        Tensor::from_vec(rows, cols, buffer)
+    }
+
+    fn row_softmax_hardmax_auto(&self, rows: usize, cols: usize) -> PureResult<(Tensor, Tensor)> {
+        #[cfg(feature = "wgpu")]
+        {
+            if wgpu_dense::is_available() && wgpu_dense::supports_row_softmax_hardmax(rows, cols) {
+                if let Ok((soft, hard)) =
+                    wgpu_dense::row_softmax_hardmax(self.data(), rows, cols, self.layout)
+                {
+                    let soft_tensor = Tensor::from_vec(rows, cols, soft)?;
+                    let hard_tensor = Tensor::from_vec(rows, cols, hard)?;
+                    return Ok((soft_tensor, hard_tensor));
+                }
+            }
+        }
+
+        let (soft, hard) = row_softmax_hardmax_cpu(self.data(), rows, cols);
+        let soft_tensor = Tensor::from_vec(rows, cols, soft)?;
+        let hard_tensor = Tensor::from_vec(rows, cols, hard)?;
+        Ok((soft_tensor, hard_tensor))
+    }
+
+    fn row_hardmax_auto(&self, rows: usize, cols: usize) -> PureResult<Tensor> {
+        #[cfg(feature = "wgpu")]
+        {
+            if wgpu_dense::is_available() && wgpu_dense::supports_row_hardmax(rows, cols) {
+                if let Ok(buffer) = wgpu_dense::row_hardmax(self.data(), rows, cols, self.layout) {
+                    return Tensor::from_vec(rows, cols, buffer);
+                }
+            }
+        }
+
+        let buffer = row_hardmax_cpu(self.data(), rows, cols);
         Tensor::from_vec(rows, cols, buffer)
     }
 
@@ -4690,15 +4819,16 @@ fn fused_attention_cpu(
     output
 }
 
-fn row_softmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
-    let mut out = vec![0.0; rows * cols];
+fn row_softmax_hardmax_cpu(data: &[f32], rows: usize, cols: usize) -> (Vec<f32>, Vec<f32>) {
+    let mut softmax = vec![0.0; rows * cols];
+    let mut hardmax = vec![0.0; rows * cols];
     if cols == 0 {
-        return out;
+        return (softmax, hardmax);
     }
     for r in 0..rows {
         let offset = r * cols;
         let row_slice = &data[offset..offset + cols];
-        let mut max_value = -1.0e30_f32;
+        let mut max_value = f32::NEG_INFINITY;
         for &value in row_slice {
             if value > max_value {
                 max_value = value;
@@ -4707,12 +4837,44 @@ fn row_softmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
         let mut sum = 0.0_f32;
         for c in 0..cols {
             let exp_value = (row_slice[c] - max_value).exp();
-            out[offset + c] = exp_value;
+            softmax[offset + c] = exp_value;
             sum += exp_value;
         }
         let inv_sum = if sum > 0.0 { 1.0 / sum } else { 0.0 };
         for c in 0..cols {
-            out[offset + c] *= inv_sum;
+            softmax[offset + c] *= inv_sum;
+            let value = row_slice[c];
+            hardmax[offset + c] = if value == max_value { 1.0 } else { 0.0 };
+        }
+    }
+    (softmax, hardmax)
+}
+
+fn row_softmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+    row_softmax_hardmax_cpu(data, rows, cols).0
+}
+
+fn row_hardmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+    row_softmax_hardmax_cpu(data, rows, cols).1
+}
+
+fn row_hardmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+    let mut out = vec![0.0; rows * cols];
+    if cols == 0 {
+        return out;
+    }
+    for r in 0..rows {
+        let offset = r * cols;
+        let row_slice = &data[offset..offset + cols];
+        let mut max_value = f32::NEG_INFINITY;
+        for &value in row_slice {
+            if value > max_value {
+                max_value = value;
+            }
+        }
+        for c in 0..cols {
+            let value = row_slice[c];
+            out[offset + c] = if value == max_value { 1.0 } else { 0.0 };
         }
     }
     out
