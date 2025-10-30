@@ -15,8 +15,12 @@ use crate::pure::{Layout, PureResult};
 #[cfg(feature = "wgpu")]
 use crate::pure::{Layout, PureResult, TensorError};
 use core::fmt;
+use rayon::{current_num_threads, prelude::*};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 const DP_CPU_THRESHOLD: usize = 4_096;
+const PARALLEL_ROW_THRESHOLD: usize = 32;
+const PARALLEL_MIN_VOLUME: usize = 16_384;
 
 /// Explicit backend selection for row-wise hardmax style reductions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -141,12 +145,23 @@ impl<'a> HardmaxFusionPlan<'a> {
 
         let executor = HardmaxEinsum::new(self.input, self.rows, self.cols);
         let result = executor.evaluate(self.mode);
+        let HardmaxEinsumResult {
+            softmax,
+            hardmax,
+            dp_reductions,
+            parallelized,
+        } = result;
         Ok(HardmaxFusionResult {
-            softmax: result.softmax,
-            hardmax: result.hardmax,
-            dp_reductions: result.dp_reductions,
+            softmax,
+            hardmax,
+            dp_reductions,
             einsum: einsum_signature,
-            fused_ops,
+            fused_ops: match (self.mode, parallelized) {
+                (HardmaxMode::SoftmaxAndMask, true) => "softmax|hardmax|par",
+                (HardmaxMode::SoftmaxAndMask, false) => fused_ops,
+                (HardmaxMode::MaskOnly, true) => "hardmax|par",
+                (HardmaxMode::MaskOnly, false) => fused_ops,
+            },
         })
     }
 
@@ -237,46 +252,43 @@ impl<'a> HardmaxEinsum<'a> {
                 softmax,
                 hardmax,
                 dp_reductions: 0,
+                parallelized: false,
             };
         }
+
+        let should_parallelize = || {
+            let volume = expected;
+            volume >= PARALLEL_MIN_VOLUME
+                && self.rows >= PARALLEL_ROW_THRESHOLD
+                && current_num_threads() > 1
+        };
 
         match mode {
             HardmaxMode::SoftmaxAndMask => {
                 let mut softmax = vec![0.0; expected];
                 let mut dp_reductions = 0usize;
+                let mut parallelized = false;
 
-                for row in 0..self.rows {
-                    let offset = row * self.cols;
-                    let mut row_max = f32::NEG_INFINITY;
-                    let mut sum = 0.0f32;
-
-                    for c in 0..self.cols {
-                        let value = self.input[offset + c];
-                        if value > row_max {
-                            if row_max.is_finite() {
-                                let scale = (row_max - value).exp();
-                                sum = sum * scale + 1.0;
-                                dp_reductions += 1;
-                            } else {
-                                sum = 1.0;
-                            }
-                            row_max = value;
-                        } else {
-                            sum += (value - row_max).exp();
-                        }
-                    }
-
-                    let inv_sum = if sum.is_finite() && sum > f32::EPSILON {
-                        sum.recip()
-                    } else {
-                        0.0
-                    };
-
-                    for c in 0..self.cols {
-                        let value = self.input[offset + c];
-                        let prob = ((value - row_max).exp()) * inv_sum;
-                        softmax[offset + c] = prob;
-                        hardmax[offset + c] = if value == row_max { 1.0 } else { 0.0 };
+                if should_parallelize() {
+                    parallelized = true;
+                    let reductions = AtomicUsize::new(0);
+                    self
+                        .input
+                        .par_chunks(self.cols)
+                        .zip(softmax.par_chunks_mut(self.cols))
+                        .zip(hardmax.par_chunks_mut(self.cols))
+                        .for_each(|((input_row, soft_row), hard_row)| {
+                            let dp = compute_softmax_row(input_row, soft_row, hard_row);
+                            reductions.fetch_add(dp, Ordering::Relaxed);
+                        });
+                    dp_reductions = reductions.load(Ordering::Relaxed);
+                } else {
+                    for row in 0..self.rows {
+                        let offset = row * self.cols;
+                        let input_row = &self.input[offset..offset + self.cols];
+                        let soft_row = &mut softmax[offset..offset + self.cols];
+                        let hard_row = &mut hardmax[offset..offset + self.cols];
+                        dp_reductions += compute_softmax_row(input_row, soft_row, hard_row);
                     }
                 }
 
@@ -284,30 +296,40 @@ impl<'a> HardmaxEinsum<'a> {
                     softmax: Some(softmax),
                     hardmax,
                     dp_reductions,
+                    parallelized,
                 }
             }
             HardmaxMode::MaskOnly => {
                 let mut dp_reductions = 0usize;
+                let mut parallelized = false;
 
-                for row in 0..self.rows {
-                    let offset = row * self.cols;
-                    let mut row_max = f32::NEG_INFINITY;
-                    for c in 0..self.cols {
-                        row_max = row_max.max(self.input[offset + c]);
+                if should_parallelize() {
+                    parallelized = true;
+                    let reductions = AtomicUsize::new(0);
+                    self
+                        .input
+                        .par_chunks(self.cols)
+                        .zip(hardmax.par_chunks_mut(self.cols))
+                        .for_each(|(input_row, hard_row)| {
+                            let dp = compute_mask_row(input_row, hard_row);
+                            reductions.fetch_add(dp, Ordering::Relaxed);
+                        });
+                    dp_reductions = reductions.load(Ordering::Relaxed);
+                } else {
+                    for row in 0..self.rows {
+                        let offset = row * self.cols;
+                        let input_row = &self.input[offset..offset + self.cols];
+                        let hard_row = &mut hardmax[offset..offset + self.cols];
+                        dp_reductions = dp_reductions
+                            .saturating_add(compute_mask_row(input_row, hard_row));
                     }
-
-                    for c in 0..self.cols {
-                        let value = self.input[offset + c];
-                        hardmax[offset + c] = if value == row_max { 1.0 } else { 0.0 };
-                    }
-
-                    dp_reductions = dp_reductions.saturating_add(self.cols.saturating_sub(1));
                 }
 
                 HardmaxEinsumResult {
                     softmax: None,
                     hardmax,
                     dp_reductions,
+                    parallelized,
                 }
             }
         }
@@ -319,4 +341,66 @@ struct HardmaxEinsumResult {
     softmax: Option<Vec<f32>>,
     hardmax: Vec<f32>,
     dp_reductions: usize,
+    parallelized: bool,
+}
+
+fn compute_softmax_row(input_row: &[f32], soft_row: &mut [f32], hard_row: &mut [f32]) -> usize {
+    debug_assert_eq!(input_row.len(), soft_row.len());
+    debug_assert_eq!(input_row.len(), hard_row.len());
+
+    let mut row_max = f32::NEG_INFINITY;
+    let mut sum = 0.0f32;
+    let mut dp_reductions = 0usize;
+
+    for &value in input_row {
+        if value > row_max {
+            if row_max.is_finite() {
+                let scale = (row_max - value).exp();
+                sum = sum * scale + 1.0;
+                dp_reductions += 1;
+            } else {
+                sum = 1.0;
+            }
+            row_max = value;
+        } else {
+            sum += (value - row_max).exp();
+        }
+    }
+
+    let inv_sum = if sum.is_finite() && sum > f32::EPSILON {
+        sum.recip()
+    } else {
+        0.0
+    };
+
+    for ((prob_slot, hard_slot), &value) in soft_row
+        .iter_mut()
+        .zip(hard_row.iter_mut())
+        .zip(input_row.iter())
+    {
+        let prob = (value - row_max).exp() * inv_sum;
+        *prob_slot = prob;
+        *hard_slot = if value == row_max { 1.0 } else { 0.0 };
+    }
+
+    dp_reductions
+}
+
+fn compute_mask_row(input_row: &[f32], hard_row: &mut [f32]) -> usize {
+    debug_assert_eq!(input_row.len(), hard_row.len());
+
+    if input_row.is_empty() {
+        return 0;
+    }
+
+    let mut row_max = f32::NEG_INFINITY;
+    for &value in input_row {
+        row_max = row_max.max(value);
+    }
+
+    for (dst, &value) in hard_row.iter_mut().zip(input_row.iter()) {
+        *dst = if value == row_max { 1.0 } else { 0.0 };
+    }
+
+    input_row.len().saturating_sub(1)
 }

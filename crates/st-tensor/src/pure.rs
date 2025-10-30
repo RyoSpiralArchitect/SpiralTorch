@@ -1949,6 +1949,8 @@ impl Tensor {
 
                 let fused_bias = if fused_ops.contains("wgpu") {
                     0.25
+                } else if fused_ops.contains("par") {
+                    0.18
                 } else {
                     0.1
                 };
