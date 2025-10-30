@@ -6,7 +6,13 @@ wider environment so callers can coordinate BLAS parallelism with the rest of
 the system.  Beyond the CPU the routines now integrate with the WGPU autotuning
 artefacts emitted by the Rust runtime, allowing SpiralTorch to reserve host
 threads for GPU command submission so compute on both sides can progress
-without contending for the same CPU cores.
+without contending for the same CPU cores.  The system-facing helpers also
+interrogate Linux control groups so container limits and CPU reservations are
+captured before tuning decisions are made.  The expanded system snapshot now
+records CPU topology from ``/sys/devices/system/cpu`` so physical cores can be
+weighed against logical CPUs when scheduling work alongside GPU pipelines.
+WGSL kernel metadata persisted in the autotune store is also summarised so GPU
+dispatch characteristics can feed back into the CPU reservation heuristic.
 """
 
 from __future__ import annotations
@@ -14,8 +20,9 @@ from __future__ import annotations
 import ctypes
 import ctypes.util
 import json
-import os
 import math
+import os
+import time
 import warnings
 from array import array
 from contextlib import contextmanager
@@ -29,12 +36,16 @@ __all__ = [
     "thread_controls_available",
     "temporary_thread_count",
     "system_cpu_count",
+    "system_cpu_topology",
     "recommended_thread_count",
     "synchronise_thread_hints",
     "auto_tune_threads",
     "blas_vendor",
     "wgpu_adapter_info",
+    "wgpu_kernel_profiles",
     "gpu_host_thread_reservation",
+    "process_cpu_budget",
+    "cgroup_cpu_quota",
     "dgemm",
 ]
 
@@ -60,7 +71,16 @@ _THREAD_HINT_SOURCES: tuple[str, ...] = (
 _GPU_HOST_HINT_VAR = "SPIRALTORCH_WGPU_HOST_THREADS"
 
 _WGPU_ADAPTER_INFO: dict[str, object] | None = None
+_WGPU_KERNEL_PROFILES: dict[str, object] | None = None
 _GPU_HOST_RESERVATION: int | None = None
+_GPU_HOST_RESERVATION_BUDGET: int | None = None
+
+_CPU_BUDGET_CACHE: dict[str, object] | None = None
+_CPU_TOPOLOGY_CACHE: tuple[int, tuple[int, ...] | None, dict[str, object]] | None = None
+
+_CGROUP_SELF_CACHE: dict[str, str] | None = None
+_CGROUP_QUOTA_CACHE: tuple[int, float | None] | None = None
+_CGROUP_CPUSET_CACHE: tuple[int, int | None] | None = None
 
 _INTEGRATED_GPU_VENDORS = {
     0x8086,  # Intel
@@ -80,6 +100,10 @@ _SOFTWARE_GPU_KEYWORDS = {
     "software",
     "warp",
 }
+
+_WGPU_PROFILE_STALE_SECONDS = 90 * 24 * 60 * 60
+_WGPU_HEAVY_WORKGROUP_THRESHOLD = 256
+_WGPU_HEAVY_VOLUME_THRESHOLD = 2_000_000
 
 
 def _candidate_paths() -> Iterable[str]:
@@ -421,6 +445,225 @@ def _detect_wgpu_adapter() -> dict[str, object] | None:
     return _WGPU_ADAPTER_INFO
 
 
+def _coerce_positive_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return None
+        rounded = int(value)
+        return rounded if rounded >= 0 and abs(value - rounded) < 1e-6 else None
+    if isinstance(value, str):
+        candidate = value.strip()
+        if not candidate:
+            return None
+        try:
+            parsed = int(candidate, 0)
+        except ValueError:
+            return None
+        return parsed if parsed >= 0 else None
+    return None
+
+
+def _estimate_context_volume(context: object) -> int | None:
+    if not isinstance(context, dict):
+        return None
+    dims: list[int] = []
+    for key, raw in context.items():
+        if not isinstance(key, str):
+            continue
+        lowered = key.lower()
+        if any(token in lowered for token in ("rows", "cols", "inner", "m", "n", "k", "width", "height", "depth", "size", "len", "length", "volume")):
+            value = _coerce_positive_int(raw)
+            if value:
+                dims.append(value)
+    dims = [value for value in dims if value]
+    if not dims:
+        return None
+    dims.sort(reverse=True)
+    volume = 1
+    for value in dims[:3]:
+        volume *= value
+    return volume
+
+
+def _estimate_workgroup_size(params: object) -> int | None:
+    if not isinstance(params, dict):
+        return None
+    direct = _coerce_positive_int(params.get("workgroup_size"))
+    if direct:
+        return direct
+    tile_m = _coerce_positive_int(params.get("tile_m"))
+    tile_n = _coerce_positive_int(params.get("tile_n"))
+    tile_k = _coerce_positive_int(params.get("tile_k"))
+    if tile_m and tile_n:
+        if tile_k and tile_k > 1:
+            return tile_m * tile_n * tile_k
+        return tile_m * tile_n
+    axes: list[int] = []
+    for key in ("workgroup_x", "workgroup_y", "workgroup_z", "local_size_x", "local_size_y", "local_size_z", "wg_rows", "wg_cols"):
+        value = _coerce_positive_int(params.get(key))
+        if value:
+            axes.append(value)
+    if axes:
+        size = 1
+        for axis in axes:
+            size *= axis
+        return size
+    for key, raw in params.items():
+        if not isinstance(key, str):
+            continue
+        lowered = key.lower()
+        if lowered.endswith("_workgroup") or lowered.endswith("_workgroup_size"):
+            value = _coerce_positive_int(raw)
+            if value:
+                return value
+    return None
+
+
+def _summarise_wgpu_buckets(store: object) -> dict[str, object] | None:
+    if not isinstance(store, dict):
+        return None
+    kernels: dict[str, dict[str, object]] = {}
+    latest: int | None = None
+    total_entries = 0
+    for raw_key, bucket in store.items():
+        key = str(raw_key)
+        if not key.startswith("wgpu."):
+            continue
+        info = _parse_wgpu_autotune_key(key)
+        kernel_prefix = key.split("|", 1)[0]
+        parts = kernel_prefix.split(".")
+        kernel_name = parts[1] if len(parts) > 1 else kernel_prefix
+        entries: list[dict[str, object]] = []
+        if isinstance(bucket, dict):
+            maybe_entries = bucket.get("entries")
+            if isinstance(maybe_entries, list):
+                entries = [entry for entry in maybe_entries if isinstance(entry, dict)]
+            elif {"params", "score", "updated_unix"}.issubset(bucket.keys()):
+                entries = [bucket]
+        elif isinstance(bucket, list):
+            entries = [entry for entry in bucket if isinstance(entry, dict)]
+        if not entries:
+            continue
+        summary = kernels.setdefault(
+            kernel_name,
+            {
+                "entries": 0,
+                "max_workgroup": 0,
+                "max_volume": 0,
+                "recent_update": None,
+                "prefix": kernel_prefix,
+            },
+        )
+        if info:
+            summary.setdefault("adapter", info.get("name"))
+            summary.setdefault("backend", info.get("backend"))
+            summary.setdefault("classification", info.get("classification"))
+        for entry in entries:
+            total_entries += 1
+            summary["entries"] = int(summary.get("entries", 0)) + 1
+            updated = _coerce_positive_int(entry.get("updated_unix"))
+            if updated is not None:
+                summary["recent_update"] = max(summary.get("recent_update") or 0, updated)
+                if latest is None or updated > latest:
+                    latest = updated
+            context = entry.get("context")
+            volume = _estimate_context_volume(context)
+            if volume is not None:
+                summary["max_volume"] = max(int(summary.get("max_volume", 0)), volume)
+            params = entry.get("params")
+            workgroup = _estimate_workgroup_size(params)
+            if workgroup is not None:
+                summary["max_workgroup"] = max(int(summary.get("max_workgroup", 0)), workgroup)
+        summary["entries"] = int(summary.get("entries", 0))
+        summary["max_workgroup"] = int(summary.get("max_workgroup", 0))
+        summary["max_volume"] = int(summary.get("max_volume", 0))
+        if summary.get("recent_update") is None:
+            summary.pop("recent_update", None)
+    if not kernels:
+        return None
+    profile: dict[str, object] = {
+        "kernels": kernels,
+        "entries": total_entries,
+    }
+    if latest is not None:
+        profile["most_recent"] = latest
+    return profile
+
+
+def _collect_wgpu_kernel_profiles() -> dict[str, object] | None:
+    for candidate in _autotune_store_candidates():
+        try:
+            with open(candidate, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (FileNotFoundError, OSError, json.JSONDecodeError):
+            continue
+        profile = _summarise_wgpu_buckets(data)
+        if profile:
+            profile["source"] = candidate
+            return profile
+    return None
+
+
+def wgpu_kernel_profiles(*, refresh: bool = False) -> dict[str, object] | None:
+    """Return aggregated metadata about autotuned WGPU/WGSL kernels."""
+
+    global _WGPU_KERNEL_PROFILES
+    if _WGPU_KERNEL_PROFILES is not None and not refresh:
+        return dict(_WGPU_KERNEL_PROFILES)
+
+    profile = _collect_wgpu_kernel_profiles()
+    _WGPU_KERNEL_PROFILES = dict(profile) if profile is not None else None
+    return dict(profile) if profile is not None else None
+
+
+def _wgpu_kernel_pressure_details() -> tuple[bool, int, int]:
+    profile = wgpu_kernel_profiles()
+    if not profile:
+        return False, 0, 0
+    kernels = profile.get("kernels")
+    if not isinstance(kernels, dict):
+        return False, 0, 0
+    max_workgroup = 0
+    max_volume = 0
+    for stats in kernels.values():
+        if not isinstance(stats, dict):
+            continue
+        workgroup = _coerce_positive_int(stats.get("max_workgroup"))
+        if workgroup is not None:
+            max_workgroup = max(max_workgroup, workgroup)
+        volume = _coerce_positive_int(stats.get("max_volume"))
+        if volume is not None:
+            max_volume = max(max_volume, volume)
+    stale = False
+    most_recent = profile.get("most_recent")
+    if isinstance(most_recent, (int, float)):
+        try:
+            stale = (time.time() - float(most_recent)) > _WGPU_PROFILE_STALE_SECONDS
+        except OverflowError:
+            stale = False
+    heavy = False
+    if not stale:
+        if max_workgroup >= _WGPU_HEAVY_WORKGROUP_THRESHOLD:
+            heavy = True
+        elif max_volume >= _WGPU_HEAVY_VOLUME_THRESHOLD:
+            heavy = True
+    return heavy, max_workgroup, max_volume
+
+
+def _apply_budget_cap(reservation: int, budget: int | None) -> int:
+    reservation = max(0, reservation)
+    if budget is None:
+        return reservation
+    cap = max(0, budget - 1)
+    if cap == 0:
+        return 0
+    return min(reservation, cap)
+
+
 def _compute_gpu_host_reservation(cpu_budget: int | None) -> int | None:
     explicit = _read_int_env(_GPU_HOST_HINT_VAR)
     if explicit is not None:
@@ -430,21 +673,46 @@ def _compute_gpu_host_reservation(cpu_budget: int | None) -> int | None:
     if not info:
         return None
 
+    heavy_gpu, max_workgroup, max_volume = _wgpu_kernel_pressure_details()
     classification = str(info.get("classification", "unknown"))
     if classification == "software":
         return None
     if classification == "integrated":
         if cpu_budget is None or cpu_budget <= 2:
-            return 1
-        return min(2, max(1, cpu_budget // 4))
+            reservation = 1
+        else:
+            reservation = min(2, max(1, cpu_budget // 4))
+        if heavy_gpu:
+            target = max(reservation + 1, 2)
+            if max_volume >= (_WGPU_HEAVY_VOLUME_THRESHOLD * 2):
+                target = max(target, reservation + 2)
+            reservation = _apply_budget_cap(target, cpu_budget)
+            if reservation < 1:
+                reservation = 1
+        return reservation
     if classification == "discrete":
         if cpu_budget is not None and cpu_budget >= 8:
-            return 2
-        return 1
+            reservation = 2
+        else:
+            reservation = 1
+        if heavy_gpu:
+            target = reservation + 1
+            if max_workgroup >= _WGPU_HEAVY_WORKGROUP_THRESHOLD * 2:
+                target = max(target, 3)
+            reservation = _apply_budget_cap(target, cpu_budget)
+            if reservation < 1 and (cpu_budget is None or cpu_budget > 1):
+                reservation = 1
+        return reservation
     if classification == "unknown":
         if cpu_budget is None or cpu_budget <= 1:
             return None
-        return 1
+        reservation = 1
+        if heavy_gpu:
+            target = reservation + 1
+            reservation = _apply_budget_cap(target, cpu_budget)
+            if reservation < 1:
+                reservation = 1
+        return reservation
     return None
 
 
@@ -455,13 +723,36 @@ def _propagate_gpu_host_hint(reservation: int | None) -> None:
     os.environ[_GPU_HOST_HINT_VAR] = str(int(reservation))
 
 
-def gpu_host_thread_reservation(*, refresh: bool = False) -> int | None:
-    """Return the number of CPU threads reserved for GPU host work."""
+def gpu_host_thread_reservation(
+    cpu_budget: int | None = None, *, refresh: bool = False
+) -> int | None:
+    """Return the number of CPU threads reserved for GPU host work.
 
-    global _GPU_HOST_RESERVATION
-    if refresh or _GPU_HOST_RESERVATION is None:
-        cpu_budget = system_cpu_count()
-        _GPU_HOST_RESERVATION = _compute_gpu_host_reservation(cpu_budget)
+    Parameters
+    ----------
+    cpu_budget:
+        Optional upper bound on the CPU threads that should remain available to
+        BLAS workloads.  When provided the reservation heuristic scales its
+        result relative to this limit instead of the raw system CPU count.
+    refresh:
+        Force a recomputation of the cached reservation value even when the
+        inputs have not changed.
+    """
+
+    global _GPU_HOST_RESERVATION, _GPU_HOST_RESERVATION_BUDGET
+
+    if cpu_budget is not None:
+        try:
+            budget = max(0, int(cpu_budget))
+        except (TypeError, ValueError):
+            budget = None
+    else:
+        budget = system_cpu_count()
+
+    if refresh or _GPU_HOST_RESERVATION is None or _GPU_HOST_RESERVATION_BUDGET != budget:
+        _GPU_HOST_RESERVATION = _compute_gpu_host_reservation(budget)
+        _GPU_HOST_RESERVATION_BUDGET = budget
+
     return _GPU_HOST_RESERVATION
 
 
@@ -474,6 +765,291 @@ def wgpu_adapter_info() -> dict[str, object] | None:
     return dict(info)
 
 
+def _read_text_file(path: str) -> str | None:
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            return handle.read().strip()
+    except (FileNotFoundError, OSError):
+        return None
+
+
+def _cpu_topology_from_sysfs(affinity_filter: set[int] | None) -> dict[str, object] | None:
+    base = "/sys/devices/system/cpu"
+    try:
+        entries = os.listdir(base)
+    except (FileNotFoundError, NotADirectoryError, PermissionError, OSError):
+        return None
+
+    logical_ids: list[int] = []
+    cores: dict[tuple[int, int], int] = {}
+    packages: set[int] = set()
+
+    for name in entries:
+        if not name.startswith("cpu"):
+            continue
+        suffix = name[3:]
+        if not suffix.isdigit():
+            continue
+        cpu_id = int(suffix)
+        if affinity_filter is not None and cpu_id not in affinity_filter:
+            continue
+
+        topology_dir = os.path.join(base, name, "topology")
+        core_id_text = _read_text_file(os.path.join(topology_dir, "core_id"))
+        package_id_text = _read_text_file(os.path.join(topology_dir, "physical_package_id"))
+
+        try:
+            core_id = int(core_id_text) if core_id_text is not None else None
+        except ValueError:
+            core_id = None
+        try:
+            package_id = int(package_id_text) if package_id_text is not None else None
+        except ValueError:
+            package_id = None
+
+        key: tuple[int, int] | None = None
+        if core_id is not None and package_id is not None:
+            key = (package_id, core_id)
+        elif core_id is not None:
+            key = (-1, core_id)
+        elif package_id is not None:
+            key = (package_id, -1)
+
+        logical_ids.append(cpu_id)
+        if package_id is not None:
+            packages.add(package_id)
+        if key is not None:
+            cores[key] = cores.get(key, 0) + 1
+
+    if not logical_ids:
+        return None
+
+    physical_cores = len(cores) if cores else None
+    packages_count = len(packages) if packages else None
+    threads_per_core = max(cores.values()) if cores else None
+
+    return {
+        "logical_ids": logical_ids,
+        "physical_cores": physical_cores,
+        "packages": packages_count,
+        "threads_per_core": threads_per_core,
+    }
+
+
+def _self_cgroup_paths(*, refresh: bool = False) -> dict[str, str]:
+    global _CGROUP_SELF_CACHE
+    if _CGROUP_SELF_CACHE is not None and not refresh:
+        return dict(_CGROUP_SELF_CACHE)
+
+    mapping: dict[str, str] = {}
+    try:
+        with open("/proc/self/cgroup", "r", encoding="utf-8") as handle:
+            for line in handle:
+                parts = line.strip().split(":", 2)
+                if len(parts) != 3:
+                    continue
+                _, controllers, path = parts
+                mapping[controllers] = path or "/"
+    except (FileNotFoundError, OSError):
+        mapping = {}
+
+    _CGROUP_SELF_CACHE = dict(mapping)
+    return mapping
+
+
+def _resolve_cgroup_path(base: str, relative: str) -> str:
+    rel = relative.lstrip("/")
+    if not rel:
+        return base
+    return os.path.join(base, rel)
+
+
+def _parse_cpu_quota(quota: str, period: str | None) -> float | None:
+    try:
+        quota_value = int(quota)
+    except (TypeError, ValueError):
+        return None
+    if quota_value <= 0:
+        return None
+
+    if period is None:
+        period_value = 100000
+    else:
+        try:
+            period_value = int(period)
+        except (TypeError, ValueError):
+            return None
+        if period_value <= 0:
+            return None
+
+    return quota_value / period_value
+
+
+def _cgroup_v2_cpu_quota(paths: dict[str, str]) -> float | None:
+    relative = paths.get("")
+    if relative is None:
+        return None
+
+    base = _resolve_cgroup_path("/sys/fs/cgroup", relative)
+    data = _read_text_file(os.path.join(base, "cpu.max"))
+    if not data:
+        return None
+
+    parts = data.split()
+    if not parts or parts[0] == "max":
+        return None
+
+    period = parts[1] if len(parts) > 1 else None
+    return _parse_cpu_quota(parts[0], period)
+
+
+_CGROUP_V1_CPU_BASES: tuple[str, ...] = (
+    "/sys/fs/cgroup/cpu",
+    "/sys/fs/cgroup/cpuacct",
+    "/sys/fs/cgroup/cpu,cpuacct",
+    "/sys/fs/cgroup/cpuacct,cpu",
+)
+
+
+def _cgroup_v1_cpu_quota(paths: dict[str, str]) -> float | None:
+    candidates = []
+    for controllers, relative in paths.items():
+        if not controllers:
+            continue
+        controller_set = {token.strip() for token in controllers.split(",") if token.strip()}
+        if "cpu" not in controller_set:
+            continue
+        for base in _CGROUP_V1_CPU_BASES:
+            full_base = _resolve_cgroup_path(base, relative)
+            if os.path.exists(full_base):
+                candidates.append(full_base)
+                break
+        else:
+            for base in _CGROUP_V1_CPU_BASES:
+                if os.path.exists(base):
+                    candidates.append(base)
+                    break
+
+    for candidate in candidates:
+        quota_path = os.path.join(candidate, "cpu.cfs_quota_us")
+        period_path = os.path.join(candidate, "cpu.cfs_period_us")
+        quota_raw = _read_text_file(quota_path)
+        period_raw = _read_text_file(period_path)
+        if quota_raw is None or period_raw is None:
+            continue
+        quota_raw = quota_raw.strip()
+        if quota_raw == "-1":
+            continue
+        quota = _parse_cpu_quota(quota_raw, period_raw.strip())
+        if quota is not None:
+            return quota
+    return None
+
+
+def _cgroup_cpu_quota_raw(*, refresh: bool = False) -> float | None:
+    global _CGROUP_QUOTA_CACHE
+    if not refresh and _CGROUP_QUOTA_CACHE is not None:
+        cached_pid, cached = _CGROUP_QUOTA_CACHE
+        if cached_pid == os.getpid():
+            return cached
+
+    paths = _self_cgroup_paths(refresh=refresh)
+    quota = _cgroup_v2_cpu_quota(paths)
+    if quota is None:
+        quota = _cgroup_v1_cpu_quota(paths)
+
+    _CGROUP_QUOTA_CACHE = (os.getpid(), quota)  # PID ensures cache scoped to process
+    return quota
+
+
+def _parse_cpuset_list(spec: str) -> int | None:
+    total = 0
+    for segment in spec.split(","):
+        segment = segment.strip()
+        if not segment:
+            continue
+        if "-" in segment:
+            start_str, end_str = segment.split("-", 1)
+            try:
+                start = int(start_str)
+                end = int(end_str)
+            except ValueError:
+                return None
+            if end < start:
+                return None
+            total += end - start + 1
+        else:
+            try:
+                int(segment)
+            except ValueError:
+                return None
+            total += 1
+    if total <= 0:
+        return None
+    return total
+
+
+_CGROUP_V1_CPUSET_BASES: tuple[str, ...] = (
+    "/sys/fs/cgroup/cpuset",
+    "/sys/fs/cgroup/cpuset,cpu",
+)
+
+
+def _cgroup_cpuset_count(paths: dict[str, str], *, refresh: bool = False) -> int | None:
+    global _CGROUP_CPUSET_CACHE
+    if not refresh and _CGROUP_CPUSET_CACHE is not None:
+        cached_pid, cached = _CGROUP_CPUSET_CACHE
+        if cached_pid == os.getpid():
+            return cached
+
+    # cgroup v2 exposes cpuset files alongside cpu.max
+    relative_v2 = paths.get("")
+    cpuset_paths: list[str] = []
+    if relative_v2 is not None:
+        base = _resolve_cgroup_path("/sys/fs/cgroup", relative_v2)
+        for name in ("cpuset.cpus.effective", "cpuset.cpus"):
+            candidate = os.path.join(base, name)
+            if os.path.exists(candidate):
+                cpuset_paths.append(candidate)
+
+    # cgroup v1 cpuset controller
+    for controllers, relative in paths.items():
+        controller_set = {token.strip() for token in controllers.split(",") if token.strip()}
+        if "cpuset" not in controller_set:
+            continue
+        for base in _CGROUP_V1_CPUSET_BASES:
+            full_base = _resolve_cgroup_path(base, relative)
+            if os.path.exists(full_base):
+                for name in ("cpuset.cpus.effective", "cpuset.cpus"):
+                    candidate = os.path.join(full_base, name)
+                    if os.path.exists(candidate):
+                        cpuset_paths.append(candidate)
+                break
+
+    for path in cpuset_paths:
+        data = _read_text_file(path)
+        if not data:
+            continue
+        count = _parse_cpuset_list(data)
+        if count is not None:
+            _CGROUP_CPUSET_CACHE = (os.getpid(), count)
+            return count
+
+    _CGROUP_CPUSET_CACHE = (os.getpid(), None)
+    return None
+
+
+def cgroup_cpu_quota(*, refresh: bool = False) -> float | None:
+    """Return the CPU quota imposed by control groups, if any.
+
+    The returned value represents the number of CPU cores available to the
+    process according to cgroup ``cpu.max`` or ``cpu.cfs_*`` limits.  A ``None``
+    result indicates that no quota could be detected or the quota is unlimited.
+    """
+
+    return _cgroup_cpu_quota_raw(refresh=refresh)
+
+
 def _system_affinity_size() -> int | None:
     try:
         affinity = os.sched_getaffinity(0)
@@ -484,16 +1060,118 @@ def _system_affinity_size() -> int | None:
     return len(affinity)
 
 
+def process_cpu_budget(*, refresh: bool = False) -> dict[str, object]:
+    """Return a snapshot of CPU availability signals for the current process.
+
+    The returned dictionary contains the raw system CPU count (``"system"``),
+    the size of the POSIX affinity mask (``"affinity"``), any detected cgroup
+    quota expressed both as a float (``"cgroup_quota"``) and clamped integer
+    limit (``"cgroup_quota_limit"``), the number of CPUs exposed through cgroup
+    cpuset files (``"cgroup_cpuset"``) and the final minimum of the available
+    signals (``"effective"``).
+    """
+
+    global _CPU_BUDGET_CACHE
+    if _CPU_BUDGET_CACHE is not None and not refresh:
+        return dict(_CPU_BUDGET_CACHE)
+
+    affinity = _system_affinity_size()
+    system_total = os.cpu_count()
+    system_total = system_total if isinstance(system_total, int) and system_total > 0 else None
+
+    paths = _self_cgroup_paths(refresh=refresh)
+    quota = _cgroup_cpu_quota_raw(refresh=refresh)
+    quota_limit: int | None
+    if quota is None:
+        quota_limit = None
+    else:
+        quota_limit = max(1, int(math.floor(quota))) if quota >= 1 else 1
+
+    cpuset = _cgroup_cpuset_count(paths, refresh=refresh)
+
+    candidates = [value for value in (affinity, quota_limit, cpuset, system_total) if value]
+    effective: int | None = None
+    if candidates:
+        effective = max(1, min(candidates))
+
+    budget = {
+        "system": system_total,
+        "affinity": affinity,
+        "cgroup_quota": quota,
+        "cgroup_quota_limit": quota_limit,
+        "cgroup_cpuset": cpuset,
+        "effective": effective,
+    }
+
+    _CPU_BUDGET_CACHE = dict(budget)
+    return budget
+
+
 def system_cpu_count() -> int | None:
     """Return the best-effort number of CPUs available to the process."""
 
-    affinity = _system_affinity_size()
-    if affinity:
-        return affinity
-    count = os.cpu_count()
-    if isinstance(count, int) and count > 0:
-        return count
-    return None
+    budget = process_cpu_budget()
+    effective = budget.get("effective")
+    return int(effective) if isinstance(effective, int) else None
+
+
+def system_cpu_topology(*, refresh: bool = False) -> dict[str, object]:
+    """Return detected CPU topology details scoped to the current process.
+
+    The returned dictionary exposes the logical CPU count seen by the system
+    (``"logical_cpus"``), the number of logical CPUs currently available via the
+    affinity mask (``"available_logical_cpus"``) and the effective limit that
+    considers affinity, cpusets and cgroup quotas (``"effective_logical_cpus"``).
+    When the host exposes topology metadata through ``/sys/devices/system/cpu``
+    additional keys describe the number of physical cores (``"physical_cores"``),
+    CPU packages (``"packages"``) and threads per core
+    (``"threads_per_core"``).  A boolean ``"smt_active"`` key indicates whether
+    symmetric multithreading appears to be enabled for the accessible CPUs.
+    """
+
+    global _CPU_TOPOLOGY_CACHE
+
+    try:
+        affinity_members = set(os.sched_getaffinity(0))  # type: ignore[arg-type]
+    except (AttributeError, OSError):
+        affinity_members = None
+
+    signature: tuple[int, ...] | None
+    if affinity_members is None:
+        signature = None
+    else:
+        signature = tuple(sorted(affinity_members))
+
+    if (
+        not refresh
+        and _CPU_TOPOLOGY_CACHE is not None
+        and _CPU_TOPOLOGY_CACHE[0] == os.getpid()
+        and _CPU_TOPOLOGY_CACHE[1] == signature
+    ):
+        return dict(_CPU_TOPOLOGY_CACHE[2])
+
+    budget = process_cpu_budget(refresh=refresh)
+    logical_total = budget.get("system")
+    affinity_total = budget.get("affinity")
+    effective = budget.get("effective")
+
+    topology = _cpu_topology_from_sysfs(affinity_members)
+    physical_cores = topology.get("physical_cores") if topology else None
+    packages = topology.get("packages") if topology else None
+    threads_per_core = topology.get("threads_per_core") if topology else None
+
+    result = {
+        "logical_cpus": logical_total if isinstance(logical_total, int) else None,
+        "available_logical_cpus": affinity_total if isinstance(affinity_total, int) else None,
+        "effective_logical_cpus": effective if isinstance(effective, int) else None,
+        "physical_cores": physical_cores if isinstance(physical_cores, int) else None,
+        "packages": packages if isinstance(packages, int) else None,
+        "threads_per_core": threads_per_core if isinstance(threads_per_core, int) else None,
+        "smt_active": bool(threads_per_core and isinstance(threads_per_core, int) and threads_per_core > 1),
+    }
+
+    _CPU_TOPOLOGY_CACHE = (os.getpid(), signature, dict(result))
+    return result
 
 
 def recommended_thread_count(
@@ -519,25 +1197,49 @@ def recommended_thread_count(
         room for GPU command submission.
     """
 
-    cpu_budget = system_cpu_count()
-    if cpu_budget is None:
-        return None
+    system_threads = system_cpu_count()
 
-    reservation = _compute_gpu_host_reservation(cpu_budget if consider_gpu else None)
-    global _GPU_HOST_RESERVATION
-    _GPU_HOST_RESERVATION = reservation
-    if consider_gpu and reservation is not None and reservation > 0:
-        cpu_budget = max(1, cpu_budget - min(reservation, cpu_budget - 1))
-
-    # Honour explicit hints when they restrict the process.
+    env_limit: int | None = None
     if clamp_to_env:
         hints = [_read_int_env(var) for var in _THREAD_HINT_SOURCES]
         hints = [hint for hint in hints if hint is not None and hint > 0]
         if hints:
-            cpu_budget = min(cpu_budget, min(hints))
+            env_limit = min(hints)
+
+    if system_threads is None and env_limit is None:
+        return None
+
+    available = system_threads if system_threads is not None else env_limit
+    if env_limit is not None:
+        available = min(available, env_limit) if available is not None else env_limit
+
+    if available is None:
+        return None
+
+    if consider_gpu:
+        reservation = gpu_host_thread_reservation(available, refresh=True)
+        if reservation is not None and available > 0:
+            deductible = available - 1 if available > 1 else 0
+            if deductible > 0:
+                available = max(1, available - min(reservation, deductible))
+
+        topology = system_cpu_topology()
+        physical = topology.get("physical_cores") if topology else None
+        threads_per_core = topology.get("threads_per_core") if topology else None
+        if (
+            isinstance(physical, int)
+            and physical > 0
+            and isinstance(threads_per_core, int)
+            and threads_per_core > 1
+            and reservation is not None
+            and reservation > 0
+        ):
+            available = max(1, min(available, physical))
+
+    available = max(1, int(available))
 
     if not problem_size:
-        return cpu_budget
+        return available
 
     m, n, k = (max(0, int(d)) for d in problem_size)
     if m == 0 or n == 0 or k == 0:
@@ -551,8 +1253,8 @@ def recommended_thread_count(
     work_estimate = max(1, m * n * k)
     tile_capacity = max(m, n, k)
     dynamic_budget = max(1, int(math.sqrt(work_estimate)) // max(1, min(m, n, k)))
-    proposed = max(1, min(tile_capacity, cpu_budget, dynamic_budget or 1))
-    return max(1, min(cpu_budget, proposed))
+    proposed = max(1, min(tile_capacity, available, dynamic_budget or 1))
+    return max(1, min(available, proposed))
 
 
 def _determine_thread_hint() -> tuple[int | None, str | None]:
@@ -600,7 +1302,9 @@ def synchronise_thread_hints(*, propagate: bool = False) -> int | None:
 
     if propagate:
         _propagate_thread_hint(hint)
-        _propagate_gpu_host_hint(gpu_host_thread_reservation(refresh=True))
+        _propagate_gpu_host_hint(
+            gpu_host_thread_reservation(hint, refresh=True)
+        )
     return hint
 
 
@@ -637,7 +1341,9 @@ def auto_tune_threads(
 
     if propagate:
         _propagate_thread_hint(recommendation)
-        _propagate_gpu_host_hint(gpu_host_thread_reservation())
+        _propagate_gpu_host_hint(
+            gpu_host_thread_reservation(recommendation, refresh=True)
+        )
     return recommendation
 
 
