@@ -6,7 +6,9 @@
 #![cfg(feature = "wgpu_dense")]
 
 use crate::backend::wgpu_util::WgpuContext;
-use crate::pure::{Layout, PackedB, PackedLayout};
+use crate::pure::{
+    spiral_softmax_hardmax_consensus, Layout, PackedB, PackedLayout, SpiralConsensusStats,
+};
 use crate::util::readback_f32;
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
@@ -4501,6 +4503,17 @@ pub fn row_softmax_hardmax(
     Ok((softmax, mask))
 }
 
+pub fn row_softmax_hardmax_spiral(
+    input: &[f32],
+    rows: usize,
+    cols: usize,
+    layout: Layout,
+) -> Result<(Vec<f32>, Vec<f32>, Vec<f32>, SpiralConsensusStats), String> {
+    let (softmax, hardmax) = row_softmax_hardmax(input, rows, cols, layout)?;
+    let (spiral, stats) = spiral_softmax_hardmax_consensus(&softmax, &hardmax, rows, cols);
+    Ok((softmax, hardmax, spiral, stats))
+}
+
 pub fn row_hardmax(
     input: &[f32],
     rows: usize,
@@ -4592,6 +4605,10 @@ pub fn supports_row_softmax(rows: usize, cols: usize) -> bool {
 }
 
 pub fn supports_row_softmax_hardmax(rows: usize, cols: usize) -> bool {
+    supports_row_softmax(rows, cols)
+}
+
+pub fn supports_row_softmax_hardmax_spiral(rows: usize, cols: usize) -> bool {
     supports_row_softmax(rows, cols)
 }
 
