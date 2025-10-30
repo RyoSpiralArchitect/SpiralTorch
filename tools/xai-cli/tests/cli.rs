@@ -27,6 +27,26 @@ struct StatisticsFile {
     entropy: f32,
 }
 
+#[derive(serde::Deserialize)]
+struct AuditSummaryFile {
+    total_events: usize,
+}
+
+#[derive(serde::Deserialize)]
+struct AuditCheckFile {
+    name: String,
+    passed: bool,
+}
+
+#[derive(serde::Deserialize)]
+struct AuditReportFile {
+    #[serde(default)]
+    _events: Vec<serde_json::Value>,
+    summary: AuditSummaryFile,
+    #[serde(default)]
+    self_checks: Vec<AuditCheckFile>,
+}
+
 fn run_cli(args: &[&str]) {
     let status = Command::new(env!("CARGO_BIN_EXE_st-xai-cli"))
         .args(args)
@@ -405,6 +425,82 @@ fn grad_cam_cli_emits_heatmap_and_statistics_files() {
     assert!(stats.max >= stats.min);
     assert!(stats.mean.is_finite());
     assert!(stats.entropy.is_finite());
+}
+
+#[test]
+fn grad_cam_cli_writes_audit_report_and_summary() {
+    let dir = tempdir().unwrap();
+    let activations_path = dir.path().join("activations.json");
+    let gradients_path = dir.path().join("gradients.json");
+    let report_path = dir.path().join("report.json");
+    let audit_path = dir.path().join("audit.json");
+
+    let activations = DiskTensor {
+        rows: 2,
+        cols: 4,
+        data: vec![1.0, 0.5, 0.25, 0.75, 0.8, 0.2, 0.3, 0.6],
+    };
+    let gradients = DiskTensor {
+        rows: 2,
+        cols: 4,
+        data: vec![0.2, 0.4, 0.6, 0.8, 1.0, 0.8, 0.6, 0.4],
+    };
+
+    write_tensor(&activations_path, &activations);
+    write_tensor(&gradients_path, &gradients);
+
+    run_cli(&[
+        "--embed-audit-summary",
+        "--audit-out",
+        audit_path.to_str().unwrap(),
+        "grad-cam",
+        "--activations",
+        activations_path.to_str().unwrap(),
+        "--gradients",
+        gradients_path.to_str().unwrap(),
+        "--height",
+        "2",
+        "--width",
+        "2",
+        "--output",
+        report_path.to_str().unwrap(),
+    ]);
+
+    let report: AttributionReport =
+        serde_json::from_str(&fs::read_to_string(&report_path).unwrap()).unwrap();
+    let summary = report
+        .metadata
+        .extras
+        .get("audit_summary")
+        .and_then(|value| value.as_object())
+        .cloned()
+        .expect("audit summary embedded");
+    let total_events = summary
+        .get("total_events")
+        .and_then(|value| value.as_u64())
+        .expect("total events present");
+    assert!(total_events > 0);
+
+    let checks = report
+        .metadata
+        .extras
+        .get("audit_self_checks")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .expect("audit checks embedded");
+    assert!(!checks.is_empty());
+    assert!(checks
+        .iter()
+        .all(|value| value.get("passed").and_then(|flag| flag.as_bool()) == Some(true)));
+
+    let audit_report: AuditReportFile =
+        serde_json::from_str(&fs::read_to_string(&audit_path).unwrap()).unwrap();
+    assert!(audit_report.summary.total_events as u64 >= total_events);
+    assert!(audit_report
+        .self_checks
+        .iter()
+        .any(|check| check.name == "cli_parsed"));
+    assert!(audit_report.self_checks.iter().all(|check| check.passed));
 }
 
 #[test]
