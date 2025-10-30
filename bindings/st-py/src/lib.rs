@@ -214,7 +214,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "scalar_scale_stack","semantic_scale_stack","scale_stack",
         "golden_ratio","golden_angle","set_global_seed",
         "fibonacci_pacing","pack_nacci_chunks","pack_tribonacci_chunks","pack_tetranacci_chunks",
-        "generate_plan_batch_ex",
+        "generate_plan_batch_ex","describe_wgpu_softmax_variants",
         "gl_coeffs_adaptive","fracdiff_gl_1d",
         "zspace_eval",
         "zspace_snapshot","softlogic_feedback","describe_zspace","softlogic_signal",
