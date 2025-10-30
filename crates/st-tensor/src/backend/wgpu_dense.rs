@@ -1295,6 +1295,7 @@ impl GpuContext {
             Option<SoftmaxBayesEvidence>,
             Option<SoftmaxMetropolisEvidence>,
             Option<SoftmaxSpiralAnnealEvidence>,
+            Option<SoftmaxSpiralConsensusEvidence>,
             f64,
         )> = None;
         for &candidate in &[SoftmaxVariant::Workgroup, SoftmaxVariant::Subgroup] {
@@ -1318,6 +1319,14 @@ impl GpuContext {
                         bayes.as_ref(),
                         metropolis.as_ref(),
                     );
+                    let consensus = self.spiral_consensus_softmax(
+                        candidate,
+                        score_ms,
+                        projection.as_ref(),
+                        bayes.as_ref(),
+                        metropolis.as_ref(),
+                        anneal.as_ref(),
+                    );
                     let mut effective_ms = score_ms;
                     if let Some(ref evidence) = bayes {
                         effective_ms = effective_ms.min(evidence.posterior_ms);
@@ -1328,8 +1337,11 @@ impl GpuContext {
                     if let Some(ref anneal) = anneal {
                         effective_ms = effective_ms.min(anneal.annealed_ms);
                     }
+                    if let Some(ref consensus) = consensus {
+                        effective_ms = effective_ms.min(consensus.consensus_ms);
+                    }
                     let update = best
-                        .map(|(_, _, _, _, _, _, best_ms)| effective_ms < best_ms)
+                        .map(|(_, _, _, _, _, _, _, best_ms)| effective_ms < best_ms)
                         .unwrap_or(true);
                     if update {
                         best = Some((
@@ -1339,6 +1351,7 @@ impl GpuContext {
                             bayes,
                             metropolis,
                             anneal,
+                            consensus,
                             effective_ms,
                         ));
                     }
@@ -1348,15 +1361,17 @@ impl GpuContext {
         }
 
         let measured = best.is_some();
-        let (variant, score_s, projection, bayes, metropolis, anneal, _) = best.unwrap_or((
-            SoftmaxVariant::Workgroup,
-            0.0,
-            None,
-            None,
-            None,
-            None,
-            f64::MAX,
-        ));
+        let (variant, score_s, projection, bayes, metropolis, anneal, consensus, _) = best
+            .unwrap_or((
+                SoftmaxVariant::Workgroup,
+                0.0,
+                None,
+                None,
+                None,
+                None,
+                None,
+                f64::MAX,
+            ));
         let pipeline = self
             .softmax_pipeline_variant(variant)
             .ok_or_else(|| "row softmax pipeline unavailable".to_string())?;
@@ -1379,6 +1394,7 @@ impl GpuContext {
                     bayes,
                     metropolis,
                     anneal,
+                    consensus,
                 });
                 let len = history.len();
                 if len > SOFTMAX_HISTORY_LIMIT {
@@ -2073,6 +2089,94 @@ impl GpuContext {
         ))
     }
 
+    fn spiral_consensus_softmax(
+        &self,
+        variant: SoftmaxVariant,
+        raw_ms: f64,
+        projection: Option<&SoftmaxZProjectMetrics>,
+        bayes: Option<&SoftmaxBayesEvidence>,
+        metropolis: Option<&SoftmaxMetropolisEvidence>,
+        anneal: Option<&SoftmaxSpiralAnnealEvidence>,
+    ) -> Option<SoftmaxSpiralConsensusEvidence> {
+        let history = self.softmax_history.lock().ok()?.clone();
+        let focus = projection.map(|m| m.focus).unwrap_or(0.5);
+        let flux = projection.map(|m| m.spiral_flux).unwrap_or(0.0);
+        let swirl = projection.map(|m| m.swirl).unwrap_or(0.0);
+
+        let mut harmony_sum = 0.0f64;
+        let mut harmony_weight = 0.0f64;
+        for (index, record) in history
+            .iter()
+            .rev()
+            .take(SOFTMAX_CONSENSUS_HISTORY)
+            .enumerate()
+        {
+            let decay = (f64::from(GOLDEN_RATIO)).powf(-(index as f64) / 3.0);
+            let affinity = record
+                .zmetrics
+                .map(|metrics| {
+                    zspace_affinity(projection, &metrics, record.variant == variant) as f64
+                })
+                .unwrap_or(0.5);
+            harmony_sum += decay * affinity;
+            harmony_weight += decay;
+        }
+
+        let harmony = if harmony_weight > f64::EPSILON {
+            (harmony_sum / harmony_weight).clamp(0.0, 1.0) as f32
+        } else {
+            ((focus + flux) * 0.5).clamp(0.0, 1.0)
+        };
+
+        let raw_weight = 0.4 + 0.3 * f64::from(focus);
+        let mut weighted_ms = raw_ms.max(0.0) * raw_weight;
+        let mut total_weight = raw_weight;
+        let mut bayes_w = 0.0f64;
+        let mut metro_w = 0.0f64;
+        let mut anneal_w = 0.0f64;
+
+        if let Some(bayes) = bayes {
+            let w = 0.5 + 0.5 * f64::from(harmony);
+            weighted_ms += bayes.posterior_ms.max(0.0) * w;
+            total_weight += w;
+            bayes_w = w;
+        }
+
+        if let Some(mtm) = metropolis {
+            let w = 0.35 + 0.4 * f64::from(mtm.acceptance);
+            weighted_ms += mtm.expected_ms.max(0.0) * w;
+            total_weight += w;
+            metro_w = w;
+        }
+
+        if let Some(anneal) = anneal {
+            let w = 0.25 + 0.35 * f64::from(anneal.exploration_mass);
+            weighted_ms += anneal.annealed_ms.max(0.0) * w;
+            total_weight += w;
+            anneal_w = w;
+        }
+
+        if total_weight <= f64::EPSILON {
+            return Some(SoftmaxSpiralConsensusEvidence::identity(
+                raw_ms, focus, flux,
+            ));
+        }
+
+        let consensus_ms = (weighted_ms / total_weight).max(0.0);
+        let synergy = ((focus + flux + harmony) / 3.0).clamp(0.0, 1.0);
+        let z_bias = ((focus + flux + swirl.abs()) / 3.0).clamp(0.0, 1.0);
+
+        Some(SoftmaxSpiralConsensusEvidence::new(
+            consensus_ms,
+            synergy,
+            z_bias,
+            (bayes_w / total_weight) as f32,
+            (metro_w / total_weight) as f32,
+            (anneal_w / total_weight) as f32,
+            harmony,
+        ))
+    }
+
     fn fused_gelu_back_bind_group(
         &self,
         z: &Buffer,
@@ -2451,7 +2555,7 @@ struct SoftmaxZSpaceParams {
 }
 
 const LAYOUT_FLAG_CHIMERA: u32 = 1 << 0;
-const SOFTMAX_AUTOTUNE_REVISION: u64 = 1;
+const SOFTMAX_AUTOTUNE_REVISION: u64 = 2;
 const SOFTMAX_AUTOTUNE_WARMUP: usize = 1;
 const SOFTMAX_AUTOTUNE_SAMPLES: usize = 3;
 const SOFTMAX_HISTORY_LIMIT: usize = 32;
@@ -2460,6 +2564,7 @@ const SOFTMAX_METROPOLIS_TEMPERATURE: f64 = 3.5;
 const SOFTMAX_ANNEAL_MIN_TEMP: f64 = 0.35;
 const SOFTMAX_ANNEAL_MAX_TEMP: f64 = 2.75;
 const SOFTMAX_ANNEAL_HISTORY: usize = 12;
+const SOFTMAX_CONSENSUS_HISTORY: usize = 24;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 enum SoftmaxVariant {
@@ -2639,6 +2744,46 @@ impl SoftmaxSpiralAnnealEvidence {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SoftmaxSpiralConsensusEvidence {
+    pub consensus_ms: f64,
+    pub synergy: f32,
+    pub z_bias: f32,
+    pub bayes_weight: f32,
+    pub metropolis_weight: f32,
+    pub anneal_weight: f32,
+    pub harmony: f32,
+}
+
+impl SoftmaxSpiralConsensusEvidence {
+    fn new(
+        consensus_ms: f64,
+        synergy: f32,
+        z_bias: f32,
+        bayes_weight: f32,
+        metropolis_weight: f32,
+        anneal_weight: f32,
+        harmony: f32,
+    ) -> Self {
+        Self {
+            consensus_ms: consensus_ms.max(0.0),
+            synergy: synergy.clamp(0.0, 1.0),
+            z_bias: z_bias.clamp(0.0, 1.0),
+            bayes_weight: bayes_weight.clamp(0.0, 1.0),
+            metropolis_weight: metropolis_weight.clamp(0.0, 1.0),
+            anneal_weight: anneal_weight.clamp(0.0, 1.0),
+            harmony: harmony.clamp(0.0, 1.0),
+        }
+    }
+
+    fn identity(raw_ms: f64, focus: f32, flux: f32) -> Self {
+        let synergy = ((focus + flux) * 0.5).clamp(0.0, 1.0);
+        let z_bias = ((focus + flux) * 0.5).clamp(0.0, 1.0);
+        let harmony = ((focus + flux) * 0.5).clamp(0.0, 1.0);
+        Self::new(raw_ms.max(0.0), synergy, z_bias, 0.0, 0.0, 0.0, harmony)
+    }
+}
+
 fn zspace_affinity(
     reference: Option<&SoftmaxZProjectMetrics>,
     proposal: &SoftmaxZProjectMetrics,
@@ -2667,6 +2812,7 @@ struct SoftmaxSelectionRecord {
     bayes: Option<SoftmaxBayesEvidence>,
     metropolis: Option<SoftmaxMetropolisEvidence>,
     anneal: Option<SoftmaxSpiralAnnealEvidence>,
+    consensus: Option<SoftmaxSpiralConsensusEvidence>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -2838,6 +2984,7 @@ pub struct SoftmaxSelectionSnapshot {
     bayesian: Option<SoftmaxBayesEvidence>,
     metropolis: Option<SoftmaxMetropolisEvidence>,
     anneal: Option<SoftmaxSpiralAnnealEvidence>,
+    consensus: Option<SoftmaxSpiralConsensusEvidence>,
 }
 
 impl SoftmaxSelectionSnapshot {
@@ -2869,6 +3016,10 @@ impl SoftmaxSelectionSnapshot {
         self.anneal.as_ref()
     }
 
+    pub fn consensus(&self) -> Option<&SoftmaxSpiralConsensusEvidence> {
+        self.consensus.as_ref()
+    }
+
     fn from_record(
         record: SoftmaxSelectionRecord,
         telemetry: Option<SoftmaxTelemetrySummary>,
@@ -2894,6 +3045,7 @@ impl SoftmaxSelectionSnapshot {
             bayesian: record.bayes,
             metropolis: record.metropolis,
             anneal: record.anneal,
+            consensus: record.consensus,
         }
     }
 }

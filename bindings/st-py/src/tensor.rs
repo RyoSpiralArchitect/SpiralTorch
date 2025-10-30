@@ -1391,6 +1391,17 @@ fn describe_wgpu_softmax_variants(py: Python<'_>) -> PyResult<Option<Vec<PyObjec
             anneal_dict.set_item("refreshes", anneal.refreshes)?;
             dict.set_item("anneal", anneal_dict)?;
         }
+        if let Some(consensus) = entry.consensus() {
+            let consensus_dict = PyDict::new_bound(py);
+            consensus_dict.set_item("consensus_ms", consensus.consensus_ms)?;
+            consensus_dict.set_item("synergy", consensus.synergy)?;
+            consensus_dict.set_item("z_bias", consensus.z_bias)?;
+            consensus_dict.set_item("bayes_weight", consensus.bayes_weight)?;
+            consensus_dict.set_item("metropolis_weight", consensus.metropolis_weight)?;
+            consensus_dict.set_item("anneal_weight", consensus.anneal_weight)?;
+            consensus_dict.set_item("harmony", consensus.harmony)?;
+            dict.set_item("consensus", consensus_dict)?;
+        }
         out.push(dict.unbind().into());
     }
 
