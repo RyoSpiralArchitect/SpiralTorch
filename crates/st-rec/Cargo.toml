@@ -11,3 +11,4 @@ st-tensor = { path = "../st-tensor" }
 st-kdsl = { path = "../st-kdsl" }
 st-spiral-rl    = { path = "../st-spiral-rl" }
 rand     = { version = "0.8", default-features = false, features = ["std"] }
+spiral-config = { path = "../spiral-config" }
