@@ -98,6 +98,39 @@ sequenceDiagram
   Bridge-->>API: awaitable result / telemetry hook
 ```
 
+### 🛠️ Why Robotics Teams Are Watching
+
+The README never calls out robotics explicitly, yet SpiralTorch’s design goals
+line up with the five hardest problems every robotics team faces—hardware
+diversity, real-time control, multi-modal fusion, instinctive behavior, and
+safety:
+
+1. **Escaping hardware hell — WGPU-first.** Robots live across NVIDIA Jetson,
+   Raspberry Pi, Apple Silicon, AMD, Intel, and whatever comes next. SpiralTorch
+   executes kernels through WGPU (Metal/Vulkan/DX12) so the same Z-space graph
+   can run from edge compute to datacenter without CUDA lock-in.
+2. **A runtime that behaves like a robot brain.** The architecture shown in the
+   mermaid diagrams—session manager, graph planner + scheduler, command queue,
+   telemetry—maps directly onto a parallel real-time control loop that ingests
+   sensors, updates a world model, plans, and dispatches actuator commands.
+3. **Ultimate sensor fusion — Z-space.** Camera frames, LiDAR point clouds,
+   audio, torque sensors, IMUs, and natural-language prompts are projected into
+   a single geometric manifold. Every modality shares coordinates, so
+   perception, planning, and instruction following compose without friction.
+4. **Instinct-driven policies — Desire Lagrangians + SpiralTorchRL.** Instead of
+   brittle reward shaping, instincts like “stay balanced,” “seek charge,” or
+   “avoid hazards” become physical laws inside Z-space. They coexist with
+   conventional reinforcement learning loops to produce robust, explainable
+   policies.
+5. **Self-awareness for safety — ψ telemetry.** The runtime continuously watches
+   gradient stability, memory allocators, and kernel health. When ψ telemetry
+   detects instability it can trigger self-maintain routines that pause
+   computation or move the robot to a safe configuration.
+
+Together these guarantees let SpiralTorch slot into anything from lab
+manipulators to outdoor mobile fleets as a ready-made vision, planning, and
+control stack.
+
 **Licensing**
 
 SpiralTorch ships under a dual-license model:
