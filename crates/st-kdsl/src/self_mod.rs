@@ -38,6 +38,8 @@ pub struct SelfRewriteEngine<G: AiHintGenerator> {
     context_clusters: Vec<ContextCluster>,
     cluster_limit: usize,
     cluster_decay: f32,
+    quality_model: HintQualityModel,
+    diversity: DiversityGovernor,
 }
 
 #[derive(Clone)]
@@ -57,6 +59,7 @@ struct HintPerformance {
     best_gain: f32,
     last_eta: f32,
     last_affinity: f32,
+    last_gain: f32,
 }
 
 impl HintPerformance {
@@ -72,7 +75,242 @@ impl HintPerformance {
         let mean = self.mean_gain();
         let penalty = self.failures as f32 * 0.05;
         let affinity = self.last_affinity * 0.2;
-        self.best_gain * 0.6 + mean * 0.3 + affinity - penalty
+        let recent = self.last_gain * 0.4;
+        self.best_gain * 0.45 + mean * 0.25 + affinity + recent - penalty
+    }
+}
+
+#[derive(Clone, Debug)]
+struct HintQualityModel {
+    weights: [f32; 5],
+    bias: f32,
+    lr: f32,
+    momentum: f32,
+    velocity: [f32; 5],
+    bias_velocity: f32,
+    ema_accuracy: f32,
+    updates: u32,
+}
+
+#[derive(Clone, Debug)]
+struct DiversityGovernor {
+    window: usize,
+    threshold: f32,
+    cooldown: u32,
+    cooldown_left: u32,
+    debt: u32,
+    history: VecDeque<f32>,
+}
+
+impl Default for DiversityGovernor {
+    fn default() -> Self {
+        Self {
+            window: 4,
+            threshold: 0.08,
+            cooldown: 3,
+            cooldown_left: 0,
+            debt: 0,
+            history: VecDeque::new(),
+        }
+    }
+}
+
+impl DiversityGovernor {
+    fn record_success(&mut self, gain: f32, fresh: bool) {
+        let gain = gain.max(0.0);
+        self.push_gain(gain);
+        let mean = self.mean_gain();
+        if mean < self.threshold && self.cooldown_left == 0 {
+            self.debt = self.debt.max(1);
+        } else if mean >= self.threshold * 1.5 {
+            self.debt = self.debt.saturating_sub(1);
+        }
+        if fresh {
+            if gain >= self.threshold {
+                self.debt = self.debt.saturating_sub(1);
+            }
+            self.cooldown_left = self.cooldown.max(1);
+        } else if gain >= self.threshold * 1.2 {
+            self.debt = self.debt.saturating_sub(1);
+        }
+    }
+
+    fn record_failure(&mut self) {
+        self.push_gain(0.0);
+        if self.cooldown_left == 0 {
+            self.debt = (self.debt + 1).min(4);
+        }
+    }
+
+    fn advance_cycle(&mut self) {
+        if self.cooldown_left > 0 {
+            self.cooldown_left -= 1;
+        }
+    }
+
+    fn should_force_fresh(&self) -> bool {
+        self.debt > 0 && self.cooldown_left == 0
+    }
+
+    fn push_gain(&mut self, gain: f32) {
+        self.history.push_back(gain);
+        while self.history.len() > self.window {
+            self.history.pop_front();
+        }
+    }
+
+    fn mean_gain(&self) -> f32 {
+        if self.history.is_empty() {
+            0.0
+        } else {
+            self.history.iter().copied().sum::<f32>() / self.history.len() as f32
+        }
+    }
+
+    fn set_threshold(&mut self, threshold: f32) {
+        if threshold.is_finite() && threshold >= 0.0 {
+            self.threshold = threshold;
+        }
+    }
+
+    fn set_window(&mut self, window: usize) {
+        let window = window.max(1);
+        self.window = window;
+        while self.history.len() > self.window {
+            self.history.pop_front();
+        }
+    }
+
+    fn set_cooldown(&mut self, cooldown: u32) {
+        self.cooldown = cooldown.max(1);
+        self.cooldown_left = self.cooldown_left.min(self.cooldown);
+    }
+
+    fn snapshot(&self) -> DiversitySnapshot {
+        DiversitySnapshot {
+            window: self.window,
+            threshold: self.threshold,
+            mean_gain: self.mean_gain(),
+            debt: self.debt,
+            cooldown: self.cooldown,
+            cooldown_left: self.cooldown_left,
+        }
+    }
+}
+
+impl Default for HintQualityModel {
+    fn default() -> Self {
+        Self {
+            weights: [0.0; 5],
+            bias: 0.0,
+            lr: 0.08,
+            momentum: 0.2,
+            velocity: [0.0; 5],
+            bias_velocity: 0.0,
+            ema_accuracy: 0.5,
+            updates: 0,
+        }
+    }
+}
+
+impl HintQualityModel {
+    fn score(&self, perf: &HintPerformance, staleness: u32) -> f32 {
+        let gain = perf.last_gain.max(perf.mean_gain());
+        let features = Self::features(
+            gain,
+            perf.mean_gain(),
+            perf.best_gain,
+            perf.last_affinity,
+            staleness,
+        );
+        let prediction = self.predict(features);
+        prediction * (1.0 + perf.best_gain + perf.mean_gain() * 0.5)
+    }
+
+    fn observe(
+        &mut self,
+        gain: f32,
+        mean: f32,
+        best: f32,
+        affinity: f32,
+        staleness: u32,
+        success: bool,
+    ) {
+        if !gain.is_finite() && !mean.is_finite() {
+            return;
+        }
+        let features = Self::features(gain, mean, best, affinity, staleness);
+        let prediction = self.predict(features);
+        let target = if success { 1.0 } else { 0.0 };
+        let error = prediction - target;
+
+        for (w, (v, feat)) in self
+            .weights
+            .iter_mut()
+            .zip(self.velocity.iter_mut().zip(features.iter()))
+        {
+            *v = self.momentum * *v + (1.0 - self.momentum) * error * *feat;
+            *w -= self.lr * *v;
+        }
+
+        self.bias_velocity = self.momentum * self.bias_velocity + (1.0 - self.momentum) * error;
+        self.bias -= self.lr * self.bias_velocity;
+
+        let correct = if success {
+            prediction >= 0.5
+        } else {
+            prediction < 0.5
+        };
+        let target_accuracy = if correct { 1.0 } else { 0.0 };
+        self.ema_accuracy = self.ema_accuracy * 0.9 + target_accuracy * 0.1;
+        self.updates = self.updates.saturating_add(1);
+    }
+
+    fn predict(&self, features: [f32; 5]) -> f32 {
+        let mut sum = self.bias;
+        for (w, feat) in self.weights.iter().zip(features.iter()) {
+            sum += *w * *feat;
+        }
+        Self::sigmoid(sum)
+    }
+
+    fn sigmoid(x: f32) -> f32 {
+        if x >= 0.0 {
+            let z = (-x).exp();
+            1.0 / (1.0 + z)
+        } else {
+            let z = x.exp();
+            z / (1.0 + z)
+        }
+    }
+
+    fn features(gain: f32, mean: f32, best: f32, affinity: f32, staleness: u32) -> [f32; 5] {
+        let clipped_gain = gain.clamp(0.0, 2.0);
+        let clipped_mean = mean.clamp(0.0, 2.0);
+        let clipped_best = best.clamp(0.0, 2.0);
+        let clipped_affinity = affinity.clamp(0.0, 1.0);
+        let freshness = if staleness == u32::MAX {
+            0.0
+        } else {
+            1.0 / (1.0 + staleness as f32)
+        };
+        [
+            clipped_gain,
+            clipped_mean,
+            clipped_best,
+            clipped_affinity,
+            freshness,
+        ]
+    }
+
+    fn snapshot(&self) -> HintQualitySnapshot {
+        HintQualitySnapshot {
+            weights: self.weights,
+            bias: self.bias,
+            accuracy: self.ema_accuracy.clamp(0.0, 1.0),
+            updates: self.updates,
+            learning_rate: self.lr,
+        }
     }
 }
 
@@ -139,6 +377,7 @@ pub struct HintStatSnapshot {
     pub mean_gain: f32,
     pub last_eta: f32,
     pub last_affinity: f32,
+    pub last_gain: f32,
 }
 
 /// Snapshot of a context cluster used to steer hint reuse.
@@ -149,6 +388,27 @@ pub struct ContextClusterSnapshot {
     pub best_gain: f32,
     pub mean_gain: f32,
     pub momentum: f32,
+}
+
+/// Snapshot of the adaptive hint quality model used for cache prioritisation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HintQualitySnapshot {
+    pub weights: [f32; 5],
+    pub bias: f32,
+    pub accuracy: f32,
+    pub updates: u32,
+    pub learning_rate: f32,
+}
+
+/// Snapshot of the diversity governor steering cache refresh behaviour.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DiversitySnapshot {
+    pub window: usize,
+    pub threshold: f32,
+    pub mean_gain: f32,
+    pub debt: u32,
+    pub cooldown: u32,
+    pub cooldown_left: u32,
 }
 
 impl<G: AiHintGenerator> SelfRewriteEngine<G> {
@@ -170,6 +430,8 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
             context_clusters: Vec::new(),
             cluster_limit: 16,
             cluster_decay: 0.92,
+            quality_model: HintQualityModel::default(),
+            diversity: DiversityGovernor::default(),
         }
     }
 
@@ -233,6 +495,24 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         self
     }
 
+    /// Configure the plateau window used by the diversity governor.
+    pub fn with_diversity_window(mut self, window: usize) -> Self {
+        self.diversity.set_window(window);
+        self
+    }
+
+    /// Set the minimum rolling gain required before cached hints remain dominant.
+    pub fn with_diversity_threshold(mut self, threshold: f32) -> Self {
+        self.diversity.set_threshold(threshold);
+        self
+    }
+
+    /// Adjust the cooldown after a forced refresh before the next can fire.
+    pub fn with_diversity_cooldown(mut self, cooldown: u32) -> Self {
+        self.diversity.set_cooldown(cooldown);
+        self
+    }
+
     /// Returns the smoothed η̄ after the most recent rewrite.
     pub fn smoothed_eta(&self) -> Option<f32> {
         if self.eta_history.is_empty() {
@@ -260,6 +540,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
                 mean_gain: perf.mean_gain(),
                 last_eta: perf.last_eta,
                 last_affinity: perf.last_affinity,
+                last_gain: perf.last_gain,
             })
             .collect();
         stats.sort_by(|a, b| {
@@ -291,6 +572,16 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         clusters
     }
 
+    /// Provides telemetry for the adaptive hint quality model.
+    pub fn quality_model(&self) -> HintQualitySnapshot {
+        self.quality_model.snapshot()
+    }
+
+    /// Exposes the diversity governor metrics for monitoring cache freshness pressure.
+    pub fn diversity_snapshot(&self) -> DiversitySnapshot {
+        self.diversity.snapshot()
+    }
+
     /// Attempt a self-rewrite. Returns `Ok(None)` when no rewrite is required.
     pub fn tick(
         &mut self,
@@ -300,6 +591,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         observed_eta: f32,
     ) -> Result<Option<SelfRewriteEvent>, AiRewriteError> {
         self.age_cache();
+        self.diversity.advance_cycle();
         if observed_eta >= self.eta_floor
             && self.smoothed_eta().unwrap_or(observed_eta) >= self.eta_floor
         {
@@ -308,11 +600,14 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
 
         let ctx_signature = Self::ctx_signature(ctx);
 
-        if let Some(event) = self.try_cached(base_src, ctx, observed_eta, ctx_signature)? {
-            let eta_bar = event.eta_bar;
-            self.record_eta(eta_bar);
-            self.auto_tune_eta();
-            return Ok(Some(event));
+        let force_fresh = self.diversity.should_force_fresh();
+        if !force_fresh {
+            if let Some(event) = self.try_cached(base_src, ctx, observed_eta, ctx_signature)? {
+                let eta_bar = event.eta_bar;
+                self.record_eta(eta_bar);
+                self.auto_tune_eta();
+                return Ok(Some(event));
+            }
         }
 
         let mut prompt =
@@ -331,13 +626,15 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         let event = self.eval_hints(base_src, ctx, &hints)?;
         self.record_eta(event.eta_bar);
         self.push_cache(event.eta_bar, event.hints.clone(), ctx_signature);
-        self.record_hint_success(
+        let gain = self.record_hint_success(
             &event.hints,
             observed_eta,
             event.eta_bar,
             1.0,
             ctx_signature,
+            None,
         );
+        self.diversity.record_success(gain, true);
         self.auto_tune_eta();
 
         Ok(Some(event))
@@ -368,6 +665,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
             let Some(entry) = self.hint_cache.get(idx).cloned() else {
                 continue;
             };
+            let entry_staleness = entry.staleness;
             let affinity = self.context_affinity(entry.ctx_signature, ctx_signature);
             let bridged = self.cluster_bridge_affinity(entry.ctx_signature, ctx_signature);
             let effective_affinity = if affinity >= self.ctx_sensitivity * 0.5 {
@@ -388,13 +686,15 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
                 self.penalize_hint(&entry.hints);
                 continue;
             }
-            self.record_hint_success(
+            let gain = self.record_hint_success(
                 &event.hints,
                 observed_eta,
                 event.eta_bar,
                 effective_affinity,
                 ctx_signature,
+                Some(entry_staleness),
             );
+            self.diversity.record_success(gain, false);
             self.touch_cache(idx, event.eta_bar, event.hints.clone(), ctx_signature);
             return Ok(Some(event));
         }
@@ -447,7 +747,10 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         let score = self
             .hint_stats
             .get(&entry.key)
-            .map(|perf| perf.score())
+            .map(|perf| {
+                let quality = self.quality_model.score(perf, entry.staleness);
+                perf.score() + quality
+            })
             .unwrap_or(entry.eta * 0.5);
         let affinity = self.context_affinity(entry.ctx_signature, ctx_signature);
         let bridge = self.cluster_bridge_affinity(entry.ctx_signature, ctx_signature);
@@ -518,25 +821,46 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         eta: f32,
         affinity: f32,
         ctx_signature: u64,
-    ) {
+        staleness: Option<u32>,
+    ) -> f32 {
         let gain = (eta - observed).max(0.0);
         let key = Self::hint_key(hints);
-        let entry = self.hint_stats.entry(key).or_default();
-        entry.uses += 1;
-        entry.total_gain += gain;
-        entry.best_gain = entry.best_gain.max(gain);
-        entry.last_eta = eta;
-        entry.last_affinity = affinity;
-        self.promote_cluster(ctx_signature, gain, affinity);
+        let (mean_gain, best_gain, last_affinity) = {
+            let entry = self.hint_stats.entry(key).or_default();
+            entry.uses += 1;
+            entry.total_gain += gain;
+            entry.best_gain = entry.best_gain.max(gain);
+            entry.last_eta = eta;
+            entry.last_affinity = affinity;
+            entry.last_gain = gain;
+            (entry.mean_gain(), entry.best_gain, entry.last_affinity)
+        };
+        self.promote_cluster(ctx_signature, gain, last_affinity);
+        let staleness = staleness.unwrap_or(0);
+        self.quality_model
+            .observe(gain, mean_gain, best_gain, last_affinity, staleness, true);
+        gain
     }
 
     fn penalize_hint(&mut self, hints: &[HeuristicHint]) {
         let key = Self::hint_key(hints);
-        let entry = self.hint_stats.entry(key.clone()).or_default();
-        entry.failures += 1;
-        entry.total_gain *= 0.5;
-        entry.last_affinity *= 0.5;
+        let staleness = self.cache_staleness(&key).unwrap_or(u32::MAX);
+        let (gain, mean, best, affinity) = {
+            let entry = self.hint_stats.entry(key.clone()).or_default();
+            let gain = entry.last_gain;
+            let mean = entry.mean_gain();
+            let best = entry.best_gain;
+            let affinity = entry.last_affinity;
+            entry.failures += 1;
+            entry.total_gain *= 0.5;
+            entry.last_affinity *= 0.5;
+            entry.last_gain *= 0.5;
+            (gain, mean, best, affinity)
+        };
+        self.quality_model
+            .observe(gain, mean, best, affinity, staleness, false);
         self.degrade_cache_entry(&key);
+        self.diversity.record_failure();
     }
 
     fn auto_tune_eta(&mut self) {
@@ -572,6 +896,13 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         if let Some(entry) = self.hint_cache.iter_mut().find(|entry| entry.key == key) {
             entry.staleness = entry.staleness.saturating_add(2);
         }
+    }
+
+    fn cache_staleness(&self, key: &str) -> Option<u32> {
+        self.hint_cache
+            .iter()
+            .find(|entry| entry.key == key)
+            .map(|entry| entry.staleness)
     }
 
     fn promote_cluster(&mut self, ctx_signature: u64, gain: f32, affinity: f32) {
@@ -682,7 +1013,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::auto::{HeuristicHint, TemplateAiGenerator};
+    use crate::auto::{AiRewritePrompt, HeuristicHint, TemplateAiGenerator};
 
     fn sample_ctx() -> Ctx {
         Ctx {
@@ -791,6 +1122,7 @@ mod tests {
         assert!(stat.mean_gain > 0.0);
         assert_eq!(stat.failures, 0);
         assert!(stat.last_affinity >= 0.0);
+        assert!(stat.last_gain > 0.0);
     }
 
     #[test]
@@ -838,6 +1170,27 @@ mod tests {
         assert!(snapshot.best_gain > 0.0);
         assert!(snapshot.momentum > 0.0);
         assert!(snapshot.mean_gain >= 0.0);
+    }
+
+    #[test]
+    fn quality_model_updates_after_success() {
+        let mut generator = |_: &AiRewriteConfig, _: &AiRewritePrompt| {
+            Ok(vec![HeuristicHint::new("radix", "radix * 2", 0.95, "true")])
+        };
+        let ctx = sample_ctx();
+        let mut engine = SelfRewriteEngine::new(&mut generator, AiRewriteConfig::new("mock"))
+            .with_eta_floor(0.6);
+
+        let event = engine
+            .tick("algo: 1;", &ctx, None, 0.25)
+            .expect("tick")
+            .expect("event");
+        assert!(event.eta_bar > 0.0);
+
+        let snapshot = engine.quality_model();
+        assert!(snapshot.updates >= 1);
+        assert!(snapshot.accuracy >= 0.5);
+        assert!(snapshot.weights.iter().any(|w| w.abs() > 1e-6));
     }
 
     #[test]
@@ -934,6 +1287,50 @@ mod tests {
             .expect("event");
 
         assert_eq!(calls.get(), 1, "cluster bridging reused cached hints");
+    }
+
+    #[test]
+    fn diversity_governor_forces_fresh_generation_on_plateau() {
+        use std::cell::Cell;
+
+        let calls = Cell::new(0usize);
+        let mut generator = |_: &AiRewriteConfig, _: &AiRewritePrompt| {
+            calls.set(calls.get() + 1);
+            Ok(vec![HeuristicHint::new(
+                "tile_cols",
+                "tile_cols + 1",
+                0.05,
+                "true",
+            )])
+        };
+
+        let ctx = sample_ctx();
+        let mut engine = SelfRewriteEngine::new(&mut generator, AiRewriteConfig::new("mock"))
+            .with_eta_floor(0.65)
+            .with_cache_limit(1)
+            .with_diversity_threshold(10.0)
+            .with_diversity_window(2)
+            .with_diversity_cooldown(1);
+
+        engine
+            .tick("algo: 1;", &ctx, None, 0.25)
+            .expect("tick")
+            .expect("event");
+        assert_eq!(calls.get(), 1);
+
+        engine
+            .tick("algo: 1;", &ctx, None, 0.25)
+            .expect("tick")
+            .expect("event");
+        assert_eq!(
+            calls.get(),
+            2,
+            "diversity governor should force fresh hints on plateau",
+        );
+
+        let snapshot = engine.diversity_snapshot();
+        assert!(snapshot.cooldown_left > 0 || snapshot.debt > 0);
+        assert!(snapshot.mean_gain < snapshot.threshold);
     }
 
     #[test]

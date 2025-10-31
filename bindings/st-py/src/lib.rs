@@ -175,7 +175,6 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     theory::register(py, m)?;
     qr::register(py, m)?;
     julia_bridge::register(py, m)?;
-    robotics::register(py, m)?;
 
     // 2) サブモジュール（空でも import 可）
     nn::register(py, m)?;
