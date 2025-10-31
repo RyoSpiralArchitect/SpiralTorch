@@ -23,6 +23,10 @@ pub struct Params {
     pub cols: u32,
     pub in_stride: u32,
     pub out_stride: u32,
+    pub chimera_tile: u32,
+    pub chimera_stripes: u32,
+    pub flags: u32,
+    pub mask_stride: u32,
 }
 
 impl Params {
@@ -113,6 +117,16 @@ impl<'a> Builder<'a> {
                         },
                         count: None,
                     },
+                    BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
                 ],
             });
 
@@ -197,8 +211,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn params_layout_is_16_bytes() {
-        assert_eq!(std::mem::size_of::<Params>(), 16);
+    fn params_layout_is_32_bytes() {
+        assert_eq!(std::mem::size_of::<Params>(), 32);
     }
 
     #[test]
