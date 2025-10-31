@@ -3715,6 +3715,13 @@ impl GradientSummary {
             negative_count: 0,
             near_zero_count: 0,
         }
+
+        self.min = min;
+        self.max = max;
+        self.positive_count = positive_count;
+        self.negative_count = negative_count;
+        self.near_zero_count = near_zero_count;
+        self
     }
 
     /// Attach support and sign statistics to an existing summary. When the

@@ -74,6 +74,18 @@ assert_eq!(preview[0][0], 0.2); // first block in stage 0 starts softly
 assert!((preview.last().unwrap().last().unwrap() - 1.0).abs() < 1e-6);
 ```
 
+Already instantiated a `ResNetBackbone`? You can update its slip schedule without rebuilding the network and inspect the live factors:
+
+```rust
+let mut resnet = ResNetBackbone::new(ResNetConfig::resnet56_cifar(true))?;
+
+let anneal = SkipSlipSchedule::linear(0.15, 1.0).per_stage();
+resnet.set_skip_slip(Some(anneal.clone()))?;
+assert_eq!(resnet.skip_slip_factors(), anneal.preview(&[9, 9, 9])?);
+
+resnet.set_skip_slip(None)?; // return to identity skips mid-training
+```
+
 ### Temporal resonance accumulation
 
 Temporal continuity lets SpiralTorchVision respond to motion and lingering cues without reprocessing an entire video buffer. Each frame updates a `ZSpaceVolume` in-place with `accumulate`, applying an exponential moving average (`alpha` near `0.2` preserves the past, `alpha` near `1.0` chases the latest frame). The resulting volume feeds a `TemporalResonanceBuffer`, which smooths the depth attention profile before collapse:

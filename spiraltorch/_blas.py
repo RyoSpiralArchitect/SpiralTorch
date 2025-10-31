@@ -8,7 +8,13 @@ artefacts emitted by the Rust runtime, allowing SpiralTorch to reserve host
 threads for GPU command submission so compute on both sides can progress
 without contending for the same CPU cores.  The system-facing helpers also
 interrogate Linux control groups so container limits and CPU reservations are
-captured before tuning decisions are made.
+captured before tuning decisions are made.  The expanded system snapshot now
+records CPU topology from ``/sys/devices/system/cpu`` so physical cores can be
+weighed against logical CPUs when scheduling work alongside GPU pipelines while
+Linux Pressure Stall Information (PSI) metrics feed into the heuristics so BLAS
+threads back off when the host is already saturated.  WGSL kernel metadata
+persisted in the autotune store is also summarised so GPU dispatch
+characteristics can feed back into the CPU reservation heuristic.
 """
 
 from __future__ import annotations
@@ -16,8 +22,9 @@ from __future__ import annotations
 import ctypes
 import ctypes.util
 import json
-import os
 import math
+import os
+import time
 import warnings
 from array import array
 from contextlib import contextmanager
@@ -31,14 +38,17 @@ __all__ = [
     "thread_controls_available",
     "temporary_thread_count",
     "system_cpu_count",
+    "system_cpu_topology",
     "recommended_thread_count",
     "synchronise_thread_hints",
     "auto_tune_threads",
     "blas_vendor",
     "wgpu_adapter_info",
+    "wgpu_kernel_profiles",
     "gpu_host_thread_reservation",
     "process_cpu_budget",
     "cgroup_cpu_quota",
+    "system_cpu_pressure",
     "dgemm",
 ]
 
@@ -64,10 +74,15 @@ _THREAD_HINT_SOURCES: tuple[str, ...] = (
 _GPU_HOST_HINT_VAR = "SPIRALTORCH_WGPU_HOST_THREADS"
 
 _WGPU_ADAPTER_INFO: dict[str, object] | None = None
+_WGPU_KERNEL_PROFILES: dict[str, object] | None = None
 _GPU_HOST_RESERVATION: int | None = None
 _GPU_HOST_RESERVATION_BUDGET: int | None = None
 
 _CPU_BUDGET_CACHE: dict[str, object] | None = None
+_CPU_TOPOLOGY_CACHE: tuple[int, tuple[int, ...] | None, dict[str, object]] | None = None
+_CPU_PRESSURE_CACHE: tuple[int, float, dict[str, object] | None] | None = None
+
+_CPU_PRESSURE_CACHE_TTL = 2.0
 
 _CGROUP_SELF_CACHE: dict[str, str] | None = None
 _CGROUP_QUOTA_CACHE: tuple[int, float | None] | None = None
@@ -91,6 +106,10 @@ _SOFTWARE_GPU_KEYWORDS = {
     "software",
     "warp",
 }
+
+_WGPU_PROFILE_STALE_SECONDS = 90 * 24 * 60 * 60
+_WGPU_HEAVY_WORKGROUP_THRESHOLD = 256
+_WGPU_HEAVY_VOLUME_THRESHOLD = 2_000_000
 
 
 def _candidate_paths() -> Iterable[str]:
@@ -432,6 +451,247 @@ def _detect_wgpu_adapter() -> dict[str, object] | None:
     return _WGPU_ADAPTER_INFO
 
 
+def _coerce_positive_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return None
+        rounded = int(value)
+        return rounded if rounded >= 0 and abs(value - rounded) < 1e-6 else None
+    if isinstance(value, str):
+        candidate = value.strip()
+        if not candidate:
+            return None
+        try:
+            parsed = int(candidate, 0)
+        except ValueError:
+            return None
+        return parsed if parsed >= 0 else None
+    return None
+
+
+def _coerce_non_negative_float(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        candidate = float(value)
+        if not math.isfinite(candidate) or candidate < 0:
+            return None
+        return candidate
+    if isinstance(value, str):
+        candidate = value.strip()
+        if not candidate:
+            return None
+        try:
+            parsed = float(candidate)
+        except ValueError:
+            return None
+        if not math.isfinite(parsed) or parsed < 0:
+            return None
+        return parsed
+    return None
+
+
+def _estimate_context_volume(context: object) -> int | None:
+    if not isinstance(context, dict):
+        return None
+    dims: list[int] = []
+    for key, raw in context.items():
+        if not isinstance(key, str):
+            continue
+        lowered = key.lower()
+        if any(token in lowered for token in ("rows", "cols", "inner", "m", "n", "k", "width", "height", "depth", "size", "len", "length", "volume")):
+            value = _coerce_positive_int(raw)
+            if value:
+                dims.append(value)
+    dims = [value for value in dims if value]
+    if not dims:
+        return None
+    dims.sort(reverse=True)
+    volume = 1
+    for value in dims[:3]:
+        volume *= value
+    return volume
+
+
+def _estimate_workgroup_size(params: object) -> int | None:
+    if not isinstance(params, dict):
+        return None
+    direct = _coerce_positive_int(params.get("workgroup_size"))
+    if direct:
+        return direct
+    tile_m = _coerce_positive_int(params.get("tile_m"))
+    tile_n = _coerce_positive_int(params.get("tile_n"))
+    tile_k = _coerce_positive_int(params.get("tile_k"))
+    if tile_m and tile_n:
+        if tile_k and tile_k > 1:
+            return tile_m * tile_n * tile_k
+        return tile_m * tile_n
+    axes: list[int] = []
+    for key in ("workgroup_x", "workgroup_y", "workgroup_z", "local_size_x", "local_size_y", "local_size_z", "wg_rows", "wg_cols"):
+        value = _coerce_positive_int(params.get(key))
+        if value:
+            axes.append(value)
+    if axes:
+        size = 1
+        for axis in axes:
+            size *= axis
+        return size
+    for key, raw in params.items():
+        if not isinstance(key, str):
+            continue
+        lowered = key.lower()
+        if lowered.endswith("_workgroup") or lowered.endswith("_workgroup_size"):
+            value = _coerce_positive_int(raw)
+            if value:
+                return value
+    return None
+
+
+def _summarise_wgpu_buckets(store: object) -> dict[str, object] | None:
+    if not isinstance(store, dict):
+        return None
+    kernels: dict[str, dict[str, object]] = {}
+    latest: int | None = None
+    total_entries = 0
+    for raw_key, bucket in store.items():
+        key = str(raw_key)
+        if not key.startswith("wgpu."):
+            continue
+        info = _parse_wgpu_autotune_key(key)
+        kernel_prefix = key.split("|", 1)[0]
+        parts = kernel_prefix.split(".")
+        kernel_name = parts[1] if len(parts) > 1 else kernel_prefix
+        entries: list[dict[str, object]] = []
+        if isinstance(bucket, dict):
+            maybe_entries = bucket.get("entries")
+            if isinstance(maybe_entries, list):
+                entries = [entry for entry in maybe_entries if isinstance(entry, dict)]
+            elif {"params", "score", "updated_unix"}.issubset(bucket.keys()):
+                entries = [bucket]
+        elif isinstance(bucket, list):
+            entries = [entry for entry in bucket if isinstance(entry, dict)]
+        if not entries:
+            continue
+        summary = kernels.setdefault(
+            kernel_name,
+            {
+                "entries": 0,
+                "max_workgroup": 0,
+                "max_volume": 0,
+                "recent_update": None,
+                "prefix": kernel_prefix,
+            },
+        )
+        if info:
+            summary.setdefault("adapter", info.get("name"))
+            summary.setdefault("backend", info.get("backend"))
+            summary.setdefault("classification", info.get("classification"))
+        for entry in entries:
+            total_entries += 1
+            summary["entries"] = int(summary.get("entries", 0)) + 1
+            updated = _coerce_positive_int(entry.get("updated_unix"))
+            if updated is not None:
+                summary["recent_update"] = max(summary.get("recent_update") or 0, updated)
+                if latest is None or updated > latest:
+                    latest = updated
+            context = entry.get("context")
+            volume = _estimate_context_volume(context)
+            if volume is not None:
+                summary["max_volume"] = max(int(summary.get("max_volume", 0)), volume)
+            params = entry.get("params")
+            workgroup = _estimate_workgroup_size(params)
+            if workgroup is not None:
+                summary["max_workgroup"] = max(int(summary.get("max_workgroup", 0)), workgroup)
+        summary["entries"] = int(summary.get("entries", 0))
+        summary["max_workgroup"] = int(summary.get("max_workgroup", 0))
+        summary["max_volume"] = int(summary.get("max_volume", 0))
+        if summary.get("recent_update") is None:
+            summary.pop("recent_update", None)
+    if not kernels:
+        return None
+    profile: dict[str, object] = {
+        "kernels": kernels,
+        "entries": total_entries,
+    }
+    if latest is not None:
+        profile["most_recent"] = latest
+    return profile
+
+
+def _collect_wgpu_kernel_profiles() -> dict[str, object] | None:
+    for candidate in _autotune_store_candidates():
+        try:
+            with open(candidate, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (FileNotFoundError, OSError, json.JSONDecodeError):
+            continue
+        profile = _summarise_wgpu_buckets(data)
+        if profile:
+            profile["source"] = candidate
+            return profile
+    return None
+
+
+def wgpu_kernel_profiles(*, refresh: bool = False) -> dict[str, object] | None:
+    """Return aggregated metadata about autotuned WGPU/WGSL kernels."""
+
+    global _WGPU_KERNEL_PROFILES
+    if _WGPU_KERNEL_PROFILES is not None and not refresh:
+        return dict(_WGPU_KERNEL_PROFILES)
+
+    profile = _collect_wgpu_kernel_profiles()
+    _WGPU_KERNEL_PROFILES = dict(profile) if profile is not None else None
+    return dict(profile) if profile is not None else None
+
+
+def _wgpu_kernel_pressure_details() -> tuple[bool, int, int]:
+    profile = wgpu_kernel_profiles()
+    if not profile:
+        return False, 0, 0
+    kernels = profile.get("kernels")
+    if not isinstance(kernels, dict):
+        return False, 0, 0
+    max_workgroup = 0
+    max_volume = 0
+    for stats in kernels.values():
+        if not isinstance(stats, dict):
+            continue
+        workgroup = _coerce_positive_int(stats.get("max_workgroup"))
+        if workgroup is not None:
+            max_workgroup = max(max_workgroup, workgroup)
+        volume = _coerce_positive_int(stats.get("max_volume"))
+        if volume is not None:
+            max_volume = max(max_volume, volume)
+    stale = False
+    most_recent = profile.get("most_recent")
+    if isinstance(most_recent, (int, float)):
+        try:
+            stale = (time.time() - float(most_recent)) > _WGPU_PROFILE_STALE_SECONDS
+        except OverflowError:
+            stale = False
+    heavy = False
+    if not stale:
+        if max_workgroup >= _WGPU_HEAVY_WORKGROUP_THRESHOLD:
+            heavy = True
+        elif max_volume >= _WGPU_HEAVY_VOLUME_THRESHOLD:
+            heavy = True
+    return heavy, max_workgroup, max_volume
+
+
+def _apply_budget_cap(reservation: int, budget: int | None) -> int:
+    reservation = max(0, reservation)
+    if budget is None:
+        return reservation
+    cap = max(0, budget - 1)
+    if cap == 0:
+        return 0
+    return min(reservation, cap)
+
+
 def _compute_gpu_host_reservation(cpu_budget: int | None) -> int | None:
     explicit = _read_int_env(_GPU_HOST_HINT_VAR)
     if explicit is not None:
@@ -441,21 +701,46 @@ def _compute_gpu_host_reservation(cpu_budget: int | None) -> int | None:
     if not info:
         return None
 
+    heavy_gpu, max_workgroup, max_volume = _wgpu_kernel_pressure_details()
     classification = str(info.get("classification", "unknown"))
     if classification == "software":
         return None
     if classification == "integrated":
         if cpu_budget is None or cpu_budget <= 2:
-            return 1
-        return min(2, max(1, cpu_budget // 4))
+            reservation = 1
+        else:
+            reservation = min(2, max(1, cpu_budget // 4))
+        if heavy_gpu:
+            target = max(reservation + 1, 2)
+            if max_volume >= (_WGPU_HEAVY_VOLUME_THRESHOLD * 2):
+                target = max(target, reservation + 2)
+            reservation = _apply_budget_cap(target, cpu_budget)
+            if reservation < 1:
+                reservation = 1
+        return reservation
     if classification == "discrete":
         if cpu_budget is not None and cpu_budget >= 8:
-            return 2
-        return 1
+            reservation = 2
+        else:
+            reservation = 1
+        if heavy_gpu:
+            target = reservation + 1
+            if max_workgroup >= _WGPU_HEAVY_WORKGROUP_THRESHOLD * 2:
+                target = max(target, 3)
+            reservation = _apply_budget_cap(target, cpu_budget)
+            if reservation < 1 and (cpu_budget is None or cpu_budget > 1):
+                reservation = 1
+        return reservation
     if classification == "unknown":
         if cpu_budget is None or cpu_budget <= 1:
             return None
-        return 1
+        reservation = 1
+        if heavy_gpu:
+            target = reservation + 1
+            reservation = _apply_budget_cap(target, cpu_budget)
+            if reservation < 1:
+                reservation = 1
+        return reservation
     return None
 
 
@@ -514,6 +799,69 @@ def _read_text_file(path: str) -> str | None:
             return handle.read().strip()
     except (FileNotFoundError, OSError):
         return None
+
+
+def _cpu_topology_from_sysfs(affinity_filter: set[int] | None) -> dict[str, object] | None:
+    base = "/sys/devices/system/cpu"
+    try:
+        entries = os.listdir(base)
+    except (FileNotFoundError, NotADirectoryError, PermissionError, OSError):
+        return None
+
+    logical_ids: list[int] = []
+    cores: dict[tuple[int, int], int] = {}
+    packages: set[int] = set()
+
+    for name in entries:
+        if not name.startswith("cpu"):
+            continue
+        suffix = name[3:]
+        if not suffix.isdigit():
+            continue
+        cpu_id = int(suffix)
+        if affinity_filter is not None and cpu_id not in affinity_filter:
+            continue
+
+        topology_dir = os.path.join(base, name, "topology")
+        core_id_text = _read_text_file(os.path.join(topology_dir, "core_id"))
+        package_id_text = _read_text_file(os.path.join(topology_dir, "physical_package_id"))
+
+        try:
+            core_id = int(core_id_text) if core_id_text is not None else None
+        except ValueError:
+            core_id = None
+        try:
+            package_id = int(package_id_text) if package_id_text is not None else None
+        except ValueError:
+            package_id = None
+
+        key: tuple[int, int] | None = None
+        if core_id is not None and package_id is not None:
+            key = (package_id, core_id)
+        elif core_id is not None:
+            key = (-1, core_id)
+        elif package_id is not None:
+            key = (package_id, -1)
+
+        logical_ids.append(cpu_id)
+        if package_id is not None:
+            packages.add(package_id)
+        if key is not None:
+            cores[key] = cores.get(key, 0) + 1
+
+    if not logical_ids:
+        return None
+
+    physical_cores = len(cores) if cores else None
+    packages_count = len(packages) if packages else None
+    threads_per_core = max(cores.values()) if cores else None
+
+    return {
+        "logical_ids": logical_ids,
+        "physical_cores": physical_cores,
+        "packages": packages_count,
+        "threads_per_core": threads_per_core,
+    }
 
 
 def _self_cgroup_paths(*, refresh: bool = False) -> dict[str, str]:
@@ -730,6 +1078,93 @@ def cgroup_cpu_quota(*, refresh: bool = False) -> float | None:
     return _cgroup_cpu_quota_raw(refresh=refresh)
 
 
+def _parse_pressure_line(line: str) -> tuple[str, dict[str, float | int]] | None:
+    tokens = line.strip().split()
+    if not tokens:
+        return None
+
+    kind = tokens[0].strip()
+    if not kind:
+        return None
+
+    metrics: dict[str, float | int] = {}
+    for token in tokens[1:]:
+        if "=" not in token:
+            continue
+        key, raw = token.split("=", 1)
+        key = key.strip()
+        raw = raw.strip()
+        if not key or not raw:
+            continue
+        if key == "total":
+            value = _coerce_positive_int(raw)
+            if value is None:
+                continue
+            metrics[key] = value
+            continue
+        value_f = _coerce_non_negative_float(raw)
+        if value_f is None:
+            continue
+        metrics[key] = value_f
+
+    if not metrics:
+        return None
+
+    return kind, metrics
+
+
+def _cpu_pressure_snapshot() -> dict[str, dict[str, float | int]] | None:
+    try:
+        with open("/proc/pressure/cpu", "r", encoding="utf-8") as handle:
+            snapshot: dict[str, dict[str, float | int]] = {}
+            for line in handle:
+                parsed = _parse_pressure_line(line)
+                if parsed is None:
+                    continue
+                kind, metrics = parsed
+                if kind not in {"some", "full"}:
+                    continue
+                snapshot[kind] = dict(metrics)
+    except (FileNotFoundError, OSError):
+        return None
+
+    return snapshot or None
+
+
+def system_cpu_pressure(*, refresh: bool = False) -> dict[str, dict[str, float | int]] | None:
+    """Return Linux Pressure Stall Information (PSI) metrics for the host.
+
+    The returned mapping exposes the ``"some"`` and ``"full"`` CPU pressure
+    buckets when available, including their ``avg10``/``avg60``/``avg300``
+    windows as floating-point percentages alongside the accumulated ``total``
+    stall time in microseconds.  ``None`` is returned when PSI support is not
+    available on the running kernel.
+    """
+
+    global _CPU_PRESSURE_CACHE
+
+    now = time.time()
+    if (
+        not refresh
+        and _CPU_PRESSURE_CACHE is not None
+        and _CPU_PRESSURE_CACHE[0] == os.getpid()
+        and (now - _CPU_PRESSURE_CACHE[1]) <= _CPU_PRESSURE_CACHE_TTL
+    ):
+        cached = _CPU_PRESSURE_CACHE[2]
+        if cached is None:
+            return None
+        return {bucket: dict(metrics) for bucket, metrics in cached.items()}
+
+    snapshot = _cpu_pressure_snapshot()
+    if snapshot is None:
+        _CPU_PRESSURE_CACHE = (os.getpid(), now, None)
+        return None
+
+    structured = {bucket: dict(metrics) for bucket, metrics in snapshot.items()}
+    _CPU_PRESSURE_CACHE = (os.getpid(), now, structured)
+    return {bucket: dict(metrics) for bucket, metrics in structured.items()}
+
+
 def _system_affinity_size() -> int | None:
     try:
         affinity = os.sched_getaffinity(0)
@@ -795,6 +1230,65 @@ def system_cpu_count() -> int | None:
     return int(effective) if isinstance(effective, int) else None
 
 
+def system_cpu_topology(*, refresh: bool = False) -> dict[str, object]:
+    """Return detected CPU topology details scoped to the current process.
+
+    The returned dictionary exposes the logical CPU count seen by the system
+    (``"logical_cpus"``), the number of logical CPUs currently available via the
+    affinity mask (``"available_logical_cpus"``) and the effective limit that
+    considers affinity, cpusets and cgroup quotas (``"effective_logical_cpus"``).
+    When the host exposes topology metadata through ``/sys/devices/system/cpu``
+    additional keys describe the number of physical cores (``"physical_cores"``),
+    CPU packages (``"packages"``) and threads per core
+    (``"threads_per_core"``).  A boolean ``"smt_active"`` key indicates whether
+    symmetric multithreading appears to be enabled for the accessible CPUs.
+    """
+
+    global _CPU_TOPOLOGY_CACHE
+
+    try:
+        affinity_members = set(os.sched_getaffinity(0))  # type: ignore[arg-type]
+    except (AttributeError, OSError):
+        affinity_members = None
+
+    signature: tuple[int, ...] | None
+    if affinity_members is None:
+        signature = None
+    else:
+        signature = tuple(sorted(affinity_members))
+
+    if (
+        not refresh
+        and _CPU_TOPOLOGY_CACHE is not None
+        and _CPU_TOPOLOGY_CACHE[0] == os.getpid()
+        and _CPU_TOPOLOGY_CACHE[1] == signature
+    ):
+        return dict(_CPU_TOPOLOGY_CACHE[2])
+
+    budget = process_cpu_budget(refresh=refresh)
+    logical_total = budget.get("system")
+    affinity_total = budget.get("affinity")
+    effective = budget.get("effective")
+
+    topology = _cpu_topology_from_sysfs(affinity_members)
+    physical_cores = topology.get("physical_cores") if topology else None
+    packages = topology.get("packages") if topology else None
+    threads_per_core = topology.get("threads_per_core") if topology else None
+
+    result = {
+        "logical_cpus": logical_total if isinstance(logical_total, int) else None,
+        "available_logical_cpus": affinity_total if isinstance(affinity_total, int) else None,
+        "effective_logical_cpus": effective if isinstance(effective, int) else None,
+        "physical_cores": physical_cores if isinstance(physical_cores, int) else None,
+        "packages": packages if isinstance(packages, int) else None,
+        "threads_per_core": threads_per_core if isinstance(threads_per_core, int) else None,
+        "smt_active": bool(threads_per_core and isinstance(threads_per_core, int) and threads_per_core > 1),
+    }
+
+    _CPU_TOPOLOGY_CACHE = (os.getpid(), signature, dict(result))
+    return result
+
+
 def recommended_thread_count(
     problem_size: tuple[int, int, int] | None = None,
     *,
@@ -815,7 +1309,8 @@ def recommended_thread_count(
     consider_gpu:
         When ``True`` (the default) host thread reservations derived from the
         active WGPU adapter are respected so CPU BLAS workloads leave breathing
-        room for GPU command submission.
+        room for GPU command submission.  The heuristic also inspects Linux PSI
+        CPU pressure metrics to back off when the host is already congested.
     """
 
     system_threads = system_cpu_count()
@@ -843,6 +1338,47 @@ def recommended_thread_count(
             deductible = available - 1 if available > 1 else 0
             if deductible > 0:
                 available = max(1, available - min(reservation, deductible))
+
+        topology = system_cpu_topology()
+        physical = topology.get("physical_cores") if topology else None
+        threads_per_core = topology.get("threads_per_core") if topology else None
+        if (
+            isinstance(physical, int)
+            and physical > 0
+            and isinstance(threads_per_core, int)
+            and threads_per_core > 1
+            and reservation is not None
+            and reservation > 0
+        ):
+            available = max(1, min(available, physical))
+
+    pressure = system_cpu_pressure()
+    if pressure and available and available > 1:
+        peak_avg = 0.0
+        sustained_avg = 0.0
+        for bucket in ("some", "full"):
+            metrics = pressure.get(bucket)
+            if not isinstance(metrics, dict):
+                continue
+            peak = _coerce_non_negative_float(metrics.get("avg10"))
+            if peak is not None:
+                peak_avg = max(peak_avg, peak)
+            sustained = _coerce_non_negative_float(metrics.get("avg60"))
+            if sustained is not None:
+                sustained_avg = max(sustained_avg, sustained)
+
+        if peak_avg >= 10.0:
+            if peak_avg >= 50.0:
+                reduction_ratio = 0.5
+            elif peak_avg >= 20.0:
+                reduction_ratio = 0.3
+            else:
+                reduction_ratio = 0.15
+            if sustained_avg >= 20.0:
+                reduction_ratio = min(0.6, reduction_ratio + 0.1)
+            scaled = int(max(1, math.floor(available * (1 - reduction_ratio))))
+            if scaled < available:
+                available = scaled
 
     available = max(1, int(available))
 

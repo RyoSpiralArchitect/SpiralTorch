@@ -83,13 +83,17 @@ fn resnet_skip_slip_scales_learnable_gate_gradients() {
     let mut baseline = ResNetBackbone::new(base.clone()).unwrap();
     let mut slipped_cfg = base.clone();
     let slip_value = 0.4;
-    slipped_cfg.skip_slip = Some(SkipSlipSchedule::constant(slip_value));
+    let slip_schedule = SkipSlipSchedule::constant(slip_value);
+    slipped_cfg.skip_slip = Some(slip_schedule.clone());
     let mut slipped = ResNetBackbone::new(slipped_cfg).unwrap();
 
     let dir = tempdir().unwrap();
     let path = dir.path().join("resnet_slip.bin");
     io::save_bincode(&baseline, &path).unwrap();
     slipped.load_weights_bincode(&path).unwrap();
+    let mut dynamic = ResNetBackbone::new(base.clone()).unwrap();
+    dynamic.load_weights_bincode(&path).unwrap();
+    dynamic.set_skip_slip(Some(slip_schedule.clone())).unwrap();
 
     let input = sample_input(base.input_channels, base.input_hw, 31);
     let grad_output =
@@ -97,8 +101,10 @@ fn resnet_skip_slip_scales_learnable_gate_gradients() {
 
     let _ = baseline.forward(&input).unwrap();
     let _ = slipped.forward(&input).unwrap();
+    let _ = dynamic.forward(&input).unwrap();
     let _ = baseline.backward(&input, &grad_output).unwrap();
     let _ = slipped.backward(&input, &grad_output).unwrap();
+    let _ = dynamic.backward(&input, &grad_output).unwrap();
 
     let mut baseline_grads = Vec::new();
     baseline
@@ -124,7 +130,7 @@ fn resnet_skip_slip_scales_learnable_gate_gradients() {
 
     assert_eq!(baseline_grads.len(), slipped_grads.len());
     assert!(!baseline_grads.is_empty());
-    for (baseline_grad, slipped_grad) in baseline_grads.into_iter().zip(slipped_grads) {
+    for (baseline_grad, slipped_grad) in baseline_grads.iter().zip(slipped_grads.iter()) {
         assert!(baseline_grad.abs() > 0.0);
         let expected = baseline_grad * slip_value;
         let tolerance = baseline_grad.abs() * 1.0e-4 + 1.0e-6;
@@ -132,6 +138,38 @@ fn resnet_skip_slip_scales_learnable_gate_gradients() {
             (expected - slipped_grad).abs() <= tolerance,
             "expected slip-scaled gradient {expected}, got {slipped_grad}"
         );
+    }
+
+    let mut dynamic_grads = Vec::new();
+    dynamic
+        .visit_parameters(|param| {
+            if param.name().contains("skip_gate") {
+                let gradient = param.gradient().expect("dynamic skip gradient");
+                dynamic_grads.push(gradient.data()[0]);
+            }
+            Ok(())
+        })
+        .unwrap();
+
+    assert_eq!(slipped_grads.len(), dynamic_grads.len());
+    let slip_factors = dynamic.skip_slip_factors();
+    for stage in &slip_factors {
+        for &factor in stage {
+            let tolerance = slip_value.abs() * 1.0e-6 + 1.0e-6;
+            assert!((factor - slip_value).abs() <= tolerance);
+        }
+    }
+    for (slipped_grad, dynamic_grad) in slipped_grads.iter().zip(dynamic_grads.iter()) {
+        let tolerance = slipped_grad.abs() * 1.0e-5 + 1.0e-6;
+        assert!((slipped_grad - dynamic_grad).abs() <= tolerance);
+    }
+
+    dynamic.set_skip_slip(None).unwrap();
+    let reset_factors = dynamic.skip_slip_factors();
+    for stage in reset_factors {
+        for factor in stage {
+            assert!((factor - 1.0).abs() <= 1.0e-6);
+        }
     }
 }
 
