@@ -8,6 +8,129 @@ import time
 from typing import Iterable, Mapping, MutableMapping, Sequence
 
 
+class ZSpaceGeometry:
+    """Geometry helper for computing norms in Z-space."""
+
+    def __init__(
+        self,
+        *,
+        kind: str,
+        curvature: float = 0.0,
+        metric: Sequence[Sequence[float]] | None = None,
+        time_dilation: float = 1.0,
+    ) -> None:
+        self._kind = kind
+        self._curvature = float(curvature)
+        if metric is not None:
+            self._metric = tuple(tuple(float(value) for value in row) for row in metric)
+        else:
+            self._metric = tuple()
+        self._time_dilation = max(float(time_dilation), 1e-6)
+
+    @staticmethod
+    def euclidean() -> "ZSpaceGeometry":
+        return ZSpaceGeometry(kind="euclidean")
+
+    @staticmethod
+    def non_euclidean(curvature: float) -> "ZSpaceGeometry":
+        return ZSpaceGeometry(kind="non_euclidean", curvature=curvature)
+
+    @staticmethod
+    def general_relativity(
+        metric: Sequence[Sequence[float]],
+        time_dilation: float = 1.0,
+    ) -> "ZSpaceGeometry":
+        return ZSpaceGeometry(
+            kind="general_relativity", metric=metric, time_dilation=time_dilation
+        )
+
+    def metric_norm(self, vector: Sequence[float]) -> float:
+        if not vector:
+            return 0.0
+        euclidean = math.sqrt(sum(float(value) * float(value) for value in vector))
+        if self._kind == "euclidean":
+            return euclidean
+        if self._kind == "non_euclidean":
+            curvature = self._curvature
+            if abs(curvature) < 1e-6:
+                return euclidean
+            if curvature > 0.0:
+                adjustment = 1.0 + curvature * euclidean * euclidean / 6.0
+                return euclidean * adjustment
+            contraction = 1.0 + abs(curvature) * euclidean * euclidean / 6.0
+            return euclidean / max(contraction, 1e-6)
+        # General relativity fallback
+        metric = self._metric
+        if not metric:
+            return euclidean * self._time_dilation
+        accumulator = 0.0
+        for i, value_i in enumerate(vector):
+            row = metric[i] if i < len(metric) else ()
+            for j, value_j in enumerate(vector):
+                coefficient = (
+                    row[j]
+                    if j < len(row)
+                    else (1.0 if i == j else 0.0)
+                )
+                accumulator += float(value_i) * coefficient * float(value_j)
+        spatial = math.sqrt(abs(accumulator))
+        return spatial * self._time_dilation
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging helper
+        return f"ZSpaceGeometry(kind={self._kind!r})"
+
+    @property
+    def kind(self) -> str:
+        return self._kind
+
+
+@dataclass
+class GravityWell:
+    mass: float
+    regime: str = "newtonian"
+    speed_of_light: float = 1.0
+
+    @staticmethod
+    def newtonian(mass: float) -> "GravityWell":
+        return GravityWell(mass=float(mass), regime="newtonian")
+
+    @staticmethod
+    def relativistic(mass: float, speed_of_light: float) -> "GravityWell":
+        return GravityWell(
+            mass=float(mass), regime="relativistic", speed_of_light=float(speed_of_light)
+        )
+
+
+@dataclass
+class GravityField:
+    constant: float = 6.67430e-11
+    wells: dict[str, GravityWell] = field(default_factory=dict)
+
+    def add_well(self, channel: str, well: GravityWell) -> None:
+        self.wells[channel] = well
+
+    def potential(
+        self, channel: str, geometry: ZSpaceGeometry, vector: Sequence[float]
+    ) -> float | None:
+        well = self.wells.get(channel)
+        if well is None:
+            return None
+        radius = geometry.metric_norm(vector)
+        if radius <= 1e-6:
+            return 0.0
+        base = -self.constant * float(well.mass) / radius
+        if well.regime == "relativistic":
+            c = max(float(well.speed_of_light), 1e-6)
+            base *= 1.0 / (1.0 + radius / c)
+        return base
+
+
+@dataclass
+class ZSpaceDynamics:
+    geometry: ZSpaceGeometry = field(default_factory=ZSpaceGeometry.euclidean)
+    gravity: GravityField | None = None
+
+
 @dataclass
 class ExponentialSmoother:
     """Simple exponential moving-average smoother."""
@@ -116,25 +239,54 @@ class Desire:
 class EnergyReport:
     total: float
     per_channel: dict[str, float]
+    gravitational: float
+    gravitational_per_channel: dict[str, float]
 
 
 class DesireLagrangianField:
     """Aggregate instinctive potentials across registered desires."""
 
-    def __init__(self, desires: Mapping[str, Desire] | None = None) -> None:
+    def __init__(
+        self,
+        desires: Mapping[str, Desire] | None = None,
+        *,
+        dynamics: ZSpaceDynamics | None = None,
+    ) -> None:
         self._desires: dict[str, Desire] = dict(desires or {})
+        self._dynamics = dynamics or ZSpaceDynamics()
 
     def energy(self, frame: FusedFrame) -> EnergyReport:
         per_channel: dict[str, float] = {}
+        gravitational: dict[str, float] = {}
         total = 0.0
-        for name, desire in self._desires.items():
-            norm = frame.norm(name)
-            if norm is None:
-                continue
-            value = desire.energy(norm)
-            per_channel[name] = value
-            total += value
-        return EnergyReport(total=total, per_channel=per_channel)
+        for name, vector in frame.coordinates.items():
+            desire = self._desires.get(name)
+            if desire is not None:
+                norm = self._dynamics.geometry.metric_norm(vector)
+                value = desire.energy(norm)
+                per_channel[name] = value
+                total += value
+            if self._dynamics.gravity is not None:
+                potential = self._dynamics.gravity.potential(
+                    name, self._dynamics.geometry, vector
+                )
+                if potential is not None:
+                    gravitational[name] = potential
+                    total += abs(potential)
+        gravity_total = sum(gravitational.values()) if gravitational else 0.0
+        return EnergyReport(
+            total=total,
+            per_channel=per_channel,
+            gravitational=gravity_total,
+            gravitational_per_channel=gravitational,
+        )
+
+    @property
+    def dynamics(self) -> ZSpaceDynamics:
+        return self._dynamics
+
+    def set_dynamics(self, dynamics: ZSpaceDynamics) -> None:
+        self._dynamics = dynamics
 
 
 class SensorFusionHub:
@@ -232,12 +384,14 @@ class PsiTelemetry:
         stability_threshold: float = 0.5,
         failure_energy: float = 5.0,
         norm_limit: float = 10.0,
+        geometry: ZSpaceGeometry | None = None,
     ) -> None:
         self.window = max(int(window), 1)
         self.stability_threshold = float(stability_threshold)
         self.failure_energy = float(failure_energy)
         self.norm_limit = float(norm_limit)
         self._history: deque[float] = deque(maxlen=self.window)
+        self._geometry = geometry or ZSpaceGeometry.euclidean()
 
     def observe(self, frame: FusedFrame, energy: EnergyReport) -> TelemetryReport:
         self._history.append(float(energy.total))
@@ -253,8 +407,10 @@ class PsiTelemetry:
             anomalies.append("instability")
         if energy.total > self.failure_energy:
             anomalies.append("energy_overflow")
+        if abs(energy.gravitational) > self.failure_energy:
+            anomalies.append("gravity_overflow")
         for vector in frame.coordinates.values():
-            norm = math.sqrt(sum(value * value for value in vector))
+            norm = self._geometry.metric_norm(vector)
             if norm > self.norm_limit:
                 anomalies.append("norm_overflow")
         for name, health in frame.health.items():
@@ -264,13 +420,20 @@ class PsiTelemetry:
         anomalies = sorted(set(anomalies))
         failsafe = any(tag.startswith("norm_overflow") for tag in anomalies) or (
             energy.total > self.failure_energy
-        )
+        ) or (abs(energy.gravitational) > self.failure_energy)
         return TelemetryReport(
             energy=float(energy.total),
             stability=stability,
             failsafe=failsafe,
             anomalies=tuple(anomalies),
         )
+
+    def set_geometry(self, geometry: ZSpaceGeometry) -> None:
+        self._geometry = geometry
+
+    @property
+    def geometry(self) -> ZSpaceGeometry:
+        return self._geometry
 
 
 @dataclass
@@ -309,6 +472,7 @@ class RoboticsRuntime:
         self.telemetry = telemetry or PsiTelemetry()
         self._policy: PolicyGradientController | None = None
         self._trajectory: deque[RuntimeStep] | None = None
+        self.telemetry.set_geometry(self.desires.dynamics.geometry)
 
     def attach_policy_gradient(self, controller: PolicyGradientController) -> None:
         self._policy = controller
@@ -349,8 +513,16 @@ class RoboticsRuntime:
         self._trajectory.clear()
         return result
 
+    def configure_dynamics(self, dynamics: ZSpaceDynamics) -> None:
+        self.desires.set_dynamics(dynamics)
+        self.telemetry.set_geometry(self.desires.dynamics.geometry)
+
 
 __all__ = [
+    "GravityField",
+    "GravityWell",
+    "ZSpaceDynamics",
+    "ZSpaceGeometry",
     "ChannelHealth",
     "Desire",
     "DesireLagrangianField",

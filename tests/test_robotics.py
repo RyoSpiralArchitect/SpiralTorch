@@ -31,6 +31,10 @@ RoboticsRuntime = robotics.RoboticsRuntime
 SensorFusionHub = robotics.SensorFusionHub
 PolicyGradientController = robotics.PolicyGradientController
 ChannelHealth = robotics.ChannelHealth
+GravityField = robotics.GravityField
+GravityWell = robotics.GravityWell
+ZSpaceDynamics = robotics.ZSpaceDynamics
+ZSpaceGeometry = robotics.ZSpaceGeometry
 
 
 class SensorFusionHubTests(unittest.TestCase):
@@ -97,11 +101,29 @@ class DesireFieldTests(unittest.TestCase):
         self.assertIn("balance", energy.per_channel)
         self.assertIn("power", energy.per_channel)
         self.assertGreater(energy.per_channel["balance"], energy.per_channel["power"])
+        self.assertEqual(energy.gravitational, 0.0)
+        self.assertFalse(energy.gravitational_per_channel)
+
+    def test_gravity_field_contributes_energy(self) -> None:
+        dynamics = ZSpaceDynamics(
+            geometry=ZSpaceGeometry.euclidean(),
+            gravity=GravityField(),
+        )
+        dynamics.gravity.add_well("pose", GravityWell.newtonian(10.0))
+        field = DesireLagrangianField({}, dynamics=dynamics)
+        hub = SensorFusionHub()
+        hub.register_channel("pose", 3)
+        frame = hub.fuse({"pose": (2.0, 0.0, 0.0)})
+        energy = field.energy(frame)
+        self.assertLess(energy.gravitational, 0.0)
+        self.assertIn("pose", energy.gravitational_per_channel)
 
 
 class TelemetryTests(unittest.TestCase):
     def test_observe_triggers_failsafe_on_instability(self) -> None:
-        telemetry = PsiTelemetry(window=4, stability_threshold=0.8, failure_energy=10.0, norm_limit=2.0)
+        telemetry = PsiTelemetry(
+            window=4, stability_threshold=0.8, failure_energy=10.0, norm_limit=2.0
+        )
         hub = SensorFusionHub()
         hub.register_channel("pose", 2)
         field = DesireLagrangianField({"pose": Desire(target_norm=0.0, tolerance=0.0, weight=1.0)})
@@ -148,7 +170,9 @@ class RoboticsRuntimeTests(unittest.TestCase):
         hub = SensorFusionHub()
         hub.register_channel("imu", 3)
         field = DesireLagrangianField({"imu": Desire(target_norm=0.0, tolerance=0.0, weight=1.0)})
-        telemetry = PsiTelemetry(window=2, stability_threshold=0.2, failure_energy=0.01, norm_limit=0.2)
+        telemetry = PsiTelemetry(
+            window=2, stability_threshold=0.2, failure_energy=0.01, norm_limit=0.2
+        )
         runtime = RoboticsRuntime(sensors=hub, desires=field, telemetry=telemetry)
 
         result = runtime.step({"imu": (1.0, 1.0, 1.0)})
@@ -168,6 +192,22 @@ class RoboticsRuntimeTests(unittest.TestCase):
         trajectory = runtime.drain_trajectory()
         self.assertEqual(len(trajectory), 2)
         self.assertEqual(runtime.recording_len(), 0)
+
+    def test_runtime_configure_dynamics_tracks_gravity(self) -> None:
+        hub = SensorFusionHub()
+        hub.register_channel("pose", 3)
+        field = DesireLagrangianField({})
+        telemetry = PsiTelemetry()
+        runtime = RoboticsRuntime(sensors=hub, desires=field, telemetry=telemetry)
+        gravity = GravityField()
+        gravity.add_well("pose", GravityWell.relativistic(5.0e8, speed_of_light=1.0))
+        dynamics = ZSpaceDynamics(
+            geometry=ZSpaceGeometry.general_relativity(((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))),
+            gravity=gravity,
+        )
+        runtime.configure_dynamics(dynamics)
+        result = runtime.step({"pose": (0.5, 0.0, 0.0)})
+        self.assertIn("pose", result.energy.gravitational_per_channel)
 
 
 if __name__ == "__main__":
