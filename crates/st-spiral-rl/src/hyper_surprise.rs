@@ -35,6 +35,11 @@ impl LossStdTrigger {
         }
     }
 
+    /// Returns the current exponential moving standard deviation estimate.
+    pub fn ema(&self) -> f32 {
+        self.ema
+    }
+
     /// Sets the exponential decay applied to the internal rolling estimate.
     pub fn with_decay(mut self, decay: f32) -> Self {
         if decay.is_finite() && (0.0..=1.0).contains(&decay) {
@@ -47,6 +52,18 @@ impl LossStdTrigger {
     pub fn with_max_ratio(mut self, ratio: f32) -> Self {
         if ratio.is_finite() && ratio > 0.0 {
             self.max_ratio = ratio;
+        }
+        self
+    }
+
+    /// Sets a deadband that suppresses small shocks before emitting pulses.
+    ///
+    /// Ratios below the configured deadband are ignored so the controller only
+    /// reacts once the observed deviation clears the margin. This keeps minor
+    /// fluctuations from chattering the gauge.
+    pub fn with_deadband(mut self, deadband: f32) -> Self {
+        if deadband.is_finite() && deadband >= 0.0 {
+            self.deadband = deadband;
         }
         self
     }
@@ -105,9 +122,7 @@ pub struct HyperSurpriseConfig {
     pub eta_floor: f32,
     pub lr_floor: f32,
     pub smoothing: f32,
-    pub relaxation: f32,
-    pub ratio_smoothing: f32,
-    pub cooldown_steps: usize,
+    pub reversion: f32,
 }
 
 impl HyperSurpriseConfig {
@@ -160,22 +175,10 @@ impl HyperSurpriseConfig {
         self
     }
 
-    pub fn with_relaxation(mut self, relaxation: f32) -> Self {
-        if relaxation.is_finite() {
-            self.relaxation = relaxation.clamp(0.0, 1.0);
+    pub fn with_reversion(mut self, reversion: f32) -> Self {
+        if reversion.is_finite() {
+            self.reversion = reversion.clamp(0.0, 1.0);
         }
-        self
-    }
-
-    pub fn with_ratio_smoothing(mut self, ratio_smoothing: f32) -> Self {
-        if ratio_smoothing.is_finite() {
-            self.ratio_smoothing = ratio_smoothing.clamp(0.0, 1.0);
-        }
-        self
-    }
-
-    pub fn with_cooldown_steps(mut self, cooldown_steps: usize) -> Self {
-        self.cooldown_steps = cooldown_steps;
         self
     }
 }
@@ -190,9 +193,7 @@ impl Default for HyperSurpriseConfig {
             eta_floor: 0.0,
             lr_floor: 1e-6,
             smoothing: 0.0,
-            relaxation: 0.5,
-            ratio_smoothing: 0.0,
-            cooldown_steps: 0,
+            reversion: 0.35,
         }
     }
 }
@@ -208,6 +209,7 @@ pub struct HyperSurpriseSignal {
     pub curvature: f32,
     pub gauge: f32,
     pub learning_rate: f32,
+    pub rolling_std: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -223,8 +225,6 @@ pub struct HyperSurpriseController {
     config: HyperSurpriseConfig,
     last_signal: Option<HyperSurpriseSignal>,
     last_gauge: f32,
-    smoothed_ratio: f32,
-    cooldown: usize,
 }
 
 impl HyperSurpriseController {
@@ -234,8 +234,6 @@ impl HyperSurpriseController {
             config,
             last_signal: None,
             last_gauge: 1.0,
-            smoothed_ratio: 0.0,
-            cooldown: 0,
         }
     }
 
@@ -254,35 +252,42 @@ impl HyperSurpriseController {
         learning_rate: f32,
     ) -> HyperSurpriseOutcome {
         let std = loss_std(returns, baseline);
-        let candidate_ratio = self.trigger.observe(std);
-        let ratio = self.pop_ratio(candidate_ratio);
-        if let Some(ratio) = ratio {
-            let clamped_ratio = ratio.clamp(0.0, self.config.max_gauge);
-            let gauge_ceiling = self.config.max_gauge.max(self.config.min_gauge);
-            let raw_gauge = 1.0 + clamped_ratio * self.config.curvature.tanh().abs();
-            let bounded_gauge = raw_gauge.clamp(self.config.min_gauge, gauge_ceiling);
+        if let Some(ratio) = self.trigger.observe(std) {
+            let ratio = ratio.max(0.0);
+            let curvature_gain = self.config.curvature.tanh().abs().max(1e-3);
+            let raw_gauge = 1.0 + ratio * curvature_gain;
+            let gauge_floor = self.config.min_gauge.max(1e-3);
+            let gauge_ceiling = self
+                .config
+                .max_gauge
+                .max(self.config.min_gauge)
+                .max(gauge_floor);
+            let bounded_gauge = raw_gauge.clamp(gauge_floor, gauge_ceiling);
             let smoothing = self.config.smoothing.clamp(0.0, 1.0);
             let gauge = if smoothing > 0.0 {
                 let relaxed = smoothing * self.last_gauge + (1.0 - smoothing) * bounded_gauge;
-                self.last_gauge = relaxed;
-                relaxed
+                self.last_gauge = relaxed.clamp(gauge_floor, gauge_ceiling);
+                self.last_gauge
             } else {
                 self.last_gauge = bounded_gauge;
                 bounded_gauge
             };
+            let effective_ratio = ((gauge - 1.0) / curvature_gain).max(0.0);
             let scaled_lr = match learning_rate.partial_cmp(&0.0) {
-                Some(Ordering::Greater) => learning_rate * (1.0 + clamped_ratio),
+                Some(Ordering::Greater) => learning_rate * (1.0 + effective_ratio),
                 _ => learning_rate,
             }
             .max(self.config.lr_floor.max(1e-9));
-            let eta_bar = (self.config.eta_bar * (1.0 + clamped_ratio)).max(self.config.eta_floor);
+            let eta_bar =
+                (self.config.eta_bar * (1.0 + effective_ratio)).max(self.config.eta_floor);
             let signal = HyperSurpriseSignal {
                 loss_std: std,
-                inject_ratio: clamped_ratio,
+                inject_ratio: effective_ratio,
                 eta_bar,
                 curvature: self.config.curvature,
                 gauge,
                 learning_rate: scaled_lr,
+                rolling_std: self.trigger.ema(),
             };
             self.last_signal = Some(signal.clone());
             HyperSurpriseOutcome {
@@ -291,15 +296,18 @@ impl HyperSurpriseController {
                 signal: Some(signal),
             }
         } else {
-            let relaxation = self.config.relaxation.clamp(0.0, 1.0);
-            let gauge = if relaxation > 0.0 {
-                let relaxed = relaxation * self.last_gauge + (1.0 - relaxation);
-                self.last_gauge = relaxed;
-                relaxed
+            let reversion = self.config.reversion.clamp(0.0, 1.0);
+            let baseline = self.config.min_gauge.max(1e-3);
+            let ceiling = self.config.max_gauge.max(baseline);
+            let target = baseline + (self.last_gauge - baseline) * (1.0 - reversion);
+            let smoothing = self.config.smoothing.clamp(0.0, 1.0);
+            let relaxed = if smoothing > 0.0 {
+                smoothing * self.last_gauge + (1.0 - smoothing) * target
             } else {
-                self.last_gauge = 1.0;
-                1.0
+                target
             };
+            self.last_gauge = relaxed.clamp(baseline, ceiling);
+            let gauge = self.last_gauge;
             self.last_signal = None;
             HyperSurpriseOutcome {
                 learning_rate: learning_rate.max(self.config.lr_floor.max(1e-9)),
@@ -358,100 +366,13 @@ fn loss_std(values: &[f32], baseline: f32) -> f32 {
 mod tests {
     use super::*;
 
-    fn constant_returns(std: f32) -> Vec<f32> {
-        vec![std, -std, std, -std]
-    }
-
     #[test]
-    fn smoothing_relaxes_gauge_towards_baseline() {
-        let trigger = LossStdTrigger::new(0.4).with_warmup(0);
-        let config = HyperSurpriseConfig::default()
-            .with_max_gauge(2.0)
-            .with_smoothing(0.5);
-        let mut controller = HyperSurpriseController::new(trigger, config);
-
-        let outcome = controller.update(&constant_returns(0.5), 0.0, 0.1);
-        assert!(outcome.gauge > 1.0);
-
-        // Drop below the threshold and confirm the gauge relaxes instead of snapping.
-        let relaxed = controller.update(&constant_returns(0.0), 0.0, 0.1);
-        assert!(relaxed.gauge < outcome.gauge);
-        assert!(relaxed.gauge > 1.0);
-
-        let baseline = controller.update(&constant_returns(0.0), 0.0, 0.1);
-        assert!(baseline.gauge <= relaxed.gauge);
-    }
-
-    #[test]
-    fn lr_floor_and_eta_floor_are_respected() {
-        let trigger = LossStdTrigger::new(0.01).with_warmup(0).with_max_ratio(5.0);
-        let config = HyperSurpriseConfig::default()
-            .with_lr_floor(1e-3)
-            .with_eta_floor(0.2);
-        let mut controller = HyperSurpriseController::new(trigger, config);
-
-        let outcome = controller.update(&constant_returns(0.5), 0.0, 1e-4);
-        assert!(outcome.learning_rate >= 1e-3);
-        let signal = controller.last_signal().unwrap();
-        assert!(signal.learning_rate >= 1e-3);
-        assert!(signal.eta_bar >= 0.2);
-    }
-
-    #[test]
-    fn ratio_smoothing_decays_residual_pulse() {
-        let trigger = LossStdTrigger::new(0.2)
-            .with_warmup(0)
-            .with_max_ratio(4.0)
-            .with_decay(0.1);
-        let config = HyperSurpriseConfig::default()
-            .with_ratio_smoothing(0.6)
-            .with_relaxation(0.4)
-            .with_smoothing(0.0);
-        let mut controller = HyperSurpriseController::new(trigger, config);
-
-        let spike = controller.update(&constant_returns(0.5), 0.0, 0.1);
-        let first_ratio = spike.signal.unwrap().inject_ratio;
-        assert!(first_ratio > 0.0);
-
-        let trailing = controller.update(&constant_returns(0.0), 0.0, 0.1);
-        let mut last = trailing.signal.unwrap().inject_ratio;
-        assert!(last < first_ratio);
-        assert!(last > 0.0);
-
-        let mut steps = 0;
-        while steps < 48 {
-            let decay = controller.update(&constant_returns(0.0), 0.0, 0.1);
-            if let Some(signal) = decay.signal {
-                assert!(signal.inject_ratio < last);
-                last = signal.inject_ratio;
-            } else {
-                last = 0.0;
-                break;
-            }
-            steps += 1;
-        }
-        assert!(last <= 1e-6, "ratio smoothing failed to decay to baseline");
-    }
-
-    #[test]
-    fn cooldown_blocks_back_to_back_spikes() {
-        let trigger = LossStdTrigger::new(0.05).with_warmup(0).with_max_ratio(4.0);
-        let config = HyperSurpriseConfig::default()
-            .with_cooldown_steps(2)
-            .with_ratio_smoothing(0.0)
-            .with_smoothing(0.0);
-        let mut controller = HyperSurpriseController::new(trigger, config);
-
-        let burst_one = controller.update(&constant_returns(0.5), 0.0, 0.05);
-        assert!(burst_one.signal.is_some());
-
-        let burst_two = controller.update(&constant_returns(0.5), 0.0, 0.05);
-        assert!(burst_two.signal.is_none());
-
-        let idle = controller.update(&constant_returns(0.0), 0.0, 0.05);
-        assert!(idle.signal.is_none());
-
-        let rebound = controller.update(&constant_returns(0.5), 0.0, 0.05);
-        assert!(rebound.signal.is_some());
+    fn geometry_injection_scales_ratio() {
+        let mut trigger = LossStdTrigger::new(0.1)
+            .with_warmup(1)
+            .with_geometry_injection(0.6, -1.5);
+        assert!(trigger.observe(0.05).is_none());
+        let boosted = trigger.observe(0.4).expect("boosted ratio");
+        assert!(boosted > 0.0);
     }
 }

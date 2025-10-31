@@ -18,6 +18,33 @@ def test_hypergrad_helper_accepts_tensor_shape() -> None:
     assert tape.learning_rate() == 0.01
 
 
+def test_hypergrad_scale_gradient_tracks_summary() -> None:
+    tape = st.hypergrad(1, 3, curvature=-0.9, learning_rate=0.05)
+    tensor = st.Tensor((1, 3), data=[0.4, -0.6, 0.2])
+    tape.accumulate_wave(tensor)
+    before = tape.gradient()
+    tape.scale_gradient(-0.5)
+    after = tape.gradient()
+    for prev, current in zip(before, after):
+        assert abs(current - (-0.5 * prev)) < 1e-6
+    summary = tape.summary()
+    expected_l2 = sum(value * value for value in after) ** 0.5
+    assert abs(summary.l2() - expected_l2) < 1e-6
+    assert summary.count() == len(after)
+
+
+def test_hypergrad_rescale_rms_targets_value() -> None:
+    tape = st.hypergrad(1, 4, curvature=-0.88, learning_rate=0.04)
+    tensor = st.Tensor((1, 4), data=[0.35, -0.45, 0.25, -0.15])
+    tape.accumulate_wave(tensor)
+    base = tape.summary()
+    target = base.rms() * 0.3
+    factor = tape.rescale_rms(target)
+    assert factor > 0.0
+    summary = tape.summary()
+    assert abs(summary.rms() - target) < 5e-3
+
+
 def test_hypergrad_helper_accepts_mapping_topos() -> None:
     tape = st.hypergrad(
         1,
@@ -55,6 +82,8 @@ def test_hypergrad_telemetry_reports_metrics() -> None:
     assert summary.std() > 0.0
     assert summary.variance() > 0.0
     assert summary.kurtosis() >= 0.0
+    assert summary.activation() > 0.0
+    assert summary.support_width() > 0.0
 
 
 def test_hypergrad_desire_feedback_interfaces() -> None:
@@ -67,6 +96,9 @@ def test_hypergrad_desire_feedback_interfaces() -> None:
     assert interpretation.hyper_std() > 0.0
     assert interpretation.real_std() >= 0.0
     assert interpretation.sharpness() >= 0.0
+    assert interpretation.activation() > 0.0
+    assert interpretation.sign_alignment() >= 0.0
+    assert interpretation.sign_entropy() >= 0.0
     control = tape.desire_control(real)
     damped = tape.desire_control(real, gain=0.5)
     assert control.penalty_gain() >= damped.penalty_gain()
@@ -84,10 +116,13 @@ def test_hypergrad_summary_dict_reports_moments() -> None:
     assert "skewness" in summary
     assert "kurtosis" in summary
     assert summary["sum_cubes"] != 0.0
+    assert "activation" in summary
+    assert "sign_entropy" in summary
     operator = suggest_hypergrad_operator(payload)
     assert "std" in operator
     assert "skewness" in operator
     assert "kurtosis" in operator
+    assert "activation" in operator
 
 
 def test_hypergrad_topos_factory_returns_guard() -> None:
