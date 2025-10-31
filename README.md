@@ -2134,31 +2134,50 @@ the **HyperSurprise** pipeline. Attach a `LossStdTrigger` and SpiralTorch inject
 η̄ pulses whenever the episode's return standard deviation breaches the guard:
 
 ```rust
-use st_spiral_rl::{LossStdTrigger, SpiralPolicyGradient};
+use st_spiral_rl::{HyperSurpriseConfig, LossStdTrigger, SpiralPolicyGradient};
 
 let mut policy = SpiralPolicyGradient::new(4, 2, 0.05, 0.9)?;
-policy.attach_hyper_surprise(
+policy.attach_hyper_surprise_with_config(
     LossStdTrigger::new(0.12)
         .with_warmup(2)
-        .with_max_ratio(2.5),
+        .with_max_ratio(2.5)
+        .with_deadband(0.15),
+    HyperSurpriseConfig::default()
+        .with_smoothing(0.35)
+        .with_reversion(0.55)
+        .with_lr_floor(1e-4),
 );
 // ...record transitions...
 let report = policy.finish_episode()?;
 if let Some(surprise) = &report.hyper_surprise {
     println!(
-        "σ={:.3} inject={:.2} η̄={:.3}",
+        "σ={:.3} inject={:.2} η̄={:.3} gauge={:.2} lr={:.4} σ̂={:.3}",
         surprise.loss_std,
         surprise.inject_ratio,
-        surprise.eta_bar
+        surprise.eta_bar,
+        surprise.gauge,
+        surprise.learning_rate,
+        surprise.rolling_std
     );
 }
 ```
 
-`LossStdTrigger` keeps an EMA of the observed loss standard deviation, clamps
-surprise pulses, and modulates both the learning-rate and gradient gauge inside
-the episode update. `SpiralPolicyGradient::last_hyper_surprise()` exposes the
-latest packet so telemetry dashboards can correlate η̄ spikes with emergent
-behaviour.
+`LossStdTrigger` keeps an EMA of the observed loss standard deviation, applies a
+configurable deadband before clamping surprise pulses, and modulates both the
+learning-rate and gradient gauge inside the episode update.
+`SpiralPolicyGradient::last_hyper_surprise()` exposes the latest packet so
+telemetry dashboards can correlate η̄ spikes with emergent behaviour.
+
+`HyperSurpriseConfig` now includes builder helpers for smoothing, gauge floors,
+and floor clamps on both η̄ and the learning rate. A dedicated reversion factor
+lets gauges glide back to baseline instead of snapping when shocks subside, and
+the emitted telemetry now shares the rolling standard deviation alongside the
+imposed clamps. Ratio telemetry is derived from the post-clamp, smoothed gauge
+so `HyperSurpriseSignal::inject_ratio` mirrors the actual scaling applied to
+η̄ and the learning-rate. These guards keep legacy pipelines untouched (defaults
+mirror the previous behaviour) while unlocking telemetry-rich packets via
+`HyperSurpriseSignal::gauge`, `HyperSurpriseSignal::learning_rate`, and
+`HyperSurpriseSignal::rolling_std`.
 
 The controller now threads Ramanujan's π synthesis and the Λ₂₄ packing density
 into its smoothing loop while auto-rewriting its own clamps. Rank, packing
