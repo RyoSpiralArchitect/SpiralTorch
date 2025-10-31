@@ -105,36 +105,15 @@ sequenceDiagram
 
 ### 🛠️ Why Robotics Teams Are Watching
 
-The README never calls out robotics explicitly, yet SpiralTorch’s design goals
-line up with the five hardest problems every robotics team faces—hardware
-diversity, real-time control, multi-modal fusion, instinctive behavior, and
-safety:
+SpiralTorch’s runtime mirrors the main pressure points that robotics teams wrestle with today:
 
-1. **Escaping hardware hell — WGPU-first.** Robots live across NVIDIA Jetson,
-   Raspberry Pi, Apple Silicon, AMD, Intel, and whatever comes next. SpiralTorch
-   executes kernels through WGPU (Metal/Vulkan/DX12) so the same Z-space graph
-   can run from edge compute to datacenter without CUDA lock-in.
-2. **A runtime that behaves like a robot brain.** The architecture shown in the
-   mermaid diagrams—session manager, graph planner + scheduler, command queue,
-   telemetry—maps directly onto a parallel real-time control loop that ingests
-   sensors, updates a world model, plans, and dispatches actuator commands.
-3. **Ultimate sensor fusion — Z-space.** Camera frames, LiDAR point clouds,
-   audio, torque sensors, IMUs, and natural-language prompts are projected into
-   a single geometric manifold. Every modality shares coordinates, so
-   perception, planning, and instruction following compose without friction.
-4. **Instinct-driven policies — Desire Lagrangians + SpiralTorchRL.** Instead of
-   brittle reward shaping, instincts like “stay balanced,” “seek charge,” or
-   “avoid hazards” become physical laws inside Z-space. They coexist with
-   conventional reinforcement learning loops to produce robust, explainable
-   policies.
-5. **Self-awareness for safety — ψ telemetry.** The runtime continuously watches
-   gradient stability, memory allocators, and kernel health. When ψ telemetry
-   detects instability it can trigger self-maintain routines that pause
-   computation or move the robot to a safe configuration.
+1. **Vendor-agnostic acceleration (WGPU-first).** Robots ship on Jetsons, Raspberry Pis, Apple Silicon laptops, AMD workstations, and plain x86 servers. SpiralTorch kernels are written against WGPU, so the same Z-space operators run across Metal, Vulkan, or DirectX 12 without CUDA lock-in.
+2. **A control-plane grade runtime.** The mermaid diagram above is effectively a realtime robotics OS: session managers, graph planners, schedulers, command queues, and observability hooks coordinate sensing, planning, and actuation in one pipeline.
+3. **Unified sensor fusion via Z-space.** Camera frames, LiDAR point clouds, IMU states, force/torque readings, and language instructions all project into a single geometric manifold. Planning loops consume multi-modal context without writing one-off fusion code per robot.
+4. **Instinctive behaviours with Desire Lagrangians + SpiralTorchRL.** Instead of hand-crafting reward functions, core instincts—“don’t tip over,” “seek charge,” “avoid the ledge”—are encoded as potentials. Traditional policy-gradient loops still plug in, but they optimise around explainable priors.
+5. **Self-aware safety through ψ telemetry.** The runtime continuously measures kernel stability, allocator pressure, and dynamics drift. When thresholds break, ψ telemetry drives self-maintain routines that pause execution or transition to safe postures before a robot ever enters an unrecoverable state.
 
-Together these guarantees let SpiralTorch slot into anything from lab
-manipulators to outdoor mobile fleets as a ready-made vision, planning, and
-control stack.
+Together these properties let SpiralTorch act as the perception, planning, and autonomy stack for heterogeneous robot fleets—from lab manipulators to outdoor rovers—without a rewrite per platform.
 
 **Licensing**
 

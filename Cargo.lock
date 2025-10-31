@@ -3038,6 +3038,7 @@ dependencies = [
  "st-nn",
  "st-qr-studio",
  "st-rec",
+ "st-robotics",
  "st-spiral-rl",
  "st-tensor",
  "st-text",
@@ -3279,10 +3280,6 @@ dependencies = [
 [[package]]
 name = "st-robotics"
 version = "0.1.0"
-dependencies = [
- "serde",
- "thiserror 1.0.69",
-]
 
 [[package]]
 name = "st-softlogic"

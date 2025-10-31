@@ -21,25 +21,25 @@ def _load_module(name: str, relative: str):
     return module
 
 
-rl = _load_module("spiraltorch_fallback_rl", "rl.py")
 robotics = _load_module("spiraltorch_fallback_robotics", "robotics.py")
 
 Desire = robotics.Desire
 DesireLagrangianField = robotics.DesireLagrangianField
+EnergyReport = robotics.EnergyReport
 PsiTelemetry = robotics.PsiTelemetry
 RoboticsRuntime = robotics.RoboticsRuntime
 SensorFusionHub = robotics.SensorFusionHub
-PolicyGradient = rl.PolicyGradient
+PolicyGradientController = robotics.PolicyGradientController
 
 
 class SensorFusionHubTests(unittest.TestCase):
     def test_fuse_multiple_modalities(self) -> None:
         hub = SensorFusionHub()
-        hub.register_channel("camera", lambda payload: (float(len(payload)),))
-        hub.register_channel("imu", lambda payload: tuple(float(v) for v in payload))
+        hub.register_channel("camera", 1)
+        hub.register_channel("imu", 3)
         hub.calibrate("imu", bias=(0.1, 0.1, 0.1), scale=2.0)
 
-        frame = hub.fuse({"camera": [0, 1, 2, 3], "imu": (0.2, 0.4, 0.3)})
+        frame = hub.fuse({"camera": (4.0,), "imu": (0.2, 0.4, 0.3)})
         self.assertIn("camera", frame.coordinates)
         self.assertIn("imu", frame.coordinates)
         self.assertAlmostEqual(frame.coordinates["camera"][0], 4.0)
@@ -48,6 +48,26 @@ class SensorFusionHubTests(unittest.TestCase):
         self.assertTrue(
             all(math.isclose(value, expected) for value, expected in zip(imu_vector, (0.2, 0.6, 0.4)))
         )
+
+    def test_smoothing_filters_transitions(self) -> None:
+        hub = SensorFusionHub()
+        hub.register_channel("imu", 1)
+        hub.calibrate("imu", smoothing=0.5)
+
+        first = hub.fuse({"imu": (1.0,)})
+        self.assertAlmostEqual(first.coordinates["imu"][0], 1.0)
+
+        second = hub.fuse({"imu": (0.0,)})
+        self.assertGreater(second.coordinates["imu"][0], 0.0)
+        self.assertLess(second.coordinates["imu"][0], 1.0)
+
+    def test_calibrate_rejects_invalid_smoothing(self) -> None:
+        hub = SensorFusionHub()
+        hub.register_channel("imu", 1)
+        with self.assertRaises(ValueError):
+            hub.calibrate("imu", smoothing=1.5)
+        with self.assertRaises(ValueError):
+            hub.calibrate("imu", smoothing=-0.1)
 
 
 class DesireFieldTests(unittest.TestCase):
@@ -59,9 +79,9 @@ class DesireFieldTests(unittest.TestCase):
             }
         )
         hub = SensorFusionHub()
-        hub.register_channel("balance", lambda payload: (float(payload),))
-        hub.register_channel("power", lambda payload: (float(payload),))
-        frame = hub.fuse({"balance": 0.7, "power": 0.8})
+        hub.register_channel("balance", 1)
+        hub.register_channel("power", 1)
+        frame = hub.fuse({"balance": (0.7,), "power": (0.8,)})
 
         energy = field.energy(frame)
         self.assertGreater(energy.total, 0.0)
@@ -74,7 +94,7 @@ class TelemetryTests(unittest.TestCase):
     def test_observe_triggers_failsafe_on_instability(self) -> None:
         telemetry = PsiTelemetry(window=4, stability_threshold=0.8, failure_energy=10.0, norm_limit=2.0)
         hub = SensorFusionHub()
-        hub.register_channel("pose", lambda payload: tuple(float(v) for v in payload))
+        hub.register_channel("pose", 2)
         field = DesireLagrangianField({"pose": Desire(target_norm=0.0, tolerance=0.0, weight=1.0)})
 
         reports = []
@@ -94,11 +114,11 @@ class TelemetryTests(unittest.TestCase):
 class RoboticsRuntimeTests(unittest.TestCase):
     def test_step_integrates_policy_gradient(self) -> None:
         hub = SensorFusionHub()
-        hub.register_channel("imu", lambda payload: tuple(float(v) for v in payload))
+        hub.register_channel("imu", 3)
         field = DesireLagrangianField({"imu": Desire(target_norm=0.0, tolerance=0.0, weight=1.0)})
         runtime = RoboticsRuntime(sensors=hub, desires=field, telemetry=PsiTelemetry())
-        policy = PolicyGradient()
-        runtime.attach_policy_gradient(policy)
+        controller = PolicyGradientController()
+        runtime.attach_policy_gradient(controller)
 
         result = runtime.step({"imu": (0.1, -0.2, 0.05)})
         self.assertFalse(result.halted)
@@ -108,7 +128,7 @@ class RoboticsRuntimeTests(unittest.TestCase):
 
     def test_step_emits_halt_on_failsafe(self) -> None:
         hub = SensorFusionHub()
-        hub.register_channel("imu", lambda payload: tuple(float(v) for v in payload))
+        hub.register_channel("imu", 3)
         field = DesireLagrangianField({"imu": Desire(target_norm=0.0, tolerance=0.0, weight=1.0)})
         telemetry = PsiTelemetry(window=2, stability_threshold=0.2, failure_energy=0.01, norm_limit=0.2)
         runtime = RoboticsRuntime(sensors=hub, desires=field, telemetry=telemetry)
