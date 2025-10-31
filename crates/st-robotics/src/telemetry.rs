@@ -45,7 +45,7 @@ impl PsiTelemetry {
         }
         self.history.push_back(energy.total);
 
-        let stability = if self.history.len() < 2 {
+        let mut stability = if self.history.len() < 2 {
             1.0
         } else {
             let mean = self.history.iter().copied().sum::<f32>() / self.history.len() as f32;
@@ -73,6 +73,14 @@ impl PsiTelemetry {
             let norm = values.iter().map(|value| value * value).sum::<f32>().sqrt();
             if norm > self.norm_limit {
                 anomalies.push("norm_overflow".to_string());
+            }
+        }
+        for (name, health) in &frame.health {
+            if health.stale {
+                anomalies.push(format!("stale:{name}"));
+            }
+            if health.stale {
+                stability *= 0.5;
             }
         }
         anomalies.sort();
@@ -130,5 +138,28 @@ mod tests {
             .anomalies
             .iter()
             .any(|tag| tag.contains("norm_overflow")));
+    }
+
+    #[test]
+    fn telemetry_marks_stale_channels() {
+        let mut hub = SensorFusionHub::new();
+        hub.register_channel_with_options("imu", 3, None, true, Some(0.001))
+            .unwrap();
+        let frame = hub.fuse(&std::collections::HashMap::new()).unwrap();
+        let mut desires = std::collections::HashMap::new();
+        desires.insert(
+            "imu".to_string(),
+            Desire {
+                target_norm: 0.0,
+                tolerance: 0.0,
+                weight: 1.0,
+            },
+        );
+        let field = DesireLagrangianField::new(desires);
+        let mut telemetry = PsiTelemetry::default();
+        let energy = field.energy(&frame);
+        let report = telemetry.observe(&frame, &energy);
+        assert!(report.anomalies.iter().any(|tag| tag.starts_with("stale:")));
+        assert!(report.stability < 1.0);
     }
 }

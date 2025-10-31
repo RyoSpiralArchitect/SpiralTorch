@@ -24,12 +24,23 @@ class ExponentialSmoother:
 
 
 @dataclass
+class ChannelHealth:
+    """Health metadata for a channel in a fused frame."""
+
+    stale: bool
+    optional: bool
+
+
+@dataclass
 class SensorChannel:
     """Descriptor for a registered sensor modality."""
 
     dimension: int
     bias: tuple[float, ...]
     scale: float
+    optional: bool = False
+    max_staleness: float | None = None
+    last_timestamp: float | None = None
     smoothers: list[ExponentialSmoother] = field(default_factory=list)
 
     def configure_smoothing(self, smoothing: float | None) -> None:
@@ -43,19 +54,33 @@ class SensorChannel:
             )
         self.smoothers = [ExponentialSmoother(alpha=alpha) for _ in range(self.dimension)]
 
-    def apply(self, payload: Sequence[float] | Iterable[float]) -> tuple[float, ...]:
+    def mark_staleness(self, now: float) -> bool:
+        if self.max_staleness is None:
+            return False
+        if self.last_timestamp is None:
+            return True
+        return (now - self.last_timestamp) > self.max_staleness
+
+    def apply(
+        self,
+        payload: Sequence[float] | Iterable[float],
+        *,
+        timestamp: float,
+    ) -> tuple[float, ...]:
         values = tuple(float(value) for value in payload)
         if len(values) != self.dimension:
             raise ValueError(
                 f"payload for channel must contain {self.dimension} values; got {len(values)}"
             )
+        stale = self.mark_staleness(timestamp)
         adjusted: list[float] = []
         for idx, value in enumerate(values):
             calibrated = (value - self.bias[idx]) * self.scale
             if idx < len(self.smoothers):
                 calibrated = self.smoothers[idx].update(calibrated)
             adjusted.append(calibrated)
-        return tuple(adjusted)
+        self.last_timestamp = timestamp
+        return tuple(adjusted), stale
 
 
 @dataclass
@@ -64,6 +89,7 @@ class FusedFrame:
 
     coordinates: dict[str, tuple[float, ...]]
     timestamp: float
+    health: dict[str, ChannelHealth]
 
     def norm(self, channel: str) -> float | None:
         vector = self.coordinates.get(channel)
@@ -118,16 +144,26 @@ class SensorFusionHub:
         self._channels: MutableMapping[str, SensorChannel] = {}
 
     def register_channel(
-        self, name: str, dimension: int, *, smoothing: float | None = None
+        self,
+        name: str,
+        dimension: int,
+        *,
+        smoothing: float | None = None,
+        optional: bool = False,
+        max_staleness: float | None = None,
     ) -> None:
         if name in self._channels:
             raise ValueError(f"channel {name!r} already registered")
         if dimension <= 0:
             raise ValueError("channel dimension must be positive")
+        if max_staleness is not None and max_staleness <= 0.0:
+            raise ValueError("staleness threshold must be positive")
         channel = SensorChannel(
             dimension=int(dimension),
             bias=tuple(0.0 for _ in range(dimension)),
             scale=1.0,
+            optional=bool(optional),
+            max_staleness=float(max_staleness) if max_staleness is not None else None,
         )
         if smoothing is not None:
             channel.configure_smoothing(smoothing)
@@ -158,13 +194,24 @@ class SensorFusionHub:
     def fuse(self, payloads: Mapping[str, Sequence[float] | Iterable[float]]) -> FusedFrame:
         if not self._channels:
             raise RuntimeError("no sensor channels registered")
+        now = time.time()
         coordinates: dict[str, tuple[float, ...]] = {}
-        for name, raw in payloads.items():
-            channel = self._channels.get(name)
-            if channel is None:
+        health: dict[str, ChannelHealth] = {}
+        for name, channel in self._channels.items():
+            raw = payloads.get(name)
+            if raw is None:
+                if not channel.optional:
+                    raise KeyError(f"payload for required channel {name!r} missing")
+                stale = channel.mark_staleness(now)
+                health[name] = ChannelHealth(stale=stale, optional=True)
+                continue
+            adjusted, stale = channel.apply(raw, timestamp=now)
+            coordinates[name] = adjusted
+            health[name] = ChannelHealth(stale=stale, optional=channel.optional)
+        for name in payloads:
+            if name not in self._channels:
                 raise KeyError(f"unknown channel {name!r}")
-            coordinates[name] = channel.apply(raw)
-        return FusedFrame(coordinates=coordinates, timestamp=time.time())
+        return FusedFrame(coordinates=coordinates, timestamp=now, health=health)
 
 
 @dataclass
@@ -210,6 +257,10 @@ class PsiTelemetry:
             norm = math.sqrt(sum(value * value for value in vector))
             if norm > self.norm_limit:
                 anomalies.append("norm_overflow")
+        for name, health in frame.health.items():
+            if health.stale:
+                anomalies.append(f"stale:{name}")
+                stability *= 0.5
         anomalies = sorted(set(anomalies))
         failsafe = any(tag.startswith("norm_overflow") for tag in anomalies) or (
             energy.total > self.failure_energy
@@ -257,6 +308,7 @@ class RoboticsRuntime:
         self.desires = desires
         self.telemetry = telemetry or PsiTelemetry()
         self._policy: PolicyGradientController | None = None
+        self._trajectory: deque[RuntimeStep] | None = None
 
     def attach_policy_gradient(self, controller: PolicyGradientController) -> None:
         self._policy = controller
@@ -270,10 +322,36 @@ class RoboticsRuntime:
             commands.update(self._policy.update(energy, report))
         if report.failsafe:
             commands["halt"] = 1.0
-        return RuntimeStep(frame=frame, energy=energy, telemetry=report, commands=commands, halted=report.failsafe)
+        step = RuntimeStep(
+            frame=frame,
+            energy=energy,
+            telemetry=report,
+            commands=commands,
+            halted=report.failsafe,
+        )
+        if self._trajectory is not None:
+            self._trajectory.append(step)
+        return step
+
+    def enable_recording(self, capacity: int) -> None:
+        cap = max(int(capacity), 1)
+        self._trajectory = deque(maxlen=cap)
+
+    def recording_len(self) -> int:
+        if self._trajectory is None:
+            return 0
+        return len(self._trajectory)
+
+    def drain_trajectory(self) -> list[RuntimeStep]:
+        if self._trajectory is None:
+            return []
+        result = list(self._trajectory)
+        self._trajectory.clear()
+        return result
 
 
 __all__ = [
+    "ChannelHealth",
     "Desire",
     "DesireLagrangianField",
     "EnergyReport",

@@ -1,13 +1,14 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict};
+use pyo3::types::{PyAny, PyDict, PyList};
 use pyo3::PyRef;
 use std::collections::HashMap;
 use std::time::UNIX_EPOCH;
 
 use st_robotics::{
-    Desire, DesireLagrangianField, EnergyReport, FusedFrame, PolicyGradientController,
-    PsiTelemetry, RoboticsError, RoboticsRuntime, RuntimeStep, SensorFusionHub, TelemetryReport,
+    ChannelHealth, Desire, DesireLagrangianField, EnergyReport, FusedFrame,
+    PolicyGradientController, PsiTelemetry, RoboticsError, RoboticsRuntime, RuntimeStep,
+    SensorFusionHub, TelemetryReport,
 };
 
 fn robotics_err_to_py(err: RoboticsError) -> PyErr {
@@ -43,15 +44,17 @@ impl PySensorFusionHub {
         }
     }
 
-    #[pyo3(signature = (name, dimension, smoothing=None))]
+    #[pyo3(signature = (name, dimension, smoothing=None, optional=false, max_staleness=None))]
     pub fn register_channel(
         &mut self,
         name: &str,
         dimension: usize,
         smoothing: Option<f32>,
+        optional: bool,
+        max_staleness: Option<f32>,
     ) -> PyResult<()> {
         self.inner
-            .register_channel_with_smoothing(name, dimension, smoothing)
+            .register_channel_with_options(name, dimension, smoothing, optional, max_staleness)
             .map_err(robotics_err_to_py)
     }
 
@@ -113,6 +116,39 @@ impl PyFusedFrame {
             Ok(duration) => duration.as_secs_f64(),
             Err(_) => 0.0,
         }
+    }
+
+    #[getter]
+    pub fn health(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        for (key, health) in &self.inner.health {
+            dict.set_item(
+                key,
+                PyChannelHealth {
+                    inner: health.clone(),
+                },
+            )?;
+        }
+        Ok(dict.into_py(py))
+    }
+}
+
+#[pyclass(module = "spiraltorch.robotics", name = "ChannelHealth")]
+#[derive(Clone, Debug)]
+pub(crate) struct PyChannelHealth {
+    inner: ChannelHealth,
+}
+
+#[pymethods]
+impl PyChannelHealth {
+    #[getter]
+    pub fn stale(&self) -> bool {
+        self.inner.stale
+    }
+
+    #[getter]
+    pub fn optional(&self) -> bool {
+        self.inner.optional
     }
 }
 
@@ -309,6 +345,23 @@ impl PyRoboticsRuntime {
         let step = self.inner.step(map).map_err(robotics_err_to_py)?;
         Ok(PyRuntimeStep { inner: step })
     }
+
+    pub fn enable_recording(&mut self, capacity: usize) {
+        self.inner.enable_recording(capacity);
+    }
+
+    pub fn recording_len(&self) -> usize {
+        self.inner.recording_len()
+    }
+
+    pub fn drain_trajectory(&mut self, py: Python<'_>) -> PyResult<PyObject> {
+        let steps = self.inner.drain_trajectory();
+        let list = PyList::empty_bound(py);
+        for step in steps {
+            list.append(PyRuntimeStep { inner: step })?;
+        }
+        Ok(list.into_py(py))
+    }
 }
 
 #[pyclass(module = "spiraltorch.robotics", name = "RuntimeStep")]
@@ -359,6 +412,7 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
     let module = PyModule::new_bound(py, "robotics")?;
     module.add_class::<PySensorFusionHub>()?;
     module.add_class::<PyFusedFrame>()?;
+    module.add_class::<PyChannelHealth>()?;
     module.add_class::<PyDesire>()?;
     module.add_class::<PyDesireLagrangianField>()?;
     module.add_class::<PyEnergyReport>()?;

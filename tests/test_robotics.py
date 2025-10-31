@@ -30,6 +30,7 @@ PsiTelemetry = robotics.PsiTelemetry
 RoboticsRuntime = robotics.RoboticsRuntime
 SensorFusionHub = robotics.SensorFusionHub
 PolicyGradientController = robotics.PolicyGradientController
+ChannelHealth = robotics.ChannelHealth
 
 
 class SensorFusionHubTests(unittest.TestCase):
@@ -48,6 +49,9 @@ class SensorFusionHubTests(unittest.TestCase):
         self.assertTrue(
             all(math.isclose(value, expected) for value, expected in zip(imu_vector, (0.2, 0.6, 0.4)))
         )
+        self.assertIn("camera", frame.health)
+        self.assertFalse(frame.health["camera"].stale)
+        self.assertFalse(frame.health["imu"].stale)
 
     def test_smoothing_filters_noise(self) -> None:
         hub = SensorFusionHub()
@@ -59,6 +63,20 @@ class SensorFusionHubTests(unittest.TestCase):
         value = second.coordinates["imu"][0]
         self.assertGreater(value, 0.0)
         self.assertLess(value, 1.0)
+        self.assertFalse(second.health["imu"].stale)
+
+    def test_optional_channel_reports_stale(self) -> None:
+        hub = SensorFusionHub()
+        hub.register_channel("camera", 2, optional=True, max_staleness=0.001)
+        frame = hub.fuse({})
+        self.assertTrue(frame.health["camera"].optional)
+        self.assertTrue(frame.health["camera"].stale)
+
+    def test_missing_required_channel_raises(self) -> None:
+        hub = SensorFusionHub()
+        hub.register_channel("imu", 3)
+        with self.assertRaises(KeyError):
+            hub.fuse({})
 
 
 class DesireFieldTests(unittest.TestCase):
@@ -101,6 +119,15 @@ class TelemetryTests(unittest.TestCase):
         self.assertTrue(any(report.failsafe for report in reports))
         self.assertTrue(any("norm_overflow" in report.anomalies for report in reports))
 
+    def test_observe_flags_stale_channels(self) -> None:
+        telemetry = PsiTelemetry()
+        hub = SensorFusionHub()
+        hub.register_channel("depth", 1, optional=True, max_staleness=0.001)
+        frame = hub.fuse({})
+        field = DesireLagrangianField({})
+        report = telemetry.observe(frame, field.energy(frame))
+        self.assertTrue(any(tag.startswith("stale:") for tag in report.anomalies))
+
 
 class RoboticsRuntimeTests(unittest.TestCase):
     def test_step_integrates_policy_gradient(self) -> None:
@@ -127,6 +154,20 @@ class RoboticsRuntimeTests(unittest.TestCase):
         result = runtime.step({"imu": (1.0, 1.0, 1.0)})
         self.assertTrue(result.halted)
         self.assertIn("halt", result.commands)
+
+    def test_recording_collects_recent_steps(self) -> None:
+        hub = SensorFusionHub()
+        hub.register_channel("imu", 3)
+        field = DesireLagrangianField({"imu": Desire(target_norm=0.0, tolerance=0.0, weight=1.0)})
+        runtime = RoboticsRuntime(sensors=hub, desires=field, telemetry=PsiTelemetry())
+        runtime.enable_recording(2)
+        runtime.step({"imu": (0.1, 0.0, 0.0)})
+        runtime.step({"imu": (0.2, 0.0, 0.0)})
+        runtime.step({"imu": (0.3, 0.0, 0.0)})
+        self.assertEqual(runtime.recording_len(), 2)
+        trajectory = runtime.drain_trajectory()
+        self.assertEqual(len(trajectory), 2)
+        self.assertEqual(runtime.recording_len(), 0)
 
 
 if __name__ == "__main__":

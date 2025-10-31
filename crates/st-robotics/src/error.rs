@@ -11,12 +11,16 @@ pub enum RoboticsError {
     InvalidDimension { channel: String },
     /// Invalid smoothing coefficient provided for a channel.
     InvalidSmoothingCoefficient { channel: String, alpha: f32 },
+    /// Invalid staleness configuration provided for a channel.
+    InvalidStalenessThreshold { channel: String, threshold: f32 },
     /// Payload provided with incorrect dimensionality for a channel.
     DimensionMismatch {
         channel: String,
         expected: usize,
         actual: usize,
     },
+    /// Required payload for a channel was missing during fusion.
+    MissingRequiredPayload { channel: String },
     /// Calibration bias did not match the channel dimensionality.
     BiasLengthMismatch {
         channel: String,
@@ -40,6 +44,10 @@ impl fmt::Display for RoboticsError {
                 f,
                 "smoothing coefficient for channel '{channel}' must be in the range (0, 1]; got {alpha}"
             ),
+            Self::InvalidStalenessThreshold { channel, threshold } => write!(
+                f,
+                "staleness threshold for channel '{channel}' must be positive; got {threshold}"
+            ),
             Self::DimensionMismatch {
                 channel,
                 expected,
@@ -56,6 +64,9 @@ impl fmt::Display for RoboticsError {
                 f,
                 "bias for channel '{channel}' must contain {expected} values (got {actual})",
             ),
+            Self::MissingRequiredPayload { channel } => {
+                write!(f, "payload for required channel '{channel}' is missing")
+            }
         }
     }
 }

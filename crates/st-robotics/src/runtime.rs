@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use crate::desire::{DesireLagrangianField, EnergyReport};
 use crate::error::RoboticsError;
@@ -22,6 +22,7 @@ pub struct RoboticsRuntime {
     desires: DesireLagrangianField,
     telemetry: PsiTelemetry,
     policy: Option<PolicyGradientController>,
+    recorder: Option<TrajectoryRecorder>,
 }
 
 impl RoboticsRuntime {
@@ -35,6 +36,7 @@ impl RoboticsRuntime {
             desires,
             telemetry,
             policy: None,
+            recorder: None,
         }
     }
 
@@ -57,13 +59,17 @@ impl RoboticsRuntime {
         if halted {
             commands.insert("halt".to_string(), 1.0);
         }
-        Ok(RuntimeStep {
+        let step = RuntimeStep {
             frame,
             energy,
             telemetry: report,
             commands,
             halted,
-        })
+        };
+        if let Some(recorder) = &mut self.recorder {
+            recorder.push(&step);
+        }
+        Ok(step)
     }
 
     pub fn sensors(&self) -> &SensorFusionHub {
@@ -80,6 +86,54 @@ impl RoboticsRuntime {
 
     pub fn telemetry(&self) -> &PsiTelemetry {
         &self.telemetry
+    }
+
+    pub fn enable_recording(&mut self, capacity: usize) {
+        self.recorder = Some(TrajectoryRecorder::new(capacity.max(1)));
+    }
+
+    pub fn recording_len(&self) -> usize {
+        self.recorder.as_ref().map(|rec| rec.len()).unwrap_or(0)
+    }
+
+    pub fn drain_trajectory(&mut self) -> Vec<RuntimeStep> {
+        if let Some(recorder) = &mut self.recorder {
+            recorder.drain()
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+/// Circular buffer retaining the most recent runtime steps for training datasets.
+#[derive(Debug, Clone)]
+pub struct TrajectoryRecorder {
+    capacity: usize,
+    buffer: VecDeque<RuntimeStep>,
+}
+
+impl TrajectoryRecorder {
+    pub fn new(capacity: usize) -> Self {
+        let capacity = capacity.max(1);
+        Self {
+            capacity,
+            buffer: VecDeque::with_capacity(capacity),
+        }
+    }
+
+    fn push(&mut self, step: &RuntimeStep) {
+        if self.buffer.len() == self.capacity {
+            self.buffer.pop_front();
+        }
+        self.buffer.push_back(step.clone());
+    }
+
+    pub fn len(&self) -> usize {
+        self.buffer.len()
+    }
+
+    pub fn drain(&mut self) -> Vec<RuntimeStep> {
+        self.buffer.drain(..).collect()
     }
 }
 
@@ -109,5 +163,33 @@ mod tests {
         assert!(!step.halted);
         assert!(step.commands.contains_key("learning_rate"));
         assert!(step.commands.contains_key("gauge"));
+    }
+
+    #[test]
+    fn runtime_records_steps_for_training() {
+        let mut hub = SensorFusionHub::new();
+        hub.register_channel("imu", 3).unwrap();
+        let desires = DesireLagrangianField::new(HashMap::from([(
+            "imu".to_string(),
+            Desire {
+                target_norm: 0.0,
+                tolerance: 0.0,
+                weight: 1.0,
+            },
+        )]));
+        let telemetry = PsiTelemetry::default();
+        let mut runtime = RoboticsRuntime::new(hub, desires, telemetry);
+        runtime.enable_recording(3);
+        for value in [0.1, 0.2, 0.3, 0.4] {
+            runtime
+                .step(HashMap::from([("imu".to_string(), vec![value, 0.0, 0.0])]))
+                .unwrap();
+        }
+        assert_eq!(runtime.recording_len(), 3);
+        let trajectory = runtime.drain_trajectory();
+        assert_eq!(trajectory.len(), 3);
+        assert!(trajectory
+            .iter()
+            .all(|step| !step.commands.contains_key("halt")));
     }
 }
