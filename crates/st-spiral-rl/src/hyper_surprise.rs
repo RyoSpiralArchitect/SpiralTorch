@@ -73,6 +73,16 @@ impl LossStdTrigger {
         self
     }
 
+    pub fn with_geometry_injection(mut self, eta: f32, curvature: f32) -> Self {
+        if eta.is_finite() && eta >= 0.0 {
+            self.geometry_eta = eta;
+        }
+        if curvature.is_finite() {
+            self.geometry_curvature = curvature;
+        }
+        self
+    }
+
     /// Observes the latest loss standard deviation and returns a suggested
     /// injection ratio when the measurement exceeds the configured threshold.
     pub fn observe(&mut self, std: f32) -> Option<f32> {
@@ -307,6 +317,38 @@ impl HyperSurpriseController {
                 gauge,
                 signal: None,
             }
+        }
+    }
+
+    fn pop_ratio(&mut self, candidate: Option<f32>) -> Option<f32> {
+        let accepted = if let Some(ratio) = candidate {
+            if self.cooldown == 0 {
+                self.cooldown = self.config.cooldown_steps.saturating_add(1);
+                ratio.max(0.0)
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        };
+
+        if self.cooldown > 0 {
+            self.cooldown = self.cooldown.saturating_sub(1);
+        }
+
+        let smoothing = self.config.ratio_smoothing.clamp(0.0, 1.0);
+        if smoothing > 0.0 {
+            self.smoothed_ratio =
+                smoothing * self.smoothed_ratio + (1.0 - smoothing) * accepted;
+        } else {
+            self.smoothed_ratio = accepted;
+        }
+
+        if self.smoothed_ratio > 1e-6 {
+            Some(self.smoothed_ratio)
+        } else {
+            self.smoothed_ratio = 0.0;
+            None
         }
     }
 }
