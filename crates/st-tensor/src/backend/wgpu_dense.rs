@@ -3255,35 +3255,6 @@ impl GpuContext {
     }
 
     #[cfg(any())]
-    fn softmax_zspace_bind_group(
-        &self,
-        output: &Buffer,
-        metrics: &Buffer,
-        params: &Buffer,
-    ) -> Option<BindGroup> {
-        let layout = self.softmax_zspace_layout.as_ref()?;
-        let descriptor = wgpu::BindGroupDescriptor {
-            label: Some("st.tensor.wgpu_dense.softmax_zspace.bind_group"),
-            layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: output.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: metrics.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: params.as_entire_binding(),
-                },
-            ],
-        };
-        Some(self.device().create_bind_group(&descriptor))
-    }
-
-    #[cfg(any())]
     fn project_softmax_zspace(
         &self,
         rows: usize,

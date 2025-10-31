@@ -16,6 +16,7 @@ pub struct LossStdTrigger {
     ema: f32,
     warmup: usize,
     seen: usize,
+    deadband: f32,
     geometry_eta: f32,
     geometry_curvature: f32,
 }
@@ -30,6 +31,7 @@ impl LossStdTrigger {
             ema: 0.0,
             warmup: 4,
             seen: 0,
+            deadband: 0.0,
             geometry_eta: 0.0,
             geometry_curvature: -1.0,
         }
@@ -104,6 +106,10 @@ impl LossStdTrigger {
             return None;
         }
         let mut ratio = (self.ema / self.std_threshold) - 1.0;
+        if ratio <= self.deadband {
+            return None;
+        }
+        ratio -= self.deadband;
         if self.geometry_eta > 0.0 {
             let curvature_boost = self.geometry_curvature.tanh().abs() as f32;
             ratio *= 1.0 + self.geometry_eta * 0.5 + curvature_boost;
@@ -123,6 +129,8 @@ pub struct HyperSurpriseConfig {
     pub lr_floor: f32,
     pub smoothing: f32,
     pub reversion: f32,
+    pub cooldown_steps: usize,
+    pub ratio_smoothing: f32,
 }
 
 impl HyperSurpriseConfig {
@@ -181,6 +189,18 @@ impl HyperSurpriseConfig {
         }
         self
     }
+
+    pub fn with_cooldown_steps(mut self, steps: usize) -> Self {
+        self.cooldown_steps = steps;
+        self
+    }
+
+    pub fn with_ratio_smoothing(mut self, smoothing: f32) -> Self {
+        if smoothing.is_finite() {
+            self.ratio_smoothing = smoothing.clamp(0.0, 1.0);
+        }
+        self
+    }
 }
 
 impl Default for HyperSurpriseConfig {
@@ -194,6 +214,8 @@ impl Default for HyperSurpriseConfig {
             lr_floor: 1e-6,
             smoothing: 0.0,
             reversion: 0.35,
+            cooldown_steps: 0,
+            ratio_smoothing: 0.0,
         }
     }
 }
@@ -225,6 +247,8 @@ pub struct HyperSurpriseController {
     config: HyperSurpriseConfig,
     last_signal: Option<HyperSurpriseSignal>,
     last_gauge: f32,
+    cooldown: usize,
+    smoothed_ratio: f32,
 }
 
 impl HyperSurpriseController {
@@ -234,6 +258,8 @@ impl HyperSurpriseController {
             config,
             last_signal: None,
             last_gauge: 1.0,
+            cooldown: 0,
+            smoothed_ratio: 0.0,
         }
     }
 
@@ -335,8 +361,7 @@ impl HyperSurpriseController {
 
         let smoothing = self.config.ratio_smoothing.clamp(0.0, 1.0);
         if smoothing > 0.0 {
-            self.smoothed_ratio =
-                smoothing * self.smoothed_ratio + (1.0 - smoothing) * accepted;
+            self.smoothed_ratio = smoothing * self.smoothed_ratio + (1.0 - smoothing) * accepted;
         } else {
             self.smoothed_ratio = accepted;
         }

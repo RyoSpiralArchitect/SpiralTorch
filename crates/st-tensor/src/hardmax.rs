@@ -272,8 +272,7 @@ impl<'a> HardmaxEinsum<'a> {
                 if should_parallelize() {
                     parallelized = true;
                     let reductions = AtomicUsize::new(0);
-                    self
-                        .input
+                    self.input
                         .par_chunks(self.cols)
                         .zip(softmax.par_chunks_mut(self.cols))
                         .zip(hardmax.par_chunks_mut(self.cols))
@@ -306,8 +305,7 @@ impl<'a> HardmaxEinsum<'a> {
                 if should_parallelize() {
                     parallelized = true;
                     let reductions = AtomicUsize::new(0);
-                    self
-                        .input
+                    self.input
                         .par_chunks(self.cols)
                         .zip(hardmax.par_chunks_mut(self.cols))
                         .for_each(|(input_row, hard_row)| {
@@ -320,8 +318,8 @@ impl<'a> HardmaxEinsum<'a> {
                         let offset = row * self.cols;
                         let input_row = &self.input[offset..offset + self.cols];
                         let hard_row = &mut hardmax[offset..offset + self.cols];
-                        dp_reductions = dp_reductions
-                            .saturating_add(compute_mask_row(input_row, hard_row));
+                        dp_reductions =
+                            dp_reductions.saturating_add(compute_mask_row(input_row, hard_row));
                     }
                 }
 
