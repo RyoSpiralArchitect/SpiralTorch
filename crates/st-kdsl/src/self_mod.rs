@@ -40,6 +40,9 @@ pub struct SelfRewriteEngine<G: AiHintGenerator> {
     cluster_decay: f32,
     quality_model: HintQualityModel,
     diversity: DiversityGovernor,
+    transitions: HintTransitionGraph,
+    last_hint_key: Option<String>,
+    last_ctx_signature: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -100,6 +103,166 @@ struct DiversityGovernor {
     cooldown_left: u32,
     debt: u32,
     history: VecDeque<f32>,
+}
+
+#[derive(Clone, Debug)]
+struct TransitionEdge {
+    to: String,
+    strength: f32,
+    total_gain: f32,
+    best_gain: f32,
+    hits: u32,
+}
+
+impl TransitionEdge {
+    fn new(to: String, signal: f32, gain: f32) -> Self {
+        let gain = gain.max(0.0);
+        Self {
+            to,
+            strength: signal,
+            total_gain: gain,
+            best_gain: gain,
+            hits: if gain > 0.0 { 1 } else { 0 },
+        }
+    }
+
+    fn mean_gain(&self) -> f32 {
+        if self.hits == 0 {
+            0.0
+        } else {
+            self.total_gain / self.hits as f32
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct HintTransitionGraph {
+    edges: HashMap<String, Vec<TransitionEdge>>,
+    decay: f32,
+    fanout: usize,
+}
+
+impl Default for HintTransitionGraph {
+    fn default() -> Self {
+        Self {
+            edges: HashMap::new(),
+            decay: 0.88,
+            fanout: 4,
+        }
+    }
+}
+
+impl HintTransitionGraph {
+    const ROOT: &'static str = "__root__";
+
+    fn observe(
+        &mut self,
+        from: Option<&str>,
+        to: &str,
+        gain: f32,
+        affinity: f32,
+        ctx_affinity: f32,
+    ) {
+        let gain = gain.max(0.0);
+        let from_key = from.unwrap_or(Self::ROOT);
+        let signal = (gain + 0.05) * (1.0 + affinity * 0.5 + ctx_affinity * 0.5);
+        let edges = self.edges.entry(from_key.to_string()).or_default();
+        if let Some(edge) = edges.iter_mut().find(|edge| edge.to == to) {
+            edge.strength = (edge.strength * self.decay + signal).min(3.5);
+            edge.total_gain = edge.total_gain * self.decay + gain;
+            edge.best_gain = edge.best_gain.max(gain);
+            edge.hits = edge.hits.saturating_add(1);
+        } else {
+            edges.push(TransitionEdge::new(to.to_string(), signal.min(3.5), gain));
+        }
+        edges.sort_by(|a, b| {
+            b.strength
+                .partial_cmp(&a.strength)
+                .unwrap_or(Ordering::Equal)
+        });
+        while edges.len() > self.fanout {
+            edges.pop();
+        }
+    }
+
+    fn boost(&self, from: Option<&str>, to: &str) -> f32 {
+        let from_key = from.unwrap_or(Self::ROOT);
+        self.edges
+            .get(from_key)
+            .and_then(|edges| edges.iter().find(|edge| edge.to == to))
+            .map(|edge| {
+                let mean = edge.mean_gain().min(1.5);
+                (edge.strength * (1.0 + mean * 0.35)).min(4.0)
+            })
+            .unwrap_or(0.0)
+    }
+
+    fn penalize_target(&mut self, target: &str) {
+        for edges in self.edges.values_mut() {
+            if let Some(edge) = edges.iter_mut().find(|edge| edge.to == target) {
+                edge.strength *= 0.5;
+                edge.total_gain *= self.decay;
+            }
+        }
+    }
+
+    fn decay(&mut self) {
+        let decay = self.decay;
+        for edges in self.edges.values_mut() {
+            for edge in edges.iter_mut() {
+                edge.strength *= decay;
+                edge.total_gain *= decay;
+            }
+            edges.retain(|edge| edge.strength > 1e-4 || edge.total_gain > 1e-4);
+        }
+        self.edges.retain(|_, edges| !edges.is_empty());
+    }
+
+    fn set_decay(&mut self, decay: f32) {
+        if decay.is_finite() && decay > 0.0 {
+            self.decay = decay.min(0.999);
+        }
+    }
+
+    fn set_fanout(&mut self, fanout: usize) {
+        let fanout = fanout.max(1);
+        self.fanout = fanout;
+        for edges in self.edges.values_mut() {
+            edges.sort_by(|a, b| {
+                b.strength
+                    .partial_cmp(&a.strength)
+                    .unwrap_or(Ordering::Equal)
+            });
+            while edges.len() > self.fanout {
+                edges.pop();
+            }
+        }
+    }
+
+    fn snapshots(&self) -> Vec<HintTransitionSnapshot> {
+        let mut snapshots = Vec::new();
+        for (from, edges) in &self.edges {
+            if from == Self::ROOT {
+                continue;
+            }
+            for edge in edges {
+                snapshots.push(HintTransitionSnapshot {
+                    from: from.clone(),
+                    to: edge.to.clone(),
+                    strength: edge.strength,
+                    hits: edge.hits,
+                    best_gain: edge.best_gain,
+                    mean_gain: edge.mean_gain(),
+                });
+            }
+        }
+        snapshots.sort_by(|a, b| {
+            b.strength
+                .partial_cmp(&a.strength)
+                .unwrap_or(Ordering::Equal)
+        });
+        snapshots
+    }
 }
 
 impl Default for DiversityGovernor {
@@ -411,6 +574,17 @@ pub struct DiversitySnapshot {
     pub cooldown_left: u32,
 }
 
+/// Snapshot of learned transitions between cached hint sets.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HintTransitionSnapshot {
+    pub from: String,
+    pub to: String,
+    pub strength: f32,
+    pub hits: u32,
+    pub best_gain: f32,
+    pub mean_gain: f32,
+}
+
 impl<G: AiHintGenerator> SelfRewriteEngine<G> {
     /// Build a new engine with the supplied AI generator and configuration.
     pub fn new(generator: G, config: AiRewriteConfig) -> Self {
@@ -432,6 +606,9 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
             cluster_decay: 0.92,
             quality_model: HintQualityModel::default(),
             diversity: DiversityGovernor::default(),
+            transitions: HintTransitionGraph::default(),
+            last_hint_key: None,
+            last_ctx_signature: None,
         }
     }
 
@@ -513,6 +690,18 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         self
     }
 
+    /// Configure how quickly transition edges fade without reinforcement.
+    pub fn with_transition_decay(mut self, decay: f32) -> Self {
+        self.transitions.set_decay(decay);
+        self
+    }
+
+    /// Limit the number of high-energy transitions tracked per cached hint.
+    pub fn with_transition_fanout(mut self, fanout: usize) -> Self {
+        self.transitions.set_fanout(fanout);
+        self
+    }
+
     /// Returns the smoothed η̄ after the most recent rewrite.
     pub fn smoothed_eta(&self) -> Option<f32> {
         if self.eta_history.is_empty() {
@@ -582,6 +771,11 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         self.diversity.snapshot()
     }
 
+    /// Exposes the learned transitions between cached hint sets.
+    pub fn transition_snapshots(&self) -> Vec<HintTransitionSnapshot> {
+        self.transitions.snapshots()
+    }
+
     /// Attempt a self-rewrite. Returns `Ok(None)` when no rewrite is required.
     pub fn tick(
         &mut self,
@@ -626,14 +820,9 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         let event = self.eval_hints(base_src, ctx, &hints)?;
         self.record_eta(event.eta_bar);
         self.push_cache(event.eta_bar, event.hints.clone(), ctx_signature);
-        let gain = self.record_hint_success(
-            &event.hints,
-            observed_eta,
-            event.eta_bar,
-            1.0,
-            ctx_signature,
-            None,
-        );
+        let key = Self::hint_key(&event.hints);
+        let gain =
+            self.record_hint_success(&key, observed_eta, event.eta_bar, 1.0, ctx_signature, None);
         self.diversity.record_success(gain, true);
         self.auto_tune_eta();
 
@@ -687,7 +876,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
                 continue;
             }
             let gain = self.record_hint_success(
-                &event.hints,
+                &entry.key,
                 observed_eta,
                 event.eta_bar,
                 effective_affinity,
@@ -756,7 +945,24 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         let bridge = self.cluster_bridge_affinity(entry.ctx_signature, ctx_signature);
         let decay = self.staleness_decay(entry.staleness);
         let cluster_bonus = 1.0 + self.cluster_prediction(ctx_signature);
-        (entry.eta + score) * affinity.max(bridge) * decay * cluster_bonus
+        let transition_bonus = 1.0
+            + self
+                .transitions
+                .boost(self.last_hint_key.as_deref(), &entry.key)
+                * 0.25;
+        let root_bonus = 1.0 + self.transitions.boost(None, &entry.key) * 0.15;
+        let ctx_bonus = if let Some(last_ctx) = self.last_ctx_signature {
+            1.0 + self.context_affinity(last_ctx, ctx_signature) * 0.25
+        } else {
+            1.0
+        };
+        (entry.eta + score)
+            * affinity.max(bridge)
+            * decay
+            * cluster_bonus
+            * transition_bonus
+            * root_bonus
+            * ctx_bonus
     }
 
     fn eval_hints(
@@ -816,7 +1022,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
 
     fn record_hint_success(
         &mut self,
-        hints: &[HeuristicHint],
+        key: &str,
         observed: f32,
         eta: f32,
         affinity: f32,
@@ -824,9 +1030,8 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         staleness: Option<u32>,
     ) -> f32 {
         let gain = (eta - observed).max(0.0);
-        let key = Self::hint_key(hints);
         let (mean_gain, best_gain, last_affinity) = {
-            let entry = self.hint_stats.entry(key).or_default();
+            let entry = self.hint_stats.entry(key.to_string()).or_default();
             entry.uses += 1;
             entry.total_gain += gain;
             entry.best_gain = entry.best_gain.max(gain);
@@ -839,6 +1044,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         let staleness = staleness.unwrap_or(0);
         self.quality_model
             .observe(gain, mean_gain, best_gain, last_affinity, staleness, true);
+        self.observe_transition(key, ctx_signature, gain, last_affinity);
         gain
     }
 
@@ -861,6 +1067,23 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
             .observe(gain, mean, best, affinity, staleness, false);
         self.degrade_cache_entry(&key);
         self.diversity.record_failure();
+        self.transitions.penalize_target(&key);
+    }
+
+    fn observe_transition(&mut self, key: &str, ctx_signature: u64, gain: f32, affinity: f32) {
+        let ctx_affinity = self
+            .last_ctx_signature
+            .map(|prev| self.context_affinity(prev, ctx_signature))
+            .unwrap_or(0.0);
+        let affinity = affinity.max(0.0);
+        if let Some(prev) = self.last_hint_key.as_deref() {
+            self.transitions
+                .observe(Some(prev), key, gain, affinity, ctx_affinity);
+        }
+        self.transitions
+            .observe(None, key, gain, affinity, ctx_affinity);
+        self.last_hint_key = Some(key.to_string());
+        self.last_ctx_signature = Some(ctx_signature);
     }
 
     fn auto_tune_eta(&mut self) {
@@ -890,6 +1113,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         self.hint_cache
             .retain(|entry| entry.staleness <= max_staleness);
         self.decay_clusters();
+        self.transitions.decay();
     }
 
     fn degrade_cache_entry(&mut self, key: &str) {
@@ -1362,5 +1586,75 @@ mod tests {
         engine.tick("algo: 1;", &ctx, None, 0.9).expect("tick");
 
         assert!(engine.hint_cache.is_empty(), "stale entries were purged");
+    }
+
+    #[test]
+    fn transitions_prioritise_followups() {
+        let mut engine = SelfRewriteEngine::new(TemplateAiGenerator, AiRewriteConfig::new("mock"))
+            .with_eta_floor(0.45)
+            .with_transition_decay(0.95)
+            .with_transition_fanout(4);
+        let ctx = sample_ctx();
+        let signature = SelfRewriteEngine::<TemplateAiGenerator>::ctx_signature(&ctx);
+
+        let warmup_hint = HeuristicHint::new("radix", "radix + 1", 0.82, "true");
+        let followup_hint = HeuristicHint::new("kc", "kc + 32", 0.78, "true");
+        let alternative_hint = HeuristicHint::new("segments", "segments + 1", 0.72, "true");
+
+        let warmup_key = SelfRewriteEngine::<TemplateAiGenerator>::hint_key(&[warmup_hint.clone()]);
+        let followup_key =
+            SelfRewriteEngine::<TemplateAiGenerator>::hint_key(&[followup_hint.clone()]);
+        let alternative_key =
+            SelfRewriteEngine::<TemplateAiGenerator>::hint_key(&[alternative_hint.clone()]);
+
+        engine.record_hint_success(&warmup_key, 0.2, 0.68, 0.9, signature, None);
+        engine.record_hint_success(&followup_key, 0.25, 0.72, 0.85, signature, None);
+
+        engine.last_hint_key = Some(warmup_key.clone());
+        engine.last_ctx_signature = Some(signature);
+
+        engine.hint_stats.insert(
+            alternative_key.clone(),
+            HintPerformance {
+                uses: 1,
+                failures: 0,
+                total_gain: 0.05,
+                best_gain: 0.05,
+                last_eta: 0.35,
+                last_affinity: 0.2,
+                last_gain: 0.05,
+            },
+        );
+
+        let followup_entry = CachedHint {
+            key: followup_key.clone(),
+            hints: vec![followup_hint],
+            eta: 0.7,
+            ctx_signature: signature,
+            staleness: 0,
+        };
+        let alternative_entry = CachedHint {
+            key: alternative_key.clone(),
+            hints: vec![alternative_hint],
+            eta: 0.74,
+            ctx_signature: signature,
+            staleness: 0,
+        };
+
+        let followup_score = engine.cache_priority(&followup_entry, signature);
+        let alternative_score = engine.cache_priority(&alternative_entry, signature);
+
+        assert!(
+            followup_score > alternative_score,
+            "transition energy should favour cached followups",
+        );
+
+        let snapshots = engine.transition_snapshots();
+        assert!(
+            snapshots
+                .iter()
+                .any(|snap| snap.from == warmup_key && snap.to == followup_key),
+            "learned transitions should surface in telemetry",
+        );
     }
 }

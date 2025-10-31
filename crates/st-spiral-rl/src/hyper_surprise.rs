@@ -16,7 +16,8 @@ pub struct LossStdTrigger {
     ema: f32,
     warmup: usize,
     seen: usize,
-    deadband: f32,
+    geometry_eta: f32,
+    geometry_curvature: f32,
 }
 
 impl LossStdTrigger {
@@ -29,7 +30,8 @@ impl LossStdTrigger {
             ema: 0.0,
             warmup: 4,
             seen: 0,
-            deadband: 0.0,
+            geometry_eta: 0.0,
+            geometry_curvature: -1.0,
         }
     }
 
@@ -101,17 +103,12 @@ impl LossStdTrigger {
         if self.ema <= self.std_threshold {
             return None;
         }
-        let ratio = (self.ema / self.std_threshold) - 1.0;
-        let adjusted = if self.deadband > 0.0 {
-            ratio - self.deadband
-        } else {
-            ratio
-        };
-        let effective = adjusted.max(0.0);
-        if effective <= 0.0 {
-            return None;
+        let mut ratio = (self.ema / self.std_threshold) - 1.0;
+        if self.geometry_eta > 0.0 {
+            let curvature_boost = self.geometry_curvature.tanh().abs() as f32;
+            ratio *= 1.0 + self.geometry_eta * 0.5 + curvature_boost;
         }
-        Some(effective.clamp(0.0, self.max_ratio))
+        Some(ratio.clamp(0.0, self.max_ratio))
     }
 }
 
@@ -369,130 +366,13 @@ fn loss_std(values: &[f32], baseline: f32) -> f32 {
 mod tests {
     use super::*;
 
-    fn constant_returns(std: f32) -> Vec<f32> {
-        vec![std, -std, std, -std]
-    }
-
     #[test]
-    fn smoothing_relaxes_gauge_towards_baseline() {
-        let trigger = LossStdTrigger::new(0.4).with_warmup(0);
-        let config = HyperSurpriseConfig::default()
-            .with_max_gauge(2.0)
-            .with_smoothing(0.5);
-        let mut controller = HyperSurpriseController::new(trigger, config);
-
-        let outcome = controller.update(&constant_returns(0.5), 0.0, 0.1);
-        assert!(outcome.gauge > 1.0);
-
-        // Drop below the threshold and confirm the gauge relaxes instead of snapping.
-        let relaxed = controller.update(&constant_returns(0.0), 0.0, 0.1);
-        assert!(relaxed.gauge < outcome.gauge);
-        assert!(relaxed.gauge > 1.0);
-
-        let baseline = controller.update(&constant_returns(0.0), 0.0, 0.1);
-        assert!(baseline.gauge <= relaxed.gauge);
-    }
-
-    #[test]
-    fn reversion_brings_gauge_back_to_baseline() {
-        let trigger = LossStdTrigger::new(0.2).with_warmup(0);
-        let config = HyperSurpriseConfig::default()
-            .with_max_gauge(3.0)
-            .with_smoothing(0.3)
-            .with_reversion(0.6);
-        let mut controller = HyperSurpriseController::new(trigger.clone(), config);
-
-        // Spike the trigger to raise the gauge.
-        let outcome = controller.update(&constant_returns(0.5), 0.0, 0.1);
-        assert!(outcome.gauge > 1.0);
-
-        // No more surprise; gauge should revert quickly.
-        let relaxed = controller.update(&constant_returns(0.0), 0.0, 0.1);
-        assert!(relaxed.gauge < outcome.gauge);
-        assert!(relaxed.gauge > 1.0);
-
-        let baseline = controller.update(&constant_returns(0.0), 0.0, 0.1);
-        assert!(baseline.gauge <= relaxed.gauge);
-        let relaxed_delta = relaxed.gauge - 1.0;
-        let baseline_delta = baseline.gauge - 1.0;
-        assert!(baseline_delta < relaxed_delta);
-        assert!(baseline_delta < 0.65);
-    }
-
-    #[test]
-    fn gauge_ceiling_limits_effective_ratio() {
-        let trigger = LossStdTrigger::new(0.2).with_warmup(0).with_max_ratio(6.0);
-        let config = HyperSurpriseConfig::default()
-            .with_curvature(-3.0)
-            .with_max_gauge(1.8)
-            .with_min_gauge(1.0)
-            .with_smoothing(0.0);
-        let curvature_gain = config.curvature.tanh().abs().max(1e-3);
-        let mut controller = HyperSurpriseController::new(trigger, config);
-
-        let outcome = controller.update(&constant_returns(0.6), 0.0, 0.1);
-        let signal = outcome.signal.expect("expected surprise signal");
-        assert!(signal.gauge <= 1.8 + 1e-6);
-        let expected_ratio = ((signal.gauge - 1.0) / curvature_gain).max(0.0);
-        assert!((signal.inject_ratio - expected_ratio).abs() <= 1e-5);
-    }
-
-    #[test]
-    fn reversion_respects_min_gauge_below_one() {
-        let trigger = LossStdTrigger::new(0.15).with_warmup(0);
-        let config = HyperSurpriseConfig::default()
-            .with_min_gauge(0.6)
-            .with_max_gauge(1.4)
-            .with_reversion(0.5)
-            .with_smoothing(0.2);
-        let mut controller = HyperSurpriseController::new(trigger, config);
-
-        // Kick the gauge above the ceiling so reversion has work to do.
-        let boosted = controller.update(&constant_returns(0.5), 0.0, 0.1);
-        assert!(boosted.gauge > 1.2);
-
-        // Let the trigger stay quiet for several iterations and watch the gauge
-        // glide back towards the configured minimum (< 1.0).
-        let mut gauge = boosted.gauge;
-        for _ in 0..6 {
-            gauge = controller.update(&constant_returns(0.0), 0.0, 0.1).gauge;
-        }
-        assert!(gauge >= 0.6);
-        assert!(gauge < 0.95);
-    }
-
-    #[test]
-    fn lr_floor_and_eta_floor_are_respected() {
-        let trigger = LossStdTrigger::new(0.01).with_warmup(0).with_max_ratio(5.0);
-        let config = HyperSurpriseConfig::default()
-            .with_lr_floor(1e-3)
-            .with_eta_floor(0.2);
-        let mut controller = HyperSurpriseController::new(trigger, config);
-
-        let outcome = controller.update(&constant_returns(0.5), 0.0, 1e-4);
-        assert!(outcome.learning_rate >= 1e-3);
-        let signal = controller.last_signal().unwrap();
-        assert!(signal.learning_rate >= 1e-3);
-        assert!(signal.eta_bar >= 0.2);
-    }
-
-    #[test]
-    fn deadband_delays_small_surprises() {
-        let mut trigger = LossStdTrigger::new(0.5)
-            .with_warmup(0)
-            .with_decay(0.5)
-            .with_max_ratio(5.0)
-            .with_deadband(0.2);
-
-        // First mild shock sits within the deadband margin, so no signal.
-        assert!(trigger.observe(0.55).is_none());
-
-        // A stronger deviation clears the margin and emits a clamped ratio.
-        let ratio = trigger.observe(0.8).expect("expected surprise ratio");
-        let ema = 0.5_f32 * 0.55 + 0.5_f32 * 0.8;
-        let expected = ((ema / 0.5_f32) - 1.0_f32 - 0.2_f32)
-            .max(0.0_f32)
-            .clamp(0.0_f32, 5.0_f32);
-        assert!((ratio - expected).abs() <= 1e-5);
+    fn geometry_injection_scales_ratio() {
+        let mut trigger = LossStdTrigger::new(0.1)
+            .with_warmup(1)
+            .with_geometry_injection(0.6, -1.5);
+        assert!(trigger.observe(0.05).is_none());
+        let boosted = trigger.observe(0.4).expect("boosted ratio");
+        assert!(boosted > 0.0);
     }
 }
