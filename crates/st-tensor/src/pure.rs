@@ -3715,6 +3715,13 @@ impl GradientSummary {
             negative_count: 0,
             near_zero_count: 0,
         }
+
+        self.min = min;
+        self.max = max;
+        self.positive_count = positive_count;
+        self.negative_count = negative_count;
+        self.near_zero_count = near_zero_count;
+        self
     }
 
     /// Attach support and sign statistics to an existing summary. When the
@@ -5207,6 +5214,53 @@ impl AmegaHypergrad {
         }
     }
 
+    /// Scales the accumulated gradient by `factor` while keeping the cached
+    /// summary in sync. Non-finite scaling factors reset the tape to a clean
+    /// state to avoid propagating NaNs or infinities through downstream
+    /// telemetry.
+    pub fn scale_gradient(&mut self, factor: f32) {
+        if !factor.is_finite() {
+            self.reset();
+            return;
+        }
+        if (factor - 1.0).abs() <= f32::EPSILON {
+            return;
+        }
+        for idx in 0..self.gradient.len() {
+            let old = self.gradient[idx];
+            let candidate = old * factor;
+            let new = self.topos.saturate(candidate);
+            if old.to_bits() != new.to_bits() {
+                self.gradient[idx] = new;
+                self.record_transition(old, new);
+            } else {
+                self.gradient[idx] = new;
+            }
+        }
+    }
+
+    /// Rescales the gradient so its root-mean-square matches `target_rms` and
+    /// returns the factor that was applied. When the gradient is dormant the
+    /// tape stays untouched and the method returns ``0.0`` to signal no-op
+    /// scaling.
+    pub fn rescale_rms(&mut self, target_rms: f32) -> f32 {
+        if !target_rms.is_finite() {
+            return 1.0;
+        }
+        if target_rms <= 0.0 {
+            self.reset();
+            return 0.0;
+        }
+        let summary = self.summary();
+        let current_rms = summary.rms();
+        if current_rms <= 1e-12 {
+            return 0.0;
+        }
+        let factor = target_rms / current_rms;
+        self.scale_gradient(factor);
+        factor
+    }
+
     /// Retunes the curvature and learning rate while rebuilding the guard topos.
     /// The accumulated gradient buffer is cleared to avoid mixing incompatible
     /// geometries across updates.
@@ -6576,6 +6630,48 @@ mod tests {
         let summary = tape.summary();
         let expected = GradientSummary::from_slice(tape.gradient());
         assert_summary_close(summary, expected);
+    }
+
+    #[test]
+    fn hypergrad_scale_gradient_stays_in_sync() {
+        let mut tape = AmegaHypergrad::new(-0.9, 0.05, 2, 2).unwrap();
+        let wave = Tensor::from_vec(2, 2, vec![0.45, -0.3, 0.15, 0.2]).unwrap();
+        tape.accumulate_wave(&wave).unwrap();
+        let before = tape.gradient().to_vec();
+        tape.scale_gradient(-0.5);
+        let after = tape.gradient();
+        for (prev, current) in before.iter().zip(after.iter()) {
+            assert!((current + 0.5 * prev).abs() <= 1e-6);
+        }
+        let summary = tape.summary();
+        let expected = GradientSummary::from_slice(after);
+        assert_summary_close(summary, expected);
+    }
+
+    #[test]
+    fn hypergrad_rescale_rms_matches_target() {
+        let mut tape = AmegaHypergrad::new(-0.85, 0.05, 2, 3).unwrap();
+        let tensor = Tensor::from_vec(2, 3, vec![0.5, -0.4, 0.25, 0.6, -0.3, 0.1]).unwrap();
+        tape.accumulate_wave(&tensor).unwrap();
+        let initial = tape.summary();
+        let target = initial.rms() * 0.4;
+        let factor = tape.rescale_rms(target);
+        assert!((factor - 0.4).abs() <= 5e-3);
+        let summary = tape.summary();
+        assert!((summary.rms() - target).abs() <= 5e-3);
+        let expected = GradientSummary::from_slice(tape.gradient());
+        assert_summary_close(summary, expected);
+    }
+
+    #[test]
+    fn hypergrad_rescale_rms_on_dormant_gradient_is_noop() {
+        let mut tape = AmegaHypergrad::new(-0.95, 0.05, 1, 2).unwrap();
+        assert_eq!(tape.summary().rms(), 0.0);
+        let factor = tape.rescale_rms(0.25);
+        assert_eq!(factor, 0.0);
+        let summary = tape.summary();
+        assert_eq!(summary.rms(), 0.0);
+        assert_eq!(summary.l1(), 0.0);
     }
 
     #[test]
