@@ -3,7 +3,9 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-use rand::{thread_rng, Rng};
+use rand::{rngs::StdRng, Rng};
+use spiral_config::determinism;
+use std::cell::RefCell;
 
 use crate::{schedules::EpsilonGreedySchedule, RlResult, SpiralRlError};
 use st_tensor::TensorError;
@@ -19,6 +21,7 @@ pub struct DqnAgent {
     epsilon: f32,
     epsilon_schedule: Option<EpsilonGreedySchedule>,
     table: Vec<f32>,
+    rng: StdRng,
 }
 
 impl DqnAgent {
@@ -45,6 +48,8 @@ impl DqnAgent {
                 },
             ));
         }
+        let rng =
+            determinism::rng_from_label(&format!("st-spiral-rl/dqn:{}:{}", state_dim, action_dim));
         Ok(Self {
             state_dim,
             action_dim,
@@ -53,6 +58,7 @@ impl DqnAgent {
             epsilon: 0.1,
             epsilon_schedule: None,
             table: vec![0.0; state_dim * action_dim],
+            rng,
         })
     }
 
@@ -85,9 +91,9 @@ impl DqnAgent {
     }
 
     pub fn select_action(&mut self, state: usize) -> usize {
-        if thread_rng().gen::<f32>() < self.epsilon {
+        if self.rng.gen::<f32>() < self.epsilon {
             self.advance_schedule();
-            thread_rng().gen_range(0..self.action_dim)
+            self.rng.gen_range(0..self.action_dim)
         } else {
             let action = (0..self.action_dim)
                 .max_by(|&lhs, &rhs| self.q(state, lhs).total_cmp(&self.q(state, rhs)))
@@ -240,7 +246,10 @@ impl PpoAgent {
                 cols: action_dim,
             });
         }
-        let mut rng = thread_rng();
+        let mut rng = determinism::rng_from_label(&format!(
+            "st-spiral-rl/ppo:init:{}:{}",
+            state_dim, action_dim
+        ));
         let mut policy_weights = vec![0.0f32; state_dim * action_dim];
         for weight in &mut policy_weights {
             *weight = rng.gen_range(-0.05..=0.05);
@@ -315,6 +324,7 @@ pub struct SacAgent {
     action_dim: usize,
     temperature: f32,
     policy_weights: Vec<f32>,
+    rng: RefCell<StdRng>,
 }
 
 impl SacAgent {
@@ -324,7 +334,10 @@ impl SacAgent {
                 discount: temperature,
             });
         }
-        let mut rng = thread_rng();
+        let mut rng = determinism::rng_from_label(&format!(
+            "st-spiral-rl/sac:init:{}:{}",
+            state_dim, action_dim
+        ));
         let mut policy_weights = vec![0.0f32; state_dim * action_dim];
         for weight in &mut policy_weights {
             *weight = rng.gen_range(-temperature..=temperature);
@@ -334,6 +347,7 @@ impl SacAgent {
             action_dim,
             temperature,
             policy_weights,
+            rng: RefCell::new(rng),
         })
     }
 
@@ -355,7 +369,7 @@ impl SacAgent {
         if sum <= f32::EPSILON {
             return 0;
         }
-        let mut rng = thread_rng();
+        let mut rng = self.rng.borrow_mut();
         let mut cumulative = 0.0f32;
         let draw: f32 = rng.gen::<f32>() * sum;
         for (idx, score) in scores.iter().enumerate() {
@@ -368,7 +382,7 @@ impl SacAgent {
     }
 
     pub fn jitter(&mut self, entropy_target: f32) {
-        let mut rng = thread_rng();
+        let mut rng = self.rng.borrow_mut();
         for weight in &mut self.policy_weights {
             let noise: f32 = rng.gen_range(-self.temperature..=self.temperature);
             *weight = (*weight + noise * entropy_target).tanh();

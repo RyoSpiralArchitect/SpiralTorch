@@ -26,6 +26,8 @@ mod zspace;
 mod elliptic;
 mod theory;
 mod introspect;
+mod qr;
+mod julia_bridge;
 
 mod extras {
     use super::*;
@@ -170,6 +172,8 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     zspace::register(py, m)?;
     elliptic::register(py, m)?;
     theory::register(py, m)?;
+    qr::register(py, m)?;
+    julia_bridge::register(py, m)?;
 
     // 2) サブモジュール（空でも import 可）
     nn::register(py, m)?;

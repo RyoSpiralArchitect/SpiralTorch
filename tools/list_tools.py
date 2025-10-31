@@ -12,25 +12,11 @@ Example:
 from __future__ import annotations
 
 import argparse
-import ast
 import textwrap
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Iterator
+from typing import Iterable
 
-
-@dataclass
-class ToolSummary:
-    """Represents a summarized entry for a tool script."""
-
-    path: Path
-    summary: str
-
-    @property
-    def relative_path(self) -> str:
-        """Return the path relative to the tools directory as a string."""
-
-        return str(self.path)
+from tool_summary import ToolSummary, collect_tool_summaries
 
 
 def parse_args() -> argparse.Namespace:
@@ -57,95 +43,96 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Include non-Python files in the listing with placeholder summaries.",
     )
+    parser.add_argument(
+        "--format",
+        choices=("table", "json"),
+        default="table",
+        help="Render the results as a table or as JSON for automation.",
+    )
+    parser.add_argument(
+        "--filter",
+        help="Only show tools whose path or summary contains the given substring.",
+    )
+    parser.add_argument(
+        "--show-details",
+        action="store_true",
+        help="Include the longer detail text when available.",
+    )
+    parser.add_argument(
+        "--show-source",
+        action="store_true",
+        help="Display where each description was obtained (docstring, comment, …).",
+    )
     return parser.parse_args()
 
 
-def collect_tool_summaries(
-    root: Path, include_non_python: bool = False
+def _filter_summaries(
+    summaries: Iterable[ToolSummary], needle: str | None
 ) -> list[ToolSummary]:
-    """Walk the tree below *root* collecting summaries of Python scripts."""
-
-    summaries: list[ToolSummary] = []
-    for path in sorted(_iter_tool_files(root, include_non_python)):
-        summaries.append(ToolSummary(path=path.relative_to(root), summary=_summarize(path)))
-    return summaries
-
-
-def _iter_tool_files(root: Path, include_non_python: bool) -> Iterator[Path]:
-    """Yield files beneath *root* that should be summarised."""
-
-    for path in root.rglob("*"):
-        if path.is_dir():
-            continue
-        if path.name.endswith(".py"):
-            yield path
-        elif include_non_python:
-            yield path
+    if not needle:
+        return list(summaries)
+    needle_lower = needle.lower()
+    return [
+        summary
+        for summary in summaries
+        if needle_lower in summary.relative_path.lower()
+        or needle_lower in summary.summary.lower()
+        or (summary.detail and needle_lower in summary.detail.lower())
+    ]
 
 
-def _summarize(path: Path) -> str:
-    """Generate a human-friendly summary for *path*."""
-
-    if path.suffix == ".py":
-        doc = _extract_docstring(path)
-        if doc:
-            first_line = doc.strip().splitlines()[0].strip()
-            if first_line:
-                return first_line
-        top_comment = _extract_leading_comment(path)
-        if top_comment:
-            return top_comment
-        return "(no docstring found)"
-
-    return "(non-Python file)"
-
-
-def _extract_docstring(path: Path) -> str | None:
-    """Return the module level docstring for the file at *path*."""
-
-    try:
-        module = ast.parse(path.read_text(encoding="utf8"))
-    except (SyntaxError, UnicodeDecodeError):
-        return None
-    return ast.get_docstring(module)
-
-
-def _extract_leading_comment(path: Path) -> str | None:
-    """Return the first leading comment in the file, if any."""
-
-    try:
-        lines = path.read_text(encoding="utf8").splitlines()
-    except UnicodeDecodeError:
-        return None
-
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            continue
-        if stripped.startswith("#"):
-            comment = stripped.lstrip("#").strip()
-            if comment:
-                return comment
-            continue
-        break
-    return None
-
-
-def print_summaries(summaries: Iterable[ToolSummary], wrap: int) -> None:
-    """Pretty-print the collected *summaries* to stdout."""
-
-    summaries = list(summaries)
+def _print_table(
+    summaries: list[ToolSummary],
+    *,
+    wrap: int,
+    show_details: bool,
+    show_source: bool,
+) -> None:
     if not summaries:
         print("No tool scripts were found.")
         return
 
     max_path_length = max(len(summary.relative_path) for summary in summaries)
+    max_lang_length = max(len(summary.language) for summary in summaries)
+    if show_source:
+        max_source_length = max(len(summary.description_source) for summary in summaries)
+    else:
+        max_source_length = 0
+
+    header_path = "Path".ljust(max_path_length)
+    header_lang = "Lang".ljust(max_lang_length)
+    if show_source:
+        header_src = "Source".ljust(max_source_length)
+        print(f"{header_path}  {header_lang}  {header_src}  Description")
+        print("-" * (max_path_length + max_lang_length + max_source_length + 18))
+    else:
+        print(f"{header_path}  {header_lang}  Description")
+        print("-" * (max_path_length + max_lang_length + 15))
     for summary in summaries:
         description_lines = textwrap.wrap(summary.summary, width=max(wrap, 20)) or [""]
         first_line, *rest = description_lines
-        print(f"{summary.relative_path.ljust(max_path_length)}  {first_line}")
+        language = summary.language.ljust(max_lang_length)
+        prefix = summary.relative_path.ljust(max_path_length)
+        if show_source:
+            source = summary.description_source.ljust(max_source_length)
+            print(f"{prefix}  {language}  {source}  {first_line}")
+            spacer = f"{' ' * max_path_length}  {' ' * max_lang_length}  {' ' * max_source_length}  "
+        else:
+            print(f"{prefix}  {language}  {first_line}")
+            spacer = f"{' ' * max_path_length}  {' ' * max_lang_length}  "
         for line in rest:
-            print(f"{' ' * max_path_length}  {line}")
+            print(f"{spacer}{line}")
+        if show_details and summary.detail:
+            detail_lines = textwrap.wrap(summary.detail, width=max(wrap, 20))
+            for line in detail_lines:
+                print(f"{spacer}{line}")
+
+
+def _print_json(summaries: list[ToolSummary]) -> None:
+    import json
+
+    payload = [summary.as_dict() for summary in summaries]
+    print(json.dumps(payload, indent=2, ensure_ascii=False))
 
 
 def main() -> None:
@@ -153,7 +140,16 @@ def main() -> None:
     summaries = collect_tool_summaries(
         args.root.resolve(), include_non_python=args.include_non_python
     )
-    print_summaries(summaries, wrap=args.wrap)
+    filtered = _filter_summaries(summaries, args.filter)
+    if args.format == "json":
+        _print_json(filtered)
+    else:
+        _print_table(
+            filtered,
+            wrap=args.wrap,
+            show_details=args.show_details,
+            show_source=args.show_source,
+        )
 
 
 if __name__ == "__main__":
