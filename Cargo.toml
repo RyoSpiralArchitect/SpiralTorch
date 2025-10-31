@@ -16,6 +16,7 @@ members = [
   "crates/st-rec",
   "crates/st-bench",
   "crates/st-amg",
+  "crates/st-robotics",
   "crates/st-metrics",
   "crates/spiral-selfsup",
   "crates/spiral-opt",
@@ -45,6 +46,7 @@ default-members = [
   "crates/st-rec",
   "crates/st-bench",
   "crates/st-amg",
+  "crates/st-robotics",
   "crates/spiral-opt",
   "bindings/st-wasm"
 ]
