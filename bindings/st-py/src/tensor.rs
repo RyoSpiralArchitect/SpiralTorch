@@ -1156,6 +1156,36 @@ impl PyTensor {
         Ok((PyTensor { inner: softmax }, PyTensor { inner: hardmax }))
     }
 
+    /// Row-wise softmax, hardmax, and spiral consensus payload.
+    #[pyo3(signature = (*, backend=None))]
+    pub fn row_softmax_hardmax_spiral(
+        &self,
+        backend: Option<&str>,
+        py: Python<'_>,
+    ) -> PyResult<(PyTensor, PyTensor, PyTensor, PyObject)> {
+        let backend = parse_softmax_backend(backend);
+        let report = py
+            .allow_threads(|| self.inner.row_softmax_hardmax_spiral_with_backend(backend))
+            .map_err(tensor_err_to_py)?;
+        let (softmax, hardmax, spiral, metrics) = report.into_parts();
+        let metrics_dict = PyDict::new(py);
+        metrics_dict.set_item("phi", metrics.phi)?;
+        metrics_dict.set_item("phi_conjugate", metrics.phi_conjugate)?;
+        metrics_dict.set_item("phi_bias", metrics.phi_bias)?;
+        metrics_dict.set_item("ramanujan_ratio", metrics.ramanujan_ratio)?;
+        metrics_dict.set_item("ramanujan_delta", metrics.ramanujan_delta)?;
+        metrics_dict.set_item("average_enrichment", metrics.average_enrichment)?;
+        metrics_dict.set_item("mean_entropy", metrics.mean_entropy)?;
+        metrics_dict.set_item("mean_hardmass", metrics.mean_hardmass)?;
+        metrics_dict.set_item("spiral_coherence", metrics.spiral_coherence)?;
+        Ok((
+            PyTensor { inner: softmax },
+            PyTensor { inner: hardmax },
+            PyTensor { inner: spiral },
+            metrics_dict.into(),
+        ))
+    }
+
     /// Row-wise hardmax with optional backend override.
     #[pyo3(signature = (*, backend=None))]
     pub fn row_hardmax(&self, backend: Option<&str>, py: Python<'_>) -> PyResult<PyTensor> {
