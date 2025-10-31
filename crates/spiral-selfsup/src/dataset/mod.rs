@@ -2,6 +2,7 @@ use crate::contrastive::{info_nce_loss_tensor, TensorInfoNCEResult};
 use crate::{ObjectiveError, Result};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use serde::Deserialize;
+use spiral_config::determinism;
 use st_tensor::Tensor;
 use st_vision::datasets::MultiViewDatasetAdapter;
 use st_vision::transforms::{ImageTensor, TransformOperation, TransformPipeline};
@@ -96,10 +97,13 @@ impl<'a> ViewPairSampler<'a> {
                 "image dimensions must be > 0".to_string(),
             ));
         }
-        let rng = match seed {
-            Some(value) => StdRng::seed_from_u64(value),
-            None => StdRng::from_entropy(),
-        };
+        let label = format!(
+            "spiral-selfsup/view_pair_sampler:{}:{}:{}",
+            dataset.num_frames(),
+            image_height,
+            image_width
+        );
+        let rng = determinism::rng_from_optional(seed, &label);
         Ok(Self {
             dataset,
             image_height,

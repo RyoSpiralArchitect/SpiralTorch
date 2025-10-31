@@ -1,0 +1,19 @@
+[package]
+name = "st-robotics"
+version = "0.1.0"
+edition = "2021"
+authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
+description = "Robotics primitives for SpiralTorch"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/RyoSpiralArchitect/SpiralTorch"
+
+[lib]
+name = "st_robotics"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"], optional = true }
+thiserror = "1"
+
+[features]
+serde = ["dep:serde"]
