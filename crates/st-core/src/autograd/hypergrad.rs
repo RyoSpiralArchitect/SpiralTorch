@@ -158,7 +158,7 @@ pub fn implicit_with_options<F, G, It>(
     mut hyper: Tensor,
     mut data_loader: It,
     val_loss_fn: G,
-    opts: ImplicitOptions,
+    mut opts: ImplicitOptions,
 ) -> Result<ImplicitOut, HypergradError>
 where
     F: Fn(&Tensor, &Tensor, &Tensor) -> Tensor + Copy,
@@ -170,13 +170,12 @@ where
         hyper.zero_grad();
     }
 
-    if opts.finite_diff_eps.abs() < f32::EPSILON {
-        return Err(HypergradError::InvalidFiniteDiffStep);
-    }
-
     // one batch for Jacobian linearization
     let batch = data_loader.next().ok_or(HypergradError::MissingBatch)?;
     let w1 = step_fn(&w0, &hyper, &batch);
+
+    let resolved_eps = resolve_finite_diff_step(opts.finite_diff_eps, &w0, &w1)?;
+    opts.finite_diff_eps = resolved_eps;
 
     // g = ∂ val_loss / ∂ w |_{w0}
     let val = val_loss_fn(&w0);
@@ -234,7 +233,7 @@ where
     let mut v = g.clone();
     let mut jt = g.clone();
     let mut iterations = 0usize;
-    let mut residual = jt.dot(&jt).item_f32().sqrt();
+    let mut residual = (jt.dot(&jt).item_f32() as f64).sqrt() as f32;
     let mut residual_history = Vec::with_capacity(opts.max_iters + 1);
     residual_history.push(residual);
 
@@ -250,7 +249,7 @@ where
             opts.finite_diff_eps,
             opts.finite_diff_mode,
         );
-        residual = jt.dot(&jt).item_f32().sqrt();
+        residual = (jt.dot(&jt).item_f32() as f64).sqrt() as f32;
         residual_history.push(residual);
         v = v.add(&jt);
         if residual < opts.tolerance {
@@ -259,7 +258,9 @@ where
     }
     // seed backward on base with v to pick up ∂ step / ∂ hyper contribution
     base.zero_grad();
-    base.backward_with_grad(&v).ok();
+    base
+        .backward_with_grad(&v)
+        .map_err(|_| HypergradError::SolverBreakdown)?;
     let dh = hyper.grad().ok_or(HypergradError::MissingGrad("hyper"))?;
     Ok(ImplicitOut {
         dval_dhyper: dh,
@@ -291,8 +292,8 @@ where
     let mut v = Tensor::zeros_like(&g);
     let mut r = g.clone();           // r = b - A v ; start v=0 => r=b
     let mut p = r.clone();
-    let mut rr_old = r.dot(&r).item_f32();
-    let mut residual = rr_old.sqrt();
+    let mut rr_old = r.dot(&r).item_f32() as f64;
+    let mut residual = rr_old.sqrt() as f32;
     let mut residual_history = Vec::with_capacity(opts.max_iters + 1);
     residual_history.push(residual);
     let mut iterations = 0usize;
@@ -312,7 +313,9 @@ where
         );
         // J^T p via backward seed: seed base with jp, read grad at base
         base.zero_grad();
-        base.backward_with_grad(&jp).ok();
+        base
+            .backward_with_grad(&jp)
+            .map_err(|_| HypergradError::SolverBreakdown)?;
         let jtp = base.grad().ok_or(HypergradError::MissingGrad("base"))?;
         // J J^T p via J applied to (J^T p)
         let j_jtp = jvp_approx(
@@ -327,23 +330,29 @@ where
         );
         let ap = p.sub(&jp).sub(&jtp).add(&j_jtp);
 
-        let denom = p.dot(&ap).item_f32();
-        if denom.abs() < 1e-12 { return Err(HypergradError::SolverBreakdown); }
-        let alpha = rr_old / denom;
+        let denom = p.dot(&ap).item_f32() as f64;
+        if denom.abs() < 1e-12 {
+            let mut fallback_opts = opts.clone();
+            fallback_opts.solver = Solver::Neumann;
+            return implicit_neumann(step_fn, w0, hyper, batch, base, g, &fallback_opts);
+        }
+        let alpha = (rr_old / denom) as f32;
         v = v.add(&p.mul_scalar(alpha));
         r = r.sub(&ap.mul_scalar(alpha));
-        let rr_new = r.dot(&r).item_f32();
-        residual = rr_new.sqrt();
+        let rr_new = r.dot(&r).item_f32() as f64;
+        residual = rr_new.sqrt() as f32;
         residual_history.push(residual);
         if residual < opts.tolerance { break; }
-        let beta = rr_new / rr_old;
+        let beta = (rr_new / rr_old) as f32;
         p = r.add(&p.mul_scalar(beta));
         rr_old = rr_new;
     }
 
     // pick up ∂ step / ∂ hyper contribution via backward seed on base with v
     base.zero_grad();
-    base.backward_with_grad(&v).ok();
+    base
+        .backward_with_grad(&v)
+        .map_err(|_| HypergradError::SolverBreakdown)?;
     let dh = hyper.grad().ok_or(HypergradError::MissingGrad("hyper"))?;
     Ok(ImplicitOut {
         dval_dhyper: dh,
@@ -355,4 +364,29 @@ where
             finite_diff_mode: opts.finite_diff_mode,
         }),
     })
+}
+
+fn resolve_finite_diff_step(
+    initial_eps: f32,
+    w0: &Tensor,
+    base: &Tensor,
+) -> Result<f32, HypergradError> {
+    if !initial_eps.is_finite() {
+        return Err(HypergradError::InvalidFiniteDiffStep);
+    }
+
+    let abs_eps = initial_eps.abs();
+    let mut scale = w0
+        .squared_l2_norm()
+        .sqrt()
+        .max(base.squared_l2_norm().sqrt());
+    if !scale.is_finite() || scale <= 0.0 {
+        scale = 1.0;
+    }
+    let resolved = abs_eps.max(scale * 1e-6).max(1e-6);
+    if resolved.is_finite() {
+        Ok(resolved)
+    } else {
+        Err(HypergradError::InvalidFiniteDiffStep)
+    }
 }
