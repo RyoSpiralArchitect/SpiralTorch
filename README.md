@@ -4,6 +4,11 @@ _(Still under active expanding hourly.)_
 
 **Purpose.** A WGPU-first, research-grade ML/geometry runtime that fuses spectral operators, microlocal tools, and cooperative schedulers into a single stack. The goal: rival CUDA-centric ecosystems using portable GPUs (Metal/Vulkan/DX12) without sacrificing theory fidelity.
 
+## 🚀 Latest SpiralTorch highlights
+
+- **Fractal → Quantum RL bridge.** Stream Mellin-log fractal patches straight into the quantum overlay studio and recover policy gradients through `FractalQuantumTrainer` and friends—keeping Python fallbacks and PyO3 builds in lockstep.
+- **Self-evolving SpiralK kernels.** A new diversity governor inside `SelfRewriteEngine` tracks plateauing η̄ gains, forces fresh AI rewrites when caches go stale, and surfaces telemetry via `diversity_snapshot()` so operators can keep the autonomous kernel lab on course.
+
 ## 🌌 SpiralTorch Manifesto
 
 Step into the paradigm shift from imitation to emergent meaning with the [SpiralTorch Manifesto](docs/spiraltorch_manifesto.md).
@@ -98,6 +103,18 @@ sequenceDiagram
   Bridge-->>API: awaitable result / telemetry hook
 ```
 
+### 🛠️ Why Robotics Teams Are Watching
+
+SpiralTorch’s runtime mirrors the main pressure points that robotics teams wrestle with today:
+
+1. **Vendor-agnostic acceleration (WGPU-first).** Robots ship on Jetsons, Raspberry Pis, Apple Silicon laptops, AMD workstations, and plain x86 servers. SpiralTorch kernels are written against WGPU, so the same Z-space operators run across Metal, Vulkan, or DirectX 12 without CUDA lock-in.
+2. **A control-plane grade runtime.** The mermaid diagram above is effectively a realtime robotics OS: session managers, graph planners, schedulers, command queues, and observability hooks coordinate sensing, planning, and actuation in one pipeline.
+3. **Unified sensor fusion via Z-space.** Camera frames, LiDAR point clouds, IMU states, force/torque readings, and language instructions all project into a single geometric manifold. Planning loops consume multi-modal context without writing one-off fusion code per robot.
+4. **Instinctive behaviours with Desire Lagrangians + SpiralTorchRL.** Instead of hand-crafting reward functions, core instincts—“don’t tip over,” “seek charge,” “avoid the ledge”—are encoded as potentials. Traditional policy-gradient loops still plug in, but they optimise around explainable priors.
+5. **Self-aware safety through ψ telemetry.** The runtime continuously measures kernel stability, allocator pressure, and dynamics drift. When thresholds break, ψ telemetry drives self-maintain routines that pause execution or transition to safe postures before a robot ever enters an unrecoverable state.
+
+Together these properties let SpiralTorch act as the perception, planning, and autonomy stack for heterogeneous robot fleets—from lab manipulators to outdoor rovers—without a rewrite per platform.
+
 **Licensing**
 
 SpiralTorch ships under a dual-license model:
@@ -130,7 +147,7 @@ SpiralTorch ships under a dual-license model:
 ## Code stats
 
 <!-- AUTOGEN: CODESTATS BEGIN -->
-_Last updated: 2025-10-28 07:17 UTC_
+_Last updated: 2025-10-29 04:56 UTC_
 
 ```text
 
@@ -144,12 +161,12 @@ _Last updated: 2025-10-28 07:17 UTC_
  Go                     11         2582         2082          200          300
  JSON                    6          372          372            0            0
  Julia                   8         1335         1176           14          145
- Python                 71        17859        15027          101         2731
+ Python                 77        18800        15825          103         2872
  Shell                   4          194          172            4           18
  SVG                     3           60           60            0            0
  Plain Text              1          661            0          544          117
- TOML                   37          929          791           27          111
- TypeScript              7         4898         4331          175          392
+ TOML                   39          983          839           27          117
+ TypeScript              7         4899         4332          175          392
  YAML                    3           72           65            0            7
 -------------------------------------------------------------------------------
  HTML                    2          491          491            0            0
@@ -162,8 +179,8 @@ _Last updated: 2025-10-28 07:17 UTC_
  |- Python               2           22           20            0            2
  (Total)                             31           20            9            2
 -------------------------------------------------------------------------------
- Markdown               62         6239            0         4899         1340
- |- BASH                16          125           96           17           12
+ Markdown               63         6393            0         5015         1378
+ |- BASH                17          131          102           17           12
  |- C                    1           21           16            0            5
  |- COBOL                1           30           30            0            0
  |- Dockerfile           1            6            6            0            0
@@ -172,15 +189,15 @@ _Last updated: 2025-10-28 07:17 UTC_
  |- JSON                 1           11           11            0            0
  |- Julia                1           29           26            0            3
  |- Python               7          840          702           20          118
- |- Rust                 5          759          667           15           77
+ |- Rust                 5          777          683           16           78
  |- YAML                 2           62           62            0            0
- (Total)                           8174         1663         4954         1557
+ (Total)                           8352         1685         5071         1596
 -------------------------------------------------------------------------------
- Rust                  383       170457       152236         1826        16395
- |- Markdown           241         6600            0         6447          153
- (Total)                         177057       152236         8273        16548
+ Rust                  392       174257       155659         1840        16758
+ |- Markdown           247         6653            0         6499          154
+ (Total)                         180910       155659         8339        16912
 ===============================================================================
- Total                 604       207106       177654         7802        21650
+ Total                 622       212056       181924         7934        22198
 ===============================================================================
 
 ```
@@ -777,6 +794,14 @@ spotlights on graph-node materialisation versus return-handle delivery:
 - `FractalCanvas::vectorFieldFft(false)` surfaces the per-row FFT spectrum as
   interleaved energy/chroma pairs so Canvas Transformer pipelines can ingest
   frequency features without leaving Rust.
+- `FractalCanvas::emitWasmTrail(curvature)` packages the live vector field into
+  `(x, y, z, energy, r, g, b)` samples so WebGPU/WebXR experiences can stream
+  Z-space particle trails without reconstructing curvature or FFT passes in
+  JavaScript.
+- `FractalCanvas::emitWasmTrail(curvature)` packages the live vector field into
+  `(x, y, z, energy, r, g, b)` samples so WebGPU/WebXR experiences can stream
+  Z-space particle trails without reconstructing curvature or FFT passes in
+  JavaScript.
 - `CanvasProjector::accumulate_hypergrad` and
   `CanvasProjector::accumulate_realgrad` stream the refreshed canvas tensor
   directly into SpiralTorch's Riemannian or Euclidean optimisers without
@@ -1892,6 +1917,14 @@ let report = retriever.run_epoch(modules, losses, loaders, schedules)?;
 println!("workers={} avg_loss={}", report.workers, report.average_loss);
 ```
 
+Need curvature-aware consensus from multiple Z-space patches? Call
+`GoldenRetriever::sync_z_barycenter(&partials, rank)` to fold worker tensors
+into a single Leech-biased barycenter before broadcasting the result back to the
+fleet. Pair it with `GoldenRetriever::install_blackcat_moderator(threshold,
+participants)` to seed cooperative moderators on every trainer without touching
+individual mutexes—perfect for multi-node runs where you want Redis-backed
+guards and SpiralK hints to stay aligned.
+
 GoldenRetriever keeps each trainer behind a poison-resistant mutex, launches the
 epoch bodies on the shared runtime, and reduces the per-worker metrics using the
 built-in parallel reducer so the roundtable stays deterministic. No additional
@@ -2113,14 +2146,69 @@ if let Some(geo) = telemetry.geometry {
 }
 ```
 
-The controller now threads Ramanujan's π synthesis and the Λ₂₄ packing density
-into its smoothing loop while auto-rewriting its own clamps. Rank, packing
-pressure, and scale histories sit on rolling windows so noisy small-batch runs
-settle quickly, and the `trainer.telemetry()` surface mirrors the same values to
-spot drift. `GeometryFeedback` keeps `max_scale` inside the recommended `[2, 3]`
-band, raises the floor when rank collapses, and eases the Leech density weight
-if pressure over-saturates—giving you a self-tuning geometric metronome instead
-of a static multiplier.
+Hypergradient loops can now fuse loss variance with the geometric controller via
+the **HyperSurprise** pipeline. Attach a `LossStdTrigger` and SpiralTorch injects
+η̄ pulses whenever the episode's return standard deviation breaches the guard:
+
+```rust
+use st_spiral_rl::{HyperSurpriseConfig, LossStdTrigger, SpiralPolicyGradient};
+
+let mut policy = SpiralPolicyGradient::new(4, 2, 0.05, 0.9)?;
+policy.attach_hyper_surprise_with_config(
+    LossStdTrigger::new(0.12)
+        .with_warmup(2)
+        .with_max_ratio(2.5)
+        .with_deadband(0.15),
+    HyperSurpriseConfig::default()
+        .with_smoothing(0.35)
+        .with_reversion(0.55)
+        .with_lr_floor(1e-4),
+);
+// ...record transitions...
+let report = policy.finish_episode()?;
+if let Some(surprise) = &report.hyper_surprise {
+    println!(
+        "σ={:.3} inject={:.2} η̄={:.3} gauge={:.2} lr={:.4} σ̂={:.3}",
+        surprise.loss_std,
+        surprise.inject_ratio,
+        surprise.eta_bar,
+        surprise.gauge,
+        surprise.learning_rate,
+        surprise.rolling_std
+    );
+}
+```
+
+`LossStdTrigger` keeps an EMA of the observed loss standard deviation, applies a
+configurable deadband before clamping surprise pulses, and modulates both the
+learning-rate and gradient gauge inside the episode update.
+`SpiralPolicyGradient::last_hyper_surprise()` exposes the latest packet so
+telemetry dashboards can correlate η̄ spikes with emergent behaviour.
+
+`HyperSurpriseConfig` now includes builder helpers for smoothing, gauge floors,
+and floor clamps on both η̄ and the learning rate. A dedicated reversion factor
+lets gauges glide back to baseline instead of snapping when shocks subside, and
+the emitted telemetry now shares the rolling standard deviation alongside the
+imposed clamps. Ratio telemetry is derived from the post-clamp, smoothed gauge
+so `HyperSurpriseSignal::inject_ratio` mirrors the actual scaling applied to
+η̄ and the learning-rate. These guards keep legacy pipelines untouched (defaults
+mirror the previous behaviour) while unlocking telemetry-rich packets via
+`HyperSurpriseSignal::gauge`, `HyperSurpriseSignal::learning_rate`, and
+`HyperSurpriseSignal::rolling_std`.
+
+`HyperSurpriseConfig` now includes builder helpers for smoothing, relaxation
+back to the baseline gauge, ratio smoothing, cooldown windows, gauge floors, and
+floor clamps on both η̄ and the learning rate. These guards keep legacy
+pipelines untouched (defaults mirror the previous behaviour) while unlocking
+telemetry-rich packets via `HyperSurpriseSignal::gauge` and
+`HyperSurpriseSignal::learning_rate`.
+
+The controller uses the ratio smoother to bleed off residual pulses instead of
+snapping gauge/η̄ immediately back to baseline, and the cooldown window prevents
+short bursts of volatility from hammering the learner every frame. Relaxation
+lets you pick how gently the gauge returns to neutral once the surprise subsides
+so you can trade responsiveness for smoothness depending on your training
+regime.
 
 Chrono loop signals now feed directly into the controller: every
 `SpiralSession::resonate_over_time` call plants a `ChronoLoopSignal` in the
@@ -2862,7 +2950,7 @@ SpiralK is a tiny runtime DSL for device-aware choices. Flip it on, then shape t
 
 ```bash
 export SPIRAL_HEUR_SOFT=1
-export SPIRAL_HEUR_K='
+export SPIRAL_HEUR_K=' 
   # mk: 0=bitonic, 1=shared, 2=warp (subgroup path on WGPU)
   mk:   sel(sg && (k<=128), 2, sel(k<=2048, 1, 0));
   # mkd: sub-strategy (auto/heap/kway/bitonic/warp_heap/warp_bitonic)
@@ -2881,6 +2969,21 @@ export SPIRAL_HEUR_K='
   soft(tile, 1024, 0.15, (log2(c)>13.0)&&(log2(c)<=15.0));
 '
 ```
+
+Need LLM-assisted rewrites without leaving Rust? Build an
+`AiRewritePrompt`/`AiRewriteConfig` pair and call `rewrite_with_ai(...)` to let
+the Grok-style template generator emit `soft(...)` rules based on Wilson metrics
+and device guards. Python bindings expose the same surface via
+`spiraltorch.spiralk.rewrite_with_ai`, returning both the rewritten program and
+the generated `SpiralKHeuristicHint` objects so you can audit or persist the
+AI-authored tweaks before baking them into tuner tables.
+
+Prefer to bring your own LLM or heuristic engine? Pass a `generator=` callable
+to `spiraltorch.spiralk.rewrite_with_ai` and SpiralTorch will hand your function
+fresh `SpiralKAiRewriteConfig`/`SpiralKAiRewritePrompt` clones. Return a list of
+`SpiralKHeuristicHint` objects to drive the rewrite pipeline while preserving
+the same safety checks (`max_hints`, Wilson guards, DSL parsing) enforced by the
+Rust core.
 
 **How the final choice is made (three-way roundtable)**
 
