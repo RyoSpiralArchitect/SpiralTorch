@@ -1103,6 +1103,303 @@ class CanvasSnapshot:
     summary: Dict[str, Dict[str, float]]
     patch: Optional[List[List[float]]]
 
+class InfiniteZSpacePatch:
+    @property
+    def dimension(self) -> float: ...
+    @property
+    def zoom(self) -> float: ...
+    @property
+    def support(self) -> Tuple[float, float]: ...
+    @property
+    def mellin_weights(self) -> List[float]: ...
+    @property
+    def density(self) -> List[float]: ...
+    def eta_bar(self) -> float: ...
+
+class FractalCanvas:
+    def __init__(
+        self,
+        dimension: float = ...,
+        capacity: int = ...,
+        width: int = ...,
+        height: int = ...,
+    ) -> None: ...
+    @property
+    def dimension(self) -> float: ...
+    def set_dimension(self, dimension: float) -> None: ...
+    def emit_zspace_patch(
+        self,
+        dimension: Optional[float] = ...,
+        zoom: Optional[float] = ...,
+        steps: Optional[int] = ...,
+    ) -> InfiniteZSpacePatch: ...
+    def emit_zspace_infinite(
+        self,
+        dimension: Optional[float] = ...,
+    ) -> InfiniteZSpacePatch: ...
+    def emit_infinite_z(
+        self,
+        zoom: Optional[float] = ...,
+        steps: Optional[int] = ...,
+        dimension: Optional[float] = ...,
+    ) -> InfiniteZSpacePatch: ...
+
+class QuantumOverlayConfig:
+    def __init__(
+        self,
+        curvature: float = ...,
+        qubits: int = ...,
+        packing_bias: float = ...,
+        leech_shells: int = ...,
+    ) -> None: ...
+    @property
+    def curvature(self) -> float: ...
+    def set_curvature(self, curvature: float) -> None: ...
+    @property
+    def qubits(self) -> int: ...
+    def set_qubits(self, qubits: int) -> None: ...
+    @property
+    def packing_bias(self) -> float: ...
+    def set_packing_bias(self, packing_bias: float) -> None: ...
+    @property
+    def leech_shells(self) -> int: ...
+    def set_leech_shells(self, leech_shells: int) -> None: ...
+
+class ZResonance:
+    def __init__(
+        self,
+        spectrum: Optional[Sequence[float]] = ...,
+        eta_hint: float = ...,
+        shell_weights: Optional[Sequence[float]] = ...,
+    ) -> None: ...
+    @staticmethod
+    def from_spectrum(
+        spectrum: Sequence[float],
+        eta_hint: Optional[float] = ...,
+    ) -> ZResonance: ...
+    @staticmethod
+    def from_pulses(pulses: Sequence[MaxwellPulse]) -> ZResonance: ...
+    @property
+    def spectrum(self) -> List[float]: ...
+    @property
+    def eta_hint(self) -> float: ...
+    @property
+    def shell_weights(self) -> List[float]: ...
+
+class QuantumMeasurement:
+    @property
+    def active_qubits(self) -> List[int]: ...
+    @property
+    def eta_bar(self) -> float: ...
+    @property
+    def policy_logits(self) -> List[float]: ...
+    @property
+    def packing_pressure(self) -> float: ...
+    def top_qubits(self, count: Optional[int] = ...) -> List[Tuple[int, float]]: ...
+    def activation_density(self) -> float: ...
+    def to_policy_update(self, base_rate: float = ...) -> Dict[str, float]: ...
+
+class ZOverlayCircuit:
+    def weights(self) -> List[float]: ...
+    def eta_bar(self) -> float: ...
+    def packing_pressure(self) -> float: ...
+    def measure(self, threshold: float = ...) -> QuantumMeasurement: ...
+
+class QuantumRealityStudio:
+    def __init__(
+        self,
+        curvature: float = ...,
+        qubits: int = ...,
+        packing_bias: float = ...,
+        leech_shells: int = ...,
+    ) -> None: ...
+    @property
+    def config(self) -> QuantumOverlayConfig: ...
+    def configure(
+        self,
+        *,
+        curvature: Optional[float] = ...,
+        qubits: Optional[int] = ...,
+        packing_bias: Optional[float] = ...,
+        leech_shells: Optional[int] = ...,
+    ) -> None: ...
+    def overlay_zspace(self, resonance: ZResonance) -> ZOverlayCircuit: ...
+    def overlay(self, resonance: ZResonance) -> ZOverlayCircuit: ...
+    def record_quantum_policy(
+        self,
+        pulses: Sequence[MaxwellPulse],
+        *,
+        threshold: float = ...,
+    ) -> QuantumMeasurement: ...
+
+class FractalQuantumSession:
+    def __init__(
+        self,
+        studio: QuantumRealityStudio,
+        *,
+        threshold: float = ...,
+        eta_scale: float = ...,
+    ) -> None: ...
+    @property
+    def threshold(self) -> float: ...
+    @property
+    def eta_scale(self) -> float: ...
+    @property
+    def ingested(self) -> int: ...
+    def ingest(
+        self,
+        patch: InfiniteZSpacePatch,
+        *,
+        weight: float = ...,
+    ) -> ZResonance: ...
+    def resonance(self) -> ZResonance: ...
+    def measure(self, *, threshold: Optional[float] = ...) -> QuantumMeasurement: ...
+    def clear(self) -> None: ...
+
+def resonance_from_fractal_patch(
+    patch: InfiniteZSpacePatch,
+    eta_scale: float = ...,
+) -> ZResonance: ...
+
+def quantum_measurement_from_fractal(
+    studio: QuantumRealityStudio,
+    patch: InfiniteZSpacePatch,
+    threshold: float = ...,
+    eta_scale: float = ...,
+) -> QuantumMeasurement: ...
+
+def quantum_measurement_from_fractal_sequence(
+    studio: QuantumRealityStudio,
+    patches: Sequence[InfiniteZSpacePatch],
+    *,
+    weights: Optional[Sequence[float]] = ...,
+    threshold: float = ...,
+    eta_scale: float = ...,
+) -> QuantumMeasurement: ...
+
+class LossStdTrigger:
+    std_threshold: float
+    decay: float
+    max_ratio: float
+    warmup: int
+    geometry_eta: float
+    geometry_curvature: float
+
+    def observe(self, value: float) -> Optional[float]: ...
+
+class PolicyGradient:
+    def __init__(self) -> None: ...
+    def attach_hyper_surprise(self, trigger: LossStdTrigger) -> None: ...
+    def attach_geometry_feedback(self, feedback: Dict[str, float]) -> None: ...
+    def step(self, returns: Sequence[float], baseline: float = ...) -> Dict[str, float]: ...
+    def update_from_quantum(
+        self,
+        measurement: QuantumMeasurement,
+        *,
+        base_rate: float = ...,
+        returns: Optional[Sequence[float]] = ...,
+        baseline: float = ...,
+    ) -> Dict[str, float]: ...
+    def build_fractal_session(
+        self,
+        studio: QuantumRealityStudio,
+        *,
+        threshold: float = ...,
+        eta_scale: float = ...,
+    ) -> FractalQuantumSession: ...
+    def update_from_fractal_stream(
+        self,
+        studio: QuantumRealityStudio,
+        patches: Sequence[InfiniteZSpacePatch],
+        *,
+        weights: Optional[Sequence[float]] = ...,
+        base_rate: float = ...,
+        threshold: float = ...,
+        eta_scale: float = ...,
+        returns: Optional[Sequence[float]] = ...,
+        baseline: float = ...,
+    ) -> Dict[str, float]: ...
+    @property
+    def last_quantum_update(self) -> Optional[Dict[str, float]]: ...
+
+class FractalQuantumTrainer:
+    base_rate: float
+    threshold: float
+    eta_scale: float
+    window: int
+
+    def __init__(
+        self,
+        studio: QuantumRealityStudio,
+        policy: PolicyGradient,
+        *,
+        threshold: float = ...,
+        eta_scale: float = ...,
+        base_rate: float = ...,
+        window: int = ...,
+    ) -> None: ...
+    @property
+    def session(self) -> FractalQuantumSession: ...
+    @property
+    def last_update(self) -> Optional[Dict[str, float]]: ...
+    @property
+    def last_measurement(self) -> Optional[QuantumMeasurement]: ...
+    def ingest_patch(
+        self,
+        patch: InfiniteZSpacePatch,
+        *,
+        weight: float = ...,
+    ) -> ZResonance: ...
+    def accumulate_returns(self, values: Sequence[float]) -> None: ...
+    @property
+    def golden_feedback(self) -> Dict[str, float]: ...
+    def peek_resonance(self) -> ZResonance: ...
+    def flush(self, *, baseline: float = ...) -> Dict[str, float]: ...
+    def summary(self) -> Dict[str, object]: ...
+    def reconfigure(
+        self,
+        *,
+        threshold: Optional[float] = ...,
+        eta_scale: Optional[float] = ...,
+        base_rate: Optional[float] = ...,
+        window: Optional[int] = ...,
+    ) -> None: ...
+
+class ZTigerOptim:
+    def __init__(self, curvature: float = ...) -> None: ...
+    @property
+    def curvature(self) -> float: ...
+    @property
+    def gain(self) -> float: ...
+    def update(self, lora_pid: float, resonance: Sequence[float]) -> float: ...
+
+def tempo_latency_score(tile: int, slack: int) -> float: ...
+
+def update_policy_from_fractal(
+    policy: PolicyGradient,
+    studio: QuantumRealityStudio,
+    patch: InfiniteZSpacePatch,
+    *,
+    base_rate: float = ...,
+    threshold: float = ...,
+    eta_scale: float = ...,
+    returns: Optional[Sequence[float]] = ...,
+    baseline: float = ...,
+) -> Dict[str, float]: ...
+
+def update_policy_from_fractal_stream(
+    policy: PolicyGradient,
+    studio: QuantumRealityStudio,
+    patches: Sequence[InfiniteZSpacePatch],
+    *,
+    weights: Optional[Sequence[float]] = ...,
+    base_rate: float = ...,
+    threshold: float = ...,
+    eta_scale: float = ...,
+    returns: Optional[Sequence[float]] = ...,
+    baseline: float = ...,
+) -> Dict[str, float]: ...
+
 def apply_vision_update(
     vision: SpiralTorchVision,
     canvas: CanvasTransformer,
@@ -2274,6 +2571,8 @@ class _VisionModule(ModuleType):
     SpiralTorchVision: type[SpiralTorchVision]
     TemporalResonanceBuffer: type[TemporalResonanceBuffer]
     SliceProfile: type[SliceProfile]
+    FractalCanvas: type[FractalCanvas]
+    InfiniteZSpacePatch: type[InfiniteZSpacePatch]
 
 vision: _VisionModule
 
@@ -2292,6 +2591,22 @@ class _CanvasModule(ModuleType):
     ) -> CanvasSnapshot: ...
 
 canvas: _CanvasModule
+
+class _QrModule(ModuleType):
+    QuantumOverlayConfig: type[QuantumOverlayConfig]
+    ZResonance: type[ZResonance]
+    ZOverlayCircuit: type[ZOverlayCircuit]
+    QuantumMeasurement: type[QuantumMeasurement]
+    QuantumRealityStudio: type[QuantumRealityStudio]
+
+qr: _QrModule
+
+class _JuliaModule(ModuleType):
+    ZTigerOptim: type[ZTigerOptim]
+
+    def tempo_latency_score(self, tile: int, slack: int) -> float: ...
+
+julia: _JuliaModule
 
 class _SelfSupModule(ModuleType):
     def info_nce(
@@ -2708,6 +3023,8 @@ __all__ = [
     "zspace",
     "vision",
     "canvas",
+    "qr",
+    "julia",
     "compat",
     "set_global_seed",
     "golden_ratio",
@@ -2752,6 +3069,22 @@ __all__ = [
     "SliceProfile",
     "CanvasTransformer",
     "CanvasSnapshot",
+    "FractalCanvas",
+    "InfiniteZSpacePatch",
+    "QuantumOverlayConfig",
+    "ZResonance",
+    "ZOverlayCircuit",
+    "QuantumMeasurement",
+    "QuantumRealityStudio",
+    "FractalQuantumSession",
+    "FractalQuantumTrainer",
+    "resonance_from_fractal_patch",
+    "quantum_measurement_from_fractal",
+    "quantum_measurement_from_fractal_sequence",
+    "update_policy_from_fractal",
+    "update_policy_from_fractal_stream",
+    "ZTigerOptim",
+    "tempo_latency_score",
     "apply_vision_update",
     "DashboardMetric",
     "DashboardEvent",
