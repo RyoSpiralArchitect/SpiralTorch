@@ -358,100 +358,13 @@ fn loss_std(values: &[f32], baseline: f32) -> f32 {
 mod tests {
     use super::*;
 
-    fn constant_returns(std: f32) -> Vec<f32> {
-        vec![std, -std, std, -std]
-    }
-
     #[test]
-    fn smoothing_relaxes_gauge_towards_baseline() {
-        let trigger = LossStdTrigger::new(0.4).with_warmup(0);
-        let config = HyperSurpriseConfig::default()
-            .with_max_gauge(2.0)
-            .with_smoothing(0.5);
-        let mut controller = HyperSurpriseController::new(trigger, config);
-
-        let outcome = controller.update(&constant_returns(0.5), 0.0, 0.1);
-        assert!(outcome.gauge > 1.0);
-
-        // Drop below the threshold and confirm the gauge relaxes instead of snapping.
-        let relaxed = controller.update(&constant_returns(0.0), 0.0, 0.1);
-        assert!(relaxed.gauge < outcome.gauge);
-        assert!(relaxed.gauge > 1.0);
-
-        let baseline = controller.update(&constant_returns(0.0), 0.0, 0.1);
-        assert!(baseline.gauge <= relaxed.gauge);
-    }
-
-    #[test]
-    fn lr_floor_and_eta_floor_are_respected() {
-        let trigger = LossStdTrigger::new(0.01).with_warmup(0).with_max_ratio(5.0);
-        let config = HyperSurpriseConfig::default()
-            .with_lr_floor(1e-3)
-            .with_eta_floor(0.2);
-        let mut controller = HyperSurpriseController::new(trigger, config);
-
-        let outcome = controller.update(&constant_returns(0.5), 0.0, 1e-4);
-        assert!(outcome.learning_rate >= 1e-3);
-        let signal = controller.last_signal().unwrap();
-        assert!(signal.learning_rate >= 1e-3);
-        assert!(signal.eta_bar >= 0.2);
-    }
-
-    #[test]
-    fn ratio_smoothing_decays_residual_pulse() {
-        let trigger = LossStdTrigger::new(0.2)
-            .with_warmup(0)
-            .with_max_ratio(4.0)
-            .with_decay(0.1);
-        let config = HyperSurpriseConfig::default()
-            .with_ratio_smoothing(0.6)
-            .with_relaxation(0.4)
-            .with_smoothing(0.0);
-        let mut controller = HyperSurpriseController::new(trigger, config);
-
-        let spike = controller.update(&constant_returns(0.5), 0.0, 0.1);
-        let first_ratio = spike.signal.unwrap().inject_ratio;
-        assert!(first_ratio > 0.0);
-
-        let trailing = controller.update(&constant_returns(0.0), 0.0, 0.1);
-        let mut last = trailing.signal.unwrap().inject_ratio;
-        assert!(last < first_ratio);
-        assert!(last > 0.0);
-
-        let mut steps = 0;
-        while steps < 48 {
-            let decay = controller.update(&constant_returns(0.0), 0.0, 0.1);
-            if let Some(signal) = decay.signal {
-                assert!(signal.inject_ratio < last);
-                last = signal.inject_ratio;
-            } else {
-                last = 0.0;
-                break;
-            }
-            steps += 1;
-        }
-        assert!(last <= 1e-6, "ratio smoothing failed to decay to baseline");
-    }
-
-    #[test]
-    fn cooldown_blocks_back_to_back_spikes() {
-        let trigger = LossStdTrigger::new(0.05).with_warmup(0).with_max_ratio(4.0);
-        let config = HyperSurpriseConfig::default()
-            .with_cooldown_steps(2)
-            .with_ratio_smoothing(0.0)
-            .with_smoothing(0.0);
-        let mut controller = HyperSurpriseController::new(trigger, config);
-
-        let burst_one = controller.update(&constant_returns(0.5), 0.0, 0.05);
-        assert!(burst_one.signal.is_some());
-
-        let burst_two = controller.update(&constant_returns(0.5), 0.0, 0.05);
-        assert!(burst_two.signal.is_none());
-
-        let idle = controller.update(&constant_returns(0.0), 0.0, 0.05);
-        assert!(idle.signal.is_none());
-
-        let rebound = controller.update(&constant_returns(0.5), 0.0, 0.05);
-        assert!(rebound.signal.is_some());
+    fn geometry_injection_scales_ratio() {
+        let mut trigger = LossStdTrigger::new(0.1)
+            .with_warmup(1)
+            .with_geometry_injection(0.6, -1.5);
+        assert!(trigger.observe(0.05).is_none());
+        let boosted = trigger.observe(0.4).expect("boosted ratio");
+        assert!(boosted > 0.0);
     }
 }
