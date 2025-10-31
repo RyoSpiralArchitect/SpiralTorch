@@ -63,6 +63,40 @@ pub struct AuditReviewReport {
     pub check_comparisons: Vec<AuditCheckComparison>,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum AuditAnomalySeverity {
+    Info,
+    Warning,
+    Critical,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AuditAnomaly {
+    pub severity: AuditAnomalySeverity,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StageTransitionMetric {
+    pub from: Option<String>,
+    pub to: String,
+    pub count: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct AuditIntrospection {
+    pub total_events: usize,
+    pub unique_stages: usize,
+    pub entropy: f64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub loops: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transitions: Vec<StageTransitionMetric>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub anomalies: Vec<AuditAnomaly>,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct AuditTrail {
     events: Vec<AuditEvent>,
@@ -275,4 +309,106 @@ pub fn review_bundle(bundle: &AuditBundle) -> AuditReviewReport {
         issues,
         check_comparisons,
     }
+}
+
+pub fn introspect_bundle(bundle: &AuditBundle) -> AuditIntrospection {
+    let mut unique_stages = BTreeSet::new();
+    let mut loops = BTreeSet::new();
+    let mut transitions: BTreeMap<(Option<String>, String), usize> = BTreeMap::new();
+    let mut anomalies = Vec::new();
+
+    let critical_stages = ["cli.parsed", "cli.command", "io.write.report"];
+    for stage in &critical_stages {
+        if !bundle.summary.stages.contains_key(*stage) {
+            anomalies.push(AuditAnomaly {
+                severity: AuditAnomalySeverity::Critical,
+                message: format!("missing critical stage `{stage}`"),
+            });
+        }
+    }
+
+    let known_prefixes = [
+        "cli.",
+        "io.",
+        "metadata.",
+        "statistics.",
+        "overlay.",
+        "focus_mask.",
+        "postprocess.",
+        "grad_cam.",
+        "integrated_gradients.",
+        "model.",
+        "finalise.",
+        "audit.",
+    ];
+
+    let mut previous: Option<&AuditEvent> = None;
+    for event in &bundle.events {
+        unique_stages.insert(event.stage.clone());
+        if !known_prefixes
+            .iter()
+            .any(|prefix| event.stage.starts_with(prefix))
+        {
+            anomalies.push(AuditAnomaly {
+                severity: AuditAnomalySeverity::Warning,
+                message: format!("unknown stage prefix `{}`", event.stage),
+            });
+        }
+
+        if let Some(prev) = previous {
+            if prev.stage == event.stage {
+                loops.insert(event.stage.clone());
+            }
+            *transitions
+                .entry((Some(prev.stage.clone()), event.stage.clone()))
+                .or_default() += 1;
+        } else {
+            *transitions.entry((None, event.stage.clone())).or_default() += 1;
+        }
+        previous = Some(event);
+    }
+
+    let total_events = bundle.events.len();
+    let mut entropy = 0.0;
+    if total_events > 0 {
+        for count in bundle.summary.stages.values() {
+            let probability = *count as f64 / total_events as f64;
+            entropy -= probability * probability.log2();
+        }
+    }
+
+    let transitions = transitions
+        .into_iter()
+        .map(|((from, to), count)| StageTransitionMetric { from, to, count })
+        .collect();
+
+    AuditIntrospection {
+        total_events,
+        unique_stages: unique_stages.len(),
+        entropy,
+        loops: loops.into_iter().collect(),
+        transitions,
+        anomalies,
+    }
+}
+
+pub fn introspect_bundles<'a, I>(bundles: I) -> AuditIntrospection
+where
+    I: IntoIterator<Item = &'a AuditBundle>,
+{
+    let mut events = Vec::new();
+
+    for bundle in bundles {
+        events.extend(bundle.events.clone());
+    }
+
+    let summary = build_summary(&events);
+    let self_checks = build_self_checks(&events, &summary);
+    let combined = AuditBundle {
+        events,
+        summary,
+        self_checks,
+    };
+
+    introspect_bundle(&combined)
 }

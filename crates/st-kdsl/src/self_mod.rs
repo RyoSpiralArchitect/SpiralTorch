@@ -35,6 +35,9 @@ pub struct SelfRewriteEngine<G: AiHintGenerator> {
     ctx_sensitivity: f32,
     staleness_half_life: u32,
     max_staleness: u32,
+    context_clusters: Vec<ContextCluster>,
+    cluster_limit: usize,
+    cluster_decay: f32,
 }
 
 #[derive(Clone)]
@@ -73,6 +76,59 @@ impl HintPerformance {
     }
 }
 
+#[derive(Clone, Debug)]
+struct ContextCluster {
+    signature: u64,
+    total_gain: f32,
+    best_gain: f32,
+    momentum: f32,
+    hits: u32,
+}
+
+impl ContextCluster {
+    fn new(signature: u64, gain: f32, affinity: f32) -> Self {
+        let gain = gain.max(0.0);
+        let affinity = affinity.clamp(0.0, 1.0);
+        let momentum = gain * affinity;
+        Self {
+            signature,
+            total_gain: gain,
+            best_gain: gain,
+            momentum,
+            hits: if gain > 0.0 { 1 } else { 0 },
+        }
+    }
+
+    fn mean_gain(&self) -> f32 {
+        if self.hits == 0 {
+            0.0
+        } else {
+            self.total_gain / self.hits as f32
+        }
+    }
+
+    fn update(&mut self, signature: u64, gain: f32, affinity: f32, decay: f32) {
+        let gain = gain.max(0.0);
+        let affinity = affinity.clamp(0.0, 1.0);
+        self.total_gain = self.total_gain * decay + gain;
+        self.best_gain = self.best_gain.max(gain);
+        self.momentum = self.momentum * decay + gain * affinity;
+        if gain > 0.0 {
+            self.hits = self.hits.saturating_add(1);
+        }
+        self.signature = Self::blend_signature(self.signature, signature, affinity);
+    }
+
+    fn blend_signature(base: u64, incoming: u64, affinity: f32) -> u64 {
+        if affinity <= 0.0 {
+            return base;
+        }
+        let mix = base ^ incoming;
+        let scaled = (mix as f32 * affinity).round() as u64;
+        base ^ scaled
+    }
+}
+
 /// Snapshot of a cached hint's historic performance.
 #[derive(Clone, Debug, PartialEq)]
 pub struct HintStatSnapshot {
@@ -83,6 +139,16 @@ pub struct HintStatSnapshot {
     pub mean_gain: f32,
     pub last_eta: f32,
     pub last_affinity: f32,
+}
+
+/// Snapshot of a context cluster used to steer hint reuse.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContextClusterSnapshot {
+    pub signature: u64,
+    pub hits: u32,
+    pub best_gain: f32,
+    pub mean_gain: f32,
+    pub momentum: f32,
 }
 
 impl<G: AiHintGenerator> SelfRewriteEngine<G> {
@@ -101,6 +167,9 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
             ctx_sensitivity: 0.55,
             staleness_half_life: 8,
             max_staleness: 24,
+            context_clusters: Vec::new(),
+            cluster_limit: 16,
+            cluster_decay: 0.92,
         }
     }
 
@@ -147,6 +216,23 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         self
     }
 
+    /// Adjust how many distinct context clusters are tracked for hint steering.
+    pub fn with_cluster_limit(mut self, limit: usize) -> Self {
+        self.cluster_limit = limit.max(1);
+        while self.context_clusters.len() > self.cluster_limit {
+            self.context_clusters.pop();
+        }
+        self
+    }
+
+    /// Configure the exponential decay applied to cluster momentum between rewrites.
+    pub fn with_cluster_decay(mut self, decay: f32) -> Self {
+        if decay.is_finite() && decay > 0.0 {
+            self.cluster_decay = decay.min(0.999);
+        }
+        self
+    }
+
     /// Returns the smoothed η̄ after the most recent rewrite.
     pub fn smoothed_eta(&self) -> Option<f32> {
         if self.eta_history.is_empty() {
@@ -182,6 +268,27 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
                 .unwrap_or(Ordering::Equal)
         });
         stats
+    }
+
+    /// Exposes the tracked context clusters and their steering metrics.
+    pub fn context_clusters(&self) -> Vec<ContextClusterSnapshot> {
+        let mut clusters: Vec<_> = self
+            .context_clusters
+            .iter()
+            .map(|cluster| ContextClusterSnapshot {
+                signature: cluster.signature,
+                hits: cluster.hits,
+                best_gain: cluster.best_gain,
+                mean_gain: cluster.mean_gain(),
+                momentum: cluster.momentum,
+            })
+            .collect();
+        clusters.sort_by(|a, b| {
+            b.best_gain
+                .partial_cmp(&a.best_gain)
+                .unwrap_or(Ordering::Equal)
+        });
+        clusters
     }
 
     /// Attempt a self-rewrite. Returns `Ok(None)` when no rewrite is required.
@@ -224,7 +331,13 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         let event = self.eval_hints(base_src, ctx, &hints)?;
         self.record_eta(event.eta_bar);
         self.push_cache(event.eta_bar, event.hints.clone(), ctx_signature);
-        self.record_hint_success(&event.hints, observed_eta, event.eta_bar, 1.0);
+        self.record_hint_success(
+            &event.hints,
+            observed_eta,
+            event.eta_bar,
+            1.0,
+            ctx_signature,
+        );
         self.auto_tune_eta();
 
         Ok(Some(event))
@@ -256,7 +369,13 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
                 continue;
             };
             let affinity = self.context_affinity(entry.ctx_signature, ctx_signature);
-            if affinity < self.ctx_sensitivity {
+            let bridged = self.cluster_bridge_affinity(entry.ctx_signature, ctx_signature);
+            let effective_affinity = if affinity >= self.ctx_sensitivity * 0.5 {
+                affinity.max(bridged)
+            } else {
+                affinity
+            };
+            if effective_affinity < self.ctx_sensitivity {
                 self.penalize_hint(&entry.hints);
                 continue;
             }
@@ -269,7 +388,13 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
                 self.penalize_hint(&entry.hints);
                 continue;
             }
-            self.record_hint_success(&event.hints, observed_eta, event.eta_bar, affinity);
+            self.record_hint_success(
+                &event.hints,
+                observed_eta,
+                event.eta_bar,
+                effective_affinity,
+                ctx_signature,
+            );
             self.touch_cache(idx, event.eta_bar, event.hints.clone(), ctx_signature);
             return Ok(Some(event));
         }
@@ -325,8 +450,10 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
             .map(|perf| perf.score())
             .unwrap_or(entry.eta * 0.5);
         let affinity = self.context_affinity(entry.ctx_signature, ctx_signature);
+        let bridge = self.cluster_bridge_affinity(entry.ctx_signature, ctx_signature);
         let decay = self.staleness_decay(entry.staleness);
-        (entry.eta + score) * affinity * decay
+        let cluster_bonus = 1.0 + self.cluster_prediction(ctx_signature);
+        (entry.eta + score) * affinity.max(bridge) * decay * cluster_bonus
     }
 
     fn eval_hints(
@@ -390,6 +517,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         observed: f32,
         eta: f32,
         affinity: f32,
+        ctx_signature: u64,
     ) {
         let gain = (eta - observed).max(0.0);
         let key = Self::hint_key(hints);
@@ -399,6 +527,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         entry.best_gain = entry.best_gain.max(gain);
         entry.last_eta = eta;
         entry.last_affinity = affinity;
+        self.promote_cluster(ctx_signature, gain, affinity);
     }
 
     fn penalize_hint(&mut self, hints: &[HeuristicHint]) {
@@ -436,12 +565,93 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         let max_staleness = self.max_staleness;
         self.hint_cache
             .retain(|entry| entry.staleness <= max_staleness);
+        self.decay_clusters();
     }
 
     fn degrade_cache_entry(&mut self, key: &str) {
         if let Some(entry) = self.hint_cache.iter_mut().find(|entry| entry.key == key) {
             entry.staleness = entry.staleness.saturating_add(2);
         }
+    }
+
+    fn promote_cluster(&mut self, ctx_signature: u64, gain: f32, affinity: f32) {
+        if !gain.is_finite() {
+            return;
+        }
+        let mut best_idx: Option<usize> = None;
+        let mut best_affinity = 0.0f32;
+        for (idx, cluster) in self.context_clusters.iter().enumerate() {
+            let affinity_to_cluster = self.context_affinity(cluster.signature, ctx_signature);
+            if affinity_to_cluster > best_affinity {
+                best_affinity = affinity_to_cluster;
+                best_idx = Some(idx);
+            }
+        }
+
+        if let Some(idx) = best_idx {
+            if let Some(cluster) = self.context_clusters.get_mut(idx) {
+                cluster.update(
+                    ctx_signature,
+                    gain,
+                    affinity * best_affinity,
+                    self.cluster_decay,
+                );
+                return;
+            }
+        }
+
+        if self.context_clusters.len() >= self.cluster_limit {
+            self.context_clusters.sort_by(|a, b| {
+                a.best_gain
+                    .partial_cmp(&b.best_gain)
+                    .unwrap_or(Ordering::Equal)
+            });
+            self.context_clusters.remove(0);
+        }
+
+        self.context_clusters
+            .push(ContextCluster::new(ctx_signature, gain, affinity));
+    }
+
+    fn decay_clusters(&mut self) {
+        let decay = self.cluster_decay;
+        for cluster in self.context_clusters.iter_mut() {
+            cluster.total_gain *= decay;
+            cluster.momentum *= decay;
+        }
+        self.context_clusters
+            .retain(|cluster| cluster.total_gain > 1e-4 || cluster.momentum > 1e-4);
+    }
+
+    fn cluster_prediction(&self, ctx_signature: u64) -> f32 {
+        let mut best = 0.0f32;
+        for cluster in &self.context_clusters {
+            let affinity = self.context_affinity(cluster.signature, ctx_signature);
+            if affinity < 0.2 {
+                continue;
+            }
+            let energy = (1.0 + cluster.best_gain + cluster.momentum * 0.5).min(1.6);
+            best = best.max(affinity * energy);
+        }
+        best.min(2.0)
+    }
+
+    fn cluster_bridge_affinity(&self, cached: u64, current: u64) -> f32 {
+        let mut best = 0.0f32;
+        for cluster in &self.context_clusters {
+            let to_cached = self.context_affinity(cluster.signature, cached);
+            if to_cached < 0.4 {
+                continue;
+            }
+            let to_current = self.context_affinity(cluster.signature, current);
+            if to_current < 0.2 {
+                continue;
+            }
+            let base = (to_cached.sqrt() * to_current.sqrt()).min(1.0);
+            let energy = (1.0 + cluster.best_gain + cluster.momentum * 0.5).min(1.6);
+            best = best.max((base * energy).min(1.0));
+        }
+        best
     }
 
     fn context_affinity(&self, cached: u64, current: u64) -> f32 {
@@ -608,6 +818,29 @@ mod tests {
     }
 
     #[test]
+    fn captures_context_clusters_after_successes() {
+        let mut generator = |_: &AiRewriteConfig, _: &AiRewritePrompt| {
+            Ok(vec![HeuristicHint::new("radix", "radix * 2", 0.95, "true")])
+        };
+        let ctx = sample_ctx();
+        let mut engine = SelfRewriteEngine::new(&mut generator, AiRewriteConfig::new("mock"))
+            .with_eta_floor(0.6);
+
+        let event = engine
+            .tick("algo: 1;", &ctx, None, 0.25)
+            .expect("tick")
+            .expect("event");
+        assert!(event.eta_bar > 0.0);
+
+        let clusters = engine.context_clusters();
+        assert_eq!(clusters.len(), 1);
+        let snapshot = &clusters[0];
+        assert!(snapshot.best_gain > 0.0);
+        assert!(snapshot.momentum > 0.0);
+        assert!(snapshot.mean_gain >= 0.0);
+    }
+
+    #[test]
     fn skips_cached_hints_when_context_diverges() {
         use std::cell::Cell;
 
@@ -637,6 +870,70 @@ mod tests {
             .expect("tick")
             .expect("event");
         assert_eq!(calls.get(), 2, "generator invoked for divergent context");
+    }
+
+    #[test]
+    fn cluster_bridging_reuses_cache_for_related_context() {
+        use std::cell::Cell;
+
+        let calls = Cell::new(0usize);
+        let mut generator = |_: &AiRewriteConfig, _: &AiRewritePrompt| {
+            calls.set(calls.get() + 1);
+            Ok(vec![HeuristicHint::new(
+                "tile_cols",
+                "tile_cols + 8",
+                0.9,
+                "true",
+            )])
+        };
+
+        let ctx_a = sample_ctx();
+        let sig_a = SelfRewriteEngine::<TemplateAiGenerator>::ctx_signature(&ctx_a);
+
+        let mut engine = SelfRewriteEngine::new(&mut generator, AiRewriteConfig::new("mock"))
+            .with_eta_floor(0.6)
+            .with_context_sensitivity(0.8);
+
+        let mut candidate_ctx = None;
+        for delta in 1..32 {
+            let ctx_b = Ctx {
+                r: ctx_a.r + delta * 8,
+                c: ctx_a.c + delta * 4,
+                k: ctx_a.k,
+                sg: ctx_a.sg,
+                sgc: ctx_a.sgc,
+                kc: ctx_a.kc,
+                tile_cols: ctx_a.tile_cols.saturating_add((delta % 3) as u32 + 1),
+                radix: ctx_a.radix.saturating_add(delta as u32 % 5 + 1),
+                segments: ctx_a.segments,
+            };
+            let sig_b = SelfRewriteEngine::<TemplateAiGenerator>::ctx_signature(&ctx_b);
+            let affinity = engine.context_affinity(sig_a, sig_b);
+            if affinity < 0.8 && affinity > 0.45 {
+                candidate_ctx = Some((ctx_b, sig_b, affinity));
+                break;
+            }
+        }
+
+        let (ctx_b, sig_b, base_affinity) = candidate_ctx.expect("related context");
+        assert!(base_affinity < 0.8);
+        assert!(base_affinity > 0.45);
+
+        engine
+            .tick("algo: 1;", &ctx_a, None, 0.25)
+            .expect("tick")
+            .expect("event");
+        assert_eq!(calls.get(), 1);
+
+        let bridged = engine.cluster_bridge_affinity(sig_a, sig_b);
+        assert!(bridged >= base_affinity);
+
+        engine
+            .tick("algo: 1;", &ctx_b, None, 0.3)
+            .expect("tick")
+            .expect("event");
+
+        assert_eq!(calls.get(), 1, "cluster bridging reused cached hints");
     }
 
     #[test]

@@ -132,7 +132,9 @@ print(bary.objective, hyper.gradient())
 ### Ecosystem bridges
 
 SpiralTorch tensors can flow into PyTorch or JAX without copies thanks to the
-`spiraltorch.ecosystem` helpers:
+`spiraltorch.ecosystem` helpers. CuPy round-trips also accept optional CUDA
+streams so you can coordinate asynchronous pipelines, and the helpers can
+resolve friendly stream aliases on demand:
 
 ```python
 import spiraltorch as st
@@ -155,8 +157,10 @@ roundtrip = torch_to_tensor(torch_tensor)
 jax_array = tensor_to_jax(spiral)
 spiral_again = jax_to_tensor(jax_array)
 
-cupy_array = tensor_to_cupy(spiral)
-spiral_from_cupy = cupy_to_tensor(cupy_array)
+# stream can be an explicit cupy.cuda.Stream, or a lazy alias such as
+# "current" (resolve the active stream) or "null" (select the default stream).
+cupy_array = tensor_to_cupy(spiral, stream="current")
+spiral_from_cupy = cupy_to_tensor(cupy_array, stream="current")
 
 tf_tensor = tensor_to_tensorflow(spiral)
 spiral_from_tf = tensorflow_to_tensor(tf_tensor)

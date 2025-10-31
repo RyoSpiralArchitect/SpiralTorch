@@ -1,6 +1,6 @@
 mod audit;
 
-use audit::{AuditBundle, AuditTrail};
+use audit::{introspect_bundles, AuditBundle, AuditIntrospection, AuditTrail};
 use clap::{ArgAction, Args, Parser, Subcommand, ValueHint};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -141,6 +141,9 @@ enum Command {
 
     /// Review an existing audit bundle and verify its self-checks
     AuditReview(AuditReviewArgs),
+
+    /// Introspect one or more audit bundles and surface structural anomalies
+    AuditIntrospect(AuditIntrospectArgs),
 }
 
 #[derive(Args)]
@@ -232,6 +235,25 @@ struct AuditReviewArgs {
     pretty: bool,
 }
 
+#[derive(Args)]
+struct AuditIntrospectArgs {
+    /// Path(s) to the audit bundle JSON files to introspect
+    #[arg(long, value_hint = ValueHint::FilePath, num_args = 1..)]
+    input: Vec<PathBuf>,
+
+    /// Optional destination to write the introspection report as JSON (defaults to STDOUT)
+    #[arg(long, value_hint = ValueHint::FilePath)]
+    output: Option<PathBuf>,
+
+    /// Pretty-print the introspection JSON when writing to STDOUT or disk
+    #[arg(long)]
+    pretty: bool,
+
+    /// Include per-bundle introspection entries in the output alongside the aggregate view
+    #[arg(long)]
+    per_bundle: bool,
+}
+
 fn main() {
     if let Err(err) = try_main() {
         eprintln!("error: {err}");
@@ -305,6 +327,19 @@ fn try_main() -> Result<()> {
             );
             run_audit_review(args, &mut audit)?;
         }
+        Command::AuditIntrospect(args) => {
+            audit.record_with_value(
+                "cli.command",
+                json!({
+                    "name": "audit-introspect",
+                    "inputs": args.input,
+                    "output": args.output,
+                    "pretty": args.pretty,
+                    "per_bundle": args.per_bundle,
+                }),
+            );
+            run_audit_introspect(args, &mut audit)?;
+        }
     }
 
     let bundle = audit.finish();
@@ -317,7 +352,7 @@ fn try_main() -> Result<()> {
 }
 
 fn run_audit_review(args: &AuditReviewArgs, audit: &mut AuditTrail) -> Result<()> {
-    let bundle = read_audit_bundle(&args.input, audit)?;
+    let bundle = read_audit_bundle(&args.input, audit, "audit.review.bundle_loaded")?;
     let review = audit::review_bundle(&bundle);
     audit.record_with_value(
         "audit.review.summary",
@@ -340,6 +375,71 @@ fn run_audit_review(args: &AuditReviewArgs, audit: &mut AuditTrail) -> Result<()
     } else {
         println!("{payload}");
         audit.record("audit.review.stdout_emitted");
+    }
+
+    Ok(())
+}
+
+fn run_audit_introspect(args: &AuditIntrospectArgs, audit: &mut AuditTrail) -> Result<()> {
+    let mut bundles = Vec::new();
+    let mut per_bundle = Vec::new();
+
+    for path in &args.input {
+        let bundle = read_audit_bundle(path, audit, "audit.introspect.bundle_loaded")?;
+        let introspection = audit::introspect_bundle(&bundle);
+        audit.record_with_value(
+            "audit.introspect.bundle",
+            json!({
+                "path": path,
+                "events": introspection.total_events,
+                "unique_stages": introspection.unique_stages,
+                "anomalies": introspection.anomalies.len(),
+            }),
+        );
+        per_bundle.push((path.display().to_string(), introspection.clone()));
+        bundles.push(bundle);
+    }
+
+    let aggregated = introspect_bundles(&bundles);
+    audit.record_with_value(
+        "audit.introspect.summary",
+        json!({
+            "bundles": bundles.len(),
+            "unique_stages": aggregated.unique_stages,
+            "entropy": aggregated.entropy,
+            "anomalies": aggregated.anomalies.len(),
+        }),
+    );
+
+    let mut report = AuditIntrospectReportFile {
+        bundles: bundles.len(),
+        aggregated,
+        per_bundle: Vec::new(),
+    };
+
+    if args.per_bundle {
+        report.per_bundle = per_bundle
+            .into_iter()
+            .map(|(label, introspection)| AuditIntrospectEntry {
+                label,
+                introspection,
+            })
+            .collect();
+    }
+
+    let payload = if args.pretty {
+        serde_json::to_string_pretty(&report)?
+    } else {
+        serde_json::to_string(&report)?
+    };
+
+    if let Some(path) = args.output.as_ref() {
+        ensure_parent_dir(path)?;
+        fs::write(path, &payload)?;
+        audit.record_with_value("io.write.audit_introspect", json!({ "path": path }));
+    } else {
+        println!("{payload}");
+        audit.record("audit.introspect.stdout_emitted");
     }
 
     Ok(())
@@ -779,6 +879,20 @@ impl From<&AttributionStatistics> for StatisticsFile {
     }
 }
 
+#[derive(Serialize)]
+struct AuditIntrospectEntry {
+    label: String,
+    introspection: AuditIntrospection,
+}
+
+#[derive(Serialize)]
+struct AuditIntrospectReportFile {
+    bundles: usize,
+    aggregated: AuditIntrospection,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    per_bundle: Vec<AuditIntrospectEntry>,
+}
+
 fn write_statistics(stats: &AttributionStatistics, path: &Path) -> Result<()> {
     ensure_parent_dir(path)?;
     let payload = serde_json::to_string_pretty(&StatisticsFile::from(stats))?;
@@ -793,12 +907,12 @@ fn write_audit_report(bundle: &AuditBundle, path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn read_audit_bundle(path: &Path, audit: &mut AuditTrail) -> Result<AuditBundle> {
+fn read_audit_bundle(path: &Path, audit: &mut AuditTrail, stage: &str) -> Result<AuditBundle> {
     audit.record_with_value("io.read.audit", json!({ "path": path }));
     let contents = fs::read_to_string(path)?;
     let bundle: AuditBundle = serde_json::from_str(&contents)?;
     audit.record_with_value(
-        "audit.review.bundle_loaded",
+        stage,
         json!({
             "events": bundle.events.len(),
             "recorded_self_checks": bundle.self_checks.len(),
