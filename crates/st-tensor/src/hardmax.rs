@@ -349,9 +349,14 @@ fn compute_softmax_row(input_row: &[f32], soft_row: &mut [f32], hard_row: &mut [
     let mut row_max = f32::NEG_INFINITY;
     let mut sum = 0.0f32;
     let mut dp_reductions = 0usize;
+    let mut argmax_index: Option<usize> = None;
 
-    for &value in input_row {
-        if value > row_max {
+    for (index, &value) in input_row.iter().enumerate() {
+        if value.is_nan() {
+            continue;
+        }
+
+        if value > row_max || argmax_index.is_none() {
             if row_max.is_finite() {
                 let scale = (row_max - value).exp();
                 sum = sum * scale + 1.0;
@@ -360,6 +365,7 @@ fn compute_softmax_row(input_row: &[f32], soft_row: &mut [f32], hard_row: &mut [
                 sum = 1.0;
             }
             row_max = value;
+            argmax_index = Some(index);
         } else {
             sum += (value - row_max).exp();
         }
@@ -371,14 +377,16 @@ fn compute_softmax_row(input_row: &[f32], soft_row: &mut [f32], hard_row: &mut [
         0.0
     };
 
-    for ((prob_slot, hard_slot), &value) in soft_row
-        .iter_mut()
-        .zip(hard_row.iter_mut())
-        .zip(input_row.iter())
-    {
+    for (prob_slot, &value) in soft_row.iter_mut().zip(input_row.iter()) {
         let prob = (value - row_max).exp() * inv_sum;
         *prob_slot = prob;
-        *hard_slot = if value == row_max { 1.0 } else { 0.0 };
+    }
+
+    hard_row.fill(0.0);
+    if let Some(idx) = argmax_index {
+        if let Some(slot) = hard_row.get_mut(idx) {
+            *slot = 1.0;
+        }
     }
 
     dp_reductions
@@ -387,17 +395,29 @@ fn compute_softmax_row(input_row: &[f32], soft_row: &mut [f32], hard_row: &mut [
 fn compute_mask_row(input_row: &[f32], hard_row: &mut [f32]) -> usize {
     debug_assert_eq!(input_row.len(), hard_row.len());
 
+    hard_row.fill(0.0);
+
     if input_row.is_empty() {
         return 0;
     }
 
     let mut row_max = f32::NEG_INFINITY;
-    for &value in input_row {
-        row_max = row_max.max(value);
+    let mut argmax_index: Option<usize> = None;
+    for (index, &value) in input_row.iter().enumerate() {
+        if value.is_nan() {
+            continue;
+        }
+
+        if value > row_max || argmax_index.is_none() {
+            row_max = value;
+            argmax_index = Some(index);
+        }
     }
 
-    for (dst, &value) in hard_row.iter_mut().zip(input_row.iter()) {
-        *dst = if value == row_max { 1.0 } else { 0.0 };
+    if let Some(idx) = argmax_index {
+        if let Some(slot) = hard_row.get_mut(idx) {
+            *slot = 1.0;
+        }
     }
 
     input_row.len().saturating_sub(1)
