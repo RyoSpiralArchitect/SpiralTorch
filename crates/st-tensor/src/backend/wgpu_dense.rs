@@ -2141,7 +2141,6 @@ impl GpuContext {
             ramanujan_delta,
         })
     }
-
     fn bayesian_refine_softmax_score(
         &self,
         variant: SoftmaxVariant,
@@ -2222,7 +2221,6 @@ impl GpuContext {
             credible_high_ms,
         ))
     }
-
     fn metropolis_multi_try_softmax(
         &self,
         variant: SoftmaxVariant,
@@ -2305,7 +2303,6 @@ impl GpuContext {
             proposal_flux,
         ))
     }
-
     fn spiral_anneal_softmax(
         &self,
         variant: SoftmaxVariant,
@@ -2406,7 +2403,6 @@ impl GpuContext {
             refreshes,
         ))
     }
-
     fn spiral_consensus_softmax(
         &self,
         variant: SoftmaxVariant,
@@ -2502,7 +2498,6 @@ impl GpuContext {
             harmony,
         ))
     }
-
     fn fused_gelu_back_bind_group(
         &self,
         z: &Buffer,
@@ -2512,7 +2507,7 @@ impl GpuContext {
         partials: &Buffer,
         uniforms: &Buffer,
     ) -> BindGroup {
-        let descriptor = wgpu::BindGroupDescriptor {
+        self.device().create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("st.tensor.wgpu_dense.fused_gelu_back.bind_group"),
             layout: &self.fused_gelu_back_layout,
             entries: &[
@@ -2530,33 +2525,39 @@ impl GpuContext {
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
-                    resource: mask_binding.as_entire_binding(),
+                    resource: dr.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: partials.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: uniforms.as_entire_binding(),
                 },
             ],
-        };
-        self.device().create_bind_group(&descriptor)
+        })
     }
 
     fn reduce_db_bind_group(&self, partials: &Buffer, db: &Buffer, uniforms: &Buffer) -> BindGroup {
-        let descriptor = wgpu::BindGroupDescriptor {
+        self.device().create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("st.tensor.wgpu_dense.reduce_db.bind_group"),
             layout: &self.reduce_db_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: output.as_entire_binding(),
+                    resource: partials.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: metrics.as_entire_binding(),
+                    resource: db.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: params.as_entire_binding(),
+                    resource: uniforms.as_entire_binding(),
                 },
             ],
-        };
-        self.device().create_bind_group(&descriptor)
+        })
     }
 
     fn fused_conv_pipeline_for(&self, config: TileConfig) -> Result<Arc<ComputePipeline>, String> {
@@ -2593,6 +2594,7 @@ impl GpuContext {
         Ok(pipeline)
     }
 
+    #[cfg(any())]
     fn softmax_spiral_bind_group(
         &self,
         softmax: &Buffer,
@@ -2631,6 +2633,7 @@ impl GpuContext {
         Some(self.device().create_bind_group(&descriptor))
     }
 
+    #[cfg(any())]
     fn project_softmax_zspace(
         &self,
         rows: usize,
@@ -2755,6 +2758,7 @@ impl GpuContext {
         ))
     }
 
+    #[cfg(any())]
     fn prepare_spiral_consensus(
         &self,
         rows: usize,
@@ -2843,6 +2847,7 @@ impl GpuContext {
         })
     }
 
+    #[cfg(any())]
     fn bayesian_refine_softmax_score(
         &self,
         variant: SoftmaxVariant,
@@ -2924,6 +2929,7 @@ impl GpuContext {
         ))
     }
 
+    #[cfg(any())]
     fn metropolis_multi_try_softmax(
         &self,
         variant: SoftmaxVariant,
@@ -3007,6 +3013,7 @@ impl GpuContext {
         ))
     }
 
+    #[cfg(any())]
     fn spiral_anneal_softmax(
         &self,
         variant: SoftmaxVariant,
@@ -3108,6 +3115,7 @@ impl GpuContext {
         ))
     }
 
+    #[cfg(any())]
     fn spiral_consensus_softmax(
         &self,
         variant: SoftmaxVariant,
@@ -3204,6 +3212,7 @@ impl GpuContext {
         ))
     }
 
+    #[cfg(any())]
     fn fused_gelu_back_bind_group(
         &self,
         z: &Buffer,
@@ -3231,13 +3240,21 @@ impl GpuContext {
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
-                    resource: mask_binding.as_entire_binding(),
+                    resource: dr.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: partials.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: uniforms.as_entire_binding(),
                 },
             ],
-        };
-        self.device().create_bind_group(&descriptor)
+        })
     }
 
+    #[cfg(any())]
     fn softmax_zspace_bind_group(
         &self,
         output: &Buffer,
@@ -3266,6 +3283,7 @@ impl GpuContext {
         Some(self.device().create_bind_group(&descriptor))
     }
 
+    #[cfg(any())]
     fn project_softmax_zspace(
         &self,
         rows: usize,
@@ -3390,6 +3408,7 @@ impl GpuContext {
         ))
     }
 
+    #[cfg(any())]
     fn bayesian_refine_softmax_score(
         &self,
         variant: SoftmaxVariant,
@@ -3471,6 +3490,7 @@ impl GpuContext {
         ))
     }
 
+    #[cfg(any())]
     fn metropolis_multi_try_softmax(
         &self,
         variant: SoftmaxVariant,
@@ -3554,6 +3574,7 @@ impl GpuContext {
         ))
     }
 
+    #[cfg(any())]
     fn spiral_anneal_softmax(
         &self,
         variant: SoftmaxVariant,
@@ -3655,6 +3676,7 @@ impl GpuContext {
         ))
     }
 
+    #[cfg(any())]
     fn spiral_consensus_softmax(
         &self,
         variant: SoftmaxVariant,
@@ -3751,6 +3773,7 @@ impl GpuContext {
         ))
     }
 
+    #[cfg(any())]
     fn fused_gelu_back_bind_group(
         &self,
         z: &Buffer,
@@ -3792,6 +3815,7 @@ impl GpuContext {
         })
     }
 
+    #[cfg(any())]
     fn reduce_db_bind_group(&self, partials: &Buffer, db: &Buffer, uniforms: &Buffer) -> BindGroup {
         self.device().create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("st.tensor.wgpu_dense.reduce_db.bind_group"),
@@ -3813,6 +3837,7 @@ impl GpuContext {
         })
     }
 
+    #[cfg(any())]
     fn fused_conv_pipeline_for(&self, config: TileConfig) -> Result<Arc<ComputePipeline>, String> {
         let mut pipelines = self.fused_conv_pipelines.lock().unwrap();
         if let Some(pipeline) = pipelines.get(&config) {
