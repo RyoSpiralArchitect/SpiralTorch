@@ -3569,6 +3569,7 @@ pub struct AmegaHypergrad {
     cols: usize,
     gradient: Vec<f32>,
     summary: Cell<GradientSummary>,
+    summary_dirty: Cell<bool>,
     min_dirty: Cell<bool>,
     max_dirty: Cell<bool>,
     linf_dirty: Cell<bool>,
@@ -4936,6 +4937,7 @@ impl AmegaHypergrad {
             cols,
             gradient,
             summary: Cell::new(summary),
+            summary_dirty: Cell::new(false),
             min_dirty: Cell::new(false),
             max_dirty: Cell::new(false),
             linf_dirty: Cell::new(false),
@@ -4979,6 +4981,7 @@ impl AmegaHypergrad {
             cols,
             gradient,
             summary: Cell::new(summary),
+            summary_dirty: Cell::new(false),
             min_dirty: Cell::new(false),
             max_dirty: Cell::new(false),
             linf_dirty: Cell::new(false),
@@ -5008,6 +5011,10 @@ impl AmegaHypergrad {
 
     /// Provides mutable access to the accumulated gradient buffer.
     pub fn gradient_mut(&mut self) -> &mut [f32] {
+        self.summary_dirty.set(true);
+        self.min_dirty.set(true);
+        self.max_dirty.set(true);
+        self.linf_dirty.set(true);
         &mut self.gradient
     }
 
@@ -5018,6 +5025,9 @@ impl AmegaHypergrad {
 
     #[inline]
     fn ensure_summary_extrema(&self) -> GradientSummary {
+        if self.summary_dirty.get() {
+            self.rebuild_summary();
+        }
         if self.min_dirty.get() || self.max_dirty.get() || self.linf_dirty.get() {
             let mut summary = self.summary.get();
             let mut min = f32::INFINITY;
@@ -5059,6 +5069,7 @@ impl AmegaHypergrad {
     fn rebuild_summary(&self) {
         let summary = GradientSummary::from_slice(&self.gradient);
         self.summary.set(summary);
+        self.summary_dirty.set(false);
         self.min_dirty.set(false);
         self.max_dirty.set(false);
         self.linf_dirty.set(false);
@@ -5136,51 +5147,7 @@ impl AmegaHypergrad {
             }
         }
         self.summary.set(summary);
-    }
-
-    fn telemetry_snapshot(&self) -> HypergradTelemetry {
-        let guard = self.topos();
-        HypergradTelemetry {
-            summary: self.summary(),
-            curvature: self.curvature,
-            learning_rate: self.learning_rate,
-            saturation: guard.saturation(),
-            porosity: guard.porosity(),
-            tolerance: guard.tolerance(),
-            max_depth: guard.max_depth(),
-            max_volume: guard.max_volume(),
-            rows: self.rows,
-            cols: self.cols,
-        }
-    }
-
-    /// Returns a telemetry bundle that mirrors the tape's guard envelope and
-    /// accumulated statistics. Automation layers use the payload to translate
-    /// hypergrad magnitudes into Desire feedback and WGSL operator hints.
-    pub fn telemetry(&self) -> HypergradTelemetry {
-        self.telemetry_snapshot()
-    }
-
-    /// Builds a Desire gradient interpretation by pairing the hypergrad tape's
-    /// summary with the provided Euclidean gradient statistics.
-    pub fn desire_interpretation(&self, real: GradientSummary) -> DesireGradientInterpretation {
-        DesireGradientInterpretation::from_summaries(self.summary(), real)
-    }
-
-    /// Derives a Desire control packet scaled by `gain` using the tape's
-    /// telemetry and the supplied Euclidean gradient summary.
-    pub fn desire_control_with_gain(
-        &self,
-        real: GradientSummary,
-        gain: f32,
-    ) -> DesireGradientControl {
-        DesireGradientControl::from_interpretation_with_gain(self.desire_interpretation(real), gain)
-    }
-
-    /// Convenience wrapper over [`desire_control_with_gain`] that applies the
-    /// recommended gain of `1.0`.
-    pub fn desire_control(&self, real: GradientSummary) -> DesireGradientControl {
-        self.desire_control_with_gain(real, 1.0)
+        self.summary_dirty.set(false);
     }
 
     fn telemetry_snapshot(&self) -> HypergradTelemetry {
@@ -6595,6 +6562,20 @@ mod tests {
         assert_eq!(reset.near_zero_count(), reset.count());
         assert!(reset.min().abs() <= 1e-6);
         assert!(reset.max().abs() <= 1e-6);
+    }
+
+    #[test]
+    fn hypergrad_summary_rebuilds_after_manual_mutation() {
+        let mut tape = AmegaHypergrad::new(-1.0, 0.05, 2, 3).unwrap();
+        let wave = Tensor::from_vec(2, 3, vec![0.4, -0.3, 0.2, 0.1, -0.5, 0.75]).unwrap();
+        tape.accumulate_wave(&wave).unwrap();
+        {
+            let gradient = tape.gradient_mut();
+            gradient.copy_from_slice(&[0.8, -0.1, 0.0, -0.25, 0.6, -0.9]);
+        }
+        let summary = tape.summary();
+        let expected = GradientSummary::from_slice(tape.gradient());
+        assert_summary_close(summary, expected);
     }
 
     #[test]
