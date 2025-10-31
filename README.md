@@ -4,6 +4,11 @@ _(Still under active expanding hourly.)_
 
 **Purpose.** A WGPU-first, research-grade ML/geometry runtime that fuses spectral operators, microlocal tools, and cooperative schedulers into a single stack. The goal: rival CUDA-centric ecosystems using portable GPUs (Metal/Vulkan/DX12) without sacrificing theory fidelity.
 
+## 🚀 Latest SpiralTorch highlights
+
+- **Fractal → Quantum RL bridge.** Stream Mellin-log fractal patches straight into the quantum overlay studio and recover policy gradients through `FractalQuantumTrainer` and friends—keeping Python fallbacks and PyO3 builds in lockstep.
+- **Self-evolving SpiralK kernels.** A new diversity governor inside `SelfRewriteEngine` tracks plateauing η̄ gains, forces fresh AI rewrites when caches go stale, and surfaces telemetry via `diversity_snapshot()` so operators can keep the autonomous kernel lab on course.
+
 ## 🌌 SpiralTorch Manifesto
 
 Step into the paradigm shift from imitation to emergent meaning with the [SpiralTorch Manifesto](docs/spiraltorch_manifesto.md).
@@ -2152,33 +2157,44 @@ let mut policy = SpiralPolicyGradient::new(4, 2, 0.05, 0.9)?;
 policy.attach_hyper_surprise_with_config(
     LossStdTrigger::new(0.12)
         .with_warmup(2)
-        .with_max_ratio(2.5),
+        .with_max_ratio(2.5)
+        .with_deadband(0.15),
     HyperSurpriseConfig::default()
         .with_smoothing(0.35)
-        .with_relaxation(0.45)
-        .with_lr_floor(1e-4)
-        .with_ratio_smoothing(0.55)
-        .with_cooldown_steps(3),
+        .with_reversion(0.55)
+        .with_lr_floor(1e-4),
 );
 // ...record transitions...
 let report = policy.finish_episode()?;
 if let Some(surprise) = &report.hyper_surprise {
     println!(
-        "σ={:.3} inject={:.2} η̄={:.3} gauge={:.2} lr={:.4}",
+        "σ={:.3} inject={:.2} η̄={:.3} gauge={:.2} lr={:.4} σ̂={:.3}",
         surprise.loss_std,
         surprise.inject_ratio,
         surprise.eta_bar,
         surprise.gauge,
-        surprise.learning_rate
+        surprise.learning_rate,
+        surprise.rolling_std
     );
 }
 ```
 
-`LossStdTrigger` keeps an EMA of the observed loss standard deviation, clamps
-surprise pulses, and modulates both the learning-rate and gradient gauge inside
-the episode update. `SpiralPolicyGradient::last_hyper_surprise()` exposes the
-latest packet so telemetry dashboards can correlate η̄ spikes with emergent
-behaviour.
+`LossStdTrigger` keeps an EMA of the observed loss standard deviation, applies a
+configurable deadband before clamping surprise pulses, and modulates both the
+learning-rate and gradient gauge inside the episode update.
+`SpiralPolicyGradient::last_hyper_surprise()` exposes the latest packet so
+telemetry dashboards can correlate η̄ spikes with emergent behaviour.
+
+`HyperSurpriseConfig` now includes builder helpers for smoothing, gauge floors,
+and floor clamps on both η̄ and the learning rate. A dedicated reversion factor
+lets gauges glide back to baseline instead of snapping when shocks subside, and
+the emitted telemetry now shares the rolling standard deviation alongside the
+imposed clamps. Ratio telemetry is derived from the post-clamp, smoothed gauge
+so `HyperSurpriseSignal::inject_ratio` mirrors the actual scaling applied to
+η̄ and the learning-rate. These guards keep legacy pipelines untouched (defaults
+mirror the previous behaviour) while unlocking telemetry-rich packets via
+`HyperSurpriseSignal::gauge`, `HyperSurpriseSignal::learning_rate`, and
+`HyperSurpriseSignal::rolling_std`.
 
 `HyperSurpriseConfig` now includes builder helpers for smoothing, relaxation
 back to the baseline gauge, ratio smoothing, cooldown windows, gauge floors, and
