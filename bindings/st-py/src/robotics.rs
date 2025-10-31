@@ -43,28 +43,39 @@ impl PySensorFusionHub {
         }
     }
 
-    #[pyo3(signature = (name, dimension))]
-    pub fn register_channel(&mut self, name: &str, dimension: usize) -> PyResult<()> {
+    #[pyo3(signature = (name, dimension, smoothing=None))]
+    pub fn register_channel(
+        &mut self,
+        name: &str,
+        dimension: usize,
+        smoothing: Option<f32>,
+    ) -> PyResult<()> {
         self.inner
-            .register_channel(name, dimension)
+            .register_channel_with_smoothing(name, dimension, smoothing)
             .map_err(robotics_err_to_py)
     }
 
-    #[pyo3(signature = (name, bias=None, scale=None, smoothing=None))]
+    #[pyo3(signature = (name, bias=None, scale=None))]
     pub fn calibrate(
         &mut self,
         py: Python<'_>,
         name: &str,
         bias: Option<Py<PyAny>>,
         scale: Option<f32>,
-        smoothing: Option<f32>,
     ) -> PyResult<()> {
         let bias_vec = match bias {
             Some(obj) => Some(obj.bind(py).extract::<Vec<f32>>()?),
             None => None,
         };
         self.inner
-            .calibrate(name, bias_vec, scale, smoothing)
+            .calibrate(name, bias_vec, scale)
+            .map_err(robotics_err_to_py)
+    }
+
+    #[pyo3(signature = (name, smoothing))]
+    pub fn configure_smoothing(&mut self, name: &str, smoothing: Option<f32>) -> PyResult<()> {
+        self.inner
+            .configure_smoothing(name, smoothing)
             .map_err(robotics_err_to_py)
     }
 
@@ -249,7 +260,7 @@ impl PyTelemetryReport {
     }
 }
 
-#[pyclass(module = "spiraltorch.robotics", name = "PolicyGradient")]
+#[pyclass(module = "spiraltorch.robotics", name = "PolicyGradientController")]
 #[derive(Clone, Debug)]
 pub(crate) struct PyPolicyGradientController {
     inner: PolicyGradientController,

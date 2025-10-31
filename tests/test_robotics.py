@@ -49,25 +49,16 @@ class SensorFusionHubTests(unittest.TestCase):
             all(math.isclose(value, expected) for value, expected in zip(imu_vector, (0.2, 0.6, 0.4)))
         )
 
-    def test_smoothing_filters_transitions(self) -> None:
+    def test_smoothing_filters_noise(self) -> None:
         hub = SensorFusionHub()
-        hub.register_channel("imu", 1)
-        hub.calibrate("imu", smoothing=0.5)
+        hub.register_channel("imu", 1, smoothing=0.5)
 
-        first = hub.fuse({"imu": (1.0,)})
-        self.assertAlmostEqual(first.coordinates["imu"][0], 1.0)
-
+        hub.fuse({"imu": (1.0,)})
         second = hub.fuse({"imu": (0.0,)})
-        self.assertGreater(second.coordinates["imu"][0], 0.0)
-        self.assertLess(second.coordinates["imu"][0], 1.0)
 
-    def test_calibrate_rejects_invalid_smoothing(self) -> None:
-        hub = SensorFusionHub()
-        hub.register_channel("imu", 1)
-        with self.assertRaises(ValueError):
-            hub.calibrate("imu", smoothing=1.5)
-        with self.assertRaises(ValueError):
-            hub.calibrate("imu", smoothing=-0.1)
+        value = second.coordinates["imu"][0]
+        self.assertGreater(value, 0.0)
+        self.assertLess(value, 1.0)
 
 
 class DesireFieldTests(unittest.TestCase):

@@ -9,14 +9,39 @@ from typing import Iterable, Mapping, MutableMapping, Sequence
 
 
 @dataclass
+class ExponentialSmoother:
+    """Simple exponential moving-average smoother."""
+
+    alpha: float
+    state: float | None = None
+
+    def update(self, value: float) -> float:
+        if self.state is None:
+            self.state = float(value)
+        else:
+            self.state = self.alpha * float(value) + (1.0 - self.alpha) * self.state
+        return self.state
+
+
+@dataclass
 class SensorChannel:
     """Descriptor for a registered sensor modality."""
 
     dimension: int
     bias: tuple[float, ...]
     scale: float
-    smoothing: float
-    last: tuple[float, ...] | None = field(default=None, repr=False)
+    smoothers: list[ExponentialSmoother] = field(default_factory=list)
+
+    def configure_smoothing(self, smoothing: float | None) -> None:
+        if smoothing is None:
+            self.smoothers = []
+            return
+        alpha = float(smoothing)
+        if not 0.0 < alpha <= 1.0:
+            raise ValueError(
+                f"smoothing coefficient must be in the range (0, 1]; got {alpha}"
+            )
+        self.smoothers = [ExponentialSmoother(alpha=alpha) for _ in range(self.dimension)]
 
     def apply(self, payload: Sequence[float] | Iterable[float]) -> tuple[float, ...]:
         values = tuple(float(value) for value in payload)
@@ -24,16 +49,13 @@ class SensorChannel:
             raise ValueError(
                 f"payload for channel must contain {self.dimension} values; got {len(values)}"
             )
-        outputs: list[float] = []
+        adjusted: list[float] = []
         for idx, value in enumerate(values):
-            adjusted = (value - self.bias[idx]) * self.scale
-            if 0.0 < self.smoothing < 1.0 and self.last is not None:
-                previous = self.last[idx]
-                outputs.append(previous + self.smoothing * (adjusted - previous))
-            else:
-                outputs.append(adjusted)
-        self.last = tuple(outputs)
-        return self.last
+            calibrated = (value - self.bias[idx]) * self.scale
+            if idx < len(self.smoothers):
+                calibrated = self.smoothers[idx].update(calibrated)
+            adjusted.append(calibrated)
+        return tuple(adjusted)
 
 
 @dataclass
@@ -95,26 +117,24 @@ class SensorFusionHub:
     def __init__(self) -> None:
         self._channels: MutableMapping[str, SensorChannel] = {}
 
-    def register_channel(self, name: str, dimension: int) -> None:
+    def register_channel(
+        self, name: str, dimension: int, *, smoothing: float | None = None
+    ) -> None:
         if name in self._channels:
             raise ValueError(f"channel {name!r} already registered")
         if dimension <= 0:
             raise ValueError("channel dimension must be positive")
-        self._channels[name] = SensorChannel(
+        channel = SensorChannel(
             dimension=int(dimension),
             bias=tuple(0.0 for _ in range(dimension)),
             scale=1.0,
-            smoothing=0.0,
-            last=None,
         )
+        if smoothing is not None:
+            channel.configure_smoothing(smoothing)
+        self._channels[name] = channel
 
     def calibrate(
-        self,
-        name: str,
-        *,
-        bias: Sequence[float] | None = None,
-        scale: float | None = None,
-        smoothing: float | None = None,
+        self, name: str, *, bias: Sequence[float] | None = None, scale: float | None = None
     ) -> None:
         channel = self._channels.get(name)
         if channel is None:
@@ -126,26 +146,24 @@ class SensorFusionHub:
                     f"bias for channel {name!r} must contain {channel.dimension} values; got {len(vector)}"
                 )
             channel.bias = vector
-            channel.last = None
         if scale is not None:
             channel.scale = float(scale)
-            channel.last = None
-        if smoothing is not None:
-            if not 0.0 <= float(smoothing) <= 1.0:
-                raise ValueError("smoothing factor must be between 0.0 and 1.0")
-            channel.smoothing = float(smoothing)
+
+    def configure_smoothing(self, name: str, smoothing: float | None) -> None:
+        channel = self._channels.get(name)
+        if channel is None:
+            raise KeyError(f"unknown channel {name!r}")
+        channel.configure_smoothing(smoothing)
 
     def fuse(self, payloads: Mapping[str, Sequence[float] | Iterable[float]]) -> FusedFrame:
         if not self._channels:
             raise RuntimeError("no sensor channels registered")
         coordinates: dict[str, tuple[float, ...]] = {}
-        for name, channel in self._channels.items():
-            raw = payloads.get(name)
-            if raw is None:
-                continue
+        for name, raw in payloads.items():
+            channel = self._channels.get(name)
+            if channel is None:
+                raise KeyError(f"unknown channel {name!r}")
             coordinates[name] = channel.apply(raw)
-        if not coordinates:
-            raise ValueError("no payload matched any registered channel")
         return FusedFrame(coordinates=coordinates, timestamp=time.time())
 
 
