@@ -101,6 +101,83 @@ pub struct HyperSurpriseConfig {
     pub eta_bar: f32,
     pub curvature: f32,
     pub max_gauge: f32,
+    pub min_gauge: f32,
+    pub eta_floor: f32,
+    pub lr_floor: f32,
+    pub smoothing: f32,
+    pub relaxation: f32,
+    pub ratio_smoothing: f32,
+    pub cooldown_steps: usize,
+}
+
+impl HyperSurpriseConfig {
+    pub fn with_eta_bar(mut self, eta_bar: f32) -> Self {
+        if eta_bar.is_finite() && eta_bar > 0.0 {
+            self.eta_bar = eta_bar;
+        }
+        self
+    }
+
+    pub fn with_curvature(mut self, curvature: f32) -> Self {
+        if curvature.is_finite() {
+            self.curvature = curvature;
+        }
+        self
+    }
+
+    pub fn with_max_gauge(mut self, max_gauge: f32) -> Self {
+        if max_gauge.is_finite() && max_gauge > 0.0 {
+            self.max_gauge = max_gauge;
+        }
+        self
+    }
+
+    pub fn with_min_gauge(mut self, min_gauge: f32) -> Self {
+        if min_gauge.is_finite() && min_gauge > 0.0 {
+            self.min_gauge = min_gauge;
+        }
+        self
+    }
+
+    pub fn with_eta_floor(mut self, eta_floor: f32) -> Self {
+        if eta_floor.is_finite() && eta_floor >= 0.0 {
+            self.eta_floor = eta_floor;
+        }
+        self
+    }
+
+    pub fn with_lr_floor(mut self, lr_floor: f32) -> Self {
+        if lr_floor.is_finite() && lr_floor > 0.0 {
+            self.lr_floor = lr_floor;
+        }
+        self
+    }
+
+    pub fn with_smoothing(mut self, smoothing: f32) -> Self {
+        if smoothing.is_finite() {
+            self.smoothing = smoothing.clamp(0.0, 1.0);
+        }
+        self
+    }
+
+    pub fn with_relaxation(mut self, relaxation: f32) -> Self {
+        if relaxation.is_finite() {
+            self.relaxation = relaxation.clamp(0.0, 1.0);
+        }
+        self
+    }
+
+    pub fn with_ratio_smoothing(mut self, ratio_smoothing: f32) -> Self {
+        if ratio_smoothing.is_finite() {
+            self.ratio_smoothing = ratio_smoothing.clamp(0.0, 1.0);
+        }
+        self
+    }
+
+    pub fn with_cooldown_steps(mut self, cooldown_steps: usize) -> Self {
+        self.cooldown_steps = cooldown_steps;
+        self
+    }
 }
 
 impl Default for HyperSurpriseConfig {
@@ -109,6 +186,13 @@ impl Default for HyperSurpriseConfig {
             eta_bar: 0.5,
             curvature: -1.0,
             max_gauge: 4.0,
+            min_gauge: 1.0,
+            eta_floor: 0.0,
+            lr_floor: 1e-6,
+            smoothing: 0.0,
+            relaxation: 0.5,
+            ratio_smoothing: 0.0,
+            cooldown_steps: 0,
         }
     }
 }
@@ -122,6 +206,8 @@ pub struct HyperSurpriseSignal {
     pub inject_ratio: f32,
     pub eta_bar: f32,
     pub curvature: f32,
+    pub gauge: f32,
+    pub learning_rate: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -136,6 +222,9 @@ pub struct HyperSurpriseController {
     trigger: LossStdTrigger,
     config: HyperSurpriseConfig,
     last_signal: Option<HyperSurpriseSignal>,
+    last_gauge: f32,
+    smoothed_ratio: f32,
+    cooldown: usize,
 }
 
 impl HyperSurpriseController {
@@ -144,6 +233,9 @@ impl HyperSurpriseController {
             trigger,
             config,
             last_signal: None,
+            last_gauge: 1.0,
+            smoothed_ratio: 0.0,
+            cooldown: 0,
         }
     }
 
@@ -162,19 +254,35 @@ impl HyperSurpriseController {
         learning_rate: f32,
     ) -> HyperSurpriseOutcome {
         let std = loss_std(returns, baseline);
-        if let Some(ratio) = self.trigger.observe(std) {
+        let candidate_ratio = self.trigger.observe(std);
+        let ratio = self.pop_ratio(candidate_ratio);
+        if let Some(ratio) = ratio {
             let clamped_ratio = ratio.clamp(0.0, self.config.max_gauge);
-            let gauge = 1.0 + clamped_ratio * self.config.curvature.tanh().abs();
+            let gauge_ceiling = self.config.max_gauge.max(self.config.min_gauge);
+            let raw_gauge = 1.0 + clamped_ratio * self.config.curvature.tanh().abs();
+            let bounded_gauge = raw_gauge.clamp(self.config.min_gauge, gauge_ceiling);
+            let smoothing = self.config.smoothing.clamp(0.0, 1.0);
+            let gauge = if smoothing > 0.0 {
+                let relaxed = smoothing * self.last_gauge + (1.0 - smoothing) * bounded_gauge;
+                self.last_gauge = relaxed;
+                relaxed
+            } else {
+                self.last_gauge = bounded_gauge;
+                bounded_gauge
+            };
             let scaled_lr = match learning_rate.partial_cmp(&0.0) {
                 Some(Ordering::Greater) => learning_rate * (1.0 + clamped_ratio),
                 _ => learning_rate,
-            };
-            let eta_bar = self.config.eta_bar * (1.0 + clamped_ratio);
+            }
+            .max(self.config.lr_floor.max(1e-9));
+            let eta_bar = (self.config.eta_bar * (1.0 + clamped_ratio)).max(self.config.eta_floor);
             let signal = HyperSurpriseSignal {
                 loss_std: std,
                 inject_ratio: clamped_ratio,
                 eta_bar,
                 curvature: self.config.curvature,
+                gauge,
+                learning_rate: scaled_lr,
             };
             self.last_signal = Some(signal.clone());
             HyperSurpriseOutcome {
@@ -183,12 +291,53 @@ impl HyperSurpriseController {
                 signal: Some(signal),
             }
         } else {
+            let relaxation = self.config.relaxation.clamp(0.0, 1.0);
+            let gauge = if relaxation > 0.0 {
+                let relaxed = relaxation * self.last_gauge + (1.0 - relaxation);
+                self.last_gauge = relaxed;
+                relaxed
+            } else {
+                self.last_gauge = 1.0;
+                1.0
+            };
             self.last_signal = None;
             HyperSurpriseOutcome {
-                learning_rate,
-                gauge: 1.0,
+                learning_rate: learning_rate.max(self.config.lr_floor.max(1e-9)),
+                gauge,
                 signal: None,
             }
+        }
+    }
+
+    fn pop_ratio(&mut self, candidate: Option<f32>) -> Option<f32> {
+        let accepted = if let Some(ratio) = candidate {
+            if self.cooldown == 0 {
+                self.cooldown = self.config.cooldown_steps.saturating_add(1);
+                ratio.max(0.0)
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        };
+
+        if self.cooldown > 0 {
+            self.cooldown = self.cooldown.saturating_sub(1);
+        }
+
+        let smoothing = self.config.ratio_smoothing.clamp(0.0, 1.0);
+        if smoothing > 0.0 {
+            self.smoothed_ratio =
+                smoothing * self.smoothed_ratio + (1.0 - smoothing) * accepted;
+        } else {
+            self.smoothed_ratio = accepted;
+        }
+
+        if self.smoothed_ratio > 1e-6 {
+            Some(self.smoothed_ratio)
+        } else {
+            self.smoothed_ratio = 0.0;
+            None
         }
     }
 }

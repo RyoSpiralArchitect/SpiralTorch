@@ -130,7 +130,7 @@ SpiralTorch ships under a dual-license model:
 ## Code stats
 
 <!-- AUTOGEN: CODESTATS BEGIN -->
-_Last updated: 2025-10-28 07:17 UTC_
+_Last updated: 2025-10-29 04:56 UTC_
 
 ```text
 
@@ -144,12 +144,12 @@ _Last updated: 2025-10-28 07:17 UTC_
  Go                     11         2582         2082          200          300
  JSON                    6          372          372            0            0
  Julia                   8         1335         1176           14          145
- Python                 71        17859        15027          101         2731
+ Python                 77        18800        15825          103         2872
  Shell                   4          194          172            4           18
  SVG                     3           60           60            0            0
  Plain Text              1          661            0          544          117
- TOML                   37          929          791           27          111
- TypeScript              7         4898         4331          175          392
+ TOML                   39          983          839           27          117
+ TypeScript              7         4899         4332          175          392
  YAML                    3           72           65            0            7
 -------------------------------------------------------------------------------
  HTML                    2          491          491            0            0
@@ -162,8 +162,8 @@ _Last updated: 2025-10-28 07:17 UTC_
  |- Python               2           22           20            0            2
  (Total)                             31           20            9            2
 -------------------------------------------------------------------------------
- Markdown               62         6239            0         4899         1340
- |- BASH                16          125           96           17           12
+ Markdown               63         6393            0         5015         1378
+ |- BASH                17          131          102           17           12
  |- C                    1           21           16            0            5
  |- COBOL                1           30           30            0            0
  |- Dockerfile           1            6            6            0            0
@@ -172,15 +172,15 @@ _Last updated: 2025-10-28 07:17 UTC_
  |- JSON                 1           11           11            0            0
  |- Julia                1           29           26            0            3
  |- Python               7          840          702           20          118
- |- Rust                 5          759          667           15           77
+ |- Rust                 5          777          683           16           78
  |- YAML                 2           62           62            0            0
- (Total)                           8174         1663         4954         1557
+ (Total)                           8352         1685         5071         1596
 -------------------------------------------------------------------------------
- Rust                  383       170457       152236         1826        16395
- |- Markdown           241         6600            0         6447          153
- (Total)                         177057       152236         8273        16548
+ Rust                  392       174257       155659         1840        16758
+ |- Markdown           247         6653            0         6499          154
+ (Total)                         180910       155659         8339        16912
 ===============================================================================
- Total                 604       207106       177654         7802        21650
+ Total                 622       212056       181924         7934        22198
 ===============================================================================
 
 ```
@@ -2134,22 +2134,30 @@ the **HyperSurprise** pipeline. Attach a `LossStdTrigger` and SpiralTorch inject
 η̄ pulses whenever the episode's return standard deviation breaches the guard:
 
 ```rust
-use st_spiral_rl::{LossStdTrigger, SpiralPolicyGradient};
+use st_spiral_rl::{HyperSurpriseConfig, LossStdTrigger, SpiralPolicyGradient};
 
 let mut policy = SpiralPolicyGradient::new(4, 2, 0.05, 0.9)?;
-policy.attach_hyper_surprise(
+policy.attach_hyper_surprise_with_config(
     LossStdTrigger::new(0.12)
         .with_warmup(2)
         .with_max_ratio(2.5),
+    HyperSurpriseConfig::default()
+        .with_smoothing(0.35)
+        .with_relaxation(0.45)
+        .with_lr_floor(1e-4)
+        .with_ratio_smoothing(0.55)
+        .with_cooldown_steps(3),
 );
 // ...record transitions...
 let report = policy.finish_episode()?;
 if let Some(surprise) = &report.hyper_surprise {
     println!(
-        "σ={:.3} inject={:.2} η̄={:.3}",
+        "σ={:.3} inject={:.2} η̄={:.3} gauge={:.2} lr={:.4}",
         surprise.loss_std,
         surprise.inject_ratio,
-        surprise.eta_bar
+        surprise.eta_bar,
+        surprise.gauge,
+        surprise.learning_rate
     );
 }
 ```
@@ -2160,14 +2168,19 @@ the episode update. `SpiralPolicyGradient::last_hyper_surprise()` exposes the
 latest packet so telemetry dashboards can correlate η̄ spikes with emergent
 behaviour.
 
-The controller now threads Ramanujan's π synthesis and the Λ₂₄ packing density
-into its smoothing loop while auto-rewriting its own clamps. Rank, packing
-pressure, and scale histories sit on rolling windows so noisy small-batch runs
-settle quickly, and the `trainer.telemetry()` surface mirrors the same values to
-spot drift. `GeometryFeedback` keeps `max_scale` inside the recommended `[2, 3]`
-band, raises the floor when rank collapses, and eases the Leech density weight
-if pressure over-saturates—giving you a self-tuning geometric metronome instead
-of a static multiplier.
+`HyperSurpriseConfig` now includes builder helpers for smoothing, relaxation
+back to the baseline gauge, ratio smoothing, cooldown windows, gauge floors, and
+floor clamps on both η̄ and the learning rate. These guards keep legacy
+pipelines untouched (defaults mirror the previous behaviour) while unlocking
+telemetry-rich packets via `HyperSurpriseSignal::gauge` and
+`HyperSurpriseSignal::learning_rate`.
+
+The controller uses the ratio smoother to bleed off residual pulses instead of
+snapping gauge/η̄ immediately back to baseline, and the cooldown window prevents
+short bursts of volatility from hammering the learner every frame. Relaxation
+lets you pick how gently the gauge returns to neutral once the surprise subsides
+so you can trade responsiveness for smoothness depending on your training
+regime.
 
 Chrono loop signals now feed directly into the controller: every
 `SpiralSession::resonate_over_time` call plants a `ChronoLoopSignal` in the
