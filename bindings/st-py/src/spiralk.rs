@@ -1020,6 +1020,19 @@ impl From<MaxwellZPulse> for PyMaxwellPulse {
     }
 }
 
+impl PyMaxwellPulse {
+    pub(crate) fn to_pulse(&self) -> MaxwellZPulse {
+        MaxwellZPulse {
+            blocks: self.inner.blocks,
+            mean: self.inner.mean,
+            standard_error: self.inner.standard_error,
+            z_score: self.inner.z_score,
+            band_energy: self.inner.band_energy,
+            z_bias: self.inner.z_bias,
+        }
+    }
+}
+
 #[pymethods]
 impl PyMaxwellPulse {
     #[new]

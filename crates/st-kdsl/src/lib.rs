@@ -12,6 +12,7 @@ pub mod ir;
 mod program;
 pub mod query;
 pub mod registry;
+pub mod self_mod;
 pub mod tile;
 
 pub use auto::{
@@ -26,6 +27,7 @@ pub use registry::{
     AutotuneKey, AutotuneRegistry, DeviceProfile, KernelProfile, TelemetryLog, TelemetrySample,
     TelemetrySummary,
 };
+pub use self_mod::{SelfRewriteEngine, SelfRewriteEvent};
 pub use tile::{TileConfig, TileIter, TileKnowledge, TileTemplate, WeightedMetric};
 
 #[derive(Clone, Copy, Debug, Default)]
