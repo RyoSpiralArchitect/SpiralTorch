@@ -36,6 +36,11 @@ class ToolSummary:
     detail: str | None = None
     language: str = "Unknown"
     description_source: str = "unknown"
+    lines_of_code: int = 0
+    function_count: int = 0
+    class_count: int = 0
+    imports: tuple[str, ...] = ()
+    tags: tuple[str, ...] = ()
 
     @property
     def relative_path(self) -> str:
@@ -52,6 +57,11 @@ class ToolSummary:
             "detail": self.detail,
             "language": self.language,
             "description_source": self.description_source,
+            "lines_of_code": self.lines_of_code,
+            "function_count": self.function_count,
+            "class_count": self.class_count,
+            "imports": list(self.imports),
+            "tags": list(self.tags),
         }
 
 
@@ -62,7 +72,12 @@ def collect_tool_summaries(
 
     summaries: list[ToolSummary] = []
     for path in sorted(_iter_tool_files(root, include_non_python)):
-        summary, detail, source = _summarize(path)
+        text = _read_file(path)
+        module = _parse_module(path) if path.suffix == ".py" else None
+        summary, detail, source = _summarize(path, module=module)
+        imports = tuple(_extract_imports(module))
+        functions, classes = _count_definitions(module)
+        tags = tuple(_infer_tags(path, module, imports, text))
         summaries.append(
             ToolSummary(
                 path=path.relative_to(root),
@@ -70,6 +85,11 @@ def collect_tool_summaries(
                 detail=detail,
                 language=_detect_language(path),
                 description_source=source,
+                lines_of_code=_count_lines_of_code(path, text),
+                function_count=functions,
+                class_count=classes,
+                imports=imports,
+                tags=tags,
             )
         )
     return summaries
@@ -87,14 +107,17 @@ def _iter_tool_files(root: Path, include_non_python: bool) -> Iterator[Path]:
             yield path
 
 
-def _summarize(path: Path) -> tuple[str, str | None, str]:
+def _summarize(
+    path: Path, *, module: ast.Module | None = None
+) -> tuple[str, str | None, str]:
     """Generate a human-friendly summary for *path*.
 
     Returns a tuple of ``(summary, detail, description_source)``.
     """
 
     if path.suffix == ".py":
-        module = _parse_module(path)
+        if module is None:
+            module = _parse_module(path)
         doc = _extract_docstring(module)
         if doc:
             summary, detail = _split_docstring(doc)
@@ -132,11 +155,11 @@ def _extract_docstring(module: ast.Module | None) -> str | None:
 def _extract_leading_comment(path: Path) -> str | None:
     """Return the first leading comment in the file, if any."""
 
-    try:
-        lines = path.read_text(encoding="utf8").splitlines()
-    except UnicodeDecodeError:
+    text = _read_file(path)
+    if text is None:
         return None
 
+    lines = text.splitlines()
     for line in lines:
         stripped = line.strip()
         if not stripped:
@@ -250,6 +273,128 @@ def _parse_module(path: Path) -> ast.Module | None:
     try:
         return ast.parse(path.read_text(encoding="utf8"))
     except (SyntaxError, UnicodeDecodeError):
+        return None
+
+
+def _extract_imports(module: ast.Module | None) -> list[str]:
+    """Return a sorted list of imported top-level modules for *module*."""
+
+    if module is None:
+        return []
+
+    modules: set[str] = set()
+    for node in ast.walk(module):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                modules.add(alias.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                modules.add(node.module.split(".")[0])
+    return sorted(modules)
+
+
+def _count_definitions(module: ast.Module | None) -> tuple[int, int]:
+    """Return ``(function_count, class_count)`` for *module*."""
+
+    if module is None:
+        return 0, 0
+
+    function_count = 0
+    class_count = 0
+    for node in ast.walk(module):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            function_count += 1
+        elif isinstance(node, ast.ClassDef):
+            class_count += 1
+    return function_count, class_count
+
+
+def _count_lines_of_code(path: Path, text: str | None) -> int:
+    """Return a rough non-empty line count for *path*."""
+
+    if text is None:
+        return 0
+
+    count = 0
+    comment_prefix = "#" if path.suffix == ".py" else None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if comment_prefix and stripped.startswith(comment_prefix):
+            continue
+        count += 1
+    return count
+
+
+def _infer_tags(
+    path: Path,
+    module: ast.Module | None,
+    imports: tuple[str, ...] | list[str],
+    text: str | None,
+) -> list[str]:
+    """Heuristically derive descriptive tags for *path*."""
+
+    tags: set[str] = set()
+    suffix = path.suffix.lower()
+
+    if suffix == ".py":
+        if "argparse" in imports or "click" in imports or "typer" in imports:
+            tags.add("cli")
+        if any(name in imports for name in {"pytest", "unittest"}):
+            tags.add("test")
+        if module is not None:
+            async_functions = any(
+                isinstance(node, ast.AsyncFunctionDef) for node in ast.walk(module)
+            )
+            if async_functions:
+                tags.add("async")
+            main_guard = any(
+                isinstance(node, ast.If)
+                and isinstance(node.test, ast.Compare)
+                and _is_main_guard(node.test)
+                for node in module.body
+            )
+            if main_guard:
+                tags.add("entrypoint")
+    elif suffix in {".sh", ".bash"}:
+        tags.add("shell")
+    elif suffix in {".toml", ".yaml", ".yml", ".json"}:
+        tags.add("config")
+
+    if text and "TODO" in text:
+        tags.add("todo")
+    if path.name.startswith("test_") or path.name.endswith("_test.py"):
+        tags.add("test")
+
+    return sorted(tags)
+
+
+def _is_main_guard(test: ast.AST) -> bool:
+    """Return ``True`` if *test* matches ``__name__ == '__main__'``."""
+
+    if not isinstance(test, ast.Compare):
+        return False
+    if len(test.ops) != 1 or not isinstance(test.ops[0], ast.Eq):
+        return False
+    if len(test.comparators) != 1:
+        return False
+    left = test.left
+    right = test.comparators[0]
+    return (
+        isinstance(left, ast.Name)
+        and left.id == "__name__"
+        and isinstance(right, ast.Constant)
+        and right.value == "__main__"
+    )
+
+
+def _read_file(path: Path) -> str | None:
+    """Return the contents of *path* as UTF-8 text if possible."""
+
+    try:
+        return path.read_text(encoding="utf8")
+    except UnicodeDecodeError:
         return None
 
 
