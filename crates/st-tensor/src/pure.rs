@@ -3700,7 +3700,7 @@ impl GradientSummary {
             0.0
         };
         let linf = if linf.is_finite() { linf.max(0.0) } else { 0.0 };
-        Self {
+        let summary = Self {
             l1,
             l2: sum_squares.sqrt(),
             linf,
@@ -3714,14 +3714,9 @@ impl GradientSummary {
             positive_count: 0,
             negative_count: 0,
             near_zero_count: 0,
-        }
+        };
 
-        self.min = min;
-        self.max = max;
-        self.positive_count = positive_count;
-        self.negative_count = negative_count;
-        self.near_zero_count = near_zero_count;
-        self
+        summary
     }
 
     /// Attach support and sign statistics to an existing summary. When the
