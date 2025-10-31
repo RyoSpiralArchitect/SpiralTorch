@@ -5868,17 +5868,11 @@ fn fused_attention_cpu(
 }
 
 fn row_softmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
-    match HardmaxFusionPlan::new(data, rows, cols)
-        .layout(Layout::RowMajor)
-        .backend(HardmaxBackend::Cpu)
-        .mode(HardmaxMode::SoftmaxAndMask)
-        .execute()
-    {
-        Ok(result) => result
-            .softmax
-            .unwrap_or_else(|| vec![0.0; rows.saturating_mul(cols)]),
-        Err(_) => vec![0.0; rows.saturating_mul(cols)],
-    }
+    row_softmax_hardmax_cpu(data, rows, cols).0
+}
+
+fn row_hardmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+    row_softmax_hardmax_cpu(data, rows, cols).1
 }
 
 #[cfg_attr(feature = "wgpu", allow(dead_code))]
