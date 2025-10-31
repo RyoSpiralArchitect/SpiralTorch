@@ -12,6 +12,7 @@ members = [
   "crates/st-qr-studio",
   "crates/st-text",
   "crates/st-vision",
+  "crates/st-robotics",
   "crates/st-spiral-rl",
   "crates/st-rec",
   "crates/st-bench",

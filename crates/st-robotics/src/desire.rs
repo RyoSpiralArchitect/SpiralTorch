@@ -1,0 +1,141 @@
+use std::collections::HashMap;
+
+use crate::geometry::ZSpaceDynamics;
+use crate::sensors::FusedFrame;
+
+/// Encodes an instinctive objective via a quadratic tolerance band.
+#[derive(Debug, Clone)]
+pub struct Desire {
+    pub target_norm: f32,
+    pub tolerance: f32,
+    pub weight: f32,
+}
+
+impl Desire {
+    pub fn energy(&self, norm: f32) -> f32 {
+        let delta = (norm - self.target_norm).abs() - self.tolerance;
+        let penalty = delta.max(0.0);
+        penalty * self.weight
+    }
+}
+
+/// Aggregates channel energy contributions per desire field.
+#[derive(Debug, Clone)]
+pub struct EnergyReport {
+    pub total: f32,
+    pub per_channel: HashMap<String, f32>,
+    pub gravitational: f32,
+    pub gravitational_per_channel: HashMap<String, f32>,
+}
+
+impl EnergyReport {
+    pub fn zero() -> Self {
+        Self {
+            total: 0.0,
+            per_channel: HashMap::new(),
+            gravitational: 0.0,
+            gravitational_per_channel: HashMap::new(),
+        }
+    }
+}
+
+/// Collection of instincts spanning sensor channels.
+#[derive(Debug, Clone, Default)]
+pub struct DesireLagrangianField {
+    desires: HashMap<String, Desire>,
+    dynamics: ZSpaceDynamics,
+}
+
+impl DesireLagrangianField {
+    pub fn new(desires: HashMap<String, Desire>) -> Self {
+        Self {
+            desires,
+            dynamics: ZSpaceDynamics::default(),
+        }
+    }
+
+    pub fn with_dynamics(desires: HashMap<String, Desire>, dynamics: ZSpaceDynamics) -> Self {
+        Self { desires, dynamics }
+    }
+
+    pub fn energy(&self, frame: &FusedFrame) -> EnergyReport {
+        let mut report = EnergyReport::zero();
+        for (name, vector) in &frame.coordinates {
+            if let Some(desire) = self.desires.get(name) {
+                let norm = self.dynamics.geometry().metric_norm(vector);
+                let channel_energy = desire.energy(norm);
+                report.total += channel_energy;
+                report.per_channel.insert(name.clone(), channel_energy);
+            }
+            if let Some(gravity) = self.dynamics.gravity() {
+                if let Some(potential) = gravity.potential(name, self.dynamics.geometry(), vector) {
+                    report.gravitational += potential;
+                    report
+                        .gravitational_per_channel
+                        .insert(name.clone(), potential);
+                    report.total += potential.abs();
+                }
+            }
+        }
+        report
+    }
+
+    pub fn dynamics(&self) -> &ZSpaceDynamics {
+        &self.dynamics
+    }
+
+    pub fn set_dynamics(&mut self, dynamics: ZSpaceDynamics) {
+        self.dynamics = dynamics;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geometry::{
+        GravityField, GravityRegime, GravityWell, ZSpaceDynamics, ZSpaceGeometry,
+    };
+    use crate::sensors::SensorFusionHub;
+
+    #[test]
+    fn desire_field_accumulates_energy() {
+        let mut hub = SensorFusionHub::new();
+        hub.register_channel("pose", 1).unwrap();
+        let frame = hub
+            .fuse(&HashMap::from([("pose".to_string(), vec![0.7])]))
+            .unwrap();
+        let mut desires = HashMap::new();
+        desires.insert(
+            "pose".to_string(),
+            Desire {
+                target_norm: 0.2,
+                tolerance: 0.05,
+                weight: 2.0,
+            },
+        );
+        let field = DesireLagrangianField::new(desires);
+        let energy = field.energy(&frame);
+        assert!(energy.total > 0.0);
+        assert!(energy.per_channel.get("pose").unwrap() > &0.0);
+        assert!(energy.gravitational_per_channel.is_empty());
+        assert_eq!(energy.gravitational, 0.0);
+    }
+
+    #[test]
+    fn gravitational_potential_is_accumulated() {
+        let mut hub = SensorFusionHub::new();
+        hub.register_channel("pose", 3).unwrap();
+        let frame = hub
+            .fuse(&HashMap::from([("pose".to_string(), vec![2.0, 0.0, 0.0])]))
+            .unwrap();
+        let mut dynamics = ZSpaceDynamics::default();
+        let mut gravity = GravityField::default();
+        gravity.add_well("pose", GravityWell::new(10.0, GravityRegime::Newtonian));
+        dynamics = ZSpaceDynamics::new(ZSpaceGeometry::euclidean(), Some(gravity));
+        let field = DesireLagrangianField::with_dynamics(HashMap::new(), dynamics);
+        let energy = field.energy(&frame);
+        assert!(energy.total > 0.0);
+        assert!(energy.gravitational < 0.0);
+        assert!(energy.gravitational_per_channel.get("pose").is_some());
+    }
+}
