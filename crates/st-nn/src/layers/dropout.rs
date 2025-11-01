@@ -149,6 +149,7 @@ mod tests {
     use super::*;
     use rand::rngs::StdRng;
     use rand::Rng;
+    use rand::SeedableRng;
 
     #[test]
     fn dropout_forward_matches_mask() {

@@ -16,7 +16,6 @@ mod frac;
 mod psi_synchro;
 mod selfsup;
 mod text;
-mod robotics;
 mod export;
 mod inference;
 mod hpo;

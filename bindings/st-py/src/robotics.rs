@@ -4,6 +4,7 @@ use pyo3::types::{PyAny, PyDict, PyList};
 use pyo3::wrap_pyfunction;
 use pyo3::PyRef;
 use std::collections::{BTreeMap, HashMap};
+use std::fmt;
 use std::time::UNIX_EPOCH;
 
 use st_robotics::{
@@ -372,12 +373,13 @@ impl PyFusedFrame {
     pub fn health(&self, py: Python<'_>) -> PyResult<PyObject> {
         let dict = PyDict::new_bound(py);
         for (key, health) in &self.inner.health {
-            dict.set_item(
-                key,
+            let py_health = Py::new(
+                py,
                 PyChannelHealth {
                     inner: health.clone(),
                 },
             )?;
+            dict.set_item(key, py_health)?;
         }
         Ok(dict.into_py(py))
     }
@@ -678,9 +680,14 @@ impl PyDriftSafetyPlugin {
 }
 
 #[pyclass(module = "spiraltorch.robotics", name = "RoboticsRuntime")]
-#[derive(Debug)]
 pub(crate) struct PyRoboticsRuntime {
     inner: RoboticsRuntime,
+}
+
+impl fmt::Debug for PyRoboticsRuntime {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PyRoboticsRuntime").finish()
+    }
 }
 
 #[pymethods]
@@ -734,7 +741,8 @@ impl PyRoboticsRuntime {
         let steps = self.inner.drain_trajectory();
         let list = PyList::empty_bound(py);
         for step in steps {
-            list.append(PyRuntimeStep { inner: step })?;
+            let py_step = Py::new(py, PyRuntimeStep { inner: step })?;
+            list.append(py_step)?;
         }
         Ok(list.into_py(py))
     }
@@ -950,6 +958,7 @@ impl PyTemporalFeedbackLearner {
         Ok(Self { inner })
     }
 
+    #[pyo3(signature = (step, vision=None))]
     pub fn push(
         &mut self,
         step: PyRef<'_, PyRuntimeStep>,
@@ -1048,6 +1057,7 @@ impl PyZSpaceTrainerBridge {
         Ok(Self { inner: bridge })
     }
 
+    #[pyo3(signature = (step, vision=None))]
     pub fn push(
         &mut self,
         step: PyRef<'_, PyRuntimeStep>,
@@ -1088,6 +1098,7 @@ impl PyZSpaceTrainerEpisodeBuilder {
         Ok(Self { inner: builder })
     }
 
+    #[pyo3(signature = (step, vision=None, *, end_episode))]
     pub fn push(
         &mut self,
         step: PyRef<'_, PyRuntimeStep>,
@@ -1169,9 +1180,13 @@ impl PyRuntimeStep {
     pub fn safety(&self, py: Python<'_>) -> PyResult<PyObject> {
         let list = PyList::empty_bound(py);
         for review in &self.inner.safety {
-            list.append(PySafetyReview {
-                inner: review.clone(),
-            })?;
+            let review = Py::new(
+                py,
+                PySafetyReview {
+                    inner: review.clone(),
+                },
+            )?;
+            list.append(review)?;
         }
         Ok(list.into_py(py))
     }
