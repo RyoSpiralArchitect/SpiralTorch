@@ -41,6 +41,8 @@ pub struct SelfRewriteEngine<G: AiHintGenerator> {
     quality_model: HintQualityModel,
     diversity: DiversityGovernor,
     transitions: HintTransitionGraph,
+    saga: HintSagaTracker,
+    saga_history: VecDeque<String>,
     last_hint_key: Option<String>,
     last_ctx_signature: Option<u64>,
 }
@@ -138,6 +140,44 @@ impl TransitionEdge {
 #[derive(Clone, Debug)]
 struct HintTransitionGraph {
     edges: HashMap<String, Vec<TransitionEdge>>,
+    decay: f32,
+    fanout: usize,
+}
+
+#[derive(Clone, Debug)]
+struct SagaEdge {
+    to: String,
+    synergy: f32,
+    total_gain: f32,
+    best_gain: f32,
+    hits: u32,
+}
+
+impl SagaEdge {
+    fn new(to: String, signal: f32, gain: f32) -> Self {
+        let gain = gain.max(0.0);
+        Self {
+            to,
+            synergy: signal,
+            total_gain: gain,
+            best_gain: gain,
+            hits: if gain > 0.0 { 1 } else { 0 },
+        }
+    }
+
+    fn mean_gain(&self) -> f32 {
+        if self.hits == 0 {
+            0.0
+        } else {
+            self.total_gain / self.hits as f32
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct HintSagaTracker {
+    sequences: HashMap<Vec<String>, Vec<SagaEdge>>,
+    depth: usize,
     decay: f32,
     fanout: usize,
 }
@@ -261,6 +301,156 @@ impl HintTransitionGraph {
                 .partial_cmp(&a.strength)
                 .unwrap_or(Ordering::Equal)
         });
+        snapshots
+    }
+}
+
+impl Default for HintSagaTracker {
+    fn default() -> Self {
+        Self {
+            sequences: HashMap::new(),
+            depth: 3,
+            decay: 0.9,
+            fanout: 3,
+        }
+    }
+}
+
+impl HintSagaTracker {
+    fn observe(
+        &mut self,
+        history: &VecDeque<String>,
+        to: &str,
+        gain: f32,
+        affinity: f32,
+        ctx_affinity: f32,
+    ) {
+        if self.depth == 0 {
+            return;
+        }
+        let gain = gain.max(0.0);
+        let affinity = affinity.clamp(0.0, 1.0);
+        let ctx_affinity = ctx_affinity.clamp(0.0, 1.0);
+        let signal = (gain + 0.03) * (1.0 + affinity * 0.4 + ctx_affinity * 0.4);
+        self.observe_prefix(Vec::new(), to, signal, gain);
+        let max_depth = self.depth.min(history.len());
+        for len in 1..=max_depth {
+            let start = history.len() - len;
+            let prefix: Vec<String> = history.iter().skip(start).take(len).cloned().collect();
+            self.observe_prefix(prefix, to, signal, gain);
+        }
+    }
+
+    fn observe_prefix(&mut self, prefix: Vec<String>, to: &str, signal: f32, gain: f32) {
+        let edges = self.sequences.entry(prefix).or_default();
+        if let Some(edge) = edges.iter_mut().find(|edge| edge.to == to) {
+            edge.synergy = (edge.synergy * self.decay + signal).min(4.0);
+            edge.total_gain = edge.total_gain * self.decay + gain;
+            edge.best_gain = edge.best_gain.max(gain);
+            if gain > 0.0 {
+                edge.hits = edge.hits.saturating_add(1);
+            }
+        } else {
+            edges.push(SagaEdge::new(to.to_string(), signal.min(4.0), gain));
+        }
+        edges.sort_by(|a, b| b.synergy.partial_cmp(&a.synergy).unwrap_or(Ordering::Equal));
+        while edges.len() > self.fanout {
+            edges.pop();
+        }
+    }
+
+    fn boost(&self, history: &VecDeque<String>, candidate: &str) -> f32 {
+        if self.depth == 0 {
+            return 0.0;
+        }
+        let mut best = self
+            .sequences
+            .get(&Vec::new())
+            .and_then(|edges| edges.iter().find(|edge| edge.to == candidate))
+            .map(|edge| {
+                let mean = edge.mean_gain().min(1.5);
+                (edge.synergy * (1.0 + mean * 0.3)).min(4.0)
+            })
+            .unwrap_or(0.0);
+        let max_depth = self.depth.min(history.len());
+        for len in 1..=max_depth {
+            let start = history.len() - len;
+            let prefix: Vec<String> = history.iter().skip(start).take(len).cloned().collect();
+            if let Some(edges) = self.sequences.get(&prefix) {
+                if let Some(edge) = edges.iter().find(|edge| edge.to == candidate) {
+                    let mean = edge.mean_gain().min(1.5);
+                    let score = (edge.synergy * (1.0 + mean * 0.45 + len as f32 * 0.1)).min(4.5);
+                    best = best.max(score);
+                }
+            }
+        }
+        best
+    }
+
+    fn penalize_target(&mut self, target: &str) {
+        for edges in self.sequences.values_mut() {
+            if let Some(edge) = edges.iter_mut().find(|edge| edge.to == target) {
+                edge.synergy *= 0.5;
+                edge.total_gain *= self.decay;
+            }
+        }
+    }
+
+    fn decay(&mut self) {
+        let decay = self.decay;
+        for edges in self.sequences.values_mut() {
+            for edge in edges.iter_mut() {
+                edge.synergy *= decay;
+                edge.total_gain *= decay;
+            }
+            edges.retain(|edge| edge.synergy > 1e-4 || edge.total_gain > 1e-4);
+        }
+        self.sequences.retain(|_, edges| !edges.is_empty());
+    }
+
+    fn set_decay(&mut self, decay: f32) {
+        if decay.is_finite() && decay > 0.0 {
+            self.decay = decay.min(0.999);
+        }
+    }
+
+    fn set_fanout(&mut self, fanout: usize) {
+        let fanout = fanout.max(1);
+        self.fanout = fanout;
+        for edges in self.sequences.values_mut() {
+            edges.sort_by(|a, b| b.synergy.partial_cmp(&a.synergy).unwrap_or(Ordering::Equal));
+            while edges.len() > self.fanout {
+                edges.pop();
+            }
+        }
+    }
+
+    fn set_depth(&mut self, depth: usize) {
+        self.depth = depth;
+        if depth == 0 {
+            self.sequences.clear();
+        }
+    }
+
+    fn depth(&self) -> usize {
+        self.depth
+    }
+
+    fn snapshots(&self) -> Vec<HintSagaSnapshot> {
+        let mut snapshots = Vec::new();
+        for (prefix, edges) in &self.sequences {
+            for edge in edges {
+                snapshots.push(HintSagaSnapshot {
+                    prefix: prefix.clone(),
+                    to: edge.to.clone(),
+                    synergy: edge.synergy,
+                    hits: edge.hits,
+                    best_gain: edge.best_gain,
+                    mean_gain: edge.mean_gain(),
+                });
+            }
+        }
+        snapshots.sort_by(|a, b| b.synergy.partial_cmp(&a.synergy).unwrap_or(Ordering::Equal));
         snapshots
     }
 }
@@ -585,6 +775,17 @@ pub struct HintTransitionSnapshot {
     pub mean_gain: f32,
 }
 
+/// Snapshot of higher-order hint sagas capturing multi-step follow-ups.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HintSagaSnapshot {
+    pub prefix: Vec<String>,
+    pub to: String,
+    pub synergy: f32,
+    pub hits: u32,
+    pub best_gain: f32,
+    pub mean_gain: f32,
+}
+
 impl<G: AiHintGenerator> SelfRewriteEngine<G> {
     /// Build a new engine with the supplied AI generator and configuration.
     pub fn new(generator: G, config: AiRewriteConfig) -> Self {
@@ -607,6 +808,8 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
             quality_model: HintQualityModel::default(),
             diversity: DiversityGovernor::default(),
             transitions: HintTransitionGraph::default(),
+            saga: HintSagaTracker::default(),
+            saga_history: VecDeque::new(),
             last_hint_key: None,
             last_ctx_signature: None,
         }
@@ -702,6 +905,27 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         self
     }
 
+    /// Configure the maximum saga depth for higher-order hint follow-ups.
+    pub fn with_saga_depth(mut self, depth: usize) -> Self {
+        self.saga.set_depth(depth);
+        while self.saga_history.len() > self.saga.depth() {
+            self.saga_history.pop_front();
+        }
+        self
+    }
+
+    /// Configure how quickly saga synergies decay between rewrites.
+    pub fn with_saga_decay(mut self, decay: f32) -> Self {
+        self.saga.set_decay(decay);
+        self
+    }
+
+    /// Limit the number of saga continuations retained per prefix.
+    pub fn with_saga_fanout(mut self, fanout: usize) -> Self {
+        self.saga.set_fanout(fanout);
+        self
+    }
+
     /// Returns the smoothed η̄ after the most recent rewrite.
     pub fn smoothed_eta(&self) -> Option<f32> {
         if self.eta_history.is_empty() {
@@ -774,6 +998,11 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
     /// Exposes the learned transitions between cached hint sets.
     pub fn transition_snapshots(&self) -> Vec<HintTransitionSnapshot> {
         self.transitions.snapshots()
+    }
+
+    /// Exposes the multi-step saga telemetry learned from cached hint sequences.
+    pub fn saga_snapshots(&self) -> Vec<HintSagaSnapshot> {
+        self.saga.snapshots()
     }
 
     /// Attempt a self-rewrite. Returns `Ok(None)` when no rewrite is required.
@@ -951,6 +1180,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
                 .boost(self.last_hint_key.as_deref(), &entry.key)
                 * 0.25;
         let root_bonus = 1.0 + self.transitions.boost(None, &entry.key) * 0.15;
+        let saga_bonus = 1.0 + self.saga.boost(&self.saga_history, &entry.key) * 0.2;
         let ctx_bonus = if let Some(last_ctx) = self.last_ctx_signature {
             1.0 + self.context_affinity(last_ctx, ctx_signature) * 0.25
         } else {
@@ -962,6 +1192,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
             * cluster_bonus
             * transition_bonus
             * root_bonus
+            * saga_bonus
             * ctx_bonus
     }
 
@@ -1068,6 +1299,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         self.degrade_cache_entry(&key);
         self.diversity.record_failure();
         self.transitions.penalize_target(&key);
+        self.saga.penalize_target(&key);
     }
 
     fn observe_transition(&mut self, key: &str, ctx_signature: u64, gain: f32, affinity: f32) {
@@ -1082,6 +1314,16 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         }
         self.transitions
             .observe(None, key, gain, affinity, ctx_affinity);
+        self.saga
+            .observe(&self.saga_history, key, gain, affinity, ctx_affinity);
+        if self.saga.depth() == 0 {
+            self.saga_history.clear();
+        } else {
+            self.saga_history.push_back(key.to_string());
+            while self.saga_history.len() > self.saga.depth() {
+                self.saga_history.pop_front();
+            }
+        }
         self.last_hint_key = Some(key.to_string());
         self.last_ctx_signature = Some(ctx_signature);
     }
@@ -1114,6 +1356,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
             .retain(|entry| entry.staleness <= max_staleness);
         self.decay_clusters();
         self.transitions.decay();
+        self.saga.decay();
     }
 
     fn degrade_cache_entry(&mut self, key: &str) {
@@ -1238,6 +1481,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
 mod tests {
     use super::*;
     use crate::auto::{AiRewritePrompt, HeuristicHint, TemplateAiGenerator};
+    use std::collections::VecDeque;
 
     fn sample_ctx() -> Ctx {
         Ctx {
@@ -1655,6 +1899,82 @@ mod tests {
                 .iter()
                 .any(|snap| snap.from == warmup_key && snap.to == followup_key),
             "learned transitions should surface in telemetry",
+        );
+    }
+
+    #[test]
+    fn saga_sequences_prioritise_multi_step_followups() {
+        let warmup_hint = HeuristicHint::new("tile_cols", "tile_cols + 4", 0.9, "true");
+        let combo_hint = HeuristicHint::new("segments", "segments + 2", 0.85, "true");
+        let finisher_hint = HeuristicHint::new("radix", "radix + 2", 0.8, "true");
+        let alternative_hint = HeuristicHint::new("kc", "kc + 32", 0.8, "true");
+
+        let mut engine = SelfRewriteEngine::new(TemplateAiGenerator, AiRewriteConfig::new("mock"))
+            .with_saga_depth(3)
+            .with_transition_decay(0.92)
+            .with_saga_decay(0.9);
+
+        let ctx = sample_ctx();
+        let signature = SelfRewriteEngine::<TemplateAiGenerator>::ctx_signature(&ctx);
+
+        let warmup_key = SelfRewriteEngine::<TemplateAiGenerator>::hint_key(&[warmup_hint.clone()]);
+        let combo_key = SelfRewriteEngine::<TemplateAiGenerator>::hint_key(&[combo_hint.clone()]);
+        let finisher_key =
+            SelfRewriteEngine::<TemplateAiGenerator>::hint_key(&[finisher_hint.clone()]);
+        let alternative_key =
+            SelfRewriteEngine::<TemplateAiGenerator>::hint_key(&[alternative_hint.clone()]);
+
+        engine.record_hint_success(&warmup_key, 0.25, 0.6, 1.0, signature, None);
+        engine.record_hint_success(&combo_key, 0.3, 0.65, 0.95, signature, None);
+        engine.record_hint_success(&finisher_key, 0.35, 0.72, 0.9, signature, None);
+
+        engine.hint_stats.insert(
+            alternative_key.clone(),
+            HintPerformance {
+                uses: 2,
+                failures: 0,
+                total_gain: 0.7,
+                best_gain: 0.45,
+                last_eta: 0.68,
+                last_affinity: 0.9,
+                last_gain: 0.45,
+            },
+        );
+
+        let finisher_entry = CachedHint {
+            key: finisher_key.clone(),
+            hints: vec![finisher_hint],
+            eta: 0.72,
+            ctx_signature: signature,
+            staleness: 0,
+        };
+        let alternative_entry = CachedHint {
+            key: alternative_key.clone(),
+            hints: vec![alternative_hint],
+            eta: 0.72,
+            ctx_signature: signature,
+            staleness: 0,
+        };
+
+        engine.hint_cache = VecDeque::from(vec![finisher_entry, alternative_entry]);
+        engine.saga_history = VecDeque::from(vec![warmup_key.clone(), combo_key.clone()]);
+        engine.last_hint_key = Some(combo_key);
+        engine.last_ctx_signature = Some(signature);
+
+        let finisher_priority = engine.cache_priority(engine.hint_cache.get(0).unwrap(), signature);
+        let alternative_priority =
+            engine.cache_priority(engine.hint_cache.get(1).unwrap(), signature);
+
+        assert!(
+            finisher_priority > alternative_priority,
+            "saga synergy should promote finisher hints",
+        );
+
+        let saga = engine.saga_snapshots();
+        assert!(
+            saga.iter()
+                .any(|snapshot| snapshot.to == finisher_key && snapshot.prefix.len() >= 2),
+            "saga telemetry should report multi-step combo",
         );
     }
 }
