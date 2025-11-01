@@ -16,6 +16,7 @@ mod frac;
 mod psi_synchro;
 mod selfsup;
 mod text;
+mod robotics;
 mod export;
 mod inference;
 mod hpo;
@@ -169,6 +170,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     scale_stack::register(py, m)?;
     trainer::register(py, m)?;
     vision::register(py, m)?;
+    robotics::register(py, m)?;
     zspace::register(py, m)?;
     elliptic::register(py, m)?;
     theory::register(py, m)?;
