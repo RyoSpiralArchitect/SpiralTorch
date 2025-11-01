@@ -27,6 +27,8 @@ from typing import (
 )
 from importlib.metadata import version as _pkg_version, PackageNotFoundError
 
+from . import dataset as _dataset
+
 from ._meta import (
     BUILD_FINGERPRINT,
     BUILD_ID,
@@ -2851,6 +2853,65 @@ class SpiralSession:
             self.device = "wgpu"
         else:
             self.device = "cpu"
+
+    def dataset(self, samples: _Optional[_Iterable[_Tuple[_Any, _Any]]] = None):
+        """Build a :mod:`spiraltorch.dataset` payload from in-memory samples."""
+
+        if samples is None:
+            return _dataset.Dataset()
+        if isinstance(samples, _dataset.Dataset):
+            return samples
+        if not isinstance(samples, _IterableABC):
+            raise TypeError("samples must be an iterable of (input, target) pairs")
+
+        collected = list(samples)
+        normalised: list[_Tuple[_Any, _Any]] = []
+        for index, pair in enumerate(collected):
+            if not isinstance(pair, _SequenceABC) or len(pair) != 2:
+                raise TypeError(
+                    "dataset samples must be (input, target) tuples; "
+                    f"sample {index} is {type(pair)!r}"
+                )
+            normalised.append((pair[0], pair[1]))
+        return _dataset.Dataset.from_samples(normalised)
+
+    def dataloader(
+        self,
+        samples: _Any,
+        *,
+        batch_size: int | None = None,
+        shuffle: bool | int = False,
+        seed: int | None = None,
+        prefetch: int | None = None,
+        max_rows: int | None = None,
+    ):
+        """Create a :class:`spiraltorch.dataset.DataLoader` wired to this session."""
+
+        if isinstance(samples, _dataset.DataLoader):
+            loader = samples
+        else:
+            dataset = self.dataset(samples)
+            loader = dataset.loader()
+
+        if shuffle:
+            if isinstance(shuffle, bool):
+                base_seed = seed if seed is not None else self.seed
+            else:
+                base_seed = int(shuffle)
+            if base_seed is None:
+                base_seed = 0
+            loader = loader.shuffle(int(base_seed))
+
+        if max_rows is not None:
+            loader = loader.dynamic_batch_by_rows(int(max_rows))
+
+        if batch_size is not None:
+            loader = loader.batched(int(batch_size))
+
+        if prefetch is not None:
+            loader = loader.prefetch(int(prefetch))
+
+        return loader
 
     def plan_topk(self, rows: int, cols: int, k: int):
         return plan_topk(rows, cols, k, backend=self.backend)
