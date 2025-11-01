@@ -48,7 +48,7 @@ use super::psi::{PsiComponent, PsiEvent, PsiReading, PsiSpiralAdvisory, PsiSpira
 use super::psychoid::PsychoidReading;
 #[cfg(feature = "collapse")]
 use crate::engine::collapse_drive::DriveCmd;
-use crate::ops::realgrad::GradientSummary;
+use crate::ops::realgrad::{GradientSummary, TransparencySummary};
 use std::collections::VecDeque;
 
 #[cfg(feature = "psi")]
@@ -1081,6 +1081,8 @@ pub struct RealGradPulse {
     pub rolling_gradient_norm: f32,
     /// Exponential moving average of the residual ratio reported by the engine.
     pub rolling_residual_ratio: f32,
+    /// Summary of the transparent optics, when enabled.
+    pub transparency: Option<TransparencySummary>,
 }
 
 impl Default for RealGradPulse {
@@ -1101,6 +1103,7 @@ impl Default for RealGradPulse {
             gradient_sparsity: 1.0,
             rolling_gradient_norm: 0.0,
             rolling_residual_ratio: 0.0,
+            transparency: None,
         }
     }
 }
@@ -1112,6 +1115,11 @@ impl RealGradPulse {
             norm: self.gradient_norm.max(0.0),
             sparsity: self.gradient_sparsity.clamp(0.0, 1.0),
         }
+    }
+
+    /// Returns the transparency summary emitted by the optical telemetry, if any.
+    pub fn transparency_summary(&self) -> Option<TransparencySummary> {
+        self.transparency
     }
 }
 
@@ -1477,6 +1485,30 @@ fn fragment_from_realgrad(pulse: &RealGradPulse) -> AtlasFragment {
         "realgrad.rolling_residual_ratio",
         pulse.rolling_residual_ratio,
     );
+    if let Some(summary) = pulse.transparency {
+        fragment.push_metric("realgrad.transparency.gain", summary.transparency_gain);
+        fragment.push_metric(
+            "realgrad.transparency.mean_attenuation",
+            summary.mean_attenuation,
+        );
+        fragment.push_metric(
+            "realgrad.transparency.max_attenuation",
+            summary.max_attenuation,
+        );
+        fragment.push_metric(
+            "realgrad.transparency.mean_refraction",
+            summary.mean_refraction,
+        );
+        fragment.push_metric(
+            "realgrad.transparency.diffusion_energy",
+            summary.diffusion_energy,
+        );
+        fragment.push_metric(
+            "realgrad.transparency.phase_variation",
+            summary.phase_variation,
+        );
+        fragment.push_metric("realgrad.transparency.jacobian_norm", summary.jacobian_norm);
+    }
     fragment
 }
 
@@ -2070,6 +2102,15 @@ mod tests {
         pulse.gradient_sparsity = 0.2;
         pulse.rolling_gradient_norm = 1.1;
         pulse.rolling_residual_ratio = 0.3;
+        pulse.transparency = Some(TransparencySummary {
+            transparency_gain: 0.8,
+            mean_attenuation: 0.2,
+            max_attenuation: 0.35,
+            mean_refraction: 0.15,
+            diffusion_energy: 0.05,
+            phase_variation: 0.12,
+            jacobian_norm: 0.4,
+        });
         set_last_realgrad(&pulse);
         let atlas = get_atlas_frame().expect("realgrad atlas frame");
         assert!(atlas
@@ -2080,6 +2121,10 @@ mod tests {
             .metrics
             .iter()
             .any(|metric| metric.name == "realgrad.converged"));
+        assert!(atlas
+            .metrics
+            .iter()
+            .any(|metric| metric.name == "realgrad.transparency.gain"));
     }
 
     #[test]
@@ -2133,6 +2178,15 @@ mod tests {
         pulse.gradient_sparsity = 0.75;
         pulse.rolling_gradient_norm = 1.5;
         pulse.rolling_residual_ratio = 0.2;
+        pulse.transparency = Some(TransparencySummary {
+            transparency_gain: 0.9,
+            mean_attenuation: 0.3,
+            max_attenuation: 0.5,
+            mean_refraction: 0.25,
+            diffusion_energy: 0.1,
+            phase_variation: 0.2,
+            jacobian_norm: 0.6,
+        });
         set_last_realgrad(&pulse);
         let stored = get_last_realgrad().expect("pulse stored");
         assert_eq!(stored.iterations, 3);
@@ -2142,6 +2196,7 @@ mod tests {
         assert!((stored.gradient_sparsity - 0.75).abs() < f32::EPSILON);
         assert!((stored.rolling_gradient_norm - 1.5).abs() < f32::EPSILON);
         assert!((stored.rolling_residual_ratio - 0.2).abs() < f32::EPSILON);
+        assert_eq!(stored.transparency, pulse.transparency);
         let summary = stored.gradient_summary();
         assert!((summary.norm - 2.5).abs() < f32::EPSILON);
         assert!((summary.sparsity - 0.75).abs() < f32::EPSILON);

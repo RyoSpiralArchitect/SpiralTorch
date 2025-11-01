@@ -3788,57 +3788,6 @@ impl GradientSummary {
         self
     }
 
-    /// Attach support and sign statistics to an existing summary. When the
-    /// summary was constructed from aggregated power sums this method can be
-    /// used to backfill the additional metrics without reprocessing the raw
-    /// gradient samples.
-    #[inline]
-    #[allow(clippy::too_many_arguments)]
-    pub fn with_support(
-        mut self,
-        min: f32,
-        max: f32,
-        positive_count: usize,
-        negative_count: usize,
-        near_zero_count: usize,
-    ) -> Self {
-        if self.count == 0 {
-            self.min = 0.0;
-            self.max = 0.0;
-            self.positive_count = 0;
-            self.negative_count = 0;
-            self.near_zero_count = 0;
-            return self;
-        }
-
-        let mut min = if min.is_finite() { min } else { 0.0 };
-        let mut max = if max.is_finite() { max } else { 0.0 };
-        if max < min {
-            mem::swap(&mut min, &mut max);
-        }
-
-        let mut positive_count = positive_count.min(self.count);
-        let mut negative_count = negative_count.min(self.count - positive_count);
-        let near_zero_count = near_zero_count.min(self.count);
-
-        if positive_count + negative_count > self.count {
-            let overflow = positive_count + negative_count - self.count;
-            if negative_count >= overflow {
-                negative_count -= overflow;
-            } else {
-                positive_count = positive_count.saturating_sub(overflow - negative_count);
-                negative_count = 0;
-            }
-        }
-
-        self.min = min;
-        self.max = max;
-        self.positive_count = positive_count;
-        self.negative_count = negative_count;
-        self.near_zero_count = near_zero_count;
-        self
-    }
-
     #[inline]
     pub fn l1(&self) -> f32 {
         self.l1
@@ -6156,9 +6105,9 @@ fn row_softmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
     cpu_row_softmax_hardmax(data, rows, cols).0
 }
 
-#[cfg_attr(feature = "wgpu", allow(dead_code))]
+#[allow(dead_code)]
 fn row_hardmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
-    row_softmax_hardmax_cpu(data, rows, cols).1
+    cpu_row_softmax_hardmax(data, rows, cols).1
 }
 
 fn add_bias_relu_inplace(data: &mut [f32], rows: usize, cols: usize, bias: &[f32]) {
