@@ -321,6 +321,105 @@ impl ZSpaceTrainerBridge {
     }
 }
 
+/// Aggregated trainer samples representing a single robotics episode.
+#[derive(Debug, Clone)]
+pub struct TrainerEpisode {
+    pub samples: Vec<ZSpaceTrainerSample>,
+    pub average_memory: f32,
+    pub average_stability: f32,
+    pub average_drs: f32,
+    pub length: usize,
+}
+
+/// Collects trainer samples across an episode and exposes summary metrics.
+#[derive(Debug, Clone)]
+pub struct ZSpaceTrainerEpisodeBuilder {
+    bridge: ZSpaceTrainerBridge,
+    capacity: usize,
+    buffer: Vec<ZSpaceTrainerSample>,
+    memory_sum: f32,
+    stability_sum: f32,
+    drs_sum: f32,
+}
+
+impl ZSpaceTrainerEpisodeBuilder {
+    pub fn new(horizon: usize, discount: f32, capacity: usize) -> Result<Self, RoboticsError> {
+        if capacity == 0 {
+            return Err(RoboticsError::Trainer(
+                "episode capacity must be positive".to_string(),
+            ));
+        }
+        Ok(Self {
+            bridge: ZSpaceTrainerBridge::new(horizon, discount)?,
+            capacity,
+            buffer: Vec::with_capacity(capacity.min(8)),
+            memory_sum: 0.0,
+            stability_sum: 0.0,
+            drs_sum: 0.0,
+        })
+    }
+
+    pub fn push_step(
+        &mut self,
+        step: &RuntimeStep,
+        vision: Option<&VisionFeedbackSnapshot>,
+        end_episode: bool,
+    ) -> Result<Option<TrainerEpisode>, RoboticsError> {
+        if self.buffer.len() == self.capacity {
+            return Err(RoboticsError::Trainer(
+                "episode capacity exceeded before flush".to_string(),
+            ));
+        }
+        let sample = self.bridge.push(step, vision)?;
+        self.memory_sum += sample.metrics.memory;
+        self.stability_sum += sample.metrics.stability;
+        self.drs_sum += sample.metrics.drs;
+        self.buffer.push(sample);
+        if end_episode {
+            Ok(Some(self.finish_episode()))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn flush(&mut self) -> Option<TrainerEpisode> {
+        if self.buffer.is_empty() {
+            None
+        } else {
+            Some(self.finish_episode())
+        }
+    }
+
+    pub fn horizon(&self) -> usize {
+        self.bridge.horizon()
+    }
+
+    pub fn discount(&self) -> f32 {
+        self.bridge.discount()
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
+
+    fn finish_episode(&mut self) -> TrainerEpisode {
+        let samples = std::mem::take(&mut self.buffer);
+        let length = samples.len();
+        let normaliser = length.max(1) as f32;
+        let episode = TrainerEpisode {
+            samples,
+            average_memory: self.memory_sum / normaliser,
+            average_stability: self.stability_sum / normaliser,
+            average_drs: self.drs_sum / normaliser,
+            length,
+        };
+        self.memory_sum = 0.0;
+        self.stability_sum = 0.0;
+        self.drs_sum = 0.0;
+        episode
+    }
+}
+
 /// Partial observation emitted to Python for integration with ZSpacePartialBundle.
 #[derive(Debug, Clone)]
 pub struct ZSpacePartialObservation {
@@ -328,4 +427,101 @@ pub struct ZSpacePartialObservation {
     pub commands: HashMap<String, f32>,
     pub gradient: Vec<f32>,
     pub weight: f32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::desire::Desire;
+    use crate::runtime::RoboticsRuntime;
+    use crate::sensors::SensorFusionHub;
+    use crate::telemetry::PsiTelemetry;
+    use crate::vision::VisionFeedbackSynchronizer;
+    use crate::DesireLagrangianField;
+
+    use std::collections::HashMap;
+
+    #[test]
+    fn episode_builder_flushes() {
+        let mut hub = SensorFusionHub::new();
+        hub.register_channel("vision", 3).unwrap();
+        hub.register_channel("imu", 3).unwrap();
+        let desires = DesireLagrangianField::new(HashMap::from([
+            (
+                "vision".to_string(),
+                Desire {
+                    target_norm: 0.0,
+                    tolerance: 0.0,
+                    weight: 0.5,
+                },
+            ),
+            (
+                "imu".to_string(),
+                Desire {
+                    target_norm: 0.0,
+                    tolerance: 0.0,
+                    weight: 1.0,
+                },
+            ),
+        ]));
+        let telemetry = PsiTelemetry::default();
+        let mut runtime = RoboticsRuntime::new(hub, desires, telemetry);
+        let mut builder = ZSpaceTrainerEpisodeBuilder::new(3, 0.9, 8).unwrap();
+        let synchronizer = VisionFeedbackSynchronizer::new("vision".to_string());
+        let step_a = runtime
+            .step(HashMap::from([
+                ("vision".to_string(), vec![0.2, 0.3, 0.4]),
+                ("imu".to_string(), vec![0.1, -0.2, 0.05]),
+            ]))
+            .unwrap();
+        let vision_a = synchronizer
+            .sync_with_vectors(&step_a, &[[0.2, 0.0, 0.0, 0.0], [0.1, 0.02, 0.01, -0.02]])
+            .ok();
+        assert!(builder
+            .push_step(&step_a, vision_a.as_ref(), false)
+            .unwrap()
+            .is_none());
+        let step_b = runtime
+            .step(HashMap::from([
+                ("vision".to_string(), vec![0.1, 0.1, 0.2]),
+                ("imu".to_string(), vec![0.05, 0.02, -0.01]),
+            ]))
+            .unwrap();
+        let vision_b = synchronizer
+            .sync_with_vectors(&step_b, &[[0.1, -0.01, 0.0, 0.01]])
+            .ok();
+        let episode = builder
+            .push_step(&step_b, vision_b.as_ref(), true)
+            .unwrap()
+            .expect("episode to flush");
+        assert_eq!(episode.length, 2);
+        assert_eq!(episode.samples.len(), 2);
+        assert!(episode.average_memory > 0.0);
+        assert!(episode.average_stability >= 0.0);
+        assert!(episode.average_drs >= 0.0);
+        assert!(builder.flush().is_none());
+    }
+
+    #[test]
+    fn episode_builder_enforces_capacity() {
+        let mut hub = SensorFusionHub::new();
+        hub.register_channel("vision", 3).unwrap();
+        let desires = DesireLagrangianField::new(HashMap::new());
+        let telemetry = PsiTelemetry::default();
+        let mut runtime = RoboticsRuntime::new(hub, desires, telemetry);
+        let mut builder = ZSpaceTrainerEpisodeBuilder::new(2, 0.9, 1).unwrap();
+        let step = runtime
+            .step(HashMap::from([("vision".to_string(), vec![0.1, 0.0, 0.0])]))
+            .unwrap();
+        builder.push_step(&step, None, false).unwrap();
+        let err = builder
+            .push_step(&step, None, false)
+            .err()
+            .expect("capacity violation");
+        if let RoboticsError::Trainer(message) = err {
+            assert!(message.contains("capacity"));
+        } else {
+            panic!("unexpected error kind");
+        }
+    }
 }

@@ -69,6 +69,16 @@ def parse_args() -> argparse.Namespace:
         help="Show line counts and definition metrics in the markdown table.",
     )
     parser.add_argument(
+        "--show-cli",
+        action="store_true",
+        help="Include CLI framework and argument columns in the markdown table.",
+    )
+    parser.add_argument(
+        "--show-metadata",
+        action="store_true",
+        help="Include description source, TODO counts, and last modified metadata.",
+    )
+    parser.add_argument(
         "--filter-language",
         action="append",
         default=[],
@@ -81,6 +91,13 @@ def parse_args() -> argparse.Namespace:
         default=[],
         metavar="TAG",
         help="Only include tools that contain all of the specified tags.",
+    )
+    parser.add_argument(
+        "--filter-framework",
+        action="append",
+        default=[],
+        metavar="FRAMEWORK",
+        help="Only include tools that use the specified CLI frameworks.",
     )
     parser.add_argument(
         "--summary",
@@ -98,6 +115,7 @@ def main() -> None:
         summaries,
         languages=set(lang.lower() for lang in args.filter_language),
         tags=set(tag.lower() for tag in args.filter_tag),
+        frameworks=set(framework.lower() for framework in args.filter_framework),
     )
 
     if args.format == "json":
@@ -111,6 +129,8 @@ def main() -> None:
             show_tags=args.show_tags,
             show_imports=args.show_imports,
             show_metrics=args.show_metrics,
+            show_cli=args.show_cli,
+            show_metadata=args.show_metadata,
             include_summary=args.summary,
         )
 
@@ -134,6 +154,8 @@ def _format_markdown(
     show_tags: bool,
     show_imports: bool,
     show_metrics: bool,
+    show_cli: bool,
+    show_metadata: bool,
     include_summary: bool,
 ) -> str:
     summaries = list(summaries)
@@ -158,6 +180,8 @@ def _format_markdown(
                     show_tags=show_tags,
                     show_imports=show_imports,
                     show_metrics=show_metrics,
+                    show_cli=show_cli,
+                    show_metadata=show_metadata,
                 )
             )
             lines.append("")
@@ -169,6 +193,8 @@ def _format_markdown(
                 show_tags=show_tags,
                 show_imports=show_imports,
                 show_metrics=show_metrics,
+                show_cli=show_cli,
+                show_metadata=show_metadata,
             )
         )
 
@@ -176,7 +202,7 @@ def _format_markdown(
 
 
 def _format_markdown_table(
-    summaries: Iterable[ToolSummary], *, include_details: bool, show_tags: bool, show_imports: bool, show_metrics: bool
+    summaries: Iterable[ToolSummary], *, include_details: bool, show_tags: bool, show_imports: bool, show_metrics: bool, show_cli: bool, show_metadata: bool
 ) -> list[str]:
     header = ["Path", "Language", "Description"]
     if show_metrics:
@@ -185,6 +211,10 @@ def _format_markdown_table(
         header.append("Tags")
     if show_imports:
         header.append("Imports")
+    if show_cli:
+        header.extend(["CLI frameworks", "CLI args", "Has __main__"])
+    if show_metadata:
+        header.extend(["Source", "TODOs", "Last modified"])
 
     rows = [
         "| " + " | ".join(header) + " |",
@@ -214,6 +244,17 @@ def _format_markdown_table(
         if show_imports:
             import_display = "<br>".join(summary.imports) if summary.imports else "—"
             cells.append(import_display)
+        if show_cli:
+            framework_display = (
+                "<br>".join(summary.cli_frameworks) if summary.cli_frameworks else "—"
+            )
+            cells.append(framework_display)
+            cells.append(str(summary.cli_argument_count))
+            cells.append("✅" if summary.has_main_guard else "—")
+        if show_metadata:
+            cells.append(summary.description_source)
+            cells.append(str(summary.todo_count))
+            cells.append(summary.last_modified or "—")
         rows.append("| " + " | ".join(cells) + " |")
     rows.append("")
     return rows
@@ -225,8 +266,13 @@ def _format_summary_section(summaries: Iterable[ToolSummary]) -> list[str]:
     summaries = list(summaries)
     language_counts = Counter(summary.language for summary in summaries)
     tag_counts = Counter(tag for summary in summaries for tag in summary.tags)
+    framework_counts = Counter(
+        framework for summary in summaries for framework in summary.cli_frameworks
+    )
     total_loc = sum(summary.lines_of_code for summary in summaries)
     average_loc = total_loc / len(summaries)
+    total_todos = sum(summary.todo_count for summary in summaries)
+    main_guards = sum(1 for summary in summaries if summary.has_main_guard)
 
     lines = ["## Overview", ""]
     lines.append(f"* **Tools discovered:** {len(summaries)}")
@@ -240,15 +286,24 @@ def _format_summary_section(summaries: Iterable[ToolSummary]) -> list[str]:
             f"{tag}: {count}" for tag, count in tag_counts.most_common(10)
         )
         lines.append(f"* **Top tags:** {formatted}")
+    if framework_counts:
+        formatted = ", ".join(
+            f"{framework}: {count}" for framework, count in framework_counts.most_common()
+        )
+        lines.append(f"* **CLI frameworks:** {formatted}")
+    if main_guards:
+        lines.append(f"* **Modules with __main__ guard:** {main_guards}")
+    if total_todos:
+        lines.append(f"* **TODO markers detected:** {total_todos}")
     return lines
 
 
 def _apply_filters(
-    summaries: list[ToolSummary], *, languages: set[str], tags: set[str]
+    summaries: list[ToolSummary], *, languages: set[str], tags: set[str], frameworks: set[str]
 ) -> list[ToolSummary]:
     """Filter *summaries* by the provided sets."""
 
-    if not languages and not tags:
+    if not languages and not tags and not frameworks:
         return summaries
 
     filtered: list[ToolSummary] = []
@@ -257,6 +312,9 @@ def _apply_filters(
             continue
         summary_tags = {tag.lower() for tag in summary.tags}
         if tags and not tags.issubset(summary_tags):
+            continue
+        summary_frameworks = {framework.lower() for framework in summary.cli_frameworks}
+        if frameworks and not frameworks.issubset(summary_frameworks):
             continue
         filtered.append(summary)
     return filtered

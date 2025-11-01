@@ -10,8 +10,8 @@ use st_tensor::Tensor;
 use tempfile::tempdir;
 
 use st_vision::models::{
-    ConvNeXtBackbone, ConvNeXtConfig, ResNetBackbone, ResNetConfig, SkipSlipSchedule, ViTBackbone,
-    ViTConfig,
+    ConvNeXtBackbone, ConvNeXtConfig, ResNetBackbone, ResNetConfig, ResNetPreset, SkipSlipSchedule,
+    ViTBackbone, ViTConfig,
 };
 
 fn sample_input(channels: usize, hw: (usize, usize), seed: u64) -> Tensor {
@@ -52,6 +52,31 @@ fn resnet_produces_expected_shape_and_state_roundtrip() {
     let mut restored = ResNetBackbone::new(config).unwrap();
     restored.load_weights_bincode(&path).unwrap();
     assert_eq!(resnet.state_dict().unwrap(), restored.state_dict().unwrap());
+}
+
+#[test]
+fn resnet_config_auto_selects_common_presets() {
+    let large = ResNetConfig::from_depth(101).expect("resnet101 preset");
+    assert_eq!(large.block_depths, vec![3, 4, 23, 3]);
+    assert_eq!(large.stage_channels, vec![64, 128, 256, 512]);
+    assert_eq!(large.input_hw, (224, 224));
+    assert!(large.use_max_pool);
+
+    let cifar = ResNetConfig::from_depth(56).expect("resnet56 preset");
+    assert_eq!(cifar.block_depths, vec![9, 9, 9]);
+    assert_eq!(cifar.stage_channels, vec![16, 32, 64]);
+    assert_eq!(cifar.input_hw, (32, 32));
+    assert!(!cifar.use_max_pool);
+
+    assert!(ResNetConfig::from_depth(42).is_err());
+}
+
+#[test]
+fn resnet_backbone_builds_from_presets() {
+    let resnet = ResNetBackbone::from_preset(ResNetPreset::ResNet34).expect("resnet34 backbone");
+    let input = sample_input(3, (224, 224), 13);
+    let output = resnet.forward(&input).unwrap();
+    assert_eq!(output.shape(), (1, resnet.output_features()));
 }
 
 #[test]
