@@ -13,8 +13,11 @@ records CPU topology from ``/sys/devices/system/cpu`` so physical cores can be
 weighed against logical CPUs when scheduling work alongside GPU pipelines while
 Linux Pressure Stall Information (PSI) metrics feed into the heuristics so BLAS
 threads back off when the host is already saturated.  WGSL kernel metadata
-persisted in the autotune store is also summarised so GPU dispatch
-characteristics can feed back into the CPU reservation heuristic.
+persisted in the autotune store is summarised so GPU dispatch characteristics
+can feed back into the CPU reservation heuristic.  The CPU accounting helpers
+also honour kernel-level isolation controls such as ``isolcpus`` and
+``nohz_full`` so cores reserved for real-time workloads remain untouched by BLAS
+threads.
 """
 
 from __future__ import annotations
@@ -39,6 +42,7 @@ __all__ = [
     "temporary_thread_count",
     "system_cpu_count",
     "system_cpu_topology",
+    "system_cpu_isolations",
     "recommended_thread_count",
     "synchronise_thread_hints",
     "auto_tune_threads",
@@ -80,6 +84,7 @@ _GPU_HOST_RESERVATION_BUDGET: int | None = None
 
 _CPU_BUDGET_CACHE: dict[str, object] | None = None
 _CPU_TOPOLOGY_CACHE: tuple[int, tuple[int, ...] | None, dict[str, object]] | None = None
+_CPU_ISOLATION_CACHE: tuple[int, dict[str, object] | None] | None = None
 _CPU_PRESSURE_CACHE: tuple[int, float, dict[str, object] | None] | None = None
 
 _CPU_PRESSURE_CACHE_TTL = 2.0
@@ -990,31 +995,76 @@ def _cgroup_cpu_quota_raw(*, refresh: bool = False) -> float | None:
     return quota
 
 
-def _parse_cpuset_list(spec: str) -> int | None:
-    total = 0
-    for segment in spec.split(","):
-        segment = segment.strip()
-        if not segment:
-            continue
-        if "-" in segment:
-            start_str, end_str = segment.split("-", 1)
+def _expand_cpu_list(spec: str) -> tuple[int, ...] | None:
+    include: set[int] = set()
+    exclude: set[int] = set()
+
+    tokens = spec.replace("\n", ",").replace("\t", ",").split(",")
+    for raw_segment in tokens:
+        for token in raw_segment.split():
+            item = token.strip()
+            if not item:
+                continue
+            if ":" in item:
+                item = item.rsplit(":", 1)[1].strip()
+                if not item:
+                    continue
+            negate = item.startswith("^")
+            if negate:
+                item = item[1:].strip()
+                if not item:
+                    continue
+            stride = 1
+            if "/" in item:
+                item, stride_str = item.split("/", 1)
+                try:
+                    stride = int(stride_str, 10)
+                except ValueError:
+                    return None
+                if stride <= 0:
+                    return None
+            if "-" in item:
+                start_str, end_str = item.split("-", 1)
+            else:
+                start_str = end_str = item
             try:
-                start = int(start_str)
-                end = int(end_str)
+                start = int(start_str, 10)
+                end = int(end_str, 10)
             except ValueError:
                 return None
             if end < start:
                 return None
-            total += end - start + 1
+            values = range(start, end + 1, stride)
+            if negate:
+                exclude.update(values)
+            else:
+                include.update(values)
+
+    if not include:
+        if exclude:
+            include = set()
         else:
-            try:
-                int(segment)
-            except ValueError:
-                return None
-            total += 1
-    if total <= 0:
+            return None
+
+    include.difference_update(exclude)
+    return tuple(sorted(include))
+
+
+def _parse_cpuset_list(spec: str) -> int | None:
+    expanded = _expand_cpu_list(spec)
+    if expanded is None:
         return None
-    return total
+    return len(expanded)
+
+
+def _read_cpu_list_file(path: str) -> tuple[int, ...] | None:
+    raw = _read_text_file(path)
+    if raw is None:
+        return None
+    expanded = _expand_cpu_list(raw)
+    if expanded is None:
+        return None
+    return expanded
 
 
 _CGROUP_V1_CPUSET_BASES: tuple[str, ...] = (
@@ -1065,6 +1115,103 @@ def _cgroup_cpuset_count(paths: dict[str, str], *, refresh: bool = False) -> int
 
     _CGROUP_CPUSET_CACHE = (os.getpid(), None)
     return None
+
+
+_CPU_ISOLATION_PATHS: tuple[tuple[str, str], ...] = (
+    ("isolated", "/sys/devices/system/cpu/isolated"),
+    ("nohz_full", "/sys/devices/system/cpu/nohz_full"),
+    ("rcu_nocbs", "/sys/devices/system/cpu/rcu_nocbs"),
+    ("managed_irq", "/sys/devices/system/cpu/managed_irq"),
+)
+
+_CPU_ISOLATION_BASIS: tuple[str, ...] = (
+    "/sys/devices/system/cpu/online",
+    "/sys/devices/system/cpu/possible",
+)
+
+
+def _cpu_isolation_snapshot() -> dict[str, object] | None:
+    snapshot: dict[str, object] = {}
+    reserved_sets: list[set[int]] = []
+
+    for key, path in _CPU_ISOLATION_PATHS:
+        cpus = _read_cpu_list_file(path)
+        if cpus is None:
+            continue
+        snapshot[key] = cpus
+        if cpus:
+            reserved_sets.append(set(cpus))
+
+    basis: tuple[int, ...] | None = None
+    for candidate in _CPU_ISOLATION_BASIS:
+        basis = _read_cpu_list_file(candidate)
+        if basis is not None:
+            snapshot["available"] = basis
+            break
+
+    if reserved_sets:
+        reserved_union: set[int] = set()
+        for group in reserved_sets:
+            reserved_union.update(group)
+        snapshot["reserved"] = tuple(sorted(reserved_union))
+        snapshot["reserved_count"] = len(reserved_union)
+    elif snapshot:
+        snapshot["reserved_count"] = 0
+
+    if basis is not None:
+        available_set = set(basis)
+        for group in reserved_sets:
+            available_set.difference_update(group)
+        effective = tuple(sorted(available_set))
+        snapshot["effective"] = effective
+        snapshot["effective_count"] = len(effective)
+    elif snapshot:
+        snapshot["effective_count"] = None
+
+    if not snapshot:
+        return None
+
+    return snapshot
+
+
+def system_cpu_isolations(*, refresh: bool = False) -> dict[str, object] | None:
+    """Return kernel-level CPU isolation metadata when available.
+
+    The returned mapping contains any detected isolation sets such as
+    ``"isolated"``, ``"nohz_full"``, ``"rcu_nocbs"`` and ``"managed_irq"``
+    alongside the CPUs considered generally available (``"available"``), the
+    union of reserved CPUs (``"reserved"``/``"reserved_count"``) and the number
+    of CPUs left after respecting those reservations
+    (``"effective"``/``"effective_count"``).  ``None`` is returned when the host
+    does not expose any isolation metadata.
+    """
+
+    global _CPU_ISOLATION_CACHE
+
+    if (
+        not refresh
+        and _CPU_ISOLATION_CACHE is not None
+        and _CPU_ISOLATION_CACHE[0] == os.getpid()
+    ):
+        cached = _CPU_ISOLATION_CACHE[1]
+        if cached is None:
+            return None
+        return {
+            key: (tuple(value) if isinstance(value, tuple) else value)
+            for key, value in cached.items()
+        }
+
+    snapshot = _cpu_isolation_snapshot()
+    if snapshot is None:
+        _CPU_ISOLATION_CACHE = (os.getpid(), None)
+        return None
+
+    structured = {
+        key: (tuple(value) if isinstance(value, tuple) else value)
+        for key, value in snapshot.items()
+    }
+    _CPU_ISOLATION_CACHE = (os.getpid(), structured)
+    return {key: value for key, value in structured.items()}
 
 
 def cgroup_cpu_quota(*, refresh: bool = False) -> float | None:
@@ -1183,7 +1330,10 @@ def process_cpu_budget(*, refresh: bool = False) -> dict[str, object]:
     quota expressed both as a float (``"cgroup_quota"``) and clamped integer
     limit (``"cgroup_quota_limit"``), the number of CPUs exposed through cgroup
     cpuset files (``"cgroup_cpuset"``) and the final minimum of the available
-    signals (``"effective"``).
+    signals (``"effective"``).  When kernel isolation controls such as
+    ``isolcpus`` or ``nohz_full`` are detected their reserved CPUs are reported
+    via ``"isolated_cpus"`` while ``"isolated_effective"`` reflects the
+    remaining CPUs after honouring those reservations.
     """
 
     global _CPU_BUDGET_CACHE
@@ -1209,6 +1359,22 @@ def process_cpu_budget(*, refresh: bool = False) -> dict[str, object]:
     if candidates:
         effective = max(1, min(candidates))
 
+    isolation = system_cpu_isolations(refresh=refresh)
+    isolated_effective: int | None = None
+    isolated_reserved: int | None = None
+    if isolation is not None:
+        reserved = isolation.get("reserved_count")
+        if isinstance(reserved, int):
+            isolated_reserved = max(0, reserved)
+        isolation_effective = isolation.get("effective_count")
+        if isinstance(isolation_effective, int):
+            isolated_effective = max(0, isolation_effective)
+            adjusted = max(1, isolated_effective) if isolated_effective > 0 else 1
+            if effective is None:
+                effective = adjusted
+            else:
+                effective = max(1, min(effective, adjusted))
+
     budget = {
         "system": system_total,
         "affinity": affinity,
@@ -1216,6 +1382,8 @@ def process_cpu_budget(*, refresh: bool = False) -> dict[str, object]:
         "cgroup_quota_limit": quota_limit,
         "cgroup_cpuset": cpuset,
         "effective": effective,
+        "isolated_cpus": isolated_reserved,
+        "isolated_effective": isolated_effective if isolated_effective is not None else None,
     }
 
     _CPU_BUDGET_CACHE = dict(budget)
@@ -1241,7 +1409,9 @@ def system_cpu_topology(*, refresh: bool = False) -> dict[str, object]:
     additional keys describe the number of physical cores (``"physical_cores"``),
     CPU packages (``"packages"``) and threads per core
     (``"threads_per_core"``).  A boolean ``"smt_active"`` key indicates whether
-    symmetric multithreading appears to be enabled for the accessible CPUs.
+    symmetric multithreading appears to be enabled for the accessible CPUs.  If
+    kernel isolation controls reserve CPUs the derived counts are also surfaced
+    via ``"isolated_effective_cpus"`` and ``"isolated_cpu_count"``.
     """
 
     global _CPU_TOPOLOGY_CACHE
@@ -1269,6 +1439,8 @@ def system_cpu_topology(*, refresh: bool = False) -> dict[str, object]:
     logical_total = budget.get("system")
     affinity_total = budget.get("affinity")
     effective = budget.get("effective")
+    isolated_effective = budget.get("isolated_effective")
+    isolated_reserved = budget.get("isolated_cpus")
 
     topology = _cpu_topology_from_sysfs(affinity_members)
     physical_cores = topology.get("physical_cores") if topology else None
@@ -1284,6 +1456,11 @@ def system_cpu_topology(*, refresh: bool = False) -> dict[str, object]:
         "threads_per_core": threads_per_core if isinstance(threads_per_core, int) else None,
         "smt_active": bool(threads_per_core and isinstance(threads_per_core, int) and threads_per_core > 1),
     }
+
+    if isinstance(isolated_effective, int):
+        result["isolated_effective_cpus"] = max(0, isolated_effective)
+    if isinstance(isolated_reserved, int):
+        result["isolated_cpu_count"] = max(0, isolated_reserved)
 
     _CPU_TOPOLOGY_CACHE = (os.getpid(), signature, dict(result))
     return result
