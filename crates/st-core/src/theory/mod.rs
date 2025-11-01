@@ -101,6 +101,12 @@ pub mod general_relativity_impl;
 #[doc(inline)]
 pub use general_relativity_impl as general_relativity;
 
+#[path = "gravity.rs"]
+#[doc(hidden)]
+pub mod gravity_impl;
+#[doc(inline)]
+pub use gravity_impl as gravity;
+
 #[path = "inflaton_zspace.rs"]
 #[doc(hidden)]
 pub mod inflaton_zspace_impl;

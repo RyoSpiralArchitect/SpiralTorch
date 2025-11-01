@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from itertools import zip_longest
 from typing import Iterable, Mapping, Sequence
 
 __all__ = [
@@ -12,8 +13,10 @@ __all__ = [
     "QuantumRealityStudio",
     "ZOverlayCircuit",
     "ZResonance",
+    "FractalQuantumSession",
     "quantum_measurement_from_fractal",
     "resonance_from_fractal_patch",
+    "quantum_measurement_from_fractal_sequence",
 ]
 
 try:  # pragma: no cover - optional runtime dependency
@@ -397,6 +400,95 @@ def _fractal_pulses(patch: object, *, eta_scale: float = 1.0) -> list[object]:
     return pulses
 
 
+def _ensure_shells(spectrum: Sequence[float], shells: Sequence[float]) -> list[float]:
+    if shells:
+        return [abs(_float_or_default(value)) for value in shells]
+    if not spectrum:
+        return [1.0]
+    return [abs(_float_or_default(value)) * (index + 1) for index, value in enumerate(spectrum)]
+
+
+class FractalQuantumSession:
+    """Accumulate fractal patches into a single quantum overlay measurement."""
+
+    def __init__(
+        self,
+        studio: QuantumRealityStudio,
+        *,
+        threshold: float = 0.0,
+        eta_scale: float = 1.0,
+    ) -> None:
+        self._studio = studio
+        self._threshold = float(threshold)
+        self._eta_scale = max(float(eta_scale), 0.0)
+        self._spectrum: list[float] = []
+        self._shells: list[float] = []
+        self._eta_acc: float = 0.0
+        self._weight: float = 0.0
+        self._ingested: int = 0
+
+    @property
+    def threshold(self) -> float:
+        return self._threshold
+
+    @property
+    def eta_scale(self) -> float:
+        return self._eta_scale
+
+    @property
+    def ingested(self) -> int:
+        return self._ingested
+
+    def _accumulate(self, resonance: ZResonance, weight: float) -> None:
+        if weight <= 0.0:
+            return
+        spectrum = list(resonance.spectrum)
+        shells = _ensure_shells(spectrum, resonance.shell_weights)
+        if len(self._spectrum) < len(spectrum):
+            self._spectrum.extend([0.0] * (len(spectrum) - len(self._spectrum)))
+        if len(self._shells) < len(shells):
+            self._shells.extend([0.0] * (len(shells) - len(self._shells)))
+        for index, value in enumerate(self._spectrum):
+            spec = spectrum[index] if index < len(spectrum) else 0.0
+            self._spectrum[index] = value + spec * weight
+        for index, value in enumerate(self._shells):
+            shell = shells[index] if index < len(shells) else 0.0
+            self._shells[index] = value + shell * weight
+        self._eta_acc += float(resonance.eta_hint) * weight
+        self._weight += weight
+        self._ingested += 1
+
+    def ingest(self, patch: object, *, weight: float = 1.0) -> ZResonance:
+        resonance = resonance_from_fractal_patch(patch, eta_scale=self._eta_scale)
+        self._accumulate(resonance, max(float(weight), 0.0))
+        return resonance
+
+    def resonance(self) -> ZResonance:
+        if self._weight <= 0.0 or not self._spectrum:
+            return ZResonance()
+        scale = 1.0 / self._weight
+        spectrum = [value * scale for value in self._spectrum]
+        shells = [value * scale for value in self._shells]
+        return ZResonance(
+            spectrum=spectrum,
+            eta_hint=float(self._eta_acc * scale),
+            shell_weights=shells,
+        )
+
+    def measure(self, *, threshold: float | None = None) -> QuantumMeasurement:
+        resonance = self.resonance()
+        circuit = self._studio.overlay_zspace(resonance)
+        value = self._threshold if threshold is None else float(threshold)
+        return circuit.measure(value)
+
+    def clear(self) -> None:
+        self._spectrum.clear()
+        self._shells.clear()
+        self._eta_acc = 0.0
+        self._weight = 0.0
+        self._ingested = 0
+
+
 def resonance_from_fractal_patch(patch: object, *, eta_scale: float = 1.0) -> ZResonance:
     """Construct a :class:`ZResonance` directly from a fractal Z-space patch."""
 
@@ -416,3 +508,30 @@ def quantum_measurement_from_fractal(
     resonance = resonance_from_fractal_patch(patch, eta_scale=eta_scale)
     circuit = studio.overlay_zspace(resonance)
     return circuit.measure(threshold)
+
+
+def quantum_measurement_from_fractal_sequence(
+    studio: QuantumRealityStudio,
+    patches: Iterable[object],
+    *,
+    weights: Iterable[float] | None = None,
+    threshold: float = 0.0,
+    eta_scale: float = 1.0,
+) -> QuantumMeasurement:
+    """Aggregate multiple fractal patches before measuring the overlay studio."""
+
+    session = FractalQuantumSession(
+        studio,
+        threshold=threshold,
+        eta_scale=eta_scale,
+    )
+    if weights is None:
+        for patch in patches:
+            session.ingest(patch)
+    else:
+        sentinel = object()
+        for patch, weight in zip_longest(patches, weights, fillvalue=sentinel):
+            if patch is sentinel or weight is sentinel:
+                raise ValueError("patches and weights must have the same length")
+            session.ingest(patch, weight=float(weight))
+    return session.measure()
