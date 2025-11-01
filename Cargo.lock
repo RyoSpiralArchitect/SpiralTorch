@@ -3007,6 +3007,7 @@ dependencies = [
  "once_cell",
  "rand",
  "serde",
+ "spiral-config",
  "st-core",
  "st-tensor",
  "st-vision",
@@ -3038,6 +3039,7 @@ dependencies = [
  "st-nn",
  "st-qr-studio",
  "st-rec",
+ "st-robotics",
  "st-spiral-rl",
  "st-tensor",
  "st-text",
@@ -3275,6 +3277,10 @@ dependencies = [
  "st-spiral-rl",
  "st-tensor",
 ]
+
+[[package]]
+name = "st-robotics"
+version = "0.1.0"
 
 [[package]]
 name = "st-softlogic"

@@ -638,6 +638,14 @@ impl PyHypergrad {
         self.inner.scale_learning_rate(factor);
     }
 
+    pub fn scale_gradient(&mut self, factor: f32) {
+        self.inner.scale_gradient(factor);
+    }
+
+    pub fn rescale_rms(&mut self, target_rms: f32) -> f32 {
+        self.inner.rescale_rms(target_rms)
+    }
+
     pub fn reset(&mut self) {
         self.inner.reset();
     }

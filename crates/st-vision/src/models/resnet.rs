@@ -170,6 +170,238 @@ impl SkipSlipSchedule {
     /// one slip factor per residual block in that stage. The schedule is
     /// validated before previewing.
     pub fn preview(&self, block_depths: &[usize]) -> PureResult<Vec<Vec<f32>>> {
+        self.preview_inner(block_depths, None)
+    }
+
+    /// Returns the slip factors after blending the schedule with the identity bridge.
+    ///
+    /// A blend progress of `0.0` keeps all residual paths at identity strength,
+    /// while `1.0` applies the full schedule. Values outside the unit interval are
+    /// clamped for convenience.
+    pub fn preview_with_identity_blend(
+        &self,
+        block_depths: &[usize],
+        identity_progress: f32,
+    ) -> PureResult<Vec<Vec<f32>>> {
+        self.preview_inner(block_depths, Some(identity_progress))
+    }
+
+    fn preview_inner(
+        &self,
+        block_depths: &[usize],
+        identity_progress: Option<f32>,
+    ) -> PureResult<Vec<Vec<f32>>> {
+        self.validate()?;
+        let total_blocks: usize = block_depths.iter().sum();
+        let mut preview = Vec::with_capacity(block_depths.len());
+        let mut global_block_idx = 0usize;
+        let identity_progress = match identity_progress {
+            Some(value) => Some(Self::normalise_identity_progress(value)?),
+            None => None,
+        };
+        for (stage_idx, &depth) in block_depths.iter().enumerate() {
+            let mut stage_factors = Vec::with_capacity(depth);
+            for block_idx in 0..depth {
+                let factor = self.factor_internal(
+                    stage_idx,
+                    block_idx,
+                    depth,
+                    global_block_idx,
+                    total_blocks,
+                    identity_progress,
+                );
+                stage_factors.push(factor);
+                global_block_idx += 1;
+            }
+            preview.push(stage_factors);
+        }
+        Ok(preview)
+    }
+
+    fn validate(&self) -> PureResult<()> {
+        if !self.start.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "resnet_skip_slip_start",
+                value: self.start,
+            });
+        }
+        if !self.end.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "resnet_skip_slip_end",
+                value: self.end,
+            });
+        }
+        if !self.power.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "resnet_skip_slip_power",
+                value: self.power,
+            });
+        }
+        if self.start < 0.0 || self.end < 0.0 {
+            return Err(TensorError::InvalidValue {
+                label: "resnet_skip_slip_range",
+            });
+        }
+        if self.power <= 0.0 {
+            return Err(TensorError::InvalidValue {
+                label: "resnet_skip_slip_power",
+            });
+        }
+        Ok(())
+    }
+
+    fn factor_internal(
+        &self,
+        _stage_idx: usize,
+        block_idx: usize,
+        stage_depth: usize,
+        global_block_idx: usize,
+        total_blocks: usize,
+        identity_progress: Option<f32>,
+    ) -> f32 {
+        let numerator = if self.per_stage {
+            block_idx as f32
+        } else {
+            global_block_idx as f32
+        };
+        let denominator = if self.per_stage {
+            if stage_depth > 1 {
+                (stage_depth - 1) as f32
+            } else {
+                1.0
+            }
+        } else if total_blocks > 1 {
+            (total_blocks - 1) as f32
+        } else {
+            1.0
+        };
+        let progress = if denominator <= f32::EPSILON {
+            0.0
+        } else {
+            (numerator / denominator).clamp(0.0, 1.0)
+        };
+        let powered = progress.powf(self.power);
+        let slip = self.start + (self.end - self.start) * powered;
+        let slip = if slip <= 0.0 { 0.0 } else { slip };
+        match identity_progress {
+            Some(progress) => Self::blend_with_identity(slip, progress),
+            None => slip,
+        }
+    }
+
+    fn blend_with_identity(slip: f32, progress: f32) -> f32 {
+        if !progress.is_finite() {
+            return slip;
+        }
+        let progress = progress.clamp(0.0, 1.0);
+        1.0 + (slip - 1.0) * progress
+    }
+
+    fn normalise_identity_progress(progress: f32) -> PureResult<f32> {
+        if !progress.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "resnet_skip_slip_identity_progress",
+                value: progress,
+            });
+        }
+        Ok(progress.clamp(0.0, 1.0))
+    }
+
+    fn factor(
+        &self,
+        stage_idx: usize,
+        block_idx: usize,
+        stage_depth: usize,
+        global_block_idx: usize,
+        total_blocks: usize,
+    ) -> f32 {
+        self.factor_internal(
+            stage_idx,
+            block_idx,
+            stage_depth,
+            global_block_idx,
+            total_blocks,
+            None,
+        )
+    }
+
+    fn factor_with_identity_blend(
+        &self,
+        stage_idx: usize,
+        block_idx: usize,
+        stage_depth: usize,
+        global_block_idx: usize,
+        total_blocks: usize,
+        identity_progress: f32,
+    ) -> f32 {
+        self.factor_internal(
+            stage_idx,
+            block_idx,
+            stage_depth,
+            global_block_idx,
+            total_blocks,
+            Some(identity_progress),
+        )
+    }
+
+    #[allow(dead_code)]
+    fn description(&self) -> String {
+        let scope = if self.per_stage {
+            "per-stage"
+        } else {
+            "global"
+        };
+        format!(
+            "{scope} slip: start={:.3}, end={:.3}, power={:.3}",
+            self.start, self.end, self.power
+        )
+    }
+
+    /// Applies a skip slip schedule to the configuration.
+    pub fn with_skip_slip(mut self, schedule: SkipSlipSchedule) -> Self {
+        self.skip_slip = Some(schedule);
+        self
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SkipSlipSchedule {
+    start: f32,
+    end: f32,
+    power: f32,
+    per_stage: bool,
+}
+
+impl SkipSlipSchedule {
+    pub fn linear(start: f32, end: f32) -> Self {
+        Self {
+            start,
+            end,
+            power: 1.0,
+            per_stage: false,
+        }
+    }
+
+    pub fn constant(value: f32) -> Self {
+        Self::linear(value, value)
+    }
+
+    pub fn with_power(mut self, power: f32) -> Self {
+        self.power = power;
+        self
+    }
+
+    pub fn per_stage(mut self) -> Self {
+        self.per_stage = true;
+        self
+    }
+
+    /// Returns the slip factors that would be applied to a sequence of stages.
+    ///
+    /// Each element in the returned vector corresponds to a stage and contains
+    /// one slip factor per residual block in that stage. The schedule is
+    /// validated before previewing.
+    pub fn preview(&self, block_depths: &[usize]) -> PureResult<Vec<Vec<f32>>> {
         self.validate()?;
         let total_blocks: usize = block_depths.iter().sum();
         let mut preview = Vec::with_capacity(block_depths.len());
@@ -488,6 +720,26 @@ impl ResNetBlock {
         let out = self.activation2.forward(&summed)?;
         Ok((out, summed, conv2_out, act1_out, conv1_out))
     }
+
+    fn slip_factor(&self) -> f32 {
+        self.slip_factor
+    }
+
+    fn set_slip_factor(&mut self, slip: f32) -> PureResult<()> {
+        if !slip.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "resnet_skip_slip_factor",
+                value: slip,
+            });
+        }
+        if slip < 0.0 {
+            return Err(TensorError::InvalidValue {
+                label: "resnet_skip_slip_factor",
+            });
+        }
+        self.slip_factor = slip;
+        Ok(())
+    }
 }
 
 impl Module for ResNetBlock {
@@ -586,6 +838,7 @@ pub struct ResNetBackbone {
     output_channels: usize,
     output_hw: (usize, usize),
     tokens_per_stage: Vec<(usize, (usize, usize))>,
+    block_depths: Vec<usize>,
 }
 
 impl ResNetBackbone {
@@ -711,6 +964,7 @@ impl ResNetBackbone {
             output_channels: current_channels,
             output_hw: current_hw,
             tokens_per_stage,
+            block_depths: config.block_depths.clone(),
         })
     }
 
@@ -728,6 +982,98 @@ impl ResNetBackbone {
 
     pub fn stage_shapes(&self) -> &Vec<(usize, (usize, usize))> {
         &self.tokens_per_stage
+    }
+
+    pub fn block_depths(&self) -> &[usize] {
+        &self.block_depths
+    }
+
+    pub fn skip_slip_factors(&self) -> Vec<Vec<f32>> {
+        let mut factors = Vec::with_capacity(self.block_depths.len());
+        let mut global_idx = 0usize;
+        for &depth in &self.block_depths {
+            let mut stage = Vec::with_capacity(depth);
+            for _ in 0..depth {
+                let block = self
+                    .blocks
+                    .get(global_idx)
+                    .expect("skip slip factors align with block layout");
+                stage.push(block.slip_factor());
+                global_idx += 1;
+            }
+            factors.push(stage);
+        }
+        factors
+    }
+
+    pub fn set_skip_slip(&mut self, schedule: Option<SkipSlipSchedule>) -> PureResult<()> {
+        self.apply_skip_slip(schedule, None)
+    }
+
+    /// Applies a skip slip schedule with a blend factor against the identity bridge.
+    ///
+    /// A progress value of `0.0` leaves all residual paths at identity strength,
+    /// while `1.0` applies the schedule exactly. Intermediate values smoothly blend
+    /// between the two, enabling annealing over the course of training.
+    pub fn set_skip_slip_progress(
+        &mut self,
+        schedule: Option<SkipSlipSchedule>,
+        identity_progress: f32,
+    ) -> PureResult<()> {
+        self.apply_skip_slip(schedule, Some(identity_progress))
+    }
+
+    fn apply_skip_slip(
+        &mut self,
+        schedule: Option<SkipSlipSchedule>,
+        identity_progress: Option<f32>,
+    ) -> PureResult<()> {
+        match schedule {
+            Some(schedule) => {
+                schedule.validate()?;
+                let blend = match identity_progress {
+                    Some(value) => Some(SkipSlipSchedule::normalise_identity_progress(value)?),
+                    None => None,
+                };
+                let total_blocks: usize = self.block_depths.iter().sum();
+                debug_assert_eq!(self.blocks.len(), total_blocks);
+                let mut global_block_idx = 0usize;
+                let mut block_iter = self.blocks.iter_mut();
+                for (stage_idx, &depth) in self.block_depths.iter().enumerate() {
+                    for block_idx in 0..depth {
+                        let slip = match blend {
+                            Some(progress) => schedule.factor_with_identity_blend(
+                                stage_idx,
+                                block_idx,
+                                depth,
+                                global_block_idx,
+                                total_blocks,
+                                progress,
+                            ),
+                            None => schedule.factor(
+                                stage_idx,
+                                block_idx,
+                                depth,
+                                global_block_idx,
+                                total_blocks,
+                            ),
+                        };
+                        let block = block_iter
+                            .next()
+                            .expect("skip slip schedule length matches blocks");
+                        block.set_slip_factor(slip)?;
+                        global_block_idx += 1;
+                    }
+                }
+                debug_assert!(block_iter.next().is_none());
+            }
+            None => {
+                for block in &mut self.blocks {
+                    block.set_slip_factor(1.0)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn load_weights_json<P: AsRef<std::path::Path>>(&mut self, path: P) -> PureResult<()> {

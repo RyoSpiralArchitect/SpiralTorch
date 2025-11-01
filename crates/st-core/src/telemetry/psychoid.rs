@@ -23,7 +23,6 @@
 
 #![allow(clippy::too_many_arguments)]
 
-use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use spiral_config::determinism;
 use std::collections::{HashMap, VecDeque};

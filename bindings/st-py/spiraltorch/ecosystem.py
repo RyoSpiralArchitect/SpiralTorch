@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+import inspect
+from typing import Any, Callable, Iterable
 
 from . import Tensor, compat
 
@@ -125,31 +126,116 @@ def _require_module(name: str) -> Any:
         ) from exc
 
 
-def tensor_to_cupy(tensor: Tensor) -> Any:
+def _supports_stream_parameter(func: Callable[..., Any]) -> bool | None:
+    try:
+        signature = inspect.signature(func)
+    except (TypeError, ValueError):
+        return None
+
+    for parameter in signature.parameters.values():
+        if parameter.kind in (parameter.KEYWORD_ONLY, parameter.POSITIONAL_OR_KEYWORD):
+            if parameter.name == "stream":
+                return True
+        elif parameter.kind is parameter.VAR_KEYWORD:
+            return True
+    return False
+
+
+def _call_with_optional_stream(
+    func: Callable[..., Any],
+    positional: Iterable[Any],
+    *,
+    stream: Any | None,
+) -> Any:
+    positional = tuple(positional)
+    if stream is None:
+        return func(*positional)
+
+    supports_stream = _supports_stream_parameter(func)
+    if supports_stream:
+        return func(*positional, stream=stream)
+    if supports_stream is False:
+        return func(*positional)
+
+    try:
+        return func(*positional, stream=stream)
+    except TypeError as exc:
+        if "stream" in str(exc):
+            return func(*positional)
+        raise
+
+
+def _resolve_cupy_stream(stream: Any | None, *, cupy: Any) -> Any:
+    if stream is None:
+        return None
+
+    cuda = getattr(cupy, "cuda", None)
+
+    if isinstance(stream, str):
+        keyword = stream.lower()
+        if keyword in {"current", "auto"}:
+            if cuda is None or not hasattr(cuda, "get_current_stream"):
+                raise RuntimeError(
+                    "CuPy does not expose cuda.get_current_stream; cannot resolve 'current' stream alias."
+                )
+            return cuda.get_current_stream()
+        if keyword in {"null", "default"}:
+            stream_class = getattr(cuda, "Stream", None) if cuda is not None else None
+            null_stream = getattr(stream_class, "null", None)
+            if null_stream is None:
+                raise RuntimeError(
+                    "CuPy does not expose cuda.Stream.null; cannot resolve 'null' stream alias."
+                )
+            return null_stream
+        raise ValueError(f"Unknown CuPy stream alias: {stream!r}")
+
+    if isinstance(stream, int):
+        external_stream = getattr(cuda, "ExternalStream", None) if cuda is not None else None
+        if external_stream is None:
+            raise RuntimeError(
+                "CuPy does not expose cuda.ExternalStream; cannot wrap raw stream pointer."
+            )
+        return external_stream(stream)
+
+    return stream
+
+
+def _dlpack_from_array(array: Any, *, stream: Any | None, cupy_module: Any | None = None) -> Any:
+    if hasattr(array, "__dlpack__"):
+        method = getattr(array, "__dlpack__")
+        return _call_with_optional_stream(method, (), stream=stream)
+    if hasattr(array, "toDlpack"):
+        method = getattr(array, "toDlpack")
+        return _call_with_optional_stream(method, (), stream=stream)
+    if hasattr(array, "to_dlpack"):
+        method = getattr(array, "to_dlpack")
+        return _call_with_optional_stream(method, (), stream=stream)
+    cupy = cupy_module or _require_module("cupy")
+    if hasattr(cupy, "toDlpack"):
+        function = getattr(cupy, "toDlpack")
+        return _call_with_optional_stream(function, (array,), stream=stream)
+    if hasattr(cupy, "to_dlpack"):
+        function = getattr(cupy, "to_dlpack")
+        return _call_with_optional_stream(function, (array,), stream=stream)
+    raise TypeError("Object does not expose a DLPack-compatible exporter")
+
+
+def tensor_to_cupy(tensor: Tensor, *, stream: Any | None = None) -> Any:
     """Share a :class:`~spiraltorch.Tensor` with CuPy via DLPack."""
 
     cupy = _require_module("cupy")
+    stream = _resolve_cupy_stream(stream, cupy=cupy)
     exporter = getattr(cupy, "from_dlpack", None)
     if exporter is None:  # pragma: no cover - defensive guard
         raise RuntimeError("cupy.from_dlpack is unavailable")
     capsule = tensor.to_dlpack()
-    return exporter(capsule)
+    return _call_with_optional_stream(exporter, (capsule,), stream=stream)
 
 
-def cupy_to_tensor(array: Any) -> Tensor:
+def cupy_to_tensor(array: Any, *, stream: Any | None = None) -> Tensor:
     """Convert a ``cupy.ndarray`` (or compatible object) into a SpiralTorch tensor."""
 
     cupy = _require_module("cupy")
-    if hasattr(array, "toDlpack"):
-        capsule = array.toDlpack()
-    elif hasattr(array, "to_dlpack"):
-        capsule = array.to_dlpack()
-    elif hasattr(cupy, "toDlpack"):
-        capsule = cupy.toDlpack(array)
-    elif hasattr(cupy, "to_dlpack"):
-        capsule = cupy.to_dlpack(array)
-    elif hasattr(array, "__dlpack__"):
-        capsule = array.__dlpack__()
-    else:  # pragma: no cover - defensive guard
-        raise TypeError("Object does not expose a DLPack-compatible exporter")
+    stream = _resolve_cupy_stream(stream, cupy=cupy)
+    capsule = _dlpack_from_array(array, stream=stream, cupy_module=cupy)
     return Tensor.from_dlpack(capsule)

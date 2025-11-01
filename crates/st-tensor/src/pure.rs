@@ -3718,7 +3718,7 @@ impl GradientSummary {
             0.0
         };
         let linf = if linf.is_finite() { linf.max(0.0) } else { 0.0 };
-        Self {
+        let summary = Self {
             l1,
             l2: sum_squares.sqrt(),
             linf,
@@ -3732,7 +3732,60 @@ impl GradientSummary {
             positive_count: 0,
             negative_count: 0,
             near_zero_count: 0,
+        };
+
+        summary
+    }
+
+    /// Attach support and sign statistics to an existing summary. When the
+    /// summary was constructed from aggregated power sums this method can be
+    /// used to backfill the additional metrics without reprocessing the raw
+    /// gradient samples.
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_support(
+        mut self,
+        min: f32,
+        max: f32,
+        positive_count: usize,
+        negative_count: usize,
+        near_zero_count: usize,
+    ) -> Self {
+        if self.count == 0 {
+            self.min = 0.0;
+            self.max = 0.0;
+            self.positive_count = 0;
+            self.negative_count = 0;
+            self.near_zero_count = 0;
+            return self;
         }
+
+        let mut min = if min.is_finite() { min } else { 0.0 };
+        let mut max = if max.is_finite() { max } else { 0.0 };
+        if max < min {
+            mem::swap(&mut min, &mut max);
+        }
+
+        let mut positive_count = positive_count.min(self.count);
+        let mut negative_count = negative_count.min(self.count - positive_count);
+        let near_zero_count = near_zero_count.min(self.count);
+
+        if positive_count + negative_count > self.count {
+            let overflow = positive_count + negative_count - self.count;
+            if negative_count >= overflow {
+                negative_count -= overflow;
+            } else {
+                positive_count = positive_count.saturating_sub(overflow - negative_count);
+                negative_count = 0;
+            }
+        }
+
+        self.min = min;
+        self.max = max;
+        self.positive_count = positive_count;
+        self.negative_count = negative_count;
+        self.near_zero_count = near_zero_count;
+        self
     }
 
     /// Attach support and sign statistics to an existing summary. When the
@@ -5378,6 +5431,53 @@ impl AmegaHypergrad {
         }
     }
 
+    /// Scales the accumulated gradient by `factor` while keeping the cached
+    /// summary in sync. Non-finite scaling factors reset the tape to a clean
+    /// state to avoid propagating NaNs or infinities through downstream
+    /// telemetry.
+    pub fn scale_gradient(&mut self, factor: f32) {
+        if !factor.is_finite() {
+            self.reset();
+            return;
+        }
+        if (factor - 1.0).abs() <= f32::EPSILON {
+            return;
+        }
+        for idx in 0..self.gradient.len() {
+            let old = self.gradient[idx];
+            let candidate = old * factor;
+            let new = self.topos.saturate(candidate);
+            if old.to_bits() != new.to_bits() {
+                self.gradient[idx] = new;
+                self.record_transition(old, new);
+            } else {
+                self.gradient[idx] = new;
+            }
+        }
+    }
+
+    /// Rescales the gradient so its root-mean-square matches `target_rms` and
+    /// returns the factor that was applied. When the gradient is dormant the
+    /// tape stays untouched and the method returns ``0.0`` to signal no-op
+    /// scaling.
+    pub fn rescale_rms(&mut self, target_rms: f32) -> f32 {
+        if !target_rms.is_finite() {
+            return 1.0;
+        }
+        if target_rms <= 0.0 {
+            self.reset();
+            return 0.0;
+        }
+        let summary = self.summary();
+        let current_rms = summary.rms();
+        if current_rms <= 1e-12 {
+            return 0.0;
+        }
+        let factor = target_rms / current_rms;
+        self.scale_gradient(factor);
+        factor
+    }
+
     /// Retunes the curvature and learning rate while rebuilding the guard topos.
     /// The accumulated gradient buffer is cleared to avoid mixing incompatible
     /// geometries across updates.
@@ -5989,18 +6089,76 @@ fn fused_attention_cpu(
     output
 }
 
-fn row_softmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
-    match HardmaxFusionPlan::new(data, rows, cols)
-        .layout(Layout::RowMajor)
-        .backend(HardmaxBackend::Cpu)
-        .mode(HardmaxMode::SoftmaxAndMask)
-        .execute()
-    {
-        Ok(result) => result
-            .softmax
-            .unwrap_or_else(|| vec![0.0; rows.saturating_mul(cols)]),
-        Err(_) => vec![0.0; rows.saturating_mul(cols)],
+fn cpu_row_softmax_hardmax(data: &[f32], rows: usize, cols: usize) -> (Vec<f32>, Vec<f32>) {
+    let expected = rows.saturating_mul(cols);
+    if data.len() != expected || expected == 0 {
+        return (vec![0.0; expected], vec![0.0; expected]);
     }
+
+    let mut softmax = vec![0.0f32; expected];
+    let mut hardmax = vec![0.0f32; expected];
+
+    for row in 0..rows {
+        let offset = row * cols;
+        let row_slice = &data[offset..offset + cols];
+
+        let mut max_value = f32::NEG_INFINITY;
+        let mut max_index = 0usize;
+        let mut found = false;
+        for (index, &value) in row_slice.iter().enumerate() {
+            if value.is_nan() {
+                continue;
+            }
+            if !found || value > max_value {
+                max_value = value;
+                max_index = index;
+                found = true;
+            }
+        }
+
+        let base = if found && max_value.is_finite() {
+            max_value
+        } else {
+            0.0
+        };
+
+        let mut denom = 0.0f32;
+        for (index, &value) in row_slice.iter().enumerate() {
+            let weight = if !found || value.is_nan() {
+                0.0
+            } else {
+                (value - base).exp()
+            };
+            softmax[offset + index] = weight;
+            denom += weight;
+        }
+
+        if found {
+            if denom.is_finite() && denom > f32::EPSILON {
+                let inv = denom.recip();
+                for value in &mut softmax[offset..offset + cols] {
+                    *value *= inv;
+                }
+            } else {
+                for value in &mut softmax[offset..offset + cols] {
+                    *value = 0.0;
+                }
+                softmax[offset + max_index] = 1.0;
+            }
+            hardmax[offset + max_index] = 1.0;
+        }
+    }
+
+    (softmax, hardmax)
+}
+
+fn row_softmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+    cpu_row_softmax_hardmax(data, rows, cols).0
+}
+
+#[cfg_attr(feature = "wgpu", allow(dead_code))]
+fn row_hardmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+    cpu_row_softmax_hardmax(data, rows, cols).1
 }
 
 fn add_bias_relu_inplace(data: &mut [f32], rows: usize, cols: usize, bias: &[f32]) {

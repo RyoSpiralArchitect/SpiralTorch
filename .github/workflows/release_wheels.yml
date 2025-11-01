@@ -51,6 +51,17 @@ jobs:
           set -euo pipefail
           find dist -type f -name '*.whl' -print0 | sort -z | xargs -0 -I{} sh -c 'sha256sum "{}" | sed "s|  .*|  $(basename "{}")|"' > dist/wheels.sha256
           find dist -type f -name '*.whl' -print0 | sort -z | xargs -0 -I{} sh -c 'sha512sum "{}" | sed "s|  .*|  $(basename "{}")|"' > dist/wheels.sha512
+      - name: Snapshot repository manifest and compliance seal
+        run: |
+          python scripts/security/generate_repo_manifest.py \
+            --repo-root . \
+            --canonical-license "LICENSE .txt" \
+            --output dist/spiraltorch-repo-license-manifest.json \
+            --allow-untracked
+          python scripts/security/generate_compliance_seal.py \
+            --manifest dist/spiraltorch-repo-license-manifest.json \
+            --repo-root . \
+            --output dist/spiraltorch-compliance-seal.json
       - name: Enforce embedded AGPL license payloads
         env:
           RELEASE_TAG: ${{ github.ref_name }}
@@ -128,6 +139,8 @@ jobs:
             dist/*.sha256
             dist/*.sha512
             dist/*.json
+            dist/spiraltorch-repo-license-manifest.json
+            dist/spiraltorch-compliance-seal.json
       - name: Create/Update GitHub Release with assets
         uses: softprops/action-gh-release@v1
         with:
