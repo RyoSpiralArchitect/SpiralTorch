@@ -8,6 +8,10 @@ _(Still under active expanding hourly.)_
 
 - **Fractal → Quantum RL bridge.** Stream Mellin-log fractal patches straight into the quantum overlay studio and recover policy gradients through `FractalQuantumTrainer` and friends—keeping Python fallbacks and PyO3 builds in lockstep.
 - **Self-evolving SpiralK kernels.** A new diversity governor inside `SelfRewriteEngine` tracks plateauing η̄ gains, forces fresh AI rewrites when caches go stale, and surfaces telemetry via `diversity_snapshot()` so operators can keep the autonomous kernel lab on course.
+- **Saga-aware kernel evolution.** The `SelfRewriteEngine` now learns multi-step hint sagas, boosting cache priority for sequenced rewrites and exposing the orbits via `saga_snapshots()` so you can audit every cosmic combo.
+- **Reinforcement-tuned hint genetics.** Hint chains earn reward-weighted feedback, anomaly filters freeze outliers, recombination fuses cached winners, graph snapshots illuminate hint affinity, and `take_trace()` streams the self-evolution log when `--debug-self-evolution` is enabled.
+- **Chain-policy reinforcement.** Cached hint chains now feed a lightweight Q-style policy inside `SelfRewriteEngine`, boosting cache priority via chain multipliers, exposing telemetry with `chain_policy_snapshots()`, and logging `PolicyUpdate` traces whenever the self-evolution loop reshapes its instincts.
+- **Contextual bandit autopilot.** A UCB-flavoured bandit now rides alongside the cache, weighting hint reuse via `bandit_snapshots()` telemetry, steering exploration with `with_bandit_*` knobs, and leaving `BanditUpdate` traces whenever rewrites learn a new favourite arm.
 
 ## 🌌 SpiralTorch Manifesto
 
@@ -149,7 +153,7 @@ SpiralTorch ships under a dual-license model:
 ## Code stats
 
 <!-- AUTOGEN: CODESTATS BEGIN -->
-_Last updated: 2025-10-29 04:56 UTC_
+_Last updated: 2025-10-31 05:08 UTC_
 
 ```text
 
@@ -163,11 +167,11 @@ _Last updated: 2025-10-29 04:56 UTC_
  Go                     11         2582         2082          200          300
  JSON                    6          372          372            0            0
  Julia                   8         1335         1176           14          145
- Python                 77        18800        15825          103         2872
+ Python                 89        25207        21197          127         3883
  Shell                   4          194          172            4           18
  SVG                     3           60           60            0            0
  Plain Text              1          661            0          544          117
- TOML                   39          983          839           27          117
+ TOML                   40         1011          867           27          117
  TypeScript              7         4899         4332          175          392
  YAML                    3           72           65            0            7
 -------------------------------------------------------------------------------
@@ -181,8 +185,8 @@ _Last updated: 2025-10-29 04:56 UTC_
  |- Python               2           22           20            0            2
  (Total)                             31           20            9            2
 -------------------------------------------------------------------------------
- Markdown               63         6393            0         5015         1378
- |- BASH                17          131          102           17           12
+ Markdown               63         6537            0         5129         1408
+ |- BASH                18          146          117           17           12
  |- C                    1           21           16            0            5
  |- COBOL                1           30           30            0            0
  |- Dockerfile           1            6            6            0            0
@@ -190,18 +194,17 @@ _Last updated: 2025-10-29 04:56 UTC_
  |- JavaScript           1           34           29            3            2
  |- JSON                 1           11           11            0            0
  |- Julia                1           29           26            0            3
- |- Python               7          840          702           20          118
- |- Rust                 5          777          683           16           78
+ |- Python               7          867          722           22          123
+ |- Rust                 5          819          718           18           83
  |- YAML                 2           62           62            0            0
- (Total)                           8352         1685         5071         1596
+ (Total)                           8580         1755         5189         1636
 -------------------------------------------------------------------------------
- Rust                  392       174257       155659         1840        16758
- |- Markdown           247         6653            0         6499          154
- (Total)                         180910       155659         8339        16912
+ Rust                  406       187364       167484         1857        18023
+ |- Markdown           260         6934            0         6774          160
+ (Total)                         194298       167484         8631        18183
 ===============================================================================
- Total                 622       212056       181924         7934        22198
+ Total                 649       231742       199149         8089        24504
 ===============================================================================
-
 ```
 ---
 

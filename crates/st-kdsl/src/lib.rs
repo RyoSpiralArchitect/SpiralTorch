@@ -28,8 +28,9 @@ pub use registry::{
     TelemetrySummary,
 };
 pub use self_mod::{
-    ContextClusterSnapshot, DiversitySnapshot, HintQualitySnapshot, HintStatSnapshot,
-    HintTransitionSnapshot, SelfRewriteEngine, SelfRewriteEvent,
+    ContextClusterSnapshot, DiversitySnapshot, HintBanditSnapshot, HintChainPolicySnapshot,
+    HintQualitySnapshot, HintSagaSnapshot, HintStatSnapshot, HintTransitionSnapshot,
+    SelfRewriteEngine, SelfRewriteEvent,
 };
 pub use tile::{TileConfig, TileIter, TileKnowledge, TileTemplate, WeightedMetric};
 
