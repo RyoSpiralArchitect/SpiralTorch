@@ -72,6 +72,11 @@ let preview = SkipSlipSchedule::linear(0.2, 1.0)
     .preview(&[9, 9, 9])?;
 assert_eq!(preview[0][0], 0.2); // first block in stage 0 starts softly
 assert!((preview.last().unwrap().last().unwrap() - 1.0).abs() < 1e-6);
+
+let halfway = SkipSlipSchedule::linear(0.2, 1.0)
+    .per_stage()
+    .preview_with_identity_blend(&[9, 9, 9], 0.5)?;
+assert!((halfway[0][0] - 0.6).abs() < 1e-6); // halfway between identity and the raw ramp
 ```
 
 Already instantiated a `ResNetBackbone`? You can update its slip schedule without rebuilding the network and inspect the live factors:
@@ -82,6 +87,11 @@ let mut resnet = ResNetBackbone::new(ResNetConfig::resnet56_cifar(true))?;
 let anneal = SkipSlipSchedule::linear(0.15, 1.0).per_stage();
 resnet.set_skip_slip(Some(anneal.clone()))?;
 assert_eq!(resnet.skip_slip_factors(), anneal.preview(&[9, 9, 9])?);
+
+// blend back toward identity over time (0.0 = identity, 1.0 = full slip schedule)
+resnet.set_skip_slip_progress(Some(anneal.clone()), 0.25)?;
+let softened = anneal.preview_with_identity_blend(&[9, 9, 9], 0.25)?;
+assert_eq!(resnet.skip_slip_factors(), softened);
 
 resnet.set_skip_slip(None)?; // return to identity skips mid-training
 ```

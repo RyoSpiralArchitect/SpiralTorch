@@ -3254,7 +3254,65 @@ impl GpuContext {
         })
     }
 
-    #[cfg(any())]
+    fn softmax_bind_group(
+        &self,
+        input: &Buffer,
+        output: &Buffer,
+        mask: Option<&Buffer>,
+        params: &Buffer,
+    ) -> BindGroup {
+        let mask_binding = mask.unwrap_or(output);
+        self.device().create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("st.tensor.wgpu_dense.softmax.bind_group"),
+            layout: &self.softmax_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: input.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: output.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: params.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: mask_binding.as_entire_binding(),
+                },
+            ],
+        })
+    }
+
+    fn softmax_zspace_bind_group(
+        &self,
+        output: &Buffer,
+        metrics: &Buffer,
+        params: &Buffer,
+    ) -> Option<BindGroup> {
+        let layout = self.softmax_zspace_layout.as_ref()?;
+        Some(self.device().create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("st.tensor.wgpu_dense.softmax_zspace.bind_group"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: output.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: metrics.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: params.as_entire_binding(),
+                },
+            ],
+        }))
+    }
+
     fn project_softmax_zspace(
         &self,
         rows: usize,

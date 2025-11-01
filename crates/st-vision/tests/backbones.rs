@@ -174,6 +174,61 @@ fn resnet_skip_slip_scales_learnable_gate_gradients() {
             assert!((factor - 1.0).abs() <= 1.0e-6);
         }
     }
+
+    let mut progressive_identity = ResNetBackbone::new(base.clone()).unwrap();
+    progressive_identity.load_weights_bincode(&path).unwrap();
+    progressive_identity
+        .set_skip_slip_progress(Some(slip_schedule.clone()), 0.0)
+        .unwrap();
+    let identity_factors = progressive_identity.skip_slip_factors();
+    for stage in &identity_factors {
+        for &factor in stage {
+            assert!((factor - 1.0).abs() <= 1.0e-6);
+        }
+    }
+    let _ = progressive_identity.forward(&input).unwrap();
+    let _ = progressive_identity.backward(&input, &grad_output).unwrap();
+    let mut identity_grads: Vec<f32> = Vec::new();
+    visit_skip_gate_parameters(&progressive_identity, |param| {
+        let gradient = param.gradient().expect("identity blend gradient");
+        identity_grads.push(gradient.data()[0]);
+        Ok(())
+    })
+    .unwrap();
+    for (&baseline_grad, &identity_grad) in baseline_grads.iter().zip(identity_grads.iter()) {
+        let tolerance = baseline_grad.abs() * 1.0e-5 + 1.0e-6;
+        assert!((baseline_grad - identity_grad).abs() <= tolerance);
+    }
+
+    let mut progressive_blend = ResNetBackbone::new(base.clone()).unwrap();
+    progressive_blend.load_weights_bincode(&path).unwrap();
+    let blend_progress = 0.5f32;
+    progressive_blend
+        .set_skip_slip_progress(Some(slip_schedule.clone()), blend_progress)
+        .unwrap();
+    let blended_factors = progressive_blend.skip_slip_factors();
+    let expected_blended = 1.0 + (slip_value - 1.0) * blend_progress;
+    for stage in &blended_factors {
+        for &factor in stage {
+            let tolerance = expected_blended.abs() * 1.0e-6 + 1.0e-6;
+            assert!((factor - expected_blended).abs() <= tolerance);
+        }
+    }
+    let _ = progressive_blend.forward(&input).unwrap();
+    let _ = progressive_blend.backward(&input, &grad_output).unwrap();
+    let mut blended_grads: Vec<f32> = Vec::new();
+    visit_skip_gate_parameters(&progressive_blend, |param| {
+        let gradient = param.gradient().expect("blended gradient");
+        blended_grads.push(gradient.data()[0]);
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(baseline_grads.len(), blended_grads.len());
+    for (&baseline_grad, &blended_grad) in baseline_grads.iter().zip(blended_grads.iter()) {
+        let expected = baseline_grad * expected_blended;
+        let tolerance = expected.abs() * 1.0e-4 + 1.0e-6;
+        assert!((expected - blended_grad).abs() <= tolerance);
+    }
 }
 
 #[test]
@@ -224,6 +279,29 @@ fn skip_slip_schedule_preview_matches_formula() {
             let tolerance = target.abs() * 1.0e-5 + 1.0e-6;
             assert!((value - target).abs() <= tolerance);
             global_index += 1;
+        }
+    }
+
+    let identity_preview = per_stage_schedule
+        .preview_with_identity_blend(&per_stage_depths, 0.0)
+        .unwrap();
+    for stage in identity_preview {
+        for value in stage {
+            assert!((value - 1.0).abs() <= 1.0e-6);
+        }
+    }
+
+    let halfway = global_schedule
+        .preview_with_identity_blend(&global_depths, 0.5)
+        .unwrap();
+    for (stage_idx, (&depth, stage_preview)) in global_depths.iter().zip(halfway.iter()).enumerate()
+    {
+        assert_eq!(stage_preview.len(), depth);
+        for (block_idx, &value) in stage_preview.iter().enumerate() {
+            let base = global_preview[stage_idx][block_idx];
+            let expected = 1.0 + (base - 1.0) * 0.5;
+            let tolerance = expected.abs() * 1.0e-5 + 1.0e-6;
+            assert!((value - expected).abs() <= tolerance);
         }
     }
 }
