@@ -622,7 +622,7 @@ fn quantum_measurement_from_fractal_py(
 #[pyfunction(name = "quantum_measurement_from_fractal_sequence")]
 #[pyo3(signature = (studio, patches, *, weights=None, threshold=0.0, eta_scale=1.0))]
 fn quantum_measurement_from_fractal_sequence_py(
-    py: Python<'_>,
+    _py: Python<'_>,
     studio: PyRef<PyQuantumRealityStudio>,
     patches: &Bound<'_, PyAny>,
     weights: Option<&Bound<'_, PyAny>>,
@@ -632,8 +632,8 @@ fn quantum_measurement_from_fractal_sequence_py(
     let mut session =
         PyFractalQuantumSession::from_config(studio.config.clone(), threshold, eta_scale);
     if let Some(weight_obj) = weights {
-        let mut patch_iter = PyIterator::from_object(py, patches)?;
-        let mut weight_iter = PyIterator::from_object(py, weight_obj)?;
+        let mut patch_iter = PyIterator::from_bound_object(patches)?;
+        let mut weight_iter = PyIterator::from_bound_object(weight_obj)?;
         loop {
             let patch_next = patch_iter.next();
             let weight_next = weight_iter.next();
@@ -653,7 +653,7 @@ fn quantum_measurement_from_fractal_sequence_py(
             }
         }
     } else {
-        for patch in PyIterator::from_object(py, patches)? {
+        for patch in PyIterator::from_bound_object(patches)? {
             let patch = patch?;
             session.ingest_patch(&patch, 1.0);
         }
