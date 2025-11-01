@@ -130,3 +130,46 @@ declare the AGPL-3.0-or-later terms.
   exact commit they are shipping. Because only the official repository can
   obtain a Sigstore certificate for that commit and manifest, altered forks
   cannot mint a matching seal without reintroducing every AGPL obligation.
+
+### Extended clone auditing
+
+The `verify_repo_clone.py` helper now ships with hardened operator tooling to
+make redistribution scams and license stripping even less practical:
+
+- **PGP signature validation.** Provide `--manifest-signature` and optionally
+  `--seal-signature` together with `--pgp-keyring` to verify the manifest and
+  compliance seal against an offline-trusted keyring before parsing them. This
+  protects you from forged manifests that were never published by the official
+  maintainers.
+- **CI enforcement mode.** Add `--ci-mode` (optionally with
+  `--check-name=<custom name>`) inside GitHub Actions jobs to emit a rich Check
+  Run directly in the Pull Request UI. Any AGPL violation or tampering signal
+  fails the check, making it impossible to merge non-compliant contributions
+  unnoticed.
+- **Human-friendly HTML reports.** Supply `--html-report compliance.html` to
+  capture every verification step—including warnings and historical findings—in
+  an easy-to-read document for legal, compliance, or management review.
+- **Historical tamper scanning.** Pass `--audit-history` (with
+  `--history-window` to control the depth) to inspect recent git commits for
+  suspicious license deletions, renames, or edits that remove AGPL references.
+  The findings are surfaced alongside the main verification output so you can
+  respond before a malicious fork grows roots.
+
+Example CI invocation that enables all hardened checks:
+
+```bash
+python scripts/security/verify_repo_clone.py \
+  --manifest spiraltorch-repo-license-manifest.json \
+  --manifest-signature spiraltorch-repo-license-manifest.json.asc \
+  --seal spiraltorch-compliance-seal.json \
+  --seal-signature spiraltorch-compliance-seal.json.asc \
+  --pgp-keyring .github/trust/spiraltorch.gpg \
+  --repo-root "$GITHUB_WORKSPACE" \
+  --audit-history --history-window 200 \
+  --html-report compliance-report.html \
+  --ci-mode --check-name "AGPL Compliance Gate"
+```
+
+Treat any CI failure, HTML report entry under "Failures", or historical
+warning as a release-blocking issue—downstream mirrors and resellers must be
+forced to carry the exact AGPL state we publish.
