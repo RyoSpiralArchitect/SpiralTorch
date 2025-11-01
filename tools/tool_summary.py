@@ -9,6 +9,7 @@ of the same foundation without duplicating code.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 import ast
@@ -41,6 +42,11 @@ class ToolSummary:
     class_count: int = 0
     imports: tuple[str, ...] = ()
     tags: tuple[str, ...] = ()
+    cli_frameworks: tuple[str, ...] = ()
+    cli_argument_count: int = 0
+    has_main_guard: bool = False
+    todo_count: int = 0
+    last_modified: str | None = None
 
     @property
     def relative_path(self) -> str:
@@ -62,6 +68,11 @@ class ToolSummary:
             "class_count": self.class_count,
             "imports": list(self.imports),
             "tags": list(self.tags),
+            "cli_frameworks": list(self.cli_frameworks),
+            "cli_argument_count": self.cli_argument_count,
+            "has_main_guard": self.has_main_guard,
+            "todo_count": self.todo_count,
+            "last_modified": self.last_modified,
         }
 
 
@@ -77,7 +88,22 @@ def collect_tool_summaries(
         summary, detail, source = _summarize(path, module=module)
         imports = tuple(_extract_imports(module))
         functions, classes = _count_definitions(module)
-        tags = tuple(_infer_tags(path, module, imports, text))
+        cli_frameworks = tuple(_detect_cli_frameworks(module, imports))
+        cli_argument_count = _count_cli_arguments(module)
+        has_main_guard = _module_has_main_guard(module)
+        todo_count = _count_todos(text)
+        tags = tuple(
+            _infer_tags(
+                path,
+                module,
+                imports,
+                text,
+                cli_frameworks,
+                has_main_guard,
+                todo_count,
+                cli_argument_count,
+            )
+        )
         summaries.append(
             ToolSummary(
                 path=path.relative_to(root),
@@ -90,6 +116,11 @@ def collect_tool_summaries(
                 class_count=classes,
                 imports=imports,
                 tags=tags,
+                cli_frameworks=cli_frameworks,
+                cli_argument_count=cli_argument_count,
+                has_main_guard=has_main_guard,
+                todo_count=todo_count,
+                last_modified=_last_modified_timestamp(path),
             )
         )
     return summaries
@@ -332,6 +363,10 @@ def _infer_tags(
     module: ast.Module | None,
     imports: tuple[str, ...] | list[str],
     text: str | None,
+    cli_frameworks: tuple[str, ...] | list[str],
+    has_main_guard: bool,
+    todo_count: int,
+    cli_argument_count: int,
 ) -> list[str]:
     """Heuristically derive descriptive tags for *path*."""
 
@@ -339,7 +374,13 @@ def _infer_tags(
     suffix = path.suffix.lower()
 
     if suffix == ".py":
-        if "argparse" in imports or "click" in imports or "typer" in imports:
+        normalized_imports = {name.lower() for name in imports}
+        if cli_frameworks:
+            tags.add("cli")
+            tags.update(f"cli:{framework}" for framework in cli_frameworks)
+        elif any(
+            name in normalized_imports for name in {"argparse", "click", "typer", "fire"}
+        ):
             tags.add("cli")
         if any(name in imports for name in {"pytest", "unittest"}):
             tags.add("test")
@@ -349,20 +390,18 @@ def _infer_tags(
             )
             if async_functions:
                 tags.add("async")
-            main_guard = any(
-                isinstance(node, ast.If)
-                and isinstance(node.test, ast.Compare)
-                and _is_main_guard(node.test)
-                for node in module.body
-            )
-            if main_guard:
-                tags.add("entrypoint")
+        if has_main_guard:
+            tags.add("entrypoint")
+        if cli_argument_count >= 10:
+            tags.add("cli:large")
+        elif cli_argument_count >= 5:
+            tags.add("cli:medium")
     elif suffix in {".sh", ".bash"}:
         tags.add("shell")
     elif suffix in {".toml", ".yaml", ".yml", ".json"}:
         tags.add("config")
 
-    if text and "TODO" in text:
+    if todo_count:
         tags.add("todo")
     if path.name.startswith("test_") or path.name.endswith("_test.py"):
         tags.add("test")
@@ -396,6 +435,119 @@ def _read_file(path: Path) -> str | None:
         return path.read_text(encoding="utf8")
     except UnicodeDecodeError:
         return None
+
+
+def _detect_cli_frameworks(
+    module: ast.Module | None, imports: tuple[str, ...] | list[str]
+) -> list[str]:
+    """Return a sorted list of CLI frameworks heuristically detected."""
+
+    frameworks: set[str] = set()
+    normalized_imports = {name.lower() for name in imports}
+    mapping = {
+        "argparse": "argparse",
+        "click": "click",
+        "typer": "typer",
+        "fire": "fire",
+    }
+    for name, label in mapping.items():
+        if name in normalized_imports:
+            frameworks.add(label)
+
+    if module is not None:
+        for node in ast.walk(module):
+            qualname = _qualname(node) if isinstance(node, ast.Call) else None
+            if qualname is None and isinstance(node, ast.Attribute):
+                qualname = _qualname(node)
+            if not qualname:
+                continue
+            root = qualname.split(".")[0]
+            if root in {"click", "typer", "fire"}:
+                frameworks.add(root)
+    return sorted(frameworks)
+
+
+def _count_cli_arguments(module: ast.Module | None) -> int:
+    """Estimate the number of CLI arguments/options defined in *module*."""
+
+    if module is None:
+        return 0
+
+    count = 0
+    for node in ast.walk(module):
+        if isinstance(node, ast.Call):
+            qualname = _qualname(node.func)
+            if not qualname:
+                continue
+            qualname_lower = qualname.lower()
+            if qualname_lower.endswith("add_argument") or qualname_lower.endswith(
+                "add_option"
+            ):
+                count += 1
+            elif qualname_lower.endswith("add_argument_group"):
+                count += 1
+            elif qualname_lower.endswith(".option") or qualname_lower.endswith(
+                ".argument"
+            ):
+                count += 1
+        elif isinstance(node, ast.FunctionDef):
+            for decorator in node.decorator_list:
+                qualname = _qualname(decorator)
+                if not qualname:
+                    continue
+                qualname_lower = qualname.lower()
+                if qualname_lower.endswith(".option") or qualname_lower.endswith(
+                    ".argument"
+                ):
+                    count += 1
+    return count
+
+
+def _module_has_main_guard(module: ast.Module | None) -> bool:
+    """Return ``True`` if the module defines an ``if __name__ == '__main__'`` guard."""
+
+    if module is None:
+        return False
+    for node in module.body:
+        if isinstance(node, ast.If) and _is_main_guard(node.test):
+            return True
+    return False
+
+
+def _count_todos(text: str | None) -> int:
+    """Count TODO-like markers in *text*."""
+
+    if not text:
+        return 0
+    pattern = re.compile(r"\b(TODO|FIXME|XXX)\b")
+    return sum(1 for _ in pattern.finditer(text))
+
+
+def _qualname(node: ast.AST | None) -> str | None:
+    """Return a dotted path representation for *node* if possible."""
+
+    if node is None:
+        return None
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        parent = _qualname(node.value)
+        if parent:
+            return f"{parent}.{node.attr}"
+        return node.attr
+    if isinstance(node, ast.Call):
+        return _qualname(node.func)
+    return None
+
+
+def _last_modified_timestamp(path: Path) -> str | None:
+    """Return the ISO formatted last modified timestamp for *path*."""
+
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return None
+    return datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
 
 
 __all__ = ["ToolSummary", "collect_tool_summaries"]
