@@ -38,6 +38,7 @@ ZSpaceGeometry = robotics.ZSpaceGeometry
 relativity_geometry_from_metric = robotics.relativity_geometry_from_metric
 relativity_dynamics_from_metric = robotics.relativity_dynamics_from_metric
 relativity_dynamics_from_ansatz = robotics.relativity_dynamics_from_ansatz
+DriftSafetyPlugin = robotics.DriftSafetyPlugin
 
 
 class SensorFusionHubTests(unittest.TestCase):
@@ -181,6 +182,25 @@ class RoboticsRuntimeTests(unittest.TestCase):
         result = runtime.step({"imu": (1.0, 1.0, 1.0)})
         self.assertTrue(result.halted)
         self.assertIn("halt", result.commands)
+
+    def test_safety_plugin_flags_hazard(self) -> None:
+        hub = SensorFusionHub()
+        hub.register_channel("imu", 3)
+        field = DesireLagrangianField({"imu": Desire(target_norm=0.0, tolerance=0.0, weight=1.0)})
+        telemetry = PsiTelemetry(
+            window=2, stability_threshold=0.2, failure_energy=0.05, norm_limit=0.2
+        )
+        runtime = RoboticsRuntime(sensors=hub, desires=field, telemetry=telemetry)
+        runtime.attach_safety_plugin(DriftSafetyPlugin())
+
+        result = runtime.step({"imu": (1.0, 1.0, 1.0)})
+        self.assertTrue(result.halted)
+        self.assertIn("halt", result.commands)
+        self.assertGreaterEqual(len(result.safety), 1)
+        review = result.safety[0]
+        self.assertTrue(review.refused)
+        self.assertGreater(review.hazard_total, 0.0)
+        self.assertIsInstance(review.metrics.frame_hazards, dict)
 
     def test_recording_collects_recent_steps(self) -> None:
         hub = SensorFusionHub()

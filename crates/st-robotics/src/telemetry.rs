@@ -127,6 +127,22 @@ impl PsiTelemetry {
     pub fn geometry(&self) -> &ZSpaceGeometry {
         &self.geometry
     }
+
+    pub fn window(&self) -> usize {
+        self.window
+    }
+
+    pub fn stability_threshold(&self) -> f32 {
+        self.stability_threshold
+    }
+
+    pub fn failure_energy(&self) -> f32 {
+        self.failure_energy
+    }
+
+    pub fn norm_limit(&self) -> f32 {
+        self.norm_limit
+    }
 }
 
 impl Default for PsiTelemetry {

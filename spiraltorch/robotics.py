@@ -432,6 +432,22 @@ class PsiTelemetry:
     def geometry(self) -> ZSpaceGeometry:
         return self._geometry
 
+    @property
+    def window_size(self) -> int:
+        return self.window
+
+    @property
+    def stability_threshold_value(self) -> float:
+        return self.stability_threshold
+
+    @property
+    def failure_energy_limit(self) -> float:
+        return self.failure_energy
+
+    @property
+    def norm_limit_value(self) -> float:
+        return self.norm_limit
+
 
 @dataclass
 class PolicyGradientController:
@@ -445,6 +461,95 @@ class PolicyGradientController:
         return {"learning_rate": effective, "gauge": self.gauge}
 
 
+class SafetyPlugin:
+    """Interface for integrating spiral-safety style plugins."""
+
+    def review(
+        self,
+        frame: "FusedFrame",
+        energy: "EnergyReport",
+        telemetry: TelemetryReport,
+    ) -> "SafetyReview":
+        raise NotImplementedError
+
+
+@dataclass
+class SafetyMetrics:
+    frame_hazards: dict[str, float]
+    safe_radii: dict[str, float]
+    existence_load: float
+    chi: int
+    strict_mode: bool
+
+
+@dataclass
+class SafetyReview:
+    hazard_total: float
+    refused: bool
+    flagged_frames: tuple[str, ...]
+    metrics: SafetyMetrics
+
+
+class DriftSafetyPlugin(SafetyPlugin):
+    """Fallback drift-response style safety plugin."""
+
+    def __init__(self, word_name: str = "Robotics", hazard_cut: float = 0.8) -> None:
+        self.word_name = str(word_name)
+        self.hazard_cut = max(float(hazard_cut), 0.0)
+        self._thresholds: dict[str, float] = {}
+
+    def set_threshold(self, channel: str, hazard: float) -> None:
+        self._thresholds[str(channel)] = float(hazard)
+
+    def review(
+        self,
+        frame: "FusedFrame",
+        energy: "EnergyReport",
+        telemetry: TelemetryReport,
+    ) -> SafetyReview:
+        hazards: dict[str, float] = {}
+        radii: dict[str, float] = {}
+        flagged: list[str] = []
+        for name, vector in frame.coordinates.items():
+            threshold = self._thresholds.setdefault(name, self.hazard_cut)
+            channel_energy = abs(energy.per_channel.get(name, 0.0))
+            gravitational = abs(energy.gravitational_per_channel.get(name, 0.0))
+            radius = math.sqrt(sum(float(value) * float(value) for value in vector))
+            stability = max(0.0, min(1.0, float(telemetry.stability)))
+            phi = 1.0 - stability
+            anomaly_prefix = f"stale:{name}"
+            anomaly_hits = sum(
+                1
+                for tag in telemetry.anomalies
+                if tag in {"instability", "energy_overflow", "gravity_overflow", "norm_overflow"}
+                or tag.startswith(anomaly_prefix)
+            )
+            penalty = anomaly_hits + (1 if telemetry.failsafe else 0)
+            hazard = (channel_energy + gravitational + radius + penalty) * (1.0 + phi)
+            hazards[name] = hazard
+            radii[name] = (1.0 / (1.0 + hazard)) if hazard > 0.0 else float("inf")
+            if hazard >= threshold:
+                flagged.append(name)
+        hazard_total = sum(hazards.values())
+        chi = len(flagged)
+        existence_load = hazard_total
+        strict = telemetry.failsafe or chi > 0 or existence_load >= 1.0
+        metrics = SafetyMetrics(
+            frame_hazards=hazards,
+            safe_radii=radii,
+            existence_load=existence_load,
+            chi=chi,
+            strict_mode=strict,
+        )
+        refused = strict
+        return SafetyReview(
+            hazard_total=hazard_total,
+            refused=refused,
+            flagged_frames=tuple(flagged),
+            metrics=metrics,
+        )
+
+
 @dataclass
 class RuntimeStep:
     frame: FusedFrame
@@ -452,6 +557,7 @@ class RuntimeStep:
     telemetry: TelemetryReport
     commands: dict[str, float]
     halted: bool
+    safety: tuple[SafetyReview, ...]
 
 
 class RoboticsRuntime:
@@ -469,10 +575,17 @@ class RoboticsRuntime:
         self.telemetry = telemetry or PsiTelemetry()
         self._policy: PolicyGradientController | None = None
         self._trajectory: deque[RuntimeStep] | None = None
+        self._safety_plugins: list[SafetyPlugin] = []
         self.telemetry.set_geometry(self.desires.dynamics.geometry)
 
     def attach_policy_gradient(self, controller: PolicyGradientController) -> None:
         self._policy = controller
+
+    def attach_safety_plugin(self, plugin: SafetyPlugin) -> None:
+        self._safety_plugins.append(plugin)
+
+    def clear_safety_plugins(self) -> None:
+        self._safety_plugins.clear()
 
     def step(self, payloads: Mapping[str, Sequence[float] | Iterable[float]]) -> RuntimeStep:
         frame = self.sensors.fuse(payloads)
@@ -481,14 +594,22 @@ class RoboticsRuntime:
         commands: dict[str, float] = {}
         if self._policy is not None:
             commands.update(self._policy.update(energy, report))
-        if report.failsafe:
+        safety_reviews: list[SafetyReview] = []
+        halted = report.failsafe
+        for plugin in self._safety_plugins:
+            review = plugin.review(frame, energy, report)
+            safety_reviews.append(review)
+            if review.refused:
+                halted = True
+        if halted:
             commands["halt"] = 1.0
         step = RuntimeStep(
             frame=frame,
             energy=energy,
             telemetry=report,
             commands=commands,
-            halted=report.failsafe,
+            halted=halted,
+            safety=tuple(safety_reviews),
         )
         if self._trajectory is not None:
             self._trajectory.append(step)

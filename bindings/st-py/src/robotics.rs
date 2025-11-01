@@ -3,14 +3,14 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList};
 use pyo3::wrap_pyfunction;
 use pyo3::PyRef;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::UNIX_EPOCH;
 
 use st_robotics::{
-    ChannelHealth, Desire, DesireLagrangianField, EnergyReport, FusedFrame, GeometryKind,
-    GravityField, GravityRegime, GravityWell, PolicyGradientController, PsiTelemetry,
-    RelativityBridge, RoboticsError, RoboticsRuntime, RuntimeStep, SensorFusionHub, SymmetryAnsatz,
-    TelemetryReport, ZSpaceDynamics, ZSpaceGeometry,
+    ChannelHealth, Desire, DesireLagrangianField, DriftSafetyPlugin, EnergyReport, FusedFrame,
+    GeometryKind, GravityField, GravityRegime, GravityWell, PolicyGradientController, PsiTelemetry,
+    RelativityBridge, RoboticsError, RoboticsRuntime, RuntimeStep, SafetyReview, SensorFusionHub,
+    SymmetryAnsatz, TelemetryReport, ZSpaceDynamics, ZSpaceGeometry,
 };
 
 fn robotics_err_to_py(err: RoboticsError) -> PyErr {
@@ -29,6 +29,38 @@ fn dict_to_payloads(dict: &Bound<PyDict>) -> PyResult<HashMap<String, Vec<f32>>>
         payloads.insert(name, vec);
     }
     Ok(payloads)
+}
+
+fn btreemap_to_dict(py: Python<'_>, map: &BTreeMap<String, f32>) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    for (key, value) in map {
+        dict.set_item(key, *value)?;
+    }
+    Ok(dict.into_py(py))
+}
+
+fn safety_metrics_to_py(py: Python<'_>, review: &SafetyReview) -> PyResult<PyObject> {
+    let metrics = &review.metrics;
+    let dict = PyDict::new_bound(py);
+    dict.set_item("existence_load", metrics.existence_load)?;
+    dict.set_item("chi", metrics.chi)?;
+    dict.set_item("strict_mode", metrics.strict_mode)?;
+    dict.set_item(
+        "frame_hazards",
+        btreemap_to_dict(py, &metrics.frame_hazards)?,
+    )?;
+    dict.set_item("safe_radii", btreemap_to_dict(py, &metrics.safe_radii)?)?;
+    let word = PyDict::new_bound(py);
+    word.set_item("name", &metrics.word.name)?;
+    word.set_item("definition_entropy", metrics.word.definition_entropy)?;
+    word.set_item("timing_signal", metrics.word.timing_signal)?;
+    word.set_item("base_lambda", metrics.word.base_lambda)?;
+    word.set_item("beta", metrics.word.beta)?;
+    word.set_item("frame_count", metrics.word.frames.len())?;
+    dict.set_item("word", word)?;
+    dict.set_item("frame_signatures", metrics.frame_signatures.len())?;
+    dict.set_item("direction_signatures", metrics.direction_signatures.len())?;
+    Ok(dict.into_py(py))
 }
 
 fn components_from_py(values: Vec<Vec<f64>>) -> PyResult<[[f32; 4]; 4]> {
@@ -493,6 +525,26 @@ impl PyPsiTelemetry {
     pub fn set_geometry(&mut self, geometry: PyRef<'_, PyZSpaceGeometry>) {
         self.inner.set_geometry(geometry.inner.clone());
     }
+
+    #[getter]
+    pub fn window_size(&self) -> usize {
+        self.inner.window()
+    }
+
+    #[getter]
+    pub fn stability_threshold(&self) -> f32 {
+        self.inner.stability_threshold()
+    }
+
+    #[getter]
+    pub fn failure_energy(&self) -> f32 {
+        self.inner.failure_energy()
+    }
+
+    #[getter]
+    pub fn norm_limit(&self) -> f32 {
+        self.inner.norm_limit()
+    }
 }
 
 #[pyclass(module = "spiraltorch.robotics", name = "TelemetryReport")]
@@ -541,6 +593,66 @@ impl PyPolicyGradientController {
     }
 }
 
+#[pyclass(module = "spiraltorch.robotics", name = "SafetyReview")]
+#[derive(Clone, Debug)]
+pub(crate) struct PySafetyReview {
+    inner: SafetyReview,
+}
+
+#[pymethods]
+impl PySafetyReview {
+    #[getter]
+    pub fn hazard_total(&self) -> f32 {
+        self.inner.hazard_total
+    }
+
+    #[getter]
+    pub fn refused(&self) -> bool {
+        self.inner.refused
+    }
+
+    #[getter]
+    pub fn flagged_frames(&self, py: Python<'_>) -> PyResult<PyObject> {
+        Ok(self.inner.flagged_frames.clone().into_py(py))
+    }
+
+    #[getter]
+    pub fn metrics(&self, py: Python<'_>) -> PyResult<PyObject> {
+        safety_metrics_to_py(py, &self.inner)
+    }
+}
+
+#[pyclass(module = "spiraltorch.robotics", name = "DriftSafetyPlugin")]
+#[derive(Clone, Debug)]
+pub(crate) struct PyDriftSafetyPlugin {
+    inner: DriftSafetyPlugin,
+}
+
+#[pymethods]
+impl PyDriftSafetyPlugin {
+    #[new]
+    #[pyo3(signature = (word_name="Robotics", hazard_cut=0.8))]
+    pub fn new(word_name: &str, hazard_cut: f32) -> Self {
+        let mut plugin = DriftSafetyPlugin::new(word_name);
+        plugin.set_hazard_cut(hazard_cut);
+        Self { inner: plugin }
+    }
+
+    pub fn set_threshold(&mut self, channel: &str, hazard: f32) {
+        self.inner.set_threshold(channel.to_string(), hazard);
+    }
+
+    #[getter]
+    pub fn hazard_cut(&self) -> f32 {
+        self.inner.hazard_cut()
+    }
+
+    #[setter]
+    pub fn set_hazard_cut(&mut self, value: f32) {
+        self.inner.set_hazard_cut(value);
+    }
+}
+
 #[pyclass(module = "spiraltorch.robotics", name = "RoboticsRuntime")]
 #[derive(Debug)]
 pub(crate) struct PyRoboticsRuntime {
@@ -566,6 +678,14 @@ impl PyRoboticsRuntime {
 
     pub fn attach_policy_gradient(&mut self, controller: PyRef<'_, PyPolicyGradientController>) {
         self.inner.attach_policy_gradient(controller.inner.clone());
+    }
+
+    pub fn attach_safety_plugin(&mut self, plugin: PyRef<'_, PyDriftSafetyPlugin>) {
+        self.inner.attach_safety_plugin(plugin.inner.clone());
+    }
+
+    pub fn clear_safety_plugins(&mut self) {
+        self.inner.clear_safety_plugins();
     }
 
     pub fn step(&mut self, payloads: &Bound<PyDict>) -> PyResult<PyRuntimeStep> {
@@ -638,6 +758,17 @@ impl PyRuntimeStep {
     pub fn halted(&self) -> bool {
         self.inner.halted
     }
+
+    #[getter]
+    pub fn safety(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let list = PyList::empty_bound(py);
+        for review in &self.inner.safety {
+            list.append(PySafetyReview {
+                inner: review.clone(),
+            })?;
+        }
+        Ok(list.into_py(py))
+    }
 }
 
 pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
@@ -651,6 +782,8 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
     module.add_class::<PyPsiTelemetry>()?;
     module.add_class::<PyTelemetryReport>()?;
     module.add_class::<PyPolicyGradientController>()?;
+    module.add_class::<PyDriftSafetyPlugin>()?;
+    module.add_class::<PySafetyReview>()?;
     module.add_class::<PyRoboticsRuntime>()?;
     module.add_class::<PyRuntimeStep>()?;
     module.add_class::<PyGravityField>()?;

@@ -4,6 +4,7 @@ use crate::desire::{DesireLagrangianField, EnergyReport};
 use crate::error::RoboticsError;
 use crate::geometry::ZSpaceDynamics;
 use crate::policy::PolicyGradientController;
+use crate::safety::{SafetyPlugin, SafetyReview};
 use crate::sensors::{FusedFrame, SensorFusionHub};
 use crate::telemetry::{PsiTelemetry, TelemetryReport};
 
@@ -15,6 +16,7 @@ pub struct RuntimeStep {
     pub telemetry: TelemetryReport,
     pub commands: HashMap<String, f32>,
     pub halted: bool,
+    pub safety: Vec<SafetyReview>,
 }
 
 /// Coordinates sensing, instinct evaluation, and optional control policies.
@@ -24,6 +26,7 @@ pub struct RoboticsRuntime {
     telemetry: PsiTelemetry,
     policy: Option<PolicyGradientController>,
     recorder: Option<TrajectoryRecorder>,
+    safety: Vec<Box<dyn SafetyPlugin>>,
 }
 
 impl RoboticsRuntime {
@@ -38,6 +41,7 @@ impl RoboticsRuntime {
             telemetry,
             policy: None,
             recorder: None,
+            safety: Vec::new(),
         };
         let geometry = runtime.desires.dynamics().geometry().clone();
         runtime.telemetry.set_geometry(geometry);
@@ -48,6 +52,17 @@ impl RoboticsRuntime {
         self.policy = Some(controller);
     }
 
+    pub fn attach_safety_plugin<P>(&mut self, plugin: P)
+    where
+        P: SafetyPlugin + 'static,
+    {
+        self.safety.push(Box::new(plugin));
+    }
+
+    pub fn clear_safety_plugins(&mut self) {
+        self.safety.clear();
+    }
+
     pub fn step(
         &mut self,
         payloads: HashMap<String, Vec<f32>>,
@@ -55,11 +70,19 @@ impl RoboticsRuntime {
         let frame = self.sensors.fuse(&payloads)?;
         let energy = self.desires.energy(&frame);
         let report = self.telemetry.observe(&frame, &energy);
+        let mut safety_reviews = Vec::new();
         let mut commands = HashMap::new();
         if let Some(policy) = &mut self.policy {
             commands.extend(policy.update(&energy, &report));
         }
-        let halted = report.failsafe;
+        let mut halted = report.failsafe;
+        for plugin in &mut self.safety {
+            let review = plugin.review(&frame, &energy, &report);
+            if review.refused {
+                halted = true;
+            }
+            safety_reviews.push(review);
+        }
         if halted {
             commands.insert("halt".to_string(), 1.0);
         }
@@ -69,6 +92,7 @@ impl RoboticsRuntime {
             telemetry: report,
             commands,
             halted,
+            safety: safety_reviews,
         };
         if let Some(recorder) = &mut self.recorder {
             recorder.push(&step);
@@ -151,7 +175,7 @@ mod tests {
     use super::*;
     use crate::desire::Desire;
     use crate::geometry::{ZSpaceDynamics, ZSpaceGeometry};
-    use crate::{GravityField, GravityRegime, GravityWell};
+    use crate::{DriftSafetyPlugin, GravityField, GravityRegime, GravityWell};
 
     #[test]
     fn runtime_emits_policy_commands() {
@@ -202,6 +226,30 @@ mod tests {
         assert!(trajectory
             .iter()
             .all(|step| !step.commands.contains_key("halt")));
+    }
+
+    #[test]
+    fn runtime_emits_safety_reviews_when_plugins_attached() {
+        let mut hub = SensorFusionHub::new();
+        hub.register_channel("imu", 3).unwrap();
+        let desires = DesireLagrangianField::new(HashMap::from([(
+            "imu".to_string(),
+            Desire {
+                target_norm: 0.0,
+                tolerance: 0.0,
+                weight: 1.0,
+            },
+        )]));
+        let telemetry = PsiTelemetry::new(2, 0.3, 0.5, 0.5);
+        let mut runtime = RoboticsRuntime::new(hub, desires, telemetry);
+        runtime.attach_safety_plugin(DriftSafetyPlugin::default());
+        let result = runtime
+            .step(HashMap::from([("imu".to_string(), vec![1.2, 1.2, 1.2])]))
+            .unwrap();
+        assert!(!result.safety.is_empty());
+        assert!(result.safety.iter().any(|review| review.refused));
+        assert!(result.halted);
+        assert!(result.commands.contains_key("halt"));
     }
 
     #[test]
