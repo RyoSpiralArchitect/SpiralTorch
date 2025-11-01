@@ -4858,28 +4858,6 @@ fn row_hardmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
     row_softmax_hardmax_cpu(data, rows, cols).1
 }
 
-fn row_hardmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
-    let mut out = vec![0.0; rows * cols];
-    if cols == 0 {
-        return out;
-    }
-    for r in 0..rows {
-        let offset = r * cols;
-        let row_slice = &data[offset..offset + cols];
-        let mut max_value = f32::NEG_INFINITY;
-        for &value in row_slice {
-            if value > max_value {
-                max_value = value;
-            }
-        }
-        for c in 0..cols {
-            let value = row_slice[c];
-            out[offset + c] = if value == max_value { 1.0 } else { 0.0 };
-        }
-    }
-    out
-}
-
 fn add_bias_relu_inplace(data: &mut [f32], rows: usize, cols: usize, bias: &[f32]) {
     for r in 0..rows {
         let offset = r * cols;
