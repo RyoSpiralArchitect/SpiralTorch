@@ -232,6 +232,36 @@ fn resnet_skip_slip_scales_learnable_gate_gradients() {
 }
 
 #[test]
+fn resnet_skip_slip_stage_progress_updates_per_stage() {
+    let mut base = ResNetConfig::resnet56_cifar(true);
+    base.skip_slip = None;
+    let mut backbone = ResNetBackbone::new(base).unwrap();
+
+    let schedule = SkipSlipSchedule::linear(0.2, 0.8)
+        .with_power(1.3)
+        .per_stage();
+    let stage_progress = [0.0f32, 0.65f32];
+
+    backbone
+        .set_skip_slip_stage_progress(Some(schedule.clone()), &stage_progress)
+        .unwrap();
+
+    let runtime_factors = backbone.skip_slip_factors();
+    let preview = schedule
+        .preview_with_stage_identity_blend(backbone.block_depths(), &stage_progress)
+        .unwrap();
+
+    assert_eq!(runtime_factors.len(), preview.len());
+    for (runtime_stage, preview_stage) in runtime_factors.iter().zip(preview.iter()) {
+        assert_eq!(runtime_stage.len(), preview_stage.len());
+        for (&runtime_value, &preview_value) in runtime_stage.iter().zip(preview_stage.iter()) {
+            let tolerance = preview_value.abs() * 1.0e-5 + 1.0e-6;
+            assert!((runtime_value - preview_value).abs() <= tolerance);
+        }
+    }
+}
+
+#[test]
 fn resnet56_cifar_only_slips_learnable_skips() {
     let learnable = ResNetConfig::resnet56_cifar(true);
     assert!(learnable.skip_slip.is_some());
@@ -304,6 +334,28 @@ fn skip_slip_schedule_preview_matches_formula() {
             assert!((value - expected).abs() <= tolerance);
         }
     }
+
+    let stage_progress = [0.0f32, 0.5f32];
+    let per_stage_blend = per_stage_schedule
+        .preview_with_stage_identity_blend(&per_stage_depths, &stage_progress)
+        .unwrap();
+    for (stage_idx, stage_preview) in per_stage_blend.iter().enumerate() {
+        let expected_progress = if stage_idx < stage_progress.len() {
+            stage_progress[stage_idx]
+        } else {
+            *stage_progress.last().expect("stage progress is non-empty")
+        };
+        for (block_idx, &value) in stage_preview.iter().enumerate() {
+            let base = preview[stage_idx][block_idx];
+            let expected = 1.0 + (base - 1.0) * expected_progress;
+            let tolerance = expected.abs() * 1.0e-5 + 1.0e-6;
+            assert!((value - expected).abs() <= tolerance);
+        }
+    }
+
+    assert!(per_stage_schedule
+        .preview_with_stage_identity_blend(&per_stage_depths, &[])
+        .is_err());
 }
 
 #[test]

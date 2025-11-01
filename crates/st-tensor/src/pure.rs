@@ -6158,7 +6158,7 @@ fn row_softmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
 
 #[cfg_attr(feature = "wgpu", allow(dead_code))]
 fn row_hardmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
-    cpu_row_softmax_hardmax(data, rows, cols).1
+    row_softmax_hardmax_cpu(data, rows, cols).1
 }
 
 fn add_bias_relu_inplace(data: &mut [f32], rows: usize, cols: usize, bias: &[f32]) {
