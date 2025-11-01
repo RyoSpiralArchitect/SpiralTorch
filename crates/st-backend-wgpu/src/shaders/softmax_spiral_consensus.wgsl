@@ -40,15 +40,17 @@ var<workgroup> shared_entropy: array<f32, WORKGROUP_SIZE>;
 var<workgroup> shared_hardmass: array<f32, WORKGROUP_SIZE>;
 var<workgroup> shared_scale: array<f32, WORKGROUP_SIZE>;
 
-fn row_offset(row: u32, stride: u32, idx: u32) -> u32 {
-    if ((params.flags & FLAG_CHIMERA) != 0u) {
-        let tile = max(params.chimera_tile, 1u);
-        let stripes = max(params.chimera_stripes, 1u);
-        let stripe = idx / tile;
-        let within = idx % tile;
-        return row * stride + within * stripes + stripe;
+fn chimera_offset(idx: u32, tile: u32, stripes: u32) -> u32 {
+    let stripe = idx / tile;
+    let within = idx - stripe * tile;
+    return within * stripes + stripe;
+}
+
+fn layout_offset(base: u32, idx: u32, use_chimera: bool, tile: u32, stripes: u32) -> u32 {
+    if (use_chimera) {
+        return base + chimera_offset(idx, tile, stripes);
     }
-    return row * stride + idx;
+    return base + idx;
 }
 
 fn reduce_sum_entropy(local_id: u32) {
@@ -97,6 +99,13 @@ fn main(@builtin(workgroup_id) workgroup_id: vec3<u32>,
         return;
     }
 
+    let use_chimera = (params.flags & FLAG_CHIMERA) != 0u;
+    let chimera_tile = select(1u, max(params.chimera_tile, 1u), use_chimera);
+    let chimera_stripes = select(1u, max(params.chimera_stripes, 1u), use_chimera);
+    let soft_base = row * params.soft_stride;
+    let mask_base = row * params.mask_stride;
+    let spiral_base = row * params.spiral_stride;
+
     var entropy = 0.0;
     var hardmass = 0.0;
     var idx = tid;
@@ -104,8 +113,8 @@ fn main(@builtin(workgroup_id) workgroup_id: vec3<u32>,
         if (idx >= cols) {
             break;
         }
-        let soft_index = row_offset(row, params.soft_stride, idx);
-        let mask_index = row_offset(row, params.mask_stride, idx);
+        let soft_index = layout_offset(soft_base, idx, use_chimera, chimera_tile, chimera_stripes);
+        let mask_index = layout_offset(mask_base, idx, use_chimera, chimera_tile, chimera_stripes);
         let prob = max(softmax_input[soft_index], 0.0);
         let safe_prob = max(prob, params.entropy_epsilon);
         entropy = entropy - prob * log(safe_prob);
@@ -154,9 +163,9 @@ fn main(@builtin(workgroup_id) workgroup_id: vec3<u32>,
         if (idx >= cols) {
             break;
         }
-        let soft_index = row_offset(row, params.soft_stride, idx);
-        let mask_index = row_offset(row, params.mask_stride, idx);
-        let out_index = row_offset(row, params.spiral_stride, idx);
+        let soft_index = layout_offset(soft_base, idx, use_chimera, chimera_tile, chimera_stripes);
+        let mask_index = layout_offset(mask_base, idx, use_chimera, chimera_tile, chimera_stripes);
+        let out_index = layout_offset(spiral_base, idx, use_chimera, chimera_tile, chimera_stripes);
         let prob = softmax_input[soft_index];
         let mask = hardmax_input[mask_index];
         let fused = params.phi_conjugate * prob + params.phi_bias * mask;

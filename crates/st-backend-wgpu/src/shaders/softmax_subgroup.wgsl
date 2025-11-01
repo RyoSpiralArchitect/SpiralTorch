@@ -33,15 +33,17 @@ var<storage, read_write> mask_output: array<f32>;
 var<workgroup> shared_max: array<f32, MAX_SUBGROUPS>;
 var<workgroup> shared_sum: array<f32, MAX_SUBGROUPS>;
 
-fn row_offset(row: u32, stride: u32, idx: u32) -> u32 {
-    if ((params.flags & FLAG_CHIMERA) != 0u) {
-        let tile = max(params.chimera_tile, 1u);
-        let stripes = max(params.chimera_stripes, 1u);
-        let stripe = idx / tile;
-        let within = idx % tile;
-        return row * stride + within * stripes + stripe;
+fn chimera_offset(idx: u32, tile: u32, stripes: u32) -> u32 {
+    let stripe = idx / tile;
+    let within = idx - stripe * tile;
+    return within * stripes + stripe;
+}
+
+fn layout_offset(base: u32, idx: u32, use_chimera: bool, tile: u32, stripes: u32) -> u32 {
+    if (use_chimera) {
+        return base + chimera_offset(idx, tile, stripes);
     }
-    return row * stride + idx;
+    return base + idx;
 }
 
 @compute @workgroup_size(WORKGROUP_SIZE)
@@ -67,15 +69,29 @@ fn main_cs(
     let in_stride = params.in_stride;
     let out_stride = params.out_stride;
 
+    let use_chimera = (params.flags & FLAG_CHIMERA) != 0u;
+    let chimera_tile = select(1u, max(params.chimera_tile, 1u), use_chimera);
+    let chimera_stripes = select(1u, max(params.chimera_stripes, 1u), use_chimera);
+    let row_in_base = row * in_stride;
     var local_max = -1e30;
     var idx = tid;
-    loop {
-        if (idx >= cols) {
-            break;
+    if (use_chimera) {
+        loop {
+            if (idx >= cols) {
+                break;
+            }
+            let offset = chimera_offset(idx, chimera_tile, chimera_stripes);
+            local_max = max(local_max, input[row_in_base + offset]);
+            idx += WORKGROUP_SIZE;
         }
-        let value = input[row_offset(row, in_stride, idx)];
-        local_max = max(local_max, value);
-        idx += WORKGROUP_SIZE;
+    } else {
+        loop {
+            if (idx >= cols) {
+                break;
+            }
+            local_max = max(local_max, input[row_in_base + idx]);
+            idx += WORKGROUP_SIZE;
+        }
     }
 
     let sg_max = subgroupMax(local_max);
@@ -86,8 +102,8 @@ fn main_cs(
     }
     workgroupBarrier();
 
+    let subgroup_count = (WORKGROUP_SIZE + subgroup_size - 1u) / subgroup_size;
     if (tid == 0u) {
-        let subgroup_count = (WORKGROUP_SIZE + subgroup_size - 1u) / subgroup_size;
         var global_max = -1e30;
         for (var i = 0u; i < subgroup_count; i = i + 1u) {
             global_max = max(global_max, shared_max[i]);
@@ -102,36 +118,91 @@ fn main_cs(
     let hardmax_only = (params.flags & FLAG_HARDMAX_ONLY) != 0u;
 
     if (hardmax_only) {
+        let row_out_base = row * out_stride;
+        var row_mask_base = 0u;
+        if (wants_mask) {
+            row_mask_base = row * params.mask_stride;
+        }
         idx = tid;
-        loop {
-            if (idx >= cols) {
-                break;
+        if (use_chimera) {
+            loop {
+                if (idx >= cols) {
+                    break;
+                }
+                let in_index = layout_offset(row_in_base, idx, true, chimera_tile, chimera_stripes);
+                let value = input[in_index];
+                let is_peak = select(0.0, 1.0, value == row_max);
+                let out_index = layout_offset(row_out_base, idx, true, chimera_tile, chimera_stripes);
+                output[out_index] = is_peak;
+                if (wants_mask) {
+                    let mask_index = layout_offset(row_mask_base, idx, true, chimera_tile, chimera_stripes);
+                    mask_output[mask_index] = is_peak;
+                }
+                idx += WORKGROUP_SIZE;
             }
-            let offset = row_offset(row, in_stride, idx);
-            let value = input[offset];
-            let is_peak = select(0.0, 1.0, value == row_max);
-            let out_index = row_offset(row, out_stride, idx);
-            output[out_index] = is_peak;
-            if (wants_mask) {
-                mask_output[row_offset(row, params.mask_stride, idx)] = is_peak;
+        } else {
+            loop {
+                if (idx >= cols) {
+                    break;
+                }
+                let in_index = layout_offset(row_in_base, idx, false, chimera_tile, chimera_stripes);
+                let value = input[in_index];
+                let is_peak = select(0.0, 1.0, value == row_max);
+                let out_index = layout_offset(row_out_base, idx, false, chimera_tile, chimera_stripes);
+                output[out_index] = is_peak;
+                if (wants_mask) {
+                    let mask_index = layout_offset(row_mask_base, idx, false, chimera_tile, chimera_stripes);
+                    mask_output[mask_index] = is_peak;
+                }
+                idx += WORKGROUP_SIZE;
             }
-            idx += WORKGROUP_SIZE;
         }
         return;
     }
 
     var local_sum = 0.0;
+    let row_out_base = row * out_stride;
+    var row_mask_base = 0u;
+    if (wants_mask) {
+        row_mask_base = row * params.mask_stride;
+    }
     idx = tid;
-    loop {
-        if (idx >= cols) {
-            break;
+    if (use_chimera) {
+        loop {
+            if (idx >= cols) {
+                break;
+            }
+            let in_index = layout_offset(row_in_base, idx, true, chimera_tile, chimera_stripes);
+            let value = input[in_index];
+            let exp_value = exp(value - row_max);
+            let out_index = layout_offset(row_out_base, idx, true, chimera_tile, chimera_stripes);
+            output[out_index] = exp_value;
+            if (wants_mask) {
+                let is_peak = select(0.0, 1.0, value == row_max);
+                let mask_index = layout_offset(row_mask_base, idx, true, chimera_tile, chimera_stripes);
+                mask_output[mask_index] = is_peak;
+            }
+            local_sum = local_sum + exp_value;
+            idx += WORKGROUP_SIZE;
         }
-        let offset = row_offset(row, in_stride, idx);
-        let value = input[offset];
-        let exp_value = exp(value - row_max);
-        output[row_offset(row, out_stride, idx)] = exp_value;
-        local_sum = local_sum + exp_value;
-        idx += WORKGROUP_SIZE;
+    } else {
+        loop {
+            if (idx >= cols) {
+                break;
+            }
+            let in_index = layout_offset(row_in_base, idx, false, chimera_tile, chimera_stripes);
+            let value = input[in_index];
+            let exp_value = exp(value - row_max);
+            let out_index = layout_offset(row_out_base, idx, false, chimera_tile, chimera_stripes);
+            output[out_index] = exp_value;
+            if (wants_mask) {
+                let is_peak = select(0.0, 1.0, value == row_max);
+                let mask_index = layout_offset(row_mask_base, idx, false, chimera_tile, chimera_stripes);
+                mask_output[mask_index] = is_peak;
+            }
+            local_sum = local_sum + exp_value;
+            idx += WORKGROUP_SIZE;
+        }
     }
 
     let sg_sum = subgroupAdd(local_sum);
@@ -141,7 +212,6 @@ fn main_cs(
     workgroupBarrier();
 
     if (tid == 0u) {
-        let subgroup_count = (WORKGROUP_SIZE + subgroup_size - 1u) / subgroup_size;
         var global_sum = 0.0;
         for (var i = 0u; i < subgroup_count; i = i + 1u) {
             global_sum = global_sum + shared_sum[i];
@@ -154,26 +224,24 @@ fn main_cs(
     let inv_sum = select(0.0, 1.0 / row_sum, row_sum > 0.0);
 
     idx = tid;
-    loop {
-        if (idx >= cols) {
-            break;
-        }
-        let offset = row_offset(row, out_stride, idx);
-        output[offset] = output[offset] * inv_sum;
-        idx += WORKGROUP_SIZE;
-    }
-
-    if (wants_mask) {
-        idx = tid;
+    if (use_chimera) {
         loop {
             if (idx >= cols) {
                 break;
             }
-            let offset = row_offset(row, in_stride, idx);
-            let value = input[offset];
-            let is_peak = select(0.0, 1.0, value == row_max);
-            mask_output[row_offset(row, params.mask_stride, idx)] = is_peak;
+            let out_index = layout_offset(row_out_base, idx, true, chimera_tile, chimera_stripes);
+            output[out_index] = output[out_index] * inv_sum;
+            idx += WORKGROUP_SIZE;
+        }
+    } else {
+        loop {
+            if (idx >= cols) {
+                break;
+            }
+            let out_index = layout_offset(row_out_base, idx, false, chimera_tile, chimera_stripes);
+            output[out_index] = output[out_index] * inv_sum;
             idx += WORKGROUP_SIZE;
         }
     }
+
 }
