@@ -21,6 +21,7 @@ default = [
     "rec",
     "text",
     "selfsup",
+    "robotics",
 ]
 extension-module = ["pyo3/extension-module"]
 psi = []
@@ -31,6 +32,7 @@ spiral_rl = ["dep:st-spiral-rl"]
 rec = ["dep:st-rec", "dep:st-kdsl"]
 text = ["dep:st-text", "dep:st-logic"]
 selfsup = ["dep:spiral-selfsup"]
+robotics = ["dep:st-robotics"]
 golden = ["st-nn/golden", "st-core/golden"]
 
 # Backend selection (mirrors the CLI surface expected by maturin builds)
@@ -57,12 +59,15 @@ st-core = { path = "../../crates/st-core", default-features = false, features = 
 st-tensor = { path = "../../crates/st-tensor", default-features = false }
 st-nn = { path = "../../crates/st-nn", optional = true, features = ["psychoid", "collapse"] }
 st-spiral-rl = { path = "../../crates/st-spiral-rl", optional = true }
+st-robotics = { path = "../../crates/st-robotics", optional = true }
 st-rec = { path = "../../crates/st-rec", optional = true }
 st-text = { path = "../../crates/st-text", optional = true }
 st-logic = { path = "../../crates/st-logic", optional = true }
 st-kdsl = { path = "../../crates/st-kdsl", optional = true }
 st-backend-hip = { path = "../../crates/st-backend-hip", default-features = false }
 st-frac = { path = "../../crates/st-frac" }
+st-qr-studio = { path = "../../crates/st-qr-studio" }
+julia-ffi-poc = { path = "../../crates/julia-ffi-poc" }
 spiral-selfsup = { path = "../../crates/spiral-selfsup", optional = true }
 spiral-opt = { path = "../../crates/spiral-opt" }
 spiral-hpo = { path = "../../crates/spiral-hpo" }
