@@ -32,6 +32,7 @@ impl LossStdTrigger {
             ema: 0.0,
             warmup: 4,
             seen: 0,
+            deadband: 0.0,
             geometry_eta: 0.0,
             geometry_curvature: -1.0,
         }
@@ -110,6 +111,10 @@ impl LossStdTrigger {
             let curvature_boost = self.geometry_curvature.tanh().abs() as f32;
             ratio *= 1.0 + self.geometry_eta * 0.5 + curvature_boost;
         }
+        if ratio <= self.deadband {
+            return None;
+        }
+        ratio = (ratio - self.deadband).max(0.0);
         Some(ratio.clamp(0.0, self.max_ratio))
     }
 }

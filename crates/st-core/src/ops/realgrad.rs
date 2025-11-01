@@ -769,7 +769,7 @@ impl RealGradKernel {
         self.config.residual_threshold
     }
 
-    fn prepare_optical_input<'a>(&'a mut self, values: &'a [f32]) -> &'a [f32] {
+    fn prepare_optical_input(&mut self, values: &[f32]) -> (Option<Vec<f32>>, bool) {
         if let Some(optics) = self.config.optics {
             self.optical_buf.resize(values.len(), 0.0);
             self.optical_trace.prepare(values.len());
@@ -779,10 +779,10 @@ impl RealGradKernel {
                 &mut self.optical_buf,
                 &mut self.optical_trace,
             );
-            &self.optical_buf
+            (Some(self.optical_buf.clone()), true)
         } else {
             self.optical_trace.clear();
-            values
+            (None, false)
         }
     }
 
@@ -805,22 +805,7 @@ impl RealGradKernel {
         }
 
         let len = values.len();
-        let mut optical_input: Option<Vec<f32>> = None;
-        let optics_enabled = if let Some(optics) = self.config.optics {
-            self.optical_buf.resize(len, 0.0);
-            self.optical_trace.prepare(len);
-            propagate_transparent_optics(
-                optics,
-                values,
-                &mut self.optical_buf,
-                &mut self.optical_trace,
-            );
-            optical_input = Some(self.optical_buf.clone());
-            true
-        } else {
-            self.optical_trace.clear();
-            false
-        };
+        let (optical_input, optics_enabled) = self.prepare_optical_input(values);
         let input = optical_input.as_deref().unwrap_or(values);
 
         self.spectrum.resize(len, (0.0, 0.0));
