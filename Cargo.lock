@@ -3007,6 +3007,7 @@ dependencies = [
  "once_cell",
  "rand",
  "serde",
+ "spiral-config",
  "st-core",
  "st-tensor",
  "st-vision",

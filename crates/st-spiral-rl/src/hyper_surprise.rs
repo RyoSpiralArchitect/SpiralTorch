@@ -278,7 +278,8 @@ impl HyperSurpriseController {
         learning_rate: f32,
     ) -> HyperSurpriseOutcome {
         let std = loss_std(returns, baseline);
-        if let Some(ratio) = self.trigger.observe(std) {
+        let candidate = self.trigger.observe(std);
+        if let Some(ratio) = self.pop_ratio(candidate) {
             let ratio = ratio.max(0.0);
             let curvature_gain = self.config.curvature.tanh().abs().max(1e-3);
             let raw_gauge = 1.0 + ratio * curvature_gain;
