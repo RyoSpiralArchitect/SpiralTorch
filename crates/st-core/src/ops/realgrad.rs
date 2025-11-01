@@ -365,6 +365,86 @@ impl Default for RealGradProjection {
 }
 
 /// Optical telemetry emitted when transparent gradient propagation is enabled.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct TransparencySummary {
+    /// Transparency gain applied uniformly across the optical lattice.
+    pub transparency_gain: f32,
+    /// Mean attenuation observed across the optical depth.
+    pub mean_attenuation: f32,
+    /// Maximum attenuation recorded among the samples.
+    pub max_attenuation: f32,
+    /// Mean absolute refraction curvature accumulated during propagation.
+    pub mean_refraction: f32,
+    /// L2 energy of the diffusion profile.
+    pub diffusion_energy: f32,
+    /// Standard deviation of the accumulated optical phase.
+    pub phase_variation: f32,
+    /// L2 norm of the transparency jacobian, useful for scaling gradients.
+    pub jacobian_norm: f32,
+}
+
+impl TransparencySummary {
+    fn from_trace(trace: &TransparentGradientTrace) -> Option<Self> {
+        let len = trace.propagated_gradient.len();
+        if len == 0
+            || trace.attenuation_profile.len() != len
+            || trace.transparency_jacobian.len() != len
+            || trace.phase_profile.len() != len
+            || trace.refraction_profile.len() != len
+            || trace.diffusion_profile.len() != len
+        {
+            return None;
+        }
+
+        let len_f = len as f32;
+        let mean_attenuation = trace.attenuation_profile.iter().sum::<f32>() / len_f;
+        let max_attenuation = trace
+            .attenuation_profile
+            .iter()
+            .copied()
+            .fold(f32::NEG_INFINITY, f32::max);
+        let mean_refraction = trace
+            .refraction_profile
+            .iter()
+            .map(|value| value.abs())
+            .sum::<f32>()
+            / len_f;
+        let diffusion_energy = trace
+            .diffusion_profile
+            .iter()
+            .map(|value| value * value)
+            .sum::<f32>()
+            .sqrt();
+        let jacobian_norm = trace
+            .transparency_jacobian
+            .iter()
+            .map(|value| value * value)
+            .sum::<f32>()
+            .sqrt();
+        let phase_mean = trace.phase_profile.iter().sum::<f32>() / len_f;
+        let phase_variation = trace
+            .phase_profile
+            .iter()
+            .map(|value| {
+                let delta = *value - phase_mean;
+                delta * delta
+            })
+            .sum::<f32>()
+            .sqrt()
+            / len_f.sqrt();
+
+        Some(Self {
+            transparency_gain: trace.transparency_gain,
+            mean_attenuation,
+            max_attenuation,
+            mean_refraction,
+            diffusion_energy,
+            phase_variation,
+            jacobian_norm,
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct TransparentGradientTrace {
     /// Original Euclidean gradient entering the optical medium.
@@ -373,12 +453,16 @@ pub struct TransparentGradientTrace {
     pub propagated_gradient: Vec<f32>,
     /// Attenuation coefficients applied along the optical depth.
     pub attenuation_profile: Vec<f32>,
+    /// Per-sample sensitivity of the propagated gradient with respect to the transparency gate.
+    pub transparency_jacobian: Vec<f32>,
     /// Phase accumulated as the gradient refracts through the medium.
     pub phase_profile: Vec<f32>,
     /// Local refraction curvature induced by neighbouring samples.
     pub refraction_profile: Vec<f32>,
     /// Diffusion residual recorded for each sample.
     pub diffusion_profile: Vec<f32>,
+    /// Transparency gain applied during propagation (shared across the lattice).
+    pub transparency_gain: f32,
 }
 
 impl TransparentGradientTrace {
@@ -386,18 +470,43 @@ impl TransparentGradientTrace {
         self.source_gradient.resize(len, 0.0);
         self.propagated_gradient.resize(len, 0.0);
         self.attenuation_profile.resize(len, 0.0);
+        self.transparency_jacobian.resize(len, 0.0);
         self.phase_profile.resize(len, 0.0);
         self.refraction_profile.resize(len, 0.0);
         self.diffusion_profile.resize(len, 0.0);
+        self.transparency_gain = 0.0;
     }
 
     fn clear(&mut self) {
         self.source_gradient.clear();
         self.propagated_gradient.clear();
         self.attenuation_profile.clear();
+        self.transparency_jacobian.clear();
         self.phase_profile.clear();
         self.refraction_profile.clear();
         self.diffusion_profile.clear();
+        self.transparency_gain = 0.0;
+    }
+
+    /// Aggregates the gradient of the transparency gate using an upstream signal sampled at the
+    /// propagated gradient.
+    pub fn accumulate_transparency_gradient(&self, upstream: &[f32]) -> Option<f32> {
+        if upstream.len() != self.transparency_jacobian.len() {
+            return None;
+        }
+        let gradient = self
+            .transparency_jacobian
+            .iter()
+            .zip(upstream.iter())
+            .map(|(jacobian, upstream)| jacobian * upstream)
+            .sum();
+        Some(gradient)
+    }
+
+    /// Returns aggregate statistics describing the transparency gate and its effect on the
+    /// propagated gradient.
+    pub fn transparency_summary(&self) -> Option<TransparencySummary> {
+        TransparencySummary::from_trace(self)
     }
 }
 
@@ -425,6 +534,18 @@ impl TransparentGradientOpticsConfig {
             diffusion: self.diffusion.clamp(0.0, 1.0),
             phase_shift: self.phase_shift,
         }
+    }
+
+    /// Returns the transparency gate applied across the optical lattice.
+    pub fn transparency(&self) -> f32 {
+        self.transparency
+    }
+
+    /// Overrides the transparency gate, allowing external schedules or learned parameters to
+    /// adjust the optical permeability.
+    pub fn with_transparency(mut self, transparency: f32) -> Self {
+        self.transparency = transparency;
+        self
     }
 }
 
@@ -581,6 +702,21 @@ impl RealGradProjection {
     /// Returns the optical trace emitted during transparent gradient propagation, if any.
     pub fn optics_trace(&self) -> Option<&TransparentGradientTrace> {
         self.optics.as_ref()
+    }
+
+    /// Aggregates the gradient of the transparency gate using an upstream signal when optics are
+    /// enabled.
+    pub fn accumulate_transparency_gradient(&self, upstream: &[f32]) -> Option<f32> {
+        self.optics
+            .as_ref()
+            .and_then(|trace| trace.accumulate_transparency_gradient(upstream))
+    }
+
+    /// Returns aggregate transparency statistics emitted by the optical medium, if enabled.
+    pub fn transparency_summary(&self) -> Option<TransparencySummary> {
+        self.optics
+            .as_ref()
+            .and_then(|trace| trace.transparency_summary())
     }
 }
 
@@ -1143,6 +1279,8 @@ fn propagate_transparent_optics(
 
     let mut previous_wave = 0.0f32;
 
+    trace.transparency_gain = transparency;
+
     for idx in 0..len {
         let sample = input[idx];
         trace.source_gradient[idx] = sample;
@@ -1162,7 +1300,8 @@ fn propagate_transparent_optics(
         let curved = diffused + bend;
 
         let depth = idx as f32 * inv_len;
-        let attenuation = transparency * (-absorption * depth).exp();
+        let absorption_factor = (-absorption * depth).exp();
+        let attenuation = transparency * absorption_factor;
         trace.attenuation_profile[idx] = attenuation;
 
         let phase = phase_shift + depth * refractive * tau * 0.25;
@@ -1174,6 +1313,7 @@ fn propagate_transparent_optics(
         let propagated = interference * attenuation;
         output[idx] = propagated;
         trace.propagated_gradient[idx] = propagated;
+        trace.transparency_jacobian[idx] = interference * absorption_factor;
     }
 }
 
@@ -1359,8 +1499,8 @@ mod tests {
         project_realgrad, project_tempered_realgrad, CpuChirpZ, CpuRustFft, GradientSummary,
         RealGradAutoTuner, RealGradConfig, RealGradKernel, RealGradProjection,
         RealGradProjectionScratch, RealGradZProjector, SchwartzSequence, SpectralEngine,
-        SpectrumNorm, TemperedRealGradProjection, TransparentGradientOpticsConfig,
-        DEFAULT_THRESHOLD,
+        SpectrumNorm, TemperedRealGradProjection, TransparencySummary,
+        TransparentGradientOpticsConfig, DEFAULT_THRESHOLD,
     };
     use crate::theory::zpulse::ZSource;
     use crate::util::math::{LeechProjector, LEECH_PACKING_DENSITY};
@@ -1439,9 +1579,11 @@ mod tests {
         assert_eq!(trace.source_gradient, data);
         assert_eq!(trace.propagated_gradient.len(), data.len());
         assert_eq!(trace.attenuation_profile.len(), data.len());
+        assert_eq!(trace.transparency_jacobian.len(), data.len());
         assert_eq!(trace.phase_profile.len(), data.len());
         assert_eq!(trace.refraction_profile.len(), data.len());
         assert_eq!(trace.diffusion_profile.len(), data.len());
+        assert!((trace.transparency_gain - optics.transparency).abs() < 1.0e-6);
         assert!(trace
             .propagated_gradient
             .iter()
@@ -1451,6 +1593,105 @@ mod tests {
             .attenuation_profile
             .iter()
             .all(|attenuation| *attenuation <= 1.0 + 1.0e-6));
+        let upstream = vec![0.25f32; data.len()];
+        let gradient = trace
+            .accumulate_transparency_gradient(&upstream)
+            .expect("matching upstream length");
+        assert!(gradient.is_finite());
+    }
+
+    #[test]
+    fn transparent_optics_emit_summary() {
+        let optics = TransparentGradientOpticsConfig {
+            refractive_index: 1.55,
+            transparency: 0.72,
+            absorption: 0.08,
+            diffusion: 0.3,
+            phase_shift: 0.15,
+        };
+        let config = RealGradConfig::default().with_optics(optics);
+        let data = [0.5f32, -0.1, 0.35, -0.45, 0.2];
+        let projection = project_realgrad(&data, config);
+        let trace = projection.optics_trace().expect("optical trace");
+        let trace_summary = trace
+            .transparency_summary()
+            .expect("transparency summary from trace");
+        assert!((trace_summary.transparency_gain - optics.transparency).abs() < 1.0e-6);
+        assert!(trace_summary.mean_attenuation.is_finite());
+        assert!(trace_summary.max_attenuation >= trace_summary.mean_attenuation);
+        assert!(trace_summary.mean_refraction >= 0.0);
+        assert!(trace_summary.diffusion_energy >= 0.0);
+        assert!(trace_summary.phase_variation >= 0.0);
+        assert!(trace_summary.jacobian_norm >= 0.0);
+
+        let projection_summary = projection
+            .transparency_summary()
+            .expect("projection transparency summary");
+        assert_eq!(projection_summary, trace_summary);
+    }
+
+    #[test]
+    fn transparent_optics_transparency_gradient_matches_finite_difference() {
+        let config = TransparentGradientOpticsConfig {
+            refractive_index: 1.3,
+            transparency: 0.65,
+            absorption: 0.05,
+            diffusion: 0.25,
+            phase_shift: 0.4,
+        };
+        let input = [0.75f32, -0.5, 0.125, -0.25, 0.6];
+        let len = input.len();
+
+        let mut base_trace = TransparentGradientTrace::default();
+        base_trace.prepare(len);
+        let mut base_output = vec![0.0f32; len];
+        propagate_transparent_optics(config, &input, &mut base_output, &mut base_trace);
+
+        let mut perturbed_trace = TransparentGradientTrace::default();
+        perturbed_trace.prepare(len);
+        let mut perturbed_output = vec![0.0f32; len];
+        let epsilon = 1.0e-3f32;
+        let perturbed_config = TransparentGradientOpticsConfig {
+            transparency: (config.transparency + epsilon).clamp(0.0, 1.0),
+            ..config
+        };
+        propagate_transparent_optics(
+            perturbed_config,
+            &input,
+            &mut perturbed_output,
+            &mut perturbed_trace,
+        );
+
+        for ((base, perturbed), jacobian) in base_output
+            .iter()
+            .zip(perturbed_output.iter())
+            .zip(base_trace.transparency_jacobian.iter())
+        {
+            let numeric = (perturbed - base) / epsilon;
+            let diff = (numeric - jacobian).abs();
+            let scale = numeric.abs().max(jacobian.abs()).max(1.0);
+            assert!(
+                diff <= 5.0e-3 * scale,
+                "numeric={numeric}, jacobian={jacobian}"
+            );
+        }
+
+        let upstream = [0.1f32, -0.2, 0.05, -0.15, 0.4];
+        let expected: f32 = base_trace
+            .transparency_jacobian
+            .iter()
+            .zip(upstream.iter())
+            .map(|(j, u)| j * u)
+            .sum();
+        let aggregated = base_trace
+            .accumulate_transparency_gradient(&upstream)
+            .expect("matching upstream length");
+        assert!((expected - aggregated).abs() <= 1.0e-6);
+
+        let mismatch = [0.0f32; 3];
+        assert!(base_trace
+            .accumulate_transparency_gradient(&mismatch)
+            .is_none());
     }
 
     #[test]

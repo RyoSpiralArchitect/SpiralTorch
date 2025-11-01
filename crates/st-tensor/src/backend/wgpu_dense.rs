@@ -3089,67 +3089,6 @@ impl GpuContext {
     }
 
     #[cfg(any())]
-    fn fused_gelu_back_bind_group(
-        &self,
-        z: &Buffer,
-        g: &Buffer,
-        gz_out: &Buffer,
-        dr: &Buffer,
-        partials: &Buffer,
-        uniforms: &Buffer,
-    ) -> BindGroup {
-        self.device().create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("st.tensor.wgpu_dense.fused_gelu_back.bind_group"),
-            layout: &self.fused_gelu_back_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: z.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: g.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: gz_out.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: mask_binding.as_entire_binding(),
-                },
-            ],
-        })
-    }
-
-    fn softmax_zspace_bind_group(
-        &self,
-        output: &Buffer,
-        metrics: &Buffer,
-        params: &Buffer,
-    ) -> Option<BindGroup> {
-        let layout = self.softmax_zspace_layout.as_ref()?;
-        Some(self.device().create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("st.tensor.wgpu_dense.softmax_zspace.bind_group"),
-            layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: output.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: partials.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 5,
-                    resource: uniforms.as_entire_binding(),
-                },
-            ],
-        })
-    }
-
-    #[cfg(any())]
     fn bayesian_refine_softmax_score(
         &self,
         variant: SoftmaxVariant,

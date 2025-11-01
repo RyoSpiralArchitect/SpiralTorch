@@ -165,6 +165,7 @@ impl RealGradEngine {
             0.0
         };
         let gradient_summary = projection.gradient_summary();
+        let transparency = projection.transparency_summary();
         let (iterations, convergence_error, dominated, converged) = if let Some(tempered) = tempered
         {
             (
@@ -193,6 +194,7 @@ impl RealGradEngine {
             gradient_sparsity: gradient_summary.sparsity,
             rolling_gradient_norm: 0.0,
             rolling_residual_ratio: 0.0,
+            transparency,
         };
 
         let rolling_gradient = match self.rolling_gradient_norm {
@@ -374,5 +376,28 @@ mod tests {
         assert_eq!(engine.ema_alpha(), 0.0);
         engine.set_ema_alpha(1.5);
         assert_eq!(engine.ema_alpha(), 1.0);
+    }
+
+    #[test]
+    fn engine_emits_transparency_summary_with_optics() {
+        let _guard = telemetry_guard();
+        crate::telemetry::hub::clear_last_realgrad_for_test();
+        let optics = TransparentGradientOpticsConfig {
+            refractive_index: 1.5,
+            transparency: 0.8,
+            absorption: 0.05,
+            diffusion: 0.25,
+            phase_shift: 0.1,
+        };
+        let mut engine = RealGradEngine::new(RealGradConfig::default().with_optics(optics));
+        let values = vec![0.75f32, -0.3, 0.45, -0.6, 0.15];
+        let projection = engine.project(&values);
+        let trace_summary = projection
+            .transparency_summary()
+            .expect("projection transparency summary");
+        assert!((trace_summary.transparency_gain - optics.transparency).abs() < 1.0e-6);
+        let pulse = engine.last_pulse().expect("pulse emitted");
+        let pulse_summary = pulse.transparency.expect("pulse transparency summary");
+        assert_eq!(pulse_summary, trace_summary);
     }
 }
