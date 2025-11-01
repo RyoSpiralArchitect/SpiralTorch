@@ -4,6 +4,15 @@ _(Still under active expanding hourly.)_
 
 **Purpose.** A WGPU-first, research-grade ML/geometry runtime that fuses spectral operators, microlocal tools, and cooperative schedulers into a single stack. The goal: rival CUDA-centric ecosystems using portable GPUs (Metal/Vulkan/DX12) without sacrificing theory fidelity.
 
+## 🚀 Latest SpiralTorch highlights
+
+- **Fractal → Quantum RL bridge.** Stream Mellin-log fractal patches straight into the quantum overlay studio and recover policy gradients through `FractalQuantumTrainer` and friends—keeping Python fallbacks and PyO3 builds in lockstep.
+- **Self-evolving SpiralK kernels.** A new diversity governor inside `SelfRewriteEngine` tracks plateauing η̄ gains, forces fresh AI rewrites when caches go stale, and surfaces telemetry via `diversity_snapshot()` so operators can keep the autonomous kernel lab on course.
+- **Saga-aware kernel evolution.** The `SelfRewriteEngine` now learns multi-step hint sagas, boosting cache priority for sequenced rewrites and exposing the orbits via `saga_snapshots()` so you can audit every cosmic combo.
+- **Reinforcement-tuned hint genetics.** Hint chains earn reward-weighted feedback, anomaly filters freeze outliers, recombination fuses cached winners, graph snapshots illuminate hint affinity, and `take_trace()` streams the self-evolution log when `--debug-self-evolution` is enabled.
+- **Chain-policy reinforcement.** Cached hint chains now feed a lightweight Q-style policy inside `SelfRewriteEngine`, boosting cache priority via chain multipliers, exposing telemetry with `chain_policy_snapshots()`, and logging `PolicyUpdate` traces whenever the self-evolution loop reshapes its instincts.
+- **Contextual bandit autopilot.** A UCB-flavoured bandit now rides alongside the cache, weighting hint reuse via `bandit_snapshots()` telemetry, steering exploration with `with_bandit_*` knobs, and leaving `BanditUpdate` traces whenever rewrites learn a new favourite arm.
+
 ## 🌌 SpiralTorch Manifesto
 
 Step into the paradigm shift from imitation to emergent meaning with the [SpiralTorch Manifesto](docs/spiraltorch_manifesto.md).
@@ -98,6 +107,23 @@ sequenceDiagram
   Bridge-->>API: awaitable result / telemetry hook
 ```
 
+### 🛠️ Why Robotics Teams Are Watching
+
+SpiralTorch’s runtime mirrors the main pressure points that robotics teams wrestle with today:
+
+1. **Vendor-agnostic acceleration (WGPU-first).** Robots ship on Jetsons, Raspberry Pis, Apple Silicon laptops, AMD workstations, and plain x86 servers. SpiralTorch kernels are written against WGPU, so the same Z-space operators run across Metal, Vulkan, or DirectX 12 without CUDA lock-in.
+2. **A control-plane grade runtime.** The mermaid diagram above is effectively a realtime robotics OS: session managers, graph planners, schedulers, command queues, and observability hooks coordinate sensing, planning, and actuation in one pipeline.
+3. **Unified sensor fusion via Z-space.** Camera frames, LiDAR point clouds, IMU states, force/torque readings, and language instructions all project into a single geometric manifold. Planning loops consume multi-modal context without writing one-off fusion code per robot, while per-channel exponential smoothers and staleness monitors keep jittery or missing proprioception from destabilising downstream control.
+4. **Geometric + gravitational dynamics.** Z-space now carries configurable geometry (Euclidean, curved manifolds, or GR-inspired metrics) and gravity wells (Newtonian or relativistic) so training can explore non-Euclidean kinematics, orbital behaviours, or heavy-mass safety regimes without leaving the runtime. The new Relativity Bridge mirrors the general relativity tensors used in the theory module—including Lorentzian metrics generated from symmetry ansätze—so the same conceptual primitives power both physics experiments and real robot rollouts.
+5. **Instinctive behaviours with Desire Lagrangians + SpiralTorchRL.** Instead of hand-crafting reward functions, core instincts—“don’t tip over,” “seek charge,” “avoid the ledge”—are encoded as potentials. Traditional policy-gradient loops still plug in, but they optimise around explainable priors.
+6. **Self-aware safety through ψ telemetry.** The runtime continuously measures kernel stability, allocator pressure, dynamics drift, and channel health. When thresholds break—whether from physical saturation or stale sensors—ψ telemetry drives self-maintain routines that pause execution or transition to safe postures before a robot ever enters an unrecoverable state.
+7. **Training-grade data capture.** A built-in trajectory recorder snapshots fused observations, instinct evaluations, telemetry, and policy commands so teams can stream curated rollouts into offline RL pipelines or regression harnesses without bolting on a separate logging stack.
+8. **Pluggable safety governance.** Robotics runtimes can now host drift-response safety plugins sourced from the `spiral-safety` crate. ψ telemetry, Desire energy, and channel health feed directly into SpiralTorch’s governance metrics so the same policy guardrails auditing language models can halt physical robots when hazards spike.
+9. **Z-space trainers with temporal feedback.** The new `TemporalFeedbackLearner` and `ZSpaceTrainerBridge` convert runtime steps, ψ telemetry, and Desire energy into Z-space trainer metrics (speed, memory, stability, drift) and `ZSpacePartialBundle` payloads. Vision and instinctive signals stay synchronised so offline trainers can replay the exact feedback a robot experienced on the floor.
+10. **CanvasProjector-aligned vision control.** `VisionFeedbackSynchronizer` aligns CanvasProjector vector fields with sensor channels, exposes alignment/energy metrics, and feeds them into the same partial bundles. Reinforcement loops now mix proprioceptive policies with live visual feedback for gradients that understand what the robot “saw” when it acted.
+
+Together these properties let SpiralTorch act as the perception, planning, and autonomy stack for heterogeneous robot fleets—from lab manipulators to outdoor rovers—without a rewrite per platform.
+
 **Licensing**
 
 SpiralTorch ships under a dual-license model:
@@ -130,7 +156,7 @@ SpiralTorch ships under a dual-license model:
 ## Code stats
 
 <!-- AUTOGEN: CODESTATS BEGIN -->
-_Last updated: 2025-10-29 04:56 UTC_
+_Last updated: 2025-10-31 05:08 UTC_
 
 ```text
 
@@ -144,11 +170,11 @@ _Last updated: 2025-10-29 04:56 UTC_
  Go                     11         2582         2082          200          300
  JSON                    6          372          372            0            0
  Julia                   8         1335         1176           14          145
- Python                 77        18800        15825          103         2872
+ Python                 89        25207        21197          127         3883
  Shell                   4          194          172            4           18
  SVG                     3           60           60            0            0
  Plain Text              1          661            0          544          117
- TOML                   39          983          839           27          117
+ TOML                   40         1011          867           27          117
  TypeScript              7         4899         4332          175          392
  YAML                    3           72           65            0            7
 -------------------------------------------------------------------------------
@@ -162,8 +188,8 @@ _Last updated: 2025-10-29 04:56 UTC_
  |- Python               2           22           20            0            2
  (Total)                             31           20            9            2
 -------------------------------------------------------------------------------
- Markdown               63         6393            0         5015         1378
- |- BASH                17          131          102           17           12
+ Markdown               63         6537            0         5129         1408
+ |- BASH                18          146          117           17           12
  |- C                    1           21           16            0            5
  |- COBOL                1           30           30            0            0
  |- Dockerfile           1            6            6            0            0
@@ -171,18 +197,17 @@ _Last updated: 2025-10-29 04:56 UTC_
  |- JavaScript           1           34           29            3            2
  |- JSON                 1           11           11            0            0
  |- Julia                1           29           26            0            3
- |- Python               7          840          702           20          118
- |- Rust                 5          777          683           16           78
+ |- Python               7          867          722           22          123
+ |- Rust                 5          819          718           18           83
  |- YAML                 2           62           62            0            0
- (Total)                           8352         1685         5071         1596
+ (Total)                           8580         1755         5189         1636
 -------------------------------------------------------------------------------
- Rust                  392       174257       155659         1840        16758
- |- Markdown           247         6653            0         6499          154
- (Total)                         180910       155659         8339        16912
+ Rust                  406       187364       167484         1857        18023
+ |- Markdown           260         6934            0         6774          160
+ (Total)                         194298       167484         8631        18183
 ===============================================================================
- Total                 622       212056       181924         7934        22198
+ Total                 649       231742       199149         8089        24504
 ===============================================================================
-
 ```
 ---
 
@@ -2134,40 +2159,64 @@ the **HyperSurprise** pipeline. Attach a `LossStdTrigger` and SpiralTorch inject
 η̄ pulses whenever the episode's return standard deviation breaches the guard:
 
 ```rust
-use st_spiral_rl::{LossStdTrigger, SpiralPolicyGradient};
+use st_spiral_rl::{HyperSurpriseConfig, LossStdTrigger, SpiralPolicyGradient};
 
 let mut policy = SpiralPolicyGradient::new(4, 2, 0.05, 0.9)?;
-policy.attach_hyper_surprise(
+policy.attach_hyper_surprise_with_config(
     LossStdTrigger::new(0.12)
         .with_warmup(2)
-        .with_max_ratio(2.5),
+        .with_max_ratio(2.5)
+        .with_deadband(0.15),
+    HyperSurpriseConfig::default()
+        .with_smoothing(0.35)
+        .with_reversion(0.55)
+        .with_lr_floor(1e-4),
 );
 // ...record transitions...
 let report = policy.finish_episode()?;
 if let Some(surprise) = &report.hyper_surprise {
     println!(
-        "σ={:.3} inject={:.2} η̄={:.3}",
+        "σ={:.3} inject={:.2} η̄={:.3} gauge={:.2} lr={:.4} σ̂={:.3}",
         surprise.loss_std,
         surprise.inject_ratio,
-        surprise.eta_bar
+        surprise.eta_bar,
+        surprise.gauge,
+        surprise.learning_rate,
+        surprise.rolling_std
     );
 }
 ```
 
-`LossStdTrigger` keeps an EMA of the observed loss standard deviation, clamps
-surprise pulses, and modulates both the learning-rate and gradient gauge inside
-the episode update. `SpiralPolicyGradient::last_hyper_surprise()` exposes the
-latest packet so telemetry dashboards can correlate η̄ spikes with emergent
-behaviour.
+`LossStdTrigger` keeps an EMA of the observed loss standard deviation, applies a
+configurable deadband before clamping surprise pulses, and modulates both the
+learning-rate and gradient gauge inside the episode update.
+`SpiralPolicyGradient::last_hyper_surprise()` exposes the latest packet so
+telemetry dashboards can correlate η̄ spikes with emergent behaviour.
 
-The controller now threads Ramanujan's π synthesis and the Λ₂₄ packing density
-into its smoothing loop while auto-rewriting its own clamps. Rank, packing
-pressure, and scale histories sit on rolling windows so noisy small-batch runs
-settle quickly, and the `trainer.telemetry()` surface mirrors the same values to
-spot drift. `GeometryFeedback` keeps `max_scale` inside the recommended `[2, 3]`
-band, raises the floor when rank collapses, and eases the Leech density weight
-if pressure over-saturates—giving you a self-tuning geometric metronome instead
-of a static multiplier.
+`HyperSurpriseConfig` now includes builder helpers for smoothing, gauge floors,
+and floor clamps on both η̄ and the learning rate. A dedicated reversion factor
+lets gauges glide back to baseline instead of snapping when shocks subside, and
+the emitted telemetry now shares the rolling standard deviation alongside the
+imposed clamps. Ratio telemetry is derived from the post-clamp, smoothed gauge
+so `HyperSurpriseSignal::inject_ratio` mirrors the actual scaling applied to
+η̄ and the learning-rate. These guards keep legacy pipelines untouched (defaults
+mirror the previous behaviour) while unlocking telemetry-rich packets via
+`HyperSurpriseSignal::gauge`, `HyperSurpriseSignal::learning_rate`, and
+`HyperSurpriseSignal::rolling_std`.
+
+`HyperSurpriseConfig` now includes builder helpers for smoothing, relaxation
+back to the baseline gauge, ratio smoothing, cooldown windows, gauge floors, and
+floor clamps on both η̄ and the learning rate. These guards keep legacy
+pipelines untouched (defaults mirror the previous behaviour) while unlocking
+telemetry-rich packets via `HyperSurpriseSignal::gauge` and
+`HyperSurpriseSignal::learning_rate`.
+
+The controller uses the ratio smoother to bleed off residual pulses instead of
+snapping gauge/η̄ immediately back to baseline, and the cooldown window prevents
+short bursts of volatility from hammering the learner every frame. Relaxation
+lets you pick how gently the gauge returns to neutral once the surprise subsides
+so you can trade responsiveness for smoothness depending on your training
+regime.
 
 Chrono loop signals now feed directly into the controller: every
 `SpiralSession::resonate_over_time` call plants a `ChronoLoopSignal` in the
