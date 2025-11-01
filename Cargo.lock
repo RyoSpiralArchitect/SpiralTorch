@@ -3279,6 +3279,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "st-refract"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "st-softlogic",
+]
+
+[[package]]
 name = "st-robotics"
 version = "0.1.0"
 dependencies = [
@@ -3290,6 +3298,7 @@ dependencies = [
 name = "st-softlogic"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "serde",
  "serde_json",
 ]
@@ -3302,6 +3311,14 @@ dependencies = [
  "spiral-config",
  "st-core",
  "st-tensor",
+]
+
+[[package]]
+name = "st-sync"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "st-softlogic",
 ]
 
 [[package]]
@@ -3370,6 +3387,15 @@ dependencies = [
  "st-tensor",
  "st-vision",
  "tempfile",
+]
+
+[[package]]
+name = "st-zeta"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "st-softlogic",
+ "tracing",
 ]
 
 [[package]]
