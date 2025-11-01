@@ -5867,6 +5867,89 @@ fn fused_attention_cpu(
     output
 }
 
+fn cpu_row_softmax_hardmax(
+    data: &[f32],
+    rows: usize,
+    cols: usize,
+) -> (Vec<f32>, Vec<f32>) {
+    let expected = rows.saturating_mul(cols);
+    let mut softmax = vec![0.0; expected];
+    let mut hardmax = vec![0.0; expected];
+
+    if expected == 0 || data.len() != expected {
+        return (softmax, hardmax);
+    }
+
+    for row in 0..rows {
+        let offset = row * cols;
+        let input_row = &data[offset..offset + cols];
+        let soft_row = &mut softmax[offset..offset + cols];
+        let hard_row = &mut hardmax[offset..offset + cols];
+
+        soft_row.fill(0.0);
+        hard_row.fill(0.0);
+
+        let mut row_max = f32::NEG_INFINITY;
+        let mut argmax_index: Option<usize> = None;
+        let mut finite_values = 0usize;
+
+        for (index, &value) in input_row.iter().enumerate() {
+            if value.is_nan() {
+                continue;
+            }
+
+            finite_values += 1;
+            if value > row_max || argmax_index.is_none() {
+                row_max = value;
+                argmax_index = Some(index);
+            }
+        }
+
+        if finite_values == 0 {
+            continue;
+        }
+
+        let mut sum = 0.0f32;
+        for (prob_slot, &value) in soft_row.iter_mut().zip(input_row.iter()) {
+            if value.is_nan() {
+                *prob_slot = 0.0;
+                continue;
+            }
+
+            let shifted = if row_max.is_infinite() {
+                if value == row_max { 1.0 } else { 0.0 }
+            } else {
+                (value - row_max).exp()
+            };
+
+            sum += shifted;
+            *prob_slot = shifted;
+        }
+
+        let inv_sum = if sum.is_finite() && sum > 0.0 {
+            sum.recip()
+        } else {
+            0.0
+        };
+
+        if inv_sum > 0.0 {
+            for prob in soft_row.iter_mut() {
+                *prob *= inv_sum;
+            }
+        } else {
+            soft_row.fill(0.0);
+        }
+
+        if let Some(idx) = argmax_index {
+            if let Some(slot) = hard_row.get_mut(idx) {
+                *slot = 1.0;
+            }
+        }
+    }
+
+    (softmax, hardmax)
+}
+
 fn row_softmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
     cpu_row_softmax_hardmax(data, rows, cols).0
 }
