@@ -7,6 +7,7 @@ pub mod compaction;
 pub mod compaction2ce;
 pub mod compaction_2ce;
 pub mod gelu_back;
+pub mod hardmax;
 pub mod middlemax;
 pub mod midk_bottomk;
 pub mod nd_indexer;
@@ -34,6 +35,12 @@ pub use middlemax::{
     DispatchValidationError as MiddlemaxDispatchValidationError,
     ElementCounts as MiddlemaxElementCounts, Kind as MiddlemaxKind,
     Pipelines as MiddlemaxPipelines,
+};
+
+pub use hardmax::{
+    create_pipelines as create_hardmax_pipelines, upload_params as upload_hardmax_params,
+    Builder as HardmaxBuilder, Dispatch as HardmaxDispatch, Mode as HardmaxMode,
+    Params as HardmaxParams, Pipelines as HardmaxPipelines,
 };
 
 pub use util::{
