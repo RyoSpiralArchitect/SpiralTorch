@@ -1,0 +1,40 @@
+name: Repository License Manifest
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  manifest:
+    name: Generate and Sign Repository Manifest
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Generate repository license manifest
+        run: |
+          python scripts/security/generate_repo_manifest.py \
+            --repo-root . \
+            --canonical-license "LICENSE .txt" \
+            --output spiraltorch-repo-license-manifest.json
+      - name: Sign repository manifest
+        uses: sigstore/gh-action-sigstore@v2.3.1
+        with:
+          inputs: |
+            spiraltorch-repo-license-manifest.json
+      - name: Upload signed manifest artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: repo-license-manifest
+          path: |
+            spiraltorch-repo-license-manifest.json
+            spiraltorch-repo-license-manifest.json.sig
+            spiraltorch-repo-license-manifest.json.crt
