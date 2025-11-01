@@ -400,9 +400,7 @@ mod tests {
 
     #[test]
     fn deadband_suppresses_small_shocks() {
-        let mut trigger = LossStdTrigger::new(0.1)
-            .with_warmup(1)
-            .with_deadband(0.5);
+        let mut trigger = LossStdTrigger::new(0.1).with_warmup(1).with_deadband(0.5);
         // Warmup observation initializes the EMA without emitting a signal.
         assert!(trigger.observe(0.08).is_none());
         // Ratio is below the configured deadband so no pulse should be emitted.
