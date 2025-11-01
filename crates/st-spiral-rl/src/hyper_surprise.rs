@@ -16,7 +16,6 @@ pub struct LossStdTrigger {
     ema: f32,
     warmup: usize,
     seen: usize,
-    deadband: f32,
     geometry_eta: f32,
     geometry_curvature: f32,
 }
@@ -31,7 +30,6 @@ impl LossStdTrigger {
             ema: 0.0,
             warmup: 4,
             seen: 0,
-            deadband: 0.0,
             geometry_eta: 0.0,
             geometry_curvature: -1.0,
         }
@@ -106,10 +104,6 @@ impl LossStdTrigger {
             return None;
         }
         let mut ratio = (self.ema / self.std_threshold) - 1.0;
-        if ratio <= self.deadband {
-            return None;
-        }
-        ratio -= self.deadband;
         if self.geometry_eta > 0.0 {
             let curvature_boost = self.geometry_curvature.tanh().abs() as f32;
             ratio *= 1.0 + self.geometry_eta * 0.5 + curvature_boost;

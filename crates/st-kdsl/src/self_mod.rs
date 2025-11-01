@@ -45,6 +45,17 @@ pub struct SelfRewriteEngine<G: AiHintGenerator> {
     saga_history: VecDeque<String>,
     last_hint_key: Option<String>,
     last_ctx_signature: Option<u64>,
+    chain_feedback: HashMap<String, ChainFeedback>,
+    feedback_gamma: f32,
+    anomaly_threshold: f32,
+    anomaly_patience: u32,
+    anomaly_forget: u32,
+    frozen_hints: HashMap<String, FrozenHint>,
+    recombination_trials: usize,
+    relation_graph: HintRelationGraph,
+    trace_mode: bool,
+    trace_limit: usize,
+    trace_log: VecDeque<RewriteTrace>,
 }
 
 #[derive(Clone)]
@@ -65,6 +76,235 @@ struct HintPerformance {
     last_eta: f32,
     last_affinity: f32,
     last_gain: f32,
+}
+
+#[derive(Clone, Debug, Default)]
+struct ChainFeedback {
+    uses: u32,
+    successes: u32,
+    total_reward: f32,
+    ema_reward: f32,
+    last_reward: f32,
+    last_outcome: bool,
+}
+
+impl ChainFeedback {
+    fn reward(&mut self, reward: f32, success: bool, gamma: f32) {
+        self.uses = self.uses.saturating_add(1);
+        if success {
+            self.successes = self.successes.saturating_add(1);
+        }
+        let reward = reward.max(0.0);
+        self.total_reward += reward;
+        let blend = gamma.clamp(0.01, 1.0);
+        self.ema_reward = if self.uses == 1 {
+            reward
+        } else {
+            self.ema_reward * (1.0 - blend) + reward * blend
+        };
+        self.last_reward = reward;
+        self.last_outcome = success;
+    }
+
+    fn score(&self) -> f32 {
+        if self.uses == 0 {
+            return 0.0;
+        }
+        let success_rate = self.successes as f32 / self.uses as f32;
+        self.ema_reward * 0.6 + self.total_reward * 0.2 + success_rate * 0.2
+    }
+}
+
+#[derive(Clone, Debug)]
+struct FrozenHint {
+    reason: String,
+    cooldown: u32,
+    strikes: u32,
+    idle: u32,
+}
+
+impl FrozenHint {
+    fn new(reason: impl Into<String>, cooldown: u32) -> Self {
+        Self {
+            reason: reason.into(),
+            cooldown,
+            strikes: 1,
+            idle: 0,
+        }
+    }
+
+    fn age(&mut self) {
+        if self.cooldown > 0 {
+            self.cooldown -= 1;
+        }
+        self.idle = self.idle.saturating_add(1);
+    }
+
+    fn reinforce(&mut self, reason: impl Into<String>, cooldown: u32) {
+        self.reason = reason.into();
+        self.cooldown = self.cooldown.max(cooldown);
+        self.strikes = self.strikes.saturating_add(1);
+        self.idle = 0;
+    }
+}
+
+#[derive(Clone, Debug)]
+struct HintRelationGraph {
+    adjacency: HashMap<String, Vec<RelationEdge>>,
+    max_neighbors: usize,
+    decay: f32,
+}
+
+impl Default for HintRelationGraph {
+    fn default() -> Self {
+        Self {
+            adjacency: HashMap::new(),
+            max_neighbors: 6,
+            decay: 0.94,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct RelationEdge {
+    to: String,
+    weight: f32,
+    reward: f32,
+    hits: u32,
+}
+
+impl RelationEdge {
+    fn new(to: String, reward: f32) -> Self {
+        let reward = reward.max(0.0);
+        Self {
+            to,
+            weight: 1.0,
+            reward,
+            hits: if reward > 0.0 { 1 } else { 0 },
+        }
+    }
+
+    fn reinforce(&mut self, reward: f32) {
+        let reward = reward.max(0.0);
+        self.weight = (self.weight + reward * 0.5).min(16.0);
+        self.reward += reward;
+        if reward > 0.0 {
+            self.hits = self.hits.saturating_add(1);
+        }
+    }
+}
+
+impl HintRelationGraph {
+    fn observe_chain(&mut self, chain: &[String], reward: f32) {
+        if chain.len() < 2 {
+            return;
+        }
+        for window in chain.windows(2) {
+            if let [from, to] = window {
+                self.observe_edge(from, to, reward);
+            }
+        }
+    }
+
+    fn observe_edge(&mut self, from: &str, to: &str, reward: f32) {
+        let edges = self.adjacency.entry(from.to_string()).or_default();
+        if let Some(edge) = edges.iter_mut().find(|edge| edge.to == to) {
+            edge.reinforce(reward);
+        } else {
+            edges.push(RelationEdge::new(to.to_string(), reward));
+        }
+        edges.sort_by(|a, b| b.weight.partial_cmp(&a.weight).unwrap_or(Ordering::Equal));
+        edges.truncate(self.max_neighbors);
+    }
+
+    fn decay(&mut self) {
+        let decay = self.decay.clamp(0.5, 0.999);
+        for edges in self.adjacency.values_mut() {
+            edges.retain(|edge| edge.weight > 1e-3 || edge.reward > 1e-3);
+            for edge in edges.iter_mut() {
+                edge.weight *= decay;
+                edge.reward *= decay;
+            }
+        }
+    }
+
+    fn snapshots(&self) -> Vec<HintGraphSnapshot> {
+        let mut snapshots = Vec::new();
+        for (from, edges) in &self.adjacency {
+            for edge in edges {
+                let mean_reward = if edge.hits == 0 {
+                    0.0
+                } else {
+                    edge.reward / edge.hits as f32
+                };
+                snapshots.push(HintGraphSnapshot {
+                    from: from.clone(),
+                    to: edge.to.clone(),
+                    weight: edge.weight,
+                    hits: edge.hits,
+                    mean_reward,
+                });
+            }
+        }
+        snapshots.sort_by(|a, b| b.weight.partial_cmp(&a.weight).unwrap_or(Ordering::Equal));
+        snapshots
+    }
+
+    fn set_decay(&mut self, decay: f32) {
+        self.decay = decay;
+    }
+
+    fn set_max_neighbors(&mut self, limit: usize) {
+        self.max_neighbors = limit.max(1);
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HintGraphSnapshot {
+    pub from: String,
+    pub to: String,
+    pub weight: f32,
+    pub hits: u32,
+    pub mean_reward: f32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HintChainFeedbackSnapshot {
+    pub chain: String,
+    pub uses: u32,
+    pub successes: u32,
+    pub total_reward: f32,
+    pub ema_reward: f32,
+    pub last_reward: f32,
+    pub last_outcome: bool,
+    pub score: f32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FrozenHintSnapshot {
+    pub key: String,
+    pub reason: String,
+    pub cooldown: u32,
+    pub strikes: u32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RewriteTrace {
+    pub kind: TraceKind,
+    pub detail: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum TraceKind {
+    CacheReuse,
+    GeneratorSuccess,
+    GeneratorFailure,
+    CachePenalty,
+    ChainFeedback,
+    Freeze,
+    Unfreeze,
+    RecombineSuccess,
+    RecombineFailure,
 }
 
 impl HintPerformance {
@@ -812,6 +1052,17 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
             saga_history: VecDeque::new(),
             last_hint_key: None,
             last_ctx_signature: None,
+            chain_feedback: HashMap::new(),
+            feedback_gamma: 0.25,
+            anomaly_threshold: 0.35,
+            anomaly_patience: 4,
+            anomaly_forget: 24,
+            frozen_hints: HashMap::new(),
+            recombination_trials: 2,
+            relation_graph: HintRelationGraph::default(),
+            trace_mode: false,
+            trace_limit: 128,
+            trace_log: VecDeque::new(),
         }
     }
 
@@ -926,6 +1177,62 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         self
     }
 
+    /// Configure the reward blending factor for chain-level feedback.
+    pub fn with_feedback_gamma(mut self, gamma: f32) -> Self {
+        if gamma.is_finite() && gamma > 0.0 {
+            self.feedback_gamma = gamma.clamp(0.01, 1.0);
+        }
+        self
+    }
+
+    /// Configure the anomaly threshold beneath which hints are frozen.
+    pub fn with_anomaly_threshold(mut self, threshold: f32) -> Self {
+        if threshold.is_finite() {
+            self.anomaly_threshold = threshold.clamp(0.0, 0.9);
+        }
+        self
+    }
+
+    /// Configure the minimum number of observations before anomalies are considered.
+    pub fn with_anomaly_patience(mut self, patience: u32) -> Self {
+        self.anomaly_patience = patience.max(1);
+        self
+    }
+
+    /// Configure how long frozen hints are retained before being forgotten.
+    pub fn with_anomaly_forget(mut self, horizon: u32) -> Self {
+        self.anomaly_forget = horizon.max(4);
+        self
+    }
+
+    /// Configure the number of recombination attempts per rewrite cycle.
+    pub fn with_recombination_trials(mut self, trials: usize) -> Self {
+        self.recombination_trials = trials.max(1);
+        self
+    }
+
+    /// Configure how quickly the hint relation graph decays between rewrites.
+    pub fn with_relation_decay(mut self, decay: f32) -> Self {
+        if decay.is_finite() && decay > 0.0 {
+            self.relation_graph.set_decay(decay);
+        }
+        self
+    }
+
+    /// Configure how many neighbours are retained per hint in the relation graph.
+    pub fn with_relation_fanout(mut self, fanout: usize) -> Self {
+        self.relation_graph.set_max_neighbors(fanout);
+        self
+    }
+
+    /// Enable detailed trace logging for self-evolution debugging.
+    pub fn enable_trace_mode(mut self, limit: usize) -> Self {
+        self.trace_mode = true;
+        self.trace_limit = limit.max(16);
+        self.trace_log.clear();
+        self
+    }
+
     /// Returns the smoothed η̄ after the most recent rewrite.
     pub fn smoothed_eta(&self) -> Option<f32> {
         if self.eta_history.is_empty() {
@@ -1005,6 +1312,56 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         self.saga.snapshots()
     }
 
+    /// Exposes the learned reward feedback for observed hint chains.
+    pub fn chain_feedback(&self) -> Vec<HintChainFeedbackSnapshot> {
+        let mut chains: Vec<_> = self
+            .chain_feedback
+            .iter()
+            .map(|(chain, feedback)| HintChainFeedbackSnapshot {
+                chain: chain.clone(),
+                uses: feedback.uses,
+                successes: feedback.successes,
+                total_reward: feedback.total_reward,
+                ema_reward: feedback.ema_reward,
+                last_reward: feedback.last_reward,
+                last_outcome: feedback.last_outcome,
+                score: feedback.score(),
+            })
+            .collect();
+        chains.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(Ordering::Equal));
+        chains
+    }
+
+    /// Exposes hints currently frozen by the anomaly detector.
+    pub fn frozen_hints(&self) -> Vec<FrozenHintSnapshot> {
+        let mut frozen: Vec<_> = self
+            .frozen_hints
+            .iter()
+            .map(|(key, entry)| FrozenHintSnapshot {
+                key: key.clone(),
+                reason: entry.reason.clone(),
+                cooldown: entry.cooldown,
+                strikes: entry.strikes,
+            })
+            .collect();
+        frozen.sort_by(|a, b| {
+            b.strikes
+                .cmp(&a.strikes)
+                .then_with(|| b.cooldown.cmp(&a.cooldown))
+        });
+        frozen
+    }
+
+    /// Exposes the hint relation graph snapshots for debugging and visualisation.
+    pub fn relation_graph(&self) -> Vec<HintGraphSnapshot> {
+        self.relation_graph.snapshots()
+    }
+
+    /// Drains the trace log accumulated while trace mode is active.
+    pub fn take_trace(&mut self) -> Vec<RewriteTrace> {
+        self.trace_log.drain(..).collect()
+    }
+
     /// Attempt a self-rewrite. Returns `Ok(None)` when no rewrite is required.
     pub fn tick(
         &mut self,
@@ -1026,6 +1383,12 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         let force_fresh = self.diversity.should_force_fresh();
         if !force_fresh {
             if let Some(event) = self.try_cached(base_src, ctx, observed_eta, ctx_signature)? {
+                let eta_bar = event.eta_bar;
+                self.record_eta(eta_bar);
+                self.auto_tune_eta();
+                return Ok(Some(event));
+            }
+            if let Some(event) = self.try_recombined(base_src, ctx, observed_eta, ctx_signature)? {
                 let eta_bar = event.eta_bar;
                 self.record_eta(eta_bar);
                 self.auto_tune_eta();
@@ -1053,6 +1416,10 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         let gain =
             self.record_hint_success(&key, observed_eta, event.eta_bar, 1.0, ctx_signature, None);
         self.diversity.record_success(gain, true);
+        self.trace(
+            TraceKind::GeneratorSuccess,
+            format!("key={} gain={:.3} eta={:.3}", key, gain, event.eta_bar),
+        );
         self.auto_tune_eta();
 
         Ok(Some(event))
@@ -1083,6 +1450,13 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
             let Some(entry) = self.hint_cache.get(idx).cloned() else {
                 continue;
             };
+            if self.is_frozen(&entry.key) {
+                self.trace(
+                    TraceKind::CachePenalty,
+                    format!("skip frozen key={}", entry.key),
+                );
+                continue;
+            }
             let entry_staleness = entry.staleness;
             let affinity = self.context_affinity(entry.ctx_signature, ctx_signature);
             let bridged = self.cluster_bridge_affinity(entry.ctx_signature, ctx_signature);
@@ -1102,6 +1476,10 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
             let event = self.eval_hints(base_src, ctx, &entry.hints)?;
             if event.eta_bar <= observed_eta {
                 self.penalize_hint(&entry.hints);
+                self.trace(
+                    TraceKind::CachePenalty,
+                    format!("failed reuse key={} eta={:.3}", entry.key, event.eta_bar),
+                );
                 continue;
             }
             let gain = self.record_hint_success(
@@ -1114,7 +1492,111 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
             );
             self.diversity.record_success(gain, false);
             self.touch_cache(idx, event.eta_bar, event.hints.clone(), ctx_signature);
+            self.trace(
+                TraceKind::CacheReuse,
+                format!(
+                    "key={} gain={:.3} affinity={:.3}",
+                    entry.key, gain, effective_affinity
+                ),
+            );
             return Ok(Some(event));
+        }
+        Ok(None)
+    }
+
+    fn try_recombined(
+        &mut self,
+        base_src: &str,
+        ctx: &Ctx,
+        observed_eta: f32,
+        ctx_signature: u64,
+    ) -> Result<Option<SelfRewriteEvent>, AiRewriteError> {
+        if self.hint_cache.len() < 2 || self.recombination_trials == 0 {
+            return Ok(None);
+        }
+
+        let mut indices: Vec<usize> = (0..self.hint_cache.len()).collect();
+        indices.sort_by(|a, b| {
+            let sa = self.cache_priority_index(*a, ctx_signature);
+            let sb = self.cache_priority_index(*b, ctx_signature);
+            sb.partial_cmp(&sa).unwrap_or(Ordering::Equal)
+        });
+        let pool = indices.into_iter().take(4).collect::<Vec<_>>();
+        let mut attempts = 0usize;
+
+        for (i_idx, &ai) in pool.iter().enumerate() {
+            for &bi in pool.iter().skip(i_idx + 1) {
+                if attempts >= self.recombination_trials {
+                    return Ok(None);
+                }
+                let Some(a) = self.hint_cache.get(ai).cloned() else {
+                    continue;
+                };
+                let Some(b) = self.hint_cache.get(bi).cloned() else {
+                    continue;
+                };
+                if a.key == b.key {
+                    continue;
+                }
+                let combined = Self::recombine_hints(&a.hints, &b.hints);
+                if combined.is_empty() {
+                    continue;
+                }
+                let combined_key = Self::hint_key(&combined);
+                if self.is_frozen(&combined_key) {
+                    continue;
+                }
+                attempts += 1;
+                let event = self.eval_hints(base_src, ctx, &combined)?;
+                if event.eta_bar <= observed_eta {
+                    self.trace(
+                        TraceKind::RecombineFailure,
+                        format!("key={} eta={:.3}", combined_key, event.eta_bar),
+                    );
+                    {
+                        let entry = self.hint_stats.entry(combined_key.clone()).or_default();
+                        entry.uses = entry.uses.saturating_add(1);
+                        entry.failures = entry.failures.saturating_add(1);
+                        entry.last_eta = event.eta_bar;
+                        entry.last_gain *= 0.5;
+                        entry.last_affinity *= 0.5;
+                        entry.total_gain *= 0.5;
+                    }
+                    self.record_chain_feedback(
+                        vec![a.key.clone(), b.key.clone(), combined_key.clone()],
+                        0.0,
+                        false,
+                    );
+                    self.freeze_if_anomalous(&combined_key, "recombination failure");
+                    continue;
+                }
+                let affinity_a = self.context_affinity(a.ctx_signature, ctx_signature);
+                let affinity_b = self.context_affinity(b.ctx_signature, ctx_signature);
+                let affinity = ((affinity_a + affinity_b) * 0.5).clamp(0.1, 1.0);
+                let gain = self.record_hint_success(
+                    &combined_key,
+                    observed_eta,
+                    event.eta_bar,
+                    affinity,
+                    ctx_signature,
+                    None,
+                );
+                self.diversity.record_success(gain, false);
+                self.push_cache(event.eta_bar, combined.clone(), ctx_signature);
+                self.trace(
+                    TraceKind::RecombineSuccess,
+                    format!(
+                        "key={} from=({}, {}) gain={:.3} affinity={:.3}",
+                        combined_key, a.key, b.key, gain, affinity
+                    ),
+                );
+                self.record_chain_feedback(
+                    vec![a.key.clone(), b.key.clone(), combined_key.clone()],
+                    gain,
+                    true,
+                );
+                return Ok(Some(event));
+            }
         }
         Ok(None)
     }
@@ -1251,6 +1733,136 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
             .join("|")
     }
 
+    fn recombine_hints(a: &[HeuristicHint], b: &[HeuristicHint]) -> Vec<HeuristicHint> {
+        if a.is_empty() && b.is_empty() {
+            return Vec::new();
+        }
+        if a.is_empty() {
+            return b.to_vec();
+        }
+        if b.is_empty() {
+            return a.to_vec();
+        }
+        let pivot_a = (a.len() + 1) / 2;
+        let pivot_b = b.len() / 2;
+        let mut combined = Vec::with_capacity(pivot_a + (b.len() - pivot_b));
+        combined.extend_from_slice(&a[..pivot_a]);
+        combined.extend_from_slice(&b[pivot_b..]);
+        combined
+    }
+
+    fn current_chain_with(&self, key: &str) -> Vec<String> {
+        let mut chain: Vec<String> = self.saga_history.iter().cloned().collect();
+        chain.push(key.to_string());
+        chain
+    }
+
+    fn chain_signature(chain: &[String]) -> String {
+        if chain.is_empty() {
+            "<empty>".into()
+        } else {
+            chain.join(" -> ")
+        }
+    }
+
+    fn record_chain_feedback(&mut self, chain: Vec<String>, reward: f32, success: bool) {
+        if chain.is_empty() {
+            return;
+        }
+        let signature = Self::chain_signature(&chain);
+        let entry = self
+            .chain_feedback
+            .entry(signature.clone())
+            .or_insert_with(ChainFeedback::default);
+        entry.reward(reward, success, self.feedback_gamma);
+        self.relation_graph.observe_chain(&chain, reward);
+        self.trace(
+            TraceKind::ChainFeedback,
+            format!(
+                "chain={} reward={:.3} success={}",
+                signature, reward, success
+            ),
+        );
+    }
+
+    fn freeze_if_anomalous(&mut self, key: &str, reason: impl Into<String>) {
+        let Some(perf) = self.hint_stats.get(key) else {
+            return;
+        };
+        if perf.uses < self.anomaly_patience {
+            return;
+        }
+        let successes = perf.uses.saturating_sub(perf.failures);
+        let success_rate = if perf.uses == 0 {
+            0.0
+        } else {
+            successes as f32 / perf.uses as f32
+        };
+        if success_rate >= self.anomaly_threshold
+            && perf.mean_gain() >= self.anomaly_threshold * 0.5
+        {
+            return;
+        }
+        self.freeze_hint(key, reason);
+    }
+
+    fn freeze_hint(&mut self, key: &str, reason: impl Into<String>) {
+        let cooldown = self.anomaly_patience.saturating_mul(2).max(4);
+        let reason_str = reason.into();
+        if let Some(entry) = self.frozen_hints.get_mut(key) {
+            entry.reinforce(reason_str.clone(), cooldown);
+        } else {
+            self.frozen_hints.insert(
+                key.to_string(),
+                FrozenHint::new(reason_str.clone(), cooldown),
+            );
+        }
+        self.trace(
+            TraceKind::Freeze,
+            format!("key={} reason={} cooldown={}", key, reason_str, cooldown),
+        );
+    }
+
+    fn unfreeze_hint(&mut self, key: &str) {
+        if let Some(entry) = self.frozen_hints.remove(key) {
+            self.trace(
+                TraceKind::Unfreeze,
+                format!("key={} strikes={}", key, entry.strikes),
+            );
+        }
+    }
+
+    fn is_frozen(&self, key: &str) -> bool {
+        self.frozen_hints
+            .get(key)
+            .map_or(false, |entry| entry.cooldown > 0)
+    }
+
+    fn age_frozen(&mut self) {
+        let horizon = self.anomaly_forget;
+        let mut to_remove = Vec::new();
+        for (key, entry) in self.frozen_hints.iter_mut() {
+            entry.age();
+            if entry.cooldown == 0 && entry.idle >= horizon {
+                to_remove.push(key.clone());
+            }
+        }
+        for key in to_remove {
+            self.trace(TraceKind::Unfreeze, format!("key={} expired", key));
+            self.frozen_hints.remove(&key);
+        }
+    }
+
+    fn trace(&mut self, kind: TraceKind, detail: String) {
+        if !self.trace_mode {
+            return;
+        }
+        if self.trace_log.len() >= self.trace_limit {
+            self.trace_log.pop_front();
+        }
+        self.trace_log.push_back(RewriteTrace { kind, detail });
+    }
+
     fn record_hint_success(
         &mut self,
         key: &str,
@@ -1261,6 +1873,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         staleness: Option<u32>,
     ) -> f32 {
         let gain = (eta - observed).max(0.0);
+        let chain = self.current_chain_with(key);
         let (mean_gain, best_gain, last_affinity) = {
             let entry = self.hint_stats.entry(key.to_string()).or_default();
             entry.uses += 1;
@@ -1276,11 +1889,14 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         self.quality_model
             .observe(gain, mean_gain, best_gain, last_affinity, staleness, true);
         self.observe_transition(key, ctx_signature, gain, last_affinity);
+        self.record_chain_feedback(chain, gain, true);
+        self.unfreeze_hint(key);
         gain
     }
 
     fn penalize_hint(&mut self, hints: &[HeuristicHint]) {
         let key = Self::hint_key(hints);
+        let chain = self.current_chain_with(&key);
         let staleness = self.cache_staleness(&key).unwrap_or(u32::MAX);
         let (gain, mean, best, affinity) = {
             let entry = self.hint_stats.entry(key.clone()).or_default();
@@ -1300,6 +1916,8 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         self.diversity.record_failure();
         self.transitions.penalize_target(&key);
         self.saga.penalize_target(&key);
+        self.record_chain_feedback(chain, 0.0, false);
+        self.freeze_if_anomalous(&key, "cache failure");
     }
 
     fn observe_transition(&mut self, key: &str, ctx_signature: u64, gain: f32, affinity: f32) {
@@ -1357,6 +1975,8 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         self.decay_clusters();
         self.transitions.decay();
         self.saga.decay();
+        self.relation_graph.decay();
+        self.age_frozen();
     }
 
     fn degrade_cache_entry(&mut self, key: &str) {
@@ -1659,6 +2279,126 @@ mod tests {
         assert!(snapshot.updates >= 1);
         assert!(snapshot.accuracy >= 0.5);
         assert!(snapshot.weights.iter().any(|w| w.abs() > 1e-6));
+    }
+
+    #[test]
+    fn chain_feedback_accumulates_rewards() {
+        let mut generator = |_: &AiRewriteConfig, _: &AiRewritePrompt| {
+            Ok(vec![HeuristicHint::new(
+                "tile_cols",
+                "tile_cols + 8",
+                0.92,
+                "true",
+            )])
+        };
+        let ctx = sample_ctx();
+        let mut engine = SelfRewriteEngine::new(&mut generator, AiRewriteConfig::new("mock"))
+            .with_eta_floor(0.4)
+            .with_feedback_gamma(0.5);
+
+        for _ in 0..3 {
+            let event = engine
+                .tick("algo: 1;", &ctx, None, 0.2)
+                .expect("tick")
+                .expect("event");
+            assert!(event.eta_bar > 0.0);
+        }
+
+        let feedback = engine.chain_feedback();
+        assert!(!feedback.is_empty(), "chain feedback should be recorded");
+        let top = &feedback[0];
+        let total_uses: u32 = feedback.iter().map(|entry| entry.uses).sum();
+        assert!(total_uses >= 3);
+        assert!(top.total_reward > 0.0);
+        assert!(top.ema_reward > 0.0);
+        assert!(top.score > 0.0);
+    }
+
+    #[test]
+    fn freezes_hints_after_repeated_failures() {
+        let mut generator = |_: &AiRewriteConfig, _: &AiRewritePrompt| {
+            Ok(vec![HeuristicHint::new("radix", "radix + 2", 0.85, "true")])
+        };
+        let ctx = sample_ctx();
+        let mut engine = SelfRewriteEngine::new(&mut generator, AiRewriteConfig::new("mock"))
+            .with_eta_floor(0.3)
+            .with_anomaly_patience(1)
+            .with_anomaly_threshold(0.9)
+            .with_anomaly_forget(32);
+
+        let event = engine
+            .tick("algo: 1;", &ctx, None, 0.15)
+            .expect("tick")
+            .expect("event");
+        assert!(event.eta_bar > 0.0);
+
+        for _ in 0..3 {
+            engine.penalize_hint(&event.hints);
+        }
+
+        let frozen = engine.frozen_hints();
+        assert!(!frozen.is_empty(), "anomaly detector should freeze hints");
+        let stats = engine.hint_statistics();
+        let keys: Vec<_> = frozen.iter().map(|entry| entry.key.clone()).collect();
+        assert!(stats
+            .iter()
+            .any(|stat| keys.iter().any(|key| key == &stat.key)));
+    }
+
+    #[test]
+    fn recombination_attempts_merge_and_traces() {
+        let ctx = sample_ctx();
+        let signature = SelfRewriteEngine::<TemplateAiGenerator>::ctx_signature(&ctx);
+        let mut engine = SelfRewriteEngine::new(TemplateAiGenerator, AiRewriteConfig::new("mock"))
+            .with_eta_floor(0.35)
+            .with_recombination_trials(4)
+            .enable_trace_mode(64);
+
+        let hint_a = HeuristicHint::new("radix", "radix + 2", 0.9, "true");
+        let hint_b = HeuristicHint::new("tile_cols", "tile_cols + 4", 0.88, "true");
+        let key_a = SelfRewriteEngine::<TemplateAiGenerator>::hint_key(&[hint_a.clone()]);
+        let key_b = SelfRewriteEngine::<TemplateAiGenerator>::hint_key(&[hint_b.clone()]);
+
+        engine.hint_cache = VecDeque::from(vec![
+            CachedHint {
+                key: key_a.clone(),
+                hints: vec![hint_a.clone()],
+                eta: 0.15,
+                ctx_signature: signature,
+                staleness: 0,
+            },
+            CachedHint {
+                key: key_b.clone(),
+                hints: vec![hint_b.clone()],
+                eta: 0.18,
+                ctx_signature: signature,
+                staleness: 0,
+            },
+        ]);
+
+        let event = engine
+            .tick("algo: 1;", &ctx, None, 0.2)
+            .expect("tick")
+            .expect("event");
+        assert!(event.eta_bar > 0.2);
+        assert!(event.hints.len() >= 2);
+
+        let feedback = engine.chain_feedback();
+        assert!(
+            feedback.iter().any(|entry| entry.chain.contains("->")),
+            "chain feedback records recombination"
+        );
+
+        let graph = engine.relation_graph();
+        assert!(
+            !graph.is_empty(),
+            "relation graph should capture recombination edges"
+        );
+
+        let traces = engine.take_trace();
+        assert!(traces
+            .iter()
+            .any(|trace| trace.kind == TraceKind::RecombineSuccess));
     }
 
     #[test]
