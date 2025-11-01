@@ -29,7 +29,6 @@ mod theory;
 mod introspect;
 mod qr;
 mod julia_bridge;
-mod robotics;
 
 mod extras {
     use super::*;

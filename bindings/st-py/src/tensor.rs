@@ -1168,7 +1168,7 @@ impl PyTensor {
             .allow_threads(|| self.inner.row_softmax_hardmax_spiral_with_backend(backend))
             .map_err(tensor_err_to_py)?;
         let (softmax, hardmax, spiral, metrics) = report.into_parts();
-        let metrics_dict = PyDict::new(py);
+        let metrics_dict = PyDict::new_bound(py);
         metrics_dict.set_item("phi", metrics.phi)?;
         metrics_dict.set_item("phi_conjugate", metrics.phi_conjugate)?;
         metrics_dict.set_item("phi_bias", metrics.phi_bias)?;
