@@ -1,20 +1,15 @@
 [package]
-name = "st-softlogic"
+name = "st-zeta"
 version = "0.1.0"
 edition = "2021"
 authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
 license = "AGPL-3.0-or-later"
-description = "Shared soft logic primitives for SpiralTorch heuristics"
-
-[features]
-default = ["soft"]
-soft = []
-learn_store = ["dep:serde_json"]
+description = "Telemetry bridge for emitting SoftLogic feedback metrics"
 
 [dependencies]
 anyhow = "1"
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", optional = true }
+tracing = "0.1"
+st-softlogic = { path = "../st-softlogic" }
 
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"
