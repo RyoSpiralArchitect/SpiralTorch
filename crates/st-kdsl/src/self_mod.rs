@@ -54,6 +54,7 @@ pub struct SelfRewriteEngine<G: AiHintGenerator> {
     recombination_trials: usize,
     relation_graph: HintRelationGraph,
     chain_policy: ChainPolicyModel,
+    bandit: HintBandit,
     trace_mode: bool,
     trace_limit: usize,
     trace_log: VecDeque<RewriteTrace>,
@@ -188,6 +189,150 @@ impl Default for ChainPolicyModel {
             explore_bonus: 0.35,
             horizon: 4,
         }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct BanditArm {
+    pulls: u32,
+    failures: u32,
+    mean_gain: f32,
+    best_gain: f32,
+    last_gain: f32,
+}
+
+#[derive(Clone, Debug)]
+struct HintBandit {
+    arms: HashMap<String, BanditArm>,
+    total_pulls: u32,
+    explore: f32,
+    temperature: f32,
+    learning_rate: f32,
+    decay: f32,
+    min_pulls: u32,
+}
+
+impl Default for HintBandit {
+    fn default() -> Self {
+        Self {
+            arms: HashMap::new(),
+            total_pulls: 0,
+            explore: 0.55,
+            temperature: 0.65,
+            learning_rate: 0.35,
+            decay: 0.97,
+            min_pulls: 2,
+        }
+    }
+}
+
+impl HintBandit {
+    fn set_explore(&mut self, explore: f32) {
+        if explore.is_finite() {
+            self.explore = explore.max(0.0);
+        }
+    }
+
+    fn set_temperature(&mut self, temperature: f32) {
+        if temperature.is_finite() && temperature > 0.0 {
+            self.temperature = temperature.max(0.1);
+        }
+    }
+
+    fn set_learning_rate(&mut self, rate: f32) {
+        if rate.is_finite() && rate > 0.0 {
+            self.learning_rate = rate.clamp(0.05, 1.0);
+        }
+    }
+
+    fn set_decay(&mut self, decay: f32) {
+        if decay.is_finite() && decay > 0.0 {
+            self.decay = decay.min(0.999);
+        }
+    }
+
+    fn set_min_pulls(&mut self, pulls: u32) {
+        self.min_pulls = pulls.max(1);
+    }
+
+    fn observe_success(&mut self, key: &str, gain: f32) {
+        if !gain.is_finite() {
+            return;
+        }
+        let entry = self.arms.entry(key.to_string()).or_default();
+        entry.pulls = entry.pulls.saturating_add(1);
+        entry.mean_gain = if entry.pulls == 1 {
+            gain
+        } else {
+            let lr = self.learning_rate.clamp(0.05, 1.0);
+            entry.mean_gain * (1.0 - lr) + gain * lr
+        };
+        entry.best_gain = entry.best_gain.max(gain);
+        entry.last_gain = gain;
+        entry.failures = entry.failures.saturating_sub(entry.failures / 4);
+        self.total_pulls = self.total_pulls.saturating_add(1);
+    }
+
+    fn observe_failure(&mut self, key: &str) {
+        let entry = self.arms.entry(key.to_string()).or_default();
+        entry.failures = entry.failures.saturating_add(1);
+        entry.pulls = entry.pulls.saturating_add(1);
+        entry.mean_gain *= 0.5;
+        entry.last_gain *= 0.5;
+        self.total_pulls = self.total_pulls.saturating_add(1);
+    }
+
+    fn multiplier(&self, key: &str) -> f32 {
+        let score = self.score(key);
+        let temperature = self.temperature.max(0.1);
+        (1.0 + score / temperature).clamp(0.3, 4.0)
+    }
+
+    fn score(&self, key: &str) -> f32 {
+        let Some(entry) = self.arms.get(key) else {
+            return self.explore.max(0.0);
+        };
+        let pulls = entry.pulls.max(1) as f32;
+        let total = self.total_pulls.max(1) as f32;
+        let explore = if pulls < self.min_pulls.max(1) as f32 {
+            self.explore * 1.25
+        } else if self.explore <= 0.0 {
+            0.0
+        } else {
+            self.explore * ((total.ln_1p() / pulls).sqrt().max(0.0))
+        };
+        let penalty = entry.failures as f32 * 0.05;
+        entry.mean_gain + explore - penalty
+    }
+
+    fn decay(&mut self) {
+        let decay = self.decay.clamp(0.5, 0.999);
+        for entry in self.arms.values_mut() {
+            entry.mean_gain *= decay;
+            entry.last_gain *= decay;
+            if entry.mean_gain.abs() < 1e-4 && entry.failures > 0 {
+                entry.failures -= 1;
+            }
+        }
+        self.total_pulls = self.total_pulls.saturating_sub(self.total_pulls / 16);
+    }
+
+    fn snapshots(&self) -> Vec<HintBanditSnapshot> {
+        let mut snaps: Vec<_> = self
+            .arms
+            .iter()
+            .map(|(key, arm)| HintBanditSnapshot {
+                key: key.clone(),
+                pulls: arm.pulls,
+                failures: arm.failures,
+                mean_gain: arm.mean_gain,
+                best_gain: arm.best_gain,
+                last_gain: arm.last_gain,
+                score: self.score(key),
+            })
+            .collect();
+        snaps.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(Ordering::Equal));
+        snaps
     }
 }
 
@@ -455,6 +600,17 @@ pub struct HintChainPolicySnapshot {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct HintBanditSnapshot {
+    pub key: String,
+    pub pulls: u32,
+    pub failures: u32,
+    pub mean_gain: f32,
+    pub best_gain: f32,
+    pub last_gain: f32,
+    pub score: f32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct FrozenHintSnapshot {
     pub key: String,
     pub reason: String,
@@ -480,6 +636,7 @@ pub enum TraceKind {
     RecombineSuccess,
     RecombineFailure,
     PolicyUpdate,
+    BanditUpdate,
 }
 
 impl HintPerformance {
@@ -1236,6 +1393,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
             recombination_trials: 2,
             relation_graph: HintRelationGraph::default(),
             chain_policy: ChainPolicyModel::default(),
+            bandit: HintBandit::default(),
             trace_mode: false,
             trace_limit: 128,
             trace_log: VecDeque::new(),
@@ -1411,6 +1569,36 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         self
     }
 
+    /// Configure the exploration strength for the contextual bandit steering hint selection.
+    pub fn with_bandit_explore(mut self, explore: f32) -> Self {
+        self.bandit.set_explore(explore);
+        self
+    }
+
+    /// Adjust the temperature used when translating bandit scores into cache multipliers.
+    pub fn with_bandit_temperature(mut self, temperature: f32) -> Self {
+        self.bandit.set_temperature(temperature);
+        self
+    }
+
+    /// Configure the learning rate used when the bandit ingests fresh rewards.
+    pub fn with_bandit_learning_rate(mut self, rate: f32) -> Self {
+        self.bandit.set_learning_rate(rate);
+        self
+    }
+
+    /// Configure how quickly dormant bandit arms decay between rewrites.
+    pub fn with_bandit_decay(mut self, decay: f32) -> Self {
+        self.bandit.set_decay(decay);
+        self
+    }
+
+    /// Ensure each arm receives this many pulls before standard exploration is applied.
+    pub fn with_bandit_min_pulls(mut self, pulls: u32) -> Self {
+        self.bandit.set_min_pulls(pulls);
+        self
+    }
+
     /// Configure how quickly the hint relation graph decays between rewrites.
     pub fn with_relation_decay(mut self, decay: f32) -> Self {
         if decay.is_finite() && decay > 0.0 {
@@ -1515,6 +1703,11 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
     /// Exposes the learned chain policy values for reinforcement steering.
     pub fn chain_policy_snapshots(&self) -> Vec<HintChainPolicySnapshot> {
         self.chain_policy.snapshots()
+    }
+
+    /// Exposes the contextual bandit state steering cache exploration.
+    pub fn bandit_snapshots(&self) -> Vec<HintBanditSnapshot> {
+        self.bandit.snapshots()
     }
 
     /// Exposes the learned reward feedback for observed hint chains.
@@ -1875,6 +2068,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         };
         let chain = self.current_chain_with(&entry.key);
         let policy_bonus = self.chain_policy.multiplier(&chain);
+        let bandit_bonus = self.bandit.multiplier(&entry.key);
         (entry.eta + score)
             * affinity.max(bridge)
             * decay
@@ -1884,6 +2078,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
             * saga_bonus
             * ctx_bonus
             * policy_bonus
+            * bandit_bonus
     }
 
     fn eval_hints(
@@ -2112,6 +2307,12 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         self.observe_transition(key, ctx_signature, gain, last_affinity);
         self.record_chain_feedback(chain, gain, true);
         self.unfreeze_hint(key);
+        self.bandit.observe_success(key, gain);
+        let bandit_score = self.bandit.score(key);
+        self.trace(
+            TraceKind::BanditUpdate,
+            format!("key={} score={:.3} gain={:.3}", key, bandit_score, gain),
+        );
         gain
     }
 
@@ -2139,6 +2340,12 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         self.saga.penalize_target(&key);
         self.record_chain_feedback(chain, -self.anomaly_threshold.max(0.1), false);
         self.freeze_if_anomalous(&key, "cache failure");
+        self.bandit.observe_failure(&key);
+        let bandit_score = self.bandit.score(&key);
+        self.trace(
+            TraceKind::BanditUpdate,
+            format!("key={} score={:.3} failure", key, bandit_score),
+        );
     }
 
     fn observe_transition(&mut self, key: &str, ctx_signature: u64, gain: f32, affinity: f32) {
@@ -2198,6 +2405,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         self.saga.decay();
         self.relation_graph.decay();
         self.chain_policy.decay();
+        self.bandit.decay();
         self.age_frozen();
     }
 
@@ -2988,5 +3196,62 @@ mod tests {
                 .any(|snapshot| snapshot.to == finisher_key && snapshot.prefix.len() >= 2),
             "saga telemetry should report multi-step combo",
         );
+    }
+
+    #[test]
+    fn bandit_prefers_rewarded_hint_arms() {
+        let rewarded_hint = HeuristicHint::new("radix", "radix + 4", 0.9, "true");
+        let cold_hint = HeuristicHint::new("segments", "segments + 1", 0.7, "true");
+
+        let mut engine = SelfRewriteEngine::new(TemplateAiGenerator, AiRewriteConfig::new("mock"))
+            .with_cache_limit(2)
+            .with_bandit_explore(0.8)
+            .with_bandit_temperature(0.5)
+            .with_bandit_learning_rate(0.5)
+            .with_bandit_decay(0.98);
+
+        let ctx = sample_ctx();
+        let signature = SelfRewriteEngine::<TemplateAiGenerator>::ctx_signature(&ctx);
+
+        let rewarded_key =
+            SelfRewriteEngine::<TemplateAiGenerator>::hint_key(&[rewarded_hint.clone()]);
+        let cold_key = SelfRewriteEngine::<TemplateAiGenerator>::hint_key(&[cold_hint.clone()]);
+
+        engine.hint_cache = VecDeque::from(vec![
+            CachedHint {
+                key: rewarded_key.clone(),
+                hints: vec![rewarded_hint.clone()],
+                eta: 0.7,
+                ctx_signature: signature,
+                staleness: 0,
+            },
+            CachedHint {
+                key: cold_key.clone(),
+                hints: vec![cold_hint.clone()],
+                eta: 0.7,
+                ctx_signature: signature,
+                staleness: 0,
+            },
+        ]);
+
+        engine.record_hint_success(&rewarded_key, 0.2, 0.76, 0.95, signature, None);
+        engine.penalize_hint(&[cold_hint.clone()]);
+
+        let rewarded_priority = engine.cache_priority(engine.hint_cache.get(0).unwrap(), signature);
+        let cold_priority = engine.cache_priority(engine.hint_cache.get(1).unwrap(), signature);
+
+        assert!(
+            rewarded_priority > cold_priority,
+            "bandit steering should amplify the rewarded arm",
+        );
+
+        let snapshots = engine.bandit_snapshots();
+        assert!(snapshots.iter().any(|snap| snap.key == rewarded_key));
+        let rewarded_snapshot = snapshots
+            .iter()
+            .find(|snap| snap.key == rewarded_key)
+            .expect("rewarded snapshot");
+        assert!(rewarded_snapshot.mean_gain > 0.0);
+        assert!(rewarded_snapshot.score > 0.0);
     }
 }

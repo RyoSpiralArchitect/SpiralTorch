@@ -11,6 +11,7 @@ _(Still under active expanding hourly.)_
 - **Saga-aware kernel evolution.** The `SelfRewriteEngine` now learns multi-step hint sagas, boosting cache priority for sequenced rewrites and exposing the orbits via `saga_snapshots()` so you can audit every cosmic combo.
 - **Reinforcement-tuned hint genetics.** Hint chains earn reward-weighted feedback, anomaly filters freeze outliers, recombination fuses cached winners, graph snapshots illuminate hint affinity, and `take_trace()` streams the self-evolution log when `--debug-self-evolution` is enabled.
 - **Chain-policy reinforcement.** Cached hint chains now feed a lightweight Q-style policy inside `SelfRewriteEngine`, boosting cache priority via chain multipliers, exposing telemetry with `chain_policy_snapshots()`, and logging `PolicyUpdate` traces whenever the self-evolution loop reshapes its instincts.
+- **Contextual bandit autopilot.** A UCB-flavoured bandit now rides alongside the cache, weighting hint reuse via `bandit_snapshots()` telemetry, steering exploration with `with_bandit_*` knobs, and leaving `BanditUpdate` traces whenever rewrites learn a new favourite arm.
 
 ## 🌌 SpiralTorch Manifesto
 
