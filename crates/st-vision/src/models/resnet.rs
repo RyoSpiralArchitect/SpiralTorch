@@ -71,6 +71,7 @@ pub struct ResNetConfig {
     pub global_pool: bool,
     pub skip_init: f32,
     pub skip_learnable: bool,
+    pub skip_slip: Option<SkipSlipSchedule>,
 }
 
 impl Default for ResNetConfig {
@@ -89,6 +90,7 @@ impl Default for ResNetConfig {
             global_pool: true,
             skip_init: 1.0,
             skip_learnable: false,
+            skip_slip: None,
         }
     }
 }
@@ -96,6 +98,15 @@ impl Default for ResNetConfig {
 impl ResNetConfig {
     /// Returns a CIFAR-oriented ResNet-56 configuration with optional learnable skip scaling.
     pub fn resnet56_cifar(skip_learnable: bool) -> Self {
+        let skip_slip = if skip_learnable {
+            Some(
+                SkipSlipSchedule::linear(0.35, 1.0)
+                    .with_power(1.5)
+                    .per_stage(),
+            )
+        } else {
+            None
+        };
         Self {
             input_channels: 3,
             input_hw: (32, 32),
@@ -110,7 +121,312 @@ impl ResNetConfig {
             global_pool: true,
             skip_init: 1.0,
             skip_learnable,
+            skip_slip,
         }
+    }
+
+    /// Applies a skip slip schedule to the configuration.
+    pub fn with_skip_slip(mut self, schedule: SkipSlipSchedule) -> Self {
+        self.skip_slip = Some(schedule);
+        self
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SkipSlipSchedule {
+    start: f32,
+    end: f32,
+    power: f32,
+    per_stage: bool,
+}
+
+#[derive(Clone, Copy)]
+enum IdentityBlend<'a> {
+    Global(f32),
+    PerStage(&'a [f32]),
+}
+
+impl SkipSlipSchedule {
+    pub fn linear(start: f32, end: f32) -> Self {
+        Self {
+            start,
+            end,
+            power: 1.0,
+            per_stage: false,
+        }
+    }
+
+    pub fn constant(value: f32) -> Self {
+        Self::linear(value, value)
+    }
+
+    pub fn with_power(mut self, power: f32) -> Self {
+        self.power = power;
+        self
+    }
+
+    pub fn per_stage(mut self) -> Self {
+        self.per_stage = true;
+        self
+    }
+
+    /// Returns the slip factors that would be applied to a sequence of stages.
+    ///
+    /// Each element in the returned vector corresponds to a stage and contains
+    /// one slip factor per residual block in that stage. The schedule is
+    /// validated before previewing.
+    pub fn preview(&self, block_depths: &[usize]) -> PureResult<Vec<Vec<f32>>> {
+        self.preview_inner(block_depths, None)
+    }
+
+    /// Returns the slip factors after blending the schedule with the identity bridge.
+    ///
+    /// A blend progress of `0.0` keeps all residual paths at identity strength,
+    /// while `1.0` applies the full schedule. Values outside the unit interval are
+    /// clamped for convenience.
+    pub fn preview_with_identity_blend(
+        &self,
+        block_depths: &[usize],
+        identity_progress: f32,
+    ) -> PureResult<Vec<Vec<f32>>> {
+        let progress = Self::normalise_identity_progress(identity_progress)?;
+        self.preview_inner(block_depths, Some(IdentityBlend::Global(progress)))
+    }
+
+    /// Returns slip factors blended with per-stage identity progress markers.
+    ///
+    /// Each entry in `stage_progress` corresponds to one stage in `block_depths` and will
+    /// be clamped to the unit interval. Missing trailing values default to the last
+    /// provided stage when applying the blend.
+    pub fn preview_with_stage_identity_blend(
+        &self,
+        block_depths: &[usize],
+        stage_progress: &[f32],
+    ) -> PureResult<Vec<Vec<f32>>> {
+        let progress = Self::normalise_stage_identity_progress(stage_progress)?;
+        self.preview_inner(block_depths, Some(IdentityBlend::PerStage(&progress)))
+    }
+
+    fn preview_inner(
+        &self,
+        block_depths: &[usize],
+        identity_progress: Option<IdentityBlend<'_>>,
+    ) -> PureResult<Vec<Vec<f32>>> {
+        self.validate()?;
+        let total_blocks: usize = block_depths.iter().sum();
+        let mut preview = Vec::with_capacity(block_depths.len());
+        let mut global_block_idx = 0usize;
+        for (stage_idx, &depth) in block_depths.iter().enumerate() {
+            let mut stage_factors = Vec::with_capacity(depth);
+            for block_idx in 0..depth {
+                let slip = self.factor_internal(
+                    stage_idx,
+                    block_idx,
+                    depth,
+                    global_block_idx,
+                    total_blocks,
+                );
+                let factor = match identity_progress {
+                    Some(IdentityBlend::Global(progress)) => {
+                        Self::blend_with_identity(slip, progress)
+                    }
+                    Some(IdentityBlend::PerStage(per_stage)) => {
+                        let progress = Self::stage_identity_progress(per_stage, stage_idx);
+                        Self::blend_with_identity(slip, progress)
+                    }
+                    None => slip,
+                };
+                stage_factors.push(factor);
+                global_block_idx += 1;
+            }
+            preview.push(stage_factors);
+        }
+        Ok(preview)
+    }
+
+    fn validate(&self) -> PureResult<()> {
+        if !self.start.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "resnet_skip_slip_start",
+                value: self.start,
+            });
+        }
+        if !self.end.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "resnet_skip_slip_end",
+                value: self.end,
+            });
+        }
+        if !self.power.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "resnet_skip_slip_power",
+                value: self.power,
+            });
+        }
+        if self.start < 0.0 || self.end < 0.0 {
+            return Err(TensorError::InvalidValue {
+                label: "resnet_skip_slip_range",
+            });
+        }
+        if self.power <= 0.0 {
+            return Err(TensorError::InvalidValue {
+                label: "resnet_skip_slip_power",
+            });
+        }
+        Ok(())
+    }
+
+    fn factor_internal(
+        &self,
+        _stage_idx: usize,
+        block_idx: usize,
+        stage_depth: usize,
+        global_block_idx: usize,
+        total_blocks: usize,
+    ) -> f32 {
+        let numerator = if self.per_stage {
+            block_idx as f32
+        } else {
+            global_block_idx as f32
+        };
+        let denominator = if self.per_stage {
+            if stage_depth > 1 {
+                (stage_depth - 1) as f32
+            } else {
+                1.0
+            }
+        } else if total_blocks > 1 {
+            (total_blocks - 1) as f32
+        } else {
+            1.0
+        };
+        let progress = if denominator <= f32::EPSILON {
+            0.0
+        } else {
+            (numerator / denominator).clamp(0.0, 1.0)
+        };
+        let powered = progress.powf(self.power);
+        let slip = self.start + (self.end - self.start) * powered;
+        if slip <= 0.0 {
+            0.0
+        } else {
+            slip
+        }
+    }
+
+    fn blend_with_identity(slip: f32, progress: f32) -> f32 {
+        if !progress.is_finite() {
+            return slip;
+        }
+        let progress = progress.clamp(0.0, 1.0);
+        1.0 + (slip - 1.0) * progress
+    }
+
+    fn normalise_identity_progress(progress: f32) -> PureResult<f32> {
+        if !progress.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "resnet_skip_slip_identity_progress",
+                value: progress,
+            });
+        }
+        Ok(progress.clamp(0.0, 1.0))
+    }
+
+    fn normalise_stage_identity_progress(progress: &[f32]) -> PureResult<Vec<f32>> {
+        if progress.is_empty() {
+            return Err(TensorError::InvalidValue {
+                label: "resnet_skip_slip_identity_stage_progress",
+            });
+        }
+        let mut normalised = Vec::with_capacity(progress.len());
+        for &value in progress {
+            if !value.is_finite() {
+                return Err(TensorError::NonFiniteValue {
+                    label: "resnet_skip_slip_identity_stage_progress",
+                    value,
+                });
+            }
+            normalised.push(value.clamp(0.0, 1.0));
+        }
+        Ok(normalised)
+    }
+
+    fn stage_identity_progress(progress: &[f32], stage_idx: usize) -> f32 {
+        match progress.get(stage_idx).copied() {
+            Some(value) => value,
+            None => *progress
+                .last()
+                .expect("stage identity progress normalised to non-empty"),
+        }
+    }
+
+    fn factor(
+        &self,
+        stage_idx: usize,
+        block_idx: usize,
+        stage_depth: usize,
+        global_block_idx: usize,
+        total_blocks: usize,
+    ) -> f32 {
+        self.factor_internal(
+            stage_idx,
+            block_idx,
+            stage_depth,
+            global_block_idx,
+            total_blocks,
+        )
+    }
+
+    fn factor_with_identity_blend(
+        &self,
+        stage_idx: usize,
+        block_idx: usize,
+        stage_depth: usize,
+        global_block_idx: usize,
+        total_blocks: usize,
+        identity_progress: f32,
+    ) -> f32 {
+        let slip = self.factor_internal(
+            stage_idx,
+            block_idx,
+            stage_depth,
+            global_block_idx,
+            total_blocks,
+        );
+        Self::blend_with_identity(slip, identity_progress)
+    }
+
+    fn factor_with_stage_identity_blend(
+        &self,
+        stage_idx: usize,
+        block_idx: usize,
+        stage_depth: usize,
+        global_block_idx: usize,
+        total_blocks: usize,
+        stage_progress: &[f32],
+    ) -> f32 {
+        let slip = self.factor_internal(
+            stage_idx,
+            block_idx,
+            stage_depth,
+            global_block_idx,
+            total_blocks,
+        );
+        let progress = Self::stage_identity_progress(stage_progress, stage_idx);
+        Self::blend_with_identity(slip, progress)
+    }
+
+    #[allow(dead_code)]
+    fn description(&self) -> String {
+        let scope = if self.per_stage {
+            "per-stage"
+        } else {
+            "global"
+        };
+        format!(
+            "{scope} slip: start={:.3}, end={:.3}, power={:.3}",
+            self.start, self.end, self.power
+        )
     }
 }
 
@@ -203,6 +519,7 @@ struct ResNetBlock {
     downsample: Option<(Conv2d, LayerNorm)>,
     output_hw: (usize, usize),
     skip_style: SkipStyle,
+    slip_factor: f32,
 }
 
 impl ResNetBlock {
@@ -217,6 +534,7 @@ impl ResNetBlock {
         epsilon: f32,
         skip_init: f32,
         skip_learnable: bool,
+        slip_factor: f32,
     ) -> PureResult<Self> {
         let conv1 = Conv2d::new(
             format!("{name}.conv1"),
@@ -276,6 +594,17 @@ impl ResNetBlock {
         } else {
             None
         };
+        if !slip_factor.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "resnet_skip_slip_factor",
+                value: slip_factor,
+            });
+        }
+        if slip_factor < 0.0 {
+            return Err(TensorError::InvalidValue {
+                label: "resnet_skip_slip_factor",
+            });
+        }
         let skip_style = SkipStyle::from_config(name, skip_init, skip_learnable)?;
         Ok(Self {
             conv1,
@@ -287,6 +616,7 @@ impl ResNetBlock {
             downsample,
             output_hw: conv2_hw,
             skip_style,
+            slip_factor,
         })
     }
 
@@ -303,6 +633,11 @@ impl ResNetBlock {
             input.clone()
         };
         let residual = self.skip_style.apply_forward(&residual)?;
+        let residual = if (self.slip_factor - 1.0).abs() > f32::EPSILON {
+            residual.scale(self.slip_factor)?
+        } else {
+            residual
+        };
         let conv1_out = self.conv1.forward(input)?;
         let norm1_out = self.norm1.forward(&conv1_out)?;
         let act1_out = self.activation1.forward(&norm1_out)?;
@@ -311,6 +646,26 @@ impl ResNetBlock {
         let summed = norm2_out.add(&residual)?;
         let out = self.activation2.forward(&summed)?;
         Ok((out, summed, conv2_out, act1_out, conv1_out))
+    }
+
+    fn slip_factor(&self) -> f32 {
+        self.slip_factor
+    }
+
+    fn set_slip_factor(&mut self, slip: f32) -> PureResult<()> {
+        if !slip.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "resnet_skip_slip_factor",
+                value: slip,
+            });
+        }
+        if slip < 0.0 {
+            return Err(TensorError::InvalidValue {
+                label: "resnet_skip_slip_factor",
+            });
+        }
+        self.slip_factor = slip;
+        Ok(())
     }
 }
 
@@ -332,19 +687,26 @@ impl Module for ResNetBlock {
         let act1_out = self.activation1.forward(&norm1_out)?;
         let conv2_out = self.conv2.forward(&act1_out)?;
         let norm2_out = self.norm2.forward(&conv2_out)?;
-        let residual_scaled = {
-            let skip_style = &self.skip_style;
-            skip_style.apply_forward(&residual_pre)?
+        let residual_scaled = self.skip_style.apply_forward(&residual_pre)?;
+        let residual_slipped = if (self.slip_factor - 1.0).abs() > f32::EPSILON {
+            residual_scaled.scale(self.slip_factor)?
+        } else {
+            residual_scaled.clone()
         };
-        let summed = norm2_out.add(&residual_scaled)?;
+        let summed = norm2_out.add(&residual_slipped)?;
         let grad = self.activation2.backward(&summed, grad_output)?;
-        let grad_residual_scaled = grad.clone();
+        let grad_residual_slipped = grad.clone();
         let mut grad_main = grad;
         grad_main = self.norm2.backward(&conv2_out, &grad_main)?;
         grad_main = self.conv2.backward(&act1_out, &grad_main)?;
         grad_main = self.activation1.backward(&norm1_out, &grad_main)?;
         grad_main = self.norm1.backward(&conv1_out, &grad_main)?;
         let mut grad_input = self.conv1.backward(input, &grad_main)?;
+        let grad_residual_scaled = if (self.slip_factor - 1.0).abs() > f32::EPSILON {
+            grad_residual_slipped.scale(self.slip_factor)?
+        } else {
+            grad_residual_slipped.clone()
+        };
         let grad_residual_pre = self
             .skip_style
             .propagate_backward(&residual_pre, &grad_residual_scaled)?;
@@ -403,6 +765,7 @@ pub struct ResNetBackbone {
     output_channels: usize,
     output_hw: (usize, usize),
     tokens_per_stage: Vec<(usize, (usize, usize))>,
+    block_depths: Vec<usize>,
 }
 
 impl ResNetBackbone {
@@ -432,6 +795,9 @@ impl ResNetBackbone {
                 label: "resnet_skip_init",
                 value: config.skip_init,
             });
+        }
+        if let Some(schedule) = &config.skip_slip {
+            schedule.validate()?;
         }
         let stem_out_channels = config.stage_channels[0];
         let stem_conv = Conv2d::new(
@@ -468,6 +834,8 @@ impl ResNetBackbone {
         };
         let mut blocks = Vec::new();
         let mut current_channels = stem_out_channels;
+        let total_blocks: usize = config.block_depths.iter().sum();
+        let mut global_block_idx = 0usize;
         for (stage_idx, (&channels, &depth)) in config
             .stage_channels
             .iter()
@@ -480,6 +848,13 @@ impl ResNetBackbone {
                 } else {
                     (1, 1)
                 };
+                let slip_factor = config
+                    .skip_slip
+                    .as_ref()
+                    .map(|schedule| {
+                        schedule.factor(stage_idx, block_idx, depth, global_block_idx, total_blocks)
+                    })
+                    .unwrap_or(1.0);
                 let block = ResNetBlock::new(
                     &format!("resnet.stage{stage_idx}.block{block_idx}"),
                     current_channels,
@@ -490,11 +865,13 @@ impl ResNetBackbone {
                     config.epsilon,
                     config.skip_init,
                     config.skip_learnable,
+                    slip_factor,
                 )?;
                 tokens_per_stage.push((channels, block.output_hw()));
                 current_hw = block.output_hw();
                 current_channels = channels;
                 blocks.push(block);
+                global_block_idx += 1;
             }
         }
         let global_pool = if config.global_pool {
@@ -514,6 +891,7 @@ impl ResNetBackbone {
             output_channels: current_channels,
             output_hw: current_hw,
             tokens_per_stage,
+            block_depths: config.block_depths.clone(),
         })
     }
 
@@ -531,6 +909,133 @@ impl ResNetBackbone {
 
     pub fn stage_shapes(&self) -> &Vec<(usize, (usize, usize))> {
         &self.tokens_per_stage
+    }
+
+    pub fn block_depths(&self) -> &[usize] {
+        &self.block_depths
+    }
+
+    pub fn skip_slip_factors(&self) -> Vec<Vec<f32>> {
+        let mut factors = Vec::with_capacity(self.block_depths.len());
+        let mut global_idx = 0usize;
+        for &depth in &self.block_depths {
+            let mut stage = Vec::with_capacity(depth);
+            for _ in 0..depth {
+                let block = self
+                    .blocks
+                    .get(global_idx)
+                    .expect("skip slip factors align with block layout");
+                stage.push(block.slip_factor());
+                global_idx += 1;
+            }
+            factors.push(stage);
+        }
+        factors
+    }
+
+    pub fn set_skip_slip(&mut self, schedule: Option<SkipSlipSchedule>) -> PureResult<()> {
+        self.apply_skip_slip(schedule, None, None)
+    }
+
+    /// Applies a skip slip schedule with a blend factor against the identity bridge.
+    ///
+    /// A progress value of `0.0` leaves all residual paths at identity strength,
+    /// while `1.0` applies the schedule exactly. Intermediate values smoothly blend
+    /// between the two, enabling annealing over the course of training.
+    pub fn set_skip_slip_progress(
+        &mut self,
+        schedule: Option<SkipSlipSchedule>,
+        identity_progress: f32,
+    ) -> PureResult<()> {
+        self.apply_skip_slip(schedule, Some(identity_progress), None)
+    }
+
+    /// Applies a skip slip schedule with per-stage identity blend progress markers.
+    ///
+    /// The provided slice may be shorter than the number of stages; the final value will
+    /// be re-used for any additional stages. Entries are clamped to the unit interval.
+    pub fn set_skip_slip_stage_progress(
+        &mut self,
+        schedule: Option<SkipSlipSchedule>,
+        stage_progress: &[f32],
+    ) -> PureResult<()> {
+        self.apply_skip_slip(schedule, None, Some(stage_progress))
+    }
+
+    fn apply_skip_slip(
+        &mut self,
+        schedule: Option<SkipSlipSchedule>,
+        identity_progress: Option<f32>,
+        stage_progress: Option<&[f32]>,
+    ) -> PureResult<()> {
+        if identity_progress.is_some() && stage_progress.is_some() {
+            return Err(TensorError::InvalidValue {
+                label: "resnet_skip_slip_identity_blend_conflict",
+            });
+        }
+        match schedule {
+            Some(schedule) => {
+                schedule.validate()?;
+                let blend = match identity_progress {
+                    Some(value) => Some(SkipSlipSchedule::normalise_identity_progress(value)?),
+                    None => None,
+                };
+                let stage_blend = match stage_progress {
+                    Some(values) => {
+                        Some(SkipSlipSchedule::normalise_stage_identity_progress(values)?)
+                    }
+                    None => None,
+                };
+                let stage_blend_ref = stage_blend.as_deref();
+                let total_blocks: usize = self.block_depths.iter().sum();
+                debug_assert_eq!(self.blocks.len(), total_blocks);
+                let mut global_block_idx = 0usize;
+                let mut block_iter = self.blocks.iter_mut();
+                for (stage_idx, &depth) in self.block_depths.iter().enumerate() {
+                    for block_idx in 0..depth {
+                        let slip = if let Some(per_stage) = stage_blend_ref {
+                            schedule.factor_with_stage_identity_blend(
+                                stage_idx,
+                                block_idx,
+                                depth,
+                                global_block_idx,
+                                total_blocks,
+                                per_stage,
+                            )
+                        } else if let Some(progress) = blend {
+                            schedule.factor_with_identity_blend(
+                                stage_idx,
+                                block_idx,
+                                depth,
+                                global_block_idx,
+                                total_blocks,
+                                progress,
+                            )
+                        } else {
+                            schedule.factor(
+                                stage_idx,
+                                block_idx,
+                                depth,
+                                global_block_idx,
+                                total_blocks,
+                            )
+                        };
+                        let block = block_iter
+                            .next()
+                            .expect("skip slip schedule length matches blocks");
+                        block.set_slip_factor(slip)?;
+                        global_block_idx += 1;
+                    }
+                }
+                debug_assert!(block_iter.next().is_none());
+            }
+            None => {
+                for block in &mut self.blocks {
+                    block.set_slip_factor(1.0)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn load_weights_json<P: AsRef<std::path::Path>>(&mut self, path: P) -> PureResult<()> {
@@ -783,6 +1288,9 @@ impl ResNet56WithSkip {
                 cols: base.block_depths.len(),
             });
         }
+        if let Some(schedule) = &base.skip_slip {
+            schedule.validate()?;
+        }
         let stem_out_channels = base.stage_channels[0];
         let stem_conv = Conv2d::new(
             "resnet56.stem",
@@ -818,6 +1326,8 @@ impl ResNet56WithSkip {
         let mut stages = Vec::new();
         let mut stage_shapes = Vec::new();
         let mut current_channels = stem_out_channels;
+        let total_blocks: usize = base.block_depths.iter().sum();
+        let mut global_block_idx = 0usize;
         for (stage_idx, (&channels, &depth)) in base
             .stage_channels
             .iter()
@@ -831,6 +1341,13 @@ impl ResNet56WithSkip {
                 } else {
                     (1, 1)
                 };
+                let slip_factor = base
+                    .skip_slip
+                    .as_ref()
+                    .map(|schedule| {
+                        schedule.factor(stage_idx, block_idx, depth, global_block_idx, total_blocks)
+                    })
+                    .unwrap_or(1.0);
                 let block = ResNetBlock::new(
                     &format!("resnet56.stage{stage_idx}.block{block_idx}"),
                     current_channels,
@@ -839,10 +1356,14 @@ impl ResNet56WithSkip {
                     current_hw,
                     base.curvature,
                     base.epsilon,
+                    base.skip_init,
+                    base.skip_learnable,
+                    slip_factor,
                 )?;
                 current_hw = block.output_hw();
                 current_channels = channels;
                 blocks.push(block);
+                global_block_idx += 1;
             }
             stage_shapes.push((current_channels, current_hw));
             stages.push(blocks);
