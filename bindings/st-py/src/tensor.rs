@@ -1182,7 +1182,7 @@ impl PyTensor {
             PyTensor { inner: softmax },
             PyTensor { inner: hardmax },
             PyTensor { inner: spiral },
-            metrics_dict.into(),
+            metrics_dict.into_py(py),
         ))
     }
 

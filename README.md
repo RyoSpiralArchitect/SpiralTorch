@@ -4,15 +4,6 @@ _(Still under active expanding hourly.)_
 
 **Purpose.** A WGPU-first, research-grade ML/geometry runtime that fuses spectral operators, microlocal tools, and cooperative schedulers into a single stack. The goal: rival CUDA-centric ecosystems using portable GPUs (Metal/Vulkan/DX12) without sacrificing theory fidelity.
 
-## 🚀 Latest SpiralTorch highlights
-
-- **Fractal → Quantum RL bridge.** Stream Mellin-log fractal patches straight into the quantum overlay studio and recover policy gradients through `FractalQuantumTrainer` and friends—keeping Python fallbacks and PyO3 builds in lockstep.
-- **Self-evolving SpiralK kernels.** A new diversity governor inside `SelfRewriteEngine` tracks plateauing η̄ gains, forces fresh AI rewrites when caches go stale, and surfaces telemetry via `diversity_snapshot()` so operators can keep the autonomous kernel lab on course.
-- **Saga-aware kernel evolution.** The `SelfRewriteEngine` now learns multi-step hint sagas, boosting cache priority for sequenced rewrites and exposing the orbits via `saga_snapshots()` so you can audit every cosmic combo.
-- **Reinforcement-tuned hint genetics.** Hint chains earn reward-weighted feedback, anomaly filters freeze outliers, recombination fuses cached winners, graph snapshots illuminate hint affinity, and `take_trace()` streams the self-evolution log when `--debug-self-evolution` is enabled.
-- **Chain-policy reinforcement.** Cached hint chains now feed a lightweight Q-style policy inside `SelfRewriteEngine`, boosting cache priority via chain multipliers, exposing telemetry with `chain_policy_snapshots()`, and logging `PolicyUpdate` traces whenever the self-evolution loop reshapes its instincts.
-- **Contextual bandit autopilot.** A UCB-flavoured bandit now rides alongside the cache, weighting hint reuse via `bandit_snapshots()` telemetry, steering exploration with `with_bandit_*` knobs, and leaving `BanditUpdate` traces whenever rewrites learn a new favourite arm.
-
 ## 🌌 SpiralTorch Manifesto
 
 Step into the paradigm shift from imitation to emergent meaning with the [SpiralTorch Manifesto](docs/spiraltorch_manifesto.md).
@@ -107,24 +98,6 @@ sequenceDiagram
   Bridge-->>API: awaitable result / telemetry hook
 ```
 
-### 🛠️ Why Robotics Teams Are Watching
-
-SpiralTorch’s runtime mirrors the main pressure points that robotics teams wrestle with today:
-
-1. **Vendor-agnostic acceleration (WGPU-first).** Robots ship on Jetsons, Raspberry Pis, Apple Silicon laptops, AMD workstations, and plain x86 servers. SpiralTorch kernels are written against WGPU, so the same Z-space operators run across Metal, Vulkan, or DirectX 12 without CUDA lock-in.
-2. **A control-plane grade runtime.** The mermaid diagram above is effectively a realtime robotics OS: session managers, graph planners, schedulers, command queues, and observability hooks coordinate sensing, planning, and actuation in one pipeline.
-3. **Unified sensor fusion via Z-space.** Camera frames, LiDAR point clouds, IMU states, force/torque readings, and language instructions all project into a single geometric manifold. Planning loops consume multi-modal context without writing one-off fusion code per robot, while per-channel exponential smoothers and staleness monitors keep jittery or missing proprioception from destabilising downstream control.
-4. **Geometric + gravitational dynamics.** Z-space now carries configurable geometry (Euclidean, curved manifolds, or GR-inspired metrics) and gravity wells (Newtonian or relativistic) so training can explore non-Euclidean kinematics, orbital behaviours, or heavy-mass safety regimes without leaving the runtime. The new Relativity Bridge mirrors the general relativity tensors used in the theory module—including Lorentzian metrics generated from symmetry ansätze—so the same conceptual primitives power both physics experiments and real robot rollouts.
-5. **Instinctive behaviours with Desire Lagrangians + SpiralTorchRL.** Instead of hand-crafting reward functions, core instincts—“don’t tip over,” “seek charge,” “avoid the ledge”—are encoded as potentials. Traditional policy-gradient loops still plug in, but they optimise around explainable priors.
-6. **Self-aware safety through ψ telemetry.** The runtime continuously measures kernel stability, allocator pressure, dynamics drift, and channel health. When thresholds break—whether from physical saturation or stale sensors—ψ telemetry drives self-maintain routines that pause execution or transition to safe postures before a robot ever enters an unrecoverable state.
-7. **Training-grade data capture.** A built-in trajectory recorder snapshots fused observations, instinct evaluations, telemetry, and policy commands so teams can stream curated rollouts into offline RL pipelines or regression harnesses without bolting on a separate logging stack.
-8. **Pluggable safety governance.** Robotics runtimes can now host drift-response safety plugins sourced from the `spiral-safety` crate. ψ telemetry, Desire energy, and channel health feed directly into SpiralTorch’s governance metrics so the same policy guardrails auditing language models can halt physical robots when hazards spike.
-9. **Z-space trainers with temporal feedback.** The new `TemporalFeedbackLearner` and `ZSpaceTrainerBridge` convert runtime steps, ψ telemetry, and Desire energy into Z-space trainer metrics (speed, memory, stability, drift) and `ZSpacePartialBundle` payloads. Vision and instinctive signals stay synchronised so offline trainers can replay the exact feedback a robot experienced on the floor.
-10. **CanvasProjector-aligned vision control.** `VisionFeedbackSynchronizer` aligns CanvasProjector vector fields with sensor channels, exposes alignment/energy metrics, and feeds them into the same partial bundles. Reinforcement loops now mix proprioceptive policies with live visual feedback for gradients that understand what the robot “saw” when it acted.
-11. **Episode-scale dataset tooling.** `ZSpaceTrainerEpisodeBuilder` groups trainer samples into bounded episodes, reports aggregate stability/memory/drift scores, and hands Python bindings a ready-to-train bundle. Teams can checkpoint on-policy rollouts, feed them into offline RL, or compare episode health across deployments without rebuilding analysis plumbing.
-
-Together these properties let SpiralTorch act as the perception, planning, and autonomy stack for heterogeneous robot fleets—from lab manipulators to outdoor rovers—without a rewrite per platform.
-
 **Licensing**
 
 SpiralTorch ships under a dual-license model:
@@ -157,58 +130,39 @@ SpiralTorch ships under a dual-license model:
 ## Code stats
 
 <!-- AUTOGEN: CODESTATS BEGIN -->
-_Last updated: 2025-10-31 05:08 UTC_
+_Last updated: 2025-11-01 05:26 UTC_
 
 ```text
 
-===============================================================================
- Language            Files        Lines         Code     Comments       Blanks
-===============================================================================
- BASH                    1           54           52            1            1
- COBOL                   1          416          376            8           32
- C++                     1          327          286            3           38
- CSS                     1          160          137            0           23
- Go                     11         2582         2082          200          300
- JSON                    6          372          372            0            0
- Julia                   8         1335         1176           14          145
- Python                 89        25207        21197          127         3883
- Shell                   4          194          172            4           18
- SVG                     3           60           60            0            0
- Plain Text              1          661            0          544          117
- TOML                   40         1011          867           27          117
- TypeScript              7         4899         4332          175          392
- YAML                    3           72           65            0            7
--------------------------------------------------------------------------------
- HTML                    2          491          491            0            0
- |- CSS                  1          532          460            0           72
- |- JavaScript           1          769          720            0           49
- (Total)                           1792         1671            0          121
--------------------------------------------------------------------------------
- Jupyter Notebooks       2            0            0            0            0
- |- Markdown             2            9            0            9            0
- |- Python               2           22           20            0            2
- (Total)                             31           20            9            2
--------------------------------------------------------------------------------
- Markdown               63         6537            0         5129         1408
- |- BASH                18          146          117           17           12
- |- C                    1           21           16            0            5
- |- COBOL                1           30           30            0            0
- |- Dockerfile           1            6            6            0            0
- |- HTML                 1           18           18            0            0
- |- JavaScript           1           34           29            3            2
- |- JSON                 1           11           11            0            0
- |- Julia                1           29           26            0            3
- |- Python               7          867          722           22          123
- |- Rust                 5          819          718           18           83
- |- YAML                 2           62           62            0            0
- (Total)                           8580         1755         5189         1636
--------------------------------------------------------------------------------
- Rust                  406       187364       167484         1857        18023
- |- Markdown           260         6934            0         6774          160
- (Total)                         194298       167484         8631        18183
-===============================================================================
- Total                 649       231742       199149         8089        24504
-===============================================================================
+--------------------------------------------------------------------------------
+Language                      files          blank        comment           code
+--------------------------------------------------------------------------------
+Rust                            419          21662           8926         187524
+Python                           91           5290           1142          26974
+D                               840           2205              0          11695
+Markdown                         67           1670              1           7104
+TypeScript                        7            416            175           4308
+WGSL                             43            538            186           4234
+Go                               11            305            195           2082
+HTML                              2            121              0           1671
+CUDA                             14            142             47           1438
+JSON                            873              0              0           1278
+Julia                             8            173            185            977
+TOML                             41            118             27            873
+YAML                             15             44              3            580
+Text                              2            117              0            550
+COBOL                             1             32              0            384
+C++                               1             38              3            286
+Bourne Shell                      4             18              0            176
+CSS                               1             23              0            137
+SVG                               3              0              0             60
+Bourne Again Shell                1              1              0             53
+Justfile                          1             18              0             39
+Jupyter Notebook                  2              0             85             20
+--------------------------------------------------------------------------------
+SUM:                           2447          32931          10975         252443
+--------------------------------------------------------------------------------
+
 ```
 ---
 
@@ -222,6 +176,16 @@ thin veneer that reuses the same planners, losses, and Z-space resonators. No
 tensor shims, no translation layers, and no tracebacks.
 
 ---
+
+## 🚀 Latest SpiralTorch highlights
+
+- **Fractal → Quantum RL bridge.** Stream Mellin-log fractal patches straight into the quantum overlay studio and recover policy gradients through `FractalQuantumTrainer` and friends—keeping Python fallbacks and PyO3 builds in lockstep.
+- **Self-evolving SpiralK kernels.** A new diversity governor inside `SelfRewriteEngine` tracks plateauing η̄ gains, forces fresh AI rewrites when caches go stale, and surfaces telemetry via `diversity_snapshot()` so operators can keep the autonomous kernel lab on course.
+- **Saga-aware kernel evolution.** The `SelfRewriteEngine` now learns multi-step hint sagas, boosting cache priority for sequenced rewrites and exposing the orbits via `saga_snapshots()` so you can audit every cosmic combo.
+- **Reinforcement-tuned hint genetics.** Hint chains earn reward-weighted feedback, anomaly filters freeze outliers, recombination fuses cached winners, graph snapshots illuminate hint affinity, and `take_trace()` streams the self-evolution log when `--debug-self-evolution` is enabled.
+- **Chain-policy reinforcement.** Cached hint chains now feed a lightweight Q-style policy inside `SelfRewriteEngine`, boosting cache priority via chain multipliers, exposing telemetry with `chain_policy_snapshots()`, and logging `PolicyUpdate` traces whenever the self-evolution loop reshapes its instincts.
+- **Contextual bandit autopilot.** A UCB-flavoured bandit now rides alongside the cache, weighting hint reuse via `bandit_snapshots()` telemetry, steering exploration with `with_bandit_*` knobs, and leaving `BanditUpdate` traces whenever rewrites learn a new favourite arm.
+
 
 ## Why it’s different
  - **Training comes first:** Modules such as `Linear`, `Sequential`,
@@ -792,6 +756,25 @@ spotlights on graph-node materialisation versus return-handle delivery:
 - [SpinoTensorVector derivation notes](docs/stv_z_space.md), Start architecting Z-space kernels with the new  covering determinant identities, kernel causality, and minimal-norm constructions ready for implementation.
 
 ---
+
+## 🛠️ Why Robotics Teams Are Watching
+
+SpiralTorch’s runtime mirrors the main pressure points that robotics teams wrestle with today:
+
+1. **Vendor-agnostic acceleration (WGPU-first).** Robots ship on Jetsons, Raspberry Pis, Apple Silicon laptops, AMD workstations, and plain x86 servers. SpiralTorch kernels are written against WGPU, so the same Z-space operators run across Metal, Vulkan, or DirectX 12 without CUDA lock-in.
+2. **A control-plane grade runtime.** The mermaid diagram above is effectively a realtime robotics OS: session managers, graph planners, schedulers, command queues, and observability hooks coordinate sensing, planning, and actuation in one pipeline.
+3. **Unified sensor fusion via Z-space.** Camera frames, LiDAR point clouds, IMU states, force/torque readings, and language instructions all project into a single geometric manifold. Planning loops consume multi-modal context without writing one-off fusion code per robot, while per-channel exponential smoothers and staleness monitors keep jittery or missing proprioception from destabilising downstream control.
+4. **Geometric + gravitational dynamics.** Z-space now carries configurable geometry (Euclidean, curved manifolds, or GR-inspired metrics) and gravity wells (Newtonian or relativistic) so training can explore non-Euclidean kinematics, orbital behaviours, or heavy-mass safety regimes without leaving the runtime. The new Relativity Bridge mirrors the general relativity tensors used in the theory module—including Lorentzian metrics generated from symmetry ansätze—so the same conceptual primitives power both physics experiments and real robot rollouts.
+5. **Instinctive behaviours with Desire Lagrangians + SpiralTorchRL.** Instead of hand-crafting reward functions, core instincts—“don’t tip over,” “seek charge,” “avoid the ledge”—are encoded as potentials. Traditional policy-gradient loops still plug in, but they optimise around explainable priors.
+6. **Self-aware safety through ψ telemetry.** The runtime continuously measures kernel stability, allocator pressure, dynamics drift, and channel health. When thresholds break—whether from physical saturation or stale sensors—ψ telemetry drives self-maintain routines that pause execution or transition to safe postures before a robot ever enters an unrecoverable state.
+7. **Training-grade data capture.** A built-in trajectory recorder snapshots fused observations, instinct evaluations, telemetry, and policy commands so teams can stream curated rollouts into offline RL pipelines or regression harnesses without bolting on a separate logging stack.
+8. **Pluggable safety governance.** Robotics runtimes can now host drift-response safety plugins sourced from the `spiral-safety` crate. ψ telemetry, Desire energy, and channel health feed directly into SpiralTorch’s governance metrics so the same policy guardrails auditing language models can halt physical robots when hazards spike.
+9. **Z-space trainers with temporal feedback.** The new `TemporalFeedbackLearner` and `ZSpaceTrainerBridge` convert runtime steps, ψ telemetry, and Desire energy into Z-space trainer metrics (speed, memory, stability, drift) and `ZSpacePartialBundle` payloads. Vision and instinctive signals stay synchronised so offline trainers can replay the exact feedback a robot experienced on the floor.
+10. **CanvasProjector-aligned vision control.** `VisionFeedbackSynchronizer` aligns CanvasProjector vector fields with sensor channels, exposes alignment/energy metrics, and feeds them into the same partial bundles. Reinforcement loops now mix proprioceptive policies with live visual feedback for gradients that understand what the robot “saw” when it acted.
+11. **Episode-scale dataset tooling.** `ZSpaceTrainerEpisodeBuilder` groups trainer samples into bounded episodes, reports aggregate stability/memory/drift scores, and hands Python bindings a ready-to-train bundle. Teams can checkpoint on-policy rollouts, feed them into offline RL, or compare episode health across deployments without rebuilding analysis plumbing.
+
+Together these properties let SpiralTorch act as the perception, planning, and autonomy stack for heterogeneous robot fleets—from lab manipulators to outdoor rovers—without a rewrite per platform.
+
 
 ## Emerging toolkits unique to SpiralTorch
 
