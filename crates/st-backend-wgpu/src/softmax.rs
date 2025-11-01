@@ -10,8 +10,10 @@ use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
 use wgpu::{
-    BindGroupLayout, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, Buffer,
-    BufferUsages, ComputePipeline, Device, PipelineLayoutDescriptor, Queue, ShaderStages,
+    BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
+    BindGroupLayoutEntry, BindingType, Buffer, BufferUsages, CommandBuffer, CommandEncoder,
+    CommandEncoderDescriptor, ComputePassDescriptor, ComputePipeline, Device,
+    PipelineLayoutDescriptor, Queue, ShaderStages,
 };
 
 use crate::{ShaderCache, ShaderLoadError};
@@ -181,6 +183,156 @@ pub struct Dispatch {
 impl Dispatch {
     pub fn workgroups(&self) -> (u32, u32, u32) {
         (self.rows, 1, 1)
+    }
+}
+
+/// Buffers required to execute the softmax kernels.
+pub struct DispatchArgs<'a> {
+    /// Buffer containing the input values.
+    pub values: &'a Buffer,
+    /// Buffer receiving the primary output (probabilities or hardmax mask).
+    pub output: &'a Buffer,
+    /// Uniform buffer describing the tensor layout and execution flags.
+    pub params: &'a Buffer,
+    /// Optional buffer that stores the hardmax mask when requested.
+    pub mask: Option<&'a Buffer>,
+}
+
+impl<'a> DispatchArgs<'a> {
+    fn mask_binding(&self) -> &Buffer {
+        self.mask.unwrap_or(self.output)
+    }
+}
+
+/// Variant of the softmax pipeline to execute.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum PipelineVariant {
+    /// Let the backend pick the most optimised pipeline available.
+    #[default]
+    Best,
+    /// Force the workgroup-based implementation.
+    Workgroup,
+    /// Force the subgroup-accelerated implementation when available.
+    Subgroup,
+}
+
+impl PipelineVariant {
+    fn resolve<'a>(self, pipelines: &'a Pipelines) -> (&'a ComputePipeline, PipelineVariant) {
+        match self {
+            PipelineVariant::Workgroup => {
+                (pipelines.workgroup.as_ref(), PipelineVariant::Workgroup)
+            }
+            PipelineVariant::Subgroup => pipelines
+                .subgroup
+                .as_deref()
+                .map(|pipeline| (pipeline, PipelineVariant::Subgroup))
+                .unwrap_or_else(|| (pipelines.workgroup.as_ref(), PipelineVariant::Workgroup)),
+            PipelineVariant::Best => pipelines
+                .subgroup
+                .as_deref()
+                .map(|pipeline| (pipeline, PipelineVariant::Subgroup))
+                .unwrap_or_else(|| (pipelines.workgroup.as_ref(), PipelineVariant::Workgroup)),
+        }
+    }
+
+    fn bind_group_label(self) -> &'static str {
+        match self {
+            PipelineVariant::Workgroup => "st.softmax.bind_group.workgroup",
+            PipelineVariant::Subgroup => "st.softmax.bind_group.subgroup",
+            PipelineVariant::Best => "st.softmax.bind_group.auto",
+        }
+    }
+
+    fn pass_label(self) -> &'static str {
+        match self {
+            PipelineVariant::Workgroup => "st.softmax.pass.workgroup",
+            PipelineVariant::Subgroup => "st.softmax.pass.subgroup",
+            PipelineVariant::Best => "st.softmax.pass.auto",
+        }
+    }
+}
+
+/// Encode the softmax dispatch into an existing command encoder.
+pub fn encode_into(
+    device: &Device,
+    encoder: &mut CommandEncoder,
+    pipelines: &Pipelines,
+    args: &DispatchArgs<'_>,
+    dispatch: Dispatch,
+    variant: PipelineVariant,
+) -> bool {
+    let (workgroups_x, workgroups_y, workgroups_z) = dispatch.workgroups();
+    if workgroups_x == 0 || workgroups_y == 0 || workgroups_z == 0 {
+        return false;
+    }
+
+    let (pipeline, actual_variant) = variant.resolve(pipelines);
+    let bind_group = device.create_bind_group(&BindGroupDescriptor {
+        label: Some(actual_variant.bind_group_label()),
+        layout: &pipeline.get_bind_group_layout(0),
+        entries: &[
+            BindGroupEntry {
+                binding: 0,
+                resource: args.values.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 1,
+                resource: args.output.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 2,
+                resource: args.params.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 3,
+                resource: args.mask_binding().as_entire_binding(),
+            },
+        ],
+    });
+
+    let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+        label: Some(actual_variant.pass_label()),
+        timestamp_writes: None,
+    });
+    pass.set_pipeline(pipeline);
+    pass.set_bind_group(0, &bind_group, &[]);
+    pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+    true
+}
+
+/// Encode the softmax dispatch into a new command buffer.
+pub fn encode(
+    device: &Device,
+    pipelines: &Pipelines,
+    args: &DispatchArgs<'_>,
+    dispatch: Dispatch,
+    variant: PipelineVariant,
+) -> Option<CommandBuffer> {
+    let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
+        label: Some("st.softmax.encoder"),
+    });
+
+    if encode_into(device, &mut encoder, pipelines, args, dispatch, variant) {
+        Some(encoder.finish())
+    } else {
+        None
+    }
+}
+
+/// Dispatch the softmax kernels directly, submitting a command buffer to the queue.
+pub fn dispatch(
+    device: &Device,
+    queue: &Queue,
+    pipelines: &Pipelines,
+    args: &DispatchArgs<'_>,
+    dispatch: Dispatch,
+    variant: PipelineVariant,
+) -> bool {
+    if let Some(cmd) = encode(device, pipelines, args, dispatch, variant) {
+        queue.submit(Some(cmd));
+        true
+    } else {
+        false
     }
 }
 

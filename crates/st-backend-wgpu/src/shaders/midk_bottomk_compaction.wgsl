@@ -20,8 +20,10 @@ struct CParams {
 @group(0) @binding(3) var<storage, read_write> OUTVAL: array<f32>;
 @group(0) @binding(4) var<uniform> CP: CParams;
 @group(0) @binding(5) var<storage, read_write> PREFIX: array<u32>;
+@group(0) @binding(6) var<storage, read_write> OUTMAX: array<f32>;
 
 var<workgroup> temp: array<u32, 256u>;
+var<workgroup> temp_max: array<f32, 256u>;
 
 @compute @workgroup_size(256)
 fn midk_compact_scan_tiles(
@@ -385,5 +387,54 @@ fn midk_compact_apply(
     if (col0 < CP.cols && flag == 1u) {
         let pos = base + temp2[lid.x];
         OUTVAL[r * CP.cols + pos] = CX[r * CP.row_stride + col0];
+    }
+}
+
+@compute @workgroup_size(256)
+fn midk_middlemax(
+    @builtin(workgroup_id) wid: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    let r = wid.y;
+    if (r >= CP.rows) {
+        return;
+    }
+
+    var best: f32 = -0x1p127f;
+    var c = lid.x;
+    loop {
+        if (c >= CP.cols) {
+            break;
+        }
+        let idx = r * CP.row_stride + c;
+        if (CMASK[idx] != 0u) {
+            let v = CX[idx];
+            if (v > best) {
+                best = v;
+            }
+        }
+        c = c + 256u;
+    }
+
+    temp_max[lid.x] = best;
+    workgroupBarrier();
+
+    var stride = 128u;
+    loop {
+        if (stride == 0u) {
+            break;
+        }
+        if (lid.x < stride) {
+            let other = temp_max[lid.x + stride];
+            if (other > temp_max[lid.x]) {
+                temp_max[lid.x] = other;
+            }
+        }
+        stride = stride >> 1u;
+        workgroupBarrier();
+    }
+
+    if (lid.x == 0u) {
+        OUTMAX[r] = temp_max[0u];
     }
 }
