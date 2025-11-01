@@ -159,6 +159,8 @@ spiral_again = jax_to_tensor(jax_array)
 
 # stream can be an explicit cupy.cuda.Stream, or a lazy alias such as
 # "current" (resolve the active stream) or "null" (select the default stream).
+# Pointer-like objects such as ``ctypes.c_void_p`` will be wrapped in
+# ``cupy.cuda.ExternalStream`` automatically before dispatch.
 cupy_array = tensor_to_cupy(spiral, stream="current")
 spiral_from_cupy = cupy_to_tensor(cupy_array, stream="current")
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import numbers
 from typing import Any, Callable, Iterable
 
 from . import Tensor, compat
@@ -165,11 +166,33 @@ def _call_with_optional_stream(
         raise
 
 
+def _coerce_stream_pointer(value: Any | None) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, numbers.Integral):
+        return int(value)
+
+    attr_value = getattr(value, "value", None)
+    if isinstance(attr_value, numbers.Integral):
+        return int(attr_value)
+
+    converter = getattr(value, "__int__", None)
+    if converter is not None:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
 def _resolve_cupy_stream(stream: Any | None, *, cupy: Any) -> Any:
     if stream is None:
         return None
 
     cuda = getattr(cupy, "cuda", None)
+
+    if hasattr(stream, "ptr"):
+        return stream
 
     if isinstance(stream, str):
         keyword = stream.lower()
@@ -189,13 +212,14 @@ def _resolve_cupy_stream(stream: Any | None, *, cupy: Any) -> Any:
             return null_stream
         raise ValueError(f"Unknown CuPy stream alias: {stream!r}")
 
-    if isinstance(stream, int):
+    pointer = _coerce_stream_pointer(stream)
+    if pointer is not None:
         external_stream = getattr(cuda, "ExternalStream", None) if cuda is not None else None
         if external_stream is None:
             raise RuntimeError(
                 "CuPy does not expose cuda.ExternalStream; cannot wrap raw stream pointer."
             )
-        return external_stream(stream)
+        return external_stream(pointer)
 
     return stream
 

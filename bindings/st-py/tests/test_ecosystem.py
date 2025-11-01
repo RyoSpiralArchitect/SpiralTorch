@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import importlib
 import sys
 import types
@@ -384,3 +385,76 @@ def test_cupy_stream_alias_errors(stub_spiraltorch, monkeypatch):
 
     with pytest.raises(RuntimeError, match="ExternalStream"):
         ecosystem.tensor_to_cupy(tensor, stream=1)
+
+
+def test_cupy_stream_pointer_like_objects(stub_spiraltorch, monkeypatch):
+    fake_cupy = types.ModuleType("cupy")
+
+    class DummyExternalStream:
+        def __init__(self, ptr):
+            self.ptr = ptr
+
+    external_calls: list[int] = []
+
+    def external_stream(ptr):
+        external_calls.append(ptr)
+        return DummyExternalStream(ptr)
+
+    def from_dlpack(capsule, *, stream=None):
+        return ("from_dlpack", capsule, stream)
+
+    fake_cupy.from_dlpack = from_dlpack
+    fake_cupy.cuda = types.SimpleNamespace(ExternalStream=external_stream)
+
+    monkeypatch.setitem(sys.modules, "cupy", fake_cupy)
+
+    ecosystem = _load_ecosystem(stub_spiraltorch, monkeypatch)
+    Tensor = stub_spiraltorch.Tensor
+
+    capsule = object()
+    monkeypatch.setattr(Tensor, "to_dlpack", lambda self: capsule)
+    monkeypatch.setattr(Tensor, "from_dlpack", classmethod(lambda cls, cap: cap))
+
+    class IntLike(int):
+        pass
+
+    class HasInt:
+        def __int__(self):
+            return 0xBEEF
+
+    already_stream = types.SimpleNamespace(ptr="existing")
+    pointer = ctypes.c_void_p(0xDEADBEEF)
+
+    result = ecosystem.tensor_to_cupy(Tensor(1, 1, [0.0]), stream=pointer)
+    assert isinstance(result[2], DummyExternalStream)
+    assert external_calls[-1] == 0xDEADBEEF
+
+    int_like_result = ecosystem.tensor_to_cupy(Tensor(1, 1, [0.0]), stream=IntLike(0xFEED))
+    assert external_calls[-1] == 0xFEED
+    assert isinstance(int_like_result[2], DummyExternalStream)
+
+    has_int_result = ecosystem.tensor_to_cupy(Tensor(1, 1, [0.0]), stream=HasInt())
+    assert external_calls[-1] == 0xBEEF
+    assert isinstance(has_int_result[2], DummyExternalStream)
+
+    bool_result = ecosystem.tensor_to_cupy(Tensor(1, 1, [0.0]), stream=True)
+    assert bool_result[2] is True
+    assert len(external_calls) == 3
+
+    existing_stream_result = ecosystem.tensor_to_cupy(
+        Tensor(1, 1, [0.0]), stream=already_stream
+    )
+    assert existing_stream_result[2] is already_stream
+    assert len(external_calls) == 3
+
+    stream_probes: list[Any] = []
+
+    class Array:
+        def __dlpack__(self, *, stream=None):
+            stream_probes.append(stream)
+            return ("dlpack", stream)
+
+    converted = ecosystem.cupy_to_tensor(Array(), stream=ctypes.c_void_p(0xABC))
+    assert isinstance(stream_probes[-1], DummyExternalStream)
+    assert stream_probes[-1].ptr == 0xABC
+    assert converted == ("dlpack", stream_probes[-1])
