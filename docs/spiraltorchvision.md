@@ -45,6 +45,20 @@ let embedding = backbone.forward(&input)?;
 assert_eq!(embedding.shape().1, backbone.output_features());
 ```
 
+Prefer canned topologies? `ResNetPreset` enumerates the canonical ImageNet and CIFAR layouts while
+`ResNetConfig::from_depth` picks the right preset automatically:
+
+```rust
+use st_vision::models::{ResNetBackbone, ResNetConfig, ResNetPreset};
+
+let mut resnet101 = ResNetBackbone::from_depth(101)?; // depth-based lookup
+let mut resnet34 = ResNetBackbone::from_preset(ResNetPreset::ResNet34)?;
+
+// tweak after selecting a preset
+let mut wide_cifar = ResNetConfig::from_depth(56)?;
+wide_cifar.stage_channels = vec![32, 64, 128];
+```
+
 The `ViTBackbone` exports `load_weights_json`/`load_weights_bincode` helpers, accepts patch/grid tweaks, and emits CLS-token embeddings by default. `ConvNeXtBackbone` mirrors ConvNeXt-T style stage depths, returning flattened feature maps ready for detection heads or Z-space projection.
 
 Need a CIFAR-style network? `ResNetConfig::resnet56_cifar(true)` wires a 56-layer backbone with SpiralTorch's learnable skip scalers and a default **slip schedule** that eases each residual bridge in before letting it run at full strength. If you opt out of the learnable gates, the helper leaves skip slip disabled so the baseline topology stays untouched. Override the schedule to taste by swapping in your own `SkipSlipSchedule`:
