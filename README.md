@@ -4,15 +4,6 @@ _(Still under active expanding hourly.)_
 
 **Purpose.** A WGPU-first, research-grade ML/geometry runtime that fuses spectral operators, microlocal tools, and cooperative schedulers into a single stack. The goal: rival CUDA-centric ecosystems using portable GPUs (Metal/Vulkan/DX12) without sacrificing theory fidelity.
 
-## 🚀 Latest SpiralTorch highlights
-
-- **Fractal → Quantum RL bridge.** Stream Mellin-log fractal patches straight into the quantum overlay studio and recover policy gradients through `FractalQuantumTrainer` and friends—keeping Python fallbacks and PyO3 builds in lockstep.
-- **Self-evolving SpiralK kernels.** A new diversity governor inside `SelfRewriteEngine` tracks plateauing η̄ gains, forces fresh AI rewrites when caches go stale, and surfaces telemetry via `diversity_snapshot()` so operators can keep the autonomous kernel lab on course.
-- **Saga-aware kernel evolution.** The `SelfRewriteEngine` now learns multi-step hint sagas, boosting cache priority for sequenced rewrites and exposing the orbits via `saga_snapshots()` so you can audit every cosmic combo.
-- **Reinforcement-tuned hint genetics.** Hint chains earn reward-weighted feedback, anomaly filters freeze outliers, recombination fuses cached winners, graph snapshots illuminate hint affinity, and `take_trace()` streams the self-evolution log when `--debug-self-evolution` is enabled.
-- **Chain-policy reinforcement.** Cached hint chains now feed a lightweight Q-style policy inside `SelfRewriteEngine`, boosting cache priority via chain multipliers, exposing telemetry with `chain_policy_snapshots()`, and logging `PolicyUpdate` traces whenever the self-evolution loop reshapes its instincts.
-- **Contextual bandit autopilot.** A UCB-flavoured bandit now rides alongside the cache, weighting hint reuse via `bandit_snapshots()` telemetry, steering exploration with `with_bandit_*` knobs, and leaving `BanditUpdate` traces whenever rewrites learn a new favourite arm.
-
 ## 🌌 SpiralTorch Manifesto
 
 Step into the paradigm shift from imitation to emergent meaning with the [SpiralTorch Manifesto](docs/spiraltorch_manifesto.md).
@@ -185,6 +176,16 @@ thin veneer that reuses the same planners, losses, and Z-space resonators. No
 tensor shims, no translation layers, and no tracebacks.
 
 ---
+
+## 🚀 Latest SpiralTorch highlights
+
+- **Fractal → Quantum RL bridge.** Stream Mellin-log fractal patches straight into the quantum overlay studio and recover policy gradients through `FractalQuantumTrainer` and friends—keeping Python fallbacks and PyO3 builds in lockstep.
+- **Self-evolving SpiralK kernels.** A new diversity governor inside `SelfRewriteEngine` tracks plateauing η̄ gains, forces fresh AI rewrites when caches go stale, and surfaces telemetry via `diversity_snapshot()` so operators can keep the autonomous kernel lab on course.
+- **Saga-aware kernel evolution.** The `SelfRewriteEngine` now learns multi-step hint sagas, boosting cache priority for sequenced rewrites and exposing the orbits via `saga_snapshots()` so you can audit every cosmic combo.
+- **Reinforcement-tuned hint genetics.** Hint chains earn reward-weighted feedback, anomaly filters freeze outliers, recombination fuses cached winners, graph snapshots illuminate hint affinity, and `take_trace()` streams the self-evolution log when `--debug-self-evolution` is enabled.
+- **Chain-policy reinforcement.** Cached hint chains now feed a lightweight Q-style policy inside `SelfRewriteEngine`, boosting cache priority via chain multipliers, exposing telemetry with `chain_policy_snapshots()`, and logging `PolicyUpdate` traces whenever the self-evolution loop reshapes its instincts.
+- **Contextual bandit autopilot.** A UCB-flavoured bandit now rides alongside the cache, weighting hint reuse via `bandit_snapshots()` telemetry, steering exploration with `with_bandit_*` knobs, and leaving `BanditUpdate` traces whenever rewrites learn a new favourite arm.
+
 
 ## Why it’s different
  - **Training comes first:** Modules such as `Linear`, `Sequential`,
