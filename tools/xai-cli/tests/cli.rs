@@ -705,13 +705,17 @@ fn audit_introspect_reports_structural_metrics() {
     for stage in &report.aggregated.loops {
         assert!(!stage.is_empty());
     }
-    assert!(report.aggregated.anomalies.iter().all(|anomaly| {
-        if anomaly.severity == "critical" {
-            false
-        } else {
-            anomaly.message.is_empty() || !anomaly.message.trim().is_empty()
-        }
-    }));
+    assert!(report
+        .aggregated
+        .anomalies
+        .iter()
+        .all(|anomaly| {
+            if anomaly.severity == "critical" {
+                false
+            } else {
+                anomaly.message.is_empty() || !anomaly.message.trim().is_empty()
+            }
+        }));
     assert_eq!(report.per_bundle.len(), 1);
     assert_eq!(report.per_bundle[0].label, audit_path.to_str().unwrap());
     assert_eq!(

@@ -769,6 +769,23 @@ impl RealGradKernel {
         self.config.residual_threshold
     }
 
+    fn prepare_optical_input<'a>(&'a mut self, values: &'a [f32]) -> &'a [f32] {
+        if let Some(optics) = self.config.optics {
+            self.optical_buf.resize(values.len(), 0.0);
+            self.optical_trace.prepare(values.len());
+            propagate_transparent_optics(
+                optics,
+                values,
+                &mut self.optical_buf,
+                &mut self.optical_trace,
+            );
+            &self.optical_buf
+        } else {
+            self.optical_trace.clear();
+            values
+        }
+    }
+
     /// Projects the provided samples into the RealGrad field using the cached projector.
     pub fn project(&mut self, values: &[f32]) -> RealGradProjection {
         let mut scratch = RealGradProjectionScratch::default();

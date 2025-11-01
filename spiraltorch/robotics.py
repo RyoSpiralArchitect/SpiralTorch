@@ -954,6 +954,15 @@ class ZSpaceTrainerSample:
     partial: ZSpacePartialObservation
 
 
+@dataclass
+class TrainerEpisode:
+    samples: list[ZSpaceTrainerSample]
+    average_memory: float
+    average_stability: float
+    average_drs: float
+    length: int
+
+
 class ZSpaceTrainerBridge:
     """Project robotics rollouts into ZSpaceTrainer metrics."""
 
@@ -985,6 +994,95 @@ class ZSpaceTrainerBridge:
             drs=summary.anomaly_score,
         )
         return ZSpaceTrainerSample(metrics=metrics, partial=summary.partial)
+
+
+class ZSpaceTrainerEpisodeBuilder:
+    """Collect discounted trainer samples across a robotics episode."""
+
+    def __init__(
+        self,
+        horizon: int,
+        *,
+        discount: float = 0.9,
+        capacity: int = 64,
+    ) -> None:
+        if capacity <= 0:
+            raise ValueError("episode capacity must be positive")
+        self._bridge = ZSpaceTrainerBridge(horizon, discount=discount)
+        self._capacity = int(capacity)
+        self._buffer: list[ZSpaceTrainerSample] = []
+        self._memory_sum = 0.0
+        self._stability_sum = 0.0
+        self._drs_sum = 0.0
+
+    @property
+    def horizon(self) -> int:
+        return self._bridge.horizon
+
+    @property
+    def discount(self) -> float:
+        return self._bridge.discount
+
+    @property
+    def capacity(self) -> int:
+        return self._capacity
+
+    def push(
+        self,
+        step: RuntimeStep,
+        vision: VisionFeedbackSnapshot | None = None,
+        *,
+        end_episode: bool,
+    ) -> TrainerEpisode | None:
+        if len(self._buffer) >= self._capacity:
+            raise ValueError("episode capacity exceeded before flush")
+        sample = self._bridge.push(step, vision)
+        self._buffer.append(_clone_trainer_sample(sample))
+        self._memory_sum += sample.metrics.memory
+        self._stability_sum += sample.metrics.stability
+        self._drs_sum += sample.metrics.drs
+        if end_episode:
+            return self._finish_episode()
+        return None
+
+    def flush(self) -> TrainerEpisode | None:
+        if not self._buffer:
+            return None
+        return self._finish_episode()
+
+    def _finish_episode(self) -> TrainerEpisode:
+        length = len(self._buffer)
+        samples = self._buffer
+        self._buffer = []
+        normaliser = float(length if length > 0 else 1)
+        episode = TrainerEpisode(
+            samples=samples,
+            average_memory=self._memory_sum / normaliser,
+            average_stability=self._stability_sum / normaliser,
+            average_drs=self._drs_sum / normaliser,
+            length=length,
+        )
+        self._memory_sum = 0.0
+        self._stability_sum = 0.0
+        self._drs_sum = 0.0
+        return episode
+
+
+def _clone_trainer_sample(sample: ZSpaceTrainerSample) -> ZSpaceTrainerSample:
+    metrics = TrainerMetrics(
+        speed=sample.metrics.speed,
+        memory=sample.metrics.memory,
+        stability=sample.metrics.stability,
+        gradient=list(sample.metrics.gradient),
+        drs=sample.metrics.drs,
+    )
+    partial = ZSpacePartialObservation(
+        metrics=dict(sample.partial.metrics),
+        commands=dict(sample.partial.commands),
+        gradient=list(sample.partial.gradient),
+        weight=sample.partial.weight,
+    )
+    return ZSpaceTrainerSample(metrics=metrics, partial=partial)
 
 
 def _validate_metric(components: Sequence[Sequence[float]]) -> tuple[tuple[float, ...], ...]:
@@ -1084,7 +1182,9 @@ __all__ = [
     "TemporalFeedbackLearner",
     "TemporalFeedbackSummary",
     "TrainerMetrics",
+    "TrainerEpisode",
     "ZSpaceTrainerBridge",
+    "ZSpaceTrainerEpisodeBuilder",
     "ZSpaceTrainerSample",
     "relativity_geometry_from_metric",
     "relativity_dynamics_from_metric",
