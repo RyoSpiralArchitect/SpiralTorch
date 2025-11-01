@@ -16,6 +16,7 @@ pub struct LossStdTrigger {
     ema: f32,
     warmup: usize,
     seen: usize,
+    /// Minimum ratio margin that must be exceeded before a pulse is emitted.
     deadband: f32,
     geometry_eta: f32,
     geometry_curvature: f32,
@@ -400,5 +401,18 @@ mod tests {
         assert!(trigger.observe(0.05).is_none());
         let boosted = trigger.observe(0.4).expect("boosted ratio");
         assert!(boosted > 0.0);
+    }
+
+    #[test]
+    fn deadband_suppresses_small_shocks() {
+        let mut trigger = LossStdTrigger::new(0.1)
+            .with_warmup(1)
+            .with_deadband(0.5);
+        // Warmup observation initializes the EMA without emitting a signal.
+        assert!(trigger.observe(0.08).is_none());
+        // Ratio is below the configured deadband so no pulse should be emitted.
+        assert!(trigger.observe(0.14).is_none());
+        // Once the ratio clears the deadband margin a pulse is emitted.
+        assert!(trigger.observe(0.5).is_some());
     }
 }

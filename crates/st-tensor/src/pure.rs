@@ -5867,6 +5867,69 @@ fn fused_attention_cpu(
     output
 }
 
+fn cpu_row_softmax_hardmax(data: &[f32], rows: usize, cols: usize) -> (Vec<f32>, Vec<f32>) {
+    let expected = rows.saturating_mul(cols);
+    if data.len() != expected || expected == 0 {
+        return (vec![0.0; expected], vec![0.0; expected]);
+    }
+
+    let mut softmax = vec![0.0f32; expected];
+    let mut hardmax = vec![0.0f32; expected];
+
+    for row in 0..rows {
+        let offset = row * cols;
+        let row_slice = &data[offset..offset + cols];
+
+        let mut max_value = f32::NEG_INFINITY;
+        let mut max_index = 0usize;
+        let mut found = false;
+        for (index, &value) in row_slice.iter().enumerate() {
+            if value.is_nan() {
+                continue;
+            }
+            if !found || value > max_value {
+                max_value = value;
+                max_index = index;
+                found = true;
+            }
+        }
+
+        let base = if found && max_value.is_finite() {
+            max_value
+        } else {
+            0.0
+        };
+
+        let mut denom = 0.0f32;
+        for (index, &value) in row_slice.iter().enumerate() {
+            let weight = if !found || value.is_nan() {
+                0.0
+            } else {
+                (value - base).exp()
+            };
+            softmax[offset + index] = weight;
+            denom += weight;
+        }
+
+        if found {
+            if denom.is_finite() && denom > f32::EPSILON {
+                let inv = denom.recip();
+                for value in &mut softmax[offset..offset + cols] {
+                    *value *= inv;
+                }
+            } else {
+                for value in &mut softmax[offset..offset + cols] {
+                    *value = 0.0;
+                }
+                softmax[offset + max_index] = 1.0;
+            }
+            hardmax[offset + max_index] = 1.0;
+        }
+    }
+
+    (softmax, hardmax)
+}
+
 fn row_softmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
     cpu_row_softmax_hardmax(data, rows, cols).0
 }
