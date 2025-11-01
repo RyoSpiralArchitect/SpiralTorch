@@ -53,6 +53,7 @@ pub struct SelfRewriteEngine<G: AiHintGenerator> {
     frozen_hints: HashMap<String, FrozenHint>,
     recombination_trials: usize,
     relation_graph: HintRelationGraph,
+    chain_policy: ChainPolicyModel,
     trace_mode: bool,
     trace_limit: usize,
     trace_log: VecDeque<RewriteTrace>,
@@ -145,6 +146,170 @@ impl FrozenHint {
         self.cooldown = self.cooldown.max(cooldown);
         self.strikes = self.strikes.saturating_add(1);
         self.idle = 0;
+    }
+}
+
+#[derive(Clone, Debug)]
+struct ChainPolicyValue {
+    value: f32,
+    visits: u32,
+    last_reward: f32,
+    last_outcome: bool,
+}
+
+impl Default for ChainPolicyValue {
+    fn default() -> Self {
+        Self {
+            value: 0.0,
+            visits: 0,
+            last_reward: 0.0,
+            last_outcome: true,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct ChainPolicyModel {
+    values: HashMap<String, ChainPolicyValue>,
+    lr: f32,
+    discount: f32,
+    decay: f32,
+    explore_bonus: f32,
+    horizon: usize,
+}
+
+impl Default for ChainPolicyModel {
+    fn default() -> Self {
+        Self {
+            values: HashMap::new(),
+            lr: 0.35,
+            discount: 0.55,
+            decay: 0.96,
+            explore_bonus: 0.35,
+            horizon: 4,
+        }
+    }
+}
+
+impl ChainPolicyModel {
+    fn set_learning_rate(&mut self, lr: f32) {
+        if lr.is_finite() && lr > 0.0 {
+            self.lr = lr.clamp(0.05, 1.0);
+        }
+    }
+
+    fn set_discount(&mut self, discount: f32) {
+        if discount.is_finite() {
+            self.discount = discount.clamp(0.0, 0.99);
+        }
+    }
+
+    fn set_explore_bonus(&mut self, bonus: f32) {
+        if bonus.is_finite() {
+            self.explore_bonus = bonus.max(0.0);
+        }
+    }
+
+    fn set_horizon(&mut self, horizon: usize) {
+        self.horizon = horizon.max(1);
+    }
+
+    fn observe(&mut self, chain: &[String], reward: f32, success: bool) {
+        if chain.is_empty() {
+            return;
+        }
+        let truncated = if chain.len() > self.horizon {
+            &chain[chain.len() - self.horizon..]
+        } else {
+            chain
+        };
+        let signature = Self::signature(truncated);
+        let tail_value = if truncated.len() > 1 {
+            let suffix = Self::signature(&truncated[1..]);
+            self.values
+                .get(&suffix)
+                .map(|entry| entry.value)
+                .unwrap_or(0.0)
+        } else {
+            0.0
+        };
+        let target = reward + self.discount * tail_value;
+        let entry = self
+            .values
+            .entry(signature)
+            .or_insert_with(ChainPolicyValue::default);
+        entry.visits = entry.visits.saturating_add(1);
+        entry.last_reward = reward;
+        entry.last_outcome = success;
+        if entry.visits == 1 {
+            entry.value = target;
+        } else {
+            entry.value = entry.value * (1.0 - self.lr) + target * self.lr;
+        }
+    }
+
+    fn multiplier(&self, chain: &[String]) -> f32 {
+        let score = self.score(chain);
+        (1.0 + score * 0.3).clamp(0.25, 3.5)
+    }
+
+    fn score(&self, chain: &[String]) -> f32 {
+        if chain.is_empty() {
+            return 0.0;
+        }
+        let truncated = if chain.len() > self.horizon {
+            &chain[chain.len() - self.horizon..]
+        } else {
+            chain
+        };
+        let signature = Self::signature(truncated);
+        let Some(entry) = self.values.get(&signature) else {
+            return self.explore_bonus;
+        };
+        let visits = entry.visits.max(1) as f32;
+        let explore = if self.explore_bonus <= 0.0 {
+            0.0
+        } else {
+            self.explore_bonus / visits.sqrt().max(1.0)
+        };
+        let penalty = if entry.last_outcome {
+            0.0
+        } else {
+            self.explore_bonus * 0.5
+        };
+        entry.value + explore - penalty
+    }
+
+    fn decay(&mut self) {
+        let decay = self.decay.clamp(0.5, 0.999);
+        for value in self.values.values_mut() {
+            value.value *= decay;
+            value.last_reward *= decay;
+        }
+    }
+
+    fn snapshots(&self) -> Vec<HintChainPolicySnapshot> {
+        let mut snaps: Vec<_> = self
+            .values
+            .iter()
+            .map(|(chain, entry)| HintChainPolicySnapshot {
+                chain: chain.clone(),
+                value: entry.value,
+                visits: entry.visits,
+                last_reward: entry.last_reward,
+                last_outcome: entry.last_outcome,
+            })
+            .collect();
+        snaps.sort_by(|a, b| b.value.partial_cmp(&a.value).unwrap_or(Ordering::Equal));
+        snaps
+    }
+
+    fn signature(chain: &[String]) -> String {
+        if chain.is_empty() {
+            "<empty>".to_string()
+        } else {
+            chain.join(" -> ")
+        }
     }
 }
 
@@ -281,6 +446,15 @@ pub struct HintChainFeedbackSnapshot {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct HintChainPolicySnapshot {
+    pub chain: String,
+    pub value: f32,
+    pub visits: u32,
+    pub last_reward: f32,
+    pub last_outcome: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct FrozenHintSnapshot {
     pub key: String,
     pub reason: String,
@@ -305,6 +479,7 @@ pub enum TraceKind {
     Unfreeze,
     RecombineSuccess,
     RecombineFailure,
+    PolicyUpdate,
 }
 
 impl HintPerformance {
@@ -1060,6 +1235,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
             frozen_hints: HashMap::new(),
             recombination_trials: 2,
             relation_graph: HintRelationGraph::default(),
+            chain_policy: ChainPolicyModel::default(),
             trace_mode: false,
             trace_limit: 128,
             trace_log: VecDeque::new(),
@@ -1211,6 +1387,30 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         self
     }
 
+    /// Configure the learning rate used by the chain policy model.
+    pub fn with_chain_learning_rate(mut self, lr: f32) -> Self {
+        self.chain_policy.set_learning_rate(lr);
+        self
+    }
+
+    /// Configure the discount applied to downstream chain values.
+    pub fn with_chain_discount(mut self, discount: f32) -> Self {
+        self.chain_policy.set_discount(discount);
+        self
+    }
+
+    /// Configure the exploration bonus used for rarely seen chains.
+    pub fn with_chain_explore_bonus(mut self, bonus: f32) -> Self {
+        self.chain_policy.set_explore_bonus(bonus);
+        self
+    }
+
+    /// Limit how many hints are considered when shaping chain policy updates.
+    pub fn with_chain_horizon(mut self, horizon: usize) -> Self {
+        self.chain_policy.set_horizon(horizon);
+        self
+    }
+
     /// Configure how quickly the hint relation graph decays between rewrites.
     pub fn with_relation_decay(mut self, decay: f32) -> Self {
         if decay.is_finite() && decay > 0.0 {
@@ -1310,6 +1510,11 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
     /// Exposes the multi-step saga telemetry learned from cached hint sequences.
     pub fn saga_snapshots(&self) -> Vec<HintSagaSnapshot> {
         self.saga.snapshots()
+    }
+
+    /// Exposes the learned chain policy values for reinforcement steering.
+    pub fn chain_policy_snapshots(&self) -> Vec<HintChainPolicySnapshot> {
+        self.chain_policy.snapshots()
     }
 
     /// Exposes the learned reward feedback for observed hint chains.
@@ -1564,7 +1769,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
                     }
                     self.record_chain_feedback(
                         vec![a.key.clone(), b.key.clone(), combined_key.clone()],
-                        0.0,
+                        -self.anomaly_threshold.max(0.1),
                         false,
                     );
                     self.freeze_if_anomalous(&combined_key, "recombination failure");
@@ -1668,6 +1873,8 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         } else {
             1.0
         };
+        let chain = self.current_chain_with(&entry.key);
+        let policy_bonus = self.chain_policy.multiplier(&chain);
         (entry.eta + score)
             * affinity.max(bridge)
             * decay
@@ -1676,6 +1883,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
             * root_bonus
             * saga_bonus
             * ctx_bonus
+            * policy_bonus
     }
 
     fn eval_hints(
@@ -1775,7 +1983,13 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
             .entry(signature.clone())
             .or_insert_with(ChainFeedback::default);
         entry.reward(reward, success, self.feedback_gamma);
-        self.relation_graph.observe_chain(&chain, reward);
+        self.relation_graph.observe_chain(&chain, reward.max(0.0));
+        let shaped_reward = if success {
+            reward.max(0.0) + 0.05
+        } else {
+            reward.min(-0.05)
+        };
+        self.chain_policy.observe(&chain, shaped_reward, success);
         self.trace(
             TraceKind::ChainFeedback,
             format!(
@@ -1783,6 +1997,13 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
                 signature, reward, success
             ),
         );
+        if self.trace_mode {
+            let policy_score = self.chain_policy.score(&chain);
+            self.trace(
+                TraceKind::PolicyUpdate,
+                format!("chain={} policy={:.3}", signature, policy_score),
+            );
+        }
     }
 
     fn freeze_if_anomalous(&mut self, key: &str, reason: impl Into<String>) {
@@ -1916,7 +2137,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         self.diversity.record_failure();
         self.transitions.penalize_target(&key);
         self.saga.penalize_target(&key);
-        self.record_chain_feedback(chain, 0.0, false);
+        self.record_chain_feedback(chain, -self.anomaly_threshold.max(0.1), false);
         self.freeze_if_anomalous(&key, "cache failure");
     }
 
@@ -1976,6 +2197,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         self.transitions.decay();
         self.saga.decay();
         self.relation_graph.decay();
+        self.chain_policy.decay();
         self.age_frozen();
     }
 
@@ -2312,6 +2534,56 @@ mod tests {
         assert!(top.total_reward > 0.0);
         assert!(top.ema_reward > 0.0);
         assert!(top.score > 0.0);
+    }
+
+    #[test]
+    fn chain_policy_tracks_success_and_penalty() {
+        let mut generator = |_: &AiRewriteConfig, _: &AiRewritePrompt| {
+            Ok(vec![HeuristicHint::new(
+                "tile_cols",
+                "tile_cols + 16",
+                0.95,
+                "true",
+            )])
+        };
+        let ctx = sample_ctx();
+        let mut engine = SelfRewriteEngine::new(&mut generator, AiRewriteConfig::new("mock"))
+            .with_eta_floor(0.35)
+            .with_chain_learning_rate(0.8)
+            .with_chain_discount(0.0)
+            .with_chain_explore_bonus(0.0);
+
+        let event = engine
+            .tick("algo: 1;", &ctx, None, 0.2)
+            .expect("tick")
+            .expect("event");
+        assert!(event.eta_bar > 0.0);
+
+        let snapshots = engine.chain_policy_snapshots();
+        assert!(
+            !snapshots.is_empty(),
+            "policy snapshots should record the initial success"
+        );
+        assert!(snapshots.iter().any(|snap| snap.value > 0.0));
+
+        let success_snapshot = snapshots
+            .iter()
+            .find(|snap| snap.last_outcome)
+            .expect("success entry should exist");
+        assert!(success_snapshot.value > 0.0);
+        assert!(success_snapshot.visits >= 1);
+
+        engine.penalize_hint(&event.hints);
+        let snapshots_after = engine.chain_policy_snapshots();
+        let penalty_entry = snapshots_after
+            .iter()
+            .find(|snap| !snap.last_outcome)
+            .expect("penalty entry should be recorded");
+        assert!(penalty_entry.last_reward.is_sign_negative());
+        assert!(penalty_entry.value <= 0.0);
+        assert!(snapshots_after
+            .iter()
+            .any(|snap| snap.last_outcome && snap.value >= success_snapshot.value * 0.5));
     }
 
     #[test]
