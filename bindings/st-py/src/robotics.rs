@@ -1,6 +1,7 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList};
+use pyo3::wrap_pyfunction;
 use pyo3::PyRef;
 use std::collections::HashMap;
 use std::time::UNIX_EPOCH;
@@ -8,8 +9,8 @@ use std::time::UNIX_EPOCH;
 use st_robotics::{
     ChannelHealth, Desire, DesireLagrangianField, EnergyReport, FusedFrame, GeometryKind,
     GravityField, GravityRegime, GravityWell, PolicyGradientController, PsiTelemetry,
-    RoboticsError, RoboticsRuntime, RuntimeStep, SensorFusionHub, TelemetryReport, ZSpaceDynamics,
-    ZSpaceGeometry,
+    RelativityBridge, RoboticsError, RoboticsRuntime, RuntimeStep, SensorFusionHub, SymmetryAnsatz,
+    TelemetryReport, ZSpaceDynamics, ZSpaceGeometry,
 };
 
 fn robotics_err_to_py(err: RoboticsError) -> PyErr {
@@ -28,6 +29,67 @@ fn dict_to_payloads(dict: &Bound<PyDict>) -> PyResult<HashMap<String, Vec<f32>>>
         payloads.insert(name, vec);
     }
     Ok(payloads)
+}
+
+fn components_from_py(values: Vec<Vec<f64>>) -> PyResult<[[f32; 4]; 4]> {
+    if values.len() != 4 {
+        return Err(PyValueError::new_err("metric tensor must have four rows"));
+    }
+    let mut out = [[0.0_f32; 4]; 4];
+    for (row_idx, row) in values.into_iter().enumerate() {
+        if row.len() != 4 {
+            return Err(PyValueError::new_err(
+                "metric tensor rows must have four entries",
+            ));
+        }
+        for (col_idx, value) in row.into_iter().enumerate() {
+            out[row_idx][col_idx] = value as f32;
+        }
+    }
+    Ok(out)
+}
+
+fn parse_ansatz(ansatz: &str) -> SymmetryAnsatz {
+    match ansatz.to_ascii_lowercase().as_str() {
+        "static_spherical" => SymmetryAnsatz::StaticSpherical,
+        "homogeneous_isotropic" => SymmetryAnsatz::HomogeneousIsotropic,
+        other => SymmetryAnsatz::Custom(other.to_string()),
+    }
+}
+
+#[pyfunction]
+pub fn relativity_geometry_from_metric(components: Vec<Vec<f64>>) -> PyResult<PyZSpaceGeometry> {
+    let matrix = components_from_py(components)?;
+    let geometry =
+        RelativityBridge::geometry_from_components(matrix).map_err(robotics_err_to_py)?;
+    Ok(PyZSpaceGeometry { inner: geometry })
+}
+
+#[pyfunction]
+#[pyo3(signature = (components, gravity=None))]
+pub fn relativity_dynamics_from_metric(
+    components: Vec<Vec<f64>>,
+    gravity: Option<PyRef<'_, PyGravityField>>,
+) -> PyResult<PyZSpaceDynamics> {
+    let matrix = components_from_py(components)?;
+    let gravity_inner = gravity.map(|value| value.inner.clone());
+    let dynamics = RelativityBridge::dynamics_from_components(matrix, gravity_inner)
+        .map_err(robotics_err_to_py)?;
+    Ok(PyZSpaceDynamics { inner: dynamics })
+}
+
+#[pyfunction]
+#[pyo3(signature = (ansatz, scale=1.0, gravity=None))]
+pub fn relativity_dynamics_from_ansatz(
+    ansatz: &str,
+    scale: f64,
+    gravity: Option<PyRef<'_, PyGravityField>>,
+) -> PyResult<PyZSpaceDynamics> {
+    let symmetry = parse_ansatz(ansatz);
+    let gravity_inner = gravity.map(|value| value.inner.clone());
+    let dynamics = RelativityBridge::dynamics_from_ansatz(symmetry, scale, gravity_inner)
+        .map_err(robotics_err_to_py)?;
+    Ok(PyZSpaceDynamics { inner: dynamics })
 }
 
 #[pyclass(module = "spiraltorch.robotics", name = "ZSpaceGeometry")]
@@ -595,6 +657,9 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
     module.add_class::<PyGravityWell>()?;
     module.add_class::<PyZSpaceDynamics>()?;
     module.add_class::<PyZSpaceGeometry>()?;
+    module.add_function(wrap_pyfunction!(relativity_geometry_from_metric, &module)?)?;
+    module.add_function(wrap_pyfunction!(relativity_dynamics_from_metric, &module)?)?;
+    module.add_function(wrap_pyfunction!(relativity_dynamics_from_ansatz, &module)?)?;
     module.add("__doc__", "Robotics runtime bindings for SpiralTorch")?;
     parent.add_submodule(&module)?;
     Ok(())

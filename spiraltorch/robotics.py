@@ -515,6 +515,81 @@ class RoboticsRuntime:
         self.telemetry.set_geometry(self.desires.dynamics.geometry)
 
 
+def _validate_metric(components: Sequence[Sequence[float]]) -> tuple[tuple[float, ...], ...]:
+    matrix = []
+    for row in components:
+        vector = tuple(float(value) for value in row)
+        matrix.append(vector)
+    if len(matrix) != 4 or any(len(row) != 4 for row in matrix):
+        raise ValueError("metric tensor must be 4x4")
+    return tuple(matrix)
+
+
+def _time_dilation_from_metric(matrix: Sequence[Sequence[float]]) -> float:
+    g_tt = float(matrix[0][0])
+    shift = math.sqrt(sum(float(matrix[0][i]) ** 2 for i in range(1, 4)))
+    base = math.sqrt(abs(g_tt)) if g_tt < 0.0 else 1.0
+    return max(base / (1.0 + shift), 1e-6)
+
+
+def relativity_geometry_from_metric(
+    components: Sequence[Sequence[float]],
+) -> ZSpaceGeometry:
+    matrix = _validate_metric(components)
+    spatial = tuple(
+        tuple(matrix[i + 1][j + 1] for j in range(3))
+        for i in range(3)
+    )
+    dilation = _time_dilation_from_metric(matrix)
+    return ZSpaceGeometry.general_relativity(spatial, dilation)
+
+
+def relativity_dynamics_from_metric(
+    components: Sequence[Sequence[float]],
+    gravity: GravityField | None = None,
+) -> ZSpaceDynamics:
+    geometry = relativity_geometry_from_metric(components)
+    return ZSpaceDynamics(geometry=geometry, gravity=gravity)
+
+
+def _seed_metric_from_ansatz(ansatz: str) -> tuple[tuple[float, ...], ...]:
+    kind = ansatz.strip().lower()
+    if kind == "static_spherical":
+        return (
+            (-1.0, 0.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0, 0.0),
+            (0.0, 0.0, 1.0, 0.0),
+            (0.0, 0.0, 0.0, 1.0),
+        )
+    if kind == "homogeneous_isotropic":
+        return (
+            (-1.0, 0.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0, 0.0),
+            (0.0, 0.0, 1.0, 0.0),
+            (0.0, 0.0, 0.0, 1.0),
+        )
+    return (
+        (-1.0, 0.0, 0.0, 0.0),
+        (0.0, 1.0, 0.0, 0.0),
+        (0.0, 0.0, 1.0, 0.0),
+        (0.0, 0.0, 0.0, 1.0),
+    )
+
+
+def relativity_dynamics_from_ansatz(
+    ansatz: str,
+    *,
+    scale: float = 1.0,
+    gravity: GravityField | None = None,
+) -> ZSpaceDynamics:
+    seed = _seed_metric_from_ansatz(ansatz)
+    scaled = tuple(
+        tuple(value * float(scale) for value in row)
+        for row in seed
+    )
+    return relativity_dynamics_from_metric(scaled, gravity)
+
+
 __all__ = [
     "GravityField",
     "GravityWell",
@@ -531,4 +606,7 @@ __all__ = [
     "RuntimeStep",
     "SensorFusionHub",
     "TelemetryReport",
+    "relativity_geometry_from_metric",
+    "relativity_dynamics_from_metric",
+    "relativity_dynamics_from_ansatz",
 ]

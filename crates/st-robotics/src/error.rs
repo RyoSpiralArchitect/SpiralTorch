@@ -27,6 +27,8 @@ pub enum RoboticsError {
         expected: usize,
         actual: usize,
     },
+    /// Failed to adapt a general relativity metric for robotics use.
+    RelativityBridge(String),
 }
 
 impl fmt::Display for RoboticsError {
@@ -66,6 +68,9 @@ impl fmt::Display for RoboticsError {
             ),
             Self::MissingRequiredPayload { channel } => {
                 write!(f, "payload for required channel '{channel}' is missing")
+            }
+            Self::RelativityBridge(message) => {
+                write!(f, "failed to bridge general relativity metric: {message}")
             }
         }
     }

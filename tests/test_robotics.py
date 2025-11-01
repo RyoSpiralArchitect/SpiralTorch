@@ -35,6 +35,9 @@ GravityField = robotics.GravityField
 GravityWell = robotics.GravityWell
 ZSpaceDynamics = robotics.ZSpaceDynamics
 ZSpaceGeometry = robotics.ZSpaceGeometry
+relativity_geometry_from_metric = robotics.relativity_geometry_from_metric
+relativity_dynamics_from_metric = robotics.relativity_dynamics_from_metric
+relativity_dynamics_from_ansatz = robotics.relativity_dynamics_from_ansatz
 
 
 class SensorFusionHubTests(unittest.TestCase):
@@ -208,6 +211,35 @@ class RoboticsRuntimeTests(unittest.TestCase):
         runtime.configure_dynamics(dynamics)
         result = runtime.step({"pose": (0.5, 0.0, 0.0)})
         self.assertIn("pose", result.energy.gravitational_per_channel)
+
+
+class RelativityBridgeTests(unittest.TestCase):
+    def test_geometry_from_metric_matches_identity(self) -> None:
+        minkowski = (
+            (-1.0, 0.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0, 0.0),
+            (0.0, 0.0, 1.0, 0.0),
+            (0.0, 0.0, 0.0, 1.0),
+        )
+        geometry = relativity_geometry_from_metric(minkowski)
+        self.assertEqual(geometry.kind, "general_relativity")
+        self.assertAlmostEqual(geometry.metric_norm((1.0, 0.0, 0.0)), 1.0)
+
+    def test_dynamics_from_ansatz_scales_norm(self) -> None:
+        dynamics = relativity_dynamics_from_ansatz("static_spherical", scale=2.0)
+        self.assertGreater(dynamics.geometry.metric_norm((1.0, 0.0, 0.0)), 1.0)
+
+    def test_dynamics_from_metric_preserves_gravity(self) -> None:
+        minkowski = (
+            (-1.0, 0.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0, 0.0),
+            (0.0, 0.0, 1.0, 0.0),
+            (0.0, 0.0, 0.0, 1.0),
+        )
+        gravity = GravityField()
+        gravity.add_well("pose", GravityWell.newtonian(5.0))
+        dynamics = relativity_dynamics_from_metric(minkowski, gravity=gravity)
+        self.assertIsNotNone(dynamics.gravity)
 
 
 if __name__ == "__main__":
