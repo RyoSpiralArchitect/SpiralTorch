@@ -28,6 +28,20 @@ class _FakeSummary:
         std: float = 0.122474487,
         skewness: float = 0.1,
         kurtosis: float = 3.0,
+        min_value: float = -0.4,
+        max_value: float = 0.9,
+        support_width: float = 1.3,
+        positive_count: int = 7,
+        negative_count: int = 5,
+        zero_count: int = 0,
+        near_zero_count: int = 1,
+        positive_fraction: float = 0.6,
+        negative_fraction: float = 0.4,
+        zero_fraction: float = 0.0,
+        near_zero_fraction: float = 0.05,
+        activation: float = 0.95,
+        sign_lean: float = 0.2,
+        sign_entropy: float = 0.85,
     ) -> None:
         self._values = {
             "l1": float(l1),
@@ -45,6 +59,20 @@ class _FakeSummary:
             "std": float(std),
             "skewness": float(skewness),
             "kurtosis": float(kurtosis),
+            "min": float(min_value),
+            "max": float(max_value),
+            "support_width": float(support_width),
+            "positive_count": int(positive_count),
+            "negative_count": int(negative_count),
+            "zero_count": int(zero_count),
+            "near_zero_count": int(near_zero_count),
+            "positive_fraction": float(positive_fraction),
+            "negative_fraction": float(negative_fraction),
+            "zero_fraction": float(zero_fraction),
+            "near_zero_fraction": float(near_zero_fraction),
+            "activation": float(activation),
+            "sign_lean": float(sign_lean),
+            "sign_entropy": float(sign_entropy),
         }
 
     def l1(self) -> float:
@@ -91,6 +119,48 @@ class _FakeSummary:
 
     def kurtosis(self) -> float:
         return self._values["kurtosis"]
+
+    def min(self) -> float:
+        return self._values["min"]
+
+    def max(self) -> float:
+        return self._values["max"]
+
+    def support_width(self) -> float:
+        return self._values["support_width"]
+
+    def positive_count(self) -> int:
+        return self._values["positive_count"]
+
+    def negative_count(self) -> int:
+        return self._values["negative_count"]
+
+    def zero_count(self) -> int:
+        return self._values["zero_count"]
+
+    def near_zero_count(self) -> int:
+        return self._values["near_zero_count"]
+
+    def positive_fraction(self) -> float:
+        return self._values["positive_fraction"]
+
+    def negative_fraction(self) -> float:
+        return self._values["negative_fraction"]
+
+    def zero_fraction(self) -> float:
+        return self._values["zero_fraction"]
+
+    def near_zero_fraction(self) -> float:
+        return self._values["near_zero_fraction"]
+
+    def activation(self) -> float:
+        return self._values["activation"]
+
+    def sign_lean(self) -> float:
+        return self._values["sign_lean"]
+
+    def sign_entropy(self) -> float:
+        return self._values["sign_entropy"]
 
 
 class _FakeHypergrad:
@@ -149,6 +219,8 @@ def test_hypergrad_summary_dict_includes_gradient_and_extra_metrics() -> None:
     assert metrics["gradient"] == fake.gradient()
     assert "std" in metrics["summary"]
     assert "skewness" in metrics["summary"]
+    assert "activation" in metrics["summary"]
+    assert metrics["summary"]["positive_count"] == fake.summary().positive_count()
 
 
 def test_suggest_hypergrad_operator_clamps_when_requested() -> None:
@@ -169,6 +241,8 @@ def test_suggest_hypergrad_operator_clamps_when_requested() -> None:
     assert hints["spread"] > 0.0
     assert "std" in hints
     assert "kurtosis" in hints
+    assert "activation" in hints
+    assert "support_width" in hints
 
 
 def test_suggest_hypergrad_operator_accepts_tape_instances() -> None:
@@ -176,6 +250,8 @@ def test_suggest_hypergrad_operator_accepts_tape_instances() -> None:
     hints = suggest_hypergrad_operator(fake, clamp=False)
 
     assert 0.0 < hints["ratio"]
-    assert hints["mix"] == hints["ratio"]
+    assert 0.0 < hints["mix"]
+    assert abs(hints["mix"] - hints["ratio"]) < max(1e-6, hints["ratio"] * 0.2)
     assert hints["count"] == float(fake.summary().count())
     assert "skewness" in hints
+    assert "sign_entropy" in hints

@@ -3006,6 +3006,11 @@ struct CurvatureGradientAccumulator {
     sum_quartic: f64,
     linf: f32,
     count: usize,
+    min: f32,
+    max: f32,
+    positive: usize,
+    negative: usize,
+    near_zero: usize,
 }
 
 impl CurvatureGradientAccumulator {
@@ -3017,6 +3022,16 @@ impl CurvatureGradientAccumulator {
         self.sum_quartic += summary.sum_quartic() as f64;
         self.linf = self.linf.max(summary.linf());
         self.count += summary.count();
+        if self.count == summary.count() {
+            self.min = summary.min();
+            self.max = summary.max();
+        } else {
+            self.min = self.min.min(summary.min());
+            self.max = self.max.max(summary.max());
+        }
+        self.positive += summary.positive_count();
+        self.negative += summary.negative_count();
+        self.near_zero += summary.near_zero_count();
     }
 
     fn finish(self) -> GradientSummary {
@@ -3031,6 +3046,13 @@ impl CurvatureGradientAccumulator {
                 self.sum_quartic as f32,
                 self.linf,
                 self.count,
+            )
+            .with_support(
+                self.min,
+                self.max,
+                self.positive,
+                self.negative,
+                self.near_zero,
             )
         }
     }

@@ -10,9 +10,11 @@ without contending for the same CPU cores.  The system-facing helpers also
 interrogate Linux control groups so container limits and CPU reservations are
 captured before tuning decisions are made.  The expanded system snapshot now
 records CPU topology from ``/sys/devices/system/cpu`` so physical cores can be
-weighed against logical CPUs when scheduling work alongside GPU pipelines.
-WGSL kernel metadata persisted in the autotune store is also summarised so GPU
-dispatch characteristics can feed back into the CPU reservation heuristic.
+weighed against logical CPUs when scheduling work alongside GPU pipelines while
+Linux Pressure Stall Information (PSI) metrics feed into the heuristics so BLAS
+threads back off when the host is already saturated.  WGSL kernel metadata
+persisted in the autotune store is also summarised so GPU dispatch
+characteristics can feed back into the CPU reservation heuristic.
 """
 
 from __future__ import annotations
@@ -46,6 +48,7 @@ __all__ = [
     "gpu_host_thread_reservation",
     "process_cpu_budget",
     "cgroup_cpu_quota",
+    "system_cpu_pressure",
     "dgemm",
 ]
 
@@ -77,6 +80,9 @@ _GPU_HOST_RESERVATION_BUDGET: int | None = None
 
 _CPU_BUDGET_CACHE: dict[str, object] | None = None
 _CPU_TOPOLOGY_CACHE: tuple[int, tuple[int, ...] | None, dict[str, object]] | None = None
+_CPU_PRESSURE_CACHE: tuple[int, float, dict[str, object] | None] | None = None
+
+_CPU_PRESSURE_CACHE_TTL = 2.0
 
 _CGROUP_SELF_CACHE: dict[str, str] | None = None
 _CGROUP_QUOTA_CACHE: tuple[int, float | None] | None = None
@@ -464,6 +470,28 @@ def _coerce_positive_int(value: object) -> int | None:
         except ValueError:
             return None
         return parsed if parsed >= 0 else None
+    return None
+
+
+def _coerce_non_negative_float(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        candidate = float(value)
+        if not math.isfinite(candidate) or candidate < 0:
+            return None
+        return candidate
+    if isinstance(value, str):
+        candidate = value.strip()
+        if not candidate:
+            return None
+        try:
+            parsed = float(candidate)
+        except ValueError:
+            return None
+        if not math.isfinite(parsed) or parsed < 0:
+            return None
+        return parsed
     return None
 
 
@@ -1050,6 +1078,93 @@ def cgroup_cpu_quota(*, refresh: bool = False) -> float | None:
     return _cgroup_cpu_quota_raw(refresh=refresh)
 
 
+def _parse_pressure_line(line: str) -> tuple[str, dict[str, float | int]] | None:
+    tokens = line.strip().split()
+    if not tokens:
+        return None
+
+    kind = tokens[0].strip()
+    if not kind:
+        return None
+
+    metrics: dict[str, float | int] = {}
+    for token in tokens[1:]:
+        if "=" not in token:
+            continue
+        key, raw = token.split("=", 1)
+        key = key.strip()
+        raw = raw.strip()
+        if not key or not raw:
+            continue
+        if key == "total":
+            value = _coerce_positive_int(raw)
+            if value is None:
+                continue
+            metrics[key] = value
+            continue
+        value_f = _coerce_non_negative_float(raw)
+        if value_f is None:
+            continue
+        metrics[key] = value_f
+
+    if not metrics:
+        return None
+
+    return kind, metrics
+
+
+def _cpu_pressure_snapshot() -> dict[str, dict[str, float | int]] | None:
+    try:
+        with open("/proc/pressure/cpu", "r", encoding="utf-8") as handle:
+            snapshot: dict[str, dict[str, float | int]] = {}
+            for line in handle:
+                parsed = _parse_pressure_line(line)
+                if parsed is None:
+                    continue
+                kind, metrics = parsed
+                if kind not in {"some", "full"}:
+                    continue
+                snapshot[kind] = dict(metrics)
+    except (FileNotFoundError, OSError):
+        return None
+
+    return snapshot or None
+
+
+def system_cpu_pressure(*, refresh: bool = False) -> dict[str, dict[str, float | int]] | None:
+    """Return Linux Pressure Stall Information (PSI) metrics for the host.
+
+    The returned mapping exposes the ``"some"`` and ``"full"`` CPU pressure
+    buckets when available, including their ``avg10``/``avg60``/``avg300``
+    windows as floating-point percentages alongside the accumulated ``total``
+    stall time in microseconds.  ``None`` is returned when PSI support is not
+    available on the running kernel.
+    """
+
+    global _CPU_PRESSURE_CACHE
+
+    now = time.time()
+    if (
+        not refresh
+        and _CPU_PRESSURE_CACHE is not None
+        and _CPU_PRESSURE_CACHE[0] == os.getpid()
+        and (now - _CPU_PRESSURE_CACHE[1]) <= _CPU_PRESSURE_CACHE_TTL
+    ):
+        cached = _CPU_PRESSURE_CACHE[2]
+        if cached is None:
+            return None
+        return {bucket: dict(metrics) for bucket, metrics in cached.items()}
+
+    snapshot = _cpu_pressure_snapshot()
+    if snapshot is None:
+        _CPU_PRESSURE_CACHE = (os.getpid(), now, None)
+        return None
+
+    structured = {bucket: dict(metrics) for bucket, metrics in snapshot.items()}
+    _CPU_PRESSURE_CACHE = (os.getpid(), now, structured)
+    return {bucket: dict(metrics) for bucket, metrics in structured.items()}
+
+
 def _system_affinity_size() -> int | None:
     try:
         affinity = os.sched_getaffinity(0)
@@ -1194,7 +1309,8 @@ def recommended_thread_count(
     consider_gpu:
         When ``True`` (the default) host thread reservations derived from the
         active WGPU adapter are respected so CPU BLAS workloads leave breathing
-        room for GPU command submission.
+        room for GPU command submission.  The heuristic also inspects Linux PSI
+        CPU pressure metrics to back off when the host is already congested.
     """
 
     system_threads = system_cpu_count()
@@ -1235,6 +1351,34 @@ def recommended_thread_count(
             and reservation > 0
         ):
             available = max(1, min(available, physical))
+
+    pressure = system_cpu_pressure()
+    if pressure and available and available > 1:
+        peak_avg = 0.0
+        sustained_avg = 0.0
+        for bucket in ("some", "full"):
+            metrics = pressure.get(bucket)
+            if not isinstance(metrics, dict):
+                continue
+            peak = _coerce_non_negative_float(metrics.get("avg10"))
+            if peak is not None:
+                peak_avg = max(peak_avg, peak)
+            sustained = _coerce_non_negative_float(metrics.get("avg60"))
+            if sustained is not None:
+                sustained_avg = max(sustained_avg, sustained)
+
+        if peak_avg >= 10.0:
+            if peak_avg >= 50.0:
+                reduction_ratio = 0.5
+            elif peak_avg >= 20.0:
+                reduction_ratio = 0.3
+            else:
+                reduction_ratio = 0.15
+            if sustained_avg >= 20.0:
+                reduction_ratio = min(0.6, reduction_ratio + 0.1)
+            scaled = int(max(1, math.floor(available * (1 - reduction_ratio))))
+            if scaled < available:
+                available = scaled
 
     available = max(1, int(available))
 
