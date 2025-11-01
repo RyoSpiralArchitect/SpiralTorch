@@ -805,7 +805,23 @@ impl RealGradKernel {
         }
 
         let len = values.len();
-        let input = self.prepare_optical_input(values);
+        let mut optical_input: Option<Vec<f32>> = None;
+        let optics_enabled = if let Some(optics) = self.config.optics {
+            self.optical_buf.resize(len, 0.0);
+            self.optical_trace.prepare(len);
+            propagate_transparent_optics(
+                optics,
+                values,
+                &mut self.optical_buf,
+                &mut self.optical_trace,
+            );
+            optical_input = Some(self.optical_buf.clone());
+            true
+        } else {
+            self.optical_trace.clear();
+            false
+        };
+        let input = optical_input.as_deref().unwrap_or(values);
 
         self.spectrum.resize(len, (0.0, 0.0));
         self.engine.dft(input, &mut self.spectrum);
@@ -848,7 +864,7 @@ impl RealGradKernel {
         projection.monad_biome.extend_from_slice(&self.residuals);
         projection.lebesgue_measure = lebesgue_measure;
         projection.ramanujan_pi = self.ramanujan_pi;
-        if self.config.optics.is_some() {
+        if optics_enabled {
             projection.optics = Some(self.optical_trace.clone());
         }
     }
@@ -1496,11 +1512,11 @@ pub fn project_tempered_realgrad(
 #[cfg(test)]
 mod tests {
     use super::{
-        project_realgrad, project_tempered_realgrad, CpuChirpZ, CpuRustFft, GradientSummary,
-        RealGradAutoTuner, RealGradConfig, RealGradKernel, RealGradProjection,
-        RealGradProjectionScratch, RealGradZProjector, SchwartzSequence, SpectralEngine,
-        SpectrumNorm, TemperedRealGradProjection, TransparencySummary,
-        TransparentGradientOpticsConfig, DEFAULT_THRESHOLD,
+        project_realgrad, project_tempered_realgrad, propagate_transparent_optics, CpuChirpZ,
+        CpuRustFft, GradientSummary, RealGradAutoTuner, RealGradConfig, RealGradKernel,
+        RealGradProjection, RealGradProjectionScratch, RealGradZProjector, SchwartzSequence,
+        SpectralEngine, SpectrumNorm, TemperedRealGradProjection, TransparentGradientOpticsConfig,
+        TransparentGradientTrace, DEFAULT_THRESHOLD,
     };
     use crate::theory::zpulse::ZSource;
     use crate::util::math::{LeechProjector, LEECH_PACKING_DENSITY};
@@ -1667,7 +1683,8 @@ mod tests {
             .zip(perturbed_output.iter())
             .zip(base_trace.transparency_jacobian.iter())
         {
-            let numeric = (perturbed - base) / epsilon;
+            let numeric = (*perturbed - *base) / epsilon;
+            let jacobian = *jacobian;
             let diff = (numeric - jacobian).abs();
             let scale = numeric.abs().max(jacobian.abs()).max(1.0);
             assert!(
