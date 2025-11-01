@@ -14,7 +14,8 @@
 //! probability normalisation, and forward the pipeline construction utilities.
 
 use crate::softmax;
-use wgpu::{Buffer, Device, Queue};
+use std::fmt;
+use wgpu::{Buffer, CommandBuffer, CommandEncoder, Device, Queue};
 
 /// Flag enabling hardmax-only execution in the WGSL kernels.
 const FLAG_HARDMAX_ONLY: u32 = 1 << 1;
@@ -140,7 +141,20 @@ impl AsMut<softmax::Params> for Params {
 
 /// Forward the softmax pipeline builder so hardmax stays in lockstep with the
 /// probability kernels.
-pub use softmax::{Builder, Dispatch, Pipelines};
+pub use softmax::{Builder, Dispatch, DispatchArgs, PipelineVariant, Pipelines};
+
+/// Error returned when the selected [`Mode`] requires a mask buffer but the
+/// dispatch arguments omit one.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct MissingMaskBufferError;
+
+impl fmt::Display for MissingMaskBufferError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("hardmax dispatch requires `DispatchArgs::mask` when emitting the mask")
+    }
+}
+
+impl std::error::Error for MissingMaskBufferError {}
 
 /// Construct the compute pipelines used by the hardmax helpers.
 pub fn create_pipelines(
@@ -154,4 +168,57 @@ pub fn create_pipelines(
 /// Upload the configured hardmax uniforms to a GPU buffer.
 pub fn upload_params(device: &Device, queue: &Queue, params: &Params) -> Buffer {
     softmax::upload_params(device, queue, params.as_softmax())
+}
+
+fn ensure_mask(args: &softmax::DispatchArgs<'_>, mode: Mode) -> Result<(), MissingMaskBufferError> {
+    if mode.wants_mask() && args.mask.is_none() {
+        Err(MissingMaskBufferError)
+    } else {
+        Ok(())
+    }
+}
+
+/// Encode the hardmax dispatch into an existing command encoder.
+pub fn encode_into(
+    device: &Device,
+    encoder: &mut CommandEncoder,
+    pipelines: &Pipelines,
+    args: &softmax::DispatchArgs<'_>,
+    dispatch: Dispatch,
+    variant: softmax::PipelineVariant,
+    mode: Mode,
+) -> Result<bool, MissingMaskBufferError> {
+    ensure_mask(args, mode)?;
+    Ok(softmax::encode_into(
+        device, encoder, pipelines, args, dispatch, variant,
+    ))
+}
+
+/// Encode the hardmax dispatch into a new command buffer.
+pub fn encode(
+    device: &Device,
+    pipelines: &Pipelines,
+    args: &softmax::DispatchArgs<'_>,
+    dispatch: Dispatch,
+    variant: softmax::PipelineVariant,
+    mode: Mode,
+) -> Result<Option<CommandBuffer>, MissingMaskBufferError> {
+    ensure_mask(args, mode)?;
+    Ok(softmax::encode(device, pipelines, args, dispatch, variant))
+}
+
+/// Dispatch the hardmax kernels directly, submitting a command buffer to the queue.
+pub fn dispatch(
+    device: &Device,
+    queue: &Queue,
+    pipelines: &Pipelines,
+    args: &softmax::DispatchArgs<'_>,
+    dispatch: Dispatch,
+    variant: softmax::PipelineVariant,
+    mode: Mode,
+) -> Result<bool, MissingMaskBufferError> {
+    ensure_mask(args, mode)?;
+    Ok(softmax::dispatch(
+        device, queue, pipelines, args, dispatch, variant,
+    ))
 }

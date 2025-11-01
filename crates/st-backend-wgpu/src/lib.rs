@@ -38,9 +38,12 @@ pub use middlemax::{
 };
 
 pub use hardmax::{
-    create_pipelines as create_hardmax_pipelines, upload_params as upload_hardmax_params,
-    Builder as HardmaxBuilder, Dispatch as HardmaxDispatch, Mode as HardmaxMode,
-    Params as HardmaxParams, Pipelines as HardmaxPipelines,
+    create_pipelines as create_hardmax_pipelines, dispatch as dispatch_hardmax,
+    encode as encode_hardmax, encode_into as encode_hardmax_into,
+    upload_params as upload_hardmax_params, Builder as HardmaxBuilder, Dispatch as HardmaxDispatch,
+    DispatchArgs as HardmaxDispatchArgs, MissingMaskBufferError as HardmaxMissingMaskBufferError,
+    Mode as HardmaxMode, Params as HardmaxParams, PipelineVariant as HardmaxPipelineVariant,
+    Pipelines as HardmaxPipelines,
 };
 
 pub use util::{
@@ -55,9 +58,11 @@ pub use attention::{
 };
 
 pub use softmax::{
-    create_pipelines as create_softmax_pipelines, upload_params as upload_softmax_params,
-    Builder as SoftmaxBuilder, Dispatch as SoftmaxDispatch, Params as SoftmaxParams,
-    Pipelines as SoftmaxPipelines,
+    create_pipelines as create_softmax_pipelines, dispatch as dispatch_softmax,
+    encode as encode_softmax, encode_into as encode_softmax_into,
+    upload_params as upload_softmax_params, Builder as SoftmaxBuilder, Dispatch as SoftmaxDispatch,
+    DispatchArgs as SoftmaxDispatchArgs, Params as SoftmaxParams,
+    PipelineVariant as SoftmaxPipelineVariant, Pipelines as SoftmaxPipelines,
 };
 
 pub use gelu_back::{
