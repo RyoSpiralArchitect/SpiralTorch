@@ -170,15 +170,9 @@ impl AmebaAutograd {
                 });
             }
 
-            for (w, g) in agent.weights.iter_mut().zip(message.payload.iter()) {
-                *w -= agent.learning_rate * g;
-            }
-
-            let signal = message.payload.iter().map(|v| v.abs()).sum::<f32>();
-            if signal < self.tolerance && message.hops > 0 {
-                return Ok(());
-            }
-
+            // Apply the local weight update once before deciding whether to
+            // forward the gradient. The previous implementation updated the
+            // weights twice which effectively doubled the learning rate.
             for (w, g) in agent.weights.iter_mut().zip(message.payload.iter()) {
                 *w -= agent.learning_rate * g;
             }
@@ -265,5 +259,23 @@ mod tests {
         let w2 = mesh.weights(2).unwrap();
         assert_eq!(w2[0], 0.0);
         assert!(w1[0] < 0.0);
+    }
+
+    #[test]
+    fn weights_update_once_per_message() {
+        let mut mesh = AmebaAutograd::new(2, 1e-6).unwrap();
+        mesh.register_agent(
+            AgentConfig::new(1, 1)
+                .with_neighbors(Vec::new())
+                .with_learning_rate(0.1)
+                .with_weights(vec![1.0]),
+        )
+        .unwrap();
+
+        mesh.seed_gradient(1, vec![2.0]).unwrap();
+        mesh.drain().unwrap();
+
+        let w = mesh.weights(1).unwrap();
+        assert!((w[0] - 0.8).abs() < 1e-6, "weight updated more than once");
     }
 }
