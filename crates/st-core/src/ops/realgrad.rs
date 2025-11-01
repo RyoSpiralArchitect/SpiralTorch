@@ -346,6 +346,8 @@ pub struct RealGradProjection {
     pub lebesgue_measure: f32,
     /// Ramanujan π estimate used for the projection.
     pub ramanujan_pi: f32,
+    /// Optional optical trace capturing the transparent gradient flow.
+    pub optics: Option<TransparentGradientTrace>,
 }
 
 impl Default for RealGradProjection {
@@ -357,6 +359,83 @@ impl Default for RealGradProjection {
             monad_biome: Vec::new(),
             lebesgue_measure: 0.0,
             ramanujan_pi: 0.0,
+            optics: None,
+        }
+    }
+}
+
+/// Optical telemetry emitted when transparent gradient propagation is enabled.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct TransparentGradientTrace {
+    /// Original Euclidean gradient entering the optical medium.
+    pub source_gradient: Vec<f32>,
+    /// Gradient field after traversing the optical medium.
+    pub propagated_gradient: Vec<f32>,
+    /// Attenuation coefficients applied along the optical depth.
+    pub attenuation_profile: Vec<f32>,
+    /// Phase accumulated as the gradient refracts through the medium.
+    pub phase_profile: Vec<f32>,
+    /// Local refraction curvature induced by neighbouring samples.
+    pub refraction_profile: Vec<f32>,
+    /// Diffusion residual recorded for each sample.
+    pub diffusion_profile: Vec<f32>,
+}
+
+impl TransparentGradientTrace {
+    fn prepare(&mut self, len: usize) {
+        self.source_gradient.resize(len, 0.0);
+        self.propagated_gradient.resize(len, 0.0);
+        self.attenuation_profile.resize(len, 0.0);
+        self.phase_profile.resize(len, 0.0);
+        self.refraction_profile.resize(len, 0.0);
+        self.diffusion_profile.resize(len, 0.0);
+    }
+
+    fn clear(&mut self) {
+        self.source_gradient.clear();
+        self.propagated_gradient.clear();
+        self.attenuation_profile.clear();
+        self.phase_profile.clear();
+        self.refraction_profile.clear();
+        self.diffusion_profile.clear();
+    }
+}
+
+/// Configuration describing the transparent optical medium applied to gradients.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TransparentGradientOpticsConfig {
+    /// Effective refractive index controlling curvature blending across samples.
+    pub refractive_index: f32,
+    /// Baseline transparency applied to the propagated gradient (0 – fully opaque).
+    pub transparency: f32,
+    /// Absorption coefficient controlling exponential attenuation across depth.
+    pub absorption: f32,
+    /// Diffusion factor applied when blending neighbouring samples.
+    pub diffusion: f32,
+    /// Additional phase shift injected into the propagated gradient.
+    pub phase_shift: f32,
+}
+
+impl TransparentGradientOpticsConfig {
+    fn sanitised(self) -> Self {
+        Self {
+            refractive_index: self.refractive_index.max(1.0),
+            transparency: self.transparency.clamp(0.0, 1.0),
+            absorption: self.absorption.max(0.0),
+            diffusion: self.diffusion.clamp(0.0, 1.0),
+            phase_shift: self.phase_shift,
+        }
+    }
+}
+
+impl Default for TransparentGradientOpticsConfig {
+    fn default() -> Self {
+        Self {
+            refractive_index: 1.45,
+            transparency: 1.0,
+            absorption: 0.0,
+            diffusion: 0.15,
+            phase_shift: 0.0,
         }
     }
 }
@@ -390,6 +469,8 @@ pub struct RealGradKernel {
     spectrum: Vec<(f32, f32)>,
     z_buf: Vec<f32>,
     residuals: Vec<Residual>,
+    optical_buf: Vec<f32>,
+    optical_trace: TransparentGradientTrace,
 }
 
 impl fmt::Debug for RealGradKernel {
@@ -494,6 +575,12 @@ impl RealGradProjection {
         self.monad_biome.clear();
         self.lebesgue_measure = 0.0;
         self.ramanujan_pi = 0.0;
+        self.optics = None;
+    }
+
+    /// Returns the optical trace emitted during transparent gradient propagation, if any.
+    pub fn optics_trace(&self) -> Option<&TransparentGradientTrace> {
+        self.optics.as_ref()
     }
 }
 
@@ -511,6 +598,8 @@ impl RealGradKernel {
             spectrum: Vec::new(),
             z_buf: Vec::new(),
             residuals: Vec::new(),
+            optical_buf: Vec::new(),
+            optical_trace: TransparentGradientTrace::default(),
         }
     }
 
@@ -525,6 +614,16 @@ impl RealGradKernel {
         self.config
     }
 
+    /// Returns the configured optical medium, if any.
+    pub fn optics(&self) -> Option<TransparentGradientOpticsConfig> {
+        self.config.optics
+    }
+
+    /// Updates the optical medium used by the kernel.
+    pub fn set_optics(&mut self, optics: Option<TransparentGradientOpticsConfig>) {
+        self.config.optics = optics.map(|config| config.sanitised());
+    }
+
     /// Returns the cached Ramanujan π estimate used by the kernel.
     pub fn ramanujan_pi(&self) -> f32 {
         self.ramanujan_pi
@@ -532,6 +631,23 @@ impl RealGradKernel {
 
     fn residual_threshold(&self) -> f32 {
         self.config.residual_threshold
+    }
+
+    fn prepare_optical_input<'a>(&'a mut self, values: &'a [f32]) -> &'a [f32] {
+        if let Some(optics) = self.config.optics {
+            self.optical_buf.resize(values.len(), 0.0);
+            self.optical_trace.prepare(values.len());
+            propagate_transparent_optics(
+                optics,
+                values,
+                &mut self.optical_buf,
+                &mut self.optical_trace,
+            );
+            &self.optical_buf
+        } else {
+            self.optical_trace.clear();
+            values
+        }
     }
 
     /// Projects the provided samples into the RealGrad field using the cached projector.
@@ -546,13 +662,17 @@ impl RealGradKernel {
     pub fn project_into(&mut self, values: &[f32], out: &mut RealGradProjectionScratch) {
         out.clear();
         if values.is_empty() {
-            out.as_projection_mut().ramanujan_pi = self.ramanujan_pi;
+            let projection = out.as_projection_mut();
+            projection.ramanujan_pi = self.ramanujan_pi;
+            projection.optics = None;
             return;
         }
 
         let len = values.len();
+        let input = self.prepare_optical_input(values);
+
         self.spectrum.resize(len, (0.0, 0.0));
-        self.engine.dft(values, &mut self.spectrum);
+        self.engine.dft(input, &mut self.spectrum);
 
         self.config.spectrum_norm.apply(&mut self.spectrum);
 
@@ -563,6 +683,7 @@ impl RealGradKernel {
         projection.z_space.resize(len, 0.0);
         projection.spectrum.resize(len, (0.0, 0.0));
         projection.spectrum.copy_from_slice(&self.spectrum[..len]);
+        projection.optics = None;
         for (idx, &(re, im)) in self.spectrum.iter().enumerate() {
             let magnitude = (re * re + im * im).sqrt();
             if magnitude > self.residual_threshold() {
@@ -577,20 +698,23 @@ impl RealGradKernel {
             projection.z_space[idx] = enriched;
         }
 
-        let lebesgue_measure = values.iter().map(|v| v.abs()).sum::<f32>();
+        let lebesgue_measure = input.iter().map(|v| v.abs()).sum::<f32>();
         let normaliser = if lebesgue_measure > 0.0 {
             self.ramanujan_pi / lebesgue_measure
         } else {
             0.0
         };
 
-        for (idx, value) in values.iter().enumerate().take(len) {
+        for (idx, value) in input.iter().enumerate().take(len) {
             projection.realgrad[idx] = *value * normaliser + self.z_buf[idx];
         }
 
         projection.monad_biome.extend_from_slice(&self.residuals);
         projection.lebesgue_measure = lebesgue_measure;
         projection.ramanujan_pi = self.ramanujan_pi;
+        if self.config.optics.is_some() {
+            projection.optics = Some(self.optical_trace.clone());
+        }
     }
 
     /// Projects a Schwartz sequence using the cached projector and returns the tempered outcome.
@@ -748,6 +872,8 @@ pub struct RealGradConfig {
     pub residual_threshold: f32,
     /// Normalisation applied to the DFT spectrum.
     pub spectrum_norm: SpectrumNorm,
+    /// Optional transparent gradient optics applied prior to projection.
+    pub optics: Option<TransparentGradientOpticsConfig>,
 }
 
 /// Discrete representation of a Schwartz sequence used to approximate a tempered function.
@@ -817,6 +943,7 @@ impl Default for RealGradConfig {
             z_weight: DEFAULT_WEIGHT,
             residual_threshold: DEFAULT_THRESHOLD,
             spectrum_norm: SpectrumNorm::Backward,
+            optics: None,
         }
     }
 }
@@ -830,6 +957,7 @@ impl RealGradConfig {
             z_weight: self.z_weight.max(0.0),
             residual_threshold: self.residual_threshold.max(0.0),
             spectrum_norm: self.spectrum_norm,
+            optics: self.optics.map(|config| config.sanitised()),
         }
     }
 
@@ -869,6 +997,23 @@ impl RealGradConfig {
         };
 
         (tuned_config, diagnostics)
+    }
+
+    /// Enables transparent gradient optics using the provided configuration.
+    pub fn with_optics(mut self, optics: TransparentGradientOpticsConfig) -> Self {
+        self.optics = Some(optics.sanitised());
+        self
+    }
+
+    /// Disables the transparent gradient optics layer.
+    pub fn without_optics(mut self) -> Self {
+        self.optics = None;
+        self
+    }
+
+    /// Returns the configured transparent gradient optics, if present.
+    pub fn optics(&self) -> Option<TransparentGradientOpticsConfig> {
+        self.optics
     }
 }
 
@@ -969,6 +1114,66 @@ impl RealGradZProjector {
             stderr: 0.0,
             latency_ms: 0.0,
         }
+    }
+}
+
+fn propagate_transparent_optics(
+    config: TransparentGradientOpticsConfig,
+    input: &[f32],
+    output: &mut [f32],
+    trace: &mut TransparentGradientTrace,
+) {
+    let len = input.len();
+    if len == 0 {
+        return;
+    }
+
+    let refractive = config.refractive_index.max(1.0);
+    let transparency = config.transparency.clamp(0.0, 1.0);
+    let absorption = config.absorption.max(0.0);
+    let diffusion = config.diffusion.clamp(0.0, 1.0);
+    let phase_shift = config.phase_shift;
+    let curvature = (refractive - 1.0).abs();
+    let tau = std::f32::consts::PI * 2.0;
+    let inv_len = if len > 1 {
+        1.0f32 / (len as f32 - 1.0)
+    } else {
+        0.0
+    };
+
+    let mut previous_wave = 0.0f32;
+
+    for idx in 0..len {
+        let sample = input[idx];
+        trace.source_gradient[idx] = sample;
+
+        let left = if idx > 0 { input[idx - 1] } else { sample };
+        let right = if idx + 1 < len {
+            input[idx + 1]
+        } else {
+            sample
+        };
+        let diffusion_target = 0.5 * (left + right);
+        let diffused = sample + (diffusion_target - sample) * diffusion;
+        trace.diffusion_profile[idx] = diffused - sample;
+
+        let bend = 0.5 * (right - left) * curvature;
+        trace.refraction_profile[idx] = bend;
+        let curved = diffused + bend;
+
+        let depth = idx as f32 * inv_len;
+        let attenuation = transparency * (-absorption * depth).exp();
+        trace.attenuation_profile[idx] = attenuation;
+
+        let phase = phase_shift + depth * refractive * tau * 0.25;
+        trace.phase_profile[idx] = phase;
+
+        let interference = curved * phase.cos() - previous_wave * phase.sin();
+        previous_wave = interference;
+
+        let propagated = interference * attenuation;
+        output[idx] = propagated;
+        trace.propagated_gradient[idx] = propagated;
     }
 }
 
@@ -1154,7 +1359,8 @@ mod tests {
         project_realgrad, project_tempered_realgrad, CpuChirpZ, CpuRustFft, GradientSummary,
         RealGradAutoTuner, RealGradConfig, RealGradKernel, RealGradProjection,
         RealGradProjectionScratch, RealGradZProjector, SchwartzSequence, SpectralEngine,
-        SpectrumNorm, TemperedRealGradProjection, DEFAULT_THRESHOLD,
+        SpectrumNorm, TemperedRealGradProjection, TransparentGradientOpticsConfig,
+        DEFAULT_THRESHOLD,
     };
     use crate::theory::zpulse::ZSource;
     use crate::util::math::{LeechProjector, LEECH_PACKING_DENSITY};
@@ -1169,6 +1375,7 @@ mod tests {
         assert!(projection.monad_biome.is_empty());
         assert_eq!(projection.lebesgue_measure, 0.0);
         assert!(projection.ramanujan_pi > 3.14);
+        assert!(projection.optics_trace().is_none());
     }
 
     #[test]
@@ -1200,6 +1407,7 @@ mod tests {
             scratch.as_projection().spectrum.capacity()
         );
         assert_eq!(scratch.as_projection().ramanujan_pi, kernel.ramanujan_pi());
+        assert!(scratch.as_projection().optics_trace().is_none());
     }
 
     #[test]
@@ -1212,6 +1420,37 @@ mod tests {
         assert_eq!(projection.spectrum.len(), data.len());
         assert!(projection.monad_biome.len() <= data.len());
         assert!(projection.realgrad.iter().any(|v| *v > 0.0));
+        assert!(projection.optics_trace().is_none());
+    }
+
+    #[test]
+    fn transparent_optics_emit_trace() {
+        let optics = TransparentGradientOpticsConfig {
+            refractive_index: 1.6,
+            transparency: 0.85,
+            absorption: 0.1,
+            diffusion: 0.35,
+            phase_shift: 0.2,
+        };
+        let config = RealGradConfig::default().with_optics(optics);
+        let data = [1.0f32, -0.25, 0.75, -0.5];
+        let projection = project_realgrad(&data, config);
+        let trace = projection.optics_trace().expect("optical trace");
+        assert_eq!(trace.source_gradient, data);
+        assert_eq!(trace.propagated_gradient.len(), data.len());
+        assert_eq!(trace.attenuation_profile.len(), data.len());
+        assert_eq!(trace.phase_profile.len(), data.len());
+        assert_eq!(trace.refraction_profile.len(), data.len());
+        assert_eq!(trace.diffusion_profile.len(), data.len());
+        assert!(trace
+            .propagated_gradient
+            .iter()
+            .zip(trace.source_gradient.iter())
+            .any(|(propagated, source)| (propagated - source).abs() > 1.0e-4));
+        assert!(trace
+            .attenuation_profile
+            .iter()
+            .all(|attenuation| *attenuation <= 1.0 + 1.0e-6));
     }
 
     #[test]
