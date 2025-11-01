@@ -6,6 +6,7 @@ on:
       - 'v*'
 
 permissions:
+  actions: read
   contents: write
   id-token: write
 
@@ -41,21 +42,91 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           path: dist
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Generate manifest, SBOM, and verification bundle
+      - name: Generate checksums for release wheels
         run: |
-          python scripts/prepare_release_artifacts.py \
+          set -euo pipefail
+          find dist -type f -name '*.whl' -print0 | sort -z | xargs -0 -I{} sh -c 'sha256sum "{}" | sed "s|  .*|  $(basename "{}")|"' > dist/wheels.sha256
+          find dist -type f -name '*.whl' -print0 | sort -z | xargs -0 -I{} sh -c 'sha512sum "{}" | sed "s|  .*|  $(basename "{}")|"' > dist/wheels.sha512
+      - name: Snapshot repository manifest and compliance seal
+        run: |
+          python scripts/security/generate_repo_manifest.py \
+            --repo-root . \
+            --canonical-license "LICENSE .txt" \
+            --output dist/spiraltorch-repo-license-manifest.json \
+            --allow-untracked
+          python scripts/security/generate_compliance_seal.py \
+            --manifest dist/spiraltorch-repo-license-manifest.json \
+            --repo-root . \
+            --output dist/spiraltorch-compliance-seal.json
+      - name: Enforce embedded AGPL license payloads
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python scripts/security/generate_license_report.py \
             --dist dist \
-            --manifest dist/RELEASE_MANIFEST.json \
-            --checksums dist/CHECKSUMS.sha256 \
-            --sbom dist/SBOM.json \
-            --verify-doc dist/VERIFYING.md
+            --license "LICENSE .txt" \
+            --tag "$RELEASE_TAG"
+      - name: Generate SBOM for release payload
+        uses: anchore/sbom-action@v0.16.0
+        with:
+          path: dist
+          format: cyclonedx-json
+          output-file: dist/spiraltorch-${{ github.ref_name }}-sbom.cdx.json
+          artifact-name: spiraltorch-${{ github.ref_name }}-sbom
+          upload-release-assets: false
+      - name: Generate authenticated release manifest
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          base = Path("dist")
+          tag = os.environ["RELEASE_TAG"]
+
+          def digest(path: Path, algorithm: str) -> str:
+              h = hashlib.new(algorithm)
+              with path.open("rb") as fh:
+                  for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                      h.update(chunk)
+              return h.hexdigest()
+
+          files = []
+          for path in sorted(
+              p for p in base.rglob("*") if p.is_file() and p.suffix not in {".sig", ".crt", ".intoto", ".jsonl"}
+          ):
+              sha256 = digest(path, "sha256")
+              sha512 = digest(path, "sha512")
+
+              files.append(
+                  {
+                      "asset": path.name,
+                      "source_path": path.as_posix(),
+                      "size": path.stat().st_size,
+                      "sha256": sha256,
+                      "sha512": sha512,
+                  }
+              )
+
+          manifest = {
+              "schema": "https://spiraltorch.org/security/release-manifest/v1",
+              "tag": tag,
+              "generated_at": datetime.now(tz=timezone.utc).isoformat(),
+              "workflow": "Release Wheels",
+              "files": files,
+          }
+
+          output = base / f"spiraltorch-{tag}-manifest.json"
+          output.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          PY
       - name: Generate SLSA provenance for wheels
         uses: actions/attest-build-provenance@v1
         with:
@@ -65,10 +136,11 @@ jobs:
         with:
           inputs: |
             dist/**/*.whl
-            dist/CHECKSUMS.sha256
-            dist/RELEASE_MANIFEST.json
-            dist/SBOM.json
-            dist/VERIFYING.md
+            dist/*.sha256
+            dist/*.sha512
+            dist/*.json
+            dist/spiraltorch-repo-license-manifest.json
+            dist/spiraltorch-compliance-seal.json
       - name: Create/Update GitHub Release with assets
         uses: softprops/action-gh-release@v1
         with:

@@ -16,6 +16,7 @@ mod frac;
 mod psi_synchro;
 mod selfsup;
 mod text;
+mod robotics;
 mod export;
 mod inference;
 mod hpo;
@@ -28,6 +29,7 @@ mod theory;
 mod introspect;
 mod qr;
 mod julia_bridge;
+mod robotics;
 
 mod extras {
     use super::*;
@@ -169,6 +171,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     scale_stack::register(py, m)?;
     trainer::register(py, m)?;
     vision::register(py, m)?;
+    robotics::register(py, m)?;
     zspace::register(py, m)?;
     elliptic::register(py, m)?;
     theory::register(py, m)?;
@@ -210,8 +213,8 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "EllipticWarp","EllipticTelemetry",
         "lorentzian_metric_scaled","assemble_zrelativity_model",
         "spiralk",
-        "nn","frac","selfsup","dataset","linalg","spiral_rl","rec","telemetry","ecosystem",
-        "nn","frac","dataset","linalg","spiral_rl","rec","telemetry","ecosystem","hpo","inference","export",
+        "nn","frac","selfsup","dataset","linalg","spiral_rl","rec","telemetry","ecosystem","robotics",
+        "nn","frac","dataset","linalg","spiral_rl","rec","telemetry","ecosystem","robotics","hpo","inference","export",
         "LinearModel","ModuleTrainer","mean_squared_error",
         "CanvasTransformer","CanvasSnapshot","apply_vision_update",
         "Identity","Scaler","NonLiner","Dropout","ZSpaceCoherenceSequencer","ScaleStack",
