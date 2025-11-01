@@ -109,13 +109,11 @@ class GravityField:
     def add_well(self, channel: str, well: GravityWell) -> None:
         self.wells[channel] = well
 
-    def potential(
-        self, channel: str, geometry: ZSpaceGeometry, vector: Sequence[float]
-    ) -> float | None:
+    def potential(self, channel: str, radius: float) -> float | None:
         well = self.wells.get(channel)
         if well is None:
             return None
-        radius = geometry.metric_norm(vector)
+        radius = float(radius)
         if radius <= 1e-6:
             return 0.0
         base = -self.constant * float(well.mass) / radius
@@ -267,9 +265,8 @@ class DesireLagrangianField:
                 per_channel[name] = value
                 total += value
             if self._dynamics.gravity is not None:
-                potential = self._dynamics.gravity.potential(
-                    name, self._dynamics.geometry, vector
-                )
+                radius = self._dynamics.geometry.metric_norm(vector)
+                potential = self._dynamics.gravity.potential(name, radius)
                 if potential is not None:
                     gravitational[name] = potential
                     total += abs(potential)

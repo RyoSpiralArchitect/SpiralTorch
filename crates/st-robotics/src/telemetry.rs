@@ -139,10 +139,9 @@ impl Default for PsiTelemetry {
 mod tests {
     use super::*;
     use crate::desire::{Desire, DesireLagrangianField};
-    use crate::geometry::{
-        GravityField, GravityRegime, GravityWell, ZSpaceDynamics, ZSpaceGeometry,
-    };
+    use crate::geometry::{ZSpaceDynamics, ZSpaceGeometry};
     use crate::sensors::SensorFusionHub;
+    use crate::{GravityField, GravityRegime, GravityWell};
     use std::collections::HashMap;
 
     #[test]

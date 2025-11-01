@@ -68,7 +68,8 @@ impl DesireLagrangianField {
                 report.per_channel.insert(name.clone(), channel_energy);
             }
             if let Some(gravity) = self.dynamics.gravity() {
-                if let Some(potential) = gravity.potential(name, self.dynamics.geometry(), vector) {
+                let radius = self.dynamics.geometry().metric_norm(vector);
+                if let Some(potential) = gravity.potential(name, radius) {
                     report.gravitational += potential;
                     report
                         .gravitational_per_channel
@@ -92,10 +93,9 @@ impl DesireLagrangianField {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geometry::{
-        GravityField, GravityRegime, GravityWell, ZSpaceDynamics, ZSpaceGeometry,
-    };
+    use crate::geometry::{ZSpaceDynamics, ZSpaceGeometry};
     use crate::sensors::SensorFusionHub;
+    use crate::{GravityField, GravityRegime, GravityWell};
 
     #[test]
     fn desire_field_accumulates_energy() {

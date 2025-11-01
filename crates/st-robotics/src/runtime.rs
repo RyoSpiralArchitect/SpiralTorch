@@ -150,9 +150,8 @@ impl TrajectoryRecorder {
 mod tests {
     use super::*;
     use crate::desire::Desire;
-    use crate::geometry::{
-        GravityField, GravityRegime, GravityWell, ZSpaceDynamics, ZSpaceGeometry,
-    };
+    use crate::geometry::{ZSpaceDynamics, ZSpaceGeometry};
+    use crate::{GravityField, GravityRegime, GravityWell};
 
     #[test]
     fn runtime_emits_policy_commands() {

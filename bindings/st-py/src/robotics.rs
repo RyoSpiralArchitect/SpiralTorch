@@ -125,7 +125,8 @@ impl PyGravityField {
         geometry: PyRef<'_, PyZSpaceGeometry>,
         values: Vec<f32>,
     ) -> Option<f32> {
-        self.inner.potential(channel, &geometry.inner, &values)
+        let radius = geometry.inner.metric_norm(&values);
+        self.inner.potential(channel, radius)
     }
 }
 
