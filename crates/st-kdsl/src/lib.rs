@@ -12,6 +12,7 @@ pub mod ir;
 mod program;
 pub mod query;
 pub mod registry;
+pub mod self_mod;
 pub mod tile;
 
 pub use auto::{
@@ -25,6 +26,10 @@ pub use query::{compile as compile_query, Filter, OrderDirection, QueryPlan};
 pub use registry::{
     AutotuneKey, AutotuneRegistry, DeviceProfile, KernelProfile, TelemetryLog, TelemetrySample,
     TelemetrySummary,
+};
+pub use self_mod::{
+    ContextClusterSnapshot, DiversitySnapshot, HintQualitySnapshot, HintSagaSnapshot,
+    HintStatSnapshot, HintTransitionSnapshot, SelfRewriteEngine, SelfRewriteEvent,
 };
 pub use tile::{TileConfig, TileIter, TileKnowledge, TileTemplate, WeightedMetric};
 
