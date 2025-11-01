@@ -160,9 +160,10 @@ struct AssignStmt {
 
 impl AssignStmt {
     fn apply(&self, program: &Program, ctx: &Ctx, locals: &[Value], hard: &mut Hard) {
-        let value = self
-            .const_value
-            .unwrap_or_else(|| self.expr.evaluate(program, ctx, locals));
+        let value = match &self.const_value {
+            Some(value) => value.clone(),
+            None => self.expr.evaluate(program, ctx, locals),
+        };
         match self.field {
             Field::U2 => hard.use_2ce = Some(value.as_bool()),
             Field::Wg => hard.wg = Some(value.as_u32()),
@@ -188,9 +189,10 @@ struct LetStmt {
 
 impl LetStmt {
     fn store(&self, program: &Program, ctx: &Ctx, locals: &mut [Value]) {
-        let value = self
-            .const_value
-            .unwrap_or_else(|| self.expr.evaluate(program, ctx, locals));
+        let value = match &self.const_value {
+            Some(value) => value.clone(),
+            None => self.expr.evaluate(program, ctx, locals),
+        };
         locals[self.id] = value;
     }
 }
@@ -204,9 +206,10 @@ struct SetStmt {
 
 impl SetStmt {
     fn store(&self, program: &Program, ctx: &Ctx, locals: &mut [Value]) {
-        let value = self
-            .const_value
-            .unwrap_or_else(|| self.expr.evaluate(program, ctx, locals));
+        let value = match &self.const_value {
+            Some(value) => value.clone(),
+            None => self.expr.evaluate(program, ctx, locals),
+        };
         locals[self.id] = value;
     }
 }
@@ -231,9 +234,10 @@ impl SoftStmt {
             return;
         }
 
-        let value = self
-            .const_value
-            .unwrap_or_else(|| self.value_expr.evaluate(program, ctx, locals));
+        let value = match &self.const_value {
+            Some(value) => value.clone(),
+            None => self.value_expr.evaluate(program, ctx, locals),
+        };
         let weight = self
             .const_weight
             .unwrap_or_else(|| self.weight_expr.evaluate(program, ctx, locals).as_f64() as f32);
@@ -369,14 +373,17 @@ impl ForStmt {
         hard: &mut Hard,
         soft: &mut Vec<SoftRule>,
     ) {
-        let start = self
-            .const_start
-            .unwrap_or_else(|| self.start.evaluate(program, ctx, locals))
-            .as_i64();
-        let end = self
-            .const_end
-            .unwrap_or_else(|| self.end.evaluate(program, ctx, locals))
-            .as_i64();
+        let start_value = match &self.const_start {
+            Some(value) => value.clone(),
+            None => self.start.evaluate(program, ctx, locals),
+        };
+        let end_value = match &self.const_end {
+            Some(value) => value.clone(),
+            None => self.end.evaluate(program, ctx, locals),
+        };
+
+        let start = start_value.as_i64();
+        let end = end_value.as_i64();
 
         let mut current = start;
         let mut iterations = 0usize;
@@ -966,58 +973,134 @@ impl Parser {
 
     fn parse_atom(&mut self) -> Result<ExprNode, Err> {
         let token = self.next().ok_or(Err::Tok)?;
-        match token {
-            Token::Num(n) => Ok(ExprNode::number(n)),
-            Token::True => Ok(ExprNode::bool(true)),
-            Token::False => Ok(ExprNode::bool(false)),
-            Token::Id(id) if id == "r" => Ok(ExprNode::field(FieldRef::R)),
-            Token::Id(id) if id == "c" => Ok(ExprNode::field(FieldRef::C)),
-            Token::Id(id) if id == "k" => Ok(ExprNode::field(FieldRef::K)),
-            Token::Id(id) if id == "sg" => Ok(ExprNode::field(FieldRef::Sg)),
-            Token::Id(id) if id == "sgc" => Ok(ExprNode::field(FieldRef::Sgc)),
-            Token::Id(id) if id == "kc" => Ok(ExprNode::field(FieldRef::Kc)),
-            Token::Id(id) if id == "tile_cols" => Ok(ExprNode::field(FieldRef::TileCols)),
-            Token::Id(id) if id == "radix" => Ok(ExprNode::field(FieldRef::Radix)),
-            Token::Id(id) if id == "segments" => Ok(ExprNode::field(FieldRef::Segments)),
-            Token::Id(id) if id == "log2" => self.parse_function_call(Function::Log2),
-            Token::Id(id) if id == "sel" => self.parse_function_call(Function::Select),
-            Token::Id(id) if id == "clamp" => self.parse_function_call(Function::Clamp),
-            Token::Id(id) if id == "min" => self.parse_function_call(Function::Min),
-            Token::Id(id) if id == "max" => self.parse_function_call(Function::Max),
-            Token::Id(id) if id == "abs" => self.parse_function_call(Function::Abs),
-            Token::Id(id) if id == "floor" => self.parse_function_call(Function::Floor),
-            Token::Id(id) if id == "ceil" => self.parse_function_call(Function::Ceil),
-            Token::Id(id) if id == "round" => self.parse_function_call(Function::Round),
-            Token::Id(id) if id == "sqrt" => self.parse_function_call(Function::Sqrt),
-            Token::Id(id) if id == "pow" => self.parse_function_call(Function::Pow),
+        let expr = match token {
+            Token::Num(n) => ExprNode::number(n),
+            Token::True => ExprNode::bool(true),
+            Token::False => ExprNode::bool(false),
+            Token::Id(id) if id == "r" => ExprNode::field(FieldRef::R),
+            Token::Id(id) if id == "c" => ExprNode::field(FieldRef::C),
+            Token::Id(id) if id == "k" => ExprNode::field(FieldRef::K),
+            Token::Id(id) if id == "sg" => ExprNode::field(FieldRef::Sg),
+            Token::Id(id) if id == "sgc" => ExprNode::field(FieldRef::Sgc),
+            Token::Id(id) if id == "kc" => ExprNode::field(FieldRef::Kc),
+            Token::Id(id) if id == "tile_cols" => ExprNode::field(FieldRef::TileCols),
+            Token::Id(id) if id == "radix" => ExprNode::field(FieldRef::Radix),
+            Token::Id(id) if id == "segments" => ExprNode::field(FieldRef::Segments),
+            Token::Id(id) if id == "log2" => {
+                let expr = self.parse_function_call(Function::Log2)?;
+                return self.parse_postfix(expr);
+            }
+            Token::Id(id) if id == "sel" => {
+                let expr = self.parse_function_call(Function::Select)?;
+                return self.parse_postfix(expr);
+            }
+            Token::Id(id) if id == "clamp" => {
+                let expr = self.parse_function_call(Function::Clamp)?;
+                return self.parse_postfix(expr);
+            }
+            Token::Id(id) if id == "min" => {
+                let expr = self.parse_function_call(Function::Min)?;
+                return self.parse_postfix(expr);
+            }
+            Token::Id(id) if id == "max" => {
+                let expr = self.parse_function_call(Function::Max)?;
+                return self.parse_postfix(expr);
+            }
+            Token::Id(id) if id == "abs" => {
+                let expr = self.parse_function_call(Function::Abs)?;
+                return self.parse_postfix(expr);
+            }
+            Token::Id(id) if id == "floor" => {
+                let expr = self.parse_function_call(Function::Floor)?;
+                return self.parse_postfix(expr);
+            }
+            Token::Id(id) if id == "ceil" => {
+                let expr = self.parse_function_call(Function::Ceil)?;
+                return self.parse_postfix(expr);
+            }
+            Token::Id(id) if id == "round" => {
+                let expr = self.parse_function_call(Function::Round)?;
+                return self.parse_postfix(expr);
+            }
+            Token::Id(id) if id == "sqrt" => {
+                let expr = self.parse_function_call(Function::Sqrt)?;
+                return self.parse_postfix(expr);
+            }
+            Token::Id(id) if id == "pow" => {
+                let expr = self.parse_function_call(Function::Pow)?;
+                return self.parse_postfix(expr);
+            }
+            Token::Id(id) if id == "len" => {
+                let expr = self.parse_function_call(Function::Len)?;
+                return self.parse_postfix(expr);
+            }
+            Token::Id(id) if id == "sum" => {
+                let expr = self.parse_function_call(Function::Sum)?;
+                return self.parse_postfix(expr);
+            }
             Token::Id(id) => {
                 if matches!(self.peek(), Some(Token::Lp)) {
                     if let Some(&index) = self.function_lookup.get(&id) {
-                        return self.parse_user_function_call(index);
+                        let expr = self.parse_user_function_call(index)?;
+                        return self.parse_postfix(expr);
                     }
                 }
 
                 if let Some(index) = self.lookup_local(&id) {
-                    Ok(ExprNode::local(index))
+                    ExprNode::local(index)
                 } else if self.function_lookup.contains_key(&id) {
-                    Err(Err::Parse(self.index))
+                    return Err(Err::Parse(self.index));
                 } else {
-                    Err(Err::Tok)
+                    return Err(Err::Tok);
                 }
             }
-            Token::Match => self.parse_match_expr(),
+            Token::Match => {
+                let expr = self.parse_match_expr()?;
+                return self.parse_postfix(expr);
+            }
             Token::Lp => {
                 let expr = self.parse_expr()?;
                 self.expect(Token::Rp)?;
-                Ok(expr)
+                expr
             }
             Token::LBrace => {
                 let expr = self.parse_expr()?;
                 self.expect(Token::RBrace)?;
-                Ok(expr)
+                expr
             }
-            _ => Err(Err::Tok),
+            Token::LBracket => {
+                let mut elements = Vec::new();
+                if !matches!(self.peek(), Some(Token::RBracket)) {
+                    loop {
+                        elements.push(self.parse_expr()?);
+                        if matches!(self.peek(), Some(Token::Comma)) {
+                            self.next();
+                            continue;
+                        }
+                        break;
+                    }
+                }
+                self.expect(Token::RBracket)?;
+                ExprNode::list(elements)
+            }
+            _ => return Err(Err::Tok),
+        };
+        self.parse_postfix(expr)
+    }
+
+    fn parse_postfix(&mut self, mut expr: ExprNode) -> Result<ExprNode, Err> {
+        loop {
+            match self.peek() {
+                Some(Token::LBracket) => {
+                    self.next();
+                    let index = self.parse_expr()?;
+                    self.expect(Token::RBracket)?;
+                    expr = ExprNode::index(expr, index);
+                }
+                _ => break,
+            }
         }
+        Ok(expr)
     }
 
     fn parse_function_call(&mut self, function: Function) -> Result<ExprNode, Err> {
@@ -1223,6 +1306,8 @@ impl Parser {
                 | "round"
                 | "sqrt"
                 | "pow"
+                | "len"
+                | "sum"
         )
     }
 }
@@ -1237,6 +1322,8 @@ enum Token {
     Rp,
     LBrace,
     RBrace,
+    LBracket,
+    RBracket,
     Comma,
     Semi,
     Colon,
@@ -1350,8 +1437,8 @@ impl BinaryOp {
             LessEq => Value::from_bool(lhs.as_f64() <= rhs.as_f64()),
             Greater => Value::from_bool(lhs.as_f64() > rhs.as_f64()),
             GreaterEq => Value::from_bool(lhs.as_f64() >= rhs.as_f64()),
-            Eq => Value::from_bool(lhs.as_f64() == rhs.as_f64()),
-            NotEq => Value::from_bool(lhs.as_f64() != rhs.as_f64()),
+            Eq => Value::from_bool(lhs.equals(&rhs)),
+            NotEq => Value::from_bool(!lhs.equals(&rhs)),
             And => Value::from_bool(lhs.as_bool() && rhs.as_bool()),
             Or => Value::from_bool(lhs.as_bool() || rhs.as_bool()),
         }
@@ -1384,6 +1471,8 @@ enum Function {
     Round,
     Sqrt,
     Pow,
+    Len,
+    Sum,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1409,6 +1498,11 @@ enum ExprNode {
     Match {
         scrutinee: Box<ExprNode>,
         arms: Vec<MatchArm>,
+    },
+    List(Vec<ExprNode>),
+    Index {
+        target: Box<ExprNode>,
+        index: Box<ExprNode>,
     },
 }
 
@@ -1454,6 +1548,18 @@ impl ExprNode {
         ExprNode::Match {
             scrutinee: Box::new(scrutinee),
             arms,
+        }
+        .fold()
+    }
+
+    fn list(elements: Vec<ExprNode>) -> Self {
+        ExprNode::List(elements).fold()
+    }
+
+    fn index(target: ExprNode, index: ExprNode) -> Self {
+        ExprNode::Index {
+            target: Box::new(target),
+            index: Box::new(index),
         }
         .fold()
     }
@@ -1524,6 +1630,24 @@ impl ExprNode {
                 };
                 node.const_value().map_or(node, ExprNode::from_value)
             }
+            List(elements) => {
+                let folded: Vec<_> = elements.into_iter().map(|expr| expr.fold()).collect();
+                ExprNode::List(folded)
+            }
+            Index { target, index } => {
+                let target = target.fold();
+                let index = index.fold();
+                if let (Some(container), Some(offset)) = (target.const_value(), index.const_value())
+                {
+                    let resolved = offset.as_i64();
+                    let value = container.into_indexed(resolved);
+                    return ExprNode::from_value(value);
+                }
+                ExprNode::Index {
+                    target: Box::new(target),
+                    index: Box::new(index),
+                }
+            }
         }
     }
 
@@ -1562,11 +1686,23 @@ impl ExprNode {
             Match { scrutinee, arms } => {
                 let value = scrutinee.const_value()?;
                 for arm in arms {
-                    if let Some(result) = arm.const_result(value) {
+                    if let Some(result) = arm.const_result(&value) {
                         return Some(result);
                     }
                 }
                 None
+            }
+            List(elements) => {
+                let mut values = Vec::with_capacity(elements.len());
+                for element in elements {
+                    values.push(element.const_value()?);
+                }
+                Some(Value::from_list(values))
+            }
+            Index { target, index } => {
+                let container = target.const_value()?;
+                let offset = index.const_value()?.as_i64();
+                Some(container.into_indexed(offset))
             }
         }
     }
@@ -1577,7 +1713,7 @@ impl ExprNode {
             Number(n) => Value::from_f64(*n),
             Bool(b) => Value::from_bool(*b),
             Field(field) => field.read(ctx),
-            Local(id) => locals[*id],
+            Local(id) => locals[*id].clone(),
             UnaryNeg(expr) => Value::from_f64(-expr.evaluate(program, ctx, locals).as_f64()),
             UnaryNot(expr) => Value::from_bool(!expr.evaluate(program, ctx, locals).as_bool()),
             Binary { op, lhs, rhs } => match op {
@@ -1611,10 +1747,22 @@ impl ExprNode {
                     program.evaluate_user_function(*index, ctx, locals, args)
                 }
             },
+            List(elements) => {
+                let mut values = Vec::with_capacity(elements.len());
+                for element in elements {
+                    values.push(element.evaluate(program, ctx, locals));
+                }
+                Value::from_list(values)
+            }
+            Index { target, index } => {
+                let container = target.evaluate(program, ctx, locals);
+                let offset = index.evaluate(program, ctx, locals).as_i64();
+                container.into_indexed(offset)
+            }
             Match { scrutinee, arms } => {
                 let value = scrutinee.evaluate(program, ctx, locals);
                 for arm in arms {
-                    if arm.matches(program, ctx, locals, value) {
+                    if arm.matches(program, ctx, locals, &value) {
                         return arm.evaluate(program, ctx, locals);
                     }
                 }
@@ -1627,14 +1775,19 @@ impl ExprNode {
         match value {
             Value::F(v) => ExprNode::Number(v),
             Value::B(b) => ExprNode::Bool(b),
+            Value::List(values) => {
+                let elements = values.into_iter().map(ExprNode::from_value).collect();
+                ExprNode::list(elements)
+            }
         }
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 enum Value {
     F(f64),
     B(bool),
+    List(Vec<Value>),
 }
 
 impl Value {
@@ -1646,39 +1799,84 @@ impl Value {
         Value::B(v)
     }
 
-    fn as_f64(self) -> f64 {
+    fn from_list(values: Vec<Value>) -> Self {
+        Value::List(values)
+    }
+
+    fn as_f64(&self) -> f64 {
         match self {
-            Value::F(v) => v,
+            Value::F(v) => *v,
             Value::B(true) => 1.0,
             Value::B(false) => 0.0,
+            Value::List(_) => panic!("cannot coerce list to number"),
         }
     }
 
-    fn as_bool(self) -> bool {
+    fn as_bool(&self) -> bool {
         match self {
-            Value::B(v) => v,
-            Value::F(v) => v != 0.0,
+            Value::B(v) => *v,
+            Value::F(v) => *v != 0.0,
+            Value::List(_) => panic!("cannot coerce list to boolean"),
         }
     }
 
-    fn as_i64(self) -> i64 {
+    fn as_i64(&self) -> i64 {
         self.as_f64().round() as i64
     }
 
-    fn as_u32(self) -> u32 {
+    fn as_u32(&self) -> u32 {
         self.as_f64().round() as u32
     }
 
-    fn as_u8(self) -> u8 {
+    fn as_u8(&self) -> u8 {
         self.as_f64().round() as u8
     }
 
-    fn equals(self, other: Value) -> bool {
+    fn as_list(&self) -> &[Value] {
+        match self {
+            Value::List(values) => values,
+            _ => panic!("expected list value"),
+        }
+    }
+
+    fn into_list(self) -> Vec<Value> {
+        match self {
+            Value::List(values) => values,
+            _ => panic!("expected list value"),
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            Value::List(values) => values.len(),
+            _ => panic!("expected list value"),
+        }
+    }
+
+    fn into_indexed(self, index: i64) -> Value {
+        match self {
+            Value::List(values) => {
+                let len = values.len() as i64;
+                let resolved = if index < 0 { len + index } else { index };
+                if resolved < 0 || resolved >= len {
+                    panic!("list index out of bounds");
+                }
+                values.into_iter().nth(resolved as usize).unwrap()
+            }
+            _ => panic!("expected list value"),
+        }
+    }
+
+    fn equals(&self, other: &Value) -> bool {
         match (self, other) {
             (Value::B(lhs), Value::B(rhs)) => lhs == rhs,
             (Value::F(lhs), Value::F(rhs)) => lhs == rhs,
-            (Value::F(lhs), Value::B(rhs)) => lhs == if rhs { 1.0 } else { 0.0 },
-            (Value::B(lhs), Value::F(rhs)) => (if lhs { 1.0 } else { 0.0 }) == rhs,
+            (Value::F(lhs), Value::B(rhs)) => *lhs == if *rhs { 1.0 } else { 0.0 },
+            (Value::B(lhs), Value::F(rhs)) => (if *lhs { 1.0 } else { 0.0 }) == *rhs,
+            (Value::List(lhs), Value::List(rhs)) => {
+                lhs.len() == rhs.len() && lhs.iter().zip(rhs.iter()).all(|(l, r)| l.equals(r))
+            }
+            _ => false,
         }
     }
 }
@@ -1713,7 +1911,9 @@ impl Function {
             | Function::Floor
             | Function::Ceil
             | Function::Round
-            | Function::Sqrt => (1, Some(1)),
+            | Function::Sqrt
+            | Function::Len
+            | Function::Sum => (1, Some(1)),
             Function::Pow => (2, Some(2)),
             Function::Select | Function::Clamp => (3, Some(3)),
             Function::Min | Function::Max => (2, None),
@@ -1725,9 +1925,9 @@ impl Function {
             Function::Log2 => Value::from_f64(values[0].as_f64().log2()),
             Function::Select => {
                 if values[0].as_bool() {
-                    values[1]
+                    values[1].clone()
                 } else {
-                    values[2]
+                    values[2].clone()
                 }
             }
             Function::Clamp => {
@@ -1738,7 +1938,7 @@ impl Function {
             }
             Function::Min => {
                 let mut iter = values.iter();
-                let first = iter.next().copied().unwrap();
+                let first = iter.next().expect("min requires arguments");
                 let mut best = first.as_f64();
                 for v in iter {
                     best = best.min(v.as_f64());
@@ -1747,7 +1947,7 @@ impl Function {
             }
             Function::Max => {
                 let mut iter = values.iter();
-                let first = iter.next().copied().unwrap();
+                let first = iter.next().expect("max requires arguments");
                 let mut best = first.as_f64();
                 for v in iter {
                     best = best.max(v.as_f64());
@@ -1760,6 +1960,15 @@ impl Function {
             Function::Round => Value::from_f64(values[0].as_f64().round()),
             Function::Sqrt => Value::from_f64(values[0].as_f64().sqrt()),
             Function::Pow => Value::from_f64(values[0].as_f64().powf(values[1].as_f64())),
+            Function::Len => Value::from_f64(values[0].len() as f64),
+            Function::Sum => {
+                let total = values[0]
+                    .as_list()
+                    .iter()
+                    .map(|value| value.as_f64())
+                    .sum::<f64>();
+                Value::from_f64(total)
+            }
         }
     }
 
@@ -1829,6 +2038,18 @@ impl Function {
                 let exp = args[1].evaluate(program, ctx, locals).as_f64();
                 Value::from_f64(base.powf(exp))
             }
+            Function::Len => {
+                let list = args[0].evaluate(program, ctx, locals);
+                Value::from_f64(list.len() as f64)
+            }
+            Function::Sum => {
+                let values = args[0].evaluate(program, ctx, locals).into_list();
+                let mut total = 0.0;
+                for value in values {
+                    total += value.as_f64();
+                }
+                Value::from_f64(total)
+            }
         }
     }
 }
@@ -1857,8 +2078,8 @@ impl FunctionDef {
 
     fn eval(&self, program: &Program, ctx: &Ctx, locals: &[Value]) -> Value {
         if self.params == 0 {
-            if let Some(value) = self.const_value {
-                return value;
+            if let Some(value) = &self.const_value {
+                return value.clone();
             }
             debug_assert!(locals.is_empty());
         } else {
@@ -1896,6 +2117,14 @@ fn lex(src: &str) -> Result<Vec<Token>, Err> {
             }
             b'}' => {
                 tokens.push(Token::RBrace);
+                index += 1;
+            }
+            b'[' => {
+                tokens.push(Token::LBracket);
+                index += 1;
+            }
+            b']' => {
+                tokens.push(Token::RBracket);
                 index += 1;
             }
             b',' => {
@@ -2428,5 +2657,42 @@ mod tests {
         let program = Program::parse(script).unwrap();
         let out = program.evaluate(&ctx());
         assert_eq!(out.hard.wg, Some(13));
+    }
+
+    #[test]
+    fn list_literals_and_indexing() {
+        let script = r#"
+            let dims = [r, c + 1, k];
+            wg: dims[1];
+            tile_cols: len(dims);
+            radix: dims[-1];
+        "#;
+
+        let program = Program::parse(script).unwrap();
+        let out = program.evaluate(&ctx());
+        assert_eq!(out.hard.wg, Some(16385));
+        assert_eq!(out.hard.tile_cols, Some(3));
+        assert_eq!(out.hard.radix, Some(512));
+    }
+
+    #[test]
+    fn sum_intrinsic_accumulates_lists() {
+        let script = r#"
+            let metrics = [r, c, k];
+            soft(radix, sum(metrics), 1.0, true);
+            wg: sum([1, 2, 3]);
+        "#;
+
+        let program = Program::parse(script).unwrap();
+        let out = program.evaluate(&ctx());
+        assert_eq!(out.hard.wg, Some(6));
+        assert_eq!(out.soft.len(), 1);
+        match &out.soft[0] {
+            SoftRule::Radix { val, w } => {
+                assert_eq!(*val, 17920);
+                assert!((*w - 1.0).abs() < f32::EPSILON);
+            }
+            rule => panic!("unexpected soft rule: {rule:?}"),
+        }
     }
 }
