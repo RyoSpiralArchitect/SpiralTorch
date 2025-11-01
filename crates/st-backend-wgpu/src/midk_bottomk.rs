@@ -24,6 +24,7 @@ pub struct Pipelines {
     pub apply_fallback: Arc<ComputePipeline>,
     pub apply_subgroup: Option<Arc<ComputePipeline>>,
     pub apply_subgroup_v2: Option<Arc<ComputePipeline>>,
+    pub middlemax: Arc<ComputePipeline>,
 }
 
 impl Pipelines {
@@ -85,6 +86,8 @@ pub struct DispatchArgs<'a> {
     pub out_positions: &'a wgpu::Buffer,
     /// Buffer that receives the compacted values.
     pub out_values: &'a wgpu::Buffer,
+    /// Optional buffer that receives the per-row middle-band maxima.
+    pub out_middlemax: Option<&'a wgpu::Buffer>,
     /// Scratch buffer that stores per-tile prefix totals.
     pub prefix: &'a wgpu::Buffer,
 }
@@ -113,13 +116,15 @@ impl<'a> DispatchArgs<'a> {
 /// Dispatch the MidK/BottomK compaction pipeline family.
 ///
 /// The helper encodes the three stages required by the compaction kernels
-/// (tile scan, row prefix, apply) and submits them to the provided queue.
+/// (tile scan, row prefix, apply) and optionally appends the `middlemax`
+/// reduction before submitting the commands to the provided queue.
 /// The caller is responsible for ensuring the buffers have the correct size:
 ///
 /// * `values`: `rows * row_stride` elements.
 /// * `mask`: `rows * row_stride` entries, interpreted as `u32` flags.
 /// * `out_positions`: `rows` atomic counters (written as `u32`).
 /// * `out_values`: `rows * row_stride` elements to receive compacted values.
+/// * `out_middlemax` (optional): `rows` elements storing per-row maxima of the kept band.
 /// * `prefix`: `rows * tiles_x` entries (where `tiles_x = ceil(cols / 256)`).
 pub fn dispatch(
     device: &Device,
@@ -182,7 +187,7 @@ pub fn encode_into(
         &params_buffer,
         &args,
         tiles_x,
-        "scan",
+        Stage::Scan,
     );
     encode_stage(
         device,
@@ -191,7 +196,7 @@ pub fn encode_into(
         &params_buffer,
         &args,
         tiles_x,
-        "row_prefix",
+        Stage::RowPrefix,
     );
     encode_stage(
         device,
@@ -200,10 +205,57 @@ pub fn encode_into(
         &params_buffer,
         &args,
         tiles_x,
-        "apply",
+        Stage::Apply,
     );
 
+    if args.out_middlemax.is_some() {
+        encode_stage(
+            device,
+            encoder,
+            pipelines.middlemax.as_ref(),
+            &params_buffer,
+            &args,
+            tiles_x,
+            Stage::MiddleMax,
+        );
+    }
+
     Ok(true)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Stage {
+    Scan,
+    RowPrefix,
+    Apply,
+    MiddleMax,
+}
+
+impl Stage {
+    fn bind_group_label(self) -> &'static str {
+        match self {
+            Stage::Scan => "st.midk_bottomk.bind_group.scan",
+            Stage::RowPrefix => "st.midk_bottomk.bind_group.row_prefix",
+            Stage::Apply => "st.midk_bottomk.bind_group.apply",
+            Stage::MiddleMax => "st.midk_bottomk.bind_group.middlemax",
+        }
+    }
+
+    fn pass_label(self) -> &'static str {
+        match self {
+            Stage::Scan => "st.midk_bottomk.pass.scan",
+            Stage::RowPrefix => "st.midk_bottomk.pass.row_prefix",
+            Stage::Apply => "st.midk_bottomk.pass.apply",
+            Stage::MiddleMax => "st.midk_bottomk.pass.middlemax",
+        }
+    }
+
+    fn workgroups_x(self, tiles_x: u32) -> u32 {
+        match self {
+            Stage::MiddleMax => 1,
+            _ => tiles_x,
+        }
+    }
 }
 
 fn encode_stage(
@@ -213,66 +265,70 @@ fn encode_stage(
     params: &wgpu::Buffer,
     args: &DispatchArgs<'_>,
     tiles_x: u32,
-    stage: &str,
+    stage: Stage,
 ) {
     let layout = pipeline.get_bind_group_layout(0);
-    let bind_group_label = match stage {
-        "scan" => "st.midk_bottomk.bind_group.scan",
-        "row_prefix" => "st.midk_bottomk.bind_group.row_prefix",
-        "apply" => "st.midk_bottomk.bind_group.apply",
-        _ => "st.midk_bottomk.bind_group",
-    };
+    let bind_group_label = stage.bind_group_label();
+    let entries = bind_group_entries(stage, args, params);
     let bind_group = device.create_bind_group(&BindGroupDescriptor {
         label: Some(bind_group_label),
         layout: &layout,
-        entries: &bind_group_entries(args, params),
+        entries: &entries,
     });
 
-    let pass_label = match stage {
-        "scan" => "st.midk_bottomk.pass.scan",
-        "row_prefix" => "st.midk_bottomk.pass.row_prefix",
-        "apply" => "st.midk_bottomk.pass.apply",
-        _ => "st.midk_bottomk.pass",
-    };
+    let pass_label = stage.pass_label();
     let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
         label: Some(pass_label),
         timestamp_writes: None,
     });
     pass.set_pipeline(pipeline);
     pass.set_bind_group(0, &bind_group, &[]);
-    pass.dispatch_workgroups(tiles_x, args.rows, 1);
+    pass.dispatch_workgroups(stage.workgroups_x(tiles_x), args.rows, 1);
 }
 
 fn bind_group_entries<'a>(
+    stage: Stage,
     args: &'a DispatchArgs<'a>,
     params: &'a wgpu::Buffer,
-) -> [BindGroupEntry<'a>; 6] {
-    [
-        BindGroupEntry {
-            binding: 0,
-            resource: args.values.as_entire_binding(),
-        },
-        BindGroupEntry {
-            binding: 1,
-            resource: args.mask.as_entire_binding(),
-        },
-        BindGroupEntry {
-            binding: 2,
-            resource: args.out_positions.as_entire_binding(),
-        },
-        BindGroupEntry {
-            binding: 3,
-            resource: args.out_values.as_entire_binding(),
-        },
-        BindGroupEntry {
-            binding: 4,
-            resource: params.as_entire_binding(),
-        },
-        BindGroupEntry {
-            binding: 5,
-            resource: args.prefix.as_entire_binding(),
-        },
-    ]
+) -> Vec<BindGroupEntry<'a>> {
+    let mut entries = Vec::with_capacity(match stage {
+        Stage::MiddleMax => 7,
+        _ => 6,
+    });
+    entries.push(BindGroupEntry {
+        binding: 0,
+        resource: args.values.as_entire_binding(),
+    });
+    entries.push(BindGroupEntry {
+        binding: 1,
+        resource: args.mask.as_entire_binding(),
+    });
+    entries.push(BindGroupEntry {
+        binding: 2,
+        resource: args.out_positions.as_entire_binding(),
+    });
+    entries.push(BindGroupEntry {
+        binding: 3,
+        resource: args.out_values.as_entire_binding(),
+    });
+    entries.push(BindGroupEntry {
+        binding: 4,
+        resource: params.as_entire_binding(),
+    });
+    entries.push(BindGroupEntry {
+        binding: 5,
+        resource: args.prefix.as_entire_binding(),
+    });
+    if stage == Stage::MiddleMax {
+        let out = args.out_middlemax.expect(
+            "DispatchArgs::out_middlemax must be provided when dispatching the middlemax stage",
+        );
+        entries.push(BindGroupEntry {
+            binding: 6,
+            resource: out.as_entire_binding(),
+        });
+    }
+    entries
 }
 
 #[repr(C)]
@@ -357,6 +413,7 @@ fn element_counts_for_dims(rows: u32, row_stride: u32, tiles_x: u32) -> ElementC
         mask: rows as u64 * row_stride as u64,
         out_positions: rows as u64,
         out_values: rows as u64 * row_stride as u64,
+        out_middlemax: rows as u64,
         prefix: rows as u64 * tiles_x as u64,
     }
 }
@@ -385,6 +442,8 @@ pub struct ElementCounts {
     pub out_positions: u64,
     /// Number of compacted elements emitted to `out_values`.
     pub out_values: u64,
+    /// Number of maxima written to `out_middlemax` when requested.
+    pub out_middlemax: u64,
     /// Number of prefix tiles stored in `prefix`.
     pub prefix: u64,
 }
@@ -432,6 +491,7 @@ mod tests {
         assert_eq!(counts.mask, 3 * 512);
         assert_eq!(counts.out_positions, 3);
         assert_eq!(counts.out_values, 3 * 512);
+        assert_eq!(counts.out_middlemax, 3);
         assert_eq!(counts.prefix, 3 * 2);
     }
 }
@@ -511,6 +571,13 @@ impl<'a> Builder<'a> {
             "midk_compact_apply",
         )?;
 
+        let middlemax = self.cache.load_compute_pipeline(
+            self.device,
+            "midk_bottomk_compaction.wgsl",
+            "midk_middlemax",
+            "midk_middlemax",
+        )?;
+
         let apply_subgroup = (self.supports_subgroup && self.include_subgroup_v1)
             .then(|| {
                 self.cache.load_compute_pipeline(
@@ -539,6 +606,7 @@ impl<'a> Builder<'a> {
             apply_fallback,
             apply_subgroup,
             apply_subgroup_v2,
+            middlemax,
         })
     }
 
