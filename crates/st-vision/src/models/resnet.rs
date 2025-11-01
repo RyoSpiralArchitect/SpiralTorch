@@ -74,6 +74,90 @@ pub struct ResNetConfig {
     pub skip_slip: Option<SkipSlipSchedule>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ResNetPreset {
+    ResNet18,
+    ResNet34,
+    ResNet50,
+    ResNet56Cifar,
+    ResNet101,
+    ResNet152,
+}
+
+impl ResNetPreset {
+    pub fn depth(self) -> usize {
+        match self {
+            Self::ResNet18 => 18,
+            Self::ResNet34 => 34,
+            Self::ResNet50 => 50,
+            Self::ResNet56Cifar => 56,
+            Self::ResNet101 => 101,
+            Self::ResNet152 => 152,
+        }
+    }
+
+    pub fn block_depths(self) -> &'static [usize] {
+        match self {
+            Self::ResNet18 => &[2, 2, 2, 2],
+            Self::ResNet34 | Self::ResNet50 => &[3, 4, 6, 3],
+            Self::ResNet56Cifar => &[9, 9, 9],
+            Self::ResNet101 => &[3, 4, 23, 3],
+            Self::ResNet152 => &[3, 8, 36, 3],
+        }
+    }
+
+    pub fn stage_channels(self) -> &'static [usize] {
+        match self {
+            Self::ResNet56Cifar => &[16, 32, 64],
+            _ => &[64, 128, 256, 512],
+        }
+    }
+
+    fn stem_kernel(self) -> (usize, usize) {
+        match self {
+            Self::ResNet56Cifar => (3, 3),
+            _ => (7, 7),
+        }
+    }
+
+    fn stem_stride(self) -> (usize, usize) {
+        match self {
+            Self::ResNet56Cifar => (1, 1),
+            _ => (2, 2),
+        }
+    }
+
+    fn stem_padding(self) -> (usize, usize) {
+        match self {
+            Self::ResNet56Cifar => (1, 1),
+            _ => (3, 3),
+        }
+    }
+
+    fn input_hw(self) -> (usize, usize) {
+        match self {
+            Self::ResNet56Cifar => (32, 32),
+            _ => (224, 224),
+        }
+    }
+
+    fn use_max_pool(self) -> bool {
+        !matches!(self, Self::ResNet56Cifar)
+    }
+
+    pub fn from_depth(depth: usize) -> Option<Self> {
+        match depth {
+            18 => Some(Self::ResNet18),
+            34 => Some(Self::ResNet34),
+            50 => Some(Self::ResNet50),
+            56 => Some(Self::ResNet56Cifar),
+            101 => Some(Self::ResNet101),
+            152 => Some(Self::ResNet152),
+            _ => None,
+        }
+    }
+}
+
 impl Default for ResNetConfig {
     fn default() -> Self {
         Self {
@@ -96,8 +180,32 @@ impl Default for ResNetConfig {
 }
 
 impl ResNetConfig {
+    /// Builds a configuration from a canonical ResNet preset.
+    pub fn from_preset(preset: ResNetPreset) -> Self {
+        let mut base = Self::default();
+        base.input_hw = preset.input_hw();
+        base.stage_channels = preset.stage_channels().to_vec();
+        base.block_depths = preset.block_depths().to_vec();
+        base.stem_kernel = preset.stem_kernel();
+        base.stem_stride = preset.stem_stride();
+        base.stem_padding = preset.stem_padding();
+        base.use_max_pool = preset.use_max_pool();
+        base
+    }
+
+    /// Chooses a preset based on the requested network depth.
+    pub fn from_depth(depth: usize) -> PureResult<Self> {
+        let Some(preset) = ResNetPreset::from_depth(depth) else {
+            return Err(TensorError::InvalidValue {
+                label: "resnet_depth",
+            });
+        };
+        Ok(Self::from_preset(preset))
+    }
+
     /// Returns a CIFAR-oriented ResNet-56 configuration with optional learnable skip scaling.
     pub fn resnet56_cifar(skip_learnable: bool) -> Self {
+        let mut base = Self::from_preset(ResNetPreset::ResNet56Cifar);
         let skip_slip = if skip_learnable {
             Some(
                 SkipSlipSchedule::linear(0.35, 1.0)
@@ -107,22 +215,9 @@ impl ResNetConfig {
         } else {
             None
         };
-        Self {
-            input_channels: 3,
-            input_hw: (32, 32),
-            stage_channels: vec![16, 32, 64],
-            block_depths: vec![9, 9, 9],
-            stem_kernel: (3, 3),
-            stem_stride: (1, 1),
-            stem_padding: (1, 1),
-            curvature: -1.0,
-            epsilon: 1.0e-5,
-            use_max_pool: false,
-            global_pool: true,
-            skip_init: 1.0,
-            skip_learnable,
-            skip_slip,
-        }
+        base.skip_learnable = skip_learnable;
+        base.skip_slip = skip_slip;
+        base
     }
 
     /// Applies a skip slip schedule to the configuration.
@@ -769,6 +864,15 @@ pub struct ResNetBackbone {
 }
 
 impl ResNetBackbone {
+    pub fn from_preset(preset: ResNetPreset) -> PureResult<Self> {
+        Self::new(ResNetConfig::from_preset(preset))
+    }
+
+    pub fn from_depth(depth: usize) -> PureResult<Self> {
+        let config = ResNetConfig::from_depth(depth)?;
+        Self::new(config)
+    }
+
     pub fn new(config: ResNetConfig) -> PureResult<Self> {
         if config.stage_channels.is_empty() {
             return Err(TensorError::EmptyInput("resnet_stage_channels"));
@@ -1237,17 +1341,8 @@ pub struct ResNet56WithSkipConfig {
 
 impl Default for ResNet56WithSkipConfig {
     fn default() -> Self {
-        let mut base = ResNetConfig::default();
-        base.input_hw = (32, 32);
-        base.stage_channels = vec![16, 32, 64];
-        base.block_depths = vec![9, 9, 9];
-        base.stem_kernel = (3, 3);
-        base.stem_stride = (1, 1);
-        base.stem_padding = (1, 1);
-        base.use_max_pool = false;
-        base.global_pool = true;
         Self {
-            base,
+            base: ResNetConfig::from_preset(ResNetPreset::ResNet56Cifar),
             skip_scale: 0.5,
         }
     }

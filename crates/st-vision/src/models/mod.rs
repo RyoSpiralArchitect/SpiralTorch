@@ -4,7 +4,8 @@ pub mod vit;
 
 pub use convnext::{ConvNeXtBackbone, ConvNeXtConfig};
 pub use resnet::{
-    ResNet56WithSkip, ResNet56WithSkipConfig, ResNetBackbone, ResNetConfig, SkipSlipSchedule,
+    ResNet56WithSkip, ResNet56WithSkipConfig, ResNetBackbone, ResNetConfig, ResNetPreset,
+    SkipSlipSchedule,
 };
 pub use vit::{ViTBackbone, ViTConfig};
 
