@@ -1,0 +1,9 @@
+[package]
+name = "st-robotics"
+version = "0.1.0"
+edition = "2021"
+description = "Robotics sensor fusion and runtime utilities for SpiralTorch"
+license = "AGPL-3.0-or-later"
+
+[dependencies]
+spiral-safety = { path = "../spiral-safety" }
