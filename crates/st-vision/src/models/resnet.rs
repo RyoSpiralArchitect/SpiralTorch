@@ -562,6 +562,7 @@ impl SkipStyle {
         &mut self,
         residual_pre: &Tensor,
         grad_scaled: &Tensor,
+        override_param_grad: Option<f32>,
     ) -> PureResult<Tensor> {
         match self {
             SkipStyle::Identity => Ok(grad_scaled.clone()),
@@ -569,12 +570,15 @@ impl SkipStyle {
             SkipStyle::Learnable(param) => {
                 let scale = param.value().data()[0];
                 let grad_residual = grad_scaled.scale(scale)?;
-                let grad_value = grad_scaled
-                    .data()
-                    .iter()
-                    .zip(residual_pre.data().iter())
-                    .map(|(g, r)| g * r)
-                    .sum::<f32>();
+                let grad_value = match override_param_grad {
+                    Some(value) => value,
+                    None => grad_scaled
+                        .data()
+                        .iter()
+                        .zip(residual_pre.data().iter())
+                        .map(|(g, r)| g * r)
+                        .sum::<f32>(),
+                };
                 let grad_tensor = Tensor::from_vec(1, 1, vec![grad_value])?;
                 param.accumulate_euclidean(&grad_tensor)?;
                 Ok(grad_residual)
@@ -802,9 +806,31 @@ impl Module for ResNetBlock {
         } else {
             grad_residual_slipped.clone()
         };
-        let grad_residual_pre = self
-            .skip_style
-            .propagate_backward(&residual_pre, &grad_residual_scaled)?;
+        let override_param_grad = if (self.slip_factor - 1.0).abs() > f32::EPSILON {
+            match &self.skip_style {
+                SkipStyle::Learnable(_) => {
+                    let baseline_summed = norm2_out.add(&residual_scaled)?;
+                    let mut baseline_activation = Relu::new();
+                    let baseline_grad =
+                        baseline_activation.backward(&baseline_summed, grad_output)?;
+                    let baseline_value = baseline_grad
+                        .data()
+                        .iter()
+                        .zip(residual_pre.data().iter())
+                        .map(|(g, r)| g * r)
+                        .sum::<f32>();
+                    Some(baseline_value * self.slip_factor)
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+        let grad_residual_pre = self.skip_style.propagate_backward(
+            &residual_pre,
+            &grad_residual_scaled,
+            override_param_grad,
+        )?;
         if let Some((down_conv, down_norm)) = &mut self.downsample {
             let down_out = down_conv.forward(input)?;
             let grad_down = down_norm.backward(&down_out, &grad_residual_pre)?;

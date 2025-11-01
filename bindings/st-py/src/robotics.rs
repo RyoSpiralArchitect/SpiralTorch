@@ -373,13 +373,13 @@ impl PyFusedFrame {
     pub fn health(&self, py: Python<'_>) -> PyResult<PyObject> {
         let dict = PyDict::new_bound(py);
         for (key, health) in &self.inner.health {
-            let value = Py::new(
+            let py_health = Py::new(
                 py,
                 PyChannelHealth {
                     inner: health.clone(),
                 },
             )?;
-            dict.set_item(key, value)?;
+            dict.set_item(key, py_health)?;
         }
         Ok(dict.into_py(py))
     }
@@ -741,8 +741,8 @@ impl PyRoboticsRuntime {
         let steps = self.inner.drain_trajectory();
         let list = PyList::empty_bound(py);
         for step in steps {
-            let value = Py::new(py, PyRuntimeStep { inner: step })?;
-            list.append(value)?;
+            let py_step = Py::new(py, PyRuntimeStep { inner: step })?;
+            list.append(py_step)?;
         }
         Ok(list.into_py(py))
     }
@@ -1098,7 +1098,7 @@ impl PyZSpaceTrainerEpisodeBuilder {
         Ok(Self { inner: builder })
     }
 
-    #[pyo3(signature = (step, vision=None, end_episode=false))]
+    #[pyo3(signature = (step, vision=None, *, end_episode))]
     pub fn push(
         &mut self,
         step: PyRef<'_, PyRuntimeStep>,
@@ -1180,13 +1180,13 @@ impl PyRuntimeStep {
     pub fn safety(&self, py: Python<'_>) -> PyResult<PyObject> {
         let list = PyList::empty_bound(py);
         for review in &self.inner.safety {
-            let value = Py::new(
+            let review = Py::new(
                 py,
                 PySafetyReview {
                     inner: review.clone(),
                 },
             )?;
-            list.append(value)?;
+            list.append(review)?;
         }
         Ok(list.into_py(py))
     }
