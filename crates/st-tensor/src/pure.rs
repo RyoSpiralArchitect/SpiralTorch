@@ -5867,83 +5867,63 @@ fn fused_attention_cpu(
     output
 }
 
-fn cpu_row_softmax_hardmax(
-    data: &[f32],
-    rows: usize,
-    cols: usize,
-) -> (Vec<f32>, Vec<f32>) {
+fn cpu_row_softmax_hardmax(data: &[f32], rows: usize, cols: usize) -> (Vec<f32>, Vec<f32>) {
     let expected = rows.saturating_mul(cols);
-    let mut softmax = vec![0.0; expected];
-    let mut hardmax = vec![0.0; expected];
-
-    if expected == 0 || data.len() != expected {
-        return (softmax, hardmax);
+    if data.len() != expected || expected == 0 {
+        return (vec![0.0; expected], vec![0.0; expected]);
     }
+
+    let mut softmax = vec![0.0f32; expected];
+    let mut hardmax = vec![0.0f32; expected];
 
     for row in 0..rows {
         let offset = row * cols;
-        let input_row = &data[offset..offset + cols];
-        let soft_row = &mut softmax[offset..offset + cols];
-        let hard_row = &mut hardmax[offset..offset + cols];
+        let row_slice = &data[offset..offset + cols];
 
-        soft_row.fill(0.0);
-        hard_row.fill(0.0);
-
-        let mut row_max = f32::NEG_INFINITY;
-        let mut argmax_index: Option<usize> = None;
-        let mut finite_values = 0usize;
-
-        for (index, &value) in input_row.iter().enumerate() {
+        let mut max_value = f32::NEG_INFINITY;
+        let mut max_index = 0usize;
+        let mut found = false;
+        for (index, &value) in row_slice.iter().enumerate() {
             if value.is_nan() {
                 continue;
             }
-
-            finite_values += 1;
-            if value > row_max || argmax_index.is_none() {
-                row_max = value;
-                argmax_index = Some(index);
+            if !found || value > max_value {
+                max_value = value;
+                max_index = index;
+                found = true;
             }
         }
 
-        if finite_values == 0 {
-            continue;
-        }
-
-        let mut sum = 0.0f32;
-        for (prob_slot, &value) in soft_row.iter_mut().zip(input_row.iter()) {
-            if value.is_nan() {
-                *prob_slot = 0.0;
-                continue;
-            }
-
-            let shifted = if row_max.is_infinite() {
-                if value == row_max { 1.0 } else { 0.0 }
-            } else {
-                (value - row_max).exp()
-            };
-
-            sum += shifted;
-            *prob_slot = shifted;
-        }
-
-        let inv_sum = if sum.is_finite() && sum > 0.0 {
-            sum.recip()
+        let base = if found && max_value.is_finite() {
+            max_value
         } else {
             0.0
         };
 
-        if inv_sum > 0.0 {
-            for prob in soft_row.iter_mut() {
-                *prob *= inv_sum;
-            }
-        } else {
-            soft_row.fill(0.0);
+        let mut denom = 0.0f32;
+        for (index, &value) in row_slice.iter().enumerate() {
+            let weight = if !found || value.is_nan() {
+                0.0
+            } else {
+                (value - base).exp()
+            };
+            softmax[offset + index] = weight;
+            denom += weight;
         }
 
-        if let Some(idx) = argmax_index {
-            if let Some(slot) = hard_row.get_mut(idx) {
-                *slot = 1.0;
+        if found {
+            if denom.is_finite() && denom > f32::EPSILON {
+                let inv = denom.recip();
+                for value in &mut softmax[offset..offset + cols] {
+                    *value *= inv;
+                }
+            } else {
+                for value in &mut softmax[offset..offset + cols] {
+                    *value = 0.0;
+                }
+                softmax[offset + max_index] = 1.0;
             }
+            hardmax[offset + max_index] = 1.0;
         }
     }
 
