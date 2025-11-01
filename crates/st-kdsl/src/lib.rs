@@ -27,7 +27,10 @@ pub use registry::{
     AutotuneKey, AutotuneRegistry, DeviceProfile, KernelProfile, TelemetryLog, TelemetrySample,
     TelemetrySummary,
 };
-pub use self_mod::{SelfRewriteEngine, SelfRewriteEvent};
+pub use self_mod::{
+    ContextClusterSnapshot, DiversitySnapshot, HintQualitySnapshot, HintStatSnapshot,
+    HintTransitionSnapshot, SelfRewriteEngine, SelfRewriteEvent,
+};
 pub use tile::{TileConfig, TileIter, TileKnowledge, TileTemplate, WeightedMetric};
 
 #[derive(Clone, Copy, Debug, Default)]

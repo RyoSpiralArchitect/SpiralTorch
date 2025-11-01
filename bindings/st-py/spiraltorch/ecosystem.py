@@ -165,7 +165,42 @@ def _call_with_optional_stream(
         raise
 
 
-def _dlpack_from_array(array: Any, *, stream: Any | None) -> Any:
+def _resolve_cupy_stream(stream: Any | None, *, cupy: Any) -> Any:
+    if stream is None:
+        return None
+
+    cuda = getattr(cupy, "cuda", None)
+
+    if isinstance(stream, str):
+        keyword = stream.lower()
+        if keyword in {"current", "auto"}:
+            if cuda is None or not hasattr(cuda, "get_current_stream"):
+                raise RuntimeError(
+                    "CuPy does not expose cuda.get_current_stream; cannot resolve 'current' stream alias."
+                )
+            return cuda.get_current_stream()
+        if keyword in {"null", "default"}:
+            stream_class = getattr(cuda, "Stream", None) if cuda is not None else None
+            null_stream = getattr(stream_class, "null", None)
+            if null_stream is None:
+                raise RuntimeError(
+                    "CuPy does not expose cuda.Stream.null; cannot resolve 'null' stream alias."
+                )
+            return null_stream
+        raise ValueError(f"Unknown CuPy stream alias: {stream!r}")
+
+    if isinstance(stream, int):
+        external_stream = getattr(cuda, "ExternalStream", None) if cuda is not None else None
+        if external_stream is None:
+            raise RuntimeError(
+                "CuPy does not expose cuda.ExternalStream; cannot wrap raw stream pointer."
+            )
+        return external_stream(stream)
+
+    return stream
+
+
+def _dlpack_from_array(array: Any, *, stream: Any | None, cupy_module: Any | None = None) -> Any:
     if hasattr(array, "__dlpack__"):
         method = getattr(array, "__dlpack__")
         return _call_with_optional_stream(method, (), stream=stream)
@@ -175,7 +210,7 @@ def _dlpack_from_array(array: Any, *, stream: Any | None) -> Any:
     if hasattr(array, "to_dlpack"):
         method = getattr(array, "to_dlpack")
         return _call_with_optional_stream(method, (), stream=stream)
-    cupy = _require_module("cupy")
+    cupy = cupy_module or _require_module("cupy")
     if hasattr(cupy, "toDlpack"):
         function = getattr(cupy, "toDlpack")
         return _call_with_optional_stream(function, (array,), stream=stream)
@@ -189,6 +224,7 @@ def tensor_to_cupy(tensor: Tensor, *, stream: Any | None = None) -> Any:
     """Share a :class:`~spiraltorch.Tensor` with CuPy via DLPack."""
 
     cupy = _require_module("cupy")
+    stream = _resolve_cupy_stream(stream, cupy=cupy)
     exporter = getattr(cupy, "from_dlpack", None)
     if exporter is None:  # pragma: no cover - defensive guard
         raise RuntimeError("cupy.from_dlpack is unavailable")
@@ -199,5 +235,7 @@ def tensor_to_cupy(tensor: Tensor, *, stream: Any | None = None) -> Any:
 def cupy_to_tensor(array: Any, *, stream: Any | None = None) -> Tensor:
     """Convert a ``cupy.ndarray`` (or compatible object) into a SpiralTorch tensor."""
 
-    capsule = _dlpack_from_array(array, stream=stream)
+    cupy = _require_module("cupy")
+    stream = _resolve_cupy_stream(stream, cupy=cupy)
+    capsule = _dlpack_from_array(array, stream=stream, cupy_module=cupy)
     return Tensor.from_dlpack(capsule)

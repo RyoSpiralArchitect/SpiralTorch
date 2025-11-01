@@ -1,6 +1,6 @@
 use crate::contrastive::{info_nce_loss_tensor, TensorInfoNCEResult};
 use crate::{ObjectiveError, Result};
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{rngs::StdRng, Rng};
 use serde::Deserialize;
 use spiral_config::determinism;
 use st_tensor::Tensor;

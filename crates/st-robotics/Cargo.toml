@@ -2,7 +2,6 @@
 name = "st-robotics"
 version = "0.1.0"
 edition = "2021"
+authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
 description = "Robotics sensor fusion and runtime utilities for SpiralTorch"
 license = "AGPL-3.0-or-later"
-
-[dependencies]

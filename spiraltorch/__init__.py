@@ -25,6 +25,139 @@ from typing import Any, NoReturn
 _TENSOR_NO_DATA = object()
 
 
+# Hardmax/spiral consensus constants mirrored from the native implementation.
+_GOLDEN_RATIO = (1.0 + math.sqrt(5.0)) / 2.0
+_GOLDEN_RATIO_CONJUGATE = 1.0 / _GOLDEN_RATIO
+_GOLDEN_RATIO_BIAS = 1.0 - _GOLDEN_RATIO_CONJUGATE
+_SPIRAL_PROJECTOR_RANK = 24
+_SPIRAL_PROJECTOR_WEIGHT = 0.75
+_SPIRAL_PROJECTOR_RAMANUJAN_ITERS = 6
+_SPIRAL_LEECH_PACKING_DENSITY = 0.001_929_574_309_403_922_5
+
+
+def _ramanujan_pi(iterations: int) -> float:
+    """Return the Ramanujan π approximation used by the stub consensus."""
+
+    iterations = max(1, int(iterations))
+    prefactor = (2.0 * math.sqrt(2.0)) / 9801.0
+    base = 396.0**4
+    factor = 1.0
+    series_sum = 0.0
+    approximation = math.pi
+
+    for k in range(iterations):
+        kf = float(k)
+        series_sum += factor * (1103.0 + 26390.0 * kf)
+        approximation = 1.0 / (prefactor * series_sum)
+        if k + 1 == iterations:
+            break
+        next_k = float(k + 1)
+        numerator = (
+            (4.0 * next_k - 3.0)
+            * (4.0 * next_k - 2.0)
+            * (4.0 * next_k - 1.0)
+            * (4.0 * next_k)
+        )
+        denominator = (next_k**4) * base
+        factor *= numerator / denominator
+
+    return approximation
+
+
+_SPIRAL_RAMANUJAN_PI = _ramanujan_pi(_SPIRAL_PROJECTOR_RAMANUJAN_ITERS)
+_SPIRAL_RAMANUJAN_RATIO = (
+    math.pi / _SPIRAL_RAMANUJAN_PI if _SPIRAL_RAMANUJAN_PI > 1e-12 else 1.0
+)
+_SPIRAL_RAMANUJAN_DELTA = abs(_SPIRAL_RAMANUJAN_PI - math.pi)
+_SPIRAL_LEECH_SCALE = (
+    _SPIRAL_PROJECTOR_WEIGHT
+    * _SPIRAL_LEECH_PACKING_DENSITY
+    * math.sqrt(float(_SPIRAL_PROJECTOR_RANK))
+    * _SPIRAL_RAMANUJAN_RATIO
+)
+
+
+def _spiral_softmax_hardmax_consensus_python(
+    softmax: Sequence[float],
+    hardmax: Sequence[float],
+    rows: int,
+    cols: int,
+) -> tuple[list[float], dict[str, float]]:
+    """Blend softmax probabilities with hardmax masks using spiral consensus."""
+
+    expected = rows * cols
+    metrics: dict[str, float] = {
+        "phi": _GOLDEN_RATIO,
+        "phi_conjugate": _GOLDEN_RATIO_CONJUGATE,
+        "phi_bias": _GOLDEN_RATIO_BIAS,
+        "ramanujan_ratio": _SPIRAL_RAMANUJAN_RATIO,
+        "ramanujan_delta": _SPIRAL_RAMANUJAN_DELTA,
+        "average_enrichment": 0.0,
+        "mean_entropy": 0.0,
+        "mean_hardmass": 0.0,
+        "spiral_coherence": 0.0,
+    }
+
+    if expected == 0 or len(softmax) != expected or len(hardmax) != expected:
+        return [0.0] * expected, metrics
+
+    fused = [0.0] * expected
+    total_entropy = 0.0
+    total_hardmass = 0.0
+    total_enrichment = 0.0
+    total_coherence = 0.0
+
+    for row in range(rows):
+        offset = row * cols
+        row_soft = softmax[offset : offset + cols]
+        row_hard = hardmax[offset : offset + cols]
+
+        entropy = 0.0
+        hardmass = 0.0
+
+        for prob, mask in zip(row_soft, row_hard):
+            p = float(prob)
+            if p > 0.0:
+                entropy -= p * math.log(p)
+            hardmass += float(mask) if mask > 0.0 else 0.0
+
+        geodesic = entropy * _SPIRAL_RAMANUJAN_RATIO + hardmass * _GOLDEN_RATIO
+        enrichment = _SPIRAL_LEECH_SCALE * geodesic if geodesic > 1e-12 else 0.0
+        scale = 1.0 + enrichment
+
+        total_entropy += entropy
+        total_hardmass += hardmass
+        total_enrichment += enrichment
+
+        entropy_norm = (entropy / (entropy + 1.0)) if entropy > 0.0 else 0.0
+        entropy_norm = max(0.0, min(1.0, entropy_norm))
+        hardmass_norm = hardmass / cols if cols else 0.0
+        hardmass_norm = max(0.0, min(1.0, hardmass_norm))
+        enrichment_norm = enrichment / (1.0 + abs(enrichment)) if enrichment != 0.0 else 0.0
+        enrichment_norm = max(0.0, min(1.0, enrichment_norm))
+        total_coherence += (entropy_norm + hardmass_norm + enrichment_norm) / 3.0
+
+        for index, (prob, mask) in enumerate(zip(row_soft, row_hard)):
+            fused_value = (
+                _GOLDEN_RATIO_CONJUGATE * float(prob)
+                + _GOLDEN_RATIO_BIAS * float(mask)
+            )
+            fused[offset + index] = scale * fused_value
+
+    if rows > 0:
+        inv_rows = 1.0 / rows
+        metrics.update(
+            {
+                "average_enrichment": total_enrichment * inv_rows,
+                "mean_entropy": total_entropy * inv_rows,
+                "mean_hardmass": total_hardmass * inv_rows,
+                "spiral_coherence": total_coherence * inv_rows,
+            }
+        )
+
+    return fused, metrics
+
+
 def _tensor_is_sequence(obj: object) -> bool:
     return isinstance(obj, Sequence) and not isinstance(
         obj, (str, bytes, bytearray, memoryview)
@@ -1238,12 +1371,35 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
                 matrix = self._to_numpy(copy=False)
                 if matrix.size == 0 or matrix.shape[1] == 0:
                     return cls._from_numpy_array(matrix.copy())
-                max_per_row = matrix.max(axis=1, keepdims=True)
-                shifted = matrix - max_per_row
-                exps = _np.exp(shifted)
-                sums = exps.sum(axis=1, keepdims=True)
-                weights = _np.divide(exps, sums, out=_np.zeros_like(exps), where=sums != 0.0)
-                return cls._from_numpy_array(weights)
+
+                rows, cols = matrix.shape
+                soft = _np.zeros((rows, cols), dtype=_np.float64)
+
+                for r in range(rows):
+                    row = matrix[r]
+                    finite_mask = ~_np.isnan(row)
+                    if not finite_mask.any():
+                        continue
+
+                    finite_indices = _np.flatnonzero(finite_mask)
+                    finite_values = row[finite_mask]
+                    max_value = float(finite_values.max())
+                    max_is_inf = math.isinf(max_value)
+
+                    if max_is_inf:
+                        shifted = _np.where(finite_values == max_value, 1.0, 0.0)
+                    else:
+                        shifted = _np.exp(finite_values - max_value)
+
+                    denom = float(shifted.sum())
+                    if math.isfinite(denom) and denom > 0.0:
+                        soft_values = shifted / denom
+                    else:
+                        soft_values = _np.zeros_like(shifted)
+
+                    soft[r, finite_indices] = soft_values
+
+                return cls._from_numpy_array(soft)
 
             rows, cols = self._rows, self._cols
             total = rows * cols
@@ -1255,13 +1411,219 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             for r in range(rows):
                 offset = r * cols
                 row_slice = [float(flat[offset + c]) for c in range(cols)]
-                max_value = max(row_slice)
-                exps = [math.exp(value - max_value) for value in row_slice]
-                denom = sum(exps)
-                inv = 1.0 / denom if denom > 0.0 else 0.0
-                for c, exp_value in enumerate(exps):
-                    buffer[offset + c] = exp_value * inv
+                finite_indices: list[int] = []
+                max_value = -math.inf
+                for idx, value in enumerate(row_slice):
+                    if math.isnan(value):
+                        continue
+                    finite_indices.append(idx)
+                    if value > max_value:
+                        max_value = value
+
+                if not finite_indices:
+                    continue
+
+                accum = 0.0
+                exps = [0.0] * cols
+                max_is_inf = math.isinf(max_value)
+                for idx in finite_indices:
+                    value = row_slice[idx]
+                    shifted = 1.0 if max_is_inf and value == max_value else math.exp(value - max_value)
+                    exps[idx] = shifted
+                    accum += shifted
+
+                inv = 1.0 / accum if accum > 0.0 and math.isfinite(accum) else 0.0
+                for idx in finite_indices:
+                    buffer[offset + idx] = exps[idx] * inv if inv > 0.0 else 0.0
+
             return cls._from_python_array(rows, cols, buffer)
+
+        def _compute_row_softmax_hardmax_python(self) -> tuple[array, array]:
+            rows, cols = self._rows, self._cols
+            total = rows * cols
+            soft_buffer = array("d", [0.0]) * total if total else array("d")
+            hard_buffer = array("d", [0.0]) * total if total else array("d")
+            if cols == 0 or total == 0:
+                return soft_buffer, hard_buffer
+
+            flat = self._row_major_python()
+            for r in range(rows):
+                offset = r * cols
+                row_slice = [float(flat[offset + c]) for c in range(cols)]
+                finite_indices: list[int] = []
+                max_value = -math.inf
+                argmax_index = -1
+                for idx, value in enumerate(row_slice):
+                    if math.isnan(value):
+                        continue
+                    finite_indices.append(idx)
+                    if value > max_value or argmax_index == -1:
+                        max_value = value
+                        argmax_index = idx
+
+                if argmax_index == -1:
+                    continue
+
+                accum = 0.0
+                exps = [0.0] * cols
+                max_is_inf = math.isinf(max_value)
+                for idx in finite_indices:
+                    value = row_slice[idx]
+                    shifted = 1.0 if max_is_inf and value == max_value else math.exp(value - max_value)
+                    exps[idx] = shifted
+                    accum += shifted
+
+                inv = 1.0 / accum if accum > 0.0 and math.isfinite(accum) else 0.0
+                for idx in finite_indices:
+                    soft_buffer[offset + idx] = exps[idx] * inv if inv > 0.0 else 0.0
+
+                if 0 <= argmax_index < cols:
+                    hard_buffer[offset + argmax_index] = 1.0
+            return soft_buffer, hard_buffer
+
+        def _compute_row_hardmax_python(self) -> array:
+            rows, cols = self._rows, self._cols
+            total = rows * cols
+            buffer = array("d", [0.0]) * total if total else array("d")
+            if cols == 0 or total == 0:
+                return buffer
+
+            flat = self._row_major_python()
+            for r in range(rows):
+                offset = r * cols
+                row_slice = [float(flat[offset + c]) for c in range(cols)]
+                max_value = -math.inf
+                argmax_index = -1
+                for idx, value in enumerate(row_slice):
+                    if math.isnan(value):
+                        continue
+                    if value > max_value or argmax_index == -1:
+                        max_value = value
+                        argmax_index = idx
+                if 0 <= argmax_index < cols:
+                    buffer[offset + argmax_index] = 1.0
+            return buffer
+
+        def row_softmax_hardmax(
+            self, *, backend: str | None = None
+        ) -> tuple["Tensor", "Tensor"]:
+            """Return row-wise softmax probabilities paired with the hardmax mask."""
+
+            target_backend = self._resolve_backend(backend)
+            cls = type(self)
+
+            if target_backend == "numpy":
+                if not NUMPY_AVAILABLE:
+                    raise RuntimeError("NumPy backend requested but NumPy is not installed")
+                matrix = self._to_numpy(copy=False)
+                if matrix.size == 0 or matrix.shape[1] == 0:
+                    zeros = _np.zeros_like(matrix)
+                    return cls._from_numpy_array(zeros.copy()), cls._from_numpy_array(zeros)
+
+                rows, cols = matrix.shape
+                soft = _np.zeros((rows, cols), dtype=_np.float64)
+                hard = _np.zeros((rows, cols), dtype=_np.float64)
+
+                for r in range(rows):
+                    row = matrix[r]
+                    finite_mask = ~_np.isnan(row)
+                    if not finite_mask.any():
+                        continue
+
+                    finite_indices = _np.flatnonzero(finite_mask)
+                    finite_values = row[finite_mask]
+                    max_idx_local = int(finite_values.argmax())
+                    max_value = float(finite_values[max_idx_local])
+                    max_is_inf = math.isinf(max_value)
+
+                    if max_is_inf:
+                        shifted = _np.where(finite_values == max_value, 1.0, 0.0)
+                    else:
+                        shifted = _np.exp(finite_values - max_value)
+
+                    denom = float(shifted.sum())
+                    if math.isfinite(denom) and denom > 0.0:
+                        soft_values = shifted / denom
+                    else:
+                        soft_values = _np.zeros_like(shifted)
+
+                    soft[r, finite_indices] = soft_values
+
+                    argmax_col = int(finite_indices[max_idx_local])
+                    hard[r, argmax_col] = 1.0
+
+                return cls._from_numpy_array(soft), cls._from_numpy_array(hard)
+
+            rows, cols = self._rows, self._cols
+            soft_buffer, hard_buffer = self._compute_row_softmax_hardmax_python()
+            return (
+                cls._from_python_array(rows, cols, soft_buffer),
+                cls._from_python_array(rows, cols, hard_buffer),
+            )
+
+        def row_hardmax(self, *, backend: str | None = None) -> "Tensor":
+            """Return the row-wise hardmax mask."""
+
+            target_backend = self._resolve_backend(backend)
+            cls = type(self)
+
+            if target_backend == "numpy":
+                if not NUMPY_AVAILABLE:
+                    raise RuntimeError("NumPy backend requested but NumPy is not installed")
+                matrix = self._to_numpy(copy=False)
+                if matrix.size == 0 or matrix.shape[1] == 0:
+                    return cls._from_numpy_array(matrix.copy())
+
+                rows, cols = matrix.shape
+                mask = _np.zeros((rows, cols), dtype=_np.float64)
+
+                for r in range(rows):
+                    row = matrix[r]
+                    finite_mask = ~_np.isnan(row)
+                    if not finite_mask.any():
+                        continue
+                    finite_values = row[finite_mask]
+                    argmax_local = int(finite_values.argmax())
+                    argmax_col = int(_np.flatnonzero(finite_mask)[argmax_local])
+                    mask[r, argmax_col] = 1.0
+
+                return cls._from_numpy_array(mask)
+
+            rows, cols = self._rows, self._cols
+            buffer = self._compute_row_hardmax_python()
+            return cls._from_python_array(rows, cols, buffer)
+
+        def row_softmax_hardmax_spiral(
+            self, *, backend: str | None = None
+        ) -> tuple["Tensor", "Tensor", "Tensor", dict[str, float]]:
+            """Return softmax, hardmax, and spiral consensus tensors with metrics."""
+
+            soft, hard = self.row_softmax_hardmax(backend=backend)
+            rows, cols = self._rows, self._cols
+
+            if NUMPY_AVAILABLE and getattr(soft, "_backend", None) == "numpy":
+                soft_matrix = soft._to_numpy(copy=False)
+                hard_matrix = hard._to_numpy(copy=False)
+                fused, metrics = _spiral_softmax_hardmax_consensus_python(
+                    soft_matrix.reshape(-1).tolist(),
+                    hard_matrix.reshape(-1).tolist(),
+                    rows,
+                    cols,
+                )
+                spiral_matrix = _np.asarray(fused, dtype=_np.float64).reshape(rows, cols)
+                spiral = type(self)._from_numpy_array(spiral_matrix)
+            else:
+                soft_flat = [float(value) for value in soft._row_major_python()]
+                hard_flat = [float(value) for value in hard._row_major_python()]
+                fused, metrics = _spiral_softmax_hardmax_consensus_python(
+                    soft_flat,
+                    hard_flat,
+                    rows,
+                    cols,
+                )
+                spiral = type(self)._from_python_array(rows, cols, array("d", fused))
+
+            return soft, hard, spiral, metrics
 
         def scaled_dot_attention(
             self,
