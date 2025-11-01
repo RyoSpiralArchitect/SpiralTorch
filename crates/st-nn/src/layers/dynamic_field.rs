@@ -6,7 +6,8 @@
 use crate::module::{Module, Parameter};
 use crate::{PureResult, Tensor, TensorError};
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::Rng;
+use spiral_config::determinism;
 use std::cell::RefCell;
 
 /// Propagates semantic amplitudes using a discrete Klein–Gordon style update
@@ -362,10 +363,7 @@ impl StochasticSchrodingerLayer {
         }
         let name = name.into();
         let coherence = Tensor::from_fn(1, features, |_r, c| (0.85 - (c as f32 * 0.03)).max(0.1))?;
-        let rng = match seed {
-            Some(value) => StdRng::seed_from_u64(value),
-            None => StdRng::from_entropy(),
-        };
+        let rng = determinism::rng_from_optional(seed, "st-nn/layers/stochastic_schrodinger");
         Ok(Self {
             coherence: Parameter::new(format!("{name}::coherence"), coherence),
             decoherence_rate,
