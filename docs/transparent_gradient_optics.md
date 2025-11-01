@@ -1,51 +1,77 @@
 # Transparent Gradient Optics
 
-## 概要
-"物理的に透明な勾配"というメタファーを用いて、誤差逆伝播を物理シミュレーションとして捉えるアイデアを整理する。従来のチェインルール中心の抽象的な勾配伝播を、光の屈折や透過を想起させる空間的モデルとして再解釈することで、RealGrad の学習体験を刷新する。
+## Overview
+This document reframes error backpropagation as a physical simulation inspired by
+optics. Instead of reasoning about gradients purely through the chain rule, we
+model them as light travelling through transparent media. Refraction,
+attenuation, diffusion, and phase shifts become intuitive handles for shaping
+how gradients flow through RealGrad.
 
-## コアコンセプト
-- **空間的バックプロパゲーション**: 勾配を光線のようなエネルギーフローとして扱い、ネットワーク層を光学媒体に見立てる。
-- **透明度と屈折率**: 各層の性質を透過率・屈折率として定義し、勾配の減衰や方向転換を連続的に調整する。
-- **マルチパス伝播**: 光の分岐や干渉をモデル化し、複数経路での勾配情報の再利用を可能にする。
-- **物理バイアスの導入**: 既存のドメイン知識を光学パラメータとして埋め込み、学習方向を制御する。
+## Core Concepts
+- **Spatial backpropagation** – Treat gradients as light rays propagating through
+the network, with each layer acting as an optical medium.
+- **Transparency and refractive index** – Describe every layer by the fraction
+of gradient energy it lets pass and the curvature it induces on the flow.
+- **Multipath propagation** – Allow gradients to branch, interfere, and recombine
+like beams of light, increasing reuse of informative signals.
+- **Physical priors** – Encode domain knowledge as optical parameters that nudge
+optimization toward desired behaviours.
 
-## 期待されるメリット
-1. **可視化とデバッグ性の向上**
-   - 層ごとの勾配伝播を屈折・透過として可視化し、ボトルネックを直感的に把握。
-   - 「屈折率が高すぎて勾配が曲がる」など、光学メタファーに基づく診断が可能。
+## Expected Benefits
+1. **Visual debugging**
+   - Inspect where gradients bend, fade, or amplify.
+   - Diagnose issues using optical metaphors (e.g., “the refractive index here is
+     too high, the gradient is curling away”).
 
-2. **滑らかな勾配制御**
-   - ReLU や Clip のような硬い遮断ではなく、透過率で緩やかに勾配を調整。
-   - 勾配爆発・消失を連続的な減衰モデルで抑制。
-   - 透過率そのものを学習可能なゲートとして扱い、ネットワークが自律的に「どれだけ透けるか」を最適化できる。
+2. **Smooth gradient control**
+   - Replace hard clipping with continuously adjustable transparency.
+   - Let the network learn how much information to skip or preserve by treating
+     transparency as a parameter.
 
-3. **物理的制約の実装容易化**
-   - 光学パラメータを通じて、タスク固有のバイアスや制約を自然に導入。
-   - 屈折パターンを利用した方向性制御や探索制御が可能。
+3. **Injecting physical constraints**
+   - Shape learning trajectories by prescribing refraction paths or absorption
+     windows.
+   - Express task-specific inductive biases as optical media.
 
-4. **マルチパス学習と拡散的伝播**
-   - 光が分岐・干渉するように勾配を複数経路に分散し、非局所的なフィードバックを実現。
-   - 情報の再利用性やロバストな学習経路の確保に寄与。
+4. **Multipath and diffusive learning**
+   - Split gradients across several routes that later interfere constructively.
+   - Support non-local feedback where distant layers can “see” each other.
 
-5. **Differentiable Physics との親和性**
-   - 物理シミュレーションと学習アルゴリズムの融合を促進。
-   - Z 空間におけるエネルギー最適化として学習を定式化しやすくなる。
+5. **Bridge to differentiable physics**
+   - Blend simulation and learning when gradients already behave like energy
+     fields in a medium.
+   - Optimise directly in Z-space energy landscapes.
 
-6. **美的・表現的価値**
-   - 学習過程を「ガラス越しの光の流れ」として表現でき、科学とアートの架け橋となる。
-   - RealGrad を感覚的・芸術的に提示する新しいコミュニケーション手段。
+6. **Aesthetic storytelling**
+   - Portray learning as light blooming through glass, blending scientific
+     insight with artistic intuition.
 
-## RealGrad への組み込みアイデア
-- **OpticLayer インターフェース**: 各層に透過率・屈折率・散乱係数を付与する抽象クラスを追加。
-- **Gradient Ray Tracer**: 勾配伝播を光線追跡としてシミュレートするモジュールを開発。
-- **可視化ダッシュボード**: 光が通る経路、屈折角、エネルギーロスを可視化するビューアを提供。
-- **安定化テクニック**: 勾配の総エネルギーを一定範囲に保つための透過率正則化を導入。
-- **透明ゲートの学習**: RealGrad の透明トレースに含まれるヤコビアンを利用し、skip/slip 経路と同様に透過率をパラメータとして学習する。
+## Integration Ideas for RealGrad
+- **OpticLayer abstraction** – Provide each layer with transparency, refractive
+  index, and diffusion coefficients.
+- **Gradient ray tracer** – Simulate gradient flow using optical propagation
+  rather than plain algebraic composition.
+- **Visual dashboard** – Render gradient paths, refraction angles, and energy
+  loss to support interactive debugging.
+- **Stability techniques** – Regularise transparency so total gradient energy
+  stays within a comfortable band.
+- **Learnable transparency gates** – Reuse the RealGrad transparency trace (and
+  its jacobian) to optimise skip/slip pathways, letting the model decide how much
+  history to reveal.
+- **Telemetry summaries** – Aggregate attenuation, refraction, diffusion, and
+  jacobian norms so training logs can report where gradients pass freely or fade
+  into frosted glass.
 
-## 次のステップ
-1. RealGrad 内のバックプロパゲーションループを調査し、光学パラメータを挿入できるインターフェースを設計する。
-2. 小規模ネットワークでのプロトタイプを実装し、従来の勾配伝播との比較実験を行う。
-3. 光学メタファーに基づく可視化ツールを試作し、学習挙動の理解にどう寄与するか評価する。
-4. Differentiable Physics 系ライブラリとの連携可能性を検討し、Z 空間最適化との統合ロードマップを策定する。
+## Next Steps
+1. Inspect the RealGrad backprop loop and identify the insertion points for
+   optical parameters.
+2. Prototype the optical propagation on a small network and compare against the
+   classic gradient pipeline.
+3. Build a proof-of-concept visualiser to evaluate how the optical metaphors help
+   interpret learning dynamics.
+4. Explore how differentiable-physics libraries can cooperate with the Z-space
+   optimiser to co-design simulation-aware models.
 
-透明な勾配がガラスの中を滲むように流れる学習体験を、RealGrad に導入していく。光学的な視点が、勾配の理解と制御の新しい地平を開く。
+Ultimately we want gradients that glide through RealGrad the way light seeps
+through translucent crystal: selectively, artfully, and in service of clearer
+learning signals.

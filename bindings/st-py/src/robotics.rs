@@ -11,8 +11,9 @@ use st_robotics::{
     GeometryKind, GravityField, GravityRegime, GravityWell, PolicyGradientController, PsiTelemetry,
     RelativityBridge, RoboticsError, RoboticsRuntime, RuntimeStep, SafetyReview, SensorFusionHub,
     SymmetryAnsatz, TelemetryReport, TemporalFeedbackLearner, TemporalFeedbackSummary,
-    TrainerMetrics, VisionFeedbackSnapshot, VisionFeedbackSynchronizer, ZSpaceDynamics,
-    ZSpaceGeometry, ZSpacePartialObservation, ZSpaceTrainerBridge, ZSpaceTrainerSample,
+    TrainerEpisode, TrainerMetrics, VisionFeedbackSnapshot, VisionFeedbackSynchronizer,
+    ZSpaceDynamics, ZSpaceGeometry, ZSpacePartialObservation, ZSpaceTrainerBridge,
+    ZSpaceTrainerEpisodeBuilder, ZSpaceTrainerSample,
 };
 
 fn robotics_err_to_py(err: RoboticsError) -> PyErr {
@@ -993,6 +994,45 @@ impl PyZSpaceTrainerSample {
     }
 }
 
+#[pyclass(module = "spiraltorch.robotics", name = "TrainerEpisode")]
+#[derive(Clone, Debug)]
+pub(crate) struct PyTrainerEpisode {
+    inner: TrainerEpisode,
+}
+
+#[pymethods]
+impl PyTrainerEpisode {
+    #[getter]
+    pub fn samples(&self) -> Vec<PyZSpaceTrainerSample> {
+        self.inner
+            .samples
+            .iter()
+            .cloned()
+            .map(|sample| PyZSpaceTrainerSample { inner: sample })
+            .collect()
+    }
+
+    #[getter]
+    pub fn average_memory(&self) -> f32 {
+        self.inner.average_memory
+    }
+
+    #[getter]
+    pub fn average_stability(&self) -> f32 {
+        self.inner.average_stability
+    }
+
+    #[getter]
+    pub fn average_drs(&self) -> f32 {
+        self.inner.average_drs
+    }
+
+    #[getter]
+    pub fn length(&self) -> usize {
+        self.inner.length
+    }
+}
+
 #[pyclass(module = "spiraltorch.robotics", name = "ZSpaceTrainerBridge")]
 #[derive(Clone, Debug)]
 pub(crate) struct PyZSpaceTrainerBridge {
@@ -1029,6 +1069,56 @@ impl PyZSpaceTrainerBridge {
     #[getter]
     pub fn discount(&self) -> f32 {
         self.inner.discount()
+    }
+}
+
+#[pyclass(module = "spiraltorch.robotics", name = "ZSpaceTrainerEpisodeBuilder")]
+#[derive(Clone, Debug)]
+pub(crate) struct PyZSpaceTrainerEpisodeBuilder {
+    inner: ZSpaceTrainerEpisodeBuilder,
+}
+
+#[pymethods]
+impl PyZSpaceTrainerEpisodeBuilder {
+    #[new]
+    #[pyo3(signature = (horizon, *, discount=0.9, capacity=64))]
+    pub fn new(horizon: usize, discount: f32, capacity: usize) -> PyResult<Self> {
+        let builder = ZSpaceTrainerEpisodeBuilder::new(horizon, discount, capacity)
+            .map_err(robotics_err_to_py)?;
+        Ok(Self { inner: builder })
+    }
+
+    pub fn push(
+        &mut self,
+        step: PyRef<'_, PyRuntimeStep>,
+        vision: Option<PyRef<'_, PyVisionFeedbackSnapshot>>,
+        end_episode: bool,
+    ) -> PyResult<Option<PyTrainerEpisode>> {
+        let vision_snapshot = vision.map(|value| value.inner.clone());
+        let episode = self
+            .inner
+            .push_step(&step.inner, vision_snapshot.as_ref(), end_episode)
+            .map_err(robotics_err_to_py)?;
+        Ok(episode.map(|inner| PyTrainerEpisode { inner }))
+    }
+
+    pub fn flush(&mut self) -> PyResult<Option<PyTrainerEpisode>> {
+        Ok(self.inner.flush().map(|inner| PyTrainerEpisode { inner }))
+    }
+
+    #[getter]
+    pub fn horizon(&self) -> usize {
+        self.inner.horizon()
+    }
+
+    #[getter]
+    pub fn discount(&self) -> f32 {
+        self.inner.discount()
+    }
+
+    #[getter]
+    pub fn capacity(&self) -> usize {
+        self.inner.capacity()
     }
 }
 
@@ -1109,7 +1199,9 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
     module.add_class::<PyTemporalFeedbackSummary>()?;
     module.add_class::<PyTemporalFeedbackLearner>()?;
     module.add_class::<PyZSpaceTrainerSample>()?;
+    module.add_class::<PyTrainerEpisode>()?;
     module.add_class::<PyZSpaceTrainerBridge>()?;
+    module.add_class::<PyZSpaceTrainerEpisodeBuilder>()?;
     module.add_class::<PyGravityField>()?;
     module.add_class::<PyGravityWell>()?;
     module.add_class::<PyZSpaceDynamics>()?;

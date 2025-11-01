@@ -24,7 +24,8 @@ pub use safety::{DriftSafetyPlugin, SafetyPlugin, SafetyReview};
 pub use sensors::{ChannelHealth, FusedFrame, SensorFusionHub};
 pub use telemetry::{PsiTelemetry, TelemetryReport};
 pub use training::{
-    TemporalFeedbackLearner, TemporalFeedbackSample, TemporalFeedbackSummary, TrainerMetrics,
-    ZSpacePartialObservation, ZSpaceTrainerBridge, ZSpaceTrainerSample,
+    TemporalFeedbackLearner, TemporalFeedbackSample, TemporalFeedbackSummary, TrainerEpisode,
+    TrainerMetrics, ZSpacePartialObservation, ZSpaceTrainerBridge, ZSpaceTrainerEpisodeBuilder,
+    ZSpaceTrainerSample,
 };
 pub use vision::{VisionFeedbackSnapshot, VisionFeedbackSynchronizer};

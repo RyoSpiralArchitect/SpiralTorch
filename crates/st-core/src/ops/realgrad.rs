@@ -365,6 +365,86 @@ impl Default for RealGradProjection {
 }
 
 /// Optical telemetry emitted when transparent gradient propagation is enabled.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct TransparencySummary {
+    /// Transparency gain applied uniformly across the optical lattice.
+    pub transparency_gain: f32,
+    /// Mean attenuation observed across the optical depth.
+    pub mean_attenuation: f32,
+    /// Maximum attenuation recorded among the samples.
+    pub max_attenuation: f32,
+    /// Mean absolute refraction curvature accumulated during propagation.
+    pub mean_refraction: f32,
+    /// L2 energy of the diffusion profile.
+    pub diffusion_energy: f32,
+    /// Standard deviation of the accumulated optical phase.
+    pub phase_variation: f32,
+    /// L2 norm of the transparency jacobian, useful for scaling gradients.
+    pub jacobian_norm: f32,
+}
+
+impl TransparencySummary {
+    fn from_trace(trace: &TransparentGradientTrace) -> Option<Self> {
+        let len = trace.propagated_gradient.len();
+        if len == 0
+            || trace.attenuation_profile.len() != len
+            || trace.transparency_jacobian.len() != len
+            || trace.phase_profile.len() != len
+            || trace.refraction_profile.len() != len
+            || trace.diffusion_profile.len() != len
+        {
+            return None;
+        }
+
+        let len_f = len as f32;
+        let mean_attenuation = trace.attenuation_profile.iter().sum::<f32>() / len_f;
+        let max_attenuation = trace
+            .attenuation_profile
+            .iter()
+            .copied()
+            .fold(f32::NEG_INFINITY, f32::max);
+        let mean_refraction = trace
+            .refraction_profile
+            .iter()
+            .map(|value| value.abs())
+            .sum::<f32>()
+            / len_f;
+        let diffusion_energy = trace
+            .diffusion_profile
+            .iter()
+            .map(|value| value * value)
+            .sum::<f32>()
+            .sqrt();
+        let jacobian_norm = trace
+            .transparency_jacobian
+            .iter()
+            .map(|value| value * value)
+            .sum::<f32>()
+            .sqrt();
+        let phase_mean = trace.phase_profile.iter().sum::<f32>() / len_f;
+        let phase_variation = trace
+            .phase_profile
+            .iter()
+            .map(|value| {
+                let delta = *value - phase_mean;
+                delta * delta
+            })
+            .sum::<f32>()
+            .sqrt()
+            / len_f.sqrt();
+
+        Some(Self {
+            transparency_gain: trace.transparency_gain,
+            mean_attenuation,
+            max_attenuation,
+            mean_refraction,
+            diffusion_energy,
+            phase_variation,
+            jacobian_norm,
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct TransparentGradientTrace {
     /// Original Euclidean gradient entering the optical medium.
@@ -421,6 +501,12 @@ impl TransparentGradientTrace {
             .map(|(jacobian, upstream)| jacobian * upstream)
             .sum();
         Some(gradient)
+    }
+
+    /// Returns aggregate statistics describing the transparency gate and its effect on the
+    /// propagated gradient.
+    pub fn transparency_summary(&self) -> Option<TransparencySummary> {
+        TransparencySummary::from_trace(self)
     }
 }
 
@@ -624,6 +710,13 @@ impl RealGradProjection {
         self.optics
             .as_ref()
             .and_then(|trace| trace.accumulate_transparency_gradient(upstream))
+    }
+
+    /// Returns aggregate transparency statistics emitted by the optical medium, if enabled.
+    pub fn transparency_summary(&self) -> Option<TransparencySummary> {
+        self.optics
+            .as_ref()
+            .and_then(|trace| trace.transparency_summary())
     }
 }
 
@@ -1406,8 +1499,8 @@ mod tests {
         project_realgrad, project_tempered_realgrad, CpuChirpZ, CpuRustFft, GradientSummary,
         RealGradAutoTuner, RealGradConfig, RealGradKernel, RealGradProjection,
         RealGradProjectionScratch, RealGradZProjector, SchwartzSequence, SpectralEngine,
-        SpectrumNorm, TemperedRealGradProjection, TransparentGradientOpticsConfig,
-        DEFAULT_THRESHOLD,
+        SpectrumNorm, TemperedRealGradProjection, TransparencySummary,
+        TransparentGradientOpticsConfig, DEFAULT_THRESHOLD,
     };
     use crate::theory::zpulse::ZSource;
     use crate::util::math::{LeechProjector, LEECH_PACKING_DENSITY};
@@ -1505,6 +1598,36 @@ mod tests {
             .accumulate_transparency_gradient(&upstream)
             .expect("matching upstream length");
         assert!(gradient.is_finite());
+    }
+
+    #[test]
+    fn transparent_optics_emit_summary() {
+        let optics = TransparentGradientOpticsConfig {
+            refractive_index: 1.55,
+            transparency: 0.72,
+            absorption: 0.08,
+            diffusion: 0.3,
+            phase_shift: 0.15,
+        };
+        let config = RealGradConfig::default().with_optics(optics);
+        let data = [0.5f32, -0.1, 0.35, -0.45, 0.2];
+        let projection = project_realgrad(&data, config);
+        let trace = projection.optics_trace().expect("optical trace");
+        let trace_summary = trace
+            .transparency_summary()
+            .expect("transparency summary from trace");
+        assert!((trace_summary.transparency_gain - optics.transparency).abs() < 1.0e-6);
+        assert!(trace_summary.mean_attenuation.is_finite());
+        assert!(trace_summary.max_attenuation >= trace_summary.mean_attenuation);
+        assert!(trace_summary.mean_refraction >= 0.0);
+        assert!(trace_summary.diffusion_energy >= 0.0);
+        assert!(trace_summary.phase_variation >= 0.0);
+        assert!(trace_summary.jacobian_norm >= 0.0);
+
+        let projection_summary = projection
+            .transparency_summary()
+            .expect("projection transparency summary");
+        assert_eq!(projection_summary, trace_summary);
     }
 
     #[test]
