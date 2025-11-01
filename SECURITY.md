@@ -40,6 +40,11 @@ repackaged binaries, each GitHub release now provides:
   proves every published wheel still embeds the verbatim AGPL-3.0-or-later
   license text from this repository, preventing bad actors from stripping or
   altering the terms during redistribution.
+- **A sealed repository manifest and compliance seal**
+  (`spiraltorch-repo-license-manifest.json` and
+  `spiraltorch-compliance-seal.json`) that bind the release back to the exact
+  AGPL-governed Git commit. The seal hashes the manifest, records the canonical
+  license digests, and requires downstream mirrors to preserve those files.
 
 ### Automated verification
 
@@ -70,7 +75,9 @@ official repository. The script will:
    digests and file size.
 3. Confirm each wheel still contains the canonical AGPL license payload as
    recorded in the signed license provenance report.
-4. Verify the Sigstore signature and certificate pair accompanying each asset.
+4. Validate the compliance seal binds the manifest to the canonical AGPL
+   commit, cross-checking its digests against the manifest and license report.
+5. Verify the Sigstore signature and certificate pair accompanying each asset.
 
 Treat any mismatched digest, missing signature, or verification failure as a
 sign that the artifact may have been tampered with or repackaged. Contact the
@@ -95,8 +102,8 @@ declare the AGPL-3.0-or-later terms.
   the repository, along with the license declaration extracted from each Rust
   crate and Python distribution. Any attempt to ship a fork with license text
   removed will change the digests and be immediately detectable.
-- Use `scripts/security/verify_repo_clone.py` together with a trusted copy of
-  the signed manifest to audit a clone:
+- Use `scripts/security/verify_repo_clone.py` together with the signed manifest
+  **and** its compliance seal to audit a clone:
 
   ```bash
   pip install sigstore
@@ -110,9 +117,16 @@ declare the AGPL-3.0-or-later terms.
     spiraltorch-repo-license-manifest.json
   python scripts/security/verify_repo_clone.py \
     --manifest spiraltorch-repo-license-manifest.json \
+    --seal spiraltorch-compliance-seal.json \
     --repo-root /path/to/clone
   ```
 
   If the verification script reports a mismatch, treat the clone as
-  compromised—either the AGPL has been stripped, or the repository has been
-  tampered with in a way that breaks the signed manifest.
+  compromised—either the AGPL has been stripped, the repository has been
+  tampered with, or someone is attempting to sell an unofficial fork that is
+  not sealed to the canonical commit.
+
+  The compliance seal requirement forces malicious redistributors to reveal the
+  exact commit they are shipping. Because only the official repository can
+  obtain a Sigstore certificate for that commit and manifest, altered forks
+  cannot mint a matching seal without reintroducing every AGPL obligation.

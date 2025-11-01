@@ -6,11 +6,15 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 from typing import Iterable
 
 
 REQUIRED_LICENSE_TOKEN = "AGPL-3.0-or-later"
+
+
+SCHEMA = "https://spiraltorch.org/security/compliance-seal/v1"
 
 
 def parse_args() -> argparse.Namespace:
@@ -34,6 +38,12 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help="Additional file paths that must exist in the clone. Relative to the repository root.",
     )
+    parser.add_argument(
+        "--seal",
+        type=Path,
+        default=None,
+        help="Optional compliance seal to enforce commit provenance and manifest digests.",
+    )
     return parser.parse_args()
 
 
@@ -48,6 +58,63 @@ def digest(path: Path, algorithm: str) -> str:
 def ensure_exists(path: Path) -> None:
     if not path.exists():
         raise SystemExit(f"Required file is missing: {path}")
+
+
+def current_commit(repo_root: Path) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:  # pragma: no cover - relies on git availability
+        raise SystemExit(
+            "Unable to resolve HEAD commit for clone; ensure you are inside a git checkout."
+        ) from exc
+    commit = result.stdout.decode("utf-8").strip()
+    if not commit:
+        raise SystemExit("Unable to determine HEAD commit for the repository clone.")
+    return commit
+
+
+def validate_seal(seal_data: dict, seal_path: Path, manifest_path: Path, repo_root: Path) -> None:
+    if seal_data.get("schema") != SCHEMA:
+        raise SystemExit(f"Unsupported compliance seal schema in {seal_path}")
+
+    manifest_info = seal_data.get("manifest") or {}
+    expected_sha256 = manifest_info.get("sha256")
+    expected_sha512 = manifest_info.get("sha512")
+    if not expected_sha256 or not expected_sha512:
+        raise SystemExit("Compliance seal is missing manifest digests.")
+
+    actual_sha256 = digest(manifest_path, "sha256")
+    actual_sha512 = digest(manifest_path, "sha512")
+    if actual_sha256 != expected_sha256 or actual_sha512 != expected_sha512:
+        raise SystemExit("Compliance seal does not match the supplied manifest file.")
+
+    canonical = seal_data.get("canonical_license") or {}
+    for key in ["path", "sha256", "sha512"]:
+        if not canonical.get(key):
+            raise SystemExit("Compliance seal is missing canonical license metadata.")
+
+    clause = seal_data.get("agpl_clause", "")
+    if REQUIRED_LICENSE_TOKEN not in clause:
+        raise SystemExit("Compliance seal clause fails to reference AGPL obligations.")
+
+    repo_head = current_commit(repo_root)
+    seal_commit = seal_data.get("commit")
+    if not seal_commit:
+        raise SystemExit("Compliance seal omitted the source commit hash.")
+    if repo_head != seal_commit:
+        raise SystemExit(
+            "Repository clone is not checked out at the sealed commit."
+            " Ensure you are inspecting the official AGPL state before use."
+        )
+
+    for required in seal_data.get("required_files", []) or []:
+        ensure_exists(repo_root / required)
 
 
 def validate_clone(manifest: dict, repo_root: Path, required_paths: Iterable[str]) -> None:
@@ -134,6 +201,12 @@ def main() -> None:
         raise SystemExit(f"Manifest not found: {manifest_path}")
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if args.seal:
+        seal_path = args.seal.resolve()
+        if not seal_path.is_file():
+            raise SystemExit(f"Compliance seal not found: {seal_path}")
+        seal_data = json.loads(seal_path.read_text(encoding="utf-8"))
+        validate_seal(seal_data, seal_path, manifest_path, args.repo_root)
     validate_clone(manifest, args.repo_root, args.required_paths)
     print("Repository clone matches the signed manifest and preserves AGPL declarations.")
 

@@ -18,6 +18,9 @@ import requests
 
 
 CHUNK_SIZE = 1024 * 1024
+REQUIRED_LICENSE_TOKEN = "AGPL-3.0-or-later"
+COMPLIANCE_SEAL_NAME = "spiraltorch-compliance-seal.json"
+COMPLIANCE_SEAL_SCHEMA = "https://spiraltorch.org/security/compliance-seal/v1"
 
 
 def parse_args() -> argparse.Namespace:
@@ -103,6 +106,51 @@ def run_sigstore_verify(file_path: Path, repo: str, tag: str) -> None:
     subprocess.run(cmd, check=True)
 
 
+def validate_compliance_seal(seal_path: Path, manifest_path: Path, license_report: Dict | None, failures: list[str]) -> None:
+    seal = json.loads(seal_path.read_text(encoding="utf-8"))
+    if seal.get("schema") != COMPLIANCE_SEAL_SCHEMA:
+        failures.append(f"Compliance seal schema mismatch in {seal_path.name}")
+        return
+
+    manifest_info = seal.get("manifest") or {}
+    expected_manifest_path = manifest_info.get("path")
+    if expected_manifest_path and expected_manifest_path != manifest_path.name:
+        failures.append("Compliance seal references an unexpected manifest filename.")
+
+    for algorithm, key in (("sha256", "sha256"), ("sha512", "sha512")):
+        expected = manifest_info.get(key)
+        if not expected:
+            failures.append(f"Compliance seal missing manifest {key} digest.")
+            continue
+        actual = file_digest(manifest_path, algorithm)
+        if actual != expected:
+            failures.append(f"Compliance seal manifest {key} digest mismatch.")
+
+    canonical = seal.get("canonical_license") or {}
+    for field in ("path", "sha256", "sha512"):
+        if not canonical.get(field):
+            failures.append("Compliance seal missing canonical license metadata.")
+            break
+
+    clause = seal.get("agpl_clause", "")
+    if REQUIRED_LICENSE_TOKEN not in clause:
+        failures.append("Compliance seal clause does not enforce AGPL obligations.")
+
+    if license_report:
+        canonical_report = (license_report.get("license") or {}).get("sha256")
+        if canonical_report and canonical.get("sha256") != canonical_report:
+            failures.append("Compliance seal canonical license digest disagrees with license report.")
+
+    commit = seal.get("commit")
+    if not commit or len(commit) < 7:
+        failures.append("Compliance seal omitted a valid commit identifier.")
+
+    required_files = seal.get("required_files") or []
+    for expected in (manifest_path.name, canonical.get("path"), "NOTICE"):
+        if expected and expected not in required_files:
+            failures.append(f"Compliance seal required_files missing {expected}.")
+
+
 def verify_release(args: argparse.Namespace) -> None:
     if not args.repo:
         raise SystemExit("A repository slug must be provided via --repo or $GITHUB_REPOSITORY.")
@@ -185,6 +233,8 @@ def verify_release(args: argparse.Namespace) -> None:
                 if not any(item.get("matches_canonical") for item in embedded):
                     failures.append(f"No canonical AGPL license match found inside {filename}.")
 
+        compliance_seal_path: Path | None = None
+
         for entry in manifest_files:
             asset_name = entry.get("asset")
             if not asset_name:
@@ -198,6 +248,9 @@ def verify_release(args: argparse.Namespace) -> None:
 
             asset_path = work_dir / asset_name
             download_asset(asset, asset_path, token)
+
+            if asset_name == COMPLIANCE_SEAL_NAME:
+                compliance_seal_path = asset_path
 
             expected_sha256 = entry.get("sha256")
             expected_sha512 = entry.get("sha512")
@@ -227,6 +280,11 @@ def verify_release(args: argparse.Namespace) -> None:
                 run_sigstore_verify(asset_path, args.repo, tag_name)
             else:
                 failures.append(f"Missing Sigstore signature or certificate for {asset_name}")
+
+        if compliance_seal_path is None:
+            failures.append(f"Release missing compliance seal asset: {COMPLIANCE_SEAL_NAME}")
+        else:
+            validate_compliance_seal(compliance_seal_path, manifest_path, license_report, failures)
 
         if failures:
             summary = "\n - ".join(failures)
