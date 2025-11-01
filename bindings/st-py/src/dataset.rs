@@ -150,7 +150,7 @@ impl PyDataLoader {
     }
 
     pub fn prefetch(&self, depth: usize) -> Self {
-        Ok(self.clone_with(self.inner.clone().prefetch(depth)))
+        self.clone_with(self.inner.clone().prefetch(depth))
     }
 
     pub fn iter(&self, py: Python<'_>) -> PyResult<Py<PyDataLoaderIter>> {

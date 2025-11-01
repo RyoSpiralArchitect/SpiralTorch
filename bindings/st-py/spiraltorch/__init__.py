@@ -29,6 +29,17 @@ from importlib.metadata import version as _pkg_version, PackageNotFoundError
 
 from . import dataset as _dataset
 
+_DATASET_NATIVE_AVAILABLE = hasattr(_dataset, "Dataset") and hasattr(
+    _dataset, "DataLoader"
+)
+
+
+def _require_dataset_native(feature: str) -> _NoReturn:
+    raise RuntimeError(
+        "SpiralTorch dataset helpers require the compiled nn extension; "
+        f"{feature} is unavailable in this build."
+    )
+
 from ._meta import (
     BUILD_FINGERPRINT,
     BUILD_ID,
@@ -2857,6 +2868,8 @@ class SpiralSession:
     def dataset(self, samples: _Optional[_Iterable[_Tuple[_Any, _Any]]] = None):
         """Build a :mod:`spiraltorch.dataset` payload from in-memory samples."""
 
+        if not _DATASET_NATIVE_AVAILABLE:
+            _require_dataset_native("SpiralSession.dataset()")
         if samples is None:
             return _dataset.Dataset()
         if isinstance(samples, _dataset.Dataset):
@@ -2887,6 +2900,8 @@ class SpiralSession:
     ):
         """Create a :class:`spiraltorch.dataset.DataLoader` wired to this session."""
 
+        if not _DATASET_NATIVE_AVAILABLE:
+            _require_dataset_native("SpiralSession.dataloader()")
         if isinstance(samples, _dataset.DataLoader):
             loader = samples
         else:

@@ -28,7 +28,6 @@ mod theory;
 mod introspect;
 mod qr;
 mod julia_bridge;
-#[cfg(feature = "nn")]
 mod dataset;
 
 mod extras {
@@ -192,7 +191,6 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     selfsup::register(py, &selfsup_mod)?;
     m.add_submodule(&selfsup_mod)?;
 
-    #[cfg(feature = "nn")]
     dataset::register(py, m)?;
 
     let linalg = PyModule::new_bound(py, "linalg")?;
