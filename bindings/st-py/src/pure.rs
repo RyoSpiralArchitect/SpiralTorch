@@ -376,6 +376,18 @@ impl PyHypergradTelemetry {
     pub fn volume(&self) -> usize {
         self.inner.volume()
     }
+
+    pub fn finite_count(&self) -> usize {
+        self.inner.finite_count()
+    }
+
+    pub fn non_finite_count(&self) -> usize {
+        self.inner.non_finite_count()
+    }
+
+    pub fn non_finite_ratio(&self) -> f32 {
+        self.inner.non_finite_ratio()
+    }
 }
 
 #[pyclass(
@@ -600,6 +612,22 @@ impl PyHypergrad {
 
     pub fn summary(&self) -> PyGradientSummary {
         self.inner.summary().into()
+    }
+
+    pub fn finite_count(&self) -> usize {
+        self.inner.finite_count()
+    }
+
+    pub fn non_finite_count(&self) -> usize {
+        self.inner.non_finite_count()
+    }
+
+    pub fn non_finite_ratio(&self) -> f32 {
+        self.inner.non_finite_ratio()
+    }
+
+    pub fn has_non_finite(&self) -> bool {
+        self.inner.has_non_finite()
     }
 
     pub fn telemetry(&self) -> PyHypergradTelemetry {

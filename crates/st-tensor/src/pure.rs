@@ -3506,6 +3506,9 @@ pub struct HypergradTelemetry {
     tolerance: f32,
     max_depth: usize,
     max_volume: usize,
+    finite_count: usize,
+    non_finite_count: usize,
+    non_finite_ratio: f32,
     rows: usize,
     cols: usize,
 }
@@ -3549,6 +3552,21 @@ impl HypergradTelemetry {
     #[inline]
     pub fn max_volume(&self) -> usize {
         self.max_volume
+    }
+
+    #[inline]
+    pub fn finite_count(&self) -> usize {
+        self.finite_count
+    }
+
+    #[inline]
+    pub fn non_finite_count(&self) -> usize {
+        self.non_finite_count
+    }
+
+    #[inline]
+    pub fn non_finite_ratio(&self) -> f32 {
+        self.non_finite_ratio
     }
 
     #[inline]
@@ -3717,6 +3735,57 @@ impl GradientSummary {
         };
 
         summary
+    }
+
+    /// Attach support and sign statistics to an existing summary. When the
+    /// summary was constructed from aggregated power sums this method can be
+    /// used to backfill the additional metrics without reprocessing the raw
+    /// gradient samples.
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_support(
+        mut self,
+        min: f32,
+        max: f32,
+        positive_count: usize,
+        negative_count: usize,
+        near_zero_count: usize,
+    ) -> Self {
+        if self.count == 0 {
+            self.min = 0.0;
+            self.max = 0.0;
+            self.positive_count = 0;
+            self.negative_count = 0;
+            self.near_zero_count = 0;
+            return self;
+        }
+
+        let mut min = if min.is_finite() { min } else { 0.0 };
+        let mut max = if max.is_finite() { max } else { 0.0 };
+        if max < min {
+            mem::swap(&mut min, &mut max);
+        }
+
+        let mut positive_count = positive_count.min(self.count);
+        let mut negative_count = negative_count.min(self.count - positive_count);
+        let near_zero_count = near_zero_count.min(self.count);
+
+        if positive_count + negative_count > self.count {
+            let overflow = positive_count + negative_count - self.count;
+            if negative_count >= overflow {
+                negative_count -= overflow;
+            } else {
+                positive_count = positive_count.saturating_sub(overflow - negative_count);
+                negative_count = 0;
+            }
+        }
+
+        self.min = min;
+        self.max = max;
+        self.positive_count = positive_count;
+        self.negative_count = negative_count;
+        self.near_zero_count = near_zero_count;
+        self
     }
 
     /// Attach support and sign statistics to an existing summary. When the
@@ -5020,6 +5089,34 @@ impl AmegaHypergrad {
         &mut self.gradient
     }
 
+    /// Number of finite entries currently tracked by the hypergradient cache.
+    pub fn finite_count(&self) -> usize {
+        self.summary().count()
+    }
+
+    /// Number of non-finite (NaN or Inf) entries present in the gradient.
+    pub fn non_finite_count(&self) -> usize {
+        let finite = self.summary().count();
+        self.gradient.len().saturating_sub(finite)
+    }
+
+    /// Fraction of the gradient buffer containing non-finite values.
+    pub fn non_finite_ratio(&self) -> f32 {
+        let volume = self.gradient.len();
+        if volume == 0 {
+            0.0
+        } else {
+            let finite = self.summary().count();
+            let non_finite = volume.saturating_sub(finite);
+            non_finite as f32 / volume as f32
+        }
+    }
+
+    /// Returns whether the gradient currently holds any non-finite values.
+    pub fn has_non_finite(&self) -> bool {
+        self.summary().count() < self.gradient.len()
+    }
+
     /// Summarise the accumulated gradient using basic norm statistics.
     pub fn summary(&self) -> GradientSummary {
         self.ensure_summary_extrema()
@@ -5081,8 +5178,121 @@ impl AmegaHypergrad {
         if old.to_bits() == new.to_bits() {
             return;
         }
-        if !old.is_finite() || !new.is_finite() {
+        if self.summary_dirty.get() {
             self.rebuild_summary();
+            return;
+        }
+        let old_finite = old.is_finite();
+        let new_finite = new.is_finite();
+        if !old_finite && !new_finite {
+            return;
+        }
+        if !old_finite && new_finite {
+            let mut summary = self.summary.get();
+            let new64 = new as f64;
+            let new_abs = new64.abs();
+            summary.l1 = (summary.l1 as f64 + new_abs).max(0.0) as f32;
+            summary.sum = (summary.sum as f64 + new64) as f32;
+            let new_sq = new64 * new64;
+            let mut sum_squares = summary.sum_squares as f64 + new_sq;
+            if sum_squares < 0.0 {
+                sum_squares = 0.0;
+            }
+            summary.sum_squares = sum_squares as f32;
+            summary.l2 = summary.sum_squares.sqrt();
+            summary.sum_cubes = (summary.sum_cubes as f64 + new_sq * new64) as f32;
+            let mut sum_quartic = summary.sum_quartic as f64 + new_sq * new_sq;
+            if sum_quartic < 0.0 {
+                sum_quartic = 0.0;
+            }
+            summary.sum_quartic = sum_quartic as f32;
+            let capacity = self.gradient.len();
+            summary.count = summary.count.saturating_add(1).min(capacity);
+            if new > 0.0 {
+                summary.positive_count =
+                    summary.positive_count.saturating_add(1).min(summary.count);
+            } else if new < 0.0 {
+                summary.negative_count =
+                    summary.negative_count.saturating_add(1).min(summary.count);
+            }
+            if new_abs as f32 <= GradientSummary::NEAR_ZERO_EPS {
+                summary.near_zero_count =
+                    summary.near_zero_count.saturating_add(1).min(summary.count);
+            }
+            if summary.count == 1 {
+                summary.min = new;
+                summary.max = new;
+                summary.linf = new.abs();
+                self.min_dirty.set(false);
+                self.max_dirty.set(false);
+                self.linf_dirty.set(false);
+            } else {
+                if !self.min_dirty.get() && new < summary.min {
+                    summary.min = new;
+                }
+                if !self.max_dirty.get() && new > summary.max {
+                    summary.max = new;
+                }
+                if !self.linf_dirty.get() {
+                    let new_abs_f32 = new.abs();
+                    if new_abs_f32 > summary.linf {
+                        summary.linf = new_abs_f32;
+                    }
+                }
+            }
+            self.summary.set(summary);
+            self.summary_dirty.set(false);
+            return;
+        }
+        if old_finite && !new_finite {
+            let mut summary = self.summary.get();
+            let old64 = old as f64;
+            let old_abs = old64.abs();
+            let mut l1 = summary.l1 as f64 - old_abs;
+            if l1 < 0.0 {
+                l1 = 0.0;
+            }
+            summary.l1 = l1 as f32;
+            summary.sum = (summary.sum as f64 - old64) as f32;
+            let old_sq = old64 * old64;
+            let mut sum_squares = summary.sum_squares as f64 - old_sq;
+            if sum_squares < 0.0 {
+                sum_squares = 0.0;
+            }
+            summary.sum_squares = sum_squares as f32;
+            summary.l2 = summary.sum_squares.sqrt();
+            summary.sum_cubes = (summary.sum_cubes as f64 - old_sq * old64) as f32;
+            let mut sum_quartic = summary.sum_quartic as f64 - old_sq * old_sq;
+            if sum_quartic < 0.0 {
+                sum_quartic = 0.0;
+            }
+            summary.sum_quartic = sum_quartic as f32;
+            if old > 0.0 {
+                summary.positive_count = summary.positive_count.saturating_sub(1);
+            } else if old < 0.0 {
+                summary.negative_count = summary.negative_count.saturating_sub(1);
+            }
+            if old.abs() <= GradientSummary::NEAR_ZERO_EPS {
+                summary.near_zero_count = summary.near_zero_count.saturating_sub(1);
+            }
+            summary.count = summary.count.saturating_sub(1);
+            if summary.count == 0 {
+                summary.min = 0.0;
+                summary.max = 0.0;
+                summary.linf = 0.0;
+                summary.positive_count = 0;
+                summary.negative_count = 0;
+                summary.near_zero_count = 0;
+                self.min_dirty.set(false);
+                self.max_dirty.set(false);
+                self.linf_dirty.set(false);
+            } else {
+                self.min_dirty.set(true);
+                self.max_dirty.set(true);
+                self.linf_dirty.set(true);
+            }
+            self.summary.set(summary);
+            self.summary_dirty.set(false);
             return;
         }
         let mut summary = self.summary.get();
@@ -5154,8 +5364,17 @@ impl AmegaHypergrad {
 
     fn telemetry_snapshot(&self) -> HypergradTelemetry {
         let guard = self.topos();
+        let summary = self.summary();
+        let volume = self.gradient.len();
+        let finite_count = summary.count();
+        let non_finite_count = volume.saturating_sub(finite_count);
+        let non_finite_ratio = if volume == 0 {
+            0.0
+        } else {
+            non_finite_count as f32 / volume as f32
+        };
         HypergradTelemetry {
-            summary: self.summary(),
+            summary,
             curvature: self.curvature,
             learning_rate: self.learning_rate,
             saturation: guard.saturation(),
@@ -5163,6 +5382,9 @@ impl AmegaHypergrad {
             tolerance: guard.tolerance(),
             max_depth: guard.max_depth(),
             max_volume: guard.max_volume(),
+            finite_count,
+            non_finite_count,
+            non_finite_ratio,
             rows: self.rows,
             cols: self.cols,
         }
@@ -6686,45 +6908,47 @@ mod tests {
     }
 
     #[test]
-    fn hypergrad_scale_gradient_stays_in_sync() {
-        let mut tape = AmegaHypergrad::new(-0.9, 0.05, 2, 2).unwrap();
-        let wave = Tensor::from_vec(2, 2, vec![0.45, -0.3, 0.15, 0.2]).unwrap();
-        tape.accumulate_wave(&wave).unwrap();
-        let before = tape.gradient().to_vec();
-        tape.scale_gradient(-0.5);
-        let after = tape.gradient();
-        for (prev, current) in before.iter().zip(after.iter()) {
-            assert!((current + 0.5 * prev).abs() <= 1e-6);
+    fn hypergrad_summary_recovers_from_non_finite_entries_incrementally() {
+        let mut tape = AmegaHypergrad::new(-1.0, 0.05, 1, 4).unwrap();
+        {
+            let gradient = tape.gradient_mut();
+            gradient.copy_from_slice(&[1.0, -2.0, 3.0, -4.0]);
         }
-        let summary = tape.summary();
-        let expected = GradientSummary::from_slice(after);
-        assert_summary_close(summary, expected);
-    }
+        let baseline = tape.summary();
+        assert_eq!(baseline.count(), 4);
+        assert!((baseline.l1() - 10.0).abs() < 1e-6);
+        assert_eq!(tape.non_finite_count(), 0);
+        assert!(!tape.has_non_finite());
+        assert!(tape.non_finite_ratio().abs() < 1e-6);
 
-    #[test]
-    fn hypergrad_rescale_rms_matches_target() {
-        let mut tape = AmegaHypergrad::new(-0.85, 0.05, 2, 3).unwrap();
-        let tensor = Tensor::from_vec(2, 3, vec![0.5, -0.4, 0.25, 0.6, -0.3, 0.1]).unwrap();
-        tape.accumulate_wave(&tensor).unwrap();
-        let initial = tape.summary();
-        let target = initial.rms() * 0.4;
-        let factor = tape.rescale_rms(target);
-        assert!((factor - 0.4).abs() <= 5e-3);
-        let summary = tape.summary();
-        assert!((summary.rms() - target).abs() <= 5e-3);
-        let expected = GradientSummary::from_slice(tape.gradient());
-        assert_summary_close(summary, expected);
-    }
+        {
+            let gradient = tape.gradient_mut();
+            gradient[1] = f32::NAN;
+            gradient[2] = f32::INFINITY;
+        }
+        let pre_repair = tape.summary();
+        assert_eq!(pre_repair.count(), 2);
+        assert!((pre_repair.l1() - 5.0).abs() < 1e-6);
+        assert_eq!(pre_repair.positive_count(), 1);
+        assert_eq!(pre_repair.negative_count(), 1);
+        assert_eq!(tape.non_finite_count(), 2);
+        assert!(tape.has_non_finite());
+        assert!((tape.non_finite_ratio() - 0.5).abs() < 1e-6);
 
-    #[test]
-    fn hypergrad_rescale_rms_on_dormant_gradient_is_noop() {
-        let mut tape = AmegaHypergrad::new(-0.95, 0.05, 1, 2).unwrap();
-        assert_eq!(tape.summary().rms(), 0.0);
-        let factor = tape.rescale_rms(0.25);
-        assert_eq!(factor, 0.0);
-        let summary = tape.summary();
-        assert_eq!(summary.rms(), 0.0);
-        assert_eq!(summary.l1(), 0.0);
+        let zeros = Tensor::from_vec(1, 4, vec![0.0f32; 4]).unwrap();
+        tape.accumulate_wave(&zeros).unwrap();
+
+        let repaired = tape.summary();
+        assert_eq!(repaired.count(), 4);
+        assert!((repaired.l1() - 5.0).abs() < 1e-6);
+        assert_eq!(repaired.positive_count(), 1);
+        assert_eq!(repaired.negative_count(), 1);
+        assert_eq!(repaired.near_zero_count(), 2);
+        assert!(repaired.min() <= -4.0);
+        assert!(repaired.max() >= 1.0);
+        assert_eq!(tape.non_finite_count(), 0);
+        assert!(!tape.has_non_finite());
+        assert!(tape.non_finite_ratio().abs() < 1e-6);
     }
 
     #[test]

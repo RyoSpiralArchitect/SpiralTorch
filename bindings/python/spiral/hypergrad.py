@@ -137,6 +137,9 @@ def hypergrad_summary_dict(
             "tolerance": float(_callable_attr(telemetry, "tolerance")()),
             "max_depth": int(_callable_attr(telemetry, "max_depth")()),
             "max_volume": int(_callable_attr(telemetry, "max_volume")()),
+            "finite_count": int(_callable_attr(telemetry, "finite_count")()),
+            "non_finite_count": int(_callable_attr(telemetry, "non_finite_count")()),
+            "non_finite_ratio": float(_callable_attr(telemetry, "non_finite_ratio")()),
         }
 
     if include_gradient:

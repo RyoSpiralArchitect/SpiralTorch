@@ -72,10 +72,16 @@ def test_hypergrad_telemetry_reports_metrics() -> None:
     telemetry = tape.telemetry()
     assert telemetry.shape() == (1, 3)
     assert telemetry.volume() == 3
+    assert tape.non_finite_count() == 0
+    assert not tape.has_non_finite()
+    assert abs(tape.non_finite_ratio()) < 1e-6
     assert telemetry.curvature() == -0.95
     assert telemetry.learning_rate() == 0.04
     summary = telemetry.summary()
     assert summary.count() == 3
+    assert telemetry.finite_count() == summary.count()
+    assert telemetry.non_finite_count() == 0
+    assert telemetry.non_finite_ratio() == 0.0
     assert telemetry.tolerance() > 0.0
     assert telemetry.saturation() > 0.0
     assert telemetry.max_volume() >= telemetry.volume()
