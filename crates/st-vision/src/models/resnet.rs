@@ -356,6 +356,151 @@ impl SkipSlipSchedule {
             self.start, self.end, self.power
         )
     }
+
+    /// Applies a skip slip schedule to the configuration.
+    pub fn with_skip_slip(mut self, schedule: SkipSlipSchedule) -> Self {
+        self.skip_slip = Some(schedule);
+        self
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SkipSlipSchedule {
+    start: f32,
+    end: f32,
+    power: f32,
+    per_stage: bool,
+}
+
+impl SkipSlipSchedule {
+    pub fn linear(start: f32, end: f32) -> Self {
+        Self {
+            start,
+            end,
+            power: 1.0,
+            per_stage: false,
+        }
+    }
+
+    pub fn constant(value: f32) -> Self {
+        Self::linear(value, value)
+    }
+
+    pub fn with_power(mut self, power: f32) -> Self {
+        self.power = power;
+        self
+    }
+
+    pub fn per_stage(mut self) -> Self {
+        self.per_stage = true;
+        self
+    }
+
+    /// Returns the slip factors that would be applied to a sequence of stages.
+    ///
+    /// Each element in the returned vector corresponds to a stage and contains
+    /// one slip factor per residual block in that stage. The schedule is
+    /// validated before previewing.
+    pub fn preview(&self, block_depths: &[usize]) -> PureResult<Vec<Vec<f32>>> {
+        self.validate()?;
+        let total_blocks: usize = block_depths.iter().sum();
+        let mut preview = Vec::with_capacity(block_depths.len());
+        let mut global_block_idx = 0usize;
+        for (stage_idx, &depth) in block_depths.iter().enumerate() {
+            let mut stage_factors = Vec::with_capacity(depth);
+            for block_idx in 0..depth {
+                let factor =
+                    self.factor(stage_idx, block_idx, depth, global_block_idx, total_blocks);
+                stage_factors.push(factor);
+                global_block_idx += 1;
+            }
+            preview.push(stage_factors);
+        }
+        Ok(preview)
+    }
+
+    fn validate(&self) -> PureResult<()> {
+        if !self.start.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "resnet_skip_slip_start",
+                value: self.start,
+            });
+        }
+        if !self.end.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "resnet_skip_slip_end",
+                value: self.end,
+            });
+        }
+        if !self.power.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "resnet_skip_slip_power",
+                value: self.power,
+            });
+        }
+        if self.start < 0.0 || self.end < 0.0 {
+            return Err(TensorError::InvalidValue {
+                label: "resnet_skip_slip_range",
+            });
+        }
+        if self.power <= 0.0 {
+            return Err(TensorError::InvalidValue {
+                label: "resnet_skip_slip_power",
+            });
+        }
+        Ok(())
+    }
+
+    fn factor(
+        &self,
+        _stage_idx: usize,
+        block_idx: usize,
+        stage_depth: usize,
+        global_block_idx: usize,
+        total_blocks: usize,
+    ) -> f32 {
+        let numerator = if self.per_stage {
+            block_idx as f32
+        } else {
+            global_block_idx as f32
+        };
+        let denominator = if self.per_stage {
+            if stage_depth > 1 {
+                (stage_depth - 1) as f32
+            } else {
+                1.0
+            }
+        } else if total_blocks > 1 {
+            (total_blocks - 1) as f32
+        } else {
+            1.0
+        };
+        let progress = if denominator <= f32::EPSILON {
+            0.0
+        } else {
+            (numerator / denominator).clamp(0.0, 1.0)
+        };
+        let powered = progress.powf(self.power);
+        let slip = self.start + (self.end - self.start) * powered;
+        if slip <= 0.0 {
+            0.0
+        } else {
+            slip
+        }
+    }
+
+    #[allow(dead_code)]
+    fn description(&self) -> String {
+        let scope = if self.per_stage {
+            "per-stage"
+        } else {
+            "global"
+        };
+        format!(
+            "{scope} slip: start={:.3}, end={:.3}, power={:.3}",
+            self.start, self.end, self.power
+        )
+    }
 }
 
 #[derive(Debug)]
