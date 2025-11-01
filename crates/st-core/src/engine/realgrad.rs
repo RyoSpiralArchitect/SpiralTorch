@@ -5,7 +5,7 @@
 
 use crate::ops::realgrad::{
     RealGradConfig, RealGradKernel, RealGradProjection, RealGradTuning, SchwartzSequence,
-    TemperedRealGradProjection,
+    TemperedRealGradProjection, TransparentGradientOpticsConfig,
 };
 use crate::telemetry::hub::{set_last_realgrad, RealGradPulse};
 
@@ -62,6 +62,16 @@ impl RealGradEngine {
     /// Updates the smoothing factor used for the rolling telemetry metrics.
     pub fn set_ema_alpha(&mut self, alpha: f32) {
         self.ema_alpha = alpha.clamp(0.0, 1.0);
+    }
+
+    /// Returns the configured transparent gradient optics, if enabled.
+    pub fn optics(&self) -> Option<TransparentGradientOpticsConfig> {
+        self.kernel.optics()
+    }
+
+    /// Updates the transparent gradient optics configuration used by the engine.
+    pub fn set_optics(&mut self, optics: Option<TransparentGradientOpticsConfig>) {
+        self.kernel.set_optics(optics);
     }
 
     /// Returns the cached Ramanujan π estimate used by the engine.
