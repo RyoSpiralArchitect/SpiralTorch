@@ -7,7 +7,7 @@ pub mod compaction;
 pub mod compaction2ce;
 pub mod compaction_2ce;
 pub mod gelu_back;
-pub mod middleman;
+pub mod middlemax;
 pub mod midk_bottomk;
 pub mod nd_indexer;
 pub mod nerf;
@@ -26,14 +26,14 @@ pub use midk_bottomk::{
     ElementCounts as MidkBottomkElementCounts, Kind as MidkBottomkKind,
 };
 
-pub use middleman::{
-    create_pipelines as create_middleman_pipelines, dispatch as dispatch_middleman,
-    encode as encode_middleman, encode_into as encode_middleman_into,
-    ApplyStrategy as MiddlemanApplyStrategy, Builder as MiddlemanBuilder,
-    DispatchArgs as MiddlemanDispatchArgs,
-    DispatchValidationError as MiddlemanDispatchValidationError,
-    ElementCounts as MiddlemanElementCounts, Kind as MiddlemanKind,
-    Pipelines as MiddlemanPipelines,
+pub use middlemax::{
+    create_pipelines as create_middlemax_pipelines, dispatch as dispatch_middlemax,
+    encode as encode_middlemax, encode_into as encode_middlemax_into,
+    ApplyStrategy as MiddlemaxApplyStrategy, Builder as MiddlemaxBuilder,
+    DispatchArgs as MiddlemaxDispatchArgs,
+    DispatchValidationError as MiddlemaxDispatchValidationError,
+    ElementCounts as MiddlemaxElementCounts, Kind as MiddlemaxKind,
+    Pipelines as MiddlemaxPipelines,
 };
 
 pub use util::{
