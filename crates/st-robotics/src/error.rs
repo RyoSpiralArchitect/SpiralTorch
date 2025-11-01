@@ -29,6 +29,10 @@ pub enum RoboticsError {
     },
     /// Failed to adapt a general relativity metric for robotics use.
     RelativityBridge(String),
+    /// Synchronising CanvasProjector data with sensor payloads failed.
+    VisionSync(String),
+    /// Temporal feedback learner received an invalid configuration.
+    Trainer(String),
 }
 
 impl fmt::Display for RoboticsError {
@@ -71,6 +75,12 @@ impl fmt::Display for RoboticsError {
             }
             Self::RelativityBridge(message) => {
                 write!(f, "failed to bridge general relativity metric: {message}")
+            }
+            Self::VisionSync(message) => {
+                write!(f, "failed to synchronise vision feedback: {message}")
+            }
+            Self::Trainer(message) => {
+                write!(f, "temporal feedback trainer error: {message}")
             }
         }
     }

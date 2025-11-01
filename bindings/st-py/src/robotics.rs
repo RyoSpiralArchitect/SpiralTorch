@@ -10,7 +10,9 @@ use st_robotics::{
     ChannelHealth, Desire, DesireLagrangianField, DriftSafetyPlugin, EnergyReport, FusedFrame,
     GeometryKind, GravityField, GravityRegime, GravityWell, PolicyGradientController, PsiTelemetry,
     RelativityBridge, RoboticsError, RoboticsRuntime, RuntimeStep, SafetyReview, SensorFusionHub,
-    SymmetryAnsatz, TelemetryReport, ZSpaceDynamics, ZSpaceGeometry,
+    SymmetryAnsatz, TelemetryReport, TemporalFeedbackLearner, TemporalFeedbackSummary,
+    TrainerMetrics, VisionFeedbackSnapshot, VisionFeedbackSynchronizer, ZSpaceDynamics,
+    ZSpaceGeometry, ZSpacePartialObservation, ZSpaceTrainerBridge, ZSpaceTrainerSample,
 };
 
 fn robotics_err_to_py(err: RoboticsError) -> PyErr {
@@ -32,6 +34,14 @@ fn dict_to_payloads(dict: &Bound<PyDict>) -> PyResult<HashMap<String, Vec<f32>>>
 }
 
 fn btreemap_to_dict(py: Python<'_>, map: &BTreeMap<String, f32>) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    for (key, value) in map {
+        dict.set_item(key, *value)?;
+    }
+    Ok(dict.into_py(py))
+}
+
+fn hashmap_to_dict(py: Python<'_>, map: &HashMap<String, f32>) -> PyResult<PyObject> {
     let dict = PyDict::new_bound(py);
     for (key, value) in map {
         dict.set_item(key, *value)?;
@@ -61,6 +71,19 @@ fn safety_metrics_to_py(py: Python<'_>, review: &SafetyReview) -> PyResult<PyObj
     dict.set_item("frame_signatures", metrics.frame_signatures.len())?;
     dict.set_item("direction_signatures", metrics.direction_signatures.len())?;
     Ok(dict.into_py(py))
+}
+
+fn vectors_from_py(raw: Vec<Vec<f32>>) -> PyResult<Vec<[f32; 4]>> {
+    let mut vectors = Vec::with_capacity(raw.len());
+    for (idx, vector) in raw.into_iter().enumerate() {
+        if vector.len() != 4 {
+            return Err(PyValueError::new_err(format!(
+                "canvas vector #{idx} must contain four components"
+            )));
+        }
+        vectors.push([vector[0], vector[1], vector[2], vector[3]]);
+    }
+    Ok(vectors)
 }
 
 fn components_from_py(values: Vec<Vec<f64>>) -> PyResult<[[f32; 4]; 4]> {
@@ -716,6 +739,299 @@ impl PyRoboticsRuntime {
     }
 }
 
+#[pyclass(module = "spiraltorch.robotics", name = "VisionFeedbackSnapshot")]
+#[derive(Clone, Debug)]
+pub(crate) struct PyVisionFeedbackSnapshot {
+    inner: VisionFeedbackSnapshot,
+}
+
+#[pymethods]
+impl PyVisionFeedbackSnapshot {
+    #[getter]
+    pub fn channel(&self) -> &str {
+        &self.inner.channel
+    }
+
+    #[getter]
+    pub fn timestamp(&self) -> f64 {
+        self.inner
+            .timestamp
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_secs_f64())
+            .unwrap_or(0.0)
+    }
+
+    #[getter]
+    pub fn sensor(&self) -> Vec<f32> {
+        self.inner.sensor.clone()
+    }
+
+    #[getter]
+    pub fn alignment(&self) -> f32 {
+        self.inner.alignment
+    }
+
+    #[getter]
+    pub fn metrics(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        for (key, value) in self.inner.metrics() {
+            dict.set_item(key, value)?;
+        }
+        Ok(dict.into_py(py))
+    }
+}
+
+#[pyclass(module = "spiraltorch.robotics", name = "VisionFeedbackSynchronizer")]
+#[derive(Clone, Debug)]
+pub(crate) struct PyVisionFeedbackSynchronizer {
+    inner: VisionFeedbackSynchronizer,
+}
+
+#[pymethods]
+impl PyVisionFeedbackSynchronizer {
+    #[new]
+    #[pyo3(signature = (channel, *, coherence=1.0, tension=1.0, depth=1))]
+    pub fn new(channel: &str, coherence: f32, tension: f32, depth: u32) -> Self {
+        Self {
+            inner: VisionFeedbackSynchronizer::with_patch(channel, coherence, tension, depth),
+        }
+    }
+
+    #[getter]
+    pub fn channel(&self) -> &str {
+        self.inner.channel()
+    }
+
+    pub fn set_patch(&mut self, coherence: f32, tension: f32, depth: u32) {
+        self.inner.set_patch_parameters(coherence, tension, depth);
+    }
+
+    pub fn sync(
+        &self,
+        step: PyRef<'_, PyRuntimeStep>,
+        vectors: Vec<Vec<f32>>,
+    ) -> PyResult<PyVisionFeedbackSnapshot> {
+        let converted = vectors_from_py(vectors)?;
+        let snapshot = self
+            .inner
+            .sync_with_vectors(&step.inner, &converted)
+            .map_err(robotics_err_to_py)?;
+        Ok(PyVisionFeedbackSnapshot { inner: snapshot })
+    }
+}
+
+#[pyclass(module = "spiraltorch.robotics", name = "ZSpacePartialObservation")]
+#[derive(Clone, Debug)]
+pub(crate) struct PyZSpacePartialObservation {
+    inner: ZSpacePartialObservation,
+}
+
+#[pymethods]
+impl PyZSpacePartialObservation {
+    #[getter]
+    pub fn metrics(&self, py: Python<'_>) -> PyResult<PyObject> {
+        hashmap_to_dict(py, &self.inner.metrics)
+    }
+
+    #[getter]
+    pub fn commands(&self, py: Python<'_>) -> PyResult<PyObject> {
+        hashmap_to_dict(py, &self.inner.commands)
+    }
+
+    #[getter]
+    pub fn gradient(&self) -> Vec<f32> {
+        self.inner.gradient.clone()
+    }
+
+    #[getter]
+    pub fn weight(&self) -> f32 {
+        self.inner.weight
+    }
+}
+
+#[pyclass(module = "spiraltorch.robotics", name = "TrainerMetrics")]
+#[derive(Clone, Debug)]
+pub(crate) struct PyTrainerMetrics {
+    inner: TrainerMetrics,
+}
+
+#[pymethods]
+impl PyTrainerMetrics {
+    #[getter]
+    pub fn speed(&self) -> f32 {
+        self.inner.speed
+    }
+
+    #[getter]
+    pub fn memory(&self) -> f32 {
+        self.inner.memory
+    }
+
+    #[getter]
+    pub fn stability(&self) -> f32 {
+        self.inner.stability
+    }
+
+    #[getter]
+    pub fn gradient(&self) -> Vec<f32> {
+        self.inner.gradient.clone()
+    }
+
+    #[getter]
+    pub fn drs(&self) -> f32 {
+        self.inner.drs
+    }
+}
+
+#[pyclass(module = "spiraltorch.robotics", name = "TemporalFeedbackSummary")]
+#[derive(Clone, Debug)]
+pub(crate) struct PyTemporalFeedbackSummary {
+    inner: TemporalFeedbackSummary,
+}
+
+#[pymethods]
+impl PyTemporalFeedbackSummary {
+    #[getter]
+    pub fn discounted_energy(&self) -> f32 {
+        self.inner.discounted_energy
+    }
+
+    #[getter]
+    pub fn discounted_gravity(&self) -> f32 {
+        self.inner.discounted_gravity
+    }
+
+    #[getter]
+    pub fn discounted_stability(&self) -> f32 {
+        self.inner.discounted_stability
+    }
+
+    #[getter]
+    pub fn discounted_alignment(&self) -> Option<f32> {
+        self.inner.discounted_alignment
+    }
+
+    #[getter]
+    pub fn commands(&self, py: Python<'_>) -> PyResult<PyObject> {
+        hashmap_to_dict(py, &self.inner.commands)
+    }
+
+    #[getter]
+    pub fn partial(&self) -> PyZSpacePartialObservation {
+        PyZSpacePartialObservation {
+            inner: self.inner.partial.clone(),
+        }
+    }
+
+    #[getter]
+    pub fn latest_sensor_norm(&self) -> f32 {
+        self.inner.latest_sensor_norm
+    }
+
+    #[getter]
+    pub fn anomaly_score(&self) -> f32 {
+        self.inner.anomaly_score
+    }
+}
+
+#[pyclass(module = "spiraltorch.robotics", name = "TemporalFeedbackLearner")]
+#[derive(Clone, Debug)]
+pub(crate) struct PyTemporalFeedbackLearner {
+    inner: TemporalFeedbackLearner,
+}
+
+#[pymethods]
+impl PyTemporalFeedbackLearner {
+    #[new]
+    #[pyo3(signature = (horizon, *, discount=0.9))]
+    pub fn new(horizon: usize, discount: f32) -> PyResult<Self> {
+        let inner = TemporalFeedbackLearner::new(horizon, discount).map_err(robotics_err_to_py)?;
+        Ok(Self { inner })
+    }
+
+    pub fn push(
+        &mut self,
+        step: PyRef<'_, PyRuntimeStep>,
+        vision: Option<PyRef<'_, PyVisionFeedbackSnapshot>>,
+    ) -> PyResult<PyTemporalFeedbackSummary> {
+        let vision_snapshot = vision.map(|value| value.inner.clone());
+        let summary = self.inner.push(&step.inner, vision_snapshot.as_ref());
+        Ok(PyTemporalFeedbackSummary { inner: summary })
+    }
+
+    #[getter]
+    pub fn horizon(&self) -> usize {
+        self.inner.horizon()
+    }
+
+    #[getter]
+    pub fn discount(&self) -> f32 {
+        self.inner.discount()
+    }
+}
+
+#[pyclass(module = "spiraltorch.robotics", name = "ZSpaceTrainerSample")]
+#[derive(Clone, Debug)]
+pub(crate) struct PyZSpaceTrainerSample {
+    inner: ZSpaceTrainerSample,
+}
+
+#[pymethods]
+impl PyZSpaceTrainerSample {
+    #[getter]
+    pub fn metrics(&self) -> PyTrainerMetrics {
+        PyTrainerMetrics {
+            inner: self.inner.metrics.clone(),
+        }
+    }
+
+    #[getter]
+    pub fn partial(&self) -> PyZSpacePartialObservation {
+        PyZSpacePartialObservation {
+            inner: self.inner.partial.clone(),
+        }
+    }
+}
+
+#[pyclass(module = "spiraltorch.robotics", name = "ZSpaceTrainerBridge")]
+#[derive(Clone, Debug)]
+pub(crate) struct PyZSpaceTrainerBridge {
+    inner: ZSpaceTrainerBridge,
+}
+
+#[pymethods]
+impl PyZSpaceTrainerBridge {
+    #[new]
+    #[pyo3(signature = (horizon, *, discount=0.9))]
+    pub fn new(horizon: usize, discount: f32) -> PyResult<Self> {
+        let bridge = ZSpaceTrainerBridge::new(horizon, discount).map_err(robotics_err_to_py)?;
+        Ok(Self { inner: bridge })
+    }
+
+    pub fn push(
+        &mut self,
+        step: PyRef<'_, PyRuntimeStep>,
+        vision: Option<PyRef<'_, PyVisionFeedbackSnapshot>>,
+    ) -> PyResult<PyZSpaceTrainerSample> {
+        let vision_snapshot = vision.map(|value| value.inner.clone());
+        let sample = self
+            .inner
+            .push(&step.inner, vision_snapshot.as_ref())
+            .map_err(robotics_err_to_py)?;
+        Ok(PyZSpaceTrainerSample { inner: sample })
+    }
+
+    #[getter]
+    pub fn horizon(&self) -> usize {
+        self.inner.horizon()
+    }
+
+    #[getter]
+    pub fn discount(&self) -> f32 {
+        self.inner.discount()
+    }
+}
+
 #[pyclass(module = "spiraltorch.robotics", name = "RuntimeStep")]
 #[derive(Clone, Debug)]
 pub(crate) struct PyRuntimeStep {
@@ -784,8 +1100,16 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
     module.add_class::<PyPolicyGradientController>()?;
     module.add_class::<PyDriftSafetyPlugin>()?;
     module.add_class::<PySafetyReview>()?;
+    module.add_class::<PyVisionFeedbackSnapshot>()?;
+    module.add_class::<PyVisionFeedbackSynchronizer>()?;
     module.add_class::<PyRoboticsRuntime>()?;
     module.add_class::<PyRuntimeStep>()?;
+    module.add_class::<PyZSpacePartialObservation>()?;
+    module.add_class::<PyTrainerMetrics>()?;
+    module.add_class::<PyTemporalFeedbackSummary>()?;
+    module.add_class::<PyTemporalFeedbackLearner>()?;
+    module.add_class::<PyZSpaceTrainerSample>()?;
+    module.add_class::<PyZSpaceTrainerBridge>()?;
     module.add_class::<PyGravityField>()?;
     module.add_class::<PyGravityWell>()?;
     module.add_class::<PyZSpaceDynamics>()?;

@@ -39,6 +39,9 @@ relativity_geometry_from_metric = robotics.relativity_geometry_from_metric
 relativity_dynamics_from_metric = robotics.relativity_dynamics_from_metric
 relativity_dynamics_from_ansatz = robotics.relativity_dynamics_from_ansatz
 DriftSafetyPlugin = robotics.DriftSafetyPlugin
+VisionFeedbackSynchronizer = robotics.VisionFeedbackSynchronizer
+TemporalFeedbackLearner = robotics.TemporalFeedbackLearner
+ZSpaceTrainerBridge = robotics.ZSpaceTrainerBridge
 
 
 class SensorFusionHubTests(unittest.TestCase):
@@ -260,6 +263,59 @@ class RelativityBridgeTests(unittest.TestCase):
         gravity.add_well("pose", GravityWell.newtonian(5.0))
         dynamics = relativity_dynamics_from_metric(minkowski, gravity=gravity)
         self.assertIsNotNone(dynamics.gravity)
+
+
+class VisionAndTrainingTests(unittest.TestCase):
+    def _make_runtime(self) -> RoboticsRuntime:
+        hub = SensorFusionHub()
+        hub.register_channel("vision", 3)
+        hub.register_channel("imu", 3)
+        desires = DesireLagrangianField(
+            {
+                "vision": Desire(target_norm=0.0, tolerance=0.0, weight=0.5),
+                "imu": Desire(target_norm=0.0, tolerance=0.0, weight=1.0),
+            }
+        )
+        telemetry = PsiTelemetry(window=4, stability_threshold=0.5, failure_energy=5.0, norm_limit=5.0)
+        return RoboticsRuntime(sensors=hub, desires=desires, telemetry=telemetry)
+
+    def test_vision_feedback_snapshot_alignment(self) -> None:
+        runtime = self._make_runtime()
+        step = runtime.step({"vision": (0.5, 0.4, 0.3), "imu": (0.1, -0.2, 0.05)})
+        vectors = [
+            (0.2, 0.05, -0.02, 0.01),
+            (0.3, 0.02, 0.01, -0.03),
+            (0.1, -0.01, 0.0, 0.02),
+        ]
+        sync = VisionFeedbackSynchronizer("vision")
+        snapshot = sync.sync(step, vectors)
+        self.assertGreater(snapshot.canvas_mean_energy, 0.0)
+        self.assertGreaterEqual(snapshot.alignment, 0.0)
+        self.assertIn("vision.energy.mean", snapshot.metrics())
+
+    def test_temporal_feedback_and_trainer_bridge(self) -> None:
+        runtime = self._make_runtime()
+        sync = VisionFeedbackSynchronizer("vision")
+        learner = TemporalFeedbackLearner(3, discount=0.8)
+        bridge = ZSpaceTrainerBridge(3, discount=0.8)
+
+        step_a = runtime.step({"vision": (0.5, 0.4, 0.3), "imu": (0.1, -0.2, 0.05)})
+        snapshot_a = sync.sync(
+            step_a,
+            [(0.2, 0.0, 0.0, 0.0), (0.25, 0.02, -0.01, 0.03)],
+        )
+        summary_a = learner.push(step_a, snapshot_a)
+        self.assertIn("feedback.energy.discounted", summary_a.partial.metrics)
+        self.assertGreaterEqual(summary_a.latest_sensor_norm, 0.0)
+
+        step_b = runtime.step({"vision": (0.2, 0.1, 0.05), "imu": (0.05, 0.02, -0.01)})
+        snapshot_b = sync.sync(step_b, [(0.1, -0.02, 0.0, 0.01)])
+        summary_b = learner.push(step_b, snapshot_b)
+        self.assertLess(summary_b.discounted_energy, summary_a.discounted_energy + 1.0)
+
+        sample = bridge.push(step_b, snapshot_b)
+        self.assertGreater(len(sample.metrics.gradient), 0)
+        self.assertIn("vision.energy.mean", sample.partial.metrics)
 
 
 if __name__ == "__main__":

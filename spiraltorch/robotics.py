@@ -636,6 +636,357 @@ class RoboticsRuntime:
         self.telemetry.set_geometry(self.desires.dynamics.geometry)
 
 
+def _summarise_canvas_vectors(
+    vectors: Sequence[Sequence[float]],
+) -> tuple[float, float, tuple[float, float, float]]:
+    energy_sum = 0.0
+    energy_sq = 0.0
+    chroma_r = 0.0
+    chroma_g = 0.0
+    chroma_b = 0.0
+    count = 0
+    for vector in vectors:
+        if len(vector) != 4:
+            raise ValueError("canvas vectors must contain four components [energy, r, g, b]")
+        energy = float(vector[0])
+        energy_sum += energy
+        energy_sq += energy * energy
+        chroma_r += float(vector[1])
+        chroma_g += float(vector[2])
+        chroma_b += float(vector[3])
+        count += 1
+    if count == 0:
+        return 0.0, 0.0, (0.0, 0.0, 0.0)
+    inv = 1.0 / count
+    mean = energy_sum * inv
+    rms = math.sqrt(energy_sq * inv)
+    return mean, rms, (chroma_r * inv, chroma_g * inv, chroma_b * inv)
+
+
+@dataclass
+class VisionFeedbackSnapshot:
+    channel: str
+    timestamp: float
+    sensor: tuple[float, ...]
+    sensor_norm: float
+    canvas_mean_energy: float
+    canvas_rms_energy: float
+    chroma: tuple[float, float, float]
+    alignment: float
+
+    def metrics(self) -> dict[str, float]:
+        return {
+            "vision.energy.mean": self.canvas_mean_energy,
+            "vision.energy.rms": self.canvas_rms_energy,
+            "vision.alignment": self.alignment,
+            "vision.sensor.norm": self.sensor_norm,
+            "vision.chroma.r": self.chroma[0],
+            "vision.chroma.g": self.chroma[1],
+            "vision.chroma.b": self.chroma[2],
+        }
+
+    def gradient_component(self) -> list[float]:
+        return [self.alignment, self.canvas_rms_energy]
+
+
+class VisionFeedbackSynchronizer:
+    """Pair sensor channels with CanvasProjector vector feedback."""
+
+    def __init__(
+        self,
+        channel: str,
+        *,
+        coherence: float = 1.0,
+        tension: float = 1.0,
+        depth: int = 1,
+    ) -> None:
+        self._channel = channel
+        self._coherence = float(coherence)
+        self._tension = float(tension)
+        self._depth = max(int(depth), 1)
+
+    @property
+    def channel(self) -> str:
+        return self._channel
+
+    def set_patch(self, coherence: float, tension: float, depth: int) -> None:
+        self._coherence = float(coherence)
+        self._tension = float(tension)
+        self._depth = max(int(depth), 1)
+
+    def sync(
+        self,
+        step: RuntimeStep,
+        vectors: Sequence[Sequence[float]],
+    ) -> VisionFeedbackSnapshot:
+        sensor = step.frame.coordinates.get(self._channel)
+        if sensor is None:
+            raise ValueError(f"channel {self._channel!r} missing from fused frame")
+        sensor_tuple = tuple(float(value) for value in sensor)
+        sensor_norm = math.sqrt(sum(value * value for value in sensor_tuple))
+        mean_energy, rms_energy, chroma = _summarise_canvas_vectors(vectors)
+        alignment = mean_energy / sensor_norm if sensor_norm > 0.0 else 0.0
+        return VisionFeedbackSnapshot(
+            channel=self._channel,
+            timestamp=float(step.frame.timestamp),
+            sensor=sensor_tuple,
+            sensor_norm=sensor_norm,
+            canvas_mean_energy=mean_energy,
+            canvas_rms_energy=rms_energy,
+            chroma=tuple(chroma),
+            alignment=alignment,
+        )
+
+
+@dataclass
+class ZSpacePartialObservation:
+    metrics: dict[str, float]
+    commands: dict[str, float]
+    gradient: list[float]
+    weight: float
+
+
+@dataclass
+class TemporalFeedbackSample:
+    timestamp: float
+    energy_total: float
+    gravitational_total: float
+    psi_stability: float
+    psi_failsafe: bool
+    psi_anomalies: tuple[str, ...]
+    per_channel_energy: dict[str, float]
+    per_channel_gravity: dict[str, float]
+    channel_norms: dict[str, float]
+    average_norm: float
+    commands: dict[str, float]
+    halted: bool
+    vision_energy: float | None
+    vision_rms: float | None
+    vision_alignment: float | None
+
+    @classmethod
+    def from_step(
+        cls,
+        step: RuntimeStep,
+        vision: VisionFeedbackSnapshot | None = None,
+    ) -> "TemporalFeedbackSample":
+        channel_norms = {
+            name: math.sqrt(sum(value * value for value in vector))
+            for name, vector in step.frame.coordinates.items()
+        }
+        average_norm = (
+            sum(channel_norms.values()) / len(channel_norms)
+            if channel_norms
+            else 0.0
+        )
+        return cls(
+            timestamp=float(step.frame.timestamp),
+            energy_total=float(step.energy.total),
+            gravitational_total=float(step.energy.gravitational),
+            psi_stability=float(step.telemetry.stability),
+            psi_failsafe=bool(step.telemetry.failsafe),
+            psi_anomalies=tuple(step.telemetry.anomalies),
+            per_channel_energy=dict(step.energy.per_channel),
+            per_channel_gravity=dict(step.energy.gravitational_per_channel),
+            channel_norms=channel_norms,
+            average_norm=average_norm,
+            commands=dict(step.commands),
+            halted=bool(step.halted),
+            vision_energy=vision.canvas_mean_energy if vision else None,
+            vision_rms=vision.canvas_rms_energy if vision else None,
+            vision_alignment=vision.alignment if vision else None,
+        )
+
+    def anomaly_score(self) -> float:
+        score = 1.0 if self.psi_failsafe else 0.0
+        score += float(len(self.psi_anomalies))
+        if self.halted:
+            score += 1.0
+        return score
+
+    def gradient(self) -> list[float]:
+        pairs = []
+        for name, value in self.per_channel_energy.items():
+            gravity = self.per_channel_gravity.get(name, 0.0)
+            pairs.append((name, value - gravity))
+        pairs.sort(key=lambda item: item[0])
+        gradient = [delta for _, delta in pairs]
+        if self.vision_alignment is not None:
+            gradient.append(self.vision_alignment)
+        if self.vision_rms is not None:
+            gradient.append(self.vision_rms)
+        return gradient
+
+    def to_partial(self) -> ZSpacePartialObservation:
+        metrics: dict[str, float] = {
+            "psi.energy": self.energy_total,
+            "psi.stability": self.psi_stability,
+            "psi.failsafe": 1.0 if self.psi_failsafe else 0.0,
+            "psi.anomalies": float(len(self.psi_anomalies)),
+            "desire.energy.total": self.energy_total,
+            "gravity.energy.total": self.gravitational_total,
+            "sensor.norm.mean": self.average_norm,
+        }
+        for name, value in self.per_channel_energy.items():
+            metrics[f"desire.energy.{name}"] = value
+        for name, value in self.per_channel_gravity.items():
+            metrics[f"gravity.energy.{name}"] = value
+        for name, value in self.channel_norms.items():
+            metrics[f"sensor.norm.{name}"] = value
+        if self.vision_energy is not None:
+            metrics["vision.energy.mean"] = self.vision_energy
+        if self.vision_rms is not None:
+            metrics["vision.energy.rms"] = self.vision_rms
+        if self.vision_alignment is not None:
+            metrics["vision.alignment"] = self.vision_alignment
+        return ZSpacePartialObservation(
+            metrics=metrics,
+            commands=dict(self.commands),
+            gradient=self.gradient(),
+            weight=1.0,
+        )
+
+
+@dataclass
+class TrainerMetrics:
+    speed: float
+    memory: float
+    stability: float
+    gradient: list[float]
+    drs: float
+
+
+@dataclass
+class TemporalFeedbackSummary:
+    discounted_energy: float
+    discounted_gravity: float
+    discounted_stability: float
+    discounted_alignment: float | None
+    commands: dict[str, float]
+    partial: ZSpacePartialObservation
+    latest_sensor_norm: float
+    anomaly_score: float
+
+
+class TemporalFeedbackLearner:
+    """Aggregate runtime steps into discounted feedback signals."""
+
+    def __init__(self, horizon: int, *, discount: float = 0.9) -> None:
+        if horizon <= 0:
+            raise ValueError("temporal horizon must be positive")
+        if not 0.0 < float(discount) <= 1.0:
+            raise ValueError("discount factor must lie in (0, 1]")
+        self._horizon = int(horizon)
+        self._discount = float(discount)
+        self._buffer: deque[TemporalFeedbackSample] = deque(maxlen=self._horizon)
+
+    @property
+    def horizon(self) -> int:
+        return self._horizon
+
+    @property
+    def discount(self) -> float:
+        return self._discount
+
+    def push(
+        self,
+        step: RuntimeStep,
+        vision: VisionFeedbackSnapshot | None = None,
+    ) -> TemporalFeedbackSummary:
+        sample = TemporalFeedbackSample.from_step(step, vision)
+        if len(self._buffer) == self._horizon:
+            self._buffer.popleft()
+        self._buffer.append(sample)
+
+        energy = 0.0
+        gravity = 0.0
+        stability = 0.0
+        alignment_total = 0.0
+        alignment_weight = 0.0
+        commands: dict[str, float] = {}
+        weight = 0.0
+        factor = 1.0
+        for snapshot in reversed(self._buffer):
+            energy += factor * snapshot.energy_total
+            gravity += factor * snapshot.gravitational_total
+            stability += factor * snapshot.psi_stability
+            if snapshot.vision_alignment is not None:
+                alignment_total += factor * snapshot.vision_alignment
+                alignment_weight += factor
+            for name, value in snapshot.commands.items():
+                commands[name] = commands.get(name, 0.0) + factor * value
+            weight += factor
+            factor *= self._discount
+        if weight > 0.0:
+            inv = 1.0 / weight
+            energy *= inv
+            gravity *= inv
+            stability *= inv
+            commands = {name: value * inv for name, value in commands.items()}
+        alignment = (
+            alignment_total / alignment_weight if alignment_weight > 0.0 else None
+        )
+        partial = self._buffer[-1].to_partial()
+        partial.weight = max(weight, 1.0)
+        partial.metrics["feedback.energy.discounted"] = energy
+        partial.metrics["feedback.gravity.discounted"] = gravity
+        partial.metrics["feedback.stability.discounted"] = stability
+        if alignment is not None:
+            partial.metrics["vision.alignment.discounted"] = alignment
+        for name, value in commands.items():
+            partial.metrics[f"feedback.command.{name}"] = value
+        summary = TemporalFeedbackSummary(
+            discounted_energy=energy,
+            discounted_gravity=gravity,
+            discounted_stability=stability,
+            discounted_alignment=alignment,
+            commands=commands,
+            partial=partial,
+            latest_sensor_norm=self._buffer[-1].average_norm,
+            anomaly_score=self._buffer[-1].anomaly_score(),
+        )
+        return summary
+
+
+@dataclass
+class ZSpaceTrainerSample:
+    metrics: TrainerMetrics
+    partial: ZSpacePartialObservation
+
+
+class ZSpaceTrainerBridge:
+    """Project robotics rollouts into ZSpaceTrainer metrics."""
+
+    def __init__(self, horizon: int, *, discount: float = 0.9) -> None:
+        self._learner = TemporalFeedbackLearner(horizon, discount=discount)
+
+    @property
+    def horizon(self) -> int:
+        return self._learner.horizon
+
+    @property
+    def discount(self) -> float:
+        return self._learner.discount
+
+    def push(
+        self,
+        step: RuntimeStep,
+        vision: VisionFeedbackSnapshot | None = None,
+    ) -> ZSpaceTrainerSample:
+        summary = self._learner.push(step, vision)
+        gradient = list(summary.partial.gradient)
+        if not gradient:
+            gradient.append(summary.discounted_energy - summary.discounted_gravity)
+        metrics = TrainerMetrics(
+            speed=summary.latest_sensor_norm,
+            memory=summary.discounted_energy + summary.discounted_gravity,
+            stability=summary.discounted_stability,
+            gradient=gradient,
+            drs=summary.anomaly_score,
+        )
+        return ZSpaceTrainerSample(metrics=metrics, partial=summary.partial)
+
+
 def _validate_metric(components: Sequence[Sequence[float]]) -> tuple[tuple[float, ...], ...]:
     matrix = []
     for row in components:
@@ -727,6 +1078,14 @@ __all__ = [
     "RuntimeStep",
     "SensorFusionHub",
     "TelemetryReport",
+    "VisionFeedbackSnapshot",
+    "VisionFeedbackSynchronizer",
+    "ZSpacePartialObservation",
+    "TemporalFeedbackLearner",
+    "TemporalFeedbackSummary",
+    "TrainerMetrics",
+    "ZSpaceTrainerBridge",
+    "ZSpaceTrainerSample",
     "relativity_geometry_from_metric",
     "relativity_dynamics_from_metric",
     "relativity_dynamics_from_ansatz",

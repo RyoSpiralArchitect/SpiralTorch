@@ -3283,6 +3283,7 @@ name = "st-robotics"
 version = "0.1.0"
 dependencies = [
  "spiral-safety",
+ "st-tensor",
 ]
 
 [[package]]
