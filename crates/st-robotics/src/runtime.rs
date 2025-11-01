@@ -2,6 +2,7 @@ use std::collections::{HashMap, VecDeque};
 
 use crate::desire::{DesireLagrangianField, EnergyReport};
 use crate::error::RoboticsError;
+use crate::geometry::ZSpaceDynamics;
 use crate::policy::PolicyGradientController;
 use crate::sensors::{FusedFrame, SensorFusionHub};
 use crate::telemetry::{PsiTelemetry, TelemetryReport};
@@ -31,13 +32,16 @@ impl RoboticsRuntime {
         desires: DesireLagrangianField,
         telemetry: PsiTelemetry,
     ) -> Self {
-        Self {
+        let mut runtime = Self {
             sensors,
             desires,
             telemetry,
             policy: None,
             recorder: None,
-        }
+        };
+        let geometry = runtime.desires.dynamics().geometry().clone();
+        runtime.telemetry.set_geometry(geometry);
+        runtime
     }
 
     pub fn attach_policy_gradient(&mut self, controller: PolicyGradientController) {
@@ -70,6 +74,11 @@ impl RoboticsRuntime {
             recorder.push(&step);
         }
         Ok(step)
+    }
+
+    pub fn configure_dynamics(&mut self, dynamics: ZSpaceDynamics) {
+        self.desires.set_dynamics(dynamics.clone());
+        self.telemetry.set_geometry(dynamics.geometry().clone());
     }
 
     pub fn sensors(&self) -> &SensorFusionHub {
@@ -141,6 +150,8 @@ impl TrajectoryRecorder {
 mod tests {
     use super::*;
     use crate::desire::Desire;
+    use crate::geometry::{ZSpaceDynamics, ZSpaceGeometry};
+    use crate::{GravityField, GravityRegime, GravityWell};
 
     #[test]
     fn runtime_emits_policy_commands() {
@@ -191,5 +202,22 @@ mod tests {
         assert!(trajectory
             .iter()
             .all(|step| !step.commands.contains_key("halt")));
+    }
+
+    #[test]
+    fn runtime_applies_custom_dynamics() {
+        let mut hub = SensorFusionHub::new();
+        hub.register_channel("pose", 3).unwrap();
+        let desires = DesireLagrangianField::new(HashMap::new());
+        let telemetry = PsiTelemetry::default();
+        let mut runtime = RoboticsRuntime::new(hub, desires, telemetry);
+        let mut gravity = GravityField::default();
+        gravity.add_well("pose", GravityWell::new(5.0, GravityRegime::Newtonian));
+        let dynamics = ZSpaceDynamics::new(ZSpaceGeometry::euclidean(), Some(gravity));
+        runtime.configure_dynamics(dynamics);
+        let result = runtime
+            .step(HashMap::from([("pose".to_string(), vec![1.0, 0.0, 0.0])]))
+            .unwrap();
+        assert!(result.energy.gravitational_per_channel.contains_key("pose"));
     }
 }
