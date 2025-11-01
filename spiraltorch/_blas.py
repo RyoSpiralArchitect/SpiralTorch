@@ -10,22 +10,48 @@ without contending for the same CPU cores.  The system-facing helpers also
 interrogate Linux control groups so container limits and CPU reservations are
 captured before tuning decisions are made.  The expanded system snapshot now
 records CPU topology from ``/sys/devices/system/cpu`` so physical cores can be
-weighed against logical CPUs when scheduling work alongside GPU pipelines.
-WGSL kernel metadata persisted in the autotune store is also summarised so GPU
-dispatch characteristics can feed back into the CPU reservation heuristic.
+weighed against logical CPUs when scheduling work alongside GPU pipelines while
+Linux Pressure Stall Information (PSI) metrics feed into the heuristics so BLAS
+threads back off when the host is already saturated.  WGSL kernel metadata
+persisted in the autotune store is summarised so GPU dispatch characteristics
+can feed back into the CPU reservation heuristic.  The CPU accounting helpers
+also honour kernel-level isolation controls such as ``isolcpus`` and
+``nohz_full`` so cores reserved for real-time workloads remain untouched by BLAS
+threads.
+
+The scope has now broadened further.  A compute-only WGSL pipeline allows the
+module to dispatch GEMM workloads directly to WGPU-capable GPUs so SpiralTorch
+can bypass CPU BLAS implementations entirely when the caller opts into GPU
+execution.  The dispatcher keeps track of device and pipeline state so repeated
+invocations amortise setup overheads and the interface gracefully degrades when
+WGPU is unavailable.  Thread recommendations are no longer purely heuristic:
+observed execution times are persisted and folded back into future tuning
+decisions via a lightweight bandit learner that explores thread counts while
+guarding against pathological regressions.  Finally a WebAssembly-oriented
+fallback exposes BLAS-style helpers that continue to work when the runtime is
+executed inside a browser through Pyodide or similar hosts, using typed-array
+buffers to deliver a pure Web environment implementation that remains API
+compatible with the CPU BLAS entry points.
 """
 
 from __future__ import annotations
 
+import atexit
+import asyncio
 import ctypes
 import ctypes.util
+import importlib
 import json
 import math
 import os
+import random
+import struct
+import sys
 import time
 import warnings
 from array import array
 from contextlib import contextmanager
+from pathlib import Path
 from threading import Lock
 from typing import Iterable
 
@@ -37,17 +63,48 @@ __all__ = [
     "temporary_thread_count",
     "system_cpu_count",
     "system_cpu_topology",
+    "system_cpu_isolations",
     "recommended_thread_count",
     "synchronise_thread_hints",
     "auto_tune_threads",
     "blas_vendor",
+    "thread_learning_snapshot",
     "wgpu_adapter_info",
     "wgpu_kernel_profiles",
     "gpu_host_thread_reservation",
+    "gpu_blas_available",
+    "gpu_dgemm",
+    "wasm_blas_available",
+    "wasm_dgemm",
     "process_cpu_budget",
     "cgroup_cpu_quota",
+    "system_cpu_pressure",
     "dgemm",
 ]
+
+try:  # pragma: no cover - optional dependency detection
+    _WGPU_MODULE = importlib.import_module("wgpu")
+    try:  # initialise the default backend eagerly when possible
+        importlib.import_module("wgpu.backends.rs")
+    except Exception:
+        pass
+    try:
+        from wgpu.utils import get_default_device as _wgpu_get_default_device
+    except Exception:  # pragma: no cover - utils may not be available
+        _wgpu_get_default_device = None  # type: ignore[assignment]
+    _wgpu_read_buffer = None
+except Exception:  # pragma: no cover - wgpu entirely unavailable
+    _WGPU_MODULE = None
+    _wgpu_get_default_device = None  # type: ignore[assignment]
+    _wgpu_read_buffer = None  # type: ignore[assignment]
+
+try:  # pragma: no cover - only on Pyodide / WASM environments
+    import js  # type: ignore[attr-defined]
+    from pyodide.ffi import create_proxy, to_js  # type: ignore
+except Exception:  # pragma: no cover - desktop CPython
+    js = None  # type: ignore[assignment]
+    create_proxy = None  # type: ignore[assignment]
+    to_js = None  # type: ignore[assignment]
 
 _CBLAS_ROW_MAJOR = 101
 _CBLAS_NO_TRANS = 111
@@ -74,13 +131,38 @@ _WGPU_ADAPTER_INFO: dict[str, object] | None = None
 _WGPU_KERNEL_PROFILES: dict[str, object] | None = None
 _GPU_HOST_RESERVATION: int | None = None
 _GPU_HOST_RESERVATION_BUDGET: int | None = None
+_WGPU_DEVICE: object | None = None
+_WGPU_QUEUE: object | None = None
+_WGPU_PIPELINES: dict[int, object] = {}
+_WGPU_BIND_LAYOUT: object | None = None
+_WGPU_PARAMS_SIZE = struct.calcsize("<8I4f")
 
 _CPU_BUDGET_CACHE: dict[str, object] | None = None
 _CPU_TOPOLOGY_CACHE: tuple[int, tuple[int, ...] | None, dict[str, object]] | None = None
+_CPU_ISOLATION_CACHE: tuple[int, dict[str, object] | None] | None = None
+_CPU_PRESSURE_CACHE: tuple[int, float, dict[str, object] | None] | None = None
+
+_CPU_PRESSURE_CACHE_TTL = 2.0
 
 _CGROUP_SELF_CACHE: dict[str, str] | None = None
 _CGROUP_QUOTA_CACHE: tuple[int, float | None] | None = None
 _CGROUP_CPUSET_CACHE: tuple[int, int | None] | None = None
+
+_LEARNING_CACHE: dict[str, object] | None = None
+_LEARNING_CACHE_MTIME: float = 0.0
+_LEARNING_CACHE_DIRTY = False
+_LEARNING_LAST_FLUSH = 0.0
+_LEARNING_LOCK = Lock()
+_LEARNING_MAX_SAMPLES = 64
+_LEARNING_MIN_OBSERVATIONS = 3
+try:
+    _LEARNING_EPSILON = float(
+        os.environ.get("SPIRALTORCH_BLAS_LEARNING_EPSILON", "0.15") or 0.15
+    )
+except ValueError:
+    _LEARNING_EPSILON = 0.15
+
+_WASM_STATE: dict[str, object] | None = None
 
 _INTEGRATED_GPU_VENDORS = {
     0x8086,  # Intel
@@ -467,6 +549,28 @@ def _coerce_positive_int(value: object) -> int | None:
     return None
 
 
+def _coerce_non_negative_float(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        candidate = float(value)
+        if not math.isfinite(candidate) or candidate < 0:
+            return None
+        return candidate
+    if isinstance(value, str):
+        candidate = value.strip()
+        if not candidate:
+            return None
+        try:
+            parsed = float(candidate)
+        except ValueError:
+            return None
+        if not math.isfinite(parsed) or parsed < 0:
+            return None
+        return parsed
+    return None
+
+
 def _estimate_context_volume(context: object) -> int | None:
     if not isinstance(context, dict):
         return None
@@ -756,6 +860,768 @@ def gpu_host_thread_reservation(
     return _GPU_HOST_RESERVATION
 
 
+def _thread_learning_state_path() -> Path:
+    base = os.environ.get("SPIRALTORCH_STATE_DIR") or os.environ.get(
+        "SPIRALTORCH_CACHE"
+    )
+    if base:
+        return Path(base).expanduser() / "blas_thread_learning.json"
+
+    cache_home = os.environ.get("XDG_CACHE_HOME")
+    if cache_home:
+        root = Path(cache_home).expanduser() / "spiraltorch"
+    else:
+        try:
+            home = Path.home()
+        except Exception:  # pragma: no cover - Pyodide / sandboxed envs
+            home = Path(os.getcwd())
+        root = home / ".cache" / "spiraltorch"
+    return root / "blas_thread_learning.json"
+
+
+def _thread_learning_flush(force: bool = False) -> None:
+    global _LEARNING_CACHE_DIRTY, _LEARNING_LAST_FLUSH
+
+    if not _LEARNING_CACHE_DIRTY or _LEARNING_CACHE is None:
+        return
+
+    now = time.time()
+    if not force and (now - _LEARNING_LAST_FLUSH) < 1.5:
+        return
+
+    path = _thread_learning_state_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        return
+
+    tmp_path = path.with_suffix(".tmp")
+    try:
+        with tmp_path.open("w", encoding="utf-8") as handle:
+            json.dump(_LEARNING_CACHE, handle, sort_keys=True)
+        tmp_path.replace(path)
+    except Exception:
+        try:
+            tmp_path.unlink(missing_ok=True)  # type: ignore[arg-type]
+        except Exception:
+            pass
+        return
+
+    _LEARNING_CACHE_DIRTY = False
+    _LEARNING_LAST_FLUSH = now
+
+
+atexit.register(_thread_learning_flush, True)
+
+
+def _load_learning_cache() -> dict[str, object]:
+    global _LEARNING_CACHE, _LEARNING_CACHE_MTIME
+
+    if _LEARNING_CACHE is not None:
+        return _LEARNING_CACHE
+
+    path = _thread_learning_state_path()
+    cache: dict[str, object]
+    if path.exists():
+        try:
+            payload = path.read_text(encoding="utf-8")
+            parsed = json.loads(payload)
+            if not isinstance(parsed, dict):
+                raise TypeError("learning cache must be a JSON object")
+            cache = parsed
+            cache.setdefault("buckets", {})
+            try:
+                _LEARNING_CACHE_MTIME = path.stat().st_mtime
+            except OSError:
+                _LEARNING_CACHE_MTIME = 0.0
+        except Exception:
+            cache = {"buckets": {}}
+            _LEARNING_CACHE_MTIME = 0.0
+    else:
+        cache = {"buckets": {}}
+        _LEARNING_CACHE_MTIME = 0.0
+
+    _LEARNING_CACHE = cache
+    return cache
+
+
+def _thread_problem_bucket(problem_size: tuple[int, int, int]) -> str:
+    dims = [max(1, int(d)) for d in problem_size]
+    ordering = sorted(dims)
+    logs = [str(int(math.log2(v))) if v > 1 else "0" for v in ordering]
+    baseline = max(1, ordering[0])
+    ratios = [str(int(round(v / baseline))) for v in dims]
+    return "|".join(logs + ["x".join(ratios)])
+
+
+def _choose_learned_threads(
+    problem_size: tuple[int, int, int],
+    limit: int | None,
+) -> int | None:
+    with _LEARNING_LOCK:
+        cache = _load_learning_cache()
+        buckets = cache.get("buckets")
+        if not isinstance(buckets, dict):
+            return None
+
+        bucket_key = _thread_problem_bucket(problem_size)
+        entry = buckets.get(bucket_key)
+        if not isinstance(entry, dict) or not entry:
+            return None
+
+        observed: list[tuple[float, int, int]] = []
+        under_observed: list[int] = []
+        for key, stats in entry.items():
+            try:
+                threads = int(key)
+            except Exception:
+                continue
+            if threads <= 0:
+                continue
+            if limit is not None and threads > limit:
+                continue
+            if not isinstance(stats, dict):
+                continue
+            samples = int(stats.get("samples", 0))
+            mean = float(stats.get("mean", 0.0))
+            variance = float(stats.get("m2", 0.0))
+            if samples < _LEARNING_MIN_OBSERVATIONS:
+                under_observed.append(threads)
+                continue
+            deviation = 0.0
+            if samples > 1 and variance > 0.0:
+                deviation = math.sqrt(max(0.0, variance / (samples - 1)))
+            score = mean + (deviation / max(1, samples))
+            observed.append((score, threads, samples))
+
+        if observed:
+            observed.sort()
+            _, best_threads, _ = observed[0]
+            if _LEARNING_EPSILON > 0.0 and len(observed) > 1:
+                if random.random() < _LEARNING_EPSILON:
+                    _, alt_threads, _ = random.choice(observed[1:])
+                    return max(1, alt_threads)
+            if _LEARNING_EPSILON > 0.0 and under_observed:
+                if random.random() < (_LEARNING_EPSILON * 0.5):
+                    return max(1, random.choice(under_observed))
+            return max(1, best_threads)
+
+        if under_observed:
+            return max(1, min(under_observed))
+
+        return None
+
+
+def _record_thread_outcome(
+    problem_size: tuple[int, int, int],
+    threads: int | None,
+    duration: float,
+) -> None:
+    if threads is None or threads <= 0:
+        return
+    if duration <= 0.0 or any(dim <= 0 for dim in problem_size):
+        return
+
+    bucket_key = _thread_problem_bucket(problem_size)
+    now = time.time()
+
+    with _LEARNING_LOCK:
+        cache = _load_learning_cache()
+        buckets = cache.setdefault("buckets", {})
+        if not isinstance(buckets, dict):
+            buckets = {}
+            cache["buckets"] = buckets
+        entry = buckets.setdefault(bucket_key, {})
+        if not isinstance(entry, dict):
+            entry = {}
+            buckets[bucket_key] = entry
+
+        stats = entry.get(str(int(threads)))
+        if not isinstance(stats, dict):
+            stats = {"samples": 0, "mean": 0.0, "m2": 0.0}
+
+        samples = int(stats.get("samples", 0))
+        mean = float(stats.get("mean", 0.0))
+        m2 = float(stats.get("m2", 0.0))
+        if samples >= _LEARNING_MAX_SAMPLES:
+            samples = max(1, _LEARNING_MAX_SAMPLES - 1)
+            mean *= samples / max(1, samples + 1)
+            m2 *= samples / max(1, samples + 1)
+
+        samples += 1
+        delta = duration - mean
+        mean += delta / samples
+        m2 += delta * (duration - mean)
+
+        stats.update(
+            {
+                "samples": samples,
+                "mean": mean,
+                "m2": m2,
+                "last": now,
+            }
+        )
+        entry[str(int(threads))] = stats
+
+        global _LEARNING_CACHE_DIRTY
+        _LEARNING_CACHE_DIRTY = True
+        _thread_learning_flush()
+
+
+def thread_learning_snapshot() -> dict[str, object]:
+    """Return a deep copy of the adaptive thread tuning dataset."""
+
+    with _LEARNING_LOCK:
+        cache = _load_learning_cache()
+        return json.loads(json.dumps(cache))
+
+
+def _sync_await(value: object) -> object:
+    if not asyncio.iscoroutine(value):
+        return value
+    loop = asyncio.new_event_loop()
+    try:
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(value)  # type: ignore[arg-type]
+    finally:
+        asyncio.set_event_loop(None)
+        loop.close()
+
+
+def _ensure_wgpu_device(
+    device: object | None = None, queue: object | None = None
+) -> tuple[object, object]:
+    if _WGPU_MODULE is None:
+        raise RuntimeError("wgpu is not available")
+
+    if device is not None:
+        resolved_queue = queue or getattr(device, "queue", None)
+        if resolved_queue is None:
+            raise RuntimeError("provided WGPU device lacks an associated queue")
+        return device, resolved_queue
+
+    if queue is not None:
+        resolved_device = getattr(queue, "device", None)
+        if resolved_device is None:
+            raise RuntimeError("provided WGPU queue does not expose its device")
+        return resolved_device, queue
+
+    global _WGPU_DEVICE, _WGPU_QUEUE
+    if _WGPU_DEVICE is not None and _WGPU_QUEUE is not None:
+        return _WGPU_DEVICE, _WGPU_QUEUE
+
+    if _wgpu_get_default_device is not None:
+        try:
+            dev = _wgpu_get_default_device()
+        except Exception as exc:  # pragma: no cover - adapter failures
+            raise RuntimeError(f"failed to acquire default WGPU device: {exc}") from exc
+    else:
+        adapter = _WGPU_MODULE.request_adapter(power_preference="high-performance")
+        adapter = _sync_await(adapter)
+        if adapter is None:
+            raise RuntimeError("unable to acquire a WGPU adapter")
+        dev = adapter.request_device()
+        dev = _sync_await(dev)
+
+    queue_obj = getattr(dev, "queue", None)
+    if queue_obj is None:
+        raise RuntimeError("WGPU device does not expose a queue")
+
+    _WGPU_DEVICE, _WGPU_QUEUE = dev, queue_obj
+    return dev, queue_obj
+
+
+_GPU_DGEMM_SHADER_TEMPLATE = """
+struct Matrix {
+    data: array<f32>;
+};
+
+struct Params {
+    dims: vec4<u32>;
+    strides: vec4<u32>;
+    scalars: vec4<f32>;
+};
+
+@group(0) @binding(0) var<storage, read> matrix_a: Matrix;
+@group(0) @binding(1) var<storage, read> matrix_b: Matrix;
+@group(0) @binding(2) var<storage, read_write> matrix_c: Matrix;
+@group(0) @binding(3) var<uniform> params: Params;
+
+@compute @workgroup_size({wg_size}, {wg_size}, 1)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let m = params.dims.x;
+    let n = params.dims.y;
+    let k = params.dims.z;
+    let flags = params.dims.w;
+    let row = global_id.y;
+    let col = global_id.x;
+    if (row >= m || col >= n) {
+        return;
+    }
+
+    let lda = params.strides.x;
+    let ldb = params.strides.y;
+    let ldc = params.strides.z;
+    let alpha = params.scalars.x;
+    let beta = params.scalars.y;
+    let trans_a = (flags & 1u) != 0u;
+    let trans_b = (flags & 2u) != 0u;
+
+    var kk: u32 = 0u;
+    var acc: f32 = 0.0;
+    loop {
+        if kk >= k {
+            break;
+        }
+        let a_row = if trans_a { kk } else { row };
+        let a_col = if trans_a { row } else { kk };
+        let b_row = if trans_b { col } else { kk };
+        let b_col = if trans_b { kk } else { col };
+        let a_index = a_row * lda + a_col;
+        let b_index = b_row * ldb + b_col;
+        acc = acc + matrix_a.data[a_index] * matrix_b.data[b_index];
+        kk = kk + 1u;
+    }
+
+    let c_index = row * ldc + col;
+    let scaled = acc * alpha;
+    if beta != 0.0 {
+        matrix_c.data[c_index] = scaled + matrix_c.data[c_index] * beta;
+    } else {
+        matrix_c.data[c_index] = scaled;
+    }
+}
+"""
+
+
+def _wgpu_coerce_float32_buffer(
+    data: Iterable[float] | array, expected: int, label: str
+) -> array:
+    try:
+        buf = array("f", data)
+    except TypeError:
+        buf = array("f", list(data))
+    if len(buf) != expected:
+        raise ValueError(f"matrix {label} has {len(buf)} elements, expected {expected}")
+    return buf
+
+
+def _ensure_gpu_pipeline(device: object, workgroup_size: int) -> tuple[object, object]:
+    global _WGPU_BIND_LAYOUT
+    workgroup_size = max(1, min(32, int(workgroup_size)))
+    pipeline = _WGPU_PIPELINES.get(workgroup_size)
+    if pipeline is not None and _WGPU_BIND_LAYOUT is not None:
+        return pipeline, _WGPU_BIND_LAYOUT
+
+    shader_source = _GPU_DGEMM_SHADER_TEMPLATE.format(wg_size=workgroup_size)
+    module = device.create_shader_module(code=shader_source)
+
+    if _WGPU_BIND_LAYOUT is None:
+        _WGPU_BIND_LAYOUT = device.create_bind_group_layout(
+            entries=[
+                {
+                    "binding": 0,
+                    "visibility": _WGPU_MODULE.ShaderStage.COMPUTE,
+                    "buffer": {
+                        "type": _WGPU_MODULE.BufferBindingType.read_only_storage,
+                        "has_dynamic_offset": False,
+                        "min_binding_size": 0,
+                    },
+                },
+                {
+                    "binding": 1,
+                    "visibility": _WGPU_MODULE.ShaderStage.COMPUTE,
+                    "buffer": {
+                        "type": _WGPU_MODULE.BufferBindingType.read_only_storage,
+                        "has_dynamic_offset": False,
+                        "min_binding_size": 0,
+                    },
+                },
+                {
+                    "binding": 2,
+                    "visibility": _WGPU_MODULE.ShaderStage.COMPUTE,
+                    "buffer": {
+                        "type": _WGPU_MODULE.BufferBindingType.storage,
+                        "has_dynamic_offset": False,
+                        "min_binding_size": 0,
+                    },
+                },
+                {
+                    "binding": 3,
+                    "visibility": _WGPU_MODULE.ShaderStage.COMPUTE,
+                    "buffer": {
+                        "type": _WGPU_MODULE.BufferBindingType.uniform,
+                        "has_dynamic_offset": False,
+                        "min_binding_size": _WGPU_PARAMS_SIZE,
+                    },
+                },
+            ]
+        )
+
+    pipeline_layout = device.create_pipeline_layout(
+        bind_group_layouts=[_WGPU_BIND_LAYOUT]
+    )
+    pipeline = device.create_compute_pipeline(
+        layout=pipeline_layout,
+        compute={"module": module, "entry_point": "main"},
+    )
+    _WGPU_PIPELINES[workgroup_size] = pipeline
+    return pipeline, _WGPU_BIND_LAYOUT
+
+
+def _create_buffer_with_data(
+    device: object,
+    queue: object,
+    data: bytes,
+    *,
+    usage: int,
+    label: str | None = None,
+) -> object:
+    if hasattr(device, "create_buffer_with_data"):
+        return device.create_buffer_with_data(data=data, usage=usage, label=label)
+    buffer = device.create_buffer(size=len(data), usage=usage, label=label)
+    if data:
+        queue.write_buffer(buffer, 0, data)
+    return buffer
+
+
+def _readback_gpu_buffer(device: object, queue: object, buffer: object, size: int) -> bytes:
+    read_usage = _WGPU_MODULE.BufferUsage.COPY_DST | _WGPU_MODULE.BufferUsage.MAP_READ
+    readback = device.create_buffer(size=size, usage=read_usage, label="st.gpu_dgemm.readback")
+    encoder = device.create_command_encoder(label="st.gpu_dgemm.readback.encoder")
+    encoder.copy_buffer_to_buffer(buffer, 0, readback, 0, size)
+    command_buffer = encoder.finish()
+    queue.submit([command_buffer])
+    try:
+        device.poll(True)
+    except Exception:
+        pass
+    map_future = readback.map_async(_WGPU_MODULE.MapMode.READ, 0, size)
+    _sync_await(map_future)
+    data = bytes(readback.get_mapped_range(0, size))
+    readback.unmap()
+    return data
+
+
+def gpu_blas_available() -> bool:
+    """Return ``True`` when a WGPU device suitable for GEMM dispatch is available."""
+
+    if _WGPU_MODULE is None:
+        return False
+    try:
+        _ensure_wgpu_device()
+    except Exception:
+        return False
+    return True
+
+
+def gpu_dgemm(
+    m: int,
+    n: int,
+    k: int,
+    a: Iterable[float] | array,
+    b: Iterable[float] | array,
+    c: array | None = None,
+    *,
+    alpha: float = 1.0,
+    beta: float = 0.0,
+    transpose_a: bool = False,
+    transpose_b: bool = False,
+    workgroup_size: int = 16,
+    device: object | None = None,
+    queue: object | None = None,
+) -> array:
+    """Dispatch a GEMM workload to a WGPU compute device using WGSL kernels."""
+
+    if _WGPU_MODULE is None:
+        raise RuntimeError("wgpu is not available")
+    if m < 0 or n < 0 or k < 0:
+        raise ValueError("matrix dimensions must be non-negative")
+
+    expected_a = m * k
+    expected_b = k * n
+    expected_c = m * n
+
+    a_buf = _wgpu_coerce_float32_buffer(a, expected_a, "A")
+    b_buf = _wgpu_coerce_float32_buffer(b, expected_b, "B")
+
+    if expected_c == 0:
+        return array("f")
+
+    if c is None:
+        base_c = array("f", [0.0] * expected_c)
+        target = None
+    else:
+        if not isinstance(c, array):
+            raise TypeError("matrix C must be an array('d') or array('f')")
+        if len(c) != expected_c:
+            raise ValueError(f"matrix C has {len(c)} elements, expected {expected_c}")
+        if c.typecode not in {"f", "d"}:
+            raise TypeError("matrix C must use 'f' or 'd' typecode")
+        base_c = array("f", c)
+        target = c
+
+    device, queue = _ensure_wgpu_device(device, queue)
+    pipeline, bind_layout = _ensure_gpu_pipeline(device, workgroup_size)
+
+    lda = k if not transpose_a else m
+    ldb = n if not transpose_b else k
+    ldc = n
+    flags = (1 if transpose_a else 0) | (2 if transpose_b else 0)
+
+    params = struct.pack(
+        "<8I4f",
+        int(m),
+        int(n),
+        int(k),
+        int(flags),
+        int(lda if lda else 1),
+        int(ldb if ldb else 1),
+        int(ldc if ldc else 1),
+        0,
+        float(alpha),
+        float(beta),
+        0.0,
+        0.0,
+    )
+
+    usage_readonly = (
+        _WGPU_MODULE.BufferUsage.STORAGE
+        | _WGPU_MODULE.BufferUsage.COPY_DST
+    )
+    usage_storage = (
+        _WGPU_MODULE.BufferUsage.STORAGE
+        | _WGPU_MODULE.BufferUsage.COPY_DST
+        | _WGPU_MODULE.BufferUsage.COPY_SRC
+    )
+
+    buf_a = _create_buffer_with_data(
+        device,
+        queue,
+        a_buf.tobytes(),
+        usage=usage_readonly,
+        label="st.gpu_dgemm.A",
+    )
+    buf_b = _create_buffer_with_data(
+        device,
+        queue,
+        b_buf.tobytes(),
+        usage=usage_readonly,
+        label="st.gpu_dgemm.B",
+    )
+    buf_c = _create_buffer_with_data(
+        device,
+        queue,
+        base_c.tobytes(),
+        usage=usage_storage,
+        label="st.gpu_dgemm.C",
+    )
+    buf_params = _create_buffer_with_data(
+        device,
+        queue,
+        params,
+        usage=_WGPU_MODULE.BufferUsage.UNIFORM | _WGPU_MODULE.BufferUsage.COPY_DST,
+        label="st.gpu_dgemm.params",
+    )
+
+    bind_group = device.create_bind_group(
+        layout=bind_layout,
+        entries=[
+            {
+                "binding": 0,
+                "resource": {"buffer": buf_a, "offset": 0, "size": len(a_buf) * 4},
+            },
+            {
+                "binding": 1,
+                "resource": {"buffer": buf_b, "offset": 0, "size": len(b_buf) * 4},
+            },
+            {
+                "binding": 2,
+                "resource": {"buffer": buf_c, "offset": 0, "size": len(base_c) * 4},
+            },
+            {
+                "binding": 3,
+                "resource": {"buffer": buf_params, "offset": 0, "size": _WGPU_PARAMS_SIZE},
+            },
+        ],
+        label="st.gpu_dgemm.bind_group",
+    )
+
+    encoder = device.create_command_encoder(label="st.gpu_dgemm.encoder")
+    pass_encoder = encoder.begin_compute_pass(label="st.gpu_dgemm.pass")
+    pass_encoder.set_pipeline(pipeline)
+    pass_encoder.set_bind_group(0, bind_group, [])
+    groups_x = (n + workgroup_size - 1) // workgroup_size
+    groups_y = (m + workgroup_size - 1) // workgroup_size
+    pass_encoder.dispatch_workgroups(groups_x, groups_y, 1)
+    pass_encoder.end()
+
+    command_buffer = encoder.finish()
+    queue.submit([command_buffer])
+    try:
+        device.poll(True)
+    except Exception:
+        pass
+
+    result_bytes = _readback_gpu_buffer(device, queue, buf_c, expected_c * 4)
+    result = array("f")
+    result.frombytes(result_bytes)
+
+    if target is not None:
+        if target.typecode == "d":
+            target[:] = array("d", result)
+            return target
+        target[:] = result
+        return target
+    return result
+
+
+def wasm_blas_available() -> bool:
+    """Return ``True`` when the pure WebAssembly BLAS fallback can be used."""
+
+    hint = os.environ.get("SPIRALTORCH_WASM_BLAS", "").strip().lower()
+    if hint and hint not in {"0", "false", "no", "off"}:
+        return True
+    return js is not None
+
+
+def _ensure_wasm_kernel() -> None:
+    global _WASM_STATE
+    if _WASM_STATE is None:
+        _WASM_STATE = {}
+    if _WASM_STATE.get("kernel_ready"):
+        return
+    if js is None or to_js is None:
+        _WASM_STATE["kernel_ready"] = False
+        return
+    try:
+        kernel = js.Function(
+            "m",
+            "n",
+            "k",
+            "alpha",
+            "beta",
+            "a",
+            "b",
+            "c",
+            """
+            const out = new Float64Array(m * n);
+            const left = new Float64Array(a);
+            const right = new Float64Array(b);
+            const baseC = c ? new Float64Array(c) : null;
+            for (let row = 0; row < m; row++) {
+                for (let col = 0; col < n; col++) {
+                    let acc = 0.0;
+                    const rowOffset = row * k;
+                    for (let kk = 0; kk < k; kk++) {
+                        acc += left[rowOffset + kk] * right[kk * n + col];
+                    }
+                    const idx = row * n + col;
+                    out[idx] = alpha * acc + (baseC ? beta * baseC[idx] : 0.0);
+                }
+            }
+            return out;
+            """,
+        )
+        _WASM_STATE["kernel"] = kernel
+        _WASM_STATE["kernel_ready"] = True
+    except Exception:
+        _WASM_STATE["kernel_ready"] = False
+
+
+def wasm_dgemm(
+    m: int,
+    n: int,
+    k: int,
+    a: Iterable[float] | array,
+    b: Iterable[float] | array,
+    c: array | None = None,
+    *,
+    alpha: float = 1.0,
+    beta: float = 0.0,
+) -> array:
+    """Compute GEMM using a WebAssembly-friendly fallback implementation."""
+
+    if m < 0 or n < 0 or k < 0:
+        raise ValueError("matrix dimensions must be non-negative")
+
+    expected_a = m * k
+    expected_b = k * n
+    expected_c = m * n
+
+    lhs = array("d", a)
+    rhs = array("d", b)
+
+    if len(lhs) != expected_a:
+        raise ValueError(f"matrix A has {len(lhs)} elements, expected {expected_a}")
+    if len(rhs) != expected_b:
+        raise ValueError(f"matrix B has {len(rhs)} elements, expected {expected_b}")
+
+    if expected_c == 0:
+        return array("d")
+
+    if c is not None:
+        if not isinstance(c, array):
+            raise TypeError("matrix C must be an array('d') or array('f')")
+        if len(c) != expected_c:
+            raise ValueError(f"matrix C has {len(c)} elements, expected {expected_c}")
+        base_c = array("d", c)
+    else:
+        base_c = array("d", [0.0] * expected_c)
+
+    use_js = False
+    result_py: array | None = None
+    if wasm_blas_available() and js is not None and to_js is not None:
+        global _WASM_STATE
+        if _WASM_STATE is None:
+            _WASM_STATE = {}
+        _ensure_wasm_kernel()
+        kernel = _WASM_STATE.get("kernel") if _WASM_STATE else None
+        if kernel is not None and _WASM_STATE.get("kernel_ready"):
+            try:
+                lhs_js = to_js(lhs, dtype="float64")
+                rhs_js = to_js(rhs, dtype="float64")
+                base_js = to_js(base_c, dtype="float64") if beta != 0.0 else None
+                result_js = kernel(m, n, k, float(alpha), float(beta), lhs_js, rhs_js, base_js)
+                result_py = array("d", result_js.to_py())
+                use_js = True
+            except Exception:
+                result_py = None
+                use_js = False
+        else:
+            result_py = None
+    else:
+        result_py = None
+
+    if not use_js:
+        result_py = array("d", [0.0] * expected_c)
+        for row in range(m):
+            for col in range(n):
+                acc = 0.0
+                base = row * k
+                for kk in range(k):
+                    acc += lhs[base + kk] * rhs[kk * n + col]
+                idx = row * n + col
+                value = alpha * acc
+                if beta != 0.0:
+                    value += beta * base_c[idx]
+                result_py[idx] = value
+
+    if result_py is None:
+        raise RuntimeError("wasm_dgemm failed to compute a result")
+
+    if c is None:
+        return result_py
+
+    if c.typecode == "f":
+        c[:] = array("f", result_py)
+    elif c.typecode == "d":
+        c[:] = result_py
+    else:
+        raise TypeError("matrix C must use 'f' or 'd' typecode")
+    return c
+
+
 def wgpu_adapter_info() -> dict[str, object] | None:
     """Return metadata describing the detected WGPU adapter, if any."""
 
@@ -962,31 +1828,76 @@ def _cgroup_cpu_quota_raw(*, refresh: bool = False) -> float | None:
     return quota
 
 
-def _parse_cpuset_list(spec: str) -> int | None:
-    total = 0
-    for segment in spec.split(","):
-        segment = segment.strip()
-        if not segment:
-            continue
-        if "-" in segment:
-            start_str, end_str = segment.split("-", 1)
+def _expand_cpu_list(spec: str) -> tuple[int, ...] | None:
+    include: set[int] = set()
+    exclude: set[int] = set()
+
+    tokens = spec.replace("\n", ",").replace("\t", ",").split(",")
+    for raw_segment in tokens:
+        for token in raw_segment.split():
+            item = token.strip()
+            if not item:
+                continue
+            if ":" in item:
+                item = item.rsplit(":", 1)[1].strip()
+                if not item:
+                    continue
+            negate = item.startswith("^")
+            if negate:
+                item = item[1:].strip()
+                if not item:
+                    continue
+            stride = 1
+            if "/" in item:
+                item, stride_str = item.split("/", 1)
+                try:
+                    stride = int(stride_str, 10)
+                except ValueError:
+                    return None
+                if stride <= 0:
+                    return None
+            if "-" in item:
+                start_str, end_str = item.split("-", 1)
+            else:
+                start_str = end_str = item
             try:
-                start = int(start_str)
-                end = int(end_str)
+                start = int(start_str, 10)
+                end = int(end_str, 10)
             except ValueError:
                 return None
             if end < start:
                 return None
-            total += end - start + 1
+            values = range(start, end + 1, stride)
+            if negate:
+                exclude.update(values)
+            else:
+                include.update(values)
+
+    if not include:
+        if exclude:
+            include = set()
         else:
-            try:
-                int(segment)
-            except ValueError:
-                return None
-            total += 1
-    if total <= 0:
+            return None
+
+    include.difference_update(exclude)
+    return tuple(sorted(include))
+
+
+def _parse_cpuset_list(spec: str) -> int | None:
+    expanded = _expand_cpu_list(spec)
+    if expanded is None:
         return None
-    return total
+    return len(expanded)
+
+
+def _read_cpu_list_file(path: str) -> tuple[int, ...] | None:
+    raw = _read_text_file(path)
+    if raw is None:
+        return None
+    expanded = _expand_cpu_list(raw)
+    if expanded is None:
+        return None
+    return expanded
 
 
 _CGROUP_V1_CPUSET_BASES: tuple[str, ...] = (
@@ -1039,6 +1950,103 @@ def _cgroup_cpuset_count(paths: dict[str, str], *, refresh: bool = False) -> int
     return None
 
 
+_CPU_ISOLATION_PATHS: tuple[tuple[str, str], ...] = (
+    ("isolated", "/sys/devices/system/cpu/isolated"),
+    ("nohz_full", "/sys/devices/system/cpu/nohz_full"),
+    ("rcu_nocbs", "/sys/devices/system/cpu/rcu_nocbs"),
+    ("managed_irq", "/sys/devices/system/cpu/managed_irq"),
+)
+
+_CPU_ISOLATION_BASIS: tuple[str, ...] = (
+    "/sys/devices/system/cpu/online",
+    "/sys/devices/system/cpu/possible",
+)
+
+
+def _cpu_isolation_snapshot() -> dict[str, object] | None:
+    snapshot: dict[str, object] = {}
+    reserved_sets: list[set[int]] = []
+
+    for key, path in _CPU_ISOLATION_PATHS:
+        cpus = _read_cpu_list_file(path)
+        if cpus is None:
+            continue
+        snapshot[key] = cpus
+        if cpus:
+            reserved_sets.append(set(cpus))
+
+    basis: tuple[int, ...] | None = None
+    for candidate in _CPU_ISOLATION_BASIS:
+        basis = _read_cpu_list_file(candidate)
+        if basis is not None:
+            snapshot["available"] = basis
+            break
+
+    if reserved_sets:
+        reserved_union: set[int] = set()
+        for group in reserved_sets:
+            reserved_union.update(group)
+        snapshot["reserved"] = tuple(sorted(reserved_union))
+        snapshot["reserved_count"] = len(reserved_union)
+    elif snapshot:
+        snapshot["reserved_count"] = 0
+
+    if basis is not None:
+        available_set = set(basis)
+        for group in reserved_sets:
+            available_set.difference_update(group)
+        effective = tuple(sorted(available_set))
+        snapshot["effective"] = effective
+        snapshot["effective_count"] = len(effective)
+    elif snapshot:
+        snapshot["effective_count"] = None
+
+    if not snapshot:
+        return None
+
+    return snapshot
+
+
+def system_cpu_isolations(*, refresh: bool = False) -> dict[str, object] | None:
+    """Return kernel-level CPU isolation metadata when available.
+
+    The returned mapping contains any detected isolation sets such as
+    ``"isolated"``, ``"nohz_full"``, ``"rcu_nocbs"`` and ``"managed_irq"``
+    alongside the CPUs considered generally available (``"available"``), the
+    union of reserved CPUs (``"reserved"``/``"reserved_count"``) and the number
+    of CPUs left after respecting those reservations
+    (``"effective"``/``"effective_count"``).  ``None`` is returned when the host
+    does not expose any isolation metadata.
+    """
+
+    global _CPU_ISOLATION_CACHE
+
+    if (
+        not refresh
+        and _CPU_ISOLATION_CACHE is not None
+        and _CPU_ISOLATION_CACHE[0] == os.getpid()
+    ):
+        cached = _CPU_ISOLATION_CACHE[1]
+        if cached is None:
+            return None
+        return {
+            key: (tuple(value) if isinstance(value, tuple) else value)
+            for key, value in cached.items()
+        }
+
+    snapshot = _cpu_isolation_snapshot()
+    if snapshot is None:
+        _CPU_ISOLATION_CACHE = (os.getpid(), None)
+        return None
+
+    structured = {
+        key: (tuple(value) if isinstance(value, tuple) else value)
+        for key, value in snapshot.items()
+    }
+    _CPU_ISOLATION_CACHE = (os.getpid(), structured)
+    return {key: value for key, value in structured.items()}
+
+
 def cgroup_cpu_quota(*, refresh: bool = False) -> float | None:
     """Return the CPU quota imposed by control groups, if any.
 
@@ -1048,6 +2056,93 @@ def cgroup_cpu_quota(*, refresh: bool = False) -> float | None:
     """
 
     return _cgroup_cpu_quota_raw(refresh=refresh)
+
+
+def _parse_pressure_line(line: str) -> tuple[str, dict[str, float | int]] | None:
+    tokens = line.strip().split()
+    if not tokens:
+        return None
+
+    kind = tokens[0].strip()
+    if not kind:
+        return None
+
+    metrics: dict[str, float | int] = {}
+    for token in tokens[1:]:
+        if "=" not in token:
+            continue
+        key, raw = token.split("=", 1)
+        key = key.strip()
+        raw = raw.strip()
+        if not key or not raw:
+            continue
+        if key == "total":
+            value = _coerce_positive_int(raw)
+            if value is None:
+                continue
+            metrics[key] = value
+            continue
+        value_f = _coerce_non_negative_float(raw)
+        if value_f is None:
+            continue
+        metrics[key] = value_f
+
+    if not metrics:
+        return None
+
+    return kind, metrics
+
+
+def _cpu_pressure_snapshot() -> dict[str, dict[str, float | int]] | None:
+    try:
+        with open("/proc/pressure/cpu", "r", encoding="utf-8") as handle:
+            snapshot: dict[str, dict[str, float | int]] = {}
+            for line in handle:
+                parsed = _parse_pressure_line(line)
+                if parsed is None:
+                    continue
+                kind, metrics = parsed
+                if kind not in {"some", "full"}:
+                    continue
+                snapshot[kind] = dict(metrics)
+    except (FileNotFoundError, OSError):
+        return None
+
+    return snapshot or None
+
+
+def system_cpu_pressure(*, refresh: bool = False) -> dict[str, dict[str, float | int]] | None:
+    """Return Linux Pressure Stall Information (PSI) metrics for the host.
+
+    The returned mapping exposes the ``"some"`` and ``"full"`` CPU pressure
+    buckets when available, including their ``avg10``/``avg60``/``avg300``
+    windows as floating-point percentages alongside the accumulated ``total``
+    stall time in microseconds.  ``None`` is returned when PSI support is not
+    available on the running kernel.
+    """
+
+    global _CPU_PRESSURE_CACHE
+
+    now = time.time()
+    if (
+        not refresh
+        and _CPU_PRESSURE_CACHE is not None
+        and _CPU_PRESSURE_CACHE[0] == os.getpid()
+        and (now - _CPU_PRESSURE_CACHE[1]) <= _CPU_PRESSURE_CACHE_TTL
+    ):
+        cached = _CPU_PRESSURE_CACHE[2]
+        if cached is None:
+            return None
+        return {bucket: dict(metrics) for bucket, metrics in cached.items()}
+
+    snapshot = _cpu_pressure_snapshot()
+    if snapshot is None:
+        _CPU_PRESSURE_CACHE = (os.getpid(), now, None)
+        return None
+
+    structured = {bucket: dict(metrics) for bucket, metrics in snapshot.items()}
+    _CPU_PRESSURE_CACHE = (os.getpid(), now, structured)
+    return {bucket: dict(metrics) for bucket, metrics in structured.items()}
 
 
 def _system_affinity_size() -> int | None:
@@ -1068,7 +2163,10 @@ def process_cpu_budget(*, refresh: bool = False) -> dict[str, object]:
     quota expressed both as a float (``"cgroup_quota"``) and clamped integer
     limit (``"cgroup_quota_limit"``), the number of CPUs exposed through cgroup
     cpuset files (``"cgroup_cpuset"``) and the final minimum of the available
-    signals (``"effective"``).
+    signals (``"effective"``).  When kernel isolation controls such as
+    ``isolcpus`` or ``nohz_full`` are detected their reserved CPUs are reported
+    via ``"isolated_cpus"`` while ``"isolated_effective"`` reflects the
+    remaining CPUs after honouring those reservations.
     """
 
     global _CPU_BUDGET_CACHE
@@ -1094,6 +2192,22 @@ def process_cpu_budget(*, refresh: bool = False) -> dict[str, object]:
     if candidates:
         effective = max(1, min(candidates))
 
+    isolation = system_cpu_isolations(refresh=refresh)
+    isolated_effective: int | None = None
+    isolated_reserved: int | None = None
+    if isolation is not None:
+        reserved = isolation.get("reserved_count")
+        if isinstance(reserved, int):
+            isolated_reserved = max(0, reserved)
+        isolation_effective = isolation.get("effective_count")
+        if isinstance(isolation_effective, int):
+            isolated_effective = max(0, isolation_effective)
+            adjusted = max(1, isolated_effective) if isolated_effective > 0 else 1
+            if effective is None:
+                effective = adjusted
+            else:
+                effective = max(1, min(effective, adjusted))
+
     budget = {
         "system": system_total,
         "affinity": affinity,
@@ -1101,6 +2215,8 @@ def process_cpu_budget(*, refresh: bool = False) -> dict[str, object]:
         "cgroup_quota_limit": quota_limit,
         "cgroup_cpuset": cpuset,
         "effective": effective,
+        "isolated_cpus": isolated_reserved,
+        "isolated_effective": isolated_effective if isolated_effective is not None else None,
     }
 
     _CPU_BUDGET_CACHE = dict(budget)
@@ -1126,7 +2242,9 @@ def system_cpu_topology(*, refresh: bool = False) -> dict[str, object]:
     additional keys describe the number of physical cores (``"physical_cores"``),
     CPU packages (``"packages"``) and threads per core
     (``"threads_per_core"``).  A boolean ``"smt_active"`` key indicates whether
-    symmetric multithreading appears to be enabled for the accessible CPUs.
+    symmetric multithreading appears to be enabled for the accessible CPUs.  If
+    kernel isolation controls reserve CPUs the derived counts are also surfaced
+    via ``"isolated_effective_cpus"`` and ``"isolated_cpu_count"``.
     """
 
     global _CPU_TOPOLOGY_CACHE
@@ -1154,6 +2272,8 @@ def system_cpu_topology(*, refresh: bool = False) -> dict[str, object]:
     logical_total = budget.get("system")
     affinity_total = budget.get("affinity")
     effective = budget.get("effective")
+    isolated_effective = budget.get("isolated_effective")
+    isolated_reserved = budget.get("isolated_cpus")
 
     topology = _cpu_topology_from_sysfs(affinity_members)
     physical_cores = topology.get("physical_cores") if topology else None
@@ -1169,6 +2289,11 @@ def system_cpu_topology(*, refresh: bool = False) -> dict[str, object]:
         "threads_per_core": threads_per_core if isinstance(threads_per_core, int) else None,
         "smt_active": bool(threads_per_core and isinstance(threads_per_core, int) and threads_per_core > 1),
     }
+
+    if isinstance(isolated_effective, int):
+        result["isolated_effective_cpus"] = max(0, isolated_effective)
+    if isinstance(isolated_reserved, int):
+        result["isolated_cpu_count"] = max(0, isolated_reserved)
 
     _CPU_TOPOLOGY_CACHE = (os.getpid(), signature, dict(result))
     return result
@@ -1194,7 +2319,8 @@ def recommended_thread_count(
     consider_gpu:
         When ``True`` (the default) host thread reservations derived from the
         active WGPU adapter are respected so CPU BLAS workloads leave breathing
-        room for GPU command submission.
+        room for GPU command submission.  The heuristic also inspects Linux PSI
+        CPU pressure metrics to back off when the host is already congested.
     """
 
     system_threads = system_cpu_count()
@@ -1236,7 +2362,42 @@ def recommended_thread_count(
         ):
             available = max(1, min(available, physical))
 
+    pressure = system_cpu_pressure()
+    if pressure and available and available > 1:
+        peak_avg = 0.0
+        sustained_avg = 0.0
+        for bucket in ("some", "full"):
+            metrics = pressure.get(bucket)
+            if not isinstance(metrics, dict):
+                continue
+            peak = _coerce_non_negative_float(metrics.get("avg10"))
+            if peak is not None:
+                peak_avg = max(peak_avg, peak)
+            sustained = _coerce_non_negative_float(metrics.get("avg60"))
+            if sustained is not None:
+                sustained_avg = max(sustained_avg, sustained)
+
+        if peak_avg >= 10.0:
+            if peak_avg >= 50.0:
+                reduction_ratio = 0.5
+            elif peak_avg >= 20.0:
+                reduction_ratio = 0.3
+            else:
+                reduction_ratio = 0.15
+            if sustained_avg >= 20.0:
+                reduction_ratio = min(0.6, reduction_ratio + 0.1)
+            scaled = int(max(1, math.floor(available * (1 - reduction_ratio))))
+            if scaled < available:
+                available = scaled
+
     available = max(1, int(available))
+
+    if problem_size:
+        learned = _choose_learned_threads(
+            problem_size, available if clamp_to_env else None
+        )
+        if learned is not None:
+            return max(1, min(available, learned))
 
     if not problem_size:
         return available
@@ -1536,6 +2697,7 @@ def dgemm(
     b_ptr = _as_double_buffer(b)
     c_ptr = _as_double_buffer(c)
 
+    start = time.perf_counter()
     with _LOCK:
         _DGEMM(  # type: ignore[misc]
             _CBLAS_ROW_MAJOR,
@@ -1553,3 +2715,10 @@ def dgemm(
             c_ptr,
             int(n if n else 1),
         )
+
+    duration = time.perf_counter() - start
+    try:
+        threads = current_thread_count()
+    except Exception:
+        threads = _THREAD_LAST_SET
+    _record_thread_outcome((m, n, k), threads, duration)

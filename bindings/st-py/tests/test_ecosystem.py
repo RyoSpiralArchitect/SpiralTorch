@@ -4,6 +4,7 @@ import importlib
 import sys
 import types
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -244,8 +245,9 @@ def test_cupy_to_tensor_prefers_dunder_dlpack(stub_spiraltorch, monkeypatch):
         def __dlpack__(self, *, stream=None):
             return ("dlpack", stream)
 
-    restored = ecosystem.cupy_to_tensor(Array(), stream="stream-token")
-    assert restored == ("from_dlpack", ("dlpack", "stream-token"))
+    stream = object()
+    restored = ecosystem.cupy_to_tensor(Array(), stream=stream)
+    assert restored == ("from_dlpack", ("dlpack", stream))
 
 
 def test_cupy_to_tensor_uses_module_level_exporter_when_needed(
@@ -280,3 +282,105 @@ def test_cupy_to_tensor_uses_module_level_exporter_when_needed(
     assert result == ("from_dlpack", ("dlpack", stream))
     assert isinstance(called["args"][0], Array)
     assert called["args"][1] is stream
+
+
+def test_cupy_stream_alias_resolution(stub_spiraltorch, monkeypatch):
+    fake_cupy = types.ModuleType("cupy")
+
+    class DummyExternalStream:
+        def __init__(self, ptr):
+            self.ptr = ptr
+
+    external_calls: list[int] = []
+
+    fake_cupy.cuda = types.SimpleNamespace(
+        get_current_stream=lambda: "current-stream",
+        Stream=types.SimpleNamespace(null="null-stream"),
+        ExternalStream=lambda ptr: external_calls.append(ptr) or DummyExternalStream(ptr),
+    )
+
+    stream_calls: list[Any] = []
+
+    def from_dlpack(capsule, *, stream=None):
+        stream_calls.append(stream)
+        return ("from_dlpack", capsule, stream)
+
+    def to_dlpack(array, *, stream=None):
+        return ("dlpack", stream)
+
+    fake_cupy.from_dlpack = from_dlpack
+    fake_cupy.to_dlpack = to_dlpack
+    fake_cupy.toDlpack = to_dlpack
+
+    monkeypatch.setitem(sys.modules, "cupy", fake_cupy)
+
+    ecosystem = _load_ecosystem(stub_spiraltorch, monkeypatch)
+    Tensor = stub_spiraltorch.Tensor
+    capsule = object()
+    monkeypatch.setattr(Tensor, "to_dlpack", lambda self: capsule)
+    monkeypatch.setattr(Tensor, "from_dlpack", classmethod(lambda cls, cap: cap))
+
+    tensor = Tensor(1, 1, [0.0])
+    assert ecosystem.tensor_to_cupy(tensor, stream="current") == (
+        "from_dlpack",
+        capsule,
+        "current-stream",
+    )
+    assert stream_calls[-1] == "current-stream"
+
+    assert ecosystem.tensor_to_cupy(tensor, stream="null") == (
+        "from_dlpack",
+        capsule,
+        "null-stream",
+    )
+    assert stream_calls[-1] == "null-stream"
+
+    pointer_result = ecosystem.tensor_to_cupy(tensor, stream=0xDEADBEEF)
+    pointer_stream = stream_calls[-1]
+    assert isinstance(pointer_stream, DummyExternalStream)
+    assert pointer_stream.ptr == 0xDEADBEEF
+    assert external_calls == [0xDEADBEEF]
+    assert pointer_result == ("from_dlpack", capsule, pointer_stream)
+
+    class Array:
+        def __dlpack__(self, *, stream=None):
+            return ("dlpack", stream)
+
+    array = Array()
+    restored = ecosystem.cupy_to_tensor(array, stream="current")
+    assert restored == ("dlpack", "current-stream")
+
+
+def test_cupy_stream_alias_errors(stub_spiraltorch, monkeypatch):
+    fake_cupy = types.ModuleType("cupy")
+    fake_cupy.from_dlpack = lambda capsule, *, stream=None: ("from", stream)
+    fake_cupy.to_dlpack = lambda array, *, stream=None: ("dlpack", stream)
+    fake_cupy.toDlpack = fake_cupy.to_dlpack
+
+    monkeypatch.setitem(sys.modules, "cupy", fake_cupy)
+
+    ecosystem = _load_ecosystem(stub_spiraltorch, monkeypatch)
+    Tensor = stub_spiraltorch.Tensor
+    capsule = object()
+    monkeypatch.setattr(Tensor, "to_dlpack", lambda self: capsule)
+    monkeypatch.setattr(Tensor, "from_dlpack", classmethod(lambda cls, cap: cap))
+
+    tensor = Tensor(1, 1, [0.0])
+
+    with pytest.raises(ValueError):
+        ecosystem.tensor_to_cupy(tensor, stream="mystery")
+
+    fake_cupy.cuda = types.SimpleNamespace()
+
+    with pytest.raises(RuntimeError, match="get_current_stream"):
+        ecosystem.tensor_to_cupy(tensor, stream="current")
+
+    fake_cupy.cuda.get_current_stream = lambda: "stream"
+
+    with pytest.raises(RuntimeError, match="Stream.null"):
+        ecosystem.tensor_to_cupy(tensor, stream="null")
+
+    fake_cupy.cuda.Stream = types.SimpleNamespace(null="null-stream")
+
+    with pytest.raises(RuntimeError, match="ExternalStream"):
+        ecosystem.tensor_to_cupy(tensor, stream=1)

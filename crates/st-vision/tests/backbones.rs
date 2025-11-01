@@ -4,17 +4,32 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use st_nn::io;
-use st_nn::module::Module;
+use st_nn::module::{Module, Parameter};
+use st_nn::PureResult;
 use st_tensor::Tensor;
 use tempfile::tempdir;
 
 use st_vision::models::{
-    ConvNeXtBackbone, ConvNeXtConfig, ResNet56WithSkip, ResNet56WithSkipConfig, ResNetBackbone,
-    ResNetConfig, SkipSlipSchedule, ViTBackbone, ViTConfig,
+    ConvNeXtBackbone, ConvNeXtConfig, ResNetBackbone, ResNetConfig, SkipSlipSchedule, ViTBackbone,
+    ViTConfig,
 };
 
 fn sample_input(channels: usize, hw: (usize, usize), seed: u64) -> Tensor {
     Tensor::random_normal(1, channels * hw.0 * hw.1, 0.0, 1.0, Some(seed)).unwrap()
+}
+
+fn visit_skip_gate_parameters<M, F>(module: &M, mut callback: F) -> PureResult<()>
+where
+    M: Module + ?Sized,
+    F: FnMut(&Parameter) -> PureResult<()>,
+{
+    let mut visitor = |param: &Parameter| -> PureResult<()> {
+        if param.name().contains("skip_gate") {
+            callback(param)?;
+        }
+        Ok(())
+    };
+    module.visit_parameters(&mut visitor)
 }
 
 #[test]
@@ -53,16 +68,13 @@ fn resnet56_skip_gate_accumulates_gradients() {
     let _ = resnet.backward(&input, &grad_output).unwrap();
 
     let mut skip_params = 0usize;
-    resnet
-        .visit_parameters(|param| {
-            if param.name().contains("skip_gate") {
-                skip_params += 1;
-                let gradient = param.gradient().expect("skip gate gradient present");
-                assert_eq!(gradient.shape(), (1, 1));
-            }
-            Ok(())
-        })
-        .unwrap();
+    visit_skip_gate_parameters(&resnet, |param| {
+        skip_params += 1;
+        let gradient = param.gradient().expect("skip gate gradient present");
+        assert_eq!(gradient.shape(), (1, 1));
+        Ok(())
+    })
+    .unwrap();
     assert!(skip_params > 0, "expected at least one learnable skip gate");
 }
 
@@ -106,31 +118,25 @@ fn resnet_skip_slip_scales_learnable_gate_gradients() {
     let _ = slipped.backward(&input, &grad_output).unwrap();
     let _ = dynamic.backward(&input, &grad_output).unwrap();
 
-    let mut baseline_grads = Vec::new();
-    baseline
-        .visit_parameters(|param| {
-            if param.name().contains("skip_gate") {
-                let gradient = param.gradient().expect("baseline skip gradient");
-                baseline_grads.push(gradient.data()[0]);
-            }
-            Ok(())
-        })
-        .unwrap();
+    let mut baseline_grads: Vec<f32> = Vec::new();
+    visit_skip_gate_parameters(&baseline, |param| {
+        let gradient = param.gradient().expect("baseline skip gradient");
+        baseline_grads.push(gradient.data()[0]);
+        Ok(())
+    })
+    .unwrap();
 
-    let mut slipped_grads = Vec::new();
-    slipped
-        .visit_parameters(|param| {
-            if param.name().contains("skip_gate") {
-                let gradient = param.gradient().expect("slip skip gradient");
-                slipped_grads.push(gradient.data()[0]);
-            }
-            Ok(())
-        })
-        .unwrap();
+    let mut slipped_grads: Vec<f32> = Vec::new();
+    visit_skip_gate_parameters(&slipped, |param| {
+        let gradient = param.gradient().expect("slip skip gradient");
+        slipped_grads.push(gradient.data()[0]);
+        Ok(())
+    })
+    .unwrap();
 
     assert_eq!(baseline_grads.len(), slipped_grads.len());
     assert!(!baseline_grads.is_empty());
-    for (baseline_grad, slipped_grad) in baseline_grads.iter().zip(slipped_grads.iter()) {
+    for (&baseline_grad, &slipped_grad) in baseline_grads.iter().zip(slipped_grads.iter()) {
         assert!(baseline_grad.abs() > 0.0);
         let expected = baseline_grad * slip_value;
         let tolerance = baseline_grad.abs() * 1.0e-4 + 1.0e-6;
@@ -140,16 +146,13 @@ fn resnet_skip_slip_scales_learnable_gate_gradients() {
         );
     }
 
-    let mut dynamic_grads = Vec::new();
-    dynamic
-        .visit_parameters(|param| {
-            if param.name().contains("skip_gate") {
-                let gradient = param.gradient().expect("dynamic skip gradient");
-                dynamic_grads.push(gradient.data()[0]);
-            }
-            Ok(())
-        })
-        .unwrap();
+    let mut dynamic_grads: Vec<f32> = Vec::new();
+    visit_skip_gate_parameters(&dynamic, |param| {
+        let gradient = param.gradient().expect("dynamic skip gradient");
+        dynamic_grads.push(gradient.data()[0]);
+        Ok(())
+    })
+    .unwrap();
 
     assert_eq!(slipped_grads.len(), dynamic_grads.len());
     let slip_factors = dynamic.skip_slip_factors();
@@ -159,7 +162,7 @@ fn resnet_skip_slip_scales_learnable_gate_gradients() {
             assert!((factor - slip_value).abs() <= tolerance);
         }
     }
-    for (slipped_grad, dynamic_grad) in slipped_grads.iter().zip(dynamic_grads.iter()) {
+    for (&slipped_grad, &dynamic_grad) in slipped_grads.iter().zip(dynamic_grads.iter()) {
         let tolerance = slipped_grad.abs() * 1.0e-5 + 1.0e-6;
         assert!((slipped_grad - dynamic_grad).abs() <= tolerance);
     }
@@ -170,6 +173,61 @@ fn resnet_skip_slip_scales_learnable_gate_gradients() {
         for factor in stage {
             assert!((factor - 1.0).abs() <= 1.0e-6);
         }
+    }
+
+    let mut progressive_identity = ResNetBackbone::new(base.clone()).unwrap();
+    progressive_identity.load_weights_bincode(&path).unwrap();
+    progressive_identity
+        .set_skip_slip_progress(Some(slip_schedule.clone()), 0.0)
+        .unwrap();
+    let identity_factors = progressive_identity.skip_slip_factors();
+    for stage in &identity_factors {
+        for &factor in stage {
+            assert!((factor - 1.0).abs() <= 1.0e-6);
+        }
+    }
+    let _ = progressive_identity.forward(&input).unwrap();
+    let _ = progressive_identity.backward(&input, &grad_output).unwrap();
+    let mut identity_grads: Vec<f32> = Vec::new();
+    visit_skip_gate_parameters(&progressive_identity, |param| {
+        let gradient = param.gradient().expect("identity blend gradient");
+        identity_grads.push(gradient.data()[0]);
+        Ok(())
+    })
+    .unwrap();
+    for (&baseline_grad, &identity_grad) in baseline_grads.iter().zip(identity_grads.iter()) {
+        let tolerance = baseline_grad.abs() * 1.0e-5 + 1.0e-6;
+        assert!((baseline_grad - identity_grad).abs() <= tolerance);
+    }
+
+    let mut progressive_blend = ResNetBackbone::new(base.clone()).unwrap();
+    progressive_blend.load_weights_bincode(&path).unwrap();
+    let blend_progress = 0.5f32;
+    progressive_blend
+        .set_skip_slip_progress(Some(slip_schedule.clone()), blend_progress)
+        .unwrap();
+    let blended_factors = progressive_blend.skip_slip_factors();
+    let expected_blended = 1.0 + (slip_value - 1.0) * blend_progress;
+    for stage in &blended_factors {
+        for &factor in stage {
+            let tolerance = expected_blended.abs() * 1.0e-6 + 1.0e-6;
+            assert!((factor - expected_blended).abs() <= tolerance);
+        }
+    }
+    let _ = progressive_blend.forward(&input).unwrap();
+    let _ = progressive_blend.backward(&input, &grad_output).unwrap();
+    let mut blended_grads: Vec<f32> = Vec::new();
+    visit_skip_gate_parameters(&progressive_blend, |param| {
+        let gradient = param.gradient().expect("blended gradient");
+        blended_grads.push(gradient.data()[0]);
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(baseline_grads.len(), blended_grads.len());
+    for (&baseline_grad, &blended_grad) in baseline_grads.iter().zip(blended_grads.iter()) {
+        let expected = baseline_grad * expected_blended;
+        let tolerance = expected.abs() * 1.0e-4 + 1.0e-6;
+        assert!((expected - blended_grad).abs() <= tolerance);
     }
 }
 
@@ -221,6 +279,29 @@ fn skip_slip_schedule_preview_matches_formula() {
             let tolerance = target.abs() * 1.0e-5 + 1.0e-6;
             assert!((value - target).abs() <= tolerance);
             global_index += 1;
+        }
+    }
+
+    let identity_preview = per_stage_schedule
+        .preview_with_identity_blend(&per_stage_depths, 0.0)
+        .unwrap();
+    for stage in identity_preview {
+        for value in stage {
+            assert!((value - 1.0).abs() <= 1.0e-6);
+        }
+    }
+
+    let halfway = global_schedule
+        .preview_with_identity_blend(&global_depths, 0.5)
+        .unwrap();
+    for (stage_idx, (&depth, stage_preview)) in global_depths.iter().zip(halfway.iter()).enumerate()
+    {
+        assert_eq!(stage_preview.len(), depth);
+        for (block_idx, &value) in stage_preview.iter().enumerate() {
+            let base = global_preview[stage_idx][block_idx];
+            let expected = 1.0 + (base - 1.0) * 0.5;
+            let tolerance = expected.abs() * 1.0e-5 + 1.0e-6;
+            assert!((value - expected).abs() <= tolerance);
         }
     }
 }

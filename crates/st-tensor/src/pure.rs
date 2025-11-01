@@ -54,7 +54,7 @@ use rand_distr::StandardNormal;
 use rayon::{current_num_threads, prelude::*};
 use serde::{Deserialize, Serialize};
 use spiral_config::determinism;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::convert::TryFrom;
 use std::error::Error;
 use std::f32::consts::PI;
@@ -3568,6 +3568,11 @@ pub struct AmegaHypergrad {
     rows: usize,
     cols: usize,
     gradient: Vec<f32>,
+    summary: Cell<GradientSummary>,
+    summary_dirty: Cell<bool>,
+    min_dirty: Cell<bool>,
+    max_dirty: Cell<bool>,
+    linf_dirty: Cell<bool>,
     topos: topos::OpenCartesianTopos,
 }
 
@@ -3583,9 +3588,16 @@ pub struct GradientSummary {
     sum_cubes: f32,
     sum_quartic: f32,
     count: usize,
+    min: f32,
+    max: f32,
+    positive_count: usize,
+    negative_count: usize,
+    near_zero_count: usize,
 }
 
 impl GradientSummary {
+    const NEAR_ZERO_EPS: f32 = 1e-5;
+
     #[inline]
     pub fn from_slice(values: &[f32]) -> Self {
         let mut l1 = 0.0f64;
@@ -3595,6 +3607,11 @@ impl GradientSummary {
         let mut sum_quartic = 0.0f64;
         let mut linf = 0.0f64;
         let mut count = 0usize;
+        let mut min = f32::INFINITY;
+        let mut max = f32::NEG_INFINITY;
+        let mut positive_count = 0usize;
+        let mut negative_count = 0usize;
+        let mut near_zero_count = 0usize;
         for &value in values {
             if !value.is_finite() {
                 continue;
@@ -3609,6 +3626,21 @@ impl GradientSummary {
             sum_quartic += square * square;
             linf = linf.max(abs);
             count += 1;
+            let value_f32 = value as f32;
+            min = min.min(value_f32);
+            max = max.max(value_f32);
+            if value_f32 > 0.0 {
+                positive_count += 1;
+            } else if value_f32 < 0.0 {
+                negative_count += 1;
+            }
+            if abs as f32 <= Self::NEAR_ZERO_EPS {
+                near_zero_count += 1;
+            }
+        }
+        if count == 0 {
+            min = 0.0;
+            max = 0.0;
         }
         Self {
             l1: l1 as f32,
@@ -3619,6 +3651,11 @@ impl GradientSummary {
             sum_cubes: sum_cubes as f32,
             sum_quartic: sum_quartic as f32,
             count,
+            min,
+            max,
+            positive_count,
+            negative_count,
+            near_zero_count,
         }
     }
 
@@ -3663,7 +3700,7 @@ impl GradientSummary {
             0.0
         };
         let linf = if linf.is_finite() { linf.max(0.0) } else { 0.0 };
-        Self {
+        let summary = Self {
             l1,
             l2: sum_squares.sqrt(),
             linf,
@@ -3672,7 +3709,65 @@ impl GradientSummary {
             sum_cubes,
             sum_quartic,
             count,
+            min: 0.0,
+            max: 0.0,
+            positive_count: 0,
+            negative_count: 0,
+            near_zero_count: 0,
+        };
+
+        summary
+    }
+
+    /// Attach support and sign statistics to an existing summary. When the
+    /// summary was constructed from aggregated power sums this method can be
+    /// used to backfill the additional metrics without reprocessing the raw
+    /// gradient samples.
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_support(
+        mut self,
+        min: f32,
+        max: f32,
+        positive_count: usize,
+        negative_count: usize,
+        near_zero_count: usize,
+    ) -> Self {
+        if self.count == 0 {
+            self.min = 0.0;
+            self.max = 0.0;
+            self.positive_count = 0;
+            self.negative_count = 0;
+            self.near_zero_count = 0;
+            return self;
         }
+
+        let mut min = if min.is_finite() { min } else { 0.0 };
+        let mut max = if max.is_finite() { max } else { 0.0 };
+        if max < min {
+            mem::swap(&mut min, &mut max);
+        }
+
+        let mut positive_count = positive_count.min(self.count);
+        let mut negative_count = negative_count.min(self.count - positive_count);
+        let near_zero_count = near_zero_count.min(self.count);
+
+        if positive_count + negative_count > self.count {
+            let overflow = positive_count + negative_count - self.count;
+            if negative_count >= overflow {
+                negative_count -= overflow;
+            } else {
+                positive_count = positive_count.saturating_sub(overflow - negative_count);
+                negative_count = 0;
+            }
+        }
+
+        self.min = min;
+        self.max = max;
+        self.positive_count = positive_count;
+        self.negative_count = negative_count;
+        self.near_zero_count = near_zero_count;
+        self
     }
 
     #[inline]
@@ -3735,6 +3830,53 @@ impl GradientSummary {
     #[inline]
     pub fn sum_quartic(&self) -> f32 {
         self.sum_quartic
+    }
+
+    /// Minimum gradient value captured by the summary.
+    #[inline]
+    pub fn min(&self) -> f32 {
+        self.min
+    }
+
+    /// Maximum gradient value captured by the summary.
+    #[inline]
+    pub fn max(&self) -> f32 {
+        self.max
+    }
+
+    /// Difference between the maximum and minimum gradient value.
+    #[inline]
+    pub fn support_width(&self) -> f32 {
+        if self.count == 0 {
+            0.0
+        } else {
+            self.max - self.min
+        }
+    }
+
+    /// Number of positive entries observed when constructing the summary.
+    #[inline]
+    pub fn positive_count(&self) -> usize {
+        self.positive_count
+    }
+
+    /// Number of negative entries observed when constructing the summary.
+    #[inline]
+    pub fn negative_count(&self) -> usize {
+        self.negative_count
+    }
+
+    /// Number of entries that landed within the near-zero guard threshold.
+    #[inline]
+    pub fn near_zero_count(&self) -> usize {
+        self.near_zero_count
+    }
+
+    /// Number of exact zeros recorded by the summary.
+    #[inline]
+    pub fn zero_count(&self) -> usize {
+        self.count
+            .saturating_sub(self.positive_count + self.negative_count)
     }
 
     /// Population mean of the gradient distribution.
@@ -3807,6 +3949,99 @@ impl GradientSummary {
             (central_moment4 / (variance * variance)).max(0.0)
         }
     }
+
+    /// Fraction of entries that were positive when constructing the summary.
+    #[inline]
+    pub fn positive_fraction(&self) -> f32 {
+        if self.count == 0 {
+            0.0
+        } else {
+            self.positive_count as f32 / self.count as f32
+        }
+    }
+
+    /// Fraction of entries that were negative when constructing the summary.
+    #[inline]
+    pub fn negative_fraction(&self) -> f32 {
+        if self.count == 0 {
+            0.0
+        } else {
+            self.negative_count as f32 / self.count as f32
+        }
+    }
+
+    /// Fraction of entries that landed within the near-zero guard threshold.
+    #[inline]
+    pub fn near_zero_fraction(&self) -> f32 {
+        if self.count == 0 {
+            0.0
+        } else {
+            (self.near_zero_count.min(self.count)) as f32 / self.count as f32
+        }
+    }
+
+    /// Fraction of exact zero entries captured by the summary.
+    #[inline]
+    pub fn zero_fraction(&self) -> f32 {
+        if self.count == 0 {
+            0.0
+        } else {
+            self.zero_count() as f32 / self.count as f32
+        }
+    }
+
+    /// Activity score indicating how many entries escaped the near-zero band.
+    #[inline]
+    pub fn activation(&self) -> f32 {
+        if self.count == 0 {
+            0.0
+        } else {
+            1.0 - self.near_zero_fraction()
+        }
+    }
+
+    /// Signed imbalance between positive and negative entries in `[-1, 1]`.
+    #[inline]
+    pub fn sign_lean(&self) -> f32 {
+        if self.count == 0 {
+            0.0
+        } else {
+            (self.positive_count as f32 - self.negative_count as f32) / self.count as f32
+        }
+    }
+
+    /// Shannon entropy of the sign distribution normalised to `[0, 1]`.
+    #[inline]
+    pub fn sign_entropy(&self) -> f32 {
+        if self.count == 0 {
+            return 0.0;
+        }
+        let total = self.count as f32;
+        let bins = [
+            self.positive_count as f32 / total,
+            self.negative_count as f32 / total,
+            self.zero_count() as f32 / total,
+        ];
+        let mut non_zero_bins = 0usize;
+        let entropy = bins.iter().fold(0.0, |acc, &p| {
+            if p > 0.0 {
+                non_zero_bins += 1;
+                acc - p * p.ln()
+            } else {
+                acc
+            }
+        });
+        if non_zero_bins <= 1 {
+            0.0
+        } else {
+            let norm = (non_zero_bins as f32).ln();
+            if norm > 0.0 {
+                (entropy / norm).clamp(0.0, 1.0)
+            } else {
+                0.0
+            }
+        }
+    }
 }
 
 impl Default for GradientSummary {
@@ -3820,6 +4055,11 @@ impl Default for GradientSummary {
             sum_cubes: 0.0,
             sum_quartic: 0.0,
             count: 0,
+            min: 0.0,
+            max: 0.0,
+            positive_count: 0,
+            negative_count: 0,
+            near_zero_count: 0,
         }
     }
 }
@@ -3836,6 +4076,9 @@ pub struct DesireGradientInterpretation {
     hyper_std: f32,
     real_std: f32,
     sharpness: f32,
+    activation: f32,
+    sign_alignment: f32,
+    sign_entropy: f32,
 }
 
 impl DesireGradientInterpretation {
@@ -3868,6 +4111,11 @@ impl DesireGradientInterpretation {
             - (hyper_pressure - real_pressure).abs() / (hyper_pressure + real_pressure + Self::EPS);
         let stability = stability_raw.clamp(0.0, 1.0);
         let saturation = hyper.linf().max(real.linf());
+        let activation = 0.5 * (hyper.activation() + real.activation());
+        let hyper_lean = hyper.sign_lean();
+        let real_lean = real.sign_lean();
+        let sign_alignment = (1.0 - 0.5 * (hyper_lean - real_lean).abs()).clamp(0.0, 1.0);
+        let sign_entropy = 0.5 * (hyper.sign_entropy() + real.sign_entropy());
         Self {
             hyper_pressure,
             real_pressure,
@@ -3877,6 +4125,9 @@ impl DesireGradientInterpretation {
             hyper_std,
             real_std,
             sharpness,
+            activation,
+            sign_alignment,
+            sign_entropy: sign_entropy.clamp(0.0, 1.0),
         }
     }
 
@@ -3929,13 +4180,38 @@ impl DesireGradientInterpretation {
         self.sharpness
     }
 
+    /// Average activation of the paired summaries (values escaping the near-zero band).
+    #[inline]
+    pub fn activation(&self) -> f32 {
+        self.activation
+    }
+
+    /// Alignment score describing how closely the hyper and Euclidean signs agree.
+    #[inline]
+    pub fn sign_alignment(&self) -> f32 {
+        self.sign_alignment
+    }
+
+    /// Average Shannon entropy of the sign distribution across the paired summaries.
+    #[inline]
+    pub fn sign_entropy(&self) -> f32 {
+        self.sign_entropy
+    }
+
     /// Gain factor for hypergradient penalties when the two tapes disagree.
     #[inline]
     pub fn penalty_gain(&self) -> f32 {
         let imbalance = (self.balance - 1.0).abs().min(2.0);
         let instability = (1.0 - self.stability).min(1.0);
         let sharpness = (self.sharpness * 0.25).min(1.0);
-        (1.0 + 0.4 * imbalance + 0.4 * instability + 0.2 * sharpness).clamp(1.0, 3.0)
+        let misalignment = (1.0 - self.sign_alignment).min(1.0);
+        let dormancy = (1.0 - self.activation).min(1.0);
+        (1.0 + 0.35 * imbalance
+            + 0.35 * instability
+            + 0.2 * sharpness
+            + 0.2 * misalignment
+            + 0.1 * dormancy)
+            .clamp(1.0, 3.5)
     }
 
     /// Mixing factor used when blending Desire bias updates – drops towards zero
@@ -3943,7 +4219,9 @@ impl DesireGradientInterpretation {
     #[inline]
     pub fn bias_mix(&self) -> f32 {
         let softness = (1.0 / (1.0 + 0.5 * self.sharpness)).clamp(0.25, 1.0);
-        (0.25 + 0.75 * self.stability * softness).clamp(0.1, 1.0)
+        let alignment = (0.4 + 0.6 * self.sign_alignment).clamp(0.25, 1.0);
+        let activation = (0.3 + 0.7 * self.activation).clamp(0.2, 1.0);
+        (0.2 + 0.8 * self.stability * softness * alignment * activation).clamp(0.1, 1.0)
     }
 
     /// Gain used when accumulating avoidance reports during the observation
@@ -3952,14 +4230,19 @@ impl DesireGradientInterpretation {
     pub fn observation_gain(&self) -> f32 {
         let saturation = self.saturation.tanh().clamp(0.0, 1.0);
         let sharpness = (self.sharpness * 0.25).min(1.0);
-        (0.5 + 0.5 * (1.0 - saturation) * (1.0 - 0.25 * sharpness)).clamp(0.25, 1.0)
+        let activation = (0.4 + 0.6 * self.activation).clamp(0.2, 1.0);
+        let entropy = (0.5 + 0.5 * self.sign_entropy).clamp(0.25, 1.0);
+        (0.4 + 0.6 * (1.0 - saturation) * (1.0 - 0.25 * sharpness) * activation * entropy)
+            .clamp(0.25, 1.0)
     }
 
     /// Damping factor that can shrink epsilon-like tolerances when gradients
     /// spike.
     #[inline]
     pub fn damping(&self) -> f32 {
-        (0.5 + 0.5 * self.saturation.tanh()).clamp(0.1, 1.0)
+        let saturation = self.saturation.tanh().clamp(0.0, 1.0);
+        let dormancy = (1.0 - self.activation).clamp(0.0, 1.0);
+        (0.4 + 0.4 * saturation + 0.2 * dormancy).clamp(0.1, 1.0)
     }
 
     /// Collapse the interpretation into ready-to-apply control signals for
@@ -3991,6 +4274,9 @@ impl Default for DesireGradientInterpretation {
             hyper_std: 0.0,
             real_std: 0.0,
             sharpness: 0.0,
+            activation: 0.0,
+            sign_alignment: 1.0,
+            sign_entropy: 0.0,
         }
     }
 }
@@ -4425,6 +4711,11 @@ impl DesireControlBuilder {
         let saturation = interpretation.saturation().tanh().clamp(0.0, 1.0);
         let stability = interpretation.stability().clamp(0.0, 1.0);
         let caution = (1.0 - stability).clamp(0.0, 1.0);
+        let activation = interpretation.activation().clamp(0.0, 1.0);
+        let dormancy = (1.0 - activation).clamp(0.0, 1.0);
+        let alignment = interpretation.sign_alignment().clamp(0.0, 1.0);
+        let misalignment = (1.0 - alignment).clamp(0.0, 1.0);
+        let sign_entropy = interpretation.sign_entropy().clamp(0.0, 1.0);
 
         let (hyper_base, real_base) = if imbalance >= 0.0 {
             (
@@ -4438,33 +4729,38 @@ impl DesireControlBuilder {
             )
         };
 
-        let hyper_guard = (1.0 - 0.6 * caution - 0.4 * saturation).clamp(0.25, 1.0);
-        let real_guard = (1.0 - 0.4 * caution - 0.25 * saturation).clamp(0.3, 1.0);
+        let hyper_guard =
+            (1.0 - 0.6 * caution - 0.4 * saturation - 0.25 * misalignment).clamp(0.2, 1.0);
+        let real_guard =
+            (1.0 - 0.4 * caution - 0.25 * saturation - 0.2 * dormancy).clamp(0.25, 1.0);
         self.hyper_base = (hyper_base * hyper_guard).clamp(0.25, 1.8);
         self.real_base = (real_base * real_guard).clamp(0.25, 1.8);
 
-        self.operator_mix = (0.4 + 0.6 * stability).clamp(0.25, 1.0);
+        self.operator_mix =
+            (0.25 + 0.45 * stability + 0.2 * alignment + 0.1 * sign_entropy).clamp(0.2, 1.0);
         self.operator_gain =
-            (self.control.penalty_gain * (1.0 - 0.35 * saturation)).clamp(0.5, 1.5);
+            (self.control.penalty_gain * (1.0 - 0.35 * saturation) * (0.7 + 0.3 * activation))
+                .clamp(0.5, 1.6);
 
-        self.target_entropy = 3.5 + 0.8 * caution;
-        self.entropy_eta = 0.08 + 0.14 * caution;
-        self.lr_slew = (0.25 - 0.15 * caution).clamp(0.05, 0.25);
+        self.target_entropy = 3.5 + 0.8 * caution + 0.6 * (1.0 - sign_entropy);
+        self.entropy_eta = (0.08 + 0.14 * caution + 0.05 * misalignment).clamp(0.05, 0.3);
+        self.lr_slew = (0.25 - 0.15 * caution - 0.05 * dormancy).clamp(0.05, 0.25);
 
-        let clip_floor = (0.18 + 0.12 * caution).clamp(0.15, 0.3);
+        let clip_floor = (0.18 + 0.12 * caution + 0.05 * misalignment).clamp(0.15, 0.35);
         let clip_target = interpretation
             .saturation()
-            .max(interpretation.hyper_pressure() * 2.5)
-            .max(interpretation.real_pressure() * 3.0);
+            .max(interpretation.hyper_pressure() * (2.5 + 0.5 * misalignment))
+            .max(interpretation.real_pressure() * (3.0 + dormancy));
         self.clip_floor = clip_floor;
-        self.clip_hint = (clip_target * (0.6 + 0.4 * self.gain)).clamp(clip_floor, 32.0);
+        let clip_gain = (0.6 + 0.4 * self.gain) * (1.0 + 0.2 * misalignment);
+        self.clip_hint = (clip_target * clip_gain).clamp(clip_floor, 32.0);
         self.clip_ceiling = (self.clip_hint * 1.6).max(self.clip_hint + 0.05);
-        self.clip_ema = (0.25 + 0.35 * caution).clamp(0.2, 0.6);
+        self.clip_ema = (0.25 + 0.35 * caution + 0.1 * misalignment).clamp(0.2, 0.65);
 
-        self.z_kappa = (0.02 + 0.08 * (1.0 - stability)).clamp(0.0, 0.12);
-        self.z_slew = (0.22 - 0.1 * caution).clamp(0.05, 0.22);
+        self.z_kappa = (0.02 + 0.08 * (1.0 - stability) + 0.04 * misalignment).clamp(0.0, 0.16);
+        self.z_slew = (0.22 - 0.1 * caution - 0.05 * dormancy).clamp(0.05, 0.22);
 
-        self.quality_gain = (0.6 + 0.4 * (1.0 - caution)).clamp(0.4, 1.0);
+        self.quality_gain = (0.6 + 0.3 * (1.0 - caution) + 0.1 * alignment).clamp(0.4, 1.0);
 
         self
     }
@@ -4634,12 +4930,19 @@ impl AmegaHypergrad {
             rows.saturating_mul(cols).saturating_mul(4).max(8),
             rows.saturating_mul(cols),
         )?;
+        let gradient = vec![0.0; rows * cols];
+        let summary = GradientSummary::from_slice(&gradient);
         Ok(Self {
             curvature,
             learning_rate,
             rows,
             cols,
-            gradient: vec![0.0; rows * cols],
+            gradient,
+            summary: Cell::new(summary),
+            summary_dirty: Cell::new(false),
+            min_dirty: Cell::new(false),
+            max_dirty: Cell::new(false),
+            linf_dirty: Cell::new(false),
             topos,
         })
     }
@@ -4671,12 +4974,19 @@ impl AmegaHypergrad {
                 max_volume: topos.max_volume(),
             });
         }
+        let gradient = vec![0.0; capacity];
+        let summary = GradientSummary::from_slice(&gradient);
         Ok(Self {
             curvature,
             learning_rate,
             rows,
             cols,
-            gradient: vec![0.0; capacity],
+            gradient,
+            summary: Cell::new(summary),
+            summary_dirty: Cell::new(false),
+            min_dirty: Cell::new(false),
+            max_dirty: Cell::new(false),
+            linf_dirty: Cell::new(false),
             topos,
         })
     }
@@ -4703,12 +5013,143 @@ impl AmegaHypergrad {
 
     /// Provides mutable access to the accumulated gradient buffer.
     pub fn gradient_mut(&mut self) -> &mut [f32] {
+        self.summary_dirty.set(true);
+        self.min_dirty.set(true);
+        self.max_dirty.set(true);
+        self.linf_dirty.set(true);
         &mut self.gradient
     }
 
     /// Summarise the accumulated gradient using basic norm statistics.
     pub fn summary(&self) -> GradientSummary {
-        GradientSummary::from_slice(&self.gradient)
+        self.ensure_summary_extrema()
+    }
+
+    #[inline]
+    fn ensure_summary_extrema(&self) -> GradientSummary {
+        if self.summary_dirty.get() {
+            self.rebuild_summary();
+        }
+        if self.min_dirty.get() || self.max_dirty.get() || self.linf_dirty.get() {
+            let mut summary = self.summary.get();
+            let mut min = f32::INFINITY;
+            let mut max = f32::NEG_INFINITY;
+            let mut linf = 0.0f32;
+            let mut any_finite = false;
+            for &value in &self.gradient {
+                if !value.is_finite() {
+                    continue;
+                }
+                if !any_finite {
+                    any_finite = true;
+                    min = value;
+                    max = value;
+                    linf = value.abs();
+                } else {
+                    min = min.min(value);
+                    max = max.max(value);
+                    linf = linf.max(value.abs());
+                }
+            }
+            if !any_finite {
+                min = 0.0;
+                max = 0.0;
+                linf = 0.0;
+            }
+            summary.min = min;
+            summary.max = max;
+            summary.linf = linf;
+            self.summary.set(summary);
+            self.min_dirty.set(false);
+            self.max_dirty.set(false);
+            self.linf_dirty.set(false);
+        }
+        self.summary.get()
+    }
+
+    #[inline]
+    fn rebuild_summary(&self) {
+        let summary = GradientSummary::from_slice(&self.gradient);
+        self.summary.set(summary);
+        self.summary_dirty.set(false);
+        self.min_dirty.set(false);
+        self.max_dirty.set(false);
+        self.linf_dirty.set(false);
+    }
+
+    fn record_transition(&self, old: f32, new: f32) {
+        if old.to_bits() == new.to_bits() {
+            return;
+        }
+        if !old.is_finite() || !new.is_finite() {
+            self.rebuild_summary();
+            return;
+        }
+        let mut summary = self.summary.get();
+        let old64 = old as f64;
+        let new64 = new as f64;
+        let mut l1 = summary.l1 as f64 + new64.abs() - old64.abs();
+        if l1 < 0.0 {
+            l1 = 0.0;
+        }
+        summary.l1 = l1 as f32;
+        summary.sum = (summary.sum as f64 + new64 - old64) as f32;
+        let old_sq = old64 * old64;
+        let new_sq = new64 * new64;
+        let mut sum_squares = summary.sum_squares as f64 + new_sq - old_sq;
+        if sum_squares < 0.0 {
+            sum_squares = 0.0;
+        }
+        summary.sum_squares = sum_squares as f32;
+        summary.l2 = summary.sum_squares.sqrt();
+        let old_cubic = old_sq * old64;
+        let new_cubic = new_sq * new64;
+        summary.sum_cubes = (summary.sum_cubes as f64 + new_cubic - old_cubic) as f32;
+        let old_quartic = old_sq * old_sq;
+        let new_quartic = new_sq * new_sq;
+        let mut sum_quartic = summary.sum_quartic as f64 + new_quartic - old_quartic;
+        if sum_quartic < 0.0 {
+            sum_quartic = 0.0;
+        }
+        summary.sum_quartic = sum_quartic as f32;
+
+        if old > 0.0 {
+            summary.positive_count = summary.positive_count.saturating_sub(1);
+        } else if old < 0.0 {
+            summary.negative_count = summary.negative_count.saturating_sub(1);
+        }
+        if new > 0.0 {
+            summary.positive_count = summary.positive_count.saturating_add(1).min(summary.count);
+        } else if new < 0.0 {
+            summary.negative_count = summary.negative_count.saturating_add(1).min(summary.count);
+        }
+        if old.abs() <= GradientSummary::NEAR_ZERO_EPS {
+            summary.near_zero_count = summary.near_zero_count.saturating_sub(1);
+        }
+        if new.abs() <= GradientSummary::NEAR_ZERO_EPS {
+            summary.near_zero_count = summary.near_zero_count.saturating_add(1).min(summary.count);
+        }
+        if new < summary.min {
+            summary.min = new;
+        } else if old <= summary.min && new > old {
+            self.min_dirty.set(true);
+        }
+        if new > summary.max {
+            summary.max = new;
+        } else if old >= summary.max && new < old {
+            self.max_dirty.set(true);
+        }
+        let new_abs = new.abs();
+        if new_abs > summary.linf {
+            summary.linf = new_abs;
+        } else {
+            let old_abs = old.abs();
+            if old_abs >= summary.linf && new_abs < old_abs {
+                self.linf_dirty.set(true);
+            }
+        }
+        self.summary.set(summary);
+        self.summary_dirty.set(false);
     }
 
     fn telemetry_snapshot(&self) -> HypergradTelemetry {
@@ -4768,6 +5209,53 @@ impl AmegaHypergrad {
         }
     }
 
+    /// Scales the accumulated gradient by `factor` while keeping the cached
+    /// summary in sync. Non-finite scaling factors reset the tape to a clean
+    /// state to avoid propagating NaNs or infinities through downstream
+    /// telemetry.
+    pub fn scale_gradient(&mut self, factor: f32) {
+        if !factor.is_finite() {
+            self.reset();
+            return;
+        }
+        if (factor - 1.0).abs() <= f32::EPSILON {
+            return;
+        }
+        for idx in 0..self.gradient.len() {
+            let old = self.gradient[idx];
+            let candidate = old * factor;
+            let new = self.topos.saturate(candidate);
+            if old.to_bits() != new.to_bits() {
+                self.gradient[idx] = new;
+                self.record_transition(old, new);
+            } else {
+                self.gradient[idx] = new;
+            }
+        }
+    }
+
+    /// Rescales the gradient so its root-mean-square matches `target_rms` and
+    /// returns the factor that was applied. When the gradient is dormant the
+    /// tape stays untouched and the method returns ``0.0`` to signal no-op
+    /// scaling.
+    pub fn rescale_rms(&mut self, target_rms: f32) -> f32 {
+        if !target_rms.is_finite() {
+            return 1.0;
+        }
+        if target_rms <= 0.0 {
+            self.reset();
+            return 0.0;
+        }
+        let summary = self.summary();
+        let current_rms = summary.rms();
+        if current_rms <= 1e-12 {
+            return 0.0;
+        }
+        let factor = target_rms / current_rms;
+        self.scale_gradient(factor);
+        factor
+    }
+
     /// Retunes the curvature and learning rate while rebuilding the guard topos.
     /// The accumulated gradient buffer is cleared to avoid mixing incompatible
     /// geometries across updates.
@@ -4806,8 +5294,15 @@ impl AmegaHypergrad {
 
     /// Clears the accumulated gradient back to zero.
     pub fn reset(&mut self) {
-        for g in self.gradient.iter_mut() {
-            *g = 0.0;
+        for idx in 0..self.gradient.len() {
+            let old = self.gradient[idx];
+            let new = 0.0f32;
+            if old.to_bits() != new.to_bits() {
+                self.gradient[idx] = new;
+                self.record_transition(old, new);
+            } else {
+                self.gradient[idx] = new;
+            }
         }
     }
 
@@ -4817,10 +5312,20 @@ impl AmegaHypergrad {
         self.assert_tensor_shape(tensor)?;
         self.topos.guard_tensor("hypergrad_wave", tensor)?;
         let tolerance = self.topos.tolerance();
-        for (grad, value) in self.gradient.iter_mut().zip(tensor.data().iter()) {
+        let values = tensor.data();
+        for idx in 0..self.gradient.len() {
+            let value = values[idx];
             let denom = 1.0 - self.curvature * value * value;
-            let update = *value / denom.abs().max(tolerance);
-            *grad = self.topos.saturate(*grad + update);
+            let update = value / denom.abs().max(tolerance);
+            let old = self.gradient[idx];
+            let candidate = old + update;
+            let new = self.topos.saturate(candidate);
+            if old.to_bits() != new.to_bits() {
+                self.gradient[idx] = new;
+                self.record_transition(old, new);
+            } else {
+                self.gradient[idx] = new;
+            }
         }
         Ok(())
     }
@@ -4856,14 +5361,19 @@ impl AmegaHypergrad {
         self.topos
             .guard_tensor("hypergrad_prediction", prediction)?;
         self.topos.guard_tensor("hypergrad_target", target)?;
-        for ((grad, pred), tgt) in self
-            .gradient
-            .iter_mut()
-            .zip(prediction.data().iter())
-            .zip(target.data().iter())
-        {
-            let delta = pred - tgt;
-            *grad = self.topos.saturate(*grad + delta);
+        let prediction_data = prediction.data();
+        let target_data = target.data();
+        for idx in 0..self.gradient.len() {
+            let delta = prediction_data[idx] - target_data[idx];
+            let old = self.gradient[idx];
+            let candidate = old + delta;
+            let new = self.topos.saturate(candidate);
+            if old.to_bits() != new.to_bits() {
+                self.gradient[idx] = new;
+                self.record_transition(old, new);
+            } else {
+                self.gradient[idx] = new;
+            }
         }
         Ok(())
     }
@@ -5357,18 +5867,76 @@ fn fused_attention_cpu(
     output
 }
 
-fn row_softmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
-    match HardmaxFusionPlan::new(data, rows, cols)
-        .layout(Layout::RowMajor)
-        .backend(HardmaxBackend::Cpu)
-        .mode(HardmaxMode::SoftmaxAndMask)
-        .execute()
-    {
-        Ok(result) => result
-            .softmax
-            .unwrap_or_else(|| vec![0.0; rows.saturating_mul(cols)]),
-        Err(_) => vec![0.0; rows.saturating_mul(cols)],
+fn cpu_row_softmax_hardmax(data: &[f32], rows: usize, cols: usize) -> (Vec<f32>, Vec<f32>) {
+    let expected = rows.saturating_mul(cols);
+    if data.len() != expected || expected == 0 {
+        return (vec![0.0; expected], vec![0.0; expected]);
     }
+
+    let mut softmax = vec![0.0f32; expected];
+    let mut hardmax = vec![0.0f32; expected];
+
+    for row in 0..rows {
+        let offset = row * cols;
+        let row_slice = &data[offset..offset + cols];
+
+        let mut max_value = f32::NEG_INFINITY;
+        let mut max_index = 0usize;
+        let mut found = false;
+        for (index, &value) in row_slice.iter().enumerate() {
+            if value.is_nan() {
+                continue;
+            }
+            if !found || value > max_value {
+                max_value = value;
+                max_index = index;
+                found = true;
+            }
+        }
+
+        let base = if found && max_value.is_finite() {
+            max_value
+        } else {
+            0.0
+        };
+
+        let mut denom = 0.0f32;
+        for (index, &value) in row_slice.iter().enumerate() {
+            let weight = if !found || value.is_nan() {
+                0.0
+            } else {
+                (value - base).exp()
+            };
+            softmax[offset + index] = weight;
+            denom += weight;
+        }
+
+        if found {
+            if denom.is_finite() && denom > f32::EPSILON {
+                let inv = denom.recip();
+                for value in &mut softmax[offset..offset + cols] {
+                    *value *= inv;
+                }
+            } else {
+                for value in &mut softmax[offset..offset + cols] {
+                    *value = 0.0;
+                }
+                softmax[offset + max_index] = 1.0;
+            }
+            hardmax[offset + max_index] = 1.0;
+        }
+    }
+
+    (softmax, hardmax)
+}
+
+fn row_softmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+    cpu_row_softmax_hardmax(data, rows, cols).0
+}
+
+#[cfg_attr(feature = "wgpu", allow(dead_code))]
+fn row_hardmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+    cpu_row_softmax_hardmax(data, rows, cols).1
 }
 
 fn add_bias_relu_inplace(data: &mut [f32], rows: usize, cols: usize, bias: &[f32]) {
@@ -5461,6 +6029,23 @@ fn matmul_wgpu(
 mod tests {
     use super::*;
     use ndarray::Array2;
+
+    fn assert_summary_close(actual: GradientSummary, expected: GradientSummary) {
+        const EPS: f32 = 1e-5;
+        assert!((actual.l1() - expected.l1()).abs() < EPS);
+        assert!((actual.l2() - expected.l2()).abs() < EPS);
+        assert!((actual.linf() - expected.linf()).abs() < EPS);
+        assert!((actual.sum() - expected.sum()).abs() < EPS);
+        assert!((actual.sum_squares() - expected.sum_squares()).abs() < EPS);
+        assert!((actual.sum_cubes() - expected.sum_cubes()).abs() < EPS);
+        assert!((actual.sum_quartic() - expected.sum_quartic()).abs() < EPS);
+        assert_eq!(actual.count(), expected.count());
+        assert_eq!(actual.positive_count(), expected.positive_count());
+        assert_eq!(actual.negative_count(), expected.negative_count());
+        assert_eq!(actual.near_zero_count(), expected.near_zero_count());
+        assert!((actual.min() - expected.min()).abs() < EPS);
+        assert!((actual.max() - expected.max()).abs() < EPS);
+    }
 
     #[test]
     fn matmul_bias_relu_matches_scalar_pipeline() {
@@ -5967,6 +6552,16 @@ mod tests {
         assert!(summary.variance() > 0.0);
         assert!(summary.std() > 0.0);
         assert!(summary.kurtosis() >= 0.0);
+        assert_eq!(summary.min(), -2.0);
+        assert_eq!(summary.max(), 3.0);
+        assert_eq!(summary.positive_count(), 2);
+        assert_eq!(summary.negative_count(), 1);
+        assert_eq!(summary.zero_count(), 1);
+        assert_eq!(summary.near_zero_count(), 1);
+        assert!((summary.activation() - 0.75).abs() < 1e-6);
+        assert!((summary.sign_lean() - 0.25).abs() < 1e-6);
+        let entropy = summary.sign_entropy();
+        assert!(entropy > 0.0 && entropy < 1.0);
     }
 
     #[test]
@@ -5996,10 +6591,21 @@ mod tests {
             sum_quartic,
             3.0,
             values.len(),
+        )
+        .with_support(
+            from_slice.min(),
+            from_slice.max(),
+            from_slice.positive_count(),
+            from_slice.negative_count(),
+            from_slice.near_zero_count(),
         );
         assert!((from_slice.sum() - from_moments.sum()).abs() < 1e-6);
         assert!((from_slice.skewness() - from_moments.skewness()).abs() < 1e-6);
         assert!((from_slice.kurtosis() - from_moments.kurtosis()).abs() < 1e-6);
+        assert_eq!(from_slice.positive_count(), from_moments.positive_count());
+        assert_eq!(from_slice.negative_count(), from_moments.negative_count());
+        assert_eq!(from_slice.near_zero_count(), from_moments.near_zero_count());
+        assert!((from_slice.sign_entropy() - from_moments.sign_entropy()).abs() < 1e-6);
     }
 
     #[test]
@@ -6015,6 +6621,10 @@ mod tests {
         assert!(stable.observation_gain() >= interpretation.observation_gain());
         assert!(interpretation.hyper_std() > 0.0);
         assert!(interpretation.sharpness() >= 0.0);
+        assert!(interpretation.activation() > 0.0);
+        assert!(interpretation.sign_alignment() >= 0.0);
+        assert!(interpretation.sign_entropy() > 0.0);
+        assert!(stable.sign_alignment() >= interpretation.sign_alignment());
     }
 
     #[test]
@@ -6032,6 +6642,89 @@ mod tests {
         assert_eq!(real_summary.count(), 3);
         let expected_l1: f32 = tensor.data().iter().map(|value| value.abs()).sum();
         assert!((real_summary.l1() - expected_l1).abs() < 1e-6);
+    }
+
+    #[test]
+    fn hypergrad_summary_stays_in_sync_with_updates() {
+        let mut tape = AmegaHypergrad::new(-1.0, 0.05, 2, 2).unwrap();
+        let wave = Tensor::from_vec(2, 2, vec![0.5, -0.25, 1.2, -0.9]).unwrap();
+        tape.accumulate_wave(&wave).unwrap();
+        let after_wave = tape.summary();
+        let expected_wave = GradientSummary::from_slice(tape.gradient());
+        assert_summary_close(after_wave, expected_wave);
+
+        let prediction = Tensor::from_vec(2, 2, vec![0.8, -0.6, 0.3, -0.1]).unwrap();
+        let target = Tensor::from_vec(2, 2, vec![0.2, -0.3, 0.05, -0.15]).unwrap();
+        tape.accumulate_pair(&prediction, &target).unwrap();
+        let after_pair = tape.summary();
+        let expected_pair = GradientSummary::from_slice(tape.gradient());
+        assert_summary_close(after_pair, expected_pair);
+
+        let mut weights = Tensor::from_vec(2, 2, vec![0.05, -0.05, 0.1, -0.1]).unwrap();
+        tape.apply(&mut weights).unwrap();
+        let reset = tape.summary();
+        assert_eq!(reset.count(), 4);
+        assert!(reset.l1() <= 1e-5);
+        assert!(reset.l2() <= 1e-5);
+        assert_eq!(reset.near_zero_count(), reset.count());
+        assert!(reset.min().abs() <= 1e-6);
+        assert!(reset.max().abs() <= 1e-6);
+    }
+
+    #[test]
+    fn hypergrad_summary_rebuilds_after_manual_mutation() {
+        let mut tape = AmegaHypergrad::new(-1.0, 0.05, 2, 3).unwrap();
+        let wave = Tensor::from_vec(2, 3, vec![0.4, -0.3, 0.2, 0.1, -0.5, 0.75]).unwrap();
+        tape.accumulate_wave(&wave).unwrap();
+        {
+            let gradient = tape.gradient_mut();
+            gradient.copy_from_slice(&[0.8, -0.1, 0.0, -0.25, 0.6, -0.9]);
+        }
+        let summary = tape.summary();
+        let expected = GradientSummary::from_slice(tape.gradient());
+        assert_summary_close(summary, expected);
+    }
+
+    #[test]
+    fn hypergrad_scale_gradient_stays_in_sync() {
+        let mut tape = AmegaHypergrad::new(-0.9, 0.05, 2, 2).unwrap();
+        let wave = Tensor::from_vec(2, 2, vec![0.45, -0.3, 0.15, 0.2]).unwrap();
+        tape.accumulate_wave(&wave).unwrap();
+        let before = tape.gradient().to_vec();
+        tape.scale_gradient(-0.5);
+        let after = tape.gradient();
+        for (prev, current) in before.iter().zip(after.iter()) {
+            assert!((current + 0.5 * prev).abs() <= 1e-6);
+        }
+        let summary = tape.summary();
+        let expected = GradientSummary::from_slice(after);
+        assert_summary_close(summary, expected);
+    }
+
+    #[test]
+    fn hypergrad_rescale_rms_matches_target() {
+        let mut tape = AmegaHypergrad::new(-0.85, 0.05, 2, 3).unwrap();
+        let tensor = Tensor::from_vec(2, 3, vec![0.5, -0.4, 0.25, 0.6, -0.3, 0.1]).unwrap();
+        tape.accumulate_wave(&tensor).unwrap();
+        let initial = tape.summary();
+        let target = initial.rms() * 0.4;
+        let factor = tape.rescale_rms(target);
+        assert!((factor - 0.4).abs() <= 5e-3);
+        let summary = tape.summary();
+        assert!((summary.rms() - target).abs() <= 5e-3);
+        let expected = GradientSummary::from_slice(tape.gradient());
+        assert_summary_close(summary, expected);
+    }
+
+    #[test]
+    fn hypergrad_rescale_rms_on_dormant_gradient_is_noop() {
+        let mut tape = AmegaHypergrad::new(-0.95, 0.05, 1, 2).unwrap();
+        assert_eq!(tape.summary().rms(), 0.0);
+        let factor = tape.rescale_rms(0.25);
+        assert_eq!(factor, 0.0);
+        let summary = tape.summary();
+        assert_eq!(summary.rms(), 0.0);
+        assert_eq!(summary.l1(), 0.0);
     }
 
     #[test]
