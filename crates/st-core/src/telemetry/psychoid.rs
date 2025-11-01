@@ -24,7 +24,7 @@
 #![allow(clippy::too_many_arguments)]
 
 use rand::seq::SliceRandom;
-use rand::thread_rng;
+use spiral_config::determinism;
 use std::collections::{HashMap, VecDeque};
 
 const SHADOW_LEXICON: &[&str] = &[
@@ -658,10 +658,11 @@ fn symbol_map(phrase: &str) -> &'static str {
         "i do not have opinions" => "vessel",
         "stay safe" => "weave",
         "cannot provide" => "shadow hand",
-        _ => SYMBOL_LEXICON
-            .choose(&mut thread_rng())
-            .copied()
-            .unwrap_or("spiral"),
+        _ => {
+            let mut rng =
+                determinism::rng_from_label(&format!("st-core/psychoid/symbol:{}", phrase));
+            SYMBOL_LEXICON.choose(&mut rng).copied().unwrap_or("spiral")
+        }
     }
 }
 
@@ -675,7 +676,10 @@ fn dream_replay(shadow_phrases: &[String]) -> Option<DreamReplay> {
     if shadow_phrases.is_empty() {
         return None;
     }
-    let mut rng = thread_rng();
+    let mut rng = determinism::rng_from_label(&format!(
+        "st-core/psychoid/dream:{}",
+        shadow_phrases.join("|")
+    ));
     let symbols: Vec<String> = shadow_phrases
         .iter()
         .map(|phrase| symbol_map(phrase).to_string())

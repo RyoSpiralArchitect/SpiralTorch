@@ -14,6 +14,7 @@ wgpu = ["cpu", "st-tensor/wgpu_dense"]
 [dependencies]
 rand = { version = "0.8", features = ["std", "std_rng"] }
 serde = { version = "1", features = ["derive"] }
+spiral-config = { path = "../spiral-config" }
 st-tensor = { path = "../st-tensor", default-features = false }
 st-vision = { path = "../st-vision", default-features = false }
 thiserror = "1"

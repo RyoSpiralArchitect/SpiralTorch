@@ -47,6 +47,7 @@ rand_distr = { version = "0.4", default-features = false, features = ["std"] }
 st-frac = { path = "../st-frac" }
 # Kernel DSL utilities shared with the autotuner.
 st-kdsl = { path = "../st-kdsl" }
+spiral-config = { path = "../spiral-config" }
 # Structured serialisation for gradient feedback packets shared across
 # automation layers and WASM bindings.
 serde = { version = "1.0", features = ["derive"], default-features = false }
