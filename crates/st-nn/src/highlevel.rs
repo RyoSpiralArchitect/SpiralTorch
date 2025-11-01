@@ -3,6 +3,7 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+use crate::dataset::{DataLoader, Dataset};
 use crate::module::Module;
 use crate::trainer::{EpochStats, ModuleTrainer};
 use crate::{BandEnergy, GradientBands, Loss, RoundtableConfig, RoundtableSchedule};
@@ -1031,7 +1032,8 @@ impl SpiralSession {
     where
         M: Module,
         L: Loss,
-        I: IntoIterator<Item = (Tensor, Tensor)>,
+        I: IntoIterator,
+        I::Item: crate::trainer::IntoBatch,
     {
         trainer.train_epoch(module, loss, batches, schedule)
     }
@@ -1047,10 +1049,29 @@ impl SpiralSession {
     where
         M: Module,
         L: Loss,
-        I: IntoIterator<Item = (Tensor, Tensor)>,
+        I: IntoIterator,
+        I::Item: crate::trainer::IntoBatch,
     {
         let mut trainer = self.trainer();
         trainer.train_epoch(module, loss, batches, schedule)
+    }
+
+    /// Builds a dataset from the provided iterator of `(input, target)` samples.
+    pub fn dataset_from<I>(&self, samples: I) -> Dataset
+    where
+        I: IntoIterator<Item = (Tensor, Tensor)>,
+    {
+        Dataset::from_iter(samples)
+    }
+
+    /// Creates a [`DataLoader`] from a dataset using the session defaults.
+    pub fn data_loader_from_dataset(&self, dataset: &Dataset) -> DataLoader {
+        dataset.loader()
+    }
+
+    /// Creates a [`DataLoader`] from an owning vector of samples.
+    pub fn data_loader_from_vec(&self, samples: Vec<(Tensor, Tensor)>) -> DataLoader {
+        crate::dataset::from_vec(samples)
     }
 
     /// Creates a roundtable schedule for the provided configuration.
@@ -1440,5 +1461,42 @@ mod tests {
         assert!(harmonics.dominant_energy.is_some());
         let story = session.timeline_narrative(Some(48), 0.6).unwrap();
         assert!(story.summary.contains("Timeline span"));
+    }
+
+    #[test]
+    fn train_epoch_accepts_session_loader() {
+        let caps = DeviceCaps::cpu();
+        let session = SpiralSession::builder(caps).build().unwrap();
+        let mut module = Linear::new("session_linear", 2, 1).unwrap();
+        session.prepare_module(&mut module).unwrap();
+        let mut loss = MeanSquaredError::default();
+        let samples = vec![
+            (
+                Tensor::from_vec(1, 2, vec![0.0, 1.0]).unwrap(),
+                Tensor::from_vec(1, 1, vec![1.0]).unwrap(),
+            ),
+            (
+                Tensor::from_vec(1, 2, vec![1.0, 0.0]).unwrap(),
+                Tensor::from_vec(1, 1, vec![0.0]).unwrap(),
+            ),
+            (
+                Tensor::from_vec(1, 2, vec![1.0, 1.0]).unwrap(),
+                Tensor::from_vec(1, 1, vec![1.0]).unwrap(),
+            ),
+            (
+                Tensor::from_vec(1, 2, vec![0.5, 0.5]).unwrap(),
+                Tensor::from_vec(1, 1, vec![0.5]).unwrap(),
+            ),
+        ];
+        let dataset = session.dataset_from(samples.clone());
+        assert_eq!(dataset.len(), samples.len());
+        let loader = session.data_loader_from_dataset(&dataset).batched(2);
+        let schedule = session.roundtable(1, 2, RoundtableConfig::default());
+        let mut trainer = session.trainer();
+        let stats = session
+            .train_epoch(&mut trainer, &mut module, &mut loss, loader, &schedule)
+            .unwrap();
+        assert_eq!(stats.batches, 2);
+        assert!(stats.total_loss.is_finite());
     }
 }
