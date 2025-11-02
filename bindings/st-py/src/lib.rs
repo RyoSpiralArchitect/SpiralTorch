@@ -13,6 +13,8 @@ mod pure;
 mod planner;
 mod spiralk;
 mod frac;
+#[path = "robotics.rs"]
+mod robotics_bindings;
 mod psi_synchro;
 mod selfsup;
 mod text;
@@ -28,11 +30,14 @@ mod theory;
 mod introspect;
 mod qr;
 mod julia_bridge;
+mod robotics;
 mod dataset;
+
+use robotics_bindings as robotics;
 
 mod extras {
     use super::*;
-    use pyo3::wrap_pyfunction; // ← マクロをこのモジュール内に import
+    use pyo3::wrap_pyfunction; 
     use std::sync::atomic::{AtomicU64, Ordering};
 
     pub const GOLDEN_RATIO: f64 = 1.618_033_988_749_894_8_f64;
