@@ -189,7 +189,10 @@ impl PyDataLoaderIter {
 #[pymethods]
 impl PyDataLoaderIter {
     fn __iter__(slf: PyRefMut<'_, Self>) -> PyResult<Py<PyDataLoaderIter>> {
-        Ok(slf.into_py(slf.py()))
+        let py = slf.py();
+        let obj = slf.into_py(py);
+        let iter = obj.into_bound(py).downcast_into::<PyDataLoaderIter>()?;
+        Ok(iter.unbind())
     }
 
     fn __next__(mut slf: PyRefMut<'_, Self>) -> PyResult<Option<(PyTensor, PyTensor)>> {
