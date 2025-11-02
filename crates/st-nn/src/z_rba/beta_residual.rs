@@ -6,6 +6,9 @@
 //! Residual Beta gate that carries spectral uncertainty between layers.
 
 use super::attention::ZIndex;
+use crate::layers::linear::Linear;
+use crate::module::{Module, Parameter};
+use crate::{PureResult, Tensor};
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 use rand_distr::{Beta, Distribution};
@@ -33,57 +36,50 @@ impl BetaGateSample {
 /// Residual gate parameterised by a two-output linear map.
 #[derive(Debug)]
 pub struct BetaGate {
-    weights: [[f32; 7]; 2],
-    bias: [f32; 2],
+    phi: Linear,
     rng: RefCell<ChaCha20Rng>,
     ema_mean: Cell<f32>,
     ema_var: Cell<f32>,
     momentum: f32,
 }
 
-impl Default for BetaGate {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl BetaGate {
-    pub fn new() -> Self {
-        let mut weights = [[0.0f32; 7]; 2];
-        for (row, row_weights) in weights.iter_mut().enumerate() {
-            for (col, weight) in row_weights.iter_mut().enumerate() {
-                let seed = (row * 7 + col) as f32;
-                *weight = (seed.cos() * 0.05 + seed.sin() * 0.02).tanh();
-            }
-        }
-        let bias = [0.1, 0.2];
-        Self {
-            weights,
-            bias,
+    pub fn new() -> PureResult<Self> {
+        let phi = Linear::new("zrba.beta_gate", 7, 2)?;
+        Ok(Self {
+            phi,
             rng: RefCell::new(ChaCha20Rng::seed_from_u64(42)),
             ema_mean: Cell::new(0.5),
             ema_var: Cell::new(0.25),
             momentum: 0.05,
-        }
+        })
     }
 
-    pub fn forward(&self, stats: &SpectralFeatureSample, indices: &[ZIndex]) -> BetaGateSample {
+    pub fn forward(
+        &self,
+        stats: &SpectralFeatureSample,
+        indices: &[ZIndex],
+    ) -> PureResult<BetaGateSample> {
         let features = self.build_features(stats, indices);
-        let [alpha_raw, beta_raw] = self.linear(&features);
+        let features_tensor = Tensor::from_vec(1, features.len(), features.to_vec())?;
+        let logits = self.phi.forward(&features_tensor)?;
+        let data = logits.data();
+        let alpha_raw = data[0];
+        let beta_raw = data[1];
         let alpha = self.softplus(alpha_raw) + 1e-3;
         let beta = self.softplus(beta_raw) + 1e-3;
         let expected = alpha / (alpha + beta);
         let variance = (alpha * beta) / ((alpha + beta).powi(2) * (alpha + beta + 1.0));
         let sample = self.sample_beta(alpha, beta);
         self.update_ema(expected, variance);
-        BetaGateSample {
+        Ok(BetaGateSample {
             sample,
             alpha,
             beta,
             expected,
             variance,
             features,
-        }
+        })
     }
 
     pub fn ema(&self) -> (f32, f32) {
@@ -97,6 +93,9 @@ impl BetaGate {
         features[2] = stats.spin;
         features[3] = stats.energy;
         if indices.is_empty() {
+            features[4] = 0.0;
+            features[5] = stats.sheet_index as f32;
+            features[6] = 0.0;
             return features;
         }
         let mut mean_band = 0.0f32;
@@ -108,22 +107,13 @@ impl BetaGate {
             mean_echo += index.echo as f32;
         }
         let denom = indices.len() as f32;
-        features[4] = mean_band / denom;
-        features[5] = mean_sheet / denom;
-        features[6] = mean_echo / denom;
+        let avg_band = mean_band / denom;
+        let avg_sheet = mean_sheet / denom;
+        let avg_echo = mean_echo / denom;
+        features[4] = avg_band;
+        features[5] = 0.5 * (stats.sheet_index as f32 + avg_sheet);
+        features[6] = avg_echo;
         features
-    }
-
-    fn linear(&self, features: &[f32; 7]) -> [f32; 2] {
-        let mut outputs = [0.0f32; 2];
-        for (row, weights) in self.weights.iter().enumerate() {
-            let mut acc = self.bias[row];
-            for (feature, weight) in features.iter().zip(weights.iter()) {
-                acc += feature * weight;
-            }
-            outputs[row] = acc;
-        }
-        outputs
     }
 
     fn softplus(&self, x: f32) -> f32 {
@@ -145,6 +135,20 @@ impl BetaGate {
         self.ema_mean.set(new_mean);
         self.ema_var.set(new_var.max(1e-6));
     }
+
+    pub fn visit_parameters(
+        &self,
+        visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        self.phi.visit_parameters(visitor)
+    }
+
+    pub fn visit_parameters_mut(
+        &mut self,
+        visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        self.phi.visit_parameters_mut(visitor)
+    }
 }
 
 #[cfg(test)]
@@ -153,21 +157,23 @@ mod tests {
 
     #[test]
     fn beta_gate_emits_sample() {
-        let gate = BetaGate::new();
-        let sample = gate.forward(
-            &SpectralFeatureSample {
-                sheet_index: 1,
-                sheet_confidence: 0.8,
-                curvature: 0.1,
-                spin: 0.05,
-                energy: 0.2,
-            },
-            &[ZIndex {
-                band: 1,
-                sheet: 2,
-                echo: 3,
-            }],
-        );
+        let gate = BetaGate::new().unwrap();
+        let sample = gate
+            .forward(
+                &SpectralFeatureSample {
+                    sheet_index: 1,
+                    sheet_confidence: 0.8,
+                    curvature: 0.1,
+                    spin: 0.05,
+                    energy: 0.2,
+                },
+                &[ZIndex {
+                    band: 1,
+                    sheet: 2,
+                    echo: 3,
+                }],
+            )
+            .unwrap();
         assert!(sample.sample >= 0.0 && sample.sample <= 1.0);
         assert!(sample.alpha > 0.0 && sample.beta > 0.0);
         let (ema_mean, ema_var) = gate.ema();

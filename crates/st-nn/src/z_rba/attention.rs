@@ -5,8 +5,10 @@
 
 //! Z-RBF attention specialised for Z-space indices.
 
+use crate::module::Parameter;
 use crate::z_rba::ZTensor;
 use crate::{PureResult, Tensor, TensorError};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Identifies a token's position inside the active Z-frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -188,10 +190,10 @@ pub struct ZRBFAttention {
     head_dim: usize,
     metric: ZMetricWeights,
     ard: bool,
-    query: Tensor,
-    key: Tensor,
-    value: Tensor,
-    output: Tensor,
+    query: Parameter,
+    key: Parameter,
+    value: Parameter,
+    output: Parameter,
     head_params: Vec<ArdParameters>,
 }
 
@@ -209,16 +211,17 @@ impl ZRBFAttention {
             });
         }
         let head_dim = d_model / n_heads;
-        let initializer = |rows: usize, cols: usize| {
+        let initializer = |rows: usize, cols: usize| -> PureResult<Tensor> {
             Tensor::from_fn(rows, cols, |r, c| {
                 let seed = (r * cols + c) as f32;
                 (seed.sin() * 0.02 + 0.02 * seed.cos()).tanh()
             })
         };
-        let query = initializer(d_model, d_model)?;
-        let key = initializer(d_model, d_model)?;
-        let value = initializer(d_model, d_model)?;
-        let output = initializer(d_model, d_model)?;
+        let id = next_parameter_id();
+        let query = Parameter::new(format!("zrba.query.{id}"), initializer(d_model, d_model)?);
+        let key = Parameter::new(format!("zrba.key.{id}"), initializer(d_model, d_model)?);
+        let value = Parameter::new(format!("zrba.value.{id}"), initializer(d_model, d_model)?);
+        let output = Parameter::new(format!("zrba.output.{id}"), initializer(d_model, d_model)?);
         let head_params = (0..n_heads)
             .map(|h| {
                 if ard {
@@ -243,8 +246,8 @@ impl ZRBFAttention {
         })
     }
 
-    fn apply_linear(&self, tensor: &Tensor, weight: &Tensor) -> PureResult<Tensor> {
-        tensor.matmul(weight)
+    fn apply_linear(&self, tensor: &Tensor, weight: &Parameter) -> PureResult<Tensor> {
+        tensor.matmul(weight.value())
     }
 
     pub fn forward<G: ZFrameGeometry>(
@@ -374,7 +377,7 @@ impl ZRBFAttention {
         }
 
         let head_outputs =
-            Tensor::from_vec(rows, self.d_model, head_outputs)?.matmul(&self.output)?;
+            Tensor::from_vec(rows, self.d_model, head_outputs)?.matmul(self.output.value())?;
         let head_variances = Tensor::from_vec(rows, self.d_model, head_variances)?;
         Ok(ZRBFAttentionOutput {
             mean: head_outputs,
@@ -382,6 +385,33 @@ impl ZRBFAttention {
             telemetry,
         })
     }
+
+    pub fn visit_parameters(
+        &self,
+        visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        visitor(&self.query)?;
+        visitor(&self.key)?;
+        visitor(&self.value)?;
+        visitor(&self.output)?;
+        Ok(())
+    }
+
+    pub fn visit_parameters_mut(
+        &mut self,
+        visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        visitor(&mut self.query)?;
+        visitor(&mut self.key)?;
+        visitor(&mut self.value)?;
+        visitor(&mut self.output)?;
+        Ok(())
+    }
+}
+
+fn next_parameter_id() -> usize {
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+    COUNTER.fetch_add(1, Ordering::Relaxed)
 }
 
 #[cfg(test)]

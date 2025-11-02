@@ -16,6 +16,7 @@ pub mod beta_residual;
 pub mod cov_head;
 pub mod telemetry;
 
+use crate::module::Parameter;
 use crate::{PureResult, Tensor, TensorError};
 use st_core::ops::zspace_round::SpectralFeatureSample;
 
@@ -106,7 +107,7 @@ impl ZRBA {
             config.metric.clone(),
             config.ard,
         )?;
-        let gate = beta_residual::BetaGate::new();
+        let gate = beta_residual::BetaGate::new()?;
         let cov = cov_head::CovHead::new(config.cov_rank);
         Ok(Self { attn, gate, cov })
     }
@@ -128,7 +129,7 @@ impl ZRBA {
             return Err(TensorError::EmptyInput("zrba::forward"));
         }
         let attn_out: attention::ZRBFAttentionOutput = self.attn.forward(input, frame)?;
-        let gate = self.gate.forward(stats, &input.indices);
+        let gate = self.gate.forward(stats, &input.indices)?;
 
         let gated_mu = input.mu.scale(gate.sample)?;
         let mu = gated_mu.add(&attn_out.mean)?;
@@ -147,6 +148,24 @@ impl ZRBA {
         let telemetry =
             telemetry::ZRBATelemetry::new(attn_out.telemetry, gate.clone(), cov_out.telemetry);
         Ok((output, cov_bundle, telemetry))
+    }
+
+    pub fn visit_parameters(
+        &self,
+        visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        self.attn.visit_parameters(visitor)?;
+        self.gate.visit_parameters(visitor)?;
+        Ok(())
+    }
+
+    pub fn visit_parameters_mut(
+        &mut self,
+        visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        self.attn.visit_parameters_mut(visitor)?;
+        self.gate.visit_parameters_mut(visitor)?;
+        Ok(())
     }
 }
 
