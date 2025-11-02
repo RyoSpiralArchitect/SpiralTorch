@@ -1,0 +1,13 @@
+[package]
+name = "cobol_bridge"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+st-text = { path = "../../crates/st-text" }
+st-tensor = { path = "../../crates/st-tensor" }
