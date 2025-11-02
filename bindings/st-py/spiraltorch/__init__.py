@@ -27,6 +27,75 @@ from typing import (
 )
 from importlib.metadata import version as _pkg_version, PackageNotFoundError
 
+from . import dataset as _dataset
+
+_DATASET_NATIVE_AVAILABLE = hasattr(_dataset, "Dataset") and hasattr(
+    _dataset, "DataLoader"
+)
+
+
+def _require_dataset_native(feature: str) -> _NoReturn:
+    raise RuntimeError(
+        "SpiralTorch dataset helpers require the compiled nn extension; "
+        f"{feature} is unavailable in this build."
+    )
+
+
+def _session_tensor_type() -> type | None:
+    if isinstance(_TensorFastType, type):
+        return _TensorFastType
+    tensor_type = globals().get("Tensor")
+    return tensor_type if isinstance(tensor_type, type) else None
+
+
+def _session_require_tensor(value: _Any, *, label: str):
+    tensor_type = _session_tensor_type()
+    if tensor_type is not None and isinstance(value, tensor_type):
+        return value
+
+    if tensor_type is not None:
+        try:
+            return tensor_type(value)
+        except Exception:
+            pass
+
+    dlpack_export = getattr(value, "__dlpack__", None)
+    if callable(dlpack_export):
+        try:
+            capsule = dlpack_export()
+        except TypeError:
+            try:
+                capsule = dlpack_export(None)
+            except Exception as exc:  # pragma: no cover - defensive, exercised via runtime
+                raise TypeError(
+                    f"{label} exposes __dlpack__() but raised {exc.__class__.__name__}: {exc}"
+                ) from exc
+        except Exception as exc:  # pragma: no cover - defensive, exercised via runtime
+            raise TypeError(
+                f"{label} exposes __dlpack__() but raised {exc.__class__.__name__}: {exc}"
+            ) from exc
+
+        converter = None
+        if tensor_type is not None:
+            converter = getattr(tensor_type, "from_dlpack", None)
+        if not callable(converter):
+            converter = globals().get("from_dlpack")
+        if callable(converter):
+            try:
+                return converter(capsule)
+            except Exception as exc:
+                raise TypeError(
+                    f"{label} could not be converted from __dlpack__(): {exc}"
+                ) from exc
+        raise TypeError(
+            f"{label} exposes __dlpack__() but SpiralTorch does not provide from_dlpack()"
+        )
+
+    raise TypeError(
+        f"{label} must be a SpiralTorch Tensor, convertible via Tensor(...), "
+        "or expose __dlpack__()"
+    )
+
 from ._meta import (
     BUILD_FINGERPRINT,
     BUILD_ID,
@@ -2851,6 +2920,82 @@ class SpiralSession:
             self.device = "wgpu"
         else:
             self.device = "cpu"
+
+    def dataset(self, samples: _Optional[_Iterable[_Tuple[_Any, _Any]]] = None):
+        """Build a :mod:`spiraltorch.dataset` payload from in-memory samples.
+
+        Each sample must provide an ``(input, target)`` tuple. SpiralTorch
+        tensors are accepted directly; other objects are coerced eagerly via the
+        native :class:`Tensor` constructor and, when available, the DLPack
+        ``__dlpack__`` protocol. Streaming iterables such as generators are
+        consumed exactly once while building the dataset.
+        """
+
+        if not _DATASET_NATIVE_AVAILABLE:
+            _require_dataset_native("SpiralSession.dataset()")
+        if samples is None:
+            return _dataset.Dataset()
+        if isinstance(samples, _dataset.Dataset):
+            return samples
+        if not isinstance(samples, _IterableABC):
+            raise TypeError("samples must be an iterable of (input, target) pairs")
+
+        dataset = _dataset.Dataset()
+        push_sample = dataset.push
+        for index, pair in enumerate(samples):
+            if not isinstance(pair, _SequenceABC) or len(pair) != 2:
+                raise TypeError(
+                    "dataset samples must be (input, target) tuples; "
+                    f"sample {index} is {type(pair)!r}"
+                )
+            input_tensor = _session_require_tensor(
+                pair[0], label=f"samples[{index}][0]"
+            )
+            target_tensor = _session_require_tensor(
+                pair[1], label=f"samples[{index}][1]"
+            )
+            push_sample(input_tensor, target_tensor)
+        return dataset
+
+    def dataloader(
+        self,
+        samples: _Any,
+        *,
+        batch_size: int | None = None,
+        shuffle: bool | int = False,
+        seed: int | None = None,
+        prefetch: int | None = None,
+        max_rows: int | None = None,
+    ):
+        """Create a :class:`spiraltorch.dataset.DataLoader` wired to this session."""
+
+        if not _DATASET_NATIVE_AVAILABLE:
+            _require_dataset_native("SpiralSession.dataloader()")
+        if isinstance(samples, _dataset.DataLoader):
+            loader = samples
+        else:
+            dataset = self.dataset(samples)
+            loader = dataset.loader()
+
+        if shuffle:
+            if isinstance(shuffle, bool):
+                base_seed = seed if seed is not None else self.seed
+            else:
+                base_seed = int(shuffle)
+            if base_seed is None:
+                base_seed = 0
+            loader = loader.shuffle(int(base_seed))
+
+        if max_rows is not None:
+            loader = loader.dynamic_batch_by_rows(int(max_rows))
+
+        if batch_size is not None:
+            loader = loader.batched(int(batch_size))
+
+        if prefetch is not None:
+            loader = loader.prefetch(int(prefetch))
+
+        return loader
 
     def plan_topk(self, rows: int, cols: int, k: int):
         return plan_topk(rows, cols, k, backend=self.backend)
