@@ -2927,7 +2927,10 @@ class SpiralSession:
         Each sample must provide an ``(input, target)`` tuple. SpiralTorch
         tensors are accepted directly; other objects are coerced eagerly via the
         native :class:`Tensor` constructor and, when available, the DLPack
-        ``__dlpack__`` protocol.
+        ``__dlpack__`` protocol. Streaming iterables such as generators are
+        consumed exactly once while building the dataset. Non-sequence samples
+        may yield two values lazily and will be unpacked without materialising
+        the iterable.
         """
 
         if not _DATASET_NATIVE_AVAILABLE:
@@ -2939,21 +2942,61 @@ class SpiralSession:
         if not isinstance(samples, _IterableABC):
             raise TypeError("samples must be an iterable of (input, target) pairs")
 
-        normalised: list[_Tuple[_Any, _Any]] = []
+        dataset = _dataset.Dataset()
+        push_sample = dataset.push
+
         for index, pair in enumerate(samples):
-            if not isinstance(pair, _SequenceABC) or len(pair) != 2:
-                raise TypeError(
-                    "dataset samples must be (input, target) tuples; "
-                    f"sample {index} is {type(pair)!r}"
-                )
+            if isinstance(pair, _SequenceABC):
+                if len(pair) != 2:
+                    raise TypeError(
+                        "dataset samples must be (input, target) tuples; "
+                        f"sample {index} has length {len(pair)}"
+                    )
+                input_obj, target_obj = pair[0], pair[1]
+            else:
+                if not isinstance(pair, _IterableABC):
+                    raise TypeError(
+                        "dataset samples must yield two values; "
+                        f"sample {index} is {type(pair)!r}"
+                    )
+
+                pair_iter = iter(pair)
+                try:
+                    input_obj = next(pair_iter)
+                except StopIteration:
+                    raise TypeError(
+                        "dataset samples must yield an input tensor; "
+                        f"sample {index} ended before providing one"
+                    ) from None
+
+                try:
+                    target_obj = next(pair_iter)
+                except StopIteration:
+                    raise TypeError(
+                        "dataset samples must yield an (input, target) pair; "
+                        f"sample {index} is missing the target tensor"
+                    ) from None
+
+                try:
+                    extra = next(pair_iter)
+                except StopIteration:
+                    extra = None
+
+                if extra is not None:
+                    raise TypeError(
+                        "dataset samples must yield exactly two values; "
+                        f"sample {index} produced additional data"
+                    )
+
             input_tensor = _session_require_tensor(
-                pair[0], label=f"samples[{index}][0]"
+                input_obj, label=f"samples[{index}][0]"
             )
             target_tensor = _session_require_tensor(
-                pair[1], label=f"samples[{index}][1]"
+                target_obj, label=f"samples[{index}][1]"
             )
-            normalised.append((input_tensor, target_tensor))
-        return _dataset.Dataset.from_samples(normalised)
+            push_sample(input_tensor, target_tensor)
+
+        return dataset
 
     def dataloader(
         self,
