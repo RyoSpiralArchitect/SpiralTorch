@@ -40,6 +40,62 @@ def _require_dataset_native(feature: str) -> _NoReturn:
         f"{feature} is unavailable in this build."
     )
 
+
+def _session_tensor_type() -> type | None:
+    if isinstance(_TensorFastType, type):
+        return _TensorFastType
+    tensor_type = globals().get("Tensor")
+    return tensor_type if isinstance(tensor_type, type) else None
+
+
+def _session_require_tensor(value: _Any, *, label: str):
+    tensor_type = _session_tensor_type()
+    if tensor_type is not None and isinstance(value, tensor_type):
+        return value
+
+    if tensor_type is not None:
+        try:
+            return tensor_type(value)
+        except Exception:
+            pass
+
+    dlpack_export = getattr(value, "__dlpack__", None)
+    if callable(dlpack_export):
+        try:
+            capsule = dlpack_export()
+        except TypeError:
+            try:
+                capsule = dlpack_export(None)
+            except Exception as exc:  # pragma: no cover - defensive, exercised via runtime
+                raise TypeError(
+                    f"{label} exposes __dlpack__() but raised {exc.__class__.__name__}: {exc}"
+                ) from exc
+        except Exception as exc:  # pragma: no cover - defensive, exercised via runtime
+            raise TypeError(
+                f"{label} exposes __dlpack__() but raised {exc.__class__.__name__}: {exc}"
+            ) from exc
+
+        converter = None
+        if tensor_type is not None:
+            converter = getattr(tensor_type, "from_dlpack", None)
+        if not callable(converter):
+            converter = globals().get("from_dlpack")
+        if callable(converter):
+            try:
+                return converter(capsule)
+            except Exception as exc:
+                raise TypeError(
+                    f"{label} could not be converted from __dlpack__(): {exc}"
+                ) from exc
+        raise TypeError(
+            f"{label} exposes __dlpack__() but SpiralTorch does not provide from_dlpack()"
+        )
+
+    raise TypeError(
+        f"{label} must be a SpiralTorch Tensor, convertible via Tensor(...), "
+        "or expose __dlpack__()"
+    )
+
 from ._meta import (
     BUILD_FINGERPRINT,
     BUILD_ID,
@@ -2866,7 +2922,13 @@ class SpiralSession:
             self.device = "cpu"
 
     def dataset(self, samples: _Optional[_Iterable[_Tuple[_Any, _Any]]] = None):
-        """Build a :mod:`spiraltorch.dataset` payload from in-memory samples."""
+        """Build a :mod:`spiraltorch.dataset` payload from in-memory samples.
+
+        Each sample must provide an ``(input, target)`` tuple. SpiralTorch
+        tensors are accepted directly; other objects are coerced eagerly via the
+        native :class:`Tensor` constructor and, when available, the DLPack
+        ``__dlpack__`` protocol.
+        """
 
         if not _DATASET_NATIVE_AVAILABLE:
             _require_dataset_native("SpiralSession.dataset()")
@@ -2885,7 +2947,13 @@ class SpiralSession:
                     "dataset samples must be (input, target) tuples; "
                     f"sample {index} is {type(pair)!r}"
                 )
-            normalised.append((pair[0], pair[1]))
+            input_tensor = _session_require_tensor(
+                pair[0], label=f"samples[{index}][0]"
+            )
+            target_tensor = _session_require_tensor(
+                pair[1], label=f"samples[{index}][1]"
+            )
+            normalised.append((input_tensor, target_tensor))
         return _dataset.Dataset.from_samples(normalised)
 
     def dataloader(

@@ -71,6 +71,14 @@ impl PyDataset {
         Ok(out)
     }
 
+    pub fn iter(&self, py: Python<'_>) -> PyResult<Py<PyDataLoaderIter>> {
+        PyDataLoader::iterator_py(py, self.inner.loader())
+    }
+
+    fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyDataLoaderIter>> {
+        self.iter(py)
+    }
+
     pub fn loader(&self) -> PyDataLoader {
         PyDataLoader::from_loader(self.inner.loader())
     }
