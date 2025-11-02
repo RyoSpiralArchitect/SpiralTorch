@@ -189,7 +189,14 @@ impl PyDataLoaderIter {
 #[pymethods]
 impl PyDataLoaderIter {
     fn __iter__(slf: PyRefMut<'_, Self>) -> PyResult<Py<PyDataLoaderIter>> {
-        Ok(slf.into_py(slf.py()))
+        let py = slf.py();
+        let ptr = slf.as_ptr();
+        // SAFETY: `ptr` points to the existing Python object backing `slf`. We
+        //         create a new owned reference to return while the original
+        //         borrow is released when `slf` is dropped at the end of this
+        //         scope.
+        let iter = unsafe { Py::from_borrowed_ptr(py, ptr) };
+        Ok(iter)
     }
 
     fn __next__(mut slf: PyRefMut<'_, Self>) -> PyResult<Option<(PyTensor, PyTensor)>> {
