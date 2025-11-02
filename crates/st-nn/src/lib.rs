@@ -73,7 +73,8 @@ pub use layers::wave_rnn::WaveRnn;
 pub use layers::zspace_projector::ZSpaceProjector;
 pub use layers::{
     BatchNorm1d, Dropout, Gelu, HamiltonJacobiFlow, KleinGordonPropagation, LayerNorm, Lstm, Relu,
-    Scaler, StochasticSchrodingerLayer, ToposResonator, ZRelativityModule, ZSpaceMixer,
+    Scaler, StochasticSchrodingerLayer, ToposResonator, ZRelativityModule, ZSpaceBatchNorm1d,
+    ZSpaceMixer,
 };
 pub use lightning::{
     LightningBuilder, LightningConfig, LightningConfigBuilder, LightningEpoch, LightningReport,

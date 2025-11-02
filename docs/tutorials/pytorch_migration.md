@@ -8,6 +8,7 @@ SpiralTorch は PyTorch に近い API 感覚で Z-space 固有の最適化やハ
 | --- | --- |
 | `nn.Linear(in, out)` | `st_nn::layers::Linear::new("fc", in, out)` |
 | `nn.BatchNorm1d(feats)` | `st_nn::layers::BatchNorm1d::new("bn", feats, 0.1, 1e-5)` |
+| `nn.BatchNorm1d(feats)` + Z-space | `st_nn::layers::ZSpaceBatchNorm1d::new("bnz", feats, -1.0, 0.1, 1e-5)?` |
 | `nn.LayerNorm(feats)` | `st_nn::layers::LayerNorm::new("ln", feats, -1.0, 1e-5)` |
 | `nn.LSTM(in, hidden)` | `st_nn::layers::Lstm::new("lstm", in, hidden)` |
 | `nn.MaxPool2d` / `nn.AvgPool2d` | `st_nn::layers::conv::MaxPool2d`, `st_nn::layers::conv::AvgPool2d` |
@@ -61,7 +62,7 @@ let heatmap = GradCam::attribute(&activations, &gradients, &GradCamConfig::new(h
 
 ## まとめ
 
-* `BatchNorm1d` / `Lstm` を含む標準 NN レイヤーが Rust ネイティブで利用可能。
+* `BatchNorm1d` / `ZSpaceBatchNorm1d` / `Lstm` を含む標準 NN レイヤーが Rust ネイティブで利用可能。
 * `ZSpaceOptimizer` + `WarmupCosineScheduler` により学習率制御を SpiralTorch 内で完結。
 * `mixed_precision::GradScaler` と `AutocastGuard` が 16bit 近似計算とオーバーフロー検知を提供。
 * ドキュメントの対応表を参考にすることで、PyTorch から SpiralTorch への移行がスムーズになります。
