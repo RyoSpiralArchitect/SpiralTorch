@@ -2927,7 +2927,8 @@ class SpiralSession:
         Each sample must provide an ``(input, target)`` tuple. SpiralTorch
         tensors are accepted directly; other objects are coerced eagerly via the
         native :class:`Tensor` constructor and, when available, the DLPack
-        ``__dlpack__`` protocol.
+        ``__dlpack__`` protocol. Streaming iterables such as generators are
+        consumed exactly once while building the dataset.
         """
 
         if not _DATASET_NATIVE_AVAILABLE:
@@ -2939,7 +2940,8 @@ class SpiralSession:
         if not isinstance(samples, _IterableABC):
             raise TypeError("samples must be an iterable of (input, target) pairs")
 
-        normalised: list[_Tuple[_Any, _Any]] = []
+        dataset = _dataset.Dataset()
+        push_sample = dataset.push
         for index, pair in enumerate(samples):
             if not isinstance(pair, _SequenceABC) or len(pair) != 2:
                 raise TypeError(
@@ -2952,8 +2954,8 @@ class SpiralSession:
             target_tensor = _session_require_tensor(
                 pair[1], label=f"samples[{index}][1]"
             )
-            normalised.append((input_tensor, target_tensor))
-        return _dataset.Dataset.from_samples(normalised)
+            push_sample(input_tensor, target_tensor)
+        return dataset
 
     def dataloader(
         self,
