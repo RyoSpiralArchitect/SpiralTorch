@@ -3,6 +3,7 @@
 from .compiler import (
     Backend,
     Document,
+    FeedbackBlock,
     Layout,
     Precision,
     RefractBlock,
@@ -22,6 +23,7 @@ __all__ = [
     "RefractOpPolicy",
     "SyncBlock",
     "TargetSpec",
+    "FeedbackBlock",
     "apply_spiralk",
     "compile_spiralk",
 ]

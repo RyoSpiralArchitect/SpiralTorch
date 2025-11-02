@@ -28,6 +28,7 @@ mod theory;
 mod introspect;
 mod qr;
 mod julia_bridge;
+mod robotics;
 mod dataset;
 
 mod extras {
