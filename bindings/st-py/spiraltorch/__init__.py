@@ -2939,9 +2939,8 @@ class SpiralSession:
         if not isinstance(samples, _IterableABC):
             raise TypeError("samples must be an iterable of (input, target) pairs")
 
-        collected = list(samples)
         normalised: list[_Tuple[_Any, _Any]] = []
-        for index, pair in enumerate(collected):
+        for index, pair in enumerate(samples):
             if not isinstance(pair, _SequenceABC) or len(pair) != 2:
                 raise TypeError(
                     "dataset samples must be (input, target) tuples; "
