@@ -496,6 +496,11 @@ impl CobolDispatchPlanner {
         let json = serde_json::to_string(&preview).map_err(js_error)?;
         json_to_js_value(&json)
     }
+
+    #[wasm_bindgen(js_name = toCobolStub)]
+    pub fn to_cobol_stub(&self) -> String {
+        self.builder.envelope().function_stub().to_program()
+    }
 }
 
 #[derive(serde::Serialize)]
