@@ -13,7 +13,8 @@ mod pure;
 mod planner;
 mod spiralk;
 mod frac;
-mod robotics;
+#[path = "robotics.rs"]
+mod robotics_bindings;
 mod psi_synchro;
 mod selfsup;
 mod text;
@@ -31,6 +32,8 @@ mod qr;
 mod julia_bridge;
 mod robotics;
 mod dataset;
+
+use robotics_bindings as robotics;
 
 mod extras {
     use super::*;
