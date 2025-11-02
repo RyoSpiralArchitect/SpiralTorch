@@ -134,3 +134,31 @@ roundtable before handing gradients to `Hypergrad` or `Realgrad` tapes.
 With these components in view you can inspect, extend, and stabilise Z-space
 pipelines while keeping imported checkpoints, PSI telemetry, and Canvas feedback
 aligned with SpiralTorch's cooperative scheduler.
+
+## Quick-start: Z-RBA uncertainty head
+
+```python
+import spiraltorch as st
+from spiraltorch.nn import ZRBA, ZRBAConfig
+from spiraltorch.nn import ZMetricWeights
+from spiraltorch.nn import ZTelemetryBundle
+
+with st.zspace.session() as sess:
+    x, y = load_structured_batch()
+    cfg = ZRBAConfig(
+        d_model=128,
+        n_heads=4,
+        cov_rank=8,
+        metric=ZMetricWeights(w_band=1.0, w_sheet=0.5, w_echo=0.2),
+        ard=True,
+    )
+    model = ZRBA(cfg)
+
+    z_tensor = st.z.embed(x)
+    stats = st.zspace.sample_field()
+    yhat, cov, telemetry = model.forward(z_tensor, sess.frame, stats)
+
+    metrics = telemetry.metrics(yhat.mu, yhat.sigma, targets=y, pin=0.95, indices=yhat.indices)
+    bundle = telemetry.bundle_metrics(metrics)
+    st.zspace.telemetry.log_uq(bundle.to_json())
+```
