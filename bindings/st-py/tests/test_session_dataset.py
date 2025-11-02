@@ -35,6 +35,25 @@ def _generator_samples():
         yield [[float(index)]], [[float(index) + 0.5]]
 
 
+def _iterable_pair_samples():
+    def _pair(idx: int):
+        def _make():
+            yield [[float(idx)]]
+            yield [[float(idx) + 1.5]]
+
+        return _make()
+
+    for idx in range(3):
+        yield _pair(idx)
+
+
+def _bad_iterable_samples():
+    def _missing_target():
+        yield [[0.0]]
+
+    yield _missing_target()
+
+
 def test_session_dataset_coerces_generator_samples():
     session = spiraltorch.SpiralSession()
     dataset = session.dataset(_generator_samples())
@@ -57,3 +76,19 @@ def test_session_dataloader_accepts_iterable_samples():
         assert isinstance(target_batch, spiraltorch.Tensor)
         assert input_batch.shape()[1] == 1
         assert target_batch.shape()[1] == 1
+
+
+def test_session_dataset_accepts_iterable_pairs():
+    session = spiraltorch.SpiralSession()
+    dataset = session.dataset(_iterable_pair_samples())
+    samples = dataset.samples()
+    assert len(samples) == 3
+    for idx, (inp, target) in enumerate(samples):
+        assert inp.tolist() == [[float(idx)]]
+        assert target.tolist() == [[float(idx) + 1.5]]
+
+
+def test_session_dataset_rejects_iterable_pairs_with_missing_target():
+    session = spiraltorch.SpiralSession()
+    with pytest.raises(TypeError):
+        session.dataset(_bad_iterable_samples())

@@ -37,7 +37,7 @@ use robotics_bindings as robotics;
 
 mod extras {
     use super::*;
-    use pyo3::wrap_pyfunction; // ← マクロをこのモジュール内に import
+    use pyo3::wrap_pyfunction; 
     use std::sync::atomic::{AtomicU64, Ordering};
 
     pub const GOLDEN_RATIO: f64 = 1.618_033_988_749_894_8_f64;
