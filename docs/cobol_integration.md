@@ -93,7 +93,10 @@ pub extern "C" fn st_cobol_describe(
 
 Production builds normally add allocation helpers (`st_cobol_free_string`)
 and expose richer metrics, but the example highlights the ABI shape COBOL can
-consume.
+consume. The repository ships a ready-made implementation under
+`bindings/cobol_bridge` that normalises browser-friendly curvature/temperature
+inputs, rebuilds `DifferentialResonance` tensors from flat slices, and exposes
+both allocation and handle lifecycle helpers for COBOL callers.【F:bindings/cobol_bridge/src/lib.rs†L8-L99】
 
 Build the shared library with:
 
@@ -119,6 +122,7 @@ extern "C" {
 #endif
 
 void *st_cobol_new_resonator(float curvature, float temperature);
+void st_cobol_free_resonator(void *handle);
 int32_t st_cobol_describe(void *handle,
                           const float *values,
                           int32_t len,
@@ -145,17 +149,18 @@ With the header installed, the COBOL side can look like:
  working-storage section.
  01  curvature          pic s9v9(3) comp-2 value 0.42.
  01  temperature        pic s9v9(3) comp-2 value 0.65.
+ 01  resonator-handle   usage pointer.
  01  summary-pointer    usage pointer.
  01  status-code        pic s9(4) comp value zero.
  01  coeff-count        pic s9(4) comp value 128.
  01  coeff-table        pic s9v9(4) comp-2 occurs 128 value 0.
  procedure division.
      call "st_cobol_new_resonator" using by value curvature temperature
-                                    returning summary-pointer.
-     if summary-pointer = null
+                                    returning resonator-handle.
+     if resonator-handle = null
          display "initialisation failed" stop run
      end-if.
-     call "st_cobol_describe" using summary-pointer
+     call "st_cobol_describe" using resonator-handle
                                      by reference coeff-table
                                      by value coeff-count
                                      by reference summary-pointer
@@ -164,6 +169,7 @@ With the header installed, the COBOL side can look like:
          display "description failed" stop run
      end-if.
     call "st_cobol_free_string" using by value summary-pointer.
+    call "st_cobol_free_resonator" using by value resonator-handle.
     stop run.
 ```
 
