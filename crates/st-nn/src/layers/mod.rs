@@ -11,6 +11,7 @@ pub mod dynamic_field;
 pub mod gelu;
 pub mod identity;
 pub mod linear;
+pub mod lstm;
 pub mod non_liner;
 pub mod normalization;
 pub mod scaler;
@@ -30,11 +31,12 @@ pub use dropout::Dropout;
 pub use dynamic_field::{HamiltonJacobiFlow, KleinGordonPropagation, StochasticSchrodingerLayer};
 pub use gelu::Gelu;
 pub use identity::Identity;
+pub use lstm::Lstm;
 pub use non_liner::{
     NonLiner, NonLinerActivation, NonLinerEllipticConfig, NonLinerGeometry,
     NonLinerHyperbolicConfig,
 };
-pub use normalization::LayerNorm;
+pub use normalization::{BatchNorm1d, LayerNorm, ZSpaceBatchNorm1d, ZSpaceBatchNormTelemetry};
 pub use scaler::Scaler;
 pub use softmax::ZSpaceSoftmax;
 pub use topos_resonator::ToposResonator;
