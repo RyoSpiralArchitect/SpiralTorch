@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable, Dict, Iterable, List, Literal, Mapping, Optional, Sequence, Tuple, overload
+from typing import Callable, Dict, Iterable, Iterator, List, Literal, Mapping, Optional, Sequence, Tuple, overload
 from types import ModuleType
 
 def init_backend(backend: str) -> bool: ...
@@ -1033,6 +1033,22 @@ class SpiralSession:
     device: str
 
     def __init__(self, backend: str = ..., seed: int | None = ...) -> None: ...
+
+    def dataset(
+        self,
+        samples: Optional[Iterable[Tuple[object, object]]] = ...,
+    ) -> "dataset.Dataset": ...
+
+    def dataloader(
+        self,
+        samples: object,
+        *,
+        batch_size: Optional[int] = ...,
+        shuffle: bool | int = ...,
+        seed: Optional[int] = ...,
+        prefetch: Optional[int] = ...,
+        max_rows: Optional[int] = ...,
+    ) -> "dataset.DataLoader": ...
 
     def plan_topk(self, rows: int, cols: int, k: int) -> RankPlan: ...
 
@@ -2636,7 +2652,66 @@ class _FracModule(ModuleType):
 
 frac: _FracModule
 
-dataset: ModuleType
+class _DatasetModule(ModuleType):
+    class Dataset:
+        def __init__(self) -> None: ...
+
+        @staticmethod
+        def from_samples(
+            samples: Optional[Sequence[Tuple[Tensor, Tensor]]] = ...,
+        ) -> "_DatasetModule.Dataset": ...
+
+        def push(self, input: Tensor, target: Tensor) -> None: ...
+
+        def len(self) -> int: ...
+
+        def __len__(self) -> int: ...
+
+        def is_empty(self) -> bool: ...
+
+        def samples(self) -> List[Tuple[Tensor, Tensor]]: ...
+
+        def iter(self) -> "_DatasetModule.DataLoaderIterator": ...
+
+        def __iter__(self) -> Iterator[Tuple[Tensor, Tensor]]: ...
+
+        def loader(self) -> "_DatasetModule.DataLoader": ...
+
+    class DataLoader:
+        @staticmethod
+        def from_samples(
+            samples: Optional[Sequence[Tuple[Tensor, Tensor]]] = ...,
+        ) -> "_DatasetModule.DataLoader": ...
+
+        def len(self) -> int: ...
+
+        def __len__(self) -> int: ...
+
+        def is_empty(self) -> bool: ...
+
+        def batch_size(self) -> int: ...
+
+        def prefetch_depth(self) -> int: ...
+
+        def shuffle(self, seed: int) -> "_DatasetModule.DataLoader": ...
+
+        def batched(self, batch_size: int) -> "_DatasetModule.DataLoader": ...
+
+        def dynamic_batch_by_rows(self, max_rows: int) -> "_DatasetModule.DataLoader": ...
+
+        def prefetch(self, depth: int) -> "_DatasetModule.DataLoader": ...
+
+        def iter(self) -> "_DatasetModule.DataLoaderIterator": ...
+
+        def __iter__(self) -> Iterator[Tuple[Tensor, Tensor]]: ...
+
+    class DataLoaderIterator(Iterator[Tuple[Tensor, Tensor]]):
+        def __iter__(self) -> "_DatasetModule.DataLoaderIterator": ...
+
+        def __next__(self) -> Tuple[Tensor, Tensor]: ...
+
+
+dataset: _DatasetModule
 
 linalg: ModuleType
 
