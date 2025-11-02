@@ -312,6 +312,7 @@ impl Module for BatchNorm1d {
         let mut grad_input = vec![0.0f32; batch * features];
         let mut grad_gamma = vec![0.0f32; features];
         let mut grad_beta = vec![0.0f32; features];
+        let gamma = self.gamma.value().data();
 
         for feature in 0..features {
             let mut sum_grad = 0.0f32;
@@ -320,8 +321,9 @@ impl Module for BatchNorm1d {
                 let idx = row * features + feature;
                 let normed = (input.data()[idx] - mean[feature]) * inv_std[feature];
                 let g = grad_output.data()[idx];
-                sum_grad += g;
-                sum_grad_norm += g * normed;
+                let g_gamma = g * gamma[feature];
+                sum_grad += g_gamma;
+                sum_grad_norm += g_gamma * normed;
                 grad_gamma[feature] += g * normed;
                 grad_beta[feature] += g;
             }
@@ -329,7 +331,9 @@ impl Module for BatchNorm1d {
                 let idx = row * features + feature;
                 let normed = (input.data()[idx] - mean[feature]) * inv_std[feature];
                 let g = grad_output.data()[idx];
-                let term = (batch as f32 * g - sum_grad - normed * sum_grad_norm) / batch as f32;
+                let g_gamma = g * gamma[feature];
+                let term =
+                    (batch as f32 * g_gamma - sum_grad - normed * sum_grad_norm) / batch as f32;
                 grad_input[idx] = term * inv_std[feature];
             }
         }
@@ -552,6 +556,75 @@ mod tests {
         assert_eq!(beta_grad.shape(), (1, 2));
         for value in grad_input.data() {
             assert!(value.is_finite());
+        }
+    }
+
+    #[test]
+    fn batch_norm_backward_respects_gamma_scaling() {
+        let mut layer = BatchNorm1d::new("bn", 2, 0.1, 1e-5).unwrap();
+        {
+            let gamma = layer.gamma.value_mut();
+            for value in gamma.data_mut() {
+                *value = 1.5;
+            }
+        }
+        let input = Tensor::from_vec(2, 2, vec![0.5, -1.0, 0.25, 1.5]).unwrap();
+        let grad_output = Tensor::from_vec(2, 2, vec![0.2, -0.3, -0.4, 0.6]).unwrap();
+        let _ = layer.forward(&input).unwrap();
+        let grad_input = layer.backward(&input, &grad_output).unwrap();
+
+        let batch = input.shape().0;
+        let features = input.shape().1;
+        let mut mean = vec![0.0f32; features];
+        for row in 0..batch {
+            let slice = &input.data()[row * features..(row + 1) * features];
+            for (feature, value) in slice.iter().enumerate() {
+                mean[feature] += *value;
+            }
+        }
+        for value in mean.iter_mut() {
+            *value /= batch as f32;
+        }
+        let mut variance = vec![0.0f32; features];
+        for row in 0..batch {
+            let slice = &input.data()[row * features..(row + 1) * features];
+            for (feature, value) in slice.iter().enumerate() {
+                let centered = *value - mean[feature];
+                variance[feature] += centered * centered;
+            }
+        }
+        for value in variance.iter_mut() {
+            *value /= batch as f32;
+        }
+
+        let epsilon = layer.epsilon();
+        let gamma = layer.gamma.value().data();
+        let mut expected = vec![0.0f32; batch * features];
+        for feature in 0..features {
+            let inv_std = 1.0 / (variance[feature] + epsilon).sqrt();
+            let mut sum_grad = 0.0f32;
+            let mut sum_grad_norm = 0.0f32;
+            for row in 0..batch {
+                let idx = row * features + feature;
+                let normed = (input.data()[idx] - mean[feature]) * inv_std;
+                let go = grad_output.data()[idx];
+                let go_gamma = go * gamma[feature];
+                sum_grad += go_gamma;
+                sum_grad_norm += go_gamma * normed;
+            }
+            for row in 0..batch {
+                let idx = row * features + feature;
+                let normed = (input.data()[idx] - mean[feature]) * inv_std;
+                let go = grad_output.data()[idx];
+                let go_gamma = go * gamma[feature];
+                let term =
+                    (batch as f32 * go_gamma - sum_grad - normed * sum_grad_norm) / batch as f32;
+                expected[idx] = term * inv_std;
+            }
+        }
+
+        for (observed, anticipated) in grad_input.data().iter().zip(expected.iter()) {
+            assert!((observed - anticipated).abs() < 1e-5);
         }
     }
 }
