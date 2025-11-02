@@ -13,6 +13,7 @@ mod pure;
 mod planner;
 mod spiralk;
 mod frac;
+mod robotics;
 mod psi_synchro;
 mod selfsup;
 mod text;
