@@ -1,8 +1,11 @@
-# PyTorch から SpiralTorch への移行ガイド
+# Migrating from PyTorch to SpiralTorch
 
-SpiralTorch は PyTorch に近い API 感覚で Z-space 固有の最適化やハイパーボリック表現を扱えるよう設計されています。ここでは典型的な PyTorch のコード片に対応する SpiralTorch の書き方を示し、今回追加されたコア NN 機能を中心に整理します。
+SpiralTorch is designed to feel familiar to PyTorch users while exposing Z-space native training
+capabilities and curvature-aware numerics. This guide mirrors common PyTorch snippets with their
+SpiralTorch counterparts and highlights the deeper Z-space features that differentiate the
+framework.
 
-## 基本的なレイヤー対応
+## Core layer mapping
 
 | PyTorch | SpiralTorch |
 | --- | --- |
@@ -13,32 +16,43 @@ SpiralTorch は PyTorch に近い API 感覚で Z-space 固有の最適化やハ
 | `nn.LSTM(in, hidden)` | `st_nn::layers::Lstm::new("lstm", in, hidden)` |
 | `nn.MaxPool2d` / `nn.AvgPool2d` | `st_nn::layers::conv::MaxPool2d`, `st_nn::layers::conv::AvgPool2d` |
 
-`BatchNorm1d` と `Lstm` は内部で勾配キャッシュとランニング統計を保持しており、`train()`/`eval()` を切り替える PyTorch の流儀を `set_training(true/false)` で再現できます。LSTM の順伝播は行方向に時間軸を持つ 2 次元テンソルを受け取り、隠れ状態とセル状態は `set_state` や `reset_state` で制御します。
+`BatchNorm1d` and `Lstm` cache gradients and running statistics so you can flip between training
+and evaluation using `set_training(true/false)` exactly like PyTorch. The LSTM forward expects a
+time-major 2-D tensor and exposes `set_state` / `reset_state` helpers to manage the hidden and cell
+states explicitly.
 
-## Optimizer とスケジューラ
+The Z-space batch norm extends its Euclidean counterpart with a curvature-aware projector. You can
+blend Euclidean and hyperbolic activations via `with_projector_gain` or adjust the gain during
+training using `adapt_projector_gain` to keep the projected radius within a desired range.
 
-PyTorch の `torch.optim` に相当する高水準ラッパーとして `ZSpaceOptimizer` と `WarmupCosineScheduler` を追加しました。
+## Optimisers and schedulers
+
+SpiralTorch ships a high-level `ZSpaceOptimizer` paired with the `WarmupCosineScheduler`, covering
+the usual `torch.optim` experience while wiring in curvature-specific behaviour.
 
 ```rust
-use st_nn::{optim::{ZSpaceOptimizer, OptimizerMode, WarmupCosineScheduler}, layers::Linear, Tensor};
+use st_nn::{optim::{OptimizerMode, WarmupCosineScheduler, ZSpaceOptimizer}, layers::Linear, Tensor};
 
 let mut layer = Linear::new("fc", 4, 2)?;
 let mut opt = ZSpaceOptimizer::new(1e-2)?;
 opt.set_mode(OptimizerMode::hypergrad(-1.0, 5e-3)?);
-opt.prepare_module(&mut layer)?; // ハイパーグラッドテープを接続
+opt.prepare_module(&mut layer)?; // attach the hyper-gradient tape
 
 let mut scheduler = WarmupCosineScheduler::new(1e-2, 1e-4, 100, 1000)?;
-let lr = scheduler.step_optimizer(&mut opt, &mut layer)?; // LR を Cosine で更新
+let lr = scheduler.step_optimizer(&mut opt, &mut layer)?; // cosine update with warmup
 ```
 
-`OptimizerMode` は Euclidean / Realgrad / Hypergrad を切り替えられ、Z-space 固有の曲率付き学習率を自動的に配線します。スケジューラは PyTorch の `torch.optim.lr_scheduler.CosineAnnealingLR` と同様の挙動にウォームアップを加えたものです。
+`OptimizerMode` switches between Euclidean, Realgrad, and Hypergrad updates, automatically
+injecting the curvature-aware step size logic required by Z-space training. The warmup cosine
+scheduler mirrors `torch.optim.lr_scheduler.CosineAnnealingLR` with an integrated burn-in phase.
 
-## 混合精度トレーニング
+## Mixed precision training
 
-PyTorch の AMP (`torch.cuda.amp.GradScaler`) に相当する API として `mixed_precision::GradScaler` を追加しました。
+SpiralTorch offers an AMP-style API through `mixed_precision::GradScaler` and the `AutocastGuard`
+utility, closely matching `torch.cuda.amp` semantics.
 
 ```rust
-use st_nn::{mixed_precision::GradScaler, optim::{ZSpaceOptimizer, OptimizerMode}, Tensor};
+use st_nn::{mixed_precision::GradScaler, optim::{OptimizerMode, ZSpaceOptimizer}, Tensor};
 
 let mut scaler = GradScaler::new(2.0, 2.0, 0.5, 200)?.with_limits(1.0, 1024.0);
 let mut opt = ZSpaceOptimizer::new(1e-3)?;
@@ -46,23 +60,39 @@ opt.set_mode(OptimizerMode::realgrad(1e-3)?);
 opt.prepare_module(&mut model)?;
 
 let scaled_loss = scaler.scale_loss(loss_value);
-let stepped = scaler.step(&mut opt, &mut model)?; // オーバーフロー時は自動でステップをスキップ
+let stepped = scaler.step(&mut opt, &mut model)?; // automatically skips on overflow
 ```
 
-`AutocastGuard` を利用すると演算スコープ単位で自動キャストを無効・有効化できます。
+Guard scopes give you precise control over automatic casting when mixing FP16/FP32 operations.
 
-## Grad-CAM との連携
+## Z-space telemetry and interpretability
 
-視覚モデル向けには `st_vision::xai::GradCam` が既に用意されています。LSTM や BatchNorm で学習した特徴量に対しても、そのまま Grad-CAM を適用可能です。
+`ZSpaceBatchNorm1d` records detailed telemetry every forward pass: per-feature radius, the
+projection Jacobian, the whitened activations, and the projected values before the affine branch.
+Call `telemetry()` to retrieve a `ZSpaceBatchNormTelemetry` snapshot or `last_ball_radius()` for a
+quick per-feature summary. These diagnostics unlock curvature-aware regularisation heuristics:
 
 ```rust
-use st_vision::xai::{GradCam, GradCamConfig};
-let heatmap = GradCam::attribute(&activations, &gradients, &GradCamConfig::new(h, w))?;
+let telemetry = layer.telemetry().expect("forward pass executed");
+let avg_radius: f32 = telemetry.radius().iter().copied().sum::<f32>()
+    / telemetry.radius().len() as f32;
+if avg_radius > 0.8 {
+    layer.set_projector_gain(0.5)?; // tighten the projection if the batch drifts
+}
 ```
 
-## まとめ
+When you prefer an automated adjustment, `adapt_projector_gain` nudges the projector gain towards a
+target radius with exponential smoothing, enabling self-regulating Z-space pipelines.
 
-* `BatchNorm1d` / `ZSpaceBatchNorm1d` / `Lstm` を含む標準 NN レイヤーが Rust ネイティブで利用可能。
-* `ZSpaceOptimizer` + `WarmupCosineScheduler` により学習率制御を SpiralTorch 内で完結。
-* `mixed_precision::GradScaler` と `AutocastGuard` が 16bit 近似計算とオーバーフロー検知を提供。
-* ドキュメントの対応表を参考にすることで、PyTorch から SpiralTorch への移行がスムーズになります。
+For vision models, `st_vision::xai::GradCam` interoperates seamlessly with Z-space activations, so
+you can visualise curvature-aware representations without additional glue code.
+
+## Summary
+
+* Native Rust implementations of `BatchNorm1d`, `ZSpaceBatchNorm1d`, `LayerNorm`, and `Lstm` mirror
+  PyTorch ergonomics while exposing curvature-aware controls.
+* `ZSpaceOptimizer` and `WarmupCosineScheduler` cover the common optimisation rituals inside
+  SpiralTorch.
+* `mixed_precision::GradScaler` plus `AutocastGuard` bring AMP-style workflows to Rust.
+* Z-space telemetry APIs simplify monitoring, debugging, and adapting hyperbolic training loops when
+  migrating from PyTorch.
