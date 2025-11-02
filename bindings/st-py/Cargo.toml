@@ -68,6 +68,7 @@ st-backend-hip = { path = "../../crates/st-backend-hip", default-features = fals
 st-frac = { path = "../../crates/st-frac" }
 st-qr-studio = { path = "../../crates/st-qr-studio" }
 julia-ffi-poc = { path = "../../crates/julia-ffi-poc" }
+st-softlogic = { path = "../../crates/st-softlogic" }
 spiral-selfsup = { path = "../../crates/spiral-selfsup", optional = true }
 spiral-opt = { path = "../../crates/spiral-opt" }
 spiral-hpo = { path = "../../crates/spiral-hpo" }

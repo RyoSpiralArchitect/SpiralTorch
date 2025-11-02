@@ -6,6 +6,8 @@
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 
+pub mod spiralk;
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum SoftMode {
     Sum,
