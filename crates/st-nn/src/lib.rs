@@ -21,6 +21,7 @@ pub mod language;
 pub mod layers;
 pub mod lightning;
 pub mod loss;
+pub mod mixed_precision;
 pub mod module;
 pub mod optim;
 pub mod plan;
@@ -71,8 +72,9 @@ pub use layers::wave_gate::WaveGate;
 pub use layers::wave_rnn::WaveRnn;
 pub use layers::zspace_projector::ZSpaceProjector;
 pub use layers::{
-    Dropout, Gelu, HamiltonJacobiFlow, KleinGordonPropagation, LayerNorm, Relu, Scaler,
-    StochasticSchrodingerLayer, ToposResonator, ZRelativityModule, ZSpaceMixer,
+    BatchNorm1d, Dropout, Gelu, HamiltonJacobiFlow, KleinGordonPropagation, LayerNorm, Lstm, Relu,
+    Scaler, StochasticSchrodingerLayer, ToposResonator, ZRelativityModule, ZSpaceBatchNorm1d,
+    ZSpaceBatchNormTelemetry, ZSpaceLayerNorm, ZSpaceLayerNormTelemetry, ZSpaceMixer,
 };
 pub use lightning::{
     LightningBuilder, LightningConfig, LightningConfigBuilder, LightningEpoch, LightningReport,
@@ -80,7 +82,10 @@ pub use lightning::{
 };
 pub use loss::{HyperbolicCrossEntropy, Loss, MeanSquaredError};
 pub use module::{Module, Parameter};
-pub use optim::{LocalLearningRateAdapter, SpectralLrAdapter};
+pub use optim::{
+    LocalLearningRateAdapter, LrScheduler, OptimizerMode, SpectralLrAdapter, WarmupCosineScheduler,
+    ZSpaceOptimizer,
+};
 pub use plan::RankPlanner;
 pub use roundtable::{
     simulate_proposal_locally, BlackcatModerator, BlackcatScore, DistConfig, DistMode,
@@ -114,6 +119,7 @@ pub use zspace_coherence::{
     ZSpaceCoherenceSequencer, ZSpaceVae, ZSpaceVaeState, ZSpaceVaeStats,
 };
 
+pub use mixed_precision::{autocast_enabled, AutocastGuard, GradScaler};
 pub use st_core::telemetry::chrono::{ChronoFrame, ChronoSummary, ChronoTimeline};
 pub use st_tensor::topos::OpenCartesianTopos;
 pub use st_tensor::{
