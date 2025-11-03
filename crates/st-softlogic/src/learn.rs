@@ -69,6 +69,16 @@ pub fn weight_from_bandit(sw: &SoftWeights, rule: &str) -> f32 {
     }
 }
 
+fn stable_sigmoid(x: f32) -> f32 {
+    if x >= 0.0 {
+        let z = (-x).exp();
+        1.0 / (1.0 + z)
+    } else {
+        let z = x.exp();
+        z / (1.0 + z)
+    }
+}
+
 pub fn online_logistic_update(
     coefs: &mut HashMap<String, f32>,
     feats: &HashMap<String, f32>,
@@ -80,9 +90,48 @@ pub fn online_logistic_update(
     for (k, v) in feats {
         dot += *coefs.get(k).unwrap_or(&0.0) * *v;
     }
-    let pred = 1.0 / (1.0 + (-dot).exp());
+    let pred = stable_sigmoid(dot);
     for (k, v) in feats {
         let w = coefs.entry(k.clone()).or_insert(0.0);
         *w += eta * ((y - pred) * *v - l2 * *w);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn update_bandit_tracks_wins_and_losses() {
+        let mut weights = SoftWeights::default();
+        update_bandit(&mut weights, &["rule_a", "rule_b"], &["rule_c"]);
+        update_bandit(&mut weights, &["rule_a"], &["rule_b", "rule_c"]);
+
+        let rule_a = weights.rule_beta.get("rule_a").unwrap();
+        assert!(rule_a.alpha > rule_a.beta);
+        let rule_c = weights.rule_beta.get("rule_c").unwrap();
+        assert!(rule_c.beta > rule_c.alpha);
+    }
+
+    #[test]
+    fn logistic_update_adjusts_weights() {
+        let mut coefs = HashMap::new();
+        let feats = HashMap::from([("bias".to_string(), 1.0), ("signal".to_string(), 2.0)]);
+
+        online_logistic_update(&mut coefs, &feats, 1.0, 0.5, 0.1);
+
+        assert!(coefs.get("signal").unwrap() > &0.0);
+        assert!(coefs.get("bias").unwrap() > &0.0);
+
+        // A negative label should push the weights back down.
+        online_logistic_update(&mut coefs, &feats, 0.0, 0.5, 0.1);
+        assert!(coefs.get("signal").unwrap() < &1.0);
+        assert!(coefs.get("bias").unwrap() < &1.0);
+    }
+
+    #[test]
+    fn stable_sigmoid_handles_large_inputs() {
+        assert!(stable_sigmoid(80.0).is_finite());
+        assert!(stable_sigmoid(-80.0) >= 0.0);
     }
 }
