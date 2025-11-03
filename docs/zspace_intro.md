@@ -151,6 +151,9 @@ with st.zspace.session() as sess:
         cov_rank=8,
         metric=ZMetricWeights(w_band=1.0, w_sheet=0.5, w_echo=0.2),
         ard=True,
+        gate_momentum=0.05,
+        gate_seed=42,
+        gate_use_expected=True,
     )
     model = ZRBA(cfg)
 
@@ -162,3 +165,9 @@ with st.zspace.session() as sess:
     bundle = telemetry.bundle_metrics(metrics)
     st.zspace.telemetry.log_uq(bundle.to_json())
 ```
+
+`gate_use_expected=True` keeps the residual path deterministic by default, while
+setting it to `False` switches the gate to draw Beta samples per forward pass.
+The `gate_momentum` hyper-parameter tunes how fast the running mean/variance of
+the gate adapt to new spectral statistics, which is useful when Roundtable bands
+shift under rapid Atlas warps.

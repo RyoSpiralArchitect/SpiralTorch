@@ -106,9 +106,9 @@ pub use trainer::{
     EpochStats, ModuleTrainer, SpectralAdjustmentMetrics, SpectralLearningRatePolicy,
 };
 pub use z_rba::{
-    AttentionTelemetry as ZAttentionTelemetry, BetaGate, BetaGateSample, CovHead, CovHeadTelemetry,
-    ReliabilityBin as ZReliabilityBin, SimpleZFrame, ZCov, ZIndex, ZMetricWeights, ZRBAConfig,
-    ZRBAMetrics, ZRBATelemetry, ZTelemetryBundle, ZTensor, ZRBA,
+    AttentionTelemetry as ZAttentionTelemetry, BetaGate, BetaGateConfig, BetaGateSample, CovHead,
+    CovHeadTelemetry, ReliabilityBin as ZReliabilityBin, SimpleZFrame, ZCov, ZIndex,
+    ZMetricWeights, ZRBAConfig, ZRBAMetrics, ZRBATelemetry, ZTelemetryBundle, ZTensor, ZRBA,
 };
 #[cfg(feature = "psi")]
 pub use zspace_coherence::BranchPsiReading;

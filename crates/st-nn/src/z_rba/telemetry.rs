@@ -111,9 +111,15 @@ impl ZRBAMetrics {
         let mut crps_acc = 0.0f32;
         let mut errors = Vec::with_capacity(rows);
         let mut diag_vars = Vec::with_capacity(rows);
+        let mut row_means = Vec::with_capacity(rows);
+        let mut row_variances = Vec::with_capacity(rows);
         for i in 0..rows {
-            let mean = preds[i * cols];
-            let variance = vars[i * cols].max(1e-6);
+            let row_start = i * cols;
+            let row_end = row_start + cols;
+            let row_slice = &preds[row_start..row_end];
+            let var_slice = &vars[row_start..row_end];
+            let mean = row_slice.iter().sum::<f32>() / cols as f32;
+            let variance = var_slice.iter().map(|value| value.max(1e-6)).sum::<f32>() / cols as f32;
             let std = variance.sqrt();
             let lower = mean - quantile * std;
             let upper = mean + quantile * std;
@@ -128,12 +134,15 @@ impl ZRBAMetrics {
             crps_acc += normal_crps(z, std);
             errors.push(diff.abs());
             diag_vars.push(variance);
+            row_means.push(mean);
+            row_variances.push(variance);
         }
         let picp = coverage / rows as f32;
         let pinaw = width_acc / rows as f32;
         let nll = nll_acc / rows as f32;
         let crps = crps_acc / rows as f32;
-        let reliability = reliability_by_band(indices, targets, preds, vars, quantile, pin);
+        let reliability =
+            reliability_by_band(indices, targets, &row_means, &row_variances, quantile, pin);
         let ood = spearman_rank_correlation(&errors, &diag_vars);
         Ok(Self {
             pin,
@@ -176,34 +185,35 @@ impl ZTelemetryBundle {
 fn reliability_by_band(
     indices: &[ZIndex],
     targets: &[f32],
-    preds: &[f32],
+    means: &[f32],
     variances: &[f32],
     quantile: f32,
     pin: f32,
 ) -> Vec<ReliabilityBin> {
-    let mut per_band: HashMap<usize, (f32, f32, usize)> = HashMap::new();
+    let mut per_band: HashMap<usize, (f32, usize)> = HashMap::new();
     for ((idx, &target), (&mean, &variance)) in indices
         .iter()
         .zip(targets.iter())
-        .zip(preds.iter().zip(variances.iter()))
+        .zip(means.iter().zip(variances.iter()))
     {
         let std = variance.max(1e-6).sqrt();
         let lower = mean - quantile * std;
         let upper = mean + quantile * std;
-        let entry = per_band.entry(idx.band).or_insert((0.0, 0.0, 0));
+        let entry = per_band.entry(idx.band).or_insert((0.0, 0));
         if target >= lower && target <= upper {
             entry.0 += 1.0;
         }
-        entry.1 += 1.0;
-        entry.2 += 1;
+        entry.1 += 1;
     }
     let mut bins = Vec::new();
-    for (band, (covered, total, _count)) in per_band.into_iter() {
-        let observed = if total > 0.0 { covered / total } else { 0.0 };
+    for (band, (covered, count)) in per_band.into_iter() {
+        if count == 0 {
+            continue;
+        }
         bins.push(ReliabilityBin {
             band,
-            expected: pin,
-            observed,
+            expected: pin.clamp(0.0, 1.0),
+            observed: (covered / count as f32).clamp(0.0, 1.0),
         });
     }
     bins.sort_by(|a, b| a.band.cmp(&b.band));
@@ -366,6 +376,10 @@ mod tests {
         assert!(metrics.picp >= 0.0 && metrics.picp <= 1.0);
         assert!((metrics.pin - 0.95).abs() < 1e-3);
         assert!(metrics.reliability_by_band.len() >= 1);
+        for bin in metrics.reliability_by_band.iter() {
+            assert!((bin.expected - 0.95).abs() < 1e-6);
+            assert!(bin.observed >= 0.0 && bin.observed <= 1.0);
+        }
     }
 
     #[test]
@@ -379,6 +393,7 @@ mod tests {
                 expected: 0.5,
                 variance: 0.05,
                 features: [0.0; 7],
+                applied: 0.5,
             },
             CovHeadTelemetry {
                 min_eigenvalue: 0.1,

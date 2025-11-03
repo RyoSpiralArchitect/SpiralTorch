@@ -16,7 +16,6 @@ pub mod beta_residual;
 pub mod cov_head;
 pub mod telemetry;
 
-use crate::module::Parameter;
 use crate::{PureResult, Tensor, TensorError};
 use st_core::ops::zspace_round::SpectralFeatureSample;
 
@@ -75,6 +74,12 @@ pub struct ZRBAConfig {
     pub metric: ZMetricWeights,
     pub ard: bool,
     pub cov_rank: usize,
+    /// Momentum for the residual Beta gate's running statistics.
+    pub gate_momentum: f32,
+    /// Seed controlling the stochastic Beta samples.
+    pub gate_seed: u64,
+    /// When true the residual path uses the Beta expectation instead of samples.
+    pub gate_use_expected: bool,
 }
 
 impl Default for ZRBAConfig {
@@ -85,6 +90,9 @@ impl Default for ZRBAConfig {
             metric: ZMetricWeights::default(),
             ard: true,
             cov_rank: 8,
+            gate_momentum: 0.05,
+            gate_seed: 42,
+            gate_use_expected: true,
         }
     }
 }
@@ -96,6 +104,7 @@ pub struct ZRBA {
     attn: attention::ZRBFAttention,
     gate: beta_residual::BetaGate,
     cov: cov_head::CovHead,
+    use_expected_gate: bool,
 }
 
 impl ZRBA {
@@ -107,9 +116,17 @@ impl ZRBA {
             config.metric.clone(),
             config.ard,
         )?;
-        let gate = beta_residual::BetaGate::new()?;
+        let gate = beta_residual::BetaGate::new(beta_residual::BetaGateConfig {
+            momentum: config.gate_momentum,
+            seed: config.gate_seed,
+        });
         let cov = cov_head::CovHead::new(config.cov_rank);
-        Ok(Self { attn, gate, cov })
+        Ok(Self {
+            attn,
+            gate,
+            cov,
+            use_expected_gate: config.gate_use_expected,
+        })
     }
 
     /// Exposes the underlying attention module for fine-grained control.
@@ -129,12 +146,18 @@ impl ZRBA {
             return Err(TensorError::EmptyInput("zrba::forward"));
         }
         let attn_out: attention::ZRBFAttentionOutput = self.attn.forward(input, frame)?;
-        let gate = self.gate.forward(stats, &input.indices)?;
+        let mut gate = self.gate.forward(stats, &input.indices);
+        let gate_value = if self.use_expected_gate {
+            gate.expected
+        } else {
+            gate.sample
+        };
+        gate.applied = gate_value;
 
-        let gated_mu = input.mu.scale(gate.sample)?;
+        let gated_mu = input.mu.scale(gate_value)?;
         let mu = gated_mu.add(&attn_out.mean)?;
 
-        let gated_sigma = input.sigma.scale(gate.sample * gate.sample)?;
+        let gated_sigma = input.sigma.scale(gate_value * gate_value)?;
         let sigma = gated_sigma.add(&attn_out.variance)?;
 
         let cov_out: cov_head::CovHeadOutput = self.cov.forward(&mu, &sigma)?;
@@ -149,28 +172,10 @@ impl ZRBA {
             telemetry::ZRBATelemetry::new(attn_out.telemetry, gate.clone(), cov_out.telemetry);
         Ok((output, cov_bundle, telemetry))
     }
-
-    pub fn visit_parameters(
-        &self,
-        visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
-    ) -> PureResult<()> {
-        self.attn.visit_parameters(visitor)?;
-        self.gate.visit_parameters(visitor)?;
-        Ok(())
-    }
-
-    pub fn visit_parameters_mut(
-        &mut self,
-        visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
-    ) -> PureResult<()> {
-        self.attn.visit_parameters_mut(visitor)?;
-        self.gate.visit_parameters_mut(visitor)?;
-        Ok(())
-    }
 }
 
 pub use attention::{AttentionTelemetry, SimpleZFrame, ZFrameGeometry, ZIndex, ZMetricWeights};
-pub use beta_residual::{BetaGate, BetaGateSample};
+pub use beta_residual::{BetaGate, BetaGateConfig, BetaGateSample};
 pub use cov_head::{CovHead, CovHeadTelemetry};
 pub use telemetry::{ReliabilityBin, ZRBAMetrics, ZRBATelemetry, ZTelemetryBundle};
 
@@ -232,6 +237,9 @@ mod tests {
             metric: ZMetricWeights::default(),
             ard: true,
             cov_rank: 3,
+            gate_momentum: 0.05,
+            gate_seed: 7,
+            gate_use_expected: true,
         };
         let zrba = ZRBA::new(config).unwrap();
         let (out, cov, telemetry) = zrba.forward(&tensor, &frame, &stats).unwrap();
@@ -243,5 +251,6 @@ mod tests {
             telemetry.gate.expected_value(),
             telemetry.gate.expected_value()
         );
+        assert_eq!(telemetry.gate.applied, telemetry.gate.expected);
     }
 }
