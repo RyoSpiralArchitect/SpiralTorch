@@ -1245,6 +1245,760 @@ impl Module for ZSpaceLayerNorm {
     }
 }
 
+/// Batch normalisation over the batch dimension.
+#[derive(Debug)]
+pub struct BatchNorm1d {
+    features: usize,
+    epsilon: f32,
+    momentum: f32,
+    gamma: Parameter,
+    beta: Parameter,
+    running_mean: RefCell<Tensor>,
+    running_var: RefCell<Tensor>,
+    training: Cell<bool>,
+    last_mean: RefCell<Option<Vec<f32>>>,
+    last_inv_std: RefCell<Option<Vec<f32>>>,
+}
+
+/// Batch normalisation that projects the whitened activations into the
+/// hyperbolic Z-space ball before applying the affine parameters.
+#[derive(Debug)]
+pub struct ZSpaceBatchNorm1d {
+    features: usize,
+    curvature: f32,
+    epsilon: f32,
+    momentum: f32,
+    projector_gain: Cell<f32>,
+    gamma: Parameter,
+    beta: Parameter,
+    running_mean: RefCell<Tensor>,
+    running_var: RefCell<Tensor>,
+    training: Cell<bool>,
+    last_batch: Cell<Option<usize>>,
+    last_mean: RefCell<Option<Vec<f32>>>,
+    last_inv_std: RefCell<Option<Vec<f32>>>,
+    last_normed: RefCell<Option<Vec<f32>>>,
+    last_projected: RefCell<Option<Vec<f32>>>,
+    last_jacobian: RefCell<Option<Vec<f32>>>,
+    last_radius: RefCell<Option<Vec<f32>>>,
+}
+
+/// Cached statistics captured during the last `ZSpaceBatchNorm1d` forward pass.
+#[derive(Debug, Clone)]
+pub struct ZSpaceBatchNormTelemetry {
+    batch: usize,
+    features: usize,
+    mean: Vec<f32>,
+    inv_std: Vec<f32>,
+    normed: Vec<f32>,
+    projected: Vec<f32>,
+    jacobian: Vec<f32>,
+    radius: Vec<f32>,
+}
+
+impl ZSpaceBatchNormTelemetry {
+    /// Returns the batch size that produced the cached activations.
+    pub fn batch(&self) -> usize {
+        self.batch
+    }
+
+    /// Returns the number of features per sample.
+    pub fn features(&self) -> usize {
+        self.features
+    }
+
+    /// Returns the per-feature means computed during the forward pass.
+    pub fn mean(&self) -> &[f32] {
+        &self.mean
+    }
+
+    /// Returns the inverse standard deviation used to whiten the inputs.
+    pub fn inv_std(&self) -> &[f32] {
+        &self.inv_std
+    }
+
+    /// Returns the normalised activations before projection, flattened in
+    /// row-major order.
+    pub fn normed(&self) -> &[f32] {
+        &self.normed
+    }
+
+    /// Returns the projected activations that were fed into the affine branch.
+    pub fn projected(&self) -> &[f32] {
+        &self.projected
+    }
+
+    /// Returns the diagonal of the projection Jacobian for each activation.
+    pub fn jacobian(&self) -> &[f32] {
+        &self.jacobian
+    }
+
+    /// Returns the per-feature average Z-ball radius measured over the batch.
+    pub fn radius(&self) -> &[f32] {
+        &self.radius
+    }
+}
+
+impl ZSpaceBatchNorm1d {
+    /// Creates a new Z-space aware batch normalisation layer.
+    pub fn new(
+        name: impl Into<String>,
+        features: usize,
+        curvature: f32,
+        momentum: f32,
+        epsilon: f32,
+    ) -> PureResult<Self> {
+        if features == 0 {
+            return Err(TensorError::InvalidDimensions {
+                rows: 1,
+                cols: features,
+            });
+        }
+        if curvature >= 0.0 || !curvature.is_finite() {
+            return Err(TensorError::NonHyperbolicCurvature { curvature });
+        }
+        if !(0.0..=1.0).contains(&momentum) || !momentum.is_finite() {
+            return Err(TensorError::InvalidValue {
+                label: "zspace_batchnorm_momentum",
+            });
+        }
+        if epsilon <= 0.0 || !epsilon.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "zspace_batchnorm_epsilon",
+                value: epsilon,
+            });
+        }
+        let name = name.into();
+        let gamma = Tensor::from_vec(1, features, vec![1.0; features])?;
+        let beta = Tensor::zeros(1, features)?;
+        let running_mean = Tensor::zeros(1, features)?;
+        let running_var = Tensor::from_vec(1, features, vec![1.0; features])?;
+        Ok(Self {
+            features,
+            curvature,
+            epsilon,
+            momentum,
+            projector_gain: Cell::new(1.0),
+            gamma: Parameter::new(format!("{name}::gamma"), gamma),
+            beta: Parameter::new(format!("{name}::beta"), beta),
+            running_mean: RefCell::new(running_mean),
+            running_var: RefCell::new(running_var),
+            training: Cell::new(true),
+            last_batch: Cell::new(None),
+            last_mean: RefCell::new(None),
+            last_inv_std: RefCell::new(None),
+            last_normed: RefCell::new(None),
+            last_projected: RefCell::new(None),
+            last_jacobian: RefCell::new(None),
+            last_radius: RefCell::new(None),
+        })
+    }
+
+    /// Returns the number of features normalised per row.
+    pub fn features(&self) -> usize {
+        self.features
+    }
+
+    /// Returns the curvature enforced by the hyperbolic projection.
+    pub fn curvature(&self) -> f32 {
+        self.curvature
+    }
+
+    /// Returns the mixing ratio between Euclidean and hyperbolic projections.
+    pub fn projector_gain(&self) -> f32 {
+        self.projector_gain.get()
+    }
+
+    /// Blends the Euclidean normalised activations with their Z-space projection.
+    pub fn with_projector_gain(self, gain: f32) -> PureResult<Self> {
+        self.set_projector_gain(gain)?;
+        Ok(self)
+    }
+
+    /// Updates the projector gain in-place without rebuilding the layer.
+    pub fn set_projector_gain(&self, gain: f32) -> PureResult<()> {
+        if !(0.0..=1.0).contains(&gain) || !gain.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "zspace_batchnorm_projector_gain",
+                value: gain,
+            });
+        }
+        self.projector_gain.set(gain);
+        Ok(())
+    }
+
+    /// Returns the epsilon used to stabilise the variance estimate.
+    pub fn epsilon(&self) -> f32 {
+        self.epsilon
+    }
+
+    /// Returns the momentum applied to the running statistics.
+    pub fn momentum(&self) -> f32 {
+        self.momentum
+    }
+
+    /// Enables or disables training mode.
+    pub fn set_training(&self, training: bool) {
+        self.training.set(training);
+    }
+
+    /// Switches the layer to training mode.
+    pub fn train(&self) {
+        self.set_training(true);
+    }
+
+    /// Switches the layer to evaluation mode.
+    pub fn eval(&self) {
+        self.set_training(false);
+    }
+
+    /// Returns the cached telemetry captured during the most recent forward pass.
+    pub fn telemetry(&self) -> Option<ZSpaceBatchNormTelemetry> {
+        let batch = self.last_batch.get()?;
+        let mean = self.last_mean.borrow().clone()?;
+        let inv_std = self.last_inv_std.borrow().clone()?;
+        let normed = self.last_normed.borrow().clone()?;
+        let projected = self.last_projected.borrow().clone()?;
+        let jacobian = self.last_jacobian.borrow().clone()?;
+        let radius = self.last_radius.borrow().clone()?;
+        Some(ZSpaceBatchNormTelemetry {
+            batch,
+            features: self.features,
+            mean,
+            inv_std,
+            normed,
+            projected,
+            jacobian,
+            radius,
+        })
+    }
+
+    /// Returns the per-feature average ball radius captured during the most
+    /// recent forward pass.
+    pub fn last_ball_radius(&self) -> Option<Vec<f32>> {
+        self.last_radius.borrow().clone()
+    }
+
+    /// Adjusts the projector gain to steer the average radius towards the
+    /// provided target. Returns the updated gain.
+    pub fn adapt_projector_gain(&self, target_radius: f32, smoothing: f32) -> PureResult<f32> {
+        if !target_radius.is_finite() || target_radius < 0.0 {
+            return Err(TensorError::NonFiniteValue {
+                label: "zspace_batchnorm_target_radius",
+                value: target_radius,
+            });
+        }
+        if !smoothing.is_finite() || smoothing <= 0.0 {
+            return Err(TensorError::NonFiniteValue {
+                label: "zspace_batchnorm_smoothing",
+                value: smoothing,
+            });
+        }
+        let telemetry = self.telemetry().ok_or(TensorError::InvalidValue {
+            label: "zspace_batchnorm_telemetry",
+        })?;
+        let avg_radius =
+            telemetry.radius().iter().copied().sum::<f32>() / telemetry.radius().len() as f32;
+        let gain =
+            (self.projector_gain.get() + smoothing * (target_radius - avg_radius)).clamp(0.0, 1.0);
+        self.projector_gain.set(gain);
+        Ok(gain)
+    }
+
+    fn curvature_scale(&self) -> f32 {
+        (-self.curvature).sqrt()
+    }
+
+    fn guard_input(&self, input: &Tensor) -> PureResult<()> {
+        let (rows, cols) = input.shape();
+        if cols != self.features {
+            return Err(TensorError::ShapeMismatch {
+                left: (rows, cols),
+                right: (rows, self.features),
+            });
+        }
+        if rows == 0 {
+            return Err(TensorError::EmptyInput("zspace_batchnorm_input"));
+        }
+        Ok(())
+    }
+
+    fn compute_stats(&self, input: &Tensor) -> (Vec<f32>, Vec<f32>) {
+        let (batch, features) = input.shape();
+        let mut mean = vec![0.0f32; features];
+        for row in 0..batch {
+            let slice = &input.data()[row * features..(row + 1) * features];
+            for (idx, value) in slice.iter().enumerate() {
+                mean[idx] += *value;
+            }
+        }
+        let scale = 1.0 / batch as f32;
+        for value in mean.iter_mut() {
+            *value *= scale;
+        }
+        let mut variance = vec![0.0f32; features];
+        for row in 0..batch {
+            let slice = &input.data()[row * features..(row + 1) * features];
+            for (idx, value) in slice.iter().enumerate() {
+                let centered = *value - mean[idx];
+                variance[idx] += centered * centered;
+            }
+        }
+        for value in variance.iter_mut() {
+            *value *= scale;
+        }
+        (mean, variance)
+    }
+
+    fn project_normed(&self, value: f32) -> (f32, f32, f32) {
+        let gain = self.projector_gain.get();
+        if gain <= f32::EPSILON {
+            return (value, 1.0, 0.0);
+        }
+        let scale = self.curvature_scale();
+        let scaled = (value * scale).clamp(-TANH_CLAMP, TANH_CLAMP);
+        let tanh = scaled.tanh();
+        let radial = tanh / scale;
+        let sech_sq = 1.0 - tanh * tanh;
+        let jacobian = (1.0 - gain) + gain * sech_sq;
+        let blended = (1.0 - gain) * value + gain * radial;
+        let radius = tanh.abs() / scale;
+        (blended, jacobian, radius)
+    }
+}
+
+impl BatchNorm1d {
+    /// Creates a new batch normalisation layer operating over the feature axis.
+    pub fn new(
+        name: impl Into<String>,
+        features: usize,
+        momentum: f32,
+        epsilon: f32,
+    ) -> PureResult<Self> {
+        if features == 0 {
+            return Err(TensorError::InvalidDimensions {
+                rows: 1,
+                cols: features,
+            });
+        }
+        if !(0.0..=1.0).contains(&momentum) || !momentum.is_finite() {
+            return Err(TensorError::InvalidValue {
+                label: "batchnorm_momentum",
+            });
+        }
+        if epsilon <= 0.0 || !epsilon.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "batchnorm_epsilon",
+                value: epsilon,
+            });
+        }
+        let name = name.into();
+        let gamma = Tensor::from_vec(1, features, vec![1.0; features])?;
+        let beta = Tensor::zeros(1, features)?;
+        let running_mean = Tensor::zeros(1, features)?;
+        let running_var = Tensor::from_vec(1, features, vec![1.0; features])?;
+        Ok(Self {
+            features,
+            epsilon,
+            momentum,
+            gamma: Parameter::new(format!("{name}::gamma"), gamma),
+            beta: Parameter::new(format!("{name}::beta"), beta),
+            running_mean: RefCell::new(running_mean),
+            running_var: RefCell::new(running_var),
+            training: Cell::new(true),
+            last_mean: RefCell::new(None),
+            last_inv_std: RefCell::new(None),
+        })
+    }
+
+    /// Number of normalised features.
+    pub fn features(&self) -> usize {
+        self.features
+    }
+
+    /// Returns the momentum applied to the running statistics.
+    pub fn momentum(&self) -> f32 {
+        self.momentum
+    }
+
+    /// Returns the epsilon used to stabilise the variance estimate.
+    pub fn epsilon(&self) -> f32 {
+        self.epsilon
+    }
+
+    /// Enables or disables training mode.
+    pub fn set_training(&self, training: bool) {
+        self.training.set(training);
+    }
+
+    /// Switches the layer to training mode.
+    pub fn train(&self) {
+        self.set_training(true);
+    }
+
+    /// Switches the layer to evaluation mode.
+    pub fn eval(&self) {
+        self.set_training(false);
+    }
+
+    fn guard_input(&self, input: &Tensor) -> PureResult<()> {
+        let (rows, cols) = input.shape();
+        if cols != self.features {
+            return Err(TensorError::ShapeMismatch {
+                left: (rows, cols),
+                right: (rows, self.features),
+            });
+        }
+        if rows == 0 {
+            return Err(TensorError::EmptyInput("batchnorm_input"));
+        }
+        Ok(())
+    }
+
+    fn compute_stats(&self, input: &Tensor) -> (Vec<f32>, Vec<f32>) {
+        let (batch, features) = input.shape();
+        let mut mean = vec![0.0f32; features];
+        for row in 0..batch {
+            let slice = &input.data()[row * features..(row + 1) * features];
+            for (idx, value) in slice.iter().enumerate() {
+                mean[idx] += *value;
+            }
+        }
+        let scale = 1.0 / batch as f32;
+        for value in mean.iter_mut() {
+            *value *= scale;
+        }
+        let mut variance = vec![0.0f32; features];
+        for row in 0..batch {
+            let slice = &input.data()[row * features..(row + 1) * features];
+            for (idx, value) in slice.iter().enumerate() {
+                let centered = *value - mean[idx];
+                variance[idx] += centered * centered;
+            }
+        }
+        for value in variance.iter_mut() {
+            *value *= scale;
+        }
+        (mean, variance)
+    }
+}
+
+impl Module for BatchNorm1d {
+    fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+        self.guard_input(input)?;
+        let (batch, features) = input.shape();
+        let mut output = Vec::with_capacity(batch * features);
+        let gamma = self.gamma.value().data();
+        let beta = self.beta.value().data();
+        let (mean, variance) = if self.training.get() {
+            let (mean, variance) = self.compute_stats(input);
+            {
+                let mut running_mean = self.running_mean.borrow_mut();
+                let data = running_mean.data_mut();
+                for idx in 0..features {
+                    data[idx] = self.momentum * mean[idx] + (1.0 - self.momentum) * data[idx];
+                }
+            }
+            {
+                let mut running_var = self.running_var.borrow_mut();
+                let data = running_var.data_mut();
+                for idx in 0..features {
+                    data[idx] = self.momentum * variance[idx] + (1.0 - self.momentum) * data[idx];
+                }
+            }
+            *self.last_mean.borrow_mut() = Some(mean.clone());
+            let inv_std: Vec<f32> = variance
+                .iter()
+                .map(|v| 1.0 / (v + self.epsilon).sqrt())
+                .collect();
+            *self.last_inv_std.borrow_mut() = Some(inv_std.clone());
+            (mean, variance)
+        } else {
+            let running_mean = self.running_mean.borrow();
+            let running_var = self.running_var.borrow();
+            (running_mean.data().to_vec(), running_var.data().to_vec())
+        };
+
+        let inv_std: Vec<f32> = if let Some(inv) = self.last_inv_std.borrow().clone() {
+            if self.training.get() {
+                inv
+            } else {
+                variance
+                    .iter()
+                    .map(|v| 1.0 / (v + self.epsilon).sqrt())
+                    .collect()
+            }
+        } else {
+            variance
+                .iter()
+                .map(|v| 1.0 / (v + self.epsilon).sqrt())
+                .collect()
+        };
+
+        for row in 0..batch {
+            let slice = &input.data()[row * features..(row + 1) * features];
+            for feature in 0..features {
+                let normed = (slice[feature] - mean[feature]) * inv_std[feature];
+                output.push(normed * gamma[feature] + beta[feature]);
+            }
+        }
+        Tensor::from_vec(batch, features, output)
+    }
+
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        self.guard_input(input)?;
+        if input.shape() != grad_output.shape() {
+            return Err(TensorError::ShapeMismatch {
+                left: input.shape(),
+                right: grad_output.shape(),
+            });
+        }
+        if !self.training.get() {
+            return Err(TensorError::InvalidValue {
+                label: "batchnorm_backward_eval",
+            });
+        }
+        let (batch, features) = input.shape();
+        let mean = self
+            .last_mean
+            .borrow()
+            .clone()
+            .ok_or(TensorError::InvalidValue {
+                label: "batchnorm_cached_mean",
+            })?;
+        let inv_std = self
+            .last_inv_std
+            .borrow()
+            .clone()
+            .ok_or(TensorError::InvalidValue {
+                label: "batchnorm_cached_invstd",
+            })?;
+
+        let mut grad_input = vec![0.0f32; batch * features];
+        let mut grad_gamma = vec![0.0f32; features];
+        let mut grad_beta = vec![0.0f32; features];
+        let gamma = self.gamma.value().data();
+
+        for feature in 0..features {
+            let mut sum_grad = 0.0f32;
+            let mut sum_grad_norm = 0.0f32;
+            for row in 0..batch {
+                let idx = row * features + feature;
+                let normed = (input.data()[idx] - mean[feature]) * inv_std[feature];
+                let g = grad_output.data()[idx];
+                let g_gamma = g * gamma[feature];
+                sum_grad += g_gamma;
+                sum_grad_norm += g_gamma * normed;
+                grad_gamma[feature] += g * normed;
+                grad_beta[feature] += g;
+            }
+            for row in 0..batch {
+                let idx = row * features + feature;
+                let normed = (input.data()[idx] - mean[feature]) * inv_std[feature];
+                let g = grad_output.data()[idx];
+                let g_gamma = g * gamma[feature];
+                let term =
+                    (batch as f32 * g_gamma - sum_grad - normed * sum_grad_norm) / batch as f32;
+                grad_input[idx] = term * inv_std[feature];
+            }
+        }
+
+        let grad_gamma = Tensor::from_vec(1, features, grad_gamma)?;
+        let grad_beta = Tensor::from_vec(1, features, grad_beta)?;
+        self.gamma.accumulate_euclidean(&grad_gamma)?;
+        self.beta.accumulate_euclidean(&grad_beta)?;
+        Tensor::from_vec(batch, features, grad_input)
+    }
+
+    fn visit_parameters(
+        &self,
+        visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        visitor(&self.gamma)?;
+        visitor(&self.beta)
+    }
+
+    fn visit_parameters_mut(
+        &mut self,
+        visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        visitor(&mut self.gamma)?;
+        visitor(&mut self.beta)
+    }
+}
+
+impl Module for ZSpaceBatchNorm1d {
+    fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+        self.guard_input(input)?;
+        let (batch, features) = input.shape();
+        let mut output = Vec::with_capacity(batch * features);
+        let mut normed_cache = vec![0.0f32; batch * features];
+        let mut projected_cache = vec![0.0f32; batch * features];
+        let mut jacobian_cache = vec![0.0f32; batch * features];
+        let mut radius = vec![0.0f32; features];
+        let gamma = self.gamma.value().data();
+        let beta = self.beta.value().data();
+        self.last_batch.set(Some(batch));
+        let (mean, variance) = if self.training.get() {
+            let (mean, variance) = self.compute_stats(input);
+            {
+                let mut running_mean = self.running_mean.borrow_mut();
+                let data = running_mean.data_mut();
+                for idx in 0..features {
+                    data[idx] = self.momentum * mean[idx] + (1.0 - self.momentum) * data[idx];
+                }
+            }
+            {
+                let mut running_var = self.running_var.borrow_mut();
+                let data = running_var.data_mut();
+                for idx in 0..features {
+                    data[idx] = self.momentum * variance[idx] + (1.0 - self.momentum) * data[idx];
+                }
+            }
+            (mean, variance)
+        } else {
+            let running_mean = self.running_mean.borrow();
+            let running_var = self.running_var.borrow();
+            (running_mean.data().to_vec(), running_var.data().to_vec())
+        };
+
+        let inv_std: Vec<f32> = variance
+            .iter()
+            .map(|v| 1.0 / (v + self.epsilon).sqrt())
+            .collect();
+        *self.last_mean.borrow_mut() = Some(mean.clone());
+        *self.last_inv_std.borrow_mut() = Some(inv_std.clone());
+
+        for row in 0..batch {
+            let slice = &input.data()[row * features..(row + 1) * features];
+            for feature in 0..features {
+                let idx = row * features + feature;
+                let normed = (slice[feature] - mean[feature]) * inv_std[feature];
+                let (projected, jacobian, feature_radius) = self.project_normed(normed);
+                normed_cache[idx] = normed;
+                projected_cache[idx] = projected;
+                jacobian_cache[idx] = jacobian;
+                radius[feature] += feature_radius;
+                output.push(projected * gamma[feature] + beta[feature]);
+            }
+        }
+
+        for value in radius.iter_mut() {
+            *value /= batch as f32;
+        }
+        *self.last_radius.borrow_mut() = Some(radius);
+        *self.last_normed.borrow_mut() = Some(normed_cache);
+        *self.last_projected.borrow_mut() = Some(projected_cache.clone());
+        *self.last_jacobian.borrow_mut() = Some(jacobian_cache);
+
+        Tensor::from_vec(batch, features, output)
+    }
+
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        self.guard_input(input)?;
+        if input.shape() != grad_output.shape() {
+            return Err(TensorError::ShapeMismatch {
+                left: input.shape(),
+                right: grad_output.shape(),
+            });
+        }
+        if !self.training.get() {
+            return Err(TensorError::InvalidValue {
+                label: "zspace_batchnorm_backward_eval",
+            });
+        }
+
+        if self.last_mean.borrow().is_none() {
+            return Err(TensorError::InvalidValue {
+                label: "zspace_batchnorm_cached_mean",
+            });
+        }
+        let inv_std = self
+            .last_inv_std
+            .borrow()
+            .clone()
+            .ok_or(TensorError::InvalidValue {
+                label: "zspace_batchnorm_cached_invstd",
+            })?;
+        let normed = self
+            .last_normed
+            .borrow()
+            .clone()
+            .ok_or(TensorError::InvalidValue {
+                label: "zspace_batchnorm_cached_normed",
+            })?;
+        let projected = self
+            .last_projected
+            .borrow()
+            .clone()
+            .ok_or(TensorError::InvalidValue {
+                label: "zspace_batchnorm_cached_projected",
+            })?;
+        let jacobian = self
+            .last_jacobian
+            .borrow()
+            .clone()
+            .ok_or(TensorError::InvalidValue {
+                label: "zspace_batchnorm_cached_jacobian",
+            })?;
+
+        let (batch, features) = input.shape();
+        let gamma = self.gamma.value().data();
+        let mut grad_input = vec![0.0f32; batch * features];
+        let mut grad_gamma = vec![0.0f32; features];
+        let mut grad_beta = vec![0.0f32; features];
+        let mut grad_normed_cache = vec![0.0f32; batch * features];
+
+        for feature in 0..features {
+            let mut sum_grad = 0.0f32;
+            let mut sum_grad_norm = 0.0f32;
+            for row in 0..batch {
+                let idx = row * features + feature;
+                let go = grad_output.data()[idx];
+                let proj = projected[idx];
+                grad_gamma[feature] += go * proj;
+                grad_beta[feature] += go;
+                let go_gamma = go * gamma[feature];
+                let grad_norm = go_gamma * jacobian[idx];
+                grad_normed_cache[idx] = grad_norm;
+                sum_grad += grad_norm;
+                sum_grad_norm += grad_norm * normed[idx];
+            }
+            let inv = inv_std[feature];
+            for row in 0..batch {
+                let idx = row * features + feature;
+                let grad_norm = grad_normed_cache[idx];
+                let term = (batch as f32 * grad_norm - sum_grad - normed[idx] * sum_grad_norm)
+                    / batch as f32;
+                grad_input[idx] = term * inv;
+            }
+        }
+
+        let grad_gamma_tensor = Tensor::from_vec(1, features, grad_gamma)?;
+        let grad_beta_tensor = Tensor::from_vec(1, features, grad_beta)?;
+        self.gamma.accumulate_euclidean(&grad_gamma_tensor)?;
+        self.beta.accumulate_euclidean(&grad_beta_tensor)?;
+
+        Tensor::from_vec(batch, features, grad_input)
+    }
+
+    fn visit_parameters(
+        &self,
+        visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        visitor(&self.gamma)?;
+        visitor(&self.beta)
+    }
+
+    fn visit_parameters_mut(
+        &mut self,
+        visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        visitor(&mut self.gamma)?;
+        visitor(&mut self.beta)
+    }
+}
+
 impl Module for LayerNorm {
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
         self.guard_input(input)?;

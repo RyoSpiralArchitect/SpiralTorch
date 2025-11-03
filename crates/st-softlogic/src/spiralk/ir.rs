@@ -30,7 +30,7 @@ pub struct RefractOpPolicy {
     pub flags: Vec<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TargetSpec {
     Graph(String),
     Prsn(String),
