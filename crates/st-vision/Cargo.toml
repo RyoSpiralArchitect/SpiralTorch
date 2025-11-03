@@ -22,7 +22,7 @@ rand = "0.8"
 st-backend-wgpu = { path = "../st-backend-wgpu", optional = true }
 st-frac = { path = "../st-frac" }
 ndarray = "0.15"
-ordered-float = "4.2"
+ordered-float = "5.1"
 
 [dev-dependencies]
 tempfile = "3"
