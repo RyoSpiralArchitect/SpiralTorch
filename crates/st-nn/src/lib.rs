@@ -28,6 +28,7 @@ pub mod plan;
 pub mod roundtable;
 pub mod schedule;
 pub mod trainer;
+pub mod z_rba;
 pub mod zspace_coherence;
 
 pub use dataset::{from_vec as dataset_from_vec, BatchIter, DataLoader, Dataset};
@@ -103,6 +104,11 @@ pub use trainer::selfsup::{
 };
 pub use trainer::{
     EpochStats, ModuleTrainer, SpectralAdjustmentMetrics, SpectralLearningRatePolicy,
+};
+pub use z_rba::{
+    AttentionTelemetry as ZAttentionTelemetry, BetaGate, BetaGateConfig, BetaGateSample, CovHead,
+    CovHeadTelemetry, ReliabilityBin as ZReliabilityBin, SimpleZFrame, ZCov, ZIndex,
+    ZMetricWeights, ZRBAConfig, ZRBAMetrics, ZRBATelemetry, ZTelemetryBundle, ZTensor, ZRBA,
 };
 #[cfg(feature = "psi")]
 pub use zspace_coherence::BranchPsiReading;
