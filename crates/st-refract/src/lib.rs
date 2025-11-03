@@ -155,6 +155,9 @@ mod tests {
         assert_eq!(backend.schedule.as_deref(), Some("cooperative"));
         assert!(matches!(backend.backend, Some(Backend::WGPU)));
         assert_eq!(backend.tuned.len(), 1);
-        assert_eq!(backend.target, Some(TargetSpec::Graph("Encoder".into())));
+        assert!(matches!(
+            backend.target,
+            Some(TargetSpec::Graph(ref graph)) if graph == "Encoder"
+        ));
     }
 }
