@@ -112,18 +112,75 @@ pub struct ZSpaceBatchNorm1d {
     curvature: f32,
     epsilon: f32,
     momentum: f32,
-    projector_gain: f32,
+    projector_gain: Cell<f32>,
     gamma: Parameter,
     beta: Parameter,
     running_mean: RefCell<Tensor>,
     running_var: RefCell<Tensor>,
     training: Cell<bool>,
+    last_batch: Cell<Option<usize>>,
     last_mean: RefCell<Option<Vec<f32>>>,
     last_inv_std: RefCell<Option<Vec<f32>>>,
     last_normed: RefCell<Option<Vec<f32>>>,
     last_projected: RefCell<Option<Vec<f32>>>,
     last_jacobian: RefCell<Option<Vec<f32>>>,
     last_radius: RefCell<Option<Vec<f32>>>,
+}
+
+/// Cached statistics captured during the last `ZSpaceBatchNorm1d` forward pass.
+#[derive(Debug, Clone)]
+pub struct ZSpaceBatchNormTelemetry {
+    batch: usize,
+    features: usize,
+    mean: Vec<f32>,
+    inv_std: Vec<f32>,
+    normed: Vec<f32>,
+    projected: Vec<f32>,
+    jacobian: Vec<f32>,
+    radius: Vec<f32>,
+}
+
+impl ZSpaceBatchNormTelemetry {
+    /// Returns the batch size that produced the cached activations.
+    pub fn batch(&self) -> usize {
+        self.batch
+    }
+
+    /// Returns the number of features per sample.
+    pub fn features(&self) -> usize {
+        self.features
+    }
+
+    /// Returns the per-feature means computed during the forward pass.
+    pub fn mean(&self) -> &[f32] {
+        &self.mean
+    }
+
+    /// Returns the inverse standard deviation used to whiten the inputs.
+    pub fn inv_std(&self) -> &[f32] {
+        &self.inv_std
+    }
+
+    /// Returns the normalised activations before projection, flattened in
+    /// row-major order.
+    pub fn normed(&self) -> &[f32] {
+        &self.normed
+    }
+
+    /// Returns the projected activations that were fed into the affine branch.
+    pub fn projected(&self) -> &[f32] {
+        &self.projected
+    }
+
+    /// Returns the diagonal of the projection Jacobian for each activation.
+    pub fn jacobian(&self) -> &[f32] {
+        &self.jacobian
+    }
+
+    /// Returns the per-feature average Z-ball radius measured over the batch.
+    pub fn radius(&self) -> &[f32] {
+        &self.radius
+    }
 }
 
 impl ZSpaceBatchNorm1d {
@@ -165,12 +222,13 @@ impl ZSpaceBatchNorm1d {
             curvature,
             epsilon,
             momentum,
-            projector_gain: 1.0,
+            projector_gain: Cell::new(1.0),
             gamma: Parameter::new(format!("{name}::gamma"), gamma),
             beta: Parameter::new(format!("{name}::beta"), beta),
             running_mean: RefCell::new(running_mean),
             running_var: RefCell::new(running_var),
             training: Cell::new(true),
+            last_batch: Cell::new(None),
             last_mean: RefCell::new(None),
             last_inv_std: RefCell::new(None),
             last_normed: RefCell::new(None),
@@ -192,19 +250,25 @@ impl ZSpaceBatchNorm1d {
 
     /// Returns the mixing ratio between Euclidean and hyperbolic projections.
     pub fn projector_gain(&self) -> f32 {
-        self.projector_gain
+        self.projector_gain.get()
     }
 
     /// Blends the Euclidean normalised activations with their Z-space projection.
-    pub fn with_projector_gain(mut self, gain: f32) -> PureResult<Self> {
+    pub fn with_projector_gain(self, gain: f32) -> PureResult<Self> {
+        self.set_projector_gain(gain)?;
+        Ok(self)
+    }
+
+    /// Updates the projector gain in-place without rebuilding the layer.
+    pub fn set_projector_gain(&self, gain: f32) -> PureResult<()> {
         if !(0.0..=1.0).contains(&gain) || !gain.is_finite() {
             return Err(TensorError::NonFiniteValue {
                 label: "zspace_batchnorm_projector_gain",
                 value: gain,
             });
         }
-        self.projector_gain = gain;
-        Ok(self)
+        self.projector_gain.set(gain);
+        Ok(())
     }
 
     /// Returns the epsilon used to stabilise the variance estimate.
@@ -232,10 +296,57 @@ impl ZSpaceBatchNorm1d {
         self.set_training(false);
     }
 
+    /// Returns the cached telemetry captured during the most recent forward pass.
+    pub fn telemetry(&self) -> Option<ZSpaceBatchNormTelemetry> {
+        let batch = self.last_batch.get()?;
+        let mean = self.last_mean.borrow().clone()?;
+        let inv_std = self.last_inv_std.borrow().clone()?;
+        let normed = self.last_normed.borrow().clone()?;
+        let projected = self.last_projected.borrow().clone()?;
+        let jacobian = self.last_jacobian.borrow().clone()?;
+        let radius = self.last_radius.borrow().clone()?;
+        Some(ZSpaceBatchNormTelemetry {
+            batch,
+            features: self.features,
+            mean,
+            inv_std,
+            normed,
+            projected,
+            jacobian,
+            radius,
+        })
+    }
+
     /// Returns the per-feature average ball radius captured during the most
     /// recent forward pass.
     pub fn last_ball_radius(&self) -> Option<Vec<f32>> {
         self.last_radius.borrow().clone()
+    }
+
+    /// Adjusts the projector gain to steer the average radius towards the
+    /// provided target. Returns the updated gain.
+    pub fn adapt_projector_gain(&self, target_radius: f32, smoothing: f32) -> PureResult<f32> {
+        if !target_radius.is_finite() || target_radius < 0.0 {
+            return Err(TensorError::NonFiniteValue {
+                label: "zspace_batchnorm_target_radius",
+                value: target_radius,
+            });
+        }
+        if !smoothing.is_finite() || smoothing <= 0.0 {
+            return Err(TensorError::NonFiniteValue {
+                label: "zspace_batchnorm_smoothing",
+                value: smoothing,
+            });
+        }
+        let telemetry = self.telemetry().ok_or(TensorError::InvalidValue {
+            label: "zspace_batchnorm_telemetry",
+        })?;
+        let avg_radius =
+            telemetry.radius().iter().copied().sum::<f32>() / telemetry.radius().len() as f32;
+        let gain =
+            (self.projector_gain.get() + smoothing * (target_radius - avg_radius)).clamp(0.0, 1.0);
+        self.projector_gain.set(gain);
+        Ok(gain)
     }
 
     fn curvature_scale(&self) -> f32 {
@@ -284,7 +395,8 @@ impl ZSpaceBatchNorm1d {
     }
 
     fn project_normed(&self, value: f32) -> (f32, f32, f32) {
-        if self.projector_gain <= f32::EPSILON {
+        let gain = self.projector_gain.get();
+        if gain <= f32::EPSILON {
             return (value, 1.0, 0.0);
         }
         let scale = self.curvature_scale();
@@ -292,8 +404,8 @@ impl ZSpaceBatchNorm1d {
         let tanh = scaled.tanh();
         let radial = tanh / scale;
         let sech_sq = 1.0 - tanh * tanh;
-        let jacobian = (1.0 - self.projector_gain) + self.projector_gain * sech_sq;
-        let blended = (1.0 - self.projector_gain) * value + self.projector_gain * radial;
+        let jacobian = (1.0 - gain) + gain * sech_sq;
+        let blended = (1.0 - gain) * value + gain * radial;
         let radius = tanh.abs() / scale;
         (blended, jacobian, radius)
     }
@@ -570,6 +682,7 @@ impl Module for ZSpaceBatchNorm1d {
         let mut radius = vec![0.0f32; features];
         let gamma = self.gamma.value().data();
         let beta = self.beta.value().data();
+        self.last_batch.set(Some(batch));
         let (mean, variance) = if self.training.get() {
             let (mean, variance) = self.compute_stats(input);
             {
@@ -586,12 +699,6 @@ impl Module for ZSpaceBatchNorm1d {
                     data[idx] = self.momentum * variance[idx] + (1.0 - self.momentum) * data[idx];
                 }
             }
-            *self.last_mean.borrow_mut() = Some(mean.clone());
-            let inv_std: Vec<f32> = variance
-                .iter()
-                .map(|v| 1.0 / (v + self.epsilon).sqrt())
-                .collect();
-            *self.last_inv_std.borrow_mut() = Some(inv_std.clone());
             (mean, variance)
         } else {
             let running_mean = self.running_mean.borrow();
@@ -599,12 +706,12 @@ impl Module for ZSpaceBatchNorm1d {
             (running_mean.data().to_vec(), running_var.data().to_vec())
         };
 
-        let inv_std: Vec<f32> = self.last_inv_std.borrow().clone().unwrap_or_else(|| {
-            variance
-                .iter()
-                .map(|v| 1.0 / (v + self.epsilon).sqrt())
-                .collect()
-        });
+        let inv_std: Vec<f32> = variance
+            .iter()
+            .map(|v| 1.0 / (v + self.epsilon).sqrt())
+            .collect();
+        *self.last_mean.borrow_mut() = Some(mean.clone());
+        *self.last_inv_std.borrow_mut() = Some(inv_std.clone());
 
         for row in 0..batch {
             let slice = &input.data()[row * features..(row + 1) * features];
@@ -1089,5 +1196,61 @@ mod tests {
         for (observed, expected) in grad_input.data().iter().zip(numeric.iter()) {
             assert!((observed - expected).abs() < 1e-3);
         }
+    }
+
+    #[test]
+    fn zspace_batch_norm_exposes_telemetry() {
+        let layer = ZSpaceBatchNorm1d::new("bnz", 3, -1.0, 0.2, 1e-5)
+            .unwrap()
+            .with_projector_gain(0.6)
+            .unwrap();
+        let input = Tensor::from_vec(
+            2,
+            3,
+            vec![
+                0.25, -0.5, 0.75, // sample 0
+                1.25, -1.0, 0.5, // sample 1
+            ],
+        )
+        .unwrap();
+        let _ = layer.forward(&input).unwrap();
+        let telemetry = layer.telemetry().expect("telemetry available");
+        assert_eq!(telemetry.batch(), 2);
+        assert_eq!(telemetry.features(), 3);
+        assert_eq!(telemetry.mean().len(), 3);
+        assert_eq!(telemetry.inv_std().len(), 3);
+        assert_eq!(telemetry.radius().len(), 3);
+        assert_eq!(telemetry.normed().len(), 6);
+        assert_eq!(telemetry.projected().len(), 6);
+        assert_eq!(telemetry.jacobian().len(), 6);
+        for &value in telemetry.jacobian() {
+            assert!(value.is_finite());
+            assert!(value > 0.0);
+        }
+    }
+
+    #[test]
+    fn zspace_batch_norm_adapts_projector_gain() {
+        let layer = ZSpaceBatchNorm1d::new("bnz", 2, -1.0, 0.2, 1e-5)
+            .unwrap()
+            .with_projector_gain(0.15)
+            .unwrap();
+        let input = Tensor::from_vec(2, 2, vec![0.5, -0.25, -0.75, 1.0]).unwrap();
+        let _ = layer.forward(&input).unwrap();
+        let before = layer.projector_gain();
+        let telemetry = layer.telemetry().expect("telemetry available");
+        let avg_radius: f32 =
+            telemetry.radius().iter().copied().sum::<f32>() / telemetry.radius().len() as f32;
+        let target = (avg_radius + 0.25).min(0.9);
+        let updated = layer
+            .adapt_projector_gain(target, 0.8)
+            .expect("gain adaptation succeeds");
+        if target > avg_radius {
+            assert!(updated >= before);
+        } else if target < avg_radius {
+            assert!(updated <= before);
+        }
+        assert!(updated <= 1.0);
+        assert!((layer.projector_gain() - updated).abs() < f32::EPSILON);
     }
 }

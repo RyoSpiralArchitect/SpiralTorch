@@ -3350,6 +3350,7 @@ dependencies = [
  "serde",
  "serde_json",
  "spiral-config",
+ "st-backend-hip",
  "st-frac",
  "st-kdsl",
  "wgpu",

@@ -1,31 +1,31 @@
 # Envelope Tooling Bonus Ideas
 
-このドキュメントでは、ナレーション用エンベロープ処理を支援するためのおまけ開発案をまとめています。いずれも運用者や開発者の負担を下げ、トラブル時の可視化・復旧をサポートすることを目的としています。
+This note collects five “nice to have” tools that would make narration envelope operations friendlier for on-call engineers and integrators. Each proposal aims to reduce repetitive validation work, surface configuration drift faster, or provide extra safety nets when production incidents strike.
 
 ## 1. 🧪 WASM-side Envelope Validator GUI
-- WebAssembly で動作するバリデーターをブラウザで提供し、エンベロープの静的検証をチェックリスト形式で表示。
-- MQ ルートの欠落、ブロックサイズの不整合、必須タグの欠如などを即時フィードバック。
-- 運用担当者のセルフチェックツールとして役立つが、気づかれずに裏で支えてくれる存在。
+- Publish a WebAssembly-powered checklist in the browser that runs the same structural validation logic as the CLI.
+- Flag missing MQ routes, incompatible dataset block sizes, and absent required tags before an envelope leaves the planner.
+- Ideal as a self-serve helper for operations staff even if it quietly does its job behind the scenes.
 
 ## 2. 📦 Envelope Diff Viewer
-- 過去に保存した JSON エンベロープ構成との比較 UI を提供し、タグの増減やルートの変更を差分として提示。
-- 運用中の設定変更確認や、デバッグ時の原因究明に役立つナビゲーション機能を備える。
-- 夜間のトラブルシュートを支える「妖精」的なアシスタント。
+- Offer a side-by-side comparison between a saved JSON envelope and the current plan, highlighting tag removals, route changes, and metadata drift.
+- Provide navigation shortcuts that make it easy to confirm day-of-release tweaks or chase down late-night regressions.
+- Becomes the debugging “fairy” that keeps morale intact during difficult troubleshooting sessions.
 
 ## 3. 📼 Z-space Narration Simulator
-- フロントエンドでランダム係数を生成し、WASM を介してナレーション処理を模擬した上で、COBOL 側に送信した“フリ”を行うデモ環境。
-- 実運用系を触れない新人教育や、疲れた時のリラクゼーション用途として活用できる。
+- Generate random resonance coefficients in JavaScript, route them through the WebAssembly bridge, and pretend to deliver them to COBOL to mimic the end-to-end workflow.
+- Doubles as an onboarding playground for new hires who cannot touch the live mainframe yet—and a soothing toy when you need a short break.
 
 ## 4. 🗃️ Job Envelope Archive
-- 発行したナレーションジョブをローカルに保存し、日付やコンテンツで検索可能にするアーカイブシステム。
-- 将来的な監査対応やトラブル発生時の復元に備え、安心材料として機能する。
+- Store every dispatched narration job locally with indexed metadata so teams can search by date, initiator, or target route.
+- Acts as a comfort blanket when auditors—or future incident reviews—ask for a concrete history of what ran and why.
 
 ## 5. 👩‍💻 COBOL Function Stub Generator
-- エンベロープ定義から COBOL 側のパラメータ定義や CALL 文テンプレートを自動生成。
-- キーパーソン不在時の保険として、また COBOL 拡張の実験を後押しするサポートツール。
-- `CobolEnvelope::function_stub()` が WORKING-STORAGE/PROCEDURE DIVISION テンプレートを構築し、`CobolDispatchPlanner.toCobolStub()` から WASM 経由でも取得できる。生成結果には MQ/CICS/データセット定義、係数テーブル初期化、`st_cobol_new_resonator`/`st_cobol_describe` 呼び出しが含まれる。 【F:bindings/st-wasm/src/cobol.rs†L741-L1224】【F:bindings/st-wasm/src/cobol.rs†L2283-L2287】【F:bindings/st-wasm/src/cobol_bridge.rs†L500-L503】
+- Derive WORKING-STORAGE and PROCEDURE DIVISION scaffolding straight from an envelope definition so COBOL maintainers can wire narrators into existing transaction flows.
+- Serves as “coverage insurance” when key experts are offline and nudges teams to experiment with additional COBOL touchpoints.
+- `CobolEnvelope::function_stub()` assembles the annotated program, while `CobolDispatchPlanner.toCobolStub()` exposes the same output to WASM callers. The generated stub bundles MQ/CICS/dataset declarations, coefficient initialisation, and the lifecycle calls to `st_cobol_new_resonator` and `st_cobol_describe`.【F:bindings/st-wasm/src/cobol.rs†L742-L1316】【F:bindings/st-wasm/src/cobol.rs†L2277-L2295】【F:bindings/st-wasm/src/cobol_bridge.rs†L492-L505】
 
-## 今後の検討事項
-- どの案を優先的に実装するかを、運用部門や新人教育担当とのヒアリングで評価する。
-- 各案に必要な技術スタック（WebAssembly、差分ビュー UI、COBOL 自動生成など）の調査とプロトタイピングを進める。
-- セキュリティと運用フローへの影響を評価し、導入コストを明確化する。
+## Future evaluation
+- Prioritise the backlog with input from operations, onboarding mentors, and reliability leads.
+- Prototype the supporting stacks (WASM UIs, diff visualisation, COBOL code generation) so effort estimates stay realistic.
+- Audit security and operational impact ahead of any rollout, including how each tool fits existing change-management processes.
