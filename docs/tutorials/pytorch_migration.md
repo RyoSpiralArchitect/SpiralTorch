@@ -13,6 +13,7 @@ framework.
 | `nn.BatchNorm1d(feats)` | `st_nn::layers::BatchNorm1d::new("bn", feats, 0.1, 1e-5)` |
 | `nn.BatchNorm1d(feats)` + Z-space | `st_nn::layers::ZSpaceBatchNorm1d::new("bnz", feats, -1.0, 0.1, 1e-5)?` |
 | `nn.LayerNorm(feats)` | `st_nn::layers::LayerNorm::new("ln", feats, -1.0, 1e-5)` |
+| `nn.LayerNorm(feats)` + Z-space | `st_nn::layers::ZSpaceLayerNorm::new("lnz", feats, -1.0, 1e-5)?` |
 | `nn.LSTM(in, hidden)` | `st_nn::layers::Lstm::new("lstm", in, hidden)` |
 | `nn.MaxPool2d` / `nn.AvgPool2d` | `st_nn::layers::conv::MaxPool2d`, `st_nn::layers::conv::AvgPool2d` |
 
@@ -21,9 +22,9 @@ and evaluation using `set_training(true/false)` exactly like PyTorch. The LSTM f
 time-major 2-D tensor and exposes `set_state` / `reset_state` helpers to manage the hidden and cell
 states explicitly.
 
-The Z-space batch norm extends its Euclidean counterpart with a curvature-aware projector. You can
-blend Euclidean and hyperbolic activations via `with_projector_gain` or adjust the gain during
-training using `adapt_projector_gain` to keep the projected radius within a desired range.
+The Z-space batch and layer norm variants extend their Euclidean counterparts with a curvature-aware
+projector. You can blend Euclidean and hyperbolic activations via `with_projector_gain` or adjust the
+gain during training using `adapt_projector_gain` to keep the projected radius within a desired range.
 
 ## Optimisers and schedulers
 
@@ -67,10 +68,11 @@ Guard scopes give you precise control over automatic casting when mixing FP16/FP
 
 ## Z-space telemetry and interpretability
 
-`ZSpaceBatchNorm1d` records detailed telemetry every forward pass: per-feature radius, the
-projection Jacobian, the whitened activations, and the projected values before the affine branch.
-Call `telemetry()` to retrieve a `ZSpaceBatchNormTelemetry` snapshot or `last_ball_radius()` for a
-quick per-feature summary. These diagnostics unlock curvature-aware regularisation heuristics:
+`ZSpaceBatchNorm1d` and `ZSpaceLayerNorm` record detailed telemetry every forward pass. Batch norm
+captures per-feature radius while layer norm captures per-sample curvature, in addition to the
+projection Jacobian, whitened activations, and blended outputs. Call `telemetry()` to retrieve a
+`ZSpaceBatchNormTelemetry` or `ZSpaceLayerNormTelemetry` snapshot, or `last_ball_radius()` for a
+quick summary. These diagnostics unlock curvature-aware regularisation heuristics:
 
 ```rust
 let telemetry = layer.telemetry().expect("forward pass executed");
@@ -82,14 +84,15 @@ if avg_radius > 0.8 {
 ```
 
 When you prefer an automated adjustment, `adapt_projector_gain` nudges the projector gain towards a
-target radius with exponential smoothing, enabling self-regulating Z-space pipelines.
+target radius with exponential smoothing, enabling self-regulating Z-space pipelines across both
+batch and layer normalisation workflows.
 
 For vision models, `st_vision::xai::GradCam` interoperates seamlessly with Z-space activations, so
 you can visualise curvature-aware representations without additional glue code.
 
 ## Summary
 
-* Native Rust implementations of `BatchNorm1d`, `ZSpaceBatchNorm1d`, `LayerNorm`, and `Lstm` mirror
+* Native Rust implementations of `BatchNorm1d`, `ZSpaceBatchNorm1d`, `ZSpaceLayerNorm`, `LayerNorm`, and `Lstm` mirror
   PyTorch ergonomics while exposing curvature-aware controls.
 * `ZSpaceOptimizer` and `WarmupCosineScheduler` cover the common optimisation rituals inside
   SpiralTorch.

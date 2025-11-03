@@ -36,7 +36,10 @@ pub use non_liner::{
     NonLiner, NonLinerActivation, NonLinerEllipticConfig, NonLinerGeometry,
     NonLinerHyperbolicConfig,
 };
-pub use normalization::{BatchNorm1d, LayerNorm, ZSpaceBatchNorm1d, ZSpaceBatchNormTelemetry};
+pub use normalization::{
+    BatchNorm1d, LayerNorm, ZSpaceBatchNorm1d, ZSpaceBatchNormTelemetry, ZSpaceLayerNorm,
+    ZSpaceLayerNormTelemetry,
+};
 pub use scaler::Scaler;
 pub use softmax::ZSpaceSoftmax;
 pub use topos_resonator::ToposResonator;
