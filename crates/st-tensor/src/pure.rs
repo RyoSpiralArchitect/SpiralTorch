@@ -133,6 +133,8 @@ pub enum TensorError {
     UnsupportedLayout { label: &'static str },
     /// Interoperability bridge encountered an unsupported or malformed DLPack tensor.
     DlpackError { message: String },
+    /// Generic error with a custom message.
+    Generic(String),
 }
 
 impl fmt::Display for TensorError {
@@ -259,6 +261,9 @@ impl fmt::Display for TensorError {
             }
             TensorError::DlpackError { message } => {
                 write!(f, "dlpack error: {message}")
+            }
+            TensorError::Generic(message) => {
+                write!(f, "{message}")
             }
         }
     }

@@ -199,7 +199,7 @@ impl ModulePipelineBuilder {
     pub fn build(self) -> PureResult<crate::Sequential> {
         let mut sequential = crate::Sequential::new();
         for module in self.modules {
-            sequential.push(module);
+            sequential.push_boxed(module);
         }
         Ok(sequential)
     }

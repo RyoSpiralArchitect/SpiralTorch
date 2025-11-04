@@ -188,8 +188,8 @@ impl PyDataLoaderIter {
 #[cfg(feature = "nn")]
 #[pymethods]
 impl PyDataLoaderIter {
-    fn __iter__(slf: PyRefMut<'_, Self>) -> PyResult<Py<PyDataLoaderIter>> {
-        Ok(slf.into_py(slf.py()))
+    fn __iter__(slf: PyRef<'_, Self>) -> Py<PyDataLoaderIter> {
+        slf.into()
     }
 
     fn __next__(mut slf: PyRefMut<'_, Self>) -> PyResult<Option<(PyTensor, PyTensor)>> {

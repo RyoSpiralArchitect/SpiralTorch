@@ -5,7 +5,7 @@
 
 #[cfg(feature = "faer")]
 mod imp {
-    use faer::get_global_parallelism;
+    use faer::{get_global_parallelism, Accum};
     use faer::linalg::matmul::matmul as faer_matmul;
     use faer::mat::{MatMut, MatRef};
 
@@ -141,13 +141,15 @@ mod imp {
         dst.fill(0.0);
         let mut out = unsafe { row_major_mut(dst.as_mut_ptr(), rows, cols, cols as isize, 1) };
         
-        use faer::linalg::matmul::Accum;
+        // faer 0.23 API: matmul(dst, beta, lhs, rhs, alpha, parallelism)
+        // beta: Accum::Replace (overwrite) or Accum::Add (accumulate)
+        // Since dst is zero-filled, we use Replace to overwrite with α·A·B
         faer_matmul(
             out.as_mut(),
-            Accum::Replace(lhs.as_ref()),
+            Accum::Replace,      // Overwrite dst with result
+            lhs.as_ref(),
             rhs.as_ref(),
-            None,
-            1.0,
+            1.0,                  // α = 1
             get_global_parallelism(),
         );
 
