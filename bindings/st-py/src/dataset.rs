@@ -188,8 +188,13 @@ impl PyDataLoaderIter {
 #[cfg(feature = "nn")]
 #[pymethods]
 impl PyDataLoaderIter {
-    fn __iter__(slf: PyRefMut<'_, Self>) -> PyResult<Py<PyDataLoaderIter>> {
-        Ok(slf.into_py(slf.py()))
+    /// Returns an iterator over the dataset.
+    /// 
+    /// This method implements the Python iterator protocol (__iter__).
+    /// The conversion from PyRef to Py<PyDataLoaderIter> is guaranteed to succeed
+    /// as it only involves reference counting, not any fallible operations.
+    fn __iter__(slf: PyRef<'_, Self>) -> Py<PyDataLoaderIter> {
+        slf.into()
     }
 
     fn __next__(mut slf: PyRefMut<'_, Self>) -> PyResult<Option<(PyTensor, PyTensor)>> {

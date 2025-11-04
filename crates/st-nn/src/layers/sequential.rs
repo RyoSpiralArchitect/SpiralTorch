@@ -32,6 +32,11 @@ impl Sequential {
         self.layers.push(Box::new(layer));
     }
 
+    /// Appends a pre-boxed module to the sequence.
+    pub fn push_boxed(&mut self, layer: Box<dyn Module>) {
+        self.layers.push(layer);
+    }
+
     /// Returns the number of layers registered in the container.
     pub fn len(&self) -> usize {
         self.layers.len()

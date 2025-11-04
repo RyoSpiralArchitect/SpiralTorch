@@ -19,6 +19,19 @@ Reuse or redistribution **must retain the SpiralTorch name and authorship** as p
 
 ---
 
+## 🚀 Quick Start
+
+**New to SpiralTorch?** Start here:
+
+- 📚 **[Getting Started Guide](docs/getting-started.md)** - Installation, first steps, and core concepts
+- 🔄 **[PyTorch Migration Guide](docs/pytorch-migration-guide.md)** - Seamless transition from PyTorch  
+- 📖 **[Example Gallery](docs/example-gallery.md)** - 18+ examples across vision, NLP, RL, and more
+- 🌌 **[Z-Space Introduction](docs/zspace_intro.md)** - Understanding hyperbolic geometry in ML
+
+**Already familiar?** Jump to [Installation](#install-pip) or explore [Latest Highlights](#-latest-spiraltorch-highlights).
+
+---
+
 ### Why SpiralTorch  
 
 Modern ML stacks were built around CUDA—fast, but closed and rigid.  

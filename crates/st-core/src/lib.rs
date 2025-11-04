@@ -39,3 +39,6 @@ pub mod telemetry;
 pub mod plugin;
 
 pub use theory::maxwell;
+
+// Re-export common types from st-tensor
+pub use st_tensor::{PureResult, TensorError};

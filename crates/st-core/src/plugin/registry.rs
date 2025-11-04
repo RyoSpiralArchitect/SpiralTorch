@@ -103,7 +103,7 @@ impl PluginRegistry {
 
         // Call on_unload hook
         let mut ctx = self.context.lock().unwrap();
-        handle.with_plugin(|plugin| plugin.on_unload(&mut ctx))?;
+        handle.with_plugin(|plugin: &mut dyn Plugin| plugin.on_unload(&mut ctx))?;
         drop(ctx);
 
         // Emit event
