@@ -1245,7 +1245,6 @@ impl Module for ZSpaceLayerNorm {
     }
 }
 
-
 impl Module for LayerNorm {
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
         self.guard_input(input)?;
