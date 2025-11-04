@@ -36,5 +36,6 @@ pub mod util;
 
 pub mod coop;
 pub mod telemetry;
+pub mod plugin;
 
 pub use theory::maxwell;
