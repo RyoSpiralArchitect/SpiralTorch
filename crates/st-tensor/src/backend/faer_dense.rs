@@ -7,7 +7,7 @@
 mod imp {
     use faer::get_global_parallelism;
     use faer::linalg::matmul::matmul as faer_matmul;
-    use faer::mat::{from_raw_parts, from_raw_parts_mut, MatMut, MatRef};
+    use faer::mat::{MatMut, MatRef};
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum DenseLayout {
@@ -22,7 +22,7 @@ mod imp {
         row_stride: isize,
         col_stride: isize,
     ) -> MatRef<'a, f32> {
-        from_raw_parts(ptr, rows, cols, row_stride, col_stride)
+        MatRef::from_raw_parts(ptr, rows, cols, row_stride, col_stride)
     }
 
     unsafe fn row_major_mut<'a>(
@@ -32,7 +32,7 @@ mod imp {
         row_stride: isize,
         col_stride: isize,
     ) -> MatMut<'a, f32> {
-        from_raw_parts_mut(ptr, rows, cols, row_stride, col_stride)
+        MatMut::from_raw_parts_mut(ptr, rows, cols, row_stride, col_stride)
     }
 
     pub fn is_available() -> bool {
@@ -139,8 +139,17 @@ mod imp {
             unsafe { row_major_ref(rhs.as_ptr(), inner, cols, rhs_row_stride, rhs_col_stride) };
 
         dst.fill(0.0);
-        let out = unsafe { row_major_mut(dst.as_mut_ptr(), rows, cols, cols as isize, 1) };
-        faer_matmul(out, lhs, rhs, None, 1.0, get_global_parallelism());
+        let mut out = unsafe { row_major_mut(dst.as_mut_ptr(), rows, cols, cols as isize, 1) };
+        
+        use faer::linalg::matmul::Accum;
+        faer_matmul(
+            out.as_mut(),
+            Accum::Replace(lhs.as_ref()),
+            rhs.as_ref(),
+            None,
+            1.0,
+            get_global_parallelism(),
+        );
 
         Ok(())
     }
