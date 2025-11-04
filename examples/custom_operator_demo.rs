@@ -87,16 +87,25 @@ fn main() -> PureResult<()> {
             let grad_y = grad_outputs[0];
             let (rows, cols) = x.shape();
             
-            // Gradient computation (simplified)
+            // Gradient computation for L2 normalization
+            // d/dx (x / ||x||) = (I - xx^T/||x||^2) / ||x||
             let norm: f32 = x.data().iter().map(|&v| v * v).sum::<f32>().sqrt().max(1e-8);
+            let norm_sq = norm * norm;
+            
+            // Compute x^T * grad_y (dot product)
+            let dot_product: f32 = x
+                .data()
+                .iter()
+                .zip(grad_y.data().iter())
+                .map(|(&x_val, &grad_val)| x_val * grad_val)
+                .sum();
             
             let grad_data: Vec<f32> = x
                 .data()
                 .iter()
                 .zip(grad_y.data().iter())
-                .zip(y.data().iter())
-                .map(|((&x_val, &grad_val), &_y_val)| {
-                    (grad_val - x_val * grad_val) / norm
+                .map(|(&x_val, &grad_val)| {
+                    (grad_val * norm - x_val * dot_product / norm) / norm_sq
                 })
                 .collect();
             

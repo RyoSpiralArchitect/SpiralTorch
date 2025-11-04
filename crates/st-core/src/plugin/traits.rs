@@ -114,6 +114,26 @@ pub enum PluginCapability {
     Custom(String),
 }
 
+impl std::fmt::Display for PluginCapability {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PluginCapability::Backend(name) => write!(f, "Backend({})", name),
+            PluginCapability::Operators => write!(f, "Operators"),
+            PluginCapability::LossFunctions => write!(f, "LossFunctions"),
+            PluginCapability::Optimizers => write!(f, "Optimizers"),
+            PluginCapability::DataLoaders => write!(f, "DataLoaders"),
+            PluginCapability::Visualization => write!(f, "Visualization"),
+            PluginCapability::Telemetry => write!(f, "Telemetry"),
+            PluginCapability::Language => write!(f, "Language"),
+            PluginCapability::Vision => write!(f, "Vision"),
+            PluginCapability::ReinforcementLearning => write!(f, "ReinforcementLearning"),
+            PluginCapability::GraphNeuralNetworks => write!(f, "GraphNeuralNetworks"),
+            PluginCapability::Recommender => write!(f, "Recommender"),
+            PluginCapability::Custom(name) => write!(f, "Custom({})", name),
+        }
+    }
+}
+
 /// Core trait that all plugins must implement.
 ///
 /// Plugins are the primary extension mechanism in SpiralTorch. They can provide

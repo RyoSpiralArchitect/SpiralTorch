@@ -117,6 +117,12 @@ impl OperatorRegistry {
         }
     }
 
+    /// Clear all registered operators (useful for testing).
+    #[cfg(test)]
+    pub fn clear(&self) {
+        self.operators.write().unwrap().clear();
+    }
+
     /// Register a new operator.
     pub fn register(&self, operator: RegisteredOperator) -> PureResult<()> {
         let name = operator.metadata.signature.name.clone();
