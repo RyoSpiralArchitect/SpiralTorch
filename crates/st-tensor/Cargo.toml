@@ -53,7 +53,7 @@ spiral-config = { path = "../spiral-config" }
 serde = { version = "1.0", features = ["derive"], default-features = false }
 serde_json = "1.0"
 # High-performance SIMD dense linear algebra for CPU matmul acceleration.
-faer = { version = "0.18", default-features = false, features = ["std", "rayon"], optional = true }
+faer = { version = "0.23", default-features = false, features = ["std", "rayon"], optional = true }
 # Parallel execution for tiled CPU kernels.
 rayon = { version = "1.10" }
 # Optional; only needed if building WGPU kernel
