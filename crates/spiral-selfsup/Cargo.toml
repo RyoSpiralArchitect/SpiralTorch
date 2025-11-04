@@ -19,7 +19,7 @@ st-tensor = { path = "../st-tensor", default-features = false }
 st-vision = { path = "../st-vision", default-features = false }
 thiserror = "1"
 once_cell = "1"
-toml = "0.8"
+toml = "0.9"
 
 [dev-dependencies]
 rand = { version = "0.8", features = ["std", "std_rng"] }
