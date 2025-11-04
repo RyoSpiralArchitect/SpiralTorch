@@ -373,9 +373,7 @@ impl ResourceMonotonicityProof {
                 self.r2
             );
         }
-        info!(
-            "✓ Resource monotonicity verified: r1 ≼ r2 ⟹ d(r2) ≤ d(r1)"
-        );
+        info!("✓ Resource monotonicity verified: r1 ≼ r2 ⟹ d(r2) ≤ d(r1)");
         Ok(())
     }
 }
@@ -429,9 +427,7 @@ impl DistributionDominanceProof {
                 self.dominance.d2
             );
         }
-        info!(
-            "✓ Distribution dominance verified: D ≼ D' ⟹ d(D) ≤ d(D')"
-        );
+        info!("✓ Distribution dominance verified: D ≼ D' ⟹ d(D) ≤ d(D')");
         Ok(())
     }
 }
@@ -482,10 +478,7 @@ impl SpiralPoint {
         let (phase, oracle) = if normalized_theta < 2.0 {
             (SpiralPhase::Equal, OracleType::Equal)
         } else if normalized_theta < 4.0 {
-            (
-                SpiralPhase::Approximate,
-                OracleType::Hybrid { distance: 0 },
-            )
+            (SpiralPhase::Approximate, OracleType::Hybrid { distance: 0 })
         } else {
             (SpiralPhase::NotEqual, OracleType::NotEqual)
         };
@@ -543,14 +536,13 @@ impl MonodromyLoop {
 
     /// Traverse one complete loop around S¹
     pub fn traverse_loop(&mut self) -> Result<()> {
-        info!("Starting monodromy loop traversal from θ = {:.2}", self.current.theta);
+        info!(
+            "Starting monodromy loop traversal from θ = {:.2}",
+            self.current.theta
+        );
 
         // Traverse through all three phases
-        let steps = vec![
-            (1.0, "U_= → U_≈"),
-            (2.0, "U_≈ → U_≠"),
-            (3.0, "U_≠ → U_="),
-        ];
+        let steps = vec![(1.0, "U_= → U_≈"), (2.0, "U_≈ → U_≠"), (3.0, "U_≠ → U_=")];
 
         for (delta, desc) in steps {
             self.current.advance(delta);
@@ -607,8 +599,8 @@ impl SpiralReality {
         info!("Initializing SpiralReality framework");
 
         // Run numerical experiments
-        let experiments = run_numerical_experiments()
-            .context("Failed to run numerical experiments")?;
+        let experiments =
+            run_numerical_experiments().context("Failed to run numerical experiments")?;
         let worst_errors = compute_worst_error(&experiments);
 
         // Set up proof obligations
@@ -723,7 +715,10 @@ impl SpiralReality {
         ));
 
         report.push_str("\n§ 3. Monodromy (モノドロミー)\n");
-        report.push_str(&format!("  Current phase: {:?}\n", self.monodromy.current.phase));
+        report.push_str(&format!(
+            "  Current phase: {:?}\n",
+            self.monodromy.current.phase
+        ));
         report.push_str(&format!("  Loops completed: {}\n", self.monodromy.loops));
         report.push_str(&format!(
             "  Φ_= current value: {}\n",

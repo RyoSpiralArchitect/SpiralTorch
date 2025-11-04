@@ -30,13 +30,22 @@ fn main() -> Result<()> {
 
     // Demonstrate monodromy loop
     println!("\n🔄 Demonstrating monodromy (one complete loop):");
-    println!("  Initial Φ_= value: {}", reality.monodromy.phi_equal_value());
+    println!(
+        "  Initial Φ_= value: {}",
+        reality.monodromy.phi_equal_value()
+    );
 
     reality.monodromy.traverse_loop()?;
-    println!("  After 1 loop, Φ_= value: {}", reality.monodromy.phi_equal_value());
+    println!(
+        "  After 1 loop, Φ_= value: {}",
+        reality.monodromy.phi_equal_value()
+    );
 
     reality.monodromy.traverse_loop()?;
-    println!("  After 2 loops, Φ_= value: {}", reality.monodromy.phi_equal_value());
+    println!(
+        "  After 2 loops, Φ_= value: {}",
+        reality.monodromy.phi_equal_value()
+    );
 
     println!("\n✅ SpiralReality demonstration complete!\n");
 
