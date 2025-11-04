@@ -6,10 +6,17 @@ authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
 license = "AGPL-3.0-or-later"
 description = "Telemetry bridge for emitting SoftLogic feedback metrics"
 
+[[example]]
+name = "spiral_reality_demo"
+path = "../../examples/spiral_reality_demo.rs"
+
 [dependencies]
 anyhow = "1"
 tracing = "0.1"
 st-softlogic = { path = "../st-softlogic" }
+
+[dev-dependencies]
+tracing-subscriber = "0.3"
 
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"

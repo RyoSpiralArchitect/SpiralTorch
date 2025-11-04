@@ -3405,6 +3405,7 @@ dependencies = [
  "anyhow",
  "st-softlogic",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

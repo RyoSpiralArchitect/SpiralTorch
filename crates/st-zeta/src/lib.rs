@@ -1,5 +1,7 @@
 //! Telemetry helpers for emitting SoftLogic feedback signals.
 
+pub mod spiral_reality;
+
 use anyhow::Result;
 use st_softlogic::spiralk::ir::FeedbackBlock;
 use tracing::event;
