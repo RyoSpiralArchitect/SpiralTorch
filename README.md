@@ -222,7 +222,7 @@ tensor shims, no translation layers, and no tracebacks.
     transcripts, and ψ telemetry double as explainability artifacts, enabling
     decision-path inspection without leaving the Z-space calculus.
     
-**Current release:** `spiraltorch==0.2.8` (abi3 wheel, Python ≥3.8)  
+**Current release:** `spiraltorch==0.3.0` (abi3 wheel, Python ≥3.8)  
 **Targets:** CPU (always), MPS, Vulkan/DX (WGPU), CUDA, HIP/ROCm
 
 ---
@@ -230,7 +230,7 @@ tensor shims, no translation layers, and no tracebacks.
 ## Install (pip)
 
 ```bash
-pip install -U spiraltorch==0.2.8
+pip install -U spiraltorch==0.3.0
 ```
 
 - Wheels are **abi3**; you can use any CPython ≥ 3.8.
@@ -299,120 +299,116 @@ pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
 
 ## Python quickstart (wheel)
 
-> The snippets below run against the published `spiraltorch` wheel and showcase the new chat-notation helpers bundled with the Python bindings.
+> The snippets below run against the published `spiraltorch` wheel and showcase the rich ecosystem of Python bindings that make SpiralTorch's Z-space runtime accessible and intuitive.
 
-### 1) Safety-aware generation with chat notation helpers
+### 🌟 Quick Tour: Core Features
 
-```python
-from spiral.inference import (
-    ChatMessage,
-    ChatPrompt,
-    InferenceClient,
-)
-
-client = InferenceClient(refusal_threshold=0.65)
-
-messages = ChatPrompt.from_messages(
-    [
-        ChatMessage.system("You are SpiralTorch's safety-tuned narrator."),
-        ChatMessage.user("Summarise why WGPU inference matters in two sentences."),
-    ]
-)
-
-result = client.chat(messages, candidate="Portable GPUs keep attention fast without CUDA lock-in.")
-
-if result.accepted:
-    print("model:", result.response)
-else:
-    print("refusal:", result.refusal_message)
-
-for event in client.audit_events():
-    verdict = event.verdict
-    print(f"[{event.timestamp}] {event.channel} → {verdict.dominant_risk} (score={verdict.score:.2f})")
-```
-
-The `spiral.inference` helpers ship alongside the wheel and wrap the native
-`spiraltorch.inference` runtime with ergonomic dataclasses. Build chat prompts
-with `ChatMessage`/`ChatPrompt`, or hand `InferenceClient.generate(...)` a plain
-string — the client normalises either form, applies safety policy checks, and
-records every verdict in the audit log.
-
-### 2) Practical tensor constructors (and axis labels)
+#### 1) Tensor creation and basic operations
 
 ```python
 import spiraltorch as st
 
-zeros = st.Tensor(2, 3)  # rows, cols → zero-initialised
-from_rows = st.tensor([[1, 2, 3], [4, 5, 6]])
+# Create tensors from Python lists
+x = st.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+y = st.Tensor(2, 3)  # Zero-initialized 2x3 tensor
+
+# Label your dimensions for clarity
 labeled = st.tensor(
     [[0.2, 0.8], [0.4, 0.6]],
     axes=[st.Axis("batch", 2), st.Axis("feature", 2)],
 )
 
-print("zeros:", zeros.tolist())
-print("from_rows shape:", from_rows.shape())
-print("labeled axis names:", labeled.axis_names())
+# Basic operations
+z = x.scale(2.0)  # Multiply by scalar
+print("Shape:", x.shape())
+print("Data:", x.tolist())
+print("Axis names:", labeled.axis_names())
 ```
 
-`Tensor(rows, cols, data=None)` mirrors the Rust constructor exactly, while
-`st.tensor(...)` accepts any nested iterable (or existing SpiralTorch/Torch
-tensor) and flattens it for you. Attach human-readable dimensions with
-`Axis`/`LabeledTensor` so downstream planning and visualisation stay in sync.
+#### 2) Zero-copy interop with PyTorch via DLPack
 
-### 3) Hypergrad tapes without ceremony
+```python
+import spiraltorch as st
+import torch
+from torch.utils.dlpack import from_dlpack as torch_from_dlpack
+
+# SpiralTorch → PyTorch (zero-copy)
+st_tensor = st.Tensor(2, 3, [1, 2, 3, 4, 5, 6])
+capsule = st_tensor.to_dlpack()
+torch_tensor = torch_from_dlpack(capsule)
+
+# Mutations are visible in both (shared memory)
+torch_tensor += 10
+print("SpiralTorch sees changes:", st_tensor.tolist())
+
+# PyTorch → SpiralTorch
+pt_tensor = torch.arange(6, dtype=torch.float32).reshape(2, 3)
+st_from_torch = st.Tensor.from_dlpack(pt_tensor)
+pt_tensor.mul_(2)
+print("SpiralTorch sees torch mul_:", st_from_torch.tolist())
+```
+
+#### 3) Hypergrad tapes for Z-space optimization
 
 ```python
 import spiraltorch as st
 
+# Initialize weights and create hypergrad tape
 weights = st.Tensor(1, 3, [0.1, 0.2, 0.3])
 tape = st.hg[weights](
-    curvature=-0.9,
+    curvature=-0.9,  # Hyperbolic curvature
     learning_rate=0.02,
 )
 
-guarded = st.hg[weights].with_topos(tolerance=1e-3, saturation=0.8, max_depth=8)
+# Add topological guards for stability
+guarded = st.hg[weights].with_topos(
+    tolerance=1e-3,
+    saturation=0.8,
+    max_depth=8
+)
 
+# Accumulate gradients
 prediction = st.Tensor(1, 3, [0.25, 0.25, 0.25])
 target = st.Tensor(1, 3, [0.0, 1.0, 0.0])
 tape.accumulate_pair(prediction, target)
+
+# Apply updates to weights
 tape.apply(weights)
 
-print("shape:", tape.shape(), "lr:", tape.learning_rate())
-print("guard curvature:", guarded.curvature())
-print("guard depth:", guarded.topos().max_depth())
+print("Tape shape:", tape.shape())
+print("Learning rate:", tape.learning_rate())
+print("Guard curvature:", guarded.curvature())
 ```
 
-The `st.hg[...]` DSL infers shapes from tensors, tuples, or slice notation
-(`st.hg[rows:cols]`) and forwards the result into `spiraltorch.hypergrad`. Chain
-`.with_topos(...)` to construct open-cartesian guards inline, or pass
-`st.hg.topos(...)` directly when you already have a reusable guard object.
-
-### 4) Hypergrad sessions & operator hints
+#### 4) Advanced hypergrad sessions with operator hints
 
 ```python
 import spiraltorch as st
-from spiral.hypergrad import hypergrad_session, hypergrad_summary_dict, suggest_hypergrad_operator
+from spiral.hypergrad import (
+    hypergrad_session,
+    hypergrad_summary_dict,
+    suggest_hypergrad_operator
+)
 
 weights = st.Tensor(1, 3, [0.05, -0.15, 0.25])
 targets = st.Tensor(1, 3, [0.0, 1.0, 0.0])
 
+# Context manager for automatic cleanup
 with hypergrad_session(weights, learning_rate=0.03, curvature=-0.85) as tape:
     tape.accumulate_pair(weights, targets)
+    
+    # Get detailed gradient metrics
     metrics = hypergrad_summary_dict(tape, include_gradient=True)
+    
+    # Get WGSL operator hints for GPU optimization
     hints = suggest_hypergrad_operator(metrics)
 
-print("summary:", metrics["summary"])  # l1/l2/linf/mean_abs/rms stats
-print("wgsl operator hints:", hints)
-print("gradient sample:", metrics.get("gradient", [])[:3])
+print("Gradient stats:", metrics["summary"])
+print("WGSL hints:", hints)
+print("Gradient sample:", metrics.get("gradient", [])[:3])
 ```
 
-`hypergrad_session(...)` wraps `st.hypergrad(...)` in a context manager so
-weights can accumulate, apply, and reset without manual `try`/`finally`
-scaffolding. Feed the resulting tape to `hypergrad_summary_dict(...)` and
-`suggest_hypergrad_operator(...)` to translate gradient telemetry into WGSL mix
-and gain hints for shader authors.
-
-### 5) Z-space encoders and metric normalisers
+#### 5) Z-space encoding and metric normalization
 
 ```python
 import spiraltorch as st
