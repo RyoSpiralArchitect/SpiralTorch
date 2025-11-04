@@ -128,7 +128,7 @@ jobs:
           output.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
           PY
       - name: Generate SLSA provenance for wheels
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v3
         with:
           subject-path: 'dist/**/*.whl'
       - name: Sign release artifacts with Sigstore
