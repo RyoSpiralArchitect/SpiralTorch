@@ -4,6 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 pub mod coherence_engine;
+pub mod plugin_bridge;
 pub mod psi_synchro;
 pub mod sequencer;
 pub mod vae;
@@ -12,6 +13,7 @@ pub use coherence_engine::{
     BackendCapabilities, CoherenceBackend, CoherenceEngine, DomainConcept, DomainLinguisticProfile,
     LinguisticChannelReport, LinguisticContour,
 };
+pub use plugin_bridge::{ZSpacePluginAdapter, ZSpacePluginRegistry};
 #[cfg(feature = "psi")]
 pub use psi_synchro::BranchPsiReading;
 #[cfg(feature = "golden")]

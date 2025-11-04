@@ -11,6 +11,7 @@
 
 pub mod cloud;
 pub mod dataset;
+pub mod discovery;
 pub mod gnn;
 #[cfg(feature = "golden")]
 pub mod golden;
@@ -32,6 +33,9 @@ pub mod z_rba;
 pub mod zspace_coherence;
 
 pub use dataset::{from_vec as dataset_from_vec, BatchIter, DataLoader, Dataset};
+pub use discovery::{
+    ModuleCategory, ModuleDiscoveryRegistry, ModuleMetadata, ModulePipelineBuilder,
+};
 pub use gnn::{
     embed_into_biome, flows_to_canvas_tensor, flows_to_canvas_tensor_with_shape,
     fold_into_roundtable, fold_with_band_energy, AggregationReducer, GraphActivation,
