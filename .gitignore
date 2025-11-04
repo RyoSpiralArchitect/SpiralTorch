@@ -6,3 +6,5 @@ node_modules/
 *.zip
 dist/
 logs/
+__pycache__/
+*.pyc
