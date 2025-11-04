@@ -16,6 +16,12 @@
 //! without leaking into the default build.
 
 pub mod ablog;
+pub mod operator_registry;
 pub mod rank_entry;
 pub mod realgrad;
 pub mod zspace_round;
+
+pub use operator_registry::{
+    global_operator_registry, GradientFn, OperatorBuilder, OperatorFn, OperatorMetadata,
+    OperatorRegistry, OperatorSignature, RegisteredOperator,
+};
