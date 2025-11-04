@@ -141,9 +141,12 @@ mod imp {
         dst.fill(0.0);
         let mut out = unsafe { row_major_mut(dst.as_mut_ptr(), rows, cols, cols as isize, 1) };
         
-        // faer 0.23 API: matmul(dst, beta, lhs, rhs, alpha, parallelism)
-        // beta: Accum::Replace (overwrite) or Accum::Add (accumulate)
-        // Since dst is zero-filled, we use Replace to overwrite with α·A·B
+        // faer 0.23 API: matmul(dst, accum_mode, lhs, rhs, alpha, parallelism)
+        // - dst: mutable output matrix
+        // - accum_mode: Accum::Replace (overwrite) or Accum::Add (accumulate)
+        // - lhs, rhs: input matrices
+        // - alpha: scalar multiplier (1.0 for simple C = A·B)
+        // - parallelism: threading configuration
         faer_matmul(
             out.as_mut(),
             Accum::Replace,      // Overwrite dst with result
