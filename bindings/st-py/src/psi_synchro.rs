@@ -5,7 +5,9 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyModule};
 use pyo3::{wrap_pyfunction, Bound};
 
-use st_core::telemetry::atlas::AtlasFragment;
+use st_core::telemetry::atlas::{AtlasFragment, ConceptSense};
+use st_core::telemetry::chrono::{ChronoHarmonics, ChronoPeak, ChronoSummary};
+use st_core::telemetry::maintainer::MaintainerStatus;
 #[cfg(feature = "psi")]
 use st_core::telemetry::psi::PsiReading;
 use st_core::theory::zpulse::{ZPulse, ZScale, ZSource, ZSupport};
@@ -61,6 +63,73 @@ fn scale_to_tuple(scale: Option<ZScale>) -> Option<(f32, f32)> {
     scale.map(|s| (s.physical_radius, s.log_radius))
 }
 
+fn chrono_peak_to_py(py: Python<'_>, peak: &ChronoPeak) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("frequency", peak.frequency)?;
+    dict.set_item("magnitude", peak.magnitude)?;
+    dict.set_item("phase", peak.phase)?;
+    Ok(dict.into())
+}
+
+fn chrono_summary_to_py(py: Python<'_>, summary: &ChronoSummary) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("frames", summary.frames)?;
+    dict.set_item("duration", summary.duration)?;
+    dict.set_item("latest_timestamp", summary.latest_timestamp)?;
+    dict.set_item("mean_drift", summary.mean_drift)?;
+    dict.set_item("mean_abs_drift", summary.mean_abs_drift)?;
+    dict.set_item("drift_std", summary.drift_std)?;
+    dict.set_item("mean_energy", summary.mean_energy)?;
+    dict.set_item("energy_std", summary.energy_std)?;
+    dict.set_item("mean_decay", summary.mean_decay)?;
+    dict.set_item("min_energy", summary.min_energy)?;
+    dict.set_item("max_energy", summary.max_energy)?;
+    Ok(dict.into())
+}
+
+fn chrono_harmonics_to_py(py: Python<'_>, harmonics: &ChronoHarmonics) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("frames", harmonics.frames)?;
+    dict.set_item("duration", harmonics.duration)?;
+    dict.set_item("sample_rate", harmonics.sample_rate)?;
+    dict.set_item("nyquist", harmonics.nyquist)?;
+    dict.set_item("drift_power", harmonics.drift_power.clone())?;
+    dict.set_item("energy_power", harmonics.energy_power.clone())?;
+    if let Some(peak) = harmonics.dominant_drift.as_ref() {
+        dict.set_item("dominant_drift", chrono_peak_to_py(py, peak)?)?;
+    } else {
+        dict.set_item("dominant_drift", py.None())?;
+    }
+    if let Some(peak) = harmonics.dominant_energy.as_ref() {
+        dict.set_item("dominant_energy", chrono_peak_to_py(py, peak)?)?;
+    } else {
+        dict.set_item("dominant_energy", py.None())?;
+    }
+    Ok(dict.into())
+}
+
+fn maintainer_status_to_py(status: Option<MaintainerStatus>) -> Option<&'static str> {
+    status.map(|value| value.as_str())
+}
+
+fn concept_annotation_to_py(
+    py: Python<'_>,
+    term: &str,
+    sense: ConceptSense,
+    rationale: Option<&String>,
+) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("term", term)?;
+    dict.set_item("sense", sense.label())?;
+    dict.set_item("description", sense.description())?;
+    if let Some(rationale) = rationale {
+        dict.set_item("rationale", rationale.as_str())?;
+    } else {
+        dict.set_item("rationale", py.None())?;
+    }
+    Ok(dict.into())
+}
+
 fn atlas_fragment_to_py(py: Python<'_>, fragment: AtlasFragment) -> PyResult<PyObject> {
     let dict = PyDict::new_bound(py);
     dict.set_item("timestamp", fragment.timestamp)?;
@@ -68,6 +137,20 @@ fn atlas_fragment_to_py(py: Python<'_>, fragment: AtlasFragment) -> PyResult<PyO
     dict.set_item("collapse_total", fragment.collapse_total)?;
     dict.set_item("z_signal", fragment.z_signal)?;
     dict.set_item("script_hint", fragment.script_hint)?;
+    if let Some(summary) = fragment.summary.as_ref() {
+        dict.set_item("chrono_summary", chrono_summary_to_py(py, summary)?)?;
+    } else {
+        dict.set_item("chrono_summary", py.None())?;
+    }
+    if let Some(harmonics) = fragment.harmonics.as_ref() {
+        dict.set_item("chrono_harmonics", chrono_harmonics_to_py(py, harmonics)?)?;
+    } else {
+        dict.set_item("chrono_harmonics", py.None())?;
+    }
+    dict.set_item("maintainer_status", maintainer_status_to_py(fragment.maintainer_status))?;
+    dict.set_item("maintainer_diagnostic", fragment.maintainer_diagnostic)?;
+    dict.set_item("suggested_max_scale", fragment.suggested_max_scale)?;
+    dict.set_item("suggested_pressure", fragment.suggested_pressure)?;
     let metrics = PyList::empty_bound(py);
     for metric in fragment.metrics.iter() {
         let metric_dict = PyDict::new_bound(py);
@@ -78,6 +161,17 @@ fn atlas_fragment_to_py(py: Python<'_>, fragment: AtlasFragment) -> PyResult<PyO
     }
     dict.set_item("metrics", metrics)?;
     dict.set_item("notes", fragment.notes.clone())?;
+    let concepts = PyList::empty_bound(py);
+    for concept in fragment.concepts.iter() {
+        let annotation = concept_annotation_to_py(
+            py,
+            &concept.term,
+            concept.sense,
+            concept.rationale.as_ref(),
+        )?;
+        concepts.append(annotation)?;
+    }
+    dict.set_item("concepts", concepts)?;
     Ok(dict.into())
 }
 
