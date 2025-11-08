@@ -10,6 +10,7 @@ as a unified system, showing the flow of data and transformations across:
 - Vision processing
 - Reinforcement learning
 - System-wide feedback loops
+- Ecosystem memory weaving
 
 This is a complete end-to-end workflow showing SpiralTorch as a "giant OS"
 for machine learning.
@@ -72,6 +73,7 @@ try:
         SafetyReview,
         SensorFusionHub,
         TelemetryReport,
+        TelemetryAtlas,
         ZSpaceDynamics,
         ZSpaceGeometry,
     )
@@ -88,6 +90,7 @@ except ModuleNotFoundError:
     SafetyReview = robotics_module.SafetyReview
     SensorFusionHub = robotics_module.SensorFusionHub
     TelemetryReport = robotics_module.TelemetryReport
+    TelemetryAtlas = robotics_module.TelemetryAtlas
     ZSpaceDynamics = robotics_module.ZSpaceDynamics
     ZSpaceGeometry = robotics_module.ZSpaceGeometry
     TelemetryInsight = robotics_module.TelemetryInsight
@@ -155,6 +158,7 @@ class IntegratedMLPipeline:
 
         self.sensor_fusion = SensorFusionHub()
         self.telemetry = PsiTelemetry(window=6, stability_threshold=0.6, geometry=self.geometry)
+        self.telemetry_atlas = TelemetryAtlas(window=9)
 
         self.fractal_canvas = FractalCanvas(dim=float(self.z_dim))
         self.policy = PolicyGradient()
@@ -620,6 +624,42 @@ class IntegratedMLPipeline:
             "adaptation_readiness": adaptation_readiness,
         }
 
+    def weave_ecosystem_memory(
+        self,
+        telemetry_insight: TelemetryInsight,
+        synergy_summary: dict[str, float],
+        harmony_summary: dict[str, float],
+        fractal_signature: FractalSignature,
+        projection_summary: dict[str, float],
+    ) -> dict[str, float]:
+        """Archive telemetry-synergy interplay to guide broader adaptation."""
+
+        print("\n" + "-" * 70)
+        print("STEP 11: ECOSYSTEM MEMORY WEAVING")
+        print("-" * 70)
+
+        summary = self.telemetry_atlas.record(
+            stability_margin=telemetry_insight.stability_margin,
+            synergy_index=synergy_summary.get("synergy_index", 0.0),
+            harmony=harmony_summary.get("system_harmony", 0.0),
+            resonance=fractal_signature.resonance,
+            drift_penalty=fractal_signature.drift_index,
+            anomaly_pressure=telemetry_insight.anomaly_pressure,
+            adaptation_readiness=projection_summary.get("adaptation_readiness", 0.0),
+            energy_trend=telemetry_insight.energy_trend,
+            curvature=self.curvature,
+        )
+
+        print(
+            "✓ Ecosystem memory -> "
+            f"cohesion={summary['ecosystem_cohesion']:.4f}, "
+            f"resilience={summary['ecosystem_resilience']:.4f}, "
+            f"memory={summary['atlas_memory_strength']:.4f}, "
+            f"window_fill={summary['atlas_window_fill']:.4f}"
+        )
+
+        return summary
+
     # ------------------------------------------------------------------
     # Training orchestration
     # ------------------------------------------------------------------
@@ -701,6 +741,13 @@ class IntegratedMLPipeline:
             harmony_summary["system_harmony"],
             telemetry_report.stability,
         )
+        memory_summary = self.weave_ecosystem_memory(
+            telemetry_insight,
+            synergy_summary,
+            harmony_summary,
+            fractal_signature,
+            projection_summary,
+        )
 
         step_metrics = {
             "step": float(self.step_count),
@@ -744,6 +791,21 @@ class IntegratedMLPipeline:
             "projected_loss": float(projection_summary["projected_loss"]),
             "projected_effective_lr": float(projection_summary["projected_effective_lr"]),
             "adaptation_readiness": float(projection_summary["adaptation_readiness"]),
+            "ecosystem_cohesion": float(memory_summary["ecosystem_cohesion"]),
+            "ecosystem_resilience": float(memory_summary["ecosystem_resilience"]),
+            "atlas_memory_strength": float(memory_summary["atlas_memory_strength"]),
+            "atlas_window_fill": float(memory_summary["atlas_window_fill"]),
+            "atlas_curvature_span": float(memory_summary["atlas_curvature_span"]),
+            "atlas_margin_mean": float(memory_summary["atlas_margin_mean"]),
+            "atlas_synergy_mean": float(memory_summary["atlas_synergy_mean"]),
+            "atlas_resonance_mean": float(memory_summary["atlas_resonance_mean"]),
+            "atlas_drift_mean": float(memory_summary["atlas_drift_mean"]),
+            "atlas_anomaly_pressure_mean": float(
+                memory_summary["atlas_anomaly_pressure_mean"]
+            ),
+            "atlas_adaptation_mean": float(memory_summary["atlas_adaptation_mean"]),
+            "atlas_energy_trend_mean": float(memory_summary["atlas_energy_trend_mean"]),
+            "atlas_harmony_trend": float(memory_summary["atlas_harmony_trend"]),
             "timestamp": float(time.time()),
         }
 
@@ -798,6 +860,17 @@ class IntegratedMLPipeline:
         avg_margin = _safe_mean(collect("telemetry_stability_margin"))
         avg_anomaly_pressure = _safe_mean(collect("telemetry_anomaly_pressure"))
         avg_feedback_harmony = _safe_mean(collect("system_feedback.harmony"))
+        avg_ecosystem_cohesion = _safe_mean(collect("ecosystem_cohesion"))
+        avg_ecosystem_resilience = _safe_mean(collect("ecosystem_resilience"))
+        avg_memory_strength = _safe_mean(collect("atlas_memory_strength"))
+        avg_harmony_trend = _safe_mean(collect("atlas_harmony_trend"))
+        avg_window_fill = _safe_mean(collect("atlas_window_fill"))
+        avg_atlas_synergy = _safe_mean(collect("atlas_synergy_mean"))
+        avg_atlas_resonance = _safe_mean(collect("atlas_resonance_mean"))
+        avg_atlas_drift = _safe_mean(collect("atlas_drift_mean"))
+        avg_atlas_anomaly = _safe_mean(collect("atlas_anomaly_pressure_mean"))
+        avg_atlas_adaptation = _safe_mean(collect("atlas_adaptation_mean"))
+        avg_atlas_energy_trend = _safe_mean(collect("atlas_energy_trend_mean"))
 
         print(f"Average loss: {avg_loss:.6f}")
         print(f"Average effective LR: {avg_lr:.6f}")
@@ -815,6 +888,17 @@ class IntegratedMLPipeline:
         print(f"Average stability margin: {avg_margin:.6f}")
         print(f"Average anomaly pressure: {avg_anomaly_pressure:.6f}")
         print(f"Average feedback harmony: {avg_feedback_harmony:.6f}")
+        print(f"Average ecosystem cohesion: {avg_ecosystem_cohesion:.6f}")
+        print(f"Average ecosystem resilience: {avg_ecosystem_resilience:.6f}")
+        print(f"Average atlas memory strength: {avg_memory_strength:.6f}")
+        print(f"Mean atlas harmony trend: {avg_harmony_trend:.6f}")
+        print(f"Average atlas window fill: {avg_window_fill:.6f}")
+        print(f"Average atlas synergy mean: {avg_atlas_synergy:.6f}")
+        print(f"Average atlas resonance mean: {avg_atlas_resonance:.6f}")
+        print(f"Average atlas drift mean: {avg_atlas_drift:.6f}")
+        print(f"Average atlas anomaly pressure mean: {avg_atlas_anomaly:.6f}")
+        print(f"Average atlas adaptation mean: {avg_atlas_adaptation:.6f}")
+        print(f"Average atlas energy trend mean: {avg_atlas_energy_trend:.6f}")
 
         if len(self.metrics_history) >= 2:
             initial = self.metrics_history[0]["loss"]
@@ -866,6 +950,7 @@ def main() -> None:
     print("  • Cross-modal synergy aligning telemetry insights with fractal resonance")
     print("  • Policy gradient reinforcement steering learning")
     print("  • System harmonization and future projection for adaptation")
+    print("  • Ecosystem memory weaving to retain cross-modal evolution")
     print("  • System-wide feedback and adaptation")
 
     pipeline = IntegratedMLPipeline(z_dim=4, learning_rate=0.02, curvature=-0.9)
@@ -914,9 +999,10 @@ def main() -> None:
     print("\nKey takeaways:")
     print("  1. Spiral consensus, robotics telemetry, and fractal vision align in adaptive loops")
     print("  2. Drift safety oversight, telemetry insights, and fractal resonance co-steer harmonization")
-    print("  3. Policy gradients absorb system feedback envelopes for responsive learning")
-    print("  4. Geometry-aware monitoring and synergy metrics keep learning dynamics coherent")
-    print("  5. SpiralTorch tensors interoperate seamlessly with PyTorch")
+    print("  3. Telemetry atlas weaving preserves cohesion and resilience insights across steps")
+    print("  4. Policy gradients absorb system feedback envelopes for responsive learning")
+    print("  5. Geometry-aware monitoring and synergy metrics keep learning dynamics coherent")
+    print("  6. SpiralTorch tensors interoperate seamlessly with PyTorch")
     print("\nSpiralTorch: A complete OS for Z-space machine learning")
     print("=" * 70 + "\n")
 
