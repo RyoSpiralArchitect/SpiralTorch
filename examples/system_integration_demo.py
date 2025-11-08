@@ -675,6 +675,27 @@ class IntegratedMLPipeline:
         )
 
         print(
+            "  ↳ Flux -> "
+            f"grade={summary['atlas_coherence_grade']}, "
+            f"synergy={summary['atlas_coherence_synergy']:.4f}, "
+            f"loop_range={summary['atlas_flux_loop_range']:.4f}, "
+            f"variability={summary['atlas_flux_loop_variability']:.4f}"
+        )
+
+        dominant_sense = summary.get("atlas_concept_dominant_sense", "n/a")
+        top_terms = summary.get("atlas_concept_top_terms", [])
+        if isinstance(top_terms, list) and top_terms:
+            top_terms_display = ", ".join(str(term) for term in top_terms[:3])
+        else:
+            top_terms_display = "n/a"
+        print(
+            "  ↳ Concept heatmap -> "
+            f"sense={dominant_sense}, "
+            f"density={summary.get('atlas_flux_concept_density', 0.0):.4f}, "
+            f"top_terms={top_terms_display}"
+        )
+
+        print(
             "  ↳ Forecast -> "
             f"cohesion={forecast['atlas_forecast_cohesion']:.4f}, "
             f"resilience={forecast['atlas_forecast_resilience']:.4f}, "
@@ -876,6 +897,34 @@ class IntegratedMLPipeline:
             "atlas_recent_margin_volatility": float(
                 memory_summary["atlas_recent_margin_volatility"]
             ),
+            "atlas_flux_coverage": float(memory_summary["atlas_flux_coverage"]),
+            "atlas_flux_loop_range": float(memory_summary["atlas_flux_loop_range"]),
+            "atlas_flux_loop_variability": float(
+                memory_summary["atlas_flux_loop_variability"]
+            ),
+            "atlas_flux_collapse_drift": float(
+                memory_summary["atlas_flux_collapse_drift"]
+            ),
+            "atlas_flux_z_signal_drift": float(
+                memory_summary["atlas_flux_z_signal_drift"]
+            ),
+            "atlas_flux_note_density": float(memory_summary["atlas_flux_note_density"]),
+            "atlas_flux_concept_density": float(
+                memory_summary["atlas_flux_concept_density"]
+            ),
+            "atlas_flux_synergy": float(memory_summary["atlas_flux_synergy"]),
+            "atlas_coherence_synergy": float(
+                memory_summary["atlas_coherence_synergy"]
+            ),
+            "atlas_flux_stability_hint": str(memory_summary["atlas_flux_stability_hint"]),
+            "atlas_coherence_grade": str(memory_summary["atlas_coherence_grade"]),
+            "atlas_concept_dominant_sense": str(
+                memory_summary.get("atlas_concept_dominant_sense", "n/a")
+            ),
+            "atlas_concept_top_terms": ", ".join(
+                str(term)
+                for term in memory_summary.get("atlas_concept_top_terms", [])[:3]
+            ),
             "timestamp": float(time.time()),
         }
 
@@ -952,6 +1001,16 @@ class IntegratedMLPipeline:
         avg_recent_margin_volatility = _safe_mean(
             collect("atlas_recent_margin_volatility")
         )
+        avg_flux_coverage = _safe_mean(collect("atlas_flux_coverage"))
+        avg_flux_loop_range = _safe_mean(collect("atlas_flux_loop_range"))
+        avg_flux_variability = _safe_mean(
+            collect("atlas_flux_loop_variability")
+        )
+        avg_flux_concept_density = _safe_mean(
+            collect("atlas_flux_concept_density")
+        )
+        avg_flux_synergy = _safe_mean(collect("atlas_flux_synergy"))
+        avg_coherence_synergy = _safe_mean(collect("atlas_coherence_synergy"))
 
         print(f"Average loss: {avg_loss:.6f}")
         print(f"Average effective LR: {avg_lr:.6f}")
@@ -991,6 +1050,14 @@ class IntegratedMLPipeline:
         print(
             f"Average recent margin volatility: {avg_recent_margin_volatility:.6f}"
         )
+        print(f"Average atlas flux coverage: {avg_flux_coverage:.6f}")
+        print(f"Average atlas flux loop range: {avg_flux_loop_range:.6f}")
+        print(f"Average atlas flux variability: {avg_flux_variability:.6f}")
+        print(
+            f"Average atlas flux concept density: {avg_flux_concept_density:.6f}"
+        )
+        print(f"Average atlas flux synergy: {avg_flux_synergy:.6f}")
+        print(f"Average atlas coherence synergy: {avg_coherence_synergy:.6f}")
 
         if len(self.metrics_history) >= 2:
             initial = self.metrics_history[0]["loss"]
@@ -1045,6 +1112,7 @@ def main() -> None:
     print(
         "  • Ecosystem memory weaving with vitality tracking and atlas forecasts"
     )
+    print("  • Atlas flux sensing and concept heatmaps guiding coherence cues")
     print("  • System-wide feedback and adaptation")
 
     pipeline = IntegratedMLPipeline(z_dim=4, learning_rate=0.02, curvature=-0.9)
@@ -1094,7 +1162,7 @@ def main() -> None:
     print("  1. Spiral consensus, robotics telemetry, and fractal vision align in adaptive loops")
     print("  2. Drift safety oversight, telemetry insights, and fractal resonance co-steer harmonization")
     print(
-        "  3. Telemetry atlas weaving surfaces vitality, correlation alignment, and forecasts"
+        "  3. Telemetry atlas weaving surfaces vitality, flux coherence, concept heatmaps, and forecasts"
     )
     print("  4. Policy gradients absorb system feedback envelopes for responsive learning")
     print("  5. Geometry-aware monitoring and synergy metrics keep learning dynamics coherent")

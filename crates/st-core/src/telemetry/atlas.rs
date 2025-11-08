@@ -893,6 +893,69 @@ impl AtlasRouteSummary {
             .into_iter()
             .find(|beacon| beacon.metric == metric)
     }
+
+    /// Builds a concept heatmap describing how philosophical annotations surfaced.
+    pub fn concept_heatmap(&self) -> AtlasConceptHeatmap {
+        let mut heatmap = AtlasConceptHeatmap::default();
+        for pulse in &self.concept_pulses {
+            if pulse.mentions == 0 {
+                continue;
+            }
+            let mentions = pulse
+                .mentions
+                .min(u32::MAX as usize) as u32;
+            *heatmap.sense_counts.entry(pulse.sense).or_default() += mentions;
+            *heatmap
+                .term_counts
+                .entry(pulse.term.clone())
+                .or_default() += mentions;
+            heatmap.total_mentions = heatmap
+                .total_mentions
+                .saturating_add(mentions);
+        }
+        heatmap.total_terms = heatmap
+            .term_counts
+            .values()
+            .filter(|count| **count > 0)
+            .count();
+        heatmap
+    }
+
+    /// Synthesises a flux summary capturing atlas volatility and density cues.
+    pub fn flux(&self) -> Option<AtlasFlux> {
+        if self.frames == 0 {
+            return None;
+        }
+        let loop_range = (self.loop_max - self.loop_min).max(0.0);
+        let loop_variability = self.loop_std.max(0.0);
+        let collapse_drift = self.collapse_trend.unwrap_or(0.0);
+        let z_signal_drift = self.z_signal_trend.unwrap_or(0.0);
+        let note_density = if self.frames > 0 {
+            self.total_notes as f32 / self.frames as f32
+        } else {
+            0.0
+        };
+        let heatmap = self.concept_heatmap();
+        let concept_density = if self.frames > 0 {
+            heatmap.total_mentions as f32 / self.frames as f32
+        } else {
+            0.0
+        };
+        Some(AtlasFlux {
+            coverage: self.frames,
+            loop_range,
+            loop_variability,
+            collapse_drift,
+            z_signal_drift,
+            note_density,
+            concept_density,
+        })
+    }
+
+    /// Derives a coherence grade based on the atlas flux signature.
+    pub fn coherence(&self) -> AtlasCoherence {
+        AtlasCoherence::from_flux(self.flux())
+    }
 }
 
 /// Perspective describing how a particular district can act on the atlas map.
@@ -1324,6 +1387,169 @@ pub struct ConceptPulse {
 struct ConceptAccumulator {
     mentions: usize,
     last_rationale: Option<String>,
+}
+
+/// Distribution of conceptual annotations seen across the atlas route.
+#[derive(Clone, Debug, Default)]
+pub struct AtlasConceptHeatmap {
+    /// Number of unique terms referenced by conceptual annotations.
+    pub total_terms: usize,
+    /// Total annotation mentions accumulated across the route.
+    pub total_mentions: u32,
+    /// Frequency of each conceptual sense invoked by the annotations.
+    pub sense_counts: BTreeMap<ConceptSense, u32>,
+    /// Frequency of each annotated term.
+    pub term_counts: BTreeMap<String, u32>,
+}
+
+impl AtlasConceptHeatmap {
+    /// Returns true when no annotations were observed.
+    pub fn is_empty(&self) -> bool {
+        self.total_mentions == 0
+    }
+
+    /// Returns the dominant conceptual sense when present.
+    pub fn dominant_sense(&self) -> Option<ConceptSense> {
+        self.sense_counts
+            .iter()
+            .max_by(|(sense_a, count_a), (sense_b, count_b)| {
+                count_a
+                    .cmp(count_b)
+                    .then_with(|| sense_a.label().cmp(sense_b.label()))
+            })
+            .map(|(sense, _)| *sense)
+    }
+
+    /// Returns the share of mentions attributed to a conceptual sense.
+    pub fn sense_ratio(&self, sense: ConceptSense) -> f32 {
+        if self.total_mentions == 0 {
+            return 0.0;
+        }
+        let count = self.sense_counts.get(&sense).copied().unwrap_or(0);
+        count as f32 / self.total_mentions as f32
+    }
+
+    /// Returns the most frequently annotated terms ordered by frequency.
+    pub fn top_terms(&self, limit: usize) -> Vec<(String, u32)> {
+        let mut terms: Vec<(String, u32)> = self
+            .term_counts
+            .iter()
+            .filter(|(_, count)| **count > 0)
+            .map(|(term, count)| (term.clone(), *count))
+            .collect();
+        terms.sort_by(|(term_a, count_a), (term_b, count_b)| {
+            count_b
+                .cmp(count_a)
+                .then_with(|| term_a.cmp(term_b))
+        });
+        if limit > 0 && terms.len() > limit {
+            terms.truncate(limit);
+        }
+        terms
+    }
+}
+
+/// Flux snapshot combining volatility and density cues from the atlas route.
+#[derive(Clone, Debug, Default)]
+pub struct AtlasFlux {
+    /// Number of frames contributing to the flux calculation.
+    pub coverage: usize,
+    /// Range of loop support values encountered across the route.
+    pub loop_range: f32,
+    /// Standard deviation of loop support observations.
+    pub loop_variability: f32,
+    /// Signed drift of collapse totals between the first and latest frames.
+    pub collapse_drift: f32,
+    /// Signed drift of Z-space control signals across the route.
+    pub z_signal_drift: f32,
+    /// Notes encountered per frame, approximating narrative density.
+    pub note_density: f32,
+    /// Concept mentions per frame, approximating conceptual density.
+    pub concept_density: f32,
+}
+
+impl AtlasFlux {
+    /// Returns a qualitative stability hint derived from the flux signature.
+    pub fn stability_hint(&self) -> &'static str {
+        if self.coverage == 0 {
+            return "expressive";
+        }
+        let volatility = self.loop_variability + 0.5 * self.loop_range.abs();
+        let drift = self.collapse_drift.abs() + self.z_signal_drift.abs();
+        if volatility < 0.1 && drift < 0.1 {
+            "harmonic"
+        } else if volatility < 0.5 && drift < 0.6 {
+            "expressive"
+        } else {
+            "turbulent"
+        }
+    }
+
+    /// Synthesises a 0–1 synergy score combining stability, drift, and density cues.
+    pub fn synergy_score(&self) -> f32 {
+        if self.coverage == 0 {
+            return 0.5;
+        }
+        let variability = self.loop_variability.max(0.0) + 0.25 * self.loop_range.abs();
+        let stability = (1.0 / (1.0 + variability)).clamp(0.0, 1.0);
+        let drift_penalty = ((self.collapse_drift.abs() + self.z_signal_drift.abs()).min(4.0)) / 4.0;
+        let density_support = ((self.note_density + self.concept_density).min(2.0)) / 2.0;
+        let score = 0.6 * stability + 0.2 * (1.0 - drift_penalty) + 0.2 * density_support;
+        score.clamp(0.0, 1.0)
+    }
+}
+
+/// Coherence labels derived from atlas flux analysis.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AtlasCoherence {
+    /// Flux indicates near-harmonic dynamics.
+    Harmonic,
+    /// Flux indicates expressive yet contained dynamics.
+    Expressive,
+    /// Flux indicates turbulent or divergent dynamics.
+    Turbulent,
+}
+
+impl AtlasCoherence {
+    fn from_flux(flux: Option<AtlasFlux>) -> Self {
+        match flux {
+            Some(flux) => {
+                let score = flux.synergy_score();
+                if score >= 0.75 {
+                    AtlasCoherence::Harmonic
+                } else if score >= 0.45 {
+                    AtlasCoherence::Expressive
+                } else {
+                    AtlasCoherence::Turbulent
+                }
+            }
+            None => AtlasCoherence::Expressive,
+        }
+    }
+
+    /// Returns a string label for display in telemetry dashboards.
+    pub fn label(&self) -> &'static str {
+        match self {
+            AtlasCoherence::Harmonic => "harmonic",
+            AtlasCoherence::Expressive => "expressive",
+            AtlasCoherence::Turbulent => "turbulent",
+        }
+    }
+
+    /// Returns a narrative description associated with the grade.
+    pub fn description(&self) -> &'static str {
+        match self {
+            AtlasCoherence::Harmonic => {
+                "Flux is calm and resonant; harmonisation can proceed with confidence."
+            }
+            AtlasCoherence::Expressive => {
+                "Flux is lively yet contained; maintain adaptive vigilance and steer gently."
+            }
+            AtlasCoherence::Turbulent => {
+                "Flux is turbulent; prioritise stabilisation before escalating coordination."
+            }
+        }
+    }
 }
 
 impl ConceptAccumulator {
