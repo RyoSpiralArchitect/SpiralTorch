@@ -8,6 +8,12 @@ import time
 from typing import Iterable, Mapping, MutableMapping, Sequence
 
 
+def _safe_mean(values: Sequence[float]) -> float:
+    """Return the mean of *values* or 0.0 when empty."""
+
+    return sum(values) / len(values) if values else 0.0
+
+
 class ZSpaceGeometry:
     """Geometry helper for computing norms in Z-space."""
 
@@ -370,6 +376,156 @@ class TelemetryReport:
     failsafe: bool
     anomalies: tuple[str, ...]
 
+    def stability_margin(self, threshold: float) -> float:
+        return float(self.stability) - float(threshold)
+
+
+@dataclass
+class TelemetryInsight:
+    stability_margin: float
+    energy_trend: float
+    stability_trend: float
+    anomaly_pressure: float
+    energy_baseline: float
+
+    def integration_factor(self) -> float:
+        margin = max(self.stability_margin, 0.0)
+        relief = max(-self.energy_trend, 0.0)
+        resilience = max(self.stability_trend, 0.0)
+        return margin + 0.5 * relief + 0.25 * resilience
+
+    def to_dict(self, prefix: str = "telemetry") -> dict[str, float]:
+        return {
+            f"{prefix}.stability_margin": self.stability_margin,
+            f"{prefix}.energy_trend": self.energy_trend,
+            f"{prefix}.stability_trend": self.stability_trend,
+            f"{prefix}.anomaly_pressure": self.anomaly_pressure,
+            f"{prefix}.energy_baseline": self.energy_baseline,
+        }
+
+
+@dataclass
+class AtlasSnapshot:
+    """Short-lived container capturing telemetry, harmony, and synergy factors."""
+
+    stability_margin: float
+    synergy_index: float
+    harmony: float
+    resonance: float
+    drift_penalty: float
+    anomaly_pressure: float
+    adaptation_readiness: float
+    energy_trend: float
+    curvature: float
+
+    def coherence_score(self) -> float:
+        margin = max(self.stability_margin, 0.0)
+        synergy = max(self.synergy_index, 0.0)
+        resonance = max(self.resonance, 0.0)
+        drift = max(self.drift_penalty, 0.0)
+        attenuation = 1.0 - min(drift, 1.0)
+        return (margin + 0.5 * synergy + 0.25 * resonance) * attenuation
+
+    def resilience_score(self) -> float:
+        readiness = max(self.adaptation_readiness, 0.0)
+        anomaly = max(self.anomaly_pressure, 0.0)
+        return readiness * (1.0 - min(anomaly, 1.0))
+
+
+class TelemetryAtlas:
+    """Maintain a rolling window of telemetry-driven systemic summaries."""
+
+    def __init__(self, window: int = 8) -> None:
+        self.window = max(int(window), 1)
+        self._history: deque[AtlasSnapshot] = deque(maxlen=self.window)
+
+    def record(
+        self,
+        *,
+        stability_margin: float,
+        synergy_index: float,
+        harmony: float,
+        resonance: float,
+        drift_penalty: float,
+        anomaly_pressure: float,
+        adaptation_readiness: float,
+        energy_trend: float,
+        curvature: float,
+    ) -> dict[str, float]:
+        snapshot = AtlasSnapshot(
+            stability_margin=float(stability_margin),
+            synergy_index=float(synergy_index),
+            harmony=float(harmony),
+            resonance=float(resonance),
+            drift_penalty=float(drift_penalty),
+            anomaly_pressure=float(anomaly_pressure),
+            adaptation_readiness=float(adaptation_readiness),
+            energy_trend=float(energy_trend),
+            curvature=float(curvature),
+        )
+        self._history.append(snapshot)
+        return self.summary()
+
+    def summary(self) -> dict[str, float]:
+        snapshots = list(self._history)
+        if not snapshots:
+            return {
+                "ecosystem_cohesion": 0.0,
+                "ecosystem_resilience": 0.0,
+                "atlas_memory_strength": 0.0,
+                "atlas_window_fill": 0.0,
+                "atlas_curvature_span": 0.0,
+                "atlas_margin_mean": 0.0,
+                "atlas_synergy_mean": 0.0,
+                "atlas_resonance_mean": 0.0,
+                "atlas_drift_mean": 0.0,
+                "atlas_anomaly_pressure_mean": 0.0,
+                "atlas_adaptation_mean": 0.0,
+                "atlas_energy_trend_mean": 0.0,
+                "atlas_harmony_trend": 0.0,
+            }
+
+        margin_mean = _safe_mean([entry.stability_margin for entry in snapshots])
+        synergy_mean = _safe_mean([entry.synergy_index for entry in snapshots])
+        resonance_mean = _safe_mean([entry.resonance for entry in snapshots])
+        drift_mean = _safe_mean([entry.drift_penalty for entry in snapshots])
+        anomaly_mean = _safe_mean([entry.anomaly_pressure for entry in snapshots])
+        adaptation_mean = _safe_mean([entry.adaptation_readiness for entry in snapshots])
+        energy_trend_mean = _safe_mean([entry.energy_trend for entry in snapshots])
+        cohesion = _safe_mean([entry.coherence_score() for entry in snapshots])
+        resilience = _safe_mean([entry.resilience_score() for entry in snapshots])
+        harmony_trend = (
+            snapshots[-1].harmony - snapshots[0].harmony if len(snapshots) > 1 else 0.0
+        )
+        curvature_span = (
+            snapshots[-1].curvature - snapshots[0].curvature if len(snapshots) > 1 else 0.0
+        )
+        memory_strength = max(
+            0.0,
+            min(
+                1.0,
+                0.5 * resilience + 0.5 * max(snapshots[-1].harmony, 0.0),
+            ),
+        )
+
+        return {
+            "ecosystem_cohesion": cohesion,
+            "ecosystem_resilience": resilience,
+            "atlas_memory_strength": memory_strength,
+            "atlas_window_fill": len(snapshots) / float(self.window),
+            "atlas_curvature_span": curvature_span,
+            "atlas_margin_mean": margin_mean,
+            "atlas_synergy_mean": synergy_mean,
+            "atlas_resonance_mean": resonance_mean,
+            "atlas_drift_mean": drift_mean,
+            "atlas_anomaly_pressure_mean": anomaly_mean,
+            "atlas_adaptation_mean": adaptation_mean,
+            "atlas_energy_trend_mean": energy_trend_mean,
+            "atlas_harmony_trend": harmony_trend,
+        }
+
+    def history_size(self) -> int:
+        return len(self._history)
 
 class PsiTelemetry:
     """Monitor runtime vitals and emit intervention signals."""
@@ -388,6 +544,7 @@ class PsiTelemetry:
         self.failure_energy = float(failure_energy)
         self.norm_limit = float(norm_limit)
         self._history: deque[float] = deque(maxlen=self.window)
+        self._stability_history: deque[float] = deque(maxlen=self.window)
         self._geometry = geometry or ZSpaceGeometry.euclidean()
 
     def observe(self, frame: FusedFrame, energy: EnergyReport) -> TelemetryReport:
@@ -418,11 +575,37 @@ class PsiTelemetry:
         failsafe = any(tag.startswith("norm_overflow") for tag in anomalies) or (
             energy.total > self.failure_energy
         ) or (abs(energy.gravitational) > self.failure_energy)
-        return TelemetryReport(
+        report = TelemetryReport(
             energy=float(energy.total),
             stability=stability,
             failsafe=failsafe,
             anomalies=tuple(anomalies),
+        )
+        self._stability_history.append(report.stability)
+        return report
+
+    def insight(self, report: TelemetryReport) -> TelemetryInsight:
+        if self._history:
+            history_values = list(self._history)
+            energy_trend = history_values[-1] - history_values[0]
+            energy_baseline = sum(history_values) / len(history_values)
+        else:
+            energy_trend = 0.0
+            energy_baseline = report.energy
+        if self._stability_history:
+            stability_values = list(self._stability_history)
+            stability_mean = sum(stability_values) / len(stability_values)
+            stability_trend = stability_values[-1] - stability_mean
+        else:
+            stability_trend = 0.0
+        anomaly_pressure = min(1.0, len(report.anomalies) / max(self.window, 1))
+        margin = report.stability_margin(self.stability_threshold)
+        return TelemetryInsight(
+            stability_margin=margin,
+            energy_trend=energy_trend,
+            stability_trend=stability_trend,
+            anomaly_pressure=anomaly_pressure,
+            energy_baseline=energy_baseline,
         )
 
     def set_geometry(self, geometry: ZSpaceGeometry) -> None:
