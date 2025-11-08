@@ -55,6 +55,52 @@ def _safe_correlation(xs: Sequence[float], ys: Sequence[float]) -> float:
     return max(-1.0, min(1.0, correlation))
 
 
+def _safe_mean(values: Sequence[float]) -> float:
+    """Return the mean of *values* or 0.0 when empty."""
+
+    return sum(values) / len(values) if values else 0.0
+
+
+def _safe_std(values: Sequence[float]) -> float:
+    """Return the population standard deviation of *values* or 0.0 when empty."""
+
+    if not values:
+        return 0.0
+    mean = _safe_mean(values)
+    variance = _safe_mean([(value - mean) ** 2 for value in values])
+    return math.sqrt(variance)
+
+
+def _recent_slope(values: Sequence[float], *, window: int = 3) -> float:
+    """Return a short-term slope using the most recent *window* samples."""
+
+    if len(values) < 2:
+        return 0.0
+    limit = min(max(int(window), 2), len(values))
+    samples = values[-limit:]
+    if len(samples) < 2:
+        return 0.0
+    return (samples[-1] - samples[0]) / (len(samples) - 1)
+
+
+def _safe_correlation(xs: Sequence[float], ys: Sequence[float]) -> float:
+    """Return the Pearson correlation coefficient for *xs* and *ys*."""
+
+    if len(xs) != len(ys) or len(xs) < 2:
+        return 0.0
+    mean_x = _safe_mean(xs)
+    mean_y = _safe_mean(ys)
+    centered_x = [value - mean_x for value in xs]
+    centered_y = [value - mean_y for value in ys]
+    numerator = sum(x * y for x, y in zip(centered_x, centered_y))
+    denom_x = math.sqrt(sum(x * x for x in centered_x))
+    denom_y = math.sqrt(sum(y * y for y in centered_y))
+    if denom_x == 0.0 or denom_y == 0.0:
+        return 0.0
+    correlation = numerator / (denom_x * denom_y)
+    return max(-1.0, min(1.0, correlation))
+
+
 class ZSpaceGeometry:
     """Geometry helper for computing norms in Z-space."""
 
