@@ -650,12 +650,41 @@ class IntegratedMLPipeline:
             curvature=self.curvature,
         )
 
+        forecast = self.telemetry_atlas.forecast(horizon=2)
+        summary.update(forecast)
+
+        stability_series = self.telemetry_atlas.metric_series("stability_margin")
+        recent_window = stability_series[-min(len(stability_series), 5) :]
+        recent_margin_volatility = _safe_std(recent_window)
+        summary["atlas_recent_margin_volatility"] = recent_margin_volatility
+
         print(
             "✓ Ecosystem memory -> "
             f"cohesion={summary['ecosystem_cohesion']:.4f}, "
             f"resilience={summary['ecosystem_resilience']:.4f}, "
+            f"vitality={summary['ecosystem_vitality']:.4f}, "
             f"memory={summary['atlas_memory_strength']:.4f}, "
             f"window_fill={summary['atlas_window_fill']:.4f}"
+        )
+
+        print(
+            "  ↳ Atlas dynamics -> "
+            f"synergy_persistence={summary['atlas_synergy_persistence']:.4f}, "
+            f"anomaly_climate={summary['atlas_anomaly_climate']:.4f}, "
+            f"corr_alignment={summary['atlas_corr_alignment']:.4f}"
+        )
+
+        print(
+            "  ↳ Forecast -> "
+            f"cohesion={forecast['atlas_forecast_cohesion']:.4f}, "
+            f"resilience={forecast['atlas_forecast_resilience']:.4f}, "
+            f"vitality={forecast['atlas_forecast_vitality']:.4f}, "
+            f"memory={forecast['atlas_forecast_memory_strength']:.4f}"
+        )
+
+        print(
+            "  ↳ Recent stability volatility = "
+            f"{recent_margin_volatility:.4f}"
         )
 
         return summary
@@ -806,6 +835,47 @@ class IntegratedMLPipeline:
             "atlas_adaptation_mean": float(memory_summary["atlas_adaptation_mean"]),
             "atlas_energy_trend_mean": float(memory_summary["atlas_energy_trend_mean"]),
             "atlas_harmony_trend": float(memory_summary["atlas_harmony_trend"]),
+            "ecosystem_vitality": float(memory_summary["ecosystem_vitality"]),
+            "atlas_memory_decay": float(memory_summary["atlas_memory_decay"]),
+            "atlas_curvature_variability": float(
+                memory_summary["atlas_curvature_variability"]
+            ),
+            "atlas_margin_variability": float(
+                memory_summary["atlas_margin_variability"]
+            ),
+            "atlas_synergy_persistence": float(
+                memory_summary["atlas_synergy_persistence"]
+            ),
+            "atlas_resonance_span": float(memory_summary["atlas_resonance_span"]),
+            "atlas_drift_dampening": float(memory_summary["atlas_drift_dampening"]),
+            "atlas_anomaly_climate": float(memory_summary["atlas_anomaly_climate"]),
+            "atlas_adaptation_drive": float(memory_summary["atlas_adaptation_drive"]),
+            "atlas_energy_balance": float(memory_summary["atlas_energy_balance"]),
+            "atlas_energy_volatility": float(memory_summary["atlas_energy_volatility"]),
+            "atlas_harmony_mean": float(memory_summary["atlas_harmony_mean"]),
+            "atlas_anomaly_peak": float(memory_summary["atlas_anomaly_peak"]),
+            "atlas_resilience_trend": float(memory_summary["atlas_resilience_trend"]),
+            "atlas_corr_synergy_resilience": float(
+                memory_summary["atlas_corr_synergy_resilience"]
+            ),
+            "atlas_corr_harmony_resonance": float(
+                memory_summary["atlas_corr_harmony_resonance"]
+            ),
+            "atlas_corr_drift_anomaly": float(
+                memory_summary["atlas_corr_drift_anomaly"]
+            ),
+            "atlas_corr_alignment": float(memory_summary["atlas_corr_alignment"]),
+            "atlas_forecast_cohesion": float(memory_summary["atlas_forecast_cohesion"]),
+            "atlas_forecast_resilience": float(
+                memory_summary["atlas_forecast_resilience"]
+            ),
+            "atlas_forecast_vitality": float(memory_summary["atlas_forecast_vitality"]),
+            "atlas_forecast_memory_strength": float(
+                memory_summary["atlas_forecast_memory_strength"]
+            ),
+            "atlas_recent_margin_volatility": float(
+                memory_summary["atlas_recent_margin_volatility"]
+            ),
             "timestamp": float(time.time()),
         }
 
@@ -871,6 +941,17 @@ class IntegratedMLPipeline:
         avg_atlas_anomaly = _safe_mean(collect("atlas_anomaly_pressure_mean"))
         avg_atlas_adaptation = _safe_mean(collect("atlas_adaptation_mean"))
         avg_atlas_energy_trend = _safe_mean(collect("atlas_energy_trend_mean"))
+        avg_vitality = _safe_mean(collect("ecosystem_vitality"))
+        avg_memory_decay = _safe_mean(collect("atlas_memory_decay"))
+        avg_margin_variability = _safe_mean(collect("atlas_margin_variability"))
+        avg_synergy_persistence = _safe_mean(collect("atlas_synergy_persistence"))
+        avg_anomaly_climate = _safe_mean(collect("atlas_anomaly_climate"))
+        avg_energy_volatility = _safe_mean(collect("atlas_energy_volatility"))
+        avg_corr_alignment = _safe_mean(collect("atlas_corr_alignment"))
+        avg_forecast_vitality = _safe_mean(collect("atlas_forecast_vitality"))
+        avg_recent_margin_volatility = _safe_mean(
+            collect("atlas_recent_margin_volatility")
+        )
 
         print(f"Average loss: {avg_loss:.6f}")
         print(f"Average effective LR: {avg_lr:.6f}")
@@ -899,6 +980,17 @@ class IntegratedMLPipeline:
         print(f"Average atlas anomaly pressure mean: {avg_atlas_anomaly:.6f}")
         print(f"Average atlas adaptation mean: {avg_atlas_adaptation:.6f}")
         print(f"Average atlas energy trend mean: {avg_atlas_energy_trend:.6f}")
+        print(f"Average ecosystem vitality: {avg_vitality:.6f}")
+        print(f"Average atlas memory decay: {avg_memory_decay:.6f}")
+        print(f"Average atlas margin variability: {avg_margin_variability:.6f}")
+        print(f"Average atlas synergy persistence: {avg_synergy_persistence:.6f}")
+        print(f"Average atlas anomaly climate: {avg_anomaly_climate:.6f}")
+        print(f"Average atlas energy volatility: {avg_energy_volatility:.6f}")
+        print(f"Average atlas correlation alignment: {avg_corr_alignment:.6f}")
+        print(f"Average forecast vitality: {avg_forecast_vitality:.6f}")
+        print(
+            f"Average recent margin volatility: {avg_recent_margin_volatility:.6f}"
+        )
 
         if len(self.metrics_history) >= 2:
             initial = self.metrics_history[0]["loss"]
@@ -950,7 +1042,9 @@ def main() -> None:
     print("  • Cross-modal synergy aligning telemetry insights with fractal resonance")
     print("  • Policy gradient reinforcement steering learning")
     print("  • System harmonization and future projection for adaptation")
-    print("  • Ecosystem memory weaving to retain cross-modal evolution")
+    print(
+        "  • Ecosystem memory weaving with vitality tracking and atlas forecasts"
+    )
     print("  • System-wide feedback and adaptation")
 
     pipeline = IntegratedMLPipeline(z_dim=4, learning_rate=0.02, curvature=-0.9)
@@ -999,7 +1093,9 @@ def main() -> None:
     print("\nKey takeaways:")
     print("  1. Spiral consensus, robotics telemetry, and fractal vision align in adaptive loops")
     print("  2. Drift safety oversight, telemetry insights, and fractal resonance co-steer harmonization")
-    print("  3. Telemetry atlas weaving preserves cohesion and resilience insights across steps")
+    print(
+        "  3. Telemetry atlas weaving surfaces vitality, correlation alignment, and forecasts"
+    )
     print("  4. Policy gradients absorb system feedback envelopes for responsive learning")
     print("  5. Geometry-aware monitoring and synergy metrics keep learning dynamics coherent")
     print("  6. SpiralTorch tensors interoperate seamlessly with PyTorch")

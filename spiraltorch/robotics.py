@@ -14,6 +14,46 @@ def _safe_mean(values: Sequence[float]) -> float:
     return sum(values) / len(values) if values else 0.0
 
 
+def _safe_std(values: Sequence[float]) -> float:
+    """Return the population standard deviation of *values* or 0.0 when empty."""
+
+    if not values:
+        return 0.0
+    mean = _safe_mean(values)
+    variance = _safe_mean([(value - mean) ** 2 for value in values])
+    return math.sqrt(variance)
+
+
+def _recent_slope(values: Sequence[float], *, window: int = 3) -> float:
+    """Return a short-term slope using the most recent *window* samples."""
+
+    if len(values) < 2:
+        return 0.0
+    limit = min(max(int(window), 2), len(values))
+    samples = values[-limit:]
+    if len(samples) < 2:
+        return 0.0
+    return (samples[-1] - samples[0]) / (len(samples) - 1)
+
+
+def _safe_correlation(xs: Sequence[float], ys: Sequence[float]) -> float:
+    """Return the Pearson correlation coefficient for *xs* and *ys*."""
+
+    if len(xs) != len(ys) or len(xs) < 2:
+        return 0.0
+    mean_x = _safe_mean(xs)
+    mean_y = _safe_mean(ys)
+    centered_x = [value - mean_x for value in xs]
+    centered_y = [value - mean_y for value in ys]
+    numerator = sum(x * y for x, y in zip(centered_x, centered_y))
+    denom_x = math.sqrt(sum(x * x for x in centered_x))
+    denom_y = math.sqrt(sum(y * y for y in centered_y))
+    if denom_x == 0.0 or denom_y == 0.0:
+        return 0.0
+    correlation = numerator / (denom_x * denom_y)
+    return max(-1.0, min(1.0, correlation))
+
+
 class ZSpaceGeometry:
     """Geometry helper for computing norms in Z-space."""
 
@@ -432,6 +472,104 @@ class AtlasSnapshot:
         return readiness * (1.0 - min(anomaly, 1.0))
 
 
+@dataclass
+class AtlasPulse:
+    """Aggregated metrics derived from the active atlas history window."""
+
+    cohesion: float
+    resilience: float
+    memory_strength: float
+    window_fill: float
+    curvature_span: float
+    harmony_trend: float
+    margin_mean: float
+    synergy_mean: float
+    resonance_mean: float
+    drift_mean: float
+    anomaly_mean: float
+    adaptation_mean: float
+    energy_trend_mean: float
+    harmony_mean: float
+    margin_variability: float
+    energy_volatility: float
+    synergy_persistence: float
+    resonance_span: float
+    drift_dampening: float
+    anomaly_climate: float
+    adaptation_drive: float
+    energy_balance: float
+    anomaly_peak: float
+    resilience_trend: float
+    curvature_variability: float
+    memory_decay: float
+
+    def vitality_index(self) -> float:
+        """Combine cohesion, resilience, and drift dampening into a vitality score."""
+
+        base = 0.4 * max(self.cohesion, 0.0) + 0.4 * max(self.resilience, 0.0)
+        drift_support = 0.2 * max(self.drift_dampening, 0.0)
+        vitality = base + drift_support
+        return max(0.0, vitality)
+
+    def to_dict(self) -> dict[str, float]:
+        """Export the pulse metrics with atlas-prefixed keys."""
+
+        return {
+            "ecosystem_cohesion": self.cohesion,
+            "ecosystem_resilience": self.resilience,
+            "ecosystem_vitality": self.vitality_index(),
+            "atlas_memory_strength": self.memory_strength,
+            "atlas_memory_decay": self.memory_decay,
+            "atlas_window_fill": self.window_fill,
+            "atlas_curvature_span": self.curvature_span,
+            "atlas_curvature_variability": self.curvature_variability,
+            "atlas_margin_mean": self.margin_mean,
+            "atlas_margin_variability": self.margin_variability,
+            "atlas_synergy_mean": self.synergy_mean,
+            "atlas_synergy_persistence": self.synergy_persistence,
+            "atlas_resonance_mean": self.resonance_mean,
+            "atlas_resonance_span": self.resonance_span,
+            "atlas_drift_mean": self.drift_mean,
+            "atlas_drift_dampening": self.drift_dampening,
+            "atlas_anomaly_pressure_mean": self.anomaly_mean,
+            "atlas_anomaly_climate": self.anomaly_climate,
+            "atlas_adaptation_mean": self.adaptation_mean,
+            "atlas_adaptation_drive": self.adaptation_drive,
+            "atlas_energy_trend_mean": self.energy_trend_mean,
+            "atlas_energy_balance": self.energy_balance,
+            "atlas_energy_volatility": self.energy_volatility,
+            "atlas_harmony_trend": self.harmony_trend,
+            "atlas_harmony_mean": self.harmony_mean,
+            "atlas_anomaly_peak": self.anomaly_peak,
+            "atlas_resilience_trend": self.resilience_trend,
+        }
+
+
+@dataclass
+class AtlasCorrelation:
+    """Correlation summary across the atlas history."""
+
+    synergy_vs_resilience: float
+    harmony_vs_resonance: float
+    drift_vs_anomaly: float
+
+    def overall_alignment(self) -> float:
+        positive = max(self.synergy_vs_resilience, 0.0) + max(
+            self.harmony_vs_resonance, 0.0
+        )
+        negative = max(self.drift_vs_anomaly, 0.0)
+        alignment = (positive - 0.5 * negative) / 2.0
+        return alignment
+
+    def to_dict(self) -> dict[str, float]:
+        return {
+            "atlas_corr_synergy_resilience": self.synergy_vs_resilience,
+            "atlas_corr_harmony_resonance": self.harmony_vs_resonance,
+            "atlas_corr_drift_anomaly": self.drift_vs_anomaly,
+            "atlas_corr_alignment": self.overall_alignment(),
+        }
+
+
 class TelemetryAtlas:
     """Maintain a rolling window of telemetry-driven systemic summaries."""
 
@@ -466,66 +604,217 @@ class TelemetryAtlas:
         self._history.append(snapshot)
         return self.summary()
 
-    def summary(self) -> dict[str, float]:
+    def _empty_pulse(self) -> AtlasPulse:
+        return AtlasPulse(
+            cohesion=0.0,
+            resilience=0.0,
+            memory_strength=0.0,
+            window_fill=0.0,
+            curvature_span=0.0,
+            harmony_trend=0.0,
+            margin_mean=0.0,
+            synergy_mean=0.0,
+            resonance_mean=0.0,
+            drift_mean=0.0,
+            anomaly_mean=0.0,
+            adaptation_mean=0.0,
+            energy_trend_mean=0.0,
+            harmony_mean=0.0,
+            margin_variability=0.0,
+            energy_volatility=0.0,
+            synergy_persistence=0.0,
+            resonance_span=0.0,
+            drift_dampening=0.0,
+            anomaly_climate=0.0,
+            adaptation_drive=0.0,
+            energy_balance=0.0,
+            anomaly_peak=0.0,
+            resilience_trend=0.0,
+            curvature_variability=0.0,
+            memory_decay=1.0,
+        )
+
+    def pulse(self) -> AtlasPulse:
+        """Return an aggregated view of the atlas history window."""
+
         snapshots = list(self._history)
         if not snapshots:
-            return {
-                "ecosystem_cohesion": 0.0,
-                "ecosystem_resilience": 0.0,
-                "atlas_memory_strength": 0.0,
-                "atlas_window_fill": 0.0,
-                "atlas_curvature_span": 0.0,
-                "atlas_margin_mean": 0.0,
-                "atlas_synergy_mean": 0.0,
-                "atlas_resonance_mean": 0.0,
-                "atlas_drift_mean": 0.0,
-                "atlas_anomaly_pressure_mean": 0.0,
-                "atlas_adaptation_mean": 0.0,
-                "atlas_energy_trend_mean": 0.0,
-                "atlas_harmony_trend": 0.0,
-            }
+            return self._empty_pulse()
 
-        margin_mean = _safe_mean([entry.stability_margin for entry in snapshots])
-        synergy_mean = _safe_mean([entry.synergy_index for entry in snapshots])
-        resonance_mean = _safe_mean([entry.resonance for entry in snapshots])
-        drift_mean = _safe_mean([entry.drift_penalty for entry in snapshots])
-        anomaly_mean = _safe_mean([entry.anomaly_pressure for entry in snapshots])
-        adaptation_mean = _safe_mean([entry.adaptation_readiness for entry in snapshots])
-        energy_trend_mean = _safe_mean([entry.energy_trend for entry in snapshots])
-        cohesion = _safe_mean([entry.coherence_score() for entry in snapshots])
-        resilience = _safe_mean([entry.resilience_score() for entry in snapshots])
+        margin_values = [entry.stability_margin for entry in snapshots]
+        synergy_values = [entry.synergy_index for entry in snapshots]
+        resonance_values = [entry.resonance for entry in snapshots]
+        drift_values = [entry.drift_penalty for entry in snapshots]
+        anomaly_values = [entry.anomaly_pressure for entry in snapshots]
+        adaptation_values = [entry.adaptation_readiness for entry in snapshots]
+        energy_values = [entry.energy_trend for entry in snapshots]
+        harmony_values = [entry.harmony for entry in snapshots]
+        curvature_values = [entry.curvature for entry in snapshots]
+        cohesion_values = [entry.coherence_score() for entry in snapshots]
+        resilience_values = [entry.resilience_score() for entry in snapshots]
+
+        margin_mean = _safe_mean(margin_values)
+        synergy_mean = _safe_mean(synergy_values)
+        resonance_mean = _safe_mean(resonance_values)
+        drift_mean = _safe_mean(drift_values)
+        anomaly_mean = _safe_mean(anomaly_values)
+        adaptation_mean = _safe_mean(adaptation_values)
+        energy_trend_mean = _safe_mean(energy_values)
+        cohesion = _safe_mean(cohesion_values)
+        resilience = _safe_mean(resilience_values)
         harmony_trend = (
-            snapshots[-1].harmony - snapshots[0].harmony if len(snapshots) > 1 else 0.0
+            harmony_values[-1] - harmony_values[0] if len(harmony_values) > 1 else 0.0
         )
         curvature_span = (
-            snapshots[-1].curvature - snapshots[0].curvature if len(snapshots) > 1 else 0.0
+            curvature_values[-1] - curvature_values[0]
+            if len(curvature_values) > 1
+            else 0.0
         )
         memory_strength = max(
             0.0,
-            min(
-                1.0,
-                0.5 * resilience + 0.5 * max(snapshots[-1].harmony, 0.0),
-            ),
+            min(1.0, 0.5 * resilience + 0.5 * max(harmony_values[-1], 0.0)),
+        )
+        window_fill = len(snapshots) / float(self.window)
+        margin_variability = _safe_std(margin_values)
+        energy_volatility = _safe_std(energy_values)
+        synergy_persistence = (
+            sum(1 for value in synergy_values if value >= 0.0) / len(synergy_values)
+        )
+        resonance_span = (
+            max(resonance_values) - min(resonance_values)
+            if len(resonance_values) > 1
+            else 0.0
+        )
+        drift_dampening = max(0.0, 1.0 - max(drift_mean, 0.0))
+        anomaly_climate = max(0.0, 1.0 - min(anomaly_mean, 1.0))
+        adaptation_drive = adaptation_mean * anomaly_climate
+        energy_balance = -energy_trend_mean
+        anomaly_peak = max(anomaly_values) if anomaly_values else 0.0
+        resilience_trend = (
+            resilience_values[-1] - resilience_values[0]
+            if len(resilience_values) > 1
+            else 0.0
+        )
+        curvature_variability = _safe_std(curvature_values)
+        memory_decay = max(0.0, 1.0 - memory_strength)
+
+        return AtlasPulse(
+            cohesion=cohesion,
+            resilience=resilience,
+            memory_strength=memory_strength,
+            window_fill=window_fill,
+            curvature_span=curvature_span,
+            harmony_trend=harmony_trend,
+            margin_mean=margin_mean,
+            synergy_mean=synergy_mean,
+            resonance_mean=resonance_mean,
+            drift_mean=drift_mean,
+            anomaly_mean=anomaly_mean,
+            adaptation_mean=adaptation_mean,
+            energy_trend_mean=energy_trend_mean,
+            harmony_mean=_safe_mean(harmony_values),
+            margin_variability=margin_variability,
+            energy_volatility=energy_volatility,
+            synergy_persistence=synergy_persistence,
+            resonance_span=resonance_span,
+            drift_dampening=drift_dampening,
+            anomaly_climate=anomaly_climate,
+            adaptation_drive=adaptation_drive,
+            energy_balance=energy_balance,
+            anomaly_peak=anomaly_peak,
+            resilience_trend=resilience_trend,
+            curvature_variability=curvature_variability,
+            memory_decay=memory_decay,
         )
 
-        return {
-            "ecosystem_cohesion": cohesion,
-            "ecosystem_resilience": resilience,
-            "atlas_memory_strength": memory_strength,
-            "atlas_window_fill": len(snapshots) / float(self.window),
-            "atlas_curvature_span": curvature_span,
-            "atlas_margin_mean": margin_mean,
-            "atlas_synergy_mean": synergy_mean,
-            "atlas_resonance_mean": resonance_mean,
-            "atlas_drift_mean": drift_mean,
-            "atlas_anomaly_pressure_mean": anomaly_mean,
-            "atlas_adaptation_mean": adaptation_mean,
-            "atlas_energy_trend_mean": energy_trend_mean,
-            "atlas_harmony_trend": harmony_trend,
-        }
+    def correlations(self) -> AtlasCorrelation:
+        """Return the correlation profile for the current history window."""
+
+        snapshots = list(self._history)
+        if len(snapshots) < 2:
+            return AtlasCorrelation(0.0, 0.0, 0.0)
+
+        synergy_values = [entry.synergy_index for entry in snapshots]
+        resilience_values = [entry.resilience_score() for entry in snapshots]
+        harmony_values = [entry.harmony for entry in snapshots]
+        resonance_values = [entry.resonance for entry in snapshots]
+        drift_values = [entry.drift_penalty for entry in snapshots]
+        anomaly_values = [entry.anomaly_pressure for entry in snapshots]
+
+        return AtlasCorrelation(
+            synergy_vs_resilience=_safe_correlation(synergy_values, resilience_values),
+            harmony_vs_resonance=_safe_correlation(harmony_values, resonance_values),
+            drift_vs_anomaly=_safe_correlation(drift_values, anomaly_values),
+        )
+
+    def summary(self) -> dict[str, float]:
+        pulse = self.pulse()
+        summary = pulse.to_dict()
+        summary.update(self.correlations().to_dict())
+        return summary
 
     def history_size(self) -> int:
         return len(self._history)
+
+    def metric_series(self, metric: str) -> list[float]:
+        """Return the raw metric series tracked by the atlas history."""
+
+        accessors = {
+            "stability_margin": lambda snapshot: snapshot.stability_margin,
+            "synergy_index": lambda snapshot: snapshot.synergy_index,
+            "harmony": lambda snapshot: snapshot.harmony,
+            "resonance": lambda snapshot: snapshot.resonance,
+            "drift_penalty": lambda snapshot: snapshot.drift_penalty,
+            "anomaly_pressure": lambda snapshot: snapshot.anomaly_pressure,
+            "adaptation_readiness": lambda snapshot: snapshot.adaptation_readiness,
+            "energy_trend": lambda snapshot: snapshot.energy_trend,
+            "curvature": lambda snapshot: snapshot.curvature,
+            "coherence_score": lambda snapshot: snapshot.coherence_score(),
+            "resilience_score": lambda snapshot: snapshot.resilience_score(),
+        }
+        try:
+            accessor = accessors[metric]
+        except KeyError as exc:
+            raise KeyError(f"unknown atlas metric {metric!r}") from exc
+        return [accessor(snapshot) for snapshot in self._history]
+
+    def forecast(self, horizon: int = 3) -> dict[str, float]:
+        """Return a lightweight forecast for cohesion, resilience, and vitality."""
+
+        horizon = max(int(horizon), 1)
+        snapshots = list(self._history)
+        if not snapshots:
+            pulse = self._empty_pulse()
+        else:
+            pulse = self.pulse()
+
+        cohesion_values = [snapshot.coherence_score() for snapshot in snapshots]
+        resilience_values = [snapshot.resilience_score() for snapshot in snapshots]
+        drift_support = [max(0.0, 1.0 - snapshot.drift_penalty) for snapshot in snapshots]
+        harmony_values = [snapshot.harmony for snapshot in snapshots]
+
+        cohesion_slope = _recent_slope(cohesion_values)
+        resilience_slope = _recent_slope(resilience_values)
+        drift_slope = _recent_slope(drift_support)
+        harmony_slope = _recent_slope(harmony_values)
+
+        projected_cohesion = max(0.0, pulse.cohesion + horizon * cohesion_slope)
+        projected_resilience = max(0.0, pulse.resilience + horizon * resilience_slope)
+        vitality_slope = 0.4 * cohesion_slope + 0.4 * resilience_slope + 0.2 * drift_slope
+        projected_vitality = max(
+            0.0, min(1.0, pulse.vitality_index() + horizon * vitality_slope)
+        )
+        memory_slope = 0.5 * resilience_slope + 0.25 * harmony_slope
+        projected_memory = max(
+            0.0, min(1.0, pulse.memory_strength + horizon * memory_slope)
+        )
+
+        return {
+            "atlas_forecast_cohesion": projected_cohesion,
+            "atlas_forecast_resilience": projected_resilience,
+            "atlas_forecast_vitality": projected_vitality,
+            "atlas_forecast_memory_strength": projected_memory,
+        }
 
 class PsiTelemetry:
     """Monitor runtime vitals and emit intervention signals."""
