@@ -51,11 +51,12 @@ except ImportError as exc:  # pragma: no cover - script entry guard
     sys.exit(1)
 
 try:  # pragma: no branch - prefer package import, fallback to repository source
-    from spiraltorch.rl import LossStdTrigger, PolicyGradient
+    from spiraltorch.rl import HyperFeedbackEnvelope, LossStdTrigger, PolicyGradient
 except ModuleNotFoundError:
     rl_module = _import_from_repo("spiraltorch.rl", "spiraltorch/rl.py")
     LossStdTrigger = rl_module.LossStdTrigger
     PolicyGradient = rl_module.PolicyGradient
+    HyperFeedbackEnvelope = rl_module.HyperFeedbackEnvelope
 
 try:
     from spiraltorch.robotics import (
@@ -67,6 +68,7 @@ try:
         GravityField,
         GravityWell,
         PsiTelemetry,
+        TelemetryInsight,
         SafetyReview,
         SensorFusionHub,
         TelemetryReport,
@@ -88,12 +90,14 @@ except ModuleNotFoundError:
     TelemetryReport = robotics_module.TelemetryReport
     ZSpaceDynamics = robotics_module.ZSpaceDynamics
     ZSpaceGeometry = robotics_module.ZSpaceGeometry
+    TelemetryInsight = robotics_module.TelemetryInsight
 
 try:
-    from spiraltorch.vision import FractalCanvas
+    from spiraltorch.vision import FractalCanvas, FractalSignature
 except ModuleNotFoundError:
     vision_module = _import_from_repo("spiraltorch.vision", "spiraltorch/vision.py")
     FractalCanvas = vision_module.FractalCanvas
+    FractalSignature = vision_module.FractalSignature
 
 
 def _seed_spiraltorch(seed: int) -> None:
@@ -318,14 +322,16 @@ class IntegratedMLPipeline:
 
         return review
 
-    def generate_fractal_context(self) -> tuple[dict[str, float], float]:
-        """Emit a fractal patch to inform learning rate modulation."""
+    def generate_fractal_context(self) -> tuple[dict[str, float], float, FractalSignature]:
+        """Emit fractal patches to inform learning rate modulation."""
 
         print("\n" + "-" * 70)
         print("STEP 5: FRACTAL VISION CONTEXT")
         print("-" * 70)
 
         patch = self.fractal_canvas.emit_zspace_infinite(dim=float(self.z_dim))
+        resonant_series = self.fractal_canvas.emit_resonant_series(depth=3)
+        signature = self.fractal_canvas.synthesize_signature([patch, *resonant_series])
         eta = patch.eta_bar()
         density_mean = _safe_mean(patch.density)
         support_min, support_max = patch.support
@@ -336,15 +342,71 @@ class IntegratedMLPipeline:
             "density_mean": density_mean,
             "support_min": support_min,
             "support_max": support_max,
+            "compactness": signature.compactness,
+            "resonance": signature.resonance,
+            "drift_index": signature.drift_index,
         }
 
         print(
             "✓ Fractal patch -> "
             f"dim={patch.dimension:.2f}, η̄={eta:.4f}, density_mean={density_mean:.4f}, "
-            f"support=[{support_min:.4f}, {support_max:.4f}]"
+            f"support=[{support_min:.4f}, {support_max:.4f}], "
+            f"compactness={signature.compactness:.4f}, resonance={signature.resonance:.4f}, "
+            f"drift={signature.drift_index:.4f}"
         )
 
-        return summary, eta
+        return summary, eta, signature
+
+    def synthesize_cross_modal_feedback(
+        self,
+        telemetry_insight: TelemetryInsight,
+        fractal_signature: FractalSignature,
+        safety_review: SafetyReview,
+    ) -> dict[str, float]:
+        """Blend telemetry and vision summaries before policy updates."""
+
+        print("\n" + "-" * 70)
+        print("STEP 6: CROSS-MODAL SYNERGY")
+        print("-" * 70)
+
+        margin = max(telemetry_insight.stability_margin, 0.0)
+        anomaly_pressure = telemetry_insight.anomaly_pressure
+        resonance = max(fractal_signature.resonance, 0.0)
+        compactness = max(fractal_signature.compactness, 0.0)
+        drift_penalty = max(fractal_signature.drift_index, 0.0)
+        hazard_relief = max(0.0, 1.0 - safety_review.hazard_total)
+
+        integration_factor = telemetry_insight.integration_factor()
+        synergy_index = (1.0 + integration_factor) * (hazard_relief + compactness)
+        synergy_index *= 1.0 + 0.1 * resonance
+        synergy_index *= 1.0 - min(drift_penalty * 0.5, 0.5)
+
+        envelope = HyperFeedbackEnvelope(
+            stability_margin=margin,
+            harmony=hazard_relief * fractal_signature.harmony(),
+            anomaly_pressure=anomaly_pressure,
+            fractal_resonance=max(0.0, resonance - drift_penalty * 0.5),
+        )
+        self.policy.integrate_system_feedback(envelope)
+
+        summary = {
+            "synergy_index": synergy_index,
+            "integration_factor": integration_factor,
+            "stability_margin": margin,
+            "anomaly_pressure": anomaly_pressure,
+            "resonance": resonance,
+            "compactness": compactness,
+            "drift_penalty": drift_penalty,
+            "hazard_relief": hazard_relief,
+        }
+
+        print(
+            "✓ Cross-modal synergy -> "
+            f"synergy={synergy_index:.4f}, margin={margin:.4f}, anomaly={anomaly_pressure:.4f}, "
+            f"resonance={resonance:.4f}, compactness={compactness:.4f}"
+        )
+
+        return summary
 
     def reinforce_with_policy(
         self,
@@ -356,7 +418,7 @@ class IntegratedMLPipeline:
         """Blend telemetry with policy gradient signals for adaptation."""
 
         print("\n" + "-" * 70)
-        print("STEP 6: POLICY GRADIENT FEEDBACK")
+        print("STEP 7: POLICY GRADIENT FEEDBACK")
         print("-" * 70)
 
         self.policy.attach_geometry_feedback(geometry_feedback)
@@ -367,12 +429,18 @@ class IntegratedMLPipeline:
         lr_scale = max(0.1, min(2.5, update.get("learning_rate", 1.0)))
         gauge_scale = max(0.1, min(2.5, update.get("gauge", 1.0)))
         effective_lr = self.base_learning_rate * lr_scale
+        feedback_fields = {
+            key: float(value)
+            for key, value in update.items()
+            if key.startswith("system_feedback.")
+        }
 
         summary = {
             "lr_scale": lr_scale,
             "gauge_scale": gauge_scale,
             "effective_learning_rate": effective_lr,
         }
+        summary.update(feedback_fields)
 
         print(
             "✓ Policy update -> "
@@ -395,7 +463,7 @@ class IntegratedMLPipeline:
         """Update the pipeline weights using consensus-informed gradients."""
 
         print("\n" + "-" * 70)
-        print("STEP 7: CONSENSUS WEIGHT UPDATE")
+        print("STEP 8: CONSENSUS WEIGHT UPDATE")
         print("-" * 70)
 
         if not self.weights:
@@ -422,22 +490,45 @@ class IntegratedMLPipeline:
         telemetry_report: TelemetryReport,
         fractal_summary: dict[str, float],
         safety_review: SafetyReview,
+        telemetry_insight: TelemetryInsight,
+        fractal_signature: FractalSignature,
+        synergy_summary: dict[str, float],
     ) -> dict[str, float]:
         """Adapt base parameters using telemetry, vision, and safety context."""
 
         print("\n" + "-" * 70)
-        print("STEP 8: SYSTEM HARMONIZATION")
+        print("STEP 9: SYSTEM HARMONIZATION")
         print("-" * 70)
 
         hazard_relief = 1.0 / (1.0 + max(safety_review.hazard_total, 0.0))
         stability = max(0.0, min(1.0, telemetry_report.stability))
         eta = fractal_summary.get("eta", 0.0)
         density = fractal_summary.get("density_mean", 0.0)
-        alignment = 1.0 / (1.0 + abs(eta - density))
-        harmony = 0.4 * stability + 0.35 * hazard_relief + 0.25 * alignment
+        compactness = fractal_signature.compactness
+        resonance = fractal_signature.resonance
+        drift_penalty = fractal_signature.drift_index
+        synergy_index = synergy_summary.get("synergy_index", 0.0)
+        margin = max(telemetry_insight.stability_margin, 0.0)
+        anomaly_pressure = telemetry_insight.anomaly_pressure
+        stability_trend = telemetry_insight.stability_trend
 
-        target_lr = 0.008 + harmony * 0.018
-        self.base_learning_rate = 0.85 * self.base_learning_rate + 0.15 * target_lr
+        alignment = 1.0 / (1.0 + abs(eta - density))
+        harmony = (
+            0.3 * stability
+            + 0.25 * hazard_relief
+            + 0.15 * alignment
+            + 0.15 * max(0.0, 1.0 - drift_penalty)
+            + 0.15 * compactness
+        )
+        harmony = max(0.0, min(1.0, harmony))
+
+        adaptive_bias = 0.1 * margin + 0.05 * max(stability_trend, 0.0)
+        adaptive_bias -= 0.08 * anomaly_pressure
+        adaptive_bias += 0.05 * max(resonance, 0.0)
+        adaptive_bias += 0.05 * max(synergy_index, 0.0)
+
+        target_lr = 0.008 + harmony * 0.018 + adaptive_bias * 0.003
+        self.base_learning_rate = 0.82 * self.base_learning_rate + 0.18 * target_lr
 
         curvature_shift = math.tanh((eta - 0.5) * 1.5) * 0.05
         updated_curvature = self.curvature + curvature_shift
@@ -449,8 +540,18 @@ class IntegratedMLPipeline:
             self.desire_field.set_dynamics(self.dynamics)
             self.telemetry.set_geometry(self.geometry)
 
-        feature_target = max(0.2, min(0.95, 0.35 + harmony * 0.45))
-        label_target = max(0.2, min(0.9, 0.3 + harmony * 0.35))
+        feature_shift = 0.03 * (margin - anomaly_pressure)
+        feature_shift += 0.015 * max(stability_trend, 0.0)
+        feature_shift -= 0.01 * drift_penalty
+        label_shift = 0.025 * (hazard_relief - anomaly_pressure)
+        label_shift += 0.01 * compactness
+
+        feature_target = max(
+            0.2, min(0.95, self.channel_smoothing["features"] + feature_shift)
+        )
+        label_target = max(
+            0.2, min(0.9, self.channel_smoothing["labels"] + label_shift)
+        )
         self.channel_smoothing["features"] = feature_target
         self.channel_smoothing["labels"] = label_target
         if self.feature_axis is not None:
@@ -465,17 +566,19 @@ class IntegratedMLPipeline:
             "curvature": self.curvature,
             "feature_smoothing": feature_target,
             "label_smoothing": label_target,
+            "stability_margin": telemetry_insight.stability_margin,
+            "anomaly_pressure": anomaly_pressure,
+            "stability_trend": stability_trend,
+            "synergy_index": synergy_index,
+            "fractal_compactness": compactness,
+            "fractal_resonance": resonance,
         }
 
         print(
-            "✓ Harmonized -> harmony={:.4f}, base_lr={:.5f}, curvature={:.3f}, "
-            "feature_smoothing={:.3f}, label_smoothing={:.3f}".format(
-                harmony,
-                self.base_learning_rate,
-                self.curvature,
-                feature_target,
-                label_target,
-            )
+            "✓ Harmonized -> "
+            f"harmony={harmony:.4f}, base_lr={self.base_learning_rate:.5f}, "
+            f"curvature={self.curvature:.3f}, features={feature_target:.3f}, "
+            f"labels={label_target:.3f}"
         )
 
         return summary
@@ -490,7 +593,7 @@ class IntegratedMLPipeline:
         """Forecast short-term evolution for narrative context."""
 
         print("\n" + "-" * 70)
-        print("STEP 9: FUTURE PROJECTION")
+        print("STEP 10: FUTURE PROJECTION")
         print("-" * 70)
 
         recent_losses = [entry["loss"] for entry in self.metrics_history[-3:]]
@@ -534,8 +637,12 @@ class IntegratedMLPipeline:
         data_tensor, label_tensor = self.ingest_data(data, labels)
         consensus_metrics, soft_rows, spiral_rows = self.analyze_spiral_consensus(data_tensor)
         energy_report, telemetry_report, frame = self.compute_robotics_feedback(data, labels)
+        telemetry_insight = self.telemetry.insight(telemetry_report)
         safety_review = self.review_safety(frame, energy_report, telemetry_report)
-        fractal_summary, eta = self.generate_fractal_context()
+        fractal_summary, eta, fractal_signature = self.generate_fractal_context()
+        synergy_summary = self.synthesize_cross_modal_feedback(
+            telemetry_insight, fractal_signature, safety_review
+        )
 
         returns = [
             float(consensus_metrics.get("spiral_coherence", 0.0)),
@@ -545,8 +652,8 @@ class IntegratedMLPipeline:
         ]
         baseline = float(consensus_metrics.get("mean_entropy", 0.0))
         geometry_feedback = {
-            "min_learning_rate_scale": 1.0 + max(fractal_summary["eta"], 0.0),
-            "max_learning_rate_scale": 1.0 + max(fractal_summary["density_mean"], 0.0),
+            "min_learning_rate_scale": 1.0 + max(fractal_signature.adaptivity(), 0.0),
+            "max_learning_rate_scale": 1.0 + max(fractal_signature.harmony(), 0.0),
         }
         effective_lr, policy_summary = self.reinforce_with_policy(
             returns, baseline, geometry_feedback, eta
@@ -580,7 +687,14 @@ class IntegratedMLPipeline:
         ]
         avg_potential = _safe_mean(gravity_potential)
 
-        harmony_summary = self.harmonize_system_state(telemetry_report, fractal_summary, safety_review)
+        harmony_summary = self.harmonize_system_state(
+            telemetry_report,
+            fractal_summary,
+            safety_review,
+            telemetry_insight,
+            fractal_signature,
+            synergy_summary,
+        )
         projection_summary = self.project_future_state(
             loss,
             policy_summary["effective_learning_rate"],
@@ -608,6 +722,9 @@ class IntegratedMLPipeline:
             "safety_flagged": float(len(safety_review.flagged_frames)),
             "fractal_eta": float(fractal_summary["eta"]),
             "fractal_density_mean": float(fractal_summary["density_mean"]),
+            "fractal_compactness": float(fractal_signature.compactness),
+            "fractal_resonance": float(fractal_signature.resonance),
+            "fractal_drift_index": float(fractal_signature.drift_index),
             "avg_geometry_norm": float(avg_geometry_norm),
             "avg_gravity_potential": float(avg_potential),
             "weights_norm": float(weights_norm),
@@ -617,11 +734,22 @@ class IntegratedMLPipeline:
             "curvature": float(harmony_summary["curvature"]),
             "feature_smoothing": float(harmony_summary["feature_smoothing"]),
             "label_smoothing": float(harmony_summary["label_smoothing"]),
+            "telemetry_stability_margin": float(telemetry_insight.stability_margin),
+            "telemetry_energy_trend": float(telemetry_insight.energy_trend),
+            "telemetry_stability_trend": float(telemetry_insight.stability_trend),
+            "telemetry_anomaly_pressure": float(telemetry_insight.anomaly_pressure),
+            "telemetry_energy_baseline": float(telemetry_insight.energy_baseline),
+            "synergy_index": float(synergy_summary["synergy_index"]),
+            "synergy_integration_factor": float(synergy_summary["integration_factor"]),
             "projected_loss": float(projection_summary["projected_loss"]),
             "projected_effective_lr": float(projection_summary["projected_effective_lr"]),
             "adaptation_readiness": float(projection_summary["adaptation_readiness"]),
             "timestamp": float(time.time()),
         }
+
+        for key, value in policy_summary.items():
+            if key.startswith("system_feedback."):
+                step_metrics[key] = float(value)
 
         self.metrics_history.append(step_metrics)
 
@@ -663,6 +791,13 @@ class IntegratedMLPipeline:
         avg_hazard = _safe_mean(collect("safety_hazard_total"))
         avg_harmony = _safe_mean(collect("system_harmony"))
         avg_readiness = _safe_mean(collect("adaptation_readiness"))
+        avg_compactness = _safe_mean(collect("fractal_compactness"))
+        avg_resonance = _safe_mean(collect("fractal_resonance"))
+        avg_drift = _safe_mean(collect("fractal_drift_index"))
+        avg_synergy = _safe_mean(collect("synergy_index"))
+        avg_margin = _safe_mean(collect("telemetry_stability_margin"))
+        avg_anomaly_pressure = _safe_mean(collect("telemetry_anomaly_pressure"))
+        avg_feedback_harmony = _safe_mean(collect("system_feedback.harmony"))
 
         print(f"Average loss: {avg_loss:.6f}")
         print(f"Average effective LR: {avg_lr:.6f}")
@@ -673,6 +808,13 @@ class IntegratedMLPipeline:
         print(f"Average safety hazard: {avg_hazard:.6f}")
         print(f"Mean system harmony: {avg_harmony:.6f}")
         print(f"Average adaptation readiness: {avg_readiness:.6f}")
+        print(f"Average fractal compactness: {avg_compactness:.6f}")
+        print(f"Average fractal resonance: {avg_resonance:.6f}")
+        print(f"Mean fractal drift index: {avg_drift:.6f}")
+        print(f"Average synergy index: {avg_synergy:.6f}")
+        print(f"Average stability margin: {avg_margin:.6f}")
+        print(f"Average anomaly pressure: {avg_anomaly_pressure:.6f}")
+        print(f"Average feedback harmony: {avg_feedback_harmony:.6f}")
 
         if len(self.metrics_history) >= 2:
             initial = self.metrics_history[0]["loss"]
@@ -682,11 +824,15 @@ class IntegratedMLPipeline:
 
         print("\nPolicy history (learning rate scales):")
         for idx, update in enumerate(self.policy_history):
-            print(
+            line = (
                 f"  Step {idx}: lr_scale={update['lr_scale']:.4f}, "
                 f"gauge_scale={update['gauge_scale']:.4f}, "
                 f"effective_lr={update['effective_learning_rate']:.6f}"
             )
+            harmony_feedback = update.get("system_feedback.harmony")
+            if harmony_feedback is not None:
+                line += f", feedback_harmony={harmony_feedback:.4f}"
+            print(line)
 
         print("\nFinal weights:")
         if self.weights:
@@ -717,6 +863,7 @@ def main() -> None:
     print("  • Robotics-inspired geometry and stability monitoring")
     print("  • Safety drift review guiding harmonization")
     print("  • Fractal vision context for geometry coherence")
+    print("  • Cross-modal synergy aligning telemetry insights with fractal resonance")
     print("  • Policy gradient reinforcement steering learning")
     print("  • System harmonization and future projection for adaptation")
     print("  • System-wide feedback and adaptation")
@@ -765,10 +912,10 @@ def main() -> None:
     print("INTEGRATION COMPLETE")
     print("=" * 70)
     print("\nKey takeaways:")
-    print("  1. Spiral consensus, robotics telemetry, and fractal vision align in feedback loops")
-    print("  2. Drift safety oversight guides harmonized learning parameters")
-    print("  3. Policy gradients adapt learning directly from system telemetry")
-    print("  4. Geometry-aware monitoring keeps learning dynamics coherent")
+    print("  1. Spiral consensus, robotics telemetry, and fractal vision align in adaptive loops")
+    print("  2. Drift safety oversight, telemetry insights, and fractal resonance co-steer harmonization")
+    print("  3. Policy gradients absorb system feedback envelopes for responsive learning")
+    print("  4. Geometry-aware monitoring and synergy metrics keep learning dynamics coherent")
     print("  5. SpiralTorch tensors interoperate seamlessly with PyTorch")
     print("\nSpiralTorch: A complete OS for Z-space machine learning")
     print("=" * 70 + "\n")
