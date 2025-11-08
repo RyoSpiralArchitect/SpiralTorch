@@ -370,6 +370,33 @@ class TelemetryReport:
     failsafe: bool
     anomalies: tuple[str, ...]
 
+    def stability_margin(self, threshold: float) -> float:
+        return float(self.stability) - float(threshold)
+
+
+@dataclass
+class TelemetryInsight:
+    stability_margin: float
+    energy_trend: float
+    stability_trend: float
+    anomaly_pressure: float
+    energy_baseline: float
+
+    def integration_factor(self) -> float:
+        margin = max(self.stability_margin, 0.0)
+        relief = max(-self.energy_trend, 0.0)
+        resilience = max(self.stability_trend, 0.0)
+        return margin + 0.5 * relief + 0.25 * resilience
+
+    def to_dict(self, prefix: str = "telemetry") -> dict[str, float]:
+        return {
+            f"{prefix}.stability_margin": self.stability_margin,
+            f"{prefix}.energy_trend": self.energy_trend,
+            f"{prefix}.stability_trend": self.stability_trend,
+            f"{prefix}.anomaly_pressure": self.anomaly_pressure,
+            f"{prefix}.energy_baseline": self.energy_baseline,
+        }
+
 
 class PsiTelemetry:
     """Monitor runtime vitals and emit intervention signals."""
@@ -388,6 +415,7 @@ class PsiTelemetry:
         self.failure_energy = float(failure_energy)
         self.norm_limit = float(norm_limit)
         self._history: deque[float] = deque(maxlen=self.window)
+        self._stability_history: deque[float] = deque(maxlen=self.window)
         self._geometry = geometry or ZSpaceGeometry.euclidean()
 
     def observe(self, frame: FusedFrame, energy: EnergyReport) -> TelemetryReport:
@@ -418,11 +446,37 @@ class PsiTelemetry:
         failsafe = any(tag.startswith("norm_overflow") for tag in anomalies) or (
             energy.total > self.failure_energy
         ) or (abs(energy.gravitational) > self.failure_energy)
-        return TelemetryReport(
+        report = TelemetryReport(
             energy=float(energy.total),
             stability=stability,
             failsafe=failsafe,
             anomalies=tuple(anomalies),
+        )
+        self._stability_history.append(report.stability)
+        return report
+
+    def insight(self, report: TelemetryReport) -> TelemetryInsight:
+        if self._history:
+            history_values = list(self._history)
+            energy_trend = history_values[-1] - history_values[0]
+            energy_baseline = sum(history_values) / len(history_values)
+        else:
+            energy_trend = 0.0
+            energy_baseline = report.energy
+        if self._stability_history:
+            stability_values = list(self._stability_history)
+            stability_mean = sum(stability_values) / len(stability_values)
+            stability_trend = stability_values[-1] - stability_mean
+        else:
+            stability_trend = 0.0
+        anomaly_pressure = min(1.0, len(report.anomalies) / max(self.window, 1))
+        margin = report.stability_margin(self.stability_threshold)
+        return TelemetryInsight(
+            stability_margin=margin,
+            energy_trend=energy_trend,
+            stability_trend=stability_trend,
+            anomaly_pressure=anomaly_pressure,
+            energy_baseline=energy_baseline,
         )
 
     def set_geometry(self, geometry: ZSpaceGeometry) -> None:
