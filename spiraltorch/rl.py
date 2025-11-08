@@ -59,6 +59,33 @@ def _resolve_fractal_session_cls():
 
 
 @dataclass
+class HyperFeedbackEnvelope:
+    stability_margin: float
+    harmony: float
+    anomaly_pressure: float
+    fractal_resonance: float = 0.0
+
+    def clamp(self) -> "HyperFeedbackEnvelope":
+        return HyperFeedbackEnvelope(
+            stability_margin=float(self.stability_margin),
+            harmony=max(0.0, float(self.harmony)),
+            anomaly_pressure=max(0.0, float(self.anomaly_pressure)),
+            fractal_resonance=max(0.0, float(self.fractal_resonance)),
+        )
+
+    def as_dict(self, prefix: str = "") -> dict[str, float]:
+        data = {
+            "stability_margin": float(self.stability_margin),
+            "harmony": float(self.harmony),
+            "anomaly_pressure": float(self.anomaly_pressure),
+            "fractal_resonance": float(self.fractal_resonance),
+        }
+        if prefix:
+            return {f"{prefix}{key}": value for key, value in data.items()}
+        return data
+
+
+@dataclass
 class LossStdTrigger:
     std_threshold: float = 0.1
     decay: float = 0.8
@@ -93,12 +120,20 @@ class PolicyGradient:
         self._hyper_trigger: LossStdTrigger | None = None
         self._geometry_feedback: dict[str, float] | None = None
         self._last_quantum: dict[str, float] | None = None
+        self._system_feedback: HyperFeedbackEnvelope | None = None
 
     def attach_hyper_surprise(self, trigger: LossStdTrigger) -> None:
         self._hyper_trigger = trigger
 
     def attach_geometry_feedback(self, feedback: dict[str, float]) -> None:
         self._geometry_feedback = dict(feedback)
+
+    def integrate_system_feedback(self, envelope: HyperFeedbackEnvelope) -> None:
+        self._system_feedback = envelope.clamp()
+
+    @property
+    def last_system_feedback(self) -> HyperFeedbackEnvelope | None:
+        return self._system_feedback
 
     def step(self, returns: Iterable[float], baseline: float = 0.0) -> dict[str, float]:
         returns = [float(value) for value in returns]
@@ -114,6 +149,17 @@ class PolicyGradient:
         if self._geometry_feedback:
             learning_rate *= self._geometry_feedback.get("min_learning_rate_scale", 1.0)
             gauge *= self._geometry_feedback.get("max_learning_rate_scale", 1.0)
+        if self._system_feedback is not None:
+            feedback = self._system_feedback
+            harmony = max(feedback.harmony, 0.0)
+            margin = max(feedback.stability_margin, 0.0)
+            anomaly = max(feedback.anomaly_pressure, 0.0)
+            resonance = max(feedback.fractal_resonance, 0.0)
+            learning_rate *= 1.0 + 0.25 * harmony + 0.1 * resonance
+            gauge *= (1.0 + 0.3 * margin) * (1.0 + 0.2 * anomaly)
+            update = {"learning_rate": learning_rate, "gauge": gauge}
+            update.update(feedback.as_dict(prefix="system_feedback."))
+            return update
         return {"learning_rate": learning_rate, "gauge": gauge}
 
     def update_from_quantum(
@@ -157,6 +203,8 @@ class PolicyGradient:
             update["learning_rate"] *= rl_update.get("learning_rate", 1.0)
             update["gauge"] *= rl_update.get("gauge", 1.0)
         self._last_quantum = dict(update)
+        if self._system_feedback is not None:
+            update.update(self._system_feedback.as_dict(prefix="system_feedback."))
         return update
 
     def build_fractal_session(
