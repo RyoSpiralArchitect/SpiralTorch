@@ -31,6 +31,64 @@ use std::collections::HashMap;
 use tracing::{debug, info};
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Experiment configuration helpers
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/// Configuration for the numerical experiments that power `SpiralReality`.
+///
+/// The initial implementation hard-coded three `n` values, ten planted and
+/// dense instances, and a handful of repetition/advice combinations.  The
+/// framework is often used for exploratory runs, so callers frequently asked
+/// for a way to stretch those parameters without editing the source.  This
+/// configuration object exposes the knobs while keeping the original
+/// defaults, enabling “伸ばしていけそうなところ手当たり次第に伸ばす” style
+/// experimentation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExperimentConfig {
+    /// Problem sizes to evaluate.
+    pub n_values: Vec<usize>,
+    /// Number of planted instances generated per `n`.
+    pub planted_instances: usize,
+    /// Number of dense random instances generated per `n`.
+    pub dense_instances: usize,
+    /// Number of trials for the base random sampler.
+    pub base_trials: usize,
+    /// Repetition counts to test.
+    pub rep_ks: Vec<usize>,
+    /// Advice budgets (in bits) to test.
+    pub advice_bits_options: Vec<usize>,
+    /// Seed offset for planted instances (lets callers stagger experiments).
+    pub planted_seed_offset: u64,
+    /// Seed offset for dense random instances.
+    pub dense_seed_offset: u64,
+    /// How many methods to surface in the summary table.
+    pub summary_top_k: usize,
+}
+
+impl ExperimentConfig {
+    /// Total number of instances generated per `n`.
+    pub fn total_instances_per_n(&self) -> usize {
+        self.planted_instances + self.dense_instances
+    }
+}
+
+impl Default for ExperimentConfig {
+    fn default() -> Self {
+        Self {
+            n_values: vec![9, 11, 13],
+            planted_instances: 10,
+            dense_instances: 10,
+            base_trials: 8,
+            rep_ks: vec![1, 3, 5, 7],
+            advice_bits_options: vec![0, 512, 2048],
+            planted_seed_offset: 0,
+            dense_seed_offset: 100,
+            summary_top_k: 5,
+        }
+    }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // § 1. 数値実験 (Numerical Experiments)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -240,36 +298,58 @@ pub struct ExperimentResult {
     pub error_rate: f64,
 }
 
-/// Run numerical experiments
-/// 変数数 n ∈ {9, 11, 13}、各 n で 20 本の式を生成
-pub fn run_numerical_experiments() -> Result<Vec<ExperimentResult>> {
-    let mut results = Vec::new();
-    let n_values = vec![9, 11, 13];
+/// Aggregated statistics for a method across all `n` values tested.
+#[derive(Clone, Debug)]
+pub struct MethodStatistics {
+    pub method: String,
+    pub worst_error: f64,
+    pub best_error: f64,
+    pub mean_error: f64,
+}
 
-    for &n in &n_values {
+/// Run numerical experiments with a fully customizable configuration.
+pub fn run_numerical_experiments_with_config(
+    config: &ExperimentConfig,
+) -> Result<Vec<ExperimentResult>> {
+    let mut results = Vec::new();
+    for (idx, &n) in config.n_values.iter().enumerate() {
         info!("Running experiments for n = {}", n);
 
-        // Generate dataset: 10 planted + 10 dense random
-        let mut instances = Vec::new();
-        for i in 0..10 {
-            instances.push(SatInstance::generate_planted(n, i));
+        // Generate dataset according to the config
+        let mut instances = Vec::with_capacity(config.total_instances_per_n());
+        for i in 0..config.planted_instances {
+            let seed = config.planted_seed_offset
+                + (idx as u64 * config.planted_instances as u64)
+                + i as u64;
+            instances.push(SatInstance::generate_planted(n, seed));
         }
-        for i in 0..10 {
-            instances.push(SatInstance::generate_dense_random(n, i + 100));
+        for i in 0..config.dense_instances {
+            let seed =
+                config.dense_seed_offset + (idx as u64 * config.dense_instances as u64) + i as u64;
+            instances.push(SatInstance::generate_dense_random(n, seed));
         }
 
-        // Test different methods
-        // Base: rand-8
-        let rand8 = RandomSampler::new(8);
+        if instances.is_empty() {
+            anyhow::bail!(
+                "Experiment configuration produced zero instances for n = {}",
+                n
+            );
+        }
+
+        // Base random sampler (configurable trials)
+        let base_sampler = RandomSampler::new(config.base_trials);
         results.push(ExperimentResult {
-            method: "rand-8".to_string(),
+            method: format!("rand-{}", config.base_trials),
             n,
-            error_rate: rand8.error_rate(&instances),
+            error_rate: base_sampler.error_rate(&instances),
         });
 
-        // rep-1, rep-3, rep-5, rep-7
-        for k in [1, 3, 5, 7] {
-            let rep = RepetitionOracle::new(8, k);
+        // rep-k runs
+        for &k in &config.rep_ks {
+            if k == 0 {
+                continue;
+            }
+            let rep = RepetitionOracle::new(config.base_trials, k);
             results.push(ExperimentResult {
                 method: format!("rep-{}", k),
                 n,
@@ -278,9 +358,12 @@ pub fn run_numerical_experiments() -> Result<Vec<ExperimentResult>> {
         }
 
         // rep-k + advice-b combinations
-        for k in [1, 3, 5, 7] {
-            for advice_bits in [0, 512, 2048] {
-                let mut advice = AdviceOracle::new(8, k, advice_bits);
+        for &k in &config.rep_ks {
+            if k == 0 {
+                continue;
+            }
+            for &advice_bits in &config.advice_bits_options {
+                let mut advice = AdviceOracle::new(config.base_trials, k, advice_bits);
                 advice.train(&instances);
                 results.push(ExperimentResult {
                     method: format!("rep-{}+advice-{}", k, advice_bits),
@@ -294,8 +377,13 @@ pub fn run_numerical_experiments() -> Result<Vec<ExperimentResult>> {
     Ok(results)
 }
 
-/// Compute d̂_{n_max} = max error across all n values for each method
-pub fn compute_worst_error(results: &[ExperimentResult]) -> HashMap<String, f64> {
+/// Run numerical experiments using the default configuration.
+pub fn run_numerical_experiments() -> Result<Vec<ExperimentResult>> {
+    run_numerical_experiments_with_config(&ExperimentConfig::default())
+}
+
+/// Compute aggregate statistics per method.
+pub fn compute_method_statistics(results: &[ExperimentResult]) -> Vec<MethodStatistics> {
     let mut method_errors: HashMap<String, Vec<f64>> = HashMap::new();
 
     for result in results {
@@ -305,16 +393,38 @@ pub fn compute_worst_error(results: &[ExperimentResult]) -> HashMap<String, f64>
             .push(result.error_rate);
     }
 
-    method_errors
+    let mut stats = Vec::with_capacity(method_errors.len());
+    for (method, errors) in method_errors {
+        if errors.is_empty() {
+            continue;
+        }
+        let worst = errors
+            .iter()
+            .copied()
+            .max_by(|a, b| a.partial_cmp(b).unwrap())
+            .unwrap_or(0.0);
+        let best = errors
+            .iter()
+            .copied()
+            .min_by(|a, b| a.partial_cmp(b).unwrap())
+            .unwrap_or(0.0);
+        let mean = errors.iter().sum::<f64>() / errors.len() as f64;
+        stats.push(MethodStatistics {
+            method,
+            worst_error: worst,
+            best_error: best,
+            mean_error: mean,
+        });
+    }
+
+    stats
+}
+
+/// Compute d̂_{n_max} = max error across all n values for each method
+pub fn compute_worst_error(results: &[ExperimentResult]) -> HashMap<String, f64> {
+    compute_method_statistics(results)
         .into_iter()
-        .map(|(method, errors)| {
-            let worst = errors
-                .iter()
-                .copied()
-                .max_by(|a, b| a.partial_cmp(b).unwrap())
-                .unwrap_or(0.0);
-            (method, worst)
-        })
+        .map(|stats| (stats.method, stats.worst_error))
         .collect()
 }
 
@@ -583,6 +693,8 @@ impl Default for MonodromyLoop {
 pub struct SpiralReality {
     /// Numerical experiment results
     pub experiments: Vec<ExperimentResult>,
+    /// Aggregate method statistics (mean/best/worst)
+    pub method_statistics: Vec<MethodStatistics>,
     /// Computed worst errors per method
     pub worst_errors: HashMap<String, f64>,
     /// Resource monotonicity proofs
@@ -591,17 +703,28 @@ pub struct SpiralReality {
     pub distribution_proofs: Vec<DistributionDominanceProof>,
     /// Monodromy loop state
     pub monodromy: MonodromyLoop,
+    /// Experiment configuration used to generate data
+    pub experiment_config: ExperimentConfig,
 }
 
 impl SpiralReality {
     /// Initialize a new SpiralReality framework
     pub fn new() -> Result<Self> {
+        Self::new_with_config(ExperimentConfig::default())
+    }
+
+    /// Initialize the framework with a custom experiment configuration
+    pub fn new_with_config(config: ExperimentConfig) -> Result<Self> {
         info!("Initializing SpiralReality framework");
 
         // Run numerical experiments
-        let experiments =
-            run_numerical_experiments().context("Failed to run numerical experiments")?;
-        let worst_errors = compute_worst_error(&experiments);
+        let experiments = run_numerical_experiments_with_config(&config)
+            .context("Failed to run numerical experiments")?;
+        let method_statistics = compute_method_statistics(&experiments);
+        let worst_errors = method_statistics
+            .iter()
+            .map(|stats| (stats.method.clone(), stats.worst_error))
+            .collect();
 
         // Set up proof obligations
         let resource_proofs = vec![
@@ -655,10 +778,12 @@ impl SpiralReality {
 
         Ok(Self {
             experiments,
+            method_statistics,
             worst_errors,
             resource_proofs,
             distribution_proofs,
             monodromy,
+            experiment_config: config,
         })
     }
 
@@ -695,13 +820,61 @@ impl SpiralReality {
             "  Total experiments: {}\n",
             self.experiments.len()
         ));
-        report.push_str(&format!("  Methods tested: {}\n", self.worst_errors.len()));
+        report.push_str(&format!(
+            "  Methods tested: {}\n",
+            self.method_statistics.len()
+        ));
+        report.push_str(&format!(
+            "  n values: {:?}\n",
+            self.experiment_config.n_values
+        ));
+        report.push_str(&format!(
+            "  Instances per n: {} planted + {} dense\n",
+            self.experiment_config.planted_instances, self.experiment_config.dense_instances
+        ));
+        report.push_str(&format!(
+            "  Base trials: {}\n",
+            self.experiment_config.base_trials
+        ));
+        report.push_str(&format!(
+            "  Repetition ks tested: {:?}\n",
+            self.experiment_config.rep_ks
+        ));
+        report.push_str(&format!(
+            "  Advice bits tested: {:?}\n",
+            self.experiment_config.advice_bits_options
+        ));
 
-        report.push_str("\n  d̂_{n_max} (worst error) by method:\n");
-        let mut sorted_methods: Vec<_> = self.worst_errors.iter().collect();
-        sorted_methods.sort_by(|a, b| a.1.partial_cmp(b.1).unwrap());
-        for (method, error) in sorted_methods.iter().take(5) {
-            report.push_str(&format!("    {}: {:.3}\n", method, error));
+        report.push_str("\n  Method statistics (sorted by mean error):\n");
+        let mut sorted_methods = self.method_statistics.clone();
+        sorted_methods.sort_by(|a, b| {
+            a.mean_error
+                .partial_cmp(&b.mean_error)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let top_k = self.experiment_config.summary_top_k.max(1);
+        for stats in sorted_methods.iter().take(top_k) {
+            report.push_str(&format!(
+                "    {method}: worst={worst:.3}, mean={mean:.3}, best={best:.3}\n",
+                method = stats.method,
+                worst = stats.worst_error,
+                mean = stats.mean_error,
+                best = stats.best_error
+            ));
+        }
+
+        if let Some(baseline) = self
+            .method_statistics
+            .iter()
+            .find(|m| m.method == format!("rand-{}", self.experiment_config.base_trials))
+        {
+            if let Some(best) = sorted_methods.first() {
+                let delta_worst = baseline.worst_error - best.worst_error;
+                let delta_mean = baseline.mean_error - best.mean_error;
+                report.push_str("\n  Baseline comparison (best vs rand-base):\n");
+                report.push_str(&format!("    Δworst error: {:+.3}\n", delta_worst));
+                report.push_str(&format!("    Δmean error: {:+.3}\n", delta_mean));
+            }
         }
 
         report.push_str("\n§ 2. Proof Obligations (証明義務)\n");
@@ -858,6 +1031,8 @@ mod tests {
         let reality = reality.unwrap();
         assert!(!reality.experiments.is_empty());
         assert!(!reality.worst_errors.is_empty());
+        assert!(!reality.method_statistics.is_empty());
+        assert_eq!(reality.experiment_config, ExperimentConfig::default());
     }
 
     #[test]
@@ -874,5 +1049,55 @@ mod tests {
         assert!(summary.contains("Numerical Experiments"));
         assert!(summary.contains("Proof Obligations"));
         assert!(summary.contains("Monodromy"));
+    }
+
+    #[test]
+    fn test_run_numerical_experiments_with_custom_config() {
+        let config = ExperimentConfig {
+            n_values: vec![5],
+            planted_instances: 2,
+            dense_instances: 1,
+            base_trials: 4,
+            rep_ks: vec![1, 2],
+            advice_bits_options: vec![0, 128],
+            planted_seed_offset: 5,
+            dense_seed_offset: 42,
+            summary_top_k: 3,
+        };
+
+        let results = run_numerical_experiments_with_config(&config).unwrap();
+
+        // Expect: 1 baseline + 2 rep variants + (2 reps * 2 advice options) = 7 results
+        assert_eq!(results.len(), 7);
+        assert!(results.iter().all(|res| res.n == 5));
+
+        let stats = compute_method_statistics(&results);
+        assert_eq!(stats.len(), 7);
+        for stat in stats {
+            assert!(stat.worst_error >= stat.best_error - f64::EPSILON);
+        }
+    }
+
+    #[test]
+    fn test_spiral_reality_with_custom_config() {
+        let config = ExperimentConfig {
+            n_values: vec![7],
+            planted_instances: 1,
+            dense_instances: 1,
+            base_trials: 2,
+            rep_ks: vec![1],
+            advice_bits_options: vec![0],
+            planted_seed_offset: 0,
+            dense_seed_offset: 10,
+            summary_top_k: 2,
+        };
+
+        let reality = SpiralReality::new_with_config(config.clone()).unwrap();
+        assert_eq!(reality.experiment_config, config);
+        assert!(!reality.method_statistics.is_empty());
+
+        let summary = reality.summary();
+        assert!(summary.contains("n values: [7]"));
+        assert!(summary.contains("Base trials: 2"));
     }
 }
