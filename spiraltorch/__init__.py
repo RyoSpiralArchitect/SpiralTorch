@@ -116,10 +116,14 @@ def _spiral_softmax_hardmax_consensus_python(
         hardmass = 0.0
 
         for prob, mask in zip(row_soft, row_hard):
-            p = float(prob)
+            p_raw = float(prob)
+            m_raw = float(mask)
+            p = p_raw if math.isfinite(p_raw) and p_raw > 0.0 else 0.0
+            m = m_raw if math.isfinite(m_raw) and m_raw > 0.0 else 0.0
+
             if p > 0.0:
                 entropy -= p * math.log(p)
-            hardmass += float(mask) if mask > 0.0 else 0.0
+            hardmass += m
 
         geodesic = entropy * _SPIRAL_RAMANUJAN_RATIO + hardmass * _GOLDEN_RATIO
         enrichment = _SPIRAL_LEECH_SCALE * geodesic if geodesic > 1e-12 else 0.0
@@ -138,9 +142,13 @@ def _spiral_softmax_hardmax_consensus_python(
         total_coherence += (entropy_norm + hardmass_norm + enrichment_norm) / 3.0
 
         for index, (prob, mask) in enumerate(zip(row_soft, row_hard)):
+            prob = float(prob)
+            mask = float(mask)
+            sanitized_prob = prob if math.isfinite(prob) and prob > 0.0 else 0.0
+            sanitized_mask = mask if math.isfinite(mask) and mask > 0.0 else 0.0
             fused_value = (
-                _GOLDEN_RATIO_CONJUGATE * float(prob)
-                + _GOLDEN_RATIO_BIAS * float(mask)
+                _GOLDEN_RATIO_CONJUGATE * sanitized_prob
+                + _GOLDEN_RATIO_BIAS * sanitized_mask
             )
             fused[offset + index] = scale * fused_value
 

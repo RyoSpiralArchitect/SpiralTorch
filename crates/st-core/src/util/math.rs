@@ -236,11 +236,13 @@ pub fn spiral_softmax_hardmax_consensus(
         let mut hardmass = 0.0_f64;
 
         for (&prob, &mask) in row_soft.iter().zip(row_hard.iter()) {
-            let p = f64::from(prob.max(0.0));
+            let p = f64::from(if prob.is_finite() { prob.max(0.0) } else { 0.0 });
+            let m = f64::from(if mask.is_finite() { mask.max(0.0) } else { 0.0 });
+
             if p > 0.0 {
                 entropy -= p * p.ln();
             }
-            hardmass += f64::from(mask);
+            hardmass += m;
         }
 
         let geodesic = entropy * projector.ramanujan_ratio() + hardmass * GOLDEN_RATIO;
@@ -256,8 +258,11 @@ pub fn spiral_softmax_hardmax_consensus(
         total_coherence += (entropy_norm + hardmass_norm + enrichment_norm) / 3.0;
 
         for (index, (&prob, &mask)) in row_soft.iter().zip(row_hard.iter()).enumerate() {
-            let fused_value =
-                (GOLDEN_RATIO_CONJUGATE as f32) * prob + (GOLDEN_RATIO_BIAS as f32) * mask;
+            let sanitized_prob = if prob.is_finite() { prob.max(0.0) } else { 0.0 };
+            let sanitized_mask = if mask.is_finite() { mask.max(0.0) } else { 0.0 };
+
+            let fused_value = (GOLDEN_RATIO_CONJUGATE as f32) * sanitized_prob
+                + (GOLDEN_RATIO_BIAS as f32) * sanitized_mask;
             fused[offset + index] = scale * fused_value;
         }
     }
@@ -283,9 +288,9 @@ pub fn spiral_softmax_hardmax_consensus(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use approx::assert_abs_diff_eq;
+    mod tests {
+        use super::*;
+        use approx::assert_abs_diff_eq;
 
     #[test]
     fn ramanujan_cache_reuses_values() {
@@ -317,5 +322,19 @@ mod tests {
         assert!(weighted.ramanujan_ratio() >= 1.0);
         assert!(weighted.enrich(1.0) >= vanilla.enrich(1.0));
         assert!(weighted.ramanujan_delta() >= 0.0);
+    }
+
+    #[test]
+    fn spiral_softmax_hardmax_consensus_sanitises_non_finite_values() {
+        let projector = LeechProjector::new(24, 0.75);
+        let softmax = [0.5_f32, f32::NAN, -0.2, 1.2];
+        let hardmax = [1.0_f32, f32::NAN, -3.0, 0.0];
+
+        let (fused, stats) = spiral_softmax_hardmax_consensus(&softmax, &hardmax, 2, 2, &projector);
+
+        assert_eq!(fused.len(), 4);
+        assert!(fused.iter().all(|value| value.is_finite() && *value >= 0.0));
+        assert!(stats.average_enrichment.is_finite());
+        assert!(stats.spiral_coherence.is_finite());
     }
 }
