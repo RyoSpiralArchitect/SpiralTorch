@@ -5816,10 +5816,31 @@ pub fn row_softmax_hardmax_spiral(
         let mut total_enrichment = 0.0_f64;
         let mut total_coherence = 0.0_f64;
         for chunk in metrics.chunks_exact(4) {
-            total_entropy += f64::from(chunk[0].max(0.0));
-            total_hardmass += f64::from(chunk[1].max(0.0));
-            total_enrichment += f64::from(chunk[2]);
-            total_coherence += f64::from(chunk[3].clamp(0.0, 1.0));
+            let entropy = if chunk[0].is_finite() {
+                f64::from(chunk[0].max(0.0))
+            } else {
+                0.0
+            };
+            let hardmass = if chunk[1].is_finite() {
+                f64::from(chunk[1].max(0.0))
+            } else {
+                0.0
+            };
+            let enrichment = if chunk[2].is_finite() {
+                f64::from(chunk[2].max(0.0))
+            } else {
+                0.0
+            };
+            let coherence = if chunk[3].is_finite() {
+                f64::from(chunk[3].clamp(0.0, 1.0))
+            } else {
+                0.0
+            };
+
+            total_entropy += entropy;
+            total_hardmass += hardmass;
+            total_enrichment += enrichment;
+            total_coherence += coherence;
         }
         let rows_f64 = rows as f64;
         let inv_rows = if rows_f64 > 0.0 { 1.0 / rows_f64 } else { 0.0 };
