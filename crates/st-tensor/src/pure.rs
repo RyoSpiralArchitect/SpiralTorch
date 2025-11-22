@@ -451,20 +451,29 @@ pub(crate) fn spiral_softmax_hardmax_consensus(
         let mut hardmass = 0.0_f64;
 
         for (&prob, &mask) in row_soft.iter().zip(row_hard.iter()) {
-            let p = f64::from(prob.max(0.0));
+            let p = f64::from(if prob.is_finite() { prob.max(0.0) } else { 0.0 });
+            let m = f64::from(if mask.is_finite() { mask.max(0.0) } else { 0.0 });
+
             if p > 0.0 {
                 entropy -= p * p.ln();
             }
-            hardmass += f64::from(mask.max(0.0));
+            hardmass += m;
         }
 
         let geodesic = entropy * ramanujan_ratio + hardmass * GOLDEN_RATIO;
+        let geodesic = if geodesic.is_finite() { geodesic } else { 0.0 };
         let enrichment = if geodesic > f64::EPSILON {
             leech_scale * geodesic
         } else {
             0.0
         };
-        let scale = (1.0 + enrichment) as f32;
+        let enrichment = if enrichment.is_finite() {
+            enrichment.max(0.0)
+        } else {
+            0.0
+        };
+        let raw_scale = 1.0 + enrichment;
+        let scale = raw_scale.clamp(0.0, f32::MAX as f64) as f32;
         total_entropy += entropy;
         total_hardmass += hardmass;
         total_enrichment += enrichment;
@@ -475,9 +484,17 @@ pub(crate) fn spiral_softmax_hardmax_consensus(
         total_coherence += (entropy_norm + hardmass_norm + enrichment_norm) / 3.0;
 
         for (index, (&prob, &mask)) in row_soft.iter().zip(row_hard.iter()).enumerate() {
-            let fused_value =
-                (GOLDEN_RATIO_CONJUGATE as f32) * prob + (GOLDEN_RATIO_BIAS as f32) * mask;
-            fused[offset + index] = scale * fused_value;
+            let sanitized_prob = if prob.is_finite() { prob.max(0.0) } else { 0.0 };
+            let sanitized_mask = if mask.is_finite() { mask.max(0.0) } else { 0.0 };
+
+            let fused_value = (GOLDEN_RATIO_CONJUGATE as f32) * sanitized_prob
+                + (GOLDEN_RATIO_BIAS as f32) * sanitized_mask;
+            let candidate = scale * fused_value;
+            fused[offset + index] = if candidate.is_finite() {
+                candidate.max(0.0)
+            } else {
+                0.0
+            };
         }
     }
 
@@ -6205,6 +6222,33 @@ fn matmul_wgpu(
 mod tests {
     use super::*;
     use ndarray::Array2;
+
+    #[test]
+    fn spiral_consensus_sanitises_non_finite_values() {
+        let softmax = [0.5_f32, f32::NAN, -0.2, 1.2];
+        let hardmax = [1.0_f32, f32::NAN, -3.0, 0.0];
+
+        let (fused, stats) = spiral_softmax_hardmax_consensus(&softmax, &hardmax, 2, 2);
+
+        assert_eq!(fused.len(), 4);
+        assert!(fused.iter().all(|value| value.is_finite() && *value >= 0.0));
+        assert!(stats.average_enrichment.is_finite());
+        assert!(stats.spiral_coherence.is_finite());
+    }
+
+    #[test]
+    fn spiral_consensus_bounds_extreme_values() {
+        let huge = f32::powi(10.0, 30);
+        let softmax = [huge, huge, huge, huge];
+        let hardmax = [huge, huge, huge, huge];
+
+        let (fused, stats) = spiral_softmax_hardmax_consensus(&softmax, &hardmax, 2, 2);
+
+        assert_eq!(fused.len(), 4);
+        assert!(fused.iter().all(|value| value.is_finite() && *value >= 0.0));
+        assert!(stats.average_enrichment.is_finite());
+        assert!(stats.spiral_coherence.is_finite());
+    }
 
     fn assert_summary_close(actual: GradientSummary, expected: GradientSummary) {
         const EPS: f32 = 1e-5;
