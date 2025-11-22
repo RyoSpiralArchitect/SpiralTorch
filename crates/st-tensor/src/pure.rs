@@ -350,7 +350,7 @@ const GOLDEN_RATIO_CONJUGATE: f64 = 0.618_033_988_749_894_8;
 const GOLDEN_RATIO_BIAS: f64 = 0.381_966_011_250_105_1;
 
 /// Aggregate telemetry captured while building the spiral consensus weights.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct SpiralConsensusStats {
     /// The golden ratio φ used for the fusion.
     pub phi: f64,
@@ -370,6 +370,30 @@ pub struct SpiralConsensusStats {
     pub mean_hardmass: f64,
     /// Average per-row coherence balancing entropy, hardmass, and enrichment.
     pub spiral_coherence: f64,
+}
+
+impl Default for SpiralConsensusStats {
+    fn default() -> Self {
+        let approximation = ramanujan_pi(SPIRAL_PROJECTOR_RAMANUJAN_ITERS);
+        let pi = std::f64::consts::PI;
+        let (ramanujan_ratio, ramanujan_delta) = if approximation.is_finite() && approximation > f64::EPSILON {
+            (pi / approximation, (approximation - pi).abs())
+        } else {
+            (1.0, pi.abs())
+        };
+
+        Self {
+            phi: GOLDEN_RATIO,
+            phi_conjugate: GOLDEN_RATIO_CONJUGATE,
+            phi_bias: GOLDEN_RATIO_BIAS,
+            ramanujan_ratio,
+            ramanujan_delta,
+            average_enrichment: 0.0,
+            mean_entropy: 0.0,
+            mean_hardmass: 0.0,
+            spiral_coherence: 0.0,
+        }
+    }
 }
 
 /// Combined softmax, hardmax, and spiral consensus payload returned by
@@ -6248,6 +6272,21 @@ mod tests {
         assert!(fused.iter().all(|value| value.is_finite() && *value >= 0.0));
         assert!(stats.average_enrichment.is_finite());
         assert!(stats.spiral_coherence.is_finite());
+    }
+
+    #[test]
+    fn spiral_consensus_default_metrics_have_constants() {
+        let stats = SpiralConsensusStats::default();
+
+        assert!((stats.phi - GOLDEN_RATIO).abs() < 1e-12);
+        assert!((stats.phi_conjugate - GOLDEN_RATIO_CONJUGATE).abs() < 1e-12);
+        assert!((stats.phi_bias - GOLDEN_RATIO_BIAS).abs() < 1e-12);
+        assert!(stats.ramanujan_ratio.is_finite());
+        assert!(stats.ramanujan_delta.is_finite());
+        assert_eq!(stats.average_enrichment, 0.0);
+        assert_eq!(stats.mean_entropy, 0.0);
+        assert_eq!(stats.mean_hardmass, 0.0);
+        assert_eq!(stats.spiral_coherence, 0.0);
     }
 
     fn assert_summary_close(actual: GradientSummary, expected: GradientSummary) {
