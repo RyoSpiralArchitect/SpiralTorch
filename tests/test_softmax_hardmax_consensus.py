@@ -49,6 +49,28 @@ class SpiralConsensusTests(unittest.TestCase):
         expected_coherence = (0.0 + 1.0 + enrichment_norm) / 3.0
         self.assertTrue(math.isclose(metrics["spiral_coherence"], expected_coherence, rel_tol=1e-12))
 
+    def test_non_finite_values_are_sanitised(self) -> None:
+        fused, metrics = _spiral_softmax_hardmax_consensus_python(
+            [0.5, math.nan, -0.1, 0.6], [1.0, math.nan, -3.0, 0.0], rows=2, cols=2
+        )
+
+        self.assertEqual(len(fused), 4)
+        self.assertTrue(all(math.isfinite(value) and value >= 0.0 for value in fused))
+        self.assertTrue(math.isfinite(metrics["average_enrichment"]))
+        self.assertTrue(math.isfinite(metrics["spiral_coherence"]))
+
+    def test_extreme_values_remain_finite(self) -> None:
+        huge = 1e30
+        softmax = [huge, huge, huge, huge]
+        hardmax = [huge, huge, huge, huge]
+
+        fused, metrics = _spiral_softmax_hardmax_consensus_python(softmax, hardmax, rows=2, cols=2)
+
+        self.assertEqual(len(fused), 4)
+        self.assertTrue(all(math.isfinite(value) for value in fused))
+        self.assertTrue(math.isfinite(metrics["average_enrichment"]))
+        self.assertTrue(math.isfinite(metrics["spiral_coherence"]))
+
 
 if __name__ == "__main__":
     unittest.main()
