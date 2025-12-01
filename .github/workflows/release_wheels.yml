@@ -20,7 +20,7 @@ jobs:
         os: [ubuntu-22.04, macos-14, windows-2022]
         py: ["3.11","3.12","3.13","3.14"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.py }}
@@ -40,7 +40,7 @@ jobs:
     needs: wheels
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
       - uses: actions/download-artifact@v4
