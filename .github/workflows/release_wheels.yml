@@ -71,7 +71,7 @@ jobs:
             --license "LICENSE .txt" \
             --tag "$RELEASE_TAG"
       - name: Generate SBOM for release payload
-        uses: anchore/sbom-action@v0.20.9
+        uses: anchore/sbom-action@v0.20.11
         with:
           path: dist
           format: cyclonedx-json
