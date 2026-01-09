@@ -456,10 +456,12 @@ mod tests {
     fn runtime_accumulates_stats() {
         let mut runtime = sample_runtime();
         runtime.begin_step();
-        let mut metrics = StepMetrics::default();
-        metrics.step_time_ms = 12.5;
-        metrics.mem_peak_mb = 512.0;
-        metrics.retry_rate = 0.1;
+        let mut metrics = StepMetrics {
+            step_time_ms: 12.5,
+            mem_peak_mb: 512.0,
+            retry_rate: 0.1,
+            ..Default::default()
+        };
         metrics.extra.insert("grad_norm".into(), 0.5);
         let reward1 = runtime.post_step(&metrics);
         let stats1 = runtime.stats();
@@ -471,10 +473,12 @@ mod tests {
         assert_eq!(stats1.extras.get("grad_norm").cloned().unwrap(), 0.5);
 
         runtime.begin_step();
-        let mut metrics2 = StepMetrics::default();
-        metrics2.step_time_ms = 6.0;
-        metrics2.mem_peak_mb = 256.0;
-        metrics2.retry_rate = 0.05;
+        let mut metrics2 = StepMetrics {
+            step_time_ms: 6.0,
+            mem_peak_mb: 256.0,
+            retry_rate: 0.05,
+            ..Default::default()
+        };
         metrics2.extra.insert("grad_norm".into(), 0.25);
         let _ = runtime.post_step(&metrics2);
         let stats2 = runtime.stats();
@@ -908,11 +912,13 @@ pub mod zmeta {
 
         #[test]
         fn logistic_projection_keeps_unit_norm() {
-            let mut params = ZMetaParams::default();
-            params.dim = 3;
-            params.seed = 7;
-            params.orientation_eta = 0.2;
-            params.orientation_eps = 5e-3;
+            let params = ZMetaParams {
+                dim: 3,
+                seed: 7,
+                orientation_eta: 0.2,
+                orientation_eps: 5e-3,
+                ..Default::default()
+            };
             let mut es = ZMetaES::new(params);
             assert!((norm(&es.dir) - 1.0).abs() < 1e-6);
 

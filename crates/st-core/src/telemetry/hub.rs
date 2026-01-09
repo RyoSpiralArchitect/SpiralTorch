@@ -2086,31 +2086,32 @@ mod tests {
         clear_atlas();
         clear_atlas_route();
         clear_last_realgrad_for_test();
-        let mut pulse = RealGradPulse::default();
-        pulse.lebesgue_measure = 5.0;
-        pulse.monad_energy = 2.0;
-        pulse.z_energy = 3.0;
-        pulse.residual_ratio = 0.6;
-        pulse.lebesgue_ratio = 0.4;
-        pulse.ramanujan_pi = 3.1415;
-        pulse.tolerance = 1.0e-3;
-        pulse.convergence_error = 5.0e-4;
-        pulse.iterations = 4;
-        pulse.dominated = true;
-        pulse.converged = true;
-        pulse.gradient_norm = 1.5;
-        pulse.gradient_sparsity = 0.2;
-        pulse.rolling_gradient_norm = 1.1;
-        pulse.rolling_residual_ratio = 0.3;
-        pulse.transparency = Some(TransparencySummary {
-            transparency_gain: 0.8,
-            mean_attenuation: 0.2,
-            max_attenuation: 0.35,
-            mean_refraction: 0.15,
-            diffusion_energy: 0.05,
-            phase_variation: 0.12,
-            jacobian_norm: 0.4,
-        });
+        let pulse = RealGradPulse {
+            lebesgue_measure: 5.0,
+            monad_energy: 2.0,
+            z_energy: 3.0,
+            residual_ratio: 0.6,
+            lebesgue_ratio: 0.4,
+            ramanujan_pi: core::f32::consts::PI,
+            tolerance: 1.0e-3,
+            convergence_error: 5.0e-4,
+            iterations: 4,
+            dominated: true,
+            converged: true,
+            gradient_norm: 1.5,
+            gradient_sparsity: 0.2,
+            rolling_gradient_norm: 1.1,
+            rolling_residual_ratio: 0.3,
+            transparency: Some(TransparencySummary {
+                transparency_gain: 0.8,
+                mean_attenuation: 0.2,
+                max_attenuation: 0.35,
+                mean_refraction: 0.15,
+                diffusion_energy: 0.05,
+                phase_variation: 0.12,
+                jacobian_norm: 0.4,
+            }),
+        };
         set_last_realgrad(&pulse);
         let atlas = get_atlas_frame().expect("realgrad atlas frame");
         assert!(atlas
@@ -2162,31 +2163,32 @@ mod tests {
     fn realgrad_pulse_roundtrips_through_cache() {
         clear_last_realgrad_for_test();
         assert!(get_last_realgrad().is_none());
-        let mut pulse = RealGradPulse::default();
-        pulse.lebesgue_measure = 4.0;
-        pulse.monad_energy = 1.0;
-        pulse.z_energy = 3.0;
-        pulse.residual_ratio = 0.25;
-        pulse.lebesgue_ratio = 0.5;
-        pulse.ramanujan_pi = 3.1415;
-        pulse.tolerance = 1.0e-3;
-        pulse.convergence_error = 5.0e-4;
-        pulse.iterations = 3;
-        pulse.dominated = true;
-        pulse.converged = true;
-        pulse.gradient_norm = 2.5;
-        pulse.gradient_sparsity = 0.75;
-        pulse.rolling_gradient_norm = 1.5;
-        pulse.rolling_residual_ratio = 0.2;
-        pulse.transparency = Some(TransparencySummary {
-            transparency_gain: 0.9,
-            mean_attenuation: 0.3,
-            max_attenuation: 0.5,
-            mean_refraction: 0.25,
-            diffusion_energy: 0.1,
-            phase_variation: 0.2,
-            jacobian_norm: 0.6,
-        });
+        let pulse = RealGradPulse {
+            lebesgue_measure: 4.0,
+            monad_energy: 1.0,
+            z_energy: 3.0,
+            residual_ratio: 0.25,
+            lebesgue_ratio: 0.5,
+            ramanujan_pi: core::f32::consts::PI,
+            tolerance: 1.0e-3,
+            convergence_error: 5.0e-4,
+            iterations: 3,
+            dominated: true,
+            converged: true,
+            gradient_norm: 2.5,
+            gradient_sparsity: 0.75,
+            rolling_gradient_norm: 1.5,
+            rolling_residual_ratio: 0.2,
+            transparency: Some(TransparencySummary {
+                transparency_gain: 0.9,
+                mean_attenuation: 0.3,
+                max_attenuation: 0.5,
+                mean_refraction: 0.25,
+                diffusion_energy: 0.1,
+                phase_variation: 0.2,
+                jacobian_norm: 0.6,
+            }),
+        };
         set_last_realgrad(&pulse);
         let stored = get_last_realgrad().expect("pulse stored");
         assert_eq!(stored.iterations, 3);

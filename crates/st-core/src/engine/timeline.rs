@@ -791,9 +791,11 @@ mod tests {
             .schedule_kernel("conv", 0, 1.0, 1.0)
             .expect("second");
 
-        let mut config = TimelineAutoConfig::default();
-        config.smoothing = 1.0;
-        config.stability_sensitivity = 0.0;
+        let config = TimelineAutoConfig {
+            smoothing: 1.0,
+            stability_sensitivity: 0.0,
+            ..Default::default()
+        };
         let mut controller = TimelineWarpController::new(config);
 
         let baseline = TimelineSignal {
@@ -828,10 +830,12 @@ mod tests {
             .schedule_kernel("conv", 0, 1.5, 1.0)
             .expect("second");
 
-        let mut config = TimelineAutoConfig::default();
-        config.smoothing = 1.0;
-        config.lr_sensitivity = 0.0;
-        config.stability_sensitivity = 0.0;
+        let config = TimelineAutoConfig {
+            smoothing: 1.0,
+            lr_sensitivity: 0.0,
+            stability_sensitivity: 0.0,
+            ..Default::default()
+        };
         let mut controller = TimelineWarpController::new(config);
 
         let baseline = TimelineSignal {
@@ -866,8 +870,10 @@ mod tests {
             .schedule_kernel("conv", 0, 1.0, 1.0)
             .expect("second");
 
-        let mut config = TimelineAutoConfig::default();
-        config.smoothing = 1.0;
+        let config = TimelineAutoConfig {
+            smoothing: 1.0,
+            ..Default::default()
+        };
         let mut controller = TimelineWarpController::new(config);
         controller.set_manual_control(ManualWarp::new(1.2, 0.5, 1.0));
 
@@ -898,10 +904,12 @@ mod tests {
             .schedule_kernel("conv", 0, 1.0, 1.0)
             .expect("second");
 
-        let mut config = TimelineAutoConfig::default();
-        config.smoothing = 1.0;
-        config.memory_sensitivity = 0.0;
-        config.throughput_sensitivity = 0.0;
+        let config = TimelineAutoConfig {
+            smoothing: 1.0,
+            memory_sensitivity: 0.0,
+            throughput_sensitivity: 0.0,
+            ..Default::default()
+        };
         let mut controller = TimelineWarpController::new(config);
         controller.set_manual_control(ManualWarp::with_curvature(1.0, 0.0, 1.0, 0.7));
 
@@ -932,9 +940,11 @@ mod tests {
             .schedule_kernel("conv", 0, 1.0, 1.0)
             .expect("second");
 
-        let mut config = TimelineAutoConfig::default();
-        config.smoothing = 1.0;
-        config.throughput_sensitivity = 0.0;
+        let config = TimelineAutoConfig {
+            smoothing: 1.0,
+            throughput_sensitivity: 0.0,
+            ..Default::default()
+        };
         let mut controller = TimelineWarpController::new(config);
 
         let baseline = TimelineSignal {
@@ -972,10 +982,12 @@ mod tests {
             .schedule_kernel("conv", 0, 1.0, 1.0)
             .expect("second");
 
-        let mut config = TimelineAutoConfig::default();
-        config.smoothing = 1.0;
-        config.memory_sensitivity = 0.0;
-        config.throughput_sensitivity = 0.0;
+        let config = TimelineAutoConfig {
+            smoothing: 1.0,
+            memory_sensitivity: 0.0,
+            throughput_sensitivity: 0.0,
+            ..Default::default()
+        };
         let mut controller = TimelineWarpController::new(config);
 
         let mut signal = TimelineSignal {

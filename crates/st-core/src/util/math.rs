@@ -305,7 +305,7 @@ pub fn spiral_softmax_hardmax_consensus(
     #[test]
     fn ramanujan_pi_with_tolerance_converges() {
         let (value, iterations) = ramanujan_pi_with_tolerance(1e-12, 8);
-        assert!(iterations >= 1 && iterations <= 8);
+        assert!((1..=8).contains(&iterations));
         assert_abs_diff_eq!(value, std::f64::consts::PI, epsilon = 1e-10);
     }
 

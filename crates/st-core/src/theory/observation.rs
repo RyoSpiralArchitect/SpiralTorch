@@ -378,15 +378,16 @@ mod tests {
     }
 
     fn sample_pulse() -> InterfaceZPulse {
-        let mut pulse = InterfaceZPulse::default();
-        pulse.support = 1.0;
-        pulse.interface_cells = 1.0;
-        pulse.band_energy = (0.2, 0.6, 0.2);
-        pulse.scale = ZScale::new(1.0);
-        pulse.drift = 0.1;
-        pulse.z_bias = 0.05;
-        pulse.quality_hint = Some(0.8);
-        pulse
+        InterfaceZPulse {
+            support: 1.0,
+            interface_cells: 1.0,
+            band_energy: (0.2, 0.6, 0.2),
+            scale: ZScale::new(1.0),
+            drift: 0.1,
+            z_bias: 0.05,
+            quality_hint: Some(0.8),
+            ..Default::default()
+        }
     }
 
     fn sample_feedback() -> SoftlogicZFeedback {

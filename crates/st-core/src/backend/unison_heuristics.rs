@@ -1779,9 +1779,11 @@ mod tests {
     #[test]
     fn tuned_latency_window_responds_to_gradient_feedback() {
         hub::clear_last_realgrad_for_test();
-        let mut pulse = hub::RealGradPulse::default();
-        pulse.gradient_norm = 64.0;
-        pulse.gradient_sparsity = 0.1;
+        let pulse = hub::RealGradPulse {
+            gradient_norm: 64.0,
+            gradient_sparsity: 0.1,
+            ..Default::default()
+        };
         hub::set_last_realgrad(&pulse);
         let caps = DeviceCaps::wgpu(32, true, 256);
         let scenario = RankScenario::new(64, 4_096, 48, &caps, RankKind::MidK);
@@ -1886,7 +1888,7 @@ mod tests {
                 } else {
                     score -= 0.03;
                 }
-                if choice.ctile.abs_diff(window.target) as u32 <= window.slack {
+                if choice.ctile.abs_diff(window.target) <= window.slack {
                     score += 0.01;
                 } else {
                     score -= 0.015;
@@ -2069,7 +2071,7 @@ mod tests {
         let lane_snapped = window.snapped(snapped);
         assert_eq!(snapped, lane_snapped);
         assert_eq!(snapped, window.target);
-        assert!(snapped.abs_diff(window.target) as u32 <= window.slack);
+        assert!(snapped.abs_diff(window.target) <= window.slack);
     }
 
     #[test]
@@ -2357,7 +2359,7 @@ mod tests {
         let choice = learner.into_choice();
 
         assert!(choice.use_2ce);
-        assert_eq!(choice.subgroup, true);
+        assert!(choice.subgroup);
         assert_eq!(choice.wg, 203);
         assert_eq!(choice.tile, 1621);
         assert_eq!(choice.ctile, 320);

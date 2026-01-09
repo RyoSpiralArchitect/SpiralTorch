@@ -637,8 +637,10 @@ mod tests {
     use super::*;
 
     fn build_metrics(value: f64) -> StepMetrics {
-        let mut metrics = StepMetrics::default();
-        metrics.step_time_ms = 10.0;
+        let mut metrics = StepMetrics {
+            step_time_ms: 10.0,
+            ..Default::default()
+        };
         metrics.extra.insert("step_loss".into(), value);
         metrics.extra.insert("band_here".into(), value * 0.1);
         metrics

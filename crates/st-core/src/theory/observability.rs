@@ -413,7 +413,7 @@ mod tests {
         let observed = vec![2, 5, 30];
         let assessment = coalgebra.assess(&observed);
         assert_eq!(assessment.expected, vec![2, 6, 42]);
-        assert!(assessment.efficiency[0] - 1.0 < f64::EPSILON);
+        assert!((assessment.efficiency[0] - 1.0).abs() < f64::EPSILON);
         assert!(assessment.efficiency[1] < 1.0);
         assert!(assessment.efficiency[2] < 1.0);
     }

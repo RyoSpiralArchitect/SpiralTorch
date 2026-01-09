@@ -2255,7 +2255,7 @@ mod tests {
     #[test]
     fn lorentzian_metric_supports_scaling() {
         let base = Matrix4::from_diagonal(&Vector4::new(-1.0, 1.0, 1.0, 1.0));
-        let scaled = LorentzianMetric::try_scaled(base.clone(), 3.0).unwrap();
+        let scaled = LorentzianMetric::try_scaled(base, 3.0).unwrap();
         assert_relative_eq!(scaled.components()[(0, 0)], -3.0, epsilon = 1e-12);
         assert_relative_eq!(scaled.components()[(2, 2)], 3.0, epsilon = 1e-12);
 
@@ -2353,9 +2353,9 @@ mod tests {
         let field_equation = FieldEquation::vacuum(&einstein, 0.0, &metric);
         let constants = PhysicalConstants::new(6.67430e-11, 299_792_458.0);
         let residual = field_equation.residual(&EnergyMomentumTensor::zero(), &constants);
-        for mu in 0..DIM {
-            for nu in 0..DIM {
-                assert_relative_eq!(residual[mu][nu], 0.0, epsilon = 1e-12);
+        for row in residual.iter() {
+            for value in row.iter() {
+                assert_relative_eq!(*value, 0.0, epsilon = 1e-12);
             }
         }
     }
@@ -2538,15 +2538,15 @@ mod tests {
 
         let g = metric.components();
         let mut riemann_lower_manual = [[[[0.0; DIM]; DIM]; DIM]; DIM];
-        for mu in 0..DIM {
-            for nu in 0..DIM {
-                for rho in 0..DIM {
-                    for sigma in 0..DIM {
+        for (mu, mu_slice) in riemann_lower_manual.iter_mut().enumerate() {
+            for (nu, nu_slice) in mu_slice.iter_mut().enumerate() {
+                for (rho, rho_slice) in nu_slice.iter_mut().enumerate() {
+                    for (sigma, slot) in rho_slice.iter_mut().enumerate() {
                         let mut sum = 0.0;
                         for alpha in 0..DIM {
                             sum += g[(mu, alpha)] * riemann.component(alpha, nu, rho, sigma);
                         }
-                        riemann_lower_manual[mu][nu][rho][sigma] = sum;
+                        *slot = sum;
                     }
                 }
             }
@@ -2601,12 +2601,11 @@ mod tests {
             .volume_element()
             .unwrap_or_else(|| metric.determinant().abs().sqrt());
         let mut epsilon_lower = [[[[0.0; DIM]; DIM]; DIM]; DIM];
-        for mu in 0..DIM {
-            for nu in 0..DIM {
-                for rho in 0..DIM {
-                    for sigma in 0..DIM {
-                        epsilon_lower[mu][nu][rho][sigma] =
-                            volume * levi_civita_symbol([mu, nu, rho, sigma]);
+        for (mu, mu_slice) in epsilon_lower.iter_mut().enumerate() {
+            for (nu, nu_slice) in mu_slice.iter_mut().enumerate() {
+                for (rho, rho_slice) in nu_slice.iter_mut().enumerate() {
+                    for (sigma, slot) in rho_slice.iter_mut().enumerate() {
+                        *slot = volume * levi_civita_symbol([mu, nu, rho, sigma]);
                     }
                 }
             }

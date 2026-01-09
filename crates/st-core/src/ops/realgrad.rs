@@ -1515,7 +1515,7 @@ mod tests {
         assert!(projection.spectrum.is_empty());
         assert!(projection.monad_biome.is_empty());
         assert_eq!(projection.lebesgue_measure, 0.0);
-        assert!(projection.ramanujan_pi > 3.14);
+        assert!(projection.ramanujan_pi > core::f32::consts::PI - 0.002);
         assert!(projection.optics_trace().is_none());
     }
 
@@ -1523,7 +1523,7 @@ mod tests {
     fn kernel_caches_ramanujan_series() {
         let config = RealGradConfig::default();
         let mut kernel = RealGradKernel::new(config);
-        assert!(kernel.ramanujan_pi() > 3.14);
+        assert!(kernel.ramanujan_pi() > core::f32::consts::PI - 0.002);
         let empty = kernel.project(&[]);
         assert_eq!(empty.ramanujan_pi, kernel.ramanujan_pi());
         let data = [0.5f32, -0.25];
@@ -1891,13 +1891,18 @@ mod tests {
 
     #[test]
     fn spectrum_norm_variants_affect_scaling() {
-        let mut config = RealGradConfig::default();
-        config.spectrum_norm = SpectrumNorm::Backward;
-        let mut backward = RealGradKernel::new(config);
+        let backward_config = RealGradConfig {
+            spectrum_norm: SpectrumNorm::Backward,
+            ..RealGradConfig::default()
+        };
+        let mut backward = RealGradKernel::new(backward_config);
         let backward_proj = backward.project(&[1.0f32, 0.0, 0.0, 0.0]);
 
-        config.spectrum_norm = SpectrumNorm::Forward;
-        let mut forward = RealGradKernel::new(config);
+        let forward_config = RealGradConfig {
+            spectrum_norm: SpectrumNorm::Forward,
+            ..RealGradConfig::default()
+        };
+        let mut forward = RealGradKernel::new(forward_config);
         let forward_proj = forward.project(&[1.0f32, 0.0, 0.0, 0.0]);
 
         assert_ne!(backward_proj.z_space[0], forward_proj.z_space[0]);
@@ -1918,8 +1923,10 @@ mod tests {
         ];
 
         for norm in norms {
-            let mut config = RealGradConfig::default();
-            config.spectrum_norm = norm;
+            let config = RealGradConfig {
+                spectrum_norm: norm,
+                ..RealGradConfig::default()
+            };
             let projection = project_realgrad(&data, config);
             let spectral_energy: f64 = projection
                 .spectrum
@@ -1956,8 +1963,10 @@ mod tests {
             let value = ((state >> 8) & 0xFFFF) as f32 / 65535.0 - 0.5;
             samples.push(value * 2.0);
         }
-        let mut config = RealGradConfig::default();
-        config.spectrum_norm = SpectrumNorm::Whitened;
+        let config = RealGradConfig {
+            spectrum_norm: SpectrumNorm::Whitened,
+            ..RealGradConfig::default()
+        };
         let projection = project_realgrad(&samples, config);
         let len = projection.spectrum.len() as f64;
         assert!(len > 0.0);
@@ -2057,7 +2066,8 @@ mod tests {
     fn auto_tuner_tracks_residual_ratio() {
         let mut tuner = RealGradAutoTuner::new(0.2);
         let mut config = RealGradConfig::default();
-        let projection = project_realgrad(&vec![DEFAULT_THRESHOLD * 64.0; 8], config);
+        let sample = [DEFAULT_THRESHOLD * 64.0; 8];
+        let projection = project_realgrad(&sample, config);
         let previous = config.residual_threshold;
         tuner.update(&projection, &mut config);
         assert!(tuner.residual_ratio() > 0.0);

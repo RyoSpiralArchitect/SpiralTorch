@@ -562,6 +562,8 @@ fn auto_fft_plan(rows: u32, cols: u32, k: u32, subgroup: bool) -> Option<SpiralK
     Some(SpiralKFftPlan::from_choice(&choice, subgroup))
 }
 
+include!("wgpu_heuristics_generated.rs");
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -574,5 +576,3 @@ mod tests {
         assert!(hint.contains("tile_cols"));
     }
 }
-
-include!("wgpu_heuristics_generated.rs");
