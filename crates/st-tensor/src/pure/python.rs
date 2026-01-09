@@ -64,6 +64,18 @@ fn data_length_mismatch(expected: usize, got: usize) -> TensorError {
     TensorError::DataLength { expected, got }
 }
 
+fn checked_element_count(
+    rows: usize,
+    cols: usize,
+    label: &'static str,
+) -> Result<usize, TensorError> {
+    rows.checked_mul(cols).ok_or_else(|| {
+        TensorError::Generic(format!(
+            "{label} element count overflows usize ({rows} x {cols})"
+        ))
+    })
+}
+
 #[no_mangle]
 pub extern "C" fn st_pure_last_error() -> *const c_char {
     catch_unwind_or(
@@ -276,7 +288,7 @@ unsafe fn tensor_from_pointer(
             label: "tensor pointer is misaligned",
         });
     }
-    let expected = rows.saturating_mul(cols);
+    let expected = checked_element_count(rows, cols, label)?;
     if len != expected {
         return Err(data_length_mismatch(expected, len));
     }
@@ -361,7 +373,10 @@ pub unsafe extern "C" fn st_pure_hypergrad_apply(
         // Safety: caller guarantees `hypergrad` points to a valid, mutable `AmegaHypergrad`.
         let hypergrad = unsafe { &mut *hypergrad };
         let (rows, cols) = hypergrad.shape();
-        let expected = rows.saturating_mul(cols);
+        let expected = match checked_element_count(rows, cols, "weights") {
+            Ok(expected) => expected,
+            Err(err) => return store_error(err),
+        };
         if weights_len != expected {
             return store_error(data_length_mismatch(expected, weights_len));
         }
