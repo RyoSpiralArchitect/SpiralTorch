@@ -29,6 +29,8 @@ mod introspect;
 mod qr;
 mod julia_bridge;
 mod dataset;
+#[cfg(feature = "robotics")]
+mod robotics;
 
 mod extras {
     use super::*;
@@ -170,6 +172,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     scale_stack::register(py, m)?;
     trainer::register(py, m)?;
     vision::register(py, m)?;
+    #[cfg(feature = "robotics")]
     robotics::register(py, m)?;
     zspace::register(py, m)?;
     elliptic::register(py, m)?;
@@ -204,7 +207,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     // 3) __all__
     m.add("__all__", vec![
         "Tensor","from_dlpack","to_dlpack","CpuSimdPackedRhs","cpu_simd_prepack_rhs",
-        "ComplexTensor","OpenCartesianTopos","LanguageWaveEncoder","Hypergrad","TensorBiome","GradientSummary",
+        "ComplexTensor","OpenCartesianTopos","LanguageWaveEncoder","Hypergrad","Realgrad","TensorBiome","GradientSummary",
         "ZSpaceBarycenter","BarycenterIntermediate","z_space_barycenter",
         "RankPlan","plan","plan_topk","describe_device","hip_probe",
         "EllipticWarp","EllipticTelemetry",

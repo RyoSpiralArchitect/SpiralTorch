@@ -9,7 +9,7 @@ use st_tensor::measure::{
     z_space_barycenter as z_space_barycenter_rs, BarycenterIntermediate, ZSpaceBarycenter,
 };
 use st_tensor::{
-    AmegaHypergrad, Complex32 as StComplex32, ComplexTensor, DesireGradientControl,
+    AmegaHypergrad, AmegaRealgrad, Complex32 as StComplex32, ComplexTensor, DesireGradientControl,
     DesireGradientInterpretation, GradientSummary, HypergradTelemetry, LanguageWaveEncoder,
     OpenCartesianTopos, Tensor, TensorBiome,
 };
@@ -726,6 +726,74 @@ impl PyHypergrad {
     }
 }
 
+#[pyclass(module = "spiraltorch", name = "Realgrad", unsendable)]
+pub(crate) struct PyRealgrad {
+    inner: AmegaRealgrad,
+}
+
+#[pymethods]
+impl PyRealgrad {
+    #[new]
+    pub fn new(learning_rate: f32, rows: usize, cols: usize) -> PyResult<Self> {
+        let inner = AmegaRealgrad::new(learning_rate, rows, cols).map_err(tensor_err_to_py)?;
+        Ok(Self { inner })
+    }
+
+    pub fn learning_rate(&self) -> f32 {
+        self.inner.learning_rate()
+    }
+
+    pub fn shape(&self) -> (usize, usize) {
+        self.inner.shape()
+    }
+
+    pub fn gradient(&self) -> Vec<f32> {
+        self.inner.gradient().to_vec()
+    }
+
+    pub fn summary(&self) -> PyGradientSummary {
+        self.inner.summary().into()
+    }
+
+    pub fn scale_learning_rate(&mut self, factor: f32) {
+        self.inner.scale_learning_rate(factor);
+    }
+
+    pub fn reset(&mut self) {
+        self.inner.reset();
+    }
+
+    pub fn accumulate_wave(&mut self, tensor: &PyTensor) -> PyResult<()> {
+        self.inner
+            .accumulate_wave(&tensor.inner)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn accumulate_complex_wave(&mut self, wave: &PyComplexTensor) -> PyResult<()> {
+        self.inner
+            .accumulate_complex_wave(&wave.inner)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn absorb_text(&mut self, encoder: &PyLanguageWaveEncoder, text: &str) -> PyResult<()> {
+        self.inner
+            .absorb_text(&encoder.inner, text)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn accumulate_pair(&mut self, prediction: &PyTensor, target: &PyTensor) -> PyResult<()> {
+        self.inner
+            .accumulate_pair(&prediction.inner, &target.inner)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn apply(&mut self, mut weights: PyRefMut<'_, PyTensor>) -> PyResult<()> {
+        self.inner
+            .apply(&mut weights.inner)
+            .map_err(tensor_err_to_py)
+    }
+}
+
 #[pyclass(module = "spiraltorch", name = "TensorBiome", unsendable)]
 pub(crate) struct PyTensorBiome {
     inner: TensorBiome,
@@ -921,6 +989,7 @@ pub(crate) fn register(_py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_class::<PyDesireGradientInterpretation>()?;
     m.add_class::<PyDesireGradientControl>()?;
     m.add_class::<PyHypergrad>()?;
+    m.add_class::<PyRealgrad>()?;
     m.add_class::<PyTensorBiome>()?;
     m.add_class::<PyBarycenterIntermediate>()?;
     m.add_class::<PyZSpaceBarycenter>()?;

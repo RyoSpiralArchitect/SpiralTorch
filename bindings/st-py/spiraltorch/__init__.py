@@ -459,7 +459,7 @@ _EXTRAS = [
     "pack_tribonacci_chunks","pack_tetranacci_chunks",
     "generate_plan_batch_ex","plan","plan_topk",
     "describe_device","hip_probe","z_space_barycenter",
-    "hypergrad","hypergrad_topos","encode_zspace","z_metrics",
+    "hypergrad","realgrad","hypergrad_topos","encode_zspace","z_metrics",
 ]
 for _n in _EXTRAS:
     _value = _safe_getattr(_rs, _n, None)
@@ -897,12 +897,14 @@ def _extract_shape_like(candidate: _Any, label: str) -> tuple[int, int] | None:
     return None
 
 
-def _normalize_hypergrad_shape(
+def _normalize_tape_shape(
+    name: str,
     *args: _Any,
     shape: _Any | None = None,
     rows: _Any | None = None,
     cols: _Any | None = None,
 ) -> tuple[int, int]:
+    name = str(name).strip() or "tape"
     resolved_rows = _tensor_coerce_index(rows, "rows") if rows is not None else None
     resolved_cols = _tensor_coerce_index(cols, "cols") if cols is not None else None
 
@@ -920,34 +922,34 @@ def _normalize_hypergrad_shape(
             inferred_shape = maybe_shape if inferred_shape is None else inferred_shape
             if inferred_shape != maybe_shape:
                 raise ValueError(
-                    f"hypergrad shape {maybe_shape} conflicts with declared shape {inferred_shape}"
+                    f"{name} shape {maybe_shape} conflicts with declared shape {inferred_shape}"
                 )
         else:
             value = _tensor_coerce_index(candidate, "rows")
             if resolved_rows is not None and resolved_rows != value:
                 raise ValueError(
-                    f"hypergrad rows {value} conflicts with declared rows {resolved_rows}"
+                    f"{name} rows {value} conflicts with declared rows {resolved_rows}"
                 )
             resolved_rows = value
     elif len(positional) == 2:
         if inferred_shape is not None:
-            raise TypeError("hypergrad() received multiple shape specifications")
+            raise TypeError(f"{name}() received multiple shape specifications")
         first, second = positional
         inferred_rows = _tensor_coerce_index(first, "rows")
         inferred_cols = _tensor_coerce_index(second, "cols")
         if resolved_rows is not None and resolved_rows != inferred_rows:
             raise ValueError(
-                f"hypergrad rows {inferred_rows} conflicts with declared rows {resolved_rows}"
+                f"{name} rows {inferred_rows} conflicts with declared rows {resolved_rows}"
             )
         if resolved_cols is not None and resolved_cols != inferred_cols:
             raise ValueError(
-                f"hypergrad cols {inferred_cols} conflicts with declared cols {resolved_cols}"
+                f"{name} cols {inferred_cols} conflicts with declared cols {resolved_cols}"
             )
         resolved_rows = inferred_rows
         resolved_cols = inferred_cols
     elif len(positional) > 2:
         raise TypeError(
-            "hypergrad() takes at most 2 positional arguments"
+            f"{name}() takes at most 2 positional arguments"
             f" but {len(positional)} were given"
         )
 
@@ -955,18 +957,38 @@ def _normalize_hypergrad_shape(
         rows_candidate, cols_candidate = inferred_shape
         if resolved_rows is not None and resolved_rows != rows_candidate:
             raise ValueError(
-                f"hypergrad rows {rows_candidate} conflicts with declared rows {resolved_rows}"
+                f"{name} rows {rows_candidate} conflicts with declared rows {resolved_rows}"
             )
         if resolved_cols is not None and resolved_cols != cols_candidate:
             raise ValueError(
-                f"hypergrad cols {cols_candidate} conflicts with declared cols {resolved_cols}"
+                f"{name} cols {cols_candidate} conflicts with declared cols {resolved_cols}"
             )
         resolved_rows, resolved_cols = rows_candidate, cols_candidate
 
     if resolved_rows is None or resolved_cols is None:
-        raise TypeError("hypergrad() requires a shape or explicit rows/cols")
+        raise TypeError(f"{name}() requires a shape or explicit rows/cols")
 
     return resolved_rows, resolved_cols
+
+
+def _normalize_hypergrad_shape(
+    *args: _Any,
+    shape: _Any | None = None,
+    rows: _Any | None = None,
+    cols: _Any | None = None,
+) -> tuple[int, int]:
+    return _normalize_tape_shape(
+        "hypergrad", *args, shape=shape, rows=rows, cols=cols
+    )
+
+
+def _normalize_realgrad_shape(
+    *args: _Any,
+    shape: _Any | None = None,
+    rows: _Any | None = None,
+    cols: _Any | None = None,
+) -> tuple[int, int]:
+    return _normalize_tape_shape("realgrad", *args, shape=shape, rows=rows, cols=cols)
 
 
 def _require_rs_class(name: str) -> _Any:
@@ -1029,6 +1051,20 @@ def hypergrad(
     if guard is not None:
         return tape_cls(curvature, learning_rate, rows_value, cols_value, guard)
     return tape_cls(curvature, learning_rate, rows_value, cols_value)
+
+
+def realgrad(
+    *shape_args: _Any,
+    learning_rate: float = 0.01,
+    shape: _Any | None = None,
+    rows: _Any | None = None,
+    cols: _Any | None = None,
+) -> _Any:
+    rows_value, cols_value = _normalize_realgrad_shape(
+        *shape_args, shape=shape, rows=rows, cols=cols
+    )
+    tape_cls = _require_rs_class("Realgrad")
+    return tape_cls(float(learning_rate), rows_value, cols_value)
 
 
 def hypergrad_topos(
@@ -1267,6 +1303,62 @@ class _HypergradNotation:
 
     guard = topos
 
+
+class _RealgradPartial:
+    """Callable proxy that bakes a shape into :func:`realgrad`."""
+
+    __slots__ = ("_args", "_kwargs")
+
+    def __init__(self, args: _Tuple[_Any, ...], kwargs: _Dict[str, _Any]) -> None:
+        self._args = args
+        self._kwargs = kwargs
+
+    def __call__(self, *args: _Any, **kwargs: _Any) -> _Any:
+        if args:
+            raise TypeError(
+                "realgrad notation binds the shape already; pass configuration as keyword arguments"
+            )
+        merged: _Dict[str, _Any] = dict(self._kwargs)
+        for key in ("shape", "rows", "cols"):
+            if key in merged and key in kwargs:
+                raise TypeError(
+                    f"realgrad() shape component '{key}' was provided by the notation and cannot be overridden"
+                )
+        merged.update(kwargs)
+        return realgrad(*self._args, **merged)
+
+
+class _RealgradNotation:
+    """Lightweight DSL that shortens realgrad tape construction."""
+
+    __slots__ = ()
+
+    def __call__(self, *shape_args: _Any, **kwargs: _Any) -> _Any:
+        return realgrad(*shape_args, **kwargs)
+
+    def __getitem__(self, selector: _Any) -> _RealgradPartial:
+        if isinstance(selector, slice):
+            if selector.step is not None:
+                raise TypeError("realgrad slice notation does not support step")
+            base_kwargs: _Dict[str, _Any] = {}
+            if selector.start is not None:
+                base_kwargs["rows"] = _tensor_coerce_index(selector.start, "rows")
+            if selector.stop is not None:
+                base_kwargs["cols"] = _tensor_coerce_index(selector.stop, "cols")
+            if not base_kwargs:
+                raise TypeError("realgrad[:] requires at least rows or cols")
+            return _RealgradPartial((), base_kwargs)
+        if isinstance(selector, tuple):
+            if not selector:
+                raise TypeError("realgrad[] requires a shape or tensor")
+            if len(selector) == 1:
+                return _RealgradPartial((selector[0],), {})
+            if len(selector) == 2:
+                return _RealgradPartial((), {"shape": tuple(selector)})
+            raise TypeError("realgrad[...] accepts at most two entries")
+        return _RealgradPartial((selector,), {})
+
+
 class _ZSpaceNotation:
     """Syntactic sugar for encoding text and metrics into Z-space."""
 
@@ -1429,6 +1521,7 @@ class _ZSpaceNotation:
 
 
 hg = _HypergradNotation()
+rg = _RealgradNotation()
 z = _ZSpaceNotation()
 
 _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
@@ -3072,7 +3165,7 @@ for _key, _hint in _FORWARDING_HINTS.items():
 
 _CORE_EXPORTS = [
     "Tensor","ComplexTensor","OpenCartesianTopos","LanguageWaveEncoder",
-    "GradientSummary","Hypergrad","TensorBiome",
+    "GradientSummary","Hypergrad","Realgrad","TensorBiome",
     "LinearModel",
     "BarycenterIntermediate","ZSpaceBarycenter",
     "QueryPlan","RecEpochReport","Recommender",
@@ -3133,7 +3226,7 @@ _EXPORTED = {
     "nn","frac","dataset","linalg","spiral_rl","rec","telemetry","ecosystem",
     "selfsup","export","compat","hpo","inference","zspace","vision","canvas",
     "planner","spiralk",
-    "hg","z",
+    "hg","rg","z",
     "__version__",
 }
 _EXPORTED.update(
