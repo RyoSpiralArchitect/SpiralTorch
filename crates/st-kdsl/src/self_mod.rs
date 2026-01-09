@@ -379,10 +379,7 @@ impl ChainPolicyModel {
             0.0
         };
         let target = reward + self.discount * tail_value;
-        let entry = self
-            .values
-            .entry(signature)
-            .or_insert_with(ChainPolicyValue::default);
+        let entry = self.values.entry(signature).or_default();
         entry.visits = entry.visits.saturating_add(1);
         entry.last_reward = reward;
         entry.last_outcome = success;
@@ -2146,7 +2143,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
         if b.is_empty() {
             return a.to_vec();
         }
-        let pivot_a = (a.len() + 1) / 2;
+        let pivot_a = a.len().div_ceil(2);
         let pivot_b = b.len() / 2;
         let mut combined = Vec::with_capacity(pivot_a + (b.len() - pivot_b));
         combined.extend_from_slice(&a[..pivot_a]);
@@ -2173,10 +2170,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
             return;
         }
         let signature = Self::chain_signature(&chain);
-        let entry = self
-            .chain_feedback
-            .entry(signature.clone())
-            .or_insert_with(ChainFeedback::default);
+        let entry = self.chain_feedback.entry(signature.clone()).or_default();
         entry.reward(reward, success, self.feedback_gamma);
         self.relation_graph.observe_chain(&chain, reward.max(0.0));
         let shaped_reward = if success {
@@ -2251,7 +2245,7 @@ impl<G: AiHintGenerator> SelfRewriteEngine<G> {
     fn is_frozen(&self, key: &str) -> bool {
         self.frozen_hints
             .get(key)
-            .map_or(false, |entry| entry.cooldown > 0)
+            .is_some_and(|entry| entry.cooldown > 0)
     }
 
     fn age_frozen(&mut self) {
@@ -2836,8 +2830,10 @@ mod tests {
 
         let hint_a = HeuristicHint::new("radix", "radix + 2", 0.9, "true");
         let hint_b = HeuristicHint::new("tile_cols", "tile_cols + 4", 0.88, "true");
-        let key_a = SelfRewriteEngine::<TemplateAiGenerator>::hint_key(&[hint_a.clone()]);
-        let key_b = SelfRewriteEngine::<TemplateAiGenerator>::hint_key(&[hint_b.clone()]);
+        let key_a =
+            SelfRewriteEngine::<TemplateAiGenerator>::hint_key(std::slice::from_ref(&hint_a));
+        let key_b =
+            SelfRewriteEngine::<TemplateAiGenerator>::hint_key(std::slice::from_ref(&hint_b));
 
         engine.hint_cache = VecDeque::from(vec![
             CachedHint {
@@ -2944,8 +2940,8 @@ mod tests {
                 sg: ctx_a.sg,
                 sgc: ctx_a.sgc,
                 kc: ctx_a.kc,
-                tile_cols: ctx_a.tile_cols.saturating_add((delta % 3) as u32 + 1),
-                radix: ctx_a.radix.saturating_add(delta as u32 % 5 + 1),
+                tile_cols: ctx_a.tile_cols.saturating_add(delta % 3 + 1),
+                radix: ctx_a.radix.saturating_add(delta % 5 + 1),
                 segments: ctx_a.segments,
             };
             let sig_b = SelfRewriteEngine::<TemplateAiGenerator>::ctx_signature(&ctx_b);
@@ -3065,11 +3061,14 @@ mod tests {
         let followup_hint = HeuristicHint::new("kc", "kc + 32", 0.78, "true");
         let alternative_hint = HeuristicHint::new("segments", "segments + 1", 0.72, "true");
 
-        let warmup_key = SelfRewriteEngine::<TemplateAiGenerator>::hint_key(&[warmup_hint.clone()]);
-        let followup_key =
-            SelfRewriteEngine::<TemplateAiGenerator>::hint_key(&[followup_hint.clone()]);
-        let alternative_key =
-            SelfRewriteEngine::<TemplateAiGenerator>::hint_key(&[alternative_hint.clone()]);
+        let warmup_key =
+            SelfRewriteEngine::<TemplateAiGenerator>::hint_key(std::slice::from_ref(&warmup_hint));
+        let followup_key = SelfRewriteEngine::<TemplateAiGenerator>::hint_key(
+            std::slice::from_ref(&followup_hint),
+        );
+        let alternative_key = SelfRewriteEngine::<TemplateAiGenerator>::hint_key(
+            std::slice::from_ref(&alternative_hint),
+        );
 
         engine.record_hint_success(&warmup_key, 0.2, 0.68, 0.9, signature, None);
         engine.record_hint_success(&followup_key, 0.25, 0.72, 0.85, signature, None);
@@ -3137,12 +3136,16 @@ mod tests {
         let ctx = sample_ctx();
         let signature = SelfRewriteEngine::<TemplateAiGenerator>::ctx_signature(&ctx);
 
-        let warmup_key = SelfRewriteEngine::<TemplateAiGenerator>::hint_key(&[warmup_hint.clone()]);
-        let combo_key = SelfRewriteEngine::<TemplateAiGenerator>::hint_key(&[combo_hint.clone()]);
-        let finisher_key =
-            SelfRewriteEngine::<TemplateAiGenerator>::hint_key(&[finisher_hint.clone()]);
-        let alternative_key =
-            SelfRewriteEngine::<TemplateAiGenerator>::hint_key(&[alternative_hint.clone()]);
+        let warmup_key =
+            SelfRewriteEngine::<TemplateAiGenerator>::hint_key(std::slice::from_ref(&warmup_hint));
+        let combo_key =
+            SelfRewriteEngine::<TemplateAiGenerator>::hint_key(std::slice::from_ref(&combo_hint));
+        let finisher_key = SelfRewriteEngine::<TemplateAiGenerator>::hint_key(
+            std::slice::from_ref(&finisher_hint),
+        );
+        let alternative_key = SelfRewriteEngine::<TemplateAiGenerator>::hint_key(
+            std::slice::from_ref(&alternative_hint),
+        );
 
         engine.record_hint_success(&warmup_key, 0.25, 0.6, 1.0, signature, None);
         engine.record_hint_success(&combo_key, 0.3, 0.65, 0.95, signature, None);
@@ -3181,7 +3184,8 @@ mod tests {
         engine.last_hint_key = Some(combo_key);
         engine.last_ctx_signature = Some(signature);
 
-        let finisher_priority = engine.cache_priority(engine.hint_cache.get(0).unwrap(), signature);
+        let finisher_priority =
+            engine.cache_priority(engine.hint_cache.front().unwrap(), signature);
         let alternative_priority =
             engine.cache_priority(engine.hint_cache.get(1).unwrap(), signature);
 
@@ -3213,9 +3217,11 @@ mod tests {
         let ctx = sample_ctx();
         let signature = SelfRewriteEngine::<TemplateAiGenerator>::ctx_signature(&ctx);
 
-        let rewarded_key =
-            SelfRewriteEngine::<TemplateAiGenerator>::hint_key(&[rewarded_hint.clone()]);
-        let cold_key = SelfRewriteEngine::<TemplateAiGenerator>::hint_key(&[cold_hint.clone()]);
+        let rewarded_key = SelfRewriteEngine::<TemplateAiGenerator>::hint_key(
+            std::slice::from_ref(&rewarded_hint),
+        );
+        let cold_key =
+            SelfRewriteEngine::<TemplateAiGenerator>::hint_key(std::slice::from_ref(&cold_hint));
 
         engine.hint_cache = VecDeque::from(vec![
             CachedHint {
@@ -3235,9 +3241,10 @@ mod tests {
         ]);
 
         engine.record_hint_success(&rewarded_key, 0.2, 0.76, 0.95, signature, None);
-        engine.penalize_hint(&[cold_hint.clone()]);
+        engine.penalize_hint(std::slice::from_ref(&cold_hint));
 
-        let rewarded_priority = engine.cache_priority(engine.hint_cache.get(0).unwrap(), signature);
+        let rewarded_priority =
+            engine.cache_priority(engine.hint_cache.front().unwrap(), signature);
         let cold_priority = engine.cache_priority(engine.hint_cache.get(1).unwrap(), signature);
 
         assert!(

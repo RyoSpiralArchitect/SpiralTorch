@@ -29,7 +29,7 @@ const DEFAULT_MODALITY_PERMEABILITY: f32 = 0.12;
 const DEFAULT_GRAPH_PERMEABILITY: f32 = 0.08;
 
 fn validate_permeability(label: &'static str, permeability: f32) -> PureResult<()> {
-    if !permeability.is_finite() || permeability < 0.0 || permeability > 1.0 {
+    if !(0.0..=1.0).contains(&permeability) {
         return Err(TensorError::InvalidValue { label });
     }
     Ok(())
@@ -232,12 +232,10 @@ impl LawvereTierneyGuard {
             if *value > self.density_max {
                 *value = self.density_max;
             }
-            if *value > 0.0 {
-                if *value + self.mass_tolerance < self.density_min {
-                    return Err(TensorError::InvalidValue {
-                        label: "lawvere_tierney_probability_density_floor",
-                    });
-                }
+            if *value > 0.0 && *value + self.mass_tolerance < self.density_min {
+                return Err(TensorError::InvalidValue {
+                    label: "lawvere_tierney_probability_density_floor",
+                });
             }
         }
         let final_sum: f32 = slice.iter().sum();
@@ -532,14 +530,14 @@ fn gamma(z: f64) -> f64 {
 fn lanczos_gamma(z: f64) -> f64 {
     const G: f64 = 7.0;
     const P: [f64; 9] = [
-        0.99999999999980993,
+        0.9999999999998099,
         676.5203681218851,
         -1259.1392167224028,
-        771.32342877765313,
-        -176.61502916214059,
+        771.3234287776531,
+        -176.6150291621406,
         12.507343278686905,
         -0.13857109526572012,
-        9.9843695780195716e-6,
+        9.984369578019572e-6,
         1.5056327351493116e-7,
     ];
     if z < 0.5 {
@@ -656,7 +654,7 @@ impl OpenCartesianTopos {
 
     /// Replaces the porosity used during saturation.
     pub fn with_porosity(mut self, porosity: f32) -> PureResult<Self> {
-        if !porosity.is_finite() || porosity < 0.0 || porosity > 1.0 {
+        if !(0.0..=1.0).contains(&porosity) {
             return Err(TensorError::PorosityOutOfRange { porosity });
         }
         self.porosity = porosity;
@@ -1001,7 +999,7 @@ impl GraphGuardProfile {
     /// This is an alias for [`with_permeability`](Self::with_permeability) that mirrors the
     /// terminology used by higher level guards and bindings.
     pub fn with_porosity(mut self, porosity: f32) -> PureResult<Self> {
-        if !porosity.is_finite() || porosity < 0.0 || porosity > 1.0 {
+        if !(0.0..=1.0).contains(&porosity) {
             return Err(TensorError::PorosityOutOfRange { porosity });
         }
         self.permeability = porosity;
@@ -1068,7 +1066,7 @@ impl RewardBoundary {
         hysteresis: f32,
         porosity: f32,
     ) -> PureResult<Self> {
-        if !porosity.is_finite() || porosity < 0.0 || porosity > 1.0 {
+        if !(0.0..=1.0).contains(&porosity) {
             return Err(TensorError::PorosityOutOfRange { porosity });
         }
         let mut boundary = Self::new(lower, upper, hysteresis)?;
@@ -1188,14 +1186,12 @@ impl<'a> MultiModalToposGuard<'a> {
 
     /// Builds a new multi-modal guard anchored to the provided topos with conservative defaults.
     pub fn new(topos: &'a OpenCartesianTopos) -> PureResult<Self> {
-        let text = ModalityProfile::new(topos.max_volume().min(16384).max(1), None)?
+        let text = ModalityProfile::new(topos.max_volume().clamp(1, 16384), None)?
             .with_permeability(0.18)?;
-        let audio = ModalityProfile::new(
-            topos.max_volume().min(65536).max(1),
-            Some(topos.saturation()),
-        )?
-        .with_permeability(0.1)?;
-        let vision = ModalityProfile::new(topos.max_volume().min(262144).max(1), None)?
+        let audio =
+            ModalityProfile::new(topos.max_volume().clamp(1, 65536), Some(topos.saturation()))?
+                .with_permeability(0.1)?;
+        let vision = ModalityProfile::new(topos.max_volume().clamp(1, 262144), None)?
             .with_permeability(0.15)?;
         let graph = GraphGuardProfile::new(
             cmp::min(2048, topos.max_volume()),
@@ -2309,20 +2305,32 @@ mod tests {
     use super::*;
     use crate::pure::fractal::FractalPatch;
 
+    #[track_caller]
+    fn unwrap_ok<T, E: core::fmt::Debug>(result: Result<T, E>) -> T {
+        match result {
+            Ok(value) => value,
+            Err(error) => panic!("expected Ok(..), got Err({error:?})"),
+        }
+    }
+
+    #[track_caller]
+    fn unwrap_err<T, E: core::fmt::Debug>(result: Result<T, E>) -> E {
+        match result {
+            Ok(_) => panic!("expected Err(..), got Ok(..)"),
+            Err(error) => error,
+        }
+    }
+
     fn demo_topos() -> OpenCartesianTopos {
-        OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 64, 4096).unwrap()
+        unwrap_ok(OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 64, 4096))
     }
 
     #[test]
     fn topos_porosity_softens_extremes() {
-        let rigid = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 64, 4096)
-            .unwrap()
-            .with_porosity(0.0)
-            .unwrap();
-        let porous = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 64, 4096)
-            .unwrap()
-            .with_porosity(0.9)
-            .unwrap();
+        let rigid = unwrap_ok(OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 64, 4096));
+        let rigid = unwrap_ok(rigid.with_porosity(0.0));
+        let porous = unwrap_ok(OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 64, 4096));
+        let porous = unwrap_ok(porous.with_porosity(0.9));
         let sample = rigid.saturation() * 4.0;
         let rigid_value = rigid.saturate(sample);
         let porous_value = porous.saturate(sample);
@@ -2333,20 +2341,16 @@ mod tests {
     #[test]
     fn reward_boundary_porosity_delays_breach() {
         let topos = demo_topos();
-        let strict_boundary = RewardBoundary::with_porosity(-0.5, 0.5, 0.05, 0.0).unwrap();
-        let porous_boundary = RewardBoundary::with_porosity(-0.5, 0.5, 0.05, 0.8).unwrap();
-        let strict_guard = MultiModalToposGuard::new(&topos)
-            .unwrap()
-            .with_reward_boundary(strict_boundary)
-            .unwrap();
-        let porous_guard = MultiModalToposGuard::new(&topos)
-            .unwrap()
-            .with_reward_boundary(porous_boundary)
-            .unwrap();
+        let strict_boundary = unwrap_ok(RewardBoundary::with_porosity(-0.5, 0.5, 0.05, 0.0));
+        let porous_boundary = unwrap_ok(RewardBoundary::with_porosity(-0.5, 0.5, 0.05, 0.8));
+        let strict_guard = unwrap_ok(MultiModalToposGuard::new(&topos));
+        let strict_guard = unwrap_ok(strict_guard.with_reward_boundary(strict_boundary));
+        let porous_guard = unwrap_ok(MultiModalToposGuard::new(&topos));
+        let porous_guard = unwrap_ok(porous_guard.with_reward_boundary(porous_boundary));
         let mut strict_trace = vec![0.56f32];
         let mut porous_trace = vec![0.56f32];
-        let strict_signal = strict_guard.guard_reward_trace(&mut strict_trace).unwrap();
-        let porous_signal = porous_guard.guard_reward_trace(&mut porous_trace).unwrap();
+        let strict_signal = unwrap_ok(strict_guard.guard_reward_trace(&mut strict_trace));
+        let porous_signal = unwrap_ok(porous_guard.guard_reward_trace(&mut porous_trace));
         assert!(strict_signal.upper_breach_index.is_some());
         assert!(porous_signal.upper_breach_index.is_none());
         assert!(strict_trace[0] <= 0.5 + 1e-6);
@@ -2355,8 +2359,8 @@ mod tests {
 
     #[test]
     fn graph_profile_rejects_invalid_porosity() {
-        let profile = GraphGuardProfile::new(8, 12, 4, 1e-3, 0.05, Some(1.0)).unwrap();
-        let err = profile.with_porosity(1.5).unwrap_err();
+        let profile = unwrap_ok(GraphGuardProfile::new(8, 12, 4, 1e-3, 0.05, Some(1.0)));
+        let err = unwrap_err(profile.with_porosity(1.5));
         assert!(matches!(err, TensorError::PorosityOutOfRange { .. }));
     }
 
@@ -2366,24 +2370,24 @@ mod tests {
         let centers_a = vec![vec![0.0f32, 0.0]];
         let centers_b = vec![vec![0.25f32, -0.1]];
         let radii = vec![0.4f32];
-        let base = ZBox::new(centers_a.clone(), radii.clone(), 1.0).unwrap();
-        let volume = base.hyperbolic_volume(topos.curvature()).unwrap();
+        let base = unwrap_ok(ZBox::new(centers_a.clone(), radii.clone(), 1.0));
+        let volume = unwrap_ok(base.hyperbolic_volume(topos.curvature()));
         let density = 0.5 / volume;
-        let box_a = ZBox::new(centers_a.clone(), radii.clone(), density).unwrap();
-        let box_b = ZBox::new(centers_b.clone(), radii.clone(), density).unwrap();
-        topos.guard_cover(&[box_a.clone(), box_b.clone()]).unwrap();
+        let box_a = unwrap_ok(ZBox::new(centers_a.clone(), radii.clone(), density));
+        let box_b = unwrap_ok(ZBox::new(centers_b.clone(), radii.clone(), density));
+        unwrap_ok(topos.guard_cover(&[box_a.clone(), box_b.clone()]));
         let heavy_density = 0.8 / volume;
-        let heavy = ZBox::new(centers_b, radii, heavy_density).unwrap();
-        let err = topos.guard_cover(&[box_a, heavy]).unwrap_err();
+        let heavy = unwrap_ok(ZBox::new(centers_b, radii, heavy_density));
+        let err = unwrap_err(topos.guard_cover(&[box_a, heavy]));
         assert!(matches!(err, TensorError::InvalidValue { .. }));
     }
 
     #[test]
     fn topos_rejects_non_finite_values() {
         let topos = demo_topos();
-        let tensor = Tensor::from_vec(1, 2, vec![1.0, f32::INFINITY]).unwrap();
-        let err = topos.guard_tensor("nonfinite", &tensor).unwrap_err();
-        matches!(err, TensorError::NonFiniteValue { .. });
+        let tensor = unwrap_ok(Tensor::from_vec(1, 2, vec![1.0, f32::INFINITY]));
+        let err = unwrap_err(topos.guard_tensor("nonfinite", &tensor));
+        assert!(matches!(err, TensorError::NonFiniteValue { .. }));
     }
 
     #[test]
@@ -2391,19 +2395,15 @@ mod tests {
         let topos = demo_topos();
         let mut biome = TensorBiome::new(topos.clone());
         let big = topos.saturation() * 2.0;
-        biome
-            .absorb(
-                "biome_shoot_a",
-                Tensor::from_vec(1, 2, vec![big, 0.5]).unwrap(),
-            )
-            .unwrap();
-        biome
-            .absorb(
-                "biome_shoot_b",
-                Tensor::from_vec(1, 2, vec![-big, 1.0]).unwrap(),
-            )
-            .unwrap();
-        let canopy = biome.canopy().unwrap();
+        unwrap_ok(biome.absorb(
+            "biome_shoot_a",
+            unwrap_ok(Tensor::from_vec(1, 2, vec![big, 0.5])),
+        ));
+        unwrap_ok(biome.absorb(
+            "biome_shoot_b",
+            unwrap_ok(Tensor::from_vec(1, 2, vec![-big, 1.0])),
+        ));
+        let canopy = unwrap_ok(biome.canopy());
         assert_eq!(canopy.shape(), (1, 2));
         let data = canopy.data();
         assert!((data[0] - 0.0).abs() < 1e-6);
@@ -2415,18 +2415,14 @@ mod tests {
     fn biome_detects_shape_mismatch() {
         let topos = demo_topos();
         let mut biome = TensorBiome::new(topos);
-        biome
-            .absorb(
-                "biome_shape_a",
-                Tensor::from_vec(2, 1, vec![0.1, 0.2]).unwrap(),
-            )
-            .unwrap();
-        let err = biome
-            .absorb(
-                "biome_shape_b",
-                Tensor::from_vec(1, 2, vec![0.1, 0.2]).unwrap(),
-            )
-            .unwrap_err();
+        unwrap_ok(biome.absorb(
+            "biome_shape_a",
+            unwrap_ok(Tensor::from_vec(2, 1, vec![0.1, 0.2])),
+        ));
+        let err = unwrap_err(biome.absorb(
+            "biome_shape_b",
+            unwrap_ok(Tensor::from_vec(1, 2, vec![0.1, 0.2])),
+        ));
         assert!(matches!(err, TensorError::ShapeMismatch { .. }));
     }
 
@@ -2434,21 +2430,17 @@ mod tests {
     fn biome_weighted_canopy_respects_shoot_weights() {
         let topos = demo_topos();
         let mut biome = TensorBiome::new(topos);
-        biome
-            .absorb_weighted(
-                "weighted_a",
-                Tensor::from_vec(1, 1, vec![1.0]).unwrap(),
-                1.0,
-            )
-            .unwrap();
-        biome
-            .absorb_weighted(
-                "weighted_b",
-                Tensor::from_vec(1, 1, vec![3.0]).unwrap(),
-                3.0,
-            )
-            .unwrap();
-        let canopy = biome.canopy().unwrap();
+        unwrap_ok(biome.absorb_weighted(
+            "weighted_a",
+            unwrap_ok(Tensor::from_vec(1, 1, vec![1.0])),
+            1.0,
+        ));
+        unwrap_ok(biome.absorb_weighted(
+            "weighted_b",
+            unwrap_ok(Tensor::from_vec(1, 1, vec![3.0])),
+            3.0,
+        ));
+        let canopy = unwrap_ok(biome.canopy());
         assert_eq!(canopy.data(), &[2.5]);
         assert_eq!(biome.weights(), &[1.0, 3.0]);
         assert!((biome.total_weight() - 4.0).abs() < 1e-6);
@@ -2458,13 +2450,9 @@ mod tests {
     fn biome_stack_concatenates_shoots() {
         let topos = demo_topos();
         let mut biome = TensorBiome::new(topos);
-        biome
-            .absorb("stack_a", Tensor::from_vec(1, 2, vec![0.1, 0.2]).unwrap())
-            .unwrap();
-        biome
-            .absorb("stack_b", Tensor::from_vec(1, 2, vec![0.3, 0.4]).unwrap())
-            .unwrap();
-        let stacked = biome.stack().unwrap();
+        unwrap_ok(biome.absorb("stack_a", unwrap_ok(Tensor::from_vec(1, 2, vec![0.1, 0.2]))));
+        unwrap_ok(biome.absorb("stack_b", unwrap_ok(Tensor::from_vec(1, 2, vec![0.3, 0.4]))));
+        let stacked = unwrap_ok(biome.stack());
         assert_eq!(stacked.shape(), (2, 2));
         assert_eq!(stacked.data(), &[0.1, 0.2, 0.3, 0.4]);
     }
@@ -2473,8 +2461,8 @@ mod tests {
     fn rewrite_monad_saturates_values() {
         let topos = demo_topos();
         let monad = RewriteMonad::new(&topos);
-        let mut tensor = Tensor::from_vec(1, 2, vec![20.0, -20.0]).unwrap();
-        monad.rewrite_tensor("rewrite", &mut tensor).unwrap();
+        let mut tensor = unwrap_ok(Tensor::from_vec(1, 2, vec![20.0, -20.0]));
+        unwrap_ok(monad.rewrite_tensor("rewrite", &mut tensor));
         assert!(tensor.data().iter().all(|v| v.abs() <= topos.saturation()));
     }
 
@@ -2491,27 +2479,23 @@ mod tests {
     fn rewrite_monad_lift_and_bind_tensor() {
         let topos = demo_topos();
         let monad = RewriteMonad::new(&topos);
-        let lifted = monad
-            .lift_tensor(
-                "lift",
-                Tensor::from_vec(1, 2, vec![topos.saturation() * 4.0, 0.25]).unwrap(),
-            )
-            .unwrap();
+        let lifted = unwrap_ok(monad.lift_tensor(
+            "lift",
+            unwrap_ok(Tensor::from_vec(1, 2, vec![topos.saturation() * 4.0, 0.25])),
+        ));
         assert!(lifted
             .data()
             .iter()
             .all(|v| v.is_finite() && v.abs() <= topos.saturation()));
 
-        let bound = monad
-            .bind_tensor(
-                "bind",
-                Tensor::from_vec(1, 2, vec![0.1, 0.2]).unwrap(),
-                |tensor| {
-                    let update = Tensor::from_vec(1, 2, vec![0.3, 0.4]).unwrap();
-                    tensor.add_scaled(&update, 1.0)
-                },
-            )
-            .unwrap();
+        let bound = unwrap_ok(monad.bind_tensor(
+            "bind",
+            unwrap_ok(Tensor::from_vec(1, 2, vec![0.1, 0.2])),
+            |tensor| {
+                let update = unwrap_ok(Tensor::from_vec(1, 2, vec![0.3, 0.4]));
+                tensor.add_scaled(&update, 1.0)
+            },
+        ));
         assert_eq!(bound.shape(), (1, 2));
         assert!(bound.data().iter().all(|v| v.is_finite()));
     }
@@ -2520,9 +2504,7 @@ mod tests {
     fn topos_normalises_probability_slices() {
         let topos = demo_topos();
         let mut slice = vec![2.0, -1.0, 0.5];
-        topos
-            .guard_probability_slice("probability_guard", &mut slice)
-            .unwrap();
+        unwrap_ok(topos.guard_probability_slice("probability_guard", &mut slice));
         assert!(slice.iter().all(|v| *v >= 0.0));
         let sum: f32 = slice.iter().sum();
         assert!((sum - 1.0).abs() < 1e-6);
@@ -2532,13 +2514,17 @@ mod tests {
     fn atlas_tracks_volume_and_depth() {
         let topos = demo_topos();
         let mut atlas = ToposAtlas::new(&topos);
-        let tensor = Tensor::from_vec(1, 2, vec![0.1, 0.2]).unwrap();
-        atlas.guard_tensor("atlas_tensor", &tensor).unwrap();
+        let tensor = unwrap_ok(Tensor::from_vec(1, 2, vec![0.1, 0.2]));
+        unwrap_ok(atlas.guard_tensor("atlas_tensor", &tensor));
         assert_eq!(atlas.visited_volume(), 2);
         assert_eq!(atlas.remaining_volume(), topos.max_volume() - 2);
-        let patch = FractalPatch::new(Tensor::from_vec(1, 2, vec![0.3, 0.4]).unwrap(), 1.0, 1.0, 1)
-            .unwrap();
-        atlas.guard_fractal_patch("atlas_patch", &patch).unwrap();
+        let patch = unwrap_ok(FractalPatch::new(
+            unwrap_ok(Tensor::from_vec(1, 2, vec![0.3, 0.4])),
+            1.0,
+            1.0,
+            1,
+        ));
+        unwrap_ok(atlas.guard_fractal_patch("atlas_patch", &patch));
         assert_eq!(atlas.depth(), 1);
         assert_eq!(atlas.visited_volume(), 4);
     }
@@ -2547,12 +2533,10 @@ mod tests {
     fn atlas_lifts_tensor_through_monad() {
         let topos = demo_topos();
         let mut atlas = ToposAtlas::new(&topos);
-        let lifted = atlas
-            .lift_tensor(
-                "atlas_lift",
-                Tensor::from_vec(1, 2, vec![topos.saturation() * 5.0, 0.5]).unwrap(),
-            )
-            .unwrap();
+        let lifted = unwrap_ok(atlas.lift_tensor(
+            "atlas_lift",
+            unwrap_ok(Tensor::from_vec(1, 2, vec![topos.saturation() * 5.0, 0.5])),
+        ));
         assert!(lifted.data().iter().all(|v| v.abs() <= topos.saturation()));
         assert_eq!(atlas.visited_volume(), 2);
     }
@@ -2561,11 +2545,15 @@ mod tests {
     fn biome_absorbs_fractal_patches() {
         let topos = demo_topos();
         let mut biome = TensorBiome::new(topos.clone());
-        let patch =
-            FractalPatch::new(Tensor::from_vec(1, 1, vec![2.0]).unwrap(), 2.0, 1.0, 0).unwrap();
-        biome.absorb_fractal_patch(&patch).unwrap();
+        let patch = unwrap_ok(FractalPatch::new(
+            unwrap_ok(Tensor::from_vec(1, 1, vec![2.0])),
+            2.0,
+            1.0,
+            0,
+        ));
+        unwrap_ok(biome.absorb_fractal_patch(&patch));
         assert_eq!(biome.len(), 1);
-        let canopy = biome.canopy().unwrap();
+        let canopy = unwrap_ok(biome.canopy());
         assert_eq!(canopy.data(), &[2.0]);
     }
 
@@ -2573,16 +2561,14 @@ mod tests {
     fn biome_absorb_with_monadic_builder() {
         let topos = demo_topos();
         let mut biome = TensorBiome::new(topos.clone());
-        biome
-            .absorb_with("monadic", |monad| {
-                monad.lift_tensor(
-                    "monadic_build",
-                    Tensor::from_vec(1, 2, vec![topos.saturation() * 3.0, 0.5]).unwrap(),
-                )
-            })
-            .unwrap();
+        unwrap_ok(biome.absorb_with("monadic", |monad| {
+            monad.lift_tensor(
+                "monadic_build",
+                unwrap_ok(Tensor::from_vec(1, 2, vec![topos.saturation() * 3.0, 0.5])),
+            )
+        }));
         assert_eq!(biome.len(), 1);
-        let canopy = biome.canopy().unwrap();
+        let canopy = unwrap_ok(biome.canopy());
         assert_eq!(canopy.shape(), (1, 2));
     }
 
@@ -2590,16 +2576,19 @@ mod tests {
     fn biome_absorb_weighted_with_monadic_builder() {
         let topos = demo_topos();
         let mut biome = TensorBiome::new(topos.clone());
-        biome
-            .absorb_weighted_with("weighted_monadic", 2.0, |monad| {
+        unwrap_ok(
+            biome.absorb_weighted_with("weighted_monadic", 2.0, |monad| {
                 monad.bind_tensor(
                     "weighted_monadic_build",
-                    Tensor::from_vec(1, 1, vec![1.0]).unwrap(),
-                    |tensor| tensor.add_scaled(&Tensor::from_vec(1, 1, vec![1.0]).unwrap(), 1.0),
+                    unwrap_ok(Tensor::from_vec(1, 1, vec![1.0])),
+                    |tensor| {
+                        let update = unwrap_ok(Tensor::from_vec(1, 1, vec![1.0]));
+                        tensor.add_scaled(&update, 1.0)
+                    },
                 )
-            })
-            .unwrap();
-        let canopy = biome.canopy().unwrap();
+            }),
+        );
+        let canopy = unwrap_ok(biome.canopy());
         assert_eq!(canopy.data(), &[2.0]);
         assert!((biome.total_weight() - 2.0).abs() < 1e-6);
     }
@@ -2608,22 +2597,18 @@ mod tests {
     fn biome_bind_shoots_rewrites_each_shoot() {
         let topos = demo_topos();
         let mut biome = TensorBiome::new(topos.clone());
-        biome
-            .absorb(
-                "bind_shoot",
-                Tensor::from_vec(1, 1, vec![topos.saturation() * 4.0]).unwrap(),
-            )
-            .unwrap();
-        biome
-            .bind_shoots("bind_shoots", |monad, shoot| {
-                let update = monad.lift_tensor(
-                    "bind_shoot_update",
-                    Tensor::from_vec(1, 1, vec![0.5]).unwrap(),
-                )?;
-                shoot.add_scaled(&update, 1.0)
-            })
-            .unwrap();
-        let canopy = biome.canopy().unwrap();
+        unwrap_ok(biome.absorb(
+            "bind_shoot",
+            unwrap_ok(Tensor::from_vec(1, 1, vec![topos.saturation() * 4.0])),
+        ));
+        unwrap_ok(biome.bind_shoots("bind_shoots", |monad, shoot| {
+            let update = monad.lift_tensor(
+                "bind_shoot_update",
+                unwrap_ok(Tensor::from_vec(1, 1, vec![0.5])),
+            )?;
+            shoot.add_scaled(&update, 1.0)
+        }));
+        let canopy = unwrap_ok(biome.canopy());
         assert!(canopy.data()[0].abs() <= topos.saturation());
     }
 
@@ -2631,23 +2616,26 @@ mod tests {
     fn biome_map_shoots_reuses_weights() {
         let topos = demo_topos();
         let mut biome = TensorBiome::new(topos.clone());
-        biome
-            .absorb_weighted("map_a", Tensor::from_vec(1, 1, vec![1.0]).unwrap(), 2.0)
-            .unwrap();
-        biome
-            .absorb_weighted("map_b", Tensor::from_vec(1, 1, vec![2.0]).unwrap(), 3.0)
-            .unwrap();
-        let base_canopy = biome.canopy().unwrap();
-        let mapped = biome
-            .map_shoots("map_transform", |monad, shoot| {
-                monad.bind_tensor("map_transform_build", shoot.clone(), |tensor| {
-                    tensor.add_scaled(&Tensor::from_vec(1, 1, vec![1.0]).unwrap(), 1.0)
-                })
+        unwrap_ok(biome.absorb_weighted(
+            "map_a",
+            unwrap_ok(Tensor::from_vec(1, 1, vec![1.0])),
+            2.0,
+        ));
+        unwrap_ok(biome.absorb_weighted(
+            "map_b",
+            unwrap_ok(Tensor::from_vec(1, 1, vec![2.0])),
+            3.0,
+        ));
+        let base_canopy = unwrap_ok(biome.canopy());
+        let mapped = unwrap_ok(biome.map_shoots("map_transform", |monad, shoot| {
+            monad.bind_tensor("map_transform_build", shoot.clone(), |tensor| {
+                let update = unwrap_ok(Tensor::from_vec(1, 1, vec![1.0]));
+                tensor.add_scaled(&update, 1.0)
             })
-            .unwrap();
+        }));
         assert_eq!(mapped.len(), biome.len());
         assert!((mapped.total_weight() - biome.total_weight()).abs() < 1e-6);
-        let mapped_canopy = mapped.canopy().unwrap();
+        let mapped_canopy = unwrap_ok(mapped.canopy());
         assert!((mapped_canopy.data()[0] - (base_canopy.data()[0] + 1.0)).abs() < 1e-6);
     }
 
@@ -2655,18 +2643,22 @@ mod tests {
     fn biome_renormalises_weights_preserves_canopy() {
         let topos = demo_topos();
         let mut biome = TensorBiome::new(topos.clone());
-        biome
-            .absorb_weighted("renorm_a", Tensor::from_vec(1, 1, vec![1.0]).unwrap(), 2.0)
-            .unwrap();
-        biome
-            .absorb_weighted("renorm_b", Tensor::from_vec(1, 1, vec![3.0]).unwrap(), 3.0)
-            .unwrap();
-        let canopy_before = biome.canopy().unwrap();
-        biome.renormalise_weights().unwrap();
+        unwrap_ok(biome.absorb_weighted(
+            "renorm_a",
+            unwrap_ok(Tensor::from_vec(1, 1, vec![1.0])),
+            2.0,
+        ));
+        unwrap_ok(biome.absorb_weighted(
+            "renorm_b",
+            unwrap_ok(Tensor::from_vec(1, 1, vec![3.0])),
+            3.0,
+        ));
+        let canopy_before = unwrap_ok(biome.canopy());
+        unwrap_ok(biome.renormalise_weights());
         let sum: f32 = biome.weights().iter().sum();
         assert!((sum - 1.0).abs() < 1e-6);
         assert!((biome.total_weight() - 1.0).abs() < 1e-6);
-        let canopy_after = biome.canopy().unwrap();
+        let canopy_after = unwrap_ok(biome.canopy());
         assert!((canopy_before.data()[0] - canopy_after.data()[0]).abs() < 1e-6);
     }
 
@@ -2675,24 +2667,22 @@ mod tests {
         let topos = demo_topos();
         let monad = RewriteMonad::new(&topos);
         let mut biome = monad.cultivate_biome();
-        monad
-            .absorb_weighted_into_biome(
-                &mut biome,
-                "monad_absorb",
-                Tensor::from_vec(1, 1, vec![topos.saturation() * 6.0]).unwrap(),
-                2.0,
-            )
-            .unwrap();
+        unwrap_ok(monad.absorb_weighted_into_biome(
+            &mut biome,
+            "monad_absorb",
+            unwrap_ok(Tensor::from_vec(1, 1, vec![topos.saturation() * 6.0])),
+            2.0,
+        ));
         assert_eq!(biome.len(), 1);
         assert!((biome.total_weight() - 2.0).abs() < 1e-6);
-        let canopy = biome.canopy().unwrap();
+        let canopy = unwrap_ok(biome.canopy());
         assert!(canopy.data()[0].abs() <= topos.saturation());
     }
 
     #[test]
     fn conjugate_gradient_converges_with_guard() {
         let topos = demo_topos();
-        let solver = ConjugateGradientSolver::new(&topos, 1e-5, 32).unwrap();
+        let solver = unwrap_ok(ConjugateGradientSolver::new(&topos, 1e-5, 32));
         let matrix = [4.0f32, 1.0, 0.0, 1.0, 3.0, 0.0, 0.0, 0.0, 2.0];
         let mut matvec = |src: &[f32], dst: &mut [f32]| {
             dst.fill(0.0);
@@ -2704,7 +2694,7 @@ mod tests {
         };
         let b = [1.0f32, 2.0, 3.0];
         let mut x = [0.0f32; 3];
-        let iterations = solver.solve(&mut matvec, &b, &mut x).unwrap();
+        let iterations = unwrap_ok(solver.solve(&mut matvec, &b, &mut x));
         assert!(iterations > 0);
         let mut residual = [0.0f32; 3];
         matvec(&x, &mut residual);
@@ -2718,14 +2708,11 @@ mod tests {
     #[test]
     fn multi_modal_text_profile_clamps_values() {
         let topos = demo_topos();
-        let guard = MultiModalToposGuard::new(&topos)
-            .unwrap()
-            .with_text_profile(ModalityProfile::new(16, Some(0.25)).unwrap())
-            .unwrap();
-        let mut tensor = Tensor::from_vec(4, 4, vec![10.0; 16]).unwrap();
-        guard
-            .guard_text_tensor("multi_modal_text", &mut tensor)
-            .unwrap();
+        let text_profile = unwrap_ok(ModalityProfile::new(16, Some(0.25)));
+        let guard = unwrap_ok(MultiModalToposGuard::new(&topos));
+        let guard = unwrap_ok(guard.with_text_profile(text_profile));
+        let mut tensor = unwrap_ok(Tensor::from_vec(4, 4, vec![10.0; 16]));
+        unwrap_ok(guard.guard_text_tensor("multi_modal_text", &mut tensor));
         let headroom = 0.25 * (1.0 + DEFAULT_MODALITY_PERMEABILITY);
         assert!(tensor
             .data()
@@ -2736,14 +2723,13 @@ mod tests {
     #[test]
     fn multi_modal_graph_guard_reports_symmetry() {
         let topos = demo_topos();
-        let guard = MultiModalToposGuard::new(&topos)
-            .unwrap()
-            .with_graph_profile(GraphGuardProfile::new(8, 12, 4, 1e-3, 0.05, Some(1.0)).unwrap())
-            .unwrap();
+        let graph_profile = unwrap_ok(GraphGuardProfile::new(8, 12, 4, 1e-3, 0.05, Some(1.0)));
+        let guard = unwrap_ok(MultiModalToposGuard::new(&topos));
+        let guard = unwrap_ok(guard.with_graph_profile(graph_profile));
         let mut adjacency = vec![0.0f32; 16];
-        adjacency[0 * 4 + 1] = 0.2;
-        adjacency[1 * 4 + 0] = 0.1;
-        let report = guard.guard_graph_adjacency(&mut adjacency, 4).unwrap();
+        adjacency[1] = 0.2;
+        adjacency[4] = 0.1;
+        let report = unwrap_ok(guard.guard_graph_adjacency(&mut adjacency, 4));
         assert_eq!(report.edge_count, 1);
         assert_eq!(report.symmetry_violations, 1);
         assert_eq!(report.edge_overflow, 0);
@@ -2753,12 +2739,11 @@ mod tests {
     #[test]
     fn multi_modal_reward_boundary_detects_breaches() {
         let topos = demo_topos();
-        let guard = MultiModalToposGuard::new(&topos)
-            .unwrap()
-            .with_reward_boundary(RewardBoundary::new(-0.5, 0.5, 0.1).unwrap())
-            .unwrap();
+        let boundary = unwrap_ok(RewardBoundary::new(-0.5, 0.5, 0.1));
+        let guard = unwrap_ok(MultiModalToposGuard::new(&topos));
+        let guard = unwrap_ok(guard.with_reward_boundary(boundary));
         let mut rewards = vec![-0.9, 0.2, 0.8];
-        let signal = guard.guard_reward_trace(&mut rewards).unwrap();
+        let signal = unwrap_ok(guard.guard_reward_trace(&mut rewards));
         assert_eq!(signal.lower_breach_index, Some(0));
         assert_eq!(signal.upper_breach_index, Some(2));
         assert_eq!(signal.clamped, 2);
@@ -2770,12 +2755,10 @@ mod tests {
     #[test]
     fn multi_modal_atlas_tracks_volume_and_lifts() {
         let topos = demo_topos();
-        let guard = MultiModalToposGuard::new(&topos).unwrap();
+        let guard = unwrap_ok(MultiModalToposGuard::new(&topos));
         let mut atlas = guard.atlas();
-        let mut text = Tensor::from_vec(2, 4, vec![topos.saturation() * 4.0; 8]).unwrap();
-        atlas
-            .guard_text_tensor("multi_modal_atlas_text", &mut text)
-            .unwrap();
+        let mut text = unwrap_ok(Tensor::from_vec(2, 4, vec![topos.saturation() * 4.0; 8]));
+        unwrap_ok(atlas.guard_text_tensor("multi_modal_atlas_text", &mut text));
         assert_eq!(atlas.visited_volume(), 8);
         let text_limit = atlas.guard.text.effective_saturation(atlas.guard.topos);
         let text_headroom = text_limit * (1.0 + atlas.guard.text.permeability());
@@ -2783,12 +2766,10 @@ mod tests {
             .data()
             .iter()
             .all(|&value| value.abs() <= text_headroom + 1e-5));
-        let lifted = atlas
-            .lift_vision_tensor(
-                "multi_modal_atlas_vision",
-                Tensor::from_vec(1, 4, vec![topos.saturation() * 3.0; 4]).unwrap(),
-            )
-            .unwrap();
+        let lifted = unwrap_ok(atlas.lift_vision_tensor(
+            "multi_modal_atlas_vision",
+            unwrap_ok(Tensor::from_vec(1, 4, vec![topos.saturation() * 3.0; 4])),
+        ));
         let vision_limit = atlas.guard.vision.effective_saturation(atlas.guard.topos);
         let vision_headroom = vision_limit * (1.0 + atlas.guard.vision.permeability());
         assert!(lifted
@@ -2801,32 +2782,23 @@ mod tests {
     #[test]
     fn multi_modal_biome_absorbs_with_preserved_profiles() {
         let topos = demo_topos();
-        let guard = MultiModalToposGuard::new(&topos)
-            .unwrap()
-            .with_text_profile(
-                ModalityProfile::new(64, Some(0.5))
-                    .unwrap()
-                    .with_permeability(0.2)
-                    .unwrap(),
-            )
-            .unwrap();
+        let text_profile = unwrap_ok(ModalityProfile::new(64, Some(0.5)));
+        let text_profile = unwrap_ok(text_profile.with_permeability(0.2));
+        let guard = unwrap_ok(MultiModalToposGuard::new(&topos));
+        let guard = unwrap_ok(guard.with_text_profile(text_profile));
         let mut biome = guard.cultivate_biome();
-        biome
-            .absorb_text(
-                "multi_modal_biome_text",
-                Tensor::from_vec(1, 4, vec![2.0; 4]).unwrap(),
-            )
-            .unwrap();
-        biome
-            .absorb_vision_weighted(
-                "multi_modal_biome_vision",
-                Tensor::from_vec(1, 4, vec![5.0; 4]).unwrap(),
-                2.0,
-            )
-            .unwrap();
+        unwrap_ok(biome.absorb_text(
+            "multi_modal_biome_text",
+            unwrap_ok(Tensor::from_vec(1, 4, vec![2.0; 4])),
+        ));
+        unwrap_ok(biome.absorb_vision_weighted(
+            "multi_modal_biome_vision",
+            unwrap_ok(Tensor::from_vec(1, 4, vec![5.0; 4])),
+            2.0,
+        ));
         assert_eq!(biome.len(), 2);
         assert!((biome.total_weight() - 3.0).abs() < 1e-6);
-        let canopy = biome.canopy().unwrap();
+        let canopy = unwrap_ok(biome.canopy());
         let text_limit = biome.text.effective_saturation(biome.topos());
         let text_headroom = text_limit * (1.0 + biome.text.permeability());
         let vision_limit = biome.vision.effective_saturation(biome.topos());
@@ -2838,20 +2810,16 @@ mod tests {
             .all(|&value| value.abs() <= max_headroom + 1e-5));
         let mut atlas = biome.atlas();
         let mut waveform = vec![topos.saturation() * 6.0; 4];
-        atlas
-            .guard_audio_waveform("multi_modal_biome_audio", &mut waveform)
-            .unwrap();
+        unwrap_ok(atlas.guard_audio_waveform("multi_modal_biome_audio", &mut waveform));
         let audio_limit = biome.audio.effective_saturation(biome.topos());
         let audio_headroom = audio_limit * (1.0 + biome.audio.permeability());
         assert!(waveform
             .iter()
             .all(|&value| value.abs() <= audio_headroom + 1e-5));
-        let _lifted = atlas
-            .lift_text_tensor(
-                "multi_modal_biome_lift",
-                Tensor::from_vec(1, 4, vec![topos.saturation() * 2.5; 4]).unwrap(),
-            )
-            .unwrap();
+        let _lifted = unwrap_ok(atlas.lift_text_tensor(
+            "multi_modal_biome_lift",
+            unwrap_ok(Tensor::from_vec(1, 4, vec![topos.saturation() * 2.5; 4])),
+        ));
         assert_eq!(atlas.visited_volume(), 4);
     }
 }

@@ -2,7 +2,15 @@
 target/
 .venv/
 .buildenv/
+.cargo-home/
 node_modules/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.spiraltorch/
 *.zip
 dist/
 logs/

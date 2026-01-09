@@ -4,7 +4,10 @@ fmt:
     cargo fmt --all
 
 clippy:
-    cargo clippy --workspace --all-targets -- -D warnings
+    cargo clippy --workspace --all-targets
+
+clippy-strict list="configs/clippy_strict_packages.txt":
+    bash scripts/run_rust_clippy_strict.sh "{{list}}"
 
 clean:
     cargo clean

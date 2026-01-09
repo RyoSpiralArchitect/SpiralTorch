@@ -438,7 +438,7 @@ fn detect_semantic_interfaces(
     if feature_dim == 0 {
         return out;
     }
-    if spatial_shape.iter().any(|&dim| dim == 0) {
+    if spatial_shape.contains(&0) {
         return out;
     }
     let offsets = ball_offsets(spatial_axes.len(), radius);
@@ -453,9 +453,9 @@ fn detect_semantic_interfaces(
             center_coords[axis] = index.get(slot).copied().unwrap_or(0);
         }
 
-        for f in 0..feature_dim {
-            center_coords[feature_axis] = f;
-            center_vec[f] = field[IxDyn(&center_coords)];
+        for (feature_index, slot) in center_vec.iter_mut().enumerate() {
+            center_coords[feature_axis] = feature_index;
+            *slot = field[IxDyn(&center_coords)];
         }
 
         let mut triggered = false;
@@ -477,9 +477,9 @@ fn detect_semantic_interfaces(
             if !valid {
                 continue;
             }
-            for f in 0..feature_dim {
-                neighbor_coords[feature_axis] = f;
-                neighbor_vec[f] = field[IxDyn(&neighbor_coords)];
+            for (feature_index, slot) in neighbor_vec.iter_mut().enumerate() {
+                neighbor_coords[feature_axis] = feature_index;
+                *slot = field[IxDyn(&neighbor_coords)];
             }
             if metric.distance(&center_vec, &neighbor_vec) > threshold as f64 {
                 triggered = true;

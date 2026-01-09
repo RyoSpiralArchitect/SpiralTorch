@@ -34,7 +34,7 @@ impl QueryPlan {
     }
 
     /// Executes the query plan against an in-memory dataset.
-    pub fn execute<'a>(&self, rows: &'a [BTreeMap<String, f64>]) -> Vec<BTreeMap<String, f64>> {
+    pub fn execute(&self, rows: &[BTreeMap<String, f64>]) -> Vec<BTreeMap<String, f64>> {
         let mut matches: Vec<_> = rows
             .iter()
             .filter(|row| self.filters.iter().all(|filter| filter.matches(row)))
@@ -69,6 +69,12 @@ impl QueryPlan {
                     .collect()
             })
             .collect()
+    }
+}
+
+impl Default for QueryPlan {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

@@ -101,6 +101,7 @@ mod imp {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn matmul_oriented_into(
         dst: &mut [f32],
         lhs: &[f32],

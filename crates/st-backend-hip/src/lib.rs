@@ -197,10 +197,8 @@ fn hip_env_available() -> bool {
 
     let mut seen = HashSet::new();
     let mut push_candidate = |candidate: PathBuf| {
-        if seen.insert(candidate.clone()) {
-            if candidate.exists() {
-                return true;
-            }
+        if seen.insert(candidate.clone()) && candidate.exists() {
+            return true;
         }
         false
     };
@@ -322,127 +320,6 @@ fn gather_binary_search_paths() -> Vec<PathBuf> {
     }
 
     paths.into_iter().collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-    use std::sync::Mutex;
-    use tempfile::tempdir;
-
-    static ENV_MUTEX: Mutex<()> = Mutex::new(());
-
-    fn clear_force_flag() {
-        std::env::remove_var("SPIRALTORCH_FORCE_HIP");
-    }
-
-    fn restore_env(key: &str, previous: Option<std::ffi::OsString>) {
-        match previous {
-            Some(value) => std::env::set_var(key, value),
-            None => std::env::remove_var(key),
-        }
-    }
-
-    #[test]
-    fn hip_available_when_forced() {
-        let _guard = ENV_MUTEX.lock().unwrap();
-        let prev = std::env::var_os("SPIRALTORCH_FORCE_HIP");
-        std::env::set_var("SPIRALTORCH_FORCE_HIP", "1");
-        assert!(hip_env_available());
-        restore_env("SPIRALTORCH_FORCE_HIP", prev);
-    }
-
-    #[test]
-    fn hip_available_via_rocm_path_marker() {
-        let _guard = ENV_MUTEX.lock().unwrap();
-        clear_force_flag();
-        let prev_rocm = std::env::var_os("ROCM_PATH");
-
-        let temp = tempdir().expect("tempdir");
-        let lib_dir = temp.path().join("lib");
-        fs::create_dir(&lib_dir).expect("lib dir");
-        fs::write(lib_dir.join("libamdhip64.so"), b"").expect("touch lib");
-
-        std::env::set_var("ROCM_PATH", temp.path());
-        assert!(hip_env_available());
-
-        restore_env("ROCM_PATH", prev_rocm);
-    }
-
-    #[test]
-    fn hip_available_via_path_hipcc() {
-        let _guard = ENV_MUTEX.lock().unwrap();
-        clear_force_flag();
-
-        let prev_path = std::env::var_os("PATH");
-        let temp = tempdir().expect("tempdir");
-        let bin_dir = temp.path().join("bin");
-        fs::create_dir(&bin_dir).expect("bin dir");
-        fs::write(bin_dir.join("hipcc"), b"").expect("touch hipcc");
-
-        let mut paths = vec![bin_dir];
-        if let Some(existing) = prev_path.clone() {
-            paths.extend(std::env::split_paths(&existing));
-        }
-        let joined = std::env::join_paths(paths).expect("join paths");
-        std::env::set_var("PATH", &joined);
-
-        assert!(hip_env_available());
-
-        restore_env("PATH", prev_path);
-    }
-
-    #[test]
-    fn init_requires_detectable_runtime() {
-        let _guard = ENV_MUTEX.lock().unwrap();
-        super::reset_runtime_for_tests();
-        clear_force_flag();
-
-        let prev_rocm = std::env::var_os("ROCM_PATH");
-        std::env::remove_var("ROCM_PATH");
-        let prev_path = std::env::var_os("PATH");
-        std::env::set_var("PATH", "");
-
-        assert!(super::init().is_err());
-
-        restore_env("PATH", prev_path);
-        restore_env("ROCM_PATH", prev_rocm);
-        super::reset_runtime_for_tests();
-    }
-
-    #[test]
-    fn init_succeeds_when_forced() {
-        let _guard = ENV_MUTEX.lock().unwrap();
-        super::reset_runtime_for_tests();
-        let prev_force = std::env::var_os("SPIRALTORCH_FORCE_HIP");
-        std::env::set_var("SPIRALTORCH_FORCE_HIP", "1");
-
-        let runtime = super::init().expect("runtime should initialise when forced");
-        assert!(runtime.device_count() >= 1);
-        assert!(runtime.devices().iter().any(|device| device.id == 0));
-
-        restore_env("SPIRALTORCH_FORCE_HIP", prev_force);
-        super::reset_runtime_for_tests();
-    }
-
-    #[test]
-    fn gemm_stub_matches_reference_matmul() {
-        let _guard = ENV_MUTEX.lock().unwrap();
-        super::reset_runtime_for_tests();
-        let prev_force = std::env::var_os("SPIRALTORCH_FORCE_HIP");
-        std::env::set_var("SPIRALTORCH_FORCE_HIP", "1");
-
-        let lhs = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
-        let rhs = vec![7.0, 8.0, 9.0, 10.0, 11.0, 12.0];
-        let mut out = vec![0.0; 4];
-        super::gemm_f32(2, 2, 3, &lhs, &rhs, &mut out).expect("gemm stub should succeed");
-        let expected = vec![58.0, 64.0, 139.0, 154.0];
-        assert_eq!(out, expected);
-
-        restore_env("SPIRALTORCH_FORCE_HIP", prev_force);
-        super::reset_runtime_for_tests();
-    }
 }
 
 fn collect_env_devices() -> Vec<DeviceInfo> {
@@ -584,6 +461,14 @@ fn gemm_backend(
     Ok(())
 }
 
+/// Perform a GEMM operation using raw pointers.
+///
+/// # Safety
+/// - `lhs` must be non-null, properly aligned, and point to `m * k` contiguous `f32` values.
+/// - `rhs` must be non-null, properly aligned, and point to `k * n` contiguous `f32` values.
+/// - `out` must be non-null, properly aligned, and point to `m * n` writable `f32` values.
+/// - The referenced memory must be valid for the duration of the call and must not alias in a way
+///   that violates Rust's aliasing rules.
 pub unsafe fn gemm_f32_raw(
     m: usize,
     n: usize,
@@ -644,5 +529,126 @@ pub fn device_info() -> Vec<DeviceInfo> {
             ));
             devices
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::sync::Mutex;
+    use tempfile::tempdir;
+
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
+
+    fn clear_force_flag() {
+        std::env::remove_var("SPIRALTORCH_FORCE_HIP");
+    }
+
+    fn restore_env(key: &str, previous: Option<std::ffi::OsString>) {
+        match previous {
+            Some(value) => std::env::set_var(key, value),
+            None => std::env::remove_var(key),
+        }
+    }
+
+    #[test]
+    fn hip_available_when_forced() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let prev = std::env::var_os("SPIRALTORCH_FORCE_HIP");
+        std::env::set_var("SPIRALTORCH_FORCE_HIP", "1");
+        assert!(hip_env_available());
+        restore_env("SPIRALTORCH_FORCE_HIP", prev);
+    }
+
+    #[test]
+    fn hip_available_via_rocm_path_marker() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        clear_force_flag();
+        let prev_rocm = std::env::var_os("ROCM_PATH");
+
+        let temp = tempdir().expect("tempdir");
+        let lib_dir = temp.path().join("lib");
+        fs::create_dir(&lib_dir).expect("lib dir");
+        fs::write(lib_dir.join("libamdhip64.so"), b"").expect("touch lib");
+
+        std::env::set_var("ROCM_PATH", temp.path());
+        assert!(hip_env_available());
+
+        restore_env("ROCM_PATH", prev_rocm);
+    }
+
+    #[test]
+    fn hip_available_via_path_hipcc() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        clear_force_flag();
+
+        let prev_path = std::env::var_os("PATH");
+        let temp = tempdir().expect("tempdir");
+        let bin_dir = temp.path().join("bin");
+        fs::create_dir(&bin_dir).expect("bin dir");
+        fs::write(bin_dir.join("hipcc"), b"").expect("touch hipcc");
+
+        let mut paths = vec![bin_dir];
+        if let Some(existing) = prev_path.clone() {
+            paths.extend(std::env::split_paths(&existing));
+        }
+        let joined = std::env::join_paths(paths).expect("join paths");
+        std::env::set_var("PATH", &joined);
+
+        assert!(hip_env_available());
+
+        restore_env("PATH", prev_path);
+    }
+
+    #[test]
+    fn init_requires_detectable_runtime() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        super::reset_runtime_for_tests();
+        clear_force_flag();
+
+        let prev_rocm = std::env::var_os("ROCM_PATH");
+        std::env::remove_var("ROCM_PATH");
+        let prev_path = std::env::var_os("PATH");
+        std::env::set_var("PATH", "");
+
+        assert!(super::init().is_err());
+
+        restore_env("PATH", prev_path);
+        restore_env("ROCM_PATH", prev_rocm);
+        super::reset_runtime_for_tests();
+    }
+
+    #[test]
+    fn init_succeeds_when_forced() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        super::reset_runtime_for_tests();
+        let prev_force = std::env::var_os("SPIRALTORCH_FORCE_HIP");
+        std::env::set_var("SPIRALTORCH_FORCE_HIP", "1");
+
+        let runtime = super::init().expect("runtime should initialise when forced");
+        assert!(runtime.device_count() >= 1);
+        assert!(runtime.devices().iter().any(|device| device.id == 0));
+
+        restore_env("SPIRALTORCH_FORCE_HIP", prev_force);
+        super::reset_runtime_for_tests();
+    }
+
+    #[test]
+    fn gemm_stub_matches_reference_matmul() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        super::reset_runtime_for_tests();
+        let prev_force = std::env::var_os("SPIRALTORCH_FORCE_HIP");
+        std::env::set_var("SPIRALTORCH_FORCE_HIP", "1");
+
+        let lhs = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let rhs = vec![7.0, 8.0, 9.0, 10.0, 11.0, 12.0];
+        let mut out = vec![0.0; 4];
+        super::gemm_f32(2, 2, 3, &lhs, &rhs, &mut out).expect("gemm stub should succeed");
+        let expected = vec![58.0, 64.0, 139.0, 154.0];
+        assert_eq!(out, expected);
+
+        restore_env("SPIRALTORCH_FORCE_HIP", prev_force);
+        super::reset_runtime_for_tests();
     }
 }

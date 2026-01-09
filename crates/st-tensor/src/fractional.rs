@@ -80,29 +80,34 @@ fn nan_to_num(x: f32) -> f32 {
 }
 
 /// Grünwald–Letnikov coefficients w[k].
-pub fn gl_coeffs(alpha: f32, m: usize) -> Vec<f32> {
-    assert!(
-        (0.0..=1.0).contains(&alpha) && alpha > 0.0,
-        "alpha in (0,1]"
-    );
-    let mut w = vec![0.0f32; m + 1];
+pub fn gl_coeffs(alpha: f32, m: usize) -> PureResult<Vec<f32>> {
+    if !(0.0..=1.0).contains(&alpha) || alpha <= 0.0 {
+        return Err(TensorError::InvalidValue {
+            label: "gl_coeffs requires alpha in (0,1]",
+        });
+    }
+
+    let len = m.checked_add(1).ok_or(TensorError::InvalidValue {
+        label: "gl_coeffs length overflow",
+    })?;
+    let mut w = vec![0.0f32; len];
     w[0] = 1.0;
-    for k in 1..=m {
+    for k in 1..len {
         let kf = k as f32;
         w[k] = w[k - 1] * ((kf - 1.0 - alpha) / kf);
     }
-    w
+    Ok(w)
 }
 
 /// Left-sided GL 1D derivative (forward form) with zero-extension boundaries.
 /// y[i] ≈ (1/h^α) * Σ_{k=0..min(i,m)} w[k]*x[i-k]
-pub fn fracdiff1d_gl(x: &[f32], alpha: f32, h: f32, m: usize) -> Vec<f32> {
+pub fn fracdiff1d_gl(x: &[f32], alpha: f32, h: f32, m: usize) -> PureResult<Vec<f32>> {
     let n = x.len();
     if n == 0 {
-        return vec![];
+        return Ok(vec![]);
     }
     let m = m.min(n.saturating_sub(1));
-    let w = gl_coeffs(alpha, m);
+    let w = gl_coeffs(alpha, m)?;
     let h_alpha = h.powf(alpha);
 
     let mut y = vec![0.0f32; n];
@@ -114,17 +119,17 @@ pub fn fracdiff1d_gl(x: &[f32], alpha: f32, h: f32, m: usize) -> Vec<f32> {
         }
         y[i] = nan_to_num(acc / h_alpha);
     }
-    y
+    Ok(y)
 }
 
 /// Backward pass (VJP): ∂L/∂x[j] += Σ_k w[k] * ∂L/∂y[j+k] / h^α.
-pub fn fracdiff1d_gl_vjp(gy: &[f32], alpha: f32, h: f32, m: usize) -> Vec<f32> {
+pub fn fracdiff1d_gl_vjp(gy: &[f32], alpha: f32, h: f32, m: usize) -> PureResult<Vec<f32>> {
     let n = gy.len();
     if n == 0 {
-        return vec![];
+        return Ok(vec![]);
     }
     let m = m.min(n.saturating_sub(1));
-    let w = gl_coeffs(alpha, m);
+    let w = gl_coeffs(alpha, m)?;
     let h_alpha = h.powf(alpha);
 
     let mut gx = vec![0.0f32; n];
@@ -136,5 +141,5 @@ pub fn fracdiff1d_gl_vjp(gy: &[f32], alpha: f32, h: f32, m: usize) -> Vec<f32> {
         }
         gx[j] = nan_to_num(acc / h_alpha);
     }
-    gx
+    Ok(gx)
 }

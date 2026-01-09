@@ -111,10 +111,17 @@ impl UringFractalScheduler {
         })
     }
 
+    fn lock_inner(&self) -> std::sync::MutexGuard<'_, Inner> {
+        match self.inner.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
     /// Push a new relation patch into the queue, recycling the oldest item when
     /// the capacity is exceeded.
     pub fn push(&self, patch: FractalPatch) -> PureResult<()> {
-        let mut inner = self.inner.lock().expect("scheduler mutex poisoned");
+        let mut inner = self.lock_inner();
         while inner.queue.len() >= inner.capacity {
             if let Some(old) = inner.queue.pop_front() {
                 inner.total_weight -= old.weight();
@@ -132,7 +139,7 @@ impl UringFractalScheduler {
 
     /// Pop the oldest relation patch from the queue.
     pub fn pop(&self) -> Option<FractalPatch> {
-        let mut inner = self.inner.lock().expect("scheduler mutex poisoned");
+        let mut inner = self.lock_inner();
         let patch = inner.queue.pop_front();
         if let Some(ref p) = patch {
             inner.total_weight -= p.weight();
@@ -147,7 +154,7 @@ impl UringFractalScheduler {
 
     /// Number of queued relation patches.
     pub fn len(&self) -> usize {
-        let inner = self.inner.lock().expect("scheduler mutex poisoned");
+        let inner = self.lock_inner();
         inner.queue.len()
     }
 
@@ -158,14 +165,14 @@ impl UringFractalScheduler {
 
     /// Sum of the coherence weights currently staged.
     pub fn total_weight(&self) -> f32 {
-        let inner = self.inner.lock().expect("scheduler mutex poisoned");
+        let inner = self.lock_inner();
         inner.total_weight
     }
 
     /// Fold the queue into a single relation tensor where coherence acts as the
     /// combining factor and tension keeps the stream smooth.
     pub fn fold_coherence(&self) -> PureResult<Tensor> {
-        let inner = self.inner.lock().expect("scheduler mutex poisoned");
+        let inner = self.lock_inner();
         if inner.queue.is_empty() {
             return Err(TensorError::EmptyInput("fractal scheduler queue"));
         }
@@ -211,8 +218,24 @@ impl UringFractalScheduler {
 mod tests {
     use super::*;
 
+    #[track_caller]
+    fn unwrap_ok<T, E: core::fmt::Debug>(result: Result<T, E>) -> T {
+        match result {
+            Ok(value) => value,
+            Err(error) => panic!("expected Ok(..), got Err({error:?})"),
+        }
+    }
+
+    #[track_caller]
+    fn unwrap_some<T>(option: Option<T>) -> T {
+        match option {
+            Some(value) => value,
+            None => panic!("expected Some(..), got None"),
+        }
+    }
+
     fn tensor(values: &[f32]) -> Tensor {
-        Tensor::from_vec(1, values.len(), values.to_vec()).unwrap()
+        unwrap_ok(Tensor::from_vec(1, values.len(), values.to_vec()))
     }
 
     #[test]
@@ -230,17 +253,17 @@ mod tests {
 
     #[test]
     fn scheduler_enforces_capacity() {
-        let scheduler = UringFractalScheduler::new(2).unwrap();
-        let p1 = FractalPatch::new(tensor(&[1.0, 0.0]), 1.0, 1.0, 0).unwrap();
-        let p2 = FractalPatch::new(tensor(&[0.0, 1.0]), 1.0, 1.0, 1).unwrap();
-        let p3 = FractalPatch::new(tensor(&[1.0, 1.0]), 1.0, 1.0, 2).unwrap();
+        let scheduler = unwrap_ok(UringFractalScheduler::new(2));
+        let p1 = unwrap_ok(FractalPatch::new(tensor(&[1.0, 0.0]), 1.0, 1.0, 0));
+        let p2 = unwrap_ok(FractalPatch::new(tensor(&[0.0, 1.0]), 1.0, 1.0, 1));
+        let p3 = unwrap_ok(FractalPatch::new(tensor(&[1.0, 1.0]), 1.0, 1.0, 2));
 
-        scheduler.push(p1).unwrap();
-        scheduler.push(p2).unwrap();
-        scheduler.push(p3).unwrap();
+        unwrap_ok(scheduler.push(p1));
+        unwrap_ok(scheduler.push(p2));
+        unwrap_ok(scheduler.push(p3));
 
         assert_eq!(scheduler.len(), 2);
-        let mut remaining = vec![scheduler.pop().unwrap(), scheduler.pop().unwrap()];
+        let mut remaining = [unwrap_some(scheduler.pop()), unwrap_some(scheduler.pop())];
         remaining.sort_by_key(|p| p.depth());
         assert_eq!(remaining[0].relation().data(), &[0.0, 1.0]);
         assert_eq!(remaining[1].relation().data(), &[1.0, 1.0]);
@@ -248,13 +271,13 @@ mod tests {
 
     #[test]
     fn coherence_fold_blends_relations() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        let p1 = FractalPatch::new(tensor(&[1.0, 0.0]), 1.0, 0.5, 0).unwrap();
-        let p2 = FractalPatch::new(tensor(&[0.0, 1.0]), 2.0, 1.0, 1).unwrap();
-        scheduler.push(p1).unwrap();
-        scheduler.push(p2).unwrap();
+        let scheduler = unwrap_ok(UringFractalScheduler::new(4));
+        let p1 = unwrap_ok(FractalPatch::new(tensor(&[1.0, 0.0]), 1.0, 0.5, 0));
+        let p2 = unwrap_ok(FractalPatch::new(tensor(&[0.0, 1.0]), 2.0, 1.0, 1));
+        unwrap_ok(scheduler.push(p1));
+        unwrap_ok(scheduler.push(p2));
 
-        let blended = scheduler.fold_coherence().unwrap();
+        let blended = unwrap_ok(scheduler.fold_coherence());
         let values = blended.data();
         assert_eq!(values.len(), 2);
         let sum: f32 = values.iter().sum();

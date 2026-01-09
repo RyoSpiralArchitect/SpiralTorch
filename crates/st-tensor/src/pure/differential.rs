@@ -395,7 +395,7 @@ impl SpiralDifferential {
     /// Runs the full resonance and optionally accumulates the recursive path into a hypergrad.
     pub fn resonate(
         &self,
-        mut hypergrad: Option<&mut AmegaHypergrad>,
+        hypergrad: Option<&mut AmegaHypergrad>,
     ) -> PureResult<DifferentialResonance> {
         let mut homotopy_flow = self.homotopy.flow()?;
         let mut functor_linear = self.functor.linearise(self.homotopy.direction())?;
@@ -414,7 +414,7 @@ impl SpiralDifferential {
             topos.saturate_slice(infinity_energy.data_mut());
             topos.guard_tensor("spiral_resonance_energy", &infinity_energy)?;
         }
-        if let Some(hypergrad) = hypergrad.as_deref_mut() {
+        if let Some(hypergrad) = hypergrad {
             self.recursive.accumulate(hypergrad)?;
         }
         Ok(DifferentialResonance {
@@ -431,8 +431,16 @@ impl SpiralDifferential {
 mod tests {
     use super::*;
 
+    #[track_caller]
+    fn unwrap_ok<T, E: core::fmt::Debug>(result: Result<T, E>) -> T {
+        match result {
+            Ok(value) => value,
+            Err(error) => panic!("expected Ok(..), got Err({error:?})"),
+        }
+    }
+
     fn toy_tensor(values: &[f32]) -> Tensor {
-        Tensor::from_vec(1, values.len(), values.to_vec()).unwrap()
+        unwrap_ok(Tensor::from_vec(1, values.len(), values.to_vec()))
     }
 
     fn toy_stage(value: f32, density: &Tensor) -> BarycenterIntermediate {
@@ -450,9 +458,13 @@ mod tests {
         let seed = toy_tensor(&[0.5, -0.2]);
         let generator = toy_tensor(&[1.0, -1.0]);
         let direction = toy_tensor(&[0.1, 0.4]);
-        let homotopy = HomotopyDifferential::new(seed.clone(), generator, direction).unwrap();
-        let kernel = Tensor::from_vec(2, 2, vec![1.0, 0.5, -0.5, 1.5]).unwrap();
-        let functor = FunctorDifferential::new(seed.clone(), kernel, 0.01).unwrap();
+        let homotopy = unwrap_ok(HomotopyDifferential::new(
+            seed.clone(),
+            generator,
+            direction,
+        ));
+        let kernel = unwrap_ok(Tensor::from_vec(2, 2, vec![1.0, 0.5, -0.5, 1.5]));
+        let functor = unwrap_ok(FunctorDifferential::new(seed.clone(), kernel, 0.01));
         let density = toy_tensor(&[0.6, 0.4]);
         let stage_a = toy_stage(0.2, &density);
         let stage_b = toy_stage(0.8, &density);
@@ -466,12 +478,13 @@ mod tests {
             intermediates: vec![stage_a, stage_b],
         };
         let recursive = RecursiveDifferential::from_barycenter(&barycenter);
-        let infinity =
-            InfinityDifferential::new(vec![density.clone(), density.clone()], vec![1.0, 2.0])
-                .unwrap();
-        let topos = OpenCartesianTopos::new(-1.0, 1e-4, 10.0, 8, 16).unwrap();
+        let infinity = unwrap_ok(InfinityDifferential::new(
+            vec![density.clone(), density.clone()],
+            vec![1.0, 2.0],
+        ));
+        let topos = unwrap_ok(OpenCartesianTopos::new(-1.0, 1e-4, 10.0, 8, 16));
         let spiral = SpiralDifferential::new(Some(topos), homotopy, functor, recursive, infinity);
-        let resonance = spiral.resonate(None).unwrap();
+        let resonance = unwrap_ok(spiral.resonate(None));
         assert_eq!(resonance.homotopy_flow.shape(), (1, 2));
         assert_eq!(resonance.functor_linearisation.shape(), (1, 2));
         assert_eq!(resonance.recursive_objective.shape().0, 1);

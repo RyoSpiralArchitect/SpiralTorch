@@ -441,9 +441,11 @@ pub fn analyse_word_with(
     hazard_cut: Option<f32>,
     min_radius: f32,
 ) -> DrlMetrics {
-    let mut options = AnalysisOptions::default();
-    options.hazard_cut = hazard_cut;
-    options.min_radius = min_radius;
+    let options = AnalysisOptions {
+        hazard_cut,
+        min_radius,
+        ..Default::default()
+    };
     analyse_word_with_options(word, thresholds, &options)
 }
 

@@ -53,18 +53,15 @@ impl fmt::Display for ViolationCategory {
 }
 
 /// Severity of a flagged item.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Ord, PartialOrd, Hash)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Ord, PartialOrd, Hash, Default,
+)]
 pub enum RiskLevel {
+    #[default]
     Low,
     Medium,
     High,
     Critical,
-}
-
-impl Default for RiskLevel {
-    fn default() -> Self {
-        RiskLevel::Low
-    }
 }
 
 impl fmt::Display for RiskLevel {
@@ -404,8 +401,10 @@ impl AuditSink {
     /// Generate a summary of historical audit events.
     pub fn summarize(&self) -> AuditSummary {
         let events = self.snapshot();
-        let mut summary = AuditSummary::default();
-        summary.total_events = events.len();
+        let mut summary = AuditSummary {
+            total_events: events.len(),
+            ..Default::default()
+        };
 
         for event in &events {
             if event.verdict.should_refuse() {

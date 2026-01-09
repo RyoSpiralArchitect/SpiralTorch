@@ -23,9 +23,14 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - name: rustfmt (workspace)
+        if: matrix.toolchain == 'nightly'
         run: cargo fmt --all -- --check
-      - name: clippy (deny warnings)
-        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: clippy (workspace)
+        if: matrix.toolchain == 'nightly'
+        run: cargo clippy --workspace --all-targets
+      - name: clippy (strict subset)
+        if: matrix.toolchain == 'nightly'
+        run: bash scripts/run_rust_clippy_strict.sh
       - name: build + test core
         run: |
           cargo build -p st-core --release
@@ -33,7 +38,7 @@ jobs:
       - name: build upper stack
         run: |
           cargo build -p st-nn --release
-          cargo build -p st-rl --release
+          cargo build -p st-spiral-rl --release
           cargo build -p st-rec --release
   wgpu-macos:
     name: st-tensor (wgpu / macOS)

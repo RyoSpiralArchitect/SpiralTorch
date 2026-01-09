@@ -169,7 +169,7 @@ fn weighted_baseline(
     weight_sum: f32,
 ) -> PureResult<Vec<f32>> {
     let volume = normalised
-        .get(0)
+        .first()
         .map(|dist| dist.len())
         .ok_or(TensorError::EmptyInput("z_space_barycenter"))?;
     let mut baseline = vec![0.0f32; volume];
@@ -192,6 +192,7 @@ fn weighted_baseline(
     Ok(baseline)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn barycenter_intermediates(
     guard: Option<RewriteMonad<'_>>,
     baseline: &[f32],
@@ -245,7 +246,7 @@ fn barycenter_mode(
     effective: f32,
 ) -> PureResult<Vec<f32>> {
     let volume = normalised
-        .get(0)
+        .first()
         .map(|dist| dist.len())
         .ok_or(TensorError::EmptyInput("z_space_barycenter"))?;
     let mut out = vec![0.0f32; volume];
@@ -627,6 +628,30 @@ mod tests {
     use super::*;
     use crate::pure::topos::OpenCartesianTopos;
 
+    #[track_caller]
+    fn unwrap_ok<T, E: core::fmt::Debug>(result: Result<T, E>) -> T {
+        match result {
+            Ok(value) => value,
+            Err(error) => panic!("expected Ok(..), got Err({error:?})"),
+        }
+    }
+
+    #[track_caller]
+    fn unwrap_err<T, E: core::fmt::Debug>(result: Result<T, E>) -> E {
+        match result {
+            Ok(_) => panic!("expected Err(..), got Ok(..)"),
+            Err(error) => error,
+        }
+    }
+
+    #[track_caller]
+    fn unwrap_some<T>(option: Option<T>) -> T {
+        match option {
+            Some(value) => value,
+            None => panic!("expected Some(..), got None"),
+        }
+    }
+
     #[derive(Clone, Debug)]
     struct CyclicShift {
         width: usize,
@@ -656,18 +681,18 @@ mod tests {
     #[test]
     fn projection_recovers_invariants() {
         let action = CyclicShift { width: 3 };
-        let input = Tensor::from_vec(1, 3, vec![1.0, 2.0, 3.0]).unwrap();
+        let input = unwrap_ok(Tensor::from_vec(1, 3, vec![1.0, 2.0, 3.0]));
         let elements = vec![0usize, 1, 2];
-        let projected = conditional_expectation(&action, &elements, &input).unwrap();
+        let projected = unwrap_ok(conditional_expectation(&action, &elements, &input));
         assert_eq!(projected.data(), &[2.0, 2.0, 2.0]);
     }
 
     #[test]
     fn cesaro_sequence_converges() {
         let action = CyclicShift { width: 3 };
-        let input = Tensor::from_vec(1, 3, vec![3.0, 0.0, 0.0]).unwrap();
+        let input = unwrap_ok(Tensor::from_vec(1, 3, vec![3.0, 0.0, 0.0]));
         let sequence = vec![vec![0usize], vec![0usize, 1], vec![0usize, 1, 2]];
-        let averages = cesaro_averages(&action, sequence, &input).unwrap();
+        let averages = unwrap_ok(cesaro_averages(&action, sequence, &input));
         assert_eq!(averages.len(), 3);
         assert_eq!(averages[0].data(), &[3.0, 0.0, 0.0]);
         assert_eq!(averages[1].data(), &[1.5, 1.5, 0.0]);
@@ -677,11 +702,11 @@ mod tests {
     #[test]
     fn barycenter_respects_symmetry() {
         let densities = vec![
-            Tensor::from_vec(1, 2, vec![0.8, 0.2]).unwrap(),
-            Tensor::from_vec(1, 2, vec![0.2, 0.8]).unwrap(),
+            unwrap_ok(Tensor::from_vec(1, 2, vec![0.8, 0.2])),
+            unwrap_ok(Tensor::from_vec(1, 2, vec![0.2, 0.8])),
         ];
         let weights = vec![1.0, 1.0];
-        let result = z_space_barycenter(&weights, &densities, 0.25, 0.0, None).unwrap();
+        let result = unwrap_ok(z_space_barycenter(&weights, &densities, 0.25, 0.0, None));
         let data = result.density.data();
         assert!((data[0] - data[1]).abs() < 1e-6);
         assert!(result.kl_energy > 0.0);
@@ -692,9 +717,9 @@ mod tests {
 
     #[test]
     fn barycenter_degeneracy_detected() {
-        let densities = vec![Tensor::from_vec(1, 2, vec![0.6, 0.4]).unwrap()];
+        let densities = vec![unwrap_ok(Tensor::from_vec(1, 2, vec![0.6, 0.4]))];
         let weights = vec![1.0];
-        let err = z_space_barycenter(&weights, &densities, -1.5, 0.0, None).unwrap_err();
+        let err = unwrap_err(z_space_barycenter(&weights, &densities, -1.5, 0.0, None));
         assert!(matches!(
             err,
             TensorError::DegenerateBarycenter { effective_weight } if effective_weight <= 0.0
@@ -704,12 +729,18 @@ mod tests {
     #[test]
     fn barycenter_coupling_energy_matches() {
         let densities = vec![
-            Tensor::from_vec(1, 2, vec![0.9, 0.1]).unwrap(),
-            Tensor::from_vec(1, 2, vec![0.4, 0.6]).unwrap(),
+            unwrap_ok(Tensor::from_vec(1, 2, vec![0.9, 0.1])),
+            unwrap_ok(Tensor::from_vec(1, 2, vec![0.4, 0.6])),
         ];
         let weights = vec![2.0, 1.0];
-        let coupling = Tensor::from_vec(2, 2, vec![0.0, 1.0, 1.0, 0.0]).unwrap();
-        let result = z_space_barycenter(&weights, &densities, 0.1, 2.0, Some(&coupling)).unwrap();
+        let coupling = unwrap_ok(Tensor::from_vec(2, 2, vec![0.0, 1.0, 1.0, 0.0]));
+        let result = unwrap_ok(z_space_barycenter(
+            &weights,
+            &densities,
+            0.1,
+            2.0,
+            Some(&coupling),
+        ));
         assert!(result.coupling_energy > 0.0);
         assert!(result.objective < result.kl_energy + result.coupling_energy);
         assert!(!result.intermediates.is_empty());
@@ -718,11 +749,11 @@ mod tests {
     #[test]
     fn barycenter_loss_curve_descends() {
         let densities = vec![
-            Tensor::from_vec(1, 3, vec![0.7, 0.2, 0.1]).unwrap(),
-            Tensor::from_vec(1, 3, vec![0.1, 0.4, 0.5]).unwrap(),
+            unwrap_ok(Tensor::from_vec(1, 3, vec![0.7, 0.2, 0.1])),
+            unwrap_ok(Tensor::from_vec(1, 3, vec![0.1, 0.4, 0.5])),
         ];
         let weights = vec![1.5, 0.5];
-        let result = z_space_barycenter(&weights, &densities, 0.2, 0.0, None).unwrap();
+        let result = unwrap_ok(z_space_barycenter(&weights, &densities, 0.2, 0.0, None));
         assert!(result.intermediates.len() >= 2);
         let objectives: Vec<f32> = result
             .intermediates
@@ -732,28 +763,27 @@ mod tests {
         for window in objectives.windows(2) {
             assert!(window[1] <= window[0] + 1e-5);
         }
-        let last = result.intermediates.last().unwrap();
+        let last = unwrap_some(result.intermediates.last());
         assert!((last.objective - result.objective).abs() < 1e-4);
         assert!((last.interpolation - 1.0).abs() < f32::EPSILON);
     }
 
     #[test]
     fn guarded_barycenter_projects_through_topos() {
-        let topos = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 64, 4096).unwrap();
+        let topos = unwrap_ok(OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 64, 4096));
         let weights = vec![1.0, 2.0];
         let densities = vec![
-            Tensor::from_vec(1, 3, vec![0.2, f32::NAN, 0.6]).unwrap(),
-            Tensor::from_vec(1, 3, vec![-5.0, 0.3, f32::INFINITY]).unwrap(),
+            unwrap_ok(Tensor::from_vec(1, 3, vec![0.2, f32::NAN, 0.6])),
+            unwrap_ok(Tensor::from_vec(1, 3, vec![-5.0, 0.3, f32::INFINITY])),
         ];
-        let result = z_space_barycenter_guarded(
+        let result = unwrap_ok(z_space_barycenter_guarded(
             RewriteMonad::new(&topos),
             &weights,
             &densities,
             0.05,
             0.0,
             None,
-        )
-        .unwrap();
+        ));
         let data = result.density.data();
         let sum: f32 = data.iter().sum();
         assert!((sum - 1.0).abs() < 1e-5);
@@ -765,7 +795,7 @@ mod tests {
         let radii = [0.9, 0.75, 0.5];
         let freqs = [1.0, 2.0, 3.5];
         let weights = [0.4, 0.35, 0.25];
-        let tail = tesla_tail_spectrum(&radii, &freqs, &weights, 0.6).unwrap();
+        let tail = unwrap_ok(tesla_tail_spectrum(&radii, &freqs, &weights, 0.6));
         assert_eq!(tail.lines.len(), radii.len());
         assert!(tail.lines.iter().all(|line| line.amplitude >= 0.0));
         let expected = 1.0
@@ -782,7 +812,7 @@ mod tests {
     fn nirt_weight_update_shifts_mass_towards_similar_modes() {
         let mut weights = vec![0.3, 0.4, 0.3];
         let similarities = vec![0.9, 0.1, 0.4];
-        nirt_weight_update(&mut weights, &similarities, 0.8, 0.2).unwrap();
+        unwrap_ok(nirt_weight_update(&mut weights, &similarities, 0.8, 0.2));
         let sum = weights.iter().sum::<f32>();
         assert!((sum - 1.0).abs() < 1e-6);
         assert!(weights[0] > weights[1]);

@@ -1,0 +1,9 @@
+# Packages to lint with `cargo clippy -- -D warnings` (one per line).
+# Empty lines and `#` comments are ignored.
+#
+# Start small (e.g. spiral-config) and grow this list over time.
+
+spiral-config
+st-frac
+st-kdsl
+st-tensor

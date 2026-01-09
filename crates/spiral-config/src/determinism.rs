@@ -21,10 +21,7 @@ impl DeterminismConfig {
     fn from_env() -> Self {
         let enabled = std::env::var("SPIRAL_DETERMINISTIC")
             .ok()
-            .map(|v| match v.as_str() {
-                "0" | "false" | "False" | "off" | "OFF" => false,
-                _ => true,
-            })
+            .map(|v| !matches!(v.as_str(), "0" | "false" | "False" | "off" | "OFF"))
             .unwrap_or(false);
 
         let base_seed = std::env::var("SPIRAL_DETERMINISTIC_SEED")

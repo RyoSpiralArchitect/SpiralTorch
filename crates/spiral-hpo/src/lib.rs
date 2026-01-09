@@ -138,17 +138,12 @@ pub mod space {
 pub use analysis::TrialSummary;
 pub use space::{ParamSpec, ParamValue, SearchSpace, TrialSuggestion};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Objective {
+    #[default]
     Minimize,
     Maximize,
-}
-
-impl Default for Objective {
-    fn default() -> Self {
-        Objective::Minimize
-    }
 }
 
 impl Objective {

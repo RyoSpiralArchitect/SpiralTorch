@@ -252,9 +252,7 @@ pub fn record_best<P: Serialize, C: Serialize>(
         features: extract_features(&context_value),
     };
 
-    let bucket = store
-        .entry(key.to_string())
-        .or_insert_with(AutoTuneBucket::default);
+    let bucket = store.entry(key.to_string()).or_default();
     let inserted = bucket.insert_entry(entry);
     save_store_atomic(path, &store)?;
     Ok(inserted)

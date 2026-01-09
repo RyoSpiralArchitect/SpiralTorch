@@ -33,6 +33,8 @@ pub enum FracErr {
     Axis,
     #[error("kernel_len must be > 0")]
     Kernel,
+    #[error("tol must be > 0")]
+    Tol,
 }
 
 /// Padding behaviour for fractional convolution boundaries.
@@ -51,8 +53,10 @@ pub enum Pad {
 }
 
 /// Generate `len` Grünwald–Letnikov coefficients for a fractional exponent `alpha`.
-pub fn gl_coeffs(alpha: f32, len: usize) -> Vec<f32> {
-    assert!(len > 0);
+pub fn gl_coeffs(alpha: f32, len: usize) -> Result<Vec<f32>, FracErr> {
+    if len == 0 {
+        return Err(FracErr::Kernel);
+    }
     let mut c = vec![0.0f32; len];
     c[0] = 1.0;
     for k in 1..len {
@@ -60,7 +64,7 @@ pub fn gl_coeffs(alpha: f32, len: usize) -> Vec<f32> {
         let num = alpha - (k as f32 - 1.0);
         c[k] = -(prev * (num / k as f32));
     }
-    c
+    Ok(c)
 }
 
 fn wrap_index(idx: isize, len: usize) -> usize {
@@ -139,14 +143,18 @@ fn conv1d_gl_line(x: &[f32], y: &mut [f32], coeff: &[f32], pad: Pad, scale: f32)
 
 /// Generate Grünwald–Letnikov coefficients until their magnitude drops below `tol`
 /// or until `max_len` coefficients have been produced.
-fn gl_coeffs_adaptive_forward(alpha: f32, tol: f32, max_len: usize) -> Vec<f32> {
+fn gl_coeffs_adaptive_forward(alpha: f32, tol: f32, max_len: usize) -> Result<Vec<f32>, FracErr> {
     gl_coeffs_adaptive_impl(alpha, tol, max_len)
 }
 
 #[inline]
-fn gl_coeffs_adaptive_impl(alpha: f32, tol: f32, max_len: usize) -> Vec<f32> {
-    assert!(max_len > 0);
-    assert!(tol > 0.0);
+fn gl_coeffs_adaptive_impl(alpha: f32, tol: f32, max_len: usize) -> Result<Vec<f32>, FracErr> {
+    if max_len == 0 {
+        return Err(FracErr::Kernel);
+    }
+    if !tol.is_finite() || tol <= 0.0 {
+        return Err(FracErr::Tol);
+    }
 
     let mut coeffs = Vec::with_capacity(max_len);
     let mut prev = 1.0f32;
@@ -161,7 +169,7 @@ fn gl_coeffs_adaptive_impl(alpha: f32, tol: f32, max_len: usize) -> Vec<f32> {
         }
     }
 
-    coeffs
+    Ok(coeffs)
 }
 
 /// Apply a fractional difference along a 1-D slice.
@@ -186,7 +194,7 @@ fn fracdiff_gl_1d_impl(
     if kernel_len == 0 {
         return Err(FracErr::Kernel);
     }
-    let coeff = gl_coeffs(alpha, kernel_len);
+    let coeff = gl_coeffs(alpha, kernel_len)?;
     Ok(fracdiff_gl_1d_with_coeffs_impl(x, &coeff, pad, scale))
 }
 
@@ -214,7 +222,7 @@ fn fracdiff_gl_1d_with_coeffs_impl(
 
 /// Generate Grünwald–Letnikov coefficients until their magnitude drops below `tol`
 /// or until `max_len` coefficients have been produced.
-pub fn gl_coeffs_adaptive(alpha: f32, tol: f32, max_len: usize) -> Vec<f32> {
+pub fn gl_coeffs_adaptive(alpha: f32, tol: f32, max_len: usize) -> Result<Vec<f32>, FracErr> {
     gl_coeffs_adaptive_forward(alpha, tol, max_len)
 }
 
@@ -253,8 +261,11 @@ pub fn fracdiff_gl_nd(
         return Err(FracErr::Kernel);
     }
     let mut y = x.clone();
-    let coeff = gl_coeffs(alpha, kernel_len);
+    let coeff = gl_coeffs(alpha, kernel_len)?;
     let s = scale.unwrap_or(1.0);
+    let axis_len = x.len_of(Axis(axis));
+    let mut scratch_src = vec![0.0f32; axis_len];
+    let mut scratch_dst = vec![0.0f32; axis_len];
     let ax = Axis(axis);
     let mut yv = y.view_mut();
     let dst_lanes = yv.lanes_mut(ax);
@@ -262,13 +273,20 @@ pub fn fracdiff_gl_nd(
     let src_lanes = xv.lanes(ax);
 
     for (mut dst, src) in dst_lanes.into_iter().zip(src_lanes.into_iter()) {
-        conv1d_gl_line(
-            src.as_slice().unwrap(),
-            dst.as_slice_mut().unwrap(),
-            &coeff,
-            pad,
-            s,
-        );
+        match (src.as_slice(), dst.as_slice_mut()) {
+            (Some(src_slice), Some(dst_slice)) => {
+                conv1d_gl_line(src_slice, dst_slice, &coeff, pad, s);
+            }
+            _ => {
+                for (slot, &value) in scratch_src.iter_mut().zip(src.iter()) {
+                    *slot = value;
+                }
+                conv1d_gl_line(&scratch_src, &mut scratch_dst, &coeff, pad, s);
+                for (dst_value, &value) in dst.iter_mut().zip(scratch_dst.iter()) {
+                    *dst_value = value;
+                }
+            }
+        }
     }
     Ok(y)
 }
@@ -288,9 +306,12 @@ pub fn fracdiff_gl_nd_backward(
         return Err(FracErr::Kernel);
     }
     let mut gx = gy.clone();
-    let mut coeff = gl_coeffs(alpha, kernel_len);
+    let mut coeff = gl_coeffs(alpha, kernel_len)?;
     coeff.reverse();
     let s = scale.unwrap_or(1.0);
+    let axis_len = gy.len_of(Axis(axis));
+    let mut scratch_src = vec![0.0f32; axis_len];
+    let mut scratch_dst = vec![0.0f32; axis_len];
     let ax = Axis(axis);
     let mut gxv = gx.view_mut();
     let dst_lanes = gxv.lanes_mut(ax);
@@ -298,13 +319,20 @@ pub fn fracdiff_gl_nd_backward(
     let src_lanes = gyv.lanes(ax);
 
     for (mut dst, src) in dst_lanes.into_iter().zip(src_lanes.into_iter()) {
-        conv1d_gl_line(
-            src.as_slice().unwrap(),
-            dst.as_slice_mut().unwrap(),
-            &coeff,
-            pad,
-            s,
-        );
+        match (src.as_slice(), dst.as_slice_mut()) {
+            (Some(src_slice), Some(dst_slice)) => {
+                conv1d_gl_line(src_slice, dst_slice, &coeff, pad, s);
+            }
+            _ => {
+                for (slot, &value) in scratch_src.iter_mut().zip(src.iter()) {
+                    *slot = value;
+                }
+                conv1d_gl_line(&scratch_src, &mut scratch_dst, &coeff, pad, s);
+                for (dst_value, &value) in dst.iter_mut().zip(scratch_dst.iter()) {
+                    *dst_value = value;
+                }
+            }
+        }
     }
     Ok(gx)
 }
@@ -322,7 +350,7 @@ mod tests {
 
     #[test]
     fn adaptive_coeffs_truncates() {
-        let coeffs = gl_coeffs_adaptive(0.3, 1e-4, 64);
+        let coeffs = gl_coeffs_adaptive(0.3, 1e-4, 64).unwrap();
         assert!(!coeffs.is_empty());
         assert!(coeffs.len() <= 64);
         if coeffs.len() < 64 {
@@ -335,7 +363,7 @@ mod tests {
     #[test]
     fn fracdiff_1d_matches_nd() {
         let x = vec![0., 1., 2., 3.];
-        let coeff = gl_coeffs(0.7, 4);
+        let coeff = gl_coeffs(0.7, 4).unwrap();
         let line = fracdiff_gl_1d_with_coeffs(&x, &coeff, Pad::Zero, Some(1.0)).unwrap();
 
         let arr = ArrayD::from_shape_vec(IxDyn(&[1, 4]), x.clone()).unwrap();
@@ -348,9 +376,80 @@ mod tests {
     }
 
     #[test]
+    fn fracdiff_nd_handles_strided_lanes() {
+        let x = ArrayD::from_shape_vec(
+            IxDyn(&[3, 4]),
+            vec![
+                0.0, 1.0, 2.0, 3.0, //
+                4.0, 5.0, 6.0, 7.0, //
+                8.0, 9.0, 10.0, 11.0,
+            ],
+        )
+        .unwrap();
+
+        // Axis 0 lanes are strided (columns) in a standard row-major layout.
+        let x_view = x.view();
+        let first_lane = x_view.lanes(Axis(0)).into_iter().next().unwrap();
+        assert!(first_lane.as_slice().is_none());
+
+        let alpha = 0.35;
+        let kernel_len = 4;
+        let pad = Pad::Zero;
+        let scale = Some(0.8);
+
+        let y = fracdiff_gl_nd(&x, alpha, 0, kernel_len, pad, scale).unwrap();
+        let coeff = gl_coeffs(alpha, kernel_len).unwrap();
+
+        for col in 0..4 {
+            let lane: Vec<f32> = (0..3).map(|row| x[[row, col]]).collect();
+            let expected =
+                fracdiff_gl_1d_with_coeffs(&lane, &coeff, pad, scale).unwrap();
+            for row in 0..3 {
+                assert!((y[[row, col]] - expected[row]).abs() < 1e-6f32);
+            }
+        }
+    }
+
+    #[test]
+    fn fracdiff_nd_backward_handles_strided_lanes() {
+        let gy = ArrayD::from_shape_vec(
+            IxDyn(&[3, 4]),
+            vec![
+                0.0, 1.0, 2.0, 3.0, //
+                4.0, 5.0, 6.0, 7.0, //
+                8.0, 9.0, 10.0, 11.0,
+            ],
+        )
+        .unwrap();
+
+        // Axis 0 lanes are strided (columns) in a standard row-major layout.
+        let gy_view = gy.view();
+        let first_lane = gy_view.lanes(Axis(0)).into_iter().next().unwrap();
+        assert!(first_lane.as_slice().is_none());
+
+        let alpha = 0.6;
+        let kernel_len = 3;
+        let pad = Pad::Edge;
+        let scale = Some(0.25);
+
+        let gx = fracdiff_gl_nd_backward(&gy, alpha, 0, kernel_len, pad, scale).unwrap();
+        let mut coeff = gl_coeffs(alpha, kernel_len).unwrap();
+        coeff.reverse();
+
+        for col in 0..4 {
+            let lane: Vec<f32> = (0..3).map(|row| gy[[row, col]]).collect();
+            let expected =
+                fracdiff_gl_1d_with_coeffs(&lane, &coeff, pad, scale).unwrap();
+            for row in 0..3 {
+                assert!((gx[[row, col]] - expected[row]).abs() < 1e-6f32);
+            }
+        }
+    }
+
+    #[test]
     fn constant_pad_behaves() {
         let x = vec![1.0, 2.0];
-        let coeff = gl_coeffs(0.4, 3);
+        let coeff = gl_coeffs(0.4, 3).unwrap();
         let y = fracdiff_gl_1d_with_coeffs(&x, &coeff, Pad::Constant(5.0), None).unwrap();
         assert_eq!(y.len(), 2);
         // When padding with 5, the first element should only see the padded value

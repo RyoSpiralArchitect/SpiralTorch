@@ -31,10 +31,7 @@ impl TrialSummary {
     }
 }
 
-pub fn best_trial<'a>(
-    completed: &'a [TrialRecord],
-    objective: Objective,
-) -> Option<&'a TrialRecord> {
+pub fn best_trial(completed: &[TrialRecord], objective: Objective) -> Option<&TrialRecord> {
     completed
         .iter()
         .filter_map(|record| record.metric.map(|metric| (record, metric)))

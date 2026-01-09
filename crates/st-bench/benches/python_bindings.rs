@@ -83,9 +83,11 @@ fn bench_tensor_matmul(c: &mut Criterion, tensor_cls: &Py<PyAny>, flavor: &str) 
     for &(m, k, n, seed) in &cases {
         let lhs_data = random_matrix(m, k, seed);
         let rhs_data = random_matrix(k, n, seed + 1);
-        let (lhs, rhs) = Python::with_gil(|py| -> PyResult<_> {
-            let lhs = tensor_cls.call1(py, (m, k, &lhs_data))?;
-            let rhs = tensor_cls.call1(py, (k, n, &rhs_data))?;
+        let (lhs, rhs): (Py<PyAny>, Py<PyAny>) = Python::with_gil(|py| -> PyResult<_> {
+            let lhs_data = PyList::new(py, &lhs_data);
+            let rhs_data = PyList::new(py, &rhs_data);
+            let lhs = tensor_cls.call1(py, (m, k, lhs_data))?;
+            let rhs = tensor_cls.call1(py, (k, n, rhs_data))?;
             Ok::<_, PyErr>((lhs.into(), rhs.into()))
         })
         .expect("failed to allocate python tensors for matmul");
@@ -118,9 +120,11 @@ fn bench_tensor_hadamard(c: &mut Criterion, tensor_cls: &Py<PyAny>, flavor: &str
     for &(rows, cols, seed) in &cases {
         let lhs_data = random_matrix(rows, cols, seed);
         let rhs_data = random_matrix(rows, cols, seed + 1);
-        let (lhs, rhs) = Python::with_gil(|py| -> PyResult<_> {
-            let lhs = tensor_cls.call1(py, (rows, cols, &lhs_data))?;
-            let rhs = tensor_cls.call1(py, (rows, cols, &rhs_data))?;
+        let (lhs, rhs): (Py<PyAny>, Py<PyAny>) = Python::with_gil(|py| -> PyResult<_> {
+            let lhs_data = PyList::new(py, &lhs_data);
+            let rhs_data = PyList::new(py, &rhs_data);
+            let lhs = tensor_cls.call1(py, (rows, cols, lhs_data))?;
+            let rhs = tensor_cls.call1(py, (rows, cols, rhs_data))?;
             Ok::<_, PyErr>((lhs.into(), rhs.into()))
         })
         .expect("failed to allocate python tensors for hadamard");

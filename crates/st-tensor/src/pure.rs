@@ -15,6 +15,7 @@
 pub mod differential;
 pub mod fractal;
 pub mod measure;
+pub mod python;
 pub mod topos;
 pub mod wasm_canvas;
 
@@ -345,7 +346,7 @@ const SPIRAL_PROJECTOR_RANK: usize = 24;
 const SPIRAL_PROJECTOR_WEIGHT: f64 = 0.75;
 const SPIRAL_PROJECTOR_RAMANUJAN_ITERS: usize = 6;
 const SPIRAL_LEECH_PACKING_DENSITY: f64 = 0.001_929_574_309_403_922_5;
-const GOLDEN_RATIO: f64 = 1.618_033_988_749_894_8;
+const GOLDEN_RATIO: f64 = 1.618_033_988_749_895;
 const GOLDEN_RATIO_CONJUGATE: f64 = 0.618_033_988_749_894_8;
 const GOLDEN_RATIO_BIAS: f64 = 0.381_966_011_250_105_1;
 
@@ -920,7 +921,7 @@ impl Tensor {
         if rows == 0 || cols == 0 {
             return Err(TensorError::InvalidDimensions { rows, cols });
         }
-        if !(min < max) {
+        if min.partial_cmp(&max) != Some(std::cmp::Ordering::Less) {
             return Err(TensorError::InvalidValue {
                 label: "random_uniform_bounds",
             });
@@ -987,6 +988,10 @@ impl Tensor {
     #[inline]
     pub fn len(&self) -> usize {
         self.rows * self.cols
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     /// Returns the logical stride for advancing one row and one column.
@@ -1222,7 +1227,7 @@ impl Tensor {
             byte_offset: 0,
         };
 
-        let manager_ctx = Box::into_raw(state) as *mut ManagedTensorState as *mut c_void;
+        let manager_ctx = Box::into_raw(state) as *mut c_void;
         let managed = Box::new(DLManagedTensor {
             dl_tensor,
             manager_ctx,
@@ -1256,32 +1261,38 @@ impl Tensor {
     /// Construct a tensor from a managed DLPack tensor. The managed tensor is consumed.
     ///
     /// # Safety
-    /// The caller must ensure `managed` points to a valid `DLManagedTensor`.
+    /// - `managed` must point to a valid `DLManagedTensor` produced by a DLPack exporter.
+    /// - This function takes ownership of `managed`; the pointer must not be used again after a
+    ///   successful call.
+    /// - The tensor must describe a contiguous 2D CPU `f32` buffer in row-major order, and
+    ///   `dl_tensor.data` + `dl_tensor.byte_offset` must remain valid for `rows * cols` elements
+    ///   until the DLPack deleter runs.
+    /// - The managed tensor must include a non-null deleter that is safe to call exactly once.
     pub unsafe fn from_dlpack(managed: *mut DLManagedTensor) -> PureResult<Self> {
         struct ManagedGuard {
-            ptr: Option<NonNull<DLManagedTensor>>,
+            ptr: NonNull<DLManagedTensor>,
+            armed: bool,
         }
 
         impl ManagedGuard {
-            unsafe fn new(ptr: NonNull<DLManagedTensor>) -> Self {
-                Self { ptr: Some(ptr) }
+            fn new(ptr: NonNull<DLManagedTensor>) -> Self {
+                Self { ptr, armed: true }
             }
 
             fn tensor(&self) -> &DLManagedTensor {
-                unsafe { self.ptr.unwrap().as_ref() }
+                unsafe { self.ptr.as_ref() }
             }
 
             fn into_inner(mut self) -> NonNull<DLManagedTensor> {
-                self.ptr.take().unwrap()
+                self.armed = false;
+                self.ptr
             }
         }
 
         impl Drop for ManagedGuard {
             fn drop(&mut self) {
-                if let Some(ptr) = self.ptr.take() {
-                    unsafe {
-                        call_managed_deleter(ptr.as_ptr());
-                    }
+                if self.armed {
+                    unsafe { call_managed_deleter(self.ptr.as_ptr()) }
                 }
             }
         }
@@ -1327,25 +1338,25 @@ impl Tensor {
             });
         }
 
+        if !(dl_tensor.shape as usize).is_multiple_of(mem::align_of::<i64>()) {
+            return Err(TensorError::DlpackError {
+                message: "dlpack tensor shape pointer is misaligned".to_string(),
+            });
+        }
+
         if tensor.deleter.is_none() {
             return Err(TensorError::DlpackError {
                 message: "dlpack tensor is missing a deleter".to_string(),
             });
         }
 
-        let ndim = usize::try_from(dl_tensor.ndim).map_err(|_| TensorError::DlpackError {
-            message: format!("invalid ndim {}", dl_tensor.ndim),
-        })?;
-
-        let shape = slice::from_raw_parts(dl_tensor.shape, ndim);
-        let (rows_i64, cols_i64) = match *shape {
-            [rows, cols] => (rows, cols),
-            _ => {
-                return Err(TensorError::DlpackError {
-                    message: "shape must contain exactly two dimensions".to_string(),
-                })
-            }
+        let shape = unsafe {
+            // SAFETY: `dl_tensor.shape` is non-null and aligned, and `dl_tensor.ndim == 2` ensures
+            // there are exactly two shape entries.
+            slice::from_raw_parts(dl_tensor.shape, 2)
         };
+        let rows_i64 = shape[0];
+        let cols_i64 = shape[1];
 
         if rows_i64 <= 0 || cols_i64 <= 0 {
             return Err(TensorError::InvalidDimensions {
@@ -1377,11 +1388,11 @@ impl Tensor {
         }
 
         let offset = dl_tensor.byte_offset / mem::size_of::<f32>();
-        if offset > expected_len {
-            return Err(TensorError::DlpackError {
-                message: format!("byte offset {offset} exceeds tensor length {expected_len}",),
-            });
-        }
+        let _ = (dl_tensor.data as usize)
+            .checked_add(dl_tensor.byte_offset)
+            .ok_or_else(|| TensorError::DlpackError {
+                message: "byte offset causes pointer overflow".to_string(),
+            })?;
 
         let base_ptr = match NonNull::new(dl_tensor.data as *mut f32) {
             Some(ptr) => ptr,
@@ -1391,7 +1402,17 @@ impl Tensor {
         };
 
         if !dl_tensor.strides.is_null() {
-            let strides = slice::from_raw_parts(dl_tensor.strides, ndim);
+            if !(dl_tensor.strides as usize).is_multiple_of(mem::align_of::<i64>()) {
+                return Err(TensorError::DlpackError {
+                    message: "dlpack tensor strides pointer is misaligned".to_string(),
+                });
+            }
+
+            let strides = unsafe {
+                // SAFETY: `dl_tensor.strides` is non-null and aligned, and `dl_tensor.ndim == 2`
+                // ensures there are exactly two stride entries when provided.
+                slice::from_raw_parts(dl_tensor.strides, 2)
+            };
             let expected_row = i64::try_from(cols).map_err(|_| TensorError::DlpackError {
                 message: format!("cols {cols} exceed i64 range"),
             })?;
@@ -1414,13 +1435,19 @@ impl Tensor {
             }
         }
 
-        let data_ptr = unsafe { base_ptr.as_ptr().add(offset) };
+        let data_ptr = base_ptr.as_ptr().wrapping_add(offset);
         let data_ptr = match NonNull::new(data_ptr) {
             Some(ptr) => ptr,
             None => {
                 return Err(TensorError::EmptyInput("dlpack tensor data"));
             }
         };
+
+        if !(data_ptr.as_ptr() as usize).is_multiple_of(mem::align_of::<f32>()) {
+            return Err(TensorError::DlpackError {
+                message: "dlpack tensor data pointer is misaligned for f32 elements".to_string(),
+            });
+        }
 
         let foreign = unsafe { ForeignTensor::new(guard.into_inner(), data_ptr, expected_len) };
 
@@ -2677,6 +2704,7 @@ impl Tensor {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn matmul_bias_add_relu_into_auto(
         &self,
         other: &Tensor,
@@ -3070,10 +3098,12 @@ impl Tensor {
     /// Returns the sum over rows for each column.
     pub fn sum_axis0(&self) -> Vec<f32> {
         let mut sums = vec![0.0; self.cols];
-        for r in 0..self.rows {
-            let offset = r * self.cols;
-            for c in 0..self.cols {
-                sums[c] += self.data[offset + c];
+        if self.cols == 0 {
+            return sums;
+        }
+        for row in self.data().chunks(self.cols) {
+            for (sum, value) in sums.iter_mut().zip(row.iter()) {
+                *sum += *value;
             }
         }
         sums
@@ -3082,13 +3112,11 @@ impl Tensor {
     /// Returns the sum over columns for each row.
     pub fn sum_axis1(&self) -> Vec<f32> {
         let mut sums = vec![0.0; self.rows];
-        for r in 0..self.rows {
-            let offset = r * self.cols;
-            let mut total = 0.0f32;
-            for c in 0..self.cols {
-                total += self.data[offset + c];
-            }
-            sums[r] = total;
+        if self.cols == 0 {
+            return sums;
+        }
+        for (slot, row) in sums.iter_mut().zip(self.data().chunks(self.cols)) {
+            *slot = row.iter().copied().sum();
         }
         sums
     }
@@ -3403,11 +3431,7 @@ impl ComplexTensor {
                 got: data.len(),
             });
         }
-        Ok(Self {
-            data: data.into(),
-            rows,
-            cols,
-        })
+        Ok(Self { data, rows, cols })
     }
 
     pub fn shape(&self) -> (usize, usize) {
@@ -3764,7 +3788,7 @@ impl GradientSummary {
             0.0
         };
         let linf = if linf.is_finite() { linf.max(0.0) } else { 0.0 };
-        let summary = Self {
+        Self {
             l1,
             l2: sum_squares.sqrt(),
             linf,
@@ -3778,9 +3802,7 @@ impl GradientSummary {
             positive_count: 0,
             negative_count: 0,
             near_zero_count: 0,
-        };
-
-        summary
+        }
     }
 
     /// Attach support and sign statistics to an existing summary. When the
@@ -5514,11 +5536,9 @@ impl AmegaHypergrad {
         for idx in 0..self.gradient.len() {
             let old = self.gradient[idx];
             let new = 0.0f32;
+            self.gradient[idx] = new;
             if old.to_bits() != new.to_bits() {
-                self.gradient[idx] = new;
                 self.record_transition(old, new);
-            } else {
-                self.gradient[idx] = new;
             }
         }
     }
@@ -5530,18 +5550,15 @@ impl AmegaHypergrad {
         self.topos.guard_tensor("hypergrad_wave", tensor)?;
         let tolerance = self.topos.tolerance();
         let values = tensor.data();
-        for idx in 0..self.gradient.len() {
-            let value = values[idx];
+        for (idx, &value) in values.iter().enumerate() {
             let denom = 1.0 - self.curvature * value * value;
             let update = value / denom.abs().max(tolerance);
             let old = self.gradient[idx];
             let candidate = old + update;
             let new = self.topos.saturate(candidate);
+            self.gradient[idx] = new;
             if old.to_bits() != new.to_bits() {
-                self.gradient[idx] = new;
                 self.record_transition(old, new);
-            } else {
-                self.gradient[idx] = new;
             }
         }
         Ok(())
@@ -5632,7 +5649,9 @@ impl AmegaHypergrad {
             self.assert_tensor_shape(&stage.density)?;
         }
         let mut stages = intermediates.iter();
-        let first = stages.next().unwrap();
+        let first = stages
+            .next()
+            .ok_or(TensorError::EmptyInput("barycenter_intermediates"))?;
         self.accumulate_wave(&first.density)?;
         let mut previous = &first.density;
         for stage in stages {
@@ -6019,6 +6038,7 @@ fn matmul_naive(lhs: &[f32], rhs: &[f32], rows: usize, inner: usize, cols: usize
     out
 }
 
+#[allow(clippy::too_many_arguments)]
 fn fused_attention_cpu(
     queries: &[f32],
     keys: &[f32],
@@ -6157,12 +6177,15 @@ fn row_hardmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
 }
 
 fn add_bias_relu_inplace(data: &mut [f32], rows: usize, cols: usize, bias: &[f32]) {
-    for r in 0..rows {
-        let offset = r * cols;
-        for c in 0..cols {
-            let index = offset + c;
-            let sum = data[index] + bias[c];
-            data[index] = if sum > 0.0 { sum } else { 0.0 };
+    assert_eq!(data.len(), rows * cols);
+    assert_eq!(bias.len(), cols);
+    if cols == 0 {
+        return;
+    }
+    for row in data.chunks_mut(cols) {
+        for (value, &bias) in row.iter_mut().zip(bias.iter()) {
+            let sum = *value + bias;
+            *value = if sum > 0.0 { sum } else { 0.0 };
         }
     }
 }
@@ -6175,7 +6198,7 @@ fn gelu(x: f32) -> f32 {
 }
 
 fn gelu_prime(x: f32) -> f32 {
-    const SQRT_2_OVER_PI: f32 = 0.797_884_560_802_865_4;
+    const SQRT_2_OVER_PI: f32 = 0.797_884_6;
     const KAPPA: f32 = 0.044_715;
     let x2 = x * x;
     let inner = SQRT_2_OVER_PI * (x + KAPPA * x * x2);
@@ -6184,12 +6207,14 @@ fn gelu_prime(x: f32) -> f32 {
 }
 
 fn add_bias_gelu_inplace(data: &mut [f32], rows: usize, cols: usize, bias: &[f32]) {
-    for r in 0..rows {
-        let offset = r * cols;
-        for c in 0..cols {
-            let index = offset + c;
-            let sum = data[index] + bias[c];
-            data[index] = gelu(sum);
+    assert_eq!(data.len(), rows * cols);
+    assert_eq!(bias.len(), cols);
+    if cols == 0 {
+        return;
+    }
+    for row in data.chunks_mut(cols) {
+        for (value, &bias) in row.iter_mut().zip(bias.iter()) {
+            *value = gelu(*value + bias);
         }
     }
 }
@@ -6201,12 +6226,17 @@ fn add_bias_residual_relu_inplace(
     bias: &[f32],
     residual: &[f32],
 ) {
-    for r in 0..rows {
-        let offset = r * cols;
-        for c in 0..cols {
-            let index = offset + c;
-            let sum = data[index] + bias[c] + residual[index];
-            data[index] = if sum > 0.0 { sum } else { 0.0 };
+    assert_eq!(data.len(), rows * cols);
+    assert_eq!(bias.len(), cols);
+    assert_eq!(residual.len(), rows * cols);
+    if cols == 0 {
+        return;
+    }
+    for (row, residual_row) in data.chunks_mut(cols).zip(residual.chunks(cols)) {
+        for ((value, &bias), &residual) in row.iter_mut().zip(bias.iter()).zip(residual_row.iter())
+        {
+            let sum = *value + bias + residual;
+            *value = if sum > 0.0 { sum } else { 0.0 };
         }
     }
 }
@@ -6218,12 +6248,16 @@ fn add_bias_residual_gelu_inplace(
     bias: &[f32],
     residual: &[f32],
 ) {
-    for r in 0..rows {
-        let offset = r * cols;
-        for c in 0..cols {
-            let index = offset + c;
-            let sum = data[index] + bias[c] + residual[index];
-            data[index] = gelu(sum);
+    assert_eq!(data.len(), rows * cols);
+    assert_eq!(bias.len(), cols);
+    assert_eq!(residual.len(), rows * cols);
+    if cols == 0 {
+        return;
+    }
+    for (row, residual_row) in data.chunks_mut(cols).zip(residual.chunks(cols)) {
+        for ((value, &bias), &residual) in row.iter_mut().zip(bias.iter()).zip(residual_row.iter())
+        {
+            *value = gelu(*value + bias + residual);
         }
     }
 }
@@ -6246,6 +6280,46 @@ fn matmul_wgpu(
 mod tests {
     use super::*;
     use ndarray::Array2;
+    use std::ptr;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct DlpackTestCtx {
+        drops: Arc<AtomicUsize>,
+        data: Box<[f32]>,
+        shape: Box<[i64]>,
+        strides: Option<Box<[i64]>>,
+    }
+
+    unsafe extern "C" fn dlpack_test_deleter(ptr: *mut DLManagedTensor) {
+        if ptr.is_null() {
+            return;
+        }
+        let mut boxed = Box::from_raw(ptr);
+        if !boxed.manager_ctx.is_null() {
+            let ctx = Box::from_raw(boxed.manager_ctx as *mut DlpackTestCtx);
+            ctx.drops.fetch_add(1, Ordering::SeqCst);
+            drop(ctx);
+            boxed.manager_ctx = ptr::null_mut();
+        }
+        boxed.deleter = None;
+        drop(boxed);
+    }
+
+    #[track_caller]
+    fn unwrap_ok<T, E: core::fmt::Debug>(result: Result<T, E>) -> T {
+        match result {
+            Ok(value) => value,
+            Err(error) => panic!("expected Ok(..), got Err({error:?})"),
+        }
+    }
+
+    #[track_caller]
+    fn unwrap_err<T, E: core::fmt::Debug>(result: Result<T, E>) -> E {
+        match result {
+            Ok(_) => panic!("expected Err(..), got Ok(..)"),
+            Err(error) => error,
+        }
+    }
 
     #[test]
     fn spiral_consensus_sanitises_non_finite_values() {
@@ -6308,14 +6382,22 @@ mod tests {
 
     #[test]
     fn matmul_bias_relu_matches_scalar_pipeline() {
-        let lhs = Tensor::from_vec(2, 3, vec![1.0, -2.0, 0.5, 0.25, 1.5, -0.75]).unwrap();
-        let rhs = Tensor::from_vec(3, 2, vec![0.5, -1.0, 2.0, 0.25, -0.5, 1.0]).unwrap();
+        let lhs = unwrap_ok(Tensor::from_vec(
+            2,
+            3,
+            vec![1.0, -2.0, 0.5, 0.25, 1.5, -0.75],
+        ));
+        let rhs = unwrap_ok(Tensor::from_vec(
+            3,
+            2,
+            vec![0.5, -1.0, 2.0, 0.25, -0.5, 1.0],
+        ));
         let bias = vec![0.5, -0.25];
 
-        let fused = lhs.matmul_bias_relu(&rhs, &bias).unwrap();
+        let fused = unwrap_ok(lhs.matmul_bias_relu(&rhs, &bias));
 
-        let mut reference = lhs.matmul(&rhs).unwrap();
-        reference.add_row_inplace(&bias).unwrap();
+        let mut reference = unwrap_ok(lhs.matmul(&rhs));
+        unwrap_ok(reference.add_row_inplace(&bias));
         reference.relu_inplace();
 
         assert_eq!(fused.shape(), reference.shape());
@@ -6326,22 +6408,24 @@ mod tests {
 
     #[test]
     fn matmul_bias_gelu_matches_scalar_pipeline() {
-        let lhs =
-            Tensor::from_vec(2, 4, vec![1.0, -1.5, 0.75, 2.0, -0.25, 0.5, 1.25, -0.75]).unwrap();
-        let rhs = Tensor::from_vec(
+        let lhs = unwrap_ok(Tensor::from_vec(
+            2,
+            4,
+            vec![1.0, -1.5, 0.75, 2.0, -0.25, 0.5, 1.25, -0.75],
+        ));
+        let rhs = unwrap_ok(Tensor::from_vec(
             4,
             3,
             vec![
                 0.5, -0.25, 1.0, 1.5, 0.75, -1.0, -0.5, 0.33, 0.8, -0.2, 1.2, 0.6,
             ],
-        )
-        .unwrap();
+        ));
         let bias = vec![0.1, -0.05, 0.2];
 
-        let fused = lhs.matmul_bias_gelu(&rhs, &bias).unwrap();
+        let fused = unwrap_ok(lhs.matmul_bias_gelu(&rhs, &bias));
 
-        let mut reference = lhs.matmul(&rhs).unwrap();
-        reference.add_row_inplace(&bias).unwrap();
+        let mut reference = unwrap_ok(lhs.matmul(&rhs));
+        unwrap_ok(reference.add_row_inplace(&bias));
         reference.gelu_inplace();
 
         assert_eq!(fused.shape(), reference.shape());
@@ -6352,31 +6436,32 @@ mod tests {
 
     #[test]
     fn matmul_bias_add_relu_matches_scalar_pipeline() {
-        let lhs = Tensor::from_vec(
+        let lhs = unwrap_ok(Tensor::from_vec(
             3,
             4,
             vec![
                 1.0, -0.5, 0.25, 2.0, 0.75, -1.25, 1.5, -0.75, 0.33, 0.5, -0.25, 1.0,
             ],
-        )
-        .unwrap();
-        let rhs = Tensor::from_vec(
+        ));
+        let rhs = unwrap_ok(Tensor::from_vec(
             4,
             3,
             vec![
                 0.5, 1.25, -0.75, -1.0, 0.75, 0.5, 1.5, -0.25, 0.33, -0.66, 0.25, 0.8,
             ],
-        )
-        .unwrap();
+        ));
         let bias = vec![0.2, -0.1, 0.05];
-        let residual =
-            Tensor::from_vec(3, 3, vec![0.1, 0.2, -0.3, -0.4, 0.5, 0.6, 0.0, -0.2, 0.3]).unwrap();
+        let residual = unwrap_ok(Tensor::from_vec(
+            3,
+            3,
+            vec![0.1, 0.2, -0.3, -0.4, 0.5, 0.6, 0.0, -0.2, 0.3],
+        ));
 
-        let fused = lhs.matmul_bias_add_relu(&rhs, &bias, &residual).unwrap();
+        let fused = unwrap_ok(lhs.matmul_bias_add_relu(&rhs, &bias, &residual));
 
-        let mut reference = lhs.matmul(&rhs).unwrap();
-        reference.add_row_inplace(&bias).unwrap();
-        let mut reference = reference.add(&residual).unwrap();
+        let mut reference = unwrap_ok(lhs.matmul(&rhs));
+        unwrap_ok(reference.add_row_inplace(&bias));
+        let mut reference = unwrap_ok(reference.add(&residual));
         reference.relu_inplace();
 
         assert_eq!(fused.shape(), reference.shape());
@@ -6387,9 +6472,17 @@ mod tests {
 
     #[test]
     fn tensor_gelu_backward_matches_manual() {
-        let input = Tensor::from_vec(2, 3, vec![-1.0, 0.25, 0.75, -0.5, 0.0, 1.25]).unwrap();
-        let grad = Tensor::from_vec(2, 3, vec![0.5, -0.75, 0.3, -0.2, 0.4, 0.1]).unwrap();
-        let result = input.gelu_backward(&grad).unwrap();
+        let input = unwrap_ok(Tensor::from_vec(
+            2,
+            3,
+            vec![-1.0, 0.25, 0.75, -0.5, 0.0, 1.25],
+        ));
+        let grad = unwrap_ok(Tensor::from_vec(
+            2,
+            3,
+            vec![0.5, -0.75, 0.3, -0.2, 0.4, 0.1],
+        ));
+        let result = unwrap_ok(input.gelu_backward(&grad));
         for ((z, g), value) in input
             .data()
             .iter()
@@ -6414,8 +6507,13 @@ mod tests {
             .map(|i| ((i as f32 % 7.0) - 3.0) * 0.2)
             .collect();
         let residual: Vec<f32> = vec![0.05; rows * cols];
-        let (gz, dr, db) =
-            wgpu_dense::fused_gelu_backward(&z, &grad, Some(&residual), rows, cols).unwrap();
+        let (gz, dr, db) = unwrap_ok(wgpu_dense::fused_gelu_backward(
+            &z,
+            &grad,
+            Some(&residual),
+            rows,
+            cols,
+        ));
 
         for ((z_val, g_val), gz_val) in z.iter().zip(grad.iter()).zip(gz.iter()) {
             let expected = gelu_prime(*z_val) * g_val;
@@ -6438,21 +6536,28 @@ mod tests {
 
     #[test]
     fn matmul_bias_add_gelu_matches_scalar_pipeline() {
-        let lhs = Tensor::from_vec(2, 3, vec![0.5, -1.0, 1.5, 0.25, 0.75, -0.5]).unwrap();
-        let rhs = Tensor::from_vec(
+        let lhs = unwrap_ok(Tensor::from_vec(
+            2,
+            3,
+            vec![0.5, -1.0, 1.5, 0.25, 0.75, -0.5],
+        ));
+        let rhs = unwrap_ok(Tensor::from_vec(
             3,
             3,
             vec![1.0, -0.75, 0.5, -0.5, 0.33, 1.25, 0.8, -0.2, 0.4],
-        )
-        .unwrap();
+        ));
         let bias = vec![0.2, -0.1, 0.05];
-        let residual = Tensor::from_vec(2, 3, vec![0.1, -0.05, 0.0, -0.2, 0.3, 0.4]).unwrap();
+        let residual = unwrap_ok(Tensor::from_vec(
+            2,
+            3,
+            vec![0.1, -0.05, 0.0, -0.2, 0.3, 0.4],
+        ));
 
-        let fused = lhs.matmul_bias_add_gelu(&rhs, &bias, &residual).unwrap();
+        let fused = unwrap_ok(lhs.matmul_bias_add_gelu(&rhs, &bias, &residual));
 
-        let mut reference = lhs.matmul(&rhs).unwrap();
-        reference.add_row_inplace(&bias).unwrap();
-        let mut reference = reference.add(&residual).unwrap();
+        let mut reference = unwrap_ok(lhs.matmul(&rhs));
+        unwrap_ok(reference.add_row_inplace(&bias));
+        let mut reference = unwrap_ok(reference.add(&residual));
         reference.gelu_inplace();
 
         assert_eq!(fused.shape(), reference.shape());
@@ -6463,18 +6568,154 @@ mod tests {
 
     #[test]
     fn tensor_roundtrip_dlpack_preserves_contents() {
-        let tensor = Tensor::from_vec(2, 3, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
-        let managed = tensor.to_dlpack().unwrap();
-        let restored = unsafe { Tensor::from_dlpack(managed).unwrap() };
+        let tensor = unwrap_ok(Tensor::from_vec(2, 3, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]));
+        let managed = unwrap_ok(tensor.to_dlpack());
+        let restored = unsafe { unwrap_ok(Tensor::from_dlpack(managed)) };
         assert_eq!(tensor, restored);
         assert_eq!(tensor.data().as_ptr(), restored.data().as_ptr());
     }
 
     #[test]
+    fn tensor_from_dlpack_calls_deleter_on_error() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let ctx = Box::new(DlpackTestCtx {
+            drops: Arc::clone(&drops),
+            data: vec![0.0; 4].into_boxed_slice(),
+            shape: vec![2, 2].into_boxed_slice(),
+            strides: Some(vec![2, 1].into_boxed_slice()),
+        });
+        let data_ptr = ctx.data.as_ptr() as *mut f32;
+        let shape_ptr = ctx.shape.as_ptr() as *mut i64;
+        let strides_ptr = match ctx.strides.as_ref() {
+            Some(strides) => strides.as_ptr() as *mut i64,
+            None => ptr::null_mut(),
+        };
+
+        let managed = Box::new(DLManagedTensor {
+            dl_tensor: DLTensor {
+                data: data_ptr as *mut c_void,
+                device: DLDevice {
+                    device_type: DLDeviceType::Cuda as i32,
+                    device_id: 0,
+                },
+                ndim: 2,
+                dtype: DLDataType {
+                    code: DLDataTypeCode::Float as u8,
+                    bits: 32,
+                    lanes: 1,
+                },
+                shape: shape_ptr,
+                strides: strides_ptr,
+                byte_offset: 0,
+            },
+            manager_ctx: Box::into_raw(ctx) as *mut c_void,
+            deleter: Some(dlpack_test_deleter),
+        });
+        let managed_ptr = Box::into_raw(managed);
+
+        let err = unsafe { unwrap_err(Tensor::from_dlpack(managed_ptr)) };
+        assert!(matches!(err, TensorError::DlpackError { .. }));
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn tensor_from_dlpack_respects_byte_offset() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let data: Vec<f32> = (0..16).map(|value| value as f32).collect();
+        let ctx = Box::new(DlpackTestCtx {
+            drops: Arc::clone(&drops),
+            data: data.into_boxed_slice(),
+            shape: vec![2, 2].into_boxed_slice(),
+            strides: Some(vec![2, 1].into_boxed_slice()),
+        });
+        let data_ptr = ctx.data.as_ptr() as *mut f32;
+        let shape_ptr = ctx.shape.as_ptr() as *mut i64;
+        let strides_ptr = match ctx.strides.as_ref() {
+            Some(strides) => strides.as_ptr() as *mut i64,
+            None => ptr::null_mut(),
+        };
+        let byte_offset = mem::size_of::<f32>() * 8;
+        let expected_ptr = data_ptr.wrapping_add(8) as *const f32;
+
+        let managed = Box::new(DLManagedTensor {
+            dl_tensor: DLTensor {
+                data: data_ptr as *mut c_void,
+                device: DLDevice {
+                    device_type: DLDeviceType::Cpu as i32,
+                    device_id: 0,
+                },
+                ndim: 2,
+                dtype: DLDataType {
+                    code: DLDataTypeCode::Float as u8,
+                    bits: 32,
+                    lanes: 1,
+                },
+                shape: shape_ptr,
+                strides: strides_ptr,
+                byte_offset,
+            },
+            manager_ctx: Box::into_raw(ctx) as *mut c_void,
+            deleter: Some(dlpack_test_deleter),
+        });
+        let managed_ptr = Box::into_raw(managed);
+
+        let tensor = unsafe { unwrap_ok(Tensor::from_dlpack(managed_ptr)) };
+        assert_eq!(tensor.data(), &[8.0, 9.0, 10.0, 11.0]);
+        assert_eq!(tensor.data().as_ptr(), expected_ptr);
+        assert_eq!(drops.load(Ordering::SeqCst), 0);
+
+        drop(tensor);
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn tensor_from_dlpack_rejects_misaligned_byte_offset() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let ctx = Box::new(DlpackTestCtx {
+            drops: Arc::clone(&drops),
+            data: vec![0.0; 4].into_boxed_slice(),
+            shape: vec![2, 2].into_boxed_slice(),
+            strides: Some(vec![2, 1].into_boxed_slice()),
+        });
+        let data_ptr = ctx.data.as_ptr() as *mut f32;
+        let shape_ptr = ctx.shape.as_ptr() as *mut i64;
+        let strides_ptr = match ctx.strides.as_ref() {
+            Some(strides) => strides.as_ptr() as *mut i64,
+            None => ptr::null_mut(),
+        };
+
+        let managed = Box::new(DLManagedTensor {
+            dl_tensor: DLTensor {
+                data: data_ptr as *mut c_void,
+                device: DLDevice {
+                    device_type: DLDeviceType::Cpu as i32,
+                    device_id: 0,
+                },
+                ndim: 2,
+                dtype: DLDataType {
+                    code: DLDataTypeCode::Float as u8,
+                    bits: 32,
+                    lanes: 1,
+                },
+                shape: shape_ptr,
+                strides: strides_ptr,
+                byte_offset: 2,
+            },
+            manager_ctx: Box::into_raw(ctx) as *mut c_void,
+            deleter: Some(dlpack_test_deleter),
+        });
+        let managed_ptr = Box::into_raw(managed);
+
+        let err = unsafe { unwrap_err(Tensor::from_dlpack(managed_ptr)) };
+        assert!(matches!(err, TensorError::DlpackError { .. }));
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
     fn tensor_to_dlpack_shares_underlying_buffer() {
-        let tensor = Tensor::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0]).unwrap();
+        let tensor = unwrap_ok(Tensor::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0]));
         let ptr = tensor.data.as_ptr();
-        let managed = tensor.to_dlpack().unwrap();
+        let managed = unwrap_ok(tensor.to_dlpack());
         unsafe {
             let dl_tensor = &(*managed).dl_tensor;
             assert_eq!(dl_tensor.data as *mut f32, ptr as *mut f32);
@@ -6486,92 +6727,91 @@ mod tests {
 
     #[test]
     fn tensor_matmul_and_add_work_without_panicking() {
-        let a = Tensor::from_vec(2, 3, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
-        let b = Tensor::from_vec(3, 2, vec![7.0, 8.0, 9.0, 10.0, 11.0, 12.0]).unwrap();
-        let product = a.matmul(&b).unwrap();
+        let a = unwrap_ok(Tensor::from_vec(2, 3, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]));
+        let b = unwrap_ok(Tensor::from_vec(
+            3,
+            2,
+            vec![7.0, 8.0, 9.0, 10.0, 11.0, 12.0],
+        ));
+        let product = unwrap_ok(a.matmul(&b));
         assert_eq!(product.shape(), (2, 2));
-        let expected = Tensor::from_vec(2, 2, vec![58.0, 64.0, 139.0, 154.0]).unwrap();
+        let expected = unwrap_ok(Tensor::from_vec(2, 2, vec![58.0, 64.0, 139.0, 154.0]));
         assert_eq!(product, expected);
 
-        let sum = product
-            .add(&Tensor::from_vec(2, 2, vec![1.0, 1.0, 1.0, 1.0]).unwrap())
-            .unwrap();
-        let expected_sum = Tensor::from_vec(2, 2, vec![59.0, 65.0, 140.0, 155.0]).unwrap();
+        let addend = unwrap_ok(Tensor::from_vec(2, 2, vec![1.0, 1.0, 1.0, 1.0]));
+        let sum = unwrap_ok(product.add(&addend));
+        let expected_sum = unwrap_ok(Tensor::from_vec(2, 2, vec![59.0, 65.0, 140.0, 155.0]));
         assert_eq!(sum, expected_sum);
     }
 
     #[test]
     fn matmul_prepacked_matches_standard() {
-        let lhs = Tensor::from_vec(
+        let lhs = unwrap_ok(Tensor::from_vec(
             4,
             3,
             vec![
                 1.0, -0.5, 2.0, 0.25, 1.5, -1.25, 0.75, 0.5, -0.75, 1.0, -1.5, 0.33,
             ],
-        )
-        .unwrap();
-        let rhs = Tensor::from_vec(
+        ));
+        let rhs = unwrap_ok(Tensor::from_vec(
             3,
             5,
             vec![
                 0.5, -1.0, 0.25, 1.5, -0.75, 1.0, 0.5, -0.5, 0.75, -1.25, 0.66, 0.8, -0.2, 1.2,
                 -0.4,
             ],
-        )
-        .unwrap();
-        let packed = PackedB::from_tensor(&rhs, Tile::col_major()).unwrap();
-        let standard = lhs.matmul(&rhs).unwrap();
-        let prepacked = lhs.matmul_prepacked(&packed).unwrap();
+        ));
+        let packed = unwrap_ok(PackedB::from_tensor(&rhs, Tile::col_major()));
+        let standard = unwrap_ok(lhs.matmul(&rhs));
+        let prepacked = unwrap_ok(lhs.matmul_prepacked(&packed));
         assert_eq!(standard, prepacked);
     }
 
     #[test]
     fn matmul_prepacked_transpose_matches_standard() {
-        let lhs = Tensor::from_vec(
+        let lhs = unwrap_ok(Tensor::from_vec(
             4,
             3,
             vec![
                 0.2, -0.4, 0.6, 1.1, -0.9, 0.7, 0.3, -0.2, 0.5, -1.3, 0.8, -0.1,
             ],
-        )
-        .unwrap();
-        let rhs = Tensor::from_vec(
+        ));
+        let rhs = unwrap_ok(Tensor::from_vec(
             5,
             3,
             vec![
                 0.1, 0.2, -0.3, 0.4, -0.5, 0.6, -0.7, 0.8, -0.9, 1.0, -1.1, 1.2, -1.3, 1.4, -1.5,
             ],
-        )
-        .unwrap();
+        ));
         let rhs_t = rhs.transpose();
-        let packed_t = PackedB::from_tensor_transpose(&rhs, Tile::col_major()).unwrap();
-        let standard = lhs.matmul(&rhs_t).unwrap();
-        let prepacked = lhs.matmul_prepacked(&packed_t).unwrap();
+        let packed_t = unwrap_ok(PackedB::from_tensor_transpose(&rhs, Tile::col_major()));
+        let standard = unwrap_ok(lhs.matmul(&rhs_t));
+        let prepacked = unwrap_ok(lhs.matmul_prepacked(&packed_t));
         assert_eq!(standard, prepacked);
     }
 
     #[test]
     fn tensor_hadamard_matches_manual_product() {
-        let a = Tensor::from_vec(2, 2, vec![1.5, -2.0, 0.5, 3.0]).unwrap();
-        let b = Tensor::from_vec(2, 2, vec![2.0, 4.0, -1.0, 0.5]).unwrap();
-        let product = a.hadamard(&b).unwrap();
-        let expected = Tensor::from_vec(2, 2, vec![3.0, -8.0, -0.5, 1.5]).unwrap();
+        let a = unwrap_ok(Tensor::from_vec(2, 2, vec![1.5, -2.0, 0.5, 3.0]));
+        let b = unwrap_ok(Tensor::from_vec(2, 2, vec![2.0, 4.0, -1.0, 0.5]));
+        let product = unwrap_ok(a.hadamard(&b));
+        let expected = unwrap_ok(Tensor::from_vec(2, 2, vec![3.0, -8.0, -0.5, 1.5]));
         assert_eq!(product, expected);
     }
 
     #[test]
     fn linear_regression_converges_without_tracebacks() {
-        let inputs = Tensor::from_vec(4, 1, vec![0.0, 1.0, 2.0, 3.0]).unwrap();
-        let targets = Tensor::from_vec(4, 1, vec![1.0, 3.0, 5.0, 7.0]).unwrap();
-        let mut model = LinearModel::new(1, 1).unwrap();
+        let inputs = unwrap_ok(Tensor::from_vec(4, 1, vec![0.0, 1.0, 2.0, 3.0]));
+        let targets = unwrap_ok(Tensor::from_vec(4, 1, vec![1.0, 3.0, 5.0, 7.0]));
+        let mut model = unwrap_ok(LinearModel::new(1, 1));
         let mut loss = 0.0;
         for _ in 0..200 {
-            loss = model.train_batch(&inputs, &targets, 0.1).unwrap();
+            loss = unwrap_ok(model.train_batch(&inputs, &targets, 0.1));
         }
         assert!(loss < 1e-3, "loss should converge, got {loss}");
 
-        let predictions = model.forward(&inputs).unwrap();
-        let mse = mean_squared_error(&predictions, &targets).unwrap();
+        let predictions = unwrap_ok(model.forward(&inputs));
+        let mse = unwrap_ok(mean_squared_error(&predictions, &targets));
         assert!(mse < 1e-3, "model should fit the line, got {mse}");
 
         let weight = model.weights().data()[0];
@@ -6582,44 +6822,46 @@ mod tests {
 
     #[test]
     fn language_wave_encoder_maps_text_without_tokens() {
-        let encoder = LanguageWaveEncoder::new(-1.0, 0.5).unwrap();
-        let wave = encoder.encode_wave("spiral").unwrap();
+        let encoder = unwrap_ok(LanguageWaveEncoder::new(-1.0, 0.5));
+        let wave = unwrap_ok(encoder.encode_wave("spiral"));
         assert_eq!(wave.shape(), (1, 6));
-        let z = encoder.encode_z_space("spiral").unwrap();
+        let z = unwrap_ok(encoder.encode_z_space("spiral"));
         assert_eq!(z.shape().0, 1);
         assert_eq!(z.shape().1, 12);
     }
 
     #[test]
     fn amega_hypergrad_tracks_z_space_updates() {
-        let encoder = LanguageWaveEncoder::new(-1.25, 0.9).unwrap();
-        let z = encoder
-            .encode_z_space("non-euclidean waves stay token free")
-            .unwrap();
+        let encoder = unwrap_ok(LanguageWaveEncoder::new(-1.25, 0.9));
+        let z = unwrap_ok(encoder.encode_z_space("non-euclidean waves stay token free"));
         let shape = z.shape();
-        let mut hypergrad =
-            AmegaHypergrad::new(encoder.curvature(), 0.05, shape.0, shape.1).unwrap();
-        hypergrad.accumulate_wave(&z).unwrap();
-        let mut weights = Tensor::zeros(shape.0, shape.1).unwrap();
-        let targets = Tensor::zeros(shape.0, shape.1).unwrap();
-        hypergrad.accumulate_pair(&z, &targets).unwrap();
-        hypergrad.apply(&mut weights).unwrap();
+        let mut hypergrad = unwrap_ok(AmegaHypergrad::new(
+            encoder.curvature(),
+            0.05,
+            shape.0,
+            shape.1,
+        ));
+        unwrap_ok(hypergrad.accumulate_wave(&z));
+        let mut weights = unwrap_ok(Tensor::zeros(shape.0, shape.1));
+        let targets = unwrap_ok(Tensor::zeros(shape.0, shape.1));
+        unwrap_ok(hypergrad.accumulate_pair(&z, &targets));
+        unwrap_ok(hypergrad.apply(&mut weights));
         assert_eq!(weights.shape(), shape);
         assert!(weights.squared_l2_norm() > 0.0);
     }
 
     #[test]
     fn amega_hypergrad_absorbs_text_directly() {
-        let encoder = LanguageWaveEncoder::new(-0.8, 0.7).unwrap();
-        let z = encoder
-            .encode_z_space("SpiralTorch dances in Z-space")
-            .unwrap();
+        let encoder = unwrap_ok(LanguageWaveEncoder::new(-0.8, 0.7));
+        let z = unwrap_ok(encoder.encode_z_space("SpiralTorch dances in Z-space"));
         let shape = z.shape();
-        let mut hypergrad =
-            AmegaHypergrad::new(encoder.curvature(), 0.02, shape.0, shape.1).unwrap();
-        hypergrad
-            .absorb_text(&encoder, "SpiralTorch dances in Z-space")
-            .unwrap();
+        let mut hypergrad = unwrap_ok(AmegaHypergrad::new(
+            encoder.curvature(),
+            0.02,
+            shape.0,
+            shape.1,
+        ));
+        unwrap_ok(hypergrad.absorb_text(&encoder, "SpiralTorch dances in Z-space"));
         assert!(hypergrad
             .gradient()
             .iter()
@@ -6628,9 +6870,9 @@ mod tests {
 
     #[test]
     fn amega_hypergrad_telemetry_reports_guard_state() {
-        let mut hypergrad = AmegaHypergrad::new(-1.1, 0.03, 1, 4).unwrap();
-        let tensor = Tensor::from_vec(1, 4, vec![0.5, -0.25, 0.75, -0.125]).unwrap();
-        hypergrad.accumulate_wave(&tensor).unwrap();
+        let mut hypergrad = unwrap_ok(AmegaHypergrad::new(-1.1, 0.03, 1, 4));
+        let tensor = unwrap_ok(Tensor::from_vec(1, 4, vec![0.5, -0.25, 0.75, -0.125]));
+        unwrap_ok(hypergrad.accumulate_wave(&tensor));
         let telemetry = hypergrad.telemetry();
         assert_eq!(telemetry.shape(), (1, 4));
         assert_eq!(telemetry.volume(), 4);
@@ -6647,9 +6889,9 @@ mod tests {
 
     #[test]
     fn amega_hypergrad_desire_control_matches_gain() {
-        let mut hypergrad = AmegaHypergrad::new(-0.95, 0.04, 1, 3).unwrap();
-        let tensor = Tensor::from_vec(1, 3, vec![0.8, -0.4, 0.2]).unwrap();
-        hypergrad.accumulate_wave(&tensor).unwrap();
+        let mut hypergrad = unwrap_ok(AmegaHypergrad::new(-0.95, 0.04, 1, 3));
+        let tensor = unwrap_ok(Tensor::from_vec(1, 3, vec![0.8, -0.4, 0.2]));
+        unwrap_ok(hypergrad.accumulate_wave(&tensor));
         let real = GradientSummary::from_slice(&[0.4, -0.2, 0.1]);
         let interpretation = hypergrad.desire_interpretation(real);
         assert!(interpretation.hyper_pressure() > interpretation.real_pressure());
@@ -6759,25 +7001,24 @@ mod tests {
         use crate::pure::measure::z_space_barycenter;
 
         let densities = vec![
-            Tensor::from_vec(1, 2, vec![0.8, 0.2]).unwrap(),
-            Tensor::from_vec(1, 2, vec![0.3, 0.7]).unwrap(),
+            unwrap_ok(Tensor::from_vec(1, 2, vec![0.8, 0.2])),
+            unwrap_ok(Tensor::from_vec(1, 2, vec![0.3, 0.7])),
         ];
         let weights = vec![1.0, 2.0];
-        let result = z_space_barycenter(&weights, &densities, 0.1, 0.0, None).unwrap();
-        let mut tape = AmegaHypergrad::new(-1.0, 0.05, 1, 2).unwrap();
-        tape.accumulate_barycenter_path(&result.intermediates)
-            .unwrap();
+        let result = unwrap_ok(z_space_barycenter(&weights, &densities, 0.1, 0.0, None));
+        let mut tape = unwrap_ok(AmegaHypergrad::new(-1.0, 0.05, 1, 2));
+        unwrap_ok(tape.accumulate_barycenter_path(&result.intermediates));
         let gradient = tape.gradient();
         assert!(gradient.iter().any(|value| value.abs() > 0.0));
     }
 
     #[test]
     fn amega_realgrad_accumulates_and_applies() {
-        let mut tape = AmegaRealgrad::new(0.1, 1, 3).unwrap();
-        let tensor = Tensor::from_vec(1, 3, vec![1.0, -2.0, 0.5]).unwrap();
-        tape.accumulate_wave(&tensor).unwrap();
-        let mut weights = Tensor::from_vec(1, 3, vec![0.0, 0.0, 0.0]).unwrap();
-        tape.apply(&mut weights).unwrap();
+        let mut tape = unwrap_ok(AmegaRealgrad::new(0.1, 1, 3));
+        let tensor = unwrap_ok(Tensor::from_vec(1, 3, vec![1.0, -2.0, 0.5]));
+        unwrap_ok(tape.accumulate_wave(&tensor));
+        let mut weights = unwrap_ok(Tensor::from_vec(1, 3, vec![0.0, 0.0, 0.0]));
+        unwrap_ok(tape.apply(&mut weights));
         assert!((weights.data()[0] + 0.1).abs() < 1e-6);
         assert!((weights.data()[1] - 0.2).abs() < 1e-6);
         assert!((weights.data()[2] + 0.05).abs() < 1e-6);
@@ -6785,10 +7026,10 @@ mod tests {
 
     #[test]
     fn amega_realgrad_absorbs_text() {
-        let encoder = LanguageWaveEncoder::new(-1.0, 0.6).unwrap();
-        let z = encoder.encode_z_space("spiral torch realgrad").unwrap();
-        let mut tape = AmegaRealgrad::new(0.05, z.shape().0, z.shape().1).unwrap();
-        tape.absorb_text(&encoder, "spiral torch realgrad").unwrap();
+        let encoder = unwrap_ok(LanguageWaveEncoder::new(-1.0, 0.6));
+        let z = unwrap_ok(encoder.encode_z_space("spiral torch realgrad"));
+        let mut tape = unwrap_ok(AmegaRealgrad::new(0.05, z.shape().0, z.shape().1));
+        unwrap_ok(tape.absorb_text(&encoder, "spiral torch realgrad"));
         assert!(tape
             .gradient()
             .iter()
@@ -6888,15 +7129,15 @@ mod tests {
 
     #[test]
     fn gradient_tapes_surface_summary_metrics() {
-        let tensor = Tensor::from_vec(1, 3, vec![1.0, -2.0, 4.0]).unwrap();
-        let mut hypergrad = AmegaHypergrad::new(-1.0, 0.1, 1, 3).unwrap();
-        hypergrad.accumulate_wave(&tensor).unwrap();
+        let tensor = unwrap_ok(Tensor::from_vec(1, 3, vec![1.0, -2.0, 4.0]));
+        let mut hypergrad = unwrap_ok(AmegaHypergrad::new(-1.0, 0.1, 1, 3));
+        unwrap_ok(hypergrad.accumulate_wave(&tensor));
         let hyper_summary = hypergrad.summary();
         assert_eq!(hyper_summary.count(), 3);
         assert!(hyper_summary.l2() > 0.0);
 
-        let mut realgrad = AmegaRealgrad::new(0.1, 1, 3).unwrap();
-        realgrad.accumulate_wave(&tensor).unwrap();
+        let mut realgrad = unwrap_ok(AmegaRealgrad::new(0.1, 1, 3));
+        unwrap_ok(realgrad.accumulate_wave(&tensor));
         let real_summary = realgrad.summary();
         assert_eq!(real_summary.count(), 3);
         let expected_l1: f32 = tensor.data().iter().map(|value| value.abs()).sum();
@@ -6905,22 +7146,22 @@ mod tests {
 
     #[test]
     fn hypergrad_summary_stays_in_sync_with_updates() {
-        let mut tape = AmegaHypergrad::new(-1.0, 0.05, 2, 2).unwrap();
-        let wave = Tensor::from_vec(2, 2, vec![0.5, -0.25, 1.2, -0.9]).unwrap();
-        tape.accumulate_wave(&wave).unwrap();
+        let mut tape = unwrap_ok(AmegaHypergrad::new(-1.0, 0.05, 2, 2));
+        let wave = unwrap_ok(Tensor::from_vec(2, 2, vec![0.5, -0.25, 1.2, -0.9]));
+        unwrap_ok(tape.accumulate_wave(&wave));
         let after_wave = tape.summary();
         let expected_wave = GradientSummary::from_slice(tape.gradient());
         assert_summary_close(after_wave, expected_wave);
 
-        let prediction = Tensor::from_vec(2, 2, vec![0.8, -0.6, 0.3, -0.1]).unwrap();
-        let target = Tensor::from_vec(2, 2, vec![0.2, -0.3, 0.05, -0.15]).unwrap();
-        tape.accumulate_pair(&prediction, &target).unwrap();
+        let prediction = unwrap_ok(Tensor::from_vec(2, 2, vec![0.8, -0.6, 0.3, -0.1]));
+        let target = unwrap_ok(Tensor::from_vec(2, 2, vec![0.2, -0.3, 0.05, -0.15]));
+        unwrap_ok(tape.accumulate_pair(&prediction, &target));
         let after_pair = tape.summary();
         let expected_pair = GradientSummary::from_slice(tape.gradient());
         assert_summary_close(after_pair, expected_pair);
 
-        let mut weights = Tensor::from_vec(2, 2, vec![0.05, -0.05, 0.1, -0.1]).unwrap();
-        tape.apply(&mut weights).unwrap();
+        let mut weights = unwrap_ok(Tensor::from_vec(2, 2, vec![0.05, -0.05, 0.1, -0.1]));
+        unwrap_ok(tape.apply(&mut weights));
         let reset = tape.summary();
         assert_eq!(reset.count(), 4);
         assert!(reset.l1() <= 1e-5);
@@ -6932,9 +7173,13 @@ mod tests {
 
     #[test]
     fn hypergrad_summary_rebuilds_after_manual_mutation() {
-        let mut tape = AmegaHypergrad::new(-1.0, 0.05, 2, 3).unwrap();
-        let wave = Tensor::from_vec(2, 3, vec![0.4, -0.3, 0.2, 0.1, -0.5, 0.75]).unwrap();
-        tape.accumulate_wave(&wave).unwrap();
+        let mut tape = unwrap_ok(AmegaHypergrad::new(-1.0, 0.05, 2, 3));
+        let wave = unwrap_ok(Tensor::from_vec(
+            2,
+            3,
+            vec![0.4, -0.3, 0.2, 0.1, -0.5, 0.75],
+        ));
+        unwrap_ok(tape.accumulate_wave(&wave));
         {
             let gradient = tape.gradient_mut();
             gradient.copy_from_slice(&[0.8, -0.1, 0.0, -0.25, 0.6, -0.9]);
@@ -6946,7 +7191,7 @@ mod tests {
 
     #[test]
     fn hypergrad_summary_recovers_from_non_finite_entries_incrementally() {
-        let mut tape = AmegaHypergrad::new(-1.0, 0.05, 1, 4).unwrap();
+        let mut tape = unwrap_ok(AmegaHypergrad::new(-1.0, 0.05, 1, 4));
         {
             let gradient = tape.gradient_mut();
             gradient.copy_from_slice(&[1.0, -2.0, 3.0, -4.0]);
@@ -6972,8 +7217,8 @@ mod tests {
         assert!(tape.has_non_finite());
         assert!((tape.non_finite_ratio() - 0.5).abs() < 1e-6);
 
-        let zeros = Tensor::from_vec(1, 4, vec![0.0f32; 4]).unwrap();
-        tape.accumulate_wave(&zeros).unwrap();
+        let zeros = unwrap_ok(Tensor::from_vec(1, 4, vec![0.0f32; 4]));
+        unwrap_ok(tape.accumulate_wave(&zeros));
 
         let repaired = tape.summary();
         assert_eq!(repaired.count(), 4);
@@ -6990,11 +7235,11 @@ mod tests {
 
     #[test]
     fn hypergrad_retune_updates_curvature_and_resets() {
-        let mut tape = AmegaHypergrad::new(-1.0, 0.05, 1, 2).unwrap();
-        let tensor = Tensor::from_vec(1, 2, vec![0.25, -0.4]).unwrap();
-        tape.accumulate_wave(&tensor).unwrap();
+        let mut tape = unwrap_ok(AmegaHypergrad::new(-1.0, 0.05, 1, 2));
+        let tensor = unwrap_ok(Tensor::from_vec(1, 2, vec![0.25, -0.4]));
+        unwrap_ok(tape.accumulate_wave(&tensor));
         assert!(tape.gradient().iter().any(|value| value.abs() > 0.0));
-        tape.retune(-0.5, 0.1).unwrap();
+        unwrap_ok(tape.retune(-0.5, 0.1));
         assert!((tape.curvature() + 0.5).abs() < 1e-6);
         assert!((tape.learning_rate() - 0.1).abs() < 1e-6);
         assert!(tape.gradient().iter().all(|value| value.abs() < 1e-6));
@@ -7004,37 +7249,37 @@ mod tests {
 
     #[test]
     fn amega_realgrad_accumulates_pair() {
-        let mut tape = AmegaRealgrad::new(0.01, 1, 2).unwrap();
-        let prediction = Tensor::from_vec(1, 2, vec![0.5, -0.5]).unwrap();
-        let target = Tensor::from_vec(1, 2, vec![0.25, -0.75]).unwrap();
-        tape.accumulate_pair(&prediction, &target).unwrap();
+        let mut tape = unwrap_ok(AmegaRealgrad::new(0.01, 1, 2));
+        let prediction = unwrap_ok(Tensor::from_vec(1, 2, vec![0.5, -0.5]));
+        let target = unwrap_ok(Tensor::from_vec(1, 2, vec![0.25, -0.75]));
+        unwrap_ok(tape.accumulate_pair(&prediction, &target));
         assert!((tape.gradient()[0] - 0.25).abs() < 1e-6);
         assert!((tape.gradient()[1] - 0.25).abs() < 1e-6);
     }
 
     #[test]
     fn random_uniform_respects_bounds_and_is_convertible_to_ndarray() {
-        let tensor = Tensor::random_uniform(4, 3, -0.25, 0.75, Some(7)).unwrap();
+        let tensor = unwrap_ok(Tensor::random_uniform(4, 3, -0.25, 0.75, Some(7)));
         assert_eq!(tensor.shape(), (4, 3));
         assert!(tensor
             .data()
             .iter()
             .all(|value| (-0.25..0.75).contains(value)));
-        let array = Array2::from_shape_vec((4, 3), tensor.data().to_vec()).unwrap();
+        let array = unwrap_ok(Array2::from_shape_vec((4, 3), tensor.data().to_vec()));
         assert_eq!(array.dim(), (4, 3));
         assert_eq!(array[[0, 0]], tensor.data()[0]);
     }
 
     #[test]
     fn random_initialisers_are_deterministic_with_seed() {
-        let left = Tensor::random_normal(2, 2, 0.0, 1.0, Some(42)).unwrap();
-        let right = Tensor::random_normal(2, 2, 0.0, 1.0, Some(42)).unwrap();
+        let left = unwrap_ok(Tensor::random_normal(2, 2, 0.0, 1.0, Some(42)));
+        let right = unwrap_ok(Tensor::random_normal(2, 2, 0.0, 1.0, Some(42)));
         assert_eq!(left.data(), right.data());
     }
 
     #[test]
     fn random_uniform_rejects_invalid_bounds() {
-        let err = Tensor::random_uniform(2, 2, 1.0, 1.0, None).unwrap_err();
+        let err = unwrap_err(Tensor::random_uniform(2, 2, 1.0, 1.0, None));
         assert!(matches!(err, TensorError::InvalidValue { .. }));
     }
 }

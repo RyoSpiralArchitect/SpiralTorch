@@ -4,12 +4,17 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 // crates/st-tensor/src/backend/wgpu_frac.rs
-#![cfg(feature = "wgpu_frac")]
 use crate::fractional::gl_coeffs;
 use crate::util::readback_f32;
 use std::any::Any;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use wgpu::*;
+use wgpu::util::DeviceExt;
+use wgpu::{
+    BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
+    BindGroupLayoutEntry, BindingType, BufferBindingType, BufferDescriptor, BufferUsages,
+    CommandEncoderDescriptor, ComputePassDescriptor, ComputePipeline, ComputePipelineDescriptor,
+    Device, PipelineLayoutDescriptor, Queue, ShaderModuleDescriptor, ShaderSource, ShaderStages,
+};
 
 pub struct Frac1dKernel {
     pipeline: ComputePipeline,
@@ -97,12 +102,20 @@ impl Frac1dKernel {
         h: f32,
         m: usize,
     ) -> Result<Vec<f32>, String> {
-        let n = x.len();
-        let m = m.min(n.saturating_sub(1));
-        let w = gl_coeffs(alpha, m);
-        let h_alpha = h.powf(alpha);
+        if x.is_empty() {
+            return Ok(Vec::new());
+        }
 
-        use wgpu::util::DeviceExt;
+        if !(0.0..=1.0).contains(&alpha) || alpha <= 0.0 {
+            return Err(format!("alpha must be in (0, 1], got {alpha}"));
+        }
+
+        let n = x.len();
+        let n_u32 = u32::try_from(n).map_err(|_| format!("input length {n} exceeds u32 range"))?;
+        let m = m.min(n.saturating_sub(1));
+        let m_u32 = u32::try_from(m).map_err(|_| format!("kernel length {m} exceeds u32 range"))?;
+        let w = gl_coeffs(alpha, m).map_err(|error| error.to_string())?;
+        let h_alpha = h.powf(alpha);
         let xb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("X"),
             contents: bytemuck::cast_slice(x),
@@ -115,7 +128,7 @@ impl Frac1dKernel {
         });
         let yb = device.create_buffer(&BufferDescriptor {
             label: Some("Y"),
-            size: (n * std::mem::size_of::<f32>()) as u64,
+            size: (n_u32 as u64) * (std::mem::size_of::<f32>() as u64),
             usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
@@ -128,8 +141,8 @@ impl Frac1dKernel {
             _pad: f32,
         }
         let params = Params {
-            n: n as u32,
-            m: m as u32,
+            n: n_u32,
+            m: m_u32,
             h_alpha,
             _pad: 0.0,
         };
@@ -173,10 +186,10 @@ impl Frac1dKernel {
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &bind, &[]);
             let wg = 256u32;
-            let n_groups = ((n as u32) + wg - 1) / wg;
+            let n_groups = n_u32.div_ceil(wg);
             pass.dispatch_workgroups(n_groups, 1, 1);
         }
-        queue.submit(Some(enc.finish()));
+        let _ = queue.submit(Some(enc.finish()));
 
         readback_f32(device, queue, &yb, n)
     }
@@ -189,5 +202,22 @@ fn panic_payload_to_string(payload: Box<dyn Any + Send>) -> String {
         msg.clone()
     } else {
         "unknown panic".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[track_caller]
+    fn unwrap_ok<T, E: core::fmt::Debug>(result: Result<T, E>) -> T {
+        match result {
+            Ok(value) => value,
+            Err(error) => panic!("expected Ok(..), got Err({error:?})"),
+        }
+    }
+
+    #[test]
+    fn frac_gl_shader_wgsl_is_valid() {
+        let shader = include_str!("../wgpu_shaders/frac_gl_1d.wgsl");
+        let _ = unwrap_ok(naga::front::wgsl::parse_str(shader));
     }
 }

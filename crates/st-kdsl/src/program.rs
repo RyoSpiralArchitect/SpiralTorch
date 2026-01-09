@@ -1089,16 +1089,11 @@ impl Parser {
     }
 
     fn parse_postfix(&mut self, mut expr: ExprNode) -> Result<ExprNode, Err> {
-        loop {
-            match self.peek() {
-                Some(Token::LBracket) => {
-                    self.next();
-                    let index = self.parse_expr()?;
-                    self.expect(Token::RBracket)?;
-                    expr = ExprNode::index(expr, index);
-                }
-                _ => break,
-            }
+        while let Some(Token::LBracket) = self.peek() {
+            self.next();
+            let index = self.parse_expr()?;
+            self.expect(Token::RBracket)?;
+            expr = ExprNode::index(expr, index);
         }
         Ok(expr)
     }

@@ -40,18 +40,13 @@ pub enum CosmologyError {
 }
 
 /// Window functions applied to the trapezoidal weights before normalisation.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum WindowFunction {
     /// No tapering (rectangular window).
+    #[default]
     Rectangular,
     /// Hann taper for endpoint leakage suppression.
     Hann,
-}
-
-impl Default for WindowFunction {
-    fn default() -> Self {
-        WindowFunction::Rectangular
-    }
 }
 
 impl WindowFunction {
@@ -74,20 +69,15 @@ impl WindowFunction {
 }
 
 /// Normalisation applied to the windowed weights.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum WeightNormalisation {
     /// No normalisation is applied.
     None,
     /// L1 normalisation (sum of absolute values equals 1).
+    #[default]
     L1,
     /// L2 normalisation (Euclidean norm equals 1).
     L2,
-}
-
-impl Default for WeightNormalisation {
-    fn default() -> Self {
-        WeightNormalisation::L1
-    }
 }
 
 impl WeightNormalisation {
@@ -119,19 +109,10 @@ impl WeightNormalisation {
 }
 
 /// Options controlling how a log-time series is projected into Z-space.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SeriesOptions {
     pub window: WindowFunction,
     pub normalisation: WeightNormalisation,
-}
-
-impl Default for SeriesOptions {
-    fn default() -> Self {
-        Self {
-            window: WindowFunction::default(),
-            normalisation: WeightNormalisation::default(),
-        }
-    }
 }
 
 /// Log-time sequence projected into Z-space with pre-weighted coefficients.
@@ -202,6 +183,10 @@ impl LogZSeries {
     /// Number of log-time samples.
     pub fn len(&self) -> usize {
         self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
     }
 
     /// Starting log-time of the lattice.

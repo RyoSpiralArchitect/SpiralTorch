@@ -26,18 +26,13 @@ impl Default for QatConfig {
 }
 
 /// Strategy used to compute the effective quantisation levels.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum QuantizationLeveling {
     /// Use symmetric ranges around zero.
+    #[default]
     Symmetric,
     /// Use an asymmetric range by aligning zero to the observed minimum.
     Asymmetric,
-}
-
-impl Default for QuantizationLeveling {
-    fn default() -> Self {
-        QuantizationLeveling::Symmetric
-    }
 }
 
 /// Tracks running statistics needed to perform QAT without allocating.

@@ -22,6 +22,7 @@ import warnings
 from typing import Any, NoReturn
 
 
+_DEV_SHIM_DIR = pathlib.Path(__file__).resolve().parent
 _TENSOR_NO_DATA = object()
 
 
@@ -675,7 +676,7 @@ def _load_native_package() -> None:
     module = sys.modules[__name__]
     module.__file__ = str(impl_init)
     module.__package__ = __name__
-    module.__path__ = [str(impl_init.parent)]
+    module.__path__ = [str(impl_init.parent), str(_DEV_SHIM_DIR)]
     module.__spec__ = spec
 
     try:

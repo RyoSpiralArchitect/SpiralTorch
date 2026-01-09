@@ -6,6 +6,7 @@ members = [
   "crates/st-kdsl",
   "crates/st-logic",
   "crates/st-kv",
+  "crates/st-frac",
   "crates/st-tensor",
   "crates/st-softlogic",
   "crates/st-refract",
@@ -27,12 +28,12 @@ members = [
   "crates/spiral-safety",
   "crates/spiral-config",
   "bindings/cobol_bridge",
+  "crates/julia-ffi-poc",
   "bindings/spiraltorch-sys",
   "bindings/st-py",
   "bindings/st-wasm",
   "tools/xai-cli",
-  "tools/visualize-z-volume"
-,  "crates/julia-ffi-poc"
+  "tools/visualize-z-volume",
 ]
 default-members = [
   "crates/st-core",

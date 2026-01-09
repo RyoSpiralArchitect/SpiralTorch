@@ -105,20 +105,20 @@ fn pack_b_block_into(
     width: usize,
 ) {
     debug_assert_eq!(dst.len(), width * inner);
+    debug_assert_eq!(rhs.len(), inner * cols);
+    debug_assert!(col_start <= cols);
+    debug_assert!(col_start + width <= cols);
 
-    unsafe {
-        for col in 0..width {
-            let dst_col = dst.as_mut_ptr().add(col * inner);
-            let mut rhs_ptr = rhs.as_ptr().add(col_start + col);
-            for offset in 0..inner {
-                *dst_col.add(offset) = *rhs_ptr;
-                rhs_ptr = rhs_ptr.add(cols);
-            }
+    for col in 0..width {
+        let rhs_col = col_start + col;
+        for offset in 0..inner {
+            dst[col * inner + offset] = rhs[offset * cols + rhs_col];
         }
     }
 }
 
 #[inline]
+#[allow(clippy::too_many_arguments)]
 fn scalar_block_with_packed(
     dst: &mut [f32],
     lhs: &[f32],
@@ -150,19 +150,15 @@ fn pack_a_block(src: &[f32], inner: usize, tm: usize, dst: &mut [f32]) {
     debug_assert_eq!(src.len(), tm * inner);
     debug_assert_eq!(dst.len(), tm * inner);
 
-    unsafe {
-        for k in 0..inner {
-            let dst_col = dst.as_mut_ptr().add(k * tm);
-            let mut src_ptr = src.as_ptr().add(k);
-            for row in 0..tm {
-                *dst_col.add(row) = *src_ptr;
-                src_ptr = src_ptr.add(inner);
-            }
+    for k in 0..inner {
+        for row in 0..tm {
+            dst[k * tm + row] = src[row * inner + k];
         }
     }
 }
 
 #[inline]
+#[allow(clippy::too_many_arguments)]
 fn compute_with_packed_block(
     spec: &'static MicroKernelSpec,
     dst: &mut [f32],
@@ -190,11 +186,16 @@ fn compute_with_packed_block(
 
             let apply = |(dst_chunk, lhs_chunk): (&mut [f32], &[f32])| {
                 let local_rows = lhs_chunk.len() / inner;
+                debug_assert_eq!(local_rows % tm, 0);
                 let mut packed_a = vec![0.0f32; tm * inner];
 
                 for offset in (0..local_rows).step_by(tm) {
                     let lhs_panel = &lhs_chunk[offset * inner..(offset + tm) * inner];
                     pack_a_block(lhs_panel, inner, tm, &mut packed_a);
+                    // SAFETY: `packed_a` is exactly `tm * inner` elements arranged as expected by
+                    // the microkernel, `packed_block` contains `tn * inner` packed rhs elements,
+                    // and `dst_chunk` covers `local_rows * cols` elements with
+                    // `offset + tm <= local_rows` and `col_start + tn <= cols`.
                     unsafe {
                         kernel(
                             packed_a.as_ptr(),
@@ -283,6 +284,9 @@ unsafe fn microkernel_8x12_simd(
     ldc: usize,
     k: usize,
 ) {
+    debug_assert_eq!(lda, M8N12_TM);
+    debug_assert_eq!(ldb, k);
+    debug_assert!(ldc >= M8N12_TN);
     let mut acc = [Simd8::splat(0.0); M8N12_TN];
 
     for p in 0..k {
@@ -308,6 +312,7 @@ unsafe fn microkernel_8x12_simd(
 }
 
 #[cfg(not(feature = "simd"))]
+#[allow(clippy::needless_range_loop)]
 #[inline(always)]
 unsafe fn microkernel_8x12_scalar(
     a: *const f32,
@@ -318,6 +323,9 @@ unsafe fn microkernel_8x12_scalar(
     ldc: usize,
     k: usize,
 ) {
+    debug_assert_eq!(lda, M8N12_TM);
+    debug_assert_eq!(ldb, k);
+    debug_assert!(ldc >= M8N12_TN);
     let mut acc = [[0.0f32; M8N12_TN]; M8N12_TM];
 
     for p in 0..k {
@@ -373,6 +381,9 @@ unsafe fn microkernel_4x16_simd(
     ldc: usize,
     k: usize,
 ) {
+    debug_assert_eq!(lda, M4N16_TM);
+    debug_assert_eq!(ldb, k);
+    debug_assert!(ldc >= M4N16_TN);
     let mut acc = [Simd4::splat(0.0); M4N16_TN];
 
     for p in 0..k {
@@ -398,6 +409,7 @@ unsafe fn microkernel_4x16_simd(
 }
 
 #[cfg(not(feature = "simd"))]
+#[allow(clippy::needless_range_loop)]
 #[inline(always)]
 unsafe fn microkernel_4x16_scalar(
     a: *const f32,
@@ -408,6 +420,9 @@ unsafe fn microkernel_4x16_scalar(
     ldc: usize,
     k: usize,
 ) {
+    debug_assert_eq!(lda, M4N16_TM);
+    debug_assert_eq!(ldb, k);
+    debug_assert!(ldc >= M4N16_TN);
     let mut acc = [[0.0f32; M4N16_TN]; M4N16_TM];
 
     for p in 0..k {
@@ -911,9 +926,7 @@ fn quantize_dimension(value: usize) -> usize {
 }
 
 fn sample_dimension(value: usize) -> usize {
-    quantize_dimension(value)
-        .min(CPU_AUTOTUNE_SAMPLE_MAX_DIM)
-        .max(1)
+    quantize_dimension(value).clamp(1, CPU_AUTOTUNE_SAMPLE_MAX_DIM)
 }
 
 fn cpu_autotune_key(rows: usize, inner: usize, cols: usize) -> Option<(String, PathBuf)> {
@@ -973,4 +986,133 @@ fn cpu_feature_tag() -> String {
 #[cfg(not(target_arch = "x86_64"))]
 fn cpu_feature_tag() -> String {
     "baseline".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reference_matmul(lhs: &[f32], rhs: &[f32], rows: usize, inner: usize, cols: usize) -> Vec<f32> {
+        let mut out = vec![0.0f32; rows * cols];
+        for r in 0..rows {
+            for c in 0..cols {
+                let mut acc = 0.0f32;
+                for k in 0..inner {
+                    acc += lhs[r * inner + k] * rhs[k * cols + c];
+                }
+                out[r * cols + c] = acc;
+            }
+        }
+        out
+    }
+
+    fn assert_close(actual: &[f32], expected: &[f32]) {
+        const EPS: f32 = 1e-4;
+        assert_eq!(actual.len(), expected.len());
+        for (idx, (&actual_value, &expected_value)) in actual.iter().zip(expected.iter()).enumerate()
+        {
+            assert!(
+                (actual_value - expected_value).abs() < EPS,
+                "mismatch at index {idx}: actual={actual_value}, expected={expected_value}"
+            );
+        }
+    }
+
+    #[track_caller]
+    fn unwrap_ok<T>(result: Result<T, String>) -> T {
+        match result {
+            Ok(value) => value,
+            Err(error) => panic!("expected Ok(..), got Err({error})"),
+        }
+    }
+
+    #[test]
+    fn matmul_into_matches_reference_m8n12() {
+        let rows = 8;
+        let inner = 7;
+        let cols = 12;
+        let lhs: Vec<f32> = (0..rows * inner)
+            .map(|idx| ((idx % 13) as f32 * 0.25) - 1.5)
+            .collect();
+        let rhs: Vec<f32> = (0..inner * cols)
+            .map(|idx| ((idx % 17) as f32 * 0.1) - 0.8)
+            .collect();
+        let expected = reference_matmul(&lhs, &rhs, rows, inner, cols);
+
+        let mut dst = vec![0.0f32; rows * cols];
+        unwrap_ok(matmul_into(&mut dst, &lhs, &rhs, rows, inner, cols));
+        assert_close(&dst, &expected);
+    }
+
+    #[test]
+    fn matmul_into_matches_reference_with_tail_and_partial_rows() {
+        let rows = 10;
+        let inner = 9;
+        let cols = 13;
+        let lhs: Vec<f32> = (0..rows * inner)
+            .map(|idx| ((idx % 11) as f32 * 0.33) - 1.1)
+            .collect();
+        let rhs: Vec<f32> = (0..inner * cols)
+            .map(|idx| ((idx % 19) as f32 * 0.15) - 1.25)
+            .collect();
+        let expected = reference_matmul(&lhs, &rhs, rows, inner, cols);
+
+        let mut dst = vec![0.0f32; rows * cols];
+        unwrap_ok(matmul_into(&mut dst, &lhs, &rhs, rows, inner, cols));
+        assert_close(&dst, &expected);
+    }
+
+    #[test]
+    fn matmul_packed_into_matches_unpacked() {
+        let rows = 8;
+        let inner = 6;
+        let cols = 16;
+        let lhs: Vec<f32> = (0..rows * inner)
+            .map(|idx| ((idx % 7) as f32 * 0.5) - 1.0)
+            .collect();
+        let rhs: Vec<f32> = (0..inner * cols)
+            .map(|idx| ((idx % 23) as f32 * 0.2) - 2.0)
+            .collect();
+
+        let mut dst_unpacked = vec![0.0f32; rows * cols];
+        unwrap_ok(matmul_into(
+            &mut dst_unpacked,
+            &lhs,
+            &rhs,
+            rows,
+            inner,
+            cols,
+        ));
+
+        let packed_rhs = unwrap_ok(prepack_rhs(&rhs, inner, cols));
+        let mut dst_packed = vec![0.0f32; rows * cols];
+        unwrap_ok(matmul_packed_into(
+            &mut dst_packed,
+            &lhs,
+            &packed_rhs,
+            rows,
+            inner,
+            cols,
+        ));
+
+        assert_close(&dst_packed, &dst_unpacked);
+    }
+
+    #[test]
+    fn matmul_with_kernel_spec_matches_reference_m4n16() {
+        let rows = 4;
+        let inner = 5;
+        let cols = 16;
+        let lhs: Vec<f32> = (0..rows * inner)
+            .map(|idx| ((idx % 9) as f32 * 0.4) - 1.75)
+            .collect();
+        let rhs: Vec<f32> = (0..inner * cols)
+            .map(|idx| ((idx % 5) as f32 * 0.6) - 0.2)
+            .collect();
+        let expected = reference_matmul(&lhs, &rhs, rows, inner, cols);
+
+        let mut dst = vec![0.0f32; rows * cols];
+        matmul_with_kernel_spec(&MICROKERNELS[1], &mut dst, &lhs, &rhs, rows, inner, cols);
+        assert_close(&dst, &expected);
+    }
 }

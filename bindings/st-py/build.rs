@@ -218,13 +218,12 @@ fn apply_linkfor_shared(
         if token == "-stack_size" {
             should_skip = true;
             skip_next = true;
-        } else if token.starts_with("-Wl,") {
-            if token
+        } else if token.starts_with("-Wl,")
+            && token
                 .split(',')
                 .any(|component| component.trim_start_matches('-') == "stack_size")
-            {
-                should_skip = true;
-            }
+        {
+            should_skip = true;
         }
 
         if should_skip {

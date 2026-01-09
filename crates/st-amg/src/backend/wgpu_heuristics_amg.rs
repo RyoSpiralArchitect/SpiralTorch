@@ -28,7 +28,10 @@ fn emphasize(hit: bool, on_hit: f32, on_miss: f32) -> f32 {
 }
 
 fn fractional_energy(alpha: f32) -> f32 {
-    let coeffs = gl_coeffs(alpha, 32);
+    let coeffs = match gl_coeffs(alpha, 32) {
+        Ok(coeffs) => coeffs,
+        Err(_) => return 0.0,
+    };
     let l1 = coeffs.iter().map(|c| c.abs()).sum::<f32>().max(1e-6);
     l1.ln()
 }

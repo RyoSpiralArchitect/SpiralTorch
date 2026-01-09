@@ -12,7 +12,10 @@ use std::{
     },
     thread,
 };
-use wgpu::*;
+use wgpu::{
+    Buffer, BufferDescriptor, BufferSlice, BufferUsages, CommandEncoderDescriptor, Device, MapMode,
+    Maintain, Queue,
+};
 
 fn wait_for_map(slice: &BufferSlice, device: &Device) -> Result<(), String> {
     // 0 => pending, 1 => success, 2 => error
@@ -42,7 +45,13 @@ pub fn readback_f32(
     src: &Buffer,
     len: usize,
 ) -> Result<Vec<f32>, String> {
-    let size_bytes = (len * std::mem::size_of::<f32>()) as u64;
+    if len == 0 {
+        return Ok(Vec::new());
+    }
+
+    let size_bytes = len
+        .checked_mul(std::mem::size_of::<f32>())
+        .ok_or_else(|| "readback length overflow".to_string())? as u64;
     let rb = device.create_buffer(&BufferDescriptor {
         label: Some("readback"),
         size: size_bytes,

@@ -3,8 +3,6 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-#![cfg(feature = "wgpu_dense")]
-
 use crate::backend::wgpu_util::WgpuContext;
 use crate::pure::{
     spiral_softmax_hardmax_consensus, Layout, PackedB, PackedLayout, SpiralConsensusStats,
@@ -79,10 +77,10 @@ const RAMANUJAN_PI_ITERATIONS: usize = 6;
 const SOFTMAX_WORKGROUP_SIZE: f32 = 256.0;
 const SOFTMAX_FLOPS_PER_ELEMENT: f64 = 5.0;
 const SOFTMAX_BYTES_PER_ELEMENT: f64 = 12.0;
-const GOLDEN_RATIO: f32 = 1.618_033_988_749_894_8_f32;
-const GOLDEN_RATIO_CONJUGATE: f32 = 0.618_033_988_749_894_8_f32;
-const GOLDEN_RATIO_BIAS: f32 = 0.381_966_011_250_105_1_f32;
-const GOLDEN_ANGLE_DEG: f32 = 137.507_764_05_f32;
+const GOLDEN_RATIO: f32 = 1.618_034;
+const GOLDEN_RATIO_CONJUGATE: f32 = 0.618_034;
+const GOLDEN_RATIO_BIAS: f32 = 0.381_966;
+const GOLDEN_ANGLE_DEG: f32 = 137.507_77;
 const GOLDEN_ANGLE_RAD: f32 = GOLDEN_ANGLE_DEG * (PI / 180.0);
 const ZSPACE_MIN_ENERGY: f32 = 1e-6;
 const LEECH_PACKING_DENSITY: f64 = 0.001_929_574_309_403_922_5;
@@ -95,6 +93,9 @@ const SPIRAL_PROJECTOR_WEIGHT: f64 = 0.75;
 const SPIRAL_PROJECTOR_RAMANUJAN_ITERS: usize = 6;
 const SPIRAL_LEECH_PACKING_DENSITY: f64 = 0.001_929_574_309_403_922_5;
 const SPIRAL_ENTROPY_EPSILON: f32 = 1e-7;
+
+pub type FusedGeluBackwardOutput = (Vec<f32>, Vec<f32>, Vec<f32>);
+pub type RowSoftmaxHardmaxSpiralOutput = (Vec<f32>, Vec<f32>, Vec<f32>, SpiralConsensusStats);
 
 fn global_autotune_registry() -> &'static Mutex<AutotuneRegistry> {
     static REGISTRY: OnceLock<Mutex<AutotuneRegistry>> = OnceLock::new();
@@ -211,7 +212,10 @@ impl PipelineCache {
         key: PipelineKey,
         layout: &PipelineLayout,
     ) -> Result<Arc<ComputePipeline>, anyhow::Error> {
-        let mut guard = self.entries.lock().unwrap();
+        let mut guard = self
+            .entries
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let entry = guard
             .entry(key)
             .or_insert_with(|| Arc::new(PipelineEntry::new()))
@@ -292,7 +296,7 @@ fn div_ceil_usize(lhs: usize, rhs: usize) -> usize {
     if rhs == 0 {
         0
     } else {
-        (lhs + rhs - 1) / rhs
+        lhs.div_ceil(rhs)
     }
 }
 
@@ -346,7 +350,7 @@ fn pack_rhs_int8(packed: &PackedB, tile: TileConfig) -> (Vec<i32>, Vec<f32>, usi
     let inner = packed.inner();
     let cols = packed.cols();
     let (tile_k, tile_n, tiles_k, tiles_n, total_elems) = compute_rhs_tile_meta(inner, cols, tile);
-    let mut quantized = Vec::with_capacity((total_elems + 3) / 4);
+    let mut quantized = Vec::with_capacity(total_elems.div_ceil(4));
     let mut accumulator: u32 = 0;
     let mut lane: u32 = 0;
     let slice = packed.as_slice();
@@ -1402,7 +1406,7 @@ impl GpuContext {
         }
 
         let autotune_enabled = autotune_env_enabled() && store_path.is_some();
-        let mut best: Option<(
+        type SoftmaxAutotuneBest = (
             SoftmaxVariant,
             f64,
             Option<SoftmaxZProjectMetrics>,
@@ -1411,7 +1415,8 @@ impl GpuContext {
             Option<SoftmaxSpiralAnnealEvidence>,
             Option<SoftmaxSpiralConsensusEvidence>,
             f64,
-        )> = None;
+        );
+        let mut best: Option<SoftmaxAutotuneBest> = None;
         for &candidate in &[SoftmaxVariant::Workgroup, SoftmaxVariant::Subgroup] {
             let Some(pipeline) = self.softmax_pipeline_variant(candidate) else {
                 continue;
@@ -1725,7 +1730,7 @@ impl GpuContext {
         if let Some(existing) = self
             .weights_cache
             .lock()
-            .unwrap()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get(&key)
             .and_then(|weak| weak.upgrade())
         {
@@ -1775,7 +1780,7 @@ impl GpuContext {
 
         self.weights_cache
             .lock()
-            .unwrap()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .insert(key, Arc::downgrade(&prepared));
         Ok(prepared)
     }
@@ -1784,6 +1789,7 @@ impl GpuContext {
         self.fused_attention.as_ref()
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn fused_attention_bind_group(
         &self,
         kernel: &FusedAttentionKernel,
@@ -2561,7 +2567,10 @@ impl GpuContext {
     }
 
     fn fused_conv_pipeline_for(&self, config: TileConfig) -> Result<Arc<ComputePipeline>, String> {
-        let mut pipelines = self.fused_conv_pipelines.lock().unwrap();
+        let mut pipelines = self
+            .fused_conv_pipelines
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(pipeline) = pipelines.get(&config) {
             return Ok(pipeline.clone());
         }
@@ -3519,7 +3528,10 @@ impl GpuContext {
 
     #[cfg(any())]
     fn fused_conv_pipeline_for(&self, config: TileConfig) -> Result<Arc<ComputePipeline>, String> {
-        let mut pipelines = self.fused_conv_pipelines.lock().unwrap();
+        let mut pipelines = self
+            .fused_conv_pipelines
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(pipeline) = pipelines.get(&config) {
             return Ok(pipeline.clone());
         }
@@ -3944,6 +3956,7 @@ pub struct SoftmaxZProjectMetrics {
 }
 
 impl SoftmaxZProjectMetrics {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         focus: f32,
         above: f32,
@@ -4706,7 +4719,7 @@ struct QuantizedWeights {
 
 impl QuantizedWeights {
     fn from_f32(weights: &[f32], inner: usize, cols: usize) -> Self {
-        let stride = (inner + 3) / 4;
+        let stride = inner.div_ceil(4);
         let mut packed = vec![0u32; cols * stride];
         let mut scales = vec![0.0f32; cols];
         for col in 0..cols {
@@ -4824,6 +4837,7 @@ fn upload_weights(device: &Device, rhs: &[f32], inner: usize, cols: usize) -> We
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn create_bind_group(
     ctx: &GpuContext,
     key: &PipelineKey,
@@ -4880,6 +4894,7 @@ fn create_bind_group(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn dispatch_matmul(
     ctx: &GpuContext,
     encoder: &mut wgpu::CommandEncoder,
@@ -4951,14 +4966,15 @@ fn dispatch_matmul(
         });
         pass.set_pipeline(pipeline.as_ref());
         pass.set_bind_group(0, &bind_group, &[]);
-        let groups_x = ((cols as u32) + tile.tile_n() - 1) / tile.tile_n();
-        let groups_y = ((rows as u32) + tile.tile_m() - 1) / tile.tile_m();
+        let groups_x = (cols as u32).div_ceil(tile.tile_n());
+        let groups_y = (rows as u32).div_ceil(tile.tile_m());
         pass.dispatch_workgroups(groups_x.max(1), groups_y.max(1), 1);
     }
     Ok(())
 }
 
 #[allow(dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn dispatch_matmul_with_options(
     ctx: &GpuContext,
     encoder: &mut wgpu::CommandEncoder,
@@ -4997,6 +5013,7 @@ fn dispatch_matmul_with_options(
 }
 
 #[allow(dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn dispatch_fused_linear(
     ctx: &GpuContext,
     encoder: &mut wgpu::CommandEncoder,
@@ -5033,6 +5050,7 @@ fn dispatch_fused_linear(
 }
 
 #[allow(dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn dispatch_fused_linear_with_residual(
     ctx: &GpuContext,
     encoder: &mut wgpu::CommandEncoder,
@@ -5298,6 +5316,7 @@ pub fn matmul_bias_add_gelu(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn matmul_with_bias_activation(
     lhs: &[f32],
     rhs: &[f32],
@@ -5405,7 +5424,7 @@ pub fn fused_gelu_backward(
     residual_grad: Option<&[f32]>,
     rows: usize,
     cols: usize,
-) -> Result<(Vec<f32>, Vec<f32>, Vec<f32>), String> {
+) -> Result<FusedGeluBackwardOutput, String> {
     if rows == 0 || cols == 0 {
         return Err("tensor dimensions must be positive".into());
     }
@@ -5463,8 +5482,8 @@ pub fn fused_gelu_backward(
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
     });
 
-    let num_wg_x = (cols_u32 + FUSED_GELU_BACK_WG_COLS - 1) / FUSED_GELU_BACK_WG_COLS;
-    let num_wg_y = (rows_u32 + FUSED_GELU_BACK_WG_ROWS - 1) / FUSED_GELU_BACK_WG_ROWS;
+    let num_wg_x = cols_u32.div_ceil(FUSED_GELU_BACK_WG_COLS);
+    let num_wg_y = rows_u32.div_ceil(FUSED_GELU_BACK_WG_ROWS);
     let partial_len = (num_wg_x * num_wg_y * FUSED_GELU_BACK_WG_COLS) as usize;
     let partials_zero = vec![0.0f32; partial_len];
     let partials_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -5530,7 +5549,7 @@ pub fn fused_gelu_backward(
         pass.dispatch_workgroups(num_wg_x, num_wg_y, 1);
     }
 
-    let reduce_groups = (cols_u32 + REDUCE_DB_WORKGROUP - 1) / REDUCE_DB_WORKGROUP;
+    let reduce_groups = cols_u32.div_ceil(REDUCE_DB_WORKGROUP);
     {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("st.tensor.wgpu_dense.gelu_back.reduce"),
@@ -5718,7 +5737,7 @@ pub fn row_softmax_hardmax_spiral(
     rows: usize,
     cols: usize,
     layout: Layout,
-) -> Result<(Vec<f32>, Vec<f32>, Vec<f32>, SpiralConsensusStats), String> {
+) -> Result<RowSoftmaxHardmaxSpiralOutput, String> {
     if rows == 0 || cols == 0 {
         return Err("matrix dimensions must be positive".into());
     }
@@ -5991,6 +6010,7 @@ pub fn softmax_autotune_snapshot() -> Option<Vec<SoftmaxSelectionSnapshot>> {
     Some(snapshots)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn fused_attention(
     queries: &[f32],
     keys: &[f32],
@@ -6088,13 +6108,9 @@ pub fn fused_attention(
     let attn_bias_buf =
         attn_bias.map(|data| upload_lhs(device, "st.tensor.wgpu_dense.attn.attn_bias", data));
     let zero_storage = ctx.zero_storage_buffer();
-    let z_binding = z_bias_buf
-        .as_ref()
-        .map(|buf| buf)
-        .unwrap_or_else(|| zero_storage.as_ref());
+    let z_binding = z_bias_buf.as_ref().unwrap_or_else(|| zero_storage.as_ref());
     let attn_binding = attn_bias_buf
         .as_ref()
-        .map(|buf| buf)
         .unwrap_or_else(|| zero_storage.as_ref());
 
     let flags = {
@@ -6169,6 +6185,7 @@ pub fn supports_fused_attention(contexts: usize, sequence: usize, head_dim: usiz
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn conv_im2col_gemm(
     input: &[f32],
     batch: usize,
@@ -6280,8 +6297,8 @@ pub fn conv_im2col_gemm(
         });
         pass.set_pipeline(fused_pipeline.as_ref());
         pass.set_bind_group(0, &fused_bind_group, &[]);
-        let groups_x = ((out_channels as u32) + tile_config.tile_n() - 1) / tile_config.tile_n();
-        let groups_y = ((rows as u32) + tile_config.tile_m() - 1) / tile_config.tile_m();
+        let groups_x = (out_channels as u32).div_ceil(tile_config.tile_n());
+        let groups_y = (rows as u32).div_ceil(tile_config.tile_m());
         pass.dispatch_workgroups(groups_x.max(1), groups_y.max(1), 1);
     }
 
@@ -6461,9 +6478,9 @@ fn conv_grad_input_fused_common(config: GradInputLaunch<'_>) -> Result<Vec<f32>,
             timestamp_writes: None,
         });
         pass.set_pipeline(pipeline.as_ref());
-        let groups_x = ((input[2] as u32) + GRAD_INPUT_TILE_X - 1) / GRAD_INPUT_TILE_X;
-        let groups_y = ((input[1] as u32) + GRAD_INPUT_TILE_Y - 1) / GRAD_INPUT_TILE_Y;
-        let groups_z = ((total_bc as u32) + GRAD_INPUT_TILE_Z - 1) / GRAD_INPUT_TILE_Z;
+        let groups_x = (input[2] as u32).div_ceil(GRAD_INPUT_TILE_X);
+        let groups_y = (input[1] as u32).div_ceil(GRAD_INPUT_TILE_Y);
+        let groups_z = (total_bc as u32).div_ceil(GRAD_INPUT_TILE_Z);
         pass.set_bind_group(0, &bind_group, &[]);
         pass.dispatch_workgroups(groups_x.max(1), groups_y.max(1), groups_z.max(1));
     }
@@ -6473,6 +6490,7 @@ fn conv_grad_input_fused_common(config: GradInputLaunch<'_>) -> Result<Vec<f32>,
     readback_f32(device, queue, &output_buf, input_volume)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn conv_grad_input_fused(
     grad_matrix: &[f32],
     weights: &[f32],
@@ -6508,6 +6526,7 @@ pub fn conv_grad_input_fused(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn conv3d_grad_input_fused(
     grad_matrix: &[f32],
     weights: &[f32],
@@ -6549,6 +6568,7 @@ pub fn conv3d_grad_input_fused(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn conv4d_grad_input_fused(
     grad_matrix: &[f32],
     weights: &[f32],
@@ -6635,7 +6655,7 @@ pub fn ramanujan_pi_gpu(iterations: usize) -> Result<f64, String> {
     queue.submit(Some(encoder.finish()));
 
     let values = readback_f32(device, queue, &output_buf, 1)?;
-    Ok(values.get(0).copied().unwrap_or(0.0) as f64)
+    Ok(values.first().copied().unwrap_or(0.0) as f64)
 }
 
 fn fallback_tile_config(rows: usize, inner: usize, cols: usize) -> TileConfig {
@@ -6850,14 +6870,11 @@ fn quantize_dimension(value: usize) -> usize {
     } else {
         64
     };
-    let rounded = ((value + step / 2) / step).max(1) * step;
-    rounded
+    ((value + step / 2) / step).max(1) * step
 }
 
 fn sample_dimension(value: usize) -> usize {
-    quantize_dimension(value)
-        .min(AUTOTUNE_SAMPLE_MAX_DIM)
-        .max(1)
+    quantize_dimension(value).clamp(1, AUTOTUNE_SAMPLE_MAX_DIM)
 }
 
 fn tile_supported(device: &Device, tile: TileConfig) -> bool {
@@ -6952,6 +6969,7 @@ struct MatmulAutotuneContext {
     runs: u32,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn microbenchmark_tile(
     ctx: &GpuContext,
     rows: usize,

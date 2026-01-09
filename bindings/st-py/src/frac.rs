@@ -29,8 +29,9 @@ fn fracdiff_gl_1d(
 
 #[pyfunction]
 #[pyo3(signature = (alpha, tol=1e-6, max_len=8192))]
-fn gl_coeffs_adaptive(alpha: f32, tol: f32, max_len: usize) -> Vec<f32> {
+fn gl_coeffs_adaptive(alpha: f32, tol: f32, max_len: usize) -> PyResult<Vec<f32>> {
     st_frac::gl_coeffs_adaptive(alpha, tol, max_len)
+        .map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
 pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {

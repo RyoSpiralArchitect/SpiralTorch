@@ -28,6 +28,12 @@ impl Default for StructuredPruningConfig {
 #[derive(Debug, Clone, Copy)]
 pub struct StructuredPruner;
 
+impl Default for StructuredPruner {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl StructuredPruner {
     pub fn new() -> Self {
         Self
@@ -67,7 +73,7 @@ impl StructuredPruner {
             ));
         }
 
-        let block_count = (weights.len() + config.block_size - 1) / config.block_size;
+        let block_count = weights.len().div_ceil(config.block_size);
         workspace.prepare(block_count);
         compute_block_norms(
             weights,

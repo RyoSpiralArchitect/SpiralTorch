@@ -22,6 +22,21 @@ use st_frac::fft::{self, Complex32};
 use st_frac::mellin::MellinLogGrid;
 use st_frac::mellin_types::ComplexScalar;
 
+fn checked_scaled_len(label: &'static str, count: usize, scale: usize) -> PureResult<usize> {
+    if scale == 0 {
+        return Ok(0);
+    }
+    let max = usize::MAX / scale;
+    if count > max {
+        return Err(TensorError::TensorVolumeExceeded {
+            label,
+            volume: count,
+            max_volume: max,
+        });
+    }
+    Ok(count * scale)
+}
+
 /// Streaming Z-space normaliser that keeps canvas updates stable even when the
 /// underlying tensor swings across vastly different value ranges.
 ///
@@ -110,9 +125,10 @@ impl Default for CanvasNormalizer {
 }
 
 /// Palette used to colourise the normalised tensor energy.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub enum CanvasPalette {
     /// Blue → Magenta gradient tuned for Z-space phase portraits.
+    #[default]
     BlueMagenta,
     /// "Turbo" inspired gradient with warm highlights.
     Turbo,
@@ -162,12 +178,6 @@ impl CanvasPalette {
             rgba[2] as f32 / 255.0 * 2.0 - 1.0,
         ];
         (rgba, chroma)
-    }
-}
-
-impl Default for CanvasPalette {
-    fn default() -> Self {
-        CanvasPalette::BlueMagenta
     }
 }
 
@@ -287,7 +297,7 @@ impl CanvasWasmTrail {
     /// WebGPU storage buffer. Each sample contributes seven floats ordered as
     /// `(x, y, z, energy, r, g, b)`.
     pub fn as_f32_slice(&self) -> Vec<f32> {
-        let mut flat = Vec::with_capacity(self.samples.len() * 7);
+        let mut flat = Vec::with_capacity(self.samples.len().saturating_mul(7));
         for sample in &self.samples {
             let [x, y, z] = sample.position;
             flat.push(x);
@@ -314,18 +324,43 @@ impl ColorVectorField {
         let mut field = Self {
             width,
             height,
-            vectors: Vec::with_capacity(width * height),
+            vectors: Vec::with_capacity(width.checked_mul(height).unwrap_or(0)),
         };
         field.ensure_shape(width, height);
         field
     }
 
-    fn ensure_fft_dimensions(&self) -> PureResult<()> {
-        if self.width == 0 || self.height == 0 {
-            Err(TensorError::EmptyInput("canvas_fft"))
-        } else {
-            Ok(())
+    fn ensure_fft_dimensions(&self) -> PureResult<usize> {
+        let width = self.width;
+        let height = self.height;
+        if width == 0 || height == 0 {
+            return Err(TensorError::EmptyInput("canvas_fft"));
         }
+
+        let max_volume = usize::MAX / Self::FFT_INTERLEAVED_STRIDE;
+        let expected = width
+            .checked_mul(height)
+            .ok_or(TensorError::TensorVolumeExceeded {
+                label: "canvas_fft",
+                volume: width.saturating_mul(height),
+                max_volume,
+            })?;
+
+        if expected > max_volume {
+            return Err(TensorError::TensorVolumeExceeded {
+                label: "canvas_fft",
+                volume: expected,
+                max_volume,
+            });
+        }
+
+        if self.vectors.len() != expected {
+            return Err(TensorError::DataLength {
+                expected,
+                got: self.vectors.len(),
+            });
+        }
+        Ok(expected)
     }
 
     fn ensure_shape(&mut self, width: usize, height: usize) {
@@ -333,7 +368,15 @@ impl ColorVectorField {
             self.width = width;
             self.height = height;
         }
-        let expected = width * height;
+        let expected = match width.checked_mul(height) {
+            Some(expected) => expected,
+            None => {
+                self.width = 0;
+                self.height = 0;
+                self.vectors.clear();
+                return;
+            }
+        };
         if self.vectors.len() != expected {
             self.vectors.resize(expected, [0.0; 4]);
         }
@@ -380,11 +423,16 @@ impl ColorVectorField {
     }
 
     pub fn as_tensor(&self) -> PureResult<Tensor> {
-        let mut flat = Vec::with_capacity(self.vectors.len() * 4);
+        let mut flat = Vec::with_capacity(checked_scaled_len(
+            "canvas_vector_tensor",
+            self.vectors.len(),
+            4,
+        )?);
         for vector in &self.vectors {
             flat.extend_from_slice(vector);
         }
-        Tensor::from_vec(self.height, self.width * 4, flat)
+        let cols = checked_scaled_len("canvas_vector_tensor", self.width, 4)?;
+        Tensor::from_vec(self.height, cols, flat)
     }
 
     pub fn energy_tensor(&self) -> PureResult<Tensor> {
@@ -412,12 +460,16 @@ impl ColorVectorField {
     pub fn fft_rows_interleaved(&self, inverse: bool) -> PureResult<Vec<f32>> {
         let width = self.width;
         let height = self.height;
-        self.ensure_fft_dimensions()?;
+        let expected_pixels = self.ensure_fft_dimensions()?;
         let mut energy = vec![Complex32::default(); width];
         let mut chroma_r = vec![Complex32::default(); width];
         let mut chroma_g = vec![Complex32::default(); width];
         let mut chroma_b = vec![Complex32::default(); width];
-        let mut out = Vec::with_capacity(self.height * width * Self::FFT_INTERLEAVED_STRIDE);
+        let mut out = Vec::with_capacity(checked_scaled_len(
+            "canvas_fft_rows",
+            expected_pixels,
+            Self::FFT_INTERLEAVED_STRIDE,
+        )?);
 
         for row in 0..height {
             for col in 0..width {
@@ -456,12 +508,16 @@ impl ColorVectorField {
     ) -> PureResult<Vec<f32>> {
         let width = self.width;
         let height = self.height;
-        self.ensure_fft_dimensions()?;
+        let expected_pixels = self.ensure_fft_dimensions()?;
         let mut energy = vec![Complex32::default(); width];
         let mut chroma_r = vec![Complex32::default(); width];
         let mut chroma_g = vec![Complex32::default(); width];
         let mut chroma_b = vec![Complex32::default(); width];
-        let mut out = Vec::with_capacity(self.height * width * Self::FFT_INTERLEAVED_STRIDE);
+        let mut out = Vec::with_capacity(checked_scaled_len(
+            "canvas_fft_rows",
+            expected_pixels,
+            Self::FFT_INTERLEAVED_STRIDE,
+        )?);
         let coeffs = window.coefficients(width);
 
         for row in 0..height {
@@ -619,13 +675,17 @@ impl ColorVectorField {
     pub fn fft_cols_interleaved(&self, inverse: bool) -> PureResult<Vec<f32>> {
         let height = self.height;
         let width = self.width;
-        self.ensure_fft_dimensions()?;
+        let expected_pixels = self.ensure_fft_dimensions()?;
 
         let mut energy = vec![Complex32::default(); height];
         let mut chroma_r = vec![Complex32::default(); height];
         let mut chroma_g = vec![Complex32::default(); height];
         let mut chroma_b = vec![Complex32::default(); height];
-        let mut out = Vec::with_capacity(self.height * self.width * Self::FFT_INTERLEAVED_STRIDE);
+        let mut out = Vec::with_capacity(checked_scaled_len(
+            "canvas_fft_cols",
+            expected_pixels,
+            Self::FFT_INTERLEAVED_STRIDE,
+        )?);
 
         for col in 0..width {
             for row in 0..height {
@@ -664,13 +724,17 @@ impl ColorVectorField {
     ) -> PureResult<Vec<f32>> {
         let height = self.height;
         let width = self.width;
-        self.ensure_fft_dimensions()?;
+        let expected_pixels = self.ensure_fft_dimensions()?;
 
         let mut energy = vec![Complex32::default(); height];
         let mut chroma_r = vec![Complex32::default(); height];
         let mut chroma_g = vec![Complex32::default(); height];
         let mut chroma_b = vec![Complex32::default(); height];
-        let mut out = Vec::with_capacity(self.height * self.width * Self::FFT_INTERLEAVED_STRIDE);
+        let mut out = Vec::with_capacity(checked_scaled_len(
+            "canvas_fft_cols",
+            expected_pixels,
+            Self::FFT_INTERLEAVED_STRIDE,
+        )?);
         let coeffs = window.coefficients(height);
 
         for col in 0..width {
@@ -825,9 +889,8 @@ impl ColorVectorField {
     pub fn fft_2d_interleaved(&self, inverse: bool) -> PureResult<Vec<f32>> {
         let width = self.width;
         let height = self.height;
-        self.ensure_fft_dimensions()?;
+        let size = self.ensure_fft_dimensions()?;
 
-        let size = width * height;
         let mut energy = vec![Complex32::default(); size];
         let mut chroma_r = vec![Complex32::default(); size];
         let mut chroma_g = vec![Complex32::default(); size];
@@ -879,7 +942,11 @@ impl ColorVectorField {
             }
         }
 
-        let mut out = Vec::with_capacity(size * Self::FFT_INTERLEAVED_STRIDE);
+        let mut out = Vec::with_capacity(checked_scaled_len(
+            "canvas_fft_2d",
+            size,
+            Self::FFT_INTERLEAVED_STRIDE,
+        )?);
         for idx in 0..size {
             out.push(energy[idx].re);
             out.push(energy[idx].im);
@@ -902,9 +969,8 @@ impl ColorVectorField {
     ) -> PureResult<Vec<f32>> {
         let width = self.width;
         let height = self.height;
-        self.ensure_fft_dimensions()?;
+        let size = self.ensure_fft_dimensions()?;
 
-        let size = width * height;
         let mut energy = vec![Complex32::default(); size];
         let mut chroma_r = vec![Complex32::default(); size];
         let mut chroma_g = vec![Complex32::default(); size];
@@ -912,12 +978,11 @@ impl ColorVectorField {
         let row_coeffs = window.coefficients(width);
         let col_coeffs = window.coefficients(height);
 
-        for row in 0..height {
-            let row_weight = col_coeffs[row];
-            for col in 0..width {
+        for (row, &row_weight) in col_coeffs.iter().enumerate() {
+            for (col, &col_weight) in row_coeffs.iter().enumerate() {
                 let idx = row * width + col;
                 let vector = self.vectors[idx];
-                let weight = row_weight * row_coeffs[col];
+                let weight = row_weight * col_weight;
                 energy[idx] = Complex32::new(vector[0] * weight, 0.0);
                 chroma_r[idx] = Complex32::new(vector[1] * weight, 0.0);
                 chroma_g[idx] = Complex32::new(vector[2] * weight, 0.0);
@@ -960,7 +1025,11 @@ impl ColorVectorField {
             }
         }
 
-        let mut out = Vec::with_capacity(size * Self::FFT_INTERLEAVED_STRIDE);
+        let mut out = Vec::with_capacity(checked_scaled_len(
+            "canvas_fft_2d",
+            size,
+            Self::FFT_INTERLEAVED_STRIDE,
+        )?);
         for idx in 0..size {
             out.push(energy[idx].re);
             out.push(energy[idx].im);
@@ -1373,10 +1442,18 @@ impl CanvasSurface {
                 cols: width,
             });
         }
+        let pixel_count = width
+            .checked_mul(height)
+            .ok_or(TensorError::TensorVolumeExceeded {
+                label: "canvas_surface_pixels",
+                volume: width.saturating_mul(height),
+                max_volume: usize::MAX / 4,
+            })?;
+        let pixel_bytes = checked_scaled_len("canvas_surface_pixels", pixel_count, 4)?;
         Ok(Self {
             width,
             height,
-            pixels: vec![0; width * height * 4],
+            pixels: vec![0u8; pixel_bytes],
         })
     }
 
@@ -1420,6 +1497,13 @@ impl CanvasSurface {
         }
 
         let data = tensor.data();
+        let expected_pixels = checked_scaled_len("canvas_surface_pixels", data.len(), 4)?;
+        if self.pixels.len() != expected_pixels {
+            return Err(TensorError::DataLength {
+                expected: expected_pixels,
+                got: self.pixels.len(),
+            });
+        }
         normalizer.update(data);
         for (idx, &value) in data.iter().enumerate() {
             let normalized = normalizer.normalize(value);
@@ -1452,6 +1536,13 @@ impl CanvasSurface {
 
         vectors.ensure_shape(self.width, self.height);
         let data = tensor.data();
+        let expected_pixels = checked_scaled_len("canvas_surface_pixels", data.len(), 4)?;
+        if self.pixels.len() != expected_pixels {
+            return Err(TensorError::DataLength {
+                expected: expected_pixels,
+                got: self.pixels.len(),
+            });
+        }
         normalizer.update(data);
         for (idx, &value) in data.iter().enumerate() {
             let normalized = normalizer.normalize(value);
@@ -1641,11 +1732,11 @@ impl FractalCanvas {
         let support = grid.support();
         let mut density = Vec::with_capacity(steps);
         for (idx, sample) in grid.samples().iter().enumerate() {
-            let magnitude = (sample.re.powi(2) + sample.im.powi(2)).sqrt() as f32;
+            let magnitude = (sample.re.powi(2) + sample.im.powi(2)).sqrt();
             let scale = ((idx + 1) as f32 / steps as f32).powf(dimension / 2.0);
             density.push(magnitude * scale);
         }
-        let mellin_weights: Vec<f32> = grid.weights().iter().copied().collect();
+        let mellin_weights = grid.weights().to_vec();
         Ok(InfiniteZSpacePatch {
             dimension,
             zoom,
@@ -2543,10 +2634,11 @@ impl CanvasProjector {
 
         let width = self.surface.width();
         let height = self.surface.height();
+        let pixels = width.saturating_mul(height);
         CanvasFftLayout {
-            field_bytes: width * height * FIELD_STRIDE,
+            field_bytes: pixels.saturating_mul(FIELD_STRIDE),
             field_stride: FIELD_STRIDE,
-            spectrum_bytes: width * height * SPECTRUM_STRIDE,
+            spectrum_bytes: pixels.saturating_mul(SPECTRUM_STRIDE),
             spectrum_stride: SPECTRUM_STRIDE,
             uniform_bytes: UNIFORM_BYTES,
         }
@@ -2562,11 +2654,7 @@ impl CanvasProjector {
         let width = self.surface.width() as u32;
         let height = self.surface.height() as u32;
         let workgroup = if subgroup { 32 } else { 64 };
-        let groups_x = if width == 0 {
-            0
-        } else {
-            (width + workgroup - 1) / workgroup
-        };
+        let groups_x = width.div_ceil(workgroup);
         [groups_x, height, 1]
     }
 
@@ -2620,11 +2708,7 @@ impl CanvasProjector {
         let width = self.surface.width() as u32;
         let height = self.surface.height() as u32;
         let workgroup = if subgroup { 32 } else { 64 };
-        let groups_x = if width == 0 {
-            0
-        } else {
-            (width + workgroup - 1) / workgroup
-        };
+        let groups_x = width.div_ceil(workgroup);
         [groups_x, height, 1]
     }
 
@@ -2696,19 +2780,10 @@ impl CanvasProjector {
 
 /// Projector construction parameters so integrators (including Python glue)
 /// can pick palettes and stability behaviour explicitly.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct CanvasProjectorConfig {
     pub normalizer: CanvasNormalizer,
     pub palette: CanvasPalette,
-}
-
-impl Default for CanvasProjectorConfig {
-    fn default() -> Self {
-        Self {
-            normalizer: CanvasNormalizer::default(),
-            palette: CanvasPalette::default(),
-        }
-    }
 }
 
 fn compute_fft(line: &mut [Complex32], inverse: bool) -> PureResult<()> {
@@ -2730,7 +2805,7 @@ fn compute_fft(line: &mut [Complex32], inverse: bool) -> PureResult<()> {
     let len = line.len();
     let mut output = vec![Complex32::default(); len];
     let sign = if inverse { 1.0 } else { -1.0 };
-    for k in 0..len {
+    for (k, slot) in output.iter_mut().enumerate() {
         let mut acc = Complex32::default();
         for (n, value) in line.iter().enumerate() {
             let angle = 2.0 * PI * k as f32 * n as f32 / len as f32 * sign;
@@ -2740,7 +2815,7 @@ fn compute_fft(line: &mut [Complex32], inverse: bool) -> PureResult<()> {
         if inverse {
             acc = acc.scale(1.0 / len as f32);
         }
-        output[k] = acc;
+        *slot = acc;
     }
     line.copy_from_slice(&output);
     Ok(())
@@ -2853,21 +2928,50 @@ mod tests {
     use super::*;
     use crate::pure::fractal::FractalPatch;
 
+    fn unwrap_ok<T>(result: PureResult<T>) -> T {
+        match result {
+            Ok(value) => value,
+            Err(err) => panic!("unexpected error: {err}"),
+        }
+    }
+
+    fn unwrap_some<T>(value: Option<T>, label: &'static str) -> T {
+        match value {
+            Some(value) => value,
+            None => panic!("{label}"),
+        }
+    }
+
     fn tensor(values: &[f32]) -> Tensor {
-        Tensor::from_vec(1, values.len(), values.to_vec()).unwrap()
+        unwrap_ok(Tensor::from_vec(1, values.len(), values.to_vec()))
     }
 
     fn tensor_with_shape(rows: usize, cols: usize, values: &[f32]) -> Tensor {
         assert_eq!(rows * cols, values.len());
-        Tensor::from_vec(rows, cols, values.to_vec()).unwrap()
+        unwrap_ok(Tensor::from_vec(rows, cols, values.to_vec()))
+    }
+
+    fn seeded_scheduler(rows: usize, cols: usize) -> UringFractalScheduler {
+        let scheduler = unwrap_ok(UringFractalScheduler::new(4));
+        unwrap_ok(scheduler.push(unwrap_ok(FractalPatch::new(
+            unwrap_ok(Tensor::zeros(rows, cols)),
+            1.0,
+            1.0,
+            0,
+        ))));
+        scheduler
+    }
+
+    fn scheduler_with_patch(patch: FractalPatch) -> UringFractalScheduler {
+        let scheduler = unwrap_ok(UringFractalScheduler::new(4));
+        unwrap_ok(scheduler.push(patch));
+        scheduler
     }
 
     #[test]
     fn emit_zspace_infinite_emits_density() {
-        let canvas = FractalCanvas::new(4, 32, 32).expect("canvas");
-        let patch = canvas
-            .emit_zspace_infinite(2.618)
-            .expect("infinite z patch");
+        let canvas = unwrap_ok(FractalCanvas::new(4, 32, 32));
+        let patch = unwrap_ok(canvas.emit_zspace_infinite(2.618));
         assert!(patch.eta_bar() >= 0.0);
         assert_eq!(patch.mellin_weights().len(), patch.density().len());
         assert!(patch.density().iter().any(|value| value.is_finite()));
@@ -2886,8 +2990,10 @@ mod tests {
     fn canvas_window_hann_tapers_ends() {
         let coeffs = CanvasWindow::Hann.coefficients(8);
         assert_eq!(coeffs.len(), 8);
-        assert!(coeffs.first().unwrap().abs() < 1e-6);
-        assert!(coeffs.last().unwrap().abs() < 1e-6);
+        let first = unwrap_some(coeffs.first().copied(), "missing Hann first coefficient");
+        let last = unwrap_some(coeffs.last().copied(), "missing Hann last coefficient");
+        assert!(first.abs() < 1e-6);
+        assert!(last.abs() < 1e-6);
         let middle = coeffs[coeffs.len() / 2];
         assert!(middle > 0.9);
     }
@@ -2908,10 +3014,9 @@ mod tests {
     #[test]
     fn rectangular_window_matches_row_fft_baseline() {
         let field = seeded_color_field(4, 3);
-        let baseline = field.fft_rows_interleaved(false).unwrap();
-        let windowed = field
-            .fft_rows_interleaved_with_window(CanvasWindow::Rectangular, false)
-            .unwrap();
+        let baseline = unwrap_ok(field.fft_rows_interleaved(false));
+        let windowed =
+            unwrap_ok(field.fft_rows_interleaved_with_window(CanvasWindow::Rectangular, false));
         for (lhs, rhs) in baseline.iter().zip(windowed.iter()) {
             assert!((lhs - rhs).abs() < 1e-5);
         }
@@ -2920,10 +3025,9 @@ mod tests {
     #[test]
     fn rectangular_window_matches_column_fft_baseline() {
         let field = seeded_color_field(5, 2);
-        let baseline = field.fft_cols_interleaved(false).unwrap();
-        let windowed = field
-            .fft_cols_interleaved_with_window(CanvasWindow::Rectangular, false)
-            .unwrap();
+        let baseline = unwrap_ok(field.fft_cols_interleaved(false));
+        let windowed =
+            unwrap_ok(field.fft_cols_interleaved_with_window(CanvasWindow::Rectangular, false));
         for (lhs, rhs) in baseline.iter().zip(windowed.iter()) {
             assert!((lhs - rhs).abs() < 1e-5);
         }
@@ -2932,10 +3036,9 @@ mod tests {
     #[test]
     fn rectangular_window_matches_fft_2d_baseline() {
         let field = seeded_color_field(4, 3);
-        let baseline = field.fft_2d_interleaved(false).unwrap();
-        let windowed = field
-            .fft_2d_interleaved_with_window(CanvasWindow::Rectangular, false)
-            .unwrap();
+        let baseline = unwrap_ok(field.fft_2d_interleaved(false));
+        let windowed =
+            unwrap_ok(field.fft_2d_interleaved_with_window(CanvasWindow::Rectangular, false));
         for (lhs, rhs) in baseline.iter().zip(windowed.iter()) {
             assert!((lhs - rhs).abs() < 1e-5);
         }
@@ -2954,24 +3057,30 @@ mod tests {
 
     #[test]
     fn palette_switch_applies_without_allocation() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(FractalPatch::new(Tensor::zeros(2, 2).unwrap(), 1.0, 1.0, 0).unwrap())
-            .unwrap();
-        let mut projector = CanvasProjector::new(scheduler, 2, 2).unwrap();
+        let scheduler = unwrap_ok(UringFractalScheduler::new(4));
+        unwrap_ok(scheduler.push(unwrap_ok(FractalPatch::new(
+            unwrap_ok(Tensor::zeros(2, 2)),
+            1.0,
+            1.0,
+            0,
+        ))));
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler, 2, 2));
         projector.set_palette(CanvasPalette::Grayscale);
-        let bytes = projector.refresh().unwrap();
+        let bytes = unwrap_ok(projector.refresh());
         assert_eq!(bytes.len(), 16);
     }
 
     #[test]
     fn refresh_with_vectors_surfaces_color_field() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(FractalPatch::new(Tensor::zeros(2, 2).unwrap(), 1.0, 1.0, 0).unwrap())
-            .unwrap();
-        let mut projector = CanvasProjector::new(scheduler, 2, 2).unwrap();
-        let (_bytes, field) = projector.refresh_with_vectors().unwrap();
+        let scheduler = unwrap_ok(UringFractalScheduler::new(4));
+        unwrap_ok(scheduler.push(unwrap_ok(FractalPatch::new(
+            unwrap_ok(Tensor::zeros(2, 2)),
+            1.0,
+            1.0,
+            0,
+        ))));
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler, 2, 2));
+        let (_bytes, field) = unwrap_ok(projector.refresh_with_vectors());
         assert_eq!(field.vectors().len(), 4);
         for vector in field.iter() {
             assert!(vector[0] >= 0.0 && vector[0] <= 1.0);
@@ -2980,11 +3089,14 @@ mod tests {
 
     #[test]
     fn vector_fft_wgsl_covers_expected_bindings() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(FractalPatch::new(Tensor::zeros(2, 2).unwrap(), 1.0, 1.0, 0).unwrap())
-            .unwrap();
-        let projector = CanvasProjector::new(scheduler, 4, 2).unwrap();
+        let scheduler = unwrap_ok(UringFractalScheduler::new(4));
+        unwrap_ok(scheduler.push(unwrap_ok(FractalPatch::new(
+            unwrap_ok(Tensor::zeros(2, 2)),
+            1.0,
+            1.0,
+            0,
+        ))));
+        let projector = unwrap_ok(CanvasProjector::new(scheduler, 4, 2));
         let wgsl = projector.vector_fft_wgsl(false);
         assert!(wgsl.contains("@binding(2)"));
         assert!(wgsl.contains("SpectrumSample"));
@@ -2993,30 +3105,36 @@ mod tests {
 
     #[test]
     fn vector_fft_uniform_matches_canvas_dimensions() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(FractalPatch::new(Tensor::zeros(2, 2).unwrap(), 1.0, 1.0, 0).unwrap())
-            .unwrap();
-        let projector = CanvasProjector::new(scheduler, 3, 5).unwrap();
+        let scheduler = unwrap_ok(UringFractalScheduler::new(4));
+        unwrap_ok(scheduler.push(unwrap_ok(FractalPatch::new(
+            unwrap_ok(Tensor::zeros(2, 2)),
+            1.0,
+            1.0,
+            0,
+        ))));
+        let projector = unwrap_ok(CanvasProjector::new(scheduler, 3, 5));
         let params = projector.vector_fft_uniform(true);
         assert_eq!(params, [3, 5, 1, 0]);
     }
 
     #[test]
     fn vector_fft_dispatch_respects_workgroup_chunks() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(FractalPatch::new(Tensor::zeros(2, 2).unwrap(), 1.0, 1.0, 0).unwrap())
-            .unwrap();
-        let projector = CanvasProjector::new(scheduler, 130, 4).unwrap();
+        let scheduler = unwrap_ok(UringFractalScheduler::new(4));
+        unwrap_ok(scheduler.push(unwrap_ok(FractalPatch::new(
+            unwrap_ok(Tensor::zeros(2, 2)),
+            1.0,
+            1.0,
+            0,
+        ))));
+        let projector = unwrap_ok(CanvasProjector::new(scheduler, 130, 4));
         assert_eq!(projector.vector_fft_dispatch(false), [3, 4, 1]);
         assert_eq!(projector.vector_fft_dispatch(true), [5, 4, 1]);
     }
 
     #[test]
     fn vector_fft_layout_matches_wgsl_structs() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        let projector = CanvasProjector::new(scheduler, 64, 3).unwrap();
+        let scheduler = unwrap_ok(UringFractalScheduler::new(4));
+        let projector = unwrap_ok(CanvasProjector::new(scheduler, 64, 3));
         let layout = projector.vector_fft_layout();
         assert_eq!(layout.field_stride(), 16);
         assert_eq!(layout.spectrum_stride(), 32);
@@ -3030,7 +3148,7 @@ mod tests {
     fn vector_field_fft_emits_interleaved_channels() {
         let mut field = ColorVectorField::new(4, 1);
         field.set(0, 1.0, [0.0, 0.0, 0.0]);
-        let spectrum = field.fft_rows_interleaved(false).unwrap();
+        let spectrum = unwrap_ok(field.fft_rows_interleaved(false));
         assert_eq!(spectrum.len(), 32);
         for chunk in spectrum.chunks_exact(8) {
             assert!((chunk[0] - 1.0).abs() < 1e-6);
@@ -3045,7 +3163,7 @@ mod tests {
     fn vector_field_fft_columns_emits_interleaved_channels() {
         let mut field = ColorVectorField::new(1, 4);
         field.set(0, 1.0, [0.0, 0.0, 0.0]);
-        let spectrum = field.fft_cols_interleaved(false).unwrap();
+        let spectrum = unwrap_ok(field.fft_cols_interleaved(false));
         assert_eq!(spectrum.len(), 32);
         for chunk in spectrum.chunks_exact(8) {
             assert!((chunk[0] - 1.0).abs() < 1e-6);
@@ -3060,7 +3178,7 @@ mod tests {
     fn vector_field_fft_2d_emits_interleaved_channels() {
         let mut field = ColorVectorField::new(2, 2);
         field.set(0, 1.0, [0.0, 0.0, 0.0]);
-        let spectrum = field.fft_2d_interleaved(false).unwrap();
+        let spectrum = unwrap_ok(field.fft_2d_interleaved(false));
         assert_eq!(spectrum.len(), 2 * 2 * 8);
         for chunk in spectrum.chunks_exact(8) {
             assert!((chunk[0] - 1.0).abs() < 1e-6);
@@ -3075,7 +3193,7 @@ mod tests {
     fn vector_field_fft_2d_handles_rectangular_canvas() {
         let mut field = ColorVectorField::new(3, 2);
         field.set(0, 1.0, [0.0, 0.0, 0.0]);
-        let spectrum = field.fft_2d_interleaved(false).unwrap();
+        let spectrum = unwrap_ok(field.fft_2d_interleaved(false));
         assert_eq!(spectrum.len(), 3 * 2 * 8);
         assert!(spectrum.iter().all(|value| value.is_finite()));
     }
@@ -3084,7 +3202,7 @@ mod tests {
     fn vector_field_fft_columns_handles_non_power_of_two_height() {
         let mut field = ColorVectorField::new(2, 3);
         field.set(0, 1.0, [0.0, 0.0, 0.0]);
-        let spectrum = field.fft_cols_interleaved(false).unwrap();
+        let spectrum = unwrap_ok(field.fft_cols_interleaved(false));
         assert_eq!(spectrum.len(), 48);
         for value in spectrum {
             assert!(value.is_finite());
@@ -3095,7 +3213,7 @@ mod tests {
     fn vector_field_fft_handles_non_power_of_two_width() {
         let mut field = ColorVectorField::new(3, 1);
         field.set(0, 1.0, [0.0, 0.0, 0.0]);
-        let spectrum = field.fft_rows_interleaved(false).unwrap();
+        let spectrum = unwrap_ok(field.fft_rows_interleaved(false));
         assert_eq!(spectrum.len(), 24);
         for value in spectrum {
             assert!(value.is_finite());
@@ -3142,7 +3260,7 @@ mod tests {
     fn vector_field_fft_rows_magnitude_tensor_matches_shape() {
         let mut field = ColorVectorField::new(2, 1);
         field.set(0, 1.0, [0.0, 0.0, 0.0]);
-        let tensor = field.fft_rows_magnitude_tensor(false).unwrap();
+        let tensor = unwrap_ok(field.fft_rows_magnitude_tensor(false));
         assert_eq!(tensor.shape(), (1, 8));
         assert!(tensor
             .data()
@@ -3163,8 +3281,8 @@ mod tests {
             field.set(idx, energy, chroma);
         }
 
-        let power = field.fft_rows_power_tensor(false).unwrap();
-        let magnitude = field.fft_rows_magnitude_tensor(false).unwrap();
+        let power = unwrap_ok(field.fft_rows_power_tensor(false));
+        let magnitude = unwrap_ok(field.fft_rows_magnitude_tensor(false));
 
         assert_eq!(power.shape(), magnitude.shape());
         for (p, m) in power.data().iter().zip(magnitude.data()) {
@@ -3185,8 +3303,8 @@ mod tests {
             field.set(idx, energy, chroma);
         }
 
-        let power = field.fft_rows_power_tensor(false).unwrap();
-        let power_db = field.fft_rows_power_db_tensor(false).unwrap();
+        let power = unwrap_ok(field.fft_rows_power_tensor(false));
+        let power_db = unwrap_ok(field.fft_rows_power_db_tensor(false));
 
         assert_eq!(power.shape(), power_db.shape());
         for (&linear, &db) in power.data().iter().zip(power_db.data()) {
@@ -3209,9 +3327,9 @@ mod tests {
             field.set(idx, energy, chroma);
         }
 
-        let (power, power_db) = field.fft_rows_power_with_db_tensors(false).unwrap();
-        let solo_power = field.fft_rows_power_tensor(false).unwrap();
-        let solo_power_db = field.fft_rows_power_db_tensor(false).unwrap();
+        let (power, power_db) = unwrap_ok(field.fft_rows_power_with_db_tensors(false));
+        let solo_power = unwrap_ok(field.fft_rows_power_tensor(false));
+        let solo_power_db = unwrap_ok(field.fft_rows_power_db_tensor(false));
 
         assert_eq!(power.shape(), solo_power.shape());
         assert_eq!(power_db.shape(), solo_power_db.shape());
@@ -3228,7 +3346,7 @@ mod tests {
     fn vector_field_fft_rows_phase_tensor_matches_shape() {
         let mut field = ColorVectorField::new(2, 1);
         field.set(0, 1.0, [0.0, 0.0, 0.0]);
-        let tensor = field.fft_rows_phase_tensor(false).unwrap();
+        let tensor = unwrap_ok(field.fft_rows_phase_tensor(false));
         assert_eq!(tensor.shape(), (1, 8));
         assert!(tensor.data().iter().all(|value| value.is_finite()));
     }
@@ -3246,9 +3364,9 @@ mod tests {
             field.set(idx, energy, chroma);
         }
 
-        let (magnitude, phase) = field.fft_rows_polar_tensors(false).unwrap();
-        let magnitude_only = field.fft_rows_magnitude_tensor(false).unwrap();
-        let phase_only = field.fft_rows_phase_tensor(false).unwrap();
+        let (magnitude, phase) = unwrap_ok(field.fft_rows_polar_tensors(false));
+        let magnitude_only = unwrap_ok(field.fft_rows_magnitude_tensor(false));
+        let phase_only = unwrap_ok(field.fft_rows_phase_tensor(false));
 
         assert_eq!(magnitude.shape(), magnitude_only.shape());
         assert_eq!(phase.shape(), phase_only.shape());
@@ -3288,7 +3406,7 @@ mod tests {
     fn vector_field_fft_columns_magnitude_tensor_matches_shape() {
         let mut field = ColorVectorField::new(1, 2);
         field.set(0, 1.0, [0.0, 0.0, 0.0]);
-        let tensor = field.fft_cols_magnitude_tensor(false).unwrap();
+        let tensor = unwrap_ok(field.fft_cols_magnitude_tensor(false));
         assert_eq!(tensor.shape(), (1, 8));
         assert!(tensor
             .data()
@@ -3309,8 +3427,8 @@ mod tests {
             field.set(idx, energy, chroma);
         }
 
-        let power = field.fft_cols_power_tensor(false).unwrap();
-        let magnitude = field.fft_cols_magnitude_tensor(false).unwrap();
+        let power = unwrap_ok(field.fft_cols_power_tensor(false));
+        let magnitude = unwrap_ok(field.fft_cols_magnitude_tensor(false));
 
         assert_eq!(power.shape(), magnitude.shape());
         for (p, m) in power.data().iter().zip(magnitude.data()) {
@@ -3331,8 +3449,8 @@ mod tests {
             field.set(idx, energy, chroma);
         }
 
-        let power = field.fft_cols_power_tensor(false).unwrap();
-        let power_db = field.fft_cols_power_db_tensor(false).unwrap();
+        let power = unwrap_ok(field.fft_cols_power_tensor(false));
+        let power_db = unwrap_ok(field.fft_cols_power_db_tensor(false));
 
         assert_eq!(power.shape(), power_db.shape());
         for (&linear, &db) in power.data().iter().zip(power_db.data()) {
@@ -3355,9 +3473,9 @@ mod tests {
             field.set(idx, energy, chroma);
         }
 
-        let (power, power_db) = field.fft_cols_power_with_db_tensors(false).unwrap();
-        let solo_power = field.fft_cols_power_tensor(false).unwrap();
-        let solo_power_db = field.fft_cols_power_db_tensor(false).unwrap();
+        let (power, power_db) = unwrap_ok(field.fft_cols_power_with_db_tensors(false));
+        let solo_power = unwrap_ok(field.fft_cols_power_tensor(false));
+        let solo_power_db = unwrap_ok(field.fft_cols_power_db_tensor(false));
 
         assert_eq!(power.shape(), solo_power.shape());
         assert_eq!(power_db.shape(), solo_power_db.shape());
@@ -3374,7 +3492,7 @@ mod tests {
     fn vector_field_fft_columns_phase_tensor_matches_shape() {
         let mut field = ColorVectorField::new(1, 2);
         field.set(0, 1.0, [0.0, 0.0, 0.0]);
-        let tensor = field.fft_cols_phase_tensor(false).unwrap();
+        let tensor = unwrap_ok(field.fft_cols_phase_tensor(false));
         assert_eq!(tensor.shape(), (1, 8));
         assert!(tensor.data().iter().all(|value| value.is_finite()));
     }
@@ -3392,9 +3510,9 @@ mod tests {
             field.set(idx, energy, chroma);
         }
 
-        let (magnitude, phase) = field.fft_cols_polar_tensors(false).unwrap();
-        let magnitude_only = field.fft_cols_magnitude_tensor(false).unwrap();
-        let phase_only = field.fft_cols_phase_tensor(false).unwrap();
+        let (magnitude, phase) = unwrap_ok(field.fft_cols_polar_tensors(false));
+        let magnitude_only = unwrap_ok(field.fft_cols_magnitude_tensor(false));
+        let phase_only = unwrap_ok(field.fft_cols_phase_tensor(false));
 
         assert_eq!(magnitude.shape(), magnitude_only.shape());
         assert_eq!(phase.shape(), phase_only.shape());
@@ -3420,7 +3538,7 @@ mod tests {
     fn vector_field_fft_2d_magnitude_tensor_matches_shape() {
         let mut field = ColorVectorField::new(2, 2);
         field.set(0, 1.0, [0.0, 0.0, 0.0]);
-        let tensor = field.fft_2d_magnitude_tensor(false).unwrap();
+        let tensor = unwrap_ok(field.fft_2d_magnitude_tensor(false));
         assert_eq!(tensor.shape(), (2, 8));
         assert!(tensor
             .data()
@@ -3441,8 +3559,8 @@ mod tests {
             field.set(idx, energy, chroma);
         }
 
-        let power = field.fft_2d_power_tensor(false).unwrap();
-        let magnitude = field.fft_2d_magnitude_tensor(false).unwrap();
+        let power = unwrap_ok(field.fft_2d_power_tensor(false));
+        let magnitude = unwrap_ok(field.fft_2d_magnitude_tensor(false));
 
         assert_eq!(power.shape(), magnitude.shape());
         for (p, m) in power.data().iter().zip(magnitude.data()) {
@@ -3463,8 +3581,8 @@ mod tests {
             field.set(idx, energy, chroma);
         }
 
-        let power = field.fft_2d_power_tensor(false).unwrap();
-        let power_db = field.fft_2d_power_db_tensor(false).unwrap();
+        let power = unwrap_ok(field.fft_2d_power_tensor(false));
+        let power_db = unwrap_ok(field.fft_2d_power_db_tensor(false));
 
         assert_eq!(power.shape(), power_db.shape());
         for (&linear, &db) in power.data().iter().zip(power_db.data()) {
@@ -3487,9 +3605,9 @@ mod tests {
             field.set(idx, energy, chroma);
         }
 
-        let (power, power_db) = field.fft_2d_power_with_db_tensors(false).unwrap();
-        let solo_power = field.fft_2d_power_tensor(false).unwrap();
-        let solo_power_db = field.fft_2d_power_db_tensor(false).unwrap();
+        let (power, power_db) = unwrap_ok(field.fft_2d_power_with_db_tensors(false));
+        let solo_power = unwrap_ok(field.fft_2d_power_tensor(false));
+        let solo_power_db = unwrap_ok(field.fft_2d_power_db_tensor(false));
 
         assert_eq!(power.shape(), solo_power.shape());
         assert_eq!(power_db.shape(), solo_power_db.shape());
@@ -3506,7 +3624,7 @@ mod tests {
     fn vector_field_fft_2d_phase_tensor_matches_shape() {
         let mut field = ColorVectorField::new(2, 2);
         field.set(0, 1.0, [0.0, 0.0, 0.0]);
-        let tensor = field.fft_2d_phase_tensor(false).unwrap();
+        let tensor = unwrap_ok(field.fft_2d_phase_tensor(false));
         assert_eq!(tensor.shape(), (2, 8));
         assert!(tensor.data().iter().all(|value| value.is_finite()));
     }
@@ -3524,9 +3642,9 @@ mod tests {
             field.set(idx, energy, chroma);
         }
 
-        let (magnitude, phase) = field.fft_2d_polar_tensors(false).unwrap();
-        let magnitude_only = field.fft_2d_magnitude_tensor(false).unwrap();
-        let phase_only = field.fft_2d_phase_tensor(false).unwrap();
+        let (magnitude, phase) = unwrap_ok(field.fft_2d_polar_tensors(false));
+        let magnitude_only = unwrap_ok(field.fft_2d_magnitude_tensor(false));
+        let phase_only = unwrap_ok(field.fft_2d_phase_tensor(false));
 
         assert_eq!(magnitude.shape(), magnitude_only.shape());
         assert_eq!(phase.shape(), phase_only.shape());
@@ -3541,37 +3659,26 @@ mod tests {
 
     #[test]
     fn projector_refresh_tensor_exposes_workspace() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(FractalPatch::new(Tensor::zeros(2, 2).unwrap(), 1.0, 1.0, 0).unwrap())
-            .unwrap();
-        let mut projector = CanvasProjector::new(scheduler, 2, 2).unwrap();
-        let tensor = projector.refresh_tensor().unwrap();
+        let scheduler = seeded_scheduler(2, 2);
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler, 2, 2));
+        let tensor = unwrap_ok(projector.refresh_tensor());
         assert_eq!(tensor.shape(), (2, 2));
         assert!(tensor.data().iter().all(|value| value.is_finite()));
     }
 
     #[test]
     fn projector_refresh_vector_fft_columns_tensor_matches_shape() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(FractalPatch::new(Tensor::zeros(3, 5).unwrap(), 1.0, 1.0, 0).unwrap())
-            .unwrap();
-        let mut projector = CanvasProjector::new(scheduler, 5, 3).unwrap();
-        let tensor = projector.refresh_vector_fft_columns_tensor(false).unwrap();
+        let scheduler = seeded_scheduler(3, 5);
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler, 5, 3));
+        let tensor = unwrap_ok(projector.refresh_vector_fft_columns_tensor(false));
         assert_eq!(tensor.shape(), (5, 3 * 8));
     }
 
     #[test]
     fn projector_refresh_vector_fft_magnitude_tensor_matches_shape() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(FractalPatch::new(Tensor::zeros(2, 4).unwrap(), 1.0, 1.0, 0).unwrap())
-            .unwrap();
-        let mut projector = CanvasProjector::new(scheduler, 4, 2).unwrap();
-        let tensor = projector
-            .refresh_vector_fft_magnitude_tensor(false)
-            .unwrap();
+        let scheduler = seeded_scheduler(2, 4);
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler, 4, 2));
+        let tensor = unwrap_ok(projector.refresh_vector_fft_magnitude_tensor(false));
         assert_eq!(tensor.shape(), (2, 4 * 4));
         assert!(tensor
             .data()
@@ -3581,15 +3688,10 @@ mod tests {
 
     #[test]
     fn projector_refresh_vector_fft_power_tensor_matches_squared_magnitude() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(FractalPatch::new(Tensor::zeros(2, 4).unwrap(), 1.0, 1.0, 0).unwrap())
-            .unwrap();
-        let mut projector = CanvasProjector::new(scheduler, 4, 2).unwrap();
-        let power = projector.refresh_vector_fft_power_tensor(false).unwrap();
-        let magnitude = projector
-            .refresh_vector_fft_magnitude_tensor(false)
-            .unwrap();
+        let scheduler = seeded_scheduler(2, 4);
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler, 4, 2));
+        let power = unwrap_ok(projector.refresh_vector_fft_power_tensor(false));
+        let magnitude = unwrap_ok(projector.refresh_vector_fft_magnitude_tensor(false));
 
         assert_eq!(power.shape(), magnitude.shape());
         for (p, m) in power.data().iter().zip(magnitude.data()) {
@@ -3599,13 +3701,10 @@ mod tests {
 
     #[test]
     fn projector_refresh_vector_fft_power_db_tensor_matches_logarithmic_projection() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(FractalPatch::new(Tensor::zeros(2, 4).unwrap(), 1.0, 1.0, 0).unwrap())
-            .unwrap();
-        let mut projector = CanvasProjector::new(scheduler, 4, 2).unwrap();
-        let power = projector.refresh_vector_fft_power_tensor(false).unwrap();
-        let power_db = projector.refresh_vector_fft_power_db_tensor(false).unwrap();
+        let scheduler = seeded_scheduler(2, 4);
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler, 4, 2));
+        let power = unwrap_ok(projector.refresh_vector_fft_power_tensor(false));
+        let power_db = unwrap_ok(projector.refresh_vector_fft_power_db_tensor(false));
 
         assert_eq!(power.shape(), power_db.shape());
         for (&linear, &db) in power.data().iter().zip(power_db.data()) {
@@ -3617,17 +3716,13 @@ mod tests {
 
     #[test]
     fn projector_refresh_vector_fft_power_with_db_tensors_match_components() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(FractalPatch::new(Tensor::zeros(2, 4).unwrap(), 1.0, 1.0, 0).unwrap())
-            .unwrap();
-        let mut projector = CanvasProjector::new(scheduler, 4, 2).unwrap();
+        let scheduler = seeded_scheduler(2, 4);
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler, 4, 2));
 
-        let (power, power_db) = projector
-            .refresh_vector_fft_power_with_db_tensors(false)
-            .unwrap();
-        let solo_power = projector.vector_fft_power_tensor(false).unwrap();
-        let solo_power_db = projector.vector_fft_power_db_tensor(false).unwrap();
+        let (power, power_db) =
+            unwrap_ok(projector.refresh_vector_fft_power_with_db_tensors(false));
+        let solo_power = unwrap_ok(projector.vector_fft_power_tensor(false));
+        let solo_power_db = unwrap_ok(projector.vector_fft_power_db_tensor(false));
 
         assert_eq!(power.shape(), solo_power.shape());
         assert_eq!(power_db.shape(), solo_power_db.shape());
@@ -3642,28 +3737,20 @@ mod tests {
 
     #[test]
     fn projector_refresh_vector_fft_phase_tensor_matches_shape() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(FractalPatch::new(Tensor::zeros(2, 4).unwrap(), 1.0, 1.0, 0).unwrap())
-            .unwrap();
-        let mut projector = CanvasProjector::new(scheduler, 4, 2).unwrap();
-        let tensor = projector.refresh_vector_fft_phase_tensor(false).unwrap();
+        let scheduler = seeded_scheduler(2, 4);
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler, 4, 2));
+        let tensor = unwrap_ok(projector.refresh_vector_fft_phase_tensor(false));
         assert_eq!(tensor.shape(), (2, 4 * 4));
         assert!(tensor.data().iter().all(|value| value.is_finite()));
     }
 
     #[test]
     fn projector_refresh_vector_fft_polar_tensors_align_with_components() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(FractalPatch::new(Tensor::zeros(2, 4).unwrap(), 1.0, 1.0, 0).unwrap())
-            .unwrap();
-        let mut projector = CanvasProjector::new(scheduler, 4, 2).unwrap();
-        let (magnitude, phase) = projector.refresh_vector_fft_polar_tensors(false).unwrap();
-        let magnitude_only = projector
-            .refresh_vector_fft_magnitude_tensor(false)
-            .unwrap();
-        let phase_only = projector.refresh_vector_fft_phase_tensor(false).unwrap();
+        let scheduler = seeded_scheduler(2, 4);
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler, 4, 2));
+        let (magnitude, phase) = unwrap_ok(projector.refresh_vector_fft_polar_tensors(false));
+        let magnitude_only = unwrap_ok(projector.refresh_vector_fft_magnitude_tensor(false));
+        let phase_only = unwrap_ok(projector.refresh_vector_fft_phase_tensor(false));
 
         assert_eq!(magnitude.shape(), (2, 4 * 4));
         assert_eq!(phase.shape(), (2, 4 * 4));
@@ -3678,14 +3765,9 @@ mod tests {
 
     #[test]
     fn projector_refresh_vector_fft_columns_magnitude_tensor_matches_shape() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(FractalPatch::new(Tensor::zeros(3, 5).unwrap(), 1.0, 1.0, 0).unwrap())
-            .unwrap();
-        let mut projector = CanvasProjector::new(scheduler, 5, 3).unwrap();
-        let tensor = projector
-            .refresh_vector_fft_columns_magnitude_tensor(false)
-            .unwrap();
+        let scheduler = seeded_scheduler(3, 5);
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler, 5, 3));
+        let tensor = unwrap_ok(projector.refresh_vector_fft_columns_magnitude_tensor(false));
         assert_eq!(tensor.shape(), (5, 3 * 4));
         assert!(tensor
             .data()
@@ -3695,17 +3777,10 @@ mod tests {
 
     #[test]
     fn projector_refresh_vector_fft_columns_power_tensor_matches_squared_magnitude() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(FractalPatch::new(Tensor::zeros(3, 5).unwrap(), 1.0, 1.0, 0).unwrap())
-            .unwrap();
-        let mut projector = CanvasProjector::new(scheduler, 5, 3).unwrap();
-        let power = projector
-            .refresh_vector_fft_columns_power_tensor(false)
-            .unwrap();
-        let magnitude = projector
-            .refresh_vector_fft_columns_magnitude_tensor(false)
-            .unwrap();
+        let scheduler = seeded_scheduler(3, 5);
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler, 5, 3));
+        let power = unwrap_ok(projector.refresh_vector_fft_columns_power_tensor(false));
+        let magnitude = unwrap_ok(projector.refresh_vector_fft_columns_magnitude_tensor(false));
 
         assert_eq!(power.shape(), magnitude.shape());
         for (p, m) in power.data().iter().zip(magnitude.data()) {
@@ -3715,17 +3790,10 @@ mod tests {
 
     #[test]
     fn projector_refresh_vector_fft_columns_power_db_tensor_matches_logarithmic_projection() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(FractalPatch::new(Tensor::zeros(3, 5).unwrap(), 1.0, 1.0, 0).unwrap())
-            .unwrap();
-        let mut projector = CanvasProjector::new(scheduler, 5, 3).unwrap();
-        let power = projector
-            .refresh_vector_fft_columns_power_tensor(false)
-            .unwrap();
-        let power_db = projector
-            .refresh_vector_fft_columns_power_db_tensor(false)
-            .unwrap();
+        let scheduler = seeded_scheduler(3, 5);
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler, 5, 3));
+        let power = unwrap_ok(projector.refresh_vector_fft_columns_power_tensor(false));
+        let power_db = unwrap_ok(projector.refresh_vector_fft_columns_power_db_tensor(false));
 
         assert_eq!(power.shape(), power_db.shape());
         for (&linear, &db) in power.data().iter().zip(power_db.data()) {
@@ -3737,17 +3805,13 @@ mod tests {
 
     #[test]
     fn projector_refresh_vector_fft_columns_power_with_db_tensors_match_components() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(FractalPatch::new(Tensor::zeros(3, 5).unwrap(), 1.0, 1.0, 0).unwrap())
-            .unwrap();
-        let mut projector = CanvasProjector::new(scheduler, 5, 3).unwrap();
+        let scheduler = seeded_scheduler(3, 5);
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler, 5, 3));
 
-        let (power, power_db) = projector
-            .refresh_vector_fft_columns_power_with_db_tensors(false)
-            .unwrap();
-        let solo_power = projector.vector_fft_columns_power_tensor(false).unwrap();
-        let solo_power_db = projector.vector_fft_columns_power_db_tensor(false).unwrap();
+        let (power, power_db) =
+            unwrap_ok(projector.refresh_vector_fft_columns_power_with_db_tensors(false));
+        let solo_power = unwrap_ok(projector.vector_fft_columns_power_tensor(false));
+        let solo_power_db = unwrap_ok(projector.vector_fft_columns_power_db_tensor(false));
 
         assert_eq!(power.shape(), solo_power.shape());
         assert_eq!(power_db.shape(), solo_power_db.shape());
@@ -3762,34 +3826,22 @@ mod tests {
 
     #[test]
     fn projector_refresh_vector_fft_columns_phase_tensor_matches_shape() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(FractalPatch::new(Tensor::zeros(3, 5).unwrap(), 1.0, 1.0, 0).unwrap())
-            .unwrap();
-        let mut projector = CanvasProjector::new(scheduler, 5, 3).unwrap();
-        let tensor = projector
-            .refresh_vector_fft_columns_phase_tensor(false)
-            .unwrap();
+        let scheduler = seeded_scheduler(3, 5);
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler, 5, 3));
+        let tensor = unwrap_ok(projector.refresh_vector_fft_columns_phase_tensor(false));
         assert_eq!(tensor.shape(), (5, 3 * 4));
         assert!(tensor.data().iter().all(|value| value.is_finite()));
     }
 
     #[test]
     fn projector_refresh_vector_fft_columns_polar_tensors_align_with_components() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(FractalPatch::new(Tensor::zeros(3, 5).unwrap(), 1.0, 1.0, 0).unwrap())
-            .unwrap();
-        let mut projector = CanvasProjector::new(scheduler, 5, 3).unwrap();
-        let (magnitude, phase) = projector
-            .refresh_vector_fft_columns_polar_tensors(false)
-            .unwrap();
-        let magnitude_only = projector
-            .refresh_vector_fft_columns_magnitude_tensor(false)
-            .unwrap();
-        let phase_only = projector
-            .refresh_vector_fft_columns_phase_tensor(false)
-            .unwrap();
+        let scheduler = seeded_scheduler(3, 5);
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler, 5, 3));
+        let (magnitude, phase) =
+            unwrap_ok(projector.refresh_vector_fft_columns_polar_tensors(false));
+        let magnitude_only =
+            unwrap_ok(projector.refresh_vector_fft_columns_magnitude_tensor(false));
+        let phase_only = unwrap_ok(projector.refresh_vector_fft_columns_phase_tensor(false));
 
         assert_eq!(magnitude.shape(), (5, 3 * 4));
         assert_eq!(phase.shape(), (5, 3 * 4));
@@ -3804,14 +3856,9 @@ mod tests {
 
     #[test]
     fn projector_refresh_vector_fft_2d_magnitude_tensor_matches_shape() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(FractalPatch::new(Tensor::zeros(3, 5).unwrap(), 1.0, 1.0, 0).unwrap())
-            .unwrap();
-        let mut projector = CanvasProjector::new(scheduler, 5, 3).unwrap();
-        let tensor = projector
-            .refresh_vector_fft_2d_magnitude_tensor(false)
-            .unwrap();
+        let scheduler = seeded_scheduler(3, 5);
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler, 5, 3));
+        let tensor = unwrap_ok(projector.refresh_vector_fft_2d_magnitude_tensor(false));
         assert_eq!(tensor.shape(), (3, 5 * 4));
         assert!(tensor
             .data()
@@ -3821,15 +3868,10 @@ mod tests {
 
     #[test]
     fn projector_refresh_vector_fft_2d_power_tensor_matches_squared_magnitude() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(FractalPatch::new(Tensor::zeros(3, 5).unwrap(), 1.0, 1.0, 0).unwrap())
-            .unwrap();
-        let mut projector = CanvasProjector::new(scheduler, 5, 3).unwrap();
-        let power = projector.refresh_vector_fft_2d_power_tensor(false).unwrap();
-        let magnitude = projector
-            .refresh_vector_fft_2d_magnitude_tensor(false)
-            .unwrap();
+        let scheduler = seeded_scheduler(3, 5);
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler, 5, 3));
+        let power = unwrap_ok(projector.refresh_vector_fft_2d_power_tensor(false));
+        let magnitude = unwrap_ok(projector.refresh_vector_fft_2d_magnitude_tensor(false));
 
         assert_eq!(power.shape(), magnitude.shape());
         for (p, m) in power.data().iter().zip(magnitude.data()) {
@@ -3839,15 +3881,10 @@ mod tests {
 
     #[test]
     fn projector_refresh_vector_fft_2d_power_db_tensor_matches_logarithmic_projection() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(FractalPatch::new(Tensor::zeros(3, 5).unwrap(), 1.0, 1.0, 0).unwrap())
-            .unwrap();
-        let mut projector = CanvasProjector::new(scheduler, 5, 3).unwrap();
-        let power = projector.refresh_vector_fft_2d_power_tensor(false).unwrap();
-        let power_db = projector
-            .refresh_vector_fft_2d_power_db_tensor(false)
-            .unwrap();
+        let scheduler = seeded_scheduler(3, 5);
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler, 5, 3));
+        let power = unwrap_ok(projector.refresh_vector_fft_2d_power_tensor(false));
+        let power_db = unwrap_ok(projector.refresh_vector_fft_2d_power_db_tensor(false));
 
         assert_eq!(power.shape(), power_db.shape());
         for (&linear, &db) in power.data().iter().zip(power_db.data()) {
@@ -3859,17 +3896,13 @@ mod tests {
 
     #[test]
     fn projector_refresh_vector_fft_2d_power_with_db_tensors_match_components() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(FractalPatch::new(Tensor::zeros(3, 5).unwrap(), 1.0, 1.0, 0).unwrap())
-            .unwrap();
-        let mut projector = CanvasProjector::new(scheduler, 5, 3).unwrap();
+        let scheduler = seeded_scheduler(3, 5);
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler, 5, 3));
 
-        let (power, power_db) = projector
-            .refresh_vector_fft_2d_power_with_db_tensors(false)
-            .unwrap();
-        let solo_power = projector.vector_fft_2d_power_tensor(false).unwrap();
-        let solo_power_db = projector.vector_fft_2d_power_db_tensor(false).unwrap();
+        let (power, power_db) =
+            unwrap_ok(projector.refresh_vector_fft_2d_power_with_db_tensors(false));
+        let solo_power = unwrap_ok(projector.vector_fft_2d_power_tensor(false));
+        let solo_power_db = unwrap_ok(projector.vector_fft_2d_power_db_tensor(false));
 
         assert_eq!(power.shape(), solo_power.shape());
         assert_eq!(power_db.shape(), solo_power_db.shape());
@@ -3884,30 +3917,20 @@ mod tests {
 
     #[test]
     fn projector_refresh_vector_fft_2d_phase_tensor_matches_shape() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(FractalPatch::new(Tensor::zeros(3, 5).unwrap(), 1.0, 1.0, 0).unwrap())
-            .unwrap();
-        let mut projector = CanvasProjector::new(scheduler, 5, 3).unwrap();
-        let tensor = projector.refresh_vector_fft_2d_phase_tensor(false).unwrap();
+        let scheduler = seeded_scheduler(3, 5);
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler, 5, 3));
+        let tensor = unwrap_ok(projector.refresh_vector_fft_2d_phase_tensor(false));
         assert_eq!(tensor.shape(), (3, 5 * 4));
         assert!(tensor.data().iter().all(|value| value.is_finite()));
     }
 
     #[test]
     fn projector_refresh_vector_fft_2d_polar_tensors_align_with_components() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(FractalPatch::new(Tensor::zeros(3, 5).unwrap(), 1.0, 1.0, 0).unwrap())
-            .unwrap();
-        let mut projector = CanvasProjector::new(scheduler, 5, 3).unwrap();
-        let (magnitude, phase) = projector
-            .refresh_vector_fft_2d_polar_tensors(false)
-            .unwrap();
-        let magnitude_only = projector
-            .refresh_vector_fft_2d_magnitude_tensor(false)
-            .unwrap();
-        let phase_only = projector.refresh_vector_fft_2d_phase_tensor(false).unwrap();
+        let scheduler = seeded_scheduler(3, 5);
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler, 5, 3));
+        let (magnitude, phase) = unwrap_ok(projector.refresh_vector_fft_2d_polar_tensors(false));
+        let magnitude_only = unwrap_ok(projector.refresh_vector_fft_2d_magnitude_tensor(false));
+        let phase_only = unwrap_ok(projector.refresh_vector_fft_2d_phase_tensor(false));
 
         assert_eq!(magnitude.shape(), (3, 5 * 4));
         assert_eq!(phase.shape(), (3, 5 * 4));
@@ -3922,41 +3945,35 @@ mod tests {
 
     #[test]
     fn projector_refresh_vector_fft_2d_tensor_matches_shape() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(FractalPatch::new(Tensor::zeros(3, 5).unwrap(), 1.0, 1.0, 0).unwrap())
-            .unwrap();
-        let mut projector = CanvasProjector::new(scheduler, 5, 3).unwrap();
-        let tensor = projector.refresh_vector_fft_2d_tensor(false).unwrap();
+        let scheduler = seeded_scheduler(3, 5);
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler, 5, 3));
+        let tensor = unwrap_ok(projector.refresh_vector_fft_2d_tensor(false));
         assert_eq!(tensor.shape(), (3, 5 * 8));
     }
 
     #[test]
     fn projector_accumulates_into_gradients() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(FractalPatch::new(Tensor::zeros(2, 2).unwrap(), 1.0, 1.0, 0).unwrap())
-            .unwrap();
-        let mut projector = CanvasProjector::new(scheduler, 2, 2).unwrap();
-        let mut hypergrad = AmegaHypergrad::new(-1.0, 0.05, 2, 2).unwrap();
-        let mut realgrad = AmegaRealgrad::new(0.05, 2, 2).unwrap();
-        projector.accumulate_hypergrad(&mut hypergrad).unwrap();
-        projector.accumulate_realgrad(&mut realgrad).unwrap();
+        let scheduler = seeded_scheduler(2, 2);
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler, 2, 2));
+        let mut hypergrad = unwrap_ok(AmegaHypergrad::new(-1.0, 0.05, 2, 2));
+        let mut realgrad = unwrap_ok(AmegaRealgrad::new(0.05, 2, 2));
+        unwrap_ok(projector.accumulate_hypergrad(&mut hypergrad));
+        unwrap_ok(projector.accumulate_realgrad(&mut realgrad));
         assert!(hypergrad.gradient().iter().all(|value| value.is_finite()));
         assert_eq!(realgrad.gradient().len(), 4);
     }
 
     #[test]
     fn projector_surfaces_gradient_summary() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(
-                FractalPatch::new(tensor_with_shape(2, 2, &[1.0, -2.0, 0.5, 0.0]), 1.0, 1.0, 0)
-                    .unwrap(),
-            )
-            .unwrap();
-        let mut projector = CanvasProjector::new(scheduler, 2, 2).unwrap();
-        let (hyper, real) = projector.gradient_summary(-1.0).unwrap();
+        let patch = unwrap_ok(FractalPatch::new(
+            tensor_with_shape(2, 2, &[1.0, -2.0, 0.5, 0.0]),
+            1.0,
+            1.0,
+            0,
+        ));
+        let scheduler = scheduler_with_patch(patch);
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler, 2, 2));
+        let (hyper, real) = unwrap_ok(projector.gradient_summary(-1.0));
         assert_eq!(hyper.count(), 4);
         assert_eq!(real.count(), 4);
         assert!(hyper.l2() > 0.0);
@@ -3969,35 +3986,30 @@ mod tests {
 
     #[test]
     fn projector_surfaces_desire_interpretation() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(
-                FractalPatch::new(tensor_with_shape(2, 2, &[0.2, -0.1, 0.4, 0.3]), 1.0, 1.0, 0)
-                    .unwrap(),
-            )
-            .unwrap();
-        let mut projector = CanvasProjector::new(scheduler, 2, 2).unwrap();
-        let interpretation = projector.gradient_interpretation(-1.0).unwrap();
+        let patch = unwrap_ok(FractalPatch::new(
+            tensor_with_shape(2, 2, &[0.2, -0.1, 0.4, 0.3]),
+            1.0,
+            1.0,
+            0,
+        ));
+        let scheduler = scheduler_with_patch(patch);
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler, 2, 2));
+        let interpretation = unwrap_ok(projector.gradient_interpretation(-1.0));
         assert!(interpretation.penalty_gain() >= 1.0);
         assert!(interpretation.bias_mix() > 0.0);
     }
 
     #[test]
     fn projector_surfaces_desire_control() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(
-                FractalPatch::new(
-                    tensor_with_shape(2, 2, &[0.25, 0.1, -0.35, 0.6]),
-                    1.0,
-                    1.0,
-                    0,
-                )
-                .unwrap(),
-            )
-            .unwrap();
-        let mut projector = CanvasProjector::new(scheduler, 2, 2).unwrap();
-        let control = projector.gradient_control(-1.0).unwrap();
+        let patch = unwrap_ok(FractalPatch::new(
+            tensor_with_shape(2, 2, &[0.25, 0.1, -0.35, 0.6]),
+            1.0,
+            1.0,
+            0,
+        ));
+        let scheduler = scheduler_with_patch(patch);
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler, 2, 2));
+        let control = unwrap_ok(projector.gradient_control(-1.0));
         assert!(control.penalty_gain() >= 1.0);
         assert!(control.hyper_rate_scale().is_finite());
         let uniform = projector.hypergrad_operator_uniform_from_control(&control);
@@ -4015,14 +4027,14 @@ mod tests {
 
     #[test]
     fn hypergrad_operator_surfaces_wgsl_and_metadata() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(
-                FractalPatch::new(tensor_with_shape(2, 2, &[0.1, 0.2, 0.3, 0.4]), 1.0, 1.0, 0)
-                    .unwrap(),
-            )
-            .unwrap();
-        let projector = CanvasProjector::new(scheduler, 2, 2).unwrap();
+        let patch = unwrap_ok(FractalPatch::new(
+            tensor_with_shape(2, 2, &[0.1, 0.2, 0.3, 0.4]),
+            1.0,
+            1.0,
+            0,
+        ));
+        let scheduler = scheduler_with_patch(patch);
+        let projector = unwrap_ok(CanvasProjector::new(scheduler, 2, 2));
         let shader = projector.hypergrad_operator_wgsl(false);
         assert!(shader.contains("CanvasHypergradParams"));
         assert!(shader.contains("width 2"));
@@ -4037,23 +4049,17 @@ mod tests {
 
     #[test]
     fn projector_refresh_vector_fft_matches_canvas_shape() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(FractalPatch::new(Tensor::zeros(2, 2).unwrap(), 1.0, 1.0, 0).unwrap())
-            .unwrap();
-        let mut projector = CanvasProjector::new(scheduler, 2, 2).unwrap();
-        let spectrum = projector.refresh_vector_fft(false).unwrap();
+        let scheduler = seeded_scheduler(2, 2);
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler, 2, 2));
+        let spectrum = unwrap_ok(projector.refresh_vector_fft(false));
         assert_eq!(spectrum.len(), 2 * 2 * 8);
     }
 
     #[test]
     fn projector_refresh_vector_fft_2d_matches_canvas_shape() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(FractalPatch::new(Tensor::zeros(2, 2).unwrap(), 1.0, 1.0, 0).unwrap())
-            .unwrap();
-        let mut projector = CanvasProjector::new(scheduler, 2, 2).unwrap();
-        let spectrum = projector.refresh_vector_fft_2d(false).unwrap();
+        let scheduler = seeded_scheduler(2, 2);
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler, 2, 2));
+        let spectrum = unwrap_ok(projector.refresh_vector_fft_2d(false));
         assert_eq!(spectrum.len(), 2 * 2 * 8);
     }
 
@@ -4067,40 +4073,41 @@ mod tests {
 
     #[test]
     fn projector_refreshes_without_extra_allocations() {
-        let scheduler = UringFractalScheduler::new(8).unwrap();
-        scheduler
-            .push(FractalPatch::new(tensor(&[1.0, 0.0, 0.5, 1.0]), 1.5, 1.0, 0).unwrap())
-            .unwrap();
-        scheduler
-            .push(FractalPatch::new(tensor(&[0.25, 1.0, 0.75, 0.5]), 0.75, 0.5, 1).unwrap())
-            .unwrap();
+        let scheduler = unwrap_ok(UringFractalScheduler::new(8));
+        unwrap_ok(scheduler.push(unwrap_ok(FractalPatch::new(
+            tensor(&[1.0, 0.0, 0.5, 1.0]),
+            1.5,
+            1.0,
+            0,
+        ))));
+        unwrap_ok(scheduler.push(unwrap_ok(FractalPatch::new(
+            tensor(&[0.25, 1.0, 0.75, 0.5]),
+            0.75,
+            0.5,
+            1,
+        ))));
 
-        let mut projector = CanvasProjector::new(scheduler.clone(), 4, 1).unwrap();
-        let first = projector.refresh().unwrap().as_ptr();
-        let second = projector.refresh().unwrap().as_ptr();
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler.clone(), 4, 1));
+        let first = unwrap_ok(projector.refresh()).as_ptr();
+        let second = unwrap_ok(projector.refresh()).as_ptr();
         assert_eq!(first, second);
         assert_eq!(projector.surface().as_rgba().len(), 4 * 4);
     }
 
     #[test]
     fn emit_zspace_patch_respects_canvas_shape() {
-        let scheduler = UringFractalScheduler::new(4).unwrap();
-        scheduler
-            .push(
-                FractalPatch::new(
-                    tensor_with_shape(2, 2, &[1.0, 0.5, 0.25, 0.75]),
-                    1.0,
-                    1.0,
-                    0,
-                )
-                .unwrap(),
-            )
-            .unwrap();
+        let patch = unwrap_ok(FractalPatch::new(
+            tensor_with_shape(2, 2, &[1.0, 0.5, 0.25, 0.75]),
+            1.0,
+            1.0,
+            0,
+        ));
+        let scheduler = scheduler_with_patch(patch);
 
-        let mut projector = CanvasProjector::new(scheduler, 2, 2).unwrap();
-        let patch = projector.emit_zspace_patch(1.0, 1.0, 2).unwrap();
-        assert_eq!(patch.relation().shape(), (2, 2));
-        let data = patch.relation().data();
+        let mut projector = unwrap_ok(CanvasProjector::new(scheduler, 2, 2));
+        let emitted = unwrap_ok(projector.emit_zspace_patch(1.0, 1.0, 2));
+        assert_eq!(emitted.relation().shape(), (2, 2));
+        let data = emitted.relation().data();
         assert_eq!(data.len(), 4);
     }
 }

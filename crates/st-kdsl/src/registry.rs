@@ -280,7 +280,7 @@ impl AutotuneRegistry {
 
     pub fn record(&mut self, key: AutotuneKey, sample: TelemetrySample) {
         let cap = self.capacity;
-        let log = self.logs.entry(key).or_insert_with(TelemetryLog::new);
+        let log = self.logs.entry(key).or_default();
         log.push_bounded(sample, cap);
     }
 
