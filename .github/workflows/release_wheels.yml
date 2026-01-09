@@ -29,6 +29,14 @@ jobs:
       - name: Build wheels (CPU+WGPU)
         run: |
           maturin build -m bindings/st-py/Cargo.toml --release --features wgpu,logic,kdsl
+      - name: Smoke test wheel import
+        shell: bash
+        working-directory: target/wheels
+        env:
+          PYTHONNOUSERSITE: "1"
+        run: |
+          python -m pip install --force-reinstall --no-cache-dir spiraltorch-*.whl
+          python -c "import spiraltorch as st; print('import ok:', len(getattr(st, '__all__', [])))"
       - name: Upload wheels (artifact)
         uses: actions/upload-artifact@v4
         with:

@@ -25,6 +25,13 @@ jobs:
           python -m pip install -U pip wheel maturin
           # Example: feature flags are illustrative; adapt to your crate layout.
           maturin build --release -m bindings/st-py/Cargo.toml --features "${{ matrix.feat }}"
+      - name: Smoke test wheel import
+        working-directory: target/wheels
+        env:
+          PYTHONNOUSERSITE: "1"
+        run: |
+          python -m pip install --force-reinstall --no-cache-dir spiraltorch-*.whl
+          python -c "import spiraltorch as st; print('import ok:', len(getattr(st, '__all__', [])))"
       - name: Upload
         uses: actions/upload-artifact@v4
         with:

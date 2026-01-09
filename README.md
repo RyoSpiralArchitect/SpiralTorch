@@ -308,6 +308,8 @@ maturin build -m bindings/st-py/Cargo.toml --release --features hip
 pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
 ```
 
+If your local `python` aborts during startup because of a third-party `sitecustomize.py`, rerun the commands above with `PYTHONNOUSERSITE=1` (or `python -s`).
+
 ---
 
 ## Python quickstart (wheel)
