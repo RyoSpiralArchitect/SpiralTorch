@@ -10,7 +10,7 @@
 //! its determinant, closed-form computation of the scalar invariants `α` and
 //! `β`, and causal classification of the resulting kernel vector.
 
-use std::{f64::consts::PI, fmt};
+use std::{cmp::Ordering, f64::consts::PI, fmt};
 
 use nalgebra as na;
 use num_complex::Complex;
@@ -382,6 +382,10 @@ impl IntersectionEllipse {
 
 /// Possible shapes of the intersection between `𝒬_α` and `𝒠_β`.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "Public API; boxing the ellipse would be a breaking change"
+)]
 pub enum IntersectionCurve {
     /// No real intersection exists or it is degenerate beyond the supported
     /// model (e.g. hyperbolic).
@@ -460,9 +464,9 @@ impl Matrix3 {
 
     pub fn transpose(&self) -> Self {
         let mut result = [[0.0; 3]; 3];
-        for i in 0..3 {
-            for j in 0..3 {
-                result[i][j] = self.data[j][i];
+        for (i, row) in result.iter_mut().enumerate() {
+            for (j, value) in row.iter_mut().enumerate() {
+                *value = self.data[j][i];
             }
         }
         Self { data: result }
@@ -505,9 +509,9 @@ impl Matrix3 {
 
     pub fn scale(&self, scalar: f64) -> Self {
         let mut out = [[0.0; 3]; 3];
-        for i in 0..3 {
-            for j in 0..3 {
-                out[i][j] = self.data[i][j] * scalar;
+        for (i, row) in out.iter_mut().enumerate() {
+            for (j, value) in row.iter_mut().enumerate() {
+                *value = self.data[i][j] * scalar;
             }
         }
         Self { data: out }
@@ -515,9 +519,9 @@ impl Matrix3 {
 
     pub fn add(&self, rhs: &Self) -> Self {
         let mut out = [[0.0; 3]; 3];
-        for i in 0..3 {
-            for j in 0..3 {
-                out[i][j] = self.data[i][j] + rhs.data[i][j];
+        for (i, row) in out.iter_mut().enumerate() {
+            for (j, value) in row.iter_mut().enumerate() {
+                *value = self.data[i][j] + rhs.data[i][j];
             }
         }
         Self { data: out }
@@ -525,9 +529,9 @@ impl Matrix3 {
 
     pub fn sub(&self, rhs: &Self) -> Self {
         let mut out = [[0.0; 3]; 3];
-        for i in 0..3 {
-            for j in 0..3 {
-                out[i][j] = self.data[i][j] - rhs.data[i][j];
+        for (i, row) in out.iter_mut().enumerate() {
+            for (j, value) in row.iter_mut().enumerate() {
+                *value = self.data[i][j] - rhs.data[i][j];
             }
         }
         Self { data: out }
@@ -535,13 +539,13 @@ impl Matrix3 {
 
     pub fn mul(&self, rhs: &Self) -> Self {
         let mut out = [[0.0; 3]; 3];
-        for i in 0..3 {
-            for j in 0..3 {
+        for (i, row) in out.iter_mut().enumerate() {
+            for (j, value) in row.iter_mut().enumerate() {
                 let mut acc = 0.0;
                 for k in 0..3 {
                     acc += self.data[i][k] * rhs.data[k][j];
                 }
-                out[i][j] = acc;
+                *value = acc;
             }
         }
         Self { data: out }
@@ -549,17 +553,17 @@ impl Matrix3 {
 
     pub fn mul_vec(&self, v: &Vec3) -> Vec3 {
         let mut out = [0.0; 3];
-        for i in 0..3 {
-            out[i] = self.data[i][0] * v[0] + self.data[i][1] * v[1] + self.data[i][2] * v[2];
+        for (i, value) in out.iter_mut().enumerate() {
+            *value = self.data[i][0] * v[0] + self.data[i][1] * v[1] + self.data[i][2] * v[2];
         }
         out
     }
 
     pub fn symmetrize(&self) -> Self {
         let mut out = [[0.0; 3]; 3];
-        for i in 0..3 {
-            for j in 0..3 {
-                out[i][j] = 0.5 * (self.data[i][j] + self.data[j][i]);
+        for (i, row) in out.iter_mut().enumerate() {
+            for (j, value) in row.iter_mut().enumerate() {
+                *value = 0.5 * (self.data[i][j] + self.data[j][i]);
             }
         }
         Self { data: out }
@@ -567,9 +571,9 @@ impl Matrix3 {
 
     pub fn outer(a: &Vec3, b: &Vec3) -> Self {
         let mut out = [[0.0; 3]; 3];
-        for i in 0..3 {
-            for j in 0..3 {
-                out[i][j] = a[i] * b[j];
+        for (i, row) in out.iter_mut().enumerate() {
+            for (j, value) in row.iter_mut().enumerate() {
+                *value = a[i] * b[j];
             }
         }
         Self { data: out }
@@ -653,15 +657,15 @@ impl fmt::Display for Matrix3 {
 fn minor(m: &[[f64; 3]; 3], row: usize, col: usize) -> f64 {
     let mut vals = [0.0; 4];
     let mut idx = 0;
-    for i in 0..3 {
+    for (i, row_values) in m.iter().enumerate() {
         if i == row {
             continue;
         }
-        for j in 0..3 {
+        for (j, value) in row_values.iter().enumerate() {
             if j == col {
                 continue;
             }
-            vals[idx] = m[i][j];
+            vals[idx] = *value;
             idx += 1;
         }
     }
@@ -981,7 +985,7 @@ impl SpinoTensorKernel {
         let det_a = self.a.determinant();
         let omega_a = self.a.mul_vec(&self.omega);
         let numerator = self.s0 * (det_a + dot(&self.omega, &omega_a));
-        if !(numerator > 0.0) {
+        if numerator.partial_cmp(&0.0) != Some(Ordering::Greater) {
             return None;
         }
         let k = self
@@ -1002,7 +1006,7 @@ impl SpinoTensorKernel {
             return None;
         }
         let magnitude_squared = numerator / lambda_max;
-        if !(magnitude_squared > 0.0) {
+        if magnitude_squared.partial_cmp(&0.0) != Some(Ordering::Greater) {
             return None;
         }
         let direction = vectors.column(index);
@@ -1047,7 +1051,7 @@ impl SpinoTensorKernel {
                 return None;
             }
             let magnitude_squared = mu / lambda;
-            if !(magnitude_squared > 0.0) {
+            if magnitude_squared.partial_cmp(&0.0) != Some(Ordering::Greater) {
                 return None;
             }
             let direction = vectors.column(index);
@@ -1074,7 +1078,7 @@ impl SpinoTensorKernel {
                 return None;
             }
             let magnitude_squared = mu / lambda;
-            if !(magnitude_squared > 0.0) {
+            if magnitude_squared.partial_cmp(&0.0) != Some(Ordering::Greater) {
                 return None;
             }
             let direction = vectors.column(index);

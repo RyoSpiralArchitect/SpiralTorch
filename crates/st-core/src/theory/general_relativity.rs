@@ -470,7 +470,7 @@ impl LorentzianMetric {
 
     /// Returns a rescaled copy of the current metric.
     pub fn scaled(&self, scale: f64) -> Result<Self, MetricError> {
-        Self::try_scaled(self.components.clone(), scale)
+        Self::try_scaled(self.components, scale)
     }
 
     /// Returns a reference to the metric matrix.
@@ -837,7 +837,7 @@ impl ProductMetric {
 
     /// Returns the spacetime block after applying any warp factor.
     pub fn effective_base_metric(&self) -> Result<LorentzianMetric, MetricError> {
-        let mut components = self.base.components().clone();
+        let mut components = *self.base.components();
         if let Some(warp) = self.warp {
             components *= warp.scale();
         }
@@ -1196,10 +1196,10 @@ impl MetricDerivatives {
         F: FnMut(usize, usize, usize) -> f64,
     {
         let mut partials = [[[0.0; DIM]; DIM]; DIM];
-        for rho in 0..DIM {
-            for mu in 0..DIM {
-                for nu in 0..DIM {
-                    partials[rho][mu][nu] = f(rho, mu, nu);
+        for (rho, partials_rho) in partials.iter_mut().enumerate() {
+            for (mu, partials_mu) in partials_rho.iter_mut().enumerate() {
+                for (nu, value) in partials_mu.iter_mut().enumerate() {
+                    *value = f(rho, mu, nu);
                 }
             }
         }
@@ -1232,11 +1232,11 @@ impl MetricSecondDerivatives {
         F: FnMut(usize, usize, usize, usize) -> f64,
     {
         let mut partials = [[[[0.0; DIM]; DIM]; DIM]; DIM];
-        for lambda in 0..DIM {
-            for rho in 0..DIM {
-                for mu in 0..DIM {
-                    for nu in 0..DIM {
-                        partials[lambda][rho][mu][nu] = f(lambda, rho, mu, nu);
+        for (lambda, partials_lambda) in partials.iter_mut().enumerate() {
+            for (rho, partials_rho) in partials_lambda.iter_mut().enumerate() {
+                for (mu, partials_mu) in partials_rho.iter_mut().enumerate() {
+                    for (nu, value) in partials_mu.iter_mut().enumerate() {
+                        *value = f(lambda, rho, mu, nu);
                     }
                 }
             }
@@ -1263,7 +1263,7 @@ where
     F: FnMut(&[f64; DIM]) -> Matrix4<f64>,
 {
     if let Some(value) = cache.get(&offset) {
-        return value.clone();
+        return *value;
     }
 
     let mut coords = point;
@@ -1272,7 +1272,7 @@ where
     }
 
     let matrix = metric_fn(&coords);
-    cache.insert(offset, matrix.clone());
+    cache.insert(offset, matrix);
     matrix
 }
 
@@ -1288,7 +1288,7 @@ where
     assert!(step > 0.0, "finite difference step must be positive");
 
     let base = metric_fn(&point);
-    let metric = LorentzianMetric::try_new(base.clone())?;
+    let metric = LorentzianMetric::try_new(base)?;
 
     let mut cache: HashMap<Offset, Matrix4<f64>> = HashMap::new();
     cache.insert([0_i8; DIM], base);
@@ -1310,7 +1310,7 @@ where
         }
     }
 
-    let base_matrix = metric.components().clone();
+    let base_matrix = *metric.components();
     let mut second = [[[[0.0; DIM]; DIM]; DIM]; DIM];
     for lambda in 0..DIM {
         for rho in 0..DIM {
@@ -1381,9 +1381,9 @@ impl LeviCivitaConnection {
         let mut coefficients = [[[0.0; DIM]; DIM]; DIM];
         let g_inv = metric.inverse();
 
-        for rho in 0..DIM {
-            for mu in 0..DIM {
-                for nu in 0..DIM {
+        for (rho, coefficients_rho) in coefficients.iter_mut().enumerate() {
+            for (mu, coefficients_mu) in coefficients_rho.iter_mut().enumerate() {
+                for (nu, value) in coefficients_mu.iter_mut().enumerate() {
                     let mut sum = 0.0;
                     for sigma in 0..DIM {
                         let term = derivatives.partial(mu, nu, sigma)
@@ -1391,7 +1391,7 @@ impl LeviCivitaConnection {
                             - derivatives.partial(sigma, mu, nu);
                         sum += g_inv[(rho, sigma)] * term;
                     }
-                    coefficients[rho][mu][nu] = 0.5 * sum;
+                    *value = 0.5 * sum;
                 }
             }
         }
@@ -1426,7 +1426,7 @@ impl ConnectionDerivatives {
         let mut partials = [[[[0.0; DIM]; DIM]; DIM]; DIM];
         let g_inv = metric.inverse();
 
-        for lambda in 0..DIM {
+        for (lambda, partials_lambda) in partials.iter_mut().enumerate() {
             // ∂_λ g^{ρσ} = - g^{ρα} g^{σβ} ∂_λ g_{αβ}
             let mut d_inverse = [[0.0; DIM]; DIM];
             for rho in 0..DIM {
@@ -1443,9 +1443,9 @@ impl ConnectionDerivatives {
                 }
             }
 
-            for rho in 0..DIM {
-                for mu in 0..DIM {
-                    for nu in 0..DIM {
+            for (rho, partials_rho) in partials_lambda.iter_mut().enumerate() {
+                for (mu, partials_mu) in partials_rho.iter_mut().enumerate() {
+                    for (nu, value) in partials_mu.iter_mut().enumerate() {
                         let mut sum = 0.0;
                         for sigma in 0..DIM {
                             let first_sym = first.partial(mu, nu, sigma)
@@ -1457,7 +1457,7 @@ impl ConnectionDerivatives {
                             sum += d_inverse[rho][sigma] * first_sym
                                 + g_inv[(rho, sigma)] * second_sym;
                         }
-                        partials[lambda][rho][mu][nu] = 0.5 * sum;
+                        *value = 0.5 * sum;
                     }
                 }
             }
@@ -1490,17 +1490,19 @@ impl RiemannTensor {
         for sigma in 0..DIM {
             for mu in 0..DIM {
                 for nu in 0..DIM {
-                    for rho in 0..DIM {
-                        let mut value = derivatives.partial(nu, sigma, mu, rho)
-                            - derivatives.partial(rho, sigma, mu, nu);
-                        for lambda in 0..DIM {
-                            value += gamma[sigma][lambda][nu] * gamma[lambda][mu][rho]
-                                - gamma[sigma][lambda][rho] * gamma[lambda][mu][nu];
-                        }
-                        components[sigma][mu][nu][rho] = value;
-                    }
-                }
-            }
+	                    for rho in 0..DIM {
+	                        let mut value = derivatives.partial(nu, sigma, mu, rho)
+	                            - derivatives.partial(rho, sigma, mu, nu);
+	                        let gamma_sigma = &gamma[sigma];
+	                        for (lambda, gamma_sigma_lambda) in gamma_sigma.iter().enumerate() {
+	                            let gamma_lambda = &gamma[lambda];
+	                            value += gamma_sigma_lambda[nu] * gamma_lambda[mu][rho]
+	                                - gamma_sigma_lambda[rho] * gamma_lambda[mu][nu];
+	                        }
+	                        components[sigma][mu][nu][rho] = value;
+	                    }
+	                }
+	            }
         }
 
         Self { components }
@@ -1547,13 +1549,13 @@ impl RicciTensor {
     /// Contracts R^σ_{ μ σ ν }.
     pub fn from_riemann(riemann: &RiemannTensor) -> Self {
         let mut components = [[0.0; DIM]; DIM];
-        for mu in 0..DIM {
-            for nu in 0..DIM {
+        for (mu, components_mu) in components.iter_mut().enumerate() {
+            for (nu, value) in components_mu.iter_mut().enumerate() {
                 let mut sum = 0.0;
                 for sigma in 0..DIM {
                     sum += riemann.component(sigma, mu, sigma, nu);
                 }
-                components[mu][nu] = sum;
+                *value = sum;
             }
         }
         Self { components }
@@ -1597,20 +1599,20 @@ impl RicciTensor {
     pub fn contracted_square(&self, metric: &LorentzianMetric) -> f64 {
         let mut raised = [[0.0; DIM]; DIM];
         let g_inv = metric.inverse();
-        for mu in 0..DIM {
-            for nu in 0..DIM {
+        for (mu, raised_mu) in raised.iter_mut().enumerate() {
+            for (nu, value) in raised_mu.iter_mut().enumerate() {
                 let mut sum = 0.0;
                 for alpha in 0..DIM {
                     sum += g_inv[(mu, alpha)] * self.components[alpha][nu];
                 }
-                raised[mu][nu] = sum;
+                *value = sum;
             }
         }
 
         let mut contraction = 0.0;
-        for mu in 0..DIM {
-            for nu in 0..DIM {
-                contraction += self.components[mu][nu] * raised[mu][nu];
+        for (row, raised_row) in self.components.iter().zip(raised.iter()) {
+            for (component, raised_component) in row.iter().zip(raised_row.iter()) {
+                contraction += component * raised_component;
             }
         }
         contraction
@@ -1660,9 +1662,9 @@ pub struct EnergyMomentumTensor {
 impl EnergyMomentumTensor {
     /// Constructs a symmetric energy-momentum tensor.
     pub fn try_new(components: [[f64; DIM]; DIM], tolerance: f64) -> Result<Self, MetricError> {
-        for mu in 0..DIM {
-            for nu in 0..DIM {
-                if (components[mu][nu] - components[nu][mu]).abs() > tolerance {
+        for (mu, row) in components.iter().enumerate() {
+            for (nu, value) in row.iter().enumerate() {
+                if (*value - components[nu][mu]).abs() > tolerance {
                     return Err(MetricError::NonSymmetric(tolerance));
                 }
             }
@@ -1743,9 +1745,9 @@ impl FieldEquation {
     ) -> [[f64; DIM]; DIM] {
         let prefactor = constants.einstein_prefactor();
         let mut residual = [[0.0; DIM]; DIM];
-        for mu in 0..DIM {
-            for nu in 0..DIM {
-                residual[mu][nu] = self.lhs[mu][nu] - prefactor * energy_momentum.component(mu, nu);
+        for (mu, residual_mu) in residual.iter_mut().enumerate() {
+            for (nu, value) in residual_mu.iter_mut().enumerate() {
+                *value = self.lhs[mu][nu] - prefactor * energy_momentum.component(mu, nu);
             }
         }
         residual
@@ -1944,15 +1946,15 @@ impl CurvatureDiagnostics {
 
         // Lower the first index of Riemann: R_{μνρσ} = g_{μα} R^α_{νρσ}.
         let mut riemann_lower = [[[[0.0; DIM]; DIM]; DIM]; DIM];
-        for mu in 0..DIM {
-            for nu in 0..DIM {
-                for rho in 0..DIM {
-                    for sigma in 0..DIM {
+        for (mu, riemann_mu) in riemann_lower.iter_mut().enumerate() {
+            for (nu, riemann_nu) in riemann_mu.iter_mut().enumerate() {
+                for (rho, riemann_rho) in riemann_nu.iter_mut().enumerate() {
+                    for (sigma, value) in riemann_rho.iter_mut().enumerate() {
                         let mut sum = 0.0;
                         for alpha in 0..DIM {
                             sum += g[(mu, alpha)] * riemann.component(alpha, nu, rho, sigma);
                         }
-                        riemann_lower[mu][nu][rho][sigma] = sum;
+                        *value = sum;
                     }
                 }
             }
@@ -2001,12 +2003,11 @@ impl CurvatureDiagnostics {
         let volume = metric.volume_element().unwrap_or_else(|| det.abs().sqrt());
 
         let mut epsilon_lower = [[[[0.0; DIM]; DIM]; DIM]; DIM];
-        for mu in 0..DIM {
-            for nu in 0..DIM {
-                for rho in 0..DIM {
-                    for sigma in 0..DIM {
-                        epsilon_lower[mu][nu][rho][sigma] =
-                            volume * levi_civita_symbol([mu, nu, rho, sigma]);
+        for (mu, epsilon_mu) in epsilon_lower.iter_mut().enumerate() {
+            for (nu, epsilon_nu) in epsilon_mu.iter_mut().enumerate() {
+                for (rho, epsilon_rho) in epsilon_nu.iter_mut().enumerate() {
+                    for (sigma, value) in epsilon_rho.iter_mut().enumerate() {
+                        *value = volume * levi_civita_symbol([mu, nu, rho, sigma]);
                     }
                 }
             }

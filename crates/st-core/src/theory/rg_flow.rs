@@ -245,7 +245,7 @@ impl RgFlowLattice {
         let series = evaluate_weighted_series_many(weighted, &z_values)?;
         Ok(series
             .into_iter()
-            .zip(prefactors.into_iter())
+            .zip(prefactors)
             .map(|(series, prefactor)| prefactor * series)
             .collect())
     }

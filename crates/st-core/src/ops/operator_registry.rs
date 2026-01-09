@@ -270,7 +270,7 @@ static GLOBAL_OPERATOR_REGISTRY: std::sync::OnceLock<OperatorRegistry> = std::sy
 
 /// Get the global operator registry.
 pub fn global_operator_registry() -> &'static OperatorRegistry {
-    GLOBAL_OPERATOR_REGISTRY.get_or_init(|| OperatorRegistry::new())
+    GLOBAL_OPERATOR_REGISTRY.get_or_init(OperatorRegistry::new)
 }
 
 #[cfg(test)]

@@ -47,7 +47,7 @@ pub fn estimate_sheet_index(samples: &[f32], sheet_hint: usize) -> Option<(usize
         return None;
     }
     let sheet_count = sheet_hint.max(1).min(samples.len());
-    let window = (samples.len() + sheet_count - 1) / sheet_count;
+    let window = samples.len().div_ceil(sheet_count);
     let total_energy = samples.iter().map(|value| value.abs()).sum::<f32>();
     if total_energy <= f32::EPSILON {
         return Some((0, 0.0));

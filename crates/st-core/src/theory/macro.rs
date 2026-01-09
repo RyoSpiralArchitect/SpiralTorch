@@ -92,9 +92,10 @@ impl SurfaceTerm {
 }
 
 /// Anisotropy descriptor for γ(ν).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub enum AnisotropySpec {
     /// γ(ν) ≡ 1 (isotropic surface tension).
+    #[default]
     Isotropic,
     /// γ(ν) expanded in planar Fourier modes (useful for 2D crystals).
     Fourier { modes: Vec<(usize, f64)> },
@@ -105,12 +106,6 @@ pub enum AnisotropySpec {
     },
     /// Free-form description when the concrete implementation lives elsewhere.
     Custom { note: String },
-}
-
-impl Default for AnisotropySpec {
-    fn default() -> Self {
-        Self::Isotropic
-    }
 }
 
 /// Bending/regularisation contribution (S2).
@@ -370,19 +365,19 @@ impl MacroKinetics {
         self.external_forces
             .iter()
             .map(|force| match *force {
-                ExternalForce::PressureJump(delta_p) => delta_p as f64,
+                ExternalForce::PressureJump(delta_p) => delta_p,
                 ExternalForce::BulkPotential(value)
                 | ExternalForce::Nonlocal(value)
                 | ExternalForce::Custom {
                     magnitude: value, ..
-                } => value as f64,
+                } => value,
                 ExternalForce::ContactAngle {
                     equilibrium,
                     friction,
                 } => {
                     if let Some(pulse) = pulse {
-                        let deviation = pulse.z_bias as f64 - equilibrium as f64;
-                        -(friction as f64) * deviation
+                        let deviation = pulse.z_bias as f64 - equilibrium;
+                        -friction * deviation
                     } else {
                         0.0
                     }
@@ -1007,7 +1002,7 @@ impl MacroZBridge {
     }
 
     fn average_field(field: &ArrayD<f32>) -> f64 {
-        if field.len() == 0 {
+        if field.is_empty() {
             0.0
         } else {
             field.iter().map(|v| *v as f64).sum::<f64>() / field.len() as f64
@@ -1047,18 +1042,19 @@ impl MacroZBridge {
         let mut total = 0.0f64;
         for idx in indices(signature.r_machine.raw_dim()) {
             let idx_dyn = IxDyn(idx.slice());
-            let weight = weights
-                .map(|w| w[&idx_dyn] as f64)
-                .unwrap_or_else(|| signature.r_machine[&idx_dyn] as f64);
+            let weight = match weights {
+                Some(weights) => weights[&idx_dyn] as f64,
+                None => signature.r_machine[&idx_dyn] as f64,
+            };
             if weight <= 0.0 {
                 continue;
             }
             total += weight;
-            for axis in 0..components {
+            for (axis, slot) in accum.iter_mut().enumerate() {
                 let mut orient_idx = Vec::with_capacity(orient.ndim());
                 orient_idx.push(axis);
                 orient_idx.extend_from_slice(idx.slice());
-                accum[axis] += orient[IxDyn(&orient_idx)] as f64 * weight;
+                *slot += orient[IxDyn(&orient_idx)] as f64 * weight;
             }
         }
 
@@ -1089,7 +1085,7 @@ impl MacroZBridge {
                     return None;
                 }
                 let nx = normal.get(1).copied().unwrap_or(0.0);
-                let ny = normal.get(0).copied().unwrap_or(0.0);
+                let ny = normal.first().copied().unwrap_or(0.0);
                 if nx.abs() + ny.abs() <= 1e-12 {
                     return None;
                 }
@@ -1117,7 +1113,7 @@ impl MacroZBridge {
         let mut weighted = 0.0f64;
         let mut sigma_total = 0.0f64;
         for term in &self.template.functional.surface_terms {
-            let sigma = term.sigma as f64;
+            let sigma = term.sigma;
             if sigma <= 0.0 {
                 continue;
             }

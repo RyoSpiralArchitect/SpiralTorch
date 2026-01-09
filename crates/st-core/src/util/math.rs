@@ -59,7 +59,7 @@ impl Default for RamanujanCache {
 pub const LEECH_PACKING_DENSITY: f64 = 0.001_929_574_309_403_922_5;
 
 /// Golden ratio φ used when blending softmax and hardmax consensus weights.
-pub const GOLDEN_RATIO: f64 = 1.618_033_988_749_894_8;
+pub const GOLDEN_RATIO: f64 = 1.618_033_988_749_895;
 /// Conjugate of φ (1/φ) that balances the softmax contribution in consensus blending.
 pub const GOLDEN_RATIO_CONJUGATE: f64 = 0.618_033_988_749_894_8;
 /// Complement of the conjugate that controls the hardmax contribution (1 - 1/φ).
@@ -121,7 +121,6 @@ impl LeechProjector {
     pub fn with_ramanujan_iterations(rank: usize, weight: f64, iterations: usize) -> Self {
         let sqrt_rank = (rank.max(1) as f64).sqrt();
         let weight = weight.max(0.0);
-        let iterations = iterations;
         let (ramanujan_pi, ramanujan_normalizer) = if iterations == 0 {
             (PI, 1.0)
         } else {

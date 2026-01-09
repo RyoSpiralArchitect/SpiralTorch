@@ -82,7 +82,7 @@ impl PluginEventBus {
     pub fn subscribe(&self, event_type: impl Into<String>, listener: EventListener) {
         let event_type = event_type.into();
         let mut listeners = self.listeners.lock().unwrap();
-        listeners.entry(event_type).or_insert_with(Vec::new).push(listener);
+        listeners.entry(event_type).or_default().push(listener);
     }
 
     /// Publish an event to all interested listeners.

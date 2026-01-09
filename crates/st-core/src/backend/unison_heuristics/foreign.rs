@@ -14,6 +14,7 @@ use super::{align_down_to_lanes, align_to_lanes, lane_range, LaneWindow};
 
 /// Applies foreign-language latency refinements to the provided window.
 #[cfg_attr(not(feature = "go-bridge"), allow(unused_variables))]
+#[allow(clippy::too_many_arguments)]
 pub(super) fn apply_latency_refinements(
     rows: u32,
     cols: u32,

@@ -485,7 +485,7 @@ fn merge_metrics(dest: &mut Vec<AtlasMetric>, incoming: Vec<AtlasMetric>) {
         if metric.name.is_empty() {
             continue;
         }
-        metric.district = metric.district.map(|district| normalise_text(district));
+        metric.district = metric.district.map(normalise_text);
         let key = (metric.name.clone(), metric.district.clone());
         if let Some(position) = index.get(&key).copied() {
             dest[position] = metric;

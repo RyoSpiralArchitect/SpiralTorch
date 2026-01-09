@@ -169,7 +169,7 @@ impl PluginRegistry {
     }
 
     fn validate_dependencies(&self, metadata: &PluginMetadata) -> PureResult<()> {
-        for (dep_id, _version_req) in &metadata.dependencies {
+        for dep_id in metadata.dependencies.keys() {
             if !self.plugins.read().unwrap().contains_key(dep_id) {
                 return Err(TensorError::Generic(format!(
                     "Plugin '{}' depends on '{}' which is not registered",

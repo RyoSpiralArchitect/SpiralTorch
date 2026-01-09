@@ -1339,7 +1339,7 @@ impl InterfaceZConductor {
         }
 
         if let Some(elliptic) = &fused.elliptic {
-            events.extend(elliptic.event_tags().into_iter());
+            events.extend(elliptic.event_tags());
         }
 
         let mut budget_scale = 1.0;

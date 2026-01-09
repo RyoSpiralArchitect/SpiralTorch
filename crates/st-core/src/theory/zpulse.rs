@@ -88,7 +88,7 @@ impl ZScale {
         let clamped = t.clamp(0.0, 1.0);
         let physical = a.physical_radius + (b.physical_radius - a.physical_radius) * clamped;
         let log = a.log_radius + (b.log_radius - a.log_radius) * clamped;
-        Self::from_components(physical, log).unwrap_or_else(|| if clamped < 0.5 { a } else { b })
+        Self::from_components(physical, log).unwrap_or(if clamped < 0.5 { a } else { b })
     }
 
     /// Computes the weighted centroid of a collection of scales.
@@ -470,7 +470,7 @@ impl LatencyAlignerState {
             let entry = self
                 .lags
                 .entry(pulse.source)
-                .or_insert_with(LagEstimate::default);
+                .or_default();
             entry.lag = pulse.latency_ms;
             entry.frames_since_update = 0;
             entry.seeded = true;
@@ -515,7 +515,7 @@ impl LatencyAlignerState {
             if source == ZSource::Microlocal {
                 continue;
             }
-            let entry = self.lags.entry(source).or_insert_with(LagEstimate::default);
+            let entry = self.lags.entry(source).or_default();
 
             if entry.seeded {
                 if self.cfg.hold_steps > 0 {
@@ -540,9 +540,7 @@ impl LatencyAlignerState {
                 clamped.round() * hop
             };
 
-            if entry.frames_since_update == 0 {
-                entry.lag = lag_units;
-            } else if entry.frames_since_update == u32::MAX {
+            if entry.frames_since_update == 0 || entry.frames_since_update == u32::MAX {
                 entry.lag = lag_units;
             } else {
                 entry.lag = lerp(entry.lag, lag_units, alpha);

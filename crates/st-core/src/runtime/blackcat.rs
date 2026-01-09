@@ -650,9 +650,7 @@ pub mod zmeta {
 
         #[allow(dead_code)]
         fn ingest_structural_legacy(&mut self, structural: Option<&[f64]>) -> Option<Vec<f64>> {
-            let Some(raw) = structural else {
-                return None;
-            };
+            let raw = structural?;
             if self.params.dim == 0 {
                 return None;
             }
@@ -691,9 +689,7 @@ pub mod zmeta {
         }
 
         fn ingest_structural(&mut self, structural: Option<&[f64]>) -> Option<Vec<f64>> {
-            let Some(raw) = structural else {
-                return None;
-            };
+            let raw = structural?;
             if self.params.dim == 0 {
                 return None;
             }

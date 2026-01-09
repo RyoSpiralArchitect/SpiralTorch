@@ -465,6 +465,10 @@ pub fn dimensionless_parameters(
 
 /// Aggregates the Hopf, gain, and dimensionless data needed to project the
 /// Spiral dynamics health into the PSI monitoring stack.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "PSI projection requires the full parameter tuple"
+)]
 pub fn psi_spiral_metrics(
     mu0: f64,
     gamma: f64,

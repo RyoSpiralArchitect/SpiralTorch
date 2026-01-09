@@ -55,6 +55,7 @@ impl PrimordialProjection {
     /// same set of Mellin abscissae.  The primordial spectrum is assembled on
     /// creation so that downstream consumers can access the full bundle without
     /// recomputing it.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         log_start: f64,
         log_step: f64,
@@ -171,6 +172,11 @@ impl LogLattice {
     /// Returns the length of the lattice.
     pub fn len(&self) -> usize {
         self.samples.len()
+    }
+
+    /// Returns `true` when the lattice contains no samples.
+    pub fn is_empty(&self) -> bool {
+        self.samples.is_empty()
     }
 
     /// Iterator over `(sample, weight)` pairs.

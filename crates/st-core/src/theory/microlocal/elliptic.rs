@@ -403,9 +403,7 @@ impl EllipticWarp {
         }
 
         let mut d_normal_bias = [0.0; 3];
-        for j in 0..3 {
-            d_normal_bias[j] = jac_unit[2][j];
-        }
+        d_normal_bias.copy_from_slice(&jac_unit[2]);
 
         let mut d_rotor_x = [0.0; 3];
         let mut d_rotor_y = [0.0; 3];
@@ -550,8 +548,8 @@ impl EllipticTelemetry {
         let mut quaternion = [0.0f32; 4];
         let qa = self.lie_frame.quaternion();
         let qb = other.lie_frame.quaternion();
-        for i in 0..4 {
-            quaternion[i] = super::lerp(qa[i], qb[i], clamped);
+        for (slot, (&a, &b)) in quaternion.iter_mut().zip(qa.iter().zip(qb.iter())) {
+            *slot = super::lerp(a, b, clamped);
         }
         let lie_frame = LieFrame::from_quaternion(quaternion);
         let mut rotor_field = [0.0; 3];
@@ -568,13 +566,12 @@ impl EllipticTelemetry {
                 super::lerp(self.rotor_transport[i], other.rotor_transport[i], clamped);
         }
         let mut curvature_tensor = [[0.0; 3]; 3];
-        for i in 0..3 {
-            for j in 0..3 {
-                curvature_tensor[i][j] = super::lerp(
-                    self.curvature_tensor[i][j],
-                    other.curvature_tensor[i][j],
-                    clamped,
-                );
+        for (out_row, (self_row, other_row)) in curvature_tensor
+            .iter_mut()
+            .zip(self.curvature_tensor.iter().zip(other.curvature_tensor.iter()))
+        {
+            for (out, (&a, &b)) in out_row.iter_mut().zip(self_row.iter().zip(other_row.iter())) {
+                *out = super::lerp(a, b, clamped);
             }
         }
         let topological_sector = if clamped < 0.5 {
@@ -700,8 +697,8 @@ impl EllipticAccumulator {
         self.heat_sum += telemetry.resonance_heat * weight;
         self.noise_sum += telemetry.noise_density * weight;
         let quaternion = telemetry.lie_frame.quaternion();
-        for i in 0..4 {
-            self.quat_sum[i] += quaternion[i] * weight;
+        for (slot, value) in self.quat_sum.iter_mut().zip(quaternion.iter()) {
+            *slot += value * weight;
         }
         self.weight += weight;
         if telemetry.sheet_count > self.sheet_count {
@@ -745,9 +742,9 @@ impl EllipticAccumulator {
             rotor_transport[i] = self.transport_sum[i] / self.weight;
         }
         let mut curvature_tensor = [[0.0f32; 3]; 3];
-        for i in 0..3 {
-            for j in 0..3 {
-                curvature_tensor[i][j] = self.tensor_sum[i][j] / self.weight;
+        for (out_row, in_row) in curvature_tensor.iter_mut().zip(self.tensor_sum.iter()) {
+            for (out, value) in out_row.iter_mut().zip(in_row.iter()) {
+                *out = *value / self.weight;
             }
         }
         Some(EllipticTelemetry {
