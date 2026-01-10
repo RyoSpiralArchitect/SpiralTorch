@@ -51,6 +51,11 @@ jobs:
               {"speed": 0.2, "memory": 0.1, "stability": 0.9, "gradient": opt.real.gradient()}
           )
           float(loss)
+          partial_loss = trainer.step_partial(
+              {"speed": 0.15, "memory": 0.1, "stability": 0.92, "gradient": [0.1, 0.0, 0.0, 0.0]}
+          )
+          float(partial_loss)
+          assert trainer.last_inference is not None
 
           assert hasattr(st, "LanguageWaveEncoder")
           encoder = st.LanguageWaveEncoder(-1.0, 0.5)

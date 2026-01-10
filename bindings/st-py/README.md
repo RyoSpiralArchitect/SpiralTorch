@@ -172,6 +172,21 @@ trainer = st.ZSpaceTrainer(z_dim=4)
 trainer.step({"speed": 0.2, "memory": 0.1, "stability": 0.9, "gradient": opt.real.gradient()})
 ```
 
+### Z-space inference quickstart
+
+```bash
+python examples/zspace_inference_quickstart.py
+```
+
+```python
+import spiraltorch as st
+
+trainer = st.ZSpaceTrainer(z_dim=4)
+loss = trainer.step_partial({"speed": 0.2, "memory": 0.1, "stability": 0.9, "gradient": [0.1, 0.0, 0.0, 0.0]})
+print("z:", trainer.state, "loss:", loss)
+print("last inference:", trainer.last_inference.residual, trainer.last_inference.confidence)
+```
+
 ### Ecosystem bridges
 
 SpiralTorch tensors can flow into PyTorch or JAX without copies thanks to the

@@ -2409,10 +2409,15 @@ class ZSpaceTrainer:
         self._m: _List[float] = [0.0] * z_dim
         self._v: _List[float] = [0.0] * z_dim
         self._t = 0
+        self._last_inference: ZSpaceInference | None = None
 
     @property
     def state(self) -> _List[float]:
         return list(self._z)
+
+    @property
+    def last_inference(self) -> ZSpaceInference | None:
+        return self._last_inference
 
     def reset(self) -> None:
         for arr in (self._z, self._m, self._v):
@@ -2588,6 +2593,50 @@ class ZSpaceTrainer:
         total_grad = [grad_metric[idx] + lam_frac * frac_grad[idx] for idx in range(len(self._z))]
         self._adam_update(total_grad)
         return loss
+
+    def infer_partial(
+        self,
+        partial: _Mapping[str, _Any] | ZSpacePartialBundle | None,
+        *,
+        alpha: float | None = None,
+        smoothing: float = 0.35,
+        telemetry: _Mapping[str, _Any] | ZSpaceTelemetryFrame | None = None,
+    ) -> ZSpaceInference:
+        if alpha is None:
+            alpha = self._alpha
+
+        partial_mapping = partial
+        if isinstance(partial, ZSpacePartialBundle):
+            partial_mapping = partial.metrics
+            if telemetry is None:
+                telemetry = partial.telemetry_payload()
+
+        inference = infer_from_partial(
+            self.state,
+            partial_mapping,
+            alpha=float(alpha),
+            smoothing=float(smoothing),
+            telemetry=telemetry,
+        )
+        self._last_inference = inference
+        return inference
+
+    def step_partial(
+        self,
+        partial: _Mapping[str, _Any] | ZSpacePartialBundle | None,
+        *,
+        alpha: float | None = None,
+        smoothing: float = 0.35,
+        telemetry: _Mapping[str, _Any] | ZSpaceTelemetryFrame | None = None,
+        prefer_applied: bool = True,
+    ) -> float:
+        inference = self.infer_partial(
+            partial,
+            alpha=alpha,
+            smoothing=smoothing,
+            telemetry=telemetry,
+        )
+        return self.step(inference, prefer_applied=prefer_applied)
 
 
 def step_many(
