@@ -65,41 +65,49 @@ def describe_backend(session: st.SpiralSession) -> None:
         subgroup=True,
     )
     print("\nFFT plan latency window:", fft_plan.latency_window())
-    spiralk_fft = st.SpiralKFftPlan.from_rank_plan(fft_plan)
-    print(
-        "SpiralKFftPlan radix:",
-        getattr(spiralk_fft, "radix", lambda: None)()
-        if callable(getattr(spiralk_fft, "radix", None))
-        else spiralk_fft.radix,
-    )
-    print("SpiralKFftPlan workgroup size:", spiralk_fft.workgroup_size())
-    wgsl_fn = getattr(spiralk_fft, "wgsl", None) or getattr(spiralk_fft, "emit_wgsl", None)
-    if wgsl_fn:
-        wgsl_src = wgsl_fn()
-        print("SpiralKFftPlan WGSL snippet:")
-        print(wgsl_src.splitlines()[0])
-    hint_fn = getattr(spiralk_fft, "spiralk_hint", None) or getattr(spiralk_fft, "emit_spiralk_hint", None)
-    if hint_fn:
-        print("SpiralKFftPlan hint:")
-        print(hint_fn())
+    spiralk_fft_type = getattr(st, "SpiralKFftPlan", None)
+    if spiralk_fft_type is None:
+        print("SpiralKFftPlan: unavailable in this build")
+    else:
+        spiralk_fft = spiralk_fft_type.from_rank_plan(fft_plan)
+        print(
+            "SpiralKFftPlan radix:",
+            getattr(spiralk_fft, "radix", lambda: None)()
+            if callable(getattr(spiralk_fft, "radix", None))
+            else spiralk_fft.radix,
+        )
+        print("SpiralKFftPlan workgroup size:", spiralk_fft.workgroup_size())
+        wgsl_fn = getattr(spiralk_fft, "wgsl", None) or getattr(spiralk_fft, "emit_wgsl", None)
+        if wgsl_fn:
+            wgsl_src = wgsl_fn()
+            print("SpiralKFftPlan WGSL snippet:")
+            print(wgsl_src.splitlines()[0])
+        hint_fn = getattr(spiralk_fft, "spiralk_hint", None) or getattr(spiralk_fft, "emit_spiralk_hint", None)
+        if hint_fn:
+            print("SpiralKFftPlan hint:")
+            print(hint_fn())
 
     unison_lines = fft_plan.to_unison_script().splitlines()
     print("Unison script (first 3 lines):")
     for line in unison_lines[:3]:
         print("  ", line)
 
-    batches = st.generate_plan_batch_ex(
-        n=3,
-        total_steps=24,
-        base_radius=1.0,
-        radial_growth=0.3,
-        base_height=0.2,
-        meso_gain=0.4,
-        micro_gain=0.25,
-        seed=0xBEE,
-    )
-    print("\nGenerated plan batch (first entry):")
-    pprint(batches[0])
+    try:
+        batches = st.generate_plan_batch_ex(
+            n=3,
+            total_steps=24,
+            base_radius=1.0,
+            radial_growth=0.3,
+            base_height=0.2,
+            meso_gain=0.4,
+            micro_gain=0.25,
+            seed=0xBEE,
+        )
+    except NotImplementedError as exc:
+        print("\ngenerate_plan_batch_ex: unavailable in this build:", exc)
+    else:
+        print("\nGenerated plan batch (first entry):")
+        pprint(batches[0])
 
 
 def train_small_linear_model() -> None:
@@ -132,7 +140,7 @@ def train_small_linear_model() -> None:
     print("Predictions:")
     pprint(predictions.tolist())
 
-    tensor_inputs = st.capture(inputs)
+    tensor_inputs = st.tensor(inputs)
     tensor_predictions = trainer.predict_tensor(tensor_inputs)
     print("Predictions (tensor API):")
     pprint(tensor_predictions.tolist())
@@ -179,7 +187,7 @@ def explore_barycenters() -> None:
         f"Barycenter objective={bary.objective:.6f} entropy={bary.entropy:.6f} "
         f"effective_weight={bary.effective_weight:.3f}"
     )
-    canopy = bary.density().tolist()
+    canopy = bary.density.tolist()
     print("Barycenter density matrix:")
     pprint(canopy)
 
@@ -220,7 +228,7 @@ def explore_barycenters() -> None:
 
 def tensor_algebra_and_losses() -> None:
     banner("Tensor algebra & loss helpers")
-    captured = st.capture([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    captured = st.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
     random = st.Tensor.rand(3, 2, seed=123)
     product = captured.matmul(random)
     print("Matmul result shape:", product.shape())
@@ -273,28 +281,30 @@ def resonance_and_vision_demo() -> None:
     print("Vision projection (normalised):")
     pprint(projection)
     print("Vision volume energy:", vision.volume_energy())
-    temporal_state = vision.temporal_state()
+    temporal_state = vision.temporal_state
     if temporal_state:
         print("Temporal state sample:", temporal_state[0][0])
 
 
 def wave_encoding_showcase() -> None:
     banner("Language wave encoder & extras")
-    encoder = st.LanguageWaveEncoder(curvature=-1.0, temperature=0.5)
-    wave = encoder.encode_wave("hello SpiralTorch session")
+    curvature = -1.0
+    encoder = st.LanguageWaveEncoder(curvature=curvature, temperature=0.5)
+    text = "hyperbolic gradients are fun"
+    wave = encoder.encode_wave(text)
     wave_data = wave.data()
     print("Encoded wave (first four complex samples):")
     pprint(wave_data[:4])
 
-    z_space = encoder.encode_z_space("tensor spiral")
+    z_space = encoder.encode_z_space(text)
     print("Z-space tensor shape:", z_space.shape())
 
     print("Golden ratio:", st.golden_ratio())
     print("Golden angle:", st.golden_angle())
 
     rows, cols = z_space.shape()
-    hyper = st.Hypergrad(curvature=-0.85, learning_rate=0.02, rows=rows, cols=cols)
-    hyper.absorb_text(encoder, "hyperbolic gradients are fun")
+    hyper = st.Hypergrad(curvature=curvature, learning_rate=0.02, rows=rows, cols=cols)
+    hyper.absorb_text(encoder, text)
     hyper.accumulate_complex_wave(wave)
     hyper.accumulate_pair(z_space, z_space)
     summary = hyper.summary()
@@ -311,7 +321,7 @@ def wave_encoding_showcase() -> None:
 
 
 if __name__ == "__main__":
-    session = st.SpiralSession(backend="wgpu")
+    session = st.SpiralSession()
     describe_backend(session)
     train_small_linear_model()
     tensor_algebra_and_losses()

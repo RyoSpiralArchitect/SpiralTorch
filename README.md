@@ -346,23 +346,31 @@ print("Axis names:", labeled.axis_names())
 
 ```python
 import spiraltorch as st
-import torch
-from torch.utils.dlpack import from_dlpack as torch_from_dlpack
 
-# SpiralTorch → PyTorch (zero-copy)
+# DLPack roundtrip (no extra deps)
 st_tensor = st.Tensor(2, 3, [1, 2, 3, 4, 5, 6])
 capsule = st_tensor.to_dlpack()
-torch_tensor = torch_from_dlpack(capsule)
+st_roundtrip = st.from_dlpack(capsule)
+print("Roundtrip:", st_roundtrip.tolist())
 
-# Mutations are visible in both (shared memory)
-torch_tensor += 10
-print("SpiralTorch sees changes:", st_tensor.tolist())
+try:
+    import torch
+    from torch.utils.dlpack import from_dlpack as torch_from_dlpack
+except ImportError:
+    print("PyTorch not installed; skipping torch interop demo.")
+else:
+    # SpiralTorch → PyTorch (zero-copy)
+    torch_tensor = torch_from_dlpack(capsule)
 
-# PyTorch → SpiralTorch
-pt_tensor = torch.arange(6, dtype=torch.float32).reshape(2, 3)
-st_from_torch = st.Tensor.from_dlpack(pt_tensor)
-pt_tensor.mul_(2)
-print("SpiralTorch sees torch mul_:", st_from_torch.tolist())
+    # Mutations are visible in both (shared memory)
+    torch_tensor += 10
+    print("SpiralTorch sees changes:", st_tensor.tolist())
+
+    # PyTorch → SpiralTorch
+    pt_tensor = torch.arange(6, dtype=torch.float32).reshape(2, 3)
+    st_from_torch = st.Tensor.from_dlpack(pt_tensor)
+    pt_tensor.mul_(2)
+    print("SpiralTorch sees torch mul_:", st_from_torch.tolist())
 ```
 
 #### 3) Hypergrad tapes for Z-space optimization
@@ -401,28 +409,28 @@ print("Guard curvature:", guarded.curvature())
 
 ```python
 import spiraltorch as st
-from spiral.hypergrad import (
-    hypergrad_session,
-    hypergrad_summary_dict,
-    suggest_hypergrad_operator
-)
 
-weights = st.Tensor(1, 3, [0.05, -0.15, 0.25])
-targets = st.Tensor(1, 3, [0.0, 1.0, 0.0])
+weights = st.Tensor(1, 4, [0.05, -0.15, 0.25, 0.10])
+targets = st.Tensor(1, 4, [0.0, 1.0, 0.0, 0.0])
 
-# Context manager for automatic cleanup
-with hypergrad_session(weights, learning_rate=0.03, curvature=-0.85) as tape:
+tape = st.Hypergrad(curvature=-0.85, learning_rate=0.03, rows=1, cols=4)
+real = st.Realgrad(learning_rate=0.01, rows=1, cols=4)
+try:
     tape.accumulate_pair(weights, targets)
-    
-    # Get detailed gradient metrics
-    metrics = hypergrad_summary_dict(tape, include_gradient=True)
-    
-    # Get WGSL operator hints for GPU optimization
-    hints = suggest_hypergrad_operator(metrics)
+    real.accumulate_pair(weights, targets)
 
-print("Gradient stats:", metrics["summary"])
-print("WGSL hints:", hints)
-print("Gradient sample:", metrics.get("gradient", [])[:3])
+    summary = tape.summary()
+    telemetry = tape.telemetry()
+    print("summary:", {"l2": summary.l2(), "rms": summary.rms(), "std": summary.std()})
+    print("non-finite ratio:", telemetry.non_finite_ratio())
+
+    # Desire-derived operator hints (mix/gain etc.)
+    control = tape.desire_control(real.summary())
+    print("operator mix/gain:", control.operator_mix(), control.operator_gain())
+    print("control events:", control.events())
+finally:
+    tape.reset()
+    real.reset()
 ```
 
 #### 5) Z-space encoding and metric normalization
@@ -464,22 +472,11 @@ partials before handing them to `ZSpaceTrainer`.
 
 ```python
 import spiraltorch as st
-import torch
-from torch.utils.dlpack import from_dlpack as torch_from_dlpack
 
-# SpiralTorch → Torch
 a = st.Tensor(2, 3, [1, 2, 3, 4, 5, 6])
-capsule = a.to_dlpack()
-t = torch_from_dlpack(capsule)
-
-t += 10
-print("SpiralTorch after torch += 10:", a.tolist())
-
-# Torch → SpiralTorch
-t2 = torch.arange(6, dtype=torch.float32).reshape(2, 3)
-a2 = st.Tensor.from_dlpack(t2)
-t2.mul_(2)
-print("SpiralTorch sees torch mul_:", a2.tolist())
+capsule = st.to_dlpack(a)
+roundtrip = st.from_dlpack(capsule)
+print("roundtrip:", roundtrip.tolist())
 ```
 
 The wheel exposes both `Tensor.to_dlpack()` and `Tensor.from_dlpack(...)` so you
@@ -514,15 +511,14 @@ available (WGPU/MPS/CPU) and keeps the axis metadata intact.
 ### 8) rl.stAgent multi-armed bandit
 
 ```python
-import torch
-from torch.utils.dlpack import from_dlpack as torch_from_dlpack
+import random
 import spiraltorch as st
 
 Agent = getattr(st.rl, "stAgent", None)
 if Agent is None:
     raise SystemExit("st.rl.stAgent not available in this build")
 
-def reward(action):
+def reward(action: int) -> float:
     p = 0.6 if action == 0 else 0.4
     return 1.0 if random.random() < p else 0.0
 
@@ -612,9 +608,10 @@ pairs = [
     (st.Tensor(1,2,[1,0]), st.Tensor(1,2,[1,0])),
     (st.Tensor(1,2,[0,1]), st.Tensor(1,2,[0,1])),
 ]
-loader = st.nn.Dataset.from_pairs(pairs).loader().shuffle(123).batched(2).prefetch(2)
+dataset = st.dataset.Dataset.from_samples(pairs)
+loader = dataset.loader().shuffle(123).batched(2).prefetch(2)
 for x, y in loader:
-    pass
+    print("batch:", x.shape(), y.shape())
 ```
 
 ### 13) Recommender & RL
@@ -630,11 +627,17 @@ print("top-k:", rec.recommend_top_k(0, k=3))
 ### 14) Interop (PyTorch / JAX / TensorFlow)
 
 ```python
-import spiraltorch as st, torch
+import spiraltorch as st
 
 x = st.Tensor(1,3,[1.0, 2.0, 3.0])
-xt = st.compat.torch.to_torch(x, dtype=torch.float32, device="cpu")
-x_back = st.compat.torch.from_torch(xt)
+try:
+    import torch
+except ImportError:
+    print("PyTorch not installed; skipping st.compat.torch demo.")
+else:
+    xt = st.compat.torch.to_torch(x, dtype=torch.float32, device="cpu")
+    x_back = st.compat.torch.from_torch(xt)
+    print(x_back.tolist())
 ```
 
 ### 15) Math & pacing helpers
@@ -1337,7 +1340,7 @@ Once the raw telemetry exists, braid it directly into automation, logging, and
 rewrite hooks with the `DesirePipeline`. The pipeline fans each automated step
 out to any number of sinks—logbooks, trigger buffers, SpiralK bridges—so graph
 tooling, language desire, and self-rewrite loops evolve together without custom
-glue.【F:crates/st-nn/src/language/pipeline.rs†L1-L240】 Attach a
+glue. Attach a
 `DesireTriggerBuffer` to capture emitted rewrite events while the logbook keeps
 the JSONL trace alive, and optionally replay historical automation into new
 consumers:
@@ -1363,60 +1366,38 @@ let replayed = pipeline.replay(DesireLogReplay::open("desire.ndjson")?)?;
 let drained = trigger_buffer.drain()?; // forward to analytics or trainers
 ```
 
-Python bindings mirror the same geometry builders and automation braid. The
-`SparseKernel::from_dense` and `SemanticBridge::from_dense` helpers collapse
-token/concept matrices directly, so notebooks can assemble desire pipelines
-from dense observations without juggling sparse tuples. Once the components are
-assembled, the pipeline builder attaches sinks and steps logits exactly like the
-Rust API:
+Python bindings currently expose **desire-derived gradient control** primitives
+(via `Hypergrad.desire_control(...)` / `desire_interpretation(...)`). The full
+`DesirePipeline` builder + logbook sinks remain Rust-first today.
 
 ```python
-from spiraltorch import (
-    SparseKernel,
-    SymbolGeometry,
-    RepressionField,
-    SemanticBridge,
-    TemperatureController,
-    DesireSchedule,
-    DesireLagrangian,
-    SelfRewriteConfig,
-    DesireAutomation,
-    DesirePipelineBuilder,
-    ConceptHint,
-)
+import spiraltorch as st
 
-syn = SparseKernel.from_dense([[0.6, 0.4], [0.3, 0.7]])
-par = SparseKernel.from_dense([[0.55, 0.45], [0.2, 0.8]])
-geometry = SymbolGeometry(syn, par)
-repression = RepressionField([0.1, 0.05])
-concept_kernel = SparseKernel.from_dense([[0.8, 0.2], [0.2, 0.8]])
-bridge = SemanticBridge(
-    [[0.7, 0.3], [0.25, 0.75]],
-    concept_kernel,
-)
-controller = TemperatureController(1.0, 0.9, 0.4, 0.4, 1.6)
-desire = DesireLagrangian(geometry, repression, bridge, controller)
-desire.set_alpha_schedule(DesireSchedule.warmup(0.0, 0.2, 400))
-automation = DesireAutomation(desire, SelfRewriteConfig())
-pipeline = (
-    DesirePipelineBuilder(automation)
-    .with_logbook("desire.ndjson", flush_every=16)
-    .with_telemetry()
-    .build()
-)
-step = pipeline.step(
-    [1.2, -0.4],
-    previous_token=0,
-    concept_hint=ConceptHint.distribution([0.6, 0.4]),
-)
-print(step["solution"]["phase"], step["solution"]["entropy"])
+hyper = st.Hypergrad(curvature=-0.9, learning_rate=0.05, rows=1, cols=4)
+real = st.Realgrad(learning_rate=0.01, rows=1, cols=4)
+try:
+    pred = st.Tensor(1, 4, [0.2, 0.1, 0.3, 0.4])
+    tgt = st.Tensor(1, 4, [0.0, 1.0, 0.0, 0.0])
+
+    hyper.accumulate_pair(pred, tgt)
+    real.accumulate_pair(pred, tgt)
+
+    real_summary = real.summary()
+    control = hyper.desire_control(real_summary)
+    interp = hyper.desire_interpretation(real_summary)
+
+    print("operator mix/gain:", control.operator_mix(), control.operator_gain())
+    print("pressure/balance:", interp.hyper_pressure(), interp.balance())
+finally:
+    hyper.reset()
+    real.reset()
 ```
 
 When you need to splice the stream into other runtimes, attach a
 `DesireChannelSink` via `with_channel`. It emits `DesirePipelineEvent`s over a standard channel so
 rewriters, trainers, or async dashboards can subscribe without bespoke glue—each
 step arrives before any trigger for the same timestamp, preserving ordering for
-downstream automata.【F:crates/st-nn/src/language/pipeline.rs†L52-L239】【F:crates/st-nn/src/language/pipeline.rs†L360-L472】
+downstream automata.
 
 ```rust
 use std::sync::mpsc::channel;
@@ -1556,11 +1537,11 @@ trainer.enable_desire_roundtable_bridge(bridge.clone());
 
 Every optimisation step now reports `desire_roundtable_*` metrics, while
 `ModuleTrainer::desire_roundtable_summary()` returns the most recent aggregate so
-Python notebooks can watch the unconscious drift in real time.【F:crates/st-nn/src/trainer.rs†L240-L392】【F:crates/st-nn/src/trainer.rs†L780-L905】
+Python notebooks can watch the unconscious drift in real time.
 
 Need all three braids at once? `DesireTelemetryBundle` wires the trainer,
 roundtable, and ψ bridges together so experiments can attach a single bundle to
-both the pipeline and optimiser.【F:crates/st-nn/src/language/pipeline.rs†L1808-L1853】【F:crates/st-nn/src/trainer.rs†L1352-L1383】
+both the pipeline and optimiser.
 
 ```rust
 use st_nn::language::{
@@ -1583,24 +1564,15 @@ let mut pipeline = DesirePipeline::builder(automation)
 trainer.enable_desire_telemetry(&bundle);
 ```
 
-```python
-import spiraltorch
-
-trainer = spiraltorch.ModuleTrainer()
-bridge = spiraltorch.DesireRoundtableBridge(blend=0.4, drift_gain=0.5)
-trainer.enable_desire_roundtable_bridge(bridge)
-
-# ... after running a training epoch ...
-summary = trainer.desire_roundtable_summary()
-if summary:
-    print(f"roundtable drift {summary['mean_drift']:.4f}")
-```
+Python note: `DesireRoundtableBridge` / ψ telemetry bridges are not yet exposed in
+the published wheel. For notebook-friendly feedback today, use
+`Hypergrad.desire_control(...)` (shown above).
 
 ψ telemetry can ride the same braid. Attach a `DesirePsiBridge` to fold the
 latest `PsiMeter` readings, SoftLogic Z feedback, and threshold crossings into
 the automation stream. The bridge can be drained directly or wired into
 `ModuleTrainer::enable_desire_psi_bridge` so every optimisation step records the
-aggregated ψ view alongside desire entropy and graph consensus.【F:crates/st-nn/src/language/pipeline.rs†L121-L286】【F:crates/st-nn/src/trainer.rs†L39-L66】【F:crates/st-core/src/telemetry/hub.rs†L1-L72】
+aggregated ψ view alongside desire entropy and graph consensus.
 
 ```rust
 use st_core::telemetry::hub;
@@ -1631,270 +1603,55 @@ glue.
 
 ## Hello SpiralSession quickstart
 
-Kick the tires with the new end-to-end `hello_session` walkthrough. It seeds a
-session, computes a barycenter, aligns a hypergrad tape, and runs a one-epoch
-roundtable update over a toy dataset.
+The wheel ships a self-contained demo script that exercises the currently
+supported Python surface:
 
 ```bash
-cargo run -p st-nn --example hello_session
+python bindings/st-py/examples/hello_session.py
 ```
 
-Enable the optional ψ telemetry layer (and CollapseDrive automation) directly
-from the roundtable schedule:
-
-```bash
-cargo run -p st-nn --features "psi collapse" --example hello_session
-```
-
-The Python wheel mirrors the same flow for rapid notebooks:
-
-```bash
-python bindings/st-py/examples/hello_session.py  # enables psi+collapse by default
-```
-
-Flip on the psychoid self-metrics layer when you want the full dream-engine
-analysis (divergence, ritual rate, CTI, dream-pass/export events):
-
-```bash
-cargo run -p st-nn --features "psi psychoid collapse" --example hello_session
-```
-
-On the Python side, pass `psychoid=True` when building the roundtable and fetch
-the latest reading via `spiraltorch.get_psychoid_stats()` to log the CTI score,
-raw metrics, and z-scores emitted from the Rust meter.
-
-Need the language desire pulse from Python as well? Call
-`spiraltorch.get_desire_telemetry()` to retrieve the same sample that the
-Rust-side `DesireTelemetrySink` recorded—phase, temperature, avoidance energy,
-logit norms, and the current α/β/γ/λ weights are all surfaced as a dictionary
-ready for notebooks or dashboards.【F:bindings/st-py/src/lib.rs†L227-L243】【F:crates/st-nn/src/language/pipeline.rs†L101-L239】
-
-ψ readings stay inside the automation loop—CollapseDrive, the psychoid dream
-engine, and the distributed roundtable all consume them directly. The examples
-only surface the totals so you can verify wiring; regular runs keep the meter
-off unless the schedule or trainer explicitly enables it.
-
-Both variants print the averaged roundtable loss after aligning the barycenter
-path with the hypergrad tape. On the Python side you can now spin up the
-streaming loader without touching NumPy:
+Minimal session + rank planning:
 
 ```python
-loader = st.dataset.from_vec(samples).shuffle(0xC0FFEE).batched(4).prefetch(2)
-stats = session.train_epoch(trainer, model, loss, loader, schedule)
+import spiraltorch as st
+
+session = st.SpiralSession()  # backend="auto" by default
+print("backend:", session.backend, "device:", session.device)
+
+plan = session.plan_topk(rows=128, cols=256, k=32)
+print("plan:", plan.kind, plan.merge_strategy, "tile", plan.tile, "workgroup", plan.workgroup)
+print("SpiralK hint:\n", plan.fft_spiralk_hint())
+
+session.close()
 ```
 
-The loader runs entirely in Rust—mini-batches stream straight into
-`train_epoch` and propagate errors as native `TensorError`s when shapes drift.
-
-### Temporal resonance timelines
-
-Sessions now keep a rolling **chrono timeline** that measures how each
-`DifferentialResonance` evolves across calls. Record a frame by piping a fresh
-snapshot through `resonate_over_time(dt)` and inspect the history via
-`session.timeline()` or the underlying `ChronoFrame` handles:
+Minimal dataset loader (runs entirely in Rust):
 
 ```python
-resonance = trace.resonate()
-frame = session.resonate_over_time(resonance, dt=0.1)
-print(frame.timestamp, frame.total_energy)
+import spiraltorch as st
 
-# Sample the most recent frames for plotting.
-frames = session.timeline(timesteps=128)
-summary = session.timeline_summary(timesteps=128)
-harmonics = session.timeline_harmonics(timesteps=256, bins=24)
-loop_signal = session.loop_signal(timesteps=256)
-times, energy, drift = session.animate_resonance(timesteps=128)
-wave = session.speak(timesteps=128, temperature=0.7)
-story, highlights = session.timeline_story(timesteps=256, temperature=0.65)
-
-if loop_signal and loop_signal.spiralk_script:
-    print("SpiralK hint:")
-    print(loop_signal.spiralk_script)
+session = st.SpiralSession()
+pairs = [
+    (st.Tensor(1, 2, [1, 0]), st.Tensor(1, 2, [1, 0])),
+    (st.Tensor(1, 2, [0, 1]), st.Tensor(1, 2, [0, 1])),
+]
+loader = session.dataloader(pairs, batch_size=2, shuffle=123, prefetch=2)
+for x, y in loader:
+    print("batch:", x.shape(), y.shape())
+session.close()
 ```
 
-`ChronoFrame` surfaces per-band energy, curvature drift, and decay estimates so
-you can chart living topology directly in notebooks. Reach for
-`session.timeline_summary()` when you want windowed drift/energy statistics or
-`session.timeline_harmonics()` to expose dominant oscillations inside the
-timeline. `session.loop_signal(...)` folds both into a reusable bundle that
-includes a SpiralK script (when the `kdsl` feature is enabled) so heuristics can
-be replayed across devices. `session.speak(...)` still generates a playback-ready
-amplitude trace, while `session.timeline_story(...)` and `session.describe()`
-synthesise natural language narratives about the latest state (or pass an
-explicit `resonance` snapshot to ground the narration in a fresh observation):
+Minimal `ModuleTrainer` loop:
 
 ```python
-print(session.describe())
-print(session.describe(resonance, temperature=0.8))
-print(st.describe_timeline(frames))
-print(harmonics.dominant_energy.frequency if harmonics else None)
+import spiraltorch as st
+
+trainer = st.ModuleTrainer(input_dim=2, output_dim=2)
+inputs = [[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]]
+targets = [[0.0, 1.0], [0.0, 1.0], [1.0, 0.0], [1.0, 0.0]]
+loss = trainer.train_epoch(inputs, targets, learning_rate=0.1, batch_size=2)
+print("avg loss:", loss)
 ```
-
-### Atlas projections
-
-Chrono telemetry, maintainer diagnostics, and loopback envelopes now converge
-into a **SpiralTorch atlas** that captures the city-wide state of your run.
-Every `resonate_over_time` call contributes a fragment with drift, energy,
-collapse pulses, and Z-bias hints; the maintainer folds in clamp/pressure
-recommendations at the same time. Rust sessions expose the aggregated
-`AtlasFrame`, and Python mirrors it via `session.atlas()`:
-
-```python
-atlas = session.atlas()
-if atlas:
-    print(atlas.timestamp, atlas.loop_support)
-    for metric in atlas.metrics():
-        print(metric.name, metric.value)
-    story = session.atlas_story(temperature=0.65)
-    if story:
-        summary, highlights = story
-        print(summary)
-        print(highlights)
-    print(st.describe_atlas(atlas))
-```
-
-`AtlasFrame` exposes the latest `ChronoSummary`, optional harmonics, maintainer
-status, and any SpiralK hints captured along the way. Metrics from auxiliary
-nodes (collapse totals, Z-bias pushes) ride alongside free-form notes so you can
-route the atlas straight into dashboards or back into SpiralK planners. Even
-fragments that arrive without explicit timestamps now stay alive, so stray
-Z-space nudges or maintainer notes still land on the shared map. Each
-frame also clusters its metrics into **districts** — Surface, Concourse, and
-Substrate — so you can see which layer of the SpiralTorch “city” is lighting up
-at a glance:
-
-```python
-for district in atlas.districts():
-    print(district.name, district.mean, district.span)
-```
-
-If you want more than a snapshot, call `session.atlas_route(limit=12)` to pull a
-bounded history of frames. It’s perfect for feeding notebooks with sliding
-windows of atlas metrics or piping the loop into other SpiralTorch nodes. When
-you just need a quick **district-level synopsis**, `session.atlas_route_summary`
-condenses the same window into aggregate trends, maintainer hints, and now the
-qualia-focused **concept pulses** mandated by our language stewardship memo. The
-summary keeps a rolling count of how each fragment annotated qualia—Lewis,
-Nagel, Jackson, Chalmers, Tononi, or the generic drift—so dashboards can surface
-where Z-space narratives might be sliding into conceptual entropy:
-
-```python
-summary = session.atlas_route_summary(limit=12)
-print(
-    summary.frames,
-    summary.mean_loop_support,
-    summary.loop_std,
-    summary.collapse_trend,
-    summary.z_signal_trend,
-)
-for pulse in summary.concept_pulses:
-    print(pulse.term, pulse.sense.label(), pulse.mentions, pulse.last_rationale)
-for district in summary.districts():
-    print(district.name, district.coverage, district.delta, district.std_dev)
-print(summary.frames, summary.mean_loop_support)
-for district in summary.districts():
-    print(district.name, district.coverage, district.delta)
-if summary.maintainer_status:
-    print("Maintainer", summary.maintainer_status, summary.maintainer_diagnostic)
-```
-
-The summary keeps track of recent clamp/pressure recommendations, script hints,
-and now reports **loop volatility** (`loop_std`) alongside collapse/Z drift so
-dashboards can surface the “city heartbeat” without iterating over each frame.
-District summaries additionally carry a standard deviation so you can flag
-which neighbourhoods are swinging the hardest even when their means stay flat.
-Each district now tracks its headline metrics via `district.focus` so nodes can
-see which signals actually drove the change:
-
-```python
-for metric in district.focus:
-    print(metric.name, metric.delta, metric.momentum, metric.std_dev)
-```
-
-When you want curated guidance for each SpiralTorch “audience”, call
-`session.atlas_perspectives()` to generate **atlas perspectives** that translate
-district trends into actionable narratives:
-
-```python
-for perspective in session.atlas_perspectives(limit=12):
-    print(perspective.district, perspective.guidance)
-    for focus in perspective.focus:
-        print("  ↳", focus.name, focus.latest)
-
-surface = session.atlas_perspective(
-    "Surface", limit=12, focus_prefixes=["timeline", "session.surface"],
-)
-if surface:
-    print(surface.guidance)
-```
-
-Perspectives compute per-frame momentum, volatility-derived stability, and a
-filtered set of focus metrics so every node — Python bindings, maintainer,
-SpiralK scripts, or collapse-drive peers — can read the same atlas route in the
-language that serves them best.
-
-### Self-maintaining feedback loops
-
-Temporal telemetry now feeds a lightweight **maintainer** that keeps the
-geometry controller within the recommended 2–3× max-scale band and gently bumps
-Leech density pressure when energy starts to race. Both Rust and Python callers
-can inspect the maintainer report and override thresholds when experimenting:
-
-```python
-# Tune thresholds before building a session.
-session_builder.maintainer(jitter_threshold=0.25, growth_threshold=0.03)
-session = session_builder.build()
-
-# Review the live configuration and trigger an assessment.
-print(session.maintainer_config())
-report = session.self_maintain()
-print(report.status, report.suggested_max_scale)
-
-if report.should_rewrite():
-    print("Maintainer recommends a self-rewrite cycle:", report.diagnostic)
-```
-
-The maintainer computes curvature jitter, mean energy, and decay across the most
-recent frames, returning actionable clamp and pressure suggestions. Spectral
-peaks are now included in every report so you can see whether high-frequency
-jitter or runaway energy oscillations triggered an intervention. Override the
-defaults on-the-fly with `session.configure_maintainer(...)` to experiment with
-more aggressive rewrite policies or relaxed dormancy thresholds.
-
-Maintainer reports now ship with the same SpiralK snippet the session pushes into
-the chrono loop, and `session.collapse_pulse()` returns the latest CollapseDrive
-command (including any associated loop signal) so distributed nodes can stay in
-lockstep without bespoke plumbing.
-
-On the audio front, `LanguageWaveEncoder.speak(frames)` maps chrono timelines to
-wave amplitudes, and the higher-level `TextResonator` class lets Rust or Python
-callers drive the same pipeline with custom curvature/temperature settings:
-
-```python
-encoder = st.LanguageWaveEncoder(session.curvature(), 0.55)
-amplitude = encoder.speak(frames)
-
-narrator = st.TextResonator(session.curvature(), 0.55)
-print(narrator.describe_resonance(resonance))
-print(narrator.describe_timeline(frames))
-wave = narrator.speak(frames)
-```
-
-Prefer a notebook-friendly wrapper? Instantiate `SpiralLightning` from Python
-to bundle the session, trainer, and schedule into a single object that
-auto-prepares modules and returns per-epoch reports with `lightning.fit(...)`.
-On the Rust side you can reach for `SpiralLightning::builder(...)` or the
-companion `LightningConfig::builder(...)` helper to customise the output shape,
-roundtable parameters, or disable automatic module preparation before
-construction. Once created, call `set_auto_prepare(false)` to opt back into
-manual tape management without rebuilding the harness.
-
-Need curriculum-style hand-offs? Compose `LightningStage` entries and feed them
-into `SpiralLightning::fit_plan(...)`. Each stage can tweak the output shape,
-roundtable, or auto-prepare flag before running one or more epochs. The helper
-returns a structured `LightningReport` so you can inspect per-stage summaries,
-query the best epoch, or plot aggregate loss curves without stitching vectors
-manually.
 
 ### GoldenRetriever Training (distributed, data-race free)
 
@@ -2059,62 +1816,26 @@ oscillations, or persist the negotiated state for a follow-up run. Consumers who
 need streaming updates can subscribe with `GoldenRetriever::subscribe_digest()`
 and replay `CouncilDigest` events as nodes fall in and out of the cluster.
 
-Python callers can read the same signals via
-`spiraltorch.ModuleTrainer.last_blackcat_pulse()` and
-`last_blackcat_directive()`, which yield rich `GoldenBlackcatPulse` and
-`GoldenCooperativeDirective` wrappers. The bindings surface getters for every
-metric alongside a `pulse.directive(baseline_interval, baseline_window)` helper
-so notebooks can mirror the Rust-side retuning logic. The council feed is
-available through `ModuleTrainer.last_council()`, which returns a
-`GoldenCouncilSnapshot` wrapper that now exposes the epoch, high watermark,
-missing ranges, council evidence, and decoded winner `HeurOp`s for audit trails.
+Python note: Golden/Blackcat runtime taps are currently Rust-first; Python
+wrappers for council/pulse snapshots are on the roadmap.
 
-### SpiralTorchRL (hypergrad policy gradients)
+### SpiralTorchRL (agents)
 
-SpiralTorchRL unifies the reinforcement-learning surface around the same
-Z-space tensors that power the supervised stack. Policies stream returns into
-optional `AmegaHypergrad` tapes, meaning the Riemannian curvature remains under
-control even when reward schedules wobble. The Rust crate ships with a
-hypergrad-aware policy gradient learner and the Python bindings mirror it via
-`spiraltorch.spiral_rl.PolicyGradient` so notebooks can probe schedules without
-departing from the Rust implementation.
+The wheel exports lightweight RL agents under `spiraltorch.rl` (alias of
+`spiral_rl`) so you can prototype bandits, PPO, or SAC loops without leaving the
+native stack.
 
 ```python
-from spiraltorch import Tensor
-from spiraltorch.spiral_rl import PolicyGradient
+import spiraltorch as st
 
-policy = PolicyGradient(state_dim=6, action_dim=3, learning_rate=0.01)
-policy.enable_hypergrad(curvature=-1.0, learning_rate=0.05)
+agent = st.rl.stAgent(state_dim=1, action_dim=2, discount=0.0, learning_rate=5e-2)
+agent.set_epsilon(0.1)
 
-state = Tensor(1, 6, [0.1, 0.2, -0.3, 0.5, -0.1, 0.0])
-action, probs = policy.select_action(state)
-policy.record_transition(state, action, reward=0.8)
-report = policy.finish_episode()
-print(report.steps, report.hypergrad_applied)
-```
+action = agent.select_action(0)
+agent.update(0, action, reward=1.0, next_state=0)
 
-Python bindings mirror the geometry controller as well. Pass a dictionary of
-overrides to `PolicyGradient.attach_geometry_feedback` to customise the
-observability parameters and smoothing ranges without leaving Python.
-
-```python
-from spiraltorch import SpiralSession
-from spiraltorch.spiral_rl import PolicyGradient
-
-session = SpiralSession(device="wgpu", curvature=-1.0)
-policy = PolicyGradient(state_dim=6, action_dim=3, learning_rate=0.01)
-policy.attach_geometry_feedback({"z_space_rank": 24, "slot_symmetry": "cyclic"})
-
-resonance = session.trace(state).resonate()
-policy.record_transition(state, action, reward=0.8)
-
-report, signal = policy.finish_episode_with_geometry(resonance)
-if signal:
-    print(f"η̄={signal['averaged_efficiency']:.3f} scale={signal['learning_rate_scale']:.2f}")
-
-telemetry = policy.geometry_telemetry()
-if telemetry:
-    print("loop gain", telemetry["loop_gain"], "script", telemetry["loop_script"])
+print("ok (stAgent)")
+print("also available:", [name for name in ("PpoAgent", "SacAgent") if hasattr(st.rl, name)])
 ```
 
 Rust projects can pair the policy with the new geometric feedback module to
@@ -2466,58 +2187,29 @@ Instead of Q·K^T softmax:
 - **Fractional operators** replace dot products
 
 ```python
-from spiraltorch.nn import CoherenceDiagnostics, ZSpaceCoherenceSequencer
+import spiraltorch as st
+from spiraltorch.nn import ZSpaceCoherenceSequencer
 
-model = ZSpaceCoherenceSequencer(
-    dim=768,
-    num_heads=12,
-    curvature=-1.0
-)
-
-out, coherence, diagnostics = model.forward_with_diagnostics(x)
-print(f"dominant channel: {diagnostics.dominant_channel()}")
-print(f"z-bias: {diagnostics.z_bias():.3f}")
-```
-
-### Pre-Discard Sequencing
-
-Humans don't wait to evaluate every possibility—they discard the "now impossible"
-branches first and let thought ride whatever remains. The sequencer now mirrors
-that behaviour:
-
-```python
-model.configure_pre_discard(
-    dominance_ratio=0.35,  # keep channels within 35% of the dominant signal
-    energy_floor=1e-3,     # drop negligible bands outright
-    min_channels=3,        # always preserve a minimal braid of possibilities
-)
+# Toy input (same API as larger models)
+x = st.Tensor.rand(1, 768, seed=1)
+model = ZSpaceCoherenceSequencer(dim=768, num_heads=12, curvature=-1.0)
 
 out, coherence, diagnostics = model.forward_with_diagnostics(x)
-print("discarded", diagnostics.discarded_channels(), "channels pre-aggregation")
+print("channels:", diagnostics.preserved_channels, "preserved,", diagnostics.discarded_channels, "discarded")
+print("top report:", diagnostics.channel_reports[0].channel, diagnostics.channel_reports[0].backend)
 
-# Disable when you want full retention again
-model.disable_pre_discard()
-```
-
-The accompanying diagnostics surface `pre_discard` telemetry so you can inspect
-how aggressively the sequencer culled low-credence channels during a pass.
-Every invocation is also journaled so you can study the discard pattern over
-time:
-
-```python
-# Keep the last 32 pre-discard snapshots (default) or dial it up/down.
+# Pre-discard sequencing + snapshot history
+model.configure_pre_discard(dominance_ratio=0.35, energy_floor=1e-3, min_channels=3)
 model.configure_pre_discard_memory(limit=64)
 
-_ = model.forward_with_diagnostics(x)
-latest = model.pre_discard_snapshots()[-1]
-print("step", latest.step)
-print("survivors", latest.survivors)
-print("discarded ratio", latest.telemetry.discarded_ratio)
-print("survivor energy", latest.telemetry.survivor_energy)
-print("dominant weight", latest.telemetry.dominant_weight)
+out, coherence, diagnostics = model.forward_with_diagnostics(x)
+if diagnostics.pre_discard:
+    print("pre-discard:", diagnostics.pre_discard.discarded, "discarded of", diagnostics.pre_discard.total)
 
-# Reset the history whenever you want a fresh view.
+latest = model.pre_discard_snapshots[-1]
+print("snapshot step", latest.step, "survivors", latest.survivors)
 model.clear_pre_discard_snapshots()
+model.disable_pre_discard()
 ```
 
 Telemetry now tracks both survivor/discard counts and their energy share,
@@ -2726,8 +2418,8 @@ effective occupancy, and auto-derive sweep/compaction tiles from the device limi
 ```python
 import spiraltorch as st
 
-plan = st.plan_topk(rows=8, cols=65_536, k=1_024, device="auto")
-print(plan["choice"])  # unified merge-kind, tiles, and workgroup sizing
+plan = st.plan_topk(rows=8, cols=65_536, k=1_024, backend="auto")
+print("choice:", plan.merge_strategy, plan.tile, plan.workgroup, "lanes", plan.lanes)
 ```
 
 ---
