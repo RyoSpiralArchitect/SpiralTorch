@@ -453,12 +453,12 @@ impl Matrix3 {
     }
 
     pub fn from_columns(columns: [Vec3; 3]) -> Self {
-        let mut data = [[0.0; 3]; 3];
-        for col in 0..3 {
-            for row in 0..3 {
-                data[row][col] = columns[col][row];
-            }
-        }
+        let [c0, c1, c2] = columns;
+        let data = [
+            [c0[0], c1[0], c2[0]],
+            [c0[1], c1[1], c2[1]],
+            [c0[2], c1[2], c2[2]],
+        ];
         Self { data }
     }
 
@@ -1314,8 +1314,8 @@ mod tests {
         let mut manual = [0.0; 4];
         for row in 0..4 {
             let mut acc = 0.0;
-            for col in 0..4 {
-                acc += block[row][col] * vector[col];
+            for (&coeff, &value) in block[row].iter().zip(vector.iter()) {
+                acc += coeff * value;
             }
             manual[row] = acc;
         }

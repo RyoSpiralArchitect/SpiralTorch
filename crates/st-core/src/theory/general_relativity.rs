@@ -2018,8 +2018,8 @@ impl CurvatureDiagnostics {
         let mut weyl_dual_lower = [[[[0.0; DIM]; DIM]; DIM]; DIM];
         for mu in 0..DIM {
             for nu in 0..DIM {
-                for rho in 0..DIM {
-                    for sigma in 0..DIM {
+                for (rho, weyl_dual_rho) in weyl_dual_lower[mu][nu].iter_mut().enumerate() {
+                    for (sigma, value) in weyl_dual_rho.iter_mut().enumerate() {
                         let mut sum = 0.0;
                         for alpha in 0..DIM {
                             for beta in 0..DIM {
@@ -2027,7 +2027,7 @@ impl CurvatureDiagnostics {
                                     * weyl_lower[mu][nu][alpha][beta];
                             }
                         }
-                        weyl_dual_lower[mu][nu][rho][sigma] = 0.5 * sum;
+                        *value = 0.5 * sum;
                     }
                 }
             }
@@ -2636,10 +2636,9 @@ mod tests {
                 for rho in 0..DIM {
                     for sigma in 0..DIM {
                         let mut sum = 0.0;
-                        for alpha in 0..DIM {
-                            for beta in 0..DIM {
-                                sum += epsilon_mixed[mu][nu][alpha][beta]
-                                    * weyl_lower[alpha][beta][rho][sigma];
+                        for (alpha, epsilon_alpha) in epsilon_mixed[mu][nu].iter().enumerate() {
+                            for (beta, &epsilon_value) in epsilon_alpha.iter().enumerate() {
+                                sum += epsilon_value * weyl_lower[alpha][beta][rho][sigma];
                             }
                         }
                         weyl_dual_lower[mu][nu][rho][sigma] = 0.5 * sum;

@@ -362,8 +362,8 @@ impl EllipticWarp {
         // Jacobians
         let mut d_polar = [0.0; 3];
         if sin_theta > EPSILON {
-            for j in 0..3 {
-                d_polar[j] = -jac_unit[2][j] / sin_theta_safe;
+            for (d_polar_j, &jac) in d_polar.iter_mut().zip(jac_unit[2].iter()) {
+                *d_polar_j = -jac / sin_theta_safe;
             }
         }
 
@@ -384,9 +384,14 @@ impl EllipticWarp {
 
         let denom_xy = (dir[0] * dir[0] + dir[1] * dir[1]).max(EPSILON);
         let mut d_azimuth = [0.0; 3];
-        for j in 0..3 {
-            d_azimuth[j] =
-                (-dir[1] / denom_xy) * jac_unit[0][j] + (dir[0] / denom_xy) * jac_unit[1][j];
+        let azimuth_coeff_x = -dir[1] / denom_xy;
+        let azimuth_coeff_y = dir[0] / denom_xy;
+        for ((d_azimuth_j, &jac0), &jac1) in d_azimuth
+            .iter_mut()
+            .zip(jac_unit[0].iter())
+            .zip(jac_unit[1].iter())
+        {
+            *d_azimuth_j = azimuth_coeff_x * jac0 + azimuth_coeff_y * jac1;
         }
 
         let mut d_spin = [0.0; 3];
@@ -410,8 +415,9 @@ impl EllipticWarp {
         let mut d_rotor_z = [0.0; 3];
         if sin_theta > EPSILON {
             let mut d_sin_theta = [0.0; 3];
-            for j in 0..3 {
-                d_sin_theta[j] = -dir[2] / sin_theta_safe * jac_unit[2][j];
+            let sin_theta_coeff = -dir[2] / sin_theta_safe;
+            for (d_sin_theta_j, &jac) in d_sin_theta.iter_mut().zip(jac_unit[2].iter()) {
+                *d_sin_theta_j = sin_theta_coeff * jac;
             }
             for j in 0..3 {
                 let d_dir0 = jac_unit[0][j];
