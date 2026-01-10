@@ -52,6 +52,19 @@ jobs:
           )
           float(loss)
 
+          assert hasattr(st, "LanguageWaveEncoder")
+          encoder = st.LanguageWaveEncoder(-1.0, 0.5)
+          probe = encoder.encode_z_space("SpiralTorch")
+          rows, cols = probe.shape()
+          text_opt = st.optim.Amegagrad((rows, cols), curvature=float(encoder.curvature()))
+          text_weights = st.Tensor(rows, cols, [0.0] * (rows * cols))
+          text_opt.absorb_text(encoder, "SpiralTorch wheels smoke test")
+          before = text_weights.tolist()
+          control = text_opt.desire_control()
+          text_opt.step(text_weights, tune=True, control=control)
+          after = text_weights.tolist()
+          assert after != before
+
           print("smoke ok")
           PY
       - name: Upload

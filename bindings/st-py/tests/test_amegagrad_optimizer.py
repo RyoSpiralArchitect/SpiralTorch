@@ -43,3 +43,20 @@ def test_amegagrad_step_updates_weights() -> None:
     assert updated is weights
     assert after != before
 
+
+def test_amegagrad_absorb_text_handles_variable_length() -> None:
+    _require_native()
+    if not hasattr(st, "LanguageWaveEncoder"):
+        pytest.skip("LanguageWaveEncoder unavailable in this build")
+
+    encoder = st.LanguageWaveEncoder(-1.0, 0.5)
+    rows, cols = encoder.encode_z_space("seed").shape()
+
+    opt = st.optim.Amegagrad((rows, cols), curvature=float(encoder.curvature()))
+    weights = st.Tensor(rows, cols, [0.0] * (rows * cols))
+
+    opt.absorb_text(encoder, "SpiralTorch wheels smoke test")
+    before = weights.tolist()
+    opt.step(weights, tune=False)
+    after = weights.tolist()
+    assert after != before

@@ -150,6 +150,28 @@ loss = trainer.step({"speed": 0.2, "memory": 0.1, "stability": 0.9, "gradient": 
 print("z:", trainer.state, "loss:", loss)
 ```
 
+### Text → optim → zspace quickstart
+
+```bash
+python examples/text_optim_zspace_quickstart.py
+```
+
+```python
+import spiraltorch as st
+
+encoder = st.LanguageWaveEncoder(-1.0, 0.5)
+rows, cols = encoder.encode_z_space("SpiralTorch").shape()
+opt = st.optim.Amegagrad((rows, cols), curvature=encoder.curvature())
+weights = st.Tensor(rows, cols, [0.0] * (rows * cols))
+
+opt.absorb_text(encoder, "Z-space wants to be steerable.")  # pads/truncates to (rows, cols)
+opt.step(weights)
+print("weights (head):", [v for row in weights.tolist() for v in row][:5])
+
+trainer = st.ZSpaceTrainer(z_dim=4)
+trainer.step({"speed": 0.2, "memory": 0.1, "stability": 0.9, "gradient": opt.real.gradient()})
+```
+
 ### Ecosystem bridges
 
 SpiralTorch tensors can flow into PyTorch or JAX without copies thanks to the

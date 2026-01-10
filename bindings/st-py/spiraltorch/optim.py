@@ -113,8 +113,35 @@ class Amegagrad:
         self.real.accumulate_complex_wave(wave)
 
     def absorb_text(self, encoder: Any, text: str) -> None:
-        self.hyper.absorb_text(encoder, text)
-        self.real.absorb_text(encoder, text)
+        import spiraltorch as st
+
+        curvature_fn = getattr(encoder, "curvature", None)
+        if callable(curvature_fn):
+            encoder_curvature = float(curvature_fn())
+            if abs(encoder_curvature - self.curvature) > 1e-6:
+                raise ValueError(
+                    "encoder curvature must match Amegagrad.curvature "
+                    f"(encoder={encoder_curvature}, optimizer={self.curvature})"
+                )
+
+        encode = getattr(encoder, "encode_z_space", None)
+        if not callable(encode):
+            raise TypeError("encoder must provide encode_z_space(text) -> Tensor")
+
+        encoded = encode(str(text))
+        tolist = getattr(encoded, "tolist", None)
+        if not callable(tolist):
+            raise TypeError("encode_z_space(text) must return a Tensor exposing tolist()")
+
+        flat = [float(value) for row in tolist() for value in row]
+        rows, cols = self.shape()
+        total = rows * cols
+        if len(flat) < total:
+            flat.extend(0.0 for _ in range(total - len(flat)))
+        elif len(flat) > total:
+            flat = flat[:total]
+
+        self.accumulate_wave(st.Tensor(rows, cols, flat))
 
     def accumulate_pair(self, prediction: Any, target: Any) -> None:
         import spiraltorch as st
@@ -178,4 +205,3 @@ def amegagrad(
         topos=topos,
         gain=gain,
     )
-
