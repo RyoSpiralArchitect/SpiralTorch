@@ -12,7 +12,7 @@ jobs:
       matrix:
         os: [macos-13, ubuntu-22.04]
         py: ['3.10', '3.11', '3.12']
-        feat: ['wgpu', 'wgpu,hip', 'wgpu,cuda']
+        feat: ['wgpu,logic,kdsl']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -23,8 +23,7 @@ jobs:
       - name: Build wheel
         run: |
           python -m pip install -U pip wheel maturin
-          # Example: feature flags are illustrative; adapt to your crate layout.
-          maturin build --release -m bindings/st-py/Cargo.toml --features "${{ matrix.feat }}"
+          maturin build --release --locked -m bindings/st-py/Cargo.toml --features "${{ matrix.feat }}"
       - name: Smoke test wheel import
         working-directory: target/wheels
         env:

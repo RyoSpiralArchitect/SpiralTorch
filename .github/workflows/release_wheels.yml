@@ -28,7 +28,7 @@ jobs:
         run: pip install maturin==1.*
       - name: Build wheels (CPU+WGPU)
         run: |
-          maturin build -m bindings/st-py/Cargo.toml --release --features wgpu,logic,kdsl
+          maturin build -m bindings/st-py/Cargo.toml --release --locked --features wgpu,logic,kdsl
       - name: Smoke test wheel import
         shell: bash
         working-directory: target/wheels
