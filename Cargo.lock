@@ -3256,6 +3256,7 @@ dependencies = [
  "ndarray",
  "num-complex",
  "pyo3",
+ "pyo3-ffi",
  "pyo3-build-config",
  "serde_json",
  "spiral-hpo",

@@ -54,7 +54,8 @@ kdsl = ["st-core/kdsl", "st-nn/kdsl", "st-spiral-rl/kdsl"]
 pyo3-build-config = "0.22"
 
 [dependencies]
-pyo3 = { version = "0.22", features = ["extension-module", "abi3", "abi3-py38", "gil-refs", "num-complex", "auto-initialize"] }
+pyo3 = { version = "0.22", features = ["extension-module", "abi3", "abi3-py38", "gil-refs", "num-complex"] }
+pyo3-ffi = { version = "0.22", features = ["extension-module"] }
 st-core = { path = "../../crates/st-core", default-features = false, features = ["psi", "psychoid", "collapse"] }
 st-tensor = { path = "../../crates/st-tensor", default-features = false }
 st-nn = { path = "../../crates/st-nn", optional = true, features = ["psychoid", "collapse"] }
