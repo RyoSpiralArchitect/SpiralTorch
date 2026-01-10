@@ -153,7 +153,8 @@ impl ContinuousWaveletTransform {
                 if kernels.len() == self.scales.len()
                     && kernels
                         .first()
-                        .map_or(true, |kernel| kernel.len() == cols * cols)
+                        .map(|kernel| kernel.len() == cols * cols)
+                        .unwrap_or(true)
                 {
                     return Ref::map(cached, |opt| opt.as_ref().unwrap());
                 }

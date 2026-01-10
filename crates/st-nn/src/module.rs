@@ -285,9 +285,9 @@ impl Parameter {
     pub fn apply_step_with_adapter(
         &mut self,
         fallback_lr: f32,
-        mut adapter: Option<&mut dyn LocalLearningRateAdapter>,
+        adapter: Option<&mut dyn LocalLearningRateAdapter>,
     ) -> PureResult<()> {
-        if let Some(adapter) = adapter.as_deref_mut() {
+        if let Some(adapter) = adapter {
             if let Some(view) = self.primary_gradient_view() {
                 let hint = adapter.sheet_hint().max(1);
                 if let Some(features) = SpectralFeatureSample::from_slice(view, hint) {

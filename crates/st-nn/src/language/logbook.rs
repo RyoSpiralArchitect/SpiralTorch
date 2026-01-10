@@ -117,7 +117,7 @@ impl Iterator for DesireLogReplay {
     type Item = PureResult<DesireLogRecord>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some(line) = self.lines.next() {
+        for line in self.lines.by_ref() {
             match line {
                 Ok(text) => {
                     if text.trim().is_empty() {
@@ -366,9 +366,9 @@ mod tests {
                 .expect("record");
         }
         logbook.flush().expect("flush");
-        let mut replay = DesireLogReplay::open(&path).expect("open");
+        let replay = DesireLogReplay::open(&path).expect("open");
         let mut phases = Vec::new();
-        while let Some(record) = replay.next() {
+        for record in replay {
             let record = record.expect("record");
             phases.push(record.solution.phase);
         }

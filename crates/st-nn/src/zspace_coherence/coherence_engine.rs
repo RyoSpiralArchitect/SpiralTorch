@@ -160,8 +160,7 @@ impl DomainLinguisticProfile {
         if emphasis <= 0.0 || !emphasis.is_finite() {
             return Err(TensorError::NonPositiveCoherence {
                 coherence: emphasis,
-            }
-            .into());
+            });
         }
         self.emphasis = emphasis;
         Ok(self)
@@ -171,11 +170,11 @@ impl DomainLinguisticProfile {
     /// positive and finite.
     pub fn with_harmonic_bias(mut self, bias: Vec<f32>) -> PureResult<Self> {
         if bias.is_empty() {
-            return Err(TensorError::EmptyInput("harmonic_bias").into());
+            return Err(TensorError::EmptyInput("harmonic_bias"));
         }
         for value in &bias {
             if *value <= 0.0 || !value.is_finite() {
-                return Err(TensorError::NonPositiveCoherence { coherence: *value }.into());
+                return Err(TensorError::NonPositiveCoherence { coherence: *value });
             }
         }
         self.harmonic_bias = Some(bias);
@@ -309,10 +308,10 @@ impl CoherenceEngine {
     /// Creates a new coherence engine.
     pub fn new(dim: usize, curvature: f32) -> PureResult<Self> {
         if dim == 0 {
-            return Err(TensorError::InvalidDimensions { rows: 0, cols: 0 }.into());
+            return Err(TensorError::InvalidDimensions { rows: 0, cols: 0 });
         }
         if curvature >= 0.0 {
-            return Err(TensorError::NonHyperbolicCurvature { curvature }.into());
+            return Err(TensorError::NonHyperbolicCurvature { curvature });
         }
         Ok(Self {
             dim,
@@ -326,7 +325,7 @@ impl CoherenceEngine {
     /// Overrides the number of Maxwell channels used for coherence measurement.
     pub fn with_channel_count(mut self, num_channels: usize) -> PureResult<Self> {
         if num_channels == 0 {
-            return Err(TensorError::EmptyInput("maxwell_channels").into());
+            return Err(TensorError::EmptyInput("maxwell_channels"));
         }
         self.num_channels = num_channels;
         Ok(self)
@@ -360,25 +359,24 @@ impl CoherenceEngine {
     /// Derives a linguistic contour from the provided coherence weights.
     pub fn derive_linguistic_contour(&self, weights: &[f32]) -> PureResult<LinguisticContour> {
         if weights.is_empty() {
-            return Err(TensorError::EmptyInput("linguistic_contour_weights").into());
+            return Err(TensorError::EmptyInput("linguistic_contour_weights"));
         }
         if weights.len() != self.num_channels {
             return Err(TensorError::DataLength {
                 expected: self.num_channels,
                 got: weights.len(),
-            }
-            .into());
+            });
         }
 
         let mut total = 0.0f32;
         for weight in weights {
             if !weight.is_finite() || *weight < 0.0 {
-                return Err(TensorError::NonPositiveCoherence { coherence: *weight }.into());
+                return Err(TensorError::NonPositiveCoherence { coherence: *weight });
             }
             total += *weight;
         }
         if total <= 0.0 || !total.is_finite() {
-            return Err(TensorError::NonPositiveCoherence { coherence: total }.into());
+            return Err(TensorError::NonPositiveCoherence { coherence: total });
         }
 
         let norm_factor = 1.0 / total;
@@ -420,14 +418,13 @@ impl CoherenceEngine {
             return Err(TensorError::DataLength {
                 expected: self.num_channels,
                 got: weights.len(),
-            }
-            .into());
+            });
         }
         if weights
             .iter()
             .any(|weight| !weight.is_finite() || *weight < 0.0)
         {
-            return Err(TensorError::NonPositiveCoherence { coherence: -1.0 }.into());
+            return Err(TensorError::NonPositiveCoherence { coherence: -1.0 });
         }
 
         let mut reports = Vec::with_capacity(self.num_channels);
@@ -473,12 +470,11 @@ impl CoherenceEngine {
             return Err(TensorError::ShapeMismatch {
                 left: (rows, cols),
                 right: (1, self.dim),
-            }
-            .into());
+            });
         }
 
         let data = x.data();
-        let channel_width = (self.dim + self.num_channels - 1) / self.num_channels;
+        let channel_width = self.dim.div_ceil(self.num_channels);
         let mut weights = Vec::with_capacity(self.num_channels);
         let curvature_bias = self.curvature_bias();
         let backend_bias = if self.backend.is_accelerated() {
@@ -519,7 +515,7 @@ impl CoherenceEngine {
 
         let mut total: f32 = weights.iter().copied().sum();
         if !total.is_finite() || total <= f32::EPSILON {
-            return Err(TensorError::NonPositiveCoherence { coherence: total }.into());
+            return Err(TensorError::NonPositiveCoherence { coherence: total });
         }
         total = total.max(1e-6);
         for weight in &mut weights {
@@ -558,7 +554,7 @@ mod tests {
             128,
             vec![0.1; 64]
                 .into_iter()
-                .chain(vec![0.6; 64].into_iter())
+                .chain(vec![0.6; 64])
                 .collect(),
         )
         .unwrap();
@@ -605,7 +601,7 @@ mod tests {
             96,
             vec![0.05; 48]
                 .into_iter()
-                .chain(vec![0.6; 48].into_iter())
+                .chain(vec![0.6; 48])
                 .collect(),
         )
         .unwrap();
@@ -641,7 +637,7 @@ mod tests {
             assert_eq!(report.channel(), idx);
             assert_eq!(report.weight(), weights[idx]);
             assert!(report.emphasis() >= 1.0 - f32::EPSILON);
-            assert!(report.backend().label().len() > 0);
+            assert!(!report.backend().label().is_empty());
         }
 
         engine.clear_linguistic_profiles();

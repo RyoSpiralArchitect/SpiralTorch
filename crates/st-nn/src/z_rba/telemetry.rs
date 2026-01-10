@@ -113,7 +113,7 @@ impl ZRBAMetrics {
         let mut diag_vars = Vec::with_capacity(rows);
         let mut row_means = Vec::with_capacity(rows);
         let mut row_variances = Vec::with_capacity(rows);
-        for i in 0..rows {
+        for (i, &target) in targets.iter().enumerate() {
             let row_start = i * cols;
             let row_end = row_start + cols;
             let row_slice = &preds[row_start..row_end];
@@ -123,7 +123,6 @@ impl ZRBAMetrics {
             let std = variance.sqrt();
             let lower = mean - quantile * std;
             let upper = mean + quantile * std;
-            let target = targets[i];
             if target >= lower && target <= upper {
                 coverage += 1.0;
             }
@@ -226,7 +225,7 @@ fn approx_standard_normal_quantile(p: f32) -> f32 {
         -3.969683028665376e+01,
         2.209460984245205e+02,
         -2.759285104469687e+02,
-        1.383577518672690e+02,
+        1.38357751867269e+02,
         -3.066479806614716e+01,
         2.506628277459239e+00,
     ];
@@ -277,12 +276,15 @@ fn normal_crps(z: f32, sigma: f32) -> f32 {
 }
 
 fn approx_erf(x: f32) -> f32 {
-    // Abramowitz and Stegun approximation with good accuracy for f32.
+    // Abramowitz and Stegun approximation (computed in f64 for stability).
     let sign = if x < 0.0 { -1.0 } else { 1.0 };
-    let x = x.abs();
+    let x = x.abs() as f64;
     let t = 1.0 / (1.0 + 0.5 * x);
     let tau = t
-        * (-x * x - 1.26551223 + 1.00002368 * t + 0.37409196 * t * t + 0.09678418 * t.powi(3)
+        * (-x * x - 1.26551223
+            + 1.00002368 * t
+            + 0.37409196 * t * t
+            + 0.09678418 * t.powi(3)
             - 0.18628806 * t.powi(4)
             + 0.27886807 * t.powi(5)
             - 1.13520398 * t.powi(6)
@@ -290,7 +292,7 @@ fn approx_erf(x: f32) -> f32 {
             - 0.82215223 * t.powi(8)
             + 0.17087277 * t.powi(9))
         .exp();
-    sign as f32 * (1.0 - tau)
+    (sign * (1.0 - tau)) as f32
 }
 
 fn spearman_rank_correlation(x: &[f32], y: &[f32]) -> f32 {
@@ -375,7 +377,7 @@ mod tests {
         let metrics = ZRBAMetrics::compute(&preds, &vars, &targets, 0.95, &indices).unwrap();
         assert!(metrics.picp >= 0.0 && metrics.picp <= 1.0);
         assert!((metrics.pin - 0.95).abs() < 1e-3);
-        assert!(metrics.reliability_by_band.len() >= 1);
+        assert!(!metrics.reliability_by_band.is_empty());
         for bin in metrics.reliability_by_band.iter() {
             assert!((bin.expected - 0.95).abs() < 1e-6);
             assert!(bin.observed >= 0.0 && bin.observed <= 1.0);

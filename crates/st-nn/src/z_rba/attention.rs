@@ -202,7 +202,7 @@ impl ZRBFAttention {
         metric: ZMetricWeights,
         ard: bool,
     ) -> PureResult<Self> {
-        if d_model == 0 || n_heads == 0 || d_model % n_heads != 0 {
+        if d_model == 0 || n_heads == 0 || !d_model.is_multiple_of(n_heads) {
             return Err(TensorError::InvalidDimensions {
                 rows: d_model,
                 cols: n_heads,
@@ -404,7 +404,7 @@ mod tests {
         };
         let kernel = product_kernel(&frame, &weights, &a, &b, &ard);
         let norm = weights.normalised();
-        let band = frame.band_distance(a.band, b.band) as f32 * norm.w_band.max(1e-6);
+        let band = frame.band_distance(a.band, b.band) * norm.w_band.max(1e-6);
         let sheet = frame.sheet_distance(a.sheet, b.sheet) * norm.w_sheet.max(1e-6);
         let echo = frame.echo_circular_distance(a.echo, b.echo) * norm.w_echo.max(1e-6);
         let expected = ard.sigma2

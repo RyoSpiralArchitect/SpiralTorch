@@ -176,6 +176,12 @@ impl SynchroBus {
     }
 }
 
+impl Default for SynchroBus {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Periodic ticker that drives the synchronisation bus.
 pub struct Ticker {
     handle: Option<JoinHandle<()>>,
@@ -489,7 +495,7 @@ impl HeatmapResult {
             if total_energy <= f64::EPSILON {
                 0.0
             } else {
-                (value / total_energy).max(0.0).min(1.0) as f32
+                (value / total_energy).clamp(0.0, 1.0) as f32
             }
         };
 
@@ -563,9 +569,11 @@ impl HeatmapResult {
 
     /// Converts the heatmap into a synthetic ZPulse snapshot for downstream Z-space consumers.
     pub fn to_zpulse(&self, ts: u64) -> ZPulse {
-        let mut pulse = ZPulse::default();
-        pulse.source = ZSource::Other("psi");
-        pulse.ts = ts;
+        let mut pulse = ZPulse {
+            source: ZSource::Other("psi"),
+            ts,
+            ..ZPulse::default()
+        };
 
         let Some(analytics) = self.analyse() else {
             return pulse;
@@ -597,8 +605,10 @@ impl HeatmapResult {
     /// Builds an atlas fragment carrying the synchroniser metrics.
     pub fn to_atlas_fragment(&self, timestamp: Option<f32>) -> Option<AtlasFragment> {
         let analytics = self.analyse()?;
-        let mut fragment = AtlasFragment::default();
-        fragment.timestamp = timestamp;
+        let mut fragment = AtlasFragment {
+            timestamp,
+            ..AtlasFragment::default()
+        };
         fragment.push_metric_with_district("psi.synchro.gamma", self.gamma as f32, "psi");
         fragment.push_metric_with_district("psi.synchro.kappa_hat", self.kappa_hat as f32, "psi");
         fragment.push_metric_with_district(

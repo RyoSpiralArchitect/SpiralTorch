@@ -7,7 +7,8 @@ use crate::module::Module;
 use crate::{PureResult, Tensor};
 use st_tensor::TensorError;
 
-const SQRT_2_OVER_PI: f32 = 0.7978845608028654;
+const SQRT_2_OVER_PI: f32 =
+    std::f32::consts::FRAC_2_SQRT_PI * std::f32::consts::FRAC_1_SQRT_2;
 const KAPPA: f32 = 0.044715;
 
 /// Gaussian Error Linear Unit with the tanh-based approximation that remains

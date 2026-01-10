@@ -232,21 +232,27 @@ impl Module for HamiltonJacobiFlow {
             let out_buf = output.data_mut();
             for r in 0..rows {
                 let offset = r * cols;
-                for c in 0..cols {
-                    let idx = offset + c;
-                    let current = input_buf[idx];
-                    let prev = if r > 0 {
-                        input_buf[idx - cols]
-                    } else {
-                        current
-                    };
-                    let next = if r + 1 < rows {
-                        input_buf[idx + cols]
-                    } else {
-                        current
-                    };
-                    let grad = (2.0 * current - prev - next) + potential[c] * current;
-                    out_buf[idx] = current - step * grad;
+                let input_row = &input_buf[offset..offset + cols];
+                let prev_row = if r > 0 {
+                    &input_buf[offset - cols..offset]
+                } else {
+                    input_row
+                };
+                let next_row = if r + 1 < rows {
+                    &input_buf[offset + cols..offset + 2 * cols]
+                } else {
+                    input_row
+                };
+                let out_row = &mut out_buf[offset..offset + cols];
+
+                for (((out, &current), &potential), (&prev, &next)) in out_row
+                    .iter_mut()
+                    .zip(input_row.iter())
+                    .zip(potential.iter())
+                    .zip(prev_row.iter().zip(next_row.iter()))
+                {
+                    let grad = (2.0 * current - prev - next) + potential * current;
+                    *out = current - step * grad;
                 }
             }
         }
@@ -408,15 +414,23 @@ impl Module for StochasticSchrodingerLayer {
             let mut rng = self.rng.borrow_mut();
             for r in 0..rows {
                 let offset = r * cols;
-                for c in 0..cols {
-                    let idx = offset + c;
-                    let amp = input_buf[idx].tanh();
+                let input_row = &input_buf[offset..offset + cols];
+                let out_row = &mut out_buf[offset..offset + cols];
+                let amp_row = &mut amp_buf[offset..offset + cols];
+                let deco_row = &mut deco_buf[offset..offset + cols];
+                for (((out, amp_slot), deco_slot), (&input, &coherence)) in out_row
+                    .iter_mut()
+                    .zip(amp_row.iter_mut())
+                    .zip(deco_row.iter_mut())
+                    .zip(input_row.iter().zip(coherence.iter()))
+                {
+                    let amp = input.tanh();
                     let deco = 1.0 / (1.0 + rate * amp.abs());
-                    let interference = amp * coherence[c] * deco;
+                    let interference = amp * coherence * deco;
                     let noise = (rng.gen::<f32>() - 0.5) * noise_scale;
-                    out_buf[idx] = interference + noise;
-                    amp_buf[idx] = amp;
-                    deco_buf[idx] = deco;
+                    *out = interference + noise;
+                    *amp_slot = amp;
+                    *deco_slot = deco;
                 }
             }
         }

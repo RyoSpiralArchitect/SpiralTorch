@@ -101,12 +101,8 @@ fn saturate_slice(values: &mut [f32], topos: Option<&OpenCartesianTopos>) {
         for value in values.iter_mut() {
             if !value.is_finite() {
                 *value = 0.0;
-                continue;
-            }
-            if *value > FALLBACK_SATURATION {
-                *value = FALLBACK_SATURATION;
-            } else if *value < -FALLBACK_SATURATION {
-                *value = -FALLBACK_SATURATION;
+            } else {
+                *value = (*value).clamp(-FALLBACK_SATURATION, FALLBACK_SATURATION);
             }
         }
     }

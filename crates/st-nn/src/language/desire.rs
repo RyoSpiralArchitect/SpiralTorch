@@ -463,10 +463,10 @@ impl DesireLagrangian {
     }
 
     fn on_phase_transition(&mut self, phase: DesirePhase) {
-        if matches!(phase, DesirePhase::Injection | DesirePhase::Integration) {
-            if !self.avoidance_accumulator.is_empty() {
-                self.desire_bias = normalise(&self.avoidance_accumulator);
-            }
+        if matches!(phase, DesirePhase::Injection | DesirePhase::Integration)
+            && !self.avoidance_accumulator.is_empty()
+        {
+            self.desire_bias = normalise(&self.avoidance_accumulator);
         }
     }
 

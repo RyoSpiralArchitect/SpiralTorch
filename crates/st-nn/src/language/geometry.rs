@@ -172,6 +172,10 @@ impl RepressionField {
         self.values.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
+
     pub fn value(&self, idx: usize) -> f32 {
         self.values.get(idx).copied().unwrap_or(0.0)
     }

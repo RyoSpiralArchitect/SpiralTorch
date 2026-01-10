@@ -446,8 +446,7 @@ impl PreDiscardPolicy {
         if !dominance_ratio.is_finite() || dominance_ratio < 0.0 {
             return Err(TensorError::NonPositiveCoherence {
                 coherence: dominance_ratio,
-            }
-            .into());
+            });
         }
         Ok(Self {
             dominance_ratio: dominance_ratio.min(1.0),
@@ -461,8 +460,7 @@ impl PreDiscardPolicy {
         if !energy_floor.is_finite() || energy_floor < 0.0 {
             return Err(TensorError::NonPositiveCoherence {
                 coherence: energy_floor,
-            }
-            .into());
+            });
         }
         self.energy_floor = energy_floor;
         Ok(self)
@@ -494,8 +492,7 @@ impl PreDiscardPolicy {
             return Err(TensorError::DataLength {
                 expected: original.len(),
                 got: weights.len(),
-            }
-            .into());
+            });
         }
         if weights.is_empty() {
             return Ok(PreDiscardOutcome::fallback(
@@ -682,8 +679,7 @@ impl PreDiscardRegulator {
         {
             return Err(TensorError::NonPositiveCoherence {
                 coherence: target_preserved_ratio.min(target_survivor_energy_ratio),
-            }
-            .into());
+            });
         }
 
         Ok(Self {
@@ -722,11 +718,10 @@ impl PreDiscardRegulator {
     /// Configures the smoothing factor used for the internal exponential moving averages.
     /// Values are clamped to the \[0, 1] interval.
     pub fn with_smoothing(mut self, smoothing: f32) -> PureResult<Self> {
-        if !smoothing.is_finite() || smoothing < 0.0 || smoothing > 1.0 {
+        if !(0.0..=1.0).contains(&smoothing) {
             return Err(TensorError::NonPositiveCoherence {
                 coherence: smoothing,
-            }
-            .into());
+            });
         }
         self.smoothing = smoothing;
         Ok(self)
@@ -747,8 +742,7 @@ impl PreDiscardRegulator {
         {
             return Err(TensorError::NonPositiveCoherence {
                 coherence: channel_weight.min(energy_weight),
-            }
-            .into());
+            });
         }
         self.channel_weight = channel_weight;
         self.energy_weight = energy_weight;
@@ -758,7 +752,7 @@ impl PreDiscardRegulator {
     /// Configures an additional penalty applied when the pre-discard policy has to fall back.
     pub fn with_fallback_penalty(mut self, penalty: f32) -> PureResult<Self> {
         if !penalty.is_finite() || penalty < 0.0 {
-            return Err(TensorError::NonPositiveCoherence { coherence: penalty }.into());
+            return Err(TensorError::NonPositiveCoherence { coherence: penalty });
         }
         self.fallback_penalty = penalty;
         Ok(self)
@@ -771,13 +765,12 @@ impl PreDiscardRegulator {
     /// values and the smoothing factor restricted to the [0, 1] interval.
     pub fn with_fallback_memory(mut self, gain: f32, smoothing: f32) -> PureResult<Self> {
         if !gain.is_finite() || gain < 0.0 {
-            return Err(TensorError::NonPositiveCoherence { coherence: gain }.into());
+            return Err(TensorError::NonPositiveCoherence { coherence: gain });
         }
-        if !smoothing.is_finite() || smoothing < 0.0 || smoothing > 1.0 {
+        if !(0.0..=1.0).contains(&smoothing) {
             return Err(TensorError::NonPositiveCoherence {
                 coherence: smoothing,
-            }
-            .into());
+            });
         }
 
         self.fallback_gain = gain;
@@ -790,8 +783,7 @@ impl PreDiscardRegulator {
         if !aggressiveness.is_finite() || aggressiveness <= 0.0 {
             return Err(TensorError::NonPositiveCoherence {
                 coherence: aggressiveness,
-            }
-            .into());
+            });
         }
         self.aggressiveness = aggressiveness;
         Ok(self)
@@ -800,11 +792,10 @@ impl PreDiscardRegulator {
     /// Configures the smoothing factor used when tracking error trends. Values are clamped to
     /// the \[0, 1] interval.
     pub fn with_trend_smoothing(mut self, smoothing: f32) -> PureResult<Self> {
-        if !smoothing.is_finite() || smoothing < 0.0 || smoothing > 1.0 {
+        if !(0.0..=1.0).contains(&smoothing) {
             return Err(TensorError::NonPositiveCoherence {
                 coherence: smoothing,
-            }
-            .into());
+            });
         }
         self.trend_smoothing = smoothing;
         Ok(self)
@@ -815,8 +806,7 @@ impl PreDiscardRegulator {
         if !max_step.is_finite() || max_step <= 0.0 {
             return Err(TensorError::NonPositiveCoherence {
                 coherence: max_step,
-            }
-            .into());
+            });
         }
         self.max_step = max_step.min(1.0);
         Ok(self)
@@ -827,8 +817,7 @@ impl PreDiscardRegulator {
         if !min_offset.is_finite() || !max_offset.is_finite() || min_offset > max_offset {
             return Err(TensorError::NonPositiveCoherence {
                 coherence: min_offset.min(max_offset),
-            }
-            .into());
+            });
         }
         self.min_offset = min_offset;
         self.max_offset = max_offset;
@@ -841,8 +830,7 @@ impl PreDiscardRegulator {
         if !momentum.is_finite() || momentum < 0.0 {
             return Err(TensorError::NonPositiveCoherence {
                 coherence: momentum,
-            }
-            .into());
+            });
         }
         self.momentum = momentum;
         Ok(self)
@@ -853,8 +841,7 @@ impl PreDiscardRegulator {
         if !deadband.is_finite() || deadband < 0.0 {
             return Err(TensorError::NonPositiveCoherence {
                 coherence: deadband,
-            }
-            .into());
+            });
         }
         self.deadband = deadband;
         Ok(self)
@@ -863,8 +850,8 @@ impl PreDiscardRegulator {
     /// Applies exponential decay towards the neutral offset when the regulator observes equilibrium.
     /// The decay factor must lie in the [0, 1] interval.
     pub fn with_equilibrium_decay(mut self, decay: f32) -> PureResult<Self> {
-        if !decay.is_finite() || decay < 0.0 || decay > 1.0 {
-            return Err(TensorError::NonPositiveCoherence { coherence: decay }.into());
+        if !(0.0..=1.0).contains(&decay) {
+            return Err(TensorError::NonPositiveCoherence { coherence: decay });
         }
         self.equilibrium_decay = decay;
         Ok(self)
@@ -880,16 +867,13 @@ impl PreDiscardRegulator {
         confidence_floor: f32,
         confidence_gain: f32,
     ) -> PureResult<Self> {
-        if !confidence_floor.is_finite()
+        if !(0.0..=1.0).contains(&confidence_floor)
             || !confidence_gain.is_finite()
-            || confidence_floor < 0.0
-            || confidence_floor > 1.0
             || confidence_gain < 0.0
         {
             return Err(TensorError::NonPositiveCoherence {
                 coherence: confidence_floor.min(confidence_gain),
-            }
-            .into());
+            });
         }
 
         self.confidence_floor = confidence_floor;
@@ -905,13 +889,13 @@ impl PreDiscardRegulator {
     /// [0, 1] interval.
     pub fn with_integral_control(mut self, gain: f32, limit: f32, decay: f32) -> PureResult<Self> {
         if !gain.is_finite() || gain < 0.0 {
-            return Err(TensorError::NonPositiveCoherence { coherence: gain }.into());
+            return Err(TensorError::NonPositiveCoherence { coherence: gain });
         }
         if !limit.is_finite() || limit < 0.0 {
-            return Err(TensorError::NonPositiveCoherence { coherence: limit }.into());
+            return Err(TensorError::NonPositiveCoherence { coherence: limit });
         }
-        if !decay.is_finite() || decay < 0.0 || decay > 1.0 {
-            return Err(TensorError::NonPositiveCoherence { coherence: decay }.into());
+        if !(0.0..=1.0).contains(&decay) {
+            return Err(TensorError::NonPositiveCoherence { coherence: decay });
         }
 
         self.integral_gain = gain;
@@ -956,8 +940,7 @@ impl PreDiscardRegulator {
     }
 
     fn clamped_offset(&self, base_ratio: f32) -> f32 {
-        let ratio = (base_ratio + self.offset).clamp(0.0, 1.0);
-        ratio
+        (base_ratio + self.offset).clamp(0.0, 1.0)
     }
 
     /// Derives the policy that should be applied next given the base configuration.
@@ -1116,7 +1099,7 @@ impl PreDiscardTelemetry {
         dominant_weight: f32,
     ) -> Self {
         let mut dominant_weight = if dominant_weight.is_finite() {
-            dominant_weight.max(0.0).min(1.0)
+            dominant_weight.clamp(0.0, 1.0)
         } else {
             0.0
         };
@@ -1395,6 +1378,14 @@ pub struct ZSpaceCoherenceSequencer {
     pre_discard_regulator: Option<Arc<Mutex<PreDiscardRegulator>>>,
 }
 
+pub type ZSpaceSequencerLanguageOutput = (
+    Tensor,
+    Vec<f32>,
+    ConceptHint,
+    Option<NarrativeHint>,
+    MaxwellZPulse,
+);
+
 impl ZSpaceCoherenceSequencer {
     /// Creates a new Z-space coherence sequencer.
     pub fn new(
@@ -1404,21 +1395,21 @@ impl ZSpaceCoherenceSequencer {
         topos: OpenCartesianTopos,
     ) -> PureResult<Self> {
         if num_heads == 0 {
-            return Err(st_tensor::TensorError::EmptyInput("maxwell_heads").into());
+            return Err(st_tensor::TensorError::EmptyInput("maxwell_heads"));
         }
-        if dim % num_heads != 0 {
+        if !dim.is_multiple_of(num_heads) {
             return Err(st_tensor::TensorError::InvalidDimensions {
                 rows: dim,
                 cols: num_heads,
             }
-            .into());
+            );
         }
         if (topos.curvature() - curvature).abs() > 1e-6 {
             return Err(st_tensor::TensorError::CurvatureMismatch {
                 expected: curvature,
                 got: topos.curvature(),
             }
-            .into());
+            );
         }
 
         let channel_count = (dim / 8).max(1).max(num_heads);
@@ -1486,19 +1477,19 @@ impl ZSpaceCoherenceSequencer {
         coherence_weights: &[f32],
     ) -> PureResult<(Tensor, f32, f32, usize)> {
         if coherence_weights.is_empty() {
-            return Err(TensorError::EmptyInput("coherence_weights").into());
+            return Err(TensorError::EmptyInput("coherence_weights"));
         }
         if coherence_weights.len() != self.coherence_engine.num_channels() {
             return Err(TensorError::DataLength {
                 expected: self.coherence_engine.num_channels(),
                 got: coherence_weights.len(),
             }
-            .into());
+            );
         }
 
         let (rows, cols) = x.shape();
         let mut aggregated = Tensor::zeros(rows, cols)?;
-        let channel_width = (cols + coherence_weights.len() - 1) / coherence_weights.len();
+        let channel_width = cols.div_ceil(coherence_weights.len());
         let normalization = coherence_weights.iter().copied().sum::<f32>().max(1e-6);
         let fractional_order = self.fractional_order();
         let input = x.data();
@@ -1577,9 +1568,7 @@ impl ZSpaceCoherenceSequencer {
             }
         } else if !normalized_weights.is_empty() {
             let fill = 1.0 / normalized_weights.len() as f32;
-            for value in &mut normalized_weights {
-                *value = fill;
-            }
+            normalized_weights.fill(fill);
         }
 
         let mean_coherence = if channel_weights.is_empty() {
@@ -1704,13 +1693,7 @@ impl ZSpaceCoherenceSequencer {
         x: &Tensor,
         semantics: &SemanticBridge,
         maxwell_bridge: &MaxwellDesireBridge,
-    ) -> PureResult<(
-        Tensor,
-        Vec<f32>,
-        ConceptHint,
-        Option<NarrativeHint>,
-        MaxwellZPulse,
-    )> {
+    ) -> PureResult<ZSpaceSequencerLanguageOutput> {
         let (aggregated, coherence) = self.forward_with_coherence(x)?;
         let semantic_distribution =
             self.derive_semantic_distribution(&aggregated, &coherence, semantics)?;
@@ -2042,8 +2025,8 @@ impl ZSpaceCoherenceSequencer {
         if cols == 0 || rows == 0 {
             return Vec::new();
         }
-        let token_width = (cols + tokens - 1) / tokens;
-        let channel_width = (cols + coherence.len() - 1) / coherence.len().max(1);
+        let token_width = cols.div_ceil(tokens);
+        let channel_width = cols.div_ceil(coherence.len());
         let mut window = Vec::with_capacity(tokens);
         let data = aggregated.data();
         for token in 0..tokens {
@@ -2148,9 +2131,7 @@ impl ZSpaceCoherenceSequencer {
             }
         } else {
             let fill = 1.0 / len as f32;
-            for value in &mut fused {
-                *value = fill;
-            }
+            fused.fill(fill);
         }
         fused
     }

@@ -310,9 +310,13 @@ mod tests {
             .map(|(g, p)| g * p)
             .sum();
         let scale = (-layer.curvature()).sqrt() / layer.last_temperatures()[0];
-        for idx in 0..3 {
-            let expected = scale * probs[idx] * (grad_out.data()[idx] - dot);
-            assert!((expected - grad_in.data()[idx]).abs() < 1e-5);
+        for ((&prob, &grad), &grad_in) in probs
+            .iter()
+            .zip(grad_out.data().iter())
+            .zip(grad_in.data().iter())
+        {
+            let expected = scale * prob * (grad - dot);
+            assert!((expected - grad_in).abs() < 1e-5);
         }
     }
 

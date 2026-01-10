@@ -149,15 +149,15 @@ impl Module for Lstm {
             let input_slice = &input.data()[t * input_dim..(t + 1) * input_dim];
             cache.inputs[t * input_dim..(t + 1) * input_dim].copy_from_slice(input_slice);
             let mut gates = vec![0.0f32; 4 * hidden_dim];
-            for gate in 0..4 * hidden_dim {
+            for (gate, slot) in gates.iter_mut().enumerate() {
                 let mut value = bias_ih.data()[gate] + bias_hh.data()[gate];
-                for idx in 0..input_dim {
-                    value += input_slice[idx] * weight_ih.data()[idx * 4 * hidden_dim + gate];
+                for (idx, &input) in input_slice.iter().enumerate() {
+                    value += input * weight_ih.data()[idx * 4 * hidden_dim + gate];
                 }
-                for idx in 0..hidden_dim {
-                    value += hidden_prev[idx] * weight_hh.data()[idx * 4 * hidden_dim + gate];
+                for (idx, &hidden) in hidden_prev.iter().enumerate() {
+                    value += hidden * weight_hh.data()[idx * 4 * hidden_dim + gate];
                 }
-                gates[gate] = value;
+                *slot = value;
             }
             for unit in 0..hidden_dim {
                 let gi = sigmoid(gates[unit]);

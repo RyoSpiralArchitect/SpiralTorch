@@ -37,20 +37,15 @@ use st_core::runtime::blackcat::{
 };
 
 /// Mode that dictates how a roundtable node participates in distributed consensus.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DistMode {
     /// Keep the roundtable local. No summaries are exported.
+    #[default]
     LocalOnly,
     /// Periodically push compact summaries to a meta layer for light-weight promotion.
     PeriodicMeta,
     /// Fully participate in the meta layer and accept remote proposals automatically.
     FullyGlobal,
-}
-
-impl Default for DistMode {
-    fn default() -> Self {
-        DistMode::LocalOnly
-    }
 }
 
 impl DistMode {
@@ -468,10 +463,6 @@ impl HeurOpLog {
             return Vec::new();
         }
 
-        if limit == 0 {
-            return Vec::new();
-        }
-
         let mut candidates: Vec<&HeurOp> = self
             .entries
             .iter()
@@ -490,7 +481,7 @@ impl HeurOpLog {
             candidates.truncate(partition);
         }
 
-        candidates.into_iter().map(|op| op.clone()).collect()
+        candidates.into_iter().cloned().collect()
     }
 }
 
@@ -568,6 +559,7 @@ impl RoundtableNode {
         &self.config
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn record_decision(
         &mut self,
         plan_signature: String,
@@ -714,7 +706,7 @@ pub fn simulate_proposal_locally(
         kind: HeurOpKind::Annotate {
             script_hash: proposal
                 .ops
-                .get(0)
+                .first()
                 .map(|op| op.proposal_fingerprint())
                 .unwrap_or(0),
             note: "preview".to_string(),
@@ -1367,10 +1359,10 @@ mod tests {
             notes: "base".into(),
             issued_at: base_time,
         };
-        moderator.absorb_minutes(&[minute.clone()]);
+        moderator.absorb_minutes(std::slice::from_ref(&minute));
         assert_eq!(moderator.minutes().len(), 1);
 
-        moderator.absorb_minutes(&[minute.clone()]);
+        moderator.absorb_minutes(std::slice::from_ref(&minute));
         assert_eq!(moderator.minutes().len(), 1);
 
         let mut picks_b = picks;
@@ -1389,13 +1381,13 @@ mod tests {
             notes: "later".into(),
             issued_at: base_time + Duration::from_secs(5),
         };
-        moderator.absorb_minutes(&[later_minute.clone()]);
+        moderator.absorb_minutes(std::slice::from_ref(&later_minute));
         assert_eq!(moderator.minutes().len(), 2);
 
         moderator.set_history_limit(1);
         assert_eq!(moderator.minutes().len(), 1);
 
-        moderator.absorb_minutes(&[later_minute]);
+        moderator.absorb_minutes(std::slice::from_ref(&later_minute));
         assert_eq!(moderator.minutes().len(), 1);
     }
 

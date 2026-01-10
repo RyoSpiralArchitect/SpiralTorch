@@ -291,6 +291,9 @@ cargo build -p st-vision      # vision kernels/pipelines
 ## Build Python wheel (maturin)
 
 ```bash
+# Install maturin (once)
+python -m pip install -U "maturin>=1,<2"
+
 # Release-equivalent (matches PyPI wheels)
 maturin build -m bindings/st-py/Cargo.toml --release --locked --features wgpu,logic,kdsl
 
@@ -306,6 +309,8 @@ pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
 ```
 
 If your local `python` aborts during startup because of a third-party `sitecustomize.py`, rerun the commands above with `PYTHONNOUSERSITE=1` (or `python -s`).
+
+Linux note: build inside a manylinux container (e.g. via GitHub Actions) for broadly-compatible wheels; building directly on Ubuntu may produce a `manylinux_2_3x` tag that won’t install on older distros.
 
 ---
 

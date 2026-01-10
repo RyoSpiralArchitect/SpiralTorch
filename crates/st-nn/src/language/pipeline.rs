@@ -67,6 +67,7 @@ impl DesirePipelineSink for DesireLogbook {
 /// Event broadcast by [`DesirePipeline`] when a step is evaluated or a rewrite
 /// trigger fires.
 #[derive(Clone, Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum DesirePipelineEvent {
     Step {
         step: DesireAutomatedStep,
@@ -2107,6 +2108,7 @@ mod language_pipeline {
             }
         }
 
+        #[allow(clippy::too_many_arguments)]
         pub fn record_heuristic(
             &self,
             subsystem: impl Into<String>,

@@ -115,7 +115,7 @@ impl CovHead {
             }
             let eigenvector = eigen.eigenvectors.column(idx);
             let value = value.max(0.0);
-            result += value * (&eigenvector * eigenvector.transpose());
+            result += value * (eigenvector * eigenvector.transpose());
         }
         result
     }

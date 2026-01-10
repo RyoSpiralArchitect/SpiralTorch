@@ -23,9 +23,10 @@ pub enum AggregationReducer {
 }
 
 /// Strategy used to mix neighbour features before applying the learnable kernel.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum NeighborhoodAggregation {
     /// Single-hop propagation identical to the historic implementation.
+    #[default]
     Single,
     /// Multi-hop aggregation with optional self-inclusion and attenuation.
     MultiHop {
@@ -135,12 +136,6 @@ impl NeighborhoodAggregation {
                 Ok(weights)
             }
         }
-    }
-}
-
-impl Default for NeighborhoodAggregation {
-    fn default() -> Self {
-        NeighborhoodAggregation::Single
     }
 }
 

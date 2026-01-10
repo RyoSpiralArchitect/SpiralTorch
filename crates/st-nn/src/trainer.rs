@@ -754,18 +754,13 @@ impl RegionLossConfig {
 }
 
 /// Loss aggregation strategies supported by [`ModuleTrainer`].
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub enum LossStrategy {
     /// Baseline behaviour using band weights only.
+    #[default]
     Baseline,
     /// Applies additional region weights extracted from Softlogic feedback.
     Region(RegionLossConfig),
-}
-
-impl Default for LossStrategy {
-    fn default() -> Self {
-        LossStrategy::Baseline
-    }
 }
 
 impl LossStrategy {
@@ -1166,6 +1161,12 @@ impl SpectralLearningRatePolicy {
             return target;
         }
         previous + (target - previous) * alpha
+    }
+}
+
+impl Default for SpectralLearningRatePolicy {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -2490,14 +2491,9 @@ impl ModuleTrainer {
                         }
                     }
                     if let Some(loop_signal) = hub::get_chrono_loop() {
-                        let collapse_hint =
-                            psi_total_opt.filter(|value| *value > 0.0).or_else(|| {
-                                if summary.mean_psi > 0.0 {
-                                    Some(summary.mean_psi)
-                                } else {
-                                    None
-                                }
-                            });
+                        let collapse_hint = psi_total_opt
+                            .filter(|value| *value > 0.0)
+                            .or((summary.mean_psi > 0.0).then_some(summary.mean_psi));
                         let support = (summary.support + summary.mean_score).max(0.1);
                         let envelope = LoopbackEnvelope::new(loop_signal)
                             .with_source(summary.node_id.clone())
@@ -3637,11 +3633,14 @@ mod tests {
         let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01).with_blackcat(runtime);
         if let Some(rt) = trainer.blackcat.as_mut() {
             rt.begin_step();
-            let mut metrics = StepMetrics::default();
-            metrics.step_time_ms = 10.0;
-            metrics.mem_peak_mb = 256.0;
-            metrics.retry_rate = 0.05;
-            metrics.extra.insert("grad_norm".into(), 0.4);
+            let mut extra = HashMap::new();
+            extra.insert("grad_norm".into(), 0.4);
+            let metrics = StepMetrics {
+                step_time_ms: 10.0,
+                mem_peak_mb: 256.0,
+                retry_rate: 0.05,
+                extra,
+            };
             let _ = rt.post_step(&metrics);
         }
         let stats = trainer
@@ -3873,7 +3872,7 @@ mod tests {
         assert!(trainer.gnn_roundtable_signal().is_some());
         let latest = bridge.latest().unwrap();
         assert!(latest.is_some());
-        assert!(bridge.len() >= 1);
+        assert!(!bridge.is_empty());
     }
 
     #[cfg(feature = "golden")]

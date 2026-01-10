@@ -25,16 +25,6 @@ impl Dataset {
         }
     }
 
-    /// Builds a dataset from an iterator of `(input, target)` pairs.
-    pub fn from_iter<I>(iter: I) -> Self
-    where
-        I: IntoIterator<Item = Sample>,
-    {
-        Self {
-            samples: iter.into_iter().collect(),
-        }
-    }
-
     /// Builds a dataset from an owning vector.
     pub fn from_vec(samples: Vec<Sample>) -> Self {
         Self { samples }
@@ -75,6 +65,14 @@ impl Dataset {
     /// while enabling builders like `.shuffle().batched().prefetch()`.
     pub fn loader(&self) -> DataLoader {
         DataLoader::new(self.samples.clone().into())
+    }
+}
+
+impl std::iter::FromIterator<Sample> for Dataset {
+    fn from_iter<I: IntoIterator<Item = Sample>>(iter: I) -> Self {
+        Self {
+            samples: iter.into_iter().collect(),
+        }
     }
 }
 
@@ -443,7 +441,7 @@ mod tests {
             let target = Tensor::from_vec(1, 1, vec![i as f32 * 2.0]).unwrap();
             (input, target)
         });
-        let dataset = Dataset::from_iter(samples);
+        let dataset: Dataset = samples.collect();
         let mut batches = dataset.iter().batched(3);
         let first = batches.next().unwrap().unwrap();
         assert_eq!(first.0.shape(), (3, 2));

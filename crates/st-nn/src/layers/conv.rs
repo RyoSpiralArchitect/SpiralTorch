@@ -76,6 +76,7 @@ fn compute_strides(shape: &[usize]) -> Vec<usize> {
     strides
 }
 
+#[allow(clippy::too_many_arguments)]
 fn einsum_recursive(
     depth: usize,
     sum_axes: &[usize],
@@ -312,7 +313,7 @@ impl Conv1d {
     }
 
     fn infer_width(&self, cols: usize) -> PureResult<usize> {
-        if cols % self.in_channels != 0 {
+        if !cols.is_multiple_of(self.in_channels) {
             return Err(TensorError::ShapeMismatch {
                 left: (1, cols),
                 right: (1, self.in_channels),

@@ -1193,9 +1193,8 @@ impl Module for ZSpaceLayerNorm {
         let mut grad_beta = vec![0.0f32; features];
         let mut grad_normed_cache = vec![0.0f32; rows * features];
 
-        for row in 0..rows {
+        for (row, &inv) in inv_std.iter().enumerate() {
             let offset = row * features;
-            let inv = inv_std[row];
             let mut sum_grad = 0.0f32;
             let mut sum_grad_norm = 0.0f32;
             for feature in 0..features {
@@ -1557,7 +1556,7 @@ mod tests {
         let grad_input = layer.backward(&input, &grad_output).unwrap();
 
         let eps = 1e-3;
-        let mut numeric = vec![0.0f32; 4];
+        let mut numeric = [0.0f32; 4];
         let base = input.data().to_vec();
         for (idx, numeric_grad) in numeric.iter_mut().enumerate() {
             let mut plus = base.clone();
@@ -1698,7 +1697,7 @@ mod tests {
         let grad_input = layer.backward(&input, &grad_output).unwrap();
 
         let eps = 1e-3;
-        let mut numeric = vec![0.0f32; 6];
+        let mut numeric = [0.0f32; 6];
         let base = input.data().to_vec();
         for (idx, numeric_grad) in numeric.iter_mut().enumerate() {
             let mut plus = base.clone();

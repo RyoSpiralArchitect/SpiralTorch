@@ -83,7 +83,7 @@ pub fn flows_to_canvas_tensor(flows: &[NodeFlowSample], width: usize) -> PureRes
             cols: width,
         });
     }
-    let height = ((flows.len().max(1) + width - 1) / width).max(1);
+    let height = flows.len().max(1).div_ceil(width);
     flows_to_grid(flows, width, height)
 }
 

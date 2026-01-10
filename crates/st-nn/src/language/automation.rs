@@ -399,7 +399,7 @@ mod tests {
                 events.push((offset, event));
             }
         }
-        assert!(events.len() >= 1);
+        assert!(!events.is_empty());
         if events.len() > 1 {
             let (first_time, _) = events[0];
             let (second_time, _) = events[1];

@@ -822,7 +822,7 @@ mod tests {
         lightning.set_auto_prepare(false);
         assert_eq!(lightning.prepared_module_count(), 0);
         lightning.set_auto_prepare(true);
-        assert_eq!(lightning.config().auto_prepare(), true);
+        assert!(lightning.config().auto_prepare());
     }
 
     #[test]
@@ -862,7 +862,7 @@ mod tests {
         assert_eq!(report.stages()[0].label(), Some("warmup"));
         assert_eq!(report.stages()[1].label(), Some("refine"));
         assert_eq!(report.stages()[1].config().roundtable().top_k, 2);
-        assert_eq!(report.stages()[1].config().auto_prepare(), false);
+        assert!(!report.stages()[1].config().auto_prepare());
         assert!(report.best_epoch().is_some());
         assert!(report.best_stage_index().is_some());
         assert_eq!(lightning.config().roundtable().top_k, 2);

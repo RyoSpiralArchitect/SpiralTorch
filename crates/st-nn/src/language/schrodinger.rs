@@ -29,7 +29,7 @@ pub(crate) fn schrodinger_boost(
 
     for _ in 0..lookahead {
         let mut v_curr = vec![eps; vocab];
-        for i in 0..vocab {
+        for (i, v_curr_i) in v_curr.iter_mut().enumerate() {
             let mut sum = eps;
             for &(j, log_syn) in geometry.syn_row(i) {
                 let log_par = geometry.log_par(i, j);
@@ -41,7 +41,7 @@ pub(crate) fn schrodinger_boost(
                 let weight = (baseline + potential).exp();
                 sum += weight * v_next[j];
             }
-            v_curr[i] = sum;
+            *v_curr_i = sum;
         }
         v_next = v_curr;
     }

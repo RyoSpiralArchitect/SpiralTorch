@@ -149,9 +149,8 @@ impl Module for WaveRnn {
                 let src_offset = b * self.hidden_dim;
                 let dst_offset =
                     b * self.hidden_dim * cache.out_steps + (cache.out_steps - 1) * self.hidden_dim;
-                for h in 0..self.hidden_dim {
-                    dst[dst_offset + h] = src[src_offset + h];
-                }
+                dst[dst_offset..dst_offset + self.hidden_dim]
+                    .copy_from_slice(&src[src_offset..src_offset + self.hidden_dim]);
             }
         }
         let grad_gate_out =

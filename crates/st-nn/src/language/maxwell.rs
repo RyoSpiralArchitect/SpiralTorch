@@ -229,6 +229,12 @@ pub struct MaxwellDesireBridge {
     channels: HashMap<String, ChannelProgram>,
 }
 
+impl Default for MaxwellDesireBridge {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MaxwellDesireBridge {
     /// Creates an empty bridge with small default smoothing.
     pub fn new() -> Self {

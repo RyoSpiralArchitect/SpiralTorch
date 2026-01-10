@@ -17,18 +17,13 @@ use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 
 /// Activation applied after each convolutional stage in a graph network stack.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GraphActivation {
     /// Leave the convolution output untouched.
+    #[default]
     Identity,
     /// Apply a ReLU activation.
     Relu,
-}
-
-impl Default for GraphActivation {
-    fn default() -> Self {
-        GraphActivation::Identity
-    }
 }
 
 /// Describes a single layer inside a [`ZSpaceGraphNetwork`].

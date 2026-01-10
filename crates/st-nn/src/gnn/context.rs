@@ -7,18 +7,13 @@ use crate::{PureResult, Tensor, TensorError};
 use st_core::telemetry::xai::NodeFlowSample;
 
 /// Strategy used to normalise the adjacency matrix prior to propagation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GraphNormalization {
     /// Symmetric normalisation `D^{-1/2} A D^{-1/2}` suitable for undirected graphs.
+    #[default]
     Symmetric,
     /// Row-stochastic normalisation `D^{-1} A` that keeps outgoing weights summing to one.
     Row,
-}
-
-impl Default for GraphNormalization {
-    fn default() -> Self {
-        GraphNormalization::Symmetric
-    }
 }
 
 /// Normalised adjacency wrapper that keeps Z-space compatible graph propagation.
@@ -190,11 +185,11 @@ impl GraphContext {
 
         let mut row_degrees = vec![0.0f32; rows];
         let mut col_degrees = vec![0.0f32; cols];
-        for r in 0..rows {
+        for (r, row_degree) in row_degrees.iter_mut().enumerate() {
             let offset = r * cols;
             for c in 0..cols {
                 let value = adjusted[offset + c];
-                row_degrees[r] += value;
+                *row_degree += value;
                 col_degrees[c] += value;
             }
         }
@@ -218,14 +213,14 @@ impl GraphContext {
                         1.0 / degree.sqrt()
                     };
                 }
-                for r in 0..rows {
+                for (r, &row_factor) in row_scale.iter().enumerate() {
                     let offset = r * cols;
                     for c in 0..cols {
                         let value = adjusted[offset + c];
                         if value.abs() <= f32::EPSILON {
                             continue;
                         }
-                        let scaled = value * row_scale[r] * col_scale[c];
+                        let scaled = value * row_factor * col_scale[c];
                         if scaled.abs() > f32::EPSILON {
                             normalised[offset + c] = scaled;
                         }
@@ -233,9 +228,8 @@ impl GraphContext {
                 }
             }
             GraphNormalization::Row => {
-                for r in 0..rows {
+                for (r, &degree) in row_degrees.iter().enumerate() {
                     let offset = r * cols;
-                    let degree = row_degrees[r];
                     if degree <= f32::EPSILON {
                         continue;
                     }
@@ -254,9 +248,9 @@ impl GraphContext {
         let norm_adjacency_t = norm_adjacency.transpose();
         let mut row_sums = vec![0.0f32; rows];
         let data = norm_adjacency.data();
-        for r in 0..rows {
+        for (r, row_sum) in row_sums.iter_mut().enumerate() {
             let offset = r * cols;
-            row_sums[r] = data[offset..offset + cols].iter().sum();
+            *row_sum = data[offset..offset + cols].iter().sum();
         }
 
         Ok(Self {

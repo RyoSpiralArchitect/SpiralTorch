@@ -34,7 +34,7 @@ impl Dropout {
     /// Creates a new dropout layer with a deterministic seed used for unit
     /// tests and reproducible experiments.
     pub fn with_seed(probability: f32, seed: Option<u64>) -> PureResult<Self> {
-        if probability < 0.0 || probability >= 1.0 {
+        if !(0.0..1.0).contains(&probability) {
             return Err(TensorError::InvalidValue {
                 label: "dropout_probability",
             });

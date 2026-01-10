@@ -189,6 +189,7 @@ impl ModulePipelineBuilder {
     }
 
     /// Add a pre-constructed module.
+    #[allow(clippy::should_implement_trait)]
     pub fn add(mut self, module: Box<dyn Module>) -> Self {
         self.modules.push(module);
         self

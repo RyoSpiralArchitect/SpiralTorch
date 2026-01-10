@@ -38,7 +38,7 @@ fn main() -> PureResult<()> {
 
     let mut encoder = Linear::new("encoder", 4, 4)?;
 
-    let mut rng = StdRng::seed_from_u64(0x5E1F_5u64);
+    let mut rng = StdRng::seed_from_u64(0x0005_E1F5_u64);
     let mut batches = Vec::new();
     for _ in 0..4 {
         batches.push(synthetic_pair(4, 4, &mut rng)?);

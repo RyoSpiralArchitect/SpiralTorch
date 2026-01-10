@@ -67,10 +67,11 @@ impl Module for ZSpaceMixer {
         let (rows, cols) = input.shape();
         let gate: Vec<f32> = self.gate_row().to_vec();
         let mut data = Vec::with_capacity(rows * cols);
+        let input_data = input.data();
         for r in 0..rows {
             let offset = r * cols;
-            for c in 0..cols {
-                data.push(input.data()[offset + c] * gate[c]);
+            for (&value, &gain) in input_data[offset..offset + cols].iter().zip(gate.iter()) {
+                data.push(value * gain);
             }
         }
         Tensor::from_vec(rows, cols, data)
@@ -87,13 +88,18 @@ impl Module for ZSpaceMixer {
 
         let (rows, cols) = input.shape();
         let gate: Vec<f32> = self.gate_row().to_vec();
+        let input_data = input.data();
+        let grad_data = grad_output.data();
 
         let mut grad_gate = vec![0.0f32; cols];
         for r in 0..rows {
             let offset = r * cols;
-            for c in 0..cols {
-                let idx = offset + c;
-                grad_gate[c] += grad_output.data()[idx] * input.data()[idx];
+            for ((slot, &grad), &value) in grad_gate
+                .iter_mut()
+                .zip(grad_data[offset..offset + cols].iter())
+                .zip(input_data[offset..offset + cols].iter())
+            {
+                *slot += grad * value;
             }
         }
         let grad_tensor = Tensor::from_vec(1, cols, grad_gate)?;
@@ -102,9 +108,8 @@ impl Module for ZSpaceMixer {
         let mut grad_input = Vec::with_capacity(rows * cols);
         for r in 0..rows {
             let offset = r * cols;
-            for c in 0..cols {
-                let idx = offset + c;
-                grad_input.push(grad_output.data()[idx] * gate[c]);
+            for (&grad, &gain) in grad_data[offset..offset + cols].iter().zip(gate.iter()) {
+                grad_input.push(grad * gain);
             }
         }
         Tensor::from_vec(rows, cols, grad_input)
@@ -309,10 +314,10 @@ mod tests {
         assert_eq!(grad_input.data(), grad_output.data());
 
         let gate = mixer.gate().value();
-        let expected_grad = vec![
+        let expected_grad = [
             1.0 * 0.5 + 4.0 * 0.25,
             2.0 * 1.0 + 5.0 * 0.5,
-            3.0 * -1.0 + 6.0 * -0.5,
+            -3.0 + 6.0 * -0.5,
         ];
         let grads = mixer.gate().gradient().unwrap();
         for (expected, actual) in expected_grad.iter().zip(grads.data()) {

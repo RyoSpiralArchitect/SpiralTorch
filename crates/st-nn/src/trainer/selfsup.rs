@@ -9,8 +9,6 @@ use std::fmt;
 use std::mem;
 
 mod contrastive {
-    use std::f32::EPSILON;
-
     #[derive(Debug, Clone)]
     pub struct InfoNCEResult {
         pub loss: f32,
@@ -133,7 +131,7 @@ mod contrastive {
                 .map(|&v| (v as f64).powi(2))
                 .sum::<f64>()
                 .sqrt() as f32;
-            let norm = norm.max(EPSILON);
+            let norm = norm.max(f32::EPSILON);
             norms[row_idx] = norm;
             for value in chunk.iter_mut() {
                 *value /= norm;
@@ -149,7 +147,7 @@ mod contrastive {
                 norm_sq += (value as f64).powi(2);
             }
             let norm = norm_sq.sqrt() as f32;
-            let norm = norm.max(EPSILON);
+            let norm = norm.max(f32::EPSILON);
             norms[col_idx] = norm;
             for row_idx in 0..feature_dim {
                 let idx = row_idx * batch + col_idx;
@@ -184,15 +182,19 @@ mod contrastive {
         positive_norms: &[f32],
         batch: usize,
     ) {
-        for i in 0..batch {
-            let a = anchor_norms[i].max(EPSILON);
-            for j in 0..batch {
-                let idx = i * batch + j;
-                logits[idx] /= a * positive_norms[j].max(EPSILON);
+        for (row, &anchor_norm) in logits
+            .chunks_exact_mut(batch)
+            .zip(anchor_norms.iter().take(batch))
+        {
+            let a = anchor_norm.max(f32::EPSILON);
+            for (logit, &positive_norm) in row.iter_mut().zip(positive_norms.iter().take(batch)) {
+                *logit /= a * positive_norm.max(f32::EPSILON);
             }
         }
     }
 }
+
+type SplitPredictionBatch = (Vec<Vec<f32>>, Vec<Vec<f32>>);
 
 #[derive(Debug, Clone)]
 pub struct SelfSupBatch {
@@ -506,7 +508,7 @@ impl InfoNCELoss {
         mem::take(&mut self.epoch_metrics)
     }
 
-    fn split_predictions(&self, prediction: &Tensor) -> PureResult<(Vec<Vec<f32>>, Vec<Vec<f32>>)> {
+    fn split_predictions(&self, prediction: &Tensor) -> PureResult<SplitPredictionBatch> {
         let (rows, cols) = prediction.shape();
         if rows % 2 != 0 {
             return Err(prediction.shape_mismatch_error((rows + 1, cols)));
@@ -533,7 +535,7 @@ impl InfoNCELoss {
         for row in batch {
             let norm = if self.normalize {
                 let squared = row.iter().map(|v| (*v as f64).powi(2)).sum::<f64>() as f32;
-                squared.sqrt().max(std::f32::EPSILON)
+                squared.sqrt().max(f32::EPSILON)
             } else {
                 1.0
             };
@@ -604,28 +606,34 @@ impl Loss for InfoNCELoss {
         }
 
         if self.normalize {
-            for i in 0..batch {
-                let norm = cache.anchor_norms[i].max(std::f32::EPSILON);
-                let hat = &cache.anchor_hat[i];
-                let dot = anchor_grads[i]
+            for ((grad_row, hat_row), &norm) in anchor_grads
+                .iter_mut()
+                .zip(cache.anchor_hat.iter())
+                .zip(cache.anchor_norms.iter())
+            {
+                let norm = norm.max(f32::EPSILON);
+                let dot = grad_row
                     .iter()
-                    .zip(hat.iter())
+                    .zip(hat_row.iter())
                     .map(|(g, h)| g * h)
                     .sum::<f32>();
-                for k in 0..cols {
-                    anchor_grads[i][k] = (anchor_grads[i][k] - hat[k] * dot) / norm;
+                for (grad, &hat) in grad_row.iter_mut().zip(hat_row.iter()) {
+                    *grad = (*grad - hat * dot) / norm;
                 }
             }
-            for i in 0..batch {
-                let norm = cache.positive_norms[i].max(std::f32::EPSILON);
-                let hat = &cache.positive_hat[i];
-                let dot = positive_grads[i]
+            for ((grad_row, hat_row), &norm) in positive_grads
+                .iter_mut()
+                .zip(cache.positive_hat.iter())
+                .zip(cache.positive_norms.iter())
+            {
+                let norm = norm.max(f32::EPSILON);
+                let dot = grad_row
                     .iter()
-                    .zip(hat.iter())
+                    .zip(hat_row.iter())
                     .map(|(g, h)| g * h)
                     .sum::<f32>();
-                for k in 0..cols {
-                    positive_grads[i][k] = (positive_grads[i][k] - hat[k] * dot) / norm;
+                for (grad, &hat) in grad_row.iter_mut().zip(hat_row.iter()) {
+                    *grad = (*grad - hat * dot) / norm;
                 }
             }
         }

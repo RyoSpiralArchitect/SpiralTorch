@@ -471,16 +471,16 @@ impl DifferentialTrace {
         let seed = self.seed;
         let generator = self
             .generator
-            .ok_or_else(|| TensorError::EmptyInput("differential_generator"))?;
+            .ok_or(TensorError::EmptyInput("differential_generator"))?;
         let direction = self
             .direction
-            .ok_or_else(|| TensorError::EmptyInput("differential_direction"))?;
+            .ok_or(TensorError::EmptyInput("differential_direction"))?;
         let kernel = self
             .kernel
-            .ok_or_else(|| TensorError::EmptyInput("differential_kernel"))?;
+            .ok_or(TensorError::EmptyInput("differential_kernel"))?;
         let barycenter = self
             .barycenter
-            .ok_or_else(|| TensorError::EmptyInput("differential_barycenter"))?;
+            .ok_or(TensorError::EmptyInput("differential_barycenter"))?;
         let source = self.functor_source.unwrap_or_else(|| seed.clone());
         let levels = if self.infinity_levels.is_empty() {
             vec![barycenter.density.clone()]
@@ -757,7 +757,7 @@ impl SpiralSession {
             message: "chrono timeline poisoned".to_string(),
         })?;
         let frame = timeline.record(dt, metrics);
-        let bin_hint = self.maintainer.window.max(4).min(64);
+        let bin_hint = self.maintainer.window.clamp(4, 64);
         let signal = timeline.loop_signal(self.maintainer.window, bin_hint);
         drop(timeline);
         let atlas_signal = signal.clone();
@@ -1061,7 +1061,7 @@ impl SpiralSession {
     where
         I: IntoIterator<Item = (Tensor, Tensor)>,
     {
-        Dataset::from_iter(samples)
+        samples.into_iter().collect()
     }
 
     /// Creates a [`DataLoader`] from a dataset using the session defaults.
@@ -1140,7 +1140,7 @@ mod tests {
         session.prepare_module(&mut module).unwrap();
         let mut trainer = session.trainer();
         let schedule = trainer.roundtable(1, 1, RoundtableConfig::default());
-        let mut loss = MeanSquaredError::default();
+        let mut loss = MeanSquaredError;
         let batches = vec![(toy_tensor(&[1.0]), toy_tensor(&[0.5])); 4];
         let stats = session
             .train_epoch(&mut trainer, &mut module, &mut loss, batches, &schedule)
@@ -1280,7 +1280,9 @@ mod tests {
         let kernel = Tensor::from_vec(2, 2, vec![1.0, 0.2, -0.3, 1.1]).unwrap();
         let density = toy_tensor(&[0.6, 0.4]);
         let weights = vec![1.0];
-        let barycenter = session.barycenter(&weights, &[density.clone()]).unwrap();
+        let barycenter = session
+            .barycenter(&weights, std::slice::from_ref(&density))
+            .unwrap();
         let resonance = session
             .trace(seed.clone())
             .unwrap()
@@ -1469,7 +1471,7 @@ mod tests {
         let session = SpiralSession::builder(caps).build().unwrap();
         let mut module = Linear::new("session_linear", 2, 1).unwrap();
         session.prepare_module(&mut module).unwrap();
-        let mut loss = MeanSquaredError::default();
+        let mut loss = MeanSquaredError;
         let samples = vec![
             (
                 Tensor::from_vec(1, 2, vec![0.0, 1.0]).unwrap(),
