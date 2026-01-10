@@ -129,6 +129,27 @@ session.align_hypergrad(hyper, bary)
 print(bary.objective, hyper.gradient())
 ```
 
+### Z-space + optim quickstart
+
+```bash
+python examples/zspace_optim_quickstart.py
+```
+
+```python
+import spiraltorch as st
+
+opt = st.optim.Amegagrad((1, 3), curvature=-0.9, hyper_learning_rate=0.03, real_learning_rate=0.02)
+weights = st.Tensor(1, 3, [0.2, -0.1, 0.05])
+
+opt.accumulate_wave(st.Tensor(1, 3, [0.4, -0.6, 0.2]))
+opt.step(weights)  # tunes rates via DesireGradientControl + applies both tapes
+print("weights:", weights.tolist())
+
+trainer = st.ZSpaceTrainer(z_dim=4)
+loss = trainer.step({"speed": 0.2, "memory": 0.1, "stability": 0.9, "gradient": opt.real.gradient()})
+print("z:", trainer.state, "loss:", loss)
+```
+
 ### Ecosystem bridges
 
 SpiralTorch tensors can flow into PyTorch or JAX without copies thanks to the
