@@ -6,7 +6,7 @@ use pyo3::wrap_pyfunction;
 #[cfg(feature = "kdsl")]
 use pyo3::PyRef;
 #[cfg(feature = "kdsl")]
-use pyo3::{Bound, Py, PyCell};
+use pyo3::{Bound, Py};
 
 use crate::planner::PyRankPlan;
 
@@ -19,8 +19,8 @@ use st_core::theory::maxwell::{
 #[cfg(feature = "kdsl")]
 use st_kdsl::{
     auto::{
-        self, AiRewriteConfig, AiRewriteError, AiRewritePrompt, HeuristicHint, TemplateAiGenerator,
-        WilsonMetrics,
+        self, AiHintGenerator, AiRewriteConfig, AiRewriteError, AiRewritePrompt, HeuristicHint,
+        TemplateAiGenerator, WilsonMetrics,
     },
     Ctx as SpiralKCtx, Err as SpiralKErr, Out as SpiralKOut, SoftRule as SpiralKSoftRule,
 };
@@ -677,33 +677,29 @@ impl AiHintGenerator for PythonAiHintGenerator {
             let value = callable
                 .call1(args)
                 .map_err(|err| AiRewriteError::Generator(err.to_string()))?;
-            let bound = value.bind(py);
-            extract_python_hints(py, &bound)
+            extract_python_hints(&value)
         })
     }
 }
 
 #[cfg(feature = "kdsl")]
 fn extract_python_hints(
-    py: Python<'_>,
     value: &Bound<'_, PyAny>,
 ) -> Result<Vec<HeuristicHint>, AiRewriteError> {
-    let iterator = PyIterator::from_object(py, value.as_ref()).map_err(|_| {
+    let iterator = PyIterator::from_bound_object(value).map_err(|_| {
         AiRewriteError::Generator(
             "AI generator must return an iterable of SpiralKHeuristicHint".to_string(),
         )
     })?;
     let mut hints = Vec::new();
     for item in iterator {
-        let object = item
-            .map_err(|err| AiRewriteError::Generator(err.to_string()))?
-            .bind(py);
-        let cell: &PyCell<PySpiralKHeuristicHint> = object.downcast().map_err(|_| {
+        let object = item.map_err(|err| AiRewriteError::Generator(err.to_string()))?;
+        let hint: &Bound<'_, PySpiralKHeuristicHint> = object.downcast().map_err(|_| {
             AiRewriteError::Generator(
                 "AI generator must yield SpiralKHeuristicHint instances".to_string(),
             )
         })?;
-        let borrowed = cell.borrow();
+        let borrowed = hint.borrow();
         hints.push(borrowed.inner().clone());
     }
     Ok(hints)

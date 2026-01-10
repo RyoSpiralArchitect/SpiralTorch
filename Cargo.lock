@@ -3179,8 +3179,6 @@ dependencies = [
 [[package]]
 name = "spindle"
 version = "0.2.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f794dedb367e82477aa6bbf83ea9bbce9bc074b3caacaa82fc4ba398ec9b701d"
 dependencies = [
  "atomic-wait",
  "crossbeam",

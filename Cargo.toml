@@ -59,3 +59,6 @@ default-members = [
   "bindings/st-wasm"
 ]
 resolver = "2"
+
+[patch.crates-io]
+spindle = { path = "vendor/spindle" }
