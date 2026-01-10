@@ -181,6 +181,7 @@ impl PyContextualLagrangianGate {
         quality_floor=0.0,
         stderr_gain=1.0
     ))]
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         curvature: f32,
         temperature: f32,

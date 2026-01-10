@@ -398,7 +398,7 @@ pub fn lorentzian_metric_scaled(
     dict.set_item("volume_element", metric.volume_element())?;
     dict.set_item(
         "signature",
-        metric.signature().iter().copied().collect::<Vec<_>>(),
+        metric.signature().to_vec(),
     )?;
     Ok(dict.into())
 }
@@ -420,6 +420,7 @@ pub fn lorentzian_metric_scaled(
     topology=None,
     boundary_conditions=None,
 ))]
+#[allow(clippy::too_many_arguments)]
 pub fn assemble_zrelativity_model(
     py: Python<'_>,
     base_metric: Vec<Vec<f64>>,

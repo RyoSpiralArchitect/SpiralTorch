@@ -265,6 +265,7 @@ impl PyCircleLockMapConfig {
 impl PyCircleLockMapConfig {
     #[new]
     #[pyo3(signature = (*, lam_min=0.0, lam_max=2.0, lam_bins=60, wd_min=0.3, wd_max=1.2, wd_bins=80, burn_in=200, samples=300, qmax=8))]
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         lam_min: f64,
         lam_max: f64,
@@ -381,14 +382,16 @@ impl PyPsiTelemetryConfig {
         golden_baseline_interval: f64,
         golden_baseline_window: usize,
     ) -> Self {
-        let mut inner = PsiTelemetryConfig::default();
-        inner.emit_atlas = emit_atlas;
-        inner.atlas_timestamp = atlas_timestamp;
-        inner.emit_psi = emit_psi;
-        inner.psi_step_base = psi_step_base;
-        inner.emit_golden = emit_golden;
-        inner.golden_baseline_interval = Duration::from_secs_f64(golden_baseline_interval.max(0.0));
-        inner.golden_baseline_window = golden_baseline_window;
+        let inner = PsiTelemetryConfig {
+            emit_atlas,
+            atlas_timestamp,
+            emit_psi,
+            psi_step_base,
+            emit_golden,
+            golden_baseline_interval: Duration::from_secs_f64(golden_baseline_interval.max(0.0)),
+            golden_baseline_window,
+            ..Default::default()
+        };
         Self { inner }
     }
 
@@ -401,11 +404,12 @@ impl PyPsiTelemetryConfig {
         emit_psi: bool,
         psi_step_base: u64,
     ) -> Self {
-        let mut inner = PsiTelemetryConfig::default();
-        inner.emit_atlas = emit_atlas;
-        inner.atlas_timestamp = atlas_timestamp;
-        inner.emit_psi = emit_psi;
-        inner.psi_step_base = psi_step_base;
+        let inner = PsiTelemetryConfig {
+            emit_atlas,
+            atlas_timestamp,
+            emit_psi,
+            psi_step_base,
+        };
         Self { inner }
     }
 
@@ -428,12 +432,14 @@ impl PyPsiTelemetryConfig {
         golden_baseline_interval: f64,
         golden_baseline_window: usize,
     ) -> Self {
-        let mut inner = PsiTelemetryConfig::default();
-        inner.emit_atlas = emit_atlas;
-        inner.atlas_timestamp = atlas_timestamp;
-        inner.emit_golden = emit_golden;
-        inner.golden_baseline_interval = Duration::from_secs_f64(golden_baseline_interval.max(0.0));
-        inner.golden_baseline_window = golden_baseline_window;
+        let inner = PsiTelemetryConfig {
+            emit_atlas,
+            atlas_timestamp,
+            emit_golden,
+            golden_baseline_interval: Duration::from_secs_f64(golden_baseline_interval.max(0.0)),
+            golden_baseline_window,
+            ..Default::default()
+        };
         Self { inner }
     }
 
@@ -498,6 +504,7 @@ pub(crate) struct PyPsiSynchroConfig {
 impl PyPsiSynchroConfig {
     #[new]
     #[pyo3(signature = (step=0.01, samples=1000, ticker_interval=None, min_ident_points=600, max_ident_points=2400, metamemb=None, circle_map=None, telemetry=None))]
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         step: f64,
         samples: usize,
@@ -508,12 +515,14 @@ impl PyPsiSynchroConfig {
         circle_map: Option<&Bound<PyCircleLockMapConfig>>,
         telemetry: Option<&Bound<PyPsiTelemetryConfig>>,
     ) -> PyResult<Self> {
-        let mut inner = PsiSynchroConfig::default();
-        inner.step = step;
-        inner.samples = samples;
-        inner.ticker_interval = ticker_interval.map(|secs| Duration::from_secs_f64(secs.max(0.0)));
-        inner.min_ident_points = min_ident_points;
-        inner.max_ident_points = max_ident_points;
+        let mut inner = PsiSynchroConfig {
+            step,
+            samples,
+            ticker_interval: ticker_interval.map(|secs| Duration::from_secs_f64(secs.max(0.0))),
+            min_ident_points,
+            max_ident_points,
+            ..Default::default()
+        };
         if let Some(cfg) = metamemb {
             inner.metamemb = cfg.borrow().inner.clone();
         }
@@ -1329,7 +1338,7 @@ fn parse_branch_states(py: Python<'_>, branches: &Bound<PyAny>) -> PyResult<Vec<
 fn resolve_synchro_config(config: Option<&Bound<PyPsiSynchroConfig>>) -> PsiSynchroConfig {
     config
         .map(|cfg| cfg.borrow().inner.clone())
-        .unwrap_or_else(PsiSynchroConfig::default)
+        .unwrap_or_default()
 }
 
 #[pyfunction(name = "run_multibranch_demo")]

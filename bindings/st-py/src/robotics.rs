@@ -265,7 +265,7 @@ impl PyZSpaceDynamics {
     ) -> Self {
         let geom = geometry
             .map(|value| value.inner.clone())
-            .unwrap_or_else(ZSpaceGeometry::default);
+            .unwrap_or_default();
         let grav = gravity.map(|field| field.inner.clone());
         Self {
             inner: ZSpaceDynamics::new(geom, grav),
@@ -530,7 +530,7 @@ impl PyPsiTelemetry {
     ) -> Self {
         let geom = geometry
             .map(|value| value.inner.clone())
-            .unwrap_or_else(ZSpaceGeometry::default);
+            .unwrap_or_default();
         Self {
             inner: PsiTelemetry::with_geometry(
                 window,
@@ -701,7 +701,7 @@ impl PyRoboticsRuntime {
     ) -> Self {
         let telemetry = telemetry
             .map(|wrapper| wrapper.inner.clone())
-            .unwrap_or_else(PsiTelemetry::default);
+            .unwrap_or_default();
         Self {
             inner: RoboticsRuntime::new(sensors.inner.clone(), desires.inner.clone(), telemetry),
         }

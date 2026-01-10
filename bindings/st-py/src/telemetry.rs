@@ -301,8 +301,8 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
 
 #[pyfunction]
 fn current(py: Python<'_>) -> PyResult<Option<Py<PySoftlogicZFeedback>>> {
-    Ok(hub::get_softlogic_z()
+    hub::get_softlogic_z()
         .map(PySoftlogicZFeedback::from_feedback)
         .map(|feedback| Py::new(py, feedback))
-        .transpose()?)
+        .transpose()
 }

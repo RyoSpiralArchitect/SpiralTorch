@@ -1,5 +1,7 @@
 //! Minimal one-binary PyO3 module: `import spiraltorch`
 
+#![allow(clippy::useless_conversion)]
+
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 
@@ -34,10 +36,10 @@ mod robotics;
 
 mod extras {
     use super::*;
-    use pyo3::wrap_pyfunction; 
+    use pyo3::wrap_pyfunction;
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    pub const GOLDEN_RATIO: f64 = 1.618_033_988_749_894_8_f64;
+    pub const GOLDEN_RATIO: f64 = 1.618_033_988_749_895_f64;
     pub const GOLDEN_ANGLE: f64 = 2.0 * std::f64::consts::PI / (GOLDEN_RATIO * GOLDEN_RATIO);
 
     static GLOBAL_SEED: AtomicU64 = AtomicU64::new(0);
@@ -102,6 +104,7 @@ mod extras {
     // ← 引数名を #[pyo3(signature=...)] と一致させる
     #[pyfunction]
     #[pyo3(signature = (n, total_steps, base_radius, radial_growth, base_height, meso_gain, micro_gain, seed=None))]
+    #[allow(clippy::too_many_arguments)]
     pub fn generate_plan_batch_ex(
         py: Python<'_>,
         n: usize,
@@ -113,6 +116,7 @@ mod extras {
         micro_gain: f64,
         seed: Option<u64>,
     ) -> PyResult<Vec<PyObject>> {
+        #[allow(clippy::too_many_arguments)]
         fn call_generate_plan(
             _py: Python<'_>,
             _total_steps: usize,

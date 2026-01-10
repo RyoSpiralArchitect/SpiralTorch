@@ -232,10 +232,10 @@ fn load_dqn_state_dict(agent: &mut DqnAgent, state: &Bound<'_, PyAny>) -> PyResu
             agent.set_epsilon(agent.epsilon());
         } else {
             let schedule_dict = schedule_obj.downcast::<PyDict>()?;
-            let start: f32 = required_schedule_field(&schedule_dict, "start")?;
-            let end: f32 = required_schedule_field(&schedule_dict, "end")?;
-            let steps: u32 = required_schedule_field(&schedule_dict, "steps")?;
-            let progress: u32 = required_schedule_field(&schedule_dict, "step")?;
+            let start: f32 = required_schedule_field(schedule_dict, "start")?;
+            let end: f32 = required_schedule_field(schedule_dict, "end")?;
+            let steps: u32 = required_schedule_field(schedule_dict, "steps")?;
+            let progress: u32 = required_schedule_field(schedule_dict, "step")?;
             let mut schedule = EpsilonGreedySchedule::new(start, end, steps);
             schedule.set_step(progress);
             agent.configure_epsilon_schedule(schedule);
@@ -259,7 +259,7 @@ where
 fn warn_epsilon_deprecated(py: Python<'_>, message: &str) -> PyResult<()> {
     let warning_type = py.get_type_bound::<PyDeprecationWarning>();
     let warning_type_any = warning_type.as_any();
-    PyErr::warn_bound(py, &warning_type_any, message, 1)
+    PyErr::warn_bound(py, warning_type_any, message, 1)
 }
 
 #[cfg(feature = "spiral_rl")]
@@ -267,6 +267,7 @@ fn warn_epsilon_deprecated(py: Python<'_>, message: &str) -> PyResult<()> {
 impl PyAgentConfig {
     #[new]
     #[pyo3(signature = (algo, state_dim, action_dim, gamma, lr, exploration=None, optimizer="adam", clip_grad=None, replay=None, target_sync=None, n_step=None, seed=None))]
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         py: Python<'_>,
         algo: &str,
@@ -431,7 +432,7 @@ impl PyDqnAgent {
         next_states: Vec<usize>,
         dones: Option<Vec<bool>>,
     ) -> PyResult<()> {
-        let done_slice = dones.as_ref().map(|flags| flags.as_slice());
+        let done_slice = dones.as_deref();
         self.inner
             .update_batch(&states, &actions, &rewards, &next_states, done_slice)
             .map_err(rl_err_to_py)
@@ -534,7 +535,7 @@ impl PyAgent {
         next_states: Vec<usize>,
         dones: Option<Vec<bool>>,
     ) -> PyResult<()> {
-        let done_slice = dones.as_ref().map(|flags| flags.as_slice());
+        let done_slice = dones.as_deref();
         self.dqn
             .update_batch(&states, &actions, &rewards, &next_states, done_slice)
             .map_err(rl_err_to_py)

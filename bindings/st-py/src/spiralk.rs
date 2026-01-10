@@ -249,6 +249,7 @@ impl PySpiralKContext {
 impl PySpiralKContext {
     #[new]
     #[pyo3(signature = (rows, cols, k, subgroup, subgroup_capacity, kernel_capacity, tile_cols, radix, segments))]
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         rows: u32,
         cols: u32,
@@ -783,6 +784,7 @@ impl PyMaxwellSpiralKBridge {
             .with_weight_bounds(min_weight, max_weight);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn push_pulse(
         &mut self,
         channel: &str,

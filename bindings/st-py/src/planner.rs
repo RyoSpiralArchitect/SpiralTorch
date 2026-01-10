@@ -75,7 +75,7 @@ fn spiralk_ctx_from_plan(plan: &RankPlan) -> SpiralKCtx {
     let tile_cols = if plan.choice.fft_tile != 0 {
         plan.choice.fft_tile
     } else {
-        let tiles = (plan.cols.max(1) + 255) / 256;
+        let tiles = plan.cols.max(1).div_ceil(256);
         tiles.max(1) * 256
     };
     let radix = if plan.choice.fft_radix != 0 {
@@ -372,6 +372,7 @@ fn build_caps(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn plan_impl(
     kind: RankKind,
     rows: u32,
@@ -402,6 +403,7 @@ fn plan_impl(
 
 #[pyfunction]
 #[pyo3(signature = (kind, rows, cols, k, *, backend=None, lane_width=None, subgroup=None, max_workgroup=None, shared_mem_per_workgroup=None))]
+#[allow(clippy::too_many_arguments)]
 fn plan(
     kind: &str,
     rows: u32,
@@ -440,6 +442,7 @@ fn plan(
 
 #[pyfunction]
 #[pyo3(signature = (rows, cols, k, *, backend=None, lane_width=None, subgroup=None, max_workgroup=None, shared_mem_per_workgroup=None))]
+#[allow(clippy::too_many_arguments)]
 fn plan_topk(
     rows: u32,
     cols: u32,
@@ -466,6 +469,7 @@ fn plan_topk(
 
 #[pyfunction]
 #[pyo3(signature = (backend="wgpu", *, lane_width=None, subgroup=None, max_workgroup=None, shared_mem_per_workgroup=None, workgroup=None, cols=None, tile_hint=None, compaction_hint=None))]
+#[allow(clippy::too_many_arguments)]
 fn describe_device(
     py: Python<'_>,
     backend: &str,

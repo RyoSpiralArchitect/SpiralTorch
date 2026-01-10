@@ -2,6 +2,8 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use st_core::theory::microlocal::{EllipticTelemetry, EllipticWarp};
 
+type EllipticDifferential = (PyEllipticTelemetry, Vec<f32>, Vec<Vec<f32>>);
+
 #[pyclass(name = "EllipticWarp", module = "spiraltorch")]
 pub struct PyEllipticWarp {
     warp: EllipticWarp,
@@ -72,7 +74,7 @@ impl PyEllipticWarp {
     fn map_orientation_differential(
         &self,
         orientation: Vec<f32>,
-    ) -> PyResult<Option<(PyEllipticTelemetry, Vec<f32>, Vec<Vec<f32>>)>> {
+    ) -> PyResult<Option<EllipticDifferential>> {
         let Some((telemetry, diff)) = self.warp.map_orientation_with_differential(&orientation)
         else {
             return Ok(None);

@@ -264,6 +264,7 @@ impl PyCurvatureScheduler {
             smoothing=None
         )
     )]
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         initial: Option<f32>,
         min_curvature: Option<f32>,
@@ -653,6 +654,7 @@ impl PyPool2d {
 impl PyPool2d {
     #[new]
     #[pyo3(signature = (mode, channels, height, width, kernel, *, stride=None, padding=None, layout="NCHW"))]
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         mode: &str,
         channels: usize,
@@ -913,6 +915,7 @@ pub(crate) struct PyNonLiner {
 impl PyNonLiner {
     #[new]
     #[pyo3(signature = (name, features, *, activation="tanh", slope=1.0, gain=1.0, bias=0.0, curvature=None, z_scale=None, retention=0.0))]
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: &str,
         features: usize,

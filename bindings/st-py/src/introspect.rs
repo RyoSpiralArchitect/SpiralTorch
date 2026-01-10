@@ -10,6 +10,9 @@ use st_core::telemetry::zspace_region::{
 };
 use st_core::theory::zpulse::{ZScale, ZSource};
 
+type Tuple3 = (f32, f32, f32);
+type Tuple3x3 = (Tuple3, Tuple3, Tuple3);
+
 fn zsource_to_string(source: ZSource) -> &'static str {
     match source {
         ZSource::Microlocal => "microlocal",
@@ -26,11 +29,11 @@ fn scale_to_tuple(scale: Option<ZScale>) -> Option<(f32, f32)> {
     scale.map(|value| (value.physical_radius, value.log_radius))
 }
 
-fn rotor_to_tuple(values: [f32; 3]) -> (f32, f32, f32) {
+fn rotor_to_tuple(values: [f32; 3]) -> Tuple3 {
     (values[0], values[1], values[2])
 }
 
-fn tensor3_to_tuple(values: [[f32; 3]; 3]) -> ((f32, f32, f32), (f32, f32, f32), (f32, f32, f32)) {
+fn tensor3_to_tuple(values: [[f32; 3]; 3]) -> Tuple3x3 {
     (
         (values[0][0], values[0][1], values[0][2]),
         (values[1][0], values[1][1], values[1][2]),
@@ -322,7 +325,7 @@ impl PySoftlogicEllipticSample {
     }
 
     #[getter]
-    pub fn curvature_tensor(&self) -> ((f32, f32, f32), (f32, f32, f32), (f32, f32, f32)) {
+    pub fn curvature_tensor(&self) -> Tuple3x3 {
         tensor3_to_tuple(self.inner.curvature_tensor)
     }
 
@@ -347,7 +350,7 @@ impl PySoftlogicEllipticSample {
     }
 
     #[getter]
-    pub fn rotation(&self) -> ((f32, f32, f32), (f32, f32, f32), (f32, f32, f32)) {
+    pub fn rotation(&self) -> Tuple3x3 {
         (
             (
                 self.inner.rotation[0],
@@ -469,19 +472,19 @@ impl PySoftlogicZFeedback {
 
 #[pyfunction]
 pub(crate) fn zspace_snapshot(py: Python<'_>) -> PyResult<Option<Py<PyZSpaceRegionDescriptor>>> {
-    Ok(hub::get_softlogic_z()
+    hub::get_softlogic_z()
         .and_then(|feedback| feedback.region_descriptor())
         .map(PyZSpaceRegionDescriptor::from_descriptor)
         .map(|descriptor| Py::new(py, descriptor))
-        .transpose()?)
+        .transpose()
 }
 
 #[pyfunction]
 pub(crate) fn softlogic_feedback(py: Python<'_>) -> PyResult<Option<Py<PySoftlogicZFeedback>>> {
-    Ok(hub::get_softlogic_z()
+    hub::get_softlogic_z()
         .map(PySoftlogicZFeedback::from_feedback)
         .map(|feedback| Py::new(py, feedback))
-        .transpose()?)
+        .transpose()
 }
 
 #[pyfunction]

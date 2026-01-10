@@ -225,7 +225,7 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
     dataset.add_class::<PyDataset>()?;
     dataset.add_class::<PyDataLoader>()?;
     dataset.add_class::<PyDataLoaderIter>()?;
-    let exports = PyList::new_bound(py, &["Dataset", "DataLoader", "DataLoaderIterator"]);
+    let exports = PyList::new_bound(py, ["Dataset", "DataLoader", "DataLoaderIterator"]);
     dataset.add("__all__", exports)?;
     parent.add_submodule(&dataset)?;
     Ok(())

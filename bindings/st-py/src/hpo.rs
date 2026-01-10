@@ -342,10 +342,10 @@ impl PySearchLoop {
 
     pub fn best_trial(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
         let guard = self.inner.lock().unwrap();
-        Ok(guard
+        guard
             .best_trial()
             .map(|record| trial_to_dict(py, &record))
-            .transpose()?)
+            .transpose()
     }
 
     pub fn summary(&self, py: Python<'_>) -> PyResult<PyObject> {
