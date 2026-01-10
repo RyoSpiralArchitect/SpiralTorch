@@ -354,14 +354,10 @@ fn synthesize_soft_choice(base: Choice, rules: &[SoftRule]) -> Option<(Choice, f
     let mut segments_vote = NumericVote::default();
 
     for rule in rules {
-        let mut weight = rule.weight.max(0.0);
-        let mut score = rule.score;
+        let weight = rule.weight.max(0.0);
+        let score = rule.score;
         #[cfg(feature = "logic-learn")]
-        {
-            let (w, s) = adjust_soft_rule(rule.name, weight, score);
-            weight = w;
-            score = s;
-        }
+        let (weight, score) = adjust_soft_rule(rule.name, weight, score);
         if weight <= 0.0 {
             continue;
         }

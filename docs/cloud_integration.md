@@ -9,7 +9,7 @@ root `README.md`.
 
 - Build release artefacts up front to keep cluster images lean:
   - `just stack` for the full Rust stack.
-  - `maturin build -m bindings/st-py/Cargo.toml --release --features wgpu`
+  - `maturin build -m bindings/st-py/Cargo.toml --release --locked --features wgpu,logic,kdsl`
     when a Python wheel is required.
 - Produce a container image that bakes the chosen backend features and the
   `spiraltorch` CLI entrypoints:

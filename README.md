@@ -291,18 +291,15 @@ cargo build -p st-vision      # vision kernels/pipelines
 ## Build Python wheel (maturin)
 
 ```bash
-# CPU-only
-maturin build -m bindings/st-py/Cargo.toml --release \
-  --no-default-features --features cpu
+# Release-equivalent (matches PyPI wheels)
+maturin build -m bindings/st-py/Cargo.toml --release --locked --features wgpu,logic,kdsl
 
-# Metal (macOS, via WGPU)
-maturin build -m bindings/st-py/Cargo.toml --release --features wgpu
+# CPU-only (no GPU backend)
+maturin build -m bindings/st-py/Cargo.toml --release --locked
 
-# CUDA (NVIDIA)
-maturin build -m bindings/st-py/Cargo.toml --release --features cuda
-
-# HIP/ROCm (AMD, Linux)
-maturin build -m bindings/st-py/Cargo.toml --release --features hip
+# Optional backends (toolchains required; not always CI-covered yet)
+maturin build -m bindings/st-py/Cargo.toml --release --locked --features cuda,logic,kdsl
+maturin build -m bindings/st-py/Cargo.toml --release --locked --features hip,logic,kdsl
 
 # Install the wheel you just built
 pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
@@ -3125,8 +3122,8 @@ Suggested caption: **“SpiralTorch — WGPU-first, Self-Tuning GPU Top-K (Rank-
   and a working ROCm + RCCL toolchain.
 
 - **Wheels red?**  
-  First build CPU+WGPU only: `maturin build -m bindings/st-py/Cargo.toml --release --features wgpu`
-  to decouple GPU toolchain issues.
+  First try the release-equivalent wheel build: `maturin build -m bindings/st-py/Cargo.toml --release --locked --features wgpu,logic,kdsl`.
+  If you suspect a GPU toolchain issue, build CPU-only: `maturin build -m bindings/st-py/Cargo.toml --release --locked`.
 
 ---
 

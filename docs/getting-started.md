@@ -44,15 +44,11 @@ cargo test --workspace
 ### Building Python Wheel from Source
 
 ```bash
-# CPU-only
-maturin build -m bindings/st-py/Cargo.toml --release \
-  --no-default-features --features cpu
+# Release-equivalent (matches PyPI wheels)
+maturin build -m bindings/st-py/Cargo.toml --release --locked --features wgpu,logic,kdsl
 
-# Metal (macOS, via WGPU)
-maturin build -m bindings/st-py/Cargo.toml --release --features wgpu
-
-# CUDA (NVIDIA)
-maturin build -m bindings/st-py/Cargo.toml --release --features cuda
+# CPU-only (no GPU backend)
+maturin build -m bindings/st-py/Cargo.toml --release --locked
 
 # Install the wheel
 pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl

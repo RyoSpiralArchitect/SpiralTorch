@@ -26,6 +26,6 @@ which path was exercised using the module version string—for example
 `native_v0.1.0` for the optimized bindings or `stub_v0.0.0+stub` when the stub is
 active.
 
-If you are iterating on the Rust extension, rebuild it via `maturin develop -m
-bindings/st-py/Cargo.toml` before re-running the suite so the latest code is
-measured.
+If you are iterating on the Rust extension, rebuild it via
+`maturin develop -m bindings/st-py/Cargo.toml --locked --features wgpu,logic,kdsl`
+before re-running the suite so the latest code is measured.

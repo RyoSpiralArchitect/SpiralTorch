@@ -8,9 +8,8 @@
 //! neural network modules at runtime, enabling flexible model architectures.
 
 use crate::{Module, PureResult};
-use st_core::plugin::{PluginCapability, PluginContext, PluginEvent, PluginRegistry};
+use st_core::plugin::{PluginEvent, PluginRegistry};
 use st_core::TensorError;
-use st_tensor::Tensor;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 

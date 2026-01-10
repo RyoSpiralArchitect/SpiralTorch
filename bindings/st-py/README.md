@@ -69,17 +69,18 @@ and maturin will bake the appropriate artefact:
 ```bash
 pip install maturin==1.*
 
-# CPU + WebGPU (default)
-maturin build -m bindings/st-py/Cargo.toml --release --features wgpu
+# Release-equivalent (matches PyPI wheels)
+maturin build -m bindings/st-py/Cargo.toml --release --locked --features wgpu,logic,kdsl
 
-# Metal (macOS)
-maturin build -m bindings/st-py/Cargo.toml --release --features mps
+# CPU-only (no GPU backend)
+maturin build -m bindings/st-py/Cargo.toml --release --locked
 
-# CUDA (NVRTC toolchain expected on PATH)
-maturin build -m bindings/st-py/Cargo.toml --release --features cuda
+# Optional backends (toolchains required; not always CI-covered yet)
+maturin build -m bindings/st-py/Cargo.toml --release --locked --features cuda,logic,kdsl
+maturin build -m bindings/st-py/Cargo.toml --release --locked --features hip,logic,kdsl
 
-# HIP / ROCm (use hip-real for the RCCL path)
-maturin build -m bindings/st-py/Cargo.toml --release --features "hip hip-real"
+# Install the wheel you just built
+pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
 ```
 
 ## Minimal usage
