@@ -2,6 +2,7 @@
 target/
 .venv/
 .buildenv/
+.tmp-wheel-env/
 .cargo-home/
 node_modules/
 __pycache__/

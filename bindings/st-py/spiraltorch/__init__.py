@@ -27,11 +27,10 @@ from typing import (
 )
 from importlib.metadata import version as _pkg_version, PackageNotFoundError
 
-from . import dataset as _dataset
+from .optim import Amegagrad, amegagrad
 
-_DATASET_NATIVE_AVAILABLE = hasattr(_dataset, "Dataset") and hasattr(
-    _dataset, "DataLoader"
-)
+_dataset: _types.ModuleType | None = None
+_DATASET_NATIVE_AVAILABLE = False
 
 
 def _require_dataset_native(feature: str) -> _NoReturn:
@@ -219,6 +218,7 @@ _PREDECLARED_SUBMODULES: list[tuple[str, str]] = [
     ("frac", "Fractal & fractional tools"),
     ("dataset", "Datasets & loaders"),
     ("linalg", "Linear algebra utilities"),
+    ("optim", "Optimizers / gradient tapes"),
     ("planner", "Planning & device heuristics"),
     ("spiralk", "SpiralK DSL & hint bridges"),
     ("spiral_rl", "Reinforcement learning components"),
@@ -1541,6 +1541,11 @@ _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
         "CurvatureDecision": ("CurvatureDecision",),
         "softlogic_signal": ("softlogic_signal",),
     },
+    "dataset": {
+        "Dataset": ("dataset.Dataset",),
+        "DataLoader": ("dataset.DataLoader",),
+        "DataLoaderIterator": ("dataset.DataLoaderIterator",),
+    },
     "compat": {
         "capture": ("capture",),
         "share": ("share",),
@@ -2830,6 +2835,17 @@ _mirror_into_module(
     },
 )
 
+_mirror_into_module(
+    "optim",
+    [
+        "Amegagrad",
+        "amegagrad",
+        "Hypergrad",
+        "Realgrad",
+        "GradientSummary",
+    ],
+)
+
 
 _mirror_into_module(
     "nn",
@@ -2994,6 +3010,15 @@ _mirror_into_module(
     },
     reexport=False,
 )
+
+_dataset = globals().get("dataset")
+if isinstance(_dataset, _types.ModuleType):
+    _DATASET_NATIVE_AVAILABLE = hasattr(_dataset, "Dataset") and hasattr(
+        _dataset, "DataLoader"
+    )
+else:  # pragma: no cover - defensive
+    _dataset = None
+    _DATASET_NATIVE_AVAILABLE = False
 
 
 class SpiralSession:
@@ -3166,6 +3191,7 @@ for _key, _hint in _FORWARDING_HINTS.items():
 _CORE_EXPORTS = [
     "Tensor","ComplexTensor","OpenCartesianTopos","LanguageWaveEncoder",
     "GradientSummary","Hypergrad","Realgrad","TensorBiome",
+    "Amegagrad","amegagrad",
     "LinearModel",
     "BarycenterIntermediate","ZSpaceBarycenter",
     "QueryPlan","RecEpochReport","Recommender",
@@ -3223,7 +3249,7 @@ _EXPORTED = {
     *_EXTRAS,
     *_CORE_EXPORTS,
     *[n for n in _COMPAT_ALIAS if n in globals()],
-    "nn","frac","dataset","linalg","spiral_rl","rec","telemetry","ecosystem",
+    "nn","frac","dataset","linalg","optim","spiral_rl","rec","telemetry","ecosystem",
     "selfsup","export","compat","hpo","inference","zspace","vision","canvas",
     "planner","spiralk",
     "hg","rg","z",
