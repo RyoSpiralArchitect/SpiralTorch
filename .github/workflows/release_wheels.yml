@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
   actions: read
@@ -17,13 +18,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, macos-14, windows-2022]
-        py: ["3.11","3.12","3.13","3.14"]
+        os: [ubuntu-22.04, macos-13, macos-14, windows-2022]
+        py: ["3.12"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.py }}
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
       - name: Install maturin
         run: pip install maturin==1.*
       - name: Build wheels (CPU+WGPU)
