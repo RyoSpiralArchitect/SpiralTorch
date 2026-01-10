@@ -1394,7 +1394,7 @@ fn describe_wgpu_softmax_variants(py: Python<'_>) -> PyResult<Option<Vec<PyObjec
     let mut out = Vec::with_capacity(snapshot.len());
     for entry in snapshot {
         let dict = PyDict::new_bound(py);
-        dict.set_item("key", entry.key)?;
+        dict.set_item("key", entry.key.as_str())?;
         dict.set_item("variant", entry.variant_name())?;
         dict.set_item("score_ms", entry.score_ms)?;
         dict.set_item("samples", entry.samples)?;
