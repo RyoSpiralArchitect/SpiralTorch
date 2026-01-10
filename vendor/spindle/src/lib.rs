@@ -598,12 +598,12 @@ fn for_each_raw_imp(n_jobs: usize, task: &(dyn Sync + Fn(usize))) {
 						let task: &'static (dyn Sync + Fn(usize)) = std::mem::transmute(task);
 						let task = AssertUnwindSafe(task);
 
-					let task = |thread_id: usize, panic_slot: &AtomicPtr<PanicLoad>| match std::panic::catch_unwind(|| {
-						({ task }.0)(thread_id);
-					}) {
-						Ok(_) => {},
-						Err(panic_load) => {
-							let ptr = panic_slot.swap(null_mut(), AcqRel);
+						let task = move |thread_id: usize, panic_slot: &AtomicPtr<PanicLoad>| match std::panic::catch_unwind(|| {
+							({ task }.0)(thread_id);
+						}) {
+							Ok(_) => {},
+							Err(panic_load) => {
+								let ptr = panic_slot.swap(null_mut(), AcqRel);
 							if !ptr.is_null() {
 								ptr.write(panic_load);
 							}
