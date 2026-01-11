@@ -37,6 +37,11 @@ def main() -> None:
     parser.add_argument("--radial-growth", type=float, default=0.08)
     parser.add_argument("--curvature", type=float, default=-1.0)
     parser.add_argument("--max-volume", type=int, default=512)
+    parser.add_argument(
+        "--strict-biome",
+        action="store_true",
+        help="Fail if SoT3DPlan.grow_biome/canopy is unavailable (useful for CI).",
+    )
     args = parser.parse_args()
 
     if not hasattr(st, "sot") or not hasattr(st.sot, "generate_plan"):
@@ -52,10 +57,20 @@ def main() -> None:
     print("plan.role_tensor shape:", plan.role_tensor().shape())
 
     topos = st.hypergrad_topos(curvature=args.curvature, max_volume=args.max_volume)
-    biome = plan.grow_biome(topos, label_prefix="sot_demo")
-    canopy = biome.canopy()
+    biome = None
+    canopy = None
+    try:
+        biome = plan.grow_biome(topos, label_prefix="sot_demo")
+        canopy = biome.canopy()
+    except Exception as exc:
+        if args.strict_biome:
+            raise
+        print("\nSoT3DPlan.grow_biome(...) failed:", exc)
+        print("Falling back to `plan.feature_tensor()`; install a newer wheel for biome support.")
+        canopy = plan.feature_tensor()
 
-    print("\nbiome shoots:", len(biome), "total weight:", biome.total_weight())
+    if biome is not None:
+        print("\nbiome shoots:", len(biome), "total weight:", biome.total_weight())
     print("canopy shape:", canopy.shape())
 
     if hypergrad_session is None:
