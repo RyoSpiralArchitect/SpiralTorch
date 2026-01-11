@@ -594,18 +594,6 @@ def rewrite_with_ai(
     | None = ...,
 ) -> tuple[Dict[str, object], str, Sequence[SpiralKHeuristicHint]]: ...
 
-    def predict(self, inputs: Sequence[Sequence[float]]) -> Tensor: ...
-
-    def predict_tensor(self, inputs: Tensor) -> Tensor: ...
-
-    def weights(self) -> Tensor: ...
-
-    def bias(self) -> List[float]: ...
-
-    def input_dim(self) -> int: ...
-
-    def output_dim(self) -> int: ...
-
 class LinearModel:
     def __init__(self, input_dim: int, output_dim: int) -> None: ...
 
@@ -901,15 +889,6 @@ def infer_from_partial(
     *,
     alpha: float = ...,
     smoothing: float = ...,
-) -> ZSpaceInference: ...
-
-
-def infer_with_trainer(
-    trainer: object,
-    partial: Mapping[str, object] | None,
-    *,
-    smoothing: float = ...,
-    alpha: float | None = ...,
 ) -> ZSpaceInference: ...
 
 
@@ -1397,94 +1376,6 @@ def quantum_measurement_from_fractal_sequence(
     eta_scale: float = ...,
 ) -> QuantumMeasurement: ...
 
-class LossStdTrigger:
-    std_threshold: float
-    decay: float
-    max_ratio: float
-    warmup: int
-    geometry_eta: float
-    geometry_curvature: float
-
-    def observe(self, value: float) -> Optional[float]: ...
-
-class PolicyGradient:
-    def __init__(self) -> None: ...
-    def attach_hyper_surprise(self, trigger: LossStdTrigger) -> None: ...
-    def attach_geometry_feedback(self, feedback: Dict[str, float]) -> None: ...
-    def step(self, returns: Sequence[float], baseline: float = ...) -> Dict[str, float]: ...
-    def update_from_quantum(
-        self,
-        measurement: QuantumMeasurement,
-        *,
-        base_rate: float = ...,
-        returns: Optional[Sequence[float]] = ...,
-        baseline: float = ...,
-    ) -> Dict[str, float]: ...
-    def build_fractal_session(
-        self,
-        studio: QuantumRealityStudio,
-        *,
-        threshold: float = ...,
-        eta_scale: float = ...,
-    ) -> FractalQuantumSession: ...
-    def update_from_fractal_stream(
-        self,
-        studio: QuantumRealityStudio,
-        patches: Sequence[InfiniteZSpacePatch],
-        *,
-        weights: Optional[Sequence[float]] = ...,
-        base_rate: float = ...,
-        threshold: float = ...,
-        eta_scale: float = ...,
-        returns: Optional[Sequence[float]] = ...,
-        baseline: float = ...,
-    ) -> Dict[str, float]: ...
-    @property
-    def last_quantum_update(self) -> Optional[Dict[str, float]]: ...
-
-class FractalQuantumTrainer:
-    base_rate: float
-    threshold: float
-    eta_scale: float
-    window: int
-
-    def __init__(
-        self,
-        studio: QuantumRealityStudio,
-        policy: PolicyGradient,
-        *,
-        threshold: float = ...,
-        eta_scale: float = ...,
-        base_rate: float = ...,
-        window: int = ...,
-    ) -> None: ...
-    @property
-    def session(self) -> FractalQuantumSession: ...
-    @property
-    def last_update(self) -> Optional[Dict[str, float]]: ...
-    @property
-    def last_measurement(self) -> Optional[QuantumMeasurement]: ...
-    def ingest_patch(
-        self,
-        patch: InfiniteZSpacePatch,
-        *,
-        weight: float = ...,
-    ) -> ZResonance: ...
-    def accumulate_returns(self, values: Sequence[float]) -> None: ...
-    @property
-    def golden_feedback(self) -> Dict[str, float]: ...
-    def peek_resonance(self) -> ZResonance: ...
-    def flush(self, *, baseline: float = ...) -> Dict[str, float]: ...
-    def summary(self) -> Dict[str, object]: ...
-    def reconfigure(
-        self,
-        *,
-        threshold: Optional[float] = ...,
-        eta_scale: Optional[float] = ...,
-        base_rate: Optional[float] = ...,
-        window: Optional[int] = ...,
-    ) -> None: ...
-
 class ZTigerOptim:
     def __init__(self, curvature: float = ...) -> None: ...
     @property
@@ -1494,31 +1385,6 @@ class ZTigerOptim:
     def update(self, lora_pid: float, resonance: Sequence[float]) -> float: ...
 
 def tempo_latency_score(tile: int, slack: int) -> float: ...
-
-def update_policy_from_fractal(
-    policy: PolicyGradient,
-    studio: QuantumRealityStudio,
-    patch: InfiniteZSpacePatch,
-    *,
-    base_rate: float = ...,
-    threshold: float = ...,
-    eta_scale: float = ...,
-    returns: Optional[Sequence[float]] = ...,
-    baseline: float = ...,
-) -> Dict[str, float]: ...
-
-def update_policy_from_fractal_stream(
-    policy: PolicyGradient,
-    studio: QuantumRealityStudio,
-    patches: Sequence[InfiniteZSpacePatch],
-    *,
-    weights: Optional[Sequence[float]] = ...,
-    base_rate: float = ...,
-    threshold: float = ...,
-    eta_scale: float = ...,
-    returns: Optional[Sequence[float]] = ...,
-    baseline: float = ...,
-) -> Dict[str, float]: ...
 
 def apply_vision_update(
     vision: SpiralTorchVision,
@@ -2001,9 +1867,6 @@ class _ZSpaceCoherenceSequencer:
 
     def __call__(self, x: Tensor) -> Tensor: ...
 
-
-def is_swap_invariant(arrangement: Sequence[float]) -> bool: ...
-
     def dim(self) -> int: ...
 
     def num_heads(self) -> int: ...
@@ -2017,6 +1880,9 @@ def is_swap_invariant(arrangement: Sequence[float]) -> bool: ...
     def maxwell_channels(self) -> int: ...
 
     def topos(self) -> OpenCartesianTopos: ...
+
+
+def is_swap_invariant(arrangement: Sequence[float]) -> bool: ...
 
 
 class _NnIdentity:
@@ -2523,77 +2389,6 @@ class PsiSynchroPulse:
     def pulse(self) -> ZPulseSnapshot: ...
 
 
-class GoldenPulse:
-    @property
-    def exploration_drive(self) -> float: ...
-
-    @property
-    def optimization_gain(self) -> float: ...
-
-    @property
-    def synergy_score(self) -> float: ...
-
-    @property
-    def reinforcement_weight(self) -> float: ...
-
-    @property
-    def mean_support(self) -> float: ...
-
-    @property
-    def mean_reward(self) -> float: ...
-
-    @property
-    def mean_psi(self) -> float: ...
-
-    @property
-    def mean_confidence(self) -> float: ...
-
-    @property
-    def coverage(self) -> int: ...
-
-    @property
-    def heuristics_contributions(self) -> int: ...
-
-    @property
-    def append_weight(self) -> float: ...
-
-    @property
-    def retract_count(self) -> int: ...
-
-    @property
-    def annotate_count(self) -> int: ...
-
-    @property
-    def dominant_plan(self) -> str | None: ...
-
-    def is_idle(self) -> bool: ...
-
-
-class GoldenDirective:
-    @property
-    def push_interval(self) -> float: ...
-
-    @property
-    def summary_window(self) -> int: ...
-
-    @property
-    def exploration_priority(self) -> float: ...
-
-    @property
-    def reinforcement_weight(self) -> float: ...
-
-
-class GoldenPsiTelemetry:
-    @property
-    def branch_id(self) -> str: ...
-
-    @property
-    def pulse(self) -> GoldenPulse: ...
-
-    @property
-    def directive(self) -> GoldenDirective: ...
-
-
 class PsiSynchroResult:
     @property
     def heatmaps(self) -> List[HeatmapResult]: ...
@@ -2606,21 +2401,6 @@ class PsiSynchroResult:
     def psi_readings(self) -> List[Tuple[str, Dict[str, object]]]: ...
 
     def by_branch(self) -> List[Tuple[str, ZPulseSnapshot]]: ...
-
-    @property
-    def golden(self) -> List[GoldenPsiTelemetry]: ...
-
-    @property
-    def golden_baseline_interval(self) -> float: ...
-
-    @property
-    def golden_baseline_window(self) -> int: ...
-
-    def golden_telemetry(
-        self,
-        baseline_interval: float = ...,
-        baseline_window: int = ...,
-    ) -> List[GoldenPsiTelemetry]: ...
 
 
 class _PsiModule(ModuleType):
@@ -2635,9 +2415,6 @@ class _PsiModule(ModuleType):
     ZPulseSnapshot: type[ZPulseSnapshot]
     PsiSynchroPulse: type[PsiSynchroPulse]
     PsiSynchroResult: type[PsiSynchroResult]
-    GoldenPulse: type[GoldenPulse]
-    GoldenDirective: type[GoldenDirective]
-    GoldenPsiTelemetry: type[GoldenPsiTelemetry]
 
     def run_multibranch_demo(
         branches: Sequence[PsiBranchState],
@@ -3256,12 +3033,9 @@ __all__ = [
     "QuantumMeasurement",
     "QuantumRealityStudio",
     "FractalQuantumSession",
-    "FractalQuantumTrainer",
     "resonance_from_fractal_patch",
     "quantum_measurement_from_fractal",
     "quantum_measurement_from_fractal_sequence",
-    "update_policy_from_fractal",
-    "update_policy_from_fractal_stream",
     "ZTigerOptim",
     "tempo_latency_score",
     "apply_vision_update",

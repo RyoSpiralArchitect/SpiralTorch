@@ -25,7 +25,7 @@ use st_kdsl::{
     Ctx as SpiralKCtx, Err as SpiralKErr, Out as SpiralKOut, SoftRule as SpiralKSoftRule,
 };
 
-#[pyclass(module = "spiraltorch.spiralk", name = "FftPlan")]
+#[pyclass(module = "spiraltorch.spiralk", name = "SpiralKFftPlan")]
 pub(crate) struct PySpiralKFftPlan {
     pub(crate) inner: SpiralKFftPlan,
 }
@@ -706,7 +706,7 @@ fn extract_python_hints(
     Ok(hints)
 }
 
-#[pyclass(module = "spiraltorch.spiralk", name = "MaxwellHint")]
+#[pyclass(module = "spiraltorch.spiralk", name = "MaxwellSpiralKHint")]
 #[derive(Clone)]
 pub(crate) struct PyMaxwellSpiralKHint {
     inner: MaxwellSpiralKHint,
@@ -750,7 +750,7 @@ impl PyMaxwellSpiralKHint {
     }
 }
 
-#[pyclass(module = "spiraltorch.spiralk", name = "MaxwellBridge")]
+#[pyclass(module = "spiraltorch.spiralk", name = "MaxwellSpiralKBridge")]
 pub(crate) struct PyMaxwellSpiralKBridge {
     inner: MaxwellSpiralKBridge,
 }
@@ -1195,9 +1195,9 @@ pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     let exports = {
         #[allow(unused_mut)]
         let mut list = vec![
-            "FftPlan",
-            "MaxwellHint",
-            "MaxwellBridge",
+            "SpiralKFftPlan",
+            "MaxwellSpiralKHint",
+            "MaxwellSpiralKBridge",
             "MaxwellFingerprint",
             "MeaningGate",
             "SequentialZ",
@@ -1224,5 +1224,36 @@ pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     };
     module.add("__all__", exports)?;
     m.add_submodule(&module)?;
+
+    // Re-export key SpiralK helpers at the top-level so `import spiraltorch as st` can access
+    // the names advertised by `spiraltorch.__all__` and the bundled `.pyi` stubs.
+    for name in [
+        "SpiralKFftPlan",
+        "MaxwellSpiralKHint",
+        "MaxwellSpiralKBridge",
+    ] {
+        if let Ok(value) = module.getattr(name) {
+            m.add(name, value)?;
+        }
+    }
+    #[cfg(feature = "kdsl")]
+    {
+        for name in [
+            "SpiralKContext",
+            "SpiralKHeuristicHint",
+            "SpiralKWilsonMetrics",
+            "SpiralKAiRewriteConfig",
+            "SpiralKAiRewritePrompt",
+            "wilson_lower_bound",
+            "should_rewrite",
+            "synthesize_program",
+            "rewrite_with_wilson",
+            "rewrite_with_ai",
+        ] {
+            if let Ok(value) = module.getattr(name) {
+                m.add(name, value)?;
+            }
+        }
+    }
     Ok(())
 }

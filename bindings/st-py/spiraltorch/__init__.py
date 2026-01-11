@@ -1559,9 +1559,9 @@ _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
         "generate_plan_batch_ex": (),
     },
     "spiralk": {
-        "FftPlan": (),
-        "MaxwellBridge": (),
-        "MaxwellHint": (),
+        "SpiralKFftPlan": (),
+        "MaxwellSpiralKBridge": (),
+        "MaxwellSpiralKHint": (),
         "MaxwellFingerprint": (),
         "MeaningGate": (),
         "SequentialZ": (),
@@ -2712,6 +2712,7 @@ class _ForwardingModule(_types.ModuleType):
         flat_suffix = "_".join(namespace_parts)
         candidates.extend(
             [
+                f"{self._forward_key}.{attr}",
                 attr,
                 f"{suffix}_{attr}",
                 f"{suffix}_{attr.lower()}",
@@ -2733,7 +2734,24 @@ class _ForwardingModule(_types.ModuleType):
         exported = set(getattr(self, "__all__", ()))
         exported.update(super().__dir__())
         hints = _FORWARDING_HINTS.get(self._forward_key, {})
-        exported.update(hints.keys())
+        if hints:
+            for public_name, aliases in hints.items():
+                candidates: list[str] = [
+                    f"{self._forward_key}.{public_name}",
+                    public_name,
+                ]
+                candidates.extend(aliases)
+                for candidate in dict.fromkeys(candidates):
+                    if _resolve_rs_attr(candidate) is not None:
+                        exported.add(public_name)
+                        break
+
+        backing = _resolve_rs_attr(self._forward_key)
+        if backing is not None:
+            for name in dir(backing):
+                if name.startswith("_"):
+                    continue
+                exported.add(_RENAMED_EXPORTS.get(name, name))
         suffix = self._forward_key.split(".")[-1] + "_"
         flat_suffix = "_".join(self._forward_key.split(".")) + "_"
         if _rs is not None:
@@ -3026,10 +3044,13 @@ _mirror_into_module(
         "SpiralKContext": (),
         "SpiralKWilsonMetrics": (),
         "SpiralKHeuristicHint": (),
+        "SpiralKAiRewriteConfig": (),
+        "SpiralKAiRewritePrompt": (),
         "wilson_lower_bound": (),
         "should_rewrite": (),
         "synthesize_program": (),
         "rewrite_with_wilson": (),
+        "rewrite_with_ai": (),
     },
     reexport=False,
 )
@@ -3044,18 +3065,6 @@ _mirror_into_module(
         "describe_device": (),
         "hip_probe": (),
         "generate_plan_batch_ex": (),
-    },
-    reexport=False,
-)
-
-
-_mirror_into_module(
-    "spiralk",
-    {
-        "FftPlan": (),
-        "MaxwellBridge": (),
-        "MaxwellHint": (),
-        "required_blocks": (),
     },
     reexport=False,
 )
@@ -3233,8 +3242,18 @@ for _key, _hint in _FORWARDING_HINTS.items():
     if not _hint:
         continue
     _exports = set(getattr(_module, "__all__", ()))
-    _exports.update(_hint.keys())
-    _module.__all__ = sorted(_exports)
+    for public_name, aliases in _hint.items():
+        candidates: list[str] = [
+            f"{_key}.{public_name}",
+            public_name,
+        ]
+        candidates.extend(aliases)
+        for candidate in dict.fromkeys(candidates):
+            if _resolve_rs_attr(candidate) is not None:
+                _exports.add(public_name)
+                break
+    if _exports:
+        _module.__all__ = sorted(_exports)
 
 
 _CORE_EXPORTS = [
@@ -3294,19 +3313,45 @@ def __dir__() -> list[str]:
     return sorted(_public)
 
 
-_EXPORTED = {
-    *_EXTRAS,
-    *_CORE_EXPORTS,
-    *[n for n in _COMPAT_ALIAS if n in globals()],
-    "nn","frac","dataset","linalg","optim","spiral_rl","rec","telemetry","ecosystem",
-    "selfsup","export","compat","hpo","inference","zspace","vision","canvas",
-    "planner","spiralk",
-    "hg","rg","z",
-    "__version__",
-}
+_EXPORTED: set[str] = set()
+_EXPORTED.update(n for n in _EXTRAS if n in globals())
+_EXPORTED.update(n for n in _CORE_EXPORTS if n in globals())
+_EXPORTED.update(n for n in _COMPAT_ALIAS if n in globals())
+
+for _name in [
+    "nn",
+    "frac",
+    "dataset",
+    "linalg",
+    "optim",
+    "spiral_rl",
+    "rec",
+    "telemetry",
+    "ecosystem",
+    "selfsup",
+    "export",
+    "compat",
+    "hpo",
+    "inference",
+    "zspace",
+    "vision",
+    "canvas",
+    "planner",
+    "spiralk",
+    "psi",
+    "qr",
+    "julia",
+    "robotics",
+]:
+    if _name in globals() or _resolve_rs_attr(_name) is not None:
+        _EXPORTED.add(_name)
+
+_EXPORTED.update(["hg", "rg", "z", "__version__"])
 _EXPORTED.update(
-    n
+    _RENAMED_EXPORTS.get(n, n)
     for n in _safe_getattr(_rs, "__all__", ())
-    if isinstance(n, str) and not n.startswith("_")
+    if isinstance(n, str)
+    and not n.startswith("_")
+    and _resolve_rs_attr(n) is not None
 )
 __all__ = sorted(_EXPORTED)

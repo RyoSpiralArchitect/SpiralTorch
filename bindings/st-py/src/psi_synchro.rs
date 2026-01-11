@@ -1412,5 +1412,25 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
     }
     module.add("__all__", exports)?;
     parent.add_submodule(&module)?;
+
+    // Re-export the ψ/psychoid telemetry types at the top-level so the bundled `.pyi` stubs
+    // stay aligned with runtime imports (`from spiraltorch import PsiSynchroResult`, etc).
+    for name in [
+        "MetaMembConfig",
+        "CircleLockMapConfig",
+        "PsiTelemetryConfig",
+        "PsiSynchroConfig",
+        "PsiBranchState",
+        "ArnoldTonguePeak",
+        "HeatmapAnalytics",
+        "HeatmapResult",
+        "ZPulseSnapshot",
+        "PsiSynchroPulse",
+        "PsiSynchroResult",
+    ] {
+        if let Ok(value) = module.getattr(name) {
+            parent.add(name, value)?;
+        }
+    }
     Ok(())
 }

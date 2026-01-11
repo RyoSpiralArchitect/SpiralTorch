@@ -2043,7 +2043,7 @@ impl PyZPooling {
 }
 
 #[cfg(feature = "nn")]
-#[pyclass(module = "spiraltorch.nn")]
+#[pyclass(module = "spiraltorch.nn", name = "Dataset")]
 pub(crate) struct PyDataset {
     inner: Dataset,
 }
@@ -2088,7 +2088,7 @@ impl PyDataset {
 }
 
 #[cfg(feature = "nn")]
-#[pyclass(module = "spiraltorch.nn", unsendable)]
+#[pyclass(module = "spiraltorch.nn", name = "DataLoader", unsendable)]
 pub(crate) struct PyDataLoader {
     inner: DataLoader,
 }
@@ -2153,7 +2153,7 @@ impl PyDataLoader {
 }
 
 #[cfg(feature = "nn")]
-#[pyclass(module = "spiraltorch.nn", unsendable)]
+#[pyclass(module = "spiraltorch.nn", name = "DataLoaderIter", unsendable)]
 pub(crate) struct PyDataLoaderIter {
     batches: Option<DataLoaderBatches>,
 }
@@ -2975,6 +2975,36 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     }
     if let Ok(scheduler) = module.getattr("CurvatureScheduler") {
         parent.add("CurvatureScheduler", scheduler)?;
+    }
+    if let Ok(decision) = module.getattr("CurvatureDecision") {
+        parent.add("CurvatureDecision", decision)?;
+    }
+    if let Ok(channel_report) = module.getattr("CoherenceChannelReport") {
+        parent.add("CoherenceChannelReport", channel_report)?;
+    }
+    if let Ok(signature) = module.getattr("CoherenceSignature") {
+        parent.add("CoherenceSignature", signature)?;
+    }
+    if let Ok(observation) = module.getattr("CoherenceObservation") {
+        parent.add("CoherenceObservation", observation)?;
+    }
+    if let Ok(telemetry) = module.getattr("PreDiscardTelemetry") {
+        parent.add("PreDiscardTelemetry", telemetry)?;
+    }
+    if let Ok(policy) = module.getattr("PreDiscardPolicy") {
+        parent.add("PreDiscardPolicy", policy)?;
+    }
+    if let Ok(snapshot) = module.getattr("PreDiscardSnapshot") {
+        parent.add("PreDiscardSnapshot", snapshot)?;
+    }
+    if let Ok(diagnostics) = module.getattr("CoherenceDiagnostics") {
+        parent.add("CoherenceDiagnostics", diagnostics)?;
+    }
+    if let Ok(zrelativity) = module.getattr("ZRelativityModule") {
+        parent.add("ZRelativityModule", zrelativity)?;
+    }
+    if let Ok(is_swap_invariant) = module.getattr("is_swap_invariant") {
+        parent.add("is_swap_invariant", is_swap_invariant)?;
     }
     Ok(())
 }
