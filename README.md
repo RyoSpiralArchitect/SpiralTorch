@@ -339,6 +339,7 @@ Linux note: build inside a manylinux container (e.g. via GitHub Actions) for bro
 ## Python quickstart (wheel)
 
 > The snippets below run against the published `spiraltorch` wheel and showcase the rich ecosystem of Python bindings that make SpiralTorch's Z-space runtime accessible and intuitive.
+> Copy-paste scripts live in `bindings/st-py/examples/` (e.g. `sot_biome_quickstart.py`, `spiralk_plan_rewrite_quickstart.py`, `zspace_stream_training_quickstart.py`).
 
 ### 🌟 Quick Tour: Core Features
 

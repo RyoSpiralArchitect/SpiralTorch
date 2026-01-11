@@ -143,3 +143,11 @@ jobs:
           PYTHONNOUSERSITE: "1"
         run: |
           python -P bindings/st-py/examples/hello_session.py
+      - name: Run extra examples
+        env:
+          PYTHONNOUSERSITE: "1"
+        run: |
+          python -P bindings/st-py/examples/sot_biome_quickstart.py --steps 16
+          python -P bindings/st-py/examples/spiralk_plan_rewrite_quickstart.py
+          python -P bindings/st-py/examples/maxwell_spiralk_bridge_quickstart.py --max-samples 32
+          python -P bindings/st-py/examples/zspace_stream_training_quickstart.py --steps 25

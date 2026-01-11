@@ -716,6 +716,47 @@ impl PySoT3DPlan {
         Tensor::from_vec(self.macros.len(), 6, macro_data)
     }
 
+    fn biome_tensor_internal(
+        &self,
+        include_reflections: bool,
+        include_roles: bool,
+    ) -> Result<Tensor, st_tensor::TensorError> {
+        let cols = 11
+            + if include_roles { 2 } else { 0 }
+            + if include_reflections { 3 } else { 0 };
+        if self.steps.is_empty() {
+            return Tensor::from_vec(0, cols, Vec::new());
+        }
+
+        let mut data = Vec::with_capacity(self.steps.len() * cols);
+        for step in &self.steps {
+            data.push(step.x as f32);
+            data.push(step.y as f32);
+            data.push(step.height as f32);
+            data.push(step.radius as f32);
+            data.push(step.angle as f32);
+            data.push(step.curvature as f32);
+            data.push(step.macro_phase as f32);
+            data.push(step.meso_phase as f32);
+            data.push(step.micro_phase as f32);
+            data.push(self.params.meso_gain as f32);
+            data.push(self.params.micro_gain as f32);
+
+            if include_roles {
+                data.push(step.meso_role_index as f32);
+                data.push(step.micro_role_index as f32);
+            }
+
+            if include_reflections {
+                data.push(if step.macro_reflection { 1.0 } else { 0.0 });
+                data.push(if step.meso_reflection { 1.0 } else { 0.0 });
+                data.push(if step.micro_reflection { 1.0 } else { 0.0 });
+            }
+        }
+
+        Tensor::from_vec(self.steps.len(), cols, data)
+    }
+
     fn deposit_into_biome(
         &self,
         biome: &mut TensorBiome,
@@ -723,49 +764,17 @@ impl PySoT3DPlan {
         include_reflections: bool,
         include_roles: bool,
     ) -> PyResult<()> {
-        if self.steps.is_empty() {
-            return Ok(());
-        }
-        let positions = self.positions_tensor().map_err(tensor_err_to_py)?;
-        biome
-            .absorb(intern_label(&format!("{prefix}_positions")), positions)
-            .map_err(tensor_err_to_py)?;
-
-        let features = self.feature_tensor_internal().map_err(tensor_err_to_py)?;
         let feature_weight = (1.0 + self.params.meso_gain + self.params.micro_gain) as f32;
+        let biome_tensor = self
+            .biome_tensor_internal(include_reflections, include_roles)
+            .map_err(tensor_err_to_py)?;
         biome
             .absorb_weighted(
-                intern_label(&format!("{prefix}_features")),
-                features,
+                intern_label(&format!("{prefix}_plan")),
+                biome_tensor,
                 feature_weight,
             )
             .map_err(tensor_err_to_py)?;
-
-        if include_roles {
-            let roles = self.role_tensor_internal().map_err(tensor_err_to_py)?;
-            biome
-                .absorb(intern_label(&format!("{prefix}_roles")), roles)
-                .map_err(tensor_err_to_py)?;
-        }
-
-        if include_reflections {
-            let reflections = self.reflection_tensor_internal().map_err(tensor_err_to_py)?;
-            biome
-                .absorb(intern_label(&format!("{prefix}_reflections")), reflections)
-                .map_err(tensor_err_to_py)?;
-        }
-
-        if !self.macros.is_empty() {
-            let macros_tensor = self.macro_summary_tensor_internal().map_err(tensor_err_to_py)?;
-            let macro_weight = (self.macros.len() as f32).max(1.0);
-            biome
-                .absorb_weighted(
-                    intern_label(&format!("{prefix}_macro_summary")),
-                    macros_tensor,
-                    macro_weight,
-                )
-                .map_err(tensor_err_to_py)?;
-        }
 
         Ok(())
     }

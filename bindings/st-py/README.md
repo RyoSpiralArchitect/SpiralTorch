@@ -100,7 +100,7 @@ pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
 ### Hello SpiralSession
 
 ```bash
-python examples/hello_session.py
+python bindings/st-py/examples/hello_session.py
 ```
 
 Aligns a barycenter with a hypergrad tape, prepares a Sequential module, and
@@ -133,7 +133,7 @@ print(bary.objective, hyper.gradient())
 ### Z-space + optim quickstart
 
 ```bash
-python examples/zspace_optim_quickstart.py
+python bindings/st-py/examples/zspace_optim_quickstart.py
 ```
 
 ```python
@@ -154,7 +154,7 @@ print("z:", trainer.state, "loss:", loss)
 ### Text → optim → zspace quickstart
 
 ```bash
-python examples/text_optim_zspace_quickstart.py
+python bindings/st-py/examples/text_optim_zspace_quickstart.py
 ```
 
 ```python
@@ -176,7 +176,7 @@ trainer.step({"speed": 0.2, "memory": 0.1, "stability": 0.9, "gradient": opt.rea
 ### Z-space inference quickstart
 
 ```bash
-python examples/zspace_inference_quickstart.py
+python bindings/st-py/examples/zspace_inference_quickstart.py
 ```
 
 ```python
@@ -186,6 +186,30 @@ trainer = st.ZSpaceTrainer(z_dim=4)
 loss = trainer.step_partial({"speed": 0.2, "memory": 0.1, "stability": 0.9, "gradient": [0.1, 0.0, 0.0, 0.0]})
 print("z:", trainer.state, "loss:", loss)
 print("last inference:", trainer.last_inference.residual, trainer.last_inference.confidence)
+```
+
+### SoT-3Dφ → TensorBiome quickstart
+
+```bash
+python bindings/st-py/examples/sot_biome_quickstart.py
+```
+
+### SpiralK KDSl plan rewrite quickstart
+
+```bash
+python bindings/st-py/examples/spiralk_plan_rewrite_quickstart.py
+```
+
+### Maxwell-coded envelopes → SpiralK hints quickstart
+
+```bash
+python bindings/st-py/examples/maxwell_spiralk_bridge_quickstart.py
+```
+
+### Streaming Z-space trainer quickstart
+
+```bash
+python bindings/st-py/examples/zspace_stream_training_quickstart.py
 ```
 
 ### Ecosystem bridges
