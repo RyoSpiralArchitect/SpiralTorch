@@ -235,7 +235,7 @@ tensor shims, no translation layers, and no tracebacks.
     transcripts, and ψ telemetry double as explainability artifacts, enabling
     decision-path inspection without leaving the Z-space calculus.
     
-**Current release:** `spiraltorch==0.3.0` (abi3 wheel, Python ≥3.8)  
+**Current release:** `spiraltorch==0.3.1` (abi3 wheel, Python ≥3.8)  
 **Targets:** CPU (always), MPS, Vulkan/DX (WGPU), CUDA, HIP/ROCm
 
 ---
@@ -243,7 +243,7 @@ tensor shims, no translation layers, and no tracebacks.
 ## Install (pip)
 
 ```bash
-pip install -U spiraltorch==0.3.0
+pip install -U spiraltorch==0.3.1
 ```
 
 - Wheels are **abi3**; you can use any CPython ≥ 3.8.
@@ -648,6 +648,8 @@ st.set_global_seed(42)
 print(st.golden_ratio(), st.golden_angle())
 print(st.fibonacci_pacing(12))
 print(st.pack_tribonacci_chunks(20))
+plan = st.sot.generate_plan(16, radial_growth=0.08)
+print("sot:", plan.total_steps, plan.polyline()[:3])
 ```
 
 
@@ -1022,10 +1024,10 @@ WGPU backend can remember which tile schedules performed best on each device.
 We encode the hardware fingerprint using vendor, numeric device ID, subgroup
 size, shared-memory budget, and driver revision, then splice in the shader
 revision plus op signature to form a stable cache key—no timestamps or host
-process details required.【F:crates/st-kdsl/src/registry.rs†L15-L89】 The same log
+process details required. The same log
 tracks throughput, bandwidth, occupancy, chosen tile, and regression fallbacks
 while evicting the oldest samples once the per-key capacity is reached, keeping
-the cache warm without unbounded growth.【F:crates/st-kdsl/src/registry.rs†L92-L229】【F:crates/st-kdsl/src/registry.rs†L248-L334】
+the cache warm without unbounded growth.
 
 ### Microlocal interface gauges
 
@@ -1036,18 +1038,18 @@ density over shrinking metric balls, outputs the gauge-invariant `R` machine,
 and only reconstructs oriented normals when an external label `c′` is supplied.
 This lets SpiralTorch stabilise interface detection, switch on co-orientations
 precisely when downstream pipelines inject a label, and keep curvature-ready
-statistics without violating the gauge symmetry of the unlabeled limit.【F:crates/st-core/src/theory/microlocal.rs†L1-L256】
+statistics without violating the gauge symmetry of the unlabeled limit.
 Once those signatures exist, `InterfaceZLift` pushes them straight into
 Z-space: it projects the perimeter mass onto a preferred Z-axis, splits the
 energy into Above/Here/Beneath bands, enriches the drift with the Leech
 projector, and emits a ready-to-store `SoftlogicZFeedback` pulse so runtimes can
-bias their collapse heuristics without leaving the microlocal picture.【F:crates/st-core/src/theory/microlocal.rs†L258-L471】
+bias their collapse heuristics without leaving the microlocal picture.
 
 Beyond the perimeter statistics the gauge now reports a gauge-invariant
 mean-curvature magnitude and, whenever `c′` fixes an orientation, the signed
 mean curvature that restores the co-oriented BV picture. Collapse loops can
 therefore gate on curvature without labels, and only light up the signed
-variant once a label or co-orientation becomes available.【F:crates/st-core/src/theory/microlocal.rs†L42-L259】
+variant once a label or co-orientation becomes available.
 
 To make those bridges operational inside collapse loops the gauge now supports
 multi-radius sweeps and a conductor that fuses their Z pulses with exponential
@@ -1056,23 +1058,23 @@ different blow-up scales (and reuses an optional `c′` label when supplied),
 while `InterfaceZConductor` drives any number of gauges, aggregates the
 resulting pulses, and hands back a `ZFused` packet with attribution weights and
 event tags alongside the smoothed `SoftlogicZFeedback` record so runtime loops
-can see which layer dominated the decision.【F:crates/st-core/src/theory/microlocal.rs†L90-L259】【F:crates/st-core/src/theory/microlocal.rs†L387-L515】【F:crates/st-core/src/theory/zpulse.rs†L22-L344】
+can see which layer dominated the decision.
 `MicrolocalGaugeBank` turns that loose collection into a pluggable registry.
 It stores named `InterfaceGauge`s, offers builder-style helpers to register or
 remove probes, runs batch analysis keyed by id, and hands the resulting lineup
 directly to the conductor so runtime code can swap probe sets without rewriting
-fusion logic.【F:crates/st-core/src/theory/microlocal.rs†L100-L220】【F:crates/st-core/src/theory/microlocal.rs†L819-L875】
+fusion logic.
 `InterfaceZConductor::step` now preserves those identifiers, returning an
 `InterfaceZReport` that bundles the raw `InterfaceSignature`s alongside the
 matching ids and a cloned lift so downstream consumers can reuse the same
-projection without re-running the gauges.【F:crates/st-core/src/theory/microlocal.rs†L663-L738】
+projection without re-running the gauges.
 `MacroTemplateBank` mirrors that registry pattern for macro-scale designs: it
 keeps named `MacroModelTemplate`s, accepts cards directly, and couples the whole
 lineup to an `InterfaceZLift` to emit a bridge bank so macro kinetics can travel
-with whatever microlocal gauges are currently wired into the conductor.【F:crates/st-core/src/theory/macro.rs†L680-L812】
+with whatever microlocal gauges are currently wired into the conductor.
 It can then call `drive_matched` to produce macro drives only for the gauges
 present in the latest report and merge their microlocal feedback via
-`feedback_from_report` before piping the result back into the conductor.【F:crates/st-core/src/theory/macro.rs†L780-L812】
+`feedback_from_report` before piping the result back into the conductor.
 
 The conductor can now blend the pulses in both time and frequency: `set_frequency_config`
 installs a power-of-two FFT window and per-source spectral gains so high-frequency
@@ -1083,14 +1085,14 @@ score and nudges their gains on-line until the fused drift stabilises. A new
 latency and emits `latency-*` events whenever the offsets are learnt or
 corrected, keeping Maxwell’s block pulses in lockstep with microlocal frames.
 Tests cover the spectral weighting, the adaptive loop, and the latency alignment
-so the new knobs keep their invariants.【F:crates/st-core/src/theory/zpulse.rs†L121-L233】【F:crates/st-core/src/theory/zpulse.rs†L244-L405】【F:crates/st-core/src/theory/zpulse.rs†L407-L683】【F:crates/st-core/src/theory/zpulse.rs†L900-L1036】
+so the new knobs keep their invariants.
 
 Desire loops pick up the fused Z feedback straight from the hub: the conductor
 stores the latest `SoftlogicZFeedback`, and the temperature controller now
 accepts that pulse to raise exploration when the drift jitters and cool the
 distribution when the Z-bias settles. The default controller keeps a short
 memory of recent flips and exposes `with_feedback` so runtimes can tweak the
-feedback gain without rebuilding the desire machinery.【F:crates/st-core/src/theory/microlocal.rs†L488-L559】【F:crates/st-nn/src/language/temperature.rs†L1-L81】【F:crates/st-nn/src/language/desire.rs†L318-L352】
+feedback gain without rebuilding the desire machinery.
 
 ### Collaborative canvas telemetry and ghost trails
 
@@ -1098,15 +1100,15 @@ The hardened collaboration stack now layers spectator-grade UX on top of the
 BroadcastChannel/localStorage bridge. Every pointer broadcast feeds a
 policy-aware ghost trail buffer (`pointerTrail` events plus the
 `getPointerTrail` helper) so dashboards can draw fading cursors without keeping
-their own queues.【F:bindings/st-wasm/types/canvas-collab.ts†L73-L112】【F:bindings/st-wasm/types/canvas-collab.ts†L1905-L1933】
+their own queues.
 At the same time a bounded timeline recorder captures every pointer, patch, and
 full-state message with Lamport clocks and origins so HUDs can play back the
 last few seconds of collaboration or splice the data into attribution feeds via
-`session.replay`.【F:bindings/st-wasm/types/canvas-collab.ts†L93-L113】【F:bindings/st-wasm/types/canvas-collab.ts†L1093-L1131】【F:bindings/st-wasm/types/canvas-collab.ts†L1935-L1976】
+`session.replay`.
 The WASM README now documents the new knobs (`pointerTrailMs`,
 `replayWindowMs`, `replayMaxEntries`) and ships usage snippets for replaying
 frames or painting ghost trails, making it trivial to showcase collaborative
-Z-space canvases right from the top-level docs.【F:bindings/st-wasm/README.md†L125-L257】
+Z-space canvases right from the top-level docs.
 
 ### Maxwell-coded envelopes meet SpiralK
 
@@ -1114,21 +1116,21 @@ The coded-envelope utilities now ship with a `MaxwellSpiralKBridge` that turns
 sequential Z pulses into KDSl snippets ready for the runtime. Every channel name
 is sanitised for SpiralK, weights adapt to the observed Z magnitude, and
 existing programs can be prepended so the hints extend a live policy rather than
-replace it.【F:crates/st-core/src/theory/maxwell.rs†L335-L441】 Call
+replace it. Call
 `push_pulse(channel, &pulse)` for each stream, then `script()` to emit the
 combined `soft(maxwell.bias, …)` rules that SpiralK can ingest without custom
-glue code.【F:crates/st-core/src/theory/maxwell.rs†L362-L408】 The workflow is
+glue code. The workflow is
 documented in the refreshed Maxwell technical note, which now includes a
-section on streaming detections back into SpiralK orchestration.【F:docs/coded_envelope_maxwell_model.md†L144-L157】
+section on streaming detections back into SpiralK orchestration.
 
 Want the language desire loops to see the same detections? Enable the PSI
 feature and run the new `MaxwellPsiTelemetryBridge`. It converts each pulse into
 a PSI reading, optional band-energy threshold events, and a `SoftlogicZFeedback`
 sample so `DesirePsiBridge` captures the Z drift alongside ψ totals without
-hand-written glue.【F:crates/st-core/src/theory/maxwell.rs†L183-L270】【F:crates/st-core/src/theory/maxwell.rs†L666-L714】
+hand-written glue.
 Pair it with `MaxwellDesireBridge` to translate the very same pulse into a
 concept window that the `DesireLagrangian` can consume, aligning coded-envelope
-channels with vocabulary slots on the fly.【F:crates/st-nn/src/language/maxwell.rs†L1-L132】
+channels with vocabulary slots on the fly.
 
 ### Quantum Reality Studio overlays
 
@@ -1140,14 +1142,14 @@ frames surface glyph/intensity pairs for immersive projection. The crate now
 re-exports `MaxwellPulse` (an alias for `MaxwellZPulse`) and ships overlay
 builders such as `OverlayFrame::from_pairs`/`::from_glyphs_and_intensities` so
 AR pipelines can zip glyph and intensity streams without writing manual
-plumbing.【F:crates/st-qr-studio/src/lib.rs†L1-L362】 Storyboard exports drop directly into
+plumbing. Storyboard exports drop directly into
 `tools/qr_storyboard.py`, which converts JSON/NDJSON captures into Markdown decks
 grouped by channel for Desire roundtables while weaving overlay glyph stacks,
 meta-narrative tags, causal ancestry, concept windows, and meaning-sheaf
-signatures into a highlights column for reviewers.【F:tools/qr_storyboard.py†L1-L190】 The companion
+signatures into a highlights column for reviewers. The companion
 [Quantum Reality Playbook](docs/qr_playbook/README.md) provides rituals,
 collaboration tips, and art-direction cues so research and cultural teams stay
-synchronised.【F:docs/qr_playbook/README.md†L1-L49】
+synchronised.
 
 Latest iterations expose `QuantumRealityStudio::record_pulse` so capture rigs can
 stash `RecordedPulse` snapshots prior to narration, while
@@ -1157,7 +1159,7 @@ Desire loops. `OverlayGlyph` powers `OverlayFrame::new`, while the new
 convenience constructors accept glyph/intensity pairs directly and the
 storyboard exporter now retains overlay stacks, narrative tags, and concept
 window weights so AR HUDs can replay exactly what collaborators saw without
-deriving those assets a second time.【F:crates/st-qr-studio/src/lib.rs†L94-L865】
+deriving those assets a second time.
 
 ### Semiotic suturing, desire control, and EGW bridges
 
@@ -1170,16 +1172,16 @@ implements the closed-form update
 \]
 
 so syntagmatic/ paradigmatic couplings, repression scores, and S→s drives land
-as a single additive logit injection.【F:crates/st-nn/src/language/desire.rs†L1-L214】
+as a single additive logit injection.
 The `TemperatureController` keeps desire aligned with a target entropy, while
 the lightweight Schrödinger lookahead adds one-to-two Doob iterations directly
-from the Z-space kernels to approximate the bridge in-line with training.【F:crates/st-nn/src/language/temperature.rs†L1-L41】【F:crates/st-nn/src/language/schrodinger.rs†L1-L63】
+from the Z-space kernels to approximate the bridge in-line with training.
 
 Symbol/meaning suturing arrives via an entropic Gromov–Wasserstein solver that
 enforces anchors and floaty signifiers together. `EntropicGwSolver` estimates
 the coupling \(\Pi\) by minimising the EGW objective with Sinkhorn-style
 updates, boosting anchor pairs, and handing back a `SemanticBridge` ready for
-token-to-concept expectations across the tape.【F:crates/st-nn/src/language/gw.rs†L1-L245】【F:crates/st-nn/src/language/geometry.rs†L1-L325】
+token-to-concept expectations across the tape.
 Feed that bridge into the desire Lagrangian and you obtain a turn-key workflow:
 
 1. Build sparse syntagmatic/ paradigmatic kernels and repression vectors, then
@@ -1217,7 +1219,7 @@ match report.phase {
 observation, while the integration phase emits the barycentric drift so a
 hypergrad or self-rewrite scheduler can keep desire centred without collapse.
 The schedules default to zeroed observation and grow-only ramps, so existing
-callers can continue to provide manual `DesireWeights` without opt-in changes.【F:crates/st-nn/src/language/desire.rs†L1-L388】【F:crates/st-nn/src/language/desire.rs†L389-L487】
+callers can continue to provide manual `DesireWeights` without opt-in changes.
 
 Every step now ships a `DesireGradientControl` alongside the interpretation so
 automation layers can react without recomputing heuristics. Grab it via
@@ -1268,7 +1270,7 @@ hypergrad drift during the integration phase, and emits
 `DesireRewriteTrigger` structures once enough evidence accumulates. Each
 trigger carries the normalised avoidance vector so a SpiralK
 `self-rewrite` or hypergrad scheduler can queue barycentric nudges without
-hand-crafted heuristics.【F:crates/st-nn/src/language/automation.rs†L1-L226】
+hand-crafted heuristics.
 
 ```rust
 use st_core::config::self_rewrite::read_cfg;
@@ -1302,7 +1304,7 @@ Python callers can retrieve the same diff stream via
 `{"layer": "run", "path": "desire.self_rewrite.score_thresh", "previous": 0.02, "current": 0.05}`.
 Point the module at alternate config roots (for example when replaying a site
 profile) by exporting the environment variables before importing
-`spiraltorch` so the layered loader observes the overrides.【F:crates/st-core/src/config/layered.rs†L14-L153】【F:crates/st-core/src/config/self_rewrite.rs†L1-L49】【F:bindings/st-py/src/lib.rs†L346-L397】【F:bindings/st-py/src/lib.rs†L20460-L20504】
+`spiraltorch` so the layered loader observes the overrides.
 
 Persist the stream to disk with `DesireLogbook` so the observation/injection/
 integration cadence can be replayed later or shared with SpiralK rewrite
@@ -1310,7 +1312,7 @@ automation. The logbook writes line-delimited JSON records that contain the
 entire `DesireSolution` payload plus any emitted triggers, keeping telemetry and
 avoidance vectors together for offline inspection. Re-opening the logbook will
 resume the ordinal counter automatically, so a long-running automation loop can
-be restarted without clobbering record IDs.【F:crates/st-nn/src/language/logbook.rs†L1-L152】【F:crates/st-nn/src/language/logbook.rs†L168-L276】
+be restarted without clobbering record IDs.
 
 ```rust
 use st_nn::language::{DesireAutomatedStep, DesireAutomation, DesireLogbook};
@@ -1325,7 +1327,7 @@ logbook.record(&DesireAutomatedStep { solution, trigger }, SystemTime::now())?;
 Stream the persisted decisions back with `DesireLogReplay` to build dashboards
 or off-line analytics. The iterator skips blank lines and surfaces every record
 as a `PureResult`, making it straightforward to plug into telemetry sinks or
-trainers that ingest JSONL traces.【F:crates/st-nn/src/language/logbook.rs†L154-L207】
+trainers that ingest JSONL traces.
 
 ```rust
 use st_nn::language::DesireLogReplay;
@@ -1427,7 +1429,7 @@ Global telemetry consumers can subscribe without owning the pipeline by adding
 `with_telemetry()`. The `DesireTelemetrySink` records every step’s phase,
 temperature, avoidance energy, and schedule weights into the shared telemetry
 hub so trainers, notebooks, or external services can poll the latest state via
-`get_last_desire_step`.【F:crates/st-nn/src/language/pipeline.rs†L101-L239】【F:crates/st-core/src/telemetry/hub.rs†L61-L126】
+`get_last_desire_step`.
 
 ```rust
 use st_core::telemetry::hub;
@@ -1447,7 +1449,7 @@ Training loops can now subscribe directly. Clone a `DesireTrainerBridge`, attach
 it with `with_trainer_bridge`, and hand the same bridge to `ModuleTrainer` via
 `enable_desire_pipeline`. Each step drains into a shared summary so the trainer
 records phase counts, mean desire weights, and trigger temperatures alongside
-band energy telemetry without custom glue.【F:crates/st-nn/src/language/pipeline.rs†L118-L239】【F:crates/st-nn/src/language/pipeline.rs†L242-L357】【F:crates/st-nn/src/trainer.rs†L214-L365】
+band energy telemetry without custom glue.
 
 ```rust
 use st_nn::language::{
@@ -1472,7 +1474,7 @@ Graph telemetry can join the same braid. Instantiate a `GraphFlowTracer`, feed i
 into `GraphConsensusBridge`, and wrap the result with `DesireGraphBridge`. Every
 desire step now captures the latest graph digest, letting you aggregate
 Z-space desire entropy with SpiralK’s quad-band consensus or replay graph
-shares into analytics dashboards via `DesireGraphSummary`.【F:crates/st-nn/src/language/pipeline.rs†L32-L119】【F:crates/st-nn/src/language/pipeline.rs†L575-L676】
+shares into analytics dashboards via `DesireGraphSummary`.
 
 ```rust
 use std::sync::{Arc, Mutex};
@@ -1508,7 +1510,7 @@ Roundtable consensus can now absorb desire impulses directly. Attach a
 `DesireRoundtableBridge` and the pipeline will export Above/Here/Beneath
 multipliers plus drift adjustments every step. Drain the summary or let
 `ModuleTrainer::enable_desire_roundtable_bridge` fold it into the optimiser so
-the three-way negotiation constantly reflects the latest semiotic pressure.【F:crates/st-nn/src/language/pipeline.rs†L121-L286】【F:crates/st-nn/src/trainer.rs†L240-L392】
+the three-way negotiation constantly reflects the latest semiotic pressure.
 
 ```rust
 use st_nn::language::{DesirePipeline, DesireRoundtableBridge};

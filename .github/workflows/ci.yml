@@ -107,6 +107,7 @@ jobs:
               "spiraltorch.theory",
               "spiraltorch.julia",
               "spiraltorch.scale_stack",
+              "spiraltorch.sot",
               "spiraltorch.rl",
               "spiraltorch.robotics",
           ]
@@ -118,7 +119,7 @@ jobs:
               if hasattr(spiraltorch, symbol) and hasattr(mod, symbol):
                   if getattr(spiraltorch, symbol) is not getattr(mod, symbol):
                       raise RuntimeError(
-                          f\"{module}.{symbol} is not the same object as spiraltorch.{symbol}\"
+                          f"{module}.{symbol} is not the same object as spiraltorch.{symbol}"
                       )
 
           assert_reexported("spiraltorch.psi", "MetaMembConfig")
@@ -127,6 +128,7 @@ jobs:
           assert_reexported("spiraltorch.theory", "ZRelativityModel")
           assert_reexported("spiraltorch.julia", "ZTigerOptim")
           assert_reexported("spiraltorch.scale_stack", "ScaleStack")
+          assert_reexported("spiraltorch.sot", "SoT3DPlan")
 
           inspect.signature(spiralk.required_blocks)
           print("stubs ok")

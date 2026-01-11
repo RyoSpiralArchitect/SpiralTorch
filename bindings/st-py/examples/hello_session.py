@@ -107,7 +107,16 @@ def describe_backend(session: st.SpiralSession) -> None:
         print("\ngenerate_plan_batch_ex: unavailable in this build:", exc)
     else:
         print("\nGenerated plan batch (first entry):")
-        pprint(batches[0])
+        first = batches[0]
+        pprint(first)
+        as_tensor = getattr(first, "as_tensor", None)
+        if callable(as_tensor):
+            try:
+                tensor = as_tensor()
+            except Exception:
+                pass
+            else:
+                print("Plan tensor shape:", tensor.shape())
 
 
 def train_small_linear_model() -> None:

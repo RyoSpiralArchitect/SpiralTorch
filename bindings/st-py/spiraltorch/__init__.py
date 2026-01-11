@@ -220,6 +220,7 @@ _PREDECLARED_SUBMODULES: list[tuple[str, str]] = [
     ("linalg", "Linear algebra utilities"),
     ("optim", "Optimizers / gradient tapes"),
     ("planner", "Planning & device heuristics"),
+    ("sot", "SoT-3Dφ spiral planners"),
     ("spiralk", "SpiralK DSL & hint bridges"),
     ("psi", "Psi synchro & resonance telemetry"),
     ("text", "Contextual resonance text tools"),

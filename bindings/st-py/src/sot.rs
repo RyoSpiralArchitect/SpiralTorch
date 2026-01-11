@@ -3,16 +3,50 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-use super::{convert, intern_label, PyOpenTopos, PyTensor, PyTensorBiome};
+use crate::pure::{PyOpenCartesianTopos, PyTensorBiome};
+use crate::tensor::{tensor_err_to_py, PyTensor};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyModule};
 use pyo3::wrap_pyfunction;
 use pyo3::Bound;
 use st_tensor::{Tensor, TensorBiome};
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 
 const GOLDEN_ANGLE: f64 = 2.399_963_229_728_653; // π(3 − √5)
 const GOLDEN_RATIO: f64 = 1.618_033_988_749_895; // (1 + √5) / 2
+
+const FALLBACK_LABEL: &str = "spiraltorch.dynamic_label";
+const MAX_INTERNED_LABELS: usize = 256;
+const MAX_LABEL_LEN: usize = 96;
+
+static INTERNED_LABELS: OnceLock<Mutex<HashMap<String, &'static str>>> = OnceLock::new();
+
+fn is_label_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.')
+}
+
+fn intern_label(label: &str) -> &'static str {
+    let trimmed = label.trim();
+    if trimmed.is_empty() || trimmed.len() > MAX_LABEL_LEN || !trimmed.chars().all(is_label_char) {
+        return FALLBACK_LABEL;
+    }
+
+    let registry = INTERNED_LABELS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut guard = registry.lock().unwrap_or_else(|poison| poison.into_inner());
+    if let Some(existing) = guard.get(trimmed) {
+        return existing;
+    }
+    if guard.len() >= MAX_INTERNED_LABELS {
+        return FALLBACK_LABEL;
+    }
+
+    let owned = trimmed.to_owned();
+    let leaked: &'static str = Box::leak(owned.clone().into_boxed_str());
+    guard.insert(owned, leaked);
+    leaked
+}
 
 #[derive(Clone, Copy)]
 pub(crate) struct Sot3DParams {
@@ -297,6 +331,41 @@ pub(crate) fn build_plan(total_steps: usize, params: Sot3DParams) -> PyResult<Py
         params,
         total_steps,
     })
+}
+
+fn splitmix64(mut state: u64) -> u64 {
+    state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    let mut z = state;
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+fn angle_offset_from_seed(seed: u64) -> f64 {
+    let sample = splitmix64(seed);
+    let unit = (sample as f64) / (u64::MAX as f64);
+    unit * (2.0 * std::f64::consts::PI)
+}
+
+pub(crate) fn build_plan_seeded(
+    total_steps: usize,
+    params: Sot3DParams,
+    seed: u64,
+) -> PyResult<PySoT3DPlan> {
+    let mut plan = build_plan(total_steps, params)?;
+    if plan.steps.is_empty() {
+        return Ok(plan);
+    }
+    let offset = angle_offset_from_seed(seed);
+    if offset.abs() <= f64::EPSILON {
+        return Ok(plan);
+    }
+    for step in &mut plan.steps {
+        step.angle += offset;
+        step.x = step.radius * step.angle.cos();
+        step.y = step.radius * step.angle.sin();
+    }
+    Ok(plan)
 }
 
 #[pyclass(module = "spiraltorch.sot", name = "SoT3DStep")]
@@ -657,38 +726,45 @@ impl PySoT3DPlan {
         if self.steps.is_empty() {
             return Ok(());
         }
-        let positions = convert(self.positions_tensor())?;
-        convert(biome.absorb(intern_label(&format!("{}_positions", prefix)), positions))?;
+        let positions = self.positions_tensor().map_err(tensor_err_to_py)?;
+        biome
+            .absorb(intern_label(&format!("{prefix}_positions")), positions)
+            .map_err(tensor_err_to_py)?;
 
-        let features = convert(self.feature_tensor_internal())?;
+        let features = self.feature_tensor_internal().map_err(tensor_err_to_py)?;
         let feature_weight = (1.0 + self.params.meso_gain + self.params.micro_gain) as f32;
-        convert(biome.absorb_weighted(
-            intern_label(&format!("{}_features", prefix)),
-            features,
-            feature_weight,
-        ))?;
+        biome
+            .absorb_weighted(
+                intern_label(&format!("{prefix}_features")),
+                features,
+                feature_weight,
+            )
+            .map_err(tensor_err_to_py)?;
 
         if include_roles {
-            let roles = convert(self.role_tensor_internal())?;
-            convert(biome.absorb(intern_label(&format!("{}_roles", prefix)), roles))?;
+            let roles = self.role_tensor_internal().map_err(tensor_err_to_py)?;
+            biome
+                .absorb(intern_label(&format!("{prefix}_roles")), roles)
+                .map_err(tensor_err_to_py)?;
         }
 
         if include_reflections {
-            let reflections = convert(self.reflection_tensor_internal())?;
-            convert(biome.absorb(
-                intern_label(&format!("{}_reflections", prefix)),
-                reflections,
-            ))?;
+            let reflections = self.reflection_tensor_internal().map_err(tensor_err_to_py)?;
+            biome
+                .absorb(intern_label(&format!("{prefix}_reflections")), reflections)
+                .map_err(tensor_err_to_py)?;
         }
 
         if !self.macros.is_empty() {
-            let macros_tensor = convert(self.macro_summary_tensor_internal())?;
+            let macros_tensor = self.macro_summary_tensor_internal().map_err(tensor_err_to_py)?;
             let macro_weight = (self.macros.len() as f32).max(1.0);
-            convert(biome.absorb_weighted(
-                intern_label(&format!("{}_macro_summary", prefix)),
-                macros_tensor,
-                macro_weight,
-            ))?;
+            biome
+                .absorb_weighted(
+                    intern_label(&format!("{prefix}_macro_summary")),
+                    macros_tensor,
+                    macro_weight,
+                )
+                .map_err(tensor_err_to_py)?;
         }
 
         Ok(())
@@ -814,7 +890,7 @@ impl PySoT3DPlan {
     #[pyo3(signature = (topos, label_prefix=None, include_reflections=true, include_roles=true))]
     fn grow_biome(
         &self,
-        topos: &PyOpenTopos,
+        topos: &PyOpenCartesianTopos,
         label_prefix: Option<&str>,
         include_reflections: bool,
         include_roles: bool,
@@ -863,54 +939,6 @@ fn generate_plan(
         micro_gain,
     };
     build_plan(total_steps, params)
-}
-
-pub(crate) fn generate_plan_with_params(
-    total_steps: usize,
-    params: Sot3DParams,
-) -> PyResult<PySoT3DPlan> {
-    build_plan(total_steps, params)
-}
-
-pub(crate) fn plan_from_py_config(
-    default_steps: usize,
-    cfg: Option<&Bound<'_, PyDict>>,
-) -> PyResult<Option<PySoT3DPlan>> {
-    let mut plan_steps = default_steps;
-    let mut params = Sot3DParams {
-        base_radius: 1.0,
-        radial_growth: 0.05,
-        base_height: 1.0,
-        meso_gain: 0.2,
-        micro_gain: 0.05,
-    };
-
-    if let Some(cfg) = cfg {
-        if let Some(value) = cfg.get_item("steps")? {
-            plan_steps = value.extract()?;
-        }
-        if let Some(value) = cfg.get_item("base_radius")? {
-            params.base_radius = value.extract()?;
-        }
-        if let Some(value) = cfg.get_item("radial_growth")? {
-            params.radial_growth = value.extract()?;
-        }
-        if let Some(value) = cfg.get_item("base_height")? {
-            params.base_height = value.extract()?;
-        }
-        if let Some(value) = cfg.get_item("meso_gain")? {
-            params.meso_gain = value.extract()?;
-        }
-        if let Some(value) = cfg.get_item("micro_gain")? {
-            params.micro_gain = value.extract()?;
-        }
-    }
-
-    if plan_steps == 0 {
-        Ok(None)
-    } else {
-        generate_plan_with_params(plan_steps, params).map(Some)
-    }
 }
 
 #[pyfunction]

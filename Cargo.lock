@@ -3249,15 +3249,15 @@ dependencies = [
 
 [[package]]
 name = "spiraltorch-py"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "julia-ffi-poc",
  "nalgebra 0.32.6",
  "ndarray",
  "num-complex",
  "pyo3",
- "pyo3-ffi",
  "pyo3-build-config",
+ "pyo3-ffi",
  "serde_json",
  "spiral-hpo",
  "spiral-opt",

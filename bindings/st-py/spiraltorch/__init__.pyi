@@ -2,7 +2,7 @@
 # so it is shipped in the published wheel (PEP 561).
 from __future__ import annotations
 
-from typing import Callable, Dict, Iterable, Iterator, List, Literal, Mapping, Optional, Sequence, Tuple, overload
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Literal, Mapping, Optional, Sequence, Tuple, overload
 from types import ModuleType
 
 def init_backend(backend: str) -> bool: ...
@@ -1426,7 +1426,92 @@ def generate_plan_batch_ex(
     meso_gain: float,
     micro_gain: float,
     seed: Optional[int] = ...,
-) -> List[object]: ...
+) -> List[SoT3DPlan]: ...
+
+
+class SoT3DStep:
+    @property
+    def index(self) -> int: ...
+
+    @property
+    def x(self) -> float: ...
+
+    @property
+    def y(self) -> float: ...
+
+    @property
+    def height(self) -> float: ...
+
+    @property
+    def macro_index(self) -> int: ...
+
+    @property
+    def meso_role(self) -> str: ...
+
+    @property
+    def micro_role(self) -> str: ...
+
+    def as_dict(self) -> Dict[str, object]: ...
+
+
+class MacroSummary:
+    @property
+    def index(self) -> int: ...
+
+    @property
+    def start(self) -> int: ...
+
+    @property
+    def length(self) -> int: ...
+
+    def as_dict(self) -> Dict[str, object]: ...
+
+
+class SoT3DPlan:
+    @property
+    def total_steps(self) -> int: ...
+
+    @property
+    def base_radius(self) -> float: ...
+
+    @property
+    def radial_growth(self) -> float: ...
+
+    def steps(self) -> List[SoT3DStep]: ...
+
+    def as_dicts(self) -> List[Dict[str, object]]: ...
+
+    def as_tensor(self) -> Tensor: ...
+
+    def feature_tensor(self) -> Tensor: ...
+
+    def role_tensor(self) -> Tensor: ...
+
+    def reflection_tensor(self) -> Tensor: ...
+
+    def macro_summary_tensor(self) -> Tensor: ...
+
+    def macro_summaries(self) -> List[MacroSummary]: ...
+
+    def polyline(self) -> List[Tuple[float, float, float]]: ...
+
+    def reflection_points(self) -> List[Tuple[int, str]]: ...
+
+    def grow_biome(
+        self,
+        topos: OpenCartesianTopos,
+        label_prefix: str | None = ...,
+        include_reflections: bool = ...,
+        include_roles: bool = ...,
+    ) -> TensorBiome: ...
+
+    def infuse_biome(
+        self,
+        biome: TensorBiome,
+        label_prefix: str | None = ...,
+        include_reflections: bool = ...,
+        include_roles: bool = ...,
+    ) -> None: ...
 
 
 class _NnNonLiner:
@@ -2527,6 +2612,28 @@ rl: ModuleType
 
 robotics: ModuleType
 
+class _SotModule(ModuleType):
+    SoT3DPlan: type[SoT3DPlan]
+    SoT3DStep: type[SoT3DStep]
+    MacroSummary: type[MacroSummary]
+
+    def generate_plan(
+        total_steps: int,
+        base_radius: float = ...,
+        radial_growth: float = ...,
+        base_height: float = ...,
+        meso_gain: float = ...,
+        micro_gain: float = ...,
+    ) -> SoT3DPlan: ...
+
+    def pack_tribonacci_chunks(length: int) -> List[int]: ...
+    def pack_tetranacci_chunks(length: int) -> List[int]: ...
+    def fibonacci_pacing(total_steps: int) -> List[int]: ...
+    def golden_angle() -> float: ...
+    def golden_ratio() -> float: ...
+
+sot: _SotModule
+
 class _ZSpaceModule(ModuleType):
     ZMetrics: type[ZMetrics]
     ZSpaceTrainer: type[ZSpaceTrainer]
@@ -2643,7 +2750,7 @@ class _PlannerModule(ModuleType):
         meso_gain: float,
         micro_gain: float,
         seed: Optional[int] = ...,
-    ) -> List[object]: ...
+    ) -> List[SoT3DPlan]: ...
 
 planner: _PlannerModule
 
@@ -2994,6 +3101,7 @@ __all__ = [
     "ecosystem",
     "selfsup",
     "planner",
+    "sot",
     "zspace",
     "vision",
     "canvas",
@@ -3008,6 +3116,9 @@ __all__ = [
     "pack_tribonacci_chunks",
     "pack_tetranacci_chunks",
     "generate_plan_batch_ex",
+    "SoT3DPlan",
+    "SoT3DStep",
+    "MacroSummary",
     "info_nce",
     "masked_mse",
     "gl_coeffs_adaptive",

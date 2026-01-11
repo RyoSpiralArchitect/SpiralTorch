@@ -30,6 +30,7 @@ mod theory;
 mod introspect;
 mod qr;
 mod julia_bridge;
+mod sot;
 mod dataset;
 #[cfg(feature = "robotics")]
 mod robotics;
@@ -116,30 +117,20 @@ mod extras {
         micro_gain: f64,
         seed: Option<u64>,
     ) -> PyResult<Vec<PyObject>> {
-        #[allow(clippy::too_many_arguments)]
-        fn call_generate_plan(
-            _py: Python<'_>,
-            _total_steps: usize,
-            _base_radius: f64,
-            _radial_growth: f64,
-            _base_height: f64,
-            _meso_gain: f64,
-            _micro_gain: f64,
-            _seed: Option<u64>,
-        ) -> PyResult<PyObject> {
-            Err(pyo3::exceptions::PyNotImplementedError::new_err(
-                "wire generate_plan_batch_ex() to your existing generate_plan()",
-            ))
-        }
-
         let base_seed = seed.unwrap_or_else(|| GLOBAL_SEED.load(Ordering::SeqCst));
+        let params = crate::sot::Sot3DParams {
+            base_radius,
+            radial_growth,
+            base_height,
+            meso_gain,
+            micro_gain,
+        };
         let mut out = Vec::with_capacity(n);
         for i in 0..n {
             let s = base_seed.wrapping_add(i as u64);
-            let plan_obj = call_generate_plan(
-                py, total_steps, base_radius, radial_growth, base_height, meso_gain, micro_gain, Some(s)
-            )?;
-            out.push(plan_obj);
+            let plan = crate::sot::build_plan_seeded(total_steps, params, s)?;
+            let obj = Py::new(py, plan)?.into_py(py);
+            out.push(obj);
         }
         Ok(out)
     }
@@ -190,6 +181,14 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     rec::register(py, m)?;
     telemetry::register(py, m)?;
 
+    let sot_module = PyModule::new_bound(py, "spiraltorch.sot")?;
+    sot::module(py, &sot_module)?;
+    m.add_submodule(&sot_module)?;
+    m.add("sot", sot_module.to_object(py))?;
+    m.add("SoT3DPlan", sot_module.getattr("SoT3DPlan")?)?;
+    m.add("SoT3DStep", sot_module.getattr("SoT3DStep")?)?;
+    m.add("MacroSummary", sot_module.getattr("MacroSummary")?)?;
+
     let export_module = PyModule::new_bound(py, "export")?;
     export::register(py, &export_module)?;
     m.add_submodule(&export_module)?;
@@ -238,6 +237,10 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "nn",
         "frac",
         "selfsup",
+        "sot",
+        "SoT3DPlan",
+        "SoT3DStep",
+        "MacroSummary",
         "dataset",
         "linalg",
         "spiral_rl",

@@ -796,7 +796,13 @@ impl PyRealgrad {
 
 #[pyclass(module = "spiraltorch", name = "TensorBiome", unsendable)]
 pub(crate) struct PyTensorBiome {
-    inner: TensorBiome,
+    pub(crate) inner: TensorBiome,
+}
+
+impl PyTensorBiome {
+    pub(crate) fn from_biome(inner: TensorBiome) -> Self {
+        Self { inner }
+    }
 }
 
 #[pyclass(module = "spiraltorch", name = "BarycenterIntermediate", unsendable)]
