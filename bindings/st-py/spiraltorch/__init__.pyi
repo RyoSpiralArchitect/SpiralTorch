@@ -2517,6 +2517,16 @@ telemetry: ModuleType
 
 ecosystem: ModuleType
 
+text: ModuleType
+
+theory: ModuleType
+
+scale_stack: ModuleType
+
+rl: ModuleType
+
+robotics: ModuleType
+
 class _ZSpaceModule(ModuleType):
     ZMetrics: type[ZMetrics]
     ZSpaceTrainer: type[ZSpaceTrainer]
@@ -2972,6 +2982,12 @@ __all__ = [
     "frac",
     "dataset",
     "linalg",
+    "psi",
+    "text",
+    "theory",
+    "scale_stack",
+    "rl",
+    "robotics",
     "spiral_rl",
     "rec",
     "telemetry",

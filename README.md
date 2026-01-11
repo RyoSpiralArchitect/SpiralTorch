@@ -360,7 +360,7 @@ except ImportError:
     print("PyTorch not installed; skipping torch interop demo.")
 else:
     # SpiralTorch → PyTorch (zero-copy)
-    torch_tensor = torch_from_dlpack(capsule)
+    torch_tensor = torch_from_dlpack(st_tensor.to_dlpack())
 
     # Mutations are visible in both (shared memory)
     torch_tensor += 10

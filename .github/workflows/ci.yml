@@ -76,6 +76,7 @@ jobs:
           PYTHONNOUSERSITE: "1"
         run: |
           python -P - <<'PY'
+          import importlib
           import inspect
           import pathlib
 
@@ -98,6 +99,34 @@ jobs:
               raise FileNotFoundError(py_typed)
           if not spiralk_pyi.exists():
               raise FileNotFoundError(spiralk_pyi)
+
+          submodules = [
+              "spiraltorch.psi",
+              "spiraltorch.text",
+              "spiraltorch.qr",
+              "spiraltorch.theory",
+              "spiraltorch.julia",
+              "spiraltorch.scale_stack",
+              "spiraltorch.rl",
+              "spiraltorch.robotics",
+          ]
+          for name in submodules:
+              importlib.import_module(name)
+
+          def assert_reexported(module: str, symbol: str) -> None:
+              mod = importlib.import_module(module)
+              if hasattr(spiraltorch, symbol) and hasattr(mod, symbol):
+                  if getattr(spiraltorch, symbol) is not getattr(mod, symbol):
+                      raise RuntimeError(
+                          f\"{module}.{symbol} is not the same object as spiraltorch.{symbol}\"
+                      )
+
+          assert_reexported("spiraltorch.psi", "MetaMembConfig")
+          assert_reexported("spiraltorch.text", "ContextualPulseFrame")
+          assert_reexported("spiraltorch.qr", "QuantumRealityStudio")
+          assert_reexported("spiraltorch.theory", "ZRelativityModel")
+          assert_reexported("spiraltorch.julia", "ZTigerOptim")
+          assert_reexported("spiraltorch.scale_stack", "ScaleStack")
 
           inspect.signature(spiralk.required_blocks)
           print("stubs ok")
