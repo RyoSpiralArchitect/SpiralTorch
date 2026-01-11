@@ -382,7 +382,7 @@ print(f"Z-space shape: {z_vec.shape()}, loss: {loss}")
 ### Common Issues
 
 **Q: `AttributeError: module 'spiraltorch' has no attribute 'XYZ'`**  
-A: Check that you're using the correct import. The Python wheel forwards many symbols dynamically. See `spiraltorch.pyi` for the supported API.
+A: Check that you're using the correct import. The Python wheel forwards many symbols dynamically. See `spiraltorch/__init__.pyi` for the supported API.
 
 **Q: CUDA/ROCm link errors**  
 A: Verify `CUDA_HOME`, driver/toolkit versions, or ROCm installation. On CI, add toolkit paths to `LD_LIBRARY_PATH`/`DYLD_LIBRARY_PATH`.

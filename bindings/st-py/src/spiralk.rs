@@ -826,8 +826,8 @@ impl PyMaxwellSpiralKBridge {
 }
 
 #[pyfunction]
-fn required_blocks(target_z: f64, sigma: f64, kappa: f64, lambda: f64) -> Option<f64> {
-    required_blocks_rs(target_z, sigma, kappa, lambda)
+fn required_blocks(target_z: f64, sigma: f64, kappa: f64, lambda_: f64) -> Option<f64> {
+    required_blocks_rs(target_z, sigma, kappa, lambda_)
 }
 
 #[pyclass(module = "spiraltorch.spiralk", name = "MaxwellFingerprint")]

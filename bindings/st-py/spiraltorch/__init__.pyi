@@ -1,3 +1,5 @@
+# NOTE: This stub lives next to the runtime package as `spiraltorch/__init__.pyi`,
+# so it is shipped in the published wheel (PEP 561).
 from __future__ import annotations
 
 from typing import Callable, Dict, Iterable, Iterator, List, Literal, Mapping, Optional, Sequence, Tuple, overload

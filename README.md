@@ -695,7 +695,7 @@ A: Verify `CUDA_HOME`, driver/toolkit versions, or ROCm installation. On CI, add
 A: `pip uninstall -y spiraltorch && pip cache purge` → reinstall the freshly built wheel with `--no-cache-dir`.
 
 **Q: How stable is the Python API?**  
-A: The type stubs (`spiraltorch.pyi`) reflect the **supported** surface. New Rust exports appear dynamically via forwarding; removals/renames adopt compatibility aliases where possible.
+A: The shipped type stubs (`spiraltorch/__init__.pyi`) reflect the **supported** surface. New Rust exports appear dynamically via forwarding; removals/renames adopt compatibility aliases where possible.
 
 ---
 

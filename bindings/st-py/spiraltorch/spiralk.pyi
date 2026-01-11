@@ -1,15 +1,22 @@
 from __future__ import annotations
 
-from typing import Iterable, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from spiraltorch import RankPlan
+from spiraltorch import (
+    SpiralKAiRewriteConfig,
+    SpiralKAiRewritePrompt,
+    SpiralKContext,
+    SpiralKHeuristicHint,
+    SpiralKWilsonMetrics,
+)
 
 
-class FftPlan:
+class SpiralKFftPlan:
     def __init__(self, radix: int, tile_cols: int, segments: int, subgroup: bool) -> None: ...
 
     @staticmethod
-    def from_rank_plan(plan: RankPlan) -> "FftPlan": ...
+    def from_rank_plan(plan: RankPlan) -> "SpiralKFftPlan": ...
 
     def radix(self) -> int: ...
 
@@ -26,7 +33,10 @@ class FftPlan:
     def emit_spiralk_hint(self) -> str: ...
 
 
-class MaxwellHint:
+FftPlan = SpiralKFftPlan
+
+
+class MaxwellSpiralKHint:
     @property
     def channel(self) -> str: ...
 
@@ -45,7 +55,10 @@ class MaxwellHint:
     def script_line(self) -> str: ...
 
 
-class MaxwellBridge:
+MaxwellHint = MaxwellSpiralKHint
+
+
+class MaxwellSpiralKBridge:
     def __init__(
         self,
         base_program: Optional[str] = None,
@@ -66,16 +79,63 @@ class MaxwellBridge:
         z_score: float,
         band_energy: Tuple[float, float, float],
         z_bias: float,
-    ) -> MaxwellHint: ...
+    ) -> MaxwellSpiralKHint: ...
 
-    def hints(self) -> List[MaxwellHint]: ...
+    def hints(self) -> List[MaxwellSpiralKHint]: ...
 
     def is_empty(self) -> bool: ...
 
     def script(self) -> Optional[str]: ...
 
 
-def required_blocks(target_z: float, sigma: float, kappa: float, lambda_: float) -> Optional[float]: ...
+MaxwellBridge = MaxwellSpiralKBridge
+
+
+def required_blocks(
+    target_z: float,
+    sigma: float,
+    kappa: float,
+    lambda_: float,
+) -> Optional[float]: ...
+
+
+def wilson_lower_bound(wins: int, trials: int, z: float) -> float: ...
+
+
+def should_rewrite(
+    metrics: SpiralKWilsonMetrics,
+    min_gain: float = ...,
+    min_confidence: float = ...,
+) -> bool: ...
+
+
+def synthesize_program(
+    base_src: str,
+    hints: Sequence[SpiralKHeuristicHint],
+) -> str: ...
+
+
+def rewrite_with_wilson(
+    base_src: str,
+    ctx: SpiralKContext,
+    metrics: SpiralKWilsonMetrics,
+    hints: Sequence[SpiralKHeuristicHint],
+    min_gain: float = ...,
+    min_confidence: float = ...,
+) -> tuple[Dict[str, object], str]: ...
+
+
+def rewrite_with_ai(
+    base_src: str,
+    ctx: SpiralKContext,
+    config: SpiralKAiRewriteConfig,
+    prompt: SpiralKAiRewritePrompt,
+    generator: Callable[
+        [SpiralKAiRewriteConfig, SpiralKAiRewritePrompt],
+        Sequence[SpiralKHeuristicHint],
+    ]
+    | None = ...,
+) -> tuple[Dict[str, object], str, Sequence[SpiralKHeuristicHint]]: ...
 
 
 class MaxwellFingerprint:

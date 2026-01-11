@@ -71,13 +71,44 @@ jobs:
       - name: Install wheel
         run: |
           python -m pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
+      - name: Sanity-check packaged stubs
+        env:
+          PYTHONNOUSERSITE: "1"
+        run: |
+          python -P - <<'PY'
+          import inspect
+          import pathlib
+
+          import spiral
+          import spiraltorch
+          import spiraltorch.spiralk as spiralk
+
+          from spiral import hypergrad_session
+
+          if hypergrad_session.__module__ != "spiral.hypergrad":
+              raise RuntimeError("spiral.hypergrad_session is not backed by spiral.hypergrad")
+
+          init_pyi = pathlib.Path(spiraltorch.__file__).resolve().with_name("__init__.pyi")
+          py_typed = pathlib.Path(spiraltorch.__file__).resolve().with_name("py.typed")
+          spiralk_pyi = pathlib.Path(spiraltorch.__file__).resolve().with_name("spiralk.pyi")
+
+          if not init_pyi.exists():
+              raise FileNotFoundError(init_pyi)
+          if not py_typed.exists():
+              raise FileNotFoundError(py_typed)
+          if not spiralk_pyi.exists():
+              raise FileNotFoundError(spiralk_pyi)
+
+          inspect.signature(spiralk.required_blocks)
+          print("stubs ok")
+          PY
       - name: Run README python blocks
         env:
           PYTHONNOUSERSITE: "1"
         run: |
-          python tools/run_readme_python_blocks.py --readme README.md --cwd .
+          python -P tools/run_readme_python_blocks.py --readme README.md --cwd .
       - name: Run hello_session example
         env:
           PYTHONNOUSERSITE: "1"
         run: |
-          python bindings/st-py/examples/hello_session.py
+          python -P bindings/st-py/examples/hello_session.py
