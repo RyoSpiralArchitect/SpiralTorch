@@ -52,3 +52,32 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: build tensor + wgpu
         run: cargo build -p st-tensor --features wgpu --release
+
+  python-docs-smoke:
+    name: python docs smoke (README + hello_session)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build wheel
+        run: |
+          python -m pip install -U pip wheel maturin
+          maturin build --release --locked -m bindings/st-py/Cargo.toml --features "wgpu,logic,kdsl"
+      - name: Install wheel
+        run: |
+          python -m pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
+      - name: Run README python blocks
+        env:
+          PYTHONNOUSERSITE: "1"
+        run: |
+          python tools/run_readme_python_blocks.py --readme README.md --cwd .
+      - name: Run hello_session example
+        env:
+          PYTHONNOUSERSITE: "1"
+        run: |
+          python bindings/st-py/examples/hello_session.py
