@@ -37,6 +37,7 @@ mod robotics;
 
 mod extras {
     use super::*;
+    use pyo3::types::PyDict;
     use pyo3::wrap_pyfunction;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -102,6 +103,44 @@ mod extras {
         nacci_orbits(4, &[1, 1, 2, 4], total_steps).into_iter().map(|o| o.actual).collect()
     }
 
+    #[pyfunction]
+    pub fn build_info(py: Python<'_>) -> PyResult<Py<PyDict>> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("package", env!("CARGO_PKG_NAME"))?;
+        dict.set_item("version", env!("CARGO_PKG_VERSION"))?;
+        dict.set_item(
+            "profile",
+            if cfg!(debug_assertions) { "debug" } else { "release" },
+        )?;
+
+        let target = PyDict::new_bound(py);
+        target.set_item("arch", std::env::consts::ARCH)?;
+        target.set_item("os", std::env::consts::OS)?;
+        target.set_item("family", std::env::consts::FAMILY)?;
+        target.set_item("pointer_width", usize::BITS)?;
+        dict.set_item("target", target)?;
+
+        let features = PyDict::new_bound(py);
+        features.set_item("cpu", cfg!(feature = "cpu"))?;
+        features.set_item("wgpu", cfg!(feature = "wgpu"))?;
+        features.set_item("wgpu-rt", cfg!(feature = "wgpu-rt"))?;
+        features.set_item("mps", cfg!(feature = "mps"))?;
+        features.set_item("cuda", cfg!(feature = "cuda"))?;
+        features.set_item("hip", cfg!(feature = "hip"))?;
+        features.set_item("hip-real", cfg!(feature = "hip-real"))?;
+        features.set_item("logic", cfg!(feature = "logic"))?;
+        features.set_item("logic-learn", cfg!(feature = "logic-learn"))?;
+        features.set_item("kdsl", cfg!(feature = "kdsl"))?;
+        features.set_item("nn", cfg!(feature = "nn"))?;
+        features.set_item("rec", cfg!(feature = "rec"))?;
+        features.set_item("text", cfg!(feature = "text"))?;
+        features.set_item("selfsup", cfg!(feature = "selfsup"))?;
+        features.set_item("robotics", cfg!(feature = "robotics"))?;
+        dict.set_item("features", features)?;
+
+        Ok(dict.into())
+    }
+
     // ← 引数名を #[pyo3(signature=...)] と一致させる
     #[pyfunction]
     #[pyo3(signature = (n, total_steps, base_radius, radial_growth, base_height, meso_gain, micro_gain, seed=None))]
@@ -143,6 +182,7 @@ mod extras {
         m.add_function(wrap_pyfunction!(pack_nacci_chunks, m)?)?;
         m.add_function(wrap_pyfunction!(pack_tribonacci_chunks, m)?)?;
         m.add_function(wrap_pyfunction!(pack_tetranacci_chunks, m)?)?;
+        m.add_function(wrap_pyfunction!(build_info, m)?)?;
         m.add_function(wrap_pyfunction!(generate_plan_batch_ex, m)?)?;
         m.add("__doc__", "SpiralTorch extras: seeds/golden/n-bonacci/chunking/plan-batch")?;
         let _ = py;
@@ -255,6 +295,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "mean_squared_error",
         "CanvasTransformer",
         "CanvasSnapshot",
+        "CanvasProjector",
         "apply_vision_update",
         "ScaleStack",
         "scalar_scale_stack",
@@ -267,6 +308,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "pack_nacci_chunks",
         "pack_tribonacci_chunks",
         "pack_tetranacci_chunks",
+        "build_info",
         "generate_plan_batch_ex",
         "describe_wgpu_softmax_variants",
         "gl_coeffs_adaptive",

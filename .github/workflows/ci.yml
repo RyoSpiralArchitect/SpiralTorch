@@ -147,6 +147,10 @@ jobs:
         env:
           PYTHONNOUSERSITE: "1"
         run: |
+          python -P bindings/st-py/examples/canvas_projector_quickstart.py
+          python -P bindings/st-py/examples/atlas_quickstart.py
+          python -P bindings/st-py/examples/amegagrad_session_quickstart.py --steps 8
+          python -P bindings/st-py/examples/canvas_atlas_session_quickstart.py --steps 8
           python -P bindings/st-py/examples/sot_biome_quickstart.py --steps 16 --strict-biome
           python -P bindings/st-py/examples/spiralk_plan_rewrite_quickstart.py
           python -P bindings/st-py/examples/maxwell_spiralk_bridge_quickstart.py --max-samples 32

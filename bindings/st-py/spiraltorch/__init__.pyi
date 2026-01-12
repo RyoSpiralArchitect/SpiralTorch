@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, Iterable, Iterator, List, Literal, Mapping, Optional, Sequence, Tuple, overload
 from types import ModuleType
 
+from .optim import Amegagrad, amegagrad
+
 def init_backend(backend: str) -> bool: ...
 
 class Axis:
@@ -1050,6 +1052,138 @@ class SpiralSession:
 
     def close(self) -> None: ...
 
+def hypergrad(
+    *shape_args: Any,
+    curvature: float = ...,
+    learning_rate: float = ...,
+    shape: Any | None = ...,
+    rows: Any | None = ...,
+    cols: Any | None = ...,
+    topos: Any | None = ...,
+) -> Hypergrad: ...
+
+def realgrad(
+    *shape_args: Any,
+    learning_rate: float = ...,
+    shape: Any | None = ...,
+    rows: Any | None = ...,
+    cols: Any | None = ...,
+) -> Realgrad: ...
+
+def hypergrad_topos(
+    *,
+    curvature: float = ...,
+    tolerance: float = ...,
+    saturation: float = ...,
+    max_depth: int = ...,
+    max_volume: int = ...,
+) -> OpenCartesianTopos: ...
+
+def encode_zspace(
+    text: str,
+    *,
+    curvature: float = ...,
+    temperature: float = ...,
+    encoder: LanguageWaveEncoder | None = ...,
+) -> Tensor: ...
+
+class HypergradSession(SpiralSession):
+    hyper: Hypergrad
+    weights: Tensor
+    route: AtlasRoute | None
+
+    def __init__(
+        self,
+        *shape_args: Any,
+        curvature: float = ...,
+        learning_rate: float = ...,
+        backend: str = ...,
+        seed: int | None = ...,
+        shape: Any | None = ...,
+        rows: Any | None = ...,
+        cols: Any | None = ...,
+        topos: Any | None = ...,
+        weights: Any | None = ...,
+        telemetry: bool = ...,
+        telemetry_bound: int = ...,
+    ) -> None: ...
+
+    def shape(self) -> tuple[int, int]: ...
+    def zero_grad(self) -> None: ...
+    def reset(self) -> None: ...
+    def accumulate_wave(self, wave: Any) -> None: ...
+    def accumulate_pair(self, prediction: Any, target: Any) -> None: ...
+    def summary(self) -> Any: ...
+    def step(self, weights: Tensor | None = ..., *, note: str | None = ...) -> Tensor: ...
+
+class AmegagradSession(SpiralSession):
+    opt: Amegagrad
+    hyper: Hypergrad
+    real: Realgrad
+    weights: Tensor
+    ztrainer: ZSpaceTrainer | None
+    route: AtlasRoute | None
+
+    def __init__(
+        self,
+        *shape_args: Any,
+        curvature: float = ...,
+        hyper_learning_rate: float = ...,
+        real_learning_rate: float = ...,
+        backend: str = ...,
+        seed: int | None = ...,
+        shape: Any | None = ...,
+        rows: Any | None = ...,
+        cols: Any | None = ...,
+        topos: Any | None = ...,
+        gain: float = ...,
+        weights: Any | None = ...,
+        z_dim: int = ...,
+        z_lr: float = ...,
+        z_lam_frac: float = ...,
+        telemetry: bool = ...,
+        telemetry_bound: int = ...,
+    ) -> None: ...
+
+    def shape(self) -> tuple[int, int]: ...
+    def zero_grad(self) -> None: ...
+    def reset(self) -> None: ...
+    def step_wave(
+        self,
+        wave: Any,
+        *,
+        tune: bool = ...,
+        gain: float | None = ...,
+        control: Any | None = ...,
+        note: str | None = ...,
+    ) -> Tensor: ...
+
+    def step_pair(
+        self,
+        prediction: Any,
+        target: Any,
+        *,
+        tune: bool = ...,
+        gain: float | None = ...,
+        control: Any | None = ...,
+        note: str | None = ...,
+    ) -> Tensor: ...
+
+    def step_text(
+        self,
+        encoder: Any,
+        text: str,
+        *,
+        tune: bool = ...,
+        gain: float | None = ...,
+        control: Any | None = ...,
+        note: str | None = ...,
+    ) -> Tensor: ...
+
+def hypergrad_session(*shape_args: Any, **kwargs: Any) -> HypergradSession: ...
+
+def amegagrad_session(*shape_args: Any, **kwargs: Any) -> AmegagradSession: ...
+
 def describe_device(
     backend: str = ...,
     *,
@@ -1245,6 +1379,84 @@ class FractalCanvas:
         dimension: Optional[float] = ...,
     ) -> InfiniteZSpacePatch: ...
 
+class CanvasProjector:
+    def __init__(
+        self,
+        width: int = ...,
+        height: int = ...,
+        *,
+        capacity: int = ...,
+        palette: str = ...,
+    ) -> None: ...
+
+    @property
+    def width(self) -> int: ...
+
+    @property
+    def height(self) -> int: ...
+
+    def queue_len(self) -> int: ...
+    def total_weight(self) -> float: ...
+
+    def palette(self) -> str: ...
+    def set_palette(self, name: str) -> None: ...
+    def reset_normalizer(self) -> None: ...
+
+    def push_patch(
+        self,
+        relation: Tensor | Sequence[Sequence[float]],
+        *,
+        coherence: float = ...,
+        tension: float = ...,
+        depth: int = ...,
+    ) -> None: ...
+
+    def emit_zspace_patch(
+        self,
+        *,
+        coherence: float = ...,
+        tension: float = ...,
+        depth: int = ...,
+    ) -> Dict[str, object]: ...
+
+    def emit_wasm_trail(self, curvature: float = ...) -> Dict[str, object]: ...
+
+    def emit_atlas_frame(
+        self,
+        *,
+        prefix: str = ...,
+        refresh: bool = ...,
+        timestamp: float | None = ...,
+    ) -> AtlasFrame: ...
+
+    def clear_queue(self) -> None: ...
+
+    def rgba(self) -> bytes: ...
+    def refresh_rgba(self) -> bytes: ...
+
+    def tensor(self) -> Tensor: ...
+    def refresh_tensor(self) -> Tensor: ...
+
+    def refresh_vector_fft_tensor(self, *, inverse: bool = ...) -> Tensor: ...
+    def refresh_vector_fft_power_db_tensor(self, *, inverse: bool = ...) -> Tensor: ...
+
+class CanvasZSpacePatch:
+    relation: Tensor
+    coherence: float
+    tension: float
+    depth: int
+    weight: float
+
+    def to_dict(self) -> Dict[str, object]: ...
+
+class CanvasWasmTrail:
+    curvature: float
+    width: int
+    height: int
+    samples: Tensor
+
+    def to_dict(self) -> Dict[str, object]: ...
+
 class QuantumOverlayConfig:
     def __init__(
         self,
@@ -1416,6 +1628,8 @@ def pack_nacci_chunks(order: int, total_steps: int) -> List[int]: ...
 def pack_tribonacci_chunks(total_steps: int) -> List[int]: ...
 
 def pack_tetranacci_chunks(total_steps: int) -> List[int]: ...
+
+def build_info() -> Dict[str, object]: ...
 
 def generate_plan_batch_ex(
     n: int,
@@ -2598,7 +2812,33 @@ spiral_rl: ModuleType
 
 rec: ModuleType
 
-telemetry: ModuleType
+class _TelemetryModule(ModuleType):
+    DashboardMetric: type[DashboardMetric]
+    DashboardEvent: type[DashboardEvent]
+    DashboardFrame: type[DashboardFrame]
+    DashboardRing: type[DashboardRing]
+    AtlasMetric: type[AtlasMetric]
+    AtlasFragment: type[AtlasFragment]
+    AtlasFrame: type[AtlasFrame]
+    AtlasRoute: type[AtlasRoute]
+    AtlasMetricFocus: type[AtlasMetricFocus]
+    AtlasPerspective: type[AtlasPerspective]
+
+    def current() -> SoftlogicZFeedback | None: ...
+    def metric_root_token(name: str) -> str: ...
+    def infer_district(name: str) -> str: ...
+    def perspective_for_dict(
+        route: AtlasRoute,
+        district: str,
+        focus_prefixes: Optional[Sequence[str]] = ...,
+    ) -> Optional[Dict[str, object]]: ...
+    def perspective_for_packet(
+        route: AtlasRoute,
+        district: str,
+        focus_prefixes: Optional[Sequence[str]] = ...,
+    ) -> Optional[AtlasPerspective]: ...
+
+telemetry: _TelemetryModule
 
 ecosystem: ModuleType
 
@@ -2654,6 +2894,9 @@ vision: _VisionModule
 class _CanvasModule(ModuleType):
     CanvasTransformer: type[CanvasTransformer]
     CanvasSnapshot: type[CanvasSnapshot]
+    CanvasProjector: type[CanvasProjector]
+    CanvasZSpacePatch: type[CanvasZSpacePatch]
+    CanvasWasmTrail: type[CanvasWasmTrail]
 
     def apply_vision_update(
         vision: SpiralTorchVision,
@@ -2664,6 +2907,31 @@ class _CanvasModule(ModuleType):
         weight: float = ...,
         include_patch: bool = ...,
     ) -> CanvasSnapshot: ...
+
+    def available_palettes() -> List[str]: ...
+    def canonical_palette(name: str) -> str: ...
+    def emit_zspace_patch_dict(
+        projector: CanvasProjector,
+        *,
+        coherence: float = ...,
+        tension: float = ...,
+        depth: int = ...,
+    ) -> Dict[str, object]: ...
+    def emit_zspace_patch_packet(
+        projector: CanvasProjector,
+        *,
+        coherence: float = ...,
+        tension: float = ...,
+        depth: int = ...,
+    ) -> CanvasZSpacePatch: ...
+    def emit_wasm_trail_dict(
+        projector: CanvasProjector,
+        curvature: float = ...,
+    ) -> Dict[str, object]: ...
+    def emit_wasm_trail_packet(
+        projector: CanvasProjector,
+        curvature: float = ...,
+    ) -> CanvasWasmTrail: ...
 
 canvas: _CanvasModule
 
@@ -2925,6 +3193,74 @@ class SacAgent:
     def __init__(self, state_dim: int, action_dim: int, temperature: float) -> None: ...
     def sample_action(self, state: Sequence[float]) -> int: ...
     def jitter(self, entropy_target: float) -> None: ...
+
+class AtlasMetric:
+    name: str
+    value: float
+    district: Optional[str]
+
+class AtlasFragment:
+    def __init__(self, timestamp: float | None = ...) -> None: ...
+    @property
+    def timestamp(self) -> float | None: ...
+    def set_timestamp(self, timestamp: float) -> None: ...
+    def is_empty(self) -> bool: ...
+    def push_metric(self, name: str, value: float, district: str | None = ...) -> None: ...
+    def push_note(self, note: str) -> None: ...
+    def metrics(self) -> List[AtlasMetric]: ...
+    def notes(self) -> List[str]: ...
+    def to_frame(self) -> AtlasFrame | None: ...
+
+class AtlasFrame:
+    @staticmethod
+    def from_metrics(
+        metrics: Mapping[str, float],
+        *,
+        timestamp: float | None = ...,
+    ) -> AtlasFrame: ...
+    @property
+    def timestamp(self) -> float: ...
+    def metric_value(self, name: str) -> float | None: ...
+    def metrics_with_prefix(self, prefix: str) -> List[AtlasMetric]: ...
+    def metrics(self) -> List[AtlasMetric]: ...
+    def notes(self) -> List[str]: ...
+    def districts(self) -> List[Dict[str, object]]: ...
+
+class AtlasRoute:
+    def __init__(self) -> None: ...
+    def is_empty(self) -> bool: ...
+    def len(self) -> int: ...
+    def __len__(self) -> int: ...
+    def latest_timestamp(self) -> float | None: ...
+    def push_bounded(self, frame: AtlasFrame, bound: int) -> None: ...
+    def summary(self) -> Dict[str, object]: ...
+    def perspective_for(
+        self, district: str, focus_prefixes: Optional[Sequence[str]] = ...
+    ) -> Optional[Dict[str, object]]: ...
+    def beacons(self, limit: int = ...) -> List[Dict[str, object]]: ...
+
+class AtlasMetricFocus:
+    name: str
+    coverage: int
+    mean: float
+    latest: float
+    delta: float
+    momentum: float
+    std_dev: float
+
+class AtlasPerspective:
+    district: str
+    coverage: int
+    mean: float
+    latest: float
+    delta: float
+    momentum: float
+    volatility: float
+    stability: float
+    guidance: str
+    focus: List[AtlasMetricFocus]
+
+    def to_dict(self) -> Dict[str, object]: ...
 
 class DashboardMetric:
     name: str

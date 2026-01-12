@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import cmath as _cmath
 import math as _math
+import time as _time
 import threading as _threading
 import types as _types
 import sys
@@ -3230,7 +3231,597 @@ class SpiralSession:
         """Release any session-scoped resources (currently a no-op)."""
 
 
+class HypergradSession(SpiralSession):
+    """High-level wrapper around a Hypergrad tape plus a weights tensor."""
+
+    hyper: _Any
+    weights: _Any
+    route: _Any | None
+
+    def __init__(
+        self,
+        *shape_args: _Any,
+        curvature: float = -1.0,
+        learning_rate: float = 0.05,
+        backend: str = "auto",
+        seed: int | None = None,
+        shape: _Any | None = None,
+        rows: _Any | None = None,
+        cols: _Any | None = None,
+        topos: _Any | None = None,
+        weights: _Any | None = None,
+        telemetry: bool = True,
+        telemetry_bound: int = 128,
+    ) -> None:
+        super().__init__(backend=backend, seed=seed)
+        if _rs is None or not callable(globals().get("hypergrad")):
+            raise RuntimeError(
+                "HypergradSession requires the compiled SpiralTorch extension. "
+                "Install a wheel or build via `maturin develop -m bindings/st-py/Cargo.toml`."
+            )
+
+        self.curvature = float(curvature)
+        self.learning_rate = float(learning_rate)
+        self.telemetry_bound = int(telemetry_bound)
+
+        self.hyper = hypergrad(
+            *shape_args,
+            curvature=self.curvature,
+            learning_rate=self.learning_rate,
+            shape=shape,
+            rows=rows,
+            cols=cols,
+            topos=topos,
+        )
+        rows_out, cols_out = self.hyper.shape()
+
+        tensor_type = _session_tensor_type()
+        if tensor_type is None:
+            raise RuntimeError("HypergradSession requires Tensor support in this build.")
+
+        if weights is None:
+            self.weights = tensor_type(rows_out, cols_out, [0.0] * (rows_out * cols_out))
+        else:
+            self.weights = _session_require_tensor(weights, label="weights")
+
+        route_type = _safe_getattr(globals().get("telemetry"), "AtlasRoute")
+        self.route = route_type() if telemetry and callable(route_type) else None
+
+    def shape(self) -> tuple[int, int]:
+        return self.hyper.shape()
+
+    def zero_grad(self) -> None:
+        self.hyper.reset()
+
+    reset = zero_grad
+
+    def accumulate_wave(self, wave: _Any) -> None:
+        wave = _session_require_tensor(wave, label="wave")
+        self.hyper.accumulate_wave(wave)
+
+    def accumulate_pair(self, prediction: _Any, target: _Any) -> None:
+        prediction = _session_require_tensor(prediction, label="prediction")
+        target = _session_require_tensor(target, label="target")
+        self.hyper.accumulate_pair(prediction, target)
+
+    def summary(self) -> _Any:
+        return self.hyper.summary()
+
+    def _push_telemetry(self, metrics: _Mapping[str, float], note: str | None = None) -> None:
+        if self.route is None:
+            return
+        frag_type = _safe_getattr(globals().get("telemetry"), "AtlasFragment")
+        if not callable(frag_type):
+            return
+
+        frag = frag_type(timestamp=float(_time.time()))
+        for name, value in metrics.items():
+            frag.push_metric(str(name), float(value))
+        if note:
+            frag.push_note(str(note))
+        frame = frag.to_frame()
+        if frame is not None:
+            self.route.push_bounded(frame, self.telemetry_bound)
+
+    def step(self, weights: _Any | None = None, *, note: str | None = None) -> _Any:
+        """Apply the current hypergrad gradient to weights and record telemetry."""
+
+        if weights is None:
+            weights = self.weights
+        else:
+            weights = _session_require_tensor(weights, label="weights")
+
+        self.hyper.apply(weights)
+
+        metrics: dict[str, float] = {}
+        summary = self.hyper.summary()
+        for name, getter in (
+            ("hypergrad.l2", "l2"),
+            ("hypergrad.mean_abs", "mean_abs"),
+            ("hypergrad.count", "count"),
+        ):
+            fn = getattr(summary, getter, None)
+            if callable(fn):
+                try:
+                    metrics[name] = float(fn())
+                except Exception:
+                    pass
+        lr_fn = getattr(self.hyper, "learning_rate", None)
+        if callable(lr_fn):
+            try:
+                metrics["hypergrad.learning_rate"] = float(lr_fn())
+            except Exception:
+                pass
+
+        self._push_telemetry(metrics, note=note)
+        return weights
+
+
+class AmegagradSession(SpiralSession):
+    """High-level wrapper around `optim.Amegagrad` + optional Z-space trainer."""
+
+    opt: Amegagrad
+    hyper: _Any
+    real: _Any
+    weights: _Any
+    ztrainer: _Any | None
+    route: _Any | None
+
+    def __init__(
+        self,
+        *shape_args: _Any,
+        curvature: float = -1.0,
+        hyper_learning_rate: float = 0.05,
+        real_learning_rate: float = 0.01,
+        backend: str = "auto",
+        seed: int | None = None,
+        shape: _Any | None = None,
+        rows: _Any | None = None,
+        cols: _Any | None = None,
+        topos: _Any | None = None,
+        gain: float = 1.0,
+        weights: _Any | None = None,
+        z_dim: int = 4,
+        z_lr: float = 0.05,
+        z_lam_frac: float = 0.05,
+        telemetry: bool = True,
+        telemetry_bound: int = 128,
+    ) -> None:
+        super().__init__(backend=backend, seed=seed)
+
+        self.opt = Amegagrad(
+            *shape_args,
+            curvature=float(curvature),
+            hyper_learning_rate=float(hyper_learning_rate),
+            real_learning_rate=float(real_learning_rate),
+            shape=shape,
+            rows=rows,
+            cols=cols,
+            topos=topos,
+            gain=float(gain),
+        )
+        self.hyper = self.opt.hyper
+        self.real = self.opt.real
+
+        tensor_type = _session_tensor_type()
+        if tensor_type is None:
+            raise RuntimeError("AmegagradSession requires Tensor support in this build.")
+        rows_out, cols_out = self.opt.shape()
+        if weights is None:
+            self.weights = tensor_type(rows_out, cols_out, [0.0] * (rows_out * cols_out))
+        else:
+            self.weights = _session_require_tensor(weights, label="weights")
+
+        ztrainer_type = globals().get("ZSpaceTrainer")
+        self.ztrainer = (
+            ztrainer_type(z_dim=int(z_dim), lr=float(z_lr), lam_frac=float(z_lam_frac))
+            if isinstance(ztrainer_type, type)
+            else None
+        )
+
+        route_type = _safe_getattr(globals().get("telemetry"), "AtlasRoute")
+        self.route = route_type() if telemetry and callable(route_type) else None
+        self.telemetry_bound = int(telemetry_bound)
+
+    def shape(self) -> tuple[int, int]:
+        return self.opt.shape()
+
+    def zero_grad(self) -> None:
+        self.opt.zero_grad()
+
+    reset = zero_grad
+
+    def _push_telemetry(self, metrics: _Mapping[str, float], note: str | None = None) -> None:
+        if self.route is None:
+            return
+        frag_type = _safe_getattr(globals().get("telemetry"), "AtlasFragment")
+        if not callable(frag_type):
+            return
+
+        frag = frag_type(timestamp=float(_time.time()))
+        for name, value in metrics.items():
+            frag.push_metric(str(name), float(value))
+        if note:
+            frag.push_note(str(note))
+        frame = frag.to_frame()
+        if frame is not None:
+            self.route.push_bounded(frame, self.telemetry_bound)
+
+    def _zspace_step(self) -> float | None:
+        if self.ztrainer is None:
+            return None
+        summary = self.real.summary()
+        metrics: dict[str, _Any] = {"gradient": self.real.gradient()}
+        for name, getter in (
+            ("speed", "mean_abs"),
+            ("memory", "l2"),
+        ):
+            fn = getattr(summary, getter, None)
+            if callable(fn):
+                try:
+                    metrics[name] = float(fn())
+                except Exception:
+                    pass
+        if "memory" in metrics:
+            metrics["stability"] = 1.0 / (1.0 + float(metrics["memory"]))
+        try:
+            return float(self.ztrainer.step(metrics))
+        except Exception:
+            return None
+
+    def step_wave(
+        self,
+        wave: _Any,
+        *,
+        tune: bool = True,
+        gain: float | None = None,
+        control: _Any | None = None,
+        note: str | None = None,
+    ) -> _Any:
+        self.opt.zero_grad()
+        self.opt.accumulate_wave(wave)
+        z_loss = self._zspace_step()
+        control_obj = self.opt.desire_control(gain=gain) if control is None else control
+        self.opt.step(self.weights, tune=tune, gain=gain, control=control_obj)
+
+        metrics: dict[str, float] = {}
+        summary = self.real.summary()
+        for name, getter in (
+            ("realgrad.l2", "l2"),
+            ("realgrad.mean_abs", "mean_abs"),
+            ("realgrad.count", "count"),
+        ):
+            fn = getattr(summary, getter, None)
+            if callable(fn):
+                try:
+                    metrics[name] = float(fn())
+                except Exception:
+                    pass
+        if z_loss is not None:
+            metrics["zspace.loss"] = float(z_loss)
+        self._push_telemetry(metrics, note=note)
+        return self.weights
+
+    def step_pair(
+        self,
+        prediction: _Any,
+        target: _Any,
+        *,
+        tune: bool = True,
+        gain: float | None = None,
+        control: _Any | None = None,
+        note: str | None = None,
+    ) -> _Any:
+        self.opt.zero_grad()
+        self.opt.accumulate_pair(prediction, target)
+        z_loss = self._zspace_step()
+        control_obj = self.opt.desire_control(gain=gain) if control is None else control
+        self.opt.step(self.weights, tune=tune, gain=gain, control=control_obj)
+
+        metrics: dict[str, float] = {}
+        summary = self.real.summary()
+        fn = getattr(summary, "l2", None)
+        if callable(fn):
+            try:
+                metrics["realgrad.l2"] = float(fn())
+            except Exception:
+                pass
+        if z_loss is not None:
+            metrics["zspace.loss"] = float(z_loss)
+        self._push_telemetry(metrics, note=note)
+        return self.weights
+
+    def step_text(
+        self,
+        encoder: _Any,
+        text: str,
+        *,
+        tune: bool = True,
+        gain: float | None = None,
+        control: _Any | None = None,
+        note: str | None = None,
+    ) -> _Any:
+        self.opt.zero_grad()
+        self.opt.absorb_text(encoder, str(text))
+        z_loss = self._zspace_step()
+        control_obj = self.opt.desire_control(gain=gain) if control is None else control
+        self.opt.step(self.weights, tune=tune, gain=gain, control=control_obj)
+
+        metrics: dict[str, float] = {}
+        summary = self.real.summary()
+        fn = getattr(summary, "l2", None)
+        if callable(fn):
+            try:
+                metrics["realgrad.l2"] = float(fn())
+            except Exception:
+                pass
+        if z_loss is not None:
+            metrics["zspace.loss"] = float(z_loss)
+        self._push_telemetry(metrics, note=note)
+        return self.weights
+
+
+def hypergrad_session(*shape_args: _Any, **kwargs: _Any) -> HypergradSession:
+    """Create a HypergradSession (Hypergrad + weights) for quick loops."""
+
+    return HypergradSession(*shape_args, **kwargs)
+
+
+def amegagrad_session(*shape_args: _Any, **kwargs: _Any) -> AmegagradSession:
+    """Create an AmegagradSession (Hypergrad + Realgrad + weights) for quick loops."""
+
+    return AmegagradSession(*shape_args, **kwargs)
+
+
+@_dataclass(frozen=True)
+class CanvasZSpacePatch:
+    relation: "Tensor"
+    coherence: float
+    tension: float
+    depth: int
+    weight: float
+
+    def to_dict(self) -> _Dict[str, _Any]:
+        return {
+            "relation": self.relation,
+            "coherence": self.coherence,
+            "tension": self.tension,
+            "depth": self.depth,
+            "weight": self.weight,
+        }
+
+
+@_dataclass(frozen=True)
+class CanvasWasmTrail:
+    curvature: float
+    width: int
+    height: int
+    samples: "Tensor"
+
+    def to_dict(self) -> _Dict[str, _Any]:
+        return {
+            "curvature": self.curvature,
+            "width": self.width,
+            "height": self.height,
+            "samples": self.samples,
+        }
+
+
+def _coerce_canvas_patch(payload: _Mapping[str, _Any]) -> CanvasZSpacePatch:
+    return CanvasZSpacePatch(
+        relation=payload["relation"],
+        coherence=float(payload["coherence"]),
+        tension=float(payload["tension"]),
+        depth=int(payload["depth"]),
+        weight=float(payload["weight"]),
+    )
+
+
+def emit_zspace_patch_dict(
+    projector: _Any,
+    *,
+    coherence: float = 1.0,
+    tension: float = 1.0,
+    depth: int = 0,
+) -> _Dict[str, _Any]:
+    """Emit a canvas loopback patch as a plain dict."""
+
+    if not hasattr(projector, "emit_zspace_patch"):
+        raise TypeError("projector must provide emit_zspace_patch()")
+    payload = projector.emit_zspace_patch(
+        coherence=float(coherence),
+        tension=float(tension),
+        depth=int(depth),
+    )
+    if not isinstance(payload, _Mapping):
+        raise TypeError("emit_zspace_patch() must return a mapping")
+    return dict(payload)
+
+
+def emit_zspace_patch_packet(
+    projector: _Any,
+    *,
+    coherence: float = 1.0,
+    tension: float = 1.0,
+    depth: int = 0,
+) -> CanvasZSpacePatch:
+    """Emit a canvas loopback patch as a typed packet."""
+
+    return _coerce_canvas_patch(
+        emit_zspace_patch_dict(
+            projector,
+            coherence=coherence,
+            tension=tension,
+            depth=depth,
+        )
+    )
+
+
+def emit_wasm_trail_dict(projector: _Any, curvature: float = 1.0) -> _Dict[str, _Any]:
+    """Emit a canvas AR/WebGPU trail payload as a plain dict."""
+
+    if not hasattr(projector, "emit_wasm_trail"):
+        raise TypeError("projector must provide emit_wasm_trail()")
+    payload = projector.emit_wasm_trail(float(curvature))
+    if not isinstance(payload, _Mapping):
+        raise TypeError("emit_wasm_trail() must return a mapping")
+    return dict(payload)
+
+
+def emit_wasm_trail_packet(projector: _Any, curvature: float = 1.0) -> CanvasWasmTrail:
+    """Emit a canvas AR/WebGPU trail payload as a typed packet."""
+
+    payload = emit_wasm_trail_dict(projector, curvature)
+    return CanvasWasmTrail(
+        curvature=float(payload["curvature"]),
+        width=int(payload["width"]),
+        height=int(payload["height"]),
+        samples=payload["samples"],
+    )
+
+
+@_dataclass(frozen=True)
+class AtlasMetricFocus:
+    name: str
+    coverage: int
+    mean: float
+    latest: float
+    delta: float
+    momentum: float
+    std_dev: float
+
+
+@_dataclass(frozen=True)
+class AtlasPerspective:
+    district: str
+    coverage: int
+    mean: float
+    latest: float
+    delta: float
+    momentum: float
+    volatility: float
+    stability: float
+    guidance: str
+    focus: _List[AtlasMetricFocus]
+
+    def to_dict(self) -> _Dict[str, _Any]:
+        return {
+            "district": self.district,
+            "coverage": self.coverage,
+            "mean": self.mean,
+            "latest": self.latest,
+            "delta": self.delta,
+            "momentum": self.momentum,
+            "volatility": self.volatility,
+            "stability": self.stability,
+            "guidance": self.guidance,
+            "focus": [metric.__dict__.copy() for metric in self.focus],
+        }
+
+
+def _coerce_atlas_focus(payload: _Mapping[str, _Any]) -> AtlasMetricFocus:
+    return AtlasMetricFocus(
+        name=str(payload["name"]),
+        coverage=int(payload["coverage"]),
+        mean=float(payload["mean"]),
+        latest=float(payload["latest"]),
+        delta=float(payload["delta"]),
+        momentum=float(payload["momentum"]),
+        std_dev=float(payload["std_dev"]),
+    )
+
+
+def _coerce_atlas_perspective(payload: _Mapping[str, _Any]) -> AtlasPerspective:
+    focus = payload.get("focus", [])
+    focus_items: _List[AtlasMetricFocus] = []
+    if isinstance(focus, _SequenceABC):
+        for entry in focus:
+            if isinstance(entry, _Mapping):
+                focus_items.append(_coerce_atlas_focus(entry))
+    return AtlasPerspective(
+        district=str(payload.get("district", "")),
+        coverage=int(payload.get("coverage", 0)),
+        mean=float(payload.get("mean", 0.0)),
+        latest=float(payload.get("latest", 0.0)),
+        delta=float(payload.get("delta", 0.0)),
+        momentum=float(payload.get("momentum", 0.0)),
+        volatility=float(payload.get("volatility", 0.0)),
+        stability=float(payload.get("stability", 0.0)),
+        guidance=str(payload.get("guidance", "")),
+        focus=focus_items,
+    )
+
+
+def perspective_for_dict(
+    route: _Any,
+    district: str,
+    focus_prefixes: _Optional[_Sequence[str]] = None,
+) -> _Optional[_Dict[str, _Any]]:
+    """Fetch an atlas district perspective as a plain dict."""
+
+    if not hasattr(route, "perspective_for"):
+        raise TypeError("route must provide perspective_for()")
+    prefixes = list(focus_prefixes) if focus_prefixes else None
+    payload = route.perspective_for(str(district), prefixes)
+    if payload is None:
+        return None
+    if not isinstance(payload, _Mapping):
+        raise TypeError("perspective_for() must return a mapping or None")
+    return dict(payload)
+
+
+def perspective_for_packet(
+    route: _Any,
+    district: str,
+    focus_prefixes: _Optional[_Sequence[str]] = None,
+) -> _Optional[AtlasPerspective]:
+    """Fetch an atlas district perspective as a typed packet."""
+
+    payload = perspective_for_dict(route, district, focus_prefixes)
+    if payload is None:
+        return None
+    return _coerce_atlas_perspective(payload)
+
+
+try:
+    _canvas_module = globals().get("canvas")
+    if isinstance(_canvas_module, _types.ModuleType):
+        _canvas_module.CanvasZSpacePatch = CanvasZSpacePatch
+        _register_module_export(_canvas_module, "CanvasZSpacePatch")
+        _canvas_module.CanvasWasmTrail = CanvasWasmTrail
+        _register_module_export(_canvas_module, "CanvasWasmTrail")
+        _canvas_module.emit_zspace_patch_dict = emit_zspace_patch_dict
+        _register_module_export(_canvas_module, "emit_zspace_patch_dict")
+        _canvas_module.emit_zspace_patch_packet = emit_zspace_patch_packet
+        _register_module_export(_canvas_module, "emit_zspace_patch_packet")
+        _canvas_module.emit_wasm_trail_dict = emit_wasm_trail_dict
+        _register_module_export(_canvas_module, "emit_wasm_trail_dict")
+        _canvas_module.emit_wasm_trail_packet = emit_wasm_trail_packet
+        _register_module_export(_canvas_module, "emit_wasm_trail_packet")
+
+    _telemetry_module = globals().get("telemetry")
+    if isinstance(_telemetry_module, _types.ModuleType):
+        _telemetry_module.AtlasMetricFocus = AtlasMetricFocus
+        _register_module_export(_telemetry_module, "AtlasMetricFocus")
+        _telemetry_module.AtlasPerspective = AtlasPerspective
+        _register_module_export(_telemetry_module, "AtlasPerspective")
+        _telemetry_module.perspective_for_dict = perspective_for_dict
+        _register_module_export(_telemetry_module, "perspective_for_dict")
+        _telemetry_module.perspective_for_packet = perspective_for_packet
+        _register_module_export(_telemetry_module, "perspective_for_packet")
+except Exception:
+    pass
+
+
 _EXTRAS.append("SpiralSession")
+_EXTRAS.extend(
+    [
+        "HypergradSession",
+        "AmegagradSession",
+        "hypergrad_session",
+        "amegagrad_session",
+    ]
+)
 _EXTRAS.extend(
     [
         "ZSpaceDecoded",

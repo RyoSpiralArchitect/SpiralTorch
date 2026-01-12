@@ -1679,6 +1679,21 @@ mod concept_tests {
     }
 }
 
+#[cfg(test)]
+mod district_tests {
+    use super::*;
+
+    #[test]
+    fn infer_district_classifies_root_tokens() {
+        assert_eq!(infer_district("psi.total"), "Concourse");
+        assert_eq!(infer_district("  PSI.total  "), "Concourse");
+        assert_eq!(infer_district(".psi.total"), "Concourse");
+        assert_eq!(infer_district("realgrad_step"), "Substrate");
+        assert_eq!(infer_district("canvas.energy"), "Surface");
+        assert_eq!(infer_district(""), "Unknown");
+    }
+}
+
 /// Atlas district representing a logical SpiralTorch layer.
 #[derive(Clone, Debug, Default)]
 pub struct AtlasDistrict {
@@ -1717,11 +1732,28 @@ impl AtlasDistrict {
     }
 }
 
-fn infer_district(name: &str) -> &'static str {
-    let lower = name.to_ascii_lowercase();
-    let token = lower.split(['.', ':', '/', '-']).next().unwrap_or("");
-    match token {
-        "py" | "python" | "bindings" | "session" | "timeline" | "config" | "psychoid" => "Surface",
+/// Extracts the leading namespace token from an atlas metric identifier.
+///
+/// Examples:
+/// - `"psi.total"` → `"psi"`
+/// - `"canvas_energy"` → `"canvas"`
+/// - `"  .loop.frames  "` → `"loop"`
+pub fn metric_root_token(name: &str) -> &str {
+    name.trim()
+        .split(|c: char| matches!(c, '.' | ':' | '/' | '-' | '_'))
+        .find(|token| !token.is_empty())
+        .unwrap_or("")
+}
+
+/// Best-effort district classification for metrics without an explicit district.
+///
+/// The returned strings match the district names used by [`AtlasFrame::districts`]:
+/// `"Surface"`, `"Concourse"`, `"Substrate"`, or `"Unknown"`.
+pub fn infer_district(name: &str) -> &'static str {
+    let token = metric_root_token(name).to_ascii_lowercase();
+    match token.as_str() {
+        "py" | "python" | "bindings" | "session" | "timeline" | "config" | "psychoid"
+        | "canvas" => "Surface",
         "trainer" | "maintainer" | "atlas" | "loop" | "chrono" | "policy" | "resonator"
         | "softlogic" | "psi" | "desire" => "Concourse",
         "tensor" | "backend" | "core" | "z" | "collapse" | "geometry" | "kdsl" | "realgrad" => {

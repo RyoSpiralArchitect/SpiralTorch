@@ -119,15 +119,38 @@ tape.apply(z)
 print(z.tolist())
 ```
 
-```python
-from spiraltorch import SpiralSession, Tensor
+### Canvas projector quickstart
 
-session = SpiralSession(device="wgpu", curvature=-1.0, hyper_learning_rate=0.05)
-densities = [Tensor(1, 2, [0.7, 0.3]), Tensor(1, 2, [0.2, 0.8])]
-bary = session.barycenter(densities)
-hyper = session.hypergrad(*bary.density.shape())
-session.align_hypergrad(hyper, bary)
-print(bary.objective, hyper.gradient())
+```bash
+python bindings/st-py/examples/canvas_projector_quickstart.py
+```
+
+Renders a radial energy field into an RGBA surface (written as
+`spiraltorch_canvas.ppm`) and prints the row-wise FFT power spectrum tensor
+shape.
+
+### Atlas telemetry quickstart
+
+```bash
+python bindings/st-py/examples/atlas_quickstart.py
+```
+
+Builds an `AtlasFrame` from a Python dict and prints the district aggregation.
+
+```python
+import spiraltorch as st
+
+route = st.telemetry.AtlasRoute()
+route.push_bounded(
+    st.telemetry.AtlasFrame.from_metrics({"psi.total": 1.0}, timestamp=0.0),
+    bound=32,
+)
+route.push_bounded(
+    st.telemetry.AtlasFrame.from_metrics({"psi.total": 1.5}, timestamp=1.0),
+    bound=32,
+)
+print("summary:", route.summary()["frames"], "frames")
+print("psi perspective:", route.perspective_for("Concourse", focus_prefixes=["psi."])["guidance"])
 ```
 
 ### Z-space + optim quickstart
@@ -150,6 +173,24 @@ trainer = st.ZSpaceTrainer(z_dim=4)
 loss = trainer.step({"speed": 0.2, "memory": 0.1, "stability": 0.9, "gradient": opt.real.gradient()})
 print("z:", trainer.state, "loss:", loss)
 ```
+
+### AmegagradSession quickstart
+
+```bash
+python bindings/st-py/examples/amegagrad_session_quickstart.py
+```
+
+### Canvas → Atlas → Session quickstart
+
+```bash
+python bindings/st-py/examples/canvas_atlas_session_quickstart.py
+```
+
+Runs a small closed-loop demo:
+
+- `AmegagradSession` updates weights
+- `CanvasProjector` renders + emits a loopback patch
+- `CanvasProjector.emit_atlas_frame(...)` streams metrics into `AtlasRoute`
 
 ### Text → optim → zspace quickstart
 

@@ -69,6 +69,39 @@ jobs:
           after = text_weights.tolist()
           assert after != before
 
+          info = st.build_info()
+          assert isinstance(info, dict)
+          assert info.get("package") == "spiraltorch-py"
+
+          projector = st.canvas.CanvasProjector(width=16, height=16, palette="turbo")
+          projector.push_patch(st.Tensor(16, 16, [0.0] * 256), coherence=1.0, tension=1.0, depth=0)
+          projector.refresh_rgba()
+          patch = projector.emit_zspace_patch(coherence=1.0, tension=1.0, depth=0)
+          assert patch["relation"].shape() == (16, 16)
+          projector.push_patch(patch["relation"], coherence=patch["coherence"], tension=patch["tension"], depth=patch["depth"])
+          trail = projector.emit_wasm_trail(curvature=1.5)
+          assert trail["samples"].shape() == (16 * 16, 7)
+          frame = projector.emit_atlas_frame(prefix="canvas", refresh=False, timestamp=0.0)
+          assert isinstance(frame.timestamp, float)
+
+          patch_packet = st.canvas.emit_zspace_patch_packet(projector, coherence=1.0, tension=1.0, depth=0)
+          assert patch_packet.relation.shape() == (16, 16)
+          trail_packet = st.canvas.emit_wasm_trail_packet(projector, curvature=1.5)
+          assert trail_packet.samples.shape() == (16 * 16, 7)
+
+          route = st.telemetry.AtlasRoute()
+          route.push_bounded(st.telemetry.AtlasFrame.from_metrics({"psi.total": 1.0}, timestamp=0.0), bound=8)
+          route.push_bounded(st.telemetry.AtlasFrame.from_metrics({"psi.total": 1.5}, timestamp=1.0), bound=8)
+          route.push_bounded(frame, bound=8)
+          assert route.perspective_for("Concourse", focus_prefixes=["psi."]) is not None
+          assert isinstance(route.beacons(limit=4), list)
+          perspective_packet = st.telemetry.perspective_for_packet(route, "Concourse", focus_prefixes=["psi."])
+          assert perspective_packet is not None
+          assert isinstance(perspective_packet.guidance, str)
+
+          session = st.amegagrad_session((1, 4), curvature=-0.9, telemetry=True, telemetry_bound=8)
+          session.step_wave(st.Tensor(1, 4, [0.1, -0.2, 0.05, 0.0]))
+
           print("smoke ok")
           PY
       - name: Upload

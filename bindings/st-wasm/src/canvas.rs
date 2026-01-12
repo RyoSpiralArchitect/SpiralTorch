@@ -748,25 +748,16 @@ impl FractalCanvas {
 #[wasm_bindgen]
 pub fn available_palettes() -> Array {
     let out = Array::new();
-    out.push(&JsValue::from_str("blue-magenta"));
-    out.push(&JsValue::from_str("turbo"));
-    out.push(&JsValue::from_str("grayscale"));
+    for palette in CanvasPalette::ALL {
+        out.push(&JsValue::from_str(palette.canonical_name()));
+    }
     out
 }
 
 fn parse_palette(name: &str) -> Result<CanvasPalette, JsValue> {
-    match name.to_ascii_lowercase().as_str() {
-        "blue-magenta" | "blue_magenta" | "blue" => Ok(CanvasPalette::BlueMagenta),
-        "turbo" => Ok(CanvasPalette::Turbo),
-        "grayscale" | "grey" | "gray" => Ok(CanvasPalette::Grayscale),
-        other => Err(js_error(format!("unknown palette '{other}'"))),
-    }
+    CanvasPalette::parse(name).ok_or_else(|| js_error(format!("unknown palette '{name}'")))
 }
 
 fn palette_to_name(palette: CanvasPalette) -> &'static str {
-    match palette {
-        CanvasPalette::BlueMagenta => "blue-magenta",
-        CanvasPalette::Turbo => "turbo",
-        CanvasPalette::Grayscale => "grayscale",
-    }
+    palette.canonical_name()
 }

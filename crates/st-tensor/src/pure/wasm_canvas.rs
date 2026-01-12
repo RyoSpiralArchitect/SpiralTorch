@@ -73,6 +73,16 @@ impl CanvasNormalizer {
         self.state
     }
 
+    /// Returns the smoothing factor used when updating the range estimate.
+    pub fn alpha(&self) -> f32 {
+        self.alpha
+    }
+
+    /// Returns the minimum span applied to the range estimate.
+    pub fn epsilon(&self) -> f32 {
+        self.epsilon
+    }
+
     /// Fold a new tensor slice into the normaliser. Returns the smoothed
     /// `(min, max)` pair that will be used to map values into `[0, 1]`.
     pub fn update(&mut self, data: &[f32]) -> (f32, f32) {
@@ -137,6 +147,43 @@ pub enum CanvasPalette {
 }
 
 impl CanvasPalette {
+    /// All supported palettes in a stable order.
+    pub const ALL: [Self; 3] = [Self::BlueMagenta, Self::Turbo, Self::Grayscale];
+
+    /// Returns the canonical palette identifier used by the public bindings.
+    pub fn canonical_name(self) -> &'static str {
+        match self {
+            CanvasPalette::BlueMagenta => "blue-magenta",
+            CanvasPalette::Turbo => "turbo",
+            CanvasPalette::Grayscale => "grayscale",
+        }
+    }
+
+    /// Parses a palette identifier accepted by the public bindings.
+    pub fn parse(name: &str) -> Option<Self> {
+        let name = name.trim();
+        if name.is_empty() {
+            return None;
+        }
+        if name.eq_ignore_ascii_case("blue-magenta")
+            || name.eq_ignore_ascii_case("blue_magenta")
+            || name.eq_ignore_ascii_case("blue")
+        {
+            return Some(CanvasPalette::BlueMagenta);
+        }
+        if name.eq_ignore_ascii_case("turbo") {
+            return Some(CanvasPalette::Turbo);
+        }
+        if name.eq_ignore_ascii_case("grayscale")
+            || name.eq_ignore_ascii_case("grey")
+            || name.eq_ignore_ascii_case("gray")
+            || name.eq_ignore_ascii_case("greyscale")
+        {
+            return Some(CanvasPalette::Grayscale);
+        }
+        None
+    }
+
     fn map(self, t: f32) -> [u8; 4] {
         match self {
             CanvasPalette::BlueMagenta => {
@@ -1802,6 +1849,11 @@ impl CanvasProjector {
         &mut self.surface
     }
 
+    /// Immutable access to the normaliser used for colouring.
+    pub fn normalizer(&self) -> &CanvasNormalizer {
+        &self.normalizer
+    }
+
     /// Mutable access to the normaliser used for colouring.
     pub fn normalizer_mut(&mut self) -> &mut CanvasNormalizer {
         &mut self.normalizer
@@ -2966,6 +3018,47 @@ mod tests {
         let scheduler = unwrap_ok(UringFractalScheduler::new(4));
         unwrap_ok(scheduler.push(patch));
         scheduler
+    }
+
+    #[test]
+    fn canvas_palette_parse_accepts_public_aliases() {
+        assert!(matches!(
+            CanvasPalette::parse("blue-magenta"),
+            Some(CanvasPalette::BlueMagenta)
+        ));
+        assert!(matches!(
+            CanvasPalette::parse("blue_magenta"),
+            Some(CanvasPalette::BlueMagenta)
+        ));
+        assert!(matches!(
+            CanvasPalette::parse(" BLUE "),
+            Some(CanvasPalette::BlueMagenta)
+        ));
+        assert!(matches!(
+            CanvasPalette::parse("turbo"),
+            Some(CanvasPalette::Turbo)
+        ));
+        assert!(matches!(
+            CanvasPalette::parse("gray"),
+            Some(CanvasPalette::Grayscale)
+        ));
+        assert!(matches!(
+            CanvasPalette::parse("greyscale"),
+            Some(CanvasPalette::Grayscale)
+        ));
+        assert!(matches!(
+            CanvasPalette::parse("ultraviolet"),
+            None
+        ));
+    }
+
+    #[test]
+    fn canvas_palette_canonical_names_match_all() {
+        let names: Vec<&'static str> = CanvasPalette::ALL
+            .iter()
+            .map(|palette| palette.canonical_name())
+            .collect();
+        assert_eq!(names, vec!["blue-magenta", "turbo", "grayscale"]);
     }
 
     #[test]
