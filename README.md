@@ -146,8 +146,7 @@ SpiralTorch ships under a dual-license model:
 _Last updated: 2026-1-10 11:22 UTC_
 
 ```text
-
-ryospiralarchitect@Ryos-MacBook-Pro SpiralTorch % tokei .                
+               
 ===============================================================================
  Language            Files        Lines         Code     Comments       Blanks
 ===============================================================================
@@ -265,7 +264,7 @@ tensor shims, no translation layers, and no tracebacks.
 ## Install (pip)
 
 ```bash
-pip install -U spiraltorch==0.3.1
+pip install -U spiraltorch==0.3.2
 ```
 
 - Wheels are **abi3**; you can use any CPython ≥ 3.8.
