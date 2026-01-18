@@ -42,3 +42,19 @@ tempfile = "3"
 
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"
+
+[[example]]
+name = "ecosystem_integration_demo"
+path = "../../examples/ecosystem_integration_demo.rs"
+
+[[example]]
+name = "fine_tune_with_selfsup"
+path = "../../examples/fine_tune_with_selfsup.rs"
+
+[[example]]
+name = "modelzoo_mlp_regression"
+path = "../../examples/modelzoo_mlp_regression.rs"
+
+[[example]]
+name = "modelzoo_zconv_classification"
+path = "../../examples/modelzoo_zconv_classification.rs"

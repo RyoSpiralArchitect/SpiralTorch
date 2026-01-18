@@ -1,0 +1,21 @@
+# SpiralTorch (Python) changelog
+
+## 0.3.5
+
+- Add ops sugar (`ops.signature`, flexible `ops.register`) and allow variadic inputs for Python-registered operators.
+- Add `ops.describe` plus varargs support for `ops.execute`.
+- Add `plugin.record(...)` JSONL recorder plus queue helpers for notebook-friendly observability.
+- Expand `nn` bindings with additional losses (HyperbolicCrossEntropy/CrossEntropy, Focal, Contrastive, Triplet) and broader `ModuleTrainer` coverage.
+- Make `nn.save_json/load_json` accept state dicts and return them when called with `None` (plus bincode equivalents).
+- Add `nn.save/nn.load` helpers with auto format detection and manifest generation.
+- Allow `nn.Sequential.add` to accept NonLiner/Scaler/Dropout/Pool2d/ZPooling/ZConv/ZConv6DA layers (NCHW for 2d ops, NCDHW for ZConv6DA).
+- Strengthen unittest smoke coverage for ops/plugin/serialization.
+
+## 0.3.4
+
+- Add `spiraltorch.ops` to register custom operators in Python and run them via the Rust registry.
+- Upgrade `spiraltorch.plugin` with queue/listen helpers plus batch subscribe/unsubscribe.
+- Add `spiraltorch.nn.save_json/load_json` (+ bincode) for module snapshots.
+- Start the model zoo with Python + Rust MLP regression examples.
+- Route core tensor ops (`add`, `matmul`, `row_softmax`, …) into plugin events via the new `st-tensor` observer hook.
+- Expose `st_nn::ModuleTrainer` as `spiraltorch.nn.ModuleTrainer` with `RoundtableConfig`, `RoundtableSchedule`, and `EpochStats`.

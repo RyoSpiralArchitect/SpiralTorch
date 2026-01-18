@@ -9,7 +9,7 @@
 
 use st_core::plugin::{
     Plugin, PluginCapability, PluginContext, PluginEvent, PluginMetadata, PluginRegistry,
-    StaticPluginLoader,
+    PluginLoader, StaticPluginLoader,
 };
 use st_core::PureResult;
 use std::any::Any;

@@ -1581,6 +1581,11 @@ impl Tensor {
             }
         }
 
+        crate::emit_tensor_op(
+            "matmul",
+            &[self.rows, self.cols, other.rows, other.cols],
+            &[rows, cols],
+        );
         Ok(())
     }
 
@@ -1692,6 +1697,11 @@ impl Tensor {
             }
         }
 
+        crate::emit_tensor_op(
+            "matmul_prepacked",
+            &[self.rows, self.cols, packed.inner(), packed.cols()],
+            &[rows, cols],
+        );
         Ok(())
     }
 
@@ -1796,7 +1806,7 @@ impl Tensor {
         let rows = self.rows;
         let cols = self.cols;
 
-        match backend {
+        let output = match backend {
             SoftmaxBackend::Auto => self.row_softmax_auto(rows, cols),
             SoftmaxBackend::Cpu => {
                 let buffer = row_softmax_cpu(self.data(), rows, cols);
@@ -1812,7 +1822,10 @@ impl Tensor {
                 )?;
                 Tensor::from_vec(rows, cols, data)
             }
-        }
+        }?;
+
+        crate::emit_tensor_op("row_softmax", &[rows, cols], &[rows, cols]);
+        Ok(output)
     }
 
     /// Row-wise softmax probabilities with accompanying hardmax mask using automatic backend selection.
@@ -1828,7 +1841,7 @@ impl Tensor {
         let rows = self.rows;
         let cols = self.cols;
 
-        match backend {
+        let output = match backend {
             SoftmaxBackend::Auto => self.row_softmax_hardmax_auto(rows, cols),
             SoftmaxBackend::Cpu => {
                 let result = self.hardmax_fusion(
@@ -1849,7 +1862,10 @@ impl Tensor {
                 )?;
                 self.fusion_pair_to_tensors(rows, cols, result)
             }
-        }
+        }?;
+
+        crate::emit_tensor_op("row_softmax_hardmax", &[rows, cols], &[rows, cols]);
+        Ok(output)
     }
 
     /// Row-wise softmax, hardmax, and spiral consensus payload using automatic backend selection.
@@ -1865,7 +1881,7 @@ impl Tensor {
         let rows = self.rows;
         let cols = self.cols;
 
-        match backend {
+        let output = match backend {
             SoftmaxBackend::Auto => self.row_softmax_hardmax_spiral_auto(rows, cols),
             SoftmaxBackend::Cpu => {
                 let result = self.hardmax_fusion(
@@ -1886,7 +1902,10 @@ impl Tensor {
                 )?;
                 self.fusion_pair_to_spiral(rows, cols, result)
             }
-        }
+        }?;
+
+        crate::emit_tensor_op("row_softmax_hardmax_spiral", &[rows, cols], &[rows, cols]);
+        Ok(output)
     }
 
     /// Row-wise hardmax using automatic backend selection.
@@ -1899,7 +1918,7 @@ impl Tensor {
         let rows = self.rows;
         let cols = self.cols;
 
-        match backend {
+        let output = match backend {
             HardmaxBackend::Auto => self.row_hardmax_auto(rows, cols),
             HardmaxBackend::Cpu => {
                 let result =
@@ -1916,7 +1935,10 @@ impl Tensor {
                 )?;
                 Tensor::from_vec(rows, cols, result.hardmax)
             }
-        }
+        }?;
+
+        crate::emit_tensor_op("row_hardmax", &[rows, cols], &[rows, cols]);
+        Ok(output)
     }
 
     fn row_softmax_auto(&self, rows: usize, cols: usize) -> PureResult<Tensor> {
@@ -2938,7 +2960,13 @@ impl Tensor {
         for (a, b) in self.data.iter().zip(other.data.iter()) {
             data.push(a + b);
         }
-        Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)
+        let output = Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)?;
+        crate::emit_tensor_op(
+            "add",
+            &[self.rows, self.cols, other.rows, other.cols],
+            &[self.rows, self.cols],
+        );
+        Ok(output)
     }
 
     /// Element-wise subtraction.
@@ -2953,7 +2981,13 @@ impl Tensor {
         for (a, b) in self.data.iter().zip(other.data.iter()) {
             data.push(a - b);
         }
-        Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)
+        let output = Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)?;
+        crate::emit_tensor_op(
+            "sub",
+            &[self.rows, self.cols, other.rows, other.cols],
+            &[self.rows, self.cols],
+        );
+        Ok(output)
     }
 
     /// Returns a new tensor where every element is scaled by `value`.
@@ -2962,7 +2996,9 @@ impl Tensor {
         for &a in self.data.iter() {
             data.push(a * value);
         }
-        Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)
+        let output = Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)?;
+        crate::emit_tensor_op("scale", &[self.rows, self.cols], &[self.rows, self.cols]);
+        Ok(output)
     }
 
     /// Element-wise product (Hadamard) between two tensors of identical shape.
@@ -2977,7 +3013,13 @@ impl Tensor {
         for (a, b) in self.data.iter().zip(other.data.iter()) {
             data.push(a * b);
         }
-        Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)
+        let output = Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)?;
+        crate::emit_tensor_op(
+            "hadamard",
+            &[self.rows, self.cols, other.rows, other.cols],
+            &[self.rows, self.cols],
+        );
+        Ok(output)
     }
 
     /// Add a scaled tensor to this tensor (`self += scale * other`).
@@ -2992,6 +3034,11 @@ impl Tensor {
         for (a, b) in data.iter_mut().zip(other.data.iter()) {
             *a += scale * b;
         }
+        crate::emit_tensor_op(
+            "add_scaled",
+            &[self.rows, self.cols, other.rows, other.cols],
+            &[self.rows, self.cols],
+        );
         Ok(())
     }
 
@@ -3010,6 +3057,11 @@ impl Tensor {
                 data[offset + c] += bias[c];
             }
         }
+        crate::emit_tensor_op(
+            "add_row_inplace",
+            &[self.rows, self.cols, 1, bias.len()],
+            &[self.rows, self.cols],
+        );
         Ok(())
     }
 
@@ -3021,6 +3073,7 @@ impl Tensor {
                 *value = 0.0;
             }
         }
+        crate::emit_tensor_op("relu_inplace", &[self.rows, self.cols], &[self.rows, self.cols]);
     }
 
     /// Apply the GELU activation in-place (`self[i] = GELU(self[i])`).
@@ -3029,6 +3082,7 @@ impl Tensor {
         for value in data.iter_mut() {
             *value = gelu(*value);
         }
+        crate::emit_tensor_op("gelu_inplace", &[self.rows, self.cols], &[self.rows, self.cols]);
     }
 
     /// Applies the derivative of GELU to the provided gradient tensor.
@@ -3056,7 +3110,13 @@ impl Tensor {
         for (z, g) in self.data().iter().zip(grad_output.data().iter()) {
             data.push(gelu_prime(*z) * g);
         }
-        Tensor::from_vec(rows, cols, data)
+        let output = Tensor::from_vec(rows, cols, data)?;
+        crate::emit_tensor_op(
+            "gelu_backward",
+            &[self.rows, self.cols, grad_output.rows, grad_output.cols],
+            &[rows, cols],
+        );
+        Ok(output)
     }
 
     /// Returns the transpose of the tensor.
@@ -3067,12 +3127,18 @@ impl Tensor {
                 data[c * self.rows + r] = self.data[r * self.cols + c];
             }
         }
-        Tensor {
+        let output = Tensor {
             data: Arc::new(TensorBuffer::from_aligned(data)),
             rows: self.cols,
             cols: self.rows,
             layout: Layout::RowMajor,
-        }
+        };
+        crate::emit_tensor_op(
+            "transpose",
+            &[self.rows, self.cols],
+            &[output.rows, output.cols],
+        );
+        output
     }
 
     /// Returns a reshaped copy of the tensor when the requested dimensions are compatible.
@@ -3087,12 +3153,14 @@ impl Tensor {
             });
         }
 
-        if matches!(self.layout, Layout::RowMajor) {
-            return self.view(rows, cols);
-        }
-
-        let row_major = self.to_layout(Layout::RowMajor)?;
-        row_major.view(rows, cols)
+        let output = if matches!(self.layout, Layout::RowMajor) {
+            self.view(rows, cols)?
+        } else {
+            let row_major = self.to_layout(Layout::RowMajor)?;
+            row_major.view(rows, cols)?
+        };
+        crate::emit_tensor_op("reshape", &[self.rows, self.cols], &[rows, cols]);
+        Ok(output)
     }
 
     /// Returns the sum over rows for each column.

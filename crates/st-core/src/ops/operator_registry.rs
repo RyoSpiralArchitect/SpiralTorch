@@ -8,6 +8,7 @@
 //! that integrate seamlessly with the SpiralTorch ecosystem.
 
 use crate::PureResult;
+use crate::plugin::{global_registry, PluginEvent};
 use st_tensor::{Tensor, TensorError};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -69,7 +70,9 @@ impl RegisteredOperator {
 
     /// Execute the operator.
     pub fn execute(&self, inputs: &[&Tensor]) -> PureResult<Vec<Tensor>> {
-        if inputs.len() != self.metadata.signature.num_inputs {
+        if self.metadata.signature.num_inputs > 0
+            && inputs.len() != self.metadata.signature.num_inputs
+        {
             return Err(TensorError::Generic(format!(
                 "Operator '{}' expects {} inputs, got {}",
                 self.metadata.signature.name,
@@ -78,7 +81,29 @@ impl RegisteredOperator {
             )));
         }
 
-        (self.forward_fn)(inputs)
+        let outputs = (self.forward_fn)(inputs)?;
+
+        let input_shape = inputs
+            .first()
+            .map(|tensor| {
+                let (rows, cols) = tensor.shape();
+                vec![rows, cols]
+            })
+            .unwrap_or_default();
+        let output_shape = outputs
+            .first()
+            .map(|tensor| {
+                let (rows, cols) = tensor.shape();
+                vec![rows, cols]
+            })
+            .unwrap_or_default();
+        global_registry().event_bus().publish(&PluginEvent::TensorOp {
+            op_name: self.metadata.signature.name.clone(),
+            input_shape,
+            output_shape,
+        });
+
+        Ok(outputs)
     }
 
     /// Compute gradients.
@@ -147,6 +172,11 @@ impl OperatorRegistry {
     /// List all registered operators.
     pub fn list_operators(&self) -> Vec<String> {
         self.operators.read().unwrap().keys().cloned().collect()
+    }
+
+    /// Unregister an operator by name.
+    pub fn unregister(&self, name: &str) -> bool {
+        self.operators.write().unwrap().remove(name).is_some()
     }
 
     /// Find operators by backend support.

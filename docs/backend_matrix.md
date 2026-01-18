@@ -2,23 +2,26 @@
 
 SpiralTorch targets a unified runtime that can dispatch to multiple accelerators without rewriting kernels. The table below summarizes the current expectations and caveats for each supported backend so contributors can prioritize validation and fixes.
 
+<!-- AUTOGEN:BEGIN backend-matrix -->
 | Capability | CPU (default) | WGPU | MPS | CUDA | HIP / ROCm |
-|------------|---------------|------|-----|------|------------|
+| --- | --- | --- | --- | --- | --- |
 | Build flag | _none_ | `--features wgpu` | `--features mps` | `--features cuda` | `--features "hip,st-backend-hip/hip-real"` |
 | Min toolchain | Stable Rust | Stable Rust + system WebGPU drivers | Stable Rust + macOS 14 SDK | Stable Rust + CUDA 12 Toolkit & NVRTC | Stable Rust + ROCm 6 toolchain |
-| Tensor ops | ✅ Full | ✅ Full (verify image/texture paths) | ✅ Full | ✅ Full | ✅ Full |
-| Autodiff / hypergrad | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Planner & scheduler | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Telemetry | ✅ Structured logging | ✅ GPU timelines | ✅ Instruments via macOS unified logging | ✅ CUPTI hooks planned | ✅ Counter wiring complete |
-| Python wheel support | ✅ | ✅ (default build) | ✅ | ✅ | ✅ |
-| Kernel autotuning | ✅ Parameter sweeps nightly | ✅ Shader cache heuristics tuned | ✅ Convolution coverage complete | ✅ Heuristic tuner with offline database | ✅ Wavefront parameter search tuned |
-| Sparse tensor ops | ✅ CSR kernels merged | ✅ Subgroup atomics covered | ✅ Metal sparse pipeline ready | ✅ CUSPARSE integration validated | ✅ ROCm sparse kernels merged |
-| Quantized inference | ✅ INT8/BF16 calibrations stable | ✅ Shader range calibrated | ✅ Metal Performance Shaders INT8 path validated | ✅ Tensor cores validated for INT8/BF16 | ✅ rocWMMA quantized path ready |
-| Mixed precision training | ✅ AMP via BF16 accumulation | ✅ FP16 gradient scaling tuned | ✅ Metal AMP validated on A17 | ✅ Apex parity across optimizers | ✅ Wavefront loss scaling tuned |
-| Dynamic shape compilation | ✅ Shape polymorphic kernels validated | ✅ Runtime shape lowering ready | ✅ Metal dynamic pipeline cached | ✅ NVRTC specialization stable | ✅ rocDynamic shape support |
-| Graph fusion pipeline | ✅ Stable scheduler passes | ✅ Texture graph fusion benchmarked | ✅ Tile buffer heuristics tuned | ✅ NVRTC fusion coverage nightly | ✅ ROC graph capture instrumented |
-| ONNX export parity | ✅ Parity score ≥ 0.9 | ✅ Dynamic shape operators covered | ✅ Gradient suite expanded | ✅ Validated nightly against reference ops | ✅ Complex kernel coverage upstreamed |
-| CI coverage | ✅ Nightly smoke + perf matrix | ✅ Weekly adapter matrix automated | ✅ Weekly adapter matrix automated | ✅ Nightly + gated release pipeline | ✅ Hardware allocation secured |
+| Tensor ops | ✅ Full (cpu/faer) | ✅ WGPU dense + frac kernels | ❌ Feature placeholder (no kernels wired) | ❌ Feature placeholder (no kernels wired) | ⚠️ hip GEMM (matmul); extend op coverage |
+| Autodiff / hypergrad | ✅ Ready | ⚠️ Validate tapes with WGPU execution | ❌ Backend placeholder | ❌ Backend placeholder | ⚠️ Validate tapes with HIP execution |
+| Planner & scheduler | ✅ Ready (backend-agnostic) | ✅ Ready (backend-agnostic) | ✅ Ready (backend-agnostic) | ✅ Ready (backend-agnostic) | ✅ Ready (backend-agnostic) |
+| Telemetry | ✅ Tracing + structured logging | ⚠️ GPU timing hooks planned | ❌ Backend placeholder | ⚠️ CUPTI hooks not wired | ⚠️ ROCm counters pending |
+| Python wheel support | ✅ Ready | ✅ Ready (default build) | ❌ Feature placeholder | ⚠️ Requires CUDA toolchain build | ⚠️ Requires ROCm toolchain build |
+| Kernel autotuning | ⚠️ CPU tiling heuristics (faer + autotune) | ⚠️ Shader cache heuristics | ❌ Backend placeholder | ❌ Backend placeholder | ❌ Backend placeholder |
+| Sparse tensor ops | ❌ Not implemented | ❌ Not implemented | ❌ Not implemented | ❌ Not implemented | ❌ Not implemented |
+| Quantized inference | ⚠️ i8 matmul path present; validate end-to-end | ⚠️ int8 kernels present; validate end-to-end | ❌ Backend placeholder | ❌ Backend placeholder | ❌ Backend placeholder |
+| Mixed precision training | ⚠️ BF16/FP16 roadmap | ⚠️ wgpu_f16 feature (validate) | ❌ Backend placeholder | ❌ Backend placeholder | ❌ Backend placeholder |
+| Dynamic shape compilation | ⚠️ Planned | ⚠️ Planned | ❌ Backend placeholder | ❌ Backend placeholder | ❌ Backend placeholder |
+| Graph fusion pipeline | ⚠️ Planned | ⚠️ Planned | ❌ Backend placeholder | ❌ Backend placeholder | ❌ Backend placeholder |
+| ONNX export parity | ⚠️ Export scaffolding (JSON artefacts); ONNX pending | ❌ Not implemented | ❌ Not implemented | ❌ Not implemented | ❌ Not implemented |
+| CI coverage | ⚠️ Unit tests + docs checks | ⚠️ GPU CI planned | ❌ No CI | ❌ No CI | ❌ No CI |
+<!-- AUTOGEN:END backend-matrix -->
+
 
 The matrix is also available programmatically via the static
 `st_bench::backend_matrix::CAPABILITY_MATRIX` view (or the
@@ -47,4 +50,3 @@ payload for dashboards.
 ## Future Work
 - Capture backend-specific quirks (e.g., alignment constraints, shader compilation limits) in per-backend subpages.
 - Publish CI artifacts that include perf regressions, kernel autotune summaries, and binary size trends for each backend.
-

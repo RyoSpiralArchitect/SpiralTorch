@@ -11,6 +11,7 @@ pub mod backend;
 pub mod dlpack;
 mod hardmax;
 mod memory;
+pub mod observability;
 
 #[cfg(feature = "wgpu_frac")]
 mod util;
@@ -27,6 +28,8 @@ mod pure;
 
 #[doc = "Re-exported for convenience."]
 pub use pure::*;
+
+pub use observability::{emit_tensor_op, set_tensor_op_observer, TensorOpEvent, TensorOpObserver};
 
 #[doc = "Expose the hardmax backend selector."]
 pub use hardmax::HardmaxBackend;

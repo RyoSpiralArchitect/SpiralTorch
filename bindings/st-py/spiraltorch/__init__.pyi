@@ -2090,6 +2090,48 @@ class ZConv6DA:
     def ramanujan_pi_delta(self) -> float: ...
 
 
+class Pool2d:
+    def __init__(
+        self,
+        mode: Literal["max", "avg"],
+        channels: int,
+        height: int,
+        width: int,
+        kernel: Tuple[int, int],
+        *,
+        stride: Tuple[int, int] | None = ...,
+        padding: Tuple[int, int] | None = ...,
+        layout: Literal["NCHW", "NHWC"] = ...,
+    ) -> None: ...
+
+    def forward(self, x: Tensor) -> Tensor: ...
+    def backward(self, x: Tensor, grad_output: Tensor) -> Tensor: ...
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+    @property
+    def mode(self) -> Literal["max", "avg"]: ...
+
+    @property
+    def layout(self) -> Literal["NCHW", "NHWC"]: ...
+
+    @property
+    def kernel(self) -> Tuple[int, int]: ...
+
+    @property
+    def stride(self) -> Tuple[int, int]: ...
+
+    @property
+    def padding(self) -> Tuple[int, int]: ...
+
+    @property
+    def input_shape(self) -> Tuple[int, int, int]: ...
+
+    @property
+    def output_shape(self) -> Tuple[int, int, int]: ...
+
+    def set_layout(self, layout: Literal["NCHW", "NHWC"]) -> None: ...
+
+
 class ZPooling:
     def __init__(
         self,
@@ -2196,6 +2238,213 @@ class _NnIdentity:
     def __call__(self, x: Tensor) -> Tensor: ...
 
 
+class _NnLinear:
+    def __init__(self, name: str, input_dim: int, output_dim: int) -> None: ...
+
+    def forward(self, input: Tensor) -> Tensor: ...
+
+    def backward(self, input: Tensor, grad_output: Tensor) -> Tensor: ...
+
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+    def attach_hypergrad(
+        self,
+        curvature: float,
+        learning_rate: float,
+        *,
+        topos: OpenCartesianTopos | None = ...,
+    ) -> None: ...
+
+    def attach_realgrad(self, learning_rate: float) -> None: ...
+
+    def zero_accumulators(self) -> None: ...
+
+    def apply_step(self, fallback_lr: float) -> None: ...
+
+    def state_dict(self) -> List[Tuple[str, Tensor]]: ...
+
+    def load_state_dict(self, state: Sequence[Tuple[str, Tensor]]) -> None: ...
+
+
+class _NnRelu:
+    def __init__(self) -> None: ...
+
+    def forward(self, input: Tensor) -> Tensor: ...
+
+    def backward(self, input: Tensor, grad_output: Tensor) -> Tensor: ...
+
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+
+class _NnSequential:
+    def __init__(self) -> None: ...
+
+    def add(self, layer: object) -> None: ...
+
+    def forward(self, input: Tensor) -> Tensor: ...
+
+    def backward(self, input: Tensor, grad_output: Tensor) -> Tensor: ...
+
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+    def attach_hypergrad(
+        self,
+        curvature: float,
+        learning_rate: float,
+        *,
+        topos: OpenCartesianTopos | None = ...,
+    ) -> None: ...
+
+    def attach_realgrad(self, learning_rate: float) -> None: ...
+
+    def zero_accumulators(self) -> None: ...
+
+    def apply_step(self, fallback_lr: float) -> None: ...
+
+    def state_dict(self) -> List[Tuple[str, Tensor]]: ...
+
+    def load_state_dict(self, state: Sequence[Tuple[str, Tensor]]) -> None: ...
+
+    def len(self) -> int: ...
+
+    def is_empty(self) -> bool: ...
+
+    def __len__(self) -> int: ...
+
+
+class _NnMeanSquaredError:
+    def __init__(self) -> None: ...
+
+    def forward(self, prediction: Tensor, target: Tensor) -> Tensor: ...
+
+    def backward(self, prediction: Tensor, target: Tensor) -> Tensor: ...
+
+    def __call__(self, prediction: Tensor, target: Tensor) -> Tensor: ...
+
+class _NnHyperbolicCrossEntropy:
+    def __init__(self, curvature: float, *, epsilon: float | None = ...) -> None: ...
+
+    @property
+    def curvature(self) -> float: ...
+
+    @property
+    def epsilon(self) -> float: ...
+
+    def forward(self, prediction: Tensor, target: Tensor) -> Tensor: ...
+
+    def backward(self, prediction: Tensor, target: Tensor) -> Tensor: ...
+
+    def __call__(self, prediction: Tensor, target: Tensor) -> Tensor: ...
+
+class _NnFocalLoss:
+    def __init__(self, alpha: float = ..., gamma: float = ..., *, epsilon: float | None = ...) -> None: ...
+
+    @property
+    def alpha(self) -> float: ...
+
+    @property
+    def gamma(self) -> float: ...
+
+    def forward(self, prediction: Tensor, target: Tensor) -> Tensor: ...
+
+    def backward(self, prediction: Tensor, target: Tensor) -> Tensor: ...
+
+    def __call__(self, prediction: Tensor, target: Tensor) -> Tensor: ...
+
+class _NnContrastiveLoss:
+    def __init__(self, margin: float = ...) -> None: ...
+
+    @property
+    def margin(self) -> float: ...
+
+    def forward(self, prediction: Tensor, target: Tensor) -> Tensor: ...
+
+    def backward(self, prediction: Tensor, target: Tensor) -> Tensor: ...
+
+    def __call__(self, prediction: Tensor, target: Tensor) -> Tensor: ...
+
+class _NnTripletLoss:
+    def __init__(self, margin: float = ...) -> None: ...
+
+    @property
+    def margin(self) -> float: ...
+
+    def forward(self, prediction: Tensor, target: Tensor) -> Tensor: ...
+
+    def backward(self, prediction: Tensor, target: Tensor) -> Tensor: ...
+
+    def __call__(self, prediction: Tensor, target: Tensor) -> Tensor: ...
+
+class _NnRoundtableConfig:
+    def __init__(
+        self,
+        *,
+        top_k: int = ...,
+        mid_k: int = ...,
+        bottom_k: int = ...,
+        here_tolerance: float = ...,
+    ) -> None: ...
+
+    @property
+    def top_k(self) -> int: ...
+
+    @property
+    def mid_k(self) -> int: ...
+
+    @property
+    def bottom_k(self) -> int: ...
+
+    @property
+    def here_tolerance(self) -> float: ...
+
+
+class _NnRoundtableSchedule:
+    def above(self) -> RankPlan: ...
+    def here(self) -> RankPlan: ...
+    def beneath(self) -> RankPlan: ...
+
+
+class _NnEpochStats:
+    @property
+    def batches(self) -> int: ...
+
+    @property
+    def total_loss(self) -> float: ...
+
+    @property
+    def average_loss(self) -> float: ...
+
+
+class _NnModuleTrainer:
+    def __init__(
+        self,
+        *,
+        backend: str = ...,
+        curvature: float = ...,
+        hyper_learning_rate: float = ...,
+        fallback_learning_rate: float = ...,
+        lane_width: int | None = ...,
+        subgroup: bool | None = ...,
+        max_workgroup: int | None = ...,
+        shared_mem_per_workgroup: int | None = ...,
+    ) -> None: ...
+
+    def roundtable(
+        self,
+        rows: int,
+        cols: int,
+        config: _NnRoundtableConfig | None = ...,
+    ) -> _NnRoundtableSchedule: ...
+
+    def train_epoch(
+        self,
+        module: object,
+        loss: object,
+        batches: Iterable[Tuple[Tensor, Tensor]],
+        schedule: _NnRoundtableSchedule,
+    ) -> _NnEpochStats: ...
+
+
 class _NnScaler:
     def __init__(self, name: str, features: int) -> None: ...
 
@@ -2245,6 +2494,19 @@ class _NnScaler:
 
 class _NnModule(ModuleType):
     Identity: type[_NnIdentity]
+    Linear: type[_NnLinear]
+    Relu: type[_NnRelu]
+    Sequential: type[_NnSequential]
+    MeanSquaredError: type[_NnMeanSquaredError]
+    HyperbolicCrossEntropy: type[_NnHyperbolicCrossEntropy]
+    CrossEntropy: type[_NnHyperbolicCrossEntropy]
+    FocalLoss: type[_NnFocalLoss]
+    ContrastiveLoss: type[_NnContrastiveLoss]
+    TripletLoss: type[_NnTripletLoss]
+    RoundtableConfig: type[_NnRoundtableConfig]
+    RoundtableSchedule: type[_NnRoundtableSchedule]
+    EpochStats: type[_NnEpochStats]
+    ModuleTrainer: type[_NnModuleTrainer]
     Scaler: type[_NnScaler]
     NonLiner: type[_NnNonLiner]
     Dropout: type[_NnDropout]
@@ -2259,8 +2521,33 @@ class _NnModule(ModuleType):
     ZRelativityModule: type[ZRelativityModule]
     ZConv: type[ZConv]
     ZPooling: type[ZPooling]
+    Pool2d: type[Pool2d]
 
     def from_samples(samples: Sequence[Tuple[Tensor, Tensor]]) -> _NnDataLoader: ...
+    def save_json(
+        target: object | Mapping[str, Tensor] | Sequence[Tuple[str, Tensor]],
+        path: str,
+    ) -> None: ...
+    def load_json(
+        target: object | None,
+        path: str,
+    ) -> List[Tuple[str, Tensor]] | None: ...
+    def save(
+        path: Any,
+        target: object | Mapping[str, Tensor] | Sequence[Tuple[str, Tensor]],
+    ) -> None: ...
+    def load(
+        path: Any,
+        target: object | None = ...,
+    ) -> List[Tuple[str, Tensor]] | None: ...
+    def save_bincode(
+        target: object | Mapping[str, Tensor] | Sequence[Tuple[str, Tensor]],
+        path: str,
+    ) -> None: ...
+    def load_bincode(
+        target: object | None,
+        path: str,
+    ) -> List[Tuple[str, Tensor]] | None: ...
 
 
 nn: _NnModule
@@ -2269,6 +2556,36 @@ nn: _NnModule
 class Identity(_NnIdentity):
     ...
 
+
+class Linear(_NnLinear):
+    ...
+
+
+class Relu(_NnRelu):
+    ...
+
+
+class Sequential(_NnSequential):
+    ...
+
+
+class MeanSquaredError(_NnMeanSquaredError):
+    ...
+
+class HyperbolicCrossEntropy(_NnHyperbolicCrossEntropy):
+    ...
+
+class CrossEntropy(_NnHyperbolicCrossEntropy):
+    ...
+
+class FocalLoss(_NnFocalLoss):
+    ...
+
+class ContrastiveLoss(_NnContrastiveLoss):
+    ...
+
+class TripletLoss(_NnTripletLoss):
+    ...
 
 class Scaler(_NnScaler):
     ...
@@ -2840,7 +3157,128 @@ class _TelemetryModule(ModuleType):
 
 telemetry: _TelemetryModule
 
+class _PluginModule(ModuleType):
+    class PluginQueue:
+        @property
+        def event_type(self) -> str: ...
+
+        @property
+        def subscription_id(self) -> int: ...
+
+        @property
+        def maxlen(self) -> int: ...
+
+        def poll(self) -> Optional[Dict[str, object]]: ...
+        def drain(self, max_items: int | None = ...) -> List[Dict[str, object]]: ...
+        def close(self) -> bool: ...
+        def __len__(self) -> int: ...
+        def __iter__(self) -> "_PluginModule.PluginQueue": ...
+        def __next__(self) -> Dict[str, object]: ...
+
+    class PluginRecorder:
+        path: str
+        event_types: List[str]
+        closed: bool
+
+        def close(self) -> bool: ...
+        def __enter__(self) -> "_PluginModule.PluginRecorder": ...
+        def __exit__(self, exc_type: object, exc: object, tb: object) -> None: ...
+
+    def subscribe(self, event_type: str, callback: Callable[[Dict[str, object]], None]) -> int: ...
+    def subscribe_many(
+        self,
+        event_types: Iterable[str],
+        callback: Callable[[Dict[str, object]], None],
+    ) -> List[Tuple[str, int]]: ...
+    def unsubscribe(self, event_type: str, subscription_id: int) -> bool: ...
+    def unsubscribe_many(self, subscriptions: Iterable[Tuple[str, int]]) -> int: ...
+    def listen(self, event_type: str = ..., *, maxlen: int = ...) -> "_PluginModule.PluginQueue": ...
+    def record(
+        self,
+        path: Any,
+        event_types: str | Iterable[str] = ...,
+        *,
+        mode: str = ...,
+        flush: bool = ...,
+    ) -> "_PluginModule.PluginRecorder": ...
+    def event_types(self) -> Dict[str, str]: ...
+
+plugin: _PluginModule
+
 ecosystem: ModuleType
+
+class _OpsModule(ModuleType):
+    @overload
+    def register(
+        self,
+        name: str,
+        num_inputs: int,
+        num_outputs: int,
+        forward: Callable[[Sequence[Tensor]], Tensor | Sequence[Tensor]],
+        *,
+        backward: Callable[[Sequence[Tensor], Sequence[Tensor], Sequence[Tensor]], Tensor | Sequence[Tensor]] | None = ...,
+        description: str | None = ...,
+        backends: Sequence[str] | None = ...,
+        attributes: Mapping[str, object] | None = ...,
+        supports_inplace: bool = ...,
+        differentiable: bool | None = ...,
+    ) -> None: ...
+
+    @overload
+    def register(
+        self,
+        name: str,
+        forward: Callable[[Sequence[Tensor]], Tensor | Sequence[Tensor]],
+        backward: Callable[[Sequence[Tensor], Sequence[Tensor], Sequence[Tensor]], Tensor | Sequence[Tensor]] | None = ...,
+        *,
+        num_inputs: int | None = ...,
+        num_outputs: int | None = ...,
+        description: str | None = ...,
+        backends: Sequence[str] | None = ...,
+        attributes: Mapping[str, object] | None = ...,
+        supports_inplace: bool = ...,
+        differentiable: bool | None = ...,
+    ) -> None: ...
+
+    def signature(
+        self,
+        num_inputs: int,
+        num_outputs: int,
+    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]: ...
+
+    @overload
+    def execute(
+        self,
+        name: str,
+        inputs: Sequence[Tensor],
+        *,
+        return_single: bool = ...,
+    ) -> Tensor | List[Tensor]: ...
+
+    @overload
+    def execute(
+        self,
+        name: str,
+        *inputs: Tensor,
+        return_single: bool = ...,
+    ) -> Tensor | List[Tensor]: ...
+
+    def backward(
+        self,
+        name: str,
+        inputs: Sequence[Tensor],
+        outputs: Sequence[Tensor],
+        grad_outputs: Sequence[Tensor],
+        *,
+        return_single: bool = ...,
+    ) -> Tensor | List[Tensor]: ...
+
+    def list_operators(self) -> List[str]: ...
+    def unregister(self, name: str) -> bool: ...
+    def metadata(self, name: str) -> Dict[str, object]: ...
+    def describe(self, name: str) -> str: ...
+
+ops: _OpsModule
 
 text: ModuleType
 
@@ -3416,6 +3854,7 @@ __all__ = [
     "ZConv",
     "ZConv6DA",
     "ZPooling",
+    "Pool2d",
     "compat",
     "capture",
     "share",

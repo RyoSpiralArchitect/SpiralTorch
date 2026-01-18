@@ -6,6 +6,7 @@
 
 use std::any::Any;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// Events that can be emitted and handled by plugins.
@@ -64,7 +65,8 @@ pub type EventListener = Arc<dyn Fn(&PluginEvent) + Send + Sync>;
 /// Event bus for publishing and subscribing to plugin events.
 #[derive(Clone)]
 pub struct PluginEventBus {
-    listeners: Arc<Mutex<HashMap<String, Vec<EventListener>>>>,
+    listeners: Arc<Mutex<HashMap<String, Vec<(usize, EventListener)>>>>,
+    next_id: Arc<AtomicUsize>,
 }
 
 impl PluginEventBus {
@@ -72,6 +74,7 @@ impl PluginEventBus {
     pub fn new() -> Self {
         Self {
             listeners: Arc::new(Mutex::new(HashMap::new())),
+            next_id: Arc::new(AtomicUsize::new(1)),
         }
     }
 
@@ -79,29 +82,49 @@ impl PluginEventBus {
     ///
     /// The `event_type` is matched against the variant name of PluginEvent.
     /// Use "*" to subscribe to all events.
-    pub fn subscribe(&self, event_type: impl Into<String>, listener: EventListener) {
+    pub fn subscribe(&self, event_type: impl Into<String>, listener: EventListener) -> usize {
         let event_type = event_type.into();
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let mut listeners = self.listeners.lock().unwrap();
-        listeners.entry(event_type).or_default().push(listener);
+        listeners.entry(event_type).or_default().push((id, listener));
+        id
+    }
+
+    /// Unsubscribe a previously registered listener.
+    ///
+    /// Returns `true` when a subscription was found and removed.
+    pub fn unsubscribe(&self, event_type: &str, id: usize) -> bool {
+        let mut listeners = self.listeners.lock().unwrap();
+        let Some(bucket) = listeners.get_mut(event_type) else {
+            return false;
+        };
+        let before = bucket.len();
+        bucket.retain(|(existing, _)| *existing != id);
+        let removed = bucket.len() != before;
+        if bucket.is_empty() {
+            listeners.remove(event_type);
+        }
+        removed
     }
 
     /// Publish an event to all interested listeners.
     pub fn publish(&self, event: &PluginEvent) {
-        let listeners = self.listeners.lock().unwrap();
         let event_type = self.event_type_name(event);
 
-        // Notify specific listeners
-        if let Some(specific_listeners) = listeners.get(&event_type) {
-            for listener in specific_listeners {
-                listener(event);
+        let listeners: Vec<EventListener> = {
+            let listeners = self.listeners.lock().unwrap();
+            let mut collected = Vec::new();
+            if let Some(specific_listeners) = listeners.get(&event_type) {
+                collected.extend(specific_listeners.iter().map(|(_, listener)| listener.clone()));
             }
-        }
+            if let Some(wildcard_listeners) = listeners.get("*") {
+                collected.extend(wildcard_listeners.iter().map(|(_, listener)| listener.clone()));
+            }
+            collected
+        };
 
-        // Notify wildcard listeners
-        if let Some(wildcard_listeners) = listeners.get("*") {
-            for listener in wildcard_listeners {
-                listener(event);
-            }
+        for listener in listeners {
+            listener(event);
         }
     }
 
@@ -139,13 +162,16 @@ mod tests {
         let counter = Arc::new(AtomicUsize::new(0));
         let counter_clone = counter.clone();
 
-        bus.subscribe("EpochStart", Arc::new(move |_| {
+        let id = bus.subscribe("EpochStart", Arc::new(move |_| {
             counter_clone.fetch_add(1, Ordering::SeqCst);
         }));
 
         bus.publish(&PluginEvent::EpochStart { epoch: 1 });
         bus.publish(&PluginEvent::EpochStart { epoch: 2 });
 
+        assert_eq!(counter.load(Ordering::SeqCst), 2);
+        assert!(bus.unsubscribe("EpochStart", id));
+        bus.publish(&PluginEvent::EpochStart { epoch: 3 });
         assert_eq!(counter.load(Ordering::SeqCst), 2);
     }
 

@@ -81,8 +81,8 @@ impl Serialize for Backend {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum CapabilityState {
     Ready,
-    Watchlist,
-    Blocked,
+    Planned,
+    Stub,
 }
 
 impl CapabilityState {
@@ -90,8 +90,8 @@ impl CapabilityState {
     pub const fn marker(self) -> &'static str {
         match self {
             CapabilityState::Ready => "✅",
-            CapabilityState::Watchlist => "⚠️",
-            CapabilityState::Blocked => "❌",
+            CapabilityState::Planned => "⚠️",
+            CapabilityState::Stub => "❌",
         }
     }
 }
@@ -186,15 +186,15 @@ impl CapabilityRow {
     /// Computes a [`CapabilitySummary`] describing how every backend fares for this row.
     pub const fn summarize(&self) -> CapabilitySummary {
         let mut ready = 0;
-        let mut watchlist = 0;
-        let mut blocked = 0;
+        let mut planned = 0;
+        let mut stub = 0;
         let mut idx = 0;
         while idx < Backend::COUNT {
             let state = self.entries[idx].state;
             match state {
                 Some(CapabilityState::Ready) => ready += 1,
-                Some(CapabilityState::Watchlist) => watchlist += 1,
-                Some(CapabilityState::Blocked) => blocked += 1,
+                Some(CapabilityState::Planned) => planned += 1,
+                Some(CapabilityState::Stub) => stub += 1,
                 None => {}
             }
             idx += 1;
@@ -203,8 +203,8 @@ impl CapabilityRow {
         CapabilitySummary {
             capability: self.capability,
             ready,
-            watchlist,
-            blocked,
+            planned,
+            stub,
         }
     }
 }
@@ -225,23 +225,23 @@ pub struct BackendSummary {
     pub backend: Backend,
     /// Number of ready capabilities.
     pub ready: usize,
-    /// Number of capabilities tracked on the watchlist.
-    pub watchlist: usize,
-    /// Number of blocked capabilities.
-    pub blocked: usize,
+    /// Number of capabilities that are planned but not yet complete.
+    pub planned: usize,
+    /// Number of capabilities that are currently stubbed/unwired.
+    pub stub: usize,
     /// Collected notes for non-ready capabilities and informational rows.
     pub notes: Vec<BackendNote>,
 }
 
 impl BackendSummary {
-    /// Returns `true` if the backend has no watchlist or blocked capabilities.
+    /// Returns `true` if the backend has no planned or stubbed capabilities.
     pub fn is_fully_ready(&self) -> bool {
-        self.watchlist == 0 && self.blocked == 0
+        self.planned == 0 && self.stub == 0
     }
 
     /// Number of capabilities that carry a readiness marker for this backend.
     pub fn tracked_capabilities(&self) -> usize {
-        self.ready + self.watchlist + self.blocked
+        self.ready + self.planned + self.stub
     }
 
     /// Fraction of tracked capabilities that are marked as ready.
@@ -256,7 +256,7 @@ impl BackendSummary {
 
     /// Number of capabilities that are not yet ready.
     pub fn pending(&self) -> usize {
-        self.watchlist + self.blocked
+        self.planned + self.stub
     }
 }
 
@@ -265,10 +265,10 @@ impl BackendSummary {
 pub struct MatrixSummary {
     /// Number of entries marked ready across the matrix.
     pub ready: usize,
-    /// Number of entries tracked on the watchlist.
-    pub watchlist: usize,
-    /// Number of entries marked as blocked.
-    pub blocked: usize,
+    /// Number of entries tracked as planned.
+    pub planned: usize,
+    /// Number of entries tracked as stubbed.
+    pub stub: usize,
     /// Number of informational entries without readiness markers.
     pub informational: usize,
 }
@@ -276,7 +276,7 @@ pub struct MatrixSummary {
 impl MatrixSummary {
     /// Number of entries that have an explicit readiness marker.
     pub const fn tracked_entries(&self) -> usize {
-        self.ready + self.watchlist + self.blocked
+        self.ready + self.planned + self.stub
     }
 
     /// Total number of entries including informational notes.
@@ -302,16 +302,16 @@ pub struct CapabilitySummary {
     pub capability: &'static str,
     /// Number of backends marked as ready.
     pub ready: usize,
-    /// Number of backends on the watchlist.
-    pub watchlist: usize,
-    /// Number of backends marked as blocked.
-    pub blocked: usize,
+    /// Number of backends tracked as planned.
+    pub planned: usize,
+    /// Number of backends tracked as stubbed.
+    pub stub: usize,
 }
 
 impl CapabilitySummary {
     /// Total number of backends that have an explicit readiness marker for the capability.
     pub const fn tracked_backends(&self) -> usize {
-        self.ready + self.watchlist + self.blocked
+        self.ready + self.planned + self.stub
     }
 
     /// Dominant state if exactly one readiness tier has the highest count.
@@ -329,21 +329,21 @@ impl CapabilitySummary {
             ties += 1;
         }
 
-        let watchlist = self.watchlist;
-        if watchlist > max {
-            max = watchlist;
+        let planned = self.planned;
+        if planned > max {
+            max = planned;
             ties = 1;
-            candidate = Some(CapabilityState::Watchlist);
-        } else if watchlist != 0 && watchlist == max {
+            candidate = Some(CapabilityState::Planned);
+        } else if planned != 0 && planned == max {
             ties += 1;
         }
 
-        let blocked = self.blocked;
-        if blocked > max {
-            max = blocked;
+        let stub = self.stub;
+        if stub > max {
+            max = stub;
             ties = 1;
-            candidate = Some(CapabilityState::Blocked);
-        } else if blocked != 0 && blocked == max {
+            candidate = Some(CapabilityState::Stub);
+        } else if stub != 0 && stub == max {
             ties += 1;
         }
 
@@ -379,47 +379,56 @@ static CAPABILITY_ROWS: &[CapabilityRow] = &[
     CapabilityRow {
         capability: "Tensor ops",
         entries: [
-            CapabilityEntry::with_state(CapabilityState::Ready, "Full"),
+            CapabilityEntry::with_state(CapabilityState::Ready, "Full (cpu/faer)"),
+            CapabilityEntry::with_state(CapabilityState::Ready, "WGPU dense + frac kernels"),
             CapabilityEntry::with_state(
-                CapabilityState::Ready,
-                "Full (verify image/texture paths)",
+                CapabilityState::Stub,
+                "Feature placeholder (no kernels wired)",
             ),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Full"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Full"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Full"),
+            CapabilityEntry::with_state(
+                CapabilityState::Stub,
+                "Feature placeholder (no kernels wired)",
+            ),
+            CapabilityEntry::with_state(
+                CapabilityState::Planned,
+                "hip GEMM (matmul); extend op coverage",
+            ),
         ],
     },
     CapabilityRow {
         capability: "Autodiff / hypergrad",
         entries: [
             CapabilityEntry::with_state(CapabilityState::Ready, "Ready"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Ready"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Ready"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Ready"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Ready"),
+            CapabilityEntry::with_state(
+                CapabilityState::Planned,
+                "Validate tapes with WGPU execution",
+            ),
+            CapabilityEntry::with_state(CapabilityState::Stub, "Backend placeholder"),
+            CapabilityEntry::with_state(CapabilityState::Stub, "Backend placeholder"),
+            CapabilityEntry::with_state(
+                CapabilityState::Planned,
+                "Validate tapes with HIP execution",
+            ),
         ],
     },
     CapabilityRow {
         capability: "Planner & scheduler",
         entries: [
-            CapabilityEntry::with_state(CapabilityState::Ready, "Ready"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Ready"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Ready"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Ready"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Ready"),
+            CapabilityEntry::with_state(CapabilityState::Ready, "Ready (backend-agnostic)"),
+            CapabilityEntry::with_state(CapabilityState::Ready, "Ready (backend-agnostic)"),
+            CapabilityEntry::with_state(CapabilityState::Ready, "Ready (backend-agnostic)"),
+            CapabilityEntry::with_state(CapabilityState::Ready, "Ready (backend-agnostic)"),
+            CapabilityEntry::with_state(CapabilityState::Ready, "Ready (backend-agnostic)"),
         ],
     },
     CapabilityRow {
         capability: "Telemetry",
         entries: [
-            CapabilityEntry::with_state(CapabilityState::Ready, "Structured logging"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "GPU timelines"),
-            CapabilityEntry::with_state(
-                CapabilityState::Ready,
-                "Instruments via macOS unified logging",
-            ),
-            CapabilityEntry::with_state(CapabilityState::Ready, "CUPTI hooks planned"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Counter wiring complete"),
+            CapabilityEntry::with_state(CapabilityState::Ready, "Tracing + structured logging"),
+            CapabilityEntry::with_state(CapabilityState::Planned, "GPU timing hooks planned"),
+            CapabilityEntry::with_state(CapabilityState::Stub, "Backend placeholder"),
+            CapabilityEntry::with_state(CapabilityState::Planned, "CUPTI hooks not wired"),
+            CapabilityEntry::with_state(CapabilityState::Planned, "ROCm counters pending"),
         ],
     },
     CapabilityRow {
@@ -427,107 +436,107 @@ static CAPABILITY_ROWS: &[CapabilityRow] = &[
         entries: [
             CapabilityEntry::with_state(CapabilityState::Ready, "Ready"),
             CapabilityEntry::with_state(CapabilityState::Ready, "Ready (default build)"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Ready"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Ready"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Ready"),
+            CapabilityEntry::with_state(CapabilityState::Stub, "Feature placeholder"),
+            CapabilityEntry::with_state(
+                CapabilityState::Planned,
+                "Requires CUDA toolchain build",
+            ),
+            CapabilityEntry::with_state(
+                CapabilityState::Planned,
+                "Requires ROCm toolchain build",
+            ),
         ],
     },
     CapabilityRow {
         capability: "Kernel autotuning",
         entries: [
-            CapabilityEntry::with_state(CapabilityState::Ready, "Parameter sweeps nightly"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Shader cache heuristics tuned"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Convolution coverage complete"),
             CapabilityEntry::with_state(
-                CapabilityState::Ready,
-                "Heuristic tuner with offline database",
+                CapabilityState::Planned,
+                "CPU tiling heuristics (faer + autotune)",
             ),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Wavefront parameter search tuned"),
+            CapabilityEntry::with_state(CapabilityState::Planned, "Shader cache heuristics"),
+            CapabilityEntry::with_state(CapabilityState::Stub, "Backend placeholder"),
+            CapabilityEntry::with_state(CapabilityState::Stub, "Backend placeholder"),
+            CapabilityEntry::with_state(CapabilityState::Stub, "Backend placeholder"),
         ],
     },
     CapabilityRow {
         capability: "Sparse tensor ops",
         entries: [
-            CapabilityEntry::with_state(CapabilityState::Ready, "CSR kernels merged"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Subgroup atomics covered"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Metal sparse pipeline ready"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "CUSPARSE integration validated"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "ROCm sparse kernels merged"),
+            CapabilityEntry::with_state(CapabilityState::Stub, "Not implemented"),
+            CapabilityEntry::with_state(CapabilityState::Stub, "Not implemented"),
+            CapabilityEntry::with_state(CapabilityState::Stub, "Not implemented"),
+            CapabilityEntry::with_state(CapabilityState::Stub, "Not implemented"),
+            CapabilityEntry::with_state(CapabilityState::Stub, "Not implemented"),
         ],
     },
     CapabilityRow {
         capability: "Quantized inference",
         entries: [
-            CapabilityEntry::with_state(CapabilityState::Ready, "INT8/BF16 calibrations stable"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Shader range calibrated"),
             CapabilityEntry::with_state(
-                CapabilityState::Ready,
-                "Metal Performance Shaders INT8 path validated",
+                CapabilityState::Planned,
+                "i8 matmul path present; validate end-to-end",
             ),
             CapabilityEntry::with_state(
-                CapabilityState::Ready,
-                "Tensor cores validated for INT8/BF16",
+                CapabilityState::Planned,
+                "int8 kernels present; validate end-to-end",
             ),
-            CapabilityEntry::with_state(CapabilityState::Ready, "rocWMMA quantized path ready"),
+            CapabilityEntry::with_state(CapabilityState::Stub, "Backend placeholder"),
+            CapabilityEntry::with_state(CapabilityState::Stub, "Backend placeholder"),
+            CapabilityEntry::with_state(CapabilityState::Stub, "Backend placeholder"),
         ],
     },
     CapabilityRow {
         capability: "Mixed precision training",
         entries: [
-            CapabilityEntry::with_state(CapabilityState::Ready, "AMP via BF16 accumulation"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "FP16 gradient scaling tuned"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Metal AMP validated on A17"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Apex parity across optimizers"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Wavefront loss scaling tuned"),
+            CapabilityEntry::with_state(CapabilityState::Planned, "BF16/FP16 roadmap"),
+            CapabilityEntry::with_state(CapabilityState::Planned, "wgpu_f16 feature (validate)"),
+            CapabilityEntry::with_state(CapabilityState::Stub, "Backend placeholder"),
+            CapabilityEntry::with_state(CapabilityState::Stub, "Backend placeholder"),
+            CapabilityEntry::with_state(CapabilityState::Stub, "Backend placeholder"),
         ],
     },
     CapabilityRow {
         capability: "Dynamic shape compilation",
         entries: [
-            CapabilityEntry::with_state(
-                CapabilityState::Ready,
-                "Shape polymorphic kernels validated",
-            ),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Runtime shape lowering ready"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Metal dynamic pipeline cached"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "NVRTC specialization stable"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "rocDynamic shape support"),
+            CapabilityEntry::with_state(CapabilityState::Planned, "Planned"),
+            CapabilityEntry::with_state(CapabilityState::Planned, "Planned"),
+            CapabilityEntry::with_state(CapabilityState::Stub, "Backend placeholder"),
+            CapabilityEntry::with_state(CapabilityState::Stub, "Backend placeholder"),
+            CapabilityEntry::with_state(CapabilityState::Stub, "Backend placeholder"),
         ],
     },
     CapabilityRow {
         capability: "Graph fusion pipeline",
         entries: [
-            CapabilityEntry::with_state(CapabilityState::Ready, "Stable scheduler passes"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Texture graph fusion benchmarked"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Tile buffer heuristics tuned"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "NVRTC fusion coverage nightly"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "ROC graph capture instrumented"),
+            CapabilityEntry::with_state(CapabilityState::Planned, "Planned"),
+            CapabilityEntry::with_state(CapabilityState::Planned, "Planned"),
+            CapabilityEntry::with_state(CapabilityState::Stub, "Backend placeholder"),
+            CapabilityEntry::with_state(CapabilityState::Stub, "Backend placeholder"),
+            CapabilityEntry::with_state(CapabilityState::Stub, "Backend placeholder"),
         ],
     },
     CapabilityRow {
         capability: "ONNX export parity",
         entries: [
-            CapabilityEntry::with_state(CapabilityState::Ready, "Parity score ≥ 0.9"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Dynamic shape operators covered"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Gradient suite expanded"),
             CapabilityEntry::with_state(
-                CapabilityState::Ready,
-                "Validated nightly against reference ops",
+                CapabilityState::Planned,
+                "Export scaffolding (JSON artefacts); ONNX pending",
             ),
-            CapabilityEntry::with_state(
-                CapabilityState::Ready,
-                "Complex kernel coverage upstreamed",
-            ),
+            CapabilityEntry::with_state(CapabilityState::Stub, "Not implemented"),
+            CapabilityEntry::with_state(CapabilityState::Stub, "Not implemented"),
+            CapabilityEntry::with_state(CapabilityState::Stub, "Not implemented"),
+            CapabilityEntry::with_state(CapabilityState::Stub, "Not implemented"),
         ],
     },
     CapabilityRow {
         capability: "CI coverage",
         entries: [
-            CapabilityEntry::with_state(CapabilityState::Ready, "Nightly smoke + perf matrix"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Weekly adapter matrix automated"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Weekly adapter matrix automated"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Nightly + gated release pipeline"),
-            CapabilityEntry::with_state(CapabilityState::Ready, "Hardware allocation secured"),
+            CapabilityEntry::with_state(CapabilityState::Planned, "Unit tests + docs checks"),
+            CapabilityEntry::with_state(CapabilityState::Planned, "GPU CI planned"),
+            CapabilityEntry::with_state(CapabilityState::Stub, "No CI"),
+            CapabilityEntry::with_state(CapabilityState::Stub, "No CI"),
+            CapabilityEntry::with_state(CapabilityState::Stub, "No CI"),
         ],
     },
 ];
@@ -562,8 +571,8 @@ pub fn summarize_backend(backend: Backend) -> BackendSummary {
     let mut summary = BackendSummary {
         backend,
         ready: 0,
-        watchlist: 0,
-        blocked: 0,
+        planned: 0,
+        stub: 0,
         notes: Vec::new(),
     };
 
@@ -571,15 +580,15 @@ pub fn summarize_backend(backend: Backend) -> BackendSummary {
         let entry = row.entry(backend);
         match entry.state {
             Some(CapabilityState::Ready) => summary.ready += 1,
-            Some(CapabilityState::Watchlist) => {
-                summary.watchlist += 1;
+            Some(CapabilityState::Planned) => {
+                summary.planned += 1;
                 summary.notes.push(BackendNote {
                     capability: row.capability,
                     note: entry.note,
                 });
             }
-            Some(CapabilityState::Blocked) => {
-                summary.blocked += 1;
+            Some(CapabilityState::Stub) => {
+                summary.stub += 1;
                 summary.notes.push(BackendNote {
                     capability: row.capability,
                     note: entry.note,
@@ -659,7 +668,7 @@ pub fn pending_capabilities_for_backend(backend: Backend) -> Vec<&'static Capabi
         .iter()
         .filter(|row| match row.entry(backend).state {
             Some(CapabilityState::Ready) => false,
-            Some(CapabilityState::Watchlist) | Some(CapabilityState::Blocked) => true,
+            Some(CapabilityState::Planned) | Some(CapabilityState::Stub) => true,
             None => false,
         })
         .collect()
@@ -682,12 +691,103 @@ pub fn capability_matrix_json() -> serde_json::Value {
     serde_json::to_value(CAPABILITY_ROWS).expect("matrix is serialisable")
 }
 
+const BACKEND_MATRIX_AUTOGEN_BEGIN: &str = "<!-- AUTOGEN:BEGIN backend-matrix -->";
+const BACKEND_MATRIX_AUTOGEN_END: &str = "<!-- AUTOGEN:END backend-matrix -->";
+
+fn backend_doc_heading(backend: Backend) -> &'static str {
+    match backend {
+        Backend::Cpu => "CPU (default)",
+        Backend::Wgpu => "WGPU",
+        Backend::Mps => "MPS",
+        Backend::Cuda => "CUDA",
+        Backend::Hip => "HIP / ROCm",
+    }
+}
+
+/// Render the capability matrix as a Markdown table.
+pub fn backend_matrix_markdown_table() -> String {
+    let headers = [
+        "Capability",
+        backend_doc_heading(Backend::Cpu),
+        backend_doc_heading(Backend::Wgpu),
+        backend_doc_heading(Backend::Mps),
+        backend_doc_heading(Backend::Cuda),
+        backend_doc_heading(Backend::Hip),
+    ];
+
+    let mut out = String::new();
+    out.push_str("| ");
+    out.push_str(&headers.join(" | "));
+    out.push_str(" |\n");
+    out.push_str("| ");
+    out.push_str(&headers.iter().map(|_| "---").collect::<Vec<_>>().join(" | "));
+    out.push_str(" |\n");
+
+    for row in CAPABILITY_ROWS {
+        out.push_str("| ");
+        out.push_str(row.capability);
+        for backend in Backend::ALL {
+            let entry = row.entry(backend);
+            out.push_str(" | ");
+            match entry.state {
+                Some(state) => {
+                    out.push_str(state.marker());
+                    if !entry.note.is_empty() {
+                        out.push(' ');
+                        out.push_str(entry.note);
+                    }
+                }
+                None => out.push_str(entry.note),
+            }
+        }
+        out.push_str(" |\n");
+    }
+
+    out
+}
+
+/// Render the autogen block inserted into `docs/backend_matrix.md`.
+pub fn backend_matrix_autogen_block() -> String {
+    let mut out = String::new();
+    out.push_str(BACKEND_MATRIX_AUTOGEN_BEGIN);
+    out.push('\n');
+    out.push_str(&backend_matrix_markdown_table());
+    out.push_str(BACKEND_MATRIX_AUTOGEN_END);
+    out.push('\n');
+    out
+}
+
+/// Replace the autogen block inside `docs/backend_matrix.md`.
+pub fn sync_backend_matrix_markdown(doc: &str) -> Result<String, String> {
+    let begin = doc
+        .find(BACKEND_MATRIX_AUTOGEN_BEGIN)
+        .ok_or_else(|| format!("missing {BACKEND_MATRIX_AUTOGEN_BEGIN}"))?;
+    let end = doc
+        .find(BACKEND_MATRIX_AUTOGEN_END)
+        .ok_or_else(|| format!("missing {BACKEND_MATRIX_AUTOGEN_END}"))?;
+    if end < begin {
+        return Err("backend matrix autogen markers are out of order".to_string());
+    }
+
+    let mut end_after = end + BACKEND_MATRIX_AUTOGEN_END.len();
+    if doc[end_after..].starts_with("\r\n") {
+        end_after += 2;
+    } else if doc[end_after..].starts_with('\n') {
+        end_after += 1;
+    }
+    let mut out = String::new();
+    out.push_str(&doc[..begin]);
+    out.push_str(&backend_matrix_autogen_block());
+    out.push_str(&doc[end_after..]);
+    Ok(out)
+}
+
 /// Computes aggregate readiness counts across the entire matrix.
 pub fn matrix_summary() -> MatrixSummary {
     let mut summary = MatrixSummary {
         ready: 0,
-        watchlist: 0,
-        blocked: 0,
+        planned: 0,
+        stub: 0,
         informational: 0,
     };
 
@@ -695,8 +795,8 @@ pub fn matrix_summary() -> MatrixSummary {
         for entry in &row.entries {
             match entry.state {
                 Some(CapabilityState::Ready) => summary.ready += 1,
-                Some(CapabilityState::Watchlist) => summary.watchlist += 1,
-                Some(CapabilityState::Blocked) => summary.blocked += 1,
+                Some(CapabilityState::Planned) => summary.planned += 1,
+                Some(CapabilityState::Stub) => summary.stub += 1,
                 None => summary.informational += 1,
             }
         }
@@ -718,8 +818,8 @@ mod tests {
             .find(|row| row.capability == "Telemetry")
             .expect("telemetry row present");
         let hip_entry = telemetry.entry(Backend::Hip);
-        assert_eq!(hip_entry.state, Some(CapabilityState::Ready));
-        assert_eq!(hip_entry.note, "Counter wiring complete");
+        assert_eq!(hip_entry.state, Some(CapabilityState::Planned));
+        assert_eq!(hip_entry.note, "ROCm counters pending");
     }
 
     #[test]
@@ -739,23 +839,15 @@ mod tests {
     }
 
     #[test]
-    fn summarizes_backend_reports_full_readiness() {
-        let hip = summarize_backend(Backend::Hip);
-        assert_eq!(hip.backend, Backend::Hip);
-        assert_eq!(hip.watchlist, 0);
-        assert_eq!(hip.blocked, 0);
-        assert!(hip.is_fully_ready());
-        assert_eq!(hip.tracked_capabilities(), 13);
-        assert_eq!(hip.ready, 13);
-        assert_eq!(hip.readiness_ratio(), 1.0);
-        assert_eq!(hip.pending(), 0);
-        assert_eq!(hip.notes.len(), 2);
-        assert!(hip.notes.iter().any(|note| {
-            note.capability == "Build flag"
-                && note.note == "`--features \"hip,st-backend-hip/hip-real\"`"
-        }));
-        assert!(hip.notes.iter().any(|note| {
-            note.capability == "Min toolchain" && note.note == "Stable Rust + ROCm 6 toolchain"
+    fn summarizes_backend_reports_counts_and_notes() {
+        let cpu = summarize_backend(Backend::Cpu);
+        assert_eq!(cpu.backend, Backend::Cpu);
+        assert_eq!(cpu.tracked_capabilities(), 13);
+        assert_eq!(cpu.ready + cpu.planned + cpu.stub, cpu.tracked_capabilities());
+        assert!(cpu.ready > 0);
+        assert!(!cpu.is_fully_ready());
+        assert!(cpu.notes.iter().any(|note| {
+            note.capability == "Build flag" && note.note == "_none_"
         }));
     }
 
@@ -768,42 +860,41 @@ mod tests {
             .find(|row| row["capability"].as_str() == Some("Telemetry"))
             .expect("telemetry row serialized");
         let hip_note = first["entries"][Backend::Hip.index()]["note"].as_str();
-        assert_eq!(
-            hip_note.expect("hip note present"),
-            "Counter wiring complete"
-        );
+        assert_eq!(hip_note.expect("hip note present"), "ROCm counters pending");
     }
 
     #[test]
-    fn capability_summaries_reflect_full_readiness() {
+    fn capability_summaries_reflect_state_counts() {
         let summaries = capability_summaries();
         let onnx = summaries
             .iter()
             .find(|summary| summary.capability == "ONNX export parity")
             .expect("onnx row present");
-        assert_eq!(onnx.ready, 5);
-        assert_eq!(onnx.watchlist, 0);
-        assert_eq!(onnx.blocked, 0);
+        assert_eq!(onnx.ready, 0);
+        assert_eq!(onnx.planned, 1);
+        assert_eq!(onnx.stub, 4);
         assert_eq!(onnx.tracked_backends(), 5);
-        assert_eq!(onnx.dominant_state(), Some(CapabilityState::Ready));
+        assert_eq!(onnx.dominant_state(), Some(CapabilityState::Stub));
 
         let ci = summaries
             .iter()
             .find(|summary| summary.capability == "CI coverage")
             .expect("ci row present");
-        assert_eq!(ci.ready, 5);
-        assert_eq!(ci.watchlist, 0);
-        assert_eq!(ci.blocked, 0);
-        assert_eq!(ci.dominant_state(), Some(CapabilityState::Ready));
+        assert_eq!(ci.ready, 0);
+        assert_eq!(ci.planned, 2);
+        assert_eq!(ci.stub, 3);
+        assert_eq!(ci.dominant_state(), Some(CapabilityState::Stub));
     }
 
     #[test]
     fn capabilities_with_state_filters_rows() {
-        let blocked_rows = capabilities_with_state(CapabilityState::Blocked);
-        assert!(blocked_rows.is_empty());
+        let stub_rows = capabilities_with_state(CapabilityState::Stub);
+        assert!(stub_rows.iter().any(|row| row.capability == "Sparse tensor ops"));
 
-        let watchlist_rows = capabilities_with_state(CapabilityState::Watchlist);
-        assert!(watchlist_rows.is_empty());
+        let planned_rows = capabilities_with_state(CapabilityState::Planned);
+        assert!(planned_rows
+            .iter()
+            .any(|row| row.capability == "Kernel autotuning"));
 
         let ready_rows = capabilities_with_state(CapabilityState::Ready);
         assert!(ready_rows.iter().any(|row| row.capability == "Tensor ops"));
@@ -811,13 +902,12 @@ mod tests {
 
     #[test]
     fn capabilities_for_backend_with_state_lists_pending_items() {
-        let hip_watchlist =
-            capabilities_for_backend_with_state(Backend::Hip, CapabilityState::Watchlist);
-        assert!(hip_watchlist.is_empty());
+        let hip_planned =
+            capabilities_for_backend_with_state(Backend::Hip, CapabilityState::Planned);
+        assert!(hip_planned.iter().any(|row| row.capability == "Telemetry"));
 
-        let cuda_blocked =
-            capabilities_for_backend_with_state(Backend::Cuda, CapabilityState::Blocked);
-        assert!(cuda_blocked.is_empty());
+        let cuda_stub = capabilities_for_backend_with_state(Backend::Cuda, CapabilityState::Stub);
+        assert!(cuda_stub.iter().any(|row| row.capability == "Tensor ops"));
 
         let hip_ready = capabilities_for_backend_with_state(Backend::Hip, CapabilityState::Ready);
         assert_eq!(
@@ -831,13 +921,13 @@ mod tests {
 
     #[test]
     fn capabilities_with_note_containing_is_case_insensitive() {
-        let wavefront = capabilities_with_note_containing("wavefront");
-        assert!(wavefront
+        let autotune = capabilities_with_note_containing("AUTOTUNE");
+        assert!(autotune
             .iter()
             .any(|row| row.capability == "Kernel autotuning"));
-        assert!(wavefront
-            .iter()
-            .any(|row| row.capability == "Mixed precision training"));
+
+        let placeholders = capabilities_with_note_containing("backend placeholder");
+        assert!(!placeholders.is_empty());
 
         assert!(capabilities_with_note_containing(" ").is_empty());
     }
@@ -846,28 +936,28 @@ mod tests {
     fn matrix_summary_matches_manual_counts() {
         let summary = matrix_summary();
         let mut ready = 0usize;
-        let mut watchlist = 0usize;
-        let mut blocked = 0usize;
+        let mut planned = 0usize;
+        let mut stub = 0usize;
         let mut informational = 0usize;
 
         for row in capability_matrix() {
             for entry in &row.entries {
                 match entry.state {
                     Some(CapabilityState::Ready) => ready += 1,
-                    Some(CapabilityState::Watchlist) => watchlist += 1,
-                    Some(CapabilityState::Blocked) => blocked += 1,
+                    Some(CapabilityState::Planned) => planned += 1,
+                    Some(CapabilityState::Stub) => stub += 1,
                     None => informational += 1,
                 }
             }
         }
 
         assert_eq!(summary.ready, ready);
-        assert_eq!(summary.watchlist, watchlist);
-        assert_eq!(summary.blocked, blocked);
+        assert_eq!(summary.planned, planned);
+        assert_eq!(summary.stub, stub);
         assert_eq!(summary.informational, informational);
         assert_eq!(
             summary.total_entries(),
-            ready + watchlist + blocked + informational
+            ready + planned + stub + informational
         );
         if summary.tracked_entries() > 0 {
             let expected_ratio = ready as f32 / summary.tracked_entries() as f32;
@@ -889,16 +979,14 @@ mod tests {
     #[test]
     fn capability_matrix_view_provides_note_search() {
         let view = capability_matrix_view();
-        let matches = view.capabilities_with_note("dynamic shape");
-        assert!(matches
-            .iter()
-            .any(|row| row.capability == "Dynamic shape compilation"));
+        let matches = view.capabilities_with_note("json artefacts");
+        assert!(matches.iter().any(|row| row.capability == "ONNX export parity"));
     }
 
     #[test]
-    fn pending_capabilities_collects_watchlist_and_blocked() {
+    fn pending_capabilities_collects_planned_and_stub() {
         let hip_pending = pending_capabilities_for_backend(Backend::Hip);
-        assert!(hip_pending.is_empty());
+        assert!(hip_pending.iter().any(|row| row.capability == "Telemetry"));
     }
 
     #[test]

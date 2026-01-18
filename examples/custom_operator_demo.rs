@@ -12,6 +12,17 @@ use st_core::PureResult;
 use st_tensor::Tensor;
 use std::sync::Arc;
 
+fn print_tensor(label: &str, tensor: &Tensor) {
+    let (rows, cols) = tensor.shape();
+    println!("{label} (shape=({rows},{cols})):");
+    let data = tensor.data();
+    for r in 0..rows {
+        let start = r * cols;
+        let end = start + cols;
+        println!("  Row {r}: {:?}", &data[start..end]);
+    }
+}
+
 fn main() -> PureResult<()> {
     println!("🌀 Custom Operator Registration Example 🌀\n");
 
@@ -83,7 +94,7 @@ fn main() -> PureResult<()> {
         .with_backward(Arc::new(|inputs, outputs, grad_outputs| {
             println!("  🔄 Computing normalize gradient");
             let x = inputs[0];
-            let y = outputs[0];
+            let _y = outputs[0];
             let grad_y = grad_outputs[0];
             let (rows, cols) = x.shape();
             
@@ -182,35 +193,23 @@ fn main() -> PureResult<()> {
 
     // Create test tensors
     let x = Tensor::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0])?;
-    println!("Input tensor x:");
-    for (i, row) in x.tolist().iter().enumerate() {
-        println!("  Row {}: {:?}", i, row);
-    }
+    print_tensor("Input tensor x", &x);
     println!();
 
     // Test square operator
     let y_square = registry.execute("square", &[&x])?;
-    println!("After square:");
-    for (i, row) in y_square[0].tolist().iter().enumerate() {
-        println!("  Row {}: {:?}", i, row);
-    }
+    print_tensor("After square", &y_square[0]);
     println!();
 
     // Test normalize operator
     let y_norm = registry.execute("normalize", &[&x])?;
-    println!("After normalize:");
-    for (i, row) in y_norm[0].tolist().iter().enumerate() {
-        println!("  Row {}: {:?}", i, row);
-    }
+    print_tensor("After normalize", &y_norm[0]);
     println!();
 
     // Test weighted sum operator
     let x2 = Tensor::from_vec(2, 2, vec![4.0, 3.0, 2.0, 1.0])?;
     let y_weighted = registry.execute("weighted_sum", &[&x, &x2])?;
-    println!("After weighted_sum:");
-    for (i, row) in y_weighted[0].tolist().iter().enumerate() {
-        println!("  Row {}: {:?}", i, row);
-    }
+    print_tensor("After weighted_sum", &y_weighted[0]);
     println!();
 
     // Test gradient computation
@@ -219,11 +218,9 @@ fn main() -> PureResult<()> {
     let grad_output = Tensor::from_vec(2, 2, vec![1.0, 1.0, 1.0, 1.0])?;
     
     if let Some(square_op) = registry.get("square") {
-        let grad_input = square_op.backward(&[&x], &y_square, &[&grad_output])?;
-        println!("Square gradient w.r.t. input:");
-        for (i, row) in grad_input[0].tolist().iter().enumerate() {
-            println!("  Row {}: {:?}", i, row);
-        }
+        let y_square_refs: Vec<&Tensor> = y_square.iter().collect();
+        let grad_input = square_op.backward(&[&x], &y_square_refs, &[&grad_output])?;
+        print_tensor("Square gradient w.r.t. input", &grad_input[0]);
         println!();
     }
 

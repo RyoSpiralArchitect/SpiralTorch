@@ -20,14 +20,14 @@ pub(crate) struct PyRankPlan {
 }
 
 impl PyRankPlan {
-    fn from_plan(inner: RankPlan) -> Self {
+    pub(crate) fn from_plan(inner: RankPlan) -> Self {
         Self {
             inner,
             kind_override: None,
         }
     }
 
-    fn from_plan_with_override(inner: RankPlan, kind: Option<&'static str>) -> Self {
+    pub(crate) fn from_plan_with_override(inner: RankPlan, kind: Option<&'static str>) -> Self {
         Self {
             inner,
             kind_override: kind,
@@ -284,7 +284,7 @@ impl PyRankPlan {
     }
 }
 
-fn parse_backend(name: Option<&str>) -> PyResult<BackendKind> {
+pub(crate) fn parse_backend(name: Option<&str>) -> PyResult<BackendKind> {
     let raw = name.unwrap_or("wgpu");
     if raw.eq_ignore_ascii_case("auto") {
         return Ok(BackendKind::Wgpu);
@@ -336,7 +336,7 @@ fn apply_overrides(
     caps
 }
 
-fn build_caps(
+pub(crate) fn build_caps(
     backend: BackendKind,
     lane_width: Option<u32>,
     subgroup: Option<bool>,

@@ -226,7 +226,7 @@ jobs:
             dist/spiraltorch-repo-license-manifest.json
             dist/spiraltorch-compliance-seal.json
       - name: Create/Update GitHub Release with assets
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/**/*

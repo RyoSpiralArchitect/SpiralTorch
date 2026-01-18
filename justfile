@@ -58,3 +58,8 @@ go-test:
 distributed-selfsup config="configs/selfsup_distributed.toml":
     echo "Launching distributed self-supervised trainer with config: {{config}}" && \
     cargo test --manifest-path crates/spiral-selfsup/Cargo.toml --test distributed_selfsup -- --ignored
+
+docs-check:
+    PYTHONNOUSERSITE=1 python3 tools/check_example_gallery.py
+    PYTHONNOUSERSITE=1 python3 tools/run_readme_python_blocks.py
+    PYTHONNOUSERSITE=1 cargo run -p st-bench --bin backend_matrix_md -- --check --doc docs/backend_matrix.md

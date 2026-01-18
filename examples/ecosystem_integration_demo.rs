@@ -8,15 +8,13 @@
 //! composition work together to create an organically pluggable ecosystem.
 
 use st_core::plugin::{
-    init_plugin_system, global_registry, Plugin, PluginCapability, PluginContext, 
-    PluginEvent, PluginMetadata, StaticPluginLoader,
+    global_registry, init_plugin_system, Plugin, PluginCapability, PluginContext, PluginEvent,
+    PluginLoader, PluginMetadata, StaticPluginLoader,
 };
 use st_core::PureResult;
 use st_nn::{
-    ModuleCategory, ModuleDiscoveryRegistry, ModuleMetadata, ModulePipelineBuilder,
-    Module, Linear, Relu, Sequential,
+    Linear, Module, ModuleCategory, ModuleDiscoveryRegistry, ModuleMetadata, Relu, Sequential,
 };
-use st_tensor::Tensor;
 use std::any::Any;
 use std::collections::HashMap;
 use std::path::Path;
@@ -243,9 +241,9 @@ fn main() -> PureResult<()> {
         println!("\n  🔨 Constructing pipeline from discovered modules...");
         
         let mut model = Sequential::new();
-        model.push(Box::new(Linear::new("input", 10, 20)?));
-        model.push(Box::new(Relu::new()));
-        model.push(Box::new(Linear::new("hidden", 20, 10)?));
+        model.push(Linear::new("input", 10, 20)?);
+        model.push(Relu::new());
+        model.push(Linear::new("hidden", 20, 10)?);
         
         println!("  ✅ Pipeline created with {} layers", model.len());
     }

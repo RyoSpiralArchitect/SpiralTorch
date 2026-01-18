@@ -47,31 +47,43 @@ pub mod context;
 pub use registry::{PluginRegistry, PluginHandle};
 pub use traits::{Plugin, PluginMetadata, PluginCapability};
 pub use events::{PluginEvent, PluginEventBus, EventListener};
-pub use loader::{PluginLoader, DynamicPluginLoader};
+pub use loader::{DynamicPluginLoader, PluginLoader, StaticPluginLoader};
 pub use context::{PluginContext, PluginDependency};
 
 use crate::PureResult;
+use std::sync::Arc;
+use st_tensor::TensorOpEvent;
+use st_tensor::set_tensor_op_observer;
 
 /// Initialize the global plugin system.
 ///
 /// This function should be called once at application startup to set up the
 /// global plugin registry and event bus.
 pub fn init_plugin_system() -> PureResult<()> {
-    let registry = PluginRegistry::new();
-    GLOBAL_REGISTRY.set(registry).map_err(|_| {
-        crate::TensorError::Generic("Plugin system already initialized".to_string())
-    })?;
+    let _ = global_registry();
     Ok(())
 }
 
 /// Get a reference to the global plugin registry.
-///
-/// # Panics
-///
-/// Panics if the plugin system has not been initialized via `init_plugin_system()`.
 pub fn global_registry() -> &'static PluginRegistry {
-    GLOBAL_REGISTRY.get().expect("Plugin system not initialized. Call init_plugin_system() first.")
+    let registry = GLOBAL_REGISTRY.get_or_init(PluginRegistry::new);
+    ensure_tensor_op_bridge(registry.event_bus().clone());
+    registry
+}
+
+fn ensure_tensor_op_bridge(bus: PluginEventBus) {
+    let _ = TENSOR_OP_BRIDGE.get_or_init(|| {
+        let bus = bus.clone();
+        set_tensor_op_observer(Some(Arc::new(move |event: &TensorOpEvent| {
+            bus.publish(&PluginEvent::TensorOp {
+                op_name: event.op_name.to_string(),
+                input_shape: event.input_shape.clone(),
+                output_shape: event.output_shape.clone(),
+            });
+        })));
+    });
 }
 
 use std::sync::OnceLock;
 static GLOBAL_REGISTRY: OnceLock<PluginRegistry> = OnceLock::new();
+static TENSOR_OP_BRIDGE: OnceLock<()> = OnceLock::new();

@@ -56,6 +56,7 @@ use st_core::ecosystem::{
 #[cfg(feature = "collapse")]
 use st_core::engine::collapse_drive::{CollapseConfig, CollapseDrive, DriveCmd};
 use st_core::ops::rank_entry::RankPlan;
+use st_core::plugin::{global_registry, PluginEvent};
 use st_core::runtime::autopilot::Autopilot;
 use st_core::runtime::blackcat::{BlackCatRuntime, BlackcatRuntimeStats, StepMetrics};
 #[cfg(feature = "collapse")]
@@ -87,9 +88,17 @@ pub struct CurvatureScheduler {
     target_pressure: f32,
     tolerance: f32,
     step: f32,
+    kp: f32,
     alpha: f32,
     current: f32,
     ema_pressure: Option<f32>,
+    ema_pressure2: Option<f32>,
+    stability_threshold: f32,
+    stability_boost: f32,
+    stable_steps: u32,
+    dither_strength: f32,
+    dither_period: u32,
+    dither_sign: f32,
 }
 
 impl CurvatureScheduler {
@@ -110,9 +119,17 @@ impl CurvatureScheduler {
             target_pressure: target_pressure.max(0.0),
             tolerance: 0.05,
             step: 0.05,
+            kp: 1.0,
             alpha: 0.2,
             current,
             ema_pressure: None,
+            ema_pressure2: None,
+            stability_threshold: 1.0e-3,
+            stability_boost: 0.5,
+            stable_steps: 0,
+            dither_strength: 0.15,
+            dither_period: 8,
+            dither_sign: 1.0,
         }
     }
 
@@ -124,11 +141,35 @@ impl CurvatureScheduler {
         self
     }
 
+    /// Adjusts the proportional gain used to convert pressure error into curvature delta.
+    pub fn with_proportional_gain(mut self, gain: f32) -> Self {
+        self.set_proportional_gain(gain);
+        self
+    }
+
     /// Adjusts the tolerated pressure band before the curvature is nudged.
     pub fn with_tolerance(mut self, tolerance: f32) -> Self {
         if tolerance.is_finite() && tolerance >= 0.0 {
             self.tolerance = tolerance;
         }
+        self
+    }
+
+    /// Adjusts the stability threshold used to detect "settled" pressure conditions.
+    pub fn with_stability_threshold(mut self, threshold: f32) -> Self {
+        self.set_stability_threshold(threshold);
+        self
+    }
+
+    /// Adjusts the stability boost applied to the proportional gain when pressure settles.
+    pub fn with_stability_boost(mut self, boost: f32) -> Self {
+        self.set_stability_boost(boost);
+        self
+    }
+
+    /// Enables a small curvature dither when pressure remains stable within tolerance.
+    pub fn with_dither(mut self, strength: f32, period: u32) -> Self {
+        self.set_dither(strength, period);
         self
     }
 
@@ -138,6 +179,11 @@ impl CurvatureScheduler {
             self.alpha = alpha.clamp(0.01, 1.0);
         }
         self
+    }
+
+    /// Returns the proportional gain used to compute curvature deltas.
+    pub fn proportional_gain(&self) -> f32 {
+        self.kp
     }
 
     /// Returns the curvature currently enforced by the scheduler.
@@ -165,6 +211,26 @@ impl CurvatureScheduler {
         self.step
     }
 
+    /// Returns the stability threshold applied to pressure variance estimates.
+    pub fn stability_threshold(&self) -> f32 {
+        self.stability_threshold
+    }
+
+    /// Returns the stability boost applied to the proportional gain.
+    pub fn stability_boost(&self) -> f32 {
+        self.stability_boost
+    }
+
+    /// Returns the dither strength expressed as a fraction of the step size.
+    pub fn dither_strength(&self) -> f32 {
+        self.dither_strength
+    }
+
+    /// Returns the minimum stable observation count before applying dither.
+    pub fn dither_period(&self) -> u32 {
+        self.dither_period
+    }
+
     /// Returns the tolerated pressure band before adjustments.
     pub fn tolerance(&self) -> f32 {
         self.tolerance
@@ -180,6 +246,20 @@ impl CurvatureScheduler {
         self.ema_pressure
     }
 
+    /// Returns the estimated pressure variance (EMA(p²) - EMA(p)²), if available.
+    pub fn last_pressure_variance(&self) -> Option<f32> {
+        let mean = self.ema_pressure?;
+        let second = self.ema_pressure2?;
+        Some((second - mean * mean).max(0.0))
+    }
+
+    /// Returns the estimated relative variance (var / (mean² + eps)), if available.
+    pub fn last_pressure_rel_variance(&self) -> Option<f32> {
+        let mean = self.ema_pressure?;
+        let var = self.last_pressure_variance()?;
+        Some(var / (mean * mean + 1.0e-6))
+    }
+
     /// Synchronises the scheduler with an externally adjusted curvature and
     /// clears the pressure history so subsequent observations start fresh.
     pub fn sync(&mut self, curvature: f32) {
@@ -187,6 +267,9 @@ impl CurvatureScheduler {
             .clamp(self.min_curvature, self.max_curvature)
             .min(-1e-6);
         self.ema_pressure = None;
+        self.ema_pressure2 = None;
+        self.stable_steps = 0;
+        self.dither_sign = 1.0;
     }
 
     /// Adjusts the curvature bounds while keeping the current value within range.
@@ -216,10 +299,41 @@ impl CurvatureScheduler {
         }
     }
 
+    /// Adjusts the proportional gain used to convert pressure error into curvature delta.
+    pub fn set_proportional_gain(&mut self, gain: f32) {
+        if gain.is_finite() && gain >= 0.0 {
+            self.kp = gain;
+        }
+    }
+
     /// Adjusts the tolerated pressure band before the curvature is nudged.
     pub fn set_tolerance(&mut self, tolerance: f32) {
         if tolerance.is_finite() && tolerance >= 0.0 {
             self.tolerance = tolerance;
+        }
+    }
+
+    /// Adjusts the stability threshold used to detect low-variance pressure.
+    pub fn set_stability_threshold(&mut self, threshold: f32) {
+        if threshold.is_finite() && threshold > 0.0 {
+            self.stability_threshold = threshold;
+        }
+    }
+
+    /// Adjusts the stability boost applied to the proportional gain.
+    pub fn set_stability_boost(&mut self, boost: f32) {
+        if boost.is_finite() && boost >= 0.0 {
+            self.stability_boost = boost;
+        }
+    }
+
+    /// Enables a small curvature dither when pressure remains stable within tolerance.
+    pub fn set_dither(&mut self, strength: f32, period: u32) {
+        if strength.is_finite() && strength >= 0.0 {
+            self.dither_strength = strength.clamp(0.0, 1.0);
+        }
+        if period > 0 {
+            self.dither_period = period.max(1);
         }
     }
 
@@ -239,30 +353,64 @@ impl CurvatureScheduler {
 
     /// Records a raw pressure observation without requiring a full gradient summary.
     pub fn observe_pressure(&mut self, raw_pressure: f32) -> CurvatureDecision {
+        let raw_pressure = if raw_pressure.is_finite() {
+            raw_pressure.max(0.0)
+        } else {
+            0.0
+        };
         let smoothed = match self.ema_pressure {
             Some(prev) => prev + self.alpha * (raw_pressure - prev),
             None => raw_pressure,
         };
         self.ema_pressure = Some(smoothed);
+        let raw_sq = raw_pressure * raw_pressure;
+        let smoothed_sq = match self.ema_pressure2 {
+            Some(prev) => prev + self.alpha * (raw_sq - prev),
+            None => raw_sq,
+        };
+        self.ema_pressure2 = Some(smoothed_sq);
+        let variance = (smoothed_sq - smoothed * smoothed).max(0.0);
+        let rel_var = variance / (smoothed * smoothed + 1.0e-6);
+        let error = smoothed - self.target_pressure;
+        let within_band = error.abs() <= self.tolerance;
 
         let mut curvature = self.current;
         let mut changed = false;
-        if smoothed > self.target_pressure + self.tolerance {
-            let next = (self.current + self.step).min(self.max_curvature);
-            if (next - self.current).abs() > f32::EPSILON {
-                curvature = next;
-                changed = true;
-            }
-        } else if smoothed < self.target_pressure - self.tolerance {
-            let next = (self.current - self.step).max(self.min_curvature);
-            if (next - self.current).abs() > f32::EPSILON {
-                curvature = next;
-                changed = true;
-            }
+        let stable = within_band && rel_var.is_finite() && rel_var <= self.stability_threshold;
+        if stable {
+            self.stable_steps = self.stable_steps.saturating_add(1);
+        } else {
+            self.stable_steps = 0;
         }
 
-        if changed {
-            self.current = curvature;
+        let mut delta = 0.0f32;
+        if !within_band {
+            let stability = if rel_var.is_finite() && self.stability_threshold > 0.0 {
+                (1.0 - (rel_var / self.stability_threshold).clamp(0.0, 1.0)).max(0.0)
+            } else {
+                0.0
+            };
+            let kp = self.kp * (1.0 + self.stability_boost * stability);
+            delta = (kp * error).clamp(-self.step, self.step);
+        } else if stable
+            && self.dither_strength > 0.0
+            && self.dither_period > 0
+            && self.stable_steps >= self.dither_period
+        {
+            delta = self.dither_sign * self.dither_strength * self.step;
+            self.dither_sign = -self.dither_sign;
+            self.stable_steps = 0;
+        }
+
+        if delta.abs() > f32::EPSILON {
+            let next = (self.current + delta)
+                .clamp(self.min_curvature, self.max_curvature)
+                .min(-1e-6);
+            if (next - self.current).abs() > f32::EPSILON {
+                curvature = next;
+                changed = true;
+                self.current = curvature;
+            }
         }
 
         CurvatureDecision {
@@ -303,6 +451,7 @@ impl From<CurvatureDecision> for CurvatureMetrics {
 
 /// High-level orchestrator that keeps hypergrad, SpiralK, and module updates aligned.
 pub struct ModuleTrainer {
+    epoch: usize,
     planner: RankPlanner,
     curvature: f32,
     hyper_learning_rate: f32,
@@ -798,14 +947,23 @@ pub struct RegionReportBundle {
 #[derive(Debug, Clone)]
 struct SoftLogicFlex {
     inertia: f32,
+    inertia_min: f32,
+    inertia_drift_k: f32,
+    inertia_z_k: f32,
     drift_gain: f32,
     psi_gain: f32,
     loss_gain: f32,
     floor: f32,
     scale_gain: f32,
+    region_gain: f32,
+    region_factor_gain: f32,
     last_weights: (f32, f32, f32),
     last_z: f32,
     last_feedback: Option<SoftlogicZFeedback>,
+    last_inertia: f32,
+    last_region: Option<ZSpaceRegionDescriptor>,
+    last_region_factor: f32,
+    last_region_scale: (f32, f32, f32),
 }
 
 impl SoftLogicFlex {
@@ -816,6 +974,21 @@ impl SoftLogicFlex {
                 .and_then(|value| value.parse::<f32>().ok())
                 .map(|v| v.clamp(0.0, 0.95))
                 .unwrap_or(0.65),
+            inertia_min: env::var("SPIRAL_SOFTLOGIC_INERTIA_MIN")
+                .ok()
+                .and_then(|value| value.parse::<f32>().ok())
+                .map(|v| v.clamp(0.0, 0.95))
+                .unwrap_or(0.15),
+            inertia_drift_k: env::var("SPIRAL_SOFTLOGIC_INERTIA_DRIFT_K")
+                .ok()
+                .and_then(|value| value.parse::<f32>().ok())
+                .map(|v| v.clamp(0.0, 4.0))
+                .unwrap_or(0.6),
+            inertia_z_k: env::var("SPIRAL_SOFTLOGIC_INERTIA_Z_K")
+                .ok()
+                .and_then(|value| value.parse::<f32>().ok())
+                .map(|v| v.clamp(0.0, 2.0))
+                .unwrap_or(0.2),
             drift_gain: env::var("SPIRAL_SOFTLOGIC_DRIFT_GAIN")
                 .ok()
                 .and_then(|value| value.parse::<f32>().ok())
@@ -841,17 +1014,108 @@ impl SoftLogicFlex {
                 .and_then(|value| value.parse::<f32>().ok())
                 .map(|v| v.clamp(0.0, 1.5))
                 .unwrap_or(0.2),
+            region_gain: env::var("SPIRAL_SOFTLOGIC_REGION_GAIN")
+                .ok()
+                .and_then(|value| value.parse::<f32>().ok())
+                .map(|v| v.clamp(0.0, 1.5))
+                .unwrap_or(0.15),
+            region_factor_gain: env::var("SPIRAL_SOFTLOGIC_REGION_FACTOR_GAIN")
+                .ok()
+                .and_then(|value| value.parse::<f32>().ok())
+                .map(|v| v.clamp(0.0, 2.0))
+                .unwrap_or(0.35),
             last_weights: (1.0, 1.0, 1.0),
             last_z: 0.0,
             last_feedback: None,
+            last_inertia: 0.0,
+            last_region: None,
+            last_region_factor: 1.0,
+            last_region_scale: (1.0, 1.0, 1.0),
         };
         if flex.inertia >= 0.95 {
             flex.inertia = 0.95;
         }
+        flex.inertia_min = flex.inertia_min.min(flex.inertia).clamp(0.0, 0.95);
+        flex.last_inertia = flex.inertia;
         flex
     }
 
+    fn record_region_feedback(&mut self, descriptor: ZSpaceRegionDescriptor, factor: f32) {
+        self.last_region = Some(descriptor);
+        self.last_region_factor = if factor.is_finite() { factor.max(0.0) } else { 1.0 };
+    }
+
+    fn clear_region_feedback(&mut self) {
+        self.last_region = None;
+        self.last_region_factor = 1.0;
+        self.last_region_scale = (1.0, 1.0, 1.0);
+    }
+
+    fn last_inertia(&self) -> f32 {
+        self.last_inertia
+    }
+
+    fn last_region_scale(&self) -> (f32, f32, f32) {
+        self.last_region_scale
+    }
+
+    fn effective_inertia(&mut self, band_energy: &BandEnergy) -> f32 {
+        let drift_drive = (band_energy.drift.abs() * self.inertia_drift_k).tanh();
+        let z_drive = self
+            .last_feedback
+            .as_ref()
+            .map(|feedback| feedback.z_signal.abs())
+            .unwrap_or(self.last_z.abs())
+            * self.inertia_z_k;
+        let adapt = (drift_drive + z_drive).clamp(0.0, 0.9);
+        let inertia = (self.inertia * (1.0 - adapt)).clamp(self.inertia_min, 0.95);
+        self.last_inertia = inertia;
+        inertia
+    }
+
+    fn region_steering(&mut self, z_bias: f32) -> (f32, f32, f32) {
+        let Some(descriptor) = self.last_region else {
+            self.last_region_scale = (1.0, 1.0, 1.0);
+            return self.last_region_scale;
+        };
+        if self.region_gain <= 0.0 {
+            self.last_region_scale = (1.0, 1.0, 1.0);
+            return self.last_region_scale;
+        }
+        let factor_boost = if self.last_region_factor.is_finite() && self.last_region_factor > 1.0 {
+            1.0 + self.region_factor_gain * (self.last_region_factor - 1.0).clamp(0.0, 3.0)
+        } else {
+            1.0
+        };
+        let gain = (self.region_gain * factor_boost).clamp(0.0, 0.9);
+        let radius_weight = match descriptor.key().radius {
+            ZSpaceRadiusBand::Core => 0.25,
+            ZSpaceRadiusBand::Mantle => 0.6,
+            ZSpaceRadiusBand::Edge => 1.0,
+        };
+        let intensity = (gain * radius_weight).clamp(0.0, 0.9);
+        let preferred_band = match descriptor.key().spin {
+            ZSpaceSpinBand::Leading => 0,
+            ZSpaceSpinBand::Trailing => 2,
+            ZSpaceSpinBand::Neutral => {
+                if matches!(descriptor.key().radius, ZSpaceRadiusBand::Edge) {
+                    if z_bias >= 0.0 { 0 } else { 2 }
+                } else {
+                    1
+                }
+            }
+        };
+        let other = (1.0 - 0.5 * intensity).max(0.1);
+        self.last_region_scale = match preferred_band {
+            0 => (1.0 + intensity, other, other),
+            1 => (other, 1.0 + intensity, other),
+            _ => (other, other, 1.0 + intensity),
+        };
+        self.last_region_scale
+    }
+
     fn prepare_weights(&mut self, band_energy: &BandEnergy) -> (f32, f32, f32) {
+        let inertia = self.effective_inertia(band_energy);
         let norm = (band_energy.above.abs() + band_energy.here.abs() + band_energy.beneath.abs())
             .max(1e-4);
         let asymmetry = (band_energy.above - band_energy.beneath) / norm;
@@ -882,15 +1146,20 @@ impl SoftLogicFlex {
             }
         }
 
+        let region_scale = self.region_steering(z_bias);
+        target_above *= region_scale.0;
+        target_here *= region_scale.1;
+        target_beneath *= region_scale.2;
+
         let target = (
             target_above.clamp(self.floor, 3.0),
             target_here.clamp(self.floor, 2.5),
             target_beneath.clamp(self.floor, 3.0),
         );
         self.last_weights = (
-            Self::lerp(self.last_weights.0, target.0, 1.0 - self.inertia),
-            Self::lerp(self.last_weights.1, target.1, 1.0 - self.inertia),
-            Self::lerp(self.last_weights.2, target.2, 1.0 - self.inertia),
+            Self::lerp(self.last_weights.0, target.0, 1.0 - inertia),
+            Self::lerp(self.last_weights.1, target.1, 1.0 - inertia),
+            Self::lerp(self.last_weights.2, target.2, 1.0 - inertia),
         );
         self.last_weights
     }
@@ -902,13 +1171,14 @@ impl SoftLogicFlex {
         psi_total: Option<f32>,
         scale_hint: Option<ZScale>,
     ) -> SoftlogicZFeedback {
+        let inertia = self.effective_inertia(band_energy);
         let psi_total = psi_total.unwrap_or(0.0);
         let total = (band_energy.above + band_energy.here + band_energy.beneath).max(1e-4);
         let asym = (band_energy.above - band_energy.beneath) / total;
         let drift = band_energy.drift;
         let raw_signal = 0.6 * (psi_total - weighted_loss) + 0.3 * asym + 0.1 * drift;
         let z_signal = raw_signal.tanh();
-        self.last_z = Self::lerp(self.last_z, z_signal, 1.0 - self.inertia);
+        self.last_z = Self::lerp(self.last_z, z_signal, 1.0 - inertia);
         let feedback = SoftlogicZFeedback {
             psi_total,
             weighted_loss,
@@ -942,12 +1212,21 @@ impl SoftLogicFlex {
 #[derive(Debug, Clone)]
 pub struct SpectralLearningRatePolicy {
     smoothing: f32,
+    event_smoothing: f32,
+    turnover_smoothing: f32,
     coherence_gain: f32,
     curvature_gain: f32,
     sheet_gain: f32,
     spin_gain: f32,
     radius_gain: f32,
     energy_gain: f32,
+    phase_gain: f32,
+    stuck_phase_gain: f32,
+    max_phase_gain: f32,
+    stuck_turnover_threshold: f32,
+    dominant_turnover: f32,
+    last_dominant: Option<usize>,
+    last_label: Option<CoherenceLabel>,
     min_lr_scale: f32,
     max_lr_scale: f32,
     max_lr_step: f32,
@@ -963,12 +1242,21 @@ impl SpectralLearningRatePolicy {
     pub fn new() -> Self {
         Self {
             smoothing: 0.2,
+            event_smoothing: 0.75,
+            turnover_smoothing: 0.15,
             coherence_gain: 0.5,
             curvature_gain: 0.15,
             sheet_gain: 0.6,
             spin_gain: 0.4,
             radius_gain: 0.35,
             energy_gain: 0.25,
+            phase_gain: 0.25,
+            stuck_phase_gain: 0.35,
+            max_phase_gain: 0.65,
+            stuck_turnover_threshold: 0.12,
+            dominant_turnover: 0.0,
+            last_dominant: None,
+            last_label: None,
             min_lr_scale: 0.1,
             max_lr_scale: 6.0,
             max_lr_step: 1.4,
@@ -984,6 +1272,46 @@ impl SpectralLearningRatePolicy {
     pub fn with_smoothing(mut self, smoothing: f32) -> Self {
         if smoothing.is_finite() && smoothing > 0.0 {
             self.smoothing = smoothing.clamp(1.0e-3, 1.0);
+        }
+        self
+    }
+
+    /// Overrides the smoothing factor used when a coherence label transition is detected.
+    pub fn with_event_smoothing(mut self, smoothing: f32) -> Self {
+        if smoothing.is_finite() && smoothing > 0.0 {
+            self.event_smoothing = smoothing.clamp(1.0e-3, 1.0);
+        }
+        self
+    }
+
+    /// Overrides the smoothing factor used to track dominant channel turnover.
+    pub fn with_turnover_smoothing(mut self, smoothing: f32) -> Self {
+        if smoothing.is_finite() && smoothing > 0.0 {
+            self.turnover_smoothing = smoothing.clamp(1.0e-3, 1.0);
+        }
+        self
+    }
+
+    /// Adjusts the base phase gain used to bias band scales towards a dominant "seat".
+    pub fn with_phase_gain(mut self, gain: f32) -> Self {
+        if gain.is_finite() && gain >= 0.0 {
+            self.phase_gain = gain;
+        }
+        self
+    }
+
+    /// Adjusts the extra phase gain applied when dominant channel turnover drops below threshold.
+    pub fn with_stuck_phase_gain(mut self, gain: f32) -> Self {
+        if gain.is_finite() && gain >= 0.0 {
+            self.stuck_phase_gain = gain;
+        }
+        self
+    }
+
+    /// Adjusts the turnover threshold used to detect "stuck" coherence.
+    pub fn with_stuck_turnover_threshold(mut self, threshold: f32) -> Self {
+        if threshold.is_finite() && threshold >= 0.0 {
+            self.stuck_turnover_threshold = threshold;
         }
         self
     }
@@ -1046,6 +1374,16 @@ impl SpectralLearningRatePolicy {
         self
     }
 
+    /// Returns the last semantic coherence label that influenced the policy.
+    pub fn last_coherence_label(&self) -> Option<CoherenceLabel> {
+        self.last_label
+    }
+
+    /// Returns the EMA of dominant channel changes (0 = locked, 1 = swapping every step).
+    pub fn dominant_turnover(&self) -> f32 {
+        self.dominant_turnover
+    }
+
     pub fn observe(
         &mut self,
         diagnostics: Option<&CoherenceDiagnostics>,
@@ -1053,11 +1391,33 @@ impl SpectralLearningRatePolicy {
         band_energy: &BandEnergy,
     ) -> Option<SpectralAdjustment> {
         let diagnostics = diagnostics?;
+        let label = diagnostics.observation().lift_to_label();
         let preserved = diagnostics.preserved_channels().max(1);
         let dominant = diagnostics
             .dominant_channel()
             .unwrap_or(0)
             .min(preserved - 1);
+        let dominant_changed = self
+            .last_dominant
+            .map(|previous| previous != dominant)
+            .unwrap_or(false);
+        self.dominant_turnover = Self::smooth(
+            self.dominant_turnover,
+            if dominant_changed { 1.0 } else { 0.0 },
+            self.turnover_smoothing,
+        )
+        .clamp(0.0, 1.0);
+        self.last_dominant = Some(dominant);
+        let label_changed = self
+            .last_label
+            .map(|previous| previous != label)
+            .unwrap_or(false);
+        self.last_label = Some(label);
+        let smoothing = if label_changed {
+            self.event_smoothing.max(self.smoothing)
+        } else {
+            self.smoothing
+        };
         let sheet_ratio = (dominant as f32 + 0.5) / preserved as f32;
         let sheet_bias = (sheet_ratio - 0.5) * self.sheet_gain;
         let spin = diagnostics.z_bias().clamp(-1.0, 1.0);
@@ -1097,6 +1457,42 @@ impl SpectralLearningRatePolicy {
             (band_energy.beneath / energy_total).clamp(-1.0, 1.0),
         );
 
+        let label_lr_scale = match label {
+            CoherenceLabel::Background => {
+                if self.dominant_turnover < self.stuck_turnover_threshold {
+                    1.05
+                } else {
+                    1.0
+                }
+            }
+            CoherenceLabel::SymmetricPulse => 0.9,
+            CoherenceLabel::CascadeImbalance => 0.7,
+            CoherenceLabel::DiffuseDrift => 1.15,
+        };
+        let label_band_bias = match label {
+            CoherenceLabel::CascadeImbalance => (0.92, 1.15, 0.92),
+            CoherenceLabel::SymmetricPulse => (0.96, 1.06, 0.96),
+            _ => (1.0, 1.0, 1.0),
+        };
+        let mut phase_gain = match label {
+            CoherenceLabel::DiffuseDrift => self.phase_gain * 1.15,
+            CoherenceLabel::CascadeImbalance => 0.0,
+            CoherenceLabel::SymmetricPulse => self.phase_gain * 0.35,
+            CoherenceLabel::Background => self.phase_gain,
+        };
+        if self.dominant_turnover < self.stuck_turnover_threshold
+            && !matches!(label, CoherenceLabel::CascadeImbalance)
+        {
+            phase_gain += self.stuck_phase_gain;
+        }
+        phase_gain = phase_gain.clamp(0.0, self.max_phase_gain);
+        let phase = dominant % 3;
+        let phase_mul = match phase {
+            0 => (1.0 + phase_gain, 1.0 - 0.5 * phase_gain, 1.0 - 0.5 * phase_gain),
+            1 => (1.0 - 0.5 * phase_gain, 1.0 + phase_gain, 1.0 - 0.5 * phase_gain),
+            _ => (1.0 - 0.5 * phase_gain, 1.0 - 0.5 * phase_gain, 1.0 + phase_gain),
+        };
+
         let mut target_band = (
             (base_above * (1.0 + energy_bias.0 * self.energy_gain))
                 .clamp(self.min_band_scale, self.max_band_scale),
@@ -1105,17 +1501,23 @@ impl SpectralLearningRatePolicy {
             (base_beneath * (1.0 + energy_bias.2 * self.energy_gain))
                 .clamp(self.min_band_scale, self.max_band_scale),
         );
+        target_band.0 = (target_band.0 * phase_mul.0 * label_band_bias.0)
+            .clamp(self.min_band_scale, self.max_band_scale);
+        target_band.1 = (target_band.1 * phase_mul.1 * label_band_bias.1)
+            .clamp(self.min_band_scale, self.max_band_scale);
+        target_band.2 = (target_band.2 * phase_mul.2 * label_band_bias.2)
+            .clamp(self.min_band_scale, self.max_band_scale);
 
-        self.band_state.0 = Self::smooth(self.band_state.0, target_band.0, self.smoothing);
-        self.band_state.1 = Self::smooth(self.band_state.1, target_band.1, self.smoothing);
-        self.band_state.2 = Self::smooth(self.band_state.2, target_band.2, self.smoothing);
+        self.band_state.0 = Self::smooth(self.band_state.0, target_band.0, smoothing);
+        self.band_state.1 = Self::smooth(self.band_state.1, target_band.1, smoothing);
+        self.band_state.2 = Self::smooth(self.band_state.2, target_band.2, smoothing);
         target_band = self.band_state;
 
         let mean_band = (target_band.0 + target_band.1 + target_band.2) / 3.0;
         let coherence_boost = 1.0 + spectral_pressure * self.coherence_gain;
-        let mut target_lr =
-            (mean_band * coherence_boost).clamp(self.min_lr_scale, self.max_lr_scale);
-        self.lr_state = Self::smooth(self.lr_state, target_lr, self.smoothing);
+        let mut target_lr = (mean_band * coherence_boost * label_lr_scale)
+            .clamp(self.min_lr_scale, self.max_lr_scale);
+        self.lr_state = Self::smooth(self.lr_state, target_lr, smoothing);
         target_lr = self.lr_state.clamp(self.min_lr_scale, self.max_lr_scale);
 
         let mut target_local = (
@@ -1123,15 +1525,23 @@ impl SpectralLearningRatePolicy {
             (target_band.1 / mean_band).clamp(self.min_band_scale, self.max_band_scale),
             (target_band.2 / mean_band).clamp(self.min_band_scale, self.max_band_scale),
         );
-        self.local_lr_state.0 = Self::smooth(self.local_lr_state.0, target_local.0, self.smoothing);
-        self.local_lr_state.1 = Self::smooth(self.local_lr_state.1, target_local.1, self.smoothing);
-        self.local_lr_state.2 = Self::smooth(self.local_lr_state.2, target_local.2, self.smoothing);
+        self.local_lr_state.0 =
+            Self::smooth(self.local_lr_state.0, target_local.0, smoothing);
+        self.local_lr_state.1 =
+            Self::smooth(self.local_lr_state.1, target_local.1, smoothing);
+        self.local_lr_state.2 =
+            Self::smooth(self.local_lr_state.2, target_local.2, smoothing);
         target_local = self.local_lr_state;
 
         let mut lr_multiplier = 1.0;
         if self.applied_lr_scale.is_finite() && self.applied_lr_scale > 0.0 {
+            let max_lr_step = if label_changed {
+                (self.max_lr_step * 1.25).max(self.max_lr_step)
+            } else {
+                self.max_lr_step
+            };
             lr_multiplier =
-                (target_lr / self.applied_lr_scale).clamp(1.0 / self.max_lr_step, self.max_lr_step);
+                (target_lr / self.applied_lr_scale).clamp(1.0 / max_lr_step, max_lr_step);
         }
         self.applied_lr_scale =
             (self.applied_lr_scale * lr_multiplier).clamp(self.min_lr_scale, self.max_lr_scale);
@@ -1255,6 +1665,7 @@ impl ModuleTrainer {
         spectral_adapter.set_curvature_target(curvature);
 
         Self {
+            epoch: 0,
             planner: RankPlanner::new(caps),
             curvature,
             hyper_learning_rate,
@@ -2007,7 +2418,7 @@ impl ModuleTrainer {
     }
 
     /// Attaches hypergrad tapes to all parameters of the provided module.
-    pub fn prepare<M: Module>(&self, module: &mut M) -> PureResult<()> {
+    pub fn prepare<M: Module + ?Sized>(&self, module: &mut M) -> PureResult<()> {
         module.attach_hypergrad(self.curvature, self.hyper_learning_rate)?;
         if let Some(rate) = self.real_learning_rate {
             module.attach_realgrad(rate)?;
@@ -2016,7 +2427,7 @@ impl ModuleTrainer {
     }
 
     /// Attaches hypergrad tapes with an explicit topos shared across parameters.
-    pub fn prepare_with_topos<M: Module>(
+    pub fn prepare_with_topos<M: Module + ?Sized>(
         &self,
         module: &mut M,
         topos: OpenCartesianTopos,
@@ -2029,12 +2440,12 @@ impl ModuleTrainer {
     }
 
     /// Clears accumulated gradients or hypergrad buffers.
-    pub fn zero<M: Module>(&self, module: &mut M) -> PureResult<()> {
+    pub fn zero<M: Module + ?Sized>(&self, module: &mut M) -> PureResult<()> {
         module.zero_accumulators()
     }
 
     /// Applies the parameter updates using either the hypergrad tape or the fallback rate.
-    pub fn step<M: Module>(&mut self, module: &mut M) -> PureResult<()> {
+    pub fn step<M: Module + ?Sized>(&mut self, module: &mut M) -> PureResult<()> {
         let adapter: &mut dyn LocalLearningRateAdapter = &mut self.spectral_adapter;
         module.apply_step_with_adapter(self.fallback_learning_rate, Some(adapter))
     }
@@ -2048,11 +2459,16 @@ impl ModuleTrainer {
         schedule: &RoundtableSchedule,
     ) -> PureResult<EpochStats>
     where
-        M: Module,
-        L: Loss,
+        M: Module + ?Sized,
+        L: Loss + ?Sized,
         I: IntoIterator,
         I::Item: IntoBatch,
     {
+        self.epoch = self.epoch.saturating_add(1);
+        let epoch = self.epoch;
+        global_registry()
+            .event_bus()
+            .publish(&PluginEvent::EpochStart { epoch });
         if let Some(budget) = self.rewrite_budget.as_mut() {
             budget.begin_epoch();
         }
@@ -2138,22 +2554,42 @@ impl ModuleTrainer {
             let mut spectral_used = false;
             let mut spectral_extra: Option<SpectralAdjustmentMetrics> = None;
             let coherence_snapshot = self.pending_coherence.take();
+            let coherence_label = coherence_snapshot
+                .as_ref()
+                .map(|diagnostics| diagnostics.observation().lift_to_label());
+            let mut spectral_label_code = coherence_label.map(|label| match label {
+                CoherenceLabel::Background => 0.0,
+                CoherenceLabel::SymmetricPulse => 1.0,
+                CoherenceLabel::CascadeImbalance => 2.0,
+                CoherenceLabel::DiffuseDrift => 3.0,
+            });
+            let mut spectral_turnover = None;
+            let mut spectral_adjustment: Option<SpectralAdjustment> = None;
             if let Some(policy) = self.spectral_policy.as_mut() {
-                if let Some(adjustment) =
-                    policy.observe(coherence_snapshot.as_ref(), self.curvature, &band_energy)
-                {
-                    weights.0 *= adjustment.band_scale.0;
-                    weights.1 *= adjustment.band_scale.1;
-                    weights.2 *= adjustment.band_scale.2;
-                    if adjustment.lr_multiplier.is_finite()
-                        && (adjustment.lr_multiplier - 1.0).abs() > 1.0e-3
-                    {
-                        self.scale_learning_rates(module, adjustment.lr_multiplier)?;
-                    }
-                    spectral_extra = Some(adjustment.metrics.clone());
-                    self.last_spectral_metrics = Some(adjustment.metrics);
-                    spectral_used = coherence_snapshot.is_some();
+                spectral_adjustment =
+                    policy.observe(coherence_snapshot.as_ref(), self.curvature, &band_energy);
+                spectral_turnover = Some(policy.dominant_turnover());
+                if let Some(label) = policy.last_coherence_label() {
+                    spectral_label_code = Some(match label {
+                        CoherenceLabel::Background => 0.0,
+                        CoherenceLabel::SymmetricPulse => 1.0,
+                        CoherenceLabel::CascadeImbalance => 2.0,
+                        CoherenceLabel::DiffuseDrift => 3.0,
+                    });
                 }
+            }
+            if let Some(adjustment) = spectral_adjustment {
+                weights.0 *= adjustment.band_scale.0;
+                weights.1 *= adjustment.band_scale.1;
+                weights.2 *= adjustment.band_scale.2;
+                if adjustment.lr_multiplier.is_finite()
+                    && (adjustment.lr_multiplier - 1.0).abs() > 1.0e-3
+                {
+                    self.scale_learning_rates(module, adjustment.lr_multiplier)?;
+                }
+                spectral_extra = Some(adjustment.metrics.clone());
+                self.last_spectral_metrics = Some(adjustment.metrics);
+                spectral_used = coherence_snapshot.is_some();
             }
             if coherence_snapshot.is_some() && !spectral_used {
                 self.pending_coherence = coherence_snapshot;
@@ -2166,6 +2602,26 @@ impl ModuleTrainer {
             extra.insert("softlogic_w_above".to_string(), weights.0 as f64);
             extra.insert("softlogic_w_here".to_string(), weights.1 as f64);
             extra.insert("softlogic_w_beneath".to_string(), weights.2 as f64);
+            extra.insert("softlogic_inertia".to_string(), self.softlogic.last_inertia() as f64);
+            let region_scale = self.softlogic.last_region_scale();
+            extra.insert(
+                "softlogic_region_scale_above".to_string(),
+                region_scale.0 as f64,
+            );
+            extra.insert(
+                "softlogic_region_scale_here".to_string(),
+                region_scale.1 as f64,
+            );
+            extra.insert(
+                "softlogic_region_scale_beneath".to_string(),
+                region_scale.2 as f64,
+            );
+            if let Some(label) = spectral_label_code {
+                extra.insert("spectral_label".to_string(), label);
+            }
+            if let Some(turnover) = spectral_turnover {
+                extra.insert("spectral_turnover".to_string(), turnover as f64);
+            }
             if let Some(metrics) = spectral_extra {
                 extra.insert(
                     "spectral_lr_scale".to_string(),
@@ -2428,7 +2884,11 @@ impl ModuleTrainer {
                     "region_normalized_radius".to_string(),
                     region_descriptor.normalized_radius as f64,
                 );
+                self.softlogic
+                    .record_region_feedback(region_descriptor, factor);
                 region_highlight = Some(region_descriptor);
+            } else {
+                self.softlogic.clear_region_feedback();
             }
             let region_bundle = self
                 .loss_strategy
@@ -2535,6 +2995,34 @@ impl ModuleTrainer {
                     if decision.changed {
                         extra.insert("curvature_adjusted".to_string(), 1.0);
                     }
+                    if let Some(scheduler) = self.curvature_scheduler.as_ref() {
+                        extra.insert("curvature_kp".to_string(), scheduler.proportional_gain() as f64);
+                        extra.insert(
+                            "curvature_step".to_string(),
+                            scheduler.step_size() as f64,
+                        );
+                        extra.insert(
+                            "curvature_tolerance".to_string(),
+                            scheduler.tolerance() as f64,
+                        );
+                        extra.insert(
+                            "curvature_dither_strength".to_string(),
+                            scheduler.dither_strength() as f64,
+                        );
+                        extra.insert(
+                            "curvature_dither_period".to_string(),
+                            scheduler.dither_period() as f64,
+                        );
+                        if let Some(var) = scheduler.last_pressure_variance() {
+                            extra.insert("curvature_pressure_var".to_string(), var as f64);
+                        }
+                        if let Some(rel_var) = scheduler.last_pressure_rel_variance() {
+                            extra.insert(
+                                "curvature_pressure_rel_var".to_string(),
+                                rel_var as f64,
+                            );
+                        }
+                    }
                 }
             }
             self.zero(module)?;
@@ -2579,7 +3067,7 @@ impl ModuleTrainer {
                 }
             }
         }
-        Ok(EpochStats {
+        let stats = EpochStats {
             batches: steps,
             total_loss,
             average_loss: if steps == 0 {
@@ -2587,10 +3075,15 @@ impl ModuleTrainer {
             } else {
                 total_loss / steps as f32
             },
-        })
+        };
+        global_registry().event_bus().publish(&PluginEvent::EpochEnd {
+            epoch,
+            loss: stats.average_loss,
+        });
+        Ok(stats)
     }
 
-    fn apply_curvature_scheduler<M: Module>(
+    fn apply_curvature_scheduler<M: Module + ?Sized>(
         &mut self,
         module: &mut M,
         summary: GradientSummary,
@@ -2614,7 +3107,7 @@ impl ModuleTrainer {
         caps.occupancy_score(caps.max_workgroup) as f64
     }
 
-    fn collect_gradient_summary<M: Module>(module: &M) -> PureResult<GradientSummary> {
+    fn collect_gradient_summary<M: Module + ?Sized>(module: &M) -> PureResult<GradientSummary> {
         let mut accumulator = CurvatureGradientAccumulator::default();
         module.visit_parameters(&mut |param| {
             let mut accounted = false;
@@ -2636,7 +3129,7 @@ impl ModuleTrainer {
         Ok(accumulator.finish())
     }
 
-    fn retune_hypergrads<M: Module>(
+    fn retune_hypergrads<M: Module + ?Sized>(
         module: &mut M,
         curvature: f32,
         learning_rate: f32,
@@ -2805,7 +3298,11 @@ impl ModuleTrainer {
         self.psychoid_log = schedule.psychoid_log();
     }
 
-    fn scale_learning_rates<M: Module>(&mut self, module: &mut M, factor: f32) -> PureResult<()> {
+    fn scale_learning_rates<M: Module + ?Sized>(
+        &mut self,
+        module: &mut M,
+        factor: f32,
+    ) -> PureResult<()> {
         if !factor.is_finite() || factor <= 0.0 {
             return Ok(());
         }
@@ -2830,7 +3327,11 @@ impl ModuleTrainer {
     }
 
     #[cfg(feature = "collapse")]
-    fn apply_grad_scale<M: Module>(&self, module: &mut M, scale: f32) -> PureResult<()> {
+    fn apply_grad_scale<M: Module + ?Sized>(
+        &self,
+        module: &mut M,
+        scale: f32,
+    ) -> PureResult<()> {
         if (scale - 1.0).abs() <= f32::EPSILON {
             return Ok(());
         }
@@ -2841,7 +3342,11 @@ impl ModuleTrainer {
     }
 
     #[cfg(feature = "collapse")]
-    fn clip_grad_global_norm<M: Module>(&self, module: &mut M, max_norm: f32) -> PureResult<()> {
+    fn clip_grad_global_norm<M: Module + ?Sized>(
+        &self,
+        module: &mut M,
+        max_norm: f32,
+    ) -> PureResult<()> {
         if max_norm <= 0.0 {
             return Ok(());
         }
@@ -2859,7 +3364,11 @@ impl ModuleTrainer {
     }
 
     #[cfg(feature = "collapse")]
-    fn optimizer_mul_lr<M: Module>(&mut self, module: &mut M, factor: f32) -> PureResult<()> {
+    fn optimizer_mul_lr<M: Module + ?Sized>(
+        &mut self,
+        module: &mut M,
+        factor: f32,
+    ) -> PureResult<()> {
         if !factor.is_finite() || factor <= 0.0 {
             return Ok(());
         }
@@ -2876,7 +3385,7 @@ impl ModuleTrainer {
     }
 
     #[cfg(feature = "psi")]
-    fn collect_grad_l2<M: Module>(module: &M) -> PureResult<f32> {
+    fn collect_grad_l2<M: Module + ?Sized>(module: &M) -> PureResult<f32> {
         let mut sum = 0.0f64;
         module.visit_parameters(&mut |param| {
             if let Some(tape) = param.hypergrad() {

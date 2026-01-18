@@ -82,3 +82,11 @@ uuid = { version = "1", features = ["v4"] }
 
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"
+
+[[example]]
+name = "custom_operator_demo"
+path = "../../examples/custom_operator_demo.rs"
+
+[[example]]
+name = "plugin_system_demo"
+path = "../../examples/plugin_system_demo.rs"

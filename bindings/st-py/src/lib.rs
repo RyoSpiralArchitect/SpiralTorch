@@ -11,6 +11,8 @@ mod nn;
 mod spiral_rl;
 mod rec;
 mod telemetry;
+mod plugin;
+mod ops;
 mod pure;
 mod planner;
 mod spiralk;
@@ -220,6 +222,8 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     spiral_rl::register(py, m)?;
     rec::register(py, m)?;
     telemetry::register(py, m)?;
+    plugin::register(py, m)?;
+    ops::register_module(py, m)?;
 
     let sot_module = PyModule::new_bound(py, "spiraltorch.sot")?;
     sot::module(py, &sot_module)?;
@@ -286,6 +290,8 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "spiral_rl",
         "rec",
         "telemetry",
+        "plugin",
+        "ops",
         "ecosystem",
         "hpo",
         "inference",

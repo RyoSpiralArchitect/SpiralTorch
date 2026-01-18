@@ -37,13 +37,21 @@ struct ModuleSnapshot {
     parameters: HashMap<String, StoredTensor>,
 }
 
-fn to_snapshot<M: Module>(module: &M) -> PureResult<ModuleSnapshot> {
+fn to_snapshot<M: Module + ?Sized>(module: &M) -> PureResult<ModuleSnapshot> {
     let state = module.state_dict()?;
     let mut parameters = HashMap::new();
     for (name, tensor) in state {
         parameters.insert(name, StoredTensor::from_tensor(&tensor));
     }
     Ok(ModuleSnapshot { parameters })
+}
+
+fn snapshot_from_state(state: &HashMap<String, Tensor>) -> ModuleSnapshot {
+    let mut parameters = HashMap::new();
+    for (name, tensor) in state {
+        parameters.insert(name.clone(), StoredTensor::from_tensor(tensor));
+    }
+    ModuleSnapshot { parameters }
 }
 
 fn from_snapshot(snapshot: ModuleSnapshot) -> PureResult<HashMap<String, Tensor>> {
@@ -66,7 +74,7 @@ fn serde_error(err: impl ToString) -> TensorError {
     }
 }
 
-pub fn save_json<M: Module, P: AsRef<Path>>(module: &M, path: P) -> PureResult<()> {
+pub fn save_json<M: Module + ?Sized, P: AsRef<Path>>(module: &M, path: P) -> PureResult<()> {
     let snapshot = to_snapshot(module)?;
     let file = File::create(path.as_ref()).map_err(io_error)?;
     let writer = BufWriter::new(file);
@@ -74,7 +82,10 @@ pub fn save_json<M: Module, P: AsRef<Path>>(module: &M, path: P) -> PureResult<(
     Ok(())
 }
 
-pub fn load_json<M: Module, P: AsRef<Path>>(module: &mut M, path: P) -> PureResult<()> {
+pub fn load_json<M: Module + ?Sized, P: AsRef<Path>>(
+    module: &mut M,
+    path: P,
+) -> PureResult<()> {
     let file = File::open(path.as_ref()).map_err(io_error)?;
     let reader = BufReader::new(file);
     let snapshot: ModuleSnapshot = serde_json::from_reader(reader).map_err(serde_error)?;
@@ -82,7 +93,25 @@ pub fn load_json<M: Module, P: AsRef<Path>>(module: &mut M, path: P) -> PureResu
     module.load_state_dict(&state)
 }
 
-pub fn save_bincode<M: Module, P: AsRef<Path>>(module: &M, path: P) -> PureResult<()> {
+pub fn save_state_dict_json<P: AsRef<Path>>(
+    state: &HashMap<String, Tensor>,
+    path: P,
+) -> PureResult<()> {
+    let snapshot = snapshot_from_state(state);
+    let file = File::create(path.as_ref()).map_err(io_error)?;
+    let writer = BufWriter::new(file);
+    serde_json::to_writer_pretty(writer, &snapshot).map_err(serde_error)?;
+    Ok(())
+}
+
+pub fn load_state_dict_json<P: AsRef<Path>>(path: P) -> PureResult<HashMap<String, Tensor>> {
+    let file = File::open(path.as_ref()).map_err(io_error)?;
+    let reader = BufReader::new(file);
+    let snapshot: ModuleSnapshot = serde_json::from_reader(reader).map_err(serde_error)?;
+    from_snapshot(snapshot)
+}
+
+pub fn save_bincode<M: Module + ?Sized, P: AsRef<Path>>(module: &M, path: P) -> PureResult<()> {
     let snapshot = to_snapshot(module)?;
     let file = File::create(path.as_ref()).map_err(io_error)?;
     let writer = BufWriter::new(file);
@@ -90,12 +119,33 @@ pub fn save_bincode<M: Module, P: AsRef<Path>>(module: &M, path: P) -> PureResul
     Ok(())
 }
 
-pub fn load_bincode<M: Module, P: AsRef<Path>>(module: &mut M, path: P) -> PureResult<()> {
+pub fn load_bincode<M: Module + ?Sized, P: AsRef<Path>>(
+    module: &mut M,
+    path: P,
+) -> PureResult<()> {
     let file = File::open(path.as_ref()).map_err(io_error)?;
     let reader = BufReader::new(file);
     let snapshot: ModuleSnapshot = bincode::deserialize_from(reader).map_err(serde_error)?;
     let state = from_snapshot(snapshot)?;
     module.load_state_dict(&state)
+}
+
+pub fn save_state_dict_bincode<P: AsRef<Path>>(
+    state: &HashMap<String, Tensor>,
+    path: P,
+) -> PureResult<()> {
+    let snapshot = snapshot_from_state(state);
+    let file = File::create(path.as_ref()).map_err(io_error)?;
+    let writer = BufWriter::new(file);
+    bincode::serialize_into(writer, &snapshot).map_err(serde_error)?;
+    Ok(())
+}
+
+pub fn load_state_dict_bincode<P: AsRef<Path>>(path: P) -> PureResult<HashMap<String, Tensor>> {
+    let file = File::open(path.as_ref()).map_err(io_error)?;
+    let reader = BufReader::new(file);
+    let snapshot: ModuleSnapshot = bincode::deserialize_from(reader).map_err(serde_error)?;
+    from_snapshot(snapshot)
 }
 
 #[cfg(test)]

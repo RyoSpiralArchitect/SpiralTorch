@@ -34,6 +34,20 @@ NumPy, no PyTorch, and no shim layers.
 - `SpiralLightning` harness for quick notebook experiments—prepare modules,
   run epochs, and stream results without manually juggling trainers or
   schedules.
+- Event observability via `spiraltorch.plugin`—subscribe, listen queues, or
+  record JSONL streams with `plugin.record(...)`.
+- Custom operator registration via `spiraltorch.ops` with flexible `register`
+  calls, `ops.signature(...)`, and a human-friendly `ops.describe(...)`.
+- Built-in module + state-dict serialization helpers (`spiraltorch.nn.save_json` /
+  `spiraltorch.nn.load_json`, plus bincode equivalents) for `Linear`,
+  `Sequential`, and core layer modules; pass `None` to `load_json` to get a
+  state dict back. The higher-level `spiraltorch.nn.save` / `load` helpers
+  auto-detect JSON vs bincode and emit a compact manifest alongside weights.
+- Expanded loss surface: `MeanSquaredError`, `HyperbolicCrossEntropy`
+  (`CrossEntropy` alias), `FocalLoss`, `ContrastiveLoss`, and `TripletLoss`.
+- Direct access to the core A/B/C roundtable trainer via
+  `spiraltorch.nn.ModuleTrainer` (`RoundtableConfig`, `RoundtableSchedule`,
+  `EpochStats`).
 - Streaming dataset helpers via `spiraltorch.dataset`—build a
   shuffle/batch/prefetch pipeline entirely in Rust using the native
   `DataLoader`.
@@ -81,6 +95,12 @@ maturin build -m bindings/st-py/Cargo.toml --release --locked --features hip,log
 
 # Install the wheel you just built
 pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
+```
+
+## Smoke tests (no pytest required)
+
+```bash
+PYTHONNOUSERSITE=1 python3 -s -m unittest bindings/st-py/tests/test_unittest_smoke.py
 ```
 
 ## Minimal usage

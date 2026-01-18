@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import cmath as _cmath
+import json as _json
 import math as _math
+import os as _os
+import pathlib as _pathlib
 import time as _time
 import threading as _threading
 import types as _types
@@ -220,6 +223,7 @@ _PREDECLARED_SUBMODULES: list[tuple[str, str]] = [
     ("dataset", "Datasets & loaders"),
     ("linalg", "Linear algebra utilities"),
     ("optim", "Optimizers / gradient tapes"),
+    ("ops", "Custom operator registry"),
     ("planner", "Planning & device heuristics"),
     ("sot", "SoT-3Dφ spiral planners"),
     ("spiralk", "SpiralK DSL & hint bridges"),
@@ -234,6 +238,7 @@ _PREDECLARED_SUBMODULES: list[tuple[str, str]] = [
     ("spiral_rl", "Reinforcement learning components"),
     ("rec", "Reconstruction / signal processing"),
     ("telemetry", "Telemetry / dashboards / metrics"),
+    ("plugin", "Plugin/event observability"),
     ("ecosystem", "Integrations & ecosystem glue"),
     ("selfsup", "Self-supervised objectives"),
     ("export", "Model export & compression"),
@@ -1540,6 +1545,16 @@ _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
         "Scaler": ("Scaler",),
         "NonLiner": ("NonLiner",),
         "Dropout": ("Dropout",),
+        "ModuleTrainer": ("ModuleTrainer",),
+        "RoundtableConfig": ("RoundtableConfig",),
+        "RoundtableSchedule": ("RoundtableSchedule",),
+        "EpochStats": ("EpochStats",),
+        "MeanSquaredError": ("MeanSquaredError",),
+        "HyperbolicCrossEntropy": ("HyperbolicCrossEntropy",),
+        "CrossEntropy": ("HyperbolicCrossEntropy",),
+        "FocalLoss": ("FocalLoss",),
+        "ContrastiveLoss": ("ContrastiveLoss",),
+        "TripletLoss": ("TripletLoss",),
         "Dataset": ("_NnDataset",),
         "DataLoader": ("_NnDataLoader",),
         "DataLoaderIter": ("_NnDataLoaderIter",),
@@ -2704,8 +2719,14 @@ class _ForwardingModule(_types.ModuleType):
         if attr.startswith("_"):
             raise AttributeError(f"module '{self.__name__}' has no attribute '{attr}'")
 
-        # Prefer already-exposed globals so top-level mirrors stay consistent.
+        # Prefer the backing Rust submodule when available; otherwise fall back
+        # to already-exposed globals so top-level mirrors stay consistent.
         if attr in globals():
+            scoped = _resolve_rs_attr(f"{self._forward_key}.{attr}")
+            if scoped is not None:
+                setattr(self, attr, scoped)
+                _register_module_export(self, attr)
+                return scoped
             value = globals()[attr]
             setattr(self, attr, value)
             _register_module_export(self, attr)
@@ -2853,6 +2874,398 @@ def _mirror_into_module(
     return module
 
 
+class _PluginRecorder:
+    _subscribe = None
+    _unsubscribe = None
+    _subscribe_many = None
+    _unsubscribe_many = None
+
+    def __init__(
+        self,
+        path: _Any,
+        event_types: str | _Iterable[str] = "*",
+        *,
+        mode: str = "a",
+        flush: bool = True,
+    ) -> None:
+        if self._subscribe is None or self._unsubscribe is None:
+            raise RuntimeError("plugin core is not available in this build")
+        if "b" in mode:
+            raise ValueError("mode must be text (no 'b')")
+
+        if isinstance(event_types, str):
+            types = [event_types]
+        else:
+            try:
+                types = list(event_types)
+            except TypeError as exc:
+                raise TypeError("event_types must be a string or iterable of strings") from exc
+        if not types:
+            raise ValueError("event_types must contain at least one entry")
+
+        self._event_types = types
+        self._path = _os.fspath(path)
+        self._file = open(self._path, mode, encoding="utf-8")
+        self._flush = bool(flush)
+        self._lock = _threading.Lock()
+        self._closed = False
+        self._subscriptions: list[tuple[str, int]] = []
+
+        def _on_event(event: _Dict[str, _Any]) -> None:
+            if self._closed:
+                return
+            line = _json.dumps(event, ensure_ascii=True)
+            with self._lock:
+                self._file.write(line + "\n")
+                if self._flush:
+                    self._file.flush()
+
+        self._callback = _on_event
+        if self._subscribe_many is not None and len(self._event_types) > 1:
+            self._subscriptions = self._subscribe_many(self._event_types, _on_event)
+        else:
+            for event_type in self._event_types:
+                sub_id = self._subscribe(event_type, _on_event)
+                self._subscriptions.append((event_type, sub_id))
+
+    @property
+    def path(self) -> str:
+        return self._path
+
+    @property
+    def event_types(self) -> list[str]:
+        return list(self._event_types)
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
+    def close(self) -> bool:
+        if self._closed:
+            return False
+        self._closed = True
+        if self._subscriptions:
+            if self._unsubscribe_many is not None and len(self._subscriptions) > 1:
+                self._unsubscribe_many(self._subscriptions)
+            else:
+                for event_type, sub_id in self._subscriptions:
+                    self._unsubscribe(event_type, sub_id)
+            self._subscriptions.clear()
+        with self._lock:
+            self._file.close()
+        return True
+
+    def __enter__(self) -> "_PluginRecorder":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
+
+    def __repr__(self) -> str:
+        status = "closed" if self._closed else "open"
+        return f"PluginRecorder(path={self._path!r}, events={self._event_types!r}, {status})"
+
+
+def _install_ops_helpers() -> None:
+    ops_module = _ensure_submodule("ops")
+    native_register = _resolve_rs_attr("ops.register")
+    native_execute = _resolve_rs_attr("ops.execute")
+    native_metadata = _resolve_rs_attr("ops.metadata")
+    if native_register is None:
+        return
+    if getattr(ops_module, "_register_native", None) is None:
+        ops_module._register_native = native_register
+    if native_execute is not None and getattr(ops_module, "_execute_native", None) is None:
+        ops_module._execute_native = native_execute
+    if native_metadata is not None and getattr(ops_module, "_metadata_native", None) is None:
+        ops_module._metadata_native = native_metadata
+
+    def signature(num_inputs: int, num_outputs: int):
+        def decorator(fn: _Callable[..., _Any]):
+            setattr(fn, "__spiral_num_inputs__", int(num_inputs))
+            setattr(fn, "__spiral_num_outputs__", int(num_outputs))
+            return fn
+
+        return decorator
+
+    def register(name: str, *args: _Any, **kwargs: _Any) -> _Any:
+        if args and isinstance(args[0], int):
+            if len(args) < 2:
+                raise TypeError("register(name, num_inputs, num_outputs, forward, ...) expected")
+            num_inputs = int(args[0])
+            num_outputs = int(args[1])
+            forward = None
+            if len(args) >= 3:
+                forward = args[2]
+            else:
+                forward = kwargs.pop("forward", None)
+            if forward is None:
+                raise TypeError("register() missing forward callback")
+            if len(args) >= 4 and "backward" not in kwargs:
+                kwargs["backward"] = args[3]
+            if len(args) > 4:
+                raise TypeError("register() received too many positional arguments")
+            return native_register(name, num_inputs, num_outputs, forward, **kwargs)
+
+        forward = None
+        backward = None
+        if args:
+            forward = args[0]
+            if len(args) > 1:
+                backward = args[1]
+            if len(args) > 2:
+                raise TypeError("register(name, forward, backward=None, *, ...) expected")
+        else:
+            forward = kwargs.pop("forward", None)
+            backward = kwargs.pop("backward", None)
+        if forward is None:
+            raise TypeError("register() missing forward callback")
+        if backward is None:
+            backward = kwargs.pop("backward", None)
+
+        num_inputs = kwargs.pop("num_inputs", None)
+        num_outputs = kwargs.pop("num_outputs", None)
+        if num_inputs is None:
+            num_inputs = getattr(forward, "__spiral_num_inputs__", None)
+        if num_outputs is None:
+            num_outputs = getattr(forward, "__spiral_num_outputs__", None)
+        if num_inputs is None:
+            num_inputs = 0
+        if num_outputs is None:
+            num_outputs = 0
+        return native_register(
+            name,
+            int(num_inputs),
+            int(num_outputs),
+            forward,
+            backward=backward,
+            **kwargs,
+        )
+
+    register.__doc__ = (
+        "Register a custom operator.\n\n"
+        "Usage:\n"
+        "  register(name, forward, backward=None, *, num_inputs=0, num_outputs=0, ...)\n"
+        "  register(name, num_inputs, num_outputs, forward, *, ...)\n"
+        "If num_inputs/num_outputs are 0, input/output counts are not enforced."
+    )
+
+    def execute(
+        name: str,
+        *inputs: _Any,
+        return_single: bool = False,
+        **kwargs: _Any,
+    ) -> _Any:
+        if native_execute is None:
+            raise RuntimeError("ops.execute is not available in this build")
+        inputs_kw = kwargs.pop("inputs", None)
+        if kwargs:
+            raise TypeError(f"execute() got unexpected keyword arguments: {', '.join(kwargs)}")
+        if inputs and inputs_kw is not None:
+            raise TypeError("execute() received both positional inputs and inputs=...")
+        if inputs_kw is None:
+            if len(inputs) == 1 and isinstance(inputs[0], (_IterableABC, _SequenceABC)):
+                tensor_type = _session_tensor_type()
+                if tensor_type is None or not isinstance(inputs[0], tensor_type):
+                    inputs_kw = inputs[0]
+                else:
+                    inputs_kw = list(inputs)
+            else:
+                inputs_kw = list(inputs)
+        return native_execute(name, inputs_kw, return_single=return_single)
+
+    def describe(name: str) -> str:
+        if native_metadata is None:
+            raise RuntimeError("ops.metadata is not available in this build")
+        meta = native_metadata(name)
+        signature = f"{meta.get('name', name)}({meta.get('num_inputs', '?')} -> {meta.get('num_outputs', '?')})"
+        description = meta.get("description", "")
+        backends = meta.get("backends", [])
+        attrs = meta.get("attributes", {})
+        parts = [signature]
+        if description:
+            parts.append(description)
+        if backends:
+            parts.append(f"backends: {', '.join(backends)}")
+        if attrs:
+            parts.append(f"attrs: {attrs}")
+        return " | ".join(parts)
+
+    ops_module.signature = signature
+    ops_module.register = register
+    ops_module.execute = execute
+    ops_module.describe = describe
+    _register_module_export(ops_module, "signature")
+    _register_module_export(ops_module, "register")
+    _register_module_export(ops_module, "execute")
+    _register_module_export(ops_module, "describe")
+
+
+def _install_plugin_helpers() -> None:
+    plugin_module = _ensure_submodule("plugin")
+    subscribe = _resolve_rs_attr("plugin.subscribe")
+    unsubscribe = _resolve_rs_attr("plugin.unsubscribe")
+    if subscribe is None or unsubscribe is None:
+        return
+    _PluginRecorder._subscribe = subscribe
+    _PluginRecorder._unsubscribe = unsubscribe
+    _PluginRecorder._subscribe_many = _resolve_rs_attr("plugin.subscribe_many")
+    _PluginRecorder._unsubscribe_many = _resolve_rs_attr("plugin.unsubscribe_many")
+
+    def record(
+        path: _Any,
+        event_types: str | _Iterable[str] = "*",
+        *,
+        mode: str = "a",
+        flush: bool = True,
+    ) -> _PluginRecorder:
+        return _PluginRecorder(path, event_types, mode=mode, flush=flush)
+
+    _PluginRecorder.__module__ = plugin_module.__name__
+    record.__module__ = plugin_module.__name__
+    plugin_module.PluginRecorder = _PluginRecorder
+    plugin_module.record = record
+    _register_module_export(plugin_module, "PluginRecorder")
+    _register_module_export(plugin_module, "record")
+
+
+def _install_nn_helpers() -> None:
+    nn_module = _ensure_submodule("nn")
+    save_json = _resolve_rs_attr("nn.save_json")
+    load_json = _resolve_rs_attr("nn.load_json")
+    save_bincode = _resolve_rs_attr("nn.save_bincode")
+    load_bincode = _resolve_rs_attr("nn.load_bincode")
+    if save_json is None or load_json is None or save_bincode is None or load_bincode is None:
+        return
+
+    def _weights_format(path: _Any) -> str:
+        path_str = _os.fspath(path)
+        lower = path_str.lower()
+        if lower.endswith(".manifest.json"):
+            return "manifest"
+        suffix = _pathlib.Path(path_str).suffix.lower()
+        if suffix == ".json":
+            return "json"
+        if suffix in {".bin", ".bincode", ".bc"}:
+            return "bincode"
+        raise ValueError(
+            "unsupported weights extension (expected .json, .bin, .bincode, .bc, or .manifest.json)"
+        )
+
+    def _manifest_path(path: _pathlib.Path) -> _pathlib.Path:
+        if path.name.lower().endswith(".manifest.json"):
+            return path
+        return path.with_suffix(".manifest.json")
+
+    def _state_dict_entries(state: _Any) -> list[tuple[str, _Any]]:
+        if isinstance(state, _Mapping):
+            items = list(state.items())
+        else:
+            items = list(state)
+        return [(str(name), tensor) for name, tensor in items]
+
+    def _state_dict_summary(state: _Any) -> list[dict[str, _Any]]:
+        summary: list[dict[str, _Any]] = []
+        for name, tensor in _state_dict_entries(state):
+            shape = None
+            try:
+                shape = list(tensor.shape())
+            except Exception:
+                rows = getattr(tensor, "rows", None)
+                cols = getattr(tensor, "cols", None)
+                if rows is not None and cols is not None:
+                    shape = [int(rows), int(cols)]
+            summary.append({"name": name, "shape": shape})
+        return summary
+
+    def save(path: _Any, target: _Any) -> None:
+        path = _pathlib.Path(_os.fspath(path))
+        fmt = _weights_format(path)
+        if fmt == "manifest":
+            raise ValueError("save() expects a weights path, not a manifest path")
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        state = None
+        if hasattr(target, "state_dict"):
+            state = target.state_dict()
+
+        if fmt == "json":
+            if state is not None:
+                save_json(state, str(path))
+            else:
+                save_json(target, str(path))
+        else:
+            if state is not None:
+                save_bincode(state, str(path))
+            else:
+                save_bincode(target, str(path))
+
+        if state is None:
+            return
+
+        manifest = {
+            "format_version": 1,
+            "spiraltorch_version": __version__,
+            "module_type": type(target).__name__,
+            "weights": {
+                "path": _os.path.relpath(str(path), str(_manifest_path(path).parent)),
+                "format": fmt,
+            },
+            "state_dict": _state_dict_summary(state),
+        }
+        manifest_path = _manifest_path(path)
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(manifest_path, "w", encoding="utf-8") as handle:
+            _json.dump(manifest, handle, ensure_ascii=True, indent=2)
+
+    def load(path: _Any, target: _Any | None = None) -> _Any:
+        path = _pathlib.Path(_os.fspath(path))
+        fmt = _weights_format(path)
+        if fmt == "manifest":
+            with open(path, "r", encoding="utf-8") as handle:
+                manifest = _json.load(handle)
+            weights = manifest.get("weights", {})
+            weights_path = weights.get("path")
+            if not weights_path:
+                raise ValueError("manifest is missing weights.path")
+            weights_path = path.parent / weights_path
+            fmt = weights.get("format") or _weights_format(weights_path)
+            path = weights_path
+
+        if fmt == "json":
+            if target is None:
+                return load_json(None, str(path))
+            if hasattr(target, "load_state_dict"):
+                state = load_json(None, str(path))
+                target.load_state_dict(state)
+                return None
+            load_json(target, str(path))
+            return None
+
+        if fmt == "bincode":
+            if target is None:
+                return load_bincode(None, str(path))
+            if hasattr(target, "load_state_dict"):
+                state = load_bincode(None, str(path))
+                target.load_state_dict(state)
+                return None
+            load_bincode(target, str(path))
+            return None
+
+        raise ValueError("unsupported weights format")
+
+    nn_module.save = save
+    nn_module.load = load
+    _register_module_export(nn_module, "save")
+    _register_module_export(nn_module, "load")
+
+
 for _name, _doc in _PREDECLARED_SUBMODULES:
     _module = _ensure_submodule(_name, _doc)
     if not isinstance(_module, _ForwardingModule):
@@ -2867,6 +3280,11 @@ for _name, _doc in _PREDECLARED_SUBMODULES:
         sys.modules[_fq] = _forward
         setattr(sys.modules[__name__], _name, _forward)
         globals()[_name] = _forward
+
+
+_install_ops_helpers()
+_install_plugin_helpers()
+_install_nn_helpers()
 
 
 _compat_children = {
@@ -3924,9 +4342,11 @@ for _name in [
     "dataset",
     "linalg",
     "optim",
+    "ops",
     "spiral_rl",
     "rec",
     "telemetry",
+    "plugin",
     "ecosystem",
     "selfsup",
     "export",
