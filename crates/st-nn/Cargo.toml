@@ -66,3 +66,7 @@ path = "../../examples/zspace_trace_demo.rs"
 [[example]]
 name = "planner_trace_demo"
 path = "../../examples/planner_trace_demo.rs"
+
+[[example]]
+name = "layernorm_wgpu_demo"
+path = "../../examples/layernorm_wgpu_demo.rs"

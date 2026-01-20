@@ -256,7 +256,7 @@ tensor shims, no translation layers, and no tracebacks.
     transcripts, and ψ telemetry double as explainability artifacts, enabling
     decision-path inspection without leaving the Z-space calculus.
     
-**Current release:** `spiraltorch==0.3.1` (abi3 wheel, Python ≥3.8)  
+**Current release:** `spiraltorch==0.3.6` (abi3 wheel, Python ≥3.8)  
 **Targets:** CPU (always), MPS, Vulkan/DX (WGPU), CUDA, HIP/ROCm
 
 ---
@@ -264,7 +264,7 @@ tensor shims, no translation layers, and no tracebacks.
 ## Install (pip)
 
 ```bash
-pip install -U spiraltorch==0.3.2
+pip install -U spiraltorch==0.3.6
 ```
 
 - Wheels are **abi3**; you can use any CPython ≥ 3.8.
@@ -332,6 +332,11 @@ pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
 If your local `python` aborts during startup because of a third-party `sitecustomize.py`, rerun the commands above with `PYTHONNOUSERSITE=1` (or `python -s`).
 
 Linux note: build inside a manylinux container (e.g. via GitHub Actions) for broadly-compatible wheels; building directly on Ubuntu may produce a `manylinux_2_3x` tag that won’t install on older distros.
+
+### CI wheel stash (GitHub Actions)
+
+- Artifact build: `.github/workflows/wheels.yml` (Windows / Linux / macOS-13)
+- Release assets: `.github/workflows/release_wheels.yml` (attaches wheels to the GitHub Release)
 
 ---
 

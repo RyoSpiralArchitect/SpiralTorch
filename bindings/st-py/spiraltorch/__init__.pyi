@@ -122,6 +122,21 @@ class Tensor:
         attn_bias: Tensor | None = ...,
         backend: str | None = ...,
     ) -> Tensor: ...
+    def layer_norm_affine(
+        self,
+        gamma: Tensor,
+        beta: Tensor,
+        *,
+        epsilon: float = ...,
+    ) -> Tensor: ...
+    def layer_norm_affine_add(
+        self,
+        residual: Tensor,
+        gamma: Tensor,
+        beta: Tensor,
+        *,
+        epsilon: float = ...,
+    ) -> Tensor: ...
     def add(self, other: Tensor) -> Tensor: ...
     def sub(self, other: Tensor) -> Tensor: ...
     def scale(self, value: float) -> Tensor: ...

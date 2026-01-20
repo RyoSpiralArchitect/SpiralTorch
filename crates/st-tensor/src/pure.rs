@@ -2068,6 +2068,194 @@ impl Tensor {
         })
     }
 
+    /// Layer normalisation over the last dimension (`cols`) with affine parameters.
+    pub fn layer_norm_affine(
+        &self,
+        gamma: &Tensor,
+        beta: &Tensor,
+        epsilon: f32,
+    ) -> PureResult<Tensor> {
+        self.layer_norm_affine_add_impl(None, gamma, beta, epsilon)
+    }
+
+    /// Layer normalisation over `self + residual` with affine parameters.
+    pub fn layer_norm_affine_add(
+        &self,
+        residual: &Tensor,
+        gamma: &Tensor,
+        beta: &Tensor,
+        epsilon: f32,
+    ) -> PureResult<Tensor> {
+        self.layer_norm_affine_add_impl(Some(residual), gamma, beta, epsilon)
+    }
+
+    fn layer_norm_affine_add_impl(
+        &self,
+        residual: Option<&Tensor>,
+        gamma: &Tensor,
+        beta: &Tensor,
+        epsilon: f32,
+    ) -> PureResult<Tensor> {
+        if !epsilon.is_finite() || epsilon < 0.0 {
+            return Err(TensorError::NonFiniteValue {
+                label: "layernorm_epsilon",
+                value: epsilon,
+            });
+        }
+
+        let (rows, cols) = self.shape();
+        if cols == 0 || rows == 0 {
+            return Err(TensorError::InvalidDimensions { rows, cols });
+        }
+        self.layout.expect_row_major("layer_norm input")?;
+
+        if gamma.shape() != (1, cols) {
+            return Err(TensorError::ShapeMismatch {
+                left: gamma.shape(),
+                right: (1, cols),
+            });
+        }
+        if beta.shape() != (1, cols) {
+            return Err(TensorError::ShapeMismatch {
+                left: beta.shape(),
+                right: (1, cols),
+            });
+        }
+        gamma.layout.expect_row_major("layer_norm gamma")?;
+        beta.layout.expect_row_major("layer_norm beta")?;
+
+        let residual_data = if let Some(residual) = residual {
+            if residual.shape() != (rows, cols) {
+                return Err(TensorError::ShapeMismatch {
+                    left: residual.shape(),
+                    right: (rows, cols),
+                });
+            }
+            residual.layout.expect_row_major("layer_norm residual")?;
+            Some(residual.data())
+        } else {
+            None
+        };
+
+        let volume = rows.checked_mul(cols).ok_or_else(|| TensorError::TensorVolumeExceeded {
+            label: "layer_norm",
+            volume: rows,
+            max_volume: usize::MAX / cols.max(1),
+        })?;
+
+        let gamma_slice = gamma.data();
+        let beta_slice = beta.data();
+
+        let prefer_wgpu = volume >= 4096;
+        let (tensor, backend_used): (Tensor, &'static str) = {
+            #[cfg(feature = "wgpu")]
+            {
+                let wgpu_tensor: Option<Tensor> = if prefer_wgpu
+                    && wgpu_dense::is_available()
+                    && wgpu_dense::supports_layer_norm(rows, cols)
+                {
+                    let result = match residual_data {
+                        Some(residual_slice) => wgpu_dense::layer_norm_affine_add(
+                            self.data(),
+                            residual_slice,
+                            gamma_slice,
+                            beta_slice,
+                            rows,
+                            cols,
+                            epsilon,
+                        ),
+                        None => wgpu_dense::layer_norm_affine(
+                            self.data(),
+                            gamma_slice,
+                            beta_slice,
+                            rows,
+                            cols,
+                            epsilon,
+                        ),
+                    };
+                    match result {
+                        Ok(buffer) => Some(Tensor::from_vec(rows, cols, buffer)?),
+                        Err(_) => None,
+                    }
+                } else {
+                    None
+                };
+
+                if let Some(tensor) = wgpu_tensor {
+                    (tensor, "wgpu")
+                } else {
+                    (self.layer_norm_cpu(residual_data, gamma_slice, beta_slice, epsilon)?, "cpu")
+                }
+            }
+            #[cfg(not(feature = "wgpu"))]
+            {
+                let _ = prefer_wgpu;
+                (
+                    self.layer_norm_cpu(residual_data, gamma_slice, beta_slice, epsilon)?,
+                    "cpu",
+                )
+            }
+        };
+
+        crate::emit_tensor_op("layer_norm", &[rows, cols], &[rows, cols]);
+        if backend_used != "wgpu" {
+            crate::emit_tensor_op_meta("layer_norm", || {
+                serde_json::json!({
+                    "backend": backend_used,
+                    "rows": rows,
+                    "cols": cols,
+                    "epsilon": epsilon,
+                    "flags": {
+                        "use_residual": residual_data.is_some(),
+                    }
+                })
+            });
+        }
+        Ok(tensor)
+    }
+
+    fn layer_norm_cpu(
+        &self,
+        residual: Option<&[f32]>,
+        gamma: &[f32],
+        beta: &[f32],
+        epsilon: f32,
+    ) -> PureResult<Tensor> {
+        let (rows, cols) = self.shape();
+        let cols_f = cols as f32;
+        let mut output = vec![0.0f32; rows * cols];
+        let input = self.data();
+
+        for r in 0..rows {
+            let offset = r * cols;
+            let mut sum = 0.0f32;
+            let mut sumsq = 0.0f32;
+            for c in 0..cols {
+                let idx = offset + c;
+                let mut v = input[idx];
+                if let Some(residual) = residual {
+                    v += residual[idx];
+                }
+                sum += v;
+                sumsq += v * v;
+            }
+            let mean = sum / cols_f;
+            let var = (sumsq / cols_f - mean * mean).max(0.0);
+            let denom = (var + epsilon).sqrt();
+            for c in 0..cols {
+                let idx = offset + c;
+                let mut v = input[idx];
+                if let Some(residual) = residual {
+                    v += residual[idx];
+                }
+                let normed = (v - mean) / denom;
+                output[idx] = normed * gamma[c] + beta[c];
+            }
+        }
+
+        Tensor::from_vec(rows, cols, output)
+    }
+
     /// Scaled dot-product attention using automatic backend selection.
     pub fn scaled_dot_attention(
         &self,

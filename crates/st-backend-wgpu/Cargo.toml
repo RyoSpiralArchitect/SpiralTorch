@@ -7,7 +7,7 @@ license = "AGPL-3.0-or-later"
 description = "WGPU backend kernels and pipeline loaders for SpiralTorch"
 
 [dependencies]
-wgpu = { version = "0.20", default-features = false, features = ["wgsl"] }
+wgpu = { version = "0.20", features = ["wgsl"] }
 thiserror = "2"
 bytemuck = { version = "1", features = ["derive"] }
 rand = "0.8"

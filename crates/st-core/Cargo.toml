@@ -52,7 +52,7 @@ tracing     = "0.1"
 once_cell   = { version = "1.19", optional = true }
 bytemuck    = { version = "1.16", optional = true, features = ["derive"] }
 pollster    = { version = "0.3",  optional = true }
-wgpu        = { version = "0.20", optional = true, default-features = false, features = ["wgsl"] }
+wgpu        = { version = "0.20", optional = true, features = ["wgsl"] }
 bitflags    = { version = "2.4", optional = true }
 parking_lot = { version = "0.12", optional = true }
 plotters    = { version = "0.3", optional = true, default-features = false, features = ["bitmap_backend", "bitmap_encoder"] }

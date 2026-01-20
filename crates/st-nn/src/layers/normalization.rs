@@ -1247,31 +1247,11 @@ impl Module for ZSpaceLayerNorm {
 impl Module for LayerNorm {
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
         self.guard_input(input)?;
-        let (rows, cols) = input.shape();
-        let mut output = Vec::with_capacity(rows * cols);
-        let gamma = self.gamma.value().data();
-        let beta = self.beta.value().data();
-        let epsilon = self.effective_epsilon();
-
-        for r in 0..rows {
-            let offset = r * cols;
-            let slice = &input.data()[offset..offset + cols];
-            let mean: f32 = slice.iter().copied().sum::<f32>() / cols as f32;
-            let variance: f32 = slice
-                .iter()
-                .map(|x| {
-                    let centered = *x - mean;
-                    centered * centered
-                })
-                .sum::<f32>()
-                / cols as f32;
-            let denom = (variance + epsilon).sqrt();
-            for c in 0..cols {
-                let normed = (slice[c] - mean) / denom;
-                output.push(normed * gamma[c] + beta[c]);
-            }
-        }
-        Tensor::from_vec(rows, cols, output)
+        input.layer_norm_affine(
+            self.gamma.value(),
+            self.beta.value(),
+            self.effective_epsilon(),
+        )
     }
 
     fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {

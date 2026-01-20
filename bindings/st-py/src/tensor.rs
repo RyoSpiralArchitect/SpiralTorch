@@ -1227,6 +1227,44 @@ impl PyTensor {
         Ok(PyTensor { inner: tensor })
     }
 
+    /// Layer normalisation with affine parameters.
+    #[pyo3(signature = (gamma, beta, *, epsilon=1e-5))]
+    pub fn layer_norm_affine(
+        &self,
+        gamma: &PyTensor,
+        beta: &PyTensor,
+        epsilon: f32,
+        py: Python<'_>,
+    ) -> PyResult<PyTensor> {
+        let tensor = py
+            .allow_threads(|| self.inner.layer_norm_affine(&gamma.inner, &beta.inner, epsilon))
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor { inner: tensor })
+    }
+
+    /// Layer normalisation over `self + residual` with affine parameters.
+    #[pyo3(signature = (residual, gamma, beta, *, epsilon=1e-5))]
+    pub fn layer_norm_affine_add(
+        &self,
+        residual: &PyTensor,
+        gamma: &PyTensor,
+        beta: &PyTensor,
+        epsilon: f32,
+        py: Python<'_>,
+    ) -> PyResult<PyTensor> {
+        let tensor = py
+            .allow_threads(|| {
+                self.inner.layer_norm_affine_add(
+                    &residual.inner,
+                    &gamma.inner,
+                    &beta.inner,
+                    epsilon,
+                )
+            })
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor { inner: tensor })
+    }
+
     /// Add (element-wise)
     pub fn add(&self, other: &PyTensor, py: Python<'_>) -> PyResult<PyTensor> {
         let tensor = py

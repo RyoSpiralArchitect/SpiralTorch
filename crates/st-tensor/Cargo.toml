@@ -57,7 +57,7 @@ faer = { version = "0.23", default-features = false, features = ["std", "rayon"]
 # Parallel execution for tiled CPU kernels.
 rayon = { version = "1.10" }
 # Optional; only needed if building WGPU kernel
-wgpu = { version = "0.20", optional = true, default-features = false, features = ["wgsl"] }
+wgpu = { version = "0.20", optional = true, features = ["wgsl"] }
 bytemuck = { version = "1.15", features = ["derive"], optional = true }
 pollster = { version = "0.3", optional = true }
 futures-intrusive = { version = "0.5", optional = true }

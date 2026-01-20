@@ -7,11 +7,14 @@ on:
 jobs:
   build-wheels:
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-13, ubuntu-22.04]
-        py: ['3.10', '3.11', '3.12']
+        os: [macos-13, ubuntu-22.04, windows-2022]
+        py: ['3.12']
         feat: ['wgpu,logic,kdsl']
     steps:
       - uses: actions/checkout@v4

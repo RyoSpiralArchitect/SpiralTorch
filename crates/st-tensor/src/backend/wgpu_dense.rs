@@ -35,6 +35,7 @@ const FUSED_GRAD_INPUT_WGSL_TEMPLATE: &str =
     include_str!("../wgpu_shaders/fused_grad_input_col2im.wgsl");
 const FUSED_GELU_BACK_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/fused_gelu_back.wgsl");
 const REDUCE_DB_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/reduce_db.wgsl");
+const LAYER_NORM_WGSL: &str = include_str!("../wgpu_shaders/layer_norm.wgsl");
 const RAMANUJAN_PI_WGSL: &str = include_str!("../wgpu_shaders/ramanujan_pi.wgsl");
 const ROW_SOFTMAX_WGSL: &str =
     include_str!("../../../st-backend-wgpu/src/shaders/softmax_workgroup.wgsl");
@@ -52,6 +53,7 @@ const FUSED_ATTENTION_MAX_HEAD_DIM: u32 = 256;
 const FUSED_GELU_BACK_WG_ROWS: u32 = 16;
 const FUSED_GELU_BACK_WG_COLS: u32 = 16;
 const REDUCE_DB_WORKGROUP: u32 = 256;
+const LAYER_NORM_WORKGROUP: u32 = 256;
 
 const FLAG_USE_BIAS: u32 = 1 << 0;
 const FLAG_FUSED_RELU: u32 = 1 << 1;
@@ -68,6 +70,7 @@ const QUANTIZATION_MIN_VOLUME: usize = 64 * 64;
 
 const FUSED_ATTENTION_FLAG_USE_Z_BIAS: u32 = 1 << 0;
 const FUSED_ATTENTION_FLAG_USE_ATTN_BIAS: u32 = 1 << 1;
+const LAYER_NORM_FLAG_USE_RESIDUAL: u32 = 1 << 0;
 
 const GRAD_INPUT_TILE_X: u32 = 4;
 const GRAD_INPUT_TILE_Y: u32 = 4;
@@ -443,6 +446,8 @@ struct GpuContext {
     fused_gelu_back_pipeline: Arc<ComputePipeline>,
     reduce_db_layout: BindGroupLayout,
     reduce_db_pipeline: Arc<ComputePipeline>,
+    layer_norm_layout: BindGroupLayout,
+    layer_norm_pipeline: Arc<ComputePipeline>,
     fused_conv_layout: BindGroupLayout,
     fused_conv_pipeline_layout: PipelineLayout,
     fused_conv_pipelines: Mutex<HashMap<TileConfig, Arc<ComputePipeline>>>,
@@ -464,13 +469,30 @@ impl GpuContext {
     fn new() -> Result<Self, String> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
         let adapter = pollster::block_on(async {
-            instance
-                .request_adapter(&wgpu::RequestAdapterOptions {
-                    power_preference: wgpu::PowerPreference::HighPerformance,
-                    compatible_surface: None,
-                    force_fallback_adapter: false,
-                })
-                .await
+            let opts = wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: None,
+                force_fallback_adapter: false,
+            };
+            if let Some(adapter) = instance.request_adapter(&opts).await {
+                return Some(adapter);
+            }
+
+            let opts = wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::LowPower,
+                compatible_surface: None,
+                force_fallback_adapter: false,
+            };
+            if let Some(adapter) = instance.request_adapter(&opts).await {
+                return Some(adapter);
+            }
+
+            let opts = wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::LowPower,
+                compatible_surface: None,
+                force_fallback_adapter: true,
+            };
+            instance.request_adapter(&opts).await
         })
         .ok_or_else(|| "no suitable WGPU adapter".to_string())?;
 
@@ -986,6 +1008,95 @@ impl GpuContext {
             },
         ));
 
+        let layer_norm_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("st.tensor.wgpu_dense.layer_norm.layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let layer_norm_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("st.tensor.wgpu_dense.layer_norm.pipeline_layout"),
+                bind_group_layouts: &[&layer_norm_layout],
+                push_constant_ranges: &[],
+            });
+
+        let layer_norm_shader = create_wgsl_module(
+            device.as_ref(),
+            "st.tensor.wgpu_dense.layer_norm",
+            LAYER_NORM_WGSL,
+        )
+        .map_err(|err| err.to_string())?;
+        let layer_norm_pipeline = Arc::new(device.create_compute_pipeline(
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("st.tensor.wgpu_dense.layer_norm"),
+                layout: Some(&layer_norm_pipeline_layout),
+                module: &layer_norm_shader,
+                entry_point: "main",
+                compilation_options: Default::default(),
+            },
+        ));
+
         let fused_attention = {
             let shader_source = FUSED_ATTENTION_WGSL_TEMPLATE
                 .replace("{WORKGROUP_SIZE}", &FUSED_ATTENTION_WORKGROUP.to_string())
@@ -1256,6 +1367,8 @@ impl GpuContext {
             fused_gelu_back_pipeline,
             reduce_db_layout,
             reduce_db_pipeline,
+            layer_norm_layout,
+            layer_norm_pipeline,
             fused_conv_layout,
             fused_conv_pipeline_layout,
             fused_conv_pipelines: Mutex::new(HashMap::new()),
@@ -3782,6 +3895,11 @@ mod tests {
     }
 
     #[test]
+    fn layer_norm_shader_wgsl_is_valid() {
+        assert_parses("layer norm", LAYER_NORM_WGSL);
+    }
+
+    #[test]
     fn row_softmax_shader_wgsl_is_valid() {
         assert_parses("row softmax", ROW_SOFTMAX_WGSL);
     }
@@ -3830,6 +3948,19 @@ struct RowSoftmaxParams {
     chimera_stripes: u32,
     flags: u32,
     mask_stride: u32,
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct LayerNormParams {
+    rows: u32,
+    cols: u32,
+    flags: u32,
+    _pad0: u32,
+    epsilon: f32,
+    _pad1: f32,
+    _pad2: f32,
+    _pad3: f32,
 }
 
 #[repr(C, align(16))]
@@ -5579,6 +5710,200 @@ pub fn gelu_backward(
     Ok(gz)
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn layer_norm_affine(
+    input: &[f32],
+    gamma: &[f32],
+    beta: &[f32],
+    rows: usize,
+    cols: usize,
+    epsilon: f32,
+) -> Result<Vec<f32>, String> {
+    layer_norm_internal(input, None, gamma, beta, rows, cols, epsilon)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn layer_norm_affine_add(
+    input: &[f32],
+    residual: &[f32],
+    gamma: &[f32],
+    beta: &[f32],
+    rows: usize,
+    cols: usize,
+    epsilon: f32,
+) -> Result<Vec<f32>, String> {
+    layer_norm_internal(input, Some(residual), gamma, beta, rows, cols, epsilon)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn layer_norm_internal(
+    input: &[f32],
+    residual: Option<&[f32]>,
+    gamma: &[f32],
+    beta: &[f32],
+    rows: usize,
+    cols: usize,
+    epsilon: f32,
+) -> Result<Vec<f32>, String> {
+    if rows == 0 || cols == 0 {
+        return Err("layer norm dimensions must be positive".into());
+    }
+    if !epsilon.is_finite() || epsilon < 0.0 {
+        return Err("layer norm epsilon must be finite and non-negative".into());
+    }
+
+    let volume = rows
+        .checked_mul(cols)
+        .ok_or_else(|| "layer norm volume exceeds usize range".to_string())?;
+
+    if input.len() != volume {
+        return Err(format!(
+            "layer norm input length mismatch: expected {} elements, got {}",
+            volume,
+            input.len()
+        ));
+    }
+    if let Some(residual) = residual {
+        if residual.len() != volume {
+            return Err(format!(
+                "layer norm residual length mismatch: expected {} elements, got {}",
+                volume,
+                residual.len()
+            ));
+        }
+    }
+    if gamma.len() != cols {
+        return Err(format!(
+            "layer norm gamma length mismatch: expected {} elements, got {}",
+            cols,
+            gamma.len()
+        ));
+    }
+    if beta.len() != cols {
+        return Err(format!(
+            "layer norm beta length mismatch: expected {} elements, got {}",
+            cols,
+            beta.len()
+        ));
+    }
+
+    if rows > u32::MAX as usize || cols > u32::MAX as usize {
+        return Err("layer norm dimensions exceed u32 dispatch range".into());
+    }
+
+    let rows_u32 =
+        u32::try_from(rows).map_err(|_| "layer norm rows exceed u32 dispatch range".to_string())?;
+    let cols_u32 =
+        u32::try_from(cols).map_err(|_| "layer norm cols exceed u32 dispatch range".to_string())?;
+
+    let ctx = dense_context()?;
+    let device = ctx.device();
+    let queue = ctx.queue();
+
+    let input_buf = upload_lhs(device, "st.tensor.wgpu_dense.layer_norm.input", input);
+    let residual_buf = residual.map(|data| {
+        upload_lhs(
+            device,
+            "st.tensor.wgpu_dense.layer_norm.residual",
+            data,
+        )
+    });
+    let gamma_buf = upload_lhs(device, "st.tensor.wgpu_dense.layer_norm.gamma", gamma);
+    let beta_buf = upload_lhs(device, "st.tensor.wgpu_dense.layer_norm.beta", beta);
+    let output_buf = allocate_output(device, "st.tensor.wgpu_dense.layer_norm.output", volume);
+
+    let flags = if residual.is_some() {
+        LAYER_NORM_FLAG_USE_RESIDUAL
+    } else {
+        0
+    };
+
+    crate::emit_tensor_op_meta("layer_norm", || {
+        serde_json::json!({
+            "backend": "wgpu_dense",
+            "rows": rows,
+            "cols": cols,
+            "epsilon": epsilon,
+            "flags": {
+                "use_residual": (flags & LAYER_NORM_FLAG_USE_RESIDUAL) != 0,
+            },
+            "kernel": {
+                "workgroup_size": LAYER_NORM_WORKGROUP,
+            }
+        })
+    });
+
+    let params = LayerNormParams {
+        rows: rows_u32,
+        cols: cols_u32,
+        flags,
+        _pad0: 0,
+        epsilon,
+        _pad1: 0.0,
+        _pad2: 0.0,
+        _pad3: 0.0,
+    };
+    let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.layer_norm.params"),
+        contents: bytemuck::bytes_of(&params),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
+    let zero_storage = ctx.zero_storage_buffer();
+    let residual_binding: &Buffer = match residual_buf.as_ref() {
+        Some(buf) => buf,
+        None => zero_storage.as_ref(),
+    };
+
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("st.tensor.wgpu_dense.layer_norm.bind_group"),
+        layout: &ctx.layer_norm_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: input_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: residual_binding.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: gamma_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: beta_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: output_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: params_buf.as_entire_binding(),
+            },
+        ],
+    });
+
+    let pipeline = ctx.layer_norm_pipeline.clone();
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("st.tensor.wgpu_dense.layer_norm.encoder"),
+    });
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("st.tensor.wgpu_dense.layer_norm.pass"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(pipeline.as_ref());
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.dispatch_workgroups(rows_u32, 1, 1);
+    }
+    queue.submit(Some(encoder.finish()));
+
+    readback_f32(device, queue, &output_buf, volume)
+}
+
 pub fn row_softmax(
     input: &[f32],
     rows: usize,
@@ -6012,6 +6337,16 @@ pub fn row_hardmax(
 }
 
 pub fn is_available() -> bool {
+    dense_context().is_ok()
+}
+
+pub fn supports_layer_norm(rows: usize, cols: usize) -> bool {
+    if rows == 0 || cols == 0 {
+        return false;
+    }
+    if rows > u32::MAX as usize || cols > u32::MAX as usize {
+        return false;
+    }
     dense_context().is_ok()
 }
 
