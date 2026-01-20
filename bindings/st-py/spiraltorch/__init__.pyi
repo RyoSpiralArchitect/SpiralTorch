@@ -9,6 +9,16 @@ from .optim import Amegagrad, amegagrad
 
 def init_backend(backend: str) -> bool: ...
 
+def load_zspace_trace_events(path: str, *, event_type: str = ...) -> List[Dict[str, Any]]: ...
+
+def write_zspace_trace_html(
+    trace_jsonl: str,
+    html_path: str | None = ...,
+    *,
+    title: str = ...,
+    event_type: str = ...,
+) -> str: ...
+
 class Axis:
     name: str
     size: int | None
@@ -2239,6 +2249,22 @@ class _ZSpaceCoherenceSequencer:
 
     def topos(self) -> OpenCartesianTopos: ...
 
+    def install_trace_recorder(
+        self,
+        *,
+        capacity: int = ...,
+        max_vector_len: int = ...,
+        publish_plugin_events: bool = ...,
+    ) -> ZSpaceTraceRecorder: ...
+
+    def trace_recorder(self) -> ZSpaceTraceRecorder | None: ...
+
+
+class _ZSpaceTraceRecorder:
+    def snapshot(self) -> Dict[str, Any]: ...
+    def clear(self) -> None: ...
+    def write_jsonl(self, path: str) -> None: ...
+
 
 def is_swap_invariant(arrangement: Sequence[float]) -> bool: ...
 
@@ -2615,6 +2641,10 @@ class Dropout(_NnDropout):
 
 
 class ZSpaceCoherenceSequencer(_ZSpaceCoherenceSequencer):
+    ...
+
+
+class ZSpaceTraceRecorder(_ZSpaceTraceRecorder):
     ...
 
 

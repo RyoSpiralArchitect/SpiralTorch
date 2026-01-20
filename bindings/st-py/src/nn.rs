@@ -18,6 +18,8 @@ use crate::planner::{build_caps, parse_backend, PyRankPlan};
 use crate::tensor::{tensor_err_to_py, tensor_to_torch, PyTensor};
 #[cfg(feature = "nn")]
 use crate::theory::PyZRelativityModel;
+#[cfg(feature = "nn")]
+use crate::json::json_to_py;
 
 #[cfg(feature = "nn")]
 use st_core::{
@@ -53,6 +55,7 @@ use st_nn::{
         PreDiscardSnapshot, PreDiscardTelemetry,
     },
     AvgPool2d, DataLoader, Dataset, MaxPool2d, ZRelativityModule, ZSpaceCoherenceSequencer,
+    ZSpaceTraceConfig, ZSpaceTraceRecorder,
 };
 #[cfg(feature = "nn")]
 use st_tensor::{OpenCartesianTopos, Tensor, TensorError};
@@ -3897,6 +3900,32 @@ impl PyCoherenceDiagnostics {
 )]
 pub(crate) struct PyZSpaceCoherenceSequencer {
     inner: ZSpaceCoherenceSequencer,
+    trace_recorder: Option<ZSpaceTraceRecorder>,
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "ZSpaceTraceRecorder", unsendable)]
+pub(crate) struct PyZSpaceTraceRecorder {
+    inner: ZSpaceTraceRecorder,
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyZSpaceTraceRecorder {
+    pub fn snapshot(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let trace = self.inner.snapshot();
+        let value =
+            serde_json::to_value(&trace).map_err(|err| PyValueError::new_err(err.to_string()))?;
+        json_to_py(py, &value)
+    }
+
+    pub fn clear(&self) {
+        self.inner.clear();
+    }
+
+    pub fn write_jsonl(&self, path: &str) -> PyResult<()> {
+        self.inner.write_jsonl(path).map_err(tensor_err_to_py)
+    }
 }
 
 #[cfg(feature = "nn")]
@@ -3923,7 +3952,10 @@ impl PyZSpaceCoherenceSequencer {
         };
         let inner = ZSpaceCoherenceSequencer::new(dim, num_heads, curvature, topos)
             .map_err(tensor_err_to_py)?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner,
+            trace_recorder: None,
+        })
     }
 
     pub fn forward(&self, x: &PyTensor) -> PyResult<PyTensor> {
@@ -3952,6 +3984,38 @@ impl PyZSpaceCoherenceSequencer {
             coherence,
             PyCoherenceDiagnostics::from_diagnostics(diagnostics),
         ))
+    }
+
+    #[pyo3(signature = (*, capacity=256, max_vector_len=256, publish_plugin_events=true))]
+    pub fn install_trace_recorder(
+        &mut self,
+        capacity: usize,
+        max_vector_len: usize,
+        publish_plugin_events: bool,
+    ) -> PyResult<PyZSpaceTraceRecorder> {
+        if publish_plugin_events {
+            st_core::plugin::init_plugin_system().map_err(tensor_err_to_py)?;
+        }
+        if self.trace_recorder.is_some() {
+            self.inner.clear_plugins();
+            self.trace_recorder = None;
+        }
+        let recorder = self.inner.install_trace_recorder(ZSpaceTraceConfig {
+            capacity,
+            max_vector_len,
+            publish_plugin_events,
+        });
+        self.trace_recorder = Some(recorder.clone());
+        Ok(PyZSpaceTraceRecorder { inner: recorder })
+    }
+
+    #[getter]
+    pub fn trace_recorder(&self) -> Option<PyZSpaceTraceRecorder> {
+        self.trace_recorder
+            .as_ref()
+            .map(|recorder| PyZSpaceTraceRecorder {
+                inner: recorder.clone(),
+            })
     }
 
     pub fn project_to_zspace(&self, x: &PyTensor) -> PyResult<PyTensor> {
@@ -4149,6 +4213,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyPreDiscardSnapshot>()?;
     module.add_class::<PyCoherenceDiagnostics>()?;
     module.add_class::<PyZSpaceCoherenceSequencer>()?;
+    module.add_class::<PyZSpaceTraceRecorder>()?;
     module.add_class::<PyZRelativityModule>()?;
     module.add_class::<PyCurvatureScheduler>()?;
     module.add_class::<PyCurvatureDecision>()?;
@@ -4189,6 +4254,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
             "PreDiscardPolicy",
             "PreDiscardSnapshot",
             "ZSpaceCoherenceSequencer",
+            "ZSpaceTraceRecorder",
             "ZRelativityModule",
             "CurvatureScheduler",
             "CurvatureDecision",
@@ -4237,6 +4303,9 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     }
     if let Ok(sequencer) = module.getattr("ZSpaceCoherenceSequencer") {
         parent.add("ZSpaceCoherenceSequencer", sequencer)?;
+    }
+    if let Ok(recorder) = module.getattr("ZSpaceTraceRecorder") {
+        parent.add("ZSpaceTraceRecorder", recorder)?;
     }
     if let Ok(scheduler) = module.getattr("CurvatureScheduler") {
         parent.add("CurvatureScheduler", scheduler)?;

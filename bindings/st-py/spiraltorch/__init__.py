@@ -459,6 +459,11 @@ from .zspace_inference import (
     infer_weights_from_compat,
 )
 
+from .zspace_trace import (
+    load_zspace_trace_events,
+    write_zspace_trace_html,
+)
+
 from .elliptic import (
     EllipticWarpFunction,
     elliptic_warp_autograd,
@@ -475,6 +480,7 @@ _EXTRAS = [
     "generate_plan_batch_ex","plan","plan_topk",
     "describe_device","hip_probe","z_space_barycenter",
     "hypergrad","realgrad","hypergrad_topos","encode_zspace","z_metrics",
+    "load_zspace_trace_events","write_zspace_trace_html",
 ]
 for _n in _EXTRAS:
     _value = _safe_getattr(_rs, _n, None)
@@ -4288,7 +4294,7 @@ _CORE_EXPORTS = [
     "SearchLoop",
     "QatObserver","QuantizationReport","StructuredPruningReport","CompressionReport",
     "structured_prune","compress_weights",
-    "ModuleTrainer","Identity","Scaler","NonLiner","ZConv","ZPooling","ZSpaceTrainer","ZSpaceCoherenceSequencer","PreDiscardTelemetry","PreDiscardPolicy",
+    "ModuleTrainer","Identity","Scaler","NonLiner","ZConv","ZPooling","ZSpaceTrainer","ZSpaceCoherenceSequencer","ZSpaceTraceRecorder","PreDiscardTelemetry","PreDiscardPolicy",
     "CoherenceObservation","CoherenceSignature","CoherenceChannelReport","CoherenceDiagnostics","is_swap_invariant",
     "TemporalResonanceBuffer","SpiralTorchVision",
     "CanvasTransformer","CanvasSnapshot","apply_vision_update",

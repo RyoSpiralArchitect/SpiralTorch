@@ -13,6 +13,7 @@ mod rec;
 mod telemetry;
 mod plugin;
 mod ops;
+mod json;
 mod pure;
 mod planner;
 mod spiralk;

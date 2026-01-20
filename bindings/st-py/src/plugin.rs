@@ -5,11 +5,16 @@ use pyo3::wrap_pyfunction;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
+use crate::json::json_to_py;
 use crate::tensor::tensor_err_to_py;
 use st_core::plugin::{global_registry, init_plugin_system, EventListener, PluginEvent};
 
 fn plugin_event_to_py(py: Python<'_>, event: &PluginEvent) -> PyResult<PyObject> {
     let dict = PyDict::new_bound(py);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    dict.set_item("ts", now.as_secs_f64())?;
     match event {
         PluginEvent::SystemInit => {
             dict.set_item("type", "SystemInit")?;
@@ -55,6 +60,13 @@ fn plugin_event_to_py(py: Python<'_>, event: &PluginEvent) -> PyResult<PyObject>
         PluginEvent::Custom { event_type, .. } => {
             dict.set_item("type", event_type)?;
             dict.set_item("event_type", event_type)?;
+            if let Some(payload) = event.downcast_data::<serde_json::Value>() {
+                dict.set_item("payload", json_to_py(py, payload)?)?;
+            } else if let Some(payload) = event.downcast_data::<String>() {
+                dict.set_item("payload", payload.clone())?;
+            } else {
+                dict.set_item("payload", py.None())?;
+            }
         }
     }
     Ok(dict.into_py(py))
@@ -328,6 +340,7 @@ fn event_types() -> HashMap<String, String> {
         ("EpochEnd", "Training epoch completed"),
         ("BackendChanged", "Backend changed"),
         ("Telemetry", "Telemetry data emitted"),
+        ("ZSpaceTrace", "Z-space trace event"),
         ("*", "Wildcard subscription (all events)"),
     ]
     .into_iter()
