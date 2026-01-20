@@ -13,17 +13,40 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-13, macos-14, ubuntu-22.04, windows-2022]
-        py: ['3.12']
-        feat: ['wgpu,logic,kdsl']
+        include:
+          - os: macos-13
+            label: macos-13-macosx11
+            macos_deployment_target: "11.0"
+            py: "3.12"
+            feat: "wgpu,logic,kdsl"
+          - os: macos-14
+            label: macos-14-macosx11
+            macos_deployment_target: "11.0"
+            py: "3.12"
+            feat: "wgpu,logic,kdsl"
+          - os: macos-14
+            label: macos-14-macosx14
+            macos_deployment_target: "14.0"
+            py: "3.12"
+            feat: "wgpu,logic,kdsl"
+          - os: ubuntu-22.04
+            label: ubuntu-22.04
+            macos_deployment_target: ""
+            py: "3.12"
+            feat: "wgpu,logic,kdsl"
+          - os: windows-2022
+            label: windows-2022
+            macos_deployment_target: ""
+            py: "3.12"
+            feat: "wgpu,logic,kdsl"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.py }}
-      - name: Set macOS deployment target (wheel compatibility)
-        if: startsWith(matrix.os, 'macos')
-        run: echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> "$GITHUB_ENV"
+      - name: Set macOS deployment target
+        if: matrix.macos_deployment_target != ''
+        run: echo "MACOSX_DEPLOYMENT_TARGET=${{ matrix.macos_deployment_target }}" >> "$GITHUB_ENV"
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Build wheel
@@ -113,5 +136,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: wheel-${{ matrix.os }}-py${{ matrix.py }}-${{ matrix.feat }}
+          name: wheel-${{ matrix.label }}-py${{ matrix.py }}-${{ matrix.feat }}
           path: target/wheels/*.whl

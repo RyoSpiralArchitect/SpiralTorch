@@ -315,9 +315,9 @@ cargo build -p st-vision      # vision kernels/pipelines
 # Install maturin (once)
 python -m pip install -U "maturin>=1,<2"
 
-# macOS note: if you build on macOS 14 but want wheels that install on macOS 11–13,
-# set the deployment target explicitly.
-# (Apple Silicon requires >= 11.0.)
+# macOS wheel targets (Apple Silicon requires >= 11.0):
+# - macOS 11+ (broad compatibility): export MACOSX_DEPLOYMENT_TARGET=11.0
+# - macOS 14+ (separate wheel build): export MACOSX_DEPLOYMENT_TARGET=14.0
 export MACOSX_DEPLOYMENT_TARGET=11.0
 
 # Release-equivalent (matches PyPI wheels)

@@ -13,21 +13,40 @@ permissions:
 
 jobs:
   wheels:
-    name: Build ${{ matrix.os }} / py${{ matrix.py }}
+    name: Build ${{ matrix.label }} / py${{ matrix.py }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, macos-13, macos-14, windows-2022]
-        py: ["3.12"]
+        include:
+          - os: ubuntu-22.04
+            label: ubuntu-22.04
+            macos_deployment_target: ""
+            py: "3.12"
+          - os: macos-13
+            label: macos-13-macosx11
+            macos_deployment_target: "11.0"
+            py: "3.12"
+          - os: macos-14
+            label: macos-14-macosx11
+            macos_deployment_target: "11.0"
+            py: "3.12"
+          - os: macos-14
+            label: macos-14-macosx14
+            macos_deployment_target: "14.0"
+            py: "3.12"
+          - os: windows-2022
+            label: windows-2022
+            macos_deployment_target: ""
+            py: "3.12"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.py }}
-      - name: Set macOS deployment target (wheel compatibility)
-        if: startsWith(matrix.os, 'macos')
-        run: echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> "$GITHUB_ENV"
+      - name: Set macOS deployment target
+        if: matrix.macos_deployment_target != ''
+        run: echo "MACOSX_DEPLOYMENT_TARGET=${{ matrix.macos_deployment_target }}" >> "$GITHUB_ENV"
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Install maturin
@@ -119,7 +138,7 @@ jobs:
       - name: Upload wheels (artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.os }}-py${{ matrix.py }}
+          name: wheels-${{ matrix.label }}-py${{ matrix.py }}
           path: target/wheels/*.whl
 
   attach:
