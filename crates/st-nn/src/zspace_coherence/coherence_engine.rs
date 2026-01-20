@@ -197,6 +197,16 @@ impl DomainLinguisticProfile {
         &self.concept
     }
 
+    /// Returns the emphasis multiplier applied by this profile.
+    pub fn emphasis(&self) -> f32 {
+        self.emphasis
+    }
+
+    /// Returns the number of harmonic bias entries, when configured.
+    pub fn harmonic_bias_len(&self) -> Option<usize> {
+        self.harmonic_bias.as_ref().map(|bias| bias.len())
+    }
+
     fn harmonic_multiplier(&self, channel_idx: usize, total_channels: usize) -> f32 {
         if let Some(ref bias) = self.harmonic_bias {
             if let Some(value) = bias.get(channel_idx) {

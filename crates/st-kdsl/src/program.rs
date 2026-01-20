@@ -7,6 +7,7 @@ use std::fmt;
 
 use crate::{Ctx, Err, Hard, Out, SoftRule};
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 mod pattern;
@@ -18,6 +19,7 @@ use pattern::{MatchArm, MatchPattern};
 pub struct Program {
     stmts: Vec<Stmt>,
     locals: usize,
+    local_names: Vec<String>,
     functions: Vec<FunctionDef>,
 }
 
@@ -37,6 +39,103 @@ enum FlowSignal {
     Continue,
 }
 
+/// JSON-friendly value representation surfaced by [`KdslTraceEvent`].
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum KdslValue {
+    Number(f64),
+    Bool(bool),
+    List(Vec<KdslValue>),
+}
+
+/// Execution event recorded while evaluating a SpiralK DSL program.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub enum KdslTraceEvent {
+    Assign { field: String, value: KdslValue },
+    Soft {
+        field: String,
+        applied: bool,
+        value: Option<KdslValue>,
+        weight: Option<f32>,
+    },
+    Let { name: String, value: KdslValue },
+    Set { name: String, value: KdslValue },
+    If { condition: bool },
+    While { iterations: usize },
+    For {
+        var: String,
+        start: i64,
+        end: i64,
+        inclusive: bool,
+        iterations: usize,
+    },
+    Break,
+    Continue,
+}
+
+/// Bounded execution trace captured from [`Program::evaluate_with_trace`].
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct KdslEvaluationTrace {
+    max_events: usize,
+    dropped_events: usize,
+    events: Vec<KdslTraceEvent>,
+}
+
+impl KdslEvaluationTrace {
+    pub fn new(max_events: usize) -> Self {
+        Self {
+            max_events: max_events.max(1),
+            dropped_events: 0,
+            events: Vec::new(),
+        }
+    }
+
+    pub fn events(&self) -> &[KdslTraceEvent] {
+        &self.events
+    }
+
+    pub fn dropped_events(&self) -> usize {
+        self.dropped_events
+    }
+
+    pub fn is_truncated(&self) -> bool {
+        self.dropped_events > 0
+    }
+
+    fn push(&mut self, event: KdslTraceEvent) {
+        if self.events.len() >= self.max_events {
+            self.dropped_events = self.dropped_events.saturating_add(1);
+            return;
+        }
+        self.events.push(event);
+    }
+}
+
+trait TraceSink {
+    fn enabled(&self) -> bool;
+    fn record(&mut self, event: KdslTraceEvent);
+}
+
+struct NoopTraceSink;
+
+impl TraceSink for NoopTraceSink {
+    fn enabled(&self) -> bool {
+        false
+    }
+
+    fn record(&mut self, _event: KdslTraceEvent) {}
+}
+
+impl TraceSink for KdslEvaluationTrace {
+    fn enabled(&self) -> bool {
+        true
+    }
+
+    fn record(&mut self, event: KdslTraceEvent) {
+        self.push(event);
+    }
+}
+
 impl Program {
     /// Parses the provided source string into a [`Program`].
     pub fn parse(src: &str) -> Result<Self, Err> {
@@ -46,17 +145,30 @@ impl Program {
         Ok(Self {
             stmts: output.stmts,
             locals: output.locals,
+            local_names: parser.locals.clone(),
             functions: output.functions,
         })
     }
 
     /// Evaluates the program for the given [`Ctx`].
     pub fn evaluate(&self, ctx: &Ctx) -> Out {
+        let mut sink = NoopTraceSink;
+        self.evaluate_with_sink(ctx, &mut sink)
+    }
+
+    /// Evaluates the program while recording a structured execution trace.
+    pub fn evaluate_with_trace(&self, ctx: &Ctx, max_events: usize) -> (Out, KdslEvaluationTrace) {
+        let mut trace = KdslEvaluationTrace::new(max_events);
+        let out = self.evaluate_with_sink(ctx, &mut trace);
+        (out, trace)
+    }
+
+    fn evaluate_with_sink(&self, ctx: &Ctx, sink: &mut dyn TraceSink) -> Out {
         let mut hard = Hard::default();
         let mut soft = Vec::<SoftRule>::new();
         let mut locals = vec![Value::default(); self.locals];
 
-        let signal = self.execute_block(&self.stmts, ctx, &mut locals, &mut hard, &mut soft);
+        let signal = self.execute_block(&self.stmts, ctx, &mut locals, &mut hard, &mut soft, sink);
         debug_assert_eq!(signal, FlowSignal::None, "top-level control flow escape");
 
         Out { hard, soft }
@@ -69,45 +181,53 @@ impl Program {
         locals: &mut [Value],
         hard: &mut Hard,
         soft: &mut Vec<SoftRule>,
+        sink: &mut dyn TraceSink,
     ) -> FlowSignal {
         for stmt in block {
             let signal = match stmt {
                 Stmt::Assign(assign) => {
-                    assign.apply(self, ctx, locals, hard);
+                    assign.apply(self, ctx, locals, hard, sink);
                     FlowSignal::None
                 }
                 Stmt::Let(binding) => {
-                    binding.store(self, ctx, locals);
+                    binding.store(self, ctx, locals, sink);
                     FlowSignal::None
                 }
                 Stmt::Set(update) => {
-                    update.store(self, ctx, locals);
+                    update.store(self, ctx, locals, sink);
                     FlowSignal::None
                 }
                 Stmt::Soft(rule) => {
-                    rule.apply(self, ctx, locals, soft);
+                    rule.apply(self, ctx, locals, soft, sink);
                     FlowSignal::None
                 }
                 Stmt::If(branch) => {
                     let cond = branch
                         .const_cond
                         .unwrap_or_else(|| branch.cond.evaluate(self, ctx, locals).as_bool());
+                    sink.record(KdslTraceEvent::If { condition: cond });
                     if cond {
-                        self.execute_block(&branch.then_branch, ctx, locals, hard, soft)
+                        self.execute_block(&branch.then_branch, ctx, locals, hard, soft, sink)
                     } else {
-                        self.execute_block(&branch.else_branch, ctx, locals, hard, soft)
+                        self.execute_block(&branch.else_branch, ctx, locals, hard, soft, sink)
                     }
                 }
                 Stmt::While(loop_stmt) => {
-                    loop_stmt.run(self, ctx, locals, hard, soft);
+                    loop_stmt.run(self, ctx, locals, hard, soft, sink);
                     FlowSignal::None
                 }
                 Stmt::For(loop_stmt) => {
-                    loop_stmt.run(self, ctx, locals, hard, soft);
+                    loop_stmt.run(self, ctx, locals, hard, soft, sink);
                     FlowSignal::None
                 }
-                Stmt::Break => FlowSignal::Break,
-                Stmt::Continue => FlowSignal::Continue,
+                Stmt::Break => {
+                    sink.record(KdslTraceEvent::Break);
+                    FlowSignal::Break
+                }
+                Stmt::Continue => {
+                    sink.record(KdslTraceEvent::Continue);
+                    FlowSignal::Continue
+                }
             };
 
             match signal {
@@ -136,6 +256,13 @@ impl Program {
         }
         def.eval(self, ctx, &values)
     }
+
+    fn local_name(&self, id: usize) -> &str {
+        self.local_names
+            .get(id)
+            .map(|name| name.as_str())
+            .unwrap_or("<local>")
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -159,7 +286,14 @@ struct AssignStmt {
 }
 
 impl AssignStmt {
-    fn apply(&self, program: &Program, ctx: &Ctx, locals: &[Value], hard: &mut Hard) {
+    fn apply(
+        &self,
+        program: &Program,
+        ctx: &Ctx,
+        locals: &[Value],
+        hard: &mut Hard,
+        sink: &mut dyn TraceSink,
+    ) {
         let value = match &self.const_value {
             Some(value) => value.clone(),
             None => self.expr.evaluate(program, ctx, locals),
@@ -177,6 +311,13 @@ impl AssignStmt {
             Field::Radix => hard.radix = Some(value.as_u32()),
             Field::Segments => hard.segments = Some(value.as_u32()),
         }
+
+        if sink.enabled() {
+            sink.record(KdslTraceEvent::Assign {
+                field: self.field.label().to_string(),
+                value: KdslValue::from_runtime(&value),
+            });
+        }
     }
 }
 
@@ -188,12 +329,19 @@ struct LetStmt {
 }
 
 impl LetStmt {
-    fn store(&self, program: &Program, ctx: &Ctx, locals: &mut [Value]) {
+    fn store(&self, program: &Program, ctx: &Ctx, locals: &mut [Value], sink: &mut dyn TraceSink) {
         let value = match &self.const_value {
             Some(value) => value.clone(),
             None => self.expr.evaluate(program, ctx, locals),
         };
         locals[self.id] = value;
+        if sink.enabled() {
+            let value = &locals[self.id];
+            sink.record(KdslTraceEvent::Let {
+                name: program.local_name(self.id).to_string(),
+                value: KdslValue::from_runtime(value),
+            });
+        }
     }
 }
 
@@ -205,12 +353,19 @@ struct SetStmt {
 }
 
 impl SetStmt {
-    fn store(&self, program: &Program, ctx: &Ctx, locals: &mut [Value]) {
+    fn store(&self, program: &Program, ctx: &Ctx, locals: &mut [Value], sink: &mut dyn TraceSink) {
         let value = match &self.const_value {
             Some(value) => value.clone(),
             None => self.expr.evaluate(program, ctx, locals),
         };
         locals[self.id] = value;
+        if sink.enabled() {
+            let value = &locals[self.id];
+            sink.record(KdslTraceEvent::Set {
+                name: program.local_name(self.id).to_string(),
+                value: KdslValue::from_runtime(value),
+            });
+        }
     }
 }
 
@@ -226,11 +381,26 @@ struct SoftStmt {
 }
 
 impl SoftStmt {
-    fn apply(&self, program: &Program, ctx: &Ctx, locals: &[Value], soft: &mut Vec<SoftRule>) {
+    fn apply(
+        &self,
+        program: &Program,
+        ctx: &Ctx,
+        locals: &[Value],
+        soft: &mut Vec<SoftRule>,
+        sink: &mut dyn TraceSink,
+    ) {
         let should_apply = self
             .const_cond
             .unwrap_or_else(|| self.cond_expr.evaluate(program, ctx, locals).as_bool());
         if !should_apply {
+            if sink.enabled() {
+                sink.record(KdslTraceEvent::Soft {
+                    field: self.field.label().to_string(),
+                    applied: false,
+                    value: None,
+                    weight: None,
+                });
+            }
             return;
         }
 
@@ -241,6 +411,15 @@ impl SoftStmt {
         let weight = self
             .const_weight
             .unwrap_or_else(|| self.weight_expr.evaluate(program, ctx, locals).as_f64() as f32);
+
+        if sink.enabled() {
+            sink.record(KdslTraceEvent::Soft {
+                field: self.field.label().to_string(),
+                applied: true,
+                value: Some(KdslValue::from_runtime(&value)),
+                weight: Some(weight),
+            });
+        }
 
         match self.field {
             Field::U2 => soft.push(SoftRule::U2 {
@@ -314,8 +493,12 @@ impl WhileStmt {
         locals: &mut [Value],
         hard: &mut Hard,
         soft: &mut Vec<SoftRule>,
+        sink: &mut dyn TraceSink,
     ) {
         if matches!(self.const_cond, Some(false)) {
+            if sink.enabled() {
+                sink.record(KdslTraceEvent::While { iterations: 0 });
+            }
             return;
         }
 
@@ -334,7 +517,7 @@ impl WhileStmt {
                 break;
             }
 
-            let signal = program.execute_block(&self.body, ctx, locals, hard, soft);
+            let signal = program.execute_block(&self.body, ctx, locals, hard, soft, sink);
             iterations += 1;
             if iterations >= MAX_LOOP_ITERATIONS {
                 debug_assert!(
@@ -349,6 +532,10 @@ impl WhileStmt {
                 FlowSignal::Continue => continue,
                 FlowSignal::Break => break,
             }
+        }
+
+        if sink.enabled() {
+            sink.record(KdslTraceEvent::While { iterations });
         }
     }
 }
@@ -372,6 +559,7 @@ impl ForStmt {
         locals: &mut [Value],
         hard: &mut Hard,
         soft: &mut Vec<SoftRule>,
+        sink: &mut dyn TraceSink,
     ) {
         let start_value = match &self.const_start {
             Some(value) => value.clone(),
@@ -407,7 +595,7 @@ impl ForStmt {
             }
 
             locals[self.id] = Value::from_f64(current as f64);
-            let signal = program.execute_block(&self.body, ctx, locals, hard, soft);
+            let signal = program.execute_block(&self.body, ctx, locals, hard, soft, sink);
             iterations += 1;
             if iterations >= MAX_LOOP_ITERATIONS {
                 debug_assert!(
@@ -427,6 +615,16 @@ impl ForStmt {
                 continue;
             }
         }
+
+        if sink.enabled() {
+            sink.record(KdslTraceEvent::For {
+                var: program.local_name(self.id).to_string(),
+                start,
+                end,
+                inclusive: self.inclusive,
+                iterations,
+            });
+        }
     }
 }
 
@@ -443,6 +641,24 @@ enum Field {
     TileCols,
     Radix,
     Segments,
+}
+
+impl Field {
+    fn label(self) -> &'static str {
+        match self {
+            Field::U2 => "u2",
+            Field::Wg => "wg",
+            Field::Kl => "kl",
+            Field::Ch => "ch",
+            Field::Algo => "algo",
+            Field::Midk => "midk",
+            Field::Bottomk => "bottomk",
+            Field::Ctile => "ctile",
+            Field::TileCols => "tile_cols",
+            Field::Radix => "radix",
+            Field::Segments => "segments",
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1882,6 +2098,16 @@ impl Default for Value {
     }
 }
 
+impl KdslValue {
+    fn from_runtime(value: &Value) -> Self {
+        match value {
+            Value::F(v) => KdslValue::Number(*v),
+            Value::B(b) => KdslValue::Bool(*b),
+            Value::List(values) => KdslValue::List(values.iter().map(KdslValue::from_runtime).collect()),
+        }
+    }
+}
+
 impl FieldRef {
     fn read(self, ctx: &Ctx) -> Value {
         match self {
@@ -2689,5 +2915,45 @@ mod tests {
             }
             rule => panic!("unexpected soft rule: {rule:?}"),
         }
+    }
+
+    #[test]
+    fn evaluate_with_trace_records_assignments_and_soft_rules() {
+        let script = r#"
+            let base = r / 4;
+            wg: base;
+            soft(wg, base, 0.5, true);
+            soft(radix, base, 1.0, false);
+        "#;
+        let program = Program::parse(script).unwrap();
+        let (out, trace) = program.evaluate_with_trace(&ctx(), 128);
+        assert_eq!(out.hard.wg, Some(256));
+        assert_eq!(out.soft.len(), 1);
+
+        assert!(trace.events().iter().any(|event| matches!(
+            event,
+            KdslTraceEvent::Assign { field, .. } if field == "wg"
+        )));
+        assert!(trace.events().iter().any(|event| matches!(
+            event,
+            KdslTraceEvent::Soft { field, applied: true, .. } if field == "wg"
+        )));
+        assert!(trace.events().iter().any(|event| matches!(
+            event,
+            KdslTraceEvent::Soft { field, applied: false, .. } if field == "radix"
+        )));
+    }
+
+    #[test]
+    fn evaluate_with_trace_respects_event_budget() {
+        let script = r#"
+            for i in 0..64 {
+                wg: i;
+            }
+        "#;
+        let program = Program::parse(script).unwrap();
+        let (_out, trace) = program.evaluate_with_trace(&ctx(), 4);
+        assert!(trace.events().len() <= 4);
+        assert!(trace.is_truncated());
     }
 }

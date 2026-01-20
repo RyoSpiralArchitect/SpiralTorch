@@ -9,6 +9,7 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 
 use crate::backend::device_caps::{BackendKind, DeviceCaps};
+use crate::plugin::{global_registry, PluginEvent};
 use crate::runtime::blackcat::{BlackCatRuntime, StepMetrics};
 use crate::telemetry::trace_init;
 use spiral_config::determinism;
@@ -134,6 +135,9 @@ impl Autopilot {
             self.picks.clear();
             return &self.picks;
         }
+        let bus = global_registry().event_bus();
+        let trace_enabled = bus.has_listeners("AutopilotSuggest");
+        let context_snapshot = trace_enabled.then(|| context.clone());
         let picks = self.runtime.choose(context);
         self.picks = picks;
         if self.mode == AutoMode::Hint {
@@ -144,6 +148,17 @@ impl Autopilot {
             }
         }
         debug!(picks = ?self.picks, "autopilot suggestions updated");
+        if trace_enabled {
+            bus.publish(&PluginEvent::custom(
+                "AutopilotSuggest",
+                serde_json::json!({
+                    "profile_key": self.profile_key.as_str(),
+                    "mode": format!("{:?}", self.mode),
+                    "context": context_snapshot,
+                    "picks": &self.picks,
+                }),
+            ));
+        }
         &self.picks
     }
 
@@ -154,11 +169,35 @@ impl Autopilot {
         if self.mode == AutoMode::Off {
             return;
         }
-        let _ = self.runtime.post_step(metrics);
+        let bus = global_registry().event_bus();
+        let trace_enabled = bus.has_listeners("AutopilotReport");
+        let reward = self.runtime.post_step(metrics);
         update_profile_stats(&mut self.profile, metrics);
         self.profile.chosen = self.picks.clone();
         let _ = save_profile(&self.profile_key, &self.profile);
         debug!(profile_key = %self.profile_key, "autopilot metrics reported");
+        if trace_enabled {
+            bus.publish(&PluginEvent::custom(
+                "AutopilotReport",
+                serde_json::json!({
+                    "profile_key": self.profile_key.as_str(),
+                    "mode": format!("{:?}", self.mode),
+                    "reward": reward,
+                    "picks": &self.picks,
+                    "metrics": {
+                        "step_time_ms": metrics.step_time_ms,
+                        "mem_peak_mb": metrics.mem_peak_mb,
+                        "retry_rate": metrics.retry_rate,
+                        "extra": &metrics.extra,
+                    },
+                    "profile": {
+                        "step_ms_p50": self.profile.step_ms_p50,
+                        "mem_mb_p95": self.profile.mem_mb_p95,
+                        "retry_rate": self.profile.retry_rate,
+                    }
+                }),
+            ));
+        }
     }
 
     /// Exposes the underlying runtime for advanced integrations.

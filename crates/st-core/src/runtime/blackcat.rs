@@ -14,6 +14,7 @@ use tracing::{debug, instrument};
 use wilson::wilson_lower;
 use zmeta::{ZMetaES, ZMetaParams};
 
+use crate::plugin::{global_registry, PluginEvent};
 use crate::telemetry::{monitoring::MonitoringHub, trace_init};
 
 /// Metrics reported by a training loop back into the runtime.
@@ -207,6 +208,16 @@ impl BlackCatRuntime {
         self.last_context = context;
         self.last_picks = picks.clone();
         debug!(picks = ?self.last_picks, "blackcat bandit picks");
+        let bus = global_registry().event_bus();
+        if bus.has_listeners("BlackCatChoose") {
+            bus.publish(&PluginEvent::custom(
+                "BlackCatChoose",
+                serde_json::json!({
+                    "context": &self.last_context,
+                    "picks": &self.last_picks,
+                }),
+            ));
+        }
         picks
     }
 
@@ -256,6 +267,23 @@ impl BlackCatRuntime {
                 .update(*value);
         }
         let _ = self.monitoring.observe(metrics, reward_current);
+        let bus = global_registry().event_bus();
+        if bus.has_listeners("BlackCatPostStep") {
+            bus.publish(&PluginEvent::custom(
+                "BlackCatPostStep",
+                serde_json::json!({
+                    "reward": reward_current,
+                    "frac_penalty": curr_penalty,
+                    "picks": &self.last_picks,
+                    "metrics": {
+                        "step_time_ms": metrics.step_time_ms,
+                        "mem_peak_mb": metrics.mem_peak_mb,
+                        "retry_rate": metrics.retry_rate,
+                        "extra": &metrics.extra,
+                    }
+                }),
+            ));
+        }
         reward_current
     }
 

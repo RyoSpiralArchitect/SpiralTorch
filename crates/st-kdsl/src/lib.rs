@@ -21,7 +21,7 @@ pub use auto::{
     TemplateAiGenerator, WilsonMetrics,
 };
 pub use ir::{Expr, ScalarType, SubgroupModule, SubgroupOp, SubgroupStmt};
-pub use program::Program;
+pub use program::{KdslEvaluationTrace, KdslTraceEvent, KdslValue, Program};
 pub use query::{compile as compile_query, Filter, OrderDirection, QueryPlan};
 pub use registry::{
     AutotuneKey, AutotuneRegistry, DeviceProfile, KernelProfile, TelemetryLog, TelemetrySample,
@@ -101,4 +101,13 @@ pub fn compile_program(src: &str) -> Result<Program, Err> {
 /// Parses and evaluates a program for the provided context.
 pub fn eval_program(src: &str, ctx: &Ctx) -> Result<Out, Err> {
     compile_program(src).map(|program| program.evaluate(ctx))
+}
+
+/// Parses and evaluates a program for the provided context while recording a trace.
+pub fn eval_program_with_trace(
+    src: &str,
+    ctx: &Ctx,
+    max_events: usize,
+) -> Result<(Out, KdslEvaluationTrace), Err> {
+    compile_program(src).map(|program| program.evaluate_with_trace(ctx, max_events))
 }

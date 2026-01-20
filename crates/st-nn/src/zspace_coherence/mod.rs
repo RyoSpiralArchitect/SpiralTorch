@@ -7,6 +7,7 @@ pub mod coherence_engine;
 pub mod plugin_bridge;
 pub mod psi_synchro;
 pub mod sequencer;
+pub mod trace;
 pub mod vae;
 
 pub use coherence_engine::{
@@ -28,5 +29,9 @@ pub use sequencer::{
     is_swap_invariant, CoherenceDiagnostics, CoherenceLabel, CoherenceObservation,
     CoherenceSignature, PreDiscardPolicy, PreDiscardRegulator, PreDiscardSnapshot,
     PreDiscardTelemetry, ZSpaceCoherenceSequencer, ZSpaceSequencerPlugin, ZSpaceSequencerStage,
+};
+pub use trace::{
+    coherence_relation_tensor, ZSpaceTrace, ZSpaceTraceConfig, ZSpaceTraceEvent,
+    ZSpaceTraceRecorder,
 };
 pub use vae::{MellinBasis, ZSpaceVae, ZSpaceVaeState, ZSpaceVaeStats};

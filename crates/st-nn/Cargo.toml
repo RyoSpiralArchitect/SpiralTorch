@@ -58,3 +58,11 @@ path = "../../examples/modelzoo_mlp_regression.rs"
 [[example]]
 name = "modelzoo_zconv_classification"
 path = "../../examples/modelzoo_zconv_classification.rs"
+
+[[example]]
+name = "zspace_trace_demo"
+path = "../../examples/zspace_trace_demo.rs"
+
+[[example]]
+name = "planner_trace_demo"
+path = "../../examples/planner_trace_demo.rs"

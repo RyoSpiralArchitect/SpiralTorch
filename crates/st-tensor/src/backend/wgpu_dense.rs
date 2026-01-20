@@ -5630,7 +5630,21 @@ pub fn row_softmax(
         usage: wgpu::BufferUsages::UNIFORM,
     });
     let bind_group = ctx.softmax_bind_group(&input_buf, &output_buf, None, &params_buf);
-    let (pipeline, _) = ctx.select_softmax_pipeline(rows, cols, &layout_desc)?;
+    let (pipeline, variant) = ctx.select_softmax_pipeline(rows, cols, &layout_desc)?;
+
+    crate::emit_tensor_op_meta("row_softmax", || {
+        serde_json::json!({
+            "backend": "wgpu_dense",
+            "variant": variant.as_str(),
+            "rows": rows,
+            "cols": cols,
+            "layout": {
+                "flags": layout_desc.flags,
+                "chimera_tile": layout_desc.chimera_tile,
+                "chimera_stripes": layout_desc.chimera_stripes,
+            }
+        })
+    });
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("st.tensor.wgpu_dense.softmax.encoder"),
@@ -5711,7 +5725,21 @@ pub fn row_softmax_hardmax(
         usage: wgpu::BufferUsages::UNIFORM,
     });
     let bind_group = ctx.softmax_bind_group(&input_buf, &softmax_buf, Some(&mask_buf), &params_buf);
-    let (pipeline, _) = ctx.select_softmax_pipeline(rows, cols, &layout_desc)?;
+    let (pipeline, variant) = ctx.select_softmax_pipeline(rows, cols, &layout_desc)?;
+
+    crate::emit_tensor_op_meta("row_softmax_hardmax", || {
+        serde_json::json!({
+            "backend": "wgpu_dense",
+            "variant": variant.as_str(),
+            "rows": rows,
+            "cols": cols,
+            "layout": {
+                "flags": layout_desc.flags,
+                "chimera_tile": layout_desc.chimera_tile,
+                "chimera_stripes": layout_desc.chimera_stripes,
+            }
+        })
+    });
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("st.tensor.wgpu_dense.softmax_hardmax.encoder"),
@@ -5794,10 +5822,26 @@ pub fn row_softmax_hardmax_spiral(
         usage: wgpu::BufferUsages::UNIFORM,
     });
     let bind_group = ctx.softmax_bind_group(&input_buf, &softmax_buf, Some(&mask_buf), &params_buf);
-    let (pipeline, _) = ctx.select_softmax_pipeline(rows, cols, &layout_desc)?;
+    let (pipeline, variant) = ctx.select_softmax_pipeline(rows, cols, &layout_desc)?;
 
     let consensus_resources =
         ctx.prepare_spiral_consensus(rows, cols, &layout_desc, &softmax_buf, &mask_buf);
+    let spiral_consensus_gpu = consensus_resources.is_some();
+
+    crate::emit_tensor_op_meta("row_softmax_hardmax_spiral", || {
+        serde_json::json!({
+            "backend": "wgpu_dense",
+            "variant": variant.as_str(),
+            "rows": rows,
+            "cols": cols,
+            "spiral_consensus_gpu": spiral_consensus_gpu,
+            "layout": {
+                "flags": layout_desc.flags,
+                "chimera_tile": layout_desc.chimera_tile,
+                "chimera_stripes": layout_desc.chimera_stripes,
+            }
+        })
+    });
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("st.tensor.wgpu_dense.softmax_spiral.encoder"),
@@ -5934,7 +5978,21 @@ pub fn row_hardmax(
         usage: wgpu::BufferUsages::UNIFORM,
     });
     let bind_group = ctx.softmax_bind_group(&input_buf, &output_buf, None, &params_buf);
-    let (pipeline, _) = ctx.select_softmax_pipeline(rows, cols, &layout_desc)?;
+    let (pipeline, variant) = ctx.select_softmax_pipeline(rows, cols, &layout_desc)?;
+
+    crate::emit_tensor_op_meta("row_hardmax", || {
+        serde_json::json!({
+            "backend": "wgpu_dense",
+            "variant": variant.as_str(),
+            "rows": rows,
+            "cols": cols,
+            "layout": {
+                "flags": layout_desc.flags,
+                "chimera_tile": layout_desc.chimera_tile,
+                "chimera_stripes": layout_desc.chimera_stripes,
+            }
+        })
+    });
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("st.tensor.wgpu_dense.hardmax.encoder"),
@@ -6123,6 +6181,24 @@ pub fn fused_attention(
         }
         mask
     };
+
+    crate::emit_tensor_op_meta("scaled_dot_attention", || {
+        serde_json::json!({
+            "backend": "wgpu_dense",
+            "contexts": contexts,
+            "sequence": sequence,
+            "head_dim": head_dim,
+            "scale": scale,
+            "flags": {
+                "use_z_bias": (flags & FUSED_ATTENTION_FLAG_USE_Z_BIAS) != 0,
+                "use_attn_bias": (flags & FUSED_ATTENTION_FLAG_USE_ATTN_BIAS) != 0,
+            },
+            "kernel": {
+                "workgroup_size": FUSED_ATTENTION_WORKGROUP,
+                "max_head_dim": kernel.max_head_dim,
+            }
+        })
+    });
 
     let params = FusedAttentionParams {
         contexts: contexts as u32,

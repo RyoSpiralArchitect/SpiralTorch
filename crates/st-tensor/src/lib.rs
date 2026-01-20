@@ -29,7 +29,10 @@ mod pure;
 #[doc = "Re-exported for convenience."]
 pub use pure::*;
 
-pub use observability::{emit_tensor_op, set_tensor_op_observer, TensorOpEvent, TensorOpObserver};
+pub use observability::{
+    emit_tensor_op, emit_tensor_op_meta, set_tensor_op_meta_observer, set_tensor_op_observer,
+    TensorOpEvent, TensorOpMetaEvent, TensorOpMetaObserver, TensorOpObserver,
+};
 
 #[doc = "Expose the hardmax backend selector."]
 pub use hardmax::HardmaxBackend;

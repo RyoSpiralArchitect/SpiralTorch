@@ -15,3 +15,7 @@ tempfile = "3"
 
 [package.metadata.spiraltorch]
 copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved"
+
+[[example]]
+name = "kdsl_trace_demo"
+path = "../../examples/kdsl_trace_demo.rs"

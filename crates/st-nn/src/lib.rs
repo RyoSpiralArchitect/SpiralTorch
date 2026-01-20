@@ -122,14 +122,15 @@ pub use zspace_coherence::BranchPsiReading;
 #[cfg(feature = "golden")]
 pub use zspace_coherence::{heatmaps_to_golden_telemetry, PsiGoldenTelemetry};
 pub use zspace_coherence::{
-    heatmaps_to_zpulses, is_swap_invariant, run_multibranch_demo, run_zspace_learning_pass,
-    ArnoldTongueSummary, BackendCapabilities, BranchAtlasFragment, CircleLockMapConfig,
-    CoherenceBackend, CoherenceEngine, CoherenceLabel, CoherenceObservation, CoherenceSignature,
-    DomainConcept, DomainLinguisticProfile, HeatmapAnalytics, HeatmapResult,
+    coherence_relation_tensor, heatmaps_to_zpulses, is_swap_invariant, run_multibranch_demo,
+    run_zspace_learning_pass, ArnoldTongueSummary, BackendCapabilities, BranchAtlasFragment,
+    CircleLockMapConfig, CoherenceBackend, CoherenceEngine, CoherenceLabel, CoherenceObservation,
+    CoherenceSignature, DomainConcept, DomainLinguisticProfile, HeatmapAnalytics, HeatmapResult,
     LinguisticChannelReport, LinguisticContour, MellinBasis, MetaMembConfig, MetaMembSampler,
     PreDiscardPolicy, PreDiscardRegulator, PsiBranchState, PsiSynchroConfig, PsiSynchroPulse,
     PsiSynchroResult, PsiTelemetryConfig, SyncState, SynchroBus, SynchroEvent,
-    ZSpaceCoherenceSequencer, ZSpaceVae, ZSpaceVaeState, ZSpaceVaeStats,
+    ZSpaceCoherenceSequencer, ZSpaceTrace, ZSpaceTraceConfig, ZSpaceTraceEvent,
+    ZSpaceTraceRecorder, ZSpaceVae, ZSpaceVaeState, ZSpaceVaeStats,
 };
 
 pub use mixed_precision::{autocast_enabled, AutocastGuard, GradScaler};

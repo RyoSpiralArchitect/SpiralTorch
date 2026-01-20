@@ -2176,41 +2176,55 @@ impl Tensor {
 
         let make_tensor = |buffer: Vec<f32>| Tensor::from_vec(expected_rows, head_dim, buffer);
 
-        match backend {
+        let (tensor, backend_used): (Tensor, &'static str) = match backend {
             AttentionBackend::Auto => {
-                #[cfg(feature = "wgpu")]
-                {
-                    if wgpu_dense::is_available()
-                        && wgpu_dense::supports_fused_attention(contexts, sequence, head_dim)
+                let wgpu_tensor: Option<Tensor> = {
+                    #[cfg(feature = "wgpu")]
                     {
-                        if let Ok(buffer) = wgpu_dense::fused_attention(
-                            queries,
-                            keys_data,
-                            values_data,
-                            contexts,
-                            sequence,
-                            head_dim,
-                            scale,
-                            z_bias_slice,
-                            attn_bias_slice,
-                        ) {
-                            return make_tensor(buffer);
+                        if wgpu_dense::is_available()
+                            && wgpu_dense::supports_fused_attention(contexts, sequence, head_dim)
+                        {
+                            if let Ok(buffer) = wgpu_dense::fused_attention(
+                                queries,
+                                keys_data,
+                                values_data,
+                                contexts,
+                                sequence,
+                                head_dim,
+                                scale,
+                                z_bias_slice,
+                                attn_bias_slice,
+                            ) {
+                                Some(make_tensor(buffer)?)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
                         }
                     }
-                }
+                    #[cfg(not(feature = "wgpu"))]
+                    {
+                        None
+                    }
+                };
 
-                let buffer = fused_attention_cpu(
-                    queries,
-                    keys_data,
-                    values_data,
-                    contexts,
-                    sequence,
-                    head_dim,
-                    scale,
-                    z_bias_slice,
-                    attn_bias_slice,
-                );
-                make_tensor(buffer)
+                if let Some(tensor) = wgpu_tensor {
+                    Ok((tensor, "wgpu"))
+                } else {
+                    let buffer = fused_attention_cpu(
+                        queries,
+                        keys_data,
+                        values_data,
+                        contexts,
+                        sequence,
+                        head_dim,
+                        scale,
+                        z_bias_slice,
+                        attn_bias_slice,
+                    );
+                    make_tensor(buffer).map(|tensor| (tensor, "cpu"))
+                }
             }
             AttentionBackend::Cpu => {
                 let buffer = fused_attention_cpu(
@@ -2224,7 +2238,7 @@ impl Tensor {
                     z_bias_slice,
                     attn_bias_slice,
                 );
-                make_tensor(buffer)
+                make_tensor(buffer).map(|tensor| (tensor, "cpu"))
             }
             #[cfg(feature = "wgpu")]
             AttentionBackend::GpuWgpu => {
@@ -2243,14 +2257,36 @@ impl Tensor {
                     backend: "wgpu",
                     message,
                 })?;
-                make_tensor(data)
+                make_tensor(data).map(|tensor| (tensor, "wgpu"))
             }
             #[cfg(not(feature = "wgpu"))]
             AttentionBackend::GpuWgpu => Err(TensorError::BackendFailure {
                 backend: "wgpu",
                 message: "wgpu backend disabled at compile time".into(),
             }),
+        }?;
+
+        crate::emit_tensor_op(
+            "scaled_dot_attention",
+            &[expected_rows, head_dim],
+            &[expected_rows, head_dim],
+        );
+        if backend_used != "wgpu" {
+            crate::emit_tensor_op_meta("scaled_dot_attention", || {
+                serde_json::json!({
+                    "backend": backend_used,
+                    "contexts": contexts,
+                    "sequence": sequence,
+                    "head_dim": head_dim,
+                    "scale": scale,
+                    "flags": {
+                        "use_z_bias": z_bias_slice.is_some(),
+                        "use_attn_bias": attn_bias_slice.is_some(),
+                    }
+                })
+            });
         }
+        Ok(tensor)
     }
 
     /// Matrix multiply using the WGPU backend when available.

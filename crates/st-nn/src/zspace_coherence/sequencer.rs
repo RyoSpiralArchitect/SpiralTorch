@@ -1869,6 +1869,16 @@ impl ZSpaceCoherenceSequencer {
         self.plugins.push(Arc::new(plugin));
     }
 
+    /// Installs a built-in trace recorder plugin and returns a handle to it.
+    pub fn install_trace_recorder(
+        &mut self,
+        config: super::trace::ZSpaceTraceConfig,
+    ) -> super::trace::ZSpaceTraceRecorder {
+        let recorder = super::trace::ZSpaceTraceRecorder::new(config);
+        self.register_plugin(recorder.clone());
+        recorder
+    }
+
     /// Removes all registered plugins.
     pub fn clear_plugins(&mut self) {
         self.plugins.clear();

@@ -258,6 +258,183 @@ pub fn parse_env_dsl_plus_kind(
     }
 }
 
+/// Debug helper that mirrors [`parse_env_dsl_plus_kind`] but also returns a structured KDSL trace.
+#[cfg(feature = "kdsl")]
+pub fn parse_env_dsl_plus_kind_explain(
+    rows: u32,
+    cols: u32,
+    k: u32,
+    subgroup: bool,
+    kind: &'static str,
+    max_events: usize,
+) -> (
+    Option<Choice>,
+    Vec<SoftRule>,
+    DslOverrides,
+    Option<st_kdsl::KdslEvaluationTrace>,
+) {
+    let src = std::env::var("SPIRAL_HEUR_K").unwrap_or_default();
+    let kc = sweet_kc(kind, k);
+    let mut ov = DslOverrides::default();
+    if src.trim().is_empty() {
+        return (None, vec![], ov, None);
+    }
+
+    let ctx = st_kdsl::Ctx {
+        r: rows,
+        c: cols,
+        k,
+        sg: subgroup,
+        sgc: if subgroup { 8 } else { 1 },
+        kc,
+        tile_cols: ((cols.max(1) + 255) / 256) as u32,
+        radix: if k.is_power_of_two() { 4 } else { 2 },
+        segments: if cols > 131_072 {
+            4
+        } else if cols > 32_768 {
+            2
+        } else {
+            1
+        },
+    };
+
+    let (out, trace) = match st_kdsl::eval_program_with_trace(&src, &ctx, max_events.max(1)) {
+        Ok(result) => result,
+        Err(_) => return (None, vec![], ov, None),
+    };
+
+    let mut hard = None;
+    if out.hard.use_2ce.is_some()
+        || out.hard.wg.is_some()
+        || out.hard.kl.is_some()
+        || out.hard.ch.is_some()
+        || out.hard.algo.is_some()
+        || out.hard.midk.is_some()
+        || out.hard.bottomk.is_some()
+        || out.hard.ctile.is_some()
+        || out.hard.tile_cols.is_some()
+        || out.hard.radix.is_some()
+        || out.hard.segments.is_some()
+    {
+        hard = Some(Choice {
+            use_2ce: out.hard.use_2ce.unwrap_or(false),
+            wg: out.hard.wg.unwrap_or(if subgroup { 256 } else { 128 }),
+            kl: out.hard.kl.unwrap_or(if k >= 64 {
+                32
+            } else if k >= 16 {
+                16
+            } else {
+                8
+            }),
+            ch: out.hard.ch.unwrap_or(if cols > 16_384 { 8192 } else { 0 }),
+            algo_topk: out.hard.algo.unwrap_or(0),
+            ctile: out.hard.ctile.unwrap_or(0),
+            mode_midk: out.hard.midk.unwrap_or(0),
+            mode_bottomk: out.hard.bottomk.unwrap_or(0),
+            tile_cols: out
+                .hard
+                .tile_cols
+                .unwrap_or(cols.max(1).div_ceil(1024) * 1024),
+            radix: out
+                .hard
+                .radix
+                .unwrap_or(if k.is_power_of_two() { 4 } else { 2 }),
+            segments: out.hard.segments.unwrap_or(if cols > 131_072 {
+                4
+            } else if cols > 32_768 {
+                2
+            } else {
+                1
+            }),
+        });
+    }
+
+    let mut soft = Vec::<SoftRule>::new();
+    for r in out.soft {
+        match r {
+            st_kdsl::SoftRule::U2 { val, w } => soft.push(SoftRule {
+                name: SOFT_NAME_USE2CE,
+                weight: w,
+                score: if val { 1.0 } else { -1.0 },
+            }),
+            st_kdsl::SoftRule::Wg { val, w } => soft.push(SoftRule {
+                name: SOFT_NAME_WG,
+                weight: w,
+                score: val as f32,
+            }),
+            st_kdsl::SoftRule::Kl { val, w } => soft.push(SoftRule {
+                name: SOFT_NAME_KL,
+                weight: w,
+                score: val as f32,
+            }),
+            st_kdsl::SoftRule::Ch { val, w } => soft.push(SoftRule {
+                name: SOFT_NAME_CH,
+                weight: w,
+                score: val as f32,
+            }),
+            st_kdsl::SoftRule::Algo { val, w } => soft.push(SoftRule {
+                name: SOFT_NAME_ALGO,
+                weight: w,
+                score: val as f32,
+            }),
+            st_kdsl::SoftRule::Midk { val, w } => soft.push(SoftRule {
+                name: SOFT_NAME_MODE_MIDK,
+                weight: w,
+                score: val as f32,
+            }),
+            st_kdsl::SoftRule::Bottomk { val, w } => soft.push(SoftRule {
+                name: SOFT_NAME_MODE_BOTTOMK,
+                weight: w,
+                score: val as f32,
+            }),
+            st_kdsl::SoftRule::Ctile { val, w } => soft.push(SoftRule {
+                name: SOFT_NAME_CTILE,
+                weight: w,
+                score: val as f32,
+            }),
+            st_kdsl::SoftRule::TileCols { val, w } => soft.push(SoftRule {
+                name: SOFT_NAME_TILE_COLS,
+                weight: w,
+                score: val as f32,
+            }),
+            st_kdsl::SoftRule::Radix { val, w } => soft.push(SoftRule {
+                name: SOFT_NAME_RADIX,
+                weight: w,
+                score: val as f32,
+            }),
+            st_kdsl::SoftRule::Segments { val, w } => soft.push(SoftRule {
+                name: SOFT_NAME_SEGMENTS,
+                weight: w,
+                score: val as f32,
+            }),
+        }
+    }
+
+    if let Some(a) = out.hard.algo {
+        ov.algo_topk = a;
+    }
+    if let Some(m) = out.hard.midk {
+        ov.mode_midk = m;
+    }
+    if let Some(m) = out.hard.bottomk {
+        ov.mode_bottomk = m;
+    }
+    if let Some(t) = out.hard.ctile {
+        ov.ctile = t;
+    }
+    if let Some(t) = out.hard.tile_cols {
+        ov.tile_cols = t;
+    }
+    if let Some(r) = out.hard.radix {
+        ov.radix = r;
+    }
+    if let Some(s) = out.hard.segments {
+        ov.segments = s;
+    }
+
+    (hard, soft, ov, Some(trace))
+}
+
 pub fn parse_env_dsl(
     rows: u32,
     cols: u32,

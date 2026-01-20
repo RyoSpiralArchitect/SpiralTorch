@@ -43,17 +43,19 @@ pub mod traits;
 pub mod events;
 pub mod loader;
 pub mod context;
+pub mod recorder;
 
 pub use registry::{PluginRegistry, PluginHandle};
 pub use traits::{Plugin, PluginMetadata, PluginCapability};
 pub use events::{PluginEvent, PluginEventBus, EventListener};
 pub use loader::{DynamicPluginLoader, PluginLoader, StaticPluginLoader};
 pub use context::{PluginContext, PluginDependency};
+pub use recorder::{PluginEventRecord, PluginEventRecorder, PluginEventRecorderConfig, PluginEventSnapshot, PluginEventTrace};
 
 use crate::PureResult;
 use std::sync::Arc;
 use st_tensor::TensorOpEvent;
-use st_tensor::set_tensor_op_observer;
+use st_tensor::{set_tensor_op_meta_observer, set_tensor_op_observer, TensorOpMetaEvent};
 
 /// Initialize the global plugin system.
 ///
@@ -73,13 +75,24 @@ pub fn global_registry() -> &'static PluginRegistry {
 
 fn ensure_tensor_op_bridge(bus: PluginEventBus) {
     let _ = TENSOR_OP_BRIDGE.get_or_init(|| {
-        let bus = bus.clone();
+        let bus_ops = bus.clone();
         set_tensor_op_observer(Some(Arc::new(move |event: &TensorOpEvent| {
-            bus.publish(&PluginEvent::TensorOp {
+            bus_ops.publish(&PluginEvent::TensorOp {
                 op_name: event.op_name.to_string(),
                 input_shape: event.input_shape.clone(),
                 output_shape: event.output_shape.clone(),
             });
+        })));
+
+        let bus_meta = bus.clone();
+        set_tensor_op_meta_observer(Some(Arc::new(move |event: &TensorOpMetaEvent| {
+            bus_meta.publish(&PluginEvent::custom(
+                "TensorOpMeta",
+                serde_json::json!({
+                    "op_name": event.op_name,
+                    "data": event.data.clone(),
+                }),
+            ));
         })));
     });
 }

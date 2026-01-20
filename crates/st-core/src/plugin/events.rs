@@ -107,6 +107,18 @@ impl PluginEventBus {
         removed
     }
 
+    /// Returns true when there are listeners registered for the provided event type
+    /// or for the wildcard `"*"`.
+    pub fn has_listeners(&self, event_type: &str) -> bool {
+        let listeners = self.listeners.lock().unwrap();
+        listeners
+            .get(event_type)
+            .is_some_and(|bucket| !bucket.is_empty())
+            || listeners
+                .get("*")
+                .is_some_and(|bucket| !bucket.is_empty())
+    }
+
     /// Publish an event to all interested listeners.
     pub fn publish(&self, event: &PluginEvent) {
         let event_type = self.event_type_name(event);

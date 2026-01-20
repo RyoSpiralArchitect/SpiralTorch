@@ -8,6 +8,7 @@
 use std::cell::Cell;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Arc, OnceLock, RwLock};
+use serde_json::Value;
 
 /// Metadata about a completed tensor operation.
 #[derive(Clone, Debug)]
@@ -22,8 +23,21 @@ pub type TensorOpObserver = Arc<dyn Fn(&TensorOpEvent) + Send + Sync + 'static>;
 
 static TENSOR_OP_OBSERVER: OnceLock<RwLock<Option<TensorOpObserver>>> = OnceLock::new();
 
+/// Metadata about a tensor operation decision (backend choice, fused kernel variant, etc).
+#[derive(Clone, Debug)]
+pub struct TensorOpMetaEvent {
+    pub op_name: &'static str,
+    pub data: Value,
+}
+
+/// Observer callback invoked after a tensor operation emits metadata.
+pub type TensorOpMetaObserver = Arc<dyn Fn(&TensorOpMetaEvent) + Send + Sync + 'static>;
+
+static TENSOR_OP_META_OBSERVER: OnceLock<RwLock<Option<TensorOpMetaObserver>>> = OnceLock::new();
+
 thread_local! {
     static IN_OBSERVER_CALLBACK: Cell<bool> = Cell::new(false);
+    static IN_META_OBSERVER_CALLBACK: Cell<bool> = Cell::new(false);
 }
 
 /// Install (or clear) the global tensor operation observer.
@@ -31,6 +45,17 @@ thread_local! {
 /// Returns the previously installed observer, if any.
 pub fn set_tensor_op_observer(observer: Option<TensorOpObserver>) -> Option<TensorOpObserver> {
     let lock = TENSOR_OP_OBSERVER.get_or_init(|| RwLock::new(None));
+    let mut slot = lock.write().unwrap();
+    std::mem::replace(&mut *slot, observer)
+}
+
+/// Install (or clear) the global tensor operation metadata observer.
+///
+/// Returns the previously installed observer, if any.
+pub fn set_tensor_op_meta_observer(
+    observer: Option<TensorOpMetaObserver>,
+) -> Option<TensorOpMetaObserver> {
+    let lock = TENSOR_OP_META_OBSERVER.get_or_init(|| RwLock::new(None));
     let mut slot = lock.write().unwrap();
     std::mem::replace(&mut *slot, observer)
 }
@@ -73,3 +98,41 @@ pub fn emit_tensor_op(op_name: &'static str, input_shape: &[usize], output_shape
     IN_OBSERVER_CALLBACK.with(|flag| flag.set(false));
 }
 
+/// Emit an operation metadata event to the currently installed observer.
+///
+/// The `build` closure is only evaluated when an observer is present, keeping
+/// the hot path allocation-free by default.
+pub fn emit_tensor_op_meta<F>(op_name: &'static str, build: F)
+where
+    F: FnOnce() -> Value,
+{
+    let lock = match TENSOR_OP_META_OBSERVER.get() {
+        Some(lock) => lock,
+        None => return,
+    };
+    let observer = lock.read().unwrap().clone();
+    let Some(observer) = observer else {
+        return;
+    };
+
+    let already_in_callback = IN_META_OBSERVER_CALLBACK.with(|flag| {
+        if flag.get() {
+            true
+        } else {
+            flag.set(true);
+            false
+        }
+    });
+    if already_in_callback {
+        return;
+    }
+
+    let event = TensorOpMetaEvent {
+        op_name,
+        data: build(),
+    };
+
+    let _ = catch_unwind(AssertUnwindSafe(|| observer(&event)));
+
+    IN_META_OBSERVER_CALLBACK.with(|flag| flag.set(false));
+}

@@ -2160,6 +2160,7 @@ impl ModuleTrainer {
         config: RoundtableConfig,
     ) -> RoundtableSchedule {
         let mut schedule = RoundtableSchedule::new(&self.planner, rows, cols, config);
+        let mut autopilot_picks: Option<std::collections::HashMap<String, String>> = None;
         if self.autopilot.is_some() {
             let depth = schedule.above().k + schedule.here().k + schedule.beneath().k;
             let device_load = self.estimate_device_load();
@@ -2169,7 +2170,51 @@ impl ModuleTrainer {
                 if !picks.is_empty() {
                     schedule.apply_knob_overrides(&picks);
                 }
+                autopilot_picks = Some(picks);
             }
+        }
+        let bus = global_registry().event_bus();
+        if bus.has_listeners("RoundtablePlanned") {
+            let encode_plan = |plan: &RankPlan| {
+                serde_json::json!({
+                    "kind": plan.kind.as_str(),
+                    "rows": plan.rows,
+                    "cols": plan.cols,
+                    "k": plan.k,
+                    "choice": {
+                        "subgroup": plan.choice.subgroup,
+                        "use_2ce": plan.choice.use_2ce,
+                        "wg": plan.choice.wg,
+                        "kl": plan.choice.kl,
+                        "ch": plan.choice.ch,
+                        "tile": plan.choice.tile,
+                        "ctile": plan.choice.ctile,
+                        "fft_tile": plan.choice.fft_tile,
+                        "fft_radix": plan.choice.fft_radix,
+                        "fft_segments": plan.choice.fft_segments,
+                    }
+                })
+            };
+            bus.publish(&PluginEvent::custom(
+                "RoundtablePlanned",
+                serde_json::json!({
+                    "rows": rows,
+                    "cols": cols,
+                    "config": {
+                        "top_k": config.top_k,
+                        "mid_k": config.mid_k,
+                        "bottom_k": config.bottom_k,
+                        "here_tolerance": config.here_tolerance,
+                    },
+                    "autopilot_enabled": self.autopilot.is_some(),
+                    "autopilot_picks": autopilot_picks,
+                    "bands": {
+                        "above": encode_plan(schedule.above()),
+                        "here": encode_plan(schedule.here()),
+                        "beneath": encode_plan(schedule.beneath()),
+                    },
+                }),
+            ));
         }
         self.emit_roundtable_summary(rows, cols, config, &schedule);
         schedule
