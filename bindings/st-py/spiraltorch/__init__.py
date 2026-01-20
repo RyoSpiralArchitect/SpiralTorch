@@ -464,6 +464,16 @@ from .zspace_trace import (
     write_zspace_trace_html,
 )
 
+from .zspace_atlas import (
+    zspace_trace_to_atlas_route,
+    zspace_trace_event_to_atlas_frame,
+)
+
+from .zspace_live import (
+    serve_zspace_trace,
+    ZSpaceTraceLiveServer,
+)
+
 from .elliptic import (
     EllipticWarpFunction,
     elliptic_warp_autograd,
@@ -481,6 +491,8 @@ _EXTRAS = [
     "describe_device","hip_probe","z_space_barycenter",
     "hypergrad","realgrad","hypergrad_topos","encode_zspace","z_metrics",
     "load_zspace_trace_events","write_zspace_trace_html",
+    "zspace_trace_to_atlas_route","zspace_trace_event_to_atlas_frame",
+    "serve_zspace_trace","ZSpaceTraceLiveServer",
 ]
 for _n in _EXTRAS:
     _value = _safe_getattr(_rs, _n, None)
@@ -3117,7 +3129,8 @@ def _install_plugin_helpers() -> None:
     plugin_module = _ensure_submodule("plugin")
     subscribe = _resolve_rs_attr("plugin.subscribe")
     unsubscribe = _resolve_rs_attr("plugin.unsubscribe")
-    if subscribe is None or unsubscribe is None:
+    listen = _resolve_rs_attr("plugin.listen")
+    if subscribe is None or unsubscribe is None or listen is None:
         return
     _PluginRecorder._subscribe = subscribe
     _PluginRecorder._unsubscribe = unsubscribe
@@ -3139,6 +3152,38 @@ def _install_plugin_helpers() -> None:
     plugin_module.record = record
     _register_module_export(plugin_module, "PluginRecorder")
     _register_module_export(plugin_module, "record")
+
+    def listen_stream(
+        event_type: str = "*",
+        *,
+        maxlen: int = 1024,
+        poll_interval: float = 0.05,
+        max_batch: int = 256,
+    ) -> _Iterator[_Dict[str, _Any]]:
+        """Yield plugin events continuously by polling an internal queue.
+
+        This is a notebook-friendly wrapper around `plugin.listen()` that keeps
+        yielding as new events arrive.
+        """
+
+        queue = listen(event_type, maxlen=maxlen)
+        try:
+            while True:
+                drained = queue.drain(max_batch)
+                if drained:
+                    for item in drained:
+                        yield item
+                    continue
+                _time.sleep(max(0.0, float(poll_interval)))
+        finally:
+            try:
+                queue.close()
+            except Exception:
+                pass
+
+    listen_stream.__module__ = plugin_module.__name__
+    plugin_module.listen_stream = listen_stream
+    _register_module_export(plugin_module, "listen_stream")
 
 
 def _install_nn_helpers() -> None:

@@ -19,6 +19,46 @@ def write_zspace_trace_html(
     event_type: str = ...,
 ) -> str: ...
 
+def zspace_trace_event_to_atlas_frame(
+    event: Mapping[str, Any],
+    *,
+    district: str = ...,
+    timestamp_base: float | None = ...,
+    step_seconds: float = ...,
+) -> "telemetry.AtlasFrame" | None: ...
+
+def zspace_trace_to_atlas_route(
+    trace: str | Iterable[Mapping[str, Any]],
+    *,
+    district: str = ...,
+    bound: int = ...,
+    event_type: str = ...,
+    timestamp_base: float | None = ...,
+    step_seconds: float = ...,
+) -> "telemetry.AtlasRoute": ...
+
+class ZSpaceTraceLiveServer:
+    url: str
+    event_type: str
+    record_jsonl: str | None
+    def close(self) -> None: ...
+    def join(self, timeout: float | None = ...) -> None: ...
+
+def serve_zspace_trace(
+    *,
+    event_type: str = ...,
+    host: str = ...,
+    port: int = ...,
+    title: str = ...,
+    maxlen: int = ...,
+    poll_interval: float = ...,
+    max_batch: int = ...,
+    buffer: int = ...,
+    record_jsonl: str | None = ...,
+    open_browser: bool = ...,
+    background: bool = ...,
+) -> ZSpaceTraceLiveServer: ...
+
 class Axis:
     name: str
     size: int | None
@@ -3238,6 +3278,14 @@ class _PluginModule(ModuleType):
     def unsubscribe(self, event_type: str, subscription_id: int) -> bool: ...
     def unsubscribe_many(self, subscriptions: Iterable[Tuple[str, int]]) -> int: ...
     def listen(self, event_type: str = ..., *, maxlen: int = ...) -> "_PluginModule.PluginQueue": ...
+    def listen_stream(
+        self,
+        event_type: str = ...,
+        *,
+        maxlen: int = ...,
+        poll_interval: float = ...,
+        max_batch: int = ...,
+    ) -> Iterator[Dict[str, object]]: ...
     def record(
         self,
         path: Any,

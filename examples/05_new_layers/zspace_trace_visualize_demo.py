@@ -43,7 +43,14 @@ with st.plugin.record(trace_jsonl, ["ZSpaceTrace"], mode="w"):
 
 html_path = st.write_zspace_trace_html(trace_jsonl, trace_html, title="SpiralTorch Z-Space Trace")
 
+route = st.zspace_trace_to_atlas_route(trace_jsonl, district="Concourse", bound=256)
+summary = route.summary()
+perspective = route.perspective_for("Concourse", focus_prefixes=["coherence_"])
+
 print(f"y_shape={y.shape()}")
 print(f"coherence_channels={len(coherence)} label={diagnostics.observation.label}")
 print(f"trace_jsonl={trace_jsonl}")
 print(f"trace_html={html_path}")
+print(f"atlas_frames={summary.get('frames')}")
+if perspective is not None:
+    print(f"atlas_guidance={perspective.get('guidance')}")
