@@ -315,6 +315,11 @@ cargo build -p st-vision      # vision kernels/pipelines
 # Install maturin (once)
 python -m pip install -U "maturin>=1,<2"
 
+# macOS note: if you build on macOS 14 but want wheels that install on macOS 11–13,
+# set the deployment target explicitly.
+# (Apple Silicon requires >= 11.0.)
+export MACOSX_DEPLOYMENT_TARGET=11.0
+
 # Release-equivalent (matches PyPI wheels)
 maturin build -m bindings/st-py/Cargo.toml --release --locked --features wgpu,logic,kdsl
 
