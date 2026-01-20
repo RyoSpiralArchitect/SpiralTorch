@@ -1,5 +1,3 @@
-enable chromium_experimental_subgroups;
-
 const WORKGROUP_SIZE: u32 = 256u;
 const MAX_SUBGROUPS: u32 = WORKGROUP_SIZE;
 

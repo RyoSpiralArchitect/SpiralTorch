@@ -760,7 +760,7 @@ impl GpuContext {
                     label: Some("st.tensor.wgpu_dense.softmax_zspace"),
                     layout: Some(&softmax_zspace_pipeline_layout),
                     module: &shader,
-                    entry_point: "main_cs",
+                    entry_point: "main",
                     compilation_options: Default::default(),
                 }),
             )
@@ -842,7 +842,7 @@ impl GpuContext {
                     label: Some("st.tensor.wgpu_dense.softmax_spiral"),
                     layout: Some(&softmax_spiral_pipeline_layout),
                     module: &shader,
-                    entry_point: "main_cs",
+                    entry_point: "main",
                     compilation_options: Default::default(),
                 }),
             )
@@ -3895,8 +3895,23 @@ mod tests {
     }
 
     #[test]
+    fn softmax_subgroup_shader_wgsl_is_valid() {
+        assert_parses("row softmax subgroup", ROW_SOFTMAX_SUBGROUP_WGSL);
+    }
+
+    #[test]
     fn layer_norm_shader_wgsl_is_valid() {
         assert_parses("layer norm", LAYER_NORM_WGSL);
+    }
+
+    #[test]
+    fn softmax_zspace_shader_wgsl_is_valid() {
+        assert_parses("softmax zspace projection", SOFTMAX_ZSPACE_WGSL);
+    }
+
+    #[test]
+    fn softmax_spiral_shader_wgsl_is_valid() {
+        assert_parses("softmax spiral consensus", SOFTMAX_SPIRAL_WGSL);
     }
 
     #[test]
