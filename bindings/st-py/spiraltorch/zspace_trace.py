@@ -327,12 +327,12 @@ def write_zspace_trace_html(
       if (typeof ev.aggregated_shape !== "undefined") items.push(["aggregated_shape", JSON.stringify(ev.aggregated_shape)]);
       if (ev.diagnostics && typeof ev.diagnostics === "object") {{
         for (const [k, v] of Object.entries(ev.diagnostics)) {{
-          items.push([`diag.${k}`, typeof v === "number" ? v.toFixed(6) : JSON.stringify(v)]);
+          items.push([`diag.${{k}}`, typeof v === "number" ? v.toFixed(6) : JSON.stringify(v)]);
         }}
       }}
       for (const [k, v] of items) {{
         const cell = document.createElement("div");
-        cell.innerHTML = `<strong>${k}</strong><br/>${v}`;
+        cell.innerHTML = `<strong>${{k}}</strong><br/>${{v}}`;
         metaEl.appendChild(cell);
       }}
     }}
@@ -358,4 +358,3 @@ def write_zspace_trace_html(
     html_path.parent.mkdir(parents=True, exist_ok=True)
     html_path.write_text(html + "\n", encoding="utf-8")
     return str(html_path)
-

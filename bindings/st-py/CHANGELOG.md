@@ -1,5 +1,11 @@
 # SpiralTorch (Python) changelog
 
+## 0.3.8
+
+- Fix `serve_zspace_trace(...)` live viewer (no PyO3 cross-thread `PluginQueue` panic).
+- Fix HTML viewers (`write_zspace_trace_html`, live viewer) f-string escaping for JS template literals.
+- Add wheel smoke coverage for trace viewers.
+
 ## 0.3.7
 
 - Stream Z-space trace events into Python (payload + timestamp on `spiraltorch.plugin` custom events).

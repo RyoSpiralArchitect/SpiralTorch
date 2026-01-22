@@ -299,7 +299,7 @@ def _viewer_html(title: str) -> str:
       if (typeof ev.aggregated_shape !== "undefined") items.push(["aggregated_shape", JSON.stringify(ev.aggregated_shape)]);
       if (ev.diagnostics && typeof ev.diagnostics === "object") {{
         for (const [k, v] of Object.entries(ev.diagnostics)) {{
-          items.push([`diag.${k}`, typeof v === "number" ? v.toFixed(6) : JSON.stringify(v)]);
+          items.push([`diag.${{k}}`, typeof v === "number" ? v.toFixed(6) : JSON.stringify(v)]);
         }}
       }}
       for (const [k, v] of items) {{
@@ -352,10 +352,8 @@ class _LiveHub:
         record_jsonl: str | None,
         buffer: int,
     ) -> None:
-        import spiraltorch as st
-
         self._event_type = str(event_type)
-        self._queue = st.plugin.listen(self._event_type, maxlen=int(maxlen))
+        self._maxlen = max(1, int(maxlen))
         self._poll_interval = max(0.0, float(poll_interval))
         self._max_batch = max(1, int(max_batch))
         self._clients: list[Queue[dict[str, Any]]] = []
@@ -378,22 +376,25 @@ class _LiveHub:
 
     def close(self) -> None:
         self._stop.set()
-        try:
-            self._queue.close()
-        except Exception:
-            pass
+        thread = self._thread
+        if thread.is_alive() and threading.current_thread() is not thread:
+            thread.join(timeout=2.0)
         if self._record_handle is not None:
             try:
                 self._record_handle.close()
             except Exception:
                 pass
+            self._record_handle = None
 
     def _pump(self) -> None:
+        import spiraltorch as st
+
+        queue = st.plugin.listen(self._event_type, maxlen=self._maxlen)
         try:
             while not self._stop.is_set():
-                drained = self._queue.drain(self._max_batch)
+                drained = queue.drain(self._max_batch)
                 if not drained:
-                    time.sleep(self._poll_interval)
+                    self._stop.wait(self._poll_interval)
                     continue
                 for record in drained:
                     if not isinstance(record, Mapping):
@@ -419,7 +420,16 @@ class _LiveHub:
                         except Exception:
                             continue
         finally:
-            self.close()
+            try:
+                queue.close()
+            except Exception:
+                pass
+            if self._record_handle is not None:
+                try:
+                    self._record_handle.close()
+                except Exception:
+                    pass
+                self._record_handle = None
 
     def subscribe(self) -> tuple[Queue[dict[str, Any]], list[dict[str, Any]]]:
         q: Queue[dict[str, Any]] = Queue(maxsize=256)
@@ -555,7 +565,11 @@ def serve_zspace_trace(
     handler = type("_Handler", (_ZSpaceHandler,), {})
     handler.hub = hub
     handler.title = str(title)
-    server = ThreadingHTTPServer((host, int(port)), handler)
+    try:
+        server = ThreadingHTTPServer((host, int(port)), handler)
+    except Exception:
+        hub.close()
+        raise
 
     bound_host, bound_port = server.server_address[:2]
     url = f"http://{bound_host}:{bound_port}/"

@@ -131,6 +131,25 @@ jobs:
           session = st.amegagrad_session((1, 4), curvature=-0.9, telemetry=True, telemetry_bound=8)
           session.step_wave(st.Tensor(1, 4, [0.1, -0.2, 0.05, 0.0]))
 
+          import tempfile
+          import pathlib
+          import time as _time
+
+          with tempfile.TemporaryDirectory() as td:
+              td_path = pathlib.Path(td)
+              trace_path = td_path / "trace.jsonl"
+              trace_path.write_text(
+                  '{"type":"ZSpaceTrace","event_type":"ZSpaceTrace","payload":{"ZSpaceCoherence":{"step":0,"coherence":[0.1,0.2]}}}\\n',
+                  encoding="utf-8",
+              )
+              html_path = st.write_zspace_trace_html(trace_path, td_path / "trace.html")
+              assert pathlib.Path(html_path).exists()
+
+          live = st.serve_zspace_trace(open_browser=False, background=True, poll_interval=0.01, max_batch=1, buffer=1)
+          _time.sleep(0.05)
+          live.close()
+          live.join(2.0)
+
           print("smoke ok")
           PY
       - name: Upload
