@@ -1,5 +1,12 @@
 # SpiralTorch (Python) changelog
 
+## 0.3.7
+
+- Stream Z-space trace events into Python (payload + timestamp on `spiraltorch.plugin` custom events).
+- Add `ZSpaceCoherenceSequencer.install_trace_recorder(...)` + `ZSpaceTraceRecorder` bindings.
+- Add `write_zspace_trace_html(...)` / `serve_zspace_trace(...)` for notebook-friendly visualization (HTML + live SSE viewer).
+- Add `zspace_trace_to_atlas_route(...)` to merge traces into `telemetry.AtlasRoute`.
+
 ## 0.3.6
 
 - Route `nn.LayerNorm` forward through the tensor-layer `layer_norm` op (WGPU kernel available when the backend is enabled).
