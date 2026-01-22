@@ -19,6 +19,20 @@ def write_zspace_trace_html(
     event_type: str = ...,
 ) -> str: ...
 
+def load_kdsl_trace_events(path: str) -> List[Dict[str, Any]]: ...
+
+def write_kdsl_trace_jsonl(
+    trace: Mapping[str, Any] | Sequence[Mapping[str, Any]],
+    path: str,
+) -> str: ...
+
+def write_kdsl_trace_html(
+    trace: Mapping[str, Any] | Sequence[Mapping[str, Any]],
+    html_path: str | None = ...,
+    *,
+    title: str = ...,
+) -> str: ...
+
 def zspace_trace_event_to_atlas_frame(
     event: Mapping[str, Any],
     *,
@@ -564,6 +578,12 @@ class SpiralKContext:
     def radix(self) -> int: ...
     @property
     def segments(self) -> int: ...
+    def eval(self, program: str) -> Dict[str, object]: ...
+    def eval_with_trace(
+        self,
+        program: str,
+        max_events: int = ...,
+    ) -> tuple[Dict[str, object], Dict[str, Any]]: ...
 
 class SpiralKWilsonMetrics:
     def __init__(
@@ -1045,6 +1065,12 @@ class RankPlan:
     def fft_spiralk_hint(self) -> str: ...
     def spiralk_context(self) -> SpiralKContext: ...
     def rewrite_with_spiralk(self, script: str) -> RankPlan: ...
+    def rewrite_with_spiralk_explain(
+        self,
+        script: str,
+        *,
+        max_events: int = ...,
+    ) -> tuple[RankPlan, Dict[str, object], Dict[str, Any]]: ...
 
 def from_dlpack(capsule: object) -> Tensor: ...
 

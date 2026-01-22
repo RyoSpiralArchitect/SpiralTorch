@@ -250,14 +250,15 @@ impl PipelineCache {
                 "st.tensor.wgpu_dense.matmul_pipeline.{:?}.tile{}x{}x{}",
                 pipeline_key.dtype, pipeline_key.tile_m, pipeline_key.tile_n, pipeline_key.tile_k
             );
-            let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some(&label),
-                layout: Some(layout),
-                module: shader_for_pipeline.as_ref(),
-                entry_point: "main",
-                compilation_options: Default::default(),
-            });
-            Ok(Arc::new(pipeline))
+            create_compute_pipeline(
+                device.as_ref(),
+                &label,
+                Some(layout),
+                shader_for_pipeline.as_ref(),
+                "main",
+            )
+            .map(Arc::new)
+            .map_err(|err| err.to_string())
         });
         match pipeline_result {
             Ok(pipeline) => Ok(Arc::clone(pipeline)),
@@ -670,16 +671,15 @@ impl GpuContext {
             "st.tensor.wgpu_dense.softmax",
             ROW_SOFTMAX_WGSL,
         )
-        .map(|shader| {
-            Arc::new(
-                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some("st.tensor.wgpu_dense.softmax"),
-                    layout: Some(&softmax_pipeline_layout),
-                    module: &shader,
-                    entry_point: "main_cs",
-                    compilation_options: Default::default(),
-                }),
+        .and_then(|shader| {
+            create_compute_pipeline(
+                device.as_ref(),
+                "st.tensor.wgpu_dense.softmax",
+                Some(&softmax_pipeline_layout),
+                &shader,
+                "main_cs",
             )
+            .map(Arc::new)
         })
         .ok();
 
@@ -689,16 +689,15 @@ impl GpuContext {
                 "st.tensor.wgpu_dense.softmax.subgroup",
                 ROW_SOFTMAX_SUBGROUP_WGSL,
             )
-            .map(|shader| {
-                Arc::new(
-                    device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                        label: Some("st.tensor.wgpu_dense.softmax.subgroup"),
-                        layout: Some(&softmax_pipeline_layout),
-                        module: &shader,
-                        entry_point: "main_cs",
-                        compilation_options: Default::default(),
-                    }),
+            .and_then(|shader| {
+                create_compute_pipeline(
+                    device.as_ref(),
+                    "st.tensor.wgpu_dense.softmax.subgroup",
+                    Some(&softmax_pipeline_layout),
+                    &shader,
+                    "main_cs",
                 )
+                .map(Arc::new)
             })
             .ok()
         } else {
@@ -754,16 +753,15 @@ impl GpuContext {
             "st.tensor.wgpu_dense.softmax_zspace",
             SOFTMAX_ZSPACE_WGSL,
         )
-        .map(|shader| {
-            Arc::new(
-                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some("st.tensor.wgpu_dense.softmax_zspace"),
-                    layout: Some(&softmax_zspace_pipeline_layout),
-                    module: &shader,
-                    entry_point: "main",
-                    compilation_options: Default::default(),
-                }),
+        .and_then(|shader| {
+            create_compute_pipeline(
+                device.as_ref(),
+                "st.tensor.wgpu_dense.softmax_zspace",
+                Some(&softmax_zspace_pipeline_layout),
+                &shader,
+                "main",
             )
+            .map(Arc::new)
         })
         .ok();
 
@@ -836,16 +834,15 @@ impl GpuContext {
             "st.tensor.wgpu_dense.softmax_spiral",
             SOFTMAX_SPIRAL_WGSL,
         )
-        .map(|shader| {
-            Arc::new(
-                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some("st.tensor.wgpu_dense.softmax_spiral"),
-                    layout: Some(&softmax_spiral_pipeline_layout),
-                    module: &shader,
-                    entry_point: "main",
-                    compilation_options: Default::default(),
-                }),
+        .and_then(|shader| {
+            create_compute_pipeline(
+                device.as_ref(),
+                "st.tensor.wgpu_dense.softmax_spiral",
+                Some(&softmax_spiral_pipeline_layout),
+                &shader,
+                "main",
             )
+            .map(Arc::new)
         })
         .ok();
 
@@ -934,15 +931,16 @@ impl GpuContext {
             fused_gelu_back_shader_source.as_str(),
         )
         .map_err(|err| err.to_string())?;
-        let fused_gelu_back_pipeline = Arc::new(device.create_compute_pipeline(
-            &wgpu::ComputePipelineDescriptor {
-                label: Some("st.tensor.wgpu_dense.fused_gelu_back"),
-                layout: Some(&fused_gelu_back_pipeline_layout),
-                module: &fused_gelu_back_shader,
-                entry_point: "main",
-                compilation_options: Default::default(),
-            },
-        ));
+        let fused_gelu_back_pipeline = Arc::new(
+            create_compute_pipeline(
+                device.as_ref(),
+                "st.tensor.wgpu_dense.fused_gelu_back",
+                Some(&fused_gelu_back_pipeline_layout),
+                &fused_gelu_back_shader,
+                "main",
+            )
+            .map_err(|err| err.to_string())?,
+        );
 
         let reduce_db_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("st.tensor.wgpu_dense.reduce_db_layout"),
@@ -998,15 +996,16 @@ impl GpuContext {
             reduce_db_shader_source.as_str(),
         )
         .map_err(|err| err.to_string())?;
-        let reduce_db_pipeline = Arc::new(device.create_compute_pipeline(
-            &wgpu::ComputePipelineDescriptor {
-                label: Some("st.tensor.wgpu_dense.reduce_db"),
-                layout: Some(&reduce_db_pipeline_layout),
-                module: &reduce_db_shader,
-                entry_point: "reduce",
-                compilation_options: Default::default(),
-            },
-        ));
+        let reduce_db_pipeline = Arc::new(
+            create_compute_pipeline(
+                device.as_ref(),
+                "st.tensor.wgpu_dense.reduce_db",
+                Some(&reduce_db_pipeline_layout),
+                &reduce_db_shader,
+                "reduce",
+            )
+            .map_err(|err| err.to_string())?,
+        );
 
         let layer_norm_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("st.tensor.wgpu_dense.layer_norm.layout"),
@@ -1087,15 +1086,16 @@ impl GpuContext {
             LAYER_NORM_WGSL,
         )
         .map_err(|err| err.to_string())?;
-        let layer_norm_pipeline = Arc::new(device.create_compute_pipeline(
-            &wgpu::ComputePipelineDescriptor {
-                label: Some("st.tensor.wgpu_dense.layer_norm"),
-                layout: Some(&layer_norm_pipeline_layout),
-                module: &layer_norm_shader,
-                entry_point: "main",
-                compilation_options: Default::default(),
-            },
-        ));
+        let layer_norm_pipeline = Arc::new(
+            create_compute_pipeline(
+                device.as_ref(),
+                "st.tensor.wgpu_dense.layer_norm",
+                Some(&layer_norm_pipeline_layout),
+                &layer_norm_shader,
+                "main",
+            )
+            .map_err(|err| err.to_string())?,
+        );
 
         let fused_attention = {
             let shader_source = FUSED_ATTENTION_WGSL_TEMPLATE
@@ -1106,7 +1106,7 @@ impl GpuContext {
                 "st.tensor.wgpu_dense.fused_attention.shader",
                 shader_source.as_str(),
             )
-            .map(|shader| {
+            .and_then(|shader| {
                 let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                     label: Some("st.tensor.wgpu_dense.fused_attention.layout"),
                     entries: &[
@@ -1188,20 +1188,19 @@ impl GpuContext {
                         bind_group_layouts: &[&layout],
                         push_constant_ranges: &[],
                     });
-                let pipeline = Arc::new(device.create_compute_pipeline(
-                    &wgpu::ComputePipelineDescriptor {
-                        label: Some("st.tensor.wgpu_dense.fused_attention"),
-                        layout: Some(&pipeline_layout),
-                        module: &shader,
-                        entry_point: "main",
-                        compilation_options: Default::default(),
-                    },
-                ));
-                FusedAttentionKernel {
+                create_compute_pipeline(
+                    device.as_ref(),
+                    "st.tensor.wgpu_dense.fused_attention",
+                    Some(&pipeline_layout),
+                    &shader,
+                    "main",
+                )
+                .map(Arc::new)
+                .map(|pipeline| FusedAttentionKernel {
                     layout,
                     pipeline,
                     max_head_dim: FUSED_ATTENTION_MAX_HEAD_DIM,
-                }
+                })
             })
             .ok()
         };
@@ -2703,15 +2702,16 @@ impl GpuContext {
             config.tile_n(),
             config.tile_k(),
         );
-        let pipeline = Arc::new(self.device().create_compute_pipeline(
-            &wgpu::ComputePipelineDescriptor {
-                label: Some(&pipeline_label),
-                layout: Some(&self.fused_conv_pipeline_layout),
-                module: &shader,
-                entry_point: "main",
-                compilation_options: Default::default(),
-            },
-        ));
+        let pipeline = Arc::new(
+            create_compute_pipeline(
+                self.device(),
+                &pipeline_label,
+                Some(&self.fused_conv_pipeline_layout),
+                &shader,
+                "main",
+            )
+            .map_err(|err| err.to_string())?,
+        );
         pipelines.insert(config, pipeline.clone());
         Ok(pipeline)
     }
@@ -3726,15 +3726,16 @@ impl GpuContext {
             &source,
         )
         .map_err(|err| err.to_string())?;
-        let pipeline = Arc::new(self.device().create_compute_pipeline(
-            &wgpu::ComputePipelineDescriptor {
-                label: Some("st.tensor.wgpu_dense.fused_grad_input.pipeline"),
-                layout: Some(&self.fused_grad_input_pipeline_layout),
-                module: &shader,
-                entry_point: "main",
-                compilation_options: Default::default(),
-            },
-        ));
+        let pipeline = Arc::new(
+            create_compute_pipeline(
+                self.device(),
+                "st.tensor.wgpu_dense.fused_grad_input.pipeline",
+                Some(&self.fused_grad_input_pipeline_layout),
+                &shader,
+                "main",
+            )
+            .map_err(|err| err.to_string())?,
+        );
         let _ = self.fused_grad_input_pipeline.set(pipeline.clone());
         Ok(pipeline)
     }
@@ -3780,15 +3781,16 @@ impl GpuContext {
             RAMANUJAN_PI_WGSL,
         )
         .map_err(|err| err.to_string())?;
-        let pipeline = Arc::new(self.device().create_compute_pipeline(
-            &wgpu::ComputePipelineDescriptor {
-                label: Some("st.tensor.wgpu_dense.ramanujan_pi.pipeline"),
-                layout: Some(&self.ramanujan_pipeline_layout),
-                module: &shader,
-                entry_point: "main",
-                compilation_options: Default::default(),
-            },
-        ));
+        let pipeline = Arc::new(
+            create_compute_pipeline(
+                self.device(),
+                "st.tensor.wgpu_dense.ramanujan_pi.pipeline",
+                Some(&self.ramanujan_pipeline_layout),
+                &shader,
+                "main",
+            )
+            .map_err(|err| err.to_string())?,
+        );
         let _ = self.ramanujan_pipeline.set(pipeline.clone());
         Ok(pipeline)
     }
@@ -4839,6 +4841,30 @@ fn create_wgsl_module(
     .map_err(|payload| {
         anyhow!(
             "WGSL parse error ({label}): {}",
+            panic_payload_to_string(payload)
+        )
+    })
+}
+
+fn create_compute_pipeline(
+    device: &wgpu::Device,
+    label: &str,
+    layout: Option<&wgpu::PipelineLayout>,
+    module: &wgpu::ShaderModule,
+    entry_point: &str,
+) -> Result<wgpu::ComputePipeline, anyhow::Error> {
+    catch_unwind(AssertUnwindSafe(|| {
+        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some(label),
+            layout,
+            module,
+            entry_point,
+            compilation_options: Default::default(),
+        })
+    }))
+    .map_err(|payload| {
+        anyhow!(
+            "WGPU pipeline error ({label}): {}",
             panic_payload_to_string(payload)
         )
     })

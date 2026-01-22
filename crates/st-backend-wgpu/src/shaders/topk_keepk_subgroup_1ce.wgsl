@@ -1,5 +1,3 @@
-enable chromium_experimental_subgroups;
-
 struct InP  { data: array<u32>, }; // u64 packed [lo(idx), hi(f32_bits)]
 struct OutV { data: array<f32>, };
 struct OutI { data: array<i32>, };

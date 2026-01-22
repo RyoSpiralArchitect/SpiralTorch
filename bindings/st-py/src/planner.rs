@@ -8,7 +8,9 @@ use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
 
 #[cfg(feature = "kdsl")]
-use crate::spiralk::{spiralk_err_to_py, PySpiralKContext};
+use crate::spiralk::{spiralk_err_to_py, spiralk_out_to_dict, PySpiralKContext};
+#[cfg(feature = "kdsl")]
+use crate::json::json_to_py;
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
 #[cfg(feature = "kdsl")]
 use st_kdsl::{self, Ctx as SpiralKCtx, Hard as SpiralKHard};
@@ -276,8 +278,44 @@ impl PyRankPlan {
         ))
     }
 
+    #[cfg(feature = "kdsl")]
+    #[pyo3(signature = (script, *, max_events=256))]
+    fn rewrite_with_spiralk_explain(
+        &self,
+        py: Python<'_>,
+        script: &str,
+        max_events: usize,
+    ) -> PyResult<(PyRankPlan, PyObject, PyObject)> {
+        let ctx = spiralk_ctx_from_plan(self.plan());
+        let (out, trace) =
+            st_kdsl::eval_program_with_trace(script, &ctx, max_events).map_err(spiralk_err_to_py)?;
+        let mut updated = self.inner.clone();
+        apply_spiralk_overrides(&mut updated.choice, &out.hard);
+        let out_obj = spiralk_out_to_dict(py, &out)?;
+        let trace_value = serde_json::to_value(&trace)
+            .map_err(|err| pyo3::exceptions::PyRuntimeError::new_err(err.to_string()))?;
+        let trace_obj = json_to_py(py, &trace_value)?;
+        Ok((
+            PyRankPlan::from_plan_with_override(updated, self.kind_override),
+            out_obj,
+            trace_obj,
+        ))
+    }
+
     #[cfg(not(feature = "kdsl"))]
     fn rewrite_with_spiralk(&self, _script: &str) -> PyResult<PyRankPlan> {
+        Err(pyo3::exceptions::PyNotImplementedError::new_err(
+            "SpiralK support requires enabling the 'kdsl' feature",
+        ))
+    }
+
+    #[cfg(not(feature = "kdsl"))]
+    fn rewrite_with_spiralk_explain(
+        &self,
+        _py: Python<'_>,
+        _script: &str,
+        _max_events: usize,
+    ) -> PyResult<(PyRankPlan, PyObject, PyObject)> {
         Err(pyo3::exceptions::PyNotImplementedError::new_err(
             "SpiralK support requires enabling the 'kdsl' feature",
         ))

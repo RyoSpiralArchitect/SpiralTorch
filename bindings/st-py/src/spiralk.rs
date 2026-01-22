@@ -8,6 +8,8 @@ use pyo3::PyRef;
 #[cfg(feature = "kdsl")]
 use pyo3::{Bound, Py};
 
+#[cfg(feature = "kdsl")]
+use crate::json::json_to_py;
 use crate::planner::PyRankPlan;
 
 use st_core::backend::spiralk_fft::SpiralKFftPlan;
@@ -105,7 +107,7 @@ fn spiralk_ai_err_to_py(err: AiRewriteError) -> PyErr {
 }
 
 #[cfg(feature = "kdsl")]
-fn spiralk_out_to_dict(py: Python<'_>, out: &SpiralKOut) -> PyResult<PyObject> {
+pub(crate) fn spiralk_out_to_dict(py: Python<'_>, out: &SpiralKOut) -> PyResult<PyObject> {
     let hard = PyDict::new_bound(py);
     if let Some(flag) = out.hard.use_2ce {
         hard.set_item("use_2ce", flag)?;
@@ -323,6 +325,17 @@ impl PySpiralKContext {
     fn eval(&self, py: Python<'_>, program: &str) -> PyResult<PyObject> {
         let out = st_kdsl::eval_program(program, &self.inner).map_err(spiralk_err_to_py)?;
         spiralk_out_to_dict(py, &out)
+    }
+
+    #[pyo3(signature = (program, max_events=256))]
+    fn eval_with_trace(&self, py: Python<'_>, program: &str, max_events: usize) -> PyResult<(PyObject, PyObject)> {
+        let (out, trace) =
+            st_kdsl::eval_program_with_trace(program, &self.inner, max_events).map_err(spiralk_err_to_py)?;
+        let out_obj = spiralk_out_to_dict(py, &out)?;
+        let trace_value = serde_json::to_value(&trace)
+            .map_err(|err| pyo3::exceptions::PyRuntimeError::new_err(err.to_string()))?;
+        let trace_obj = json_to_py(py, &trace_value)?;
+        Ok((out_obj, trace_obj))
     }
 }
 

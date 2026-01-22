@@ -52,6 +52,17 @@ pub enum ShaderLoadError {
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
+    /// The compute pipeline failed to validate when creating the pipeline object.
+    #[error("failed to create compute pipeline '{label}' ({context})")]
+    Pipeline {
+        /// Label assigned to the compute pipeline.
+        label: String,
+        /// Additional context, such as the originating file path.
+        context: String,
+        /// Underlying error reported by WGPU.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -201,6 +212,17 @@ impl fmt::Display for ShaderCompileError {
 }
 
 impl std::error::Error for ShaderCompileError {}
+
+#[derive(Debug)]
+struct PipelineCreateError(String);
+
+impl fmt::Display for PipelineCreateError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for PipelineCreateError {}
 
 fn panic_payload_to_string(payload: Box<dyn Any + Send>) -> String {
     if let Some(msg) = payload.downcast_ref::<&str>() {
@@ -395,16 +417,23 @@ impl ShaderCache {
                         apply_overrides(&base, file, overrides)
                     }
                 },
-                Some(context),
+                Some(context.clone()),
             )?;
 
-            let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
-                label: Some(label),
-                layout,
-                module: module.as_ref(),
-                entry_point,
-                compilation_options: Default::default(),
-            });
+            let pipeline = catch_unwind(AssertUnwindSafe(|| {
+                device.create_compute_pipeline(&ComputePipelineDescriptor {
+                    label: Some(label),
+                    layout,
+                    module: module.as_ref(),
+                    entry_point,
+                    compilation_options: Default::default(),
+                })
+            }))
+            .map_err(|payload| ShaderLoadError::Pipeline {
+                label: label.to_string(),
+                context: context.clone(),
+                source: Box::new(PipelineCreateError(panic_payload_to_string(payload))),
+            })?;
             Ok(Arc::new(pipeline))
         })
     }

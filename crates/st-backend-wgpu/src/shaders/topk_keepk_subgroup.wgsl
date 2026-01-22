@@ -1,5 +1,3 @@
-enable chromium_experimental_subgroups;
-
 struct InBuf { data: array<u32>, };    // packed u64 as 2x u32
 struct OutVal { data: array<f32>, };
 struct OutIdx { data: array<i32>, };

@@ -1,5 +1,11 @@
 # SpiralTorch (Python) changelog
 
+## 0.3.9
+
+- WGPU: remove unsupported WGSL `enable ...;` directives and harden compute-pipeline creation against validation panics.
+- SpiralK: add `SpiralKContext.eval_with_trace(...)` and `RankPlan.rewrite_with_spiralk_explain(...)` for notebook-friendly explainability.
+- Add `write_kdsl_trace_html(...)` / `write_kdsl_trace_jsonl(...)` + demo viewer.
+
 ## 0.3.8
 
 - Fix `serve_zspace_trace(...)` live viewer (no PyO3 cross-thread `PluginQueue` panic).

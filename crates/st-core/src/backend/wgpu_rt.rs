@@ -232,13 +232,16 @@ fn pl(
         bind_group_layouts: &[layout],
         push_constant_ranges: &[],
     });
-    Ok(ctx.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor{
-        label: Some(entry),
-        layout: Some(&pl_layout),
-        module: &module,
-        entry_point: entry,
-        compilation_options: Default::default(),
+    catch_unwind(AssertUnwindSafe(|| {
+        ctx.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor{
+            label: Some(entry),
+            layout: Some(&pl_layout),
+            module: &module,
+            entry_point: entry,
+            compilation_options: Default::default(),
+        })
     }))
+    .map_err(|payload| panic_payload_to_string(payload))
 }
 
 #[cfg(all(feature="wgpu", feature="wgpu-rt"))]
@@ -253,13 +256,16 @@ fn lin_pl(
         bind_group_layouts: &[layout],
         push_constant_ranges: &[],
     });
-    Ok(ctx.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor{
-        label: Some(entry),
-        layout: Some(&pl_layout),
-        module: &module,
-        entry_point: entry,
-        compilation_options: Default::default(),
+    catch_unwind(AssertUnwindSafe(|| {
+        ctx.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor{
+            label: Some(entry),
+            layout: Some(&pl_layout),
+            module: &module,
+            entry_point: entry,
+            compilation_options: Default::default(),
+        })
     }))
+    .map_err(|payload| panic_payload_to_string(payload))
 }
 
 #[cfg(all(feature="wgpu", feature="wgpu-rt"))]
@@ -274,13 +280,16 @@ fn lin_subgroup_pl(
         bind_group_layouts: &[layout],
         push_constant_ranges: &[],
     });
-    Ok(ctx.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor{
-        label: Some(entry),
-        layout: Some(&pl_layout),
-        module: &module,
-        entry_point: entry,
-        compilation_options: Default::default(),
+    catch_unwind(AssertUnwindSafe(|| {
+        ctx.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor{
+            label: Some(entry),
+            layout: Some(&pl_layout),
+            module: &module,
+            entry_point: entry,
+            compilation_options: Default::default(),
+        })
     }))
+    .map_err(|payload| panic_payload_to_string(payload))
 }
 
 fn panic_payload_to_string(payload: Box<dyn Any + Send>) -> String {

@@ -1,5 +1,3 @@
-enable chromium_experimental_subgroups;
-
 // Packed input: u64 as 2x u32 (lo=index bits, hi=f32 bits)
 struct InP { data: array<u32>, };
 struct OutV { data: array<f32>, };

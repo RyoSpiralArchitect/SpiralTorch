@@ -5,8 +5,6 @@
 // subgroup-capable GPUs (M-series, RDNA, Xe, etc.) execute warp-synchronous
 // reductions without bouncing through shared memory.
 
-enable subgroups;
-
 struct LParams {
   dims:    vec4<u32>,  // x: length, y: partial_count, z: unused, w: unused
   scalars: vec4<f32>,  // x: alpha (scale/axpy), others reserved
