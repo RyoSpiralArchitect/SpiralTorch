@@ -133,15 +133,18 @@ jobs:
 
           import tempfile
           import pathlib
+          import json
           import time as _time
 
           with tempfile.TemporaryDirectory() as td:
               td_path = pathlib.Path(td)
               trace_path = td_path / "trace.jsonl"
-              trace_path.write_text(
-                  '{"type":"ZSpaceTrace","event_type":"ZSpaceTrace","payload":{"ZSpaceCoherence":{"step":0,"coherence":[0.1,0.2]}}}\\n',
-                  encoding="utf-8",
-              )
+              trace_event = {
+                  "type": "ZSpaceTrace",
+                  "event_type": "ZSpaceTrace",
+                  "payload": {"ZSpaceCoherence": {"step": 0, "coherence": [0.1, 0.2]}},
+              }
+              trace_path.write_text(json.dumps(trace_event) + "\n", encoding="utf-8")
               html_path = st.write_zspace_trace_html(trace_path, td_path / "trace.html")
               assert pathlib.Path(html_path).exists()
 
