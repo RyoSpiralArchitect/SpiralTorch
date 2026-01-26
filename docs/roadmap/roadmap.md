@@ -46,7 +46,45 @@ _Last updated: 2024-06-XX_
 - **Channels:** Slack `#spiraltorch-roadmap`, Confluence summaries, recorded Zoom sessions.
 - **Ownership:** Roadmap working group maintains materials, PMO ensures distribution.
 
-## 5. Next Steps
+## 5. Priority Growth Areas (伸び代が大きい領域)
+
+The roadmap has three high-leverage domains where incremental investment yields outsized returns. These priorities align the technical backbone (WGPU-first performance), backend parity (MPS/CUDA/HIP), and ecosystem readiness (docs, samples, distribution) so each layer reinforces the others.
+
+### 5.1 GPU performance step-up (WGPU-first)
+
+The WGPU stack is positioned for the next performance jump, but it requires deeper shader specialization and runtime adaptation. The biggest levers are:
+
+1. **Subgroup-aware WGSL primitives** for softmax/attention/normalisation hotspots (warp-style reductions on WGPU hardware).
+2. **Chimera / Split-K layouts** to keep intermediate tensors in a layout that avoids repeated transpose or layout conversions.
+3. **Fusion-first IR** to emit a single kernel for GEMM + pointwise sequences (bias + activation, residual adds).
+4. **Runtime telemetry-driven autotuning** to loop kernel selection based on observed execution metrics.
+
+See the [Level 2 GPU optimisation roadmap](../performance/level2_gpu_roadmap.md) for implementation details already framed in the WGPU stack.
+
+### 5.2 Backend parity expansion (MPS / CUDA / HIP)
+
+The [backend capability matrix](../backend_matrix.md) shows multiple placeholders or planned items across MPS/CUDA/HIP. The growth opportunity here is straightforward: each incremental implementation is a net-new feature for users, especially around:
+
+- Tensor ops coverage (including mixed precision paths).
+- Autodiff + hypergrad readiness.
+- Telemetry and runtime observability.
+- Dynamic shapes and graph fusion.
+- ONNX export consistency.
+- CI coverage and validation pipelines.
+
+Closing these gaps raises reliability and adoption confidence across heterogeneous deployments.
+
+### 5.3 Ecosystem enablement (docs / tutorials / distribution / integrations)
+
+User onboarding and downstream integrations are the fastest multipliers for adoption. Priority investments include:
+
+- Entry-point docs, glossaries, and PyTorch migration recipes.
+- Device-switching notebooks, canvas demos, and sample galleries.
+- ONNX compatibility, tuning integrations (Optuna, Ray Tune), and early Julia/Go bindings.
+
+These items mirror the [ecosystem roadmap](../ecosystem_roadmap.md) and keep the platform approachable as the core performance stack evolves.
+
+## 6. Next Steps
 
 1. Finalize PoC scope with kernel owners by July 15.
 2. Stand up nightly fuzzing pipeline by August 1.
