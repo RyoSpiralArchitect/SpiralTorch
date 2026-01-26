@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use wgpu::{ComputePipeline, Device};
 
-use crate::{ShaderCache, ShaderLoadError};
+use crate::{util::device_supports_subgroup, ShaderCache, ShaderLoadError};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MergeKind {
@@ -177,6 +177,7 @@ pub fn create_pipelines(
     shader_dir: &str,
     supports_subgroup: bool,
 ) -> Result<Pipelines, ShaderLoadError> {
+    let supports_subgroup = supports_subgroup && device_supports_subgroup(device);
     Builder::new(device, shader_dir)
         .supports_subgroup(supports_subgroup)
         .build()

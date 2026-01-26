@@ -15,7 +15,7 @@ use wgpu::{
     ComputePassDescriptor, ComputePipeline, Device, Queue,
 };
 
-use crate::{ShaderCache, ShaderLoadError};
+use crate::{util::device_supports_subgroup, ShaderCache, ShaderLoadError};
 
 #[derive(Debug)]
 pub struct Pipelines {
@@ -629,6 +629,7 @@ pub fn create_pipelines(
     include_v1: bool,
     include_v2: bool,
 ) -> Result<Pipelines, ShaderLoadError> {
+    let supports_subgroup = supports_subgroup && device_supports_subgroup(device);
     let builder = Builder::new(device, shader_dir).supports_subgroup(supports_subgroup);
     let builder = if include_v1 {
         builder.include_subgroup()

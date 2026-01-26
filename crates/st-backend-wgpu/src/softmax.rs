@@ -16,7 +16,7 @@ use wgpu::{
     PipelineLayoutDescriptor, Queue, ShaderStages,
 };
 
-use crate::{ShaderCache, ShaderLoadError};
+use crate::{util::device_supports_subgroup, ShaderCache, ShaderLoadError};
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable, Debug)]
@@ -352,6 +352,7 @@ pub fn create_pipelines(
     shader_dir: impl AsRef<Path>,
     supports_subgroup: bool,
 ) -> Result<Pipelines, ShaderLoadError> {
+    let supports_subgroup = supports_subgroup && device_supports_subgroup(device);
     let (pipelines, _) = Builder::new(device, shader_dir.as_ref().to_path_buf())
         .supports_subgroup(supports_subgroup)
         .build()?;
