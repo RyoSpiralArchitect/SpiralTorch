@@ -16,7 +16,7 @@ use wgpu::{
     PipelineLayoutDescriptor, Queue, ShaderStages,
 };
 
-use crate::{ShaderCache, ShaderLoadError};
+use crate::{util::device_supports_subgroup, ShaderCache, ShaderLoadError};
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable, Debug)]
@@ -84,6 +84,7 @@ impl<'a> Builder<'a> {
     }
 
     pub fn build(self) -> Result<(Pipelines, ShaderCache), ShaderLoadError> {
+        let supports_subgroup = self.supports_subgroup && device_supports_subgroup(self.device);
         let bind_layout = self
             .device
             .create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -151,8 +152,7 @@ impl<'a> Builder<'a> {
             Some(&pipeline_layout),
         )?;
 
-        let subgroup = self
-            .supports_subgroup
+        let subgroup = supports_subgroup
             .then(|| {
                 self.cache.load_compute_pipeline_with_layout(
                     self.device,

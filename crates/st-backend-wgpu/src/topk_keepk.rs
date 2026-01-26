@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use wgpu::{ComputePipeline, Device};
 
-use crate::{ShaderCache, ShaderLoadError};
+use crate::{util::device_supports_subgroup, ShaderCache, ShaderLoadError};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MergeKind {
@@ -111,6 +111,7 @@ impl<'a> Builder<'a> {
     }
 
     fn assemble(&self) -> Result<Pipelines, ShaderLoadError> {
+        let supports_subgroup = self.supports_subgroup && device_supports_subgroup(self.device);
         let keepk_workgroup = self.cache.load_compute_pipeline(
             self.device,
             "topk_keepk_workgroup.wgsl",
@@ -118,8 +119,7 @@ impl<'a> Builder<'a> {
             "main_cs",
         )?;
 
-        let keepk_subgroup = self
-            .supports_subgroup
+        let keepk_subgroup = supports_subgroup
             .then(|| {
                 self.cache.load_compute_pipeline(
                     self.device,
@@ -130,7 +130,7 @@ impl<'a> Builder<'a> {
             })
             .transpose()?;
 
-        let keepk_subgroup_1ce = (self.supports_subgroup && self.include_1ce)
+        let keepk_subgroup_1ce = (supports_subgroup && self.include_1ce)
             .then(|| {
                 self.cache.load_compute_pipeline(
                     self.device,
@@ -141,7 +141,7 @@ impl<'a> Builder<'a> {
             })
             .transpose()?;
 
-        let keepk_subgroup_1ce_large = (self.supports_subgroup && self.include_large_1ce)
+        let keepk_subgroup_1ce_large = (supports_subgroup && self.include_large_1ce)
             .then(|| {
                 self.cache.load_compute_pipeline(
                     self.device,

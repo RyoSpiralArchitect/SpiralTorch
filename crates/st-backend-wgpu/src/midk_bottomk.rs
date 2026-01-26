@@ -15,7 +15,7 @@ use wgpu::{
     ComputePassDescriptor, ComputePipeline, Device, Queue,
 };
 
-use crate::{ShaderCache, ShaderLoadError};
+use crate::{util::device_supports_subgroup, ShaderCache, ShaderLoadError};
 
 #[derive(Debug)]
 pub struct Pipelines {
@@ -550,6 +550,7 @@ impl<'a> Builder<'a> {
     }
 
     fn assemble(&self) -> Result<Pipelines, ShaderLoadError> {
+        let supports_subgroup = self.supports_subgroup && device_supports_subgroup(self.device);
         let scan_tiles = self.cache.load_compute_pipeline(
             self.device,
             "midk_bottomk_compaction.wgsl",
@@ -578,7 +579,7 @@ impl<'a> Builder<'a> {
             "midk_middlemax",
         )?;
 
-        let apply_subgroup = (self.supports_subgroup && self.include_subgroup_v1)
+        let apply_subgroup = (supports_subgroup && self.include_subgroup_v1)
             .then(|| {
                 self.cache.load_compute_pipeline(
                     self.device,
@@ -589,7 +590,7 @@ impl<'a> Builder<'a> {
             })
             .transpose()?;
 
-        let apply_subgroup_v2 = (self.supports_subgroup && self.include_subgroup_v2)
+        let apply_subgroup_v2 = (supports_subgroup && self.include_subgroup_v2)
             .then(|| {
                 self.cache.load_compute_pipeline(
                     self.device,
