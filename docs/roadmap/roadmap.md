@@ -59,6 +59,12 @@ The WGPU stack is positioned for the next performance jump, but it requires deep
 3. **Fusion-first IR** to emit a single kernel for GEMM + pointwise sequences (bias + activation, residual adds).
 4. **Runtime telemetry-driven autotuning** to loop kernel selection based on observed execution metrics.
 
+Immediate execution focus (next 1-2 milestones):
+
+- Add subgroup capability detection + WGSL dual-path templates in `st-backend-wgpu` so kernel authors can opt-in without boilerplate.
+- Pilot subgroup reductions on the softmax + attention kernels and capture perf deltas on M-series + RDNA3.
+- Extend kernel cache keys to include layout + subgroup tuning flags for telemetry-driven autotuning.
+
 See the [Level 2 GPU optimisation roadmap](../performance/level2_gpu_roadmap.md) for implementation details already framed in the WGPU stack.
 
 ### 5.2 Backend parity expansion (MPS / CUDA / HIP)
@@ -72,6 +78,12 @@ The [backend capability matrix](../backend_matrix.md) shows multiple placeholder
 - ONNX export consistency.
 - CI coverage and validation pipelines.
 
+Immediate execution focus (next 1-2 milestones):
+
+- Convert placeholder entries in the backend matrix into concrete work items with owners and acceptance tests.
+- Prioritize telemetry + mixed precision on MPS/CUDA/HIP to unblock profiling and performance validation.
+- Add CI validation smoke coverage for each backend to raise confidence in parity claims.
+
 Closing these gaps raises reliability and adoption confidence across heterogeneous deployments.
 
 ### 5.3 Ecosystem enablement (docs / tutorials / distribution / integrations)
@@ -81,6 +93,12 @@ User onboarding and downstream integrations are the fastest multipliers for adop
 - Entry-point docs, glossaries, and PyTorch migration recipes.
 - Device-switching notebooks, canvas demos, and sample galleries.
 - ONNX compatibility, tuning integrations (Optuna, Ray Tune), and early Julia/Go bindings.
+
+Immediate execution focus (next 1-2 milestones):
+
+- Publish an onboarding landing page that links the getting-started guide, migration recipes, and backend matrix.
+- Ship at least two device-switching notebooks (CPU ↔ WGPU) plus a canvas demo to showcase end-to-end workflows.
+- Define the ONNX export MVP and publish a compatibility checklist for early adopters.
 
 These items mirror the [ecosystem roadmap](../ecosystem_roadmap.md) and keep the platform approachable as the core performance stack evolves.
 
