@@ -21,6 +21,10 @@ use wgpu::{
     ComputePipeline, ComputePipelineDescriptor, Device, ShaderModuleDescriptor, ShaderSource,
 };
 
+pub(crate) fn device_supports_subgroup(device: &Device) -> bool {
+    device.features().contains(wgpu::Features::SUBGROUP)
+}
+
 /// Errors that may occur when loading WGSL shaders into a WGPU pipeline.
 #[derive(Debug, Error)]
 pub enum ShaderLoadError {
