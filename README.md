@@ -40,6 +40,8 @@ SpiralTorch’s “learning stack” is a set of minimal, runnable training base
 - **LLM (Python, raw text, no tokenizer):** `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_finetune.py <text.txt>`
 - **LLM (coherence scan, raw text, no tokenizer):** `cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text.txt>`
 - **LLM (Python, coherence scan, raw text, no tokenizer):** `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_coherence_scan.py <text.txt>`
+- **LLM (coherence wave, raw text, no tokenizer):** `cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text.txt>`
+- **LLM (Python, coherence wave, raw text, no tokenizer):** `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_coherence_wave.py <text.txt>`
 - **Vision (Conv/Pool):** `cargo run -p st-nn --example modelzoo_vision_conv_pool_classification`
 - **Coherence (ZSpace VAE):** `cargo run -p st-nn --example modelzoo_zspace_vae_reconstruction`
 - **Training (Lightning/selfsup):** `cargo run -p st-nn --example modelzoo_lightning_selfsup_minimal`
@@ -225,7 +227,7 @@ tensor shims, no translation layers, and no tracebacks.
 
 ## 🚀 Latest SpiralTorch highlights
 
-- **Learning Stack (model zoo).** Runnable baselines for Vision/Coherence/Training plus character-level LLM fine-tuning from raw text (no tokenizer): `cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text.txt>` or `cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text.txt>`.
+- **Learning Stack (model zoo).** Runnable baselines for Vision/Coherence/Training plus character-level LLM fine-tuning from raw text (no tokenizer): `cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text.txt>`, `cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text.txt>`, or `cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text.txt>`.
 - **Fractal → Quantum RL bridge.** Stream Mellin-log fractal patches straight into the quantum overlay studio and recover policy gradients through `FractalQuantumTrainer` and friends—keeping Python fallbacks and PyO3 builds in lockstep.
 - **Self-evolving SpiralK kernels.** A new diversity governor inside `SelfRewriteEngine` tracks plateauing η̄ gains, forces fresh AI rewrites when caches go stale, and surfaces telemetry via `diversity_snapshot()` so operators can keep the autonomous kernel lab on course.
 - **Saga-aware kernel evolution.** The `SelfRewriteEngine` now learns multi-step hint sagas, boosting cache priority for sequenced rewrites and exposing the orbits via `saga_snapshots()` so you can audit every cosmic combo.

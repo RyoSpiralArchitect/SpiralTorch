@@ -5,6 +5,7 @@
 
 pub mod activation;
 pub mod coherence_scan;
+pub mod coherence_wave;
 pub mod continuous_wavelet;
 pub mod conv;
 pub mod dropout;
@@ -23,12 +24,14 @@ pub mod spiral_rnn;
 pub mod topos_resonator;
 pub mod wave_gate;
 pub mod wave_rnn;
+pub mod wave_scan;
 pub mod zrelativity;
 pub mod zspace_mixer;
 pub mod zspace_projector;
 
 pub use activation::Relu;
 pub use coherence_scan::ZSpaceCoherenceScan;
+pub use coherence_wave::ZSpaceCoherenceWaveBlock;
 pub use continuous_wavelet::ContinuousWaveletTransform;
 pub use dropout::Dropout;
 pub use dynamic_field::{HamiltonJacobiFlow, KleinGordonPropagation, StochasticSchrodingerLayer};

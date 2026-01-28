@@ -49,7 +49,8 @@ use st_nn::{
         spiral_rnn::SpiralRnn as RustSpiralRnn,
         Dropout as RustDropout, Embedding as RustEmbedding, Identity, NonLiner,
         NonLinerActivation, NonLinerEllipticConfig, NonLinerGeometry, NonLinerHyperbolicConfig,
-        Scaler, ZSpaceCoherenceScan as RustZSpaceCoherenceScan, ZSpaceSoftmax as RustZSpaceSoftmax,
+        Scaler, ZSpaceCoherenceScan as RustZSpaceCoherenceScan,
+        ZSpaceCoherenceWaveBlock as RustZSpaceCoherenceWaveBlock, ZSpaceSoftmax as RustZSpaceSoftmax,
     },
     zspace_coherence::{
         is_swap_invariant as rust_is_swap_invariant, CoherenceDiagnostics, CoherenceLabel,
@@ -1490,6 +1491,130 @@ impl PyZSpaceCoherenceScan {
 }
 
 #[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "ZSpaceCoherenceWaveBlock", unsendable)]
+pub(crate) struct PyZSpaceCoherenceWaveBlock {
+    inner: Option<RustZSpaceCoherenceWaveBlock>,
+}
+
+#[cfg(feature = "nn")]
+impl PyZSpaceCoherenceWaveBlock {
+    fn inner(&self) -> PyResult<&RustZSpaceCoherenceWaveBlock> {
+        self.inner.as_ref().ok_or_else(|| {
+            PyValueError::new_err(
+                "ZSpaceCoherenceWaveBlock was moved into a container and can no longer be used",
+            )
+        })
+    }
+
+    fn inner_mut(&mut self) -> PyResult<&mut RustZSpaceCoherenceWaveBlock> {
+        self.inner.as_mut().ok_or_else(|| {
+            PyValueError::new_err(
+                "ZSpaceCoherenceWaveBlock was moved into a container and can no longer be used",
+            )
+        })
+    }
+
+    fn take_inner(&mut self) -> PyResult<RustZSpaceCoherenceWaveBlock> {
+        self.inner.take().ok_or_else(|| {
+            PyValueError::new_err(
+                "ZSpaceCoherenceWaveBlock was moved into a container and can no longer be used",
+            )
+        })
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyZSpaceCoherenceWaveBlock {
+    #[new]
+    #[pyo3(signature = (dim, steps, memory, curvature, temperature, *, kernel_size=3, dilations=None))]
+    pub fn new(
+        dim: usize,
+        steps: usize,
+        memory: usize,
+        curvature: f32,
+        temperature: f32,
+        kernel_size: usize,
+        dilations: Option<Vec<usize>>,
+    ) -> PyResult<Self> {
+        let dilations = dilations.unwrap_or_else(|| vec![1, 2]);
+        let inner = RustZSpaceCoherenceWaveBlock::new(
+            dim,
+            steps,
+            memory,
+            curvature,
+            temperature,
+            kernel_size,
+            dilations,
+        )
+        .map_err(tensor_err_to_py)?;
+        Ok(Self { inner: Some(inner) })
+    }
+
+    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        let output = self
+            .inner()?
+            .forward(&input.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        let grad = self
+            .inner_mut()?
+            .backward(&input.inner, &grad_output.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(grad))
+    }
+
+    pub fn infuse_text(&mut self, text: &str) -> PyResult<()> {
+        self.inner_mut()?.infuse_text(text).map_err(tensor_err_to_py)
+    }
+
+    pub fn state_dict(&self) -> PyResult<Vec<(String, PyTensor)>> {
+        let mut entries: Vec<_> = self
+            .inner()?
+            .state_dict()
+            .map_err(tensor_err_to_py)?
+            .into_iter()
+            .collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(entries
+            .into_iter()
+            .map(|(name, tensor)| (name, PyTensor::from_tensor(tensor)))
+            .collect())
+    }
+
+    pub fn load_state_dict(&mut self, state: Vec<(String, PyTensor)>) -> PyResult<()> {
+        let mut map = std::collections::HashMap::new();
+        for (name, tensor) in state {
+            map.insert(name, tensor.inner.clone());
+        }
+        self.inner_mut()?.load_state_dict(&map).map_err(tensor_err_to_py)
+    }
+
+    #[pyo3(signature = (x))]
+    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(x)
+    }
+
+    #[getter]
+    pub fn dim(&self) -> PyResult<usize> {
+        Ok(self.inner()?.dim())
+    }
+
+    #[getter]
+    pub fn steps(&self) -> PyResult<usize> {
+        Ok(self.inner()?.steps())
+    }
+
+    #[getter]
+    pub fn memory(&self) -> PyResult<usize> {
+        Ok(self.inner()?.memory())
+    }
+}
+
+#[cfg(feature = "nn")]
 #[pyclass(module = "spiraltorch.nn", name = "Relu", unsendable)]
 pub(crate) struct PyRelu {
     inner: Relu,
@@ -1570,6 +1695,13 @@ impl PySequential {
         }
 
         if let Ok(handle) = layer.extract::<Py<PyZSpaceCoherenceScan>>() {
+            let mut layer = handle.bind(py).borrow_mut();
+            let inner = layer.take_inner()?;
+            self.inner.push(inner);
+            return Ok(());
+        }
+
+        if let Ok(handle) = layer.extract::<Py<PyZSpaceCoherenceWaveBlock>>() {
             let mut layer = handle.bind(py).borrow_mut();
             let inner = layer.take_inner()?;
             self.inner.push(inner);
@@ -1664,7 +1796,7 @@ impl PySequential {
         }
 
         Err(PyTypeError::new_err(
-            "Sequential.add expects a spiraltorch.nn layer (supported: Linear, Embedding, SpiralRnn, ZSpaceSoftmax, ZSpaceCoherenceScan, Relu, Identity, NonLiner, Scaler, Dropout, Pool2d, ZPooling, ZConv, ZConv6DA)",
+            "Sequential.add expects a spiraltorch.nn layer (supported: Linear, Embedding, SpiralRnn, ZSpaceSoftmax, ZSpaceCoherenceScan, ZSpaceCoherenceWaveBlock, Relu, Identity, NonLiner, Scaler, Dropout, Pool2d, ZPooling, ZConv, ZConv6DA)",
         ))
     }
 
@@ -2211,6 +2343,11 @@ fn with_module_ref<R>(
         let inner = model.inner()?;
         return f(inner).map_err(tensor_err_to_py);
     }
+    if let Ok(handle) = module.extract::<Py<PyZSpaceCoherenceWaveBlock>>() {
+        let model = handle.bind(py).borrow();
+        let inner = model.inner()?;
+        return f(inner).map_err(tensor_err_to_py);
+    }
     if let Ok(handle) = module.extract::<Py<PySequential>>() {
         let model = handle.bind(py).borrow();
         return f(&model.inner).map_err(tensor_err_to_py);
@@ -2249,7 +2386,7 @@ fn with_module_ref<R>(
     }
 
     Err(PyTypeError::new_err(
-        "module must be a spiraltorch.nn module (supported: Linear, Embedding, SpiralRnn, ZSpaceSoftmax, ZSpaceCoherenceScan, Sequential, Identity, Relu, NonLiner, Scaler, Dropout, ZConv, ZConv6DA, ZRelativityModule)",
+        "module must be a spiraltorch.nn module (supported: Linear, Embedding, SpiralRnn, ZSpaceSoftmax, ZSpaceCoherenceScan, ZSpaceCoherenceWaveBlock, Sequential, Identity, Relu, NonLiner, Scaler, Dropout, ZConv, ZConv6DA, ZRelativityModule)",
     ))
 }
 
@@ -2284,6 +2421,11 @@ fn with_module_mut<R>(
         let inner = model.inner_mut()?;
         return f(inner).map_err(tensor_err_to_py);
     }
+    if let Ok(handle) = module.extract::<Py<PyZSpaceCoherenceWaveBlock>>() {
+        let mut model = handle.bind(py).borrow_mut();
+        let inner = model.inner_mut()?;
+        return f(inner).map_err(tensor_err_to_py);
+    }
     if let Ok(handle) = module.extract::<Py<PySequential>>() {
         let mut model = handle.bind(py).borrow_mut();
         return f(&mut model.inner).map_err(tensor_err_to_py);
@@ -2322,7 +2464,7 @@ fn with_module_mut<R>(
     }
 
     Err(PyTypeError::new_err(
-        "module must be a spiraltorch.nn module (supported: Linear, Embedding, SpiralRnn, ZSpaceSoftmax, ZSpaceCoherenceScan, Sequential, Identity, Relu, NonLiner, Scaler, Dropout, ZConv, ZConv6DA, ZRelativityModule)",
+        "module must be a spiraltorch.nn module (supported: Linear, Embedding, SpiralRnn, ZSpaceSoftmax, ZSpaceCoherenceScan, ZSpaceCoherenceWaveBlock, Sequential, Identity, Relu, NonLiner, Scaler, Dropout, ZConv, ZConv6DA, ZRelativityModule)",
     ))
 }
 
@@ -4736,6 +4878,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PySpiralRnn>()?;
     module.add_class::<PyZSpaceSoftmax>()?;
     module.add_class::<PyZSpaceCoherenceScan>()?;
+    module.add_class::<PyZSpaceCoherenceWaveBlock>()?;
     module.add_class::<PyRelu>()?;
     module.add_class::<PySequential>()?;
     module.add_class::<PyMeanSquaredError>()?;
@@ -4791,6 +4934,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
             "SpiralRnn",
             "ZSpaceSoftmax",
             "ZSpaceCoherenceScan",
+            "ZSpaceCoherenceWaveBlock",
             "Relu",
             "Sequential",
             "MeanSquaredError",

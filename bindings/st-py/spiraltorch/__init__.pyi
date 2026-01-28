@@ -2506,6 +2506,41 @@ class _NnZSpaceCoherenceScan:
     def __call__(self, x: Tensor) -> Tensor: ...
 
 
+class _NnZSpaceCoherenceWaveBlock:
+    def __init__(
+        self,
+        dim: int,
+        steps: int,
+        memory: int,
+        curvature: float,
+        temperature: float,
+        *,
+        kernel_size: int = ...,
+        dilations: Sequence[int] | None = ...,
+    ) -> None: ...
+
+    def forward(self, input: Tensor) -> Tensor: ...
+
+    def backward(self, input: Tensor, grad_output: Tensor) -> Tensor: ...
+
+    def infuse_text(self, text: str) -> None: ...
+
+    def state_dict(self) -> List[Tuple[str, Tensor]]: ...
+
+    def load_state_dict(self, state: Sequence[Tuple[str, Tensor]]) -> None: ...
+
+    @property
+    def dim(self) -> int: ...
+
+    @property
+    def steps(self) -> int: ...
+
+    @property
+    def memory(self) -> int: ...
+
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+
 class _NnRelu:
     def __init__(self) -> None: ...
 
@@ -2753,6 +2788,7 @@ class _NnModule(ModuleType):
     SpiralRnn: type[_NnSpiralRnn]
     ZSpaceSoftmax: type[_NnZSpaceSoftmax]
     ZSpaceCoherenceScan: type[_NnZSpaceCoherenceScan]
+    ZSpaceCoherenceWaveBlock: type[_NnZSpaceCoherenceWaveBlock]
     Relu: type[_NnRelu]
     Sequential: type[_NnSequential]
     MeanSquaredError: type[_NnMeanSquaredError]
@@ -2833,6 +2869,10 @@ class ZSpaceSoftmax(_NnZSpaceSoftmax):
 
 
 class ZSpaceCoherenceScan(_NnZSpaceCoherenceScan):
+    ...
+
+
+class ZSpaceCoherenceWaveBlock(_NnZSpaceCoherenceWaveBlock):
     ...
 
 

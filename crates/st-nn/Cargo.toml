@@ -96,6 +96,10 @@ name = "modelzoo_llm_char_coherence_scan"
 path = "../../examples/modelzoo_llm_char_coherence_scan.rs"
 
 [[example]]
+name = "modelzoo_llm_char_coherence_wave"
+path = "../../examples/modelzoo_llm_char_coherence_wave.rs"
+
+[[example]]
 name = "zspace_trace_demo"
 path = "../../examples/zspace_trace_demo.rs"
 
