@@ -1582,7 +1582,7 @@ _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
         "EpochStats": ("EpochStats",),
         "MeanSquaredError": ("MeanSquaredError",),
         "HyperbolicCrossEntropy": ("HyperbolicCrossEntropy",),
-        "CrossEntropy": ("HyperbolicCrossEntropy",),
+        "CrossEntropy": ("nn.HyperbolicCrossEntropy", "HyperbolicCrossEntropy"),
         "FocalLoss": ("FocalLoss",),
         "ContrastiveLoss": ("ContrastiveLoss",),
         "TripletLoss": ("TripletLoss",),
