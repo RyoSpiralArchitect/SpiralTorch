@@ -2384,6 +2384,128 @@ class _NnLinear:
     def load_state_dict(self, state: Sequence[Tuple[str, Tensor]]) -> None: ...
 
 
+class _NnEmbedding:
+    def __init__(self, name: str, vocab_size: int, embed_dim: int) -> None: ...
+
+    def forward(self, input: Tensor) -> Tensor: ...
+
+    def backward(self, input: Tensor, grad_output: Tensor) -> Tensor: ...
+
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+    def attach_hypergrad(
+        self,
+        curvature: float,
+        learning_rate: float,
+        *,
+        topos: OpenCartesianTopos | None = ...,
+    ) -> None: ...
+
+    def attach_realgrad(self, learning_rate: float) -> None: ...
+
+    def zero_accumulators(self) -> None: ...
+
+    def apply_step(self, fallback_lr: float) -> None: ...
+
+    def state_dict(self) -> List[Tuple[str, Tensor]]: ...
+
+    def load_state_dict(self, state: Sequence[Tuple[str, Tensor]]) -> None: ...
+
+
+class _NnSpiralRnn:
+    def __init__(self, name: str, input_dim: int, hidden_dim: int, steps: int) -> None: ...
+
+    def forward(self, input: Tensor) -> Tensor: ...
+
+    def backward(self, input: Tensor, grad_output: Tensor) -> Tensor: ...
+
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+    def attach_hypergrad(
+        self,
+        curvature: float,
+        learning_rate: float,
+        *,
+        topos: OpenCartesianTopos | None = ...,
+    ) -> None: ...
+
+    def attach_realgrad(self, learning_rate: float) -> None: ...
+
+    def zero_accumulators(self) -> None: ...
+
+    def apply_step(self, fallback_lr: float) -> None: ...
+
+    def state_dict(self) -> List[Tuple[str, Tensor]]: ...
+
+    def load_state_dict(self, state: Sequence[Tuple[str, Tensor]]) -> None: ...
+
+
+class _NnZSpaceSoftmax:
+    def __init__(
+        self,
+        curvature: float,
+        temperature: float,
+        *,
+        entropy_target: float | None = ...,
+        entropy_tolerance: float = ...,
+        entropy_gain: float = ...,
+        min_temperature: float | None = ...,
+        max_temperature: float | None = ...,
+    ) -> None: ...
+
+    def forward(self, input: Tensor) -> Tensor: ...
+
+    def backward(self, input: Tensor, grad_output: Tensor) -> Tensor: ...
+
+    def reset_metrics(self) -> None: ...
+
+    def last_entropies(self) -> List[float]: ...
+
+    def last_temperatures(self) -> List[float]: ...
+
+    def state_dict(self) -> List[Tuple[str, Tensor]]: ...
+
+    def load_state_dict(self, state: Sequence[Tuple[str, Tensor]]) -> None: ...
+
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+
+class _NnZSpaceCoherenceScan:
+    def __init__(
+        self,
+        dim: int,
+        steps: int,
+        memory: int,
+        curvature: float,
+        temperature: float,
+    ) -> None: ...
+
+    def forward(self, input: Tensor) -> Tensor: ...
+
+    def backward(self, input: Tensor, grad_output: Tensor) -> Tensor: ...
+
+    def state_dict(self) -> List[Tuple[str, Tensor]]: ...
+
+    def load_state_dict(self, state: Sequence[Tuple[str, Tensor]]) -> None: ...
+
+    @property
+    def dim(self) -> int: ...
+
+    @property
+    def steps(self) -> int: ...
+
+    @property
+    def memory(self) -> int: ...
+
+    @property
+    def curvature(self) -> float: ...
+
+    @property
+    def temperature(self) -> float: ...
+
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+
 class _NnRelu:
     def __init__(self) -> None: ...
 
@@ -2438,6 +2560,20 @@ class _NnMeanSquaredError:
     def backward(self, prediction: Tensor, target: Tensor) -> Tensor: ...
 
     def __call__(self, prediction: Tensor, target: Tensor) -> Tensor: ...
+
+
+class _NnCategoricalCrossEntropy:
+    def __init__(self, *, epsilon: float | None = ...) -> None: ...
+
+    @property
+    def epsilon(self) -> float: ...
+
+    def forward(self, prediction: Tensor, target: Tensor) -> Tensor: ...
+
+    def backward(self, prediction: Tensor, target: Tensor) -> Tensor: ...
+
+    def __call__(self, prediction: Tensor, target: Tensor) -> Tensor: ...
+
 
 class _NnHyperbolicCrossEntropy:
     def __init__(self, curvature: float, *, epsilon: float | None = ...) -> None: ...
@@ -2613,9 +2749,14 @@ class _NnScaler:
 class _NnModule(ModuleType):
     Identity: type[_NnIdentity]
     Linear: type[_NnLinear]
+    Embedding: type[_NnEmbedding]
+    SpiralRnn: type[_NnSpiralRnn]
+    ZSpaceSoftmax: type[_NnZSpaceSoftmax]
+    ZSpaceCoherenceScan: type[_NnZSpaceCoherenceScan]
     Relu: type[_NnRelu]
     Sequential: type[_NnSequential]
     MeanSquaredError: type[_NnMeanSquaredError]
+    CategoricalCrossEntropy: type[_NnCategoricalCrossEntropy]
     HyperbolicCrossEntropy: type[_NnHyperbolicCrossEntropy]
     CrossEntropy: type[_NnHyperbolicCrossEntropy]
     FocalLoss: type[_NnFocalLoss]
@@ -2679,6 +2820,22 @@ class Linear(_NnLinear):
     ...
 
 
+class Embedding(_NnEmbedding):
+    ...
+
+
+class SpiralRnn(_NnSpiralRnn):
+    ...
+
+
+class ZSpaceSoftmax(_NnZSpaceSoftmax):
+    ...
+
+
+class ZSpaceCoherenceScan(_NnZSpaceCoherenceScan):
+    ...
+
+
 class Relu(_NnRelu):
     ...
 
@@ -2689,6 +2846,11 @@ class Sequential(_NnSequential):
 
 class MeanSquaredError(_NnMeanSquaredError):
     ...
+
+
+class CategoricalCrossEntropy(_NnCategoricalCrossEntropy):
+    ...
+
 
 class HyperbolicCrossEntropy(_NnHyperbolicCrossEntropy):
     ...

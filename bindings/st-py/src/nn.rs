@@ -40,14 +40,16 @@ use st_nn::loss::{ContrastiveLoss, FocalLoss, TripletLoss};
 use st_nn::{
     dataset::DataLoaderBatches,
     dataset_from_vec,
-    HyperbolicCrossEntropy, Linear, MeanSquaredError, Relu, Sequential,
+    CategoricalCrossEntropy, HyperbolicCrossEntropy, Linear, MeanSquaredError, Relu, Sequential,
     EpochStats as RustEpochStats, ModuleTrainer as RustModuleTrainer, RoundtableConfig as RustRoundtableConfig,
     RoundtableSchedule as RustRoundtableSchedule,
     io as nn_io,
     layers::{
         conv::{Conv2d, Conv6da},
-        Dropout as RustDropout, Identity, NonLiner, NonLinerActivation, NonLinerEllipticConfig,
-        NonLinerGeometry, NonLinerHyperbolicConfig, Scaler,
+        spiral_rnn::SpiralRnn as RustSpiralRnn,
+        Dropout as RustDropout, Embedding as RustEmbedding, Identity, NonLiner,
+        NonLinerActivation, NonLinerEllipticConfig, NonLinerGeometry, NonLinerHyperbolicConfig,
+        Scaler, ZSpaceCoherenceScan as RustZSpaceCoherenceScan, ZSpaceSoftmax as RustZSpaceSoftmax,
     },
     zspace_coherence::{
         is_swap_invariant as rust_is_swap_invariant, CoherenceDiagnostics, CoherenceLabel,
@@ -1052,6 +1054,442 @@ impl PyLinear {
 }
 
 #[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "Embedding", unsendable)]
+pub(crate) struct PyEmbedding {
+    inner: Option<RustEmbedding>,
+}
+
+#[cfg(feature = "nn")]
+impl PyEmbedding {
+    fn inner(&self) -> PyResult<&RustEmbedding> {
+        self.inner.as_ref().ok_or_else(|| {
+            PyValueError::new_err("Embedding was moved into a container and can no longer be used")
+        })
+    }
+
+    fn inner_mut(&mut self) -> PyResult<&mut RustEmbedding> {
+        self.inner.as_mut().ok_or_else(|| {
+            PyValueError::new_err("Embedding was moved into a container and can no longer be used")
+        })
+    }
+
+    fn take_inner(&mut self) -> PyResult<RustEmbedding> {
+        self.inner.take().ok_or_else(|| {
+            PyValueError::new_err("Embedding was moved into a container and can no longer be used")
+        })
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyEmbedding {
+    #[new]
+    pub fn new(name: &str, vocab_size: usize, embed_dim: usize) -> PyResult<Self> {
+        let inner = RustEmbedding::new(name, vocab_size, embed_dim).map_err(tensor_err_to_py)?;
+        Ok(Self { inner: Some(inner) })
+    }
+
+    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        let output = self.inner()?.forward(&input.inner).map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        let grad = self
+            .inner_mut()?
+            .backward(&input.inner, &grad_output.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(grad))
+    }
+
+    #[pyo3(signature = (curvature, learning_rate, *, topos=None))]
+    pub fn attach_hypergrad(
+        &mut self,
+        curvature: f32,
+        learning_rate: f32,
+        topos: Option<&PyOpenCartesianTopos>,
+    ) -> PyResult<()> {
+        if let Some(topos) = topos {
+            self.inner_mut()?
+                .attach_hypergrad_with_topos(curvature, learning_rate, topos.inner.clone())
+                .map_err(tensor_err_to_py)
+        } else {
+            self.inner_mut()?
+                .attach_hypergrad(curvature, learning_rate)
+                .map_err(tensor_err_to_py)
+        }
+    }
+
+    pub fn attach_realgrad(&mut self, learning_rate: f32) -> PyResult<()> {
+        self.inner_mut()?
+            .attach_realgrad(learning_rate)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn zero_accumulators(&mut self) -> PyResult<()> {
+        self.inner_mut()?.zero_accumulators().map_err(tensor_err_to_py)
+    }
+
+    pub fn apply_step(&mut self, fallback_lr: f32) -> PyResult<()> {
+        self.inner_mut()?.apply_step(fallback_lr).map_err(tensor_err_to_py)
+    }
+
+    pub fn state_dict(&self) -> PyResult<Vec<(String, PyTensor)>> {
+        let mut entries: Vec<_> = self
+            .inner()?
+            .state_dict()
+            .map_err(tensor_err_to_py)?
+            .into_iter()
+            .collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(entries
+            .into_iter()
+            .map(|(name, tensor)| (name, PyTensor::from_tensor(tensor)))
+            .collect())
+    }
+
+    pub fn load_state_dict(&mut self, state: Vec<(String, PyTensor)>) -> PyResult<()> {
+        let mut map = std::collections::HashMap::new();
+        for (name, tensor) in state {
+            map.insert(name, tensor.inner.clone());
+        }
+        self.inner_mut()?
+            .load_state_dict(&map)
+            .map_err(tensor_err_to_py)
+    }
+
+    #[pyo3(signature = (x))]
+    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(x)
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "SpiralRnn", unsendable)]
+pub(crate) struct PySpiralRnn {
+    inner: Option<RustSpiralRnn>,
+}
+
+#[cfg(feature = "nn")]
+impl PySpiralRnn {
+    fn inner(&self) -> PyResult<&RustSpiralRnn> {
+        self.inner.as_ref().ok_or_else(|| {
+            PyValueError::new_err("SpiralRnn was moved into a container and can no longer be used")
+        })
+    }
+
+    fn inner_mut(&mut self) -> PyResult<&mut RustSpiralRnn> {
+        self.inner.as_mut().ok_or_else(|| {
+            PyValueError::new_err("SpiralRnn was moved into a container and can no longer be used")
+        })
+    }
+
+    fn take_inner(&mut self) -> PyResult<RustSpiralRnn> {
+        self.inner.take().ok_or_else(|| {
+            PyValueError::new_err("SpiralRnn was moved into a container and can no longer be used")
+        })
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PySpiralRnn {
+    #[new]
+    pub fn new(name: &str, input_dim: usize, hidden_dim: usize, steps: usize) -> PyResult<Self> {
+        let inner = RustSpiralRnn::new(name, input_dim, hidden_dim, steps).map_err(tensor_err_to_py)?;
+        Ok(Self { inner: Some(inner) })
+    }
+
+    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        let output = self.inner()?.forward(&input.inner).map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        let grad = self
+            .inner_mut()?
+            .backward(&input.inner, &grad_output.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(grad))
+    }
+
+    #[pyo3(signature = (curvature, learning_rate, *, topos=None))]
+    pub fn attach_hypergrad(
+        &mut self,
+        curvature: f32,
+        learning_rate: f32,
+        topos: Option<&PyOpenCartesianTopos>,
+    ) -> PyResult<()> {
+        if let Some(topos) = topos {
+            self.inner_mut()?
+                .attach_hypergrad_with_topos(curvature, learning_rate, topos.inner.clone())
+                .map_err(tensor_err_to_py)
+        } else {
+            self.inner_mut()?
+                .attach_hypergrad(curvature, learning_rate)
+                .map_err(tensor_err_to_py)
+        }
+    }
+
+    pub fn attach_realgrad(&mut self, learning_rate: f32) -> PyResult<()> {
+        self.inner_mut()?
+            .attach_realgrad(learning_rate)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn zero_accumulators(&mut self) -> PyResult<()> {
+        self.inner_mut()?.zero_accumulators().map_err(tensor_err_to_py)
+    }
+
+    pub fn apply_step(&mut self, fallback_lr: f32) -> PyResult<()> {
+        self.inner_mut()?.apply_step(fallback_lr).map_err(tensor_err_to_py)
+    }
+
+    pub fn state_dict(&self) -> PyResult<Vec<(String, PyTensor)>> {
+        let mut entries: Vec<_> = self
+            .inner()?
+            .state_dict()
+            .map_err(tensor_err_to_py)?
+            .into_iter()
+            .collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(entries
+            .into_iter()
+            .map(|(name, tensor)| (name, PyTensor::from_tensor(tensor)))
+            .collect())
+    }
+
+    pub fn load_state_dict(&mut self, state: Vec<(String, PyTensor)>) -> PyResult<()> {
+        let mut map = std::collections::HashMap::new();
+        for (name, tensor) in state {
+            map.insert(name, tensor.inner.clone());
+        }
+        self.inner_mut()?
+            .load_state_dict(&map)
+            .map_err(tensor_err_to_py)
+    }
+
+    #[pyo3(signature = (x))]
+    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(x)
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "ZSpaceSoftmax", unsendable)]
+pub(crate) struct PyZSpaceSoftmax {
+    inner: Option<RustZSpaceSoftmax>,
+}
+
+#[cfg(feature = "nn")]
+impl PyZSpaceSoftmax {
+    fn inner(&self) -> PyResult<&RustZSpaceSoftmax> {
+        self.inner.as_ref().ok_or_else(|| {
+            PyValueError::new_err(
+                "ZSpaceSoftmax was moved into a container and can no longer be used",
+            )
+        })
+    }
+
+    fn inner_mut(&mut self) -> PyResult<&mut RustZSpaceSoftmax> {
+        self.inner.as_mut().ok_or_else(|| {
+            PyValueError::new_err(
+                "ZSpaceSoftmax was moved into a container and can no longer be used",
+            )
+        })
+    }
+
+    fn take_inner(&mut self) -> PyResult<RustZSpaceSoftmax> {
+        self.inner.take().ok_or_else(|| {
+            PyValueError::new_err(
+                "ZSpaceSoftmax was moved into a container and can no longer be used",
+            )
+        })
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyZSpaceSoftmax {
+    #[new]
+    #[pyo3(signature = (curvature, temperature, *, entropy_target=None, entropy_tolerance=1e-4, entropy_gain=0.5, min_temperature=None, max_temperature=None))]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        curvature: f32,
+        temperature: f32,
+        entropy_target: Option<f32>,
+        entropy_tolerance: f32,
+        entropy_gain: f32,
+        min_temperature: Option<f32>,
+        max_temperature: Option<f32>,
+    ) -> PyResult<Self> {
+        let mut inner = RustZSpaceSoftmax::new(curvature, temperature).map_err(tensor_err_to_py)?;
+        if let Some(target) = entropy_target {
+            inner = inner
+                .with_entropy_target(target, entropy_tolerance, entropy_gain)
+                .map_err(tensor_err_to_py)?;
+        }
+        if min_temperature.is_some() || max_temperature.is_some() {
+            let min = min_temperature.ok_or_else(|| {
+                PyValueError::new_err("min_temperature must be provided when setting bounds")
+            })?;
+            let max = max_temperature.ok_or_else(|| {
+                PyValueError::new_err("max_temperature must be provided when setting bounds")
+            })?;
+            inner = inner
+                .with_temperature_bounds(min, max)
+                .map_err(tensor_err_to_py)?;
+        }
+        Ok(Self { inner: Some(inner) })
+    }
+
+    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        let output = self.inner()?.forward(&input.inner).map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        let grad = self
+            .inner_mut()?
+            .backward(&input.inner, &grad_output.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(grad))
+    }
+
+    pub fn reset_metrics(&mut self) -> PyResult<()> {
+        self.inner_mut()?.reset_metrics();
+        Ok(())
+    }
+
+    pub fn last_entropies(&self) -> PyResult<Vec<f32>> {
+        Ok(self.inner()?.last_entropies())
+    }
+
+    pub fn last_temperatures(&self) -> PyResult<Vec<f32>> {
+        Ok(self.inner()?.last_temperatures())
+    }
+
+    pub fn state_dict(&self) -> PyResult<Vec<(String, PyTensor)>> {
+        Ok(Vec::new())
+    }
+
+    pub fn load_state_dict(&mut self, _state: Vec<(String, PyTensor)>) -> PyResult<()> {
+        Ok(())
+    }
+
+    #[pyo3(signature = (x))]
+    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(x)
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "ZSpaceCoherenceScan", unsendable)]
+pub(crate) struct PyZSpaceCoherenceScan {
+    inner: Option<RustZSpaceCoherenceScan>,
+}
+
+#[cfg(feature = "nn")]
+impl PyZSpaceCoherenceScan {
+    fn inner(&self) -> PyResult<&RustZSpaceCoherenceScan> {
+        self.inner.as_ref().ok_or_else(|| {
+            PyValueError::new_err(
+                "ZSpaceCoherenceScan was moved into a container and can no longer be used",
+            )
+        })
+    }
+
+    fn inner_mut(&mut self) -> PyResult<&mut RustZSpaceCoherenceScan> {
+        self.inner.as_mut().ok_or_else(|| {
+            PyValueError::new_err(
+                "ZSpaceCoherenceScan was moved into a container and can no longer be used",
+            )
+        })
+    }
+
+    fn take_inner(&mut self) -> PyResult<RustZSpaceCoherenceScan> {
+        self.inner.take().ok_or_else(|| {
+            PyValueError::new_err(
+                "ZSpaceCoherenceScan was moved into a container and can no longer be used",
+            )
+        })
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyZSpaceCoherenceScan {
+    #[new]
+    #[pyo3(signature = (dim, steps, memory, curvature, temperature))]
+    pub fn new(
+        dim: usize,
+        steps: usize,
+        memory: usize,
+        curvature: f32,
+        temperature: f32,
+    ) -> PyResult<Self> {
+        let inner =
+            RustZSpaceCoherenceScan::new(dim, steps, memory, curvature, temperature)
+                .map_err(tensor_err_to_py)?;
+        Ok(Self { inner: Some(inner) })
+    }
+
+    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        let output = self
+            .inner()?
+            .forward(&input.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        let grad = self
+            .inner_mut()?
+            .backward(&input.inner, &grad_output.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(grad))
+    }
+
+    pub fn state_dict(&self) -> PyResult<Vec<(String, PyTensor)>> {
+        Ok(Vec::new())
+    }
+
+    pub fn load_state_dict(&mut self, _state: Vec<(String, PyTensor)>) -> PyResult<()> {
+        Ok(())
+    }
+
+    #[pyo3(signature = (x))]
+    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(x)
+    }
+
+    #[getter]
+    pub fn dim(&self) -> PyResult<usize> {
+        Ok(self.inner()?.dim())
+    }
+
+    #[getter]
+    pub fn steps(&self) -> PyResult<usize> {
+        Ok(self.inner()?.steps())
+    }
+
+    #[getter]
+    pub fn memory(&self) -> PyResult<usize> {
+        Ok(self.inner()?.memory())
+    }
+
+    #[getter]
+    pub fn curvature(&self) -> PyResult<f32> {
+        Ok(self.inner()?.curvature())
+    }
+
+    #[getter]
+    pub fn temperature(&self) -> PyResult<f32> {
+        Ok(self.inner()?.temperature())
+    }
+}
+
+#[cfg(feature = "nn")]
 #[pyclass(module = "spiraltorch.nn", name = "Relu", unsendable)]
 pub(crate) struct PyRelu {
     inner: Relu,
@@ -1106,6 +1544,34 @@ impl PySequential {
         if let Ok(handle) = layer.extract::<Py<PyLinear>>() {
             let mut linear = handle.bind(py).borrow_mut();
             let inner = linear.take_inner()?;
+            self.inner.push(inner);
+            return Ok(());
+        }
+
+        if let Ok(handle) = layer.extract::<Py<PyEmbedding>>() {
+            let mut layer = handle.bind(py).borrow_mut();
+            let inner = layer.take_inner()?;
+            self.inner.push(inner);
+            return Ok(());
+        }
+
+        if let Ok(handle) = layer.extract::<Py<PySpiralRnn>>() {
+            let mut layer = handle.bind(py).borrow_mut();
+            let inner = layer.take_inner()?;
+            self.inner.push(inner);
+            return Ok(());
+        }
+
+        if let Ok(handle) = layer.extract::<Py<PyZSpaceSoftmax>>() {
+            let mut layer = handle.bind(py).borrow_mut();
+            let inner = layer.take_inner()?;
+            self.inner.push(inner);
+            return Ok(());
+        }
+
+        if let Ok(handle) = layer.extract::<Py<PyZSpaceCoherenceScan>>() {
+            let mut layer = handle.bind(py).borrow_mut();
+            let inner = layer.take_inner()?;
             self.inner.push(inner);
             return Ok(());
         }
@@ -1198,7 +1664,7 @@ impl PySequential {
         }
 
         Err(PyTypeError::new_err(
-            "Sequential.add expects a spiraltorch.nn layer (supported: Linear, Relu, Identity, NonLiner, Scaler, Dropout, Pool2d, ZPooling, ZConv, ZConv6DA)",
+            "Sequential.add expects a spiraltorch.nn layer (supported: Linear, Embedding, SpiralRnn, ZSpaceSoftmax, ZSpaceCoherenceScan, Relu, Identity, NonLiner, Scaler, Dropout, Pool2d, ZPooling, ZConv, ZConv6DA)",
         ))
     }
 
@@ -1317,6 +1783,52 @@ impl PyMeanSquaredError {
             .backward(&prediction.inner, &target.inner)
             .map_err(tensor_err_to_py)?;
         Ok(PyTensor::from_tensor(grad))
+    }
+
+    #[pyo3(signature = (prediction, target))]
+    pub fn __call__(&mut self, prediction: &PyTensor, target: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(prediction, target)
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "CategoricalCrossEntropy", unsendable)]
+pub(crate) struct PyCategoricalCrossEntropy {
+    inner: CategoricalCrossEntropy,
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyCategoricalCrossEntropy {
+    #[new]
+    #[pyo3(signature = (*, epsilon=None))]
+    pub fn new(epsilon: Option<f32>) -> Self {
+        let mut inner = CategoricalCrossEntropy::new();
+        if let Some(epsilon) = epsilon {
+            inner = inner.with_epsilon(epsilon);
+        }
+        Self { inner }
+    }
+
+    pub fn forward(&mut self, prediction: &PyTensor, target: &PyTensor) -> PyResult<PyTensor> {
+        let output = self
+            .inner
+            .forward(&prediction.inner, &target.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn backward(&mut self, prediction: &PyTensor, target: &PyTensor) -> PyResult<PyTensor> {
+        let grad = self
+            .inner
+            .backward(&prediction.inner, &target.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(grad))
+    }
+
+    #[getter]
+    pub fn epsilon(&self) -> f32 {
+        self.inner.epsilon()
     }
 
     #[pyo3(signature = (prediction, target))]
@@ -1679,6 +2191,26 @@ fn with_module_ref<R>(
         let inner = model.inner()?;
         return f(inner).map_err(tensor_err_to_py);
     }
+    if let Ok(handle) = module.extract::<Py<PyEmbedding>>() {
+        let model = handle.bind(py).borrow();
+        let inner = model.inner()?;
+        return f(inner).map_err(tensor_err_to_py);
+    }
+    if let Ok(handle) = module.extract::<Py<PySpiralRnn>>() {
+        let model = handle.bind(py).borrow();
+        let inner = model.inner()?;
+        return f(inner).map_err(tensor_err_to_py);
+    }
+    if let Ok(handle) = module.extract::<Py<PyZSpaceSoftmax>>() {
+        let model = handle.bind(py).borrow();
+        let inner = model.inner()?;
+        return f(inner).map_err(tensor_err_to_py);
+    }
+    if let Ok(handle) = module.extract::<Py<PyZSpaceCoherenceScan>>() {
+        let model = handle.bind(py).borrow();
+        let inner = model.inner()?;
+        return f(inner).map_err(tensor_err_to_py);
+    }
     if let Ok(handle) = module.extract::<Py<PySequential>>() {
         let model = handle.bind(py).borrow();
         return f(&model.inner).map_err(tensor_err_to_py);
@@ -1717,7 +2249,7 @@ fn with_module_ref<R>(
     }
 
     Err(PyTypeError::new_err(
-        "module must be a spiraltorch.nn module (supported: Linear, Sequential, Identity, Relu, NonLiner, Scaler, Dropout, ZConv, ZConv6DA, ZRelativityModule)",
+        "module must be a spiraltorch.nn module (supported: Linear, Embedding, SpiralRnn, ZSpaceSoftmax, ZSpaceCoherenceScan, Sequential, Identity, Relu, NonLiner, Scaler, Dropout, ZConv, ZConv6DA, ZRelativityModule)",
     ))
 }
 
@@ -1728,6 +2260,26 @@ fn with_module_mut<R>(
 ) -> PyResult<R> {
     let py = module.py();
     if let Ok(handle) = module.extract::<Py<PyLinear>>() {
+        let mut model = handle.bind(py).borrow_mut();
+        let inner = model.inner_mut()?;
+        return f(inner).map_err(tensor_err_to_py);
+    }
+    if let Ok(handle) = module.extract::<Py<PyEmbedding>>() {
+        let mut model = handle.bind(py).borrow_mut();
+        let inner = model.inner_mut()?;
+        return f(inner).map_err(tensor_err_to_py);
+    }
+    if let Ok(handle) = module.extract::<Py<PySpiralRnn>>() {
+        let mut model = handle.bind(py).borrow_mut();
+        let inner = model.inner_mut()?;
+        return f(inner).map_err(tensor_err_to_py);
+    }
+    if let Ok(handle) = module.extract::<Py<PyZSpaceSoftmax>>() {
+        let mut model = handle.bind(py).borrow_mut();
+        let inner = model.inner_mut()?;
+        return f(inner).map_err(tensor_err_to_py);
+    }
+    if let Ok(handle) = module.extract::<Py<PyZSpaceCoherenceScan>>() {
         let mut model = handle.bind(py).borrow_mut();
         let inner = model.inner_mut()?;
         return f(inner).map_err(tensor_err_to_py);
@@ -1770,7 +2322,7 @@ fn with_module_mut<R>(
     }
 
     Err(PyTypeError::new_err(
-        "module must be a spiraltorch.nn module (supported: Linear, Sequential, Identity, Relu, NonLiner, Scaler, Dropout, ZConv, ZConv6DA, ZRelativityModule)",
+        "module must be a spiraltorch.nn module (supported: Linear, Embedding, SpiralRnn, ZSpaceSoftmax, ZSpaceCoherenceScan, Sequential, Identity, Relu, NonLiner, Scaler, Dropout, ZConv, ZConv6DA, ZRelativityModule)",
     ))
 }
 
@@ -1781,6 +2333,10 @@ fn with_loss_mut<R>(
 ) -> PyResult<R> {
     let py = loss.py();
     if let Ok(handle) = loss.extract::<Py<PyMeanSquaredError>>() {
+        let mut inner = handle.bind(py).borrow_mut();
+        return f(&mut inner.inner).map_err(tensor_err_to_py);
+    }
+    if let Ok(handle) = loss.extract::<Py<PyCategoricalCrossEntropy>>() {
         let mut inner = handle.bind(py).borrow_mut();
         return f(&mut inner.inner).map_err(tensor_err_to_py);
     }
@@ -1802,7 +2358,7 @@ fn with_loss_mut<R>(
     }
 
     Err(PyTypeError::new_err(
-        "loss must be a spiraltorch.nn loss (supported: MeanSquaredError, HyperbolicCrossEntropy, FocalLoss, ContrastiveLoss, TripletLoss)",
+        "loss must be a spiraltorch.nn loss (supported: MeanSquaredError, CategoricalCrossEntropy, HyperbolicCrossEntropy, FocalLoss, ContrastiveLoss, TripletLoss)",
     ))
 }
 
@@ -4176,10 +4732,18 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add("__doc__", "SpiralTorch neural network primitives")?;
     module.add_class::<PyIdentity>()?;
     module.add_class::<PyLinear>()?;
+    module.add_class::<PyEmbedding>()?;
+    module.add_class::<PySpiralRnn>()?;
+    module.add_class::<PyZSpaceSoftmax>()?;
+    module.add_class::<PyZSpaceCoherenceScan>()?;
     module.add_class::<PyRelu>()?;
     module.add_class::<PySequential>()?;
     module.add_class::<PyMeanSquaredError>()?;
+    module.add_class::<PyCategoricalCrossEntropy>()?;
     module.add_class::<PyHyperbolicCrossEntropy>()?;
+    if let Ok(loss) = module.getattr("HyperbolicCrossEntropy") {
+        module.add("CrossEntropy", loss)?;
+    }
     module.add_class::<PyFocalLoss>()?;
     module.add_class::<PyContrastiveLoss>()?;
     module.add_class::<PyTripletLoss>()?;
@@ -4223,10 +4787,16 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
         vec![
             "Identity",
             "Linear",
+            "Embedding",
+            "SpiralRnn",
+            "ZSpaceSoftmax",
+            "ZSpaceCoherenceScan",
             "Relu",
             "Sequential",
             "MeanSquaredError",
+            "CategoricalCrossEntropy",
             "HyperbolicCrossEntropy",
+            "CrossEntropy",
             "FocalLoss",
             "ContrastiveLoss",
             "TripletLoss",

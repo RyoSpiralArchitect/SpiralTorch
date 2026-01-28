@@ -1,0 +1,349 @@
+from __future__ import annotations
+
+import json
+import pathlib
+import random
+import sys
+from typing import Any
+
+# Prefer the in-repo development shim when running from a source checkout.
+_ROOT = pathlib.Path(__file__).resolve().parents[2]
+if (_ROOT / "spiraltorch").is_dir():
+    sys.path.insert(0, str(_ROOT))
+
+import spiraltorch as st
+
+FORMAT = "st-char-lm-coherence-v1"
+DEFAULT_UNK = "\uFFFD"
+
+
+def _meta_path_for_weights(weights_path: pathlib.Path) -> pathlib.Path:
+    name = weights_path.name
+    if name.endswith(".json"):
+        return weights_path.with_name(name[: -len(".json")] + ".meta.json")
+    return weights_path.with_name(name + ".meta.json")
+
+
+def _read_text(path: pathlib.Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+def _build_vocab(text: str, unk: str) -> tuple[str, list[str], dict[str, int]]:
+    symbols = sorted({ch for ch in text if ch != unk})
+    symbols = [unk, *symbols]
+    index = {ch: i for i, ch in enumerate(symbols)}
+    return unk, symbols, index
+
+
+def _encode(text: str, index: dict[str, int]) -> list[int]:
+    return [index.get(ch, 0) for ch in text]
+
+
+def _argmax(values: list[float]) -> int:
+    best_idx = 0
+    best_val = float("-inf")
+    for idx, value in enumerate(values):
+        if value == value and value > best_val:  # NaN-safe
+            best_val = value
+            best_idx = idx
+    return best_idx
+
+
+def _sample_topk(values: list[float], top_k: int, rng: random.Random) -> int:
+    if not values:
+        return 0
+    if top_k <= 1:
+        return _argmax(values)
+
+    candidates: list[tuple[int, float]] = []
+    for idx, value in enumerate(values):
+        if value == value and value > 0.0:
+            candidates.append((idx, float(value)))
+        else:
+            candidates.append((idx, 0.0))
+
+    if 0 < top_k < len(candidates):
+        candidates.sort(key=lambda pair: pair[1], reverse=True)
+        candidates = candidates[:top_k]
+
+    total = sum(weight for _idx, weight in candidates)
+    if total <= 0.0 or total != total:
+        return _argmax(values)
+
+    threshold = rng.random() * total
+    for idx, weight in candidates:
+        threshold -= weight
+        if threshold <= 0.0:
+            return idx
+    return candidates[-1][0]
+
+
+def _build_model(
+    vocab_size: int,
+    steps: int,
+    embed_dim: int,
+    hidden: int,
+    memory: int,
+    curvature: float,
+    temperature: float,
+) -> st.nn.Sequential:
+    model = st.nn.Sequential()
+    model.add(st.nn.Embedding("embed", vocab_size, embed_dim))
+    model.add(st.nn.ZSpaceCoherenceScan(embed_dim, steps, memory, curvature, temperature))
+    model.add(st.nn.Linear("mix", embed_dim, hidden))
+    model.add(st.nn.Relu())
+    model.add(st.nn.Linear("head", hidden, vocab_size))
+    model.add(st.nn.ZSpaceSoftmax(curvature, temperature))
+    return model
+
+
+def _build_random_batch(
+    tokens: list[int],
+    vocab_size: int,
+    steps: int,
+    batch: int,
+    rng: random.Random,
+) -> tuple[st.Tensor, st.Tensor]:
+    max_start = len(tokens) - steps
+    if max_start <= 0:
+        raise ValueError(f"text too short for steps={steps}: len={len(tokens)}")
+
+    x_data: list[float] = []
+    y_data = [0.0] * (batch * vocab_size)
+    for row in range(batch):
+        start = rng.randrange(0, max_start)
+        for t in range(steps):
+            x_data.append(float(tokens[start + t]))
+        target = tokens[start + steps]
+        if 0 <= target < vocab_size:
+            y_data[row * vocab_size + target] = 1.0
+    x = st.Tensor(batch, steps, x_data)
+    y = st.Tensor(batch, vocab_size, y_data)
+    return x, y
+
+
+def _generate(
+    model: st.nn.Sequential,
+    symbols: list[str],
+    index: dict[str, int],
+    steps: int,
+    prompt: str,
+    gen_len: int,
+    top_k: int,
+    seed: int,
+) -> str:
+    rng = random.Random(seed)
+    vocab_size = len(symbols)
+
+    context = [index.get(ch, 0) for ch in prompt]
+    if len(context) < steps:
+        context = [0] * (steps - len(context)) + context
+    elif len(context) > steps:
+        context = context[-steps:]
+
+    out = prompt
+    for _ in range(gen_len):
+        x = st.Tensor(1, steps, [float(i) for i in context])
+        probs = model.forward(x)
+        row = probs.tolist()[0]
+        next_idx = _sample_topk([float(v) for v in row], top_k, rng)
+        out += symbols[next_idx]
+        context = context[1:] + [next_idx]
+    return out
+
+
+def _load_meta(meta_path: pathlib.Path) -> dict[str, Any]:
+    with meta_path.open("r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def _save_meta(meta_path: pathlib.Path, meta: dict[str, Any]) -> None:
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+    with meta_path.open("w", encoding="utf-8") as handle:
+        json.dump(meta, handle, ensure_ascii=False, indent=2)
+
+
+def main() -> None:
+    if len(sys.argv) < 2 or sys.argv[1] in {"-h", "--help"}:
+        print(
+            "usage: PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_coherence_scan.py <text.txt> "
+            "[--load weights.json] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] [--memory N] "
+            "[--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] "
+            "[--gen N] [--topk N] [--seed N] [--prompt STR]"
+        )
+        return
+
+    args = list(sys.argv[1:])
+    text_path = pathlib.Path(args.pop(0))
+
+    load_weights: pathlib.Path | None = None
+    save_weights: pathlib.Path | None = None
+    steps = 32
+    embed_dim = 32
+    hidden = 64
+    memory = 16
+    epochs = 6
+    batches_per_epoch = 24
+    batch = 8
+    lr = 2e-2
+    curvature = -1.0
+    temperature = 1.0
+    gen_len = 200
+    top_k = 32
+    seed = 42
+    prompt: str | None = None
+
+    it = iter(args)
+    for flag in it:
+        if flag == "--load":
+            load_weights = pathlib.Path(next(it))
+        elif flag == "--save":
+            save_weights = pathlib.Path(next(it))
+        elif flag == "--steps":
+            steps = int(next(it))
+        elif flag == "--embed-dim":
+            embed_dim = int(next(it))
+        elif flag == "--hidden":
+            hidden = int(next(it))
+        elif flag == "--memory":
+            memory = int(next(it))
+        elif flag == "--epochs":
+            epochs = int(next(it))
+        elif flag == "--batches":
+            batches_per_epoch = int(next(it))
+        elif flag == "--batch":
+            batch = int(next(it))
+        elif flag == "--lr":
+            lr = float(next(it))
+        elif flag == "--curvature":
+            curvature = float(next(it))
+        elif flag == "--temperature":
+            temperature = float(next(it))
+        elif flag == "--gen":
+            gen_len = int(next(it))
+        elif flag == "--topk":
+            top_k = int(next(it))
+        elif flag == "--seed":
+            seed = int(next(it))
+        elif flag == "--prompt":
+            prompt = str(next(it))
+        else:
+            raise ValueError(f"unknown flag: {flag}")
+
+    if memory > steps:
+        raise ValueError(f"--memory must be <= --steps (got memory={memory}, steps={steps})")
+
+    text = _read_text(text_path)
+    if not text:
+        raise ValueError("empty text")
+
+    if load_weights is not None:
+        meta_path = _meta_path_for_weights(load_weights)
+        meta = _load_meta(meta_path)
+        fmt = str(meta.get("format", ""))
+        if fmt != FORMAT:
+            raise ValueError(f"unexpected meta format: {fmt}")
+        steps = int(meta["steps"])
+        embed_dim = int(meta["embed_dim"])
+        hidden = int(meta["hidden"])
+        memory = int(meta["memory"])
+        curvature = float(meta["curvature"])
+        temperature = float(meta["temperature"])
+        symbols = [str(ch) for ch in meta["symbols"]]
+        index = {ch: i for i, ch in enumerate(symbols)}
+        vocab_size = len(symbols)
+        model = _build_model(
+            vocab_size,
+            steps,
+            embed_dim,
+            hidden,
+            memory,
+            curvature,
+            temperature,
+        )
+        st.nn.load(str(load_weights), model)
+    else:
+        _unk, symbols, index = _build_vocab(text, DEFAULT_UNK)
+        vocab_size = len(symbols)
+        model = _build_model(
+            vocab_size,
+            steps,
+            embed_dim,
+            hidden,
+            memory,
+            curvature,
+            temperature,
+        )
+
+    tokens = _encode(text, index)
+    if len(tokens) <= steps:
+        raise ValueError(f"text too short for steps={steps}: len={len(tokens)}")
+
+    model.attach_hypergrad(curvature=curvature, learning_rate=lr)
+    trainer = st.nn.ModuleTrainer(
+        backend="cpu",
+        curvature=curvature,
+        hyper_learning_rate=lr,
+        fallback_learning_rate=lr,
+    )
+    schedule = trainer.roundtable(
+        batch,
+        vocab_size,
+        st.nn.RoundtableConfig(top_k=1, mid_k=1, bottom_k=1, here_tolerance=1e-5),
+    )
+    loss = st.nn.CategoricalCrossEntropy()
+
+    print(
+        f"arch=coherence_scan vocab={vocab_size} steps={steps} embed_dim={embed_dim} hidden={hidden} "
+        f"memory={memory} epochs={epochs} batch={batch} lr={lr:.3e} curvature={curvature} temp={temperature}"
+    )
+
+    for epoch in range(epochs):
+        rng = random.Random(seed + epoch * 10_000)
+        batches = []
+        for _ in range(batches_per_epoch):
+            batches.append(_build_random_batch(tokens, vocab_size, steps, batch, rng))
+        stats = trainer.train_epoch(model, loss, batches, schedule)
+        print(f"epoch[{epoch}] batches={stats.batches} avg_loss={stats.average_loss:.6f}")
+
+    weights_path = (
+        save_weights
+        or load_weights
+        or (_ROOT / "models" / "weights" / "llm_char_coherence_scan_py.json")
+    )
+    weights_path = pathlib.Path(weights_path)
+    weights_path.parent.mkdir(parents=True, exist_ok=True)
+    st.nn.save(str(weights_path), model)
+
+    meta = {
+        "format": FORMAT,
+        "steps": steps,
+        "embed_dim": embed_dim,
+        "hidden": hidden,
+        "memory": memory,
+        "curvature": curvature,
+        "temperature": temperature,
+        "unk": symbols[0],
+        "symbols": symbols,
+    }
+    _save_meta(_meta_path_for_weights(weights_path), meta)
+
+    if prompt is None:
+        prompt = "".join(list(text)[:steps])
+    sample = _generate(
+        model,
+        symbols,
+        index,
+        steps,
+        prompt,
+        gen_len,
+        top_k,
+        seed + 999,
+    )
+    print("--- sample (prompt + gen) ---")
+    print(sample)
+
+
+if __name__ == "__main__":
+    main()
+

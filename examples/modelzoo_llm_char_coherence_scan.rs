@@ -1,27 +1,26 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // © 2025 Ryo ∴ SpiralArchitect (kishkavsesvit@icloud.com)
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
+// Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-//! LLM model-zoo: character-level language model fine-tuning from raw text
+//! LLM model-zoo: character-level fine-tuning using Z-space coherence scan
 //! (no tokenizer / no BPE).
 
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
 use st_core::backend::device_caps::DeviceCaps;
-use st_nn::layers::spiral_rnn::SpiralRnn;
 use st_nn::layers::ZSpaceSoftmax;
 use st_nn::{
     load_json, save_json, CategoricalCrossEntropy, Embedding, Module, ModuleTrainer, PureResult,
-    RoundtableConfig, Sequential, Tensor, TensorError,
+    Relu, RoundtableConfig, Sequential, Tensor, TensorError, ZSpaceCoherenceScan,
 };
 use std::collections::{BTreeSet, HashMap};
 use std::env;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 
-const FORMAT_ID_V1: &str = "st-char-lm-v1";
-const FORMAT_ID_V2: &str = "st-char-lm-v2";
+const FORMAT_ID: &str = "st-char-lm-coherence-v1";
 const DEFAULT_UNK: char = '\u{FFFD}';
 
 #[derive(Debug, Clone)]
@@ -70,11 +69,11 @@ impl Vocab {
 struct CharLmMeta {
     format: String,
     steps: usize,
+    embed_dim: usize,
     hidden: usize,
+    memory: usize,
     curvature: f32,
     temperature: f32,
-    #[serde(default)]
-    embed_dim: Option<usize>,
     unk: char,
     symbols: Vec<char>,
 }
@@ -82,23 +81,21 @@ struct CharLmMeta {
 impl CharLmMeta {
     fn new(
         steps: usize,
+        embed_dim: usize,
         hidden: usize,
-        embed_dim: Option<usize>,
+        memory: usize,
         curvature: f32,
         temperature: f32,
         vocab: &Vocab,
     ) -> Self {
         Self {
-            format: if embed_dim.is_some() {
-                FORMAT_ID_V2.to_string()
-            } else {
-                FORMAT_ID_V1.to_string()
-            },
+            format: FORMAT_ID.to_string(),
             steps,
+            embed_dim,
             hidden,
+            memory,
             curvature,
             temperature,
-            embed_dim,
             unk: vocab.unk,
             symbols: vocab.symbols.clone(),
         }
@@ -113,6 +110,7 @@ struct Args {
     steps: usize,
     embed_dim: usize,
     hidden: usize,
+    memory: usize,
     epochs: usize,
     batches_per_epoch: usize,
     batch: usize,
@@ -130,7 +128,7 @@ impl Args {
         let mut argv = env::args().skip(1);
         let Some(text_path) = argv.next() else {
             return Err(TensorError::Generic(
-                "usage: cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text.txt> [--load weights.json] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--prompt STR]"
+                "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text.txt> [--load weights.json] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--prompt STR]"
                     .to_string(),
             ));
         };
@@ -142,6 +140,7 @@ impl Args {
             steps: 32,
             embed_dim: 32,
             hidden: 64,
+            memory: 16,
             epochs: 6,
             batches_per_epoch: 24,
             batch: 8,
@@ -161,6 +160,7 @@ impl Args {
                 "--steps" => args.steps = take_parse(&mut argv, "--steps")?,
                 "--embed-dim" => args.embed_dim = take_parse(&mut argv, "--embed-dim")?,
                 "--hidden" => args.hidden = take_parse(&mut argv, "--hidden")?,
+                "--memory" => args.memory = take_parse(&mut argv, "--memory")?,
                 "--epochs" => args.epochs = take_parse(&mut argv, "--epochs")?,
                 "--batches" => args.batches_per_epoch = take_parse(&mut argv, "--batches")?,
                 "--batch" => args.batch = take_parse(&mut argv, "--batch")?,
@@ -173,7 +173,7 @@ impl Args {
                 "--prompt" => args.prompt = Some(take_arg(&mut argv, "--prompt")?),
                 "--help" | "-h" => {
                     return Err(TensorError::Generic(
-                        "usage: cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text.txt> [--load weights.json] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--prompt STR]"
+                        "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text.txt> [--load weights.json] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--prompt STR]"
                             .to_string(),
                     ));
                 }
@@ -185,9 +185,20 @@ impl Args {
             }
         }
 
-        if args.steps == 0 || args.embed_dim == 0 || args.hidden == 0 || args.batch == 0 {
+        if args.steps == 0
+            || args.embed_dim == 0
+            || args.hidden == 0
+            || args.memory == 0
+            || args.batch == 0
+        {
             return Err(TensorError::InvalidValue {
-                label: "char_lm_invalid_dims",
+                label: "char_lm_coherence_invalid_dims",
+            });
+        }
+        if args.memory > args.steps {
+            return Err(TensorError::InvalidDimensions {
+                rows: args.memory,
+                cols: args.steps,
             });
         }
         Ok(args)
@@ -198,9 +209,8 @@ fn take_arg<I>(argv: &mut I, flag: &'static str) -> Result<String, TensorError>
 where
     I: Iterator<Item = String>,
 {
-    argv.next().ok_or_else(|| {
-        TensorError::Generic(format!("missing value for {flag}. Try --help"))
-    })
+    argv.next()
+        .ok_or_else(|| TensorError::Generic(format!("missing value for {flag}. Try --help")))
 }
 
 fn take_parse<I, T>(argv: &mut I, flag: &'static str) -> Result<T, TensorError>
@@ -252,19 +262,24 @@ fn write_meta(path: &Path, meta: &CharLmMeta) -> PureResult<()> {
 
 fn build_model(
     vocab_size: usize,
-    embed_dim: Option<usize>,
     steps: usize,
+    embed_dim: usize,
     hidden: usize,
+    memory: usize,
     curvature: f32,
     temperature: f32,
 ) -> PureResult<Sequential> {
     let mut model = Sequential::new();
-    if let Some(embed_dim) = embed_dim {
-        model.push(Embedding::new("embed", vocab_size, embed_dim)?);
-        model.push(SpiralRnn::new("char_rnn", embed_dim, hidden, steps)?);
-    } else {
-        model.push(SpiralRnn::new("char_rnn", vocab_size, hidden, steps)?);
-    }
+    model.push(Embedding::new("embed", vocab_size, embed_dim)?);
+    model.push(ZSpaceCoherenceScan::new(
+        embed_dim,
+        steps,
+        memory,
+        curvature,
+        temperature,
+    )?);
+    model.push(st_nn::Linear::new("mix", embed_dim, hidden)?);
+    model.push(Relu::new());
     model.push(st_nn::Linear::new("head", hidden, vocab_size)?);
     model.push(ZSpaceSoftmax::new(curvature, temperature)?);
     Ok(model)
@@ -272,19 +287,6 @@ fn build_model(
 
 fn encode_text(text: &str, vocab: &Vocab) -> Vec<usize> {
     text.chars().map(|ch| vocab.encode(ch)).collect()
-}
-
-fn encode_context_one_hot(context: &[usize], vocab_size: usize) -> PureResult<Tensor> {
-    let steps = context.len();
-    let cols = vocab_size * steps;
-    let mut x = Tensor::zeros(1, cols)?;
-    let data = x.data_mut();
-    for (t, &idx) in context.iter().enumerate() {
-        if idx < vocab_size {
-            data[t * vocab_size + idx] = 1.0;
-        }
-    }
-    Ok(x)
 }
 
 fn encode_context_indices(context: &[usize]) -> PureResult<Tensor> {
@@ -298,7 +300,6 @@ fn encode_context_indices(context: &[usize]) -> PureResult<Tensor> {
 fn build_random_batch(
     tokens: &[usize],
     vocab_size: usize,
-    embed_dim: Option<usize>,
     steps: usize,
     batch: usize,
     rng: &mut impl Rng,
@@ -307,25 +308,15 @@ fn build_random_batch(
     if max_start == 0 {
         return Err(TensorError::EmptyInput("char_lm_tokens"));
     }
-    let input_cols = vocab_size * steps;
-    let mut x = Tensor::zeros(batch, if embed_dim.is_some() { steps } else { input_cols })?;
+    let mut x = Tensor::zeros(batch, steps)?;
     let mut y = Tensor::zeros(batch, vocab_size)?;
     {
         let x_data = x.data_mut();
         let y_data = y.data_mut();
         for row in 0..batch {
             let start = rng.gen_range(0..max_start);
-            if embed_dim.is_some() {
-                for t in 0..steps {
-                    x_data[row * steps + t] = tokens[start + t] as f32;
-                }
-            } else {
-                for t in 0..steps {
-                    let idx = tokens[start + t];
-                    if idx < vocab_size {
-                        x_data[row * input_cols + t * vocab_size + idx] = 1.0;
-                    }
-                }
+            for t in 0..steps {
+                x_data[row * steps + t] = tokens[start + t] as f32;
             }
             let target = tokens[start + steps];
             if target < vocab_size {
@@ -385,7 +376,6 @@ fn sample_from_probs(probs: &[f32], top_k: usize, rng: &mut impl Rng) -> usize {
 fn generate_text(
     model: &Sequential,
     vocab: &Vocab,
-    embed_dim: Option<usize>,
     steps: usize,
     prompt: &str,
     gen_len: usize,
@@ -404,11 +394,7 @@ fn generate_text(
 
     let mut out = String::from(prompt);
     for _ in 0..gen_len {
-        let x = if embed_dim.is_some() {
-            encode_context_indices(&context)?
-        } else {
-            encode_context_one_hot(&context, vocab.len())?
-        };
+        let x = encode_context_indices(&context)?;
         let probs = model.forward(&x)?;
         let row = &probs.data()[..vocab.len()];
         let next = sample_from_probs(row, top_k, &mut rng);
@@ -428,33 +414,31 @@ fn main() -> PureResult<()> {
         return Err(TensorError::EmptyInput("char_lm_text"));
     }
 
-    let (steps, hidden, curvature, temperature, vocab, model, loaded_from) =
+    let (steps, embed_dim, hidden, memory, curvature, temperature, vocab, mut model, loaded_from) =
         if let Some(ref weights_path) = args.load_weights {
             let meta_path = meta_path_for_weights(weights_path);
             let meta = read_meta(&meta_path)?;
-            if meta.format != FORMAT_ID_V1 && meta.format != FORMAT_ID_V2 {
+            if meta.format != FORMAT_ID {
                 return Err(TensorError::Generic(format!(
-                    "unexpected meta format: {} (expected {FORMAT_ID_V1} or {FORMAT_ID_V2})",
+                    "unexpected meta format: {} (expected {FORMAT_ID})",
                     meta.format
                 )));
-            }
-            if meta.format == FORMAT_ID_V2 && meta.embed_dim.is_none() {
-                return Err(TensorError::Generic(
-                    "meta format st-char-lm-v2 requires embed_dim".to_string(),
-                ));
             }
             let vocab = Vocab::from_symbols(meta.unk, meta.symbols);
             let model = build_model(
                 vocab.len(),
-                meta.embed_dim,
                 meta.steps,
+                meta.embed_dim,
                 meta.hidden,
+                meta.memory,
                 meta.curvature,
                 meta.temperature,
             )?;
             (
                 meta.steps,
+                meta.embed_dim,
                 meta.hidden,
+                meta.memory,
                 meta.curvature,
                 meta.temperature,
                 vocab,
@@ -465,15 +449,18 @@ fn main() -> PureResult<()> {
             let vocab = Vocab::build_from_text(&text, DEFAULT_UNK);
             let model = build_model(
                 vocab.len(),
-                Some(args.embed_dim),
                 args.steps,
+                args.embed_dim,
                 args.hidden,
+                args.memory,
                 args.curvature,
                 args.temperature,
             )?;
             (
                 args.steps,
+                args.embed_dim,
                 args.hidden,
+                args.memory,
                 args.curvature,
                 args.temperature,
                 vocab,
@@ -482,15 +469,6 @@ fn main() -> PureResult<()> {
             )
         };
 
-    let embed_dim = if let Some(ref weights_path) = loaded_from {
-        let meta_path = meta_path_for_weights(weights_path);
-        let meta = read_meta(&meta_path)?;
-        meta.embed_dim
-    } else {
-        Some(args.embed_dim)
-    };
-
-    let mut model = model;
     if let Some(weights_path) = loaded_from.as_ref() {
         load_json(&mut model, weights_path)?;
     }
@@ -504,7 +482,8 @@ fn main() -> PureResult<()> {
         )));
     }
 
-    let mut trainer = ModuleTrainer::new(DeviceCaps::cpu(), curvature, args.learning_rate, args.learning_rate);
+    let mut trainer =
+        ModuleTrainer::new(DeviceCaps::cpu(), curvature, args.learning_rate, args.learning_rate);
     let schedule = trainer.roundtable(
         args.batch as u32,
         vocab.len() as u32,
@@ -517,14 +496,13 @@ fn main() -> PureResult<()> {
 
     let mut loss = CategoricalCrossEntropy::new();
 
-    let mode = embed_dim
-        .map(|dim| format!("embedding({dim})"))
-        .unwrap_or_else(|| "one_hot".to_string());
     println!(
-        "mode={mode} vocab={} steps={} hidden={} epochs={} batch={} lr={:.3e} curvature={} temp={}",
+        "arch=coherence_scan vocab={} steps={} embed_dim={} hidden={} memory={} epochs={} batch={} lr={:.3e} curvature={} temp={}",
         vocab.len(),
         steps,
+        embed_dim,
         hidden,
+        memory,
         args.epochs,
         args.batch,
         args.learning_rate,
@@ -539,7 +517,6 @@ fn main() -> PureResult<()> {
             batches.push(build_random_batch(
                 &tokens,
                 vocab.len(),
-                embed_dim,
                 steps,
                 args.batch,
                 &mut rng,
@@ -556,7 +533,7 @@ fn main() -> PureResult<()> {
         .save_weights
         .clone()
         .or_else(|| args.load_weights.clone())
-        .unwrap_or_else(|| PathBuf::from("models/weights/llm_char_finetune.json"));
+        .unwrap_or_else(|| PathBuf::from("models/weights/llm_char_coherence_scan.json"));
     if let Some(parent) = save_weights.parent() {
         std::fs::create_dir_all(parent).map_err(|err| TensorError::IoError {
             message: err.to_string(),
@@ -564,7 +541,9 @@ fn main() -> PureResult<()> {
     }
     save_json(&model, &save_weights)?;
 
-    let meta = CharLmMeta::new(steps, hidden, embed_dim, curvature, temperature, &vocab);
+    let meta = CharLmMeta::new(
+        steps, embed_dim, hidden, memory, curvature, temperature, &vocab,
+    );
     let meta_path = meta_path_for_weights(&save_weights);
     write_meta(&meta_path, &meta)?;
 
@@ -575,7 +554,6 @@ fn main() -> PureResult<()> {
     let sample = generate_text(
         &model,
         &vocab,
-        embed_dim,
         steps,
         &prompt,
         args.gen_len,
@@ -588,3 +566,4 @@ fn main() -> PureResult<()> {
 
     Ok(())
 }
+
