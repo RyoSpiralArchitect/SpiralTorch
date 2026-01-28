@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use st_core::maxwell::MaxwellZPulse;
 use st_tensor::TensorError;
 use std::collections::VecDeque;
+use std::env;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
@@ -326,10 +327,18 @@ pub struct ZSpaceTraceConfig {
 
 impl Default for ZSpaceTraceConfig {
     fn default() -> Self {
+        let publish_plugin_events = env::var("SPIRAL_ZSPACE_TRACE_PUBLISH")
+            .map(|value| {
+                matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "on"
+                )
+            })
+            .unwrap_or(false);
         Self {
             capacity: 256,
             max_vector_len: 256,
-            publish_plugin_events: false,
+            publish_plugin_events,
         }
     }
 }
@@ -561,10 +570,11 @@ impl ZSpaceSequencerPlugin for ZSpaceTraceRecorder {
 
         if let Some(publish_event) = publish_event {
             use st_core::plugin::{global_registry, PluginEvent};
-            if let Ok(payload) = serde_json::to_value(&publish_event) {
-                global_registry()
-                    .event_bus()
-                    .publish(&PluginEvent::custom("ZSpaceTrace", payload));
+            let bus = global_registry().event_bus();
+            if bus.has_listeners("ZSpaceTrace") {
+                if let Ok(payload) = serde_json::to_value(&publish_event) {
+                    bus.publish(&PluginEvent::custom("ZSpaceTrace", payload));
+                }
             }
         }
 

@@ -32,6 +32,15 @@ Reuse or redistribution **must retain the SpiralTorch name and authorship** as p
 
 ---
 
+### 🧱 Learning Stack (Model Zoo)
+
+SpiralTorch’s “learning stack” is a set of minimal, runnable training baselines (Rust-first; no NumPy/PyTorch required). See `models/README.md`.
+
+- **LLM (raw text, no tokenizer):** `cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text.txt>`
+- **Vision (Conv/Pool):** `cargo run -p st-nn --example modelzoo_vision_conv_pool_classification`
+- **Coherence (ZSpace VAE):** `cargo run -p st-nn --example modelzoo_zspace_vae_reconstruction`
+- **Training (Lightning/selfsup):** `cargo run -p st-nn --example modelzoo_lightning_selfsup_minimal`
+
 ### Why SpiralTorch  
 
 Modern ML stacks were built around CUDA—fast, but closed and rigid.  
@@ -213,6 +222,7 @@ tensor shims, no translation layers, and no tracebacks.
 
 ## 🚀 Latest SpiralTorch highlights
 
+- **Learning Stack (model zoo).** Runnable baselines for Vision/Coherence/Training plus character-level LLM fine-tuning from raw text (no tokenizer): `cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text.txt>`.
 - **Fractal → Quantum RL bridge.** Stream Mellin-log fractal patches straight into the quantum overlay studio and recover policy gradients through `FractalQuantumTrainer` and friends—keeping Python fallbacks and PyO3 builds in lockstep.
 - **Self-evolving SpiralK kernels.** A new diversity governor inside `SelfRewriteEngine` tracks plateauing η̄ gains, forces fresh AI rewrites when caches go stale, and surfaces telemetry via `diversity_snapshot()` so operators can keep the autonomous kernel lab on course.
 - **Saga-aware kernel evolution.** The `SelfRewriteEngine` now learns multi-step hint sagas, boosting cache priority for sequenced rewrites and exposing the orbits via `saga_snapshots()` so you can audit every cosmic combo.
@@ -2075,15 +2085,16 @@ visibility—the exact manoeuvre the theoretical note predicts when constructing
   harvest, and let SoT-3Dφ planners seed a ready-to-project biome via
   `SoT3DPlan.grow_biome(...)` before reinjecting it with `ZSpaceProjector`.
 - **Rust-first modules & losses**
-  `st-nn` now ships `Linear`, `Sequential`, the lightweight `Relu`, the
+  `st-nn` now ships `Linear`, `Sequential`, the lightweight `Relu`, sequence
+  cores like `SpiralRnn`/`WaveRnn`, hyperbolic-friendly `ZSpaceSoftmax`, the
   hyperbolic `WaveGate`, `ToposResonator`, the new `ZSpaceMixer`, and the
-  `ZSpaceProjector` alongside `MeanSquaredError` / `HyperbolicCrossEntropy`
-  losses. They stream gradients through the hypergrad tape, apply open-topos
-  rewrites, and keep SpiralK planners one call away with roundtable-aware
-  scheduling helpers. Every primitive is exported through the Python wheel so
-  you can stay NumPy-free while scripting experiments—with the new
-  `spiraltorch.dataset.DataLoader` keeping shuffle/batch/prefetch entirely in
-  Rust.
+  `ZSpaceProjector` alongside `MeanSquaredError` / `HyperbolicCrossEntropy` /
+  `CategoricalCrossEntropy` losses. They stream gradients through the hypergrad
+  tape, apply open-topos rewrites, and keep SpiralK planners one call away with
+  roundtable-aware scheduling helpers. Every primitive is exported through the
+  Python wheel so you can stay NumPy-free while scripting experiments—with the
+  new `spiraltorch.dataset.DataLoader` keeping shuffle/batch/prefetch entirely
+  in Rust.
 - **Optional WASM tuner table**
   Bake the JSON dataset offline and ship it to browsers/WASM. The runtime loads the table lazily, blends it with SpiralK, and keeps the optimiser in sync with the generated WGSL kernels.
 - **Self-Rewrite**

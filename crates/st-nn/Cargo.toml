@@ -60,6 +60,38 @@ name = "modelzoo_zconv_classification"
 path = "../../examples/modelzoo_zconv_classification.rs"
 
 [[example]]
+name = "modelzoo_vision_conv_pool_classification"
+path = "../../examples/modelzoo_vision_conv_pool_classification.rs"
+
+[[example]]
+name = "modelzoo_zspace_mixer_regression"
+path = "../../examples/modelzoo_zspace_mixer_regression.rs"
+
+[[example]]
+name = "modelzoo_zspace_vae_reconstruction"
+path = "../../examples/modelzoo_zspace_vae_reconstruction.rs"
+
+[[example]]
+name = "modelzoo_wave_rnn_sequence"
+path = "../../examples/modelzoo_wave_rnn_sequence.rs"
+
+[[example]]
+name = "modelzoo_gnn_graph_regression"
+path = "../../examples/modelzoo_gnn_graph_regression.rs"
+
+[[example]]
+name = "modelzoo_zrba_telemetry"
+path = "../../examples/modelzoo_zrba_telemetry.rs"
+
+[[example]]
+name = "modelzoo_lightning_selfsup_minimal"
+path = "../../examples/modelzoo_lightning_selfsup_minimal.rs"
+
+[[example]]
+name = "modelzoo_llm_char_finetune"
+path = "../../examples/modelzoo_llm_char_finetune.rs"
+
+[[example]]
 name = "zspace_trace_demo"
 path = "../../examples/zspace_trace_demo.rs"
 

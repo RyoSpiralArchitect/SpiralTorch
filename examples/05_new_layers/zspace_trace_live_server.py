@@ -1,11 +1,11 @@
-#!/usr/bin/env -S python3 -s
+#!/usr/bin/env -S python3 -S -s
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # © 2025 Ryo ∴ SpiralArchitect
 
 """Live Z-space trace stream (SSE + Canvas viewer).
 
 Run from a source checkout:
-`python3 -s examples/05_new_layers/zspace_trace_live_server.py`
+`python3 -S -s examples/05_new_layers/zspace_trace_live_server.py`
 
 If you see `AttributeError: ... install_trace_recorder`, rebuild the Python extension
 (e.g. via `maturin build` / `maturin develop`) so the latest Rust bindings are picked up.
@@ -51,4 +51,3 @@ try:
 except KeyboardInterrupt:
     print("\nshutting down...")
     server.close()
-

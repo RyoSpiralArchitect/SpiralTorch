@@ -45,7 +45,9 @@ use crate::roundtable::{
     RoundtableNode,
 };
 use crate::schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSchedule};
-use crate::zspace_coherence::{CoherenceDiagnostics, CoherenceLabel, CoherenceObservation};
+use crate::zspace_coherence::{
+    CoherenceDiagnostics, CoherenceLabel, CoherenceObservation, ZSpaceTraceEvent,
+};
 use crate::{PureResult, Tensor};
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::backend::unison_heuristics::RankKind;
@@ -77,6 +79,7 @@ use st_core::theory::zpulse::ZScale;
 use st_tensor::{topos::OpenCartesianTopos, GradientSummary};
 use std::collections::HashMap;
 use std::env;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 /// Adaptive curvature controller that nudges the trainer's hyperbolic geometry
@@ -170,6 +173,75 @@ impl CurvatureScheduler {
     /// Enables a small curvature dither when pressure remains stable within tolerance.
     pub fn with_dither(mut self, strength: f32, period: u32) -> Self {
         self.set_dither(strength, period);
+        self
+    }
+
+    /// Applies environment overrides to the scheduler in-place.
+    ///
+    /// Supported variables:
+    /// - `SPIRAL_CURVATURE_STEP`
+    /// - `SPIRAL_CURVATURE_TOLERANCE`
+    /// - `SPIRAL_CURVATURE_ALPHA`
+    /// - `SPIRAL_CURVATURE_KP`
+    /// - `SPIRAL_CURVATURE_STABILITY_THRESHOLD`
+    /// - `SPIRAL_CURVATURE_STABILITY_BOOST`
+    /// - `SPIRAL_CURVATURE_DITHER_STRENGTH`
+    /// - `SPIRAL_CURVATURE_DITHER_PERIOD`
+    pub fn apply_env_overrides(&mut self) {
+        if let Ok(value) = env::var("SPIRAL_CURVATURE_STEP") {
+            if let Ok(step) = value.parse::<f32>() {
+                self.set_step(step);
+            }
+        }
+        if let Ok(value) = env::var("SPIRAL_CURVATURE_TOLERANCE") {
+            if let Ok(tolerance) = value.parse::<f32>() {
+                self.set_tolerance(tolerance);
+            }
+        }
+        if let Ok(value) = env::var("SPIRAL_CURVATURE_ALPHA") {
+            if let Ok(alpha) = value.parse::<f32>() {
+                self.set_smoothing(alpha);
+            }
+        }
+        if let Ok(value) = env::var("SPIRAL_CURVATURE_KP") {
+            if let Ok(kp) = value.parse::<f32>() {
+                self.set_proportional_gain(kp);
+            }
+        }
+        if let Ok(value) = env::var("SPIRAL_CURVATURE_STABILITY_THRESHOLD") {
+            if let Ok(threshold) = value.parse::<f32>() {
+                self.set_stability_threshold(threshold);
+            }
+        }
+        if let Ok(value) = env::var("SPIRAL_CURVATURE_STABILITY_BOOST") {
+            if let Ok(boost) = value.parse::<f32>() {
+                self.set_stability_boost(boost);
+            }
+        }
+
+        let mut dither_strength = self.dither_strength;
+        let mut dither_period = self.dither_period;
+        let mut changed = false;
+        if let Ok(value) = env::var("SPIRAL_CURVATURE_DITHER_STRENGTH") {
+            if let Ok(strength) = value.parse::<f32>() {
+                dither_strength = strength;
+                changed = true;
+            }
+        }
+        if let Ok(value) = env::var("SPIRAL_CURVATURE_DITHER_PERIOD") {
+            if let Ok(period) = value.parse::<u32>() {
+                dither_period = period;
+                changed = true;
+            }
+        }
+        if changed {
+            self.set_dither(dither_strength, dither_period);
+        }
+    }
+
+    /// Applies environment overrides and returns `self` for fluent construction.
+    pub fn with_env_overrides(mut self) -> Self {
+        self.apply_env_overrides();
         self
     }
 
@@ -449,6 +521,139 @@ impl From<CurvatureDecision> for CurvatureMetrics {
     }
 }
 
+/// Coherence statistics required by [`SpectralLearningRatePolicy`].
+#[derive(Debug, Clone, Copy)]
+pub struct CoherenceSignal {
+    dominant_channel: Option<usize>,
+    preserved_channels: usize,
+    mean_coherence: f32,
+    z_bias: f32,
+    energy_ratio: f32,
+    entropy: f32,
+    label: CoherenceLabel,
+}
+
+impl CoherenceSignal {
+    pub fn dominant_channel(&self) -> Option<usize> {
+        self.dominant_channel
+    }
+
+    pub fn preserved_channels(&self) -> usize {
+        self.preserved_channels
+    }
+
+    pub fn mean_coherence(&self) -> f32 {
+        self.mean_coherence
+    }
+
+    pub fn z_bias(&self) -> f32 {
+        self.z_bias
+    }
+
+    pub fn energy_ratio(&self) -> f32 {
+        self.energy_ratio
+    }
+
+    pub fn coherence_entropy(&self) -> f32 {
+        self.entropy
+    }
+
+    pub fn label(&self) -> CoherenceLabel {
+        self.label
+    }
+
+    fn label_from_str(label: &str) -> CoherenceLabel {
+        match label.trim() {
+            "symmetric_pulse" => CoherenceLabel::SymmetricPulse,
+            "cascade_imbalance" => CoherenceLabel::CascadeImbalance,
+            "diffuse_drift" => CoherenceLabel::DiffuseDrift,
+            _ => CoherenceLabel::Background,
+        }
+    }
+
+    fn from_zspace_trace_event(event: &ZSpaceTraceEvent) -> Option<Self> {
+        let ZSpaceTraceEvent::Aggregated { diagnostics, .. } = event else {
+            return None;
+        };
+        Some(Self {
+            dominant_channel: diagnostics.dominant_channel,
+            preserved_channels: diagnostics.preserved_channels.max(1),
+            mean_coherence: diagnostics.mean_coherence,
+            z_bias: diagnostics.z_bias,
+            energy_ratio: diagnostics.energy_ratio,
+            entropy: diagnostics.entropy,
+            label: Self::label_from_str(&diagnostics.label),
+        })
+    }
+}
+
+impl From<&CoherenceDiagnostics> for CoherenceSignal {
+    fn from(diagnostics: &CoherenceDiagnostics) -> Self {
+        Self {
+            dominant_channel: diagnostics.dominant_channel(),
+            preserved_channels: diagnostics.preserved_channels().max(1),
+            mean_coherence: diagnostics.mean_coherence(),
+            z_bias: diagnostics.z_bias(),
+            energy_ratio: diagnostics.energy_ratio(),
+            entropy: diagnostics.coherence_entropy(),
+            label: diagnostics.observation().lift_to_label(),
+        }
+    }
+}
+
+/// Listens for `ZSpaceTrace` plugin events and lifts coherence diagnostics into a signal.
+pub struct ZSpaceTraceCoherenceBridge {
+    bus: st_core::plugin::PluginEventBus,
+    subscription_id: usize,
+    latest: Arc<Mutex<Option<CoherenceSignal>>>,
+}
+
+impl ZSpaceTraceCoherenceBridge {
+    pub fn subscribe() -> Self {
+        let bus = global_registry().event_bus().clone();
+        let latest: Arc<Mutex<Option<CoherenceSignal>>> = Arc::new(Mutex::new(None));
+        let latest_clone = Arc::clone(&latest);
+        let subscription_id = bus.subscribe(
+            "ZSpaceTrace",
+            Arc::new(move |event: &PluginEvent| {
+                let Some(payload) = event.downcast_data::<serde_json::Value>() else {
+                    return;
+                };
+                let Ok(trace_event) = serde_json::from_value::<ZSpaceTraceEvent>(payload.clone())
+                else {
+                    return;
+                };
+                let Some(signal) = CoherenceSignal::from_zspace_trace_event(&trace_event) else {
+                    return;
+                };
+                let mut guard = latest_clone
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                *guard = Some(signal);
+            }),
+        );
+        Self {
+            bus,
+            subscription_id,
+            latest,
+        }
+    }
+
+    pub fn drain(&self) -> Option<CoherenceSignal> {
+        let mut guard = self
+            .latest
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        guard.take()
+    }
+}
+
+impl Drop for ZSpaceTraceCoherenceBridge {
+    fn drop(&mut self) {
+        let _ = self.bus.unsubscribe("ZSpaceTrace", self.subscription_id);
+    }
+}
+
 /// High-level orchestrator that keeps hypergrad, SpiralK, and module updates aligned.
 pub struct ModuleTrainer {
     epoch: usize,
@@ -482,8 +687,19 @@ pub struct ModuleTrainer {
     last_curvature_metrics: Option<CurvatureMetrics>,
     loss_strategy: LossStrategy,
     spectral_policy: Option<SpectralLearningRatePolicy>,
-    pending_coherence: Option<CoherenceDiagnostics>,
+    coherence_bridge: Option<ZSpaceTraceCoherenceBridge>,
+    pending_coherence: Option<CoherenceSignal>,
     last_spectral_metrics: Option<SpectralAdjustmentMetrics>,
+    phase_turnover_spike_threshold: f32,
+    phase_loss_ema_alpha: f32,
+    phase_loss_spike_ratio: f32,
+    phase_drift_spike_threshold: f32,
+    phase_last_label: Option<CoherenceLabel>,
+    phase_last_turnover: Option<f32>,
+    phase_last_band: Option<u8>,
+    phase_last_drift_abs: Option<f32>,
+    phase_loss_ema: Option<f32>,
+    phase_loss_spiking: bool,
     #[cfg(feature = "golden")]
     golden_pulse: Option<GoldenBlackcatPulse>,
     #[cfg(feature = "golden")]
@@ -1374,6 +1590,104 @@ impl SpectralLearningRatePolicy {
         self
     }
 
+    /// Applies environment overrides to the policy in-place.
+    ///
+    /// Supported variables (all optional):
+    /// - `SPIRAL_SPECTRAL_POLICY_SMOOTHING`
+    /// - `SPIRAL_SPECTRAL_POLICY_EVENT_SMOOTHING`
+    /// - `SPIRAL_SPECTRAL_POLICY_TURNOVER_SMOOTHING`
+    /// - `SPIRAL_SPECTRAL_POLICY_PHASE_GAIN`
+    /// - `SPIRAL_SPECTRAL_POLICY_STUCK_PHASE_GAIN`
+    /// - `SPIRAL_SPECTRAL_POLICY_MAX_PHASE_GAIN`
+    /// - `SPIRAL_SPECTRAL_POLICY_STUCK_TURNOVER_THRESHOLD`
+    /// - `SPIRAL_SPECTRAL_POLICY_LR_MIN` / `SPIRAL_SPECTRAL_POLICY_LR_MAX`
+    /// - `SPIRAL_SPECTRAL_POLICY_BAND_MIN` / `SPIRAL_SPECTRAL_POLICY_BAND_MAX`
+    pub fn apply_env_overrides(&mut self) {
+        if let Ok(value) = env::var("SPIRAL_SPECTRAL_POLICY_SMOOTHING") {
+            if let Ok(smoothing) = value.parse::<f32>() {
+                if smoothing.is_finite() && smoothing > 0.0 {
+                    self.smoothing = smoothing.clamp(1.0e-3, 1.0);
+                }
+            }
+        }
+        if let Ok(value) = env::var("SPIRAL_SPECTRAL_POLICY_EVENT_SMOOTHING") {
+            if let Ok(smoothing) = value.parse::<f32>() {
+                if smoothing.is_finite() && smoothing > 0.0 {
+                    self.event_smoothing = smoothing.clamp(1.0e-3, 1.0);
+                }
+            }
+        }
+        if let Ok(value) = env::var("SPIRAL_SPECTRAL_POLICY_TURNOVER_SMOOTHING") {
+            if let Ok(smoothing) = value.parse::<f32>() {
+                if smoothing.is_finite() && smoothing > 0.0 {
+                    self.turnover_smoothing = smoothing.clamp(1.0e-3, 1.0);
+                }
+            }
+        }
+        if let Ok(value) = env::var("SPIRAL_SPECTRAL_POLICY_PHASE_GAIN") {
+            if let Ok(gain) = value.parse::<f32>() {
+                if gain.is_finite() && gain >= 0.0 {
+                    self.phase_gain = gain;
+                }
+            }
+        }
+        if let Ok(value) = env::var("SPIRAL_SPECTRAL_POLICY_STUCK_PHASE_GAIN") {
+            if let Ok(gain) = value.parse::<f32>() {
+                if gain.is_finite() && gain >= 0.0 {
+                    self.stuck_phase_gain = gain;
+                }
+            }
+        }
+        if let Ok(value) = env::var("SPIRAL_SPECTRAL_POLICY_MAX_PHASE_GAIN") {
+            if let Ok(gain) = value.parse::<f32>() {
+                if gain.is_finite() && gain >= 0.0 {
+                    self.max_phase_gain = gain;
+                }
+            }
+        }
+        if let Ok(value) = env::var("SPIRAL_SPECTRAL_POLICY_STUCK_TURNOVER_THRESHOLD") {
+            if let Ok(threshold) = value.parse::<f32>() {
+                if threshold.is_finite() && threshold >= 0.0 {
+                    self.stuck_turnover_threshold = threshold.clamp(0.0, 1.0);
+                }
+            }
+        }
+        let lr_min = env::var("SPIRAL_SPECTRAL_POLICY_LR_MIN")
+            .ok()
+            .and_then(|value| value.parse::<f32>().ok());
+        let lr_max = env::var("SPIRAL_SPECTRAL_POLICY_LR_MAX")
+            .ok()
+            .and_then(|value| value.parse::<f32>().ok());
+        if let (Some(min), Some(max)) = (lr_min, lr_max) {
+            if min.is_finite() && max.is_finite() && min > 0.0 && max > min {
+                self.min_lr_scale = min;
+                self.max_lr_scale = max;
+            }
+        }
+        let band_min = env::var("SPIRAL_SPECTRAL_POLICY_BAND_MIN")
+            .ok()
+            .and_then(|value| value.parse::<f32>().ok());
+        let band_max = env::var("SPIRAL_SPECTRAL_POLICY_BAND_MAX")
+            .ok()
+            .and_then(|value| value.parse::<f32>().ok());
+        if let (Some(min), Some(max)) = (band_min, band_max) {
+            if min.is_finite() && max.is_finite() && min > 0.0 && max > min {
+                self.min_band_scale = min;
+                self.max_band_scale = max;
+            }
+        }
+        self.max_lr_step = self.max_lr_step.max(1.0);
+        self.max_phase_gain = self.max_phase_gain.max(0.0);
+        self.phase_gain = self.phase_gain.max(0.0);
+        self.stuck_phase_gain = self.stuck_phase_gain.max(0.0);
+    }
+
+    /// Applies environment overrides and returns `self` for fluent construction.
+    pub fn with_env_overrides(mut self) -> Self {
+        self.apply_env_overrides();
+        self
+    }
+
     /// Returns the last semantic coherence label that influenced the policy.
     pub fn last_coherence_label(&self) -> Option<CoherenceLabel> {
         self.last_label
@@ -1390,8 +1704,18 @@ impl SpectralLearningRatePolicy {
         curvature: f32,
         band_energy: &BandEnergy,
     ) -> Option<SpectralAdjustment> {
+        let signal = diagnostics.map(CoherenceSignal::from);
+        self.observe_signal(signal.as_ref(), curvature, band_energy)
+    }
+
+    pub fn observe_signal(
+        &mut self,
+        diagnostics: Option<&CoherenceSignal>,
+        curvature: f32,
+        band_energy: &BandEnergy,
+    ) -> Option<SpectralAdjustment> {
         let diagnostics = diagnostics?;
-        let label = diagnostics.observation().lift_to_label();
+        let label = diagnostics.label();
         let preserved = diagnostics.preserved_channels().max(1);
         let dominant = diagnostics
             .dominant_channel()
@@ -1664,6 +1988,29 @@ impl ModuleTrainer {
         let mut spectral_adapter = SpectralLrAdapter::default().with_sheet_hint(8);
         spectral_adapter.set_curvature_target(curvature);
 
+        let phase_turnover_spike_threshold = env::var("SPIRAL_TRAINER_PHASE_TURNOVER_SPIKE_THRESHOLD")
+            .ok()
+            .and_then(|value| value.parse::<f32>().ok())
+            .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
+            .unwrap_or(0.35);
+        let phase_loss_ema_alpha = env::var("SPIRAL_TRAINER_PHASE_LOSS_EMA_ALPHA")
+            .ok()
+            .and_then(|value| value.parse::<f32>().ok())
+            .filter(|value| value.is_finite() && *value > 0.0 && *value <= 1.0)
+            .unwrap_or(0.12);
+        let phase_loss_spike_ratio = env::var("SPIRAL_TRAINER_PHASE_LOSS_SPIKE_RATIO")
+            .ok()
+            .and_then(|value| value.parse::<f32>().ok())
+            .filter(|value| value.is_finite() && *value >= 0.0)
+            .map(|value| value.clamp(0.0, 10.0))
+            .unwrap_or(0.25);
+        let phase_drift_spike_threshold = env::var("SPIRAL_TRAINER_PHASE_DRIFT_SPIKE_THRESHOLD")
+            .ok()
+            .and_then(|value| value.parse::<f32>().ok())
+            .filter(|value| value.is_finite() && *value >= 0.0)
+            .map(|value| value.max(0.0))
+            .unwrap_or(0.6);
+
         Self {
             epoch: 0,
             planner: RankPlanner::new(caps),
@@ -1696,8 +2043,19 @@ impl ModuleTrainer {
             last_curvature_metrics: None,
             loss_strategy: LossStrategy::default(),
             spectral_policy: None,
+            coherence_bridge: None,
             pending_coherence: None,
             last_spectral_metrics: None,
+            phase_turnover_spike_threshold,
+            phase_loss_ema_alpha,
+            phase_loss_spike_ratio,
+            phase_drift_spike_threshold,
+            phase_last_label: None,
+            phase_last_turnover: None,
+            phase_last_band: None,
+            phase_last_drift_abs: None,
+            phase_loss_ema: None,
+            phase_loss_spiking: false,
             #[cfg(feature = "golden")]
             golden_pulse: None,
             #[cfg(feature = "golden")]
@@ -1814,6 +2172,7 @@ impl ModuleTrainer {
     /// Installs a curvature scheduler so the trainer can adapt its hyperbolic
     /// geometry based on recent gradient pressure observations.
     pub fn enable_curvature_scheduler(&mut self, mut scheduler: CurvatureScheduler) {
+        scheduler.apply_env_overrides();
         scheduler.sync(self.curvature);
         self.curvature_scheduler = Some(scheduler);
         self.last_curvature_metrics = None;
@@ -1834,20 +2193,38 @@ impl ModuleTrainer {
     }
 
     /// Enables the spectral learning rate adaptation policy driven by Z-space coherence.
-    pub fn enable_spectral_learning_rate(&mut self, policy: SpectralLearningRatePolicy) {
+    pub fn enable_spectral_learning_rate(&mut self, mut policy: SpectralLearningRatePolicy) {
+        policy.apply_env_overrides();
         self.spectral_policy = Some(policy);
         self.last_spectral_metrics = None;
+        self.phase_last_label = None;
+        self.phase_last_turnover = None;
+        self.enable_zspace_trace_coherence_bridge();
     }
 
     /// Disables the spectral learning rate policy.
     pub fn disable_spectral_learning_rate(&mut self) {
         self.spectral_policy = None;
         self.last_spectral_metrics = None;
+        self.phase_last_label = None;
+        self.phase_last_turnover = None;
     }
 
     /// Publishes fresh coherence diagnostics that will be consumed by the spectral policy.
     pub fn push_coherence_diagnostics(&mut self, diagnostics: CoherenceDiagnostics) {
-        self.pending_coherence = Some(diagnostics);
+        self.pending_coherence = Some(CoherenceSignal::from(&diagnostics));
+    }
+
+    /// Enables automatic coherence injection by listening to `ZSpaceTrace` plugin events.
+    pub fn enable_zspace_trace_coherence_bridge(&mut self) {
+        if self.coherence_bridge.is_none() {
+            self.coherence_bridge = Some(ZSpaceTraceCoherenceBridge::subscribe());
+        }
+    }
+
+    /// Disables any configured ZSpaceTrace coherence bridge.
+    pub fn disable_zspace_trace_coherence_bridge(&mut self) {
+        self.coherence_bridge = None;
     }
 
     /// Returns the last recorded spectral learning rate metrics when available.
@@ -2518,6 +2895,12 @@ impl ModuleTrainer {
             budget.begin_epoch();
         }
         self.zero(module)?;
+        self.phase_last_label = None;
+        self.phase_last_turnover = None;
+        self.phase_last_band = None;
+        self.phase_last_drift_abs = None;
+        self.phase_loss_ema = None;
+        self.phase_loss_spiking = false;
         #[cfg(feature = "psi")]
         self.bootstrap_psi(schedule);
         #[cfg(feature = "psychoid")]
@@ -2598,10 +2981,17 @@ impl ModuleTrainer {
             }
             let mut spectral_used = false;
             let mut spectral_extra: Option<SpectralAdjustmentMetrics> = None;
+            if self.pending_coherence.is_none() {
+                if let Some(bridge) = self.coherence_bridge.as_ref() {
+                    if let Some(signal) = bridge.drain() {
+                        self.pending_coherence = Some(signal);
+                    }
+                }
+            }
             let coherence_snapshot = self.pending_coherence.take();
             let coherence_label = coherence_snapshot
                 .as_ref()
-                .map(|diagnostics| diagnostics.observation().lift_to_label());
+                .map(|diagnostics| diagnostics.label());
             let mut spectral_label_code = coherence_label.map(|label| match label {
                 CoherenceLabel::Background => 0.0,
                 CoherenceLabel::SymmetricPulse => 1.0,
@@ -2612,7 +3002,7 @@ impl ModuleTrainer {
             let mut spectral_adjustment: Option<SpectralAdjustment> = None;
             if let Some(policy) = self.spectral_policy.as_mut() {
                 spectral_adjustment =
-                    policy.observe(coherence_snapshot.as_ref(), self.curvature, &band_energy);
+                    policy.observe_signal(coherence_snapshot.as_ref(), self.curvature, &band_energy);
                 spectral_turnover = Some(policy.dominant_turnover());
                 if let Some(label) = policy.last_coherence_label() {
                     spectral_label_code = Some(match label {
@@ -3073,6 +3463,203 @@ impl ModuleTrainer {
             self.zero(module)?;
             steps += 1;
 
+            let phase_label = self
+                .spectral_policy
+                .as_ref()
+                .and_then(|policy| policy.last_coherence_label())
+                .or(coherence_label);
+            let mut phase_label_change = None;
+            if let Some(label) = phase_label {
+                if let Some(previous) = self.phase_last_label {
+                    if previous != label {
+                        phase_label_change = Some((previous, label));
+                    }
+                }
+                self.phase_last_label = Some(label);
+            }
+
+            let mut turnover_spike = None;
+            if let Some(turnover) = spectral_turnover {
+                if let Some(previous) = self.phase_last_turnover {
+                    if previous <= self.phase_turnover_spike_threshold
+                        && turnover > self.phase_turnover_spike_threshold
+                    {
+                        turnover_spike = Some((previous, turnover));
+                    }
+                }
+                self.phase_last_turnover = Some(turnover);
+            }
+
+            let mut band_shift = None;
+            let band_abs = [
+                baseline_band_energy.above.abs(),
+                baseline_band_energy.here.abs(),
+                baseline_band_energy.beneath.abs(),
+            ];
+            let mut dominant_band = 0usize;
+            for idx in 1..band_abs.len() {
+                if band_abs[idx] > band_abs[dominant_band] {
+                    dominant_band = idx;
+                }
+            }
+            let dominant_band = dominant_band as u8;
+            if let Some(previous) = self.phase_last_band {
+                if previous != dominant_band {
+                    band_shift = Some((previous, dominant_band));
+                }
+            }
+            self.phase_last_band = Some(dominant_band);
+
+            let mut drift_spike = None;
+            let drift_abs = band_energy.drift.abs();
+            if drift_abs.is_finite() {
+                if let Some(previous) = self.phase_last_drift_abs {
+                    if previous <= self.phase_drift_spike_threshold
+                        && drift_abs > self.phase_drift_spike_threshold
+                    {
+                        drift_spike = Some((previous, drift_abs));
+                    }
+                }
+                self.phase_last_drift_abs = Some(drift_abs);
+            }
+
+            let mut loss_spike = None;
+            let loss_value = weighted_loss.abs();
+            if loss_value.is_finite() {
+                let ema = if let Some(previous) = self.phase_loss_ema {
+                    previous + self.phase_loss_ema_alpha * (loss_value - previous)
+                } else {
+                    loss_value
+                };
+                self.phase_loss_ema = Some(ema);
+                let threshold = ema * (1.0 + self.phase_loss_spike_ratio);
+                let spiking = threshold.is_finite() && loss_value > threshold;
+                if spiking && !self.phase_loss_spiking {
+                    loss_spike = Some((loss_value, ema, threshold));
+                }
+                self.phase_loss_spiking = spiking;
+            }
+
+            let bus = global_registry().event_bus();
+            if bus.has_listeners("TrainerPhase") {
+                let label_code = |label: CoherenceLabel| -> u8 {
+                    match label {
+                        CoherenceLabel::Background => 0,
+                        CoherenceLabel::SymmetricPulse => 1,
+                        CoherenceLabel::CascadeImbalance => 2,
+                        CoherenceLabel::DiffuseDrift => 3,
+                    }
+                };
+
+                if let Some((from, to)) = phase_label_change {
+                    bus.publish(&PluginEvent::custom(
+                        "TrainerPhase",
+                        serde_json::json!({
+                            "epoch": epoch,
+                            "step": steps,
+                            "kind": "label_change",
+                            "from": {"code": label_code(from), "label": from.to_string()},
+                            "to": {"code": label_code(to), "label": to.to_string()},
+                            "turnover": spectral_turnover.map(|v| v as f64),
+                            "curvature": self.curvature as f64,
+                        }),
+                    ));
+                }
+
+                if let Some((prev, now)) = turnover_spike {
+                    bus.publish(&PluginEvent::custom(
+                        "TrainerPhase",
+                        serde_json::json!({
+                            "epoch": epoch,
+                            "step": steps,
+                            "kind": "turnover_spike",
+                            "turnover_prev": prev as f64,
+                            "turnover": now as f64,
+                            "threshold": self.phase_turnover_spike_threshold as f64,
+                            "label": phase_label.map(|label| label.to_string()),
+                            "label_code": phase_label.map(label_code),
+                            "curvature": self.curvature as f64,
+                        }),
+                    ));
+                }
+
+                let band_name = |code: u8| -> &'static str {
+                    match code {
+                        0 => "above",
+                        1 => "here",
+                        2 => "beneath",
+                        _ => "unknown",
+                    }
+                };
+
+                if let Some((from, to)) = band_shift {
+                    bus.publish(&PluginEvent::custom(
+                        "TrainerPhase",
+                        serde_json::json!({
+                            "epoch": epoch,
+                            "step": steps,
+                            "kind": "band_shift",
+                            "from": {"code": from, "band": band_name(from)},
+                            "to": {"code": to, "band": band_name(to)},
+                            "baseline_energy": {
+                                "above": baseline_band_energy.above as f64,
+                                "here": baseline_band_energy.here as f64,
+                                "beneath": baseline_band_energy.beneath as f64,
+                                "drift": baseline_band_energy.drift as f64,
+                            },
+                            "energy": {
+                                "above": band_energy.above as f64,
+                                "here": band_energy.here as f64,
+                                "beneath": band_energy.beneath as f64,
+                                "drift": band_energy.drift as f64,
+                            },
+                            "turnover": spectral_turnover.map(|v| v as f64),
+                            "label": phase_label.map(|label| label.to_string()),
+                            "label_code": phase_label.map(label_code),
+                            "curvature": self.curvature as f64,
+                        }),
+                    ));
+                }
+
+                if let Some((prev, now)) = drift_spike {
+                    bus.publish(&PluginEvent::custom(
+                        "TrainerPhase",
+                        serde_json::json!({
+                            "epoch": epoch,
+                            "step": steps,
+                            "kind": "drift_spike",
+                            "drift": band_energy.drift as f64,
+                            "drift_abs_prev": prev as f64,
+                            "drift_abs": now as f64,
+                            "threshold": self.phase_drift_spike_threshold as f64,
+                            "turnover": spectral_turnover.map(|v| v as f64),
+                            "label": phase_label.map(|label| label.to_string()),
+                            "label_code": phase_label.map(label_code),
+                            "curvature": self.curvature as f64,
+                        }),
+                    ));
+                }
+
+                if let Some((loss, ema, threshold)) = loss_spike {
+                    bus.publish(&PluginEvent::custom(
+                        "TrainerPhase",
+                        serde_json::json!({
+                            "epoch": epoch,
+                            "step": steps,
+                            "kind": "loss_spike",
+                            "loss_weighted": loss as f64,
+                            "loss_ema": ema as f64,
+                            "threshold": threshold as f64,
+                            "ratio": self.phase_loss_spike_ratio as f64,
+                            "turnover": spectral_turnover.map(|v| v as f64),
+                            "label": phase_label.map(|label| label.to_string()),
+                            "label_code": phase_label.map(label_code),
+                            "curvature": self.curvature as f64,
+                        }),
+                    ));
+                }
+            }
+
             let elapsed_ms = if let Some(rt) = self.blackcat.as_ref() {
                 rt.elapsed_since_begin()
                     .unwrap_or_else(|| Duration::from_secs_f64(0.0))
@@ -3097,6 +3684,21 @@ impl ModuleTrainer {
                 retry_rate: 0.0,
                 extra,
             };
+            if bus.has_listeners("TrainerStep") {
+                bus.publish(&PluginEvent::custom(
+                    "TrainerStep",
+                    serde_json::json!({
+                        "epoch": epoch,
+                        "step": steps,
+                        "metrics": {
+                            "step_time_ms": metrics.step_time_ms,
+                            "mem_peak_mb": metrics.mem_peak_mb,
+                            "retry_rate": metrics.retry_rate,
+                            "extra": &metrics.extra,
+                        },
+                    }),
+                ));
+            }
             if let Some(ap) = self.autopilot.as_mut() {
                 ap.report(&metrics);
             }

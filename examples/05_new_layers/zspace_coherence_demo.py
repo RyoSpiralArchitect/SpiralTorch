@@ -1,11 +1,11 @@
-#!/usr/bin/env -S python3 -s
+#!/usr/bin/env -S python3 -S -s
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # © 2025 Ryo ∴ SpiralArchitect
 
 """ZSpaceCoherenceSequencer demo.
 
 Run from a source checkout:
-`python3 -s examples/05_new_layers/zspace_coherence_demo.py`
+`python3 -S -s examples/05_new_layers/zspace_coherence_demo.py`
 """
 
 from __future__ import annotations

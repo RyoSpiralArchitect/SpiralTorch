@@ -10,10 +10,18 @@ copy-pastable models that act as reference implementations for both Python and R
 
 ## Running
 
-- Python: `PYTHONNOUSERSITE=1 python3 -s models/python/mlp_regression.py`
-- Python (classification): `PYTHONNOUSERSITE=1 python3 -s models/python/zconv_classification.py`
+- Python: `PYTHONNOUSERSITE=1 python3 -S -s models/python/mlp_regression.py`
+- Python (classification): `PYTHONNOUSERSITE=1 python3 -S -s models/python/zconv_classification.py`
 - Rust: `cargo run -p st-nn --example modelzoo_mlp_regression`
 - Rust (classification): `cargo run -p st-nn --example modelzoo_zconv_classification`
+- Rust (vision + pooling): `cargo run -p st-nn --example modelzoo_vision_conv_pool_classification`
+- Rust (mixer): `cargo run -p st-nn --example modelzoo_zspace_mixer_regression`
+- Rust (VAE): `cargo run -p st-nn --example modelzoo_zspace_vae_reconstruction`
+- Rust (sequence): `cargo run -p st-nn --example modelzoo_wave_rnn_sequence`
+- Rust (LLM char fine-tune): `cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text.txt>`
+- Rust (GNN): `cargo run -p st-nn --example modelzoo_gnn_graph_regression`
+- Rust (Z-RBA telemetry): `cargo run -p st-nn --example modelzoo_zrba_telemetry`
+- Rust (Lightning + selfsup): `cargo run -p st-nn --example modelzoo_lightning_selfsup_minimal`
 
 ## Goals
 

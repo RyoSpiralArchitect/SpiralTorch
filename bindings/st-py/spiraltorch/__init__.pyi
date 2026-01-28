@@ -19,6 +19,17 @@ def write_zspace_trace_html(
     event_type: str = ...,
 ) -> str: ...
 
+def load_trainer_trace_events(path: str, *, event_type: str = ...) -> List[Dict[str, Any]]: ...
+
+def write_trainer_trace_html(
+    trace_jsonl: str,
+    html_path: str | None = ...,
+    *,
+    title: str = ...,
+    event_type: str = ...,
+    marker_event_type: str | None = ...,
+) -> str: ...
+
 def load_kdsl_trace_events(path: str) -> List[Dict[str, Any]]: ...
 
 def write_kdsl_trace_jsonl(

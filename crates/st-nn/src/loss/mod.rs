@@ -3,6 +3,7 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+mod categorical_cross_entropy;
 mod contrastive_loss;
 mod focal_loss;
 mod hyperbolic_cross_entropy;
@@ -11,6 +12,7 @@ mod triplet_loss;
 
 use crate::{PureResult, Tensor};
 
+pub use categorical_cross_entropy::CategoricalCrossEntropy;
 pub use contrastive_loss::ContrastiveLoss;
 pub use focal_loss::FocalLoss;
 pub use hyperbolic_cross_entropy::HyperbolicCrossEntropy;

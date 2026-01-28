@@ -464,6 +464,11 @@ from .zspace_trace import (
     write_zspace_trace_html,
 )
 
+from .trainer_trace import (
+    load_trainer_trace_events,
+    write_trainer_trace_html,
+)
+
 from .kdsl_trace import (
     load_kdsl_trace_events,
     write_kdsl_trace_jsonl,
@@ -497,6 +502,7 @@ _EXTRAS = [
     "describe_device","hip_probe","z_space_barycenter",
     "hypergrad","realgrad","hypergrad_topos","encode_zspace","z_metrics",
     "load_zspace_trace_events","write_zspace_trace_html",
+    "load_trainer_trace_events","write_trainer_trace_html",
     "load_kdsl_trace_events","write_kdsl_trace_jsonl","write_kdsl_trace_html",
     "zspace_trace_to_atlas_route","zspace_trace_event_to_atlas_frame",
     "serve_zspace_trace","ZSpaceTraceLiveServer",

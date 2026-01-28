@@ -1,11 +1,14 @@
-#!/usr/bin/env -S python3 -s
+#!/usr/bin/env -S python3 -S -s
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # © 2025 Ryo ∴ SpiralArchitect
 
 """SpiralK (KDSL) trace + HTML viewer demo.
 
 Run from a source checkout:
-`python3 -s examples/kdsl_trace_visualize_demo.py`
+`python3 -S -s examples/kdsl_trace_visualize_demo.py`
+
+If you see `NotImplementedError: SpiralK support requires enabling the 'kdsl' feature`,
+rebuild the Python extension with `--features kdsl` (e.g. via `maturin develop`).
 """
 
 from __future__ import annotations
@@ -50,4 +53,3 @@ st.write_kdsl_trace_html(trace, html_path, title="SpiralTorch SpiralK Trace")
 
 print(f"\ntrace_jsonl={jsonl_path}")
 print(f"viewer_html={html_path}")
-
