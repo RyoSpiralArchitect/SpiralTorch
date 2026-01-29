@@ -14,6 +14,7 @@ use st_nn::layers::ZSpaceSoftmax;
 use st_nn::{
     load_json, save_json, CategoricalCrossEntropy, Embedding, Module, ModuleTrainer, PureResult,
     Relu, RoundtableConfig, Sequential, Tensor, TensorError, ZSpaceCoherenceWaveBlock,
+    TextInfusionEvery,
 };
 use std::collections::{BTreeSet, HashMap};
 use std::env;
@@ -130,6 +131,7 @@ struct Args {
     seed: u64,
     prompt: Option<String>,
     infuse: Option<String>,
+    infuse_every: String,
 }
 
 impl Args {
@@ -137,7 +139,7 @@ impl Args {
         let mut argv = env::args().skip(1);
         let Some(text_path) = argv.next() else {
             return Err(TensorError::Generic(
-                "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text.txt> [--load weights.json] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--kernel N] [--dilations 1,2,4] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--prompt STR] [--infuse STR]"
+                "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text.txt> [--load weights.json] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--kernel N] [--dilations 1,2,4] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--prompt STR] [--infuse STR] [--infuse-every once|epoch|batch]"
                     .to_string(),
             ));
         };
@@ -163,6 +165,7 @@ impl Args {
             seed: 42,
             prompt: None,
             infuse: None,
+            infuse_every: "once".to_string(),
         };
 
         while let Some(flag) = argv.next() {
@@ -186,9 +189,10 @@ impl Args {
                 "--seed" => args.seed = take_parse(&mut argv, "--seed")?,
                 "--prompt" => args.prompt = Some(take_arg(&mut argv, "--prompt")?),
                 "--infuse" => args.infuse = Some(take_arg(&mut argv, "--infuse")?),
+                "--infuse-every" => args.infuse_every = take_arg(&mut argv, "--infuse-every")?,
                 "--help" | "-h" => {
                     return Err(TensorError::Generic(
-                        "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text.txt> [--load weights.json] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--kernel N] [--dilations 1,2,4] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--prompt STR] [--infuse STR]"
+                        "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text.txt> [--load weights.json] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--kernel N] [--dilations 1,2,4] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--prompt STR] [--infuse STR] [--infuse-every once|epoch|batch]"
                             .to_string(),
                     ));
                 }
@@ -219,6 +223,17 @@ impl Args {
         }
         if args.dilations.is_empty() || args.dilations.iter().any(|v| *v == 0) {
             return Err(TensorError::EmptyInput("dilations"));
+        }
+        if !matches!(args.infuse_every.as_str(), "once" | "epoch" | "batch") {
+            return Err(TensorError::Generic(format!(
+                "invalid --infuse-every: {} (expected once|epoch|batch)",
+                args.infuse_every
+            )));
+        }
+        if args.infuse_every != "once" && args.infuse.is_none() {
+            return Err(TensorError::Generic(
+                "--infuse-every requires --infuse".to_string(),
+            ));
         }
         Ok(args)
     }
@@ -536,10 +551,6 @@ fn main() -> PureResult<()> {
         load_json(&mut model, weights_path)?;
     }
     model.attach_hypergrad(curvature, args.learning_rate)?;
-    if let Some(text) = args.infuse.as_deref() {
-        model.infuse_text(text)?;
-        model.apply_step(args.learning_rate)?;
-    }
 
     let tokens = encode_text(&text, &vocab);
     if tokens.len() <= steps {
@@ -551,6 +562,21 @@ fn main() -> PureResult<()> {
 
     let mut trainer =
         ModuleTrainer::new(DeviceCaps::cpu(), curvature, args.learning_rate, args.learning_rate);
+    if let Some(text) = args.infuse.as_deref() {
+        match args.infuse_every.as_str() {
+            "once" => {
+                model.infuse_text(text)?;
+                model.apply_step(args.learning_rate)?;
+            }
+            "epoch" => trainer.set_text_infusion(text, TextInfusionEvery::Epoch)?,
+            "batch" => trainer.set_text_infusion(text, TextInfusionEvery::Batch)?,
+            other => {
+                return Err(TensorError::Generic(format!(
+                    "invalid --infuse-every: {other}"
+                )));
+            }
+        }
+    }
     let schedule = trainer.roundtable(
         args.batch as u32,
         vocab.len() as u32,

@@ -196,7 +196,8 @@ def main() -> None:
             "usage: PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_coherence_wave.py <text.txt> "
             "[--load weights.json] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] [--memory N] "
             "[--kernel N] [--dilations 1,2,4] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] "
-            "[--temperature F] [--gen N] [--topk N] [--seed N] [--prompt STR] [--infuse STR]"
+            "[--temperature F] [--gen N] [--topk N] [--seed N] [--prompt STR] "
+            "[--infuse STR] [--infuse-every once|epoch|batch]"
         )
         return
 
@@ -222,6 +223,7 @@ def main() -> None:
     seed = 42
     prompt: str | None = None
     infuse: str | None = None
+    infuse_every = "once"
 
     it = iter(args)
     for flag in it:
@@ -263,6 +265,8 @@ def main() -> None:
             prompt = str(next(it))
         elif flag == "--infuse":
             infuse = str(next(it))
+        elif flag == "--infuse-every":
+            infuse_every = str(next(it)).strip().lower()
         else:
             raise ValueError(f"unknown flag: {flag}")
 
@@ -272,6 +276,12 @@ def main() -> None:
         raise ValueError("--kernel must be > 0")
     if not dilations:
         raise ValueError("empty --dilations")
+    if infuse_every not in {"once", "epoch", "batch"}:
+        raise ValueError(
+            f"invalid --infuse-every: {infuse_every} (expected once|epoch|batch)"
+        )
+    if infuse_every != "once" and infuse is None:
+        raise ValueError("--infuse-every requires --infuse")
 
     text = _read_text(text_path)
     if not text:
@@ -326,15 +336,18 @@ def main() -> None:
         raise ValueError(f"text too short for steps={steps}: len={len(tokens)}")
 
     model.attach_hypergrad(curvature=curvature, learning_rate=lr)
-    if infuse is not None:
-        model.infuse_text(infuse)
-        model.apply_step(lr)
     trainer = st.nn.ModuleTrainer(
         backend="cpu",
         curvature=curvature,
         hyper_learning_rate=lr,
         fallback_learning_rate=lr,
     )
+    if infuse is not None:
+        if infuse_every == "once":
+            model.infuse_text(infuse)
+            model.apply_step(lr)
+        else:
+            trainer.set_text_infusion(infuse, every=infuse_every)
     schedule = trainer.roundtable(
         batch,
         vocab_size,

@@ -48,7 +48,7 @@ use crate::schedule::{BandEnergy, GradientBands, RoundtableConfig, RoundtableSch
 use crate::zspace_coherence::{
     CoherenceDiagnostics, CoherenceLabel, CoherenceObservation, ZSpaceTraceEvent,
 };
-use crate::{PureResult, Tensor};
+use crate::{PureResult, Tensor, TensorError};
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ecosystem::{
@@ -666,6 +666,7 @@ pub struct ModuleTrainer {
     blackcat_moderator: Option<BlackcatModerator>,
     autopilot: Option<Autopilot>,
     band_weight_fn: Option<BandWeightFn>,
+    text_infusion: Option<TextInfusionConfig>,
     injector_enabled: bool,
     distribution: Option<RoundtableNode>,
     meta_conductor: Option<MetaConductor>,
@@ -731,6 +732,21 @@ impl core::fmt::Debug for ModuleTrainer {
 
 /// Function pointer used to convert band energy into Above/Here/Beneath weights.
 pub type BandWeightFn = fn(BandEnergy) -> (f32, f32, f32);
+
+/// Controls how often the trainer injects [`Module::infuse_text`] calls.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextInfusionEvery {
+    /// Infuse once at the start of each epoch (after clearing accumulators).
+    Epoch,
+    /// Infuse before every optimisation step (each batch).
+    Batch,
+}
+
+#[derive(Clone, Debug)]
+struct TextInfusionConfig {
+    text: String,
+    every: TextInfusionEvery,
+}
 
 fn append_cloud_targets(metadata: &mut HashMap<String, String>, targets: &[CloudConnector]) {
     CloudTargetSummary::from_targets(targets).extend_map(metadata);
@@ -2022,6 +2038,7 @@ impl ModuleTrainer {
             blackcat_moderator: None,
             autopilot: None,
             band_weight_fn: None,
+            text_infusion: None,
             injector_enabled: false,
             distribution: None,
             meta_conductor: None,
@@ -2839,6 +2856,21 @@ impl ModuleTrainer {
         self.real_learning_rate = None;
     }
 
+    /// Configures the trainer to broadcast a text infusion signal through the module.
+    pub fn set_text_infusion(&mut self, text: impl Into<String>, every: TextInfusionEvery) -> PureResult<()> {
+        let text = text.into();
+        if text.trim().is_empty() {
+            return Err(TensorError::EmptyInput("text_infusion"));
+        }
+        self.text_infusion = Some(TextInfusionConfig { text, every });
+        Ok(())
+    }
+
+    /// Disables any previously configured text infusion signal.
+    pub fn clear_text_infusion(&mut self) {
+        self.text_infusion = None;
+    }
+
     /// Attaches hypergrad tapes to all parameters of the provided module.
     pub fn prepare<M: Module + ?Sized>(&self, module: &mut M) -> PureResult<()> {
         module.attach_hypergrad(self.curvature, self.hyper_learning_rate)?;
@@ -2895,6 +2927,13 @@ impl ModuleTrainer {
             budget.begin_epoch();
         }
         self.zero(module)?;
+        if let Some(infusion) = self
+            .text_infusion
+            .as_ref()
+            .filter(|infusion| infusion.every == TextInfusionEvery::Epoch)
+        {
+            module.infuse_text(&infusion.text)?;
+        }
         self.phase_last_label = None;
         self.phase_last_turnover = None;
         self.phase_last_band = None;
@@ -3415,6 +3454,13 @@ impl ModuleTrainer {
             } else {
                 None
             };
+            if let Some(infusion) = self
+                .text_infusion
+                .as_ref()
+                .filter(|infusion| infusion.every == TextInfusionEvery::Batch)
+            {
+                module.infuse_text(&infusion.text)?;
+            }
             self.step(module)?;
             if let Some(summary) = curvature_summary {
                 if let Some(decision) = self.apply_curvature_scheduler(module, summary)? {

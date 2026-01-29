@@ -2727,6 +2727,10 @@ class _NnModuleTrainer:
         config: _NnRoundtableConfig | None = ...,
     ) -> _NnRoundtableSchedule: ...
 
+    def set_text_infusion(self, text: str, *, every: str = ...) -> None: ...
+
+    def clear_text_infusion(self) -> None: ...
+
     def train_epoch(
         self,
         module: object,

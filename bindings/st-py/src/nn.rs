@@ -43,6 +43,7 @@ use st_nn::{
     CategoricalCrossEntropy, HyperbolicCrossEntropy, Linear, MeanSquaredError, Relu, Sequential,
     EpochStats as RustEpochStats, ModuleTrainer as RustModuleTrainer, RoundtableConfig as RustRoundtableConfig,
     RoundtableSchedule as RustRoundtableSchedule,
+    TextInfusionEvery,
     io as nn_io,
     layers::{
         conv::{Conv2d, Conv6da},
@@ -2662,6 +2663,26 @@ impl PyNnModuleTrainer {
         })?;
 
         Ok(PyEpochStats::new(stats))
+    }
+
+    #[pyo3(signature = (text, *, every="epoch"))]
+    pub fn set_text_infusion(&mut self, text: &str, every: &str) -> PyResult<()> {
+        let every = match every.to_ascii_lowercase().as_str() {
+            "epoch" => TextInfusionEvery::Epoch,
+            "batch" => TextInfusionEvery::Batch,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "invalid every={other}. Expected 'epoch' or 'batch'"
+                )))
+            }
+        };
+        self.inner
+            .set_text_infusion(text, every)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn clear_text_infusion(&mut self) {
+        self.inner.clear_text_infusion();
     }
 
     fn __repr__(&self) -> String {
