@@ -193,6 +193,10 @@ impl Module for WaveScan {
         self.gate.visit_parameters_mut(visitor)?;
         Ok(())
     }
+
+    fn infuse_text(&mut self, text: &str) -> PureResult<()> {
+        self.gate.infuse_text(text)
+    }
 }
 
 /// Multi-dilation WaveScan stack that averages the per-dilation summaries.
@@ -273,6 +277,13 @@ impl Module for WaveScanStack {
         }
         Ok(())
     }
+
+    fn infuse_text(&mut self, text: &str) -> PureResult<()> {
+        for scan in &mut self.scans {
+            scan.infuse_text(text)?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -303,4 +314,3 @@ mod tests {
         assert_eq!(grad_in.shape(), input.shape());
     }
 }
-

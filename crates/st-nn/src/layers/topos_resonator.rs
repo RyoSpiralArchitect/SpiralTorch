@@ -90,6 +90,13 @@ impl Module for ToposResonator {
     ) -> PureResult<()> {
         visitor(&mut self.gate)
     }
+
+    fn infuse_text(&mut self, text: &str) -> PureResult<()> {
+        let Some(encoder) = self.encoder.as_ref() else {
+            return Ok(());
+        };
+        self.gate.absorb_text(encoder, text)
+    }
 }
 
 #[cfg(test)]

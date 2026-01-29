@@ -467,6 +467,19 @@ pub trait Module {
         Ok(())
     }
 
+    /// Optional hook that allows modules to infuse raw text into their state.
+    ///
+    /// Layers that support Z-space resonance (e.g. wave gates) can override this
+    /// and translate the provided string into parameter updates via
+    /// [`Parameter::absorb_text`].
+    ///
+    /// The default implementation is a no-op so callers can broadcast a single
+    /// infusion signal through composite modules (such as [`Sequential`])
+    /// without needing per-layer feature checks.
+    fn infuse_text(&mut self, _text: &str) -> PureResult<()> {
+        Ok(())
+    }
+
     /// Attaches a hypergrad tape to every parameter.
     fn attach_hypergrad(&mut self, curvature: f32, learning_rate: f32) -> PureResult<()> {
         self.visit_parameters_mut(&mut |param| param.attach_hypergrad(curvature, learning_rate))

@@ -99,6 +99,13 @@ impl Module for Sequential {
         }
         Ok(())
     }
+
+    fn infuse_text(&mut self, text: &str) -> PureResult<()> {
+        for layer in &mut self.layers {
+            layer.infuse_text(text)?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

@@ -1845,6 +1845,10 @@ impl PySequential {
         self.inner.apply_step(fallback_lr).map_err(tensor_err_to_py)
     }
 
+    pub fn infuse_text(&mut self, text: &str) -> PyResult<()> {
+        self.inner.infuse_text(text).map_err(tensor_err_to_py)
+    }
+
     pub fn state_dict(&self) -> PyResult<Vec<(String, PyTensor)>> {
         let mut entries: Vec<_> = self
             .inner

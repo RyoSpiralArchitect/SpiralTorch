@@ -129,6 +129,7 @@ struct Args {
     top_k: usize,
     seed: u64,
     prompt: Option<String>,
+    infuse: Option<String>,
 }
 
 impl Args {
@@ -136,7 +137,7 @@ impl Args {
         let mut argv = env::args().skip(1);
         let Some(text_path) = argv.next() else {
             return Err(TensorError::Generic(
-                "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text.txt> [--load weights.json] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--kernel N] [--dilations 1,2,4] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--prompt STR]"
+                "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text.txt> [--load weights.json] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--kernel N] [--dilations 1,2,4] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--prompt STR] [--infuse STR]"
                     .to_string(),
             ));
         };
@@ -161,6 +162,7 @@ impl Args {
             top_k: 32,
             seed: 42,
             prompt: None,
+            infuse: None,
         };
 
         while let Some(flag) = argv.next() {
@@ -183,9 +185,10 @@ impl Args {
                 "--topk" => args.top_k = take_parse(&mut argv, "--topk")?,
                 "--seed" => args.seed = take_parse(&mut argv, "--seed")?,
                 "--prompt" => args.prompt = Some(take_arg(&mut argv, "--prompt")?),
+                "--infuse" => args.infuse = Some(take_arg(&mut argv, "--infuse")?),
                 "--help" | "-h" => {
                     return Err(TensorError::Generic(
-                        "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text.txt> [--load weights.json] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--kernel N] [--dilations 1,2,4] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--prompt STR]"
+                        "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text.txt> [--load weights.json] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--kernel N] [--dilations 1,2,4] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--prompt STR] [--infuse STR]"
                             .to_string(),
                     ));
                 }
@@ -533,6 +536,10 @@ fn main() -> PureResult<()> {
         load_json(&mut model, weights_path)?;
     }
     model.attach_hypergrad(curvature, args.learning_rate)?;
+    if let Some(text) = args.infuse.as_deref() {
+        model.infuse_text(text)?;
+        model.apply_step(args.learning_rate)?;
+    }
 
     let tokens = encode_text(&text, &vocab);
     if tokens.len() <= steps {
@@ -636,4 +643,3 @@ fn main() -> PureResult<()> {
 
     Ok(())
 }
-

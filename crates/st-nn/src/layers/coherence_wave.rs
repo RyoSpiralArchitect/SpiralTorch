@@ -203,6 +203,10 @@ impl Module for ZSpaceCoherenceWaveBlock {
         self.resonator.visit_parameters_mut(visitor)?;
         Ok(())
     }
+
+    fn infuse_text(&mut self, text: &str) -> PureResult<()> {
+        ZSpaceCoherenceWaveBlock::infuse_text(self, text)
+    }
 }
 
 #[cfg(test)]

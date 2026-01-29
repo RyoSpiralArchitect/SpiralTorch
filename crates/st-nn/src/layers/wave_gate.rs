@@ -185,6 +185,11 @@ impl Module for WaveGate {
         visitor(&mut self.bias)?;
         Ok(())
     }
+
+    fn infuse_text(&mut self, text: &str) -> PureResult<()> {
+        let encoder = self.encoder.clone();
+        self.visit_parameters_mut(&mut |param| param.absorb_text(&encoder, text))
+    }
 }
 
 #[cfg(test)]
