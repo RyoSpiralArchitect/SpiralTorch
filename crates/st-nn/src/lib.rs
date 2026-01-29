@@ -113,6 +113,7 @@ pub use trainer::selfsup::{
 pub use trainer::{
     EpochStats, ModuleTrainer, SpectralAdjustmentMetrics, SpectralLearningRatePolicy,
     TextInfusionEvery,
+    TextInfusionMode,
 };
 pub use z_rba::{
     AttentionTelemetry as ZAttentionTelemetry, BetaGate, BetaGateConfig, BetaGateSample, CovHead,

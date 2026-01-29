@@ -43,7 +43,7 @@ use st_nn::{
     CategoricalCrossEntropy, HyperbolicCrossEntropy, Linear, MeanSquaredError, Relu, Sequential,
     EpochStats as RustEpochStats, ModuleTrainer as RustModuleTrainer, RoundtableConfig as RustRoundtableConfig,
     RoundtableSchedule as RustRoundtableSchedule,
-    TextInfusionEvery,
+    TextInfusionEvery, TextInfusionMode,
     io as nn_io,
     layers::{
         conv::{Conv2d, Conv6da},
@@ -2665,19 +2665,29 @@ impl PyNnModuleTrainer {
         Ok(PyEpochStats::new(stats))
     }
 
-    #[pyo3(signature = (text, *, every="epoch"))]
-    pub fn set_text_infusion(&mut self, text: &str, every: &str) -> PyResult<()> {
+    #[pyo3(signature = (text, *, every="epoch", mode="blend"))]
+    pub fn set_text_infusion(&mut self, text: &str, every: &str, mode: &str) -> PyResult<()> {
         let every = match every.to_ascii_lowercase().as_str() {
+            "once" => TextInfusionEvery::Once,
             "epoch" => TextInfusionEvery::Epoch,
             "batch" => TextInfusionEvery::Batch,
             other => {
                 return Err(PyValueError::new_err(format!(
-                    "invalid every={other}. Expected 'epoch' or 'batch'"
+                    "invalid every={other}. Expected 'once', 'epoch', or 'batch'"
+                )))
+            }
+        };
+        let mode = match mode.to_ascii_lowercase().as_str() {
+            "blend" => TextInfusionMode::Blend,
+            "separate" => TextInfusionMode::Separate,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "invalid mode={other}. Expected 'blend' or 'separate'"
                 )))
             }
         };
         self.inner
-            .set_text_infusion(text, every)
+            .set_text_infusion(text, every, mode)
             .map_err(tensor_err_to_py)
     }
 

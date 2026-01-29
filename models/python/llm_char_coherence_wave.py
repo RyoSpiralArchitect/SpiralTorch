@@ -197,7 +197,7 @@ def main() -> None:
             "[--load weights.json] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] [--memory N] "
             "[--kernel N] [--dilations 1,2,4] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] "
             "[--temperature F] [--gen N] [--topk N] [--seed N] [--prompt STR] "
-            "[--infuse STR] [--infuse-every once|epoch|batch]"
+            "[--infuse STR] [--infuse-every once|epoch|batch] [--infuse-mode blend|separate]"
         )
         return
 
@@ -224,6 +224,7 @@ def main() -> None:
     prompt: str | None = None
     infuse: str | None = None
     infuse_every = "once"
+    infuse_mode: str | None = None
 
     it = iter(args)
     for flag in it:
@@ -267,6 +268,8 @@ def main() -> None:
             infuse = str(next(it))
         elif flag == "--infuse-every":
             infuse_every = str(next(it)).strip().lower()
+        elif flag == "--infuse-mode":
+            infuse_mode = str(next(it)).strip().lower()
         else:
             raise ValueError(f"unknown flag: {flag}")
 
@@ -282,6 +285,12 @@ def main() -> None:
         )
     if infuse_every != "once" and infuse is None:
         raise ValueError("--infuse-every requires --infuse")
+    if infuse_mode is not None and infuse_mode not in {"blend", "separate"}:
+        raise ValueError(
+            f"invalid --infuse-mode: {infuse_mode} (expected blend|separate)"
+        )
+    if infuse_mode is not None and infuse is None:
+        raise ValueError("--infuse-mode requires --infuse")
 
     text = _read_text(text_path)
     if not text:
@@ -343,11 +352,12 @@ def main() -> None:
         fallback_learning_rate=lr,
     )
     if infuse is not None:
-        if infuse_every == "once":
-            model.infuse_text(infuse)
-            model.apply_step(lr)
-        else:
-            trainer.set_text_infusion(infuse, every=infuse_every)
+        if infuse_mode is None:
+            if infuse_every == "once":
+                infuse_mode = "separate"
+            else:
+                infuse_mode = "blend"
+        trainer.set_text_infusion(infuse, every=infuse_every, mode=infuse_mode)
     schedule = trainer.roundtable(
         batch,
         vocab_size,

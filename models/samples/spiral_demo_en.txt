@@ -1,0 +1,20 @@
+SpiralTorch demo text (English)
+
+SpiralTorch is an experiment in building a “learning stack” that stays simple:
+tiny runnable examples, portable backends, and a geometry-first view of training.
+
+We are not trying to win a benchmark today. We want a loop that you can read,
+modify, and rerun in minutes. When you change one idea, you should be able to
+see the effect immediately.
+
+The coherence-wave character model is intentionally small. It trains directly
+from raw text without tokenization. The goal is to explore how Z-space style
+updates and resonance-style modules behave in practice.
+
+Try changing the prompt, the window size, the dilations, or the infusion mode.
+Does a separate “infuse step” feel different from blending infusion into the
+loss update? Can the model keep a consistent tone when the training data is
+short and noisy?
+
+If you are reading this, the demo is working. Now replace this file with your
+own notes, a log, or a small corpus and see what it learns.

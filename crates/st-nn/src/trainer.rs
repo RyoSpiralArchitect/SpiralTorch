@@ -736,16 +736,29 @@ pub type BandWeightFn = fn(BandEnergy) -> (f32, f32, f32);
 /// Controls how often the trainer injects [`Module::infuse_text`] calls.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextInfusionEvery {
+    /// Infuse once at the start of the first epoch only.
+    Once,
     /// Infuse once at the start of each epoch (after clearing accumulators).
     Epoch,
     /// Infuse before every optimisation step (each batch).
     Batch,
 }
 
+/// Controls whether infused text is blended into the loss update or applied as a
+/// separate optimiser step.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextInfusionMode {
+    /// Add infused gradients to the current loss update before stepping.
+    Blend,
+    /// Apply infused gradients in a dedicated optimiser step.
+    Separate,
+}
+
 #[derive(Clone, Debug)]
 struct TextInfusionConfig {
     text: String,
     every: TextInfusionEvery,
+    mode: TextInfusionMode,
 }
 
 fn append_cloud_targets(metadata: &mut HashMap<String, String>, targets: &[CloudConnector]) {
@@ -2857,12 +2870,17 @@ impl ModuleTrainer {
     }
 
     /// Configures the trainer to broadcast a text infusion signal through the module.
-    pub fn set_text_infusion(&mut self, text: impl Into<String>, every: TextInfusionEvery) -> PureResult<()> {
+    pub fn set_text_infusion(
+        &mut self,
+        text: impl Into<String>,
+        every: TextInfusionEvery,
+        mode: TextInfusionMode,
+    ) -> PureResult<()> {
         let text = text.into();
         if text.trim().is_empty() {
             return Err(TensorError::EmptyInput("text_infusion"));
         }
-        self.text_infusion = Some(TextInfusionConfig { text, every });
+        self.text_infusion = Some(TextInfusionConfig { text, every, mode });
         Ok(())
     }
 
@@ -2927,12 +2945,21 @@ impl ModuleTrainer {
             budget.begin_epoch();
         }
         self.zero(module)?;
-        if let Some(infusion) = self
-            .text_infusion
-            .as_ref()
-            .filter(|infusion| infusion.every == TextInfusionEvery::Epoch)
-        {
-            module.infuse_text(&infusion.text)?;
+        if let Some(infusion) = self.text_infusion.clone() {
+            let should_apply = match infusion.every {
+                TextInfusionEvery::Once => epoch == 1,
+                TextInfusionEvery::Epoch => true,
+                TextInfusionEvery::Batch => false,
+            };
+            if should_apply {
+                module.infuse_text(&infusion.text)?;
+                if infusion.mode == TextInfusionMode::Separate {
+                    self.step(module)?;
+                }
+                if matches!(infusion.every, TextInfusionEvery::Once) {
+                    self.text_infusion = None;
+                }
+            }
         }
         self.phase_last_label = None;
         self.phase_last_turnover = None;
@@ -3449,18 +3476,21 @@ impl ModuleTrainer {
                     hub::push_loopback_envelope(envelope);
                 }
             }
+            let batch_infusion = self
+                .text_infusion
+                .clone()
+                .filter(|infusion| infusion.every == TextInfusionEvery::Batch);
+            if let Some(infusion) = batch_infusion
+                .as_ref()
+                .filter(|infusion| infusion.mode == TextInfusionMode::Blend)
+            {
+                module.infuse_text(&infusion.text)?;
+            }
             let curvature_summary = if self.curvature_scheduler.is_some() {
                 Some(Self::collect_gradient_summary(module)?)
             } else {
                 None
             };
-            if let Some(infusion) = self
-                .text_infusion
-                .as_ref()
-                .filter(|infusion| infusion.every == TextInfusionEvery::Batch)
-            {
-                module.infuse_text(&infusion.text)?;
-            }
             self.step(module)?;
             if let Some(summary) = curvature_summary {
                 if let Some(decision) = self.apply_curvature_scheduler(module, summary)? {
@@ -3505,6 +3535,13 @@ impl ModuleTrainer {
                         }
                     }
                 }
+            }
+            if let Some(infusion) = batch_infusion
+                .as_ref()
+                .filter(|infusion| infusion.mode == TextInfusionMode::Separate)
+            {
+                module.infuse_text(&infusion.text)?;
+                self.step(module)?;
             }
             self.zero(module)?;
             steps += 1;
