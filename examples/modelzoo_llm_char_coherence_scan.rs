@@ -18,10 +18,44 @@ use st_nn::{
 use std::collections::{BTreeSet, HashMap};
 use std::env;
 use std::fs::File;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const FORMAT_ID: &str = "st-char-lm-coherence-v1";
 const DEFAULT_UNK: char = '\u{FFFD}';
+const RUN_SCHEMA: &str = "st.modelzoo.run.v1";
+
+#[derive(Debug, Clone, Serialize)]
+struct RunMeta {
+    schema: String,
+    arch: String,
+    format: String,
+    text_path: String,
+    weights_loaded_from: Option<String>,
+    steps: usize,
+    embed_dim: usize,
+    hidden: usize,
+    memory: usize,
+    epochs: usize,
+    batches_per_epoch: usize,
+    batch: usize,
+    learning_rate: f32,
+    curvature: f32,
+    temperature: f32,
+    gen_len: usize,
+    top_k: usize,
+    seed: u64,
+    prompt: String,
+    vocab_size: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct EpochMetric {
+    epoch: usize,
+    batches: usize,
+    average_loss: f32,
+}
 
 #[derive(Debug, Clone)]
 struct Vocab {
@@ -107,6 +141,7 @@ struct Args {
     text_path: PathBuf,
     load_weights: Option<PathBuf>,
     save_weights: Option<PathBuf>,
+    run_dir: Option<PathBuf>,
     steps: usize,
     embed_dim: usize,
     hidden: usize,
@@ -128,7 +163,7 @@ impl Args {
         let mut argv = env::args().skip(1);
         let Some(text_path) = argv.next() else {
             return Err(TensorError::Generic(
-                "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text.txt> [--load weights.json] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--prompt STR]"
+                "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text.txt> [--load weights.json] [--save weights.json] [--run-dir PATH] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--prompt STR]"
                     .to_string(),
             ));
         };
@@ -137,6 +172,7 @@ impl Args {
             text_path: PathBuf::from(text_path),
             load_weights: None,
             save_weights: None,
+            run_dir: None,
             steps: 32,
             embed_dim: 32,
             hidden: 64,
@@ -157,6 +193,7 @@ impl Args {
             match flag.as_str() {
                 "--load" => args.load_weights = Some(PathBuf::from(take_arg(&mut argv, "--load")?)),
                 "--save" => args.save_weights = Some(PathBuf::from(take_arg(&mut argv, "--save")?)),
+                "--run-dir" => args.run_dir = Some(PathBuf::from(take_arg(&mut argv, "--run-dir")?)),
                 "--steps" => args.steps = take_parse(&mut argv, "--steps")?,
                 "--embed-dim" => args.embed_dim = take_parse(&mut argv, "--embed-dim")?,
                 "--hidden" => args.hidden = take_parse(&mut argv, "--hidden")?,
@@ -173,7 +210,7 @@ impl Args {
                 "--prompt" => args.prompt = Some(take_arg(&mut argv, "--prompt")?),
                 "--help" | "-h" => {
                     return Err(TensorError::Generic(
-                        "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text.txt> [--load weights.json] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--prompt STR]"
+                        "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text.txt> [--load weights.json] [--save weights.json] [--run-dir PATH] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--prompt STR]"
                             .to_string(),
                     ));
                 }
@@ -258,6 +295,11 @@ fn write_meta(path: &Path, meta: &CharLmMeta) -> PureResult<()> {
         message: err.to_string(),
     })?;
     Ok(())
+}
+
+fn default_run_dir() -> PathBuf {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    PathBuf::from("models/runs").join(format!("{}_{}", now.as_secs(), now.subsec_nanos()))
 }
 
 fn build_model(
@@ -414,6 +456,19 @@ fn main() -> PureResult<()> {
         return Err(TensorError::EmptyInput("char_lm_text"));
     }
 
+    let run_dir = args.run_dir.clone().unwrap_or_else(default_run_dir);
+    std::fs::create_dir_all(&run_dir).map_err(|err| TensorError::IoError {
+        message: err.to_string(),
+    })?;
+    let samples_dir = run_dir.join("samples");
+    std::fs::create_dir_all(&samples_dir).map_err(|err| TensorError::IoError {
+        message: err.to_string(),
+    })?;
+    std::fs::write(run_dir.join("command.txt"), env::args().collect::<Vec<_>>().join(" "))
+        .map_err(|err| TensorError::IoError {
+            message: err.to_string(),
+        })?;
+
     let (steps, embed_dim, hidden, memory, curvature, temperature, vocab, mut model, loaded_from) =
         if let Some(ref weights_path) = args.load_weights {
             let meta_path = meta_path_for_weights(weights_path);
@@ -482,6 +537,45 @@ fn main() -> PureResult<()> {
         )));
     }
 
+    let prompt = args
+        .prompt
+        .clone()
+        .unwrap_or_else(|| text.chars().take(steps).collect::<String>());
+    let run_meta = RunMeta {
+        schema: RUN_SCHEMA.to_string(),
+        arch: "llm_char_coherence_scan".to_string(),
+        format: FORMAT_ID.to_string(),
+        text_path: args.text_path.to_string_lossy().to_string(),
+        weights_loaded_from: loaded_from.as_ref().map(|path| path.to_string_lossy().to_string()),
+        steps,
+        embed_dim,
+        hidden,
+        memory,
+        epochs: args.epochs,
+        batches_per_epoch: args.batches_per_epoch,
+        batch: args.batch,
+        learning_rate: args.learning_rate,
+        curvature,
+        temperature,
+        gen_len: args.gen_len,
+        top_k: args.top_k,
+        seed: args.seed,
+        prompt: prompt.clone(),
+        vocab_size: vocab.len(),
+    };
+    let run_writer = File::create(run_dir.join("run.json")).map_err(|err| TensorError::IoError {
+        message: err.to_string(),
+    })?;
+    serde_json::to_writer_pretty(run_writer, &run_meta).map_err(|err| {
+        TensorError::SerializationError {
+            message: err.to_string(),
+        }
+    })?;
+    let mut metrics_file =
+        File::create(run_dir.join("metrics.jsonl")).map_err(|err| TensorError::IoError {
+            message: err.to_string(),
+        })?;
+
     let mut trainer =
         ModuleTrainer::new(DeviceCaps::cpu(), curvature, args.learning_rate, args.learning_rate);
     let schedule = trainer.roundtable(
@@ -497,7 +591,7 @@ fn main() -> PureResult<()> {
     let mut loss = CategoricalCrossEntropy::new();
 
     println!(
-        "arch=coherence_scan vocab={} steps={} embed_dim={} hidden={} memory={} epochs={} batch={} lr={:.3e} curvature={} temp={}",
+        "arch=coherence_scan vocab={} steps={} embed_dim={} hidden={} memory={} epochs={} batch={} lr={:.3e} curvature={} temp={} run_dir={}",
         vocab.len(),
         steps,
         embed_dim,
@@ -507,9 +601,11 @@ fn main() -> PureResult<()> {
         args.batch,
         args.learning_rate,
         curvature,
-        temperature
+        temperature,
+        run_dir.display()
     );
 
+    let mut last_sample: Option<String> = None;
     for epoch in 0..args.epochs {
         let mut rng = ChaCha8Rng::seed_from_u64(args.seed.wrapping_add(epoch as u64 * 10_000));
         let mut batches = Vec::with_capacity(args.batches_per_epoch);
@@ -523,47 +619,81 @@ fn main() -> PureResult<()> {
             )?);
         }
         let stats = trainer.train_epoch(&mut model, &mut loss, batches, &schedule)?;
+        let metric = EpochMetric {
+            epoch,
+            batches: stats.batches,
+            average_loss: stats.average_loss,
+        };
+        writeln!(
+            metrics_file,
+            "{}",
+            serde_json::to_string(&metric).map_err(|err| TensorError::SerializationError {
+                message: err.to_string(),
+            })?
+        )
+        .map_err(|err| TensorError::IoError {
+            message: err.to_string(),
+        })?;
+        let sample = generate_text(
+            &model,
+            &vocab,
+            steps,
+            &prompt,
+            args.gen_len,
+            args.top_k,
+            args.seed.wrapping_add(999).wrapping_add(epoch as u64),
+        )?;
+        std::fs::write(
+            samples_dir.join(format!("epoch_{epoch:03}.txt")),
+            &sample,
+        )
+        .map_err(|err| TensorError::IoError {
+            message: err.to_string(),
+        })?;
+        last_sample = Some(sample);
         println!(
             "epoch[{epoch}] batches={} avg_loss={:.6}",
             stats.batches, stats.average_loss
         );
     }
 
-    let save_weights = args
-        .save_weights
-        .clone()
-        .or_else(|| args.load_weights.clone())
-        .unwrap_or_else(|| PathBuf::from("models/weights/llm_char_coherence_scan.json"));
-    if let Some(parent) = save_weights.parent() {
-        std::fs::create_dir_all(parent).map_err(|err| TensorError::IoError {
-            message: err.to_string(),
-        })?;
-    }
-    save_json(&model, &save_weights)?;
-
     let meta = CharLmMeta::new(
         steps, embed_dim, hidden, memory, curvature, temperature, &vocab,
     );
-    let meta_path = meta_path_for_weights(&save_weights);
-    write_meta(&meta_path, &meta)?;
+    let run_weights = run_dir.join("weights.json");
+    save_json(&model, &run_weights)?;
+    write_meta(&meta_path_for_weights(&run_weights), &meta)?;
+    if let Some(save_weights) = args.save_weights.as_ref() {
+        if let Some(parent) = save_weights.parent() {
+            std::fs::create_dir_all(parent).map_err(|err| TensorError::IoError {
+                message: err.to_string(),
+            })?;
+        }
+        save_json(&model, save_weights)?;
+        write_meta(&meta_path_for_weights(save_weights), &meta)?;
+    }
 
-    let prompt = args
-        .prompt
-        .clone()
-        .unwrap_or_else(|| text.chars().take(steps).collect::<String>());
-    let sample = generate_text(
-        &model,
-        &vocab,
-        steps,
-        &prompt,
-        args.gen_len,
-        args.top_k,
-        args.seed.wrapping_add(999),
-    )?;
+    let sample = match last_sample {
+        Some(sample) => sample,
+        None => {
+            let sample = generate_text(
+                &model,
+                &vocab,
+                steps,
+                &prompt,
+                args.gen_len,
+                args.top_k,
+                args.seed.wrapping_add(999),
+            )?;
+            std::fs::write(samples_dir.join("init.txt"), &sample).map_err(|err| TensorError::IoError {
+                message: err.to_string(),
+            })?;
+            sample
+        }
+    };
 
     println!("--- sample (prompt + gen) ---");
     println!("{sample}");
 
     Ok(())
 }
-

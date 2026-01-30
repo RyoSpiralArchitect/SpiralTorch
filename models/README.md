@@ -11,6 +11,7 @@ copy-pastable models that act as reference implementations for both Python and R
 ## Running
 
 - Demo texts: `models/samples/spiral_demo_en.txt`, `models/samples/spiral_demo_ja.txt`
+- Run outputs: `models/runs/<timestamp>/` (e.g. `run.json`, `metrics.jsonl`, `samples/`, `weights.json`)
 - Python: `PYTHONNOUSERSITE=1 python3 -S -s models/python/mlp_regression.py`
 - Python (classification): `PYTHONNOUSERSITE=1 python3 -S -s models/python/zconv_classification.py`
 - Python (LLM char fine-tune): `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_finetune.py <text.txt>`

@@ -16,6 +16,7 @@ __pycache__/
 *.zip
 dist/
 logs/
+models/runs/
 __pycache__/
 *.pyc
 bindings/st-py/spiraltorch/*.so

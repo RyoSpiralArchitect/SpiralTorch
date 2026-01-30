@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import pathlib
 import random
@@ -16,6 +17,8 @@ import spiraltorch as st
 FORMAT = "st-char-lm-coherence-wave-v1"
 DEFAULT_UNK = "\uFFFD"
 
+RUN_SCHEMA = "st.modelzoo.run.v1"
+
 
 def _meta_path_for_weights(weights_path: pathlib.Path) -> pathlib.Path:
     name = weights_path.name
@@ -26,6 +29,19 @@ def _meta_path_for_weights(weights_path: pathlib.Path) -> pathlib.Path:
 
 def _read_text(path: pathlib.Path) -> str:
     return path.read_text(encoding="utf-8")
+
+def _timestamp_slug() -> str:
+    return _dt.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+
+
+def _default_run_dir() -> pathlib.Path:
+    return _ROOT / "models" / "runs" / _timestamp_slug()
+
+
+def _write_json(path: pathlib.Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
 
 
 def _build_vocab(text: str, unk: str) -> tuple[str, list[str], dict[str, int]]:
@@ -197,7 +213,8 @@ def main() -> None:
             "[--load weights.json] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] [--memory N] "
             "[--kernel N] [--dilations 1,2,4] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] "
             "[--temperature F] [--gen N] [--topk N] [--seed N] [--prompt STR] "
-            "[--infuse STR] [--infuse-every once|epoch|batch] [--infuse-mode blend|separate]"
+            "[--infuse STR] [--infuse-every once|epoch|batch] [--infuse-mode blend|separate] "
+            "[--run-dir PATH]"
         )
         return
 
@@ -206,6 +223,7 @@ def main() -> None:
 
     load_weights: pathlib.Path | None = None
     save_weights: pathlib.Path | None = None
+    run_dir: pathlib.Path | None = None
     steps = 32
     embed_dim = 32
     hidden = 64
@@ -270,6 +288,8 @@ def main() -> None:
             infuse_every = str(next(it)).strip().lower()
         elif flag == "--infuse-mode":
             infuse_mode = str(next(it)).strip().lower()
+        elif flag == "--run-dir":
+            run_dir = pathlib.Path(str(next(it)))
         else:
             raise ValueError(f"unknown flag: {flag}")
 
@@ -291,6 +311,13 @@ def main() -> None:
         )
     if infuse_mode is not None and infuse is None:
         raise ValueError("--infuse-mode requires --infuse")
+
+    if run_dir is None:
+        run_dir = _default_run_dir()
+    run_dir.mkdir(parents=True, exist_ok=True)
+    samples_dir = run_dir / "samples"
+    samples_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "command.txt").write_text(" ".join(sys.argv), encoding="utf-8")
 
     text = _read_text(text_path)
     if not text:
@@ -344,6 +371,39 @@ def main() -> None:
     if len(tokens) <= steps:
         raise ValueError(f"text too short for steps={steps}: len={len(tokens)}")
 
+    if prompt is None:
+        prompt = "".join(list(text)[:steps])
+
+    run_meta: dict[str, Any] = {
+        "schema": RUN_SCHEMA,
+        "arch": "llm_char_coherence_wave",
+        "text_path": str(text_path),
+        "format": FORMAT,
+        "steps": steps,
+        "embed_dim": embed_dim,
+        "hidden": hidden,
+        "memory": memory,
+        "kernel": kernel,
+        "dilations": dilations,
+        "epochs": epochs,
+        "batches_per_epoch": batches_per_epoch,
+        "batch": batch,
+        "lr": lr,
+        "curvature": curvature,
+        "temperature": temperature,
+        "gen_len": gen_len,
+        "top_k": top_k,
+        "seed": seed,
+        "prompt": prompt,
+        "infuse": infuse,
+        "infuse_every": infuse_every,
+        "infuse_mode": infuse_mode,
+        "vocab_size": vocab_size,
+        "symbols_count": len(symbols),
+        "weights_loaded_from": str(load_weights) if load_weights is not None else None,
+    }
+    _write_json(run_dir / "run.json", run_meta)
+
     model.attach_hypergrad(curvature=curvature, learning_rate=lr)
     trainer = st.nn.ModuleTrainer(
         backend="cpu",
@@ -368,8 +428,10 @@ def main() -> None:
     print(
         f"arch=coherence_wave vocab={vocab_size} steps={steps} embed_dim={embed_dim} hidden={hidden} "
         f"memory={memory} kernel={kernel} dilations={dilations} epochs={epochs} batch={batch} "
-        f"lr={lr:.3e} curvature={curvature} temp={temperature}"
+        f"lr={lr:.3e} curvature={curvature} temp={temperature} run_dir={run_dir}"
     )
+
+    metrics_path = run_dir / "metrics.jsonl"
 
     for epoch in range(epochs):
         rng = random.Random(seed + epoch * 10_000)
@@ -377,15 +439,29 @@ def main() -> None:
         for _ in range(batches_per_epoch):
             batches.append(_build_random_batch(tokens, vocab_size, steps, batch, rng))
         stats = trainer.train_epoch(model, loss, batches, schedule)
-        print(f"epoch[{epoch}] batches={stats.batches} avg_loss={stats.average_loss:.6f}")
+        avg_loss = float(stats.average_loss)
+        with metrics_path.open("a", encoding="utf-8") as handle:
+            handle.write(
+                json.dumps(
+                    {"epoch": epoch, "batches": int(stats.batches), "average_loss": avg_loss},
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+        sample = _generate(
+            model,
+            symbols,
+            index,
+            steps,
+            prompt,
+            gen_len,
+            top_k,
+            seed + 999 + epoch,
+        )
+        (samples_dir / f"epoch_{epoch:03d}.txt").write_text(sample, encoding="utf-8")
+        print(f"epoch[{epoch}] batches={stats.batches} avg_loss={avg_loss:.6f}")
 
-    weights_path = (
-        save_weights
-        or load_weights
-        or (_ROOT / "models" / "weights" / "llm_char_coherence_wave_py.json")
-    )
-    weights_path = pathlib.Path(weights_path)
-    weights_path.parent.mkdir(parents=True, exist_ok=True)
+    weights_path = run_dir / "weights.json"
     st.nn.save(str(weights_path), model)
 
     meta = {
@@ -403,20 +479,30 @@ def main() -> None:
     }
     _save_meta(_meta_path_for_weights(weights_path), meta)
 
-    if prompt is None:
-        prompt = "".join(list(text)[:steps])
-    sample = _generate(
-        model,
-        symbols,
-        index,
-        steps,
-        prompt,
-        gen_len,
-        top_k,
-        seed + 999,
-    )
+    if save_weights is not None:
+        save_weights = pathlib.Path(save_weights)
+        save_weights.parent.mkdir(parents=True, exist_ok=True)
+        st.nn.save(str(save_weights), model)
+        _save_meta(_meta_path_for_weights(save_weights), meta)
+
+    if epochs > 0:
+        final_sample = (samples_dir / f"epoch_{epochs - 1:03d}.txt").read_text(
+            encoding="utf-8"
+        )
+    else:
+        final_sample = _generate(
+            model,
+            symbols,
+            index,
+            steps,
+            prompt,
+            gen_len,
+            top_k,
+            seed + 999,
+        )
+        (samples_dir / "init.txt").write_text(final_sample, encoding="utf-8")
     print("--- sample (prompt + gen) ---")
-    print(sample)
+    print(final_sample)
 
 
 if __name__ == "__main__":
