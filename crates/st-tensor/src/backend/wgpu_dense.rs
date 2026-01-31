@@ -3860,6 +3860,17 @@ mod tests {
         );
         let source_f16 = generate_matmul_shader(&key_f16);
         assert_parses("matmul f16", &source_f16);
+
+        let key_q8 = PipelineKey::new(
+            ScalarType::QuantizedI8,
+            TileConfig::new(8, 32, 16),
+            false,
+            false,
+            false,
+            0,
+        );
+        let source_q8 = generate_matmul_shader(&key_q8);
+        assert_parses("matmul quantized i8", &source_q8);
     }
 
     #[test]
@@ -4802,9 +4813,9 @@ fn generate_matmul_shader(key: &PipelineKey) -> String {
         let word = rhs_packed[base];
         let lane = (k & 3u) * 8u;
         let byte_val = (word >> lane) & 0xFFu;
-        let signed = bitcast<i32>(byte_val << 24u) >> 24;
+        let signed_val = bitcast<i32>(byte_val << 24u) >> 24;
         let scale = scales[col];
-        return f32(signed) * scale;"
+        return f32(signed_val) * scale;"
             .to_string(),
     };
 
