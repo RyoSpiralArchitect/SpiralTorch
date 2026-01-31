@@ -21,6 +21,81 @@ DEFAULT_UNK = "\uFFFD"
 
 RUN_SCHEMA = "st.modelzoo.run.v1"
 
+_PRESETS: dict[str, dict[str, Any]] = {
+    "tiny": {
+        "steps": 32,
+        "embed_dim": 32,
+        "hidden": 64,
+        "kernel": 3,
+        "stride": 1,
+        "mixer_depth": 1,
+        "epochs": 6,
+        "batches_per_epoch": 24,
+        "batch": 8,
+        "lr": 2e-2,
+        "top_k": 32,
+        "temperature": 1.0,
+        "weights_format": "json",
+        "checkpoint_every": 0,
+        "val_split": 0.1,
+        "val_batches": 0,
+    },
+    "small": {
+        "steps": 64,
+        "embed_dim": 64,
+        "hidden": 128,
+        "kernel": 3,
+        "stride": 1,
+        "mixer_depth": 2,
+        "epochs": 8,
+        "batches_per_epoch": 32,
+        "batch": 8,
+        "lr": 1.5e-2,
+        "top_k": 32,
+        "temperature": 1.0,
+        "weights_format": "auto",
+        "checkpoint_every": 0,
+        "val_split": 0.1,
+        "val_batches": 0,
+    },
+    "base": {
+        "steps": 128,
+        "embed_dim": 128,
+        "hidden": 256,
+        "kernel": 5,
+        "stride": 1,
+        "mixer_depth": 4,
+        "epochs": 10,
+        "batches_per_epoch": 48,
+        "batch": 8,
+        "lr": 1.0e-2,
+        "top_k": 48,
+        "temperature": 1.0,
+        "weights_format": "auto",
+        "checkpoint_every": 1,
+        "val_split": 0.1,
+        "val_batches": 4,
+    },
+    "large": {
+        "steps": 256,
+        "embed_dim": 256,
+        "hidden": 512,
+        "kernel": 7,
+        "stride": 1,
+        "mixer_depth": 6,
+        "epochs": 12,
+        "batches_per_epoch": 64,
+        "batch": 4,
+        "lr": 8.0e-3,
+        "top_k": 64,
+        "temperature": 1.0,
+        "weights_format": "bincode",
+        "checkpoint_every": 1,
+        "val_split": 0.1,
+        "val_batches": 4,
+    },
+}
+
 
 def _meta_path_for_weights(weights_path: pathlib.Path) -> pathlib.Path:
     name = weights_path.name
@@ -204,9 +279,12 @@ def _build_model(
     kernel: int,
     stride: int,
     padding: int,
+    mixer_depth: int,
     curvature: float,
     temperature: float,
 ) -> st.nn.Sequential:
+    mixer_depth = max(1, int(mixer_depth))
+
     model = st.nn.Sequential()
     model.add(st.nn.Embedding("embed", vocab_size, embed_dim))
     # Embedding emits (batch, steps * channels) laid out like NHWC (w-major, then channels).
@@ -232,11 +310,130 @@ def _build_model(
             padding=padding,
         )
     )
-    model.add(st.nn.ZSpaceMixer("mixer", hidden))
-    model.add(st.nn.WaveGate("gate", hidden, curvature, temperature))
+    for depth in range(mixer_depth):
+        model.add(st.nn.ZSpaceMixer(f"mixer_{depth}", hidden))
+        model.add(st.nn.WaveGate(f"gate_{depth}", hidden, curvature, temperature))
     model.add(st.nn.Linear("head", hidden, vocab_size))
     model.add(st.nn.ZSpaceSoftmax(curvature, temperature))
     return model
+
+
+def _estimate_parameter_count(module: Any) -> int:
+    state = getattr(module, "state_dict", None)
+    if state is None:
+        return 0
+    try:
+        entries = state()
+    except Exception:
+        return 0
+
+    total = 0
+    for _name, tensor in entries:
+        try:
+            shape = tensor.shape()
+            if isinstance(shape, tuple) and len(shape) >= 2:
+                rows = int(shape[0])
+                cols = int(shape[1])
+            else:
+                rows = int(getattr(tensor, "rows", 0) or 0)
+                cols = int(getattr(tensor, "cols", 0) or 0)
+            if rows > 0 and cols > 0:
+                total += rows * cols
+        except Exception:
+            continue
+    return total
+
+
+def _resolve_weights_format(requested: str, *, parameter_count: int) -> str:
+    requested = str(requested).strip().lower()
+    if requested in {"json", "bincode"}:
+        return requested
+    if requested != "auto":
+        raise ValueError("--weights-format must be json|bincode|auto")
+    # JSON is convenient for tiny models; bincode avoids huge JSON payloads.
+    if parameter_count >= 250_000:
+        return "bincode"
+    return "json"
+
+
+def _weights_format_for_path(path: pathlib.Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix == ".json":
+        return "json"
+    if suffix in {".bin", ".bincode", ".bc"}:
+        return "bincode"
+    raise ValueError(
+        "unsupported weights extension (expected .json, .bin, .bincode, or .bc)"
+    )
+
+
+def _weights_path_for_run(run_dir: pathlib.Path, weights_format: str) -> pathlib.Path:
+    weights_format = str(weights_format).strip().lower()
+    if weights_format == "json":
+        return run_dir / "weights.json"
+    if weights_format == "bincode":
+        return run_dir / "weights.bin"
+    raise ValueError(f"unsupported weights format: {weights_format}")
+
+
+def _evaluate_loss(
+    model: st.nn.Sequential,
+    loss: Any,
+    batches: list[tuple[st.Tensor, st.Tensor]],
+) -> float:
+    if not batches:
+        return float("nan")
+    total = 0.0
+    for x, y in batches:
+        pred = model.forward(x)
+        value = loss.forward(pred, y).tolist()
+        total += float(value[0][0])
+    return total / float(len(batches))
+
+
+def _apply_preset(
+    preset: str,
+    *,
+    steps: int,
+    embed_dim: int,
+    hidden: int,
+    kernel: int,
+    stride: int,
+    mixer_depth: int,
+    epochs: int,
+    batches_per_epoch: int,
+    batch: int,
+    lr: float,
+    top_k: int,
+    temperature: float,
+    weights_format: str,
+    checkpoint_every: int,
+    val_split: float,
+    val_batches: int,
+) -> tuple[int, int, int, int, int, int, int, int, int, float, int, float, str, int, float, int]:
+    preset = str(preset).strip().lower()
+    cfg = _PRESETS.get(preset)
+    if cfg is None:
+        raise ValueError(f"unknown --preset: {preset} (available: {', '.join(sorted(_PRESETS))})")
+
+    return (
+        int(cfg.get("steps", steps)),
+        int(cfg.get("embed_dim", embed_dim)),
+        int(cfg.get("hidden", hidden)),
+        int(cfg.get("kernel", kernel)),
+        int(cfg.get("stride", stride)),
+        int(cfg.get("mixer_depth", mixer_depth)),
+        int(cfg.get("epochs", epochs)),
+        int(cfg.get("batches_per_epoch", batches_per_epoch)),
+        int(cfg.get("batch", batch)),
+        float(cfg.get("lr", lr)),
+        int(cfg.get("top_k", top_k)),
+        float(cfg.get("temperature", temperature)),
+        str(cfg.get("weights_format", weights_format)),
+        int(cfg.get("checkpoint_every", checkpoint_every)),
+        float(cfg.get("val_split", val_split)),
+        int(cfg.get("val_batches", val_batches)),
+    )
 
 
 def _build_random_batch(
@@ -315,12 +512,16 @@ def main() -> None:
     if len(sys.argv) < 2 or sys.argv[1] in {"-h", "--help"}:
         print(
             "usage: PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_wave_rnn_mixer.py <text.txt> "
+            "[--preset tiny|small|base|large] "
             "[--load weights.json] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] "
             "[--kernel N] [--stride N] [--padding N] "
+            "[--mixer-depth N] "
             "[--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] "
             "[--gen N] [--topk N] [--seed N] [--prompt STR] "
             "[--infuse STR] [--infuse-every once|epoch|batch] [--infuse-mode blend|separate] "
             "[--backend cpu|wgpu|cuda|hip|auto] "
+            "[--weights-format json|bincode|auto] [--checkpoint-every N] "
+            "[--val-split F] [--val-batches N] "
             "[--events PATH] [--events-types A,B,C] "
             "[--atlas] [--atlas-bound N] [--atlas-district NAME] "
             "[--desire] [--desire-concepts N] [--desire-prime N] [--desire-blend F] [--desire-drift-gain F] "
@@ -334,12 +535,14 @@ def main() -> None:
     load_weights: pathlib.Path | None = None
     save_weights: pathlib.Path | None = None
     run_dir: pathlib.Path | None = None
+    preset: str | None = None
     steps = 32
     embed_dim = 32
     hidden = 64
     kernel = 3
     stride = 1
     padding: int | None = None
+    mixer_depth = 1
     epochs = 6
     batches_per_epoch = 24
     batch = 8
@@ -354,6 +557,10 @@ def main() -> None:
     infuse_every = "once"
     infuse_mode: str | None = None
     backend = "cpu"
+    weights_format = "json"
+    checkpoint_every = 0
+    val_split = 0.1
+    val_batches = 0
     events_path: pathlib.Path | None = None
     events_types = [
         "EpochStart",
@@ -370,6 +577,52 @@ def main() -> None:
     desire_prime = 16
     desire_blend = 0.35
     desire_drift_gain = 0.35
+
+    # Apply presets before parsing other flags so explicit args override defaults.
+    if "--preset" in args:
+        idx = args.index("--preset")
+        if idx + 1 >= len(args):
+            raise ValueError("--preset requires a value")
+        preset = str(args[idx + 1]).strip().lower()
+        del args[idx : idx + 2]
+        (
+            steps,
+            embed_dim,
+            hidden,
+            kernel,
+            stride,
+            mixer_depth,
+            epochs,
+            batches_per_epoch,
+            batch,
+            lr,
+            top_k,
+            temperature,
+            weights_format,
+            checkpoint_every,
+            val_split,
+            val_batches,
+        ) = _apply_preset(
+            preset,
+            steps=steps,
+            embed_dim=embed_dim,
+            hidden=hidden,
+            kernel=kernel,
+            stride=stride,
+            mixer_depth=mixer_depth,
+            epochs=epochs,
+            batches_per_epoch=batches_per_epoch,
+            batch=batch,
+            lr=lr,
+            top_k=top_k,
+            temperature=temperature,
+            weights_format=weights_format,
+            checkpoint_every=checkpoint_every,
+            val_split=val_split,
+            val_batches=val_batches,
+        )
+        if checkpoint_every == 0 and weights_format == "bincode":
+            checkpoint_every = 1
 
     it = iter(args)
     for flag in it:
@@ -389,6 +642,8 @@ def main() -> None:
             stride = int(next(it))
         elif flag == "--padding":
             padding = int(next(it))
+        elif flag == "--mixer-depth":
+            mixer_depth = int(next(it))
         elif flag == "--epochs":
             epochs = int(next(it))
         elif flag == "--batches":
@@ -417,6 +672,14 @@ def main() -> None:
             infuse_mode = str(next(it)).strip().lower()
         elif flag == "--backend":
             backend = str(next(it)).strip().lower()
+        elif flag == "--weights-format":
+            weights_format = str(next(it)).strip().lower()
+        elif flag == "--checkpoint-every":
+            checkpoint_every = int(next(it))
+        elif flag == "--val-split":
+            val_split = float(next(it))
+        elif flag == "--val-batches":
+            val_batches = int(next(it))
         elif flag == "--events":
             events_path = pathlib.Path(next(it))
         elif flag == "--events-types":
@@ -459,6 +722,14 @@ def main() -> None:
         raise ValueError("--hidden must be > 0")
     if steps <= 0:
         raise ValueError("--steps must be > 0")
+    if mixer_depth <= 0:
+        raise ValueError("--mixer-depth must be > 0")
+    if checkpoint_every < 0:
+        raise ValueError("--checkpoint-every must be >= 0")
+    if val_batches < 0:
+        raise ValueError("--val-batches must be >= 0")
+    if val_split <= 0.0 or val_split >= 0.95:
+        raise ValueError("--val-split must be within (0, 0.95)")
     if infuse_every not in {"once", "epoch", "batch"}:
         raise ValueError(
             f"invalid --infuse-every: {infuse_every} (expected once|epoch|batch)"
@@ -500,6 +771,7 @@ def main() -> None:
         kernel = int(meta["kernel"])
         stride = int(meta["stride"])
         padding = int(meta["padding"])
+        mixer_depth = int(meta.get("mixer_depth", 1))
         curvature = float(meta["curvature"])
         temperature = float(meta["temperature"])
         symbols = [str(ch) for ch in meta["symbols"]]
@@ -513,6 +785,7 @@ def main() -> None:
             kernel,
             stride,
             padding,
+            mixer_depth,
             curvature,
             temperature,
         )
@@ -528,6 +801,7 @@ def main() -> None:
             kernel,
             stride,
             padding,
+            mixer_depth,
             curvature,
             temperature,
         )
@@ -539,17 +813,53 @@ def main() -> None:
     if prompt is None:
         prompt = "".join(list(text)[:steps])
 
-    run_meta: dict[str, Any] = {
-        "schema": RUN_SCHEMA,
-        "arch": "llm_char_wave_rnn_mixer",
-        "text_path": str(text_path),
+    parameter_count = _estimate_parameter_count(model)
+    resolved_weights_format = _resolve_weights_format(weights_format, parameter_count=parameter_count)
+    weights_suffix = _weights_path_for_run(run_dir, resolved_weights_format).suffix
+
+    train_tokens = tokens
+    val_tokens: list[int] = []
+    if val_batches > 0:
+        split_idx = int(float(len(tokens)) * (1.0 - float(val_split)))
+        split_idx = max(0, min(len(tokens), split_idx))
+        train_tokens = tokens[:split_idx]
+        val_tokens = tokens[split_idx:]
+        if len(train_tokens) <= steps + 1 or len(val_tokens) <= steps + 1:
+            # If the text is too short, just disable validation to avoid confusing errors.
+            train_tokens = tokens
+            val_tokens = []
+            val_batches = 0
+
+    meta_base = {
         "format": FORMAT,
+        "preset": preset,
         "steps": steps,
         "embed_dim": embed_dim,
         "hidden": hidden,
         "kernel": kernel,
         "stride": stride,
         "padding": padding,
+        "mixer_depth": mixer_depth,
+        "curvature": curvature,
+        "temperature": temperature,
+        "parameter_count": parameter_count,
+        "unk": symbols[0],
+        "symbols": symbols,
+    }
+
+    run_meta: dict[str, Any] = {
+        "schema": RUN_SCHEMA,
+        "arch": "llm_char_wave_rnn_mixer",
+        "text_path": str(text_path),
+        "format": FORMAT,
+        "preset": preset,
+        "steps": steps,
+        "embed_dim": embed_dim,
+        "hidden": hidden,
+        "kernel": kernel,
+        "stride": stride,
+        "padding": padding,
+        "mixer_depth": mixer_depth,
         "epochs": epochs,
         "batches_per_epoch": batches_per_epoch,
         "batch": batch,
@@ -557,6 +867,12 @@ def main() -> None:
         "curvature": curvature,
         "temperature": temperature,
         "backend": backend,
+        "parameter_count": parameter_count,
+        "weights_format": weights_format,
+        "resolved_weights_format": resolved_weights_format,
+        "checkpoint_every": checkpoint_every,
+        "val_split": val_split if val_batches > 0 else None,
+        "val_batches": val_batches if val_batches > 0 else None,
         "gen_len": gen_len,
         "top_k": top_k,
         "seed": seed,
@@ -610,9 +926,9 @@ def main() -> None:
     loss = st.nn.CategoricalCrossEntropy()
 
     print(
-        f"vocab={vocab_size} steps={steps} embed={embed_dim} hidden={hidden} kernel={kernel} "
+        f"vocab={vocab_size} steps={steps} embed={embed_dim} hidden={hidden} kernel={kernel} depth={mixer_depth} "
         f"epochs={epochs} batch={batch} lr={lr:.3e} curvature={curvature} temp={temperature} "
-        f"backend={backend} run_dir={run_dir}"
+        f"backend={backend} params={parameter_count} weights={resolved_weights_format} run_dir={run_dir}"
     )
 
     metrics_path = run_dir / "metrics.jsonl"
@@ -627,6 +943,17 @@ def main() -> None:
             vocab_size,
             st.nn.RoundtableConfig(top_k=1, mid_k=1, bottom_k=1, here_tolerance=1e-5),
         )
+
+        best_metric = float("inf")
+        best_epoch = None
+
+        val_batches_cache: list[tuple[st.Tensor, st.Tensor]] = []
+        if val_batches > 0 and val_tokens:
+            val_rng = random.Random(seed + 987_654)
+            for _ in range(val_batches):
+                val_batches_cache.append(
+                    _build_random_batch(val_tokens, vocab_size, steps, batch, val_rng)
+                )
 
         for epoch in range(max(0, epochs)):
             rng = random.Random(seed + epoch * 10_000)
@@ -644,13 +971,25 @@ def main() -> None:
                 )
             batches = []
             for _ in range(batches_per_epoch):
-                batches.append(_build_random_batch(tokens, vocab_size, steps, batch, rng))
+                batches.append(_build_random_batch(train_tokens, vocab_size, steps, batch, rng))
             stats = trainer.train_epoch(model, loss, batches, schedule)
             avg_loss = float(stats.average_loss)
+
+            val_loss = (
+                _evaluate_loss(model, loss, val_batches_cache)
+                if val_batches_cache
+                else float("nan")
+            )
+
             with metrics_path.open("a", encoding="utf-8") as handle:
                 handle.write(
                     json.dumps(
-                        {"epoch": epoch, "batches": int(stats.batches), "average_loss": avg_loss},
+                        {
+                            "epoch": epoch,
+                            "batches": int(stats.batches),
+                            "average_loss": avg_loss,
+                            "val_loss": val_loss if val_loss == val_loss else None,
+                        },
                         ensure_ascii=False,
                     )
                     + "\n"
@@ -667,7 +1006,34 @@ def main() -> None:
                 desire=desire_pipeline,
             )
             (samples_dir / f"epoch_{epoch:03d}.txt").write_text(sample, encoding="utf-8")
-            print(f"epoch[{epoch}] batches={stats.batches} avg_loss={avg_loss:.6f}")
+            if val_loss == val_loss:
+                print(
+                    f"epoch[{epoch}] batches={stats.batches} avg_loss={avg_loss:.6f} val_loss={val_loss:.6f}"
+                )
+            else:
+                print(f"epoch[{epoch}] batches={stats.batches} avg_loss={avg_loss:.6f}")
+
+            tracked = val_loss if val_loss == val_loss else avg_loss
+            if tracked < best_metric:
+                best_metric = tracked
+                best_epoch = epoch
+                best_weights_path = run_dir / f"best_weights{weights_suffix}"
+                st.nn.save(str(best_weights_path), model)
+                best_meta = dict(meta_base)
+                best_meta["weights_format"] = resolved_weights_format
+                best_meta["best_epoch"] = epoch
+                best_meta["epoch"] = epoch
+                _save_meta(_meta_path_for_weights(best_weights_path), best_meta)
+
+            if checkpoint_every > 0 and ((epoch + 1) % checkpoint_every == 0):
+                ckpt_dir = run_dir / "checkpoints"
+                ckpt_dir.mkdir(parents=True, exist_ok=True)
+                ckpt_path = ckpt_dir / f"epoch_{epoch:03d}{weights_suffix}"
+                st.nn.save(str(ckpt_path), model)
+                ckpt_meta = dict(meta_base)
+                ckpt_meta["weights_format"] = resolved_weights_format
+                ckpt_meta["epoch"] = epoch
+                _save_meta(_meta_path_for_weights(ckpt_path), ckpt_meta)
 
     if atlas and events_path is not None:
         try:
@@ -682,29 +1048,28 @@ def main() -> None:
         except Exception as exc:
             _write_json(run_dir / "atlas_summary.json", {"error": str(exc)})
 
-    weights_path = run_dir / "weights.json"
+    weights_path = _weights_path_for_run(run_dir, resolved_weights_format)
     st.nn.save(str(weights_path), model)
 
-    meta = {
-        "format": FORMAT,
-        "steps": steps,
-        "embed_dim": embed_dim,
-        "hidden": hidden,
-        "kernel": kernel,
-        "stride": stride,
-        "padding": padding,
-        "curvature": curvature,
-        "temperature": temperature,
-        "unk": symbols[0],
-        "symbols": symbols,
-    }
+    meta = dict(meta_base)
+    meta.update(
+        {
+        "weights_format": resolved_weights_format,
+        "checkpoint_every": checkpoint_every,
+        "best_epoch": best_epoch,
+        "val_split": val_split if val_batches > 0 else None,
+        "val_batches": val_batches if val_batches > 0 else None,
+        }
+    )
     _save_meta(_meta_path_for_weights(weights_path), meta)
 
     if save_weights is not None:
         save_weights = pathlib.Path(save_weights)
         save_weights.parent.mkdir(parents=True, exist_ok=True)
         st.nn.save(str(save_weights), model)
-        _save_meta(_meta_path_for_weights(save_weights), meta)
+        save_meta = dict(meta)
+        save_meta["weights_format"] = _weights_format_for_path(save_weights)
+        _save_meta(_meta_path_for_weights(save_weights), save_meta)
 
     if epochs > 0:
         sample = (samples_dir / f"epoch_{epochs - 1:03d}.txt").read_text(encoding="utf-8")
@@ -727,4 +1092,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

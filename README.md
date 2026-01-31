@@ -37,7 +37,7 @@ Reuse or redistribution **must retain the SpiralTorch name and authorship** as p
 SpiralTorch’s “learning stack” is a set of minimal, runnable training baselines (Rust-first; no NumPy/PyTorch required). See `models/README.md`.
 
 - Demo texts: `models/samples/spiral_demo_en.txt`, `models/samples/spiral_demo_ja.txt`
-- Run outputs: `models/runs/<timestamp>/` (e.g. `run.json`, `metrics.jsonl`, `samples/`, `weights.json`)
+- Run outputs: `models/runs/<timestamp>/` (e.g. `run.json`, `metrics.jsonl`, `samples/`, `weights.json` / `weights.bin`)
 - Optional (Python): `--backend cpu|wgpu|cuda|hip|auto` to pick the compute backend
 - Optional (Python): `--events <path>` to record events (JSONL) + `--atlas` to emit `atlas_summary.json`
 - Optional (Python): `--desire` to enable desire telemetry + apply desire offsets during sampling
