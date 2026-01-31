@@ -12,11 +12,16 @@ copy-pastable models that act as reference implementations for both Python and R
 
 - Demo texts: `models/samples/spiral_demo_en.txt`, `models/samples/spiral_demo_ja.txt`
 - Run outputs: `models/runs/<timestamp>/` (e.g. `run.json`, `metrics.jsonl`, `samples/`, `weights.json`)
+- Python scripts accept `--backend cpu|wgpu|cuda|hip|auto`, `--events <path>`, `--atlas`, and `--desire` (applies offsets during sampling).
+- WGPU quickstart (build + run): `bash scripts/wgpu_quickstart.sh`
 - Python: `PYTHONNOUSERSITE=1 python3 -S -s models/python/mlp_regression.py`
 - Python (classification): `PYTHONNOUSERSITE=1 python3 -S -s models/python/zconv_classification.py`
-- Python (LLM char fine-tune): `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_finetune.py <text.txt>`
-- Python (LLM char coherence scan): `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_coherence_scan.py <text.txt>`
-- Python (LLM char coherence wave): `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_coherence_wave.py <text.txt> [--infuse \"spiral\" --infuse-every batch --infuse-mode separate]`
+- Python (vision + pooling): `PYTHONNOUSERSITE=1 python3 -S -s models/python/vision_conv_pool_classification.py`
+- Python (VAE): `PYTHONNOUSERSITE=1 python3 -S -s models/python/zspace_vae_reconstruction.py`
+- Python (LLM char fine-tune): `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_finetune.py <text.txt> [--desire --events runs.jsonl --atlas]`
+- Python (LLM char coherence scan): `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_coherence_scan.py <text.txt> [--desire --events runs.jsonl --atlas]`
+- Python (LLM char coherence wave): `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_coherence_wave.py <text.txt> [--infuse \"spiral\" --infuse-every batch --infuse-mode separate] [--desire --events runs.jsonl --atlas]`
+- Python (LLM char WaveRnn+Mixer): `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_wave_rnn_mixer.py <text.txt> [--infuse \"spiral\" --infuse-every batch --infuse-mode separate] [--desire --events runs.jsonl --atlas]`
 - Rust: `cargo run -p st-nn --example modelzoo_mlp_regression`
 - Rust (classification): `cargo run -p st-nn --example modelzoo_zconv_classification`
 - Rust (vision + pooling): `cargo run -p st-nn --example modelzoo_vision_conv_pool_classification`

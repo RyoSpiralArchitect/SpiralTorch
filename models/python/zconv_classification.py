@@ -12,6 +12,52 @@ import spiraltorch as st
 from spiraltorch import plugin
 
 
+def _native_feature_flags() -> dict[str, bool]:
+    try:
+        info = st.build_info()
+    except Exception:
+        return {}
+    if not isinstance(info, dict):
+        return {}
+    features = info.get("features")
+    if not isinstance(features, dict):
+        return {}
+    out: dict[str, bool] = {}
+    for key, value in features.items():
+        out[str(key)] = bool(value)
+    return out
+
+
+def _require_backend_available(backend: str) -> None:
+    backend = str(backend).strip().lower()
+    if backend in {"cpu"}:
+        return
+
+    flags = _native_feature_flags()
+    if backend in {"wgpu", "webgpu", "auto"}:
+        if flags.get("wgpu") or flags.get("wgpu-rt"):
+            return
+        raise RuntimeError(
+            "backend=wgpu requested but this SpiralTorch build lacks the 'wgpu' feature. "
+            "Rebuild the extension with `--features wgpu` (or `wgpu-rt`)."
+        )
+    if backend == "cuda":
+        if flags.get("cuda"):
+            return
+        raise RuntimeError(
+            "backend=cuda requested but this SpiralTorch build lacks the 'cuda' feature. "
+            "Rebuild the extension with `--features cuda`."
+        )
+    if backend in {"hip", "rocm"}:
+        if flags.get("hip") or flags.get("hip-real"):
+            return
+        raise RuntimeError(
+            "backend=hip requested but this SpiralTorch build lacks the 'hip' feature. "
+            "Rebuild the extension with `--features hip` (or `hip-real`)."
+        )
+    raise ValueError(f"unknown --backend: {backend} (expected cpu|wgpu|cuda|hip|auto)")
+
+
 def build_batch(batch: int, input_hw: tuple[int, int], seed: int) -> tuple[st.Tensor, st.Tensor]:
     cols = input_hw[0] * input_hw[1]
     x = st.Tensor.rand(batch, cols, seed=seed)
@@ -58,6 +104,20 @@ def build_model(
 
 
 def main() -> None:
+    backend = "cpu"
+    args = sys.argv[1:]
+    it = iter(args)
+    for flag in it:
+        if flag == "--backend":
+            backend = str(next(it)).strip().lower()
+        elif flag in {"-h", "--help"}:
+            print("usage: PYTHONNOUSERSITE=1 python3 -S -s models/python/zconv_classification.py [--backend cpu|wgpu|cuda|hip|auto]")
+            return
+        else:
+            raise ValueError(f"unknown flag: {flag}")
+
+    _require_backend_available(backend)
+
     batch = 6
     input_hw = (4, 4)
     kernel = (3, 3)
@@ -66,7 +126,7 @@ def main() -> None:
     out_channels = 2
 
     trainer = st.nn.ModuleTrainer(
-        backend="cpu",
+        backend=backend,
         curvature=-1.0,
         hyper_learning_rate=1e-2,
         fallback_learning_rate=1e-2,

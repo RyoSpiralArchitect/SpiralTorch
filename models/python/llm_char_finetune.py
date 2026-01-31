@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import datetime as _dt
+import contextlib
 import json
+import math
 import pathlib
 import random
 import sys
@@ -43,6 +45,52 @@ def _write_json(path: pathlib.Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=False, indent=2)
+
+
+def _native_feature_flags() -> dict[str, bool]:
+    try:
+        info = st.build_info()
+    except Exception:
+        return {}
+    if not isinstance(info, dict):
+        return {}
+    features = info.get("features")
+    if not isinstance(features, dict):
+        return {}
+    out: dict[str, bool] = {}
+    for key, value in features.items():
+        out[str(key)] = bool(value)
+    return out
+
+
+def _require_backend_available(backend: str) -> None:
+    backend = str(backend).strip().lower()
+    if backend in {"cpu"}:
+        return
+
+    flags = _native_feature_flags()
+    if backend in {"wgpu", "webgpu", "auto"}:
+        if flags.get("wgpu") or flags.get("wgpu-rt"):
+            return
+        raise RuntimeError(
+            "backend=wgpu requested but this SpiralTorch build lacks the 'wgpu' feature. "
+            "Rebuild the extension with `--features wgpu` (or `wgpu-rt`)."
+        )
+    if backend == "cuda":
+        if flags.get("cuda"):
+            return
+        raise RuntimeError(
+            "backend=cuda requested but this SpiralTorch build lacks the 'cuda' feature. "
+            "Rebuild the extension with `--features cuda`."
+        )
+    if backend in {"hip", "rocm"}:
+        if flags.get("hip") or flags.get("hip-real"):
+            return
+        raise RuntimeError(
+            "backend=hip requested but this SpiralTorch build lacks the 'hip' feature. "
+            "Rebuild the extension with `--features hip` (or `hip-real`)."
+        )
+    raise ValueError(f"unknown --backend: {backend} (expected cpu|wgpu|cuda|hip|auto)")
 
 
 def _build_vocab(text: str, unk: str) -> tuple[str, list[str], dict[str, int]]:
@@ -93,6 +141,57 @@ def _sample_topk(values: list[float], top_k: int, rng: random.Random) -> int:
         if threshold <= 0.0:
             return idx
     return candidates[-1][0]
+
+def _logits_from_probs(values: list[float], eps: float = 1e-9) -> list[float]:
+    out: list[float] = []
+    for value in values:
+        v = float(value)
+        if v == v and v > 0.0:
+            out.append(math.log(v))
+        else:
+            out.append(math.log(eps))
+    return out
+
+def _apply_desire_offsets_to_probs(
+    probs: list[float],
+    desire_step: Any,
+    *,
+    max_offset: float = 8.0,
+) -> list[float]:
+    if not isinstance(desire_step, dict):
+        return probs
+    indices = desire_step.get("indices")
+    offsets = desire_step.get("logit_offsets")
+    if not isinstance(indices, list) or not isinstance(offsets, list):
+        return probs
+    if len(indices) != len(offsets):
+        return probs
+
+    out: list[float] = []
+    for value in probs:
+        v = float(value)
+        out.append(v if v == v and v > 0.0 else 0.0)
+
+    for idx, offset in zip(indices, offsets):
+        if not isinstance(idx, int):
+            continue
+        if idx < 0 or idx >= len(out):
+            continue
+        try:
+            off = float(offset)
+        except Exception:
+            continue
+        if off != off or off == float("inf") or off == float("-inf"):
+            continue
+        if max_offset > 0.0:
+            off = max(-max_offset, min(max_offset, off))
+        out[idx] *= math.exp(off)
+
+    total = sum(out)
+    if total <= 0.0 or total != total:
+        return probs
+    inv = 1.0 / total
+    return [value * inv for value in out]
 
 
 def _build_model(
@@ -170,6 +269,7 @@ def _generate(
     seed: int,
     *,
     embed_dim: int | None,
+    desire: st.nn.DesirePipeline | None = None,
 ) -> str:
     rng = random.Random(seed)
     vocab_size = len(symbols)
@@ -193,7 +293,12 @@ def _generate(
 
         probs = model.forward(x)
         row = probs.tolist()[0]
-        next_idx = _sample_topk([float(v) for v in row], top_k, rng)
+        if desire is not None:
+            step = desire.step(_logits_from_probs([float(v) for v in row]), context[-1])
+            row = _apply_desire_offsets_to_probs([float(v) for v in row], step)
+        else:
+            row = [float(v) for v in row]
+        next_idx = _sample_topk(row, top_k, rng)
         out += symbols[next_idx]
         context = context[1:] + [next_idx]
     return out
@@ -216,7 +321,12 @@ def main() -> None:
             "usage: PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_finetune.py <text.txt> "
             "[--load weights.json] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] "
             "[--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] "
-            "[--gen N] [--topk N] [--seed N] [--prompt STR] [--run-dir PATH]"
+            "[--gen N] [--topk N] [--seed N] [--prompt STR] "
+            "[--backend cpu|wgpu|cuda|hip|auto] "
+            "[--events PATH] [--events-types A,B,C] "
+            "[--atlas] [--atlas-bound N] [--atlas-district NAME] "
+            "[--desire] [--desire-concepts N] [--desire-prime N] [--desire-blend F] [--desire-drift-gain F] "
+            "[--run-dir PATH]"
         )
         return
 
@@ -239,6 +349,23 @@ def main() -> None:
     top_k = 32
     seed = 42
     prompt: str | None = None
+    backend = "cpu"
+    events_path: pathlib.Path | None = None
+    events_types = [
+        "EpochStart",
+        "EpochEnd",
+        "RoundtablePlanned",
+        "TrainerStep",
+        "TrainerPhase",
+    ]
+    atlas = False
+    atlas_bound = 512
+    atlas_district = "Training"
+    desire = False
+    desire_concepts = 3
+    desire_prime = 16
+    desire_blend = 0.35
+    desire_drift_gain = 0.35
 
     it = iter(args)
     for flag in it:
@@ -272,10 +399,43 @@ def main() -> None:
             seed = int(next(it))
         elif flag == "--prompt":
             prompt = str(next(it))
+        elif flag == "--backend":
+            backend = str(next(it)).strip().lower()
+        elif flag == "--events":
+            events_path = pathlib.Path(str(next(it)))
+        elif flag == "--events-types":
+            raw = str(next(it))
+            parts = [part.strip() for part in raw.split(",") if part.strip()]
+            if not parts:
+                raise ValueError("empty --events-types")
+            events_types = parts
+        elif flag == "--atlas":
+            atlas = True
+        elif flag == "--atlas-bound":
+            atlas_bound = int(next(it))
+        elif flag == "--atlas-district":
+            atlas_district = str(next(it))
+        elif flag == "--desire":
+            desire = True
+        elif flag == "--desire-concepts":
+            desire_concepts = int(next(it))
+        elif flag == "--desire-prime":
+            desire_prime = int(next(it))
+        elif flag == "--desire-blend":
+            desire_blend = float(next(it))
+        elif flag == "--desire-drift-gain":
+            desire_drift_gain = float(next(it))
         elif flag == "--run-dir":
             run_dir = pathlib.Path(str(next(it)))
         else:
             raise ValueError(f"unknown flag: {flag}")
+
+    if desire_concepts <= 0:
+        raise ValueError("--desire-concepts must be >= 1")
+    if desire_prime < 0:
+        raise ValueError("--desire-prime must be >= 0")
+
+    _require_backend_available(backend)
 
     text = _read_text(text_path)
     if not text:
@@ -287,6 +447,9 @@ def main() -> None:
     samples_dir = run_dir / "samples"
     samples_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "command.txt").write_text(" ".join(sys.argv), encoding="utf-8")
+
+    if atlas and events_path is None:
+        events_path = run_dir / "events.jsonl"
 
     if load_weights is not None:
         meta_path = _meta_path_for_weights(load_weights)
@@ -353,6 +516,7 @@ def main() -> None:
         "lr": lr,
         "curvature": curvature,
         "temperature": temperature,
+        "backend": backend,
         "gen_len": gen_len,
         "top_k": top_k,
         "seed": seed,
@@ -360,68 +524,123 @@ def main() -> None:
         "vocab_size": vocab_size,
         "symbols_count": len(symbols),
         "mode": mode,
+        "events_path": str(events_path) if events_path is not None else None,
+        "events_types": events_types,
+        "atlas": atlas,
+        "atlas_bound": atlas_bound if atlas else None,
+        "atlas_district": atlas_district if atlas else None,
+        "desire": desire,
+        "desire_concepts": desire_concepts if desire else None,
+        "desire_prime": desire_prime if desire else None,
+        "desire_blend": desire_blend if desire else None,
+        "desire_drift_gain": desire_drift_gain if desire else None,
         "weights_loaded_from": str(load_weights) if load_weights is not None else None,
     }
     _write_json(run_dir / "run.json", run_meta)
 
     model.attach_hypergrad(curvature=curvature, learning_rate=lr)
     trainer = st.nn.ModuleTrainer(
-        backend="cpu",
+        backend=backend,
         curvature=curvature,
         hyper_learning_rate=lr,
         fallback_learning_rate=lr,
     )
-    schedule = trainer.roundtable(
-        batch,
-        vocab_size,
-        st.nn.RoundtableConfig(top_k=1, mid_k=1, bottom_k=1, here_tolerance=1e-5),
-    )
+    desire_pipeline: st.nn.DesirePipeline | None = None
+    if desire:
+        desire_bundle = st.nn.DesireTelemetryBundle(
+            blend=desire_blend,
+            drift_gain=desire_drift_gain,
+        )
+        trainer.enable_desire_telemetry(desire_bundle)
+        desire_pipeline = st.nn.DesirePipeline(
+            vocab_size,
+            concepts=desire_concepts,
+            bundle=desire_bundle,
+        )
     loss = st.nn.CategoricalCrossEntropy()
 
     print(
         f"mode={mode} vocab={vocab_size} steps={steps} hidden={hidden} epochs={epochs} "
-        f"batch={batch} lr={lr:.3e} curvature={curvature} temp={temperature} run_dir={run_dir}"
+        f"batch={batch} lr={lr:.3e} curvature={curvature} temp={temperature} backend={backend} run_dir={run_dir}"
     )
 
     metrics_path = run_dir / "metrics.jsonl"
-
-    for epoch in range(epochs):
-        rng = random.Random(seed + epoch * 10_000)
-        batches = []
-        for _ in range(batches_per_epoch):
-            batches.append(
-                _build_random_batch(
-                    tokens,
-                    vocab_size,
-                    steps,
-                    batch,
-                    rng,
-                    embed_dim=embed_dim_runtime,
-                )
-            )
-        stats = trainer.train_epoch(model, loss, batches, schedule)
-        avg_loss = float(stats.average_loss)
-        with metrics_path.open("a", encoding="utf-8") as handle:
-            handle.write(
-                json.dumps(
-                    {"epoch": epoch, "batches": int(stats.batches), "average_loss": avg_loss},
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-        sample = _generate(
-            model,
-            symbols,
-            index,
-            steps,
-            prompt,
-            gen_len,
-            top_k,
-            seed + 999 + epoch,
-            embed_dim=embed_dim_runtime,
+    record_ctx = (
+        st.plugin.record(str(events_path), event_types=events_types)
+        if events_path is not None
+        else contextlib.nullcontext()
+    )
+    with record_ctx:
+        schedule = trainer.roundtable(
+            batch,
+            vocab_size,
+            st.nn.RoundtableConfig(top_k=1, mid_k=1, bottom_k=1, here_tolerance=1e-5),
         )
-        (samples_dir / f"epoch_{epoch:03d}.txt").write_text(sample, encoding="utf-8")
-        print(f"epoch[{epoch}] batches={stats.batches} avg_loss={avg_loss:.6f}")
+
+        for epoch in range(epochs):
+            rng = random.Random(seed + epoch * 10_000)
+            if desire_pipeline is not None and desire_prime > 0:
+                _generate(
+                    model,
+                    symbols,
+                    index,
+                    steps,
+                    prompt,
+                    desire_prime,
+                    top_k,
+                    seed + 123 + epoch,
+                    embed_dim=embed_dim_runtime,
+                    desire=desire_pipeline,
+                )
+            batches = []
+            for _ in range(batches_per_epoch):
+                batches.append(
+                    _build_random_batch(
+                        tokens,
+                        vocab_size,
+                        steps,
+                        batch,
+                        rng,
+                        embed_dim=embed_dim_runtime,
+                    )
+                )
+            stats = trainer.train_epoch(model, loss, batches, schedule)
+            avg_loss = float(stats.average_loss)
+            with metrics_path.open("a", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        {"epoch": epoch, "batches": int(stats.batches), "average_loss": avg_loss},
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+            sample = _generate(
+                model,
+                symbols,
+                index,
+                steps,
+                prompt,
+                gen_len,
+                top_k,
+                seed + 999 + epoch,
+                embed_dim=embed_dim_runtime,
+                desire=desire_pipeline,
+            )
+            (samples_dir / f"epoch_{epoch:03d}.txt").write_text(sample, encoding="utf-8")
+            print(f"epoch[{epoch}] batches={stats.batches} avg_loss={avg_loss:.6f}")
+
+    if atlas and events_path is not None:
+        try:
+            from spiraltorch.zspace_atlas import trainer_events_to_atlas_route
+
+            route = trainer_events_to_atlas_route(
+                events_path,
+                district=atlas_district,
+                bound=atlas_bound,
+            )
+            _write_json(run_dir / "atlas_summary.json", route.summary())
+        except Exception as exc:
+            _write_json(run_dir / "atlas_summary.json", {"error": str(exc)})
 
     weights_path = run_dir / "weights.json"
     st.nn.save(str(weights_path), model)
@@ -457,6 +676,7 @@ def main() -> None:
             top_k,
             seed + 999,
             embed_dim=embed_dim_runtime,
+            desire=desire_pipeline,
         )
         (samples_dir / "init.txt").write_text(sample, encoding="utf-8")
     print("--- sample (prompt + gen) ---")

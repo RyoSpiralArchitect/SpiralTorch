@@ -10,6 +10,7 @@ import threading as _threading
 import types as _types
 import sys
 import importlib.abc as _importlib_abc
+import importlib.machinery as _importlib_machinery
 import importlib.util as _importlib_util
 import weakref as _weakref
 from collections import deque as _deque
@@ -284,6 +285,71 @@ def _resolve_rs_attr(candidate: str) -> _Any | None:
     return target
 
 
+def _workspace_root_for_dev() -> _pathlib.Path | None:
+    here = _pathlib.Path(__file__).resolve()
+    for parent in here.parents:
+        if (parent / "Cargo.toml").is_file() and (parent / "target").is_dir():
+            return parent
+    return None
+
+
+def _maybe_load_rs_from_target() -> _types.ModuleType | None:
+    """Load the freshest in-tree native extension when developing from source.
+
+    This keeps the Python package usable after `cargo build -p spiraltorch-py`
+    without copying the compiled dylib/so into `bindings/st-py/spiraltorch/`.
+    """
+
+    root = _workspace_root_for_dev()
+    if root is None:
+        return None
+
+    target_root = root / "target"
+    candidates: list[_pathlib.Path] = []
+    for rel in (
+        "debug/libspiraltorch.dylib",
+        "release/libspiraltorch.dylib",
+        "maturin/libspiraltorch.dylib",
+        "debug/libspiraltorch.so",
+        "release/libspiraltorch.so",
+        "maturin/libspiraltorch.so",
+    ):
+        path = target_root / rel
+        if path.is_file():
+            candidates.append(path)
+
+    if not candidates:
+        return None
+
+    newest = max(candidates, key=lambda p: p.stat().st_mtime)
+    packaged = _pathlib.Path(__file__).resolve().with_name("spiraltorch.abi3.so")
+    packaged_mtime = packaged.stat().st_mtime if packaged.exists() else 0.0
+
+    force = str(_os.environ.get("SPIRALTORCH_DEV_NATIVE_FROM_TARGET", "")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if not force and newest.stat().st_mtime <= packaged_mtime:
+        return None
+
+    module_name = "spiraltorch.spiraltorch"
+    loader = _importlib_machinery.ExtensionFileLoader(module_name, str(newest))
+    spec = _importlib_util.spec_from_file_location(module_name, str(newest), loader=loader)
+    if spec is None:
+        return None
+
+    module = _importlib_util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(module_name, None)
+        return None
+    return module
+
+
 _parent_module = sys.modules[__name__]
 for _name, _doc in _PREDECLARED_SUBMODULES:
     _fq = f"{__name__}.{_name}"
@@ -304,8 +370,13 @@ if "spiral_rl" not in sys.modules:
     _shim.__spiraltorch_placeholder__ = True
     sys.modules["spiral_rl"] = _shim
 
+_rs = _maybe_load_rs_from_target()
+if _rs is not None:
+    sys.modules["spiraltorch.spiraltorch"] = _rs
+
 try:
-    _rs = import_module("spiraltorch.spiraltorch")
+    if _rs is None:
+        _rs = import_module("spiraltorch.spiraltorch")
 except ModuleNotFoundError as exc:
     if exc.name not in {"spiraltorch.spiraltorch", "spiraltorch"}:
         raise
@@ -478,6 +549,8 @@ from .kdsl_trace import (
 from .zspace_atlas import (
     zspace_trace_to_atlas_route,
     zspace_trace_event_to_atlas_frame,
+    trainer_events_to_atlas_route,
+    trainer_step_event_to_atlas_frame,
 )
 
 from .zspace_live import (
@@ -505,6 +578,7 @@ _EXTRAS = [
     "load_trainer_trace_events","write_trainer_trace_html",
     "load_kdsl_trace_events","write_kdsl_trace_jsonl","write_kdsl_trace_html",
     "zspace_trace_to_atlas_route","zspace_trace_event_to_atlas_frame",
+    "trainer_events_to_atlas_route","trainer_step_event_to_atlas_frame",
     "serve_zspace_trace","ZSpaceTraceLiveServer",
 ]
 for _n in _EXTRAS:

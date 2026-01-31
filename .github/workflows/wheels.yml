@@ -14,8 +14,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-13
-            label: macos-13-macosx11
+          - os: macos-15-intel
+            label: macos-15-intel-macosx11
             macos_deployment_target: "11.0"
             py: "3.12"
             feat: "wgpu,logic,kdsl"
@@ -52,7 +52,11 @@ jobs:
       - name: Build wheel
         run: |
           python -m pip install -U pip wheel maturin
-          maturin build --release --locked -m bindings/st-py/Cargo.toml --features "${{ matrix.feat }}"
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            maturin build --release --locked --manylinux 2014 -m bindings/st-py/Cargo.toml --features "${{ matrix.feat }}"
+          else
+            maturin build --release --locked -m bindings/st-py/Cargo.toml --features "${{ matrix.feat }}"
+          fi
       - name: Smoke test wheel import
         working-directory: target/wheels
         env:

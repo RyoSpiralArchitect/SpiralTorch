@@ -16,7 +16,7 @@ if (_ROOT / "spiraltorch").is_dir():
 
 import spiraltorch as st
 
-FORMAT = "st-char-lm-coherence-wave-v1"
+FORMAT = "st-char-lm-wave-rnn-mixer-v1"
 DEFAULT_UNK = "\uFFFD"
 
 RUN_SCHEMA = "st.modelzoo.run.v1"
@@ -31,6 +31,7 @@ def _meta_path_for_weights(weights_path: pathlib.Path) -> pathlib.Path:
 
 def _read_text(path: pathlib.Path) -> str:
     return path.read_text(encoding="utf-8")
+
 
 def _timestamp_slug() -> str:
     return _dt.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -141,6 +142,7 @@ def _sample_topk(values: list[float], top_k: int, rng: random.Random) -> int:
             return idx
     return candidates[-1][0]
 
+
 def _logits_from_probs(values: list[float], eps: float = 1e-9) -> list[float]:
     out: list[float] = []
     for value in values:
@@ -150,6 +152,7 @@ def _logits_from_probs(values: list[float], eps: float = 1e-9) -> list[float]:
         else:
             out.append(math.log(eps))
     return out
+
 
 def _apply_desire_offsets_to_probs(
     probs: list[float],
@@ -193,47 +196,44 @@ def _apply_desire_offsets_to_probs(
     return [value * inv for value in out]
 
 
-def _parse_dilations(raw: str) -> list[int]:
-    out: list[int] = []
-    for part in raw.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        value = int(part)
-        if value <= 0:
-            raise ValueError(f"invalid --dilations entry: {part}")
-        out.append(value)
-    if not out:
-        raise ValueError("empty --dilations")
-    return out
-
-
 def _build_model(
     vocab_size: int,
     steps: int,
     embed_dim: int,
     hidden: int,
-    memory: int,
     kernel: int,
-    dilations: list[int],
+    stride: int,
+    padding: int,
     curvature: float,
     temperature: float,
 ) -> st.nn.Sequential:
     model = st.nn.Sequential()
     model.add(st.nn.Embedding("embed", vocab_size, embed_dim))
+    # Embedding emits (batch, steps * channels) laid out like NHWC (w-major, then channels).
+    # WaveRnn/Conv1d expects channels-major, so reorder NHWC -> NCHW before the 1D conv stack.
     model.add(
-        st.nn.ZSpaceCoherenceWaveBlock(
+        st.nn.FeatureReorder2d(
             embed_dim,
+            1,
             steps,
-            memory,
-            curvature,
-            temperature,
-            kernel_size=kernel,
-            dilations=dilations,
+            layout="NHWC",
+            direction="to_canonical",
         )
     )
-    model.add(st.nn.Linear("mix", embed_dim, hidden))
-    model.add(st.nn.Relu())
+    model.add(
+        st.nn.WaveRnn(
+            "wrnn",
+            embed_dim,
+            hidden,
+            kernel,
+            curvature,
+            temperature,
+            stride=stride,
+            padding=padding,
+        )
+    )
+    model.add(st.nn.ZSpaceMixer("mixer", hidden))
+    model.add(st.nn.WaveGate("gate", hidden, curvature, temperature))
     model.add(st.nn.Linear("head", hidden, vocab_size))
     model.add(st.nn.ZSpaceSoftmax(curvature, temperature))
     return model
@@ -314,10 +314,11 @@ def _save_meta(meta_path: pathlib.Path, meta: dict[str, Any]) -> None:
 def main() -> None:
     if len(sys.argv) < 2 or sys.argv[1] in {"-h", "--help"}:
         print(
-            "usage: PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_coherence_wave.py <text.txt> "
-            "[--load weights.json] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] [--memory N] "
-            "[--kernel N] [--dilations 1,2,4] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] "
-            "[--temperature F] [--gen N] [--topk N] [--seed N] [--prompt STR] "
+            "usage: PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_wave_rnn_mixer.py <text.txt> "
+            "[--load weights.json] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] "
+            "[--kernel N] [--stride N] [--padding N] "
+            "[--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] "
+            "[--gen N] [--topk N] [--seed N] [--prompt STR] "
             "[--infuse STR] [--infuse-every once|epoch|batch] [--infuse-mode blend|separate] "
             "[--backend cpu|wgpu|cuda|hip|auto] "
             "[--events PATH] [--events-types A,B,C] "
@@ -336,9 +337,9 @@ def main() -> None:
     steps = 32
     embed_dim = 32
     hidden = 64
-    memory = 16
     kernel = 3
-    dilations = [1, 2, 4]
+    stride = 1
+    padding: int | None = None
     epochs = 6
     batches_per_epoch = 24
     batch = 8
@@ -382,12 +383,12 @@ def main() -> None:
             embed_dim = int(next(it))
         elif flag == "--hidden":
             hidden = int(next(it))
-        elif flag == "--memory":
-            memory = int(next(it))
         elif flag == "--kernel":
             kernel = int(next(it))
-        elif flag == "--dilations":
-            dilations = _parse_dilations(str(next(it)))
+        elif flag == "--stride":
+            stride = int(next(it))
+        elif flag == "--padding":
+            padding = int(next(it))
         elif flag == "--epochs":
             epochs = int(next(it))
         elif flag == "--batches":
@@ -417,13 +418,12 @@ def main() -> None:
         elif flag == "--backend":
             backend = str(next(it)).strip().lower()
         elif flag == "--events":
-            events_path = pathlib.Path(str(next(it)))
+            events_path = pathlib.Path(next(it))
         elif flag == "--events-types":
             raw = str(next(it))
             parts = [part.strip() for part in raw.split(",") if part.strip()]
-            if not parts:
-                raise ValueError("empty --events-types")
-            events_types = parts
+            if parts:
+                events_types = parts
         elif flag == "--atlas":
             atlas = True
         elif flag == "--atlas-bound":
@@ -441,21 +441,24 @@ def main() -> None:
         elif flag == "--desire-drift-gain":
             desire_drift_gain = float(next(it))
         elif flag == "--run-dir":
-            run_dir = pathlib.Path(str(next(it)))
+            run_dir = pathlib.Path(next(it))
         else:
             raise ValueError(f"unknown flag: {flag}")
 
-    if desire_concepts <= 0:
-        raise ValueError("--desire-concepts must be >= 1")
-    if desire_prime < 0:
-        raise ValueError("--desire-prime must be >= 0")
-
-    if memory > steps:
-        raise ValueError(f"--memory must be <= --steps (got memory={memory}, steps={steps})")
     if kernel <= 0:
         raise ValueError("--kernel must be > 0")
-    if not dilations:
-        raise ValueError("empty --dilations")
+    if stride <= 0:
+        raise ValueError("--stride must be > 0")
+    if padding is None:
+        padding = kernel // 2
+    if padding < 0:
+        raise ValueError("--padding must be >= 0")
+    if embed_dim <= 0:
+        raise ValueError("--embed-dim must be > 0")
+    if hidden <= 0:
+        raise ValueError("--hidden must be > 0")
+    if steps <= 0:
+        raise ValueError("--steps must be > 0")
     if infuse_every not in {"once", "epoch", "batch"}:
         raise ValueError(
             f"invalid --infuse-every: {infuse_every} (expected once|epoch|batch)"
@@ -471,6 +474,10 @@ def main() -> None:
 
     _require_backend_available(backend)
 
+    text = _read_text(text_path)
+    if not text:
+        raise ValueError("empty text")
+
     if run_dir is None:
         run_dir = _default_run_dir()
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -481,10 +488,6 @@ def main() -> None:
     if atlas and events_path is None:
         events_path = run_dir / "events.jsonl"
 
-    text = _read_text(text_path)
-    if not text:
-        raise ValueError("empty text")
-
     if load_weights is not None:
         meta_path = _meta_path_for_weights(load_weights)
         meta = _load_meta(meta_path)
@@ -494,9 +497,9 @@ def main() -> None:
         steps = int(meta["steps"])
         embed_dim = int(meta["embed_dim"])
         hidden = int(meta["hidden"])
-        memory = int(meta["memory"])
         kernel = int(meta["kernel"])
-        dilations = [int(v) for v in meta["dilations"]]
+        stride = int(meta["stride"])
+        padding = int(meta["padding"])
         curvature = float(meta["curvature"])
         temperature = float(meta["temperature"])
         symbols = [str(ch) for ch in meta["symbols"]]
@@ -507,9 +510,9 @@ def main() -> None:
             steps,
             embed_dim,
             hidden,
-            memory,
             kernel,
-            dilations,
+            stride,
+            padding,
             curvature,
             temperature,
         )
@@ -522,9 +525,9 @@ def main() -> None:
             steps,
             embed_dim,
             hidden,
-            memory,
             kernel,
-            dilations,
+            stride,
+            padding,
             curvature,
             temperature,
         )
@@ -538,15 +541,15 @@ def main() -> None:
 
     run_meta: dict[str, Any] = {
         "schema": RUN_SCHEMA,
-        "arch": "llm_char_coherence_wave",
+        "arch": "llm_char_wave_rnn_mixer",
         "text_path": str(text_path),
         "format": FORMAT,
         "steps": steps,
         "embed_dim": embed_dim,
         "hidden": hidden,
-        "memory": memory,
         "kernel": kernel,
-        "dilations": dilations,
+        "stride": stride,
+        "padding": padding,
         "epochs": epochs,
         "batches_per_epoch": batches_per_epoch,
         "batch": batch,
@@ -558,6 +561,8 @@ def main() -> None:
         "top_k": top_k,
         "seed": seed,
         "prompt": prompt,
+        "vocab_size": vocab_size,
+        "symbols_count": len(symbols),
         "infuse": infuse,
         "infuse_every": infuse_every,
         "infuse_mode": infuse_mode,
@@ -571,8 +576,6 @@ def main() -> None:
         "desire_prime": desire_prime if desire else None,
         "desire_blend": desire_blend if desire else None,
         "desire_drift_gain": desire_drift_gain if desire else None,
-        "vocab_size": vocab_size,
-        "symbols_count": len(symbols),
         "weights_loaded_from": str(load_weights) if load_weights is not None else None,
     }
     _write_json(run_dir / "run.json", run_meta)
@@ -584,6 +587,14 @@ def main() -> None:
         hyper_learning_rate=lr,
         fallback_learning_rate=lr,
     )
+    if infuse is not None:
+        if infuse_mode is None:
+            if infuse_every == "once":
+                infuse_mode = "separate"
+            else:
+                infuse_mode = "blend"
+        trainer.set_text_infusion(infuse, every=infuse_every, mode=infuse_mode)
+
     desire_pipeline: st.nn.DesirePipeline | None = None
     if desire:
         desire_bundle = st.nn.DesireTelemetryBundle(
@@ -596,19 +607,12 @@ def main() -> None:
             concepts=desire_concepts,
             bundle=desire_bundle,
         )
-    if infuse is not None:
-        if infuse_mode is None:
-            if infuse_every == "once":
-                infuse_mode = "separate"
-            else:
-                infuse_mode = "blend"
-        trainer.set_text_infusion(infuse, every=infuse_every, mode=infuse_mode)
     loss = st.nn.CategoricalCrossEntropy()
 
     print(
-        f"arch=coherence_wave vocab={vocab_size} steps={steps} embed_dim={embed_dim} hidden={hidden} "
-        f"memory={memory} kernel={kernel} dilations={dilations} epochs={epochs} batch={batch} "
-        f"lr={lr:.3e} curvature={curvature} temp={temperature} backend={backend} run_dir={run_dir}"
+        f"vocab={vocab_size} steps={steps} embed={embed_dim} hidden={hidden} kernel={kernel} "
+        f"epochs={epochs} batch={batch} lr={lr:.3e} curvature={curvature} temp={temperature} "
+        f"backend={backend} run_dir={run_dir}"
     )
 
     metrics_path = run_dir / "metrics.jsonl"
@@ -624,7 +628,7 @@ def main() -> None:
             st.nn.RoundtableConfig(top_k=1, mid_k=1, bottom_k=1, here_tolerance=1e-5),
         )
 
-        for epoch in range(epochs):
+        for epoch in range(max(0, epochs)):
             rng = random.Random(seed + epoch * 10_000)
             if desire_pipeline is not None and desire_prime > 0:
                 _generate(
@@ -686,9 +690,9 @@ def main() -> None:
         "steps": steps,
         "embed_dim": embed_dim,
         "hidden": hidden,
-        "memory": memory,
         "kernel": kernel,
-        "dilations": dilations,
+        "stride": stride,
+        "padding": padding,
         "curvature": curvature,
         "temperature": temperature,
         "unk": symbols[0],
@@ -703,11 +707,9 @@ def main() -> None:
         _save_meta(_meta_path_for_weights(save_weights), meta)
 
     if epochs > 0:
-        final_sample = (samples_dir / f"epoch_{epochs - 1:03d}.txt").read_text(
-            encoding="utf-8"
-        )
+        sample = (samples_dir / f"epoch_{epochs - 1:03d}.txt").read_text(encoding="utf-8")
     else:
-        final_sample = _generate(
+        sample = _generate(
             model,
             symbols,
             index,
@@ -718,10 +720,11 @@ def main() -> None:
             seed + 999,
             desire=desire_pipeline,
         )
-        (samples_dir / "init.txt").write_text(final_sample, encoding="utf-8")
+        (samples_dir / "init.txt").write_text(sample, encoding="utf-8")
     print("--- sample (prompt + gen) ---")
-    print(final_sample)
+    print(sample)
 
 
 if __name__ == "__main__":
     main()
+

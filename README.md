@@ -38,14 +38,22 @@ SpiralTorch’s “learning stack” is a set of minimal, runnable training base
 
 - Demo texts: `models/samples/spiral_demo_en.txt`, `models/samples/spiral_demo_ja.txt`
 - Run outputs: `models/runs/<timestamp>/` (e.g. `run.json`, `metrics.jsonl`, `samples/`, `weights.json`)
+- Optional (Python): `--backend cpu|wgpu|cuda|hip|auto` to pick the compute backend
+- Optional (Python): `--events <path>` to record events (JSONL) + `--atlas` to emit `atlas_summary.json`
+- Optional (Python): `--desire` to enable desire telemetry + apply desire offsets during sampling
 - **LLM (raw text, no tokenizer):** `cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text.txt>`
 - **LLM (Python, raw text, no tokenizer):** `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_finetune.py <text.txt>`
 - **LLM (coherence scan, raw text, no tokenizer):** `cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text.txt>`
 - **LLM (Python, coherence scan, raw text, no tokenizer):** `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_coherence_scan.py <text.txt>`
 - **LLM (coherence wave, raw text, no tokenizer):** `cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text.txt> [--infuse \"spiral\" --infuse-every batch --infuse-mode separate]`
 - **LLM (Python, coherence wave, raw text, no tokenizer):** `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_coherence_wave.py <text.txt> [--infuse \"spiral\" --infuse-every batch --infuse-mode separate]`
+- **LLM (Python, WaveRnn+Mixer, attentionless):** `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_wave_rnn_mixer.py <text.txt>`
+- Example (Python, desire + atlas): `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_coherence_wave.py models/samples/spiral_demo_en.txt --desire --events models/runs/demo_desire/events.jsonl --atlas --run-dir models/runs/demo_desire`
+- WGPU quickstart (build + run): `bash scripts/wgpu_quickstart.sh`
 - **Vision (Conv/Pool):** `cargo run -p st-nn --example modelzoo_vision_conv_pool_classification`
+- **Vision (Python, Conv/Pool):** `PYTHONNOUSERSITE=1 python3 -S -s models/python/vision_conv_pool_classification.py`
 - **Coherence (ZSpace VAE):** `cargo run -p st-nn --example modelzoo_zspace_vae_reconstruction`
+- **Coherence (Python, ZSpace VAE):** `PYTHONNOUSERSITE=1 python3 -S -s models/python/zspace_vae_reconstruction.py`
 - **Training (Lightning/selfsup):** `cargo run -p st-nn --example modelzoo_lightning_selfsup_minimal`
 
 ### Why SpiralTorch  
@@ -229,7 +237,7 @@ tensor shims, no translation layers, and no tracebacks.
 
 ## 🚀 Latest SpiralTorch highlights
 
-- **Learning Stack (model zoo).** Runnable baselines for Vision/Coherence/Training plus character-level LLM fine-tuning from raw text (no tokenizer): `cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text.txt>`, `cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text.txt>`, or `cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text.txt>`.
+- **Learning Stack (model zoo).** Runnable baselines (Rust + Python) including raw-text char LMs (no tokenizer), coherence scan/wave, and an attentionless `WaveRnn+Mixer` variant; use `--desire` to bias sampling and `--events ... --atlas` to emit telemetry routes (see `models/README.md`).
 - **Fractal → Quantum RL bridge.** Stream Mellin-log fractal patches straight into the quantum overlay studio and recover policy gradients through `FractalQuantumTrainer` and friends—keeping Python fallbacks and PyO3 builds in lockstep.
 - **Self-evolving SpiralK kernels.** A new diversity governor inside `SelfRewriteEngine` tracks plateauing η̄ gains, forces fresh AI rewrites when caches go stale, and surfaces telemetry via `diversity_snapshot()` so operators can keep the autonomous kernel lab on course.
 - **Saga-aware kernel evolution.** The `SelfRewriteEngine` now learns multi-step hint sagas, boosting cache priority for sequenced rewrites and exposing the orbits via `saga_snapshots()` so you can audit every cosmic combo.
@@ -273,7 +281,7 @@ tensor shims, no translation layers, and no tracebacks.
     transcripts, and ψ telemetry double as explainability artifacts, enabling
     decision-path inspection without leaving the Z-space calculus.
     
-**Current release:** `spiraltorch==0.3.9` (abi3 wheel, Python ≥3.8)  
+**Current release:** `spiraltorch==0.4.1` (abi3 wheel, Python ≥3.8)  
 **Targets:** CPU (always), MPS, Vulkan/DX (WGPU), CUDA, HIP/ROCm
 
 ---
@@ -281,7 +289,7 @@ tensor shims, no translation layers, and no tracebacks.
 ## Install (pip)
 
 ```bash
-pip install -U spiraltorch==0.3.9
+pip install -U spiraltorch==0.4.1
 ```
 
 - Wheels are **abi3**; you can use any CPython ≥ 3.8.

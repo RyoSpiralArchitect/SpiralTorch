@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import time
 from pathlib import Path
@@ -10,6 +11,8 @@ from .zspace_trace import load_zspace_trace_events
 __all__ = [
     "zspace_trace_to_atlas_route",
     "zspace_trace_event_to_atlas_frame",
+    "trainer_events_to_atlas_route",
+    "trainer_step_event_to_atlas_frame",
 ]
 
 
@@ -60,6 +63,44 @@ def _normalise_event(obj: Mapping[str, Any], *, event_type: str = "ZSpaceTrace")
         else:
             event["data"] = body
         return event
+
+    return None
+
+
+def _iter_jsonl(path: Path) -> Iterable[dict[str, Any]]:
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(obj, Mapping):
+                yield dict(obj)
+
+
+def _normalise_trainer_step_event(
+    obj: Mapping[str, Any],
+    *,
+    event_type: str = "TrainerStep",
+) -> dict[str, Any] | None:
+    record_type = obj.get("event_type") or obj.get("type")
+    if record_type not in (None, event_type):
+        return None
+
+    if "payload" in obj:
+        payload = obj.get("payload")
+        if not isinstance(payload, Mapping):
+            return None
+        event = dict(payload)
+        if "ts" in obj and "ts" not in event:
+            event["ts"] = obj["ts"]
+        return event
+
+    if {"epoch", "step", "metrics"}.issubset(obj.keys()):
+        return dict(obj)
 
     return None
 
@@ -143,6 +184,58 @@ def zspace_trace_event_to_atlas_frame(
     return fragment.to_frame()
 
 
+def trainer_step_event_to_atlas_frame(
+    event: Mapping[str, Any],
+    *,
+    district: str = "Training",
+    timestamp_base: float | None = None,
+    step_seconds: float = 0.001,
+) -> Any | None:
+    """Convert one TrainerStep plugin record (or normalised dict) into an AtlasFrame."""
+
+    normalised = _normalise_trainer_step_event(event)
+    if normalised is None:
+        return None
+
+    ts = _as_float(normalised.get("ts"))
+    if ts is None:
+        base = time.time() if timestamp_base is None else float(timestamp_base)
+        step = _as_float(normalised.get("step")) or 0.0
+        ts = base + step * max(0.0, float(step_seconds))
+
+    import spiraltorch as st
+
+    fragment = st.telemetry.AtlasFragment(timestamp=ts)
+    epoch_val = _as_float(normalised.get("epoch"))
+    step_val = _as_float(normalised.get("step"))
+    if epoch_val is not None:
+        fragment.push_metric("epoch", float(epoch_val), district)
+    if step_val is not None:
+        fragment.push_metric("step", float(step_val), district)
+
+    metrics = normalised.get("metrics")
+    if isinstance(metrics, Mapping):
+        step_time_ms = _as_float(metrics.get("step_time_ms"))
+        if step_time_ms is not None:
+            fragment.push_metric("step_time_ms", step_time_ms, district)
+        mem_peak_mb = _as_float(metrics.get("mem_peak_mb"))
+        if mem_peak_mb is not None:
+            fragment.push_metric("mem_peak_mb", mem_peak_mb, district)
+        retry_rate = _as_float(metrics.get("retry_rate"))
+        if retry_rate is not None:
+            fragment.push_metric("retry_rate", retry_rate, district)
+
+        extra = metrics.get("extra")
+        if isinstance(extra, Mapping):
+            for key, value in extra.items():
+                val = _as_float(value)
+                if val is None:
+                    continue
+                fragment.push_metric(str(key), float(val), district)
+
+    return fragment.to_frame()
+
+
 def zspace_trace_to_atlas_route(
     trace: str | Path | Iterable[Mapping[str, Any]],
     *,
@@ -180,3 +273,47 @@ def zspace_trace_to_atlas_route(
         route.push_bounded(frame, bound=int(bound))
     return route
 
+
+def trainer_events_to_atlas_route(
+    trace: str | Path | Iterable[Mapping[str, Any]],
+    *,
+    district: str = "Training",
+    bound: int = 512,
+    event_type: str = "TrainerStep",
+    timestamp_base: float | None = None,
+    step_seconds: float = 0.001,
+) -> Any:
+    """Convert a plugin-recorded JSONL (or iterable) into a telemetry.AtlasRoute.
+
+    This adapter targets `TrainerStep` events emitted by `nn.ModuleTrainer`.
+    """
+
+    import spiraltorch as st
+
+    if isinstance(trace, (str, Path)):
+        events: list[dict[str, Any]] = []
+        for item in _iter_jsonl(Path(trace)):
+            normalised = _normalise_trainer_step_event(item, event_type=event_type)
+            if normalised is not None:
+                events.append(normalised)
+    else:
+        events = []
+        for item in trace:
+            if isinstance(item, Mapping):
+                normalised = _normalise_trainer_step_event(item, event_type=event_type)
+                if normalised is not None:
+                    events.append(normalised)
+
+    route = st.telemetry.AtlasRoute()
+    base = time.time() if timestamp_base is None else float(timestamp_base)
+    for idx, event in enumerate(events):
+        frame = trainer_step_event_to_atlas_frame(
+            event,
+            district=district,
+            timestamp_base=base + float(idx) * max(0.0, float(step_seconds)),
+            step_seconds=step_seconds,
+        )
+        if frame is None:
+            continue
+        route.push_bounded(frame, bound=int(bound))
+    return route

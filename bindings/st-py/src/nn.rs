@@ -1,6 +1,8 @@
 use pyo3::prelude::*;
 #[cfg(feature = "nn")]
 use pyo3::types::PyAny;
+#[cfg(feature = "nn")]
+use pyo3::types::PyDict;
 use pyo3::types::PyModule;
 #[cfg(feature = "nn")]
 use pyo3::wrap_pyfunction;
@@ -27,13 +29,15 @@ use st_core::{
     util::math::{ramanujan_pi, LeechProjector},
 };
 #[cfg(feature = "nn")]
+use st_core::config::self_rewrite::SelfRewriteCfg;
+#[cfg(feature = "nn")]
 use st_nn::trainer::{
     CurvatureDecision as RustCurvatureDecision, CurvatureScheduler as RustCurvatureScheduler,
 };
 #[cfg(feature = "nn")]
 use st_nn::Loss;
 #[cfg(feature = "nn")]
-use st_nn::Module;
+use st_nn::{Module, Parameter};
 #[cfg(feature = "nn")]
 use st_nn::loss::{ContrastiveLoss, FocalLoss, TripletLoss};
 #[cfg(feature = "nn")]
@@ -41,6 +45,10 @@ use st_nn::{
     dataset::DataLoaderBatches,
     dataset_from_vec,
     CategoricalCrossEntropy, HyperbolicCrossEntropy, Linear, MeanSquaredError, Relu, Sequential,
+    ConceptHint, DesireAutomation, DesireLagrangian, DesirePhase, DesirePipeline,
+    DesireRoundtableBridge, DesireRoundtableSummary, DesireTelemetryBundle, DesireTrainerBridge,
+    DesireWeights, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry,
+    TemperatureController, WaveGate, WaveRnn, ZSpaceMixer, constant, warmup,
     EpochStats as RustEpochStats, ModuleTrainer as RustModuleTrainer, RoundtableConfig as RustRoundtableConfig,
     RoundtableSchedule as RustRoundtableSchedule,
     TextInfusionEvery, TextInfusionMode,
@@ -59,12 +67,16 @@ use st_nn::{
         PreDiscardSnapshot, PreDiscardTelemetry,
     },
     AvgPool2d, DataLoader, Dataset, MaxPool2d, ZRelativityModule, ZSpaceCoherenceSequencer,
-    ZSpaceTraceConfig, ZSpaceTraceRecorder,
+    ZSpaceTraceConfig, ZSpaceTraceRecorder, MellinBasis, ZSpaceVae, ZSpaceVaeState, ZSpaceVaeStats,
 };
+#[cfg(feature = "nn")]
+use nalgebra::DVector;
 #[cfg(feature = "nn")]
 use st_tensor::{OpenCartesianTopos, Tensor, TensorError};
 #[cfg(feature = "nn")]
 use pyo3::types::{PyIterator, PyList};
+#[cfg(feature = "nn")]
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[cfg(feature = "nn")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -142,7 +154,12 @@ impl Spatial3d {
 }
 
 #[cfg(feature = "nn")]
-#[derive(Clone, Copy)]
+fn dvector_to_vec(vector: &DVector<f64>) -> Vec<f64> {
+    vector.iter().copied().collect()
+}
+
+#[cfg(feature = "nn")]
+#[derive(Clone, Copy, Debug)]
 enum LayoutDirection {
     ToCanonical,
     FromCanonical,
@@ -1167,6 +1184,169 @@ impl PyEmbedding {
 }
 
 #[cfg(feature = "nn")]
+#[derive(Clone, Copy, Debug)]
+struct FeatureReorder2d {
+    dims: Spatial2d,
+    layout: Layout2d,
+    direction: LayoutDirection,
+}
+
+#[cfg(feature = "nn")]
+impl FeatureReorder2d {
+    fn opposite(self) -> Self {
+        let direction = match self.direction {
+            LayoutDirection::ToCanonical => LayoutDirection::FromCanonical,
+            LayoutDirection::FromCanonical => LayoutDirection::ToCanonical,
+        };
+        Self { direction, ..self }
+    }
+}
+
+#[cfg(feature = "nn")]
+impl Module for FeatureReorder2d {
+    fn forward(&self, input: &Tensor) -> Result<Tensor, TensorError> {
+        reorder_tensor_layout(input, self.dims, self.layout, self.direction)
+    }
+
+    fn backward(&mut self, _input: &Tensor, grad_output: &Tensor) -> Result<Tensor, TensorError> {
+        reorder_tensor_layout(
+            grad_output,
+            self.dims,
+            self.layout,
+            self.opposite().direction,
+        )
+    }
+
+    fn visit_parameters(
+        &self,
+        _visitor: &mut dyn FnMut(&Parameter) -> Result<(), TensorError>,
+    ) -> Result<(), TensorError> {
+        Ok(())
+    }
+
+    fn visit_parameters_mut(
+        &mut self,
+        _visitor: &mut dyn FnMut(&mut Parameter) -> Result<(), TensorError>,
+    ) -> Result<(), TensorError> {
+        Ok(())
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "FeatureReorder2d", unsendable)]
+pub(crate) struct PyFeatureReorder2d {
+    inner: Option<FeatureReorder2d>,
+}
+
+#[cfg(feature = "nn")]
+impl PyFeatureReorder2d {
+    fn inner(&self) -> PyResult<&FeatureReorder2d> {
+        self.inner.as_ref().ok_or_else(|| {
+            PyValueError::new_err(
+                "FeatureReorder2d was moved into a container and can no longer be used",
+            )
+        })
+    }
+
+    fn inner_mut(&mut self) -> PyResult<&mut FeatureReorder2d> {
+        self.inner.as_mut().ok_or_else(|| {
+            PyValueError::new_err(
+                "FeatureReorder2d was moved into a container and can no longer be used",
+            )
+        })
+    }
+
+    fn take_inner(&mut self) -> PyResult<FeatureReorder2d> {
+        self.inner.take().ok_or_else(|| {
+            PyValueError::new_err(
+                "FeatureReorder2d was moved into a container and can no longer be used",
+            )
+        })
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyFeatureReorder2d {
+    #[new]
+    #[pyo3(signature = (channels, height, width, *, layout="NCHW", direction="to_canonical"))]
+    pub fn new(
+        channels: usize,
+        height: usize,
+        width: usize,
+        layout: &str,
+        direction: &str,
+    ) -> PyResult<Self> {
+        let layout = Layout2d::parse(layout)?;
+        let direction = LayoutDirection::parse(direction)?;
+        Ok(Self {
+            inner: Some(FeatureReorder2d {
+                dims: Spatial2d::new(channels, height, width),
+                layout,
+                direction,
+            }),
+        })
+    }
+
+    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        let output = self
+            .inner()?
+            .forward(&input.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        let grad = self
+            .inner_mut()?
+            .backward(&input.inner, &grad_output.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(grad))
+    }
+
+    #[getter]
+    pub fn shape(&self) -> PyResult<(usize, usize, usize)> {
+        let inner = self.inner()?;
+        Ok((inner.dims.channels, inner.dims.height, inner.dims.width))
+    }
+
+    #[getter]
+    pub fn layout(&self) -> PyResult<&'static str> {
+        Ok(self.inner()?.layout.as_str())
+    }
+
+    #[getter]
+    pub fn direction(&self) -> PyResult<&'static str> {
+        Ok(match self.inner()?.direction {
+            LayoutDirection::ToCanonical => "to_canonical",
+            LayoutDirection::FromCanonical => "from_canonical",
+        })
+    }
+
+    #[pyo3(signature = (x))]
+    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(x)
+    }
+
+    fn __repr__(&self) -> String {
+        match self.inner.as_ref() {
+            Some(inner) => format!(
+                "FeatureReorder2d(shape=({}, {}, {}), layout='{}', direction='{}')",
+                inner.dims.channels,
+                inner.dims.height,
+                inner.dims.width,
+                inner.layout.as_str(),
+                match inner.direction {
+                    LayoutDirection::ToCanonical => "to_canonical",
+                    LayoutDirection::FromCanonical => "from_canonical",
+                }
+            ),
+            None => "FeatureReorder2d(moved)".to_string(),
+        }
+    }
+}
+
+#[cfg(feature = "nn")]
 #[pyclass(module = "spiraltorch.nn", name = "SpiralRnn", unsendable)]
 pub(crate) struct PySpiralRnn {
     inner: Option<RustSpiralRnn>,
@@ -1199,6 +1379,367 @@ impl PySpiralRnn {
     #[new]
     pub fn new(name: &str, input_dim: usize, hidden_dim: usize, steps: usize) -> PyResult<Self> {
         let inner = RustSpiralRnn::new(name, input_dim, hidden_dim, steps).map_err(tensor_err_to_py)?;
+        Ok(Self { inner: Some(inner) })
+    }
+
+    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        let output = self.inner()?.forward(&input.inner).map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        let grad = self
+            .inner_mut()?
+            .backward(&input.inner, &grad_output.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(grad))
+    }
+
+    #[pyo3(signature = (curvature, learning_rate, *, topos=None))]
+    pub fn attach_hypergrad(
+        &mut self,
+        curvature: f32,
+        learning_rate: f32,
+        topos: Option<&PyOpenCartesianTopos>,
+    ) -> PyResult<()> {
+        if let Some(topos) = topos {
+            self.inner_mut()?
+                .attach_hypergrad_with_topos(curvature, learning_rate, topos.inner.clone())
+                .map_err(tensor_err_to_py)
+        } else {
+            self.inner_mut()?
+                .attach_hypergrad(curvature, learning_rate)
+                .map_err(tensor_err_to_py)
+        }
+    }
+
+    pub fn attach_realgrad(&mut self, learning_rate: f32) -> PyResult<()> {
+        self.inner_mut()?
+            .attach_realgrad(learning_rate)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn zero_accumulators(&mut self) -> PyResult<()> {
+        self.inner_mut()?.zero_accumulators().map_err(tensor_err_to_py)
+    }
+
+    pub fn apply_step(&mut self, fallback_lr: f32) -> PyResult<()> {
+        self.inner_mut()?.apply_step(fallback_lr).map_err(tensor_err_to_py)
+    }
+
+    pub fn state_dict(&self) -> PyResult<Vec<(String, PyTensor)>> {
+        let mut entries: Vec<_> = self
+            .inner()?
+            .state_dict()
+            .map_err(tensor_err_to_py)?
+            .into_iter()
+            .collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(entries
+            .into_iter()
+            .map(|(name, tensor)| (name, PyTensor::from_tensor(tensor)))
+            .collect())
+    }
+
+    pub fn load_state_dict(&mut self, state: Vec<(String, PyTensor)>) -> PyResult<()> {
+        let mut map = std::collections::HashMap::new();
+        for (name, tensor) in state {
+            map.insert(name, tensor.inner.clone());
+        }
+        self.inner_mut()?
+            .load_state_dict(&map)
+            .map_err(tensor_err_to_py)
+    }
+
+    #[pyo3(signature = (x))]
+    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(x)
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "WaveGate", unsendable)]
+pub(crate) struct PyWaveGate {
+    inner: Option<WaveGate>,
+}
+
+#[cfg(feature = "nn")]
+impl PyWaveGate {
+    fn inner(&self) -> PyResult<&WaveGate> {
+        self.inner.as_ref().ok_or_else(|| {
+            PyValueError::new_err("WaveGate was moved into a container and can no longer be used")
+        })
+    }
+
+    fn inner_mut(&mut self) -> PyResult<&mut WaveGate> {
+        self.inner.as_mut().ok_or_else(|| {
+            PyValueError::new_err("WaveGate was moved into a container and can no longer be used")
+        })
+    }
+
+    fn take_inner(&mut self) -> PyResult<WaveGate> {
+        self.inner.take().ok_or_else(|| {
+            PyValueError::new_err("WaveGate was moved into a container and can no longer be used")
+        })
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyWaveGate {
+    #[new]
+    pub fn new(name: &str, features: usize, curvature: f32, temperature: f32) -> PyResult<Self> {
+        let inner = WaveGate::new(name, features, curvature, temperature).map_err(tensor_err_to_py)?;
+        Ok(Self { inner: Some(inner) })
+    }
+
+    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        let output = self.inner()?.forward(&input.inner).map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        let grad = self
+            .inner_mut()?
+            .backward(&input.inner, &grad_output.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(grad))
+    }
+
+    pub fn infuse_text(&mut self, text: &str) -> PyResult<()> {
+        self.inner_mut()?.infuse_text(text).map_err(tensor_err_to_py)
+    }
+
+    #[pyo3(signature = (curvature, learning_rate, *, topos=None))]
+    pub fn attach_hypergrad(
+        &mut self,
+        curvature: f32,
+        learning_rate: f32,
+        topos: Option<&PyOpenCartesianTopos>,
+    ) -> PyResult<()> {
+        if let Some(topos) = topos {
+            self.inner_mut()?
+                .attach_hypergrad_with_topos(curvature, learning_rate, topos.inner.clone())
+                .map_err(tensor_err_to_py)
+        } else {
+            self.inner_mut()?
+                .attach_hypergrad(curvature, learning_rate)
+                .map_err(tensor_err_to_py)
+        }
+    }
+
+    pub fn attach_realgrad(&mut self, learning_rate: f32) -> PyResult<()> {
+        self.inner_mut()?
+            .attach_realgrad(learning_rate)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn zero_accumulators(&mut self) -> PyResult<()> {
+        self.inner_mut()?.zero_accumulators().map_err(tensor_err_to_py)
+    }
+
+    pub fn apply_step(&mut self, fallback_lr: f32) -> PyResult<()> {
+        self.inner_mut()?.apply_step(fallback_lr).map_err(tensor_err_to_py)
+    }
+
+    pub fn state_dict(&self) -> PyResult<Vec<(String, PyTensor)>> {
+        let mut entries: Vec<_> = self
+            .inner()?
+            .state_dict()
+            .map_err(tensor_err_to_py)?
+            .into_iter()
+            .collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(entries
+            .into_iter()
+            .map(|(name, tensor)| (name, PyTensor::from_tensor(tensor)))
+            .collect())
+    }
+
+    pub fn load_state_dict(&mut self, state: Vec<(String, PyTensor)>) -> PyResult<()> {
+        let mut map = std::collections::HashMap::new();
+        for (name, tensor) in state {
+            map.insert(name, tensor.inner.clone());
+        }
+        self.inner_mut()?
+            .load_state_dict(&map)
+            .map_err(tensor_err_to_py)
+    }
+
+    #[pyo3(signature = (x))]
+    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(x)
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "WaveRnn", unsendable)]
+pub(crate) struct PyWaveRnn {
+    inner: Option<WaveRnn>,
+}
+
+#[cfg(feature = "nn")]
+impl PyWaveRnn {
+    fn inner(&self) -> PyResult<&WaveRnn> {
+        self.inner.as_ref().ok_or_else(|| {
+            PyValueError::new_err("WaveRnn was moved into a container and can no longer be used")
+        })
+    }
+
+    fn inner_mut(&mut self) -> PyResult<&mut WaveRnn> {
+        self.inner.as_mut().ok_or_else(|| {
+            PyValueError::new_err("WaveRnn was moved into a container and can no longer be used")
+        })
+    }
+
+    fn take_inner(&mut self) -> PyResult<WaveRnn> {
+        self.inner.take().ok_or_else(|| {
+            PyValueError::new_err("WaveRnn was moved into a container and can no longer be used")
+        })
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyWaveRnn {
+    #[new]
+    #[pyo3(signature = (name, in_channels, hidden_dim, kernel_size, curvature, temperature, *, stride=1, padding=0))]
+    pub fn new(
+        name: &str,
+        in_channels: usize,
+        hidden_dim: usize,
+        kernel_size: usize,
+        curvature: f32,
+        temperature: f32,
+        stride: usize,
+        padding: usize,
+    ) -> PyResult<Self> {
+        let inner = WaveRnn::new(
+            name,
+            in_channels,
+            hidden_dim,
+            kernel_size,
+            stride,
+            padding,
+            curvature,
+            temperature,
+        )
+        .map_err(tensor_err_to_py)?;
+        Ok(Self { inner: Some(inner) })
+    }
+
+    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        let output = self.inner()?.forward(&input.inner).map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        let grad = self
+            .inner_mut()?
+            .backward(&input.inner, &grad_output.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(grad))
+    }
+
+    pub fn infuse_text(&mut self, text: &str) -> PyResult<()> {
+        self.inner_mut()?.infuse_text(text).map_err(tensor_err_to_py)
+    }
+
+    #[pyo3(signature = (curvature, learning_rate, *, topos=None))]
+    pub fn attach_hypergrad(
+        &mut self,
+        curvature: f32,
+        learning_rate: f32,
+        topos: Option<&PyOpenCartesianTopos>,
+    ) -> PyResult<()> {
+        if let Some(topos) = topos {
+            self.inner_mut()?
+                .attach_hypergrad_with_topos(curvature, learning_rate, topos.inner.clone())
+                .map_err(tensor_err_to_py)
+        } else {
+            self.inner_mut()?
+                .attach_hypergrad(curvature, learning_rate)
+                .map_err(tensor_err_to_py)
+        }
+    }
+
+    pub fn attach_realgrad(&mut self, learning_rate: f32) -> PyResult<()> {
+        self.inner_mut()?
+            .attach_realgrad(learning_rate)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn zero_accumulators(&mut self) -> PyResult<()> {
+        self.inner_mut()?.zero_accumulators().map_err(tensor_err_to_py)
+    }
+
+    pub fn apply_step(&mut self, fallback_lr: f32) -> PyResult<()> {
+        self.inner_mut()?.apply_step(fallback_lr).map_err(tensor_err_to_py)
+    }
+
+    pub fn state_dict(&self) -> PyResult<Vec<(String, PyTensor)>> {
+        let mut entries: Vec<_> = self
+            .inner()?
+            .state_dict()
+            .map_err(tensor_err_to_py)?
+            .into_iter()
+            .collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(entries
+            .into_iter()
+            .map(|(name, tensor)| (name, PyTensor::from_tensor(tensor)))
+            .collect())
+    }
+
+    pub fn load_state_dict(&mut self, state: Vec<(String, PyTensor)>) -> PyResult<()> {
+        let mut map = std::collections::HashMap::new();
+        for (name, tensor) in state {
+            map.insert(name, tensor.inner.clone());
+        }
+        self.inner_mut()?
+            .load_state_dict(&map)
+            .map_err(tensor_err_to_py)
+    }
+
+    #[pyo3(signature = (x))]
+    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(x)
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "ZSpaceMixer", unsendable)]
+pub(crate) struct PyZSpaceMixer {
+    inner: Option<ZSpaceMixer>,
+}
+
+#[cfg(feature = "nn")]
+impl PyZSpaceMixer {
+    fn inner(&self) -> PyResult<&ZSpaceMixer> {
+        self.inner.as_ref().ok_or_else(|| {
+            PyValueError::new_err("ZSpaceMixer was moved into a container and can no longer be used")
+        })
+    }
+
+    fn inner_mut(&mut self) -> PyResult<&mut ZSpaceMixer> {
+        self.inner.as_mut().ok_or_else(|| {
+            PyValueError::new_err("ZSpaceMixer was moved into a container and can no longer be used")
+        })
+    }
+
+    fn take_inner(&mut self) -> PyResult<ZSpaceMixer> {
+        self.inner.take().ok_or_else(|| {
+            PyValueError::new_err("ZSpaceMixer was moved into a container and can no longer be used")
+        })
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyZSpaceMixer {
+    #[new]
+    pub fn new(name: &str, features: usize) -> PyResult<Self> {
+        let inner = ZSpaceMixer::new(name, features).map_err(tensor_err_to_py)?;
         Ok(Self { inner: Some(inner) })
     }
 
@@ -1681,7 +2222,35 @@ impl PySequential {
             return Ok(());
         }
 
+        if let Ok(handle) = layer.extract::<Py<PyFeatureReorder2d>>() {
+            let mut layer = handle.bind(py).borrow_mut();
+            let inner = layer.take_inner()?;
+            self.inner.push(inner);
+            return Ok(());
+        }
+
         if let Ok(handle) = layer.extract::<Py<PySpiralRnn>>() {
+            let mut layer = handle.bind(py).borrow_mut();
+            let inner = layer.take_inner()?;
+            self.inner.push(inner);
+            return Ok(());
+        }
+
+        if let Ok(handle) = layer.extract::<Py<PyWaveGate>>() {
+            let mut layer = handle.bind(py).borrow_mut();
+            let inner = layer.take_inner()?;
+            self.inner.push(inner);
+            return Ok(());
+        }
+
+        if let Ok(handle) = layer.extract::<Py<PyWaveRnn>>() {
+            let mut layer = handle.bind(py).borrow_mut();
+            let inner = layer.take_inner()?;
+            self.inner.push(inner);
+            return Ok(());
+        }
+
+        if let Ok(handle) = layer.extract::<Py<PyZSpaceMixer>>() {
             let mut layer = handle.bind(py).borrow_mut();
             let inner = layer.take_inner()?;
             self.inner.push(inner);
@@ -1797,7 +2366,7 @@ impl PySequential {
         }
 
         Err(PyTypeError::new_err(
-            "Sequential.add expects a spiraltorch.nn layer (supported: Linear, Embedding, SpiralRnn, ZSpaceSoftmax, ZSpaceCoherenceScan, ZSpaceCoherenceWaveBlock, Relu, Identity, NonLiner, Scaler, Dropout, Pool2d, ZPooling, ZConv, ZConv6DA)",
+            "Sequential.add expects a spiraltorch.nn layer (supported: Linear, Embedding, FeatureReorder2d, SpiralRnn, WaveGate, WaveRnn, ZSpaceMixer, ZSpaceSoftmax, ZSpaceCoherenceScan, ZSpaceCoherenceWaveBlock, Relu, Identity, NonLiner, Scaler, Dropout, Pool2d, ZPooling, ZConv, ZConv6DA)",
         ))
     }
 
@@ -2333,7 +2902,27 @@ fn with_module_ref<R>(
         let inner = model.inner()?;
         return f(inner).map_err(tensor_err_to_py);
     }
+    if let Ok(handle) = module.extract::<Py<PyFeatureReorder2d>>() {
+        let model = handle.bind(py).borrow();
+        let inner = model.inner()?;
+        return f(inner).map_err(tensor_err_to_py);
+    }
     if let Ok(handle) = module.extract::<Py<PySpiralRnn>>() {
+        let model = handle.bind(py).borrow();
+        let inner = model.inner()?;
+        return f(inner).map_err(tensor_err_to_py);
+    }
+    if let Ok(handle) = module.extract::<Py<PyWaveGate>>() {
+        let model = handle.bind(py).borrow();
+        let inner = model.inner()?;
+        return f(inner).map_err(tensor_err_to_py);
+    }
+    if let Ok(handle) = module.extract::<Py<PyWaveRnn>>() {
+        let model = handle.bind(py).borrow();
+        let inner = model.inner()?;
+        return f(inner).map_err(tensor_err_to_py);
+    }
+    if let Ok(handle) = module.extract::<Py<PyZSpaceMixer>>() {
         let model = handle.bind(py).borrow();
         let inner = model.inner()?;
         return f(inner).map_err(tensor_err_to_py);
@@ -2391,7 +2980,7 @@ fn with_module_ref<R>(
     }
 
     Err(PyTypeError::new_err(
-        "module must be a spiraltorch.nn module (supported: Linear, Embedding, SpiralRnn, ZSpaceSoftmax, ZSpaceCoherenceScan, ZSpaceCoherenceWaveBlock, Sequential, Identity, Relu, NonLiner, Scaler, Dropout, ZConv, ZConv6DA, ZRelativityModule)",
+        "module must be a spiraltorch.nn module (supported: Linear, Embedding, FeatureReorder2d, SpiralRnn, WaveGate, WaveRnn, ZSpaceMixer, ZSpaceSoftmax, ZSpaceCoherenceScan, ZSpaceCoherenceWaveBlock, Sequential, Identity, Relu, NonLiner, Scaler, Dropout, ZConv, ZConv6DA, ZRelativityModule)",
     ))
 }
 
@@ -2411,7 +3000,27 @@ fn with_module_mut<R>(
         let inner = model.inner_mut()?;
         return f(inner).map_err(tensor_err_to_py);
     }
+    if let Ok(handle) = module.extract::<Py<PyFeatureReorder2d>>() {
+        let mut model = handle.bind(py).borrow_mut();
+        let inner = model.inner_mut()?;
+        return f(inner).map_err(tensor_err_to_py);
+    }
     if let Ok(handle) = module.extract::<Py<PySpiralRnn>>() {
+        let mut model = handle.bind(py).borrow_mut();
+        let inner = model.inner_mut()?;
+        return f(inner).map_err(tensor_err_to_py);
+    }
+    if let Ok(handle) = module.extract::<Py<PyWaveGate>>() {
+        let mut model = handle.bind(py).borrow_mut();
+        let inner = model.inner_mut()?;
+        return f(inner).map_err(tensor_err_to_py);
+    }
+    if let Ok(handle) = module.extract::<Py<PyWaveRnn>>() {
+        let mut model = handle.bind(py).borrow_mut();
+        let inner = model.inner_mut()?;
+        return f(inner).map_err(tensor_err_to_py);
+    }
+    if let Ok(handle) = module.extract::<Py<PyZSpaceMixer>>() {
         let mut model = handle.bind(py).borrow_mut();
         let inner = model.inner_mut()?;
         return f(inner).map_err(tensor_err_to_py);
@@ -2469,7 +3078,7 @@ fn with_module_mut<R>(
     }
 
     Err(PyTypeError::new_err(
-        "module must be a spiraltorch.nn module (supported: Linear, Embedding, SpiralRnn, ZSpaceSoftmax, ZSpaceCoherenceScan, ZSpaceCoherenceWaveBlock, Sequential, Identity, Relu, NonLiner, Scaler, Dropout, ZConv, ZConv6DA, ZRelativityModule)",
+        "module must be a spiraltorch.nn module (supported: Linear, Embedding, FeatureReorder2d, SpiralRnn, WaveGate, WaveRnn, ZSpaceMixer, ZSpaceSoftmax, ZSpaceCoherenceScan, ZSpaceCoherenceWaveBlock, Sequential, Identity, Relu, NonLiner, Scaler, Dropout, ZConv, ZConv6DA, ZRelativityModule)",
     ))
 }
 
@@ -2695,8 +3304,557 @@ impl PyNnModuleTrainer {
         self.inner.clear_text_infusion();
     }
 
+    pub fn enable_desire_telemetry(&mut self, bundle: &PyDesireTelemetryBundle) -> PyResult<()> {
+        let rust_bundle = bundle.to_rust_bundle();
+        self.inner.enable_desire_telemetry(&rust_bundle);
+        Ok(())
+    }
+
+    pub fn disable_desire_roundtable_bridge(&mut self) {
+        self.inner.disable_desire_roundtable_bridge();
+    }
+
+    pub fn desire_roundtable_summary(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        let summary = self.inner.desire_roundtable_summary();
+        match summary {
+            Some(summary) => Ok(Some(desire_roundtable_summary_to_py(py, &summary)?)),
+            None => Ok(None),
+        }
+    }
+
     fn __repr__(&self) -> String {
         "ModuleTrainer(...)".to_string()
+    }
+}
+
+#[cfg(feature = "nn")]
+fn system_time_ms(timestamp: SystemTime) -> u128 {
+    timestamp
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::from_secs(0))
+        .as_millis()
+}
+
+#[cfg(feature = "nn")]
+fn desire_phase_label(phase: DesirePhase) -> &'static str {
+    match phase {
+        DesirePhase::Observation => "observation",
+        DesirePhase::Injection => "injection",
+        DesirePhase::Integration => "integration",
+    }
+}
+
+#[cfg(feature = "nn")]
+fn desire_weights_to_py(py: Python<'_>, weights: &DesireWeights) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("alpha", weights.alpha)?;
+    dict.set_item("beta", weights.beta)?;
+    dict.set_item("gamma", weights.gamma)?;
+    dict.set_item("lambda", weights.lambda)?;
+    Ok(dict.into_py(py))
+}
+
+#[cfg(feature = "nn")]
+fn desire_trainer_summary_to_py(py: Python<'_>, summary: &st_nn::DesireTrainerSummary) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("total", summary.total)?;
+    dict.set_item("observation", summary.observation)?;
+    dict.set_item("injection", summary.injection)?;
+    dict.set_item("integration", summary.integration)?;
+    dict.set_item("triggers", summary.triggers)?;
+    dict.set_item("mean_entropy", summary.mean_entropy)?;
+    dict.set_item("mean_temperature", summary.mean_temperature)?;
+    dict.set_item("mean_penalty", summary.mean_penalty)?;
+    dict.set_item("mean_alpha", summary.mean_alpha)?;
+    dict.set_item("mean_beta", summary.mean_beta)?;
+    dict.set_item("mean_gamma", summary.mean_gamma)?;
+    dict.set_item("mean_lambda", summary.mean_lambda)?;
+    dict.set_item("trigger_mean_penalty", summary.trigger_mean_penalty)?;
+    dict.set_item("trigger_mean_entropy", summary.trigger_mean_entropy)?;
+    dict.set_item("trigger_mean_temperature", summary.trigger_mean_temperature)?;
+    dict.set_item("trigger_mean_samples", summary.trigger_mean_samples)?;
+    Ok(dict.into_py(py))
+}
+
+#[cfg(feature = "nn")]
+fn desire_roundtable_summary_to_py(py: Python<'_>, summary: &DesireRoundtableSummary) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("steps", summary.steps)?;
+    dict.set_item("triggers", summary.triggers)?;
+    dict.set_item("mean_entropy", summary.mean_entropy)?;
+    dict.set_item("mean_temperature", summary.mean_temperature)?;
+    dict.set_item("mean_alpha", summary.mean_alpha)?;
+    dict.set_item("mean_beta", summary.mean_beta)?;
+    dict.set_item("mean_gamma", summary.mean_gamma)?;
+    dict.set_item("mean_lambda", summary.mean_lambda)?;
+    dict.set_item("mean_above", summary.mean_above)?;
+    dict.set_item("mean_here", summary.mean_here)?;
+    dict.set_item("mean_beneath", summary.mean_beneath)?;
+    dict.set_item("mean_drift", summary.mean_drift)?;
+    dict.set_item("last_timestamp_ms", system_time_ms(summary.last_timestamp))?;
+    Ok(dict.into_py(py))
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "DesireTrainerBridge", unsendable)]
+pub(crate) struct PyDesireTrainerBridge {
+    inner: DesireTrainerBridge,
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyDesireTrainerBridge {
+    #[new]
+    pub fn new() -> Self {
+        Self {
+            inner: DesireTrainerBridge::new(),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    pub fn drain_summary(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        let summary = self.inner.drain_summary().map_err(tensor_err_to_py)?;
+        match summary {
+            Some(summary) => Ok(Some(desire_trainer_summary_to_py(py, &summary)?)),
+            None => Ok(None),
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("DesireTrainerBridge(len={})", self.inner.len())
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "DesireRoundtableBridge", unsendable)]
+pub(crate) struct PyDesireRoundtableBridge {
+    inner: DesireRoundtableBridge,
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyDesireRoundtableBridge {
+    #[new]
+    #[pyo3(signature = (*, blend=0.35, drift_gain=0.35))]
+    pub fn new(blend: f32, drift_gain: f32) -> Self {
+        let mut inner = DesireRoundtableBridge::new();
+        inner.set_blend(blend);
+        inner.set_drift_gain(drift_gain);
+        Self { inner }
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    #[getter]
+    pub fn blend(&self) -> f32 {
+        self.inner.blend()
+    }
+
+    #[setter]
+    pub fn set_blend(&mut self, blend: f32) {
+        self.inner.set_blend(blend);
+    }
+
+    #[getter]
+    pub fn drift_gain(&self) -> f32 {
+        self.inner.drift_gain()
+    }
+
+    #[setter]
+    pub fn set_drift_gain(&mut self, drift_gain: f32) {
+        self.inner.set_drift_gain(drift_gain);
+    }
+
+    pub fn impulse(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        let impulse = self.inner.impulse().map_err(tensor_err_to_py)?;
+        let Some(impulse) = impulse else {
+            return Ok(None);
+        };
+        let dict = PyDict::new_bound(py);
+        dict.set_item(
+            "multipliers",
+            (
+                impulse.multipliers.0,
+                impulse.multipliers.1,
+                impulse.multipliers.2,
+            ),
+        )?;
+        dict.set_item("drift", impulse.drift)?;
+        dict.set_item("timestamp_ms", system_time_ms(impulse.timestamp))?;
+        Ok(Some(dict.into_py(py)))
+    }
+
+    pub fn drain_summary(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        let summary = self.inner.drain_summary().map_err(tensor_err_to_py)?;
+        match summary {
+            Some(summary) => Ok(Some(desire_roundtable_summary_to_py(py, &summary)?)),
+            None => Ok(None),
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "DesireRoundtableBridge(blend={}, drift_gain={}, len={})",
+            self.inner.blend(),
+            self.inner.drift_gain(),
+            self.inner.len()
+        )
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "DesireTelemetryBundle", unsendable)]
+pub(crate) struct PyDesireTelemetryBundle {
+    trainer: Option<DesireTrainerBridge>,
+    roundtable: Option<DesireRoundtableBridge>,
+}
+
+#[cfg(feature = "nn")]
+impl PyDesireTelemetryBundle {
+    fn to_rust_bundle(&self) -> DesireTelemetryBundle {
+        let mut bundle = DesireTelemetryBundle::new();
+        if let Some(bridge) = self.trainer.as_ref() {
+            bundle = bundle.with_trainer_bridge(bridge);
+        }
+        if let Some(bridge) = self.roundtable.as_ref() {
+            bundle = bundle.with_roundtable_bridge(bridge);
+        }
+        bundle
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyDesireTelemetryBundle {
+    #[new]
+    #[pyo3(signature = (*, trainer=true, roundtable=true, blend=0.35, drift_gain=0.35))]
+    pub fn new(trainer: bool, roundtable: bool, blend: f32, drift_gain: f32) -> Self {
+        let trainer_bridge = trainer.then(DesireTrainerBridge::new);
+        let roundtable_bridge = roundtable.then(|| {
+            let mut bridge = DesireRoundtableBridge::new();
+            bridge.set_blend(blend);
+            bridge.set_drift_gain(drift_gain);
+            bridge
+        });
+        Self {
+            trainer: trainer_bridge,
+            roundtable: roundtable_bridge,
+        }
+    }
+
+    pub fn has_trainer(&self) -> bool {
+        self.trainer.is_some()
+    }
+
+    pub fn has_roundtable(&self) -> bool {
+        self.roundtable.is_some()
+    }
+
+    pub fn trainer_bridge(&self, py: Python<'_>) -> PyResult<Option<Py<PyDesireTrainerBridge>>> {
+        match self.trainer.as_ref() {
+            Some(bridge) => Ok(Some(Py::new(
+                py,
+                PyDesireTrainerBridge {
+                    inner: bridge.clone(),
+                },
+            )?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn roundtable_bridge(&self, py: Python<'_>) -> PyResult<Option<Py<PyDesireRoundtableBridge>>> {
+        match self.roundtable.as_ref() {
+            Some(bridge) => Ok(Some(Py::new(
+                py,
+                PyDesireRoundtableBridge {
+                    inner: bridge.clone(),
+                },
+            )?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn drain_trainer_summary(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        let Some(bridge) = self.trainer.as_ref() else {
+            return Ok(None);
+        };
+        let summary = bridge.drain_summary().map_err(tensor_err_to_py)?;
+        match summary {
+            Some(summary) => Ok(Some(desire_trainer_summary_to_py(py, &summary)?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn drain_roundtable_summary(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        let Some(bridge) = self.roundtable.as_ref() else {
+            return Ok(None);
+        };
+        let summary = bridge.drain_summary().map_err(tensor_err_to_py)?;
+        match summary {
+            Some(summary) => Ok(Some(desire_roundtable_summary_to_py(py, &summary)?)),
+            None => Ok(None),
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "DesireTelemetryBundle(trainer={}, roundtable={})",
+            self.trainer.is_some(),
+            self.roundtable.is_some()
+        )
+    }
+}
+
+#[cfg(feature = "nn")]
+fn build_simple_desire_automation(
+    vocab_size: usize,
+    concepts: usize,
+    alpha_end: f32,
+    beta_end: f32,
+    gamma: f32,
+    lambda_: f32,
+    observation_horizon: Option<u64>,
+    integration_horizon: Option<u64>,
+    target_entropy: f32,
+    eta: f32,
+    temp_min: f32,
+    temp_max: f32,
+    score_thresh: f32,
+    min_samples: usize,
+    cooldown_sec: u64,
+) -> Result<DesireAutomation, TensorError> {
+    if vocab_size == 0 {
+        return Err(TensorError::InvalidValue {
+            label: "vocab_size must be >= 1",
+        });
+    }
+    if concepts == 0 {
+        return Err(TensorError::InvalidValue {
+            label: "concepts must be >= 1",
+        });
+    }
+
+    let epsilon = 1e-6;
+    let syn = SparseKernel::from_rows(
+        (0..vocab_size).map(|i| vec![(i, 1.0)]).collect(),
+        epsilon,
+    )?;
+    let par = SparseKernel::from_rows(
+        (0..vocab_size).map(|i| vec![(i, 1.0)]).collect(),
+        epsilon,
+    )?;
+    let geometry = SymbolGeometry::new(syn, par)?;
+
+    let repression =
+        RepressionField::new((0..vocab_size).map(|i| 0.05 + (i % 7) as f32 * 0.01).collect())?;
+
+    let concept_kernel = SparseKernel::from_rows(
+        (0..concepts).map(|i| vec![(i, 1.0)]).collect(),
+        epsilon,
+    )?;
+
+    let primary: f32 = if concepts == 1 { 1.0 } else { 0.72 };
+    let secondary: f32 = if concepts == 1 { 0.0 } else { 0.28 };
+    let mut log_pi: Vec<Vec<(usize, f32)>> = Vec::with_capacity(vocab_size);
+    let mut row_sums: Vec<f32> = Vec::with_capacity(vocab_size);
+    let mut col_sums = vec![0.0f32; concepts];
+    for token in 0..vocab_size {
+        let mut row: Vec<(usize, f32)> = Vec::with_capacity(if concepts == 1 { 1 } else { 2 });
+        let a = token % concepts;
+        row.push((a, primary.max(f32::EPSILON).ln()));
+        col_sums[a] += primary;
+        if concepts > 1 {
+            let b = (token + 1) % concepts;
+            if b != a {
+                row.push((b, secondary.max(f32::EPSILON).ln()));
+                col_sums[b] += secondary;
+            } else {
+                col_sums[a] += secondary;
+            }
+        }
+        log_pi.push(row);
+        row_sums.push(1.0);
+    }
+    for sum in &mut col_sums {
+        if *sum <= 0.0 {
+            *sum = 1.0;
+        }
+    }
+
+    let anchors = std::collections::HashSet::new();
+    let semantics = SemanticBridge::new(log_pi, row_sums, col_sums, anchors, epsilon, concept_kernel)?;
+    let controller = TemperatureController::new(1.0, target_entropy, eta, temp_min, temp_max);
+    let desire = DesireLagrangian::new(geometry, repression, semantics, controller)?
+        .with_alpha_schedule(warmup(0.0, alpha_end, 1))
+        .with_beta_schedule(warmup(0.0, beta_end, 1))
+        .with_gamma_schedule(constant(gamma))
+        .with_lambda_schedule(constant(lambda_))
+        .with_observation_horizon(observation_horizon)
+        .with_integration_horizon(integration_horizon);
+
+    let cfg = SelfRewriteCfg {
+        score_thresh,
+        min_samples: min_samples.max(1),
+        cooldown_sec,
+    };
+    Ok(DesireAutomation::new(desire, cfg))
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "DesirePipeline", unsendable)]
+pub(crate) struct PyDesirePipeline {
+    inner: DesirePipeline,
+    vocab_size: usize,
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyDesirePipeline {
+    #[new]
+    #[pyo3(signature = (
+        vocab_size,
+        *,
+        concepts=3,
+        alpha_end=0.2,
+        beta_end=0.1,
+        gamma=0.04,
+        lambda_=0.02,
+        observation_horizon=1,
+        integration_horizon=2,
+        target_entropy=0.8,
+        eta=0.4,
+        temp_min=0.4,
+        temp_max=1.6,
+        score_thresh=0.0,
+        min_samples=2,
+        cooldown_sec=0,
+        bundle=None
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        vocab_size: usize,
+        concepts: usize,
+        alpha_end: f32,
+        beta_end: f32,
+        gamma: f32,
+        lambda_: f32,
+        observation_horizon: u64,
+        integration_horizon: u64,
+        target_entropy: f32,
+        eta: f32,
+        temp_min: f32,
+        temp_max: f32,
+        score_thresh: f32,
+        min_samples: usize,
+        cooldown_sec: u64,
+        bundle: Option<&PyDesireTelemetryBundle>,
+    ) -> PyResult<Self> {
+        let automation = build_simple_desire_automation(
+            vocab_size,
+            concepts,
+            alpha_end,
+            beta_end,
+            gamma,
+            lambda_,
+            Some(observation_horizon),
+            Some(integration_horizon),
+            target_entropy,
+            eta,
+            temp_min,
+            temp_max,
+            score_thresh,
+            min_samples,
+            cooldown_sec,
+        )
+        .map_err(tensor_err_to_py)?;
+
+        let mut builder = DesirePipeline::builder(automation);
+        if let Some(bundle) = bundle {
+            let rust_bundle = bundle.to_rust_bundle();
+            builder = builder.with_telemetry_bundle(&rust_bundle);
+        }
+        let pipeline = builder.build();
+        Ok(Self {
+            inner: pipeline,
+            vocab_size,
+        })
+    }
+
+    pub fn sink_count(&self) -> usize {
+        self.inner.sink_count()
+    }
+
+    #[pyo3(signature = (logits, previous_token, concept=None))]
+    pub fn step(
+        &mut self,
+        py: Python<'_>,
+        logits: Vec<f32>,
+        previous_token: usize,
+        concept: Option<Vec<f32>>,
+    ) -> PyResult<PyObject> {
+        if logits.len() != self.vocab_size {
+            return Err(PyValueError::new_err(format!(
+                "logits length mismatch (expected {}, got {})",
+                self.vocab_size,
+                logits.len()
+            )));
+        }
+        if previous_token >= self.vocab_size {
+            return Err(PyValueError::new_err(format!(
+                "previous_token out of range (expected < {}, got {})",
+                self.vocab_size, previous_token
+            )));
+        }
+        let concept_hint = ConceptHint::Distribution(concept.unwrap_or_default());
+        let step = self
+            .inner
+            .step_realtime(&logits, previous_token, &concept_hint)
+            .map_err(tensor_err_to_py)?;
+
+        let dict = PyDict::new_bound(py);
+        dict.set_item("phase", desire_phase_label(step.solution.phase))?;
+        dict.set_item("temperature", step.solution.temperature)?;
+        dict.set_item("entropy", step.solution.entropy)?;
+        dict.set_item("hypergrad_penalty", step.solution.hypergrad_penalty)?;
+        dict.set_item("weights", desire_weights_to_py(py, &step.solution.weights)?)?;
+        dict.set_item("indices", step.solution.indices.clone())?;
+        dict.set_item("probabilities", step.solution.probabilities.clone())?;
+        dict.set_item("logit_offsets", step.solution.logit_offsets.clone())?;
+        dict.set_item("triggered", step.trigger.is_some())?;
+        if let Some(trigger) = step.trigger.as_ref() {
+            let trig = PyDict::new_bound(py);
+            trig.set_item("mean_penalty", trigger.mean_penalty)?;
+            trig.set_item("mean_entropy", trigger.mean_entropy)?;
+            trig.set_item("temperature", trigger.temperature)?;
+            trig.set_item("samples", trigger.samples)?;
+            dict.set_item("trigger", trig)?;
+        }
+        Ok(dict.into_py(py))
+    }
+
+    pub fn flush(&mut self) -> PyResult<()> {
+        self.inner.flush().map_err(tensor_err_to_py)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "DesirePipeline(vocab_size={}, sinks={})",
+            self.vocab_size,
+            self.inner.sink_count()
+        )
     }
 }
 
@@ -4662,6 +5820,265 @@ impl PyZSpaceTraceRecorder {
 }
 
 #[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "MellinBasis", unsendable)]
+pub(crate) struct PyMellinBasis {
+    inner: MellinBasis,
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyMellinBasis {
+    #[new]
+    pub fn new(exponents: Vec<f64>) -> Self {
+        Self {
+            inner: MellinBasis::new(exponents),
+        }
+    }
+
+    pub fn project(&self, input: Vec<f64>) -> Vec<f64> {
+        let vector = DVector::from_vec(input);
+        let projected = self.inner.project(&vector);
+        dvector_to_vec(&projected)
+    }
+
+    #[getter]
+    pub fn dimension(&self) -> usize {
+        self.inner.dimension()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("MellinBasis(dim={})", self.inner.dimension())
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "ZSpaceVaeStats", unsendable)]
+pub(crate) struct PyZSpaceVaeStats {
+    inner: ZSpaceVaeStats,
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyZSpaceVaeStats {
+    #[getter]
+    pub fn recon_loss(&self) -> f64 {
+        self.inner.recon_loss
+    }
+
+    #[getter]
+    pub fn kl_loss(&self) -> f64 {
+        self.inner.kl_loss
+    }
+
+    #[getter]
+    pub fn evidence_lower_bound(&self) -> f64 {
+        self.inner.evidence_lower_bound
+    }
+
+    #[getter]
+    pub fn target(&self) -> Vec<f64> {
+        dvector_to_vec(&self.inner.target)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "ZSpaceVaeStats(recon_loss={:.6}, kl_loss={:.6}, elbo={:.6})",
+            self.inner.recon_loss, self.inner.kl_loss, self.inner.evidence_lower_bound
+        )
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "ZSpaceVaeState", unsendable)]
+pub(crate) struct PyZSpaceVaeState {
+    inner: ZSpaceVaeState,
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyZSpaceVaeState {
+    #[getter]
+    pub fn latent(&self) -> Vec<f64> {
+        dvector_to_vec(&self.inner.latent)
+    }
+
+    #[getter]
+    pub fn reconstruction(&self) -> Vec<f64> {
+        dvector_to_vec(&self.inner.reconstruction)
+    }
+
+    #[getter]
+    pub fn mu(&self) -> Vec<f64> {
+        dvector_to_vec(&self.inner.mu)
+    }
+
+    #[getter]
+    pub fn logvar(&self) -> Vec<f64> {
+        dvector_to_vec(&self.inner.logvar)
+    }
+
+    #[getter]
+    pub fn stats(&self) -> PyZSpaceVaeStats {
+        PyZSpaceVaeStats {
+            inner: self.inner.stats.clone(),
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "ZSpaceVaeState(input_dim={}, latent_dim={})",
+            self.inner.reconstruction.len(),
+            self.inner.latent.len()
+        )
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "ZSpaceVae", unsendable)]
+pub(crate) struct PyZSpaceVae {
+    inner: ZSpaceVae,
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyZSpaceVae {
+    #[new]
+    #[pyo3(signature = (input_dim, latent_dim, seed=42))]
+    pub fn new(input_dim: usize, latent_dim: usize, seed: u64) -> Self {
+        Self {
+            inner: ZSpaceVae::new(input_dim, latent_dim, seed),
+        }
+    }
+
+    #[getter]
+    pub fn input_dim(&self) -> usize {
+        self.inner.input_dim()
+    }
+
+    #[getter]
+    pub fn latent_dim(&self) -> usize {
+        self.inner.latent_dim()
+    }
+
+    pub fn forward(&mut self, input: Vec<f64>) -> PyResult<PyZSpaceVaeState> {
+        if input.len() != self.inner.input_dim() {
+            return Err(PyValueError::new_err(format!(
+                "input length mismatch (expected {}, got {})",
+                self.inner.input_dim(),
+                input.len()
+            )));
+        }
+        let vec = DVector::from_vec(input);
+        let state = self.inner.forward(&vec);
+        Ok(PyZSpaceVaeState { inner: state })
+    }
+
+    pub fn encode(&self, input: Vec<f64>) -> PyResult<(Vec<f64>, Vec<f64>)> {
+        if input.len() != self.inner.input_dim() {
+            return Err(PyValueError::new_err(format!(
+                "input length mismatch (expected {}, got {})",
+                self.inner.input_dim(),
+                input.len()
+            )));
+        }
+        let vec = DVector::from_vec(input);
+        let (mu, logvar) = self.inner.encode(&vec);
+        Ok((dvector_to_vec(&mu), dvector_to_vec(&logvar)))
+    }
+
+    pub fn encode_with_mellin(
+        &self,
+        input: Vec<f64>,
+        basis: &PyMellinBasis,
+    ) -> PyResult<(Vec<f64>, Vec<f64>)> {
+        if input.len() != self.inner.input_dim() {
+            return Err(PyValueError::new_err(format!(
+                "input length mismatch (expected {}, got {})",
+                self.inner.input_dim(),
+                input.len()
+            )));
+        }
+        let vec = DVector::from_vec(input);
+        let (mu, logvar) = self.inner.encode_with_mellin(&vec, &basis.inner);
+        Ok((dvector_to_vec(&mu), dvector_to_vec(&logvar)))
+    }
+
+    pub fn sample_latent(
+        &mut self,
+        mu: Vec<f64>,
+        logvar: Vec<f64>,
+    ) -> PyResult<Vec<f64>> {
+        if mu.len() != self.inner.latent_dim() || logvar.len() != self.inner.latent_dim() {
+            return Err(PyValueError::new_err(format!(
+                "latent length mismatch (expected {}, got mu={}, logvar={})",
+                self.inner.latent_dim(),
+                mu.len(),
+                logvar.len()
+            )));
+        }
+        let mu = DVector::from_vec(mu);
+        let logvar = DVector::from_vec(logvar);
+        let sample = self.inner.sample_latent(&mu, &logvar);
+        Ok(dvector_to_vec(&sample))
+    }
+
+    pub fn mean_latent(&self, mu: Vec<f64>) -> PyResult<Vec<f64>> {
+        if mu.len() != self.inner.latent_dim() {
+            return Err(PyValueError::new_err(format!(
+                "latent length mismatch (expected {}, got {})",
+                self.inner.latent_dim(),
+                mu.len()
+            )));
+        }
+        let mu = DVector::from_vec(mu);
+        let latent = self.inner.mean_latent(&mu);
+        Ok(dvector_to_vec(&latent))
+    }
+
+    pub fn decode(&self, latent: Vec<f64>) -> PyResult<Vec<f64>> {
+        if latent.len() != self.inner.latent_dim() {
+            return Err(PyValueError::new_err(format!(
+                "latent length mismatch (expected {}, got {})",
+                self.inner.latent_dim(),
+                latent.len()
+            )));
+        }
+        let latent = DVector::from_vec(latent);
+        let decoded = self.inner.decode(&latent);
+        Ok(dvector_to_vec(&decoded))
+    }
+
+    pub fn decode_with_mellin(
+        &self,
+        latent: Vec<f64>,
+        basis: &PyMellinBasis,
+    ) -> PyResult<Vec<f64>> {
+        if latent.len() != self.inner.latent_dim() {
+            return Err(PyValueError::new_err(format!(
+                "latent length mismatch (expected {}, got {})",
+                self.inner.latent_dim(),
+                latent.len()
+            )));
+        }
+        let latent = DVector::from_vec(latent);
+        let decoded = self.inner.decode_with_mellin(&latent, &basis.inner);
+        Ok(dvector_to_vec(&decoded))
+    }
+
+    pub fn refine_decoder(&mut self, state: &PyZSpaceVaeState, learning_rate: f64) {
+        self.inner.refine_decoder(&state.inner, learning_rate);
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "ZSpaceVae(input_dim={}, latent_dim={})",
+            self.inner.input_dim(),
+            self.inner.latent_dim()
+        )
+    }
+}
+
+#[cfg(feature = "nn")]
 #[pyclass(module = "spiraltorch.nn", name = "ZRelativityModule", unsendable)]
 pub(crate) struct PyZRelativityModule {
     pub(crate) inner: ZRelativityModule,
@@ -4910,7 +6327,11 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyIdentity>()?;
     module.add_class::<PyLinear>()?;
     module.add_class::<PyEmbedding>()?;
+    module.add_class::<PyFeatureReorder2d>()?;
     module.add_class::<PySpiralRnn>()?;
+    module.add_class::<PyWaveGate>()?;
+    module.add_class::<PyWaveRnn>()?;
+    module.add_class::<PyZSpaceMixer>()?;
     module.add_class::<PyZSpaceSoftmax>()?;
     module.add_class::<PyZSpaceCoherenceScan>()?;
     module.add_class::<PyZSpaceCoherenceWaveBlock>()?;
@@ -4929,6 +6350,10 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyRoundtableSchedule>()?;
     module.add_class::<PyEpochStats>()?;
     module.add_class::<PyNnModuleTrainer>()?;
+    module.add_class::<PyDesireTrainerBridge>()?;
+    module.add_class::<PyDesireRoundtableBridge>()?;
+    module.add_class::<PyDesireTelemetryBundle>()?;
+    module.add_class::<PyDesirePipeline>()?;
     module.add_class::<PyNonLiner>()?;
     module.add_class::<PyScaler>()?;
     module.add_class::<PyZConv>()?;
@@ -4956,6 +6381,10 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyCoherenceDiagnostics>()?;
     module.add_class::<PyZSpaceCoherenceSequencer>()?;
     module.add_class::<PyZSpaceTraceRecorder>()?;
+    module.add_class::<PyMellinBasis>()?;
+    module.add_class::<PyZSpaceVae>()?;
+    module.add_class::<PyZSpaceVaeState>()?;
+    module.add_class::<PyZSpaceVaeStats>()?;
     module.add_class::<PyZRelativityModule>()?;
     module.add_class::<PyCurvatureScheduler>()?;
     module.add_class::<PyCurvatureDecision>()?;
@@ -4966,7 +6395,11 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
             "Identity",
             "Linear",
             "Embedding",
+            "FeatureReorder2d",
             "SpiralRnn",
+            "WaveGate",
+            "WaveRnn",
+            "ZSpaceMixer",
             "ZSpaceSoftmax",
             "ZSpaceCoherenceScan",
             "ZSpaceCoherenceWaveBlock",
@@ -4983,6 +6416,10 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
             "RoundtableSchedule",
             "EpochStats",
             "ModuleTrainer",
+            "DesireTrainerBridge",
+            "DesireRoundtableBridge",
+            "DesireTelemetryBundle",
+            "DesirePipeline",
             "save_json",
             "load_json",
             "save_bincode",
@@ -5004,6 +6441,10 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
             "PreDiscardSnapshot",
             "ZSpaceCoherenceSequencer",
             "ZSpaceTraceRecorder",
+            "MellinBasis",
+            "ZSpaceVae",
+            "ZSpaceVaeState",
+            "ZSpaceVaeStats",
             "ZRelativityModule",
             "CurvatureScheduler",
             "CurvatureDecision",
@@ -5044,6 +6485,18 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     if let Ok(zpool) = module.getattr("ZPooling") {
         parent.add("ZPooling", zpool)?;
     }
+    if let Ok(reorder) = module.getattr("FeatureReorder2d") {
+        parent.add("FeatureReorder2d", reorder)?;
+    }
+    if let Ok(wave_gate) = module.getattr("WaveGate") {
+        parent.add("WaveGate", wave_gate)?;
+    }
+    if let Ok(wave_rnn) = module.getattr("WaveRnn") {
+        parent.add("WaveRnn", wave_rnn)?;
+    }
+    if let Ok(mixer) = module.getattr("ZSpaceMixer") {
+        parent.add("ZSpaceMixer", mixer)?;
+    }
     if let Ok(dropout) = module.getattr("Dropout") {
         parent.add("Dropout", dropout)?;
     }
@@ -5055,6 +6508,12 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     }
     if let Ok(recorder) = module.getattr("ZSpaceTraceRecorder") {
         parent.add("ZSpaceTraceRecorder", recorder)?;
+    }
+    if let Ok(basis) = module.getattr("MellinBasis") {
+        parent.add("MellinBasis", basis)?;
+    }
+    if let Ok(vae) = module.getattr("ZSpaceVae") {
+        parent.add("ZSpaceVae", vae)?;
     }
     if let Ok(scheduler) = module.getattr("CurvatureScheduler") {
         parent.add("CurvatureScheduler", scheduler)?;

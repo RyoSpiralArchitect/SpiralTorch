@@ -48,6 +48,10 @@ NumPy, no PyTorch, and no shim layers.
 - Direct access to the core A/B/C roundtable trainer via
   `spiraltorch.nn.ModuleTrainer` (`RoundtableConfig`, `RoundtableSchedule`,
   `EpochStats`).
+- Attentionless sequence layers via `spiraltorch.nn`—`WaveRnn`, `WaveGate`,
+  `ZSpaceMixer`, and `FeatureReorder2d` for Conv/RNN-style language baselines.
+- Coherence VAE primitives via `spiraltorch.nn`—`MellinBasis` and `ZSpaceVae`
+  for reconstruction loops (and Atlas-ready telemetry).
 - Streaming dataset helpers via `spiraltorch.dataset`—build a
   shuffle/batch/prefetch pipeline entirely in Rust using the native
   `DataLoader`.
@@ -62,6 +66,8 @@ NumPy, no PyTorch, and no shim layers.
 - Z-space projector bindings (`spiraltorch.nn.ZSpaceProjector`) so spiral
   trajectories can be rendered onto the canvas or reused inside sequential
   transformer stacks.
+- Atlas adapters (`spiraltorch.zspace_atlas`) to convert JSONL traces + trainer
+  events into `telemetry.AtlasRoute` summaries.
 - Deployment and optimisation bridges via `spiraltorch.integrations`: archive
   TorchServe models, persist BentoML runners, explore hyperparameters with
   Optuna or Ray Tune, and export trained modules to ONNX—all behind ergonomic

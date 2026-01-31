@@ -2059,6 +2059,60 @@ class PreDiscardPolicy:
     min_channels: int
 
 
+class MellinBasis:
+    def __init__(self, exponents: Sequence[float]) -> None: ...
+
+    def project(self, input: Sequence[float]) -> List[float]: ...
+
+    @property
+    def dimension(self) -> int: ...
+
+
+class ZSpaceVaeStats:
+    recon_loss: float
+    kl_loss: float
+    evidence_lower_bound: float
+    target: List[float]
+
+
+class ZSpaceVaeState:
+    latent: List[float]
+    reconstruction: List[float]
+    mu: List[float]
+    logvar: List[float]
+    stats: ZSpaceVaeStats
+
+
+class ZSpaceVae:
+    def __init__(self, input_dim: int, latent_dim: int, seed: int = ...) -> None: ...
+
+    def forward(self, input: Sequence[float]) -> ZSpaceVaeState: ...
+
+    def encode(self, input: Sequence[float]) -> Tuple[List[float], List[float]]: ...
+
+    def encode_with_mellin(
+        self,
+        input: Sequence[float],
+        basis: MellinBasis,
+    ) -> Tuple[List[float], List[float]]: ...
+
+    def sample_latent(self, mu: Sequence[float], logvar: Sequence[float]) -> List[float]: ...
+
+    def mean_latent(self, mu: Sequence[float]) -> List[float]: ...
+
+    def decode(self, latent: Sequence[float]) -> List[float]: ...
+
+    def decode_with_mellin(self, latent: Sequence[float], basis: MellinBasis) -> List[float]: ...
+
+    def refine_decoder(self, state: ZSpaceVaeState, learning_rate: float) -> None: ...
+
+    @property
+    def input_dim(self) -> int: ...
+
+    @property
+    def latent_dim(self) -> int: ...
+
+
 class ZConv:
     def __init__(
         self,
@@ -2819,6 +2873,10 @@ class _NnModule(ModuleType):
     PreDiscardTelemetry: type[PreDiscardTelemetry]
     PreDiscardPolicy: type[PreDiscardPolicy]
     PreDiscardSnapshot: type[PreDiscardSnapshot]
+    MellinBasis: type[MellinBasis]
+    ZSpaceVae: type[ZSpaceVae]
+    ZSpaceVaeState: type[ZSpaceVaeState]
+    ZSpaceVaeStats: type[ZSpaceVaeStats]
     ZRelativityModule: type[ZRelativityModule]
     ZConv: type[ZConv]
     ZPooling: type[ZPooling]

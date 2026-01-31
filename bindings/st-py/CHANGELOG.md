@@ -1,5 +1,18 @@
 # SpiralTorch (Python) changelog
 
+## 0.4.1
+
+- Model zoo: add runnable Python baselines for `vision_conv_pool_classification.py` and `zspace_vae_reconstruction.py`.
+- `nn`: expose `MellinBasis` + `ZSpaceVae` for the Coherence VAE reconstruction loop.
+
+## 0.4.0
+
+- DesirePipeline: surface `indices`/`probabilities`/`logit_offsets` in `step(...)` so callers can apply desire feedback during sampling.
+- Model zoo: new attentionless character LLM baseline (`llm_char_wave_rnn_mixer.py`) built from `WaveRnn` + `ZSpaceMixer` + `WaveGate`.
+- `nn`: expose `WaveGate`, `WaveRnn`, `ZSpaceMixer`, and `FeatureReorder2d` in the Python bindings.
+- Dev: when running from a source checkout, auto-load the freshest native extension from `target/` after `cargo build -p spiraltorch-py`.
+- Telemetry: add `trainer_events_to_atlas_route(...)` helpers and export them from `spiraltorch`.
+
 ## 0.3.9
 
 - WGPU: remove unsupported WGSL `enable ...;` directives and harden compute-pipeline creation against validation panics.
