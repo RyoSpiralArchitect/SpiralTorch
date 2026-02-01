@@ -290,8 +290,8 @@ fn assemble_pzeta(
 
 #[pyclass(module = "spiraltorch.frac", name = "MellinLogGrid")]
 #[derive(Clone, Debug)]
-struct PyMellinLogGrid {
-    inner: MellinLogGrid,
+pub(crate) struct PyMellinLogGrid {
+    pub(crate) inner: MellinLogGrid,
 }
 
 #[pymethods]

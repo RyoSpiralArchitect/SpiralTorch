@@ -11,7 +11,7 @@ use st_tensor::measure::{
 use st_tensor::{
     AmegaHypergrad, AmegaRealgrad, Complex32 as StComplex32, ComplexTensor, DesireGradientControl,
     DesireGradientInterpretation, GradientSummary, HypergradTelemetry, LanguageWaveEncoder,
-    OpenCartesianTopos, Tensor, TensorBiome,
+    OpenCartesianTopos, Tensor, TensorBiome, ZBox, ZBoxSite,
 };
 
 fn py_complex_to_st(values: Vec<PyComplex32>) -> Vec<StComplex32> {
@@ -143,6 +143,128 @@ impl PyOpenCartesianTopos {
 
     pub fn saturate(&self, value: f32) -> f32 {
         self.inner.saturate(value)
+    }
+
+    pub fn site(&self) -> PyResult<PyZBoxSite> {
+        Ok(PyZBoxSite::from_site(self.inner.site().clone()))
+    }
+
+    pub fn guard_zbox(&self, zbox: &PyZBox) -> PyResult<()> {
+        self.inner.guard_zbox(&zbox.inner).map_err(tensor_err_to_py)
+    }
+
+    pub fn guard_cover(&self, cover: Vec<Py<PyZBox>>, py: Python<'_>) -> PyResult<()> {
+        let mut boxes = Vec::with_capacity(cover.len());
+        for handle in cover {
+            boxes.push(handle.borrow(py).inner.clone());
+        }
+        self.inner.guard_cover(&boxes).map_err(tensor_err_to_py)
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ZBox")]
+#[derive(Clone)]
+pub(crate) struct PyZBox {
+    inner: ZBox,
+    centers: Vec<Vec<f32>>,
+    radii: Vec<f32>,
+}
+
+#[pymethods]
+impl PyZBox {
+    #[new]
+    #[pyo3(signature = (centers, radii, density=1.0))]
+    pub fn new(centers: Vec<Vec<f32>>, radii: Vec<f32>, density: f32) -> PyResult<Self> {
+        let inner = ZBox::new(centers.clone(), radii.clone(), density).map_err(tensor_err_to_py)?;
+        Ok(Self {
+            inner,
+            centers,
+            radii,
+        })
+    }
+
+    #[getter]
+    pub fn centers(&self) -> Vec<Vec<f32>> {
+        self.centers.clone()
+    }
+
+    #[getter]
+    pub fn radii(&self) -> Vec<f32> {
+        self.radii.clone()
+    }
+
+    pub fn arity(&self) -> usize {
+        self.inner.arity()
+    }
+
+    pub fn density(&self) -> f32 {
+        self.inner.density()
+    }
+
+    pub fn factor_dimension(&self, index: usize) -> usize {
+        self.inner.factor_dimension(index)
+    }
+
+    pub fn hyperbolic_volume(&self, curvature: f32) -> PyResult<f32> {
+        self.inner.hyperbolic_volume(curvature).map_err(tensor_err_to_py)
+    }
+
+    pub fn probability_mass(&self, curvature: f32) -> PyResult<f32> {
+        self.inner.probability_mass(curvature).map_err(tensor_err_to_py)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "ZBox(arity={}, density={:.4})",
+            self.inner.arity(),
+            self.inner.density()
+        )
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "ZBoxSite")]
+#[derive(Clone)]
+pub(crate) struct PyZBoxSite {
+    inner: ZBoxSite,
+}
+
+impl PyZBoxSite {
+    pub(crate) fn from_site(inner: ZBoxSite) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PyZBoxSite {
+    #[staticmethod]
+    pub fn default_for(curvature: f32) -> PyResult<Self> {
+        let inner = ZBoxSite::default_for(curvature).map_err(tensor_err_to_py)?;
+        Ok(Self { inner })
+    }
+
+    pub fn with_radius_window(&self, min: f32, max: f32) -> PyResult<Self> {
+        let inner = self
+            .inner
+            .clone()
+            .with_radius_window(min, max)
+            .map_err(tensor_err_to_py)?;
+        Ok(Self { inner })
+    }
+
+    pub fn curvature(&self) -> f32 {
+        self.inner.curvature()
+    }
+
+    pub fn guard_box(&self, zbox: &PyZBox) -> PyResult<()> {
+        self.inner.guard_box(&zbox.inner).map_err(tensor_err_to_py)
+    }
+
+    pub fn guard_cover(&self, cover: Vec<Py<PyZBox>>, py: Python<'_>) -> PyResult<()> {
+        let mut boxes = Vec::with_capacity(cover.len());
+        for handle in cover {
+            boxes.push(handle.borrow(py).inner.clone());
+        }
+        self.inner.guard_cover(&boxes).map_err(tensor_err_to_py)
     }
 }
 
@@ -989,6 +1111,8 @@ impl PyZSpaceBarycenter {
 pub(crate) fn register(_py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_class::<PyComplexTensor>()?;
     m.add_class::<PyOpenCartesianTopos>()?;
+    m.add_class::<PyZBox>()?;
+    m.add_class::<PyZBoxSite>()?;
     m.add_class::<PyLanguageWaveEncoder>()?;
     m.add_class::<PyGradientSummary>()?;
     m.add_class::<PyHypergradTelemetry>()?;
