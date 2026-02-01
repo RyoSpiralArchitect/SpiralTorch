@@ -11,15 +11,12 @@ datasets).
 1. Build the `spiraltorch-wasm` bindings once so the example can import them:
 
    ```bash
-   wasm-pack build bindings/st-wasm --target web --out-dir bindings/st-wasm/examples/pkg
+   ./scripts/build_wasm_web.sh --dev
    ```
 
-   The command writes `spiraltorch_wasm.js` plus the `.wasm` binary. Copy the
-   `types/spiraltorch-wasm.d.ts` file next to the generated glue to obtain editor hints:
-
-   ```bash
-   cp bindings/st-wasm/types/spiraltorch-wasm.d.ts bindings/st-wasm/examples/pkg/
-   ```
+   (If you prefer calling `wasm-pack` directly, make sure to unset any host-only linker
+   flags like `RUSTFLAGS` / `LIBRARY_PATH` / `PKG_CONFIG_PATH` that point at native
+   `vcpkg` archives.)
 
 2. Install the frontend dependencies for the console:
 

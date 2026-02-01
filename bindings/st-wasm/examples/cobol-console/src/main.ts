@@ -1,4 +1,4 @@
-import init, { CobolDispatchPlanner } from "../../pkg/spiraltorch_wasm.js";
+import init, { CobolDispatchPlanner } from "../pkg/spiraltorch_wasm.js";
 
 const form = document.querySelector<HTMLFormElement>("#planner-form")!;
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;

@@ -1,7 +1,7 @@
 import init, {
   WasmMellinLogGrid,
   mellin_exp_decay_samples,
-} from "../../pkg/spiraltorch_wasm.js";
+} from "../pkg/spiraltorch_wasm.js";
 
 const form = document.querySelector<HTMLFormElement>("#mellin-form")!;
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
@@ -173,4 +173,3 @@ init()
   .catch((err) => {
     setStatus(`WASM init failed: ${(err as Error).message}`, true);
   });
-
