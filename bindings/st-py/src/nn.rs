@@ -25,6 +25,7 @@ use crate::json::json_to_py;
 
 #[cfg(feature = "nn")]
 use st_core::{
+    maxwell::MaxwellZPulse,
     theory::zpulse::ZScale,
     util::math::{ramanujan_pi, LeechProjector},
 };
@@ -47,7 +48,8 @@ use st_nn::{
     CategoricalCrossEntropy, HyperbolicCrossEntropy, Linear, MeanSquaredError, Relu, Sequential,
     ConceptHint, DesireAutomation, DesireLagrangian, DesirePhase, DesirePipeline,
     DesireRoundtableBridge, DesireRoundtableSummary, DesireTelemetryBundle, DesireTrainerBridge,
-    DesireWeights, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry,
+    DesireWeights, MaxwellDesireBridge, NarrativeHint, NarrativeSummary, RepressionField,
+    SemanticBridge, SparseKernel, SymbolGeometry,
     TemperatureController, WaveGate, WaveRnn, ZSpaceMixer, constant, warmup,
     EpochStats as RustEpochStats, ModuleTrainer as RustModuleTrainer, RoundtableConfig as RustRoundtableConfig,
     RoundtableSchedule as RustRoundtableSchedule,
@@ -77,6 +79,8 @@ use st_tensor::{OpenCartesianTopos, Tensor, TensorError};
 use pyo3::types::{PyIterator, PyList};
 #[cfg(feature = "nn")]
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+#[cfg(feature = "nn")]
+use crate::spiralk::PyMaxwellPulse;
 
 #[cfg(feature = "nn")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -3714,6 +3718,369 @@ fn build_simple_desire_automation(
 }
 
 #[cfg(feature = "nn")]
+fn maxwell_pulse_from_any(pulse: &Bound<'_, PyAny>) -> PyResult<MaxwellZPulse> {
+    let py = pulse.py();
+
+    if let Ok(handle) = pulse.extract::<Py<PyMaxwellPulse>>() {
+        return Ok(handle.bind(py).borrow().to_pulse());
+    }
+
+    if let Ok(dict) = pulse.downcast::<PyDict>() {
+        let get = |key: &str| -> PyResult<Bound<'_, PyAny>> {
+            dict.get_item(key)?
+                .ok_or_else(|| PyValueError::new_err(format!("pulse missing field '{key}'")))
+        };
+        let blocks: u64 = get("blocks")?.extract()?;
+        let mean: f64 = get("mean")?.extract()?;
+        let standard_error: f64 = get("standard_error")?.extract()?;
+        let z_score: f64 = get("z_score")?.extract()?;
+        let band_energy: (f32, f32, f32) = get("band_energy")?.extract()?;
+        let z_bias: f32 = get("z_bias")?.extract()?;
+        return Ok(MaxwellZPulse {
+            blocks,
+            mean,
+            standard_error,
+            z_score,
+            band_energy,
+            z_bias,
+        });
+    }
+
+    let blocks = pulse.getattr("blocks").and_then(|v| v.extract::<u64>());
+    let mean = pulse.getattr("mean").and_then(|v| v.extract::<f64>());
+    let standard_error = pulse
+        .getattr("standard_error")
+        .and_then(|v| v.extract::<f64>());
+    let z_score = pulse.getattr("z_score").and_then(|v| v.extract::<f64>());
+    let band_energy = pulse
+        .getattr("band_energy")
+        .and_then(|v| v.extract::<(f32, f32, f32)>());
+    let z_bias = pulse.getattr("z_bias").and_then(|v| v.extract::<f32>());
+
+    match (blocks, mean, standard_error, z_score, band_energy, z_bias) {
+        (Ok(blocks), Ok(mean), Ok(standard_error), Ok(z_score), Ok(band_energy), Ok(z_bias)) => {
+            Ok(MaxwellZPulse {
+                blocks,
+                mean,
+                standard_error,
+                z_score,
+                band_energy,
+                z_bias,
+            })
+        }
+        _ => Err(PyTypeError::new_err(
+            concat!(
+                "pulse must be spiraltorch.spiralk.MaxwellPulse, a mapping with keys ",
+                "'blocks','mean','standard_error','z_score','band_energy','z_bias', ",
+                "or an object exposing those attributes"
+            ),
+        )),
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "NarrativeSummary")]
+#[derive(Clone)]
+pub(crate) struct PyNarrativeSummary {
+    inner: NarrativeSummary,
+}
+
+#[cfg(feature = "nn")]
+impl From<NarrativeSummary> for PyNarrativeSummary {
+    fn from(inner: NarrativeSummary) -> Self {
+        Self { inner }
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyNarrativeSummary {
+    #[getter]
+    pub fn channel(&self) -> &str {
+        &self.inner.channel
+    }
+
+    #[getter]
+    pub fn dominant_tag(&self) -> Option<String> {
+        self.inner.dominant_tag.clone()
+    }
+
+    #[getter]
+    pub fn tags(&self) -> Vec<String> {
+        self.inner.tags.clone()
+    }
+
+    #[getter]
+    pub fn intensity(&self) -> f32 {
+        self.inner.intensity
+    }
+
+    #[getter]
+    pub fn amplitude(&self) -> f32 {
+        self.inner.amplitude
+    }
+
+    #[getter]
+    pub fn phase(&self) -> f32 {
+        self.inner.phase
+    }
+
+    #[getter]
+    pub fn coherence(&self) -> f32 {
+        self.inner.coherence
+    }
+
+    #[getter]
+    pub fn decoherence(&self) -> f32 {
+        self.inner.decoherence
+    }
+
+    #[getter]
+    pub fn emphasis(&self) -> f32 {
+        self.inner.emphasis
+    }
+
+    pub fn describe(&self) -> String {
+        self.inner.describe()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("NarrativeSummary({})", self.inner.describe())
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "NarrativeHint")]
+#[derive(Clone)]
+pub(crate) struct PyNarrativeHint {
+    inner: NarrativeHint,
+}
+
+#[cfg(feature = "nn")]
+impl From<NarrativeHint> for PyNarrativeHint {
+    fn from(inner: NarrativeHint) -> Self {
+        Self { inner }
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyNarrativeHint {
+    #[getter]
+    pub fn channel(&self) -> &str {
+        self.inner.channel()
+    }
+
+    #[getter]
+    pub fn tags(&self) -> Vec<String> {
+        self.inner.tags().to_vec()
+    }
+
+    pub fn dominant_tag(&self) -> Option<String> {
+        self.inner.dominant_tag().map(|tag| tag.to_string())
+    }
+
+    #[getter]
+    pub fn intensity(&self) -> f32 {
+        self.inner.intensity()
+    }
+
+    #[getter]
+    pub fn amplitude(&self) -> f32 {
+        self.inner.amplitude()
+    }
+
+    #[getter]
+    pub fn phase(&self) -> f32 {
+        self.inner.phase()
+    }
+
+    #[getter]
+    pub fn coherence(&self) -> f32 {
+        self.inner.coherence()
+    }
+
+    #[getter]
+    pub fn decoherence(&self) -> f32 {
+        self.inner.decoherence()
+    }
+
+    pub fn collapsed_tag(&self) -> Option<String> {
+        self.inner.collapsed_tag().map(|tag| tag.to_string())
+    }
+
+    pub fn quantum_emphasis(&self) -> f32 {
+        self.inner.quantum_emphasis()
+    }
+
+    pub fn summary(&self) -> PyNarrativeSummary {
+        PyNarrativeSummary::from(self.inner.summary())
+    }
+
+    pub fn describe(&self) -> String {
+        self.inner.summary().describe()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("NarrativeHint({})", self.inner.summary().describe())
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "MaxwellDesireBridge", unsendable)]
+pub(crate) struct PyMaxwellDesireBridge {
+    inner: MaxwellDesireBridge,
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyMaxwellDesireBridge {
+    #[new]
+    #[pyo3(signature = (*, smoothing=1e-4, magnitude_floor=0.0))]
+    pub fn new(smoothing: f32, magnitude_floor: f32) -> Self {
+        let mut bridge = MaxwellDesireBridge::new();
+        bridge.set_smoothing(smoothing);
+        bridge.set_magnitude_floor(magnitude_floor);
+        Self { inner: bridge }
+    }
+
+    #[getter]
+    pub fn smoothing(&self) -> f32 {
+        self.inner.smoothing()
+    }
+
+    #[getter]
+    pub fn magnitude_floor(&self) -> f32 {
+        self.inner.magnitude_floor()
+    }
+
+    pub fn set_smoothing(&mut self, smoothing: f32) {
+        self.inner.set_smoothing(smoothing);
+    }
+
+    pub fn set_magnitude_floor(&mut self, floor: f32) {
+        self.inner.set_magnitude_floor(floor);
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    pub fn contains(&self, channel: &str) -> bool {
+        self.inner.contains(channel)
+    }
+
+    pub fn channel_names(&self) -> Vec<String> {
+        self.inner.channel_names()
+    }
+
+    pub fn register_channel(&mut self, channel: &str, window: Vec<(usize, f32)>) -> PyResult<()> {
+        self.inner
+            .register_channel(channel.to_string(), window)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn register_channel_with_narrative(
+        &mut self,
+        channel: &str,
+        window: Vec<(usize, f32)>,
+        tags: Vec<String>,
+    ) -> PyResult<()> {
+        self.inner
+            .register_channel_with_narrative(channel.to_string(), window, tags)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn set_narrative_tags(&mut self, channel: &str, tags: Vec<String>) -> PyResult<()> {
+        self.inner
+            .set_narrative_tags(channel, tags)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn narrative_tags(&self, channel: &str) -> Option<Vec<String>> {
+        self.inner
+            .narrative_tags(channel)
+            .map(|tags| tags.to_vec())
+    }
+
+    pub fn set_narrative_gain(&mut self, channel: &str, gain: f32) -> PyResult<()> {
+        self.inner
+            .set_narrative_gain(channel, gain)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn narrative_gain(&self, channel: &str) -> Option<f32> {
+        self.inner.narrative_gain(channel)
+    }
+
+    pub fn hint_for(&self, channel: &str, pulse: &Bound<'_, PyAny>) -> PyResult<Option<Vec<(usize, f32)>>> {
+        let pulse = maxwell_pulse_from_any(pulse)?;
+        let Some(hint) = self.inner.hint_for(channel, &pulse) else {
+            return Ok(None);
+        };
+        match hint {
+            ConceptHint::Window(window) => Ok(Some(window)),
+            ConceptHint::Distribution(_) => Err(PyValueError::new_err(
+                "unexpected ConceptHint::Distribution from MaxwellDesireBridge",
+            )),
+        }
+    }
+
+    pub fn narrative_for(
+        &self,
+        py: Python<'_>,
+        channel: &str,
+        pulse: &Bound<'_, PyAny>,
+    ) -> PyResult<Option<Py<PyNarrativeHint>>> {
+        let pulse = maxwell_pulse_from_any(pulse)?;
+        match self.inner.narrative_for(channel, &pulse) {
+            Some(hint) => Ok(Some(Py::new(py, PyNarrativeHint::from(hint))?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn emit(
+        &self,
+        py: Python<'_>,
+        channel: &str,
+        pulse: &Bound<'_, PyAny>,
+    ) -> PyResult<Option<PyObject>> {
+        let pulse = maxwell_pulse_from_any(pulse)?;
+        let Some((hint, narrative)) = self.inner.emit(channel, &pulse) else {
+            return Ok(None);
+        };
+        let dict = PyDict::new_bound(py);
+        match hint {
+            ConceptHint::Window(window) => {
+                dict.set_item("window", window)?;
+            }
+            ConceptHint::Distribution(dist) => {
+                dict.set_item("distribution", dist)?;
+            }
+        }
+        if let Some(narrative) = narrative {
+            dict.set_item("narrative", Py::new(py, PyNarrativeHint::from(narrative))?)?;
+        } else {
+            dict.set_item("narrative", py.None())?;
+        }
+        Ok(Some(dict.into_py(py)))
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "MaxwellDesireBridge(len={}, smoothing={:.2e}, magnitude_floor={:.2e})",
+            self.inner.len(),
+            self.inner.smoothing(),
+            self.inner.magnitude_floor()
+        )
+    }
+}
+
+#[cfg(feature = "nn")]
 #[pyclass(module = "spiraltorch.nn", name = "DesirePipeline", unsendable)]
 pub(crate) struct PyDesirePipeline {
     inner: DesirePipeline,
@@ -3797,13 +4164,14 @@ impl PyDesirePipeline {
         self.inner.sink_count()
     }
 
-    #[pyo3(signature = (logits, previous_token, concept=None))]
+    #[pyo3(signature = (logits, previous_token, concept=None, window=None))]
     pub fn step(
         &mut self,
         py: Python<'_>,
         logits: Vec<f32>,
         previous_token: usize,
         concept: Option<Vec<f32>>,
+        window: Option<Vec<(usize, f32)>>,
     ) -> PyResult<PyObject> {
         if logits.len() != self.vocab_size {
             return Err(PyValueError::new_err(format!(
@@ -3818,7 +4186,31 @@ impl PyDesirePipeline {
                 self.vocab_size, previous_token
             )));
         }
-        let concept_hint = ConceptHint::Distribution(concept.unwrap_or_default());
+        if concept.is_some() && window.is_some() {
+            return Err(PyValueError::new_err(
+                "concept and window are mutually exclusive; supply only one",
+            ));
+        }
+        if let Some(window) = window.as_ref() {
+            for (token, weight) in window {
+                if *token >= self.vocab_size {
+                    return Err(PyValueError::new_err(format!(
+                        "window token out of range (expected < {}, got {})",
+                        self.vocab_size, token
+                    )));
+                }
+                if !weight.is_finite() || *weight < 0.0 {
+                    return Err(PyValueError::new_err(
+                        "window weights must be finite and non-negative",
+                    ));
+                }
+            }
+        }
+
+        let concept_hint = match window {
+            Some(window) => ConceptHint::Window(window),
+            None => ConceptHint::Distribution(concept.unwrap_or_default()),
+        };
         let step = self
             .inner
             .step_realtime(&logits, previous_token, &concept_hint)
@@ -6353,6 +6745,9 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyDesireTrainerBridge>()?;
     module.add_class::<PyDesireRoundtableBridge>()?;
     module.add_class::<PyDesireTelemetryBundle>()?;
+    module.add_class::<PyMaxwellDesireBridge>()?;
+    module.add_class::<PyNarrativeHint>()?;
+    module.add_class::<PyNarrativeSummary>()?;
     module.add_class::<PyDesirePipeline>()?;
     module.add_class::<PyNonLiner>()?;
     module.add_class::<PyScaler>()?;
@@ -6419,6 +6814,9 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
             "DesireTrainerBridge",
             "DesireRoundtableBridge",
             "DesireTelemetryBundle",
+            "MaxwellDesireBridge",
+            "NarrativeHint",
+            "NarrativeSummary",
             "DesirePipeline",
             "save_json",
             "load_json",

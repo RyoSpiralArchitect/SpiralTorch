@@ -245,11 +245,23 @@ impl MaxwellDesireBridge {
         }
     }
 
+    pub fn smoothing(&self) -> f32 {
+        self.smoothing
+    }
+
+    pub fn magnitude_floor(&self) -> f32 {
+        self.magnitude_floor
+    }
+
     /// Ensures every registered window receives at least this additive weight
     /// before being scaled by the detected Z magnitude.
     pub fn with_smoothing(mut self, smoothing: f32) -> Self {
         self.smoothing = smoothing.max(0.0);
         self
+    }
+
+    pub fn set_smoothing(&mut self, smoothing: f32) {
+        self.smoothing = smoothing.max(0.0);
     }
 
     /// Floors the |Z| magnitude used when scaling concept weights. This keeps
@@ -258,6 +270,10 @@ impl MaxwellDesireBridge {
     pub fn with_magnitude_floor(mut self, floor: f32) -> Self {
         self.magnitude_floor = floor.max(0.0);
         self
+    }
+
+    pub fn set_magnitude_floor(&mut self, floor: f32) {
+        self.magnitude_floor = floor.max(0.0);
     }
 
     /// Returns the number of channels registered with the bridge.
