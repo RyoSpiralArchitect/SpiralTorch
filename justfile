@@ -21,6 +21,12 @@ core-test:
 wgpu:
     cargo build -p st-tensor --features wgpu --release
 
+wasm-web:
+    ./scripts/build_wasm_web.sh --dev
+
+wasm-web-release:
+    ./scripts/build_wasm_web.sh --release
+
 stack:
     cargo build -p st-nn --release && \
     cargo build -p st-spiral-rl --release && \

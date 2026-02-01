@@ -5,6 +5,19 @@ wasm-bindgen surface exposed by this crate. Copy the file next to the generated
 JavaScript glue (e.g. into the `pkg/` directory produced by `wasm-pack`) and reference it
 from your bundler's `types` field to enable editor completion and static checking.
 
+## Building
+
+Build the WebAssembly package (and copy the bundled TypeScript declarations) with:
+
+```bash
+./scripts/build_wasm_web.sh --dev
+# or: ./scripts/build_wasm_web.sh --release
+```
+
+If you have `vcpkg`-style host linker flags exported in your shell (for example via
+`RUSTFLAGS`), prefer the helper script above (it sanitises the environment for wasm
+builds) or run `wasm-pack` via `env -u RUSTFLAGS -u LIBRARY_PATH -u PKG_CONFIG_PATH …`.
+
 ## Examples
 
 - COBOL dispatch console: `bindings/st-wasm/examples/cobol-console/`
