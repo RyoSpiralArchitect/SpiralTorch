@@ -165,7 +165,7 @@ async function runOnce(ev?: Event) {
 
 form.addEventListener("submit", runOnce);
 
-init()
+initWasm()
   .then(() => {
     ready = true;
     setStatus("WebAssembly ready. Click “Build + Evaluate”.");
@@ -173,3 +173,13 @@ init()
   .catch((err) => {
     setStatus(`WASM init failed: ${(err as Error).message}`, true);
   });
+
+async function initWasm(): Promise<void> {
+  const url = new URL("../pkg/spiraltorch_wasm_bg.wasm", import.meta.url);
+  const resp = await fetch(url);
+  if (!resp.ok) {
+    throw new Error(`failed to fetch wasm (${resp.status})`);
+  }
+  const bytes = await resp.arrayBuffer();
+  await init(bytes);
+}

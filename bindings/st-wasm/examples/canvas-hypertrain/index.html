@@ -68,6 +68,7 @@
                 <select id="mode" name="mode">
                   <option value="hyper">hypergradWave</option>
                   <option value="real">realgradWave</option>
+                  <option value="webgpu-hyperop">webgpu-hyperop (kernel)</option>
                 </select>
               </label>
               <label>
@@ -98,6 +99,48 @@
               <button id="reset-norm" type="button">Reset normalizer</button>
             </div>
           </fieldset>
+
+          <fieldset>
+            <legend>WebGPU</legend>
+            <div class="inline">
+              <label>
+                trail renderer
+                <select id="trail-renderer" name="trail-renderer">
+                  <option value="webgpu">webgpu-3d</option>
+                  <option value="2d">2d</option>
+                </select>
+              </label>
+              <label>
+                trail_stride
+                <input id="trail-stride" name="trail-stride" type="number" min="1" step="1" value="4" />
+              </label>
+              <label>
+                point_size
+                <input id="point-size" name="point-size" value="2.0" />
+              </label>
+              <label>
+                rotate_speed
+                <input id="rotate-speed" name="rotate-speed" value="0.6" />
+              </label>
+            </div>
+            <div class="inline">
+              <label>
+                z_scale
+                <input id="z-scale" name="z-scale" value="1.2" />
+              </label>
+              <label>
+                fft_row
+                <input id="fft-row" name="fft-row" type="number" min="0" step="1" value="0" />
+              </label>
+              <label class="checkbox">
+                <input id="fft-auto" name="fft-auto" type="checkbox" checked />
+                fft auto
+              </label>
+            </div>
+            <div class="actions">
+              <button id="fft-run" type="button">Compute FFT</button>
+            </div>
+          </fieldset>
         </form>
 
         <p id="status" class="status">Loading WebAssembly…</p>
@@ -113,17 +156,17 @@
         <header>
           <h2>Canvas output</h2>
           <p class="subtitle">
-            Left: fractal canvas. Right: hyperbolic trail buffer projected onto 2D.
+            Left: fractal canvas. Right: hyperbolic trail buffer (2D or WebGPU 3D).
           </p>
         </header>
         <div class="canvases">
           <canvas id="fractal" width="512" height="320"></canvas>
           <canvas id="trail" width="512" height="320"></canvas>
         </div>
+        <canvas id="spectrum" width="1024" height="220"></canvas>
       </section>
     </main>
 
     <script type="module" src="./src/main.ts"></script>
   </body>
 </html>
-

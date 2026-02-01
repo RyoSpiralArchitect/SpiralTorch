@@ -167,9 +167,12 @@ canvas {
   border-radius: 14px;
 }
 
+canvas#spectrum {
+  margin-top: 1rem;
+}
+
 @media (max-width: 900px) {
   .canvases {
     grid-template-columns: 1fr;
   }
 }
-

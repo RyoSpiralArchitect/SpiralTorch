@@ -29,3 +29,9 @@ transform at many complex points (`evaluateMany`), and plots the magnitude.
 npm run dev
 # or: npm run build && npm run preview
 ```
+
+Notes:
+
+- The demo bootstraps WASM by fetching `spiraltorch_wasm_bg.wasm` as bytes (avoids strict
+  `application/wasm` MIME requirements), but you still need to serve the file via a local
+  dev server (don’t open `index.html` directly).

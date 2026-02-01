@@ -332,7 +332,7 @@ function seedCoefficients() {
 
 async function bootstrap() {
   setStatus("Loading WebAssembly runtime…");
-  await init();
+  await initWasm();
   ready = true;
   setStatus("Runtime ready. Configure the planner and generate an envelope.");
 }
@@ -350,3 +350,13 @@ seedButton.addEventListener("click", seedCoefficients);
 bootstrap().catch((err) => {
   setStatus(`Failed to initialize WASM: ${(err as Error).message}`, true);
 });
+
+async function initWasm(): Promise<void> {
+  const url = new URL("../pkg/spiraltorch_wasm_bg.wasm", import.meta.url);
+  const resp = await fetch(url);
+  if (!resp.ok) {
+    throw new Error(`failed to fetch wasm (${resp.status})`);
+  }
+  const bytes = await resp.arrayBuffer();
+  await init(bytes);
+}

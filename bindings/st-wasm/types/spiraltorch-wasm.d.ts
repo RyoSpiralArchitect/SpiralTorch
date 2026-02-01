@@ -98,10 +98,33 @@ declare module "spiraltorch-wasm" {
         eventLabels(): DesireControlEventLabel[];
     }
 
+    export class CanvasFramePacket {
+        private constructor();
+        readonly width: number;
+        readonly height: number;
+        readonly pixels: Uint8Array;
+        readonly relation: Float32Array;
+        readonly field: Float32Array;
+        readonly trail: Float32Array;
+        readonly hypergradRms: number;
+        readonly realgradRms: number;
+        readonly hypergradCount: number;
+        readonly realgradCount: number;
+        readonly balance: number;
+        readonly stability: number;
+        readonly saturation: number;
+        readonly hyperLearningRateScale: number;
+        readonly realLearningRateScale: number;
+        readonly operatorMix: number;
+        readonly operatorGain: number;
+        readonly eventsMask: number;
+    }
+
     export class FractalCanvas {
         constructor(capacity: number, width: number, height: number);
         readonly width: number;
         readonly height: number;
+        framePacket(curvature: number): CanvasFramePacket;
         push_patch(
             relation: Float32Array,
             coherence: number,
@@ -115,7 +138,9 @@ declare module "spiraltorch-wasm" {
         emitWasmTrail(curvature: number): Float32Array;
         relation(): Float32Array;
         hypergradWave(curvature: number): Float32Array;
+        hypergradWaveCurrent(curvature: number): Float32Array;
         realgradWave(): Float32Array;
+        realgradWaveCurrent(): Float32Array;
         gradientSummary(curvature: number): CanvasGradientSummary;
         desireInterpretation(curvature: number): CanvasDesireInterpretation;
         desireControl(curvature: number): CanvasDesireControl;

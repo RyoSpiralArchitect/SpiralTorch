@@ -442,6 +442,121 @@ impl CanvasDesireControl {
 }
 
 #[wasm_bindgen]
+pub struct CanvasFramePacket {
+    width: u32,
+    height: u32,
+    pixels: Uint8Array,
+    relation: Float32Array,
+    field: Float32Array,
+    trail: Float32Array,
+    hypergrad_rms: f32,
+    realgrad_rms: f32,
+    hypergrad_count: u32,
+    realgrad_count: u32,
+    balance: f32,
+    stability: f32,
+    saturation: f32,
+    hyper_lr_scale: f32,
+    real_lr_scale: f32,
+    operator_mix: f32,
+    operator_gain: f32,
+    events: u32,
+}
+
+#[wasm_bindgen]
+impl CanvasFramePacket {
+    #[wasm_bindgen(getter)]
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn pixels(&self) -> Uint8Array {
+        self.pixels.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn relation(&self) -> Float32Array {
+        self.relation.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn field(&self) -> Float32Array {
+        self.field.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn trail(&self) -> Float32Array {
+        self.trail.clone()
+    }
+
+    #[wasm_bindgen(getter, js_name = hypergradRms)]
+    pub fn hypergrad_rms(&self) -> f32 {
+        self.hypergrad_rms
+    }
+
+    #[wasm_bindgen(getter, js_name = realgradRms)]
+    pub fn realgrad_rms(&self) -> f32 {
+        self.realgrad_rms
+    }
+
+    #[wasm_bindgen(getter, js_name = hypergradCount)]
+    pub fn hypergrad_count(&self) -> u32 {
+        self.hypergrad_count
+    }
+
+    #[wasm_bindgen(getter, js_name = realgradCount)]
+    pub fn realgrad_count(&self) -> u32 {
+        self.realgrad_count
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn balance(&self) -> f32 {
+        self.balance
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn stability(&self) -> f32 {
+        self.stability
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn saturation(&self) -> f32 {
+        self.saturation
+    }
+
+    #[wasm_bindgen(getter, js_name = hyperLearningRateScale)]
+    pub fn hyper_learning_rate_scale(&self) -> f32 {
+        self.hyper_lr_scale
+    }
+
+    #[wasm_bindgen(getter, js_name = realLearningRateScale)]
+    pub fn real_learning_rate_scale(&self) -> f32 {
+        self.real_lr_scale
+    }
+
+    #[wasm_bindgen(getter, js_name = operatorMix)]
+    pub fn operator_mix(&self) -> f32 {
+        self.operator_mix
+    }
+
+    #[wasm_bindgen(getter, js_name = operatorGain)]
+    pub fn operator_gain(&self) -> f32 {
+        self.operator_gain
+    }
+
+    #[wasm_bindgen(getter, js_name = eventsMask)]
+    pub fn events_mask(&self) -> u32 {
+        self.events
+    }
+}
+
+#[wasm_bindgen]
 pub struct FractalCanvas {
     projector: CanvasProjector,
     width: usize,
@@ -498,6 +613,85 @@ impl FractalCanvas {
         let tensor = Tensor::from_vec(self.height, self.width, values).map_err(js_error)?;
         let patch = FractalPatch::new(tensor, coherence, tension, depth).map_err(js_error)?;
         self.projector.scheduler().push(patch).map_err(js_error)
+    }
+
+    /// Refresh the canvas once and return a compact packet with the current
+    /// RGBA pixels, relation tensor, colour field, hyperbolic trail, and
+    /// gradient-derived Desire signals. Use this when you want to drive
+    /// multiple visualisations (2D canvas, WebGPU trails, telemetry) without
+    /// re-rendering the canvas for each query.
+    #[wasm_bindgen(js_name = framePacket)]
+    pub fn frame_packet(&mut self, curvature: f32) -> Result<CanvasFramePacket, JsValue> {
+        let pixels = Uint8Array::from(self.projector.refresh().map_err(js_error)?);
+        let tensor = self.projector.tensor();
+        let (rows, cols) = tensor.shape();
+        let mut hypergrad = AmegaHypergrad::new(curvature, 1.0, rows, cols).map_err(js_error)?;
+        hypergrad.accumulate_wave(tensor).map_err(js_error)?;
+        let hyper_summary = hypergrad.summary();
+        let hypergrad_rms = hyper_summary.rms();
+        let hypergrad_count = hyper_summary.count().min(u32::MAX as usize) as u32;
+
+        let mut realgrad = AmegaRealgrad::new(1.0, rows, cols).map_err(js_error)?;
+        realgrad.accumulate_wave(tensor).map_err(js_error)?;
+        let real_summary = realgrad.summary();
+        let realgrad_rms = real_summary.rms();
+        let realgrad_count = real_summary.count().min(u32::MAX as usize) as u32;
+
+        let interpretation =
+            DesireGradientInterpretation::from_summaries(hyper_summary, real_summary);
+        let control = interpretation.control();
+
+        let field = self.projector.vector_field();
+        let mut field_data = Vec::with_capacity(field.vectors().len() * 4);
+        for vector in field.iter() {
+            field_data.extend_from_slice(&vector);
+        }
+
+        let trail = field.to_wasm_trail(curvature);
+
+        Ok(CanvasFramePacket {
+            width: self.width as u32,
+            height: self.height as u32,
+            pixels,
+            relation: Float32Array::from(tensor.data()),
+            field: Float32Array::from(field_data.as_slice()),
+            trail: Float32Array::from(trail.as_f32_slice().as_slice()),
+            hypergrad_rms,
+            realgrad_rms,
+            hypergrad_count,
+            realgrad_count,
+            balance: interpretation.balance(),
+            stability: interpretation.stability(),
+            saturation: interpretation.saturation(),
+            hyper_lr_scale: control.hyper_rate_scale(),
+            real_lr_scale: control.real_rate_scale(),
+            operator_mix: control.operator_mix(),
+            operator_gain: control.operator_gain(),
+            events: control.events().bits(),
+        })
+    }
+
+    /// Compute the hypergradient wave update against the current relation
+    /// tensor without refreshing the canvas first. Use `framePacket()` or
+    /// `render_to_canvas()` to refresh the internal state before calling this.
+    #[wasm_bindgen(js_name = hypergradWaveCurrent)]
+    pub fn hypergrad_wave_current(&self, curvature: f32) -> Result<Float32Array, JsValue> {
+        let tensor = self.projector.tensor();
+        let (rows, cols) = tensor.shape();
+        let mut tape = AmegaHypergrad::new(curvature, 1.0, rows, cols).map_err(js_error)?;
+        tape.accumulate_wave(tensor).map_err(js_error)?;
+        Ok(Float32Array::from(tape.gradient()))
+    }
+
+    /// Compute the Euclidean wave update against the current relation tensor
+    /// without refreshing the canvas first.
+    #[wasm_bindgen(js_name = realgradWaveCurrent)]
+    pub fn realgrad_wave_current(&self) -> Result<Float32Array, JsValue> {
+        let tensor = self.projector.tensor();
+        let (rows, cols) = tensor.shape();
+        let mut tape = AmegaRealgrad::new(1.0, rows, cols).map_err(js_error)?;
+        tape.accumulate_wave(tensor).map_err(js_error)?;
+        Ok(Float32Array::from(tape.gradient()))
     }
 
     /// Render the current scheduler state onto the provided HTML canvas.

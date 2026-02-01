@@ -3,9 +3,9 @@
 This example demonstrates running a tiny “learning loop” in the browser using
 `spiraltorch-wasm`'s `FractalCanvas` bindings:
 
-- Render the fractal canvas to an HTML `<canvas>`
-- Sample the hyperbolic trail buffer (`emitWasmTrail`) for visualisation
-- Update the relation tensor using `hypergradWave` / `realgradWave` each step
+- `FractalCanvas.framePacket()` returns pixels + relation + trail + Desire metrics in one call.
+- CPU loop: update relation via `hypergradWaveCurrent` / `realgradWaveCurrent`.
+- WebGPU: optional 3D trail renderer + FFT row probe + “hypergrad operator” compute step.
 
 ## Prerequisites
 
@@ -27,4 +27,3 @@ npm install
 ```bash
 npm run dev
 ```
-
