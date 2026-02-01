@@ -30,15 +30,15 @@ jobs:
             macos_deployment_target: ""
             py: "3.12"
           - os: macos-15-intel
-            label: macos-15-intel-macosx11
+            label: macos-15-intel-macosx11-x86_64
             macos_deployment_target: "11.0"
             py: "3.12"
-          - os: macos-14
-            label: macos-14-macosx11
+          - os: macos-latest
+            label: macos-latest-macosx11-arm64
             macos_deployment_target: "11.0"
             py: "3.12"
-          - os: macos-14
-            label: macos-14-macosx14
+          - os: macos-latest
+            label: macos-latest-macosx14-arm64
             macos_deployment_target: "14.0"
             py: "3.12"
           - os: windows-2022
