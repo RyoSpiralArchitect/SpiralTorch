@@ -3874,6 +3874,13 @@ mod tests {
     }
 
     #[test]
+    fn matmul_candidate_tiles_non_empty() {
+        let candidates = candidate_tiles(256, 8, 256, &[]);
+        assert!(!candidates.is_empty());
+        assert!(candidates.contains(&TileConfig::new(16, 16, 16)));
+    }
+
+    #[test]
     fn fused_conv_shader_wgsl_is_valid() {
         let source = instantiate_tile_template(FUSED_CONV_WGSL_TEMPLATE, TileConfig::new(8, 8, 8));
         assert_parses("fused conv", &source);
@@ -7190,6 +7197,11 @@ fn autotune_tile_config(
         return None;
     }
 
+    let autotune_enabled = autotune_env_enabled();
+    if !autotune_enabled {
+        return None;
+    }
+
     let (bucket_rows, bucket_inner, bucket_cols) = quantized_problem(rows, inner, cols);
     let (key, path) = matmul_autotune_key(ctx, bucket_rows, bucket_inner, bucket_cols)?;
 
@@ -7217,7 +7229,6 @@ fn autotune_tile_config(
         runs: AUTOTUNE_SAMPLE_RUNS as u32,
     };
 
-    let autotune_enabled = autotune_env_enabled();
     eprintln!("[autotune] key={key} apply={autotune_enabled}");
 
     let matches = if autotune_enabled {
@@ -7298,7 +7309,15 @@ fn autotune_tile_config(
         }
         Some(tile)
     } else {
-        None
+        let tile = fallback_tile_config(bucket_rows, bucket_inner, bucket_cols);
+        if tile_supported(ctx.device(), tile) {
+            if let Ok(mut cache) = ctx.autotune_cache.lock() {
+                cache.insert(key.clone(), tile);
+            }
+            Some(tile)
+        } else {
+            None
+        }
     }
 }
 
@@ -7383,6 +7402,12 @@ fn candidate_tiles(
     for (seed_cfg, _) in seeds {
         if !ordered.contains(seed_cfg) {
             ordered.insert(0, *seed_cfg);
+        }
+    }
+
+    for candidate in BASE {
+        if !ordered.contains(&candidate) {
+            ordered.push(candidate);
         }
     }
 
