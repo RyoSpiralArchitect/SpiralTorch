@@ -289,7 +289,7 @@ tensor shims, no translation layers, and no tracebacks.
 ## Install (pip)
 
 ```bash
-pip install -U spiraltorch==0.4.1
+pip install -U spiraltorch==0.3.9
 ```
 
 - Wheels are **abi3**; you can use any CPython ≥ 3.8.
