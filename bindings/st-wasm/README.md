@@ -5,6 +5,11 @@ wasm-bindgen surface exposed by this crate. Copy the file next to the generated
 JavaScript glue (e.g. into the `pkg/` directory produced by `wasm-pack`) and reference it
 from your bundler's `types` field to enable editor completion and static checking.
 
+## Examples
+
+- COBOL dispatch console: `bindings/st-wasm/examples/cobol-console/`
+- Mellin log grid demo (evaluateMany): `bindings/st-wasm/examples/mellin-log-grid/`
+
 ## High-level Canvas utilities
 
 `types/canvas-view.ts` implements an opinionated orchestration layer around the raw

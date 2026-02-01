@@ -7,6 +7,10 @@ use nalgebra::{DMatrix, DVector};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rand_distr::StandardNormal;
+use serde::{Deserialize, Serialize};
+use std::path::Path;
+
+use crate::{PureResult, TensorError};
 
 /// Mellin basis capturing log-scale harmonics of Z-space coordinates.
 #[derive(Clone, Debug)]
@@ -21,6 +25,27 @@ impl MellinBasis {
         Self {
             exponents: DVector::from_vec(exponents),
         }
+    }
+
+    /// Builds a basis with the same exponent applied to every coordinate.
+    pub fn constant(dimension: usize, exponent: f64) -> Self {
+        Self::new(vec![exponent; dimension])
+    }
+
+    /// Builds a basis with linearly interpolated exponents.
+    ///
+    /// The returned basis has `dimension` exponents spanning `[start, end]`.
+    pub fn ramp(dimension: usize, start: f64, end: f64) -> Self {
+        if dimension <= 1 {
+            return Self::new(vec![start]);
+        }
+        let mut exponents = Vec::with_capacity(dimension);
+        let denom = (dimension - 1) as f64;
+        for idx in 0..dimension {
+            let t = idx as f64 / denom;
+            exponents.push(start + (end - start) * t);
+        }
+        Self::new(exponents)
     }
 
     pub fn dimension(&self) -> usize {
@@ -48,6 +73,29 @@ impl MellinBasis {
     }
 }
 
+const ZSPACE_VAE_CHECKPOINT_VERSION: u32 = 1;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct ZSpaceVaeCheckpoint {
+    version: u32,
+    input_dim: usize,
+    latent_dim: usize,
+    encoder_mu: Vec<f64>,
+    encoder_logvar: Vec<f64>,
+    decoder: Vec<f64>,
+    bias_mu: Vec<f64>,
+    bias_logvar: Vec<f64>,
+    bias_decoder: Vec<f64>,
+    seed: u64,
+}
+
+fn is_json_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("json"))
+        .unwrap_or(false)
+}
+
 /// Minimal variational autoencoder tailored for Z-space telemetry.
 #[derive(Clone, Debug)]
 pub struct ZSpaceVae {
@@ -59,6 +107,7 @@ pub struct ZSpaceVae {
     bias_mu: DVector<f64>,
     bias_logvar: DVector<f64>,
     bias_decoder: DVector<f64>,
+    seed: u64,
     rng: StdRng,
 }
 
@@ -80,8 +129,154 @@ impl ZSpaceVae {
             bias_mu,
             bias_logvar,
             bias_decoder,
+            seed,
             rng: StdRng::seed_from_u64(seed),
         }
+    }
+
+    pub fn save(&self, path: impl AsRef<Path>) -> PureResult<()> {
+        let path = path.as_ref();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|err| TensorError::IoError {
+                message: err.to_string(),
+            })?;
+        }
+        let checkpoint = self.checkpoint();
+        let payload = if is_json_path(path) {
+            serde_json::to_vec_pretty(&checkpoint).map_err(|err| TensorError::SerializationError {
+                message: err.to_string(),
+            })?
+        } else {
+            bincode::serialize(&checkpoint).map_err(|err| TensorError::SerializationError {
+                message: err.to_string(),
+            })?
+        };
+        std::fs::write(path, payload).map_err(|err| TensorError::IoError {
+            message: err.to_string(),
+        })?;
+        Ok(())
+    }
+
+    pub fn load(path: impl AsRef<Path>) -> PureResult<Self> {
+        let path = path.as_ref();
+        let payload = std::fs::read(path).map_err(|err| TensorError::IoError {
+            message: err.to_string(),
+        })?;
+        let checkpoint: ZSpaceVaeCheckpoint = if is_json_path(path) {
+            serde_json::from_slice(&payload).map_err(|err| TensorError::SerializationError {
+                message: err.to_string(),
+            })?
+        } else {
+            bincode::deserialize(&payload).map_err(|err| TensorError::SerializationError {
+                message: err.to_string(),
+            })?
+        };
+        Self::from_checkpoint(checkpoint)
+    }
+
+    pub(crate) fn checkpoint(&self) -> ZSpaceVaeCheckpoint {
+        ZSpaceVaeCheckpoint {
+            version: ZSPACE_VAE_CHECKPOINT_VERSION,
+            input_dim: self.input_dim,
+            latent_dim: self.latent_dim,
+            encoder_mu: self.encoder_mu.as_slice().to_vec(),
+            encoder_logvar: self.encoder_logvar.as_slice().to_vec(),
+            decoder: self.decoder.as_slice().to_vec(),
+            bias_mu: self.bias_mu.as_slice().to_vec(),
+            bias_logvar: self.bias_logvar.as_slice().to_vec(),
+            bias_decoder: self.bias_decoder.as_slice().to_vec(),
+            seed: self.seed,
+        }
+    }
+
+    pub(crate) fn from_checkpoint(checkpoint: ZSpaceVaeCheckpoint) -> PureResult<Self> {
+        if checkpoint.version != ZSPACE_VAE_CHECKPOINT_VERSION {
+            return Err(TensorError::SerializationError {
+                message: format!(
+                    "unsupported ZSpaceVae checkpoint version {}",
+                    checkpoint.version
+                ),
+            });
+        }
+        if checkpoint.input_dim == 0 || checkpoint.latent_dim == 0 {
+            return Err(TensorError::InvalidValue {
+                label: "zspace_vae_checkpoint_dims",
+            });
+        }
+
+        let enc_len = checkpoint
+            .latent_dim
+            .checked_mul(checkpoint.input_dim)
+            .ok_or_else(|| TensorError::InvalidValue {
+                label: "zspace_vae_checkpoint_overflow",
+            })?;
+        if checkpoint.encoder_mu.len() != enc_len {
+            return Err(TensorError::DataLength {
+                expected: enc_len,
+                got: checkpoint.encoder_mu.len(),
+            });
+        }
+        if checkpoint.encoder_logvar.len() != enc_len {
+            return Err(TensorError::DataLength {
+                expected: enc_len,
+                got: checkpoint.encoder_logvar.len(),
+            });
+        }
+        let dec_len = checkpoint
+            .input_dim
+            .checked_mul(checkpoint.latent_dim)
+            .ok_or_else(|| TensorError::InvalidValue {
+                label: "zspace_vae_checkpoint_overflow",
+            })?;
+        if checkpoint.decoder.len() != dec_len {
+            return Err(TensorError::DataLength {
+                expected: dec_len,
+                got: checkpoint.decoder.len(),
+            });
+        }
+        if checkpoint.bias_mu.len() != checkpoint.latent_dim {
+            return Err(TensorError::DataLength {
+                expected: checkpoint.latent_dim,
+                got: checkpoint.bias_mu.len(),
+            });
+        }
+        if checkpoint.bias_logvar.len() != checkpoint.latent_dim {
+            return Err(TensorError::DataLength {
+                expected: checkpoint.latent_dim,
+                got: checkpoint.bias_logvar.len(),
+            });
+        }
+        if checkpoint.bias_decoder.len() != checkpoint.input_dim {
+            return Err(TensorError::DataLength {
+                expected: checkpoint.input_dim,
+                got: checkpoint.bias_decoder.len(),
+            });
+        }
+
+        Ok(Self {
+            latent_dim: checkpoint.latent_dim,
+            input_dim: checkpoint.input_dim,
+            encoder_mu: DMatrix::from_column_slice(
+                checkpoint.latent_dim,
+                checkpoint.input_dim,
+                &checkpoint.encoder_mu,
+            ),
+            encoder_logvar: DMatrix::from_column_slice(
+                checkpoint.latent_dim,
+                checkpoint.input_dim,
+                &checkpoint.encoder_logvar,
+            ),
+            decoder: DMatrix::from_column_slice(
+                checkpoint.input_dim,
+                checkpoint.latent_dim,
+                &checkpoint.decoder,
+            ),
+            bias_mu: DVector::from_vec(checkpoint.bias_mu),
+            bias_logvar: DVector::from_vec(checkpoint.bias_logvar),
+            bias_decoder: DVector::from_vec(checkpoint.bias_decoder),
+            seed: checkpoint.seed,
+            rng: StdRng::seed_from_u64(checkpoint.seed),
+        })
     }
 
     pub fn input_dim(&self) -> usize {
@@ -208,11 +403,21 @@ impl ZSpaceVaeStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn mellin_projection_normalises() {
         let basis = MellinBasis::new(vec![1.0, 2.0, 0.5]);
         let input = DVector::from_vec(vec![1.0, 2.0, 3.0]);
+        let projected = basis.project(&input);
+        assert!((projected.norm() - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn mellin_basis_ramp_has_expected_endpoints() {
+        let basis = MellinBasis::ramp(4, 0.5, 2.0);
+        assert_eq!(basis.dimension(), 4);
+        let input = DVector::from_vec(vec![1.0, 1.0, 1.0, 1.0]);
         let projected = basis.project(&input);
         assert!((projected.norm() - 1.0).abs() < 1e-6);
     }
@@ -237,5 +442,21 @@ mod tests {
         let before = vae.bias_decoder.clone();
         vae.refine_decoder(&state, 1e-2);
         assert!((&before - &vae.bias_decoder).norm() > 0.0);
+    }
+
+    #[test]
+    fn vae_checkpoint_roundtrips() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("vae.bin");
+        let mut vae = ZSpaceVae::new(3, 2, 123);
+        let input = DVector::from_vec(vec![0.5, -0.25, 0.75]);
+        let state = vae.forward(&input);
+        vae.refine_decoder(&state, 1e-2);
+        vae.save(&path).unwrap();
+
+        let loaded = ZSpaceVae::load(&path).unwrap();
+        assert_eq!(loaded.input_dim(), vae.input_dim());
+        assert_eq!(loaded.latent_dim(), vae.latent_dim());
+        assert_eq!(loaded.bias_decoder.len(), vae.bias_decoder.len());
     }
 }

@@ -19,9 +19,10 @@ copy-pastable models that act as reference implementations for both Python and R
 - Python (classification): `PYTHONNOUSERSITE=1 python3 -S -s models/python/zconv_classification.py`
 - Python (vision + pooling): `PYTHONNOUSERSITE=1 python3 -S -s models/python/vision_conv_pool_classification.py`
 - Python (VAE): `PYTHONNOUSERSITE=1 python3 -S -s models/python/zspace_vae_reconstruction.py`
-- Python (LLM char fine-tune): `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_finetune.py <text.txt> [--desire --events runs.jsonl --atlas]`
-- Python (LLM char coherence scan): `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_coherence_scan.py <text.txt> [--desire --events runs.jsonl --atlas]`
-- Python (LLM char coherence wave): `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_coherence_wave.py <text.txt> [--infuse \"spiral\" --infuse-every batch --infuse-mode separate] [--desire --events runs.jsonl --atlas]`
+- Python (Text→ZSpace VAE): `PYTHONNOUSERSITE=1 python3 -S -s models/python/zspace_text_vae.py models/samples/spiral_corpus_en --mellin ramp`
+- Python (LLM char fine-tune): `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_finetune.py <text_or_dir> [<text_or_dir> ...] [--desire --events runs.jsonl --atlas]`
+- Python (LLM char coherence scan): `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_coherence_scan.py <text_or_dir> [<text_or_dir> ...] [--desire --events runs.jsonl --atlas]`
+- Python (LLM char coherence wave): `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_coherence_wave.py <text_or_dir> [<text_or_dir> ...] [--infuse \"spiral\" --infuse-every batch --infuse-mode separate] [--desire --events runs.jsonl --atlas]`
 - Python (LLM char WaveRnn+Mixer): `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_wave_rnn_mixer.py <text_or_dir> [<text_or_dir> ...] [--preset base --weights-format auto --checkpoint-every 1 --val-batches 4] [--infuse \"spiral\" --infuse-every batch --infuse-mode separate] [--desire --events runs.jsonl --atlas]`
 - Rust: `cargo run -p st-nn --example modelzoo_mlp_regression`
 - Rust (classification): `cargo run -p st-nn --example modelzoo_zconv_classification`

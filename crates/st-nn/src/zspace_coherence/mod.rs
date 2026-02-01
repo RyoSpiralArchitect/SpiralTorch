@@ -7,6 +7,7 @@ pub mod coherence_engine;
 pub mod plugin_bridge;
 pub mod psi_synchro;
 pub mod sequencer;
+pub mod text_vae;
 pub mod trace;
 pub mod vae;
 
@@ -34,4 +35,5 @@ pub use trace::{
     coherence_relation_tensor, ZSpaceTrace, ZSpaceTraceConfig, ZSpaceTraceEvent,
     ZSpaceTraceRecorder,
 };
+pub use text_vae::ZSpaceTextVae;
 pub use vae::{MellinBasis, ZSpaceVae, ZSpaceVaeState, ZSpaceVaeStats};

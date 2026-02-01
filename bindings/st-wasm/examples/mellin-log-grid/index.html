@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SpiralTorch Mellin Log Grid (WASM)</title>
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <main class="app">
+      <section class="pane">
+        <header>
+          <h1>SpiralTorch Mellin Log Grid</h1>
+          <p class="subtitle">
+            WASM demo for <code>MellinLogGrid.evaluateMany</code> (log-uniform samples →
+            Mellin transform).
+          </p>
+        </header>
+
+        <form id="mellin-form">
+          <fieldset>
+            <legend>Log-uniform samples</legend>
+            <div class="inline">
+              <label>
+                log_start
+                <input id="log-start" name="log-start" value="-5.0" />
+              </label>
+              <label>
+                log_step
+                <input id="log-step" name="log-step" value="0.01" />
+              </label>
+              <label>
+                len
+                <input id="len" name="len" type="number" min="2" value="2048" />
+              </label>
+            </div>
+            <p class="hint">
+              Samples are generated in WASM using <code>f(x)=exp(-x)</code> on
+              <code>x_k = exp(log_start + k·log_step)</code>.
+            </p>
+          </fieldset>
+
+          <fieldset>
+            <legend>Evaluation points</legend>
+            <div class="inline">
+              <label>
+                s.real
+                <input id="s-real" name="s-real" value="2.5" />
+              </label>
+              <label>
+                imag_min
+                <input id="imag-min" name="imag-min" value="-30.0" />
+              </label>
+              <label>
+                imag_max
+                <input id="imag-max" name="imag-max" value="30.0" />
+              </label>
+              <label>
+                count
+                <input id="count" name="count" type="number" min="2" value="256" />
+              </label>
+            </div>
+          </fieldset>
+
+          <div class="actions">
+            <button id="run" type="submit">Build + Evaluate</button>
+          </div>
+        </form>
+
+        <p id="status" class="status">Loading WebAssembly…</p>
+        <div class="meta">
+          <div><span class="label">support</span> <code id="support">—</code></div>
+          <div><span class="label">hilbert_norm</span> <code id="hilbert-norm">—</code></div>
+          <div><span class="label">timings</span> <code id="timings">—</code></div>
+        </div>
+      </section>
+
+      <section class="pane">
+        <header>
+          <h2>Magnitude plot</h2>
+          <p class="subtitle">
+            Plots <code>|M(s)|</code> for <code>s = real + i·t</code> over the chosen imaginary
+            range.
+          </p>
+        </header>
+        <canvas id="plot" width="920" height="360"></canvas>
+        <pre id="preview" class="preview"></pre>
+      </section>
+    </main>
+
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>
+

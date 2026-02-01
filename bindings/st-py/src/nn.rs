@@ -69,7 +69,8 @@ use st_nn::{
         PreDiscardSnapshot, PreDiscardTelemetry,
     },
     AvgPool2d, DataLoader, Dataset, MaxPool2d, ZRelativityModule, ZSpaceCoherenceSequencer,
-    ZSpaceTraceConfig, ZSpaceTraceRecorder, MellinBasis, ZSpaceVae, ZSpaceVaeState, ZSpaceVaeStats,
+    ZSpaceTextVae, ZSpaceTraceConfig, ZSpaceTraceRecorder, MellinBasis, ZSpaceVae, ZSpaceVaeState,
+    ZSpaceVaeStats,
 };
 #[cfg(feature = "nn")]
 use nalgebra::DVector;
@@ -6227,6 +6228,20 @@ impl PyMellinBasis {
         }
     }
 
+    #[staticmethod]
+    pub fn constant(dimension: usize, exponent: f64) -> Self {
+        Self {
+            inner: MellinBasis::constant(dimension, exponent),
+        }
+    }
+
+    #[staticmethod]
+    pub fn ramp(dimension: usize, start: f64, end: f64) -> Self {
+        Self {
+            inner: MellinBasis::ramp(dimension, start, end),
+        }
+    }
+
     pub fn project(&self, input: Vec<f64>) -> Vec<f64> {
         let vector = DVector::from_vec(input);
         let projected = self.inner.project(&vector);
@@ -6340,6 +6355,16 @@ impl PyZSpaceVae {
         Self {
             inner: ZSpaceVae::new(input_dim, latent_dim, seed),
         }
+    }
+
+    #[staticmethod]
+    pub fn load(path: &str) -> PyResult<Self> {
+        let inner = ZSpaceVae::load(path).map_err(tensor_err_to_py)?;
+        Ok(Self { inner })
+    }
+
+    pub fn save(&self, path: &str) -> PyResult<()> {
+        self.inner.save(path).map_err(tensor_err_to_py)
     }
 
     #[getter]
@@ -6464,6 +6489,129 @@ impl PyZSpaceVae {
     fn __repr__(&self) -> String {
         format!(
             "ZSpaceVae(input_dim={}, latent_dim={})",
+            self.inner.input_dim(),
+            self.inner.latent_dim()
+        )
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "ZSpaceTextVae", unsendable)]
+pub(crate) struct PyZSpaceTextVae {
+    inner: ZSpaceTextVae,
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyZSpaceTextVae {
+    #[new]
+    #[pyo3(signature = (window_chars, latent_dim, *, curvature=-1.0, temperature=1.0, seed=42))]
+    pub fn new(
+        window_chars: usize,
+        latent_dim: usize,
+        curvature: f32,
+        temperature: f32,
+        seed: u64,
+    ) -> PyResult<Self> {
+        let inner =
+            ZSpaceTextVae::new(window_chars, latent_dim, curvature, temperature, seed)
+                .map_err(tensor_err_to_py)?;
+        Ok(Self { inner })
+    }
+
+    #[staticmethod]
+    pub fn load(path: &str) -> PyResult<Self> {
+        let inner = ZSpaceTextVae::load(path).map_err(tensor_err_to_py)?;
+        Ok(Self { inner })
+    }
+
+    pub fn save(&self, path: &str) -> PyResult<()> {
+        self.inner.save(path).map_err(tensor_err_to_py)
+    }
+
+    #[getter]
+    pub fn window_chars(&self) -> usize {
+        self.inner.window_chars()
+    }
+
+    #[getter]
+    pub fn input_dim(&self) -> usize {
+        self.inner.input_dim()
+    }
+
+    #[getter]
+    pub fn latent_dim(&self) -> usize {
+        self.inner.latent_dim()
+    }
+
+    #[getter]
+    pub fn curvature(&self) -> f32 {
+        self.inner.curvature()
+    }
+
+    #[getter]
+    pub fn temperature(&self) -> f32 {
+        self.inner.temperature()
+    }
+
+    pub fn encode_text(&self, text: &str) -> PyResult<Vec<f64>> {
+        let encoded = self.inner.encode_text(text).map_err(tensor_err_to_py)?;
+        Ok(dvector_to_vec(&encoded))
+    }
+
+    pub fn encode_text_with_mellin(
+        &self,
+        text: &str,
+        basis: &PyMellinBasis,
+    ) -> PyResult<Vec<f64>> {
+        let encoded = self
+            .inner
+            .encode_text_with_mellin(text, &basis.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(dvector_to_vec(&encoded))
+    }
+
+    pub fn forward_text(&mut self, text: &str) -> PyResult<PyZSpaceVaeState> {
+        let state = self.inner.forward_text(text).map_err(tensor_err_to_py)?;
+        Ok(PyZSpaceVaeState { inner: state })
+    }
+
+    pub fn forward_text_with_mellin(
+        &mut self,
+        text: &str,
+        basis: &PyMellinBasis,
+    ) -> PyResult<PyZSpaceVaeState> {
+        let state = self
+            .inner
+            .forward_text_with_mellin(text, &basis.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyZSpaceVaeState { inner: state })
+    }
+
+    pub fn forward_encoded(&mut self, encoded: Vec<f64>) -> PyResult<PyZSpaceVaeState> {
+        if encoded.len() != self.inner.input_dim() {
+            return Err(PyValueError::new_err(format!(
+                "encoded length mismatch (expected {}, got {})",
+                self.inner.input_dim(),
+                encoded.len()
+            )));
+        }
+        let encoded = DVector::from_vec(encoded);
+        let state = self
+            .inner
+            .forward_encoded(&encoded)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyZSpaceVaeState { inner: state })
+    }
+
+    pub fn refine_decoder(&mut self, state: &PyZSpaceVaeState, learning_rate: f64) {
+        self.inner.refine_decoder(&state.inner, learning_rate);
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "ZSpaceTextVae(window_chars={}, input_dim={}, latent_dim={})",
+            self.inner.window_chars(),
             self.inner.input_dim(),
             self.inner.latent_dim()
         )
@@ -6780,6 +6928,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyZSpaceVae>()?;
     module.add_class::<PyZSpaceVaeState>()?;
     module.add_class::<PyZSpaceVaeStats>()?;
+    module.add_class::<PyZSpaceTextVae>()?;
     module.add_class::<PyZRelativityModule>()?;
     module.add_class::<PyCurvatureScheduler>()?;
     module.add_class::<PyCurvatureDecision>()?;
@@ -6843,6 +6992,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
             "ZSpaceVae",
             "ZSpaceVaeState",
             "ZSpaceVaeStats",
+            "ZSpaceTextVae",
             "ZRelativityModule",
             "CurvatureScheduler",
             "CurvatureDecision",
@@ -6912,6 +7062,9 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     }
     if let Ok(vae) = module.getattr("ZSpaceVae") {
         parent.add("ZSpaceVae", vae)?;
+    }
+    if let Ok(text_vae) = module.getattr("ZSpaceTextVae") {
+        parent.add("ZSpaceTextVae", text_vae)?;
     }
     if let Ok(scheduler) = module.getattr("CurvatureScheduler") {
         parent.add("CurvatureScheduler", scheduler)?;

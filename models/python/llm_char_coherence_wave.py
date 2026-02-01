@@ -30,7 +30,36 @@ def _meta_path_for_weights(weights_path: pathlib.Path) -> pathlib.Path:
 
 
 def _read_text(path: pathlib.Path) -> str:
-    return path.read_text(encoding="utf-8")
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
+_TEXT_EXTS = {".txt"}
+
+
+def _collect_text_files(paths: list[pathlib.Path]) -> list[pathlib.Path]:
+    files: list[pathlib.Path] = []
+    seen: set[pathlib.Path] = set()
+
+    for raw in paths:
+        path = raw.expanduser()
+        if not path.exists():
+            raise FileNotFoundError(path)
+
+        if path.is_dir():
+            candidates = sorted(p for p in path.rglob("*") if p.is_file())
+        else:
+            candidates = [path]
+
+        for candidate in candidates:
+            if candidate.suffix.lower() not in _TEXT_EXTS:
+                continue
+            resolved = candidate.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            files.append(candidate)
+
+    return files
 
 def _timestamp_slug() -> str:
     return _dt.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -314,7 +343,7 @@ def _save_meta(meta_path: pathlib.Path, meta: dict[str, Any]) -> None:
 def main() -> None:
     if len(sys.argv) < 2 or sys.argv[1] in {"-h", "--help"}:
         print(
-            "usage: PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_coherence_wave.py <text.txt> "
+            "usage: PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_coherence_wave.py <text_or_dir> [<text_or_dir> ...] "
             "[--load weights.json] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] [--memory N] "
             "[--kernel N] [--dilations 1,2,4] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] "
             "[--temperature F] [--gen N] [--topk N] [--seed N] [--prompt STR] "
@@ -328,7 +357,12 @@ def main() -> None:
         return
 
     args = list(sys.argv[1:])
-    text_path = pathlib.Path(args.pop(0))
+    data_args: list[str] = []
+    while args and not str(args[0]).startswith("--"):
+        data_args.append(str(args.pop(0)))
+    if not data_args:
+        raise ValueError("expected at least one <text.txt|dir> before flags")
+    data_paths = [pathlib.Path(p) for p in data_args]
 
     load_weights: pathlib.Path | None = None
     save_weights: pathlib.Path | None = None
@@ -471,19 +505,28 @@ def main() -> None:
 
     _require_backend_available(backend)
 
+    data_files = _collect_text_files(data_paths)
+    if not data_files:
+        raise ValueError("no .txt files found in inputs")
+
+    text_parts = [_read_text(path) for path in data_files]
+    text = "\n\n".join(part for part in text_parts if part)
+    if not text:
+        raise ValueError("empty text")
+
     if run_dir is None:
         run_dir = _default_run_dir()
     run_dir.mkdir(parents=True, exist_ok=True)
     samples_dir = run_dir / "samples"
     samples_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "command.txt").write_text(" ".join(sys.argv), encoding="utf-8")
+    (run_dir / "data_files.txt").write_text(
+        "\n".join(str(path) for path in data_files) + "\n",
+        encoding="utf-8",
+    )
 
     if atlas and events_path is None:
         events_path = run_dir / "events.jsonl"
-
-    text = _read_text(text_path)
-    if not text:
-        raise ValueError("empty text")
 
     if load_weights is not None:
         meta_path = _meta_path_for_weights(load_weights)
@@ -539,7 +582,9 @@ def main() -> None:
     run_meta: dict[str, Any] = {
         "schema": RUN_SCHEMA,
         "arch": "llm_char_coherence_wave",
-        "text_path": str(text_path),
+        "data_paths": [str(path) for path in data_paths],
+        "data_file_count": len(data_files),
+        "data_files_manifest": str(run_dir / "data_files.txt"),
         "format": FORMAT,
         "steps": steps,
         "embed_dim": embed_dim,
@@ -606,7 +651,7 @@ def main() -> None:
     loss = st.nn.CategoricalCrossEntropy()
 
     print(
-        f"arch=coherence_wave vocab={vocab_size} steps={steps} embed_dim={embed_dim} hidden={hidden} "
+        f"arch=coherence_wave vocab={vocab_size} files={len(data_files)} chars={len(text)} steps={steps} embed_dim={embed_dim} hidden={hidden} "
         f"memory={memory} kernel={kernel} dilations={dilations} epochs={epochs} batch={batch} "
         f"lr={lr:.3e} curvature={curvature} temp={temperature} backend={backend} run_dir={run_dir}"
     )

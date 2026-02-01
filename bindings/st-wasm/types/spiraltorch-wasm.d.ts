@@ -198,6 +198,29 @@ declare module "spiraltorch-wasm" {
     export function fft_forward_in_place(buffer: Float32Array): void;
     export function fft_inverse_in_place(buffer: Float32Array): void;
 
+    export class WasmMellinLogGrid {
+        constructor(log_start: number, log_step: number, samples: Float32Array);
+        readonly logStart: number;
+        readonly logStep: number;
+        len(): number;
+        isEmpty(): boolean;
+        samples(): Float32Array;
+        weights(): Float32Array;
+        support(): Float32Array;
+        weightedSeries(): Float32Array;
+        evaluate(s: Float32Array): Float32Array;
+        evaluateMany(sValues: Float32Array): Float32Array;
+        evaluateVerticalLine(real: number, imagValues: Float32Array): Float32Array;
+        hilbertInnerProduct(other: WasmMellinLogGrid): Float32Array;
+        hilbertNorm(): number;
+    }
+
+    export function mellin_exp_decay_samples(
+        log_start: number,
+        log_step: number,
+        len: number,
+    ): Float32Array;
+
     export interface WasmTunerRecord {
         rows_min?: number | null;
         rows_max?: number | null;

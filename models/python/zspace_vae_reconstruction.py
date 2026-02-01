@@ -59,6 +59,7 @@ def main() -> None:
             "usage: PYTHONNOUSERSITE=1 python3 -S -s models/python/zspace_vae_reconstruction.py "
             "[--input-dim N] [--latent-dim N] [--seed N] [--steps N] [--lr F] "
             "[--input \"0.35,-0.12,...\"] [--exponents \"1.0,0.5,...\"] "
+            "[--load PATH] [--save PATH] "
             "[--events PATH] [--atlas] [--atlas-bound N] [--atlas-district NAME] "
             "[--run-dir PATH]"
         )
@@ -69,6 +70,9 @@ def main() -> None:
     atlas = False
     atlas_bound = 512
     atlas_district = "Coherence"
+
+    load_path: pathlib.Path | None = None
+    save_path: pathlib.Path | None = None
 
     input_dim = 8
     latent_dim = 3
@@ -92,6 +96,10 @@ def main() -> None:
             atlas_bound = int(next(it))
         elif flag == "--atlas-district":
             atlas_district = str(next(it))
+        elif flag == "--load":
+            load_path = pathlib.Path(next(it))
+        elif flag == "--save":
+            save_path = pathlib.Path(next(it))
         elif flag == "--input-dim":
             input_dim = int(next(it))
         elif flag == "--latent-dim":
@@ -136,7 +144,23 @@ def main() -> None:
     basis = st.nn.MellinBasis([float(v) for v in exponents])
     projected = basis.project([float(v) for v in input_vec])
 
-    vae = st.nn.ZSpaceVae(input_dim, latent_dim, seed=seed)
+    if save_path is None:
+        save_path = run_dir / "weights.bin"
+
+    if load_path is not None:
+        vae = st.nn.ZSpaceVae.load(str(load_path))
+        input_dim = int(vae.input_dim)
+        latent_dim = int(vae.latent_dim)
+        if len(input_vec) != input_dim:
+            raise ValueError(
+                f"--input length mismatch for loaded model (expected {input_dim}, got {len(input_vec)})"
+            )
+        if len(exponents) != input_dim:
+            raise ValueError(
+                f"--exponents length mismatch for loaded model (expected {input_dim}, got {len(exponents)})"
+            )
+    else:
+        vae = st.nn.ZSpaceVae(input_dim, latent_dim, seed=seed)
 
     run_meta = {
         "schema": RUN_SCHEMA,
@@ -147,6 +171,10 @@ def main() -> None:
         "seed": seed,
         "steps": steps,
         "lr": lr,
+        "checkpoint": {
+            "load_path": str(load_path) if load_path is not None else None,
+            "save_path": str(save_path),
+        },
         "events_path": str(events_path) if events_path is not None else None,
         "atlas": atlas,
         "atlas_bound": atlas_bound if atlas else None,
@@ -196,6 +224,7 @@ def main() -> None:
     final_state = vae.forward(projected)
     final_recon = [float(v) for v in final_state.reconstruction]
     final_error_norm = _l2_norm([final_recon[i] - projected[i] for i in range(len(projected))])
+    vae.save(str(save_path))
     _write_json(
         run_dir / "final.json",
         {

@@ -1,0 +1,82 @@
+SpiralTorch — longform demo corpus (English)
+
+This file is intentionally longer than the small demo snippets.
+It exists so that validation splits have enough room to run, and so that tiny
+character models can learn something beyond memorising a short prompt.
+
+SpiralTorch is a Rust-first experiment: not a promise of state-of-the-art
+benchmarks today, but a place where ideas are runnable. The central question is
+simple: if we treat geometry, scheduling, and telemetry as first-class citizens,
+what kind of training loops become possible?
+
+Learning stack means:
+- a minimal script you can read end-to-end,
+- a dataset that is just a folder of text files,
+- a backend flag that chooses CPU/WGPU/CUDA without rewriting the model,
+- and outputs that are easy to inspect: run.json, metrics.jsonl, samples/.
+
+Z-space is a viewpoint. Instead of letting everything be hidden inside a black
+box optimizer, we explicitly represent curvature, coherence, and energy-like
+signals. Sometimes that looks like hyperbolic encodings. Sometimes it looks like
+telemetry that can be plotted and inspected. Either way, we want the loop to
+stay visible.
+
+The character language models here are deliberately small:
+they do next-character prediction from raw text, with no tokenizer.
+You should be able to swap the input files, change the prompt, and rerun.
+If the output changes, you should be able to point to the exact line of code
+that caused it.
+
+An attentionless baseline is not a rejection of attention.
+It is a reminder that sequence modelling existed before transformers, and that
+there are still many ways to trade compute for structure: recurrence, mixing,
+local convolution, wave-like blocks, and scan-style state machines.
+
+If your corpus is small, the loss might not drop much.
+That is not a moral failure; it is an observation. With tiny data, a model can
+memorise quickly and then stall. The validation loss is often more informative
+than the training loss. A stable-but-high loss can still produce useful samples
+if the model learns the “shape” of the text.
+
+Coherence experiments are different. A VAE can compress signals from Z-space,
+but “better” does not always mean “lower loss”. Sometimes we care about what
+the latent captures: does it track rhythm? does it react to topic shifts?
+can it remain stable under small perturbations? The metrics are a tool, not a
+religion.
+
+Now a few themed paragraphs to give the toy models something to chew on:
+
+Geometry notes:
+Curvature can act like a knob on representation. A negative curvature encourages
+expansion away from the origin, which can separate clusters. But separation is
+not always the goal. Sometimes you want controlled overlap so that the model can
+generalise from short data. The correct value depends on the story you are
+encoding.
+
+Maxwell notes:
+A field view is useful because it gives language a physical metaphor.
+The metaphor is not correctness, it is structure. We can treat changes as flows,
+forces, and constraints. A “desire” signal can be a gradient-like hint that
+nudges generation. It can also be recorded, replayed, and compared across runs.
+
+WGPU notes:
+Portability matters. If a model only runs on one vendor’s GPU, it is harder to
+share experiments. WGPU lets us target Metal, Vulkan, and DX12 with the same
+kernel language. Some kernels need tuning; some runners need new robustness
+checks. That is part of the work.
+
+Trace notes:
+Tracing is not decoration. It is the difference between “it feels faster” and
+“this kernel dominates, this is why, here is a record”. When a bug happens, a
+trace is often the shortest path to understanding it.
+
+Roadmap notes:
+Short loops first. Better tools second. Big models later.
+The goal is to keep every stage runnable on a laptop while still leaving a path
+to scale up when the foundations are stable.
+
+If you are reading this in the repository, consider adding your own text files
+next to this one. Personal notes and logs often make the best toy corpora.
+When the model starts to echo your own phrasing, you will know the stack is
+alive end-to-end.
+

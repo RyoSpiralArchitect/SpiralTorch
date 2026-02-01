@@ -9,6 +9,8 @@ mod cobol_bridge;
 #[cfg(target_arch = "wasm32")]
 mod fft;
 #[cfg(target_arch = "wasm32")]
+mod mellin;
+#[cfg(target_arch = "wasm32")]
 mod tuner;
 #[cfg(target_arch = "wasm32")]
 mod utils;
@@ -20,5 +22,7 @@ pub use cobol::*;
 pub use cobol_bridge::*;
 #[cfg(target_arch = "wasm32")]
 pub use fft::*;
+#[cfg(target_arch = "wasm32")]
+pub use mellin::*;
 #[cfg(target_arch = "wasm32")]
 pub use tuner::*;

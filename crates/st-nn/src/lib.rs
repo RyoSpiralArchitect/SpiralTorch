@@ -133,7 +133,7 @@ pub use zspace_coherence::{
     PreDiscardPolicy, PreDiscardRegulator, PsiBranchState, PsiSynchroConfig, PsiSynchroPulse,
     PsiSynchroResult, PsiTelemetryConfig, SyncState, SynchroBus, SynchroEvent,
     ZSpaceCoherenceSequencer, ZSpaceTrace, ZSpaceTraceConfig, ZSpaceTraceEvent,
-    ZSpaceTraceRecorder, ZSpaceVae, ZSpaceVaeState, ZSpaceVaeStats,
+    ZSpaceTextVae, ZSpaceTraceRecorder, ZSpaceVae, ZSpaceVaeState, ZSpaceVaeStats,
 };
 
 pub use mixed_precision::{autocast_enabled, AutocastGuard, GradScaler};
