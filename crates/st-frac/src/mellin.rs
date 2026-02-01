@@ -63,6 +63,18 @@ where
     Ok(samples)
 }
 
+/// Convenience sampler for the reference function `f(x) = exp(-x)`.
+///
+/// This is used by demos and tests because the Mellin transform reduces to the
+/// Gamma function on the real axis.
+pub fn sample_log_uniform_exp_decay(
+    log_start: Scalar,
+    log_step: Scalar,
+    len: usize,
+) -> MellinResult<Vec<ComplexScalar>> {
+    sample_log_uniform(log_start, log_step, len, |x| ComplexScalar::new((-x).exp(), 0.0))
+}
+
 /// Pre-sampled log lattice with helpers for Mellin/Hilbert evaluations.
 #[derive(Clone, Debug)]
 pub struct MellinLogGrid {
@@ -131,6 +143,47 @@ impl MellinLogGrid {
         }
 
         self.evaluate_many_cpu(s_values)
+    }
+
+    /// Evaluate the Mellin transform over a 2D mesh of `s = real + i * imag`.
+    ///
+    /// The returned values are laid out in row-major order with `real_values`
+    /// as the outer dimension:
+    /// `out[real_index * imag_values.len() + imag_index]`.
+    pub fn evaluate_mesh(
+        &self,
+        real_values: &[Scalar],
+        imag_values: &[Scalar],
+    ) -> MellinResult<Vec<ComplexScalar>> {
+        if real_values.is_empty() || imag_values.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut s_values = Vec::with_capacity(real_values.len() * imag_values.len());
+        for &real in real_values {
+            for &imag in imag_values {
+                s_values.push(ComplexScalar::new(real, imag));
+            }
+        }
+        self.evaluate_many(&s_values)
+    }
+
+    /// Evaluate the Mellin transform over a 2D mesh using pre-weighted series coefficients.
+    pub fn evaluate_mesh_with_series(
+        &self,
+        real_values: &[Scalar],
+        imag_values: &[Scalar],
+        weighted: &[ComplexScalar],
+    ) -> MellinResult<Vec<ComplexScalar>> {
+        if real_values.is_empty() || imag_values.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut s_values = Vec::with_capacity(real_values.len() * imag_values.len());
+        for &real in real_values {
+            for &imag in imag_values {
+                s_values.push(ComplexScalar::new(real, imag));
+            }
+        }
+        self.evaluate_many_with_series(&s_values, weighted)
     }
 
     /// Precompute the Z-plane weighted series associated with the grid samples.
@@ -603,6 +656,31 @@ mod tests {
             let single = grid.evaluate(s).unwrap();
             let diff = (batch[idx] - single).norm();
             assert!(diff < 1e-6, "idx={} diff={}", idx, diff);
+        }
+    }
+
+    #[test]
+    fn mellin_log_grid_mesh_matches_pointwise() {
+        let log_start = -3.0f32;
+        let log_step = 0.05f32;
+        let len = 256usize;
+        let samples = sample_log_uniform_exp_decay(log_start, log_step, len).unwrap();
+        let grid = MellinLogGrid::new(log_start, log_step, samples).unwrap();
+
+        let real_values = vec![0.8f32, 1.3];
+        let imag_values = vec![-0.5f32, 0.0, 0.4];
+        let mesh = grid.evaluate_mesh(&real_values, &imag_values).unwrap();
+
+        assert_eq!(mesh.len(), real_values.len() * imag_values.len());
+
+        for (ri, &real) in real_values.iter().enumerate() {
+            for (ii, &imag) in imag_values.iter().enumerate() {
+                let idx = ri * imag_values.len() + ii;
+                let s = ComplexScalar::new(real, imag);
+                let single = grid.evaluate(s).unwrap();
+                let diff = (mesh[idx] - single).norm();
+                assert!(diff < 1e-5, "idx={} diff={}", idx, diff);
+            }
         }
     }
 
