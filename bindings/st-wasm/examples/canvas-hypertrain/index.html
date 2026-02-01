@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SpiralTorch Canvas Hypertrain (WASM)</title>
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <main class="app">
+      <section class="pane">
+        <header>
+          <h1>SpiralTorch Canvas Hypertrain</h1>
+          <p class="subtitle">
+            WASM demo for <code>FractalCanvas</code> + <code>hypergradWave</code> (curvature-aware)
+            training loops.
+          </p>
+        </header>
+
+        <form id="controls">
+          <fieldset>
+            <legend>Canvas</legend>
+            <div class="inline">
+              <label>
+                width
+                <input id="width" name="width" type="number" min="64" step="1" value="512" />
+              </label>
+              <label>
+                height
+                <input id="height" name="height" type="number" min="64" step="1" value="320" />
+              </label>
+              <label>
+                capacity
+                <input id="capacity" name="capacity" type="number" min="1" step="1" value="1" />
+              </label>
+            </div>
+            <div class="inline">
+              <label>
+                coherence
+                <input id="coherence" name="coherence" value="1.0" />
+              </label>
+              <label>
+                tension
+                <input id="tension" name="tension" value="1.0" />
+              </label>
+              <label>
+                depth
+                <input id="depth" name="depth" type="number" min="0" step="1" value="0" />
+              </label>
+            </div>
+            <div class="inline">
+              <label>
+                palette
+                <select id="palette" name="palette"></select>
+              </label>
+            </div>
+            <div class="actions">
+              <button id="rebuild" type="button">Rebuild</button>
+              <button id="seed" type="button">Seed relation</button>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Training</legend>
+            <div class="inline">
+              <label>
+                mode
+                <select id="mode" name="mode">
+                  <option value="hyper">hypergradWave</option>
+                  <option value="real">realgradWave</option>
+                </select>
+              </label>
+              <label>
+                steps/frame
+                <input id="steps" name="steps" type="number" min="1" step="1" value="2" />
+              </label>
+              <label>
+                base_lr
+                <input id="lr" name="lr" value="0.02" />
+              </label>
+            </div>
+            <div class="inline">
+              <label>
+                curvature
+                <input id="curvature" name="curvature" value="-1.0" />
+              </label>
+              <label class="checkbox">
+                <input id="use-desire" name="use-desire" type="checkbox" checked />
+                use Desire LR scaling
+              </label>
+              <label class="checkbox">
+                <input id="run" name="run" type="checkbox" />
+                run continuously
+              </label>
+            </div>
+            <div class="actions">
+              <button id="step" type="button">Step</button>
+              <button id="reset-norm" type="button">Reset normalizer</button>
+            </div>
+          </fieldset>
+        </form>
+
+        <p id="status" class="status">Loading WebAssembly…</p>
+        <div class="meta">
+          <div><span class="label">grad</span> <code id="grad">—</code></div>
+          <div><span class="label">desire</span> <code id="desire">—</code></div>
+          <div><span class="label">lr</span> <code id="lr-effective">—</code></div>
+          <div><span class="label">timing</span> <code id="timing">—</code></div>
+        </div>
+      </section>
+
+      <section class="pane">
+        <header>
+          <h2>Canvas output</h2>
+          <p class="subtitle">
+            Left: fractal canvas. Right: hyperbolic trail buffer projected onto 2D.
+          </p>
+        </header>
+        <div class="canvases">
+          <canvas id="fractal" width="512" height="320"></canvas>
+          <canvas id="trail" width="512" height="320"></canvas>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>
+

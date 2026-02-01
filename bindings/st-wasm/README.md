@@ -21,6 +21,7 @@ builds) or run `wasm-pack` via `env -u RUSTFLAGS -u LIBRARY_PATH -u PKG_CONFIG_P
 ## Examples
 
 - COBOL dispatch console: `bindings/st-wasm/examples/cobol-console/`
+- Canvas hypertrain demo (FractalCanvas + hypergradWave): `bindings/st-wasm/examples/canvas-hypertrain/`
 - Mellin log grid demo (evaluateMany): `bindings/st-wasm/examples/mellin-log-grid/`
 
 ## High-level Canvas utilities

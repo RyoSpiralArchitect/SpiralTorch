@@ -20,7 +20,14 @@ echo "[SpiralTorch] copying TypeScript declarations..."
 cp "$ROOT/bindings/st-wasm/types/spiraltorch-wasm.d.ts" "$OUT_DIR/"
 
 echo "[SpiralTorch] syncing package into Vite examples..."
-for example in "$EXAMPLES_DIR"/cobol-console "$EXAMPLES_DIR"/mellin-log-grid; do
+for example in "$EXAMPLES_DIR"/*; do
+  if [[ ! -d "$example" ]]; then
+    continue
+  fi
+  if [[ "$(basename "$example")" == "pkg" ]]; then
+    continue
+  fi
+
   dest="$example/pkg"
   mkdir -p "$dest"
   cp -f "$OUT_DIR"/spiraltorch* "$dest"/
