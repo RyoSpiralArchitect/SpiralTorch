@@ -15,8 +15,11 @@ use crate::planner::PyRankPlan;
 use st_core::backend::spiralk_fft::SpiralKFftPlan;
 
 use st_core::theory::maxwell::{
-    required_blocks as required_blocks_rs, MaxwellFingerprint, MaxwellSpiralKBridge,
-    MaxwellSpiralKHint, MaxwellZProjector, MaxwellZPulse, MeaningGate, SequentialZ,
+    expected_z_curve as expected_z_curve_rs,
+    polarisation_slope as polarisation_slope_rs,
+    required_blocks as required_blocks_rs, MaxwellExpectationError, MaxwellFingerprint,
+    MaxwellSeriesError, MaxwellSpiralKBridge, MaxwellSpiralKHint, MaxwellZProjector, MaxwellZPulse,
+    MeaningGate, SequentialZ,
 };
 #[cfg(feature = "kdsl")]
 use st_kdsl::{
@@ -843,6 +846,26 @@ fn required_blocks(target_z: f64, sigma: f64, kappa: f64, lambda_: f64) -> Optio
     required_blocks_rs(target_z, sigma, kappa, lambda_)
 }
 
+fn maxwell_series_err_to_py(err: MaxwellSeriesError) -> PyErr {
+    pyo3::exceptions::PyValueError::new_err(err.to_string())
+}
+
+fn maxwell_expectation_err_to_py(err: MaxwellExpectationError) -> PyErr {
+    pyo3::exceptions::PyValueError::new_err(err.to_string())
+}
+
+#[pyfunction]
+#[pyo3(signature = (blocks, sigma, kappa, lambda_))]
+fn expected_z_curve(blocks: usize, sigma: f64, kappa: f64, lambda_: f64) -> PyResult<Vec<f64>> {
+    expected_z_curve_rs(blocks, sigma, kappa, lambda_).map_err(maxwell_expectation_err_to_py)
+}
+
+#[pyfunction]
+#[pyo3(signature = (fingerprint, samples=16))]
+fn polarisation_slope(fingerprint: &PyMaxwellFingerprint, samples: usize) -> f64 {
+    polarisation_slope_rs(&fingerprint.inner, samples)
+}
+
 #[pyclass(module = "spiraltorch.spiralk", name = "MaxwellFingerprint")]
 pub(crate) struct PyMaxwellFingerprint {
     inner: MaxwellFingerprint,
@@ -923,6 +946,26 @@ impl PyMaxwellFingerprint {
     fn expected_block_mean(&self, kappa: f64) -> f64 {
         self.inner.expected_block_mean(kappa)
     }
+
+    fn expected_z_curve(&self, blocks: usize, sigma: f64, kappa: f64) -> PyResult<Vec<f64>> {
+        expected_z_curve_rs(blocks, sigma, kappa, self.inner.lambda())
+            .map_err(maxwell_expectation_err_to_py)
+    }
+
+    fn polarisation_slope(&self, samples: usize) -> f64 {
+        polarisation_slope_rs(&self.inner, samples)
+    }
+
+    fn envelope_series(
+        &self,
+        semantic_gain: f64,
+        rho_values: Vec<f64>,
+        code_values: Vec<f64>,
+    ) -> PyResult<Vec<f64>> {
+        let gate = MeaningGate::new(self.inner.lambda(), semantic_gain);
+        gate.envelope_series(&rho_values, &code_values)
+            .map_err(maxwell_series_err_to_py)
+    }
 }
 
 #[pyclass(module = "spiraltorch.spiralk", name = "MeaningGate")]
@@ -960,6 +1003,12 @@ impl PyMeaningGate {
 
     fn envelope(&self, rho: f64) -> f64 {
         self.inner.envelope(rho)
+    }
+
+    fn envelope_series(&self, rho_values: Vec<f64>, code_values: Vec<f64>) -> PyResult<Vec<f64>> {
+        self.inner
+            .envelope_series(&rho_values, &code_values)
+            .map_err(maxwell_series_err_to_py)
     }
 }
 
@@ -1196,6 +1245,8 @@ pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyMaxwellPulse>()?;
     module.add_class::<PyMaxwellProjector>()?;
     module.add_function(wrap_pyfunction!(required_blocks, &module)?)?;
+    module.add_function(wrap_pyfunction!(expected_z_curve, &module)?)?;
+    module.add_function(wrap_pyfunction!(polarisation_slope, &module)?)?;
     #[cfg(feature = "kdsl")]
     {
         module.add_function(wrap_pyfunction!(wilson_lower_bound, &module)?)?;
@@ -1217,6 +1268,8 @@ pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
             "MaxwellPulse",
             "MaxwellProjector",
             "required_blocks",
+            "expected_z_curve",
+            "polarisation_slope",
         ];
         #[cfg(feature = "kdsl")]
         {

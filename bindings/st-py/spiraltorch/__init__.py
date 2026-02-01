@@ -1698,6 +1698,8 @@ _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
         "MaxwellPulse": (),
         "MaxwellProjector": (),
         "required_blocks": (),
+        "expected_z_curve": (),
+        "polarisation_slope": (),
     },
     "compat.torch": {
         "to_torch": ("compat_to_torch", "to_torch"),

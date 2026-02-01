@@ -43,6 +43,7 @@ use crate::{
     theory::zpulse::{ZEmitter, ZPulse, ZSource, ZSupport},
     util::math::LeechProjector,
 };
+use thiserror::Error;
 use std::cell::RefCell;
 #[cfg(feature = "psi")]
 use std::collections::HashMap;
@@ -208,6 +209,112 @@ impl MeaningGate {
         let rho = rho.clamp(-1.0, 1.0);
         self.physical_gain + self.semantic_gain * rho
     }
+
+    /// Build a full envelope coefficient series `u_tot(t) = [λ + μ ρ(t)] c(t)`.
+    ///
+    /// This is a convenience helper for plotting and for piping coded-envelope
+    /// coefficients into matched filters without allocating bespoke glue code.
+    pub fn envelope_series(
+        &self,
+        rho_values: &[f64],
+        code_values: &[f64],
+    ) -> Result<Vec<f64>, MaxwellSeriesError> {
+        if rho_values.len() != code_values.len() {
+            return Err(MaxwellSeriesError::LengthMismatch {
+                rho: rho_values.len(),
+                code: code_values.len(),
+            });
+        }
+        let mut out = Vec::with_capacity(rho_values.len());
+        for (idx, (&rho, &code)) in rho_values.iter().zip(code_values.iter()).enumerate() {
+            if !rho.is_finite() {
+                return Err(MaxwellSeriesError::NonFiniteRho { index: idx, value: rho });
+            }
+            if !code.is_finite() {
+                return Err(MaxwellSeriesError::NonFiniteCode { index: idx, value: code });
+            }
+            out.push(self.envelope(rho) * code);
+        }
+        Ok(out)
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum MaxwellSeriesError {
+    #[error("rho and code lengths must match (rho={rho}, code={code})")]
+    LengthMismatch { rho: usize, code: usize },
+    #[error("rho[{index}] is not finite: {value}")]
+    NonFiniteRho { index: usize, value: f64 },
+    #[error("code[{index}] is not finite: {value}")]
+    NonFiniteCode { index: usize, value: f64 },
+}
+
+#[derive(Debug, Error)]
+pub enum MaxwellExpectationError {
+    #[error("sigma must be finite and > 0, got {sigma}")]
+    InvalidSigma { sigma: f64 },
+    #[error("kappa must be finite, got {kappa}")]
+    NonFiniteKappa { kappa: f64 },
+    #[error("lambda must be finite, got {lambda}")]
+    NonFiniteLambda { lambda: f64 },
+    #[error("expected z coefficient became non-finite")]
+    NonFiniteCoefficient,
+}
+
+/// Generate the expected Z statistic progression for `n=1..blocks` under the
+/// Gaussian approximation used by `required_blocks`.
+///
+/// The returned curve is:
+/// `Z(n) = (κ λ / σ) √n`.
+pub fn expected_z_curve(
+    blocks: usize,
+    sigma: f64,
+    kappa: f64,
+    lambda: f64,
+) -> Result<Vec<f64>, MaxwellExpectationError> {
+    if blocks == 0 {
+        return Ok(Vec::new());
+    }
+    if !(sigma.is_finite() && sigma > 0.0) {
+        return Err(MaxwellExpectationError::InvalidSigma { sigma });
+    }
+    if !kappa.is_finite() {
+        return Err(MaxwellExpectationError::NonFiniteKappa { kappa });
+    }
+    if !lambda.is_finite() {
+        return Err(MaxwellExpectationError::NonFiniteLambda { lambda });
+    }
+    let coeff = (kappa * lambda) / sigma;
+    if !coeff.is_finite() {
+        return Err(MaxwellExpectationError::NonFiniteCoefficient);
+    }
+    let mut out = Vec::with_capacity(blocks);
+    for n in 1..=blocks {
+        out.push(coeff * (n as f64).sqrt());
+    }
+    Ok(out)
+}
+
+/// Convenience wrapper around `expected_z_curve` that computes λ from a fingerprint.
+pub fn expected_z_curve_from_fingerprint(
+    blocks: usize,
+    sigma: f64,
+    kappa: f64,
+    fingerprint: &MaxwellFingerprint,
+) -> Result<Vec<f64>, MaxwellExpectationError> {
+    expected_z_curve(blocks, sigma, kappa, fingerprint.lambda())
+}
+
+/// Convenience wrapper that builds `MeaningGate(λ, μ)` from a fingerprint and returns
+/// `u_tot(t)` for plotting/simulation.
+pub fn envelope_series_from_fingerprint(
+    fingerprint: &MaxwellFingerprint,
+    semantic_gain: f64,
+    rho_values: &[f64],
+    code_values: &[f64],
+) -> Result<Vec<f64>, MaxwellSeriesError> {
+    let gate = MeaningGate::new(fingerprint.lambda(), semantic_gain);
+    gate.envelope_series(rho_values, code_values)
 }
 
 /// Online estimator for sequential Z statistics built from matched-filter
@@ -847,6 +954,34 @@ mod tests {
         assert!(required_blocks(3.0, 1.0, 1.0, 0.0).is_none());
         let blocks = required_blocks(3.0, 1.0, 1.5, 0.8).unwrap();
         assert!(blocks > 0.0);
+    }
+
+    #[test]
+    fn meaning_gate_envelope_series_matches_formula() {
+        let gate = MeaningGate::new(1.25, 0.4);
+        let rho = [0.0, 1.0, -1.0];
+        let code = [1.0, -2.0, 0.5];
+        let series = gate.envelope_series(&rho, &code).unwrap();
+        assert_eq!(series.len(), 3);
+        assert_abs_diff_eq!(series[0], (1.25 + 0.4 * 0.0) * 1.0);
+        assert_abs_diff_eq!(series[1], (1.25 + 0.4 * 1.0) * -2.0);
+        assert_abs_diff_eq!(series[2], (1.25 + 0.4 * -1.0) * 0.5);
+    }
+
+    #[test]
+    fn expected_z_curve_matches_required_blocks_identity() {
+        let target_z = 3.0;
+        let sigma = 1.25;
+        let kappa = 1.5;
+        let lambda = 0.8;
+        let blocks = required_blocks(target_z, sigma, kappa, lambda).unwrap();
+        let blocks = blocks.round() as usize;
+        let curve = expected_z_curve(blocks, sigma, kappa, lambda).unwrap();
+        assert_eq!(curve.len(), blocks);
+        let last = *curve.last().unwrap();
+        assert!(last.is_finite());
+        // Should be close to the target (rounding introduces small error).
+        assert!((last.abs() - target_z).abs() < 0.25);
     }
 
     #[test]

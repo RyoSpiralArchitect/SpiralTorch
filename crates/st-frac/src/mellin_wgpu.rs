@@ -7,12 +7,11 @@
 
 use std::any::Any;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use bytemuck::{cast_slice, Pod, Zeroable};
 use pollster::block_on;
 use thiserror::Error;
-use wgpu::util::DeviceExt;
 
 use crate::mellin_types::{ComplexScalar, Scalar};
 
@@ -54,6 +53,7 @@ struct MellinGpuExecutor {
     queue: wgpu::Queue,
     pipeline: wgpu::ComputePipeline,
     layout: wgpu::BindGroupLayout,
+    buffers: Mutex<MellinGpuBuffers>,
 }
 
 static EXECUTOR: OnceLock<Result<MellinGpuExecutor, MellinGpuError>> = OnceLock::new();
@@ -160,6 +160,7 @@ impl MellinGpuExecutor {
             queue,
             pipeline,
             layout,
+            buffers: Mutex::new(MellinGpuBuffers::default()),
         })
     }
 
@@ -170,47 +171,59 @@ impl MellinGpuExecutor {
     ) -> Result<Vec<ComplexScalar>, MellinGpuError> {
         let coeffs = to_pod_vec(weighted)?;
         let zs = to_pod_vec(z_values)?;
-        let coeff_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("st.mellin.gpu.coeffs"),
-                contents: cast_slice(&coeffs),
-                usage: wgpu::BufferUsages::STORAGE,
-            });
-        let z_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("st.mellin.gpu.zs"),
-                contents: cast_slice(&zs),
-                usage: wgpu::BufferUsages::STORAGE,
-            });
+        let coeff_bytes = (std::mem::size_of::<ComplexPod>() * weighted.len()) as u64;
+        let z_bytes = (std::mem::size_of::<ComplexPod>() * z_values.len()) as u64;
+        let output_size = z_bytes;
 
-        let output_size = (std::mem::size_of::<ComplexPod>() * z_values.len()) as u64;
-        let output_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("st.mellin.gpu.output"),
-            size: output_size,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
-        let staging_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("st.mellin.gpu.staging"),
-            size: output_size,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+        let (coeff_buffer, z_buffer, output_buffer, staging_buffer, params_buffer) = {
+            let mut buffers = self.buffers.lock().expect("mellin gpu buffers poisoned");
+
+            let coeff = buffers.ensure(
+                &self.device,
+                "st.mellin.gpu.coeffs",
+                coeff_bytes,
+                wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            );
+            let z = buffers.ensure(
+                &self.device,
+                "st.mellin.gpu.zs",
+                z_bytes,
+                wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            );
+            let output = buffers.ensure(
+                &self.device,
+                "st.mellin.gpu.output",
+                output_size,
+                wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            );
+            let staging = buffers.ensure(
+                &self.device,
+                "st.mellin.gpu.staging",
+                output_size,
+                wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            );
+            let params = buffers.ensure_params(&self.device);
+            (coeff, z, output, staging, params)
+        };
+
+        self.queue.write_buffer(
+            coeff_buffer.as_ref(),
+            0,
+            cast_slice(&coeffs),
+        );
+        self.queue.write_buffer(
+            z_buffer.as_ref(),
+            0,
+            cast_slice(&zs),
+        );
 
         let params = ParamsPod {
             len: weighted.len() as u32,
             count: z_values.len() as u32,
             _pad: [0, 0],
         };
-        let params_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("st.mellin.gpu.params"),
-                contents: cast_slice(&[params]),
-                usage: wgpu::BufferUsages::UNIFORM,
-            });
+        self.queue
+            .write_buffer(params_buffer.as_ref(), 0, cast_slice(&[params]));
 
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("st.mellin.gpu.bind_group"),
@@ -250,11 +263,17 @@ impl MellinGpuExecutor {
             let workgroups = (z_values.len() as u32 + 63) / 64;
             pass.dispatch_workgroups(workgroups.max(1), 1, 1);
         }
-        encoder.copy_buffer_to_buffer(&output_buffer, 0, &staging_buffer, 0, output_size);
+        encoder.copy_buffer_to_buffer(
+            output_buffer.as_ref(),
+            0,
+            staging_buffer.as_ref(),
+            0,
+            output_size,
+        );
         self.queue.submit(Some(encoder.finish()));
         self.device.poll(wgpu::Maintain::Wait);
 
-        let slice = staging_buffer.slice(..);
+        let slice = staging_buffer.slice(0..output_size);
         let (sender, receiver) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |res| {
             let _ = sender.send(res);
@@ -274,6 +293,81 @@ impl MellinGpuExecutor {
         staging_buffer.unmap();
 
         Ok(result)
+    }
+}
+
+#[derive(Default)]
+struct MellinGpuBuffers {
+    coeffs: Option<CachedBuffer>,
+    zs: Option<CachedBuffer>,
+    output: Option<CachedBuffer>,
+    staging: Option<CachedBuffer>,
+    params: Option<Arc<wgpu::Buffer>>,
+}
+
+#[derive(Clone)]
+struct CachedBuffer {
+    buffer: Arc<wgpu::Buffer>,
+    bytes: u64,
+}
+
+impl MellinGpuBuffers {
+    fn ensure(
+        &mut self,
+        device: &wgpu::Device,
+        label: &str,
+        bytes: u64,
+        usage: wgpu::BufferUsages,
+    ) -> Arc<wgpu::Buffer> {
+        let slot = match label {
+            "st.mellin.gpu.coeffs" => &mut self.coeffs,
+            "st.mellin.gpu.zs" => &mut self.zs,
+            "st.mellin.gpu.output" => &mut self.output,
+            "st.mellin.gpu.staging" => &mut self.staging,
+            _ => {
+                // Fallback: allocate a fresh buffer (label is only used internally).
+                let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(label),
+                    size: bytes.max(4),
+                    usage,
+                    mapped_at_creation: false,
+                });
+                return Arc::new(buffer);
+            }
+        };
+
+        let needs_alloc = slot.as_ref().map(|buf| buf.bytes < bytes).unwrap_or(true);
+        if needs_alloc {
+            let padded = bytes.max(4);
+            let padded = padded.saturating_mul(11) / 10;
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size: padded,
+                usage,
+                mapped_at_creation: false,
+            });
+            *slot = Some(CachedBuffer {
+                buffer: Arc::new(buffer),
+                bytes: padded,
+            });
+        }
+
+        slot.as_ref().expect("buffer must be allocated").buffer.clone()
+    }
+
+    fn ensure_params(&mut self, device: &wgpu::Device) -> Arc<wgpu::Buffer> {
+        if let Some(buf) = &self.params {
+            return buf.clone();
+        }
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("st.mellin.gpu.params"),
+            size: std::mem::size_of::<ParamsPod>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let buf = Arc::new(buffer);
+        self.params = Some(buf.clone());
+        buf
     }
 }
 

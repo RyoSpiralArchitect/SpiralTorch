@@ -23,6 +23,33 @@ Reuse or redistribution **must retain the SpiralTorch name and authorship** as p
 
 **New to SpiralTorch?** Start here:
 
+- **1-minute quickstart (Python):**
+  ```bash
+  pip install -U spiraltorch==0.4.1
+
+  python - <<'PY'
+  import spiraltorch as st
+
+  # Mellin geometry: log-uniform samples → Mellin transform mesh (Hilbert-grounded).
+  grid = st.frac.MellinLogGrid.exp_decay(log_start=-3.0, log_step=0.05, len=256)
+  mesh = grid.evaluate_mesh(real_values=[0.8, 1.3], imag_values=[-0.5, 0.0, 0.4])
+
+  # Maxwell coded-envelope helpers (visualisation-ready time series + expectation curves).
+  fp = st.MaxwellFingerprint(
+      gamma=1.0,
+      modulation_depth=1.0,
+      tissue_response=1.0,
+      shielding_db=0.0,
+      transmit_gain=1.0,
+      polarization_angle=0.0,
+      distance_m=1.0,
+  )
+  z_curve = fp.expected_z_curve(blocks=64, sigma=1.0, kappa=1.0)
+
+  print("mesh:", len(mesh), "x", (len(mesh[0]) if mesh else 0), "| z[64]:", z_curve[-1])
+  PY
+  ```
+
 - 📚 **[Getting Started Guide](docs/getting-started.md)** - Installation, first steps, and core concepts
 - 🔄 **[PyTorch Migration Guide](docs/pytorch-migration-guide.md)** - Seamless transition from PyTorch  
 - 📖 **[Example Gallery](docs/example-gallery.md)** - 18+ examples across vision, NLP, RL, and more
@@ -291,7 +318,7 @@ tensor shims, no translation layers, and no tracebacks.
 ## Install (pip)
 
 ```bash
-pip install -U spiraltorch==0.3.9
+pip install -U spiraltorch==0.4.1
 ```
 
 - Wheels are **abi3**; you can use any CPython ≥ 3.8.
