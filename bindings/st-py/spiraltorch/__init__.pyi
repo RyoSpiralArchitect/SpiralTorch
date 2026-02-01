@@ -3772,12 +3772,86 @@ class MellinLogGrid:
     def hilbert_norm(self) -> float: ...
 
 
+class FractalFieldGenerator:
+    def __init__(
+        self,
+        octaves: int,
+        lacunarity: float = ...,
+        gain: float = ...,
+        iterations: int = ...,
+    ) -> None: ...
+
+    @property
+    def octaves(self) -> int: ...
+
+    @property
+    def lacunarity(self) -> float: ...
+
+    @property
+    def gain(self) -> float: ...
+
+    @property
+    def iterations(self) -> int: ...
+
+    def branching_field(self, log_start: float, log_step: float, len: int) -> List[complex]: ...
+    def spawn_grid(self, log_start: float, log_step: float, len: int) -> MellinLogGrid: ...
+    def weave_with_grid(self, base: MellinLogGrid) -> MellinLogGrid: ...
+
+
+class LogZSeries:
+    def __init__(
+        self,
+        log_start: float,
+        log_step: float,
+        samples: Sequence[float],
+        window: str = ...,
+        normalisation: str = ...,
+    ) -> None: ...
+
+    def len(self) -> int: ...
+    def __len__(self) -> int: ...
+    def is_empty(self) -> bool: ...
+
+    @property
+    def log_start(self) -> float: ...
+
+    @property
+    def log_step(self) -> float: ...
+
+    @property
+    def samples(self) -> List[float]: ...
+
+    @property
+    def weights(self) -> List[float]: ...
+
+    @property
+    def window(self) -> str: ...
+
+    @property
+    def normalisation(self) -> str: ...
+
+    def evaluate_z(self, z: complex) -> complex: ...
+    def evaluate_many_z(self, z_values: Sequence[complex]) -> List[complex]: ...
+    def ensure_compatible(self, other: LogZSeries) -> None: ...
+
+
 class _FracModule(ModuleType):
     MellinLogGrid: type[MellinLogGrid]
+    FractalFieldGenerator: type[FractalFieldGenerator]
+    LogZSeries: type[LogZSeries]
 
     def gl_coeffs_adaptive(alpha: float, tol: float = ..., max_len: int = ...) -> List[float]: ...
 
     def mellin_exp_decay_samples(log_start: float, log_step: float, len: int) -> List[complex]: ...
+
+    def log_lattice_z_points(log_step: float, s_values: Sequence[complex]) -> List[complex]: ...
+
+    def assemble_pzeta(
+        z_points: Sequence[complex],
+        h_series: LogZSeries,
+        epsilon_series: LogZSeries,
+        planck_mass: float,
+    ) -> List[float]: ...
 
     def fracdiff_gl_1d(
         xs: Sequence[float],
