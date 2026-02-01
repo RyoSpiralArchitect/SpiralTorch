@@ -1,5 +1,6 @@
 use js_sys::Float32Array;
 use serde::{Deserialize, Serialize};
+use serde_wasm_bindgen as swb;
 use st_core::backend::spiralk_fft::SpiralKFftPlan;
 use st_core::backend::wgpu_heuristics::{self, Choice};
 use st_frac::fft::{self, Complex32};
@@ -84,7 +85,7 @@ impl WasmFftPlan {
     /// Convert the plan into a plain JavaScript object with the same fields as [`toJson`].
     #[wasm_bindgen(js_name = toObject)]
     pub fn to_object(&self) -> Result<JsValue, JsValue> {
-        JsValue::from_serde(&self.plan).map_err(js_error)
+        swb::to_value(&self.plan).map_err(js_error)
     }
 
     /// Rebuild a plan from a JSON string produced by [`toJson`].
@@ -97,7 +98,7 @@ impl WasmFftPlan {
     /// Rebuild a plan from a plain JavaScript object with the same fields as [`toObject`].
     #[wasm_bindgen(js_name = fromObject)]
     pub fn from_object(value: &JsValue) -> Result<WasmFftPlan, JsValue> {
-        let plan = value.into_serde::<SpiralKFftPlan>().map_err(js_error)?;
+        let plan = swb::from_value::<SpiralKFftPlan>(value.clone()).map_err(js_error)?;
         Ok(WasmFftPlan::from_plan(plan))
     }
 }
@@ -146,10 +147,10 @@ pub fn auto_fft_plan_object(
     cols: u32,
     k: u32,
     subgroup: bool,
-) -> Result<Option<JsValue>, JsValue> {
+) -> Result<JsValue, JsValue> {
     match auto_plan_internal(rows, cols, k, subgroup) {
-        Some(plan) => Ok(Some(plan.to_object()?)),
-        None => Ok(None),
+        Some(plan) => plan.to_object(),
+        None => Ok(JsValue::UNDEFINED),
     }
 }
 
@@ -165,17 +166,17 @@ pub fn fft_inverse(buffer: &Float32Array) -> Result<Float32Array, JsValue> {
 
 #[wasm_bindgen(js_name = "fft_forward_in_place")]
 pub fn fft_forward_in_place(buffer: &Float32Array) -> Result<(), JsValue> {
-    fft_transform(buffer, false).and_then(|updated| {
+    fft_transform(buffer, false).map(|updated| {
         let view = Float32Array::from(updated.as_slice());
-        buffer.set(&view, 0)
+        buffer.set(&view, 0);
     })
 }
 
 #[wasm_bindgen(js_name = "fft_inverse_in_place")]
 pub fn fft_inverse_in_place(buffer: &Float32Array) -> Result<(), JsValue> {
-    fft_transform(buffer, true).and_then(|updated| {
+    fft_transform(buffer, true).map(|updated| {
         let view = Float32Array::from(updated.as_slice());
-        buffer.set(&view, 0)
+        buffer.set(&view, 0);
     })
 }
 
@@ -209,7 +210,7 @@ fn complex_to_interleaved(data: &[Complex32]) -> Vec<f32> {
     host
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct WasmFftPlanSerde {
     radix: u32,
     #[serde(rename = "tileCols")]

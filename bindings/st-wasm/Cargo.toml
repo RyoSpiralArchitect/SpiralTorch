@@ -13,7 +13,7 @@ name = "spiraltorch_wasm"
 path = "src/lib.rs"
 
 [dependencies]
-st-tensor = { path = "../../crates/st-tensor" }
+st-tensor = { path = "../../crates/st-tensor", default-features = false }
 st-core   = { path = "../../crates/st-core" }
 st-frac   = { path = "../../crates/st-frac" }
 serde = { version = "1", features = ["derive"] }
@@ -29,3 +29,4 @@ web-sys = { version = "0.3", features = [
     "ImageData"
 ] }
 serde-wasm-bindgen = "0.5"
+getrandom = { version = "0.2", features = ["js"] }

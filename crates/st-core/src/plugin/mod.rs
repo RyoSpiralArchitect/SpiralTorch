@@ -38,24 +38,27 @@
 //! registry.initialize_all()?;
 //! ```
 
-pub mod registry;
-pub mod traits;
+pub mod context;
 pub mod events;
 pub mod loader;
-pub mod context;
 pub mod recorder;
+pub mod registry;
+pub mod traits;
 
-pub use registry::{PluginRegistry, PluginHandle};
-pub use traits::{Plugin, PluginMetadata, PluginCapability};
-pub use events::{PluginEvent, PluginEventBus, EventListener};
-pub use loader::{DynamicPluginLoader, PluginLoader, StaticPluginLoader};
 pub use context::{PluginContext, PluginDependency};
-pub use recorder::{PluginEventRecord, PluginEventRecorder, PluginEventRecorderConfig, PluginEventSnapshot, PluginEventTrace};
+pub use events::{EventListener, PluginEvent, PluginEventBus};
+pub use loader::{DynamicPluginLoader, PluginLoader, StaticPluginLoader};
+pub use recorder::{
+    PluginEventJsonlWriter, PluginEventJsonlWriterConfig, PluginEventRecord, PluginEventRecorder,
+    PluginEventRecorderConfig, PluginEventSnapshot, PluginEventTrace,
+};
+pub use registry::{PluginHandle, PluginRegistry};
+pub use traits::{Plugin, PluginCapability, PluginMetadata};
 
 use crate::PureResult;
-use std::sync::Arc;
 use st_tensor::TensorOpEvent;
 use st_tensor::{set_tensor_op_meta_observer, set_tensor_op_observer, TensorOpMetaEvent};
+use std::sync::Arc;
 
 /// Initialize the global plugin system.
 ///

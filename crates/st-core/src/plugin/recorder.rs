@@ -37,17 +37,30 @@ impl Default for PluginEventRecorderConfig {
 pub enum PluginEventSnapshot {
     SystemInit,
     SystemShutdown,
-    PluginLoaded { plugin_id: String },
-    PluginUnloaded { plugin_id: String },
+    PluginLoaded {
+        plugin_id: String,
+    },
+    PluginUnloaded {
+        plugin_id: String,
+    },
     TensorOp {
         op_name: String,
         input_shape: Vec<usize>,
         output_shape: Vec<usize>,
     },
-    EpochStart { epoch: usize },
-    EpochEnd { epoch: usize, loss: f32 },
-    BackendChanged { backend: String },
-    Telemetry { data: HashMap<String, f32> },
+    EpochStart {
+        epoch: usize,
+    },
+    EpochEnd {
+        epoch: usize,
+        loss: f32,
+    },
+    BackendChanged {
+        backend: String,
+    },
+    Telemetry {
+        data: HashMap<String, f32>,
+    },
     Custom {
         event_type: String,
         data: Option<Value>,
@@ -82,7 +95,9 @@ impl PluginEventSnapshot {
             PluginEvent::BackendChanged { backend } => PluginEventSnapshot::BackendChanged {
                 backend: backend.clone(),
             },
-            PluginEvent::Telemetry { data } => PluginEventSnapshot::Telemetry { data: data.clone() },
+            PluginEvent::Telemetry { data } => {
+                PluginEventSnapshot::Telemetry { data: data.clone() }
+            }
             PluginEvent::Custom { event_type, .. } => {
                 let data = event.downcast_data::<Value>().cloned();
                 PluginEventSnapshot::Custom {
@@ -107,7 +122,9 @@ impl PluginEventSnapshot {
                 output_shape,
             } => format!("TensorOp: {op_name} {input_shape:?}→{output_shape:?}"),
             PluginEventSnapshot::EpochStart { epoch } => format!("EpochStart: {epoch}"),
-            PluginEventSnapshot::EpochEnd { epoch, loss } => format!("EpochEnd: {epoch} loss={loss:.6}"),
+            PluginEventSnapshot::EpochEnd { epoch, loss } => {
+                format!("EpochEnd: {epoch} loss={loss:.6}")
+            }
             PluginEventSnapshot::BackendChanged { backend } => format!("BackendChanged: {backend}"),
             PluginEventSnapshot::Telemetry { data } => format!("Telemetry: {} keys", data.len()),
             PluginEventSnapshot::Custom { event_type, .. } => format!("Custom: {event_type}"),
@@ -158,7 +175,10 @@ impl PluginEventRecorder {
         let inner_clone = Arc::clone(&inner);
         let started_at_clone = started_at;
         let listener: EventListener = Arc::new(move |event: &PluginEvent| {
-            let elapsed_ms = started_at_clone.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+            let elapsed_ms = started_at_clone
+                .elapsed()
+                .as_millis()
+                .min(u128::from(u64::MAX)) as u64;
             let snapshot = PluginEventSnapshot::from_event(event);
             let mut guard = inner_clone
                 .lock()
@@ -207,16 +227,20 @@ impl PluginEventRecorder {
     }
 
     pub fn elapsed_ms(&self) -> u64 {
-        self.started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+        self.started_at
+            .elapsed()
+            .as_millis()
+            .min(u128::from(u64::MAX)) as u64
     }
 
     pub fn write_jsonl(&self, path: impl AsRef<Path>) -> PureResult<()> {
         let trace = self.snapshot();
-        let file = File::create(path.as_ref()).map_err(|err| TensorError::Generic(err.to_string()))?;
+        let file =
+            File::create(path.as_ref()).map_err(|err| TensorError::Generic(err.to_string()))?;
         let mut writer = BufWriter::new(file);
         for record in trace.events {
-            let json =
-                serde_json::to_string(&record).map_err(|err| TensorError::Generic(err.to_string()))?;
+            let json = serde_json::to_string(&record)
+                .map_err(|err| TensorError::Generic(err.to_string()))?;
             writer
                 .write_all(json.as_bytes())
                 .and_then(|_| writer.write_all(b"\n"))
@@ -254,3 +278,120 @@ impl Drop for PluginEventRecorder {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct PluginEventJsonlWriterConfig {
+    /// When `false`, `TensorOp` events are skipped to keep traces compact.
+    pub capture_tensor_ops: bool,
+}
+
+impl Default for PluginEventJsonlWriterConfig {
+    fn default() -> Self {
+        Self {
+            capture_tensor_ops: false,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct PluginEventJsonlWriter {
+    bus: PluginEventBus,
+    subscription_id: usize,
+    started_at: Instant,
+    inner: Arc<Mutex<JsonlWriterState>>,
+}
+
+#[derive(Debug)]
+struct JsonlWriterState {
+    writer: BufWriter<File>,
+    next_idx: u64,
+    errored: bool,
+}
+
+impl PluginEventJsonlWriter {
+    pub fn subscribe(
+        bus: PluginEventBus,
+        path: impl AsRef<Path>,
+        config: PluginEventJsonlWriterConfig,
+    ) -> PureResult<Self> {
+        let started_at = Instant::now();
+        let file =
+            File::create(path.as_ref()).map_err(|err| TensorError::Generic(err.to_string()))?;
+        let writer = BufWriter::new(file);
+        let inner = Arc::new(Mutex::new(JsonlWriterState {
+            writer,
+            next_idx: 0,
+            errored: false,
+        }));
+
+        let inner_clone = Arc::clone(&inner);
+        let started_at_clone = started_at;
+        let listener: EventListener = Arc::new(move |event: &PluginEvent| {
+            if !config.capture_tensor_ops && matches!(event, PluginEvent::TensorOp { .. }) {
+                return;
+            }
+
+            let elapsed_ms = started_at_clone
+                .elapsed()
+                .as_millis()
+                .min(u128::from(u64::MAX)) as u64;
+            let snapshot = PluginEventSnapshot::from_event(event);
+
+            let mut guard = inner_clone
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let idx = guard.next_idx;
+            guard.next_idx = guard.next_idx.wrapping_add(1);
+
+            let record = PluginEventRecord {
+                idx,
+                elapsed_ms,
+                event: snapshot,
+            };
+
+            let err = match serde_json::to_writer(&mut guard.writer, &record) {
+                Ok(()) => guard.writer.write_all(b"\n").err().map(|err| err.to_string()),
+                Err(err) => Some(err.to_string()),
+            };
+            if let Some(err) = err {
+                if !guard.errored {
+                    guard.errored = true;
+                    eprintln!("[spiraltorch] plugin event JSONL writer error: {err}");
+                }
+            }
+        });
+
+        let subscription_id = bus.subscribe("*", listener);
+        Ok(Self {
+            bus,
+            subscription_id,
+            started_at,
+            inner,
+        })
+    }
+
+    pub fn elapsed_ms(&self) -> u64 {
+        self.started_at
+            .elapsed()
+            .as_millis()
+            .min(u128::from(u64::MAX)) as u64
+    }
+
+    pub fn flush(&self) -> PureResult<()> {
+        let mut guard = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        guard
+            .writer
+            .flush()
+            .map_err(|err| TensorError::Generic(err.to_string()))?;
+        Ok(())
+    }
+}
+
+impl Drop for PluginEventJsonlWriter {
+    fn drop(&mut self) {
+        let _ = self.flush();
+        let _ = self.bus.unsubscribe("*", self.subscription_id);
+    }
+}

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_wasm_bindgen as swb;
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::backend::wasm_tuner::{WasmTunerRecord, WasmTunerTable};
 use st_core::backend::wgpu_heuristics::{self, Choice};
@@ -217,10 +218,10 @@ impl WasmTuner {
         cols: u32,
         k: u32,
         subgroup: bool,
-    ) -> Result<Option<JsValue>, JsValue> {
+    ) -> Result<JsValue, JsValue> {
         match self.plan_fft(rows, cols, k, subgroup) {
-            Some(plan) => Ok(Some(plan.to_object()?)),
-            None => Ok(None),
+            Some(plan) => plan.to_object(),
+            None => Ok(JsValue::UNDEFINED),
         }
     }
 
@@ -330,18 +331,6 @@ pub fn base_choice_js(rows: u32, cols: u32, k: u32, subgroup: bool) -> Result<Js
     ))
 }
 
-/// Emit the auto-generated WGSL kernel using the native heuristics pipeline.
-#[wasm_bindgen]
-pub fn auto_fft_wgsl(rows: u32, cols: u32, k: u32, subgroup: bool) -> Option<String> {
-    wgpu_heuristics::auto_fft_wgsl(rows, cols, k, subgroup)
-}
-
-/// Emit the SpiralK hint associated with the generated WGSL kernel.
-#[wasm_bindgen]
-pub fn auto_fft_spiralk(rows: u32, cols: u32, k: u32, subgroup: bool) -> Option<String> {
-    wgpu_heuristics::auto_fft_spiralk(rows, cols, k, subgroup)
-}
-
 fn base_choice(rows: usize, cols: usize, k: usize, subgroup: bool) -> Choice {
     let max_wg = if subgroup { 256 } else { 128 };
     let caps = DeviceCaps::wgpu(32, subgroup, max_wg);
@@ -375,7 +364,7 @@ fn base_choice(rows: usize, cols: usize, k: usize, subgroup: bool) -> Choice {
 }
 
 fn choice_to_js(choice: Choice) -> Result<JsValue, JsValue> {
-    JsValue::from_serde(&ChoiceSerde::from(choice)).map_err(js_error)
+    swb::to_value(&ChoiceSerde::from(choice)).map_err(js_error)
 }
 
 #[derive(Serialize)]
@@ -394,15 +383,19 @@ struct ChoiceSerde {
 }
 
 fn parse_record(value: JsValue) -> Result<WasmTunerRecord, JsValue> {
-    value.into_serde::<WasmTunerRecord>().map_err(js_error)
+    swb::from_value::<WasmTunerRecord>(value).map_err(js_error)
+}
+
+fn record_to_js(record: &WasmTunerRecord) -> Result<JsValue, JsValue> {
+    swb::to_value(record).map_err(js_error)
 }
 
 fn records_to_js(records: &[WasmTunerRecord]) -> Result<JsValue, JsValue> {
-    JsValue::from_serde(records).map_err(js_error)
+    swb::to_value(records).map_err(js_error)
 }
 
 fn parse_records(value: &JsValue) -> Result<Vec<WasmTunerRecord>, JsValue> {
-    value.into_serde::<Vec<WasmTunerRecord>>().map_err(js_error)
+    swb::from_value::<Vec<WasmTunerRecord>>(value.clone()).map_err(js_error)
 }
 
 impl From<Choice> for ChoiceSerde {
@@ -564,7 +557,7 @@ impl ResolvedWasmFftPlan {
 
     #[wasm_bindgen(js_name = toObject)]
     pub fn to_object(&self) -> Result<JsValue, JsValue> {
-        JsValue::from_serde(&self.to_serde()).map_err(js_error)
+        swb::to_value(&self.to_serde()).map_err(js_error)
     }
 
     #[wasm_bindgen(js_name = fromJson)]
@@ -575,7 +568,7 @@ impl ResolvedWasmFftPlan {
 
     #[wasm_bindgen(js_name = fromObject)]
     pub fn from_object(value: &JsValue) -> Result<ResolvedWasmFftPlan, JsValue> {
-        let parsed = value.into_serde::<ResolvedPlanSerde>().map_err(js_error)?;
+        let parsed = swb::from_value::<ResolvedPlanSerde>(value.clone()).map_err(js_error)?;
         Ok(Self::from_serde(parsed))
     }
 }

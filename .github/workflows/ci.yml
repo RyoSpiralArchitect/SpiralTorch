@@ -53,6 +53,18 @@ jobs:
       - name: build tensor + wgpu
         run: cargo build -p st-tensor --features wgpu --release
 
+  wasm-build:
+    name: spiraltorch-wasm (wasm32 build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: build (wasm32)
+        run: cargo build -p spiraltorch-wasm --target wasm32-unknown-unknown --release
+
   python-docs-smoke:
     name: python docs smoke (README + hello_session)
     runs-on: ubuntu-latest
