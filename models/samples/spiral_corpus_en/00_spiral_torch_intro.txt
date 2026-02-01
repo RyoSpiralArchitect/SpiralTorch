@@ -1,0 +1,11 @@
+SpiralTorch demo corpus (English)
+
+SpiralTorch is an experiment in a "learning stack":
+- tiny runnable models
+- one-command training loops
+- optional GPU backends (WGPU, CUDA/HIP when available)
+
+This file is intentionally small and plain-text so you can fine-tune quickly.
+If you want a bigger dataset, add more .txt files to this folder and pass the
+folder path into the script.
+

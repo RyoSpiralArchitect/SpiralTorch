@@ -1,0 +1,9 @@
+Roadmap snippets
+
+- Coherence: VAE + trace loops that are inspectable.
+- Vision: simple Conv/Pool stacks that run everywhere.
+- Training: minimal self-supervised recipes.
+- Geometry: make the field tools easy to call from Python.
+
+Spiral, iterate, repeat.
+

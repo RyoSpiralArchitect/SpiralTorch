@@ -1,0 +1,10 @@
+WGPU + traces
+
+WGPU is used for portability. One goal is to make training runnable on:
+- macOS (Metal)
+- Linux (Vulkan)
+- Windows (DX12 / Vulkan)
+
+Traces / telemetry are for debugging learning dynamics:
+not only "did it converge?", but "what changed per step?"
+

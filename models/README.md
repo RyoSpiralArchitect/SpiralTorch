@@ -11,6 +11,7 @@ copy-pastable models that act as reference implementations for both Python and R
 ## Running
 
 - Demo texts: `models/samples/spiral_demo_en.txt`, `models/samples/spiral_demo_ja.txt`
+- Demo corpus folder: `models/samples/spiral_corpus_en/` (multiple `.txt` files)
 - Run outputs: `models/runs/<timestamp>/` (e.g. `run.json`, `metrics.jsonl`, `samples/`, `weights.json` / `weights.bin`)
 - Python scripts accept `--backend cpu|wgpu|cuda|hip|auto`, `--events <path>`, `--atlas`, and `--desire` (applies offsets during sampling).
 - WGPU quickstart (build + run): `bash scripts/wgpu_quickstart.sh`
@@ -21,7 +22,7 @@ copy-pastable models that act as reference implementations for both Python and R
 - Python (LLM char fine-tune): `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_finetune.py <text.txt> [--desire --events runs.jsonl --atlas]`
 - Python (LLM char coherence scan): `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_coherence_scan.py <text.txt> [--desire --events runs.jsonl --atlas]`
 - Python (LLM char coherence wave): `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_coherence_wave.py <text.txt> [--infuse \"spiral\" --infuse-every batch --infuse-mode separate] [--desire --events runs.jsonl --atlas]`
-- Python (LLM char WaveRnn+Mixer): `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_wave_rnn_mixer.py <text.txt> [--preset base --weights-format auto --checkpoint-every 1 --val-batches 4] [--infuse \"spiral\" --infuse-every batch --infuse-mode separate] [--desire --events runs.jsonl --atlas]`
+- Python (LLM char WaveRnn+Mixer): `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_wave_rnn_mixer.py <text_or_dir> [<text_or_dir> ...] [--preset base --weights-format auto --checkpoint-every 1 --val-batches 4] [--infuse \"spiral\" --infuse-every batch --infuse-mode separate] [--desire --events runs.jsonl --atlas]`
 - Rust: `cargo run -p st-nn --example modelzoo_mlp_regression`
 - Rust (classification): `cargo run -p st-nn --example modelzoo_zconv_classification`
 - Rust (vision + pooling): `cargo run -p st-nn --example modelzoo_vision_conv_pool_classification`

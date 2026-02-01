@@ -105,7 +105,36 @@ def _meta_path_for_weights(weights_path: pathlib.Path) -> pathlib.Path:
 
 
 def _read_text(path: pathlib.Path) -> str:
-    return path.read_text(encoding="utf-8")
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
+_TEXT_EXTS = {".txt"}
+
+
+def _collect_text_files(paths: list[pathlib.Path]) -> list[pathlib.Path]:
+    files: list[pathlib.Path] = []
+    seen: set[pathlib.Path] = set()
+
+    for raw in paths:
+        path = raw.expanduser()
+        if not path.exists():
+            raise FileNotFoundError(path)
+
+        if path.is_dir():
+            candidates = sorted(p for p in path.rglob("*") if p.is_file())
+        else:
+            candidates = [path]
+
+        for candidate in candidates:
+            if candidate.suffix.lower() not in _TEXT_EXTS:
+                continue
+            resolved = candidate.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            files.append(candidate)
+
+    return files
 
 
 def _timestamp_slug() -> str:
@@ -511,7 +540,7 @@ def _save_meta(meta_path: pathlib.Path, meta: dict[str, Any]) -> None:
 def main() -> None:
     if len(sys.argv) < 2 or sys.argv[1] in {"-h", "--help"}:
         print(
-            "usage: PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_wave_rnn_mixer.py <text.txt> "
+            "usage: PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_wave_rnn_mixer.py <text_or_dir> [<text_or_dir> ...] "
             "[--preset tiny|small|base|large] "
             "[--load weights.json] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] "
             "[--kernel N] [--stride N] [--padding N] "
@@ -530,7 +559,12 @@ def main() -> None:
         return
 
     args = list(sys.argv[1:])
-    text_path = pathlib.Path(args.pop(0))
+    data_args: list[str] = []
+    while args and not str(args[0]).startswith("--"):
+        data_args.append(str(args.pop(0)))
+    if not data_args:
+        raise ValueError("expected at least one <text.txt|dir> before flags")
+    data_paths = [pathlib.Path(p) for p in data_args]
 
     load_weights: pathlib.Path | None = None
     save_weights: pathlib.Path | None = None
@@ -745,7 +779,12 @@ def main() -> None:
 
     _require_backend_available(backend)
 
-    text = _read_text(text_path)
+    data_files = _collect_text_files(data_paths)
+    if not data_files:
+        raise ValueError("no .txt files found in inputs")
+
+    text_parts = [_read_text(path) for path in data_files]
+    text = "\n\n".join(part for part in text_parts if part)
     if not text:
         raise ValueError("empty text")
 
@@ -755,6 +794,10 @@ def main() -> None:
     samples_dir = run_dir / "samples"
     samples_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "command.txt").write_text(" ".join(sys.argv), encoding="utf-8")
+    (run_dir / "data_files.txt").write_text(
+        "\n".join(str(path) for path in data_files) + "\n",
+        encoding="utf-8",
+    )
 
     if atlas and events_path is None:
         events_path = run_dir / "events.jsonl"
@@ -850,7 +893,9 @@ def main() -> None:
     run_meta: dict[str, Any] = {
         "schema": RUN_SCHEMA,
         "arch": "llm_char_wave_rnn_mixer",
-        "text_path": str(text_path),
+        "data_paths": [str(path) for path in data_paths],
+        "data_file_count": len(data_files),
+        "data_files_manifest": str(run_dir / "data_files.txt"),
         "format": FORMAT,
         "preset": preset,
         "steps": steps,
@@ -926,7 +971,7 @@ def main() -> None:
     loss = st.nn.CategoricalCrossEntropy()
 
     print(
-        f"vocab={vocab_size} steps={steps} embed={embed_dim} hidden={hidden} kernel={kernel} depth={mixer_depth} "
+        f"vocab={vocab_size} files={len(data_files)} chars={len(text)} steps={steps} embed={embed_dim} hidden={hidden} kernel={kernel} depth={mixer_depth} "
         f"epochs={epochs} batch={batch} lr={lr:.3e} curvature={curvature} temp={temperature} "
         f"backend={backend} params={parameter_count} weights={resolved_weights_format} run_dir={run_dir}"
     )
@@ -956,6 +1001,10 @@ def main() -> None:
                 )
 
         for epoch in range(max(0, epochs)):
+            print(
+                f"epoch[{epoch}] start batches={batches_per_epoch} batch={batch} backend={backend}",
+                flush=True,
+            )
             rng = random.Random(seed + epoch * 10_000)
             if desire_pipeline is not None and desire_prime > 0:
                 _generate(
@@ -994,6 +1043,8 @@ def main() -> None:
                     )
                     + "\n"
                 )
+            if gen_len > 0:
+                print(f"epoch[{epoch}] sampling gen_len={gen_len}...", flush=True)
             sample = _generate(
                 model,
                 symbols,
@@ -1008,32 +1059,40 @@ def main() -> None:
             (samples_dir / f"epoch_{epoch:03d}.txt").write_text(sample, encoding="utf-8")
             if val_loss == val_loss:
                 print(
-                    f"epoch[{epoch}] batches={stats.batches} avg_loss={avg_loss:.6f} val_loss={val_loss:.6f}"
+                    f"epoch[{epoch}] batches={stats.batches} avg_loss={avg_loss:.6f} val_loss={val_loss:.6f}",
+                    flush=True,
                 )
             else:
-                print(f"epoch[{epoch}] batches={stats.batches} avg_loss={avg_loss:.6f}")
+                print(
+                    f"epoch[{epoch}] batches={stats.batches} avg_loss={avg_loss:.6f}",
+                    flush=True,
+                )
 
             tracked = val_loss if val_loss == val_loss else avg_loss
             if tracked < best_metric:
                 best_metric = tracked
                 best_epoch = epoch
                 best_weights_path = run_dir / f"best_weights{weights_suffix}"
+                print(f"epoch[{epoch}] saving {best_weights_path.name}...", flush=True)
                 st.nn.save(str(best_weights_path), model)
                 best_meta = dict(meta_base)
                 best_meta["weights_format"] = resolved_weights_format
                 best_meta["best_epoch"] = epoch
                 best_meta["epoch"] = epoch
                 _save_meta(_meta_path_for_weights(best_weights_path), best_meta)
+                print(f"epoch[{epoch}] saved {best_weights_path.name}", flush=True)
 
             if checkpoint_every > 0 and ((epoch + 1) % checkpoint_every == 0):
                 ckpt_dir = run_dir / "checkpoints"
                 ckpt_dir.mkdir(parents=True, exist_ok=True)
                 ckpt_path = ckpt_dir / f"epoch_{epoch:03d}{weights_suffix}"
+                print(f"epoch[{epoch}] saving {ckpt_path.name}...", flush=True)
                 st.nn.save(str(ckpt_path), model)
                 ckpt_meta = dict(meta_base)
                 ckpt_meta["weights_format"] = resolved_weights_format
                 ckpt_meta["epoch"] = epoch
                 _save_meta(_meta_path_for_weights(ckpt_path), ckpt_meta)
+                print(f"epoch[{epoch}] saved {ckpt_path.name}", flush=True)
 
     if atlas and events_path is not None:
         try:
@@ -1086,8 +1145,8 @@ def main() -> None:
             desire=desire_pipeline,
         )
         (samples_dir / "init.txt").write_text(sample, encoding="utf-8")
-    print("--- sample (prompt + gen) ---")
-    print(sample)
+    print("--- sample (prompt + gen) ---", flush=True)
+    print(sample, flush=True)
 
 
 if __name__ == "__main__":

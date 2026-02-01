@@ -1,0 +1,10 @@
+Geometry + Maxwell
+
+Geometry is a first-class citizen here:
+curvature, constraints, and "desire" can be treated as signals.
+
+Maxwell-style flows can be used as a bridge:
+from narrative hints -> field-like updates -> stable adaptation.
+
+This is not a claim of correctness; it is a playground for ideas.
+

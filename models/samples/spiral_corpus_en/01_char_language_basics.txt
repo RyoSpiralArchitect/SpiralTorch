@@ -1,0 +1,10 @@
+Character language modeling is the simplest training loop:
+predict the next character.
+
+It is slow to learn long-range structure, but it is extremely robust:
+- no tokenizer
+- no vocab merges
+- just "next char"
+
+SpiralTorch uses this as the baseline for testing new blocks and backends.
+

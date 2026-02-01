@@ -1,0 +1,10 @@
+Z-space notes
+
+The z-space idea (in this repo) is:
+- keep representations continuous and geometric
+- keep training loops small enough to audit
+- keep the model usable even when the loss curve is not impressive
+
+Sometimes the sample quality improves before the loss visibly drops,
+especially on tiny corpora. Track both.
+
