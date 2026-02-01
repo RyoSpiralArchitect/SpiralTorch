@@ -21,6 +21,9 @@ jobs:
   wheels:
     name: Build ${{ matrix.label }} / py${{ matrix.py }}
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
@@ -28,22 +31,17 @@ jobs:
           - os: ubuntu-22.04
             label: ubuntu-22.04
             macos_deployment_target: ""
-            py: "3.12"
-          - os: macos-15-intel
-            label: macos-15-intel-macosx11-x86_64
-            macos_deployment_target: "11.0"
+            universal2: false
             py: "3.12"
           - os: macos-latest
-            label: macos-latest-macosx11-arm64
-            macos_deployment_target: "11.0"
-            py: "3.12"
-          - os: macos-latest
-            label: macos-latest-macosx14-arm64
+            label: macos-latest-macosx14-universal2
             macos_deployment_target: "14.0"
+            universal2: true
             py: "3.12"
           - os: windows-2022
             label: windows-2022
             macos_deployment_target: ""
+            universal2: false
             py: "3.12"
     steps:
       - uses: actions/checkout@v4
@@ -55,16 +53,18 @@ jobs:
         run: echo "MACOSX_DEPLOYMENT_TARGET=${{ matrix.macos_deployment_target }}" >> "$GITHUB_ENV"
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-      - name: Install maturin
-        run: pip install maturin==1.*
       - name: Build wheels (CPU+WGPU, manylinux2014)
-        if: runner.os == 'Linux'
         run: |
-          maturin build -m bindings/st-py/Cargo.toml --release --locked --manylinux 2014 --features wgpu,logic,kdsl
-      - name: Build wheels (CPU+WGPU)
-        if: runner.os != 'Linux'
-        run: |
-          maturin build -m bindings/st-py/Cargo.toml --release --locked --features wgpu,logic,kdsl
+          python -m pip install -U pip wheel maturin
+          extra_args=""
+          if [ "${{ matrix.universal2 }}" = "true" ]; then
+            extra_args="$extra_args --universal2"
+          fi
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            maturin build -m bindings/st-py/Cargo.toml --release --locked --manylinux 2014 --features wgpu,logic,kdsl
+          else
+            maturin build -m bindings/st-py/Cargo.toml --release --locked $extra_args --features wgpu,logic,kdsl
+          fi
       - name: Smoke test wheel import
         shell: bash
         working-directory: target/wheels

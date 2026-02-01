@@ -25,7 +25,7 @@ Reuse or redistribution **must retain the SpiralTorch name and authorship** as p
 
 - **1-minute quickstart (Python):**
   ```bash
-  pip install -U spiraltorch==0.4.3
+  pip install -U spiraltorch==0.4.4
 
   python - <<'PY'
   import spiraltorch as st
@@ -310,7 +310,7 @@ tensor shims, no translation layers, and no tracebacks.
     transcripts, and ψ telemetry double as explainability artifacts, enabling
     decision-path inspection without leaving the Z-space calculus.
     
-**Current release:** `spiraltorch==0.4.3` (abi3 wheel, Python ≥3.8)  
+**Current release:** `spiraltorch==0.4.4` (abi3 wheel, Python ≥3.8)  
 **Targets:** CPU (always), MPS, Vulkan/DX (WGPU), CUDA, HIP/ROCm
 
 ---
@@ -318,11 +318,24 @@ tensor shims, no translation layers, and no tracebacks.
 ## Install (pip)
 
 ```bash
-pip install -U spiraltorch==0.4.3
+pip install -U spiraltorch==0.4.4
 ```
 
 - Wheels are **abi3**; you can use any CPython ≥ 3.8.
-- macOS/aarch64 wheel bundles the Rust extension; no system Python deps required.
+- Prebuilt wheels ship for **Windows**, **manylinux2014 (x86_64)**, and **macOS 14+ (universal2)**.
+- The published wheel is built with `wgpu,logic,kdsl` (CPU always available; WGPU activates when a compatible backend is present).
+- For macOS < 14 or other targets, build from source.
+
+### ✅ pipでできること (wheel)
+
+Without cloning the repo, `pip install spiraltorch` gives you:
+
+- **Core tensors + optimisers:** `st.Tensor`, autodiff, `st.optim.Amegagrad`, DLPack interop.
+- **Geometry:** `st.frac.MellinLogGrid` (Mellin mesh / verticals) + Hilbert helpers.
+- **Signal tools:** `st.MaxwellFingerprint` expectation curves (visualisation-ready).
+- **Z-space training utilities:** `st.ZSpaceTrainer`, `st.LanguageWaveEncoder`.
+- **Canvas + observability:** `st.canvas.CanvasProjector`, `st.telemetry.*`, HTML trace writers, `st.serve_zspace_trace`.
+- **SpiralK planning:** `st.plan_topk(...)`, `st.RankPlan`, `st.write_kdsl_trace_jsonl`, `st.write_kdsl_trace_html`.
 
 ---
 
@@ -369,13 +382,12 @@ cargo build -p st-vision      # vision kernels/pipelines
 # Install maturin (once)
 python -m pip install -U "maturin>=1,<2"
 
-# macOS wheel targets (Apple Silicon requires >= 11.0):
-# - macOS 11+ (broad compatibility): export MACOSX_DEPLOYMENT_TARGET=11.0
-# - macOS 14+ (separate wheel build): export MACOSX_DEPLOYMENT_TARGET=14.0
-export MACOSX_DEPLOYMENT_TARGET=11.0
-
 # Release-equivalent (matches PyPI wheels)
 maturin build -m bindings/st-py/Cargo.toml --release --locked --features wgpu,logic,kdsl
+
+# macOS 14+ universal2 (matches macOS wheels on PyPI)
+export MACOSX_DEPLOYMENT_TARGET=14.0
+maturin build -m bindings/st-py/Cargo.toml --release --locked --universal2 --features wgpu,logic,kdsl
 
 # CPU-only (no GPU backend)
 maturin build -m bindings/st-py/Cargo.toml --release --locked
@@ -394,7 +406,7 @@ Linux note: build inside a manylinux container (e.g. via GitHub Actions) for bro
 
 ### CI wheel stash (GitHub Actions)
 
-- Artifact build: `.github/workflows/wheels.yml` (Windows / Linux / macOS-13)
+- Artifact build: `.github/workflows/wheels.yml` (Windows / manylinux2014 / macOS 14+)
 - Release assets: `.github/workflows/release_wheels.yml` (attaches wheels to the GitHub Release)
 
 ---

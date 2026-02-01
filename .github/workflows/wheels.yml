@@ -14,29 +14,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-15-intel
-            label: macos-15-intel-macosx11-x86_64
-            macos_deployment_target: "11.0"
-            py: "3.12"
-            feat: "wgpu,logic,kdsl"
           - os: macos-latest
-            label: macos-latest-macosx11-arm64
-            macos_deployment_target: "11.0"
-            py: "3.12"
-            feat: "wgpu,logic,kdsl"
-          - os: macos-latest
-            label: macos-latest-macosx14-arm64
+            label: macos-latest-macosx14-universal2
             macos_deployment_target: "14.0"
+            universal2: true
             py: "3.12"
             feat: "wgpu,logic,kdsl"
           - os: ubuntu-22.04
             label: ubuntu-22.04
             macos_deployment_target: ""
+            universal2: false
             py: "3.12"
             feat: "wgpu,logic,kdsl"
           - os: windows-2022
             label: windows-2022
             macos_deployment_target: ""
+            universal2: false
             py: "3.12"
             feat: "wgpu,logic,kdsl"
     steps:
@@ -52,10 +45,14 @@ jobs:
       - name: Build wheel
         run: |
           python -m pip install -U pip wheel maturin
+          extra_args=""
+          if [ "${{ matrix.universal2 }}" = "true" ]; then
+            extra_args="$extra_args --universal2"
+          fi
           if [ "${{ runner.os }}" = "Linux" ]; then
             maturin build --release --locked --manylinux 2014 -m bindings/st-py/Cargo.toml --features "${{ matrix.feat }}"
           else
-            maturin build --release --locked -m bindings/st-py/Cargo.toml --features "${{ matrix.feat }}"
+            maturin build --release --locked $extra_args -m bindings/st-py/Cargo.toml --features "${{ matrix.feat }}"
           fi
       - name: Smoke test wheel import
         working-directory: target/wheels
