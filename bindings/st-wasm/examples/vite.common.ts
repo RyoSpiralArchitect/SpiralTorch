@@ -26,7 +26,6 @@ function copyDirRecursive(srcDir: string, destDir: string) {
       try {
         fs.unlinkSync(destPath);
       } catch {
-        // ignore
       }
       fs.symlinkSync(target, destPath);
       continue;
