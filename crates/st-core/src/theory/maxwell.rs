@@ -32,6 +32,9 @@
 
 use core::f64::consts::PI;
 
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
+
 #[cfg(feature = "psi")]
 use crate::telemetry::{
     hub,
@@ -257,8 +260,17 @@ pub enum MaxwellExpectationError {
     NonFiniteKappa { kappa: f64 },
     #[error("lambda must be finite, got {lambda}")]
     NonFiniteLambda { lambda: f64 },
+    #[error("simulated sample {index} became non-finite: {value}")]
+    NonFiniteSample { index: usize, value: f64 },
     #[error("expected z coefficient became non-finite")]
     NonFiniteCoefficient,
+}
+
+fn sample_standard_normal(rng: &mut StdRng) -> f64 {
+    // Box-Muller transform (deterministic given the RNG stream).
+    let u1 = rng.gen::<f64>().clamp(f64::MIN_POSITIVE, 1.0);
+    let u2 = rng.gen::<f64>();
+    (-2.0 * u1.ln()).sqrt() * (2.0 * PI * u2).cos()
 }
 
 /// Generate the expected Z statistic progression for `n=1..blocks` under the
@@ -291,6 +303,49 @@ pub fn expected_z_curve(
     let mut out = Vec::with_capacity(blocks);
     for n in 1..=blocks {
         out.push(coeff * (n as f64).sqrt());
+    }
+    Ok(out)
+}
+
+/// Simulate the sequential Z statistic progression under the same Gaussian approximation
+/// used by [`expected_z_curve`], but with per-block noise and a deterministic seed.
+///
+/// Each matched-filter score is sampled as `x ~ Normal(κ λ, σ)`, then pushed through
+/// [`SequentialZ`]. The first element is `0.0` because Z is undefined for `n < 2`.
+pub fn simulate_z_curve(
+    blocks: usize,
+    sigma: f64,
+    kappa: f64,
+    lambda: f64,
+    seed: u64,
+) -> Result<Vec<f64>, MaxwellExpectationError> {
+    if blocks == 0 {
+        return Ok(Vec::new());
+    }
+    if !(sigma.is_finite() && sigma > 0.0) {
+        return Err(MaxwellExpectationError::InvalidSigma { sigma });
+    }
+    if !kappa.is_finite() {
+        return Err(MaxwellExpectationError::NonFiniteKappa { kappa });
+    }
+    if !lambda.is_finite() {
+        return Err(MaxwellExpectationError::NonFiniteLambda { lambda });
+    }
+    let mean = kappa * lambda;
+    if !mean.is_finite() {
+        return Err(MaxwellExpectationError::NonFiniteCoefficient);
+    }
+
+    let mut rng = StdRng::seed_from_u64(seed);
+    let mut tracker = SequentialZ::new();
+    let mut out = Vec::with_capacity(blocks);
+    for idx in 0..blocks {
+        let sample = mean + sigma * sample_standard_normal(&mut rng);
+        if !sample.is_finite() {
+            return Err(MaxwellExpectationError::NonFiniteSample { index: idx, value: sample });
+        }
+        let z = tracker.push(sample).unwrap_or(0.0);
+        out.push(if z.is_finite() { z } else { 0.0 });
     }
     Ok(out)
 }
@@ -982,6 +1037,16 @@ mod tests {
         assert!(last.is_finite());
         // Should be close to the target (rounding introduces small error).
         assert!((last.abs() - target_z).abs() < 0.25);
+    }
+
+    #[test]
+    fn simulate_z_curve_is_deterministic_and_finite() {
+        let curve1 = simulate_z_curve(16, 1.25, 1.1, 0.8, 123).unwrap();
+        let curve2 = simulate_z_curve(16, 1.25, 1.1, 0.8, 123).unwrap();
+        assert_eq!(curve1, curve2);
+        assert_eq!(curve1.len(), 16);
+        assert_abs_diff_eq!(curve1[0], 0.0);
+        assert!(curve1.iter().all(|value| value.is_finite()));
     }
 
     #[test]

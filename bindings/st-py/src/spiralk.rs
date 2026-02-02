@@ -18,8 +18,8 @@ use st_core::theory::maxwell::{
     expected_z_curve as expected_z_curve_rs,
     polarisation_slope as polarisation_slope_rs,
     required_blocks as required_blocks_rs, MaxwellExpectationError, MaxwellFingerprint,
-    MaxwellSeriesError, MaxwellSpiralKBridge, MaxwellSpiralKHint, MaxwellZProjector, MaxwellZPulse,
-    MeaningGate, SequentialZ,
+    simulate_z_curve as simulate_z_curve_rs, MaxwellSeriesError, MaxwellSpiralKBridge,
+    MaxwellSpiralKHint, MaxwellZProjector, MaxwellZPulse, MeaningGate, SequentialZ,
 };
 #[cfg(feature = "kdsl")]
 use st_kdsl::{
@@ -861,6 +861,18 @@ fn expected_z_curve(blocks: usize, sigma: f64, kappa: f64, lambda_: f64) -> PyRe
 }
 
 #[pyfunction]
+#[pyo3(signature = (blocks, sigma, kappa, lambda_, seed))]
+fn simulate_z_curve(
+    blocks: usize,
+    sigma: f64,
+    kappa: f64,
+    lambda_: f64,
+    seed: u64,
+) -> PyResult<Vec<f64>> {
+    simulate_z_curve_rs(blocks, sigma, kappa, lambda_, seed).map_err(maxwell_expectation_err_to_py)
+}
+
+#[pyfunction]
 #[pyo3(signature = (fingerprint, samples=16))]
 fn polarisation_slope(fingerprint: &PyMaxwellFingerprint, samples: usize) -> f64 {
     polarisation_slope_rs(&fingerprint.inner, samples)
@@ -1246,6 +1258,7 @@ pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyMaxwellProjector>()?;
     module.add_function(wrap_pyfunction!(required_blocks, &module)?)?;
     module.add_function(wrap_pyfunction!(expected_z_curve, &module)?)?;
+    module.add_function(wrap_pyfunction!(simulate_z_curve, &module)?)?;
     module.add_function(wrap_pyfunction!(polarisation_slope, &module)?)?;
     #[cfg(feature = "kdsl")]
     {
@@ -1269,6 +1282,7 @@ pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
             "MaxwellProjector",
             "required_blocks",
             "expected_z_curve",
+            "simulate_z_curve",
             "polarisation_slope",
         ];
         #[cfg(feature = "kdsl")]
