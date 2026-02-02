@@ -97,6 +97,7 @@
             <div class="actions">
               <button id="step" type="button">Step</button>
               <button id="reset-norm" type="button">Reset normalizer</button>
+              <button id="reset-metrics" type="button">Reset metrics</button>
             </div>
           </fieldset>
 
@@ -145,6 +146,8 @@
 
         <p id="status" class="status">Loading WebAssembly…</p>
         <div class="meta">
+          <div><span class="label">step</span> <code id="train-step">—</code></div>
+          <div><span class="label">loss</span> <code id="loss">—</code></div>
           <div><span class="label">grad</span> <code id="grad">—</code></div>
           <div><span class="label">desire</span> <code id="desire">—</code></div>
           <div><span class="label">lr</span> <code id="lr-effective">—</code></div>
@@ -156,13 +159,15 @@
         <header>
           <h2>Canvas output</h2>
           <p class="subtitle">
-            Left: fractal canvas. Right: hyperbolic trail buffer (2D or WebGPU 3D).
+            Left: fractal canvas. Right: hyperbolic trail buffer (2D or WebGPU 3D). Bottom:
+            training metrics + row FFT.
           </p>
         </header>
         <div class="canvases">
           <canvas id="fractal" width="512" height="320"></canvas>
           <canvas id="trail" width="512" height="320"></canvas>
         </div>
+        <canvas id="metrics" width="1024" height="160"></canvas>
         <canvas id="spectrum" width="1024" height="220"></canvas>
       </section>
     </main>

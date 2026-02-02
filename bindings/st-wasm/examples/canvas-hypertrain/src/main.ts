@@ -4,6 +4,8 @@ type Mode = "hyper" | "real" | "webgpu-hyperop";
 type TrailRendererMode = "2d" | "webgpu";
 
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
+const stepEl = document.querySelector<HTMLElement>("#train-step")!;
+const lossEl = document.querySelector<HTMLElement>("#loss")!;
 const gradEl = document.querySelector<HTMLElement>("#grad")!;
 const desireEl = document.querySelector<HTMLElement>("#desire")!;
 const lrEl = document.querySelector<HTMLElement>("#lr-effective")!;
@@ -19,6 +21,7 @@ const rebuildButton = document.querySelector<HTMLButtonElement>("#rebuild")!;
 const seedButton = document.querySelector<HTMLButtonElement>("#seed")!;
 const stepButton = document.querySelector<HTMLButtonElement>("#step")!;
 const resetNormButton = document.querySelector<HTMLButtonElement>("#reset-norm")!;
+const resetMetricsButton = document.querySelector<HTMLButtonElement>("#reset-metrics")!;
 const fftRunButton = document.querySelector<HTMLButtonElement>("#fft-run")!;
 
 const trailRendererSelect = document.querySelector<HTMLSelectElement>("#trail-renderer")!;
@@ -28,6 +31,8 @@ const fftAutoToggle = document.querySelector<HTMLInputElement>("#fft-auto")!;
 const fractalCanvasEl = document.querySelector<HTMLCanvasElement>("#fractal")!;
 const fractalCtx = fractalCanvasEl.getContext("2d")!;
 const trailCanvasEl = document.querySelector<HTMLCanvasElement>("#trail")!;
+const metricsCanvasEl = document.querySelector<HTMLCanvasElement>("#metrics")!;
+const metricsCtx = metricsCanvasEl.getContext("2d")!;
 const spectrumCanvasEl = document.querySelector<HTMLCanvasElement>("#spectrum")!;
 const spectrumCtx = spectrumCanvasEl.getContext("2d")!;
 let trailCtx2d: CanvasRenderingContext2D | null = null;
@@ -44,6 +49,24 @@ let gpuFft: WebGpuFftRow | null = null;
 let gpuTrainer: WebGpuHyperTrainer | null = null;
 let stepInFlight: Promise<void> | null = null;
 let lastFftAt = 0;
+
+type TrainingMetric = {
+  step: number;
+  mode: Mode;
+  lr: number;
+  lrScale: number;
+  hyperRms: number;
+  realRms: number;
+  loss: number;
+  balance: number;
+  stability: number;
+  saturation: number;
+};
+
+const METRICS_CAPACITY = 512;
+const metricsHistory: TrainingMetric[] = [];
+let trainStep = 0;
+let metricsDirty = false;
 
 function setStatus(message: string, isError = false) {
   statusEl.textContent = message;
@@ -75,6 +98,43 @@ function parseIntStrict(id: string, fallback: number, min: number): number {
 
 function clampFinite(value: number): number {
   return Number.isFinite(value) ? value : 0;
+}
+
+function metricLoss(packet: any, mode: Mode): number {
+  if (mode === "real") return clampFinite(packet.realgradRms);
+  return clampFinite(packet.hypergradRms);
+}
+
+function recordMetrics(packet: any, mode: Mode, lr: number, lrScale: number) {
+  const metric: TrainingMetric = {
+    step: trainStep,
+    mode,
+    lr: clampFinite(lr),
+    lrScale: clampFinite(lrScale),
+    hyperRms: clampFinite(packet.hypergradRms),
+    realRms: clampFinite(packet.realgradRms),
+    loss: metricLoss(packet, mode),
+    balance: clampFinite(packet.balance),
+    stability: clampFinite(packet.stability),
+    saturation: clampFinite(packet.saturation),
+  };
+  metricsHistory.push(metric);
+  if (metricsHistory.length > METRICS_CAPACITY) {
+    metricsHistory.splice(0, metricsHistory.length - METRICS_CAPACITY);
+  }
+  trainStep += 1;
+  metricsDirty = true;
+
+  stepEl.textContent = `${trainStep}`;
+  lossEl.textContent = `${metric.loss.toExponential(3)} (${mode})`;
+}
+
+function resetMetrics() {
+  metricsHistory.length = 0;
+  trainStep = 0;
+  metricsDirty = true;
+  stepEl.textContent = "0";
+  lossEl.textContent = "—";
 }
 
 function parseTrailRenderer(raw: string): TrailRendererMode {
@@ -263,6 +323,8 @@ function stepOnceCpu(curvature: number) {
   timingEl.textContent = `frame ${(t1 - t0).toFixed(2)}ms · grad ${(t2 - t1).toFixed(
     2,
   )}ms · push ${(t3 - t2).toFixed(2)}ms`;
+
+  recordMetrics(packet, mode, lr, lrScale);
 }
 
 async function stepOnceWebGpu(curvature: number) {
@@ -312,6 +374,70 @@ async function stepOnceWebGpu(curvature: number) {
   timingEl.textContent = `frame ${(t1 - t0).toFixed(2)}ms · webgpu ${(t2 - t1).toFixed(
     2,
   )}ms · push ${(t3 - t2).toFixed(2)}ms`;
+
+  recordMetrics(packet, "webgpu-hyperop", lr, lrScale);
+}
+
+function drawMetrics() {
+  const w = metricsCanvasEl.width;
+  const h = metricsCanvasEl.height;
+  metricsCtx.clearRect(0, 0, w, h);
+  metricsCtx.fillStyle = "rgba(6, 8, 18, 0.85)";
+  metricsCtx.fillRect(0, 0, w, h);
+
+  if (metricsHistory.length < 2) {
+    metricsCtx.fillStyle = "rgba(210, 218, 255, 0.65)";
+    metricsCtx.font = "12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+    metricsCtx.fillText("training metrics (no data yet)", 10, 18);
+    return;
+  }
+
+  let max = 0;
+  for (const m of metricsHistory) {
+    if (m.hyperRms > max) max = m.hyperRms;
+    if (m.realRms > max) max = m.realRms;
+  }
+  if (max <= 0) max = 1;
+  const denom = Math.log1p(max);
+
+  const padX = 10;
+  const padY = 22;
+  const innerW = Math.max(1, w - padX * 2);
+  const innerH = Math.max(1, h - padY * 2);
+
+  const toY = (value: number): number => {
+    const v = Math.max(0, value);
+    const t = denom > 0 ? Math.log1p(v) / denom : 0;
+    return padY + (1 - t) * innerH;
+  };
+
+  const drawLine = (selector: (m: TrainingMetric) => number, stroke: string) => {
+    metricsCtx.strokeStyle = stroke;
+    metricsCtx.lineWidth = 2;
+    metricsCtx.beginPath();
+    const n = metricsHistory.length;
+    for (let i = 0; i < n; i++) {
+      const x = padX + (i / (n - 1)) * innerW;
+      const y = toY(selector(metricsHistory[i]));
+      if (i === 0) metricsCtx.moveTo(x, y);
+      else metricsCtx.lineTo(x, y);
+    }
+    metricsCtx.stroke();
+  };
+
+  drawLine((m) => m.hyperRms, "rgba(120, 160, 255, 0.95)");
+  drawLine((m) => m.realRms, "rgba(255, 140, 210, 0.75)");
+
+  const last = metricsHistory[metricsHistory.length - 1];
+  metricsCtx.fillStyle = "rgba(210, 218, 255, 0.82)";
+  metricsCtx.font = "12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+  metricsCtx.fillText(
+    `grad rms (log1p): hyper ${last.hyperRms.toExponential(3)} · real ${last.realRms.toExponential(
+      3,
+    )} (max ${max.toExponential(3)})`,
+    10,
+    18,
+  );
 }
 
 function drawSpectrumMagnitudes(magnitudes: Float32Array) {
@@ -421,6 +547,11 @@ function frame() {
       lastFftAt = now;
       void computeFftFromPacket(packet);
     }
+
+    if (metricsDirty) {
+      metricsDirty = false;
+      drawMetrics();
+    }
   } catch (err) {
     setStatus((err as Error).message, true);
   }
@@ -483,6 +614,11 @@ resetNormButton.addEventListener("click", () => {
   canvas.reset_normalizer();
 });
 
+resetMetricsButton.addEventListener("click", () => {
+  if (!ready) return;
+  resetMetrics();
+});
+
 paletteSelect.addEventListener("change", () => applyPalette(paletteSelect.value));
 
 trailRendererSelect.addEventListener("change", async () => {
@@ -506,6 +642,7 @@ fftRunButton.addEventListener("click", async () => {
 initWasm()
   .then(() => {
     ready = true;
+    resetMetrics();
     populatePalettes();
     rebuildCanvas();
     setStatus("WebAssembly ready.");

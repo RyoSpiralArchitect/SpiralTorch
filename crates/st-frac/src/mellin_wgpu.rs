@@ -400,7 +400,7 @@ fn to_pod_vec(values: &[ComplexScalar]) -> Result<Vec<ComplexPod>, MellinGpuErro
 }
 
 const MELLIN_WGSL: &str = r#"
-struct Complex { re: f32, im: f32; };
+struct Complex { re: f32, im: f32, };
 
 fn complex_mul(a: Complex, b: Complex) -> Complex {
     return Complex(
