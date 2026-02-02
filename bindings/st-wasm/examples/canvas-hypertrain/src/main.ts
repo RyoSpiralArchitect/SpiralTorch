@@ -214,6 +214,7 @@ function drawTrail2d(buffer: Float32Array, strideStep: number) {
 
 function applyPalette(name: string) {
   if (!canvas) return;
+  if (!name) return;
   try {
     canvas.set_palette(name);
   } catch (err) {
@@ -229,7 +230,7 @@ function rebuildCanvas() {
   ensureCanvasDimensions(width, height);
 
   canvas = new FractalCanvas(capacity, width, height);
-  applyPalette(paletteSelect.value || "midnight");
+  applyPalette(paletteSelect.value || "blue-magenta");
   seedRelation();
 
   if (gpuTrail) {
@@ -566,7 +567,11 @@ function populatePalettes() {
     option.textContent = name;
     paletteSelect.appendChild(option);
   }
-  paletteSelect.value = "midnight";
+  if (entries.length > 0) {
+    paletteSelect.value = entries[0];
+  } else {
+    paletteSelect.value = "blue-magenta";
+  }
 }
 
 rebuildButton.addEventListener("click", () => {
