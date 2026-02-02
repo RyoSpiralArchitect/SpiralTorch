@@ -6,7 +6,7 @@
 use crate::mellin_types::{ComplexScalar, MellinError, MellinResult, Scalar, ZSpaceError};
 use crate::zspace::{
     evaluate_weighted_series, evaluate_weighted_series_many, mellin_log_lattice_prefactor,
-    prepare_weighted_series, trapezoidal_weights, weighted_z_transform, weighted_z_transform_many,
+    prepare_weighted_series, trapezoidal_weights, weighted_z_transform,
 };
 
 /// Change-of-variable helper for Mellin integrals.
@@ -75,6 +75,255 @@ pub fn sample_log_uniform_exp_decay(
     sample_log_uniform(log_start, log_step, len, |x| ComplexScalar::new((-x).exp(), 0.0))
 }
 
+/// Convenience sampler for `f(x) = exp(-rate * x)`.
+///
+/// When `rate=1` this matches [`sample_log_uniform_exp_decay`]. The continuous Mellin transform
+/// obeys `M{exp(-rate x)}(s) = rate^{-s} Γ(s)` for Re(s) > 0.
+pub fn sample_log_uniform_exp_decay_scaled(
+    log_start: Scalar,
+    log_step: Scalar,
+    len: usize,
+    rate: Scalar,
+) -> MellinResult<Vec<ComplexScalar>> {
+    if !(rate.is_finite() && rate > 0.0) {
+        return Err(MellinError::InvalidRate);
+    }
+    sample_log_uniform(log_start, log_step, len, move |x| {
+        ComplexScalar::new((-(rate * x)).exp(), 0.0)
+    })
+}
+
+#[inline]
+fn complex_magnitude(value: ComplexScalar) -> Scalar {
+    value.norm()
+}
+
+/// Precomputed Z-plane evaluation points (prefactor + z) for Mellin lattices.
+///
+/// This is meant to be re-used across many sample series (e.g. in training loops):
+/// precompute the evaluation mesh once, then feed different weighted series.
+#[derive(Clone, Debug)]
+pub struct MellinEvalPlan {
+    log_start: Scalar,
+    log_step: Scalar,
+    prefactors: Vec<ComplexScalar>,
+    z_points: Vec<ComplexScalar>,
+    shape: (usize, usize),
+}
+
+impl MellinEvalPlan {
+    /// Build a plan for arbitrary Mellin evaluation points.
+    pub fn many(log_start: Scalar, log_step: Scalar, s_values: &[ComplexScalar]) -> MellinResult<Self> {
+        if s_values.is_empty() {
+            return Ok(Self {
+                log_start,
+                log_step,
+                prefactors: Vec::new(),
+                z_points: Vec::new(),
+                shape: (0, 0),
+            });
+        }
+
+        let mut prefactors = Vec::with_capacity(s_values.len());
+        let mut z_points = Vec::with_capacity(s_values.len());
+        for &s in s_values {
+            let (prefactor, z) = mellin_log_lattice_prefactor(log_start, log_step, s)?;
+            prefactors.push(prefactor);
+            z_points.push(z);
+        }
+
+        Ok(Self {
+            log_start,
+            log_step,
+            prefactors,
+            z_points,
+            shape: (1, s_values.len()),
+        })
+    }
+
+    /// Build a plan for `s = real + i * t` along a vertical line.
+    pub fn vertical_line(
+        log_start: Scalar,
+        log_step: Scalar,
+        real: Scalar,
+        imag_values: &[Scalar],
+    ) -> MellinResult<Self> {
+        if imag_values.is_empty() {
+            return Ok(Self {
+                log_start,
+                log_step,
+                prefactors: Vec::new(),
+                z_points: Vec::new(),
+                shape: (0, 0),
+            });
+        }
+
+        let mut prefactors = Vec::with_capacity(imag_values.len());
+        let mut z_points = Vec::with_capacity(imag_values.len());
+        for &imag in imag_values {
+            let s = ComplexScalar::new(real, imag);
+            let (prefactor, z) = mellin_log_lattice_prefactor(log_start, log_step, s)?;
+            prefactors.push(prefactor);
+            z_points.push(z);
+        }
+
+        Ok(Self {
+            log_start,
+            log_step,
+            prefactors,
+            z_points,
+            shape: (1, imag_values.len()),
+        })
+    }
+
+    /// Build a plan for a 2D mesh `s = real + i * imag`.
+    ///
+    /// The layout matches [`MellinLogGrid::evaluate_mesh`]:
+    /// `out[real_index * imag_len + imag_index]`.
+    pub fn mesh(
+        log_start: Scalar,
+        log_step: Scalar,
+        real_values: &[Scalar],
+        imag_values: &[Scalar],
+    ) -> MellinResult<Self> {
+        if real_values.is_empty() || imag_values.is_empty() {
+            return Ok(Self {
+                log_start,
+                log_step,
+                prefactors: Vec::new(),
+                z_points: Vec::new(),
+                shape: (0, 0),
+            });
+        }
+
+        let rows = real_values.len();
+        let cols = imag_values.len();
+        let mut prefactors = Vec::with_capacity(rows * cols);
+        let mut z_points = Vec::with_capacity(rows * cols);
+        for &real in real_values {
+            for &imag in imag_values {
+                let s = ComplexScalar::new(real, imag);
+                let (prefactor, z) = mellin_log_lattice_prefactor(log_start, log_step, s)?;
+                prefactors.push(prefactor);
+                z_points.push(z);
+            }
+        }
+
+        Ok(Self {
+            log_start,
+            log_step,
+            prefactors,
+            z_points,
+            shape: (rows, cols),
+        })
+    }
+
+    pub fn log_start(&self) -> Scalar {
+        self.log_start
+    }
+
+    pub fn log_step(&self) -> Scalar {
+        self.log_step
+    }
+
+    pub fn len(&self) -> usize {
+        self.z_points.len()
+    }
+
+    pub fn shape(&self) -> (usize, usize) {
+        self.shape
+    }
+
+    pub fn evaluate(&self, weighted: &[ComplexScalar]) -> MellinResult<Vec<ComplexScalar>> {
+        if self.z_points.is_empty() {
+            return Ok(Vec::new());
+        }
+        let series = evaluate_weighted_series_many(weighted, &self.z_points)?;
+        Ok(series
+            .into_iter()
+            .zip(self.prefactors.iter())
+            .map(|(value, prefactor)| value * *prefactor)
+            .collect())
+    }
+
+    pub fn evaluate_magnitude(&self, weighted: &[ComplexScalar]) -> MellinResult<Vec<Scalar>> {
+        if self.z_points.is_empty() {
+            return Ok(Vec::new());
+        }
+        let series = evaluate_weighted_series_many(weighted, &self.z_points)?;
+        Ok(series
+            .into_iter()
+            .zip(self.prefactors.iter())
+            .map(|(value, prefactor)| complex_magnitude(value) * complex_magnitude(*prefactor))
+            .collect())
+    }
+
+    pub fn evaluate_log_magnitude(&self, weighted: &[ComplexScalar], epsilon: Scalar) -> MellinResult<Vec<Scalar>> {
+        if self.z_points.is_empty() {
+            return Ok(Vec::new());
+        }
+        let series = evaluate_weighted_series_many(weighted, &self.z_points)?;
+        Ok(series
+            .into_iter()
+            .zip(self.prefactors.iter())
+            .map(|(value, prefactor)| {
+                let mag = complex_magnitude(value) * complex_magnitude(*prefactor);
+                if epsilon.is_finite() && epsilon > 0.0 {
+                    (mag + epsilon).ln()
+                } else {
+                    mag.ln_1p()
+                }
+            })
+            .collect())
+    }
+
+    #[cfg(feature = "wgpu")]
+    pub fn evaluate_gpu(&self, weighted: &[ComplexScalar]) -> MellinResult<Vec<ComplexScalar>> {
+        if self.z_points.is_empty() {
+            return Ok(Vec::new());
+        }
+        let series = crate::mellin_wgpu::evaluate_weighted_series_many_gpu(weighted, &self.z_points)?;
+        Ok(series
+            .into_iter()
+            .zip(self.prefactors.iter())
+            .map(|(value, prefactor)| value * *prefactor)
+            .collect())
+    }
+
+    #[cfg(feature = "wgpu")]
+    pub fn evaluate_magnitude_gpu(&self, weighted: &[ComplexScalar]) -> MellinResult<Vec<Scalar>> {
+        if self.z_points.is_empty() {
+            return Ok(Vec::new());
+        }
+        let series = crate::mellin_wgpu::evaluate_weighted_series_many_gpu(weighted, &self.z_points)?;
+        Ok(series
+            .into_iter()
+            .zip(self.prefactors.iter())
+            .map(|(value, prefactor)| complex_magnitude(value) * complex_magnitude(*prefactor))
+            .collect())
+    }
+
+    #[cfg(feature = "wgpu")]
+    pub fn evaluate_log_magnitude_gpu(&self, weighted: &[ComplexScalar], epsilon: Scalar) -> MellinResult<Vec<Scalar>> {
+        if self.z_points.is_empty() {
+            return Ok(Vec::new());
+        }
+        let series = crate::mellin_wgpu::evaluate_weighted_series_many_gpu(weighted, &self.z_points)?;
+        Ok(series
+            .into_iter()
+            .zip(self.prefactors.iter())
+            .map(|(value, prefactor)| {
+                let mag = complex_magnitude(value) * complex_magnitude(*prefactor);
+                if epsilon.is_finite() && epsilon > 0.0 {
+                    (mag + epsilon).ln()
+                } else {
+                    mag.ln_1p()
+                }
+            })
+            .collect())
+    }
+}
+
 /// Pre-sampled log lattice with helpers for Mellin/Hilbert evaluations.
 #[derive(Clone, Debug)]
 pub struct MellinLogGrid {
@@ -82,6 +331,7 @@ pub struct MellinLogGrid {
     log_step: Scalar,
     samples: Vec<ComplexScalar>,
     weights: Vec<Scalar>,
+    weighted: Vec<ComplexScalar>,
 }
 
 impl MellinLogGrid {
@@ -101,11 +351,13 @@ impl MellinLogGrid {
             return Err(MellinError::InvalidLogStart);
         }
         let weights = trapezoidal_weights(samples.len())?;
+        let weighted = prepare_weighted_series(&samples, &weights)?;
         Ok(Self {
             log_start,
             log_step,
             samples,
             weights,
+            weighted,
         })
     }
 
@@ -126,7 +378,7 @@ impl MellinLogGrid {
     /// Evaluate the Mellin transform using the pre-sampled lattice.
     pub fn evaluate(&self, s: ComplexScalar) -> MellinResult<ComplexScalar> {
         let (prefactor, z) = mellin_log_lattice_prefactor(self.log_start, self.log_step, s)?;
-        let series = weighted_z_transform(&self.samples, &self.weights, z)?;
+        let series = evaluate_weighted_series(&self.weighted, z)?;
         Ok(prefactor * series)
     }
 
@@ -143,6 +395,80 @@ impl MellinLogGrid {
         }
 
         self.evaluate_many_cpu(s_values)
+    }
+
+    fn assert_plan_compatible(&self, plan: &MellinEvalPlan) -> MellinResult<()> {
+        if float_bits(self.log_start) != float_bits(plan.log_start())
+            || float_bits(self.log_step) != float_bits(plan.log_step())
+        {
+            return Err(MellinError::LatticeMismatch);
+        }
+        Ok(())
+    }
+
+    /// Precompute Z-plane evaluation points for a mesh.
+    pub fn plan_mesh(
+        &self,
+        real_values: &[Scalar],
+        imag_values: &[Scalar],
+    ) -> MellinResult<MellinEvalPlan> {
+        MellinEvalPlan::mesh(self.log_start, self.log_step, real_values, imag_values)
+    }
+
+    /// Precompute Z-plane evaluation points for a vertical line.
+    pub fn plan_vertical_line(&self, real: Scalar, imag_values: &[Scalar]) -> MellinResult<MellinEvalPlan> {
+        MellinEvalPlan::vertical_line(self.log_start, self.log_step, real, imag_values)
+    }
+
+    /// Evaluate the Mellin transform using a precomputed plan.
+    pub fn evaluate_plan(&self, plan: &MellinEvalPlan) -> MellinResult<Vec<ComplexScalar>> {
+        self.assert_plan_compatible(plan)?;
+        #[cfg(feature = "wgpu")]
+        match plan.evaluate_gpu(&self.weighted) {
+            Ok(values) => return Ok(values),
+            Err(MellinError::Gpu(_)) => {}
+            Err(other) => return Err(other),
+        }
+        plan.evaluate(&self.weighted)
+    }
+
+    /// Evaluate magnitudes using a precomputed plan.
+    pub fn evaluate_plan_magnitude(&self, plan: &MellinEvalPlan) -> MellinResult<Vec<Scalar>> {
+        self.assert_plan_compatible(plan)?;
+        #[cfg(feature = "wgpu")]
+        match plan.evaluate_magnitude_gpu(&self.weighted) {
+            Ok(values) => return Ok(values),
+            Err(MellinError::Gpu(_)) => {}
+            Err(other) => return Err(other),
+        }
+        plan.evaluate_magnitude(&self.weighted)
+    }
+
+    /// Evaluate log-magnitudes using a precomputed plan.
+    pub fn evaluate_plan_log_magnitude(
+        &self,
+        plan: &MellinEvalPlan,
+        epsilon: Scalar,
+    ) -> MellinResult<Vec<Scalar>> {
+        self.assert_plan_compatible(plan)?;
+        #[cfg(feature = "wgpu")]
+        match plan.evaluate_log_magnitude_gpu(&self.weighted, epsilon) {
+            Ok(values) => return Ok(values),
+            Err(MellinError::Gpu(_)) => {}
+            Err(other) => return Err(other),
+        }
+        plan.evaluate_log_magnitude(&self.weighted, epsilon)
+    }
+
+    /// Evaluate the magnitude `|M(s)|`.
+    pub fn evaluate_magnitude(&self, s: ComplexScalar) -> MellinResult<Scalar> {
+        Ok(complex_magnitude(self.evaluate(s)?))
+    }
+
+    /// Evaluate the magnitude `|M(s)|` at multiple points.
+    pub fn evaluate_many_magnitude(&self, s_values: &[ComplexScalar]) -> MellinResult<Vec<Scalar>> {
+        let values = self.evaluate_many(s_values)?;
+        Ok(values.into_iter().map(complex_magnitude).collect())
     }
 
     /// Evaluate the Mellin transform over a 2D mesh of `s = real + i * imag`.
@@ -167,6 +493,39 @@ impl MellinLogGrid {
         self.evaluate_many(&s_values)
     }
 
+    /// Evaluate a mesh and return magnitudes laid out row-major.
+    pub fn evaluate_mesh_magnitude(
+        &self,
+        real_values: &[Scalar],
+        imag_values: &[Scalar],
+    ) -> MellinResult<Vec<Scalar>> {
+        let plan = MellinEvalPlan::mesh(self.log_start, self.log_step, real_values, imag_values)?;
+        #[cfg(feature = "wgpu")]
+        match plan.evaluate_magnitude_gpu(&self.weighted) {
+            Ok(values) => return Ok(values),
+            Err(MellinError::Gpu(_)) => {}
+            Err(other) => return Err(other),
+        }
+        plan.evaluate_magnitude(&self.weighted)
+    }
+
+    /// Evaluate a mesh and return log-magnitudes (default uses `ln(1+|M|)`).
+    pub fn evaluate_mesh_log_magnitude(
+        &self,
+        real_values: &[Scalar],
+        imag_values: &[Scalar],
+        epsilon: Scalar,
+    ) -> MellinResult<Vec<Scalar>> {
+        let plan = MellinEvalPlan::mesh(self.log_start, self.log_step, real_values, imag_values)?;
+        #[cfg(feature = "wgpu")]
+        match plan.evaluate_log_magnitude_gpu(&self.weighted, epsilon) {
+            Ok(values) => return Ok(values),
+            Err(MellinError::Gpu(_)) => {}
+            Err(other) => return Err(other),
+        }
+        plan.evaluate_log_magnitude(&self.weighted, epsilon)
+    }
+
     /// Evaluate the Mellin transform over a 2D mesh using pre-weighted series coefficients.
     pub fn evaluate_mesh_with_series(
         &self,
@@ -188,7 +547,7 @@ impl MellinLogGrid {
 
     /// Precompute the Z-plane weighted series associated with the grid samples.
     pub fn weighted_series(&self) -> MellinResult<Vec<ComplexScalar>> {
-        Ok(prepare_weighted_series(&self.samples, &self.weights)?)
+        Ok(self.weighted.clone())
     }
 
     /// Evaluate the Mellin transform using pre-weighted Z-series coefficients.
@@ -257,6 +616,39 @@ impl MellinLogGrid {
         }
 
         self.evaluate_vertical_line_cpu(real, imag_values)
+    }
+
+    /// Evaluate `|M(real + i·t)|` along a vertical line.
+    pub fn evaluate_vertical_line_magnitude(
+        &self,
+        real: Scalar,
+        imag_values: &[Scalar],
+    ) -> MellinResult<Vec<Scalar>> {
+        let plan = MellinEvalPlan::vertical_line(self.log_start, self.log_step, real, imag_values)?;
+        #[cfg(feature = "wgpu")]
+        match plan.evaluate_magnitude_gpu(&self.weighted) {
+            Ok(values) => return Ok(values),
+            Err(MellinError::Gpu(_)) => {}
+            Err(other) => return Err(other),
+        }
+        plan.evaluate_magnitude(&self.weighted)
+    }
+
+    /// Evaluate `ln(1 + |M(real + i·t)|)` (or `ln(|M| + epsilon)` when `epsilon>0`).
+    pub fn evaluate_vertical_line_log_magnitude(
+        &self,
+        real: Scalar,
+        imag_values: &[Scalar],
+        epsilon: Scalar,
+    ) -> MellinResult<Vec<Scalar>> {
+        let plan = MellinEvalPlan::vertical_line(self.log_start, self.log_step, real, imag_values)?;
+        #[cfg(feature = "wgpu")]
+        match plan.evaluate_log_magnitude_gpu(&self.weighted, epsilon) {
+            Ok(values) => return Ok(values),
+            Err(MellinError::Gpu(_)) => {}
+            Err(other) => return Err(other),
+        }
+        plan.evaluate_log_magnitude(&self.weighted, epsilon)
     }
 
     /// Return the number of log-uniform samples stored in the grid.
@@ -332,19 +724,8 @@ impl MellinLogGrid {
     }
 
     fn evaluate_many_cpu(&self, s_values: &[ComplexScalar]) -> MellinResult<Vec<ComplexScalar>> {
-        let mut prefactors = Vec::with_capacity(s_values.len());
-        let mut z_points = Vec::with_capacity(s_values.len());
-        for &s in s_values {
-            let (prefactor, z) = mellin_log_lattice_prefactor(self.log_start, self.log_step, s)?;
-            prefactors.push(prefactor);
-            z_points.push(z);
-        }
-        let series = weighted_z_transform_many(&self.samples, &self.weights, &z_points)?;
-        Ok(series
-            .into_iter()
-            .zip(prefactors)
-            .map(|(series, prefactor)| prefactor * series)
-            .collect())
+        let plan = MellinEvalPlan::many(self.log_start, self.log_step, s_values)?;
+        plan.evaluate(&self.weighted)
     }
 
     fn evaluate_vertical_line_cpu(
@@ -352,39 +733,14 @@ impl MellinLogGrid {
         real: Scalar,
         imag_values: &[Scalar],
     ) -> MellinResult<Vec<ComplexScalar>> {
-        let weighted = self.weighted_series()?;
-        let mut prefactors = Vec::with_capacity(imag_values.len());
-        let mut z_points = Vec::with_capacity(imag_values.len());
-        for &imag in imag_values {
-            let s = ComplexScalar::new(real, imag);
-            let (prefactor, z) = mellin_log_lattice_prefactor(self.log_start, self.log_step, s)?;
-            prefactors.push(prefactor);
-            z_points.push(z);
-        }
-        let series = evaluate_weighted_series_many(&weighted, &z_points)?;
-        Ok(series
-            .into_iter()
-            .zip(prefactors)
-            .map(|(series, prefactor)| prefactor * series)
-            .collect())
+        let plan = MellinEvalPlan::vertical_line(self.log_start, self.log_step, real, imag_values)?;
+        plan.evaluate(&self.weighted)
     }
 
     #[cfg(feature = "wgpu")]
     fn evaluate_many_gpu(&self, s_values: &[ComplexScalar]) -> MellinResult<Vec<ComplexScalar>> {
-        let weighted = self.weighted_series()?;
-        let mut prefactors = Vec::with_capacity(s_values.len());
-        let mut z_points = Vec::with_capacity(s_values.len());
-        for &s in s_values {
-            let (prefactor, z) = mellin_log_lattice_prefactor(self.log_start, self.log_step, s)?;
-            prefactors.push(prefactor);
-            z_points.push(z);
-        }
-        let series = crate::mellin_wgpu::evaluate_weighted_series_many_gpu(&weighted, &z_points)?;
-        Ok(series
-            .into_iter()
-            .zip(prefactors)
-            .map(|(series, prefactor)| prefactor * series)
-            .collect())
+        let plan = MellinEvalPlan::many(self.log_start, self.log_step, s_values)?;
+        plan.evaluate_gpu(&self.weighted)
     }
 
     #[cfg(feature = "wgpu")]
@@ -393,21 +749,8 @@ impl MellinLogGrid {
         real: Scalar,
         imag_values: &[Scalar],
     ) -> MellinResult<Vec<ComplexScalar>> {
-        let weighted = self.weighted_series()?;
-        let mut prefactors = Vec::with_capacity(imag_values.len());
-        let mut z_points = Vec::with_capacity(imag_values.len());
-        for &imag in imag_values {
-            let s = ComplexScalar::new(real, imag);
-            let (prefactor, z) = mellin_log_lattice_prefactor(self.log_start, self.log_step, s)?;
-            prefactors.push(prefactor);
-            z_points.push(z);
-        }
-        let series = crate::mellin_wgpu::evaluate_weighted_series_many_gpu(&weighted, &z_points)?;
-        Ok(series
-            .into_iter()
-            .zip(prefactors)
-            .map(|(series, prefactor)| prefactor * series)
-            .collect())
+        let plan = MellinEvalPlan::vertical_line(self.log_start, self.log_step, real, imag_values)?;
+        plan.evaluate_gpu(&self.weighted)
     }
 }
 
@@ -783,5 +1126,59 @@ mod tests {
             norm,
             expected_norm
         );
+    }
+
+    #[test]
+    fn sample_log_uniform_exp_decay_scaled_matches_rate_one() {
+        let log_start = -3.0f32;
+        let log_step = 0.1f32;
+        let len = 32usize;
+        let base = sample_log_uniform_exp_decay(log_start, log_step, len).unwrap();
+        let scaled = sample_log_uniform_exp_decay_scaled(log_start, log_step, len, 1.0).unwrap();
+        assert_eq!(base.len(), scaled.len());
+        for (idx, (lhs, rhs)) in base.iter().zip(scaled.iter()).enumerate() {
+            let diff = (*lhs - *rhs).norm();
+            assert!(diff < 1e-6, "idx={} diff={}", idx, diff);
+        }
+    }
+
+    #[test]
+    fn mellin_eval_plan_mesh_matches_grid_evaluate_mesh() {
+        let log_start = -3.0f32;
+        let log_step = 0.05f32;
+        let len = 256usize;
+        let grid = MellinLogGrid::from_function(log_start, log_step, len, exp_decay).unwrap();
+        let weighted = grid.weighted_series().unwrap();
+
+        let real_values = vec![0.8f32, 1.3];
+        let imag_values = vec![-0.5f32, 0.0, 0.4];
+        let plan = MellinEvalPlan::mesh(log_start, log_step, &real_values, &imag_values).unwrap();
+        assert_eq!(plan.shape(), (real_values.len(), imag_values.len()));
+
+        let via_plan = plan.evaluate(&weighted).unwrap();
+        let via_grid = grid.evaluate_mesh(&real_values, &imag_values).unwrap();
+        assert_eq!(via_plan.len(), via_grid.len());
+        for (idx, (lhs, rhs)) in via_plan.iter().zip(via_grid.iter()).enumerate() {
+            let diff = (*lhs - *rhs).norm();
+            assert!(diff < 1e-6, "idx={} diff={}", idx, diff);
+        }
+    }
+
+    #[test]
+    fn mellin_log_grid_mesh_magnitude_matches_complex_norm() {
+        let log_start = -3.0f32;
+        let log_step = 0.05f32;
+        let len = 256usize;
+        let grid = MellinLogGrid::from_function(log_start, log_step, len, exp_decay).unwrap();
+
+        let real_values = vec![0.8f32, 1.3];
+        let imag_values = vec![-0.5f32, 0.0, 0.4];
+        let mags = grid.evaluate_mesh_magnitude(&real_values, &imag_values).unwrap();
+        let complex = grid.evaluate_mesh(&real_values, &imag_values).unwrap();
+        assert_eq!(mags.len(), complex.len());
+        for (idx, (mag, value)) in mags.iter().zip(complex.iter()).enumerate() {
+            let diff = (*mag - value.norm()).abs();
+            assert!(diff < 1e-6, "idx={} diff={}", idx, diff);
+        }
     }
 }

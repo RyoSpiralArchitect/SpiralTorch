@@ -45,6 +45,8 @@ pub enum MellinError {
     NonFiniteFunctionValue { x: Scalar },
     #[error("sample {index} produced a non-finite value")]
     NonFiniteSample { index: usize },
+    #[error("rate must be positive and finite")]
+    InvalidRate,
     #[error("mellin lattices do not match")]
     LatticeMismatch,
     #[error("hilbert inner product became negative: {value}")]

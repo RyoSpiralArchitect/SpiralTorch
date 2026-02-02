@@ -8,7 +8,10 @@ use st_frac::cosmology::{
     LogZSeries, SeriesOptions, WeightNormalisation, WindowFunction,
 };
 use st_frac::fractal_field::FractalFieldGenerator;
-use st_frac::mellin::{sample_log_uniform_exp_decay, MellinLogGrid};
+use st_frac::mellin::{
+    sample_log_uniform_exp_decay, sample_log_uniform_exp_decay_scaled, MellinEvalPlan,
+    MellinLogGrid,
+};
 use st_frac::mellin_types::{ComplexScalar, Scalar};
 use st_tensor::fractional::{fracdiff_gl_1d as rust_fracdiff_gl_1d, PadMode};
 
@@ -49,6 +52,17 @@ fn mellin_exp_decay_samples(
     len: usize,
 ) -> PyResult<Vec<ComplexScalar>> {
     sample_log_uniform_exp_decay(log_start, log_step, len).map_err(mellin_err_to_py)
+}
+
+#[pyfunction]
+#[pyo3(signature = (log_start, log_step, len, rate))]
+fn mellin_exp_decay_samples_scaled(
+    log_start: Scalar,
+    log_step: Scalar,
+    len: usize,
+    rate: Scalar,
+) -> PyResult<Vec<ComplexScalar>> {
+    sample_log_uniform_exp_decay_scaled(log_start, log_step, len, rate).map_err(mellin_err_to_py)
 }
 
 fn mellin_err_to_py(err: st_frac::mellin_types::MellinError) -> PyErr {
@@ -294,12 +308,103 @@ pub(crate) struct PyMellinLogGrid {
     pub(crate) inner: MellinLogGrid,
 }
 
+#[pyclass(module = "spiraltorch.frac", name = "MellinEvalPlan")]
+#[derive(Clone, Debug)]
+pub(crate) struct PyMellinEvalPlan {
+    inner: MellinEvalPlan,
+}
+
+#[pymethods]
+impl PyMellinEvalPlan {
+    #[staticmethod]
+    fn mesh(
+        log_start: Scalar,
+        log_step: Scalar,
+        real_values: Vec<Scalar>,
+        imag_values: Vec<Scalar>,
+    ) -> PyResult<Self> {
+        let inner =
+            MellinEvalPlan::mesh(log_start, log_step, &real_values, &imag_values).map_err(mellin_err_to_py)?;
+        Ok(Self { inner })
+    }
+
+    #[staticmethod]
+    fn vertical_line(
+        log_start: Scalar,
+        log_step: Scalar,
+        real: Scalar,
+        imag_values: Vec<Scalar>,
+    ) -> PyResult<Self> {
+        let inner =
+            MellinEvalPlan::vertical_line(log_start, log_step, real, &imag_values).map_err(mellin_err_to_py)?;
+        Ok(Self { inner })
+    }
+
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn __len__(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn shape(&self) -> (usize, usize) {
+        self.inner.shape()
+    }
+
+    #[getter]
+    fn log_start(&self) -> Scalar {
+        self.inner.log_start()
+    }
+
+    #[getter]
+    fn log_step(&self) -> Scalar {
+        self.inner.log_step()
+    }
+
+    fn evaluate(&self, grid: &PyMellinLogGrid) -> PyResult<Vec<ComplexScalar>> {
+        grid.inner.evaluate_plan(&self.inner).map_err(mellin_err_to_py)
+    }
+
+    fn evaluate_magnitude(&self, grid: &PyMellinLogGrid) -> PyResult<Vec<Scalar>> {
+        grid.inner
+            .evaluate_plan_magnitude(&self.inner)
+            .map_err(mellin_err_to_py)
+    }
+
+    #[pyo3(signature = (grid, epsilon=0.0))]
+    fn evaluate_log_magnitude(&self, grid: &PyMellinLogGrid, epsilon: Scalar) -> PyResult<Vec<Scalar>> {
+        grid.inner
+            .evaluate_plan_log_magnitude(&self.inner, epsilon)
+            .map_err(mellin_err_to_py)
+    }
+
+    fn __repr__(&self) -> String {
+        let shape = self.inner.shape();
+        format!(
+            "MellinEvalPlan(shape=({}, {}), log_start={:.4}, log_step={:.4})",
+            shape.0,
+            shape.1,
+            self.inner.log_start(),
+            self.inner.log_step()
+        )
+    }
+}
+
 #[pymethods]
 impl PyMellinLogGrid {
     #[staticmethod]
     fn exp_decay(log_start: Scalar, log_step: Scalar, len: usize) -> PyResult<Self> {
         let samples =
             sample_log_uniform_exp_decay(log_start, log_step, len).map_err(mellin_err_to_py)?;
+        let inner = MellinLogGrid::new(log_start, log_step, samples).map_err(mellin_err_to_py)?;
+        Ok(Self { inner })
+    }
+
+    #[staticmethod]
+    fn exp_decay_scaled(log_start: Scalar, log_step: Scalar, len: usize, rate: Scalar) -> PyResult<Self> {
+        let samples = sample_log_uniform_exp_decay_scaled(log_start, log_step, len, rate)
+            .map_err(mellin_err_to_py)?;
         let inner = MellinLogGrid::new(log_start, log_step, samples).map_err(mellin_err_to_py)?;
         Ok(Self { inner })
     }
@@ -378,6 +483,41 @@ impl PyMellinLogGrid {
         Ok(flat.chunks(cols).map(|row| row.to_vec()).collect())
     }
 
+    fn plan_mesh(&self, real_values: Vec<Scalar>, imag_values: Vec<Scalar>) -> PyResult<PyMellinEvalPlan> {
+        let inner = self
+            .inner
+            .plan_mesh(&real_values, &imag_values)
+            .map_err(mellin_err_to_py)?;
+        Ok(PyMellinEvalPlan { inner })
+    }
+
+    fn plan_vertical_line(&self, real: Scalar, imag_values: Vec<Scalar>) -> PyResult<PyMellinEvalPlan> {
+        let inner = self
+            .inner
+            .plan_vertical_line(real, &imag_values)
+            .map_err(mellin_err_to_py)?;
+        Ok(PyMellinEvalPlan { inner })
+    }
+
+    #[pyo3(signature = (real_values, imag_values))]
+    fn evaluate_mesh_magnitude_flat(&self, real_values: Vec<Scalar>, imag_values: Vec<Scalar>) -> PyResult<Vec<Scalar>> {
+        self.inner
+            .evaluate_mesh_magnitude(&real_values, &imag_values)
+            .map_err(mellin_err_to_py)
+    }
+
+    #[pyo3(signature = (real_values, imag_values, epsilon=0.0))]
+    fn evaluate_mesh_log_magnitude_flat(
+        &self,
+        real_values: Vec<Scalar>,
+        imag_values: Vec<Scalar>,
+        epsilon: Scalar,
+    ) -> PyResult<Vec<Scalar>> {
+        self.inner
+            .evaluate_mesh_log_magnitude(&real_values, &imag_values, epsilon)
+            .map_err(mellin_err_to_py)
+    }
+
     fn evaluate_with_series(
         &self,
         s: ComplexScalar,
@@ -433,8 +573,10 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
     module.add_function(wrap_pyfunction!(gl_coeffs_adaptive, &module)?)?;
     module.add_function(wrap_pyfunction!(fracdiff_gl_1d, &module)?)?;
     module.add_function(wrap_pyfunction!(mellin_exp_decay_samples, &module)?)?;
+    module.add_function(wrap_pyfunction!(mellin_exp_decay_samples_scaled, &module)?)?;
     module.add_function(wrap_pyfunction!(log_lattice_z_points, &module)?)?;
     module.add_function(wrap_pyfunction!(assemble_pzeta, &module)?)?;
+    module.add_class::<PyMellinEvalPlan>()?;
     module.add_class::<PyMellinLogGrid>()?;
     module.add_class::<PyFractalFieldGenerator>()?;
     module.add_class::<PyLogZSeries>()?;
@@ -447,8 +589,10 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
             "gl_coeffs_adaptive",
             "fracdiff_gl_1d",
             "mellin_exp_decay_samples",
+            "mellin_exp_decay_samples_scaled",
             "FractalFieldGenerator",
             "LogZSeries",
+            "MellinEvalPlan",
             "MellinLogGrid",
         ],
     )?;

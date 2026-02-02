@@ -139,6 +139,37 @@ impl WasmMellinLogGrid {
         Ok(complex_array(&values))
     }
 
+    #[wasm_bindgen(js_name = evaluateMeshMagnitude)]
+    pub fn evaluate_mesh_magnitude(
+        &self,
+        real_values: &Float32Array,
+        imag_values: &Float32Array,
+    ) -> Result<Float32Array, JsValue> {
+        let real_values = float32array_to_vec(real_values);
+        let imag_values = float32array_to_vec(imag_values);
+        let values = self
+            .grid
+            .evaluate_mesh_magnitude(&real_values, &imag_values)
+            .map_err(js_error)?;
+        Ok(scalar_array(&values))
+    }
+
+    #[wasm_bindgen(js_name = evaluateMeshLogMagnitude)]
+    pub fn evaluate_mesh_log_magnitude(
+        &self,
+        real_values: &Float32Array,
+        imag_values: &Float32Array,
+        epsilon: Scalar,
+    ) -> Result<Float32Array, JsValue> {
+        let real_values = float32array_to_vec(real_values);
+        let imag_values = float32array_to_vec(imag_values);
+        let values = self
+            .grid
+            .evaluate_mesh_log_magnitude(&real_values, &imag_values, epsilon)
+            .map_err(js_error)?;
+        Ok(scalar_array(&values))
+    }
+
     #[wasm_bindgen(js_name = hilbertInnerProduct)]
     pub fn hilbert_inner_product(&self, other: &WasmMellinLogGrid) -> Result<Float32Array, JsValue> {
         let ip = self
@@ -164,5 +195,17 @@ pub fn mellin_exp_decay_samples(
         ComplexScalar::new((-x).exp(), 0.0)
     })
     .map_err(js_error)?;
+    Ok(complex_array(&samples))
+}
+
+#[wasm_bindgen(js_name = mellin_exp_decay_samples_scaled)]
+pub fn mellin_exp_decay_samples_scaled(
+    log_start: Scalar,
+    log_step: Scalar,
+    len: usize,
+    rate: Scalar,
+) -> Result<Float32Array, JsValue> {
+    let samples = st_frac::mellin::sample_log_uniform_exp_decay_scaled(log_start, log_step, len, rate)
+        .map_err(js_error)?;
     Ok(complex_array(&samples))
 }

@@ -236,6 +236,13 @@ declare module "spiraltorch-wasm" {
         evaluate(s: Float32Array): Float32Array;
         evaluateMany(sValues: Float32Array): Float32Array;
         evaluateVerticalLine(real: number, imagValues: Float32Array): Float32Array;
+        evaluateMesh(realValues: Float32Array, imagValues: Float32Array): Float32Array;
+        evaluateMeshMagnitude(realValues: Float32Array, imagValues: Float32Array): Float32Array;
+        evaluateMeshLogMagnitude(
+            realValues: Float32Array,
+            imagValues: Float32Array,
+            epsilon: number,
+        ): Float32Array;
         hilbertInnerProduct(other: WasmMellinLogGrid): Float32Array;
         hilbertNorm(): number;
     }
@@ -244,6 +251,13 @@ declare module "spiraltorch-wasm" {
         log_start: number,
         log_step: number,
         len: number,
+    ): Float32Array;
+
+    export function mellin_exp_decay_samples_scaled(
+        log_start: number,
+        log_step: number,
+        len: number,
+        rate: number,
     ): Float32Array;
 
     export interface WasmTunerRecord {

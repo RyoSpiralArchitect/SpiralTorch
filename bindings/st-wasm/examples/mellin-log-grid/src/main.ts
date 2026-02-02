@@ -221,10 +221,9 @@ async function runOnce(ev?: Event) {
     if (mode === "mesh") {
       const realValues = linspace(realMin, realMax, realCount);
       const imagValues = linspace(imagMin, imagMax, imagCount);
-      const values = grid.evaluateMesh(realValues, imagValues);
+      const mags = grid.evaluateMeshMagnitude(realValues, imagValues);
       const t4 = performance.now();
 
-      const mags = interleavedToMagnitudes(values);
       drawHeatmap(mags, realCount, imagCount);
       timingsEl.textContent = `samples ${(t1 - t0).toFixed(1)}ms · grid ${(t2 - t1).toFixed(
         1,
@@ -232,10 +231,15 @@ async function runOnce(ev?: Event) {
 
       const head = Math.min(6, imagCount);
       const rows: string[] = [];
+      const previewS = new Float32Array(head * 2);
       for (let i = 0; i < head; i++) {
-        const base = i;
-        const re = values[base * 2];
-        const im = values[base * 2 + 1];
+        previewS[i * 2] = realValues[0];
+        previewS[i * 2 + 1] = imagValues[i];
+      }
+      const previewValues = grid.evaluateMany(previewS);
+      for (let i = 0; i < head; i++) {
+        const re = previewValues[i * 2];
+        const im = previewValues[i * 2 + 1];
         rows.push(
           `re=${realValues[0].toFixed(3)}  t=${imagValues[i].toFixed(3)}  M(s)≈${re.toExponential(
             4,
