@@ -25,7 +25,7 @@ Reuse or redistribution **must retain the SpiralTorch name and authorship** as p
 
 - **1-minute quickstart (Python):**
   ```bash
-  pip install -U spiraltorch==0.4.5
+  pip install -U spiraltorch==0.4.6
 
   python - <<'PY'
   import spiraltorch as st
@@ -310,7 +310,7 @@ tensor shims, no translation layers, and no tracebacks.
     transcripts, and ψ telemetry double as explainability artifacts, enabling
     decision-path inspection without leaving the Z-space calculus.
     
-**Current release:** `spiraltorch==0.4.5` (abi3 wheel, Python ≥3.8)  
+**Current release:** `spiraltorch==0.4.6` (abi3 wheel, Python ≥3.8)  
 **Targets:** CPU (always), MPS, Vulkan/DX (WGPU), CUDA, HIP/ROCm
 
 ---
@@ -318,7 +318,7 @@ tensor shims, no translation layers, and no tracebacks.
 ## Install (pip)
 
 ```bash
-pip install -U spiraltorch==0.4.5
+pip install -U spiraltorch==0.4.6
 ```
 
 - Wheels are **abi3**; you can use any CPython ≥ 3.8.
@@ -387,7 +387,7 @@ maturin build -m bindings/st-py/Cargo.toml --release --locked --features wgpu,lo
 
 # macOS 14+ universal2 (matches macOS wheels on PyPI)
 export MACOSX_DEPLOYMENT_TARGET=14.0
-maturin build -m bindings/st-py/Cargo.toml --release --locked --universal2 --features wgpu,logic,kdsl
+maturin build -m bindings/st-py/Cargo.toml --release --locked --target universal2-apple-darwin --features wgpu,logic,kdsl
 
 # CPU-only (no GPU backend)
 maturin build -m bindings/st-py/Cargo.toml --release --locked
@@ -402,7 +402,7 @@ pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
 
 If your local `python` aborts during startup because of a third-party `sitecustomize.py`, rerun the commands above with `PYTHONNOUSERSITE=1` (or `python -s`).
 
-Linux note: build inside a manylinux container (e.g. via GitHub Actions) for broadly-compatible wheels; building directly on Ubuntu may produce a `manylinux_2_3x` tag that won’t install on older distros.
+Linux note: for manylinux2014 wheels you either need a manylinux container (e.g. via GitHub Actions) or `maturin --compatibility manylinux2014 --zig` (requires `pip install maturin[zig]`). Building directly on Ubuntu without these may produce wheels that won’t install on older distros.
 
 ### CI wheel stash (GitHub Actions)
 

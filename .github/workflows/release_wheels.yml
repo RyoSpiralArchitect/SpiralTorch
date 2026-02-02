@@ -58,13 +58,18 @@ jobs:
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
       - name: Build wheels (CPU+WGPU, manylinux2014)
         run: |
-          python -m pip install -U pip wheel maturin
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            python -m pip install -U pip wheel "maturin[zig]"
+          else
+            python -m pip install -U pip wheel maturin
+          fi
+
           extra_args=""
-          if [ "${{ matrix.universal2 }}" = "true" ]; then
-            extra_args="$extra_args --universal2"
+          if [ "${{ runner.os }}" = "macOS" ] && [ "${{ matrix.universal2 }}" = "true" ]; then
+            extra_args="$extra_args --target universal2-apple-darwin"
           fi
           if [ "${{ runner.os }}" = "Linux" ]; then
-            maturin build -m bindings/st-py/Cargo.toml --release --locked --manylinux 2014 --features wgpu,logic,kdsl
+            maturin build -m bindings/st-py/Cargo.toml --release --locked --compatibility manylinux2014 --zig --features wgpu,logic,kdsl
           else
             maturin build -m bindings/st-py/Cargo.toml --release --locked $extra_args --features wgpu,logic,kdsl
           fi
