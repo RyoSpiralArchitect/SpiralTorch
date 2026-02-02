@@ -11,12 +11,18 @@ const timingsEl = document.querySelector<HTMLElement>("#timings")!;
 const previewEl = document.querySelector<HTMLPreElement>("#preview")!;
 const canvas = document.querySelector<HTMLCanvasElement>("#plot")!;
 const ctx = canvas.getContext("2d")!;
+const heatmapCanvas = document.createElement("canvas");
+const heatmapCtx = heatmapCanvas.getContext("2d");
 
 let ready = false;
 
 function setStatus(message: string, isError = false) {
   statusEl.textContent = message;
   statusEl.style.color = isError ? "#ff9a9a" : "";
+}
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
 }
 
 function getValue(id: string): string {
@@ -40,6 +46,16 @@ function parseIntStrict(id: string, fallback: number, min: number): number {
     throw new Error(`${id} must be an integer >= ${min}`);
   }
   return parsed;
+}
+
+function linspace(min: number, max: number, count: number): Float32Array {
+  const out = new Float32Array(count);
+  const denom = count > 1 ? count - 1 : 1;
+  for (let i = 0; i < count; i++) {
+    const t = denom === 0 ? 0 : i / denom;
+    out[i] = min + (max - min) * t;
+  }
+  return out;
 }
 
 function buildVerticalLineS(real: number, imagMin: number, imagMax: number, count: number): Float32Array {
@@ -89,6 +105,70 @@ function drawMagnitude(magnitudes: Float32Array) {
   ctx.fillText(`max |M(s)| ≈ ${max.toExponential(3)}`, 10, 18);
 }
 
+function rampColor(t: number): [number, number, number] {
+  const x = clamp01(t) * 4;
+  const seg = Math.min(3, Math.floor(x));
+  const f = x - seg;
+
+  switch (seg) {
+    case 0:
+      return [0, Math.round(255 * f), 255];
+    case 1:
+      return [0, 255, Math.round(255 * (1 - f))];
+    case 2:
+      return [Math.round(255 * f), 255, 0];
+    default:
+      return [255, Math.round(255 * (1 - f)), 0];
+  }
+}
+
+function drawHeatmap(magnitudes: Float32Array, rows: number, cols: number) {
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  ctx.fillStyle = "rgba(4, 6, 14, 0.75)";
+  ctx.fillRect(0, 0, w, h);
+
+  if (magnitudes.length !== rows * cols) return;
+  if (!heatmapCtx) return;
+
+  let max = 0;
+  for (let i = 0; i < magnitudes.length; i++) {
+    const v = magnitudes[i];
+    if (Number.isFinite(v) && v > max) max = v;
+  }
+  if (max <= 0) max = 1;
+
+  heatmapCanvas.width = cols;
+  heatmapCanvas.height = rows;
+  const img = heatmapCtx.createImageData(cols, rows);
+
+  const denom = Math.log1p(max);
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const idx = r * cols + c;
+      const v = Math.max(0, magnitudes[idx]);
+      const t = denom > 0 ? Math.log1p(v) / denom : 0;
+      const [rr, gg, bb] = rampColor(t);
+      const o = idx * 4;
+      img.data[o] = rr;
+      img.data[o + 1] = gg;
+      img.data[o + 2] = bb;
+      img.data[o + 3] = 255;
+    }
+  }
+
+  heatmapCtx.putImageData(img, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(heatmapCanvas, 0, 0, w, h);
+  ctx.imageSmoothingEnabled = true;
+
+  ctx.fillStyle = "rgba(210, 218, 255, 0.85)";
+  ctx.font = "12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+  ctx.fillText(`max |M(s)| ≈ ${max.toExponential(3)} (log scale)`, 10, 18);
+}
+
 function interleavedToMagnitudes(values: Float32Array): Float32Array {
   if (values.length % 2 !== 0) {
     return new Float32Array();
@@ -115,10 +195,15 @@ async function runOnce(ev?: Event) {
     const logStep = parseNumber("log-step", 0.01);
     const len = parseIntStrict("len", 2048, 2);
 
+    const mode = getValue("mode") || "vertical";
     const real = parseNumber("s-real", 2.5);
     const imagMin = parseNumber("imag-min", -30);
     const imagMax = parseNumber("imag-max", 30);
-    const count = parseIntStrict("count", 256, 2);
+    const imagCount = parseIntStrict("imag-count", 256, 2);
+
+    const realMin = parseNumber("real-min", 0.8);
+    const realMax = parseNumber("real-max", 3.2);
+    const realCount = parseIntStrict("real-count", 256, 2);
 
     const t0 = performance.now();
     const samples = mellin_exp_decay_samples(logStart, logStep, len);
@@ -131,32 +216,59 @@ async function runOnce(ev?: Event) {
     hilbertEl.textContent = `${grid.hilbertNorm().toExponential(6)}`;
 
     setStatus("Evaluating…");
-    const sValues = buildVerticalLineS(real, imagMin, imagMax, count);
     const t3 = performance.now();
-    const values = grid.evaluateMany(sValues);
-    const t4 = performance.now();
 
-    const mags = interleavedToMagnitudes(values);
-    drawMagnitude(mags);
+    if (mode === "mesh") {
+      const realValues = linspace(realMin, realMax, realCount);
+      const imagValues = linspace(imagMin, imagMax, imagCount);
+      const values = grid.evaluateMesh(realValues, imagValues);
+      const t4 = performance.now();
 
-    timingsEl.textContent = `samples ${(t1 - t0).toFixed(1)}ms · grid ${(t2 - t1).toFixed(
-      1,
-    )}ms · eval ${(t4 - t3).toFixed(1)}ms`;
+      const mags = interleavedToMagnitudes(values);
+      drawHeatmap(mags, realCount, imagCount);
+      timingsEl.textContent = `samples ${(t1 - t0).toFixed(1)}ms · grid ${(t2 - t1).toFixed(
+        1,
+      )}ms · mesh ${(t4 - t3).toFixed(1)}ms`;
 
-    const head = Math.min(6, count);
-    const rows: string[] = [];
-    for (let i = 0; i < head; i++) {
-      const re = values[i * 2];
-      const im = values[i * 2 + 1];
-      rows.push(
-        `t=${sValues[i * 2 + 1].toFixed(3)}  M(s)≈${re.toExponential(4)} + ${im.toExponential(
-          4,
-        )}i  |M|≈${mags[i].toExponential(4)}`,
-      );
+      const head = Math.min(6, imagCount);
+      const rows: string[] = [];
+      for (let i = 0; i < head; i++) {
+        const base = i;
+        const re = values[base * 2];
+        const im = values[base * 2 + 1];
+        rows.push(
+          `re=${realValues[0].toFixed(3)}  t=${imagValues[i].toFixed(3)}  M(s)≈${re.toExponential(
+            4,
+          )} + ${im.toExponential(4)}i`,
+        );
+      }
+      previewEl.textContent = rows.join("\n");
+      setStatus(`OK (mesh ${realCount}×${imagCount})`);
+    } else {
+      const sValues = buildVerticalLineS(real, imagMin, imagMax, imagCount);
+      const values = grid.evaluateMany(sValues);
+      const t4 = performance.now();
+
+      const mags = interleavedToMagnitudes(values);
+      drawMagnitude(mags);
+      timingsEl.textContent = `samples ${(t1 - t0).toFixed(1)}ms · grid ${(t2 - t1).toFixed(
+        1,
+      )}ms · eval ${(t4 - t3).toFixed(1)}ms`;
+
+      const head = Math.min(6, imagCount);
+      const rows: string[] = [];
+      for (let i = 0; i < head; i++) {
+        const re = values[i * 2];
+        const im = values[i * 2 + 1];
+        rows.push(
+          `t=${sValues[i * 2 + 1].toFixed(3)}  M(s)≈${re.toExponential(4)} + ${im.toExponential(
+            4,
+          )}i  |M|≈${mags[i].toExponential(4)}`,
+        );
+      }
+      previewEl.textContent = rows.join("\n");
+      setStatus(`OK (n=${imagCount})`);
     }
-    previewEl.textContent = rows.join("\n");
-
-    setStatus(`OK (n=${count})`);
   } catch (err) {
     setStatus((err as Error).message, true);
     console.error(err);

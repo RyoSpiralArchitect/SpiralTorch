@@ -44,6 +44,13 @@
             <legend>Evaluation points</legend>
             <div class="inline">
               <label>
+                mode
+                <select id="mode" name="mode">
+                  <option value="vertical" selected>vertical line</option>
+                  <option value="mesh">mesh heatmap</option>
+                </select>
+              </label>
+              <label>
                 s.real
                 <input id="s-real" name="s-real" value="2.5" />
               </label>
@@ -56,10 +63,29 @@
                 <input id="imag-max" name="imag-max" value="30.0" />
               </label>
               <label>
-                count
-                <input id="count" name="count" type="number" min="2" value="256" />
+                imag_count
+                <input id="imag-count" name="imag-count" type="number" min="2" value="256" />
               </label>
             </div>
+            <div class="inline">
+              <label>
+                real_min
+                <input id="real-min" name="real-min" value="0.8" />
+              </label>
+              <label>
+                real_max
+                <input id="real-max" name="real-max" value="3.2" />
+              </label>
+              <label>
+                real_count
+                <input id="real-count" name="real-count" type="number" min="2" value="256" />
+              </label>
+            </div>
+            <p class="hint">
+              Use <code>mode=vertical</code> to plot a single vertical line. Use
+              <code>mode=mesh</code> to render a heatmap over <code>real_min..real_max</code>
+              × <code>imag_min..imag_max</code>.
+            </p>
           </fieldset>
 
           <div class="actions">
@@ -91,4 +117,3 @@
     <script type="module" src="./src/main.ts"></script>
   </body>
 </html>
-

@@ -2,7 +2,7 @@
 
 This example exposes `st-frac`'s Mellin log-lattice tooling in the browser via the
 `spiraltorch-wasm` bindings. It builds a log-uniform sample grid, evaluates the Mellin
-transform at many complex points (`evaluateMany`), and plots the magnitude.
+transform at many complex points (`evaluateMany` / `evaluateMesh`), and plots the magnitude.
 
 ## Quickstart
 

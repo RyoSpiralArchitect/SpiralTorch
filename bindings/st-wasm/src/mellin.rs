@@ -124,6 +124,21 @@ impl WasmMellinLogGrid {
         Ok(complex_array(&values))
     }
 
+    #[wasm_bindgen(js_name = evaluateMesh)]
+    pub fn evaluate_mesh(
+        &self,
+        real_values: &Float32Array,
+        imag_values: &Float32Array,
+    ) -> Result<Float32Array, JsValue> {
+        let real_values = float32array_to_vec(real_values);
+        let imag_values = float32array_to_vec(imag_values);
+        let values = self
+            .grid
+            .evaluate_mesh(&real_values, &imag_values)
+            .map_err(js_error)?;
+        Ok(complex_array(&values))
+    }
+
     #[wasm_bindgen(js_name = hilbertInnerProduct)]
     pub fn hilbert_inner_product(&self, other: &WasmMellinLogGrid) -> Result<Float32Array, JsValue> {
         let ip = self
@@ -151,4 +166,3 @@ pub fn mellin_exp_decay_samples(
     .map_err(js_error)?;
     Ok(complex_array(&samples))
 }
-
