@@ -7,6 +7,14 @@ This example demonstrates running a tiny “learning loop” in the browser usin
 - CPU loop: update relation via `hypergradWaveCurrent` / `realgradWaveCurrent`.
 - WebGPU: optional 3D trail renderer + FFT row probe + “hypergrad operator” compute step.
 
+## Quickstart
+
+From the repo root:
+
+```bash
+bash scripts/wasm_demo.sh canvas-hypertrain
+```
+
 ## Prerequisites
 
 Build the WASM package (and sync it into each example’s `pkg/` directory):

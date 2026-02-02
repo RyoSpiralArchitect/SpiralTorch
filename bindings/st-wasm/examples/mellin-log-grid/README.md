@@ -4,6 +4,14 @@ This example exposes `st-frac`'s Mellin log-lattice tooling in the browser via t
 `spiraltorch-wasm` bindings. It builds a log-uniform sample grid, evaluates the Mellin
 transform at many complex points (`evaluateMany`), and plots the magnitude.
 
+## Quickstart
+
+From the repo root:
+
+```bash
+bash scripts/wasm_demo.sh mellin-log-grid
+```
+
 ## Prerequisites
 
 1. Build the `spiraltorch-wasm` bindings once so the example can import them.
@@ -33,5 +41,5 @@ npm run dev
 Notes:
 
 - The demo bootstraps WASM by fetching `spiraltorch_wasm_bg.wasm` as bytes (avoids strict
-  `application/wasm` MIME requirements), but you still need to serve the file via a local
-  dev server (don’t open `index.html` directly).
+  `application/wasm` MIME requirements).
+- If your server still trips MIME-type issues, use `python scripts/serve_wasm_demo.py <dist>`.

@@ -6,6 +6,14 @@ browser surface: they configure narrator parameters through WebAssembly, review 
 and ship it to a z/OS entrypoint via HTTP (which can fan the buffer into MQ, CICS, or
 datasets).
 
+## Quickstart
+
+From the repo root:
+
+```bash
+bash scripts/wasm_demo.sh cobol-console
+```
+
 ## Prerequisites
 
 1. Build the `spiraltorch-wasm` bindings once so the example can import them:

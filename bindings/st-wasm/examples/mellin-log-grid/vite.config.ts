@@ -1,13 +1,3 @@
-import { defineConfig } from "vite";
+import { defineSpiralWasmExampleConfig } from "../vite.common";
 
-export default defineConfig({
-  root: ".",
-  build: {
-    outDir: "dist",
-    emptyOutDir: true,
-  },
-  server: {
-    port: 4174,
-  },
-});
-
+export default defineSpiralWasmExampleConfig({ port: 4174 });
