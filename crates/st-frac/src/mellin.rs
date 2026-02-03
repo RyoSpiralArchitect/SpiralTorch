@@ -460,6 +460,98 @@ impl MellinLogGrid {
         plan.evaluate_log_magnitude(&self.weighted, epsilon)
     }
 
+    fn assert_grid_compatible(&self, other: &MellinLogGrid) -> MellinResult<()> {
+        if float_bits(self.log_start) != float_bits(other.log_start)
+            || float_bits(self.log_step) != float_bits(other.log_step)
+        {
+            return Err(MellinError::LatticeMismatch);
+        }
+        if self.samples.len() != other.samples.len() {
+            return Err(MellinError::SampleLengthMismatch {
+                expected: self.samples.len(),
+                got: other.samples.len(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Compute an L2 loss + gradient that matches the Mellin transform of `target`.
+    ///
+    /// This is intended for training loops: reuse the same `plan` for both grids
+    /// and update `self.samples` using the returned gradient.
+    ///
+    /// The returned loss is the mean squared magnitude of the complex error
+    /// `M_self(s) - M_target(s)` over all plan points.
+    pub fn l2_loss_grad_plan_match_grid(
+        &self,
+        plan: &MellinEvalPlan,
+        target: &MellinLogGrid,
+    ) -> MellinResult<(Scalar, Vec<ComplexScalar>)> {
+        self.assert_plan_compatible(plan)?;
+        self.assert_grid_compatible(target)?;
+
+        let points = plan.z_points.len();
+        let len = self.samples.len();
+        let mut grad = vec![ComplexScalar::new(0.0, 0.0); len];
+        if points == 0 || len == 0 {
+            return Ok((0.0, grad));
+        }
+
+        let inv_points = 1.0 / points as Scalar;
+        let scale = 2.0 * inv_points;
+        let mut loss = 0.0;
+
+        for (z, prefactor) in plan.z_points.iter().zip(plan.prefactors.iter()) {
+            let mut series = ComplexScalar::new(0.0, 0.0);
+            let mut pow = ComplexScalar::new(1.0, 0.0);
+            for idx in 0..len {
+                let diff = self.samples[idx] - target.samples[idx];
+                let coeff = diff * ComplexScalar::new(self.weights[idx], 0.0);
+                series += coeff * pow;
+                pow *= *z;
+            }
+
+            let error = series * *prefactor;
+            loss += error.norm_sqr();
+
+            let factor = error * prefactor.conj();
+            let conj_z = z.conj();
+            let mut pow_conj = ComplexScalar::new(1.0, 0.0);
+            for idx in 0..len {
+                let w = self.weights[idx];
+                grad[idx] += factor * pow_conj * ComplexScalar::new(w, 0.0);
+                pow_conj *= conj_z;
+            }
+        }
+
+        loss *= inv_points;
+        for g in &mut grad {
+            *g *= scale;
+        }
+
+        Ok((loss, grad))
+    }
+
+    /// Single gradient-descent step that matches the Mellin transform of `target`.
+    pub fn train_step_l2_plan_match_grid(
+        &mut self,
+        plan: &MellinEvalPlan,
+        target: &MellinLogGrid,
+        lr: Scalar,
+    ) -> MellinResult<Scalar> {
+        if !(lr.is_finite() && lr > 0.0) {
+            return Err(MellinError::InvalidLearningRate);
+        }
+
+        let (loss, grad) = self.l2_loss_grad_plan_match_grid(plan, target)?;
+        for (sample, grad) in self.samples.iter_mut().zip(grad.iter()) {
+            sample.re -= lr * grad.re;
+            sample.im -= lr * grad.im;
+        }
+        self.weighted = prepare_weighted_series(&self.samples, &self.weights)?;
+        Ok(loss)
+    }
+
     /// Evaluate the magnitude `|M(s)|`.
     pub fn evaluate_magnitude(&self, s: ComplexScalar) -> MellinResult<Scalar> {
         Ok(complex_magnitude(self.evaluate(s)?))

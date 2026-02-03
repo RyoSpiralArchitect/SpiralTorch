@@ -88,6 +88,33 @@
             </p>
           </fieldset>
 
+          <fieldset>
+            <legend>Learning (match reference)</legend>
+            <div class="inline">
+              <label>
+                init_noise
+                <input id="init-noise" name="init-noise" value="0.02" />
+              </label>
+              <label>
+                train_steps
+                <input id="train-steps" name="train-steps" type="number" min="1" value="40" />
+              </label>
+              <label>
+                train_lr
+                <input id="train-lr" name="train-lr" value="0.08" />
+              </label>
+            </div>
+            <p class="hint">
+              Creates a second (“learnable”) sample grid and takes gradient steps so its Mellin
+              transform matches the reference <code>exp(-x)</code> grid along the current vertical
+              evaluation line.
+            </p>
+            <div class="actions">
+              <button id="init" type="button">Init learnable grid</button>
+              <button id="train" type="button">Train</button>
+            </div>
+          </fieldset>
+
           <div class="actions">
             <button id="run" type="submit">Build + Evaluate</button>
           </div>
@@ -97,6 +124,7 @@
         <div class="meta">
           <div><span class="label">support</span> <code id="support">—</code></div>
           <div><span class="label">hilbert_norm</span> <code id="hilbert-norm">—</code></div>
+          <div><span class="label">train_loss</span> <code id="train-loss">—</code></div>
           <div><span class="label">timings</span> <code id="timings">—</code></div>
         </div>
       </section>

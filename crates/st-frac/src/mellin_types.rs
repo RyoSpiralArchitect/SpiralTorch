@@ -47,8 +47,14 @@ pub enum MellinError {
     NonFiniteSample { index: usize },
     #[error("rate must be positive and finite")]
     InvalidRate,
+    #[error("learning rate must be positive and finite")]
+    InvalidLearningRate,
     #[error("mellin lattices do not match")]
     LatticeMismatch,
+    #[error("sample length mismatch (expected={expected}, got={got})")]
+    SampleLengthMismatch { expected: usize, got: usize },
+    #[error("target length mismatch (expected={expected}, got={got})")]
+    TargetLengthMismatch { expected: usize, got: usize },
     #[error("hilbert inner product became negative: {value}")]
     NegativeInnerProduct { value: ComplexScalar },
     // New: explicit invalid z

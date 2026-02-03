@@ -223,6 +223,31 @@ declare module "spiraltorch-wasm" {
     export function fft_forward_in_place(buffer: Float32Array): void;
     export function fft_inverse_in_place(buffer: Float32Array): void;
 
+    export class WasmMellinEvalPlan {
+        private constructor();
+        static many(
+            log_start: number,
+            log_step: number,
+            sValues: Float32Array,
+        ): WasmMellinEvalPlan;
+        static verticalLine(
+            log_start: number,
+            log_step: number,
+            real: number,
+            imagValues: Float32Array,
+        ): WasmMellinEvalPlan;
+        static mesh(
+            log_start: number,
+            log_step: number,
+            realValues: Float32Array,
+            imagValues: Float32Array,
+        ): WasmMellinEvalPlan;
+        readonly logStart: number;
+        readonly logStep: number;
+        len(): number;
+        shape(): Uint32Array;
+    }
+
     export class WasmMellinLogGrid {
         constructor(log_start: number, log_step: number, samples: Float32Array);
         readonly logStart: number;
@@ -233,6 +258,17 @@ declare module "spiraltorch-wasm" {
         weights(): Float32Array;
         support(): Float32Array;
         weightedSeries(): Float32Array;
+        planMany(sValues: Float32Array): WasmMellinEvalPlan;
+        planVerticalLine(real: number, imagValues: Float32Array): WasmMellinEvalPlan;
+        planMesh(realValues: Float32Array, imagValues: Float32Array): WasmMellinEvalPlan;
+        evaluatePlan(plan: WasmMellinEvalPlan): Float32Array;
+        evaluatePlanMagnitude(plan: WasmMellinEvalPlan): Float32Array;
+        evaluatePlanLogMagnitude(plan: WasmMellinEvalPlan, epsilon: number): Float32Array;
+        trainStepMatchGridPlan(
+            plan: WasmMellinEvalPlan,
+            target: WasmMellinLogGrid,
+            lr: number,
+        ): number;
         evaluate(s: Float32Array): Float32Array;
         evaluateMany(sValues: Float32Array): Float32Array;
         evaluateVerticalLine(real: number, imagValues: Float32Array): Float32Array;

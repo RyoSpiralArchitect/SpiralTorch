@@ -1,4 +1,5 @@
 import init, {
+  WasmMellinEvalPlan,
   WasmMellinLogGrid,
   mellin_exp_decay_samples,
 } from "../pkg/spiraltorch_wasm.js";
@@ -7,14 +8,20 @@ const form = document.querySelector<HTMLFormElement>("#mellin-form")!;
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
 const supportEl = document.querySelector<HTMLElement>("#support")!;
 const hilbertEl = document.querySelector<HTMLElement>("#hilbert-norm")!;
+const trainLossEl = document.querySelector<HTMLElement>("#train-loss")!;
 const timingsEl = document.querySelector<HTMLElement>("#timings")!;
 const previewEl = document.querySelector<HTMLPreElement>("#preview")!;
 const canvas = document.querySelector<HTMLCanvasElement>("#plot")!;
 const ctx = canvas.getContext("2d")!;
 const heatmapCanvas = document.createElement("canvas");
 const heatmapCtx = heatmapCanvas.getContext("2d");
+const initButton = document.querySelector<HTMLButtonElement>("#init")!;
+const trainButton = document.querySelector<HTMLButtonElement>("#train")!;
 
 let ready = false;
+let targetGrid: WasmMellinLogGrid | null = null;
+let learnGrid: WasmMellinLogGrid | null = null;
+let gridKey = "";
 
 function setStatus(message: string, isError = false) {
   statusEl.textContent = message;
@@ -70,6 +77,36 @@ function buildVerticalLineS(real: number, imagMin: number, imagMax: number, coun
   return out;
 }
 
+function makeGridKey(logStart: number, logStep: number, len: number): string {
+  return `${logStart.toFixed(6)}|${logStep.toFixed(6)}|${len}`;
+}
+
+function ensureTargetGrid(logStart: number, logStep: number, len: number): WasmMellinLogGrid {
+  const key = makeGridKey(logStart, logStep, len);
+  if (!targetGrid || gridKey !== key) {
+    const samples = mellin_exp_decay_samples(logStart, logStep, len);
+    targetGrid = new WasmMellinLogGrid(logStart, logStep, samples);
+    learnGrid = null;
+    gridKey = key;
+    trainLossEl.textContent = "—";
+  }
+  return targetGrid;
+}
+
+function initLearnableGrid(logStart: number, logStep: number, len: number, noise: number): WasmMellinLogGrid {
+  const target = ensureTargetGrid(logStart, logStep, len);
+  const base = target.samples();
+  const out = new Float32Array(base);
+  const sigma = Number.isFinite(noise) ? noise : 0.02;
+  if (sigma > 0) {
+    for (let i = 0; i < out.length; i++) {
+      out[i] += (Math.random() * 2 - 1) * sigma;
+    }
+  }
+  learnGrid = new WasmMellinLogGrid(logStart, logStep, out);
+  return learnGrid;
+}
+
 function drawMagnitude(magnitudes: Float32Array) {
   const w = canvas.width;
   const h = canvas.height;
@@ -103,6 +140,50 @@ function drawMagnitude(magnitudes: Float32Array) {
   ctx.fillStyle = "rgba(210, 218, 255, 0.8)";
   ctx.font = "12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
   ctx.fillText(`max |M(s)| ≈ ${max.toExponential(3)}`, 10, 18);
+}
+
+function drawMagnitudeCompare(target: Float32Array, learned: Float32Array, loss: number) {
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  ctx.fillStyle = "rgba(4, 6, 14, 0.75)";
+  ctx.fillRect(0, 0, w, h);
+
+  const n = Math.min(target.length, learned.length);
+  if (n < 2) return;
+
+  let max = 0;
+  for (let i = 0; i < n; i++) {
+    const a = target[i];
+    const b = learned[i];
+    if (Number.isFinite(a) && a > max) max = a;
+    if (Number.isFinite(b) && b > max) max = b;
+  }
+  if (max <= 0) max = 1;
+
+  const drawLine = (values: Float32Array, style: string) => {
+    ctx.strokeStyle = style;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      const x = (i / (n - 1)) * (w - 16) + 8;
+      const v = Math.min(1, Math.max(0, values[i] / max));
+      const y = (1 - v) * (h - 24) + 16;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  };
+
+  drawLine(target, "rgba(120, 160, 255, 0.92)");
+  drawLine(learned, "rgba(255, 120, 220, 0.92)");
+
+  ctx.fillStyle = "rgba(210, 218, 255, 0.82)";
+  ctx.font = "12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+  const lossText = Number.isFinite(loss) ? loss.toExponential(3) : "—";
+  ctx.fillText(`target vs learned · loss=${lossText}`, 10, 16);
+  ctx.fillText(`max |M(s)| ≈ ${max.toExponential(3)}`, 10, 32);
 }
 
 function rampColor(t: number): [number, number, number] {
@@ -205,11 +286,24 @@ async function runOnce(ev?: Event) {
     const realMax = parseNumber("real-max", 3.2);
     const realCount = parseIntStrict("real-count", 256, 2);
 
+    const key = makeGridKey(logStart, logStep, len);
+    const reuse = targetGrid && gridKey === key;
     const t0 = performance.now();
-    const samples = mellin_exp_decay_samples(logStart, logStep, len);
-    const t1 = performance.now();
-    const grid = new WasmMellinLogGrid(logStart, logStep, samples);
-    const t2 = performance.now();
+    let t1 = t0;
+    let t2 = t0;
+    let grid: WasmMellinLogGrid;
+    if (reuse) {
+      grid = targetGrid!;
+    } else {
+      const samples = mellin_exp_decay_samples(logStart, logStep, len);
+      t1 = performance.now();
+      grid = new WasmMellinLogGrid(logStart, logStep, samples);
+      t2 = performance.now();
+      targetGrid = grid;
+      learnGrid = null;
+      gridKey = key;
+      trainLossEl.textContent = "—";
+    }
 
     const support = grid.support();
     supportEl.textContent = `[${support[0].toExponential(3)}, ${support[1].toExponential(3)}]`;
@@ -221,13 +315,15 @@ async function runOnce(ev?: Event) {
     if (mode === "mesh") {
       const realValues = linspace(realMin, realMax, realCount);
       const imagValues = linspace(imagMin, imagMax, imagCount);
-      const mags = grid.evaluateMeshMagnitude(realValues, imagValues);
+      const plan = grid.planMesh(realValues, imagValues);
+      const mags = grid.evaluatePlanMagnitude(plan);
       const t4 = performance.now();
 
       drawHeatmap(mags, realCount, imagCount);
-      timingsEl.textContent = `samples ${(t1 - t0).toFixed(1)}ms · grid ${(t2 - t1).toFixed(
-        1,
-      )}ms · mesh ${(t4 - t3).toFixed(1)}ms`;
+      const buildLabel = reuse
+        ? "cached"
+        : `samples ${(t1 - t0).toFixed(1)}ms · grid ${(t2 - t1).toFixed(1)}ms`;
+      timingsEl.textContent = `${buildLabel} · mesh ${(t4 - t3).toFixed(1)}ms`;
 
       const head = Math.min(6, imagCount);
       const rows: string[] = [];
@@ -236,7 +332,8 @@ async function runOnce(ev?: Event) {
         previewS[i * 2] = realValues[0];
         previewS[i * 2 + 1] = imagValues[i];
       }
-      const previewValues = grid.evaluateMany(previewS);
+      const previewPlan = grid.planMany(previewS);
+      const previewValues = grid.evaluatePlan(previewPlan);
       for (let i = 0; i < head; i++) {
         const re = previewValues[i * 2];
         const im = previewValues[i * 2 + 1];
@@ -249,18 +346,21 @@ async function runOnce(ev?: Event) {
       previewEl.textContent = rows.join("\n");
       setStatus(`OK (mesh ${realCount}×${imagCount})`);
     } else {
-      const sValues = buildVerticalLineS(real, imagMin, imagMax, imagCount);
-      const values = grid.evaluateMany(sValues);
+      const imagValues = linspace(imagMin, imagMax, imagCount);
+      const plan = grid.planVerticalLine(real, imagValues);
+      const values = grid.evaluatePlan(plan);
       const t4 = performance.now();
 
       const mags = interleavedToMagnitudes(values);
       drawMagnitude(mags);
-      timingsEl.textContent = `samples ${(t1 - t0).toFixed(1)}ms · grid ${(t2 - t1).toFixed(
-        1,
-      )}ms · eval ${(t4 - t3).toFixed(1)}ms`;
+      const buildLabel = reuse
+        ? "cached"
+        : `samples ${(t1 - t0).toFixed(1)}ms · grid ${(t2 - t1).toFixed(1)}ms`;
+      timingsEl.textContent = `${buildLabel} · eval ${(t4 - t3).toFixed(1)}ms`;
 
       const head = Math.min(6, imagCount);
       const rows: string[] = [];
+      const sValues = buildVerticalLineS(real, imagMin, imagMax, imagCount);
       for (let i = 0; i < head; i++) {
         const re = values[i * 2];
         const im = values[i * 2 + 1];
@@ -280,6 +380,84 @@ async function runOnce(ev?: Event) {
 }
 
 form.addEventListener("submit", runOnce);
+
+initButton.addEventListener("click", () => {
+  if (!ready) return;
+  try {
+    const logStart = parseNumber("log-start", -5.0);
+    const logStep = parseNumber("log-step", 0.01);
+    const len = parseIntStrict("len", 2048, 2);
+    const noise = parseNumber("init-noise", 0.02);
+    initLearnableGrid(logStart, logStep, len, noise);
+    trainLossEl.textContent = "—";
+    const mode = getValue("mode") || "vertical";
+    if (mode !== "vertical" || !targetGrid || !learnGrid) {
+      setStatus("Learnable grid initialised.");
+      void runOnce();
+      return;
+    }
+
+    const real = parseNumber("s-real", 2.5);
+    const imagMin = parseNumber("imag-min", -30);
+    const imagMax = parseNumber("imag-max", 30);
+    const imagCount = parseIntStrict("imag-count", 256, 2);
+    const imagValues = linspace(imagMin, imagMax, imagCount);
+    const plan: WasmMellinEvalPlan = targetGrid.planVerticalLine(real, imagValues);
+
+    const targetMags = targetGrid.evaluatePlanMagnitude(plan);
+    const learnedMags = learnGrid.evaluatePlanMagnitude(plan);
+    drawMagnitudeCompare(targetMags, learnedMags, Number.NaN);
+    timingsEl.textContent = `learnable init · noise=${noise.toExponential(2)} · n=${imagCount}`;
+    setStatus("OK (learnable grid initialised)");
+  } catch (err) {
+    setStatus((err as Error).message, true);
+  }
+});
+
+trainButton.addEventListener("click", () => {
+  if (!ready) return;
+  try {
+    const logStart = parseNumber("log-start", -5.0);
+    const logStep = parseNumber("log-step", 0.01);
+    const len = parseIntStrict("len", 2048, 2);
+    const noise = parseNumber("init-noise", 0.02);
+    const steps = parseIntStrict("train-steps", 40, 1);
+    const lr = parseNumber("train-lr", 0.08);
+
+    const target = ensureTargetGrid(logStart, logStep, len);
+    if (!learnGrid) {
+      initLearnableGrid(logStart, logStep, len, noise);
+    }
+    const learned = learnGrid!;
+
+    const real = parseNumber("s-real", 2.5);
+    const imagMin = parseNumber("imag-min", -30);
+    const imagMax = parseNumber("imag-max", 30);
+    const imagCount = parseIntStrict("imag-count", 256, 2);
+    const imagValues = linspace(imagMin, imagMax, imagCount);
+    const plan: WasmMellinEvalPlan = target.planVerticalLine(real, imagValues);
+
+    setStatus("Training…");
+    const t0 = performance.now();
+    let lastLoss = Number.NaN;
+    for (let i = 0; i < steps; i++) {
+      lastLoss = learned.trainStepMatchGridPlan(plan, target, lr);
+    }
+    const t1 = performance.now();
+
+    trainLossEl.textContent = Number.isFinite(lastLoss) ? lastLoss.toExponential(6) : "—";
+
+    const targetMags = target.evaluatePlanMagnitude(plan);
+    const learnedMags = learned.evaluatePlanMagnitude(plan);
+    drawMagnitudeCompare(targetMags, learnedMags, lastLoss);
+
+    timingsEl.textContent = `train ${(t1 - t0).toFixed(1)}ms · steps=${steps} · lr=${lr.toExponential(2)}`;
+    setStatus("OK (trained)");
+  } catch (err) {
+    setStatus((err as Error).message, true);
+    console.error(err);
+  }
+});
 
 initWasm()
   .then(() => {
