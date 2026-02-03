@@ -1205,6 +1205,8 @@ pub struct RegionReportBundle {
 /// - `SPIRAL_SOFTLOGIC_REGION_FACTOR_GAIN`
 /// - `SPIRAL_SOFTLOGIC_ENERGY_EQUALIZE_GAIN`
 /// - `SPIRAL_SOFTLOGIC_MEAN_NORMALIZE_GAIN`
+/// - `SPIRAL_SOFTLOGIC_ENERGY_EQUALIZE_AUTO`
+/// - `SPIRAL_SOFTLOGIC_MEAN_NORMALIZE_AUTO`
 #[derive(Debug, Clone, Copy)]
 pub struct SoftLogicConfig {
     pub inertia: f32,
@@ -1220,6 +1222,8 @@ pub struct SoftLogicConfig {
     pub region_factor_gain: f32,
     pub energy_equalize_gain: f32,
     pub mean_normalize_gain: f32,
+    pub energy_equalize_auto: f32,
+    pub mean_normalize_auto: f32,
 }
 
 impl Default for SoftLogicConfig {
@@ -1238,6 +1242,8 @@ impl Default for SoftLogicConfig {
             region_factor_gain: 0.35,
             energy_equalize_gain: 0.0,
             mean_normalize_gain: 0.0,
+            energy_equalize_auto: 0.0,
+            mean_normalize_auto: 0.0,
         }
     }
 }
@@ -1283,6 +1289,12 @@ impl SoftLogicConfig {
         if !self.mean_normalize_gain.is_finite() {
             self.mean_normalize_gain = 0.0;
         }
+        if !self.energy_equalize_auto.is_finite() {
+            self.energy_equalize_auto = 0.0;
+        }
+        if !self.mean_normalize_auto.is_finite() {
+            self.mean_normalize_auto = 0.0;
+        }
 
         self.inertia = self.inertia.clamp(0.0, 0.95);
         self.inertia_min = self.inertia_min.clamp(0.0, 0.95).min(self.inertia);
@@ -1297,6 +1309,8 @@ impl SoftLogicConfig {
         self.region_factor_gain = self.region_factor_gain.clamp(0.0, 2.0);
         self.energy_equalize_gain = self.energy_equalize_gain.clamp(0.0, 1.0);
         self.mean_normalize_gain = self.mean_normalize_gain.clamp(0.0, 1.0);
+        self.energy_equalize_auto = self.energy_equalize_auto.clamp(0.0, 1.0);
+        self.mean_normalize_auto = self.mean_normalize_auto.clamp(0.0, 1.0);
     }
 
     /// Applies environment overrides to the configuration in-place.
@@ -1366,6 +1380,16 @@ impl SoftLogicConfig {
                 self.mean_normalize_gain = parsed;
             }
         }
+        if let Ok(value) = env::var("SPIRAL_SOFTLOGIC_ENERGY_EQUALIZE_AUTO") {
+            if let Ok(parsed) = value.parse::<f32>() {
+                self.energy_equalize_auto = parsed;
+            }
+        }
+        if let Ok(value) = env::var("SPIRAL_SOFTLOGIC_MEAN_NORMALIZE_AUTO") {
+            if let Ok(parsed) = value.parse::<f32>() {
+                self.mean_normalize_auto = parsed;
+            }
+        }
 
         self.clamp_inplace();
     }
@@ -1375,6 +1399,18 @@ impl SoftLogicConfig {
         self.apply_env_overrides();
         self
     }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct SoftLogicAdaptiveMetrics {
+    energy_equalize_gain_eff: f32,
+    energy_equalize_strength: f32,
+    energy_equalize_over: f32,
+    energy_equalize_state: f32,
+    mean_normalize_gain_eff: f32,
+    mean_normalize_need: f32,
+    mean_normalize_state: f32,
+    mean_target: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -1387,6 +1423,13 @@ struct SoftLogicFlex {
     last_region: Option<ZSpaceRegionDescriptor>,
     last_region_factor: f32,
     last_region_scale: (f32, f32, f32),
+    equalize_state: f32,
+    mean_normalize_state: f32,
+    adaptive_metrics: SoftLogicAdaptiveMetrics,
+    pending_events: Vec<String>,
+    equalize_guard_on: bool,
+    equalize_clamp_on: bool,
+    normalize_on: bool,
 }
 
 impl SoftLogicFlex {
@@ -1405,6 +1448,13 @@ impl SoftLogicFlex {
             last_region: None,
             last_region_factor: 1.0,
             last_region_scale: (1.0, 1.0, 1.0),
+            equalize_state: 1.0,
+            mean_normalize_state: 1.0,
+            adaptive_metrics: SoftLogicAdaptiveMetrics::default(),
+            pending_events: Vec::new(),
+            equalize_guard_on: false,
+            equalize_clamp_on: false,
+            normalize_on: false,
         };
         flex.last_inertia = flex.config.inertia;
         flex
@@ -1418,6 +1468,17 @@ impl SoftLogicFlex {
         config.clamp_inplace();
         self.config = config;
         self.last_inertia = self.config.inertia;
+        self.equalize_state = 1.0;
+        self.mean_normalize_state = 1.0;
+        self.adaptive_metrics = SoftLogicAdaptiveMetrics::default();
+        self.pending_events.clear();
+        self.equalize_guard_on = false;
+        self.equalize_clamp_on = false;
+        self.normalize_on = false;
+    }
+
+    fn adaptive_metrics(&self) -> SoftLogicAdaptiveMetrics {
+        self.adaptive_metrics
     }
 
     fn record_region_feedback(&mut self, descriptor: ZSpaceRegionDescriptor, factor: f32) {
@@ -1504,6 +1565,7 @@ impl SoftLogicFlex {
 
     fn prepare_weights(&mut self, band_energy: &BandEnergy) -> (f32, f32, f32) {
         let inertia = self.effective_inertia(band_energy);
+        self.adaptive_metrics = SoftLogicAdaptiveMetrics::default();
         let above_abs = band_energy.above.abs();
         let here_abs = band_energy.here.abs();
         let beneath_abs = band_energy.beneath.abs();
@@ -1551,10 +1613,62 @@ impl SoftLogicFlex {
             let ph = (here_abs / norm).max(eps);
             let pb = (beneath_abs / norm).max(eps);
             let ratio_max = 9.0;
-            let ra = (target_share / pa).clamp(1.0 / ratio_max, ratio_max);
-            let rh = (target_share / ph).clamp(1.0 / ratio_max, ratio_max);
-            let rb = (target_share / pb).clamp(1.0 / ratio_max, ratio_max);
-            let gain = self.config.energy_equalize_gain.clamp(0.0, 1.0);
+            let ra_raw = target_share / pa;
+            let rh_raw = target_share / ph;
+            let rb_raw = target_share / pb;
+            let ra = ra_raw.clamp(1.0 / ratio_max, ratio_max);
+            let rh = rh_raw.clamp(1.0 / ratio_max, ratio_max);
+            let rb = rb_raw.clamp(1.0 / ratio_max, ratio_max);
+            let raw_max = ra_raw.max(rh_raw).max(rb_raw);
+            let ln_ratio_max = ratio_max.ln().max(1e-4);
+            let strength = if raw_max.is_finite() && raw_max > 0.0 {
+                (raw_max.ln() / ln_ratio_max).clamp(0.0, 2.0)
+            } else if raw_max.is_sign_positive() && raw_max.is_infinite() {
+                2.0
+            } else {
+                0.0
+            };
+            let strength_clamped = strength.clamp(0.0, 1.0);
+            let over = ((strength_clamped - 0.85) / 0.15).clamp(0.0, 1.0);
+            let desired_guard = (1.0 - 0.75 * over).clamp(0.05, 1.0);
+
+            let gain_base = self.config.energy_equalize_gain.clamp(0.0, 1.0);
+            let auto = self.config.energy_equalize_auto.clamp(0.0, 1.0);
+            let gain = if auto > 0.0 {
+                let update = (auto * (1.0 - inertia)).clamp(0.0, 1.0);
+                self.equalize_state = Self::lerp(self.equalize_state, desired_guard, update)
+                    .clamp(0.0, 1.0);
+                let guard_on = desired_guard < 0.999;
+                let clamp_on = ra_raw > ratio_max || rh_raw > ratio_max || rb_raw > ratio_max;
+                if guard_on != self.equalize_guard_on {
+                    self.pending_events.push(if guard_on {
+                        "equalize.guard.on".to_string()
+                    } else {
+                        "equalize.guard.off".to_string()
+                    });
+                    self.equalize_guard_on = guard_on;
+                }
+                if clamp_on != self.equalize_clamp_on {
+                    self.pending_events.push(if clamp_on {
+                        "equalize.clamp.on".to_string()
+                    } else {
+                        "equalize.clamp.off".to_string()
+                    });
+                    self.equalize_clamp_on = clamp_on;
+                }
+                gain_base * self.equalize_state
+            } else {
+                self.equalize_state = 1.0;
+                self.equalize_guard_on = false;
+                self.equalize_clamp_on = false;
+                gain_base
+            };
+
+            self.adaptive_metrics.energy_equalize_gain_eff = gain;
+            self.adaptive_metrics.energy_equalize_strength = strength_clamped;
+            self.adaptive_metrics.energy_equalize_over = over;
+            self.adaptive_metrics.energy_equalize_state = self.equalize_state;
+
             target_above *= ra.powf(gain);
             target_here *= rh.powf(gain);
             target_beneath *= rb.powf(gain);
@@ -1569,12 +1683,39 @@ impl SoftLogicFlex {
         if self.config.mean_normalize_gain > 0.0 {
             let mean = (target.0 + target.1 + target.2) / 3.0;
             if mean.is_finite() && mean > 0.0 {
-                let gain = self.config.mean_normalize_gain.clamp(0.0, 1.0);
+                self.adaptive_metrics.mean_target = mean;
+                let gain_base = self.config.mean_normalize_gain.clamp(0.0, 1.0);
+                let auto = self.config.mean_normalize_auto.clamp(0.0, 1.0);
+                let mean_dev = mean.ln().abs();
+                let need = (mean_dev / 0.4).clamp(0.0, 1.0);
+                let gain = if auto > 0.0 {
+                    let update = (auto * (1.0 - inertia)).clamp(0.0, 1.0);
+                    self.mean_normalize_state =
+                        Self::lerp(self.mean_normalize_state, need, update).clamp(0.0, 1.0);
+                    let normalize_on = need > 0.25;
+                    if normalize_on != self.normalize_on {
+                        self.pending_events.push(if normalize_on {
+                            "normalize.on".to_string()
+                        } else {
+                            "normalize.off".to_string()
+                        });
+                        self.normalize_on = normalize_on;
+                    }
+                    gain_base * self.mean_normalize_state
+                } else {
+                    self.mean_normalize_state = 1.0;
+                    self.normalize_on = false;
+                    gain_base
+                };
                 let norm_factor = 1.0 / mean;
                 let blend = (1.0 - gain) + gain * norm_factor;
                 target.0 = (target.0 * blend).clamp(self.config.floor, 3.0);
                 target.1 = (target.1 * blend).clamp(self.config.floor, 2.5);
                 target.2 = (target.2 * blend).clamp(self.config.floor, 3.0);
+
+                self.adaptive_metrics.mean_normalize_gain_eff = gain;
+                self.adaptive_metrics.mean_normalize_need = need;
+                self.adaptive_metrics.mean_normalize_state = self.mean_normalize_state;
             }
         }
         self.last_weights = (
@@ -1607,7 +1748,7 @@ impl SoftLogicFlex {
             drift,
             z_signal: self.last_z,
             scale: scale_hint,
-            events: Vec::new(),
+            events: std::mem::take(&mut self.pending_events),
             attributions: Vec::new(),
             elliptic: None,
         };
@@ -3323,6 +3464,56 @@ impl ModuleTrainer {
             extra.insert(
                 "softlogic_region_scale_beneath".to_string(),
                 region_scale.2 as f64,
+            );
+            let softlogic_config = self.softlogic.config();
+            let softlogic_metrics = self.softlogic.adaptive_metrics();
+            extra.insert(
+                "softlogic_energy_equalize_gain".to_string(),
+                softlogic_config.energy_equalize_gain as f64,
+            );
+            extra.insert(
+                "softlogic_energy_equalize_auto".to_string(),
+                softlogic_config.energy_equalize_auto as f64,
+            );
+            extra.insert(
+                "softlogic_energy_equalize_gain_eff".to_string(),
+                softlogic_metrics.energy_equalize_gain_eff as f64,
+            );
+            extra.insert(
+                "softlogic_energy_equalize_strength".to_string(),
+                softlogic_metrics.energy_equalize_strength as f64,
+            );
+            extra.insert(
+                "softlogic_energy_equalize_over".to_string(),
+                softlogic_metrics.energy_equalize_over as f64,
+            );
+            extra.insert(
+                "softlogic_energy_equalize_state".to_string(),
+                softlogic_metrics.energy_equalize_state as f64,
+            );
+            extra.insert(
+                "softlogic_mean_normalize_gain".to_string(),
+                softlogic_config.mean_normalize_gain as f64,
+            );
+            extra.insert(
+                "softlogic_mean_normalize_auto".to_string(),
+                softlogic_config.mean_normalize_auto as f64,
+            );
+            extra.insert(
+                "softlogic_mean_normalize_gain_eff".to_string(),
+                softlogic_metrics.mean_normalize_gain_eff as f64,
+            );
+            extra.insert(
+                "softlogic_mean_normalize_need".to_string(),
+                softlogic_metrics.mean_normalize_need as f64,
+            );
+            extra.insert(
+                "softlogic_mean_normalize_state".to_string(),
+                softlogic_metrics.mean_normalize_state as f64,
+            );
+            extra.insert(
+                "softlogic_mean_target".to_string(),
+                softlogic_metrics.mean_target as f64,
             );
             if let Some(label) = spectral_label_code {
                 extra.insert("spectral_label".to_string(), label);

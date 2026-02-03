@@ -3116,6 +3116,8 @@ class _NnSoftLogicConfig:
         region_factor_gain: float = ...,
         energy_equalize_gain: float = ...,
         mean_normalize_gain: float = ...,
+        energy_equalize_auto: float = ...,
+        mean_normalize_auto: float = ...,
     ) -> None: ...
 
     @staticmethod
@@ -3159,6 +3161,12 @@ class _NnSoftLogicConfig:
 
     @property
     def mean_normalize_gain(self) -> float: ...
+
+    @property
+    def energy_equalize_auto(self) -> float: ...
+
+    @property
+    def mean_normalize_auto(self) -> float: ...
 
 
 class _NnRoundtableSchedule:

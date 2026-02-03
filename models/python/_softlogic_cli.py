@@ -19,6 +19,8 @@ _SOFTLOGIC_FIELDS: tuple[str, ...] = (
     "region_factor_gain",
     "energy_equalize_gain",
     "mean_normalize_gain",
+    "energy_equalize_auto",
+    "mean_normalize_auto",
 )
 
 _SOFTLOGIC_FLAG_TO_FIELD: dict[str, str] = {
@@ -35,6 +37,8 @@ _SOFTLOGIC_FLAG_TO_FIELD: dict[str, str] = {
     "--softlogic-region-factor-gain": "region_factor_gain",
     "--softlogic-energy-equalize-gain": "energy_equalize_gain",
     "--softlogic-mean-normalize-gain": "mean_normalize_gain",
+    "--softlogic-energy-equalize-auto": "energy_equalize_auto",
+    "--softlogic-mean-normalize-auto": "mean_normalize_auto",
 }
 
 _SOFTLOGIC_ENV_VARS: tuple[str, ...] = (
@@ -51,6 +55,8 @@ _SOFTLOGIC_ENV_VARS: tuple[str, ...] = (
     "SPIRAL_SOFTLOGIC_REGION_FACTOR_GAIN",
     "SPIRAL_SOFTLOGIC_ENERGY_EQUALIZE_GAIN",
     "SPIRAL_SOFTLOGIC_MEAN_NORMALIZE_GAIN",
+    "SPIRAL_SOFTLOGIC_ENERGY_EQUALIZE_AUTO",
+    "SPIRAL_SOFTLOGIC_MEAN_NORMALIZE_AUTO",
 )
 
 
@@ -62,6 +68,7 @@ def usage_flags() -> str:
         "[--softlogic-floor F] [--softlogic-scale-gain F] [--softlogic-region-gain F] "
         "[--softlogic-region-factor-gain F] [--softlogic-reset]"
         " [--softlogic-energy-equalize-gain F] [--softlogic-mean-normalize-gain F]"
+        " [--softlogic-energy-equalize-auto F] [--softlogic-mean-normalize-auto F]"
     )
 
 

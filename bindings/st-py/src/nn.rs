@@ -2873,7 +2873,7 @@ pub(crate) struct PySoftLogicConfig {
 #[pymethods]
 impl PySoftLogicConfig {
     #[new]
-    #[pyo3(signature = (*, inertia=0.65, inertia_min=0.15, inertia_drift_k=0.6, inertia_z_k=0.2, drift_gain=0.25, psi_gain=0.5, loss_gain=0.35, floor=0.25, scale_gain=0.2, region_gain=0.15, region_factor_gain=0.35, energy_equalize_gain=0.0, mean_normalize_gain=0.0))]
+    #[pyo3(signature = (*, inertia=0.65, inertia_min=0.15, inertia_drift_k=0.6, inertia_z_k=0.2, drift_gain=0.25, psi_gain=0.5, loss_gain=0.35, floor=0.25, scale_gain=0.2, region_gain=0.15, region_factor_gain=0.35, energy_equalize_gain=0.0, mean_normalize_gain=0.0, energy_equalize_auto=0.0, mean_normalize_auto=0.0))]
     pub fn new(
         inertia: f32,
         inertia_min: f32,
@@ -2888,6 +2888,8 @@ impl PySoftLogicConfig {
         region_factor_gain: f32,
         energy_equalize_gain: f32,
         mean_normalize_gain: f32,
+        energy_equalize_auto: f32,
+        mean_normalize_auto: f32,
     ) -> PyResult<Self> {
         let mut config = RustSoftLogicConfig {
             inertia,
@@ -2903,6 +2905,8 @@ impl PySoftLogicConfig {
             region_factor_gain,
             energy_equalize_gain,
             mean_normalize_gain,
+            energy_equalize_auto,
+            mean_normalize_auto,
         };
         config.clamp_inplace();
         Ok(Self { inner: config })
@@ -2980,9 +2984,19 @@ impl PySoftLogicConfig {
         self.inner.mean_normalize_gain
     }
 
+    #[getter]
+    pub fn energy_equalize_auto(&self) -> f32 {
+        self.inner.energy_equalize_auto
+    }
+
+    #[getter]
+    pub fn mean_normalize_auto(&self) -> f32 {
+        self.inner.mean_normalize_auto
+    }
+
     fn __repr__(&self) -> String {
         format!(
-            "SoftLogicConfig(inertia={}, inertia_min={}, inertia_drift_k={}, inertia_z_k={}, drift_gain={}, psi_gain={}, loss_gain={}, floor={}, scale_gain={}, region_gain={}, region_factor_gain={}, energy_equalize_gain={}, mean_normalize_gain={})",
+            "SoftLogicConfig(inertia={}, inertia_min={}, inertia_drift_k={}, inertia_z_k={}, drift_gain={}, psi_gain={}, loss_gain={}, floor={}, scale_gain={}, region_gain={}, region_factor_gain={}, energy_equalize_gain={}, mean_normalize_gain={}, energy_equalize_auto={}, mean_normalize_auto={})",
             self.inner.inertia,
             self.inner.inertia_min,
             self.inner.inertia_drift_k,
@@ -2996,6 +3010,8 @@ impl PySoftLogicConfig {
             self.inner.region_factor_gain,
             self.inner.energy_equalize_gain,
             self.inner.mean_normalize_gain,
+            self.inner.energy_equalize_auto,
+            self.inner.mean_normalize_auto,
         )
     }
 }
