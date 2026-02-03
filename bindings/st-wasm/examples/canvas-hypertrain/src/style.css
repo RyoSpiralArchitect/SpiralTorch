@@ -141,6 +141,12 @@ button:active {
   color: rgba(214, 221, 255, 0.86);
 }
 
+.hint {
+  margin: 0.65rem 0 0;
+  color: rgba(210, 218, 255, 0.72);
+  font-size: 0.88rem;
+}
+
 .meta {
   margin-top: 1rem;
   display: grid;

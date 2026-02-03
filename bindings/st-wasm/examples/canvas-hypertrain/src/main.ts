@@ -1,11 +1,13 @@
 import init, { FractalCanvas, available_palettes } from "../pkg/spiraltorch_wasm.js";
 
 type Mode = "hyper" | "real" | "webgpu-hyperop";
+type Objective = "grad-rms" | "target-mse";
 type TrailRendererMode = "2d" | "webgpu";
 
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
 const stepEl = document.querySelector<HTMLElement>("#train-step")!;
 const lossEl = document.querySelector<HTMLElement>("#loss")!;
+const targetEl = document.querySelector<HTMLElement>("#target")!;
 const gradEl = document.querySelector<HTMLElement>("#grad")!;
 const desireEl = document.querySelector<HTMLElement>("#desire")!;
 const lrEl = document.querySelector<HTMLElement>("#lr-effective")!;
@@ -13,6 +15,7 @@ const timingEl = document.querySelector<HTMLElement>("#timing")!;
 
 const paletteSelect = document.querySelector<HTMLSelectElement>("#palette")!;
 const modeSelect = document.querySelector<HTMLSelectElement>("#mode")!;
+const objectiveSelect = document.querySelector<HTMLSelectElement>("#objective")!;
 
 const runToggle = document.querySelector<HTMLInputElement>("#run")!;
 const useDesireToggle = document.querySelector<HTMLInputElement>("#use-desire")!;
@@ -22,6 +25,8 @@ const seedButton = document.querySelector<HTMLButtonElement>("#seed")!;
 const stepButton = document.querySelector<HTMLButtonElement>("#step")!;
 const resetNormButton = document.querySelector<HTMLButtonElement>("#reset-norm")!;
 const resetMetricsButton = document.querySelector<HTMLButtonElement>("#reset-metrics")!;
+const captureTargetButton = document.querySelector<HTMLButtonElement>("#capture-target")!;
+const clearTargetButton = document.querySelector<HTMLButtonElement>("#clear-target")!;
 const fftRunButton = document.querySelector<HTMLButtonElement>("#fft-run")!;
 
 const trailRendererSelect = document.querySelector<HTMLSelectElement>("#trail-renderer")!;
@@ -49,10 +54,13 @@ let gpuFft: WebGpuFftRow | null = null;
 let gpuTrainer: WebGpuHyperTrainer | null = null;
 let stepInFlight: Promise<void> | null = null;
 let lastFftAt = 0;
+let targetRelation: Float32Array | null = null;
+let targetDims: { width: number; height: number } | null = null;
 
 type TrainingMetric = {
   step: number;
   mode: Mode;
+  objective: Objective;
   lr: number;
   lrScale: number;
   hyperRms: number;
@@ -71,6 +79,11 @@ let metricsDirty = false;
 function setStatus(message: string, isError = false) {
   statusEl.textContent = message;
   statusEl.style.color = isError ? "#ff9a9a" : "";
+}
+
+function getObjective(): Objective {
+  const raw = objectiveSelect.value;
+  return raw === "target-mse" ? "target-mse" : "grad-rms";
 }
 
 function getValue(id: string): string {
@@ -100,20 +113,45 @@ function clampFinite(value: number): number {
   return Number.isFinite(value) ? value : 0;
 }
 
-function metricLoss(packet: any, mode: Mode): number {
-  if (mode === "real") return clampFinite(packet.realgradRms);
-  return clampFinite(packet.hypergradRms);
+function updateTargetLabel() {
+  if (!targetRelation || !targetDims) {
+    targetEl.textContent = "—";
+    return;
+  }
+  targetEl.textContent = `set (${targetDims.width}×${targetDims.height})`;
 }
 
-function recordMetrics(packet: any, mode: Mode, lr: number, lrScale: number) {
+function clearTarget() {
+  targetRelation = null;
+  targetDims = null;
+  updateTargetLabel();
+}
+
+function captureTarget() {
+  if (!canvas) return;
+  const relation = canvas.relation();
+  targetRelation = new Float32Array(relation);
+  targetDims = { width: canvas.width, height: canvas.height };
+  updateTargetLabel();
+}
+
+function recordMetrics(
+  packet: any,
+  mode: Mode,
+  objective: Objective,
+  loss: number,
+  lr: number,
+  lrScale: number,
+) {
   const metric: TrainingMetric = {
     step: trainStep,
     mode,
+    objective,
     lr: clampFinite(lr),
     lrScale: clampFinite(lrScale),
     hyperRms: clampFinite(packet.hypergradRms),
     realRms: clampFinite(packet.realgradRms),
-    loss: metricLoss(packet, mode),
+    loss: clampFinite(loss),
     balance: clampFinite(packet.balance),
     stability: clampFinite(packet.stability),
     saturation: clampFinite(packet.saturation),
@@ -126,7 +164,7 @@ function recordMetrics(packet: any, mode: Mode, lr: number, lrScale: number) {
   metricsDirty = true;
 
   stepEl.textContent = `${trainStep}`;
-  lossEl.textContent = `${metric.loss.toExponential(3)} (${mode})`;
+  lossEl.textContent = `${metric.loss.toExponential(3)} (${objective} · ${mode})`;
 }
 
 function resetMetrics() {
@@ -235,6 +273,11 @@ function rebuildCanvas() {
   applyPalette(paletteSelect.value || "blue-magenta");
   seedRelation();
 
+  if (targetRelation && targetRelation.length !== width * height) {
+    clearTarget();
+  }
+  updateTargetLabel();
+
   if (gpuTrail) {
     gpuTrail.resize(width, height);
   }
@@ -290,32 +333,70 @@ function stepOnceCpu(curvature: number) {
   const baseLr = parseNumber("lr", 0.02);
   const useDesire = useDesireToggle.checked;
   const mode = getMode();
+  const objective = getObjective();
 
   const t0 = performance.now();
   const packet = canvas.framePacket(curvature);
   const t1 = performance.now();
 
   const rel = packet.relation;
-  const grad =
-    mode === "hyper"
-      ? canvas.hypergradWaveCurrent(curvature)
-      : (canvas.realgradWaveCurrent() as Float32Array);
-  const t2 = performance.now();
 
   const lrScale =
-    mode === "hyper" ? packet.hyperLearningRateScale : packet.realLearningRateScale;
+    mode === "real" ? packet.realLearningRateScale : packet.hyperLearningRateScale;
   const lr = useDesire ? baseLr * lrScale : baseLr;
 
+  let loss = Number.NaN;
+  let gradLabel = "";
+  let stepLabel = "grad";
+  let t2 = t1;
+
   const next = new Float32Array(rel.length);
-  for (let i = 0; i < rel.length; i++) {
-    next[i] = clampFinite(rel[i] - lr * grad[i]);
+  if (objective === "target-mse") {
+    if (!targetRelation || targetRelation.length !== rel.length) {
+      runToggle.checked = false;
+      setStatus("target-mse requires a captured target (same canvas size).", true);
+      return;
+    }
+    stepLabel = "loss";
+    const invN = rel.length > 0 ? 1.0 / rel.length : 0;
+    const scale = 2.0 * invN;
+    let lossAcc = 0;
+    let gradAcc = 0;
+    for (let i = 0; i < rel.length; i++) {
+      const diff = rel[i] - targetRelation[i];
+      lossAcc += diff * diff;
+      const g = scale * diff;
+      gradAcc += g * g;
+      next[i] = clampFinite(rel[i] - lr * g);
+    }
+    loss = lossAcc * invN;
+    const gradRms = Math.sqrt(gradAcc * invN);
+    gradLabel = `mse_grad_rms=${gradRms.toExponential(3)}`;
+    t2 = performance.now();
+  } else {
+    const grad =
+      mode === "hyper"
+        ? canvas.hypergradWaveCurrent(curvature)
+        : (canvas.realgradWaveCurrent() as Float32Array);
+    t2 = performance.now();
+    for (let i = 0; i < rel.length; i++) {
+      next[i] = clampFinite(rel[i] - lr * grad[i]);
+    }
+    loss = mode === "real" ? packet.realgradRms : packet.hypergradRms;
+    gradLabel = `hyper_rms=${packet.hypergradRms.toExponential(3)} real_rms=${packet.realgradRms.toExponential(
+      3,
+    )} (n=${packet.hypergradCount})`;
   }
   canvas.push_patch(next, coherence, tension, depth);
   const t3 = performance.now();
 
-  gradEl.textContent = `hyper_rms=${packet.hypergradRms.toExponential(3)} real_rms=${packet.realgradRms.toExponential(
-    3,
-  )} (n=${packet.hypergradCount})`;
+  if (objective === "target-mse") {
+    gradEl.textContent = `${gradLabel} | hyper_rms=${packet.hypergradRms.toExponential(
+      3,
+    )} real_rms=${packet.realgradRms.toExponential(3)}`;
+  } else {
+    gradEl.textContent = gradLabel;
+  }
   desireEl.textContent = `balance=${packet.balance.toFixed(3)} stability=${packet.stability.toFixed(
     3,
   )} saturation=${packet.saturation.toFixed(3)}`;
@@ -323,15 +404,20 @@ function stepOnceCpu(curvature: number) {
     2,
   )}`;
 
-  timingEl.textContent = `frame ${(t1 - t0).toFixed(2)}ms · grad ${(t2 - t1).toFixed(
+  timingEl.textContent = `frame ${(t1 - t0).toFixed(2)}ms · ${stepLabel} ${(t2 - t1).toFixed(
     2,
   )}ms · push ${(t3 - t2).toFixed(2)}ms`;
 
-  recordMetrics(packet, mode, lr, lrScale);
+  recordMetrics(packet, mode, objective, loss, lr, lrScale);
 }
 
 async function stepOnceWebGpu(curvature: number) {
   if (!canvas) return;
+  const objective = getObjective();
+  if (objective !== "grad-rms") {
+    stepOnceCpu(curvature);
+    return;
+  }
   await ensureGpuDevice();
   if (!gpuDevice) {
     setStatus("WebGPU not available (trainer).", true);
@@ -378,7 +464,7 @@ async function stepOnceWebGpu(curvature: number) {
     2,
   )}ms · push ${(t3 - t2).toFixed(2)}ms`;
 
-  recordMetrics(packet, "webgpu-hyperop", lr, lrScale);
+  recordMetrics(packet, "webgpu-hyperop", objective, packet.hypergradRms, lr, lrScale);
 }
 
 function drawMetrics() {
@@ -399,6 +485,7 @@ function drawMetrics() {
   for (const m of metricsHistory) {
     if (m.hyperRms > max) max = m.hyperRms;
     if (m.realRms > max) max = m.realRms;
+    if (m.loss > max) max = m.loss;
   }
   if (max <= 0) max = 1;
   const denom = Math.log1p(max);
@@ -428,6 +515,7 @@ function drawMetrics() {
     metricsCtx.stroke();
   };
 
+  drawLine((m) => m.loss, "rgba(140, 255, 185, 0.9)");
   drawLine((m) => m.hyperRms, "rgba(120, 160, 255, 0.95)");
   drawLine((m) => m.realRms, "rgba(255, 140, 210, 0.75)");
 
@@ -435,9 +523,9 @@ function drawMetrics() {
   metricsCtx.fillStyle = "rgba(210, 218, 255, 0.82)";
   metricsCtx.font = "12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
   metricsCtx.fillText(
-    `grad rms (log1p): hyper ${last.hyperRms.toExponential(3)} · real ${last.realRms.toExponential(
+    `loss ${last.loss.toExponential(3)} (${last.objective}) · hyper ${last.hyperRms.toExponential(
       3,
-    )} (max ${max.toExponential(3)})`,
+    )} · real ${last.realRms.toExponential(3)} (max ${max.toExponential(3)})`,
     10,
     18,
   );
@@ -509,9 +597,10 @@ function frame() {
   const steps = parseIntStrict("steps", 2, 1);
   const shouldRun = runToggle.checked;
   const mode = getMode();
+  const objective = getObjective();
 
   if (shouldRun) {
-    if (mode === "webgpu-hyperop") {
+    if (mode === "webgpu-hyperop" && objective === "grad-rms") {
       if (!stepInFlight) {
         stepInFlight = stepOnceWebGpu(curvature).finally(() => {
           stepInFlight = null;
@@ -598,7 +687,8 @@ stepButton.addEventListener("click", () => {
   if (!ready || !canvas) return;
   const curvature = parseNumber("curvature", -1.0);
   const mode = getMode();
-  if (mode === "webgpu-hyperop") {
+  const objective = getObjective();
+  if (mode === "webgpu-hyperop" && objective === "grad-rms") {
     void (async () => {
       try {
         await ensureGpuDevice();
@@ -624,6 +714,22 @@ resetNormButton.addEventListener("click", () => {
 resetMetricsButton.addEventListener("click", () => {
   if (!ready) return;
   resetMetrics();
+});
+
+captureTargetButton.addEventListener("click", () => {
+  if (!ready || !canvas) return;
+  try {
+    captureTarget();
+    setStatus("Captured target relation.");
+  } catch (err) {
+    setStatus((err as Error).message, true);
+  }
+});
+
+clearTargetButton.addEventListener("click", () => {
+  if (!ready) return;
+  clearTarget();
+  setStatus("Cleared target.");
 });
 
 paletteSelect.addEventListener("change", () => applyPalette(paletteSelect.value));

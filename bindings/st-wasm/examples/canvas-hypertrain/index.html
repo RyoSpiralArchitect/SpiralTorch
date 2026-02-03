@@ -102,6 +102,28 @@
           </fieldset>
 
           <fieldset>
+            <legend>Objective</legend>
+            <div class="inline">
+              <label>
+                loss
+                <select id="objective" name="objective">
+                  <option value="grad-rms" selected>grad rms (internal)</option>
+                  <option value="target-mse">target mse (supervised)</option>
+                </select>
+              </label>
+            </div>
+            <div class="actions">
+              <button id="capture-target" type="button">Capture target</button>
+              <button id="clear-target" type="button">Clear target</button>
+            </div>
+            <p class="hint">
+              When using <code>target mse</code>, the trainer ignores <code>hypergradWave</code> and
+              performs direct gradient descent on the relation buffer to match the captured target
+              relation.
+            </p>
+          </fieldset>
+
+          <fieldset>
             <legend>WebGPU</legend>
             <div class="inline">
               <label>
@@ -148,6 +170,7 @@
         <div class="meta">
           <div><span class="label">step</span> <code id="train-step">—</code></div>
           <div><span class="label">loss</span> <code id="loss">—</code></div>
+          <div><span class="label">target</span> <code id="target">—</code></div>
           <div><span class="label">grad</span> <code id="grad">—</code></div>
           <div><span class="label">desire</span> <code id="desire">—</code></div>
           <div><span class="label">lr</span> <code id="lr-effective">—</code></div>

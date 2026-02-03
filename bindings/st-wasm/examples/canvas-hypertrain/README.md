@@ -5,6 +5,7 @@ This example demonstrates running a tiny “learning loop” in the browser usin
 
 - `FractalCanvas.framePacket()` returns pixels + relation + trail + Desire metrics in one call.
 - CPU loop: update relation via `hypergradWaveCurrent` / `realgradWaveCurrent`.
+- Optional supervised mode: capture a target relation and train by minimising mean-squared error.
 - WebGPU: optional 3D trail renderer + FFT row probe + “hypergrad operator” compute step.
 
 ## Quickstart
@@ -35,3 +36,9 @@ npm install
 ```bash
 npm run dev
 ```
+
+## Target MSE quick demo
+
+1. Click “Capture target” to store the current relation as the supervised target.
+2. Click “Seed relation” (optional) to create a new starting point.
+3. Set “loss = target mse” and click “Step” (or enable “run continuously”).
