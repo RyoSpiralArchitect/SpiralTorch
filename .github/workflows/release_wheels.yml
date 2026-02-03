@@ -44,7 +44,7 @@ jobs:
             universal2: false
             py: "3.12"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.py }}
@@ -199,7 +199,7 @@ jobs:
     needs: wheels
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
       - uses: actions/download-artifact@v4
