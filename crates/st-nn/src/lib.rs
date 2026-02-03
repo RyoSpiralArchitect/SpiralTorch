@@ -111,9 +111,8 @@ pub use trainer::selfsup::{
     SelfSupEpochTelemetry, SelfSupObjective, SelfSupPlanReport, SelfSupStage, SelfSupStageReport,
 };
 pub use trainer::{
-    EpochStats, ModuleTrainer, SpectralAdjustmentMetrics, SpectralLearningRatePolicy,
-    TextInfusionEvery,
-    TextInfusionMode,
+    EpochStats, ModuleTrainer, SoftLogicConfig, SpectralAdjustmentMetrics,
+    SpectralLearningRatePolicy, TextInfusionEvery, TextInfusionMode,
 };
 pub use z_rba::{
     AttentionTelemetry as ZAttentionTelemetry, BetaGate, BetaGateConfig, BetaGateSample, CovHead,
@@ -122,8 +121,6 @@ pub use z_rba::{
 };
 #[cfg(feature = "psi")]
 pub use zspace_coherence::BranchPsiReading;
-#[cfg(feature = "golden")]
-pub use zspace_coherence::{heatmaps_to_golden_telemetry, PsiGoldenTelemetry};
 pub use zspace_coherence::{
     coherence_relation_tensor, heatmaps_to_zpulses, is_swap_invariant, run_multibranch_demo,
     run_zspace_learning_pass, ArnoldTongueSummary, BackendCapabilities, BranchAtlasFragment,
@@ -132,9 +129,11 @@ pub use zspace_coherence::{
     LinguisticChannelReport, LinguisticContour, MellinBasis, MetaMembConfig, MetaMembSampler,
     PreDiscardPolicy, PreDiscardRegulator, PsiBranchState, PsiSynchroConfig, PsiSynchroPulse,
     PsiSynchroResult, PsiTelemetryConfig, SyncState, SynchroBus, SynchroEvent,
-    ZSpaceCoherenceSequencer, ZSpaceTrace, ZSpaceTraceConfig, ZSpaceTraceEvent,
-    ZSpaceTextVae, ZSpaceTraceRecorder, ZSpaceVae, ZSpaceVaeState, ZSpaceVaeStats,
+    ZSpaceCoherenceSequencer, ZSpaceTextVae, ZSpaceTrace, ZSpaceTraceConfig, ZSpaceTraceEvent,
+    ZSpaceTraceRecorder, ZSpaceVae, ZSpaceVaeState, ZSpaceVaeStats,
 };
+#[cfg(feature = "golden")]
+pub use zspace_coherence::{heatmaps_to_golden_telemetry, PsiGoldenTelemetry};
 
 pub use mixed_precision::{autocast_enabled, AutocastGuard, GradScaler};
 pub use st_core::telemetry::chrono::{ChronoFrame, ChronoSummary, ChronoTimeline};

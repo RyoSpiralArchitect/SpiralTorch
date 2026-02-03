@@ -3099,6 +3099,60 @@ class _NnRoundtableConfig:
     def here_tolerance(self) -> float: ...
 
 
+class _NnSoftLogicConfig:
+    def __init__(
+        self,
+        *,
+        inertia: float = ...,
+        inertia_min: float = ...,
+        inertia_drift_k: float = ...,
+        inertia_z_k: float = ...,
+        drift_gain: float = ...,
+        psi_gain: float = ...,
+        loss_gain: float = ...,
+        floor: float = ...,
+        scale_gain: float = ...,
+        region_gain: float = ...,
+        region_factor_gain: float = ...,
+    ) -> None: ...
+
+    @staticmethod
+    def from_env() -> _NnSoftLogicConfig: ...
+
+    @property
+    def inertia(self) -> float: ...
+
+    @property
+    def inertia_min(self) -> float: ...
+
+    @property
+    def inertia_drift_k(self) -> float: ...
+
+    @property
+    def inertia_z_k(self) -> float: ...
+
+    @property
+    def drift_gain(self) -> float: ...
+
+    @property
+    def psi_gain(self) -> float: ...
+
+    @property
+    def loss_gain(self) -> float: ...
+
+    @property
+    def floor(self) -> float: ...
+
+    @property
+    def scale_gain(self) -> float: ...
+
+    @property
+    def region_gain(self) -> float: ...
+
+    @property
+    def region_factor_gain(self) -> float: ...
+
+
 class _NnRoundtableSchedule:
     def above(self) -> RankPlan: ...
     def here(self) -> RankPlan: ...
@@ -3250,6 +3304,12 @@ class _NnModuleTrainer:
 
     def clear_text_infusion(self) -> None: ...
 
+    def softlogic_config(self) -> _NnSoftLogicConfig: ...
+
+    def set_softlogic_config(self, config: _NnSoftLogicConfig | None = ...) -> None: ...
+
+    def reset_softlogic(self) -> None: ...
+
     def train_epoch(
         self,
         module: object,
@@ -3324,6 +3384,7 @@ class _NnModule(ModuleType):
     ContrastiveLoss: type[_NnContrastiveLoss]
     TripletLoss: type[_NnTripletLoss]
     RoundtableConfig: type[_NnRoundtableConfig]
+    SoftLogicConfig: type[_NnSoftLogicConfig]
     RoundtableSchedule: type[_NnRoundtableSchedule]
     EpochStats: type[_NnEpochStats]
     ModuleTrainer: type[_NnModuleTrainer]

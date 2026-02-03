@@ -15,10 +15,9 @@ use crate::planner::PyRankPlan;
 use st_core::backend::spiralk_fft::SpiralKFftPlan;
 
 use st_core::theory::maxwell::{
-    expected_z_curve as expected_z_curve_rs,
-    polarisation_slope as polarisation_slope_rs,
-    required_blocks as required_blocks_rs, MaxwellExpectationError, MaxwellFingerprint,
-    simulate_z_curve as simulate_z_curve_rs, MaxwellSeriesError, MaxwellSpiralKBridge,
+    expected_z_curve as expected_z_curve_rs, polarisation_slope as polarisation_slope_rs,
+    required_blocks as required_blocks_rs, simulate_z_curve as simulate_z_curve_rs,
+    MaxwellExpectationError, MaxwellFingerprint, MaxwellSeriesError, MaxwellSpiralKBridge,
     MaxwellSpiralKHint, MaxwellZProjector, MaxwellZPulse, MeaningGate, SequentialZ,
 };
 #[cfg(feature = "kdsl")]
@@ -93,6 +92,50 @@ pub(crate) fn spiralk_err_to_py(err: SpiralKErr) -> PyErr {
     match err {
         SpiralKErr::Parse(pos) => PyValueError::new_err(format!("parse error at pos {pos}")),
         SpiralKErr::Tok => PyValueError::new_err("unexpected token"),
+    }
+}
+
+#[cfg(feature = "kdsl")]
+fn spiralk_err_with_src_to_py(src: &str, err: SpiralKErr) -> PyErr {
+    use pyo3::exceptions::PyValueError;
+
+    fn format_parse_error(src: &str, pos: usize) -> String {
+        let bytes = src.as_bytes();
+        let pos = pos.min(bytes.len());
+
+        let mut line = 1usize;
+        let mut col = 1usize;
+        for &b in &bytes[..pos] {
+            if b == b'\n' {
+                line += 1;
+                col = 1;
+            } else {
+                col += 1;
+            }
+        }
+
+        let mut line_start = pos;
+        while line_start > 0 && bytes[line_start.saturating_sub(1)] != b'\n' {
+            line_start -= 1;
+        }
+        let mut line_end = pos;
+        while line_end < bytes.len() && bytes[line_end] != b'\n' {
+            line_end += 1;
+        }
+        let snippet = String::from_utf8_lossy(&bytes[line_start..line_end]);
+        let caret_offset = pos.saturating_sub(line_start);
+        let mut caret = String::new();
+        for _ in 0..caret_offset {
+            caret.push(' ');
+        }
+        caret.push('^');
+
+        format!("parse error at line {line}, col {col}\n{snippet}\n{caret}")
+    }
+
+    match err {
+        SpiralKErr::Parse(pos) => PyValueError::new_err(format_parse_error(src, pos)),
+        other => spiralk_err_to_py(other),
     }
 }
 
@@ -326,14 +369,20 @@ impl PySpiralKContext {
     }
 
     fn eval(&self, py: Python<'_>, program: &str) -> PyResult<PyObject> {
-        let out = st_kdsl::eval_program(program, &self.inner).map_err(spiralk_err_to_py)?;
+        let out = st_kdsl::eval_program(program, &self.inner)
+            .map_err(|err| spiralk_err_with_src_to_py(program, err))?;
         spiralk_out_to_dict(py, &out)
     }
 
     #[pyo3(signature = (program, max_events=256))]
-    fn eval_with_trace(&self, py: Python<'_>, program: &str, max_events: usize) -> PyResult<(PyObject, PyObject)> {
-        let (out, trace) =
-            st_kdsl::eval_program_with_trace(program, &self.inner, max_events).map_err(spiralk_err_to_py)?;
+    fn eval_with_trace(
+        &self,
+        py: Python<'_>,
+        program: &str,
+        max_events: usize,
+    ) -> PyResult<(PyObject, PyObject)> {
+        let (out, trace) = st_kdsl::eval_program_with_trace(program, &self.inner, max_events)
+            .map_err(|err| spiralk_err_with_src_to_py(program, err))?;
         let out_obj = spiralk_out_to_dict(py, &out)?;
         let trace_value = serde_json::to_value(&trace)
             .map_err(|err| pyo3::exceptions::PyRuntimeError::new_err(err.to_string()))?;
@@ -700,9 +749,7 @@ impl AiHintGenerator for PythonAiHintGenerator {
 }
 
 #[cfg(feature = "kdsl")]
-fn extract_python_hints(
-    value: &Bound<'_, PyAny>,
-) -> Result<Vec<HeuristicHint>, AiRewriteError> {
+fn extract_python_hints(value: &Bound<'_, PyAny>) -> Result<Vec<HeuristicHint>, AiRewriteError> {
     let iterator = PyIterator::from_bound_object(value).map_err(|_| {
         AiRewriteError::Generator(
             "AI generator must return an iterable of SpiralKHeuristicHint".to_string(),

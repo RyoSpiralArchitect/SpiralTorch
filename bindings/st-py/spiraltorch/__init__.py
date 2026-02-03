@@ -1652,6 +1652,7 @@ _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
         "Dropout": ("Dropout",),
         "ModuleTrainer": ("ModuleTrainer",),
         "RoundtableConfig": ("RoundtableConfig",),
+        "SoftLogicConfig": ("SoftLogicConfig",),
         "RoundtableSchedule": ("RoundtableSchedule",),
         "EpochStats": ("EpochStats",),
         "MeanSquaredError": ("MeanSquaredError",),

@@ -7,6 +7,19 @@ use std::collections::BTreeMap;
 
 use crate::Err;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct QueryToken {
+    text: String,
+    start: usize,
+}
+
+fn query_error_pos(tokens: &[QueryToken], cursor: usize, input: &str) -> usize {
+    tokens
+        .get(cursor)
+        .map(|token| token.start)
+        .unwrap_or_else(|| input.len())
+}
+
 /// Ordering applied to query results.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OrderDirection {
@@ -122,9 +135,9 @@ pub fn compile(input: &str) -> Result<QueryPlan, Err> {
     let mut cursor = 0usize;
     let mut plan = QueryPlan::new();
 
-    expect_keyword(&tokens, &mut cursor, "select")?;
+    expect_keyword(&tokens, &mut cursor, "select", input)?;
     while cursor < tokens.len() {
-        match tokens[cursor].as_str() {
+        match tokens[cursor].text.as_str() {
             "where" => {
                 cursor += 1;
                 break;
@@ -138,26 +151,29 @@ pub fn compile(input: &str) -> Result<QueryPlan, Err> {
         }
     }
 
-    if cursor < tokens.len() && tokens[cursor] == "where" {
+    if cursor < tokens.len() && tokens[cursor].text == "where" {
         cursor += 1;
     }
 
     while cursor < tokens.len() {
-        match tokens[cursor].as_str() {
+        match tokens[cursor].text.as_str() {
             "order" | "limit" => break,
             "and" => cursor += 1,
             ident => {
                 let column = ident.to_string();
                 cursor += 1;
                 if cursor >= tokens.len() {
-                    return Err(Err::Parse(cursor));
+                    return Err(Err::Parse(query_error_pos(&tokens, cursor, input)));
                 }
-                let op = tokens[cursor].as_str().to_string();
+                let op = tokens[cursor].text.as_str().to_string();
                 cursor += 1;
                 if cursor >= tokens.len() {
-                    return Err(Err::Parse(cursor));
+                    return Err(Err::Parse(query_error_pos(&tokens, cursor, input)));
                 }
-                let value: f64 = tokens[cursor].parse().map_err(|_| Err::Parse(cursor))?;
+                let value: f64 = tokens[cursor]
+                    .text
+                    .parse()
+                    .map_err(|_| Err::Parse(query_error_pos(&tokens, cursor, input)))?;
                 cursor += 1;
                 let filter = match op.as_str() {
                     "=" => Filter::Eq(column, value),
@@ -166,23 +182,23 @@ pub fn compile(input: &str) -> Result<QueryPlan, Err> {
                     "<" => Filter::Lt(column, value),
                     ">=" => Filter::Ge(column, value),
                     "<=" => Filter::Le(column, value),
-                    _ => return Err(Err::Parse(cursor)),
+                    _ => return Err(Err::Parse(query_error_pos(&tokens, cursor, input))),
                 };
                 plan.filters.push(filter);
             }
         }
     }
 
-    if cursor < tokens.len() && tokens[cursor] == "order" {
+    if cursor < tokens.len() && tokens[cursor].text == "order" {
         cursor += 1;
-        expect_keyword(&tokens, &mut cursor, "by")?;
+        expect_keyword(&tokens, &mut cursor, "by", input)?;
         if cursor >= tokens.len() {
-            return Err(Err::Parse(cursor));
+            return Err(Err::Parse(query_error_pos(&tokens, cursor, input)));
         }
-        let column = tokens[cursor].to_string();
+        let column = tokens[cursor].text.to_string();
         cursor += 1;
         let direction = if cursor < tokens.len() {
-            let token = tokens[cursor].as_str();
+            let token = tokens[cursor].text.as_str();
             let direction = match token {
                 "asc" => OrderDirection::Asc,
                 "desc" => OrderDirection::Desc,
@@ -198,68 +214,104 @@ pub fn compile(input: &str) -> Result<QueryPlan, Err> {
         plan.order = Some((column, direction));
     }
 
-    if cursor < tokens.len() && tokens[cursor] == "limit" {
+    if cursor < tokens.len() && tokens[cursor].text == "limit" {
         cursor += 1;
         if cursor >= tokens.len() {
-            return Err(Err::Parse(cursor));
+            return Err(Err::Parse(query_error_pos(&tokens, cursor, input)));
         }
-        let limit: usize = tokens[cursor].parse().map_err(|_| Err::Parse(cursor))?;
+        let limit: usize = tokens[cursor]
+            .text
+            .parse()
+            .map_err(|_| Err::Parse(query_error_pos(&tokens, cursor, input)))?;
         plan.limit = Some(limit);
     }
 
     Ok(plan)
 }
 
-fn expect_keyword(tokens: &[String], cursor: &mut usize, keyword: &str) -> Result<(), Err> {
+fn expect_keyword(
+    tokens: &[QueryToken],
+    cursor: &mut usize,
+    keyword: &str,
+    input: &str,
+) -> Result<(), Err> {
     if *cursor >= tokens.len() {
-        return Err(Err::Parse(*cursor));
+        return Err(Err::Parse(query_error_pos(tokens, *cursor, input)));
     }
-    if tokens[*cursor] == keyword {
+    if tokens[*cursor].text == keyword {
         *cursor += 1;
         Ok(())
     } else {
-        Err(Err::Parse(*cursor))
+        Err(Err::Parse(query_error_pos(tokens, *cursor, input)))
     }
 }
 
-fn lex_query(input: &str) -> Result<Vec<String>, Err> {
+fn lex_query(input: &str) -> Result<Vec<QueryToken>, Err> {
+    let bytes = input.as_bytes();
     let mut tokens = Vec::new();
     let mut current = String::new();
-    let mut chars = input.chars().peekable();
-    while let Some(ch) = chars.next() {
+    let mut current_start = 0usize;
+    let mut index = 0usize;
+    while index < bytes.len() {
+        let b = bytes[index];
+        let ch = b as char;
         if ch.is_whitespace() {
             if !current.is_empty() {
-                tokens.push(current.to_ascii_lowercase());
+                tokens.push(QueryToken {
+                    text: current.to_ascii_lowercase(),
+                    start: current_start,
+                });
                 current.clear();
             }
+            index += 1;
             continue;
         }
         match ch {
             ',' | '=' | '!' | '<' | '>' => {
                 if !current.is_empty() {
-                    tokens.push(current.to_ascii_lowercase());
+                    tokens.push(QueryToken {
+                        text: current.to_ascii_lowercase(),
+                        start: current_start,
+                    });
                     current.clear();
                 }
+                let op_start = index;
                 let mut op = ch.to_string();
-                if let Some(next) = chars.peek() {
-                    if (*next == '=' || (*next == '>' && ch == '<')) && ch != ',' {
-                        op.push(*next);
-                        chars.next();
+                if index + 1 < bytes.len() {
+                    let next = bytes[index + 1] as char;
+                    if (next == '=' || (next == '>' && ch == '<')) && ch != ',' {
+                        op.push(next);
+                        index += 1;
                     }
                 }
-                tokens.push(op);
+                tokens.push(QueryToken {
+                    text: op,
+                    start: op_start,
+                });
             }
             ';' => {
                 if !current.is_empty() {
-                    tokens.push(current.to_ascii_lowercase());
+                    tokens.push(QueryToken {
+                        text: current.to_ascii_lowercase(),
+                        start: current_start,
+                    });
                     current.clear();
                 }
             }
-            _ => current.push(ch),
+            _ => {
+                if current.is_empty() {
+                    current_start = index;
+                }
+                current.push(ch);
+            }
         }
+        index += 1;
     }
     if !current.is_empty() {
-        tokens.push(current.to_ascii_lowercase());
+        tokens.push(QueryToken {
+            text: current.to_ascii_lowercase(),
+            start: current_start,
+        });
     }
 
     Ok(tokens)

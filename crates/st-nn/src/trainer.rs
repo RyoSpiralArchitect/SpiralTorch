@@ -1189,19 +1189,173 @@ pub struct RegionReportBundle {
     pub volatility: Option<AttributionReport>,
 }
 
+/// Configuration describing how SoftLogic adjusts gradient band weighting.
+///
+/// Environment overrides (all optional):
+/// - `SPIRAL_SOFTLOGIC_INERTIA`
+/// - `SPIRAL_SOFTLOGIC_INERTIA_MIN`
+/// - `SPIRAL_SOFTLOGIC_INERTIA_DRIFT_K`
+/// - `SPIRAL_SOFTLOGIC_INERTIA_Z_K`
+/// - `SPIRAL_SOFTLOGIC_DRIFT_GAIN`
+/// - `SPIRAL_SOFTLOGIC_PSI_GAIN`
+/// - `SPIRAL_SOFTLOGIC_LOSS_GAIN`
+/// - `SPIRAL_SOFTLOGIC_FLOOR`
+/// - `SPIRAL_SOFTLOGIC_SCALE_GAIN`
+/// - `SPIRAL_SOFTLOGIC_REGION_GAIN`
+/// - `SPIRAL_SOFTLOGIC_REGION_FACTOR_GAIN`
+#[derive(Debug, Clone, Copy)]
+pub struct SoftLogicConfig {
+    pub inertia: f32,
+    pub inertia_min: f32,
+    pub inertia_drift_k: f32,
+    pub inertia_z_k: f32,
+    pub drift_gain: f32,
+    pub psi_gain: f32,
+    pub loss_gain: f32,
+    pub floor: f32,
+    pub scale_gain: f32,
+    pub region_gain: f32,
+    pub region_factor_gain: f32,
+}
+
+impl Default for SoftLogicConfig {
+    fn default() -> Self {
+        Self {
+            inertia: 0.65,
+            inertia_min: 0.15,
+            inertia_drift_k: 0.6,
+            inertia_z_k: 0.2,
+            drift_gain: 0.25,
+            psi_gain: 0.5,
+            loss_gain: 0.35,
+            floor: 0.25,
+            scale_gain: 0.2,
+            region_gain: 0.15,
+            region_factor_gain: 0.35,
+        }
+    }
+}
+
+impl SoftLogicConfig {
+    pub fn clamp_inplace(&mut self) {
+        if !self.inertia.is_finite() {
+            self.inertia = 0.65;
+        }
+        if !self.inertia_min.is_finite() {
+            self.inertia_min = 0.15;
+        }
+        if !self.inertia_drift_k.is_finite() {
+            self.inertia_drift_k = 0.6;
+        }
+        if !self.inertia_z_k.is_finite() {
+            self.inertia_z_k = 0.2;
+        }
+        if !self.drift_gain.is_finite() {
+            self.drift_gain = 0.25;
+        }
+        if !self.psi_gain.is_finite() {
+            self.psi_gain = 0.5;
+        }
+        if !self.loss_gain.is_finite() {
+            self.loss_gain = 0.35;
+        }
+        if !self.floor.is_finite() {
+            self.floor = 0.25;
+        }
+        if !self.scale_gain.is_finite() {
+            self.scale_gain = 0.2;
+        }
+        if !self.region_gain.is_finite() {
+            self.region_gain = 0.15;
+        }
+        if !self.region_factor_gain.is_finite() {
+            self.region_factor_gain = 0.35;
+        }
+
+        self.inertia = self.inertia.clamp(0.0, 0.95);
+        self.inertia_min = self.inertia_min.clamp(0.0, 0.95).min(self.inertia);
+        self.inertia_drift_k = self.inertia_drift_k.clamp(0.0, 4.0);
+        self.inertia_z_k = self.inertia_z_k.clamp(0.0, 2.0);
+        self.drift_gain = self.drift_gain.clamp(0.0, 1.0);
+        self.psi_gain = self.psi_gain.clamp(0.0, 2.0);
+        self.loss_gain = self.loss_gain.clamp(0.0, 1.5);
+        self.floor = self.floor.clamp(0.05, 1.0);
+        self.scale_gain = self.scale_gain.clamp(0.0, 1.5);
+        self.region_gain = self.region_gain.clamp(0.0, 1.5);
+        self.region_factor_gain = self.region_factor_gain.clamp(0.0, 2.0);
+    }
+
+    /// Applies environment overrides to the configuration in-place.
+    pub fn apply_env_overrides(&mut self) {
+        if let Ok(value) = env::var("SPIRAL_SOFTLOGIC_INERTIA") {
+            if let Ok(parsed) = value.parse::<f32>() {
+                self.inertia = parsed;
+            }
+        }
+        if let Ok(value) = env::var("SPIRAL_SOFTLOGIC_INERTIA_MIN") {
+            if let Ok(parsed) = value.parse::<f32>() {
+                self.inertia_min = parsed;
+            }
+        }
+        if let Ok(value) = env::var("SPIRAL_SOFTLOGIC_INERTIA_DRIFT_K") {
+            if let Ok(parsed) = value.parse::<f32>() {
+                self.inertia_drift_k = parsed;
+            }
+        }
+        if let Ok(value) = env::var("SPIRAL_SOFTLOGIC_INERTIA_Z_K") {
+            if let Ok(parsed) = value.parse::<f32>() {
+                self.inertia_z_k = parsed;
+            }
+        }
+        if let Ok(value) = env::var("SPIRAL_SOFTLOGIC_DRIFT_GAIN") {
+            if let Ok(parsed) = value.parse::<f32>() {
+                self.drift_gain = parsed;
+            }
+        }
+        if let Ok(value) = env::var("SPIRAL_SOFTLOGIC_PSI_GAIN") {
+            if let Ok(parsed) = value.parse::<f32>() {
+                self.psi_gain = parsed;
+            }
+        }
+        if let Ok(value) = env::var("SPIRAL_SOFTLOGIC_LOSS_GAIN") {
+            if let Ok(parsed) = value.parse::<f32>() {
+                self.loss_gain = parsed;
+            }
+        }
+        if let Ok(value) = env::var("SPIRAL_SOFTLOGIC_FLOOR") {
+            if let Ok(parsed) = value.parse::<f32>() {
+                self.floor = parsed;
+            }
+        }
+        if let Ok(value) = env::var("SPIRAL_SOFTLOGIC_SCALE_GAIN") {
+            if let Ok(parsed) = value.parse::<f32>() {
+                self.scale_gain = parsed;
+            }
+        }
+        if let Ok(value) = env::var("SPIRAL_SOFTLOGIC_REGION_GAIN") {
+            if let Ok(parsed) = value.parse::<f32>() {
+                self.region_gain = parsed;
+            }
+        }
+        if let Ok(value) = env::var("SPIRAL_SOFTLOGIC_REGION_FACTOR_GAIN") {
+            if let Ok(parsed) = value.parse::<f32>() {
+                self.region_factor_gain = parsed;
+            }
+        }
+
+        self.clamp_inplace();
+    }
+
+    /// Applies environment overrides and returns `self` for fluent construction.
+    pub fn with_env_overrides(mut self) -> Self {
+        self.apply_env_overrides();
+        self
+    }
+}
+
 #[derive(Debug, Clone)]
 struct SoftLogicFlex {
-    inertia: f32,
-    inertia_min: f32,
-    inertia_drift_k: f32,
-    inertia_z_k: f32,
-    drift_gain: f32,
-    psi_gain: f32,
-    loss_gain: f32,
-    floor: f32,
-    scale_gain: f32,
-    region_gain: f32,
-    region_factor_gain: f32,
+    config: SoftLogicConfig,
     last_weights: (f32, f32, f32),
     last_z: f32,
     last_feedback: Option<SoftlogicZFeedback>,
@@ -1213,62 +1367,13 @@ struct SoftLogicFlex {
 
 impl SoftLogicFlex {
     fn new() -> Self {
+        Self::from_config(SoftLogicConfig::default().with_env_overrides())
+    }
+
+    fn from_config(mut config: SoftLogicConfig) -> Self {
+        config.clamp_inplace();
         let mut flex = Self {
-            inertia: env::var("SPIRAL_SOFTLOGIC_INERTIA")
-                .ok()
-                .and_then(|value| value.parse::<f32>().ok())
-                .map(|v| v.clamp(0.0, 0.95))
-                .unwrap_or(0.65),
-            inertia_min: env::var("SPIRAL_SOFTLOGIC_INERTIA_MIN")
-                .ok()
-                .and_then(|value| value.parse::<f32>().ok())
-                .map(|v| v.clamp(0.0, 0.95))
-                .unwrap_or(0.15),
-            inertia_drift_k: env::var("SPIRAL_SOFTLOGIC_INERTIA_DRIFT_K")
-                .ok()
-                .and_then(|value| value.parse::<f32>().ok())
-                .map(|v| v.clamp(0.0, 4.0))
-                .unwrap_or(0.6),
-            inertia_z_k: env::var("SPIRAL_SOFTLOGIC_INERTIA_Z_K")
-                .ok()
-                .and_then(|value| value.parse::<f32>().ok())
-                .map(|v| v.clamp(0.0, 2.0))
-                .unwrap_or(0.2),
-            drift_gain: env::var("SPIRAL_SOFTLOGIC_DRIFT_GAIN")
-                .ok()
-                .and_then(|value| value.parse::<f32>().ok())
-                .map(|v| v.clamp(0.0, 1.0))
-                .unwrap_or(0.25),
-            psi_gain: env::var("SPIRAL_SOFTLOGIC_PSI_GAIN")
-                .ok()
-                .and_then(|value| value.parse::<f32>().ok())
-                .map(|v| v.clamp(0.0, 2.0))
-                .unwrap_or(0.5),
-            loss_gain: env::var("SPIRAL_SOFTLOGIC_LOSS_GAIN")
-                .ok()
-                .and_then(|value| value.parse::<f32>().ok())
-                .map(|v| v.clamp(0.0, 1.5))
-                .unwrap_or(0.35),
-            floor: env::var("SPIRAL_SOFTLOGIC_FLOOR")
-                .ok()
-                .and_then(|value| value.parse::<f32>().ok())
-                .map(|v| v.clamp(0.05, 1.0))
-                .unwrap_or(0.25),
-            scale_gain: env::var("SPIRAL_SOFTLOGIC_SCALE_GAIN")
-                .ok()
-                .and_then(|value| value.parse::<f32>().ok())
-                .map(|v| v.clamp(0.0, 1.5))
-                .unwrap_or(0.2),
-            region_gain: env::var("SPIRAL_SOFTLOGIC_REGION_GAIN")
-                .ok()
-                .and_then(|value| value.parse::<f32>().ok())
-                .map(|v| v.clamp(0.0, 1.5))
-                .unwrap_or(0.15),
-            region_factor_gain: env::var("SPIRAL_SOFTLOGIC_REGION_FACTOR_GAIN")
-                .ok()
-                .and_then(|value| value.parse::<f32>().ok())
-                .map(|v| v.clamp(0.0, 2.0))
-                .unwrap_or(0.35),
+            config,
             last_weights: (1.0, 1.0, 1.0),
             last_z: 0.0,
             last_feedback: None,
@@ -1277,17 +1382,27 @@ impl SoftLogicFlex {
             last_region_factor: 1.0,
             last_region_scale: (1.0, 1.0, 1.0),
         };
-        if flex.inertia >= 0.95 {
-            flex.inertia = 0.95;
-        }
-        flex.inertia_min = flex.inertia_min.min(flex.inertia).clamp(0.0, 0.95);
-        flex.last_inertia = flex.inertia;
+        flex.last_inertia = flex.config.inertia;
         flex
+    }
+
+    fn config(&self) -> SoftLogicConfig {
+        self.config
+    }
+
+    fn set_config(&mut self, mut config: SoftLogicConfig) {
+        config.clamp_inplace();
+        self.config = config;
+        self.last_inertia = self.config.inertia;
     }
 
     fn record_region_feedback(&mut self, descriptor: ZSpaceRegionDescriptor, factor: f32) {
         self.last_region = Some(descriptor);
-        self.last_region_factor = if factor.is_finite() { factor.max(0.0) } else { 1.0 };
+        self.last_region_factor = if factor.is_finite() {
+            factor.max(0.0)
+        } else {
+            1.0
+        };
     }
 
     fn clear_region_feedback(&mut self) {
@@ -1305,15 +1420,15 @@ impl SoftLogicFlex {
     }
 
     fn effective_inertia(&mut self, band_energy: &BandEnergy) -> f32 {
-        let drift_drive = (band_energy.drift.abs() * self.inertia_drift_k).tanh();
+        let drift_drive = (band_energy.drift.abs() * self.config.inertia_drift_k).tanh();
         let z_drive = self
             .last_feedback
             .as_ref()
             .map(|feedback| feedback.z_signal.abs())
             .unwrap_or(self.last_z.abs())
-            * self.inertia_z_k;
+            * self.config.inertia_z_k;
         let adapt = (drift_drive + z_drive).clamp(0.0, 0.9);
-        let inertia = (self.inertia * (1.0 - adapt)).clamp(self.inertia_min, 0.95);
+        let inertia = (self.config.inertia * (1.0 - adapt)).clamp(self.config.inertia_min, 0.95);
         self.last_inertia = inertia;
         inertia
     }
@@ -1323,16 +1438,16 @@ impl SoftLogicFlex {
             self.last_region_scale = (1.0, 1.0, 1.0);
             return self.last_region_scale;
         };
-        if self.region_gain <= 0.0 {
+        if self.config.region_gain <= 0.0 {
             self.last_region_scale = (1.0, 1.0, 1.0);
             return self.last_region_scale;
         }
         let factor_boost = if self.last_region_factor.is_finite() && self.last_region_factor > 1.0 {
-            1.0 + self.region_factor_gain * (self.last_region_factor - 1.0).clamp(0.0, 3.0)
+            1.0 + self.config.region_factor_gain * (self.last_region_factor - 1.0).clamp(0.0, 3.0)
         } else {
             1.0
         };
-        let gain = (self.region_gain * factor_boost).clamp(0.0, 0.9);
+        let gain = (self.config.region_gain * factor_boost).clamp(0.0, 0.9);
         let radius_weight = match descriptor.key().radius {
             ZSpaceRadiusBand::Core => 0.25,
             ZSpaceRadiusBand::Mantle => 0.6,
@@ -1344,7 +1459,11 @@ impl SoftLogicFlex {
             ZSpaceSpinBand::Trailing => 2,
             ZSpaceSpinBand::Neutral => {
                 if matches!(descriptor.key().radius, ZSpaceRadiusBand::Edge) {
-                    if z_bias >= 0.0 { 0 } else { 2 }
+                    if z_bias >= 0.0 {
+                        0
+                    } else {
+                        2
+                    }
                 } else {
                     1
                 }
@@ -1370,13 +1489,16 @@ impl SoftLogicFlex {
             .as_ref()
             .map(|feedback| feedback.z_signal)
             .unwrap_or(self.last_z);
-        let mut target_above = 1.0 + (asymmetry * self.drift_gain) + (z_bias * self.psi_gain);
-        let mut target_here =
-            1.0 + ((band_energy.here / norm) - (band_energy.drift.abs() / norm)) * self.loss_gain;
-        let mut target_beneath = 1.0 - (asymmetry * self.drift_gain) - (z_bias * self.psi_gain)
-            + (-drift_term * self.drift_gain * 0.5);
+        let mut target_above =
+            1.0 + (asymmetry * self.config.drift_gain) + (z_bias * self.config.psi_gain);
+        let mut target_here = 1.0
+            + ((band_energy.here / norm) - (band_energy.drift.abs() / norm))
+                * self.config.loss_gain;
+        let mut target_beneath =
+            1.0 - (asymmetry * self.config.drift_gain) - (z_bias * self.config.psi_gain)
+                + (-drift_term * self.config.drift_gain * 0.5);
 
-        if self.scale_gain > 0.0 {
+        if self.config.scale_gain > 0.0 {
             if let Some(scale) = self
                 .last_feedback
                 .as_ref()
@@ -1385,9 +1507,9 @@ impl SoftLogicFlex {
                 let bias = (-scale.log_radius).tanh();
                 let explore = bias.max(0.0);
                 let settle = (-bias).max(0.0);
-                target_above *= 1.0 + self.scale_gain * explore;
-                target_here *= 1.0 + self.scale_gain * 0.5 * (explore - settle);
-                target_beneath *= 1.0 + self.scale_gain * settle;
+                target_above *= 1.0 + self.config.scale_gain * explore;
+                target_here *= 1.0 + self.config.scale_gain * 0.5 * (explore - settle);
+                target_beneath *= 1.0 + self.config.scale_gain * settle;
             }
         }
 
@@ -1397,9 +1519,9 @@ impl SoftLogicFlex {
         target_beneath *= region_scale.2;
 
         let target = (
-            target_above.clamp(self.floor, 3.0),
-            target_here.clamp(self.floor, 2.5),
-            target_beneath.clamp(self.floor, 3.0),
+            target_above.clamp(self.config.floor, 3.0),
+            target_here.clamp(self.config.floor, 2.5),
+            target_beneath.clamp(self.config.floor, 3.0),
         );
         self.last_weights = (
             Self::lerp(self.last_weights.0, target.0, 1.0 - inertia),
@@ -1841,9 +1963,21 @@ impl SpectralLearningRatePolicy {
         phase_gain = phase_gain.clamp(0.0, self.max_phase_gain);
         let phase = dominant % 3;
         let phase_mul = match phase {
-            0 => (1.0 + phase_gain, 1.0 - 0.5 * phase_gain, 1.0 - 0.5 * phase_gain),
-            1 => (1.0 - 0.5 * phase_gain, 1.0 + phase_gain, 1.0 - 0.5 * phase_gain),
-            _ => (1.0 - 0.5 * phase_gain, 1.0 - 0.5 * phase_gain, 1.0 + phase_gain),
+            0 => (
+                1.0 + phase_gain,
+                1.0 - 0.5 * phase_gain,
+                1.0 - 0.5 * phase_gain,
+            ),
+            1 => (
+                1.0 - 0.5 * phase_gain,
+                1.0 + phase_gain,
+                1.0 - 0.5 * phase_gain,
+            ),
+            _ => (
+                1.0 - 0.5 * phase_gain,
+                1.0 - 0.5 * phase_gain,
+                1.0 + phase_gain,
+            ),
         };
 
         let mut target_band = (
@@ -1878,12 +2012,9 @@ impl SpectralLearningRatePolicy {
             (target_band.1 / mean_band).clamp(self.min_band_scale, self.max_band_scale),
             (target_band.2 / mean_band).clamp(self.min_band_scale, self.max_band_scale),
         );
-        self.local_lr_state.0 =
-            Self::smooth(self.local_lr_state.0, target_local.0, smoothing);
-        self.local_lr_state.1 =
-            Self::smooth(self.local_lr_state.1, target_local.1, smoothing);
-        self.local_lr_state.2 =
-            Self::smooth(self.local_lr_state.2, target_local.2, smoothing);
+        self.local_lr_state.0 = Self::smooth(self.local_lr_state.0, target_local.0, smoothing);
+        self.local_lr_state.1 = Self::smooth(self.local_lr_state.1, target_local.1, smoothing);
+        self.local_lr_state.2 = Self::smooth(self.local_lr_state.2, target_local.2, smoothing);
         target_local = self.local_lr_state;
 
         let mut lr_multiplier = 1.0;
@@ -2017,11 +2148,12 @@ impl ModuleTrainer {
         let mut spectral_adapter = SpectralLrAdapter::default().with_sheet_hint(8);
         spectral_adapter.set_curvature_target(curvature);
 
-        let phase_turnover_spike_threshold = env::var("SPIRAL_TRAINER_PHASE_TURNOVER_SPIKE_THRESHOLD")
-            .ok()
-            .and_then(|value| value.parse::<f32>().ok())
-            .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
-            .unwrap_or(0.35);
+        let phase_turnover_spike_threshold =
+            env::var("SPIRAL_TRAINER_PHASE_TURNOVER_SPIKE_THRESHOLD")
+                .ok()
+                .and_then(|value| value.parse::<f32>().ok())
+                .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
+                .unwrap_or(0.35);
         let phase_loss_ema_alpha = env::var("SPIRAL_TRAINER_PHASE_LOSS_EMA_ALPHA")
             .ok()
             .and_then(|value| value.parse::<f32>().ok())
@@ -2184,6 +2316,21 @@ impl ModuleTrainer {
     /// Returns the currently configured loss strategy.
     pub fn loss_strategy(&self) -> &LossStrategy {
         &self.loss_strategy
+    }
+
+    /// Returns the active SoftLogic configuration.
+    pub fn softlogic_config(&self) -> SoftLogicConfig {
+        self.softlogic.config()
+    }
+
+    /// Installs a new SoftLogic configuration (clamped to safe ranges).
+    pub fn set_softlogic_config(&mut self, config: SoftLogicConfig) {
+        self.softlogic.set_config(config);
+    }
+
+    /// Resets SoftLogic state and reloads environment overrides.
+    pub fn reset_softlogic(&mut self) {
+        self.softlogic = SoftLogicFlex::new();
     }
 
     /// Surfaces the qualitative coherence observation so schedulers can react.
@@ -3067,8 +3214,11 @@ impl ModuleTrainer {
             let mut spectral_turnover = None;
             let mut spectral_adjustment: Option<SpectralAdjustment> = None;
             if let Some(policy) = self.spectral_policy.as_mut() {
-                spectral_adjustment =
-                    policy.observe_signal(coherence_snapshot.as_ref(), self.curvature, &band_energy);
+                spectral_adjustment = policy.observe_signal(
+                    coherence_snapshot.as_ref(),
+                    self.curvature,
+                    &band_energy,
+                );
                 spectral_turnover = Some(policy.dominant_turnover());
                 if let Some(label) = policy.last_coherence_label() {
                     spectral_label_code = Some(match label {
@@ -3103,7 +3253,10 @@ impl ModuleTrainer {
             extra.insert("softlogic_w_above".to_string(), weights.0 as f64);
             extra.insert("softlogic_w_here".to_string(), weights.1 as f64);
             extra.insert("softlogic_w_beneath".to_string(), weights.2 as f64);
-            extra.insert("softlogic_inertia".to_string(), self.softlogic.last_inertia() as f64);
+            extra.insert(
+                "softlogic_inertia".to_string(),
+                self.softlogic.last_inertia() as f64,
+            );
             let region_scale = self.softlogic.last_region_scale();
             extra.insert(
                 "softlogic_region_scale_above".to_string(),
@@ -3507,11 +3660,11 @@ impl ModuleTrainer {
                         extra.insert("curvature_adjusted".to_string(), 1.0);
                     }
                     if let Some(scheduler) = self.curvature_scheduler.as_ref() {
-                        extra.insert("curvature_kp".to_string(), scheduler.proportional_gain() as f64);
                         extra.insert(
-                            "curvature_step".to_string(),
-                            scheduler.step_size() as f64,
+                            "curvature_kp".to_string(),
+                            scheduler.proportional_gain() as f64,
                         );
+                        extra.insert("curvature_step".to_string(), scheduler.step_size() as f64);
                         extra.insert(
                             "curvature_tolerance".to_string(),
                             scheduler.tolerance() as f64,
@@ -3528,10 +3681,7 @@ impl ModuleTrainer {
                             extra.insert("curvature_pressure_var".to_string(), var as f64);
                         }
                         if let Some(rel_var) = scheduler.last_pressure_rel_variance() {
-                            extra.insert(
-                                "curvature_pressure_rel_var".to_string(),
-                                rel_var as f64,
-                            );
+                            extra.insert("curvature_pressure_rel_var".to_string(), rel_var as f64);
                         }
                     }
                 }
@@ -3806,10 +3956,12 @@ impl ModuleTrainer {
                 total_loss / steps as f32
             },
         };
-        global_registry().event_bus().publish(&PluginEvent::EpochEnd {
-            epoch,
-            loss: stats.average_loss,
-        });
+        global_registry()
+            .event_bus()
+            .publish(&PluginEvent::EpochEnd {
+                epoch,
+                loss: stats.average_loss,
+            });
         Ok(stats)
     }
 
@@ -4057,11 +4209,7 @@ impl ModuleTrainer {
     }
 
     #[cfg(feature = "collapse")]
-    fn apply_grad_scale<M: Module + ?Sized>(
-        &self,
-        module: &mut M,
-        scale: f32,
-    ) -> PureResult<()> {
+    fn apply_grad_scale<M: Module + ?Sized>(&self, module: &mut M, scale: f32) -> PureResult<()> {
         if (scale - 1.0).abs() <= f32::EPSILON {
             return Ok(());
         }

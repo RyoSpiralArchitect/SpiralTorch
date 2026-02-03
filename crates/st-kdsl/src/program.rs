@@ -51,17 +51,30 @@ pub enum KdslValue {
 /// Execution event recorded while evaluating a SpiralK DSL program.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum KdslTraceEvent {
-    Assign { field: String, value: KdslValue },
+    Assign {
+        field: String,
+        value: KdslValue,
+    },
     Soft {
         field: String,
         applied: bool,
         value: Option<KdslValue>,
         weight: Option<f32>,
     },
-    Let { name: String, value: KdslValue },
-    Set { name: String, value: KdslValue },
-    If { condition: bool },
-    While { iterations: usize },
+    Let {
+        name: String,
+        value: KdslValue,
+    },
+    Set {
+        name: String,
+        value: KdslValue,
+    },
+    If {
+        condition: bool,
+    },
+    While {
+        iterations: usize,
+    },
     For {
         var: String,
         start: i64,
@@ -140,7 +153,7 @@ impl Program {
     /// Parses the provided source string into a [`Program`].
     pub fn parse(src: &str) -> Result<Self, Err> {
         let toks = lex(src)?;
-        let mut parser = Parser::new(toks);
+        let mut parser = Parser::new(toks, src.len());
         let output = parser.parse_program()?;
         Ok(Self {
             stmts: output.stmts,
@@ -663,8 +676,9 @@ impl Field {
 
 #[derive(Clone, Debug)]
 struct Parser {
-    tokens: Vec<Token>,
+    tokens: Vec<LexedToken>,
     index: usize,
+    src_len: usize,
     locals: Vec<String>,
     scopes: Vec<HashMap<String, usize>>,
     loop_depth: usize,
@@ -680,10 +694,11 @@ struct ParseOutput {
 }
 
 impl Parser {
-    fn new(tokens: Vec<Token>) -> Self {
+    fn new(tokens: Vec<LexedToken>, src_len: usize) -> Self {
         Self {
             tokens,
             index: 0,
+            src_len,
             locals: Vec::new(),
             scopes: vec![HashMap::new()],
             loop_depth: 0,
@@ -718,7 +733,7 @@ impl Parser {
         };
 
         if Self::is_reserved_ident(&name) || self.function_lookup.contains_key(&name) {
-            return Err(Err::Parse(self.index.saturating_sub(1)));
+            return Err(Err::Parse(self.error_pos_prev()));
         }
 
         self.expect(Token::Lp)?;
@@ -728,7 +743,7 @@ impl Parser {
                 match self.next().ok_or(Err::Tok)? {
                     Token::Id(id) => {
                         if Self::is_reserved_ident(&id) || params.contains(&id) {
-                            return Err(Err::Parse(self.index.saturating_sub(1)));
+                            return Err(Err::Parse(self.error_pos_prev()));
                         }
                         params.push(id);
                     }
@@ -832,7 +847,7 @@ impl Parser {
             };
             let id = self
                 .lookup_local(&name)
-                .ok_or_else(|| Err::Parse(self.index.saturating_sub(1)))?;
+                .ok_or_else(|| Err::Parse(self.error_pos_prev()))?;
             self.expect(Token::Assign)?;
             let expr = self.parse_expr()?;
             let const_value = expr.const_value();
@@ -904,7 +919,7 @@ impl Parser {
         let cond = self.parse_expr()?;
         let const_cond = cond.const_value().map(|v| v.as_bool());
         if matches!(const_cond, Some(true)) {
-            return Err(Err::Parse(self.index.saturating_sub(1)));
+            return Err(Err::Parse(self.error_pos_prev()));
         }
         self.loop_depth += 1;
         let body_result = self.parse_block();
@@ -1000,7 +1015,7 @@ impl Parser {
 
         while !matches!(self.peek(), Some(Token::RBrace)) {
             if saw_wildcard {
-                return Err(Err::Parse(self.index));
+                return Err(Err::Parse(self.error_pos()));
             }
             let arm = self.parse_match_arm()?;
             saw_wildcard |= arm.has_wildcard();
@@ -1015,7 +1030,7 @@ impl Parser {
 
         self.expect(Token::RBrace)?;
         if !saw_wildcard {
-            return Err(Err::Parse(self.index.saturating_sub(1)));
+            return Err(Err::Parse(self.error_pos_prev()));
         }
 
         Ok(ExprNode::match_expr(scrutinee, arms))
@@ -1265,7 +1280,7 @@ impl Parser {
                 if let Some(index) = self.lookup_local(&id) {
                     ExprNode::local(index)
                 } else if self.function_lookup.contains_key(&id) {
-                    return Err(Err::Parse(self.index));
+                    return Err(Err::Parse(self.error_pos_prev()));
                 } else {
                     return Err(Err::Tok);
                 }
@@ -1330,7 +1345,7 @@ impl Parser {
         self.expect(Token::Rp)?;
         let (min, max) = function.arity();
         if args.len() < min || max.map(|limit| args.len() > limit).unwrap_or(false) {
-            return Err(Err::Parse(self.index));
+            return Err(Err::Parse(self.error_pos()));
         }
         Ok(ExprNode::call(CallTarget::Intrinsic(function), args))
     }
@@ -1340,7 +1355,7 @@ impl Parser {
             .functions
             .get(index)
             .map(|function| function.params)
-            .ok_or(Err::Parse(self.index))?;
+            .ok_or_else(|| Err::Parse(self.error_pos()))?;
 
         self.expect(Token::Lp)?;
         let mut args = Vec::new();
@@ -1356,17 +1371,34 @@ impl Parser {
         }
         self.expect(Token::Rp)?;
         if args.len() != expected {
-            return Err(Err::Parse(self.index));
+            return Err(Err::Parse(self.error_pos()));
         }
         Ok(ExprNode::call(CallTarget::User(index), args))
     }
 
+    fn error_pos(&self) -> usize {
+        self.tokens
+            .get(self.index)
+            .map(|token| token.start)
+            .unwrap_or(self.src_len)
+    }
+
+    fn error_pos_prev(&self) -> usize {
+        if self.index == 0 {
+            return 0;
+        }
+        self.tokens
+            .get(self.index.saturating_sub(1))
+            .map(|token| token.start)
+            .unwrap_or(self.src_len)
+    }
+
     fn peek(&self) -> Option<&Token> {
-        self.tokens.get(self.index)
+        self.tokens.get(self.index).map(|token| &token.token)
     }
 
     fn next(&mut self) -> Option<Token> {
-        let token = self.tokens.get(self.index).cloned();
+        let token = self.tokens.get(self.index).map(|token| token.token.clone());
         if token.is_some() {
             self.index += 1;
         }
@@ -1442,7 +1474,7 @@ impl Parser {
     fn consume_break(&mut self) -> Result<bool, Err> {
         if matches!(self.peek(), Some(Token::Break)) {
             if self.loop_depth == 0 {
-                return Err(Err::Parse(self.index));
+                return Err(Err::Parse(self.error_pos()));
             }
             self.next();
             return Ok(true);
@@ -1453,7 +1485,7 @@ impl Parser {
     fn consume_continue(&mut self) -> Result<bool, Err> {
         if matches!(self.peek(), Some(Token::Continue)) {
             if self.loop_depth == 0 {
-                return Err(Err::Parse(self.index));
+                return Err(Err::Parse(self.error_pos()));
             }
             self.next();
             return Ok(true);
@@ -1471,18 +1503,18 @@ impl Parser {
 
     fn define_local(&mut self, name: String) -> Result<usize, Err> {
         if Self::is_reserved_ident(&name) {
-            return Err(Err::Parse(self.index));
+            return Err(Err::Parse(self.error_pos()));
         }
         if let Some(scope) = self.scopes.last_mut() {
             if scope.contains_key(&name) {
-                return Err(Err::Parse(self.index));
+                return Err(Err::Parse(self.error_pos()));
             }
             let id = self.locals.len();
             self.locals.push(name.clone());
             scope.insert(name, id);
             Ok(id)
         } else {
-            Err(Err::Parse(self.index))
+            Err(Err::Parse(self.error_pos()))
         }
     }
 
@@ -1557,6 +1589,12 @@ enum Token {
     FatArrow,
     Pipe,
     Op(Operator),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct LexedToken {
+    token: Token,
+    start: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2103,7 +2141,9 @@ impl KdslValue {
         match value {
             Value::F(v) => KdslValue::Number(*v),
             Value::B(b) => KdslValue::Bool(*b),
-            Value::List(values) => KdslValue::List(values.iter().map(KdslValue::from_runtime).collect()),
+            Value::List(values) => {
+                KdslValue::List(values.iter().map(KdslValue::from_runtime).collect())
+            }
         }
     }
 }
@@ -2310,12 +2350,13 @@ impl FunctionDef {
     }
 }
 
-fn lex(src: &str) -> Result<Vec<Token>, Err> {
+fn lex(src: &str) -> Result<Vec<LexedToken>, Err> {
     let bytes = src.as_bytes();
     let mut tokens = Vec::new();
     let mut index = 0usize;
 
     while index < bytes.len() {
+        let start = index;
         let b = bytes[index];
         let ch = b as char;
         if ch.is_whitespace() {
@@ -2325,84 +2366,137 @@ fn lex(src: &str) -> Result<Vec<Token>, Err> {
 
         match b {
             b'(' => {
-                tokens.push(Token::Lp);
+                tokens.push(LexedToken {
+                    token: Token::Lp,
+                    start,
+                });
                 index += 1;
             }
             b')' => {
-                tokens.push(Token::Rp);
+                tokens.push(LexedToken {
+                    token: Token::Rp,
+                    start,
+                });
                 index += 1;
             }
             b'{' => {
-                tokens.push(Token::LBrace);
+                tokens.push(LexedToken {
+                    token: Token::LBrace,
+                    start,
+                });
                 index += 1;
             }
             b'}' => {
-                tokens.push(Token::RBrace);
+                tokens.push(LexedToken {
+                    token: Token::RBrace,
+                    start,
+                });
                 index += 1;
             }
             b'[' => {
-                tokens.push(Token::LBracket);
+                tokens.push(LexedToken {
+                    token: Token::LBracket,
+                    start,
+                });
                 index += 1;
             }
             b']' => {
-                tokens.push(Token::RBracket);
+                tokens.push(LexedToken {
+                    token: Token::RBracket,
+                    start,
+                });
                 index += 1;
             }
             b',' => {
-                tokens.push(Token::Comma);
+                tokens.push(LexedToken {
+                    token: Token::Comma,
+                    start,
+                });
                 index += 1;
             }
             b';' => {
-                tokens.push(Token::Semi);
+                tokens.push(LexedToken {
+                    token: Token::Semi,
+                    start,
+                });
                 index += 1;
             }
             b':' => {
-                tokens.push(Token::Colon);
+                tokens.push(LexedToken {
+                    token: Token::Colon,
+                    start,
+                });
                 index += 1;
             }
             b'=' => {
                 if index + 1 < bytes.len() && bytes[index + 1] == b'>' {
-                    tokens.push(Token::FatArrow);
+                    tokens.push(LexedToken {
+                        token: Token::FatArrow,
+                        start,
+                    });
                     index += 2;
                 } else if index + 1 < bytes.len() && bytes[index + 1] == b'=' {
-                    tokens.push(Token::Op(Operator::Eq));
+                    tokens.push(LexedToken {
+                        token: Token::Op(Operator::Eq),
+                        start,
+                    });
                     index += 2;
                 } else {
-                    tokens.push(Token::Assign);
+                    tokens.push(LexedToken {
+                        token: Token::Assign,
+                        start,
+                    });
                     index += 1;
                 }
             }
             b'!' => {
                 if index + 1 < bytes.len() && bytes[index + 1] == b'=' {
-                    tokens.push(Token::Op(Operator::NotEq));
+                    tokens.push(LexedToken {
+                        token: Token::Op(Operator::NotEq),
+                        start,
+                    });
                     index += 2;
                 } else {
-                    tokens.push(Token::Bang);
+                    tokens.push(LexedToken {
+                        token: Token::Bang,
+                        start,
+                    });
                     index += 1;
                 }
             }
             b'|' => {
                 if index + 1 < bytes.len() && bytes[index + 1] == b'|' {
-                    tokens.push(Token::Op(Operator::Or));
+                    tokens.push(LexedToken {
+                        token: Token::Op(Operator::Or),
+                        start,
+                    });
                     index += 2;
                 } else {
-                    tokens.push(Token::Pipe);
+                    tokens.push(LexedToken {
+                        token: Token::Pipe,
+                        start,
+                    });
                     index += 1;
                 }
             }
             b'.' => {
                 if index + 1 < bytes.len() && bytes[index + 1] == b'.' {
                     if index + 2 < bytes.len() && bytes[index + 2] == b'=' {
-                        tokens.push(Token::RangeEq);
+                        tokens.push(LexedToken {
+                            token: Token::RangeEq,
+                            start,
+                        });
                         index += 3;
                     } else {
-                        tokens.push(Token::Range);
+                        tokens.push(LexedToken {
+                            token: Token::Range,
+                            start,
+                        });
                         index += 2;
                     }
                     continue;
                 }
 
-                let start = index;
                 index += 1;
                 if index >= bytes.len() || !bytes[index].is_ascii_digit() {
                     return Err(Err::Parse(start));
@@ -2414,10 +2508,12 @@ fn lex(src: &str) -> Result<Vec<Token>, Err> {
                     .map_err(|_| Err::Parse(start))?
                     .parse::<f64>()
                     .map_err(|_| Err::Parse(start))?;
-                tokens.push(Token::Num(token));
+                tokens.push(LexedToken {
+                    token: Token::Num(token),
+                    start,
+                });
             }
             b'0'..=b'9' => {
-                let start = index;
                 index += 1;
                 while index < bytes.len() && bytes[index].is_ascii_digit() {
                     index += 1;
@@ -2438,10 +2534,12 @@ fn lex(src: &str) -> Result<Vec<Token>, Err> {
                     .map_err(|_| Err::Parse(start))?
                     .parse::<f64>()
                     .map_err(|_| Err::Parse(start))?;
-                tokens.push(Token::Num(token));
+                tokens.push(LexedToken {
+                    token: Token::Num(token),
+                    start,
+                });
             }
             b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
-                let start = index;
                 index += 1;
                 while index < bytes.len() {
                     let c = bytes[index] as char;
@@ -2454,23 +2552,24 @@ fn lex(src: &str) -> Result<Vec<Token>, Err> {
                 let ident = std::str::from_utf8(&bytes[start..index])
                     .map_err(|_| Err::Parse(start))?
                     .to_string();
-                match ident.as_str() {
-                    "true" => tokens.push(Token::True),
-                    "false" => tokens.push(Token::False),
-                    "soft" => tokens.push(Token::Soft),
-                    "let" => tokens.push(Token::Let),
-                    "set" => tokens.push(Token::Set),
-                    "fn" => tokens.push(Token::Fn),
-                    "if" => tokens.push(Token::If),
-                    "else" => tokens.push(Token::Else),
-                    "while" => tokens.push(Token::While),
-                    "for" => tokens.push(Token::For),
-                    "in" => tokens.push(Token::In),
-                    "match" => tokens.push(Token::Match),
-                    "break" => tokens.push(Token::Break),
-                    "continue" => tokens.push(Token::Continue),
-                    _ => tokens.push(Token::Id(ident)),
-                }
+                let token = match ident.as_str() {
+                    "true" => Token::True,
+                    "false" => Token::False,
+                    "soft" => Token::Soft,
+                    "let" => Token::Let,
+                    "set" => Token::Set,
+                    "fn" => Token::Fn,
+                    "if" => Token::If,
+                    "else" => Token::Else,
+                    "while" => Token::While,
+                    "for" => Token::For,
+                    "in" => Token::In,
+                    "match" => Token::Match,
+                    "break" => Token::Break,
+                    "continue" => Token::Continue,
+                    _ => Token::Id(ident),
+                };
+                tokens.push(LexedToken { token, start });
             }
             _ => {
                 let next = if index + 1 < bytes.len() {
@@ -2479,7 +2578,10 @@ fn lex(src: &str) -> Result<Vec<Token>, Err> {
                     None
                 };
                 if let Some((op, consumed)) = Operator::from_bytes(b, next) {
-                    tokens.push(Token::Op(op));
+                    tokens.push(LexedToken {
+                        token: Token::Op(op),
+                        start,
+                    });
                     index += consumed;
                 } else {
                     return Err(Err::Parse(index));
