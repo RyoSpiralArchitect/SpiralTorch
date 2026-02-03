@@ -194,9 +194,11 @@ function drawTrail2d(buffer: Float32Array, strideStep: number) {
     const y = buffer[base + 1];
     const z = buffer[base + 2];
     const energy = buffer[base + 3];
-    const r = buffer[base + 4];
-    const g = buffer[base + 5];
-    const b = buffer[base + 6];
+    // WASM trail chroma is emitted in Z-space friendly `[-1, 1]` coordinates.
+    // Remap to `[0, 1]` for display.
+    const r = buffer[base + 4] * 0.5 + 0.5;
+    const g = buffer[base + 5] * 0.5 + 0.5;
+    const b = buffer[base + 6] * 0.5 + 0.5;
 
     const sx = x * w;
     const sy = y * h;
@@ -896,9 +898,15 @@ fn fs_main(input: VsOut) -> @location(0) vec4<f32> {
     let out = 0;
     for (let i = 0; i < count; i += step) {
       const base = i * stride;
-      for (let lane = 0; lane < stride; lane++) {
-        packed[out++] = trail[base + lane];
-      }
+      packed[out++] = trail[base]; // x
+      packed[out++] = trail[base + 1]; // y
+      packed[out++] = trail[base + 2]; // z
+      packed[out++] = trail[base + 3]; // energy
+      // WASM trail chroma is emitted in Z-space `[-1, 1]` coordinates.
+      // Convert to `[0, 1]` so the shader sees valid colors.
+      packed[out++] = trail[base + 4] * 0.5 + 0.5;
+      packed[out++] = trail[base + 5] * 0.5 + 0.5;
+      packed[out++] = trail[base + 6] * 0.5 + 0.5;
     }
 
     this.device.queue.writeBuffer(this.vertex, 0, packed.buffer, packed.byteOffset, packed.byteLength);
