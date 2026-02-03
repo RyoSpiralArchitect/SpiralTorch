@@ -17,6 +17,8 @@ _SOFTLOGIC_FIELDS: tuple[str, ...] = (
     "scale_gain",
     "region_gain",
     "region_factor_gain",
+    "energy_equalize_gain",
+    "mean_normalize_gain",
 )
 
 _SOFTLOGIC_FLAG_TO_FIELD: dict[str, str] = {
@@ -31,6 +33,8 @@ _SOFTLOGIC_FLAG_TO_FIELD: dict[str, str] = {
     "--softlogic-scale-gain": "scale_gain",
     "--softlogic-region-gain": "region_gain",
     "--softlogic-region-factor-gain": "region_factor_gain",
+    "--softlogic-energy-equalize-gain": "energy_equalize_gain",
+    "--softlogic-mean-normalize-gain": "mean_normalize_gain",
 }
 
 _SOFTLOGIC_ENV_VARS: tuple[str, ...] = (
@@ -45,6 +49,8 @@ _SOFTLOGIC_ENV_VARS: tuple[str, ...] = (
     "SPIRAL_SOFTLOGIC_SCALE_GAIN",
     "SPIRAL_SOFTLOGIC_REGION_GAIN",
     "SPIRAL_SOFTLOGIC_REGION_FACTOR_GAIN",
+    "SPIRAL_SOFTLOGIC_ENERGY_EQUALIZE_GAIN",
+    "SPIRAL_SOFTLOGIC_MEAN_NORMALIZE_GAIN",
 )
 
 
@@ -55,6 +61,7 @@ def usage_flags() -> str:
         "[--softlogic-drift-gain F] [--softlogic-psi-gain F] [--softlogic-loss-gain F] "
         "[--softlogic-floor F] [--softlogic-scale-gain F] [--softlogic-region-gain F] "
         "[--softlogic-region-factor-gain F] [--softlogic-reset]"
+        " [--softlogic-energy-equalize-gain F] [--softlogic-mean-normalize-gain F]"
     )
 
 
@@ -99,7 +106,10 @@ def _env_overrides() -> dict[str, str]:
 def _config_to_dict(config: Any) -> dict[str, float]:
     out: dict[str, float] = {}
     for key in _SOFTLOGIC_FIELDS:
-        out[key] = float(getattr(config, key))
+        value = getattr(config, key, None)
+        if value is None:
+            continue
+        out[key] = float(value)
     return out
 
 
@@ -126,4 +136,3 @@ def apply_softlogic_cli(trainer: st.nn.ModuleTrainer, cli: dict[str, Any]) -> di
         "overrides": overrides or None,
         "env": env_overrides or None,
     }
-

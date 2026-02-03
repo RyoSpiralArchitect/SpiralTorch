@@ -1203,6 +1203,8 @@ pub struct RegionReportBundle {
 /// - `SPIRAL_SOFTLOGIC_SCALE_GAIN`
 /// - `SPIRAL_SOFTLOGIC_REGION_GAIN`
 /// - `SPIRAL_SOFTLOGIC_REGION_FACTOR_GAIN`
+/// - `SPIRAL_SOFTLOGIC_ENERGY_EQUALIZE_GAIN`
+/// - `SPIRAL_SOFTLOGIC_MEAN_NORMALIZE_GAIN`
 #[derive(Debug, Clone, Copy)]
 pub struct SoftLogicConfig {
     pub inertia: f32,
@@ -1216,6 +1218,8 @@ pub struct SoftLogicConfig {
     pub scale_gain: f32,
     pub region_gain: f32,
     pub region_factor_gain: f32,
+    pub energy_equalize_gain: f32,
+    pub mean_normalize_gain: f32,
 }
 
 impl Default for SoftLogicConfig {
@@ -1232,6 +1236,8 @@ impl Default for SoftLogicConfig {
             scale_gain: 0.2,
             region_gain: 0.15,
             region_factor_gain: 0.35,
+            energy_equalize_gain: 0.0,
+            mean_normalize_gain: 0.0,
         }
     }
 }
@@ -1271,6 +1277,12 @@ impl SoftLogicConfig {
         if !self.region_factor_gain.is_finite() {
             self.region_factor_gain = 0.35;
         }
+        if !self.energy_equalize_gain.is_finite() {
+            self.energy_equalize_gain = 0.0;
+        }
+        if !self.mean_normalize_gain.is_finite() {
+            self.mean_normalize_gain = 0.0;
+        }
 
         self.inertia = self.inertia.clamp(0.0, 0.95);
         self.inertia_min = self.inertia_min.clamp(0.0, 0.95).min(self.inertia);
@@ -1283,6 +1295,8 @@ impl SoftLogicConfig {
         self.scale_gain = self.scale_gain.clamp(0.0, 1.5);
         self.region_gain = self.region_gain.clamp(0.0, 1.5);
         self.region_factor_gain = self.region_factor_gain.clamp(0.0, 2.0);
+        self.energy_equalize_gain = self.energy_equalize_gain.clamp(0.0, 1.0);
+        self.mean_normalize_gain = self.mean_normalize_gain.clamp(0.0, 1.0);
     }
 
     /// Applies environment overrides to the configuration in-place.
@@ -1340,6 +1354,16 @@ impl SoftLogicConfig {
         if let Ok(value) = env::var("SPIRAL_SOFTLOGIC_REGION_FACTOR_GAIN") {
             if let Ok(parsed) = value.parse::<f32>() {
                 self.region_factor_gain = parsed;
+            }
+        }
+        if let Ok(value) = env::var("SPIRAL_SOFTLOGIC_ENERGY_EQUALIZE_GAIN") {
+            if let Ok(parsed) = value.parse::<f32>() {
+                self.energy_equalize_gain = parsed;
+            }
+        }
+        if let Ok(value) = env::var("SPIRAL_SOFTLOGIC_MEAN_NORMALIZE_GAIN") {
+            if let Ok(parsed) = value.parse::<f32>() {
+                self.mean_normalize_gain = parsed;
             }
         }
 
@@ -1480,8 +1504,10 @@ impl SoftLogicFlex {
 
     fn prepare_weights(&mut self, band_energy: &BandEnergy) -> (f32, f32, f32) {
         let inertia = self.effective_inertia(band_energy);
-        let norm = (band_energy.above.abs() + band_energy.here.abs() + band_energy.beneath.abs())
-            .max(1e-4);
+        let above_abs = band_energy.above.abs();
+        let here_abs = band_energy.here.abs();
+        let beneath_abs = band_energy.beneath.abs();
+        let norm = (above_abs + here_abs + beneath_abs).max(1e-4);
         let asymmetry = (band_energy.above - band_energy.beneath) / norm;
         let drift_term = band_energy.drift.tanh();
         let z_bias = self
@@ -1518,11 +1544,39 @@ impl SoftLogicFlex {
         target_here *= region_scale.1;
         target_beneath *= region_scale.2;
 
-        let target = (
+        if self.config.energy_equalize_gain > 0.0 {
+            let target_share = 1.0 / 3.0;
+            let eps = 1e-4;
+            let pa = (above_abs / norm).max(eps);
+            let ph = (here_abs / norm).max(eps);
+            let pb = (beneath_abs / norm).max(eps);
+            let ratio_max = 9.0;
+            let ra = (target_share / pa).clamp(1.0 / ratio_max, ratio_max);
+            let rh = (target_share / ph).clamp(1.0 / ratio_max, ratio_max);
+            let rb = (target_share / pb).clamp(1.0 / ratio_max, ratio_max);
+            let gain = self.config.energy_equalize_gain.clamp(0.0, 1.0);
+            target_above *= ra.powf(gain);
+            target_here *= rh.powf(gain);
+            target_beneath *= rb.powf(gain);
+        }
+
+        let mut target = (
             target_above.clamp(self.config.floor, 3.0),
             target_here.clamp(self.config.floor, 2.5),
             target_beneath.clamp(self.config.floor, 3.0),
         );
+
+        if self.config.mean_normalize_gain > 0.0 {
+            let mean = (target.0 + target.1 + target.2) / 3.0;
+            if mean.is_finite() && mean > 0.0 {
+                let gain = self.config.mean_normalize_gain.clamp(0.0, 1.0);
+                let norm_factor = 1.0 / mean;
+                let blend = (1.0 - gain) + gain * norm_factor;
+                target.0 = (target.0 * blend).clamp(self.config.floor, 3.0);
+                target.1 = (target.1 * blend).clamp(self.config.floor, 2.5);
+                target.2 = (target.2 * blend).clamp(self.config.floor, 3.0);
+            }
+        }
         self.last_weights = (
             Self::lerp(self.last_weights.0, target.0, 1.0 - inertia),
             Self::lerp(self.last_weights.1, target.1, 1.0 - inertia),
