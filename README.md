@@ -85,6 +85,15 @@ SpiralTorch’s “learning stack” is a set of minimal, runnable training base
 - **Coherence (Python, Text→ZSpace VAE):** `PYTHONNOUSERSITE=1 python3 -S -s models/python/zspace_text_vae.py models/samples/spiral_corpus_en --mellin ramp`
 - **Training (Lightning/selfsup):** `cargo run -p st-nn --example modelzoo_lightning_selfsup_minimal`
 
+### 🌐 WebAssembly (WASM) demos (not a stub)
+
+SpiralTorch’s WASM bindings are now **fully runnable** in the browser: geometry evaluation, small training loops, and WebGPU visualisation work end-to-end.
+
+- **Mellin log grid (WASM):** evaluate meshes + run a tiny “match reference” training loop  
+  `bash scripts/wasm_demo.sh mellin-log-grid dev`
+- **Canvas hypertrain (WASM):** `FractalCanvas` learning loop + WebGPU trail + FFT probe + **target-MSE supervised mode**  
+  `bash scripts/wasm_demo.sh canvas-hypertrain dev`
+
 ### Why SpiralTorch  
 
 Modern ML stacks were built around CUDA—fast, but closed and rigid.  
