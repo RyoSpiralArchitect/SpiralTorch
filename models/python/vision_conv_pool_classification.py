@@ -16,6 +16,8 @@ if (_ROOT / "spiraltorch").is_dir():
 
 import spiraltorch as st
 
+import _softlogic_cli
+
 FORMAT = "st-vision-conv-pool-classification-v1"
 RUN_SCHEMA = "st.modelzoo.run.v1"
 
@@ -170,7 +172,8 @@ def main() -> None:
             "[--backend cpu|wgpu|cuda|hip|auto] "
             "[--events PATH] [--events-types A,B,C] "
             "[--atlas] [--atlas-bound N] [--atlas-district NAME] "
-            "[--run-dir PATH]"
+            "[--run-dir PATH] "
+            f"{_softlogic_cli.usage_flags()}"
         )
         return
 
@@ -206,6 +209,7 @@ def main() -> None:
     atlas_district = "Training"
 
     args = list(sys.argv[1:])
+    softlogic_cli = _softlogic_cli.pop_softlogic_flags(args)
     it = iter(args)
     for flag in it:
         if flag == "--load":
@@ -289,6 +293,7 @@ def main() -> None:
         hyper_learning_rate=lr,
         fallback_learning_rate=lr,
     )
+    softlogic_meta = _softlogic_cli.apply_softlogic_cli(trainer, softlogic_cli)
     schedule = trainer.roundtable(
         batch,
         1,
@@ -318,6 +323,7 @@ def main() -> None:
         "atlas": atlas,
         "atlas_bound": atlas_bound if atlas else None,
         "atlas_district": atlas_district if atlas else None,
+        "softlogic": softlogic_meta,
         "weights_loaded_from": str(load_weights) if load_weights is not None else None,
     }
     _write_json(run_dir / "run.json", run_meta)

@@ -16,6 +16,8 @@ if (_ROOT / "spiraltorch").is_dir():
 
 import spiraltorch as st
 
+import _softlogic_cli
+
 FORMAT = "st-char-lm-wave-rnn-mixer-v1"
 DEFAULT_UNK = "\uFFFD"
 
@@ -554,7 +556,8 @@ def main() -> None:
             "[--events PATH] [--events-types A,B,C] "
             "[--atlas] [--atlas-bound N] [--atlas-district NAME] "
             "[--desire] [--desire-concepts N] [--desire-prime N] [--desire-blend F] [--desire-drift-gain F] "
-            "[--run-dir PATH]"
+            "[--run-dir PATH] "
+            f"{_softlogic_cli.usage_flags()}"
         )
         return
 
@@ -657,6 +660,8 @@ def main() -> None:
         )
         if checkpoint_every == 0 and weights_format == "bincode":
             checkpoint_every = 1
+
+    softlogic_cli = _softlogic_cli.pop_softlogic_flags(args)
 
     it = iter(args)
     for flag in it:
@@ -939,7 +944,6 @@ def main() -> None:
         "desire_drift_gain": desire_drift_gain if desire else None,
         "weights_loaded_from": str(load_weights) if load_weights is not None else None,
     }
-    _write_json(run_dir / "run.json", run_meta)
 
     model.attach_hypergrad(curvature=curvature, learning_rate=lr)
     trainer = st.nn.ModuleTrainer(
@@ -948,6 +952,9 @@ def main() -> None:
         hyper_learning_rate=lr,
         fallback_learning_rate=lr,
     )
+    softlogic_meta = _softlogic_cli.apply_softlogic_cli(trainer, softlogic_cli)
+    run_meta["softlogic"] = softlogic_meta
+    _write_json(run_dir / "run.json", run_meta)
     if infuse is not None:
         if infuse_mode is None:
             if infuse_every == "once":

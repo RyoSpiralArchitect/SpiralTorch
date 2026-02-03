@@ -16,6 +16,8 @@ if (_ROOT / "spiraltorch").is_dir():
 
 import spiraltorch as st
 
+import _softlogic_cli
+
 FORMAT = "st-char-lm-coherence-v1"
 DEFAULT_UNK = "\uFFFD"
 
@@ -324,7 +326,8 @@ def main() -> None:
             "[--events PATH] [--events-types A,B,C] "
             "[--atlas] [--atlas-bound N] [--atlas-district NAME] "
             "[--desire] [--desire-concepts N] [--desire-prime N] [--desire-blend F] [--desire-drift-gain F] "
-            "[--run-dir PATH]"
+            "[--run-dir PATH] "
+            f"{_softlogic_cli.usage_flags()}"
         )
         return
 
@@ -371,6 +374,7 @@ def main() -> None:
     desire_blend = 0.35
     desire_drift_gain = 0.35
 
+    softlogic_cli = _softlogic_cli.pop_softlogic_flags(args)
     it = iter(args)
     for flag in it:
         if flag == "--load":
@@ -550,7 +554,6 @@ def main() -> None:
         "symbols_count": len(symbols),
         "weights_loaded_from": str(load_weights) if load_weights is not None else None,
     }
-    _write_json(run_dir / "run.json", run_meta)
 
     model.attach_hypergrad(curvature=curvature, learning_rate=lr)
     trainer = st.nn.ModuleTrainer(
@@ -559,6 +562,9 @@ def main() -> None:
         hyper_learning_rate=lr,
         fallback_learning_rate=lr,
     )
+    softlogic_meta = _softlogic_cli.apply_softlogic_cli(trainer, softlogic_cli)
+    run_meta["softlogic"] = softlogic_meta
+    _write_json(run_dir / "run.json", run_meta)
     desire_pipeline: st.nn.DesirePipeline | None = None
     if desire:
         desire_bundle = st.nn.DesireTelemetryBundle(

@@ -11,6 +11,8 @@ if (_ROOT / "spiraltorch").is_dir():
 import spiraltorch as st
 from spiraltorch import plugin
 
+import _softlogic_cli
+
 
 def _native_feature_flags() -> dict[str, bool]:
     try:
@@ -60,13 +62,18 @@ def _require_backend_available(backend: str) -> None:
 
 def main() -> None:
     backend = "cpu"
-    args = sys.argv[1:]
+    args = list(sys.argv[1:])
+    _softlogic_cli_state = _softlogic_cli.pop_softlogic_flags(args)
     it = iter(args)
     for flag in it:
         if flag == "--backend":
             backend = str(next(it)).strip().lower()
         elif flag in {"-h", "--help"}:
-            print("usage: PYTHONNOUSERSITE=1 python3 -S -s models/python/mlp_regression.py [--backend cpu|wgpu|cuda|hip|auto]")
+            print(
+                "usage: PYTHONNOUSERSITE=1 python3 -S -s models/python/mlp_regression.py "
+                "[--backend cpu|wgpu|cuda|hip|auto] "
+                f"{_softlogic_cli.usage_flags()}"
+            )
             return
         else:
             raise ValueError(f"unknown flag: {flag}")
@@ -89,6 +96,7 @@ def main() -> None:
         hyper_learning_rate=1e-2,
         fallback_learning_rate=1e-2,
     )
+    _softlogic_cli.apply_softlogic_cli(trainer, _softlogic_cli_state)
     schedule = trainer.roundtable(
         batch,
         out_dim,

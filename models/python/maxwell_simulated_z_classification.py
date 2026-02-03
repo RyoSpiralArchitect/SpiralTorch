@@ -16,6 +16,8 @@ if (_ROOT / "spiraltorch").is_dir():
 
 import spiraltorch as st
 
+import _softlogic_cli
+
 FORMAT = "st-core-maxwell-simulated-z-classification-v1"
 RUN_SCHEMA = "st.modelzoo.run.v1"
 
@@ -148,7 +150,8 @@ def main() -> None:
             "[--backend cpu|wgpu|cuda|hip|auto] "
             "[--events PATH] [--events-types A,B,C] "
             "[--atlas] [--atlas-bound N] [--atlas-district NAME] "
-            "[--run-dir PATH] [--seed N] [--val-batches N]"
+            "[--run-dir PATH] [--seed N] [--val-batches N] "
+            f"{_softlogic_cli.usage_flags()}"
         )
         return
 
@@ -179,6 +182,7 @@ def main() -> None:
     atlas_district = "Training"
 
     args = list(sys.argv[1:])
+    softlogic_cli = _softlogic_cli.pop_softlogic_flags(args)
     it = iter(args)
     for flag in it:
         if flag == "--epochs":
@@ -258,6 +262,7 @@ def main() -> None:
         hyper_learning_rate=lr,
         fallback_learning_rate=lr,
     )
+    softlogic_meta = _softlogic_cli.apply_softlogic_cli(trainer, softlogic_cli)
     schedule = trainer.roundtable(
         batch,
         2,
@@ -290,6 +295,7 @@ def main() -> None:
         "atlas": atlas,
         "atlas_bound": atlas_bound if atlas else None,
         "atlas_district": atlas_district if atlas else None,
+        "softlogic": softlogic_meta,
         "val_batches": val_batches if val_batches > 0 else None,
     }
     _write_json(run_dir / "run.json", run_meta)
