@@ -867,6 +867,7 @@ def main() -> None:
 
     train_tokens = tokens
     val_tokens: list[int] = []
+    requested_val_batches = val_batches
     if val_batches > 0:
         split_idx = int(float(len(tokens)) * (1.0 - float(val_split)))
         split_idx = max(0, min(len(tokens), split_idx))
@@ -874,6 +875,15 @@ def main() -> None:
         val_tokens = tokens[split_idx:]
         if len(train_tokens) <= steps + 1 or len(val_tokens) <= steps + 1:
             # If the text is too short, just disable validation to avoid confusing errors.
+            print(
+                "[warn] disabling validation: data too short for the requested val split/batches "
+                f"(tokens={len(tokens)}, train={len(train_tokens)}, val={len(val_tokens)}, "
+                f"steps={steps}, val_split={val_split}, val_batches={requested_val_batches}). "
+                "Tip: pass a longer text or a folder of .txt files, increase --val-split, "
+                "reduce --steps, or set --val-batches 0 to disable validation explicitly.",
+                file=sys.stderr,
+                flush=True,
+            )
             train_tokens = tokens
             val_tokens = []
             val_batches = 0
