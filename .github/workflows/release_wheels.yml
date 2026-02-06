@@ -84,6 +84,18 @@ jobs:
           import spiraltorch as st
 
           print("import ok:", len(getattr(st, "__all__", ())))
+          assert hasattr(st, "MaxwellFingerprint")
+          fp = st.MaxwellFingerprint(
+              gamma=1.0,
+              modulation_depth=1.0,
+              tissue_response=1.0,
+              shielding_db=0.0,
+              transmit_gain=1.0,
+              polarization_angle=0.0,
+              distance_m=1.0,
+          )
+          z_curve = fp.expected_z_curve(blocks=64, sigma=1.0, kappa=1.0)
+          assert len(z_curve) == 64
           assert hasattr(st, "optim")
           assert hasattr(st.optim, "Amegagrad")
 
