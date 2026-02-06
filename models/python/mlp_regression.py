@@ -62,16 +62,24 @@ def _require_backend_available(backend: str) -> None:
 
 def main() -> None:
     backend = "cpu"
+    activation = "relu"
+    norm = "none"
     args = list(sys.argv[1:])
     _softlogic_cli_state = _softlogic_cli.pop_softlogic_flags(args)
     it = iter(args)
     for flag in it:
         if flag == "--backend":
             backend = str(next(it)).strip().lower()
+        elif flag == "--activation":
+            activation = str(next(it)).strip().lower()
+        elif flag == "--norm":
+            norm = str(next(it)).strip().lower()
         elif flag in {"-h", "--help"}:
             print(
                 "usage: PYTHONNOUSERSITE=1 python3 -S -s models/python/mlp_regression.py "
                 "[--backend cpu|wgpu|cuda|hip|auto] "
+                "[--activation relu|gelu] "
+                "[--norm none|layer|zspace|batch|zbatch] "
                 f"{_softlogic_cli.usage_flags()}"
             )
             return
@@ -89,6 +97,7 @@ def main() -> None:
     batch = 8
     in_dim = 2
     out_dim = 1
+    hidden = 8
 
     trainer = st.nn.ModuleTrainer(
         backend=backend,
@@ -104,9 +113,28 @@ def main() -> None:
     )
 
     model = st.nn.Sequential()
-    model.add(st.nn.Linear("l1", in_dim, 8))
-    model.add(st.nn.Relu())
-    model.add(st.nn.Linear("l2", 8, out_dim))
+    model.add(st.nn.Linear("l1", in_dim, hidden))
+    if activation == "relu":
+        model.add(st.nn.Relu())
+    elif activation == "gelu":
+        model.add(st.nn.Gelu())
+    else:
+        raise ValueError(f"unknown --activation: {activation} (expected relu|gelu)")
+
+    if norm == "none":
+        pass
+    elif norm == "layer":
+        model.add(st.nn.LayerNorm("ln1", hidden, curvature=-1.0, epsilon=1e-5))
+    elif norm == "zspace":
+        model.add(st.nn.ZSpaceLayerNorm("ln1", hidden, curvature=-1.0, epsilon=1e-5))
+    elif norm == "batch":
+        model.add(st.nn.BatchNorm1d("bn1", hidden, momentum=0.1, epsilon=1e-5))
+    elif norm == "zbatch":
+        model.add(st.nn.ZSpaceBatchNorm1d("bn1", hidden, curvature=-1.0, momentum=0.1, epsilon=1e-5))
+    else:
+        raise ValueError(f"unknown --norm: {norm} (expected none|layer|zspace|batch|zbatch)")
+
+    model.add(st.nn.Linear("l2", hidden, out_dim))
     model.attach_hypergrad(curvature=-1.0, learning_rate=1e-2)
 
     loss = st.nn.MeanSquaredError()
@@ -129,9 +157,20 @@ def main() -> None:
     restored = st.nn.load(str(manifest_path))
 
     reloaded = st.nn.Sequential()
-    reloaded.add(st.nn.Linear("l1", in_dim, 8))
-    reloaded.add(st.nn.Relu())
-    reloaded.add(st.nn.Linear("l2", 8, out_dim))
+    reloaded.add(st.nn.Linear("l1", in_dim, hidden))
+    if activation == "relu":
+        reloaded.add(st.nn.Relu())
+    else:
+        reloaded.add(st.nn.Gelu())
+    if norm == "layer":
+        reloaded.add(st.nn.LayerNorm("ln1", hidden, curvature=-1.0, epsilon=1e-5))
+    elif norm == "zspace":
+        reloaded.add(st.nn.ZSpaceLayerNorm("ln1", hidden, curvature=-1.0, epsilon=1e-5))
+    elif norm == "batch":
+        reloaded.add(st.nn.BatchNorm1d("bn1", hidden, momentum=0.1, epsilon=1e-5))
+    elif norm == "zbatch":
+        reloaded.add(st.nn.ZSpaceBatchNorm1d("bn1", hidden, curvature=-1.0, momentum=0.1, epsilon=1e-5))
+    reloaded.add(st.nn.Linear("l2", hidden, out_dim))
     reloaded.load_state_dict(restored)
     _ = reloaded.forward(x)
 

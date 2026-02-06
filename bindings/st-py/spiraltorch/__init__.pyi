@@ -2,7 +2,7 @@
 # so it is shipped in the published wheel (PEP 561).
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Iterable, Iterator, List, Literal, Mapping, Optional, Sequence, Tuple, overload
+from typing import Any, Callable, ContextManager, Dict, Iterable, Iterator, List, Literal, Mapping, Optional, Sequence, Tuple, overload
 from types import ModuleType
 
 from .optim import Amegagrad, amegagrad
@@ -2216,13 +2216,21 @@ class _NnNonLiner:
 
 
 class _NnDropout:
-    def __init__(self, probability: float, *, seed: int | None = ...) -> None: ...
+    def __init__(
+        self,
+        probability: float,
+        *,
+        seed: int | None = ...,
+        training: bool = ...,
+    ) -> None: ...
 
     def forward(self, input: Tensor) -> Tensor: ...
 
     def backward(self, input: Tensor, grad_output: Tensor) -> Tensor: ...
 
     def __call__(self, x: Tensor) -> Tensor: ...
+
+    def set_training(self, training: bool) -> None: ...
 
     def train(self) -> None: ...
 
@@ -2233,9 +2241,6 @@ class _NnDropout:
 
     @property
     def training(self) -> bool: ...
-
-    @training.setter
-    def training(self, value: bool) -> None: ...
 
 
 class _NnDataset:
@@ -2961,6 +2966,229 @@ class _NnRelu:
     def __call__(self, x: Tensor) -> Tensor: ...
 
 
+class _NnGelu:
+    def __init__(self) -> None: ...
+
+    def forward(self, input: Tensor) -> Tensor: ...
+
+    def backward(self, input: Tensor, grad_output: Tensor) -> Tensor: ...
+
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+
+class _NnLayerNorm:
+    def __init__(self, name: str, features: int, curvature: float, epsilon: float) -> None: ...
+
+    def forward(self, input: Tensor) -> Tensor: ...
+
+    def backward(self, input: Tensor, grad_output: Tensor) -> Tensor: ...
+
+    def attach_hypergrad(
+        self,
+        curvature: float,
+        learning_rate: float,
+        *,
+        topos: OpenCartesianTopos | None = ...,
+    ) -> None: ...
+
+    def attach_realgrad(self, learning_rate: float) -> None: ...
+
+    def zero_accumulators(self) -> None: ...
+
+    def apply_step(self, fallback_lr: float) -> None: ...
+
+    def state_dict(self) -> List[Tuple[str, Tensor]]: ...
+
+    def load_state_dict(self, state: Sequence[Tuple[str, Tensor]]) -> None: ...
+
+    @property
+    def features(self) -> int: ...
+
+    @property
+    def curvature(self) -> float: ...
+
+    @property
+    def epsilon(self) -> float: ...
+
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+
+class _NnZSpaceLayerNorm:
+    def __init__(
+        self,
+        name: str,
+        features: int,
+        curvature: float,
+        epsilon: float,
+        *,
+        projector_gain: float = ...,
+    ) -> None: ...
+
+    def forward(self, input: Tensor) -> Tensor: ...
+
+    def backward(self, input: Tensor, grad_output: Tensor) -> Tensor: ...
+
+    def attach_hypergrad(
+        self,
+        curvature: float,
+        learning_rate: float,
+        *,
+        topos: OpenCartesianTopos | None = ...,
+    ) -> None: ...
+
+    def attach_realgrad(self, learning_rate: float) -> None: ...
+
+    def zero_accumulators(self) -> None: ...
+
+    def apply_step(self, fallback_lr: float) -> None: ...
+
+    def state_dict(self) -> List[Tuple[str, Tensor]]: ...
+
+    def load_state_dict(self, state: Sequence[Tuple[str, Tensor]]) -> None: ...
+
+    @property
+    def features(self) -> int: ...
+
+    @property
+    def curvature(self) -> float: ...
+
+    @property
+    def epsilon(self) -> float: ...
+
+    @property
+    def projector_gain(self) -> float: ...
+
+    def set_projector_gain(self, gain: float) -> None: ...
+
+    def adapt_projector_gain(self, target_radius: float, smoothing: float) -> float: ...
+
+    def telemetry(self, *, full: bool = ...) -> Dict[str, Any] | None: ...
+
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+
+class _NnBatchNorm1d:
+    def __init__(
+        self,
+        name: str,
+        features: int,
+        momentum: float,
+        epsilon: float,
+        *,
+        training: bool = ...,
+    ) -> None: ...
+
+    def forward(self, input: Tensor) -> Tensor: ...
+
+    def backward(self, input: Tensor, grad_output: Tensor) -> Tensor: ...
+
+    def set_training(self, training: bool) -> None: ...
+
+    def train(self) -> None: ...
+
+    def eval(self) -> None: ...
+
+    @property
+    def training(self) -> bool: ...
+
+    def attach_hypergrad(
+        self,
+        curvature: float,
+        learning_rate: float,
+        *,
+        topos: OpenCartesianTopos | None = ...,
+    ) -> None: ...
+
+    def attach_realgrad(self, learning_rate: float) -> None: ...
+
+    def zero_accumulators(self) -> None: ...
+
+    def apply_step(self, fallback_lr: float) -> None: ...
+
+    def state_dict(self) -> List[Tuple[str, Tensor]]: ...
+
+    def load_state_dict(self, state: Sequence[Tuple[str, Tensor]]) -> None: ...
+
+    @property
+    def features(self) -> int: ...
+
+    @property
+    def momentum(self) -> float: ...
+
+    @property
+    def epsilon(self) -> float: ...
+
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+
+class _NnZSpaceBatchNorm1d:
+    def __init__(
+        self,
+        name: str,
+        features: int,
+        curvature: float,
+        momentum: float,
+        epsilon: float,
+        *,
+        projector_gain: float = ...,
+        training: bool = ...,
+    ) -> None: ...
+
+    def forward(self, input: Tensor) -> Tensor: ...
+
+    def backward(self, input: Tensor, grad_output: Tensor) -> Tensor: ...
+
+    def set_training(self, training: bool) -> None: ...
+
+    def train(self) -> None: ...
+
+    def eval(self) -> None: ...
+
+    @property
+    def training(self) -> bool: ...
+
+    def attach_hypergrad(
+        self,
+        curvature: float,
+        learning_rate: float,
+        *,
+        topos: OpenCartesianTopos | None = ...,
+    ) -> None: ...
+
+    def attach_realgrad(self, learning_rate: float) -> None: ...
+
+    def zero_accumulators(self) -> None: ...
+
+    def apply_step(self, fallback_lr: float) -> None: ...
+
+    def state_dict(self) -> List[Tuple[str, Tensor]]: ...
+
+    def load_state_dict(self, state: Sequence[Tuple[str, Tensor]]) -> None: ...
+
+    @property
+    def features(self) -> int: ...
+
+    @property
+    def curvature(self) -> float: ...
+
+    @property
+    def momentum(self) -> float: ...
+
+    @property
+    def epsilon(self) -> float: ...
+
+    @property
+    def projector_gain(self) -> float: ...
+
+    def set_projector_gain(self, gain: float) -> None: ...
+
+    def adapt_projector_gain(self, target_radius: float, smoothing: float) -> float: ...
+
+    def telemetry(self, *, full: bool = ...) -> Dict[str, Any] | None: ...
+
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+
 class _NnSequential:
     def __init__(self) -> None: ...
 
@@ -2987,6 +3215,15 @@ class _NnSequential:
     def apply_step(self, fallback_lr: float) -> None: ...
 
     def infuse_text(self, text: str) -> None: ...
+
+    def set_training(self, training: bool) -> None: ...
+
+    def train(self) -> None: ...
+
+    def eval(self) -> None: ...
+
+    @property
+    def training(self) -> bool: ...
 
     def state_dict(self) -> List[Tuple[str, Tensor]]: ...
 
@@ -3334,6 +3571,15 @@ class _NnModuleTrainer:
         schedule: _NnRoundtableSchedule,
     ) -> _NnEpochStats: ...
 
+    @property
+    def grad_clip_max_norm(self) -> float | None: ...
+
+    def set_grad_clip_max_norm(self, max_norm: float) -> None: ...
+
+    def clear_grad_clip_max_norm(self) -> None: ...
+
+    def mul_learning_rate(self, module: object, factor: float) -> None: ...
+
 
 class _NnScaler:
     def __init__(self, name: str, features: int) -> None: ...
@@ -3391,6 +3637,11 @@ class _NnModule(ModuleType):
     ZSpaceCoherenceScan: type[_NnZSpaceCoherenceScan]
     ZSpaceCoherenceWaveBlock: type[_NnZSpaceCoherenceWaveBlock]
     Relu: type[_NnRelu]
+    Gelu: type[_NnGelu]
+    LayerNorm: type[_NnLayerNorm]
+    ZSpaceLayerNorm: type[_NnZSpaceLayerNorm]
+    BatchNorm1d: type[_NnBatchNorm1d]
+    ZSpaceBatchNorm1d: type[_NnZSpaceBatchNorm1d]
     Sequential: type[_NnSequential]
     MeanSquaredError: type[_NnMeanSquaredError]
     CategoricalCrossEntropy: type[_NnCategoricalCrossEntropy]
@@ -3453,6 +3704,7 @@ class _NnModule(ModuleType):
         target: object | None,
         path: str,
     ) -> List[Tuple[str, Tensor]] | None: ...
+    def eval_mode(module: object) -> ContextManager[None]: ...
 
 
 nn: _NnModule
@@ -3487,6 +3739,26 @@ class ZSpaceCoherenceWaveBlock(_NnZSpaceCoherenceWaveBlock):
 
 
 class Relu(_NnRelu):
+    ...
+
+
+class Gelu(_NnGelu):
+    ...
+
+
+class LayerNorm(_NnLayerNorm):
+    ...
+
+
+class ZSpaceLayerNorm(_NnZSpaceLayerNorm):
+    ...
+
+
+class BatchNorm1d(_NnBatchNorm1d):
+    ...
+
+
+class ZSpaceBatchNorm1d(_NnZSpaceBatchNorm1d):
     ...
 
 

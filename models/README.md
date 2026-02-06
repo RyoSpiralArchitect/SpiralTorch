@@ -15,7 +15,7 @@ copy-pastable models that act as reference implementations for both Python and R
 - Run outputs: `models/runs/<timestamp>/` (e.g. `run.json`, `metrics.jsonl`, `samples/`, `weights.json` / `weights.bin`)
 - Python scripts accept `--backend cpu|wgpu|cuda|hip|auto`, `--events <path>`, `--atlas`, `--desire` (applies offsets during sampling), and `--softlogic-*` tuning flags (captured in `run.json`).
 - WGPU quickstart (build + run): `bash scripts/wgpu_quickstart.sh`
-- Python: `PYTHONNOUSERSITE=1 python3 -S -s models/python/mlp_regression.py`
+- Python: `PYTHONNOUSERSITE=1 python3 -S -s models/python/mlp_regression.py [--activation gelu --norm zspace]`
 - Python (classification): `PYTHONNOUSERSITE=1 python3 -S -s models/python/zconv_classification.py`
 - Python (vision + pooling): `PYTHONNOUSERSITE=1 python3 -S -s models/python/vision_conv_pool_classification.py`
 - Python (Mellin log-grid classification): `PYTHONNOUSERSITE=1 python3 -S -s models/python/mellin_log_grid_classification.py --val-batches 4`

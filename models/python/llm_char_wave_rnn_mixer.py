@@ -313,8 +313,43 @@ def _build_model(
     mixer_depth: int,
     curvature: float,
     temperature: float,
+    norm: str = "none",
+    dropout: float = 0.0,
+    dropout_seed: int | None = None,
 ) -> st.nn.Sequential:
     mixer_depth = max(1, int(mixer_depth))
+    norm = str(norm).strip().lower()
+    dropout = float(dropout)
+    if dropout < 0.0 or dropout >= 1.0:
+        raise ValueError("--dropout must be within [0, 1)")
+
+    def _maybe_add_norm(name: str) -> None:
+        if norm == "none":
+            return
+        if norm == "layer":
+            model.add(st.nn.LayerNorm(name, hidden, curvature=curvature, epsilon=1e-5))
+        elif norm == "zspace":
+            model.add(st.nn.ZSpaceLayerNorm(name, hidden, curvature=curvature, epsilon=1e-5))
+        elif norm == "batch":
+            model.add(st.nn.BatchNorm1d(name, hidden, momentum=0.1, epsilon=1e-5))
+        elif norm == "zbatch":
+            model.add(
+                st.nn.ZSpaceBatchNorm1d(
+                    name,
+                    hidden,
+                    curvature=curvature,
+                    momentum=0.1,
+                    epsilon=1e-5,
+                )
+            )
+        else:
+            raise ValueError(f"unknown norm mode: {norm}")
+
+    def _maybe_add_dropout(offset: int) -> None:
+        if dropout <= 0.0:
+            return
+        seed = None if dropout_seed is None else int(dropout_seed) + int(offset)
+        model.add(st.nn.Dropout(dropout, seed=seed))
 
     model = st.nn.Sequential()
     model.add(st.nn.Embedding("embed", vocab_size, embed_dim))
@@ -341,9 +376,13 @@ def _build_model(
             padding=padding,
         )
     )
+    _maybe_add_norm("norm_wrnn")
+    _maybe_add_dropout(100)
     for depth in range(mixer_depth):
         model.add(st.nn.ZSpaceMixer(f"mixer_{depth}", hidden))
         model.add(st.nn.WaveGate(f"gate_{depth}", hidden, curvature, temperature))
+        _maybe_add_norm(f"norm_{depth}")
+        _maybe_add_dropout(200 + depth)
     model.add(st.nn.Linear("head", hidden, vocab_size))
     model.add(st.nn.ZSpaceSoftmax(curvature, temperature))
     return model
@@ -415,10 +454,11 @@ def _evaluate_loss(
     if not batches:
         return float("nan")
     total = 0.0
-    for x, y in batches:
-        pred = model.forward(x)
-        value = loss.forward(pred, y).tolist()
-        total += float(value[0][0])
+    with st.nn.eval_mode(model):
+        for x, y in batches:
+            pred = model.forward(x)
+            value = loss.forward(pred, y).tolist()
+            total += float(value[0][0])
     return total / float(len(batches))
 
 
@@ -513,18 +553,19 @@ def _generate(
         context = context[-steps:]
 
     out = prompt
-    for _ in range(gen_len):
-        x = st.Tensor(1, steps, [float(i) for i in context])
-        probs = model.forward(x)
-        row = probs.tolist()[0]
-        if desire is not None:
-            step = desire.step(_logits_from_probs([float(v) for v in row]), context[-1])
-            row = _apply_desire_offsets_to_probs([float(v) for v in row], step)
-        else:
-            row = [float(v) for v in row]
-        next_idx = _sample_topk(row, top_k, rng)
-        out += symbols[next_idx]
-        context = context[1:] + [next_idx]
+    with st.nn.eval_mode(model):
+        for _ in range(gen_len):
+            x = st.Tensor(1, steps, [float(i) for i in context])
+            probs = model.forward(x)
+            row = probs.tolist()[0]
+            if desire is not None:
+                step = desire.step(_logits_from_probs([float(v) for v in row]), context[-1])
+                row = _apply_desire_offsets_to_probs([float(v) for v in row], step)
+            else:
+                row = [float(v) for v in row]
+            next_idx = _sample_topk(row, top_k, rng)
+            out += symbols[next_idx]
+            context = context[1:] + [next_idx]
     return out
 
 
@@ -547,7 +588,10 @@ def main() -> None:
             "[--load weights.json] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] "
             "[--kernel N] [--stride N] [--padding N] "
             "[--mixer-depth N] "
+            "[--norm none|layer|zspace|batch|zbatch] "
+            "[--dropout F] [--dropout-seed N] "
             "[--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] "
+            "[--lr-schedule constant|linear|cosine] [--lr-min F] [--grad-clip F] "
             "[--gen N] [--topk N] [--seed N] [--prompt STR] "
             "[--infuse STR] [--infuse-every once|epoch|batch] [--infuse-mode blend|separate] "
             "[--backend cpu|wgpu|cuda|hip|auto] "
@@ -580,10 +624,16 @@ def main() -> None:
     stride = 1
     padding: int | None = None
     mixer_depth = 1
+    norm = "none"
+    dropout = 0.0
+    dropout_seed: int | None = None
     epochs = 6
     batches_per_epoch = 24
     batch = 8
     lr = 2e-2
+    lr_schedule = "constant"
+    lr_min: float | None = None
+    grad_clip = 0.0
     curvature = -1.0
     temperature = 1.0
     gen_len = 200
@@ -614,6 +664,8 @@ def main() -> None:
     desire_prime = 16
     desire_blend = 0.35
     desire_drift_gain = 0.35
+    dropout_from_cli = False
+    dropout_seed_from_cli = False
 
     # Apply presets before parsing other flags so explicit args override defaults.
     if "--preset" in args:
@@ -683,6 +735,14 @@ def main() -> None:
             padding = int(next(it))
         elif flag == "--mixer-depth":
             mixer_depth = int(next(it))
+        elif flag == "--norm":
+            norm = str(next(it)).strip().lower()
+        elif flag == "--dropout":
+            dropout = float(next(it))
+            dropout_from_cli = True
+        elif flag == "--dropout-seed":
+            dropout_seed = int(next(it))
+            dropout_seed_from_cli = True
         elif flag == "--epochs":
             epochs = int(next(it))
         elif flag == "--batches":
@@ -691,6 +751,12 @@ def main() -> None:
             batch = int(next(it))
         elif flag == "--lr":
             lr = float(next(it))
+        elif flag == "--lr-schedule":
+            lr_schedule = str(next(it)).strip().lower()
+        elif flag == "--lr-min":
+            lr_min = float(next(it))
+        elif flag == "--grad-clip":
+            grad_clip = float(next(it))
         elif flag == "--curvature":
             curvature = float(next(it))
         elif flag == "--temperature":
@@ -782,6 +848,20 @@ def main() -> None:
     if infuse_mode is not None and infuse is None:
         raise ValueError("--infuse-mode requires --infuse")
 
+    if norm not in {"none", "layer", "zspace", "batch", "zbatch"}:
+        raise ValueError(
+            f"unknown --norm: {norm} (expected none|layer|zspace|batch|zbatch)"
+        )
+    if dropout < 0.0 or dropout >= 1.0:
+        raise ValueError("--dropout must be within [0, 1)")
+    if lr_schedule not in {"constant", "linear", "cosine"}:
+        raise ValueError(
+            f"unknown --lr-schedule: {lr_schedule} (expected constant|linear|cosine)"
+        )
+    if lr_min is not None and (not math.isfinite(lr_min) or lr_min <= 0.0):
+        raise ValueError("--lr-min must be a positive, finite float")
+    if not math.isfinite(grad_clip) or grad_clip < 0.0:
+        raise ValueError("--grad-clip must be a finite float >= 0")
     _require_backend_available(backend)
 
     data_files = _collect_text_files(data_paths)
@@ -807,6 +887,8 @@ def main() -> None:
     if atlas and events_path is None:
         events_path = run_dir / "events.jsonl"
 
+    requested_norm = norm
+    requested_dropout = dropout
     if load_weights is not None:
         meta_path = _meta_path_for_weights(load_weights)
         meta = _load_meta(meta_path)
@@ -820,11 +902,34 @@ def main() -> None:
         stride = int(meta["stride"])
         padding = int(meta["padding"])
         mixer_depth = int(meta.get("mixer_depth", 1))
+        norm = str(meta.get("norm", "none")).strip().lower()
+        if not dropout_from_cli:
+            dropout = float(meta.get("dropout", dropout))
+        if not dropout_seed_from_cli and meta.get("dropout_seed") is not None:
+            try:
+                dropout_seed = int(meta["dropout_seed"])
+            except Exception:
+                dropout_seed = dropout_seed
+        if requested_norm != "none" and requested_norm != norm:
+            print(
+                f"[warn] ignoring --norm={requested_norm}: weights were trained with norm={norm}",
+                file=sys.stderr,
+                flush=True,
+            )
+        if requested_dropout > 0.0 and requested_dropout != dropout:
+            print(
+                f"[warn] overriding weights dropout={dropout} with --dropout={requested_dropout}",
+                file=sys.stderr,
+                flush=True,
+            )
+            dropout = requested_dropout
         curvature = float(meta["curvature"])
         temperature = float(meta["temperature"])
         symbols = [str(ch) for ch in meta["symbols"]]
         index = {ch: i for i, ch in enumerate(symbols)}
         vocab_size = len(symbols)
+        if dropout > 0.0 and dropout_seed is None:
+            dropout_seed = seed
         model = _build_model(
             vocab_size,
             steps,
@@ -836,11 +941,16 @@ def main() -> None:
             mixer_depth,
             curvature,
             temperature,
+            norm=norm,
+            dropout=dropout,
+            dropout_seed=dropout_seed,
         )
         st.nn.load(str(load_weights), model)
     else:
         _unk, symbols, index = _build_vocab(text, DEFAULT_UNK)
         vocab_size = len(symbols)
+        if dropout > 0.0 and dropout_seed is None:
+            dropout_seed = seed
         model = _build_model(
             vocab_size,
             steps,
@@ -852,6 +962,9 @@ def main() -> None:
             mixer_depth,
             curvature,
             temperature,
+            norm=norm,
+            dropout=dropout,
+            dropout_seed=dropout_seed,
         )
 
     tokens = _encode(text, index)
@@ -887,8 +1000,19 @@ def main() -> None:
             train_tokens = tokens
             val_tokens = []
             val_batches = 0
+    if requested_val_batches <= 0:
+        print(
+            "[warn] validation disabled (--val-batches 0): val_loss will be omitted.",
+            file=sys.stderr,
+            flush=True,
+        )
+
+    resolved_lr_min: float | None = None
+    if lr_schedule != "constant":
+        resolved_lr_min = float(lr_min) if lr_min is not None else float(lr) * 0.1
 
     meta_base = {
+        "arch": "llm_char_wave_rnn_mixer",
         "format": FORMAT,
         "preset": preset,
         "steps": steps,
@@ -898,8 +1022,15 @@ def main() -> None:
         "stride": stride,
         "padding": padding,
         "mixer_depth": mixer_depth,
+        "norm": norm,
+        "dropout": dropout,
+        "dropout_seed": dropout_seed,
+        "lr_schedule": lr_schedule,
+        "lr_min": resolved_lr_min,
+        "grad_clip": grad_clip if grad_clip > 0.0 else None,
         "curvature": curvature,
         "temperature": temperature,
+        "backend": backend,
         "parameter_count": parameter_count,
         "unk": symbols[0],
         "symbols": symbols,
@@ -920,10 +1051,16 @@ def main() -> None:
         "stride": stride,
         "padding": padding,
         "mixer_depth": mixer_depth,
+        "norm": norm,
+        "dropout": dropout,
+        "dropout_seed": dropout_seed,
         "epochs": epochs,
         "batches_per_epoch": batches_per_epoch,
         "batch": batch,
         "lr": lr,
+        "lr_schedule": lr_schedule,
+        "lr_min": resolved_lr_min,
+        "grad_clip": grad_clip if grad_clip > 0.0 else None,
         "curvature": curvature,
         "temperature": temperature,
         "backend": backend,
@@ -962,6 +1099,8 @@ def main() -> None:
         hyper_learning_rate=lr,
         fallback_learning_rate=lr,
     )
+    if grad_clip > 0.0:
+        trainer.set_grad_clip_max_norm(grad_clip)
     softlogic_meta = _softlogic_cli.apply_softlogic_cli(trainer, softlogic_cli)
     run_meta["softlogic"] = softlogic_meta
     _write_json(run_dir / "run.json", run_meta)
@@ -988,8 +1127,8 @@ def main() -> None:
     loss = st.nn.CategoricalCrossEntropy()
 
     print(
-        f"vocab={vocab_size} files={len(data_files)} chars={len(text)} steps={steps} embed={embed_dim} hidden={hidden} kernel={kernel} depth={mixer_depth} "
-        f"epochs={epochs} batch={batch} lr={lr:.3e} curvature={curvature} temp={temperature} "
+        f"vocab={vocab_size} files={len(data_files)} chars={len(text)} steps={steps} embed={embed_dim} hidden={hidden} kernel={kernel} depth={mixer_depth} norm={norm} drop={dropout:.3g} "
+        f"epochs={epochs} batch={batch} lr={lr:.3e} schedule={lr_schedule} grad_clip={grad_clip:.3g} curvature={curvature} temp={temperature} "
         f"backend={backend} params={parameter_count} weights={resolved_weights_format} run_dir={run_dir}"
     )
 
@@ -1008,6 +1147,16 @@ def main() -> None:
 
         best_metric = float("inf")
         best_epoch = None
+        lr_active = float(lr)
+        lr_floor = float(resolved_lr_min) if resolved_lr_min is not None else float(lr) * 0.1
+
+        def _scheduled_lr(epoch_idx: int) -> float:
+            if lr_schedule == "constant" or epochs <= 1:
+                return float(lr)
+            t = float(epoch_idx) / float(max(1, epochs - 1))
+            if lr_schedule == "linear":
+                return float(lr) + (lr_floor - float(lr)) * t
+            return lr_floor + 0.5 * (float(lr) - lr_floor) * (1.0 + math.cos(math.pi * t))
 
         val_batches_cache: list[tuple[st.Tensor, st.Tensor]] = []
         if val_batches > 0 and val_tokens:
@@ -1018,8 +1167,14 @@ def main() -> None:
                 )
 
         for epoch in range(max(0, epochs)):
+            target_lr = _scheduled_lr(epoch)
+            if lr_active > 0.0 and target_lr > 0.0:
+                factor = float(target_lr) / float(lr_active)
+                if factor == factor and abs(factor - 1.0) > 1e-9:
+                    trainer.mul_learning_rate(model, factor)
+                    lr_active = float(target_lr)
             print(
-                f"epoch[{epoch}] start batches={batches_per_epoch} batch={batch} backend={backend}",
+                f"epoch[{epoch}] start batches={batches_per_epoch} batch={batch} backend={backend} lr={lr_active:.3e}",
                 flush=True,
             )
             rng = random.Random(seed + epoch * 10_000)
@@ -1054,6 +1209,7 @@ def main() -> None:
                             "epoch": epoch,
                             "batches": int(stats.batches),
                             "average_loss": avg_loss,
+                            "learning_rate": lr_active,
                             "val_loss": val_loss if val_loss == val_loss else None,
                         },
                         ensure_ascii=False,
@@ -1130,11 +1286,11 @@ def main() -> None:
     meta = dict(meta_base)
     meta.update(
         {
-        "weights_format": resolved_weights_format,
-        "checkpoint_every": checkpoint_every,
-        "best_epoch": best_epoch,
-        "val_split": val_split if val_batches > 0 else None,
-        "val_batches": val_batches if val_batches > 0 else None,
+            "weights_format": resolved_weights_format,
+            "checkpoint_every": checkpoint_every,
+            "best_epoch": best_epoch,
+            "val_split": val_split if val_batches > 0 else None,
+            "val_batches": val_batches if val_batches > 0 else None,
         }
     )
     _save_meta(_meta_path_for_weights(weights_path), meta)

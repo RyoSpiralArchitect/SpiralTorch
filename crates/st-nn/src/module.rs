@@ -480,6 +480,26 @@ pub trait Module {
         Ok(())
     }
 
+    /// Enables or disables training mode.
+    ///
+    /// The default implementation is a no-op so stateless layers (or layers
+    /// without distinct training/evaluation behaviour) don't need to implement
+    /// it. Stateful layers such as dropout or batch normalisation should
+    /// override it to toggle their internal mode.
+    fn set_training(&mut self, _training: bool) -> PureResult<()> {
+        Ok(())
+    }
+
+    /// Convenience helper that switches the module into training mode.
+    fn train(&mut self) -> PureResult<()> {
+        self.set_training(true)
+    }
+
+    /// Convenience helper that switches the module into evaluation mode.
+    fn eval(&mut self) -> PureResult<()> {
+        self.set_training(false)
+    }
+
     /// Attaches a hypergrad tape to every parameter.
     fn attach_hypergrad(&mut self, curvature: f32, learning_rate: f32) -> PureResult<()> {
         self.visit_parameters_mut(&mut |param| param.attach_hypergrad(curvature, learning_rate))
