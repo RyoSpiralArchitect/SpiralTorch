@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import cmath as _cmath
+import contextlib as _contextlib
 import json as _json
 import math as _math
 import os as _os
@@ -3278,6 +3279,61 @@ def _install_plugin_helpers() -> None:
 
 def _install_nn_helpers() -> None:
     nn_module = _ensure_submodule("nn")
+
+    @_contextlib.contextmanager
+    def eval_mode(module: _Any):
+        """Temporarily switch a module into eval mode and restore afterwards."""
+
+        was_training: bool | None = None
+        try:
+            training_value = getattr(module, "training")
+            if isinstance(training_value, bool):
+                was_training = training_value
+        except Exception:
+            was_training = None
+
+        set_training = getattr(module, "set_training", None)
+        eval_fn = getattr(module, "eval", None)
+        train_fn = getattr(module, "train", None)
+
+        switched = False
+        try:
+            if callable(eval_fn):
+                eval_fn()
+                switched = True
+            elif callable(set_training):
+                set_training(False)
+                switched = True
+        except Exception:
+            switched = False
+
+        try:
+            yield
+        finally:
+            if not switched:
+                return
+            try:
+                if was_training is None:
+                    if callable(train_fn):
+                        train_fn()
+                    elif callable(set_training):
+                        set_training(True)
+                elif was_training:
+                    if callable(train_fn):
+                        train_fn()
+                    elif callable(set_training):
+                        set_training(True)
+                else:
+                    if callable(eval_fn):
+                        eval_fn()
+                    elif callable(set_training):
+                        set_training(False)
+            except Exception:
+                pass
+
+    nn_module.eval_mode = eval_mode
+    _register_module_export(nn_module, "eval_mode")
+
     save_json = _resolve_rs_attr("nn.save_json")
     load_json = _resolve_rs_attr("nn.load_json")
     save_bincode = _resolve_rs_attr("nn.save_bincode")

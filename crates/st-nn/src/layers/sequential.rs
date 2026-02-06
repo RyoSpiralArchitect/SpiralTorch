@@ -5,6 +5,7 @@
 
 use crate::module::{Module, Parameter};
 use crate::{PureResult, Tensor};
+use std::collections::HashMap;
 
 /// Sequential container that mirrors `nn.Sequential`.
 #[derive(Default)]
@@ -100,9 +101,33 @@ impl Module for Sequential {
         Ok(())
     }
 
+    fn state_dict(&self) -> PureResult<HashMap<String, Tensor>> {
+        let mut state = HashMap::new();
+        for layer in &self.layers {
+            for (name, value) in layer.state_dict()? {
+                state.insert(name, value);
+            }
+        }
+        Ok(state)
+    }
+
+    fn load_state_dict(&mut self, state: &HashMap<String, Tensor>) -> PureResult<()> {
+        for layer in &mut self.layers {
+            layer.load_state_dict(state)?;
+        }
+        Ok(())
+    }
+
     fn infuse_text(&mut self, text: &str) -> PureResult<()> {
         for layer in &mut self.layers {
             layer.infuse_text(text)?;
+        }
+        Ok(())
+    }
+
+    fn set_training(&mut self, training: bool) -> PureResult<()> {
+        for layer in &mut self.layers {
+            layer.set_training(training)?;
         }
         Ok(())
     }

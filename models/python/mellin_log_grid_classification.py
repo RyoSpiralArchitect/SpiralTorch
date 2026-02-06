@@ -22,6 +22,19 @@ FORMAT = "st-frac-mellin-log-grid-classification-v1"
 RUN_SCHEMA = "st.modelzoo.run.v1"
 
 
+def _meta_path_for_weights(weights_path: pathlib.Path) -> pathlib.Path:
+    name = weights_path.name
+    if name.endswith(".json"):
+        return weights_path.with_name(name[: -len(".json")] + ".meta.json")
+    return weights_path.with_name(name + ".meta.json")
+
+
+def _save_meta(meta_path: pathlib.Path, meta: dict[str, Any]) -> None:
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+    with meta_path.open("w", encoding="utf-8") as handle:
+        json.dump(meta, handle, ensure_ascii=False, indent=2)
+
+
 def _timestamp_slug() -> str:
     return _dt.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
 
@@ -163,6 +176,8 @@ def _build_model(
     padding: tuple[int, int],
     pool_kernel: tuple[int, int],
     pool_stride: tuple[int, int],
+    norm: str = "none",
+    curvature: float = -1.0,
 ) -> st.nn.Sequential:
     conv_out_hw = st.nn.conv_output_shape(
         input_hw, kernel, stride=stride, padding=padding, dilation=(1, 1)
@@ -197,6 +212,19 @@ def _build_model(
         )
     )
     model.add(st.nn.Relu())
+    if norm == "none":
+        pass
+    elif norm == "layer":
+        model.add(st.nn.LayerNorm("norm1", features, curvature=curvature, epsilon=1e-5))
+    elif norm == "zspace":
+        model.add(st.nn.ZSpaceLayerNorm("norm1", features, curvature=curvature, epsilon=1e-5))
+    elif norm == "batch":
+        model.add(st.nn.BatchNorm1d("norm1", features, momentum=0.1, epsilon=1e-5))
+    elif norm == "zbatch":
+        model.add(st.nn.ZSpaceBatchNorm1d("norm1", features, curvature=curvature, momentum=0.1, epsilon=1e-5))
+    else:
+        raise ValueError(f"unknown --norm: {norm} (expected none|layer|zspace|batch|zbatch)")
+
     model.add(st.nn.Linear("head", features, 2))
     return model
 
@@ -205,10 +233,11 @@ def _evaluate_loss(model: st.nn.Sequential, loss: Any, batches: list[tuple[st.Te
     if not batches:
         return float("nan")
     total = 0.0
-    for x, y in batches:
-        pred = model.forward(x)
-        value = loss.forward(pred, y).tolist()
-        total += float(value[0][0])
+    with st.nn.eval_mode(model):
+        for x, y in batches:
+            pred = model.forward(x)
+            value = loss.forward(pred, y).tolist()
+            total += float(value[0][0])
     return total / float(len(batches))
 
 
@@ -216,7 +245,7 @@ def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] in {"-h", "--help"}:
         print(
             "usage: PYTHONNOUSERSITE=1 python3 -S -s models/python/mellin_log_grid_classification.py "
-            "[--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] "
+            "[--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--norm none|layer|zspace|batch|zbatch] "
             "[--feature mag|logmag] [--epsilon F] "
             "[--log-start F] [--log-step F] [--series-len N] "
             "[--real-min F] [--real-max F] [--real-count N] "
@@ -237,6 +266,7 @@ def main() -> None:
     batch = 8
     lr = 2e-2
     curvature = -1.0
+    norm = "none"
     seed = 777
 
     feature = "logmag"
@@ -281,6 +311,8 @@ def main() -> None:
             lr = float(next(it))
         elif flag == "--curvature":
             curvature = float(next(it))
+        elif flag == "--norm":
+            norm = str(next(it)).strip().lower()
         elif flag == "--seed":
             seed = int(next(it))
         elif flag == "--feature":
@@ -345,6 +377,8 @@ def main() -> None:
         raise ValueError("--low-rate-min/max must satisfy 0 < min <= max")
     if not (high_rate_min > 0.0 and high_rate_max >= high_rate_min):
         raise ValueError("--high-rate-min/max must satisfy 0 < min <= max")
+    if norm not in {"none", "layer", "zspace", "batch", "zbatch"}:
+        raise ValueError(f"unknown --norm: {norm} (expected none|layer|zspace|batch|zbatch)")
 
     _require_backend_available(backend)
 
@@ -369,6 +403,8 @@ def main() -> None:
         padding=(1, 1),
         pool_kernel=(2, 2),
         pool_stride=(2, 2),
+        norm=norm,
+        curvature=curvature,
     )
     model.attach_hypergrad(curvature=curvature, learning_rate=lr)
     trainer = st.nn.ModuleTrainer(
@@ -394,6 +430,7 @@ def main() -> None:
         "batch": batch,
         "lr": lr,
         "curvature": curvature,
+        "norm": norm,
         "seed": seed,
         "backend": backend,
         "feature": feature,
@@ -424,7 +461,7 @@ def main() -> None:
     _write_json(run_dir / "run.json", run_meta)
 
     print(
-        f"arch=mellin_log_grid_classification mesh={input_hw} feature={feature} series_len={series_len} "
+        f"arch=mellin_log_grid_classification mesh={input_hw} feature={feature} series_len={series_len} norm={norm} "
         f"epochs={epochs} batch={batch} lr={lr:.3e} curvature={curvature} backend={backend} run_dir={run_dir}"
     )
 
@@ -507,6 +544,23 @@ def main() -> None:
 
     weights_path = run_dir / "weights.json"
     st.nn.save(str(weights_path), model)
+    meta = dict(run_meta)
+    meta.update(
+        {
+            "weights_path": weights_path.name,
+            "weights_format": "json",
+            "model": {
+                "out_channels": 4,
+                "kernel": [3, 3],
+                "stride": [1, 1],
+                "padding": [1, 1],
+                "pool_kernel": [2, 2],
+                "pool_stride": [2, 2],
+                "input_hw": [input_hw[0], input_hw[1]],
+            },
+        }
+    )
+    _save_meta(_meta_path_for_weights(weights_path), meta)
 
 
 if __name__ == "__main__":

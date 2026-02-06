@@ -1643,9 +1643,22 @@ fn ensure_dlpack_capsule(py: Python<'_>, candidate: &Bound<PyAny>) -> PyResult<P
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Once;
+
+    fn ensure_python_initialized() {
+        static INIT: Once = Once::new();
+        INIT.call_once(|| {
+            // The developer machine may have user-site packages that crash on import
+            // (e.g. Metal-backed ML stacks). Disable user-site loading so embedded
+            // Python stays reproducible in `cargo test`.
+            std::env::set_var("PYTHONNOUSERSITE", "1");
+            pyo3::prepare_freethreaded_python();
+        });
+    }
 
     #[test]
     fn dlpack_roundtrip_shares_buffer() {
+        ensure_python_initialized();
         Python::with_gil(|py| {
             let tensor = PyTensor::from_tensor(
                 Tensor::from_vec(2, 3, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap(),
@@ -1661,6 +1674,7 @@ mod tests {
 
     #[test]
     fn dlpack_device_reports_cpu() {
+        ensure_python_initialized();
         Python::with_gil(|py| {
             let tensor = PyTensor::zeros(1, 1).unwrap();
             let device = tensor.__dlpack_device__();

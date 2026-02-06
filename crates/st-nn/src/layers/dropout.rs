@@ -142,6 +142,11 @@ impl Module for Dropout {
     ) -> PureResult<()> {
         Ok(())
     }
+
+    fn set_training(&mut self, training: bool) -> PureResult<()> {
+        Dropout::set_training(self, training);
+        Ok(())
+    }
 }
 
 #[cfg(test)]

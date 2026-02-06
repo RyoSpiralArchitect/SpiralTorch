@@ -661,6 +661,7 @@ pub struct ModuleTrainer {
     curvature: f32,
     hyper_learning_rate: f32,
     fallback_learning_rate: f32,
+    grad_clip_max_norm: Option<f32>,
     real_learning_rate: Option<f32>,
     blackcat: Option<BlackCatRuntime>,
     blackcat_moderator: Option<BlackcatModerator>,
@@ -1512,7 +1513,16 @@ impl SoftLogicFlex {
             .map(|feedback| feedback.z_signal.abs())
             .unwrap_or(self.last_z.abs())
             * self.config.inertia_z_k;
-        let adapt = (drift_drive + z_drive).clamp(0.0, 0.9);
+        let mut adapt = (drift_drive + z_drive).clamp(0.0, 0.9);
+        if self.config.energy_equalize_auto > 0.0 {
+            let above_abs = band_energy.above.abs();
+            let here_abs = band_energy.here.abs();
+            let beneath_abs = band_energy.beneath.abs();
+            let norm = (above_abs + here_abs + beneath_abs).max(1e-4);
+            let max_share = above_abs.max(here_abs).max(beneath_abs) / norm;
+            let energy_drive = ((max_share - (1.0 / 3.0)) / (2.0 / 3.0)).clamp(0.0, 1.0);
+            adapt = (adapt + energy_drive * 0.35 * self.config.energy_equalize_auto).clamp(0.0, 0.9);
+        }
         let inertia = (self.config.inertia * (1.0 - adapt)).clamp(self.config.inertia_min, 0.95);
         self.last_inertia = inertia;
         inertia
@@ -2373,6 +2383,7 @@ impl ModuleTrainer {
             curvature,
             hyper_learning_rate,
             fallback_learning_rate,
+            grad_clip_max_norm: None,
             real_learning_rate: None,
             blackcat: None,
             blackcat_moderator: None,
@@ -3188,6 +3199,38 @@ impl ModuleTrainer {
         self.hyper_learning_rate
     }
 
+    /// Multiplies all learning rates (hypergrad, fallback, optional realgrad) by `factor`.
+    ///
+    /// This also scales any per-parameter learning rates so optimiser state stays consistent.
+    pub fn mul_learning_rate<M: Module + ?Sized>(
+        &mut self,
+        module: &mut M,
+        factor: f32,
+    ) -> PureResult<()> {
+        self.scale_learning_rates(module, factor)
+    }
+
+    /// Returns the optional gradient clipping threshold.
+    pub fn grad_clip_max_norm(&self) -> Option<f32> {
+        self.grad_clip_max_norm
+    }
+
+    /// Sets the gradient clipping threshold (global L2 norm).
+    ///
+    /// Passing a non-positive or non-finite value disables clipping.
+    pub fn set_grad_clip_max_norm(&mut self, max_norm: f32) {
+        if max_norm.is_finite() && max_norm > 0.0 {
+            self.grad_clip_max_norm = Some(max_norm);
+        } else {
+            self.grad_clip_max_norm = None;
+        }
+    }
+
+    /// Disables any previously configured gradient clipping.
+    pub fn clear_grad_clip_max_norm(&mut self) {
+        self.grad_clip_max_norm = None;
+    }
+
     /// Returns the Euclidean realgrad learning rate, when enabled.
     pub fn real_learning_rate(&self) -> Option<f32> {
         self.real_learning_rate
@@ -3260,6 +3303,9 @@ impl ModuleTrainer {
 
     /// Applies the parameter updates using either the hypergrad tape or the fallback rate.
     pub fn step<M: Module + ?Sized>(&mut self, module: &mut M) -> PureResult<()> {
+        if let Some(limit) = self.grad_clip_max_norm {
+            self.clip_grad_global_norm(module, limit)?;
+        }
         let adapter: &mut dyn LocalLearningRateAdapter = &mut self.spectral_adapter;
         module.apply_step_with_adapter(self.fallback_learning_rate, Some(adapter))
     }
@@ -3287,6 +3333,7 @@ impl ModuleTrainer {
             budget.begin_epoch();
         }
         self.zero(module)?;
+        module.train()?;
         if let Some(infusion) = self.text_infusion.clone() {
             let should_apply = match infusion.every {
                 TextInfusionEvery::Once => epoch == 1,
@@ -3765,6 +3812,17 @@ impl ModuleTrainer {
             }
             hub::set_softlogic_z(z_feedback.clone());
             extra.insert("softlogic_z".to_string(), z_feedback.z_signal as f64);
+            for event in z_feedback.events.iter() {
+                let trimmed = event.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                let key = format!(
+                    "softlogic_event_{}",
+                    trimmed.replace(['.', '-'], "_")
+                );
+                extra.insert(key, 1.0);
+            }
             let mut region_highlight = None;
             if let Some((region_factor, region_descriptor)) = self
                 .loss_strategy
@@ -4453,7 +4511,6 @@ impl ModuleTrainer {
         self.collapse = Some(CollapseDrive::new(cfg));
     }
 
-    #[cfg(feature = "collapse")]
     fn apply_grad_scale<M: Module + ?Sized>(&self, module: &mut M, scale: f32) -> PureResult<()> {
         if (scale - 1.0).abs() <= f32::EPSILON {
             return Ok(());
@@ -4464,7 +4521,6 @@ impl ModuleTrainer {
         })
     }
 
-    #[cfg(feature = "collapse")]
     fn clip_grad_global_norm<M: Module + ?Sized>(
         &self,
         module: &mut M,

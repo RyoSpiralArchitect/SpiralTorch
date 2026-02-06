@@ -66,13 +66,15 @@ use st_nn::{
         CoherenceObservation, CoherenceSignature, LinguisticChannelReport, PreDiscardPolicy,
         PreDiscardSnapshot, PreDiscardTelemetry,
     },
-    AvgPool2d, CategoricalCrossEntropy, ConceptHint, DataLoader, Dataset, DesireAutomation,
-    DesireLagrangian, DesirePhase, DesirePipeline, DesireRoundtableBridge, DesireRoundtableSummary,
-    DesireTelemetryBundle, DesireTrainerBridge, DesireWeights, EpochStats as RustEpochStats,
-    HyperbolicCrossEntropy, Linear, MaxPool2d, MaxwellDesireBridge, MeanSquaredError, MellinBasis,
-    ModuleTrainer as RustModuleTrainer, NarrativeHint, NarrativeSummary, Relu, RepressionField,
-    RoundtableConfig as RustRoundtableConfig, RoundtableSchedule as RustRoundtableSchedule,
-    SemanticBridge, Sequential, SparseKernel, SymbolGeometry, TemperatureController,
+    AvgPool2d, BatchNorm1d, CategoricalCrossEntropy, ConceptHint, DataLoader, Dataset,
+    DesireAutomation, DesireLagrangian, DesirePhase, DesirePipeline, DesireRoundtableBridge,
+    DesireRoundtableSummary, DesireTelemetryBundle, DesireTrainerBridge, DesireWeights,
+    EpochStats as RustEpochStats, Gelu, HyperbolicCrossEntropy, LayerNorm, Linear, MaxPool2d,
+    MaxwellDesireBridge,
+    MeanSquaredError, MellinBasis, ModuleTrainer as RustModuleTrainer, NarrativeHint,
+    NarrativeSummary, Relu, RepressionField, RoundtableConfig as RustRoundtableConfig,
+    RoundtableSchedule as RustRoundtableSchedule, SemanticBridge, Sequential, SparseKernel,
+    SymbolGeometry, TemperatureController, ZSpaceBatchNorm1d, ZSpaceLayerNorm,
     TextInfusionEvery, TextInfusionMode, WaveGate, WaveRnn, ZRelativityModule,
     ZSpaceCoherenceSequencer, ZSpaceMixer, ZSpaceTextVae, ZSpaceTraceConfig, ZSpaceTraceRecorder,
     ZSpaceVae, ZSpaceVaeState, ZSpaceVaeStats,
@@ -2260,9 +2262,731 @@ impl PyRelu {
 }
 
 #[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "Gelu", unsendable)]
+pub(crate) struct PyGelu {
+    inner: Gelu,
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyGelu {
+    #[new]
+    pub fn new() -> Self {
+        Self { inner: Gelu::new() }
+    }
+
+    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        let output = self.inner.forward(&input.inner).map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        let grad = self
+            .inner
+            .backward(&input.inner, &grad_output.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(grad))
+    }
+
+    #[pyo3(signature = (x))]
+    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(x)
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "LayerNorm", unsendable)]
+pub(crate) struct PyLayerNorm {
+    inner: Option<LayerNorm>,
+}
+
+#[cfg(feature = "nn")]
+impl PyLayerNorm {
+    fn inner(&self) -> PyResult<&LayerNorm> {
+        self.inner.as_ref().ok_or_else(|| {
+            PyValueError::new_err("LayerNorm was moved into a container and can no longer be used")
+        })
+    }
+
+    fn inner_mut(&mut self) -> PyResult<&mut LayerNorm> {
+        self.inner.as_mut().ok_or_else(|| {
+            PyValueError::new_err("LayerNorm was moved into a container and can no longer be used")
+        })
+    }
+
+    fn take_inner(&mut self) -> PyResult<LayerNorm> {
+        self.inner.take().ok_or_else(|| {
+            PyValueError::new_err("LayerNorm was moved into a container and can no longer be used")
+        })
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyLayerNorm {
+    #[new]
+    pub fn new(name: &str, features: usize, curvature: f32, epsilon: f32) -> PyResult<Self> {
+        let inner = LayerNorm::new(name, features, curvature, epsilon).map_err(tensor_err_to_py)?;
+        Ok(Self { inner: Some(inner) })
+    }
+
+    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        let output = self
+            .inner()?
+            .forward(&input.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        let grad = self
+            .inner_mut()?
+            .backward(&input.inner, &grad_output.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(grad))
+    }
+
+    #[pyo3(signature = (curvature, learning_rate, *, topos=None))]
+    pub fn attach_hypergrad(
+        &mut self,
+        curvature: f32,
+        learning_rate: f32,
+        topos: Option<&PyOpenCartesianTopos>,
+    ) -> PyResult<()> {
+        if let Some(topos) = topos {
+            self.inner_mut()?
+                .attach_hypergrad_with_topos(curvature, learning_rate, topos.inner.clone())
+                .map_err(tensor_err_to_py)
+        } else {
+            self.inner_mut()?
+                .attach_hypergrad(curvature, learning_rate)
+                .map_err(tensor_err_to_py)
+        }
+    }
+
+    pub fn attach_realgrad(&mut self, learning_rate: f32) -> PyResult<()> {
+        self.inner_mut()?
+            .attach_realgrad(learning_rate)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn zero_accumulators(&mut self) -> PyResult<()> {
+        self.inner_mut()?
+            .zero_accumulators()
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn apply_step(&mut self, fallback_lr: f32) -> PyResult<()> {
+        self.inner_mut()?.apply_step(fallback_lr).map_err(tensor_err_to_py)
+    }
+
+    pub fn state_dict(&self) -> PyResult<Vec<(String, PyTensor)>> {
+        let mut entries: Vec<_> = self
+            .inner()?
+            .state_dict()
+            .map_err(tensor_err_to_py)?
+            .into_iter()
+            .collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(entries
+            .into_iter()
+            .map(|(name, tensor)| (name, PyTensor::from_tensor(tensor)))
+            .collect())
+    }
+
+    pub fn load_state_dict(&mut self, state: Vec<(String, PyTensor)>) -> PyResult<()> {
+        let mut map = std::collections::HashMap::new();
+        for (name, tensor) in state {
+            map.insert(name, tensor.inner.clone());
+        }
+        self.inner_mut()?
+            .load_state_dict(&map)
+            .map_err(tensor_err_to_py)
+    }
+
+    #[getter]
+    pub fn features(&self) -> PyResult<usize> {
+        Ok(self.inner()?.features())
+    }
+
+    #[getter]
+    pub fn curvature(&self) -> PyResult<f32> {
+        Ok(self.inner()?.curvature())
+    }
+
+    #[getter]
+    pub fn epsilon(&self) -> PyResult<f32> {
+        Ok(self.inner()?.epsilon())
+    }
+
+    #[pyo3(signature = (x))]
+    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(x)
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "ZSpaceLayerNorm", unsendable)]
+pub(crate) struct PyZSpaceLayerNorm {
+    inner: Option<ZSpaceLayerNorm>,
+}
+
+#[cfg(feature = "nn")]
+impl PyZSpaceLayerNorm {
+    fn inner(&self) -> PyResult<&ZSpaceLayerNorm> {
+        self.inner.as_ref().ok_or_else(|| {
+            PyValueError::new_err(
+                "ZSpaceLayerNorm was moved into a container and can no longer be used",
+            )
+        })
+    }
+
+    fn inner_mut(&mut self) -> PyResult<&mut ZSpaceLayerNorm> {
+        self.inner.as_mut().ok_or_else(|| {
+            PyValueError::new_err(
+                "ZSpaceLayerNorm was moved into a container and can no longer be used",
+            )
+        })
+    }
+
+    fn take_inner(&mut self) -> PyResult<ZSpaceLayerNorm> {
+        self.inner.take().ok_or_else(|| {
+            PyValueError::new_err(
+                "ZSpaceLayerNorm was moved into a container and can no longer be used",
+            )
+        })
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyZSpaceLayerNorm {
+    #[new]
+    #[pyo3(signature = (name, features, curvature, epsilon, *, projector_gain=1.0))]
+    pub fn new(
+        name: &str,
+        features: usize,
+        curvature: f32,
+        epsilon: f32,
+        projector_gain: f32,
+    ) -> PyResult<Self> {
+        let inner = ZSpaceLayerNorm::new(name, features, curvature, epsilon)
+            .and_then(|layer| layer.with_projector_gain(projector_gain))
+            .map_err(tensor_err_to_py)?;
+        Ok(Self { inner: Some(inner) })
+    }
+
+    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        let output = self
+            .inner()?
+            .forward(&input.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        let grad = self
+            .inner_mut()?
+            .backward(&input.inner, &grad_output.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(grad))
+    }
+
+    #[pyo3(signature = (curvature, learning_rate, *, topos=None))]
+    pub fn attach_hypergrad(
+        &mut self,
+        curvature: f32,
+        learning_rate: f32,
+        topos: Option<&PyOpenCartesianTopos>,
+    ) -> PyResult<()> {
+        if let Some(topos) = topos {
+            self.inner_mut()?
+                .attach_hypergrad_with_topos(curvature, learning_rate, topos.inner.clone())
+                .map_err(tensor_err_to_py)
+        } else {
+            self.inner_mut()?
+                .attach_hypergrad(curvature, learning_rate)
+                .map_err(tensor_err_to_py)
+        }
+    }
+
+    pub fn attach_realgrad(&mut self, learning_rate: f32) -> PyResult<()> {
+        self.inner_mut()?
+            .attach_realgrad(learning_rate)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn zero_accumulators(&mut self) -> PyResult<()> {
+        self.inner_mut()?
+            .zero_accumulators()
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn apply_step(&mut self, fallback_lr: f32) -> PyResult<()> {
+        self.inner_mut()?.apply_step(fallback_lr).map_err(tensor_err_to_py)
+    }
+
+    pub fn state_dict(&self) -> PyResult<Vec<(String, PyTensor)>> {
+        let mut entries: Vec<_> = self
+            .inner()?
+            .state_dict()
+            .map_err(tensor_err_to_py)?
+            .into_iter()
+            .collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(entries
+            .into_iter()
+            .map(|(name, tensor)| (name, PyTensor::from_tensor(tensor)))
+            .collect())
+    }
+
+    pub fn load_state_dict(&mut self, state: Vec<(String, PyTensor)>) -> PyResult<()> {
+        let mut map = std::collections::HashMap::new();
+        for (name, tensor) in state {
+            map.insert(name, tensor.inner.clone());
+        }
+        self.inner_mut()?
+            .load_state_dict(&map)
+            .map_err(tensor_err_to_py)
+    }
+
+    #[getter]
+    pub fn features(&self) -> PyResult<usize> {
+        Ok(self.inner()?.features())
+    }
+
+    #[getter]
+    pub fn curvature(&self) -> PyResult<f32> {
+        Ok(self.inner()?.curvature())
+    }
+
+    #[getter]
+    pub fn epsilon(&self) -> PyResult<f32> {
+        Ok(self.inner()?.epsilon())
+    }
+
+    #[getter]
+    pub fn projector_gain(&self) -> PyResult<f32> {
+        Ok(self.inner()?.projector_gain())
+    }
+
+    pub fn set_projector_gain(&self, gain: f32) -> PyResult<()> {
+        self.inner()?.set_projector_gain(gain).map_err(tensor_err_to_py)
+    }
+
+    pub fn adapt_projector_gain(&self, target_radius: f32, smoothing: f32) -> PyResult<f32> {
+        self.inner()?
+            .adapt_projector_gain(target_radius, smoothing)
+            .map_err(tensor_err_to_py)
+    }
+
+    #[pyo3(signature = (*, full=false))]
+    pub fn telemetry(&self, py: Python<'_>, full: bool) -> PyResult<Option<PyObject>> {
+        let Some(telemetry) = self.inner()?.telemetry() else {
+            return Ok(None);
+        };
+        let dict = PyDict::new_bound(py);
+        dict.set_item("batch", telemetry.batch())?;
+        dict.set_item("features", telemetry.features())?;
+        dict.set_item("mean", telemetry.mean().to_vec())?;
+        dict.set_item("inv_std", telemetry.inv_std().to_vec())?;
+        dict.set_item("radius", telemetry.radius().to_vec())?;
+        if full {
+            dict.set_item("normed", telemetry.normed().to_vec())?;
+            dict.set_item("projected", telemetry.projected().to_vec())?;
+            dict.set_item("jacobian", telemetry.jacobian().to_vec())?;
+        }
+        Ok(Some(dict.into_py(py)))
+    }
+
+    #[pyo3(signature = (x))]
+    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(x)
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "BatchNorm1d", unsendable)]
+pub(crate) struct PyBatchNorm1d {
+    inner: Option<BatchNorm1d>,
+}
+
+#[cfg(feature = "nn")]
+impl PyBatchNorm1d {
+    fn inner(&self) -> PyResult<&BatchNorm1d> {
+        self.inner.as_ref().ok_or_else(|| {
+            PyValueError::new_err(
+                "BatchNorm1d was moved into a container and can no longer be used",
+            )
+        })
+    }
+
+    fn inner_mut(&mut self) -> PyResult<&mut BatchNorm1d> {
+        self.inner.as_mut().ok_or_else(|| {
+            PyValueError::new_err(
+                "BatchNorm1d was moved into a container and can no longer be used",
+            )
+        })
+    }
+
+    fn take_inner(&mut self) -> PyResult<BatchNorm1d> {
+        self.inner.take().ok_or_else(|| {
+            PyValueError::new_err(
+                "BatchNorm1d was moved into a container and can no longer be used",
+            )
+        })
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyBatchNorm1d {
+    #[new]
+    #[pyo3(signature = (name, features, momentum, epsilon, *, training=true))]
+    pub fn new(
+        name: &str,
+        features: usize,
+        momentum: f32,
+        epsilon: f32,
+        training: bool,
+    ) -> PyResult<Self> {
+        let inner = BatchNorm1d::new(name, features, momentum, epsilon).map_err(tensor_err_to_py)?;
+        if !training {
+            inner.eval();
+        }
+        Ok(Self { inner: Some(inner) })
+    }
+
+    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        let output = self
+            .inner()?
+            .forward(&input.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        let grad = self
+            .inner_mut()?
+            .backward(&input.inner, &grad_output.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(grad))
+    }
+
+    pub fn set_training(&mut self, training: bool) -> PyResult<()> {
+        self.inner()?.set_training(training);
+        Ok(())
+    }
+
+    pub fn train(&mut self) -> PyResult<()> {
+        self.inner()?.train();
+        Ok(())
+    }
+
+    pub fn eval(&mut self) -> PyResult<()> {
+        self.inner()?.eval();
+        Ok(())
+    }
+
+    #[getter]
+    pub fn training(&self) -> PyResult<bool> {
+        Ok(self.inner()?.training())
+    }
+
+    #[pyo3(signature = (curvature, learning_rate, *, topos=None))]
+    pub fn attach_hypergrad(
+        &mut self,
+        curvature: f32,
+        learning_rate: f32,
+        topos: Option<&PyOpenCartesianTopos>,
+    ) -> PyResult<()> {
+        if let Some(topos) = topos {
+            self.inner_mut()?
+                .attach_hypergrad_with_topos(curvature, learning_rate, topos.inner.clone())
+                .map_err(tensor_err_to_py)
+        } else {
+            self.inner_mut()?
+                .attach_hypergrad(curvature, learning_rate)
+                .map_err(tensor_err_to_py)
+        }
+    }
+
+    pub fn attach_realgrad(&mut self, learning_rate: f32) -> PyResult<()> {
+        self.inner_mut()?
+            .attach_realgrad(learning_rate)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn zero_accumulators(&mut self) -> PyResult<()> {
+        self.inner_mut()?
+            .zero_accumulators()
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn apply_step(&mut self, fallback_lr: f32) -> PyResult<()> {
+        self.inner_mut()?.apply_step(fallback_lr).map_err(tensor_err_to_py)
+    }
+
+    pub fn state_dict(&self) -> PyResult<Vec<(String, PyTensor)>> {
+        let mut entries: Vec<_> = self
+            .inner()?
+            .state_dict()
+            .map_err(tensor_err_to_py)?
+            .into_iter()
+            .collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(entries
+            .into_iter()
+            .map(|(name, tensor)| (name, PyTensor::from_tensor(tensor)))
+            .collect())
+    }
+
+    pub fn load_state_dict(&mut self, state: Vec<(String, PyTensor)>) -> PyResult<()> {
+        let mut map = std::collections::HashMap::new();
+        for (name, tensor) in state {
+            map.insert(name, tensor.inner.clone());
+        }
+        self.inner_mut()?
+            .load_state_dict(&map)
+            .map_err(tensor_err_to_py)
+    }
+
+    #[getter]
+    pub fn features(&self) -> PyResult<usize> {
+        Ok(self.inner()?.features())
+    }
+
+    #[getter]
+    pub fn momentum(&self) -> PyResult<f32> {
+        Ok(self.inner()?.momentum())
+    }
+
+    #[getter]
+    pub fn epsilon(&self) -> PyResult<f32> {
+        Ok(self.inner()?.epsilon())
+    }
+
+    #[pyo3(signature = (x))]
+    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(x)
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "ZSpaceBatchNorm1d", unsendable)]
+pub(crate) struct PyZSpaceBatchNorm1d {
+    inner: Option<ZSpaceBatchNorm1d>,
+}
+
+#[cfg(feature = "nn")]
+impl PyZSpaceBatchNorm1d {
+    fn inner(&self) -> PyResult<&ZSpaceBatchNorm1d> {
+        self.inner.as_ref().ok_or_else(|| {
+            PyValueError::new_err(
+                "ZSpaceBatchNorm1d was moved into a container and can no longer be used",
+            )
+        })
+    }
+
+    fn inner_mut(&mut self) -> PyResult<&mut ZSpaceBatchNorm1d> {
+        self.inner.as_mut().ok_or_else(|| {
+            PyValueError::new_err(
+                "ZSpaceBatchNorm1d was moved into a container and can no longer be used",
+            )
+        })
+    }
+
+    fn take_inner(&mut self) -> PyResult<ZSpaceBatchNorm1d> {
+        self.inner.take().ok_or_else(|| {
+            PyValueError::new_err(
+                "ZSpaceBatchNorm1d was moved into a container and can no longer be used",
+            )
+        })
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyZSpaceBatchNorm1d {
+    #[new]
+    #[pyo3(signature = (name, features, curvature, momentum, epsilon, *, projector_gain=1.0, training=true))]
+    pub fn new(
+        name: &str,
+        features: usize,
+        curvature: f32,
+        momentum: f32,
+        epsilon: f32,
+        projector_gain: f32,
+        training: bool,
+    ) -> PyResult<Self> {
+        let inner = ZSpaceBatchNorm1d::new(name, features, curvature, momentum, epsilon)
+            .and_then(|layer| layer.with_projector_gain(projector_gain))
+            .map_err(tensor_err_to_py)?;
+        if !training {
+            inner.eval();
+        }
+        Ok(Self { inner: Some(inner) })
+    }
+
+    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        let output = self
+            .inner()?
+            .forward(&input.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        let grad = self
+            .inner_mut()?
+            .backward(&input.inner, &grad_output.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(grad))
+    }
+
+    pub fn set_training(&mut self, training: bool) -> PyResult<()> {
+        self.inner()?.set_training(training);
+        Ok(())
+    }
+
+    pub fn train(&mut self) -> PyResult<()> {
+        self.inner()?.train();
+        Ok(())
+    }
+
+    pub fn eval(&mut self) -> PyResult<()> {
+        self.inner()?.eval();
+        Ok(())
+    }
+
+    #[getter]
+    pub fn training(&self) -> PyResult<bool> {
+        Ok(self.inner()?.training())
+    }
+
+    #[pyo3(signature = (curvature, learning_rate, *, topos=None))]
+    pub fn attach_hypergrad(
+        &mut self,
+        curvature: f32,
+        learning_rate: f32,
+        topos: Option<&PyOpenCartesianTopos>,
+    ) -> PyResult<()> {
+        if let Some(topos) = topos {
+            self.inner_mut()?
+                .attach_hypergrad_with_topos(curvature, learning_rate, topos.inner.clone())
+                .map_err(tensor_err_to_py)
+        } else {
+            self.inner_mut()?
+                .attach_hypergrad(curvature, learning_rate)
+                .map_err(tensor_err_to_py)
+        }
+    }
+
+    pub fn attach_realgrad(&mut self, learning_rate: f32) -> PyResult<()> {
+        self.inner_mut()?
+            .attach_realgrad(learning_rate)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn zero_accumulators(&mut self) -> PyResult<()> {
+        self.inner_mut()?
+            .zero_accumulators()
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn apply_step(&mut self, fallback_lr: f32) -> PyResult<()> {
+        self.inner_mut()?.apply_step(fallback_lr).map_err(tensor_err_to_py)
+    }
+
+    pub fn state_dict(&self) -> PyResult<Vec<(String, PyTensor)>> {
+        let mut entries: Vec<_> = self
+            .inner()?
+            .state_dict()
+            .map_err(tensor_err_to_py)?
+            .into_iter()
+            .collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(entries
+            .into_iter()
+            .map(|(name, tensor)| (name, PyTensor::from_tensor(tensor)))
+            .collect())
+    }
+
+    pub fn load_state_dict(&mut self, state: Vec<(String, PyTensor)>) -> PyResult<()> {
+        let mut map = std::collections::HashMap::new();
+        for (name, tensor) in state {
+            map.insert(name, tensor.inner.clone());
+        }
+        self.inner_mut()?
+            .load_state_dict(&map)
+            .map_err(tensor_err_to_py)
+    }
+
+    #[getter]
+    pub fn features(&self) -> PyResult<usize> {
+        Ok(self.inner()?.features())
+    }
+
+    #[getter]
+    pub fn curvature(&self) -> PyResult<f32> {
+        Ok(self.inner()?.curvature())
+    }
+
+    #[getter]
+    pub fn momentum(&self) -> PyResult<f32> {
+        Ok(self.inner()?.momentum())
+    }
+
+    #[getter]
+    pub fn epsilon(&self) -> PyResult<f32> {
+        Ok(self.inner()?.epsilon())
+    }
+
+    #[getter]
+    pub fn projector_gain(&self) -> PyResult<f32> {
+        Ok(self.inner()?.projector_gain())
+    }
+
+    pub fn set_projector_gain(&self, gain: f32) -> PyResult<()> {
+        self.inner()?.set_projector_gain(gain).map_err(tensor_err_to_py)
+    }
+
+    pub fn adapt_projector_gain(&self, target_radius: f32, smoothing: f32) -> PyResult<f32> {
+        self.inner()?
+            .adapt_projector_gain(target_radius, smoothing)
+            .map_err(tensor_err_to_py)
+    }
+
+    #[pyo3(signature = (*, full=false))]
+    pub fn telemetry(&self, py: Python<'_>, full: bool) -> PyResult<Option<PyObject>> {
+        let Some(telemetry) = self.inner()?.telemetry() else {
+            return Ok(None);
+        };
+        let dict = PyDict::new_bound(py);
+        dict.set_item("batch", telemetry.batch())?;
+        dict.set_item("features", telemetry.features())?;
+        dict.set_item("mean", telemetry.mean().to_vec())?;
+        dict.set_item("inv_std", telemetry.inv_std().to_vec())?;
+        dict.set_item("radius", telemetry.radius().to_vec())?;
+        if full {
+            dict.set_item("normed", telemetry.normed().to_vec())?;
+            dict.set_item("projected", telemetry.projected().to_vec())?;
+            dict.set_item("jacobian", telemetry.jacobian().to_vec())?;
+        }
+        Ok(Some(dict.into_py(py)))
+    }
+
+    #[pyo3(signature = (x))]
+    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(x)
+    }
+}
+
+#[cfg(feature = "nn")]
 #[pyclass(module = "spiraltorch.nn", name = "Sequential", unsendable)]
 pub(crate) struct PySequential {
     inner: Sequential,
+    training: bool,
 }
 
 #[cfg(feature = "nn")]
@@ -2272,6 +2996,7 @@ impl PySequential {
     pub fn new() -> Self {
         Self {
             inner: Sequential::new(),
+            training: true,
         }
     }
 
@@ -2354,9 +3079,43 @@ impl PySequential {
             return Ok(());
         }
 
+        if let Ok(handle) = layer.extract::<Py<PyGelu>>() {
+            let gelu = handle.bind(py).borrow();
+            self.inner.push(gelu.inner);
+            return Ok(());
+        }
+
         if let Ok(handle) = layer.extract::<Py<PyIdentity>>() {
             let identity = handle.bind(py).borrow();
             self.inner.push(identity.inner);
+            return Ok(());
+        }
+
+        if let Ok(handle) = layer.extract::<Py<PyLayerNorm>>() {
+            let mut layer = handle.bind(py).borrow_mut();
+            let inner = layer.take_inner()?;
+            self.inner.push(inner);
+            return Ok(());
+        }
+
+        if let Ok(handle) = layer.extract::<Py<PyZSpaceLayerNorm>>() {
+            let mut layer = handle.bind(py).borrow_mut();
+            let inner = layer.take_inner()?;
+            self.inner.push(inner);
+            return Ok(());
+        }
+
+        if let Ok(handle) = layer.extract::<Py<PyBatchNorm1d>>() {
+            let mut layer = handle.bind(py).borrow_mut();
+            let inner = layer.take_inner()?;
+            self.inner.push(inner);
+            return Ok(());
+        }
+
+        if let Ok(handle) = layer.extract::<Py<PyZSpaceBatchNorm1d>>() {
+            let mut layer = handle.bind(py).borrow_mut();
+            let inner = layer.take_inner()?;
+            self.inner.push(inner);
             return Ok(());
         }
 
@@ -2436,7 +3195,7 @@ impl PySequential {
         }
 
         Err(PyTypeError::new_err(
-            "Sequential.add expects a spiraltorch.nn layer (supported: Linear, Embedding, FeatureReorder2d, SpiralRnn, WaveGate, WaveRnn, ZSpaceMixer, ZSpaceSoftmax, ZSpaceCoherenceScan, ZSpaceCoherenceWaveBlock, Relu, Identity, NonLiner, Scaler, Dropout, Pool2d, ZPooling, ZConv, ZConv6DA)",
+            "Sequential.add expects a spiraltorch.nn layer (supported: Linear, Embedding, FeatureReorder2d, SpiralRnn, WaveGate, WaveRnn, ZSpaceMixer, ZSpaceSoftmax, ZSpaceCoherenceScan, ZSpaceCoherenceWaveBlock, Relu, Gelu, Identity, LayerNorm, ZSpaceLayerNorm, BatchNorm1d, ZSpaceBatchNorm1d, NonLiner, Scaler, Dropout, Pool2d, ZPooling, ZConv, ZConv6DA)",
         ))
     }
 
@@ -2487,6 +3246,26 @@ impl PySequential {
 
     pub fn infuse_text(&mut self, text: &str) -> PyResult<()> {
         self.inner.infuse_text(text).map_err(tensor_err_to_py)
+    }
+
+    pub fn set_training(&mut self, training: bool) -> PyResult<()> {
+        self.training = training;
+        self.inner.set_training(training).map_err(tensor_err_to_py)
+    }
+
+    pub fn train(&mut self) -> PyResult<()> {
+        self.training = true;
+        self.inner.train().map_err(tensor_err_to_py)
+    }
+
+    pub fn eval(&mut self) -> PyResult<()> {
+        self.training = false;
+        self.inner.eval().map_err(tensor_err_to_py)
+    }
+
+    #[getter]
+    pub fn training(&self) -> PyResult<bool> {
+        Ok(self.training)
     }
 
     pub fn state_dict(&self) -> PyResult<Vec<(String, PyTensor)>> {
@@ -3181,11 +3960,31 @@ fn with_module_ref<R>(
         let model = handle.bind(py).borrow();
         return f(&model.inner).map_err(tensor_err_to_py);
     }
+    if let Ok(handle) = module.extract::<Py<PyGelu>>() {
+        let model = handle.bind(py).borrow();
+        return f(&model.inner).map_err(tensor_err_to_py);
+    }
     if let Ok(handle) = module.extract::<Py<PyNonLiner>>() {
         let model = handle.bind(py).borrow();
         return f(model.inner()?).map_err(tensor_err_to_py);
     }
     if let Ok(handle) = module.extract::<Py<PyScaler>>() {
+        let model = handle.bind(py).borrow();
+        return f(model.inner()?).map_err(tensor_err_to_py);
+    }
+    if let Ok(handle) = module.extract::<Py<PyLayerNorm>>() {
+        let model = handle.bind(py).borrow();
+        return f(model.inner()?).map_err(tensor_err_to_py);
+    }
+    if let Ok(handle) = module.extract::<Py<PyZSpaceLayerNorm>>() {
+        let model = handle.bind(py).borrow();
+        return f(model.inner()?).map_err(tensor_err_to_py);
+    }
+    if let Ok(handle) = module.extract::<Py<PyBatchNorm1d>>() {
+        let model = handle.bind(py).borrow();
+        return f(model.inner()?).map_err(tensor_err_to_py);
+    }
+    if let Ok(handle) = module.extract::<Py<PyZSpaceBatchNorm1d>>() {
         let model = handle.bind(py).borrow();
         return f(model.inner()?).map_err(tensor_err_to_py);
     }
@@ -3207,7 +4006,7 @@ fn with_module_ref<R>(
     }
 
     Err(PyTypeError::new_err(
-        "module must be a spiraltorch.nn module (supported: Linear, Embedding, FeatureReorder2d, SpiralRnn, WaveGate, WaveRnn, ZSpaceMixer, ZSpaceSoftmax, ZSpaceCoherenceScan, ZSpaceCoherenceWaveBlock, Sequential, Identity, Relu, NonLiner, Scaler, Dropout, ZConv, ZConv6DA, ZRelativityModule)",
+        "module must be a spiraltorch.nn module (supported: Linear, Embedding, FeatureReorder2d, SpiralRnn, WaveGate, WaveRnn, ZSpaceMixer, ZSpaceSoftmax, ZSpaceCoherenceScan, ZSpaceCoherenceWaveBlock, Sequential, Identity, Relu, Gelu, NonLiner, Scaler, LayerNorm, ZSpaceLayerNorm, BatchNorm1d, ZSpaceBatchNorm1d, Dropout, ZConv, ZConv6DA, ZRelativityModule)",
     ))
 }
 
@@ -3279,11 +4078,31 @@ fn with_module_mut<R>(
         let mut model = handle.bind(py).borrow_mut();
         return f(&mut model.inner).map_err(tensor_err_to_py);
     }
+    if let Ok(handle) = module.extract::<Py<PyGelu>>() {
+        let mut model = handle.bind(py).borrow_mut();
+        return f(&mut model.inner).map_err(tensor_err_to_py);
+    }
     if let Ok(handle) = module.extract::<Py<PyNonLiner>>() {
         let mut model = handle.bind(py).borrow_mut();
         return f(model.inner_mut()?).map_err(tensor_err_to_py);
     }
     if let Ok(handle) = module.extract::<Py<PyScaler>>() {
+        let mut model = handle.bind(py).borrow_mut();
+        return f(model.inner_mut()?).map_err(tensor_err_to_py);
+    }
+    if let Ok(handle) = module.extract::<Py<PyLayerNorm>>() {
+        let mut model = handle.bind(py).borrow_mut();
+        return f(model.inner_mut()?).map_err(tensor_err_to_py);
+    }
+    if let Ok(handle) = module.extract::<Py<PyZSpaceLayerNorm>>() {
+        let mut model = handle.bind(py).borrow_mut();
+        return f(model.inner_mut()?).map_err(tensor_err_to_py);
+    }
+    if let Ok(handle) = module.extract::<Py<PyBatchNorm1d>>() {
+        let mut model = handle.bind(py).borrow_mut();
+        return f(model.inner_mut()?).map_err(tensor_err_to_py);
+    }
+    if let Ok(handle) = module.extract::<Py<PyZSpaceBatchNorm1d>>() {
         let mut model = handle.bind(py).borrow_mut();
         return f(model.inner_mut()?).map_err(tensor_err_to_py);
     }
@@ -3305,7 +4124,7 @@ fn with_module_mut<R>(
     }
 
     Err(PyTypeError::new_err(
-        "module must be a spiraltorch.nn module (supported: Linear, Embedding, FeatureReorder2d, SpiralRnn, WaveGate, WaveRnn, ZSpaceMixer, ZSpaceSoftmax, ZSpaceCoherenceScan, ZSpaceCoherenceWaveBlock, Sequential, Identity, Relu, NonLiner, Scaler, Dropout, ZConv, ZConv6DA, ZRelativityModule)",
+        "module must be a spiraltorch.nn module (supported: Linear, Embedding, FeatureReorder2d, SpiralRnn, WaveGate, WaveRnn, ZSpaceMixer, ZSpaceSoftmax, ZSpaceCoherenceScan, ZSpaceCoherenceWaveBlock, Sequential, Identity, Relu, Gelu, NonLiner, Scaler, LayerNorm, ZSpaceLayerNorm, BatchNorm1d, ZSpaceBatchNorm1d, Dropout, ZConv, ZConv6DA, ZRelativityModule)",
     ))
 }
 
@@ -3504,6 +4323,25 @@ impl PyNnModuleTrainer {
         })?;
 
         Ok(PyEpochStats::new(stats))
+    }
+
+    #[getter]
+    pub fn grad_clip_max_norm(&self) -> Option<f32> {
+        self.inner.grad_clip_max_norm()
+    }
+
+    #[pyo3(signature = (max_norm))]
+    pub fn set_grad_clip_max_norm(&mut self, max_norm: f32) {
+        self.inner.set_grad_clip_max_norm(max_norm);
+    }
+
+    pub fn clear_grad_clip_max_norm(&mut self) {
+        self.inner.clear_grad_clip_max_norm();
+    }
+
+    #[pyo3(signature = (module, factor))]
+    pub fn mul_learning_rate(&mut self, module: &Bound<PyAny>, factor: f32) -> PyResult<()> {
+        with_module_mut(module, |module_inner| self.inner.mul_learning_rate(module_inner, factor))
     }
 
     #[pyo3(signature = (text, *, every="epoch", mode="blend"))]
@@ -7114,6 +7952,11 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyZSpaceCoherenceScan>()?;
     module.add_class::<PyZSpaceCoherenceWaveBlock>()?;
     module.add_class::<PyRelu>()?;
+    module.add_class::<PyGelu>()?;
+    module.add_class::<PyLayerNorm>()?;
+    module.add_class::<PyZSpaceLayerNorm>()?;
+    module.add_class::<PyBatchNorm1d>()?;
+    module.add_class::<PyZSpaceBatchNorm1d>()?;
     module.add_class::<PySequential>()?;
     module.add_class::<PyMeanSquaredError>()?;
     module.add_class::<PyCategoricalCrossEntropy>()?;
@@ -7187,6 +8030,11 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
             "ZSpaceCoherenceScan",
             "ZSpaceCoherenceWaveBlock",
             "Relu",
+            "Gelu",
+            "LayerNorm",
+            "ZSpaceLayerNorm",
+            "BatchNorm1d",
+            "ZSpaceBatchNorm1d",
             "Sequential",
             "MeanSquaredError",
             "CategoricalCrossEntropy",
@@ -7250,6 +8098,21 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     }
     if let Ok(relu) = module.getattr("Relu") {
         parent.add("Relu", relu)?;
+    }
+    if let Ok(gelu) = module.getattr("Gelu") {
+        parent.add("Gelu", gelu)?;
+    }
+    if let Ok(layer_norm) = module.getattr("LayerNorm") {
+        parent.add("LayerNorm", layer_norm)?;
+    }
+    if let Ok(zspace_layer_norm) = module.getattr("ZSpaceLayerNorm") {
+        parent.add("ZSpaceLayerNorm", zspace_layer_norm)?;
+    }
+    if let Ok(batch_norm) = module.getattr("BatchNorm1d") {
+        parent.add("BatchNorm1d", batch_norm)?;
+    }
+    if let Ok(zspace_batch_norm) = module.getattr("ZSpaceBatchNorm1d") {
+        parent.add("ZSpaceBatchNorm1d", zspace_batch_norm)?;
     }
     if let Ok(sequential) = module.getattr("Sequential") {
         parent.add("Sequential", sequential)?;

@@ -7,6 +7,7 @@ use crate::module::{Module, Parameter};
 use crate::{PureResult, Tensor};
 use st_tensor::TensorError;
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 
 const TANH_CLAMP: f32 = 25.0;
 
@@ -367,6 +368,11 @@ impl ZSpaceBatchNorm1d {
     /// Switches the layer to evaluation mode.
     pub fn eval(&self) {
         self.set_training(false);
+    }
+
+    /// Returns `true` when the layer is operating in training mode.
+    pub fn training(&self) -> bool {
+        self.training.get()
     }
 
     /// Returns the cached telemetry captured during the most recent forward pass.
@@ -730,6 +736,11 @@ impl BatchNorm1d {
         self.set_training(false);
     }
 
+    /// Returns `true` when the layer is operating in training mode.
+    pub fn training(&self) -> bool {
+        self.training.get()
+    }
+
     fn guard_input(&self, input: &Tensor) -> PureResult<()> {
         let (rows, cols) = input.shape();
         if cols != self.features {
@@ -914,6 +925,64 @@ impl Module for BatchNorm1d {
         visitor(&mut self.gamma)?;
         visitor(&mut self.beta)
     }
+
+    fn state_dict(&self) -> PureResult<HashMap<String, Tensor>> {
+        let mut state = HashMap::new();
+        self.visit_parameters(&mut |param| {
+            state.insert(param.name().to_string(), param.value().clone());
+            Ok(())
+        })?;
+
+        let base = self.gamma.name().strip_suffix("::gamma").unwrap_or(self.gamma.name());
+        state.insert(
+            format!("{base}::running_mean"),
+            (*self.running_mean.borrow()).clone(),
+        );
+        state.insert(
+            format!("{base}::running_var"),
+            (*self.running_var.borrow()).clone(),
+        );
+        Ok(state)
+    }
+
+    fn load_state_dict(&mut self, state: &HashMap<String, Tensor>) -> PureResult<()> {
+        self.visit_parameters_mut(&mut |param| {
+            let Some(value) = state.get(param.name()) else {
+                return Err(TensorError::MissingParameter {
+                    name: param.name().to_string(),
+                });
+            };
+            param.load_value(value)
+        })?;
+
+        let base = self.gamma.name().strip_suffix("::gamma").unwrap_or(self.gamma.name());
+        if let Some(value) = state.get(&format!("{base}::running_mean")) {
+            let expected = { self.running_mean.borrow().shape() };
+            if value.shape() != expected {
+                return Err(TensorError::ShapeMismatch {
+                    left: value.shape(),
+                    right: expected,
+                });
+            }
+            *self.running_mean.borrow_mut() = value.clone();
+        }
+        if let Some(value) = state.get(&format!("{base}::running_var")) {
+            let expected = { self.running_var.borrow().shape() };
+            if value.shape() != expected {
+                return Err(TensorError::ShapeMismatch {
+                    left: value.shape(),
+                    right: expected,
+                });
+            }
+            *self.running_var.borrow_mut() = value.clone();
+        }
+        Ok(())
+    }
+
+    fn set_training(&mut self, training: bool) -> PureResult<()> {
+        BatchNorm1d::set_training(self, training);
+        Ok(())
+    }
 }
 
 impl Module for ZSpaceBatchNorm1d {
@@ -1085,6 +1154,78 @@ impl Module for ZSpaceBatchNorm1d {
     ) -> PureResult<()> {
         visitor(&mut self.gamma)?;
         visitor(&mut self.beta)
+    }
+
+    fn state_dict(&self) -> PureResult<HashMap<String, Tensor>> {
+        let mut state = HashMap::new();
+        self.visit_parameters(&mut |param| {
+            state.insert(param.name().to_string(), param.value().clone());
+            Ok(())
+        })?;
+
+        let base = self.gamma.name().strip_suffix("::gamma").unwrap_or(self.gamma.name());
+        state.insert(
+            format!("{base}::running_mean"),
+            (*self.running_mean.borrow()).clone(),
+        );
+        state.insert(
+            format!("{base}::running_var"),
+            (*self.running_var.borrow()).clone(),
+        );
+        state.insert(
+            format!("{base}::projector_gain"),
+            Tensor::from_vec(1, 1, vec![self.projector_gain.get()])?,
+        );
+        Ok(state)
+    }
+
+    fn load_state_dict(&mut self, state: &HashMap<String, Tensor>) -> PureResult<()> {
+        self.visit_parameters_mut(&mut |param| {
+            let Some(value) = state.get(param.name()) else {
+                return Err(TensorError::MissingParameter {
+                    name: param.name().to_string(),
+                });
+            };
+            param.load_value(value)
+        })?;
+
+        let base = self.gamma.name().strip_suffix("::gamma").unwrap_or(self.gamma.name());
+        if let Some(value) = state.get(&format!("{base}::running_mean")) {
+            let expected = { self.running_mean.borrow().shape() };
+            if value.shape() != expected {
+                return Err(TensorError::ShapeMismatch {
+                    left: value.shape(),
+                    right: expected,
+                });
+            }
+            *self.running_mean.borrow_mut() = value.clone();
+        }
+        if let Some(value) = state.get(&format!("{base}::running_var")) {
+            let expected = { self.running_var.borrow().shape() };
+            if value.shape() != expected {
+                return Err(TensorError::ShapeMismatch {
+                    left: value.shape(),
+                    right: expected,
+                });
+            }
+            *self.running_var.borrow_mut() = value.clone();
+        }
+        if let Some(value) = state.get(&format!("{base}::projector_gain")) {
+            if value.shape() != (1, 1) {
+                return Err(TensorError::ShapeMismatch {
+                    left: value.shape(),
+                    right: (1, 1),
+                });
+            }
+            let gain = value.data().first().copied().unwrap_or(1.0);
+            self.set_projector_gain(gain)?;
+        }
+        Ok(())
+    }
+
+    fn set_training(&mut self, training: bool) -> PureResult<()> {
+        ZSpaceBatchNorm1d::set_training(self, training);
+        Ok(())
     }
 }
 
