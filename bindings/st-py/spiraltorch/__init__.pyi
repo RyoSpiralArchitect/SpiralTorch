@@ -1358,6 +1358,31 @@ def stream_zspace_training(
     on_step: Optional[Callable[[int, List[float], float], None]] = ...,
 ) -> List[float]: ...
 
+def vision_online_step(
+    vision: SpiralTorchVision,
+    payload: object,
+    *,
+    aggregator: object | None = ...,
+    trainer: ZSpaceTrainer | None = ...,
+    weight: float = ...,
+    metrics_builder: Callable[[SpiralTorchVision, Mapping[str, object]], Mapping[str, object] | ZMetrics] | None = ...,
+    step_index: int | None = ...,
+) -> Dict[str, object]: ...
+
+def stream_vision_training(
+    vision: SpiralTorchVision,
+    frames: Iterable[object],
+    *,
+    aggregator: object | None = ...,
+    trainer: ZSpaceTrainer | None = ...,
+    weight: float = ...,
+    flush_every: int = ...,
+    keep_depth: int | None = ...,
+    metrics_builder: Callable[[SpiralTorchVision, Mapping[str, object]], Mapping[str, object] | ZMetrics] | None = ...,
+    on_step: Callable[[int, Dict[str, object]], None] | None = ...,
+    final_flush: bool = ...,
+) -> List[Dict[str, object]]: ...
+
 class RankPlan:
     kind: str
     rows: int
@@ -4943,6 +4968,33 @@ class _VisionModule(ModuleType):
     FractalCanvas: type[FractalCanvas]
     InfiniteZSpacePatch: type[InfiniteZSpacePatch]
 
+    def vision_online_step(
+        self,
+        vision: SpiralTorchVision,
+        payload: object,
+        *,
+        aggregator: object | None = ...,
+        trainer: ZSpaceTrainer | None = ...,
+        weight: float = ...,
+        metrics_builder: Callable[[SpiralTorchVision, Mapping[str, object]], Mapping[str, object] | ZMetrics] | None = ...,
+        step_index: int | None = ...,
+    ) -> Dict[str, object]: ...
+
+    def stream_vision_training(
+        self,
+        vision: SpiralTorchVision,
+        frames: Iterable[object],
+        *,
+        aggregator: object | None = ...,
+        trainer: ZSpaceTrainer | None = ...,
+        weight: float = ...,
+        flush_every: int = ...,
+        keep_depth: int | None = ...,
+        metrics_builder: Callable[[SpiralTorchVision, Mapping[str, object]], Mapping[str, object] | ZMetrics] | None = ...,
+        on_step: Callable[[int, Dict[str, object]], None] | None = ...,
+        final_flush: bool = ...,
+    ) -> List[Dict[str, object]]: ...
+
 vision: _VisionModule
 
 class _CanvasModule(ModuleType):
@@ -5534,6 +5586,8 @@ __all__ = [
     "ZSpaceCoherenceSequencer",
     "step_many",
     "stream_zspace_training",
+    "vision_online_step",
+    "stream_vision_training",
     "ZConv",
     "ZConv6DA",
     "ZPooling",

@@ -80,6 +80,18 @@ _ENTRY_METADATA: dict[str, dict[str, Any]] = {
         "description": "Text-conditioned Z-space VAE recipe.",
         "tags": ("vae", "text", "zspace", "generative", "multimodal"),
     },
+    "zspace_stream_online_vision": {
+        "task": "classification",
+        "family": "vision",
+        "description": "Online stream updates for SpiralTorchVision with ZSpaceTrainer.",
+        "tags": ("vision", "zspace", "streaming", "temporal", "online", "starter", "physics"),
+    },
+    "zspace_stream_frame_aggregator": {
+        "task": "classification",
+        "family": "vision",
+        "description": "ChronoSnapshot + ZSpaceStreamFrameAggregator online stream recipe.",
+        "tags": ("vision", "zspace", "streaming", "temporal", "aggregator", "chrono"),
+    },
     "llm_char_finetune": {
         "task": "language-modeling",
         "family": "llm",
@@ -118,7 +130,7 @@ _FOCUS_PRESETS: dict[str, dict[str, Any]] = {
     "zspace_stream": {
         "description": "Temporal/stream-oriented Z-space training recipes.",
         "required_tags": ("zspace",),
-        "prefer_tags": ("streaming", "temporal", "vision", "physics"),
+        "prefer_tags": ("streaming", "temporal", "vision", "physics", "online", "aggregator"),
         "avoid_tags": (),
     },
     "zspace_generative": {

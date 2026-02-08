@@ -45,6 +45,8 @@ def test_vision_stream_frame_and_chrono_snapshot_bridge() -> None:
     assert hasattr(st.vision, "ZSpaceStreamFrame")
     assert hasattr(st.vision, "StreamedVolume")
     assert hasattr(st.vision, "ZSpaceStreamFrameAggregator")
+    assert hasattr(st.vision, "vision_online_step")
+    assert hasattr(st.vision, "stream_vision_training")
     assert hasattr(st, "ChronoSnapshot")
     assert hasattr(st, "ZSpaceStreamFrame")
     assert hasattr(st, "StreamedVolume")
@@ -150,3 +152,26 @@ def test_vision_stream_frame_and_chrono_snapshot_bridge() -> None:
     vision.accumulate(streamed_again)
     snapshot = vision.snapshot()
     assert "stream_metadata" in snapshot
+
+    trainer = st.zspace.ZSpaceTrainer(z_dim=4, lr=1e-3)
+    online = st.vision.vision_online_step(
+        vision,
+        frame,
+        aggregator=st.vision.ZSpaceStreamFrameAggregator(max_depth=2),
+        trainer=trainer,
+        step_index=0,
+    )
+    assert bool(online["applied"])
+    assert online["loss"] is not None
+    assert isinstance(online["z_state"], list)
+
+    run_updates = st.vision.stream_vision_training(
+        vision,
+        [frame, frame, frame],
+        aggregator=st.vision.ZSpaceStreamFrameAggregator(max_depth=2),
+        trainer=trainer,
+        flush_every=2,
+        final_flush=True,
+    )
+    assert len(run_updates) == 2
+    assert [int(update["aggregated_frames"]) for update in run_updates] == [2, 1]

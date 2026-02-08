@@ -93,6 +93,9 @@ NumPy, no PyTorch, and no shim layers.
   `vision.ZSpaceStreamFrameAggregator` so Python can attach chrono summaries,
   aggregate live frame streams, and ingest temporal updates without dropping to
   Rust glue code.
+- Online stream-loop helpers `vision.vision_online_step(...)` and
+  `vision.stream_vision_training(...)` to wire frame streams into
+  `SpiralTorchVision` + `ZSpaceTrainer` loops directly from Python.
 
 ## Building wheels
 
@@ -160,6 +163,8 @@ spiral-model-zoo focuses
 spiral-model-zoo list --task language-modeling
 spiral-model-zoo suggest llm_char --task language-modeling --prefer-tag coherence
 spiral-model-zoo suggest --focus zspace_stream --available-only
+spiral-model-zoo run zspace_stream_online_vision -- --steps 16 --flush-every 2
+spiral-model-zoo run zspace_stream_frame_aggregator -- --steps 12 --native-frames
 spiral-model-zoo run mlp_regression -- --help
 ```
 

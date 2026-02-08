@@ -2888,6 +2888,207 @@ def _coerce_matrix(matrix: _Any, height: int, width: int) -> _List[_List[float]]
     return rows
 
 
+def _profile_field(profile: _Any, key: str, default: float = 0.0) -> float:
+    if isinstance(profile, _Mapping):
+        value = profile.get(key, default)
+    else:
+        value = getattr(profile, key, default)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _default_vision_training_metrics(
+    vision: SpiralTorchVision,
+    snapshot: _Mapping[str, _Any],
+) -> ZMetrics:
+    profiles_obj = snapshot.get("profiles", [])
+    profiles = list(profiles_obj) if isinstance(profiles_obj, _SequenceABC) else []
+    if profiles:
+        profile_energy = sum(_profile_field(profile, "energy") for profile in profiles) / len(profiles)
+        profile_std = sum(_profile_field(profile, "std") for profile in profiles) / len(profiles)
+    else:
+        profile_energy = 0.0
+        profile_std = 0.0
+
+    projection = vision.project(normalise=True)
+    projection_summary = _matrix_summary(projection)
+    gradient = list(projection[0]) if projection else [0.0]
+    if not gradient:
+        gradient = [0.0]
+
+    return ZMetrics(
+        speed=float(snapshot.get("energy", 0.0)),
+        memory=float(profile_energy),
+        stability=float(profile_std),
+        gradient=gradient,
+        drs=float(projection_summary["linf"]),
+    )
+
+
+def _resolve_stream_aggregator(
+    vision: SpiralTorchVision,
+    aggregator: _Any = None,
+) -> _Any:
+    if aggregator is not None:
+        return aggregator
+
+    factory = globals().get("ZSpaceStreamFrameAggregator")
+    if not isinstance(factory, type):
+        return None
+
+    max_depth = int(getattr(vision, "depth", 0) or 0)
+    if max_depth > 0:
+        try:
+            return factory(max_depth=max_depth)
+        except TypeError:
+            pass
+        except Exception:
+            return None
+    try:
+        return factory()
+    except Exception:
+        return None
+
+
+def _extract_stream_payload(aggregator: _Any) -> _Any:
+    for method_name in ("to_streamed_volume", "as_frame"):
+        method = getattr(aggregator, method_name, None)
+        if not callable(method):
+            continue
+        try:
+            payload = method()
+        except Exception:
+            continue
+        if payload is not None:
+            return payload
+    return None
+
+
+def vision_online_step(
+    vision: SpiralTorchVision,
+    payload: _Any,
+    *,
+    aggregator: _Any = None,
+    trainer: ZSpaceTrainer | None = None,
+    weight: float = 1.0,
+    metrics_builder: _Optional[_Callable[[SpiralTorchVision, _Mapping[str, _Any]], _Mapping[str, _Any] | ZMetrics]] = None,
+    step_index: int | None = None,
+) -> _Dict[str, _Any]:
+    if aggregator is not None:
+        extend = getattr(aggregator, "extend", None)
+        if not callable(extend):
+            raise TypeError("aggregator must provide extend(...)")
+        extend(payload)
+        payload = _extract_stream_payload(aggregator)
+        if payload is None:
+            return {
+                "applied": False,
+                "frame_index": int(step_index) if step_index is not None else None,
+                "loss": None,
+                "z_state": list(trainer.state) if trainer is not None else None,
+                "snapshot": None,
+            }
+
+    vision.accumulate(payload, weight=weight)
+    snapshot = vision.snapshot()
+
+    loss: float | None = None
+    if trainer is not None:
+        builder = metrics_builder or _default_vision_training_metrics
+        metric_payload = builder(vision, snapshot)
+        loss = float(trainer.step(metric_payload))
+
+    return {
+        "applied": True,
+        "frame_index": int(step_index) if step_index is not None else None,
+        "energy": float(snapshot.get("energy", 0.0)),
+        "loss": loss,
+        "z_state": list(trainer.state) if trainer is not None else None,
+        "stream_metadata": snapshot.get("stream_metadata"),
+        "snapshot": snapshot,
+    }
+
+
+def stream_vision_training(
+    vision: SpiralTorchVision,
+    frames: _Iterable[_Any],
+    *,
+    aggregator: _Any = None,
+    trainer: ZSpaceTrainer | None = None,
+    weight: float = 1.0,
+    flush_every: int = 1,
+    keep_depth: int | None = None,
+    metrics_builder: _Optional[_Callable[[SpiralTorchVision, _Mapping[str, _Any]], _Mapping[str, _Any] | ZMetrics]] = None,
+    on_step: _Optional[_Callable[[int, _Dict[str, _Any]], None]] = None,
+    final_flush: bool = True,
+) -> _List[_Dict[str, _Any]]:
+    flush_every = int(flush_every)
+    if flush_every <= 0:
+        raise ValueError("flush_every must be positive")
+    if keep_depth is not None and int(keep_depth) <= 0:
+        raise ValueError("keep_depth must be positive when provided")
+
+    active_aggregator = _resolve_stream_aggregator(vision, aggregator)
+    prune = getattr(active_aggregator, "prune_oldest", None) if active_aggregator is not None else None
+    can_extend = callable(getattr(active_aggregator, "extend", None))
+
+    updates: _List[_Dict[str, _Any]] = []
+    pending = 0
+    last_frame_index = -1
+
+    def _append_update(frame_index: int, aggregated_frames: int, payload: _Any) -> None:
+        record = vision_online_step(
+            vision,
+            payload,
+            trainer=trainer,
+            weight=weight,
+            metrics_builder=metrics_builder,
+            step_index=frame_index,
+        )
+        if not bool(record.get("applied", False)):
+            return
+        record["update_index"] = len(updates)
+        record["aggregated_frames"] = int(aggregated_frames)
+        updates.append(record)
+        if on_step is not None:
+            on_step(int(record["update_index"]), record)
+
+    for frame_index, frame in enumerate(frames):
+        last_frame_index = frame_index
+        if active_aggregator is None or not can_extend:
+            _append_update(frame_index, 1, frame)
+            continue
+
+        try:
+            active_aggregator.extend(frame)
+        except Exception:
+            _append_update(frame_index, 1, frame)
+            continue
+        pending += 1
+
+        if keep_depth is not None and callable(prune):
+            prune(int(keep_depth))
+
+        if pending < flush_every:
+            continue
+
+        payload = _extract_stream_payload(active_aggregator)
+        frame_count = pending
+        pending = 0
+        if payload is not None:
+            _append_update(frame_index, frame_count, payload)
+
+    if active_aggregator is not None and can_extend and final_flush and pending > 0:
+        payload = _extract_stream_payload(active_aggregator)
+        if payload is not None:
+            flush_index = last_frame_index if last_frame_index >= 0 else 0
+            _append_update(flush_index, pending, payload)
+
+    return updates
+
+
 class _ForwardingModule(_types.ModuleType):
     """Module stub that forwards attribute lookups to the Rust backend."""
 
@@ -3716,6 +3917,8 @@ _mirror_into_module(
         "SpiralTorchVision",
         "TemporalResonanceBuffer",
         "SliceProfile",
+        "vision_online_step",
+        "stream_vision_training",
     ],
     reexport=False,
 )
@@ -4528,6 +4731,8 @@ _EXTRAS.extend(
         "compile_inference",
         "inference_to_zmetrics",
         "ensure_zmetrics",
+        "vision_online_step",
+        "stream_vision_training",
     ]
 )
 

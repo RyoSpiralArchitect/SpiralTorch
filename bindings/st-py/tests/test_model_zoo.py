@@ -241,3 +241,45 @@ def test_cli_focuses_json_output(stub_spiraltorch, monkeypatch, capsys):
     assert code == 0
     payload = json.loads(capsys.readouterr().out)
     assert "zspace_stream" in payload
+
+
+def test_recommend_model_zspace_stream_prefers_online_recipe(
+    stub_spiraltorch, monkeypatch, tmp_path: Path
+):
+    scripts = tmp_path / "models" / "python"
+    scripts.mkdir(parents=True)
+    _write_script(scripts / "zconv_classification.py")
+    _write_script(scripts / "maxwell_simulated_z_classification.py")
+    _write_script(scripts / "zspace_stream_online_vision.py")
+    _write_script(scripts / "zspace_stream_frame_aggregator.py")
+
+    monkeypatch.setenv("SPIRALTORCH_MODEL_ZOO_ROOT", str(tmp_path))
+    model_zoo = _load_model_zoo(stub_spiraltorch, monkeypatch)
+
+    entry = model_zoo.recommend_model(
+        focus="zspace_stream",
+        available_only=True,
+    )
+    assert entry.key == "zspace_stream_online_vision"
+
+
+def test_list_models_zspace_stream_focus_includes_stream_recipes(
+    stub_spiraltorch, monkeypatch, tmp_path: Path
+):
+    scripts = tmp_path / "models" / "python"
+    scripts.mkdir(parents=True)
+    _write_script(scripts / "zspace_stream_online_vision.py")
+    _write_script(scripts / "zspace_stream_frame_aggregator.py")
+    _write_script(scripts / "mlp_regression.py")
+
+    monkeypatch.setenv("SPIRALTORCH_MODEL_ZOO_ROOT", str(tmp_path))
+    model_zoo = _load_model_zoo(stub_spiraltorch, monkeypatch)
+
+    entries = model_zoo.list_models(
+        focus="zspace_stream",
+        available_only=True,
+    )
+    keys = [entry.key for entry in entries]
+    assert "zspace_stream_online_vision" in keys
+    assert "zspace_stream_frame_aggregator" in keys
+    assert "mlp_regression" not in keys
