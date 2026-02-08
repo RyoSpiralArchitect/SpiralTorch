@@ -15,8 +15,9 @@ use st_tensor::wasm_canvas::{
 };
 use st_tensor::{Tensor, TensorError};
 use st_vision::{
-    ChronoSnapshot as PureChronoSnapshot, ZSliceProfile as PureZSliceProfile,
-    ZSpaceStreamFrame as PureZSpaceStreamFrame, ZSpaceTelemetryReport as PureZSpaceTelemetryReport,
+    ChronoSnapshot as PureChronoSnapshot, StreamedVolume as PureStreamedVolume,
+    ZSliceProfile as PureZSliceProfile, ZSpaceStreamFrame as PureZSpaceStreamFrame,
+    ZSpaceTelemetryReport as PureZSpaceTelemetryReport,
 };
 
 const MIN_SMOOTHING: f32 = 0.0;
@@ -385,6 +386,20 @@ impl PyZSpaceStreamFrame {
         zspace_telemetry_to_dict(py, &report)
     }
 
+    fn to_streamed_volume(&self) -> PyResult<PyStreamedVolume> {
+        let streamed = self.inner.to_streamed_volume().map_err(tensor_err_to_py)?;
+        Ok(PyStreamedVolume::from_inner(streamed))
+    }
+
+    fn into_streamed_volume(&self) -> PyResult<PyStreamedVolume> {
+        let streamed = self
+            .inner
+            .clone()
+            .into_streamed_volume()
+            .map_err(tensor_err_to_py)?;
+        Ok(PyStreamedVolume::from_inner(streamed))
+    }
+
     fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
         let dict = PyDict::new_bound(py);
         dict.set_item("depth", self.inner.depth())?;
@@ -425,6 +440,125 @@ impl PyZSpaceStreamFrame {
             cols,
             self.inner.atlas_frame().is_some(),
             self.inner.chrono_snapshot().is_some()
+        )
+    }
+}
+
+#[pyclass(module = "spiraltorch.vision", name = "StreamedVolume", unsendable)]
+#[derive(Clone)]
+pub(crate) struct PyStreamedVolume {
+    inner: PureStreamedVolume,
+}
+
+impl PyStreamedVolume {
+    fn from_inner(inner: PureStreamedVolume) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PyStreamedVolume {
+    #[staticmethod]
+    fn from_frame(frame: &PyZSpaceStreamFrame) -> PyResult<Self> {
+        let streamed = frame.inner.to_streamed_volume().map_err(tensor_err_to_py)?;
+        Ok(Self { inner: streamed })
+    }
+
+    #[getter]
+    fn depth(&self) -> usize {
+        self.inner.volume.depth()
+    }
+
+    #[getter]
+    fn slice_shape(&self) -> (usize, usize) {
+        (self.inner.volume.height(), self.inner.volume.width())
+    }
+
+    fn slices(&self) -> PyResult<Vec<PyTensor>> {
+        let mut slices = Vec::with_capacity(self.inner.volume.depth());
+        for index in 0..self.inner.volume.depth() {
+            let slice = self.inner.volume.slice(index).map_err(tensor_err_to_py)?;
+            slices.push(PyTensor::from_tensor(slice));
+        }
+        Ok(slices)
+    }
+
+    #[getter]
+    fn atlas_frame(&self) -> Option<PyAtlasFrame> {
+        self.inner
+            .atlas_frame
+            .as_ref()
+            .cloned()
+            .map(PyAtlasFrame::from_frame)
+    }
+
+    #[getter]
+    fn chrono_snapshot(&self) -> Option<PyChronoSnapshot> {
+        self.inner
+            .chrono_snapshot
+            .as_ref()
+            .cloned()
+            .map(PyChronoSnapshot::from_inner)
+    }
+
+    fn profile(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+        let profile = self.inner.profile().map_err(tensor_err_to_py)?;
+        z_slice_profile_to_dict(py, &profile)
+    }
+
+    fn telemetry_report(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+        let report = self.inner.telemetry_report().map_err(tensor_err_to_py)?;
+        zspace_telemetry_to_dict(py, &report)
+    }
+
+    fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("depth", self.inner.volume.depth())?;
+        dict.set_item(
+            "slice_shape",
+            (self.inner.volume.height(), self.inner.volume.width()),
+        )?;
+
+        let mut slice_rows = Vec::with_capacity(self.inner.volume.depth());
+        for index in 0..self.inner.volume.depth() {
+            let slice = self.inner.volume.slice(index).map_err(tensor_err_to_py)?;
+            slice_rows.push(tensor_to_rows(&slice));
+        }
+        dict.set_item("slices", slice_rows)?;
+
+        let atlas_payload = if let Some(atlas) = self.inner.atlas_frame.as_ref() {
+            let atlas_dict = PyDict::new_bound(py);
+            atlas_dict.set_item("timestamp", atlas.timestamp)?;
+            atlas_dict.set_item("metrics", atlas.metrics.len())?;
+            atlas_dict.set_item("notes", atlas.notes.len())?;
+            Some(atlas_dict.into_py(py))
+        } else {
+            None
+        };
+        dict.set_item("atlas_frame", atlas_payload)?;
+
+        let snapshot_payload = self
+            .inner
+            .chrono_snapshot
+            .as_ref()
+            .cloned()
+            .map(PyChronoSnapshot::from_inner)
+            .map(|snapshot| snapshot.to_dict(py))
+            .transpose()?;
+        dict.set_item("chrono_snapshot", snapshot_payload)?;
+        dict.set_item("profile", self.profile(py)?)?;
+        dict.set_item("telemetry_report", self.telemetry_report(py)?)?;
+        Ok(dict.into())
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "StreamedVolume(depth={}, slice_shape=({}, {}), atlas={}, snapshot={})",
+            self.inner.volume.depth(),
+            self.inner.volume.height(),
+            self.inner.volume.width(),
+            self.inner.atlas_frame.is_some(),
+            self.inner.chrono_snapshot.is_some()
         )
     }
 }
@@ -1458,6 +1592,7 @@ pub fn zrelativity_heatmap(model: &PyZRelativityModel, field: &str) -> PyResult<
 pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     parent.add_class::<PyChronoSnapshot>()?;
     parent.add_class::<PyZSpaceStreamFrame>()?;
+    parent.add_class::<PyStreamedVolume>()?;
     parent.add_class::<PyCanvasTransformer>()?;
     parent.add_class::<PyCanvasSnapshot>()?;
     parent.add_class::<PyCanvasProjector>()?;

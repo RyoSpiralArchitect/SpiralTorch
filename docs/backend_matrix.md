@@ -7,12 +7,12 @@ SpiralTorch targets a unified runtime that can dispatch to multiple accelerators
 | --- | --- | --- | --- | --- | --- |
 | Build flag | _none_ | `--features wgpu` | `--features mps` | `--features cuda` | `--features "hip,st-backend-hip/hip-real"` |
 | Min toolchain | Stable Rust | Stable Rust + system WebGPU drivers | Stable Rust + macOS 14 SDK | Stable Rust + CUDA 12 Toolkit & NVRTC | Stable Rust + ROCm 6 toolchain |
-| Tensor ops | ✅ Full (cpu/faer) | ✅ WGPU dense + frac kernels | ❌ Feature placeholder (no kernels wired) | ❌ Feature placeholder (no kernels wired) | ⚠️ hip GEMM (matmul); extend op coverage |
-| Autodiff / hypergrad | ✅ Ready | ⚠️ Validate tapes with WGPU execution | ❌ Backend placeholder | ❌ Backend placeholder | ⚠️ Validate tapes with HIP execution |
+| Tensor ops | ✅ Full (cpu/faer) | ✅ WGPU dense + frac kernels | ❌ Feature placeholder (no kernels wired) | ⚠️ Rank-k kernels wired (TopK/MidK/BottomK); broaden op parity | ⚠️ Rank-k kernels wired with hip-real; broaden op parity |
+| Autodiff / hypergrad | ✅ Ready | ⚠️ Validate tapes with WGPU execution | ❌ Backend placeholder | ⚠️ Validate tapes with CUDA execution | ⚠️ Validate tapes with HIP execution |
 | Planner & scheduler | ✅ Ready (backend-agnostic) | ✅ Ready (backend-agnostic) | ✅ Ready (backend-agnostic) | ✅ Ready (backend-agnostic) | ✅ Ready (backend-agnostic) |
 | Telemetry | ✅ Tracing + structured logging | ⚠️ GPU timing hooks planned | ❌ Backend placeholder | ⚠️ CUPTI hooks not wired | ⚠️ ROCm counters pending |
 | Python wheel support | ✅ Ready | ✅ Ready (default build) | ❌ Feature placeholder | ⚠️ Requires CUDA toolchain build | ⚠️ Requires ROCm toolchain build |
-| Kernel autotuning | ⚠️ CPU tiling heuristics (faer + autotune) | ⚠️ Shader cache heuristics | ❌ Backend placeholder | ❌ Backend placeholder | ❌ Backend placeholder |
+| Kernel autotuning | ⚠️ CPU tiling heuristics (faer + autotune) | ⚠️ Shader cache heuristics | ❌ Backend placeholder | ⚠️ Heuristic tuning active; online autotune pending | ⚠️ Heuristic tuning active; online autotune pending |
 | Sparse tensor ops | ❌ Not implemented | ❌ Not implemented | ❌ Not implemented | ❌ Not implemented | ❌ Not implemented |
 | Quantized inference | ⚠️ i8 matmul path present; validate end-to-end | ⚠️ int8 kernels present; validate end-to-end | ❌ Backend placeholder | ❌ Backend placeholder | ❌ Backend placeholder |
 | Mixed precision training | ⚠️ BF16/FP16 roadmap | ⚠️ wgpu_f16 feature (validate) | ❌ Backend placeholder | ❌ Backend placeholder | ❌ Backend placeholder |

@@ -13,7 +13,8 @@ NumPy, no PyTorch, and no shim layers.
   text, accumulate gradients, and project back into the Poincaré ball.
 - `TensorBiome` to cultivate open-topos rewrites, weight shoots, stack the
   harvest, and guard tensors that can be re-imported into Z-space.
-- Unified planning helpers (`plan`, `plan_topk`, `describe_device`) that
+- Unified planning helpers (`plan`, `plan_topk`, `describe_device`,
+  `probe_gpu_path`) that
   reuse the same heuristics as the Rust executors.
 - ROCm probing (`hip_probe`) so Python callers can reflect the stubbed
   device hints shared with the Rust runtime.
@@ -87,9 +88,10 @@ NumPy, no PyTorch, and no shim layers.
   by task/family, resolve script paths, rank recommendations with
   `suggest_models(...)`/`recommend_model(...)`, and run models with a stable
   Python API or the `spiral-model-zoo` CLI.
-- Stream telemetry interop via `vision.ChronoSnapshot` and
-  `vision.ZSpaceStreamFrame` so Python can attach chrono summaries and atlas
-  frames to live Z-slice bundles without dropping to Rust glue code.
+- Stream telemetry interop via `vision.ChronoSnapshot`,
+  `vision.ZSpaceStreamFrame`, and `vision.StreamedVolume` so Python can attach
+  chrono summaries and atlas frames to live Z-slice bundles without dropping to
+  Rust glue code.
 
 ## Building wheels
 

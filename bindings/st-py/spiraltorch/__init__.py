@@ -573,7 +573,7 @@ _EXTRAS = [
     "fibonacci_pacing","pack_nacci_chunks",
     "pack_tribonacci_chunks","pack_tetranacci_chunks",
     "generate_plan_batch_ex","plan","plan_topk",
-    "describe_device","hip_probe","z_space_barycenter",
+    "describe_device","hip_probe","probe_gpu_path","z_space_barycenter",
     "hypergrad","realgrad","hypergrad_topos","encode_zspace","z_metrics",
     "load_zspace_trace_events","write_zspace_trace_html",
     "load_trainer_trace_events","write_trainer_trace_html",
@@ -1689,6 +1689,7 @@ _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
         "plan_topk": (),
         "describe_device": (),
         "hip_probe": (),
+        "probe_gpu_path": (),
         "generate_plan_batch_ex": (),
     },
     "spiralk": {
@@ -3637,6 +3638,7 @@ _mirror_into_module(
     [
         "ChronoSnapshot",
         "ZSpaceStreamFrame",
+        "StreamedVolume",
         "SpiralTorchVision",
         "TemporalResonanceBuffer",
         "SliceProfile",
@@ -3692,6 +3694,7 @@ _mirror_into_module(
         "plan_topk": (),
         "describe_device": (),
         "hip_probe": (),
+        "probe_gpu_path": (),
         "generate_plan_batch_ex": (),
     },
     reexport=False,
@@ -4492,11 +4495,11 @@ _CORE_EXPORTS = [
     "CurvatureScheduler","CurvatureDecision","SpectralLearningRatePolicy",
     "CoherenceObservation","CoherenceSignature","CoherenceChannelReport","CoherenceDiagnostics","is_swap_invariant",
     "TemporalResonanceBuffer","SpiralTorchVision",
-    "ChronoSnapshot","ZSpaceStreamFrame",
+    "ChronoSnapshot","ZSpaceStreamFrame","StreamedVolume",
     "CanvasTransformer","CanvasSnapshot","apply_vision_update",
     "ZMetrics","SliceProfile","step_many","stream_zspace_training",
     "info_nce","masked_mse","mean_squared_error",
-    "init_backend",
+    "init_backend","probe_gpu_path",
 ]
 for _name in _CORE_EXPORTS:
     _expose_from_rs(_name)

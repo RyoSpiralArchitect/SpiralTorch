@@ -1607,6 +1607,15 @@ def describe_device(
 
 def hip_probe() -> Dict[str, object]: ...
 
+def probe_gpu_path(
+    kind: Literal["topk", "midk", "bottomk"] = ...,
+    *,
+    backend: Literal["cuda", "hip"] = ...,
+    rows: int = ...,
+    cols: int = ...,
+    k: int = ...,
+) -> Dict[str, object]: ...
+
 def gl_coeffs_adaptive(alpha: float, tol: float = ..., max_len: int = ...) -> List[float]: ...
 
 def fracdiff_gl_1d(
@@ -1791,6 +1800,24 @@ class ZSpaceStreamFrame:
     def slices(self) -> List[Tensor]: ...
     def with_atlas(self, frame: AtlasFrame) -> None: ...
     def with_snapshot(self, snapshot: ChronoSnapshot) -> None: ...
+    @property
+    def atlas_frame(self) -> AtlasFrame | None: ...
+    @property
+    def chrono_snapshot(self) -> ChronoSnapshot | None: ...
+    def profile(self) -> Dict[str, object]: ...
+    def telemetry_report(self) -> Dict[str, object]: ...
+    def to_streamed_volume(self) -> StreamedVolume: ...
+    def into_streamed_volume(self) -> StreamedVolume: ...
+    def to_dict(self) -> Dict[str, object]: ...
+
+class StreamedVolume:
+    @staticmethod
+    def from_frame(frame: ZSpaceStreamFrame) -> StreamedVolume: ...
+    @property
+    def depth(self) -> int: ...
+    @property
+    def slice_shape(self) -> Tuple[int, int]: ...
+    def slices(self) -> List[Tensor]: ...
     @property
     def atlas_frame(self) -> AtlasFrame | None: ...
     @property
@@ -4861,6 +4888,7 @@ zspace: _ZSpaceModule
 class _VisionModule(ModuleType):
     ChronoSnapshot: type[ChronoSnapshot]
     ZSpaceStreamFrame: type[ZSpaceStreamFrame]
+    StreamedVolume: type[StreamedVolume]
     SpiralTorchVision: type[SpiralTorchVision]
     TemporalResonanceBuffer: type[TemporalResonanceBuffer]
     SliceProfile: type[SliceProfile]
@@ -4987,6 +5015,14 @@ class _PlannerModule(ModuleType):
     ) -> Dict[str, object]: ...
 
     def hip_probe() -> Dict[str, object]: ...
+    def probe_gpu_path(
+        kind: Literal["topk", "midk", "bottomk"] = ...,
+        *,
+        backend: Literal["cuda", "hip"] = ...,
+        rows: int = ...,
+        cols: int = ...,
+        k: int = ...,
+    ) -> Dict[str, object]: ...
     def generate_plan_batch_ex(
         n: int,
         total_steps: int,
@@ -5491,6 +5527,7 @@ __all__ = [
     "pack_tribonacci_chunks",
     "pack_tetranacci_chunks",
     "generate_plan_batch_ex",
+    "probe_gpu_path",
     "SoT3DPlan",
     "SoT3DStep",
     "MacroSummary",
@@ -5528,6 +5565,7 @@ __all__ = [
     "TemporalResonanceBuffer",
     "ChronoSnapshot",
     "ZSpaceStreamFrame",
+    "StreamedVolume",
     "SpiralTorchVision",
     "SliceProfile",
     "CanvasTransformer",

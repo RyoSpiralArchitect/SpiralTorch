@@ -13,6 +13,8 @@ pub mod cuda_loader;
 #[cfg(feature = "cuda")]
 pub mod cuda_runtime;
 pub mod device_caps;
+#[cfg(feature = "hip")]
+pub mod hip_exec;
 #[cfg(feature = "hip-real")]
 pub mod hip_runtime;
 pub mod kdsl_bridge;

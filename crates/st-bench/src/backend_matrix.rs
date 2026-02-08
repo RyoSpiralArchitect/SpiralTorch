@@ -386,12 +386,12 @@ static CAPABILITY_ROWS: &[CapabilityRow] = &[
                 "Feature placeholder (no kernels wired)",
             ),
             CapabilityEntry::with_state(
-                CapabilityState::Stub,
-                "Feature placeholder (no kernels wired)",
+                CapabilityState::Planned,
+                "Rank-k kernels wired (TopK/MidK/BottomK); broaden op parity",
             ),
             CapabilityEntry::with_state(
                 CapabilityState::Planned,
-                "hip GEMM (matmul); extend op coverage",
+                "Rank-k kernels wired with hip-real; broaden op parity",
             ),
         ],
     },
@@ -404,7 +404,10 @@ static CAPABILITY_ROWS: &[CapabilityRow] = &[
                 "Validate tapes with WGPU execution",
             ),
             CapabilityEntry::with_state(CapabilityState::Stub, "Backend placeholder"),
-            CapabilityEntry::with_state(CapabilityState::Stub, "Backend placeholder"),
+            CapabilityEntry::with_state(
+                CapabilityState::Planned,
+                "Validate tapes with CUDA execution",
+            ),
             CapabilityEntry::with_state(
                 CapabilityState::Planned,
                 "Validate tapes with HIP execution",
@@ -437,14 +440,8 @@ static CAPABILITY_ROWS: &[CapabilityRow] = &[
             CapabilityEntry::with_state(CapabilityState::Ready, "Ready"),
             CapabilityEntry::with_state(CapabilityState::Ready, "Ready (default build)"),
             CapabilityEntry::with_state(CapabilityState::Stub, "Feature placeholder"),
-            CapabilityEntry::with_state(
-                CapabilityState::Planned,
-                "Requires CUDA toolchain build",
-            ),
-            CapabilityEntry::with_state(
-                CapabilityState::Planned,
-                "Requires ROCm toolchain build",
-            ),
+            CapabilityEntry::with_state(CapabilityState::Planned, "Requires CUDA toolchain build"),
+            CapabilityEntry::with_state(CapabilityState::Planned, "Requires ROCm toolchain build"),
         ],
     },
     CapabilityRow {
@@ -456,8 +453,14 @@ static CAPABILITY_ROWS: &[CapabilityRow] = &[
             ),
             CapabilityEntry::with_state(CapabilityState::Planned, "Shader cache heuristics"),
             CapabilityEntry::with_state(CapabilityState::Stub, "Backend placeholder"),
-            CapabilityEntry::with_state(CapabilityState::Stub, "Backend placeholder"),
-            CapabilityEntry::with_state(CapabilityState::Stub, "Backend placeholder"),
+            CapabilityEntry::with_state(
+                CapabilityState::Planned,
+                "Heuristic tuning active; online autotune pending",
+            ),
+            CapabilityEntry::with_state(
+                CapabilityState::Planned,
+                "Heuristic tuning active; online autotune pending",
+            ),
         ],
     },
     CapabilityRow {
@@ -720,7 +723,13 @@ pub fn backend_matrix_markdown_table() -> String {
     out.push_str(&headers.join(" | "));
     out.push_str(" |\n");
     out.push_str("| ");
-    out.push_str(&headers.iter().map(|_| "---").collect::<Vec<_>>().join(" | "));
+    out.push_str(
+        &headers
+            .iter()
+            .map(|_| "---")
+            .collect::<Vec<_>>()
+            .join(" | "),
+    );
     out.push_str(" |\n");
 
     for row in CAPABILITY_ROWS {
@@ -843,12 +852,16 @@ mod tests {
         let cpu = summarize_backend(Backend::Cpu);
         assert_eq!(cpu.backend, Backend::Cpu);
         assert_eq!(cpu.tracked_capabilities(), 13);
-        assert_eq!(cpu.ready + cpu.planned + cpu.stub, cpu.tracked_capabilities());
+        assert_eq!(
+            cpu.ready + cpu.planned + cpu.stub,
+            cpu.tracked_capabilities()
+        );
         assert!(cpu.ready > 0);
         assert!(!cpu.is_fully_ready());
-        assert!(cpu.notes.iter().any(|note| {
-            note.capability == "Build flag" && note.note == "_none_"
-        }));
+        assert!(cpu
+            .notes
+            .iter()
+            .any(|note| { note.capability == "Build flag" && note.note == "_none_" }));
     }
 
     #[test]
@@ -889,7 +902,9 @@ mod tests {
     #[test]
     fn capabilities_with_state_filters_rows() {
         let stub_rows = capabilities_with_state(CapabilityState::Stub);
-        assert!(stub_rows.iter().any(|row| row.capability == "Sparse tensor ops"));
+        assert!(stub_rows
+            .iter()
+            .any(|row| row.capability == "Sparse tensor ops"));
 
         let planned_rows = capabilities_with_state(CapabilityState::Planned);
         assert!(planned_rows
@@ -906,8 +921,11 @@ mod tests {
             capabilities_for_backend_with_state(Backend::Hip, CapabilityState::Planned);
         assert!(hip_planned.iter().any(|row| row.capability == "Telemetry"));
 
-        let cuda_stub = capabilities_for_backend_with_state(Backend::Cuda, CapabilityState::Stub);
-        assert!(cuda_stub.iter().any(|row| row.capability == "Tensor ops"));
+        let cuda_planned =
+            capabilities_for_backend_with_state(Backend::Cuda, CapabilityState::Planned);
+        assert!(cuda_planned
+            .iter()
+            .any(|row| row.capability == "Tensor ops"));
 
         let hip_ready = capabilities_for_backend_with_state(Backend::Hip, CapabilityState::Ready);
         assert_eq!(
@@ -980,7 +998,9 @@ mod tests {
     fn capability_matrix_view_provides_note_search() {
         let view = capability_matrix_view();
         let matches = view.capabilities_with_note("json artefacts");
-        assert!(matches.iter().any(|row| row.capability == "ONNX export parity"));
+        assert!(matches
+            .iter()
+            .any(|row| row.capability == "ONNX export parity"));
     }
 
     #[test]

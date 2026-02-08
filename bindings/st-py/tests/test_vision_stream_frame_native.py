@@ -43,8 +43,10 @@ def test_vision_stream_frame_and_chrono_snapshot_bridge() -> None:
     assert hasattr(st, "vision")
     assert hasattr(st.vision, "ChronoSnapshot")
     assert hasattr(st.vision, "ZSpaceStreamFrame")
+    assert hasattr(st.vision, "StreamedVolume")
     assert hasattr(st, "ChronoSnapshot")
     assert hasattr(st, "ZSpaceStreamFrame")
+    assert hasattr(st, "StreamedVolume")
 
     snapshot = st.vision.ChronoSnapshot.from_values(
         frames=3,
@@ -96,3 +98,17 @@ def test_vision_stream_frame_and_chrono_snapshot_bridge() -> None:
     payload = frame.to_dict()
     assert int(payload["depth"]) == 2
     assert tuple(payload["slice_shape"]) == (2, 2)
+
+    streamed = frame.to_streamed_volume()
+    assert streamed.depth == 2
+    assert streamed.slice_shape == (2, 2)
+    assert len(streamed.slices()) == 2
+
+    streamed_profile = streamed.profile()
+    assert int(streamed_profile["depth"]) == 2
+    streamed_report = streamed.telemetry_report()
+    assert int(streamed_report["depth"]) == 2
+
+    streamed_payload = streamed.to_dict()
+    assert int(streamed_payload["depth"]) == 2
+    assert tuple(streamed_payload["slice_shape"]) == (2, 2)

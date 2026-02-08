@@ -73,6 +73,7 @@ fn run_hip_selection(plan: &RankPlan, selection: Selection) -> Result<(), String
     })
 }
 
+#[cfg(feature = "hip-real")]
 fn strict_gpu_path() -> bool {
     std::env::var("SPIRALTORCH_STRICT_GPU")
         .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE"))

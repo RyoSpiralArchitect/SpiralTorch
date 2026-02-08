@@ -2,15 +2,29 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyModule};
 use pyo3::wrap_pyfunction;
 use pyo3::Bound;
+use std::ffi::OsString;
+use std::sync::{Mutex, OnceLock};
 
 use st_backend_hip as hip_backend;
+#[cfg(feature = "cuda")]
+use st_core::backend::cuda_exec::CudaExecutor;
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
+#[cfg(feature = "hip")]
+use st_core::backend::hip_exec::HipExecutor;
+#[cfg(any(feature = "cuda", feature = "hip"))]
+use st_core::backend::rankk_launch::LaunchBuffers;
+#[cfg(feature = "cuda")]
+use st_core::backend::rankk_launch::with_launch_buffers_cuda;
+#[cfg(feature = "hip")]
+use st_core::backend::rankk_launch::with_launch_buffers_hip;
 use st_core::backend::unison_heuristics::RankKind;
+#[cfg(any(feature = "cuda", feature = "hip"))]
+use st_core::ops::rank_entry::execute_rank;
 
 #[cfg(feature = "kdsl")]
-use crate::spiralk::{spiralk_err_to_py, spiralk_out_to_dict, PySpiralKContext};
-#[cfg(feature = "kdsl")]
 use crate::json::json_to_py;
+#[cfg(feature = "kdsl")]
+use crate::spiralk::{spiralk_err_to_py, spiralk_out_to_dict, PySpiralKContext};
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
 #[cfg(feature = "kdsl")]
 use st_kdsl::{self, Ctx as SpiralKCtx, Hard as SpiralKHard};
@@ -287,8 +301,8 @@ impl PyRankPlan {
         max_events: usize,
     ) -> PyResult<(PyRankPlan, PyObject, PyObject)> {
         let ctx = spiralk_ctx_from_plan(self.plan());
-        let (out, trace) =
-            st_kdsl::eval_program_with_trace(script, &ctx, max_events).map_err(spiralk_err_to_py)?;
+        let (out, trace) = st_kdsl::eval_program_with_trace(script, &ctx, max_events)
+            .map_err(spiralk_err_to_py)?;
         let mut updated = self.inner.clone();
         apply_spiralk_overrides(&mut updated.choice, &out.hard);
         let out_obj = spiralk_out_to_dict(py, &out)?;
@@ -346,6 +360,218 @@ fn backend_label(kind: BackendKind) -> &'static str {
         BackendKind::Hip => "hip",
         BackendKind::Cpu => "cpu",
     }
+}
+
+fn parse_rank_kind(kind: &str) -> PyResult<RankKind> {
+    match kind.to_ascii_lowercase().as_str() {
+        "topk" | "top_k" => Ok(RankKind::TopK),
+        "midk" | "mid_k" => Ok(RankKind::MidK),
+        "bottomk" | "bottom_k" => Ok(RankKind::BottomK),
+        other => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "unknown rank kind '{other}', expected 'topk', 'midk', or 'bottomk'"
+        ))),
+    }
+}
+
+fn strict_env_lock() -> std::sync::MutexGuard<'static, ()> {
+    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    ENV_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .expect("strict env lock available")
+}
+
+struct EnvVarRestore {
+    key: &'static str,
+    previous: Option<OsString>,
+}
+
+impl EnvVarRestore {
+    fn capture(key: &'static str) -> Self {
+        Self {
+            key,
+            previous: std::env::var_os(key),
+        }
+    }
+}
+
+impl Drop for EnvVarRestore {
+    fn drop(&mut self) {
+        if let Some(previous) = self.previous.as_ref() {
+            unsafe { std::env::set_var(self.key, previous) };
+        } else {
+            unsafe { std::env::remove_var(self.key) };
+        }
+    }
+}
+
+fn with_strict_gpu_env<T>(strict: bool, f: impl FnOnce() -> T) -> T {
+    let _guard = strict_env_lock();
+    let _restore = EnvVarRestore::capture("SPIRALTORCH_STRICT_GPU");
+    if strict {
+        unsafe { std::env::set_var("SPIRALTORCH_STRICT_GPU", "1") };
+    } else {
+        unsafe { std::env::set_var("SPIRALTORCH_STRICT_GPU", "0") };
+    }
+    f()
+}
+
+fn diagnostic_input(rows: u32, cols: u32) -> Vec<f32> {
+    let mut input = Vec::with_capacity((rows as usize).saturating_mul(cols as usize));
+    let cols_center = cols as f32 * 0.5;
+    for row in 0..rows {
+        for col in 0..cols {
+            let centered = col as f32 - cols_center;
+            input.push(centered + (row as f32 * 0.125));
+        }
+    }
+    input
+}
+
+#[allow(unused_mut, unused_variables)]
+fn execute_backend_probe(
+    backend: BackendKind,
+    kind: RankKind,
+    rows: u32,
+    cols: u32,
+    k: u32,
+    strict: bool,
+) -> Result<(Vec<f32>, Vec<i32>), String> {
+    let caps = build_caps(backend, None, None, None, None);
+    let plan = plan_rank(kind, rows, cols, k, caps);
+    let input = diagnostic_input(rows, cols);
+    let mut out_vals = vec![0.0f32; (rows as usize).saturating_mul(k as usize)];
+    let mut out_idx = vec![0i32; (rows as usize).saturating_mul(k as usize)];
+
+    let launch = with_strict_gpu_env(strict, || -> Result<(), String> {
+        match backend {
+            BackendKind::Cuda => {
+                #[cfg(feature = "cuda")]
+                {
+                    let buffers = LaunchBuffers::new(
+                        &input,
+                        rows,
+                        cols,
+                        k,
+                        out_vals.as_mut_slice(),
+                        out_idx.as_mut_slice(),
+                    )?;
+                    with_launch_buffers_cuda(buffers, || {
+                        execute_rank(&CudaExecutor::default(), &plan)
+                    })
+                }
+                #[cfg(not(feature = "cuda"))]
+                {
+                    Err("cuda feature is not enabled in this build".to_string())
+                }
+            }
+            BackendKind::Hip => {
+                #[cfg(feature = "hip")]
+                {
+                    if strict && !cfg!(feature = "hip-real") {
+                        return Err(
+                            "hip-real feature is required for strict HIP GPU probing".to_string()
+                        );
+                    }
+                    let buffers = LaunchBuffers::new(
+                        &input,
+                        rows,
+                        cols,
+                        k,
+                        out_vals.as_mut_slice(),
+                        out_idx.as_mut_slice(),
+                    )?;
+                    with_launch_buffers_hip(buffers, || {
+                        execute_rank(&HipExecutor::default(), &plan)
+                    })
+                }
+                #[cfg(not(feature = "hip"))]
+                {
+                    Err("hip feature is not enabled in this build".to_string())
+                }
+            }
+            _ => Err("gpu probe supports only 'cuda' or 'hip' backends".to_string()),
+        }
+    });
+
+    launch.map(|_| (out_vals, out_idx))
+}
+
+#[pyfunction]
+#[pyo3(signature = (kind="bottomk", *, backend="cuda", rows=2, cols=5, k=2))]
+fn probe_gpu_path(
+    py: Python<'_>,
+    kind: &str,
+    backend: &str,
+    rows: u32,
+    cols: u32,
+    k: u32,
+) -> PyResult<PyObject> {
+    if rows == 0 || cols == 0 || k == 0 {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "rows, cols, and k must be positive",
+        ));
+    }
+    if k > cols {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "k must not exceed cols",
+        ));
+    }
+
+    let rank_kind = parse_rank_kind(kind)?;
+    let backend_kind = parse_backend(Some(backend))?;
+    if !matches!(backend_kind, BackendKind::Cuda | BackendKind::Hip) {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "probe_gpu_path supports only 'cuda' or 'hip' backends",
+        ));
+    }
+
+    let strict_attempt = execute_backend_probe(backend_kind, rank_kind, rows, cols, k, true);
+    let non_strict_attempt = execute_backend_probe(backend_kind, rank_kind, rows, cols, k, false);
+
+    let strict_ok = strict_attempt.is_ok();
+    let non_strict_ok = non_strict_attempt.is_ok();
+    let used_fallback = !strict_ok && non_strict_ok;
+
+    let report = PyDict::new_bound(py);
+    report.set_item("backend", backend_label(backend_kind))?;
+    report.set_item("kind", kind.to_ascii_lowercase())?;
+    report.set_item("rows", rows)?;
+    report.set_item("cols", cols)?;
+    report.set_item("k", k)?;
+    report.set_item("strict_success", strict_ok)?;
+    report.set_item("non_strict_success", non_strict_ok)?;
+    report.set_item("gpu_path_available", strict_ok)?;
+    report.set_item("used_fallback", used_fallback)?;
+    report.set_item("hip_real_enabled", cfg!(feature = "hip-real"))?;
+
+    match strict_attempt {
+        Ok((vals, idx)) => {
+            report.set_item("strict_values", vals)?;
+            report.set_item("strict_indices", idx)?;
+            report.set_item("strict_error", py.None())?;
+        }
+        Err(err) => {
+            report.set_item("strict_values", py.None())?;
+            report.set_item("strict_indices", py.None())?;
+            report.set_item("strict_error", err)?;
+        }
+    }
+
+    match non_strict_attempt {
+        Ok((vals, idx)) => {
+            report.set_item("non_strict_values", vals)?;
+            report.set_item("non_strict_indices", idx)?;
+            report.set_item("non_strict_error", py.None())?;
+        }
+        Err(err) => {
+            report.set_item("non_strict_values", py.None())?;
+            report.set_item("non_strict_indices", py.None())?;
+            report.set_item("non_strict_error", err)?;
+        }
+    }
+
+    Ok(report.into_py(py))
 }
 
 fn apply_overrides(
@@ -582,6 +808,7 @@ pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(plan_topk, m)?)?;
     m.add_function(wrap_pyfunction!(describe_device, m)?)?;
     m.add_function(wrap_pyfunction!(hip_probe, m)?)?;
+    m.add_function(wrap_pyfunction!(probe_gpu_path, m)?)?;
     let _ = py;
     Ok(())
 }
