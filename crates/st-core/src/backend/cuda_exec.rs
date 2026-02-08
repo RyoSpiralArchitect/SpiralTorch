@@ -3,10 +3,10 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-use crate::backend::rankk_launch::with_registered_buffers_cuda;
-use crate::backend::rankk_software::{run_selection, Selection};
 #[cfg(feature = "cuda")]
 use crate::backend::cuda_runtime;
+use crate::backend::rankk_launch::with_registered_buffers_cuda;
+use crate::backend::rankk_software::{run_selection, Selection};
 use crate::ops::rank_entry::{RankKExecutor, RankPlan};
 
 #[cfg(test)]
@@ -54,6 +54,9 @@ fn run_cuda_selection(plan: &RankPlan, selection: Selection) -> Result<(), Strin
             match cuda_runtime::run_selection(selection, plan, buffers) {
                 Ok(()) => return Ok(()),
                 Err(err) => {
+                    if strict_gpu_path() {
+                        return Err(format!("cuda launch failed ({err}); fallback disabled"));
+                    }
                     return run_selection(selection, plan, buffers).map_err(|soft_err| {
                         format!(
                             "cuda launch failed ({err}); software fallback also failed: {soft_err}"
@@ -68,6 +71,12 @@ fn run_cuda_selection(plan: &RankPlan, selection: Selection) -> Result<(), Strin
             return run_selection(selection, plan, buffers);
         }
     })
+}
+
+fn strict_gpu_path() -> bool {
+    std::env::var("SPIRALTORCH_STRICT_GPU")
+        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE"))
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -112,9 +121,12 @@ mod tests {
         let mut out_vals = vec![0.0f32; (ROWS * plan.k) as usize];
         let mut out_idx = vec![0i32; (ROWS * plan.k) as usize];
 
-        with_launch_buffers_cuda(launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k), || {
-            CudaExecutor::default().launch_topk(&plan).unwrap();
-        });
+        with_launch_buffers_cuda(
+            launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k),
+            || {
+                CudaExecutor::default().launch_topk(&plan).unwrap();
+            },
+        );
 
         assert_eq!(out_vals, vec![7.0, 3.5, 4.0, 2.0]);
         assert_eq!(out_idx, vec![4, 1, 1, 4]);
@@ -127,9 +139,12 @@ mod tests {
         let mut out_vals = vec![0.0f32; (ROWS * plan.k) as usize];
         let mut out_idx = vec![0i32; (ROWS * plan.k) as usize];
 
-        with_launch_buffers_cuda(launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k), || {
-            CudaExecutor::default().launch_midk(&plan).unwrap();
-        });
+        with_launch_buffers_cuda(
+            launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k),
+            || {
+                CudaExecutor::default().launch_midk(&plan).unwrap();
+            },
+        );
 
         assert_eq!(out_vals, vec![0.5, 1.0, -1.0, 0.25]);
         assert_eq!(out_idx, vec![3, 0, 0, 2]);
@@ -142,9 +157,12 @@ mod tests {
         let mut out_vals = vec![0.0f32; (ROWS * plan.k) as usize];
         let mut out_idx = vec![0i32; (ROWS * plan.k) as usize];
 
-        with_launch_buffers_cuda(launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k), || {
-            CudaExecutor::default().launch_bottomk(&plan).unwrap();
-        });
+        with_launch_buffers_cuda(
+            launch_buffers(&input, &mut out_vals, &mut out_idx, plan.k),
+            || {
+                CudaExecutor::default().launch_bottomk(&plan).unwrap();
+            },
+        );
 
         assert_eq!(out_vals, vec![-2.0, 0.5, -3.0, -1.0]);
         assert_eq!(out_idx, vec![2, 3, 3, 0]);

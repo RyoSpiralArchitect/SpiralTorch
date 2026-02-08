@@ -7,7 +7,7 @@
 
 use crate::backend::cuda_loader::{self, CudaModule};
 use crate::backend::rankk_launch::LaunchSlices;
-use crate::backend::rankk_software::Selection;
+use crate::backend::rankk_software::{run_selection as run_software_selection, Selection};
 use crate::ops::rank_entry::RankPlan;
 use cudarc::driver::{LaunchAsync, LaunchConfig};
 use cudarc::nvrtc::compile_ptx;
@@ -36,7 +36,8 @@ static COMPILED_PTX: OnceLock<cudarc::nvrtc::Ptx> = OnceLock::new();
 static CUDA_MODULE: OnceLock<CudaModule> = OnceLock::new();
 
 /// Attempt to execute the CUDA kernels for the requested selection.
-/// Falls back to the caller when the selection is not implemented on GPU.
+/// `Mid` is delegated to the software reference path until a dedicated CUDA
+/// kernel lands, so callers no longer need to treat it as an error case.
 pub fn run_selection(
     selection: Selection,
     plan: &RankPlan,
@@ -57,7 +58,7 @@ pub fn run_selection(
         }
         Selection::Top => launch_heap_kernel(plan, buffers, TOPK_KERNEL),
         Selection::Bottom => launch_heap_kernel(plan, buffers, BOTTOMK_KERNEL),
-        Selection::Mid => Err("cuda selection not implemented for mid".to_string()),
+        Selection::Mid => run_software_selection(Selection::Mid, plan, buffers),
     }
 }
 

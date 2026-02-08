@@ -54,6 +54,9 @@ fn run_hip_selection(plan: &RankPlan, selection: Selection) -> Result<(), String
             match hip_runtime::run_selection(selection, plan, buffers) {
                 Ok(()) => return Ok(()),
                 Err(err) => {
+                    if strict_gpu_path() {
+                        return Err(format!("hip launch failed ({err}); fallback disabled"));
+                    }
                     return run_selection(selection, plan, buffers).map_err(|soft_err| {
                         format!(
                             "hip launch failed ({err}); software fallback also failed: {soft_err}"
@@ -68,6 +71,12 @@ fn run_hip_selection(plan: &RankPlan, selection: Selection) -> Result<(), String
             return run_selection(selection, plan, buffers);
         }
     })
+}
+
+fn strict_gpu_path() -> bool {
+    std::env::var("SPIRALTORCH_STRICT_GPU")
+        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE"))
+        .unwrap_or(false)
 }
 
 #[cfg(test)]

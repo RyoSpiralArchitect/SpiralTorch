@@ -9,6 +9,8 @@
 
 static constexpr int kWavefront = 64;
 static constexpr int kLaneKeep = 8;
+static constexpr int kMidBlockThreads = 256;
+static constexpr int kMidMaxCols = 4096;
 
 namespace {
 
@@ -85,6 +87,17 @@ __device__ inline void fill_tail_with_nan(
     out_vals[out_base + oi] = nanf("");
     out_idx[out_base + oi] = -1;
   }
+}
+
+__device__ inline bool asc_out_of_order(float left_v, int left_i,
+                                        float right_v, int right_i) {
+  if (left_v > right_v) {
+    return true;
+  }
+  if (left_v < right_v) {
+    return false;
+  }
+  return left_i > right_i;
 }
 
 }  // namespace
@@ -190,6 +203,65 @@ __global__ void topk_warp_heap_rowwise_kernel(
       out_vals[out_base + oi] = best_v;
       out_idx[out_base + oi]  = s_idx[best_j];
       s_vals[best_j] = -INFINITY;
+    }
+    fill_tail_with_nan(row, take, k, out_vals, out_idx);
+  }
+}
+
+__global__ void midk_shared_odd_even_rowwise_kernel(
+    const float* __restrict__ X,
+    int rows,
+    int cols,
+    int k,
+    float* __restrict__ out_vals,
+    int* __restrict__ out_idx) {
+  int row = compute_row_index();
+  if (row >= rows) return;
+  if (k <= 0) return;
+  if (cols <= 0) {
+    if (threadIdx.x == 0) {
+      fill_row_with_nan(row, k, out_vals, out_idx);
+    }
+    return;
+  }
+
+  extern __shared__ unsigned char smem[];
+  float* s_vals = reinterpret_cast<float*>(smem);
+  int* s_idx = reinterpret_cast<int*>(s_vals + cols);
+
+  for (int c = threadIdx.x; c < cols; c += blockDim.x) {
+    s_vals[c] = X[static_cast<size_t>(row) * static_cast<size_t>(cols) +
+                  static_cast<size_t>(c)];
+    s_idx[c] = c;
+  }
+  __syncthreads();
+
+  // Simple and deterministic odd-even transposition in ascending order.
+  // This kernel prioritises correctness for MidK extraction.
+  for (int phase = 0; phase < cols; ++phase) {
+    int start = phase & 1;
+    for (int c = start + 2 * threadIdx.x; c + 1 < cols; c += 2 * blockDim.x) {
+      float left_v = s_vals[c];
+      float right_v = s_vals[c + 1];
+      int left_i = s_idx[c];
+      int right_i = s_idx[c + 1];
+      if (asc_out_of_order(left_v, left_i, right_v, right_i)) {
+        s_vals[c] = right_v;
+        s_vals[c + 1] = left_v;
+        s_idx[c] = right_i;
+        s_idx[c + 1] = left_i;
+      }
+    }
+    __syncthreads();
+  }
+
+  if (threadIdx.x == 0) {
+    int take = k < cols ? k : cols;
+    int start = (cols - take) / 2;
+    size_t out_base = static_cast<size_t>(row) * static_cast<size_t>(k);
+    for (int oi = 0; oi < take; ++oi) {
+      out_vals[out_base + oi] = s_vals[start + oi];
+      out_idx[out_base + oi] = s_idx[start + oi];
     }
     fill_tail_with_nan(row, take, k, out_vals, out_idx);
   }
@@ -305,6 +377,119 @@ extern "C" hipError_t st_hip_topk_rowwise_launch(
     hipLaunchKernelGGL(topk_shared_heap_rowwise_kernel, grid, block, 0, 0,
                        d_input, rows, cols, k, d_vals, d_idx);
   }
+
+  err = hipGetLastError();
+  if (err != hipSuccess) return cleanup(err);
+
+  err = hipDeviceSynchronize();
+  if (err != hipSuccess) return cleanup(err);
+
+  err = hipMemcpy(host_out_vals, d_vals, out_val_bytes, hipMemcpyDeviceToHost);
+  if (err != hipSuccess) return cleanup(err);
+  err = hipMemcpy(host_out_idx, d_idx, out_idx_bytes, hipMemcpyDeviceToHost);
+  if (err != hipSuccess) return cleanup(err);
+
+  return cleanup(hipSuccess);
+}
+
+extern "C" hipError_t st_hip_midk_rowwise_launch(
+    const float* host_input,
+    int rows,
+    int cols,
+    int k,
+    float* host_out_vals,
+    int* host_out_idx)
+{
+  if (rows < 0 || cols < 0 || k < 0) {
+    return hipErrorInvalidValue;
+  }
+
+  if (rows == 0 || cols == 0 || k == 0) {
+    return hipSuccess;
+  }
+
+  auto checked_mul = [](size_t a, size_t b, size_t& out) {
+    if (a == 0 || b == 0) {
+      out = 0;
+      return true;
+    }
+    if (a > std::numeric_limits<size_t>::max() / b) {
+      return false;
+    }
+    out = a * b;
+    return true;
+  };
+
+  size_t rows_sz = static_cast<size_t>(rows);
+  size_t cols_sz = static_cast<size_t>(cols);
+  size_t k_sz = static_cast<size_t>(k);
+
+  size_t elems = 0;
+  if (!checked_mul(rows_sz, cols_sz, elems)) {
+    return hipErrorInvalidValue;
+  }
+  size_t input_bytes = 0;
+  if (!checked_mul(elems, sizeof(float), input_bytes)) {
+    return hipErrorInvalidValue;
+  }
+  size_t out_elems = 0;
+  if (!checked_mul(rows_sz, k_sz, out_elems)) {
+    return hipErrorInvalidValue;
+  }
+  size_t out_val_bytes = 0;
+  if (!checked_mul(out_elems, sizeof(float), out_val_bytes)) {
+    return hipErrorInvalidValue;
+  }
+  size_t out_idx_bytes = 0;
+  if (!checked_mul(out_elems, sizeof(int), out_idx_bytes)) {
+    return hipErrorInvalidValue;
+  }
+
+  int device = 0;
+  hipDeviceProp_t props{};
+  if (hipGetDevice(&device) != hipSuccess ||
+      hipGetDeviceProperties(&props, device) != hipSuccess) {
+    return hipErrorInvalidDevice;
+  }
+  size_t shared_needed = cols_sz * (sizeof(float) + sizeof(int));
+  size_t shared_limit = static_cast<size_t>(props.sharedMemPerBlock);
+  if (cols > kMidMaxCols || shared_needed > shared_limit) {
+    return hipErrorInvalidValue;
+  }
+
+  float* d_input = nullptr;
+  float* d_vals = nullptr;
+  int* d_idx = nullptr;
+
+  auto cleanup = [&](hipError_t status) {
+    if (d_idx) { hipFree(d_idx); d_idx = nullptr; }
+    if (d_vals) { hipFree(d_vals); d_vals = nullptr; }
+    if (d_input) { hipFree(d_input); d_input = nullptr; }
+    return status;
+  };
+
+  hipError_t err = hipMalloc(reinterpret_cast<void**>(&d_input), input_bytes);
+  if (err != hipSuccess) return cleanup(err);
+  err = hipMalloc(reinterpret_cast<void**>(&d_vals), out_val_bytes);
+  if (err != hipSuccess) return cleanup(err);
+  err = hipMalloc(reinterpret_cast<void**>(&d_idx), out_idx_bytes);
+  if (err != hipSuccess) return cleanup(err);
+
+  err = hipMemcpy(d_input, host_input, input_bytes, hipMemcpyHostToDevice);
+  if (err != hipSuccess) return cleanup(err);
+
+  constexpr unsigned int kMaxGridY = 65535u;
+  unsigned int total_rows = static_cast<unsigned int>(rows);
+  unsigned int grid_y = total_rows < kMaxGridY ? total_rows : kMaxGridY;
+  if (grid_y == 0) {
+    grid_y = 1;
+  }
+  unsigned int grid_x = (total_rows + grid_y - 1) / grid_y;
+
+  dim3 grid(grid_x, grid_y, 1);
+  dim3 block(kMidBlockThreads, 1, 1);
+  hipLaunchKernelGGL(midk_shared_odd_even_rowwise_kernel, grid, block, shared_needed, 0,
+                     d_input, rows, cols, k, d_vals, d_idx);
 
   err = hipGetLastError();
   if (err != hipSuccess) return cleanup(err);

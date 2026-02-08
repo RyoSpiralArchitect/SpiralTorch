@@ -389,16 +389,21 @@ mod rocblas {
         handle: RocblasHandle,
         current_stream: hipStream_t,
     }
+    unsafe impl Send for HandleState {}
 
     fn library() -> Result<&'static Library, HipErr> {
         static LIB: OnceLock<Result<&'static Library, String>> = OnceLock::new();
         LIB.get_or_init(|| unsafe {
             Library::new("librocblas.so")
                 .or_else(|_| Library::new("librocblas.so.0"))
-                .map(|lib| Box::leak(Box::new(lib)))
+                .map(|lib| {
+                    let leaked: &'static mut Library = Box::leak(Box::new(lib));
+                    leaked as &'static Library
+                })
                 .map_err(|err| err.to_string())
         })
         .as_ref()
+        .map(|lib| *lib)
         .map_err(|err| HipErr::Other(format!("failed to load rocBLAS: {err}")))
     }
 
@@ -463,7 +468,7 @@ mod rocblas {
     fn create_handle(symbols: &Symbols) -> Result<RocblasHandle, HipErr> {
         let mut handle: RocblasHandle = ptr::null_mut();
         rocblas_result(
-            (symbols.create_handle)(&mut handle),
+            unsafe { (symbols.create_handle)(&mut handle) },
             "rocblas_create_handle",
             symbols,
         )?;
@@ -507,7 +512,7 @@ mod rocblas {
             .expect("rocBLAS handle must be initialised after creation");
         if state.current_stream != stream.raw() {
             rocblas_result(
-                (symbols.set_stream)(state.handle, stream.raw()),
+                unsafe { (symbols.set_stream)(state.handle, stream.raw()) },
                 "rocblas_set_stream",
                 symbols,
             )?;
@@ -539,22 +544,24 @@ mod rocblas {
             let alpha = 1.0f32;
             let beta = 0.0f32;
             rocblas_result(
-                (symbols.sgemm)(
-                    handle,
-                    Operation::None,
-                    Operation::None,
-                    m_i32,
-                    n_i32,
-                    k_i32,
-                    &alpha,
-                    rhs as *const f32,
-                    lda,
-                    lhs as *const f32,
-                    ldb,
-                    &beta,
-                    out as *mut f32,
-                    ldc,
-                ),
+                unsafe {
+                    (symbols.sgemm)(
+                        handle,
+                        Operation::None,
+                        Operation::None,
+                        m_i32,
+                        n_i32,
+                        k_i32,
+                        &alpha,
+                        rhs as *const f32,
+                        lda,
+                        lhs as *const f32,
+                        ldb,
+                        &beta,
+                        out as *mut f32,
+                        ldc,
+                    )
+                },
                 "rocblas_sgemm",
                 symbols,
             )
@@ -566,7 +573,7 @@ struct DeviceBuffer(HipPtr);
 
 impl DeviceBuffer {
     fn new(size: usize) -> Result<Self, HipErr> {
-        Ok(Self(super::malloc(size)?))
+        Ok(Self(malloc(size)?))
     }
 
     fn as_ptr(&self) -> HipPtr {
@@ -576,7 +583,7 @@ impl DeviceBuffer {
 
 impl Drop for DeviceBuffer {
     fn drop(&mut self) {
-        let _ = super::free(self.0);
+        let _ = free(self.0);
     }
 }
 
@@ -607,13 +614,13 @@ pub fn gemm_f32(
     let out_dev = DeviceBuffer::new(out_bytes)?;
 
     unsafe {
-        super::memcpy_h2d_async(
+        memcpy_h2d_async(
             lhs_dev.as_ptr(),
             lhs.as_ptr() as *const u8,
             lhs_bytes,
             &stream,
         )?;
-        super::memcpy_h2d_async(
+        memcpy_h2d_async(
             rhs_dev.as_ptr(),
             rhs.as_ptr() as *const u8,
             rhs_bytes,
@@ -632,14 +639,14 @@ pub fn gemm_f32(
     )?;
 
     unsafe {
-        super::memcpy_d2h_async(
+        memcpy_d2h_async(
             out.as_mut_ptr() as *mut u8,
             out_dev.as_ptr(),
             out_bytes,
             &stream,
         )?;
     }
-    super::stream_synchronize(&stream)?;
+    stream_synchronize(&stream)?;
     Ok(())
 }
 
