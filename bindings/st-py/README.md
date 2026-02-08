@@ -84,8 +84,12 @@ NumPy, no PyTorch, and no shim layers.
   lattices under open-cartesian topos guards so embeddings stay psychoid-safe
   while training entirely in Rust.
 - Model-zoo orchestration via `spiraltorch.model_zoo`—discover recipes, filter
-  by task/family, resolve script paths, and run models with a stable Python API
-  or the `spiral-model-zoo` CLI.
+  by task/family, resolve script paths, rank recommendations with
+  `suggest_models(...)`/`recommend_model(...)`, and run models with a stable
+  Python API or the `spiral-model-zoo` CLI.
+- Stream telemetry interop via `vision.ChronoSnapshot` and
+  `vision.ZSpaceStreamFrame` so Python can attach chrono summaries and atlas
+  frames to live Z-slice bundles without dropping to Rust glue code.
 
 ## Building wheels
 
@@ -130,12 +134,20 @@ import spiraltorch as st
 entries = st.model_zoo.list_models(task="classification")
 print("classification recipes:", [entry.key for entry in entries[:5]])
 
+suggested = st.model_zoo.suggest_models(
+    "llm_char",
+    task="language-modeling",
+    prefer_tags=["coherence"],
+)
+print("suggested:", [entry.key for entry in suggested[:3]])
+
 cmd = st.model_zoo.build_model_command("mlp_regression", "--help")
 print("command:", " ".join(cmd))
 ```
 
 ```bash
 spiral-model-zoo list --task language-modeling
+spiral-model-zoo suggest llm_char --task language-modeling --prefer-tag coherence
 spiral-model-zoo run mlp_regression -- --help
 ```
 

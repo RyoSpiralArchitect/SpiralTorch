@@ -309,8 +309,12 @@ pub(crate) struct PyAtlasFrame {
 }
 
 impl PyAtlasFrame {
-    fn from_frame(frame: AtlasFrame) -> Self {
+    pub(crate) fn from_frame(frame: AtlasFrame) -> Self {
         Self { inner: frame }
+    }
+
+    pub(crate) fn to_frame(&self) -> AtlasFrame {
+        self.inner.clone()
     }
 }
 
@@ -318,7 +322,10 @@ impl PyAtlasFrame {
 impl PyAtlasFrame {
     #[staticmethod]
     #[pyo3(signature = (metrics, *, timestamp=None))]
-    pub fn from_metrics(metrics: std::collections::HashMap<String, f64>, timestamp: Option<f64>) -> PyResult<Self> {
+    pub fn from_metrics(
+        metrics: std::collections::HashMap<String, f64>,
+        timestamp: Option<f64>,
+    ) -> PyResult<Self> {
         let mut fragment = AtlasFragment::new();
         if let Some(ts) = timestamp {
             let ts = ts as f32;

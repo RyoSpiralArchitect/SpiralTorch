@@ -1746,6 +1746,59 @@ class CanvasSnapshot:
     summary: Dict[str, Dict[str, float]]
     patch: Optional[List[List[float]]]
 
+class ChronoSnapshot:
+    def __init__(
+        self,
+        summary: Mapping[str, object] | object,
+        *,
+        dt: float = ...,
+    ) -> None: ...
+    @staticmethod
+    def from_values(
+        *,
+        frames: int,
+        duration: float,
+        latest_timestamp: float,
+        mean_drift: float,
+        mean_abs_drift: float,
+        drift_std: float,
+        mean_energy: float,
+        energy_std: float,
+        mean_decay: float,
+        min_energy: float,
+        max_energy: float,
+        dt: float = ...,
+    ) -> ChronoSnapshot: ...
+    @property
+    def timestamp(self) -> float: ...
+    @property
+    def dt(self) -> float: ...
+    def summary(self) -> Dict[str, object]: ...
+    def to_dict(self) -> Dict[str, object]: ...
+
+class ZSpaceStreamFrame:
+    def __init__(
+        self,
+        slices: Sequence[Tensor],
+        *,
+        atlas_frame: AtlasFrame | None = ...,
+        chrono_snapshot: ChronoSnapshot | None = ...,
+    ) -> None: ...
+    @property
+    def depth(self) -> int: ...
+    @property
+    def slice_shape(self) -> Tuple[int, int]: ...
+    def slices(self) -> List[Tensor]: ...
+    def with_atlas(self, frame: AtlasFrame) -> None: ...
+    def with_snapshot(self, snapshot: ChronoSnapshot) -> None: ...
+    @property
+    def atlas_frame(self) -> AtlasFrame | None: ...
+    @property
+    def chrono_snapshot(self) -> ChronoSnapshot | None: ...
+    def profile(self) -> Dict[str, object]: ...
+    def telemetry_report(self) -> Dict[str, object]: ...
+    def to_dict(self) -> Dict[str, object]: ...
+
 class InfiniteZSpacePatch:
     @property
     def dimension(self) -> float: ...
@@ -4498,7 +4551,109 @@ class _DatasetModule(ModuleType):
 dataset: _DatasetModule
 
 linalg: ModuleType
-model_zoo: ModuleType
+
+class _ModelZooModule(ModuleType):
+    class ModelZooEntry:
+        key: str
+        script_name: str
+        task: str
+        family: str
+        description: str
+        tags: Tuple[str, ...]
+        script_path: Any
+
+        def to_dict(self) -> Dict[str, Any]: ...
+
+    def list_models(
+        self,
+        *,
+        root: str | None = ...,
+        include_internal: bool = ...,
+        available_only: bool = ...,
+        family: str | None = ...,
+        task: str | None = ...,
+        tags: Sequence[str] | None = ...,
+    ) -> List["_ModelZooModule.ModelZooEntry"]: ...
+
+    def find_model(
+        self,
+        name: str,
+        *,
+        root: str | None = ...,
+        include_internal: bool = ...,
+        available_only: bool = ...,
+    ) -> "_ModelZooModule.ModelZooEntry": ...
+
+    def suggest_models(
+        self,
+        query: str | None = ...,
+        *,
+        root: str | None = ...,
+        include_internal: bool = ...,
+        available_only: bool = ...,
+        task: str | None = ...,
+        family: str | None = ...,
+        required_tags: Sequence[str] | None = ...,
+        prefer_tags: Sequence[str] | None = ...,
+        avoid_tags: Sequence[str] | None = ...,
+        limit: int | None = ...,
+    ) -> List["_ModelZooModule.ModelZooEntry"]: ...
+
+    def recommend_model(
+        self,
+        query: str | None = ...,
+        *,
+        root: str | None = ...,
+        include_internal: bool = ...,
+        available_only: bool = ...,
+        task: str | None = ...,
+        family: str | None = ...,
+        required_tags: Sequence[str] | None = ...,
+        prefer_tags: Sequence[str] | None = ...,
+        avoid_tags: Sequence[str] | None = ...,
+    ) -> "_ModelZooModule.ModelZooEntry": ...
+
+    def resolve_model_script(
+        self,
+        name: str,
+        *,
+        root: str | None = ...,
+        include_internal: bool = ...,
+    ) -> Any: ...
+
+    def build_model_command(
+        self,
+        name: str,
+        *script_args: str,
+        root: str | None = ...,
+        python_executable: str | None = ...,
+    ) -> List[str]: ...
+
+    def run_model(
+        self,
+        name: str,
+        *script_args: str,
+        root: str | None = ...,
+        python_executable: str | None = ...,
+        dry_run: bool = ...,
+        check: bool = ...,
+        capture_output: bool = ...,
+        text: bool = ...,
+        env: Mapping[str, str] | None = ...,
+        cwd: str | None = ...,
+    ) -> Any: ...
+
+    def model_zoo_summary(
+        self,
+        *,
+        root: str | None = ...,
+        include_internal: bool = ...,
+        available_only: bool = ...,
+    ) -> Dict[str, Any]: ...
+
+    def main(self, argv: Sequence[str] | None = ...) -> int: ...
+
+model_zoo: _ModelZooModule
 
 spiral_rl: ModuleType
 
@@ -4704,6 +4859,8 @@ class _ZSpaceModule(ModuleType):
 zspace: _ZSpaceModule
 
 class _VisionModule(ModuleType):
+    ChronoSnapshot: type[ChronoSnapshot]
+    ZSpaceStreamFrame: type[ZSpaceStreamFrame]
     SpiralTorchVision: type[SpiralTorchVision]
     TemporalResonanceBuffer: type[TemporalResonanceBuffer]
     SliceProfile: type[SliceProfile]
@@ -5369,6 +5526,8 @@ __all__ = [
     "PpoAgent",
     "SacAgent",
     "TemporalResonanceBuffer",
+    "ChronoSnapshot",
+    "ZSpaceStreamFrame",
     "SpiralTorchVision",
     "SliceProfile",
     "CanvasTransformer",

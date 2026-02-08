@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import sys
 from pathlib import Path
 
@@ -125,3 +126,66 @@ def test_available_only_filters_metadata_only_entries(stub_spiraltorch, monkeypa
     assert with_missing
     assert all(entry.script_path is None for entry in with_missing)
     assert available_only == []
+
+
+def test_suggest_models_ranks_preferred_tags(stub_spiraltorch, monkeypatch, tmp_path: Path):
+    scripts = tmp_path / "models" / "python"
+    scripts.mkdir(parents=True)
+    _write_script(scripts / "llm_char_finetune.py")
+    _write_script(scripts / "llm_char_coherence_scan.py")
+
+    monkeypatch.setenv("SPIRALTORCH_MODEL_ZOO_ROOT", str(tmp_path))
+    model_zoo = _load_model_zoo(stub_spiraltorch, monkeypatch)
+
+    entries = model_zoo.suggest_models(
+        "llm_char",
+        available_only=True,
+        prefer_tags=["coherence"],
+    )
+    assert entries
+    assert entries[0].key == "llm_char_coherence_scan"
+
+
+def test_recommend_model_respects_required_tags(stub_spiraltorch, monkeypatch, tmp_path: Path):
+    scripts = tmp_path / "models" / "python"
+    scripts.mkdir(parents=True)
+    _write_script(scripts / "zconv_classification.py")
+    _write_script(scripts / "vision_conv_pool_classification.py")
+
+    monkeypatch.setenv("SPIRALTORCH_MODEL_ZOO_ROOT", str(tmp_path))
+    model_zoo = _load_model_zoo(stub_spiraltorch, monkeypatch)
+
+    entry = model_zoo.recommend_model(
+        task="classification",
+        required_tags=["zspace"],
+        available_only=True,
+    )
+    assert entry.key == "zconv_classification"
+
+
+def test_cli_suggest_json_output(stub_spiraltorch, monkeypatch, tmp_path: Path, capsys):
+    scripts = tmp_path / "models" / "python"
+    scripts.mkdir(parents=True)
+    _write_script(scripts / "llm_char_finetune.py")
+    _write_script(scripts / "llm_char_coherence_scan.py")
+
+    monkeypatch.setenv("SPIRALTORCH_MODEL_ZOO_ROOT", str(tmp_path))
+    model_zoo = _load_model_zoo(stub_spiraltorch, monkeypatch)
+
+    code = model_zoo.main(
+        [
+            "suggest",
+            "llm_char",
+            "--root",
+            str(tmp_path),
+            "--available-only",
+            "--prefer-tag",
+            "coherence",
+            "--limit",
+            "1",
+            "--json",
+        ]
+    )
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload[0]["key"] == "llm_char_coherence_scan"

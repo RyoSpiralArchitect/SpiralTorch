@@ -168,6 +168,7 @@ def test_module_trainer_spectral_and_coherence_bridge_controls() -> None:
     assert hasattr(st, "nn")
     assert hasattr(st.nn, "ModuleTrainer")
     assert hasattr(st.nn, "SpectralLearningRatePolicy")
+    assert hasattr(st, "SpectralLearningRatePolicy")
 
     trainer = st.nn.ModuleTrainer(
         backend="cpu",

@@ -24,6 +24,8 @@ __all__ = [
     "ModelZooEntry",
     "list_models",
     "find_model",
+    "suggest_models",
+    "recommend_model",
     "resolve_model_script",
     "build_model_command",
     "run_model",
@@ -213,6 +215,10 @@ def _infer_metadata(key: str) -> tuple[str, str, str, tuple[str, ...]]:
     return task, family, description, tags
 
 
+def _normalise_tag_set(values: Sequence[str] | None) -> set[str]:
+    return {value.strip().lower() for value in (values or ()) if value.strip()}
+
+
 def _iter_script_paths(
     root: str | os.PathLike[str] | None = None,
     *,
@@ -313,6 +319,122 @@ def find_model(
 
     known = ", ".join(entry.key for entry in entries[:12])
     raise KeyError(f"unknown model '{name}'. known entries: {known}")
+
+
+def suggest_models(
+    query: str | None = None,
+    *,
+    root: str | os.PathLike[str] | None = None,
+    include_internal: bool = False,
+    available_only: bool = False,
+    task: str | None = None,
+    family: str | None = None,
+    required_tags: Sequence[str] | None = None,
+    prefer_tags: Sequence[str] | None = None,
+    avoid_tags: Sequence[str] | None = None,
+    limit: int | None = 5,
+) -> list[ModelZooEntry]:
+    entries = list_models(
+        root=root,
+        include_internal=include_internal,
+        available_only=available_only,
+    )
+    if not entries:
+        return []
+
+    query_key = _normalise_key(query) if query else None
+    task_filter = task.lower().strip() if task else None
+    family_filter = family.lower().strip() if family else None
+    required = _normalise_tag_set(required_tags)
+    preferred = _normalise_tag_set(prefer_tags)
+    avoided = _normalise_tag_set(avoid_tags)
+
+    scored: list[tuple[int, ModelZooEntry]] = []
+    for entry in entries:
+        entry_tags = {tag.lower() for tag in entry.tags}
+        if required and not required.issubset(entry_tags):
+            continue
+
+        score = 0
+        if query_key:
+            if entry.key == query_key:
+                score += 120
+            elif entry.key.startswith(query_key):
+                score += 90
+            elif query_key in entry.key:
+                score += 55
+            else:
+                query_tokens = {token for token in query_key.split("_") if token}
+                key_tokens = {token for token in entry.key.split("_") if token}
+                overlap = len(query_tokens & key_tokens)
+                if overlap == 0:
+                    continue
+                score += overlap * 10
+
+        if task_filter:
+            score += 45 if entry.task.lower() == task_filter else -12
+        if family_filter:
+            score += 25 if entry.family.lower() == family_filter else -8
+
+        if preferred:
+            score += 9 * len(preferred & entry_tags)
+        if avoided:
+            score -= 12 * len(avoided & entry_tags)
+
+        if entry.script_path is not None:
+            score += 5
+        if "starter" in entry_tags:
+            score += 2
+
+        scored.append((score, entry))
+
+    scored.sort(key=lambda item: (-item[0], item[1].key))
+    ranked = [entry for _, entry in scored]
+    if limit is not None:
+        if limit <= 0:
+            return []
+        ranked = ranked[:limit]
+    return ranked
+
+
+def recommend_model(
+    query: str | None = None,
+    *,
+    root: str | os.PathLike[str] | None = None,
+    include_internal: bool = False,
+    available_only: bool = False,
+    task: str | None = None,
+    family: str | None = None,
+    required_tags: Sequence[str] | None = None,
+    prefer_tags: Sequence[str] | None = None,
+    avoid_tags: Sequence[str] | None = None,
+) -> ModelZooEntry:
+    matches = suggest_models(
+        query,
+        root=root,
+        include_internal=include_internal,
+        available_only=available_only,
+        task=task,
+        family=family,
+        required_tags=required_tags,
+        prefer_tags=prefer_tags,
+        avoid_tags=avoid_tags,
+        limit=1,
+    )
+    if matches:
+        return matches[0]
+
+    detail_parts = []
+    if query:
+        detail_parts.append(f"query={query!r}")
+    if task:
+        detail_parts.append(f"task={task!r}")
+    if family:
+        detail_parts.append(f"family={family!r}")
+    if required_tags:
+        detail_parts.append(f"required_tags={list(required_tags)!r}")
+    detail = ", ".join(detail_parts) if detail_parts else "no filter criteria"
+    raise KeyError(f"no model recommendation available ({detail})")
 
 
 def resolve_model_script(
@@ -431,6 +553,50 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     list_parser.add_argument("--tag", action="append", default=[], help="Filter by tag")
     list_parser.add_argument("--json", action="store_true", help="Emit JSON")
 
+    suggest_parser = subparsers.add_parser(
+        "suggest",
+        help="Suggest best-matching model-zoo recipes",
+    )
+    suggest_parser.add_argument("query", nargs="?", default=None, help="Optional free-text query")
+    suggest_parser.add_argument("--root", default=None, help="Override repository root")
+    suggest_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Include internal scripts prefixed with underscore",
+    )
+    suggest_parser.add_argument(
+        "--available-only",
+        action="store_true",
+        help="Show only entries with scripts present on disk",
+    )
+    suggest_parser.add_argument("--task", default=None, help="Prefer task")
+    suggest_parser.add_argument("--family", default=None, help="Prefer family")
+    suggest_parser.add_argument(
+        "--require-tag",
+        action="append",
+        default=[],
+        help="Require tag (can be repeated)",
+    )
+    suggest_parser.add_argument(
+        "--prefer-tag",
+        action="append",
+        default=[],
+        help="Prefer tag (can be repeated)",
+    )
+    suggest_parser.add_argument(
+        "--avoid-tag",
+        action="append",
+        default=[],
+        help="Penalize tag (can be repeated)",
+    )
+    suggest_parser.add_argument(
+        "--limit",
+        type=int,
+        default=5,
+        help="Maximum number of suggestions to return",
+    )
+    suggest_parser.add_argument("--json", action="store_true", help="Emit JSON")
+
     path_parser = subparsers.add_parser("path", help="Resolve a model-zoo script path")
     path_parser.add_argument("model", help="Model key or script name")
     path_parser.add_argument("--root", default=None, help="Override repository root")
@@ -482,6 +648,29 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "path":
         print(resolve_model_script(args.model, root=args.root))
+        return 0
+
+    if args.command == "suggest":
+        entries = suggest_models(
+            args.query,
+            root=args.root,
+            include_internal=bool(args.all),
+            available_only=bool(args.available_only),
+            task=args.task,
+            family=args.family,
+            required_tags=args.require_tag,
+            prefer_tags=args.prefer_tag,
+            avoid_tags=args.avoid_tag,
+            limit=args.limit,
+        )
+        if args.json:
+            print(json.dumps([entry.to_dict() for entry in entries], ensure_ascii=True, indent=2))
+            return 0
+
+        for entry in entries:
+            path = str(entry.script_path) if entry.script_path else "<missing>"
+            tags = ",".join(entry.tags) if entry.tags else "-"
+            print(f"{entry.key:32s} {entry.task:18s} {entry.family:10s} {tags:24s} {path}")
         return 0
 
     if args.command == "run":

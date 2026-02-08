@@ -1671,6 +1671,7 @@ _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
         "from_samples": ("nn_from_samples", "dataset_from_samples"),
         "CurvatureScheduler": ("CurvatureScheduler",),
         "CurvatureDecision": ("CurvatureDecision",),
+        "SpectralLearningRatePolicy": ("SpectralLearningRatePolicy",),
         "softlogic_signal": ("softlogic_signal",),
     },
     "dataset": {
@@ -3634,6 +3635,8 @@ _mirror_into_module(
 _mirror_into_module(
     "vision",
     [
+        "ChronoSnapshot",
+        "ZSpaceStreamFrame",
         "SpiralTorchVision",
         "TemporalResonanceBuffer",
         "SliceProfile",
@@ -4486,8 +4489,10 @@ _CORE_EXPORTS = [
     "QatObserver","QuantizationReport","StructuredPruningReport","CompressionReport",
     "structured_prune","compress_weights",
     "ModuleTrainer","Identity","Scaler","NonLiner","ZConv","ZPooling","ZSpaceTrainer","ZSpaceCoherenceSequencer","ZSpaceTraceRecorder","PreDiscardTelemetry","PreDiscardPolicy",
+    "CurvatureScheduler","CurvatureDecision","SpectralLearningRatePolicy",
     "CoherenceObservation","CoherenceSignature","CoherenceChannelReport","CoherenceDiagnostics","is_swap_invariant",
     "TemporalResonanceBuffer","SpiralTorchVision",
+    "ChronoSnapshot","ZSpaceStreamFrame",
     "CanvasTransformer","CanvasSnapshot","apply_vision_update",
     "ZMetrics","SliceProfile","step_many","stream_zspace_training",
     "info_nce","masked_mse","mean_squared_error",

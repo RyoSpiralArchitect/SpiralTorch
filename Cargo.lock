@@ -3294,6 +3294,7 @@ dependencies = [
  "st-spiral-rl",
  "st-tensor",
  "st-text",
+ "st-vision",
  "tracing",
 ]
 

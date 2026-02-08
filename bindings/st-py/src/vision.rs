@@ -8,10 +8,16 @@ use pyo3::{wrap_pyfunction, Bound, PyRefMut};
 use crate::telemetry::PyAtlasFrame;
 use crate::tensor::{tensor_err_to_py, PyTensor};
 use crate::theory::PyZRelativityModel;
+use st_core::telemetry::chrono::ChronoSummary;
 use st_tensor::wasm_canvas::{
-    CanvasPalette, FractalCanvas as PureFractalCanvas, InfiniteZSpacePatch as PureInfiniteZSpacePatch,
+    CanvasPalette, FractalCanvas as PureFractalCanvas,
+    InfiniteZSpacePatch as PureInfiniteZSpacePatch,
 };
 use st_tensor::{Tensor, TensorError};
+use st_vision::{
+    ChronoSnapshot as PureChronoSnapshot, ZSliceProfile as PureZSliceProfile,
+    ZSpaceStreamFrame as PureZSpaceStreamFrame, ZSpaceTelemetryReport as PureZSpaceTelemetryReport,
+};
 
 const MIN_SMOOTHING: f32 = 0.0;
 const MAX_SMOOTHING: f32 = 0.999;
@@ -75,10 +81,352 @@ fn tensor_to_rows(tensor: &Tensor) -> Vec<Vec<f32>> {
     out
 }
 
+fn chrono_summary_from_any(summary: &Bound<'_, PyAny>) -> PyResult<ChronoSummary> {
+    if let Ok(dict) = summary.downcast::<PyDict>() {
+        let frames_obj = dict
+            .get_item("frames")?
+            .ok_or_else(|| PyValueError::new_err("summary missing key 'frames'"))?;
+        let duration_obj = dict
+            .get_item("duration")?
+            .ok_or_else(|| PyValueError::new_err("summary missing key 'duration'"))?;
+        let latest_timestamp_obj = dict
+            .get_item("latest_timestamp")?
+            .ok_or_else(|| PyValueError::new_err("summary missing key 'latest_timestamp'"))?;
+        let mean_drift_obj = dict
+            .get_item("mean_drift")?
+            .ok_or_else(|| PyValueError::new_err("summary missing key 'mean_drift'"))?;
+        let mean_abs_drift_obj = dict
+            .get_item("mean_abs_drift")?
+            .ok_or_else(|| PyValueError::new_err("summary missing key 'mean_abs_drift'"))?;
+        let drift_std_obj = dict
+            .get_item("drift_std")?
+            .ok_or_else(|| PyValueError::new_err("summary missing key 'drift_std'"))?;
+        let mean_energy_obj = dict
+            .get_item("mean_energy")?
+            .ok_or_else(|| PyValueError::new_err("summary missing key 'mean_energy'"))?;
+        let energy_std_obj = dict
+            .get_item("energy_std")?
+            .ok_or_else(|| PyValueError::new_err("summary missing key 'energy_std'"))?;
+        let mean_decay_obj = dict
+            .get_item("mean_decay")?
+            .ok_or_else(|| PyValueError::new_err("summary missing key 'mean_decay'"))?;
+        let min_energy_obj = dict
+            .get_item("min_energy")?
+            .ok_or_else(|| PyValueError::new_err("summary missing key 'min_energy'"))?;
+        let max_energy_obj = dict
+            .get_item("max_energy")?
+            .ok_or_else(|| PyValueError::new_err("summary missing key 'max_energy'"))?;
+        return Ok(ChronoSummary {
+            frames: frames_obj.extract()?,
+            duration: duration_obj.extract()?,
+            latest_timestamp: latest_timestamp_obj.extract()?,
+            mean_drift: mean_drift_obj.extract()?,
+            mean_abs_drift: mean_abs_drift_obj.extract()?,
+            drift_std: drift_std_obj.extract()?,
+            mean_energy: mean_energy_obj.extract()?,
+            energy_std: energy_std_obj.extract()?,
+            mean_decay: mean_decay_obj.extract()?,
+            min_energy: min_energy_obj.extract()?,
+            max_energy: max_energy_obj.extract()?,
+        });
+    }
+
+    Ok(ChronoSummary {
+        frames: summary.getattr("frames")?.extract()?,
+        duration: summary.getattr("duration")?.extract()?,
+        latest_timestamp: summary.getattr("latest_timestamp")?.extract()?,
+        mean_drift: summary.getattr("mean_drift")?.extract()?,
+        mean_abs_drift: summary.getattr("mean_abs_drift")?.extract()?,
+        drift_std: summary.getattr("drift_std")?.extract()?,
+        mean_energy: summary.getattr("mean_energy")?.extract()?,
+        energy_std: summary.getattr("energy_std")?.extract()?,
+        mean_decay: summary.getattr("mean_decay")?.extract()?,
+        min_energy: summary.getattr("min_energy")?.extract()?,
+        max_energy: summary.getattr("max_energy")?.extract()?,
+    })
+}
+
+fn chrono_summary_to_dict(py: Python<'_>, summary: &ChronoSummary) -> PyResult<Py<PyDict>> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("frames", summary.frames)?;
+    dict.set_item("duration", summary.duration)?;
+    dict.set_item("latest_timestamp", summary.latest_timestamp)?;
+    dict.set_item("mean_drift", summary.mean_drift)?;
+    dict.set_item("mean_abs_drift", summary.mean_abs_drift)?;
+    dict.set_item("drift_std", summary.drift_std)?;
+    dict.set_item("mean_energy", summary.mean_energy)?;
+    dict.set_item("energy_std", summary.energy_std)?;
+    dict.set_item("mean_decay", summary.mean_decay)?;
+    dict.set_item("min_energy", summary.min_energy)?;
+    dict.set_item("max_energy", summary.max_energy)?;
+    Ok(dict.into())
+}
+
+fn z_slice_profile_to_dict(py: Python<'_>, profile: &PureZSliceProfile) -> PyResult<Py<PyDict>> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("depth", profile.depth())?;
+    dict.set_item("means", profile.means().to_vec())?;
+    dict.set_item("stds", profile.stds().to_vec())?;
+    dict.set_item("energies", profile.energies().to_vec())?;
+    dict.set_item("average_mean", profile.average_mean())?;
+    dict.set_item("average_std", profile.average_std())?;
+    dict.set_item("average_energy", profile.average_energy())?;
+    dict.set_item("total_energy", profile.total_energy())?;
+    dict.set_item("max_energy", profile.max_energy())?;
+    dict.set_item("energy_entropy", profile.energy_entropy())?;
+    Ok(dict.into())
+}
+
+fn zspace_telemetry_to_dict(
+    py: Python<'_>,
+    report: &PureZSpaceTelemetryReport,
+) -> PyResult<Py<PyDict>> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("depth", report.depth())?;
+    dict.set_item("mean_intensity", report.mean_intensity())?;
+    dict.set_item("mean_std", report.mean_std())?;
+    dict.set_item("mean_energy", report.mean_energy())?;
+    dict.set_item("total_energy", report.total_energy())?;
+    dict.set_item("max_energy", report.max_energy())?;
+    dict.set_item("energy_entropy", report.energy_entropy())?;
+    Ok(dict.into())
+}
+
 #[derive(Clone, Copy)]
 enum TapeTarget {
     Hypergrad,
     Realgrad,
+}
+
+#[pyclass(module = "spiraltorch.vision", name = "ChronoSnapshot")]
+#[derive(Clone)]
+pub(crate) struct PyChronoSnapshot {
+    inner: PureChronoSnapshot,
+}
+
+impl PyChronoSnapshot {
+    fn from_inner(inner: PureChronoSnapshot) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PyChronoSnapshot {
+    #[new]
+    #[pyo3(signature = (summary, *, dt=0.0))]
+    fn new(summary: &Bound<'_, PyAny>, dt: f32) -> PyResult<Self> {
+        let parsed = chrono_summary_from_any(summary)?;
+        Ok(Self {
+            inner: PureChronoSnapshot::new(parsed, dt),
+        })
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (
+        *,
+        frames,
+        duration,
+        latest_timestamp,
+        mean_drift,
+        mean_abs_drift,
+        drift_std,
+        mean_energy,
+        energy_std,
+        mean_decay,
+        min_energy,
+        max_energy,
+        dt=0.0
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn from_values(
+        frames: usize,
+        duration: f32,
+        latest_timestamp: f32,
+        mean_drift: f32,
+        mean_abs_drift: f32,
+        drift_std: f32,
+        mean_energy: f32,
+        energy_std: f32,
+        mean_decay: f32,
+        min_energy: f32,
+        max_energy: f32,
+        dt: f32,
+    ) -> Self {
+        let summary = ChronoSummary {
+            frames,
+            duration,
+            latest_timestamp,
+            mean_drift,
+            mean_abs_drift,
+            drift_std,
+            mean_energy,
+            energy_std,
+            mean_decay,
+            min_energy,
+            max_energy,
+        };
+        Self {
+            inner: PureChronoSnapshot::new(summary, dt),
+        }
+    }
+
+    #[getter]
+    fn timestamp(&self) -> f32 {
+        self.inner.timestamp()
+    }
+
+    #[getter]
+    fn dt(&self) -> f32 {
+        self.inner.dt()
+    }
+
+    fn summary(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+        chrono_summary_to_dict(py, self.inner.summary())
+    }
+
+    fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("timestamp", self.timestamp())?;
+        dict.set_item("dt", self.dt())?;
+        dict.set_item("summary", chrono_summary_to_dict(py, self.inner.summary())?)?;
+        Ok(dict.into())
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "ChronoSnapshot(timestamp={:.6}, dt={:.6}, frames={})",
+            self.inner.timestamp(),
+            self.inner.dt(),
+            self.inner.summary().frames
+        )
+    }
+}
+
+#[pyclass(module = "spiraltorch.vision", name = "ZSpaceStreamFrame", unsendable)]
+#[derive(Clone)]
+pub(crate) struct PyZSpaceStreamFrame {
+    inner: PureZSpaceStreamFrame,
+}
+
+#[pymethods]
+impl PyZSpaceStreamFrame {
+    #[new]
+    #[pyo3(signature = (slices, *, atlas_frame=None, chrono_snapshot=None))]
+    fn new(
+        py: Python<'_>,
+        slices: Vec<Py<PyTensor>>,
+        atlas_frame: Option<Py<PyAtlasFrame>>,
+        chrono_snapshot: Option<Py<PyChronoSnapshot>>,
+    ) -> PyResult<Self> {
+        let tensors: Vec<Tensor> = slices
+            .into_iter()
+            .map(|tensor| tensor.borrow(py).inner.clone())
+            .collect();
+        let mut inner = PureZSpaceStreamFrame::new(tensors).map_err(tensor_err_to_py)?;
+        if let Some(frame) = atlas_frame {
+            inner = inner.with_atlas(frame.borrow(py).to_frame());
+        }
+        if let Some(snapshot) = chrono_snapshot {
+            inner = inner.with_snapshot(snapshot.borrow(py).inner.clone());
+        }
+        Ok(Self { inner })
+    }
+
+    #[getter]
+    fn depth(&self) -> usize {
+        self.inner.depth()
+    }
+
+    #[getter]
+    fn slice_shape(&self) -> (usize, usize) {
+        self.inner.slice_shape()
+    }
+
+    fn slices(&self) -> Vec<PyTensor> {
+        self.inner
+            .slices()
+            .iter()
+            .cloned()
+            .map(PyTensor::from_tensor)
+            .collect()
+    }
+
+    fn with_atlas(&mut self, frame: &PyAtlasFrame) {
+        self.inner = self.inner.clone().with_atlas(frame.to_frame());
+    }
+
+    fn with_snapshot(&mut self, snapshot: &PyChronoSnapshot) {
+        self.inner = self.inner.clone().with_snapshot(snapshot.inner.clone());
+    }
+
+    #[getter]
+    fn atlas_frame(&self) -> Option<PyAtlasFrame> {
+        self.inner
+            .atlas_frame()
+            .cloned()
+            .map(PyAtlasFrame::from_frame)
+    }
+
+    #[getter]
+    fn chrono_snapshot(&self) -> Option<PyChronoSnapshot> {
+        self.inner
+            .chrono_snapshot()
+            .cloned()
+            .map(PyChronoSnapshot::from_inner)
+    }
+
+    fn profile(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+        let profile = self.inner.profile().map_err(tensor_err_to_py)?;
+        z_slice_profile_to_dict(py, &profile)
+    }
+
+    fn telemetry_report(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+        let report = self.inner.telemetry_report().map_err(tensor_err_to_py)?;
+        zspace_telemetry_to_dict(py, &report)
+    }
+
+    fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("depth", self.inner.depth())?;
+        let (rows, cols) = self.inner.slice_shape();
+        dict.set_item("slice_shape", (rows, cols))?;
+        let slice_rows: Vec<Vec<Vec<f32>>> =
+            self.inner.slices().iter().map(tensor_to_rows).collect();
+        dict.set_item("slices", slice_rows)?;
+
+        let atlas_payload = if let Some(atlas) = self.inner.atlas_frame() {
+            let atlas_dict = PyDict::new_bound(py);
+            atlas_dict.set_item("timestamp", atlas.timestamp)?;
+            atlas_dict.set_item("metrics", atlas.metrics.len())?;
+            atlas_dict.set_item("notes", atlas.notes.len())?;
+            Some(atlas_dict.into_py(py))
+        } else {
+            None
+        };
+        dict.set_item("atlas_frame", atlas_payload)?;
+
+        let snapshot_payload = if let Some(snapshot) = self.inner.chrono_snapshot() {
+            Some(PyChronoSnapshot::from_inner(snapshot.clone()).to_dict(py)?)
+        } else {
+            None
+        };
+        dict.set_item("chrono_snapshot", snapshot_payload)?;
+        dict.set_item("profile", self.profile(py)?)?;
+        dict.set_item("telemetry_report", self.telemetry_report(py)?)?;
+        Ok(dict.into())
+    }
+
+    fn __repr__(&self) -> String {
+        let (rows, cols) = self.inner.slice_shape();
+        format!(
+            "ZSpaceStreamFrame(depth={}, slice_shape=({}, {}), atlas={}, snapshot={})",
+            self.inner.depth(),
+            rows,
+            cols,
+            self.inner.atlas_frame().is_some(),
+            self.inner.chrono_snapshot().is_some()
+        )
+    }
 }
 
 #[pyclass(module = "spiraltorch", name = "CanvasSnapshot")]
@@ -597,7 +945,8 @@ impl PyCanvasProjector {
         if capacity == 0 {
             return Err(PyValueError::new_err("capacity must be positive"));
         }
-        let mut canvas = PureFractalCanvas::new(capacity, width, height).map_err(tensor_err_to_py)?;
+        let mut canvas =
+            PureFractalCanvas::new(capacity, width, height).map_err(tensor_err_to_py)?;
         let palette = CanvasPalette::parse(palette)
             .ok_or_else(|| PyValueError::new_err(format!("unknown palette '{palette}'")))?;
         canvas.projector_mut().set_palette(palette);
@@ -727,7 +1076,10 @@ impl PyCanvasProjector {
         let tensor = projector.tensor();
         let (rows, cols) = tensor.shape();
         let mut metrics: HashMap<String, f64> = HashMap::new();
-        metrics.insert(format!("{prefix}.queue_len"), self.inner.scheduler().len() as f64);
+        metrics.insert(
+            format!("{prefix}.queue_len"),
+            self.inner.scheduler().len() as f64,
+        );
         metrics.insert(
             format!("{prefix}.total_weight"),
             self.inner.scheduler().total_weight() as f64,
@@ -744,13 +1096,19 @@ impl PyCanvasProjector {
             CanvasPalette::Grayscale => (2.0, 0.0, 0.0, 1.0),
         };
         metrics.insert(format!("{prefix}.palette.id"), palette_id);
-        metrics.insert(format!("{prefix}.palette.blue_magenta"), palette_blue_magenta);
+        metrics.insert(
+            format!("{prefix}.palette.blue_magenta"),
+            palette_blue_magenta,
+        );
         metrics.insert(format!("{prefix}.palette.turbo"), palette_turbo);
         metrics.insert(format!("{prefix}.palette.grayscale"), palette_grayscale);
 
         let normalizer = projector.normalizer();
         let normalizer_state = normalizer.state();
-        metrics.insert(format!("{prefix}.normalizer.alpha"), normalizer.alpha() as f64);
+        metrics.insert(
+            format!("{prefix}.normalizer.alpha"),
+            normalizer.alpha() as f64,
+        );
         metrics.insert(
             format!("{prefix}.normalizer.epsilon"),
             normalizer.epsilon() as f64,
@@ -763,7 +1121,10 @@ impl PyCanvasProjector {
             metrics.insert(format!("{prefix}.normalizer.min"), min as f64);
             metrics.insert(format!("{prefix}.normalizer.max"), max as f64);
             metrics.insert(format!("{prefix}.normalizer.span"), (max - min) as f64);
-            metrics.insert(format!("{prefix}.normalizer.center"), ((min + max) * 0.5) as f64);
+            metrics.insert(
+                format!("{prefix}.normalizer.center"),
+                ((min + max) * 0.5) as f64,
+            );
         }
 
         let field = projector.vector_field();
@@ -865,10 +1226,16 @@ impl PyCanvasProjector {
             if energy_finite > 0 {
                 let denom = energy_finite as f64;
                 metrics.insert(format!("{prefix}.trail.energy.mean"), energy_sum / denom);
-                metrics.insert(format!("{prefix}.trail.energy.abs_mean"), energy_sum_abs / denom);
+                metrics.insert(
+                    format!("{prefix}.trail.energy.abs_mean"),
+                    energy_sum_abs / denom,
+                );
                 metrics.insert(format!("{prefix}.trail.energy.min"), energy_min as f64);
                 metrics.insert(format!("{prefix}.trail.energy.max"), energy_max as f64);
-                metrics.insert(format!("{prefix}.trail.energy.rms"), (energy_sum_sq / denom).sqrt());
+                metrics.insert(
+                    format!("{prefix}.trail.energy.rms"),
+                    (energy_sum_sq / denom).sqrt(),
+                );
                 metrics.insert(format!("{prefix}.trail.energy.l2"), energy_sum_sq.sqrt());
             }
 
@@ -900,10 +1267,16 @@ impl PyCanvasProjector {
             );
             if chroma_finite > 0 {
                 let denom = chroma_finite as f64;
-                metrics.insert(format!("{prefix}.trail.chroma.abs_mean"), chroma_sum_abs / denom);
+                metrics.insert(
+                    format!("{prefix}.trail.chroma.abs_mean"),
+                    chroma_sum_abs / denom,
+                );
                 metrics.insert(format!("{prefix}.trail.chroma.min"), chroma_min as f64);
                 metrics.insert(format!("{prefix}.trail.chroma.max"), chroma_max as f64);
-                metrics.insert(format!("{prefix}.trail.chroma.rms"), (chroma_sum_sq / denom).sqrt());
+                metrics.insert(
+                    format!("{prefix}.trail.chroma.rms"),
+                    (chroma_sum_sq / denom).sqrt(),
+                );
                 metrics.insert(format!("{prefix}.trail.chroma.l2"), chroma_sum_sq.sqrt());
             }
         }
@@ -973,7 +1346,9 @@ impl PyCanvasProjector {
         let _ = py;
         match self.inner.refresh_tensor() {
             Ok(tensor) => Ok(PyTensor::from_tensor(tensor.clone())),
-            Err(TensorError::EmptyInput(_)) => Ok(PyTensor::from_tensor(self.inner.projector().tensor().clone())),
+            Err(TensorError::EmptyInput(_)) => Ok(PyTensor::from_tensor(
+                self.inner.projector().tensor().clone(),
+            )),
             Err(err) => Err(tensor_err_to_py(err)),
         }
     }
@@ -981,7 +1356,9 @@ impl PyCanvasProjector {
     /// Returns the last relation tensor (without forcing a refresh).
     fn tensor(&self, py: Python<'_>) -> PyResult<PyTensor> {
         let _ = py;
-        Ok(PyTensor::from_tensor(self.inner.projector().tensor().clone()))
+        Ok(PyTensor::from_tensor(
+            self.inner.projector().tensor().clone(),
+        ))
     }
 
     /// Refreshes and returns the row-wise complex FFT spectrum as a tensor with shape `(height, width * 8)`.
@@ -1079,6 +1456,8 @@ pub fn zrelativity_heatmap(model: &PyZRelativityModel, field: &str) -> PyResult<
 }
 
 pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
+    parent.add_class::<PyChronoSnapshot>()?;
+    parent.add_class::<PyZSpaceStreamFrame>()?;
     parent.add_class::<PyCanvasTransformer>()?;
     parent.add_class::<PyCanvasSnapshot>()?;
     parent.add_class::<PyCanvasProjector>()?;

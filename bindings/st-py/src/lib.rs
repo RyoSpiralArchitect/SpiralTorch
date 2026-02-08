@@ -315,6 +315,8 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "CanvasTransformer",
         "CanvasSnapshot",
         "CanvasProjector",
+        "ChronoSnapshot",
+        "ZSpaceStreamFrame",
         "apply_vision_update",
         "ScaleStack",
         "scalar_scale_stack",
