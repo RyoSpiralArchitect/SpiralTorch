@@ -80,6 +80,9 @@ NumPy, no PyTorch, and no shim layers.
 - Recommendation toolkit via `spiraltorch.rec`—SpiralTorchRec factors user/item
   lattices under open-cartesian topos guards so embeddings stay psychoid-safe
   while training entirely in Rust.
+- Model-zoo orchestration via `spiraltorch.model_zoo`—discover recipes, filter
+  by task/family, resolve script paths, and run models with a stable Python API
+  or the `spiral-model-zoo` CLI.
 
 ## Building wheels
 
@@ -115,6 +118,23 @@ PYTHONNOUSERSITE=1 python3 -s -m unittest bindings/st-py/tests/test_unittest_smo
 ```
 
 ## Minimal usage
+
+### Model Zoo discovery + launch
+
+```python
+import spiraltorch as st
+
+entries = st.model_zoo.list_models(task="classification")
+print("classification recipes:", [entry.key for entry in entries[:5]])
+
+cmd = st.model_zoo.build_model_command("mlp_regression", "--help")
+print("command:", " ".join(cmd))
+```
+
+```bash
+spiral-model-zoo list --task language-modeling
+spiral-model-zoo run mlp_regression -- --help
+```
 
 ### Rank-K execution
 

@@ -4456,6 +4456,7 @@ class _DatasetModule(ModuleType):
 dataset: _DatasetModule
 
 linalg: ModuleType
+model_zoo: ModuleType
 
 spiral_rl: ModuleType
 
@@ -5216,6 +5217,7 @@ __all__ = [
     "ecosystem",
     "selfsup",
     "planner",
+    "model_zoo",
     "sot",
     "zspace",
     "vision",

@@ -4506,6 +4506,10 @@ def __getattr__(name: str) -> _Any:
 
     if name.startswith("_"):
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+    if name == "model_zoo":
+        module = import_module("spiraltorch.model_zoo")
+        globals()["model_zoo"] = module
+        return module
     redirect = _RENAMED_EXPORTS.get(name)
     if redirect is not None:
         _expose_from_rs(redirect)
@@ -4554,6 +4558,7 @@ for _name in [
     "vision",
     "canvas",
     "planner",
+    "model_zoo",
     "spiralk",
     "psi",
     "qr",
@@ -4563,7 +4568,7 @@ for _name in [
     if _name in globals() or _resolve_rs_attr(_name) is not None:
         _EXPORTED.add(_name)
 
-_EXPORTED.update(["hg", "rg", "z", "__version__"])
+_EXPORTED.update(["hg", "rg", "z", "__version__", "model_zoo"])
 _EXPORTED.update(
     _RENAMED_EXPORTS.get(n, n)
     for n in _safe_getattr(_rs, "__all__", ())
