@@ -43,6 +43,7 @@ use st_nn::loss::{ContrastiveLoss, FocalLoss, TripletLoss};
 use st_nn::trainer::{
     CurvatureDecision as RustCurvatureDecision, CurvatureScheduler as RustCurvatureScheduler,
     SoftLogicConfig as RustSoftLogicConfig,
+    SpectralLearningRatePolicy as RustSpectralLearningRatePolicy,
 };
 #[cfg(feature = "nn")]
 use st_nn::Loss;
@@ -366,6 +367,11 @@ impl PyCurvatureScheduler {
     }
 
     #[getter]
+    pub fn proportional_gain(&self) -> f32 {
+        self.inner.proportional_gain()
+    }
+
+    #[getter]
     pub fn tolerance(&self) -> f32 {
         self.inner.tolerance()
     }
@@ -380,6 +386,36 @@ impl PyCurvatureScheduler {
         self.inner.last_pressure()
     }
 
+    #[getter]
+    pub fn last_pressure_variance(&self) -> Option<f32> {
+        self.inner.last_pressure_variance()
+    }
+
+    #[getter]
+    pub fn last_pressure_rel_variance(&self) -> Option<f32> {
+        self.inner.last_pressure_rel_variance()
+    }
+
+    #[getter]
+    pub fn stability_threshold(&self) -> f32 {
+        self.inner.stability_threshold()
+    }
+
+    #[getter]
+    pub fn stability_boost(&self) -> f32 {
+        self.inner.stability_boost()
+    }
+
+    #[getter]
+    pub fn dither_strength(&self) -> f32 {
+        self.inner.dither_strength()
+    }
+
+    #[getter]
+    pub fn dither_period(&self) -> u32 {
+        self.inner.dither_period()
+    }
+
     pub fn set_bounds(&mut self, min_curvature: f32, max_curvature: f32) {
         self.inner.set_bounds(min_curvature, max_curvature);
     }
@@ -392,12 +428,32 @@ impl PyCurvatureScheduler {
         self.inner.set_step(step);
     }
 
+    pub fn set_proportional_gain(&mut self, gain: f32) {
+        self.inner.set_proportional_gain(gain);
+    }
+
     pub fn set_tolerance(&mut self, tolerance: f32) {
         self.inner.set_tolerance(tolerance);
     }
 
+    pub fn set_stability_threshold(&mut self, threshold: f32) {
+        self.inner.set_stability_threshold(threshold);
+    }
+
+    pub fn set_stability_boost(&mut self, boost: f32) {
+        self.inner.set_stability_boost(boost);
+    }
+
+    pub fn set_dither(&mut self, strength: f32, period: u32) {
+        self.inner.set_dither(strength, period);
+    }
+
     pub fn set_smoothing(&mut self, smoothing: f32) {
         self.inner.set_smoothing(smoothing);
+    }
+
+    pub fn apply_env_overrides(&mut self) {
+        self.inner.apply_env_overrides();
     }
 
     pub fn sync(&mut self, curvature: f32) {
@@ -4394,6 +4450,44 @@ impl PyNnModuleTrainer {
             }
             None => Ok(None),
         }
+    }
+
+    pub fn enable_spectral_learning_rate(&mut self) {
+        self.inner
+            .enable_spectral_learning_rate(RustSpectralLearningRatePolicy::default());
+    }
+
+    pub fn disable_spectral_learning_rate(&mut self) {
+        self.inner.disable_spectral_learning_rate();
+    }
+
+    pub fn spectral_metrics(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        let metrics = self.inner.spectral_metrics();
+        match metrics {
+            Some(metrics) => {
+                let dict = PyDict::new_bound(py);
+                dict.set_item("absolute_lr_scale", metrics.absolute_lr_scale)?;
+                dict.set_item("sheet_index", metrics.sheet_index)?;
+                dict.set_item("sheet_count", metrics.sheet_count)?;
+                dict.set_item("spin_alignment", metrics.spin_alignment)?;
+                dict.set_item("spectral_radius", metrics.spectral_radius)?;
+                dict.set_item("spectral_entropy", metrics.spectral_entropy)?;
+                dict.set_item("spectral_pressure", metrics.spectral_pressure)?;
+                dict.set_item("energy_ratio", metrics.energy_ratio)?;
+                dict.set_item("band_scale", metrics.band_scale)?;
+                dict.set_item("local_lr", metrics.local_lr)?;
+                Ok(Some(dict.into_py(py)))
+            }
+            None => Ok(None),
+        }
+    }
+
+    pub fn enable_zspace_trace_coherence_bridge(&mut self) {
+        self.inner.enable_zspace_trace_coherence_bridge();
+    }
+
+    pub fn disable_zspace_trace_coherence_bridge(&mut self) {
+        self.inner.disable_zspace_trace_coherence_bridge();
     }
 
     #[getter]

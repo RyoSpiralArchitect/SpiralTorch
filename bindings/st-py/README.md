@@ -48,7 +48,8 @@ NumPy, no PyTorch, and no shim layers.
 - Direct access to the core A/B/C roundtable trainer via
   `spiraltorch.nn.ModuleTrainer` (`RoundtableConfig`, `RoundtableSchedule`,
   `EpochStats`) including `prepare/step/zero`, optional realgrad toggles, and
-  curvature-scheduler controls for long-running adaptive training loops.
+  curvature-scheduler controls plus spectral/coherence bridge toggles for
+  long-running adaptive training loops.
 - Attentionless sequence layers via `spiraltorch.nn`—`WaveRnn`, `WaveGate`,
   `ZSpaceMixer`, and `FeatureReorder2d` for Conv/RNN-style language baselines.
 - Coherence VAE primitives via `spiraltorch.nn`—`MellinBasis` and `ZSpaceVae`

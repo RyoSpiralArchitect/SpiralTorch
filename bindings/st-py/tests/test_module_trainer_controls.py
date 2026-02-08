@@ -125,3 +125,57 @@ def test_module_trainer_curvature_scheduler_metrics_roundtrip() -> None:
 
     trainer.disable_curvature_scheduler()
     assert trainer.curvature_metrics() is None
+
+
+def test_curvature_scheduler_exposes_advanced_knobs() -> None:
+    st = _load_native()
+    if st is None:
+        pytest.skip("native SpiralTorch extension unavailable")
+    assert hasattr(st, "nn")
+    assert hasattr(st.nn, "CurvatureScheduler")
+
+    scheduler = st.nn.CurvatureScheduler(
+        initial=-1.0,
+        min_curvature=-2.0,
+        max_curvature=-0.2,
+        target_pressure=0.05,
+        step=0.1,
+        tolerance=0.02,
+        smoothing=0.3,
+    )
+    scheduler.set_proportional_gain(1.4)
+    scheduler.set_stability_threshold(0.002)
+    scheduler.set_stability_boost(0.25)
+    scheduler.set_dither(0.2, 7)
+    scheduler.apply_env_overrides()
+
+    assert scheduler.proportional_gain == pytest.approx(1.4)
+    assert scheduler.stability_threshold == pytest.approx(0.002)
+    assert scheduler.stability_boost == pytest.approx(0.25)
+    assert scheduler.dither_strength == pytest.approx(0.2)
+    assert scheduler.dither_period == 7
+
+    _ = scheduler.observe_pressure(0.2)
+    _ = scheduler.observe_pressure(0.21)
+    _ = scheduler.last_pressure_variance
+    _ = scheduler.last_pressure_rel_variance
+
+
+def test_module_trainer_spectral_and_coherence_bridge_controls() -> None:
+    st = _load_native()
+    if st is None:
+        pytest.skip("native SpiralTorch extension unavailable")
+    assert hasattr(st, "nn")
+    assert hasattr(st.nn, "ModuleTrainer")
+
+    trainer = st.nn.ModuleTrainer(
+        backend="cpu",
+        curvature=-1.0,
+        hyper_learning_rate=1e-2,
+        fallback_learning_rate=1e-2,
+    )
+    trainer.enable_spectral_learning_rate()
+    assert trainer.spectral_metrics() is None
+    trainer.enable_zspace_trace_coherence_bridge()
+    trainer.disable_zspace_trace_coherence_bridge()
+    trainer.disable_spectral_learning_rate()
