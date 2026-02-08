@@ -2187,6 +2187,61 @@ def _coerce_volume(
     return slices
 
 
+def _stream_metadata_to_mapping(value: _Any) -> _Any:
+    if value is None:
+        return None
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict):
+        try:
+            return to_dict()
+        except Exception:
+            return value
+    return value
+
+
+def _extract_stream_slices_and_metadata(
+    payload: _Any,
+) -> _Tuple[_Any, _Optional[_Dict[str, _Any]]]:
+    candidate = payload
+
+    to_streamed = getattr(candidate, "to_streamed_volume", None)
+    if callable(to_streamed):
+        try:
+            candidate = to_streamed()
+        except Exception:
+            candidate = payload
+
+    slices_method = getattr(candidate, "slices", None)
+    if callable(slices_method):
+        try:
+            slices = slices_method()
+            atlas = _stream_metadata_to_mapping(
+                getattr(candidate, "atlas_frame", None)
+            )
+            chrono = _stream_metadata_to_mapping(
+                getattr(candidate, "chrono_snapshot", None)
+            )
+            metadata = {"atlas_frame": atlas, "chrono_snapshot": chrono}
+            return slices, metadata
+        except Exception:
+            pass
+
+    to_dict = getattr(candidate, "to_dict", None)
+    if callable(to_dict):
+        try:
+            payload_dict = to_dict()
+            if isinstance(payload_dict, _Mapping) and "slices" in payload_dict:
+                metadata = {
+                    "atlas_frame": payload_dict.get("atlas_frame"),
+                    "chrono_snapshot": payload_dict.get("chrono_snapshot"),
+                }
+                return payload_dict["slices"], metadata
+        except Exception:
+            pass
+
+    return payload, None
+
+
 def _spectral_window(name: str | None, depth: int) -> _List[float]:
     if depth <= 0:
         return []
@@ -2332,6 +2387,7 @@ class SpiralTorchVision:
             for _ in range(depth)
         ]
         self._buffer = TemporalResonanceBuffer(capacity=self._buffer_capacity, alpha=self._alpha)
+        self._last_stream_metadata: _Optional[_Dict[str, _Any]] = None
 
     @property
     def volume(self) -> _List[_List[_List[float]]]:
@@ -2353,12 +2409,19 @@ class SpiralTorchVision:
     def window(self) -> _List[float]:
         return list(self._window)
 
+    @property
+    def last_stream_metadata(self) -> _Optional[_Dict[str, _Any]]:
+        if self._last_stream_metadata is None:
+            return None
+        return dict(self._last_stream_metadata)
+
     def reset(self) -> None:
         for slice_ in self._volume:
             for row in slice_:
                 for idx in range(len(row)):
                     row[idx] = 0.0
         self._buffer = TemporalResonanceBuffer(capacity=self._buffer_capacity, alpha=self._alpha)
+        self._last_stream_metadata = None
 
     def update_window(self, window: str | _Sequence[float] | None) -> None:
         if window is None or isinstance(window, str):
@@ -2377,7 +2440,10 @@ class SpiralTorchVision:
         self._window_name = None
         self._window = values
 
-    def accumulate(self, volume: _Sequence[_Sequence[_Sequence[float]]], weight: float = 1.0) -> None:
+    def accumulate(self, volume: _Any, weight: float = 1.0) -> None:
+        volume, metadata = _extract_stream_slices_and_metadata(volume)
+        if metadata is not None:
+            self._last_stream_metadata = metadata
         if hasattr(volume, "tolist"):
             volume = volume.tolist()
         if len(volume) != self.depth:
@@ -2458,6 +2524,7 @@ class SpiralTorchVision:
             "profiles": self.slice_profile(),
             "energy": self.volume_energy(),
             "temporal": self._buffer.state(),
+            "stream_metadata": self.last_stream_metadata,
         }
 
     def state_dict(self) -> _Dict[str, _Any]:
@@ -2470,6 +2537,7 @@ class SpiralTorchVision:
             "window_name": self._window_name,
             "buffer": self._buffer.state_dict(),
             "volume": self.volume,
+            "stream_metadata": self.last_stream_metadata,
         }
 
     def load_state_dict(self, state: _Mapping[str, _Any], *, strict: bool = True) -> None:
@@ -2513,6 +2581,11 @@ class SpiralTorchVision:
             current = self._buffer.state_dict()
             current["ema"] = temporal_state
             self._buffer.load_state_dict(current)
+        stream_metadata = state.get("stream_metadata")
+        if isinstance(stream_metadata, _Mapping):
+            self._last_stream_metadata = dict(stream_metadata)
+        else:
+            self._last_stream_metadata = None
 
 
 class ZSpaceTrainer:
@@ -3639,6 +3712,7 @@ _mirror_into_module(
         "ChronoSnapshot",
         "ZSpaceStreamFrame",
         "StreamedVolume",
+        "ZSpaceStreamFrameAggregator",
         "SpiralTorchVision",
         "TemporalResonanceBuffer",
         "SliceProfile",
@@ -4495,7 +4569,7 @@ _CORE_EXPORTS = [
     "CurvatureScheduler","CurvatureDecision","SpectralLearningRatePolicy",
     "CoherenceObservation","CoherenceSignature","CoherenceChannelReport","CoherenceDiagnostics","is_swap_invariant",
     "TemporalResonanceBuffer","SpiralTorchVision",
-    "ChronoSnapshot","ZSpaceStreamFrame","StreamedVolume",
+    "ChronoSnapshot","ZSpaceStreamFrame","StreamedVolume","ZSpaceStreamFrameAggregator",
     "CanvasTransformer","CanvasSnapshot","apply_vision_update",
     "ZMetrics","SliceProfile","step_many","stream_zspace_training",
     "info_nce","masked_mse","mean_squared_error",

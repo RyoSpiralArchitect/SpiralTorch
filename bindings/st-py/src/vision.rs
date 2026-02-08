@@ -16,7 +16,9 @@ use st_tensor::wasm_canvas::{
 use st_tensor::{Tensor, TensorError};
 use st_vision::{
     ChronoSnapshot as PureChronoSnapshot, StreamedVolume as PureStreamedVolume,
-    ZSliceProfile as PureZSliceProfile, ZSpaceStreamFrame as PureZSpaceStreamFrame,
+    ZSliceProfile as PureZSliceProfile,
+    ZSpaceStreamFrame as PureZSpaceStreamFrame,
+    ZSpaceStreamFrameAggregator as PureZSpaceStreamFrameAggregator,
     ZSpaceTelemetryReport as PureZSpaceTelemetryReport,
 };
 
@@ -511,6 +513,21 @@ impl PyStreamedVolume {
         zspace_telemetry_to_dict(py, &report)
     }
 
+    #[pyo3(signature = (frame, *, alpha=0.5))]
+    fn ingest_frame(
+        &mut self,
+        frame: &PyZSpaceStreamFrame,
+        alpha: f32,
+    ) -> PyResult<PyStreamedVolume> {
+        let streamed = self
+            .inner
+            .volume
+            .ingest_stream_frame(frame.inner.clone(), alpha)
+            .map_err(tensor_err_to_py)?;
+        self.inner = streamed.clone();
+        Ok(PyStreamedVolume::from_inner(streamed))
+    }
+
     fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
         let dict = PyDict::new_bound(py);
         dict.set_item("depth", self.inner.volume.depth())?;
@@ -559,6 +576,150 @@ impl PyStreamedVolume {
             self.inner.volume.width(),
             self.inner.atlas_frame.is_some(),
             self.inner.chrono_snapshot.is_some()
+        )
+    }
+}
+
+#[pyclass(
+    module = "spiraltorch.vision",
+    name = "ZSpaceStreamFrameAggregator",
+    unsendable
+)]
+#[derive(Clone)]
+pub(crate) struct PyZSpaceStreamFrameAggregator {
+    inner: PureZSpaceStreamFrameAggregator,
+}
+
+#[pymethods]
+impl PyZSpaceStreamFrameAggregator {
+    #[new]
+    #[pyo3(signature = (*, max_depth=None))]
+    fn new(max_depth: Option<usize>) -> PyResult<Self> {
+        let inner = match max_depth {
+            Some(depth) => {
+                PureZSpaceStreamFrameAggregator::with_max_depth(depth).map_err(tensor_err_to_py)?
+            }
+            None => PureZSpaceStreamFrameAggregator::new(),
+        };
+        Ok(Self { inner })
+    }
+
+    #[staticmethod]
+    fn with_max_depth(max_depth: usize) -> PyResult<Self> {
+        let inner =
+            PureZSpaceStreamFrameAggregator::with_max_depth(max_depth).map_err(tensor_err_to_py)?;
+        Ok(Self { inner })
+    }
+
+    #[getter]
+    fn max_depth(&self) -> Option<usize> {
+        self.inner.max_depth()
+    }
+
+    #[pyo3(signature = (max_depth=None))]
+    fn set_max_depth(&mut self, max_depth: Option<usize>) -> PyResult<()> {
+        self.inner.set_max_depth(max_depth).map_err(tensor_err_to_py)
+    }
+
+    fn __len__(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    #[getter]
+    fn slice_shape(&self) -> Option<(usize, usize)> {
+        self.inner.slice_shape()
+    }
+
+    fn extend(&mut self, frame: &PyZSpaceStreamFrame) -> PyResult<()> {
+        self.inner.extend(frame.inner.clone()).map_err(tensor_err_to_py)
+    }
+
+    fn clear(&mut self) {
+        self.inner.clear();
+    }
+
+    fn prune_oldest(&mut self, keep: usize) {
+        self.inner.prune_oldest(keep);
+    }
+
+    fn as_frame(&self) -> Option<PyZSpaceStreamFrame> {
+        self.inner
+            .as_frame()
+            .map(|inner| PyZSpaceStreamFrame { inner })
+    }
+
+    fn drain_frame(&mut self) -> PyResult<Option<PyZSpaceStreamFrame>> {
+        let max_depth = self.inner.max_depth();
+        let frame = std::mem::take(&mut self.inner)
+            .into_frame()
+            .map(|inner| PyZSpaceStreamFrame { inner });
+        self.inner = match max_depth {
+            Some(depth) => {
+                PureZSpaceStreamFrameAggregator::with_max_depth(depth).map_err(tensor_err_to_py)?
+            }
+            None => PureZSpaceStreamFrameAggregator::new(),
+        };
+        Ok(frame)
+    }
+
+    fn to_streamed_volume(&self) -> PyResult<Option<PyStreamedVolume>> {
+        self.inner
+            .as_frame()
+            .map(|frame| {
+                frame
+                    .to_streamed_volume()
+                    .map(PyStreamedVolume::from_inner)
+                    .map_err(tensor_err_to_py)
+            })
+            .transpose()
+    }
+
+    #[getter]
+    fn atlas_frame(&self) -> Option<PyAtlasFrame> {
+        self.inner
+            .as_frame()
+            .and_then(|frame| frame.atlas_frame().cloned().map(PyAtlasFrame::from_frame))
+    }
+
+    #[getter]
+    fn chrono_snapshot(&self) -> Option<PyChronoSnapshot> {
+        self.inner
+            .as_frame()
+            .and_then(|frame| frame.chrono_snapshot().cloned().map(PyChronoSnapshot::from_inner))
+    }
+
+    fn telemetry_report(&self, py: Python<'_>) -> PyResult<Option<Py<PyDict>>> {
+        let report = self.inner.telemetry_report().map_err(tensor_err_to_py)?;
+        report
+            .as_ref()
+            .map(|value| zspace_telemetry_to_dict(py, value))
+            .transpose()
+    }
+
+    fn profile(&self, py: Python<'_>) -> PyResult<Option<Py<PyDict>>> {
+        self.inner
+            .as_frame()
+            .map(|frame| frame.profile().map_err(tensor_err_to_py))
+            .transpose()?
+            .as_ref()
+            .map(|value| z_slice_profile_to_dict(py, value))
+            .transpose()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "ZSpaceStreamFrameAggregator(len={}, max_depth={:?}, slice_shape={:?})",
+            self.inner.len(),
+            self.inner.max_depth(),
+            self.inner.slice_shape()
         )
     }
 }
@@ -1593,6 +1754,7 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
     parent.add_class::<PyChronoSnapshot>()?;
     parent.add_class::<PyZSpaceStreamFrame>()?;
     parent.add_class::<PyStreamedVolume>()?;
+    parent.add_class::<PyZSpaceStreamFrameAggregator>()?;
     parent.add_class::<PyCanvasTransformer>()?;
     parent.add_class::<PyCanvasSnapshot>()?;
     parent.add_class::<PyCanvasProjector>()?;

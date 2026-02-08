@@ -22,6 +22,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 __all__ = [
     "ModelZooEntry",
+    "focus_presets",
     "list_models",
     "find_model",
     "suggest_models",
@@ -41,19 +42,19 @@ _ENTRY_METADATA: dict[str, dict[str, Any]] = {
         "task": "regression",
         "family": "mlp",
         "description": "Minimal regression baseline.",
-        "tags": ("starter", "tabular"),
+        "tags": ("starter", "baseline", "tabular"),
     },
     "zconv_classification": {
         "task": "classification",
         "family": "vision",
         "description": "Compact Z-convolution classifier.",
-        "tags": ("vision", "zspace"),
+        "tags": ("vision", "zspace", "starter", "streaming"),
     },
     "vision_conv_pool_classification": {
         "task": "classification",
         "family": "vision",
         "description": "Vision classification with convolution + pooling.",
-        "tags": ("vision", "conv", "pooling"),
+        "tags": ("vision", "conv", "pooling", "starter"),
     },
     "mellin_log_grid_classification": {
         "task": "classification",
@@ -65,19 +66,19 @@ _ENTRY_METADATA: dict[str, dict[str, Any]] = {
         "task": "classification",
         "family": "maxwell",
         "description": "Maxwell-inspired simulated Z-space classification.",
-        "tags": ("physics", "zspace"),
+        "tags": ("physics", "zspace", "streaming", "temporal"),
     },
     "zspace_vae_reconstruction": {
         "task": "reconstruction",
         "family": "vae",
         "description": "Z-space VAE reconstruction recipe.",
-        "tags": ("vae", "zspace"),
+        "tags": ("vae", "zspace", "generative", "latent"),
     },
     "zspace_text_vae": {
         "task": "reconstruction",
         "family": "vae",
         "description": "Text-conditioned Z-space VAE recipe.",
-        "tags": ("vae", "text", "zspace"),
+        "tags": ("vae", "text", "zspace", "generative", "multimodal"),
     },
     "llm_char_finetune": {
         "task": "language-modeling",
@@ -102,6 +103,45 @@ _ENTRY_METADATA: dict[str, dict[str, Any]] = {
         "family": "llm",
         "description": "WaveRNN + mixer character model.",
         "tags": ("llm", "text", "rnn", "mixer"),
+    },
+}
+
+_FOCUS_PRESETS: dict[str, dict[str, Any]] = {
+    "zspace_bootstrap": {
+        "description": "Starter-friendly Z-space recipes for initial baselines.",
+        "task": "classification",
+        "family": "vision",
+        "required_tags": ("zspace",),
+        "prefer_tags": ("starter", "vision"),
+        "avoid_tags": ("text",),
+    },
+    "zspace_stream": {
+        "description": "Temporal/stream-oriented Z-space training recipes.",
+        "required_tags": ("zspace",),
+        "prefer_tags": ("streaming", "temporal", "vision", "physics"),
+        "avoid_tags": (),
+    },
+    "zspace_generative": {
+        "description": "Latent-space generative pipelines over Z-space embeddings.",
+        "task": "reconstruction",
+        "required_tags": ("zspace", "generative"),
+        "prefer_tags": ("vae", "latent"),
+        "avoid_tags": (),
+    },
+    "zspace_multimodal": {
+        "description": "Text-conditioned and multi-modal Z-space recipes.",
+        "task": "reconstruction",
+        "required_tags": ("zspace", "text"),
+        "prefer_tags": ("multimodal", "vae"),
+        "avoid_tags": (),
+    },
+    "llm_coherence": {
+        "description": "Character-level coherence and wave-conditioned LLM scans.",
+        "task": "language-modeling",
+        "family": "llm",
+        "required_tags": ("llm",),
+        "prefer_tags": ("coherence", "wave"),
+        "avoid_tags": (),
     },
 }
 
@@ -219,6 +259,32 @@ def _normalise_tag_set(values: Sequence[str] | None) -> set[str]:
     return {value.strip().lower() for value in (values or ()) if value.strip()}
 
 
+def _normalise_focus_key(value: str) -> str:
+    return value.strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _resolve_focus_preset(focus: str | None) -> dict[str, Any] | None:
+    if not focus:
+        return None
+    key = _normalise_focus_key(focus)
+    preset = _FOCUS_PRESETS.get(key)
+    if preset is None:
+        known = ", ".join(sorted(_FOCUS_PRESETS))
+        raise KeyError(f"unknown focus '{focus}'. known focuses: {known}")
+    return preset
+
+
+def focus_presets() -> dict[str, dict[str, Any]]:
+    presets: dict[str, dict[str, Any]] = {}
+    for key, preset in _FOCUS_PRESETS.items():
+        item = dict(preset)
+        item["required_tags"] = list(preset.get("required_tags", ()))
+        item["prefer_tags"] = list(preset.get("prefer_tags", ()))
+        item["avoid_tags"] = list(preset.get("avoid_tags", ()))
+        presets[key] = item
+    return presets
+
+
 def _iter_script_paths(
     root: str | os.PathLike[str] | None = None,
     *,
@@ -244,6 +310,7 @@ def list_models(
     family: str | None = None,
     task: str | None = None,
     tags: Sequence[str] | None = None,
+    focus: str | None = None,
 ) -> list[ModelZooEntry]:
     discovered = _iter_script_paths(root=root, include_internal=include_internal)
     by_key: dict[str, Path | None] = {
@@ -256,9 +323,18 @@ def list_models(
             if include_internal or not key.startswith("_"):
                 by_key.setdefault(key, None)
 
+    focus_preset = _resolve_focus_preset(focus)
     family_filter = family.lower() if family else None
     task_filter = task.lower() if task else None
-    required_tags = {tag.lower() for tag in (tags or ())}
+    required_tags = _normalise_tag_set(tags)
+    if focus_preset:
+        focus_family = focus_preset.get("family")
+        focus_task = focus_preset.get("task")
+        if family_filter is None and isinstance(focus_family, str) and focus_family.strip():
+            family_filter = focus_family.lower().strip()
+        if task_filter is None and isinstance(focus_task, str) and focus_task.strip():
+            task_filter = focus_task.lower().strip()
+        required_tags |= _normalise_tag_set(focus_preset.get("required_tags"))
 
     entries: list[ModelZooEntry] = []
     for key in sorted(by_key):
@@ -332,6 +408,7 @@ def suggest_models(
     required_tags: Sequence[str] | None = None,
     prefer_tags: Sequence[str] | None = None,
     avoid_tags: Sequence[str] | None = None,
+    focus: str | None = None,
     limit: int | None = 5,
 ) -> list[ModelZooEntry]:
     entries = list_models(
@@ -348,6 +425,17 @@ def suggest_models(
     required = _normalise_tag_set(required_tags)
     preferred = _normalise_tag_set(prefer_tags)
     avoided = _normalise_tag_set(avoid_tags)
+    focus_preset = _resolve_focus_preset(focus)
+    if focus_preset:
+        focus_task = focus_preset.get("task")
+        focus_family = focus_preset.get("family")
+        if task_filter is None and isinstance(focus_task, str) and focus_task.strip():
+            task_filter = focus_task.lower().strip()
+        if family_filter is None and isinstance(focus_family, str) and focus_family.strip():
+            family_filter = focus_family.lower().strip()
+        required |= _normalise_tag_set(focus_preset.get("required_tags"))
+        preferred |= _normalise_tag_set(focus_preset.get("prefer_tags"))
+        avoided |= _normalise_tag_set(focus_preset.get("avoid_tags"))
 
     scored: list[tuple[int, ModelZooEntry]] = []
     for entry in entries:
@@ -408,6 +496,7 @@ def recommend_model(
     required_tags: Sequence[str] | None = None,
     prefer_tags: Sequence[str] | None = None,
     avoid_tags: Sequence[str] | None = None,
+    focus: str | None = None,
 ) -> ModelZooEntry:
     matches = suggest_models(
         query,
@@ -419,6 +508,7 @@ def recommend_model(
         required_tags=required_tags,
         prefer_tags=prefer_tags,
         avoid_tags=avoid_tags,
+        focus=focus,
         limit=1,
     )
     if matches:
@@ -433,6 +523,8 @@ def recommend_model(
         detail_parts.append(f"family={family!r}")
     if required_tags:
         detail_parts.append(f"required_tags={list(required_tags)!r}")
+    if focus:
+        detail_parts.append(f"focus={focus!r}")
     detail = ", ".join(detail_parts) if detail_parts else "no filter criteria"
     raise KeyError(f"no model recommendation available ({detail})")
 
@@ -528,6 +620,7 @@ def model_zoo_summary(
         "count": len(entries),
         "families": dict(sorted(by_family.items())),
         "tasks": dict(sorted(by_task.items())),
+        "focuses": focus_presets(),
         "models": [entry.to_dict() for entry in entries],
     }
 
@@ -550,8 +643,19 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     )
     list_parser.add_argument("--family", default=None, help="Filter by family")
     list_parser.add_argument("--task", default=None, help="Filter by task")
+    list_parser.add_argument(
+        "--focus",
+        default=None,
+        help="Apply a high-level preset (for example: zspace_stream)",
+    )
     list_parser.add_argument("--tag", action="append", default=[], help="Filter by tag")
     list_parser.add_argument("--json", action="store_true", help="Emit JSON")
+
+    focus_parser = subparsers.add_parser(
+        "focuses",
+        help="List available focus presets used by list/suggest/recommend",
+    )
+    focus_parser.add_argument("--json", action="store_true", help="Emit JSON")
 
     suggest_parser = subparsers.add_parser(
         "suggest",
@@ -571,6 +675,11 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     )
     suggest_parser.add_argument("--task", default=None, help="Prefer task")
     suggest_parser.add_argument("--family", default=None, help="Prefer family")
+    suggest_parser.add_argument(
+        "--focus",
+        default=None,
+        help="Apply a high-level preset (for example: zspace_stream)",
+    )
     suggest_parser.add_argument(
         "--require-tag",
         action="append",
@@ -628,6 +737,18 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(argv)
 
+    if args.command == "focuses":
+        presets = focus_presets()
+        if args.json:
+            print(json.dumps(presets, ensure_ascii=True, indent=2))
+            return 0
+        for key in sorted(presets):
+            preset = presets[key]
+            required = ",".join(preset.get("required_tags", [])) or "-"
+            preferred = ",".join(preset.get("prefer_tags", [])) or "-"
+            print(f"{key:20s} required={required:20s} prefer={preferred:28s}")
+        return 0
+
     if args.command == "list":
         entries = list_models(
             root=args.root,
@@ -636,6 +757,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             family=args.family,
             task=args.task,
             tags=args.tag,
+            focus=args.focus,
         )
         if args.json:
             print(json.dumps([entry.to_dict() for entry in entries], ensure_ascii=True, indent=2))
@@ -661,6 +783,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             required_tags=args.require_tag,
             prefer_tags=args.prefer_tag,
             avoid_tags=args.avoid_tag,
+            focus=args.focus,
             limit=args.limit,
         )
         if args.json:

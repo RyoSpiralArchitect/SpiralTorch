@@ -89,8 +89,9 @@ NumPy, no PyTorch, and no shim layers.
   `suggest_models(...)`/`recommend_model(...)`, and run models with a stable
   Python API or the `spiral-model-zoo` CLI.
 - Stream telemetry interop via `vision.ChronoSnapshot`,
-  `vision.ZSpaceStreamFrame`, and `vision.StreamedVolume` so Python can attach
-  chrono summaries and atlas frames to live Z-slice bundles without dropping to
+  `vision.ZSpaceStreamFrame`, `vision.StreamedVolume`, and
+  `vision.ZSpaceStreamFrameAggregator` so Python can attach chrono summaries,
+  aggregate live frame streams, and ingest temporal updates without dropping to
   Rust glue code.
 
 ## Building wheels
@@ -143,13 +144,22 @@ suggested = st.model_zoo.suggest_models(
 )
 print("suggested:", [entry.key for entry in suggested[:3]])
 
+zspace_stream = st.model_zoo.suggest_models(
+    focus="zspace_stream",
+    available_only=True,
+    limit=3,
+)
+print("zspace stream track:", [entry.key for entry in zspace_stream])
+
 cmd = st.model_zoo.build_model_command("mlp_regression", "--help")
 print("command:", " ".join(cmd))
 ```
 
 ```bash
+spiral-model-zoo focuses
 spiral-model-zoo list --task language-modeling
 spiral-model-zoo suggest llm_char --task language-modeling --prefer-tag coherence
+spiral-model-zoo suggest --focus zspace_stream --available-only
 spiral-model-zoo run mlp_regression -- --help
 ```
 

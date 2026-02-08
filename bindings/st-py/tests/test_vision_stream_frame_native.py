@@ -44,6 +44,7 @@ def test_vision_stream_frame_and_chrono_snapshot_bridge() -> None:
     assert hasattr(st.vision, "ChronoSnapshot")
     assert hasattr(st.vision, "ZSpaceStreamFrame")
     assert hasattr(st.vision, "StreamedVolume")
+    assert hasattr(st.vision, "ZSpaceStreamFrameAggregator")
     assert hasattr(st, "ChronoSnapshot")
     assert hasattr(st, "ZSpaceStreamFrame")
     assert hasattr(st, "StreamedVolume")
@@ -112,3 +113,40 @@ def test_vision_stream_frame_and_chrono_snapshot_bridge() -> None:
     streamed_payload = streamed.to_dict()
     assert int(streamed_payload["depth"]) == 2
     assert tuple(streamed_payload["slice_shape"]) == (2, 2)
+
+    streamed_again = streamed.ingest_frame(frame, alpha=0.25)
+    assert streamed_again.depth == 2
+    assert streamed.depth == 2
+
+    aggregator = st.vision.ZSpaceStreamFrameAggregator(max_depth=2)
+    aggregator.extend(frame)
+    assert aggregator.max_depth == 2
+    assert len(aggregator) == 2
+    assert not aggregator.is_empty()
+    assert aggregator.slice_shape == (2, 2)
+
+    agg_profile = aggregator.profile()
+    assert agg_profile is not None
+    assert int(agg_profile["depth"]) == 2
+    agg_report = aggregator.telemetry_report()
+    assert agg_report is not None
+    assert int(agg_report["depth"]) == 2
+
+    agg_streamed = aggregator.to_streamed_volume()
+    assert agg_streamed is not None
+    assert agg_streamed.depth == 2
+
+    vision = st.vision.SpiralTorchVision(depth=2, height=2, width=2)
+    vision.accumulate(aggregator)
+    snapshot = vision.snapshot()
+    assert "stream_metadata" in snapshot
+
+    drained = aggregator.drain_frame()
+    assert drained is not None
+    assert drained.depth == 2
+    assert aggregator.is_empty()
+
+    vision.reset()
+    vision.accumulate(streamed_again)
+    snapshot = vision.snapshot()
+    assert "stream_metadata" in snapshot

@@ -189,3 +189,55 @@ def test_cli_suggest_json_output(stub_spiraltorch, monkeypatch, tmp_path: Path, 
     assert code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload[0]["key"] == "llm_char_coherence_scan"
+
+
+def test_focus_presets_expose_zspace_tracks(stub_spiraltorch, monkeypatch):
+    model_zoo = _load_model_zoo(stub_spiraltorch, monkeypatch)
+    presets = model_zoo.focus_presets()
+    assert "zspace_stream" in presets
+    assert "zspace" in presets["zspace_stream"]["required_tags"]
+
+
+def test_suggest_models_focus_prefers_streaming_zspace(stub_spiraltorch, monkeypatch, tmp_path: Path):
+    scripts = tmp_path / "models" / "python"
+    scripts.mkdir(parents=True)
+    _write_script(scripts / "zconv_classification.py")
+    _write_script(scripts / "maxwell_simulated_z_classification.py")
+    _write_script(scripts / "zspace_vae_reconstruction.py")
+
+    monkeypatch.setenv("SPIRALTORCH_MODEL_ZOO_ROOT", str(tmp_path))
+    model_zoo = _load_model_zoo(stub_spiraltorch, monkeypatch)
+
+    entries = model_zoo.suggest_models(
+        focus="zspace_stream",
+        available_only=True,
+        limit=3,
+    )
+    assert [entry.key for entry in entries[:2]] == [
+        "maxwell_simulated_z_classification",
+        "zconv_classification",
+    ]
+
+
+def test_list_models_focus_bootstrap_filters_family(stub_spiraltorch, monkeypatch, tmp_path: Path):
+    scripts = tmp_path / "models" / "python"
+    scripts.mkdir(parents=True)
+    _write_script(scripts / "zconv_classification.py")
+    _write_script(scripts / "maxwell_simulated_z_classification.py")
+
+    monkeypatch.setenv("SPIRALTORCH_MODEL_ZOO_ROOT", str(tmp_path))
+    model_zoo = _load_model_zoo(stub_spiraltorch, monkeypatch)
+
+    entries = model_zoo.list_models(
+        focus="zspace_bootstrap",
+        available_only=True,
+    )
+    assert [entry.key for entry in entries] == ["zconv_classification"]
+
+
+def test_cli_focuses_json_output(stub_spiraltorch, monkeypatch, capsys):
+    model_zoo = _load_model_zoo(stub_spiraltorch, monkeypatch)
+    code = model_zoo.main(["focuses", "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert "zspace_stream" in payload
