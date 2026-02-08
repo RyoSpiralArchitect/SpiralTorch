@@ -43,13 +43,13 @@ static CUDA_MODULE: OnceLock<CudaModule> = OnceLock::new();
 pub fn run_selection(
     selection: Selection,
     plan: &RankPlan,
-    mut buffers: LaunchSlices<'_>,
+    buffers: &mut LaunchSlices<'_>,
 ) -> Result<(), String> {
     if plan.rows == 0 || plan.k == 0 {
         return Ok(());
     }
     if plan.cols == 0 {
-        fill_empty_columns(&mut buffers);
+        fill_empty_columns(buffers);
         return Ok(());
     }
 
@@ -66,7 +66,7 @@ pub fn run_selection(
 
 fn launch_heap_kernel(
     plan: &RankPlan,
-    buffers: LaunchSlices<'_>,
+    buffers: &mut LaunchSlices<'_>,
     kernel_name: &'static str,
 ) -> Result<(), String> {
     launch_cuda_kernel(
@@ -81,19 +81,14 @@ fn launch_heap_kernel(
 
 fn launch_bitonic_kernel(
     plan: &RankPlan,
-    buffers: LaunchSlices<'_>,
+    buffers: &mut LaunchSlices<'_>,
     kernel: &'static str,
 ) -> Result<(), String> {
     launch_cuda_kernel(plan, buffers, kernel, (WARP_LANES as u32, 1, 1), 0, Some(1))
 }
 
-fn launch_midk_kernel(plan: &RankPlan, buffers: LaunchSlices<'_>) -> Result<(), String> {
-    if plan.cols > MID_MAX_COLS {
-        return Err(format!(
-            "cuda midk kernel supports cols ≤ {MID_MAX_COLS}, received {}",
-            plan.cols
-        ));
-    }
+fn launch_midk_kernel(plan: &RankPlan, buffers: &mut LaunchSlices<'_>) -> Result<(), String> {
+    validate_mid_cols(plan.cols)?;
     launch_cuda_kernel(
         plan,
         buffers,
@@ -106,7 +101,7 @@ fn launch_midk_kernel(plan: &RankPlan, buffers: LaunchSlices<'_>) -> Result<(), 
 
 fn launch_cuda_kernel(
     plan: &RankPlan,
-    buffers: LaunchSlices<'_>,
+    buffers: &mut LaunchSlices<'_>,
     kernel_name: &'static str,
     block_dim: (u32, u32, u32),
     shared_mem_bytes: u32,
@@ -247,4 +242,73 @@ fn mid_shared_bytes(cols: u32) -> Result<u32, String> {
         .checked_mul(std::mem::size_of::<f32>() + std::mem::size_of::<i32>())
         .ok_or_else(|| "cuda midk shared memory size overflow".to_string())?;
     u32::try_from(bytes).map_err(|_| "cuda midk shared memory exceeds u32 limit".to_string())
+}
+
+fn validate_mid_cols(cols: u32) -> Result<(), String> {
+    if cols > MID_MAX_COLS {
+        return Err(format!(
+            "cuda midk kernel supports cols ≤ {MID_MAX_COLS}, received {cols}"
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::device_caps::DeviceCaps;
+    use crate::backend::unison_heuristics::RankKind;
+    use crate::ops::rank_entry::plan_rank;
+
+    fn plan_midk(rows: u32, cols: u32, k: u32) -> RankPlan {
+        plan_rank(
+            RankKind::MidK,
+            rows,
+            cols,
+            k,
+            DeviceCaps::cuda(32, 1024, Some(64 * 1024)),
+        )
+    }
+
+    #[test]
+    fn mid_shared_bytes_matches_expected_layout() {
+        let expected =
+            MID_MAX_COLS * (std::mem::size_of::<f32>() + std::mem::size_of::<i32>()) as u32;
+        assert_eq!(mid_shared_bytes(MID_MAX_COLS).unwrap(), expected);
+    }
+
+    #[test]
+    fn mid_shared_bytes_rejects_u32_overflow() {
+        assert!(mid_shared_bytes(u32::MAX).is_err());
+    }
+
+    #[test]
+    fn launch_midk_rejects_cols_over_limit_before_cuda_init() {
+        let rows = 1u32;
+        let cols = MID_MAX_COLS + 1;
+        let k = 3u32;
+        let plan = plan_midk(rows, cols, k);
+
+        let input = vec![0.0f32; (rows * cols) as usize];
+        let mut out_vals = vec![0.0f32; (rows * k) as usize];
+        let mut out_idx = vec![0i32; (rows * k) as usize];
+        let mut slices = LaunchSlices {
+            input: &input,
+            out_vals: &mut out_vals,
+            out_idx: &mut out_idx,
+            rows,
+            cols,
+            k,
+        };
+        let err = launch_midk_kernel(&plan, &mut slices)
+            .expect_err("cols beyond limit should fail before touching CUDA runtime");
+
+        assert!(err.contains("supports cols"));
+        assert!(err.contains("4096"));
+    }
+
+    #[test]
+    fn validate_mid_cols_allows_exact_limit() {
+        assert!(validate_mid_cols(MID_MAX_COLS).is_ok());
+    }
 }
