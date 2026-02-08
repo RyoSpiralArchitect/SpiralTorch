@@ -4326,6 +4326,77 @@ impl PyNnModuleTrainer {
     }
 
     #[getter]
+    pub fn curvature(&self) -> f32 {
+        self.inner.curvature()
+    }
+
+    #[getter]
+    pub fn hyper_learning_rate(&self) -> f32 {
+        self.inner.hyper_learning_rate()
+    }
+
+    #[getter]
+    pub fn fallback_learning_rate(&self) -> f32 {
+        self.inner.fallback_learning_rate()
+    }
+
+    #[getter]
+    pub fn real_learning_rate(&self) -> Option<f32> {
+        self.inner.real_learning_rate()
+    }
+
+    pub fn enable_realgrad(&mut self, learning_rate: f32) {
+        self.inner.enable_realgrad(learning_rate);
+    }
+
+    pub fn disable_realgrad(&mut self) {
+        self.inner.disable_realgrad();
+    }
+
+    #[pyo3(signature = (module, *, topos=None))]
+    pub fn prepare(
+        &self,
+        module: &Bound<PyAny>,
+        topos: Option<&PyOpenCartesianTopos>,
+    ) -> PyResult<()> {
+        with_module_mut(module, |module_inner| match topos {
+            Some(topos) => self.inner.prepare_with_topos(module_inner, topos.inner.clone()),
+            None => self.inner.prepare(module_inner),
+        })
+    }
+
+    pub fn zero(&self, module: &Bound<PyAny>) -> PyResult<()> {
+        with_module_mut(module, |module_inner| self.inner.zero(module_inner))
+    }
+
+    pub fn step(&mut self, module: &Bound<PyAny>) -> PyResult<()> {
+        with_module_mut(module, |module_inner| self.inner.step(module_inner))
+    }
+
+    pub fn enable_curvature_scheduler(&mut self, scheduler: &PyCurvatureScheduler) {
+        self.inner
+            .enable_curvature_scheduler(scheduler.inner.clone());
+    }
+
+    pub fn disable_curvature_scheduler(&mut self) {
+        self.inner.disable_curvature_scheduler();
+    }
+
+    pub fn curvature_metrics(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        let metrics = self.inner.curvature_metrics();
+        match metrics {
+            Some(metrics) => {
+                let dict = PyDict::new_bound(py);
+                dict.set_item("raw_pressure", metrics.raw_pressure)?;
+                dict.set_item("smoothed_pressure", metrics.smoothed_pressure)?;
+                dict.set_item("curvature", metrics.curvature)?;
+                Ok(Some(dict.into_py(py)))
+            }
+            None => Ok(None),
+        }
+    }
+
+    #[getter]
     pub fn grad_clip_max_norm(&self) -> Option<f32> {
         self.inner.grad_clip_max_norm()
     }

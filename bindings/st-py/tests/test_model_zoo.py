@@ -59,6 +59,18 @@ def test_find_and_resolve_model_script(stub_spiraltorch, monkeypatch, tmp_path: 
     assert resolved == (scripts / "llm_char_finetune.py").resolve()
 
 
+def test_find_model_supports_contains_match(stub_spiraltorch, monkeypatch, tmp_path: Path):
+    scripts = tmp_path / "models" / "python"
+    scripts.mkdir(parents=True)
+    _write_script(scripts / "my_custom_recipe.py")
+
+    monkeypatch.setenv("SPIRALTORCH_MODEL_ZOO_ROOT", str(tmp_path))
+    model_zoo = _load_model_zoo(stub_spiraltorch, monkeypatch)
+
+    entry = model_zoo.find_model("custom_recipe")
+    assert entry.key == "my_custom_recipe"
+
+
 def test_build_and_run_dry_command(stub_spiraltorch, monkeypatch, tmp_path: Path):
     scripts = tmp_path / "models" / "python"
     scripts.mkdir(parents=True)
@@ -101,3 +113,15 @@ def test_summary_counts_models(stub_spiraltorch, monkeypatch, tmp_path: Path):
     assert summary["count"] == 2
     assert summary["tasks"]["classification"] == 1
     assert summary["tasks"]["regression"] == 1
+
+
+def test_available_only_filters_metadata_only_entries(stub_spiraltorch, monkeypatch):
+    model_zoo = _load_model_zoo(stub_spiraltorch, monkeypatch)
+    monkeypatch.setattr(model_zoo, "_iter_script_paths", lambda *args, **kwargs: [])
+
+    with_missing = model_zoo.list_models()
+    available_only = model_zoo.list_models(available_only=True)
+
+    assert with_missing
+    assert all(entry.script_path is None for entry in with_missing)
+    assert available_only == []

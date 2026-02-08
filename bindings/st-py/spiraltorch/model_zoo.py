@@ -234,6 +234,7 @@ def list_models(
     *,
     root: str | os.PathLike[str] | None = None,
     include_internal: bool = False,
+    available_only: bool = False,
     family: str | None = None,
     task: str | None = None,
     tags: Sequence[str] | None = None,
@@ -272,6 +273,8 @@ def list_models(
             continue
         if required_tags and not required_tags.issubset({tag.lower() for tag in entry.tags}):
             continue
+        if available_only and entry.script_path is None:
+            continue
         entries.append(entry)
 
     return entries
@@ -282,9 +285,14 @@ def find_model(
     *,
     root: str | os.PathLike[str] | None = None,
     include_internal: bool = False,
+    available_only: bool = False,
 ) -> ModelZooEntry:
     target = _normalise_key(name)
-    entries = list_models(root=root, include_internal=include_internal)
+    entries = list_models(
+        root=root,
+        include_internal=include_internal,
+        available_only=available_only,
+    )
     by_key = {entry.key: entry for entry in entries}
     if target in by_key:
         return by_key[target]
@@ -294,6 +302,13 @@ def find_model(
         return candidates[0]
     if len(candidates) > 1:
         labels = ", ".join(entry.key for entry in candidates[:6])
+        raise KeyError(f"model '{name}' is ambiguous; matches: {labels}")
+
+    contains = [entry for entry in entries if target in entry.key]
+    if len(contains) == 1:
+        return contains[0]
+    if len(contains) > 1:
+        labels = ", ".join(entry.key for entry in contains[:6])
         raise KeyError(f"model '{name}' is ambiguous; matches: {labels}")
 
     known = ", ".join(entry.key for entry in entries[:12])
@@ -373,8 +388,13 @@ def model_zoo_summary(
     *,
     root: str | os.PathLike[str] | None = None,
     include_internal: bool = False,
+    available_only: bool = False,
 ) -> dict[str, Any]:
-    entries = list_models(root=root, include_internal=include_internal)
+    entries = list_models(
+        root=root,
+        include_internal=include_internal,
+        available_only=available_only,
+    )
     by_family: dict[str, int] = {}
     by_task: dict[str, int] = {}
 
@@ -400,6 +420,11 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         "--all",
         action="store_true",
         help="Include internal scripts prefixed with underscore",
+    )
+    list_parser.add_argument(
+        "--available-only",
+        action="store_true",
+        help="Show only entries with scripts present on disk",
     )
     list_parser.add_argument("--family", default=None, help="Filter by family")
     list_parser.add_argument("--task", default=None, help="Filter by task")
@@ -441,6 +466,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         entries = list_models(
             root=args.root,
             include_internal=bool(args.all),
+            available_only=bool(args.available_only),
             family=args.family,
             task=args.task,
             tags=args.tag,
