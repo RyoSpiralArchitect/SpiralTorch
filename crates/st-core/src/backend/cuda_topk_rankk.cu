@@ -1,18 +1,14 @@
 // cuda_topk_rankk.cu
-// Rowwise TopK kernels: warp-heap / warp-bitonic (float32).
-// Compile to PTX and load via cust/cudarc. K up to 1024 per row in single pass (extend for larger).
+// Rowwise TopK / BottomK / MidK kernels for CUDA (float32).
 
 #include <cuda_runtime.h>
+#include <cstddef>
 #include <math_constants.h>
 
 extern "C" {
 
 constexpr int WARP_LANES = 32;
-constexpr int BLOCK_WARPS = 4;
-constexpr int THREADS_PER_BLOCK = WARP_LANES * BLOCK_WARPS;
 constexpr int KEEP_PER_THREAD = 8;
-static_assert(THREADS_PER_BLOCK % WARP_LANES == 0, "blockDim.x must be warp-aligned");
-static_assert(BLOCK_WARPS * WARP_LANES == THREADS_PER_BLOCK, "block warp geometry mismatch");
 
 __device__ __forceinline__ int linear_row_index() {
   long long gx = static_cast<long long>(gridDim.x);
@@ -24,425 +20,460 @@ __device__ __forceinline__ int linear_row_index() {
   return static_cast<int>(row);
 }
 
-struct HeapEntry {
-  float value;
-  int column;
-  int slot;
-  int tid;
-};
-
-template <typename Comparator>
-__device__ __forceinline__ bool prefer_entry(
-    const HeapEntry& candidate,
-    const HeapEntry& current,
-    Comparator cmp) {
-  if (candidate.column < 0) {
+__device__ __forceinline__ bool prefer_desc(
+    float cand_v,
+    int cand_i,
+    float best_v,
+    int best_i) {
+  if (cand_i < 0) {
     return false;
   }
-  if (current.column < 0) {
+  if (best_i < 0) {
     return true;
   }
-  if (cmp(candidate.value, current.value)) {
+  if (cand_v > best_v) {
     return true;
   }
-  if (cmp(current.value, candidate.value)) {
+  if (cand_v < best_v) {
     return false;
   }
-  if (candidate.column < current.column) {
-    return true;
-  }
-  if (candidate.column > current.column) {
-    return false;
-  }
-  if (candidate.tid < current.tid) {
-    return true;
-  }
-  if (candidate.tid > current.tid) {
-    return false;
-  }
-  return candidate.slot < current.slot;
+  return cand_i < best_i;
 }
 
-template <typename Comparator>
-__device__ __forceinline__ HeapEntry reduce_warp(HeapEntry entry, Comparator cmp) {
-  unsigned mask = __activemask();
-  int lane = threadIdx.x & (WARP_LANES - 1);
-  for (int offset = WARP_LANES / 2; offset > 0; offset >>= 1) {
-    int src_lane = lane + offset;
-    bool other_active = (src_lane < WARP_LANES) && ((mask >> src_lane) & 1u);
-    float other_value = __shfl_down_sync(mask, entry.value, offset);
-    int other_col = __shfl_down_sync(mask, entry.column, offset);
-    int other_slot = __shfl_down_sync(mask, entry.slot, offset);
-    int other_tid = __shfl_down_sync(mask, entry.tid, offset);
-    HeapEntry other{other_value, other_col, other_slot, other_tid};
-    if (other_active && prefer_entry(other, entry, cmp)) {
-      entry = other;
+__device__ __forceinline__ bool prefer_asc(
+    float cand_v,
+    int cand_i,
+    float best_v,
+    int best_i) {
+  if (cand_i < 0) {
+    return false;
+  }
+  if (best_i < 0) {
+    return true;
+  }
+  if (cand_v < best_v) {
+    return true;
+  }
+  if (cand_v > best_v) {
+    return false;
+  }
+  return cand_i < best_i;
+}
+
+__device__ __forceinline__ bool asc_out_of_order(
+    float left_v,
+    int left_i,
+    float right_v,
+    int right_i) {
+  if (left_v > right_v) {
+    return true;
+  }
+  if (left_v < right_v) {
+    return false;
+  }
+  return left_i > right_i;
+}
+
+__device__ __forceinline__ void fill_row_with_nan(
+    int row,
+    int k,
+    float* out_vals,
+    int* out_idx) {
+  if (k <= 0) {
+    return;
+  }
+  size_t out_base = static_cast<size_t>(row) * static_cast<size_t>(k);
+  for (int oi = 0; oi < k; ++oi) {
+    out_vals[out_base + oi] = CUDART_NAN_F;
+    out_idx[out_base + oi] = -1;
+  }
+}
+
+__device__ __forceinline__ void fill_tail_with_nan(
+    int row,
+    int start,
+    int k,
+    float* out_vals,
+    int* out_idx) {
+  if (start >= k) {
+    return;
+  }
+  size_t out_base = static_cast<size_t>(row) * static_cast<size_t>(k);
+  for (int oi = start; oi < k; ++oi) {
+    out_vals[out_base + oi] = CUDART_NAN_F;
+    out_idx[out_base + oi] = -1;
+  }
+}
+
+__device__ __forceinline__ void init_desc(float* vals, int* idx) {
+#pragma unroll
+  for (int i = 0; i < KEEP_PER_THREAD; ++i) {
+    vals[i] = -CUDART_INF_F;
+    idx[i] = -1;
+  }
+}
+
+__device__ __forceinline__ void init_asc(float* vals, int* idx) {
+#pragma unroll
+  for (int i = 0; i < KEEP_PER_THREAD; ++i) {
+    vals[i] = CUDART_INF_F;
+    idx[i] = -1;
+  }
+}
+
+__device__ __forceinline__ void insert_desc(float v, int col, float* vals, int* idx) {
+#pragma unroll
+  for (int pos = 0; pos < KEEP_PER_THREAD; ++pos) {
+    if (prefer_desc(v, col, vals[pos], idx[pos])) {
+      for (int q = KEEP_PER_THREAD - 1; q > pos; --q) {
+        vals[q] = vals[q - 1];
+        idx[q] = idx[q - 1];
+      }
+      vals[pos] = v;
+      idx[pos] = col;
+      return;
     }
   }
-  return entry;
 }
 
-struct GreaterThan {
-  __device__ bool operator()(float lhs, float rhs) const { return lhs > rhs; }
-};
+__device__ __forceinline__ void insert_asc(float v, int col, float* vals, int* idx) {
+#pragma unroll
+  for (int pos = 0; pos < KEEP_PER_THREAD; ++pos) {
+    if (prefer_asc(v, col, vals[pos], idx[pos])) {
+      for (int q = KEEP_PER_THREAD - 1; q > pos; --q) {
+        vals[q] = vals[q - 1];
+        idx[q] = idx[q - 1];
+      }
+      vals[pos] = v;
+      idx[pos] = col;
+      return;
+    }
+  }
+}
 
-struct LessThan {
-  __device__ bool operator()(float lhs, float rhs) const { return lhs < rhs; }
-};
-
-template <typename Comparator>
-struct HeapTraits;
-
-template <>
-struct HeapTraits<GreaterThan> {
-  static __device__ __forceinline__ float sentinel() { return -CUDART_INF_F; }
-};
-
-template <>
-struct HeapTraits<LessThan> {
-  static __device__ __forceinline__ float sentinel() { return CUDART_INF_F; }
-};
-
-template <typename Comparator>
-__device__ __forceinline__ void heap_select_rowwise_kernel_impl(
+__global__ void topk_warp_heap_rowwise_kernel(
     const float* __restrict__ X,
     int rows,
     int cols,
     int k,
     float* __restrict__ out_vals,
-    int* __restrict__ out_idx,
-    float* s_vals,
-    int* s_idx,
-    HeapEntry* warp_entries,
-    HeapEntry* block_choice) {
+    int* __restrict__ out_idx) {
   int row = linear_row_index();
-  if (row >= rows) return;
+  if (row >= rows) {
+    return;
+  }
+  if (k <= 0) {
+    return;
+  }
+
   int tid = threadIdx.x;
   int stride = blockDim.x;
-  if (stride != THREADS_PER_BLOCK) return;
 
-  Comparator cmp;
-  float sentinel = HeapTraits<Comparator>::sentinel();
-
-  if (cols <= 0 || k <= 0) {
-    if (tid == 0 && k > 0) {
-      size_t out_base = static_cast<size_t>(row) * static_cast<size_t>(k);
-      for (int oi = 0; oi < k; ++oi) {
-        out_vals[out_base + oi] = CUDART_NAN_F;
-        out_idx[out_base + oi] = -1;
-      }
+  if (cols <= 0) {
+    if (tid == 0) {
+      fill_row_with_nan(row, k, out_vals, out_idx);
     }
     return;
   }
 
-  float vbuf[KEEP_PER_THREAD];
-  int ibuf[KEEP_PER_THREAD];
-  #pragma unroll
-  for (int i = 0; i < KEEP_PER_THREAD; ++i) {
-    vbuf[i] = sentinel;
-    ibuf[i] = -1;
-  }
+  float local_vals[KEEP_PER_THREAD];
+  int local_idx[KEEP_PER_THREAD];
+  init_desc(local_vals, local_idx);
 
   const float* row_ptr = X + static_cast<size_t>(row) * static_cast<size_t>(cols);
-
   for (int c = tid; c < cols; c += stride) {
-    float v = row_ptr[c];
-    #pragma unroll
-    for (int pos = 0; pos < KEEP_PER_THREAD; ++pos) {
-      if (cmp(v, vbuf[pos]) || (v == vbuf[pos] && (ibuf[pos] < 0 || c < ibuf[pos]))) {
-        for (int q = KEEP_PER_THREAD - 1; q > pos; --q) {
-          vbuf[q] = vbuf[q - 1];
-          ibuf[q] = ibuf[q - 1];
-        }
-        vbuf[pos] = v;
-        ibuf[pos] = c;
-        break;
-      }
-    }
+    insert_desc(row_ptr[c], c, local_vals, local_idx);
   }
+
+  extern __shared__ unsigned char smem[];
+  float* s_vals = reinterpret_cast<float*>(smem);
+  int* s_idx = reinterpret_cast<int*>(s_vals + static_cast<size_t>(stride) * KEEP_PER_THREAD);
 
   int base = tid * KEEP_PER_THREAD;
-  #pragma unroll
+#pragma unroll
   for (int i = 0; i < KEEP_PER_THREAD; ++i) {
-    s_vals[base + i] = vbuf[i];
-    s_idx[base + i] = ibuf[i];
+    s_vals[base + i] = local_vals[i];
+    s_idx[base + i] = local_idx[i];
   }
+  __syncthreads();
 
-  int warp = tid / WARP_LANES;
-  int lane = tid & (WARP_LANES - 1);
+  if (tid == 0) {
+    int take = k < cols ? k : cols;
+    int total = stride * KEEP_PER_THREAD;
+    size_t out_base = static_cast<size_t>(row) * static_cast<size_t>(k);
 
-  int take = k < cols ? k : cols;
+    for (int oi = 0; oi < take; ++oi) {
+      float best_v = -CUDART_INF_F;
+      int best_i = -1;
+      int best_slot = -1;
 
-  for (int oi = 0; oi < take; ++oi) {
-    HeapEntry thread_best{sentinel, -1, -1, -1};
-    #pragma unroll
-    for (int s = 0; s < KEEP_PER_THREAD; ++s) {
-      HeapEntry candidate{s_vals[base + s], s_idx[base + s], s, tid};
-      if (prefer_entry(candidate, thread_best, cmp)) {
-        thread_best = candidate;
+      for (int slot = 0; slot < total; ++slot) {
+        float cand_v = s_vals[slot];
+        int cand_i = s_idx[slot];
+        if (prefer_desc(cand_v, cand_i, best_v, best_i)) {
+          best_v = cand_v;
+          best_i = cand_i;
+          best_slot = slot;
+        }
       }
-    }
 
-    HeapEntry entry = reduce_warp(thread_best, cmp);
-    if (lane == 0) {
-      warp_entries[warp] = entry;
-    }
-    __syncthreads();
-
-    if (warp == 0) {
-      HeapEntry block_entry;
-      if (lane < BLOCK_WARPS) {
-        block_entry = warp_entries[lane];
+      if (best_slot >= 0) {
+        out_vals[out_base + oi] = best_v;
+        out_idx[out_base + oi] = best_i;
+        s_vals[best_slot] = -CUDART_INF_F;
+        s_idx[best_slot] = -1;
       } else {
-        block_entry = HeapEntry{sentinel, -1, -1, -1};
-      }
-      block_entry = reduce_warp(block_entry, cmp);
-      if (lane == 0) {
-        *block_choice = block_entry;
+        out_vals[out_base + oi] = CUDART_NAN_F;
+        out_idx[out_base + oi] = -1;
       }
     }
-    __syncthreads();
 
-    HeapEntry chosen = *block_choice;
-    if (tid == chosen.tid && chosen.slot >= 0) {
-      s_vals[base + chosen.slot] = sentinel;
-      s_idx[base + chosen.slot] = -1;
-    }
-    if (tid == 0) {
-      size_t out_base = static_cast<size_t>(row) * static_cast<size_t>(k);
-      out_vals[out_base + oi] = chosen.value;
-      out_idx[out_base + oi] = chosen.column;
-    }
-    __syncthreads();
+    fill_tail_with_nan(row, take, k, out_vals, out_idx);
   }
-
-  if (tid == 0 && take < k) {
-    size_t out_base = static_cast<size_t>(row) * static_cast<size_t>(k);
-    for (int oi = take; oi < k; ++oi) {
-      out_vals[out_base + oi] = CUDART_NAN_F;
-      out_idx[out_base + oi] = -1;
-    }
-
-    HeapEntry entry = reduce_warp(thread_best, cmp);
-    if (lane == 0) {
-      warp_entries[warp] = entry;
-    }
-    __syncthreads();
-
-    if (warp == 0) {
-      HeapEntry block_entry;
-      if (lane < BLOCK_WARPS) {
-        block_entry = warp_entries[lane];
-      } else {
-        block_entry = HeapEntry{sentinel, -1, -1, -1};
-      }
-      block_entry = reduce_warp(block_entry, cmp);
-      if (lane == 0) {
-        *block_choice = block_entry;
-      }
-    }
-    __syncthreads();
-
-    HeapEntry chosen = *block_choice;
-    if (tid == chosen.tid && chosen.slot >= 0) {
-      s_vals[base + chosen.slot] = sentinel;
-      s_idx[base + chosen.slot] = -1;
-    }
-    if (tid == 0) {
-      size_t out_base = static_cast<size_t>(row) * static_cast<size_t>(k);
-      out_vals[out_base + oi] = chosen.value;
-      out_idx[out_base + oi] = chosen.column;
-    }
-    __syncthreads();
-  }
-
-  if (tid == 0 && take < k) {
-    size_t out_base = static_cast<size_t>(row) * static_cast<size_t>(k);
-    for (int oi = take; oi < k; ++oi) {
-      out_vals[out_base + oi] = CUDART_NAN_F;
-      out_idx[out_base + oi] = -1;
-    }
-    __syncthreads();
-
-    HeapEntry chosen = *block_choice;
-    if (tid == chosen.tid && chosen.slot >= 0) {
-      s_vals[base + chosen.slot] = sentinel;
-      s_idx[base + chosen.slot] = -1;
-    }
-    if (tid == 0) {
-      size_t out_base = static_cast<size_t>(row) * static_cast<size_t>(k);
-      out_vals[out_base + oi] = chosen.value;
-      out_idx[out_base + oi] = chosen.column;
-    }
-    __syncthreads();
-  }
-
-  if (tid == 0 && take < k) {
-    size_t out_base = static_cast<size_t>(row) * static_cast<size_t>(k);
-    for (int oi = take; oi < k; ++oi) {
-      out_vals[out_base + oi] = CUDART_NAN_F;
-      out_idx[out_base + oi] = -1;
-    }
-    __syncthreads();
-  }
-}
-
-__global__ void topk_warp_heap_rowwise_kernel(
-    const float* __restrict__ X, int rows, int cols, int k,
-    float* __restrict__ out_vals, int* __restrict__ out_idx)
-{
-  extern __shared__ unsigned char smem[];
-  float* s_vals = (float*)smem;
-  int* s_idx = (int*)(s_vals + blockDim.x * KEEP_PER_THREAD);
-  __shared__ HeapEntry warp_entries[BLOCK_WARPS];
-  __shared__ HeapEntry block_choice;
-  heap_select_rowwise_kernel_impl<GreaterThan>(
-      X, rows, cols, k, out_vals, out_idx, s_vals, s_idx, warp_entries, &block_choice);
 }
 
 __global__ void bottomk_warp_heap_rowwise_kernel(
-    const float* __restrict__ X, int rows, int cols, int k,
-    float* __restrict__ out_vals, int* __restrict__ out_idx)
-{
-  extern __shared__ unsigned char smem[];
-  float* s_vals = (float*)smem;
-  int* s_idx = (int*)(s_vals + blockDim.x * KEEP_PER_THREAD);
-  __shared__ HeapEntry warp_entries[BLOCK_WARPS];
-  __shared__ HeapEntry block_choice;
-  heap_select_rowwise_kernel_impl<LessThan>(
-      X, rows, cols, k, out_vals, out_idx, s_vals, s_idx, warp_entries, &block_choice);
-}
+    const float* __restrict__ X,
+    int rows,
+    int cols,
+    int k,
+    float* __restrict__ out_vals,
+    int* __restrict__ out_idx) {
+  int row = linear_row_index();
+  if (row >= rows) {
+    return;
+  }
+  if (k <= 0) {
+    return;
+  }
 
-__global__ void topk_warp_heap_rowwise_kernel(
-    const float* __restrict__ X, int rows, int cols, int k,
-    float* __restrict__ out_vals, int* __restrict__ out_idx)
-{
-  extern __shared__ unsigned char smem[];
-  float* s_vals = (float*)smem;
-  int* s_idx = (int*)(s_vals + blockDim.x * KEEP_PER_THREAD);
-  __shared__ HeapEntry warp_entries[BLOCK_WARPS];
-  __shared__ HeapEntry block_choice;
-  heap_select_rowwise_kernel_impl<GreaterThan>(
-      X, rows, cols, k, out_vals, out_idx, s_vals, s_idx, warp_entries, &block_choice);
-}
+  int tid = threadIdx.x;
+  int stride = blockDim.x;
 
-__global__ void bottomk_warp_heap_rowwise_kernel(
-    const float* __restrict__ X, int rows, int cols, int k,
-    float* __restrict__ out_vals, int* __restrict__ out_idx)
-{
+  if (cols <= 0) {
+    if (tid == 0) {
+      fill_row_with_nan(row, k, out_vals, out_idx);
+    }
+    return;
+  }
+
+  float local_vals[KEEP_PER_THREAD];
+  int local_idx[KEEP_PER_THREAD];
+  init_asc(local_vals, local_idx);
+
+  const float* row_ptr = X + static_cast<size_t>(row) * static_cast<size_t>(cols);
+  for (int c = tid; c < cols; c += stride) {
+    insert_asc(row_ptr[c], c, local_vals, local_idx);
+  }
+
   extern __shared__ unsigned char smem[];
-  float* s_vals = (float*)smem;
-  int* s_idx = (int*)(s_vals + blockDim.x * KEEP_PER_THREAD);
-  __shared__ HeapEntry warp_entries[BLOCK_WARPS];
-  __shared__ HeapEntry block_choice;
-  heap_select_rowwise_kernel_impl<LessThan>(
-      X, rows, cols, k, out_vals, out_idx, s_vals, s_idx, warp_entries, &block_choice);
+  float* s_vals = reinterpret_cast<float*>(smem);
+  int* s_idx = reinterpret_cast<int*>(s_vals + static_cast<size_t>(stride) * KEEP_PER_THREAD);
+
+  int base = tid * KEEP_PER_THREAD;
+#pragma unroll
+  for (int i = 0; i < KEEP_PER_THREAD; ++i) {
+    s_vals[base + i] = local_vals[i];
+    s_idx[base + i] = local_idx[i];
+  }
+  __syncthreads();
+
+  if (tid == 0) {
+    int take = k < cols ? k : cols;
+    int total = stride * KEEP_PER_THREAD;
+    size_t out_base = static_cast<size_t>(row) * static_cast<size_t>(k);
+
+    for (int oi = 0; oi < take; ++oi) {
+      float best_v = CUDART_INF_F;
+      int best_i = -1;
+      int best_slot = -1;
+
+      for (int slot = 0; slot < total; ++slot) {
+        float cand_v = s_vals[slot];
+        int cand_i = s_idx[slot];
+        if (prefer_asc(cand_v, cand_i, best_v, best_i)) {
+          best_v = cand_v;
+          best_i = cand_i;
+          best_slot = slot;
+        }
+      }
+
+      if (best_slot >= 0) {
+        out_vals[out_base + oi] = best_v;
+        out_idx[out_base + oi] = best_i;
+        s_vals[best_slot] = CUDART_INF_F;
+        s_idx[best_slot] = -1;
+      } else {
+        out_vals[out_base + oi] = CUDART_NAN_F;
+        out_idx[out_base + oi] = -1;
+      }
+    }
+
+    fill_tail_with_nan(row, take, k, out_vals, out_idx);
+  }
 }
 
 __global__ void topk_warp_bitonic_rowwise_kernel(
-    const float* __restrict__ X, int rows, int cols, int k,
-    float* __restrict__ out_vals, int* __restrict__ out_idx)
-{
+    const float* __restrict__ X,
+    int rows,
+    int cols,
+    int k,
+    float* __restrict__ out_vals,
+    int* __restrict__ out_idx) {
   int row = linear_row_index();
-  if (row >= rows) return;
-  if (k <= 0) return;
+  if (row >= rows || k <= 0) {
+    return;
+  }
 
-  unsigned mask = __activemask();
   int lane = threadIdx.x & (WARP_LANES - 1);
-  const float* row_ptr = X + static_cast<size_t>(row) * static_cast<size_t>(cols);
+  unsigned mask = __activemask();
 
   if (cols <= 0) {
     if (lane == 0) {
-      size_t out_base = static_cast<size_t>(row) * static_cast<size_t>(k);
-      for (int oi = 0; oi < k; ++oi) {
-        out_vals[out_base + oi] = CUDART_NAN_F;
-        out_idx[out_base + oi] = -1;
-      }
+      fill_row_with_nan(row, k, out_vals, out_idx);
     }
     return;
   }
 
+  const float* row_ptr = X + static_cast<size_t>(row) * static_cast<size_t>(cols);
   float best = -CUDART_INF_F;
-  int bestc = -1;
+  int best_idx = -1;
+
   for (int c = lane; c < cols; c += WARP_LANES) {
     float v = row_ptr[c];
-    if (v > best || (v == best && (bestc < 0 || c < bestc))) {
+    if (prefer_desc(v, c, best, best_idx)) {
       best = v;
-      bestc = c;
+      best_idx = c;
     }
   }
 
   for (int offset = WARP_LANES / 2; offset > 0; offset >>= 1) {
-    float ov = __shfl_down_sync(mask, best, offset);
-    int oc = __shfl_down_sync(mask, bestc, offset);
-    if (ov > best || (ov == best && (oc >= 0 && (bestc < 0 || oc < bestc)))) {
-      best = ov;
-      bestc = oc;
+    float other_v = __shfl_down_sync(mask, best, offset);
+    int other_i = __shfl_down_sync(mask, best_idx, offset);
+    if (prefer_desc(other_v, other_i, best, best_idx)) {
+      best = other_v;
+      best_idx = other_i;
     }
   }
 
   if (lane == 0) {
     size_t out_base = static_cast<size_t>(row) * static_cast<size_t>(k);
-    out_vals[out_base + 0] = best;
-    out_idx[out_base + 0] = bestc;
-    for (int oi = 1; oi < k; ++oi) {
-      out_vals[out_base + oi] = CUDART_NAN_F;
-      out_idx[out_base + oi] = -1;
-    }
+    out_vals[out_base] = best;
+    out_idx[out_base] = best_idx;
+    fill_tail_with_nan(row, 1, k, out_vals, out_idx);
   }
 }
 
 __global__ void bottomk_warp_bitonic_rowwise_kernel(
-    const float* __restrict__ X, int rows, int cols, int k,
-    float* __restrict__ out_vals, int* __restrict__ out_idx)
-{
+    const float* __restrict__ X,
+    int rows,
+    int cols,
+    int k,
+    float* __restrict__ out_vals,
+    int* __restrict__ out_idx) {
   int row = linear_row_index();
-  if (row >= rows) return;
-  if (k <= 0) return;
+  if (row >= rows || k <= 0) {
+    return;
+  }
 
-  unsigned mask = __activemask();
   int lane = threadIdx.x & (WARP_LANES - 1);
-  const float* row_ptr = X + static_cast<size_t>(row) * static_cast<size_t>(cols);
+  unsigned mask = __activemask();
 
   if (cols <= 0) {
     if (lane == 0) {
-      size_t out_base = static_cast<size_t>(row) * static_cast<size_t>(k);
-      for (int oi = 0; oi < k; ++oi) {
-        out_vals[out_base + oi] = CUDART_NAN_F;
-        out_idx[out_base + oi] = -1;
-      }
+      fill_row_with_nan(row, k, out_vals, out_idx);
     }
     return;
   }
 
+  const float* row_ptr = X + static_cast<size_t>(row) * static_cast<size_t>(cols);
   float best = CUDART_INF_F;
-  int bestc = -1;
+  int best_idx = -1;
+
   for (int c = lane; c < cols; c += WARP_LANES) {
     float v = row_ptr[c];
-    if (v < best || (v == best && (bestc < 0 || c < bestc))) {
+    if (prefer_asc(v, c, best, best_idx)) {
       best = v;
-      bestc = c;
+      best_idx = c;
     }
   }
 
   for (int offset = WARP_LANES / 2; offset > 0; offset >>= 1) {
-    float ov = __shfl_down_sync(mask, best, offset);
-    int oc = __shfl_down_sync(mask, bestc, offset);
-    if (ov < best || (ov == best && (oc >= 0 && (bestc < 0 || oc < bestc)))) {
-      best = ov;
-      bestc = oc;
+    float other_v = __shfl_down_sync(mask, best, offset);
+    int other_i = __shfl_down_sync(mask, best_idx, offset);
+    if (prefer_asc(other_v, other_i, best, best_idx)) {
+      best = other_v;
+      best_idx = other_i;
     }
   }
 
   if (lane == 0) {
     size_t out_base = static_cast<size_t>(row) * static_cast<size_t>(k);
-    out_vals[out_base + 0] = best;
-    out_idx[out_base + 0] = bestc;
-    for (int oi = 1; oi < k; ++oi) {
-      out_vals[out_base + oi] = CUDART_NAN_F;
-      out_idx[out_base + oi] = -1;
-    }
+    out_vals[out_base] = best;
+    out_idx[out_base] = best_idx;
+    fill_tail_with_nan(row, 1, k, out_vals, out_idx);
   }
 }
 
-} // extern "C"
+__global__ void midk_shared_odd_even_rowwise_kernel(
+    const float* __restrict__ X,
+    int rows,
+    int cols,
+    int k,
+    float* __restrict__ out_vals,
+    int* __restrict__ out_idx) {
+  int row = linear_row_index();
+  if (row >= rows || k <= 0) {
+    return;
+  }
+
+  int tid = threadIdx.x;
+
+  if (cols <= 0) {
+    if (tid == 0) {
+      fill_row_with_nan(row, k, out_vals, out_idx);
+    }
+    return;
+  }
+
+  extern __shared__ unsigned char smem[];
+  float* s_vals = reinterpret_cast<float*>(smem);
+  int* s_idx = reinterpret_cast<int*>(s_vals + cols);
+
+  const float* row_ptr = X + static_cast<size_t>(row) * static_cast<size_t>(cols);
+  for (int c = tid; c < cols; c += blockDim.x) {
+    s_vals[c] = row_ptr[c];
+    s_idx[c] = c;
+  }
+  __syncthreads();
+
+  for (int phase = 0; phase < cols; ++phase) {
+    int start = phase & 1;
+    for (int c = start + 2 * tid; c + 1 < cols; c += 2 * blockDim.x) {
+      float left_v = s_vals[c];
+      int left_i = s_idx[c];
+      float right_v = s_vals[c + 1];
+      int right_i = s_idx[c + 1];
+      if (asc_out_of_order(left_v, left_i, right_v, right_i)) {
+        s_vals[c] = right_v;
+        s_vals[c + 1] = left_v;
+        s_idx[c] = right_i;
+        s_idx[c + 1] = left_i;
+      }
+    }
+    __syncthreads();
+  }
+
+  if (tid == 0) {
+    int take = k < cols ? k : cols;
+    int start = (cols - take) / 2;
+    size_t out_base = static_cast<size_t>(row) * static_cast<size_t>(k);
+    for (int oi = 0; oi < take; ++oi) {
+      out_vals[out_base + oi] = s_vals[start + oi];
+      out_idx[out_base + oi] = s_idx[start + oi];
+    }
+    fill_tail_with_nan(row, take, k, out_vals, out_idx);
+  }
+}
+
+}  // extern "C"

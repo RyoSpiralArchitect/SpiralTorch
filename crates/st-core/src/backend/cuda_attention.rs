@@ -6,7 +6,7 @@
 #![cfg(feature = "cuda")]
 
 use crate::backend::cuda_loader::{self, CudaModule};
-use cudarc::driver::{LaunchAsync, LaunchConfig};
+use cudarc::driver::{DeviceRepr, LaunchAsync, LaunchConfig};
 use cudarc::nvrtc::compile_ptx;
 use std::convert::TryFrom;
 use std::sync::OnceLock;
@@ -218,7 +218,7 @@ pub fn run_attention(cfg: AttentionConfig, slices: AttentionSlices<'_>) -> Resul
         attn_bias,
         attn_probs,
         mut attn_logits,
-        output,
+        output: output_host,
     } = slices.validate(&cfg)?;
 
     let contexts = cfg.contexts();
@@ -237,8 +237,8 @@ pub fn run_attention(cfg: AttentionConfig, slices: AttentionSlices<'_>) -> Resul
     let values = device
         .htod_sync_copy(values)
         .map_err(|err| err.to_string())?;
-    let mut output = device
-        .alloc_zeros::<f32>(output.len())
+    let mut output_device = device
+        .alloc_zeros::<f32>(output_host.len())
         .map_err(|err| err.to_string())?;
 
     let use_z_bias = z_bias.is_some();
@@ -311,39 +311,47 @@ pub fn run_attention(cfg: AttentionConfig, slices: AttentionSlices<'_>) -> Resul
 
     let contexts_i32 =
         i32::try_from(contexts).map_err(|_| "attention contexts exceed i32::MAX".to_string())?;
+    let seq_len_i32 = cfg.sequence_len as i32;
+    let head_dim_i32 = cfg.head_dim as i32;
+    let scale = cfg.scale();
+    let use_z_bias_i32 = if use_z_bias { 1 } else { 0 };
+    let use_context_lengths_i32 = if use_context_lengths { 1 } else { 0 };
+    let use_attn_bias_i32 = if use_attn_bias { 1 } else { 0 };
+    let causal_i32 = if cfg.causal { 1 } else { 0 };
+    let use_attn_probs_i32 = if use_attn_probs { 1 } else { 0 };
+    let use_attn_logits_i32 = if use_attn_logits { 1 } else { 0 };
+
+    let mut params = vec![
+        (&queries).as_kernel_param(),
+        (&keys).as_kernel_param(),
+        (&values).as_kernel_param(),
+        (&context_lengths).as_kernel_param(),
+        (&z_bias).as_kernel_param(),
+        (&attn_bias).as_kernel_param(),
+        (&mut attn_probs_device).as_kernel_param(),
+        (&mut attn_logits_device).as_kernel_param(),
+        (&mut output_device).as_kernel_param(),
+        contexts_i32.as_kernel_param(),
+        seq_len_i32.as_kernel_param(),
+        head_dim_i32.as_kernel_param(),
+        scale.as_kernel_param(),
+        use_z_bias_i32.as_kernel_param(),
+        use_context_lengths_i32.as_kernel_param(),
+        use_attn_bias_i32.as_kernel_param(),
+        causal_i32.as_kernel_param(),
+        use_attn_probs_i32.as_kernel_param(),
+        use_attn_logits_i32.as_kernel_param(),
+    ];
 
     unsafe {
-        func.launch(
-            cfg_launch,
-            (
-                &queries,
-                &keys,
-                &values,
-                &context_lengths,
-                &z_bias,
-                &attn_bias,
-                &mut attn_probs_device,
-                &mut attn_logits_device,
-                &mut output,
-                contexts_i32,
-                cfg.sequence_len as i32,
-                cfg.head_dim as i32,
-                cfg.scale(),
-                use_z_bias as i32,
-                use_context_lengths as i32,
-                use_attn_bias as i32,
-                cfg.causal as i32,
-                use_attn_probs as i32,
-                use_attn_logits as i32,
-            ),
-        )
-        .map_err(|err| err.to_string())?;
+        func.launch(cfg_launch, &mut params)
+            .map_err(|err| err.to_string())?;
     }
 
     let host_output: Vec<f32> = device
-        .dtoh_sync_copy(&output)
+        .dtoh_sync_copy(&output_device)
         .map_err(|err| err.to_string())?;
-    output.copy_from_slice(&host_output);
+    output_host.copy_from_slice(&host_output);
 
     if let Some(probs) = attn_probs.as_deref_mut() {
         let host_probs: Vec<f32> = device
@@ -363,9 +371,23 @@ pub fn run_attention(cfg: AttentionConfig, slices: AttentionSlices<'_>) -> Resul
 }
 
 fn cuda_module() -> Result<&'static CudaModule, String> {
-    let ptx =
-        COMPILED_PTX.get_or_try_init(|| compile_ptx(CUDA_SOURCE).map_err(|err| err.to_string()))?;
-    CUDA_MODULE.get_or_try_init(|| cuda_loader::load_ptx_module(ptx, MODULE_NAME, MODULE_KERNELS))
+    if let Some(module) = CUDA_MODULE.get() {
+        return Ok(module);
+    }
+
+    if COMPILED_PTX.get().is_none() {
+        let compiled = compile_ptx(CUDA_SOURCE).map_err(|err| err.to_string())?;
+        let _ = COMPILED_PTX.set(compiled);
+    }
+    let ptx = COMPILED_PTX
+        .get()
+        .ok_or_else(|| "failed to initialize CUDA PTX cache".to_string())?;
+
+    let module = cuda_loader::load_ptx_module(ptx, MODULE_NAME, MODULE_KERNELS)?;
+    let _ = CUDA_MODULE.set(module);
+    CUDA_MODULE
+        .get()
+        .ok_or_else(|| "failed to initialize CUDA module cache".to_string())
 }
 
 fn shared_mem_for_sequence(seq_len: usize) -> Result<u32, String> {
@@ -415,7 +437,7 @@ fn grid_for_contexts(sequence_len: u32, contexts: usize) -> Result<(u32, u32, u3
     if z_needed > MAX_GRID_Z {
         return Err("attention contexts exceed CUDA grid capacity".to_string());
     }
-    Ok((sequence_len, MAX_GRID_YZ, z_needed as u32));
+    Ok((sequence_len, MAX_GRID_YZ, z_needed as u32))
 }
 
 #[cfg(test)]

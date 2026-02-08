@@ -43,7 +43,7 @@ pub fn default_nvrtc_options<'a>() -> NvrtcOptions<'a> {
 
 /// Compile CUDA source to PTX with NVRTC (実体はリポの FFI に繋いでください)
 pub fn st_compile_with_nvrtc(src: &str, opts: &NvrtcOptions) -> Result<String, StCudaNvrtcError> {
-    #[cfg(feature = "nvrtc")]
+    #[cfg(feature = "cuda")]
     {
         let mut flags = vec![
             format!("--gpu-architecture={}", opts.arch),
@@ -62,13 +62,13 @@ pub fn st_compile_with_nvrtc(src: &str, opts: &NvrtcOptions) -> Result<String, S
         }
         Ok(ptx)
     }
-    #[cfg(not(feature = "nvrtc"))]
+    #[cfg(not(feature = "cuda"))]
     {
         Err(StCudaNvrtcError::NvrtcUnavailable)
     }
 }
 
-#[cfg(feature = "nvrtc")]
+#[cfg(feature = "cuda")]
 fn nvrtc_compile_shim(_src: &str, _flags: &[String]) -> Result<String, String> {
     // 実環境ではここを既存の NVRTC FFI 呼び出しに置換
     Err("nvrtc shim not wired".into())
@@ -93,7 +93,7 @@ impl CudaModule {
         &self.module_name
     }
 
-    pub fn get_func(&self, func_name: &'static str) -> Result<Arc<CudaFunction>, String> {
+    pub fn get_func(&self, func_name: &'static str) -> Result<CudaFunction, String> {
         let state = self
             .entry
             .state
@@ -111,7 +111,7 @@ impl CudaModule {
 
 #[cfg(feature = "cuda")]
 struct ModuleState {
-    functions: HashMap<&'static str, Arc<CudaFunction>>,
+    functions: HashMap<&'static str, CudaFunction>,
 }
 
 #[cfg(feature = "cuda")]
@@ -144,9 +144,13 @@ static MODULES: OnceLock<Mutex<HashMap<&'static str, Arc<ModuleEntry>>>> = OnceL
 
 #[cfg(feature = "cuda")]
 fn global_device() -> Result<Arc<CudaDevice>, String> {
-    DEVICE
-        .get_or_try_init(|| CudaDevice::new(0).map_err(|err| err.to_string()))
-        .map(Arc::clone)
+    if let Some(device) = DEVICE.get() {
+        return Ok(Arc::clone(device));
+    }
+
+    let created = Arc::new(CudaDevice::new(0).map_err(|err| err.to_string())?);
+    let _ = DEVICE.set(Arc::clone(&created));
+    Ok(Arc::clone(DEVICE.get().unwrap_or(&created)))
 }
 
 #[cfg(feature = "cuda")]
@@ -172,43 +176,38 @@ pub fn load_ptx_module(
             .clone()
     };
 
-    let mut state = entry
-        .state
-        .lock()
-        .map_err(|_| "cuda module state poisoned".to_string())?;
-
-    if functions
-        .iter()
-        .all(|name| state.functions.contains_key(name))
     {
-        drop(state);
-        return Ok(CudaModule {
-            device,
-            module_name,
-            entry,
-        });
-    }
+        let mut state = entry
+            .state
+            .lock()
+            .map_err(|_| "cuda module state poisoned".to_string())?;
 
-    let mut requested: Vec<&'static str> = functions.iter().copied().collect();
-    requested.sort_unstable();
-    requested.dedup();
+        if !functions
+            .iter()
+            .all(|name| state.functions.contains_key(name))
+        {
+            let mut requested: Vec<&'static str> = functions.iter().copied().collect();
+            requested.sort_unstable();
+            requested.dedup();
 
-    let mut union: Vec<&'static str> = state.functions.keys().copied().collect();
-    union.extend(requested);
-    union.sort_unstable();
-    union.dedup();
+            let mut union: Vec<&'static str> = state.functions.keys().copied().collect();
+            union.extend(requested);
+            union.sort_unstable();
+            union.dedup();
 
-    device
-        .load_ptx(ptx.clone(), module_name, &union)
-        .map_err(|err| err.to_string())?;
+            device
+                .load_ptx(ptx.clone(), module_name, &union)
+                .map_err(|err| err.to_string())?;
 
-    state.functions.clear();
+            state.functions.clear();
 
-    for &name in &union {
-        let func = device.get_func(module_name, name).ok_or_else(|| {
-            format!("cuda function `{name}` not registered in module `{module_name}`")
-        })?;
-        state.functions.insert(name, Arc::new(func));
+            for &name in &union {
+                let func = device.get_func(module_name, name).ok_or_else(|| {
+                    format!("cuda function `{name}` not registered in module `{module_name}`")
+                })?;
+                state.functions.insert(name, func);
+            }
+        }
     }
 
     Ok(CudaModule {

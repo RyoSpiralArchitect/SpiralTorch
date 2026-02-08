@@ -7,7 +7,7 @@
 
 use crate::backend::cuda_loader::{self, CudaModule};
 use crate::backend::rankk_launch::LaunchSlices;
-use crate::backend::rankk_software::{run_selection as run_software_selection, Selection};
+use crate::backend::rankk_software::Selection;
 use crate::ops::rank_entry::RankPlan;
 use cudarc::driver::{LaunchAsync, LaunchConfig};
 use cudarc::nvrtc::compile_ptx;
@@ -17,11 +17,13 @@ use std::sync::OnceLock;
 const MODULE_NAME: &str = "spiraltorch_rankk";
 const TOPK_KERNEL: &str = "topk_warp_heap_rowwise_kernel";
 const BOTTOMK_KERNEL: &str = "bottomk_warp_heap_rowwise_kernel";
+const MIDK_KERNEL: &str = "midk_shared_odd_even_rowwise_kernel";
 const TOP_BITONIC_KERNEL: &str = "topk_warp_bitonic_rowwise_kernel";
 const BOTTOM_BITONIC_KERNEL: &str = "bottomk_warp_bitonic_rowwise_kernel";
 const MODULE_KERNELS: &[&str] = &[
     TOPK_KERNEL,
     BOTTOMK_KERNEL,
+    MIDK_KERNEL,
     TOP_BITONIC_KERNEL,
     BOTTOM_BITONIC_KERNEL,
 ];
@@ -31,13 +33,13 @@ const BLOCK_WARPS: usize = 4;
 const THREADS_PER_BLOCK: usize = WARP_LANES * BLOCK_WARPS;
 const PER_THREAD_KEEP: usize = 8;
 const SUPPORTED_K: usize = THREADS_PER_BLOCK * PER_THREAD_KEEP;
+const MID_THREADS_PER_BLOCK: u32 = 256;
+const MID_MAX_COLS: u32 = 4096;
 
 static COMPILED_PTX: OnceLock<cudarc::nvrtc::Ptx> = OnceLock::new();
 static CUDA_MODULE: OnceLock<CudaModule> = OnceLock::new();
 
 /// Attempt to execute the CUDA kernels for the requested selection.
-/// `Mid` is delegated to the software reference path until a dedicated CUDA
-/// kernel lands, so callers no longer need to treat it as an error case.
 pub fn run_selection(
     selection: Selection,
     plan: &RankPlan,
@@ -58,13 +60,13 @@ pub fn run_selection(
         }
         Selection::Top => launch_heap_kernel(plan, buffers, TOPK_KERNEL),
         Selection::Bottom => launch_heap_kernel(plan, buffers, BOTTOMK_KERNEL),
-        Selection::Mid => run_software_selection(Selection::Mid, plan, buffers),
+        Selection::Mid => launch_midk_kernel(plan, buffers),
     }
 }
 
 fn launch_heap_kernel(
     plan: &RankPlan,
-    mut buffers: LaunchSlices<'_>,
+    buffers: LaunchSlices<'_>,
     kernel_name: &'static str,
 ) -> Result<(), String> {
     launch_cuda_kernel(
@@ -85,9 +87,26 @@ fn launch_bitonic_kernel(
     launch_cuda_kernel(plan, buffers, kernel, (WARP_LANES as u32, 1, 1), 0, Some(1))
 }
 
+fn launch_midk_kernel(plan: &RankPlan, buffers: LaunchSlices<'_>) -> Result<(), String> {
+    if plan.cols > MID_MAX_COLS {
+        return Err(format!(
+            "cuda midk kernel supports cols ≤ {MID_MAX_COLS}, received {}",
+            plan.cols
+        ));
+    }
+    launch_cuda_kernel(
+        plan,
+        buffers,
+        MIDK_KERNEL,
+        (MID_THREADS_PER_BLOCK, 1, 1),
+        mid_shared_bytes(plan.cols)?,
+        None,
+    )
+}
+
 fn launch_cuda_kernel(
     plan: &RankPlan,
-    mut buffers: LaunchSlices<'_>,
+    buffers: LaunchSlices<'_>,
     kernel_name: &'static str,
     block_dim: (u32, u32, u32),
     shared_mem_bytes: u32,
@@ -157,9 +176,23 @@ fn launch_cuda_kernel(
 }
 
 fn cuda_module() -> Result<&'static CudaModule, String> {
-    let ptx =
-        COMPILED_PTX.get_or_try_init(|| compile_ptx(CUDA_SOURCE).map_err(|err| err.to_string()))?;
-    CUDA_MODULE.get_or_try_init(|| cuda_loader::load_ptx_module(ptx, MODULE_NAME, MODULE_KERNELS))
+    if let Some(module) = CUDA_MODULE.get() {
+        return Ok(module);
+    }
+
+    if COMPILED_PTX.get().is_none() {
+        let compiled = compile_ptx(CUDA_SOURCE).map_err(|err| err.to_string())?;
+        let _ = COMPILED_PTX.set(compiled);
+    }
+    let ptx = COMPILED_PTX
+        .get()
+        .ok_or_else(|| "failed to initialize CUDA PTX cache".to_string())?;
+
+    let module = cuda_loader::load_ptx_module(ptx, MODULE_NAME, MODULE_KERNELS)?;
+    let _ = CUDA_MODULE.set(module);
+    CUDA_MODULE
+        .get()
+        .ok_or_else(|| "failed to initialize CUDA module cache".to_string())
 }
 
 fn fill_empty_columns(buffers: &mut LaunchSlices<'_>) {
@@ -206,4 +239,12 @@ fn grid_for_rows(rows: u32) -> (u32, u32, u32) {
 fn heap_shared_bytes() -> u32 {
     (THREADS_PER_BLOCK * PER_THREAD_KEEP * std::mem::size_of::<f32>()
         + THREADS_PER_BLOCK * PER_THREAD_KEEP * std::mem::size_of::<i32>()) as u32
+}
+
+fn mid_shared_bytes(cols: u32) -> Result<u32, String> {
+    let cols = cols as usize;
+    let bytes = cols
+        .checked_mul(std::mem::size_of::<f32>() + std::mem::size_of::<i32>())
+        .ok_or_else(|| "cuda midk shared memory size overflow".to_string())?;
+    u32::try_from(bytes).map_err(|_| "cuda midk shared memory exceeds u32 limit".to_string())
 }
