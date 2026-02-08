@@ -480,6 +480,230 @@ impl PyCurvatureScheduler {
 }
 
 #[cfg(feature = "nn")]
+#[pyclass(
+    module = "spiraltorch.nn",
+    name = "SpectralLearningRatePolicy",
+    unsendable
+)]
+pub(crate) struct PySpectralLearningRatePolicy {
+    inner: RustSpectralLearningRatePolicy,
+}
+
+#[cfg(feature = "nn")]
+impl PySpectralLearningRatePolicy {
+    fn configure(
+        mut inner: RustSpectralLearningRatePolicy,
+        smoothing: Option<f32>,
+        event_smoothing: Option<f32>,
+        turnover_smoothing: Option<f32>,
+        phase_gain: Option<f32>,
+        stuck_phase_gain: Option<f32>,
+        stuck_turnover_threshold: Option<f32>,
+        coherence_gain: Option<f32>,
+        sheet_gain: Option<f32>,
+        spin_gain: Option<f32>,
+        radius_gain: Option<f32>,
+        energy_gain: Option<f32>,
+        lr_bounds: Option<(f32, f32)>,
+        band_bounds: Option<(f32, f32)>,
+        max_lr_step: Option<f32>,
+        env_overrides: bool,
+    ) -> RustSpectralLearningRatePolicy {
+        if let Some(value) = smoothing {
+            inner = inner.with_smoothing(value);
+        }
+        if let Some(value) = event_smoothing {
+            inner = inner.with_event_smoothing(value);
+        }
+        if let Some(value) = turnover_smoothing {
+            inner = inner.with_turnover_smoothing(value);
+        }
+        if let Some(value) = phase_gain {
+            inner = inner.with_phase_gain(value);
+        }
+        if let Some(value) = stuck_phase_gain {
+            inner = inner.with_stuck_phase_gain(value);
+        }
+        if let Some(value) = stuck_turnover_threshold {
+            inner = inner.with_stuck_turnover_threshold(value);
+        }
+        if let Some(value) = coherence_gain {
+            inner = inner.with_coherence_gain(value);
+        }
+        if let Some(value) = sheet_gain {
+            inner = inner.with_sheet_gain(value);
+        }
+        if let Some(value) = spin_gain {
+            inner = inner.with_spin_gain(value);
+        }
+        if let Some(value) = radius_gain {
+            inner = inner.with_radius_gain(value);
+        }
+        if let Some(value) = energy_gain {
+            inner = inner.with_energy_gain(value);
+        }
+        if let Some((min, max)) = lr_bounds {
+            inner = inner.with_lr_bounds(min, max);
+        }
+        if let Some((min, max)) = band_bounds {
+            inner = inner.with_band_bounds(min, max);
+        }
+        if let Some(value) = max_lr_step {
+            inner = inner.with_max_lr_step(value);
+        }
+        if env_overrides {
+            inner.apply_env_overrides();
+        }
+        inner
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PySpectralLearningRatePolicy {
+    #[new]
+    #[pyo3(
+        signature = (
+            *,
+            smoothing=None,
+            event_smoothing=None,
+            turnover_smoothing=None,
+            phase_gain=None,
+            stuck_phase_gain=None,
+            stuck_turnover_threshold=None,
+            coherence_gain=None,
+            sheet_gain=None,
+            spin_gain=None,
+            radius_gain=None,
+            energy_gain=None,
+            lr_bounds=None,
+            band_bounds=None,
+            max_lr_step=None,
+            env_overrides=false
+        )
+    )]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        smoothing: Option<f32>,
+        event_smoothing: Option<f32>,
+        turnover_smoothing: Option<f32>,
+        phase_gain: Option<f32>,
+        stuck_phase_gain: Option<f32>,
+        stuck_turnover_threshold: Option<f32>,
+        coherence_gain: Option<f32>,
+        sheet_gain: Option<f32>,
+        spin_gain: Option<f32>,
+        radius_gain: Option<f32>,
+        energy_gain: Option<f32>,
+        lr_bounds: Option<(f32, f32)>,
+        band_bounds: Option<(f32, f32)>,
+        max_lr_step: Option<f32>,
+        env_overrides: bool,
+    ) -> Self {
+        let inner = Self::configure(
+            RustSpectralLearningRatePolicy::default(),
+            smoothing,
+            event_smoothing,
+            turnover_smoothing,
+            phase_gain,
+            stuck_phase_gain,
+            stuck_turnover_threshold,
+            coherence_gain,
+            sheet_gain,
+            spin_gain,
+            radius_gain,
+            energy_gain,
+            lr_bounds,
+            band_bounds,
+            max_lr_step,
+            env_overrides,
+        );
+        Self { inner }
+    }
+
+    pub fn apply_env_overrides(&mut self) {
+        self.inner.apply_env_overrides();
+    }
+
+    #[getter]
+    pub fn dominant_turnover(&self) -> f32 {
+        self.inner.dominant_turnover()
+    }
+
+    #[getter]
+    pub fn last_coherence_label(&self) -> Option<String> {
+        self.inner.last_coherence_label().map(|label| label.to_string())
+    }
+
+    pub fn set_smoothing(&mut self, smoothing: f32) {
+        self.inner = self.inner.clone().with_smoothing(smoothing);
+    }
+
+    pub fn set_event_smoothing(&mut self, smoothing: f32) {
+        self.inner = self.inner.clone().with_event_smoothing(smoothing);
+    }
+
+    pub fn set_turnover_smoothing(&mut self, smoothing: f32) {
+        self.inner = self.inner.clone().with_turnover_smoothing(smoothing);
+    }
+
+    pub fn set_phase_gain(&mut self, gain: f32) {
+        self.inner = self.inner.clone().with_phase_gain(gain);
+    }
+
+    pub fn set_stuck_phase_gain(&mut self, gain: f32) {
+        self.inner = self.inner.clone().with_stuck_phase_gain(gain);
+    }
+
+    pub fn set_stuck_turnover_threshold(&mut self, threshold: f32) {
+        self.inner = self
+            .inner
+            .clone()
+            .with_stuck_turnover_threshold(threshold);
+    }
+
+    pub fn set_coherence_gain(&mut self, gain: f32) {
+        self.inner = self.inner.clone().with_coherence_gain(gain);
+    }
+
+    pub fn set_sheet_gain(&mut self, gain: f32) {
+        self.inner = self.inner.clone().with_sheet_gain(gain);
+    }
+
+    pub fn set_spin_gain(&mut self, gain: f32) {
+        self.inner = self.inner.clone().with_spin_gain(gain);
+    }
+
+    pub fn set_radius_gain(&mut self, gain: f32) {
+        self.inner = self.inner.clone().with_radius_gain(gain);
+    }
+
+    pub fn set_energy_gain(&mut self, gain: f32) {
+        self.inner = self.inner.clone().with_energy_gain(gain);
+    }
+
+    pub fn set_lr_bounds(&mut self, min: f32, max: f32) {
+        self.inner = self.inner.clone().with_lr_bounds(min, max);
+    }
+
+    pub fn set_band_bounds(&mut self, min: f32, max: f32) {
+        self.inner = self.inner.clone().with_band_bounds(min, max);
+    }
+
+    pub fn set_max_lr_step(&mut self, max_step: f32) {
+        self.inner = self.inner.clone().with_max_lr_step(max_step);
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "SpectralLearningRatePolicy(turnover={:.4}, label={:?})",
+            self.inner.dominant_turnover(),
+            self.inner.last_coherence_label()
+        )
+    }
+}
+
+#[cfg(feature = "nn")]
 enum PoolModule {
     Max(MaxPool2d),
     Avg(AvgPool2d),
@@ -4452,9 +4676,15 @@ impl PyNnModuleTrainer {
         }
     }
 
-    pub fn enable_spectral_learning_rate(&mut self) {
-        self.inner
-            .enable_spectral_learning_rate(RustSpectralLearningRatePolicy::default());
+    #[pyo3(signature = (policy=None))]
+    pub fn enable_spectral_learning_rate(
+        &mut self,
+        policy: Option<&PySpectralLearningRatePolicy>,
+    ) {
+        let policy = policy
+            .map(|policy| policy.inner.clone())
+            .unwrap_or_else(RustSpectralLearningRatePolicy::default);
+        self.inner.enable_spectral_learning_rate(policy);
     }
 
     pub fn disable_spectral_learning_rate(&mut self) {
@@ -8178,6 +8408,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyZSpaceTextVae>()?;
     module.add_class::<PyZRelativityModule>()?;
     module.add_class::<PyCurvatureScheduler>()?;
+    module.add_class::<PySpectralLearningRatePolicy>()?;
     module.add_class::<PyCurvatureDecision>()?;
     module.add_function(wrap_pyfunction!(from_samples, &module)?)?;
     module.add(
@@ -8247,6 +8478,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
             "ZSpaceTextVae",
             "ZRelativityModule",
             "CurvatureScheduler",
+            "SpectralLearningRatePolicy",
             "CurvatureDecision",
             "from_samples",
             "reorder_feature_tensor",
@@ -8335,6 +8567,9 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     }
     if let Ok(scheduler) = module.getattr("CurvatureScheduler") {
         parent.add("CurvatureScheduler", scheduler)?;
+    }
+    if let Ok(policy) = module.getattr("SpectralLearningRatePolicy") {
+        parent.add("SpectralLearningRatePolicy", policy)?;
     }
     if let Ok(decision) = module.getattr("CurvatureDecision") {
         parent.add("CurvatureDecision", decision)?;

@@ -167,6 +167,7 @@ def test_module_trainer_spectral_and_coherence_bridge_controls() -> None:
         pytest.skip("native SpiralTorch extension unavailable")
     assert hasattr(st, "nn")
     assert hasattr(st.nn, "ModuleTrainer")
+    assert hasattr(st.nn, "SpectralLearningRatePolicy")
 
     trainer = st.nn.ModuleTrainer(
         backend="cpu",
@@ -174,7 +175,28 @@ def test_module_trainer_spectral_and_coherence_bridge_controls() -> None:
         hyper_learning_rate=1e-2,
         fallback_learning_rate=1e-2,
     )
-    trainer.enable_spectral_learning_rate()
+    policy = st.nn.SpectralLearningRatePolicy(
+        smoothing=0.3,
+        event_smoothing=0.8,
+        turnover_smoothing=0.2,
+        phase_gain=0.3,
+        stuck_phase_gain=0.4,
+        stuck_turnover_threshold=0.1,
+        coherence_gain=0.6,
+        sheet_gain=0.7,
+        spin_gain=0.5,
+        radius_gain=0.4,
+        energy_gain=0.3,
+        lr_bounds=(0.2, 4.0),
+        band_bounds=(0.7, 2.2),
+        max_lr_step=1.3,
+    )
+    policy.set_phase_gain(0.35)
+    policy.set_coherence_gain(0.55)
+    policy.set_lr_bounds(0.3, 3.5)
+    policy.apply_env_overrides()
+
+    trainer.enable_spectral_learning_rate(policy)
     assert trainer.spectral_metrics() is None
     trainer.enable_zspace_trace_coherence_bridge()
     trainer.disable_zspace_trace_coherence_bridge()
