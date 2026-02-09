@@ -78,7 +78,7 @@ num-complex = { version = "0.4" }
 spiral-safety = { path = "../../crates/spiral-safety" }
 serde_json = "1"
 tracing = "0.1"
-nalgebra = { version = "0.32", default-features = false, features = ["std"] }
+nalgebra = { version = "0.34", default-features = false, features = ["std"] }
 
 [package.metadata]
 pyo3 = { extension-module = true, abi3 = true, abi3-py38 = true }
