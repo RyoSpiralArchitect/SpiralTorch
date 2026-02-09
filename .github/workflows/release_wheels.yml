@@ -155,7 +155,7 @@ jobs:
           print("smoke ok")
           PY
       - name: Upload wheels (artifact)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: wheels-${{ matrix.label }}-py${{ matrix.py }}
           path: target/wheels/*.whl

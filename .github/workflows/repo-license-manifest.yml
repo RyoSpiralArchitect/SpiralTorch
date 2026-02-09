@@ -38,7 +38,7 @@ jobs:
             spiraltorch-repo-license-manifest.json
             spiraltorch-compliance-seal.json
       - name: Upload signed manifest artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: repo-license-manifest
           path: |
