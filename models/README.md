@@ -15,11 +15,11 @@ copy-pastable models that act as reference implementations for both Python and R
 - Run outputs: `models/runs/<timestamp>/` (e.g. `run.json`, `metrics.jsonl`, `samples/`, `weights.json` / `weights.bin`)
 - Python scripts accept `--backend cpu|wgpu|cuda|hip|auto`, `--events <path>`, `--atlas`, `--desire` (applies offsets during sampling), and `--softlogic-*` tuning flags (captured in `run.json`).
 - WGPU quickstart (build + run): `bash scripts/wgpu_quickstart.sh`
-- Python: `PYTHONNOUSERSITE=1 python3 -S -s models/python/mlp_regression.py [--activation gelu --norm zspace]`
+- Python: `PYTHONNOUSERSITE=1 python3 -S -s models/python/mlp_regression.py [--activation gelu --norm zspace --epochs 5 --lr-schedule cosine --grad-clip 1.0]`
 - Python (classification): `PYTHONNOUSERSITE=1 python3 -S -s models/python/zconv_classification.py`
 - Python (vision + pooling): `PYTHONNOUSERSITE=1 python3 -S -s models/python/vision_conv_pool_classification.py`
-- Python (Mellin log-grid classification): `PYTHONNOUSERSITE=1 python3 -S -s models/python/mellin_log_grid_classification.py --val-batches 4`
-- Python (Maxwell simulated Z classification): `PYTHONNOUSERSITE=1 python3 -S -s models/python/maxwell_simulated_z_classification.py --val-batches 4`
+- Python (Mellin log-grid classification): `PYTHONNOUSERSITE=1 python3 -S -s models/python/mellin_log_grid_classification.py --val-batches 4 --norm zspace --lr-schedule cosine --grad-clip 1.0`
+- Python (Maxwell simulated Z classification): `PYTHONNOUSERSITE=1 python3 -S -s models/python/maxwell_simulated_z_classification.py --val-batches 4 --norm zbatch --lr-schedule linear --lr-min 1e-3 --grad-clip 1.0`
 - Python (VAE): `PYTHONNOUSERSITE=1 python3 -S -s models/python/zspace_vae_reconstruction.py`
 - Python (Text→ZSpace VAE): `PYTHONNOUSERSITE=1 python3 -S -s models/python/zspace_text_vae.py models/samples/spiral_corpus_en --mellin ramp`
 - Python (LLM char fine-tune): `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_finetune.py <text_or_dir> [<text_or_dir> ...] [--desire --events runs.jsonl --atlas]`

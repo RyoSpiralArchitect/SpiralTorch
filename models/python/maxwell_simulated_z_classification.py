@@ -171,6 +171,7 @@ def main() -> None:
         print(
             "usage: PYTHONNOUSERSITE=1 python3 -S -s models/python/maxwell_simulated_z_classification.py "
             "[--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--norm none|layer|zspace|batch|zbatch] "
+            "[--lr-schedule constant|linear|cosine] [--lr-min F] [--grad-clip F] "
             "[--blocks N] [--sigma F] [--kappa F] "
             "[--low-lambda-min F] [--low-lambda-max F] [--high-lambda-min F] [--high-lambda-max F] "
             "[--backend cpu|wgpu|cuda|hip|auto] "
@@ -189,6 +190,9 @@ def main() -> None:
     lr = 2e-2
     curvature = -1.0
     norm = "none"
+    lr_schedule = "constant"
+    lr_min: float | None = None
+    grad_clip = 0.0
     seed = 777
     val_batches = 0
 
@@ -220,6 +224,12 @@ def main() -> None:
             batch = int(next(it))
         elif flag == "--lr":
             lr = float(next(it))
+        elif flag == "--lr-schedule":
+            lr_schedule = str(next(it)).strip().lower()
+        elif flag == "--lr-min":
+            lr_min = float(next(it))
+        elif flag == "--grad-clip":
+            grad_clip = float(next(it))
         elif flag == "--curvature":
             curvature = float(next(it))
         elif flag == "--norm":
@@ -274,6 +284,14 @@ def main() -> None:
         raise ValueError("--high-lambda-min/max must satisfy 0 < min <= max")
     if norm not in {"none", "layer", "zspace", "batch", "zbatch"}:
         raise ValueError(f"unknown --norm: {norm} (expected none|layer|zspace|batch|zbatch)")
+    if lr_schedule not in {"constant", "linear", "cosine"}:
+        raise ValueError(
+            f"unknown --lr-schedule: {lr_schedule} (expected constant|linear|cosine)"
+        )
+    if lr_min is not None and (not math.isfinite(lr_min) or lr_min <= 0.0):
+        raise ValueError("--lr-min must be a positive, finite float")
+    if not math.isfinite(grad_clip) or grad_clip < 0.0:
+        raise ValueError("--grad-clip must be a finite float >= 0")
 
     _require_backend_available(backend)
 
@@ -285,6 +303,10 @@ def main() -> None:
     if atlas and events_path is None:
         events_path = run_dir / "events.jsonl"
 
+    resolved_lr_min: float | None = None
+    if lr_schedule != "constant":
+        resolved_lr_min = float(lr_min) if lr_min is not None else float(lr) * 0.1
+
     model = _build_model(blocks, norm=norm, curvature=curvature)
     model.attach_hypergrad(curvature=curvature, learning_rate=lr)
     trainer = st.nn.ModuleTrainer(
@@ -293,6 +315,8 @@ def main() -> None:
         hyper_learning_rate=lr,
         fallback_learning_rate=lr,
     )
+    if grad_clip > 0.0:
+        trainer.set_grad_clip_max_norm(grad_clip)
     softlogic_meta = _softlogic_cli.apply_softlogic_cli(trainer, softlogic_cli)
     schedule = trainer.roundtable(
         batch,
@@ -309,6 +333,9 @@ def main() -> None:
         "batches_per_epoch": batches_per_epoch,
         "batch": batch,
         "lr": lr,
+        "lr_schedule": lr_schedule,
+        "lr_min": resolved_lr_min,
+        "grad_clip": grad_clip if grad_clip > 0.0 else None,
         "curvature": curvature,
         "norm": norm,
         "seed": seed,
@@ -334,7 +361,8 @@ def main() -> None:
 
     print(
         f"arch=maxwell_simulated_z_classification blocks={blocks} sigma={sigma:.3g} kappa={kappa:.3g} norm={norm} "
-        f"epochs={epochs} batch={batch} lr={lr:.3e} curvature={curvature} backend={backend} run_dir={run_dir}"
+        f"epochs={epochs} batch={batch} lr={lr:.3e} schedule={lr_schedule} grad_clip={grad_clip:.3g} "
+        f"curvature={curvature} backend={backend} run_dir={run_dir}"
     )
 
     metrics_path = run_dir / "metrics.jsonl"
@@ -362,8 +390,26 @@ def main() -> None:
                 )
             )
 
+    lr_active = float(lr)
+    lr_floor = float(resolved_lr_min) if resolved_lr_min is not None else float(lr) * 0.1
+
+    def _scheduled_lr(epoch_idx: int) -> float:
+        if lr_schedule == "constant" or epochs <= 1:
+            return float(lr)
+        t = float(epoch_idx) / float(max(1, epochs - 1))
+        if lr_schedule == "linear":
+            return float(lr) + (lr_floor - float(lr)) * t
+        return lr_floor + 0.5 * (float(lr) - lr_floor) * (1.0 + math.cos(math.pi * t))
+
     with record_ctx:
         for epoch in range(max(0, epochs)):
+            target_lr = _scheduled_lr(epoch)
+            if lr_active > 0.0 and target_lr > 0.0:
+                factor = float(target_lr) / float(lr_active)
+                if factor == factor and abs(factor - 1.0) > 1e-9:
+                    trainer.mul_learning_rate(model, factor)
+                    lr_active = float(target_lr)
+
             batches: list[tuple[st.Tensor, st.Tensor]] = []
             base_seed = seed + epoch * 10_000
             for b in range(batches_per_epoch):
@@ -389,6 +435,7 @@ def main() -> None:
                     "epoch": epoch,
                     "batches": int(stats.batches),
                     "average_loss": avg_loss,
+                    "learning_rate": lr_active,
                     "val_loss": val_loss if val_loss == val_loss else None,
                 },
             )
