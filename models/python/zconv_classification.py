@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import pathlib
 import sys
 
@@ -107,37 +108,80 @@ def build_model(
 
 def main() -> None:
     backend = "cpu"
+    epochs = 3
+    batch = 6
+    lr = 1e-2
+    curvature = -1.0
+    lr_schedule = "constant"
+    lr_min: float | None = None
+    grad_clip = 0.0
     args = list(sys.argv[1:])
     _softlogic_cli_state = _softlogic_cli.pop_softlogic_flags(args)
     it = iter(args)
     for flag in it:
         if flag == "--backend":
             backend = str(next(it)).strip().lower()
+        elif flag == "--epochs":
+            epochs = int(next(it))
+        elif flag == "--batch":
+            batch = int(next(it))
+        elif flag == "--lr":
+            lr = float(next(it))
+        elif flag == "--curvature":
+            curvature = float(next(it))
+        elif flag == "--lr-schedule":
+            lr_schedule = str(next(it)).strip().lower()
+        elif flag == "--lr-min":
+            lr_min = float(next(it))
+        elif flag == "--grad-clip":
+            grad_clip = float(next(it))
         elif flag in {"-h", "--help"}:
             print(
                 "usage: PYTHONNOUSERSITE=1 python3 -S -s models/python/zconv_classification.py "
                 "[--backend cpu|wgpu|cuda|hip|auto] "
+                "[--epochs N] [--batch N] [--lr F] [--curvature F] "
+                "[--lr-schedule constant|linear|cosine] [--lr-min F] [--grad-clip F] "
                 f"{_softlogic_cli.usage_flags()}"
             )
             return
         else:
             raise ValueError(f"unknown flag: {flag}")
 
+    if epochs < 0:
+        raise ValueError("--epochs must be >= 0")
+    if batch <= 0:
+        raise ValueError("--batch must be > 0")
+    if not math.isfinite(lr) or lr <= 0.0:
+        raise ValueError("--lr must be a positive, finite float")
+    if lr_schedule not in {"constant", "linear", "cosine"}:
+        raise ValueError(
+            f"unknown --lr-schedule: {lr_schedule} (expected constant|linear|cosine)"
+        )
+    if lr_min is not None and (not math.isfinite(lr_min) or lr_min <= 0.0):
+        raise ValueError("--lr-min must be a positive, finite float")
+    if not math.isfinite(grad_clip) or grad_clip < 0.0:
+        raise ValueError("--grad-clip must be a finite float >= 0")
+
     _require_backend_available(backend)
 
-    batch = 6
     input_hw = (4, 4)
     kernel = (3, 3)
     stride = (1, 1)
     padding = (0, 0)
     out_channels = 2
 
+    resolved_lr_min: float | None = None
+    if lr_schedule != "constant":
+        resolved_lr_min = float(lr_min) if lr_min is not None else float(lr) * 0.1
+
     trainer = st.nn.ModuleTrainer(
         backend=backend,
-        curvature=-1.0,
-        hyper_learning_rate=1e-2,
-        fallback_learning_rate=1e-2,
+        curvature=curvature,
+        hyper_learning_rate=lr,
+        fallback_learning_rate=lr,
     )
+    if grad_clip > 0.0:
+        trainer.set_grad_clip_max_norm(grad_clip)
     _softlogic_cli.apply_softlogic_cli(trainer, _softlogic_cli_state)
     schedule = trainer.roundtable(
         batch,
@@ -146,8 +190,8 @@ def main() -> None:
     )
 
     model = build_model(input_hw, out_channels, kernel, stride, padding)
-    model.attach_hypergrad(curvature=-1.0, learning_rate=1e-2)
-    loss = st.nn.CrossEntropy(curvature=-1.0)
+    model.attach_hypergrad(curvature=curvature, learning_rate=lr)
+    loss = st.nn.CrossEntropy(curvature=curvature)
 
     x, y = build_batch(batch, input_hw, seed=11)
 
@@ -156,9 +200,26 @@ def main() -> None:
     record_path = weights_dir / "zconv_classification_events.jsonl"
 
     with plugin.record(str(record_path), event_types=["EpochEnd", "TensorOp"]):
-        for _ in range(3):
+        lr_active = float(lr)
+        lr_floor = float(resolved_lr_min) if resolved_lr_min is not None else float(lr) * 0.1
+
+        def _scheduled_lr(epoch_idx: int) -> float:
+            if lr_schedule == "constant" or epochs <= 1:
+                return float(lr)
+            t = float(epoch_idx) / float(max(1, epochs - 1))
+            if lr_schedule == "linear":
+                return float(lr) + (lr_floor - float(lr)) * t
+            return lr_floor + 0.5 * (float(lr) - lr_floor) * (1.0 + math.cos(math.pi * t))
+
+        for epoch in range(epochs):
+            target_lr = _scheduled_lr(epoch)
+            if lr_active > 0.0 and target_lr > 0.0:
+                factor = float(target_lr) / float(lr_active)
+                if factor == factor and abs(factor - 1.0) > 1e-9:
+                    trainer.mul_learning_rate(model, factor)
+                    lr_active = float(target_lr)
             stats = trainer.train_epoch(model, loss, [(x, y)], schedule)
-            print("stats:", stats)
+            print(f"epoch[{epoch}] lr={lr_active:.3e} stats:", stats)
 
     weights_path = weights_dir / "zconv_classification.json"
     st.nn.save(str(weights_path), model)
