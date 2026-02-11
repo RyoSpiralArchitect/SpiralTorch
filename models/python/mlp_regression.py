@@ -74,6 +74,8 @@ def main() -> None:
     lr = 1e-2
     lr_schedule = "constant"
     lr_min: float | None = None
+    lr_warmup_epochs = 0
+    lr_warmup_start: float | None = None
     grad_clip = 0.0
     args = list(sys.argv[1:])
     _softlogic_cli_state = _softlogic_cli.pop_softlogic_flags(args)
@@ -97,6 +99,10 @@ def main() -> None:
             lr_schedule = str(next(it)).strip().lower()
         elif flag == "--lr-min":
             lr_min = float(next(it))
+        elif flag == "--lr-warmup-epochs":
+            lr_warmup_epochs = int(next(it))
+        elif flag == "--lr-warmup-start":
+            lr_warmup_start = float(next(it))
         elif flag == "--grad-clip":
             grad_clip = float(next(it))
         elif flag in {"-h", "--help"}:
@@ -106,7 +112,8 @@ def main() -> None:
                 "[--activation relu|gelu] "
                 "[--norm none|layer|zspace|batch|zbatch] "
                 "[--epochs N] [--batch N] [--lr F] [--curvature F] "
-                "[--lr-schedule constant|linear|cosine] [--lr-min F] [--grad-clip F] "
+                "[--lr-schedule constant|linear|cosine] [--lr-min F] "
+                "[--lr-warmup-epochs N] [--lr-warmup-start F] [--grad-clip F] "
                 f"{_softlogic_cli.usage_flags()}"
             )
             return
@@ -133,12 +140,23 @@ def main() -> None:
         )
     if lr_min is not None and (not math.isfinite(lr_min) or lr_min <= 0.0):
         raise ValueError("--lr-min must be a positive, finite float")
+    if lr_warmup_epochs < 0:
+        raise ValueError("--lr-warmup-epochs must be >= 0")
+    if lr_warmup_epochs > epochs:
+        raise ValueError("--lr-warmup-epochs must be <= --epochs")
+    if lr_warmup_start is not None and (not math.isfinite(lr_warmup_start) or lr_warmup_start <= 0.0):
+        raise ValueError("--lr-warmup-start must be a positive, finite float")
     if not math.isfinite(grad_clip) or grad_clip < 0.0:
         raise ValueError("--grad-clip must be a finite float >= 0")
 
     resolved_lr_min: float | None = None
     if lr_schedule != "constant":
         resolved_lr_min = float(lr_min) if lr_min is not None else float(lr) * 0.1
+    resolved_warmup_start = (
+        float(lr_warmup_start)
+        if lr_warmup_start is not None
+        else (float(resolved_lr_min) if resolved_lr_min is not None else float(lr) * 0.1)
+    )
 
     trainer = st.nn.ModuleTrainer(
         backend=backend,
@@ -190,9 +208,15 @@ def main() -> None:
     lr_floor = float(resolved_lr_min) if resolved_lr_min is not None else float(lr) * 0.1
 
     def _scheduled_lr(epoch_idx: int) -> float:
-        if lr_schedule == "constant" or epochs <= 1:
+        if lr_warmup_epochs > 0 and epoch_idx < lr_warmup_epochs:
+            if lr_warmup_epochs == 1:
+                return float(lr)
+            t = float(epoch_idx) / float(max(1, lr_warmup_epochs - 1))
+            return resolved_warmup_start + (float(lr) - resolved_warmup_start) * t
+        decay_epochs = max(0, epochs - lr_warmup_epochs)
+        if lr_schedule == "constant" or decay_epochs <= 1:
             return float(lr)
-        t = float(epoch_idx) / float(max(1, epochs - 1))
+        t = float(max(0, epoch_idx - lr_warmup_epochs)) / float(max(1, decay_epochs - 1))
         if lr_schedule == "linear":
             return float(lr) + (lr_floor - float(lr)) * t
         return lr_floor + 0.5 * (float(lr) - lr_floor) * (1.0 + math.cos(math.pi * t))

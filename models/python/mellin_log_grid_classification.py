@@ -246,7 +246,8 @@ def main() -> None:
         print(
             "usage: PYTHONNOUSERSITE=1 python3 -S -s models/python/mellin_log_grid_classification.py "
             "[--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--norm none|layer|zspace|batch|zbatch] "
-            "[--lr-schedule constant|linear|cosine] [--lr-min F] [--grad-clip F] "
+            "[--lr-schedule constant|linear|cosine] [--lr-min F] "
+            "[--lr-warmup-epochs N] [--lr-warmup-start F] [--grad-clip F] "
             "[--feature mag|logmag] [--epsilon F] "
             "[--log-start F] [--log-step F] [--series-len N] "
             "[--real-min F] [--real-max F] [--real-count N] "
@@ -270,6 +271,8 @@ def main() -> None:
     norm = "none"
     lr_schedule = "constant"
     lr_min: float | None = None
+    lr_warmup_epochs = 0
+    lr_warmup_start: float | None = None
     grad_clip = 0.0
     seed = 777
 
@@ -317,6 +320,10 @@ def main() -> None:
             lr_schedule = str(next(it)).strip().lower()
         elif flag == "--lr-min":
             lr_min = float(next(it))
+        elif flag == "--lr-warmup-epochs":
+            lr_warmup_epochs = int(next(it))
+        elif flag == "--lr-warmup-start":
+            lr_warmup_start = float(next(it))
         elif flag == "--grad-clip":
             grad_clip = float(next(it))
         elif flag == "--curvature":
@@ -395,6 +402,12 @@ def main() -> None:
         )
     if lr_min is not None and (not math.isfinite(lr_min) or lr_min <= 0.0):
         raise ValueError("--lr-min must be a positive, finite float")
+    if lr_warmup_epochs < 0:
+        raise ValueError("--lr-warmup-epochs must be >= 0")
+    if lr_warmup_epochs > epochs:
+        raise ValueError("--lr-warmup-epochs must be <= --epochs")
+    if lr_warmup_start is not None and (not math.isfinite(lr_warmup_start) or lr_warmup_start <= 0.0):
+        raise ValueError("--lr-warmup-start must be a positive, finite float")
     if not math.isfinite(grad_clip) or grad_clip < 0.0:
         raise ValueError("--grad-clip must be a finite float >= 0")
 
@@ -416,6 +429,11 @@ def main() -> None:
     resolved_lr_min: float | None = None
     if lr_schedule != "constant":
         resolved_lr_min = float(lr_min) if lr_min is not None else float(lr) * 0.1
+    resolved_warmup_start = (
+        float(lr_warmup_start)
+        if lr_warmup_start is not None
+        else (float(resolved_lr_min) if resolved_lr_min is not None else float(lr) * 0.1)
+    )
 
     model = _build_model(
         input_hw,
@@ -455,6 +473,8 @@ def main() -> None:
         "lr": lr,
         "lr_schedule": lr_schedule,
         "lr_min": resolved_lr_min,
+        "lr_warmup_epochs": lr_warmup_epochs if lr_warmup_epochs > 0 else None,
+        "lr_warmup_start": resolved_warmup_start if lr_warmup_epochs > 0 else None,
         "grad_clip": grad_clip if grad_clip > 0.0 else None,
         "curvature": curvature,
         "norm": norm,
@@ -489,7 +509,8 @@ def main() -> None:
 
     print(
         f"arch=mellin_log_grid_classification mesh={input_hw} feature={feature} series_len={series_len} norm={norm} "
-        f"epochs={epochs} batch={batch} lr={lr:.3e} schedule={lr_schedule} grad_clip={grad_clip:.3g} "
+        f"epochs={epochs} batch={batch} lr={lr:.3e} schedule={lr_schedule} warmup={lr_warmup_epochs} "
+        f"grad_clip={grad_clip:.3g} "
         f"curvature={curvature} backend={backend} run_dir={run_dir}"
     )
 
@@ -525,9 +546,15 @@ def main() -> None:
     lr_floor = float(resolved_lr_min) if resolved_lr_min is not None else float(lr) * 0.1
 
     def _scheduled_lr(epoch_idx: int) -> float:
-        if lr_schedule == "constant" or epochs <= 1:
+        if lr_warmup_epochs > 0 and epoch_idx < lr_warmup_epochs:
+            if lr_warmup_epochs == 1:
+                return float(lr)
+            t = float(epoch_idx) / float(max(1, lr_warmup_epochs - 1))
+            return resolved_warmup_start + (float(lr) - resolved_warmup_start) * t
+        decay_epochs = max(0, epochs - lr_warmup_epochs)
+        if lr_schedule == "constant" or decay_epochs <= 1:
             return float(lr)
-        t = float(epoch_idx) / float(max(1, epochs - 1))
+        t = float(max(0, epoch_idx - lr_warmup_epochs)) / float(max(1, decay_epochs - 1))
         if lr_schedule == "linear":
             return float(lr) + (lr_floor - float(lr)) * t
         return lr_floor + 0.5 * (float(lr) - lr_floor) * (1.0 + math.cos(math.pi * t))
