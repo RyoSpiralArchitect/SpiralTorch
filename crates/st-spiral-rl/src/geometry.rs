@@ -16,7 +16,7 @@ use st_core::util::math::{
 use st_tensor::{DifferentialResonance, Tensor};
 
 /// Ramanujan π approximation using three iterations, exposed for lightweight consumers.
-pub const RAMANUJAN_PI_3: f64 = 3.141_592_653_589_793_238_46_f64;
+pub const RAMANUJAN_PI_3: f64 = std::f64::consts::PI;
 
 /// Configuration describing how geometric observability is converted into
 /// feedback for the learning loop.

@@ -1,5 +1,4 @@
 [advisories]
-version = 2
 unmaintained = "workspace"
 yanked = "warn"
 ignore = [

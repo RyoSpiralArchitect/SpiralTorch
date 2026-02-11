@@ -3,6 +3,8 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
+
 //! Minimal C-ABI shims that surface a stable subset of SpiralTorch tensor
 //! primitives. These functions are consumed by the Julia and Go bindings and
 //! can be used by other foreign-language integrations that require a stable
