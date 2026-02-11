@@ -489,6 +489,12 @@ def main() -> None:
 
             monitor_value = val_loss if val_batches_cache else avg_loss
             monitor_name = "val_loss" if val_batches_cache else "average_loss"
+            if not math.isfinite(monitor_value):
+                print(
+                    f"early-stop: monitor={monitor_name} is non-finite ({monitor_value}); "
+                    "skipping patience update for this epoch"
+                )
+                continue
             improved = (monitor_value + early_stop_min_delta) < best_monitor
             if improved:
                 best_monitor = monitor_value
