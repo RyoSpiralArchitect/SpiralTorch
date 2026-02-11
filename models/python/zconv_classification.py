@@ -117,6 +117,8 @@ def main() -> None:
     lr_warmup_epochs = 0
     lr_warmup_start: float | None = None
     grad_clip = 0.0
+    early_stop_patience = 0
+    early_stop_min_delta = 0.0
     args = list(sys.argv[1:])
     _softlogic_cli_state = _softlogic_cli.pop_softlogic_flags(args)
     it = iter(args)
@@ -141,6 +143,10 @@ def main() -> None:
             lr_warmup_start = float(next(it))
         elif flag == "--grad-clip":
             grad_clip = float(next(it))
+        elif flag == "--early-stop-patience":
+            early_stop_patience = int(next(it))
+        elif flag == "--early-stop-min-delta":
+            early_stop_min_delta = float(next(it))
         elif flag in {"-h", "--help"}:
             print(
                 "usage: PYTHONNOUSERSITE=1 python3 -S -s models/python/zconv_classification.py "
@@ -148,6 +154,7 @@ def main() -> None:
                 "[--epochs N] [--batch N] [--lr F] [--curvature F] "
                 "[--lr-schedule constant|linear|cosine] [--lr-min F] "
                 "[--lr-warmup-epochs N] [--lr-warmup-start F] [--grad-clip F] "
+                "[--early-stop-patience N] [--early-stop-min-delta F] "
                 f"{_softlogic_cli.usage_flags()}"
             )
             return
@@ -174,6 +181,10 @@ def main() -> None:
         raise ValueError("--lr-warmup-start must be a positive, finite float")
     if not math.isfinite(grad_clip) or grad_clip < 0.0:
         raise ValueError("--grad-clip must be a finite float >= 0")
+    if early_stop_patience < 0:
+        raise ValueError("--early-stop-patience must be >= 0")
+    if not math.isfinite(early_stop_min_delta) or early_stop_min_delta < 0.0:
+        raise ValueError("--early-stop-min-delta must be a finite float >= 0")
 
     _require_backend_available(backend)
 
@@ -220,6 +231,8 @@ def main() -> None:
     with plugin.record(str(record_path), event_types=["EpochEnd", "TensorOp"]):
         lr_active = float(lr)
         lr_floor = float(resolved_lr_min) if resolved_lr_min is not None else float(lr) * 0.1
+        best_monitor = float("inf")
+        stale_epochs = 0
 
         def _scheduled_lr(epoch_idx: int) -> float:
             if lr_warmup_epochs > 0 and epoch_idx < lr_warmup_epochs:
@@ -244,6 +257,19 @@ def main() -> None:
                     lr_active = float(target_lr)
             stats = trainer.train_epoch(model, loss, [(x, y)], schedule)
             print(f"epoch[{epoch}] lr={lr_active:.3e} stats:", stats)
+            avg_loss = float(stats.average_loss)
+            improved = (avg_loss + early_stop_min_delta) < best_monitor
+            if improved:
+                best_monitor = avg_loss
+                stale_epochs = 0
+            else:
+                stale_epochs += 1
+                if early_stop_patience > 0 and stale_epochs >= early_stop_patience:
+                    print(
+                        f"early-stop: epoch={epoch} monitor=average_loss value={avg_loss:.6f} "
+                        f"best={best_monitor:.6f} patience={early_stop_patience}"
+                    )
+                    break
 
     weights_path = weights_dir / "zconv_classification.json"
     st.nn.save(str(weights_path), model)

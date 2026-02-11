@@ -77,6 +77,8 @@ def main() -> None:
     lr_warmup_epochs = 0
     lr_warmup_start: float | None = None
     grad_clip = 0.0
+    early_stop_patience = 0
+    early_stop_min_delta = 0.0
     args = list(sys.argv[1:])
     _softlogic_cli_state = _softlogic_cli.pop_softlogic_flags(args)
     it = iter(args)
@@ -105,6 +107,10 @@ def main() -> None:
             lr_warmup_start = float(next(it))
         elif flag == "--grad-clip":
             grad_clip = float(next(it))
+        elif flag == "--early-stop-patience":
+            early_stop_patience = int(next(it))
+        elif flag == "--early-stop-min-delta":
+            early_stop_min_delta = float(next(it))
         elif flag in {"-h", "--help"}:
             print(
                 "usage: PYTHONNOUSERSITE=1 python3 -S -s models/python/mlp_regression.py "
@@ -114,6 +120,7 @@ def main() -> None:
                 "[--epochs N] [--batch N] [--lr F] [--curvature F] "
                 "[--lr-schedule constant|linear|cosine] [--lr-min F] "
                 "[--lr-warmup-epochs N] [--lr-warmup-start F] [--grad-clip F] "
+                "[--early-stop-patience N] [--early-stop-min-delta F] "
                 f"{_softlogic_cli.usage_flags()}"
             )
             return
@@ -148,6 +155,10 @@ def main() -> None:
         raise ValueError("--lr-warmup-start must be a positive, finite float")
     if not math.isfinite(grad_clip) or grad_clip < 0.0:
         raise ValueError("--grad-clip must be a finite float >= 0")
+    if early_stop_patience < 0:
+        raise ValueError("--early-stop-patience must be >= 0")
+    if not math.isfinite(early_stop_min_delta) or early_stop_min_delta < 0.0:
+        raise ValueError("--early-stop-min-delta must be a finite float >= 0")
 
     resolved_lr_min: float | None = None
     if lr_schedule != "constant":
@@ -222,6 +233,9 @@ def main() -> None:
         return lr_floor + 0.5 * (float(lr) - lr_floor) * (1.0 + math.cos(math.pi * t))
 
     # Train for a few epochs on the same batch (model-zoo smoke).
+    best_monitor = float("inf")
+    stale_epochs = 0
+
     for epoch in range(epochs):
         target_lr = _scheduled_lr(epoch)
         if lr_active > 0.0 and target_lr > 0.0:
@@ -230,7 +244,21 @@ def main() -> None:
                 trainer.mul_learning_rate(model, factor)
                 lr_active = float(target_lr)
         stats = trainer.train_epoch(model, loss, [(x, y)], schedule)
+        avg_loss = float(stats.average_loss)
         print(f"epoch[{epoch}] lr={lr_active:.3e} stats:", stats)
+
+        improved = (avg_loss + early_stop_min_delta) < best_monitor
+        if improved:
+            best_monitor = avg_loss
+            stale_epochs = 0
+        else:
+            stale_epochs += 1
+            if early_stop_patience > 0 and stale_epochs >= early_stop_patience:
+                print(
+                    f"early-stop: epoch={epoch} monitor=average_loss value={avg_loss:.6f} "
+                    f"best={best_monitor:.6f} patience={early_stop_patience}"
+                )
+                break
 
     # Serialize weights and reload via the manifest helpers.
     weights_dir = pathlib.Path(__file__).resolve().parents[1] / "weights"

@@ -248,6 +248,7 @@ def main() -> None:
             "[--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--norm none|layer|zspace|batch|zbatch] "
             "[--lr-schedule constant|linear|cosine] [--lr-min F] "
             "[--lr-warmup-epochs N] [--lr-warmup-start F] [--grad-clip F] "
+            "[--early-stop-patience N] [--early-stop-min-delta F] "
             "[--feature mag|logmag] [--epsilon F] "
             "[--log-start F] [--log-step F] [--series-len N] "
             "[--real-min F] [--real-max F] [--real-count N] "
@@ -274,6 +275,8 @@ def main() -> None:
     lr_warmup_epochs = 0
     lr_warmup_start: float | None = None
     grad_clip = 0.0
+    early_stop_patience = 0
+    early_stop_min_delta = 0.0
     seed = 777
 
     feature = "logmag"
@@ -326,6 +329,10 @@ def main() -> None:
             lr_warmup_start = float(next(it))
         elif flag == "--grad-clip":
             grad_clip = float(next(it))
+        elif flag == "--early-stop-patience":
+            early_stop_patience = int(next(it))
+        elif flag == "--early-stop-min-delta":
+            early_stop_min_delta = float(next(it))
         elif flag == "--curvature":
             curvature = float(next(it))
         elif flag == "--norm":
@@ -410,6 +417,10 @@ def main() -> None:
         raise ValueError("--lr-warmup-start must be a positive, finite float")
     if not math.isfinite(grad_clip) or grad_clip < 0.0:
         raise ValueError("--grad-clip must be a finite float >= 0")
+    if early_stop_patience < 0:
+        raise ValueError("--early-stop-patience must be >= 0")
+    if not math.isfinite(early_stop_min_delta) or early_stop_min_delta < 0.0:
+        raise ValueError("--early-stop-min-delta must be a finite float >= 0")
 
     _require_backend_available(backend)
 
@@ -476,6 +487,9 @@ def main() -> None:
         "lr_warmup_epochs": lr_warmup_epochs if lr_warmup_epochs > 0 else None,
         "lr_warmup_start": resolved_warmup_start if lr_warmup_epochs > 0 else None,
         "grad_clip": grad_clip if grad_clip > 0.0 else None,
+        "early_stop_patience": early_stop_patience if early_stop_patience > 0 else None,
+        "early_stop_min_delta": early_stop_min_delta if early_stop_patience > 0 else None,
+        "early_stop_monitor": ("val_loss" if val_batches > 0 else "average_loss") if early_stop_patience > 0 else None,
         "curvature": curvature,
         "norm": norm,
         "seed": seed,
@@ -544,6 +558,8 @@ def main() -> None:
 
     lr_active = float(lr)
     lr_floor = float(resolved_lr_min) if resolved_lr_min is not None else float(lr) * 0.1
+    best_monitor = float("inf")
+    stale_epochs = 0
 
     def _scheduled_lr(epoch_idx: int) -> float:
         if lr_warmup_epochs > 0 and epoch_idx < lr_warmup_epochs:
@@ -604,6 +620,21 @@ def main() -> None:
                 print(f"epoch[{epoch}] batches={stats.batches} avg_loss={avg_loss:.6f} val_loss={val_loss:.6f}")
             else:
                 print(f"epoch[{epoch}] batches={stats.batches} avg_loss={avg_loss:.6f}")
+
+            monitor_value = val_loss if val_batches_cache else avg_loss
+            monitor_name = "val_loss" if val_batches_cache else "average_loss"
+            improved = (monitor_value + early_stop_min_delta) < best_monitor
+            if improved:
+                best_monitor = monitor_value
+                stale_epochs = 0
+            else:
+                stale_epochs += 1
+                if early_stop_patience > 0 and stale_epochs >= early_stop_patience:
+                    print(
+                        f"early-stop: epoch={epoch} monitor={monitor_name} value={monitor_value:.6f} "
+                        f"best={best_monitor:.6f} patience={early_stop_patience}"
+                    )
+                    break
 
     if atlas and events_path is not None:
         try:
