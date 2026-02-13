@@ -175,8 +175,10 @@ jobs:
   pypi:
     name: Publish wheels to PyPI
     needs: wheels
-    if: github.event_name == 'workflow_dispatch' && inputs.publish_pypi == 'true'
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_pypi
     runs-on: ubuntu-22.04
+    env:
+      PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
     environment:
       name: pypi
       url: https://pypi.org/p/spiraltorch
@@ -195,13 +197,13 @@ jobs:
           find dist -type f -name '*.whl' -print0 | sort -z | xargs -0 -I{} cp "{}" pypi_dist/
           ls -la pypi_dist
       - name: Publish to PyPI (token)
-        if: secrets.PYPI_API_TOKEN != ''
+        if: env.PYPI_API_TOKEN != ''
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: pypi_dist
-          password: ${{ secrets.PYPI_API_TOKEN }}
+          password: ${{ env.PYPI_API_TOKEN }}
       - name: Publish to PyPI (trusted publishing)
-        if: secrets.PYPI_API_TOKEN == ''
+        if: env.PYPI_API_TOKEN == ''
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: pypi_dist
