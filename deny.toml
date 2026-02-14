@@ -10,7 +10,7 @@ ignore = [
 ]
 
 [bans]
-multiple-versions = "warn"
+multiple-versions = "allow"
 wildcards = "deny"
 
 [sources]
