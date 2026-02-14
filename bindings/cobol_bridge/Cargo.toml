@@ -9,5 +9,5 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-st-text = { path = "../../crates/st-text" }
-st-tensor = { path = "../../crates/st-tensor" }
+st-text = { version = "0.1.0", path = "../../crates/st-text" }
+st-tensor = { version = "0.1.0", path = "../../crates/st-tensor" }

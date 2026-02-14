@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "spiraltorch"
-version = "0.4.6"
+version = "0.4.8"
 description = "Rust-first learning primitives for SpiralTorch"
 readme = "README.md"
 requires-python = ">=3.8"

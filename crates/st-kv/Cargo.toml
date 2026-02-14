@@ -3,6 +3,7 @@ authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
 name = "st-kv"
 version = "0.2.0"
 edition = "2021"
+license = "AGPL-3.0-or-later"
 
 [features]
 redis = ["dep:redis", "dep:serde", "dep:serde_json"]

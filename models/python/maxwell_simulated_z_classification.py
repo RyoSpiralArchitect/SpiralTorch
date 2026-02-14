@@ -171,6 +171,9 @@ def main() -> None:
         print(
             "usage: PYTHONNOUSERSITE=1 python3 -S -s models/python/maxwell_simulated_z_classification.py "
             "[--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--norm none|layer|zspace|batch|zbatch] "
+            "[--lr-schedule constant|linear|cosine] [--lr-min F] "
+            "[--lr-warmup-epochs N] [--lr-warmup-start F] [--grad-clip F] "
+            "[--early-stop-patience N] [--early-stop-min-delta F] "
             "[--blocks N] [--sigma F] [--kappa F] "
             "[--low-lambda-min F] [--low-lambda-max F] [--high-lambda-min F] [--high-lambda-max F] "
             "[--backend cpu|wgpu|cuda|hip|auto] "
@@ -189,6 +192,13 @@ def main() -> None:
     lr = 2e-2
     curvature = -1.0
     norm = "none"
+    lr_schedule = "constant"
+    lr_min: float | None = None
+    lr_warmup_epochs = 0
+    lr_warmup_start: float | None = None
+    grad_clip = 0.0
+    early_stop_patience = 0
+    early_stop_min_delta = 0.0
     seed = 777
     val_batches = 0
 
@@ -220,6 +230,20 @@ def main() -> None:
             batch = int(next(it))
         elif flag == "--lr":
             lr = float(next(it))
+        elif flag == "--lr-schedule":
+            lr_schedule = str(next(it)).strip().lower()
+        elif flag == "--lr-min":
+            lr_min = float(next(it))
+        elif flag == "--lr-warmup-epochs":
+            lr_warmup_epochs = int(next(it))
+        elif flag == "--lr-warmup-start":
+            lr_warmup_start = float(next(it))
+        elif flag == "--grad-clip":
+            grad_clip = float(next(it))
+        elif flag == "--early-stop-patience":
+            early_stop_patience = int(next(it))
+        elif flag == "--early-stop-min-delta":
+            early_stop_min_delta = float(next(it))
         elif flag == "--curvature":
             curvature = float(next(it))
         elif flag == "--norm":
@@ -274,6 +298,24 @@ def main() -> None:
         raise ValueError("--high-lambda-min/max must satisfy 0 < min <= max")
     if norm not in {"none", "layer", "zspace", "batch", "zbatch"}:
         raise ValueError(f"unknown --norm: {norm} (expected none|layer|zspace|batch|zbatch)")
+    if lr_schedule not in {"constant", "linear", "cosine"}:
+        raise ValueError(
+            f"unknown --lr-schedule: {lr_schedule} (expected constant|linear|cosine)"
+        )
+    if lr_min is not None and (not math.isfinite(lr_min) or lr_min <= 0.0):
+        raise ValueError("--lr-min must be a positive, finite float")
+    if lr_warmup_epochs < 0:
+        raise ValueError("--lr-warmup-epochs must be >= 0")
+    if lr_warmup_epochs > epochs:
+        raise ValueError("--lr-warmup-epochs must be <= --epochs")
+    if lr_warmup_start is not None and (not math.isfinite(lr_warmup_start) or lr_warmup_start <= 0.0):
+        raise ValueError("--lr-warmup-start must be a positive, finite float")
+    if not math.isfinite(grad_clip) or grad_clip < 0.0:
+        raise ValueError("--grad-clip must be a finite float >= 0")
+    if early_stop_patience < 0:
+        raise ValueError("--early-stop-patience must be >= 0")
+    if not math.isfinite(early_stop_min_delta) or early_stop_min_delta < 0.0:
+        raise ValueError("--early-stop-min-delta must be a finite float >= 0")
 
     _require_backend_available(backend)
 
@@ -285,6 +327,15 @@ def main() -> None:
     if atlas and events_path is None:
         events_path = run_dir / "events.jsonl"
 
+    resolved_lr_min: float | None = None
+    if lr_schedule != "constant":
+        resolved_lr_min = float(lr_min) if lr_min is not None else float(lr) * 0.1
+    resolved_warmup_start = (
+        float(lr_warmup_start)
+        if lr_warmup_start is not None
+        else (float(resolved_lr_min) if resolved_lr_min is not None else float(lr) * 0.1)
+    )
+
     model = _build_model(blocks, norm=norm, curvature=curvature)
     model.attach_hypergrad(curvature=curvature, learning_rate=lr)
     trainer = st.nn.ModuleTrainer(
@@ -293,6 +344,8 @@ def main() -> None:
         hyper_learning_rate=lr,
         fallback_learning_rate=lr,
     )
+    if grad_clip > 0.0:
+        trainer.set_grad_clip_max_norm(grad_clip)
     softlogic_meta = _softlogic_cli.apply_softlogic_cli(trainer, softlogic_cli)
     schedule = trainer.roundtable(
         batch,
@@ -309,6 +362,14 @@ def main() -> None:
         "batches_per_epoch": batches_per_epoch,
         "batch": batch,
         "lr": lr,
+        "lr_schedule": lr_schedule,
+        "lr_min": resolved_lr_min,
+        "lr_warmup_epochs": lr_warmup_epochs if lr_warmup_epochs > 0 else None,
+        "lr_warmup_start": resolved_warmup_start if lr_warmup_epochs > 0 else None,
+        "grad_clip": grad_clip if grad_clip > 0.0 else None,
+        "early_stop_patience": early_stop_patience if early_stop_patience > 0 else None,
+        "early_stop_min_delta": early_stop_min_delta if early_stop_patience > 0 else None,
+        "early_stop_monitor": ("val_loss" if val_batches > 0 else "average_loss") if early_stop_patience > 0 else None,
         "curvature": curvature,
         "norm": norm,
         "seed": seed,
@@ -334,7 +395,9 @@ def main() -> None:
 
     print(
         f"arch=maxwell_simulated_z_classification blocks={blocks} sigma={sigma:.3g} kappa={kappa:.3g} norm={norm} "
-        f"epochs={epochs} batch={batch} lr={lr:.3e} curvature={curvature} backend={backend} run_dir={run_dir}"
+        f"epochs={epochs} batch={batch} lr={lr:.3e} schedule={lr_schedule} warmup={lr_warmup_epochs} "
+        f"grad_clip={grad_clip:.3g} "
+        f"curvature={curvature} backend={backend} run_dir={run_dir}"
     )
 
     metrics_path = run_dir / "metrics.jsonl"
@@ -362,8 +425,34 @@ def main() -> None:
                 )
             )
 
+    lr_active = float(lr)
+    lr_floor = float(resolved_lr_min) if resolved_lr_min is not None else float(lr) * 0.1
+    best_monitor = float("inf")
+    stale_epochs = 0
+
+    def _scheduled_lr(epoch_idx: int) -> float:
+        if lr_warmup_epochs > 0 and epoch_idx < lr_warmup_epochs:
+            if lr_warmup_epochs == 1:
+                return float(lr)
+            t = float(epoch_idx) / float(max(1, lr_warmup_epochs - 1))
+            return resolved_warmup_start + (float(lr) - resolved_warmup_start) * t
+        decay_epochs = max(0, epochs - lr_warmup_epochs)
+        if lr_schedule == "constant" or decay_epochs <= 1:
+            return float(lr)
+        t = float(max(0, epoch_idx - lr_warmup_epochs)) / float(max(1, decay_epochs - 1))
+        if lr_schedule == "linear":
+            return float(lr) + (lr_floor - float(lr)) * t
+        return lr_floor + 0.5 * (float(lr) - lr_floor) * (1.0 + math.cos(math.pi * t))
+
     with record_ctx:
         for epoch in range(max(0, epochs)):
+            target_lr = _scheduled_lr(epoch)
+            if lr_active > 0.0 and target_lr > 0.0:
+                factor = float(target_lr) / float(lr_active)
+                if factor == factor and abs(factor - 1.0) > 1e-9:
+                    trainer.mul_learning_rate(model, factor)
+                    lr_active = float(target_lr)
+
             batches: list[tuple[st.Tensor, st.Tensor]] = []
             base_seed = seed + epoch * 10_000
             for b in range(batches_per_epoch):
@@ -389,6 +478,7 @@ def main() -> None:
                     "epoch": epoch,
                     "batches": int(stats.batches),
                     "average_loss": avg_loss,
+                    "learning_rate": lr_active,
                     "val_loss": val_loss if val_loss == val_loss else None,
                 },
             )
@@ -396,6 +486,27 @@ def main() -> None:
                 print(f"epoch[{epoch}] batches={stats.batches} avg_loss={avg_loss:.6f} val_loss={val_loss:.6f}")
             else:
                 print(f"epoch[{epoch}] batches={stats.batches} avg_loss={avg_loss:.6f}")
+
+            monitor_value = val_loss if val_batches_cache else avg_loss
+            monitor_name = "val_loss" if val_batches_cache else "average_loss"
+            if not math.isfinite(monitor_value):
+                print(
+                    f"early-stop: monitor={monitor_name} is non-finite ({monitor_value}); "
+                    "skipping patience update for this epoch"
+                )
+                continue
+            improved = (monitor_value + early_stop_min_delta) < best_monitor
+            if improved:
+                best_monitor = monitor_value
+                stale_epochs = 0
+            else:
+                stale_epochs += 1
+                if early_stop_patience > 0 and stale_epochs >= early_stop_patience:
+                    print(
+                        f"early-stop: epoch={epoch} monitor={monitor_name} value={monitor_value:.6f} "
+                        f"best={best_monitor:.6f} patience={early_stop_patience}"
+                    )
+                    break
 
     if atlas and events_path is not None:
         try:

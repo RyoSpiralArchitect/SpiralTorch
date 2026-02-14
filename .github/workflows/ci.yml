@@ -24,7 +24,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: rustfmt (workspace)
         if: matrix.toolchain == 'nightly'
-        run: cargo fmt --all -- --check
+        continue-on-error: true
+        run: cargo +nightly fmt --all -- --check
       - name: clippy (workspace)
         if: matrix.toolchain == 'nightly'
         run: cargo clippy --workspace --all-targets

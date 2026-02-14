@@ -36,8 +36,8 @@ pub type TensorOpMetaObserver = Arc<dyn Fn(&TensorOpMetaEvent) + Send + Sync + '
 static TENSOR_OP_META_OBSERVER: OnceLock<RwLock<Option<TensorOpMetaObserver>>> = OnceLock::new();
 
 thread_local! {
-    static IN_OBSERVER_CALLBACK: Cell<bool> = Cell::new(false);
-    static IN_META_OBSERVER_CALLBACK: Cell<bool> = Cell::new(false);
+    static IN_OBSERVER_CALLBACK: Cell<bool> = const { Cell::new(false) };
+    static IN_META_OBSERVER_CALLBACK: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Install (or clear) the global tensor operation observer.
