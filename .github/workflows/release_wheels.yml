@@ -53,6 +53,11 @@ jobs:
         run: echo "MACOSX_DEPLOYMENT_TARGET=${{ matrix.macos_deployment_target }}" >> "$GITHUB_ENV"
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libfontconfig1-dev
       - name: Install macOS universal2 targets
         if: runner.os == 'macOS' && matrix.universal2 == true
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
