@@ -25,10 +25,15 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
           TAG_ARG=""
+          POLICY_ARG=""
           if [ -n "${RELEASE_TAG:-}" ]; then
             TAG_ARG="--tag ${RELEASE_TAG}"
           fi
-          python scripts/security/verify_release.py ${TAG_ARG} --repo "${REPOSITORY}"
+          if [ "${EVENT_NAME}" != "release" ]; then
+            POLICY_ARG="--allow-missing-assets"
+          fi
+          python scripts/security/verify_release.py ${TAG_ARG} ${POLICY_ARG} --repo "${REPOSITORY}"

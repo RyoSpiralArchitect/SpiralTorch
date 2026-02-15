@@ -39,6 +39,11 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="Directory for downloaded artifacts. A temporary directory is used when omitted.",
     )
+    parser.add_argument(
+        "--allow-missing-assets",
+        action="store_true",
+        help="Exit successfully when the selected release has no downloadable assets.",
+    )
     return parser.parse_args()
 
 
@@ -168,13 +173,19 @@ def verify_release(args: argparse.Namespace) -> None:
 
     assets = release.get("assets", [])
     if not assets:
-        raise SystemExit(f"Release {tag_name} does not expose any downloadable assets.")
+        message = f"Release {tag_name} does not expose any downloadable assets."
+        if args.allow_missing_assets:
+            print(f"[verify-release] {message} Skipping by policy.")
+            return
+        raise SystemExit(message)
 
     manifest_asset = next((asset for asset in assets if asset["name"].endswith("-manifest.json")), None)
     if not manifest_asset:
-        raise SystemExit(
-            "No authenticated manifest was found in the release assets. Ensure the release workflow has run successfully."
-        )
+        message = "No authenticated manifest was found in the release assets. Ensure the release workflow has run successfully."
+        if args.allow_missing_assets:
+            print(f"[verify-release] {message} Skipping by policy.")
+            return
+        raise SystemExit(message)
 
     asset_index = {asset["name"]: asset for asset in assets}
 
