@@ -2,6 +2,12 @@ use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
 
+#[cfg(feature = "dashboard")]
+use st_core::telemetry::dashboard::{DashboardFrame, DashboardMetric};
+
+#[cfg(feature = "dashboard")]
+use std::time::SystemTime;
+
 type RegistryMap = HashMap<TypeId, Vec<Arc<dyn MetricComputation>>>;
 
 static REGISTRY: OnceLock<RwLock<RegistryMap>> = OnceLock::new();
@@ -194,6 +200,142 @@ pub fn evaluation_to_json(results: &[(MetricDescriptor, MetricValue)]) -> serde_
             })
             .collect(),
     )
+}
+
+/// Converts evaluated metrics into a scalar map for downstream dashboards.
+///
+/// - `Scalar` values are stored directly under the descriptor name.
+/// - `Distribution` values emit derived scalars under suffixes:
+///   `.count`, `.mean`, `.min`, `.max`.
+pub fn evaluation_to_scalar_map(
+    results: &[(MetricDescriptor, MetricValue)],
+) -> HashMap<String, f64> {
+    let mut out = HashMap::new();
+    for (descriptor, metric_value) in results {
+        match metric_value {
+            MetricValue::Scalar(v) => {
+                out.insert(descriptor.name.to_string(), *v);
+            }
+            MetricValue::Distribution(values) => {
+                let count = values.len() as f64;
+                out.insert(format!("{}.count", descriptor.name), count);
+                if values.is_empty() {
+                    continue;
+                }
+                let mut min = f64::INFINITY;
+                let mut max = f64::NEG_INFINITY;
+                let mut sum = 0.0f64;
+                for &value in values {
+                    sum += value;
+                    if value < min {
+                        min = value;
+                    }
+                    if value > max {
+                        max = value;
+                    }
+                }
+                out.insert(format!("{}.mean", descriptor.name), sum / count.max(1.0));
+                out.insert(format!("{}.min", descriptor.name), min);
+                out.insert(format!("{}.max", descriptor.name), max);
+            }
+        }
+    }
+    out
+}
+
+/// Evaluates all registered metrics and returns a scalar map (see [`evaluation_to_scalar_map`]).
+pub fn evaluate_scalar_map<T>(value: &T) -> HashMap<String, f64>
+where
+    T: Any + Send + Sync + 'static,
+{
+    evaluation_to_scalar_map(&evaluate(value))
+}
+
+#[cfg(feature = "dashboard")]
+fn unit_to_dashboard_label(unit: MetricUnit) -> Option<String> {
+    match unit {
+        MetricUnit::Unitless => None,
+        MetricUnit::Probability => Some("probability".to_string()),
+        MetricUnit::Loss => Some("loss".to_string()),
+        MetricUnit::Logit => Some("logit".to_string()),
+        MetricUnit::Custom(label) => Some(label.to_string()),
+    }
+}
+
+/// Converts evaluated metrics into a dashboard telemetry frame.
+#[cfg(feature = "dashboard")]
+pub fn evaluation_to_dashboard_frame(
+    results: &[(MetricDescriptor, MetricValue)],
+) -> DashboardFrame {
+    let mut frame = DashboardFrame::new(SystemTime::now());
+    for (descriptor, metric_value) in results {
+        let unit = unit_to_dashboard_label(descriptor.unit);
+        match metric_value {
+            MetricValue::Scalar(v) => {
+                let mut metric = DashboardMetric::new(descriptor.name, *v);
+                if let Some(unit) = unit.clone() {
+                    metric = metric.with_unit(unit);
+                }
+                frame.push_metric(metric);
+            }
+            MetricValue::Distribution(values) => {
+                let count = values.len() as f64;
+                frame.push_metric(
+                    DashboardMetric::new(format!("{}.count", descriptor.name), count)
+                        .with_unit("count"),
+                );
+                if values.is_empty() {
+                    continue;
+                }
+                let mut min = f64::INFINITY;
+                let mut max = f64::NEG_INFINITY;
+                let mut sum = 0.0f64;
+                for &value in values {
+                    sum += value;
+                    if value < min {
+                        min = value;
+                    }
+                    if value > max {
+                        max = value;
+                    }
+                }
+                let mean = sum / count.max(1.0);
+
+                let mut mean_metric =
+                    DashboardMetric::new(format!("{}.mean", descriptor.name), mean);
+                let mut min_metric = DashboardMetric::new(format!("{}.min", descriptor.name), min);
+                let mut max_metric = DashboardMetric::new(format!("{}.max", descriptor.name), max);
+                if let Some(unit) = unit {
+                    mean_metric = mean_metric.with_unit(unit.clone());
+                    min_metric = min_metric.with_unit(unit.clone());
+                    max_metric = max_metric.with_unit(unit);
+                }
+                frame.push_metric(mean_metric);
+                frame.push_metric(min_metric);
+                frame.push_metric(max_metric);
+            }
+        }
+    }
+    frame
+}
+
+/// Evaluates all registered metrics and returns a dashboard frame.
+#[cfg(feature = "dashboard")]
+pub fn evaluate_dashboard_frame<T>(value: &T) -> DashboardFrame
+where
+    T: Any + Send + Sync + 'static,
+{
+    evaluation_to_dashboard_frame(&evaluate(value))
+}
+
+/// Evaluates all registered metrics and publishes a dashboard frame to the global telemetry hub.
+#[cfg(feature = "dashboard")]
+pub fn push_dashboard_frame<T>(value: &T)
+where
+    T: Any + Send + Sync + 'static,
+{
+    let frame = evaluate_dashboard_frame(value);
+    st_core::telemetry::hub::push_dashboard_frame(frame);
 }
 
 /// Evaluates all registered metrics and returns a JSON array.
