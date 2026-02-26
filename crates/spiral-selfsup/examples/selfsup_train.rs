@@ -196,7 +196,11 @@ impl TensorboardExporter {
             let step = step as i64;
             let _ = writer.write_scalar(step, "selfsup/loss", summary.loss);
             let _ = writer.write_scalar(step, "selfsup/top1_accuracy", summary.top1_accuracy);
-            let _ = writer.write_scalar(step, "selfsup/positive_margin", summary.mean_positive_margin);
+            let _ = writer.write_scalar(
+                step,
+                "selfsup/positive_margin",
+                summary.mean_positive_margin,
+            );
             let _ = writer.write_scalar(
                 step,
                 "selfsup/positive_log_prob",
