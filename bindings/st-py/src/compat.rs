@@ -250,7 +250,7 @@ mod torch {
             if let Ok(current_device) = candidate.getattr("device") {
                 let is_cpu = current_device
                     .getattr("type")
-                    .and_then(|value| value.extract::<&str>())
+                    .and_then(|value| value.extract::<String>())
                     .map(|kind| kind == "cpu")
                     .unwrap_or(true);
                 if !is_cpu {

@@ -679,7 +679,7 @@ impl PyDriftSafetyPlugin {
     }
 }
 
-#[pyclass(module = "spiraltorch.robotics", name = "RoboticsRuntime")]
+#[pyclass(module = "spiraltorch.robotics", name = "RoboticsRuntime", unsendable)]
 pub(crate) struct PyRoboticsRuntime {
     inner: RoboticsRuntime,
 }
