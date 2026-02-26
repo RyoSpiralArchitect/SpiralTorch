@@ -3476,6 +3476,22 @@ impl TransformPipeline {
         }
     }
 
+    /// Replaces the internal RNG with a deterministic seed.
+    pub fn reseed(&mut self, seed: u64) -> &mut Self {
+        self.rng = StdRng::seed_from_u64(seed);
+        self
+    }
+
+    /// Returns a clone of the pipeline using the provided seed.
+    ///
+    /// This is useful when a shared pipeline template is reused across stream/online training
+    /// workers, as it preserves any configured GPU dispatcher.
+    pub fn cloned_with_seed(&self, seed: u64) -> Self {
+        let mut cloned = self.clone();
+        cloned.reseed(seed);
+        cloned
+    }
+
     pub fn add(&mut self, op: TransformOperation) -> &mut Self {
         self.ops.push(op);
         self
@@ -5489,6 +5505,75 @@ mod tests {
             let idx = channel * area;
             assert!((data[idx] - value).abs() < 1e-3);
         }
+    }
+
+    #[test]
+    fn transform_pipeline_cloned_with_seed_is_deterministic() {
+        let flip = RandomHorizontalFlip::new(0.5).unwrap();
+
+        let mut seed_flip = None;
+        let mut seed_no_flip = None;
+        for seed in 0u64..4096 {
+            let mut rng = StdRng::seed_from_u64(seed);
+            if flip.should_apply(&mut rng) {
+                seed_flip.get_or_insert(seed);
+            } else {
+                seed_no_flip.get_or_insert(seed);
+            }
+            if seed_flip.is_some() && seed_no_flip.is_some() {
+                break;
+            }
+        }
+        let seed_flip = seed_flip.expect("expected to find a seed that flips");
+        let seed_no_flip = seed_no_flip.expect("expected to find a seed that does not flip");
+
+        let mut template = TransformPipeline::new();
+        template.add(TransformOperation::RandomHorizontalFlip(flip.clone()));
+
+        let base = ImageTensor::new(1, 1, 4, vec![0.0, 1.0, 2.0, 3.0]).unwrap();
+
+        let cases = [(seed_flip, true), (seed_no_flip, false)];
+        for (seed, apply) in cases {
+            let mut pipeline = template.cloned_with_seed(seed);
+            let mut image = base.clone();
+            pipeline.apply(&mut image).unwrap();
+
+            let mut expected = base.clone();
+            flip.apply_with_flag(&mut expected, apply).unwrap();
+            assert_eq!(image, expected);
+        }
+    }
+
+    #[test]
+    fn transform_pipeline_reseed_resets_rng() {
+        let flip = RandomHorizontalFlip::new(0.5).unwrap();
+        let seed = 42;
+
+        let mut pipeline = TransformPipeline::new();
+        pipeline.add(TransformOperation::RandomHorizontalFlip(flip));
+        pipeline.reseed(seed);
+
+        let base = ImageTensor::new(1, 1, 4, vec![0.0, 1.0, 2.0, 3.0]).unwrap();
+
+        let mut first = base.clone();
+        pipeline.apply(&mut first).unwrap();
+
+        pipeline.reseed(seed);
+        let mut second = base;
+        pipeline.apply(&mut second).unwrap();
+
+        assert_eq!(first, second);
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn transform_pipeline_cloned_with_seed_preserves_gpu_dispatcher() {
+        let mut pipeline = TransformPipeline::new();
+        pipeline.add(TransformOperation::Resize(Resize::new(2, 2).unwrap()));
+        pipeline.set_gpu_dispatcher(TransformDispatcher::cpu());
+
+        let cloned = pipeline.cloned_with_seed(7);
+        assert!(cloned.has_gpu_dispatcher());
     }
 
     #[cfg(feature = "wgpu")]
