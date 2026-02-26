@@ -9,8 +9,7 @@ on:
       publish_pypi:
         description: "Publish wheels to PyPI (otherwise manual upload)"
         required: false
-        default: false
-        type: boolean
+        default: "false"
 
 permissions:
   actions: read
