@@ -2166,6 +2166,7 @@ mod tests {
 
     #[test]
     fn realgrad_pulse_roundtrips_through_cache() {
+        let _guard = atlas_test_lock().lock().unwrap();
         clear_last_realgrad_for_test();
         assert!(get_last_realgrad().is_none());
         let pulse = RealGradPulse {
