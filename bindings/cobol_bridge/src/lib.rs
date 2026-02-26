@@ -33,7 +33,7 @@ pub extern "C" fn st_cobol_new_resonator(
 }
 
 #[no_mangle]
-pub extern "C" fn st_cobol_free_resonator(handle: *mut ResonanceHandle) {
+pub unsafe extern "C" fn st_cobol_free_resonator(handle: *mut ResonanceHandle) {
     if handle.is_null() {
         return;
     }
@@ -43,7 +43,7 @@ pub extern "C" fn st_cobol_free_resonator(handle: *mut ResonanceHandle) {
 }
 
 #[no_mangle]
-pub extern "C" fn st_cobol_describe(
+pub unsafe extern "C" fn st_cobol_describe(
     handle: *mut ResonanceHandle,
     values: *const c_float,
     len: c_int,
@@ -75,7 +75,7 @@ pub extern "C" fn st_cobol_describe(
 }
 
 #[no_mangle]
-pub extern "C" fn st_cobol_free_string(ptr: *mut c_char) {
+pub unsafe extern "C" fn st_cobol_free_string(ptr: *mut c_char) {
     if ptr.is_null() {
         return;
     }
@@ -111,12 +111,14 @@ mod tests {
 
         let coefficients = [0.1, -0.3, 0.25, -0.4, 0.55];
         let mut summary_ptr: *mut c_char = ptr::null_mut();
-        let status = st_cobol_describe(
-            handle,
-            coefficients.as_ptr(),
-            coefficients.len() as c_int,
-            &mut summary_ptr,
-        );
+        let status = unsafe {
+            st_cobol_describe(
+                handle,
+                coefficients.as_ptr(),
+                coefficients.len() as c_int,
+                &mut summary_ptr,
+            )
+        };
         assert_eq!(status, 0);
         assert!(!summary_ptr.is_null());
 
@@ -124,9 +126,9 @@ mod tests {
             .to_string_lossy()
             .into_owned();
         assert!(!summary.is_empty());
-        st_cobol_free_string(summary_ptr);
+        unsafe { st_cobol_free_string(summary_ptr) };
 
-        st_cobol_free_resonator(handle);
+        unsafe { st_cobol_free_resonator(handle) };
     }
 
     #[test]
@@ -135,25 +137,27 @@ mod tests {
         assert!(!handle.is_null());
         let coefficients = [0.12, -0.28, 0.44];
         let mut summary_ptr: *mut c_char = ptr::null_mut();
-        let status = st_cobol_describe(
-            handle,
-            coefficients.as_ptr(),
-            coefficients.len() as c_int,
-            &mut summary_ptr,
-        );
+        let status = unsafe {
+            st_cobol_describe(
+                handle,
+                coefficients.as_ptr(),
+                coefficients.len() as c_int,
+                &mut summary_ptr,
+            )
+        };
         assert_eq!(status, 0);
         let summary = unsafe { CStr::from_ptr(summary_ptr) }
             .to_string_lossy()
             .into_owned();
         assert!(summary.chars().any(|ch| ch.is_alphabetic()));
-        st_cobol_free_string(summary_ptr);
-        st_cobol_free_resonator(handle);
+        unsafe { st_cobol_free_string(summary_ptr) };
+        unsafe { st_cobol_free_resonator(handle) };
     }
 
     #[test]
     fn rejects_invalid_arguments() {
         let mut out: *mut c_char = ptr::null_mut();
-        let status = st_cobol_describe(ptr::null_mut(), ptr::null(), 0, &mut out);
+        let status = unsafe { st_cobol_describe(ptr::null_mut(), ptr::null(), 0, &mut out) };
         assert_eq!(status, -1);
     }
 
@@ -163,18 +167,19 @@ mod tests {
         assert!(!handle.is_null());
 
         let mut out: *mut c_char = ptr::null_mut();
-        let status = st_cobol_describe(handle, ptr::null(), 5, &mut out);
+        let status = unsafe { st_cobol_describe(handle, ptr::null(), 5, &mut out) };
         assert_eq!(status, -1);
 
         let mut out: *mut c_char = ptr::null_mut();
-        let status = st_cobol_describe(handle, ptr::null(), -1, &mut out);
+        let status = unsafe { st_cobol_describe(handle, ptr::null(), -1, &mut out) };
         assert_eq!(status, -1);
 
         let empty: [f32; 0] = [];
         let mut out: *mut c_char = ptr::null_mut();
-        let status = st_cobol_describe(handle, empty.as_ptr(), empty.len() as c_int, &mut out);
+        let status =
+            unsafe { st_cobol_describe(handle, empty.as_ptr(), empty.len() as c_int, &mut out) };
         assert_eq!(status, -2);
 
-        st_cobol_free_resonator(handle);
+        unsafe { st_cobol_free_resonator(handle) };
     }
 }
