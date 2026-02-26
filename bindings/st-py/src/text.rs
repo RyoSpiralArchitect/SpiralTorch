@@ -9,7 +9,10 @@ use pyo3::exceptions::PyValueError;
 use crate::{psi_synchro::PyZPulse, tensor::tensor_err_to_py};
 
 #[cfg(feature = "text")]
-use crate::{telemetry::PyAtlasFrame, vision::chrono_summary_from_any};
+use crate::{
+    telemetry::{PyAtlasFrame, PyDashboardFrame},
+    vision::chrono_summary_from_any,
+};
 
 #[cfg(feature = "text")]
 use st_core::theory::zpulse::ZScale;
@@ -197,6 +200,10 @@ impl PyTextResonator {
         PyResonanceNarrative::from_inner(self.inner.describe_atlas(&atlas.to_frame()))
     }
 
+    fn describe_dashboard_frame(&self, frame: &PyDashboardFrame) -> PyResonanceNarrative {
+        PyResonanceNarrative::from_inner(self.inner.describe_dashboard_frame(&frame.inner))
+    }
+
     #[pyo3(signature = (summary))]
     fn describe_chrono_summary(
         &self,
@@ -229,6 +236,14 @@ impl PyTextResonator {
             .map(PyLanguageWave::from_inner)
             .map_err(tensor_err_to_py)
     }
+
+    fn wave_from_dashboard_frame(&self, frame: &PyDashboardFrame) -> PyResult<PyLanguageWave> {
+        let narrative = self.inner.describe_dashboard_frame(&frame.inner);
+        self.inner
+            .synthesize_wave(&narrative)
+            .map(PyLanguageWave::from_inner)
+            .map_err(tensor_err_to_py)
+    }
 }
 
 #[cfg(feature = "text")]
@@ -252,6 +267,12 @@ impl PyRealtimeNarrator {
     fn narrate_atlas(&self, atlas: &PyAtlasFrame) -> PyResult<Vec<f32>> {
         self.inner
             .narrate_atlas(&atlas.to_frame())
+            .map_err(tensor_err_to_py)
+    }
+
+    fn narrate_dashboard_frame(&self, frame: &PyDashboardFrame) -> PyResult<Vec<f32>> {
+        self.inner
+            .narrate_dashboard_frame(&frame.inner)
             .map_err(tensor_err_to_py)
     }
 

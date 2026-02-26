@@ -31,6 +31,7 @@ use st_core::telemetry::atlas::AtlasFrame;
 use st_core::telemetry::chrono::{
     ChronoFrame, ChronoHarmonics, ChronoSummary, ResonanceTemporalMetrics,
 };
+use st_core::telemetry::dashboard::{DashboardFrame, EventSeverity};
 use st_core::theory::zpulse::ZPulse;
 use st_logic::contextual_observation::{
     Arrangement, LagrangianGate, MeaningEmergenceProfile, MeaningProjection, OrientationGauge,
@@ -608,9 +609,99 @@ impl TextResonator {
         for note in &atlas.notes {
             highlights.push(note.clone());
         }
+        if !atlas.concepts.is_empty() {
+            let mut concepts = atlas.concepts.clone();
+            concepts.sort_by(|a, b| a.term.cmp(&b.term).then_with(|| a.sense.cmp(&b.sense)));
+            let total = concepts.len();
+            summary.push_str(&format!(" Concepts {}.", total));
+            for concept in concepts.iter().take(3) {
+                let mut line = format!("concept {} {}", concept.term, concept.sense.label());
+                if let Some(rationale) = &concept.rationale {
+                    let rationale = rationale.trim();
+                    if !rationale.is_empty() {
+                        let snippet: String = rationale.chars().take(120).collect();
+                        if snippet.chars().count() < rationale.chars().count() {
+                            line.push_str(" — ");
+                            line.push_str(&snippet);
+                            line.push('…');
+                        } else {
+                            line.push_str(" — ");
+                            line.push_str(rationale);
+                        }
+                    }
+                }
+                highlights.push(line);
+            }
+            if total > 3 {
+                highlights.push(format!("concepts +{}", total - 3));
+            }
+        }
         if let Some(script) = &atlas.script_hint {
             highlights.push(format!("script {}", script));
         }
+        ResonanceNarrative::new(summary, highlights)
+    }
+
+    /// Produces a narrative describing a dashboard telemetry frame.
+    pub fn describe_dashboard_frame(&self, frame: &DashboardFrame) -> ResonanceNarrative {
+        let mut counts = (0usize, 0usize, 0usize);
+        for event in &frame.events {
+            match event.severity {
+                EventSeverity::Info => counts.0 += 1,
+                EventSeverity::Warning => counts.1 += 1,
+                EventSeverity::Critical => counts.2 += 1,
+            }
+        }
+
+        let mut summary = format!(
+            "Dashboard frame: {} metrics, {} events ({} info, {} warning, {} critical).",
+            frame.metrics.len(),
+            frame.events.len(),
+            counts.0,
+            counts.1,
+            counts.2
+        );
+        if counts.2 > 0 {
+            summary.push_str(" Immediate attention recommended.");
+        } else if counts.1 > 0 {
+            summary.push_str(" Monitor warnings for drift.");
+        }
+
+        let mut highlights = Vec::new();
+        let mut metrics = frame.metrics.clone();
+        metrics.sort_by(|a, b| {
+            b.trend
+                .unwrap_or(0.0)
+                .abs()
+                .total_cmp(&a.trend.unwrap_or(0.0).abs())
+                .then_with(|| b.value.total_cmp(&a.value))
+        });
+        for metric in metrics.iter().take(8) {
+            match (&metric.unit, metric.trend) {
+                (Some(unit), Some(trend)) => highlights.push(format!(
+                    "{} {:.3}{} trend {:+.3}",
+                    metric.name, metric.value, unit, trend
+                )),
+                (Some(unit), None) => {
+                    highlights.push(format!("{} {:.3}{}", metric.name, metric.value, unit))
+                }
+                (None, Some(trend)) => highlights.push(format!(
+                    "{} {:.3} trend {:+.3}",
+                    metric.name, metric.value, trend
+                )),
+                (None, None) => highlights.push(format!("{} {:.3}", metric.name, metric.value)),
+            }
+        }
+
+        for event in frame.events.iter().take(8) {
+            let label = match event.severity {
+                EventSeverity::Info => "info",
+                EventSeverity::Warning => "warning",
+                EventSeverity::Critical => "critical",
+            };
+            highlights.push(format!("event {label}: {}", event.message));
+        }
+
         ResonanceNarrative::new(summary, highlights)
     }
 
@@ -714,6 +805,12 @@ impl RealtimeNarrator {
         let wave = self.inner.synthesize_wave(&narrative)?;
         Ok(wave.to_audio_samples(self.sample_rate))
     }
+
+    pub fn narrate_dashboard_frame(&self, frame: &DashboardFrame) -> PureResult<Vec<f32>> {
+        let narrative = self.inner.describe_dashboard_frame(frame);
+        let wave = self.inner.synthesize_wave(&narrative)?;
+        Ok(wave.to_audio_samples(self.sample_rate))
+    }
 }
 
 /// Convenience helper that returns a narrative summary using default narrator settings.
@@ -742,6 +839,11 @@ pub fn describe_timeline(frames: &[ChronoFrame]) -> PureResult<String> {
 /// Convenience helper that summarises an atlas frame with default narrator settings.
 pub fn describe_atlas(atlas: &AtlasFrame) -> PureResult<String> {
     TextResonator::new(-1.0, 0.6).map(|narrator| narrator.describe_atlas(atlas).summary)
+}
+
+/// Convenience helper that summarises a dashboard frame with default narrator settings.
+pub fn describe_dashboard_frame(frame: &DashboardFrame) -> PureResult<String> {
+    TextResonator::new(-1.0, 0.6).map(|narrator| narrator.describe_dashboard_frame(frame).summary)
 }
 
 fn resonance_metrics(resonance: &DifferentialResonance) -> ResonanceTemporalMetrics {
