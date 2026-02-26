@@ -107,10 +107,14 @@ impl ZSpaceCoherenceScan {
             mse += diff * diff;
         }
         let denom = (self.dim as f32).max(1.0);
-        let dist = ((mse / denom).sqrt() * (-self.curvature).sqrt() / self.temperature)
-            .max(DIST_FLOOR);
+        let dist =
+            ((mse / denom).sqrt() * (-self.curvature).sqrt() / self.temperature).max(DIST_FLOOR);
         let score = 1.0 / (dist.powf(self.coherence_order()) + SCORE_FLOOR);
-        if score.is_finite() { score } else { 0.0 }
+        if score.is_finite() {
+            score
+        } else {
+            0.0
+        }
     }
 }
 
@@ -289,4 +293,3 @@ mod tests {
         assert!((row[1] - 1.0).abs() < 1e-4);
     }
 }
-

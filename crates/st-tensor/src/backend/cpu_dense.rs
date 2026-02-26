@@ -992,7 +992,13 @@ fn cpu_feature_tag() -> String {
 mod tests {
     use super::*;
 
-    fn reference_matmul(lhs: &[f32], rhs: &[f32], rows: usize, inner: usize, cols: usize) -> Vec<f32> {
+    fn reference_matmul(
+        lhs: &[f32],
+        rhs: &[f32],
+        rows: usize,
+        inner: usize,
+        cols: usize,
+    ) -> Vec<f32> {
         let mut out = vec![0.0f32; rows * cols];
         for r in 0..rows {
             for c in 0..cols {
@@ -1009,7 +1015,8 @@ mod tests {
     fn assert_close(actual: &[f32], expected: &[f32]) {
         const EPS: f32 = 1e-4;
         assert_eq!(actual.len(), expected.len());
-        for (idx, (&actual_value, &expected_value)) in actual.iter().zip(expected.iter()).enumerate()
+        for (idx, (&actual_value, &expected_value)) in
+            actual.iter().zip(expected.iter()).enumerate()
         {
             assert!(
                 (actual_value - expected_value).abs() < EPS,

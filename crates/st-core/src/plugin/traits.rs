@@ -4,9 +4,9 @@
 
 //! Core traits and types for the plugin system.
 
-use crate::PureResult;
 use super::context::PluginContext;
 use super::events::PluginEvent;
+use crate::PureResult;
 use std::any::Any;
 use std::collections::HashMap;
 
@@ -65,7 +65,11 @@ impl PluginMetadata {
     }
 
     /// Add a dependency on another plugin.
-    pub fn with_dependency(mut self, plugin_id: impl Into<String>, version: impl Into<String>) -> Self {
+    pub fn with_dependency(
+        mut self,
+        plugin_id: impl Into<String>,
+        version: impl Into<String>,
+    ) -> Self {
         self.dependencies.insert(plugin_id.into(), version.into());
         self
     }
@@ -224,7 +228,7 @@ mod tests {
     fn test_plugin_metadata() {
         let plugin = TestPlugin;
         let meta = plugin.metadata();
-        
+
         assert_eq!(meta.id, "test_plugin");
         assert_eq!(meta.version, "1.0.0");
         assert_eq!(meta.name, Some("Test Plugin".to_string()));

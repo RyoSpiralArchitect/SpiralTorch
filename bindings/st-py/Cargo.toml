@@ -82,5 +82,5 @@ nalgebra = { version = "0.32", default-features = false, features = ["std"] }
 
 [package.metadata]
 pyo3 = { extension-module = true, abi3 = true, abi3-py38 = true }
-maturin = { name = "spiraltorch", python-source = "python" }
+maturin = { name = "spiraltorch", python-source = "." }
 spiraltorch = { copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved" }

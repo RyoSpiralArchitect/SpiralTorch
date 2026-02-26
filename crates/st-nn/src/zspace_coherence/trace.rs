@@ -391,7 +391,8 @@ impl ZSpaceTraceRecorder {
 
     pub fn write_jsonl(&self, path: impl AsRef<Path>) -> PureResult<()> {
         let trace = self.snapshot();
-        let file = File::create(path.as_ref()).map_err(|err| TensorError::Generic(err.to_string()))?;
+        let file =
+            File::create(path.as_ref()).map_err(|err| TensorError::Generic(err.to_string()))?;
         let mut writer = BufWriter::new(file);
         for event in trace.events {
             let json = serde_json::to_string(&event)
@@ -455,10 +456,12 @@ impl ZSpaceTraceRecorder {
                 narrative: narrative.cloned(),
                 pulse: MaxwellZPulseSummary::from(pulse),
             },
-            ZSpaceSequencerStage::BackendConfigured { backend } => ZSpaceTraceEvent::BackendConfigured {
-                step,
-                backend: backend.label().to_string(),
-            },
+            ZSpaceSequencerStage::BackendConfigured { backend } => {
+                ZSpaceTraceEvent::BackendConfigured {
+                    step,
+                    backend: backend.label().to_string(),
+                }
+            }
             ZSpaceSequencerStage::LinguisticProfileRegistered { profile } => {
                 ZSpaceTraceEvent::LinguisticProfileRegistered {
                     step,
@@ -509,18 +512,22 @@ impl ZSpaceTraceRecorder {
                     contour: LinguisticContourSummary::from(contour),
                 }
             }
-            ZSpaceSequencerStage::ChannelsDescribed { coherence, reports } => ZSpaceTraceEvent::ChannelsDescribed {
-                step,
-                coherence: coherence.iter().copied().take(limit).collect(),
-                reports: reports
-                    .iter()
-                    .map(LinguisticChannelReportSummary::from)
-                    .collect(),
-            },
-            ZSpaceSequencerStage::SemanticWindowFused { concept } => ZSpaceTraceEvent::SemanticWindowFused {
-                step,
-                concept: ConceptHintSnapshot::from_hint(concept, limit),
-            },
+            ZSpaceSequencerStage::ChannelsDescribed { coherence, reports } => {
+                ZSpaceTraceEvent::ChannelsDescribed {
+                    step,
+                    coherence: coherence.iter().copied().take(limit).collect(),
+                    reports: reports
+                        .iter()
+                        .map(LinguisticChannelReportSummary::from)
+                        .collect(),
+                }
+            }
+            ZSpaceSequencerStage::SemanticWindowFused { concept } => {
+                ZSpaceTraceEvent::SemanticWindowFused {
+                    step,
+                    concept: ConceptHintSnapshot::from_hint(concept, limit),
+                }
+            }
             #[cfg(feature = "psi")]
             ZSpaceSequencerStage::PsiTelemetryPublished {
                 pulse,
@@ -600,9 +607,17 @@ pub fn coherence_relation_tensor(coherence: &[f32]) -> PureResult<Tensor> {
 
     let mut data = Vec::with_capacity(n * n);
     for &a in coherence {
-        let a = if a.is_finite() { (a / max).clamp(0.0, 1.0) } else { 0.0 };
+        let a = if a.is_finite() {
+            (a / max).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
         for &b in coherence {
-            let b = if b.is_finite() { (b / max).clamp(0.0, 1.0) } else { 0.0 };
+            let b = if b.is_finite() {
+                (b / max).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
             data.push(a * b);
         }
     }
@@ -631,9 +646,18 @@ mod tests {
 
         let trace = recorder.snapshot();
         assert!(!trace.events.is_empty());
-        assert!(trace.events.iter().any(|event| matches!(event, ZSpaceTraceEvent::Projected { .. })));
-        assert!(trace.events.iter().any(|event| matches!(event, ZSpaceTraceEvent::CoherenceMeasured { .. })));
-        assert!(trace.events.iter().any(|event| matches!(event, ZSpaceTraceEvent::Aggregated { .. })));
+        assert!(trace
+            .events
+            .iter()
+            .any(|event| matches!(event, ZSpaceTraceEvent::Projected { .. })));
+        assert!(trace
+            .events
+            .iter()
+            .any(|event| matches!(event, ZSpaceTraceEvent::CoherenceMeasured { .. })));
+        assert!(trace
+            .events
+            .iter()
+            .any(|event| matches!(event, ZSpaceTraceEvent::Aggregated { .. })));
     }
 
     #[test]

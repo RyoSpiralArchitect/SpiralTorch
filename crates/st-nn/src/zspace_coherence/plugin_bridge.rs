@@ -7,9 +7,9 @@
 //! This module allows ZSpaceSequencerPlugins to be registered in the global
 //! plugin registry, enabling organic ecosystem integration.
 
+use crate::zspace_coherence::ZSpaceSequencerPlugin;
 use st_core::plugin::{Plugin, PluginCapability, PluginContext, PluginMetadata};
 use st_core::PureResult;
-use crate::zspace_coherence::ZSpaceSequencerPlugin;
 use std::any::Any;
 use std::sync::{Arc, Mutex};
 
@@ -21,10 +21,7 @@ pub struct ZSpacePluginAdapter {
 
 impl ZSpacePluginAdapter {
     /// Create a new adapter for a ZSpaceSequencerPlugin.
-    pub fn new(
-        plugin: Box<dyn ZSpaceSequencerPlugin>,
-        metadata: PluginMetadata,
-    ) -> Self {
+    pub fn new(plugin: Box<dyn ZSpaceSequencerPlugin>, metadata: PluginMetadata) -> Self {
         Self {
             inner: Arc::new(Mutex::new(plugin)),
             metadata,
@@ -34,10 +31,7 @@ impl ZSpacePluginAdapter {
     /// Create with auto-generated metadata based on the plugin name.
     pub fn with_auto_metadata(plugin: Box<dyn ZSpaceSequencerPlugin>) -> Self {
         let name = plugin.name();
-        let metadata = PluginMetadata::new(
-            format!("zspace_sequencer_{}", name),
-            "1.0.0"
-        )
+        let metadata = PluginMetadata::new(format!("zspace_sequencer_{}", name), "1.0.0")
             .with_name(format!("ZSpace Sequencer: {}", name))
             .with_description(format!("ZSpace coherence sequencing plugin: {}", name))
             .with_capability(PluginCapability::Custom("ZSpaceSequencer".to_string()));
@@ -60,7 +54,7 @@ impl Plugin for ZSpacePluginAdapter {
         // Register the sequencer plugin as a service so others can access it
         let service_name = format!("zspace_sequencer_{}", self.metadata.id);
         ctx.register_service(&service_name, Arc::clone(&self.inner));
-        
+
         println!("✅ Loaded ZSpace sequencer plugin: {}", self.metadata.id);
         Ok(())
     }
@@ -101,9 +95,8 @@ impl ZSpacePluginRegistry {
     /// Find all registered ZSpace sequencer plugins.
     pub fn find_all_sequencers() -> Vec<Arc<Mutex<Box<dyn ZSpaceSequencerPlugin>>>> {
         let registry = st_core::plugin::global_registry();
-        let handles = registry.find_by_capability(
-            &PluginCapability::Custom("ZSpaceSequencer".to_string())
-        );
+        let handles =
+            registry.find_by_capability(&PluginCapability::Custom("ZSpaceSequencer".to_string()));
 
         handles
             .iter()
@@ -122,7 +115,7 @@ impl ZSpacePluginRegistry {
     pub fn get_sequencer(name: &str) -> Option<Arc<Mutex<Box<dyn ZSpaceSequencerPlugin>>>> {
         let plugin_id = format!("zspace_sequencer_{}", name);
         let registry = st_core::plugin::global_registry();
-        
+
         registry.get(&plugin_id).and_then(|handle| {
             handle.with_plugin(|plugin| {
                 plugin
@@ -155,7 +148,7 @@ mod tests {
     fn test_adapter_creation() {
         let plugin = Box::new(TestSequencerPlugin);
         let adapter = ZSpacePluginAdapter::with_auto_metadata(plugin);
-        
+
         let meta = adapter.metadata();
         assert!(meta.id.contains("test_sequencer"));
     }

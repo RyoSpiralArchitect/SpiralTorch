@@ -3,11 +3,11 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 
 use st_core::backend::device_caps::DeviceCaps;
+use st_nn::layers::{conv::Conv2d, NonLiner};
 use st_nn::{
     HyperbolicCrossEntropy, Linear, Module, ModuleTrainer, RoundtableConfig, Scaler, Sequential,
     Tensor,
 };
-use st_nn::layers::{conv::Conv2d, NonLiner};
 
 fn conv_output_hw(
     input_hw: (usize, usize),

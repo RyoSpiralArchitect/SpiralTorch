@@ -7,6 +7,8 @@ use thiserror::Error;
 
 #[cfg(feature = "redis")]
 use redis::Value;
+#[cfg(feature = "redis")]
+use std::time::Duration;
 
 /// Unified error type for key-value helper routines.
 #[cfg(feature = "redis")]
@@ -16,6 +18,11 @@ pub enum KvErr {
     Redis(#[from] redis::RedisError),
     #[error("serde error: {0}")]
     Serde(#[from] serde_json::Error),
+    #[error("operation timed out: {operation} after {timeout:?}")]
+    Timeout {
+        operation: &'static str,
+        timeout: Duration,
+    },
     #[error("invalid Redis SET options: {0}")]
     InvalidOptions(&'static str),
     #[error("invalid expiry: {0}")]

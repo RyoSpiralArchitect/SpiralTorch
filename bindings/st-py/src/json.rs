@@ -34,4 +34,3 @@ pub fn json_to_py(py: Python<'_>, value: &JsonValue) -> PyResult<PyObject> {
         }
     })
 }
-

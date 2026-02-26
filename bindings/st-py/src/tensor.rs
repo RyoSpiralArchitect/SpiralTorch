@@ -1237,7 +1237,10 @@ impl PyTensor {
         py: Python<'_>,
     ) -> PyResult<PyTensor> {
         let tensor = py
-            .allow_threads(|| self.inner.layer_norm_affine(&gamma.inner, &beta.inner, epsilon))
+            .allow_threads(|| {
+                self.inner
+                    .layer_norm_affine(&gamma.inner, &beta.inner, epsilon)
+            })
             .map_err(tensor_err_to_py)?;
         Ok(PyTensor { inner: tensor })
     }

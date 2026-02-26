@@ -3384,6 +3384,18 @@ impl<D: VisionDataset> DataLoader<D> {
     }
 }
 
+impl<D: VisionDataset> Iterator for DataLoader<D> {
+    type Item = PureResult<VisionBatch>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.next_batch() {
+            Ok(Some(batch)) => Some(Ok(batch)),
+            Ok(None) => None,
+            Err(err) => Some(Err(err)),
+        }
+    }
+}
+
 /// Transform operations that mimic `torchvision.transforms` behaviour.
 #[derive(Clone, Debug)]
 pub enum TransformOperation {
@@ -3621,7 +3633,7 @@ impl TransformPipeline {
         op: &RandomHorizontalFlip,
         image: &mut ImageTensor,
     ) -> PureResult<()> {
-        let apply = self.rng.gen::<f32>() < op.probability;
+        let apply = op.should_apply(&mut self.rng);
         #[cfg(feature = "wgpu")]
         {
             if let Some(dispatcher) = self.dispatcher.as_deref() {
@@ -3746,6 +3758,18 @@ impl TransformPipeline {
                     commands.push(GeometryCommand::CenterCrop(config));
                     geometry.height = op.height;
                     geometry.width = op.width;
+                    index += 1;
+                }
+                TransformOperation::RandomHorizontalFlip(op) => {
+                    let apply = op.should_apply(&mut self.rng);
+                    if apply {
+                        commands.push(GeometryCommand::HorizontalFlip(HorizontalFlipConfig {
+                            channels: geometry.channels,
+                            height: geometry.height,
+                            width: geometry.width,
+                            apply,
+                        }));
+                    }
                     index += 1;
                 }
                 _ => break,
@@ -5502,6 +5526,44 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn geometry_sequence_handles_horizontal_flip() {
+        use rand::Rng;
+
+        let resize = Resize::new(80, 96).unwrap();
+        let crop = CenterCrop::new(64, 64).unwrap();
+        let flip = RandomHorizontalFlip::new(1.0).unwrap();
+
+        let mut rng = StdRng::seed_from_u64(9);
+        let mut data = vec![0.0f32; 3 * 128 * 128];
+        for value in data.iter_mut() {
+            *value = rng.gen();
+        }
+
+        let mut image = ImageTensor::new(3, 128, 128, data.clone()).unwrap();
+        let mut expected = ImageTensor::new(3, 128, 128, data).unwrap();
+
+        resize.clone().apply(&mut expected).unwrap();
+        crop.clone().apply(&mut expected).unwrap();
+        flip.apply_with_flag(&mut expected, true).unwrap();
+
+        let dispatcher = TransformDispatcher::cpu();
+        let mut pipeline = TransformPipeline::with_seed(5);
+        pipeline
+            .add(TransformOperation::Resize(resize))
+            .add(TransformOperation::CenterCrop(crop))
+            .add(TransformOperation::RandomHorizontalFlip(flip));
+        pipeline.set_gpu_dispatcher(dispatcher);
+
+        pipeline.apply(&mut image).unwrap();
+
+        assert_eq!(image.shape(), expected.shape());
+        for (lhs, rhs) in image.as_slice().iter().zip(expected.as_slice()) {
+            assert!((lhs - rhs).abs() < 1e-5);
+        }
+    }
+
     #[test]
     fn dataloader_produces_batches() {
         let descriptor = dataset_catalog()[0].clone();
@@ -5523,6 +5585,25 @@ mod tests {
             seen += batch.len();
         }
         assert_eq!(seen, 8);
+    }
+
+    #[test]
+    fn dataloader_is_iterable() {
+        let descriptor = dataset_catalog()[0].clone();
+        let mut dataset = TensorVisionDataset::new(descriptor);
+        for idx in 0..5 {
+            let image = ImageTensor::new(3, 32, 32, vec![idx as f32; 3 * 32 * 32]).unwrap();
+            dataset.push_sample(DatasetSample::new(image)).unwrap();
+        }
+        let dataset = Arc::new(dataset);
+        let mut loader = DataLoader::new(dataset, 2, Some(7)).unwrap();
+        let mut seen = 0usize;
+        for batch in loader.by_ref() {
+            let batch = batch.unwrap();
+            assert!(!batch.is_empty());
+            seen += batch.len();
+        }
+        assert_eq!(seen, 5);
     }
 
     #[test]

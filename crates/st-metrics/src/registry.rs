@@ -144,6 +144,115 @@ where
         .unwrap_or_default()
 }
 
+#[cfg(feature = "json")]
+fn unit_to_label(unit: MetricUnit) -> String {
+    match unit {
+        MetricUnit::Unitless => "unitless".to_string(),
+        MetricUnit::Probability => "probability".to_string(),
+        MetricUnit::Loss => "loss".to_string(),
+        MetricUnit::Logit => "logit".to_string(),
+        MetricUnit::Custom(label) => format!("custom:{label}"),
+    }
+}
+
+#[cfg(feature = "json")]
+fn value_to_json(value: &MetricValue) -> serde_json::Value {
+    match value {
+        MetricValue::Scalar(v) => serde_json::json!({
+            "type": "scalar",
+            "value": v,
+        }),
+        MetricValue::Distribution(values) => serde_json::json!({
+            "type": "distribution",
+            "value": values,
+        }),
+    }
+}
+
+#[cfg(feature = "json")]
+fn descriptor_to_json(descriptor: &MetricDescriptor) -> serde_json::Value {
+    serde_json::json!({
+        "name": descriptor.name,
+        "description": descriptor.description,
+        "unit": unit_to_label(descriptor.unit),
+        "tags": descriptor.tags,
+        "higher_is_better": descriptor.higher_is_better,
+    })
+}
+
+/// Converts evaluated metrics into a JSON array.
+#[cfg(feature = "json")]
+pub fn evaluation_to_json(results: &[(MetricDescriptor, MetricValue)]) -> serde_json::Value {
+    serde_json::Value::Array(
+        results
+            .iter()
+            .map(|(descriptor, value)| {
+                serde_json::json!({
+                    "descriptor": descriptor_to_json(descriptor),
+                    "value": value_to_json(value),
+                })
+            })
+            .collect(),
+    )
+}
+
+/// Evaluates all registered metrics and returns a JSON array.
+#[cfg(feature = "json")]
+pub fn evaluate_json<T>(value: &T) -> serde_json::Value
+where
+    T: Any + Send + Sync + 'static,
+{
+    evaluation_to_json(&evaluate(value))
+}
+
+/// Returns a JSON array of descriptors without running evaluation.
+#[cfg(feature = "json")]
+pub fn descriptors_json_for<T>() -> serde_json::Value
+where
+    T: Any + Send + Sync + 'static,
+{
+    serde_json::Value::Array(
+        descriptors_for::<T>()
+            .iter()
+            .map(descriptor_to_json)
+            .collect(),
+    )
+}
+
+/// Emits evaluated metrics into `tracing` as `INFO` events.
+#[cfg(feature = "tracing")]
+pub fn emit_tracing<T>(value: &T)
+where
+    T: Any + Send + Sync + 'static,
+{
+    for (descriptor, metric_value) in evaluate(value) {
+        match metric_value {
+            MetricValue::Scalar(v) => tracing::event!(
+                target: "spiraltorch::metrics",
+                tracing::Level::INFO,
+                metric = descriptor.name,
+                unit = ?descriptor.unit,
+                value = v,
+            ),
+            MetricValue::Distribution(values) => {
+                let count = values.len();
+                let mut mean = 0.0f64;
+                if count > 0 {
+                    mean = values.iter().copied().sum::<f64>() / (count as f64);
+                }
+                tracing::event!(
+                    target: "spiraltorch::metrics",
+                    tracing::Level::INFO,
+                    metric = descriptor.name,
+                    unit = ?descriptor.unit,
+                    distribution_count = count,
+                    distribution_mean = mean,
+                );
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn clear_for_tests() {
     if let Some(lock) = REGISTRY.get() {

@@ -1378,7 +1378,9 @@ class ZSpacePosterior:
         applied: Dict[str, Any] = {}
         updates = _canonicalise_inputs(partial)
         if "gradient" in updates:
-            gradient = _normalise_gradient(updates["gradient"], len(self._z_state))
+            gradient = _normalise_gradient(
+                _ensure_iterable(updates["gradient"]), len(self._z_state)
+            )
             applied["gradient"] = list(gradient)
         for key, value in updates.items():
             if key == "gradient":
@@ -1854,6 +1856,11 @@ def weights_partial_from_compat(
     """Derive a partial bundle from compat-imported weights."""
 
     values = _materialise_imported_weights(weights)
+    if not values and adapter and hasattr(weights, "_data"):
+        try:
+            values = _flatten_values(getattr(weights, "_data"))
+        except Exception:
+            values = []
     origin = label or (f"compat:{adapter}" if adapter else "compat")
     prefix = telemetry_prefix
     if adapter:
@@ -2452,5 +2459,3 @@ def infer_canvas_with_coherence(
         coherence_kwargs=coherence_kwargs,
     )
     return infer_from_partial(z_state, partial, alpha=alpha, smoothing=smoothing)
-
-

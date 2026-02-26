@@ -31,6 +31,10 @@ def _load_native() -> types.ModuleType | None:
             importlib.import_module(native_name)
         except Exception:
             continue
+        try:
+            _ = module.telemetry.AtlasFrame
+        except Exception:
+            return None
         return module
     return None
 

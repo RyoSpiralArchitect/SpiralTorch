@@ -84,10 +84,14 @@ impl PluginRegistry {
 
         // Store the plugin
         let handle = PluginHandle::new(plugin);
-        self.plugins.write().unwrap().insert(plugin_id.clone(), handle);
+        self.plugins
+            .write()
+            .unwrap()
+            .insert(plugin_id.clone(), handle);
 
         // Emit event
-        self.event_bus.publish(&PluginEvent::PluginLoaded { plugin_id });
+        self.event_bus
+            .publish(&PluginEvent::PluginLoaded { plugin_id });
 
         Ok(())
     }
@@ -96,9 +100,9 @@ impl PluginRegistry {
     pub fn unregister(&self, plugin_id: &str) -> PureResult<()> {
         let handle = {
             let mut plugins = self.plugins.write().unwrap();
-            plugins.remove(plugin_id).ok_or_else(|| {
-                TensorError::Generic(format!("Plugin '{}' not found", plugin_id))
-            })?
+            plugins
+                .remove(plugin_id)
+                .ok_or_else(|| TensorError::Generic(format!("Plugin '{}' not found", plugin_id)))?
         };
 
         // Call on_unload hook
@@ -199,8 +203,7 @@ mod tests {
 
     impl Plugin for TestPlugin {
         fn metadata(&self) -> PluginMetadata {
-            PluginMetadata::new(&self.name, "1.0.0")
-                .with_capability(PluginCapability::Operators)
+            PluginMetadata::new(&self.name, "1.0.0").with_capability(PluginCapability::Operators)
         }
 
         fn as_any(&self) -> &dyn Any {
@@ -238,7 +241,7 @@ mod tests {
     #[test]
     fn test_find_by_capability() {
         let registry = PluginRegistry::new();
-        
+
         registry
             .register(Box::new(TestPlugin {
                 name: "plugin1".to_string(),

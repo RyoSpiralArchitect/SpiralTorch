@@ -1,5 +1,6 @@
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyModule};
+use pyo3::wrap_pyfunction;
 use pyo3::Bound;
 use std::borrow::Cow;
 
@@ -11,6 +12,29 @@ use pyo3::exceptions::PyValueError;
 use st_kdsl::{compile_query, Filter, OrderDirection, QueryPlan as KdslQueryPlan};
 #[cfg(feature = "rec")]
 use st_rec::{RatingTriple, RecEpochReport, Recommendation, SpiralRecError, SpiralRecommender};
+#[cfg(feature = "rec")]
+use std::collections::HashSet;
+
+#[cfg(feature = "rec")]
+#[pyfunction(name = "evaluate_at_k")]
+fn evaluate_at_k_py(
+    py: Python<'_>,
+    recommended: Vec<usize>,
+    relevant: Vec<usize>,
+    k: usize,
+) -> PyResult<Py<PyDict>> {
+    let relevant: HashSet<usize> = relevant.into_iter().collect();
+    let row = st_rec::evaluate_at_k(&recommended, &relevant, k);
+    let dict = PyDict::new_bound(py);
+    dict.set_item("hits", row.hits)?;
+    dict.set_item("relevant", row.relevant)?;
+    dict.set_item("precision", row.precision)?;
+    dict.set_item("recall", row.recall)?;
+    dict.set_item("hit_rate", row.hit_rate)?;
+    dict.set_item("ndcg", row.ndcg)?;
+    dict.set_item("average_precision", row.average_precision)?;
+    Ok(dict.into())
+}
 
 #[cfg(feature = "rec")]
 fn rec_err_to_py(err: SpiralRecError) -> PyErr {
@@ -275,11 +299,13 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyQueryPlan>()?;
     module.add_class::<PyRecEpochReport>()?;
     module.add_class::<PyRecommender>()?;
+    module.add_function(wrap_pyfunction!(evaluate_at_k_py, &module)?)?;
 
-    let exports: [Cow<'static, str>; 3] = [
+    let exports: [Cow<'static, str>; 4] = [
         Cow::Borrowed("QueryPlan"),
         Cow::Borrowed("RecEpochReport"),
         Cow::Borrowed("Recommender"),
+        Cow::Borrowed("evaluate_at_k"),
     ];
 
     let module_dict: Bound<PyDict> = module.dict();

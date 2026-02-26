@@ -22,7 +22,8 @@ pub enum TransformCategory {
     Normalisation,
 }
 
-/// Summary of a CPU transform implementation and whether a GPU path exists.
+/// Summary of a CPU transform implementation and whether a GPU path is
+/// available in the current build.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TransformAuditEntry {
     pub name: &'static str,
@@ -101,29 +102,30 @@ pub fn audit_cpu_transforms() -> Vec<TransformAuditEntry> {
             name: "Resize",
             category: TransformCategory::Geometric,
             gpu_candidate: true,
-            gpu_available: true,
-            notes: "Bilinear sampler benefits from parallel threads for large batches.",
+            gpu_available: cfg!(feature = "wgpu"),
+            notes: "Bilinear sampler benefits from parallel threads for large batches (wgpu gated).",
         },
         TransformAuditEntry {
             name: "CenterCrop",
             category: TransformCategory::Geometric,
             gpu_candidate: true,
-            gpu_available: true,
-            notes: "Simple index mapping suited for compute shader dispatch.",
+            gpu_available: cfg!(feature = "wgpu"),
+            notes: "Simple index mapping suited for compute shader dispatch (wgpu gated).",
         },
         TransformAuditEntry {
             name: "RandomHorizontalFlip",
             category: TransformCategory::Geometric,
             gpu_candidate: true,
-            gpu_available: true,
-            notes: "Branch-free swizzle is a natural GPU candidate when rng masks are precomputed.",
+            gpu_available: cfg!(feature = "wgpu"),
+            notes:
+                "Branch-free swizzle is a natural GPU candidate when rng masks are precomputed (wgpu gated).",
         },
         TransformAuditEntry {
             name: "ColorJitter",
             category: TransformCategory::Photometric,
             gpu_candidate: true,
-            gpu_available: true,
-            notes: "Per-pixel colour transforms map directly to compute pipelines.",
+            gpu_available: cfg!(feature = "wgpu"),
+            notes: "Per-pixel colour transforms map directly to compute pipelines (wgpu gated).",
         },
     ]
 }
@@ -211,9 +213,25 @@ mod tests {
                 .copied(),
             Some(1)
         );
-        assert_eq!(summary.gpu_supported, 1);
-        assert_eq!(summary.gpu_candidates_missing, 0);
+        if cfg!(feature = "wgpu") {
+            assert_eq!(summary.gpu_supported, 1);
+            assert_eq!(summary.gpu_candidates_missing, 0);
+        } else {
+            assert_eq!(summary.gpu_supported, 0);
+            assert_eq!(summary.gpu_candidates_missing, 1);
+        }
         assert_eq!(summary.unknown_operations, 0);
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn pipeline_audit_reports_gpu_dispatcher_attachment() {
+        use st_backend_wgpu::transform::TransformDispatcher;
+
+        let mut pipeline = TransformPipeline::with_seed(7);
+        pipeline.set_gpu_dispatcher(TransformDispatcher::cpu());
+        let report = audit_pipeline(&pipeline);
+        assert!(report.has_gpu_dispatcher);
     }
 
     #[test]

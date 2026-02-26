@@ -99,4 +99,3 @@ mod tests {
         assert!((grad.data()[3] + 1.0 / (0.8 * 2.0)).abs() < 1e-6);
     }
 }
-

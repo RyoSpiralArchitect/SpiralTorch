@@ -508,6 +508,7 @@ from .zspace_inference import (
     ZSpacePosterior,
     ZSpacePartialBundle,
     ZSpaceTelemetryFrame,
+    ZSpaceInferenceRuntime,
     ZSpaceInferencePipeline,
     inference_to_mapping,
     inference_to_zmetrics,
@@ -525,6 +526,7 @@ from .zspace_inference import (
     infer_canvas_with_coherence,
     infer_with_partials,
     infer_from_partial,
+    compile_inference,
     weights_partial_from_dlpack,
     weights_partial_from_compat,
     infer_weights_from_dlpack,
@@ -869,7 +871,7 @@ if _TENSOR_BASE is not None:
 
             def __new__(cls, *args: _Any, **kwargs: _Any):
                 rows, cols, payload = _normalize_tensor_ctor_args(*args, **kwargs)
-                if payload is _TENSOR_NO_DATA:
+                if payload is _TENSOR_NO_DATA or ((rows == 0 or cols == 0) and not payload):
                     return super().__new__(cls, rows, cols)
                 return super().__new__(cls, rows, cols, payload)
 
@@ -1726,6 +1728,7 @@ _FORWARDING_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
         "QueryPlan": ("PyQueryPlan",),
         "RecEpochReport": ("PyRecEpochReport",),
         "Recommender": ("PyRecommender",),
+        "evaluate_at_k": (),
     },
     "telemetry": {
         "DashboardMetric": ("PyDashboardMetric",),
@@ -3232,7 +3235,7 @@ def _mirror_into_module(
     reexport: bool = True,
 ) -> _types.ModuleType:
     module = _ensure_submodule(name)
-    exported: set[str] = set(getattr(module, "__all__", ()))
+    exported: set[str] = set(getattr(module, "__dict__", {}).get("__all__", ()))
     items: _Iterable[tuple[str, _Iterable[str]]] \
         = members.items() if isinstance(members, _Mapping) else ((m, ()) for m in members)
     for member, aliases in items:
@@ -3749,6 +3752,8 @@ for _name, _doc in _PREDECLARED_SUBMODULES:
                 continue
             if _key == "__name__":
                 continue
+            if _key == "_forward_key":
+                continue
             setattr(_forward, _key, _value)
         sys.modules[_fq] = _forward
         setattr(sys.modules[__name__], _name, _forward)
@@ -3979,7 +3984,17 @@ _mirror_into_module(
 
 _dataset = globals().get("dataset")
 if isinstance(_dataset, _types.ModuleType):
-    _DATASET_NATIVE_AVAILABLE = hasattr(_dataset, "Dataset") and hasattr(
+    def _has_native_dataset_attr(module: _types.ModuleType, attr: str) -> bool:
+        module_dict = getattr(module, "__dict__", {})
+        if attr in module_dict:
+            return True
+        try:
+            getattr(module, attr)
+        except Exception:
+            return False
+        return True
+
+    _DATASET_NATIVE_AVAILABLE = _has_native_dataset_attr(_dataset, "Dataset") and _has_native_dataset_attr(
         _dataset, "DataLoader"
     )
 else:  # pragma: no cover - defensive
@@ -4741,7 +4756,7 @@ for _key, _hint in _FORWARDING_HINTS.items():
     _module = _ensure_submodule(_key)
     if not _hint:
         continue
-    _exports = set(getattr(_module, "__all__", ()))
+    _exports = set(getattr(_module, "__dict__", {}).get("__all__", ()))
     for public_name, aliases in _hint.items():
         candidates: list[str] = [
             f"{_key}.{public_name}",
@@ -4762,7 +4777,7 @@ _CORE_EXPORTS = [
     "Amegagrad","amegagrad",
     "LinearModel",
     "BarycenterIntermediate","ZSpaceBarycenter",
-    "QueryPlan","RecEpochReport","Recommender",
+    "QueryPlan","RecEpochReport","Recommender","evaluate_at_k",
     "stAgent","PpoAgent","SacAgent",
     "DashboardMetric","DashboardEvent","DashboardFrame","DashboardRing",
     "AuditEvent","AuditLog","InferenceResult","InferenceRuntime",

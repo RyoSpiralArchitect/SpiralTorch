@@ -8,8 +8,8 @@
 //! the SpiralTorch ecosystem with new capabilities.
 
 use st_core::plugin::{
-    Plugin, PluginCapability, PluginContext, PluginEvent, PluginMetadata, PluginRegistry,
-    PluginLoader, StaticPluginLoader,
+    Plugin, PluginCapability, PluginContext, PluginEvent, PluginLoader, PluginMetadata,
+    PluginRegistry, StaticPluginLoader,
 };
 use st_core::PureResult;
 use std::any::Any;
@@ -23,9 +23,7 @@ struct CustomOperatorPlugin {
 
 impl CustomOperatorPlugin {
     fn new() -> Self {
-        Self {
-            operation_count: 0,
-        }
+        Self { operation_count: 0 }
     }
 
     fn increment_operations(&mut self) {
@@ -37,7 +35,9 @@ impl Plugin for CustomOperatorPlugin {
     fn metadata(&self) -> PluginMetadata {
         PluginMetadata::new("custom_operator_plugin", "1.0.0")
             .with_name("Custom Operator Plugin")
-            .with_description("Provides specialized tensor operations for domain-specific use cases")
+            .with_description(
+                "Provides specialized tensor operations for domain-specific use cases",
+            )
             .with_author("SpiralTorch Example")
             .with_capability(PluginCapability::Operators)
             .with_metadata("operation_types", "fft,convolution,pooling")
@@ -97,9 +97,7 @@ struct TelemetryPlugin {
 
 impl TelemetryPlugin {
     fn new() -> Self {
-        Self {
-            events_received: 0,
-        }
+        Self { events_received: 0 }
     }
 }
 

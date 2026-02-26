@@ -1521,7 +1521,8 @@ impl SoftLogicFlex {
             let norm = (above_abs + here_abs + beneath_abs).max(1e-4);
             let max_share = above_abs.max(here_abs).max(beneath_abs) / norm;
             let energy_drive = ((max_share - (1.0 / 3.0)) / (2.0 / 3.0)).clamp(0.0, 1.0);
-            adapt = (adapt + energy_drive * 0.35 * self.config.energy_equalize_auto).clamp(0.0, 0.9);
+            adapt =
+                (adapt + energy_drive * 0.35 * self.config.energy_equalize_auto).clamp(0.0, 0.9);
         }
         let inertia = (self.config.inertia * (1.0 - adapt)).clamp(self.config.inertia_min, 0.95);
         self.last_inertia = inertia;
@@ -1646,8 +1647,8 @@ impl SoftLogicFlex {
             let auto = self.config.energy_equalize_auto.clamp(0.0, 1.0);
             let gain = if auto > 0.0 {
                 let update = (auto * (1.0 - inertia)).clamp(0.0, 1.0);
-                self.equalize_state = Self::lerp(self.equalize_state, desired_guard, update)
-                    .clamp(0.0, 1.0);
+                self.equalize_state =
+                    Self::lerp(self.equalize_state, desired_guard, update).clamp(0.0, 1.0);
                 let guard_on = desired_guard < 0.999;
                 let clamp_on = ra_raw > ratio_max || rh_raw > ratio_max || rb_raw > ratio_max;
                 if guard_on != self.equalize_guard_on {
@@ -3817,10 +3818,7 @@ impl ModuleTrainer {
                 if trimmed.is_empty() {
                     continue;
                 }
-                let key = format!(
-                    "softlogic_event_{}",
-                    trimmed.replace(['.', '-'], "_")
-                );
+                let key = format!("softlogic_event_{}", trimmed.replace(['.', '-'], "_"));
                 extra.insert(key, 1.0);
             }
             let mut region_highlight = None;

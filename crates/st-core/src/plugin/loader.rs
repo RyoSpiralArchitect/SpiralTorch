@@ -18,11 +18,11 @@ pub trait PluginLoader {
     fn load_into(&self, path: &Path, registry: &PluginRegistry) -> PureResult<usize> {
         let plugins = self.discover(path)?;
         let count = plugins.len();
-        
+
         for plugin in plugins {
             registry.register(plugin)?;
         }
-        
+
         Ok(count)
     }
 }
@@ -112,7 +112,7 @@ mod tests {
     fn test_load_into_registry() {
         let loader = StaticPluginLoader::new(test_factory);
         let registry = PluginRegistry::new();
-        
+
         let count = loader.load_into(Path::new("."), &registry).unwrap();
         assert_eq!(count, 1);
         assert!(registry.get("test").is_some());

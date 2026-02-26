@@ -340,6 +340,85 @@ impl TextResonator {
         ResonanceNarrative::new(text, highlights)
     }
 
+    /// Produces a narrative describing an aggregated chrono summary.
+    pub fn describe_summary(&self, summary: &ChronoSummary) -> ResonanceNarrative {
+        if summary.frames == 0 {
+            return ResonanceNarrative::new(
+                "No resonance history recorded.".to_string(),
+                Vec::new(),
+            );
+        }
+
+        let mut text = format!(
+            "Chrono summary over {} frames (span {:.3}s, latest t={:.3}) reports {:.3} energy ±{:.3} and drift {:+.3}±{:.3}.",
+            summary.frames,
+            summary.duration,
+            summary.latest_timestamp,
+            summary.mean_energy,
+            summary.energy_std,
+            summary.mean_drift,
+            summary.drift_std
+        );
+
+        if summary.mean_decay < 0.0 {
+            text.push_str(&format!(" Energy growing at {:+.3}.", summary.mean_decay));
+        } else {
+            text.push_str(&format!(" Energy relaxing at {:+.3}.", summary.mean_decay));
+        }
+
+        if summary.mean_abs_drift.is_finite() {
+            text.push_str(&format!(
+                " Drift magnitude averages {:.3}.",
+                summary.mean_abs_drift
+            ));
+        }
+
+        if let Some(volatility) = energy_volatility_ratio(summary) {
+            text.push_str(&format!(
+                " Energy volatility {:.1}% of the mean.",
+                volatility * 100.0
+            ));
+        }
+
+        if let Some(volatility) = drift_volatility_ratio(summary) {
+            text.push_str(&format!(
+                " Drift volatility {:.1}% of the mean magnitude.",
+                volatility * 100.0
+            ));
+        }
+
+        if let Some(swing) = energy_swing_ratio(summary) {
+            text.push_str(&format!(
+                " Energy swing spans {:.1}% of the mean.",
+                swing * 100.0
+            ));
+        }
+
+        let mut highlights = vec![
+            format!("frames {}", summary.frames),
+            format!("min energy {:.3}", summary.min_energy),
+            format!("max energy {:.3}", summary.max_energy),
+            format!("mean energy {:.3}", summary.mean_energy),
+            format!("energy σ {:.3}", summary.energy_std),
+            format!("mean drift {:+.3}", summary.mean_drift),
+            format!("mean |drift| {:.3}", summary.mean_abs_drift),
+            format!("drift σ {:.3}", summary.drift_std),
+            format!("mean decay {:+.3}", summary.mean_decay),
+        ];
+
+        if let Some(volatility) = energy_volatility_ratio(summary) {
+            highlights.push(format!("energy volatility {:.1}%", volatility * 100.0));
+        }
+        if let Some(volatility) = drift_volatility_ratio(summary) {
+            highlights.push(format!("drift volatility {:.1}%", volatility * 100.0));
+        }
+        if let Some(swing) = energy_swing_ratio(summary) {
+            highlights.push(format!("energy swing {:.1}%", swing * 100.0));
+        }
+
+        ResonanceNarrative::new(text, highlights)
+    }
+
     /// Couples contextual arrangements with the resonance narrator.
     pub fn describe_contextual_meaning(
         &self,
@@ -620,6 +699,18 @@ impl RealtimeNarrator {
 
     pub fn narrate_timeline(&self, frames: &[ChronoFrame]) -> PureResult<Vec<f32>> {
         let narrative = self.inner.describe_timeline(frames);
+        let wave = self.inner.synthesize_wave(&narrative)?;
+        Ok(wave.to_audio_samples(self.sample_rate))
+    }
+
+    pub fn narrate_summary(&self, summary: &ChronoSummary) -> PureResult<Vec<f32>> {
+        let narrative = self.inner.describe_summary(summary);
+        let wave = self.inner.synthesize_wave(&narrative)?;
+        Ok(wave.to_audio_samples(self.sample_rate))
+    }
+
+    pub fn narrate_atlas(&self, atlas: &AtlasFrame) -> PureResult<Vec<f32>> {
+        let narrative = self.inner.describe_atlas(atlas);
         let wave = self.inner.synthesize_wave(&narrative)?;
         Ok(wave.to_audio_samples(self.sample_rate))
     }
@@ -1388,6 +1479,34 @@ mod tests {
             .highlights
             .iter()
             .any(|line| line.contains("curvature persistence")));
+    }
+
+    #[test]
+    fn summary_narrative_mentions_volatility() {
+        let narrator = TextResonator::new(-1.0, 0.5).unwrap();
+        let summary = ChronoSummary {
+            frames: 12,
+            duration: 1.2,
+            latest_timestamp: 1.2,
+            mean_drift: 0.1,
+            mean_abs_drift: 0.1,
+            drift_std: 0.05,
+            mean_energy: 2.0,
+            energy_std: 0.5,
+            mean_decay: 0.02,
+            min_energy: 1.3,
+            max_energy: 2.7,
+        };
+        let narrative = narrator.describe_summary(&summary);
+        assert!(narrative.summary.contains("Chrono summary"));
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains("energy volatility")));
+        assert!(narrative
+            .highlights
+            .iter()
+            .any(|line| line.contains("drift volatility")));
     }
 
     #[test]

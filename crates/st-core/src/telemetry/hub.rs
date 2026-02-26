@@ -1034,9 +1034,11 @@ pub fn get_softlogic_z() -> Option<SoftlogicZFeedback> {
     result
 }
 
-#[cfg(feature = "psi")]
+/// Clears the stored SoftLogic Z feedback sample.
 pub fn clear_softlogic_z() {
-    let _guard = psi_lock().lock();
+    #[cfg(feature = "psi")]
+    let _psi_guard = psi_lock().lock();
+
     match softlogic_z_cell().write() {
         Ok(mut guard) => {
             *guard = None;
@@ -1046,6 +1048,9 @@ pub fn clear_softlogic_z() {
             *guard = None;
         }
     }
+
+    #[cfg(feature = "psi")]
+    drop(_psi_guard);
 }
 
 /// Snapshot summarising the latest RealGrad projection applied by the system.

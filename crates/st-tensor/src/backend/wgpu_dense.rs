@@ -5860,13 +5860,8 @@ fn layer_norm_internal(
     let queue = ctx.queue();
 
     let input_buf = upload_lhs(device, "st.tensor.wgpu_dense.layer_norm.input", input);
-    let residual_buf = residual.map(|data| {
-        upload_lhs(
-            device,
-            "st.tensor.wgpu_dense.layer_norm.residual",
-            data,
-        )
-    });
+    let residual_buf =
+        residual.map(|data| upload_lhs(device, "st.tensor.wgpu_dense.layer_norm.residual", data));
     let gamma_buf = upload_lhs(device, "st.tensor.wgpu_dense.layer_norm.gamma", gamma);
     let beta_buf = upload_lhs(device, "st.tensor.wgpu_dense.layer_norm.beta", beta);
     let output_buf = allocate_output(device, "st.tensor.wgpu_dense.layer_norm.output", volume);

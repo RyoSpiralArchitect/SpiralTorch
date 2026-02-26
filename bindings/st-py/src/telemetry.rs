@@ -648,6 +648,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(metric_root_token, &module)?)?;
     module.add_function(wrap_pyfunction!(infer_district, &module)?)?;
     module.add_function(wrap_pyfunction!(current, &module)?)?;
+    module.add_function(wrap_pyfunction!(clear_softlogic_feedback, &module)?)?;
     module.add(
         "__all__",
         vec![
@@ -662,6 +663,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
             "metric_root_token",
             "infer_district",
             "current",
+            "clear_softlogic_feedback",
         ],
     )?;
     parent.add_submodule(&module)?;
@@ -700,4 +702,9 @@ fn current(py: Python<'_>) -> PyResult<Option<Py<PySoftlogicZFeedback>>> {
         .map(PySoftlogicZFeedback::from_feedback)
         .map(|feedback| Py::new(py, feedback))
         .transpose()
+}
+
+#[pyfunction]
+fn clear_softlogic_feedback() {
+    hub::clear_softlogic_z();
 }

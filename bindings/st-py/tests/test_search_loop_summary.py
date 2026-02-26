@@ -12,7 +12,10 @@ except AttributeError as exc:  # pragma: no cover - environment-specific
         allow_module_level=True,
     )
 
-from spiraltorch.hpo import SearchLoop
+try:
+    from spiraltorch.hpo import SearchLoop
+except ImportError as exc:  # pragma: no cover - native-only surface
+    pytest.skip(f"SearchLoop unavailable: {exc}", allow_module_level=True)
 
 
 SPACE = [

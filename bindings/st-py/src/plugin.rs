@@ -113,7 +113,9 @@ fn subscribe(py: Python<'_>, event_type: &str, callback: PyObject) -> PyResult<u
     let callback = Arc::new(Mutex::new(callback));
     let listener = listener_from_callback(callback);
 
-    Ok(global_registry().event_bus().subscribe(event_type.to_string(), listener))
+    Ok(global_registry()
+        .event_bus()
+        .subscribe(event_type.to_string(), listener))
 }
 
 #[pyfunction]
@@ -129,15 +131,14 @@ fn collect_event_types(event_types: &Bound<'_, PyAny>) -> PyResult<Vec<String>> 
     if let Ok(single) = event_types.extract::<String>() {
         return Ok(vec![single]);
     }
-    let iter = PyIterator::from_bound_object(event_types).map_err(|_| {
-        PyTypeError::new_err("event_types must be a string or iterable of strings")
-    })?;
+    let iter = PyIterator::from_bound_object(event_types)
+        .map_err(|_| PyTypeError::new_err("event_types must be a string or iterable of strings"))?;
     let mut out = Vec::new();
     for item in iter {
         let item = item?;
-        let name: String = item.extract().map_err(|_| {
-            PyTypeError::new_err("event_types must contain only strings")
-        })?;
+        let name: String = item
+            .extract()
+            .map_err(|_| PyTypeError::new_err("event_types must contain only strings"))?;
         out.push(name);
     }
     if out.is_empty() {
@@ -229,17 +230,19 @@ impl PyPluginQueue {
     }
 
     pub fn poll(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
-        let mut queue = self.queue.lock().map_err(|_| {
-            PyTypeError::new_err("event queue lock was poisoned")
-        })?;
+        let mut queue = self
+            .queue
+            .lock()
+            .map_err(|_| PyTypeError::new_err("event queue lock was poisoned"))?;
         Ok(queue.pop_front().map(|item| item.into_py(py)))
     }
 
     #[pyo3(signature = (max_items=None))]
     pub fn drain(&self, py: Python<'_>, max_items: Option<usize>) -> PyResult<Vec<PyObject>> {
-        let mut queue = self.queue.lock().map_err(|_| {
-            PyTypeError::new_err("event queue lock was poisoned")
-        })?;
+        let mut queue = self
+            .queue
+            .lock()
+            .map_err(|_| PyTypeError::new_err("event queue lock was poisoned"))?;
         let take = max_items.unwrap_or(queue.len());
         let mut out = Vec::new();
         for _ in 0..take {
@@ -258,9 +261,10 @@ impl PyPluginQueue {
     }
 
     fn __len__(&self) -> PyResult<usize> {
-        let queue = self.queue.lock().map_err(|_| {
-            PyTypeError::new_err("event queue lock was poisoned")
-        })?;
+        let queue = self
+            .queue
+            .lock()
+            .map_err(|_| PyTypeError::new_err("event queue lock was poisoned"))?;
         Ok(queue.len())
     }
 
@@ -269,9 +273,10 @@ impl PyPluginQueue {
     }
 
     fn __next__(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let mut queue = self.queue.lock().map_err(|_| {
-            PyTypeError::new_err("event queue lock was poisoned")
-        })?;
+        let mut queue = self
+            .queue
+            .lock()
+            .map_err(|_| PyTypeError::new_err("event queue lock was poisoned"))?;
         if let Some(item) = queue.pop_front() {
             Ok(item.into_py(py))
         } else {

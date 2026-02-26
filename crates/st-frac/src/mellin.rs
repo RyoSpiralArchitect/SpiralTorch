@@ -72,7 +72,9 @@ pub fn sample_log_uniform_exp_decay(
     log_step: Scalar,
     len: usize,
 ) -> MellinResult<Vec<ComplexScalar>> {
-    sample_log_uniform(log_start, log_step, len, |x| ComplexScalar::new((-x).exp(), 0.0))
+    sample_log_uniform(log_start, log_step, len, |x| {
+        ComplexScalar::new((-x).exp(), 0.0)
+    })
 }
 
 /// Convenience sampler for `f(x) = exp(-rate * x)`.
@@ -113,7 +115,11 @@ pub struct MellinEvalPlan {
 
 impl MellinEvalPlan {
     /// Build a plan for arbitrary Mellin evaluation points.
-    pub fn many(log_start: Scalar, log_step: Scalar, s_values: &[ComplexScalar]) -> MellinResult<Self> {
+    pub fn many(
+        log_start: Scalar,
+        log_step: Scalar,
+        s_values: &[ComplexScalar],
+    ) -> MellinResult<Self> {
         if s_values.is_empty() {
             return Ok(Self {
                 log_start,
@@ -258,7 +264,11 @@ impl MellinEvalPlan {
             .collect())
     }
 
-    pub fn evaluate_log_magnitude(&self, weighted: &[ComplexScalar], epsilon: Scalar) -> MellinResult<Vec<Scalar>> {
+    pub fn evaluate_log_magnitude(
+        &self,
+        weighted: &[ComplexScalar],
+        epsilon: Scalar,
+    ) -> MellinResult<Vec<Scalar>> {
         if self.z_points.is_empty() {
             return Ok(Vec::new());
         }
@@ -282,7 +292,8 @@ impl MellinEvalPlan {
         if self.z_points.is_empty() {
             return Ok(Vec::new());
         }
-        let series = crate::mellin_wgpu::evaluate_weighted_series_many_gpu(weighted, &self.z_points)?;
+        let series =
+            crate::mellin_wgpu::evaluate_weighted_series_many_gpu(weighted, &self.z_points)?;
         Ok(series
             .into_iter()
             .zip(self.prefactors.iter())
@@ -295,7 +306,8 @@ impl MellinEvalPlan {
         if self.z_points.is_empty() {
             return Ok(Vec::new());
         }
-        let series = crate::mellin_wgpu::evaluate_weighted_series_many_gpu(weighted, &self.z_points)?;
+        let series =
+            crate::mellin_wgpu::evaluate_weighted_series_many_gpu(weighted, &self.z_points)?;
         Ok(series
             .into_iter()
             .zip(self.prefactors.iter())
@@ -304,11 +316,16 @@ impl MellinEvalPlan {
     }
 
     #[cfg(feature = "wgpu")]
-    pub fn evaluate_log_magnitude_gpu(&self, weighted: &[ComplexScalar], epsilon: Scalar) -> MellinResult<Vec<Scalar>> {
+    pub fn evaluate_log_magnitude_gpu(
+        &self,
+        weighted: &[ComplexScalar],
+        epsilon: Scalar,
+    ) -> MellinResult<Vec<Scalar>> {
         if self.z_points.is_empty() {
             return Ok(Vec::new());
         }
-        let series = crate::mellin_wgpu::evaluate_weighted_series_many_gpu(weighted, &self.z_points)?;
+        let series =
+            crate::mellin_wgpu::evaluate_weighted_series_many_gpu(weighted, &self.z_points)?;
         Ok(series
             .into_iter()
             .zip(self.prefactors.iter())
@@ -416,7 +433,11 @@ impl MellinLogGrid {
     }
 
     /// Precompute Z-plane evaluation points for a vertical line.
-    pub fn plan_vertical_line(&self, real: Scalar, imag_values: &[Scalar]) -> MellinResult<MellinEvalPlan> {
+    pub fn plan_vertical_line(
+        &self,
+        real: Scalar,
+        imag_values: &[Scalar],
+    ) -> MellinResult<MellinEvalPlan> {
         MellinEvalPlan::vertical_line(self.log_start, self.log_step, real, imag_values)
     }
 
@@ -1265,7 +1286,9 @@ mod tests {
 
         let real_values = vec![0.8f32, 1.3];
         let imag_values = vec![-0.5f32, 0.0, 0.4];
-        let mags = grid.evaluate_mesh_magnitude(&real_values, &imag_values).unwrap();
+        let mags = grid
+            .evaluate_mesh_magnitude(&real_values, &imag_values)
+            .unwrap();
         let complex = grid.evaluate_mesh(&real_values, &imag_values).unwrap();
         assert_eq!(mags.len(), complex.len());
         for (idx, (mag, value)) in mags.iter().zip(complex.iter()).enumerate() {

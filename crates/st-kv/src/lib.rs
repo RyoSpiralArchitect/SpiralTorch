@@ -430,8 +430,195 @@ pub fn with_redis<F, R>(url: &str, f: F) -> KvResult<R>
 where
     F: FnOnce(&mut RedisKv) -> KvResult<R>,
 {
-    let mut kv = RedisKv::connect(url)?;
-    f(&mut kv)
+    with_redis_options(url, RedisConnectOptions::default(), f)
+}
+
+#[cfg(feature = "redis")]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RedisConnectOptions {
+    pub connect_timeout: Option<std::time::Duration>,
+}
+
+#[cfg(feature = "redis")]
+impl RedisConnectOptions {
+    pub fn with_connect_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.connect_timeout = Some(timeout);
+        self
+    }
+}
+
+#[cfg(feature = "redis")]
+pub fn with_redis_options<F, R>(url: &str, options: RedisConnectOptions, f: F) -> KvResult<R>
+where
+    F: FnOnce(&mut RedisKv) -> KvResult<R>,
+{
+    let mut kv = RedisKv::connect_with_options(url, options)?;
+    #[cfg(feature = "tracing")]
+    let start = std::time::Instant::now();
+    let out = f(&mut kv);
+    #[cfg(feature = "tracing")]
+    {
+        tracing::event!(
+            target: "spiraltorch::kv",
+            tracing::Level::INFO,
+            backend = "redis",
+            duration_ms = start.elapsed().as_secs_f64() * 1000.0,
+            ok = out.is_ok()
+        );
+    }
+    out
+}
+
+#[cfg(feature = "redis-async")]
+pub async fn with_redis_async<F, Fut, R>(url: &str, f: F) -> KvResult<R>
+where
+    F: FnOnce(&mut AsyncRedisKv) -> Fut,
+    Fut: std::future::Future<Output = KvResult<R>>,
+{
+    with_redis_async_options(url, AsyncRedisConnectOptions::default(), f).await
+}
+
+#[cfg(feature = "redis-async")]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AsyncRedisConnectOptions {
+    pub connect_timeout: Option<std::time::Duration>,
+    pub operation_timeout: Option<std::time::Duration>,
+}
+
+#[cfg(feature = "redis-async")]
+impl AsyncRedisConnectOptions {
+    pub fn with_connect_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.connect_timeout = Some(timeout);
+        self
+    }
+
+    pub fn with_operation_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.operation_timeout = Some(timeout);
+        self
+    }
+}
+
+#[cfg(feature = "redis-async")]
+pub async fn with_redis_async_options<F, Fut, R>(
+    url: &str,
+    options: AsyncRedisConnectOptions,
+    f: F,
+) -> KvResult<R>
+where
+    F: FnOnce(&mut AsyncRedisKv) -> Fut,
+    Fut: std::future::Future<Output = KvResult<R>>,
+{
+    let mut kv = AsyncRedisKv::connect_with_options(url, options).await?;
+    #[cfg(feature = "tracing")]
+    let start = std::time::Instant::now();
+    let future = f(&mut kv);
+    let out = if let Some(timeout) = options.operation_timeout {
+        tokio::time::timeout(timeout, future)
+            .await
+            .map_err(|_| KvErr::Timeout {
+                operation: "redis_async",
+                timeout,
+            })?
+    } else {
+        future.await
+    };
+    #[cfg(feature = "tracing")]
+    {
+        tracing::event!(
+            target: "spiraltorch::kv",
+            tracing::Level::INFO,
+            backend = "redis_async",
+            duration_ms = start.elapsed().as_secs_f64() * 1000.0,
+            ok = out.is_ok()
+        );
+    }
+    out
+}
+
+#[cfg(feature = "redis-async")]
+pub struct AsyncRedisKv {
+    conn: redis::aio::Connection,
+}
+
+#[cfg(feature = "redis-async")]
+impl AsyncRedisKv {
+    pub async fn connect(url: &str) -> KvResult<Self> {
+        Self::connect_with_options(url, AsyncRedisConnectOptions::default()).await
+    }
+
+    pub async fn connect_with_options(
+        url: &str,
+        options: AsyncRedisConnectOptions,
+    ) -> KvResult<Self> {
+        let client = redis::Client::open(url)?;
+        Self::from_client_with_options(client, options).await
+    }
+
+    pub async fn from_client(client: redis::Client) -> KvResult<Self> {
+        Self::from_client_with_options(client, AsyncRedisConnectOptions::default()).await
+    }
+
+    pub async fn from_client_with_options(
+        client: redis::Client,
+        options: AsyncRedisConnectOptions,
+    ) -> KvResult<Self> {
+        let connect_future = client.get_async_connection();
+        let conn = if let Some(timeout) = options.connect_timeout {
+            tokio::time::timeout(timeout, connect_future)
+                .await
+                .map_err(|_| KvErr::Timeout {
+                    operation: "redis_connect",
+                    timeout,
+                })??
+        } else {
+            connect_future.await?
+        };
+        Ok(Self { conn })
+    }
+}
+
+#[cfg(feature = "redis-async")]
+impl AsyncRedisKv {
+    pub async fn get_raw(&mut self, key: &str) -> KvResult<Option<String>> {
+        use redis::AsyncCommands;
+        Ok(self.conn.get(key).await?)
+    }
+
+    pub async fn set_raw<V>(&mut self, key: &str, value: V) -> KvResult<()>
+    where
+        V: redis::ToRedisArgs + Send + Sync,
+    {
+        use redis::AsyncCommands;
+        self.conn.set::<_, _, ()>(key, value).await?;
+        Ok(())
+    }
+
+    pub async fn set_ex<V>(&mut self, key: &str, value: V, seconds: usize) -> KvResult<()>
+    where
+        V: redis::ToRedisArgs + Send + Sync,
+    {
+        use redis::AsyncCommands;
+        self.conn.set_ex::<_, _, ()>(key, value, seconds).await?;
+        Ok(())
+    }
+
+    pub async fn get_json<T: serde::de::DeserializeOwned>(
+        &mut self,
+        key: &str,
+    ) -> KvResult<Option<T>> {
+        let raw = self.get_raw_string(key).await?;
+        raw.map(|payload| serde_json::from_str(&payload).map_err(KvErr::from))
+            .transpose()
+    }
+
+    async fn get_raw_string(&mut self, key: &str) -> KvResult<Option<String>> {
+        self.get_raw(key).await
+    }
+
+    pub async fn set_json<T: serde::Serialize>(&mut self, key: &str, value: &T) -> KvResult<()> {
+        let payload = serde_json::to_string(value)?;
+        self.set_raw(key, payload).await
+    }
 }
 
 #[cfg(feature = "redis")]
@@ -442,12 +629,27 @@ pub struct RedisKv {
 #[cfg(feature = "redis")]
 impl RedisKv {
     pub fn connect(url: &str) -> KvResult<Self> {
+        Self::connect_with_options(url, RedisConnectOptions::default())
+    }
+
+    pub fn connect_with_options(url: &str, options: RedisConnectOptions) -> KvResult<Self> {
         let client = redis::Client::open(url)?;
-        Self::from_client(client)
+        Self::from_client_with_options(client, options)
     }
 
     pub fn from_client(client: redis::Client) -> KvResult<Self> {
-        let conn = client.get_connection()?;
+        Self::from_client_with_options(client, RedisConnectOptions::default())
+    }
+
+    pub fn from_client_with_options(
+        client: redis::Client,
+        options: RedisConnectOptions,
+    ) -> KvResult<Self> {
+        let conn = if let Some(timeout) = options.connect_timeout {
+            client.get_connection_with_timeout(timeout)?
+        } else {
+            client.get_connection()?
+        };
         Ok(Self { conn })
     }
 

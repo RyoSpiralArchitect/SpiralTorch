@@ -71,14 +71,13 @@ use st_nn::{
     DesireAutomation, DesireLagrangian, DesirePhase, DesirePipeline, DesireRoundtableBridge,
     DesireRoundtableSummary, DesireTelemetryBundle, DesireTrainerBridge, DesireWeights,
     EpochStats as RustEpochStats, Gelu, HyperbolicCrossEntropy, LayerNorm, Linear, MaxPool2d,
-    MaxwellDesireBridge,
-    MeanSquaredError, MellinBasis, ModuleTrainer as RustModuleTrainer, NarrativeHint,
-    NarrativeSummary, Relu, RepressionField, RoundtableConfig as RustRoundtableConfig,
-    RoundtableSchedule as RustRoundtableSchedule, SemanticBridge, Sequential, SparseKernel,
-    SymbolGeometry, TemperatureController, ZSpaceBatchNorm1d, ZSpaceLayerNorm,
-    TextInfusionEvery, TextInfusionMode, WaveGate, WaveRnn, ZRelativityModule,
-    ZSpaceCoherenceSequencer, ZSpaceMixer, ZSpaceTextVae, ZSpaceTraceConfig, ZSpaceTraceRecorder,
-    ZSpaceVae, ZSpaceVaeState, ZSpaceVaeStats,
+    MaxwellDesireBridge, MeanSquaredError, MellinBasis, ModuleTrainer as RustModuleTrainer,
+    NarrativeHint, NarrativeSummary, Relu, RepressionField,
+    RoundtableConfig as RustRoundtableConfig, RoundtableSchedule as RustRoundtableSchedule,
+    SemanticBridge, Sequential, SparseKernel, SymbolGeometry, TemperatureController,
+    TextInfusionEvery, TextInfusionMode, WaveGate, WaveRnn, ZRelativityModule, ZSpaceBatchNorm1d,
+    ZSpaceCoherenceSequencer, ZSpaceLayerNorm, ZSpaceMixer, ZSpaceTextVae, ZSpaceTraceConfig,
+    ZSpaceTraceRecorder, ZSpaceVae, ZSpaceVaeState, ZSpaceVaeStats,
 };
 #[cfg(feature = "nn")]
 use st_nn::{Module, Parameter};
@@ -632,7 +631,9 @@ impl PySpectralLearningRatePolicy {
 
     #[getter]
     pub fn last_coherence_label(&self) -> Option<String> {
-        self.inner.last_coherence_label().map(|label| label.to_string())
+        self.inner
+            .last_coherence_label()
+            .map(|label| label.to_string())
     }
 
     pub fn set_smoothing(&mut self, smoothing: f32) {
@@ -656,10 +657,7 @@ impl PySpectralLearningRatePolicy {
     }
 
     pub fn set_stuck_turnover_threshold(&mut self, threshold: f32) {
-        self.inner = self
-            .inner
-            .clone()
-            .with_stuck_turnover_threshold(threshold);
+        self.inner = self.inner.clone().with_stuck_turnover_threshold(threshold);
     }
 
     pub fn set_coherence_gain(&mut self, gain: f32) {
@@ -2657,7 +2655,9 @@ impl PyLayerNorm {
     }
 
     pub fn apply_step(&mut self, fallback_lr: f32) -> PyResult<()> {
-        self.inner_mut()?.apply_step(fallback_lr).map_err(tensor_err_to_py)
+        self.inner_mut()?
+            .apply_step(fallback_lr)
+            .map_err(tensor_err_to_py)
     }
 
     pub fn state_dict(&self) -> PyResult<Vec<(String, PyTensor)>> {
@@ -2803,7 +2803,9 @@ impl PyZSpaceLayerNorm {
     }
 
     pub fn apply_step(&mut self, fallback_lr: f32) -> PyResult<()> {
-        self.inner_mut()?.apply_step(fallback_lr).map_err(tensor_err_to_py)
+        self.inner_mut()?
+            .apply_step(fallback_lr)
+            .map_err(tensor_err_to_py)
     }
 
     pub fn state_dict(&self) -> PyResult<Vec<(String, PyTensor)>> {
@@ -2851,7 +2853,9 @@ impl PyZSpaceLayerNorm {
     }
 
     pub fn set_projector_gain(&self, gain: f32) -> PyResult<()> {
-        self.inner()?.set_projector_gain(gain).map_err(tensor_err_to_py)
+        self.inner()?
+            .set_projector_gain(gain)
+            .map_err(tensor_err_to_py)
     }
 
     pub fn adapt_projector_gain(&self, target_radius: f32, smoothing: f32) -> PyResult<f32> {
@@ -2930,7 +2934,8 @@ impl PyBatchNorm1d {
         epsilon: f32,
         training: bool,
     ) -> PyResult<Self> {
-        let inner = BatchNorm1d::new(name, features, momentum, epsilon).map_err(tensor_err_to_py)?;
+        let inner =
+            BatchNorm1d::new(name, features, momentum, epsilon).map_err(tensor_err_to_py)?;
         if !training {
             inner.eval();
         }
@@ -3004,7 +3009,9 @@ impl PyBatchNorm1d {
     }
 
     pub fn apply_step(&mut self, fallback_lr: f32) -> PyResult<()> {
-        self.inner_mut()?.apply_step(fallback_lr).map_err(tensor_err_to_py)
+        self.inner_mut()?
+            .apply_step(fallback_lr)
+            .map_err(tensor_err_to_py)
     }
 
     pub fn state_dict(&self) -> PyResult<Vec<(String, PyTensor)>> {
@@ -3175,7 +3182,9 @@ impl PyZSpaceBatchNorm1d {
     }
 
     pub fn apply_step(&mut self, fallback_lr: f32) -> PyResult<()> {
-        self.inner_mut()?.apply_step(fallback_lr).map_err(tensor_err_to_py)
+        self.inner_mut()?
+            .apply_step(fallback_lr)
+            .map_err(tensor_err_to_py)
     }
 
     pub fn state_dict(&self) -> PyResult<Vec<(String, PyTensor)>> {
@@ -3228,7 +3237,9 @@ impl PyZSpaceBatchNorm1d {
     }
 
     pub fn set_projector_gain(&self, gain: f32) -> PyResult<()> {
-        self.inner()?.set_projector_gain(gain).map_err(tensor_err_to_py)
+        self.inner()?
+            .set_projector_gain(gain)
+            .map_err(tensor_err_to_py)
     }
 
     pub fn adapt_projector_gain(&self, target_radius: f32, smoothing: f32) -> PyResult<f32> {
@@ -4640,7 +4651,9 @@ impl PyNnModuleTrainer {
         topos: Option<&PyOpenCartesianTopos>,
     ) -> PyResult<()> {
         with_module_mut(module, |module_inner| match topos {
-            Some(topos) => self.inner.prepare_with_topos(module_inner, topos.inner.clone()),
+            Some(topos) => self
+                .inner
+                .prepare_with_topos(module_inner, topos.inner.clone()),
             None => self.inner.prepare(module_inner),
         })
     }
@@ -4677,10 +4690,7 @@ impl PyNnModuleTrainer {
     }
 
     #[pyo3(signature = (policy=None))]
-    pub fn enable_spectral_learning_rate(
-        &mut self,
-        policy: Option<&PySpectralLearningRatePolicy>,
-    ) {
+    pub fn enable_spectral_learning_rate(&mut self, policy: Option<&PySpectralLearningRatePolicy>) {
         let policy = policy
             .map(|policy| policy.inner.clone())
             .unwrap_or_else(RustSpectralLearningRatePolicy::default);
@@ -4736,7 +4746,9 @@ impl PyNnModuleTrainer {
 
     #[pyo3(signature = (module, factor))]
     pub fn mul_learning_rate(&mut self, module: &Bound<PyAny>, factor: f32) -> PyResult<()> {
-        with_module_mut(module, |module_inner| self.inner.mul_learning_rate(module_inner, factor))
+        with_module_mut(module, |module_inner| {
+            self.inner.mul_learning_rate(module_inner, factor)
+        })
     }
 
     #[pyo3(signature = (text, *, every="epoch", mode="blend"))]

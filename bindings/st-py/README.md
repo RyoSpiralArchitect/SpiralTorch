@@ -83,7 +83,8 @@ NumPy, no PyTorch, and no shim layers.
   and streams geometric rewards without leaving Rust.
 - Recommendation toolkit via `spiraltorch.rec`—SpiralTorchRec factors user/item
   lattices under open-cartesian topos guards so embeddings stay psychoid-safe
-  while training entirely in Rust.
+  while training entirely in Rust (plus ranking evaluation via
+  `spiraltorch.rec.evaluate_at_k`).
 - Model-zoo orchestration via `spiraltorch.model_zoo`—discover recipes, filter
   by task/family, resolve script paths, rank recommendations with
   `suggest_models(...)`/`recommend_model(...)`, and run models with a stable
@@ -93,6 +94,9 @@ NumPy, no PyTorch, and no shim layers.
   `vision.ZSpaceStreamFrameAggregator` so Python can attach chrono summaries,
   aggregate live frame streams, and ingest temporal updates without dropping to
   Rust glue code.
+- Telemetry narration via `spiraltorch.text`—`TextResonator`/`RealtimeNarrator`
+  turn `telemetry.AtlasFrame` and `ChronoSummary` snapshots into text summaries
+  and audio-ready amplitude traces.
 - Online stream-loop helpers `vision.vision_online_step(...)` and
   `vision.stream_vision_training(...)` to wire frame streams into
   `SpiralTorchVision` + `ZSpaceTrainer` loops directly from Python.
@@ -667,13 +671,37 @@ encoder = LanguageWaveEncoder(session.curvature(), 0.55)
 wave = encoder.speak(frames)
 
 import spiraltorch as st
-from spiraltorch import TextResonator
-narrator = TextResonator(session.curvature(), 0.55)
-print(narrator.describe_resonance(resonance))
-print(narrator.describe_timeline(frames))
-print(narrator.describe_frame(frames[-1]))
-audio = narrator.speak(frames)
+from spiraltorch import RealtimeNarrator, TextResonator
+
+atlas = st.telemetry.AtlasFrame.from_metrics(
+    {"focus": 0.83, "energy.total": 1.7},
+    timestamp=1.2,
+)
+summary = {
+    "frames": 12,
+    "duration": 1.2,
+    "latest_timestamp": 1.2,
+    "mean_drift": 0.08,
+    "mean_abs_drift": 0.11,
+    "drift_std": 0.05,
+    "mean_energy": 1.7,
+    "energy_std": 0.4,
+    "mean_decay": 0.02,
+    "min_energy": 1.1,
+    "max_energy": 2.3,
+}
+
+resonator = TextResonator(curvature=session.curvature(), temperature=0.55)
+print(resonator.describe_atlas(atlas).summary)
+print(resonator.describe_chrono_summary(summary).summary)
+wave = resonator.wave_from_atlas(atlas)
+audio = wave.to_audio_samples(sample_rate=64)
+
+narrator = RealtimeNarrator(curvature=session.curvature(), temperature=0.55, sample_rate=64)
+audio2 = narrator.narrate_atlas(atlas)
 ```
+
+For a minimal end-to-end script, see `bindings/st-py/examples/text_narrator_quickstart.py`.
 
 Atlas projections collect those temporal statistics, maintainer diagnostics,
 and loopback envelopes into one object. Grab the latest `AtlasFrame` via

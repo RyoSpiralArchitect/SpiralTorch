@@ -5,10 +5,10 @@
 //! Lightweight hooks for observing tensor operations without introducing a
 //! dependency on the higher-level plugin/event system.
 
+use serde_json::Value;
 use std::cell::Cell;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Arc, OnceLock, RwLock};
-use serde_json::Value;
 
 /// Metadata about a completed tensor operation.
 #[derive(Clone, Debug)]

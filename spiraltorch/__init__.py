@@ -22,7 +22,24 @@ import warnings
 from typing import Any, NoReturn
 
 
-_DEV_SHIM_DIR = pathlib.Path(__file__).resolve().parent
+def _resolve_dev_shim_dir() -> pathlib.Path:
+    file_hint = globals().get("__file__")
+    if file_hint:
+        return pathlib.Path(file_hint).resolve().parent
+
+    cwd = pathlib.Path.cwd().resolve()
+    for candidate in (cwd, *cwd.parents):
+        maybe = candidate / "spiraltorch"
+        if not (maybe / "__init__.py").is_file():
+            continue
+        if (candidate / "bindings" / "st-py" / "spiraltorch" / "__init__.py").is_file():
+            return maybe
+    return cwd
+
+
+_DEV_SHIM_DIR = _resolve_dev_shim_dir()
+if "__file__" not in globals():
+    __file__ = str(_DEV_SHIM_DIR / "__init__.py")
 _TENSOR_NO_DATA = object()
 
 
@@ -1329,9 +1346,7 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             self._rows = rows
             self._cols = cols
 
-            preferred_backend = backend_hint or (
-                "blas" if BLAS_AVAILABLE else ("numpy" if NUMPY_AVAILABLE else "python")
-            )
+            preferred_backend = backend_hint or ("numpy" if NUMPY_AVAILABLE else "python")
             if preferred_backend == "numpy":
                 arr = (
                     _np.frombuffer(canonical, dtype=_np.float64, count=rows * cols)
@@ -1353,9 +1368,19 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
 
             if backend is not None and backend not in {"numpy", "python", "blas"}:
                 raise ValueError("backend must be 'numpy', 'python', 'blas', or None")
-            target_backend = backend or (
-                "blas" if BLAS_AVAILABLE else ("numpy" if NUMPY_AVAILABLE else "python")
-            )
+            if backend is None:
+                if NUMPY_AVAILABLE and (
+                    self._backend == "numpy" or other._backend == "numpy"
+                ):
+                    target_backend = "numpy"
+                elif BLAS_AVAILABLE and (
+                    self._backend == "blas" or other._backend == "blas"
+                ):
+                    target_backend = "blas"
+                else:
+                    target_backend = "python"
+            else:
+                target_backend = backend
 
             if target_backend == "numpy":
                 if not NUMPY_AVAILABLE:
@@ -2268,7 +2293,24 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
 
             if not NUMPY_AVAILABLE or _np is None or not hasattr(_np, "from_dlpack"):
                 cls._raise_dlpack_unavailable()
-            matrix = _np.from_dlpack(capsule)
+            source = capsule
+            if not hasattr(source, "__dlpack__"):
+                class _CapsuleWrapper:
+                    __slots__ = ("_capsule",)
+
+                    def __init__(self, payload: Any) -> None:
+                        self._capsule = payload
+
+                    def __dlpack__(self, stream: Any | None = None) -> Any:
+                        return self._capsule
+
+                    def __dlpack_device__(self) -> tuple[int, int]:
+                        # Assume CPU-only capsules in the stub backend.
+                        return (1, 0)
+
+                source = _CapsuleWrapper(capsule)
+
+            matrix = _np.from_dlpack(source)
             matrix = _np.asarray(matrix, dtype=_np.float64)
             if matrix.ndim != 2:
                 raise ValueError("Tensor expects a 2D array")
@@ -2316,7 +2358,7 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             The returned buffer always contains ``self._rows * self._cols`` floating
             point values.
             """
-            if self._backend == "python":
+            if self._backend in {"python", "blas"}:
                 return self._data
             return array("d", self._data.reshape(-1))
 
@@ -2555,8 +2597,7 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
                 matrix = _np.zeros((rows, cols), dtype=_np.float64)
                 return Tensor._from_numpy_array(matrix)
             buffer = array("d", [0.0]) * total if total else array("d")
-            backend = "blas" if BLAS_AVAILABLE else "python"
-            return Tensor._from_python_array(rows, cols, buffer, backend=backend)
+            return Tensor._from_python_array(rows, cols, buffer, backend="python")
 
         @staticmethod
         def randn(
@@ -2578,8 +2619,7 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             rng = random.Random(seed)
             values = [rng.gauss(mean, std) for _ in range(total)]
             buffer = array("d", values)
-            backend = "blas" if BLAS_AVAILABLE else "python"
-            return Tensor._from_python_array(rows, cols, buffer, backend=backend)
+            return Tensor._from_python_array(rows, cols, buffer, backend="python")
 
         @staticmethod
         def rand(
@@ -2603,8 +2643,7 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             rng = random.Random(seed)
             values = [rng.uniform(min, max) for _ in range(total)]
             buffer = array("d", values)
-            backend = "blas" if BLAS_AVAILABLE else "python"
-            return Tensor._from_python_array(rows, cols, buffer, backend=backend)
+            return Tensor._from_python_array(rows, cols, buffer, backend="python")
 
         @staticmethod
         def cat_rows(tensors: Sequence["Tensor"]) -> "Tensor":
@@ -2668,11 +2707,7 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
 
     module.Tensor = Tensor
     module.available_stub_backends = available_stub_backends
-    module.default_stub_backend = (
-        "blas"
-        if BLAS_AVAILABLE
-        else ("numpy" if NUMPY_AVAILABLE else "python")
-    )
+    module.default_stub_backend = "numpy" if NUMPY_AVAILABLE else "python"
 
     class Axis:
         """Named axis descriptor used by :class:`LabeledTensor` in the stub runtime."""
@@ -3161,11 +3196,19 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
         bridge_module.__package__ = bridge_name
         bridge_module.__path__ = [str(base_dir)]
         sys.modules[bridge_name] = bridge_module
+        previous_spiraltorch = sys.modules.get("spiraltorch")
+        sys.modules["spiraltorch"] = module
         try:
-            spec.loader.exec_module(bridge_module)
-        except ModuleNotFoundError:
-            sys.modules.pop(bridge_name, None)
-            return
+            try:
+                spec.loader.exec_module(bridge_module)
+            except (ModuleNotFoundError, ImportError):
+                sys.modules.pop(bridge_name, None)
+                return
+        finally:
+            if previous_spiraltorch is None:
+                sys.modules.pop("spiraltorch", None)
+            else:
+                sys.modules["spiraltorch"] = previous_spiraltorch
 
         def _register(name: str, value: object) -> None:
             if name.startswith("_"):

@@ -349,7 +349,11 @@ impl PluginEventJsonlWriter {
             };
 
             let err = match serde_json::to_writer(&mut guard.writer, &record) {
-                Ok(()) => guard.writer.write_all(b"\n").err().map(|err| err.to_string()),
+                Ok(()) => guard
+                    .writer
+                    .write_all(b"\n")
+                    .err()
+                    .map(|err| err.to_string()),
                 Err(err) => Some(err.to_string()),
             };
             if let Some(err) = err {

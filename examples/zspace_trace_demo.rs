@@ -36,4 +36,3 @@ fn main() -> PureResult<()> {
     println!("trace_jsonl={}", path.display());
     Ok(())
 }
-

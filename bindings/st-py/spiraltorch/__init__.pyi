@@ -4270,6 +4270,49 @@ class ContextualLagrangianGate:
     @property
     def gauge(self) -> str: ...
 
+class ResonanceNarrative:
+    def __init__(
+        self,
+        summary: str,
+        highlights: Sequence[str] | None = ...,
+    ) -> None: ...
+
+    @property
+    def summary(self) -> str: ...
+
+    @property
+    def highlights(self) -> List[str]: ...
+
+    def to_dict(self) -> Dict[str, Any]: ...
+
+
+class LanguageWave:
+    @property
+    def summary(self) -> str: ...
+
+    @property
+    def amplitude(self) -> List[float]: ...
+
+    def to_audio_samples(self, sample_rate: int) -> List[float]: ...
+
+
+class TextResonator:
+    def __init__(self, curvature: float, temperature: float) -> None: ...
+
+    def describe_atlas(self, atlas: "telemetry.AtlasFrame") -> ResonanceNarrative: ...
+    def describe_chrono_summary(self, summary: Mapping[str, Any] | Any) -> ResonanceNarrative: ...
+    def describe_chrono_snapshot(self, snapshot: ChronoSnapshot) -> ResonanceNarrative: ...
+
+    def synthesize_wave(self, narrative: ResonanceNarrative) -> LanguageWave: ...
+    def wave_from_atlas(self, atlas: "telemetry.AtlasFrame") -> LanguageWave: ...
+
+
+class RealtimeNarrator:
+    def __init__(self, curvature: float, temperature: float, sample_rate: int) -> None: ...
+
+    def narrate_atlas(self, atlas: "telemetry.AtlasFrame") -> List[float]: ...
+    def narrate_chrono_summary(self, summary: Mapping[str, Any] | Any) -> List[float]: ...
+
 
 class ArnoldTonguePeak:
     @property
@@ -4771,6 +4814,7 @@ class _TelemetryModule(ModuleType):
     AtlasPerspective: type[AtlasPerspective]
 
     def current() -> SoftlogicZFeedback | None: ...
+    def clear_softlogic_feedback() -> None: ...
     def metric_root_token(name: str) -> str: ...
     def infer_district(name: str) -> str: ...
     def perspective_for_dict(
@@ -5174,6 +5218,12 @@ class Recommender:
     def items(self) -> int: ...
     @property
     def factors(self) -> int: ...
+
+def evaluate_at_k(
+    recommended: Sequence[int],
+    relevant: Sequence[int],
+    k: int,
+) -> Dict[str, float | int]: ...
 
 class EpsilonGreedy:
     def __init__(self, start: float, end: float, decay_steps: int) -> None: ...
@@ -5644,9 +5694,14 @@ __all__ = [
     "softlogic_signal",
     "QueryPlan",
     "RecEpochReport",
+    "ResonanceNarrative",
+    "LanguageWave",
+    "TextResonator",
+    "RealtimeNarrator",
     "ContextualLagrangianGate",
     "ContextualPulseFrame",
     "Recommender",
+    "evaluate_at_k",
     "Agent",
     "AgentConfig",
     "EpsilonGreedy",

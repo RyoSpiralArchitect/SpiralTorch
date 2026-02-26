@@ -9,6 +9,7 @@ from pathlib import Path
 
 
 def test_tensor_shape_method_available_in_stub(monkeypatch):
+    preexisting = set(sys.modules)
     # Ensure we load the pure Python stub bindings rather than the native module.
     project_root = Path(__file__).resolve().parents[3]
     filtered_sys_path = [str(project_root)]
@@ -59,7 +60,14 @@ def test_tensor_shape_method_available_in_stub(monkeypatch):
     # Sanity-check that we are exercising the stub implementation.
     assert hasattr(st, "available_stub_backends"), "stub bindings should expose helper APIs"
 
-    tensor = st.Tensor((2, 3))
+    try:
+        tensor = st.Tensor((2, 3))
 
-    assert tensor.shape() == (2, 3)
-    assert tuple(tensor.shape) == (2, 3)
+        assert tensor.shape() == (2, 3)
+        assert tuple(tensor.shape) == (2, 3)
+    finally:
+        for name in list(sys.modules):
+            if name in preexisting:
+                continue
+            if name == "spiral_rl" or name == "rl" or name.startswith("spiraltorch."):
+                sys.modules.pop(name, None)
