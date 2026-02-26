@@ -236,6 +236,10 @@ impl MellinEvalPlan {
         self.z_points.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.z_points.is_empty()
+    }
+
     pub fn shape(&self) -> (usize, usize) {
         self.shape
     }
@@ -525,9 +529,14 @@ impl MellinLogGrid {
         for (z, prefactor) in plan.z_points.iter().zip(plan.prefactors.iter()) {
             let mut series = ComplexScalar::new(0.0, 0.0);
             let mut pow = ComplexScalar::new(1.0, 0.0);
-            for idx in 0..len {
-                let diff = self.samples[idx] - target.samples[idx];
-                let coeff = diff * ComplexScalar::new(self.weights[idx], 0.0);
+            for ((sample, target_sample), &weight) in self
+                .samples
+                .iter()
+                .zip(target.samples.iter())
+                .zip(self.weights.iter())
+            {
+                let diff = *sample - *target_sample;
+                let coeff = diff * ComplexScalar::new(weight, 0.0);
                 series += coeff * pow;
                 pow *= *z;
             }
@@ -538,9 +547,8 @@ impl MellinLogGrid {
             let factor = error * prefactor.conj();
             let conj_z = z.conj();
             let mut pow_conj = ComplexScalar::new(1.0, 0.0);
-            for idx in 0..len {
-                let w = self.weights[idx];
-                grad[idx] += factor * pow_conj * ComplexScalar::new(w, 0.0);
+            for (grad_slot, &weight) in grad.iter_mut().zip(self.weights.iter()) {
+                *grad_slot += factor * pow_conj * ComplexScalar::new(weight, 0.0);
                 pow_conj *= conj_z;
             }
         }
