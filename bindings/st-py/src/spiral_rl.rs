@@ -637,7 +637,7 @@ impl PyPpoAgent {
 }
 
 #[cfg(feature = "spiral_rl")]
-#[pyclass(module = "spiraltorch.spiral_rl", name = "SacAgent")]
+#[pyclass(module = "spiraltorch.spiral_rl", name = "SacAgent", unsendable)]
 pub(crate) struct PySacAgent {
     inner: SacAgent,
     state_dim: usize,

@@ -1,3 +1,6 @@
+//go:build cgo && spiraltorch_sys
+// +build cgo,spiraltorch_sys
+
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // © 2025 SpiralTorch Contributors
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.

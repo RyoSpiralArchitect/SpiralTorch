@@ -1,3 +1,6 @@
+//go:build spiraltorch_sys
+// +build spiraltorch_sys
+
 package spiraltorch
 
 import "testing"

@@ -24,4 +24,4 @@ toml = "0.9"
 [dev-dependencies]
 rand = { version = "0.8", features = ["std", "std_rng"] }
 st-core = { path = "../st-core" }
-tensorboard-rs = "0.5.9"
+tboard = "0.1.1"
