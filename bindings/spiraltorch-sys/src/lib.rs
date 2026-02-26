@@ -126,7 +126,7 @@ fn require_non_null_mut<T>(ptr: *mut T, label: &str) -> FfiResult<*mut T> {
 /// enough capacity (`capacity >= len + 1`), the string is copied and a null
 /// terminator is appended.
 #[no_mangle]
-pub extern "C" fn spiraltorch_version(buffer: *mut c_char, capacity: usize) -> usize {
+pub unsafe extern "C" fn spiraltorch_version(buffer: *mut c_char, capacity: usize) -> usize {
     let version = env!("CARGO_PKG_VERSION");
     let bytes = version.as_bytes();
     if capacity > 0 && !buffer.is_null() {
@@ -158,7 +158,10 @@ pub extern "C" fn spiraltorch_last_error_length() -> usize {
 /// number of bytes copied (excluding the null terminator). If no error is
 /// present the function returns `0` and the buffer is left untouched.
 #[no_mangle]
-pub extern "C" fn spiraltorch_last_error_message(buffer: *mut c_char, capacity: usize) -> usize {
+pub unsafe extern "C" fn spiraltorch_last_error_message(
+    buffer: *mut c_char,
+    capacity: usize,
+) -> usize {
     if buffer.is_null() || capacity == 0 {
         return 0;
     }
@@ -215,7 +218,7 @@ pub unsafe extern "C" fn spiraltorch_tensor_from_dense(
 
 /// Releases a tensor previously allocated by this library.
 #[no_mangle]
-pub extern "C" fn spiraltorch_tensor_free(handle: *mut Tensor) {
+pub unsafe extern "C" fn spiraltorch_tensor_free(handle: *mut Tensor) {
     if handle.is_null() {
         return;
     }
@@ -1020,7 +1023,7 @@ pub unsafe extern "C" fn spiraltorch_runtime_new(
 }
 
 #[no_mangle]
-pub extern "C" fn spiraltorch_runtime_free(handle: *mut RuntimeHandle) {
+pub unsafe extern "C" fn spiraltorch_runtime_free(handle: *mut RuntimeHandle) {
     if handle.is_null() {
         return;
     }
@@ -1543,10 +1546,10 @@ mod tests {
 
     #[test]
     fn version_roundtrip() {
-        let len = spiraltorch_version(ptr::null_mut(), 0);
+        let len = unsafe { spiraltorch_version(ptr::null_mut(), 0) };
         assert!(len > 0);
         let mut buffer = vec![0 as c_char; len + 1];
-        let written = spiraltorch_version(buffer.as_mut_ptr(), buffer.len());
+        let written = unsafe { spiraltorch_version(buffer.as_mut_ptr(), buffer.len()) };
         assert_eq!(written, len);
         let as_str = unsafe { CStr::from_ptr(buffer.as_ptr()) }.to_str().unwrap();
         assert_eq!(as_str, env!("CARGO_PKG_VERSION"));
@@ -1576,7 +1579,7 @@ mod tests {
         assert!(copied);
         assert_eq!(copy, data);
 
-        spiraltorch_tensor_free(handle);
+        unsafe { spiraltorch_tensor_free(handle) };
     }
 
     #[test]
@@ -1588,7 +1591,7 @@ mod tests {
         let len = spiraltorch_last_error_length();
         assert!(len > 0);
         let mut buffer = vec![0i8; len + 1];
-        let written = spiraltorch_last_error_message(buffer.as_mut_ptr(), buffer.len());
+        let written = unsafe { spiraltorch_last_error_message(buffer.as_mut_ptr(), buffer.len()) };
         assert_eq!(written, len.min(buffer.len() - 1));
         let message = unsafe { CStr::from_ptr(buffer.as_ptr()) };
         assert!(message.to_string_lossy().contains("null"));
@@ -1619,10 +1622,12 @@ mod tests {
         assert!(ok);
         assert_eq!(diff_buffer, b_data);
 
-        spiraltorch_tensor_free(diff);
-        spiraltorch_tensor_free(sum);
-        spiraltorch_tensor_free(b);
-        spiraltorch_tensor_free(a);
+        unsafe {
+            spiraltorch_tensor_free(diff);
+            spiraltorch_tensor_free(sum);
+            spiraltorch_tensor_free(b);
+            spiraltorch_tensor_free(a);
+        }
     }
 
     #[test]
@@ -1652,10 +1657,12 @@ mod tests {
         assert!(ok);
         assert_eq!(product_buffer, vec![58.0, 64.0, 139.0, 154.0]);
 
-        spiraltorch_tensor_free(product);
-        spiraltorch_tensor_free(scaled);
-        spiraltorch_tensor_free(right);
-        spiraltorch_tensor_free(left);
+        unsafe {
+            spiraltorch_tensor_free(product);
+            spiraltorch_tensor_free(scaled);
+            spiraltorch_tensor_free(right);
+            spiraltorch_tensor_free(left);
+        }
     }
 
     #[test]
@@ -1680,8 +1687,10 @@ mod tests {
             .iter()
             .all(|value| (-0.5..0.75).contains(value)));
 
-        spiraltorch_tensor_free(second);
-        spiraltorch_tensor_free(first);
+        unsafe {
+            spiraltorch_tensor_free(second);
+            spiraltorch_tensor_free(first);
+        }
     }
 
     #[test]
@@ -1703,8 +1712,10 @@ mod tests {
         assert!(second_ok);
         assert_eq!(first_buffer, second_buffer);
 
-        spiraltorch_tensor_free(second);
-        spiraltorch_tensor_free(first);
+        unsafe {
+            spiraltorch_tensor_free(second);
+            spiraltorch_tensor_free(first);
+        }
     }
 
     #[test]
@@ -1756,11 +1767,13 @@ mod tests {
         assert!(hadamard_ok);
         assert_eq!(hadamard_buffer, vec![1.0, 1.0, 4.5, 8.0, 12.5, 18.0]);
 
-        spiraltorch_tensor_free(hadamard);
-        spiraltorch_tensor_free(other);
-        spiraltorch_tensor_free(reshaped);
-        spiraltorch_tensor_free(transposed);
-        spiraltorch_tensor_free(handle);
+        unsafe {
+            spiraltorch_tensor_free(hadamard);
+            spiraltorch_tensor_free(other);
+            spiraltorch_tensor_free(reshaped);
+            spiraltorch_tensor_free(transposed);
+            spiraltorch_tensor_free(handle);
+        }
     }
 
     #[test]
@@ -1790,10 +1803,12 @@ mod tests {
         assert!(copied);
         assert_eq!(buffer, vec![19.0, 22.0, 43.0, 50.0]);
 
-        spiraltorch_tensor_free(product);
-        spiraltorch_tensor_free(right);
-        spiraltorch_tensor_free(left);
-        spiraltorch_runtime_free(runtime);
+        unsafe {
+            spiraltorch_tensor_free(product);
+            spiraltorch_tensor_free(right);
+            spiraltorch_tensor_free(left);
+            spiraltorch_runtime_free(runtime);
+        }
     }
 
     #[test]
@@ -1819,9 +1834,11 @@ mod tests {
         assert!(spawned_ok);
         assert_eq!(direct_buf, spawned_buf);
 
-        spiraltorch_tensor_free(spawned);
-        spiraltorch_tensor_free(direct);
-        spiraltorch_runtime_free(runtime);
+        unsafe {
+            spiraltorch_tensor_free(spawned);
+            spiraltorch_tensor_free(direct);
+            spiraltorch_runtime_free(runtime);
+        }
     }
 
     #[test]
@@ -1847,9 +1864,11 @@ mod tests {
         assert!(spawned_ok);
         assert_eq!(direct_buf, spawned_buf);
 
-        spiraltorch_tensor_free(spawned);
-        spiraltorch_tensor_free(direct);
-        spiraltorch_runtime_free(runtime);
+        unsafe {
+            spiraltorch_tensor_free(spawned);
+            spiraltorch_tensor_free(direct);
+            spiraltorch_runtime_free(runtime);
+        }
     }
 
     #[test]
@@ -1883,10 +1902,12 @@ mod tests {
         assert!(explicit_ok);
         assert_eq!(auto_buffer, explicit_buffer);
 
-        spiraltorch_tensor_free(explicit);
-        spiraltorch_tensor_free(auto);
-        spiraltorch_tensor_free(rhs);
-        spiraltorch_tensor_free(lhs);
+        unsafe {
+            spiraltorch_tensor_free(explicit);
+            spiraltorch_tensor_free(auto);
+            spiraltorch_tensor_free(rhs);
+            spiraltorch_tensor_free(lhs);
+        }
     }
 
     #[test]
@@ -1917,9 +1938,11 @@ mod tests {
         assert!(copied);
         assert_eq!(buffer, expected.data());
 
-        spiraltorch_tensor_free(fused);
-        spiraltorch_tensor_free(rhs_handle);
-        spiraltorch_tensor_free(lhs_handle);
+        unsafe {
+            spiraltorch_tensor_free(fused);
+            spiraltorch_tensor_free(rhs_handle);
+            spiraltorch_tensor_free(lhs_handle);
+        }
     }
 
     #[test]
@@ -1963,10 +1986,12 @@ mod tests {
         assert!(explicit_ok);
         assert_eq!(auto_buffer, explicit_buffer);
 
-        spiraltorch_tensor_free(explicit);
-        spiraltorch_tensor_free(auto);
-        spiraltorch_tensor_free(rhs);
-        spiraltorch_tensor_free(lhs);
+        unsafe {
+            spiraltorch_tensor_free(explicit);
+            spiraltorch_tensor_free(auto);
+            spiraltorch_tensor_free(rhs);
+            spiraltorch_tensor_free(lhs);
+        }
     }
 
     #[test]
@@ -2011,10 +2036,12 @@ mod tests {
         assert!(copied);
         assert_eq!(buffer, expected.data());
 
-        spiraltorch_tensor_free(fused);
-        spiraltorch_tensor_free(residual_handle);
-        spiraltorch_tensor_free(rhs_handle);
-        spiraltorch_tensor_free(lhs_handle);
+        unsafe {
+            spiraltorch_tensor_free(fused);
+            spiraltorch_tensor_free(residual_handle);
+            spiraltorch_tensor_free(rhs_handle);
+            spiraltorch_tensor_free(lhs_handle);
+        }
     }
 
     #[test]
@@ -2065,11 +2092,13 @@ mod tests {
         assert!(explicit_ok);
         assert_eq!(auto_buffer, explicit_buffer);
 
-        spiraltorch_tensor_free(explicit);
-        spiraltorch_tensor_free(auto);
-        spiraltorch_tensor_free(residual);
-        spiraltorch_tensor_free(rhs);
-        spiraltorch_tensor_free(lhs);
+        unsafe {
+            spiraltorch_tensor_free(explicit);
+            spiraltorch_tensor_free(auto);
+            spiraltorch_tensor_free(residual);
+            spiraltorch_tensor_free(rhs);
+            spiraltorch_tensor_free(lhs);
+        }
     }
 
     #[test]
@@ -2100,9 +2129,11 @@ mod tests {
         assert!(copied);
         assert_eq!(buffer, expected.data());
 
-        spiraltorch_tensor_free(fused);
-        spiraltorch_tensor_free(rhs_handle);
-        spiraltorch_tensor_free(lhs_handle);
+        unsafe {
+            spiraltorch_tensor_free(fused);
+            spiraltorch_tensor_free(rhs_handle);
+            spiraltorch_tensor_free(lhs_handle);
+        }
     }
 
     #[test]
@@ -2146,10 +2177,12 @@ mod tests {
         assert!(explicit_ok);
         assert_eq!(auto_buffer, explicit_buffer);
 
-        spiraltorch_tensor_free(explicit);
-        spiraltorch_tensor_free(auto);
-        spiraltorch_tensor_free(rhs);
-        spiraltorch_tensor_free(lhs);
+        unsafe {
+            spiraltorch_tensor_free(explicit);
+            spiraltorch_tensor_free(auto);
+            spiraltorch_tensor_free(rhs);
+            spiraltorch_tensor_free(lhs);
+        }
     }
 
     #[test]
@@ -2170,13 +2203,15 @@ mod tests {
         let len = spiraltorch_last_error_length();
         assert!(len > 0);
         let mut buffer = vec![0i8; len + 1];
-        let written = spiraltorch_last_error_message(buffer.as_mut_ptr(), buffer.len());
+        let written = unsafe { spiraltorch_last_error_message(buffer.as_mut_ptr(), buffer.len()) };
         assert!(written > 0);
         let message = unsafe { CStr::from_ptr(buffer.as_ptr()) }.to_string_lossy();
         assert!(message.contains("expected bias"));
 
-        spiraltorch_tensor_free(rhs);
-        spiraltorch_tensor_free(lhs);
+        unsafe {
+            spiraltorch_tensor_free(rhs);
+            spiraltorch_tensor_free(lhs);
+        }
     }
 
     #[test]
@@ -2197,13 +2232,15 @@ mod tests {
         let len = spiraltorch_last_error_length();
         assert!(len > 0);
         let mut buffer = vec![0i8; len + 1];
-        let written = spiraltorch_last_error_message(buffer.as_mut_ptr(), buffer.len());
+        let written = unsafe { spiraltorch_last_error_message(buffer.as_mut_ptr(), buffer.len()) };
         assert!(written > 0);
         let message = unsafe { CStr::from_ptr(buffer.as_ptr()) }.to_string_lossy();
         assert!(message.contains("expected bias"));
 
-        spiraltorch_tensor_free(rhs);
-        spiraltorch_tensor_free(lhs);
+        unsafe {
+            spiraltorch_tensor_free(rhs);
+            spiraltorch_tensor_free(lhs);
+        }
     }
 
     #[test]
@@ -2233,8 +2270,10 @@ mod tests {
             assert!((observed - expected).abs() < 1e-5);
         }
 
-        spiraltorch_tensor_free(softmax);
-        spiraltorch_tensor_free(tensor);
+        unsafe {
+            spiraltorch_tensor_free(softmax);
+            spiraltorch_tensor_free(tensor);
+        }
     }
 
     #[test]
@@ -2246,7 +2285,9 @@ mod tests {
         let dlpack = spiraltorch_tensor_to_dlpack(tensor);
         assert!(!dlpack.is_null());
 
-        spiraltorch_tensor_free(tensor);
+        unsafe {
+            spiraltorch_tensor_free(tensor);
+        }
 
         let roundtrip = unsafe { spiraltorch_tensor_from_dlpack(dlpack) };
         assert!(!roundtrip.is_null());
@@ -2257,7 +2298,9 @@ mod tests {
         assert!(copied);
         assert_eq!(buffer, data);
 
-        spiraltorch_tensor_free(roundtrip);
+        unsafe {
+            spiraltorch_tensor_free(roundtrip);
+        }
     }
 
     #[test]
@@ -2298,11 +2341,13 @@ mod tests {
         assert!(explicit_ok);
         assert_eq!(auto_buffer, explicit_buffer);
 
-        spiraltorch_tensor_free(explicit);
-        spiraltorch_tensor_free(auto);
-        spiraltorch_tensor_free(rhs);
-        spiraltorch_tensor_free(lhs);
-        spiraltorch_runtime_free(runtime);
+        unsafe {
+            spiraltorch_tensor_free(explicit);
+            spiraltorch_tensor_free(auto);
+            spiraltorch_tensor_free(rhs);
+            spiraltorch_tensor_free(lhs);
+            spiraltorch_runtime_free(runtime);
+        }
     }
 
     #[test]
@@ -2345,11 +2390,13 @@ mod tests {
         assert!(spawned_ok);
         assert_eq!(direct_buffer, spawned_buffer);
 
-        spiraltorch_tensor_free(spawned);
-        spiraltorch_tensor_free(direct);
-        spiraltorch_tensor_free(rhs);
-        spiraltorch_tensor_free(lhs);
-        spiraltorch_runtime_free(runtime);
+        unsafe {
+            spiraltorch_tensor_free(spawned);
+            spiraltorch_tensor_free(direct);
+            spiraltorch_tensor_free(rhs);
+            spiraltorch_tensor_free(lhs);
+            spiraltorch_runtime_free(runtime);
+        }
     }
 
     #[test]
@@ -2399,12 +2446,14 @@ mod tests {
         assert!(spawned_ok);
         assert_eq!(direct_buffer, spawned_buffer);
 
-        spiraltorch_tensor_free(spawned);
-        spiraltorch_tensor_free(direct);
-        spiraltorch_tensor_free(residual);
-        spiraltorch_tensor_free(rhs);
-        spiraltorch_tensor_free(lhs);
-        spiraltorch_runtime_free(runtime);
+        unsafe {
+            spiraltorch_tensor_free(spawned);
+            spiraltorch_tensor_free(direct);
+            spiraltorch_tensor_free(residual);
+            spiraltorch_tensor_free(rhs);
+            spiraltorch_tensor_free(lhs);
+            spiraltorch_runtime_free(runtime);
+        }
     }
 
     #[test]
@@ -2447,11 +2496,13 @@ mod tests {
         assert!(spawned_ok);
         assert_eq!(direct_buffer, spawned_buffer);
 
-        spiraltorch_tensor_free(spawned);
-        spiraltorch_tensor_free(direct);
-        spiraltorch_tensor_free(rhs);
-        spiraltorch_tensor_free(lhs);
-        spiraltorch_runtime_free(runtime);
+        unsafe {
+            spiraltorch_tensor_free(spawned);
+            spiraltorch_tensor_free(direct);
+            spiraltorch_tensor_free(rhs);
+            spiraltorch_tensor_free(lhs);
+            spiraltorch_runtime_free(runtime);
+        }
     }
 
     #[test]
@@ -2487,10 +2538,12 @@ mod tests {
             assert!((lhs - rhs).abs() < 1e-6);
         }
 
-        spiraltorch_tensor_free(runtime_softmax);
-        spiraltorch_tensor_free(direct);
-        spiraltorch_tensor_free(tensor);
-        spiraltorch_runtime_free(runtime);
+        unsafe {
+            spiraltorch_tensor_free(runtime_softmax);
+            spiraltorch_tensor_free(direct);
+            spiraltorch_tensor_free(tensor);
+            spiraltorch_runtime_free(runtime);
+        }
     }
 
     #[test]
@@ -2506,6 +2559,8 @@ mod tests {
         unsafe {
             spiraltorch_dlpack_drop_exported_state(dlpack);
         }
-        spiraltorch_tensor_free(tensor);
+        unsafe {
+            spiraltorch_tensor_free(tensor);
+        }
     }
 }
