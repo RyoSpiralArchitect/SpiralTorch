@@ -512,16 +512,7 @@ where
     #[cfg(feature = "tracing")]
     let start = std::time::Instant::now();
     let future = f(&mut kv);
-    let out = if let Some(timeout) = options.operation_timeout {
-        tokio::time::timeout(timeout, future)
-            .await
-            .map_err(|_| KvErr::Timeout {
-                operation: "redis_async",
-                timeout,
-            })?
-    } else {
-        future.await
-    };
+    let out = future.await;
     #[cfg(feature = "tracing")]
     {
         tracing::event!(
@@ -538,6 +529,7 @@ where
 #[cfg(feature = "redis-async")]
 pub struct AsyncRedisKv {
     conn: redis::aio::Connection,
+    operation_timeout: Option<std::time::Duration>,
 }
 
 #[cfg(feature = "redis-async")]
@@ -573,15 +565,55 @@ impl AsyncRedisKv {
         } else {
             connect_future.await?
         };
-        Ok(Self { conn })
+        Ok(Self {
+            conn,
+            operation_timeout: options.operation_timeout,
+        })
     }
 }
 
 #[cfg(feature = "redis-async")]
 impl AsyncRedisKv {
+    async fn await_with_timeout<T, Fut>(
+        timeout: Option<std::time::Duration>,
+        operation: &'static str,
+        future: Fut,
+    ) -> KvResult<T>
+    where
+        Fut: std::future::Future<Output = redis::RedisResult<T>>,
+    {
+        #[cfg(feature = "tracing")]
+        let start = std::time::Instant::now();
+
+        let out = if let Some(timeout) = timeout {
+            tokio::time::timeout(timeout, future)
+                .await
+                .map_err(|_| KvErr::Timeout { operation, timeout })?
+                .map_err(KvErr::from)
+        } else {
+            future.await.map_err(KvErr::from)
+        };
+
+        #[cfg(feature = "tracing")]
+        {
+            tracing::event!(
+                target: "spiraltorch::kv",
+                tracing::Level::DEBUG,
+                backend = "redis_async",
+                operation,
+                duration_ms = start.elapsed().as_secs_f64() * 1000.0,
+                ok = out.is_ok()
+            );
+        }
+
+        out
+    }
+
     pub async fn get_raw(&mut self, key: &str) -> KvResult<Option<String>> {
         use redis::AsyncCommands;
-        Ok(self.conn.get(key).await?)
+        let timeout = self.operation_timeout;
+        let future = self.conn.get(key);
+        Self::await_with_timeout(timeout, "redis_get", future).await
     }
 
     pub async fn set_raw<V>(&mut self, key: &str, value: V) -> KvResult<()>
@@ -589,7 +621,9 @@ impl AsyncRedisKv {
         V: redis::ToRedisArgs + Send + Sync,
     {
         use redis::AsyncCommands;
-        self.conn.set::<_, _, ()>(key, value).await?;
+        let timeout = self.operation_timeout;
+        let future = self.conn.set::<_, _, ()>(key, value);
+        Self::await_with_timeout(timeout, "redis_set", future).await?;
         Ok(())
     }
 
@@ -598,7 +632,9 @@ impl AsyncRedisKv {
         V: redis::ToRedisArgs + Send + Sync,
     {
         use redis::AsyncCommands;
-        self.conn.set_ex::<_, _, ()>(key, value, seconds).await?;
+        let timeout = self.operation_timeout;
+        let future = self.conn.set_ex::<_, _, ()>(key, value, seconds);
+        Self::await_with_timeout(timeout, "redis_set_ex", future).await?;
         Ok(())
     }
 
@@ -618,6 +654,390 @@ impl AsyncRedisKv {
     pub async fn set_json<T: serde::Serialize>(&mut self, key: &str, value: &T) -> KvResult<()> {
         let payload = serde_json::to_string(value)?;
         self.set_raw(key, payload).await
+    }
+
+    pub async fn set_json_with_options<T>(
+        &mut self,
+        key: &str,
+        value: &T,
+        options: &JsonSetOptions,
+    ) -> KvResult<bool>
+    where
+        T: serde::Serialize,
+    {
+        let payload = serde_json::to_string(value)?;
+        self.set_json_payload_with_options(key, payload, options)
+            .await
+    }
+
+    pub async fn set_json_with_automated_options<T>(
+        &mut self,
+        key: &str,
+        value: &T,
+        automated: AutomatedJsonSetOptions,
+    ) -> KvResult<bool>
+    where
+        T: serde::Serialize,
+    {
+        let payload = serde_json::to_string(value)?;
+        self.set_json_payload_with_automated_options(key, payload, automated)
+            .await
+    }
+
+    pub async fn set_json_with_prepared_options<T>(
+        &mut self,
+        key: &str,
+        value: &T,
+        prepared: &PreparedJsonSetOptions,
+    ) -> KvResult<bool>
+    where
+        T: serde::Serialize,
+    {
+        let payload = serde_json::to_string(value)?;
+        self.set_json_payload_with_prepared_options(key, payload, prepared)
+            .await
+    }
+
+    pub async fn set_json_ex<T>(&mut self, key: &str, value: &T, seconds: usize) -> KvResult<()>
+    where
+        T: serde::Serialize,
+    {
+        let options = JsonSetOptions::new().with_expiry_seconds(seconds as u64);
+        let automated = options.automated_owned()?;
+        let inserted = self
+            .set_json_with_automated_options(key, value, automated)
+            .await?;
+        debug_assert!(inserted, "unconditional JSON SET EX should not return Nil");
+        Ok(())
+    }
+
+    pub async fn set_json_nx<T>(&mut self, key: &str, value: &T) -> KvResult<bool>
+    where
+        T: serde::Serialize,
+    {
+        let options = JsonSetOptions::new().nx();
+        let automated = options.automated_owned()?;
+        self.set_json_with_automated_options(key, value, automated)
+            .await
+    }
+
+    async fn set_json_payload_with_options(
+        &mut self,
+        key: &str,
+        payload: String,
+        options: &JsonSetOptions,
+    ) -> KvResult<bool> {
+        let automated = (*options).automated_owned()?;
+        self.set_json_payload_with_automated_options(key, payload, automated)
+            .await
+    }
+
+    async fn set_json_payload_with_automated_options(
+        &mut self,
+        key: &str,
+        payload: String,
+        automated: AutomatedJsonSetOptions,
+    ) -> KvResult<bool> {
+        let mut cmd = redis::cmd("SET");
+        cmd.arg(key).arg(payload);
+        automated.apply(&mut cmd);
+        self.finish_json_set(&mut cmd).await
+    }
+
+    async fn set_json_payload_with_prepared_options(
+        &mut self,
+        key: &str,
+        payload: String,
+        prepared: &PreparedJsonSetOptions,
+    ) -> KvResult<bool> {
+        let mut cmd = redis::cmd("SET");
+        cmd.arg(key).arg(payload);
+        prepared.apply(&mut cmd);
+        self.finish_json_set(&mut cmd).await
+    }
+
+    async fn finish_json_set(&mut self, cmd: &mut redis::Cmd) -> KvResult<bool> {
+        let timeout = self.operation_timeout;
+        let future = cmd.query_async(&mut self.conn);
+        let response: Value = Self::await_with_timeout(timeout, "redis_cmd_set", future).await?;
+        match response {
+            Value::Nil => Ok(false),
+            Value::Okay | Value::Status(_) | Value::Data(_) => Ok(true),
+            other => Err(KvErr::UnexpectedResponse {
+                command: "SET",
+                response: other,
+            }),
+        }
+    }
+
+    pub async fn get_or_set_json<T, F>(&mut self, key: &str, default: F) -> KvResult<T>
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned,
+        F: FnOnce() -> T,
+    {
+        if let Some(existing) = self.get_json(key).await? {
+            return Ok(existing);
+        }
+
+        let value = default();
+        self.set_json(key, &value).await?;
+        Ok(value)
+    }
+
+    pub async fn get_or_set_json_with_options<T, F>(
+        &mut self,
+        key: &str,
+        default: F,
+        options: &JsonSetOptions,
+    ) -> KvResult<T>
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned,
+        F: FnOnce() -> T,
+    {
+        if let Some(existing) = self.get_json(key).await? {
+            return Ok(existing);
+        }
+
+        let value = default();
+        let inserted = self.set_json_with_options(key, &value, options).await?;
+
+        if inserted {
+            return Ok(value);
+        }
+
+        if let Some(existing) = self.get_json(key).await? {
+            Ok(existing)
+        } else {
+            Ok(value)
+        }
+    }
+
+    pub async fn get_or_set_json_with_automated_options<T, F>(
+        &mut self,
+        key: &str,
+        default: F,
+        automated: AutomatedJsonSetOptions,
+    ) -> KvResult<T>
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned,
+        F: FnOnce() -> T,
+    {
+        if let Some(existing) = self.get_json(key).await? {
+            return Ok(existing);
+        }
+
+        let value = default();
+        let inserted = self
+            .set_json_with_automated_options(key, &value, automated)
+            .await?;
+
+        if inserted {
+            return Ok(value);
+        }
+
+        if let Some(existing) = self.get_json(key).await? {
+            Ok(existing)
+        } else {
+            Ok(value)
+        }
+    }
+
+    pub async fn get_or_set_json_with_prepared_options<T, F>(
+        &mut self,
+        key: &str,
+        default: F,
+        prepared: &PreparedJsonSetOptions,
+    ) -> KvResult<T>
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned,
+        F: FnOnce() -> T,
+    {
+        if let Some(existing) = self.get_json(key).await? {
+            return Ok(existing);
+        }
+
+        let value = default();
+        let inserted = self
+            .set_json_with_prepared_options(key, &value, prepared)
+            .await?;
+
+        if inserted {
+            return Ok(value);
+        }
+
+        if let Some(existing) = self.get_json(key).await? {
+            Ok(existing)
+        } else {
+            Ok(value)
+        }
+    }
+
+    pub async fn del(&mut self, key: &str) -> KvResult<usize> {
+        use redis::AsyncCommands;
+        let timeout = self.operation_timeout;
+        let future = self.conn.del(key);
+        Self::await_with_timeout(timeout, "redis_del", future).await
+    }
+
+    pub async fn exists(&mut self, key: &str) -> KvResult<bool> {
+        use redis::AsyncCommands;
+        let timeout = self.operation_timeout;
+        let future = self.conn.exists(key);
+        Self::await_with_timeout(timeout, "redis_exists", future).await
+    }
+
+    pub async fn expire(&mut self, key: &str, seconds: usize) -> KvResult<bool> {
+        use redis::AsyncCommands;
+        let timeout = self.operation_timeout;
+        let future = self.conn.expire(key, seconds);
+        Self::await_with_timeout(timeout, "redis_expire", future).await
+    }
+
+    pub async fn ttl(&mut self, key: &str) -> KvResult<isize> {
+        use redis::AsyncCommands;
+        let timeout = self.operation_timeout;
+        let future = self.conn.ttl(key);
+        Self::await_with_timeout(timeout, "redis_ttl", future).await
+    }
+
+    pub async fn incr_by<N>(&mut self, key: &str, amount: N) -> KvResult<N>
+    where
+        N: redis::ToRedisArgs + redis::FromRedisValue + Send + Sync,
+    {
+        use redis::AsyncCommands;
+        let timeout = self.operation_timeout;
+        let future = self.conn.incr(key, amount);
+        Self::await_with_timeout(timeout, "redis_incr_by", future).await
+    }
+
+    pub async fn lrange<T: redis::FromRedisValue>(
+        &mut self,
+        key: &str,
+        start: isize,
+        stop: isize,
+    ) -> KvResult<Vec<T>> {
+        use redis::AsyncCommands;
+        let timeout = self.operation_timeout;
+        let future = self.conn.lrange(key, start, stop);
+        Self::await_with_timeout(timeout, "redis_lrange", future).await
+    }
+
+    pub async fn lpush<V: redis::ToRedisArgs + Send + Sync>(
+        &mut self,
+        key: &str,
+        values: V,
+    ) -> KvResult<usize> {
+        use redis::AsyncCommands;
+        let timeout = self.operation_timeout;
+        let future = self.conn.lpush(key, values);
+        Self::await_with_timeout(timeout, "redis_lpush", future).await
+    }
+
+    pub async fn rpush<V: redis::ToRedisArgs + Send + Sync>(
+        &mut self,
+        key: &str,
+        values: V,
+    ) -> KvResult<usize> {
+        use redis::AsyncCommands;
+        let timeout = self.operation_timeout;
+        let future = self.conn.rpush(key, values);
+        Self::await_with_timeout(timeout, "redis_rpush", future).await
+    }
+
+    pub async fn ltrim(&mut self, key: &str, start: isize, stop: isize) -> KvResult<()> {
+        use redis::AsyncCommands;
+        let timeout = self.operation_timeout;
+        let future = self.conn.ltrim::<_, ()>(key, start, stop);
+        Self::await_with_timeout(timeout, "redis_ltrim", future).await?;
+        Ok(())
+    }
+
+    pub async fn lpush_json<T>(&mut self, key: &str, value: &T) -> KvResult<usize>
+    where
+        T: serde::Serialize,
+    {
+        let payload = serde_json::to_string(value)?;
+        self.lpush(key, payload).await
+    }
+
+    pub async fn rpush_json<T>(&mut self, key: &str, value: &T) -> KvResult<usize>
+    where
+        T: serde::Serialize,
+    {
+        let payload = serde_json::to_string(value)?;
+        self.rpush(key, payload).await
+    }
+
+    pub async fn lrange_json<T>(&mut self, key: &str, start: isize, stop: isize) -> KvResult<Vec<T>>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        let entries: Vec<String> = self.lrange(key, start, stop).await?;
+        entries
+            .into_iter()
+            .map(|raw| serde_json::from_str(&raw).map_err(KvErr::from))
+            .collect()
+    }
+
+    pub async fn hset<F, V>(&mut self, key: &str, field: F, value: V) -> KvResult<bool>
+    where
+        F: redis::ToRedisArgs + Send + Sync,
+        V: redis::ToRedisArgs + Send + Sync,
+    {
+        use redis::AsyncCommands;
+        let timeout = self.operation_timeout;
+        let future = self.conn.hset(key, field, value);
+        let updated: usize = Self::await_with_timeout(timeout, "redis_hset", future).await?;
+        Ok(updated > 0)
+    }
+
+    pub async fn hget<F, T>(&mut self, key: &str, field: F) -> KvResult<Option<T>>
+    where
+        F: redis::ToRedisArgs + Send + Sync,
+        T: redis::FromRedisValue,
+    {
+        use redis::AsyncCommands;
+        let timeout = self.operation_timeout;
+        let future = self.conn.hget(key, field);
+        Self::await_with_timeout(timeout, "redis_hget", future).await
+    }
+
+    pub async fn hdel<F>(&mut self, key: &str, field: F) -> KvResult<usize>
+    where
+        F: redis::ToRedisArgs + Send + Sync,
+    {
+        use redis::AsyncCommands;
+        let timeout = self.operation_timeout;
+        let future = self.conn.hdel(key, field);
+        Self::await_with_timeout(timeout, "redis_hdel", future).await
+    }
+
+    pub async fn hgetall<T>(&mut self, key: &str) -> KvResult<HashMap<String, T>>
+    where
+        T: redis::FromRedisValue,
+    {
+        use redis::AsyncCommands;
+        let timeout = self.operation_timeout;
+        let future = self.conn.hgetall(key);
+        Self::await_with_timeout(timeout, "redis_hgetall", future).await
+    }
+
+    pub async fn execute_pipeline<R>(&mut self, pipeline: Pipeline) -> KvResult<R>
+    where
+        R: FromRedisValue,
+    {
+        let timeout = self.operation_timeout;
+        let future = pipeline.query_async(&mut self.conn);
+        Self::await_with_timeout(timeout, "redis_pipeline", future).await
+    }
+
+    pub async fn pipeline<R, F>(&mut self, build: F) -> KvResult<R>
+    where
+        R: FromRedisValue,
+        F: FnOnce(Pipeline) -> Pipeline,
+    {
+        let pipeline = build(redis::pipe());
+        self.execute_pipeline(pipeline).await
     }
 }
 
