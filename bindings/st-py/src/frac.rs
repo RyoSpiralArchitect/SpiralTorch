@@ -124,8 +124,8 @@ impl PyFractalFieldGenerator {
     #[new]
     #[pyo3(signature = (octaves, lacunarity=2.0, gain=0.5, iterations=16))]
     fn new(octaves: u32, lacunarity: f32, gain: f32, iterations: u32) -> PyResult<Self> {
-        let inner =
-            FractalFieldGenerator::new(octaves, lacunarity, gain, iterations).map_err(fractal_err_to_py)?;
+        let inner = FractalFieldGenerator::new(octaves, lacunarity, gain, iterations)
+            .map_err(fractal_err_to_py)?;
         Ok(Self { inner })
     }
 
@@ -149,13 +149,23 @@ impl PyFractalFieldGenerator {
         self.inner.iterations()
     }
 
-    fn branching_field(&self, log_start: Scalar, log_step: Scalar, len: usize) -> PyResult<Vec<ComplexScalar>> {
+    fn branching_field(
+        &self,
+        log_start: Scalar,
+        log_step: Scalar,
+        len: usize,
+    ) -> PyResult<Vec<ComplexScalar>> {
         self.inner
             .branching_field(log_start, log_step, len)
             .map_err(fractal_err_to_py)
     }
 
-    fn spawn_grid(&self, log_start: Scalar, log_step: Scalar, len: usize) -> PyResult<PyMellinLogGrid> {
+    fn spawn_grid(
+        &self,
+        log_start: Scalar,
+        log_step: Scalar,
+        len: usize,
+    ) -> PyResult<PyMellinLogGrid> {
         let grid = self
             .inner
             .spawn_grid(log_start, log_step, len)
@@ -286,7 +296,10 @@ impl PyLogZSeries {
 
 #[pyfunction]
 #[pyo3(signature = (log_step, s_values))]
-fn log_lattice_z_points(log_step: Scalar, s_values: Vec<ComplexScalar>) -> PyResult<Vec<ComplexScalar>> {
+fn log_lattice_z_points(
+    log_step: Scalar,
+    s_values: Vec<ComplexScalar>,
+) -> PyResult<Vec<ComplexScalar>> {
     rust_log_lattice_z_points(log_step, &s_values).map_err(cosmology_err_to_py)
 }
 
@@ -298,8 +311,13 @@ fn assemble_pzeta(
     epsilon_series: &PyLogZSeries,
     planck_mass: Scalar,
 ) -> PyResult<Vec<Scalar>> {
-    rust_assemble_pzeta(&z_points, &h_series.inner, &epsilon_series.inner, planck_mass)
-        .map_err(cosmology_err_to_py)
+    rust_assemble_pzeta(
+        &z_points,
+        &h_series.inner,
+        &epsilon_series.inner,
+        planck_mass,
+    )
+    .map_err(cosmology_err_to_py)
 }
 
 #[pyclass(module = "spiraltorch.frac", name = "MellinLogGrid")]
@@ -323,8 +341,8 @@ impl PyMellinEvalPlan {
         real_values: Vec<Scalar>,
         imag_values: Vec<Scalar>,
     ) -> PyResult<Self> {
-        let inner =
-            MellinEvalPlan::mesh(log_start, log_step, &real_values, &imag_values).map_err(mellin_err_to_py)?;
+        let inner = MellinEvalPlan::mesh(log_start, log_step, &real_values, &imag_values)
+            .map_err(mellin_err_to_py)?;
         Ok(Self { inner })
     }
 
@@ -335,8 +353,8 @@ impl PyMellinEvalPlan {
         real: Scalar,
         imag_values: Vec<Scalar>,
     ) -> PyResult<Self> {
-        let inner =
-            MellinEvalPlan::vertical_line(log_start, log_step, real, &imag_values).map_err(mellin_err_to_py)?;
+        let inner = MellinEvalPlan::vertical_line(log_start, log_step, real, &imag_values)
+            .map_err(mellin_err_to_py)?;
         Ok(Self { inner })
     }
 
@@ -363,7 +381,9 @@ impl PyMellinEvalPlan {
     }
 
     fn evaluate(&self, grid: &PyMellinLogGrid) -> PyResult<Vec<ComplexScalar>> {
-        grid.inner.evaluate_plan(&self.inner).map_err(mellin_err_to_py)
+        grid.inner
+            .evaluate_plan(&self.inner)
+            .map_err(mellin_err_to_py)
     }
 
     fn evaluate_magnitude(&self, grid: &PyMellinLogGrid) -> PyResult<Vec<Scalar>> {
@@ -373,7 +393,11 @@ impl PyMellinEvalPlan {
     }
 
     #[pyo3(signature = (grid, epsilon=0.0))]
-    fn evaluate_log_magnitude(&self, grid: &PyMellinLogGrid, epsilon: Scalar) -> PyResult<Vec<Scalar>> {
+    fn evaluate_log_magnitude(
+        &self,
+        grid: &PyMellinLogGrid,
+        epsilon: Scalar,
+    ) -> PyResult<Vec<Scalar>> {
         grid.inner
             .evaluate_plan_log_magnitude(&self.inner, epsilon)
             .map_err(mellin_err_to_py)
@@ -402,7 +426,12 @@ impl PyMellinLogGrid {
     }
 
     #[staticmethod]
-    fn exp_decay_scaled(log_start: Scalar, log_step: Scalar, len: usize, rate: Scalar) -> PyResult<Self> {
+    fn exp_decay_scaled(
+        log_start: Scalar,
+        log_step: Scalar,
+        len: usize,
+        rate: Scalar,
+    ) -> PyResult<Self> {
         let samples = sample_log_uniform_exp_decay_scaled(log_start, log_step, len, rate)
             .map_err(mellin_err_to_py)?;
         let inner = MellinLogGrid::new(log_start, log_step, samples).map_err(mellin_err_to_py)?;
@@ -461,7 +490,9 @@ impl PyMellinLogGrid {
     }
 
     fn evaluate_many(&self, s_values: Vec<ComplexScalar>) -> PyResult<Vec<ComplexScalar>> {
-        self.inner.evaluate_many(&s_values).map_err(mellin_err_to_py)
+        self.inner
+            .evaluate_many(&s_values)
+            .map_err(mellin_err_to_py)
     }
 
     fn evaluate_mesh(
@@ -483,7 +514,11 @@ impl PyMellinLogGrid {
         Ok(flat.chunks(cols).map(|row| row.to_vec()).collect())
     }
 
-    fn plan_mesh(&self, real_values: Vec<Scalar>, imag_values: Vec<Scalar>) -> PyResult<PyMellinEvalPlan> {
+    fn plan_mesh(
+        &self,
+        real_values: Vec<Scalar>,
+        imag_values: Vec<Scalar>,
+    ) -> PyResult<PyMellinEvalPlan> {
         let inner = self
             .inner
             .plan_mesh(&real_values, &imag_values)
@@ -491,7 +526,11 @@ impl PyMellinLogGrid {
         Ok(PyMellinEvalPlan { inner })
     }
 
-    fn plan_vertical_line(&self, real: Scalar, imag_values: Vec<Scalar>) -> PyResult<PyMellinEvalPlan> {
+    fn plan_vertical_line(
+        &self,
+        real: Scalar,
+        imag_values: Vec<Scalar>,
+    ) -> PyResult<PyMellinEvalPlan> {
         let inner = self
             .inner
             .plan_vertical_line(real, &imag_values)
@@ -500,7 +539,11 @@ impl PyMellinLogGrid {
     }
 
     #[pyo3(signature = (real_values, imag_values))]
-    fn evaluate_mesh_magnitude_flat(&self, real_values: Vec<Scalar>, imag_values: Vec<Scalar>) -> PyResult<Vec<Scalar>> {
+    fn evaluate_mesh_magnitude_flat(
+        &self,
+        real_values: Vec<Scalar>,
+        imag_values: Vec<Scalar>,
+    ) -> PyResult<Vec<Scalar>> {
         self.inner
             .evaluate_mesh_magnitude(&real_values, &imag_values)
             .map_err(mellin_err_to_py)
@@ -580,7 +623,10 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
     module.add_class::<PyMellinLogGrid>()?;
     module.add_class::<PyFractalFieldGenerator>()?;
     module.add_class::<PyLogZSeries>()?;
-    module.add("__doc__", "Fractional differencing + Mellin/cosmology tooling")?;
+    module.add(
+        "__doc__",
+        "Fractional differencing + Mellin/cosmology tooling",
+    )?;
     module.add(
         "__all__",
         vec![

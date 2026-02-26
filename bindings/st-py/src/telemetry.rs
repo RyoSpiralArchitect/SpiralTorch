@@ -7,7 +7,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::introspect::PySoftlogicZFeedback;
 use st_core::telemetry::atlas;
-use st_core::telemetry::atlas::{AtlasFragment, AtlasFrame, AtlasMetric, AtlasRoute};
+use st_core::telemetry::atlas::{
+    AtlasFragment, AtlasFrame, AtlasMetric, AtlasRoute, ConceptAnnotation, ConceptSense,
+};
 use st_core::telemetry::dashboard::{
     DashboardEvent, DashboardFrame, DashboardMetric, DashboardRing, EventSeverity,
 };
@@ -27,6 +29,26 @@ fn severity_to_str(severity: EventSeverity) -> &'static str {
         EventSeverity::Info => "info",
         EventSeverity::Warning => "warning",
         EventSeverity::Critical => "critical",
+    }
+}
+
+fn concept_sense_from_str(value: &str) -> PyResult<ConceptSense> {
+    match value.to_ascii_lowercase().as_str() {
+        "qualia.lewis_given" | "lewis_given" => Ok(ConceptSense::QualiaLewisGiven),
+        "qualia.nagel_subjectivity" | "nagel_subjectivity" => {
+            Ok(ConceptSense::QualiaNagelSubjectivity)
+        }
+        "qualia.jackson_knowledge" | "jackson_knowledge" => {
+            Ok(ConceptSense::QualiaJacksonKnowledge)
+        }
+        "qualia.chalmers_hard" | "chalmers_hard" => Ok(ConceptSense::QualiaChalmersHardProblem),
+        "qualia.tononi_iit" | "tononi_iit" => Ok(ConceptSense::QualiaTononiIit),
+        "qualia.general_discourse" | "general_discourse" => {
+            Ok(ConceptSense::QualiaGeneralDiscourse)
+        }
+        other => Err(PyValueError::new_err(format!(
+            "unknown concept sense '{other}'"
+        ))),
     }
 }
 
@@ -284,6 +306,49 @@ impl PyAtlasFragment {
         self.inner.push_note(note);
     }
 
+    #[pyo3(signature = (term, sense, rationale=None))]
+    pub fn push_concept(
+        &mut self,
+        term: String,
+        sense: &str,
+        rationale: Option<String>,
+    ) -> PyResult<()> {
+        let term = term.trim().to_string();
+        if term.is_empty() {
+            return Err(PyValueError::new_err("term must be non-empty"));
+        }
+        let sense = concept_sense_from_str(sense)?;
+        let rationale = rationale.and_then(|value| {
+            let trimmed = value.trim().to_string();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            }
+        });
+        let annotation = match rationale {
+            Some(rationale) => ConceptAnnotation::with_rationale(term, sense, rationale),
+            None => ConceptAnnotation::new(term, sense),
+        };
+        self.inner.push_concept(annotation);
+        Ok(())
+    }
+
+    #[pyo3(signature = (sense, rationale=None))]
+    pub fn annotate_qualia(&mut self, sense: &str, rationale: Option<String>) -> PyResult<()> {
+        let sense = concept_sense_from_str(sense)?;
+        let rationale = rationale.and_then(|value| {
+            let trimmed = value.trim().to_string();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            }
+        });
+        self.inner.annotate_qualia(sense, rationale);
+        Ok(())
+    }
+
     pub fn metrics(&self) -> Vec<PyAtlasMetric> {
         self.inner
             .metrics
@@ -374,6 +439,19 @@ impl PyAtlasFrame {
 
     pub fn notes(&self) -> Vec<String> {
         self.inner.notes.clone()
+    }
+
+    pub fn concepts(&self, py: Python<'_>) -> PyResult<Vec<Py<PyDict>>> {
+        let mut out = Vec::new();
+        for concept in &self.inner.concepts {
+            let dict = PyDict::new_bound(py);
+            dict.set_item("term", concept.term.clone())?;
+            dict.set_item("sense", concept.sense.label())?;
+            dict.set_item("description", concept.sense.description())?;
+            dict.set_item("rationale", concept.rationale.clone())?;
+            out.push(dict.into());
+        }
+        Ok(out)
     }
 
     pub fn districts(&self, py: Python<'_>) -> PyResult<Vec<Py<PyDict>>> {
@@ -648,6 +726,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(metric_root_token, &module)?)?;
     module.add_function(wrap_pyfunction!(infer_district, &module)?)?;
     module.add_function(wrap_pyfunction!(current, &module)?)?;
+    module.add_function(wrap_pyfunction!(clear_softlogic_feedback, &module)?)?;
     module.add(
         "__all__",
         vec![
@@ -662,6 +741,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
             "metric_root_token",
             "infer_district",
             "current",
+            "clear_softlogic_feedback",
         ],
     )?;
     parent.add_submodule(&module)?;
@@ -700,4 +780,9 @@ fn current(py: Python<'_>) -> PyResult<Option<Py<PySoftlogicZFeedback>>> {
         .map(PySoftlogicZFeedback::from_feedback)
         .map(|feedback| Py::new(py, feedback))
         .transpose()
+}
+
+#[pyfunction]
+fn clear_softlogic_feedback() {
+    hub::clear_softlogic_z();
 }

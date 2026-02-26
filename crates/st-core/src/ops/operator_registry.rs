@@ -7,8 +7,8 @@
 //! This module provides a framework for registering custom tensor operators
 //! that integrate seamlessly with the SpiralTorch ecosystem.
 
-use crate::PureResult;
 use crate::plugin::{global_registry, PluginEvent};
+use crate::PureResult;
 use st_tensor::{Tensor, TensorError};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -45,7 +45,8 @@ pub struct OperatorMetadata {
 pub type OperatorFn = Arc<dyn Fn(&[&Tensor]) -> PureResult<Vec<Tensor>> + Send + Sync>;
 
 /// Type alias for gradient computation function.
-pub type GradientFn = Arc<dyn Fn(&[&Tensor], &[&Tensor], &[&Tensor]) -> PureResult<Vec<Tensor>> + Send + Sync>;
+pub type GradientFn =
+    Arc<dyn Fn(&[&Tensor], &[&Tensor], &[&Tensor]) -> PureResult<Vec<Tensor>> + Send + Sync>;
 
 /// A registered operator with its implementation.
 pub struct RegisteredOperator {
@@ -97,11 +98,13 @@ impl RegisteredOperator {
                 vec![rows, cols]
             })
             .unwrap_or_default();
-        global_registry().event_bus().publish(&PluginEvent::TensorOp {
-            op_name: self.metadata.signature.name.clone(),
-            input_shape,
-            output_shape,
-        });
+        global_registry()
+            .event_bus()
+            .publish(&PluginEvent::TensorOp {
+                op_name: self.metadata.signature.name.clone(),
+                input_shape,
+                output_shape,
+            });
 
         Ok(outputs)
     }
@@ -192,9 +195,9 @@ impl OperatorRegistry {
 
     /// Execute an operator by name.
     pub fn execute(&self, name: &str, inputs: &[&Tensor]) -> PureResult<Vec<Tensor>> {
-        let operator = self.get(name).ok_or_else(|| {
-            TensorError::Generic(format!("Operator '{}' not found", name))
-        })?;
+        let operator = self
+            .get(name)
+            .ok_or_else(|| TensorError::Generic(format!("Operator '{}' not found", name)))?;
 
         operator.execute(inputs)
     }
@@ -280,9 +283,9 @@ impl OperatorBuilder {
 
     /// Build the registered operator.
     pub fn build(self) -> PureResult<RegisteredOperator> {
-        let forward_fn = self.forward_fn.ok_or_else(|| {
-            TensorError::Generic("Forward function is required".to_string())
-        })?;
+        let forward_fn = self
+            .forward_fn
+            .ok_or_else(|| TensorError::Generic("Forward function is required".to_string()))?;
 
         let metadata = OperatorMetadata {
             signature: self.signature,
@@ -291,7 +294,11 @@ impl OperatorBuilder {
             attributes: self.attributes,
         };
 
-        Ok(RegisteredOperator::new(metadata, forward_fn, self.backward_fn))
+        Ok(RegisteredOperator::new(
+            metadata,
+            forward_fn,
+            self.backward_fn,
+        ))
     }
 }
 

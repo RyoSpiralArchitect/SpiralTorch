@@ -9,8 +9,10 @@ use std::fmt;
 use st_kdsl::query::QueryPlan;
 use st_tensor::{topos::OpenCartesianTopos, Tensor, TensorError};
 
+pub mod metrics;
 pub mod rl_bridge;
 
+pub use metrics::{evaluate_at_k, summarize_at_k, RecEvalRow, RecEvalSummary};
 pub use rl_bridge::{RecBanditController, RecBanditDecision, RecRlError, RecRlResult};
 
 /// Errors surfaced by the recommender harness.

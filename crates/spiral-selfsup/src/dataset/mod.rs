@@ -5,7 +5,7 @@ use serde::Deserialize;
 use spiral_config::determinism;
 use st_tensor::Tensor;
 use st_vision::datasets::MultiViewDatasetAdapter;
-use st_vision::transforms::{ImageTensor, TransformOperation, TransformPipeline};
+use st_vision::transforms::{ImageTensor, TransformPipeline};
 use std::fs;
 use std::path::Path;
 
@@ -55,20 +55,6 @@ fn colors_to_image(colors: &Tensor, height: usize, width: usize) -> Result<Image
     ImageTensor::new(3, height, width, data).map_err(ObjectiveError::from)
 }
 
-fn clone_operations(pipeline: Option<&TransformPipeline>) -> Vec<TransformOperation> {
-    pipeline
-        .map(|p| p.operations().iter().cloned().collect())
-        .unwrap_or_default()
-}
-
-fn reseeded_pipeline(ops: &[TransformOperation], seed: u64) -> TransformPipeline {
-    let mut pipeline = TransformPipeline::with_seed(seed);
-    for op in ops {
-        pipeline.add(op.clone());
-    }
-    pipeline
-}
-
 /// Utility capable of sampling augmented view pairs from a multi-view dataset.
 #[derive(Debug)]
 pub struct ViewPairSampler<'a> {
@@ -76,7 +62,7 @@ pub struct ViewPairSampler<'a> {
     image_height: usize,
     image_width: usize,
     rng: StdRng,
-    operations: Vec<TransformOperation>,
+    pipeline: Option<TransformPipeline>,
 }
 
 impl<'a> ViewPairSampler<'a> {
@@ -109,16 +95,16 @@ impl<'a> ViewPairSampler<'a> {
             image_height,
             image_width,
             rng,
-            operations: clone_operations(pipeline),
+            pipeline: pipeline.cloned(),
         })
     }
 
     fn apply_pipeline(&mut self, image: &mut ImageTensor) -> Result<()> {
-        if self.operations.is_empty() {
+        let Some(template) = self.pipeline.as_ref() else {
             return Ok(());
-        }
+        };
         let seed = self.rng.gen();
-        let mut pipeline = reseeded_pipeline(&self.operations, seed);
+        let mut pipeline = template.cloned_with_seed(seed);
         pipeline.apply(image).map_err(ObjectiveError::from)
     }
 

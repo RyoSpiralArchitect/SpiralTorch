@@ -5,38 +5,38 @@
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 
-mod tensor;
 mod compat;
-mod nn;
-mod spiral_rl;
-mod rec;
-mod telemetry;
-mod plugin;
-mod ops;
-mod json;
-mod pure;
-mod planner;
-mod spiralk;
-mod frac;
-mod psi_synchro;
-mod selfsup;
-mod text;
-mod export;
-mod inference;
-mod hpo;
-mod trainer;
-mod vision;
-mod scale_stack;
-mod zspace;
-mod elliptic;
-mod theory;
-mod introspect;
-mod qr;
-mod julia_bridge;
-mod sot;
 mod dataset;
+mod elliptic;
+mod export;
+mod frac;
+mod hpo;
+mod inference;
+mod introspect;
+mod json;
+mod julia_bridge;
+mod nn;
+mod ops;
+mod planner;
+mod plugin;
+mod psi_synchro;
+mod pure;
+mod qr;
+mod rec;
 #[cfg(feature = "robotics")]
 mod robotics;
+mod scale_stack;
+mod selfsup;
+mod sot;
+mod spiral_rl;
+mod spiralk;
+mod telemetry;
+mod tensor;
+mod text;
+mod theory;
+mod trainer;
+mod vision;
+mod zspace;
 
 mod extras {
     use super::*;
@@ -50,16 +50,26 @@ mod extras {
     static GLOBAL_SEED: AtomicU64 = AtomicU64::new(0);
 
     #[pyfunction]
-    pub fn set_global_seed(seed: u64) { GLOBAL_SEED.store(seed, Ordering::SeqCst); }
+    pub fn set_global_seed(seed: u64) {
+        GLOBAL_SEED.store(seed, Ordering::SeqCst);
+    }
 
     #[pyfunction]
-    pub fn golden_angle() -> f64 { GOLDEN_ANGLE }
+    pub fn golden_angle() -> f64 {
+        GOLDEN_ANGLE
+    }
 
     #[pyfunction]
-    pub fn golden_ratio() -> f64 { GOLDEN_RATIO }
+    pub fn golden_ratio() -> f64 {
+        GOLDEN_RATIO
+    }
 
     #[derive(Clone, Copy, Debug)]
-    struct OrbitLength { pub actual: usize, #[allow(dead_code)] pub ideal: usize }
+    struct OrbitLength {
+        pub actual: usize,
+        #[allow(dead_code)]
+        pub ideal: usize,
+    }
 
     fn nacci_orbits(order: usize, seeds: &[usize], total_steps: usize) -> Vec<OrbitLength> {
         use std::collections::VecDeque;
@@ -76,7 +86,10 @@ mod extras {
         while remaining > 0 {
             let ideal: usize = window.iter().sum::<usize>().max(1);
             let take = ideal.min(remaining);
-            out.push(OrbitLength { actual: take, ideal });
+            out.push(OrbitLength {
+                actual: take,
+                ideal,
+            });
             remaining -= take;
             window.pop_front();
             window.push_back(ideal);
@@ -86,24 +99,38 @@ mod extras {
 
     #[pyfunction]
     pub fn fibonacci_pacing(total_steps: usize) -> Vec<usize> {
-        nacci_orbits(2, &[1, 1], total_steps).into_iter().map(|o| o.actual).collect()
+        nacci_orbits(2, &[1, 1], total_steps)
+            .into_iter()
+            .map(|o| o.actual)
+            .collect()
     }
 
     #[pyfunction]
     pub fn pack_nacci_chunks(order: usize, total_steps: usize) -> Vec<usize> {
         let mut seeds = vec![1usize; order.saturating_sub(1)];
-        if order > 0 { seeds.push(2); }
-        nacci_orbits(order, &seeds, total_steps).into_iter().map(|o| o.actual).collect()
+        if order > 0 {
+            seeds.push(2);
+        }
+        nacci_orbits(order, &seeds, total_steps)
+            .into_iter()
+            .map(|o| o.actual)
+            .collect()
     }
 
     #[pyfunction]
     pub fn pack_tribonacci_chunks(total_steps: usize) -> Vec<usize> {
-        nacci_orbits(3, &[1, 1, 2], total_steps).into_iter().map(|o| o.actual).collect()
+        nacci_orbits(3, &[1, 1, 2], total_steps)
+            .into_iter()
+            .map(|o| o.actual)
+            .collect()
     }
 
     #[pyfunction]
     pub fn pack_tetranacci_chunks(total_steps: usize) -> Vec<usize> {
-        nacci_orbits(4, &[1, 1, 2, 4], total_steps).into_iter().map(|o| o.actual).collect()
+        nacci_orbits(4, &[1, 1, 2, 4], total_steps)
+            .into_iter()
+            .map(|o| o.actual)
+            .collect()
     }
 
     #[pyfunction]
@@ -113,7 +140,11 @@ mod extras {
         dict.set_item("version", env!("CARGO_PKG_VERSION"))?;
         dict.set_item(
             "profile",
-            if cfg!(debug_assertions) { "debug" } else { "release" },
+            if cfg!(debug_assertions) {
+                "debug"
+            } else {
+                "release"
+            },
         )?;
 
         let target = PyDict::new_bound(py);
@@ -187,7 +218,10 @@ mod extras {
         m.add_function(wrap_pyfunction!(pack_tetranacci_chunks, m)?)?;
         m.add_function(wrap_pyfunction!(build_info, m)?)?;
         m.add_function(wrap_pyfunction!(generate_plan_batch_ex, m)?)?;
-        m.add("__doc__", "SpiralTorch extras: seeds/golden/n-bonacci/chunking/plan-batch")?;
+        m.add(
+            "__doc__",
+            "SpiralTorch extras: seeds/golden/n-bonacci/chunking/plan-batch",
+        )?;
         let _ = py;
         Ok(())
     }
@@ -344,6 +378,10 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "SpiralKFftPlan",
         "MaxwellSpiralKBridge",
         "MaxwellSpiralKHint",
+        "ResonanceNarrative",
+        "LanguageWave",
+        "TextResonator",
+        "RealtimeNarrator",
         "ContextualLagrangianGate",
         "ContextualPulseFrame",
     ];

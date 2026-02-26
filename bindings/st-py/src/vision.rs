@@ -16,8 +16,7 @@ use st_tensor::wasm_canvas::{
 use st_tensor::{Tensor, TensorError};
 use st_vision::{
     ChronoSnapshot as PureChronoSnapshot, StreamedVolume as PureStreamedVolume,
-    ZSliceProfile as PureZSliceProfile,
-    ZSpaceStreamFrame as PureZSpaceStreamFrame,
+    ZSliceProfile as PureZSliceProfile, ZSpaceStreamFrame as PureZSpaceStreamFrame,
     ZSpaceStreamFrameAggregator as PureZSpaceStreamFrameAggregator,
     ZSpaceTelemetryReport as PureZSpaceTelemetryReport,
 };
@@ -84,7 +83,7 @@ fn tensor_to_rows(tensor: &Tensor) -> Vec<Vec<f32>> {
     out
 }
 
-fn chrono_summary_from_any(summary: &Bound<'_, PyAny>) -> PyResult<ChronoSummary> {
+pub(crate) fn chrono_summary_from_any(summary: &Bound<'_, PyAny>) -> PyResult<ChronoSummary> {
     if let Ok(dict) = summary.downcast::<PyDict>() {
         let frames_obj = dict
             .get_item("frames")?
@@ -210,6 +209,10 @@ pub(crate) struct PyChronoSnapshot {
 impl PyChronoSnapshot {
     fn from_inner(inner: PureChronoSnapshot) -> Self {
         Self { inner }
+    }
+
+    pub(crate) fn summary_inner(&self) -> &ChronoSummary {
+        self.inner.summary()
     }
 }
 
@@ -618,7 +621,9 @@ impl PyZSpaceStreamFrameAggregator {
 
     #[pyo3(signature = (max_depth=None))]
     fn set_max_depth(&mut self, max_depth: Option<usize>) -> PyResult<()> {
-        self.inner.set_max_depth(max_depth).map_err(tensor_err_to_py)
+        self.inner
+            .set_max_depth(max_depth)
+            .map_err(tensor_err_to_py)
     }
 
     fn __len__(&self) -> usize {
@@ -639,7 +644,9 @@ impl PyZSpaceStreamFrameAggregator {
     }
 
     fn extend(&mut self, frame: &PyZSpaceStreamFrame) -> PyResult<()> {
-        self.inner.extend(frame.inner.clone()).map_err(tensor_err_to_py)
+        self.inner
+            .extend(frame.inner.clone())
+            .map_err(tensor_err_to_py)
     }
 
     fn clear(&mut self) {
@@ -691,9 +698,12 @@ impl PyZSpaceStreamFrameAggregator {
 
     #[getter]
     fn chrono_snapshot(&self) -> Option<PyChronoSnapshot> {
-        self.inner
-            .as_frame()
-            .and_then(|frame| frame.chrono_snapshot().cloned().map(PyChronoSnapshot::from_inner))
+        self.inner.as_frame().and_then(|frame| {
+            frame
+                .chrono_snapshot()
+                .cloned()
+                .map(PyChronoSnapshot::from_inner)
+        })
     }
 
     fn telemetry_report(&self, py: Python<'_>) -> PyResult<Option<Py<PyDict>>> {

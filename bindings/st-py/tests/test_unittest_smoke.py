@@ -1,11 +1,48 @@
 import json
+import importlib
+import sys
 import tempfile
+import types
 import unittest
 
-import spiraltorch as st  # noqa: E402
+
+def _ensure_torch_stub() -> None:
+    if "torch" in sys.modules:
+        return
+    torch_stub = types.ModuleType("torch")
+    torch_stub.autograd = types.SimpleNamespace(Function=object)
+    sys.modules["torch"] = torch_stub
+
+
+def _load_native() -> types.ModuleType | None:
+    _ensure_torch_stub()
+    try:
+        module = importlib.import_module("spiraltorch")
+    except Exception:
+        return None
+
+    for native_name in (
+        "spiraltorch.spiraltorch",
+        "spiraltorch.spiraltorch_native",
+        "spiraltorch_native",
+    ):
+        try:
+            importlib.import_module(native_name)
+        except Exception:
+            continue
+        return module
+    return None
+
+
+st = _load_native()
 
 
 class SpiralTorchSmokeTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        if st is None:
+            raise unittest.SkipTest("native SpiralTorch extension unavailable")
+
     def test_plugin_tensor_op(self) -> None:
         events: list[dict] = []
         sub_id = st.plugin.subscribe("TensorOp", lambda e: events.append(e))

@@ -3384,6 +3384,18 @@ impl<D: VisionDataset> DataLoader<D> {
     }
 }
 
+impl<D: VisionDataset> Iterator for DataLoader<D> {
+    type Item = PureResult<VisionBatch>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.next_batch() {
+            Ok(Some(batch)) => Some(Ok(batch)),
+            Ok(None) => None,
+            Err(err) => Some(Err(err)),
+        }
+    }
+}
+
 /// Transform operations that mimic `torchvision.transforms` behaviour.
 #[derive(Clone, Debug)]
 pub enum TransformOperation {
@@ -3462,6 +3474,22 @@ impl TransformPipeline {
             #[cfg(feature = "wgpu")]
             dispatcher: None,
         }
+    }
+
+    /// Replaces the internal RNG with a deterministic seed.
+    pub fn reseed(&mut self, seed: u64) -> &mut Self {
+        self.rng = StdRng::seed_from_u64(seed);
+        self
+    }
+
+    /// Returns a clone of the pipeline using the provided seed.
+    ///
+    /// This is useful when a shared pipeline template is reused across stream/online training
+    /// workers, as it preserves any configured GPU dispatcher.
+    pub fn cloned_with_seed(&self, seed: u64) -> Self {
+        let mut cloned = self.clone();
+        cloned.reseed(seed);
+        cloned
     }
 
     pub fn add(&mut self, op: TransformOperation) -> &mut Self {
@@ -3621,7 +3649,7 @@ impl TransformPipeline {
         op: &RandomHorizontalFlip,
         image: &mut ImageTensor,
     ) -> PureResult<()> {
-        let apply = self.rng.gen::<f32>() < op.probability;
+        let apply = op.should_apply(&mut self.rng);
         #[cfg(feature = "wgpu")]
         {
             if let Some(dispatcher) = self.dispatcher.as_deref() {
@@ -3746,6 +3774,18 @@ impl TransformPipeline {
                     commands.push(GeometryCommand::CenterCrop(config));
                     geometry.height = op.height;
                     geometry.width = op.width;
+                    index += 1;
+                }
+                TransformOperation::RandomHorizontalFlip(op) => {
+                    let apply = op.should_apply(&mut self.rng);
+                    if apply {
+                        commands.push(GeometryCommand::HorizontalFlip(HorizontalFlipConfig {
+                            channels: geometry.channels,
+                            height: geometry.height,
+                            width: geometry.width,
+                            apply,
+                        }));
+                    }
                     index += 1;
                 }
                 _ => break,
@@ -5467,6 +5507,75 @@ mod tests {
         }
     }
 
+    #[test]
+    fn transform_pipeline_cloned_with_seed_is_deterministic() {
+        let flip = RandomHorizontalFlip::new(0.5).unwrap();
+
+        let mut seed_flip = None;
+        let mut seed_no_flip = None;
+        for seed in 0u64..4096 {
+            let mut rng = StdRng::seed_from_u64(seed);
+            if flip.should_apply(&mut rng) {
+                seed_flip.get_or_insert(seed);
+            } else {
+                seed_no_flip.get_or_insert(seed);
+            }
+            if seed_flip.is_some() && seed_no_flip.is_some() {
+                break;
+            }
+        }
+        let seed_flip = seed_flip.expect("expected to find a seed that flips");
+        let seed_no_flip = seed_no_flip.expect("expected to find a seed that does not flip");
+
+        let mut template = TransformPipeline::new();
+        template.add(TransformOperation::RandomHorizontalFlip(flip.clone()));
+
+        let base = ImageTensor::new(1, 1, 4, vec![0.0, 1.0, 2.0, 3.0]).unwrap();
+
+        let cases = [(seed_flip, true), (seed_no_flip, false)];
+        for (seed, apply) in cases {
+            let mut pipeline = template.cloned_with_seed(seed);
+            let mut image = base.clone();
+            pipeline.apply(&mut image).unwrap();
+
+            let mut expected = base.clone();
+            flip.apply_with_flag(&mut expected, apply).unwrap();
+            assert_eq!(image, expected);
+        }
+    }
+
+    #[test]
+    fn transform_pipeline_reseed_resets_rng() {
+        let flip = RandomHorizontalFlip::new(0.5).unwrap();
+        let seed = 42;
+
+        let mut pipeline = TransformPipeline::new();
+        pipeline.add(TransformOperation::RandomHorizontalFlip(flip));
+        pipeline.reseed(seed);
+
+        let base = ImageTensor::new(1, 1, 4, vec![0.0, 1.0, 2.0, 3.0]).unwrap();
+
+        let mut first = base.clone();
+        pipeline.apply(&mut first).unwrap();
+
+        pipeline.reseed(seed);
+        let mut second = base;
+        pipeline.apply(&mut second).unwrap();
+
+        assert_eq!(first, second);
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn transform_pipeline_cloned_with_seed_preserves_gpu_dispatcher() {
+        let mut pipeline = TransformPipeline::new();
+        pipeline.add(TransformOperation::Resize(Resize::new(2, 2).unwrap()));
+        pipeline.set_gpu_dispatcher(TransformDispatcher::cpu());
+
+        let cloned = pipeline.cloned_with_seed(7);
+        assert!(cloned.has_gpu_dispatcher());
+    }
+
     #[cfg(feature = "wgpu")]
     #[test]
     fn geometry_sequence_matches_cpu_pipeline() {
@@ -5502,6 +5611,44 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn geometry_sequence_handles_horizontal_flip() {
+        use rand::Rng;
+
+        let resize = Resize::new(80, 96).unwrap();
+        let crop = CenterCrop::new(64, 64).unwrap();
+        let flip = RandomHorizontalFlip::new(1.0).unwrap();
+
+        let mut rng = StdRng::seed_from_u64(9);
+        let mut data = vec![0.0f32; 3 * 128 * 128];
+        for value in data.iter_mut() {
+            *value = rng.gen();
+        }
+
+        let mut image = ImageTensor::new(3, 128, 128, data.clone()).unwrap();
+        let mut expected = ImageTensor::new(3, 128, 128, data).unwrap();
+
+        resize.clone().apply(&mut expected).unwrap();
+        crop.clone().apply(&mut expected).unwrap();
+        flip.apply_with_flag(&mut expected, true).unwrap();
+
+        let dispatcher = TransformDispatcher::cpu();
+        let mut pipeline = TransformPipeline::with_seed(5);
+        pipeline
+            .add(TransformOperation::Resize(resize))
+            .add(TransformOperation::CenterCrop(crop))
+            .add(TransformOperation::RandomHorizontalFlip(flip));
+        pipeline.set_gpu_dispatcher(dispatcher);
+
+        pipeline.apply(&mut image).unwrap();
+
+        assert_eq!(image.shape(), expected.shape());
+        for (lhs, rhs) in image.as_slice().iter().zip(expected.as_slice()) {
+            assert!((lhs - rhs).abs() < 1e-5);
+        }
+    }
+
     #[test]
     fn dataloader_produces_batches() {
         let descriptor = dataset_catalog()[0].clone();
@@ -5523,6 +5670,25 @@ mod tests {
             seen += batch.len();
         }
         assert_eq!(seen, 8);
+    }
+
+    #[test]
+    fn dataloader_is_iterable() {
+        let descriptor = dataset_catalog()[0].clone();
+        let mut dataset = TensorVisionDataset::new(descriptor);
+        for idx in 0..5 {
+            let image = ImageTensor::new(3, 32, 32, vec![idx as f32; 3 * 32 * 32]).unwrap();
+            dataset.push_sample(DatasetSample::new(image)).unwrap();
+        }
+        let dataset = Arc::new(dataset);
+        let mut loader = DataLoader::new(dataset, 2, Some(7)).unwrap();
+        let mut seen = 0usize;
+        for batch in loader.by_ref() {
+            let batch = batch.unwrap();
+            assert!(!batch.is_empty());
+            seen += batch.len();
+        }
+        assert_eq!(seen, 5);
     }
 
     #[test]

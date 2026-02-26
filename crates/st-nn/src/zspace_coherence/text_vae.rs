@@ -160,8 +160,10 @@ impl ZSpaceTextVae {
         }
         let checkpoint = self.checkpoint();
         let payload = if is_json_path(path) {
-            serde_json::to_vec_pretty(&checkpoint).map_err(|err| TensorError::SerializationError {
-                message: err.to_string(),
+            serde_json::to_vec_pretty(&checkpoint).map_err(|err| {
+                TensorError::SerializationError {
+                    message: err.to_string(),
+                }
             })?
         } else {
             bincode::serialize(&checkpoint).map_err(|err| TensorError::SerializationError {
@@ -215,12 +217,13 @@ impl ZSpaceTextVae {
                 label: "zspace_text_vae_checkpoint_window_chars",
             });
         }
-        let input_dim = checkpoint
-            .window_chars
-            .checked_mul(2)
-            .ok_or_else(|| TensorError::InvalidValue {
-                label: "zspace_text_vae_checkpoint_input_dim_overflow",
-            })?;
+        let input_dim =
+            checkpoint
+                .window_chars
+                .checked_mul(2)
+                .ok_or_else(|| TensorError::InvalidValue {
+                    label: "zspace_text_vae_checkpoint_input_dim_overflow",
+                })?;
 
         let encoder = LanguageWaveEncoder::new(checkpoint.curvature, checkpoint.temperature)?;
         let vae = ZSpaceVae::from_checkpoint(checkpoint.vae)?;

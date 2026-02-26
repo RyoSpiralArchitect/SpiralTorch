@@ -1,6 +1,14 @@
 """Smoke tests for the newly exposed Z-space introspection helpers."""
 
 import spiraltorch as st
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _clear_softlogic_feedback() -> None:
+    clear = getattr(getattr(st, "telemetry", None), "clear_softlogic_feedback", None)
+    if callable(clear):
+        clear()
 
 
 def test_zspace_describe_returns_none_when_feedback_unset() -> None:

@@ -1210,7 +1210,7 @@ impl PyMaxwellPulse {
     }
 }
 
-#[pyclass(module = "spiraltorch.spiralk", name = "MaxwellProjector")]
+#[pyclass(module = "spiraltorch.spiralk", name = "MaxwellProjector", unsendable)]
 pub(crate) struct PyMaxwellProjector {
     inner: MaxwellZProjector,
     rank: usize,

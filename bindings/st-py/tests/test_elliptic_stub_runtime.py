@@ -14,16 +14,9 @@ if str(REPO_ROOT) not in sys.path:
 
 
 def test_elliptic_autograd_requires_torch_when_unavailable() -> None:
-    module_names = (
-        "spiraltorch",
-        "spiraltorch.elliptic",
-        "spiraltorch.spiraltorch",
-        "spiraltorch.spiraltorch_native",
-        "spiraltorch_native",
-    )
+    module_names = ("spiraltorch.elliptic",)
     saved_modules = {name: sys.modules.get(name) for name in module_names}
     torch_saved = sys.modules.get("torch")
-    preexisting = set(sys.modules)
 
     real_import = builtins.__import__
 
@@ -49,10 +42,6 @@ def test_elliptic_autograd_requires_torch_when_unavailable() -> None:
             elliptic.elliptic_warp_partial(None, None)  # type: ignore[arg-type]
     finally:
         builtins.__import__ = real_import
-
-        for name in list(sys.modules):
-            if name not in preexisting and name.startswith("spiraltorch"):
-                sys.modules.pop(name, None)
 
         for name, module in saved_modules.items():
             if module is not None:

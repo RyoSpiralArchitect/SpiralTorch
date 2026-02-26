@@ -46,7 +46,6 @@ use crate::{
     theory::zpulse::{ZEmitter, ZPulse, ZSource, ZSupport},
     util::math::LeechProjector,
 };
-use thiserror::Error;
 use std::cell::RefCell;
 #[cfg(feature = "psi")]
 use std::collections::HashMap;
@@ -54,6 +53,7 @@ use std::{
     collections::VecDeque,
     sync::{Arc, Mutex},
 };
+use thiserror::Error;
 
 #[derive(Clone, Default, Debug)]
 pub struct MaxwellEmitter {
@@ -231,10 +231,16 @@ impl MeaningGate {
         let mut out = Vec::with_capacity(rho_values.len());
         for (idx, (&rho, &code)) in rho_values.iter().zip(code_values.iter()).enumerate() {
             if !rho.is_finite() {
-                return Err(MaxwellSeriesError::NonFiniteRho { index: idx, value: rho });
+                return Err(MaxwellSeriesError::NonFiniteRho {
+                    index: idx,
+                    value: rho,
+                });
             }
             if !code.is_finite() {
-                return Err(MaxwellSeriesError::NonFiniteCode { index: idx, value: code });
+                return Err(MaxwellSeriesError::NonFiniteCode {
+                    index: idx,
+                    value: code,
+                });
             }
             out.push(self.envelope(rho) * code);
         }
@@ -342,7 +348,10 @@ pub fn simulate_z_curve(
     for idx in 0..blocks {
         let sample = mean + sigma * sample_standard_normal(&mut rng);
         if !sample.is_finite() {
-            return Err(MaxwellExpectationError::NonFiniteSample { index: idx, value: sample });
+            return Err(MaxwellExpectationError::NonFiniteSample {
+                index: idx,
+                value: sample,
+            });
         }
         let z = tracker.push(sample).unwrap_or(0.0);
         out.push(if z.is_finite() { z } else { 0.0 });

@@ -45,7 +45,18 @@ def _compat_call(namespace: str, attr: str, *args: Any, **kwargs: Any) -> Any:
         raise RuntimeError(
             f"spiraltorch.compat.{namespace}.{attr} is unavailable. {_NATIVE_EXTENSION_HINT}"
         ) from exc
-    return func(*args, **kwargs)
+    try:
+        return func(*args, **kwargs)
+    except TypeError as exc:  # pragma: no cover - exercised via tests
+        # When the native compat bridge is missing, stub tensor objects can end up
+        # flowing into a compiled helper and trigger a low-level conversion error.
+        # Surface a friendlier message that points the user at the native build.
+        message = str(exc)
+        if "cannot be converted" in message or "argument 'tensor'" in message:
+            raise RuntimeError(
+                f"spiraltorch.compat.{namespace}.{attr} is unavailable. {_NATIVE_EXTENSION_HINT}"
+            ) from exc
+        raise
 
 
 def tensor_to_torch(

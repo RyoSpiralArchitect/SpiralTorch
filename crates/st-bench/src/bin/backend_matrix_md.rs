@@ -42,18 +42,24 @@ fn main() {
     }
 
     if stdout || (doc.is_none() && !check && !write) {
-        print!("{}", st_bench::backend_matrix::backend_matrix_autogen_block());
+        print!(
+            "{}",
+            st_bench::backend_matrix::backend_matrix_autogen_block()
+        );
         return;
     }
 
     let doc_path = doc.unwrap_or_else(|| PathBuf::from("docs/backend_matrix.md"));
     let original = fs::read_to_string(&doc_path).unwrap_or_else(|err| {
-        eprintln!("backend_matrix_md: failed to read {}: {err}", doc_path.display());
+        eprintln!(
+            "backend_matrix_md: failed to read {}: {err}",
+            doc_path.display()
+        );
         std::process::exit(2);
     });
 
-    let updated = st_bench::backend_matrix::sync_backend_matrix_markdown(&original)
-        .unwrap_or_else(|err| {
+    let updated =
+        st_bench::backend_matrix::sync_backend_matrix_markdown(&original).unwrap_or_else(|err| {
             eprintln!("backend_matrix_md: {err}");
             std::process::exit(2);
         });
@@ -70,7 +76,10 @@ fn main() {
     }
 
     if !write {
-        eprintln!("backend_matrix_md: pass --write to update {}", doc_path.display());
+        eprintln!(
+            "backend_matrix_md: pass --write to update {}",
+            doc_path.display()
+        );
         std::process::exit(2);
     }
 
@@ -92,4 +101,3 @@ fn print_help() {
         --write          Rewrite the doc in-place with the generated table\n"
     );
 }
-

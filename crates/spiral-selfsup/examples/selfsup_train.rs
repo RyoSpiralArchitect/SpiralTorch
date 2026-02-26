@@ -10,7 +10,7 @@ use spiral_selfsup::metrics::{register_info_nce_descriptors, InfoNCEEpochMetrics
 use st_core::runtime::blackcat::StepMetrics;
 use st_core::telemetry::chrono::{ChronoSummary, ChronoTimeline, ResonanceTemporalMetrics};
 use st_core::telemetry::monitoring::{MetricsExporter, MonitoringHub};
-use tensorboard_rs::summary_writer::SummaryWriter;
+use tboard::EventWriter;
 
 fn main() -> Result<(), Box<dyn Error>> {
     register_info_nce_descriptors();
@@ -178,13 +178,13 @@ impl InfoNCEMetricSummary {
 }
 
 struct TensorboardExporter {
-    writer: Mutex<SummaryWriter>,
+    writer: Mutex<EventWriter<std::fs::File>>,
     gauge_step: AtomicUsize,
 }
 
 impl TensorboardExporter {
     fn new<P: AsRef<Path>>(logdir: P) -> Result<Self, Box<dyn Error>> {
-        let writer = SummaryWriter::new(logdir.as_ref());
+        let writer = EventWriter::create(logdir.as_ref())?;
         Ok(Self {
             writer: Mutex::new(writer),
             gauge_step: AtomicUsize::new(0),
@@ -193,32 +193,34 @@ impl TensorboardExporter {
 
     fn log_info_nce(&self, step: usize, summary: &InfoNCEMetricSummary) {
         if let Ok(mut writer) = self.writer.lock() {
-            writer.add_scalar("selfsup/loss", summary.loss, step);
-            writer.add_scalar("selfsup/top1_accuracy", summary.top1_accuracy, step);
-            writer.add_scalar(
+            let step = step as i64;
+            let _ = writer.write_scalar(step, "selfsup/loss", summary.loss);
+            let _ = writer.write_scalar(step, "selfsup/top1_accuracy", summary.top1_accuracy);
+            let _ = writer.write_scalar(
+                step,
                 "selfsup/positive_margin",
                 summary.mean_positive_margin,
-                step,
             );
-            writer.add_scalar(
+            let _ = writer.write_scalar(
+                step,
                 "selfsup/positive_log_prob",
                 summary.mean_positive_log_probability,
-                step,
             );
         }
     }
 
     fn log_chrono(&self, step: usize, summary: &ChronoSummary) {
         if let Ok(mut writer) = self.writer.lock() {
-            writer.add_scalar("chrono/mean_drift", summary.mean_drift, step);
-            writer.add_scalar("chrono/mean_energy", summary.mean_energy, step);
-            writer.add_scalar("chrono/energy_std", summary.energy_std, step);
+            let step = step as i64;
+            let _ = writer.write_scalar(step, "chrono/mean_drift", summary.mean_drift);
+            let _ = writer.write_scalar(step, "chrono/mean_energy", summary.mean_energy);
+            let _ = writer.write_scalar(step, "chrono/energy_std", summary.energy_std);
         }
     }
 
     fn flush(&self) {
         if let Ok(mut writer) = self.writer.lock() {
-            writer.flush();
+            let _ = writer.flush();
         }
     }
 }
@@ -227,14 +229,14 @@ impl MetricsExporter for TensorboardExporter {
     fn record_gauge(&self, name: &str, value: f64, _labels: &[(&str, &str)]) {
         let step = self.gauge_step.fetch_add(1, Ordering::Relaxed);
         if let Ok(mut writer) = self.writer.lock() {
-            writer.add_scalar(&format!("runtime/{name}"), value as f32, step);
+            let _ = writer.write_scalar(step as i64, &format!("runtime/{name}"), value as f32);
         }
     }
 
     fn record_counter(&self, name: &str, value: f64, _labels: &[(&str, &str)]) {
         let step = self.gauge_step.fetch_add(1, Ordering::Relaxed);
         if let Ok(mut writer) = self.writer.lock() {
-            writer.add_scalar(&format!("counter/{name}"), value as f32, step);
+            let _ = writer.write_scalar(step as i64, &format!("counter/{name}"), value as f32);
         }
     }
 }

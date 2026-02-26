@@ -377,11 +377,12 @@ impl Default for SpiralConsensusStats {
     fn default() -> Self {
         let approximation = ramanujan_pi(SPIRAL_PROJECTOR_RAMANUJAN_ITERS);
         let pi = std::f64::consts::PI;
-        let (ramanujan_ratio, ramanujan_delta) = if approximation.is_finite() && approximation > f64::EPSILON {
-            (pi / approximation, (approximation - pi).abs())
-        } else {
-            (1.0, pi.abs())
-        };
+        let (ramanujan_ratio, ramanujan_delta) =
+            if approximation.is_finite() && approximation > f64::EPSILON {
+                (pi / approximation, (approximation - pi).abs())
+            } else {
+                (1.0, pi.abs())
+            };
 
         Self {
             phi: GOLDEN_RATIO,
@@ -872,9 +873,6 @@ impl Tensor {
         data: AlignedVec,
         layout: Layout,
     ) -> PureResult<Self> {
-        if rows == 0 || cols == 0 {
-            return Err(TensorError::InvalidDimensions { rows, cols });
-        }
         let expected = rows * cols;
         if expected != data.len() {
             return Err(TensorError::DataLength {
@@ -2137,11 +2135,13 @@ impl Tensor {
             None
         };
 
-        let volume = rows.checked_mul(cols).ok_or_else(|| TensorError::TensorVolumeExceeded {
-            label: "layer_norm",
-            volume: rows,
-            max_volume: usize::MAX / cols.max(1),
-        })?;
+        let volume = rows
+            .checked_mul(cols)
+            .ok_or_else(|| TensorError::TensorVolumeExceeded {
+                label: "layer_norm",
+                volume: rows,
+                max_volume: usize::MAX / cols.max(1),
+            })?;
 
         let gamma_slice = gamma.data();
         let beta_slice = beta.data();
@@ -2184,7 +2184,10 @@ impl Tensor {
                 if let Some(tensor) = wgpu_tensor {
                     (tensor, "wgpu")
                 } else {
-                    (self.layer_norm_cpu(residual_data, gamma_slice, beta_slice, epsilon)?, "cpu")
+                    (
+                        self.layer_norm_cpu(residual_data, gamma_slice, beta_slice, epsilon)?,
+                        "cpu",
+                    )
                 }
             }
             #[cfg(not(feature = "wgpu"))]
@@ -3297,7 +3300,11 @@ impl Tensor {
                 *value = 0.0;
             }
         }
-        crate::emit_tensor_op("relu_inplace", &[self.rows, self.cols], &[self.rows, self.cols]);
+        crate::emit_tensor_op(
+            "relu_inplace",
+            &[self.rows, self.cols],
+            &[self.rows, self.cols],
+        );
     }
 
     /// Apply the GELU activation in-place (`self[i] = GELU(self[i])`).
@@ -3306,7 +3313,11 @@ impl Tensor {
         for value in data.iter_mut() {
             *value = gelu(*value);
         }
-        crate::emit_tensor_op("gelu_inplace", &[self.rows, self.cols], &[self.rows, self.cols]);
+        crate::emit_tensor_op(
+            "gelu_inplace",
+            &[self.rows, self.cols],
+            &[self.rows, self.cols],
+        );
     }
 
     /// Applies the derivative of GELU to the provided gradient tensor.

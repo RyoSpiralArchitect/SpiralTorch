@@ -68,20 +68,23 @@ impl Plugin for CustomLayerPlugin {
 
     fn on_load(&mut self, ctx: &mut PluginContext) -> PureResult<()> {
         println!("🔧 Loading Custom Layer Plugin");
-        
+
         // Register custom layers in the module discovery system
         self.register_custom_layers()?;
-        
+
         // Make the module registry available as a service
         ctx.register_service("module_registry", Arc::clone(&self.registry));
-        
+
         // Subscribe to module creation events
-        ctx.subscribe("ModuleRegistered", Arc::new(|event| {
-            if let PluginEvent::Custom { event_type, .. } = event {
-                println!("  📢 Module registered: {}", event_type);
-            }
-        }));
-        
+        ctx.subscribe(
+            "ModuleRegistered",
+            Arc::new(|event| {
+                if let PluginEvent::Custom { event_type, .. } = event {
+                    println!("  📢 Module registered: {}", event_type);
+                }
+            }),
+        );
+
         println!("✅ Custom Layer Plugin loaded");
         Ok(())
     }
@@ -108,11 +111,11 @@ impl Plugin for OptimizerPlugin {
 
     fn on_load(&mut self, ctx: &mut PluginContext) -> PureResult<()> {
         println!("🚀 Loading Optimizer Plugin");
-        
+
         // In practice, would register optimizer factories
         ctx.set_config("default_optimizer", "adamw");
         ctx.set_config("default_lr", "0.001");
-        
+
         println!("✅ Optimizer Plugin loaded");
         Ok(())
     }
@@ -147,20 +150,24 @@ impl Plugin for MonitoringPlugin {
 
     fn on_load(&mut self, ctx: &mut PluginContext) -> PureResult<()> {
         println!("📊 Loading Monitoring Plugin");
-        
+
         // Subscribe to all events for monitoring
-        ctx.subscribe("*", Arc::new(move |event| {
-            match event {
+        ctx.subscribe(
+            "*",
+            Arc::new(move |event| match event {
                 PluginEvent::EpochStart { epoch } => {
                     println!("  📈 Monitoring: Epoch {} started", epoch);
                 }
                 PluginEvent::EpochEnd { epoch, loss } => {
-                    println!("  📉 Monitoring: Epoch {} completed with loss {:.4}", epoch, loss);
+                    println!(
+                        "  📉 Monitoring: Epoch {} completed with loss {:.4}",
+                        epoch, loss
+                    );
                 }
                 _ => {}
-            }
-        }));
-        
+            }),
+        );
+
         println!("✅ Monitoring Plugin loaded");
         Ok(())
     }
@@ -204,86 +211,94 @@ fn main() -> PureResult<()> {
     println!("📦 Loading ecosystem plugins...\n");
     let loader = StaticPluginLoader::new(create_ecosystem_plugins);
     let loaded_count = loader.load_into(Path::new("."), registry)?;
-    
+
     println!("\n✅ Loaded {} plugins", loaded_count);
-    
+
     // Initialize the ecosystem
     println!("\n🎬 Initializing ecosystem...\n");
     registry.initialize_all()?;
 
     // Demonstrate plugin discovery
     println!("\n🔍 Discovering plugins by capability...\n");
-    
+
     let operator_plugins = registry.find_by_capability(&PluginCapability::Operators);
     println!("  Operator plugins: {}", operator_plugins.len());
-    
+
     let optimizer_plugins = registry.find_by_capability(&PluginCapability::Optimizers);
     println!("  Optimizer plugins: {}", optimizer_plugins.len());
-    
+
     let telemetry_plugins = registry.find_by_capability(&PluginCapability::Telemetry);
     println!("  Telemetry plugins: {}", telemetry_plugins.len());
 
     // Access the module registry service
     println!("\n🏗️  Building dynamic model pipeline...\n");
-    
+
     let ctx = registry.context();
     let ctx_guard = ctx.lock().unwrap();
-    
-    if let Some(module_registry) = ctx_guard.get_service::<Arc<ModuleDiscoveryRegistry>>("module_registry") {
+
+    if let Some(module_registry) =
+        ctx_guard.get_service::<Arc<ModuleDiscoveryRegistry>>("module_registry")
+    {
         println!("  📋 Available modules:");
         for module_type in module_registry.list_modules() {
             if let Some(meta) = module_registry.get_metadata(&module_type) {
                 println!("    - {} ({})", meta.display_name, meta.module_type);
             }
         }
-        
+
         // Build a pipeline dynamically
         println!("\n  🔨 Constructing pipeline from discovered modules...");
-        
+
         let mut model = Sequential::new();
         model.push(Linear::new("input", 10, 20)?);
         model.push(Relu::new());
         model.push(Linear::new("hidden", 20, 10)?);
-        
+
         println!("  ✅ Pipeline created with {} layers", model.len());
     }
-    
+
     // Show configuration
     if let Some(optimizer) = ctx_guard.get_config("default_optimizer") {
         println!("\n⚙️  Default optimizer: {}", optimizer);
     }
-    
+
     drop(ctx_guard);
 
     // Simulate training events
     println!("\n🏃 Simulating training workflow...\n");
-    
+
     let event_bus = registry.event_bus();
-    
+
     event_bus.publish(&PluginEvent::EpochStart { epoch: 1 });
     std::thread::sleep(std::time::Duration::from_millis(100));
-    event_bus.publish(&PluginEvent::EpochEnd { epoch: 1, loss: 0.543 });
-    
+    event_bus.publish(&PluginEvent::EpochEnd {
+        epoch: 1,
+        loss: 0.543,
+    });
+
     event_bus.publish(&PluginEvent::EpochStart { epoch: 2 });
     std::thread::sleep(std::time::Duration::from_millis(100));
-    event_bus.publish(&PluginEvent::EpochEnd { epoch: 2, loss: 0.421 });
+    event_bus.publish(&PluginEvent::EpochEnd {
+        epoch: 2,
+        loss: 0.421,
+    });
 
     // Demonstrate inter-plugin communication
     println!("\n💬 Demonstrating inter-plugin communication...\n");
-    
+
     #[derive(Clone)]
     struct CustomMetrics {
         accuracy: f32,
         precision: f32,
     }
-    
+
     let metrics = CustomMetrics {
         accuracy: 0.92,
         precision: 0.89,
     };
-    
+
     event_bus.publish(&PluginEvent::custom("CustomMetrics", metrics));
-    
+
     // Shutdown
     println!("\n🛑 Shutting down ecosystem...\n");
     registry.shutdown()?;

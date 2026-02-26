@@ -13,9 +13,11 @@ fn main() {
         Ok(encoded) if !encoded.is_empty() => encoded.split('\x1f').collect::<Vec<_>>().join(" "),
         _ => std::env::var("RUSTFLAGS").unwrap_or_default(),
     };
-    let looks_like_vcpkg = rustflags.contains("vcpkg/installed") || rustflags.contains("vcpkg\\installed");
-    let links_host_archives =
-        rustflags.contains("-l archive") || rustflags.contains("-larchive") || rustflags.contains("libarchive");
+    let looks_like_vcpkg =
+        rustflags.contains("vcpkg/installed") || rustflags.contains("vcpkg\\installed");
+    let links_host_archives = rustflags.contains("-l archive")
+        || rustflags.contains("-larchive")
+        || rustflags.contains("libarchive");
     if !(looks_like_vcpkg || links_host_archives) {
         return;
     }

@@ -9,8 +9,7 @@ on:
       publish_pypi:
         description: "Publish wheels to PyPI (otherwise manual upload)"
         required: false
-        default: false
-        type: boolean
+        default: "false"
 
 permissions:
   actions: read
@@ -168,6 +167,8 @@ jobs:
     environment:
       name: pypi
       url: https://pypi.org/p/spiraltorch
+    env:
+      PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
     permissions:
       actions: read
       contents: read
@@ -183,13 +184,13 @@ jobs:
           find dist -type f -name '*.whl' -print0 | sort -z | xargs -0 -I{} cp "{}" pypi_dist/
           ls -la pypi_dist
       - name: Publish to PyPI (token)
-        if: secrets.PYPI_API_TOKEN != ''
+        if: env.PYPI_API_TOKEN != ''
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: pypi_dist
-          password: ${{ secrets.PYPI_API_TOKEN }}
+          password: ${{ env.PYPI_API_TOKEN }}
       - name: Publish to PyPI (trusted publishing)
-        if: secrets.PYPI_API_TOKEN == ''
+        if: env.PYPI_API_TOKEN == ''
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: pypi_dist

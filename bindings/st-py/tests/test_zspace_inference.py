@@ -75,7 +75,8 @@ def test_infer_from_partial_accepts_mapping_proxy():
     result = infer_from_partial(vector, partial)
 
     assert math.isclose(result.metrics["stability"], 0.55)
-    assert result.gradient == [0.3, -0.15, 0.05, -0.02]
+    expected = [math.tanh(0.3), math.tanh(-0.15), math.tanh(0.05), math.tanh(-0.02)]
+    assert list(result.gradient) == pytest.approx(expected, rel=1e-6, abs=1e-6)
 
 
 def test_posterior_project_matches_helper():

@@ -189,7 +189,10 @@ impl Module for ZSpaceCoherenceWaveBlock {
         grad_scan.add(&grad_wave)
     }
 
-    fn visit_parameters(&self, visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>) -> PureResult<()> {
+    fn visit_parameters(
+        &self,
+        visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
         self.wave.visit_parameters(visitor)?;
         self.resonator.visit_parameters(visitor)?;
         Ok(())

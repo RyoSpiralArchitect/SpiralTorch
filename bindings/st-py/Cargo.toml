@@ -51,11 +51,11 @@ kdsl = ["st-core/kdsl", "st-nn/kdsl", "st-spiral-rl/kdsl"]
 "wgpu-frac" = ["wgpu"]
 
 [build-dependencies]
-pyo3-build-config = "0.22"
+pyo3-build-config = "0.24"
 
 [dependencies]
-pyo3 = { version = "0.22", features = ["extension-module", "abi3", "abi3-py38", "gil-refs", "num-complex"] }
-pyo3-ffi = { version = "0.22", features = ["extension-module"] }
+pyo3 = { version = "0.24", features = ["extension-module", "abi3", "abi3-py38", "num-complex"] }
+pyo3-ffi = { version = "0.24", features = ["extension-module"] }
 st-core = { path = "../../crates/st-core", default-features = false, features = ["psi", "psychoid", "collapse"] }
 st-tensor = { path = "../../crates/st-tensor", default-features = false }
 st-nn = { path = "../../crates/st-nn", optional = true, features = ["psychoid", "collapse"] }
@@ -82,5 +82,5 @@ nalgebra = { version = "0.32", default-features = false, features = ["std"] }
 
 [package.metadata]
 pyo3 = { extension-module = true, abi3 = true, abi3-py38 = true }
-maturin = { name = "spiraltorch", python-source = "python" }
+maturin = { name = "spiraltorch", python-source = "." }
 spiraltorch = { copyright = "© 2025 Ryo ∴ SpiralArchitect — All rights reserved" }

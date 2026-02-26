@@ -6,4 +6,12 @@ authors = ["SpiralTorch Contributors"]
 description = "Lightweight registry for SpiralTorch training metrics"
 license = "AGPL-3.0-or-later"
 
+[features]
+json = ["dep:serde_json"]
+tracing = ["dep:tracing"]
+dashboard = ["dep:st-core"]
+
 [dependencies]
+serde_json = { version = "1", optional = true }
+tracing = { version = "0.1", optional = true }
+st-core = { path = "../st-core", optional = true, default-features = false }

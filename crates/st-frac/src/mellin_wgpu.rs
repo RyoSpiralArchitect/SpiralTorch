@@ -206,16 +206,10 @@ impl MellinGpuExecutor {
             (coeff, z, output, staging, params)
         };
 
-        self.queue.write_buffer(
-            coeff_buffer.as_ref(),
-            0,
-            cast_slice(&coeffs),
-        );
-        self.queue.write_buffer(
-            z_buffer.as_ref(),
-            0,
-            cast_slice(&zs),
-        );
+        self.queue
+            .write_buffer(coeff_buffer.as_ref(), 0, cast_slice(&coeffs));
+        self.queue
+            .write_buffer(z_buffer.as_ref(), 0, cast_slice(&zs));
 
         let params = ParamsPod {
             len: weighted.len() as u32,
@@ -352,7 +346,10 @@ impl MellinGpuBuffers {
             });
         }
 
-        slot.as_ref().expect("buffer must be allocated").buffer.clone()
+        slot.as_ref()
+            .expect("buffer must be allocated")
+            .buffer
+            .clone()
     }
 
     fn ensure_params(&mut self, device: &wgpu::Device) -> Arc<wgpu::Buffer> {

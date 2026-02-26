@@ -48,7 +48,10 @@ impl AlignedVec {
     pub fn push(&mut self, value: f32) {
         let new_len = match self.len.checked_add(1) {
             Some(new_len) => new_len,
-            None => panic!("AlignedVec length overflow (len={}, additional=1)", self.len),
+            None => panic!(
+                "AlignedVec length overflow (len={}, additional=1)",
+                self.len
+            ),
         };
         if self.len == self.cap {
             self.grow(1);
@@ -76,7 +79,9 @@ impl AlignedVec {
         }
         // SAFETY: destination has at least `slice.len()` available after `grow`, and the source
         // and destination do not overlap.
-        unsafe { ptr::copy_nonoverlapping(slice.as_ptr(), self.ptr.as_ptr().add(self.len), slice.len()) };
+        unsafe {
+            ptr::copy_nonoverlapping(slice.as_ptr(), self.ptr.as_ptr().add(self.len), slice.len())
+        };
         self.len = new_len;
     }
 

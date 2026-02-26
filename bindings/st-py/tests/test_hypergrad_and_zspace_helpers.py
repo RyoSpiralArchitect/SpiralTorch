@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import spiraltorch as st
+import pytest
 
 from spiral.hypergrad import hypergrad_summary_dict, suggest_hypergrad_operator
 
@@ -8,14 +9,14 @@ from spiral.hypergrad import hypergrad_summary_dict, suggest_hypergrad_operator
 def test_hypergrad_helper_accepts_tuple_shape() -> None:
     tape = st.hypergrad((1, 4))
     assert tape.shape() == (1, 4)
-    assert tape.curvature() == -1.0
+    assert tape.curvature() == pytest.approx(-1.0)
 
 
 def test_hypergrad_helper_accepts_tensor_shape() -> None:
     tensor = st.Tensor((2, 3))
     tape = st.hypergrad(tensor, learning_rate=0.01)
     assert tape.shape() == tensor.shape()
-    assert tape.learning_rate() == 0.01
+    assert tape.learning_rate() == pytest.approx(0.01)
 
 
 def test_hypergrad_scale_gradient_tracks_summary() -> None:
@@ -60,7 +61,7 @@ def test_hypergrad_helper_accepts_mapping_topos() -> None:
         },
     )
     guard = tape.topos()
-    assert guard.curvature() == -0.9
+    assert guard.curvature() == pytest.approx(-0.9)
     assert guard.max_depth() == 4
     assert guard.max_volume() == 16
 
@@ -75,13 +76,13 @@ def test_hypergrad_telemetry_reports_metrics() -> None:
     assert tape.non_finite_count() == 0
     assert not tape.has_non_finite()
     assert abs(tape.non_finite_ratio()) < 1e-6
-    assert telemetry.curvature() == -0.95
-    assert telemetry.learning_rate() == 0.04
+    assert telemetry.curvature() == pytest.approx(-0.95)
+    assert telemetry.learning_rate() == pytest.approx(0.04)
     summary = telemetry.summary()
     assert summary.count() == 3
     assert telemetry.finite_count() == summary.count()
     assert telemetry.non_finite_count() == 0
-    assert telemetry.non_finite_ratio() == 0.0
+    assert telemetry.non_finite_ratio() == pytest.approx(0.0)
     assert telemetry.tolerance() > 0.0
     assert telemetry.saturation() > 0.0
     assert telemetry.max_volume() >= telemetry.volume()
@@ -139,8 +140,8 @@ def test_hypergrad_topos_factory_returns_guard() -> None:
         max_depth=8,
         max_volume=32,
     )
-    assert guard.curvature() == -0.8
-    assert guard.tolerance() == 5e-4
+    assert guard.curvature() == pytest.approx(-0.8)
+    assert guard.tolerance() == pytest.approx(5e-4)
     assert guard.max_depth() == 8
     assert guard.max_volume() == 32
 
@@ -148,18 +149,18 @@ def test_hypergrad_topos_factory_returns_guard() -> None:
 def test_hypergrad_notation_square_brackets() -> None:
     tape = st.hg[2, 3](learning_rate=0.03)
     assert tape.shape() == (2, 3)
-    assert tape.learning_rate() == 0.03
+    assert tape.learning_rate() == pytest.approx(0.03)
 
 
 def test_hypergrad_notation_slice_bindings() -> None:
     tape = st.hg[1:4](curvature=-0.75)
     assert tape.shape() == (1, 4)
-    assert tape.curvature() == -0.75
+    assert tape.curvature() == pytest.approx(-0.75)
 
 
 def test_hypergrad_notation_topos_alias() -> None:
     guard = st.hg.topos(curvature=-0.82, tolerance=2e-3, saturation=0.65, max_depth=6, max_volume=24)
-    assert guard.curvature() == -0.82
+    assert guard.curvature() == pytest.approx(-0.82)
     assert guard.max_depth() == 6
 
 
@@ -168,7 +169,7 @@ def test_hypergrad_partial_with_inline_topos() -> None:
     tape = st.hg[weights].with_topos(curvature=-0.88, tolerance=1.5e-3, saturation=0.7, max_depth=5, max_volume=20)
     assert tape.shape() == weights.shape()
     guard = tape.topos()
-    assert guard.curvature() == -0.88
+    assert guard.curvature() == pytest.approx(-0.88)
     assert guard.max_volume() == 20
 
 
@@ -186,10 +187,10 @@ def test_z_metrics_aliases_normalise_inputs() -> None:
         drift=0.1,
         grad=[1, -2, 3],
     )
-    assert metrics.speed == 0.5
-    assert metrics.memory == 0.25
-    assert metrics.stability == 0.9
-    assert metrics.drs == 0.1
+    assert metrics.speed == pytest.approx(0.5)
+    assert metrics.memory == pytest.approx(0.25)
+    assert metrics.stability == pytest.approx(0.9)
+    assert metrics.drs == pytest.approx(0.1)
     assert metrics.gradient == [1.0, -2.0, 3.0]
 
 
@@ -209,17 +210,17 @@ def test_z_notation_bracket_temperature() -> None:
 
 def test_z_notation_metrics_helper() -> None:
     metrics = st.z.metrics(velocity=0.4, drift=0.12)
-    assert metrics.speed == 0.4
-    assert metrics.drs == 0.12
+    assert metrics.speed == pytest.approx(0.4)
+    assert metrics.drs == pytest.approx(0.12)
 
 
 def test_z_partial_accepts_keyword_metrics() -> None:
     partial = st.z.partial(speed=0.7, mem=0.4, frac=0.3, origin="telemetry", weight=2.5)
     assert isinstance(partial, st.ZSpacePartialBundle)
     resolved = partial.resolved()
-    assert resolved["speed"] == 0.7
-    assert resolved["memory"] == 0.4
-    assert resolved["frac"] == 0.3
+    assert resolved["speed"] == pytest.approx(0.7)
+    assert resolved["memory"] == pytest.approx(0.4)
+    assert resolved["frac"] == pytest.approx(0.3)
     assert partial.weight == 2.5
     assert partial.origin == "telemetry"
 
@@ -228,18 +229,18 @@ def test_z_partial_merges_metrics_and_telemetry() -> None:
     base = st.z.partial(speed=0.2, telemetry={"psi": {"mean": 0.5}})
     combined = st.z.partial(base, stability=0.9, telemetry={"z": {"bias": 0.1}})
     resolved = combined.resolved()
-    assert resolved["speed"] == 0.2
-    assert resolved["stability"] == 0.9
+    assert resolved["speed"] == pytest.approx(0.2)
+    assert resolved["stability"] == pytest.approx(0.9)
     payload = combined.telemetry_payload()
-    assert payload["psi.mean"] == 0.5
-    assert payload["z.bias"] == 0.1
+    assert payload["psi.mean"] == pytest.approx(0.5)
+    assert payload["z.bias"] == pytest.approx(0.1)
 
 
 def test_z_partial_accepts_gradient_sequences() -> None:
     partial = st.z.partial(gradient=[1, -2, 3], speed=0.6)
     resolved = partial.resolved()
     assert resolved["gradient"] == [1.0, -2.0, 3.0]
-    assert resolved["speed"] == 0.6
+    assert resolved["speed"] == pytest.approx(0.6)
 
 
 def test_z_bundle_weighted_mean() -> None:

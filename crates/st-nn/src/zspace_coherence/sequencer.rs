@@ -1401,15 +1401,13 @@ impl ZSpaceCoherenceSequencer {
             return Err(st_tensor::TensorError::InvalidDimensions {
                 rows: dim,
                 cols: num_heads,
-            }
-            );
+            });
         }
         if (topos.curvature() - curvature).abs() > 1e-6 {
             return Err(st_tensor::TensorError::CurvatureMismatch {
                 expected: curvature,
                 got: topos.curvature(),
-            }
-            );
+            });
         }
 
         let channel_count = (dim / 8).max(1).max(num_heads);
@@ -1483,8 +1481,7 @@ impl ZSpaceCoherenceSequencer {
             return Err(TensorError::DataLength {
                 expected: self.coherence_engine.num_channels(),
                 got: coherence_weights.len(),
-            }
-            );
+            });
         }
 
         let (rows, cols) = x.shape();

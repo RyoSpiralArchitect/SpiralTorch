@@ -67,6 +67,7 @@ def _isolated_spiraltorch(*, provide_rl: bool, existing_rl: types.ModuleType | N
             "ZSpacePosterior",
             "ZSpacePartialBundle",
             "ZSpaceTelemetryFrame",
+            "ZSpaceInferenceRuntime",
             "ZSpaceInferencePipeline",
             "inference_to_mapping",
             "inference_to_zmetrics",
@@ -84,6 +85,7 @@ def _isolated_spiraltorch(*, provide_rl: bool, existing_rl: types.ModuleType | N
             "infer_canvas_with_coherence",
             "infer_with_partials",
             "infer_from_partial",
+            "compile_inference",
             "weights_partial_from_dlpack",
             "weights_partial_from_compat",
             "infer_weights_from_dlpack",
@@ -121,7 +123,9 @@ def test_rl_alias_respects_existing_module() -> None:
     with _isolated_spiraltorch(provide_rl=True, existing_rl=sentinel) as (module, rl_module):
         assert rl_module is not None
         assert sys.modules["rl"] is sentinel
-        assert module.rl is rl_module
+        assert sys.modules["spiraltorch.rl"] is module.rl
+        assert getattr(module.rl, "__spiraltorch_placeholder__", False) is False
+        assert module.rl.stAgent is rl_module.stAgent
 
 
 def test_rl_alias_imports_on_demand() -> None:
@@ -130,9 +134,9 @@ def test_rl_alias_imports_on_demand() -> None:
         assert "rl" not in sys.modules
 
         imported = importlib.import_module("rl")
-        assert imported is rl_module
-        assert sys.modules["rl"] is rl_module
-        assert module.rl is rl_module
+        assert imported is module.rl
+        assert sys.modules["rl"] is imported
+        assert imported.stAgent is rl_module.stAgent
 
 
 def test_rl_alias_not_reserved_without_native_target() -> None:

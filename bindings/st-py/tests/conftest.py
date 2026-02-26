@@ -11,14 +11,14 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 
 @pytest.fixture
 def stub_spiraltorch(monkeypatch: pytest.MonkeyPatch):
-    module_names = (
-        "spiraltorch",
-        "spiraltorch.spiraltorch",
-        "spiraltorch.spiraltorch_native",
-        "spiraltorch_native",
-    )
-    for name in module_names:
-        monkeypatch.delitem(sys.modules, name, raising=False)
+    preexisting = set(sys.modules)
+    for name in list(sys.modules):
+        if (
+            name == "spiraltorch"
+            or name.startswith("spiraltorch.")
+            or name in {"spiral_rl", "rl"}
+        ):
+            monkeypatch.delitem(sys.modules, name, raising=False)
 
     if "torch" not in sys.modules:
         torch_stub = types.ModuleType("torch")
@@ -36,4 +36,16 @@ def stub_spiraltorch(monkeypatch: pytest.MonkeyPatch):
         module._install_stub_bindings(
             module, ModuleNotFoundError("spiraltorch", name="spiraltorch")
         )
-    return module
+    try:
+        yield module
+    finally:
+        for name in list(sys.modules):
+            if name in preexisting:
+                continue
+            if name == "spiral_rl" or name == "rl" or name.startswith("spiraltorch."):
+                sys.modules.pop(name, None)
+
+
+@pytest.fixture
+def spiraltorch_stub(stub_spiraltorch):
+    return stub_spiraltorch

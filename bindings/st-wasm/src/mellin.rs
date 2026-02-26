@@ -15,7 +15,9 @@ fn float32array_to_vec(buffer: &Float32Array) -> Vec<f32> {
 fn interleaved_to_complex(buffer: &Float32Array) -> Result<Vec<ComplexScalar>, JsValue> {
     let host = float32array_to_vec(buffer);
     if host.len() % 2 != 0 {
-        return Err(js_error("expected interleaved complex Float32Array (re, im, ...)"));
+        return Err(js_error(
+            "expected interleaved complex Float32Array (re, im, ...)",
+        ));
     }
     Ok(host
         .chunks_exact(2)
@@ -49,7 +51,11 @@ pub struct WasmMellinEvalPlan {
 #[wasm_bindgen]
 impl WasmMellinEvalPlan {
     #[wasm_bindgen(js_name = many)]
-    pub fn many(log_start: Scalar, log_step: Scalar, s_values: &Float32Array) -> Result<Self, JsValue> {
+    pub fn many(
+        log_start: Scalar,
+        log_step: Scalar,
+        s_values: &Float32Array,
+    ) -> Result<Self, JsValue> {
         let s_values = interleaved_to_complex(s_values)?;
         let plan = MellinEvalPlan::many(log_start, log_step, &s_values).map_err(js_error)?;
         Ok(Self { plan })
@@ -63,7 +69,8 @@ impl WasmMellinEvalPlan {
         imag_values: &Float32Array,
     ) -> Result<Self, JsValue> {
         let imag_values = float32array_to_vec(imag_values);
-        let plan = MellinEvalPlan::vertical_line(log_start, log_step, real, &imag_values).map_err(js_error)?;
+        let plan = MellinEvalPlan::vertical_line(log_start, log_step, real, &imag_values)
+            .map_err(js_error)?;
         Ok(Self { plan })
     }
 
@@ -76,7 +83,8 @@ impl WasmMellinEvalPlan {
     ) -> Result<Self, JsValue> {
         let real_values = float32array_to_vec(real_values);
         let imag_values = float32array_to_vec(imag_values);
-        let plan = MellinEvalPlan::mesh(log_start, log_step, &real_values, &imag_values).map_err(js_error)?;
+        let plan = MellinEvalPlan::mesh(log_start, log_step, &real_values, &imag_values)
+            .map_err(js_error)?;
         Ok(Self { plan })
     }
 
@@ -108,7 +116,11 @@ pub struct WasmMellinLogGrid {
 #[wasm_bindgen]
 impl WasmMellinLogGrid {
     #[wasm_bindgen(constructor)]
-    pub fn new(log_start: Scalar, log_step: Scalar, samples: &Float32Array) -> Result<Self, JsValue> {
+    pub fn new(
+        log_start: Scalar,
+        log_step: Scalar,
+        samples: &Float32Array,
+    ) -> Result<Self, JsValue> {
         let samples = interleaved_to_complex(samples)?;
         let grid = MellinLogGrid::new(log_start, log_step, samples).map_err(js_error)?;
         Ok(Self { grid })
@@ -155,7 +167,8 @@ impl WasmMellinLogGrid {
     #[wasm_bindgen(js_name = planMany)]
     pub fn plan_many(&self, s_values: &Float32Array) -> Result<WasmMellinEvalPlan, JsValue> {
         let s_values = interleaved_to_complex(s_values)?;
-        let plan = MellinEvalPlan::many(self.grid.log_start(), self.grid.log_step(), &s_values).map_err(js_error)?;
+        let plan = MellinEvalPlan::many(self.grid.log_start(), self.grid.log_step(), &s_values)
+            .map_err(js_error)?;
         Ok(WasmMellinEvalPlan { plan })
     }
 
@@ -166,7 +179,10 @@ impl WasmMellinLogGrid {
         imag_values: &Float32Array,
     ) -> Result<WasmMellinEvalPlan, JsValue> {
         let imag_values = float32array_to_vec(imag_values);
-        let plan = self.grid.plan_vertical_line(real, &imag_values).map_err(js_error)?;
+        let plan = self
+            .grid
+            .plan_vertical_line(real, &imag_values)
+            .map_err(js_error)?;
         Ok(WasmMellinEvalPlan { plan })
     }
 
@@ -178,7 +194,10 @@ impl WasmMellinLogGrid {
     ) -> Result<WasmMellinEvalPlan, JsValue> {
         let real_values = float32array_to_vec(real_values);
         let imag_values = float32array_to_vec(imag_values);
-        let plan = self.grid.plan_mesh(&real_values, &imag_values).map_err(js_error)?;
+        let plan = self
+            .grid
+            .plan_mesh(&real_values, &imag_values)
+            .map_err(js_error)?;
         Ok(WasmMellinEvalPlan { plan })
     }
 
@@ -189,8 +208,14 @@ impl WasmMellinLogGrid {
     }
 
     #[wasm_bindgen(js_name = evaluatePlanMagnitude)]
-    pub fn evaluate_plan_magnitude(&self, plan: &WasmMellinEvalPlan) -> Result<Float32Array, JsValue> {
-        let values = self.grid.evaluate_plan_magnitude(&plan.plan).map_err(js_error)?;
+    pub fn evaluate_plan_magnitude(
+        &self,
+        plan: &WasmMellinEvalPlan,
+    ) -> Result<Float32Array, JsValue> {
+        let values = self
+            .grid
+            .evaluate_plan_magnitude(&plan.plan)
+            .map_err(js_error)?;
         Ok(scalar_array(&values))
     }
 
@@ -297,7 +322,10 @@ impl WasmMellinLogGrid {
     }
 
     #[wasm_bindgen(js_name = hilbertInnerProduct)]
-    pub fn hilbert_inner_product(&self, other: &WasmMellinLogGrid) -> Result<Float32Array, JsValue> {
+    pub fn hilbert_inner_product(
+        &self,
+        other: &WasmMellinLogGrid,
+    ) -> Result<Float32Array, JsValue> {
         let ip = self
             .grid
             .hilbert_inner_product(&other.grid)
@@ -331,7 +359,8 @@ pub fn mellin_exp_decay_samples_scaled(
     len: usize,
     rate: Scalar,
 ) -> Result<Float32Array, JsValue> {
-    let samples = st_frac::mellin::sample_log_uniform_exp_decay_scaled(log_start, log_step, len, rate)
-        .map_err(js_error)?;
+    let samples =
+        st_frac::mellin::sample_log_uniform_exp_decay_scaled(log_start, log_step, len, rate)
+            .map_err(js_error)?;
     Ok(complex_array(&samples))
 }

@@ -176,9 +176,19 @@ mod tests {
     fn embedding_backward_updates_weight() {
         let mut layer = Embedding::new("emb", 5, 2).unwrap();
         layer.attach_hypergrad(-1.0, 0.05).unwrap();
-        let input = Tensor::from_vec(3, 4, vec![0.0, 1.0, 2.0, 3.0, 1.0, 1.0, 4.0, 0.0, 2.0, 2.0, 2.0, 2.0]).unwrap();
+        let input = Tensor::from_vec(
+            3,
+            4,
+            vec![0.0, 1.0, 2.0, 3.0, 1.0, 1.0, 4.0, 0.0, 2.0, 2.0, 2.0, 2.0],
+        )
+        .unwrap();
         let output = layer.forward(&input).unwrap();
-        let grad_output = Tensor::from_vec(output.shape().0, output.shape().1, vec![1.0; output.data().len()]).unwrap();
+        let grad_output = Tensor::from_vec(
+            output.shape().0,
+            output.shape().1,
+            vec![1.0; output.data().len()],
+        )
+        .unwrap();
         let grad_in = layer.backward(&input, &grad_output).unwrap();
         assert_eq!(grad_in.shape(), input.shape());
         assert!(grad_in.data().iter().all(|v| *v == 0.0));
@@ -189,4 +199,3 @@ mod tests {
         assert_ne!(before, *after);
     }
 }
-
