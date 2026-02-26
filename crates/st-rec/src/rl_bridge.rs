@@ -111,6 +111,34 @@ impl RecBanditDecision {
         self.candidates[self.action_index].clone()
     }
 
+    /// Returns the candidate items ranked by the recommender score.
+    pub fn ranked_items_by_score(&self) -> Vec<usize> {
+        let mut candidates = self.candidates.clone();
+        candidates.sort_by(|a, b| b.score.total_cmp(&a.score));
+        candidates.into_iter().map(|rec| rec.item).collect()
+    }
+
+    /// Returns the candidate items ranked by the policy probabilities.
+    pub fn ranked_items_by_probability(&self) -> Vec<usize> {
+        let len = self.candidates.len().min(self.probabilities.len());
+        let mut ranked: Vec<(usize, f32, f32, usize)> = (0..len)
+            .map(|idx| {
+                (
+                    self.candidates[idx].item,
+                    self.probabilities[idx],
+                    self.candidates[idx].score,
+                    idx,
+                )
+            })
+            .collect();
+        ranked.sort_by(|a, b| {
+            b.1.total_cmp(&a.1)
+                .then_with(|| b.2.total_cmp(&a.2))
+                .then_with(|| a.3.cmp(&b.3))
+        });
+        ranked.into_iter().map(|(item, _, _, _)| item).collect()
+    }
+
     /// Decomposes the decision into its state tensor for manual bookkeeping.
     pub fn into_state(self) -> Tensor {
         self.state
@@ -383,6 +411,7 @@ impl RecBanditController {
 mod tests {
     use super::*;
     use crate::RatingTriple;
+    use std::collections::{HashMap, HashSet};
 
     fn build_basic_recommender() -> SpiralRecommender {
         let mut rec = SpiralRecommender::new(2, 5, 3, 0.05, 0.01, -1.0).unwrap();
@@ -501,5 +530,84 @@ mod tests {
             }
             other => panic!("unexpected error: {other:?}"),
         }
+    }
+
+    #[test]
+    fn decision_ranks_candidates_by_probability() {
+        let decision = RecBanditDecision {
+            user: 0,
+            candidates: vec![
+                Recommendation {
+                    item: 0,
+                    score: 0.1,
+                },
+                Recommendation {
+                    item: 1,
+                    score: 0.3,
+                },
+                Recommendation {
+                    item: 2,
+                    score: 0.2,
+                },
+            ],
+            chosen_item: 1,
+            action_index: 1,
+            state: Tensor::zeros(1, 1).unwrap(),
+            probabilities: vec![0.2, 0.5, 0.3],
+        };
+
+        assert_eq!(decision.ranked_items_by_probability(), vec![1, 2, 0]);
+        assert_eq!(decision.ranked_items_by_score(), vec![1, 2, 0]);
+    }
+
+    #[test]
+    fn bandit_e2e_can_score_policy_ranking_with_metrics() {
+        let users = 3usize;
+        let items = 7usize;
+        let k = 3usize;
+
+        let mut recommender = SpiralRecommender::new(users, items, 4, 0.05, 0.002, -1.0).unwrap();
+        let train = vec![
+            RatingTriple::new(0, 0, 5.0),
+            RatingTriple::new(0, 1, 4.0),
+            RatingTriple::new(0, 2, 3.5),
+            RatingTriple::new(1, 2, 4.5),
+            RatingTriple::new(1, 3, 4.0),
+            RatingTriple::new(1, 4, 2.0),
+            RatingTriple::new(2, 4, 4.8),
+            RatingTriple::new(2, 5, 4.2),
+        ];
+
+        let mut exclude: HashMap<usize, Vec<usize>> = HashMap::new();
+        for triple in &train {
+            exclude.entry(triple.user).or_default().push(triple.item);
+        }
+
+        for _ in 0..12 {
+            recommender.train_epoch(&train).unwrap();
+        }
+
+        let relevant: Vec<HashSet<usize>> = vec![
+            [3usize].into_iter().collect(),
+            [5usize].into_iter().collect(),
+            [6usize].into_iter().collect(),
+        ];
+
+        let mut controller = RecBanditController::new(&recommender, k, 0.01, 0.9).unwrap();
+        controller.reset_episode();
+        for user in 0..users {
+            let exclusions = exclude.get(&user).map(|items| items.as_slice());
+            let decision = controller
+                .select_top_k(&recommender, user, k, exclusions)
+                .unwrap();
+            let ranked = decision.ranked_items_by_probability();
+            let row = crate::metrics::evaluate_at_k(&ranked, &relevant[user], k);
+            controller.observe_reward(decision, row.ndcg).unwrap();
+        }
+        let report = controller.finish_episode().unwrap();
+        assert_eq!(report.steps, users);
+        assert!(report.total_reward.is_finite());
+        assert!(report.total_reward >= 0.0);
+        assert!(report.total_reward <= users as f32 + 1e-6);
     }
 }
