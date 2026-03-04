@@ -152,7 +152,7 @@ Demonstrates:
 
 ### Future Enhancements
 
-- Python bindings for plugin system
+- Extend Python plugin bindings (registry + entrypoint loader now available; richer lifecycle/context next)
 - Hot-reloading support
 - Plugin marketplace
 - Cross-language plugins (Julia, Go)
@@ -173,6 +173,38 @@ init_plugin_system()?;
 let registry = global_registry();
 registry.register(Box::new(MyPlugin))?;
 registry.initialize_all()?;
+```
+
+### Register a Python Plugin
+
+```python
+import spiraltorch as st
+
+class DemoPlugin:
+    def metadata(self) -> dict:
+        return {
+            "id": "demo_py_plugin",
+            "version": "0.0.1",
+            "capabilities": ["Telemetry"],
+        }
+
+    def on_load(self) -> None:
+        st.plugin.set_config("demo_py_plugin.enabled", "1")
+
+    def on_event(self, event: dict) -> None:
+        print("event:", event.get("type"))
+
+st.plugin.register_python_plugin(DemoPlugin())
+st.plugin.publish("HelloPlugin", {"ok": True})
+
+# Or scan a directory of plugin modules:
+# st.plugin.load_path("plugins/", recursive=True)
+# Hot reload (unregister + reload + re-register):
+# st.plugin.reload_path("plugins/", recursive=True)
+# Watch a directory and reload on changes:
+# watcher = st.plugin.watch_path("plugins/", recursive=True, poll_interval=0.25)
+# ...
+# watcher.stop()
 ```
 
 ### Register a Custom Operator

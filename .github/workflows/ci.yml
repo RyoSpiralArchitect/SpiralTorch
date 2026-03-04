@@ -40,6 +40,20 @@ jobs:
           cargo build -p st-nn --release
           cargo build -p st-spiral-rl --release
           cargo build -p st-rec --release
+
+  windows-core:
+    name: build & test core (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: build + test core
+        run: |
+          cargo build -p st-core --release
+          cargo test  -p st-core --release -- --nocapture
   wgpu-macos:
     name: st-tensor (wgpu / macOS)
     runs-on: macos-latest
@@ -155,6 +169,11 @@ jobs:
           PYTHONNOUSERSITE: "1"
         run: |
           python -P bindings/st-py/examples/hello_session.py
+      - name: Run unittest smoke
+        env:
+          PYTHONNOUSERSITE: "1"
+        run: |
+          python -P bindings/st-py/tests/test_unittest_smoke.py
       - name: Run extra examples
         env:
           PYTHONNOUSERSITE: "1"

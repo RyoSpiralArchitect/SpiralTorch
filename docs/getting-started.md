@@ -17,10 +17,10 @@ Welcome to SpiralTorch! This guide will help you get up and running with SpiralT
 ### From PyPI (Recommended for Python Users)
 
 ```bash
-pip install spiraltorch==0.4.1
+pip install -U spiraltorch==0.4.6
 ```
 
-The wheel is pre-built with `abi3` compatibility, supporting Python ≥ 3.8.
+The wheel is pre-built with `abi3` compatibility, supporting Python >= 3.8.
 
 ### From Source (For Rust Development)
 

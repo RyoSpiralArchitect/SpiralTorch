@@ -314,6 +314,15 @@ def _maybe_load_rs_from_target() -> _types.ModuleType | None:
         "debug/libspiraltorch.so",
         "release/libspiraltorch.so",
         "maturin/libspiraltorch.so",
+        "debug/spiraltorch.abi3.pyd",
+        "release/spiraltorch.abi3.pyd",
+        "maturin/spiraltorch.abi3.pyd",
+        "debug/spiraltorch.pyd",
+        "release/spiraltorch.pyd",
+        "maturin/spiraltorch.pyd",
+        "debug/spiraltorch.dll",
+        "release/spiraltorch.dll",
+        "maturin/spiraltorch.dll",
     ):
         path = target_root / rel
         if path.is_file():
@@ -323,8 +332,17 @@ def _maybe_load_rs_from_target() -> _types.ModuleType | None:
         return None
 
     newest = max(candidates, key=lambda p: p.stat().st_mtime)
-    packaged = _pathlib.Path(__file__).resolve().with_name("spiraltorch.abi3.so")
-    packaged_mtime = packaged.stat().st_mtime if packaged.exists() else 0.0
+    packaged_mtime = max(
+        (
+            packaged.stat().st_mtime
+            for packaged in (
+                _pathlib.Path(__file__).resolve().with_name("spiraltorch.abi3.so"),
+                _pathlib.Path(__file__).resolve().with_name("spiraltorch.abi3.pyd"),
+            )
+            if packaged.exists()
+        ),
+        default=0.0,
+    )
 
     force = str(_os.environ.get("SPIRALTORCH_DEV_NATIVE_FROM_TARGET", "")).strip().lower() in {
         "1",
@@ -3552,6 +3570,212 @@ def _install_plugin_helpers() -> None:
     plugin_module.listen_stream = listen_stream
     _register_module_export(plugin_module, "listen_stream")
 
+    reload_path = _resolve_rs_attr("plugin.reload_path")
+    unregister_plugin = _resolve_rs_attr("plugin.unregister_plugin")
+    if reload_path is None or unregister_plugin is None:
+        return
+
+    class PluginPathWatcher:
+        def __init__(
+            self,
+            path: _Any,
+            *,
+            recursive: bool,
+            instantiate: bool,
+            strict: bool,
+            poll_interval: float,
+            module_prefix: str,
+            add_sys_path: bool,
+            on_error: _Callable[[BaseException, str], None] | None,
+        ) -> None:
+            self._path = _os.fspath(path)
+            self._recursive = bool(recursive)
+            self._instantiate = bool(instantiate)
+            self._strict = bool(strict)
+            self._poll_interval = float(poll_interval)
+            self._module_prefix = str(module_prefix)
+            self._add_sys_path = bool(add_sys_path)
+            self._on_error = on_error
+            self._stop = _threading.Event()
+            self._thread = _threading.Thread(
+                target=self._run,
+                name=f"SpiralTorchPluginWatcher[{self._path}]",
+                daemon=True,
+            )
+            self._thread.start()
+
+        def stop(self, timeout: float | None = None) -> None:
+            self._stop.set()
+            self._thread.join(timeout=timeout)
+
+        def is_running(self) -> bool:
+            return self._thread.is_alive()
+
+        def __enter__(self) -> "PluginPathWatcher":
+            return self
+
+        def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+            self.stop()
+
+        @staticmethod
+        def _iter_py_files(base: _pathlib.Path, recursive: bool) -> _Iterator[_pathlib.Path]:
+            if base.is_file():
+                if base.suffix.lower() == ".py" and base.name != "__init__.py":
+                    yield base
+                return
+
+            if not base.is_dir():
+                return
+
+            if not recursive:
+                for entry in base.iterdir():
+                    name = entry.name
+                    if name.startswith(".") or name == "__pycache__":
+                        continue
+                    if not entry.is_file():
+                        continue
+                    if entry.suffix.lower() != ".py":
+                        continue
+                    if name == "__init__.py":
+                        continue
+                    yield entry
+                return
+
+            for root, dirnames, filenames in _os.walk(base):
+                dirnames[:] = [
+                    d for d in dirnames if not d.startswith(".") and d != "__pycache__"
+                ]
+                for filename in filenames:
+                    if filename.startswith("."):
+                        continue
+                    if not filename.lower().endswith(".py"):
+                        continue
+                    if filename == "__init__.py":
+                        continue
+                    yield _pathlib.Path(root) / filename
+
+        @staticmethod
+        def _stat_signature(path: _pathlib.Path) -> tuple[int, int] | None:
+            try:
+                st = path.stat()
+            except OSError:
+                return None
+            return (int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))), int(st.st_size))
+
+        def _run(self) -> None:
+            base = _pathlib.Path(self._path)
+            known: dict[str, tuple[int, int]] = {}
+            file_plugins: dict[str, _List[str]] = {}
+
+            def report_error(exc: BaseException, filename: str) -> None:
+                cb = self._on_error
+                if cb is None:
+                    return
+                try:
+                    cb(exc, filename)
+                except Exception:
+                    pass
+
+            def reload_file(filename: str) -> _List[str] | None:
+                try:
+                    ids = reload_path(
+                        filename,
+                        recursive=False,
+                        instantiate=self._instantiate,
+                        strict=self._strict,
+                        module_prefix=self._module_prefix,
+                        add_sys_path=self._add_sys_path,
+                    )
+                except Exception as exc:
+                    report_error(exc, filename)
+                    return None
+                try:
+                    return list(ids)
+                except Exception:
+                    return None
+
+            # Initial load
+            for path in sorted(self._iter_py_files(base, self._recursive)):
+                sig = self._stat_signature(path)
+                if sig is None:
+                    continue
+                filename = str(path)
+                known[filename] = sig
+                ids = reload_file(filename)
+                if ids is not None:
+                    file_plugins[filename] = ids
+
+            # Poll loop
+            while not self._stop.is_set():
+                current_files = list(self._iter_py_files(base, self._recursive))
+                current_known: dict[str, tuple[int, int]] = {}
+                for path in current_files:
+                    sig = self._stat_signature(path)
+                    if sig is None:
+                        continue
+                    current_known[str(path)] = sig
+
+                # Unregister plugins whose file disappeared.
+                for filename in list(file_plugins.keys()):
+                    if filename in current_known:
+                        continue
+                    for plugin_id in file_plugins.pop(filename, []):
+                        try:
+                            unregister_plugin(plugin_id)
+                        except Exception:
+                            pass
+                    known.pop(filename, None)
+
+                # Reload plugins when a file changes.
+                for filename, sig in current_known.items():
+                    if known.get(filename) == sig:
+                        continue
+                    ids = reload_file(filename)
+                    if ids is None:
+                        continue
+                    previous_ids = set(file_plugins.get(filename, []))
+                    next_ids = set(ids)
+                    file_plugins[filename] = ids
+                    known[filename] = sig
+                    for removed_id in previous_ids - next_ids:
+                        try:
+                            unregister_plugin(removed_id)
+                        except Exception:
+                            pass
+
+                _time.sleep(max(0.01, self._poll_interval))
+
+    def watch_path(
+        path: _Any,
+        *,
+        recursive: bool = True,
+        instantiate: bool = True,
+        strict: bool = False,
+        poll_interval: float = 0.25,
+        module_prefix: str = "spiraltorch_path_plugin",
+        add_sys_path: bool = True,
+        on_error: _Callable[[BaseException, str], None] | None = None,
+    ) -> "PluginPathWatcher":
+        """Watch a plugin path for changes and auto-reload Python plugins."""
+
+        return PluginPathWatcher(
+            path,
+            recursive=recursive,
+            instantiate=instantiate,
+            strict=strict,
+            poll_interval=poll_interval,
+            module_prefix=module_prefix,
+            add_sys_path=add_sys_path,
+            on_error=on_error,
+        )
+
+    PluginPathWatcher.__module__ = plugin_module.__name__
+    watch_path.__module__ = plugin_module.__name__
+    plugin_module.PluginPathWatcher = PluginPathWatcher
+    plugin_module.watch_path = watch_path
+    _register_module_export(plugin_module, "PluginPathWatcher")
+    _register_module_export(plugin_module, "watch_path")
+
 
 def _install_nn_helpers() -> None:
     nn_module = _ensure_submodule("nn")
@@ -3586,26 +3810,25 @@ def _install_nn_helpers() -> None:
         try:
             yield
         finally:
-            if not switched:
-                return
-            try:
-                if was_training is None:
-                    if callable(train_fn):
-                        train_fn()
-                    elif callable(set_training):
-                        set_training(True)
-                elif was_training:
-                    if callable(train_fn):
-                        train_fn()
-                    elif callable(set_training):
-                        set_training(True)
-                else:
-                    if callable(eval_fn):
-                        eval_fn()
-                    elif callable(set_training):
-                        set_training(False)
-            except Exception:
-                pass
+            if switched:
+                try:
+                    if was_training is None:
+                        if callable(train_fn):
+                            train_fn()
+                        elif callable(set_training):
+                            set_training(True)
+                    elif was_training:
+                        if callable(train_fn):
+                            train_fn()
+                        elif callable(set_training):
+                            set_training(True)
+                    else:
+                        if callable(eval_fn):
+                            eval_fn()
+                        elif callable(set_training):
+                            set_training(False)
+                except Exception:
+                    pass
 
     nn_module.eval_mode = eval_mode
     _register_module_export(nn_module, "eval_mode")

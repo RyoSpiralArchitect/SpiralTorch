@@ -191,6 +191,48 @@ let loader = DynamicPluginLoader::new();
 loader.load_into(Path::new("./plugins"), registry)?;
 ```
 
+### 3. Python Plugins (SpiralTorch Python bindings)
+
+When using the Python bindings (`pip install spiraltorch`), you can register and
+discover **Python plugins** via `spiraltorch.plugin`.
+
+```python
+import spiraltorch as st
+
+class DemoPlugin:
+    def metadata(self) -> dict:
+        return {"id": "demo_py_plugin", "version": "0.0.1", "capabilities": ["Telemetry"]}
+
+    def on_load(self) -> None:
+        st.plugin.set_config("demo_py_plugin.enabled", "1")
+        st.plugin.register_service("demo_py_plugin.service", self)
+
+    def on_event(self, event: dict) -> None:
+        print("event:", event.get("type"))
+
+st.plugin.register_python_plugin(DemoPlugin())
+st.plugin.publish("HelloPlugin", {"ok": True})
+```
+
+Directory/module discovery helpers:
+
+- `st.plugin.load_entrypoints(group="spiraltorch.plugins", instantiate=True, replace=False)` discovers plugins from Python entry points.
+- `st.plugin.load_path(path, recursive=True, strict=False, reload=False, replace=False, ...)` loads `.py` files from a directory (or a single file).
+- `st.plugin.reload_path(path, ...)` is a convenience wrapper that does `reload=True, replace=True`.
+- `st.plugin.watch_path(path, poll_interval=0.25, ...)` polls a directory/file and hot-reloads changed plugin files.
+
+Plugin discovery conventions for `load_path(...)`:
+
+- A module can expose an iterable of plugin objects via `__spiraltorch_plugins__`, `spiraltorch_plugins`, or `plugins`.
+- Or expose factories: `create_plugins()` / `get_plugins()` (return iterable).
+- Or expose a single plugin via `create_plugin()` / `get_plugin()` / `plugin` / `PLUGIN`.
+
+Python plugin event auto-subscription:
+
+- If a plugin defines `on_event(self, event: dict)`, SpiralTorch auto-subscribes it to `"*"` (all events).
+- Override by defining `event_types = ["TensorOp", ...]` (or an `event_types()` callable).
+- Disable by setting `auto_subscribe = False` (or `event_types = []`).
+
 ## Event System
 
 Plugins can communicate via the event bus:
@@ -359,7 +401,7 @@ The plugin system integrates seamlessly with SpiralTorch's existing features:
 
 ## Future Extensions
 
-- Hot-reloading support for development workflows
+- Hot-reloading support for development workflows (Python path plugins: `reload_path(...)` / `watch_path(...)` available; native hot reload is planned)
 - Plugin sandboxing for security
 - Dependency version resolution
 - Plugin marketplace/registry

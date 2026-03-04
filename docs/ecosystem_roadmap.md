@@ -13,12 +13,12 @@ SpiralTorch already offers a rich Rust-first runtime, a shared hypergrad tape fo
 - **Edge-ready bundles.** Produce lightweight binaries that highlight Rust's zero-runtime-cost deployment story. Target single-board ARM devices first, then progressively integrate GPU backends where available.
 
 ## Community & Contribution
-- **Guides for contributors.** Add `CONTRIBUTING.md` with style, testing, and security expectations. Reference the AGPL obligations, including how derivative works should publish sources.
+- **Guides for contributors.** Maintain `CONTRIBUTING.md` with style, testing, and security expectations. Reference the AGPL obligations, including how derivative works should publish sources.
 - **Discussion rituals.** Use scheduled office hours in GitHub Discussions to triage backend regressions and feature proposals. Publish outcomes as short changelog snippets.
 - **Issue labeling.** Introduce labels for backend coverage (`backend:cuda`, `backend:wgpu`, etc.), documentation, and canvas/UI work so that contributors can filter effortlessly.
 
 ## Integrations & Distribution
-- **ONNX/interop matrix.** Document the current ONNX export/ingest path and enumerate the missing operators for parity with PyTorch 2.x. Track the maturity per backend for both forward and backward passes.
+- **ONNX/interop matrix.** Track ONNX export/ingest progress in [onnx_interop.md](onnx_interop.md) and enumerate the missing operators for parity with PyTorch 2.x. Track the maturity per backend for both forward and backward passes.
 - **Model hub prototype.** Sketch a minimal artifact registry backed by object storage. Ensure AGPL license metadata and reproducibility manifests are embedded.
 - **Tuning pipelines.** Bundle sample configurations for Optuna and Ray Tune. Show how the hypergrad tape and planner can be wired in without Python-side tensor copying.
 - **Compatibility playbook.** Maintain the [Compatibility Strategy](compatibility_strategy.md) as a living guide for PyTorch/TensorFlow migrations, including API diff tables, operator coverage, and hybrid deployment recipes.
@@ -28,4 +28,3 @@ SpiralTorch already offers a rich Rust-first runtime, a shared hypergrad tape fo
 - Establish a living changelog that calls out which roadmap items advanced in each release.
 - Track documentation coverage by counting the number of walkthroughs with validated code samples.
 - Define a backend matrix (see `docs/backend_matrix.md`) to ensure the supported feature set stays transparent for each device stack.
-

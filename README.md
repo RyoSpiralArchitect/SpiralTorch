@@ -2902,7 +2902,9 @@ Rust and then feed the resulting curvature-aligned hints back into SpiralK.
 
 ## Contributing
 
-Issues & PRs welcome—especially:
+See `CONTRIBUTING.md` for local setup, testing, and wheel build commands (Windows: `scripts/dev.ps1`).
+
+Issues & PRs welcome, especially:
 - Backend kernels (WGPU subgroup variants, HIP/CUDA heap/k-way merges)
 - Tuner recipes & generated tables
 - New SpiralK sugar (e.g., `penalty_if(...)`, device-aware bands)

@@ -100,4 +100,4 @@ cargo run -p st-zeta --example spiral_reality_demo
 - Vision: MNIST classifier (conv + pooling stack)
 - NLP: text classification (LanguageWaveEncoder + projector + head)
 - RL: bandit / PPO training loops
-- Export: ONNX parity demos (CPU-first)
+- Export: JSON artefacts today; ONNX parity demos (CPU-first) planned

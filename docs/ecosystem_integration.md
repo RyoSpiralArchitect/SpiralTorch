@@ -386,7 +386,7 @@ impl Plugin for TrainingPlugin {
 
 ## Future Enhancements
 
-- **Hot Reloading**: Dynamic plugin updates without restart
+- **Hot Reloading**: Python path-loaded plugins can be refreshed via `st.plugin.reload_path(...)` / `st.plugin.watch_path(...)`; native Rust hot reload is still planned
 - **Plugin Marketplace**: Centralized plugin discovery
 - **Cross-Language Plugins**: Python, Julia, Go plugin support
 - **Plugin Sandboxing**: Security isolation

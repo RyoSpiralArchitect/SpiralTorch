@@ -37,6 +37,8 @@ NumPy, no PyTorch, and no shim layers.
   schedules.
 - Event observability via `spiraltorch.plugin`—subscribe, listen queues, or
   record JSONL streams with `plugin.record(...)`.
+- Python plugin registry via `spiraltorch.plugin.register_python_plugin(...)`
+  (and `plugin.load_entrypoints(...)` / `plugin.load_path(...)` / `plugin.reload_path(...)` / `plugin.watch_path(...)` for discovery + hot reload).
 - Custom operator registration via `spiraltorch.ops` with flexible `register`
   calls, `ops.signature(...)`, and a human-friendly `ops.describe(...)`.
 - Built-in module + state-dict serialization helpers (`spiraltorch.nn.save_json` /
@@ -74,8 +76,9 @@ NumPy, no PyTorch, and no shim layers.
   events into `telemetry.AtlasRoute` summaries.
 - Deployment and optimisation bridges via `spiraltorch.integrations`: archive
   TorchServe models, persist BentoML runners, explore hyperparameters with
-  Optuna or Ray Tune, and export trained modules to ONNX—all behind ergonomic
+  Optuna or Ray Tune, and emit deployment JSON artefacts (ONNX/TFLite planned) - all behind ergonomic
   Python call sites.
+  Use the `spiral-export` CLI to generate export artefacts.
 - Ecosystem helpers via `spiraltorch.ecosystem` to shuttle tensors between
   PyTorch, JAX, CuPy, and TensorFlow through zero-copy DLPack bridges.
 - Reinforcement learning harness via `spiraltorch.spiral_rl`—SpiralTorchRL keeps

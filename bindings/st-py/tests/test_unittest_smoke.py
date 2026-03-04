@@ -1,8 +1,32 @@
+import contextlib
 import json
-import tempfile
+import os
+import shutil
+import textwrap
+import time
 import unittest
+import uuid
+from pathlib import Path
 
 import spiraltorch as st  # noqa: E402
+
+_TEST_TMP_ROOT = Path(__file__).resolve().parent
+
+
+@contextlib.contextmanager
+def _temp_dir(prefix: str) -> str:
+    """Create a short-lived writable directory for tests.
+
+    Python's `tempfile` uses mode=0o700 for directories; on Windows with Python
+    3.14 this can yield ACLs that deny file creation in this environment.
+    """
+
+    path = _TEST_TMP_ROOT / f"{prefix}_{uuid.uuid4().hex}"
+    os.mkdir(path)
+    try:
+        yield str(path)
+    finally:
+        shutil.rmtree(path, ignore_errors=True)
 
 
 class SpiralTorchSmokeTest(unittest.TestCase):
@@ -52,7 +76,7 @@ class SpiralTorchSmokeTest(unittest.TestCase):
         self.assertIn("py_add", desc)
 
     def test_plugin_record_jsonl(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
+        with _temp_dir("tmp_jsonl") as tmp:
             path = f"{tmp}/events.jsonl"
             with st.plugin.record(path, event_types="TensorOp"):
                 a = st.Tensor.rand(1, 1, seed=7)
@@ -64,9 +88,328 @@ class SpiralTorchSmokeTest(unittest.TestCase):
         event = json.loads(lines[-1])
         self.assertEqual(event["type"], "TensorOp")
 
+    def test_python_plugin_registry(self) -> None:
+        class DemoPlugin:
+            def __init__(self) -> None:
+                self.events: list[dict] = []
+                self.loaded = False
+                self.unloaded = False
+                self.service: dict[str, object] = {"ok": True}
+
+            def metadata(self) -> dict:
+                return {
+                    "id": "demo_py_plugin",
+                    "version": "0.0.1",
+                    "name": "Demo Python Plugin",
+                    "capabilities": ["Telemetry", "Custom:python-demo"],
+                    "metadata": {"lang": "py"},
+                }
+
+            def on_load(self) -> None:
+                self.loaded = True
+                st.plugin.set_config("demo_py_plugin.key", "demo-value")
+                st.plugin.register_service("demo_py_plugin.service", self.service)
+
+            def on_unload(self) -> None:
+                self.unloaded = True
+
+            def on_event(self, event: dict) -> None:
+                self.events.append(event)
+
+        plugin = DemoPlugin()
+        plugin_id = st.plugin.register_python_plugin(plugin)
+        self.assertEqual(plugin_id, "demo_py_plugin")
+        self.assertTrue(plugin.loaded)
+        self.assertIn(plugin_id, st.plugin.list_plugins())
+
+        meta = st.plugin.plugin_metadata(plugin_id)
+        self.assertIsInstance(meta, dict)
+        self.assertEqual(meta["id"], plugin_id)
+        self.assertEqual(meta["version"], "0.0.1")
+        self.assertIn("Telemetry", meta.get("capabilities", []))
+
+        hits = st.plugin.find_by_capability("Telemetry")
+        self.assertIn(plugin_id, hits)
+
+        self.assertEqual(st.plugin.get_config("demo_py_plugin.key"), "demo-value")
+        self.assertIn("demo_py_plugin.service", st.plugin.list_services())
+        service = st.plugin.get_service("demo_py_plugin.service")
+        self.assertIs(service, plugin.service)
+
+        plugin.events.clear()
+        st.plugin.publish("DemoEvent", {"x": 1})
+        self.assertTrue(plugin.events)
+        self.assertEqual(plugin.events[-1]["type"], "DemoEvent")
+        self.assertEqual(plugin.events[-1]["payload"]["x"], 1)
+
+        st.plugin.unregister_plugin(plugin_id)
+        self.assertTrue(plugin.unloaded)
+        self.assertNotIn(plugin_id, st.plugin.list_plugins())
+
+    def test_python_plugin_load_path(self) -> None:
+        plugin_id = f"demo_path_plugin_{uuid.uuid4().hex}"
+        plugin_source = textwrap.dedent(
+            f"""
+            import spiraltorch as st
+
+            class PathPlugin:
+                def __init__(self) -> None:
+                    self.events = []
+
+                def metadata(self) -> dict:
+                    return {{
+                        "id": "{plugin_id}",
+                        "version": "0.0.1",
+                        "capabilities": ["Telemetry"],
+                    }}
+
+                def on_load(self) -> None:
+                    st.plugin.register_service("{plugin_id}.instance", self)
+
+                def on_event(self, event: dict) -> None:
+                    self.events.append(event)
+
+            plugin = PathPlugin()
+            """
+        )
+
+        with _temp_dir("tmp_path") as tmp:
+            plugin_path = f"{tmp}/path_plugin.py"
+            with open(plugin_path, "w", encoding="utf-8") as handle:
+                handle.write(plugin_source)
+
+            loaded = st.plugin.load_path(tmp, recursive=False, strict=True)
+            self.assertIn(plugin_id, loaded)
+
+            plugin = st.plugin.get_service(f"{plugin_id}.instance")
+            self.assertIsNotNone(plugin)
+
+            st.plugin.publish("FromPath", {"v": 123})
+            self.assertTrue(plugin.events)
+            self.assertEqual(plugin.events[-1]["type"], "FromPath")
+            self.assertEqual(plugin.events[-1]["payload"]["v"], 123)
+
+            st.plugin.unregister_plugin(plugin_id)
+            self.assertNotIn(plugin_id, st.plugin.list_plugins())
+
+    def test_python_plugin_reload_path(self) -> None:
+        plugin_id = f"demo_reload_path_plugin_{uuid.uuid4().hex}"
+        service_name = f"{plugin_id}.instance"
+
+        plugin_source_v1 = textwrap.dedent(
+            f"""
+            import spiraltorch as st
+
+            class ReloadPlugin:
+                def __init__(self) -> None:
+                    self.events = []
+                    self.unloaded = False
+
+                def metadata(self) -> dict:
+                    return {{
+                        "id": "{plugin_id}",
+                        "version": "0.0.1",
+                        "capabilities": ["Telemetry"],
+                    }}
+
+                def on_load(self) -> None:
+                    st.plugin.register_service("{service_name}", self)
+
+                def on_unload(self) -> None:
+                    self.unloaded = True
+
+                def on_event(self, event: dict) -> None:
+                    self.events.append({{
+                        "marker": "v1",
+                        "type": event.get("type"),
+                        "payload": event.get("payload"),
+                    }})
+
+            plugin = ReloadPlugin()
+            """
+        )
+
+        plugin_source_v2 = textwrap.dedent(
+            f"""
+            import spiraltorch as st
+
+            class ReloadPlugin:
+                def __init__(self) -> None:
+                    self.events = []
+                    self.unloaded = False
+
+                def metadata(self) -> dict:
+                    return {{
+                        "id": "{plugin_id}",
+                        "version": "0.0.2",
+                        "capabilities": ["Telemetry"],
+                    }}
+
+                def on_load(self) -> None:
+                    st.plugin.register_service("{service_name}", self)
+
+                def on_unload(self) -> None:
+                    self.unloaded = True
+
+                def on_event(self, event: dict) -> None:
+                    self.events.append({{
+                        "marker": "v2",
+                        "type": event.get("type"),
+                        "payload": event.get("payload"),
+                    }})
+
+            plugin = ReloadPlugin()
+            """
+        )
+
+        try:
+            with _temp_dir("tmp_reload") as tmp:
+                plugin_path = f"{tmp}/reload_plugin.py"
+                with open(plugin_path, "w", encoding="utf-8") as handle:
+                    handle.write(plugin_source_v1)
+
+                loaded = st.plugin.load_path(plugin_path, recursive=False, strict=True)
+                self.assertIn(plugin_id, loaded)
+
+                old_plugin = st.plugin.get_service(service_name)
+                self.assertIsNotNone(old_plugin)
+
+                meta = st.plugin.plugin_metadata(plugin_id)
+                self.assertIsInstance(meta, dict)
+                self.assertEqual(meta["version"], "0.0.1")
+
+                st.plugin.publish("ReloadDemo", {"x": 1})
+                self.assertTrue(old_plugin.events)
+                self.assertEqual(old_plugin.events[-1]["marker"], "v1")
+
+                with open(plugin_path, "w", encoding="utf-8") as handle:
+                    handle.write(plugin_source_v2)
+
+                reloaded = st.plugin.reload_path(plugin_path, recursive=False, strict=True)
+                self.assertIn(plugin_id, reloaded)
+
+                meta2 = st.plugin.plugin_metadata(plugin_id)
+                self.assertIsInstance(meta2, dict)
+                self.assertEqual(meta2["version"], "0.0.2")
+
+                new_plugin = st.plugin.get_service(service_name)
+                self.assertIsNotNone(new_plugin)
+                self.assertIsNot(old_plugin, new_plugin)
+                self.assertTrue(old_plugin.unloaded)
+
+                old_plugin.events.clear()
+                new_plugin.events.clear()
+                st.plugin.publish("ReloadDemo", {"x": 2})
+                self.assertFalse(old_plugin.events)
+                self.assertTrue(new_plugin.events)
+                self.assertEqual(new_plugin.events[-1]["marker"], "v2")
+
+                st.plugin.unregister_plugin(plugin_id)
+                self.assertNotIn(plugin_id, st.plugin.list_plugins())
+                self.assertTrue(new_plugin.unloaded)
+        finally:
+            try:
+                st.plugin.unregister_plugin(plugin_id)
+            except Exception:
+                pass
+
+    def test_python_plugin_watch_path(self) -> None:
+        plugin_id = f"demo_watch_path_plugin_{uuid.uuid4().hex}"
+        service_name = f"{plugin_id}.instance"
+        errors: list[tuple[str, str]] = []
+
+        plugin_source_v1 = textwrap.dedent(
+            f"""
+            import spiraltorch as st
+
+            class WatchPlugin:
+                def metadata(self) -> dict:
+                    return {{
+                        "id": "{plugin_id}",
+                        "version": "0.0.1",
+                        "capabilities": ["Telemetry"],
+                    }}
+
+                def on_load(self) -> None:
+                    st.plugin.register_service("{service_name}", self)
+
+            plugin = WatchPlugin()
+            """
+        )
+
+        plugin_source_v2 = textwrap.dedent(
+            f"""
+            import spiraltorch as st
+
+            class WatchPlugin:
+                def metadata(self) -> dict:
+                    return {{
+                        "id": "{plugin_id}",
+                        "version": "0.0.2",
+                        "capabilities": ["Telemetry"],
+                    }}
+
+                def on_load(self) -> None:
+                    st.plugin.register_service("{service_name}", self)
+
+            plugin = WatchPlugin()
+            """
+        )
+
+        watcher = None
+        try:
+            with _temp_dir("tmp_watch") as tmp:
+                plugin_path = f"{tmp}/watch_plugin.py"
+                with open(plugin_path, "w", encoding="utf-8") as handle:
+                    handle.write(plugin_source_v1)
+
+                watcher = st.plugin.watch_path(
+                    tmp,
+                    recursive=False,
+                    strict=True,
+                    poll_interval=0.01,
+                    on_error=lambda exc, filename: errors.append(
+                        (exc.__class__.__name__, f"{filename}: {exc}")
+                    ),
+                )
+
+                deadline = time.time() + 2.0
+                while time.time() < deadline:
+                    meta = st.plugin.plugin_metadata(plugin_id)
+                    if meta and meta.get("version") == "0.0.1":
+                        break
+                    time.sleep(0.02)
+                else:
+                    self.fail(f"watch_path did not load plugin {plugin_id}")
+
+                with open(plugin_path, "w", encoding="utf-8") as handle:
+                    handle.write(plugin_source_v2)
+
+                deadline = time.time() + 2.0
+                while time.time() < deadline:
+                    meta = st.plugin.plugin_metadata(plugin_id)
+                    if meta and meta.get("version") == "0.0.2":
+                        break
+                    time.sleep(0.02)
+                else:
+                    self.fail(f"watch_path did not reload plugin {plugin_id}")
+
+                self.assertFalse(errors)
+                self.assertIsNotNone(st.plugin.get_service(service_name))
+        finally:
+            if watcher is not None:
+                try:
+                    watcher.stop(timeout=1.0)
+                except Exception:
+                    pass
+            try:
+                st.plugin.unregister_plugin(plugin_id)
+            except Exception:
+                pass
+
     def test_state_dict_io(self) -> None:
         model = st.nn.Linear("l1", 2, 1)
-        with tempfile.TemporaryDirectory() as tmp:
+        with _temp_dir("tmp_state") as tmp:
             path = f"{tmp}/linear.json"
             st.nn.save(path, model)
             manifest = path.replace(".json", ".manifest.json")

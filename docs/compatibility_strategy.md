@@ -31,7 +31,7 @@ performance, memory safety, and collaborative tooling.
   and gradient semantics consistent with PyTorch 2.x. Provide fuzz tests that compare
   `st_tensor` outputs against `torch` for canonical operators, and cross-check against
   `tf.experimental.numpy` and `jax.numpy` for numerics-sensitive ops.
-- **Module conversion utilities.** Expand the existing ONNX exporter with a CLI that can
+- **Module conversion utilities.** Build an ONNX exporter + CLI (JSON artefacts exist today) that can
   ingest TorchScript, SavedModel, GGUF, and `flax.linen` checkpoints. Document the
   supported operator set and how to register custom shims.
 

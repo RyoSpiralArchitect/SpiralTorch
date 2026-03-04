@@ -77,10 +77,9 @@ impl PluginRegistry {
         // Validate dependencies
         self.validate_dependencies(&metadata)?;
 
-        // Call on_load hook
-        let mut ctx = self.context.lock().unwrap();
+        // Call on_load hook (avoid holding the registry context lock while executing plugin code)
+        let mut ctx = { self.context.lock().unwrap().clone() };
         plugin.on_load(&mut ctx)?;
-        drop(ctx);
 
         // Store the plugin
         let handle = PluginHandle::new(plugin);
@@ -102,9 +101,8 @@ impl PluginRegistry {
         };
 
         // Call on_unload hook
-        let mut ctx = self.context.lock().unwrap();
+        let mut ctx = { self.context.lock().unwrap().clone() };
         handle.with_plugin(|plugin: &mut dyn Plugin| plugin.on_unload(&mut ctx))?;
-        drop(ctx);
 
         // Emit event
         self.event_bus.publish(&PluginEvent::PluginUnloaded {
