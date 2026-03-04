@@ -9,13 +9,13 @@ use std::sync::{Arc, Mutex};
 
 use crate::json::{json_to_py, py_to_json};
 use crate::tensor::tensor_err_to_py;
-use st_core::PureResult;
-use st_core::TensorError;
 use st_core::plugin::{
     global_registry, init_plugin_system, EventListener, Plugin, PluginCapability, PluginContext,
     PluginEvent, PluginEventJsonlWriter, PluginEventJsonlWriterConfig, PluginEventRecorder,
     PluginEventRecorderConfig, PluginMetadata,
 };
+use st_core::PureResult;
+use st_core::TensorError;
 
 fn plugin_event_to_py(py: Python<'_>, event: &PluginEvent) -> PyResult<PyObject> {
     let dict = PyDict::new_bound(py);
@@ -214,7 +214,9 @@ fn collect_strings(
             .extract()
             .map_err(|_| PyTypeError::new_err(format!("{name} must contain only strings")))?;
         if value.trim().is_empty() {
-            return Err(PyValueError::new_err(format!("{name} must not contain empty strings")));
+            return Err(PyValueError::new_err(format!(
+                "{name} must not contain empty strings"
+            )));
         }
         out.push(value);
     }
@@ -270,12 +272,12 @@ fn plugin_metadata_from_dict(dict: &Bound<'_, PyDict>) -> PyResult<PluginMetadat
                 PyTypeError::new_err("plugin metadata field 'metadata' must be a mapping")
             })?;
             for (key, value) in extra.iter() {
-                let key: String = key.extract().map_err(|_| {
-                    PyTypeError::new_err("plugin metadata keys must be strings")
-                })?;
-                let value: String = value.extract().map_err(|_| {
-                    PyTypeError::new_err("plugin metadata values must be strings")
-                })?;
+                let key: String = key
+                    .extract()
+                    .map_err(|_| PyTypeError::new_err("plugin metadata keys must be strings"))?;
+                let value: String = value
+                    .extract()
+                    .map_err(|_| PyTypeError::new_err("plugin metadata values must be strings"))?;
                 meta = meta.with_metadata(key, value);
             }
         }
@@ -285,12 +287,18 @@ fn plugin_metadata_from_dict(dict: &Bound<'_, PyDict>) -> PyResult<PluginMetadat
 }
 
 fn plugin_metadata_from_attrs(plugin: &Bound<'_, PyAny>) -> PyResult<PluginMetadata> {
-    let id: String = plugin.getattr("id").map_err(|_| {
-        PyValueError::new_err("python plugin must define metadata() or 'id' attribute")
-    })?.extract()?;
-    let version: String = plugin.getattr("version").map_err(|_| {
-        PyValueError::new_err("python plugin must define metadata() or 'version' attribute")
-    })?.extract()?;
+    let id: String = plugin
+        .getattr("id")
+        .map_err(|_| {
+            PyValueError::new_err("python plugin must define metadata() or 'id' attribute")
+        })?
+        .extract()?;
+    let version: String = plugin
+        .getattr("version")
+        .map_err(|_| {
+            PyValueError::new_err("python plugin must define metadata() or 'version' attribute")
+        })?
+        .extract()?;
 
     let mut meta = PluginMetadata::new(id, version);
     if let Some(value) = optional_string_attr(plugin, "name")? {
@@ -355,9 +363,9 @@ fn plugin_metadata_from_py(plugin: &Bound<'_, PyAny>) -> PyResult<PluginMetadata
             if meta_obj.is_none() {
                 return plugin_metadata_from_attrs(plugin);
             }
-            let dict = meta_obj.downcast::<PyDict>().map_err(|_| {
-                PyTypeError::new_err("metadata() must return a dict-like mapping")
-            })?;
+            let dict = meta_obj
+                .downcast::<PyDict>()
+                .map_err(|_| PyTypeError::new_err("metadata() must return a dict-like mapping"))?;
             return plugin_metadata_from_dict(&dict);
         }
 
@@ -869,14 +877,39 @@ fn event_types() -> HashMap<String, String> {
     .collect()
 }
 
-#[pyfunction]
-#[pyo3(signature = (plugin, *, replace=false))]
-fn register_python_plugin(py: Python<'_>, plugin: PyObject, replace: bool) -> PyResult<String> {
+fn canonicalize_path_for_metadata(path: &Path) -> String {
+    let candidate = std::fs::canonicalize(path).unwrap_or_else(|_| {
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else if let Ok(cwd) = std::env::current_dir() {
+            cwd.join(path)
+        } else {
+            path.to_path_buf()
+        }
+    });
+
+    let text = candidate.to_string_lossy().to_string();
+
+    #[cfg(windows)]
+    {
+        if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+            return format!(r"\\{}", rest);
+        }
+        if let Some(rest) = text.strip_prefix(r"\\?\") {
+            return rest.to_string();
+        }
+    }
+
+    text
+}
+
+fn register_python_plugin_from_metadata(
+    _py: Python<'_>,
+    plugin: PyObject,
+    metadata: PluginMetadata,
+    replace: bool,
+) -> PyResult<String> {
     init_plugin_system().map_err(tensor_err_to_py)?;
-    let metadata = {
-        let plugin_any = plugin.bind(py);
-        plugin_metadata_from_py(&plugin_any)?
-    };
     let plugin_id = metadata.id.clone();
 
     if replace && global_registry().get(&plugin_id).is_some() {
@@ -891,6 +924,57 @@ fn register_python_plugin(py: Python<'_>, plugin: PyObject, replace: bool) -> Py
         .map_err(tensor_err_to_py)?;
 
     Ok(plugin_id)
+}
+
+fn annotate_path_metadata(meta: &mut PluginMetadata, file_path: &Path, module_name: &str) {
+    meta.metadata
+        .insert("spiraltorch.source".to_string(), "path".to_string());
+    meta.metadata.insert(
+        "spiraltorch.source_path".to_string(),
+        canonicalize_path_for_metadata(file_path),
+    );
+    meta.metadata.insert(
+        "spiraltorch.source_module".to_string(),
+        module_name.to_string(),
+    );
+}
+
+fn annotate_entrypoint_metadata(
+    meta: &mut PluginMetadata,
+    group: &str,
+    entry_point: &Bound<'_, PyAny>,
+) {
+    meta.metadata
+        .insert("spiraltorch.source".to_string(), "entrypoint".to_string());
+    meta.metadata.insert(
+        "spiraltorch.entrypoint_group".to_string(),
+        group.to_string(),
+    );
+
+    if let Ok(name) = entry_point
+        .getattr("name")
+        .and_then(|value| value.extract::<String>())
+    {
+        meta.metadata
+            .insert("spiraltorch.entrypoint_name".to_string(), name);
+    }
+    if let Ok(value) = entry_point
+        .getattr("value")
+        .and_then(|value| value.extract::<String>())
+    {
+        meta.metadata
+            .insert("spiraltorch.entrypoint_value".to_string(), value);
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (plugin, *, replace=false))]
+fn register_python_plugin(py: Python<'_>, plugin: PyObject, replace: bool) -> PyResult<String> {
+    let metadata = {
+        let plugin_any = plugin.bind(py);
+        plugin_metadata_from_py(&plugin_any)?
+    };
+    register_python_plugin_from_metadata(py, plugin, metadata, replace)
 }
 
 #[pyfunction]
@@ -1001,11 +1085,7 @@ fn file_stem_module_name(name: &str) -> String {
     if out.is_empty() {
         out.push_str("plugin");
     }
-    if out
-        .chars()
-        .next()
-        .is_some_and(|ch| ch.is_ascii_digit())
-    {
+    if out.chars().next().is_some_and(|ch| ch.is_ascii_digit()) {
         out.insert(0, '_');
     }
     out
@@ -1046,7 +1126,10 @@ fn collect_python_files(path: &Path, recursive: bool) -> PyResult<Vec<PathBuf>> 
 
     fn visit(dir: &Path, recursive: bool, out: &mut Vec<PathBuf>) -> PyResult<()> {
         let entries = std::fs::read_dir(dir).map_err(|err| {
-            PyValueError::new_err(format!("failed to read directory '{}': {err}", dir.display()))
+            PyValueError::new_err(format!(
+                "failed to read directory '{}': {err}",
+                dir.display()
+            ))
         })?;
         for entry in entries {
             let entry = entry.map_err(|err| {
@@ -1141,11 +1224,9 @@ fn load_module_from_file<'py>(
             .call1((source, path_string, "exec"))?;
         let module_dict = module.getattr("__dict__")?;
         let module_dict_obj = module_dict.to_object(py);
-        builtins.getattr("exec")?.call1((
-            code,
-            module_dict_obj.clone_ref(py),
-            module_dict_obj,
-        ))?;
+        builtins
+            .getattr("exec")?
+            .call1((code, module_dict_obj.clone_ref(py), module_dict_obj))?;
     } else {
         let loader = spec.getattr("loader")?;
         if loader.is_none() {
@@ -1183,11 +1264,7 @@ fn collect_plugins_from_module<'py>(
     module: &Bound<'py, PyAny>,
     instantiate: bool,
 ) -> PyResult<Vec<Bound<'py, PyAny>>> {
-    let candidates = [
-        "__spiraltorch_plugins__",
-        "spiraltorch_plugins",
-        "plugins",
-    ];
+    let candidates = ["__spiraltorch_plugins__", "spiraltorch_plugins", "plugins"];
     for name in candidates {
         if let Ok(value) = module.getattr(name) {
             if value.is_none() {
@@ -1451,7 +1528,12 @@ fn has_listeners(event_type: &str) -> PyResult<bool> {
 
 #[pyfunction]
 #[pyo3(signature = (group="spiraltorch.plugins", *, instantiate=true, replace=false))]
-fn load_entrypoints(py: Python<'_>, group: &str, instantiate: bool, replace: bool) -> PyResult<Vec<String>> {
+fn load_entrypoints(
+    py: Python<'_>,
+    group: &str,
+    instantiate: bool,
+    replace: bool,
+) -> PyResult<Vec<String>> {
     init_plugin_system().map_err(tensor_err_to_py)?;
 
     let importlib_metadata = PyModule::import_bound(py, "importlib.metadata")?;
@@ -1498,7 +1580,10 @@ fn load_entrypoints(py: Python<'_>, group: &str, instantiate: bool, replace: boo
         } else {
             loaded
         };
-        let plugin_id = register_python_plugin(py, plugin_obj.unbind(), replace)?;
+        let mut metadata = plugin_metadata_from_py(&plugin_obj)?;
+        annotate_entrypoint_metadata(&mut metadata, group, &item);
+        let plugin_id =
+            register_python_plugin_from_metadata(py, plugin_obj.unbind(), metadata, replace)?;
         out.push(plugin_id);
     }
 
@@ -1582,7 +1667,10 @@ fn load_path(
                 continue;
             }
             for plugin in plugins {
-                let plugin_id = register_python_plugin(py, plugin.unbind(), replace)?;
+                let mut metadata = plugin_metadata_from_py(&plugin)?;
+                annotate_path_metadata(&mut metadata, &file_path, &module_name);
+                let plugin_id =
+                    register_python_plugin_from_metadata(py, plugin.unbind(), metadata, replace)?;
                 ids.push(plugin_id);
             }
         }
@@ -1616,7 +1704,10 @@ fn reload_path(
 
 pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     let module = PyModule::new_bound(py, "plugin")?;
-    module.add("__doc__", "SpiralTorch plugin registry + event observability")?;
+    module.add(
+        "__doc__",
+        "SpiralTorch plugin registry + event observability",
+    )?;
     module.add_class::<PyPluginQueue>()?;
     module.add_class::<PyPluginEventRecorder>()?;
     module.add_class::<PyPluginEventJsonlWriter>()?;

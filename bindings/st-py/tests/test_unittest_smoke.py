@@ -181,6 +181,14 @@ class SpiralTorchSmokeTest(unittest.TestCase):
             loaded = st.plugin.load_path(tmp, recursive=False, strict=True)
             self.assertIn(plugin_id, loaded)
 
+            meta = st.plugin.plugin_metadata(plugin_id)
+            self.assertIsInstance(meta, dict)
+            self.assertIsInstance(meta.get("metadata"), dict)
+            extra = meta["metadata"]
+            self.assertEqual(extra.get("spiraltorch.source"), "path")
+            self.assertEqual(Path(extra["spiraltorch.source_path"]).resolve(), Path(plugin_path).resolve())
+            self.assertTrue(str(extra["spiraltorch.source_module"]).startswith("spiraltorch_path_plugin_"))
+
             plugin = st.plugin.get_service(f"{plugin_id}.instance")
             self.assertIsNotNone(plugin)
 
@@ -277,6 +285,11 @@ class SpiralTorchSmokeTest(unittest.TestCase):
                 meta = st.plugin.plugin_metadata(plugin_id)
                 self.assertIsInstance(meta, dict)
                 self.assertEqual(meta["version"], "0.0.1")
+                self.assertIsInstance(meta.get("metadata"), dict)
+                extra = meta["metadata"]
+                self.assertEqual(extra.get("spiraltorch.source"), "path")
+                self.assertEqual(Path(extra["spiraltorch.source_path"]).resolve(), Path(plugin_path).resolve())
+                self.assertTrue(str(extra["spiraltorch.source_module"]).startswith("spiraltorch_path_plugin_"))
 
                 st.plugin.publish("ReloadDemo", {"x": 1})
                 self.assertTrue(old_plugin.events)
@@ -291,6 +304,11 @@ class SpiralTorchSmokeTest(unittest.TestCase):
                 meta2 = st.plugin.plugin_metadata(plugin_id)
                 self.assertIsInstance(meta2, dict)
                 self.assertEqual(meta2["version"], "0.0.2")
+                self.assertIsInstance(meta2.get("metadata"), dict)
+                extra2 = meta2["metadata"]
+                self.assertEqual(extra2.get("spiraltorch.source"), "path")
+                self.assertEqual(Path(extra2["spiraltorch.source_path"]).resolve(), Path(plugin_path).resolve())
+                self.assertTrue(str(extra2["spiraltorch.source_module"]).startswith("spiraltorch_path_plugin_"))
 
                 new_plugin = st.plugin.get_service(service_name)
                 self.assertIsNotNone(new_plugin)
@@ -382,6 +400,12 @@ class SpiralTorchSmokeTest(unittest.TestCase):
                 else:
                     self.fail(f"watch_path did not load plugin {plugin_id}")
 
+                self.assertIsInstance(meta, dict)
+                self.assertIsInstance(meta.get("metadata"), dict)
+                extra = meta["metadata"]
+                self.assertEqual(extra.get("spiraltorch.source"), "path")
+                self.assertEqual(Path(extra["spiraltorch.source_path"]).resolve(), Path(plugin_path).resolve())
+
                 with open(plugin_path, "w", encoding="utf-8") as handle:
                     handle.write(plugin_source_v2)
 
@@ -393,6 +417,12 @@ class SpiralTorchSmokeTest(unittest.TestCase):
                     time.sleep(0.02)
                 else:
                     self.fail(f"watch_path did not reload plugin {plugin_id}")
+
+                self.assertIsInstance(meta, dict)
+                self.assertIsInstance(meta.get("metadata"), dict)
+                extra = meta["metadata"]
+                self.assertEqual(extra.get("spiraltorch.source"), "path")
+                self.assertEqual(Path(extra["spiraltorch.source_path"]).resolve(), Path(plugin_path).resolve())
 
                 self.assertFalse(errors)
                 self.assertIsNotNone(st.plugin.get_service(service_name))

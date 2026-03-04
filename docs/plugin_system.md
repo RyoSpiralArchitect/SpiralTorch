@@ -221,6 +221,11 @@ Directory/module discovery helpers:
 - `st.plugin.reload_path(path, ...)` is a convenience wrapper that does `reload=True, replace=True`.
 - `st.plugin.watch_path(path, poll_interval=0.25, ...)` polls a directory/file and hot-reloads changed plugin files.
 
+Loader-provided metadata:
+
+- `load_path(...)` / `reload_path(...)` annotate `PluginMetadata.metadata` with `spiraltorch.source="path"`, plus `spiraltorch.source_path` (absolute `.py` file path) and `spiraltorch.source_module` (generated module name).
+- `load_entrypoints(...)` annotates `PluginMetadata.metadata` with `spiraltorch.source="entrypoint"` and entry point fields (`spiraltorch.entrypoint_group`, `spiraltorch.entrypoint_name`, `spiraltorch.entrypoint_value`) when available.
+
 Plugin discovery conventions for `load_path(...)`:
 
 - A module can expose an iterable of plugin objects via `__spiraltorch_plugins__`, `spiraltorch_plugins`, or `plugins`.
