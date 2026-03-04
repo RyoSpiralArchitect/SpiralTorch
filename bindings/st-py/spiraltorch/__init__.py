@@ -3584,6 +3584,8 @@ def _install_plugin_helpers() -> None:
             instantiate: bool,
             strict: bool,
             poll_interval: float,
+            debounce: float,
+            missing_grace: float,
             module_prefix: str,
             add_sys_path: bool,
             on_error: _Callable[[BaseException, str], None] | None,
@@ -3593,6 +3595,8 @@ def _install_plugin_helpers() -> None:
             self._instantiate = bool(instantiate)
             self._strict = bool(strict)
             self._poll_interval = float(poll_interval)
+            self._debounce = max(0.0, float(debounce))
+            self._missing_grace = max(0.0, float(missing_grace))
             self._module_prefix = str(module_prefix)
             self._add_sys_path = bool(add_sys_path)
             self._on_error = on_error
@@ -3666,6 +3670,10 @@ def _install_plugin_helpers() -> None:
             base = _pathlib.Path(self._path)
             known: dict[str, tuple[int, int]] = {}
             file_plugins: dict[str, _List[str]] = {}
+            pending_reload: dict[str, tuple[tuple[int, int], float]] = {}
+            missing_since: dict[str, float] = {}
+            debounce = max(0.0, self._debounce)
+            missing_grace = max(0.0, self._missing_grace)
 
             def report_error(exc: BaseException, filename: str) -> None:
                 cb = self._on_error
@@ -3707,6 +3715,7 @@ def _install_plugin_helpers() -> None:
 
             # Poll loop
             while not self._stop.is_set():
+                now = _time.time()
                 current_files = list(self._iter_py_files(base, self._recursive))
                 current_known: dict[str, tuple[int, int]] = {}
                 for path in current_files:
@@ -3718,18 +3727,37 @@ def _install_plugin_helpers() -> None:
                 # Unregister plugins whose file disappeared.
                 for filename in list(file_plugins.keys()):
                     if filename in current_known:
+                        missing_since.pop(filename, None)
                         continue
+                    if missing_grace > 0.0:
+                        since = missing_since.get(filename)
+                        if since is None:
+                            missing_since[filename] = now
+                            continue
+                        if now - since < missing_grace:
+                            continue
+                        missing_since.pop(filename, None)
                     for plugin_id in file_plugins.pop(filename, []):
                         try:
                             unregister_plugin(plugin_id)
                         except Exception:
                             pass
                     known.pop(filename, None)
+                    pending_reload.pop(filename, None)
 
                 # Reload plugins when a file changes.
                 for filename, sig in current_known.items():
                     if known.get(filename) == sig:
+                        pending_reload.pop(filename, None)
                         continue
+                    if debounce > 0.0:
+                        pending = pending_reload.get(filename)
+                        if pending is None or pending[0] != sig:
+                            pending_reload[filename] = (sig, now)
+                            continue
+                        if now - pending[1] < debounce:
+                            continue
+                        pending_reload.pop(filename, None)
                     ids = reload_file(filename)
                     if ids is None:
                         continue
@@ -3752,6 +3780,8 @@ def _install_plugin_helpers() -> None:
         instantiate: bool = True,
         strict: bool = False,
         poll_interval: float = 0.25,
+        debounce: float = 0.0,
+        missing_grace: float = 0.0,
         module_prefix: str = "spiraltorch_path_plugin",
         add_sys_path: bool = True,
         on_error: _Callable[[BaseException, str], None] | None = None,
@@ -3764,6 +3794,8 @@ def _install_plugin_helpers() -> None:
             instantiate=instantiate,
             strict=strict,
             poll_interval=poll_interval,
+            debounce=debounce,
+            missing_grace=missing_grace,
             module_prefix=module_prefix,
             add_sys_path=add_sys_path,
             on_error=on_error,

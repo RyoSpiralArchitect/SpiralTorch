@@ -386,6 +386,8 @@ class SpiralTorchSmokeTest(unittest.TestCase):
                     recursive=False,
                     strict=True,
                     poll_interval=0.01,
+                    debounce=0.0,
+                    missing_grace=0.0,
                     on_error=lambda exc, filename: errors.append(
                         (exc.__class__.__name__, f"{filename}: {exc}")
                     ),

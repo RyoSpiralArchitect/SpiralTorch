@@ -4920,6 +4920,8 @@ class _PluginModule(ModuleType):
         instantiate: bool = ...,
         strict: bool = ...,
         poll_interval: float = ...,
+        debounce: float = ...,
+        missing_grace: float = ...,
         module_prefix: str = ...,
         add_sys_path: bool = ...,
         on_error: Callable[[BaseException, str], None] | None = ...,
