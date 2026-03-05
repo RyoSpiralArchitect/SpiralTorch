@@ -228,6 +228,7 @@ Dependency-aware loading:
 
 - `load_path(...)` registers plugins in dependency order when `metadata.dependencies` is present.
 - With `replace=True`, SpiralTorch unregisters matched plugins in reverse dependency order before re-registering.
+- `load_entrypoints(...)` uses the same dependency ordering logic when multiple plugins are discovered in a single call.
 
 Loader-provided metadata:
 

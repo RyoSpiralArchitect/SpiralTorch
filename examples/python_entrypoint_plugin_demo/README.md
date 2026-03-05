@@ -24,3 +24,7 @@ print("loaded:", loaded)
 print("plugins:", st.plugin.list_plugins())
 print("hello:", st.plugin.get_service("demo_entrypoint_plugin.hello"))
 ```
+
+Or run:
+
+- `python run_demo.py`

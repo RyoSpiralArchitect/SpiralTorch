@@ -234,6 +234,111 @@ class SpiralTorchSmokeTest(unittest.TestCase):
             except Exception:
                 pass
 
+    def test_python_plugin_load_entrypoints_dependency_order(self) -> None:
+        import importlib.metadata
+
+        plugin_a_id = f"demo_entry_a_{uuid.uuid4().hex}"
+        plugin_b_id = f"demo_entry_b_{uuid.uuid4().hex}"
+        service_a = f"{plugin_a_id}.value"
+        service_b = f"{plugin_b_id}.seen"
+
+        class _EntryPoint:
+            def __init__(self, name: str, value: str, plugin):
+                self.name = name
+                self.value = value
+                self._plugin = plugin
+
+            def load(self):
+                return self._plugin
+
+        def _make_plugins(version: str):
+            class PluginA:
+                def __init__(self):
+                    self.unloaded = False
+
+                def metadata(self) -> dict:
+                    return {"id": plugin_a_id, "version": version}
+
+                def on_load(self) -> None:
+                    st.plugin.register_service(service_a, version)
+                    st.plugin.register_service(f"{plugin_a_id}.instance", self)
+
+                def on_unload(self) -> None:
+                    self.unloaded = True
+
+            class PluginB:
+                def __init__(self):
+                    self.unloaded = False
+
+                def metadata(self) -> dict:
+                    return {
+                        "id": plugin_b_id,
+                        "version": version,
+                        "dependencies": {plugin_a_id: ">=0"},
+                    }
+
+                def on_load(self) -> None:
+                    st.plugin.register_service(service_b, st.plugin.get_service(service_a))
+                    st.plugin.register_service(f"{plugin_b_id}.instance", self)
+
+                def on_unload(self) -> None:
+                    self.unloaded = True
+
+            return PluginA(), PluginB()
+
+        original = importlib.metadata.entry_points
+        state = {"version": "0.0.1"}
+
+        def fake_entry_points():
+            plugin_a, plugin_b = _make_plugins(state["version"])
+            group = "spiraltorch.plugins"
+            return {
+                group: [
+                    _EntryPoint("demo_b", f"demo_b={state['version']}", plugin_b),
+                    _EntryPoint("demo_a", f"demo_a={state['version']}", plugin_a),
+                ]
+            }
+
+        try:
+            importlib.metadata.entry_points = fake_entry_points  # type: ignore[assignment]
+
+            loaded = st.plugin.load_entrypoints(replace=True)
+            self.assertIn(plugin_a_id, loaded)
+            self.assertIn(plugin_b_id, loaded)
+            self.assertLess(loaded.index(plugin_a_id), loaded.index(plugin_b_id))
+            self.assertEqual(st.plugin.get_service(service_b), "0.0.1")
+
+            meta = st.plugin.plugin_metadata(plugin_a_id)
+            self.assertIsInstance(meta, dict)
+            extra = meta.get("metadata", {})
+            self.assertEqual(extra.get("spiraltorch.source"), "entrypoint")
+            self.assertEqual(extra.get("spiraltorch.entrypoint_group"), "spiraltorch.plugins")
+
+            old_a = st.plugin.get_service(f"{plugin_a_id}.instance")
+            old_b = st.plugin.get_service(f"{plugin_b_id}.instance")
+            self.assertIsNotNone(old_a)
+            self.assertIsNotNone(old_b)
+
+            state["version"] = "0.0.2"
+            loaded2 = st.plugin.load_entrypoints(replace=True)
+            self.assertIn(plugin_a_id, loaded2)
+            self.assertIn(plugin_b_id, loaded2)
+            self.assertEqual(st.plugin.get_service(service_b), "0.0.2")
+
+            new_a = st.plugin.get_service(f"{plugin_a_id}.instance")
+            new_b = st.plugin.get_service(f"{plugin_b_id}.instance")
+            self.assertIsNot(old_a, new_a)
+            self.assertIsNot(old_b, new_b)
+            self.assertTrue(getattr(old_a, "unloaded", False))
+            self.assertTrue(getattr(old_b, "unloaded", False))
+        finally:
+            importlib.metadata.entry_points = original  # type: ignore[assignment]
+            for plugin_id in (plugin_b_id, plugin_a_id):
+                try:
+                    st.plugin.unregister_plugin(plugin_id)
+                except Exception:
+                    pass
+
     def test_python_plugin_reload_path(self) -> None:
         plugin_id = f"demo_reload_path_plugin_{uuid.uuid4().hex}"
         service_name = f"{plugin_id}.instance"
