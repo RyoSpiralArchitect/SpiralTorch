@@ -227,6 +227,8 @@ Directory/module discovery helpers:
 - `st.plugin.unregister_safe(plugin_id, strict=False)` unregisters a plugin plus any registered plugins that depend on it (to avoid leaving broken dependents loaded).
 - `st.plugin.dependency_graph(internal_only=False)` returns a dependency adjacency list for the currently registered plugins.
 - `st.plugin.explain(plugin_id)` returns a structured summary of a plugin's dependencies/dependents.
+- `st.plugin.dependency_dot(internal_only=False, show_missing=True, rankdir="LR")` renders the dependency graph as a Graphviz DOT string.
+- `st.plugin.validate_dependencies(internal_only=False, strict=False)` reports missing dependencies and dependency cycles.
 - `st.plugin.clear_services(prefix=None, strict=False)` unregisters services from the plugin context (optionally filtering by name prefix).
 - `st.plugin.clear_config(prefix=None, strict=False)` removes config keys from the plugin context (optionally filtering by key prefix).
 - `st.plugin.clear_listeners(event_type=None, strict=False)` unsubscribes event listeners from the plugin event bus (optionally filtering by event type).

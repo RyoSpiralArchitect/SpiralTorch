@@ -4035,6 +4035,144 @@ def _install_plugin_helpers() -> None:
     plugin_module.explain = explain
     _register_module_export(plugin_module, "explain")
 
+    def dependency_dot(
+        *,
+        internal_only: bool = False,
+        show_missing: bool = True,
+        rankdir: str = "LR",
+    ) -> str:
+        """Render the current plugin dependency graph as Graphviz DOT."""
+
+        internal_only = bool(internal_only)
+        show_missing = bool(show_missing)
+        if not isinstance(rankdir, str):
+            raise TypeError("rankdir must be a string")
+        rankdir = rankdir.strip() or "LR"
+        if rankdir not in ("LR", "RL", "TB", "BT"):
+            raise ValueError("rankdir must be one of LR, RL, TB, BT")
+
+        graph = dependency_graph(internal_only=internal_only)
+        plugins = sorted(graph.keys())
+        plugin_set = set(plugins)
+
+        missing_nodes: set[str] = set()
+        if show_missing and not internal_only:
+            for deps in graph.values():
+                for dep in deps:
+                    if dep not in plugin_set:
+                        missing_nodes.add(dep)
+
+        def _q(value: str) -> str:
+            value = value.replace("\\", "\\\\").replace('"', '\\"')
+            value = value.replace("\r", "").replace("\n", "\\n")
+            return f'"{value}"'
+
+        nodes = sorted(set(plugins) | missing_nodes)
+        lines: _List[str] = [
+            "digraph SpiralTorchPluginDeps {",
+            f"  rankdir={_q(rankdir)};",
+        ]
+        for node in nodes:
+            if node in missing_nodes:
+                lines.append(f"  {_q(node)} [style=dashed,color={_q('gray50')}];")
+            else:
+                lines.append(f"  {_q(node)};")
+
+        for pid in plugins:
+            for dep in graph.get(pid, []):
+                if not show_missing and dep not in plugin_set:
+                    continue
+                lines.append(f"  {_q(pid)} -> {_q(dep)};")
+
+        lines.append("}")
+        return "\n".join(lines) + "\n"
+
+    dependency_dot.__module__ = plugin_module.__name__
+    plugin_module.dependency_dot = dependency_dot
+    _register_module_export(plugin_module, "dependency_dot")
+
+    def validate_dependencies(*, internal_only: bool = False, strict: bool = False) -> _Dict[str, _Any]:
+        """Validate plugin dependency metadata for missing dependencies and cycles."""
+
+        internal_only = bool(internal_only)
+        strict = bool(strict)
+
+        graph = dependency_graph(internal_only=False)
+        plugins = sorted(graph.keys())
+        plugin_set = set(plugins)
+
+        missing: dict[str, _List[str]] = {}
+        internal_graph: dict[str, _List[str]] = {}
+        for pid in plugins:
+            deps = graph.get(pid, [])
+            missing_deps = sorted(dep for dep in deps if dep not in plugin_set)
+            if missing_deps and not internal_only:
+                missing[pid] = missing_deps
+            internal_graph[pid] = [dep for dep in deps if dep in plugin_set]
+
+        state: dict[str, int] = {pid: 0 for pid in plugins}
+        stack: _List[str] = []
+        positions: dict[str, int] = {}
+        cycle_set: set[tuple[str, ...]] = set()
+        cycles: _List[_List[str]] = []
+
+        def _canonical_cycle(nodes: _List[str]) -> tuple[str, ...]:
+            if not nodes:
+                return ()
+            best: tuple[str, ...] | None = None
+            length = len(nodes)
+            for idx in range(length):
+                rot = tuple(nodes[idx:] + nodes[:idx])
+                if best is None or rot < best:
+                    best = rot
+            return best or tuple(nodes)
+
+        def _dfs(node: str) -> None:
+            state[node] = 1
+            positions[node] = len(stack)
+            stack.append(node)
+
+            for dep in internal_graph.get(node, []):
+                if dep not in state:
+                    continue
+                dep_state = state[dep]
+                if dep_state == 0:
+                    _dfs(dep)
+                elif dep_state == 1:
+                    start = positions.get(dep)
+                    if start is None:
+                        continue
+                    cycle_nodes = stack[start:]
+                    canon = _canonical_cycle(cycle_nodes)
+                    if canon and canon not in cycle_set:
+                        cycle_set.add(canon)
+                        cycles.append(list(canon))
+
+            stack.pop()
+            positions.pop(node, None)
+            state[node] = 2
+
+        for pid in plugins:
+            if state[pid] == 0:
+                _dfs(pid)
+
+        cycles.sort(key=lambda item: (len(item), item))
+
+        ok = not missing and not cycles
+        result: _Dict[str, _Any] = {"ok": ok, "missing": missing, "cycles": cycles}
+        if strict and not ok:
+            parts: _List[str] = []
+            if missing:
+                parts.append(f"missing dependencies for {len(missing)} plugin(s)")
+            if cycles:
+                parts.append(f"cycles detected ({len(cycles)})")
+            raise ValueError("dependency validation failed: " + ", ".join(parts))
+        return result
+
+    validate_dependencies.__module__ = plugin_module.__name__
+    plugin_module.validate_dependencies = validate_dependencies
+    _register_module_export(plugin_module, "validate_dependencies")
+
     list_services = _resolve_rs_attr("plugin.list_services")
     unregister_service = _resolve_rs_attr("plugin.unregister_service")
     if list_services is not None and unregister_service is not None:

@@ -537,8 +537,106 @@ class SpiralTorchSmokeTest(unittest.TestCase):
             self.assertEqual(info_b.get("dependencies"), [plugin_a_id])
             self.assertEqual(info_b.get("direct_dependents"), [plugin_c_id])
             self.assertEqual(set(info_b.get("transitive_dependents", [])), {plugin_c_id})
+
+            dot = st.plugin.dependency_dot(internal_only=True)
+            self.assertIn("digraph SpiralTorchPluginDeps", dot)
+            self.assertIn(f"\"{plugin_b_id}\" -> \"{plugin_a_id}\"", dot)
+            self.assertIn(f"\"{plugin_c_id}\" -> \"{plugin_b_id}\"", dot)
+
+            with self.assertRaises(ValueError):
+                st.plugin.dependency_dot(rankdir="DIAGONAL")  # type: ignore[arg-type]
+
+            summary = st.plugin.validate_dependencies(strict=True)
+            self.assertTrue(summary.get("ok"))
+            self.assertEqual(summary.get("missing"), {})
+            self.assertEqual(summary.get("cycles"), [])
         finally:
             for plugin_id in (plugin_c_id, plugin_b_id, plugin_a_id):
+                try:
+                    st.plugin.unregister_plugin(plugin_id)
+                except Exception:
+                    pass
+
+    def test_python_plugin_validate_dependencies_missing(self) -> None:
+        dep_id = f"demo_dep_missing_dep_{uuid.uuid4().hex}"
+        plugin_id = f"demo_dep_missing_plugin_{uuid.uuid4().hex}"
+
+        class DepPlugin:
+            def metadata(self) -> dict:
+                return {
+                    "id": dep_id,
+                    "version": "0.0.1",
+                }
+
+        class DemoPlugin:
+            def metadata(self) -> dict:
+                return {
+                    "id": plugin_id,
+                    "version": "0.0.1",
+                    "dependencies": {dep_id: ">=0"},
+                }
+
+        try:
+            st.plugin.register_python_plugin(DepPlugin(), replace=True)
+            st.plugin.register_python_plugin(DemoPlugin(), replace=True)
+            st.plugin.unregister_plugin(dep_id)
+
+            summary = st.plugin.validate_dependencies()
+            self.assertFalse(summary.get("ok"))
+            self.assertEqual(summary.get("missing", {}).get(plugin_id), [dep_id])
+
+            with self.assertRaises(ValueError):
+                st.plugin.validate_dependencies(strict=True)
+        finally:
+            for pid in (plugin_id, dep_id):
+                try:
+                    st.plugin.unregister_plugin(pid)
+                except Exception:
+                    pass
+
+    def test_python_plugin_validate_dependencies_cycle(self) -> None:
+        plugin_a_id = f"demo_dep_cycle_a_{uuid.uuid4().hex}"
+        plugin_b_id = f"demo_dep_cycle_b_{uuid.uuid4().hex}"
+
+        class PluginA:
+            def metadata(self) -> dict:
+                return {
+                    "id": plugin_a_id,
+                    "version": "0.0.1",
+                    "dependencies": {plugin_b_id: ">=0"},
+                }
+
+        class PluginB0:
+            def metadata(self) -> dict:
+                return {
+                    "id": plugin_b_id,
+                    "version": "0.0.1",
+                }
+
+        class PluginB1:
+            def metadata(self) -> dict:
+                return {
+                    "id": plugin_b_id,
+                    "version": "0.0.2",
+                    "dependencies": {plugin_a_id: ">=0"},
+                }
+
+        try:
+            st.plugin.register_python_plugin(PluginB0(), replace=True)
+            st.plugin.register_python_plugin(PluginA(), replace=True)
+            st.plugin.register_python_plugin(PluginB1(), replace=True)
+
+            summary = st.plugin.validate_dependencies()
+            self.assertFalse(summary.get("ok"))
+            self.assertEqual(summary.get("missing"), {})
+            cycles = summary.get("cycles", [])
+            self.assertTrue(cycles)
+            self.assertTrue(any(set(cycle) == {plugin_a_id, plugin_b_id} for cycle in cycles))
+
+            with self.assertRaises(ValueError):
+                st.plugin.validate_dependencies(strict=True)
+        finally:
+            for plugin_id in (plugin_b_id, plugin_a_id):
                 try:
                     st.plugin.unregister_plugin(plugin_id)
                 except Exception:
