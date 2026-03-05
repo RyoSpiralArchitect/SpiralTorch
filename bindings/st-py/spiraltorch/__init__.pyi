@@ -4922,10 +4922,19 @@ class _PluginModule(ModuleType):
         poll_interval: float = ...,
         debounce: float = ...,
         missing_grace: float = ...,
+        unload_on_stop: bool = ...,
         module_prefix: str = ...,
         add_sys_path: bool = ...,
         on_error: Callable[[BaseException, str], None] | None = ...,
     ) -> "_PluginModule.PluginPathWatcher": ...
+
+    def unload_path(
+        self,
+        path: Any,
+        *,
+        recursive: bool = ...,
+        strict: bool = ...,
+    ) -> List[str]: ...
 
 plugin: _PluginModule
 

@@ -200,6 +200,40 @@ class SpiralTorchSmokeTest(unittest.TestCase):
             st.plugin.unregister_plugin(plugin_id)
             self.assertNotIn(plugin_id, st.plugin.list_plugins())
 
+    def test_python_plugin_unload_path(self) -> None:
+        plugin_id = f"demo_unload_path_{uuid.uuid4().hex}"
+        plugin_source = textwrap.dedent(
+            f"""
+            class DemoUnloadPlugin:
+                def metadata(self) -> dict:
+                    return {{
+                        "id": "{plugin_id}",
+                        "version": "0.0.1",
+                    }}
+
+            plugin = DemoUnloadPlugin()
+            """
+        )
+
+        try:
+            with _temp_dir("tmp_unload") as tmp:
+                plugin_path = f"{tmp}/unload_plugin.py"
+                with open(plugin_path, "w", encoding="utf-8") as handle:
+                    handle.write(plugin_source)
+
+                loaded = st.plugin.load_path(plugin_path, recursive=False, strict=True)
+                self.assertIn(plugin_id, loaded)
+                self.assertIn(plugin_id, st.plugin.list_plugins())
+
+                unloaded = st.plugin.unload_path(plugin_path, strict=True)
+                self.assertIn(plugin_id, unloaded)
+                self.assertNotIn(plugin_id, st.plugin.list_plugins())
+        finally:
+            try:
+                st.plugin.unregister_plugin(plugin_id)
+            except Exception:
+                pass
+
     def test_python_plugin_reload_path(self) -> None:
         plugin_id = f"demo_reload_path_plugin_{uuid.uuid4().hex}"
         service_name = f"{plugin_id}.instance"
@@ -523,6 +557,60 @@ class SpiralTorchSmokeTest(unittest.TestCase):
 
                 self.assertFalse(errors)
                 self.assertIsNotNone(st.plugin.get_service(service_name))
+        finally:
+            if watcher is not None:
+                try:
+                    watcher.stop(timeout=1.0)
+                except Exception:
+                    pass
+            try:
+                st.plugin.unregister_plugin(plugin_id)
+            except Exception:
+                pass
+
+    def test_python_plugin_watch_path_unload_on_stop(self) -> None:
+        plugin_id = f"demo_watch_unload_{uuid.uuid4().hex}"
+        plugin_source = textwrap.dedent(
+            f"""
+            class WatchUnloadPlugin:
+                def metadata(self) -> dict:
+                    return {{
+                        "id": "{plugin_id}",
+                        "version": "0.0.1",
+                    }}
+
+            plugin = WatchUnloadPlugin()
+            """
+        )
+
+        watcher = None
+        try:
+            with _temp_dir("tmp_watch_unload") as tmp:
+                plugin_path = f"{tmp}/watch_unload.py"
+                with open(plugin_path, "w", encoding="utf-8") as handle:
+                    handle.write(plugin_source)
+
+                watcher = st.plugin.watch_path(
+                    plugin_path,
+                    recursive=False,
+                    strict=True,
+                    poll_interval=0.01,
+                    debounce=0.0,
+                    missing_grace=0.0,
+                    unload_on_stop=True,
+                )
+
+                deadline = time.time() + 2.0
+                while time.time() < deadline:
+                    if plugin_id in st.plugin.list_plugins():
+                        break
+                    time.sleep(0.02)
+                else:
+                    self.fail(f"watch_path did not load plugin {plugin_id}")
+
+                watcher.stop(timeout=1.0)
+                watcher = None
+                self.assertNotIn(plugin_id, st.plugin.list_plugins())
         finally:
             if watcher is not None:
                 try:

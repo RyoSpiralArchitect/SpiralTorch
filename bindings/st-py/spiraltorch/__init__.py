@@ -3570,9 +3570,123 @@ def _install_plugin_helpers() -> None:
     plugin_module.listen_stream = listen_stream
     _register_module_export(plugin_module, "listen_stream")
 
-    reload_path = _resolve_rs_attr("plugin.reload_path")
     unregister_plugin = _resolve_rs_attr("plugin.unregister_plugin")
-    if reload_path is None or unregister_plugin is None:
+    list_plugins = _resolve_rs_attr("plugin.list_plugins")
+    plugin_metadata = _resolve_rs_attr("plugin.plugin_metadata")
+    if unregister_plugin is None or list_plugins is None or plugin_metadata is None:
+        return
+
+    def unload_path(
+        path: _Any,
+        *,
+        recursive: bool = True,
+        strict: bool = False,
+    ) -> _List[str]:
+        """Unload plugins that were loaded from `load_path(...)` under a filesystem path."""
+
+        base = _pathlib.Path(_os.fspath(path))
+        base_is_file = base.is_file() if base.exists() else base.suffix.lower() == ".py"
+        try:
+            base = base.resolve()
+        except Exception:
+            pass
+
+        matches: _List[str] = []
+        deps_by_id: dict[str, set[str]] = {}
+
+        for plugin_id in list_plugins():
+            meta = plugin_metadata(plugin_id)
+            if not isinstance(meta, dict):
+                continue
+            extra = meta.get("metadata")
+            if not isinstance(extra, dict):
+                continue
+            if extra.get("spiraltorch.source") != "path":
+                continue
+            source_path = extra.get("spiraltorch.source_path")
+            if not isinstance(source_path, str) or not source_path:
+                continue
+
+            source = _pathlib.Path(source_path)
+            try:
+                source = source.resolve()
+            except Exception:
+                pass
+
+            matched = False
+            if base_is_file:
+                matched = source == base
+            else:
+                if recursive:
+                    try:
+                        matched = source.is_relative_to(base)
+                    except Exception:
+                        matched = False
+                else:
+                    matched = source.parent == base
+
+            if not matched:
+                continue
+
+            matches.append(plugin_id)
+            deps = meta.get("dependencies", {})
+            if isinstance(deps, dict):
+                deps_by_id[plugin_id] = {str(k) for k in deps.keys()}
+            else:
+                deps_by_id[plugin_id] = set()
+
+        if not matches:
+            if strict:
+                raise ValueError(f"no path plugins matched '{base}'")
+            return []
+
+        match_set = set(matches)
+        internal_deps: dict[str, set[str]] = {
+            plugin_id: {dep for dep in deps_by_id.get(plugin_id, set()) if dep in match_set}
+            for plugin_id in matches
+        }
+
+        indegree: dict[str, int] = {plugin_id: len(deps) for plugin_id, deps in internal_deps.items()}
+        dependents: dict[str, _List[str]] = {plugin_id: [] for plugin_id in matches}
+        for plugin_id, deps in internal_deps.items():
+            for dep in deps:
+                dependents.setdefault(dep, []).append(plugin_id)
+
+        queue = [plugin_id for plugin_id in matches if indegree.get(plugin_id, 0) == 0]
+        order: _List[str] = []
+        idx = 0
+        while idx < len(queue):
+            plugin_id = queue[idx]
+            idx += 1
+            order.append(plugin_id)
+            for child in dependents.get(plugin_id, ()):
+                indegree[child] = indegree.get(child, 0) - 1
+                if indegree[child] == 0:
+                    queue.append(child)
+
+        if len(order) != len(matches):
+            if strict:
+                remaining = sorted(plugin_id for plugin_id in matches if indegree.get(plugin_id, 0) > 0)
+                raise ValueError(f"cyclic dependencies among plugins: {', '.join(remaining)}")
+            order = list(matches)
+
+        unloaded: _List[str] = []
+        for plugin_id in reversed(order):
+            try:
+                unregister_plugin(plugin_id)
+            except Exception:
+                if strict:
+                    raise
+                continue
+            unloaded.append(plugin_id)
+        return unloaded
+
+    unload_path.__module__ = plugin_module.__name__
+    plugin_module.unload_path = unload_path
+    _register_module_export(plugin_module, "unload_path")
+
+    reload_path = _resolve_rs_attr("plugin.reload_path")
+    if reload_path is None:
         return
 
     class PluginPathWatcher:
@@ -3586,6 +3700,7 @@ def _install_plugin_helpers() -> None:
             poll_interval: float,
             debounce: float,
             missing_grace: float,
+            unload_on_stop: bool,
             module_prefix: str,
             add_sys_path: bool,
             on_error: _Callable[[BaseException, str], None] | None,
@@ -3597,6 +3712,7 @@ def _install_plugin_helpers() -> None:
             self._poll_interval = float(poll_interval)
             self._debounce = max(0.0, float(debounce))
             self._missing_grace = max(0.0, float(missing_grace))
+            self._unload_on_stop = bool(unload_on_stop)
             self._module_prefix = str(module_prefix)
             self._add_sys_path = bool(add_sys_path)
             self._on_error = on_error
@@ -3714,64 +3830,111 @@ def _install_plugin_helpers() -> None:
                     file_plugins[filename] = ids
 
             # Poll loop
-            while not self._stop.is_set():
-                now = _time.time()
-                current_files = list(self._iter_py_files(base, self._recursive))
-                current_known: dict[str, tuple[int, int]] = {}
-                for path in current_files:
-                    sig = self._stat_signature(path)
-                    if sig is None:
-                        continue
-                    current_known[str(path)] = sig
+            try:
+                while not self._stop.is_set():
+                    now = _time.time()
+                    current_files = list(self._iter_py_files(base, self._recursive))
+                    current_known: dict[str, tuple[int, int]] = {}
+                    for path in current_files:
+                        sig = self._stat_signature(path)
+                        if sig is None:
+                            continue
+                        current_known[str(path)] = sig
 
-                # Unregister plugins whose file disappeared.
-                for filename in list(file_plugins.keys()):
-                    if filename in current_known:
-                        missing_since.pop(filename, None)
-                        continue
-                    if missing_grace > 0.0:
-                        since = missing_since.get(filename)
-                        if since is None:
-                            missing_since[filename] = now
+                    # Unregister plugins whose file disappeared.
+                    for filename in list(file_plugins.keys()):
+                        if filename in current_known:
+                            missing_since.pop(filename, None)
                             continue
-                        if now - since < missing_grace:
+                        if missing_grace > 0.0:
+                            since = missing_since.get(filename)
+                            if since is None:
+                                missing_since[filename] = now
+                                continue
+                            if now - since < missing_grace:
+                                continue
+                            missing_since.pop(filename, None)
+                        for plugin_id in file_plugins.pop(filename, []):
+                            try:
+                                unregister_plugin(plugin_id)
+                            except Exception:
+                                pass
+                        known.pop(filename, None)
+                        pending_reload.pop(filename, None)
+
+                    # Reload plugins when a file changes.
+                    for filename, sig in current_known.items():
+                        if known.get(filename) == sig:
+                            pending_reload.pop(filename, None)
                             continue
-                        missing_since.pop(filename, None)
-                    for plugin_id in file_plugins.pop(filename, []):
+                        if debounce > 0.0:
+                            pending = pending_reload.get(filename)
+                            if pending is None or pending[0] != sig:
+                                pending_reload[filename] = (sig, now)
+                                continue
+                            if now - pending[1] < debounce:
+                                continue
+                            pending_reload.pop(filename, None)
+                        ids = reload_file(filename)
+                        if ids is None:
+                            continue
+                        previous_ids = set(file_plugins.get(filename, []))
+                        next_ids = set(ids)
+                        file_plugins[filename] = ids
+                        known[filename] = sig
+                        for removed_id in previous_ids - next_ids:
+                            try:
+                                unregister_plugin(removed_id)
+                            except Exception:
+                                pass
+
+                    _time.sleep(max(0.01, self._poll_interval))
+            finally:
+                if self._unload_on_stop:
+                    ids = set()
+                    for values in file_plugins.values():
+                        ids.update(values)
+
+                    ids = list(ids)
+                    id_set = set(ids)
+                    deps_by_id: dict[str, set[str]] = {}
+                    for plugin_id in ids:
+                        meta = plugin_metadata(plugin_id)
+                        if not isinstance(meta, dict):
+                            deps_by_id[plugin_id] = set()
+                            continue
+                        deps = meta.get("dependencies", {})
+                        if not isinstance(deps, dict):
+                            deps_by_id[plugin_id] = set()
+                            continue
+                        deps_by_id[plugin_id] = {str(k) for k in deps.keys() if str(k) in id_set}
+
+                    indegree = {plugin_id: len(deps) for plugin_id, deps in deps_by_id.items()}
+                    dependents: dict[str, _List[str]] = {plugin_id: [] for plugin_id in ids}
+                    for plugin_id, deps in deps_by_id.items():
+                        for dep in deps:
+                            dependents.setdefault(dep, []).append(plugin_id)
+
+                    queue = [plugin_id for plugin_id in ids if indegree.get(plugin_id, 0) == 0]
+                    order: _List[str] = []
+                    i = 0
+                    while i < len(queue):
+                        plugin_id = queue[i]
+                        i += 1
+                        order.append(plugin_id)
+                        for child in dependents.get(plugin_id, ()):
+                            indegree[child] = indegree.get(child, 0) - 1
+                            if indegree[child] == 0:
+                                queue.append(child)
+
+                    if len(order) != len(ids):
+                        order = list(ids)
+
+                    for plugin_id in reversed(order):
                         try:
                             unregister_plugin(plugin_id)
                         except Exception:
                             pass
-                    known.pop(filename, None)
-                    pending_reload.pop(filename, None)
-
-                # Reload plugins when a file changes.
-                for filename, sig in current_known.items():
-                    if known.get(filename) == sig:
-                        pending_reload.pop(filename, None)
-                        continue
-                    if debounce > 0.0:
-                        pending = pending_reload.get(filename)
-                        if pending is None or pending[0] != sig:
-                            pending_reload[filename] = (sig, now)
-                            continue
-                        if now - pending[1] < debounce:
-                            continue
-                        pending_reload.pop(filename, None)
-                    ids = reload_file(filename)
-                    if ids is None:
-                        continue
-                    previous_ids = set(file_plugins.get(filename, []))
-                    next_ids = set(ids)
-                    file_plugins[filename] = ids
-                    known[filename] = sig
-                    for removed_id in previous_ids - next_ids:
-                        try:
-                            unregister_plugin(removed_id)
-                        except Exception:
-                            pass
-
-                _time.sleep(max(0.01, self._poll_interval))
 
     def watch_path(
         path: _Any,
@@ -3782,6 +3945,7 @@ def _install_plugin_helpers() -> None:
         poll_interval: float = 0.25,
         debounce: float = 0.0,
         missing_grace: float = 0.0,
+        unload_on_stop: bool = False,
         module_prefix: str = "spiraltorch_path_plugin",
         add_sys_path: bool = True,
         on_error: _Callable[[BaseException, str], None] | None = None,
@@ -3796,6 +3960,7 @@ def _install_plugin_helpers() -> None:
             poll_interval=poll_interval,
             debounce=debounce,
             missing_grace=missing_grace,
+            unload_on_stop=unload_on_stop,
             module_prefix=module_prefix,
             add_sys_path=add_sys_path,
             on_error=on_error,
