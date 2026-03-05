@@ -49,6 +49,50 @@ impl PluginContext {
         self.config.lock().unwrap().insert(key.into(), value.into());
     }
 
+    /// Unset a configuration value.
+    ///
+    /// Returns `true` when a key existed and was removed.
+    pub fn unset_config(&self, key: &str) -> bool {
+        self.config.lock().unwrap().remove(key).is_some()
+    }
+
+    /// List all configuration key/value pairs.
+    ///
+    /// The returned list is sorted by key for deterministic iteration.
+    pub fn list_config(&self) -> Vec<(String, String)> {
+        let mut items: Vec<(String, String)> = self
+            .config
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        items.sort_by(|a, b| a.0.cmp(&b.0));
+        items
+    }
+
+    /// Clear configuration values, optionally filtering by key prefix.
+    ///
+    /// Returns a sorted list of keys that were removed.
+    pub fn clear_config(&self, prefix: Option<&str>) -> Vec<String> {
+        let mut config = self.config.lock().unwrap();
+        let mut keys: Vec<String> = config.keys().cloned().collect();
+        keys.sort();
+
+        let mut removed = Vec::new();
+        for key in keys {
+            if let Some(prefix) = prefix {
+                if !key.starts_with(prefix) {
+                    continue;
+                }
+            }
+            if config.remove(&key).is_some() {
+                removed.push(key);
+            }
+        }
+        removed
+    }
+
     /// Subscribe to an event type.
     pub fn subscribe(&self, event_type: impl Into<String>, listener: EventListener) {
         self.event_bus.subscribe(event_type, listener);
@@ -105,8 +149,29 @@ mod tests {
         let ctx = PluginContext::new(PluginEventBus::new());
         
         ctx.set_config("key1", "value1");
+        ctx.set_config("prefix.a", "1");
+        ctx.set_config("prefix.b", "2");
         assert_eq!(ctx.get_config("key1"), Some("value1".to_string()));
         assert_eq!(ctx.get_config("key2"), None);
+
+        assert_eq!(
+            ctx.list_config(),
+            vec![
+                ("key1".to_string(), "value1".to_string()),
+                ("prefix.a".to_string(), "1".to_string()),
+                ("prefix.b".to_string(), "2".to_string())
+            ]
+        );
+
+        assert!(ctx.unset_config("key1"));
+        assert!(!ctx.unset_config("key1"));
+        assert_eq!(ctx.get_config("key1"), None);
+
+        assert_eq!(
+            ctx.clear_config(Some("prefix.")),
+            vec!["prefix.a".to_string(), "prefix.b".to_string()]
+        );
+        assert!(ctx.list_config().is_empty());
     }
 
     #[test]
@@ -118,5 +183,8 @@ mod tests {
         let service = ctx.get_service::<i32>("test_service");
         assert!(service.is_some());
         assert_eq!(*service.unwrap(), 42);
+        assert!(ctx.unregister_service("test_service"));
+        assert!(ctx.get_service::<i32>("test_service").is_none());
+        assert!(!ctx.unregister_service("test_service"));
     }
 }

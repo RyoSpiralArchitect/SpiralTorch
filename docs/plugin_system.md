@@ -225,6 +225,7 @@ Directory/module discovery helpers:
 - `st.plugin.unload_path(path, recursive=True, strict=False)` unregisters plugins previously loaded from `load_path(...)` under a filesystem path.
 - `st.plugin.unload_all(strict=False)` unregisters all currently registered plugins in reverse dependency order.
 - `st.plugin.clear_services(prefix=None, strict=False)` unregisters services from the plugin context (optionally filtering by name prefix).
+- `st.plugin.clear_config(prefix=None, strict=False)` removes config keys from the plugin context (optionally filtering by key prefix).
 
 Entry point demo package: see `examples/python_entrypoint_plugin_demo/`.
 

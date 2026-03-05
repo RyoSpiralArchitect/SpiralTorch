@@ -8,7 +8,7 @@ use super::context::PluginContext;
 use super::events::{PluginEvent, PluginEventBus};
 use super::traits::{Plugin, PluginCapability, PluginMetadata};
 use crate::{PureResult, TensorError};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, RwLock};
 
 /// Handle to a loaded plugin.
@@ -148,8 +148,87 @@ impl PluginRegistry {
     pub fn shutdown(&self) -> PureResult<()> {
         self.event_bus.publish(&PluginEvent::SystemShutdown);
 
-        let plugin_ids: Vec<_> = self.list_plugins();
-        for plugin_id in plugin_ids {
+        let (plugin_ids, deps_by_id) = {
+            let plugins = self.plugins.read().unwrap();
+            let mut ids: Vec<String> = plugins.keys().cloned().collect();
+            ids.sort();
+
+            let mut deps_by_id = HashMap::new();
+            for id in &ids {
+                let Some(handle) = plugins.get(id) else {
+                    deps_by_id.insert(id.clone(), Vec::new());
+                    continue;
+                };
+                let meta = handle.metadata();
+                let mut deps: Vec<String> = meta
+                    .dependencies
+                    .keys()
+                    .filter(|dep| plugins.contains_key(*dep))
+                    .cloned()
+                    .collect();
+                deps.sort();
+                deps_by_id.insert(id.clone(), deps);
+            }
+            (ids, deps_by_id)
+        };
+
+        if plugin_ids.is_empty() {
+            return Ok(());
+        }
+
+        let plugin_id_set: std::collections::HashSet<&str> =
+            plugin_ids.iter().map(|id| id.as_str()).collect();
+        let mut indegree: HashMap<String, usize> =
+            plugin_ids.iter().map(|id| (id.clone(), 0)).collect();
+        let mut edges: HashMap<String, Vec<String>> =
+            plugin_ids.iter().map(|id| (id.clone(), Vec::new())).collect();
+
+        for id in &plugin_ids {
+            let deps = deps_by_id.get(id).map(|deps| deps.as_slice()).unwrap_or(&[]);
+            for dep in deps {
+                if !plugin_id_set.contains(dep.as_str()) {
+                    continue;
+                }
+                edges.entry(dep.clone()).or_default().push(id.clone());
+                *indegree.entry(id.clone()).or_insert(0) += 1;
+            }
+        }
+
+        let mut queue = VecDeque::new();
+        for id in &plugin_ids {
+            if indegree.get(id).copied().unwrap_or(0) == 0 {
+                queue.push_back(id.clone());
+            }
+        }
+
+        let mut order = Vec::with_capacity(plugin_ids.len());
+        while let Some(id) = queue.pop_front() {
+            order.push(id.clone());
+            let Some(children) = edges.get(&id) else {
+                continue;
+            };
+            for child in children {
+                let Some(entry) = indegree.get_mut(child) else {
+                    continue;
+                };
+                *entry = entry.saturating_sub(1);
+                if *entry == 0 {
+                    queue.push_back(child.clone());
+                }
+            }
+        }
+
+        let unload_order: Vec<String> = if order.len() == plugin_ids.len() {
+            order.into_iter().rev().collect()
+        } else {
+            // Cycles shouldn't be possible given the registry enforces dependencies at registration time,
+            // but fall back to a deterministic order to avoid leaving the system partially shut down.
+            let mut ids = plugin_ids;
+            ids.reverse();
+            ids
+        };
+
+        for plugin_id in unload_order {
             self.unregister(&plugin_id)?;
         }
 
@@ -190,6 +269,7 @@ mod tests {
     use super::*;
     use crate::plugin::traits::{Plugin, PluginMetadata};
     use std::any::Any;
+    use std::sync::{Arc, Mutex};
 
     struct TestPlugin {
         name: String,
@@ -245,5 +325,67 @@ mod tests {
 
         let plugins = registry.find_by_capability(&PluginCapability::Operators);
         assert_eq!(plugins.len(), 1);
+    }
+
+    #[test]
+    fn test_shutdown_dependency_order() {
+        struct DepPlugin {
+            id: String,
+            deps: Vec<String>,
+            unload_log: Arc<Mutex<Vec<String>>>,
+        }
+
+        impl Plugin for DepPlugin {
+            fn metadata(&self) -> PluginMetadata {
+                let mut meta = PluginMetadata::new(&self.id, "1.0.0");
+                for dep in &self.deps {
+                    meta = meta.with_dependency(dep.clone(), ">=0");
+                }
+                meta
+            }
+
+            fn on_unload(&mut self, _ctx: &mut PluginContext) -> PureResult<()> {
+                self.unload_log.lock().unwrap().push(self.id.clone());
+                Ok(())
+            }
+
+            fn as_any(&self) -> &dyn Any {
+                self
+            }
+
+            fn as_any_mut(&mut self) -> &mut dyn Any {
+                self
+            }
+        }
+
+        let registry = PluginRegistry::new();
+        let unload_log = Arc::new(Mutex::new(Vec::new()));
+
+        registry
+            .register(Box::new(DepPlugin {
+                id: "a".to_string(),
+                deps: Vec::new(),
+                unload_log: unload_log.clone(),
+            }))
+            .unwrap();
+        registry
+            .register(Box::new(DepPlugin {
+                id: "b".to_string(),
+                deps: vec!["a".to_string()],
+                unload_log: unload_log.clone(),
+            }))
+            .unwrap();
+        registry
+            .register(Box::new(DepPlugin {
+                id: "c".to_string(),
+                deps: Vec::new(),
+                unload_log: unload_log.clone(),
+            }))
+            .unwrap();
+
+        registry.shutdown().unwrap();
+        let unloaded = unload_log.lock().unwrap().clone();
+        assert_eq!(unloaded, vec!["b".to_string(), "c".to_string(), "a".to_string()]);
+        assert!(registry.list_plugins().is_empty());
     }
 }

@@ -81,6 +81,34 @@ class SpiralTorchSmokeTest(unittest.TestCase):
                 except Exception:
                     pass
 
+    def test_plugin_config_helpers(self) -> None:
+        prefix = f"demo_cfg_{uuid.uuid4().hex}."
+        key_a = f"{prefix}a"
+        key_b = f"{prefix}b"
+        other = f"demo_cfg_other_{uuid.uuid4().hex}"
+
+        st.plugin.set_config(key_a, "1")
+        st.plugin.set_config(key_b, "2")
+        st.plugin.set_config(other, "x")
+
+        snapshot = st.plugin.list_config(prefix=prefix)
+        self.assertEqual(snapshot.get(key_a), "1")
+        self.assertEqual(snapshot.get(key_b), "2")
+        self.assertNotIn(other, snapshot)
+
+        self.assertTrue(st.plugin.unset_config(key_a))
+        self.assertFalse(st.plugin.unset_config(key_a))
+        self.assertIsNone(st.plugin.get_config(key_a))
+
+        removed = st.plugin.clear_config(prefix=prefix, strict=True)
+        self.assertIn(key_b, removed)
+        self.assertIsNone(st.plugin.get_config(key_b))
+        self.assertEqual(st.plugin.get_config(other), "x")
+
+        removed2 = st.plugin.clear_config(strict=True)
+        self.assertIn(other, removed2)
+        self.assertIsNone(st.plugin.get_config(other))
+
     def test_module_trainer_smoke(self) -> None:
         trainer = st.nn.ModuleTrainer(
             backend="cpu",
@@ -320,6 +348,46 @@ class SpiralTorchSmokeTest(unittest.TestCase):
             self.assertNotIn(plugin_b_id, st.plugin.list_plugins())
             self.assertTrue(getattr(plugin_a, "unloaded", False))
             self.assertTrue(getattr(plugin_b, "unloaded", False))
+        finally:
+            for plugin_id in (plugin_b_id, plugin_a_id):
+                try:
+                    st.plugin.unregister_plugin(plugin_id)
+                except Exception:
+                    pass
+
+    def test_python_plugin_shutdown_dependency_order(self) -> None:
+        plugin_a_id = f"demo_shutdown_a_{uuid.uuid4().hex}"
+        plugin_b_id = f"demo_shutdown_b_{uuid.uuid4().hex}"
+        unload_log: list[str] = []
+
+        class PluginA:
+            def metadata(self) -> dict:
+                return {"id": plugin_a_id, "version": "0.0.1"}
+
+            def on_unload(self) -> None:
+                unload_log.append(plugin_a_id)
+
+        class PluginB:
+            def metadata(self) -> dict:
+                return {
+                    "id": plugin_b_id,
+                    "version": "0.0.1",
+                    "dependencies": {plugin_a_id: ">=0"},
+                }
+
+            def on_unload(self) -> None:
+                unload_log.append(plugin_b_id)
+
+        try:
+            st.plugin.register_python_plugin(PluginA(), replace=True)
+            st.plugin.register_python_plugin(PluginB(), replace=True)
+            self.assertIn(plugin_a_id, st.plugin.list_plugins())
+            self.assertIn(plugin_b_id, st.plugin.list_plugins())
+
+            st.plugin.shutdown()
+            self.assertLess(unload_log.index(plugin_b_id), unload_log.index(plugin_a_id))
+            self.assertNotIn(plugin_a_id, st.plugin.list_plugins())
+            self.assertNotIn(plugin_b_id, st.plugin.list_plugins())
         finally:
             for plugin_id in (plugin_b_id, plugin_a_id):
                 try:

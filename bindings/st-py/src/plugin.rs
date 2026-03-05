@@ -1034,6 +1034,56 @@ fn set_config(key: &str, value: &str) -> PyResult<()> {
 }
 
 #[pyfunction]
+#[pyo3(signature = (key))]
+fn unset_config(key: &str) -> PyResult<bool> {
+    init_plugin_system().map_err(tensor_err_to_py)?;
+    let ctx = global_registry().context();
+    let ctx = ctx
+        .lock()
+        .map_err(|_| PyTypeError::new_err("plugin context lock was poisoned"))?;
+    Ok(ctx.unset_config(key))
+}
+
+#[pyfunction]
+#[pyo3(signature = (prefix=None))]
+fn list_config(py: Python<'_>, prefix: Option<&str>) -> PyResult<PyObject> {
+    init_plugin_system().map_err(tensor_err_to_py)?;
+    let ctx = global_registry().context();
+    let ctx = ctx
+        .lock()
+        .map_err(|_| PyTypeError::new_err("plugin context lock was poisoned"))?;
+    let items = ctx.list_config();
+    let dict = PyDict::new_bound(py);
+    for (key, value) in items {
+        if let Some(prefix) = prefix {
+            if !key.starts_with(prefix) {
+                continue;
+            }
+        }
+        dict.set_item(key, value)?;
+    }
+    Ok(dict.into_py(py))
+}
+
+#[pyfunction]
+#[pyo3(signature = (prefix=None, *, strict=false))]
+fn clear_config(prefix: Option<&str>, strict: bool) -> PyResult<Vec<String>> {
+    init_plugin_system().map_err(tensor_err_to_py)?;
+    let ctx = global_registry().context();
+    let ctx = ctx
+        .lock()
+        .map_err(|_| PyTypeError::new_err("plugin context lock was poisoned"))?;
+    let removed = ctx.clear_config(prefix);
+    if strict && removed.is_empty() {
+        return Err(PyValueError::new_err(match prefix {
+            None => "no config keys are set".to_string(),
+            Some(prefix) => format!("no config keys matched prefix '{prefix}'"),
+        }));
+    }
+    Ok(removed)
+}
+
+#[pyfunction]
 #[pyo3(signature = (name, service))]
 fn register_service(name: &str, service: PyObject) -> PyResult<()> {
     init_plugin_system().map_err(tensor_err_to_py)?;
@@ -1950,6 +2000,9 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
     module.add_function(wrap_pyfunction!(find_by_capability, &module)?)?;
     module.add_function(wrap_pyfunction!(get_config, &module)?)?;
     module.add_function(wrap_pyfunction!(set_config, &module)?)?;
+    module.add_function(wrap_pyfunction!(unset_config, &module)?)?;
+    module.add_function(wrap_pyfunction!(list_config, &module)?)?;
+    module.add_function(wrap_pyfunction!(clear_config, &module)?)?;
     module.add_function(wrap_pyfunction!(register_service, &module)?)?;
     module.add_function(wrap_pyfunction!(get_service, &module)?)?;
     module.add_function(wrap_pyfunction!(list_services, &module)?)?;
@@ -1980,6 +2033,9 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
             "find_by_capability",
             "get_config",
             "set_config",
+            "unset_config",
+            "list_config",
+            "clear_config",
             "register_service",
             "get_service",
             "list_services",
