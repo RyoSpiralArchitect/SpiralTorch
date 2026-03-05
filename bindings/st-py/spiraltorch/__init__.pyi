@@ -4936,6 +4936,13 @@ class _PluginModule(ModuleType):
         strict: bool = ...,
     ) -> List[str]: ...
 
+    def unload_entrypoints(
+        self,
+        group: str = ...,
+        *,
+        strict: bool = ...,
+    ) -> List[str]: ...
+
 plugin: _PluginModule
 
 ecosystem: ModuleType

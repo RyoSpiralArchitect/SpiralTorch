@@ -3685,6 +3685,93 @@ def _install_plugin_helpers() -> None:
     plugin_module.unload_path = unload_path
     _register_module_export(plugin_module, "unload_path")
 
+    def unload_entrypoints(
+        group: str = "spiraltorch.plugins",
+        *,
+        strict: bool = False,
+    ) -> _List[str]:
+        """Unload plugins that were loaded from `load_entrypoints(...)` for an entry point group."""
+
+        if not isinstance(group, str) or not group.strip():
+            raise ValueError("group must be a non-empty string")
+        group = group.strip()
+
+        matches: _List[str] = []
+        deps_by_id: dict[str, set[str]] = {}
+
+        for plugin_id in list_plugins():
+            meta = plugin_metadata(plugin_id)
+            if not isinstance(meta, dict):
+                continue
+            extra = meta.get("metadata")
+            if not isinstance(extra, dict):
+                continue
+            if extra.get("spiraltorch.source") != "entrypoint":
+                continue
+            if extra.get("spiraltorch.entrypoint_group") != group:
+                continue
+
+            matches.append(plugin_id)
+            deps = meta.get("dependencies", {})
+            if isinstance(deps, dict):
+                deps_by_id[plugin_id] = {str(k) for k in deps.keys()}
+            else:
+                deps_by_id[plugin_id] = set()
+
+        if not matches:
+            if strict:
+                raise ValueError(f"no entrypoint plugins matched group '{group}'")
+            return []
+
+        match_set = set(matches)
+        internal_deps: dict[str, set[str]] = {
+            plugin_id: {dep for dep in deps_by_id.get(plugin_id, set()) if dep in match_set}
+            for plugin_id in matches
+        }
+
+        indegree: dict[str, int] = {
+            plugin_id: len(deps) for plugin_id, deps in internal_deps.items()
+        }
+        dependents: dict[str, _List[str]] = {plugin_id: [] for plugin_id in matches}
+        for plugin_id, deps in internal_deps.items():
+            for dep in deps:
+                dependents.setdefault(dep, []).append(plugin_id)
+
+        queue = [plugin_id for plugin_id in matches if indegree.get(plugin_id, 0) == 0]
+        order: _List[str] = []
+        idx = 0
+        while idx < len(queue):
+            plugin_id = queue[idx]
+            idx += 1
+            order.append(plugin_id)
+            for child in dependents.get(plugin_id, ()):
+                indegree[child] = indegree.get(child, 0) - 1
+                if indegree[child] == 0:
+                    queue.append(child)
+
+        if len(order) != len(matches):
+            if strict:
+                remaining = sorted(
+                    plugin_id for plugin_id in matches if indegree.get(plugin_id, 0) > 0
+                )
+                raise ValueError(f"cyclic dependencies among plugins: {', '.join(remaining)}")
+            order = list(matches)
+
+        unloaded: _List[str] = []
+        for plugin_id in reversed(order):
+            try:
+                unregister_plugin(plugin_id)
+            except Exception:
+                if strict:
+                    raise
+                continue
+            unloaded.append(plugin_id)
+        return unloaded
+
+    unload_entrypoints.__module__ = plugin_module.__name__
+    plugin_module.unload_entrypoints = unload_entrypoints
+    _register_module_export(plugin_module, "unload_entrypoints")
+
     reload_path = _resolve_rs_attr("plugin.reload_path")
     if reload_path is None:
         return
