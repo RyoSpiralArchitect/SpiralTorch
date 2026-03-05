@@ -324,6 +324,17 @@ fn use_service(ctx: &PluginContext) {
 }
 ```
 
+### Unregistering a Service
+
+```rust
+fn on_unload(&mut self, ctx: &mut PluginContext) -> PureResult<()> {
+    ctx.unregister_service("my_service");
+    Ok(())
+}
+```
+
+Python bindings also expose `st.plugin.unregister_service("my_service")` (returns a bool indicating whether a service was removed).
+
 ## Plugin Dependencies
 
 Plugins can declare dependencies on other plugins:

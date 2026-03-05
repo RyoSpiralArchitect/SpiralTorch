@@ -1073,6 +1073,17 @@ fn list_services() -> PyResult<Vec<String>> {
     Ok(ctx.list_services())
 }
 
+#[pyfunction]
+#[pyo3(signature = (name))]
+fn unregister_service(name: &str) -> PyResult<bool> {
+    init_plugin_system().map_err(tensor_err_to_py)?;
+    let ctx = global_registry().context();
+    let ctx = ctx
+        .lock()
+        .map_err(|_| PyTypeError::new_err("plugin context lock was poisoned"))?;
+    Ok(ctx.unregister_service(name))
+}
+
 fn file_stem_module_name(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
     for ch in name.chars() {
@@ -1942,6 +1953,7 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
     module.add_function(wrap_pyfunction!(register_service, &module)?)?;
     module.add_function(wrap_pyfunction!(get_service, &module)?)?;
     module.add_function(wrap_pyfunction!(list_services, &module)?)?;
+    module.add_function(wrap_pyfunction!(unregister_service, &module)?)?;
     module.add_function(wrap_pyfunction!(initialize_all, &module)?)?;
     module.add_function(wrap_pyfunction!(shutdown, &module)?)?;
     module.add_function(wrap_pyfunction!(publish, &module)?)?;
@@ -1971,6 +1983,7 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
             "register_service",
             "get_service",
             "list_services",
+            "unregister_service",
             "initialize_all",
             "shutdown",
             "publish",

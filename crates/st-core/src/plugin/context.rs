@@ -79,6 +79,11 @@ impl PluginContext {
     pub fn list_services(&self) -> Vec<String> {
         self.services.lock().unwrap().keys().cloned().collect()
     }
+
+    /// Unregister a previously registered service.
+    pub fn unregister_service(&self, name: &str) -> bool {
+        self.services.lock().unwrap().remove(name).is_some()
+    }
 }
 
 impl Clone for PluginContext {

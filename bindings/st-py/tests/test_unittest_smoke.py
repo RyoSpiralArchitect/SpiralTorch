@@ -40,6 +40,18 @@ class SpiralTorchSmokeTest(unittest.TestCase):
         self.assertTrue(events)
         self.assertEqual(events[-1]["type"], "TensorOp")
 
+    def test_plugin_unregister_service(self) -> None:
+        name = f"demo_service_{uuid.uuid4().hex}"
+        st.plugin.register_service(name, {"ok": True})
+        self.assertIn(name, st.plugin.list_services())
+        self.assertIsNotNone(st.plugin.get_service(name))
+
+        removed = st.plugin.unregister_service(name)
+        self.assertTrue(removed)
+        self.assertNotIn(name, st.plugin.list_services())
+        self.assertIsNone(st.plugin.get_service(name))
+        self.assertFalse(st.plugin.unregister_service(name))
+
     def test_module_trainer_smoke(self) -> None:
         trainer = st.nn.ModuleTrainer(
             backend="cpu",
