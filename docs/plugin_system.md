@@ -217,6 +217,7 @@ st.plugin.publish("HelloPlugin", {"ok": True})
 Directory/module discovery helpers:
 
 - `st.plugin.load_entrypoints(group="spiraltorch.plugins", instantiate=True, replace=False)` discovers plugins from Python entry points.
+- `st.plugin.reload_entrypoints(group="spiraltorch.plugins", instantiate=True, strict=False)` reloads plugins by unloading the previously discovered entrypoint plugins for that group and then calling `load_entrypoints(..., replace=True)`.
 - `st.plugin.unload_entrypoints(group="spiraltorch.plugins", strict=False)` unregisters plugins previously discovered via `load_entrypoints(...)` for that group.
 - `st.plugin.load_path(path, recursive=True, strict=False, reload=False, replace=False, ...)` loads `.py` files from a directory (or a single file).
 - `st.plugin.reload_path(path, ...)` is a convenience wrapper that does `reload=True, replace=True`.

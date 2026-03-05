@@ -4883,6 +4883,13 @@ class _PluginModule(ModuleType):
         instantiate: bool = ...,
         replace: bool = ...,
     ) -> List[str]: ...
+    def reload_entrypoints(
+        self,
+        group: str = ...,
+        *,
+        instantiate: bool = ...,
+        strict: bool = ...,
+    ) -> List[str]: ...
     def load_path(
         self,
         path: str,

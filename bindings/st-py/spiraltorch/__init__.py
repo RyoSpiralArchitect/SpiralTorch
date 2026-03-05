@@ -3772,6 +3772,35 @@ def _install_plugin_helpers() -> None:
     plugin_module.unload_entrypoints = unload_entrypoints
     _register_module_export(plugin_module, "unload_entrypoints")
 
+    load_entrypoints = _resolve_rs_attr("plugin.load_entrypoints")
+    if load_entrypoints is not None:
+
+        def reload_entrypoints(
+            group: str = "spiraltorch.plugins",
+            *,
+            instantiate: bool = True,
+            strict: bool = False,
+        ) -> _List[str]:
+            """Reload plugins from Python entry points for a group.
+
+            This is a convenience wrapper that calls `unload_entrypoints(...)` and then
+            `load_entrypoints(..., replace=True)`.
+            """
+
+            if not isinstance(group, str) or not group.strip():
+                raise ValueError("group must be a non-empty string")
+            group = group.strip()
+
+            unload_entrypoints(group=group, strict=False)
+            loaded = load_entrypoints(group=group, instantiate=instantiate, replace=True)
+            if strict and not loaded:
+                raise ValueError(f"no entrypoint plugins discovered for group '{group}'")
+            return loaded
+
+        reload_entrypoints.__module__ = plugin_module.__name__
+        plugin_module.reload_entrypoints = reload_entrypoints
+        _register_module_export(plugin_module, "reload_entrypoints")
+
     reload_path = _resolve_rs_attr("plugin.reload_path")
     if reload_path is None:
         return

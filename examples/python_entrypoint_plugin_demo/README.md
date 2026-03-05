@@ -19,10 +19,12 @@ SpiralTorch can discover it with `st.plugin.load_entrypoints()`.
 ```python
 import spiraltorch as st
 
-loaded = st.plugin.load_entrypoints()
+loaded = st.plugin.reload_entrypoints(strict=False)
 print("loaded:", loaded)
 print("plugins:", st.plugin.list_plugins())
 print("hello:", st.plugin.get_service("demo_entrypoint_plugin.hello"))
+unloaded = st.plugin.unload_entrypoints()
+print("unloaded:", unloaded)
 ```
 
 Or run:
