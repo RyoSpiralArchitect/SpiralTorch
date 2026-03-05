@@ -39,6 +39,7 @@ NumPy, no PyTorch, and no shim layers.
   record JSONL streams with `plugin.record(...)`.
 - Python plugin registry via `spiraltorch.plugin.register_python_plugin(...)`
   (and `plugin.load_entrypoints(...)` / `plugin.load_path(...)` / `plugin.reload_path(...)` / `plugin.watch_path(...)` for discovery + hot reload).
+  The `spiral-plugin` CLI can introspect plugin graphs (`list`, `graph`, `dot`, `explain`, `validate`).
 - Custom operator registration via `spiraltorch.ops` with flexible `register`
   calls, `ops.signature(...)`, and a human-friendly `ops.describe(...)`.
 - Built-in module + state-dict serialization helpers (`spiraltorch.nn.save_json` /

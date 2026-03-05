@@ -642,6 +642,21 @@ class SpiralTorchSmokeTest(unittest.TestCase):
                 except Exception:
                     pass
 
+    def test_plugin_cli_validate_json(self) -> None:
+        import io
+
+        import spiraltorch.plugin_cli as plugin_cli
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = plugin_cli.main(["validate", "--json"])
+        self.assertEqual(code, 0)
+
+        payload = buf.getvalue().strip()
+        self.assertTrue(payload)
+        data = json.loads(payload)
+        self.assertIn("ok", data)
+
     def test_python_plugin_reset(self) -> None:
         plugin_id = f"demo_reset_{uuid.uuid4().hex}"
         service = f"{plugin_id}.service"

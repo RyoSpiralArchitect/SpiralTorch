@@ -33,6 +33,7 @@ python-packages = ["spiral", "spiraltorch"]
 spiral-train = "spiral.cli:main"
 spiral-model-zoo = "spiraltorch.model_zoo:main"
 spiral-export = "spiral.export:main"
+spiral-plugin = "spiraltorch.plugin_cli:main"
 
 [project.urls]
 Homepage = "https://github.com/RyoSpiralArchitect/SpiralTorch"
