@@ -3933,6 +3933,108 @@ def _install_plugin_helpers() -> None:
     plugin_module.unregister_safe = unregister_safe
     _register_module_export(plugin_module, "unregister_safe")
 
+    def dependency_graph(*, internal_only: bool = False) -> _Dict[str, _List[str]]:
+        """Return a dependency adjacency list for the currently registered plugins."""
+
+        internal_only = bool(internal_only)
+        plugins = sorted(list_plugins())
+        plugin_set = set(plugins)
+
+        graph: dict[str, _List[str]] = {}
+        for pid in plugins:
+            deps: _List[str] = []
+            meta = plugin_metadata(pid)
+            if isinstance(meta, dict):
+                raw = meta.get("dependencies", {})
+                if isinstance(raw, dict):
+                    deps = [str(key) for key in raw.keys() if str(key)]
+            if internal_only:
+                deps = [dep for dep in deps if dep in plugin_set]
+            graph[pid] = sorted(set(deps))
+        return graph
+
+    dependency_graph.__module__ = plugin_module.__name__
+    plugin_module.dependency_graph = dependency_graph
+    _register_module_export(plugin_module, "dependency_graph")
+
+    def explain(plugin_id: str) -> _Dict[str, _Any]:
+        """Return a structured summary of a plugin's dependencies/dependents."""
+
+        if not isinstance(plugin_id, str) or not plugin_id.strip():
+            raise ValueError("plugin_id must be a non-empty string")
+        plugin_id = plugin_id.strip()
+
+        plugins = sorted(list_plugins())
+        plugin_set = set(plugins)
+
+        meta = plugin_metadata(plugin_id)
+        meta_dict = meta if isinstance(meta, dict) else None
+
+        deps: _List[str] = []
+        extra: dict[str, _Any] | None = None
+        if meta_dict is not None:
+            raw_deps = meta_dict.get("dependencies", {})
+            if isinstance(raw_deps, dict):
+                deps = [str(key) for key in raw_deps.keys() if str(key)]
+            raw_extra = meta_dict.get("metadata")
+            if isinstance(raw_extra, dict):
+                extra = raw_extra
+
+        deps = sorted(set(deps))
+        missing_deps = sorted(dep for dep in deps if dep not in plugin_set)
+
+        dependents: dict[str, _List[str]] = {}
+        for pid in plugins:
+            child_meta = plugin_metadata(pid)
+            if not isinstance(child_meta, dict):
+                continue
+            raw = child_meta.get("dependencies", {})
+            if not isinstance(raw, dict):
+                continue
+            for dep in raw.keys():
+                dep_id = str(dep)
+                if not dep_id:
+                    continue
+                dependents.setdefault(dep_id, []).append(pid)
+
+        direct_dependents = sorted(set(dependents.get(plugin_id, [])))
+
+        transitive_dependents: _List[str] = []
+        seen: set[str] = set()
+        queue: _List[str] = list(direct_dependents)
+        idx = 0
+        while idx < len(queue):
+            current = queue[idx]
+            idx += 1
+            if current in seen:
+                continue
+            seen.add(current)
+            transitive_dependents.append(current)
+            for child in sorted(set(dependents.get(current, []))):
+                if child not in seen:
+                    queue.append(child)
+
+        source: str | None = None
+        if extra is not None:
+            raw_source = extra.get("spiraltorch.source")
+            if isinstance(raw_source, str) and raw_source:
+                source = raw_source
+
+        return {
+            "plugin_id": plugin_id,
+            "registered": plugin_id in plugin_set,
+            "source": source,
+            "metadata": meta_dict,
+            "dependencies": deps,
+            "missing_dependencies": missing_deps,
+            "direct_dependents": direct_dependents,
+            "transitive_dependents": sorted(transitive_dependents),
+        }
+
+    explain.__module__ = plugin_module.__name__
+    plugin_module.explain = explain
+    _register_module_export(plugin_module, "explain")
+
     list_services = _resolve_rs_attr("plugin.list_services")
     unregister_service = _resolve_rs_attr("plugin.unregister_service")
     if list_services is not None and unregister_service is not None:

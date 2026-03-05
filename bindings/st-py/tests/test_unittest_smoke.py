@@ -487,6 +487,63 @@ class SpiralTorchSmokeTest(unittest.TestCase):
                 except Exception:
                     pass
 
+    def test_python_plugin_dependency_graph_and_explain(self) -> None:
+        plugin_a_id = f"demo_dep_graph_a_{uuid.uuid4().hex}"
+        plugin_b_id = f"demo_dep_graph_b_{uuid.uuid4().hex}"
+        plugin_c_id = f"demo_dep_graph_c_{uuid.uuid4().hex}"
+
+        class PluginA:
+            def metadata(self) -> dict:
+                return {"id": plugin_a_id, "version": "0.0.1"}
+
+        class PluginB:
+            def metadata(self) -> dict:
+                return {
+                    "id": plugin_b_id,
+                    "version": "0.0.1",
+                    "dependencies": {plugin_a_id: ">=0"},
+                }
+
+        class PluginC:
+            def metadata(self) -> dict:
+                return {
+                    "id": plugin_c_id,
+                    "version": "0.0.1",
+                    "dependencies": {plugin_b_id: ">=0"},
+                }
+
+        try:
+            st.plugin.register_python_plugin(PluginA(), replace=True)
+            st.plugin.register_python_plugin(PluginB(), replace=True)
+            st.plugin.register_python_plugin(PluginC(), replace=True)
+
+            graph = st.plugin.dependency_graph()
+            self.assertEqual(graph.get(plugin_a_id), [])
+            self.assertEqual(graph.get(plugin_b_id), [plugin_a_id])
+            self.assertEqual(graph.get(plugin_c_id), [plugin_b_id])
+
+            info_a = st.plugin.explain(plugin_a_id)
+            self.assertEqual(info_a.get("plugin_id"), plugin_a_id)
+            self.assertTrue(info_a.get("registered"))
+            self.assertEqual(info_a.get("dependencies"), [])
+            self.assertEqual(info_a.get("missing_dependencies"), [])
+            self.assertEqual(info_a.get("direct_dependents"), [plugin_b_id])
+            self.assertEqual(
+                set(info_a.get("transitive_dependents", [])),
+                {plugin_b_id, plugin_c_id},
+            )
+
+            info_b = st.plugin.explain(plugin_b_id)
+            self.assertEqual(info_b.get("dependencies"), [plugin_a_id])
+            self.assertEqual(info_b.get("direct_dependents"), [plugin_c_id])
+            self.assertEqual(set(info_b.get("transitive_dependents", [])), {plugin_c_id})
+        finally:
+            for plugin_id in (plugin_c_id, plugin_b_id, plugin_a_id):
+                try:
+                    st.plugin.unregister_plugin(plugin_id)
+                except Exception:
+                    pass
+
     def test_python_plugin_reset(self) -> None:
         plugin_id = f"demo_reset_{uuid.uuid4().hex}"
         service = f"{plugin_id}.service"
