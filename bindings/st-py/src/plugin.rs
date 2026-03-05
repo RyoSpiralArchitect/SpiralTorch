@@ -1652,7 +1652,12 @@ fn load_path(
     }
 
     (|| -> PyResult<Vec<String>> {
-        let mut ids = Vec::new();
+        struct PendingPlugin {
+            metadata: PluginMetadata,
+            plugin: PyObject,
+        }
+
+        let mut pending = Vec::new();
         for file_path in files {
             let module_name = module_name_for_path(module_prefix, &file_path);
             let module = load_module_from_file(py, &module_name, &file_path, reload)?;
@@ -1666,14 +1671,118 @@ fn load_path(
                 }
                 continue;
             }
+
             for plugin in plugins {
                 let mut metadata = plugin_metadata_from_py(&plugin)?;
                 annotate_path_metadata(&mut metadata, &file_path, &module_name);
-                let plugin_id =
-                    register_python_plugin_from_metadata(py, plugin.unbind(), metadata, replace)?;
-                ids.push(plugin_id);
+                pending.push(PendingPlugin {
+                    metadata,
+                    plugin: plugin.unbind(),
+                });
             }
         }
+
+        if pending.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut id_to_index = HashMap::with_capacity(pending.len());
+        for (idx, plugin) in pending.iter().enumerate() {
+            let id = plugin.metadata.id.clone();
+            if id_to_index.insert(id.clone(), idx).is_some() {
+                return Err(PyValueError::new_err(format!(
+                    "duplicate plugin id '{id}' discovered while loading '{}'",
+                    base.display()
+                )));
+            }
+        }
+
+        let mut indegree = vec![0usize; pending.len()];
+        let mut edges: Vec<Vec<usize>> = vec![Vec::new(); pending.len()];
+        for (idx, plugin) in pending.iter().enumerate() {
+            let mut deps: Vec<&String> = plugin.metadata.dependencies.keys().collect();
+            deps.sort();
+            for dep_id in deps {
+                if dep_id == &plugin.metadata.id {
+                    return Err(PyValueError::new_err(format!(
+                        "plugin '{}' depends on itself",
+                        plugin.metadata.id
+                    )));
+                }
+
+                if let Some(dep_idx) = id_to_index.get(dep_id) {
+                    edges[*dep_idx].push(idx);
+                    indegree[idx] += 1;
+                    continue;
+                }
+
+                if global_registry().get(dep_id).is_none() {
+                    return Err(PyValueError::new_err(format!(
+                        "plugin '{}' depends on '{}' which is not registered",
+                        plugin.metadata.id, dep_id
+                    )));
+                }
+            }
+        }
+
+        let mut queue = VecDeque::new();
+        for idx in 0..pending.len() {
+            if indegree[idx] == 0 {
+                queue.push_back(idx);
+            }
+        }
+
+        let mut order = Vec::with_capacity(pending.len());
+        while let Some(idx) = queue.pop_front() {
+            order.push(idx);
+            for &next in &edges[idx] {
+                indegree[next] = indegree[next].saturating_sub(1);
+                if indegree[next] == 0 {
+                    queue.push_back(next);
+                }
+            }
+        }
+
+        if order.len() != pending.len() {
+            let mut seen = vec![false; pending.len()];
+            for idx in &order {
+                seen[*idx] = true;
+            }
+            let mut remaining = Vec::new();
+            for idx in 0..pending.len() {
+                if !seen[idx] {
+                    remaining.push(pending[idx].metadata.id.clone());
+                }
+            }
+            remaining.sort();
+            return Err(PyValueError::new_err(format!(
+                "cyclic dependencies among loaded plugins: {}",
+                remaining.join(", ")
+            )));
+        }
+
+        if replace {
+            for &idx in order.iter().rev() {
+                let id = pending[idx].metadata.id.as_str();
+                if global_registry().get(id).is_some() {
+                    global_registry()
+                        .unregister(id)
+                        .map_err(tensor_err_to_py)?;
+                }
+            }
+        }
+
+        let mut pending: Vec<Option<PendingPlugin>> = pending.into_iter().map(Some).collect();
+        let mut ids = Vec::with_capacity(order.len());
+        for idx in order {
+            let Some(plugin) = pending[idx].take() else {
+                continue;
+            };
+            let plugin_id =
+                register_python_plugin_from_metadata(py, plugin.plugin, plugin.metadata, false)?;
+            ids.push(plugin_id);
+        }
+
         Ok(ids)
     })()
 }

@@ -331,6 +331,101 @@ class SpiralTorchSmokeTest(unittest.TestCase):
             except Exception:
                 pass
 
+    def test_python_plugin_load_path_dependency_order(self) -> None:
+        plugin_a_id = f"demo_dep_a_{uuid.uuid4().hex}"
+        plugin_b_id = f"demo_dep_b_{uuid.uuid4().hex}"
+        service_a = f"{plugin_a_id}.value"
+        service_b = f"{plugin_b_id}.seen"
+
+        plugin_source_v1 = textwrap.dedent(
+            f"""
+            import spiraltorch as st
+
+            class PluginA:
+                def metadata(self) -> dict:
+                    return {{
+                        "id": "{plugin_a_id}",
+                        "version": "0.0.1",
+                    }}
+
+                def on_load(self) -> None:
+                    st.plugin.register_service("{service_a}", "v1")
+
+            class PluginB:
+                def metadata(self) -> dict:
+                    return {{
+                        "id": "{plugin_b_id}",
+                        "version": "0.0.1",
+                        "dependencies": {{"{plugin_a_id}": ">=0"}},
+                    }}
+
+                def on_load(self) -> None:
+                    st.plugin.register_service(
+                        "{service_b}",
+                        st.plugin.get_service("{service_a}"),
+                    )
+
+            plugins = [PluginB(), PluginA()]
+            """
+        )
+
+        plugin_source_v2 = textwrap.dedent(
+            f"""
+            import spiraltorch as st
+
+            class PluginA:
+                def metadata(self) -> dict:
+                    return {{
+                        "id": "{plugin_a_id}",
+                        "version": "0.0.2",
+                    }}
+
+                def on_load(self) -> None:
+                    st.plugin.register_service("{service_a}", "v2")
+
+            class PluginB:
+                def metadata(self) -> dict:
+                    return {{
+                        "id": "{plugin_b_id}",
+                        "version": "0.0.2",
+                        "dependencies": {{"{plugin_a_id}": ">=0"}},
+                    }}
+
+                def on_load(self) -> None:
+                    st.plugin.register_service(
+                        "{service_b}",
+                        st.plugin.get_service("{service_a}"),
+                    )
+
+            plugins = [PluginB(), PluginA()]
+            """
+        )
+
+        try:
+            with _temp_dir("tmp_deps") as tmp:
+                plugin_path = f"{tmp}/deps_plugin.py"
+                with open(plugin_path, "w", encoding="utf-8") as handle:
+                    handle.write(plugin_source_v1)
+
+                loaded = st.plugin.load_path(plugin_path, recursive=False, strict=True)
+                self.assertIn(plugin_a_id, loaded)
+                self.assertIn(plugin_b_id, loaded)
+                self.assertEqual(st.plugin.get_service(service_b), "v1")
+
+                with open(plugin_path, "w", encoding="utf-8") as handle:
+                    handle.write(plugin_source_v2)
+
+                reloaded = st.plugin.reload_path(plugin_path, recursive=False, strict=True)
+                self.assertIn(plugin_a_id, reloaded)
+                self.assertIn(plugin_b_id, reloaded)
+                self.assertEqual(st.plugin.get_service(service_b), "v2")
+        finally:
+            for plugin_id in (plugin_b_id, plugin_a_id):
+                try:
+                    st.plugin.unregister_plugin(plugin_id)
+                except Exception:
+                    pass
+
     def test_python_plugin_watch_path(self) -> None:
         plugin_id = f"demo_watch_path_plugin_{uuid.uuid4().hex}"
         service_name = f"{plugin_id}.instance"
