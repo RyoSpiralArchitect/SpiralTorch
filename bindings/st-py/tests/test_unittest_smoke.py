@@ -40,6 +40,26 @@ class SpiralTorchSmokeTest(unittest.TestCase):
         self.assertTrue(events)
         self.assertEqual(events[-1]["type"], "TensorOp")
 
+    def test_plugin_clear_listeners(self) -> None:
+        st.plugin.clear_listeners()
+
+        id_epoch = st.plugin.subscribe("EpochStart", lambda _: None)
+        id_any = st.plugin.subscribe("*", lambda _: None)
+
+        self.assertEqual(st.plugin.clear_listeners("EpochStart", strict=True), 1)
+        self.assertFalse(st.plugin.unsubscribe("EpochStart", id_epoch))
+        self.assertTrue(st.plugin.unsubscribe("*", id_any))
+
+        id_init = st.plugin.subscribe("SystemInit", lambda _: None)
+        id_any2 = st.plugin.subscribe("*", lambda _: None)
+
+        self.assertEqual(st.plugin.clear_listeners(strict=True), 2)
+        self.assertFalse(st.plugin.unsubscribe("SystemInit", id_init))
+        self.assertFalse(st.plugin.unsubscribe("*", id_any2))
+
+        with self.assertRaises(ValueError):
+            st.plugin.clear_listeners(strict=True)
+
     def test_plugin_unregister_service(self) -> None:
         name = f"demo_service_{uuid.uuid4().hex}"
         st.plugin.register_service(name, {"ok": True})

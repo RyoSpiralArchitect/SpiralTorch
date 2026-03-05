@@ -1588,6 +1588,20 @@ fn has_listeners(event_type: &str) -> PyResult<bool> {
 }
 
 #[pyfunction]
+#[pyo3(signature = (event_type=None, *, strict=false))]
+fn clear_listeners(event_type: Option<&str>, strict: bool) -> PyResult<usize> {
+    init_plugin_system().map_err(tensor_err_to_py)?;
+    let removed = global_registry().event_bus().clear_listeners(event_type);
+    if strict && removed == 0 {
+        return Err(PyValueError::new_err(match event_type {
+            None => "no listeners are registered".to_string(),
+            Some(event_type) => format!("no listeners matched event_type '{event_type}'"),
+        }));
+    }
+    Ok(removed)
+}
+
+#[pyfunction]
 #[pyo3(signature = (group="spiraltorch.plugins", *, instantiate=true, replace=false))]
 fn load_entrypoints(
     py: Python<'_>,
@@ -2011,6 +2025,7 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
     module.add_function(wrap_pyfunction!(shutdown, &module)?)?;
     module.add_function(wrap_pyfunction!(publish, &module)?)?;
     module.add_function(wrap_pyfunction!(has_listeners, &module)?)?;
+    module.add_function(wrap_pyfunction!(clear_listeners, &module)?)?;
     module.add_function(wrap_pyfunction!(load_entrypoints, &module)?)?;
     module.add_function(wrap_pyfunction!(load_path, &module)?)?;
     module.add_function(wrap_pyfunction!(reload_path, &module)?)?;
@@ -2044,6 +2059,7 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
             "shutdown",
             "publish",
             "has_listeners",
+            "clear_listeners",
             "load_entrypoints",
             "load_path",
             "reload_path",

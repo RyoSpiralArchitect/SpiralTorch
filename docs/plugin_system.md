@@ -227,6 +227,7 @@ Directory/module discovery helpers:
 - `st.plugin.unregister_safe(plugin_id, strict=False)` unregisters a plugin plus any registered plugins that depend on it (to avoid leaving broken dependents loaded).
 - `st.plugin.clear_services(prefix=None, strict=False)` unregisters services from the plugin context (optionally filtering by name prefix).
 - `st.plugin.clear_config(prefix=None, strict=False)` removes config keys from the plugin context (optionally filtering by key prefix).
+- `st.plugin.clear_listeners(event_type=None, strict=False)` unsubscribes event listeners from the plugin event bus (optionally filtering by event type).
 - `st.plugin.reset(strict=False)` is a convenience wrapper that runs `shutdown()` and clears services/config.
 
 Entry point demo package: see `examples/python_entrypoint_plugin_demo/`.

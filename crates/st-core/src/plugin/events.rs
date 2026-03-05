@@ -119,6 +119,20 @@ impl PluginEventBus {
                 .is_some_and(|bucket| !bucket.is_empty())
     }
 
+    /// Remove all listeners (or those matching an event type).
+    ///
+    /// Returns the number of removed subscriptions.
+    pub fn clear_listeners(&self, event_type: Option<&str>) -> usize {
+        let mut listeners = self.listeners.lock().unwrap();
+        match event_type {
+            Some(event_type) => listeners
+                .remove(event_type)
+                .map(|bucket| bucket.len())
+                .unwrap_or(0),
+            None => listeners.drain().map(|(_, bucket)| bucket.len()).sum(),
+        }
+    }
+
     /// Publish an event to all interested listeners.
     pub fn publish(&self, event: &PluginEvent) {
         let event_type = self.event_type_name(event);
@@ -214,5 +228,26 @@ mod tests {
         let event = PluginEvent::custom("MyEvent", CustomData { value: 42 });
         let data = event.downcast_data::<CustomData>().unwrap();
         assert_eq!(data.value, 42);
+    }
+
+    #[test]
+    fn test_clear_listeners() {
+        let bus = PluginEventBus::new();
+        let noop: EventListener = Arc::new(|_| {});
+
+        let id_epoch = bus.subscribe("EpochStart", noop.clone());
+        let id_init = bus.subscribe("SystemInit", noop.clone());
+        let id_any = bus.subscribe("*", noop.clone());
+
+        assert_eq!(bus.clear_listeners(Some("EpochStart")), 1);
+        assert!(!bus.unsubscribe("EpochStart", id_epoch));
+
+        assert_eq!(bus.clear_listeners(None), 2);
+        assert!(!bus.unsubscribe("SystemInit", id_init));
+        assert!(!bus.unsubscribe("*", id_any));
+        assert!(!bus.has_listeners("EpochStart"));
+        assert!(!bus.has_listeners("SystemInit"));
+
+        assert_eq!(bus.clear_listeners(None), 0);
     }
 }
