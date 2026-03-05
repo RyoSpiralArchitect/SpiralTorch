@@ -3772,6 +3772,125 @@ def _install_plugin_helpers() -> None:
     plugin_module.unload_entrypoints = unload_entrypoints
     _register_module_export(plugin_module, "unload_entrypoints")
 
+    def unload_all(*, strict: bool = False) -> _List[str]:
+        """Unload all registered plugins in reverse dependency order."""
+
+        matches = sorted(list_plugins())
+        if not matches:
+            if strict:
+                raise ValueError("no plugins are registered")
+            return []
+
+        deps_by_id: dict[str, set[str]] = {}
+        for plugin_id in matches:
+            meta = plugin_metadata(plugin_id)
+            if not isinstance(meta, dict):
+                deps_by_id[plugin_id] = set()
+                continue
+            deps = meta.get("dependencies", {})
+            if isinstance(deps, dict):
+                deps_by_id[plugin_id] = {str(k) for k in deps.keys()}
+            else:
+                deps_by_id[plugin_id] = set()
+
+        match_set = set(matches)
+        internal_deps: dict[str, set[str]] = {
+            plugin_id: {dep for dep in deps_by_id.get(plugin_id, set()) if dep in match_set}
+            for plugin_id in matches
+        }
+
+        indegree: dict[str, int] = {plugin_id: len(deps) for plugin_id, deps in internal_deps.items()}
+        dependents: dict[str, _List[str]] = {plugin_id: [] for plugin_id in matches}
+        for plugin_id in matches:
+            for dep in sorted(internal_deps.get(plugin_id, set())):
+                dependents.setdefault(dep, []).append(plugin_id)
+
+        queue = [plugin_id for plugin_id in matches if indegree.get(plugin_id, 0) == 0]
+        order: _List[str] = []
+        idx = 0
+        while idx < len(queue):
+            plugin_id = queue[idx]
+            idx += 1
+            order.append(plugin_id)
+            for child in dependents.get(plugin_id, ()):
+                indegree[child] = indegree.get(child, 0) - 1
+                if indegree[child] == 0:
+                    queue.append(child)
+
+        if len(order) != len(matches):
+            if strict:
+                remaining = sorted(plugin_id for plugin_id in matches if indegree.get(plugin_id, 0) > 0)
+                raise ValueError(f"cyclic dependencies among plugins: {', '.join(remaining)}")
+            order = list(matches)
+
+        unloaded: _List[str] = []
+        for plugin_id in reversed(order):
+            try:
+                unregister_plugin(plugin_id)
+            except Exception:
+                if strict:
+                    raise
+                continue
+            unloaded.append(plugin_id)
+        return unloaded
+
+    unload_all.__module__ = plugin_module.__name__
+    plugin_module.unload_all = unload_all
+    _register_module_export(plugin_module, "unload_all")
+
+    list_services = _resolve_rs_attr("plugin.list_services")
+    unregister_service = _resolve_rs_attr("plugin.unregister_service")
+    if list_services is not None and unregister_service is not None:
+
+        def clear_services(
+            prefix: str | None = None,
+            *,
+            strict: bool = False,
+        ) -> _List[str]:
+            """Unregister services from the plugin context.
+
+            If `prefix` is provided, only services with that prefix are removed.
+            """
+
+            if prefix is not None and not isinstance(prefix, str):
+                raise TypeError("prefix must be a string or None")
+            prefix = prefix or None
+
+            names = list_services()
+            if not isinstance(names, list):
+                names = list(names)
+            matches = sorted(
+                name
+                for name in names
+                if isinstance(name, str) and (prefix is None or name.startswith(prefix))
+            )
+
+            if not matches:
+                if strict:
+                    if prefix is None:
+                        raise ValueError("no services are registered")
+                    raise ValueError(f"no services matched prefix '{prefix}'")
+                return []
+
+            removed: _List[str] = []
+            for name in matches:
+                try:
+                    ok = unregister_service(name)
+                except Exception:
+                    if strict:
+                        raise
+                    continue
+                if not ok:
+                    if strict:
+                        raise RuntimeError(f"failed to unregister service '{name}'")
+                    continue
+                removed.append(name)
+            return removed
+
+        clear_services.__module__ = plugin_module.__name__
+        plugin_module.clear_services = clear_services
+        _register_module_export(plugin_module, "clear_services")
+
     load_entrypoints = _resolve_rs_attr("plugin.load_entrypoints")
     if load_entrypoints is not None:
 

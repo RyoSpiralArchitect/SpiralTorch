@@ -223,6 +223,8 @@ Directory/module discovery helpers:
 - `st.plugin.reload_path(path, ...)` is a convenience wrapper that does `reload=True, replace=True`.
 - `st.plugin.watch_path(path, poll_interval=0.25, debounce=0.0, missing_grace=0.0, unload_on_stop=False, ...)` polls a directory/file and hot-reloads changed plugin files.
 - `st.plugin.unload_path(path, recursive=True, strict=False)` unregisters plugins previously loaded from `load_path(...)` under a filesystem path.
+- `st.plugin.unload_all(strict=False)` unregisters all currently registered plugins in reverse dependency order.
+- `st.plugin.clear_services(prefix=None, strict=False)` unregisters services from the plugin context (optionally filtering by name prefix).
 
 Entry point demo package: see `examples/python_entrypoint_plugin_demo/`.
 
@@ -333,7 +335,7 @@ fn on_unload(&mut self, ctx: &mut PluginContext) -> PureResult<()> {
 }
 ```
 
-Python bindings also expose `st.plugin.unregister_service("my_service")` (returns a bool indicating whether a service was removed).
+Python bindings also expose `st.plugin.unregister_service("my_service")` (returns a bool indicating whether a service was removed) and `st.plugin.clear_services(prefix="my_prefix.")` (returns a list of removed service names).
 
 ## Plugin Dependencies
 
