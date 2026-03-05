@@ -395,6 +395,127 @@ class SpiralTorchSmokeTest(unittest.TestCase):
                 except Exception:
                     pass
 
+    def test_python_plugin_unregister_safe_dependency_order(self) -> None:
+        plugin_a_id = f"demo_unregister_safe_a_{uuid.uuid4().hex}"
+        plugin_b_id = f"demo_unregister_safe_b_{uuid.uuid4().hex}"
+        plugin_c_id = f"demo_unregister_safe_c_{uuid.uuid4().hex}"
+
+        class PluginA:
+            def __init__(self):
+                self.unloaded = False
+
+            def metadata(self) -> dict:
+                return {"id": plugin_a_id, "version": "0.0.1"}
+
+            def on_unload(self) -> None:
+                self.unloaded = True
+
+        class PluginB:
+            def __init__(self):
+                self.unloaded = False
+
+            def metadata(self) -> dict:
+                return {
+                    "id": plugin_b_id,
+                    "version": "0.0.1",
+                    "dependencies": {plugin_a_id: ">=0"},
+                }
+
+            def on_unload(self) -> None:
+                self.unloaded = True
+
+        class PluginC:
+            def __init__(self):
+                self.unloaded = False
+
+            def metadata(self) -> dict:
+                return {
+                    "id": plugin_c_id,
+                    "version": "0.0.1",
+                    "dependencies": {plugin_b_id: ">=0"},
+                }
+
+            def on_unload(self) -> None:
+                self.unloaded = True
+
+        a = PluginA()
+        b = PluginB()
+        c = PluginC()
+
+        try:
+            st.plugin.register_python_plugin(a, replace=True)
+            st.plugin.register_python_plugin(b, replace=True)
+            st.plugin.register_python_plugin(c, replace=True)
+
+            unloaded = st.plugin.unregister_safe(plugin_a_id, strict=True)
+            self.assertIn(plugin_a_id, unloaded)
+            self.assertIn(plugin_b_id, unloaded)
+            self.assertIn(plugin_c_id, unloaded)
+            self.assertLess(unloaded.index(plugin_c_id), unloaded.index(plugin_b_id))
+            self.assertLess(unloaded.index(plugin_b_id), unloaded.index(plugin_a_id))
+
+            self.assertNotIn(plugin_a_id, st.plugin.list_plugins())
+            self.assertNotIn(plugin_b_id, st.plugin.list_plugins())
+            self.assertNotIn(plugin_c_id, st.plugin.list_plugins())
+            self.assertTrue(getattr(a, "unloaded", False))
+            self.assertTrue(getattr(b, "unloaded", False))
+            self.assertTrue(getattr(c, "unloaded", False))
+        finally:
+            for plugin_id in (plugin_c_id, plugin_b_id, plugin_a_id):
+                try:
+                    st.plugin.unregister_plugin(plugin_id)
+                except Exception:
+                    pass
+
+    def test_python_plugin_reset(self) -> None:
+        plugin_id = f"demo_reset_{uuid.uuid4().hex}"
+        service = f"{plugin_id}.service"
+        cfg_key = f"{plugin_id}.cfg"
+
+        class DemoPlugin:
+            def __init__(self):
+                self.unloaded = False
+
+            def metadata(self) -> dict:
+                return {"id": plugin_id, "version": "0.0.1"}
+
+            def on_load(self) -> None:
+                st.plugin.register_service(service, self)
+                st.plugin.set_config(cfg_key, "1")
+
+            def on_unload(self) -> None:
+                self.unloaded = True
+
+        plugin = DemoPlugin()
+        try:
+            st.plugin.register_python_plugin(plugin, replace=True)
+            self.assertIn(plugin_id, st.plugin.list_plugins())
+            self.assertIsNotNone(st.plugin.get_service(service))
+            self.assertEqual(st.plugin.get_config(cfg_key), "1")
+
+            summary = st.plugin.reset(strict=True)
+            self.assertIn(plugin_id, summary.get("plugins", []))
+            self.assertIn(service, summary.get("services", []))
+            self.assertIn(cfg_key, summary.get("config", []))
+
+            self.assertNotIn(plugin_id, st.plugin.list_plugins())
+            self.assertIsNone(st.plugin.get_service(service))
+            self.assertIsNone(st.plugin.get_config(cfg_key))
+            self.assertTrue(getattr(plugin, "unloaded", False))
+        finally:
+            try:
+                st.plugin.unregister_plugin(plugin_id)
+            except Exception:
+                pass
+            try:
+                st.plugin.unregister_service(service)
+            except Exception:
+                pass
+            try:
+                st.plugin.unset_config(cfg_key)
+            except Exception:
+                pass
+
     def test_python_plugin_load_entrypoints_dependency_order(self) -> None:
         import importlib.metadata
 

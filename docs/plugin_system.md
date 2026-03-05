@@ -224,8 +224,10 @@ Directory/module discovery helpers:
 - `st.plugin.watch_path(path, poll_interval=0.25, debounce=0.0, missing_grace=0.0, unload_on_stop=False, ...)` polls a directory/file and hot-reloads changed plugin files.
 - `st.plugin.unload_path(path, recursive=True, strict=False)` unregisters plugins previously loaded from `load_path(...)` under a filesystem path.
 - `st.plugin.unload_all(strict=False)` unregisters all currently registered plugins in reverse dependency order.
+- `st.plugin.unregister_safe(plugin_id, strict=False)` unregisters a plugin plus any registered plugins that depend on it (to avoid leaving broken dependents loaded).
 - `st.plugin.clear_services(prefix=None, strict=False)` unregisters services from the plugin context (optionally filtering by name prefix).
 - `st.plugin.clear_config(prefix=None, strict=False)` removes config keys from the plugin context (optionally filtering by key prefix).
+- `st.plugin.reset(strict=False)` is a convenience wrapper that runs `shutdown()` and clears services/config.
 
 Entry point demo package: see `examples/python_entrypoint_plugin_demo/`.
 

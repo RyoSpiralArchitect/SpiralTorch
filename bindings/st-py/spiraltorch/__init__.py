@@ -3838,6 +3838,101 @@ def _install_plugin_helpers() -> None:
     plugin_module.unload_all = unload_all
     _register_module_export(plugin_module, "unload_all")
 
+    def unregister_safe(
+        plugin_id: str,
+        *,
+        strict: bool = False,
+    ) -> _List[str]:
+        """Unregister a plugin and any currently registered plugins that depend on it.
+
+        This prevents leaving dependents registered with missing dependencies.
+        """
+
+        if not isinstance(plugin_id, str) or not plugin_id.strip():
+            raise ValueError("plugin_id must be a non-empty string")
+        plugin_id = plugin_id.strip()
+
+        all_plugins = sorted(list_plugins())
+        if plugin_id not in all_plugins:
+            if strict:
+                raise ValueError(f"plugin '{plugin_id}' is not registered")
+            return []
+
+        deps_by_id: dict[str, set[str]] = {}
+        for pid in all_plugins:
+            meta = plugin_metadata(pid)
+            if not isinstance(meta, dict):
+                deps_by_id[pid] = set()
+                continue
+            deps = meta.get("dependencies", {})
+            if isinstance(deps, dict):
+                deps_by_id[pid] = {str(k) for k in deps.keys()}
+            else:
+                deps_by_id[pid] = set()
+
+        dependents: dict[str, _List[str]] = {}
+        for pid in all_plugins:
+            for dep in sorted(deps_by_id.get(pid, set())):
+                dependents.setdefault(dep, []).append(pid)
+
+        match_set: set[str] = set()
+        queue: _List[str] = [plugin_id]
+        idx = 0
+        while idx < len(queue):
+            current = queue[idx]
+            idx += 1
+            if current in match_set:
+                continue
+            match_set.add(current)
+            for child in dependents.get(current, ()):
+                if child not in match_set:
+                    queue.append(child)
+
+        matches = sorted(match_set)
+        internal_deps: dict[str, set[str]] = {
+            pid: {dep for dep in deps_by_id.get(pid, set()) if dep in match_set}
+            for pid in matches
+        }
+
+        indegree: dict[str, int] = {pid: len(deps) for pid, deps in internal_deps.items()}
+        children_by_id: dict[str, _List[str]] = {pid: [] for pid in matches}
+        for pid in matches:
+            for dep in sorted(internal_deps.get(pid, set())):
+                children_by_id.setdefault(dep, []).append(pid)
+
+        topo: _List[str] = []
+        topo_queue = [pid for pid in matches if indegree.get(pid, 0) == 0]
+        topo_idx = 0
+        while topo_idx < len(topo_queue):
+            pid = topo_queue[topo_idx]
+            topo_idx += 1
+            topo.append(pid)
+            for child in children_by_id.get(pid, ()):
+                indegree[child] = indegree.get(child, 0) - 1
+                if indegree[child] == 0:
+                    topo_queue.append(child)
+
+        if len(topo) != len(matches):
+            if strict:
+                remaining = sorted(pid for pid in matches if indegree.get(pid, 0) > 0)
+                raise ValueError(f"cyclic dependencies among plugins: {', '.join(remaining)}")
+            topo = list(matches)
+
+        unloaded: _List[str] = []
+        for pid in reversed(topo):
+            try:
+                unregister_plugin(pid)
+            except Exception:
+                if strict:
+                    raise
+                continue
+            unloaded.append(pid)
+        return unloaded
+
+    unregister_safe.__module__ = plugin_module.__name__
+    plugin_module.unregister_safe = unregister_safe
+    _register_module_export(plugin_module, "unregister_safe")
+
     list_services = _resolve_rs_attr("plugin.list_services")
     unregister_service = _resolve_rs_attr("plugin.unregister_service")
     if list_services is not None and unregister_service is not None:
@@ -3890,6 +3985,103 @@ def _install_plugin_helpers() -> None:
         clear_services.__module__ = plugin_module.__name__
         plugin_module.clear_services = clear_services
         _register_module_export(plugin_module, "clear_services")
+
+    shutdown = _resolve_rs_attr("plugin.shutdown")
+    clear_config = _resolve_rs_attr("plugin.clear_config")
+    list_config = _resolve_rs_attr("plugin.list_config")
+    if shutdown is not None:
+
+        def reset(*, strict: bool = False) -> _Dict[str, _List[str]]:
+            """Reset the plugin system (shutdown + clear services + clear config)."""
+
+            plugins_before = sorted(list_plugins())
+
+            deps_by_id: dict[str, set[str]] = {}
+            for pid in plugins_before:
+                meta = plugin_metadata(pid)
+                if not isinstance(meta, dict):
+                    deps_by_id[pid] = set()
+                    continue
+                deps = meta.get("dependencies", {})
+                if isinstance(deps, dict):
+                    deps_by_id[pid] = {str(k) for k in deps.keys()}
+                else:
+                    deps_by_id[pid] = set()
+
+            match_set = set(plugins_before)
+            internal_deps: dict[str, set[str]] = {
+                pid: {dep for dep in deps_by_id.get(pid, set()) if dep in match_set}
+                for pid in plugins_before
+            }
+
+            indegree: dict[str, int] = {
+                pid: len(deps) for pid, deps in internal_deps.items()
+            }
+            dependents: dict[str, _List[str]] = {pid: [] for pid in plugins_before}
+            for pid in plugins_before:
+                for dep in sorted(internal_deps.get(pid, set())):
+                    dependents.setdefault(dep, []).append(pid)
+
+            queue = [pid for pid in plugins_before if indegree.get(pid, 0) == 0]
+            order: _List[str] = []
+            idx = 0
+            while idx < len(queue):
+                pid = queue[idx]
+                idx += 1
+                order.append(pid)
+                for child in dependents.get(pid, ()):
+                    indegree[child] = indegree.get(child, 0) - 1
+                    if indegree[child] == 0:
+                        queue.append(child)
+
+            if len(order) != len(plugins_before):
+                order = list(plugins_before)
+
+            planned_unload = list(reversed(order))
+
+            try:
+                shutdown()
+            except Exception:
+                if strict:
+                    raise
+
+            if list_plugins() and not strict:
+                unload_all(strict=False)
+
+            remaining = set(list_plugins())
+            unloaded_plugins = [pid for pid in planned_unload if pid not in remaining]
+
+            removed_services: _List[str] = []
+            if hasattr(plugin_module, "clear_services"):
+                try:
+                    removed_services = plugin_module.clear_services(strict=bool(strict))
+                except ValueError:
+                    removed_services = []
+
+            removed_config: _List[str] = []
+            if clear_config is not None:
+                try:
+                    removed_config = clear_config(strict=bool(strict))
+                except ValueError:
+                    removed_config = []
+
+            if strict:
+                if list_plugins():
+                    raise RuntimeError("reset failed to unload all plugins")
+                if list_services is not None and list_services():
+                    raise RuntimeError("reset failed to clear all services")
+                if list_config is not None and list_config():
+                    raise RuntimeError("reset failed to clear all config keys")
+
+            return {
+                "plugins": unloaded_plugins,
+                "services": removed_services,
+                "config": removed_config,
+            }
+
+        reset.__module__ = plugin_module.__name__
+        plugin_module.reset = reset
+        _register_module_export(plugin_module, "reset")
 
     load_entrypoints = _resolve_rs_attr("plugin.load_entrypoints")
     if load_entrypoints is not None:
