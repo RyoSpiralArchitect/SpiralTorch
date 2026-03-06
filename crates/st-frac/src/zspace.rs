@@ -16,6 +16,10 @@ pub enum LogLatticeWindow {
     Rectangular,
     /// Hann taper for endpoint leakage suppression.
     Hann,
+    /// Tukey (tapered cosine) window with a fixed alpha=0.5.
+    Tukey,
+    /// Blackman window.
+    Blackman,
 }
 
 impl LogLatticeWindow {
@@ -32,6 +36,43 @@ impl LogLatticeWindow {
                     let phase = 2.0 * PI * idx as Scalar / denom;
                     let hann = 0.5 * (1.0 - phase.cos());
                     *w *= hann;
+                }
+            }
+            LogLatticeWindow::Tukey => {
+                if weights.len() <= 2 {
+                    return;
+                }
+                let alpha: Scalar = 0.5;
+                if alpha <= 0.0 {
+                    return;
+                }
+                if alpha >= 1.0 {
+                    LogLatticeWindow::Hann.apply(weights);
+                    return;
+                }
+                let denom = (weights.len() - 1) as Scalar;
+                let edge = alpha / 2.0;
+                for (idx, w) in weights.iter_mut().enumerate() {
+                    let x = idx as Scalar / denom;
+                    let tukey = if x < edge {
+                        0.5 * (1.0 + (PI * (2.0 * x / alpha - 1.0)).cos())
+                    } else if x <= 1.0 - edge {
+                        1.0
+                    } else {
+                        0.5 * (1.0 + (PI * (2.0 * x / alpha - 2.0 / alpha + 1.0)).cos())
+                    };
+                    *w *= tukey;
+                }
+            }
+            LogLatticeWindow::Blackman => {
+                if weights.len() <= 2 {
+                    return;
+                }
+                let denom = (weights.len() - 1) as Scalar;
+                for (idx, w) in weights.iter_mut().enumerate() {
+                    let phase = 2.0 * PI * idx as Scalar / denom;
+                    let blackman = 0.42 - 0.5 * phase.cos() + 0.08 * (2.0 * phase).cos();
+                    *w *= blackman;
                 }
             }
         }
@@ -341,7 +382,10 @@ pub fn evaluate_weighted_series_many_with_derivative(
 }
 
 #[inline]
-fn evaluate_weighted_series_inverse_unchecked(weighted: &[ComplexScalar], z: ComplexScalar) -> ComplexScalar {
+fn evaluate_weighted_series_inverse_unchecked(
+    weighted: &[ComplexScalar],
+    z: ComplexScalar,
+) -> ComplexScalar {
     debug_assert!(!weighted.is_empty());
     if weighted.len() == 1 || (z.re == 0.0 && z.im == 0.0) {
         return weighted[0];
@@ -371,7 +415,13 @@ fn evaluate_weighted_series_with_derivative_inverse_unchecked(
         return (weighted[0], ComplexScalar::new(0.0, 0.0));
     }
     if z.re == 0.0 && z.im == 0.0 {
-        return (weighted[0], weighted.get(1).copied().unwrap_or_else(|| ComplexScalar::new(0.0, 0.0)));
+        return (
+            weighted[0],
+            weighted
+                .get(1)
+                .copied()
+                .unwrap_or_else(|| ComplexScalar::new(0.0, 0.0)),
+        );
     }
 
     let w = ComplexScalar::new(1.0, 0.0) / z;
@@ -438,7 +488,9 @@ pub fn evaluate_weighted_series_with_derivative_inverse(
     if !z.re.is_finite() || !z.im.is_finite() {
         return Err(MellinError::NonFiniteZ { re: z.re, im: z.im });
     }
-    Ok(evaluate_weighted_series_with_derivative_inverse_unchecked(weighted, z))
+    Ok(evaluate_weighted_series_with_derivative_inverse_unchecked(
+        weighted, z,
+    ))
 }
 
 /// Evaluate a weighted power series using a stable strategy:
@@ -488,7 +540,9 @@ pub fn evaluate_weighted_series_with_derivative_stable(
     if z.norm_sqr() <= 1.0 {
         evaluate_weighted_series_with_derivative(weighted, z)
     } else {
-        Ok(evaluate_weighted_series_with_derivative_inverse_unchecked(weighted, z))
+        Ok(evaluate_weighted_series_with_derivative_inverse_unchecked(
+            weighted, z,
+        ))
     }
 }
 
@@ -687,11 +741,19 @@ mod tests {
 
     #[test]
     fn trapezoidal_weights_windowed_preserve_sum_matches_expected() {
-        fn assert_weights_close(actual: &[f32], expected: &[f32]) {
+        fn assert_weights_close(actual: &[Scalar], expected: &[Scalar], tol: Scalar) {
             assert_eq!(actual.len(), expected.len());
             for (idx, (&lhs, &rhs)) in actual.iter().zip(expected.iter()).enumerate() {
                 let diff = (lhs - rhs).abs();
-                assert!(diff < 1e-6, "idx={} lhs={} rhs={} diff={}", idx, lhs, rhs, diff);
+                assert!(
+                    diff < tol,
+                    "idx={} lhs={} rhs={} diff={} tol={}",
+                    idx,
+                    lhs,
+                    rhs,
+                    diff,
+                    tol
+                );
             }
         }
 
@@ -701,11 +763,36 @@ mod tests {
         let rect = trapezoidal_weights_windowed(4, LogLatticeWindow::Rectangular, true).unwrap();
         assert_eq!(rect, base);
 
-        let hann_no_preserve = trapezoidal_weights_windowed(4, LogLatticeWindow::Hann, false).unwrap();
-        assert_weights_close(&hann_no_preserve, &[0.0, 0.75, 0.75, 0.0]);
+        let hann_no_preserve =
+            trapezoidal_weights_windowed(4, LogLatticeWindow::Hann, false).unwrap();
+        assert_weights_close(&hann_no_preserve, &[0.0, 0.75, 0.75, 0.0], 1e-6);
 
         let hann_preserve = trapezoidal_weights_windowed(4, LogLatticeWindow::Hann, true).unwrap();
-        assert_weights_close(&hann_preserve, &[0.0, 1.5, 1.5, 0.0]);
+        assert_weights_close(&hann_preserve, &[0.0, 1.5, 1.5, 0.0], 1e-6);
+
+        let tukey_no_preserve =
+            trapezoidal_weights_windowed(5, LogLatticeWindow::Tukey, false).unwrap();
+        assert_weights_close(&tukey_no_preserve, &[0.0, 1.0, 1.0, 1.0, 0.0], 1e-6);
+
+        let tukey_preserve =
+            trapezoidal_weights_windowed(5, LogLatticeWindow::Tukey, true).unwrap();
+        assert_weights_close(
+            &tukey_preserve,
+            &[0.0, 4.0 / 3.0, 4.0 / 3.0, 4.0 / 3.0, 0.0],
+            1e-5,
+        );
+
+        let blackman_no_preserve =
+            trapezoidal_weights_windowed(5, LogLatticeWindow::Blackman, false).unwrap();
+        assert_weights_close(&blackman_no_preserve, &[0.0, 0.34, 1.0, 0.34, 0.0], 1e-5);
+
+        let blackman_preserve =
+            trapezoidal_weights_windowed(5, LogLatticeWindow::Blackman, true).unwrap();
+        assert_weights_close(
+            &blackman_preserve,
+            &[0.0, 0.8095238, 2.3809524, 0.8095238, 0.0],
+            1e-5,
+        );
     }
 
     #[test]
@@ -799,12 +886,22 @@ mod tests {
         let inverse = evaluate_weighted_series_inverse(&weighted, z).unwrap();
         let stable = evaluate_weighted_series_stable(&weighted, z).unwrap();
 
-        assert!((direct - inverse).norm() < 1e-5, "diff={}", (direct - inverse).norm());
-        assert!((direct - stable).norm() < 1e-5, "diff={}", (direct - stable).norm());
+        assert!(
+            (direct - inverse).norm() < 1e-5,
+            "diff={}",
+            (direct - inverse).norm()
+        );
+        assert!(
+            (direct - stable).norm() < 1e-5,
+            "diff={}",
+            (direct - stable).norm()
+        );
 
         let (direct_v, direct_d) = evaluate_weighted_series_with_derivative(&weighted, z).unwrap();
-        let (inv_v, inv_d) = evaluate_weighted_series_with_derivative_inverse(&weighted, z).unwrap();
-        let (stable_v, stable_d) = evaluate_weighted_series_with_derivative_stable(&weighted, z).unwrap();
+        let (inv_v, inv_d) =
+            evaluate_weighted_series_with_derivative_inverse(&weighted, z).unwrap();
+        let (stable_v, stable_d) =
+            evaluate_weighted_series_with_derivative_stable(&weighted, z).unwrap();
         assert!((direct_v - inv_v).norm() < 1e-5);
         assert!((direct_v - stable_v).norm() < 1e-5);
         assert!((direct_d - inv_d).norm() < 1e-5);

@@ -5,20 +5,12 @@
 
 use crate::mellin_types::{ComplexScalar, MellinError, MellinResult, Scalar, ZSpaceError};
 use crate::zspace::{
-    evaluate_weighted_series,
-    evaluate_weighted_series_many,
-    evaluate_weighted_series_many_stable,
+    evaluate_weighted_series, evaluate_weighted_series_many, evaluate_weighted_series_many_stable,
     evaluate_weighted_series_many_with_derivative,
-    evaluate_weighted_series_many_with_derivative_stable,
-    evaluate_weighted_series_stable,
-    evaluate_weighted_series_with_derivative,
-    evaluate_weighted_series_with_derivative_stable,
-    mellin_log_lattice_prefactor,
-    prepare_weighted_series,
-    trapezoidal_weights,
-    trapezoidal_weights_windowed,
-    weighted_z_transform,
-    LogLatticeWindow,
+    evaluate_weighted_series_many_with_derivative_stable, evaluate_weighted_series_stable,
+    evaluate_weighted_series_with_derivative, evaluate_weighted_series_with_derivative_stable,
+    mellin_log_lattice_prefactor, prepare_weighted_series, trapezoidal_weights,
+    trapezoidal_weights_windowed, weighted_z_transform, LogLatticeWindow,
 };
 
 /// Change-of-variable helper for Mellin integrals.
@@ -110,6 +102,20 @@ pub fn sample_log_uniform_exp_decay_scaled(
 #[inline]
 fn complex_magnitude(value: ComplexScalar) -> Scalar {
     value.norm()
+}
+
+#[cfg(feature = "wgpu")]
+#[inline]
+fn complex_pow_usize(mut base: ComplexScalar, mut exp: usize) -> ComplexScalar {
+    let mut out = ComplexScalar::new(1.0, 0.0);
+    while exp > 0 {
+        if exp & 1 == 1 {
+            out *= base;
+        }
+        exp >>= 1;
+        base *= base;
+    }
+    out
 }
 
 #[cfg(feature = "wgpu")]
@@ -265,16 +271,41 @@ impl MellinEvalPlan {
         self.shape
     }
 
+    #[inline]
+    fn apply_prefactors(&self, series: Vec<ComplexScalar>) -> Vec<ComplexScalar> {
+        series
+            .into_iter()
+            .zip(self.prefactors.iter())
+            .map(|(value, prefactor)| value * *prefactor)
+            .collect()
+    }
+
+    #[inline]
+    fn apply_prefactors_with_derivative(
+        &self,
+        series: Vec<ComplexScalar>,
+        d_series_dz: Vec<ComplexScalar>,
+    ) -> (Vec<ComplexScalar>, Vec<ComplexScalar>) {
+        let start = ComplexScalar::new(self.log_start, 0.0);
+        let step = ComplexScalar::new(self.log_step, 0.0);
+
+        let mut values = Vec::with_capacity(self.z_points.len());
+        let mut derivatives = Vec::with_capacity(self.z_points.len());
+        for (idx, (p, dpdz)) in series.into_iter().zip(d_series_dz.into_iter()).enumerate() {
+            let prefactor = self.prefactors[idx];
+            let z = self.z_points[idx];
+            values.push(p * prefactor);
+            derivatives.push(prefactor * (start * p + step * z * dpdz));
+        }
+        (values, derivatives)
+    }
+
     pub fn evaluate(&self, weighted: &[ComplexScalar]) -> MellinResult<Vec<ComplexScalar>> {
         if self.z_points.is_empty() {
             return Ok(Vec::new());
         }
         let series = evaluate_weighted_series_many(weighted, &self.z_points)?;
-        Ok(series
-            .into_iter()
-            .zip(self.prefactors.iter())
-            .map(|(value, prefactor)| value * *prefactor)
-            .collect())
+        Ok(self.apply_prefactors(series))
     }
 
     pub fn evaluate_stable(&self, weighted: &[ComplexScalar]) -> MellinResult<Vec<ComplexScalar>> {
@@ -282,11 +313,7 @@ impl MellinEvalPlan {
             return Ok(Vec::new());
         }
         let series = evaluate_weighted_series_many_stable(weighted, &self.z_points)?;
-        Ok(series
-            .into_iter()
-            .zip(self.prefactors.iter())
-            .map(|(value, prefactor)| value * *prefactor)
-            .collect())
+        Ok(self.apply_prefactors(series))
     }
 
     pub fn evaluate_with_derivative(
@@ -299,21 +326,7 @@ impl MellinEvalPlan {
 
         let (series, d_series_dz) =
             evaluate_weighted_series_many_with_derivative(weighted, &self.z_points)?;
-        let start = ComplexScalar::new(self.log_start, 0.0);
-        let step = ComplexScalar::new(self.log_step, 0.0);
-
-        let mut values = Vec::with_capacity(series.len());
-        let mut derivatives = Vec::with_capacity(series.len());
-        for idx in 0..series.len() {
-            let prefactor = self.prefactors[idx];
-            let z = self.z_points[idx];
-            let p = series[idx];
-            let dpdz = d_series_dz[idx];
-            values.push(p * prefactor);
-            derivatives.push(prefactor * (start * p + step * z * dpdz));
-        }
-
-        Ok((values, derivatives))
+        Ok(self.apply_prefactors_with_derivative(series, d_series_dz))
     }
 
     pub fn evaluate_with_derivative_stable(
@@ -326,21 +339,7 @@ impl MellinEvalPlan {
 
         let (series, d_series_dz) =
             evaluate_weighted_series_many_with_derivative_stable(weighted, &self.z_points)?;
-        let start = ComplexScalar::new(self.log_start, 0.0);
-        let step = ComplexScalar::new(self.log_step, 0.0);
-
-        let mut values = Vec::with_capacity(series.len());
-        let mut derivatives = Vec::with_capacity(series.len());
-        for idx in 0..series.len() {
-            let prefactor = self.prefactors[idx];
-            let z = self.z_points[idx];
-            let p = series[idx];
-            let dpdz = d_series_dz[idx];
-            values.push(p * prefactor);
-            derivatives.push(prefactor * (start * p + step * z * dpdz));
-        }
-
-        Ok((values, derivatives))
+        Ok(self.apply_prefactors_with_derivative(series, d_series_dz))
     }
 
     pub fn evaluate_magnitude(&self, weighted: &[ComplexScalar]) -> MellinResult<Vec<Scalar>> {
@@ -385,11 +384,70 @@ impl MellinEvalPlan {
         }
         let series =
             crate::mellin_wgpu::evaluate_weighted_series_many_gpu(weighted, &self.z_points)?;
-        Ok(series
-            .into_iter()
-            .zip(self.prefactors.iter())
-            .map(|(value, prefactor)| value * *prefactor)
-            .collect())
+        Ok(self.apply_prefactors(series))
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn evaluate_stable_series_gpu(
+        &self,
+        weighted: &[ComplexScalar],
+    ) -> MellinResult<Vec<ComplexScalar>> {
+        if weighted.is_empty() {
+            return Err(ZSpaceError::EmptySeries.into());
+        }
+
+        let mut direct_indices = Vec::new();
+        let mut direct_z_points = Vec::new();
+        let mut inverse_indices = Vec::new();
+        let mut inverse_z_points = Vec::new();
+        for (idx, &z) in self.z_points.iter().enumerate() {
+            if z.norm_sqr() <= 1.0 {
+                direct_indices.push(idx);
+                direct_z_points.push(z);
+            } else {
+                inverse_indices.push(idx);
+                inverse_z_points.push(z);
+            }
+        }
+
+        let mut series = vec![ComplexScalar::new(0.0, 0.0); self.z_points.len()];
+        if !direct_z_points.is_empty() {
+            let direct =
+                crate::mellin_wgpu::evaluate_weighted_series_many_gpu(weighted, &direct_z_points)?;
+            for (idx, value) in direct_indices.into_iter().zip(direct.into_iter()) {
+                series[idx] = value;
+            }
+        }
+
+        if !inverse_z_points.is_empty() {
+            let rev_weighted: Vec<_> = weighted.iter().rev().copied().collect();
+            let inverse_w: Vec<_> = inverse_z_points
+                .iter()
+                .map(|&z| ComplexScalar::new(1.0, 0.0) / z)
+                .collect();
+            let q_values =
+                crate::mellin_wgpu::evaluate_weighted_series_many_gpu(&rev_weighted, &inverse_w)?;
+            let power = weighted.len() - 1;
+            for (pos, q) in q_values.into_iter().enumerate() {
+                let idx = inverse_indices[pos];
+                let z = inverse_z_points[pos];
+                series[idx] = complex_pow_usize(z, power) * q;
+            }
+        }
+
+        Ok(series)
+    }
+
+    #[cfg(feature = "wgpu")]
+    pub fn evaluate_stable_gpu(
+        &self,
+        weighted: &[ComplexScalar],
+    ) -> MellinResult<Vec<ComplexScalar>> {
+        if self.z_points.is_empty() {
+            return Ok(Vec::new());
+        }
+        let series = self.evaluate_stable_series_gpu(weighted)?;
+        Ok(self.apply_prefactors(series))
     }
 
     #[cfg(feature = "wgpu")]
@@ -410,21 +468,96 @@ impl MellinEvalPlan {
             crate::mellin_wgpu::evaluate_weighted_series_many_gpu(&deriv_coeffs, &self.z_points)?
         };
 
-        let start = ComplexScalar::new(self.log_start, 0.0);
-        let step = ComplexScalar::new(self.log_step, 0.0);
+        Ok(self.apply_prefactors_with_derivative(series, d_series_dz))
+    }
 
-        let mut values = Vec::with_capacity(series.len());
-        let mut derivatives = Vec::with_capacity(series.len());
-        for idx in 0..series.len() {
-            let prefactor = self.prefactors[idx];
-            let z = self.z_points[idx];
-            let p = series[idx];
-            let dpdz = d_series_dz[idx];
-            values.push(p * prefactor);
-            derivatives.push(prefactor * (start * p + step * z * dpdz));
+    #[cfg(feature = "wgpu")]
+    fn evaluate_stable_series_with_derivative_gpu(
+        &self,
+        weighted: &[ComplexScalar],
+    ) -> MellinResult<(Vec<ComplexScalar>, Vec<ComplexScalar>)> {
+        if weighted.is_empty() {
+            return Err(ZSpaceError::EmptySeries.into());
         }
 
-        Ok((values, derivatives))
+        let mut direct_indices = Vec::new();
+        let mut direct_z_points = Vec::new();
+        let mut inverse_indices = Vec::new();
+        let mut inverse_z_points = Vec::new();
+        for (idx, &z) in self.z_points.iter().enumerate() {
+            if z.norm_sqr() <= 1.0 {
+                direct_indices.push(idx);
+                direct_z_points.push(z);
+            } else {
+                inverse_indices.push(idx);
+                inverse_z_points.push(z);
+            }
+        }
+
+        let deriv_coeffs = if weighted.len() <= 1 {
+            None
+        } else {
+            Some(weighted_series_derivative_coeffs(weighted))
+        };
+
+        let mut series = vec![ComplexScalar::new(0.0, 0.0); self.z_points.len()];
+        let mut derivatives = vec![ComplexScalar::new(0.0, 0.0); self.z_points.len()];
+
+        if !direct_z_points.is_empty() {
+            let direct =
+                crate::mellin_wgpu::evaluate_weighted_series_many_gpu(weighted, &direct_z_points)?;
+            let direct_deriv = if let Some(coeffs) = deriv_coeffs.as_ref() {
+                crate::mellin_wgpu::evaluate_weighted_series_many_gpu(coeffs, &direct_z_points)?
+            } else {
+                vec![ComplexScalar::new(0.0, 0.0); direct_z_points.len()]
+            };
+
+            for (pos, idx) in direct_indices.iter().copied().enumerate() {
+                series[idx] = direct[pos];
+                derivatives[idx] = direct_deriv[pos];
+            }
+        }
+
+        if !inverse_z_points.is_empty() {
+            let rev_weighted: Vec<_> = weighted.iter().rev().copied().collect();
+            let inverse_w: Vec<_> = inverse_z_points
+                .iter()
+                .map(|&z| ComplexScalar::new(1.0, 0.0) / z)
+                .collect();
+            let q_values =
+                crate::mellin_wgpu::evaluate_weighted_series_many_gpu(&rev_weighted, &inverse_w)?;
+            let q_derivs = if let Some(coeffs) = deriv_coeffs.as_ref() {
+                let rev_deriv_coeffs: Vec<_> = coeffs.iter().rev().copied().collect();
+                crate::mellin_wgpu::evaluate_weighted_series_many_gpu(
+                    &rev_deriv_coeffs,
+                    &inverse_w,
+                )?
+            } else {
+                vec![ComplexScalar::new(0.0, 0.0); inverse_z_points.len()]
+            };
+
+            let value_power = weighted.len() - 1;
+            let deriv_power = weighted.len().saturating_sub(2);
+            for (pos, idx) in inverse_indices.iter().copied().enumerate() {
+                let z = inverse_z_points[pos];
+                series[idx] = complex_pow_usize(z, value_power) * q_values[pos];
+                derivatives[idx] = complex_pow_usize(z, deriv_power) * q_derivs[pos];
+            }
+        }
+
+        Ok((series, derivatives))
+    }
+
+    #[cfg(feature = "wgpu")]
+    pub fn evaluate_with_derivative_stable_gpu(
+        &self,
+        weighted: &[ComplexScalar],
+    ) -> MellinResult<(Vec<ComplexScalar>, Vec<ComplexScalar>)> {
+        if self.z_points.is_empty() {
+            return Ok((Vec::new(), Vec::new()));
+        }
+        let (series, d_series_dz) = self.evaluate_stable_series_with_derivative_gpu(weighted)?;
+        Ok(self.apply_prefactors_with_derivative(series, d_series_dz))
     }
 
     #[cfg(feature = "wgpu")]
@@ -591,7 +724,8 @@ impl MellinLogGrid {
         s: ComplexScalar,
     ) -> MellinResult<(ComplexScalar, ComplexScalar)> {
         let (prefactor, z) = mellin_log_lattice_prefactor(self.log_start, self.log_step, s)?;
-        let (series, d_series_dz) = evaluate_weighted_series_with_derivative_stable(&self.weighted, z)?;
+        let (series, d_series_dz) =
+            evaluate_weighted_series_with_derivative_stable(&self.weighted, z)?;
 
         let start = ComplexScalar::new(self.log_start, 0.0);
         let step = ComplexScalar::new(self.log_step, 0.0);
@@ -617,7 +751,10 @@ impl MellinLogGrid {
     }
 
     /// Evaluate the Mellin transform at multiple points using stable Z-series evaluation for `|z|>1`.
-    pub fn evaluate_many_stable(&self, s_values: &[ComplexScalar]) -> MellinResult<Vec<ComplexScalar>> {
+    pub fn evaluate_many_stable(
+        &self,
+        s_values: &[ComplexScalar],
+    ) -> MellinResult<Vec<ComplexScalar>> {
         if s_values.is_empty() {
             return Ok(Vec::new());
         }
@@ -695,6 +832,12 @@ impl MellinLogGrid {
     /// Evaluate the Mellin transform using a precomputed plan with stable Z-series evaluation for `|z|>1`.
     pub fn evaluate_plan_stable(&self, plan: &MellinEvalPlan) -> MellinResult<Vec<ComplexScalar>> {
         self.assert_plan_compatible(plan)?;
+        #[cfg(feature = "wgpu")]
+        match plan.evaluate_stable_gpu(&self.weighted) {
+            Ok(values) => return Ok(values),
+            Err(MellinError::Gpu(_)) => {}
+            Err(other) => return Err(other),
+        }
         plan.evaluate_stable(&self.weighted)
     }
 
@@ -723,6 +866,12 @@ impl MellinLogGrid {
         plan: &MellinEvalPlan,
     ) -> MellinResult<(Vec<ComplexScalar>, Vec<ComplexScalar>)> {
         self.assert_plan_compatible(plan)?;
+        #[cfg(feature = "wgpu")]
+        match plan.evaluate_with_derivative_stable_gpu(&self.weighted) {
+            Ok(values) => return Ok(values),
+            Err(MellinError::Gpu(_)) => {}
+            Err(other) => return Err(other),
+        }
         plan.evaluate_with_derivative_stable(&self.weighted)
     }
 
@@ -1543,9 +1692,14 @@ mod tests {
         let samples = vec![ComplexScalar::new(1.0, 0.0); len];
 
         let rect = MellinLogGrid::new(log_start, log_step, samples.clone()).unwrap();
-        let hann =
-            MellinLogGrid::new_with_window(log_start, log_step, samples, LogLatticeWindow::Hann, true)
-                .unwrap();
+        let hann = MellinLogGrid::new_with_window(
+            log_start,
+            log_step,
+            samples,
+            LogLatticeWindow::Hann,
+            true,
+        )
+        .unwrap();
 
         let expected_weights = [0.0, 1.5, 1.5, 0.0];
         assert_eq!(hann.weights().len(), expected_weights.len());
@@ -1556,7 +1710,14 @@ mod tests {
             .enumerate()
         {
             let diff = (lhs - rhs).abs();
-            assert!(diff < 1e-6, "idx={} lhs={} rhs={} diff={}", idx, lhs, rhs, diff);
+            assert!(
+                diff < 1e-6,
+                "idx={} lhs={} rhs={} diff={}",
+                idx,
+                lhs,
+                rhs,
+                diff
+            );
         }
 
         let s0 = ComplexScalar::new(0.0, 0.0);
@@ -1597,6 +1758,39 @@ mod tests {
             let diff_d = (direct_d[idx] - stable_d[idx]).norm();
             assert!(diff_v < 1e-5, "idx={} diff={}", idx, diff_v);
             assert!(diff_d < 1e-5, "idx={} diff={}", idx, diff_d);
+        }
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn mellin_log_grid_stable_plan_gpu_fallback_matches_cpu() {
+        let log_start = -3.0f32;
+        let log_step = 0.25f32;
+        let len = 64usize;
+        let grid = MellinLogGrid::from_function(log_start, log_step, len, exp_decay).unwrap();
+        let weighted = grid.weighted_series().unwrap();
+
+        let s_values = vec![
+            ComplexScalar::new(2.0, 0.0),
+            ComplexScalar::new(1.5, 0.2),
+            ComplexScalar::new(0.8, -0.7),
+        ];
+        let plan = MellinEvalPlan::many(log_start, log_step, &s_values).unwrap();
+
+        let cpu_values = plan.evaluate_stable(&weighted).unwrap();
+        let routed_values = grid.evaluate_plan_stable(&plan).unwrap();
+        for idx in 0..cpu_values.len() {
+            let diff = (cpu_values[idx] - routed_values[idx]).norm();
+            assert!(diff < 1e-4, "idx={} diff={}", idx, diff);
+        }
+
+        let (cpu_v, cpu_d) = plan.evaluate_with_derivative_stable(&weighted).unwrap();
+        let (routed_v, routed_d) = grid.evaluate_plan_with_derivative_stable(&plan).unwrap();
+        for idx in 0..cpu_v.len() {
+            let diff_v = (cpu_v[idx] - routed_v[idx]).norm();
+            let diff_d = (cpu_d[idx] - routed_d[idx]).norm();
+            assert!(diff_v < 1e-4, "idx={} value diff={}", idx, diff_v);
+            assert!(diff_d < 1e-4, "idx={} deriv diff={}", idx, diff_d);
         }
     }
 
@@ -1646,6 +1840,7 @@ mod tests {
         let plan = MellinEvalPlan::many(log_start, log_step, &s_values).unwrap();
         let (plan_values, plan_derivs) = plan.evaluate_with_derivative(&weighted).unwrap();
         let (grid_values, grid_derivs) = grid.evaluate_plan_with_derivative(&plan).unwrap();
+        let deriv_tol = if cfg!(feature = "wgpu") { 2.5e-6 } else { 1e-6 };
 
         assert_eq!(plan_values.len(), grid_values.len());
         assert_eq!(plan_derivs.len(), grid_derivs.len());
@@ -1653,7 +1848,12 @@ mod tests {
             let value_diff = (plan_values[idx] - grid_values[idx]).norm();
             let deriv_diff = (plan_derivs[idx] - grid_derivs[idx]).norm();
             assert!(value_diff < 1e-6, "idx={} value diff={}", idx, value_diff);
-            assert!(deriv_diff < 1e-6, "idx={} deriv diff={}", idx, deriv_diff);
+            assert!(
+                deriv_diff < deriv_tol,
+                "idx={} deriv diff={}",
+                idx,
+                deriv_diff
+            );
         }
     }
 

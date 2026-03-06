@@ -175,47 +175,37 @@ impl MellinGpuExecutor {
         let z_bytes = (std::mem::size_of::<ComplexPod>() * z_values.len()) as u64;
         let output_size = z_bytes;
 
-        let (coeff_buffer, z_buffer, output_buffer, staging_buffer, params_buffer) = {
-            let mut buffers = self.buffers.lock().expect("mellin gpu buffers poisoned");
-
-            let coeff = buffers.ensure(
-                &self.device,
-                "st.mellin.gpu.coeffs",
-                coeff_bytes,
-                wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            );
-            let z = buffers.ensure(
-                &self.device,
-                "st.mellin.gpu.zs",
-                z_bytes,
-                wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            );
-            let output = buffers.ensure(
-                &self.device,
-                "st.mellin.gpu.output",
-                output_size,
-                wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-            );
-            let staging = buffers.ensure(
-                &self.device,
-                "st.mellin.gpu.staging",
-                output_size,
-                wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            );
-            let params = buffers.ensure_params(&self.device);
-            (coeff, z, output, staging, params)
-        };
-
-        self.queue.write_buffer(
-            coeff_buffer.as_ref(),
-            0,
-            cast_slice(&coeffs),
+        let mut buffers = self.buffers.lock().expect("mellin gpu buffers poisoned");
+        let coeff_buffer = buffers.ensure(
+            &self.device,
+            "st.mellin.gpu.coeffs",
+            coeff_bytes,
+            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         );
-        self.queue.write_buffer(
-            z_buffer.as_ref(),
-            0,
-            cast_slice(&zs),
+        let z_buffer = buffers.ensure(
+            &self.device,
+            "st.mellin.gpu.zs",
+            z_bytes,
+            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         );
+        let output_buffer = buffers.ensure(
+            &self.device,
+            "st.mellin.gpu.output",
+            output_size,
+            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        );
+        let params_buffer = buffers.ensure_params(&self.device);
+        let staging_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("st.mellin.gpu.staging"),
+            size: output_size.max(4),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        }));
+
+        self.queue
+            .write_buffer(coeff_buffer.as_ref(), 0, cast_slice(&coeffs));
+        self.queue
+            .write_buffer(z_buffer.as_ref(), 0, cast_slice(&zs));
 
         let params = ParamsPod {
             len: weighted.len() as u32,
@@ -283,14 +273,16 @@ impl MellinGpuExecutor {
             Ok(()) => {}
             Err(_) => return Err(MellinGpuError::Map),
         }
-        let data = slice.get_mapped_range();
-        let pods: &[ComplexPod] = cast_slice(&data);
         let mut result = Vec::with_capacity(z_values.len());
-        for pod in pods.iter() {
-            result.push(ComplexScalar::new(pod.re as Scalar, pod.im as Scalar));
+        {
+            let data = slice.get_mapped_range();
+            let pods: &[ComplexPod] = cast_slice(&data);
+            for pod in pods.iter() {
+                result.push(ComplexScalar::new(pod.re as Scalar, pod.im as Scalar));
+            }
         }
-        drop(data);
         staging_buffer.unmap();
+        drop(buffers);
 
         Ok(result)
     }
@@ -301,7 +293,6 @@ struct MellinGpuBuffers {
     coeffs: Option<CachedBuffer>,
     zs: Option<CachedBuffer>,
     output: Option<CachedBuffer>,
-    staging: Option<CachedBuffer>,
     params: Option<Arc<wgpu::Buffer>>,
 }
 
@@ -323,7 +314,6 @@ impl MellinGpuBuffers {
             "st.mellin.gpu.coeffs" => &mut self.coeffs,
             "st.mellin.gpu.zs" => &mut self.zs,
             "st.mellin.gpu.output" => &mut self.output,
-            "st.mellin.gpu.staging" => &mut self.staging,
             _ => {
                 // Fallback: allocate a fresh buffer (label is only used internally).
                 let buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -352,7 +342,10 @@ impl MellinGpuBuffers {
             });
         }
 
-        slot.as_ref().expect("buffer must be allocated").buffer.clone()
+        slot.as_ref()
+            .expect("buffer must be allocated")
+            .buffer
+            .clone()
     }
 
     fn ensure_params(&mut self, device: &wgpu::Device) -> Arc<wgpu::Buffer> {
@@ -425,16 +418,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if idx >= params.count {
         return;
     }
-    var acc = Complex(0.0, 0.0);
-    var power = Complex(1.0, 0.0);
+    if params.len == 0u {
+        out[idx] = Complex(0.0, 0.0);
+        return;
+    }
     let z = zs[idx];
-    for (var k: u32 = 0u; k < params.len; k = k + 1u) {
-        let coeff = coeffs[k];
-        acc = Complex(
-            acc.re + coeff.re * power.re - coeff.im * power.im,
-            acc.im + coeff.re * power.im + coeff.im * power.re,
-        );
-        power = complex_mul(power, z);
+    var acc = coeffs[params.len - 1u];
+    for (var k: u32 = params.len - 1u; k > 0u; k = k - 1u) {
+        let coeff = coeffs[k - 1u];
+        let prod = complex_mul(z, acc);
+        acc = Complex(coeff.re + prod.re, coeff.im + prod.im);
     }
     out[idx] = acc;
 }

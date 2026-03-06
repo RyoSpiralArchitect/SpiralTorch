@@ -92,8 +92,10 @@ fn parse_log_lattice_window(window: &str) -> PyResult<LogLatticeWindow> {
     match window.to_ascii_lowercase().as_str() {
         "rect" | "rectangular" | "none" => Ok(LogLatticeWindow::Rectangular),
         "hann" => Ok(LogLatticeWindow::Hann),
+        "tukey" => Ok(LogLatticeWindow::Tukey),
+        "blackman" => Ok(LogLatticeWindow::Blackman),
         other => Err(PyValueError::new_err(format!(
-            "unknown window '{other}', expected 'rectangular' or 'hann'"
+            "unknown window '{other}', expected 'rectangular', 'hann', 'tukey', or 'blackman'"
         ))),
     }
 }
