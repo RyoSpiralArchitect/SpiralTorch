@@ -223,6 +223,16 @@ declare module "spiraltorch-wasm" {
     export function fft_forward_in_place(buffer: Float32Array): void;
     export function fft_inverse_in_place(buffer: Float32Array): void;
 
+    export type LogLatticeWindow =
+        | "rect"
+        | "rectangular"
+        | "none"
+        | "hann"
+        | "tukey"
+        | "blackman";
+
+    export type ComplexArrayPair = [Float32Array, Float32Array];
+
     export class WasmMellinEvalPlan {
         private constructor();
         static many(
@@ -250,6 +260,28 @@ declare module "spiraltorch-wasm" {
 
     export class WasmMellinLogGrid {
         constructor(log_start: number, log_step: number, samples: Float32Array);
+        static newWithWindow(
+            log_start: number,
+            log_step: number,
+            samples: Float32Array,
+            window: LogLatticeWindow,
+            preserve_sum: boolean,
+        ): WasmMellinLogGrid;
+        static expDecay(
+            log_start: number,
+            log_step: number,
+            len: number,
+            window: LogLatticeWindow,
+            preserve_sum: boolean,
+        ): WasmMellinLogGrid;
+        static expDecayScaled(
+            log_start: number,
+            log_step: number,
+            len: number,
+            rate: number,
+            window: LogLatticeWindow,
+            preserve_sum: boolean,
+        ): WasmMellinLogGrid;
         readonly logStart: number;
         readonly logStep: number;
         len(): number;
@@ -262,6 +294,9 @@ declare module "spiraltorch-wasm" {
         planVerticalLine(real: number, imagValues: Float32Array): WasmMellinEvalPlan;
         planMesh(realValues: Float32Array, imagValues: Float32Array): WasmMellinEvalPlan;
         evaluatePlan(plan: WasmMellinEvalPlan): Float32Array;
+        evaluatePlanStable(plan: WasmMellinEvalPlan): Float32Array;
+        evaluatePlanWithDerivative(plan: WasmMellinEvalPlan): ComplexArrayPair;
+        evaluatePlanWithDerivativeStable(plan: WasmMellinEvalPlan): ComplexArrayPair;
         evaluatePlanMagnitude(plan: WasmMellinEvalPlan): Float32Array;
         evaluatePlanLogMagnitude(plan: WasmMellinEvalPlan, epsilon: number): Float32Array;
         trainStepMatchGridPlan(
@@ -270,7 +305,13 @@ declare module "spiraltorch-wasm" {
             lr: number,
         ): number;
         evaluate(s: Float32Array): Float32Array;
+        evaluateStable(s: Float32Array): Float32Array;
+        evaluateWithDerivative(s: Float32Array): ComplexArrayPair;
+        evaluateWithDerivativeStable(s: Float32Array): ComplexArrayPair;
         evaluateMany(sValues: Float32Array): Float32Array;
+        evaluateManyStable(sValues: Float32Array): Float32Array;
+        evaluateManyWithDerivative(sValues: Float32Array): ComplexArrayPair;
+        evaluateManyWithDerivativeStable(sValues: Float32Array): ComplexArrayPair;
         evaluateVerticalLine(real: number, imagValues: Float32Array): Float32Array;
         evaluateMesh(realValues: Float32Array, imagValues: Float32Array): Float32Array;
         evaluateMeshMagnitude(realValues: Float32Array, imagValues: Float32Array): Float32Array;
