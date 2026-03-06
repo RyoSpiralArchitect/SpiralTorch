@@ -3930,6 +3930,9 @@ def _install_plugin_helpers() -> None:
         return unloaded
 
     unregister_safe.__module__ = plugin_module.__name__
+    _rs_unregister_safe = _resolve_rs_attr("plugin.unregister_safe")
+    if _rs_unregister_safe is not None:
+        unregister_safe = _rs_unregister_safe
     plugin_module.unregister_safe = unregister_safe
     _register_module_export(plugin_module, "unregister_safe")
 
@@ -3954,6 +3957,9 @@ def _install_plugin_helpers() -> None:
         return graph
 
     dependency_graph.__module__ = plugin_module.__name__
+    _rs_dependency_graph = _resolve_rs_attr("plugin.dependency_graph")
+    if _rs_dependency_graph is not None:
+        dependency_graph = _rs_dependency_graph
     plugin_module.dependency_graph = dependency_graph
     _register_module_export(plugin_module, "dependency_graph")
 
@@ -4170,6 +4176,9 @@ def _install_plugin_helpers() -> None:
         return result
 
     validate_dependencies.__module__ = plugin_module.__name__
+    _rs_validate_dependencies = _resolve_rs_attr("plugin.validate_dependencies")
+    if _rs_validate_dependencies is not None:
+        validate_dependencies = _rs_validate_dependencies
     plugin_module.validate_dependencies = validate_dependencies
     _register_module_export(plugin_module, "validate_dependencies")
 

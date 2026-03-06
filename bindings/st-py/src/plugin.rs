@@ -988,6 +988,15 @@ fn unregister_plugin(plugin_id: &str) -> PyResult<()> {
 }
 
 #[pyfunction]
+#[pyo3(signature = (plugin_id, *, strict=false))]
+fn unregister_safe(plugin_id: &str, strict: bool) -> PyResult<Vec<String>> {
+    init_plugin_system().map_err(tensor_err_to_py)?;
+    global_registry()
+        .unregister_safe(plugin_id, strict)
+        .map_err(tensor_err_to_py)
+}
+
+#[pyfunction]
 #[pyo3(signature = (plugin_id))]
 fn plugin_metadata(py: Python<'_>, plugin_id: &str) -> PyResult<Option<PyObject>> {
     init_plugin_system().map_err(tensor_err_to_py)?;
@@ -1558,6 +1567,69 @@ fn list_plugins() -> PyResult<Vec<String>> {
 }
 
 #[pyfunction]
+#[pyo3(signature = (*, internal_only=false))]
+fn dependency_graph(py: Python<'_>, internal_only: bool) -> PyResult<PyObject> {
+    init_plugin_system().map_err(tensor_err_to_py)?;
+
+    let graph = global_registry().dependency_graph(internal_only);
+    let out = PyDict::new_bound(py);
+    let mut keys: Vec<String> = graph.keys().cloned().collect();
+    keys.sort();
+    for key in keys {
+        let deps = graph.get(&key).cloned().unwrap_or_default();
+        out.set_item(key, deps)?;
+    }
+    Ok(out.into_py(py))
+}
+
+#[pyfunction]
+#[pyo3(signature = (*, internal_only=false, strict=false))]
+fn validate_dependencies(py: Python<'_>, internal_only: bool, strict: bool) -> PyResult<PyObject> {
+    init_plugin_system().map_err(tensor_err_to_py)?;
+
+    let summary = global_registry().validate_dependency_graph(internal_only);
+    if strict && !summary.ok {
+        let mut parts = Vec::new();
+        if !summary.missing.is_empty() && !internal_only {
+            parts.push(format!(
+                "missing dependencies for {} plugin(s)",
+                summary.missing.len()
+            ));
+        }
+        if !summary.cycles.is_empty() {
+            parts.push(format!("cycles detected ({})", summary.cycles.len()));
+        }
+        if parts.is_empty() {
+            parts.push("dependency validation failed".to_string());
+        }
+        return Err(PyValueError::new_err(format!(
+            "dependency validation failed: {}",
+            parts.join(", ")
+        )));
+    }
+
+    let dict = PyDict::new_bound(py);
+    dict.set_item("ok", summary.ok)?;
+
+    let missing = PyDict::new_bound(py);
+    let mut missing_keys: Vec<&String> = summary.missing.keys().collect();
+    missing_keys.sort();
+    for key in missing_keys {
+        let deps = summary.missing.get(key).cloned().unwrap_or_default();
+        missing.set_item(key, deps)?;
+    }
+    dict.set_item("missing", missing)?;
+
+    let cycles = PyList::empty_bound(py);
+    for cycle in summary.cycles {
+        cycles.append(cycle)?;
+    }
+    dict.set_item("cycles", cycles)?;
+
+    Ok(dict.into_py(py))
+}
+
+#[pyfunction]
 #[pyo3(signature = (event_type, payload=None))]
 fn publish(py: Python<'_>, event_type: &str, payload: Option<PyObject>) -> PyResult<()> {
     init_plugin_system().map_err(tensor_err_to_py)?;
@@ -2008,8 +2080,11 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
     module.add_function(wrap_pyfunction!(listen, &module)?)?;
     module.add_function(wrap_pyfunction!(event_types, &module)?)?;
     module.add_function(wrap_pyfunction!(list_plugins, &module)?)?;
+    module.add_function(wrap_pyfunction!(dependency_graph, &module)?)?;
+    module.add_function(wrap_pyfunction!(validate_dependencies, &module)?)?;
     module.add_function(wrap_pyfunction!(register_python_plugin, &module)?)?;
     module.add_function(wrap_pyfunction!(unregister_plugin, &module)?)?;
+    module.add_function(wrap_pyfunction!(unregister_safe, &module)?)?;
     module.add_function(wrap_pyfunction!(plugin_metadata, &module)?)?;
     module.add_function(wrap_pyfunction!(find_by_capability, &module)?)?;
     module.add_function(wrap_pyfunction!(get_config, &module)?)?;
@@ -2042,8 +2117,11 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
             "listen",
             "event_types",
             "list_plugins",
+            "dependency_graph",
+            "validate_dependencies",
             "register_python_plugin",
             "unregister_plugin",
+            "unregister_safe",
             "plugin_metadata",
             "find_by_capability",
             "get_config",
