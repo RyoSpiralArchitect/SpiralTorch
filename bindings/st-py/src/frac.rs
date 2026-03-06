@@ -13,6 +13,7 @@ use st_frac::mellin::{
     MellinLogGrid,
 };
 use st_frac::mellin_types::{ComplexScalar, Scalar};
+use st_frac::zspace::LogLatticeWindow;
 use st_tensor::fractional::{fracdiff_gl_1d as rust_fracdiff_gl_1d, PadMode};
 
 #[pyfunction]
@@ -81,6 +82,16 @@ fn parse_window(window: &str) -> PyResult<WindowFunction> {
     match window.to_ascii_lowercase().as_str() {
         "rect" | "rectangular" | "none" => Ok(WindowFunction::Rectangular),
         "hann" => Ok(WindowFunction::Hann),
+        other => Err(PyValueError::new_err(format!(
+            "unknown window '{other}', expected 'rectangular' or 'hann'"
+        ))),
+    }
+}
+
+fn parse_log_lattice_window(window: &str) -> PyResult<LogLatticeWindow> {
+    match window.to_ascii_lowercase().as_str() {
+        "rect" | "rectangular" | "none" => Ok(LogLatticeWindow::Rectangular),
+        "hann" => Ok(LogLatticeWindow::Hann),
         other => Err(PyValueError::new_err(format!(
             "unknown window '{other}', expected 'rectangular' or 'hann'"
         ))),
@@ -386,12 +397,27 @@ impl PyMellinEvalPlan {
             .map_err(mellin_err_to_py)
     }
 
+    fn evaluate_stable(&self, grid: &PyMellinLogGrid) -> PyResult<Vec<ComplexScalar>> {
+        grid.inner
+            .evaluate_plan_stable(&self.inner)
+            .map_err(mellin_err_to_py)
+    }
+
     fn evaluate_with_derivative(
         &self,
         grid: &PyMellinLogGrid,
     ) -> PyResult<(Vec<ComplexScalar>, Vec<ComplexScalar>)> {
         grid.inner
             .evaluate_plan_with_derivative(&self.inner)
+            .map_err(mellin_err_to_py)
+    }
+
+    fn evaluate_with_derivative_stable(
+        &self,
+        grid: &PyMellinLogGrid,
+    ) -> PyResult<(Vec<ComplexScalar>, Vec<ComplexScalar>)> {
+        grid.inner
+            .evaluate_plan_with_derivative_stable(&self.inner)
             .map_err(mellin_err_to_py)
     }
 
@@ -427,29 +453,55 @@ impl PyMellinEvalPlan {
 #[pymethods]
 impl PyMellinLogGrid {
     #[staticmethod]
-    fn exp_decay(log_start: Scalar, log_step: Scalar, len: usize) -> PyResult<Self> {
+    #[pyo3(signature = (log_start, log_step, len, window="rectangular", preserve_sum=true))]
+    fn exp_decay(
+        log_start: Scalar,
+        log_step: Scalar,
+        len: usize,
+        window: &str,
+        preserve_sum: bool,
+    ) -> PyResult<Self> {
         let samples =
             sample_log_uniform_exp_decay(log_start, log_step, len).map_err(mellin_err_to_py)?;
-        let inner = MellinLogGrid::new(log_start, log_step, samples).map_err(mellin_err_to_py)?;
+        let window = parse_log_lattice_window(window)?;
+        let inner =
+            MellinLogGrid::new_with_window(log_start, log_step, samples, window, preserve_sum)
+                .map_err(mellin_err_to_py)?;
         Ok(Self { inner })
     }
 
     #[staticmethod]
+    #[pyo3(signature = (log_start, log_step, len, rate, window="rectangular", preserve_sum=true))]
     fn exp_decay_scaled(
         log_start: Scalar,
         log_step: Scalar,
         len: usize,
         rate: Scalar,
+        window: &str,
+        preserve_sum: bool,
     ) -> PyResult<Self> {
         let samples = sample_log_uniform_exp_decay_scaled(log_start, log_step, len, rate)
             .map_err(mellin_err_to_py)?;
-        let inner = MellinLogGrid::new(log_start, log_step, samples).map_err(mellin_err_to_py)?;
+        let window = parse_log_lattice_window(window)?;
+        let inner =
+            MellinLogGrid::new_with_window(log_start, log_step, samples, window, preserve_sum)
+                .map_err(mellin_err_to_py)?;
         Ok(Self { inner })
     }
 
     #[new]
-    fn new(log_start: Scalar, log_step: Scalar, samples: Vec<ComplexScalar>) -> PyResult<Self> {
-        let inner = MellinLogGrid::new(log_start, log_step, samples).map_err(mellin_err_to_py)?;
+    #[pyo3(signature = (log_start, log_step, samples, window="rectangular", preserve_sum=true))]
+    fn new(
+        log_start: Scalar,
+        log_step: Scalar,
+        samples: Vec<ComplexScalar>,
+        window: &str,
+        preserve_sum: bool,
+    ) -> PyResult<Self> {
+        let window = parse_log_lattice_window(window)?;
+        let inner =
+            MellinLogGrid::new_with_window(log_start, log_step, samples, window, preserve_sum)
+                .map_err(mellin_err_to_py)?;
         Ok(Self { inner })
     }
 
@@ -498,6 +550,10 @@ impl PyMellinLogGrid {
         self.inner.evaluate(s).map_err(mellin_err_to_py)
     }
 
+    fn evaluate_stable(&self, s: ComplexScalar) -> PyResult<ComplexScalar> {
+        self.inner.evaluate_stable(s).map_err(mellin_err_to_py)
+    }
+
     fn evaluate_with_derivative(
         &self,
         s: ComplexScalar,
@@ -507,9 +563,24 @@ impl PyMellinLogGrid {
             .map_err(mellin_err_to_py)
     }
 
+    fn evaluate_with_derivative_stable(
+        &self,
+        s: ComplexScalar,
+    ) -> PyResult<(ComplexScalar, ComplexScalar)> {
+        self.inner
+            .evaluate_with_derivative_stable(s)
+            .map_err(mellin_err_to_py)
+    }
+
     fn evaluate_many(&self, s_values: Vec<ComplexScalar>) -> PyResult<Vec<ComplexScalar>> {
         self.inner
             .evaluate_many(&s_values)
+            .map_err(mellin_err_to_py)
+    }
+
+    fn evaluate_many_stable(&self, s_values: Vec<ComplexScalar>) -> PyResult<Vec<ComplexScalar>> {
+        self.inner
+            .evaluate_many_stable(&s_values)
             .map_err(mellin_err_to_py)
     }
 
@@ -519,6 +590,15 @@ impl PyMellinLogGrid {
     ) -> PyResult<(Vec<ComplexScalar>, Vec<ComplexScalar>)> {
         self.inner
             .evaluate_many_with_derivative(&s_values)
+            .map_err(mellin_err_to_py)
+    }
+
+    fn evaluate_many_with_derivative_stable(
+        &self,
+        s_values: Vec<ComplexScalar>,
+    ) -> PyResult<(Vec<ComplexScalar>, Vec<ComplexScalar>)> {
+        self.inner
+            .evaluate_many_with_derivative_stable(&s_values)
             .map_err(mellin_err_to_py)
     }
 

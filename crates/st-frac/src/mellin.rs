@@ -5,10 +5,20 @@
 
 use crate::mellin_types::{ComplexScalar, MellinError, MellinResult, Scalar, ZSpaceError};
 use crate::zspace::{
-    evaluate_weighted_series, evaluate_weighted_series_many,
-    evaluate_weighted_series_many_with_derivative, evaluate_weighted_series_with_derivative,
-    mellin_log_lattice_prefactor, prepare_weighted_series, trapezoidal_weights,
+    evaluate_weighted_series,
+    evaluate_weighted_series_many,
+    evaluate_weighted_series_many_stable,
+    evaluate_weighted_series_many_with_derivative,
+    evaluate_weighted_series_many_with_derivative_stable,
+    evaluate_weighted_series_stable,
+    evaluate_weighted_series_with_derivative,
+    evaluate_weighted_series_with_derivative_stable,
+    mellin_log_lattice_prefactor,
+    prepare_weighted_series,
+    trapezoidal_weights,
+    trapezoidal_weights_windowed,
     weighted_z_transform,
+    LogLatticeWindow,
 };
 
 /// Change-of-variable helper for Mellin integrals.
@@ -267,6 +277,18 @@ impl MellinEvalPlan {
             .collect())
     }
 
+    pub fn evaluate_stable(&self, weighted: &[ComplexScalar]) -> MellinResult<Vec<ComplexScalar>> {
+        if self.z_points.is_empty() {
+            return Ok(Vec::new());
+        }
+        let series = evaluate_weighted_series_many_stable(weighted, &self.z_points)?;
+        Ok(series
+            .into_iter()
+            .zip(self.prefactors.iter())
+            .map(|(value, prefactor)| value * *prefactor)
+            .collect())
+    }
+
     pub fn evaluate_with_derivative(
         &self,
         weighted: &[ComplexScalar],
@@ -277,6 +299,33 @@ impl MellinEvalPlan {
 
         let (series, d_series_dz) =
             evaluate_weighted_series_many_with_derivative(weighted, &self.z_points)?;
+        let start = ComplexScalar::new(self.log_start, 0.0);
+        let step = ComplexScalar::new(self.log_step, 0.0);
+
+        let mut values = Vec::with_capacity(series.len());
+        let mut derivatives = Vec::with_capacity(series.len());
+        for idx in 0..series.len() {
+            let prefactor = self.prefactors[idx];
+            let z = self.z_points[idx];
+            let p = series[idx];
+            let dpdz = d_series_dz[idx];
+            values.push(p * prefactor);
+            derivatives.push(prefactor * (start * p + step * z * dpdz));
+        }
+
+        Ok((values, derivatives))
+    }
+
+    pub fn evaluate_with_derivative_stable(
+        &self,
+        weighted: &[ComplexScalar],
+    ) -> MellinResult<(Vec<ComplexScalar>, Vec<ComplexScalar>)> {
+        if self.z_points.is_empty() {
+            return Ok((Vec::new(), Vec::new()));
+        }
+
+        let (series, d_series_dz) =
+            evaluate_weighted_series_many_with_derivative_stable(weighted, &self.z_points)?;
         let start = ComplexScalar::new(self.log_start, 0.0);
         let step = ComplexScalar::new(self.log_step, 0.0);
 
@@ -435,6 +484,23 @@ impl MellinLogGrid {
         log_step: Scalar,
         samples: Vec<ComplexScalar>,
     ) -> MellinResult<Self> {
+        Self::new_with_window(
+            log_start,
+            log_step,
+            samples,
+            LogLatticeWindow::Rectangular,
+            false,
+        )
+    }
+
+    /// Construct a grid and optionally apply a window + sum-preserving renormalisation to the trapezoidal weights.
+    pub fn new_with_window(
+        log_start: Scalar,
+        log_step: Scalar,
+        samples: Vec<ComplexScalar>,
+        window: LogLatticeWindow,
+        preserve_sum: bool,
+    ) -> MellinResult<Self> {
         if samples.is_empty() {
             return Err(MellinError::EmptySamples);
         }
@@ -444,7 +510,7 @@ impl MellinLogGrid {
         if !log_start.is_finite() {
             return Err(MellinError::InvalidLogStart);
         }
-        let weights = trapezoidal_weights(samples.len())?;
+        let weights = trapezoidal_weights_windowed(samples.len(), window, preserve_sum)?;
         let weighted = prepare_weighted_series(&samples, &weights)?;
         Ok(Self {
             log_start,
@@ -469,10 +535,33 @@ impl MellinLogGrid {
         Self::new(log_start, log_step, samples)
     }
 
+    /// Sample a function over a log-uniform lattice and build the grid with a windowed weight scheme.
+    pub fn from_function_with_window<F>(
+        log_start: Scalar,
+        log_step: Scalar,
+        len: usize,
+        window: LogLatticeWindow,
+        preserve_sum: bool,
+        f: F,
+    ) -> MellinResult<Self>
+    where
+        F: Fn(Scalar) -> ComplexScalar,
+    {
+        let samples = sample_log_uniform(log_start, log_step, len, f)?;
+        Self::new_with_window(log_start, log_step, samples, window, preserve_sum)
+    }
+
     /// Evaluate the Mellin transform using the pre-sampled lattice.
     pub fn evaluate(&self, s: ComplexScalar) -> MellinResult<ComplexScalar> {
         let (prefactor, z) = mellin_log_lattice_prefactor(self.log_start, self.log_step, s)?;
         let series = evaluate_weighted_series(&self.weighted, z)?;
+        Ok(prefactor * series)
+    }
+
+    /// Evaluate the Mellin transform using stable Z-series evaluation for `|z|>1`.
+    pub fn evaluate_stable(&self, s: ComplexScalar) -> MellinResult<ComplexScalar> {
+        let (prefactor, z) = mellin_log_lattice_prefactor(self.log_start, self.log_step, s)?;
+        let series = evaluate_weighted_series_stable(&self.weighted, z)?;
         Ok(prefactor * series)
     }
 
@@ -485,6 +574,24 @@ impl MellinLogGrid {
     ) -> MellinResult<(ComplexScalar, ComplexScalar)> {
         let (prefactor, z) = mellin_log_lattice_prefactor(self.log_start, self.log_step, s)?;
         let (series, d_series_dz) = evaluate_weighted_series_with_derivative(&self.weighted, z)?;
+
+        let start = ComplexScalar::new(self.log_start, 0.0);
+        let step = ComplexScalar::new(self.log_step, 0.0);
+
+        let value = prefactor * series;
+        let d_value_ds = prefactor * (start * series + step * z * d_series_dz);
+        Ok((value, d_value_ds))
+    }
+
+    /// Evaluate the Mellin transform and return `d/ds` using stable Z-series evaluation for `|z|>1`.
+    ///
+    /// Returns `(M(s), dM/ds)`.
+    pub fn evaluate_with_derivative_stable(
+        &self,
+        s: ComplexScalar,
+    ) -> MellinResult<(ComplexScalar, ComplexScalar)> {
+        let (prefactor, z) = mellin_log_lattice_prefactor(self.log_start, self.log_step, s)?;
+        let (series, d_series_dz) = evaluate_weighted_series_with_derivative_stable(&self.weighted, z)?;
 
         let start = ComplexScalar::new(self.log_start, 0.0);
         let step = ComplexScalar::new(self.log_step, 0.0);
@@ -509,6 +616,15 @@ impl MellinLogGrid {
         self.evaluate_many_cpu(s_values)
     }
 
+    /// Evaluate the Mellin transform at multiple points using stable Z-series evaluation for `|z|>1`.
+    pub fn evaluate_many_stable(&self, s_values: &[ComplexScalar]) -> MellinResult<Vec<ComplexScalar>> {
+        if s_values.is_empty() {
+            return Ok(Vec::new());
+        }
+        let plan = MellinEvalPlan::many(self.log_start, self.log_step, s_values)?;
+        self.evaluate_plan_stable(&plan)
+    }
+
     /// Evaluate the Mellin transform and `d/ds` at multiple points sharing the same samples.
     ///
     /// Returns `(values, derivatives)` where derivatives correspond to `dM/ds`.
@@ -521,6 +637,20 @@ impl MellinLogGrid {
         }
         let plan = MellinEvalPlan::many(self.log_start, self.log_step, s_values)?;
         self.evaluate_plan_with_derivative(&plan)
+    }
+
+    /// Evaluate the Mellin transform and `d/ds` at multiple points using stable Z-series evaluation for `|z|>1`.
+    ///
+    /// Returns `(values, derivatives)` where derivatives correspond to `dM/ds`.
+    pub fn evaluate_many_with_derivative_stable(
+        &self,
+        s_values: &[ComplexScalar],
+    ) -> MellinResult<(Vec<ComplexScalar>, Vec<ComplexScalar>)> {
+        if s_values.is_empty() {
+            return Ok((Vec::new(), Vec::new()));
+        }
+        let plan = MellinEvalPlan::many(self.log_start, self.log_step, s_values)?;
+        self.evaluate_plan_with_derivative_stable(&plan)
     }
 
     fn assert_plan_compatible(&self, plan: &MellinEvalPlan) -> MellinResult<()> {
@@ -562,6 +692,12 @@ impl MellinLogGrid {
         plan.evaluate(&self.weighted)
     }
 
+    /// Evaluate the Mellin transform using a precomputed plan with stable Z-series evaluation for `|z|>1`.
+    pub fn evaluate_plan_stable(&self, plan: &MellinEvalPlan) -> MellinResult<Vec<ComplexScalar>> {
+        self.assert_plan_compatible(plan)?;
+        plan.evaluate_stable(&self.weighted)
+    }
+
     /// Evaluate the Mellin transform and `d/ds` using a precomputed plan.
     ///
     /// Returns `(values, derivatives)` where derivatives correspond to `dM/ds`.
@@ -577,6 +713,17 @@ impl MellinLogGrid {
             Err(other) => return Err(other),
         }
         plan.evaluate_with_derivative(&self.weighted)
+    }
+
+    /// Evaluate the Mellin transform and `d/ds` using a precomputed plan with stable Z-series evaluation for `|z|>1`.
+    ///
+    /// Returns `(values, derivatives)` where derivatives correspond to `dM/ds`.
+    pub fn evaluate_plan_with_derivative_stable(
+        &self,
+        plan: &MellinEvalPlan,
+    ) -> MellinResult<(Vec<ComplexScalar>, Vec<ComplexScalar>)> {
+        self.assert_plan_compatible(plan)?;
+        plan.evaluate_with_derivative_stable(&self.weighted)
     }
 
     /// Evaluate magnitudes using a precomputed plan.
@@ -1385,6 +1532,71 @@ mod tests {
         for (idx, (lhs, rhs)) in many_weighted.iter().zip(many_api.iter()).enumerate() {
             let diff = (*lhs - *rhs).norm();
             assert!(diff < 1e-6, "idx={} diff={}", idx, diff);
+        }
+    }
+
+    #[test]
+    fn mellin_log_grid_window_preserves_constant_integral() {
+        let log_start = -2.0f32;
+        let log_step = 0.5f32;
+        let len = 4usize;
+        let samples = vec![ComplexScalar::new(1.0, 0.0); len];
+
+        let rect = MellinLogGrid::new(log_start, log_step, samples.clone()).unwrap();
+        let hann =
+            MellinLogGrid::new_with_window(log_start, log_step, samples, LogLatticeWindow::Hann, true)
+                .unwrap();
+
+        let expected_weights = [0.0, 1.5, 1.5, 0.0];
+        assert_eq!(hann.weights().len(), expected_weights.len());
+        for (idx, (&lhs, &rhs)) in hann
+            .weights()
+            .iter()
+            .zip(expected_weights.iter())
+            .enumerate()
+        {
+            let diff = (lhs - rhs).abs();
+            assert!(diff < 1e-6, "idx={} lhs={} rhs={} diff={}", idx, lhs, rhs, diff);
+        }
+
+        let s0 = ComplexScalar::new(0.0, 0.0);
+        let rect_val = rect.evaluate(s0).unwrap();
+        let hann_val = hann.evaluate(s0).unwrap();
+        assert!((rect_val - hann_val).norm() < 1e-6);
+
+        let expected = log_step * (len as Scalar - 1.0);
+        assert!((rect_val - ComplexScalar::new(expected, 0.0)).norm() < 1e-6);
+    }
+
+    #[test]
+    fn mellin_eval_plan_stable_matches_direct() {
+        let log_start = -3.0f32;
+        let log_step = 0.25f32;
+        let len = 64usize;
+        let grid = MellinLogGrid::from_function(log_start, log_step, len, exp_decay).unwrap();
+        let weighted = grid.weighted_series().unwrap();
+
+        let s_values = vec![
+            ComplexScalar::new(2.0, 0.0),
+            ComplexScalar::new(1.5, 0.2),
+            ComplexScalar::new(0.8, -0.7),
+        ];
+        let plan = MellinEvalPlan::many(log_start, log_step, &s_values).unwrap();
+
+        let direct = plan.evaluate(&weighted).unwrap();
+        let stable = plan.evaluate_stable(&weighted).unwrap();
+        for idx in 0..direct.len() {
+            let diff = (direct[idx] - stable[idx]).norm();
+            assert!(diff < 1e-5, "idx={} diff={}", idx, diff);
+        }
+
+        let (direct_v, direct_d) = plan.evaluate_with_derivative(&weighted).unwrap();
+        let (stable_v, stable_d) = plan.evaluate_with_derivative_stable(&weighted).unwrap();
+        for idx in 0..direct_v.len() {
+            let diff_v = (direct_v[idx] - stable_v[idx]).norm();
+            let diff_d = (direct_d[idx] - stable_d[idx]).norm();
+            assert!(diff_v < 1e-5, "idx={} diff={}", idx, diff_v);
+            assert!(diff_d < 1e-5, "idx={} diff={}", idx, diff_d);
         }
     }
 

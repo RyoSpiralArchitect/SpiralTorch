@@ -1402,6 +1402,35 @@ class SpiralTorchSmokeTest(unittest.TestCase):
             except Exception:
                 pass
 
+    def test_mellin_windowed_and_stable_eval_smoke(self) -> None:
+        grid = st.frac.MellinLogGrid.exp_decay(
+            -3.0,
+            0.25,
+            64,
+            window="hann",
+            preserve_sum=True,
+        )
+        z = 2.0 + 0.0j
+        direct = grid.evaluate(z)
+        stable = grid.evaluate_stable(z)
+        self.assertAlmostEqual(abs(direct - stable), 0.0, delta=1e-4)
+
+        value, deriv = grid.evaluate_with_derivative_stable(1.5 + 0.2j)
+        self.assertIsInstance(value, complex)
+        self.assertIsInstance(deriv, complex)
+
+        vals = st.zspace.zspace_eval_stable([1.0, 2.0], [0.0, 0.0], [1.2], [0.8])
+        self.assertEqual(len(vals), 1)
+
+        vals2, derivs2 = st.zspace.zspace_eval_with_derivative_stable(
+            [1.0, 2.0],
+            [0.0, 0.0],
+            [1.2],
+            [0.8],
+        )
+        self.assertEqual(len(vals2), 1)
+        self.assertEqual(len(derivs2), 1)
+
     def test_state_dict_io(self) -> None:
         model = st.nn.Linear("l1", 2, 1)
         with _temp_dir("tmp_state") as tmp:
