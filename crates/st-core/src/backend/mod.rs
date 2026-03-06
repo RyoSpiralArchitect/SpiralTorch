@@ -1,8 +1,19 @@
 pub mod consensus;
+pub mod cpu_exec;
+pub mod cuda_exec;
+#[cfg(feature = "cuda")]
+pub mod cuda_loader;
 pub mod device_caps;
+pub mod hip_exec;
+#[cfg(feature = "hip")]
+pub mod hip_loader;
 pub mod kdsl_bridge;
+pub mod probe;
 pub mod spiralk_fft;
 pub mod unison_heuristics;
 pub mod wasm_tuner;
+pub mod wgpu_exec;
 pub mod wgpu_heuristics;
 pub mod wgpu_heuristics_generated;
+#[cfg(all(feature = "wgpu", feature = "wgpu-rt"))]
+pub mod wgpu_rt;

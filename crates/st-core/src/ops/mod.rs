@@ -11,5 +11,7 @@
 //! without leaking into the default build.
 
 pub mod ablog;
+pub mod midk;
+pub mod rank_cpu;
 pub mod rank_entry;
 pub mod zspace_round;

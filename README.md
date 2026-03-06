@@ -84,6 +84,19 @@ The Python wheel mirrors the same flow for rapid notebooks:
 python bindings/st-py/examples/hello_session.py  # enables psi+collapse by default
 ```
 
+For a quick peek at the unified Rank-K planner (plus the CPU rank/compaction reference),
+run the lightweight `st-core` examples:
+
+```bash
+cargo run -p st-core --example plan_rank
+cargo run -p st-core --example compaction_cpu
+cargo run -p st-core --example rank_select_cpu
+cargo run -p st-core --features "wgpu wgpu-rt" --example compaction_wgpu
+cargo run -p st-core --features "wgpu wgpu-rt" --example rank_select_wgpu
+python bindings/st-py/examples/plan_rank.py
+python bindings/st-py/examples/rank_select_cpu.py
+```
+
 Flip on the psychoid self-metrics layer when you want the full dream-engine
 analysis (divergence, ritual rate, CTI, dream-pass/export events):
 
@@ -142,6 +155,7 @@ locking or thread book-keeping required.
 
 - **Rank-K family** (TopK / MidK / BottomK) with a **single entrypoint**
   Backends implement a `RankKExecutor`, decisions are made once via **unison heuristics**, and every plan can now be rendered back into a SpiralK snippet via `choice.to_unison_script(kind)`.
+  The CPU fallback treats `MidK` as the centered `k`-wide window in ascending value order, while threshold-based MidK compaction stays available as a separate helper path.
 - **Introspectable compute plans**
   Unified `RankPlan`s expose their FFT stencil directly—call `plan.fft_plan()` to inspect the radix/segment shape, `plan.fft_wgsl()` to emit the ready-to-run WGSL kernel, or `plan.fft_spiralk_hint()` to log the same choice back into SpiralK.
 - **SpiralK DSL** (K×Lisp-inspired)
@@ -297,22 +311,25 @@ print("updated weights", weights.tolist())
 
 ## Minimal API
 
-**Rust (TopK via unified entry)**
+**Rust (TopK via unified entry + CPU execution)**
 ```rust
-use st_core::backend::device_caps::DeviceCaps;
-use st_core::ops::rank_entry::{RankKind, plan_rank, execute_rank};
+	use st_core::backend::device_caps::DeviceCaps;
+	use st_core::backend::cpu_exec::CpuExecutor;
+	use st_core::ops::rank_entry::{execute_rank, plan_rank, RankKind};
 
-// describe device
-let caps = DeviceCaps::wgpu(32, true, 256); // lane, subgroups, max_wg
-// plan once (decisions: mk/mkd/tile/ctile/use_2ce)
-let plan = plan_rank(RankKind::TopK, rows, cols, k, caps);
+	// describe device
+	let caps = DeviceCaps::cpu();
+	// plan once (decisions: mk/mkd/tile/ctile/use_2ce)
+	let plan = plan_rank(RankKind::TopK, rows, cols, k, caps);
 
-// choose a backend executor (WGPU/CUDA/HIP); CPU fallback exists
-use st_core::backend::wgpu_exec::WgpuExecutor;
-let exec = WgpuExecutor::default();
+	// dense row-major input buffer
+	let x: Vec<f32> = vec![0.0; (rows * cols) as usize];
+	let mut out_vals = vec![0.0; (rows * k) as usize];
+	let mut out_idx = vec![0u32; (rows * k) as usize];
 
-// launch
-execute_rank(&exec, &plan)?;
+	// launch
+	let mut exec = CpuExecutor::new(&x, cols, &mut out_vals, &mut out_idx);
+	execute_rank(&mut exec, &plan)?;
 ```
 **Modules**
 - `Linear`, `Conv1d`, `WaveRnn`, `ReLU`, `ZSpaceProjector`

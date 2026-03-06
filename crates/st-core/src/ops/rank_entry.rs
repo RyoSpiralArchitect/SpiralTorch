@@ -3,15 +3,19 @@
 //
 //! Typical flow:
 //!   let plan = plan_rank(RankKind::TopK, rows, cols, k, caps);
-//!   execute_rank(&plan, backend_impl, tensors);
+//!   // executor carries input/output buffers (CPU/WGPU/CUDA/HIP, etc.)
+//!   execute_rank(&mut exec, &plan)?;
 use crate::backend::device_caps::DeviceCaps;
 use crate::backend::spiralk_fft::SpiralKFftPlan;
-use crate::backend::unison_heuristics::{self, RankKind, Choice};
+pub use crate::backend::unison_heuristics::RankKind;
+use crate::backend::unison_heuristics::{self, Choice};
 
 #[derive(Clone, Debug)]
 pub struct RankPlan {
     pub kind: RankKind,
-    pub rows: u32, pub cols: u32, pub k: u32,
+    pub rows: u32,
+    pub cols: u32,
+    pub k: u32,
     pub choice: Choice,
 }
 
@@ -37,21 +41,27 @@ impl RankPlan {
     }
 }
 
-pub fn plan_rank(kind: RankKind, rows:u32, cols:u32, k:u32, caps:DeviceCaps) -> RankPlan {
+pub fn plan_rank(kind: RankKind, rows: u32, cols: u32, k: u32, caps: DeviceCaps) -> RankPlan {
     let choice = unison_heuristics::choose_unified_rank(rows, cols, k, caps, kind);
-    RankPlan{ kind, rows, cols, k, choice }
+    RankPlan {
+        kind,
+        rows,
+        cols,
+        k,
+        choice,
+    }
 }
 
 /// Trait that a backend implements to execute rank-k with a given plan.
 pub trait RankKExecutor {
     type Error;
-    fn launch_topk(&self, plan:&RankPlan) -> Result<(), Self::Error>;
-    fn launch_midk(&self, plan:&RankPlan) -> Result<(), Self::Error>;
-    fn launch_bottomk(&self, plan:&RankPlan) -> Result<(), Self::Error>;
+    fn launch_topk(&mut self, plan: &RankPlan) -> Result<(), Self::Error>;
+    fn launch_midk(&mut self, plan: &RankPlan) -> Result<(), Self::Error>;
+    fn launch_bottomk(&mut self, plan: &RankPlan) -> Result<(), Self::Error>;
 }
 
 /// Helper to dispatch by kind.
-pub fn execute_rank<E: RankKExecutor>(exec:&E, plan:&RankPlan) -> Result<(), E::Error> {
+pub fn execute_rank<E: RankKExecutor>(exec: &mut E, plan: &RankPlan) -> Result<(), E::Error> {
     match plan.kind {
         RankKind::TopK => exec.launch_topk(plan),
         RankKind::MidK => exec.launch_midk(plan),

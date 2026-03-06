@@ -22,8 +22,9 @@ struct CParams {
 @group(0) @binding(1) var<storage, read>  CMASK: array<u32>;
 @group(0) @binding(2) var<storage, read_write> OUTPOS: array<atomic<u32>>;
 @group(0) @binding(3) var<storage, read_write> OUTVAL: array<f32>;
-@group(0) @binding(4) var<uniform> CP: CParams;
-@group(0) @binding(5) var<storage, read_write> PREFIX: array<u32>;
+@group(0) @binding(4) var<storage, read_write> OUTIDX: array<u32>;
+@group(0) @binding(5) var<uniform> CP: CParams;
+@group(0) @binding(6) var<storage, read_write> PREFIX: array<u32>;
 
 // ===== Shared (bank padding) =====
 var<workgroup> s_vals: array<f32, 256u + 8u>;
@@ -383,6 +384,7 @@ fn midk_compact_apply_sg(
   if (flag == 1u && col < CP.cols) {
     let pos = base + my_base + local_excl;
     OUTVAL[r*CP.cols + pos] = CX[r*CP.row_stride + col];
+    OUTIDX[r*CP.cols + pos] = col;
   }
 }
 
@@ -425,5 +427,6 @@ fn midk_compact_apply(
   if (col0 < CP.cols && flag==1u) {
     let pos = base + temp2[lid.x];
     OUTVAL[r*CP.cols + pos] = CX[r*CP.row_stride + col0];
+    OUTIDX[r*CP.cols + pos] = col0;
   }
 }

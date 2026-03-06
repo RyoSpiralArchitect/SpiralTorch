@@ -28,8 +28,8 @@ use st_nn::dataset::DataLoaderBatches as NnDataLoaderBatches;
 use st_nn::dataset_from_vec as nn_dataset_from_vec;
 use st_nn::{
     Conv1d as NnConv1d, DataLoader as NnDataLoader, DifferentialTrace, DistConfig, DistMode,
-    EpochStats, Linear as NnLinear, Loss, MeanSquaredError, ModeratorMinutes, Module,
-    ModuleTrainer, RoundtableConfig, RoundtableSchedule, Sequential as NnSequential, SpiralSession,
+    EpochStats, Linear as NnLinear, Loss, MeanSquaredError, Module, ModuleTrainer,
+    RoundtableConfig, RoundtableSchedule, Sequential as NnSequential, SpiralSession,
     SpiralSessionBuilder, WaveRnn as NnWaveRnn, ZSpaceProjector as NnZSpaceProjector,
 };
 use st_tensor::pure::{
@@ -112,6 +112,7 @@ fn py_device_info<'py>(py: Python<'py>, info: HipDeviceInfo) -> PyResult<Bound<'
 fn backend_name(kind: BackendKind) -> &'static str {
     match kind {
         BackendKind::Wgpu => "wgpu",
+        BackendKind::Mps => "mps",
         BackendKind::Cuda => "cuda",
         BackendKind::Hip => "hip",
         BackendKind::Cpu => "cpu",
@@ -1241,12 +1242,6 @@ struct PyDistConfig {
     inner: DistConfig,
 }
 
-impl PyDistConfig {
-    fn from_config(inner: DistConfig) -> Self {
-        Self { inner }
-    }
-}
-
 #[pymethods]
 impl PyDistConfig {
     #[new]
@@ -1525,9 +1520,9 @@ impl PyModuleTrainer {
 
     fn blackcat_minutes<'py>(&self, py: Python<'py>) -> PyResult<PyObject> {
         let minutes = self.inner.blackcat_minutes();
-        let list = PyList::empty(py);
+        let list = PyList::empty_bound(py);
         for minute in minutes {
-            let entry = PyDict::new(py);
+            let entry = PyDict::new_bound(py);
             entry.set_item("plan_signature", minute.plan_signature.clone())?;
             entry.set_item("script_hint", minute.script_hint.clone())?;
             entry.set_item("winner", format!("{:?}", minute.winner))?;
@@ -1545,14 +1540,14 @@ impl PyModuleTrainer {
                     .map(|d| d.as_secs_f64())
                     .unwrap_or(0.0),
             )?;
-            let picks = PyDict::new(py);
+            let picks = PyDict::new_bound(py);
             for (k, v) in minute.picks.iter() {
                 picks.set_item(k.clone(), v.clone())?;
             }
             entry.set_item("picks", picks)?;
             list.append(entry)?;
         }
-        Ok(list.into())
+        Ok(list.into_py(py))
     }
 
     #[pyo3(signature = (module, loss, batches, schedule))]
@@ -2433,7 +2428,7 @@ fn caps_for(device: Option<&str>) -> DeviceCaps {
         Some(ref name) if name == "cuda" => DeviceCaps::cuda(32, 1024, Some(96 * 1024)),
         Some(ref name) if name == "hip" => DeviceCaps::hip(32, 1024, Some(64 * 1024)),
         Some(ref name) if name == "cpu" => DeviceCaps::cpu(),
-        Some(ref name) if name == "mps" => DeviceCaps::wgpu(32, true, 256),
+        Some(ref name) if name == "mps" => DeviceCaps::mps(32, 256, Some(32 * 1024)),
         Some(ref name) if name == "wgpu" => DeviceCaps::wgpu(32, true, 256),
         Some(ref name) if name == "auto" => DeviceCaps::wgpu(32, true, 256),
         Some(ref name) if name == "hip-real" => DeviceCaps::hip(32, 1024, Some(64 * 1024)),
@@ -2645,6 +2640,48 @@ fn plan_topk(
     plan(py, "topk", rows, cols, k, device)
 }
 
+/// Execute TopK/MidK/BottomK selection on CPU for a dense tensor.
+#[pyfunction]
+#[pyo3(signature = (tensor, kind="topk", k=8))]
+fn rank_select_cpu(py: Python<'_>, tensor: &PyTensor, kind: &str, k: u32) -> PyResult<PyObject> {
+    if k == 0 {
+        return Err(PyValueError::new_err("k must be positive"));
+    }
+
+    let rank_kind = parse_kind(kind)?;
+    let (rows, cols) = tensor.as_tensor().shape();
+    let rows_u32 =
+        u32::try_from(rows).map_err(|_| PyValueError::new_err("rows must fit in u32"))?;
+    let cols_u32 =
+        u32::try_from(cols).map_err(|_| PyValueError::new_err("cols must fit in u32"))?;
+
+    let plan = plan_rank(rank_kind, rows_u32, cols_u32, k, DeviceCaps::cpu());
+    let selection =
+        st_core::ops::rank_cpu::select_rank_cpu(&plan, tensor.as_tensor().data(), cols_u32)
+            .map_err(|err| PyValueError::new_err(err.to_string()))?;
+    let st_core::ops::rank_cpu::RankKSelection {
+        values, indices, ..
+    } = selection;
+
+    let values_tensor = PyTensor::from_tensor(convert(Tensor::from_vec(rows, k as usize, values))?);
+
+    let mut idx_rows: Vec<Vec<u32>> = Vec::with_capacity(rows);
+    let k_usize = k as usize;
+    for r in 0..rows {
+        let base = r * k_usize;
+        idx_rows.push(indices[base..base + k_usize].to_vec());
+    }
+
+    let out = PyDict::new_bound(py);
+    out.set_item("kind", kind.to_ascii_lowercase())?;
+    out.set_item("rows", rows_u32)?;
+    out.set_item("cols", cols_u32)?;
+    out.set_item("k", k)?;
+    out.set_item("values", values_tensor.into_py(py))?;
+    out.set_item("indices", idx_rows)?;
+    Ok(out.into_py(py))
+}
+
 /// Surface ROCm probing hints for Python callers.
 #[pyfunction]
 fn hip_probe(py: Python<'_>) -> PyResult<PyObject> {
@@ -2714,6 +2751,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_submodule(&sot_mod)?;
     m.add_function(wrap_pyfunction!(plan, m)?)?;
     m.add_function(wrap_pyfunction!(plan_topk, m)?)?;
+    m.add_function(wrap_pyfunction!(rank_select_cpu, m)?)?;
     m.add_function(wrap_pyfunction!(z_space_barycenter_py, m)?)?;
     m.add_function(wrap_pyfunction!(hip_probe, m)?)?;
     m.add_function(wrap_pyfunction!(describe_device, m)?)?;
@@ -2740,6 +2778,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         vec![
             "plan",
             "plan_topk",
+            "rank_select_cpu",
             "z_space_barycenter",
             "hip_probe",
             "describe_device",

@@ -5,6 +5,8 @@ use std::fmt;
 pub enum BackendKind {
     /// WebGPU / WGPU backend.
     Wgpu,
+    /// Metal Performance Shaders (MPS) backend (macOS).
+    Mps,
     /// CUDA backend.
     Cuda,
     /// ROCm HIP backend.
@@ -64,6 +66,16 @@ impl DeviceCaps {
             subgroup,
             max_workgroup: max_workgroup.max(1),
             ..Self::new(BackendKind::Wgpu, lane_width)
+        }
+    }
+
+    /// Metal (MPS) capabilities.
+    pub fn mps(lane_width: u32, max_workgroup: u32, shared_mem_per_workgroup: Option<u32>) -> Self {
+        Self {
+            subgroup: false,
+            max_workgroup: max_workgroup.max(1),
+            shared_mem_per_workgroup,
+            ..Self::new(BackendKind::Mps, lane_width)
         }
     }
 
@@ -362,6 +374,15 @@ impl DeviceCaps {
                     0
                 }
             }
+            BackendKind::Mps => {
+                if self.subgroup && k <= 256 {
+                    2
+                } else if k <= 2048 {
+                    1
+                } else {
+                    0
+                }
+            }
             BackendKind::Cuda => {
                 if k <= self.lane_width * 4 {
                     2
@@ -423,6 +444,7 @@ impl DeviceCaps {
         let small_rows = rows < 256;
         match self.backend {
             BackendKind::Wgpu => col_heavy || (k_heavy && !small_rows),
+            BackendKind::Mps => col_heavy || (k_heavy && !small_rows),
             BackendKind::Cuda | BackendKind::Hip => {
                 col_heavy || (k_heavy && rows > lanes.saturating_mul(8))
             }
@@ -461,6 +483,13 @@ mod tests {
         assert_eq!(wgpu.lane_width, 32);
         assert_eq!(wgpu.max_workgroup, 256);
         assert_eq!(wgpu.shared_mem_per_workgroup, None);
+
+        let mps = DeviceCaps::mps(32, 256, Some(32 * 1024));
+        assert_eq!(mps.backend, BackendKind::Mps);
+        assert!(!mps.subgroup);
+        assert_eq!(mps.lane_width, 32);
+        assert_eq!(mps.max_workgroup, 256);
+        assert_eq!(mps.shared_mem_per_workgroup, Some(32 * 1024));
 
         let cuda = DeviceCaps::cuda(32, 1024, Some(64 * 1024));
         assert_eq!(cuda.backend, BackendKind::Cuda);
