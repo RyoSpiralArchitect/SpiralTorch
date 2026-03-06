@@ -28,7 +28,10 @@ impl Complex32 {
 
     #[inline]
     pub fn mul(self, rhs: Self) -> Self {
-        Self::new(self.re * rhs.re - self.im * rhs.im, self.re * rhs.im + self.im * rhs.re)
+        Self::new(
+            self.re * rhs.re - self.im * rhs.im,
+            self.re * rhs.im + self.im * rhs.re,
+        )
     }
 
     #[inline]

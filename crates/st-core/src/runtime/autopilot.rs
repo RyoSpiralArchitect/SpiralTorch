@@ -153,6 +153,7 @@ impl Autopilot {
 fn make_key(caps: &DeviceCaps) -> String {
     let backend = match caps.backend {
         BackendKind::Wgpu => "wgpu",
+        BackendKind::Mps => "mps",
         BackendKind::Cuda => "cuda",
         BackendKind::Hip => "hip",
         BackendKind::Cpu => "cpu",

@@ -210,8 +210,7 @@ mod tests {
         gate.attach_hypergrad_with_topos(-0.75, 0.04, topos)
             .unwrap();
         let encoder = gate.encoder().clone();
-        gate
-            .visit_parameters_mut(&mut |param| param.absorb_text(&encoder, "wave"))
+        gate.visit_parameters_mut(&mut |param| param.absorb_text(&encoder, "wave"))
             .unwrap();
         gate.apply_step(0.01).unwrap();
         assert!(gate.gate().value().squared_l2_norm() > 0.0);

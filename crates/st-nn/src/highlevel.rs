@@ -82,6 +82,7 @@ impl SpiralSessionBuilder {
     pub fn from_backend(backend: BackendKind) -> Self {
         let caps = match backend {
             BackendKind::Wgpu => DeviceCaps::wgpu(32, true, 256),
+            BackendKind::Mps => DeviceCaps::mps(32, 256, Some(32 * 1024)),
             BackendKind::Hip => DeviceCaps::hip(32, 1024, Some(64 * 1024)),
             BackendKind::Cuda => DeviceCaps::cuda(32, 1024, Some(96 * 1024)),
             BackendKind::Cpu => DeviceCaps::cpu(),

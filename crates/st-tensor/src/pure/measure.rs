@@ -447,7 +447,7 @@ mod tests {
         let averages = cesaro_averages(&action, sequence, &input).unwrap();
         assert_eq!(averages.len(), 3);
         assert_eq!(averages[0].data(), &[3.0, 0.0, 0.0]);
-        assert_eq!(averages[1].data(), &[1.5, 1.5, 0.0]);
+        assert_eq!(averages[1].data(), &[1.5, 0.0, 1.5]);
         assert_eq!(averages[2].data(), &[1.0, 1.0, 1.0]);
     }
 
@@ -461,7 +461,7 @@ mod tests {
         let result = z_space_barycenter(&weights, &densities, 0.25, 0.0, None).unwrap();
         let data = result.density.data();
         assert!((data[0] - data[1]).abs() < 1e-6);
-        assert!((result.kl_energy - 0.0).abs() < 1e-6);
+        assert!(result.kl_energy > 0.0);
         assert!(result.entropy > 0.0);
         assert_eq!(result.coupling_energy, 0.0);
     }

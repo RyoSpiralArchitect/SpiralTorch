@@ -9,20 +9,20 @@ pub struct LaneParams {
     pub lane: i32,
 }
 
-#[cfg(feature="kv-redis")]
+#[cfg(feature = "kv-redis")]
 use serde_json::Value;
 
 /// Stub that runs only when HIP-real is enabled (real sync can replace it later).
-#[cfg(all(feature="hip", feature="hip-real"))]
+#[cfg(all(feature = "hip", feature = "hip-real"))]
 fn maybe_sync() {
     // Placeholder for RCCL init/synchronisation. Safe no-op for now.
 }
 
-#[cfg(not(all(feature="hip", feature="hip-real")))]
+#[cfg(not(all(feature = "hip", feature = "hip-real")))]
 fn maybe_sync() {}
 
 /// Pull lane suggestions from Redis and aggregate via median/mean.
-#[cfg(feature="kv-redis")]
+#[cfg(feature = "kv-redis")]
 fn fetch_lane_from_redis() -> Option<i32> {
     let url = std::env::var("REDIS_URL").ok()?;
     let samples = st_kv::redis_lrange(&url, "spiral:heur:lparams", -16, -1).ok()?;
@@ -35,7 +35,9 @@ fn fetch_lane_from_redis() -> Option<i32> {
             }
         }
     }
-    if lanes.is_empty() { return None; }
+    if lanes.is_empty() {
+        return None;
+    }
 
     let agg = std::env::var("SPIRAL_UNISON_AGG").unwrap_or_else(|_| "mean".into());
     let lane = if agg == "median" {
@@ -48,8 +50,10 @@ fn fetch_lane_from_redis() -> Option<i32> {
     Some(lane)
 }
 
-#[cfg(not(feature="kv-redis"))]
-fn fetch_lane_from_redis() -> Option<i32> { None }
+#[cfg(not(feature = "kv-redis"))]
+fn fetch_lane_from_redis() -> Option<i32> {
+    None
+}
 
 /// Apply runtime consensus, run the HIP-real stub if needed, and return.
 pub fn consensus_lane_params(mut p: LaneParams) -> LaneParams {

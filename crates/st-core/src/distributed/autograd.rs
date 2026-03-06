@@ -166,7 +166,8 @@ impl AmebaAutograd {
             }
 
             let signal = message.payload.iter().map(|v| v.abs()).sum::<f32>();
-            if signal < self.tolerance {
+            let below_tolerance = signal < self.tolerance;
+            if below_tolerance && message.hops > 0 {
                 return Ok(());
             }
 
@@ -174,7 +175,7 @@ impl AmebaAutograd {
                 *w -= agent.learning_rate * g;
             }
 
-            if message.hops >= self.max_hops {
+            if below_tolerance || message.hops >= self.max_hops {
                 return Ok(());
             }
 

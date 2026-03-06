@@ -150,6 +150,7 @@ impl SoftContext {
         ];
         feats.push(match self.backend {
             BackendKind::Wgpu => ("backend_wgpu", 1.0),
+            BackendKind::Mps => ("backend_mps", 1.0),
             BackendKind::Cuda => ("backend_cuda", 1.0),
             BackendKind::Hip => ("backend_hip", 1.0),
             BackendKind::Cpu => ("backend_cpu", 1.0),
