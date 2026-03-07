@@ -1,12 +1,12 @@
-// wgpu_kernels_rankk.wgsl (v1.8.5 additions)
-// Only the changed apply_sg2 section is shown here for brevity. Other entries remain as in v1.8.3.
+// wgpu_kernels_rankk.wgsl threshold-compaction additions
+// Only the changed apply_sg2 section is shown here for brevity.
 
 var<workgroup> sg_totals: array<u32, 8u>;
 var<workgroup> sg_bases:  array<u32, 8u>;
 var<workgroup> sg_temp:   array<u32, 8u>;
 
 @compute @workgroup_size(256)
-fn midk_compact_apply_sg2(
+fn compact_apply_sg2(
   @builtin(global_invocation_id) gid: vec3<u32>,
   @builtin(workgroup_id) wid: vec3<u32>,
   @builtin(local_invocation_id) lid: vec3<u32>,

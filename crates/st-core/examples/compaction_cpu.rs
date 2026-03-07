@@ -1,4 +1,4 @@
-use st_core::ops::midk::{bottomk_compact_below, midk_compact_between};
+use st_core::ops::compaction::{compact_below, compact_between};
 
 fn main() {
     // Two rows of toy data.
@@ -10,19 +10,19 @@ fn main() {
         3.0, 2.0, 1.0, 0.0, -1.0, -2.0, 5.0, 6.0, // row 1
     ];
 
-    let mid = midk_compact_between(&x, rows, cols, row_stride, 2.0, 4.0).unwrap();
-    println!("midk counts={:?}", mid.counts);
-    println!("midk row0 values={:?}", &mid.values[0..cols as usize]);
-    println!("midk row0 indices={:?}", &mid.indices[0..cols as usize]);
+    let between = compact_between(&x, rows, cols, row_stride, 2.0, 4.0).unwrap();
+    println!("between counts={:?}", between.counts);
+    println!("between row0 values={:?}", &between.values[0..cols as usize]);
+    println!("between row0 indices={:?}", &between.indices[0..cols as usize]);
 
-    let bot = bottomk_compact_below(&x, rows, cols, row_stride, 1.0).unwrap();
-    println!("bottomk counts={:?}", bot.counts);
+    let below = compact_below(&x, rows, cols, row_stride, 1.0).unwrap();
+    println!("below counts={:?}", below.counts);
     println!(
-        "bottomk row1 values={:?}",
-        &bot.values[cols as usize..2 * cols as usize]
+        "below row1 values={:?}",
+        &below.values[cols as usize..2 * cols as usize]
     );
     println!(
-        "bottomk row1 indices={:?}",
-        &bot.indices[cols as usize..2 * cols as usize]
+        "below row1 indices={:?}",
+        &below.indices[cols as usize..2 * cols as usize]
     );
 }

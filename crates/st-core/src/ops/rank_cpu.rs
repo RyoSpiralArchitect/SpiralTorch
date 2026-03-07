@@ -6,8 +6,8 @@
 //!
 //! `RankKind::MidK` is treated as an exact selection over the value-sorted row:
 //! sort ascending, take the centered window of width `k`, and emit that window
-//! in ascending order. Threshold-based MidK compaction remains available via
-//! `ops::midk`.
+//! in ascending order. Threshold-based compaction remains available via
+//! `ops::compaction`.
 
 use crate::ops::rank_entry::{RankKind, RankPlan};
 use std::cmp::Ordering;

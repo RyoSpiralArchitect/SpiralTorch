@@ -15,11 +15,8 @@ fn main() {
 fn run() -> Result<(), String> {
     use std::sync::Arc;
 
-    use st_core::backend::device_caps::DeviceCaps;
-    use st_core::backend::wgpu_exec::WgpuBufferExecutor;
     use st_core::backend::wgpu_rt::{self, WgpuCtx};
-    use st_core::ops::midk::midk_compact_between;
-    use st_core::ops::rank_entry::{execute_rank, plan_rank, RankKind};
+    use st_core::ops::compaction::compact_between;
     use wgpu::util::DeviceExt;
 
     let rows = 2u32;
@@ -89,22 +86,22 @@ fn run() -> Result<(), String> {
         mapped_at_creation: false,
     });
 
-    let caps = DeviceCaps::wgpu(32, false, 256);
-    let plan = plan_rank(RankKind::MidK, rows, cols, 3, caps);
-    let mut exec = WgpuBufferExecutor::compaction(
-        &x_buf,
+    wgpu_rt::dispatch_compaction_1ce_buffers(
+        rows,
+        cols,
         row_stride,
+        0,
+        &x_buf,
         &mask_buf,
         &out_counts,
         &out_vals,
         &out_idx,
-    );
-    execute_rank(&mut exec, &plan)?;
+    )?;
 
     let got_counts = readback::<u32>(&ctx.device, &ctx.queue, &out_counts, rows as usize);
     let got_vals = readback::<f32>(&ctx.device, &ctx.queue, &out_vals, (rows * cols) as usize);
     let got_idx = readback::<u32>(&ctx.device, &ctx.queue, &out_idx, (rows * cols) as usize);
-    let cpu = midk_compact_between(&x, rows, cols, row_stride, lower, upper)
+    let cpu = compact_between(&x, rows, cols, row_stride, lower, upper)
         .map_err(|e| format!("cpu compaction failed: {e:?}"))?;
 
     assert_eq!(got_counts, cpu.counts);
@@ -115,9 +112,9 @@ fn run() -> Result<(), String> {
         assert_eq!(&got_idx[base..base + valid], &cpu.indices[base..base + valid]);
     }
 
-    println!("midk counts={got_counts:?}");
-    println!("midk row0 values={:?}", &got_vals[..cols as usize]);
-    println!("midk row0 idx={:?}", &got_idx[..cols as usize]);
+    println!("between counts={got_counts:?}");
+    println!("between row0 values={:?}", &got_vals[..cols as usize]);
+    println!("between row0 idx={:?}", &got_idx[..cols as usize]);
     Ok(())
 }
 

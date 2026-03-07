@@ -2,7 +2,7 @@
 //
 // Additions over v1.8.0:
 // - TopK 1CE: keep‑k heap for small K (<=32) on SUBGROUP path
-// - MidK/BottomK: SUBGROUPS apply path uses per‑subgroup base array to reduce atomics/fences
+// - Threshold compaction: subgroup apply path uses per-subgroup base arrays to reduce atomics/fences
 
 // ===== Common structs/bindings =====
 struct Params {
@@ -252,10 +252,10 @@ fn topk_workgroup_1ce(
   }
 }
 
-// ===== MidK/BottomK: scan tiles (unchanged) =====
+// ===== Threshold compaction: scan tiles =====
 var<workgroup> temp: array<u32, 256u>;
 @compute @workgroup_size(256)
-fn midk_compact_scan_tiles(
+fn compact_scan_tiles(
   @builtin(global_invocation_id) gid: vec3<u32>,
   @builtin(workgroup_id) wid: vec3<u32>,
   @builtin(local_invocation_id) lid: vec3<u32>
@@ -287,9 +287,9 @@ fn midk_compact_scan_tiles(
   if (lid.x==0u){ PREFIX[r*CP.tiles_x + tile] = temp[255u]; }
 }
 
-// ===== MidK/BottomK: parallel row‑prefix (unchanged from v1.8.0 overlay) =====
+// ===== Threshold compaction: parallel row-prefix =====
 @compute @workgroup_size(256)
-fn midk_compact_row_prefix(
+fn compact_row_prefix(
   @builtin(workgroup_id) wid: vec3<u32>,
   @builtin(local_invocation_id) lid: vec3<u32>
 ){
@@ -331,12 +331,12 @@ fn midk_compact_row_prefix(
   if (lid.x == 0u){ atomicStore(&OUTPOS[r], acc); }
 }
 
-// ===== MidK/BottomK: SUBGROUP apply (optimized atomics) =====
+// ===== Threshold compaction: subgroup apply =====
 var<workgroup> wg_sg_base: atomic<u32>;
 var<workgroup> sg_bases: array<u32, 8u>; // up to 8 subgroups (256/32)
 
 @compute @workgroup_size(256)
-fn midk_compact_apply_sg(
+fn compact_apply_sg(
   @builtin(global_invocation_id) gid: vec3<u32>,
   @builtin(workgroup_id) wid: vec3<u32>,
   @builtin(local_invocation_id) lid: vec3<u32>,
@@ -388,10 +388,10 @@ fn midk_compact_apply_sg(
   }
 }
 
-// ===== MidK/BottomK: fallback apply (Blelloch) =====
+// ===== Threshold compaction: fallback apply =====
 var<workgroup> temp2: array<u32, 256u>;
 @compute @workgroup_size(256)
-fn midk_compact_apply(
+fn compact_apply(
   @builtin(global_invocation_id) gid: vec3<u32>,
   @builtin(workgroup_id) wid: vec3<u32>,
   @builtin(local_invocation_id) lid: vec3<u32>

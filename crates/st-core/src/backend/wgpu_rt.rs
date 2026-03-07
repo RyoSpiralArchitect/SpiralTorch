@@ -200,17 +200,17 @@ fn ensure_topk_wg_pl(ctx: &WgpuCtx) -> &wgpu::ComputePipeline {
 
 fn ensure_compact_scan_pl(ctx: &WgpuCtx) -> &wgpu::ComputePipeline {
     ctx.compact_scan_pl
-        .get_or_init(|| pl(ctx, "midk_compact_scan_tiles", ensure_layout_compaction(ctx)))
+        .get_or_init(|| pl(ctx, "compact_scan_tiles", ensure_layout_compaction(ctx)))
 }
 
 fn ensure_compact_row_prefix_pl(ctx: &WgpuCtx) -> &wgpu::ComputePipeline {
     ctx.compact_row_prefix_pl
-        .get_or_init(|| pl(ctx, "midk_compact_row_prefix", ensure_layout_compaction(ctx)))
+        .get_or_init(|| pl(ctx, "compact_row_prefix", ensure_layout_compaction(ctx)))
 }
 
 fn ensure_compact_apply_pl(ctx: &WgpuCtx) -> &wgpu::ComputePipeline {
     ctx.compact_apply_pl
-        .get_or_init(|| pl(ctx, "midk_compact_apply", ensure_layout_compaction(ctx)))
+        .get_or_init(|| pl(ctx, "compact_apply", ensure_layout_compaction(ctx)))
 }
 
 fn compaction_tiles_x(cols: u32) -> u32 {
@@ -471,7 +471,7 @@ fn dispatch_compaction_buffers(
     Ok(())
 }
 
-/// Execute MidK/BottomK compaction on WGPU.
+/// Execute threshold compaction on WGPU.
 ///
 /// The current shader contract consumes an explicit `mask` buffer and emits
 /// per-row counts plus packed values and indices. Only the first
@@ -502,7 +502,7 @@ pub fn dispatch_compaction_1ce_buffers(
     )
 }
 
-/// Execute the two-stage MidK/BottomK compaction surface on WGPU.
+/// Execute the two-stage threshold compaction surface on WGPU.
 ///
 /// The current runtime reuses the same scan/prefix/apply kernel suite as the
 /// 1CE path and keeps the separate entry point for higher-level API parity.
@@ -531,12 +531,12 @@ pub fn dispatch_compaction_2ce_buffers(
     )
 }
 
-/// Plan-only MidK compaction entry point used by `st-core::backend::wgpu_exec`.
+/// Plan-only compaction entry point kept for parity with the older executor surface.
 pub fn dispatch_compaction_1ce(_plan: &RankPlan, _kind: u32) -> Result<(), String> {
     Err("wgpu_rt: plan-only compaction dispatch is not wired; call dispatch_compaction_1ce_buffers(...)".into())
 }
 
-/// Plan-only BottomK compaction entry point used by `st-core::backend::wgpu_exec`.
+/// Plan-only compaction entry point kept for parity with the older executor surface.
 pub fn dispatch_compaction_2ce(_plan: &RankPlan, _kind: u32) -> Result<(), String> {
     Err("wgpu_rt: plan-only compaction dispatch is not wired; call dispatch_compaction_2ce_buffers(...)".into())
 }
