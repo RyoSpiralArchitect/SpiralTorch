@@ -5,7 +5,7 @@
 //! WGSL shaders.  The generated source focuses on clarity so integrators can
 //! inspect or tweak the kernels before shipping them to end users.
 
-use crate::backend::wgpu_heuristics::Choice;
+use crate::backend::unison_heuristics::Choice;
 
 /// Plan describing the FFT kernel that should be emitted.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,6 +23,19 @@ pub struct SpiralKFftPlan {
 impl SpiralKFftPlan {
     /// Construct a plan from a heuristic `Choice`.
     pub fn from_choice(choice: &Choice, subgroup: bool) -> Self {
+        Self {
+            radix: choice.fft_radix.max(2).min(4),
+            tile_cols: choice.fft_tile.max(1),
+            segments: choice.fft_segments.max(1),
+            subgroup,
+        }
+    }
+
+    /// Construct a plan from the WGPU heuristic surface.
+    pub fn from_wgpu_choice(
+        choice: &crate::backend::wgpu_heuristics::Choice,
+        subgroup: bool,
+    ) -> Self {
         Self {
             radix: choice.radix.max(2).min(4),
             tile_cols: choice.tile_cols.max(1),
@@ -107,17 +120,16 @@ mod tests {
     #[test]
     fn wgsl_includes_plan_information() {
         let choice = Choice {
-            use_2ce: true,
             wg: 256,
             kl: 16,
             ch: 8192,
-            algo_topk: 2,
-            ctile: 1024,
-            mode_midk: 2,
-            mode_bottomk: 1,
-            tile_cols: 2048,
-            radix: 4,
-            segments: 3,
+            mk: 2,
+            mkd: 4,
+            tile: 2048,
+            subgroup: true,
+            fft_tile: 2048,
+            fft_radix: 4,
+            fft_segments: 3,
         };
         let plan = SpiralKFftPlan::from_choice(&choice, true);
         let src = plan.emit_wgsl();

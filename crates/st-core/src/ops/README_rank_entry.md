@@ -1,14 +1,15 @@
 # Rank Entry (TopK/MidK/BottomK)
 
-- `plan_rank(RankKind, rows, cols, k, caps)` plans and returns a `RankPlan` with unified `Choice`.
+- `plan_rank(RankKind, rows, cols, k, caps)` plans exact TopK/MidK/BottomK and returns a `RankPlan` with an exact-rank `Choice`.
+- `ops::compaction::plan_compaction(rows, cols, caps)` plans threshold/mask compaction separately via `CompactionPlan`.
 - Backends implement `RankKExecutor` (mutable) and call `execute_rank(...)`.
 - All heuristics (SpiralK/Redis/SoftLogic/Generated) are encapsulated in `unison_heuristics`.
 
 CPU reference execution is available via `backend::cpu_exec::CpuExecutor` and
 `ops::rank_cpu` (TopK/MidK/BottomK). `RankKind::MidK` selects the centered
 window of width `k` from the ascending value order. Threshold-based compaction
-remains available via `ops::compaction` (with `ops::midk` kept only as a
-compatibility alias).
+is planned and executed separately through `ops::compaction` (with `ops::midk`
+kept only as a compatibility alias).
 
 WGPU threshold/mask compaction is now exposed through
 `backend::wgpu_rt::dispatch_compaction_{1ce,2ce}_buffers(...)`. The current
@@ -21,4 +22,4 @@ exact-selection path currently wires only `TopK`; exact `MidK`/`BottomK` return
 an explicit unsupported error instead of silently falling back to threshold
 compaction.
 
-This becomes the **single standard entry** for Rank‑K across WGPU/CUDA/HIP/CPU.
+This keeps exact Rank‑K and threshold compaction on distinct planner surfaces.

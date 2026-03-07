@@ -26,18 +26,23 @@ impl RankKind {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Choice {
-    pub use_2ce: bool,
     pub wg: u32,
     pub kl: u32,
     pub ch: u32,
     pub mk: u32,           // 0=bitonic,1=shared,2=warp
     pub mkd: u32,          // 0=auto,1=heap,2=kway,3=bitonic,4=warp_heap,5=warp_bitonic
     pub tile: u32,         // TopK sweep tile
-    pub ctile: u32,        // MidK/BottomK compaction tile
     pub subgroup: bool,    // Whether the planner assumed subgroup execution
     pub fft_tile: u32,     // Column tile for FFT/fractional kernels
     pub fft_radix: u32,    // Preferred radix for the FFT planner
     pub fft_segments: u32, // Number of ND segments folded by the kernel
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CompactionChoice {
+    pub use_2ce: bool,
+    pub ctile: u32,
+    pub subgroup: bool,
 }
 
 impl Choice {
@@ -79,10 +84,6 @@ impl Choice {
         if self.tile != 0 {
             let _ = writeln!(&mut out, "  tile {}", self.tile);
         }
-        if self.ctile != 0 {
-            let _ = writeln!(&mut out, "  compaction_tile {}", self.ctile);
-        }
-        let _ = writeln!(&mut out, "  two_stage {}", self.use_2ce);
         if self.fft_tile != 0 {
             let _ = writeln!(&mut out, "  fft_tile {}", self.fft_tile);
         }
@@ -97,19 +98,26 @@ impl Choice {
     }
 }
 
-fn fallback(rows: u32, cols: u32, k: u32, caps: &DeviceCaps, kind: RankKind) -> Choice {
+impl CompactionChoice {
+    pub fn to_unison_script(&self) -> String {
+        use std::fmt::Write;
+        let mut out = String::new();
+        let _ = writeln!(&mut out, "unison compaction {{");
+        let _ = writeln!(&mut out, "  compaction_tile {}", self.ctile);
+        let _ = writeln!(&mut out, "  two_stage {}", self.use_2ce);
+        let _ = writeln!(&mut out, "}}");
+        out
+    }
+}
+
+fn fallback(rows: u32, cols: u32, k: u32, caps: &DeviceCaps, _kind: RankKind) -> Choice {
     let wg = caps.recommended_workgroup(rows);
     let kl = caps.recommended_kl(k);
     let ch = caps.recommended_channel_stride(cols);
-    let (tile, mut ctile) = caps.recommended_tiles(cols);
-
-    if matches!(kind, RankKind::BottomK) {
-        ctile = ctile.min(tile / 2).max(128);
-    }
+    let (tile, _) = caps.recommended_tiles(cols);
 
     let mk = caps.preferred_merge_kind(k);
     let mkd = caps.preferred_substrategy(mk, k);
-    let use_2ce = caps.prefers_two_stage_with_rows(rows, cols, k);
 
     let fft_tile = ((cols.max(1) + 1023) / 1024) as u32 * 1024;
     let fft_radix = if k.is_power_of_two() { 4 } else { 2 };
@@ -122,18 +130,24 @@ fn fallback(rows: u32, cols: u32, k: u32, caps: &DeviceCaps, kind: RankKind) -> 
     };
 
     Choice {
-        use_2ce,
         wg,
         kl,
         ch,
         mk,
         mkd,
         tile,
-        ctile,
         subgroup: caps.subgroup,
         fft_tile,
         fft_radix,
         fft_segments,
+    }
+}
+
+fn fallback_compaction(rows: u32, cols: u32, caps: &DeviceCaps) -> CompactionChoice {
+    CompactionChoice {
+        use_2ce: caps.prefers_two_stage_compaction(rows, cols),
+        ctile: caps.preferred_compaction_tile(cols, 0),
+        subgroup: caps.subgroup,
     }
 }
 
@@ -143,9 +157,6 @@ fn uses_shared_memory(choice: &Choice) -> bool {
 
 fn enforce_shared_memory(choice: &mut Choice, caps: &DeviceCaps, k: u32) {
     if let Some(limit) = caps.shared_mem_per_workgroup {
-        if limit < 32 * 1024 {
-            choice.use_2ce = false;
-        }
         if uses_shared_memory(choice) && limit < 48 * 1024 {
             choice.mk = caps.preferred_merge_kind(k);
             choice.mkd = caps.preferred_substrategy(choice.mk, k);
@@ -157,10 +168,10 @@ fn refine_choice(
     mut choice: Choice,
     baseline: Choice,
     caps: &DeviceCaps,
-    rows: u32,
+    _rows: u32,
     cols: u32,
     k: u32,
-    kind: RankKind,
+    _kind: RankKind,
 ) -> Choice {
     if choice.wg == 0 {
         choice.wg = baseline.wg;
@@ -187,15 +198,6 @@ fn refine_choice(
     }
     choice.tile = caps.preferred_tile(cols, choice.tile);
 
-    if matches!(kind, RankKind::MidK | RankKind::BottomK) {
-        if choice.ctile == 0 {
-            choice.ctile = baseline.ctile;
-        }
-        choice.ctile = caps.preferred_compaction_tile(cols, choice.ctile);
-    } else {
-        choice.ctile = 0;
-    }
-
     if choice.fft_tile == 0 {
         choice.fft_tile = baseline.fft_tile;
     }
@@ -210,14 +212,6 @@ fn refine_choice(
         choice.fft_segments = baseline.fft_segments;
     }
     choice.fft_segments = choice.fft_segments.clamp(1, 4);
-
-    let expected_two_stage = caps.prefers_two_stage_with_rows(rows, cols, k);
-    if expected_two_stage && !choice.use_2ce {
-        choice.use_2ce = baseline.use_2ce;
-    }
-    if !expected_two_stage {
-        choice.use_2ce = false;
-    }
 
     enforce_shared_memory(&mut choice, caps, k);
 
@@ -236,30 +230,19 @@ fn closeness(actual: u32, target: u32) -> f32 {
 fn score_choice(
     choice: &Choice,
     caps: &DeviceCaps,
-    rows: u32,
-    cols: u32,
+    _rows: u32,
+    _cols: u32,
     k: u32,
     baseline: &Choice,
-    kind: RankKind,
+    _kind: RankKind,
 ) -> f32 {
     let mut score = 0.0;
-
-    let expected_two_stage = caps.prefers_two_stage_with_rows(rows, cols, k);
-    if choice.use_2ce == expected_two_stage {
-        score += 0.25;
-    } else {
-        score -= 0.1;
-    }
 
     score += closeness(choice.wg, baseline.wg) * 0.2;
     score += caps.occupancy_score(choice.wg) * 0.2;
 
     score += closeness(choice.kl, baseline.kl) * 0.15;
     score += closeness(choice.tile, baseline.tile) * 0.1;
-
-    if matches!(kind, RankKind::MidK | RankKind::BottomK) {
-        score += closeness(choice.ctile, baseline.ctile) * 0.1;
-    }
 
     score += closeness(choice.fft_tile, baseline.fft_tile) * 0.05;
     if choice.fft_radix == baseline.fft_radix {
@@ -281,19 +264,21 @@ fn score_choice(
 
 fn convert_wgpu_choice(choice: wgpu_heuristics::Choice, subgroup: bool) -> Choice {
     Choice {
-        use_2ce: choice.use_2ce,
         wg: choice.wg,
         kl: choice.kl,
         ch: choice.ch,
         mk: 0,
         mkd: 0,
         tile: choice.tile_cols,
-        ctile: choice.ctile,
         subgroup,
         fft_tile: choice.tile_cols,
         fft_radix: choice.radix,
         fft_segments: choice.segments,
     }
+}
+
+pub fn choose_unified_compaction(rows: u32, cols: u32, caps: DeviceCaps) -> CompactionChoice {
+    fallback_compaction(rows, cols, &caps)
 }
 
 pub fn choose_unified_rank(
@@ -386,7 +371,6 @@ mod tests {
     fn fallback_tracks_backend_expectations() {
         let caps = DeviceCaps::wgpu(32, true, 256);
         let choice = fallback(1024, 65_536, 256, &caps, RankKind::TopK);
-        assert!(choice.use_2ce);
         assert!(choice.tile >= 1024);
         assert_eq!(choice.mk, 2);
         assert!(choice.fft_tile >= 1024);
@@ -413,5 +397,16 @@ mod tests {
         assert!(script.contains("workgroup"));
         assert!(script.contains("merge"));
         assert!(script.contains("fft_tile"));
+        assert!(!script.contains("compaction_tile"));
+    }
+
+    #[test]
+    fn compaction_choice_has_dedicated_script() {
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let choice = choose_unified_compaction(512, 65_536, caps);
+        let script = choice.to_unison_script();
+        assert!(script.contains("unison compaction"));
+        assert!(script.contains("compaction_tile"));
+        assert!(script.contains("two_stage"));
     }
 }

@@ -81,7 +81,7 @@ impl RankKExecutor for WgpuBufferExecutor<'_> {
 
 fn unsupported_exact_rank(kind: &str) -> Result<(), String> {
     Err(format!(
-        "wgpu_exec: exact {kind} selection is not implemented on WGPU; use `ops::compaction` and `wgpu_rt::dispatch_compaction_*_buffers(...)` for threshold compaction"
+        "wgpu_exec: exact {kind} selection is not implemented on WGPU; use `ops::compaction::plan_compaction(...)` and `wgpu_rt::dispatch_compaction_*_buffers(...)` for threshold compaction"
     ))
 }
 

@@ -177,7 +177,7 @@ pub fn auto_fft_spiralk(rows: u32, cols: u32, k: u32, subgroup: bool) -> Option<
 /// `Choice`.
 fn auto_fft_plan(rows: u32, cols: u32, k: u32, subgroup: bool) -> Option<SpiralKFftPlan> {
     let choice = choose_topk(rows, cols, k, subgroup)?;
-    Some(SpiralKFftPlan::from_choice(&choice, subgroup))
+    Some(SpiralKFftPlan::from_wgpu_choice(&choice, subgroup))
 }
 
 #[cfg(test)]

@@ -17,6 +17,7 @@ use st_backend_hip::{
 };
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
+use st_core::ops::compaction::{plan_compaction, CompactionPlan};
 use st_core::ops::rank_entry::{plan_rank, RankPlan};
 #[cfg(any(feature = "psi", feature = "psychoid"))]
 use st_core::telemetry::hub;
@@ -2438,13 +2439,21 @@ fn caps_for(device: Option<&str>) -> DeviceCaps {
 
 fn choice_dict<'py>(py: Python<'py>, plan: &RankPlan) -> PyResult<Bound<'py, PyDict>> {
     let choice = PyDict::new_bound(py);
-    choice.set_item("use_2ce", plan.choice.use_2ce)?;
     choice.set_item("workgroup", plan.choice.wg)?;
     choice.set_item("kl", plan.choice.kl)?;
     choice.set_item("channel_stride", plan.choice.ch)?;
     choice.set_item("merge_kind", plan.choice.mk)?;
     choice.set_item("merge_detail", plan.choice.mkd)?;
     choice.set_item("tile", plan.choice.tile)?;
+    Ok(choice)
+}
+
+fn compaction_choice_dict<'py>(
+    py: Python<'py>,
+    plan: &CompactionPlan,
+) -> PyResult<Bound<'py, PyDict>> {
+    let choice = PyDict::new_bound(py);
+    choice.set_item("use_2ce", plan.choice.use_2ce)?;
     choice.set_item("compaction_tile", plan.choice.ctile)?;
     Ok(choice)
 }
@@ -2470,6 +2479,25 @@ fn plan(
     out.set_item("cols", cols)?;
     out.set_item("k", k)?;
     out.set_item("choice", choice_dict(py, &plan)?.into_py(py))?;
+    Ok(out.into_py(py))
+}
+
+/// Inspect the threshold compaction heuristics for the requested backend.
+#[pyfunction(name = "plan_compaction")]
+#[pyo3(signature = (rows, cols, device=None))]
+fn plan_compaction_py(
+    py: Python<'_>,
+    rows: u32,
+    cols: u32,
+    device: Option<&str>,
+) -> PyResult<PyObject> {
+    let caps = caps_for(device);
+    let plan = plan_compaction(rows, cols, caps);
+
+    let out = PyDict::new_bound(py);
+    out.set_item("rows", rows)?;
+    out.set_item("cols", cols)?;
+    out.set_item("choice", compaction_choice_dict(py, &plan)?.into_py(py))?;
     Ok(out.into_py(py))
 }
 
@@ -2750,6 +2778,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     sot::module(_py, &sot_mod)?;
     m.add_submodule(&sot_mod)?;
     m.add_function(wrap_pyfunction!(plan, m)?)?;
+    m.add_function(wrap_pyfunction!(plan_compaction_py, m)?)?;
     m.add_function(wrap_pyfunction!(plan_topk, m)?)?;
     m.add_function(wrap_pyfunction!(rank_select_cpu, m)?)?;
     m.add_function(wrap_pyfunction!(z_space_barycenter_py, m)?)?;

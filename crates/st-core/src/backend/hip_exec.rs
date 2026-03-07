@@ -16,12 +16,6 @@ impl RankKExecutor for HipExecutor {
     }
 }
 
-fn is_two_ce(plan: &RankPlan) -> bool {
-    let c = &plan.choice;
-    // Future: if generated has two_ce_hint, weigh it here.
-    c.use_2ce || (plan.cols as u64 >= (c.ctile.max(256) as u64) * 64)
-}
-
 fn dispatch_topk(plan: &RankPlan) -> Result<(), String> {
     let c = &plan.choice;
     match (c.mk, c.mkd) {
@@ -34,19 +28,17 @@ fn dispatch_topk(plan: &RankPlan) -> Result<(), String> {
     }
 }
 
-fn dispatch_midk(plan: &RankPlan) -> Result<(), String> {
-    if is_two_ce(plan) {
-        midk_two_ce(plan)
-    } else {
-        midk_one_ce(plan)
-    }
+fn dispatch_midk(_plan: &RankPlan) -> Result<(), String> {
+    unsupported_exact_rank("MidK")
 }
-fn dispatch_bottomk(plan: &RankPlan) -> Result<(), String> {
-    if is_two_ce(plan) {
-        bottomk_two_ce(plan)
-    } else {
-        bottomk_one_ce(plan)
-    }
+fn dispatch_bottomk(_plan: &RankPlan) -> Result<(), String> {
+    unsupported_exact_rank("BottomK")
+}
+
+fn unsupported_exact_rank(kind: &str) -> Result<(), String> {
+    Err(format!(
+        "hip_exec: exact {kind} selection is not implemented; use `ops::compaction::plan_compaction(...)` plus a backend compaction runtime for threshold compaction"
+    ))
 }
 
 // ---- HIP kernels are in hip_topk_rankk.hip.cpp ----
@@ -67,18 +59,5 @@ fn topk_bitonic(_p: &RankPlan) -> Result<(), String> {
     Ok(())
 }
 fn topk_default(_p: &RankPlan) -> Result<(), String> {
-    Ok(())
-}
-
-fn midk_one_ce(_p: &RankPlan) -> Result<(), String> {
-    Ok(())
-}
-fn midk_two_ce(_p: &RankPlan) -> Result<(), String> {
-    Ok(())
-}
-fn bottomk_one_ce(_p: &RankPlan) -> Result<(), String> {
-    Ok(())
-}
-fn bottomk_two_ce(_p: &RankPlan) -> Result<(), String> {
     Ok(())
 }

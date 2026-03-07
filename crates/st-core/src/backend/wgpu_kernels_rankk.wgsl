@@ -27,8 +27,9 @@ struct CParams {
 @group(0) @binding(6) var<storage, read_write> PREFIX: array<u32>;
 
 // ===== Shared (bank padding) =====
-var<workgroup> s_vals: array<f32, 256u + 8u>;
-var<workgroup> s_idx:  array<u32, 256u + 8u>;
+const SHARED_PADDED_LEN: u32 = 264u;
+var<workgroup> s_vals: array<f32, SHARED_PADDED_LEN>;
+var<workgroup> s_idx:  array<u32, SHARED_PADDED_LEN>;
 fn pad_addr(i:u32)->u32 { return i + (i >> 5u); } // +1 per 32
 
 fn next_pow2(x:u32)->u32 {
@@ -59,8 +60,7 @@ fn heap_sift_down(hv: ptr<function, array<f32, 64u>>, hi: ptr<function, array<u3
 @compute @workgroup_size(256)
 fn topk_subgroups_heap_1ce(
   @builtin(local_invocation_id)  lid: vec3<u32>,
-  @builtin(workgroup_id)         wid: vec3<u32>,
-  @builtin(subgroup_size)        sg_size: u32
+  @builtin(workgroup_id)         wid: vec3<u32>
 ){
   let r = wid.y;
   if (r >= P.rows) { return; }
@@ -119,12 +119,12 @@ fn topk_subgroups_heap_1ce(
 @compute @workgroup_size(256)
 fn topk_subgroups_bitonic_1ce(
   @builtin(local_invocation_id)  lid: vec3<u32>,
-  @builtin(workgroup_id)         wid: vec3<u32>,
-  @builtin(subgroup_size)        sg_size: u32,
-  @builtin(subgroup_invocation_id) sg_lane: u32
+  @builtin(workgroup_id)         wid: vec3<u32>
 ){
   let r = wid.y;
   if (r >= P.rows) { return; }
+  let sg_size = 32u;
+  let sg_lane = lid.x & 31u;
 
   // local scan
   var best_v: f32 = -0x1p127f;
@@ -178,7 +178,7 @@ fn topk_subgroups_bitonic_1ce(
       }
     }
     let n = next_pow2(max(1u,cand));
-    for (var i:cand; i<n; i=i+1u) {
+    for (var i:u32 = cand; i<n; i=i+1u) {
       s_vals[pad_addr(i)] = -0x1p127f; s_idx[pad_addr(i)] = 0u;
     }
   }
@@ -261,7 +261,7 @@ fn compact_scan_tiles(
   @builtin(local_invocation_id) lid: vec3<u32>
 ){
   let r = wid.y;
-  let tile = gid.x;
+  let tile = wid.x;
   if (r>=CP.rows || tile>=CP.tiles_x) { return; }
   let start = tile * 256u;
   var v: u32 = 0u;
@@ -339,13 +339,13 @@ var<workgroup> sg_bases: array<u32, 8u>; // up to 8 subgroups (256/32)
 fn compact_apply_sg(
   @builtin(global_invocation_id) gid: vec3<u32>,
   @builtin(workgroup_id) wid: vec3<u32>,
-  @builtin(local_invocation_id) lid: vec3<u32>,
-  @builtin(subgroup_size)        sg_size: u32,
-  @builtin(subgroup_invocation_id) sg_lane: u32
+  @builtin(local_invocation_id) lid: vec3<u32>
 ){
   let r = wid.y;
-  let tile = gid.x;
+  let tile = wid.x;
   if (r>=CP.rows || tile>=CP.tiles_x) { return; }
+  let sg_size = 32u;
+  let sg_lane = lid.x & 31u;
 
   let start = tile * 256u;
   let base  = PREFIX[r*CP.tiles_x + tile];
@@ -389,7 +389,6 @@ fn compact_apply_sg(
 }
 
 // ===== Threshold compaction: fallback apply =====
-var<workgroup> temp2: array<u32, 256u>;
 @compute @workgroup_size(256)
 fn compact_apply(
   @builtin(global_invocation_id) gid: vec3<u32>,
@@ -397,36 +396,22 @@ fn compact_apply(
   @builtin(local_invocation_id) lid: vec3<u32>
 ){
   let r = wid.y;
-  let tile = gid.x;
+  let tile = wid.x;
   if (r>=CP.rows || tile>=CP.tiles_x) { return; }
   let start = tile * 256u;
   let base  = PREFIX[r*CP.tiles_x + tile];
 
-  var flag: u32 = 0u;
-  let col0 = start + lid.x;
-  if (col0 < CP.cols) { if (CMASK[r*CP.row_stride + col0] != 0u) { flag = 1u; } }
-  temp2[lid.x] = flag; workgroupBarrier();
-
-  var off=1u; var d=256u;
-  loop { if (d<=1u){break;} let h=d>>1u;
-    if (lid.x < h) {
-      let ai = off*(2u*lid.x + 1u)-1u; let bi = off*(2u*lid.x + 2u)-1u;
-      temp2[bi] = temp2[bi] + temp2[ai];
+  if (lid.x == 0u) {
+    var local: u32 = 0u;
+    for (var j:u32 = 0u; j < 256u; j = j + 1u) {
+      let col = start + j;
+      if (col >= CP.cols) { break; }
+      if (CMASK[r*CP.row_stride + col] != 0u) {
+        let pos = base + local;
+        OUTVAL[r*CP.cols + pos] = CX[r*CP.row_stride + col];
+        OUTIDX[r*CP.cols + pos] = col;
+        local = local + 1u;
+      }
     }
-    off=off<<1u; d=h; workgroupBarrier();
-  }
-  if (lid.x==255u){ temp2[255u]=0u; } workgroupBarrier();
-  var h2=128u; var step=128u;
-  loop { if (h2==0u){break;}
-    if (lid.x < h2) {
-      let ai = step*(2u*lid.x + 1u)-1u; let bi = step*(2u*lid.x + 2u)-1u;
-      let t = temp2[ai]; temp2[ai]=temp2[bi]; temp2[bi]=temp2[bi]+t;
-    }
-    step=step>>1u; h2=h2>>1u; workgroupBarrier();
-  }
-  if (col0 < CP.cols && flag==1u) {
-    let pos = base + temp2[lid.x];
-    OUTVAL[r*CP.cols + pos] = CX[r*CP.row_stride + col0];
-    OUTIDX[r*CP.cols + pos] = col0;
   }
 }

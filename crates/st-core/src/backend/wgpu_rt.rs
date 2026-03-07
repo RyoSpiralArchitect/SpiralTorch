@@ -11,6 +11,7 @@
 
 #![cfg(all(feature = "wgpu", feature = "wgpu-rt"))]
 
+use crate::ops::compaction::CompactionPlan;
 use crate::ops::rank_entry::RankPlan;
 use once_cell::sync::OnceCell;
 use std::sync::Arc;
@@ -532,12 +533,12 @@ pub fn dispatch_compaction_2ce_buffers(
 }
 
 /// Plan-only compaction entry point kept for parity with the older executor surface.
-pub fn dispatch_compaction_1ce(_plan: &RankPlan, _kind: u32) -> Result<(), String> {
+pub fn dispatch_compaction_1ce(_plan: &CompactionPlan, _kind: u32) -> Result<(), String> {
     Err("wgpu_rt: plan-only compaction dispatch is not wired; call dispatch_compaction_1ce_buffers(...)".into())
 }
 
 /// Plan-only compaction entry point kept for parity with the older executor surface.
-pub fn dispatch_compaction_2ce(_plan: &RankPlan, _kind: u32) -> Result<(), String> {
+pub fn dispatch_compaction_2ce(_plan: &CompactionPlan, _kind: u32) -> Result<(), String> {
     Err("wgpu_rt: plan-only compaction dispatch is not wired; call dispatch_compaction_2ce_buffers(...)".into())
 }
 

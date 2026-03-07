@@ -1,4 +1,5 @@
-use st_core::ops::compaction::{compact_below, compact_between};
+use st_core::backend::device_caps::DeviceCaps;
+use st_core::ops::compaction::{compact_below, compact_between, plan_compaction};
 
 fn main() {
     // Two rows of toy data.
@@ -9,6 +10,11 @@ fn main() {
         0.0, 2.0, 1.0, 4.0, 3.0, 9.0, 8.0, 7.0, // row 0
         3.0, 2.0, 1.0, 0.0, -1.0, -2.0, 5.0, 6.0, // row 1
     ];
+    let plan = plan_compaction(rows, cols, DeviceCaps::cpu());
+    println!(
+        "compaction two_stage={} ctile={}",
+        plan.choice.use_2ce, plan.choice.ctile
+    );
 
     let between = compact_between(&x, rows, cols, row_stride, 2.0, 4.0).unwrap();
     println!("between counts={:?}", between.counts);

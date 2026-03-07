@@ -451,6 +451,20 @@ impl DeviceCaps {
             BackendKind::Cpu => col_heavy && rows > 512,
         }
     }
+
+    /// Whether threshold compaction should use a two-stage prefix/sweep path.
+    pub fn prefers_two_stage_compaction(&self, rows: u32, cols: u32) -> bool {
+        let col_heavy = cols > 32_768;
+        if rows == 0 {
+            return col_heavy;
+        }
+
+        match self.backend {
+            BackendKind::Wgpu | BackendKind::Mps => col_heavy && rows >= 256,
+            BackendKind::Cuda | BackendKind::Hip => col_heavy && rows >= self.lane_width.max(1) * 8,
+            BackendKind::Cpu => col_heavy && rows > 512,
+        }
+    }
 }
 
 impl Default for DeviceCaps {
@@ -557,6 +571,8 @@ mod tests {
         assert!(caps.prefers_two_stage(40_000, 64));
         assert!(caps.prefers_two_stage(2_000, 256));
         assert!(!caps.prefers_two_stage(10_000, 64));
+        assert!(caps.prefers_two_stage_compaction(1_024, 40_000));
+        assert!(!caps.prefers_two_stage_compaction(128, 10_000));
     }
 
     #[test]

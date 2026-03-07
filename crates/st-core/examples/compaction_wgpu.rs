@@ -15,8 +15,9 @@ fn main() {
 fn run() -> Result<(), String> {
     use std::sync::Arc;
 
+    use st_core::backend::device_caps::DeviceCaps;
     use st_core::backend::wgpu_rt::{self, WgpuCtx};
-    use st_core::ops::compaction::compact_between;
+    use st_core::ops::compaction::{compact_between, plan_compaction};
     use wgpu::util::DeviceExt;
 
     let rows = 2u32;
@@ -24,6 +25,7 @@ fn run() -> Result<(), String> {
     let row_stride = cols;
     let lower = 2.0f32;
     let upper = 4.0f32;
+    let plan = plan_compaction(rows, cols, DeviceCaps::wgpu(32, false, 256));
     let x: Vec<f32> = vec![
         0.0, 2.0, 1.0, 4.0, 3.0, 9.0, 8.0, 7.0, //
         3.0, 2.0, 1.0, 0.0, -1.0, -2.0, 5.0, 6.0,
@@ -40,11 +42,12 @@ fn run() -> Result<(), String> {
         println!("no WGPU adapter found; skipping");
         return Ok(());
     };
+    let limits = adapter.limits();
     let (device, queue) = pollster::block_on(adapter.request_device(
         &wgpu::DeviceDescriptor {
             label: Some("st.compaction.example.device"),
             required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::downlevel_defaults(),
+            required_limits: limits,
         },
         None,
     ))
@@ -86,17 +89,31 @@ fn run() -> Result<(), String> {
         mapped_at_creation: false,
     });
 
-    wgpu_rt::dispatch_compaction_1ce_buffers(
-        rows,
-        cols,
-        row_stride,
-        0,
-        &x_buf,
-        &mask_buf,
-        &out_counts,
-        &out_vals,
-        &out_idx,
-    )?;
+    if plan.choice.use_2ce {
+        wgpu_rt::dispatch_compaction_2ce_buffers(
+            rows,
+            cols,
+            row_stride,
+            0,
+            &x_buf,
+            &mask_buf,
+            &out_counts,
+            &out_vals,
+            &out_idx,
+        )?;
+    } else {
+        wgpu_rt::dispatch_compaction_1ce_buffers(
+            rows,
+            cols,
+            row_stride,
+            0,
+            &x_buf,
+            &mask_buf,
+            &out_counts,
+            &out_vals,
+            &out_idx,
+        )?;
+    }
 
     let got_counts = readback::<u32>(&ctx.device, &ctx.queue, &out_counts, rows as usize);
     let got_vals = readback::<f32>(&ctx.device, &ctx.queue, &out_vals, (rows * cols) as usize);
@@ -104,14 +121,32 @@ fn run() -> Result<(), String> {
     let cpu = compact_between(&x, rows, cols, row_stride, lower, upper)
         .map_err(|e| format!("cpu compaction failed: {e:?}"))?;
 
-    assert_eq!(got_counts, cpu.counts);
+    if got_counts != cpu.counts {
+        return Err(format!(
+            "count mismatch: gpu={got_counts:?} cpu={:?}",
+            cpu.counts
+        ));
+    }
     for row in 0..rows as usize {
         let base = row * cols as usize;
         let valid = got_counts[row] as usize;
-        assert_eq!(&got_vals[base..base + valid], &cpu.values[base..base + valid]);
-        assert_eq!(&got_idx[base..base + valid], &cpu.indices[base..base + valid]);
+        let got_vals_row = &got_vals[base..base + valid];
+        let got_idx_row = &got_idx[base..base + valid];
+        let cpu_vals_row = &cpu.values[base..base + valid];
+        let cpu_idx_row = &cpu.indices[base..base + valid];
+        if got_vals_row != cpu_vals_row || got_idx_row != cpu_idx_row {
+            return Err(format!(
+                "row {row} mismatch: gpu_vals={got_vals_row:?} gpu_idx={got_idx_row:?} cpu_vals={cpu_vals_row:?} cpu_idx={cpu_idx_row:?} full_gpu_vals={:?} full_gpu_idx={:?}",
+                &got_vals[base..base + cols as usize],
+                &got_idx[base..base + cols as usize],
+            ));
+        }
     }
 
+    println!(
+        "plan two_stage={} ctile={}",
+        plan.choice.use_2ce, plan.choice.ctile
+    );
     println!("between counts={got_counts:?}");
     println!("between row0 values={:?}", &got_vals[..cols as usize]);
     println!("between row0 idx={:?}", &got_idx[..cols as usize]);

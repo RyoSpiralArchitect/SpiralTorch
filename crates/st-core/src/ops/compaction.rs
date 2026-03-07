@@ -9,6 +9,23 @@
 //! `backend/wgpu_kernels_rankk.wgsl`: for each row `r`, the first `counts[r]`
 //! entries are valid and stable-ordered by increasing column index.
 
+use crate::backend::device_caps::DeviceCaps;
+use crate::backend::unison_heuristics::{self, CompactionChoice};
+
+/// Planned threshold compaction dispatch.
+#[derive(Clone, Debug)]
+pub struct CompactionPlan {
+    pub rows: u32,
+    pub cols: u32,
+    pub choice: CompactionChoice,
+}
+
+impl CompactionPlan {
+    pub fn to_unison_script(&self) -> String {
+        self.choice.to_unison_script()
+    }
+}
+
 /// Packed compaction output (row-wise).
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompactionOut {
@@ -28,6 +45,11 @@ pub struct CompactionOut {
 pub enum CompactionError {
     InvalidShape,
     NonFiniteThreshold,
+}
+
+pub fn plan_compaction(rows: u32, cols: u32, caps: DeviceCaps) -> CompactionPlan {
+    let choice = unison_heuristics::choose_unified_compaction(rows, cols, caps);
+    CompactionPlan { rows, cols, choice }
 }
 
 fn validate_dense(
@@ -183,5 +205,14 @@ mod tests {
             compact_between(&x, 1, 3, 3, f32::NAN, 1.0).unwrap_err(),
             CompactionError::NonFiniteThreshold
         );
+    }
+
+    #[test]
+    fn compaction_plan_exposes_dedicated_choice() {
+        let plan = plan_compaction(1_024, 65_536, DeviceCaps::wgpu(32, true, 256));
+        assert_eq!(plan.rows, 1_024);
+        assert_eq!(plan.cols, 65_536);
+        assert!(plan.choice.ctile >= 256);
+        assert!(plan.to_unison_script().contains("unison compaction"));
     }
 }
