@@ -332,8 +332,8 @@ fn compact_row_prefix(
 }
 
 // ===== Threshold compaction: subgroup apply =====
-var<workgroup> wg_sg_base: atomic<u32>;
-var<workgroup> sg_bases: array<u32, 8u>; // up to 8 subgroups (256/32)
+var<workgroup> sg_totals: array<u32, 8u>; // up to 8 subgroups (256/32)
+var<workgroup> sg_bases: array<u32, 8u>;
 
 @compute @workgroup_size(256)
 fn compact_apply_sg(
@@ -349,9 +349,6 @@ fn compact_apply_sg(
 
   let start = tile * 256u;
   let base  = PREFIX[r*CP.tiles_x + tile];
-
-  if (lid.x == 0u) { atomicStore(&wg_sg_base, 0u); }
-  workgroupBarrier();
 
   // lane flags
   var flag: u32 = 0u;
@@ -372,10 +369,17 @@ fn compact_apply_sg(
       sg_total = sg_total + f;
     }
   }
-  // only lane0 does atomicAdd to reserve subgroup base
+  // subgroup totals are collected deterministically so packed order stays stable
   if (sg_lane == 0u) {
-    let b = atomicAdd(&wg_sg_base, sg_total);
-    sg_bases[sg_id] = b;
+    sg_totals[sg_id] = sg_total;
+  }
+  workgroupBarrier();
+  if (lid.x == 0u) {
+    var prefix: u32 = 0u;
+    for (var sg:u32 = 0u; sg < sgc; sg = sg + 1u) {
+      sg_bases[sg] = prefix;
+      prefix = prefix + sg_totals[sg];
+    }
   }
   workgroupBarrier();
   let my_base = sg_bases[sg_id];

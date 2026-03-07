@@ -27,6 +27,7 @@ pub struct WgpuCtx {
     layout_topk: OnceCell<wgpu::BindGroupLayout>,
     compact_scan_pl: OnceCell<wgpu::ComputePipeline>,
     compact_row_prefix_pl: OnceCell<wgpu::ComputePipeline>,
+    compact_apply_sg_pl: OnceCell<wgpu::ComputePipeline>,
     compact_apply_pl: OnceCell<wgpu::ComputePipeline>,
     layout_compaction: OnceCell<wgpu::BindGroupLayout>,
 }
@@ -43,6 +44,7 @@ impl WgpuCtx {
             layout_topk: OnceCell::new(),
             compact_scan_pl: OnceCell::new(),
             compact_row_prefix_pl: OnceCell::new(),
+            compact_apply_sg_pl: OnceCell::new(),
             compact_apply_pl: OnceCell::new(),
             layout_compaction: OnceCell::new(),
         }
@@ -212,6 +214,18 @@ fn ensure_compact_row_prefix_pl(ctx: &WgpuCtx) -> &wgpu::ComputePipeline {
 fn ensure_compact_apply_pl(ctx: &WgpuCtx) -> &wgpu::ComputePipeline {
     ctx.compact_apply_pl
         .get_or_init(|| pl(ctx, "compact_apply", ensure_layout_compaction(ctx)))
+}
+
+fn ensure_compact_apply_sg_pl(ctx: &WgpuCtx) -> &wgpu::ComputePipeline {
+    ctx.compact_apply_sg_pl
+        .get_or_init(|| pl(ctx, "compact_apply_sg", ensure_layout_compaction(ctx)))
+}
+
+fn prefer_compact_apply_sg() -> bool {
+    std::env::var("ST_COMPACTION_APPLY")
+        .ok()
+        .map(|value| value.to_ascii_lowercase() != "fallback")
+        .unwrap_or(true)
 }
 
 fn compaction_tiles_x(cols: u32) -> u32 {
@@ -464,7 +478,12 @@ fn dispatch_compaction_buffers(
             label: Some("st.rankk.pass.compaction.apply"),
             timestamp_writes: None,
         });
-        pass.set_pipeline(ensure_compact_apply_pl(&ctx));
+        let apply_pipeline = if prefer_compact_apply_sg() {
+            ensure_compact_apply_sg_pl(&ctx)
+        } else {
+            ensure_compact_apply_pl(&ctx)
+        };
+        pass.set_pipeline(apply_pipeline);
         pass.set_bind_group(0, &bg, &[]);
         pass.dispatch_workgroups(tiles_x, rows, 1);
     }
