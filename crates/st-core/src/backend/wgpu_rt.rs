@@ -551,14 +551,58 @@ pub fn dispatch_compaction_2ce_buffers(
     )
 }
 
-/// Plan-only compaction entry point kept for parity with the older executor surface.
-pub fn dispatch_compaction_1ce(_plan: &CompactionPlan, _kind: u32) -> Result<(), String> {
-    Err("wgpu_rt: plan-only compaction dispatch is not wired; call dispatch_compaction_1ce_buffers(...)".into())
+/// Execute the one-stage compaction path using a precomputed compaction plan.
+pub fn dispatch_compaction_1ce(
+    plan: &CompactionPlan,
+    row_stride: u32,
+    kind: u32,
+    x: &wgpu::Buffer,
+    mask: &wgpu::Buffer,
+    out_counts: &wgpu::Buffer,
+    out_vals: &wgpu::Buffer,
+    out_idx: &wgpu::Buffer,
+) -> Result<(), String> {
+    dispatch_compaction_1ce_buffers(
+        plan.rows, plan.cols, row_stride, kind, x, mask, out_counts, out_vals, out_idx,
+    )
 }
 
-/// Plan-only compaction entry point kept for parity with the older executor surface.
-pub fn dispatch_compaction_2ce(_plan: &CompactionPlan, _kind: u32) -> Result<(), String> {
-    Err("wgpu_rt: plan-only compaction dispatch is not wired; call dispatch_compaction_2ce_buffers(...)".into())
+/// Execute the two-stage compaction path using a precomputed compaction plan.
+pub fn dispatch_compaction_2ce(
+    plan: &CompactionPlan,
+    row_stride: u32,
+    kind: u32,
+    x: &wgpu::Buffer,
+    mask: &wgpu::Buffer,
+    out_counts: &wgpu::Buffer,
+    out_vals: &wgpu::Buffer,
+    out_idx: &wgpu::Buffer,
+) -> Result<(), String> {
+    dispatch_compaction_2ce_buffers(
+        plan.rows, plan.cols, row_stride, kind, x, mask, out_counts, out_vals, out_idx,
+    )
+}
+
+/// Execute compaction using the staging mode selected by the planner.
+pub fn dispatch_compaction(
+    plan: &CompactionPlan,
+    row_stride: u32,
+    kind: u32,
+    x: &wgpu::Buffer,
+    mask: &wgpu::Buffer,
+    out_counts: &wgpu::Buffer,
+    out_vals: &wgpu::Buffer,
+    out_idx: &wgpu::Buffer,
+) -> Result<(), String> {
+    if plan.choice.use_2ce {
+        dispatch_compaction_2ce(
+            plan, row_stride, kind, x, mask, out_counts, out_vals, out_idx,
+        )
+    } else {
+        dispatch_compaction_1ce(
+            plan, row_stride, kind, x, mask, out_counts, out_vals, out_idx,
+        )
+    }
 }
 
 #[cfg(test)]

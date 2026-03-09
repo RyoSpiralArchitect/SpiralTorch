@@ -89,31 +89,16 @@ fn run() -> Result<(), String> {
         mapped_at_creation: false,
     });
 
-    if plan.choice.use_2ce {
-        wgpu_rt::dispatch_compaction_2ce_buffers(
-            rows,
-            cols,
-            row_stride,
-            0,
-            &x_buf,
-            &mask_buf,
-            &out_counts,
-            &out_vals,
-            &out_idx,
-        )?;
-    } else {
-        wgpu_rt::dispatch_compaction_1ce_buffers(
-            rows,
-            cols,
-            row_stride,
-            0,
-            &x_buf,
-            &mask_buf,
-            &out_counts,
-            &out_vals,
-            &out_idx,
-        )?;
-    }
+    wgpu_rt::dispatch_compaction(
+        &plan,
+        row_stride,
+        0,
+        &x_buf,
+        &mask_buf,
+        &out_counts,
+        &out_vals,
+        &out_idx,
+    )?;
 
     let got_counts = readback::<u32>(&ctx.device, &ctx.queue, &out_counts, rows as usize);
     let got_vals = readback::<f32>(&ctx.device, &ctx.queue, &out_vals, (rows * cols) as usize);

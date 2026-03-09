@@ -155,7 +155,7 @@ locking or thread book-keeping required.
 
 - **Rank-K family** (TopK / MidK / BottomK) with a **single entrypoint**
   Backends implement a `RankKExecutor`, decisions are made once via **unison heuristics**, and every exact-rank plan can now be rendered back into a SpiralK snippet via `choice.to_unison_script(kind)`.
-  `MidK` means the centered `k`-wide exact-selection window in ascending value order; threshold/mask compaction uses its own `ops::compaction::plan_compaction(...)` surface.
+  `MidK` means the centered `k`-wide exact-selection window in ascending value order; threshold/mask compaction uses its own `ops::compaction::plan_compaction(...)` surface and `backend::wgpu_rt::dispatch_compaction(...)` on WGPU.
 - **Introspectable compute plans**
   Unified `RankPlan`s expose their FFT stencil directly—call `plan.fft_plan()` to inspect the radix/segment shape, `plan.fft_wgsl()` to emit the ready-to-run WGSL kernel, or `plan.fft_spiralk_hint()` to log the same choice back into SpiralK.
 - **SpiralK DSL** (K×Lisp-inspired)
