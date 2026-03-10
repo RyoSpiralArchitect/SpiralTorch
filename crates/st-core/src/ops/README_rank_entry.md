@@ -25,4 +25,8 @@ exact-selection path currently wires only `TopK`; exact `MidK`/`BottomK` return
 an explicit unsupported error instead of silently falling back to threshold
 compaction.
 
+CUDA/HIP exact-selection executors are currently fail-fast stubs as well: they
+surface an explicit error for `TopK`/`MidK`/`BottomK` until real kernel
+dispatch is wired, rather than returning success without writing outputs.
+
 This keeps exact Rank‑K and threshold compaction on distinct planner surfaces.

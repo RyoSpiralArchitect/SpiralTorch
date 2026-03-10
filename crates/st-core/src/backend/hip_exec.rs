@@ -17,15 +17,7 @@ impl RankKExecutor for HipExecutor {
 }
 
 fn dispatch_topk(plan: &RankPlan) -> Result<(), String> {
-    let c = &plan.choice;
-    match (c.mk, c.mkd) {
-        (2, 4) => topk_warp_heap(plan),
-        (2, 5) => topk_warp_bitonic(plan),
-        (1, 1) => topk_shared_heap(plan),
-        (1, 2) => topk_shared_kway(plan),
-        (0, 3) => topk_bitonic(plan),
-        _ => topk_default(plan),
-    }
+    unsupported_exact_topk(topk_kernel_name(plan))
 }
 
 fn dispatch_midk(_plan: &RankPlan) -> Result<(), String> {
@@ -41,23 +33,49 @@ fn unsupported_exact_rank(kind: &str) -> Result<(), String> {
     ))
 }
 
-// ---- HIP kernels are in hip_topk_rankk.hip.cpp ----
-// Below stub calls are ready to be replaced with real WGPU runtime dispatches.
-fn topk_warp_heap(_p: &RankPlan) -> Result<(), String> {
-    Ok(())
+fn unsupported_exact_topk(kernel: &str) -> Result<(), String> {
+    Err(format!(
+        "hip_exec: exact TopK selection is not implemented; planner chose `{kernel}` but the HIP runtime path is still a stub"
+    ))
 }
-fn topk_warp_bitonic(_p: &RankPlan) -> Result<(), String> {
-    Ok(())
+
+fn topk_kernel_name(plan: &RankPlan) -> &'static str {
+    let c = &plan.choice;
+    match (c.mk, c.mkd) {
+        (2, 4) => "warp_heap",
+        (2, 5) => "warp_bitonic",
+        (1, 1) => "shared_heap",
+        (1, 2) => "shared_kway",
+        (0, 3) => "bitonic",
+        _ => "default",
+    }
 }
-fn topk_shared_heap(_p: &RankPlan) -> Result<(), String> {
-    Ok(())
-}
-fn topk_shared_kway(_p: &RankPlan) -> Result<(), String> {
-    Ok(())
-}
-fn topk_bitonic(_p: &RankPlan) -> Result<(), String> {
-    Ok(())
-}
-fn topk_default(_p: &RankPlan) -> Result<(), String> {
-    Ok(())
+
+#[cfg(test)]
+mod tests {
+    use super::{unsupported_exact_topk, HipExecutor};
+    use crate::backend::device_caps::DeviceCaps;
+    use crate::ops::rank_entry::{plan_rank, RankKExecutor, RankKind};
+
+    #[test]
+    fn exact_topk_is_reported_as_unsupported() {
+        let mut exec = HipExecutor::default();
+        let plan = plan_rank(
+            RankKind::TopK,
+            128,
+            8_192,
+            32,
+            DeviceCaps::hip(32, 1_024, Some(64 * 1024)),
+        );
+        let err = exec.launch_topk(&plan).unwrap_err();
+        assert!(err.contains("exact TopK selection is not implemented"));
+        assert!(err.contains("planner chose"));
+    }
+
+    #[test]
+    fn topk_stub_error_mentions_kernel_choice() {
+        let err = unsupported_exact_topk("warp_heap").unwrap_err();
+        assert!(err.contains("warp_heap"));
+        assert!(err.contains("still a stub"));
+    }
 }

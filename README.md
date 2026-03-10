@@ -199,8 +199,8 @@ locking or thread book-keeping required.
 
 - `wgpu` / `wgpu-rt`: WebGPU backends + runtime wiring
 - `mps`: macOS Metal (MPS)
-- `cuda`: CUDA (NVRTC/PTX loader expected)
-- `hip`: ROCm HIP (stub-safe)
+- `cuda`: CUDA (planner surface today; exact rank runtime currently fail-fast)
+- `hip`: ROCm HIP (planner/probe surface today; exact rank runtime currently fail-fast)
 - **`hip-real`**: ROCm HIP + RCCL “real” path (requires ROCm toolchain & linker; gated on top of `hip`)
 - HIP stub now probes `ROCM_PATH`/`HIP_PATH` and honours the
   `SPIRALTORCH_FORCE_HIP` override so simulated devices keep Z-space heuristics
