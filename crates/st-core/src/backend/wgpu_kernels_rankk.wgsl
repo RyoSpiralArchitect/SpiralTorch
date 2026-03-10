@@ -2,7 +2,7 @@
 //
 // Additions over v1.8.0:
 // - TopK 1CE: keep‑k heap for small K (<=32) on SUBGROUP path
-// - Threshold compaction: subgroup apply path uses per-subgroup base arrays to reduce atomics/fences
+// - Threshold compaction: subgroup apply paths use per-subgroup base arrays to reduce atomics/fences
 
 // ===== Common structs/bindings =====
 struct Params {
@@ -334,6 +334,7 @@ fn compact_row_prefix(
 // ===== Threshold compaction: subgroup apply =====
 var<workgroup> sg_totals: array<u32, 8u>; // up to 8 subgroups (256/32)
 var<workgroup> sg_bases: array<u32, 8u>;
+var<workgroup> sg_temp: array<u32, 8u>;
 
 @compute @workgroup_size(256)
 fn compact_apply_sg(
@@ -385,6 +386,85 @@ fn compact_apply_sg(
   let my_base = sg_bases[sg_id];
 
   // write
+  if (flag == 1u && col < CP.cols) {
+    let pos = base + my_base + local_excl;
+    OUTVAL[r*CP.cols + pos] = CX[r*CP.row_stride + col];
+    OUTIDX[r*CP.cols + pos] = col;
+  }
+}
+
+// ===== Threshold compaction: subgroup apply (parallel subgroup-prefix variant) =====
+@compute @workgroup_size(256)
+fn compact_apply_sg2(
+  @builtin(global_invocation_id) gid: vec3<u32>,
+  @builtin(workgroup_id) wid: vec3<u32>,
+  @builtin(local_invocation_id) lid: vec3<u32>
+){
+  let r = wid.y;
+  let tile = wid.x;
+  if (r>=CP.rows || tile>=CP.tiles_x) { return; }
+  let sg_size = 32u;
+  let sg_lane = lid.x & 31u;
+  let sg_id = lid.x / sg_size;
+  let sgc = 256u / sg_size;
+
+  let start = tile * 256u;
+  let base  = PREFIX[r*CP.tiles_x + tile];
+
+  var flag: u32 = 0u;
+  let col = start + lid.x;
+  if (col < CP.cols) { if (CMASK[r*CP.row_stride + col] != 0u) { flag = 1u; } }
+
+  var local_excl: u32 = 0u;
+  var sg_total:  u32 = 0u;
+  let sg_start = start + sg_id * sg_size;
+  for (var j:u32=0u; j<sg_size; j=j+1u) {
+    let idx = sg_start + j;
+    if (idx < CP.cols) {
+      let f = u32(CMASK[r*CP.row_stride + idx] != 0u);
+      if (j < sg_lane) { local_excl = local_excl + f; }
+      sg_total = sg_total + f;
+    }
+  }
+
+  if (sg_lane == 0u) {
+    sg_totals[sg_id] = sg_total;
+  }
+  workgroupBarrier();
+
+  if (lid.x < sgc) {
+    sg_temp[lid.x] = sg_totals[lid.x];
+  }
+  workgroupBarrier();
+
+  var offset = 1u;
+  loop {
+    if (offset >= sgc) { break; }
+    if (lid.x < sgc) {
+      var add = 0u;
+      if (lid.x >= offset) {
+        add = sg_temp[lid.x - offset];
+      }
+      sg_bases[lid.x] = sg_temp[lid.x] + add;
+    }
+    workgroupBarrier();
+    if (lid.x < sgc) {
+      sg_temp[lid.x] = sg_bases[lid.x];
+    }
+    workgroupBarrier();
+    offset = offset << 1u;
+  }
+
+  if (lid.x < sgc) {
+    if (lid.x == 0u) {
+      sg_bases[lid.x] = 0u;
+    } else {
+      sg_bases[lid.x] = sg_temp[lid.x - 1u];
+    }
+  }
+  workgroupBarrier();
+  let my_base = sg_bases[sg_id];
+
   if (flag == 1u && col < CP.cols) {
     let pos = base + my_base + local_excl;
     OUTVAL[r*CP.cols + pos] = CX[r*CP.row_stride + col];

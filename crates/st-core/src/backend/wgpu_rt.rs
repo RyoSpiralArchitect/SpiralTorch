@@ -28,6 +28,7 @@ pub struct WgpuCtx {
     compact_scan_pl: OnceCell<wgpu::ComputePipeline>,
     compact_row_prefix_pl: OnceCell<wgpu::ComputePipeline>,
     compact_apply_sg_pl: OnceCell<wgpu::ComputePipeline>,
+    compact_apply_sg2_pl: OnceCell<wgpu::ComputePipeline>,
     compact_apply_pl: OnceCell<wgpu::ComputePipeline>,
     layout_compaction: OnceCell<wgpu::BindGroupLayout>,
 }
@@ -45,6 +46,7 @@ impl WgpuCtx {
             compact_scan_pl: OnceCell::new(),
             compact_row_prefix_pl: OnceCell::new(),
             compact_apply_sg_pl: OnceCell::new(),
+            compact_apply_sg2_pl: OnceCell::new(),
             compact_apply_pl: OnceCell::new(),
             layout_compaction: OnceCell::new(),
         }
@@ -221,11 +223,33 @@ fn ensure_compact_apply_sg_pl(ctx: &WgpuCtx) -> &wgpu::ComputePipeline {
         .get_or_init(|| pl(ctx, "compact_apply_sg", ensure_layout_compaction(ctx)))
 }
 
-fn prefer_compact_apply_sg() -> bool {
-    std::env::var("ST_COMPACTION_APPLY")
-        .ok()
-        .map(|value| value.to_ascii_lowercase() != "fallback")
-        .unwrap_or(true)
+fn ensure_compact_apply_sg2_pl(ctx: &WgpuCtx) -> &wgpu::ComputePipeline {
+    ctx.compact_apply_sg2_pl
+        .get_or_init(|| pl(ctx, "compact_apply_sg2", ensure_layout_compaction(ctx)))
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CompactionApplyMode {
+    Fallback,
+    Sg,
+    Sg2,
+}
+
+fn parse_compaction_apply_mode(value: Option<&str>) -> CompactionApplyMode {
+    match value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("fallback") => CompactionApplyMode::Fallback,
+        Some("sg2") => CompactionApplyMode::Sg2,
+        _ => CompactionApplyMode::Sg,
+    }
+}
+
+fn compaction_apply_mode() -> CompactionApplyMode {
+    parse_compaction_apply_mode(std::env::var("ST_COMPACTION_APPLY").ok().as_deref())
 }
 
 fn compaction_tiles_x(cols: u32) -> u32 {
@@ -478,10 +502,10 @@ fn dispatch_compaction_buffers(
             label: Some("st.rankk.pass.compaction.apply"),
             timestamp_writes: None,
         });
-        let apply_pipeline = if prefer_compact_apply_sg() {
-            ensure_compact_apply_sg_pl(&ctx)
-        } else {
-            ensure_compact_apply_pl(&ctx)
+        let apply_pipeline = match compaction_apply_mode() {
+            CompactionApplyMode::Fallback => ensure_compact_apply_pl(&ctx),
+            CompactionApplyMode::Sg => ensure_compact_apply_sg_pl(&ctx),
+            CompactionApplyMode::Sg2 => ensure_compact_apply_sg2_pl(&ctx),
         };
         pass.set_pipeline(apply_pipeline);
         pass.set_bind_group(0, &bg, &[]);
@@ -607,7 +631,10 @@ pub fn dispatch_compaction(
 
 #[cfg(test)]
 mod tests {
-    use super::{compaction_tiles_x, validate_compaction_shape};
+    use super::{
+        compaction_tiles_x, parse_compaction_apply_mode, validate_compaction_shape,
+        CompactionApplyMode,
+    };
 
     #[test]
     fn compaction_tiles_are_fixed_256_columns() {
@@ -622,5 +649,26 @@ mod tests {
         assert!(validate_compaction_shape(4, 0, 4).is_err());
         assert!(validate_compaction_shape(1, 8, 4).is_err());
         assert_eq!(validate_compaction_shape(2, 8, 8).unwrap(), 1);
+    }
+
+    #[test]
+    fn compaction_apply_mode_defaults_to_sg() {
+        assert_eq!(parse_compaction_apply_mode(None), CompactionApplyMode::Sg);
+        assert_eq!(
+            parse_compaction_apply_mode(Some("fallback")),
+            CompactionApplyMode::Fallback
+        );
+        assert_eq!(
+            parse_compaction_apply_mode(Some("sg")),
+            CompactionApplyMode::Sg
+        );
+        assert_eq!(
+            parse_compaction_apply_mode(Some("sg2")),
+            CompactionApplyMode::Sg2
+        );
+        assert_eq!(
+            parse_compaction_apply_mode(Some("unexpected")),
+            CompactionApplyMode::Sg
+        );
     }
 }
