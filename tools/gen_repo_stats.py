@@ -2,20 +2,39 @@
 #!/usr/bin/env python3
 import json, subprocess, sys, re
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 ROOT = Path(__file__).resolve().parents[1]
 BADGE_DIR = ROOT / "docs" / "badges"
 README = ROOT / "README.md"
 
 def run(cmd: list[str]) -> str:
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=True)
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if p.returncode != 0:
+        stderr = p.stderr.strip()
+        stdout = p.stdout.strip()
+        detail = stderr or stdout or "<no output>"
+        raise RuntimeError(f"command failed ({' '.join(cmd)}): {detail}")
     return p.stdout.strip()
+
+def parse_json_output(raw: str) -> dict:
+    text = raw.strip()
+    if not text:
+        raise ValueError("empty output")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        # Some environments inject non-JSON lines before/after tool output.
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            raise
+        return json.loads(text[start:end + 1])
 
 def load_tokei() -> dict:
     # tokei JSON 形式の差異に強めにパース
     raw = run(["tokei", ".", "-o", "json"])
-    data = json.loads(raw)
+    data = parse_json_output(raw)
     # 代表的な形: {"Rust": {...}, "Total": {...}, ...}
     return data
 
@@ -32,8 +51,21 @@ def count_files(lang_block: dict) -> int:
     return len(reps)
 
 def cargo_dep_count() -> int:
-    meta = json.loads(run(["cargo", "metadata", "--format-version", "1"]))
-    return len(meta.get("packages", []))
+    try:
+        meta = parse_json_output(run(["cargo", "metadata", "--format-version", "1", "--locked"]))
+        return len(meta.get("packages", []))
+    except Exception as exc:
+        # Fallback keeps stats generation resilient when cargo metadata output
+        # is unavailable or contaminated in CI environments.
+        lock = ROOT / "Cargo.lock"
+        if lock.exists():
+            fallback = sum(1 for line in lock.read_text(encoding="utf-8").splitlines() if line.strip() == "[[package]]")
+            print(
+                f"[warn] cargo metadata unavailable; falling back to Cargo.lock package count ({fallback}): {exc}",
+                file=sys.stderr,
+            )
+            return fallback
+        raise
 
 def digits(n: int) -> str:
     return f"{n:,}"
@@ -127,7 +159,7 @@ def main():
     (BADGE_DIR/"total-code.svg").write_text(badge_svg("total code", digits(total_code), total_color), encoding="utf-8")
 
     # README セクション更新
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     section = f"""
 > _auto-generated: {now}_
 

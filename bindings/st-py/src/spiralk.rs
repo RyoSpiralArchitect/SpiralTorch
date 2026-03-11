@@ -1358,6 +1358,14 @@ pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
         "SpiralKFftPlan",
         "MaxwellSpiralKHint",
         "MaxwellSpiralKBridge",
+        "MaxwellFingerprint",
+        "MeaningGate",
+        "SequentialZ",
+        "MaxwellPulse",
+        "MaxwellProjector",
+        "required_blocks",
+        "expected_z_curve",
+        "polarisation_slope",
     ] {
         if let Ok(value) = module.getattr(name) {
             m.add(name, value)?;

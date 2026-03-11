@@ -53,6 +53,11 @@ jobs:
         run: echo "MACOSX_DEPLOYMENT_TARGET=${{ matrix.macos_deployment_target }}" >> "$GITHUB_ENV"
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libfontconfig1-dev
       - name: Install macOS universal2 targets
         if: runner.os == 'macOS' && matrix.universal2 == true
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
@@ -84,6 +89,18 @@ jobs:
           import spiraltorch as st
 
           print("import ok:", len(getattr(st, "__all__", ())))
+          assert hasattr(st, "MaxwellFingerprint")
+          fp = st.MaxwellFingerprint(
+              gamma=1.0,
+              modulation_depth=1.0,
+              tissue_response=1.0,
+              shielding_db=0.0,
+              transmit_gain=1.0,
+              polarization_angle=0.0,
+              distance_m=1.0,
+          )
+          z_curve = fp.expected_z_curve(blocks=64, sigma=1.0, kappa=1.0)
+          assert len(z_curve) == 64
           assert hasattr(st, "optim")
           assert hasattr(st.optim, "Amegagrad")
 
@@ -163,8 +180,10 @@ jobs:
   pypi:
     name: Publish wheels to PyPI
     needs: wheels
-    if: github.event_name == 'workflow_dispatch' && inputs.publish_pypi == 'true'
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_pypi
     runs-on: ubuntu-22.04
+    env:
+      PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
     environment:
       name: pypi
       url: https://pypi.org/p/spiraltorch
@@ -183,13 +202,13 @@ jobs:
           find dist -type f -name '*.whl' -print0 | sort -z | xargs -0 -I{} cp "{}" pypi_dist/
           ls -la pypi_dist
       - name: Publish to PyPI (token)
-        if: secrets.PYPI_API_TOKEN != ''
+        if: env.PYPI_API_TOKEN != ''
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: pypi_dist
-          password: ${{ secrets.PYPI_API_TOKEN }}
+          password: ${{ env.PYPI_API_TOKEN }}
       - name: Publish to PyPI (trusted publishing)
-        if: secrets.PYPI_API_TOKEN == ''
+        if: env.PYPI_API_TOKEN == ''
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: pypi_dist

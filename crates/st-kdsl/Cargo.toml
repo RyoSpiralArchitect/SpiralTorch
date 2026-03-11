@@ -3,6 +3,7 @@ authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
 name = "st-kdsl"
 version = "0.3.0"
 edition = "2021"
+license = "AGPL-3.0-or-later"
 
 [dependencies]
 blake3 = "1"

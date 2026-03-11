@@ -38,8 +38,10 @@ jobs:
           tokei --version
 
       - name: Generate badges & update README
+        env:
+          PYTHONNOUSERSITE: "1"
         run: |
-          python3 tools/gen_repo_stats.py
+          python3 -S tools/gen_repo_stats.py
 
       # ループ防止: 定期 or 手動のときだけコミットする
       - name: Commit changes (if any)

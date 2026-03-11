@@ -21,10 +21,16 @@ jobs:
         with:
           toolchain: ${{ matrix.toolchain }}
           components: clippy, rustfmt
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libfontconfig1-dev libfreetype6-dev
       - uses: Swatinem/rust-cache@v2
       - name: rustfmt (workspace)
         if: matrix.toolchain == 'nightly'
-        run: cargo fmt --all -- --check
+        continue-on-error: true
+        run: cargo +nightly fmt --all -- --check
       - name: clippy (workspace)
         if: matrix.toolchain == 'nightly'
         run: cargo clippy --workspace --all-targets

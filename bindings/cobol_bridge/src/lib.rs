@@ -1,3 +1,5 @@
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
+
 use std::ffi::CString;
 use std::os::raw::{c_char, c_float, c_int};
 use std::ptr;

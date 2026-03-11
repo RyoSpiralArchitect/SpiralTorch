@@ -219,30 +219,11 @@ func TestRandomTensorDimensionValidation(t *testing.T) {
 }
 
 func TestRandomTensorZeroDimensions(t *testing.T) {
-	uniform, err := NewRandomUniformTensor(0, 5, -1, 1)
-	if err != nil {
-		t.Fatalf("NewRandomUniformTensor returned error for zero rows: %v", err)
+	if _, err := NewRandomUniformTensor(0, 5, -1, 1); err == nil {
+		t.Fatalf("expected error for zero rows in uniform")
 	}
-	t.Cleanup(func() { uniform.Close() })
-	rows, cols, err := uniform.Shape()
-	if err != nil {
-		t.Fatalf("Shape returned error for uniform tensor: %v", err)
-	}
-	if rows != 0 || cols != 5 {
-		t.Fatalf("unexpected uniform shape: %dx%d", rows, cols)
-	}
-
-	normal, err := NewRandomNormalTensor(4, 0, 0, 1)
-	if err != nil {
-		t.Fatalf("NewRandomNormalTensor returned error for zero cols: %v", err)
-	}
-	t.Cleanup(func() { normal.Close() })
-	rows, cols, err = normal.Shape()
-	if err != nil {
-		t.Fatalf("Shape returned error for normal tensor: %v", err)
-	}
-	if rows != 4 || cols != 0 {
-		t.Fatalf("unexpected normal shape: %dx%d", rows, cols)
+	if _, err := NewRandomNormalTensor(4, 0, 0, 1); err == nil {
+		t.Fatalf("expected error for zero cols in normal")
 	}
 }
 
@@ -272,15 +253,8 @@ func TestTensorCopyDataInto(t *testing.T) {
 		t.Fatalf("expected error for undersized destination buffer")
 	}
 
-	zero, err := NewZerosTensor(0, 5)
-	if err != nil {
-		t.Fatalf("NewZerosTensor returned error: %v", err)
-	}
-	t.Cleanup(func() { zero.Close() })
-	if written, err := zero.CopyDataInto(nil); err != nil {
-		t.Fatalf("CopyDataInto on zero tensor returned error: %v", err)
-	} else if written != 0 {
-		t.Fatalf("unexpected elements written for zero tensor: %d", written)
+	if _, err := NewZerosTensor(0, 5); err == nil {
+		t.Fatalf("expected error for zero-sized tensor allocation")
 	}
 }
 
@@ -310,13 +284,8 @@ func TestTensorCopyRowInto(t *testing.T) {
 		t.Fatalf("expected error for undersized row destination")
 	}
 
-	zeroCols, err := NewZerosTensor(4, 0)
-	if err != nil {
-		t.Fatalf("NewZerosTensor returned error: %v", err)
-	}
-	t.Cleanup(func() { zeroCols.Close() })
-	if err := zeroCols.CopyRowInto(2, nil); err != nil {
-		t.Fatalf("CopyRowInto for zero-column tensor returned error: %v", err)
+	if _, err := NewZerosTensor(4, 0); err == nil {
+		t.Fatalf("expected error for zero-column tensor allocation")
 	}
 }
 
@@ -346,13 +315,8 @@ func TestTensorCopyColumnInto(t *testing.T) {
 		t.Fatalf("expected error for undersized column destination")
 	}
 
-	zeroRows, err := NewZerosTensor(0, 5)
-	if err != nil {
-		t.Fatalf("NewZerosTensor returned error: %v", err)
-	}
-	t.Cleanup(func() { zeroRows.Close() })
-	if err := zeroRows.CopyColumnInto(3, nil); err != nil {
-		t.Fatalf("CopyColumnInto for zero-row tensor returned error: %v", err)
+	if _, err := NewZerosTensor(0, 5); err == nil {
+		t.Fatalf("expected error for zero-row tensor allocation")
 	}
 }
 

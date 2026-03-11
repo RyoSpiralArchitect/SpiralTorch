@@ -25,7 +25,7 @@ Reuse or redistribution **must retain the SpiralTorch name and authorship** as p
 
 - **1-minute quickstart (Python):**
   ```bash
-  pip install -U spiraltorch==0.4.6
+  pip install -U spiraltorch==0.4.7
 
   python - <<'PY'
   import spiraltorch as st
@@ -320,7 +320,7 @@ tensor shims, no translation layers, and no tracebacks.
     transcripts, and ψ telemetry double as explainability artifacts, enabling
     decision-path inspection without leaving the Z-space calculus.
     
-**Current release:** `spiraltorch==0.4.6` (abi3 wheel, Python ≥3.8)  
+**Current release:** `spiraltorch==0.4.7` (abi3 wheel, Python ≥3.8)  
 **Targets:** CPU (always), MPS, Vulkan/DX (WGPU), CUDA, HIP/ROCm
 
 ---
@@ -328,7 +328,7 @@ tensor shims, no translation layers, and no tracebacks.
 ## Install (pip)
 
 ```bash
-pip install -U spiraltorch==0.4.6
+pip install -U spiraltorch==0.4.7
 ```
 
 - Wheels are **abi3**; you can use any CPython ≥ 3.8.

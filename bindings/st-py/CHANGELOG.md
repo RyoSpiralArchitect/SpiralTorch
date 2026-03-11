@@ -1,5 +1,11 @@
 # SpiralTorch (Python) changelog
 
+## 0.4.7
+
+- `nn`: add training mode handling, norm-state propagation, and gradient clipping support in module training workflows.
+- `spiralk`: re-export `MaxwellFingerprint`, `MeaningGate`, `SequentialZ`, `MaxwellPulse`, `MaxwellProjector`, and expectation helpers at the top level so `import spiraltorch as st` quickstarts work as documented.
+- Wheels CI: add Maxwell quickstart coverage in smoke tests and remove brittle trace/live-server checks from the cross-platform `Wheels` workflow.
+
 ## 0.4.1
 
 - Model zoo: add runnable Python baselines for `vision_conv_pool_classification.py` and `zspace_vae_reconstruction.py`.

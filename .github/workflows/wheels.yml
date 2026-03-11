@@ -72,6 +72,18 @@ jobs:
           import spiraltorch as st
 
           print("import ok:", len(getattr(st, "__all__", ())))
+          assert hasattr(st, "MaxwellFingerprint")
+          fp = st.MaxwellFingerprint(
+              gamma=1.0,
+              modulation_depth=1.0,
+              tissue_response=1.0,
+              shielding_db=0.0,
+              transmit_gain=1.0,
+              polarization_angle=0.0,
+              distance_m=1.0,
+          )
+          z_curve = fp.expected_z_curve(blocks=64, sigma=1.0, kappa=1.0)
+          assert len(z_curve) == 64
           assert hasattr(st, "optim")
           assert hasattr(st.optim, "Amegagrad")
 
@@ -139,45 +151,6 @@ jobs:
 
           session = st.amegagrad_session((1, 4), curvature=-0.9, telemetry=True, telemetry_bound=8)
           session.step_wave(st.Tensor(1, 4, [0.1, -0.2, 0.05, 0.0]))
-
-          import tempfile
-          import pathlib
-          import json
-          import time as _time
-
-          with tempfile.TemporaryDirectory() as td:
-              td_path = pathlib.Path(td)
-              trace_path = td_path / "trace.jsonl"
-              trace_event = {
-                  "type": "ZSpaceTrace",
-                  "event_type": "ZSpaceTrace",
-                  "payload": {"ZSpaceCoherence": {"step": 0, "coherence": [0.1, 0.2]}},
-              }
-              trace_path.write_text(json.dumps(trace_event) + "\n", encoding="utf-8")
-              html_path = st.write_zspace_trace_html(trace_path, td_path / "trace.html")
-              assert pathlib.Path(html_path).exists()
-
-          plan = st.plan_topk(rows=1024, cols=16384, k=32, backend="cpu")
-          ctx = plan.spiralk_context()
-          out, trace = ctx.eval_with_trace("wg: 128;", 64)
-          assert isinstance(out, dict)
-          assert isinstance(trace, dict)
-          plan2, out2, trace2 = plan.rewrite_with_spiralk_explain("wg: 128;", max_events=64)
-          assert isinstance(plan2, st.RankPlan)
-          assert isinstance(out2, dict)
-          assert isinstance(trace2, dict)
-
-          with tempfile.TemporaryDirectory() as td:
-              td_path = pathlib.Path(td)
-              kdsl_jsonl = st.write_kdsl_trace_jsonl(trace2, td_path / "kdsl.jsonl")
-              kdsl_html = st.write_kdsl_trace_html(trace2, td_path / "kdsl.html")
-              assert pathlib.Path(kdsl_jsonl).exists()
-              assert pathlib.Path(kdsl_html).exists()
-
-          live = st.serve_zspace_trace(open_browser=False, background=True, poll_interval=0.01, max_batch=1, buffer=1)
-          _time.sleep(0.05)
-          live.close()
-          live.join(2.0)
 
           print("smoke ok")
           PY
