@@ -21,9 +21,10 @@ alternate subgroup-prefix apply kernel for A/B testing; `fallback` forces the
 serial apply path.
 
 For `execute_rank(...)`, use `backend::wgpu_exec::WgpuBufferExecutor`. The WGPU
-exact-selection path currently wires only `TopK`; exact `MidK`/`BottomK` return
-an explicit unsupported error instead of silently falling back to threshold
-compaction.
+buffer-backed exact-selection path currently wires `TopK` and `BottomK`; exact
+`MidK` still returns an explicit unsupported error instead of silently falling
+back to threshold compaction. The legacy plan-only `WgpuExecutor` remains
+bufferless and therefore returns a not-wired error for exact dispatch.
 
 CUDA/HIP exact-selection executors are currently fail-fast stubs as well: they
 surface an explicit error for `TopK`/`MidK`/`BottomK` until real kernel

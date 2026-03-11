@@ -16,10 +16,8 @@ fn run() -> Result<(), String> {
     use std::sync::Arc;
 
     use st_core::backend::device_caps::DeviceCaps;
-    use st_core::backend::wgpu_exec::WgpuBufferExecutor;
     use st_core::backend::wgpu_rt::{self, WgpuCtx};
-    use st_core::ops::rank_cpu::select_rank_cpu;
-    use st_core::ops::rank_entry::{execute_rank, plan_rank, RankKind};
+    use st_core::ops::rank_entry::{plan_rank, RankKind};
     use wgpu::util::DeviceExt;
 
     let rows = 2u32;
@@ -72,20 +70,76 @@ fn run() -> Result<(), String> {
         mapped_at_creation: false,
     });
 
-    let plan = plan_rank(RankKind::TopK, rows, cols, k, DeviceCaps::wgpu(32, false, 256));
-    let mut exec = WgpuBufferExecutor::topk(&x_buf, row_stride, &out_vals, &out_idx);
-    execute_rank(&mut exec, &plan)?;
+    run_rank_case(
+        "topk",
+        &ctx,
+        &x,
+        &x_buf,
+        &out_vals,
+        &out_idx,
+        row_stride,
+        plan_rank(
+            RankKind::TopK,
+            rows,
+            cols,
+            k,
+            DeviceCaps::wgpu(32, false, 256),
+        ),
+    )?;
+    run_rank_case(
+        "bottomk",
+        &ctx,
+        &x,
+        &x_buf,
+        &out_vals,
+        &out_idx,
+        row_stride,
+        plan_rank(
+            RankKind::BottomK,
+            rows,
+            cols,
+            k,
+            DeviceCaps::wgpu(32, false, 256),
+        ),
+    )?;
+    Ok(())
+}
 
-    let got_vals = readback::<f32>(&ctx.device, &ctx.queue, &out_vals, (rows * k) as usize);
-    let got_idx = readback::<u32>(&ctx.device, &ctx.queue, &out_idx, (rows * k) as usize);
-    let expected = select_rank_cpu(&plan, &x, row_stride)
+#[cfg(all(feature = "wgpu", feature = "wgpu-rt"))]
+fn run_rank_case(
+    label: &str,
+    ctx: &std::sync::Arc<st_core::backend::wgpu_rt::WgpuCtx>,
+    x: &[f32],
+    x_buf: &wgpu::Buffer,
+    out_vals: &wgpu::Buffer,
+    out_idx: &wgpu::Buffer,
+    row_stride: u32,
+    plan: st_core::ops::rank_entry::RankPlan,
+) -> Result<(), String> {
+    let mut exec =
+        st_core::backend::wgpu_exec::WgpuBufferExecutor::rank(x_buf, row_stride, out_vals, out_idx);
+    st_core::ops::rank_entry::execute_rank(&mut exec, &plan)?;
+
+    let got_vals = readback::<f32>(
+        &ctx.device,
+        &ctx.queue,
+        out_vals,
+        (plan.rows * plan.k) as usize,
+    );
+    let got_idx = readback::<u32>(
+        &ctx.device,
+        &ctx.queue,
+        out_idx,
+        (plan.rows * plan.k) as usize,
+    );
+    let expected = st_core::ops::rank_cpu::select_rank_cpu(&plan, x, row_stride)
         .map_err(|e| format!("cpu reference failed: {e}"))?;
 
     assert_eq!(got_vals, expected.values);
     assert_eq!(got_idx, expected.indices);
 
-    println!("topk values={got_vals:?}");
-    println!("topk idx={got_idx:?}");
+    println!("{label} values={got_vals:?}");
+    println!("{label} idx={got_idx:?}");
     Ok(())
 }
 

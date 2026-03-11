@@ -252,6 +252,62 @@ fn topk_workgroup_1ce(
   }
 }
 
+fn bottomk_better(candidate_v: f32, candidate_i: u32, best_v: f32, best_i: u32) -> bool {
+  let candidate_nan = !(candidate_v == candidate_v);
+  let best_nan = !(best_v == best_v);
+  if (candidate_nan) { return false; }
+  if (best_nan) { return true; }
+  if (candidate_v < best_v) { return true; }
+  if (candidate_v > best_v) { return false; }
+  return candidate_i < best_i;
+}
+
+// ===== BottomK 1CE: workgroup fallback (portable) =====
+@compute @workgroup_size(256)
+fn bottomk_workgroup_1ce(
+  @builtin(local_invocation_id)  lid: vec3<u32>,
+  @builtin(workgroup_id)         wid: vec3<u32>
+){
+  let r = wid.y;
+  if (r >= P.rows) { return; }
+  var best_v: f32 = 0x1p127f;
+  var best_i: u32 = 0u;
+  var c: u32 = lid.x;
+  loop {
+    if (c >= P.cols) { break; }
+    let v = X[r * P.row_stride + c];
+    if (bottomk_better(v, c, best_v, best_i)) {
+      best_v = v;
+      best_i = c;
+    }
+    c += 256u;
+  }
+  s_vals[pad_addr(lid.x)] = best_v;
+  s_idx[pad_addr(lid.x)]  = best_i;
+  workgroupBarrier();
+
+  if (lid.x == 0u) {
+    for (var t:u32=0u; t<P.k; t=t+1u) {
+      var bi:u32 = 0u;
+      var bv:f32 = 0x1p127f;
+      var ii:u32 = 0u;
+      for (var j:u32=0u; j<256u; j=j+1u) {
+        let vv = s_vals[pad_addr(j)];
+        let vi = s_idx[pad_addr(j)];
+        if (bottomk_better(vv, vi, bv, ii)) {
+          bv = vv;
+          bi = j;
+          ii = vi;
+        }
+      }
+      OUTV[r*P.k + t] = s_vals[pad_addr(bi)];
+      OUTI[r*P.k + t] = s_idx[pad_addr(bi)];
+      s_vals[pad_addr(bi)] = 0x1p127f;
+      s_idx[pad_addr(bi)] = 0xffffffffu;
+    }
+  }
+}
+
 // ===== Threshold compaction: scan tiles =====
 var<workgroup> temp: array<u32, 256u>;
 @compute @workgroup_size(256)

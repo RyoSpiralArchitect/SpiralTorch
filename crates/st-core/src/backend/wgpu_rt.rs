@@ -24,6 +24,7 @@ pub struct WgpuCtx {
     topk_heap_sgintrin_pl: OnceCell<wgpu::ComputePipeline>,
     topk_bit_pl: OnceCell<wgpu::ComputePipeline>,
     topk_wg_pl: OnceCell<wgpu::ComputePipeline>,
+    bottomk_wg_pl: OnceCell<wgpu::ComputePipeline>,
     layout_topk: OnceCell<wgpu::BindGroupLayout>,
     compact_scan_pl: OnceCell<wgpu::ComputePipeline>,
     compact_row_prefix_pl: OnceCell<wgpu::ComputePipeline>,
@@ -42,6 +43,7 @@ impl WgpuCtx {
             topk_heap_sgintrin_pl: OnceCell::new(),
             topk_bit_pl: OnceCell::new(),
             topk_wg_pl: OnceCell::new(),
+            bottomk_wg_pl: OnceCell::new(),
             layout_topk: OnceCell::new(),
             compact_scan_pl: OnceCell::new(),
             compact_row_prefix_pl: OnceCell::new(),
@@ -201,6 +203,11 @@ fn ensure_topk_bit_pl(ctx: &WgpuCtx) -> &wgpu::ComputePipeline {
 fn ensure_topk_wg_pl(ctx: &WgpuCtx) -> &wgpu::ComputePipeline {
     ctx.topk_wg_pl
         .get_or_init(|| pl(ctx, "topk_workgroup_1ce", ensure_layout_topk(ctx)))
+}
+
+fn ensure_bottomk_wg_pl(ctx: &WgpuCtx) -> &wgpu::ComputePipeline {
+    ctx.bottomk_wg_pl
+        .get_or_init(|| pl(ctx, "bottomk_workgroup_1ce", ensure_layout_topk(ctx)))
 }
 
 fn ensure_compact_scan_pl(ctx: &WgpuCtx) -> &wgpu::ComputePipeline {
@@ -393,6 +400,86 @@ pub fn dispatch_topk_1ce_buffers(
             timestamp_writes: None,
         });
         pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &bg, &[]);
+        pass.dispatch_workgroups(1, rows.max(1), 1);
+    }
+    ctx.queue.submit(Some(enc.finish()));
+    Ok(())
+}
+
+/// Plan-only entry point used by `st-core::backend::wgpu_exec`.
+///
+/// The rank entry / executor trait currently does not carry buffers. Use
+/// [`dispatch_bottomk_1ce_buffers`] instead.
+pub fn dispatch_bottomk_1ce(_plan: &RankPlan) -> Result<(), String> {
+    Err("wgpu_rt: plan-only dispatch is not wired; call dispatch_bottomk_1ce_buffers(...)".into())
+}
+
+/// Execute BottomK 1CE on WGPU using the portable workgroup WGSL kernel.
+pub fn dispatch_bottomk_1ce_buffers(
+    rows: u32,
+    cols: u32,
+    k: u32,
+    row_stride: u32,
+    x: &wgpu::Buffer,
+    out_vals: &wgpu::Buffer,
+    out_idx: &wgpu::Buffer,
+) -> Result<(), String> {
+    let ctx = ctx()?;
+
+    let params = TopkParams {
+        rows,
+        cols,
+        k,
+        row_stride,
+        k_lane: 0,
+        tile_cols: cols,
+        radix: 0,
+        segments: 0,
+    };
+    let ub = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("st.rankk.params.bottomk"),
+            contents: bytemuck::bytes_of(&params),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+
+    let layout = ensure_layout_topk(&ctx);
+    let bg = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("st.rankk.bg.bottomk"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: x.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: out_vals.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: out_idx.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: ub.as_entire_binding(),
+            },
+        ],
+    });
+
+    let mut enc = ctx
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("st.rankk.enc.bottomk"),
+        });
+    {
+        let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("st.rankk.pass.bottomk"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(ensure_bottomk_wg_pl(&ctx));
         pass.set_bind_group(0, &bg, &[]);
         pass.dispatch_workgroups(1, rows.max(1), 1);
     }
