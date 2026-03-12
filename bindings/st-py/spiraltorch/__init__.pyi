@@ -1385,6 +1385,8 @@ def stream_vision_training(
 
 class RankPlan:
     kind: str
+    requested_backend: Optional[str]
+    effective_backend: Optional[str]
     rows: int
     cols: int
     k: int
@@ -1460,8 +1462,11 @@ def plan_topk(
 
 class SpiralSession:
     backend: str
+    requested_backend: str
+    effective_backend: str
     seed: int | None
     device: str
+    device_preflight: Dict[str, object]
 
     def __init__(self, backend: str = ..., seed: int | None = ...) -> None: ...
 
@@ -1631,6 +1636,7 @@ def describe_device(
 ) -> Dict[str, object]: ...
 
 def hip_probe() -> Dict[str, object]: ...
+def mps_probe() -> Dict[str, object]: ...
 
 def probe_gpu_path(
     kind: Literal["topk", "midk", "bottomk"] = ...,
@@ -5159,6 +5165,7 @@ class _PlannerModule(ModuleType):
     ) -> Dict[str, object]: ...
 
     def hip_probe() -> Dict[str, object]: ...
+    def mps_probe() -> Dict[str, object]: ...
     def probe_gpu_path(
         kind: Literal["topk", "midk", "bottomk"] = ...,
         *,
@@ -5679,6 +5686,7 @@ __all__ = [
     "pack_tribonacci_chunks",
     "pack_tetranacci_chunks",
     "generate_plan_batch_ex",
+    "mps_probe",
     "probe_gpu_path",
     "SoT3DPlan",
     "SoT3DStep",

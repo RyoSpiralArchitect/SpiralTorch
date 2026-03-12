@@ -153,7 +153,8 @@ fn hip_error_string(code: i32) -> String {
 mod tests {
     use super::*;
     use crate::backend::device_caps::DeviceCaps;
-    use crate::ops::rank_entry::{plan_rank, RankKind};
+    use crate::backend::unison_heuristics::RankKind;
+    use crate::ops::rank_entry::plan_rank;
 
     const ROWS: u32 = 2;
     const COLS: u32 = 5;

@@ -507,9 +507,9 @@ mod rocblas {
                 current_stream: ptr::null_mut(),
             });
         }
-        let state = guard
-            .as_mut()
-            .expect("rocBLAS handle must be initialised after creation");
+        let state = guard.as_mut().ok_or_else(|| {
+            HipErr::Other("rocBLAS handle slot remained empty after creation".into())
+        })?;
         if state.current_stream != stream.raw() {
             rocblas_result(
                 unsafe { (symbols.set_stream)(state.handle, stream.raw()) },

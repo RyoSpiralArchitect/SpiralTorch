@@ -8,9 +8,13 @@
 #[cfg(feature = "cuda")]
 use cudarc::driver::{CudaDevice, CudaFunction};
 #[cfg(feature = "cuda")]
+use cudarc::nvrtc::compile_ptx;
+#[cfg(feature = "cuda")]
 use cudarc::nvrtc::Ptx;
 #[cfg(feature = "cuda")]
 use std::collections::HashMap;
+#[cfg(feature = "cuda")]
+use std::panic::{catch_unwind, AssertUnwindSafe};
 #[cfg(feature = "cuda")]
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -30,6 +34,35 @@ pub struct NvrtcOptions<'a> {
     pub code: &'a str,        // e.g. "sm_80"
     pub std: &'a str,         // "c++14" / "c++17"
     pub maxrreg: Option<u32>, // optional register cap
+}
+
+#[cfg(feature = "cuda")]
+pub fn guard_cuda_call<T>(
+    context: &str,
+    f: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    match catch_unwind(AssertUnwindSafe(f)) {
+        Ok(result) => result.map_err(|err| format!("{context}: {err}")),
+        Err(payload) => Err(format!("{context}: {}", panic_payload_to_string(payload))),
+    }
+}
+
+#[cfg(feature = "cuda")]
+pub fn safe_compile_ptx(src: &str) -> Result<Ptx, String> {
+    guard_cuda_call("cuda nvrtc compile failed", || {
+        compile_ptx(src).map_err(|err| err.to_string())
+    })
+}
+
+#[cfg(feature = "cuda")]
+fn panic_payload_to_string(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(msg) = payload.downcast_ref::<String>() {
+        msg.clone()
+    } else if let Some(msg) = payload.downcast_ref::<&'static str>() {
+        (*msg).to_string()
+    } else {
+        "unknown panic payload".to_string()
+    }
 }
 
 pub fn default_nvrtc_options<'a>() -> NvrtcOptions<'a> {
@@ -148,7 +181,11 @@ fn global_device() -> Result<Arc<CudaDevice>, String> {
         return Ok(Arc::clone(device));
     }
 
-    let created = Arc::new(CudaDevice::new(0).map_err(|err| err.to_string())?);
+    let created = guard_cuda_call("cuda device initialization failed", || {
+        CudaDevice::new(0)
+            .map(Arc::new)
+            .map_err(|err| err.to_string())
+    })?;
     let _ = DEVICE.set(Arc::clone(&created));
     Ok(Arc::clone(DEVICE.get().unwrap_or(&created)))
 }
@@ -195,15 +232,19 @@ pub fn load_ptx_module(
             union.sort_unstable();
             union.dedup();
 
-            device
-                .load_ptx(ptx.clone(), module_name, &union)
-                .map_err(|err| err.to_string())?;
+            guard_cuda_call("cuda PTX module load failed", || {
+                device
+                    .load_ptx(ptx.clone(), module_name, &union)
+                    .map_err(|err| err.to_string())
+            })?;
 
             state.functions.clear();
 
             for &name in &union {
-                let func = device.get_func(module_name, name).ok_or_else(|| {
-                    format!("cuda function `{name}` not registered in module `{module_name}`")
+                let func = guard_cuda_call("cuda function lookup failed", || {
+                    device.get_func(module_name, name).ok_or_else(|| {
+                        format!("cuda function `{name}` not registered in module `{module_name}`")
+                    })
                 })?;
                 state.functions.insert(name, func);
             }
@@ -215,4 +256,26 @@ pub fn load_ptx_module(
         module_name,
         entry,
     })
+}
+
+#[cfg(all(test, feature = "cuda"))]
+mod tests {
+    use super::{guard_cuda_call, panic_payload_to_string};
+
+    #[test]
+    fn guard_cuda_call_converts_panics_into_errors() {
+        let err = guard_cuda_call("cuda path", || -> Result<(), String> {
+            panic!("boom");
+        })
+        .expect_err("panic should be surfaced as an error");
+
+        assert!(err.contains("cuda path"));
+        assert!(err.contains("boom"));
+    }
+
+    #[test]
+    fn panic_payload_string_handles_unknown_payloads() {
+        let payload: Box<dyn std::any::Any + Send> = Box::new(123usize);
+        assert_eq!(panic_payload_to_string(payload), "unknown panic payload");
+    }
 }

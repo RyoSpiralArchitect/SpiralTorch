@@ -6,8 +6,14 @@
 use std::{env, path::PathBuf, process::Command};
 
 fn main() {
-    let out = PathBuf::from(env::var("OUT_DIR").unwrap());
     if env::var("CARGO_FEATURE_HIP_REAL").is_ok() {
+        let out = match env::var("OUT_DIR") {
+            Ok(out) => PathBuf::from(out),
+            Err(err) => {
+                println!("cargo:warning=missing OUT_DIR for HIP build: {err}");
+                return;
+            }
+        };
         if let Ok(rocm) = env::var("ROCM_PATH").or_else(|_| env::var("HIP_PATH")) {
             println!("cargo:rustc-link-search=native={}/lib", rocm);
             println!("cargo:rustc-link-search=native={}/lib64", rocm);
@@ -32,11 +38,11 @@ fn main() {
         ];
         let mut objs = Vec::new();
         for src in kernels {
-            let stem = std::path::Path::new(src)
-                .file_stem()
-                .unwrap()
-                .to_string_lossy();
-            let obj = out.join(format!("{}.o", stem));
+            let Some(stem) = std::path::Path::new(src).file_stem() else {
+                println!("cargo:warning=unable to derive kernel stem from {}", src);
+                continue;
+            };
+            let obj = out.join(format!("{}.o", stem.to_string_lossy()));
             let st = Command::new(&hipcc)
                 .args([
                     "-O3",
@@ -49,8 +55,14 @@ fn main() {
                     "-o",
                 ])
                 .arg(&obj)
-                .status()
-                .expect("failed to run hipcc");
+                .status();
+            let st = match st {
+                Ok(status) => status,
+                Err(err) => {
+                    println!("cargo:warning=failed to run hipcc for {}: {}", src, err);
+                    continue;
+                }
+            };
             if st.success() {
                 objs.push(obj);
             } else {
@@ -59,12 +71,23 @@ fn main() {
         }
         if !objs.is_empty() {
             let lib = out.join("libsthipkernels.a");
-            let _ = std::process::Command::new("ar")
-                .args(["crus", lib.to_str().unwrap()])
-                .args(objs.iter().map(|p| p.to_str().unwrap()))
+            let ar_status = std::process::Command::new("ar")
+                .arg("crus")
+                .arg(&lib)
+                .args(&objs)
                 .status();
-            println!("cargo:rustc-link-lib=static=sthipkernels");
-            println!("cargo:rustc-link-search=native={}", out.display());
+            match ar_status {
+                Ok(status) if status.success() => {
+                    println!("cargo:rustc-link-lib=static=sthipkernels");
+                    println!("cargo:rustc-link-search=native={}", out.display());
+                }
+                Ok(_) => {
+                    println!("cargo:warning=ar failed while archiving HIP kernels");
+                }
+                Err(err) => {
+                    println!("cargo:warning=failed to run ar for HIP kernels: {}", err);
+                }
+            }
         }
     }
 }
