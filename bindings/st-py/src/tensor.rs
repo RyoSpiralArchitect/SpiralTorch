@@ -1398,6 +1398,7 @@ fn cpu_simd_prepack_rhs(py: Python<'_>, rhs: &PyTensor) -> PyResult<PyCpuSimdPac
 #[pyfunction]
 fn init_backend(label: &str) -> PyResult<bool> {
     match label {
+        "mps" => Ok(false),
         #[cfg(feature = "hip")]
         "hip" => hip_backend::init()
             .map(|_| true)

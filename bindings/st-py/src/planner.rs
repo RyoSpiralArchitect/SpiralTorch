@@ -33,20 +33,26 @@ use st_kdsl::{self, Ctx as SpiralKCtx, Hard as SpiralKHard};
 pub(crate) struct PyRankPlan {
     inner: RankPlan,
     kind_override: Option<&'static str>,
+    requested_backend: Option<&'static str>,
+    effective_backend: Option<&'static str>,
 }
 
 impl PyRankPlan {
     pub(crate) fn from_plan(inner: RankPlan) -> Self {
-        Self {
-            inner,
-            kind_override: None,
-        }
+        Self::from_plan_with_metadata(inner, None, None, None)
     }
 
-    pub(crate) fn from_plan_with_override(inner: RankPlan, kind: Option<&'static str>) -> Self {
+    pub(crate) fn from_plan_with_metadata(
+        inner: RankPlan,
+        kind_override: Option<&'static str>,
+        requested_backend: Option<&'static str>,
+        effective_backend: Option<&'static str>,
+    ) -> Self {
         Self {
             inner,
-            kind_override: kind,
+            kind_override,
+            requested_backend,
+            effective_backend,
         }
     }
 
@@ -181,6 +187,16 @@ impl PyRankPlan {
     }
 
     #[getter]
+    fn requested_backend(&self) -> Option<&'static str> {
+        self.requested_backend
+    }
+
+    #[getter]
+    fn effective_backend(&self) -> Option<&'static str> {
+        self.effective_backend
+    }
+
+    #[getter]
     fn workgroup(&self) -> u32 {
         self.inner.choice.wg
     }
@@ -286,9 +302,11 @@ impl PyRankPlan {
         let out = st_kdsl::eval_program(script, &ctx).map_err(spiralk_err_to_py)?;
         let mut updated = self.inner.clone();
         apply_spiralk_overrides(&mut updated.choice, &out.hard);
-        Ok(PyRankPlan::from_plan_with_override(
+        Ok(PyRankPlan::from_plan_with_metadata(
             updated,
             self.kind_override,
+            self.requested_backend,
+            self.effective_backend,
         ))
     }
 
@@ -310,7 +328,12 @@ impl PyRankPlan {
             .map_err(|err| pyo3::exceptions::PyRuntimeError::new_err(err.to_string()))?;
         let trace_obj = json_to_py(py, &trace_value)?;
         Ok((
-            PyRankPlan::from_plan_with_override(updated, self.kind_override),
+            PyRankPlan::from_plan_with_metadata(
+                updated,
+                self.kind_override,
+                self.requested_backend,
+                self.effective_backend,
+            ),
             out_obj,
             trace_obj,
         ))
@@ -360,6 +383,118 @@ fn backend_label(kind: BackendKind) -> &'static str {
         BackendKind::Hip => "hip",
         BackendKind::Cpu => "cpu",
     }
+}
+
+fn caps_to_pydict(py: Python<'_>, caps: DeviceCaps) -> PyResult<Bound<'_, PyDict>> {
+    let report = PyDict::new_bound(py);
+    report.set_item("backend", backend_label(caps.backend))?;
+    report.set_item("subgroup", caps.subgroup)?;
+    report.set_item("lane_width", caps.lane_width)?;
+    report.set_item("max_workgroup", caps.max_workgroup)?;
+    match caps.shared_mem_per_workgroup {
+        Some(value) => report.set_item("shared_mem_per_workgroup", value)?,
+        None => report.set_item("shared_mem_per_workgroup", py.None())?,
+    };
+    Ok(report)
+}
+
+fn mps_host_class() -> &'static str {
+    if !cfg!(target_os = "macos") {
+        "non-mac-host"
+    } else if cfg!(target_arch = "aarch64") {
+        "apple-silicon-mac"
+    } else {
+        "intel-mac"
+    }
+}
+
+fn mps_status(feature_enabled: bool, platform_supported: bool) -> &'static str {
+    if !feature_enabled {
+        "build-feature-disabled"
+    } else if !platform_supported {
+        "unsupported-host"
+    } else {
+        "placeholder"
+    }
+}
+
+fn mps_planner_surrogate_backend() -> BackendKind {
+    if cfg!(target_os = "macos") && cfg!(feature = "wgpu") {
+        BackendKind::Wgpu
+    } else {
+        BackendKind::Cpu
+    }
+}
+
+fn mps_planner_route(kind: BackendKind) -> &'static str {
+    match kind {
+        BackendKind::Wgpu => "metal-via-wgpu",
+        _ => "cpu-fallback",
+    }
+}
+
+fn mps_recommendation(kind: BackendKind) -> &'static str {
+    match kind {
+        BackendKind::Wgpu => "use backend='wgpu' today; native MPS kernels are not wired yet",
+        _ => "use backend='cpu' today; enable the 'wgpu' feature to route Metal hosts through WGPU",
+    }
+}
+
+#[derive(Clone, Copy)]
+struct PlannerBackendResolution {
+    effective_backend: BackendKind,
+    reported_backend: &'static str,
+}
+
+fn parse_backend_for_planner(name: Option<&str>) -> PyResult<PlannerBackendResolution> {
+    let raw = name.unwrap_or("wgpu");
+    if raw.eq_ignore_ascii_case("mps") {
+        return Ok(PlannerBackendResolution {
+            effective_backend: mps_planner_surrogate_backend(),
+            reported_backend: "mps",
+        });
+    }
+
+    let effective_backend = parse_backend(Some(raw))?;
+    Ok(PlannerBackendResolution {
+        effective_backend,
+        reported_backend: backend_label(effective_backend),
+    })
+}
+
+fn annotate_mps_surrogate_report(
+    report: &Bound<'_, PyDict>,
+    effective_backend: BackendKind,
+) -> PyResult<()> {
+    let feature_enabled = cfg!(feature = "mps");
+    let platform_supported = cfg!(target_os = "macos");
+    let status = mps_status(feature_enabled, platform_supported);
+    let error = if !feature_enabled {
+        "mps feature is not enabled in this build"
+    } else if !platform_supported {
+        "mps backend requires a macOS host"
+    } else {
+        "mps backend is a placeholder; kernels are not wired yet"
+    };
+
+    report.set_item("backend", "mps")?;
+    report.set_item("status", status)?;
+    report.set_item("feature_enabled", feature_enabled)?;
+    report.set_item("platform_supported", platform_supported)?;
+    report.set_item("host_class", mps_host_class())?;
+    report.set_item("backend_wired", false)?;
+    report.set_item("placeholder", true)?;
+    report.set_item("available", false)?;
+    report.set_item("initialized", false)?;
+    report.set_item(
+        "planner_surrogate_backend",
+        backend_label(effective_backend),
+    )?;
+    report.set_item("planner_route", mps_planner_route(effective_backend))?;
+    report.set_item("recommended_backend", backend_label(effective_backend))?;
+    report.set_item("recommendation", mps_recommendation(effective_backend))?;
+    report.set_item("error", error)?;
+    Ok(())
 }
 
 fn parse_rank_kind(kind: &str) -> PyResult<RankKind> {
@@ -649,7 +784,8 @@ fn plan_impl(
     shared_mem_per_workgroup: Option<u32>,
     kind_override: Option<&'static str>,
 ) -> PyResult<PyRankPlan> {
-    let backend_kind = parse_backend(backend)?;
+    let backend_resolution = parse_backend_for_planner(backend)?;
+    let backend_kind = backend_resolution.effective_backend;
     let caps = build_caps(
         backend_kind,
         lane_width,
@@ -658,11 +794,12 @@ fn plan_impl(
         shared_mem_per_workgroup,
     );
     let plan = plan_rank(kind, rows, cols, k, caps);
-    if kind_override.is_some() {
-        Ok(PyRankPlan::from_plan_with_override(plan, kind_override))
-    } else {
-        Ok(PyRankPlan::from_plan(plan))
-    }
+    Ok(PyRankPlan::from_plan_with_metadata(
+        plan,
+        kind_override,
+        Some(backend_resolution.reported_backend),
+        Some(backend_label(backend_kind)),
+    ))
 }
 
 #[pyfunction]
@@ -746,7 +883,8 @@ fn describe_device(
     tile_hint: Option<u32>,
     compaction_hint: Option<u32>,
 ) -> PyResult<PyObject> {
-    let backend_kind = parse_backend(Some(backend))?;
+    let backend_resolution = parse_backend_for_planner(Some(backend))?;
+    let backend_kind = backend_resolution.effective_backend;
     let caps = build_caps(
         backend_kind,
         lane_width,
@@ -754,15 +892,10 @@ fn describe_device(
         max_workgroup,
         shared_mem_per_workgroup,
     );
-    let report = PyDict::new_bound(py);
-    report.set_item("backend", backend_label(caps.backend))?;
-    report.set_item("subgroup", caps.subgroup)?;
-    report.set_item("lane_width", caps.lane_width)?;
-    report.set_item("max_workgroup", caps.max_workgroup)?;
-    match caps.shared_mem_per_workgroup {
-        Some(value) => report.set_item("shared_mem_per_workgroup", value)?,
-        None => report.set_item("shared_mem_per_workgroup", py.None())?,
-    };
+    let report = caps_to_pydict(py, caps)?;
+    if backend_resolution.reported_backend == "mps" {
+        annotate_mps_surrogate_report(&report, backend_kind)?;
+    }
 
     if let Some(requested) = workgroup {
         report.set_item("requested_workgroup", requested)?;
@@ -802,12 +935,57 @@ fn hip_probe(py: Python<'_>) -> PyResult<PyObject> {
     Ok(out.into_py(py))
 }
 
+#[pyfunction]
+fn mps_probe(py: Python<'_>) -> PyResult<PyObject> {
+    let feature_enabled = cfg!(feature = "mps");
+    let platform_supported = cfg!(target_os = "macos");
+    let status = mps_status(feature_enabled, platform_supported);
+    let host_class = mps_host_class();
+    let planner_surrogate = mps_planner_surrogate_backend();
+    let planner_caps = build_caps(planner_surrogate, None, None, None, None);
+    let backend_wired = false;
+    let initialized = false;
+    let available = feature_enabled && platform_supported && backend_wired;
+    let error = if !feature_enabled {
+        "mps feature is not enabled in this build"
+    } else if !platform_supported {
+        "mps backend requires a macOS host"
+    } else {
+        "mps backend is a placeholder; kernels are not wired yet"
+    };
+
+    let out = PyDict::new_bound(py);
+    out.set_item("backend", "mps")?;
+    out.set_item("status", status)?;
+    out.set_item("feature_enabled", feature_enabled)?;
+    out.set_item("platform_supported", platform_supported)?;
+    out.set_item("host_class", host_class)?;
+    out.set_item("backend_wired", backend_wired)?;
+    out.set_item("placeholder", !backend_wired)?;
+    out.set_item("available", available)?;
+    out.set_item("initialized", initialized)?;
+    out.set_item("host_os", std::env::consts::OS)?;
+    out.set_item("host_arch", std::env::consts::ARCH)?;
+    out.set_item(
+        "planner_surrogate_backend",
+        backend_label(planner_surrogate),
+    )?;
+    out.set_item("planner_route", mps_planner_route(planner_surrogate))?;
+    out.set_item("planner_caps", caps_to_pydict(py, planner_caps)?)?;
+    out.set_item("recommended_backend", backend_label(planner_surrogate))?;
+    out.set_item("recommendation", mps_recommendation(planner_surrogate))?;
+    out.set_item("devices", PyList::empty_bound(py))?;
+    out.set_item("error", error)?;
+    Ok(out.into_py(py))
+}
+
 pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_class::<PyRankPlan>()?;
     m.add_function(wrap_pyfunction!(plan, m)?)?;
     m.add_function(wrap_pyfunction!(plan_topk, m)?)?;
     m.add_function(wrap_pyfunction!(describe_device, m)?)?;
     m.add_function(wrap_pyfunction!(hip_probe, m)?)?;
+    m.add_function(wrap_pyfunction!(mps_probe, m)?)?;
     m.add_function(wrap_pyfunction!(probe_gpu_path, m)?)?;
     let _ = py;
     Ok(())
