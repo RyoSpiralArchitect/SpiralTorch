@@ -20,6 +20,7 @@ pub mod hip_runtime;
 pub mod kdsl_bridge;
 pub mod rankk_launch;
 pub mod rankk_software;
+pub mod runtime_probe;
 pub mod soft_logic;
 pub mod spiralk_fft;
 pub mod temporal_fusion;

@@ -10,12 +10,27 @@ use std::fmt;
 pub enum BackendKind {
     /// WebGPU / WGPU backend.
     Wgpu,
+    /// Native Apple MPS backend.
+    Mps,
     /// CUDA backend.
     Cuda,
     /// ROCm HIP backend.
     Hip,
     /// CPU fallback.
     Cpu,
+}
+
+impl BackendKind {
+    /// Stable backend label used by reports and external APIs.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            BackendKind::Wgpu => "wgpu",
+            BackendKind::Mps => "mps",
+            BackendKind::Cuda => "cuda",
+            BackendKind::Hip => "hip",
+            BackendKind::Cpu => "cpu",
+        }
+    }
 }
 
 /// Minimal capability description shared across backends.
@@ -69,6 +84,24 @@ impl DeviceCaps {
             subgroup,
             max_workgroup: max_workgroup.max(1),
             ..Self::new(BackendKind::Wgpu, lane_width)
+        }
+    }
+
+    /// Native Apple MPS capabilities.
+    ///
+    /// This builder is intentionally conservative because the runtime still
+    /// treats MPS as a placeholder backend while kernels are being wired.
+    pub fn mps(
+        lane_width: u32,
+        subgroup: bool,
+        max_workgroup: u32,
+        shared_mem_per_workgroup: Option<u32>,
+    ) -> Self {
+        Self {
+            subgroup,
+            max_workgroup: max_workgroup.max(1),
+            shared_mem_per_workgroup,
+            ..Self::new(BackendKind::Mps, lane_width)
         }
     }
 
@@ -357,7 +390,7 @@ impl DeviceCaps {
     /// Derive the merge-kind preference that matches the fallback heuristic.
     pub fn preferred_merge_kind(&self, k: u32) -> u32 {
         match self.backend {
-            BackendKind::Wgpu => {
+            BackendKind::Wgpu | BackendKind::Mps => {
                 if self.subgroup && k <= 256 {
                     2
                 } else if k <= 2048 {
@@ -416,7 +449,7 @@ impl DeviceCaps {
 
         let small_rows = rows < 256;
         match self.backend {
-            BackendKind::Wgpu => col_heavy || (k_heavy && !small_rows),
+            BackendKind::Wgpu | BackendKind::Mps => col_heavy || (k_heavy && !small_rows),
             BackendKind::Cuda | BackendKind::Hip => {
                 col_heavy || (k_heavy && rows > lanes.saturating_mul(8))
             }
@@ -428,6 +461,19 @@ impl DeviceCaps {
 impl Default for DeviceCaps {
     fn default() -> Self {
         Self::cpu()
+    }
+}
+
+impl BackendKind {
+    /// Conservative default capability descriptor for the backend.
+    pub fn default_caps(self) -> DeviceCaps {
+        match self {
+            BackendKind::Wgpu => DeviceCaps::wgpu(32, true, 256),
+            BackendKind::Mps => DeviceCaps::mps(32, false, 256, None),
+            BackendKind::Cuda => DeviceCaps::cuda(32, 1024, Some(96 * 1024)),
+            BackendKind::Hip => DeviceCaps::hip(32, 1024, Some(64 * 1024)),
+            BackendKind::Cpu => DeviceCaps::cpu(),
+        }
     }
 }
 
@@ -450,6 +496,13 @@ mod tests {
         assert_eq!(wgpu.lane_width, 32);
         assert_eq!(wgpu.max_workgroup, 256);
         assert_eq!(wgpu.shared_mem_per_workgroup, None);
+
+        let mps = DeviceCaps::mps(32, false, 256, None);
+        assert_eq!(mps.backend, BackendKind::Mps);
+        assert!(!mps.subgroup);
+        assert_eq!(mps.lane_width, 32);
+        assert_eq!(mps.max_workgroup, 256);
+        assert_eq!(mps.shared_mem_per_workgroup, None);
 
         let cuda = DeviceCaps::cuda(32, 1024, Some(64 * 1024));
         assert_eq!(cuda.backend, BackendKind::Cuda);
@@ -489,6 +542,11 @@ mod tests {
         assert_eq!(caps.preferred_merge_kind(64), 2);
         assert_eq!(caps.preferred_merge_kind(512), 1);
         assert_eq!(caps.preferred_merge_kind(4096), 0);
+
+        let mps = DeviceCaps::mps(32, true, 256, None);
+        assert_eq!(mps.preferred_merge_kind(64), 2);
+        assert_eq!(mps.preferred_merge_kind(512), 1);
+        assert_eq!(mps.preferred_merge_kind(4096), 0);
 
         let cuda = DeviceCaps::cuda(32, 1024, None);
         assert_eq!(cuda.preferred_merge_kind(64), 2);

@@ -400,7 +400,14 @@ if _rs is None:
     _install_spiral_rl_stub()
 
 
-def _mps_probe_fallback() -> _Dict[str, _Any]:
+def _matching_native_mps_error(api_name: str) -> RuntimeError:
+    return RuntimeError(
+        f"{api_name} requires a matching SpiralTorch native extension with MPS report support; "
+        "rebuild the native module from the current checkout."
+    )
+
+
+def _legacy_mps_routing_report() -> _Dict[str, _Any]:
     feature_enabled = False
     wgpu_enabled = False
     build_info_fn = _safe_getattr(_rs, "build_info", None)
@@ -504,11 +511,6 @@ def _mps_probe_fallback() -> _Dict[str, _Any]:
         "devices": [],
         "error": error,
     }
-
-
-if _safe_getattr(_rs, "mps_probe", None) is None:
-    def mps_probe() -> _Dict[str, _Any]:
-        return _mps_probe_fallback()
 
 
 # --- begin: promote real rl submodule & alias DqnAgent->stAgent ---
@@ -4133,10 +4135,10 @@ class SpiralSession:
         backend_label = str(backend).strip().lower()
         if backend_label == "mps":
             init_backend("mps")
-            probe = mps_probe()
-            self.effective_backend = str(probe.get("planner_surrogate_backend", "cpu"))
-            self.device = str(probe.get("planner_route", "cpu-fallback"))
-            self.device_preflight = dict(probe)
+            effective_backend, device, report = _resolve_runtime_entry("mps")
+            self.effective_backend = effective_backend
+            self.device = device
+            self.device_preflight = report
         elif backend_label == "hip":
             init_backend("hip")
             self.effective_backend = "hip"
@@ -4935,6 +4937,7 @@ _native_init_backend = globals().get("init_backend")
 _native_plan = globals().get("plan")
 _native_plan_topk = globals().get("plan_topk")
 _native_describe_device = globals().get("describe_device")
+_native_mps_probe = globals().get("mps_probe")
 
 
 def _is_unknown_mps_backend_error(exc: Exception) -> bool:
@@ -4942,58 +4945,60 @@ def _is_unknown_mps_backend_error(exc: Exception) -> bool:
     return "mps" in message and "unknown backend" in message
 
 
+def _coerce_report_dict(report: _Any) -> _Dict[str, _Any]:
+    if isinstance(report, dict):
+        return dict(report)
+    if isinstance(report, _Mapping):
+        return dict(report)
+    return dict(report)
+
+
+def _resolve_mps_routing_report() -> _Dict[str, _Any]:
+    if callable(_native_mps_probe):
+        return _coerce_report_dict(_native_mps_probe())
+    return _legacy_mps_routing_report()
+
+
+def mps_probe() -> _Dict[str, _Any]:
+    if not callable(_native_mps_probe):
+        raise _matching_native_mps_error("spiraltorch.mps_probe()")
+    return _coerce_report_dict(_native_mps_probe())
+
+
 if callable(_native_init_backend):
     def init_backend(backend: str) -> bool:
         raw = str(backend).strip().lower()
         if raw == "mps":
+            initialized = False
             try:
-                return bool(_native_init_backend("mps"))
+                initialized = bool(_native_init_backend("mps"))
             except Exception as exc:
                 if not _is_unknown_mps_backend_error(exc):
                     raise
-                return False
+            effective_backend, _device, _report = _resolve_runtime_entry("mps")
+            if effective_backend and effective_backend != "mps":
+                with _contextlib.suppress(Exception):
+                    _native_init_backend(effective_backend)
+            return initialized
         return bool(_native_init_backend(backend))
 
 
-def _normalize_planner_backend(
-    backend: _Any,
-) -> tuple[_Any, _Optional[_Dict[str, _Any]]]:
+def _planner_backend_argument(backend: _Any) -> _Any:
     if backend is None:
-        return backend, None
-    raw = str(backend).strip()
-    if raw.lower() != "mps":
-        return backend, None
-    probe = mps_probe()
-    surrogate = str(probe.get("planner_surrogate_backend", "cpu"))
-    return surrogate, probe
+        return None
+    raw = str(backend).strip().lower()
+    if raw in {"", "auto"}:
+        return None
+    return backend
 
 
-def _overlay_mps_describe_device(
-    report: _Any,
-    probe: _Optional[_Dict[str, _Any]],
-) -> _Any:
-    if probe is None or not isinstance(report, _Mapping):
-        return report
-    out = dict(report)
-    out["backend"] = "mps"
-    for key in (
-        "status",
-        "feature_enabled",
-        "platform_supported",
-        "host_class",
-        "backend_wired",
-        "placeholder",
-        "available",
-        "initialized",
-        "planner_surrogate_backend",
-        "planner_route",
-        "recommended_backend",
-        "recommendation",
-        "error",
-    ):
-        if key in probe:
-            out[key] = probe[key]
-    return out
+def _planner_effective_backend_label(backend: _Any) -> str:
+    if backend is None:
+        return "wgpu"
+    raw = str(backend).strip().lower()
+    if raw in {"", "auto"}:
+        return "wgpu"
+    return raw
 
 
 def _requested_planner_backend_label(backend: _Any, effective_backend: _Any) -> str:
@@ -5007,17 +5012,43 @@ def _requested_planner_backend_label(backend: _Any, effective_backend: _Any) -> 
     return str(effective_backend).strip().lower() or "wgpu"
 
 
+class _RankPlanMetadataProxy:
+    __slots__ = ("_inner", "requested_backend", "effective_backend")
+
+    def __init__(self, inner: _Any, requested_backend: str, effective_backend: str) -> None:
+        self._inner = inner
+        self.requested_backend = requested_backend
+        self.effective_backend = effective_backend
+
+    def __getattr__(self, name: str) -> _Any:
+        return getattr(self._inner, name)
+
+    def __repr__(self) -> str:
+        return repr(self._inner)
+
+
 def _annotate_rank_plan_backends(
     plan_obj: _Any,
     requested_backend: str,
     effective_backend: _Any,
 ) -> _Any:
     effective_label = str(effective_backend).strip().lower() or "wgpu"
+    requested_matches = False
+    effective_matches = False
     with _contextlib.suppress(Exception):
         setattr(plan_obj, "requested_backend", requested_backend)
+        requested_matches = getattr(plan_obj, "requested_backend") == requested_backend
     with _contextlib.suppress(Exception):
         setattr(plan_obj, "effective_backend", effective_label)
-    return plan_obj
+        effective_matches = getattr(plan_obj, "effective_backend") == effective_label
+    if requested_matches and effective_matches:
+        return plan_obj
+    with _contextlib.suppress(Exception):
+        requested_matches = getattr(plan_obj, "requested_backend") == requested_backend
+        effective_matches = getattr(plan_obj, "effective_backend") == effective_label
+    if requested_matches and effective_matches:
+        return plan_obj
+    return _RankPlanMetadataProxy(plan_obj, requested_backend, effective_label)
 
 
 def _call_planner_native(
@@ -5027,15 +5058,22 @@ def _call_planner_native(
     args: tuple[_Any, ...],
     kwargs: _Dict[str, _Any],
 ) -> tuple[_Any, _Any]:
-    effective_backend, probe = _normalize_planner_backend(backend)
-    raw = "" if backend is None else str(backend).strip().lower()
-    if raw == "mps":
+    effective_backend = _planner_effective_backend_label(backend)
+    if effective_backend == "mps":
+        probe = _resolve_mps_routing_report()
+        effective_backend = (
+            str(probe.get("planner_surrogate_backend", "cpu")).strip().lower() or "cpu"
+        )
         try:
             return func(*args, backend="mps", **kwargs), effective_backend
         except Exception as exc:
             if not _is_unknown_mps_backend_error(exc):
                 raise
-    return func(*args, backend=effective_backend, **kwargs), effective_backend
+        return func(*args, backend=effective_backend, **kwargs), effective_backend
+    return (
+        func(*args, backend=_planner_backend_argument(backend), **kwargs),
+        effective_backend,
+    )
 
 
 if callable(_native_plan):
@@ -5085,21 +5123,57 @@ if callable(_native_plan_topk):
 
 if callable(_native_describe_device):
     def describe_device(backend: str = "wgpu", **kwargs: _Any):
+        raw = "" if backend is None else str(backend).strip().lower()
+        if raw == "mps":
+            try:
+                return _native_describe_device("mps", **dict(kwargs))
+            except Exception as exc:
+                if _is_unknown_mps_backend_error(exc):
+                    raise _matching_native_mps_error(
+                        "spiraltorch.describe_device('mps')"
+                    ) from exc
+                raise
         report, _effective_backend = _call_planner_native(
             _native_describe_device,
             backend=backend,
             args=(),
             kwargs=dict(kwargs),
         )
-        _raw_backend = "" if backend is None else str(backend).strip().lower()
-        probe = mps_probe() if _raw_backend == "mps" else None
-        return _overlay_mps_describe_device(report, probe)
+        return report
+
+
+def _resolve_runtime_entry(backend: str) -> tuple[str, str, _Dict[str, _Any]]:
+    raw = str(backend).strip().lower()
+    if raw == "mps":
+        report: _Dict[str, _Any] | None = None
+        if callable(_native_describe_device):
+            try:
+                candidate = _coerce_report_dict(_native_describe_device("mps"))
+            except Exception as exc:
+                if not _is_unknown_mps_backend_error(exc):
+                    raise
+            else:
+                if "planner_surrogate_backend" in candidate and "planner_route" in candidate:
+                    report = candidate
+        if report is None:
+            report = _resolve_mps_routing_report()
+        effective_backend = str(report.get("planner_surrogate_backend", "cpu"))
+        device = str(report.get("planner_route", "cpu-fallback"))
+        return effective_backend, device, report
+    if raw == "hip":
+        report = dict(hip_probe())
+        return "hip", "hip", report
+    if raw == "wgpu":
+        report = dict(describe_device("wgpu"))
+        return "wgpu", "wgpu", report
+    report = dict(describe_device("cpu"))
+    return "cpu", "cpu", report
 
 
 try:
     _planner_module = globals().get("planner")
     if isinstance(_planner_module, _types.ModuleType):
-        for _planner_name in ("plan", "plan_topk", "describe_device"):
+        for _planner_name in ("plan", "plan_topk", "describe_device", "mps_probe"):
             _planner_value = globals().get(_planner_name)
             if _planner_value is None:
                 continue

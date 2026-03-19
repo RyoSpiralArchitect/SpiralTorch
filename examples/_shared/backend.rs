@@ -51,11 +51,12 @@ fn parse_backend_kind(raw: &str) -> Result<BackendKind, TensorError> {
 
     match raw.to_ascii_lowercase().as_str() {
         "wgpu" | "webgpu" => Ok(BackendKind::Wgpu),
+        "mps" => Ok(BackendKind::Mps),
         "cuda" => Ok(BackendKind::Cuda),
         "hip" | "rocm" => Ok(BackendKind::Hip),
         "cpu" => Ok(BackendKind::Cpu),
         other => Err(TensorError::Generic(format!(
-            "unknown backend '{other}', expected 'auto', 'wgpu', 'cuda', 'hip', or 'cpu'"
+            "unknown backend '{other}', expected 'auto', 'wgpu', 'mps', 'cuda', 'hip', or 'cpu'"
         ))),
     }
 }
@@ -73,21 +74,11 @@ fn default_backend_kind() -> BackendKind {
 }
 
 fn backend_label(kind: BackendKind) -> &'static str {
-    match kind {
-        BackendKind::Wgpu => "wgpu",
-        BackendKind::Cuda => "cuda",
-        BackendKind::Hip => "hip",
-        BackendKind::Cpu => "cpu",
-    }
+    kind.as_str()
 }
 
 fn default_caps(kind: BackendKind) -> DeviceCaps {
-    match kind {
-        BackendKind::Wgpu => DeviceCaps::wgpu(32, true, 256),
-        BackendKind::Cuda => DeviceCaps::cuda(32, 1024, Some(96 * 1024)),
-        BackendKind::Hip => DeviceCaps::hip(32, 1024, Some(64 * 1024)),
-        BackendKind::Cpu => DeviceCaps::cpu(),
-    }
+    kind.default_caps()
 }
 
 fn require_backend_available(kind: BackendKind) -> Result<(), TensorError> {
@@ -103,6 +94,10 @@ fn require_backend_available(kind: BackendKind) -> Result<(), TensorError> {
                 ))
             }
         }
+        BackendKind::Mps => Err(TensorError::Generic(
+            "backend=mps is a placeholder today; use backend=wgpu on macOS until native MPS kernels are wired."
+                .to_string(),
+        )),
         BackendKind::Cuda => {
             if cfg!(feature = "cuda") {
                 Ok(())
