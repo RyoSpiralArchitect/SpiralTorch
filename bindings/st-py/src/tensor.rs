@@ -8,6 +8,8 @@ use pyo3::wrap_pyfunction;
 use pyo3::{Bound, PyRef, PyRefMut};
 #[cfg(feature = "hip")]
 use st_backend_hip as hip_backend;
+use st_core::backend::device_caps::BackendKind;
+use st_core::backend::runtime_probe::resolve_backend;
 use st_tensor::dlpack::{drop_exported_state, DLManagedTensor, DLPACK_CAPSULE_NAME};
 use st_tensor::{
     backend::cpu_dense, AttentionBackend, HardmaxBackend, Layout, MatmulBackend, SoftmaxBackend,
@@ -1398,7 +1400,10 @@ fn cpu_simd_prepack_rhs(py: Python<'_>, rhs: &PyTensor) -> PyResult<PyCpuSimdPac
 #[pyfunction]
 fn init_backend(label: &str) -> PyResult<bool> {
     match label {
-        "mps" => Ok(false),
+        "mps" => {
+            let _ = resolve_backend(BackendKind::Mps);
+            Ok(false)
+        }
         #[cfg(feature = "hip")]
         "hip" => hip_backend::init()
             .map(|_| true)

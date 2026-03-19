@@ -1750,7 +1750,7 @@ pub fn choose_unified_rank(
         }
     }
 
-    if caps.backend == BackendKind::Wgpu {
+    if matches!(caps.backend, BackendKind::Wgpu | BackendKind::Mps) {
         if let Some(choice) =
             wgpu_heuristics::choose(rows as usize, cols as usize, k as usize, caps.subgroup)
         {

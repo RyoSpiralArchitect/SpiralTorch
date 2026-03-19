@@ -8,7 +8,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::PathBuf;
 
-use crate::backend::device_caps::{BackendKind, DeviceCaps};
+use crate::backend::device_caps::DeviceCaps;
 use crate::plugin::{global_registry, PluginEvent};
 use crate::runtime::blackcat::{BlackCatRuntime, StepMetrics};
 use crate::telemetry::trace_init;
@@ -212,12 +212,7 @@ impl Autopilot {
 }
 
 fn make_key(caps: &DeviceCaps) -> String {
-    let backend = match caps.backend {
-        BackendKind::Wgpu => "wgpu",
-        BackendKind::Cuda => "cuda",
-        BackendKind::Hip => "hip",
-        BackendKind::Cpu => "cpu",
-    };
+    let backend = caps.backend.as_str();
     format!(
         "backend={backend};lane={};wg={};subgroup={}",
         caps.lane_width, caps.max_workgroup, caps.subgroup as u8

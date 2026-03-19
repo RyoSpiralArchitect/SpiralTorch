@@ -101,13 +101,7 @@ impl SpiralSessionBuilder {
 
     /// Builder convenience constructor.
     pub fn from_backend(backend: BackendKind) -> Self {
-        let caps = match backend {
-            BackendKind::Wgpu => DeviceCaps::wgpu(32, true, 256),
-            BackendKind::Hip => DeviceCaps::hip(32, 1024, Some(64 * 1024)),
-            BackendKind::Cuda => DeviceCaps::cuda(32, 1024, Some(96 * 1024)),
-            BackendKind::Cpu => DeviceCaps::cpu(),
-        };
-        Self::new(caps)
+        Self::new(backend.default_caps())
     }
 
     /// Sets the hyperbolic curvature enforced by the session.
