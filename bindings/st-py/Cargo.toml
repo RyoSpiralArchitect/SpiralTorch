@@ -13,6 +13,7 @@ crate-type = ["cdylib"]
 [features]
 default = [
     "extension-module",
+    "wgpu",
     "psi",
     "psychoid",
     "collapse",
