@@ -17,7 +17,7 @@ use crate::json::json_to_py;
 #[cfg(feature = "nn")]
 use crate::planner::{build_caps, parse_backend, PyRankPlan};
 #[cfg(feature = "nn")]
-use crate::pure::{PyGradientSummary, PyOpenCartesianTopos};
+use crate::pure::{PyGradientSummary, PyNonCollapseSnapshot, PyOpenCartesianTopos};
 #[cfg(feature = "nn")]
 use crate::tensor::{tensor_err_to_py, tensor_to_torch, PyTensor};
 #[cfg(feature = "nn")]
@@ -5705,6 +5705,9 @@ impl PyDesirePipeline {
         dict.set_item("temperature", step.solution.temperature)?;
         dict.set_item("entropy", step.solution.entropy)?;
         dict.set_item("hypergrad_penalty", step.solution.hypergrad_penalty)?;
+        let noncollapse_snapshot =
+            PyNonCollapseSnapshot::from(step.solution.noncollapse_snapshot());
+        dict.set_item("noncollapse_snapshot", noncollapse_snapshot.to_pydict(py)?)?;
         dict.set_item("weights", desire_weights_to_py(py, &step.solution.weights)?)?;
         dict.set_item("indices", step.solution.indices.clone())?;
         dict.set_item("probabilities", step.solution.probabilities.clone())?;
@@ -7371,6 +7374,7 @@ pub(crate) struct PyCoherenceDiagnostics {
     channel_reports: Vec<PyCoherenceChannelReport>,
     pre_discard: Option<PyPreDiscardTelemetry>,
     observation: PyCoherenceObservation,
+    noncollapse_snapshot: PyNonCollapseSnapshot,
 }
 
 #[cfg(feature = "nn")]
@@ -7599,6 +7603,7 @@ impl PyPreDiscardPolicy {
 #[cfg(feature = "nn")]
 impl PyCoherenceDiagnostics {
     fn from_diagnostics(diagnostics: CoherenceDiagnostics) -> Self {
+        let noncollapse_snapshot = PyNonCollapseSnapshot::from(diagnostics.noncollapse_snapshot());
         let observation = PyCoherenceObservation::from_observation(diagnostics.observation());
         let (aggregated, coherence, channel_reports, pre_discard) = diagnostics.into_parts();
         let channel_reports = channel_reports
@@ -7611,6 +7616,7 @@ impl PyCoherenceDiagnostics {
             channel_reports,
             pre_discard: pre_discard.map(PyPreDiscardTelemetry::from_telemetry),
             observation,
+            noncollapse_snapshot,
         }
     }
 }
@@ -7654,6 +7660,11 @@ impl PyCoherenceDiagnostics {
     fn observation(&self) -> PyCoherenceObservation {
         self.observation.clone()
     }
+
+    #[getter]
+    fn noncollapse_snapshot(&self) -> PyNonCollapseSnapshot {
+        self.noncollapse_snapshot.clone()
+    }
 }
 
 #[cfg(feature = "nn")]
@@ -7680,6 +7691,13 @@ impl PyZSpaceTraceRecorder {
         let trace = self.inner.snapshot();
         let value =
             serde_json::to_value(&trace).map_err(|err| PyValueError::new_err(err.to_string()))?;
+        json_to_py(py, &value)
+    }
+
+    pub fn records(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let records = self.inner.records();
+        let value =
+            serde_json::to_value(&records).map_err(|err| PyValueError::new_err(err.to_string()))?;
         json_to_py(py, &value)
     }
 

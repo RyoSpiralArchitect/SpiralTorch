@@ -27,6 +27,7 @@ pub mod dashboard;
 pub mod hub;
 pub mod maintainer;
 pub mod monitoring;
+pub mod noncollapse;
 pub mod region_visualizer;
 pub mod trace_init;
 pub mod xai_report;

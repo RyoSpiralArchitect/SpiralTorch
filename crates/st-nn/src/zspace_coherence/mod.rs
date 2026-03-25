@@ -33,7 +33,7 @@ pub use sequencer::{
 };
 pub use trace::{
     coherence_relation_tensor, ZSpaceTrace, ZSpaceTraceConfig, ZSpaceTraceEvent,
-    ZSpaceTraceRecorder,
+    ZSpaceTraceRecord, ZSpaceTraceRecorder,
 };
 pub use text_vae::ZSpaceTextVae;
 pub use vae::{MellinBasis, ZSpaceVae, ZSpaceVaeState, ZSpaceVaeStats};

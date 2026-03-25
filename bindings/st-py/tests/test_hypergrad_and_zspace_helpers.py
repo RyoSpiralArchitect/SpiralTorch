@@ -90,6 +90,24 @@ def test_hypergrad_telemetry_reports_metrics() -> None:
     assert summary.kurtosis() >= 0.0
     assert summary.activation() > 0.0
     assert summary.support_width() > 0.0
+    snapshot = telemetry.noncollapse_snapshot()
+    assert isinstance(snapshot, st.NonCollapseSnapshot)
+    assert snapshot.hypergrad_l2 is not None and snapshot.hypergrad_l2 > 0.0
+    assert snapshot.hypergrad_non_finite_ratio == pytest.approx(0.0)
+    payload = snapshot.to_dict()
+    assert payload["hypergrad_linf"] > 0.0
+
+
+def test_hypergrad_noncollapse_snapshot_matches_telemetry() -> None:
+    tape = st.hypergrad(1, 3, curvature=-0.92, learning_rate=0.03)
+    tensor = st.Tensor((1, 3), data=[0.3, -0.45, 0.2])
+    tape.accumulate_wave(tensor)
+    direct = tape.noncollapse_snapshot()
+    via_telemetry = tape.telemetry().noncollapse_snapshot()
+    assert not direct.is_empty()
+    assert direct.hypergrad_l2 == pytest.approx(via_telemetry.hypergrad_l2)
+    assert direct.hypergrad_linf == pytest.approx(via_telemetry.hypergrad_linf)
+    assert direct.hypergrad_non_finite_ratio == pytest.approx(0.0)
 
 
 def test_hypergrad_desire_feedback_interfaces() -> None:
@@ -191,6 +209,25 @@ def test_z_metrics_aliases_normalise_inputs() -> None:
     assert metrics.stability == 0.9
     assert metrics.drs == 0.1
     assert metrics.gradient == [1.0, -2.0, 3.0]
+
+
+def test_coherence_diagnostics_expose_noncollapse_snapshot() -> None:
+    if not hasattr(st, "ZSpaceCoherenceSequencer"):
+        pytest.skip("nn feature not available")
+    topos = st.OpenCartesianTopos(-0.9, 1e-5, 10.0, 256, 8192)
+    seq = st.ZSpaceCoherenceSequencer(128, 8, -0.9, topos=topos)
+    seq.configure_pre_discard(0.35, energy_floor=1e-4, min_channels=2)
+    data = [0.02] * 128
+    for idx in range(96, 128):
+        data[idx] = 0.9
+    x = st.Tensor((1, 128), data=data)
+    diagnostics = seq.diagnostics(x)
+    snapshot = diagnostics.noncollapse_snapshot
+    assert isinstance(snapshot, st.NonCollapseSnapshot)
+    assert snapshot.coherence_entropy is not None
+    assert snapshot.preserved_channels == diagnostics.preserved_channels
+    assert snapshot.discarded_channels == diagnostics.discarded_channels
+    assert snapshot.pre_discard_preserved_ratio is not None
 
 
 def test_encode_zspace_returns_tensor() -> None:

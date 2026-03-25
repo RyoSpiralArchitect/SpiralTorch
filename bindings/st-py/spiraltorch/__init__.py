@@ -550,8 +550,14 @@ from .kdsl_trace import (
 from .zspace_atlas import (
     zspace_trace_to_atlas_route,
     zspace_trace_event_to_atlas_frame,
+    write_zspace_atlas_noncollapse_html,
     trainer_events_to_atlas_route,
     trainer_step_event_to_atlas_frame,
+)
+
+from .zspace_artifacts import (
+    load_zspace_artifact_manifest,
+    build_zspace_downstream_hook,
 )
 
 from .zspace_live import (
@@ -578,7 +584,8 @@ _EXTRAS = [
     "load_zspace_trace_events","write_zspace_trace_html",
     "load_trainer_trace_events","write_trainer_trace_html",
     "load_kdsl_trace_events","write_kdsl_trace_jsonl","write_kdsl_trace_html",
-    "zspace_trace_to_atlas_route","zspace_trace_event_to_atlas_frame",
+    "zspace_trace_to_atlas_route","zspace_trace_event_to_atlas_frame","write_zspace_atlas_noncollapse_html",
+    "load_zspace_artifact_manifest","build_zspace_downstream_hook",
     "trainer_events_to_atlas_route","trainer_step_event_to_atlas_frame",
     "serve_zspace_trace","ZSpaceTraceLiveServer",
 ]
@@ -4758,7 +4765,7 @@ for _key, _hint in _FORWARDING_HINTS.items():
 
 _CORE_EXPORTS = [
     "Tensor","ComplexTensor","OpenCartesianTopos","LanguageWaveEncoder",
-    "GradientSummary","Hypergrad","Realgrad","TensorBiome",
+    "GradientSummary","NonCollapseSnapshot","Hypergrad","Realgrad","TensorBiome",
     "Amegagrad","amegagrad",
     "LinearModel",
     "BarycenterIntermediate","ZSpaceBarycenter",

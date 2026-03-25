@@ -18,7 +18,9 @@ use super::sequencer::{
 use crate::language::{ConceptHint, NarrativeHint};
 use crate::{PureResult, Tensor};
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Map, Value};
 use st_core::maxwell::MaxwellZPulse;
+use st_core::telemetry::noncollapse::NonCollapseSnapshot;
 use st_tensor::TensorError;
 use std::collections::VecDeque;
 use std::env;
@@ -60,6 +62,8 @@ pub struct PreDiscardTelemetrySummary {
     pub survivor_energy: f32,
     pub discarded_energy: f32,
     pub dominant_weight: f32,
+    pub preserved_ratio: f32,
+    pub survivor_energy_ratio: f32,
 }
 
 impl From<&PreDiscardTelemetry> for PreDiscardTelemetrySummary {
@@ -73,6 +77,8 @@ impl From<&PreDiscardTelemetry> for PreDiscardTelemetrySummary {
             survivor_energy: telemetry.survivor_energy(),
             discarded_energy: telemetry.discarded_energy(),
             dominant_weight: telemetry.dominant_weight(),
+            preserved_ratio: telemetry.preserved_ratio(),
+            survivor_energy_ratio: telemetry.survivor_energy_ratio(),
         }
     }
 }
@@ -104,6 +110,21 @@ impl CoherenceDiagnosticsSummary {
             discarded_channels: diagnostics.discarded_channels(),
             label: label.to_string(),
         }
+    }
+
+    fn noncollapse_snapshot(&self) -> NonCollapseSnapshot {
+        NonCollapseSnapshot::new()
+            .with_coherence_metrics(
+                self.entropy,
+                self.preserved_channels,
+                self.discarded_channels,
+            )
+            .with_z_bias(self.z_bias)
+            .with_coherence_profile(
+                self.dominant_channel,
+                self.energy_ratio,
+                self.mean_coherence,
+            )
     }
 }
 
@@ -188,6 +209,9 @@ impl ConceptHintSnapshot {
         }
     }
 }
+
+pub const ZSPACE_TRACE_SCHEMA: &str = "spiraltorch.zspace_trace";
+pub const ZSPACE_TRACE_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ZSpaceTraceEvent {
@@ -277,7 +301,42 @@ pub enum ZSpaceTraceEvent {
     },
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ZSpaceTraceRecord {
+    pub schema: String,
+    pub schema_version: u32,
+    pub kind: String,
+    pub step: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub noncollapse: Option<NonCollapseSnapshot>,
+    pub payload: Map<String, Value>,
+}
+
 impl ZSpaceTraceEvent {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            ZSpaceTraceEvent::Projected { .. } => "Projected",
+            ZSpaceTraceEvent::CoherenceMeasured { .. } => "CoherenceMeasured",
+            ZSpaceTraceEvent::Aggregated { .. } => "Aggregated",
+            ZSpaceTraceEvent::PreDiscardApplied { .. } => "PreDiscardApplied",
+            ZSpaceTraceEvent::LanguageBridged { .. } => "LanguageBridged",
+            ZSpaceTraceEvent::BackendConfigured { .. } => "BackendConfigured",
+            ZSpaceTraceEvent::LinguisticProfileRegistered { .. } => "LinguisticProfileRegistered",
+            ZSpaceTraceEvent::LinguisticProfilesCleared { .. } => "LinguisticProfilesCleared",
+            ZSpaceTraceEvent::SemanticWindowDerived { .. } => "SemanticWindowDerived",
+            ZSpaceTraceEvent::SemanticDistributionDerived { .. } => {
+                "SemanticDistributionDerived"
+            }
+            ZSpaceTraceEvent::CanonicalConceptSelected { .. } => "CanonicalConceptSelected",
+            ZSpaceTraceEvent::MaxwellBridgeEmitted { .. } => "MaxwellBridgeEmitted",
+            ZSpaceTraceEvent::LinguisticContourEmitted { .. } => "LinguisticContourEmitted",
+            ZSpaceTraceEvent::ChannelsDescribed { .. } => "ChannelsDescribed",
+            ZSpaceTraceEvent::SemanticWindowFused { .. } => "SemanticWindowFused",
+            #[cfg(feature = "psi")]
+            ZSpaceTraceEvent::PsiTelemetryPublished { .. } => "PsiTelemetryPublished",
+        }
+    }
+
     pub fn step(&self) -> u64 {
         match self {
             ZSpaceTraceEvent::Projected { step, .. }
@@ -307,6 +366,141 @@ impl ZSpaceTraceEvent {
             | ZSpaceTraceEvent::LanguageBridged { coherence, .. }
             | ZSpaceTraceEvent::LinguisticContourEmitted { coherence, .. }
             | ZSpaceTraceEvent::ChannelsDescribed { coherence, .. } => Some(coherence.as_slice()),
+            _ => None,
+        }
+    }
+
+    pub fn stable_record(&self) -> ZSpaceTraceRecord {
+        ZSpaceTraceRecord {
+            schema: ZSPACE_TRACE_SCHEMA.to_string(),
+            schema_version: ZSPACE_TRACE_SCHEMA_VERSION,
+            kind: self.kind().to_string(),
+            step: self.step(),
+            noncollapse: self.noncollapse_snapshot(),
+            payload: self.payload_map(),
+        }
+    }
+
+    fn payload_map(&self) -> Map<String, Value> {
+        let Ok(value) = serde_json::to_value(self) else {
+            return Map::new();
+        };
+        let Value::Object(root) = value else {
+            return Map::new();
+        };
+        let Some((_kind, body)) = root.into_iter().next() else {
+            return Map::new();
+        };
+        let Value::Object(mut body) = body else {
+            return Map::new();
+        };
+        self.augment_payload_map(&mut body);
+        body
+    }
+
+    fn augment_payload_map(&self, body: &mut Map<String, Value>) {
+        if let Some(card) = self.noncollapse_card_value() {
+            body.insert("noncollapse_card".to_string(), card);
+        }
+
+        if let ZSpaceTraceEvent::PreDiscardApplied {
+            original, filtered, ..
+        } = self
+        {
+            body.entry("coherence".to_string())
+                .or_insert_with(|| json!(filtered));
+            body.entry("coherence_before".to_string())
+                .or_insert_with(|| json!(original));
+        }
+    }
+
+    fn noncollapse_snapshot(&self) -> Option<NonCollapseSnapshot> {
+        match self {
+            ZSpaceTraceEvent::Aggregated { diagnostics, .. } => {
+                Some(diagnostics.noncollapse_snapshot())
+            }
+            ZSpaceTraceEvent::PreDiscardApplied { telemetry, .. } => {
+                let mut snapshot = NonCollapseSnapshot::new();
+                snapshot.preserved_channels = Some(telemetry.preserved);
+                snapshot.discarded_channels = Some(telemetry.discarded);
+                snapshot.pre_discard_preserved_ratio = Some(telemetry.preserved_ratio);
+                snapshot.pre_discard_survivor_energy_ratio =
+                    Some(telemetry.survivor_energy_ratio);
+                Some(snapshot)
+            }
+            ZSpaceTraceEvent::LanguageBridged { pulse, .. }
+            | ZSpaceTraceEvent::MaxwellBridgeEmitted { pulse, .. } => Some(
+                NonCollapseSnapshot::new()
+                    .with_z_bias(pulse.z_bias)
+                    .with_band_energy(pulse.band_energy),
+            ),
+            #[cfg(feature = "psi")]
+            ZSpaceTraceEvent::PsiTelemetryPublished { pulse, .. } => Some(
+                NonCollapseSnapshot::new()
+                    .with_z_bias(pulse.z_bias)
+                    .with_band_energy(pulse.band_energy),
+            ),
+            _ => None,
+        }
+    }
+
+    fn noncollapse_card_value(&self) -> Option<Value> {
+        match self {
+            ZSpaceTraceEvent::Aggregated { diagnostics, .. } => Some(json!({
+                "stage": "aggregated",
+                "title": "Aggregated non-collapse",
+                "summary": format!(
+                    "{} preserved / {} discarded · label {}",
+                    diagnostics.preserved_channels,
+                    diagnostics.discarded_channels,
+                    diagnostics.label
+                ),
+                "metrics": {
+                    "coherence_entropy": diagnostics.entropy,
+                    "preserved_channels": diagnostics.preserved_channels,
+                    "discarded_channels": diagnostics.discarded_channels,
+                    "z_bias": diagnostics.z_bias,
+                    "energy_ratio": diagnostics.energy_ratio,
+                    "mean_coherence": diagnostics.mean_coherence,
+                    "dominant_channel": diagnostics.dominant_channel,
+                }
+            })),
+            ZSpaceTraceEvent::LanguageBridged { pulse, .. } => Some(json!({
+                "stage": "language_bridged",
+                "title": "Language pulse non-collapse",
+                "summary": format!(
+                    "z_bias {:+.3} · bands {:.3}/{:.3}/{:.3}",
+                    pulse.z_bias,
+                    pulse.band_energy.0,
+                    pulse.band_energy.1,
+                    pulse.band_energy.2
+                ),
+                "metrics": {
+                    "z_bias": pulse.z_bias,
+                    "band_energy_above": pulse.band_energy.0,
+                    "band_energy_here": pulse.band_energy.1,
+                    "band_energy_beneath": pulse.band_energy.2,
+                    "blocks": pulse.blocks,
+                    "z_score": pulse.z_score,
+                }
+            })),
+            ZSpaceTraceEvent::PreDiscardApplied { telemetry, .. } => Some(json!({
+                "stage": "pre_discard",
+                "title": "Pre-discard retention",
+                "summary": format!(
+                    "{} preserved / {} discarded",
+                    telemetry.preserved,
+                    telemetry.discarded
+                ),
+                "metrics": {
+                    "preserved_channels": telemetry.preserved,
+                    "discarded_channels": telemetry.discarded,
+                    "preserved_ratio": telemetry.preserved_ratio,
+                    "survivor_energy_ratio": telemetry.survivor_energy_ratio,
+                    "dominant_weight": telemetry.dominant_weight,
+                    "used_fallback": telemetry.used_fallback,
+                }
+            })),
             _ => None,
         }
     }
@@ -390,11 +584,12 @@ impl ZSpaceTraceRecorder {
     }
 
     pub fn write_jsonl(&self, path: impl AsRef<Path>) -> PureResult<()> {
-        let trace = self.snapshot();
-        let file = File::create(path.as_ref()).map_err(|err| TensorError::Generic(err.to_string()))?;
+        let records = self.records();
+        let file =
+            File::create(path.as_ref()).map_err(|err| TensorError::Generic(err.to_string()))?;
         let mut writer = BufWriter::new(file);
-        for event in trace.events {
-            let json = serde_json::to_string(&event)
+        for record in records {
+            let json = serde_json::to_string(&record)
                 .map_err(|err| TensorError::Generic(err.to_string()))?;
             writer
                 .write_all(json.as_bytes())
@@ -402,6 +597,14 @@ impl ZSpaceTraceRecorder {
                 .map_err(|err| TensorError::Generic(err.to_string()))?;
         }
         Ok(())
+    }
+
+    pub fn records(&self) -> Vec<ZSpaceTraceRecord> {
+        let trace = self.snapshot();
+        trace.events
+            .iter()
+            .map(ZSpaceTraceEvent::stable_record)
+            .collect()
     }
 
     fn snapshot_stage(&self, stage: ZSpaceSequencerStage<'_>, step: u64) -> ZSpaceTraceEvent {
@@ -559,7 +762,7 @@ impl ZSpaceSequencerPlugin for ZSpaceTraceRecorder {
             let step = guard.next_step;
             guard.next_step = guard.next_step.wrapping_add(1);
             let event = self.snapshot_stage(stage, step);
-            let publish_event = publish_enabled.then(|| event.clone());
+            let publish_event = publish_enabled.then(|| event.stable_record());
             guard.events.push_back(event);
             while guard.events.len() > capacity {
                 guard.events.pop_front();
@@ -631,9 +834,29 @@ mod tests {
 
         let trace = recorder.snapshot();
         assert!(!trace.events.is_empty());
-        assert!(trace.events.iter().any(|event| matches!(event, ZSpaceTraceEvent::Projected { .. })));
-        assert!(trace.events.iter().any(|event| matches!(event, ZSpaceTraceEvent::CoherenceMeasured { .. })));
-        assert!(trace.events.iter().any(|event| matches!(event, ZSpaceTraceEvent::Aggregated { .. })));
+        assert!(trace
+            .events
+            .iter()
+            .any(|event| matches!(event, ZSpaceTraceEvent::Projected { .. })));
+        assert!(trace
+            .events
+            .iter()
+            .any(|event| matches!(event, ZSpaceTraceEvent::CoherenceMeasured { .. })));
+        assert!(trace
+            .events
+            .iter()
+            .any(|event| matches!(event, ZSpaceTraceEvent::Aggregated { .. })));
+
+        let records = recorder.records();
+        let aggregated = records
+            .iter()
+            .find(|record| record.kind == "Aggregated")
+            .expect("stable aggregated record missing");
+        assert_eq!(aggregated.schema, ZSPACE_TRACE_SCHEMA);
+        assert_eq!(aggregated.schema_version, ZSPACE_TRACE_SCHEMA_VERSION);
+        assert!(aggregated.noncollapse.is_some());
+        assert!(aggregated.payload.contains_key("diagnostics"));
+        assert!(aggregated.payload.contains_key("noncollapse_card"));
     }
 
     #[test]
