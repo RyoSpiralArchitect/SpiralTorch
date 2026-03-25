@@ -1,10 +1,11 @@
 use num_complex::Complex32 as PyComplex32;
 use pyo3::prelude::*;
-use pyo3::types::PyModule;
+use pyo3::types::{PyDict, PyModule};
 use pyo3::{wrap_pyfunction, Bound, PyRefMut};
 
 use crate::tensor::{tensor_err_to_py, PyTensor};
 
+use st_core::telemetry::noncollapse::NonCollapseSnapshot as RustNonCollapseSnapshot;
 use st_tensor::measure::{
     z_space_barycenter as z_space_barycenter_rs, BarycenterIntermediate, ZSpaceBarycenter,
 };
@@ -449,6 +450,212 @@ impl PyGradientSummary {
     }
 }
 
+#[pyclass(module = "spiraltorch", name = "NonCollapseSnapshot")]
+#[derive(Clone, Default)]
+pub(crate) struct PyNonCollapseSnapshot {
+    coherence_entropy: Option<f32>,
+    preserved_channels: Option<usize>,
+    discarded_channels: Option<usize>,
+    z_bias: Option<f32>,
+    hypergrad_penalty: Option<f32>,
+    phase: Option<String>,
+    band_energy: Option<(f32, f32, f32)>,
+    dominant_channel: Option<usize>,
+    energy_ratio: Option<f32>,
+    mean_coherence: Option<f32>,
+    hypergrad_l2: Option<f32>,
+    hypergrad_linf: Option<f32>,
+    hypergrad_non_finite_ratio: Option<f32>,
+    pre_discard_preserved_ratio: Option<f32>,
+    pre_discard_survivor_energy_ratio: Option<f32>,
+}
+
+impl From<RustNonCollapseSnapshot> for PyNonCollapseSnapshot {
+    fn from(snapshot: RustNonCollapseSnapshot) -> Self {
+        Self {
+            coherence_entropy: snapshot.coherence_entropy,
+            preserved_channels: snapshot.preserved_channels,
+            discarded_channels: snapshot.discarded_channels,
+            z_bias: snapshot.z_bias,
+            hypergrad_penalty: snapshot.hypergrad_penalty,
+            phase: snapshot.phase.map(|phase| phase.as_str().to_string()),
+            band_energy: snapshot.band_energy,
+            dominant_channel: snapshot.dominant_channel,
+            energy_ratio: snapshot.energy_ratio,
+            mean_coherence: snapshot.mean_coherence,
+            hypergrad_l2: snapshot.hypergrad_l2,
+            hypergrad_linf: snapshot.hypergrad_linf,
+            hypergrad_non_finite_ratio: snapshot.hypergrad_non_finite_ratio,
+            pre_discard_preserved_ratio: snapshot.pre_discard_preserved_ratio,
+            pre_discard_survivor_energy_ratio: snapshot.pre_discard_survivor_energy_ratio,
+        }
+    }
+}
+
+impl PyNonCollapseSnapshot {
+    pub(crate) fn is_empty_inner(&self) -> bool {
+        self.coherence_entropy.is_none()
+            && self.preserved_channels.is_none()
+            && self.discarded_channels.is_none()
+            && self.z_bias.is_none()
+            && self.hypergrad_penalty.is_none()
+            && self.phase.is_none()
+            && self.band_energy.is_none()
+            && self.dominant_channel.is_none()
+            && self.energy_ratio.is_none()
+            && self.mean_coherence.is_none()
+            && self.hypergrad_l2.is_none()
+            && self.hypergrad_linf.is_none()
+            && self.hypergrad_non_finite_ratio.is_none()
+            && self.pre_discard_preserved_ratio.is_none()
+            && self.pre_discard_survivor_energy_ratio.is_none()
+    }
+
+    pub(crate) fn to_pydict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        if let Some(value) = self.coherence_entropy {
+            dict.set_item("coherence_entropy", value)?;
+        }
+        if let Some(value) = self.preserved_channels {
+            dict.set_item("preserved_channels", value)?;
+        }
+        if let Some(value) = self.discarded_channels {
+            dict.set_item("discarded_channels", value)?;
+        }
+        if let Some(value) = self.z_bias {
+            dict.set_item("z_bias", value)?;
+        }
+        if let Some(value) = self.hypergrad_penalty {
+            dict.set_item("hypergrad_penalty", value)?;
+        }
+        if let Some(value) = self.phase.as_deref() {
+            dict.set_item("phase", value)?;
+        }
+        if let Some(value) = self.band_energy {
+            dict.set_item("band_energy", value)?;
+        }
+        if let Some(value) = self.dominant_channel {
+            dict.set_item("dominant_channel", value)?;
+        }
+        if let Some(value) = self.energy_ratio {
+            dict.set_item("energy_ratio", value)?;
+        }
+        if let Some(value) = self.mean_coherence {
+            dict.set_item("mean_coherence", value)?;
+        }
+        if let Some(value) = self.hypergrad_l2 {
+            dict.set_item("hypergrad_l2", value)?;
+        }
+        if let Some(value) = self.hypergrad_linf {
+            dict.set_item("hypergrad_linf", value)?;
+        }
+        if let Some(value) = self.hypergrad_non_finite_ratio {
+            dict.set_item("hypergrad_non_finite_ratio", value)?;
+        }
+        if let Some(value) = self.pre_discard_preserved_ratio {
+            dict.set_item("pre_discard_preserved_ratio", value)?;
+        }
+        if let Some(value) = self.pre_discard_survivor_energy_ratio {
+            dict.set_item("pre_discard_survivor_energy_ratio", value)?;
+        }
+        Ok(dict.into_py(py))
+    }
+}
+
+#[pymethods]
+impl PyNonCollapseSnapshot {
+    #[getter]
+    pub fn coherence_entropy(&self) -> Option<f32> {
+        self.coherence_entropy
+    }
+
+    #[getter]
+    pub fn preserved_channels(&self) -> Option<usize> {
+        self.preserved_channels
+    }
+
+    #[getter]
+    pub fn discarded_channels(&self) -> Option<usize> {
+        self.discarded_channels
+    }
+
+    #[getter]
+    pub fn z_bias(&self) -> Option<f32> {
+        self.z_bias
+    }
+
+    #[getter]
+    pub fn hypergrad_penalty(&self) -> Option<f32> {
+        self.hypergrad_penalty
+    }
+
+    #[getter]
+    pub fn phase(&self) -> Option<String> {
+        self.phase.clone()
+    }
+
+    #[getter]
+    pub fn band_energy(&self) -> Option<(f32, f32, f32)> {
+        self.band_energy
+    }
+
+    #[getter]
+    pub fn dominant_channel(&self) -> Option<usize> {
+        self.dominant_channel
+    }
+
+    #[getter]
+    pub fn energy_ratio(&self) -> Option<f32> {
+        self.energy_ratio
+    }
+
+    #[getter]
+    pub fn mean_coherence(&self) -> Option<f32> {
+        self.mean_coherence
+    }
+
+    #[getter]
+    pub fn hypergrad_l2(&self) -> Option<f32> {
+        self.hypergrad_l2
+    }
+
+    #[getter]
+    pub fn hypergrad_linf(&self) -> Option<f32> {
+        self.hypergrad_linf
+    }
+
+    #[getter]
+    pub fn hypergrad_non_finite_ratio(&self) -> Option<f32> {
+        self.hypergrad_non_finite_ratio
+    }
+
+    #[getter]
+    pub fn pre_discard_preserved_ratio(&self) -> Option<f32> {
+        self.pre_discard_preserved_ratio
+    }
+
+    #[getter]
+    pub fn pre_discard_survivor_energy_ratio(&self) -> Option<f32> {
+        self.pre_discard_survivor_energy_ratio
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.is_empty_inner()
+    }
+
+    pub fn to_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        self.to_pydict(py)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "NonCollapseSnapshot(empty={}, phase={:?})",
+            self.is_empty_inner(),
+            self.phase
+        )
+    }
+}
+
 #[pyclass(module = "spiraltorch", name = "HypergradTelemetry")]
 #[derive(Clone, Copy)]
 pub(crate) struct PyHypergradTelemetry {
@@ -513,6 +720,10 @@ impl PyHypergradTelemetry {
 
     pub fn non_finite_ratio(&self) -> f32 {
         self.inner.non_finite_ratio()
+    }
+
+    pub fn noncollapse_snapshot(&self) -> PyNonCollapseSnapshot {
+        RustNonCollapseSnapshot::from(self.inner).into()
     }
 }
 
@@ -758,6 +969,10 @@ impl PyHypergrad {
 
     pub fn telemetry(&self) -> PyHypergradTelemetry {
         self.inner.telemetry().into()
+    }
+
+    pub fn noncollapse_snapshot(&self) -> PyNonCollapseSnapshot {
+        RustNonCollapseSnapshot::from(&self.inner).into()
     }
 
     pub fn scale_learning_rate(&mut self, factor: f32) {
@@ -1119,6 +1334,7 @@ pub(crate) fn register(_py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_class::<PyZBoxSite>()?;
     m.add_class::<PyLanguageWaveEncoder>()?;
     m.add_class::<PyGradientSummary>()?;
+    m.add_class::<PyNonCollapseSnapshot>()?;
     m.add_class::<PyHypergradTelemetry>()?;
     m.add_class::<PyDesireGradientInterpretation>()?;
     m.add_class::<PyDesireGradientControl>()?;

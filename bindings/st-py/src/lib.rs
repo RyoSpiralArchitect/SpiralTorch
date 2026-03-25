@@ -302,6 +302,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "Realgrad",
         "TensorBiome",
         "GradientSummary",
+        "NonCollapseSnapshot",
         "ZSpaceBarycenter",
         "BarycenterIntermediate",
         "z_space_barycenter",

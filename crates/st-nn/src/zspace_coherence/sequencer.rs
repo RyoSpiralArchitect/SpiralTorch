@@ -19,6 +19,7 @@ use crate::{
     Module, PureResult, Tensor,
 };
 use st_core::maxwell::MaxwellZPulse;
+use st_core::telemetry::noncollapse::NonCollapseSnapshot;
 #[cfg(feature = "psi")]
 use st_core::{
     telemetry::{
@@ -388,6 +389,31 @@ impl CoherenceDiagnostics {
             .as_ref()
             .map(|telemetry| telemetry.discarded())
             .unwrap_or(0)
+    }
+
+    /// Aggregates the main non-collapse metrics exposed by the coherence path.
+    pub fn noncollapse_snapshot(&self) -> NonCollapseSnapshot {
+        let mut snapshot = NonCollapseSnapshot::new()
+            .with_coherence_metrics(
+                self.coherence_entropy(),
+                self.preserved_channels(),
+                self.discarded_channels(),
+            )
+            .with_z_bias(self.z_bias())
+            .with_coherence_profile(
+                self.dominant_channel(),
+                self.energy_ratio(),
+                self.mean_coherence(),
+            );
+
+        if let Some(pre_discard) = self.pre_discard() {
+            snapshot = snapshot.with_pre_discard_ratios(
+                pre_discard.preserved_ratio(),
+                pre_discard.survivor_energy_ratio(),
+            );
+        }
+
+        snapshot
     }
 
     /// Detects structural events present in the coherence response.
@@ -2418,6 +2444,20 @@ mod tests {
         let telemetry = diagnostics.pre_discard().expect("telemetry missing");
         assert!(telemetry.discarded() > 0);
         assert!(!telemetry.used_fallback());
+        let snapshot = diagnostics.noncollapse_snapshot();
+        assert_eq!(
+            snapshot.preserved_channels,
+            Some(diagnostics.preserved_channels())
+        );
+        assert_eq!(
+            snapshot.discarded_channels,
+            Some(diagnostics.discarded_channels())
+        );
+        assert!(snapshot.coherence_entropy.unwrap_or_default() >= 0.0);
+        assert_eq!(
+            snapshot.pre_discard_preserved_ratio,
+            Some(telemetry.preserved_ratio())
+        );
     }
 
     #[test]
