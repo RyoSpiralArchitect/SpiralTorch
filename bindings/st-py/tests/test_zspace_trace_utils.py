@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 import pytest
+import spiraltorch as st
 
 from spiraltorch.zspace_atlas import (
     write_zspace_atlas_noncollapse_html,
@@ -10,7 +11,9 @@ from spiraltorch.zspace_atlas import (
     zspace_trace_to_atlas_route,
 )
 from spiraltorch.zspace_artifacts import (
+    build_desire_adapter_from_downstream_hook,
     build_zspace_downstream_hook,
+    desire_step_from_downstream_hook,
     load_zspace_artifact_manifest,
 )
 from spiraltorch.zspace_trace import load_zspace_trace_events, write_zspace_trace_html
@@ -418,3 +421,101 @@ def test_build_zspace_downstream_hook_extracts_desire_candidate(tmp_path) -> Non
     assert hook["desire_candidate"]["experimental"] is True
     assert hook["desire_candidate"]["phase_hint"] == "pre_discard"
     assert hook["desire_candidate"]["focus_metric"] == "noncollapse.preserved_ratio"
+
+
+def test_build_desire_adapter_from_downstream_hook_maps_gain_and_bias(tmp_path) -> None:
+    manifest_path = tmp_path / "trace.artifacts.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "trace_jsonl": "/tmp/trace.jsonl",
+                "summary": {"frames": 4, "total_notes": 8},
+                "noncollapse_perspective": {
+                    "coverage": 4,
+                    "mean": 0.61,
+                    "latest": 0.88,
+                    "delta": 0.06,
+                    "momentum": 0.24,
+                    "volatility": 0.03,
+                    "stability": 0.94,
+                    "guidance": "lean into integration when stability is high",
+                    "focus": [
+                        {
+                            "name": "noncollapse.stage.integration",
+                            "latest": 1.0,
+                        },
+                        {
+                            "name": "noncollapse.z_bias",
+                            "latest": 0.38,
+                        },
+                    ],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    adapter = build_desire_adapter_from_downstream_hook(manifest_path)
+
+    assert adapter["kind"] == "spiraltorch.desire_adapter"
+    assert adapter["phase_hint"] == "integration"
+    assert adapter["gain"] > 1.0
+    assert adapter["temperature_scale"] < 1.0
+    assert adapter["focus_metric"] == "noncollapse.z_bias"
+    assert len(adapter["geometry_bias_signal"]) == 4
+    assert adapter["geometry_bias_signal"][0] == pytest.approx(0.94)
+    assert adapter["guidance"] == "lean into integration when stability is high"
+
+
+def test_desire_step_from_downstream_hook_scales_logits_and_returns_adapter() -> None:
+    hook = {
+        "kind": "spiraltorch.zspace_artifact_hook",
+        "summary": {"guidance": "keep ambiguity alive"},
+        "top_focus": [{"name": "noncollapse.preserved_ratio"}],
+        "desire_candidate": {
+            "stability_signal": 0.87,
+            "momentum_signal": 0.18,
+            "delta_signal": 0.04,
+            "phase_hint": "integration",
+            "focus_metric": "noncollapse.preserved_ratio",
+            "guidance": "keep ambiguity alive",
+        },
+    }
+
+    pipeline = st.nn.DesirePipeline(vocab_size=4)
+    result = desire_step_from_downstream_hook(
+        pipeline,
+        [0.1, 0.2, 0.3, 0.4],
+        1,
+        hook,
+    )
+
+    assert result["phase"] in {"observation", "injection", "integration"}
+    assert len(result["probabilities"]) == 4
+    assert "noncollapse_snapshot" in result
+    assert result["downstream_adapter"]["kind"] == "spiraltorch.desire_adapter"
+    assert result["downstream_adapter"]["gain"] == pytest.approx(result["scaled_logits_gain"])
+    assert result["downstream_adapter"]["phase_hint"] == "integration"
+    assert result["scaled_logits_gain"] > 1.0
+    assert result["downstream_adapter"]["focus_metric"] == "noncollapse.preserved_ratio"
+    assert result["geometry_bias_ingested"] is True
+    assert result["geometry_bias_metrics"]["accuracy_mean"] >= 0.0
+    assert result["geometry_bias_metrics"]["fairness_mean"] >= 0.0
+    assert result["geometry_bias_coherence"]["composite_energy"] >= 0.0
+    assert result["geometry_bias_coherence"]["z_energy"] >= 0.0
+
+
+def test_desire_pipeline_geometry_bias_ingest_surfaces_metrics() -> None:
+    pipeline = st.nn.DesirePipeline(vocab_size=4)
+
+    assert pipeline.bias_context == "inference"
+    assert pipeline.geometry_bias_metrics() is None
+    assert pipeline.geometry_bias_coherence() is None
+
+    pipeline.ingest_geometry_bias([0.94, 0.18, 0.04, 0.84], source="zspace")
+    result = pipeline.step([0.1, 0.2, 0.3, 0.4], 1)
+
+    assert result["geometry_bias_metrics"]["window"] >= 1
+    assert result["geometry_bias_metrics"]["latest"]["accuracy"] >= 0.0
+    assert result["geometry_bias_coherence"]["composite_energy"] > 0.0
+    assert result["geometry_bias_coherence"]["timestamp_ms"] > 0

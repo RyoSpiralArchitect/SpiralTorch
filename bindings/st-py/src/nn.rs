@@ -70,15 +70,15 @@ use st_nn::{
     AvgPool2d, BatchNorm1d, CategoricalCrossEntropy, ConceptHint, DataLoader, Dataset,
     DesireAutomation, DesireLagrangian, DesirePhase, DesirePipeline, DesireRoundtableBridge,
     DesireRoundtableSummary, DesireTelemetryBundle, DesireTrainerBridge, DesireWeights,
-    EpochStats as RustEpochStats, Gelu, HyperbolicCrossEntropy, LayerNorm, Linear, MaxPool2d,
-    MaxwellDesireBridge,
-    MeanSquaredError, MellinBasis, ModuleTrainer as RustModuleTrainer, NarrativeHint,
-    NarrativeSummary, Relu, RepressionField, RoundtableConfig as RustRoundtableConfig,
-    RoundtableSchedule as RustRoundtableSchedule, SemanticBridge, Sequential, SparseKernel,
-    SymbolGeometry, TemperatureController, ZSpaceBatchNorm1d, ZSpaceLayerNorm,
-    TextInfusionEvery, TextInfusionMode, WaveGate, WaveRnn, ZRelativityModule,
-    ZSpaceCoherenceSequencer, ZSpaceMixer, ZSpaceTextVae, ZSpaceTraceConfig, ZSpaceTraceRecorder,
-    ZSpaceVae, ZSpaceVaeState, ZSpaceVaeStats,
+    EpochStats as RustEpochStats, Gelu, GeometryBiasContext, GeometryBiasMetrics,
+    GeometryBiasUpdate, GeometryCoherenceSample, HyperbolicCrossEntropy, LayerNorm, Linear,
+    MaxPool2d, MaxwellDesireBridge, MeanSquaredError, MellinBasis,
+    ModuleTrainer as RustModuleTrainer, NarrativeHint, NarrativeSummary, Relu, RepressionField,
+    RoundtableConfig as RustRoundtableConfig, RoundtableSchedule as RustRoundtableSchedule,
+    SemanticBridge, Sequential, SparseKernel, SymbolGeometry, TemperatureController,
+    TextInfusionEvery, TextInfusionMode, WaveGate, WaveRnn, ZRelativityModule, ZSpaceBatchNorm1d,
+    ZSpaceCoherenceSequencer, ZSpaceLayerNorm, ZSpaceMixer, ZSpaceTextVae, ZSpaceTraceConfig,
+    ZSpaceTraceRecorder, ZSpaceVae, ZSpaceVaeState, ZSpaceVaeStats,
 };
 #[cfg(feature = "nn")]
 use st_nn::{Module, Parameter};
@@ -4838,6 +4838,75 @@ fn desire_weights_to_py(py: Python<'_>, weights: &DesireWeights) -> PyResult<PyO
 }
 
 #[cfg(feature = "nn")]
+fn parse_geometry_bias_context(label: &str) -> PyResult<GeometryBiasContext> {
+    match label.to_ascii_lowercase().as_str() {
+        "inference" => Ok(GeometryBiasContext::Inference),
+        "training" => Ok(GeometryBiasContext::Training),
+        other => Err(PyValueError::new_err(format!(
+            "unsupported geometry bias context '{other}', expected 'inference' or 'training'"
+        ))),
+    }
+}
+
+#[cfg(feature = "nn")]
+fn geometry_bias_context_label(context: GeometryBiasContext) -> &'static str {
+    match context {
+        GeometryBiasContext::Inference => "inference",
+        GeometryBiasContext::Training => "training",
+    }
+}
+
+#[cfg(feature = "nn")]
+fn geometry_bias_update_from_source(
+    source: &str,
+    signal: Vec<f32>,
+) -> PyResult<GeometryBiasUpdate> {
+    match source.to_ascii_lowercase().as_str() {
+        "zspace" | "z_space" | "z-space" => Ok(GeometryBiasUpdate::ZSpace { signal }),
+        "roundtable" => Ok(GeometryBiasUpdate::Roundtable { signal }),
+        other => Err(PyValueError::new_err(format!(
+            "unsupported geometry bias source '{other}', expected 'zspace' or 'roundtable'"
+        ))),
+    }
+}
+
+#[cfg(feature = "nn")]
+fn geometry_bias_metrics_to_py(
+    py: Python<'_>,
+    metrics: &GeometryBiasMetrics,
+) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("accuracy_mean", metrics.accuracy_mean)?;
+    dict.set_item("fairness_mean", metrics.fairness_mean)?;
+    dict.set_item("window", metrics.window)?;
+    if let Some(latest) = metrics.latest.as_ref() {
+        let latest_dict = PyDict::new_bound(py);
+        latest_dict.set_item("accuracy", latest.accuracy)?;
+        latest_dict.set_item("fairness", latest.fairness)?;
+        latest_dict.set_item("timestamp_ms", system_time_ms(latest.timestamp))?;
+        dict.set_item("latest", latest_dict)?;
+    } else {
+        dict.set_item("latest", py.None())?;
+    }
+    Ok(dict.into_py(py))
+}
+
+#[cfg(feature = "nn")]
+fn geometry_coherence_to_py(
+    py: Python<'_>,
+    sample: &GeometryCoherenceSample,
+) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("z_energy", sample.z_energy)?;
+    dict.set_item("roundtable_energy", sample.roundtable_energy)?;
+    dict.set_item("composite_energy", sample.composite_energy)?;
+    dict.set_item("balance", sample.balance())?;
+    dict.set_item("coherence", sample.coherence())?;
+    dict.set_item("timestamp_ms", system_time_ms(sample.timestamp))?;
+    Ok(dict.into_py(py))
+}
+
+#[cfg(feature = "nn")]
 fn desire_trainer_summary_to_py(
     py: Python<'_>,
     summary: &st_nn::DesireTrainerSummary,
@@ -5648,6 +5717,42 @@ impl PyDesirePipeline {
         self.inner.sink_count()
     }
 
+    #[getter]
+    pub fn bias_context(&self) -> &'static str {
+        geometry_bias_context_label(self.inner.bias_context())
+    }
+
+    pub fn set_bias_context(&mut self, context: &str) -> PyResult<()> {
+        self.inner
+            .set_bias_context(parse_geometry_bias_context(context)?);
+        Ok(())
+    }
+
+    #[pyo3(signature = (signal, *, source="zspace"))]
+    pub fn ingest_geometry_bias(&mut self, signal: Vec<f32>, source: &str) -> PyResult<()> {
+        self.inner
+            .ingest_geometry_bias(geometry_bias_update_from_source(source, signal)?)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn clear_geometry_bias(&mut self) {
+        self.inner.clear_geometry_bias();
+    }
+
+    pub fn geometry_bias_metrics(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        match self.inner.geometry_bias_metrics() {
+            Some(metrics) => Ok(Some(geometry_bias_metrics_to_py(py, &metrics)?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn geometry_bias_coherence(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        match self.inner.geometry_bias_coherence() {
+            Some(sample) => Ok(Some(geometry_coherence_to_py(py, &sample)?)),
+            None => Ok(None),
+        }
+    }
+
     #[pyo3(signature = (logits, previous_token, concept=None, window=None))]
     pub fn step(
         &mut self,
@@ -5720,6 +5825,18 @@ impl PyDesirePipeline {
             trig.set_item("temperature", trigger.temperature)?;
             trig.set_item("samples", trigger.samples)?;
             dict.set_item("trigger", trig)?;
+        }
+        if let Some(metrics) = self.inner.geometry_bias_metrics() {
+            dict.set_item(
+                "geometry_bias_metrics",
+                geometry_bias_metrics_to_py(py, &metrics)?,
+            )?;
+        }
+        if let Some(sample) = self.inner.geometry_bias_coherence() {
+            dict.set_item(
+                "geometry_bias_coherence",
+                geometry_coherence_to_py(py, &sample)?,
+            )?;
         }
         Ok(dict.into_py(py))
     }

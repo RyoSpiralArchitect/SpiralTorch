@@ -85,6 +85,35 @@ def build_zspace_downstream_hook(
     top_k: int = ...,
 ) -> Dict[str, Any]: ...
 
+def build_desire_adapter_from_downstream_hook(
+    hook_or_manifest: Mapping[str, Any] | str,
+    *,
+    base_gain: float = ...,
+    min_gain: float = ...,
+    max_gain: float = ...,
+    stability_weight: float = ...,
+    momentum_weight: float = ...,
+    delta_weight: float = ...,
+    phase_bias: Mapping[str, float] | None = ...,
+) -> Dict[str, Any]: ...
+
+def desire_step_from_downstream_hook(
+    pipeline: Any,
+    logits: Sequence[float],
+    previous_token: int,
+    hook_or_manifest: Mapping[str, Any] | str,
+    *,
+    concept: Sequence[float] | None = ...,
+    window: Sequence[Tuple[int, float]] | None = ...,
+    base_gain: float = ...,
+    min_gain: float = ...,
+    max_gain: float = ...,
+    stability_weight: float = ...,
+    momentum_weight: float = ...,
+    delta_weight: float = ...,
+    phase_bias: Mapping[str, float] | None = ...,
+) -> Dict[str, Any]: ...
+
 class ZSpaceTraceLiveServer:
     url: str
     event_type: str
