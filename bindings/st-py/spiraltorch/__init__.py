@@ -674,6 +674,8 @@ from .zspace_atlas import (
 from .zspace_artifacts import (
     load_zspace_artifact_manifest,
     build_zspace_downstream_hook,
+    build_desire_adapter_from_downstream_hook,
+    desire_step_from_downstream_hook,
 )
 
 from .zspace_live import (
@@ -702,6 +704,7 @@ _EXTRAS = [
     "load_kdsl_trace_events","write_kdsl_trace_jsonl","write_kdsl_trace_html",
     "zspace_trace_to_atlas_route","zspace_trace_event_to_atlas_frame","write_zspace_atlas_noncollapse_html",
     "load_zspace_artifact_manifest","build_zspace_downstream_hook",
+    "build_desire_adapter_from_downstream_hook","desire_step_from_downstream_hook",
     "trainer_events_to_atlas_route","trainer_step_event_to_atlas_frame",
     "serve_zspace_trace","ZSpaceTraceLiveServer",
 ]
