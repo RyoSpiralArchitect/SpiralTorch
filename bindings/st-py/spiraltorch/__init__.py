@@ -5820,6 +5820,249 @@ def emit_wasm_trail_packet(projector: _Any, curvature: float = 1.0) -> CanvasWas
 
 
 @_dataclass(frozen=True)
+class AtlasMetric:
+    name: str
+    value: float
+    district: str | None = None
+
+
+class AtlasFrame:
+    def __init__(
+        self,
+        metrics: _Sequence[AtlasMetric],
+        *,
+        notes: _Sequence[str] | None = None,
+        timestamp: float | None = None,
+    ) -> None:
+        self._metrics = list(metrics)
+        self._notes = [str(note) for note in (notes or ())]
+        self._timestamp = float(_time.time()) if timestamp is None else float(timestamp)
+
+    @staticmethod
+    def from_metrics(
+        metrics: _Mapping[str, float],
+        *,
+        timestamp: float | None = None,
+    ) -> "AtlasFrame":
+        items = [
+            AtlasMetric(name=str(name), value=float(value), district=None)
+            for name, value in metrics.items()
+        ]
+        return AtlasFrame(items, timestamp=timestamp)
+
+    @property
+    def timestamp(self) -> float:
+        return self._timestamp
+
+    def metric_value(self, name: str) -> float | None:
+        needle = str(name)
+        for metric in reversed(self._metrics):
+            if metric.name == needle:
+                return metric.value
+        return None
+
+    def metrics_with_prefix(self, prefix: str) -> _List[AtlasMetric]:
+        prefix = str(prefix)
+        return [metric for metric in self._metrics if metric.name.startswith(prefix)]
+
+    def metrics(self) -> _List[AtlasMetric]:
+        return list(self._metrics)
+
+    def notes(self) -> _List[str]:
+        return list(self._notes)
+
+    def districts(self) -> _List[_Dict[str, object]]:
+        counts: _Dict[str, int] = {}
+        for metric in self._metrics:
+            district = metric.district or ""
+            counts[district] = counts.get(district, 0) + 1
+        return [
+            {"district": district, "metric_count": count}
+            for district, count in sorted(counts.items())
+        ]
+
+
+class AtlasFragment:
+    def __init__(self, timestamp: float | None = None) -> None:
+        self._timestamp = None if timestamp is None else float(timestamp)
+        self._metrics: _List[AtlasMetric] = []
+        self._notes: _List[str] = []
+
+    @property
+    def timestamp(self) -> float | None:
+        return self._timestamp
+
+    def set_timestamp(self, timestamp: float) -> None:
+        self._timestamp = float(timestamp)
+
+    def is_empty(self) -> bool:
+        return not self._metrics and not self._notes
+
+    def push_metric(self, name: str, value: float, district: str | None = None) -> None:
+        self._metrics.append(
+            AtlasMetric(name=str(name), value=float(value), district=None if district is None else str(district))
+        )
+
+    def push_note(self, note: str) -> None:
+        self._notes.append(str(note))
+
+    def metrics(self) -> _List[AtlasMetric]:
+        return list(self._metrics)
+
+    def notes(self) -> _List[str]:
+        return list(self._notes)
+
+    def to_frame(self) -> AtlasFrame | None:
+        if self.is_empty():
+            return None
+        return AtlasFrame(
+            self._metrics,
+            notes=self._notes,
+            timestamp=self._timestamp,
+        )
+
+
+class AtlasRoute:
+    def __init__(self) -> None:
+        self._frames: _List[AtlasFrame] = []
+
+    def is_empty(self) -> bool:
+        return not self._frames
+
+    def len(self) -> int:
+        return len(self._frames)
+
+    def __len__(self) -> int:
+        return len(self._frames)
+
+    def latest_timestamp(self) -> float | None:
+        if not self._frames:
+            return None
+        return self._frames[-1].timestamp
+
+    def push_bounded(self, frame: AtlasFrame, bound: int) -> None:
+        self._frames.append(frame)
+        limit = max(1, int(bound))
+        if len(self._frames) > limit:
+            del self._frames[:-limit]
+
+    def summary(self) -> _Dict[str, object]:
+        latest_notes: _List[str] = []
+        for frame in reversed(self._frames):
+            for note in reversed(frame.notes()):
+                latest_notes.append(note)
+                if len(latest_notes) >= 8:
+                    break
+            if len(latest_notes) >= 8:
+                break
+        latest_notes.reverse()
+        return {
+            "frames": len(self._frames),
+            "total_notes": sum(len(frame.notes()) for frame in self._frames),
+            "latest_notes": latest_notes,
+        }
+
+    def perspective_for(
+        self,
+        district: str,
+        focus_prefixes: _Optional[_Sequence[str]] = None,
+    ) -> _Optional[_Dict[str, object]]:
+        def _atlas_mean(values: _Sequence[float]) -> float:
+            if not values:
+                return 0.0
+            return float(sum(values)) / float(len(values))
+
+        target_district = str(district)
+        prefixes = [
+            str(prefix)
+            for prefix in (focus_prefixes or ())
+            if isinstance(prefix, str) and prefix
+        ]
+        series: _Dict[str, _List[float]] = {}
+        coverage = 0
+
+        for frame in self._frames:
+            matched = False
+            for metric in frame.metrics():
+                metric_district = metric.district or target_district
+                if metric_district != target_district:
+                    continue
+                if prefixes and not any(metric.name.startswith(prefix) for prefix in prefixes):
+                    continue
+                series.setdefault(metric.name, []).append(float(metric.value))
+                matched = True
+            if matched:
+                coverage += 1
+
+        if not series:
+            return None
+
+        focus: _List[_Dict[str, object]] = []
+        for name, values in series.items():
+            mean_value = _atlas_mean(values)
+            latest = values[-1]
+            previous = values[-2] if len(values) > 1 else values[-1]
+            delta = latest - previous if len(values) > 1 else 0.0
+            diffs = [curr - prev for prev, curr in zip(values, values[1:])]
+            momentum = _atlas_mean(diffs) if diffs else 0.0
+            variance = _atlas_mean([(value - mean_value) ** 2 for value in values])
+            std_dev = _math.sqrt(max(0.0, variance))
+            focus.append(
+                {
+                    "name": name,
+                    "coverage": len(values),
+                    "mean": mean_value,
+                    "latest": latest,
+                    "delta": delta,
+                    "momentum": momentum,
+                    "std_dev": std_dev,
+                }
+            )
+
+        focus.sort(
+            key=lambda item: (
+                -int(item["coverage"]),
+                -abs(float(item["latest"])),
+                str(item["name"]),
+            )
+        )
+        mean_value = _atlas_mean([float(item["mean"]) for item in focus])
+        latest_value = _atlas_mean([float(item["latest"]) for item in focus])
+        delta_value = _atlas_mean([float(item["delta"]) for item in focus])
+        momentum_value = _atlas_mean([float(item["momentum"]) for item in focus])
+        volatility = _atlas_mean([float(item["std_dev"]) for item in focus])
+        stability = 1.0 / (1.0 + max(0.0, volatility))
+        guidance = ""
+        if focus:
+            guidance = f"watch {focus[0]['name']}"
+
+        return {
+            "district": target_district,
+            "coverage": coverage,
+            "mean": mean_value,
+            "latest": latest_value,
+            "delta": delta_value,
+            "momentum": momentum_value,
+            "volatility": volatility,
+            "stability": stability,
+            "guidance": guidance,
+            "focus": focus,
+        }
+
+    def beacons(self, limit: int = 8) -> _List[_Dict[str, object]]:
+        count = max(0, int(limit))
+        selected = self._frames[-count:] if count else []
+        return [
+            {
+                "timestamp": frame.timestamp,
+                "metrics": [metric.__dict__.copy() for metric in frame.metrics()],
+                "notes": frame.notes(),
+            }
+            for frame in selected
+        ]
+
+
+@_dataclass(frozen=True)
 class AtlasMetricFocus:
     name: str
     coverage: int
@@ -5940,6 +6183,18 @@ try:
 
     _telemetry_module = globals().get("telemetry")
     if isinstance(_telemetry_module, _types.ModuleType):
+        if not hasattr(_telemetry_module, "AtlasMetric"):
+            _telemetry_module.AtlasMetric = AtlasMetric
+            _register_module_export(_telemetry_module, "AtlasMetric")
+        if not hasattr(_telemetry_module, "AtlasFrame"):
+            _telemetry_module.AtlasFrame = AtlasFrame
+            _register_module_export(_telemetry_module, "AtlasFrame")
+        if not hasattr(_telemetry_module, "AtlasFragment"):
+            _telemetry_module.AtlasFragment = AtlasFragment
+            _register_module_export(_telemetry_module, "AtlasFragment")
+        if not hasattr(_telemetry_module, "AtlasRoute"):
+            _telemetry_module.AtlasRoute = AtlasRoute
+            _register_module_export(_telemetry_module, "AtlasRoute")
         _telemetry_module.AtlasMetricFocus = AtlasMetricFocus
         _register_module_export(_telemetry_module, "AtlasMetricFocus")
         _telemetry_module.AtlasPerspective = AtlasPerspective

@@ -1,17 +1,29 @@
 from __future__ import annotations
 
+import pytest
+
 import spiraltorch as st
 
 from spiral.hypergrad import hypergrad_summary_dict, suggest_hypergrad_operator
 
 
+def _require_native() -> None:
+    try:
+        st.Tensor((1, 1))
+        st.hypergrad((1, 1))
+    except Exception as exc:  # pragma: no cover - depends on native build
+        pytest.skip(f"native SpiralTorch extension required: {exc}")
+
+
 def test_hypergrad_helper_accepts_tuple_shape() -> None:
+    _require_native()
     tape = st.hypergrad((1, 4))
     assert tape.shape() == (1, 4)
     assert tape.curvature() == -1.0
 
 
 def test_hypergrad_helper_accepts_tensor_shape() -> None:
+    _require_native()
     tensor = st.Tensor((2, 3))
     tape = st.hypergrad(tensor, learning_rate=0.01)
     assert tape.shape() == tensor.shape()
@@ -19,6 +31,7 @@ def test_hypergrad_helper_accepts_tensor_shape() -> None:
 
 
 def test_hypergrad_scale_gradient_tracks_summary() -> None:
+    _require_native()
     tape = st.hypergrad(1, 3, curvature=-0.9, learning_rate=0.05)
     tensor = st.Tensor((1, 3), data=[0.4, -0.6, 0.2])
     tape.accumulate_wave(tensor)
@@ -34,6 +47,7 @@ def test_hypergrad_scale_gradient_tracks_summary() -> None:
 
 
 def test_hypergrad_rescale_rms_targets_value() -> None:
+    _require_native()
     tape = st.hypergrad(1, 4, curvature=-0.88, learning_rate=0.04)
     tensor = st.Tensor((1, 4), data=[0.35, -0.45, 0.25, -0.15])
     tape.accumulate_wave(tensor)
@@ -46,6 +60,7 @@ def test_hypergrad_rescale_rms_targets_value() -> None:
 
 
 def test_hypergrad_helper_accepts_mapping_topos() -> None:
+    _require_native()
     tape = st.hypergrad(
         1,
         3,
@@ -66,6 +81,7 @@ def test_hypergrad_helper_accepts_mapping_topos() -> None:
 
 
 def test_hypergrad_telemetry_reports_metrics() -> None:
+    _require_native()
     tape = st.hypergrad(1, 3, curvature=-0.95, learning_rate=0.04)
     tensor = st.Tensor((1, 3), data=[0.5, -0.25, 0.75])
     tape.accumulate_wave(tensor)
@@ -99,6 +115,7 @@ def test_hypergrad_telemetry_reports_metrics() -> None:
 
 
 def test_hypergrad_noncollapse_snapshot_matches_telemetry() -> None:
+    _require_native()
     tape = st.hypergrad(1, 3, curvature=-0.92, learning_rate=0.03)
     tensor = st.Tensor((1, 3), data=[0.3, -0.45, 0.2])
     tape.accumulate_wave(tensor)
@@ -111,6 +128,7 @@ def test_hypergrad_noncollapse_snapshot_matches_telemetry() -> None:
 
 
 def test_hypergrad_desire_feedback_interfaces() -> None:
+    _require_native()
     tape = st.hypergrad(1, 2, curvature=-0.9, learning_rate=0.05)
     tensor = st.Tensor((1, 2), data=[0.7, -0.3])
     tape.accumulate_wave(tensor)
@@ -131,6 +149,7 @@ def test_hypergrad_desire_feedback_interfaces() -> None:
 
 
 def test_hypergrad_summary_dict_reports_moments() -> None:
+    _require_native()
     tape = st.hypergrad(1, 2, curvature=-0.85, learning_rate=0.05)
     tensor = st.Tensor((1, 2), data=[0.2, -0.6])
     tape.accumulate_wave(tensor)
@@ -150,6 +169,7 @@ def test_hypergrad_summary_dict_reports_moments() -> None:
 
 
 def test_hypergrad_topos_factory_returns_guard() -> None:
+    _require_native()
     guard = st.hypergrad_topos(
         curvature=-0.8,
         tolerance=5e-4,
@@ -164,24 +184,28 @@ def test_hypergrad_topos_factory_returns_guard() -> None:
 
 
 def test_hypergrad_notation_square_brackets() -> None:
+    _require_native()
     tape = st.hg[2, 3](learning_rate=0.03)
     assert tape.shape() == (2, 3)
     assert tape.learning_rate() == 0.03
 
 
 def test_hypergrad_notation_slice_bindings() -> None:
+    _require_native()
     tape = st.hg[1:4](curvature=-0.75)
     assert tape.shape() == (1, 4)
     assert tape.curvature() == -0.75
 
 
 def test_hypergrad_notation_topos_alias() -> None:
+    _require_native()
     guard = st.hg.topos(curvature=-0.82, tolerance=2e-3, saturation=0.65, max_depth=6, max_volume=24)
     assert guard.curvature() == -0.82
     assert guard.max_depth() == 6
 
 
 def test_hypergrad_partial_with_inline_topos() -> None:
+    _require_native()
     weights = st.Tensor((1, 4))
     tape = st.hg[weights].with_topos(curvature=-0.88, tolerance=1.5e-3, saturation=0.7, max_depth=5, max_volume=20)
     assert tape.shape() == weights.shape()
@@ -191,6 +215,7 @@ def test_hypergrad_partial_with_inline_topos() -> None:
 
 
 def test_hypergrad_partial_accepts_existing_topos() -> None:
+    _require_native()
     guard = st.hg.topos(curvature=-0.8, max_depth=4, max_volume=12)
     tape = st.hg[2, 2].with_topos(topos=guard)
     assert tape.topos().max_depth() == 4
@@ -212,6 +237,7 @@ def test_z_metrics_aliases_normalise_inputs() -> None:
 
 
 def test_coherence_diagnostics_expose_noncollapse_snapshot() -> None:
+    _require_native()
     if not hasattr(st, "ZSpaceCoherenceSequencer"):
         pytest.skip("nn feature not available")
     topos = st.OpenCartesianTopos(-0.9, 1e-5, 10.0, 256, 8192)
@@ -231,6 +257,7 @@ def test_coherence_diagnostics_expose_noncollapse_snapshot() -> None:
 
 
 def test_encode_zspace_returns_tensor() -> None:
+    _require_native()
     tensor = st.encode_zspace("hypergrad keeps z-space grounded", temperature=0.35)
     assert isinstance(tensor, st.Tensor)
     rows, cols = tensor.shape()
@@ -239,6 +266,7 @@ def test_encode_zspace_returns_tensor() -> None:
 
 
 def test_z_notation_bracket_temperature() -> None:
+    _require_native()
     tensor = st.z["hg keeps us centred", 0.42]
     assert isinstance(tensor, st.Tensor)
     assert tensor.shape()[0] == 1
