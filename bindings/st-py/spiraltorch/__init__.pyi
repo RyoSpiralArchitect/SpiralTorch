@@ -17,6 +17,7 @@ def write_zspace_trace_html(
     *,
     title: str = ...,
     event_type: str = ...,
+    related_links: Mapping[str, str] | None = ...,
 ) -> str: ...
 
 def load_trainer_trace_events(path: str, *, event_type: str = ...) -> List[Dict[str, Any]]: ...
@@ -61,6 +62,57 @@ def zspace_trace_to_atlas_route(
     timestamp_base: float | None = ...,
     step_seconds: float = ...,
 ) -> "telemetry.AtlasRoute": ...
+
+def write_zspace_atlas_noncollapse_html(
+    trace_or_route: str | Iterable[Mapping[str, Any]] | "telemetry.AtlasRoute",
+    html_path: str | None = ...,
+    *,
+    title: str = ...,
+    district: str = ...,
+    bound: int = ...,
+    event_type: str = ...,
+    timestamp_base: float | None = ...,
+    step_seconds: float = ...,
+    top_k: int = ...,
+    related_links: Mapping[str, str] | None = ...,
+) -> str: ...
+
+def load_zspace_artifact_manifest(path: str) -> Dict[str, Any]: ...
+
+def build_zspace_downstream_hook(
+    manifest_or_path: Mapping[str, Any] | str,
+    *,
+    top_k: int = ...,
+) -> Dict[str, Any]: ...
+
+def build_desire_adapter_from_downstream_hook(
+    hook_or_manifest: Mapping[str, Any] | str,
+    *,
+    base_gain: float = ...,
+    min_gain: float = ...,
+    max_gain: float = ...,
+    stability_weight: float = ...,
+    momentum_weight: float = ...,
+    delta_weight: float = ...,
+    phase_bias: Mapping[str, float] | None = ...,
+) -> Dict[str, Any]: ...
+
+def desire_step_from_downstream_hook(
+    pipeline: Any,
+    logits: Sequence[float],
+    previous_token: int,
+    hook_or_manifest: Mapping[str, Any] | str,
+    *,
+    concept: Sequence[float] | None = ...,
+    window: Sequence[Tuple[int, float]] | None = ...,
+    base_gain: float = ...,
+    min_gain: float = ...,
+    max_gain: float = ...,
+    stability_weight: float = ...,
+    momentum_weight: float = ...,
+    delta_weight: float = ...,
+    phase_bias: Mapping[str, float] | None = ...,
+) -> Dict[str, Any]: ...
 
 class ZSpaceTraceLiveServer:
     url: str
@@ -541,6 +593,27 @@ class HypergradTelemetry:
     def finite_count(self) -> int: ...
     def non_finite_count(self) -> int: ...
     def non_finite_ratio(self) -> float: ...
+    def noncollapse_snapshot(self) -> NonCollapseSnapshot: ...
+
+class NonCollapseSnapshot:
+    coherence_entropy: float | None
+    preserved_channels: int | None
+    discarded_channels: int | None
+    z_bias: float | None
+    hypergrad_penalty: float | None
+    phase: str | None
+    band_energy: tuple[float, float, float] | None
+    dominant_channel: int | None
+    energy_ratio: float | None
+    mean_coherence: float | None
+    hypergrad_l2: float | None
+    hypergrad_linf: float | None
+    hypergrad_non_finite_ratio: float | None
+    pre_discard_preserved_ratio: float | None
+    pre_discard_survivor_energy_ratio: float | None
+
+    def is_empty(self) -> bool: ...
+    def to_dict(self) -> Dict[str, object]: ...
 
 class DesireGradientInterpretation:
     def hyper_pressure(self) -> float: ...
@@ -600,6 +673,7 @@ class Hypergrad:
     def non_finite_ratio(self) -> float: ...
     def has_non_finite(self) -> bool: ...
     def telemetry(self) -> HypergradTelemetry: ...
+    def noncollapse_snapshot(self) -> NonCollapseSnapshot: ...
     def scale_learning_rate(self, factor: float) -> None: ...
     def scale_gradient(self, factor: float) -> None: ...
     def rescale_rms(self, target_rms: float) -> float: ...
@@ -2476,6 +2550,7 @@ class CoherenceDiagnostics:
     discarded_channels: int
     pre_discard: PreDiscardTelemetry | None
     observation: CoherenceObservation
+    noncollapse_snapshot: NonCollapseSnapshot
 
 
 class PreDiscardTelemetry:
@@ -2901,6 +2976,7 @@ class _ZSpaceCoherenceSequencer:
 
 class _ZSpaceTraceRecorder:
     def snapshot(self) -> Dict[str, Any]: ...
+    def records(self) -> List[Dict[str, Any]]: ...
     def clear(self) -> None: ...
     def write_jsonl(self, path: str) -> None: ...
 

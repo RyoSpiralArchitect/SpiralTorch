@@ -11,6 +11,7 @@ use crate::language::DesireGradientInterpretation;
 use crate::PureResult;
 use serde::{Deserialize, Serialize};
 use st_core::telemetry::hub;
+use st_core::telemetry::noncollapse::{NonCollapsePhase, NonCollapseSnapshot};
 use st_tensor::{DesireGradientControl, GradientSummary, TensorError};
 
 const REPORT_SIZE: usize = 8;
@@ -112,6 +113,25 @@ pub struct DesireSolution {
     #[serde(default)]
     pub control_events: Vec<String>,
     pub narrative: Option<NarrativeHint>,
+}
+
+impl DesireSolution {
+    /// Aggregates the phase and penalty telemetry used by non-collapse monitoring.
+    pub fn noncollapse_snapshot(&self) -> NonCollapseSnapshot {
+        NonCollapseSnapshot::new()
+            .with_phase(self.phase.into())
+            .with_hypergrad_penalty(self.hypergrad_penalty)
+    }
+}
+
+impl From<DesirePhase> for NonCollapsePhase {
+    fn from(value: DesirePhase) -> Self {
+        match value {
+            DesirePhase::Observation => Self::Observation,
+            DesirePhase::Injection => Self::Injection,
+            DesirePhase::Integration => Self::Integration,
+        }
+    }
 }
 
 pub struct DesireLagrangian {
@@ -687,6 +707,9 @@ mod tests {
         assert_eq!(result.phase, DesirePhase::Injection);
         assert!(result.hypergrad_penalty >= 0.0);
         assert!(result.narrative.is_none());
+        let snapshot = result.noncollapse_snapshot();
+        assert_eq!(snapshot.phase, Some(NonCollapsePhase::Injection));
+        assert_eq!(snapshot.hypergrad_penalty, Some(result.hypergrad_penalty));
     }
 
     #[test]

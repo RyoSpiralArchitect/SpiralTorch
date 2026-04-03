@@ -17,6 +17,13 @@ __all__ = [
 
 
 def _normalise_zspace_trace_record(record: Mapping[str, Any], *, event_type: str) -> dict[str, Any] | None:
+    if "kind" in record and isinstance(record.get("payload"), Mapping):
+        event = dict(record["payload"])
+        event.setdefault("kind", str(record["kind"]))
+        for key in ("step", "schema", "schema_version", "noncollapse", "ts"):
+            if key in record and key not in event:
+                event[key] = record[key]
+        return event
     if "kind" in record:
         return dict(record)
 
@@ -151,6 +158,44 @@ def _viewer_html(title: str) -> str:
       color: var(--accent);
       font-size: 11px;
     }}
+    .nc-card {{
+      margin-top: 8px;
+      padding: 10px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: rgba(0,0,0,.25);
+      min-height: 84px;
+    }}
+    .nc-title {{
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+    }}
+    .nc-summary {{
+      margin-top: 6px;
+      font-size: 12px;
+      color: var(--muted);
+    }}
+    .nc-grid {{
+      margin-top: 10px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }}
+    .nc-metric {{
+      padding: 6px 8px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: rgba(110,231,255,.06);
+      font-size: 11px;
+      color: var(--muted);
+    }}
+    .nc-metric strong {{
+      display: block;
+      margin-bottom: 2px;
+      color: var(--text);
+      font-weight: 600;
+    }}
   </style>
 </head>
 <body>
@@ -169,6 +214,10 @@ def _viewer_html(title: str) -> str:
         <input id="idx" type="range" min="0" max="0" value="0" step="1"/>
       </div>
       <div class="kv" id="meta"></div>
+      <div style="margin-top: 12px;">
+        <span class="badge">non-collapse</span>
+        <div id="nc-card" class="nc-card"></div>
+      </div>
     </section>
     <section class="panel" style="grid-column: 2;">
       <div class="row" style="justify-content: space-between; margin-bottom: 10px;">
@@ -201,6 +250,7 @@ def _viewer_html(title: str) -> str:
     const kindEl = document.getElementById("kind");
     const stepEl = document.getElementById("step");
     const metaEl = document.getElementById("meta");
+    const ncCardEl = document.getElementById("nc-card");
     const rawEl = document.getElementById("raw");
     const bars = document.getElementById("bars");
     const heat = document.getElementById("heat");
@@ -217,6 +267,34 @@ def _viewer_html(title: str) -> str:
       if (coh) return coh;
       if (ev && Array.isArray(ev.filtered)) return ev.filtered;
       if (ev && Array.isArray(ev.original)) return ev.original;
+      return null;
+    }}
+
+    function formatMetricValue(value) {{
+      if (typeof value === "number" && Number.isFinite(value)) {{
+        if (Number.isInteger(value)) return String(value);
+        const abs = Math.abs(value);
+        if (abs >= 100) return value.toFixed(2);
+        if (abs >= 10) return value.toFixed(3);
+        return value.toFixed(6);
+      }}
+      if (typeof value === "boolean") {{
+        return value ? "true" : "false";
+      }}
+      return JSON.stringify(value);
+    }}
+
+    function extractNonCollapseCard(ev) {{
+      if (ev && ev.noncollapse_card && typeof ev.noncollapse_card === "object") {{
+        return ev.noncollapse_card;
+      }}
+      if (ev && ev.noncollapse && typeof ev.noncollapse === "object") {{
+        return {{
+          title: "Non-collapse snapshot",
+          summary: "Stable non-collapse telemetry",
+          metrics: ev.noncollapse,
+        }};
+      }}
       return null;
     }}
 
@@ -294,6 +372,8 @@ def _viewer_html(title: str) -> str:
       metaEl.innerHTML = "";
       const items = [];
       if (typeof ev.ts === "number") items.push(["ts", ev.ts.toFixed(3)]);
+      if (typeof ev.schema === "string") items.push(["schema", ev.schema]);
+      if (typeof ev.schema_version === "number") items.push(["schema_version", String(ev.schema_version)]);
       if (typeof ev.input_shape !== "undefined") items.push(["input_shape", JSON.stringify(ev.input_shape)]);
       if (typeof ev.projected_shape !== "undefined") items.push(["projected_shape", JSON.stringify(ev.projected_shape)]);
       if (typeof ev.aggregated_shape !== "undefined") items.push(["aggregated_shape", JSON.stringify(ev.aggregated_shape)]);
@@ -309,12 +389,49 @@ def _viewer_html(title: str) -> str:
       }}
     }}
 
+    function renderNonCollapseCard(ev) {{
+      ncCardEl.innerHTML = "";
+      const card = extractNonCollapseCard(ev);
+      if (!card) {{
+        ncCardEl.innerHTML = '<div class="nc-summary">no dedicated non-collapse card for this event</div>';
+        return;
+      }}
+
+      const title = document.createElement("div");
+      title.className = "nc-title";
+      title.textContent = String(card.title || "Non-collapse");
+      ncCardEl.appendChild(title);
+
+      if (card.summary) {{
+        const summary = document.createElement("div");
+        summary.className = "nc-summary";
+        summary.textContent = String(card.summary);
+        ncCardEl.appendChild(summary);
+      }}
+
+      const metrics = card.metrics && typeof card.metrics === "object" ? card.metrics : null;
+      if (!metrics) {{
+        return;
+      }}
+
+      const grid = document.createElement("div");
+      grid.className = "nc-grid";
+      for (const [k, v] of Object.entries(metrics)) {{
+        const cell = document.createElement("div");
+        cell.className = "nc-metric";
+        cell.innerHTML = `<strong>${{k}}</strong>${{formatMetricValue(v)}}`;
+        grid.appendChild(cell);
+      }}
+      ncCardEl.appendChild(grid);
+    }}
+
     function renderAt(i) {{
       const ev = events[i] || {{}};
       kindEl.textContent = ev.kind || "—";
       stepEl.textContent = typeof ev.step === "number" ? String(ev.step) : "—";
       rawEl.textContent = JSON.stringify(ev, null, 2);
       renderMeta(ev);
+      renderNonCollapseCard(ev);
       const coherence = extractCoherence(ev);
       renderBars(coherence);
       renderHeatmap(coherence);
