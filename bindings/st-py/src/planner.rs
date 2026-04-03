@@ -17,6 +17,10 @@ use st_core::backend::rankk_launch::LaunchBuffers;
 use st_core::backend::rankk_launch::with_launch_buffers_cuda;
 #[cfg(feature = "hip")]
 use st_core::backend::rankk_launch::with_launch_buffers_hip;
+use st_core::backend::runtime_probe::{
+    build_device_report, mps_probe as core_mps_probe, resolve_backend, BackendResolution,
+    DeviceReport,
+};
 use st_core::backend::unison_heuristics::RankKind;
 #[cfg(any(feature = "cuda", feature = "hip"))]
 use st_core::ops::rank_entry::execute_rank;
@@ -33,20 +37,26 @@ use st_kdsl::{self, Ctx as SpiralKCtx, Hard as SpiralKHard};
 pub(crate) struct PyRankPlan {
     inner: RankPlan,
     kind_override: Option<&'static str>,
+    requested_backend: Option<&'static str>,
+    effective_backend: Option<&'static str>,
 }
 
 impl PyRankPlan {
     pub(crate) fn from_plan(inner: RankPlan) -> Self {
-        Self {
-            inner,
-            kind_override: None,
-        }
+        Self::from_plan_with_metadata(inner, None, None, None)
     }
 
-    pub(crate) fn from_plan_with_override(inner: RankPlan, kind: Option<&'static str>) -> Self {
+    pub(crate) fn from_plan_with_metadata(
+        inner: RankPlan,
+        kind_override: Option<&'static str>,
+        requested_backend: Option<&'static str>,
+        effective_backend: Option<&'static str>,
+    ) -> Self {
         Self {
             inner,
-            kind_override: kind,
+            kind_override,
+            requested_backend,
+            effective_backend,
         }
     }
 
@@ -181,6 +191,16 @@ impl PyRankPlan {
     }
 
     #[getter]
+    fn requested_backend(&self) -> Option<&'static str> {
+        self.requested_backend
+    }
+
+    #[getter]
+    fn effective_backend(&self) -> Option<&'static str> {
+        self.effective_backend
+    }
+
+    #[getter]
     fn workgroup(&self) -> u32 {
         self.inner.choice.wg
     }
@@ -286,9 +306,11 @@ impl PyRankPlan {
         let out = st_kdsl::eval_program(script, &ctx).map_err(spiralk_err_to_py)?;
         let mut updated = self.inner.clone();
         apply_spiralk_overrides(&mut updated.choice, &out.hard);
-        Ok(PyRankPlan::from_plan_with_override(
+        Ok(PyRankPlan::from_plan_with_metadata(
             updated,
             self.kind_override,
+            self.requested_backend,
+            self.effective_backend,
         ))
     }
 
@@ -310,7 +332,12 @@ impl PyRankPlan {
             .map_err(|err| pyo3::exceptions::PyRuntimeError::new_err(err.to_string()))?;
         let trace_obj = json_to_py(py, &trace_value)?;
         Ok((
-            PyRankPlan::from_plan_with_override(updated, self.kind_override),
+            PyRankPlan::from_plan_with_metadata(
+                updated,
+                self.kind_override,
+                self.requested_backend,
+                self.effective_backend,
+            ),
             out_obj,
             trace_obj,
         ))
@@ -344,22 +371,81 @@ pub(crate) fn parse_backend(name: Option<&str>) -> PyResult<BackendKind> {
 
     match raw.to_ascii_lowercase().as_str() {
         "wgpu" | "webgpu" => Ok(BackendKind::Wgpu),
+        "mps" => Ok(BackendKind::Mps),
         "cuda" => Ok(BackendKind::Cuda),
         "hip" | "rocm" => Ok(BackendKind::Hip),
         "cpu" => Ok(BackendKind::Cpu),
         other => Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "unknown backend '{other}', expected 'wgpu', 'cuda', 'hip', or 'cpu'"
+            "unknown backend '{other}', expected 'wgpu', 'mps', 'cuda', 'hip', or 'cpu'"
         ))),
     }
 }
 
 fn backend_label(kind: BackendKind) -> &'static str {
-    match kind {
-        BackendKind::Wgpu => "wgpu",
-        BackendKind::Cuda => "cuda",
-        BackendKind::Hip => "hip",
-        BackendKind::Cpu => "cpu",
+    kind.as_str()
+}
+
+fn caps_to_pydict(py: Python<'_>, caps: DeviceCaps) -> PyResult<Bound<'_, PyDict>> {
+    let report = PyDict::new_bound(py);
+    report.set_item("backend", backend_label(caps.backend))?;
+    report.set_item("subgroup", caps.subgroup)?;
+    report.set_item("lane_width", caps.lane_width)?;
+    report.set_item("max_workgroup", caps.max_workgroup)?;
+    match caps.shared_mem_per_workgroup {
+        Some(value) => report.set_item("shared_mem_per_workgroup", value)?,
+        None => report.set_item("shared_mem_per_workgroup", py.None())?,
+    };
+    Ok(report)
+}
+
+fn device_report_to_pydict(py: Python<'_>, report: DeviceReport) -> PyResult<Bound<'_, PyDict>> {
+    let out = caps_to_pydict(py, report.caps)?;
+    out.set_item("backend", backend_label(report.reported_backend))?;
+
+    if let Some(mps_probe) = report.mps_probe {
+        out.set_item("status", mps_probe.status().as_str())?;
+        out.set_item("feature_enabled", mps_probe.feature_enabled)?;
+        out.set_item("platform_supported", mps_probe.platform_supported)?;
+        out.set_item("host_class", mps_probe.host_class.as_str())?;
+        out.set_item("backend_wired", mps_probe.backend_wired)?;
+        out.set_item("placeholder", mps_probe.placeholder())?;
+        out.set_item("available", mps_probe.available())?;
+        out.set_item("initialized", mps_probe.initialized)?;
+        out.set_item(
+            "planner_surrogate_backend",
+            backend_label(mps_probe.planner_surrogate_backend),
+        )?;
+        out.set_item("planner_route", mps_probe.planner_route())?;
+        out.set_item(
+            "recommended_backend",
+            backend_label(mps_probe.recommended_backend()),
+        )?;
+        out.set_item("recommendation", mps_probe.recommendation())?;
+        out.set_item("error", mps_probe.error())?;
     }
+
+    if let Some(requested) = report.requested_workgroup {
+        out.set_item("requested_workgroup", requested)?;
+    }
+    if let Some(aligned) = report.aligned_workgroup {
+        out.set_item("aligned_workgroup", aligned)?;
+    }
+    if let Some(score) = report.occupancy_score {
+        out.set_item("occupancy_score", score)?;
+    }
+    if let Some(tile) = report.preferred_tile {
+        out.set_item("preferred_tile", tile)?;
+    }
+    if let Some(tile) = report.preferred_compaction_tile {
+        out.set_item("preferred_compaction_tile", tile)?;
+    }
+
+    Ok(out)
+}
+
+fn parse_backend_for_planner(name: Option<&str>) -> PyResult<BackendResolution> {
+    let requested_backend = parse_backend(name)?;
+    Ok(resolve_backend(requested_backend))
 }
 
 fn parse_rank_kind(kind: &str) -> PyResult<RankKind> {
@@ -445,6 +531,7 @@ fn execute_backend_probe(
 
     let launch = with_strict_gpu_env(strict, || -> Result<(), String> {
         match backend {
+            BackendKind::Mps => Err("mps GPU probing is not wired yet".to_string()),
             BackendKind::Cuda => {
                 #[cfg(feature = "cuda")]
                 {
@@ -607,25 +694,7 @@ pub(crate) fn build_caps(
     max_workgroup: Option<u32>,
     shared_mem_per_workgroup: Option<u32>,
 ) -> DeviceCaps {
-    let base = match backend {
-        BackendKind::Wgpu => {
-            let lanes = lane_width.unwrap_or(32);
-            let subgroup_flag = subgroup.unwrap_or(true);
-            let max_wg = max_workgroup.unwrap_or(256);
-            DeviceCaps::wgpu(lanes, subgroup_flag, max_wg)
-        }
-        BackendKind::Cuda => DeviceCaps::cuda(
-            lane_width.unwrap_or(32),
-            max_workgroup.unwrap_or(1024),
-            shared_mem_per_workgroup.or(Some(96 * 1024)),
-        ),
-        BackendKind::Hip => DeviceCaps::hip(
-            lane_width.unwrap_or(32),
-            max_workgroup.unwrap_or(1024),
-            shared_mem_per_workgroup.or(Some(64 * 1024)),
-        ),
-        BackendKind::Cpu => DeviceCaps::cpu(),
-    };
+    let base = backend.default_caps();
 
     apply_overrides(
         base,
@@ -649,7 +718,8 @@ fn plan_impl(
     shared_mem_per_workgroup: Option<u32>,
     kind_override: Option<&'static str>,
 ) -> PyResult<PyRankPlan> {
-    let backend_kind = parse_backend(backend)?;
+    let backend_resolution = parse_backend_for_planner(backend)?;
+    let backend_kind = backend_resolution.effective_backend;
     let caps = build_caps(
         backend_kind,
         lane_width,
@@ -658,11 +728,12 @@ fn plan_impl(
         shared_mem_per_workgroup,
     );
     let plan = plan_rank(kind, rows, cols, k, caps);
-    if kind_override.is_some() {
-        Ok(PyRankPlan::from_plan_with_override(plan, kind_override))
-    } else {
-        Ok(PyRankPlan::from_plan(plan))
-    }
+    Ok(PyRankPlan::from_plan_with_metadata(
+        plan,
+        kind_override,
+        Some(backend_label(backend_resolution.reported_backend)),
+        Some(backend_label(backend_kind)),
+    ))
 }
 
 #[pyfunction]
@@ -746,7 +817,8 @@ fn describe_device(
     tile_hint: Option<u32>,
     compaction_hint: Option<u32>,
 ) -> PyResult<PyObject> {
-    let backend_kind = parse_backend(Some(backend))?;
+    let backend_resolution = parse_backend_for_planner(Some(backend))?;
+    let backend_kind = backend_resolution.effective_backend;
     let caps = build_caps(
         backend_kind,
         lane_width,
@@ -754,30 +826,17 @@ fn describe_device(
         max_workgroup,
         shared_mem_per_workgroup,
     );
-    let report = PyDict::new_bound(py);
-    report.set_item("backend", backend_label(caps.backend))?;
-    report.set_item("subgroup", caps.subgroup)?;
-    report.set_item("lane_width", caps.lane_width)?;
-    report.set_item("max_workgroup", caps.max_workgroup)?;
-    match caps.shared_mem_per_workgroup {
-        Some(value) => report.set_item("shared_mem_per_workgroup", value)?,
-        None => report.set_item("shared_mem_per_workgroup", py.None())?,
-    };
+    let report = build_device_report(
+        backend_resolution.reported_backend,
+        caps,
+        backend_resolution.mps_probe,
+        workgroup,
+        cols,
+        tile_hint,
+        compaction_hint,
+    );
 
-    if let Some(requested) = workgroup {
-        report.set_item("requested_workgroup", requested)?;
-        report.set_item("aligned_workgroup", caps.align_workgroup(requested))?;
-        report.set_item("occupancy_score", caps.occupancy_score(requested))?;
-    }
-
-    if let Some(total_cols) = cols {
-        let tile = caps.preferred_tile(total_cols, tile_hint.unwrap_or(0));
-        let compaction = caps.preferred_compaction_tile(total_cols, compaction_hint.unwrap_or(0));
-        report.set_item("preferred_tile", tile)?;
-        report.set_item("preferred_compaction_tile", compaction)?;
-    }
-
-    Ok(report.into_py(py))
+    Ok(device_report_to_pydict(py, report)?.into_py(py))
 }
 
 #[pyfunction]
@@ -802,12 +861,45 @@ fn hip_probe(py: Python<'_>) -> PyResult<PyObject> {
     Ok(out.into_py(py))
 }
 
+#[pyfunction]
+fn mps_probe(py: Python<'_>) -> PyResult<PyObject> {
+    let probe = core_mps_probe();
+
+    let out = PyDict::new_bound(py);
+    out.set_item("backend", "mps")?;
+    out.set_item("status", probe.status().as_str())?;
+    out.set_item("feature_enabled", probe.feature_enabled)?;
+    out.set_item("platform_supported", probe.platform_supported)?;
+    out.set_item("host_class", probe.host_class.as_str())?;
+    out.set_item("backend_wired", probe.backend_wired)?;
+    out.set_item("placeholder", probe.placeholder())?;
+    out.set_item("available", probe.available())?;
+    out.set_item("initialized", probe.initialized)?;
+    out.set_item("host_os", probe.host_os())?;
+    out.set_item("host_arch", probe.host_arch())?;
+    out.set_item(
+        "planner_surrogate_backend",
+        backend_label(probe.planner_surrogate_backend),
+    )?;
+    out.set_item("planner_route", probe.planner_route())?;
+    out.set_item("planner_caps", caps_to_pydict(py, probe.planner_caps)?)?;
+    out.set_item(
+        "recommended_backend",
+        backend_label(probe.recommended_backend()),
+    )?;
+    out.set_item("recommendation", probe.recommendation())?;
+    out.set_item("devices", PyList::empty_bound(py))?;
+    out.set_item("error", probe.error())?;
+    Ok(out.into_py(py))
+}
+
 pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_class::<PyRankPlan>()?;
     m.add_function(wrap_pyfunction!(plan, m)?)?;
     m.add_function(wrap_pyfunction!(plan_topk, m)?)?;
     m.add_function(wrap_pyfunction!(describe_device, m)?)?;
     m.add_function(wrap_pyfunction!(hip_probe, m)?)?;
+    m.add_function(wrap_pyfunction!(mps_probe, m)?)?;
     m.add_function(wrap_pyfunction!(probe_gpu_path, m)?)?;
     let _ = py;
     Ok(())

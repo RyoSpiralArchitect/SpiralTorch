@@ -10,7 +10,6 @@ use crate::backend::rankk_launch::LaunchSlices;
 use crate::backend::rankk_software::Selection;
 use crate::ops::rank_entry::RankPlan;
 use cudarc::driver::{LaunchAsync, LaunchConfig};
-use cudarc::nvrtc::compile_ptx;
 use std::f32;
 use std::sync::OnceLock;
 
@@ -176,7 +175,7 @@ fn cuda_module() -> Result<&'static CudaModule, String> {
     }
 
     if COMPILED_PTX.get().is_none() {
-        let compiled = compile_ptx(CUDA_SOURCE).map_err(|err| err.to_string())?;
+        let compiled = cuda_loader::safe_compile_ptx(CUDA_SOURCE)?;
         let _ = COMPILED_PTX.set(compiled);
     }
     let ptx = COMPILED_PTX

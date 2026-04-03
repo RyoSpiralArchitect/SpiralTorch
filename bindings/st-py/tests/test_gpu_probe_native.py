@@ -1,44 +1,10 @@
 from __future__ import annotations
 
-import importlib
-import sys
-import types
-
-import pytest
-
-
-def _ensure_torch_stub() -> None:
-    if "torch" in sys.modules:
-        return
-    torch_stub = types.ModuleType("torch")
-    torch_stub.autograd = types.SimpleNamespace(Function=object)
-    sys.modules["torch"] = torch_stub
-
-
-def _load_native() -> types.ModuleType | None:
-    _ensure_torch_stub()
-    try:
-        module = importlib.import_module("spiraltorch")
-    except Exception:
-        return None
-
-    for native_name in (
-        "spiraltorch.spiraltorch",
-        "spiraltorch.spiraltorch_native",
-        "spiraltorch_native",
-    ):
-        try:
-            importlib.import_module(native_name)
-        except Exception:
-            continue
-        return module
-    return None
+from ._native_loader import require_native, require_wgpu_runtime
 
 
 def test_probe_gpu_path_exposes_runtime_route_visibility() -> None:
-    st = _load_native()
-    if st is None:
-        pytest.skip("native SpiralTorch extension unavailable")
+    st = require_native()
 
     assert hasattr(st, "probe_gpu_path")
     assert hasattr(st, "planner")
@@ -55,3 +21,46 @@ def test_probe_gpu_path_exposes_runtime_route_visibility() -> None:
     assert "gpu_path_available" in report
     assert "used_fallback" in report
 
+
+def test_describe_device_explicit_wgpu_backend() -> None:
+    st = require_native()
+
+    report = st.describe_device("wgpu", workgroup=300, cols=4096)
+    assert report["backend"] == "wgpu"
+    assert "lane_width" in report
+    assert "max_workgroup" in report
+    assert "subgroup" in report
+    assert "shared_mem_per_workgroup" in report
+    assert "aligned_workgroup" in report
+    assert "occupancy_score" in report
+    assert "preferred_tile" in report
+    assert "preferred_compaction_tile" in report
+
+
+def test_plan_explicit_wgpu_backend() -> None:
+    st = require_native()
+
+    plan = st.plan("topk", 16, 128, 8, backend="wgpu")
+    assert plan.kind == "topk"
+    assert plan.requested_backend == "wgpu"
+    assert plan.effective_backend == "wgpu"
+    assert int(plan.rows) == 16
+    assert int(plan.cols) == 128
+    assert int(plan.k) == 8
+    assert int(plan.workgroup) >= 1
+    assert int(plan.lanes) >= 1
+
+
+def test_init_backend_and_session_explicit_wgpu_backend_when_runtime_is_enabled() -> None:
+    st = require_native()
+    require_wgpu_runtime(st)
+
+    assert st.init_backend("wgpu") is True
+
+    session = st.SpiralSession(backend="wgpu")
+    assert session.backend == "wgpu"
+    assert session.requested_backend == "wgpu"
+    assert session.effective_backend == "wgpu"
+    assert session.device == "wgpu"
+    assert session.device_preflight["backend"] == "wgpu"
+    assert "lane_width" in session.device_preflight

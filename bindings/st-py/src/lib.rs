@@ -277,6 +277,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "plan_topk",
         "describe_device",
         "hip_probe",
+        "mps_probe",
         "probe_gpu_path",
         "EllipticWarp",
         "EllipticTelemetry",
