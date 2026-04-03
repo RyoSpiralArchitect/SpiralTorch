@@ -21,7 +21,7 @@ run_lint() {
   echo "Running gofmt and golangci-lint (if available)..." | tee "$lint_log"
   find "$MODULE_DIR" -name '*.go' -print0 | xargs -0 -r gofmt -l | tee -a "$lint_log"
   if command -v golangci-lint >/dev/null 2>&1; then
-    (cd "$MODULE_DIR" && golangci-lint run ./...) | tee -a "$lint_log"
+    (cd "$MODULE_DIR" && GOFLAGS= CGO_ENABLED=0 golangci-lint run ./...) | tee -a "$lint_log"
   else
     echo "golangci-lint not installed; skipping." | tee -a "$lint_log"
   fi
@@ -30,7 +30,7 @@ run_lint() {
 run_tests() {
   local test_log="$LOG_DIR/test.log"
   echo "Running go test ./..." | tee "$test_log"
-  (cd "$MODULE_DIR" && go test ./... -v) | tee -a "$test_log"
+  (cd "$MODULE_DIR" && GOFLAGS= CGO_ENABLED=0 go test ./... -v) | tee -a "$test_log"
 }
 
 case "$MODE" in
