@@ -3,6 +3,7 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+use super::layer::band_pass_sample;
 use super::{
     GraphContext, NeighborhoodAggregation, RoundtableBandInfluence, RoundtableBandSignal,
     ZSpaceGraphConvolution,
@@ -11,6 +12,7 @@ use crate::layers::activation::Relu;
 use crate::module::{Module, Parameter};
 use crate::schedule::GradientBands;
 use crate::{PureResult, Tensor, TensorError};
+use st_core::ops::zspace_round::RoundtableBand;
 use st_core::telemetry::xai::GraphFlowTracer;
 use std::cell::RefCell;
 use std::num::NonZeroUsize;
@@ -314,16 +316,40 @@ impl Module for ZSpaceGraphNetwork {
         Ok(())
     }
 
+    fn begin_backward_band_pass(
+        &mut self,
+        band: RoundtableBand,
+        gradient: &Tensor,
+    ) -> PureResult<()> {
+        let sample = band_pass_sample(band, gradient);
+        for layer in &mut self.layers {
+            layer.conv.set_roundtable_band_pass(Some(sample.clone()));
+        }
+        Ok(())
+    }
+
+    fn end_backward_band_pass(&mut self, _band: RoundtableBand) -> PureResult<()> {
+        for layer in &mut self.layers {
+            layer.conv.set_roundtable_band_pass(None);
+        }
+        Ok(())
+    }
+
     fn backward_bands(&mut self, input: &Tensor, bands: &GradientBands) -> PureResult<Tensor> {
         let (rows, cols) = input.shape();
         let mut total = Tensor::zeros(rows, cols)?;
-        for grad in bands.iter() {
+        for (band, grad) in bands.iter_labeled() {
             if grad.squared_l2_norm() == 0.0 {
                 continue;
             }
-            // Refresh the cache so each band sees the correct forward state.
-            let _ = self.forward(input)?;
-            let contribution = self.backward(input, grad)?;
+            self.begin_backward_band_pass(band, grad)?;
+            let result = (|| {
+                // Refresh the cache so each band sees the correct forward state.
+                let _ = self.forward(input)?;
+                self.backward(input, grad)
+            })();
+            self.end_backward_band_pass(band)?;
+            let contribution = result?;
             total.add_scaled(&contribution, 1.0)?;
         }
         Ok(total)
@@ -430,20 +456,58 @@ mod tests {
             .unwrap();
         let input = Tensor::from_vec(3, 2, vec![1.0, 0.25, 0.5, -0.5, -0.25, 1.0]).unwrap();
         let baseline = network.forward(&input).unwrap();
-        let signal = RoundtableBandSignal::new(
-            BandEnergy {
-                above: 1.5,
-                here: 0.5,
-                beneath: 0.2,
-                drift: 0.3,
-            },
-            (2, 1, 1),
-        );
+        let signal =
+            RoundtableBandSignal::new(BandEnergy::new(1.5, 0.5, 0.2).with_drift(0.3), (2, 1, 1));
         network.apply_roundtable_band(&signal).unwrap();
         let adjusted = network.forward(&input).unwrap();
         assert_ne!(baseline.data(), adjusted.data());
         network.clear_roundtable_band().unwrap();
         let restored = network.forward(&input).unwrap();
         assert_eq!(baseline, restored);
+    }
+
+    #[test]
+    fn stack_traces_roundtable_signal_into_layer_coefficients() {
+        let tracer = Arc::new(Mutex::new(GraphFlowTracer::new()));
+        let mut builder = ZSpaceGraphNetworkBuilder::new(
+            sample_context(),
+            NonZeroUsize::new(2).unwrap(),
+            -1.0,
+            0.05,
+        )
+        .with_tracer(tracer.clone());
+        builder.push_layer(
+            GraphLayerSpec::new(NonZeroUsize::new(3).unwrap()).with_aggregation(
+                NeighborhoodAggregation::multi_hop_sum(NonZeroUsize::new(2).unwrap())
+                    .with_include_self(true)
+                    .with_attenuation(0.6),
+            ),
+        );
+        builder.push_layer(GraphLayerSpec::new(NonZeroUsize::new(2).unwrap()));
+        let mut network = builder.build("stack_rt_trace").unwrap();
+        let signal =
+            RoundtableBandSignal::new(BandEnergy::new(1.1, 0.35, 0.12).with_drift(0.25), (2, 1, 1));
+        network.apply_roundtable_band(&signal).unwrap();
+        let input = Tensor::from_vec(3, 2, vec![1.0, 0.25, 0.5, -0.5, -0.25, 1.0]).unwrap();
+
+        let _ = network.forward(&input).unwrap();
+
+        let guard = tracer.lock().unwrap_or_else(|poison| poison.into_inner());
+        assert_eq!(guard.layers().len(), 2);
+        for report in guard.layers() {
+            let trace = report.roundtable.as_ref().expect("roundtable trace");
+            assert_eq!(trace.signal.band_sizes, (2, 1, 1));
+            assert_eq!(
+                trace.aggregation.base_coefficients.len(),
+                trace.aggregation.effective_coefficients.len()
+            );
+            assert_eq!(
+                trace.aggregation.base_coefficients.len(),
+                trace.aggregation.step_scales.len()
+            );
+            assert!(trace.influence.above_multiplier > 0.0);
+            assert!(trace.influence.here_multiplier > 0.0);
+            assert!(trace.influence.beneath_multiplier > 0.0);
+        }
     }
 }

@@ -692,6 +692,7 @@ pub struct ModuleTrainer {
     coherence_bridge: Option<ZSpaceTraceCoherenceBridge>,
     pending_coherence: Option<CoherenceSignal>,
     last_spectral_metrics: Option<SpectralAdjustmentMetrics>,
+    last_band_energy: Option<BandEnergy>,
     phase_turnover_spike_threshold: f32,
     phase_loss_ema_alpha: f32,
     phase_loss_spike_ratio: f32,
@@ -1513,7 +1514,11 @@ impl SoftLogicFlex {
             .map(|feedback| feedback.z_signal.abs())
             .unwrap_or(self.last_z.abs())
             * self.config.inertia_z_k;
-        let mut adapt = (drift_drive + z_drive).clamp(0.0, 0.9);
+        let spectral_curvature = band_energy.spectral_curvature();
+        let spectral_diffusion = (1.0 - band_energy.spectral.spin.abs()).clamp(0.0, 1.0);
+        let spectral_drive =
+            (0.18 * spectral_curvature + 0.12 * spectral_diffusion).clamp(0.0, 0.3);
+        let mut adapt = (drift_drive + z_drive + spectral_drive).clamp(0.0, 0.9);
         if self.config.energy_equalize_auto > 0.0 {
             let above_abs = band_energy.above.abs();
             let here_abs = band_energy.here.abs();
@@ -1582,6 +1587,10 @@ impl SoftLogicFlex {
         let norm = (above_abs + here_abs + beneath_abs).max(1e-4);
         let asymmetry = (band_energy.above - band_energy.beneath) / norm;
         let drift_term = band_energy.drift.tanh();
+        let spectral_focus = band_energy.spectral_focus();
+        let spectral_curvature = band_energy.spectral_curvature();
+        let spectral_spin = band_energy.spectral.spin.clamp(-1.0, 1.0);
+        let spectral_stability = band_energy.spectral_stability();
         let z_bias = self
             .last_feedback
             .as_ref()
@@ -1595,6 +1604,14 @@ impl SoftLogicFlex {
         let mut target_beneath =
             1.0 - (asymmetry * self.config.drift_gain) - (z_bias * self.config.psi_gain)
                 + (-drift_term * self.config.drift_gain * 0.5);
+
+        if spectral_focus > 0.0 {
+            let edge_gain = 0.25 * self.config.drift_gain * spectral_focus;
+            target_above *= 1.0 + edge_gain * spectral_spin.max(0.0);
+            target_beneath *= 1.0 + edge_gain * (-spectral_spin).max(0.0);
+            target_here *= 1.0 + 0.2 * self.config.loss_gain * spectral_stability;
+            target_here *= 1.0 - 0.08 * spectral_focus * spectral_curvature;
+        }
 
         if self.config.scale_gain > 0.0 {
             if let Some(scale) = self
@@ -2292,6 +2309,32 @@ pub struct SpectralAdjustmentMetrics {
     pub local_lr: (f32, f32, f32),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrainerSpectralMetricsSource {
+    BandEnergy,
+    CoherenceAdjustment,
+    Combined,
+}
+
+impl TrainerSpectralMetricsSource {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::BandEnergy => "band_energy",
+            Self::CoherenceAdjustment => "coherence_adjustment",
+            Self::Combined => "combined",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TrainerSpectralMetrics {
+    pub source: TrainerSpectralMetricsSource,
+    pub turnover: Option<f32>,
+    pub label: Option<CoherenceLabel>,
+    pub adjustment: Option<SpectralAdjustmentMetrics>,
+    pub band_energy: Option<BandEnergy>,
+}
+
 #[derive(Debug, Clone)]
 struct RewriteBudget {
     per_epoch: u32,
@@ -2414,6 +2457,7 @@ impl ModuleTrainer {
             coherence_bridge: None,
             pending_coherence: None,
             last_spectral_metrics: None,
+            last_band_energy: None,
             phase_turnover_spike_threshold,
             phase_loss_ema_alpha,
             phase_loss_spike_ratio,
@@ -2580,6 +2624,7 @@ impl ModuleTrainer {
         policy.apply_env_overrides();
         self.spectral_policy = Some(policy);
         self.last_spectral_metrics = None;
+        self.last_band_energy = None;
         self.phase_last_label = None;
         self.phase_last_turnover = None;
         self.enable_zspace_trace_coherence_bridge();
@@ -2589,6 +2634,7 @@ impl ModuleTrainer {
     pub fn disable_spectral_learning_rate(&mut self) {
         self.spectral_policy = None;
         self.last_spectral_metrics = None;
+        self.last_band_energy = None;
         self.phase_last_label = None;
         self.phase_last_turnover = None;
     }
@@ -2610,9 +2656,27 @@ impl ModuleTrainer {
         self.coherence_bridge = None;
     }
 
-    /// Returns the last recorded spectral learning rate metrics when available.
-    pub fn spectral_metrics(&self) -> Option<&SpectralAdjustmentMetrics> {
-        self.last_spectral_metrics.as_ref()
+    /// Returns the last recorded spectral metrics, including the most recent
+    /// roundtable band snapshot even when coherence adaptation did not fire.
+    pub fn spectral_metrics(&self) -> Option<TrainerSpectralMetrics> {
+        if self.spectral_policy.is_none() && self.last_spectral_metrics.is_none() {
+            return None;
+        }
+        let adjustment = self.last_spectral_metrics.clone();
+        let band_energy = self.last_band_energy;
+        let source = match (adjustment.is_some(), band_energy.is_some()) {
+            (true, true) => TrainerSpectralMetricsSource::Combined,
+            (true, false) => TrainerSpectralMetricsSource::CoherenceAdjustment,
+            (false, true) => TrainerSpectralMetricsSource::BandEnergy,
+            (false, false) => return None,
+        };
+        Some(TrainerSpectralMetrics {
+            source,
+            turnover: self.phase_last_turnover,
+            label: self.phase_last_label,
+            adjustment,
+            band_energy,
+        })
     }
 
     #[cfg(feature = "psi")]
@@ -3356,6 +3420,8 @@ impl ModuleTrainer {
         self.phase_last_drift_abs = None;
         self.phase_loss_ema = None;
         self.phase_loss_spiking = false;
+        self.last_band_energy = None;
+        self.last_spectral_metrics = None;
         #[cfg(feature = "psi")]
         self.bootstrap_psi(schedule);
         #[cfg(feature = "psychoid")]
@@ -3386,12 +3452,7 @@ impl ModuleTrainer {
             let step_loss = loss_value.data().iter().copied().sum::<f32>();
             let grad_output = loss.backward(&prediction, &target)?;
             let mut band_energy = schedule.band_energy(&grad_output)?;
-            let baseline_band_energy = BandEnergy {
-                above: band_energy.above,
-                here: band_energy.here,
-                beneath: band_energy.beneath,
-                drift: band_energy.drift,
-            };
+            let baseline_band_energy = band_energy;
             let mut desire_impulse = None;
             if let Some(bridge) = self.desire_roundtable_bridge.as_ref() {
                 if let Some(impulse) = bridge.impulse()? {
@@ -4208,6 +4269,20 @@ impl ModuleTrainer {
             extra.insert("band_here".to_string(), band_energy.here as f64);
             extra.insert("band_beneath".to_string(), band_energy.beneath as f64);
             extra.insert("band_drift".to_string(), band_energy.drift as f64);
+            extra.insert(
+                "band_sheet_confidence".to_string(),
+                band_energy.spectral.sheet_confidence as f64,
+            );
+            extra.insert("band_spin".to_string(), band_energy.spectral.spin as f64);
+            extra.insert(
+                "band_curvature".to_string(),
+                band_energy.spectral.curvature as f64,
+            );
+            extra.insert(
+                "band_mean_energy".to_string(),
+                band_energy.spectral.energy as f64,
+            );
+            self.last_band_energy = Some(band_energy);
             extra.insert("step_loss".to_string(), step_loss as f64);
             extra.insert("loss_weighted".to_string(), weighted_loss as f64);
             #[cfg(feature = "psychoid")]
@@ -4783,11 +4858,13 @@ mod tests {
     use st_core::runtime::autopilot::{AutoConfig, AutoMode};
     use st_core::runtime::blackcat::{bandit::SoftBanditMode, zmeta::ZMetaParams, ChoiceGroups};
     use st_core::telemetry::hub::{SoftlogicEllipticSample, SoftlogicZFeedback};
+    use st_core::telemetry::xai::GraphFlowTracer;
     use st_core::telemetry::zspace_region::{ZSpaceRadiusBand, ZSpaceRegionKey, ZSpaceSpinBand};
     use st_core::theory::zpulse::ZSource;
     use st_tensor::topos::OpenCartesianTopos;
     use std::collections::HashMap;
     use std::num::NonZeroUsize;
+    use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant, SystemTime};
 
     fn build_language_geometry() -> SymbolGeometry {
@@ -5111,6 +5188,52 @@ mod tests {
             .unwrap();
         let after = model.forward(&input).unwrap();
         assert_ne!(before.data(), after.data());
+    }
+
+    #[test]
+    fn trainer_spectral_metrics_capture_band_snapshot_without_coherence_events() {
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let mut trainer = ModuleTrainer::new(caps, -1.1, 0.05, 0.01);
+        trainer.enable_spectral_learning_rate(SpectralLearningRatePolicy::default());
+        let mut model = Sequential::new();
+        model.push(Linear::new("lin", 2, 3).unwrap());
+        trainer.prepare(&mut model).unwrap();
+
+        let schedule = trainer.roundtable(
+            1,
+            3,
+            RoundtableConfig {
+                top_k: 1,
+                mid_k: 1,
+                bottom_k: 1,
+                here_tolerance: 1e-6,
+                ..RoundtableConfig::default()
+            },
+        );
+        let dataset = vec![
+            (
+                Tensor::from_vec(1, 2, vec![0.0, 1.0]).unwrap(),
+                Tensor::from_vec(1, 3, vec![1.0, 0.5, -0.5]).unwrap(),
+            ),
+            (
+                Tensor::from_vec(1, 2, vec![1.0, -0.5]).unwrap(),
+                Tensor::from_vec(1, 3, vec![0.25, -0.75, 0.5]).unwrap(),
+            ),
+        ];
+
+        let mut loss = MeanSquaredError::new();
+        trainer
+            .train_epoch(&mut model, &mut loss, dataset, &schedule)
+            .unwrap();
+
+        let metrics = trainer.spectral_metrics().expect("spectral metrics");
+        assert_eq!(metrics.source, TrainerSpectralMetricsSource::BandEnergy);
+        assert!(metrics.adjustment.is_none());
+        assert_eq!(metrics.turnover, Some(0.0));
+        let band = metrics.band_energy.expect("band energy snapshot");
+        assert!(band.l1().is_finite());
+        assert!(band.l1() > 0.0);
+        assert!((0.0..=1.0).contains(&band.spectral.sheet_confidence));
     }
 
     #[test]
@@ -5561,6 +5684,87 @@ mod tests {
         let latest = bridge.latest().unwrap();
         assert!(latest.is_some());
         assert!(!bridge.is_empty());
+    }
+
+    #[test]
+    fn trainer_traces_gnn_band_replays_with_labels() {
+        let tracer = Arc::new(Mutex::new(GraphFlowTracer::new()));
+        let caps = DeviceCaps::cpu();
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        let adjacency = Tensor::from_vec(
+            4,
+            4,
+            vec![
+                0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0,
+            ],
+        )
+        .unwrap();
+        let context = GraphContext::from_adjacency(adjacency).unwrap();
+        let mut builder =
+            ZSpaceGraphNetworkBuilder::new(context, NonZeroUsize::new(2).unwrap(), -1.0, 0.05)
+                .with_tracer(tracer.clone());
+        builder.push_layer(
+            GraphLayerSpec::new(NonZeroUsize::new(3).unwrap()).with_aggregation(
+                crate::NeighborhoodAggregation::multi_hop_sum(NonZeroUsize::new(2).unwrap())
+                    .with_include_self(true)
+                    .with_attenuation(0.6),
+            ),
+        );
+        builder.push_layer(
+            GraphLayerSpec::new(NonZeroUsize::new(2).unwrap())
+                .with_activation(GraphActivation::Relu),
+        );
+        let mut model = builder.build("gnn_band_trace").unwrap();
+        trainer.prepare(&mut model).unwrap();
+
+        let schedule = trainer.roundtable(
+            4,
+            2,
+            RoundtableConfig::default()
+                .with_top_k(1)
+                .with_mid_k(1)
+                .with_bottom_k(1)
+                .with_here_tolerance(1e-5),
+        );
+        let dataset = vec![(
+            Tensor::from_vec(4, 2, vec![1.0, 0.25, 0.5, -0.75, -0.5, 1.0, 0.75, -0.25]).unwrap(),
+            Tensor::from_vec(4, 2, vec![0.2, -0.1, 0.3, 0.15, -0.15, 0.25, 0.1, -0.2]).unwrap(),
+        )];
+        let mut loss = MeanSquaredError::new();
+        trainer
+            .train_epoch(&mut model, &mut loss, dataset, &schedule)
+            .unwrap();
+
+        let reports = tracer
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .drain();
+        let band_reports: Vec<_> = reports
+            .iter()
+            .filter_map(|report| {
+                report
+                    .roundtable
+                    .as_ref()
+                    .and_then(|trace| trace.band_pass.as_ref().map(|pass| (report, trace, pass)))
+            })
+            .collect();
+        assert_eq!(band_reports.len(), 6);
+        let labels: Vec<_> = band_reports
+            .iter()
+            .map(|(_, _, pass)| pass.band.as_str())
+            .collect();
+        assert_eq!(labels.iter().filter(|label| **label == "above").count(), 2);
+        assert_eq!(labels.iter().filter(|label| **label == "here").count(), 2);
+        assert_eq!(
+            labels.iter().filter(|label| **label == "beneath").count(),
+            2
+        );
+        assert!(band_reports
+            .iter()
+            .all(|(_, _, pass)| pass.gradient_l1 > 0.0));
+        assert!(band_reports
+            .iter()
+            .all(|(_, trace, _)| !trace.aggregation.effective_coefficients.is_empty()));
     }
 
     #[cfg(feature = "golden")]

@@ -6,6 +6,7 @@
 use super::GraphContext;
 use crate::schedule::{BandEnergy, RoundtableSchedule};
 use crate::{PureResult, Tensor, TensorError};
+use st_core::ops::zspace_round::SpectralFeatureSample;
 use st_core::telemetry::xai::{GraphLayerReport, NodeFlowSample};
 use st_tensor::topos::TensorBiome;
 use st_tensor::{OpenCartesianTopos, RewriteMonad};
@@ -105,6 +106,7 @@ pub struct QuadBandEnergy {
     pub beneath: f32,
     pub graph: f32,
     pub drift: f32,
+    pub spectral: SpectralFeatureSample,
 }
 
 impl QuadBandEnergy {
@@ -125,12 +127,9 @@ impl QuadBandEnergy {
 
     /// Returns the classic band energy component for compatibility with existing consumers.
     pub fn roundtable(&self) -> BandEnergy {
-        BandEnergy {
-            above: self.above,
-            here: self.here,
-            beneath: self.beneath,
-            drift: self.drift,
-        }
+        BandEnergy::new(self.above, self.here, self.beneath)
+            .with_drift(self.drift)
+            .with_spectral(self.spectral)
     }
 }
 
@@ -142,6 +141,7 @@ impl Default for QuadBandEnergy {
             beneath: 0.0,
             graph: 0.0,
             drift: 0.0,
+            spectral: SpectralFeatureSample::default(),
         }
     }
 }
@@ -161,6 +161,7 @@ pub fn fold_into_roundtable(
         beneath: base.beneath,
         graph: graph_energy,
         drift: base.drift,
+        spectral: base.spectral,
     })
 }
 
@@ -174,6 +175,7 @@ pub fn fold_with_band_energy(base: &BandEnergy, report: &GraphLayerReport) -> Qu
         beneath: base.beneath,
         graph: report.total_flow_energy() * (1.0 + report.curvature.abs()),
         drift: base.drift,
+        spectral: base.spectral,
     }
 }
 
@@ -257,6 +259,7 @@ mod tests {
             weight_update_magnitude: Some(0.1),
             bias_update_magnitude: Some(0.05),
             elliptic: None,
+            roundtable: None,
         };
         let quad = fold_into_roundtable(&schedule, &gradient, &report).unwrap();
         let weights = quad.barycentric();
@@ -266,12 +269,7 @@ mod tests {
 
     #[test]
     fn fold_with_band_energy_reuses_baseline() {
-        let base = BandEnergy {
-            above: 0.4,
-            here: 0.3,
-            beneath: 0.2,
-            drift: 0.1,
-        };
+        let base = BandEnergy::new(0.4, 0.3, 0.2).with_drift(0.1);
         let report = GraphLayerReport {
             layer: "graph".into(),
             curvature: -1.0,
@@ -283,6 +281,7 @@ mod tests {
             weight_update_magnitude: Some(0.1),
             bias_update_magnitude: Some(0.05),
             elliptic: None,
+            roundtable: None,
         };
         let quad = fold_with_band_energy(&base, &report);
         assert_eq!(quad.above, base.above);

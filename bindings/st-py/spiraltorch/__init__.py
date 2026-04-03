@@ -670,6 +670,7 @@ from .zspace_trace import (
 
 from .trainer_trace import (
     load_trainer_trace_events,
+    summarize_trainer_trace_events,
     write_trainer_trace_html,
 )
 
@@ -692,6 +693,7 @@ from .zspace_artifacts import (
     build_zspace_downstream_hook,
     build_desire_adapter_from_downstream_hook,
     desire_step_from_downstream_hook,
+    run_desire_geometry_bias_validation,
 )
 
 from .zspace_live import (
@@ -716,11 +718,12 @@ _EXTRAS = [
     "describe_device","hip_probe","mps_probe","probe_gpu_path","z_space_barycenter",
     "hypergrad","realgrad","hypergrad_topos","encode_zspace","z_metrics",
     "load_zspace_trace_events","write_zspace_trace_html",
-    "load_trainer_trace_events","write_trainer_trace_html",
+    "load_trainer_trace_events","summarize_trainer_trace_events","write_trainer_trace_html",
     "load_kdsl_trace_events","write_kdsl_trace_jsonl","write_kdsl_trace_html",
     "zspace_trace_to_atlas_route","zspace_trace_event_to_atlas_frame","write_zspace_atlas_noncollapse_html",
     "load_zspace_artifact_manifest","build_zspace_downstream_hook",
     "build_desire_adapter_from_downstream_hook","desire_step_from_downstream_hook",
+    "run_desire_geometry_bias_validation",
     "trainer_events_to_atlas_route","trainer_step_event_to_atlas_frame",
     "serve_zspace_trace","ZSpaceTraceLiveServer",
 ]
