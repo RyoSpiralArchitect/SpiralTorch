@@ -34,7 +34,3 @@ harness = false
 name = "python_bindings"
 harness = false
 required-features = ["python"]
-
-[[bench]]
-name = "text_narrator"
-harness = false
