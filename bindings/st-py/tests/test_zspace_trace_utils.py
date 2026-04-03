@@ -19,6 +19,11 @@ from spiraltorch.zspace_artifacts import (
 from spiraltorch.zspace_trace import load_zspace_trace_events, write_zspace_trace_html
 
 
+def _require_native_nn() -> None:
+    if not hasattr(st, "nn") or not hasattr(st.nn, "DesirePipeline"):
+        pytest.skip("native SpiralTorch nn bindings unavailable")
+
+
 def test_load_zspace_trace_events_flattens_stable_records(tmp_path) -> None:
     trace_path = tmp_path / "zspace_trace.jsonl"
     record = {
@@ -468,6 +473,7 @@ def test_build_desire_adapter_from_downstream_hook_maps_gain_and_bias(tmp_path) 
 
 
 def test_desire_step_from_downstream_hook_scales_logits_and_returns_adapter() -> None:
+    _require_native_nn()
     hook = {
         "kind": "spiraltorch.zspace_artifact_hook",
         "summary": {"guidance": "keep ambiguity alive"},
@@ -506,6 +512,7 @@ def test_desire_step_from_downstream_hook_scales_logits_and_returns_adapter() ->
 
 
 def test_desire_pipeline_geometry_bias_ingest_surfaces_metrics() -> None:
+    _require_native_nn()
     pipeline = st.nn.DesirePipeline(vocab_size=4)
 
     assert pipeline.bias_context == "inference"
