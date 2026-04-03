@@ -110,5 +110,13 @@ name = "planner_trace_demo"
 path = "../../examples/planner_trace_demo.rs"
 
 [[example]]
+name = "gnn_roundtable_trace_demo"
+path = "../../examples/gnn_roundtable_trace_demo.rs"
+
+[[example]]
+name = "gnn_trainer_band_trace_demo"
+path = "../../examples/gnn_trainer_band_trace_demo.rs"
+
+[[example]]
 name = "layernorm_wgpu_demo"
 path = "../../examples/layernorm_wgpu_demo.rs"

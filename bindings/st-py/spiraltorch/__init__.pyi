@@ -22,6 +22,13 @@ def write_zspace_trace_html(
 
 def load_trainer_trace_events(path: str, *, event_type: str = ...) -> List[Dict[str, Any]]: ...
 
+def summarize_trainer_trace_events(
+    path: str,
+    *,
+    event_type: str = ...,
+    keys: Iterable[str] | None = ...,
+) -> Dict[str, Any]: ...
+
 def write_trainer_trace_html(
     trace_jsonl: str,
     html_path: str | None = ...,
@@ -105,6 +112,24 @@ def desire_step_from_downstream_hook(
     *,
     concept: Sequence[float] | None = ...,
     window: Sequence[Tuple[int, float]] | None = ...,
+    base_gain: float = ...,
+    min_gain: float = ...,
+    max_gain: float = ...,
+    stability_weight: float = ...,
+    momentum_weight: float = ...,
+    delta_weight: float = ...,
+    phase_bias: Mapping[str, float] | None = ...,
+) -> Dict[str, Any]: ...
+
+def run_desire_geometry_bias_validation(
+    pipeline_factory: Callable[[], Any],
+    logits: Sequence[float],
+    previous_token: int,
+    hook_or_manifest: Mapping[str, Any] | str,
+    *,
+    concept: Sequence[float] | None = ...,
+    window: Sequence[Tuple[int, float]] | None = ...,
+    modes: Sequence[str] = ...,
     base_gain: float = ...,
     min_gain: float = ...,
     max_gain: float = ...,
@@ -3639,6 +3664,8 @@ class _NnRoundtableSchedule:
     def above(self) -> RankPlan: ...
     def here(self) -> RankPlan: ...
     def beneath(self) -> RankPlan: ...
+    def band_energy(self, gradient: Tensor) -> Tuple[float, float, float]: ...
+    def band_energy_detail(self, gradient: Tensor) -> Dict[str, object]: ...
 
 
 class _NnEpochStats:
@@ -5591,6 +5618,7 @@ class SoftlogicZFeedback:
     attributions: List[tuple[str, float]]
     elliptic: SoftlogicEllipticSample | None
     region: ZSpaceRegionDescriptor | None
+    def band_energy_detail(self) -> Dict[str, object]: ...
     def has_event(self, tag: str) -> bool: ...
     def spin_band(self) -> ZSpaceSpinBand | None: ...
     def radius_band(self) -> ZSpaceRadiusBand | None: ...

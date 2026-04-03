@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import sys
 import types
 
@@ -202,3 +203,88 @@ def test_module_trainer_spectral_and_coherence_bridge_controls() -> None:
     trainer.enable_zspace_trace_coherence_bridge()
     trainer.disable_zspace_trace_coherence_bridge()
     trainer.disable_spectral_learning_rate()
+
+
+def test_module_trainer_spectral_metrics_include_band_snapshot() -> None:
+    st = _load_native()
+    if st is None:
+        pytest.skip("native SpiralTorch extension unavailable")
+
+    trainer = st.nn.ModuleTrainer(
+        backend="cpu",
+        curvature=-1.0,
+        hyper_learning_rate=1e-2,
+        fallback_learning_rate=1e-2,
+    )
+    trainer.enable_spectral_learning_rate()
+
+    model = st.nn.Sequential()
+    model.add(st.nn.Linear("l1", 2, 3))
+    trainer.prepare(model)
+    loss = st.nn.MeanSquaredError()
+    schedule = trainer.roundtable(
+        1,
+        3,
+        st.nn.RoundtableConfig(top_k=1, mid_k=1, bottom_k=1, here_tolerance=1e-6),
+    )
+    batches = [
+        (st.Tensor.rand(1, 2, seed=41), st.Tensor.rand(1, 3, seed=42)),
+        (st.Tensor.rand(1, 2, seed=43), st.Tensor.rand(1, 3, seed=44)),
+    ]
+
+    stats = trainer.train_epoch(model, loss, batches, schedule)
+    assert stats.batches == 2
+
+    metrics = trainer.spectral_metrics()
+    assert isinstance(metrics, dict)
+    assert metrics["source"] == "band_energy"
+    assert metrics["adjustment"] is None
+    assert metrics["turnover"] == pytest.approx(0.0)
+    band = metrics["band"]
+    assert isinstance(band, dict)
+    assert band["spectral"] is not None
+    assert metrics["band_sheet_confidence"] == pytest.approx(
+        band["spectral"]["sheet_confidence"]
+    )
+    assert metrics["band_stability"] >= 0.0
+
+
+def test_summarize_trainer_trace_events_collects_numeric_metrics(tmp_path) -> None:
+    _ensure_torch_stub()
+    st = importlib.import_module("spiraltorch")
+
+    trace_path = tmp_path / "trainer_trace.jsonl"
+    records = [
+        {
+            "type": "TrainerStep",
+            "payload": {
+                "step": 1,
+                "metrics": {
+                    "step_time_ms": 1.5,
+                    "extra": {"band_spin": 0.9, "loss_weighted": 0.3},
+                },
+            },
+        },
+        {
+            "type": "TrainerStep",
+            "payload": {
+                "step": 2,
+                "metrics": {
+                    "step_time_ms": 2.5,
+                    "extra": {"band_spin": -0.3, "loss_weighted": 0.1},
+                },
+            },
+        },
+    ]
+    trace_path.write_text(
+        "\n".join(json.dumps(record, ensure_ascii=False) for record in records),
+        encoding="utf-8",
+    )
+
+    summary = st.summarize_trainer_trace_events(trace_path)
+    assert summary["count"] == 2
+    assert summary["first_step"] == 1
+    assert summary["last_step"] == 2
+    assert summary["metrics"]["band_spin"]["first"] == pytest.approx(0.9)
+    assert summary["metrics"]["band_spin"]["last"] == pytest.approx(-0.3)
+    assert summary["metrics"]["loss_weighted"]["mean"] == pytest.approx(0.2)

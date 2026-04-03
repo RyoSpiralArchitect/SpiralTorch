@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any, Iterable
 
 __all__ = [
     "load_trainer_trace_events",
+    "summarize_trainer_trace_events",
     "write_trainer_trace_html",
 ]
 
@@ -32,6 +34,45 @@ def _extract_payload(record: dict[str, Any], *, event_type: str) -> Any | None:
     return None
 
 
+def _extract_value(sample: dict[str, Any], key: str) -> Any | None:
+    if not key:
+        return None
+    metrics = sample.get("metrics")
+    if isinstance(metrics, dict):
+        extra = metrics.get("extra")
+        if isinstance(extra, dict) and key in extra:
+            return extra.get(key)
+        if key in metrics:
+            return metrics.get(key)
+    return sample.get(key)
+
+
+def _numeric_keys(events: Iterable[dict[str, Any]]) -> list[str]:
+    keys: set[str] = set()
+    for event in events:
+        metrics = event.get("metrics")
+        if isinstance(metrics, dict):
+            extra = metrics.get("extra")
+            if isinstance(extra, dict):
+                for key, value in extra.items():
+                    if isinstance(value, (int, float)) and not isinstance(value, bool):
+                        if math.isfinite(float(value)):
+                            keys.add(key)
+            for key, value in metrics.items():
+                if key == "extra":
+                    continue
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    if math.isfinite(float(value)):
+                        keys.add(key)
+        for key, value in event.items():
+            if key == "metrics":
+                continue
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                if math.isfinite(float(value)):
+                    keys.add(key)
+    return sorted(keys)
+
+
 def load_trainer_trace_events(
     path: str | Path,
     *,
@@ -50,6 +91,71 @@ def load_trainer_trace_events(
             event["ts"] = record["ts"]
         events.append(event)
     return events
+
+
+def summarize_trainer_trace_events(
+    path: str | Path,
+    *,
+    event_type: str = "TrainerStep",
+    keys: Iterable[str] | None = None,
+) -> dict[str, Any]:
+    """Compute simple aggregates for numeric values in a trainer trace JSONL file."""
+
+    events = load_trainer_trace_events(path, event_type=event_type)
+    if not events:
+        return {
+            "event_type": event_type,
+            "count": 0,
+            "first_step": None,
+            "last_step": None,
+            "metrics": {},
+        }
+
+    selected_keys = list(keys) if keys is not None else _numeric_keys(events)
+    metrics: dict[str, dict[str, float]] = {}
+    for key in selected_keys:
+        values: list[float] = []
+        for event in events:
+            value = _extract_value(event, key)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                numeric = float(value)
+                if math.isfinite(numeric):
+                    values.append(numeric)
+        if not values:
+            continue
+        metrics[key] = {
+            "first": values[0],
+            "last": values[-1],
+            "min": min(values),
+            "max": max(values),
+            "mean": sum(values) / len(values),
+        }
+
+    first_step = next(
+        (
+            int(step)
+            for event in events
+            for step in [event.get("step")]
+            if isinstance(step, (int, float)) and not isinstance(step, bool)
+        ),
+        None,
+    )
+    last_step = next(
+        (
+            int(step)
+            for event in reversed(events)
+            for step in [event.get("step")]
+            if isinstance(step, (int, float)) and not isinstance(step, bool)
+        ),
+        None,
+    )
+    return {
+        "event_type": event_type,
+        "count": len(events),
+        "first_step": first_step,
+        "last_step": last_step,
+        "metrics": metrics,
+    }
 
 
 def write_trainer_trace_html(

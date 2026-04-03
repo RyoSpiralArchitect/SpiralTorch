@@ -27,6 +27,8 @@
 //! level tooling can surface where hypergrad energy travelled during a forward
 //! and backward pass.
 
+use crate::ops::zspace_round::RoundtableBand;
+
 /// Records explainability artefacts emitted by GNN-style layers.
 #[derive(Debug, Default)]
 pub struct GraphFlowTracer {
@@ -56,13 +58,19 @@ impl GraphFlowTracer {
             weight_update_magnitude: None,
             bias_update_magnitude: None,
             elliptic: None,
+            roundtable: None,
         });
     }
 
     /// Records the magnitude of the weight/bias updates once the backward pass
     /// completes.
     pub fn record_weight_update(&mut self, weight: f32, bias: Option<f32>) {
-        if let Some(report) = self.reports.last_mut() {
+        if let Some(report) = self
+            .reports
+            .iter_mut()
+            .rev()
+            .find(|report| report.weight_update_magnitude.is_none())
+        {
             report.weight_update_magnitude = Some(weight);
             report.bias_update_magnitude = bias;
         }
@@ -72,6 +80,13 @@ impl GraphFlowTracer {
     pub fn annotate_elliptic(&mut self, sample: EllipticLayerSample) {
         if let Some(report) = self.reports.last_mut() {
             report.elliptic = Some(sample);
+        }
+    }
+
+    /// Annotates the most recent layer with roundtable-aware aggregation telemetry.
+    pub fn annotate_roundtable(&mut self, sample: GraphRoundtableTrace) {
+        if let Some(report) = self.reports.last_mut() {
+            report.roundtable = Some(sample);
         }
     }
 
@@ -109,6 +124,8 @@ pub struct GraphLayerReport {
     pub bias_update_magnitude: Option<f32>,
     /// Optional elliptic geometry summary attached to the layer.
     pub elliptic: Option<EllipticLayerSample>,
+    /// Optional roundtable-aware aggregation trace for the layer.
+    pub roundtable: Option<GraphRoundtableTrace>,
 }
 
 impl GraphLayerReport {
@@ -125,6 +142,62 @@ pub struct EllipticLayerSample {
     pub mean_geodesic: f32,
     pub sheet_bias: f32,
     pub spin_alignment: f32,
+}
+
+/// Snapshot of the roundtable signal consumed by a graph layer.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct GraphRoundtableSignalSample {
+    pub above: f32,
+    pub here: f32,
+    pub beneath: f32,
+    pub drift: f32,
+    pub band_sizes: (u32, u32, u32),
+    pub sheet_index: usize,
+    pub sheet_confidence: f32,
+    pub curvature: f32,
+    pub spin: f32,
+    pub energy: f32,
+}
+
+/// Influence multipliers derived from the roundtable signal.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct GraphRoundtableInfluenceSample {
+    pub above_multiplier: f32,
+    pub here_multiplier: f32,
+    pub beneath_multiplier: f32,
+    pub drift_bias: f32,
+}
+
+/// Identifies which gradient band triggered a replay inside `backward_bands`.
+#[derive(Debug, Clone)]
+pub struct GraphRoundtableBandPassSample {
+    pub band: RoundtableBand,
+    pub gradient_l1: f32,
+    pub gradient_l2: f32,
+}
+
+/// Aggregation coefficients emitted by a graph layer after applying roundtable scaling.
+#[derive(Debug, Clone, Default)]
+pub struct GraphAggregationSample {
+    pub base_coefficients: Vec<f32>,
+    pub step_scales: Vec<f32>,
+    pub effective_coefficients: Vec<f32>,
+}
+
+impl GraphAggregationSample {
+    /// Returns the number of hop/self coefficients tracked by the sample.
+    pub fn hop_count(&self) -> usize {
+        self.effective_coefficients.len()
+    }
+}
+
+/// Combined trace describing how roundtable state altered message passing.
+#[derive(Debug, Clone, Default)]
+pub struct GraphRoundtableTrace {
+    pub signal: GraphRoundtableSignalSample,
+    pub influence: GraphRoundtableInfluenceSample,
+    pub aggregation: GraphAggregationSample,
+    pub band_pass: Option<GraphRoundtableBandPassSample>,
 }
 
 impl EllipticLayerSample {
@@ -234,5 +307,64 @@ mod tests {
         let sample = report.elliptic.expect("elliptic sample");
         assert!((sample.sheet_bias - 0.4).abs() < 1e-6);
         assert!(sample.normalized_radius() > 0.0);
+    }
+
+    #[test]
+    fn tracer_accepts_roundtable_annotations() {
+        let mut tracer = GraphFlowTracer::new();
+        tracer.begin_layer("layer", -1.0, Vec::new());
+        tracer.annotate_roundtable(GraphRoundtableTrace {
+            signal: GraphRoundtableSignalSample {
+                above: 0.6,
+                here: 0.3,
+                beneath: 0.1,
+                drift: 0.2,
+                band_sizes: (2, 1, 1),
+                sheet_index: 1,
+                sheet_confidence: 0.8,
+                curvature: 0.5,
+                spin: 0.4,
+                energy: 0.25,
+            },
+            influence: GraphRoundtableInfluenceSample {
+                above_multiplier: 1.2,
+                here_multiplier: 0.9,
+                beneath_multiplier: 0.7,
+                drift_bias: 1.1,
+            },
+            aggregation: GraphAggregationSample {
+                base_coefficients: vec![1.0, 0.5, 0.25],
+                step_scales: vec![0.9, 1.2, 0.7],
+                effective_coefficients: vec![0.9, 0.6, 0.175],
+            },
+            band_pass: Some(GraphRoundtableBandPassSample {
+                band: RoundtableBand::Above,
+                gradient_l1: 0.6,
+                gradient_l2: 0.4,
+            }),
+        });
+        let report = tracer.layers()[0].clone();
+        let trace = report.roundtable.expect("roundtable trace");
+        assert_eq!(trace.signal.band_sizes, (2, 1, 1));
+        assert_eq!(trace.aggregation.hop_count(), 3);
+        assert!((trace.influence.drift_bias - 1.1).abs() < 1e-6);
+        assert_eq!(
+            trace.band_pass.expect("band pass").band,
+            RoundtableBand::Above
+        );
+    }
+
+    #[test]
+    fn tracer_backfills_weight_updates_in_reverse_order() {
+        let mut tracer = GraphFlowTracer::new();
+        tracer.begin_layer("layer0", -1.0, Vec::new());
+        tracer.begin_layer("layer1", -1.0, Vec::new());
+        tracer.record_weight_update(0.2, Some(0.1));
+        tracer.record_weight_update(0.4, Some(0.3));
+        let reports = tracer.layers();
+        assert_eq!(reports[0].weight_update_magnitude, Some(0.4));
+        assert_eq!(reports[1].weight_update_magnitude, Some(0.2));
+        assert_eq!(reports[0].bias_update_magnitude, Some(0.3));
+        assert_eq!(reports[1].bias_update_magnitude, Some(0.1));
     }
 }

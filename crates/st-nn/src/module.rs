@@ -25,6 +25,7 @@ use crate::gnn::RoundtableBandSignal;
 use crate::optim::LocalLearningRateAdapter;
 use crate::schedule::GradientBands;
 use st_core::backend::device_caps::DeviceCaps;
+use st_core::ops::zspace_round::RoundtableBand;
 use st_core::ops::zspace_round::SpectralFeatureSample;
 #[cfg(feature = "psychoid")]
 use st_core::telemetry::psychoid::PsychoidSample;
@@ -447,14 +448,31 @@ pub trait Module {
     fn backward_bands(&mut self, input: &Tensor, bands: &GradientBands) -> PureResult<Tensor> {
         let (rows, cols) = input.shape();
         let mut total = Tensor::zeros(rows, cols)?;
-        for grad in bands.iter() {
+        for (band, grad) in bands.iter_labeled() {
             if grad.squared_l2_norm() == 0.0 {
                 continue;
             }
-            let contribution = self.backward(input, grad)?;
+            self.begin_backward_band_pass(band, grad)?;
+            let result = self.backward(input, grad);
+            self.end_backward_band_pass(band)?;
+            let contribution = result?;
             total.add_scaled(&contribution, 1.0)?;
         }
         Ok(total)
+    }
+
+    /// Announces the start of a band-specific backward replay.
+    fn begin_backward_band_pass(
+        &mut self,
+        _band: RoundtableBand,
+        _gradient: &Tensor,
+    ) -> PureResult<()> {
+        Ok(())
+    }
+
+    /// Announces the end of a band-specific backward replay.
+    fn end_backward_band_pass(&mut self, _band: RoundtableBand) -> PureResult<()> {
+        Ok(())
     }
 
     /// Applies the latest roundtable band signal before a backward pass.
