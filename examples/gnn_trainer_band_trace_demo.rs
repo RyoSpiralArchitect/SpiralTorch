@@ -61,6 +61,7 @@ fn roundtable_trace_json(trace: &GraphRoundtableTrace) -> Value {
             "band": pass.band.as_str(),
             "gradient_l1": pass.gradient_l1,
             "gradient_l2": pass.gradient_l2,
+            "gradient_rms": pass.gradient_rms,
         })),
     })
 }
@@ -164,6 +165,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "layer": report.layer,
                 "gradient_l1": pass.gradient_l1,
                 "gradient_l2": pass.gradient_l2,
+                "gradient_rms": pass.gradient_rms,
                 "effective_coefficients": trace.aggregation.effective_coefficients,
                 "step_scales": trace.aggregation.step_scales,
                 "band_pass_scales": trace.aggregation.band_pass_scales,

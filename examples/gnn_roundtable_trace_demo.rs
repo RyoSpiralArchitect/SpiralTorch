@@ -61,6 +61,7 @@ fn roundtable_trace_json(trace: &GraphRoundtableTrace) -> Value {
             "band": pass.band.as_str(),
             "gradient_l1": pass.gradient_l1,
             "gradient_l2": pass.gradient_l2,
+            "gradient_rms": pass.gradient_rms,
         })),
     })
 }

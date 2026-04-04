@@ -436,8 +436,8 @@ fn l2_norm(data: &[f32]) -> f32 {
 
 fn band_pass_intensity(pass: &GraphRoundtableBandPassSample) -> f32 {
     let concentration = (pass.gradient_l2 / pass.gradient_l1.max(1e-6)).clamp(0.0, 1.0);
-    let magnitude = pass.gradient_l2.tanh().clamp(0.0, 1.0);
-    (0.65 * concentration + 0.35 * magnitude).clamp(0.05, 1.0)
+    let magnitude = (pass.gradient_rms / 0.04).clamp(0.0, 1.0);
+    (magnitude * (0.55 + 0.45 * concentration)).clamp(0.0, 1.0)
 }
 
 fn build_roundtable_trace(
@@ -487,10 +487,12 @@ pub(crate) fn band_pass_sample(
 ) -> GraphRoundtableBandPassSample {
     let gradient_l1 = gradient.data().iter().map(|value| value.abs()).sum::<f32>();
     let gradient_l2 = gradient.squared_l2_norm().sqrt();
+    let gradient_rms = gradient_l2 / (gradient.data().len().max(1) as f32).sqrt();
     GraphRoundtableBandPassSample {
         band,
         gradient_l1,
         gradient_l2,
+        gradient_rms,
     }
 }
 
@@ -614,10 +616,37 @@ mod tests {
         assert_eq!(pass.band, RoundtableBand::Here);
         assert!(pass.gradient_l1 > 0.0);
         assert!(pass.gradient_l2 > 0.0);
+        assert!(pass.gradient_rms > 0.0);
         let trace = reports[0].roundtable.as_ref().expect("roundtable trace");
         assert_eq!(trace.aggregation.band_pass_scales.len(), 2);
         assert!(trace.aggregation.band_pass_scales[0] > 1.0);
         assert!(trace.aggregation.band_pass_scales[1] < 1.0);
+    }
+
+    #[test]
+    fn graph_convolution_tiny_band_pass_stays_near_neutral() {
+        let adjacency = Tensor::from_vec(2, 2, vec![0.0, 1.0, 1.0, 0.0]).unwrap();
+        let context = GraphContext::from_adjacency(adjacency).unwrap();
+        let tracer = Arc::new(Mutex::new(GraphFlowTracer::new()));
+        let mut layer = ZSpaceGraphConvolution::new("gnn_tiny_band", context, 2, 1, -1.0, 0.05).unwrap();
+        layer.set_tracer(tracer.clone());
+        let signal = RoundtableBandSignal::new(BandEnergy::new(0.8, 0.4, 0.2), (1, 1, 1));
+        layer.set_roundtable_influence(Some(RoundtableBandInfluence::from_signal(&signal)));
+        let tiny_gradient = Tensor::from_vec(2, 1, vec![1.0e-6, -1.0e-6]).unwrap();
+        layer.set_roundtable_band_pass(Some(band_pass_sample(RoundtableBand::Here, &tiny_gradient)));
+        let input = Tensor::from_vec(2, 2, vec![1.0, 0.5, -0.5, 1.0]).unwrap();
+
+        let _ = layer.forward(&input).unwrap();
+
+        let reports = tracer
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .layers()
+            .to_vec();
+        let trace = reports[0].roundtable.as_ref().expect("roundtable trace");
+        assert_eq!(trace.aggregation.band_pass_scales.len(), 2);
+        assert!((trace.aggregation.band_pass_scales[0] - 1.0).abs() < 1.0e-3);
+        assert!((trace.aggregation.band_pass_scales[1] - 1.0).abs() < 1.0e-3);
     }
 
     #[test]

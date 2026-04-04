@@ -174,6 +174,7 @@ pub struct GraphRoundtableBandPassSample {
     pub band: RoundtableBand,
     pub gradient_l1: f32,
     pub gradient_l2: f32,
+    pub gradient_rms: f32,
 }
 
 /// Aggregation coefficients emitted by a graph layer after applying roundtable scaling.
@@ -343,6 +344,7 @@ mod tests {
                 band: RoundtableBand::Above,
                 gradient_l1: 0.6,
                 gradient_l2: 0.4,
+                gradient_rms: 0.2,
             }),
         });
         let report = tracer.layers()[0].clone();
