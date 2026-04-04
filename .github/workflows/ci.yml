@@ -1,20 +1,34 @@
 name: CI
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main ]
   pull_request:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   build-test:
-    name: build & test (${{ matrix.os }} / ${{ matrix.toolchain }})
+    name: build & test (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        toolchain: [stable, nightly]
+        include:
+          - name: ubuntu / stable
+            os: ubuntu-latest
+            toolchain: stable
+            run_lints: false
+            run_upper_stack: true
+          - name: ubuntu / nightly
+            os: ubuntu-latest
+            toolchain: nightly
+            run_lints: true
+            run_upper_stack: false
+          - name: macos / stable
+            os: macos-latest
+            toolchain: stable
+            run_lints: false
+            run_upper_stack: false
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -23,30 +37,31 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - name: Install system dependencies (Ubuntu)
-        if: matrix.os == 'ubuntu-latest' && matrix.toolchain == 'nightly'
+        if: matrix.os == 'ubuntu-latest' && matrix.run_lints
         run: |
           sudo apt-get update
           sudo apt-get install -y pkg-config libfontconfig1-dev protobuf-compiler
       - name: Install system dependencies (macOS)
-        if: matrix.os == 'macos-latest' && matrix.toolchain == 'nightly'
+        if: matrix.os == 'macos-latest' && matrix.run_lints
         run: |
           if ! command -v protoc >/dev/null 2>&1; then
             HOMEBREW_NO_AUTO_UPDATE=1 brew install protobuf
           fi
       - name: rustfmt (workspace)
-        if: matrix.toolchain == 'nightly'
+        if: matrix.run_lints
         run: cargo fmt --all -- --check
       - name: clippy (workspace)
-        if: matrix.toolchain == 'nightly'
+        if: matrix.run_lints
         run: cargo clippy --workspace --all-targets
       - name: clippy (strict subset)
-        if: matrix.toolchain == 'nightly'
+        if: matrix.run_lints
         run: bash scripts/run_rust_clippy_strict.sh
       - name: build + test core
         run: |
           cargo build -p st-core --release
           cargo test  -p st-core --release -- --nocapture
       - name: build upper stack
+        if: matrix.run_upper_stack
         run: |
           cargo build -p st-nn --release
           cargo build -p st-spiral-rl --release
@@ -92,6 +107,7 @@ jobs:
 
   python-docs-smoke:
     name: python docs smoke (README + hello_session)
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

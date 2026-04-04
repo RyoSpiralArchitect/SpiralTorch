@@ -205,62 +205,22 @@ SpiralTorch ships under a dual-license model:
 
 ## Code stats
 
-<!-- AUTOGEN: CODESTATS BEGIN -->
-_Last updated: 2026-1-10 11:22 UTC_
+<!-- STATS:START -->
+> _auto-generated: 2026-04-04 00:15 UTC_
 
-```text
-               
-===============================================================================
- Language            Files        Lines         Code     Comments       Blanks
-===============================================================================
- BASH                    1           54           52            1            1
- COBOL                   1          416          376            8           32
- C++                     1          327          286            3           38
- CSS                     1          160          137            0           23
- Go                     11         2582         2082          200          300
- JSON                    6          372          372            0            0
- Julia                   8         1335         1176           14          145
- Python                106        34962        29486          193         5283
- Shell                   5          226          197            5           24
- SVG                     3           60           60            0            0
- Plain Text              2          670            0          552          118
- TOML                   45         1109          949           27          133
- TypeScript              7         4899         4332          175          392
- YAML                    3           72           65            0            7
--------------------------------------------------------------------------------
- HTML                    2          491          491            0            0
- |- CSS                  1          532          460            0           72
- |- JavaScript           1          769          720            0           49
- (Total)                           1792         1671            0          121
--------------------------------------------------------------------------------
- Jupyter Notebooks       2            0            0            0            0
- |- Markdown             2            9            0            9            0
- |- Python               2           22           20            0            2
- (Total)                             31           20            9            2
--------------------------------------------------------------------------------
- Markdown               79         9037            0         6801         2236
- |- BASH                24          250          189           30           31
- |- C                    1           22           17            0            5
- |- COBOL                1           32           32            0            0
- |- Dockerfile           1            6            6            0            0
- |- HTML                 1           18           18            0            0
- |- JavaScript           1           34           29            3            2
- |- JSON                 1           11           11            0            0
- |- Julia                1           29           26            0            3
- |- Python              10         1514         1135          116          263
- |- Rust                15         1540         1261           81          198
- |- YAML                 2           62           62            0            0
- (Total)                          12555         2786         7031         2738
--------------------------------------------------------------------------------
- Rust                  443       203112       181221         2113        19778
- |- Markdown           294         7842           16         7607          219
- (Total)                         210954       181237         9720        19997
-===============================================================================
- Total                 726       259884       221282        10092        28510
-===============================================================================
+| Metric | Value |
+|---|---:|
+| Rust code LOC | **206,300** |
+| Rust files | 479 |
+| Total code LOC (all langs) | 266,183 |
+| Workspace+deps crates | 458 |
 
-
-```
+<p>
+<img src="docs/badges/rust-loc.svg" alt="rust loc" />
+<img src="docs/badges/total-code.svg" alt="total code" />
+<img src="docs/badges/deps.svg" alt="crates" />
+</p>
+<!-- STATS:END -->
 ---
 
 **SpiralTorch is a Rust-first AI training framework** that keeps language,
@@ -416,8 +376,8 @@ Linux note: for manylinux2014 wheels you either need a manylinux container (e.g.
 
 ### CI wheel stash (GitHub Actions)
 
-- Artifact build: `.github/workflows/wheels.yml` (Windows / manylinux2014 / macOS 14+)
-- Release assets: `.github/workflows/release_wheels.yml` (attaches wheels to the GitHub Release)
+- Manual wheel artifact build: `.github/workflows/wheels.yml`
+- Official release build + attached assets: `.github/workflows/release_wheels.yml`
 
 ---
 

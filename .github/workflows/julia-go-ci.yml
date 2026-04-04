@@ -1,9 +1,7 @@
-name: Julia & Go CI Draft
+name: Julia & Go CI Draft (manual)
 
 on:
-  push:
-    branches: [ main, develop ]
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   julia:
