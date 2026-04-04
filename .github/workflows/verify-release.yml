@@ -3,8 +3,6 @@ name: Verify Official Release Integrity
 on:
   release:
     types: [published]
-  schedule:
-    - cron: '37 2 * * *'
   workflow_dispatch:
 
 permissions:

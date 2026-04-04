@@ -2,7 +2,7 @@
 #!/usr/bin/env python3
 import json, subprocess, sys, re
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 ROOT = Path(__file__).resolve().parents[1]
 BADGE_DIR = ROOT / "docs" / "badges"
@@ -32,7 +32,14 @@ def count_files(lang_block: dict) -> int:
     return len(reps)
 
 def cargo_dep_count() -> int:
-    meta = json.loads(run(["cargo", "metadata", "--format-version", "1"]))
+    p = subprocess.run(
+        ["cargo", "metadata", "--format-version", "1"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=True,
+    )
+    meta = json.loads(p.stdout)
     return len(meta.get("packages", []))
 
 def digits(n: int) -> str:
@@ -40,7 +47,7 @@ def digits(n: int) -> str:
 
 def pick_color(value: int, bands: list[tuple[int,str]]) -> str:
     # 値に応じて色分け（左から閾値昇順）
-    color = "lightgrey"
+    color = "9f9f9f"
     for th, col in bands:
         if value >= th: color = col
     return color
@@ -75,15 +82,23 @@ def update_readme_section(section_md: str) -> None:
     content = README.read_text(encoding="utf-8")
     start = "<!-- STATS:START -->"
     end = "<!-- STATS:END -->"
-    if start not in content or end not in content:
-        print("README markers not found; skipping README update.", file=sys.stderr)
-        return
     new_block = f"{start}\n{section_md.strip()}\n{end}"
-    content = re.sub(
-        re.compile(rf"{re.escape(start)}.*?{re.escape(end)}", re.S),
-        new_block,
-        content,
-    )
+    if start in content and end in content:
+        content = re.sub(
+            re.compile(rf"{re.escape(start)}.*?{re.escape(end)}", re.S),
+            new_block,
+            content,
+        )
+    else:
+        legacy = re.compile(
+            r"## Code stats\s*\n\s*<!-- AUTOGEN: CODESTATS BEGIN -->.*?(?=\n---\n|\n##\s)",
+            re.S,
+        )
+        if not legacy.search(content):
+            print("README markers not found; skipping README update.", file=sys.stderr)
+            return
+        replacement = f"## Code stats\n\n{new_block}\n"
+        content = legacy.sub(replacement, content, count=1)
     README.write_text(content, encoding="utf-8")
 
 def main():
@@ -127,7 +142,7 @@ def main():
     (BADGE_DIR/"total-code.svg").write_text(badge_svg("total code", digits(total_code), total_color), encoding="utf-8")
 
     # README セクション更新
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     section = f"""
 > _auto-generated: {now}_
 
