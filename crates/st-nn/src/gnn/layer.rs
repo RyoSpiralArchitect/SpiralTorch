@@ -296,28 +296,40 @@ impl ZSpaceGraphConvolution {
         let mut current = input.clone();
         let mut effective = Vec::with_capacity(weights.len());
         let mut step_scales = Vec::with_capacity(weights.len());
+        let mut band_pass_scales = Vec::with_capacity(weights.len());
+        let active_band_pass = self.active_band_pass.as_ref();
+        let band_intensity = active_band_pass.map(band_pass_intensity).unwrap_or(0.0);
         for (idx, weight) in weights.iter().enumerate() {
             if idx > 0 {
                 current = self.context.propagate(&current)?;
             }
-            let scale = self
+            let roundtable_scale = self
                 .roundtable
                 .as_ref()
                 .map(|influence: &RoundtableBandInfluence| influence.scale_for_step(idx))
                 .unwrap_or(1.0);
+            let pass_scale = match (self.roundtable.as_ref(), active_band_pass) {
+                (Some(influence), Some(pass)) => {
+                    influence.band_pass_scale_for_step(pass.band, idx, band_intensity)
+                }
+                _ => 1.0,
+            };
+            let scale = roundtable_scale * pass_scale;
             let coeff = weight * scale;
             if coeff.abs() > f32::EPSILON {
                 support.add_scaled(&current, coeff)?;
             }
+            band_pass_scales.push(pass_scale);
             step_scales.push(scale);
             effective.push(coeff);
         }
         let roundtable = self.roundtable.as_ref().map(|influence| {
             build_roundtable_trace(
                 influence,
-                self.active_band_pass.as_ref(),
+                active_band_pass,
                 &weights,
                 &step_scales,
+                &band_pass_scales,
                 &effective,
             )
         });
@@ -422,11 +434,18 @@ fn l2_norm(data: &[f32]) -> f32 {
     data.iter().map(|v| v * v).sum::<f32>().sqrt()
 }
 
+fn band_pass_intensity(pass: &GraphRoundtableBandPassSample) -> f32 {
+    let concentration = (pass.gradient_l2 / pass.gradient_l1.max(1e-6)).clamp(0.0, 1.0);
+    let magnitude = pass.gradient_l2.tanh().clamp(0.0, 1.0);
+    (0.65 * concentration + 0.35 * magnitude).clamp(0.05, 1.0)
+}
+
 fn build_roundtable_trace(
     influence: &RoundtableBandInfluence,
     band_pass: Option<&GraphRoundtableBandPassSample>,
     base_coefficients: &[f32],
     step_scales: &[f32],
+    band_pass_scales: &[f32],
     effective_coefficients: &[f32],
 ) -> GraphRoundtableTrace {
     let signal = influence.signal();
@@ -455,6 +474,7 @@ fn build_roundtable_trace(
         aggregation: GraphAggregationSample {
             base_coefficients: base_coefficients.to_vec(),
             step_scales: step_scales.to_vec(),
+            band_pass_scales: band_pass_scales.to_vec(),
             effective_coefficients: effective_coefficients.to_vec(),
         },
         band_pass: band_pass.cloned(),
@@ -559,8 +579,10 @@ mod tests {
         assert_eq!(trace.signal.band_sizes, (2, 1, 1));
         assert_eq!(trace.aggregation.base_coefficients.len(), 3);
         assert_eq!(trace.aggregation.step_scales.len(), 3);
+        assert_eq!(trace.aggregation.band_pass_scales.len(), 3);
         assert_eq!(trace.aggregation.effective_coefficients.len(), 3);
         assert!((trace.aggregation.step_scales[1] - influence.scale_for_step(1)).abs() < 1e-6);
+        assert_eq!(trace.aggregation.band_pass_scales, vec![1.0, 1.0, 1.0]);
         assert!(trace.aggregation.effective_coefficients[1].abs() > 0.0);
     }
 
@@ -592,6 +614,10 @@ mod tests {
         assert_eq!(pass.band, RoundtableBand::Here);
         assert!(pass.gradient_l1 > 0.0);
         assert!(pass.gradient_l2 > 0.0);
+        let trace = reports[0].roundtable.as_ref().expect("roundtable trace");
+        assert_eq!(trace.aggregation.band_pass_scales.len(), 2);
+        assert!(trace.aggregation.band_pass_scales[0] > 1.0);
+        assert!(trace.aggregation.band_pass_scales[1] < 1.0);
     }
 
     #[test]

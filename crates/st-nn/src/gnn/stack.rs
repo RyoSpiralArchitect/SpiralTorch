@@ -505,6 +505,10 @@ mod tests {
                 trace.aggregation.base_coefficients.len(),
                 trace.aggregation.step_scales.len()
             );
+            assert_eq!(
+                trace.aggregation.base_coefficients.len(),
+                trace.aggregation.band_pass_scales.len()
+            );
             assert!(trace.influence.above_multiplier > 0.0);
             assert!(trace.influence.here_multiplier > 0.0);
             assert!(trace.influence.beneath_multiplier > 0.0);

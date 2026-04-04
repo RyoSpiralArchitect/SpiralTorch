@@ -54,6 +54,7 @@ fn roundtable_trace_json(trace: &GraphRoundtableTrace) -> Value {
         "aggregation": {
             "base_coefficients": trace.aggregation.base_coefficients,
             "step_scales": trace.aggregation.step_scales,
+            "band_pass_scales": trace.aggregation.band_pass_scales,
             "effective_coefficients": trace.aggregation.effective_coefficients,
         },
         "band_pass": trace.band_pass.as_ref().map(|pass| json!({

@@ -6,6 +6,7 @@
 #[cfg(feature = "psi")]
 pub mod coherence;
 use crate::schedule::{BandEnergy, RoundtableSchedule};
+use st_core::ops::zspace_round::RoundtableBand;
 use std::time::SystemTime;
 
 pub mod context;
@@ -202,6 +203,47 @@ impl RoundtableBandInfluence {
         scale = scale.clamp(0.25, 2.0);
         scale
     }
+
+    /// Returns the replay-specific bias for a message passing step while a
+    /// particular gradient band is being replayed through `backward_bands()`.
+    pub fn band_pass_scale_for_step(
+        &self,
+        band: RoundtableBand,
+        step_index: usize,
+        intensity: f32,
+    ) -> f32 {
+        let intensity = intensity.clamp(0.0, 1.0);
+        let average =
+            ((self.multipliers.0 + self.multipliers.1 + self.multipliers.2) / 3.0).max(0.35);
+        let alignment = match band {
+            RoundtableBand::Above => (self.multipliers.0 / average).clamp(0.8, 1.35),
+            RoundtableBand::Here => (self.multipliers.1 / average).clamp(0.8, 1.35),
+            RoundtableBand::Beneath => (self.multipliers.2 / average).clamp(0.8, 1.35),
+        };
+        let focus = intensity * alignment;
+        let scale = match band {
+            RoundtableBand::Above => match step_index {
+                0 => 1.0 - 0.10 * focus,
+                1 => 1.0 + 0.24 * focus,
+                _ => 1.0 - 0.14 * focus,
+            },
+            RoundtableBand::Here => match step_index {
+                0 => 1.0 + 0.20 * focus,
+                1 => 1.0 - 0.07 * focus,
+                _ => 1.0 - 0.10 * focus,
+            },
+            RoundtableBand::Beneath => match step_index {
+                0 => 1.0 - 0.12 * focus,
+                1 => 1.0 - 0.08 * focus,
+                _ => {
+                    let tail_bias =
+                        (1.0 - ((step_index.saturating_sub(2)) as f32 * 0.06)).clamp(0.82, 1.0);
+                    1.0 + 0.24 * focus * tail_bias
+                }
+            },
+        };
+        scale.clamp(0.7, 1.35)
+    }
 }
 
 #[cfg(test)]
@@ -266,5 +308,23 @@ mod tests {
         assert!(above > beneath);
         assert!(influence.scale_for_step(1) > influence.scale_for_step(0));
         assert!(above >= here * 0.95);
+    }
+
+    #[test]
+    fn band_pass_scaling_biases_matching_steps() {
+        let signal =
+            RoundtableBandSignal::new(BandEnergy::new(1.1, 0.5, 0.25).with_drift(0.3), (2, 1, 1));
+        let influence = RoundtableBandInfluence::from_signal(&signal);
+        let intensity = 0.75;
+        let above = influence.band_pass_scale_for_step(RoundtableBand::Above, 1, intensity);
+        let here = influence.band_pass_scale_for_step(RoundtableBand::Here, 0, intensity);
+        let beneath = influence.band_pass_scale_for_step(RoundtableBand::Beneath, 2, intensity);
+        assert!(above > 1.0);
+        assert!(here > 1.0);
+        assert!(beneath > 1.0);
+        assert!(influence.band_pass_scale_for_step(RoundtableBand::Above, 2, intensity) < above);
+        assert!(
+            influence.band_pass_scale_for_step(RoundtableBand::Beneath, 0, intensity) < beneath
+        );
     }
 }

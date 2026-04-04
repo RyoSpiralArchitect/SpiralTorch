@@ -1269,12 +1269,7 @@ mod tests {
         let bridge = RoundtableGnnBridge::new();
         let planner = RankPlanner::new(DeviceCaps::wgpu(32, true, 256));
         let schedule = RoundtableSchedule::new(&planner, 1, 4, RoundtableConfig::default());
-        let energy = BandEnergy {
-            above: 1.2,
-            here: 0.8,
-            beneath: 0.4,
-            drift: 0.1,
-        };
+        let energy = BandEnergy::new(1.2, 0.8, 0.4).with_drift(0.1);
 
         let signal = bridge.record(&schedule, &energy).unwrap();
         assert_eq!(bridge.len(), 1);

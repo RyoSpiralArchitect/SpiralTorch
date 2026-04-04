@@ -181,6 +181,7 @@ pub struct GraphRoundtableBandPassSample {
 pub struct GraphAggregationSample {
     pub base_coefficients: Vec<f32>,
     pub step_scales: Vec<f32>,
+    pub band_pass_scales: Vec<f32>,
     pub effective_coefficients: Vec<f32>,
 }
 
@@ -335,6 +336,7 @@ mod tests {
             aggregation: GraphAggregationSample {
                 base_coefficients: vec![1.0, 0.5, 0.25],
                 step_scales: vec![0.9, 1.2, 0.7],
+                band_pass_scales: vec![1.0, 1.1, 0.94],
                 effective_coefficients: vec![0.9, 0.6, 0.175],
             },
             band_pass: Some(GraphRoundtableBandPassSample {
