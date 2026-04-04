@@ -9,7 +9,12 @@ use super::PsiCoherenceAdaptor;
 use crate::module::{Module, Parameter};
 use crate::RoundtableBandInfluence;
 use crate::{PureResult, Tensor, TensorError};
-use st_core::telemetry::xai::{GraphFlowTracer, NodeFlowSample};
+use st_core::ops::zspace_round::RoundtableBand;
+use st_core::telemetry::xai::{
+    GraphAggregationSample, GraphFlowTracer, GraphRoundtableBandPassSample,
+    GraphRoundtableInfluenceSample, GraphRoundtableSignalSample, GraphRoundtableTrace,
+    NodeFlowSample,
+};
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 
@@ -143,6 +148,7 @@ impl NeighborhoodAggregation {
 struct AggregatedSupport {
     support: Tensor,
     coefficients: Vec<f32>,
+    roundtable: Option<GraphRoundtableTrace>,
 }
 
 impl AggregatedSupport {
@@ -152,6 +158,10 @@ impl AggregatedSupport {
 
     fn into_weights(self) -> Vec<f32> {
         self.coefficients
+    }
+
+    fn roundtable_trace(&self) -> Option<GraphRoundtableTrace> {
+        self.roundtable.clone()
     }
 }
 
@@ -168,6 +178,7 @@ pub struct ZSpaceGraphConvolution {
     #[cfg(feature = "psi")]
     coherence: Mutex<PsiCoherenceAdaptor>,
     roundtable: Option<RoundtableBandInfluence>,
+    active_band_pass: Option<GraphRoundtableBandPassSample>,
 }
 
 impl ZSpaceGraphConvolution {
@@ -209,6 +220,7 @@ impl ZSpaceGraphConvolution {
             #[cfg(feature = "psi")]
             coherence: Mutex::new(PsiCoherenceAdaptor::default()),
             roundtable: None,
+            active_band_pass: None,
         })
     }
 
@@ -235,15 +247,27 @@ impl ZSpaceGraphConvolution {
         self.roundtable = influence;
     }
 
+    /// Tags the next traced forward replay with the active gradient band.
+    pub fn set_roundtable_band_pass(&mut self, band: Option<GraphRoundtableBandPassSample>) {
+        self.active_band_pass = band;
+    }
+
     /// Returns the underlying graph context.
     pub fn context(&self) -> &GraphContext {
         &self.context
     }
 
-    fn record_forward_flows(&self, flows: Vec<NodeFlowSample>) {
+    fn record_forward_flows(
+        &self,
+        flows: Vec<NodeFlowSample>,
+        roundtable: Option<GraphRoundtableTrace>,
+    ) {
         if let Some(tracer) = &self.tracer {
             if let Ok(mut guard) = tracer.lock() {
                 guard.begin_layer(self.name.clone(), self.curvature, flows);
+                if let Some(trace) = roundtable {
+                    guard.annotate_roundtable(trace);
+                }
             }
         }
     }
@@ -271,28 +295,48 @@ impl ZSpaceGraphConvolution {
         let mut support = Tensor::zeros(rows, cols)?;
         let mut current = input.clone();
         let mut effective = Vec::with_capacity(weights.len());
+        let mut step_scales = Vec::with_capacity(weights.len());
+        let mut band_pass_scales = Vec::with_capacity(weights.len());
+        let active_band_pass = self.active_band_pass.as_ref();
+        let band_intensity = active_band_pass.map(band_pass_intensity).unwrap_or(0.0);
         for (idx, weight) in weights.iter().enumerate() {
             if idx > 0 {
                 current = self.context.propagate(&current)?;
             }
-            if weight.abs() > f32::EPSILON {
-                let scale = self
-                    .roundtable
-                    .as_ref()
-                    .map(|influence: &RoundtableBandInfluence| influence.scale_for_step(idx))
-                    .unwrap_or(1.0);
-                let coeff = weight * scale;
-                if coeff.abs() > f32::EPSILON {
-                    support.add_scaled(&current, coeff)?;
+            let roundtable_scale = self
+                .roundtable
+                .as_ref()
+                .map(|influence: &RoundtableBandInfluence| influence.scale_for_step(idx))
+                .unwrap_or(1.0);
+            let pass_scale = match (self.roundtable.as_ref(), active_band_pass) {
+                (Some(influence), Some(pass)) => {
+                    influence.band_pass_scale_for_step(pass.band, idx, band_intensity)
                 }
-                effective.push(coeff);
-            } else {
-                effective.push(*weight);
+                _ => 1.0,
+            };
+            let scale = roundtable_scale * pass_scale;
+            let coeff = weight * scale;
+            if coeff.abs() > f32::EPSILON {
+                support.add_scaled(&current, coeff)?;
             }
+            band_pass_scales.push(pass_scale);
+            step_scales.push(scale);
+            effective.push(coeff);
         }
+        let roundtable = self.roundtable.as_ref().map(|influence| {
+            build_roundtable_trace(
+                influence,
+                active_band_pass,
+                &weights,
+                &step_scales,
+                &band_pass_scales,
+                &effective,
+            )
+        });
         Ok(AggregatedSupport {
             support,
             coefficients: effective,
+            roundtable,
         })
     }
 
@@ -327,9 +371,7 @@ impl Module for ZSpaceGraphConvolution {
         let aggregated = self.aggregate_support(input)?;
         if self.tracer.is_some() {
             let flows = self.context.measure_flows(aggregated.support())?;
-            if !flows.is_empty() {
-                self.record_forward_flows(flows);
-            }
+            self.record_forward_flows(flows, aggregated.roundtable_trace());
         }
         let pack = self.weight.ensure_matmul_pack()?;
         let mut out = aggregated.support().matmul_prepacked(&pack)?;
@@ -392,9 +434,73 @@ fn l2_norm(data: &[f32]) -> f32 {
     data.iter().map(|v| v * v).sum::<f32>().sqrt()
 }
 
+fn band_pass_intensity(pass: &GraphRoundtableBandPassSample) -> f32 {
+    let concentration = (pass.gradient_l2 / pass.gradient_l1.max(1e-6)).clamp(0.0, 1.0);
+    let magnitude = (pass.gradient_rms / 0.04).clamp(0.0, 1.0);
+    (magnitude * (0.55 + 0.45 * concentration)).clamp(0.0, 1.0)
+}
+
+fn build_roundtable_trace(
+    influence: &RoundtableBandInfluence,
+    band_pass: Option<&GraphRoundtableBandPassSample>,
+    base_coefficients: &[f32],
+    step_scales: &[f32],
+    band_pass_scales: &[f32],
+    effective_coefficients: &[f32],
+) -> GraphRoundtableTrace {
+    let signal = influence.signal();
+    let energy = signal.energy();
+    let spectral = energy.spectral;
+    let (above_multiplier, here_multiplier, beneath_multiplier) = influence.multipliers();
+    GraphRoundtableTrace {
+        signal: GraphRoundtableSignalSample {
+            above: energy.above,
+            here: energy.here,
+            beneath: energy.beneath,
+            drift: energy.drift,
+            band_sizes: signal.band_sizes(),
+            sheet_index: spectral.sheet_index,
+            sheet_confidence: spectral.sheet_confidence,
+            curvature: spectral.curvature,
+            spin: spectral.spin,
+            energy: spectral.energy,
+        },
+        influence: GraphRoundtableInfluenceSample {
+            above_multiplier,
+            here_multiplier,
+            beneath_multiplier,
+            drift_bias: influence.drift_bias(),
+        },
+        aggregation: GraphAggregationSample {
+            base_coefficients: base_coefficients.to_vec(),
+            step_scales: step_scales.to_vec(),
+            band_pass_scales: band_pass_scales.to_vec(),
+            effective_coefficients: effective_coefficients.to_vec(),
+        },
+        band_pass: band_pass.cloned(),
+    }
+}
+
+pub(crate) fn band_pass_sample(
+    band: RoundtableBand,
+    gradient: &Tensor,
+) -> GraphRoundtableBandPassSample {
+    let gradient_l1 = gradient.data().iter().map(|value| value.abs()).sum::<f32>();
+    let gradient_l2 = gradient.squared_l2_norm().sqrt();
+    let gradient_rms = gradient_l2 / (gradient.data().len().max(1) as f32).sqrt();
+    GraphRoundtableBandPassSample {
+        band,
+        gradient_l1,
+        gradient_l2,
+        gradient_rms,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schedule::BandEnergy;
+    use crate::RoundtableBandSignal;
     use std::num::NonZeroUsize;
 
     #[test]
@@ -438,6 +544,109 @@ mod tests {
         assert_eq!(reports.len(), 1);
         assert_eq!(reports[0].layer, "gnn");
         assert!(reports[0].weight_update_magnitude.is_some());
+    }
+
+    #[test]
+    fn graph_convolution_traces_roundtable_coefficients() {
+        let adjacency =
+            Tensor::from_vec(3, 3, vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0]).unwrap();
+        let context = GraphContext::from_adjacency(adjacency).unwrap();
+        let tracer = Arc::new(Mutex::new(GraphFlowTracer::new()));
+        let mut layer = ZSpaceGraphConvolution::new("gnn_rt", context, 2, 1, -1.0, 0.05).unwrap();
+        layer.set_tracer(tracer.clone());
+        layer
+            .set_aggregation(
+                NeighborhoodAggregation::multi_hop_sum(NonZeroUsize::new(2).unwrap())
+                    .with_include_self(true)
+                    .with_attenuation(0.5),
+            )
+            .unwrap();
+        let signal =
+            RoundtableBandSignal::new(BandEnergy::new(0.9, 0.3, 0.1).with_drift(0.2), (2, 1, 1));
+        let influence = RoundtableBandInfluence::from_signal(&signal);
+        layer.set_roundtable_influence(Some(influence.clone()));
+        let input = Tensor::from_vec(3, 2, vec![1.0, 0.5, 0.5, -0.25, -0.5, 1.0]).unwrap();
+
+        let _ = layer.forward(&input).unwrap();
+
+        let reports = tracer
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .layers()
+            .to_vec();
+        let trace = reports[0]
+            .roundtable
+            .clone()
+            .expect("roundtable trace should be attached");
+        assert_eq!(trace.signal.band_sizes, (2, 1, 1));
+        assert_eq!(trace.aggregation.base_coefficients.len(), 3);
+        assert_eq!(trace.aggregation.step_scales.len(), 3);
+        assert_eq!(trace.aggregation.band_pass_scales.len(), 3);
+        assert_eq!(trace.aggregation.effective_coefficients.len(), 3);
+        assert!((trace.aggregation.step_scales[1] - influence.scale_for_step(1)).abs() < 1e-6);
+        assert_eq!(trace.aggregation.band_pass_scales, vec![1.0, 1.0, 1.0]);
+        assert!(trace.aggregation.effective_coefficients[1].abs() > 0.0);
+    }
+
+    #[test]
+    fn graph_convolution_trace_can_tag_band_pass() {
+        let adjacency = Tensor::from_vec(2, 2, vec![0.0, 1.0, 1.0, 0.0]).unwrap();
+        let context = GraphContext::from_adjacency(adjacency).unwrap();
+        let tracer = Arc::new(Mutex::new(GraphFlowTracer::new()));
+        let mut layer = ZSpaceGraphConvolution::new("gnn_band", context, 2, 1, -1.0, 0.05).unwrap();
+        layer.set_tracer(tracer.clone());
+        let signal = RoundtableBandSignal::new(BandEnergy::new(0.8, 0.4, 0.2), (1, 1, 1));
+        layer.set_roundtable_influence(Some(RoundtableBandInfluence::from_signal(&signal)));
+        let gradient = Tensor::from_vec(2, 1, vec![0.2, -0.1]).unwrap();
+        layer.set_roundtable_band_pass(Some(band_pass_sample(RoundtableBand::Here, &gradient)));
+        let input = Tensor::from_vec(2, 2, vec![1.0, 0.5, -0.5, 1.0]).unwrap();
+
+        let _ = layer.forward(&input).unwrap();
+
+        let reports = tracer
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .layers()
+            .to_vec();
+        let pass = reports[0]
+            .roundtable
+            .as_ref()
+            .and_then(|trace| trace.band_pass.as_ref())
+            .expect("band pass");
+        assert_eq!(pass.band, RoundtableBand::Here);
+        assert!(pass.gradient_l1 > 0.0);
+        assert!(pass.gradient_l2 > 0.0);
+        assert!(pass.gradient_rms > 0.0);
+        let trace = reports[0].roundtable.as_ref().expect("roundtable trace");
+        assert_eq!(trace.aggregation.band_pass_scales.len(), 2);
+        assert!(trace.aggregation.band_pass_scales[0] > 1.0);
+        assert!(trace.aggregation.band_pass_scales[1] < 1.0);
+    }
+
+    #[test]
+    fn graph_convolution_tiny_band_pass_stays_near_neutral() {
+        let adjacency = Tensor::from_vec(2, 2, vec![0.0, 1.0, 1.0, 0.0]).unwrap();
+        let context = GraphContext::from_adjacency(adjacency).unwrap();
+        let tracer = Arc::new(Mutex::new(GraphFlowTracer::new()));
+        let mut layer = ZSpaceGraphConvolution::new("gnn_tiny_band", context, 2, 1, -1.0, 0.05).unwrap();
+        layer.set_tracer(tracer.clone());
+        let signal = RoundtableBandSignal::new(BandEnergy::new(0.8, 0.4, 0.2), (1, 1, 1));
+        layer.set_roundtable_influence(Some(RoundtableBandInfluence::from_signal(&signal)));
+        let tiny_gradient = Tensor::from_vec(2, 1, vec![1.0e-6, -1.0e-6]).unwrap();
+        layer.set_roundtable_band_pass(Some(band_pass_sample(RoundtableBand::Here, &tiny_gradient)));
+        let input = Tensor::from_vec(2, 2, vec![1.0, 0.5, -0.5, 1.0]).unwrap();
+
+        let _ = layer.forward(&input).unwrap();
+
+        let reports = tracer
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .layers()
+            .to_vec();
+        let trace = reports[0].roundtable.as_ref().expect("roundtable trace");
+        assert_eq!(trace.aggregation.band_pass_scales.len(), 2);
+        assert!((trace.aggregation.band_pass_scales[0] - 1.0).abs() < 1.0e-3);
+        assert!((trace.aggregation.band_pass_scales[1] - 1.0).abs() < 1.0e-3);
     }
 
     #[test]

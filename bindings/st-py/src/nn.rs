@@ -13,6 +13,8 @@ use pyo3::exceptions::PyTypeError;
 use pyo3::exceptions::PyValueError;
 
 #[cfg(feature = "nn")]
+use crate::introspect::band_energy_detail_to_py;
+#[cfg(feature = "nn")]
 use crate::json::json_to_py;
 #[cfg(feature = "nn")]
 use crate::planner::{build_caps, parse_backend, PyRankPlan};
@@ -4103,6 +4105,27 @@ impl PyRoundtableSchedule {
         PyRankPlan::from_plan(self.inner.beneath().clone())
     }
 
+    pub fn band_energy(&self, gradient: &PyTensor) -> PyResult<(f32, f32, f32)> {
+        let energy = self
+            .inner
+            .band_energy(&gradient.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok((energy.above, energy.here, energy.beneath))
+    }
+
+    pub fn band_energy_detail(&self, py: Python<'_>, gradient: &PyTensor) -> PyResult<PyObject> {
+        let energy = self
+            .inner
+            .band_energy(&gradient.inner)
+            .map_err(tensor_err_to_py)?;
+        band_energy_detail_to_py(
+            py,
+            (energy.above, energy.here, energy.beneath),
+            Some(energy.drift),
+            Some(energy.spectral),
+        )
+    }
+
     fn __repr__(&self) -> String {
         let above = self.inner.above();
         let here = self.inner.here();
@@ -4696,16 +4719,74 @@ impl PyNnModuleTrainer {
         match metrics {
             Some(metrics) => {
                 let dict = PyDict::new_bound(py);
-                dict.set_item("absolute_lr_scale", metrics.absolute_lr_scale)?;
-                dict.set_item("sheet_index", metrics.sheet_index)?;
-                dict.set_item("sheet_count", metrics.sheet_count)?;
-                dict.set_item("spin_alignment", metrics.spin_alignment)?;
-                dict.set_item("spectral_radius", metrics.spectral_radius)?;
-                dict.set_item("spectral_entropy", metrics.spectral_entropy)?;
-                dict.set_item("spectral_pressure", metrics.spectral_pressure)?;
-                dict.set_item("energy_ratio", metrics.energy_ratio)?;
-                dict.set_item("band_scale", metrics.band_scale)?;
-                dict.set_item("local_lr", metrics.local_lr)?;
+                dict.set_item("source", metrics.source.as_str())?;
+                dict.set_item("turnover", metrics.turnover)?;
+                if let Some(label) = metrics.label {
+                    let label_code = match label {
+                        CoherenceLabel::Background => 0u8,
+                        CoherenceLabel::SymmetricPulse => 1u8,
+                        CoherenceLabel::CascadeImbalance => 2u8,
+                        CoherenceLabel::DiffuseDrift => 3u8,
+                    };
+                    dict.set_item("label", label.to_string())?;
+                    dict.set_item("label_code", label_code)?;
+                } else {
+                    dict.set_item("label", py.None())?;
+                    dict.set_item("label_code", py.None())?;
+                }
+
+                if let Some(adjustment) = metrics.adjustment.as_ref() {
+                    let adjustment_dict = PyDict::new_bound(py);
+                    adjustment_dict.set_item("absolute_lr_scale", adjustment.absolute_lr_scale)?;
+                    adjustment_dict.set_item("sheet_index", adjustment.sheet_index)?;
+                    adjustment_dict.set_item("sheet_count", adjustment.sheet_count)?;
+                    adjustment_dict.set_item("spin_alignment", adjustment.spin_alignment)?;
+                    adjustment_dict.set_item("spectral_radius", adjustment.spectral_radius)?;
+                    adjustment_dict.set_item("spectral_entropy", adjustment.spectral_entropy)?;
+                    adjustment_dict.set_item("spectral_pressure", adjustment.spectral_pressure)?;
+                    adjustment_dict.set_item("energy_ratio", adjustment.energy_ratio)?;
+                    adjustment_dict.set_item("band_scale", adjustment.band_scale)?;
+                    adjustment_dict.set_item("local_lr", adjustment.local_lr)?;
+
+                    dict.set_item("adjustment", &adjustment_dict)?;
+                    dict.set_item("absolute_lr_scale", adjustment.absolute_lr_scale)?;
+                    dict.set_item("sheet_index", adjustment.sheet_index)?;
+                    dict.set_item("sheet_count", adjustment.sheet_count)?;
+                    dict.set_item("spin_alignment", adjustment.spin_alignment)?;
+                    dict.set_item("spectral_radius", adjustment.spectral_radius)?;
+                    dict.set_item("spectral_entropy", adjustment.spectral_entropy)?;
+                    dict.set_item("spectral_pressure", adjustment.spectral_pressure)?;
+                    dict.set_item("energy_ratio", adjustment.energy_ratio)?;
+                    dict.set_item("band_scale", adjustment.band_scale)?;
+                    dict.set_item("local_lr", adjustment.local_lr)?;
+                } else {
+                    dict.set_item("adjustment", py.None())?;
+                }
+
+                if let Some(band) = metrics.band_energy {
+                    let band_dict = band_energy_detail_to_py(
+                        py,
+                        (band.above, band.here, band.beneath),
+                        Some(band.drift),
+                        Some(band.spectral),
+                    )?;
+                    dict.set_item("band", band_dict)?;
+                    dict.set_item("band_above", band.above)?;
+                    dict.set_item("band_here", band.here)?;
+                    dict.set_item("band_beneath", band.beneath)?;
+                    dict.set_item("band_drift", band.drift)?;
+                    dict.set_item("band_l1", band.l1())?;
+                    dict.set_item("band_sheet_index", band.spectral.sheet_index)?;
+                    dict.set_item("band_sheet_confidence", band.spectral.sheet_confidence)?;
+                    dict.set_item("band_curvature", band.spectral.curvature)?;
+                    dict.set_item("band_spin", band.spectral.spin)?;
+                    dict.set_item("band_mean_energy", band.spectral.energy)?;
+                    dict.set_item("band_focus", band.spectral_focus())?;
+                    dict.set_item("band_curvature_gate", band.spectral_curvature())?;
+                    dict.set_item("band_stability", band.spectral_stability())?;
+                } else {
+                    dict.set_item("band", py.None())?;
+                }
                 Ok(Some(dict.into_py(py)))
             }
             None => Ok(None),

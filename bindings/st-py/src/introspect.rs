@@ -3,6 +3,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3::wrap_pyfunction;
 
+use st_core::ops::zspace_round::SpectralFeatureSample;
 use st_core::telemetry::hub;
 use st_core::telemetry::hub::{SoftlogicEllipticSample, SoftlogicZFeedback};
 use st_core::telemetry::zspace_region::{
@@ -39,6 +40,66 @@ fn tensor3_to_tuple(values: [[f32; 3]; 3]) -> Tuple3x3 {
         (values[1][0], values[1][1], values[1][2]),
         (values[2][0], values[2][1], values[2][2]),
     )
+}
+
+pub(crate) fn band_energy_detail_to_py(
+    py: Python<'_>,
+    band_energy: (f32, f32, f32),
+    drift: Option<f32>,
+    spectral: Option<SpectralFeatureSample>,
+) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    let (above, here, beneath) = band_energy;
+    let total = above.abs() + here.abs() + beneath.abs();
+    let (norm_above, norm_here, norm_beneath) = if total <= f32::EPSILON {
+        (1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0)
+    } else {
+        (
+            (above / total).clamp(0.0, 1.0),
+            (here / total).clamp(0.0, 1.0),
+            (beneath / total).clamp(0.0, 1.0),
+        )
+    };
+    let asymmetry = if total <= f32::EPSILON {
+        0.0
+    } else {
+        ((above - beneath) / total).clamp(-1.0, 1.0)
+    };
+
+    dict.set_item("above", above)?;
+    dict.set_item("here", here)?;
+    dict.set_item("beneath", beneath)?;
+    dict.set_item("l1", total)?;
+    dict.set_item("asymmetry", asymmetry)?;
+    dict.set_item("drift", drift)?;
+
+    let normalized = PyDict::new_bound(py);
+    normalized.set_item("above", norm_above)?;
+    normalized.set_item("here", norm_here)?;
+    normalized.set_item("beneath", norm_beneath)?;
+    dict.set_item("normalized", normalized)?;
+
+    match spectral {
+        Some(spectral) => {
+            let curvature_gate = (spectral.curvature / 4.0).clamp(0.0, 1.0);
+            let stability = (spectral.spin.abs() * (1.0 - curvature_gate)).clamp(0.0, 1.0);
+            let spectral_dict = PyDict::new_bound(py);
+            spectral_dict.set_item("sheet_index", spectral.sheet_index)?;
+            spectral_dict.set_item("sheet_confidence", spectral.sheet_confidence)?;
+            spectral_dict.set_item("curvature", spectral.curvature)?;
+            spectral_dict.set_item("spin", spectral.spin)?;
+            spectral_dict.set_item("energy", spectral.energy)?;
+            spectral_dict.set_item("focus", spectral.sheet_confidence.clamp(0.0, 1.0))?;
+            spectral_dict.set_item("curvature_gate", curvature_gate)?;
+            spectral_dict.set_item("stability", stability)?;
+            dict.set_item("spectral", spectral_dict)?;
+        }
+        None => {
+            dict.set_item("spectral", py.None())?;
+        }
+    }
+
+    Ok(dict.into_py(py))
 }
 
 #[pyclass(module = "spiraltorch.zspace", name = "ZSpaceSpinBand")]
@@ -404,6 +465,10 @@ impl PySoftlogicZFeedback {
         self.inner.band_energy
     }
 
+    pub fn band_energy_detail(&self, py: Python<'_>) -> PyResult<PyObject> {
+        band_energy_detail_to_py(py, self.inner.band_energy, Some(self.inner.drift), None)
+    }
+
     #[getter]
     pub fn drift(&self) -> f32 {
         self.inner.drift
@@ -525,6 +590,10 @@ pub(crate) fn softlogic_signal(py: Python<'_>) -> PyResult<Option<PyObject>> {
     dict.set_item("psi_total", sample.psi_total)?;
     dict.set_item("weighted_loss", sample.weighted_loss)?;
     dict.set_item("band_energy", sample.band_energy)?;
+    dict.set_item(
+        "band_energy_detail",
+        band_energy_detail_to_py(py, sample.band_energy, Some(sample.drift), None)?,
+    )?;
     dict.set_item("drift", sample.drift)?;
     dict.set_item("z_signal", sample.z_signal)?;
     dict.set_item("scale", scale_to_tuple(sample.scale))?;

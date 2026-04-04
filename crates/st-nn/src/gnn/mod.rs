@@ -6,6 +6,7 @@
 #[cfg(feature = "psi")]
 pub mod coherence;
 use crate::schedule::{BandEnergy, RoundtableSchedule};
+use st_core::ops::zspace_round::RoundtableBand;
 use std::time::SystemTime;
 
 pub mod context;
@@ -107,15 +108,62 @@ impl RoundtableBandInfluence {
             k_here as f32 / depth as f32,
             k_beneath as f32 / depth as f32,
         ];
+        let spectral_focus = energy.spectral_focus();
+        let spectral_curvature = energy.spectral_curvature();
+        let spectral_stability = energy.spectral_stability();
+        let spectral_spin = energy.spectral.spin.clamp(-1.0, 1.0);
+        let bary_asymmetry = (bary[0] - bary[2]).abs().clamp(0.0, 1.0);
+        let energy_reliance =
+            (0.5 + 0.35 * spectral_focus + 0.25 * bary_asymmetry).clamp(0.55, 0.9);
+        let schedule_reliance = 1.0 - energy_reliance;
+        let occupancy = [
+            energy_reliance * bary[0] + schedule_reliance * share[0],
+            energy_reliance * bary[1] + schedule_reliance * share[1],
+            energy_reliance * bary[2] + schedule_reliance * share[2],
+        ];
+        let schedule_asymmetry = (occupancy[0] - occupancy[2]).clamp(-1.0, 1.0);
+        let direction =
+            (0.6 * schedule_asymmetry + 0.4 * spectral_focus * spectral_spin).clamp(-1.0, 1.0);
+        let curvature_pull = (spectral_focus * spectral_curvature).clamp(0.0, 1.0);
+        let edge_bias = (bary[0].max(bary[2]) - bary[1]).max(0.0);
+        let edge_emphasis =
+            (0.5 * edge_bias + 0.5 * direction.abs() * spectral_focus).clamp(0.0, 1.0);
+        let edge_lift = (1.0 + 0.18 * edge_emphasis).clamp(1.0, 1.35);
+        let center_damping = (1.0 - 0.24 * edge_emphasis).clamp(0.72, 1.0);
+        let stability_lift = (0.92 + 0.16 * spectral_stability + 0.10 * edge_bias).clamp(0.85, 1.2);
+        let neutrality =
+            ((occupancy[1] + spectral_stability + curvature_pull) / 3.0).clamp(0.0, 1.0);
+        let directional_relaxation = (1.0 - curvature_pull).clamp(0.65, 1.0);
         let mut multipliers = (
-            (0.7 + 0.6 * bary[0]) * (0.55 + 0.45 * share[0]),
-            (0.7 + 0.6 * bary[1]) * (0.55 + 0.45 * share[1]),
-            (0.7 + 0.6 * bary[2]) * (0.55 + 0.45 * share[2]),
+            (0.72 + 0.62 * occupancy[0])
+                * (1.0 + 0.26 * direction.max(0.0) + 0.12 * edge_bias)
+                * directional_relaxation,
+            (0.78 + 0.52 * occupancy[1])
+                * (1.0 + 0.18 * curvature_pull + 0.12 * neutrality)
+                * (1.0 + 0.07 * (1.0 - spectral_focus))
+                * center_damping,
+            (0.72 + 0.62 * occupancy[2])
+                * (1.0 + 0.26 * (-direction).max(0.0) + 0.12 * edge_bias)
+                * directional_relaxation,
         );
+        multipliers.0 *= edge_lift;
+        multipliers.2 *= edge_lift;
+        if direction > 0.0 {
+            multipliers.0 *= stability_lift;
+        } else if direction < 0.0 {
+            multipliers.2 *= stability_lift;
+        } else {
+            multipliers.1 *= stability_lift;
+        }
         multipliers.0 = multipliers.0.clamp(0.35, 1.75);
         multipliers.1 = multipliers.1.clamp(0.35, 1.75);
         multipliers.2 = multipliers.2.clamp(0.35, 1.75);
-        let drift_bias = (1.0 + energy.drift.tanh() * 0.2).clamp(0.5, 1.5);
+        let directional_bias = (0.55 * energy.drift.tanh() + 0.45 * direction).clamp(-1.0, 1.0);
+        let drift_bias = ((1.0 + 0.22 * directional_bias)
+            * (1.0 + 0.08 * edge_emphasis)
+            * (1.0 - 0.12 * curvature_pull)
+            * (1.0 - 0.06 * neutrality * spectral_stability))
+            .clamp(0.55, 1.45);
         Self {
             signal: signal.clone(),
             multipliers,
@@ -154,5 +202,129 @@ impl RoundtableBandInfluence {
         };
         scale = scale.clamp(0.25, 2.0);
         scale
+    }
+
+    /// Returns the replay-specific bias for a message passing step while a
+    /// particular gradient band is being replayed through `backward_bands()`.
+    pub fn band_pass_scale_for_step(
+        &self,
+        band: RoundtableBand,
+        step_index: usize,
+        intensity: f32,
+    ) -> f32 {
+        let intensity = intensity.clamp(0.0, 1.0);
+        let average =
+            ((self.multipliers.0 + self.multipliers.1 + self.multipliers.2) / 3.0).max(0.35);
+        let alignment = match band {
+            RoundtableBand::Above => (self.multipliers.0 / average).clamp(0.8, 1.35),
+            RoundtableBand::Here => (self.multipliers.1 / average).clamp(0.8, 1.35),
+            RoundtableBand::Beneath => (self.multipliers.2 / average).clamp(0.8, 1.35),
+        };
+        let focus = intensity * alignment;
+        let scale = match band {
+            RoundtableBand::Above => match step_index {
+                0 => 1.0 - 0.10 * focus,
+                1 => 1.0 + 0.24 * focus,
+                _ => 1.0 - 0.14 * focus,
+            },
+            RoundtableBand::Here => match step_index {
+                0 => 1.0 + 0.20 * focus,
+                1 => 1.0 - 0.07 * focus,
+                _ => 1.0 - 0.10 * focus,
+            },
+            RoundtableBand::Beneath => match step_index {
+                0 => 1.0 - 0.12 * focus,
+                1 => 1.0 - 0.08 * focus,
+                _ => {
+                    let tail_bias =
+                        (1.0 - ((step_index.saturating_sub(2)) as f32 * 0.06)).clamp(0.82, 1.0);
+                    1.0 + 0.24 * focus * tail_bias
+                }
+            },
+        };
+        scale.clamp(0.7, 1.35)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use st_core::ops::zspace_round::SpectralFeatureSample;
+
+    #[test]
+    fn directional_signal_biases_above_step() {
+        let signal = RoundtableBandSignal::new(
+            BandEnergy::new(1.4, 0.45, 0.2)
+                .with_drift(0.35)
+                .with_spectral(SpectralFeatureSample {
+                    sheet_index: 1,
+                    sheet_confidence: 0.9,
+                    curvature: 0.6,
+                    spin: 0.85,
+                    energy: 0.72,
+                }),
+            (4, 2, 2),
+        );
+        let influence = RoundtableBandInfluence::from_signal(&signal);
+        let (above, here, beneath) = influence.multipliers();
+        assert!(above > beneath);
+        assert!(influence.scale_for_step(1) > influence.scale_for_step(2));
+        assert!(above > here * 0.85);
+    }
+
+    #[test]
+    fn curvature_pull_reinforces_here_band() {
+        let signal = RoundtableBandSignal::new(
+            BandEnergy::new(0.3, 1.2, 0.3).with_spectral(SpectralFeatureSample {
+                sheet_index: 0,
+                sheet_confidence: 0.88,
+                curvature: 3.4,
+                spin: 0.1,
+                energy: 0.58,
+            }),
+            (2, 5, 2),
+        );
+        let influence = RoundtableBandInfluence::from_signal(&signal);
+        let (above, here, beneath) = influence.multipliers();
+        assert!(here > above);
+        assert!(here > beneath);
+        assert!(influence.scale_for_step(0) >= influence.scale_for_step(1));
+    }
+
+    #[test]
+    fn edge_skewed_signal_can_promote_above_step() {
+        let signal = RoundtableBandSignal::new(
+            BandEnergy::new(0.19, 0.14, 0.01).with_spectral(SpectralFeatureSample {
+                sheet_index: 0,
+                sheet_confidence: 0.62,
+                curvature: 0.48,
+                spin: 0.45,
+                energy: 0.08,
+            }),
+            (1, 2, 1),
+        );
+        let influence = RoundtableBandInfluence::from_signal(&signal);
+        let (above, here, beneath) = influence.multipliers();
+        assert!(above > beneath);
+        assert!(influence.scale_for_step(1) > influence.scale_for_step(0));
+        assert!(above >= here * 0.95);
+    }
+
+    #[test]
+    fn band_pass_scaling_biases_matching_steps() {
+        let signal =
+            RoundtableBandSignal::new(BandEnergy::new(1.1, 0.5, 0.25).with_drift(0.3), (2, 1, 1));
+        let influence = RoundtableBandInfluence::from_signal(&signal);
+        let intensity = 0.75;
+        let above = influence.band_pass_scale_for_step(RoundtableBand::Above, 1, intensity);
+        let here = influence.band_pass_scale_for_step(RoundtableBand::Here, 0, intensity);
+        let beneath = influence.band_pass_scale_for_step(RoundtableBand::Beneath, 2, intensity);
+        assert!(above > 1.0);
+        assert!(here > 1.0);
+        assert!(beneath > 1.0);
+        assert!(influence.band_pass_scale_for_step(RoundtableBand::Above, 2, intensity) < above);
+        assert!(
+            influence.band_pass_scale_for_step(RoundtableBand::Beneath, 0, intensity) < beneath
+        );
     }
 }

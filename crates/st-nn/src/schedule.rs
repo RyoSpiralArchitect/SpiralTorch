@@ -7,7 +7,7 @@ use crate::plan::RankPlanner;
 use crate::{PureResult, Tensor};
 use st_core::backend::unison_heuristics::Choice;
 use st_core::ops::rank_entry::RankPlan;
-use st_core::ops::zspace_round::{self, RoundtableBand, RoundtableError};
+use st_core::ops::zspace_round::{self, RoundtableBand, RoundtableError, SpectralFeatureSample};
 use st_tensor::TensorError;
 use std::collections::HashMap;
 
@@ -268,12 +268,13 @@ impl RoundtableSchedule {
             },
         })?;
         let (above, here, beneath) = assignment.energy(gradient.data());
-        Ok(BandEnergy {
-            above,
-            here,
-            beneath,
-            drift: 0.0,
-        })
+        let spectral = zspace_round::roundtable_spectral_features(
+            gradient.data(),
+            &self.above,
+            &self.here,
+            &self.beneath,
+        );
+        Ok(BandEnergy::new(above, here, beneath).with_spectral(spectral))
     }
 
     #[cfg(feature = "psychoid")]
@@ -500,6 +501,15 @@ impl GradientBands {
         [&self.above, &self.here, &self.beneath]
     }
 
+    /// Returns every band paired with its semantic roundtable label.
+    pub fn iter_labeled(&self) -> [(RoundtableBand, &Tensor); 3] {
+        [
+            (RoundtableBand::Above, &self.above),
+            (RoundtableBand::Here, &self.here),
+            (RoundtableBand::Beneath, &self.beneath),
+        ]
+    }
+
     /// Combines all bands back into a single tensor.
     pub fn combine(&self) -> PureResult<Tensor> {
         let (rows, cols) = self.above.shape();
@@ -543,9 +553,42 @@ pub struct BandEnergy {
     pub here: f32,
     pub beneath: f32,
     pub drift: f32,
+    pub spectral: SpectralFeatureSample,
 }
 
 impl BandEnergy {
+    pub fn new(above: f32, here: f32, beneath: f32) -> Self {
+        Self {
+            above,
+            here,
+            beneath,
+            drift: 0.0,
+            spectral: SpectralFeatureSample::default(),
+        }
+    }
+
+    pub fn with_drift(mut self, drift: f32) -> Self {
+        self.drift = drift;
+        self
+    }
+
+    pub fn with_spectral(mut self, spectral: SpectralFeatureSample) -> Self {
+        self.spectral = spectral;
+        self
+    }
+
+    pub fn spectral_focus(&self) -> f32 {
+        self.spectral.sheet_confidence.clamp(0.0, 1.0)
+    }
+
+    pub fn spectral_curvature(&self) -> f32 {
+        (self.spectral.curvature / 4.0).clamp(0.0, 1.0)
+    }
+
+    pub fn spectral_stability(&self) -> f32 {
+        (self.spectral.spin.abs() * (1.0 - self.spectral_curvature())).clamp(0.0, 1.0)
+    }
+
     /// Returns the L1 norm of the band magnitudes.
     pub fn l1(&self) -> f32 {
         self.above.abs() + self.here.abs() + self.beneath.abs()
@@ -560,6 +603,7 @@ impl BandEnergy {
                 here: 1.0 / 3.0,
                 beneath: 1.0 / 3.0,
                 drift: self.drift,
+                spectral: self.spectral,
             };
         }
         Self {
@@ -567,6 +611,7 @@ impl BandEnergy {
             here: (self.here / sum).clamp(0.0, 1.0),
             beneath: (self.beneath / sum).clamp(0.0, 1.0),
             drift: self.drift,
+            spectral: self.spectral,
         }
     }
 }
@@ -609,6 +654,8 @@ mod tests {
         assert!((energy.above - above).abs() < 1e-6);
         assert!((energy.here - here).abs() < 1e-6);
         assert!((energy.beneath - beneath).abs() < 1e-6);
+        assert!(energy.spectral.energy > 0.0);
+        assert!((0.0..=1.0).contains(&energy.spectral.sheet_confidence));
     }
 
     #[cfg(feature = "psi")]

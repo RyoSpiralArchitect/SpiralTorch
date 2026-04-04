@@ -4,9 +4,10 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use super::rank_entry::RankPlan;
+use std::cmp::Ordering;
 
 /// Compact summary of spectral statistics extracted from a Z-space tensor.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct SpectralFeatureSample {
     /// Sheet index with the highest accumulated magnitude.
     pub sheet_index: usize,
@@ -122,6 +123,21 @@ pub fn spectral_features(samples: &[f32], sheet_hint: usize) -> Option<SpectralF
     SpectralFeatureSample::from_slice(samples, sheet_hint)
 }
 
+pub fn roundtable_spectral_features(
+    samples: &[f32],
+    above: &RankPlan,
+    here: &RankPlan,
+    beneath: &RankPlan,
+) -> SpectralFeatureSample {
+    let len = samples.len().max(1);
+    let sheet_hint = RoundtableChoiceProfile::from_plan(above, len)
+        .sheet_hint
+        .max(RoundtableChoiceProfile::from_plan(here, len).sheet_hint)
+        .max(RoundtableChoiceProfile::from_plan(beneath, len).sheet_hint)
+        .max(1);
+    SpectralFeatureSample::from_slice(samples, sheet_hint).unwrap_or_default()
+}
+
 /// Roundtable band classification used to map gradients into Above/Here/Beneath
 /// streams without requiring tensor dependencies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -139,6 +155,179 @@ impl RoundtableBand {
             RoundtableBand::Beneath => "beneath",
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct RoundtableChoiceProfile {
+    sheet_hint: usize,
+    spectral_gain: f32,
+    coherence_gain: f32,
+    neutrality_gain: f32,
+}
+
+impl RoundtableChoiceProfile {
+    fn from_plan(plan: &RankPlan, len: usize) -> Self {
+        let choice = &plan.choice;
+        let safe_len = len.max(1) as u32;
+        let sheet_hint = choice
+            .fft_segments
+            .max(1)
+            .saturating_mul(choice.fft_radix.clamp(2, 4))
+            .div_ceil(2)
+            .clamp(1, safe_len) as usize;
+        let segment_drive = (choice.fft_segments.saturating_sub(1).min(3) as f32) / 3.0;
+        let radix_drive = (choice.fft_radix.clamp(2, 4).saturating_sub(2) as f32) / 2.0;
+        let lane_density = (choice.kl.max(1) as f32 / choice.wg.max(1) as f32).clamp(0.0, 1.0);
+        let merge_drive = match choice.mk {
+            2 => 1.0,
+            1 => 0.55,
+            _ => 0.2,
+        };
+        let compaction_drive = if choice.tile > 0 {
+            (choice.ctile as f32 / choice.tile.max(1) as f32).clamp(0.0, 1.0)
+        } else if choice.ctile > 0 {
+            0.5
+        } else {
+            0.0
+        };
+        let latency_drive = choice
+            .latency_window
+            .map(|window| (window.slack as f32 / window.target.max(1) as f32).clamp(0.0, 1.0))
+            .unwrap_or(0.0);
+
+        Self {
+            sheet_hint,
+            spectral_gain: (0.02
+                + 0.05 * segment_drive
+                + 0.03 * radix_drive
+                + if choice.subgroup { 0.015 } else { 0.0 })
+            .clamp(0.0, 0.14),
+            coherence_gain: (0.015
+                + 0.055 * merge_drive
+                + 0.04 * lane_density
+                + if choice.subgroup { 0.03 } else { 0.0 })
+            .clamp(0.0, 0.16),
+            neutrality_gain: (0.01 + 0.07 * compaction_drive + 0.08 * latency_drive)
+                .clamp(0.0, 0.16),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct RoundtableLaneStats {
+    rel_mag: f32,
+    coherence: f32,
+    instability: f32,
+    sheet_affinity: f32,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ScoredLane {
+    idx: usize,
+    mag: f32,
+    score: f32,
+}
+
+fn lane_coherence(samples: &[f32], idx: usize) -> f32 {
+    let current = samples[idx];
+    let mut signed = 0.0f32;
+    let mut total = 0.0f32;
+    for offset in [-1isize, 1] {
+        let neighbor = idx as isize + offset;
+        if !(0..samples.len() as isize).contains(&neighbor) {
+            continue;
+        }
+        let neighbor = neighbor as usize;
+        let weight = current.abs().min(samples[neighbor].abs()).max(1e-6);
+        total += weight;
+        signed += if current * samples[neighbor] >= 0.0 {
+            weight
+        } else {
+            -weight
+        };
+    }
+    if total <= f32::EPSILON {
+        0.5
+    } else {
+        ((signed / total) + 1.0).mul_add(0.5, 0.0).clamp(0.0, 1.0)
+    }
+}
+
+fn lane_instability(samples: &[f32], idx: usize, global_curvature: f32) -> f32 {
+    let left = idx
+        .checked_sub(1)
+        .map(|pos| samples[pos])
+        .unwrap_or(samples[idx]);
+    let center = samples[idx];
+    let right = samples.get(idx + 1).copied().unwrap_or(center);
+    let second = (right - 2.0 * center + left).abs();
+    let scale = left.abs() + center.abs() + right.abs() + 1e-6;
+    let local = (second / scale).clamp(0.0, 1.0);
+    if global_curvature <= f32::EPSILON {
+        local
+    } else {
+        (0.5 * local + 0.5 * (local / global_curvature.max(1e-6)).clamp(0.0, 1.0)).clamp(0.0, 1.0)
+    }
+}
+
+fn sheet_affinity(samples: &[f32], sheet_hint: usize) -> (Vec<f32>, f32) {
+    if samples.is_empty() {
+        return (Vec::new(), 0.0);
+    }
+    let sheet_count = sheet_hint.max(1).min(samples.len());
+    let window = samples.len().div_ceil(sheet_count);
+    let mut sheet_energy = vec![0.0f32; sheet_count];
+    for (idx, sample) in samples.iter().enumerate() {
+        let segment = (idx / window).min(sheet_count - 1);
+        sheet_energy[segment] += sample.abs();
+    }
+    let total_energy = sheet_energy.iter().copied().sum::<f32>().max(1e-6);
+    let (dominant_idx, dominant_energy) = sheet_energy
+        .iter()
+        .copied()
+        .enumerate()
+        .max_by(|lhs, rhs| lhs.1.partial_cmp(&rhs.1).unwrap_or(Ordering::Equal))
+        .unwrap_or((0, 0.0));
+    let max_energy = dominant_energy.max(1e-6);
+    let dominant_confidence = (dominant_energy / total_energy).clamp(0.0, 1.0);
+    let affinity = (0..samples.len())
+        .map(|idx| {
+            let segment = (idx / window).min(sheet_count - 1);
+            let energy = sheet_energy[segment];
+            if segment == dominant_idx {
+                1.0
+            } else {
+                (energy / max_energy).clamp(0.0, 1.0)
+            }
+        })
+        .collect();
+    (affinity, dominant_confidence)
+}
+
+fn top_score(
+    lane: RoundtableLaneStats,
+    above: RoundtableChoiceProfile,
+    here: RoundtableChoiceProfile,
+    dominant_confidence: f32,
+) -> f32 {
+    let stability = lane.coherence * (1.0 - lane.instability);
+    lane.rel_mag
+        + above.spectral_gain * lane.sheet_affinity * dominant_confidence
+        + above.coherence_gain * lane.coherence
+        - here.neutrality_gain * stability * 0.45
+}
+
+fn bottom_score(
+    lane: RoundtableLaneStats,
+    beneath: RoundtableChoiceProfile,
+    here: RoundtableChoiceProfile,
+    dominant_confidence: f32,
+) -> f32 {
+    let stability = lane.coherence * (1.0 - lane.instability);
+    (1.0 - lane.rel_mag)
+        + beneath.spectral_gain * (1.0 - lane.sheet_affinity) * dominant_confidence
+        + beneath.coherence_gain * (1.0 - lane.coherence)
+        - here.neutrality_gain * stability * 0.3
 }
 
 /// Error returned when a gradient cannot be split into bands.
@@ -217,44 +406,95 @@ pub fn classify_roundtable(
         return Err(RoundtableError::EmptyGradient);
     }
 
-    let mut indexed: Vec<(usize, f32)> = gradient
-        .iter()
-        .enumerate()
-        .map(|(idx, value)| (idx, value.abs()))
-        .collect();
-    indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-    let len = indexed.len();
+    let len = gradient.len();
     let top = usize::min(above.k as usize, len);
     let bottom = usize::min(beneath.k as usize, len.saturating_sub(top));
-    let leftover = len.saturating_sub(top + bottom);
-    let here_target = usize::min(here.k as usize, leftover);
+
+    let above_profile = RoundtableChoiceProfile::from_plan(above, len);
+    let here_profile = RoundtableChoiceProfile::from_plan(here, len);
+    let beneath_profile = RoundtableChoiceProfile::from_plan(beneath, len);
+    let sheet_hint = above_profile
+        .sheet_hint
+        .max(here_profile.sheet_hint)
+        .max(beneath_profile.sheet_hint)
+        .max(1);
+    let (sheet_affinity, dominant_confidence) = sheet_affinity(gradient, sheet_hint);
+    let max_mag = gradient
+        .iter()
+        .map(|value| value.abs())
+        .fold(0.0f32, f32::max)
+        .max(1e-6);
+    let global_curvature = estimate_curvature(gradient).clamp(0.0, 1.0);
+    let lane_stats = gradient
+        .iter()
+        .enumerate()
+        .map(|(idx, value)| RoundtableLaneStats {
+            rel_mag: (value.abs() / max_mag).clamp(0.0, 1.0),
+            coherence: lane_coherence(gradient, idx),
+            instability: lane_instability(gradient, idx, global_curvature),
+            sheet_affinity: sheet_affinity.get(idx).copied().unwrap_or(1.0),
+        })
+        .collect::<Vec<_>>();
 
     let mut bands = vec![RoundtableBand::Here; len];
-
-    for &(idx, _) in indexed.iter().take(top) {
+    let mut top_ranked = gradient
+        .iter()
+        .enumerate()
+        .map(|(idx, value)| ScoredLane {
+            idx,
+            mag: value.abs(),
+            score: top_score(
+                lane_stats[idx],
+                above_profile,
+                here_profile,
+                dominant_confidence,
+            ),
+        })
+        .collect::<Vec<_>>();
+    top_ranked.sort_by(|lhs, rhs| {
+        rhs.score
+            .partial_cmp(&lhs.score)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| rhs.mag.partial_cmp(&lhs.mag).unwrap_or(Ordering::Equal))
+            .then_with(|| lhs.idx.cmp(&rhs.idx))
+    });
+    for entry in top_ranked.iter().take(top) {
+        let idx = entry.idx;
         bands[idx] = RoundtableBand::Above;
     }
 
-    for &(idx, _) in indexed.iter().rev().take(bottom) {
-        bands[idx] = RoundtableBand::Beneath;
-    }
-
-    if here_target > 0 {
-        let mut assigned = 0usize;
-        let mid_end = len.saturating_sub(bottom);
-        for &(idx, _) in indexed.iter().skip(top).take(mid_end.saturating_sub(top)) {
-            if bands[idx] == RoundtableBand::Here {
-                assigned += 1;
-                if assigned >= here_target {
-                    break;
-                }
-            }
+    let mut bottom_ranked = gradient
+        .iter()
+        .enumerate()
+        .filter(|(idx, _)| bands[*idx] != RoundtableBand::Above)
+        .map(|(idx, value)| ScoredLane {
+            idx,
+            mag: value.abs(),
+            score: bottom_score(
+                lane_stats[idx],
+                beneath_profile,
+                here_profile,
+                dominant_confidence,
+            ),
+        })
+        .collect::<Vec<_>>();
+    bottom_ranked.sort_by(|lhs, rhs| {
+        rhs.score
+            .partial_cmp(&lhs.score)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| lhs.mag.partial_cmp(&rhs.mag).unwrap_or(Ordering::Equal))
+            .then_with(|| lhs.idx.cmp(&rhs.idx))
+    });
+    for entry in bottom_ranked.iter().take(bottom) {
+        let idx = entry.idx;
+        if bands[idx] != RoundtableBand::Above {
+            bands[idx] = RoundtableBand::Beneath;
         }
     }
 
     let tol = tolerance.max(0.0);
-    for &(idx, magnitude) in &indexed {
+    for (idx, value) in gradient.iter().enumerate() {
+        let magnitude = value.abs();
         if magnitude <= tol {
             bands[idx] = RoundtableBand::Here;
         }
@@ -325,6 +565,40 @@ mod tests {
         assert!(above >= 1.0);
         assert!(beneath >= 0.25);
         assert!((above + here + beneath) - 3.75 < 1e-4);
+    }
+
+    #[test]
+    fn rich_choice_can_shift_above_membership() {
+        let gradient = [0.93, 0.88, 0.10, 0.10, 0.89, 0.20, 0.10, 0.10];
+        let mut rich_above = plan(RankKind::TopK, 2);
+        rich_above.choice.subgroup = true;
+        rich_above.choice.mk = 2;
+        rich_above.choice.fft_segments = 2;
+        rich_above.choice.fft_radix = 4;
+        rich_above.choice.wg = 128;
+        rich_above.choice.kl = 64;
+
+        let baseline = classify_roundtable(
+            &gradient,
+            &plan(RankKind::TopK, 2),
+            &plan(RankKind::MidK, 4),
+            &plan(RankKind::BottomK, 1),
+            0.0,
+        )
+        .unwrap();
+        let enriched = classify_roundtable(
+            &gradient,
+            &rich_above,
+            &plan(RankKind::MidK, 4),
+            &plan(RankKind::BottomK, 1),
+            0.0,
+        )
+        .unwrap();
+
+        assert_eq!(baseline.band(4), RoundtableBand::Above);
+        assert_eq!(baseline.band(1), RoundtableBand::Here);
+        assert_eq!(enriched.band(1), RoundtableBand::Above);
+        assert_eq!(enriched.band(4), RoundtableBand::Here);
     }
 
     #[test]

@@ -84,6 +84,7 @@ impl GraphConsensusBridge {
                     beneath: baseline.beneath,
                     graph: 0.0,
                     drift: baseline.drift,
+                    spectral: baseline.spectral,
                 },
                 barycentric: [0.25, 0.25, 0.25, 0.25],
                 multipliers: (1.0, 1.0, 1.0),
@@ -106,6 +107,7 @@ impl GraphConsensusBridge {
             beneath: baseline.beneath,
             graph: total_graph_energy,
             drift: baseline.drift,
+            spectral: baseline.spectral,
         };
         let barycentric = quad_energy.barycentric();
         let base_sum = baseline.above.abs() + baseline.here.abs() + baseline.beneath.abs();
@@ -228,12 +230,7 @@ mod tests {
     fn digest_builds_script_and_multipliers() {
         let tracer = Arc::new(Mutex::new(GraphFlowTracer::new()));
         let bridge = GraphConsensusBridge::new(tracer.clone());
-        let baseline = BandEnergy {
-            above: 0.4,
-            here: 0.3,
-            beneath: 0.2,
-            drift: 0.1,
-        };
+        let baseline = BandEnergy::new(0.4, 0.3, 0.2).with_drift(0.1);
         tracer
             .lock()
             .map(|mut guard| guard.begin_layer("gnn::conv1", -1.0, sample_flows(0.5)))

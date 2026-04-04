@@ -61,20 +61,10 @@ mod tests {
     #[test]
     fn injector_respects_bounds() {
         let mut inj = Injector::with_rank(4, 1.0).with_bounds(2, 8);
-        let band = BandEnergy {
-            above: 0.9,
-            here: 0.05,
-            beneath: 0.05,
-            drift: 0.0,
-        };
+        let band = BandEnergy::new(0.9, 0.05, 0.05);
         inj.rank_gate(band, 0.5);
         assert!(inj.rank() >= 4);
-        let suppress = BandEnergy {
-            above: 0.1,
-            here: 0.7,
-            beneath: 0.2,
-            drift: 0.0,
-        };
+        let suppress = BandEnergy::new(0.1, 0.7, 0.2);
         inj.rank_gate(suppress, -0.8);
         assert!(inj.rank() >= 2);
     }
