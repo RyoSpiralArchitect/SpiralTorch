@@ -296,7 +296,7 @@ pip install -U spiraltorch==0.4.6
 - The published wheel is built with `wgpu,logic,kdsl` (CPU always available; WGPU activates when a compatible backend is present).
 - For macOS < 14 or other targets, build from source.
 
-### ✅ pipでできること (wheel)
+### wheel
 
 Without cloning the repo, `pip install spiraltorch` gives you:
 
