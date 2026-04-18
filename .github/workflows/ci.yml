@@ -7,6 +7,14 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  version-consistency:
+    name: bindings/st-py version consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: pyproject.toml ↔ Cargo.toml version match
+        run: bash scripts/check_version_consistency.sh
+
   build-test:
     name: build & test (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
