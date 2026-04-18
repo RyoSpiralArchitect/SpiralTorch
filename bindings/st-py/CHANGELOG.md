@@ -1,5 +1,31 @@
 # SpiralTorch (Python) changelog
 
+## 0.4.7
+
+- `nn`: add training-mode handling, norm-state propagation, and gradient-clipping support in module training workflows.
+- `spiralk`: re-export `MaxwellFingerprint`, `MeaningGate`, `SequentialZ`, `MaxwellPulse`, `MaxwellProjector`, and the expectation helpers (`required_blocks`, `expected_z_curve`, `polarisation_slope`) at the top level so `import spiraltorch as st` quickstarts work as documented.
+- Wheels CI: add Maxwell quickstart coverage in smoke tests and remove brittle trace/live-server checks from the cross-platform `Wheels` workflow.
+
+## 0.4.6
+
+- Wheels CI: replace the deprecated `--universal2` flag with `--target universal2-apple-darwin` (matches current maturin) on macOS, and switch Linux builds to `--compatibility manylinux2014 --zig` (with `maturin[zig]`) for more reliable cross-compilation. Applied to both `release_wheels.yml` and `wheels.yml`. No API changes.
+
+## 0.4.5
+
+- Wheels CI: install macOS cross-compilation targets (`aarch64-apple-darwin`, `x86_64-apple-darwin`) before building universal2 wheels — the prior pipeline assumed the targets were already present and failed on fresh runners. Mirrored in both `wheels.yml` and `release_wheels.yml`. No API changes.
+
+## 0.4.4
+
+- Wheels CI: consolidate the macOS matrix to a single `macos-latest` / macosx14 / universal2 wheel (covering arm64 + x86_64), drop the separate `macos-15-intel` and macosx11-arm64 jobs, and thread a `universal2` flag through the matrix. Linux (ubuntu-22.04) and Windows (windows-2022) entries unchanged. README install instructions updated to match the new wheel matrix. No API changes.
+
+## 0.4.3
+
+- _No source changes._ Version metadata + README pin bump only; re-publish of 0.4.2 to align wheel artifacts with the tagged version.
+
+## 0.4.2
+
+- _No source changes._ Version metadata + README pin bump only.
+
 ## 0.4.1
 
 - Model zoo: add runnable Python baselines for `vision_conv_pool_classification.py` and `zspace_vae_reconstruction.py`.

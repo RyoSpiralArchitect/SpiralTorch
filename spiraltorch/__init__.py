@@ -1,9 +1,38 @@
-"""Development shim for the SpiralTorch Python bindings.
+"""Source-checkout entry point for the SpiralTorch Python package.
 
-This module lets ``import spiraltorch`` succeed directly from a source
-checkout without first installing the wheel.  It delegates to the real
-package that lives under ``bindings/st-py`` and improves the error message
-when the compiled extension has not been built yet.
+When ``import spiraltorch`` runs from a working copy of this repository
+(rather than the published wheel), this module is what Python finds.
+It is *not* a thin shim — it does three distinct things:
+
+1. **Re-exec into the real package.** It loads
+   ``bindings/st-py/spiraltorch/__init__.py`` and adopts its namespace so
+   callers see the same surface as the wheel installed from PyPI.
+2. **Detect a missing native extension.** If the real package imports but
+   the compiled Rust extension (``spiraltorch_native`` /
+   ``spiraltorch.spiraltorch``) is not built, this module silently swaps
+   in a pure-Python stub (``_install_stub_bindings``) and emits a
+   ``RuntimeWarning``.
+3. **Carry the pure-Python stub itself.** The stub re-implements a usable
+   subset of the API (``Tensor`` with a tiled matmul, spiral-consensus
+   helpers, ``LabeledTensor`` / ``Axis`` machinery, etc.) so tests and
+   examples can run without the wheel. Other classes — notably
+   ``ScaleStack`` — exist only as placeholders that raise.
+
+What this means in practice:
+
+- The stub is **functional but not performance-equivalent** to the native
+  build. Any benchmark against PyTorch (e.g. ``bench_st_vs_torch.py``) is
+  only meaningful when the native extension is loaded; otherwise the
+  numbers are pure-Python loops and should not be cited.
+- If you see a ``RuntimeWarning`` mentioning the stub, the API you are
+  calling is the Python re-implementation, not the WGPU/Faer-backed one.
+
+To build and load the native bindings::
+
+    maturin develop -m bindings/st-py/Cargo.toml
+
+Users who installed the wheel from PyPI never load this file — the wheel
+ships its own ``spiraltorch/__init__.py`` from ``bindings/st-py``.
 """
 
 from __future__ import annotations
