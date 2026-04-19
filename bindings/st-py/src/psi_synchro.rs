@@ -147,7 +147,10 @@ fn atlas_fragment_to_py(py: Python<'_>, fragment: AtlasFragment) -> PyResult<PyO
     } else {
         dict.set_item("chrono_harmonics", py.None())?;
     }
-    dict.set_item("maintainer_status", maintainer_status_to_py(fragment.maintainer_status))?;
+    dict.set_item(
+        "maintainer_status",
+        maintainer_status_to_py(fragment.maintainer_status),
+    )?;
     dict.set_item("maintainer_diagnostic", fragment.maintainer_diagnostic)?;
     dict.set_item("suggested_max_scale", fragment.suggested_max_scale)?;
     dict.set_item("suggested_pressure", fragment.suggested_pressure)?;
@@ -163,12 +166,8 @@ fn atlas_fragment_to_py(py: Python<'_>, fragment: AtlasFragment) -> PyResult<PyO
     dict.set_item("notes", fragment.notes.clone())?;
     let concepts = PyList::empty_bound(py);
     for concept in fragment.concepts.iter() {
-        let annotation = concept_annotation_to_py(
-            py,
-            &concept.term,
-            concept.sense,
-            concept.rationale.as_ref(),
-        )?;
+        let annotation =
+            concept_annotation_to_py(py, &concept.term, concept.sense, concept.rationale.as_ref())?;
         concepts.append(annotation)?;
     }
     dict.set_item("concepts", concepts)?;

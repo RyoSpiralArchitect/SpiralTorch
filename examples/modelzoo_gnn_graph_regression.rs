@@ -4,8 +4,8 @@
 
 use st_core::backend::device_caps::DeviceCaps;
 use st_nn::{
-    load_json, save_json, EpochStats, GraphActivation, GraphContext, GraphLayerSpec, MeanSquaredError,
-    Module, ModuleTrainer, RoundtableConfig, Tensor, ZSpaceGraphNetwork,
+    load_json, save_json, EpochStats, GraphActivation, GraphContext, GraphLayerSpec,
+    MeanSquaredError, Module, ModuleTrainer, RoundtableConfig, Tensor, ZSpaceGraphNetwork,
     ZSpaceGraphNetworkBuilder,
 };
 use std::num::NonZeroUsize;
@@ -93,4 +93,3 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-

@@ -31,9 +31,9 @@ pub use sequencer::{
     CoherenceSignature, PreDiscardPolicy, PreDiscardRegulator, PreDiscardSnapshot,
     PreDiscardTelemetry, ZSpaceCoherenceSequencer, ZSpaceSequencerPlugin, ZSpaceSequencerStage,
 };
-pub use trace::{
-    coherence_relation_tensor, ZSpaceTrace, ZSpaceTraceConfig, ZSpaceTraceEvent,
-    ZSpaceTraceRecord, ZSpaceTraceRecorder,
-};
 pub use text_vae::ZSpaceTextVae;
+pub use trace::{
+    coherence_relation_tensor, ZSpaceTrace, ZSpaceTraceConfig, ZSpaceTraceEvent, ZSpaceTraceRecord,
+    ZSpaceTraceRecorder,
+};
 pub use vae::{MellinBasis, ZSpaceVae, ZSpaceVaeState, ZSpaceVaeStats};

@@ -20,9 +20,9 @@ fn collect_tensors(py: Python<'_>, inputs: &Bound<'_, PyAny>) -> PyResult<Vec<Te
     let mut out = Vec::new();
     for item in iter {
         let item = item?;
-        let handle: Py<PyTensor> = item.extract().map_err(|_| {
-            PyTypeError::new_err("inputs must contain only Tensor objects")
-        })?;
+        let handle: Py<PyTensor> = item
+            .extract()
+            .map_err(|_| PyTypeError::new_err("inputs must contain only Tensor objects"))?;
         out.push(handle.bind(py).borrow().inner.clone());
     }
     Ok(out)
@@ -79,12 +79,11 @@ fn call_python_forward(
         for tensor in inputs {
             input_vec.push((*tensor).clone());
         }
-        let py_inputs = tensors_to_pylist(py, &input_vec).map_err(|err| {
-            TensorError::Generic(format!("failed to build input list: {err}"))
-        })?;
-        let callback = callback.lock().map_err(|_| {
-            TensorError::Generic("operator callback lock was poisoned".to_string())
-        })?;
+        let py_inputs = tensors_to_pylist(py, &input_vec)
+            .map_err(|err| TensorError::Generic(format!("failed to build input list: {err}")))?;
+        let callback = callback
+            .lock()
+            .map_err(|_| TensorError::Generic("operator callback lock was poisoned".to_string()))?;
         let result = callback
             .call1(py, (py_inputs,))
             .map_err(|err| pyerr_to_tensor(err, "operator forward"))?;
@@ -127,9 +126,9 @@ fn call_python_backward(
             .map_err(|err| TensorError::Generic(format!("failed to build output list: {err}")))?;
         let py_grads = tensors_to_pylist(py, &grad_vec)
             .map_err(|err| TensorError::Generic(format!("failed to build grad list: {err}")))?;
-        let callback = callback.lock().map_err(|_| {
-            TensorError::Generic("operator callback lock was poisoned".to_string())
-        })?;
+        let callback = callback
+            .lock()
+            .map_err(|_| TensorError::Generic("operator callback lock was poisoned".to_string()))?;
         let result = callback
             .call1(py, (py_inputs, py_outputs, py_grads))
             .map_err(|err| pyerr_to_tensor(err, "operator backward"))?;
@@ -151,9 +150,9 @@ fn parse_attributes(attrs: Option<&Bound<'_, PyAny>>) -> PyResult<HashMap<String
     let Some(attrs) = attrs else {
         return Ok(map);
     };
-    let dict = attrs.downcast::<PyDict>().map_err(|_| {
-        PyTypeError::new_err("attributes must be a dict[str, str]")
-    })?;
+    let dict = attrs
+        .downcast::<PyDict>()
+        .map_err(|_| PyTypeError::new_err("attributes must be a dict[str, str]"))?;
     for (key, value) in dict.iter() {
         let key: String = key.extract()?;
         let value: String = value.extract().map_err(|_| {
@@ -204,10 +203,16 @@ fn register(
     let backward_fn = backward.map(|backward| {
         let backward_cb = Arc::new(Mutex::new(backward));
         let expected_grads = num_inputs;
-        Arc::new(move |inputs: &[&Tensor], outputs: &[&Tensor], grads: &[&Tensor]| {
-            call_python_backward(&backward_cb, inputs, outputs, grads, expected_grads)
-        })
-            as Arc<dyn Fn(&[&Tensor], &[&Tensor], &[&Tensor]) -> Result<Vec<Tensor>, TensorError> + Send + Sync>
+        Arc::new(
+            move |inputs: &[&Tensor], outputs: &[&Tensor], grads: &[&Tensor]| {
+                call_python_backward(&backward_cb, inputs, outputs, grads, expected_grads)
+            },
+        )
+            as Arc<
+                dyn Fn(&[&Tensor], &[&Tensor], &[&Tensor]) -> Result<Vec<Tensor>, TensorError>
+                    + Send
+                    + Sync,
+            >
     });
 
     let mut builder = OperatorBuilder::new(name, num_inputs, num_outputs);
@@ -242,7 +247,12 @@ fn register(
 
 #[pyfunction]
 #[pyo3(signature = (name, inputs, *, return_single=false))]
-fn execute(py: Python<'_>, name: &str, inputs: &Bound<'_, PyAny>, return_single: bool) -> PyResult<PyObject> {
+fn execute(
+    py: Python<'_>,
+    name: &str,
+    inputs: &Bound<'_, PyAny>,
+    return_single: bool,
+) -> PyResult<PyObject> {
     let tensors = collect_tensors(py, inputs)?;
     let refs: Vec<&Tensor> = tensors.iter().collect();
     let outputs = global_operator_registry()

@@ -11,12 +11,12 @@ use st_core::backend::cuda_exec::CudaExecutor;
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 #[cfg(feature = "hip")]
 use st_core::backend::hip_exec::HipExecutor;
-#[cfg(any(feature = "cuda", feature = "hip"))]
-use st_core::backend::rankk_launch::LaunchBuffers;
 #[cfg(feature = "cuda")]
 use st_core::backend::rankk_launch::with_launch_buffers_cuda;
 #[cfg(feature = "hip")]
 use st_core::backend::rankk_launch::with_launch_buffers_hip;
+#[cfg(any(feature = "cuda", feature = "hip"))]
+use st_core::backend::rankk_launch::LaunchBuffers;
 use st_core::backend::runtime_probe::{
     build_device_report, mps_probe as core_mps_probe, resolve_backend, BackendResolution,
     DeviceReport,

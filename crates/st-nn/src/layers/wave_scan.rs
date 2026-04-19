@@ -128,8 +128,7 @@ impl Module for WaveScan {
             let source = gating_reshaped.data();
             let dest = final_hidden.data_mut();
             for b in 0..batch {
-                let src_offset =
-                    b * self.features * out_steps + (out_steps - 1) * self.features;
+                let src_offset = b * self.features * out_steps + (out_steps - 1) * self.features;
                 let dst_offset = b * self.features;
                 dest[dst_offset..dst_offset + self.features]
                     .copy_from_slice(&source[src_offset..src_offset + self.features]);
@@ -172,14 +171,16 @@ impl Module for WaveScan {
             }
         }
 
-        let grad_gate_out =
-            grad_gate_out.reshape(cache.batch * cache.out_steps, cache.features)?;
+        let grad_gate_out = grad_gate_out.reshape(cache.batch * cache.out_steps, cache.features)?;
         let grad_gate_in = self.gate.backward(&cache.gating_in, &grad_gate_out)?;
         let grad_conv_out = grad_gate_in.reshape(cache.batch, cache.features * cache.out_steps)?;
         self.conv.backward(&cache.input, &grad_conv_out)
     }
 
-    fn visit_parameters(&self, visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>) -> PureResult<()> {
+    fn visit_parameters(
+        &self,
+        visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
         self.conv.visit_parameters(visitor)?;
         self.gate.visit_parameters(visitor)?;
         Ok(())
@@ -261,7 +262,10 @@ impl Module for WaveScanStack {
         Ok(total)
     }
 
-    fn visit_parameters(&self, visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>) -> PureResult<()> {
+    fn visit_parameters(
+        &self,
+        visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
         for scan in &self.scans {
             scan.visit_parameters(visitor)?;
         }

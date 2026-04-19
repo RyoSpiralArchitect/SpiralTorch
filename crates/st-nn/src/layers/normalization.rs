@@ -933,7 +933,11 @@ impl Module for BatchNorm1d {
             Ok(())
         })?;
 
-        let base = self.gamma.name().strip_suffix("::gamma").unwrap_or(self.gamma.name());
+        let base = self
+            .gamma
+            .name()
+            .strip_suffix("::gamma")
+            .unwrap_or(self.gamma.name());
         state.insert(
             format!("{base}::running_mean"),
             (*self.running_mean.borrow()).clone(),
@@ -955,7 +959,11 @@ impl Module for BatchNorm1d {
             param.load_value(value)
         })?;
 
-        let base = self.gamma.name().strip_suffix("::gamma").unwrap_or(self.gamma.name());
+        let base = self
+            .gamma
+            .name()
+            .strip_suffix("::gamma")
+            .unwrap_or(self.gamma.name());
         if let Some(value) = state.get(&format!("{base}::running_mean")) {
             let expected = { self.running_mean.borrow().shape() };
             if value.shape() != expected {
@@ -1163,7 +1171,11 @@ impl Module for ZSpaceBatchNorm1d {
             Ok(())
         })?;
 
-        let base = self.gamma.name().strip_suffix("::gamma").unwrap_or(self.gamma.name());
+        let base = self
+            .gamma
+            .name()
+            .strip_suffix("::gamma")
+            .unwrap_or(self.gamma.name());
         state.insert(
             format!("{base}::running_mean"),
             (*self.running_mean.borrow()).clone(),
@@ -1189,7 +1201,11 @@ impl Module for ZSpaceBatchNorm1d {
             param.load_value(value)
         })?;
 
-        let base = self.gamma.name().strip_suffix("::gamma").unwrap_or(self.gamma.name());
+        let base = self
+            .gamma
+            .name()
+            .strip_suffix("::gamma")
+            .unwrap_or(self.gamma.name());
         if let Some(value) = state.get(&format!("{base}::running_mean")) {
             let expected = { self.running_mean.borrow().shape() };
             if value.shape() != expected {

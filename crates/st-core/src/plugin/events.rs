@@ -86,7 +86,10 @@ impl PluginEventBus {
         let event_type = event_type.into();
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let mut listeners = self.listeners.lock().unwrap();
-        listeners.entry(event_type).or_default().push((id, listener));
+        listeners
+            .entry(event_type)
+            .or_default()
+            .push((id, listener));
         id
     }
 
@@ -114,9 +117,7 @@ impl PluginEventBus {
         listeners
             .get(event_type)
             .is_some_and(|bucket| !bucket.is_empty())
-            || listeners
-                .get("*")
-                .is_some_and(|bucket| !bucket.is_empty())
+            || listeners.get("*").is_some_and(|bucket| !bucket.is_empty())
     }
 
     /// Remove all listeners (or those matching an event type).
@@ -141,10 +142,18 @@ impl PluginEventBus {
             let listeners = self.listeners.lock().unwrap();
             let mut collected = Vec::new();
             if let Some(specific_listeners) = listeners.get(&event_type) {
-                collected.extend(specific_listeners.iter().map(|(_, listener)| listener.clone()));
+                collected.extend(
+                    specific_listeners
+                        .iter()
+                        .map(|(_, listener)| listener.clone()),
+                );
             }
             if let Some(wildcard_listeners) = listeners.get("*") {
-                collected.extend(wildcard_listeners.iter().map(|(_, listener)| listener.clone()));
+                collected.extend(
+                    wildcard_listeners
+                        .iter()
+                        .map(|(_, listener)| listener.clone()),
+                );
             }
             collected
         };
@@ -188,9 +197,12 @@ mod tests {
         let counter = Arc::new(AtomicUsize::new(0));
         let counter_clone = counter.clone();
 
-        let id = bus.subscribe("EpochStart", Arc::new(move |_| {
-            counter_clone.fetch_add(1, Ordering::SeqCst);
-        }));
+        let id = bus.subscribe(
+            "EpochStart",
+            Arc::new(move |_| {
+                counter_clone.fetch_add(1, Ordering::SeqCst);
+            }),
+        );
 
         bus.publish(&PluginEvent::EpochStart { epoch: 1 });
         bus.publish(&PluginEvent::EpochStart { epoch: 2 });
@@ -207,9 +219,12 @@ mod tests {
         let counter = Arc::new(AtomicUsize::new(0));
         let counter_clone = counter.clone();
 
-        bus.subscribe("*", Arc::new(move |_| {
-            counter_clone.fetch_add(1, Ordering::SeqCst);
-        }));
+        bus.subscribe(
+            "*",
+            Arc::new(move |_| {
+                counter_clone.fetch_add(1, Ordering::SeqCst);
+            }),
+        );
 
         bus.publish(&PluginEvent::SystemInit);
         bus.publish(&PluginEvent::EpochStart { epoch: 1 });

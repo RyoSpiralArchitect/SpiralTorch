@@ -143,8 +143,10 @@ impl ZSpaceVae {
         }
         let checkpoint = self.checkpoint();
         let payload = if is_json_path(path) {
-            serde_json::to_vec_pretty(&checkpoint).map_err(|err| TensorError::SerializationError {
-                message: err.to_string(),
+            serde_json::to_vec_pretty(&checkpoint).map_err(|err| {
+                TensorError::SerializationError {
+                    message: err.to_string(),
+                }
             })?
         } else {
             bincode::serialize(&checkpoint).map_err(|err| TensorError::SerializationError {

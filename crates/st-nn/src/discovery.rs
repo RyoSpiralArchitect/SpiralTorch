@@ -50,7 +50,8 @@ pub enum ModuleCategory {
 }
 
 /// Factory function that creates a module instance.
-pub type ModuleFactory = Arc<dyn Fn(&HashMap<String, String>) -> PureResult<Box<dyn Module>> + Send + Sync>;
+pub type ModuleFactory =
+    Arc<dyn Fn(&HashMap<String, String>) -> PureResult<Box<dyn Module>> + Send + Sync>;
 
 /// Registry for discoverable modules.
 pub struct ModuleDiscoveryRegistry {
@@ -76,13 +77,9 @@ impl ModuleDiscoveryRegistry {
     }
 
     /// Register a module factory.
-    pub fn register(
-        &self,
-        metadata: ModuleMetadata,
-        factory: ModuleFactory,
-    ) -> PureResult<()> {
+    pub fn register(&self, metadata: ModuleMetadata, factory: ModuleFactory) -> PureResult<()> {
         let module_type = metadata.module_type.clone();
-        
+
         let mut factories = self.factories.lock().unwrap();
         if factories.contains_key(&module_type) {
             return Err(TensorError::Generic(format!(
@@ -90,9 +87,9 @@ impl ModuleDiscoveryRegistry {
                 module_type
             )));
         }
-        
+
         factories.insert(module_type.clone(), (metadata, factory));
-        
+
         // Notify plugin system if available
         if let Some(registry) = &self.plugin_registry {
             registry.event_bus().publish(&PluginEvent::Custom {
@@ -100,7 +97,7 @@ impl ModuleDiscoveryRegistry {
                 data: Arc::new(module_type),
             });
         }
-        
+
         Ok(())
     }
 
@@ -111,14 +108,11 @@ impl ModuleDiscoveryRegistry {
         config: &HashMap<String, String>,
     ) -> PureResult<Box<dyn Module>> {
         let factories = self.factories.lock().unwrap();
-        
-        let (_, factory) = factories
-            .get(module_type)
-            .ok_or_else(|| TensorError::Generic(format!(
-                "Module type '{}' not found",
-                module_type
-            )))?;
-        
+
+        let (_, factory) = factories.get(module_type).ok_or_else(|| {
+            TensorError::Generic(format!("Module type '{}' not found", module_type))
+        })?;
+
         factory(config)
     }
 
@@ -208,21 +202,19 @@ impl ModulePipelineBuilder {
 /// Helper macros for registering modules.
 #[macro_export]
 macro_rules! register_module {
-    ($registry:expr, $module_type:expr, $category:expr, $factory:expr) => {
-        {
-            let metadata = $crate::discovery::ModuleMetadata {
-                module_type: $module_type.to_string(),
-                display_name: $module_type.to_string(),
-                description: String::new(),
-                input_shape: None,
-                output_shape: None,
-                parameters: std::collections::HashMap::new(),
-                category: $category,
-            };
-            
-            $registry.register(metadata, std::sync::Arc::new($factory))
-        }
-    };
+    ($registry:expr, $module_type:expr, $category:expr, $factory:expr) => {{
+        let metadata = $crate::discovery::ModuleMetadata {
+            module_type: $module_type.to_string(),
+            display_name: $module_type.to_string(),
+            description: String::new(),
+            input_shape: None,
+            output_shape: None,
+            parameters: std::collections::HashMap::new(),
+            category: $category,
+        };
+
+        $registry.register(metadata, std::sync::Arc::new($factory))
+    }};
 }
 
 #[cfg(test)]
@@ -232,7 +224,7 @@ mod tests {
     #[test]
     fn test_module_registration() {
         let registry = ModuleDiscoveryRegistry::new();
-        
+
         let metadata = ModuleMetadata {
             module_type: "test_module".to_string(),
             display_name: "Test Module".to_string(),
@@ -242,12 +234,12 @@ mod tests {
             parameters: HashMap::new(),
             category: ModuleCategory::Layer,
         };
-        
+
         let factory = Arc::new(|_config: &HashMap<String, String>| {
             // Would create a real module here
             Err(TensorError::Generic("Not implemented in test".to_string()))
         });
-        
+
         assert!(registry.register(metadata, factory).is_ok());
         assert!(registry.get_metadata("test_module").is_some());
     }
@@ -255,7 +247,7 @@ mod tests {
     #[test]
     fn test_find_by_category() {
         let registry = ModuleDiscoveryRegistry::new();
-        
+
         let metadata1 = ModuleMetadata {
             module_type: "layer1".to_string(),
             display_name: "Layer 1".to_string(),
@@ -265,7 +257,7 @@ mod tests {
             parameters: HashMap::new(),
             category: ModuleCategory::Layer,
         };
-        
+
         let metadata2 = ModuleMetadata {
             module_type: "activation1".to_string(),
             display_name: "Activation 1".to_string(),
@@ -275,14 +267,14 @@ mod tests {
             parameters: HashMap::new(),
             category: ModuleCategory::Activation,
         };
-        
+
         let factory = Arc::new(|_: &HashMap<String, String>| {
             Err(TensorError::Generic("Not implemented".to_string()))
         });
-        
+
         registry.register(metadata1, factory.clone()).unwrap();
         registry.register(metadata2, factory).unwrap();
-        
+
         let layers = registry.find_by_category(&ModuleCategory::Layer);
         assert_eq!(layers.len(), 1);
         assert_eq!(layers[0].module_type, "layer1");
