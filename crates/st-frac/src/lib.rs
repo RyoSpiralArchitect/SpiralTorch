@@ -402,8 +402,7 @@ mod tests {
 
         for col in 0..4 {
             let lane: Vec<f32> = (0..3).map(|row| x[[row, col]]).collect();
-            let expected =
-                fracdiff_gl_1d_with_coeffs(&lane, &coeff, pad, scale).unwrap();
+            let expected = fracdiff_gl_1d_with_coeffs(&lane, &coeff, pad, scale).unwrap();
             for row in 0..3 {
                 assert!((y[[row, col]] - expected[row]).abs() < 1e-6f32);
             }
@@ -438,8 +437,7 @@ mod tests {
 
         for col in 0..4 {
             let lane: Vec<f32> = (0..3).map(|row| gy[[row, col]]).collect();
-            let expected =
-                fracdiff_gl_1d_with_coeffs(&lane, &coeff, pad, scale).unwrap();
+            let expected = fracdiff_gl_1d_with_coeffs(&lane, &coeff, pad, scale).unwrap();
             for row in 0..3 {
                 assert!((gx[[row, col]] - expected[row]).abs() < 1e-6f32);
             }

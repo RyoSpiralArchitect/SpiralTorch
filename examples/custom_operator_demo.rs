@@ -42,13 +42,9 @@ fn main() -> PureResult<()> {
             println!("  🔧 Executing square operator");
             let x = inputs[0];
             let (rows, cols) = x.shape();
-            
-            let data: Vec<f32> = x
-                .data()
-                .iter()
-                .map(|&v| v * v)
-                .collect();
-            
+
+            let data: Vec<f32> = x.data().iter().map(|&v| v * v).collect();
+
             Ok(vec![Tensor::from_vec(rows, cols, data)?])
         }))
         .with_backward(Arc::new(|inputs, _outputs, grad_outputs| {
@@ -56,7 +52,7 @@ fn main() -> PureResult<()> {
             let x = inputs[0];
             let grad_y = grad_outputs[0];
             let (rows, cols) = x.shape();
-            
+
             // Gradient: dy/dx = 2x
             let grad_data: Vec<f32> = x
                 .data()
@@ -64,7 +60,7 @@ fn main() -> PureResult<()> {
                 .zip(grad_y.data().iter())
                 .map(|(&x_val, &grad_val)| 2.0 * x_val * grad_val)
                 .collect();
-            
+
             Ok(vec![Tensor::from_vec(rows, cols, grad_data)?])
         }))
         .build()?;
@@ -82,13 +78,13 @@ fn main() -> PureResult<()> {
             println!("  🔧 Executing normalize operator");
             let x = inputs[0];
             let (rows, cols) = x.shape();
-            
+
             // Compute L2 norm
             let norm: f32 = x.data().iter().map(|&v| v * v).sum::<f32>().sqrt();
             let norm = norm.max(1e-8); // Avoid division by zero
-            
+
             let data: Vec<f32> = x.data().iter().map(|&v| v / norm).collect();
-            
+
             Ok(vec![Tensor::from_vec(rows, cols, data)?])
         }))
         .with_backward(Arc::new(|inputs, outputs, grad_outputs| {
@@ -97,12 +93,18 @@ fn main() -> PureResult<()> {
             let _y = outputs[0];
             let grad_y = grad_outputs[0];
             let (rows, cols) = x.shape();
-            
+
             // Gradient computation for L2 normalization
             // d/dx (x / ||x||) = (I - xx^T/||x||^2) / ||x||
-            let norm: f32 = x.data().iter().map(|&v| v * v).sum::<f32>().sqrt().max(1e-8);
+            let norm: f32 = x
+                .data()
+                .iter()
+                .map(|&v| v * v)
+                .sum::<f32>()
+                .sqrt()
+                .max(1e-8);
             let norm_sq = norm * norm;
-            
+
             // Compute x^T * grad_y (dot product)
             let dot_product: f32 = x
                 .data()
@@ -110,16 +112,14 @@ fn main() -> PureResult<()> {
                 .zip(grad_y.data().iter())
                 .map(|(&x_val, &grad_val)| x_val * grad_val)
                 .sum();
-            
+
             let grad_data: Vec<f32> = x
                 .data()
                 .iter()
                 .zip(grad_y.data().iter())
-                .map(|(&x_val, &grad_val)| {
-                    (grad_val * norm - x_val * dot_product / norm) / norm_sq
-                })
+                .map(|(&x_val, &grad_val)| (grad_val * norm - x_val * dot_product / norm) / norm_sq)
                 .collect();
-            
+
             Ok(vec![Tensor::from_vec(rows, cols, grad_data)?])
         }))
         .build()?;
@@ -138,7 +138,7 @@ fn main() -> PureResult<()> {
             let x1 = inputs[0];
             let x2 = inputs[1];
             let (rows, cols) = x1.shape();
-            
+
             // For simplicity, use a = 0.7
             let a = 0.7f32;
             let data: Vec<f32> = x1
@@ -147,22 +147,22 @@ fn main() -> PureResult<()> {
                 .zip(x2.data().iter())
                 .map(|(&v1, &v2)| a * v1 + (1.0 - a) * v2)
                 .collect();
-            
+
             Ok(vec![Tensor::from_vec(rows, cols, data)?])
         }))
         .with_backward(Arc::new(|_inputs, _outputs, grad_outputs| {
             println!("  🔄 Computing weighted_sum gradient");
             let grad_y = grad_outputs[0];
             let (rows, cols) = grad_y.shape();
-            
+
             let a = 0.7f32;
-            
+
             // Gradient w.r.t. x1: a * grad_y
             let grad_x1: Vec<f32> = grad_y.data().iter().map(|&g| a * g).collect();
-            
+
             // Gradient w.r.t. x2: (1-a) * grad_y
             let grad_x2: Vec<f32> = grad_y.data().iter().map(|&g| (1.0 - a) * g).collect();
-            
+
             Ok(vec![
                 Tensor::from_vec(rows, cols, grad_x1)?,
                 Tensor::from_vec(rows, cols, grad_x2)?,
@@ -179,9 +179,10 @@ fn main() -> PureResult<()> {
         if let Some(op) = registry.get(&op_name) {
             let meta = op.metadata();
             println!("  - {} ({})", op_name, meta.description);
-            println!("    Inputs: {}, Outputs: {}", 
-                     meta.signature.num_inputs, 
-                     meta.signature.num_outputs);
+            println!(
+                "    Inputs: {}, Outputs: {}",
+                meta.signature.num_inputs, meta.signature.num_outputs
+            );
             println!("    Backends: {}", meta.backends.join(", "));
             println!("    Differentiable: {}", meta.signature.differentiable);
         }
@@ -214,9 +215,9 @@ fn main() -> PureResult<()> {
 
     // Test gradient computation
     println!("🔬 Testing gradient computation...\n");
-    
+
     let grad_output = Tensor::from_vec(2, 2, vec![1.0, 1.0, 1.0, 1.0])?;
-    
+
     if let Some(square_op) = registry.get("square") {
         let y_square_refs: Vec<&Tensor> = y_square.iter().collect();
         let grad_input = square_op.backward(&[&x], &y_square_refs, &[&grad_output])?;
@@ -226,7 +227,7 @@ fn main() -> PureResult<()> {
 
     // Find operators by backend
     println!("🔍 Finding operators by backend...\n");
-    
+
     let cuda_ops = registry.find_by_backend("CUDA");
     println!("CUDA-enabled operators:");
     for op in cuda_ops {

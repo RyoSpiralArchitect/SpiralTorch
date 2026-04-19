@@ -1822,9 +1822,7 @@ fn load_entrypoints(
         for &idx in order.iter().rev() {
             let id = pending[idx].metadata.id.as_str();
             if global_registry().get(id).is_some() {
-                global_registry()
-                    .unregister(id)
-                    .map_err(tensor_err_to_py)?;
+                global_registry().unregister(id).map_err(tensor_err_to_py)?;
             }
         }
     }
@@ -2018,9 +2016,7 @@ fn load_path(
             for &idx in order.iter().rev() {
                 let id = pending[idx].metadata.id.as_str();
                 if global_registry().get(id).is_some() {
-                    global_registry()
-                        .unregister(id)
-                        .map_err(tensor_err_to_py)?;
+                    global_registry().unregister(id).map_err(tensor_err_to_py)?;
                 }
             }
         }

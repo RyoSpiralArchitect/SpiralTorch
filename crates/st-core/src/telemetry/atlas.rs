@@ -3,7 +3,6 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-
 //! Atlas projections stitching timeline telemetry with maintainer diagnostics.
 
 use super::chrono::{ChronoHarmonics, ChronoSummary};
@@ -884,17 +883,10 @@ impl AtlasRouteSummary {
             if pulse.mentions == 0 {
                 continue;
             }
-            let mentions = pulse
-                .mentions
-                .min(u32::MAX as usize) as u32;
+            let mentions = pulse.mentions.min(u32::MAX as usize) as u32;
             *heatmap.sense_counts.entry(pulse.sense).or_default() += mentions;
-            *heatmap
-                .term_counts
-                .entry(pulse.term.clone())
-                .or_default() += mentions;
-            heatmap.total_mentions = heatmap
-                .total_mentions
-                .saturating_add(mentions);
+            *heatmap.term_counts.entry(pulse.term.clone()).or_default() += mentions;
+            heatmap.total_mentions = heatmap.total_mentions.saturating_add(mentions);
         }
         heatmap.total_terms = heatmap
             .term_counts
@@ -1421,9 +1413,7 @@ impl AtlasConceptHeatmap {
             .map(|(term, count)| (term.clone(), *count))
             .collect();
         terms.sort_by(|(term_a, count_a), (term_b, count_b)| {
-            count_b
-                .cmp(count_a)
-                .then_with(|| term_a.cmp(term_b))
+            count_b.cmp(count_a).then_with(|| term_a.cmp(term_b))
         });
         if limit > 0 && terms.len() > limit {
             terms.truncate(limit);
@@ -1475,7 +1465,8 @@ impl AtlasFlux {
         }
         let variability = self.loop_variability.max(0.0) + 0.25 * self.loop_range.abs();
         let stability = (1.0 / (1.0 + variability)).clamp(0.0, 1.0);
-        let drift_penalty = ((self.collapse_drift.abs() + self.z_signal_drift.abs()).min(4.0)) / 4.0;
+        let drift_penalty =
+            ((self.collapse_drift.abs() + self.z_signal_drift.abs()).min(4.0)) / 4.0;
         let density_support = ((self.note_density + self.concept_density).min(2.0)) / 2.0;
         let score = 0.6 * stability + 0.2 * (1.0 - drift_penalty) + 0.2 * density_support;
         score.clamp(0.0, 1.0)

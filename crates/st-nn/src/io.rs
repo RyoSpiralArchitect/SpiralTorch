@@ -82,10 +82,7 @@ pub fn save_json<M: Module + ?Sized, P: AsRef<Path>>(module: &M, path: P) -> Pur
     Ok(())
 }
 
-pub fn load_json<M: Module + ?Sized, P: AsRef<Path>>(
-    module: &mut M,
-    path: P,
-) -> PureResult<()> {
+pub fn load_json<M: Module + ?Sized, P: AsRef<Path>>(module: &mut M, path: P) -> PureResult<()> {
     let file = File::open(path.as_ref()).map_err(io_error)?;
     let reader = BufReader::new(file);
     let snapshot: ModuleSnapshot = serde_json::from_reader(reader).map_err(serde_error)?;
@@ -119,10 +116,7 @@ pub fn save_bincode<M: Module + ?Sized, P: AsRef<Path>>(module: &M, path: P) -> 
     Ok(())
 }
 
-pub fn load_bincode<M: Module + ?Sized, P: AsRef<Path>>(
-    module: &mut M,
-    path: P,
-) -> PureResult<()> {
+pub fn load_bincode<M: Module + ?Sized, P: AsRef<Path>>(module: &mut M, path: P) -> PureResult<()> {
     let file = File::open(path.as_ref()).map_err(io_error)?;
     let reader = BufReader::new(file);
     let snapshot: ModuleSnapshot = bincode::deserialize_from(reader).map_err(serde_error)?;

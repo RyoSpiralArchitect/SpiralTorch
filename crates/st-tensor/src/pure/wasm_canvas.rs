@@ -3046,10 +3046,7 @@ mod tests {
             CanvasPalette::parse("greyscale"),
             Some(CanvasPalette::Grayscale)
         ));
-        assert!(matches!(
-            CanvasPalette::parse("ultraviolet"),
-            None
-        ));
+        assert!(matches!(CanvasPalette::parse("ultraviolet"), None));
     }
 
     #[test]

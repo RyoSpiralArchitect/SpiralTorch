@@ -721,9 +721,7 @@ impl PySoT3DPlan {
         include_reflections: bool,
         include_roles: bool,
     ) -> Result<Tensor, st_tensor::TensorError> {
-        let cols = 11
-            + if include_roles { 2 } else { 0 }
-            + if include_reflections { 3 } else { 0 };
+        let cols = 11 + if include_roles { 2 } else { 0 } + if include_reflections { 3 } else { 0 };
         if self.steps.is_empty() {
             return Tensor::from_vec(0, cols, Vec::new());
         }

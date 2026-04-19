@@ -6,11 +6,11 @@
 use super::{AmegaHypergrad, LanguageWaveEncoder, OpenCartesianTopos, Tensor, TensorError};
 use core::mem;
 use core::ptr;
+use std::cell::RefCell;
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
-use std::slice;
-use std::cell::RefCell;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::slice;
 
 thread_local! {
     static ERROR_STORAGE: RefCell<Option<CString>> = const { RefCell::new(None) };
@@ -78,16 +78,12 @@ fn checked_element_count(
 
 #[no_mangle]
 pub extern "C" fn st_pure_last_error() -> *const c_char {
-    catch_unwind_or(
-        ptr::null(),
-        "panic in st_pure_last_error",
-        || {
-            ERROR_STORAGE.with(|slot| match slot.borrow().as_ref() {
-                Some(msg) => msg.as_ptr(),
-                None => ptr::null(),
-            })
-        },
-    )
+    catch_unwind_or(ptr::null(), "panic in st_pure_last_error", || {
+        ERROR_STORAGE.with(|slot| match slot.borrow().as_ref() {
+            Some(msg) => msg.as_ptr(),
+            None => ptr::null(),
+        })
+    })
 }
 
 #[no_mangle]
@@ -105,15 +101,17 @@ pub extern "C" fn st_pure_topos_new(
     max_depth: usize,
     max_volume: usize,
 ) -> *mut OpenCartesianTopos {
-    catch_unwind_or(ptr::null_mut(), "panic in st_pure_topos_new", || {
-        match OpenCartesianTopos::new(curvature, tolerance, saturation, max_depth, max_volume) {
+    catch_unwind_or(
+        ptr::null_mut(),
+        "panic in st_pure_topos_new",
+        || match OpenCartesianTopos::new(curvature, tolerance, saturation, max_depth, max_volume) {
             Ok(topos) => Box::into_raw(Box::new(topos)),
             Err(err) => {
                 store_error(err);
                 ptr::null_mut()
             }
-        }
-    })
+        },
+    )
 }
 
 #[no_mangle]
@@ -140,15 +138,17 @@ pub extern "C" fn st_pure_hypergrad_new(
     rows: usize,
     cols: usize,
 ) -> *mut AmegaHypergrad {
-    catch_unwind_or(ptr::null_mut(), "panic in st_pure_hypergrad_new", || {
-        match AmegaHypergrad::new(curvature, learning_rate, rows, cols) {
+    catch_unwind_or(
+        ptr::null_mut(),
+        "panic in st_pure_hypergrad_new",
+        || match AmegaHypergrad::new(curvature, learning_rate, rows, cols) {
             Ok(hypergrad) => Box::into_raw(Box::new(hypergrad)),
             Err(err) => {
                 store_error(err);
                 ptr::null_mut()
             }
-        }
-    })
+        },
+    )
 }
 
 #[no_mangle]
@@ -162,24 +162,28 @@ pub unsafe extern "C" fn st_pure_hypergrad_with_topos(
     cols: usize,
     topos: *const OpenCartesianTopos,
 ) -> *mut AmegaHypergrad {
-    catch_unwind_or(ptr::null_mut(), "panic in st_pure_hypergrad_with_topos", || {
-        if topos.is_null() {
-            store_error(TensorError::EmptyInput("topos handle"));
-            return ptr::null_mut();
-        }
-        if !require_aligned(topos, "topos handle") {
-            return ptr::null_mut();
-        }
-        // Safety: caller must pass a valid topos pointer originating from `st_pure_topos_new`.
-        let guard = unsafe { &*topos };
-        match AmegaHypergrad::with_topos(curvature, learning_rate, rows, cols, guard.clone()) {
-            Ok(hypergrad) => Box::into_raw(Box::new(hypergrad)),
-            Err(err) => {
-                store_error(err);
-                ptr::null_mut()
+    catch_unwind_or(
+        ptr::null_mut(),
+        "panic in st_pure_hypergrad_with_topos",
+        || {
+            if topos.is_null() {
+                store_error(TensorError::EmptyInput("topos handle"));
+                return ptr::null_mut();
             }
-        }
-    })
+            if !require_aligned(topos, "topos handle") {
+                return ptr::null_mut();
+            }
+            // Safety: caller must pass a valid topos pointer originating from `st_pure_topos_new`.
+            let guard = unsafe { &*topos };
+            match AmegaHypergrad::with_topos(curvature, learning_rate, rows, cols, guard.clone()) {
+                Ok(hypergrad) => Box::into_raw(Box::new(hypergrad)),
+                Err(err) => {
+                    store_error(err);
+                    ptr::null_mut()
+                }
+            }
+        },
+    )
 }
 
 #[no_mangle]
@@ -666,8 +670,9 @@ mod tests {
         let misaligned = unsafe { storage.as_mut_ptr().add(1) as *const AmegaHypergrad };
         let mut rows = 0usize;
         let mut cols = 0usize;
-        let status =
-            unsafe { st_pure_hypergrad_shape(misaligned, &mut rows as *mut usize, &mut cols as *mut usize) };
+        let status = unsafe {
+            st_pure_hypergrad_shape(misaligned, &mut rows as *mut usize, &mut cols as *mut usize)
+        };
         assert_eq!(status, -1);
         assert!(!st_pure_last_error().is_null());
     }

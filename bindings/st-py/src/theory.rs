@@ -4,14 +4,14 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3::wrap_pyfunction;
-use st_core::theory::renormalization_flow as rg_mellin;
-use st_core::theory::rg_flow as rg_zspace;
 use st_core::theory::general_relativity::{
     BoundaryCondition, BoundaryConditionKind, GeneralRelativityModel, InternalMetric,
     InternalPatch, InternalSpace, LorentzianMetric, MetricDerivatives, MetricError,
     MetricSecondDerivatives, MixedBlock, PhysicalConstants, ProductGeometry, ProductMetric,
     SymmetryAnsatz, Topology, WarpFactor, ZManifold, ZRelativityModel, ZRelativityTensorBundle,
 };
+use st_core::theory::renormalization_flow as rg_mellin;
+use st_core::theory::rg_flow as rg_zspace;
 use st_frac::mellin_types::{ComplexScalar, MellinError};
 use st_tensor::Tensor;
 
@@ -411,10 +411,7 @@ pub fn lorentzian_metric_scaled(
     dict.set_item("inverse", matrix4_to_py(metric.inverse()))?;
     dict.set_item("determinant", metric.determinant())?;
     dict.set_item("volume_element", metric.volume_element())?;
-    dict.set_item(
-        "signature",
-        metric.signature().to_vec(),
-    )?;
+    dict.set_item("signature", metric.signature().to_vec())?;
     Ok(dict.into())
 }
 
@@ -653,7 +650,8 @@ pub(crate) struct PyRGFlowModel {
 impl PyRGFlowModel {
     #[new]
     pub fn new(log_start: f32, log_step: f32, depth: usize) -> PyResult<Self> {
-        let inner = rg_mellin::RGFlowModel::new(log_start, log_step, depth).map_err(rg_mellin_error)?;
+        let inner =
+            rg_mellin::RGFlowModel::new(log_start, log_step, depth).map_err(rg_mellin_error)?;
         Ok(Self { inner })
     }
 
@@ -665,7 +663,8 @@ impl PyRGFlowModel {
 
     #[staticmethod]
     pub fn narrative_depth(depth: usize, start: f32) -> PyResult<Self> {
-        let inner = rg_mellin::RGFlowModel::narrative_depth(depth, start).map_err(rg_mellin_error)?;
+        let inner =
+            rg_mellin::RGFlowModel::narrative_depth(depth, start).map_err(rg_mellin_error)?;
         Ok(Self { inner })
     }
 
@@ -702,7 +701,12 @@ impl PyRGFlowModel {
         Ok(PyRGFlowSolution { inner })
     }
 
-    pub fn sample_beta(&self, coupling: f32, operator_index: usize, log_scale: f32) -> PyResult<f32> {
+    pub fn sample_beta(
+        &self,
+        coupling: f32,
+        operator_index: usize,
+        log_scale: f32,
+    ) -> PyResult<f32> {
         self.inner
             .sample_beta(coupling, operator_index, log_scale)
             .map_err(rg_mellin_error)
@@ -719,9 +723,11 @@ fn gaussian_resonance(
     bandwidth: f32,
     amplitude: f32,
 ) -> PyResult<PyResonanceProfile> {
-    rg_mellin::RGFlowModel::gaussian_resonance(log_start, log_step, len, center, bandwidth, amplitude)
-        .map(|inner| PyResonanceProfile { inner })
-        .map_err(mellin_error)
+    rg_mellin::RGFlowModel::gaussian_resonance(
+        log_start, log_step, len, center, bandwidth, amplitude,
+    )
+    .map(|inner| PyResonanceProfile { inner })
+    .map_err(mellin_error)
 }
 
 #[pyfunction]
@@ -918,7 +924,10 @@ impl PyRgFlowLattice {
         self.inner.evaluate_mellin(s).map_err(rg_zspace_error)
     }
 
-    pub fn evaluate_mellin_many(&self, s_values: Vec<ComplexScalar>) -> PyResult<Vec<ComplexScalar>> {
+    pub fn evaluate_mellin_many(
+        &self,
+        s_values: Vec<ComplexScalar>,
+    ) -> PyResult<Vec<ComplexScalar>> {
         self.inner
             .evaluate_mellin_many(&s_values)
             .map_err(rg_zspace_error)

@@ -189,7 +189,7 @@ impl PyDataLoaderIter {
 #[pymethods]
 impl PyDataLoaderIter {
     /// Returns an iterator over the dataset.
-    /// 
+    ///
     /// This method implements the Python iterator protocol (__iter__).
     /// The conversion from PyRef to Py<PyDataLoaderIter> is guaranteed to succeed
     /// as it only involves reference counting, not any fallible operations.

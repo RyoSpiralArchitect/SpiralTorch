@@ -13,9 +13,9 @@ fn main() {
 mod demo {
     use st_core::backend::device_caps::DeviceCaps;
     use st_nn::{
-        load_json, save_json, InfoNCEConfig, LightningConfig, Linear, Module, Relu, RoundtableConfig,
-        SelfSupBatch, SelfSupEpoch, SelfSupEpochTelemetry, SelfSupObjective, SelfSupStage,
-        Sequential, SpiralLightning, SpiralSession, Tensor,
+        load_json, save_json, InfoNCEConfig, LightningConfig, Linear, Module, Relu,
+        RoundtableConfig, SelfSupBatch, SelfSupEpoch, SelfSupEpochTelemetry, SelfSupObjective,
+        SelfSupStage, Sequential, SpiralLightning, SpiralSession, Tensor,
     };
     use std::path::Path;
 
@@ -73,7 +73,8 @@ mod demo {
             .with_bottom_k(1)
             .with_here_tolerance(1e-5);
 
-        let cfg = LightningConfig::new(combined_rows as u32, embed_dim as u32).with_roundtable(roundtable);
+        let cfg = LightningConfig::new(combined_rows as u32, embed_dim as u32)
+            .with_roundtable(roundtable);
         let mut lightning = SpiralLightning::with_config(session, cfg.clone());
 
         let mut model = build_model(input_dim, embed_dim)?;
@@ -82,7 +83,8 @@ mod demo {
         let epochs = (0..6)
             .map(|idx| build_epoch(4, pair_batch, input_dim, 7_000 + idx as u64 * 100))
             .collect::<Result<Vec<_>, _>>()?;
-        let stage = SelfSupStage::with_epochs(cfg.clone(), objective, epochs).with_label("selfsup.minimal");
+        let stage =
+            SelfSupStage::with_epochs(cfg.clone(), objective, epochs).with_label("selfsup.minimal");
         let report = lightning.fit_selfsup_plan(&mut model, [stage])?;
 
         for (stage_idx, stage) in report.stages().iter().enumerate() {

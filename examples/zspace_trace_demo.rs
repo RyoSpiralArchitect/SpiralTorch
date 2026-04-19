@@ -14,7 +14,12 @@ use st_nn::{
 
 fn env_flag(name: &str) -> bool {
     std::env::var(name)
-        .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
         .unwrap_or(false)
 }
 
@@ -110,9 +115,7 @@ fn main() -> PureResult<()> {
     );
 
     let records = recorder.records();
-    let noncollapse = records
-        .iter()
-        .find_map(|record| record.noncollapse.clone());
+    let noncollapse = records.iter().find_map(|record| record.noncollapse.clone());
     println!(
         "trace_records={} noncollapse={:?}",
         records.len(),
@@ -129,4 +132,3 @@ fn main() -> PureResult<()> {
     export_trace_artifacts(&path, &trace_html, &atlas_html, &manifest);
     Ok(())
 }
-

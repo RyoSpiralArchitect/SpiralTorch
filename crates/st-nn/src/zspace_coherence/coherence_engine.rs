@@ -562,10 +562,7 @@ mod tests {
         let tensor = Tensor::from_vec(
             1,
             128,
-            vec![0.1; 64]
-                .into_iter()
-                .chain(vec![0.6; 64])
-                .collect(),
+            vec![0.1; 64].into_iter().chain(vec![0.6; 64]).collect(),
         )
         .unwrap();
         let weights = engine.measure_phases(&tensor).unwrap();
@@ -609,10 +606,7 @@ mod tests {
         let tensor = Tensor::from_vec(
             1,
             96,
-            vec![0.05; 48]
-                .into_iter()
-                .chain(vec![0.6; 48])
-                .collect(),
+            vec![0.05; 48].into_iter().chain(vec![0.6; 48]).collect(),
         )
         .unwrap();
         let weights = engine.measure_phases(&tensor).unwrap();
