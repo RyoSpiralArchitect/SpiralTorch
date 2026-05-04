@@ -628,12 +628,14 @@ mod tests {
         let adjacency = Tensor::from_vec(2, 2, vec![0.0, 1.0, 1.0, 0.0]).unwrap();
         let context = GraphContext::from_adjacency(adjacency).unwrap();
         let tracer = Arc::new(Mutex::new(GraphFlowTracer::new()));
-        let mut layer = ZSpaceGraphConvolution::new("gnn_tiny_band", context, 2, 1, -1.0, 0.05).unwrap();
+        let mut layer =
+            ZSpaceGraphConvolution::new("gnn_tiny_band", context, 2, 1, -1.0, 0.05).unwrap();
         layer.set_tracer(tracer.clone());
         let signal = RoundtableBandSignal::new(BandEnergy::new(0.8, 0.4, 0.2), (1, 1, 1));
         layer.set_roundtable_influence(Some(RoundtableBandInfluence::from_signal(&signal)));
         let tiny_gradient = Tensor::from_vec(2, 1, vec![1.0e-6, -1.0e-6]).unwrap();
-        layer.set_roundtable_band_pass(Some(band_pass_sample(RoundtableBand::Here, &tiny_gradient)));
+        layer
+            .set_roundtable_band_pass(Some(band_pass_sample(RoundtableBand::Here, &tiny_gradient)));
         let input = Tensor::from_vec(2, 2, vec![1.0, 0.5, -0.5, 1.0]).unwrap();
 
         let _ = layer.forward(&input).unwrap();

@@ -86,10 +86,7 @@ impl ToposLogicBridge {
         concept: Option<&ConceptWindow>,
         annotation: &TemporalCausalAnnotation,
     ) -> Vec<String> {
-        let section = self
-            .sections
-            .entry(record.channel.clone())
-            .or_insert_with(MeaningSheafSection::default);
+        let section = self.sections.entry(record.channel.clone()).or_default();
         section.integrate(record, concept, annotation.depth);
         section.semantic_tags(annotation)
     }
@@ -133,7 +130,7 @@ impl MeaningSheafSection {
     fn semantic_tags(&self, annotation: &TemporalCausalAnnotation) -> Vec<String> {
         let mut tags = Vec::new();
         if !self.signature.is_empty() {
-            let curvature = self.signature.get(0).copied().unwrap_or(0.0);
+            let curvature = self.signature.first().copied().unwrap_or(0.0);
             tags.push(format!("sheaf|curvature:{curvature:+.3}"));
             if let Some(above) = self.signature.get(1) {
                 tags.push(format!("sheaf|above:{above:.3}"));

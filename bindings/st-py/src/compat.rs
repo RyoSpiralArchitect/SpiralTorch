@@ -6,7 +6,7 @@ use pyo3::wrap_pyfunction;
 use crate::tensor::PyTensor;
 
 pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
-    let compat = PyModule::new_bound(py, "compat")?;
+    let compat = PyModule::new(py, "compat")?;
     compat.add(
         "__doc__",
         "Zero-copy bridges into Torch, JAX, and TensorFlow via DLPack.",
@@ -31,7 +31,7 @@ fn import_with_hint<'py>(
     module: &str,
     hint: &str,
 ) -> PyResult<Bound<'py, PyModule>> {
-    match PyModule::import_bound(py, module) {
+    match PyModule::import(py, module) {
         Ok(m) => Ok(m),
         Err(err) => {
             if err.is_instance_of::<PyImportError>(py) {
@@ -156,7 +156,7 @@ mod torch {
     use pyo3::wrap_pyfunction;
 
     pub(super) fn register(py: Python<'_>, compat: &Bound<PyModule>) -> PyResult<()> {
-        let torch = PyModule::new_bound(py, "torch")?;
+        let torch = PyModule::new(py, "torch")?;
         torch.add(
             "__doc__",
             "PyTorch conversion helpers backed by torch.utils.dlpack with post-conversion tuning.",
@@ -186,7 +186,7 @@ mod torch {
         let copy = copy.unwrap_or(false);
 
         if dtype.is_some() || device.is_some() || copy || memory_format.is_some() {
-            let kwargs = PyDict::new_bound(py);
+            let kwargs = PyDict::new(py);
             if let Some(dtype) = dtype {
                 kwargs.set_item("dtype", dtype.bind(py))?;
             }
@@ -238,7 +238,7 @@ mod torch {
         let ensure_cpu = ensure_cpu.unwrap_or(true);
 
         if dtype.is_some() || device.is_some() {
-            let kwargs = PyDict::new_bound(py);
+            let kwargs = PyDict::new(py);
             if let Some(dtype) = dtype {
                 kwargs.set_item("dtype", dtype.bind(py))?;
             }
@@ -254,7 +254,7 @@ mod torch {
                     .map(|kind| kind == "cpu")
                     .unwrap_or(true);
                 if !is_cpu {
-                    let kwargs = PyDict::new_bound(py);
+                    let kwargs = PyDict::new(py);
                     kwargs.set_item("device", "cpu")?;
                     candidate = candidate.call_method("to", (), Some(&kwargs))?;
                 }
@@ -283,7 +283,7 @@ mod jax {
     use pyo3::wrap_pyfunction;
 
     pub(super) fn register(py: Python<'_>, compat: &Bound<PyModule>) -> PyResult<()> {
-        let jax = PyModule::new_bound(py, "jax")?;
+        let jax = PyModule::new(py, "jax")?;
         jax.add("__doc__", "JAX conversion helpers backed by jax.dlpack")?;
         jax.add_function(wrap_pyfunction!(to_jax, &jax)?)?;
         jax.add_function(wrap_pyfunction!(from_jax, &jax)?)?;
@@ -314,7 +314,7 @@ mod tensorflow {
     use pyo3::wrap_pyfunction;
 
     pub(super) fn register(py: Python<'_>, compat: &Bound<PyModule>) -> PyResult<()> {
-        let tf = PyModule::new_bound(py, "tensorflow")?;
+        let tf = PyModule::new(py, "tensorflow")?;
         tf.add(
             "__doc__",
             "TensorFlow conversion helpers backed by tf.experimental.dlpack",

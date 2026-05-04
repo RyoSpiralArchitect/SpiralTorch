@@ -1463,11 +1463,7 @@ impl CanvasFftLayout {
 
     /// Number of pixels captured by the layout.
     pub fn pixel_count(&self) -> usize {
-        if self.field_stride == 0 {
-            0
-        } else {
-            self.field_bytes / self.field_stride
-        }
+        self.field_bytes.checked_div(self.field_stride).unwrap_or(0)
     }
 }
 
@@ -3046,10 +3042,7 @@ mod tests {
             CanvasPalette::parse("greyscale"),
             Some(CanvasPalette::Grayscale)
         ));
-        assert!(matches!(
-            CanvasPalette::parse("ultraviolet"),
-            None
-        ));
+        assert!(CanvasPalette::parse("ultraviolet").is_none());
     }
 
     #[test]

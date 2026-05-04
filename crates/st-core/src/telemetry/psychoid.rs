@@ -788,9 +788,7 @@ impl PsychoidMeter {
         for frame in sample.frames.into_iter() {
             self.window.append(frame);
         }
-        let Some(last_logits) = self.window.logits_iter().last() else {
-            return None;
-        };
+        let last_logits = self.window.logits_iter().last()?;
         let (raw_metrics, z_scores) = self.metrics.compute(
             &self.window,
             last_logits,
@@ -867,7 +865,7 @@ mod tests {
         );
         let (reading, events) = meter.observe(sample).unwrap();
         assert!(reading.raw.get("H").copied().unwrap_or(0.0) > 0.0);
-        assert!(reading.z_scores.get("H").is_some());
+        assert!(reading.z_scores.contains_key("H"));
         assert!(reading.cti >= 0.0 && reading.cti <= 1.0);
         assert!(events.len() <= 1);
     }

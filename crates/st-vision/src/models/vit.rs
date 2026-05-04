@@ -100,7 +100,7 @@ impl MultiHeadAttention {
         num_heads: usize,
         tokens_per_batch: usize,
     ) -> PureResult<Self> {
-        if embed_dim % num_heads != 0 {
+        if !embed_dim.is_multiple_of(num_heads) {
             return Err(TensorError::InvalidDimensions {
                 rows: embed_dim,
                 cols: num_heads,
@@ -155,23 +155,23 @@ impl Module for MultiHeadAttention {
                     let row_idx = b * self.tokens_per_batch + token;
                     let q_offset = row_idx * q.shape().1 + head_offset;
                     let mut logits = vec![0.0f32; self.tokens_per_batch];
-                    for other in 0..self.tokens_per_batch {
+                    for (other, logit) in logits.iter_mut().enumerate().take(self.tokens_per_batch)
+                    {
                         let k_row = b * self.tokens_per_batch + other;
                         let k_offset = k_row * k.shape().1 + head_offset;
                         let mut dot = 0.0f32;
                         for d in 0..head_dim {
                             dot += q_data[q_offset + d] * k_data[k_offset + d];
                         }
-                        logits[other] = dot / (head_dim as f32).sqrt();
+                        *logit = dot / (head_dim as f32).sqrt();
                     }
                     Self::softmax(&mut logits);
                     let mut out = vec![0.0f32; head_dim];
-                    for other in 0..self.tokens_per_batch {
-                        let weight = logits[other];
+                    for (other, weight) in logits.iter().enumerate().take(self.tokens_per_batch) {
                         let v_row = b * self.tokens_per_batch + other;
                         let v_offset = v_row * v.shape().1 + head_offset;
                         for d in 0..head_dim {
-                            out[d] += weight * v_data[v_offset + d];
+                            out[d] += *weight * v_data[v_offset + d];
                         }
                     }
                     let out_offset = row_idx * q.shape().1 + head_offset;
@@ -318,8 +318,8 @@ impl ViTBackbone {
                 value: config.epsilon,
             });
         }
-        if config.image_hw.0 % config.patch_size.0 != 0
-            || config.image_hw.1 % config.patch_size.1 != 0
+        if !config.image_hw.0.is_multiple_of(config.patch_size.0)
+            || !config.image_hw.1.is_multiple_of(config.patch_size.1)
         {
             return Err(TensorError::InvalidDimensions {
                 rows: config.image_hw.0,

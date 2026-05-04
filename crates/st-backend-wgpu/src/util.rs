@@ -98,9 +98,7 @@ impl ModuleCacheEntry {
     where
         F: FnOnce() -> Result<Arc<wgpu::ShaderModule>, ShaderLoadError>,
     {
-        self.module
-            .get_or_try_init(init)
-            .map(|module| Arc::clone(module))
+        self.module.get_or_try_init(init).map(Arc::clone)
     }
 }
 
@@ -249,10 +247,7 @@ pub fn create_inline_module(
         device,
         label,
         key,
-        {
-            let source_arc = source_arc;
-            move || Ok(Arc::clone(&source_arc))
-        },
+        move || Ok(Arc::clone(&source_arc)),
         None,
     )
 }
@@ -300,9 +295,7 @@ impl PipelineCacheEntry {
     where
         F: FnOnce() -> Result<Arc<ComputePipeline>, ShaderLoadError>,
     {
-        self.pipeline
-            .get_or_try_init(init)
-            .map(|pipeline| Arc::clone(pipeline))
+        self.pipeline.get_or_try_init(init).map(Arc::clone)
     }
 }
 
@@ -396,11 +389,7 @@ impl ShaderCache {
 
         let entry = {
             let mut pipelines = self.inner.pipelines.lock().unwrap();
-            Arc::clone(
-                pipelines
-                    .entry(pipeline_key)
-                    .or_insert_with(Default::default),
-            )
+            Arc::clone(pipelines.entry(pipeline_key).or_default())
         };
 
         if let Some(pipeline) = entry.get() {

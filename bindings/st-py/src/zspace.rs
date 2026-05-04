@@ -5,11 +5,15 @@ use pyo3::wrap_pyfunction;
 use st_frac::mellin_types::ComplexScalar;
 use st_frac::zspace::{
     evaluate_weighted_series_many, evaluate_weighted_series_many_stable,
-    evaluate_weighted_series_many_with_derivative, evaluate_weighted_series_many_with_derivative_stable,
-    prepare_weighted_series, trapezoidal_weights,
+    evaluate_weighted_series_many_with_derivative,
+    evaluate_weighted_series_many_with_derivative_stable, prepare_weighted_series,
+    trapezoidal_weights,
 };
 
 use crate::introspect;
+
+type ComplexPair = (f32, f32);
+type ComplexEvalAndDerivative = (Vec<ComplexPair>, Vec<ComplexPair>);
 
 fn pyerr<E: std::fmt::Display>(e: E) -> PyErr {
     PyRuntimeError::new_err(e.to_string())
@@ -112,7 +116,7 @@ fn zspace_eval_with_derivative(
     imag: Vec<f32>,
     z_re: Vec<f32>,
     z_im: Vec<f32>,
-) -> PyResult<(Vec<(f32, f32)>, Vec<(f32, f32)>)> {
+) -> PyResult<ComplexEvalAndDerivative> {
     if real.len() != imag.len() {
         return Err(PyRuntimeError::new_err("len(real) != len(imag)"));
     }
@@ -155,7 +159,7 @@ fn zspace_eval_with_derivative_stable(
     imag: Vec<f32>,
     z_re: Vec<f32>,
     z_im: Vec<f32>,
-) -> PyResult<(Vec<(f32, f32)>, Vec<(f32, f32)>)> {
+) -> PyResult<ComplexEvalAndDerivative> {
     if real.len() != imag.len() {
         return Err(PyRuntimeError::new_err("len(real) != len(imag)"));
     }
@@ -192,10 +196,13 @@ pub fn register(py: Python<'_>, module: &Bound<PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(zspace_eval, module)?)?;
     module.add_function(wrap_pyfunction!(zspace_eval_stable, module)?)?;
     module.add_function(wrap_pyfunction!(zspace_eval_with_derivative, module)?)?;
-    module.add_function(wrap_pyfunction!(zspace_eval_with_derivative_stable, module)?)?;
+    module.add_function(wrap_pyfunction!(
+        zspace_eval_with_derivative_stable,
+        module
+    )?)?;
     introspect::register_top_level(py, module)?;
 
-    let zspace_module = PyModule::new_bound(py, "zspace")?;
+    let zspace_module = PyModule::new(py, "zspace")?;
     zspace_module.add_function(wrap_pyfunction!(zspace_eval, &zspace_module)?)?;
     zspace_module.add_function(wrap_pyfunction!(zspace_eval_stable, &zspace_module)?)?;
     zspace_module.add_function(wrap_pyfunction!(

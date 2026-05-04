@@ -128,14 +128,13 @@ mod tests {
         let frame = hub
             .fuse(&HashMap::from([("pose".to_string(), vec![2.0, 0.0, 0.0])]))
             .unwrap();
-        let mut dynamics = ZSpaceDynamics::default();
         let mut gravity = GravityField::default();
         gravity.add_well("pose", GravityWell::new(10.0, GravityRegime::Newtonian));
-        dynamics = ZSpaceDynamics::new(ZSpaceGeometry::euclidean(), Some(gravity));
+        let dynamics = ZSpaceDynamics::new(ZSpaceGeometry::euclidean(), Some(gravity));
         let field = DesireLagrangianField::with_dynamics(HashMap::new(), dynamics);
         let energy = field.energy(&frame);
         assert!(energy.total > 0.0);
         assert!(energy.gravitational < 0.0);
-        assert!(energy.gravitational_per_channel.get("pose").is_some());
+        assert!(energy.gravitational_per_channel.contains_key("pose"));
     }
 }

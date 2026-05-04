@@ -41,13 +41,13 @@ impl Pipelines {
                 if prefer_large {
                     self.keepk_subgroup_1ce_large
                         .as_deref()
-                        .or_else(|| self.keepk_subgroup_1ce.as_deref())
-                        .or_else(|| self.keepk_subgroup.as_deref())
+                        .or(self.keepk_subgroup_1ce.as_deref())
+                        .or(self.keepk_subgroup.as_deref())
                 } else {
                     self.keepk_subgroup_1ce
                         .as_deref()
-                        .or_else(|| self.keepk_subgroup_1ce_large.as_deref())
-                        .or_else(|| self.keepk_subgroup.as_deref())
+                        .or(self.keepk_subgroup_1ce_large.as_deref())
+                        .or(self.keepk_subgroup.as_deref())
                 }
             }
         }

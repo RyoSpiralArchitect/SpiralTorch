@@ -99,7 +99,7 @@ impl Vocab {
         }
         let mut symbols = Vec::with_capacity(set.len() + 1);
         symbols.push(unk);
-        symbols.extend(set.into_iter());
+        symbols.extend(set);
         Self::from_symbols(unk, symbols)
     }
 
@@ -462,6 +462,7 @@ fn sample_from_probs(probs: &[f32], top_k: usize, rng: &mut impl Rng) -> usize {
     argmax(probs)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn generate_text(
     model: &Sequential,
     vocab: &Vocab,

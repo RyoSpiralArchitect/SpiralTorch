@@ -95,6 +95,11 @@ impl Arrangement {
         self.placements.len()
     }
 
+    /// Returns whether the arrangement has no support points.
+    pub fn is_empty(&self) -> bool {
+        self.placements.is_empty()
+    }
+
     /// Returns the number of edges on which neighbouring atoms disagree
     /// — the "boundary gate" quantity.
     pub fn boundary_edges(&self) -> usize {
@@ -717,13 +722,8 @@ impl LagrangianGate {
     }
 
     pub fn emit(&self, projection: &MeaningProjection, ts: u64) -> ZPulse {
-        let mut pulse = ZPulse::default();
-        pulse.source = ZSource::Other("contextual-lagrangian");
-        pulse.ts = ts;
-        pulse.scale = self.config.scale;
-
         let support = projection.support.max(1) as f32;
-        pulse.tempo = projection
+        let tempo = projection
             .dominant_frequency_bin()
             .map(|(bin, _)| (bin as f32 / support) * self.config.tempo_normaliser)
             .unwrap_or(0.0);
@@ -755,14 +755,21 @@ impl LagrangianGate {
         let central_support =
             (lexical + population * 0.25 + cluster.abs() * 0.1).max(0.0) * self.config.support_gain;
 
-        pulse.band_energy = (above, central, beneath);
-        pulse.density_fluctuation = ZPulse::density_fluctuation_for(pulse.band_energy);
-        pulse.support = ZSupport::new(leading_support, central_support, trailing_support);
-        pulse.drift = drift;
-        pulse.z_bias = orientation_bias;
-        pulse.quality = (self.config.quality_floor + lexical + gate_factor * 0.1).min(1.0);
-        pulse.stderr = ((1.0 - lexical).max(0.0) + cluster.abs() * 0.01) * self.config.stderr_gain;
-        pulse
+        let band_energy = (above, central, beneath);
+        ZPulse {
+            source: ZSource::Other("contextual-lagrangian"),
+            ts,
+            tempo,
+            band_energy,
+            density_fluctuation: ZPulse::density_fluctuation_for(band_energy),
+            drift,
+            z_bias: orientation_bias,
+            support: ZSupport::new(leading_support, central_support, trailing_support),
+            scale: self.config.scale,
+            quality: (self.config.quality_floor + lexical + gate_factor * 0.1).min(1.0),
+            stderr: ((1.0 - lexical).max(0.0) + cluster.abs() * 0.01) * self.config.stderr_gain,
+            ..Default::default()
+        }
     }
 }
 

@@ -4,6 +4,7 @@
 
 const WG_ROWS : u32 = {WG_ROWS}u;
 const WG_COLS : u32 = {WG_COLS}u;
+const WG_TILE : u32 = {WG_TILE}u;
 
 struct Uniforms {
   B: u32,
@@ -30,7 +31,7 @@ fn gelu_prime(z: f32) -> f32 {
   return 0.5 * (1.0 + t) + 0.5 * z * (1.0 - t * t) * k0 * (1.0 + 3.0 * k1 * z2);
 }
 
-var<workgroup> col_sum: array<f32, WG_COLS>;
+var<workgroup> tile_gz: array<f32, WG_TILE>;
 
 @compute @workgroup_size(WG_COLS, WG_ROWS, 1)
 fn main(
@@ -44,10 +45,8 @@ fn main(
   let row = base_row + lid.y;
   let col = base_col + lid.x;
 
-  if (lid.y == 0u && lid.x < WG_COLS) {
-    col_sum[lid.x] = 0.0;
-  }
-  workgroupBarrier();
+  let local_index = lid.y * WG_COLS + lid.x;
+  var gz_local: f32 = 0.0;
 
   if (row < U.B && col < U.O) {
     let idx = row * U.stride + col;
@@ -56,6 +55,7 @@ fn main(
 
     let gp = gelu_prime(z);
     let gz = g * gp;
+    gz_local = gz;
 
     gZ_out[idx] = gz;
 
@@ -64,19 +64,20 @@ fn main(
     } else {
       dR_buf[idx] = gz;
     }
-
-    if (lid.y == 0u) {
-      col_sum[lid.x] = col_sum[lid.x] + gz;
-    }
   }
 
+  tile_gz[local_index] = gz_local;
   workgroupBarrier();
 
   if (lid.y == 0u) {
     if (base_col + lid.x < U.O) {
+      var sum: f32 = 0.0;
+      for (var ry: u32 = 0u; ry < WG_ROWS; ry = ry + 1u) {
+        sum = sum + tile_gz[ry * WG_COLS + lid.x];
+      }
       let wg_linear = wid.y * U.num_wg_x + wid.x;
       let dst = wg_linear * WG_COLS + lid.x;
-      db_partials[dst] = col_sum[lid.x];
+      db_partials[dst] = sum;
     }
   }
 }

@@ -73,7 +73,7 @@ fn parse_space(specs: &Bound<'_, PyAny>) -> PyResult<SearchSpace> {
         .downcast::<PySequence>()
         .map_err(|_| PyValueError::new_err("search space must be a sequence or mapping"))?;
     let mut params = Vec::new();
-    for item in seq.iter()? {
+    for item in seq.try_iter()? {
         let item = item?;
         params.push(parse_param_spec(&item)?);
     }
@@ -151,9 +151,9 @@ fn parse_strategy(config: &Bound<'_, PyDict>) -> PyResult<Strategy> {
 }
 
 fn trial_to_dict(py: Python<'_>, record: &TrialRecord) -> PyResult<PyObject> {
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("id", record.id)?;
-    let params = PyDict::new_bound(py);
+    let params = PyDict::new(py);
     for (key, value) in &record.suggestion {
         match value {
             ParamValue::Float(v) => {
@@ -317,7 +317,7 @@ impl PySearchLoop {
 
     pub fn pending(&self, py: Python<'_>) -> PyResult<Py<PyList>> {
         let guard = self.inner.lock().unwrap();
-        let list = PyList::empty_bound(py);
+        let list = PyList::empty(py);
         for record in guard.pending() {
             let entry = trial_to_dict(py, record)?;
             list.append(entry.bind(py))?;
@@ -327,7 +327,7 @@ impl PySearchLoop {
 
     pub fn completed(&self, py: Python<'_>) -> PyResult<Py<PyList>> {
         let guard = self.inner.lock().unwrap();
-        let list = PyList::empty_bound(py);
+        let list = PyList::empty(py);
         for record in guard.completed() {
             let entry = trial_to_dict(py, record)?;
             list.append(entry.bind(py))?;
@@ -351,7 +351,7 @@ impl PySearchLoop {
     pub fn summary(&self, py: Python<'_>) -> PyResult<PyObject> {
         let guard = self.inner.lock().unwrap();
         let summary = guard.summary();
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         dict.set_item("objective", summary.objective.as_str())?;
         dict.set_item("total_trials", summary.total_trials)?;
         dict.set_item("completed_trials", summary.completed_trials)?;
@@ -370,7 +370,7 @@ impl PySearchLoop {
 }
 
 pub fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
-    let module = PyModule::new_bound(py, "hpo")?;
+    let module = PyModule::new(py, "hpo")?;
     module.add_class::<PySearchLoop>()?;
     module.add("__doc__", "Hyper-parameter search utilities.")?;
     parent.add_submodule(&module)?;

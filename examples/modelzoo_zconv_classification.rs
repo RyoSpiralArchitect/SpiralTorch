@@ -3,11 +3,11 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 
 use st_core::backend::device_caps::DeviceCaps;
+use st_nn::layers::{conv::Conv2d, NonLiner};
 use st_nn::{
     HyperbolicCrossEntropy, Linear, Module, ModuleTrainer, RoundtableConfig, Scaler, Sequential,
     Tensor,
 };
-use st_nn::layers::{conv::Conv2d, NonLiner};
 
 fn conv_output_hw(
     input_hw: (usize, usize),
@@ -78,11 +78,13 @@ fn main() -> st_nn::PureResult<()> {
     model.attach_hypergrad(-1.0, 1e-2)?;
 
     let mut trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 1e-2, 1e-2);
-    let mut config = RoundtableConfig::default();
-    config.top_k = 1;
-    config.mid_k = 1;
-    config.bottom_k = 1;
-    config.here_tolerance = 1e-5;
+    let config = RoundtableConfig {
+        top_k: 1,
+        mid_k: 1,
+        bottom_k: 1,
+        here_tolerance: 1e-5,
+        ..Default::default()
+    };
     let schedule = trainer.roundtable(batch as u32, 2, config);
 
     let mut loss = HyperbolicCrossEntropy::new(-1.0)?;

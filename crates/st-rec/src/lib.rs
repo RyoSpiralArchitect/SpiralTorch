@@ -156,7 +156,7 @@ impl NeighborhoodModel {
         }
         target_norm = target_norm.sqrt() + self.smoothing;
 
-        for other in 0..self.users {
+        for (other, similarity) in similarities.iter_mut().enumerate().take(self.users) {
             if other == user {
                 continue;
             }
@@ -169,21 +169,20 @@ impl NeighborhoodModel {
                 dot += lhs * rhs;
                 other_norm += rhs * rhs;
             }
-            similarities[other] =
+            *similarity =
                 dot / ((other_norm.sqrt() + self.smoothing) * target_norm).max(self.smoothing);
         }
 
         let mut scores = vec![0.0f32; self.items];
-        for other in 0..self.users {
+        for (other, weight) in similarities.iter().enumerate().take(self.users) {
             if other == user {
                 continue;
             }
-            let weight = similarities[other];
             if weight.abs() <= f32::EPSILON {
                 continue;
             }
-            for item in 0..self.items {
-                scores[item] += weight * self.rating(other, item);
+            for (item, score) in scores.iter_mut().enumerate().take(self.items) {
+                *score += *weight * self.rating(other, item);
             }
         }
 
@@ -287,8 +286,7 @@ impl KnowledgeGraphRecommender {
         let mut current = scores.clone();
         for _ in 0..hops {
             let mut next = current.clone();
-            for item in 0..self.items {
-                let score = current[item];
+            for (item, score) in current.iter().copied().enumerate().take(self.items) {
                 if score.abs() <= f32::EPSILON {
                     continue;
                 }

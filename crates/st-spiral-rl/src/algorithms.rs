@@ -278,10 +278,12 @@ impl PpoAgent {
     pub fn score_actions(&self, state: &[f32]) -> Vec<f32> {
         let mut logits = Vec::with_capacity(self.action_dim);
         for action in 0..self.action_dim {
-            let mut dot = 0.0f32;
-            for idx in 0..self.state_dim {
-                dot += self.policy_row(action)[idx] * state[idx];
-            }
+            let dot = self
+                .policy_row(action)
+                .iter()
+                .zip(state.iter())
+                .map(|(weight, value)| *weight * *value)
+                .sum();
             logits.push(dot);
         }
         logits
@@ -308,11 +310,12 @@ impl PpoAgent {
         let ratio = (new_log_prob - old_log_prob).exp();
         let clipped = ratio.clamp(1.0 - self.clip_range, 1.0 + self.clip_range);
         let policy_grad = clipped * advantage;
-        for idx in 0..self.state_dim {
-            self.policy_row_mut(action)[idx] += self.learning_rate * policy_grad * state[idx];
+        let learning_rate = self.learning_rate;
+        for (weight, value) in self.policy_row_mut(action).iter_mut().zip(state.iter()) {
+            *weight += learning_rate * policy_grad * value;
         }
-        for idx in 0..self.state_dim {
-            self.value_weights[idx] += self.learning_rate * advantage * state[idx];
+        for (weight, value) in self.value_weights.iter_mut().zip(state.iter()) {
+            *weight += learning_rate * advantage * value;
         }
     }
 }
@@ -359,10 +362,12 @@ impl SacAgent {
     pub fn sample_action(&self, state: &[f32]) -> usize {
         let mut scores = Vec::with_capacity(self.action_dim);
         for action in 0..self.action_dim {
-            let mut dot = 0.0f32;
-            for idx in 0..self.state_dim {
-                dot += self.row(action)[idx] * state[idx];
-            }
+            let dot: f32 = self
+                .row(action)
+                .iter()
+                .zip(state.iter())
+                .map(|(weight, value)| *weight * *value)
+                .sum();
             scores.push((dot / self.temperature).exp());
         }
         let sum: f32 = scores.iter().sum();

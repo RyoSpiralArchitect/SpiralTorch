@@ -126,6 +126,7 @@ fn require_non_null_mut<T>(ptr: *mut T, label: &str) -> FfiResult<*mut T> {
 /// enough capacity (`capacity >= len + 1`), the string is copied and a null
 /// terminator is appended.
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn spiraltorch_version(buffer: *mut c_char, capacity: usize) -> usize {
     let version = env!("CARGO_PKG_VERSION");
     let bytes = version.as_bytes();
@@ -158,6 +159,7 @@ pub extern "C" fn spiraltorch_last_error_length() -> usize {
 /// number of bytes copied (excluding the null terminator). If no error is
 /// present the function returns `0` and the buffer is left untouched.
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn spiraltorch_last_error_message(buffer: *mut c_char, capacity: usize) -> usize {
     if buffer.is_null() || capacity == 0 {
         return 0;
@@ -191,6 +193,11 @@ pub extern "C" fn spiraltorch_tensor_zeros(rows: usize, cols: usize) -> *mut Ten
 }
 
 /// Constructs a tensor from a dense row-major buffer. Returns `NULL` on failure.
+///
+/// # Safety
+///
+/// `data` must point to `len` readable `f32` values in row-major order and
+/// remain valid for the duration of the call.
 #[no_mangle]
 pub unsafe extern "C" fn spiraltorch_tensor_from_dense(
     rows: usize,
@@ -215,6 +222,7 @@ pub unsafe extern "C" fn spiraltorch_tensor_from_dense(
 
 /// Releases a tensor previously allocated by this library.
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn spiraltorch_tensor_free(handle: *mut Tensor) {
     if handle.is_null() {
         return;
@@ -258,13 +266,15 @@ pub extern "C" fn spiraltorch_tensor_shape(
 /// function returns `0` and records an error.
 #[no_mangle]
 pub extern "C" fn spiraltorch_tensor_elements(handle: *const Tensor) -> usize {
-    match with_tensor(handle, |tensor| ok(tensor.data().len())) {
-        Ok(len) => len,
-        Err(_) => 0,
-    }
+    with_tensor(handle, |tensor| ok(tensor.data().len())).unwrap_or_default()
 }
 
 /// Copies the tensor data into the provided buffer. Returns `true` on success.
+///
+/// # Safety
+///
+/// `out` must point to `len` writable `f32` values. `handle` must either be a
+/// valid tensor allocated by this library or `NULL`.
 #[no_mangle]
 pub unsafe extern "C" fn spiraltorch_tensor_copy_data(
     handle: *const Tensor,
@@ -289,6 +299,11 @@ pub unsafe extern "C" fn spiraltorch_tensor_copy_data(
 }
 
 /// Copies a single row into the provided buffer. Returns `true` on success.
+///
+/// # Safety
+///
+/// `out` must point to `len` writable `f32` values. `handle` must either be a
+/// valid tensor allocated by this library or `NULL`.
 #[no_mangle]
 pub unsafe extern "C" fn spiraltorch_tensor_copy_row(
     handle: *const Tensor,
@@ -323,6 +338,11 @@ pub unsafe extern "C" fn spiraltorch_tensor_copy_row(
 }
 
 /// Copies a single column into the provided buffer. Returns `true` on success.
+///
+/// # Safety
+///
+/// `out` must point to `len` writable `f32` values. `handle` must either be a
+/// valid tensor allocated by this library or `NULL`.
 #[no_mangle]
 pub unsafe extern "C" fn spiraltorch_tensor_copy_column(
     handle: *const Tensor,
@@ -825,6 +845,12 @@ unsafe fn tensor_matmul_bias_gelu_core(
     )
 }
 
+/// Computes `relu(lhs * rhs + bias)`.
+///
+/// # Safety
+///
+/// `lhs` and `rhs` must be valid tensor handles. `bias` must point to
+/// `bias_len` readable `f32` values.
 #[no_mangle]
 pub unsafe extern "C" fn spiraltorch_tensor_matmul_bias_relu(
     lhs: *const Tensor,
@@ -842,6 +868,12 @@ pub unsafe extern "C" fn spiraltorch_tensor_matmul_bias_relu(
     )
 }
 
+/// Computes `relu(lhs * rhs + bias)` with an explicit backend override.
+///
+/// # Safety
+///
+/// `lhs` and `rhs` must be valid tensor handles. `bias` must point to
+/// `bias_len` readable `f32` values.
 #[no_mangle]
 pub unsafe extern "C" fn spiraltorch_tensor_matmul_bias_relu_with_backend(
     lhs: *const Tensor,
@@ -867,6 +899,12 @@ pub unsafe extern "C" fn spiraltorch_tensor_matmul_bias_relu_with_backend(
     )
 }
 
+/// Computes `relu(lhs * rhs + bias + residual)`.
+///
+/// # Safety
+///
+/// `lhs`, `rhs`, and `residual` must be valid tensor handles. `bias` must point
+/// to `bias_len` readable `f32` values.
 #[no_mangle]
 pub unsafe extern "C" fn spiraltorch_tensor_matmul_bias_add_relu(
     lhs: *const Tensor,
@@ -886,6 +924,12 @@ pub unsafe extern "C" fn spiraltorch_tensor_matmul_bias_add_relu(
     )
 }
 
+/// Computes `relu(lhs * rhs + bias + residual)` with an explicit backend.
+///
+/// # Safety
+///
+/// `lhs`, `rhs`, and `residual` must be valid tensor handles. `bias` must point
+/// to `bias_len` readable `f32` values.
 #[no_mangle]
 pub unsafe extern "C" fn spiraltorch_tensor_matmul_bias_add_relu_with_backend(
     lhs: *const Tensor,
@@ -913,6 +957,12 @@ pub unsafe extern "C" fn spiraltorch_tensor_matmul_bias_add_relu_with_backend(
     )
 }
 
+/// Computes `gelu(lhs * rhs + bias)`.
+///
+/// # Safety
+///
+/// `lhs` and `rhs` must be valid tensor handles. `bias` must point to
+/// `bias_len` readable `f32` values.
 #[no_mangle]
 pub unsafe extern "C" fn spiraltorch_tensor_matmul_bias_gelu(
     lhs: *const Tensor,
@@ -930,6 +980,12 @@ pub unsafe extern "C" fn spiraltorch_tensor_matmul_bias_gelu(
     )
 }
 
+/// Computes `gelu(lhs * rhs + bias)` with an explicit backend override.
+///
+/// # Safety
+///
+/// `lhs` and `rhs` must be valid tensor handles. `bias` must point to
+/// `bias_len` readable `f32` values.
 #[no_mangle]
 pub unsafe extern "C" fn spiraltorch_tensor_matmul_bias_gelu_with_backend(
     lhs: *const Tensor,
@@ -982,6 +1038,12 @@ pub extern "C" fn spiraltorch_tensor_row_softmax(
     })
 }
 
+/// Creates a Golden runtime handle.
+///
+/// # Safety
+///
+/// `thread_name`, when non-null, must be a valid NUL-terminated UTF-8 C string
+/// for the duration of the call.
 #[no_mangle]
 pub unsafe extern "C" fn spiraltorch_runtime_new(
     worker_threads: usize,
@@ -993,7 +1055,7 @@ pub unsafe extern "C" fn spiraltorch_runtime_new(
     }
     if !thread_name.is_null() {
         match CStr::from_ptr(thread_name).to_str() {
-            Ok(name) if name.is_empty() => {
+            Ok("") => {
                 config.thread_name = None;
             }
             Ok(name) => {
@@ -1020,6 +1082,7 @@ pub unsafe extern "C" fn spiraltorch_runtime_new(
 }
 
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn spiraltorch_runtime_free(handle: *mut RuntimeHandle) {
     if handle.is_null() {
         return;
@@ -1131,6 +1194,7 @@ unsafe fn runtime_tensor_matmul_bias_relu_core(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 unsafe fn runtime_tensor_matmul_bias_add_relu_core(
     runtime: *const RuntimeHandle,
     lhs: *const Tensor,
@@ -1221,6 +1285,12 @@ pub extern "C" fn spiraltorch_runtime_tensor_matmul_with_backend(
     )
 }
 
+/// Spawns `relu(lhs * rhs + bias)` on the runtime.
+///
+/// # Safety
+///
+/// `runtime`, `lhs`, and `rhs` must be valid handles. `bias` must point to
+/// `bias_len` readable `f32` values.
 #[no_mangle]
 pub unsafe extern "C" fn spiraltorch_runtime_tensor_matmul_bias_relu(
     runtime: *const RuntimeHandle,
@@ -1240,6 +1310,12 @@ pub unsafe extern "C" fn spiraltorch_runtime_tensor_matmul_bias_relu(
     )
 }
 
+/// Spawns `relu(lhs * rhs + bias)` on the runtime with a backend override.
+///
+/// # Safety
+///
+/// `runtime`, `lhs`, and `rhs` must be valid handles. `bias` must point to
+/// `bias_len` readable `f32` values.
 #[no_mangle]
 pub unsafe extern "C" fn spiraltorch_runtime_tensor_matmul_bias_relu_with_backend(
     runtime: *const RuntimeHandle,
@@ -1267,6 +1343,12 @@ pub unsafe extern "C" fn spiraltorch_runtime_tensor_matmul_bias_relu_with_backen
     )
 }
 
+/// Spawns `relu(lhs * rhs + bias + residual)` on the runtime.
+///
+/// # Safety
+///
+/// `runtime`, `lhs`, `rhs`, and `residual` must be valid handles. `bias` must
+/// point to `bias_len` readable `f32` values.
 #[no_mangle]
 pub unsafe extern "C" fn spiraltorch_runtime_tensor_matmul_bias_add_relu(
     runtime: *const RuntimeHandle,
@@ -1288,6 +1370,12 @@ pub unsafe extern "C" fn spiraltorch_runtime_tensor_matmul_bias_add_relu(
     )
 }
 
+/// Spawns `relu(lhs * rhs + bias + residual)` with a backend override.
+///
+/// # Safety
+///
+/// `runtime`, `lhs`, `rhs`, and `residual` must be valid handles. `bias` must
+/// point to `bias_len` readable `f32` values.
 #[no_mangle]
 pub unsafe extern "C" fn spiraltorch_runtime_tensor_matmul_bias_add_relu_with_backend(
     runtime: *const RuntimeHandle,
@@ -1317,6 +1405,12 @@ pub unsafe extern "C" fn spiraltorch_runtime_tensor_matmul_bias_add_relu_with_ba
     )
 }
 
+/// Spawns `gelu(lhs * rhs + bias)` on the runtime.
+///
+/// # Safety
+///
+/// `runtime`, `lhs`, and `rhs` must be valid handles. `bias` must point to
+/// `bias_len` readable `f32` values.
 #[no_mangle]
 pub unsafe extern "C" fn spiraltorch_runtime_tensor_matmul_bias_gelu(
     runtime: *const RuntimeHandle,
@@ -1336,6 +1430,12 @@ pub unsafe extern "C" fn spiraltorch_runtime_tensor_matmul_bias_gelu(
     )
 }
 
+/// Spawns `gelu(lhs * rhs + bias)` with a backend override.
+///
+/// # Safety
+///
+/// `runtime`, `lhs`, and `rhs` must be valid handles. `bias` must point to
+/// `bias_len` readable `f32` values.
 #[no_mangle]
 pub unsafe extern "C" fn spiraltorch_runtime_tensor_matmul_bias_gelu_with_backend(
     runtime: *const RuntimeHandle,
@@ -1408,6 +1508,12 @@ pub extern "C" fn spiraltorch_runtime_tensor_random_normal(
     })
 }
 
+/// Classifies a gradient vector into roundtable assignments.
+///
+/// # Safety
+///
+/// `gradient` must point to `len` readable values, `assignments` must point to
+/// `len` writable bytes, and `summary` must be a valid writable pointer.
 #[no_mangle]
 pub unsafe extern "C" fn spiraltorch_roundtable_classify(
     gradient: *const f32,
@@ -1596,7 +1702,7 @@ mod tests {
 
     #[test]
     fn tensor_add_and_sub() {
-        let a_data = vec![1.0_f32, 2.0, 3.0, 4.0];
+        let a_data = [1.0_f32, 2.0, 3.0, 4.0];
         let b_data = vec![5.0_f32, 6.0, 7.0, 8.0];
         let a = unsafe { spiraltorch_tensor_from_dense(2, 2, a_data.as_ptr(), a_data.len()) };
         let b = unsafe { spiraltorch_tensor_from_dense(2, 2, b_data.as_ptr(), b_data.len()) };
@@ -1627,8 +1733,8 @@ mod tests {
 
     #[test]
     fn tensor_scale_and_matmul() {
-        let left_data = vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0];
-        let right_data = vec![7.0_f32, 8.0, 9.0, 10.0, 11.0, 12.0];
+        let left_data = [1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let right_data = [7.0_f32, 8.0, 9.0, 10.0, 11.0, 12.0];
         let left =
             unsafe { spiraltorch_tensor_from_dense(2, 3, left_data.as_ptr(), left_data.len()) };
         let right =
@@ -1739,7 +1845,7 @@ mod tests {
         assert!(reshaped_ok);
         assert_eq!(reshaped_buffer, data);
 
-        let other_data = vec![1.0_f32, 0.5, 1.5, 2.0, 2.5, 3.0];
+        let other_data = [1.0_f32, 0.5, 1.5, 2.0, 2.5, 3.0];
         let other =
             unsafe { spiraltorch_tensor_from_dense(2, 3, other_data.as_ptr(), other_data.len()) };
         assert!(!other.is_null());
@@ -1772,8 +1878,8 @@ mod tests {
         let workers = spiraltorch_runtime_worker_count(runtime);
         assert!(workers >= 1);
 
-        let left_data = vec![1.0_f32, 2.0, 3.0, 4.0];
-        let right_data = vec![5.0_f32, 6.0, 7.0, 8.0];
+        let left_data = [1.0_f32, 2.0, 3.0, 4.0];
+        let right_data = [5.0_f32, 6.0, 7.0, 8.0];
         let left =
             unsafe { spiraltorch_tensor_from_dense(2, 2, left_data.as_ptr(), left_data.len()) };
         let right =
@@ -1854,8 +1960,8 @@ mod tests {
 
     #[test]
     fn tensor_matmul_with_backend_matches_auto() {
-        let lhs_data = vec![1.0_f32, 2.0, 3.0, 4.0];
-        let rhs_data = vec![5.0_f32, 6.0, 7.0, 8.0];
+        let lhs_data = [1.0_f32, 2.0, 3.0, 4.0];
+        let rhs_data = [5.0_f32, 6.0, 7.0, 8.0];
         let lhs = unsafe { spiraltorch_tensor_from_dense(2, 2, lhs_data.as_ptr(), lhs_data.len()) };
         let rhs = unsafe { spiraltorch_tensor_from_dense(2, 2, rhs_data.as_ptr(), rhs_data.len()) };
         assert!(!lhs.is_null());
@@ -1924,9 +2030,9 @@ mod tests {
 
     #[test]
     fn tensor_matmul_bias_relu_with_backend_matches_auto() {
-        let lhs_data = vec![0.5_f32, -1.0, 2.0, 3.0];
-        let rhs_data = vec![1.0_f32, 0.0, -2.0, 4.0];
-        let bias = vec![0.1_f32, -0.2];
+        let lhs_data = [0.5_f32, -1.0, 2.0, 3.0];
+        let rhs_data = [1.0_f32, 0.0, -2.0, 4.0];
+        let bias = [0.1_f32, -0.2];
 
         let lhs = unsafe { spiraltorch_tensor_from_dense(2, 2, lhs_data.as_ptr(), lhs_data.len()) };
         let rhs = unsafe { spiraltorch_tensor_from_dense(2, 2, rhs_data.as_ptr(), rhs_data.len()) };
@@ -2019,10 +2125,10 @@ mod tests {
 
     #[test]
     fn tensor_matmul_bias_add_relu_with_backend_matches_auto() {
-        let lhs_data = vec![2.0_f32, -1.0, 0.0, 1.5];
-        let rhs_data = vec![1.0_f32, 3.0, -0.5, 2.0];
-        let bias = vec![0.3_f32, 0.7];
-        let residual_data = vec![0.1_f32, 0.2, 0.3, 0.4];
+        let lhs_data = [2.0_f32, -1.0, 0.0, 1.5];
+        let rhs_data = [1.0_f32, 3.0, -0.5, 2.0];
+        let bias = [0.3_f32, 0.7];
+        let residual_data = [0.1_f32, 0.2, 0.3, 0.4];
 
         let lhs = unsafe { spiraltorch_tensor_from_dense(2, 2, lhs_data.as_ptr(), lhs_data.len()) };
         let rhs = unsafe { spiraltorch_tensor_from_dense(2, 2, rhs_data.as_ptr(), rhs_data.len()) };
@@ -2107,9 +2213,9 @@ mod tests {
 
     #[test]
     fn tensor_matmul_bias_gelu_with_backend_matches_auto() {
-        let lhs_data = vec![0.25_f32, -1.0, 1.5, 2.0];
-        let rhs_data = vec![1.0_f32, 0.75, -2.0, 0.5];
-        let bias = vec![0.05_f32, -0.15];
+        let lhs_data = [0.25_f32, -1.0, 1.5, 2.0];
+        let rhs_data = [1.0_f32, 0.75, -2.0, 0.5];
+        let bias = [0.05_f32, -0.15];
 
         let lhs = unsafe { spiraltorch_tensor_from_dense(2, 2, lhs_data.as_ptr(), lhs_data.len()) };
         let rhs = unsafe { spiraltorch_tensor_from_dense(2, 2, rhs_data.as_ptr(), rhs_data.len()) };
@@ -2154,9 +2260,9 @@ mod tests {
 
     #[test]
     fn tensor_matmul_bias_relu_validates_bias_length() {
-        let lhs_data = vec![1.0_f32, 0.0, 0.0, 1.0];
-        let rhs_data = vec![1.0_f32, 2.0, 3.0, 4.0];
-        let bias = vec![0.5_f32];
+        let lhs_data = [1.0_f32, 0.0, 0.0, 1.0];
+        let rhs_data = [1.0_f32, 2.0, 3.0, 4.0];
+        let bias = [0.5_f32];
 
         let lhs = unsafe { spiraltorch_tensor_from_dense(2, 2, lhs_data.as_ptr(), lhs_data.len()) };
         let rhs = unsafe { spiraltorch_tensor_from_dense(2, 2, rhs_data.as_ptr(), rhs_data.len()) };
@@ -2181,9 +2287,9 @@ mod tests {
 
     #[test]
     fn tensor_matmul_bias_gelu_validates_bias_length() {
-        let lhs_data = vec![1.0_f32, 2.0, 3.0, 4.0];
-        let rhs_data = vec![0.5_f32, -1.5, 2.0, 1.0];
-        let bias = vec![0.1_f32];
+        let lhs_data = [1.0_f32, 2.0, 3.0, 4.0];
+        let rhs_data = [0.5_f32, -1.5, 2.0, 1.0];
+        let bias = [0.1_f32];
 
         let lhs = unsafe { spiraltorch_tensor_from_dense(2, 2, lhs_data.as_ptr(), lhs_data.len()) };
         let rhs = unsafe { spiraltorch_tensor_from_dense(2, 2, rhs_data.as_ptr(), rhs_data.len()) };
@@ -2208,7 +2314,7 @@ mod tests {
 
     #[test]
     fn tensor_row_softmax_matches_manual_computation() {
-        let data = vec![0.0_f32, 1.0, 2.0, 3.0];
+        let data = [0.0_f32, 1.0, 2.0, 3.0];
         let tensor = unsafe { spiraltorch_tensor_from_dense(2, 2, data.as_ptr(), data.len()) };
         assert!(!tensor.is_null());
 
@@ -2265,8 +2371,8 @@ mod tests {
         let runtime = unsafe { spiraltorch_runtime_new(0, ptr::null()) };
         assert!(!runtime.is_null());
 
-        let lhs_data = vec![1.0_f32, 0.0, 0.0, 1.0];
-        let rhs_data = vec![2.0_f32, 3.0, 4.0, 5.0];
+        let lhs_data = [1.0_f32, 0.0, 0.0, 1.0];
+        let rhs_data = [2.0_f32, 3.0, 4.0, 5.0];
         let lhs = unsafe { spiraltorch_tensor_from_dense(2, 2, lhs_data.as_ptr(), lhs_data.len()) };
         let rhs = unsafe { spiraltorch_tensor_from_dense(2, 2, rhs_data.as_ptr(), rhs_data.len()) };
         assert!(!lhs.is_null());
@@ -2310,9 +2416,9 @@ mod tests {
         let runtime = unsafe { spiraltorch_runtime_new(0, ptr::null()) };
         assert!(!runtime.is_null());
 
-        let lhs_data = vec![1.0_f32, -2.0, 0.5, 3.0, -1.0, 4.0];
-        let rhs_data = vec![0.5_f32, 1.0, -1.5, 2.0];
-        let bias = vec![0.25_f32, -0.75];
+        let lhs_data = [1.0_f32, -2.0, 0.5, 3.0, -1.0, 4.0];
+        let rhs_data = [0.5_f32, 1.0, -1.5, 2.0];
+        let bias = [0.25_f32, -0.75];
 
         let lhs = unsafe { spiraltorch_tensor_from_dense(3, 2, lhs_data.as_ptr(), lhs_data.len()) };
         let rhs = unsafe { spiraltorch_tensor_from_dense(2, 2, rhs_data.as_ptr(), rhs_data.len()) };
@@ -2357,10 +2463,10 @@ mod tests {
         let runtime = unsafe { spiraltorch_runtime_new(0, ptr::null()) };
         assert!(!runtime.is_null());
 
-        let lhs_data = vec![1.0_f32, 2.0, -1.0, 0.5];
-        let rhs_data = vec![0.5_f32, -0.5, 1.5, 2.5];
-        let bias = vec![0.2_f32, -0.3];
-        let residual_data = vec![0.1_f32, 0.2, 0.3, 0.4];
+        let lhs_data = [1.0_f32, 2.0, -1.0, 0.5];
+        let rhs_data = [0.5_f32, -0.5, 1.5, 2.5];
+        let bias = [0.2_f32, -0.3];
+        let residual_data = [0.1_f32, 0.2, 0.3, 0.4];
 
         let lhs = unsafe { spiraltorch_tensor_from_dense(2, 2, lhs_data.as_ptr(), lhs_data.len()) };
         let rhs = unsafe { spiraltorch_tensor_from_dense(2, 2, rhs_data.as_ptr(), rhs_data.len()) };
@@ -2412,9 +2518,9 @@ mod tests {
         let runtime = unsafe { spiraltorch_runtime_new(0, ptr::null()) };
         assert!(!runtime.is_null());
 
-        let lhs_data = vec![1.0_f32, -0.5, 0.75, 2.0];
-        let rhs_data = vec![0.5_f32, 1.25, -1.5, 0.25];
-        let bias = vec![0.05_f32, -0.1];
+        let lhs_data = [1.0_f32, -0.5, 0.75, 2.0];
+        let rhs_data = [0.5_f32, 1.25, -1.5, 0.25];
+        let bias = [0.05_f32, -0.1];
 
         let lhs = unsafe { spiraltorch_tensor_from_dense(2, 2, lhs_data.as_ptr(), lhs_data.len()) };
         let rhs = unsafe { spiraltorch_tensor_from_dense(2, 2, rhs_data.as_ptr(), rhs_data.len()) };
@@ -2459,7 +2565,7 @@ mod tests {
         let runtime = unsafe { spiraltorch_runtime_new(0, ptr::null()) };
         assert!(!runtime.is_null());
 
-        let data = vec![1.0_f32, 2.0, -1.0, -2.0, 0.5, -0.25];
+        let data = [1.0_f32, 2.0, -1.0, -2.0, 0.5, -0.25];
         let tensor = unsafe { spiraltorch_tensor_from_dense(3, 2, data.as_ptr(), data.len()) };
         assert!(!tensor.is_null());
 
@@ -2498,7 +2604,7 @@ mod tests {
         unsafe {
             spiraltorch_dlpack_drop_exported_state(ptr::null_mut());
         }
-        let data = vec![1.0_f32, 2.0, 3.0, 4.0];
+        let data = [1.0_f32, 2.0, 3.0, 4.0];
         let tensor = unsafe { spiraltorch_tensor_from_dense(2, 2, data.as_ptr(), data.len()) };
         assert!(!tensor.is_null());
         let dlpack = spiraltorch_tensor_to_dlpack(tensor);

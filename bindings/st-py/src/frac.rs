@@ -741,7 +741,7 @@ impl PyMellinLogGrid {
 }
 
 pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
-    let module = PyModule::new_bound(py, "frac")?;
+    let module = PyModule::new(py, "frac")?;
     module.add_function(wrap_pyfunction!(gl_coeffs_adaptive, &module)?)?;
     module.add_function(wrap_pyfunction!(fracdiff_gl_1d, &module)?)?;
     module.add_function(wrap_pyfunction!(mellin_exp_decay_samples, &module)?)?;

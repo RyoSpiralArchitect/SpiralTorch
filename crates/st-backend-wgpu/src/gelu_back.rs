@@ -152,7 +152,7 @@ impl Default for Geometry {
 
 fn ceil_div(lhs: u32, rhs: u32) -> u32 {
     assert!(rhs > 0, "division by zero in ceil_div");
-    (lhs + rhs - 1) / rhs
+    lhs.div_ceil(rhs)
 }
 
 #[repr(C)]
@@ -226,11 +226,11 @@ pub struct Pipelines {
 }
 
 impl Pipelines {
-    pub fn fused_dispatch<'a>(&'a self) -> &'a ComputePipeline {
+    pub fn fused_dispatch(&self) -> &ComputePipeline {
         self.fused.as_ref()
     }
 
-    pub fn reduce_dispatch<'a>(&'a self) -> &'a ComputePipeline {
+    pub fn reduce_dispatch(&self) -> &ComputePipeline {
         self.reduce.as_ref()
     }
 
@@ -411,7 +411,11 @@ impl<'a> Builder<'a> {
             &fused_label,
             "main",
             Some(&fused_layout),
-            &[("WG_ROWS", geometry.wg_rows), ("WG_COLS", geometry.wg_cols)],
+            &[
+                ("WG_ROWS", geometry.wg_rows),
+                ("WG_COLS", geometry.wg_cols),
+                ("WG_TILE", geometry.wg_rows.saturating_mul(geometry.wg_cols)),
+            ],
         )?;
 
         let reduce = self.cache.load_compute_pipeline_with_layout_and_overrides(

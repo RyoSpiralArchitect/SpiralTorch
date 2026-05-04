@@ -150,7 +150,6 @@ impl StudioConceptHint {
                 .copied()
                 .enumerate()
                 .filter(|(_, weight)| *weight > f32::EPSILON)
-                .map(|(idx, weight)| (idx, weight))
                 .collect(),
             StudioConceptHint::Window(window) => window
                 .iter()
@@ -175,7 +174,7 @@ impl ConceptWindow {
         if weights.is_empty() {
             return None;
         }
-        weights.sort_by(|a, b| a.0.cmp(&b.0));
+        weights.sort_by_key(|weight| weight.0);
         let magnitude = record.pulse.magnitude();
         Some(Self {
             channel: record.channel.clone(),
@@ -667,14 +666,13 @@ impl ZSpaceSink {
         ] {
             let channel_name = format!("{}{}", root_channel, suffix);
             let mut evaluations = Vec::with_capacity(projection.len());
-            for idx in 0..projection.len() {
+            for (idx, (value_re, value_im)) in values.iter().enumerate().take(projection.len()) {
                 let s = &projection.s_values[idx];
                 let z = &projection.z_points[idx];
-                let (value_re, value_im) = values[idx];
                 evaluations.push(ZSpaceEvaluation {
                     s: (s.re as f32, s.im as f32),
                     z: (z.re as f32, z.im as f32),
-                    value: (value_re, value_im),
+                    value: (*value_re, *value_im),
                 });
             }
             projections.push(ZSpaceProjection {
@@ -848,7 +846,7 @@ impl QuantumRealityStudio {
         Self {
             capture: SignalCaptureSession::new(config),
             tagger: SemanticTagger::from_bridge(bridge),
-            overlay: OverlayComposer::default(),
+            overlay: OverlayComposer,
             outlet: StudioOutlet::default(),
             frames: VecDeque::with_capacity(history_limit),
             meta_layer: None,
@@ -958,11 +956,11 @@ impl QuantumRealityStudio {
         }
         let summary = narrative.as_ref().map(|hint| hint.summary());
         let temporal_tags = TemporalLogicEngine::temporal_tags(&annotation);
-        overlay = self.stitch_narrative_tags(overlay, temporal_tags.into_iter());
+        overlay = self.stitch_narrative_tags(overlay, temporal_tags);
         let sheaf_tags = self
             .topos
             .update(&record, concept_window.as_ref(), &annotation);
-        overlay = self.stitch_narrative_tags(overlay, sheaf_tags.into_iter());
+        overlay = self.stitch_narrative_tags(overlay, sheaf_tags);
         let frame = StudioFrame {
             record,
             concept,
@@ -1282,7 +1280,7 @@ mod tests {
             .unwrap();
         assert_eq!(frame.overlay.glyph, expected);
         assert!(frame.overlay.intensity > 0.0);
-        assert!(frame.overlay.glyphs().len() >= 1);
+        assert!(!frame.overlay.glyphs().is_empty());
         assert_eq!(frame.z_space.signature().len(), 8);
     }
 
@@ -1302,7 +1300,7 @@ mod tests {
         let meta_json = storyboard
             .get("frames")
             .and_then(Value::as_array)
-            .and_then(|frames| frames.get(0))
+            .and_then(|frames| frames.first())
             .and_then(Value::as_object)
             .and_then(|frame| frame.get("meta"))
             .and_then(Value::as_object)
@@ -1419,7 +1417,7 @@ mod tests {
         let stored = frames.lock().expect("mutex poisoned");
         assert_eq!(stored.len(), 1);
         assert_eq!(stored[0].overlay.glyph, expected);
-        assert!(stored[0].overlay.glyphs().len() >= 1);
+        assert!(!stored[0].overlay.glyphs().is_empty());
     }
 
     #[test]
@@ -1466,7 +1464,7 @@ mod tests {
             .get("glyphs")
             .and_then(Value::as_array)
             .expect("glyph list");
-        assert!(glyphs.len() >= 1);
+        assert!(!glyphs.is_empty());
         let causal = entry
             .get("causal")
             .and_then(Value::as_object)
@@ -1657,7 +1655,7 @@ mod tests {
         let window = studio.emit_concept_window(&frame).expect("window");
         assert_eq!(window.channel, "alpha");
         assert!(window.magnitude > 0.0);
-        assert!(window.weights.len() >= 1);
+        assert!(!window.weights.is_empty());
         assert!(frame.narrative_summary.is_some());
         let summary = frame.narrative_summary.clone().unwrap();
         assert_eq!(summary.channel, "alpha");

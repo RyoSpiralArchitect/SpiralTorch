@@ -53,6 +53,6 @@ mod tests {
         };
         let commands = controller.update(&report, &telemetry);
         assert!(commands.get("learning_rate").unwrap() < &0.05);
-        assert!(commands.get("gauge").is_some());
+        assert!(commands.contains_key("gauge"));
     }
 }

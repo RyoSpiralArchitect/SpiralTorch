@@ -13,14 +13,17 @@ Thanks for helping improve SpiralTorch. This repo is **AGPL-3.0-or-later** licen
 ### Prerequisites
 
 - Rust (stable): `rustup show`
+- Rust nightly with rustfmt for workspace formatting:
+  `rustup toolchain install nightly-2026-04-15 --component rustfmt`
 - Python (recommended for wheel/docs tooling): 3.12+
+- Protobuf compiler (`protoc`) for `--all-targets` checks that build TensorBoard examples
 - (Optional) `just` for task shortcuts
 
 ### Common tasks (cross-platform)
 
 ```bash
 # Format
-cargo fmt --all
+cargo +nightly-2026-04-15 fmt --all
 
 # Lint
 cargo clippy --workspace --all-targets
@@ -60,4 +63,3 @@ python -m pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch
 
 - Update docs when you change APIs or workflows.
 - Prefer ASCII for version constraints (e.g. `>= 3.8`) to avoid encoding issues across shells.
-

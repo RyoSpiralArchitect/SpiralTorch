@@ -5,9 +5,9 @@
 
 #[cfg(feature = "faer")]
 mod imp {
-    use faer::{get_global_parallelism, Accum};
     use faer::linalg::matmul::matmul as faer_matmul;
     use faer::mat::{MatMut, MatRef};
+    use faer::{get_global_parallelism, Accum};
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum DenseLayout {
@@ -141,7 +141,7 @@ mod imp {
 
         dst.fill(0.0);
         let mut out = unsafe { row_major_mut(dst.as_mut_ptr(), rows, cols, cols as isize, 1) };
-        
+
         // faer 0.23 API: matmul(dst, accum_mode, lhs, rhs, alpha, parallelism)
         // - dst: mutable output matrix
         // - accum_mode: Accum::Replace (overwrite) or Accum::Add (accumulate)
@@ -150,10 +150,10 @@ mod imp {
         // - parallelism: threading configuration
         faer_matmul(
             out.as_mut(),
-            Accum::Replace,      // Overwrite dst with result
+            Accum::Replace, // Overwrite dst with result
             lhs.as_ref(),
             rhs.as_ref(),
-            1.0,                  // α = 1
+            1.0, // α = 1
             get_global_parallelism(),
         );
 

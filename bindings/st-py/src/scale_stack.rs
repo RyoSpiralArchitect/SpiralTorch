@@ -143,7 +143,7 @@ fn semantic_scale_stack(
 }
 
 pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
-    let module = PyModule::new_bound(py, "scale_stack")?;
+    let module = PyModule::new(py, "scale_stack")?;
     module.add_class::<PyScaleStack>()?;
     module.add_function(wrap_pyfunction!(scalar_scale_stack, &module)?)?;
     module.add_function(wrap_pyfunction!(semantic_scale_stack, &module)?)?;

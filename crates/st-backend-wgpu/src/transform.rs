@@ -466,11 +466,11 @@ impl TransformDispatcher {
         let mut means = [0.0f32; 4];
         if config.contrast != 1.0 {
             let pixels = config.height * config.width;
-            for c in 0..config.channels.min(4) {
+            for (c, mean) in means.iter_mut().enumerate().take(config.channels.min(4)) {
                 let start = c * pixels;
                 let end = start + pixels;
                 let slice = &input[start..end];
-                means[c] = slice.iter().sum::<f32>() / pixels as f32;
+                *mean = slice.iter().sum::<f32>() / pixels as f32;
             }
         }
         match &self.backend {
@@ -568,9 +568,9 @@ fn workgroup_dims(
     y: u32,
     z: u32,
 ) -> (u32, u32, u32) {
-    let gx = ((width as u32) + x - 1) / x;
-    let gy = ((height as u32) + y - 1) / y;
-    let gz = ((depth as u32) + z - 1) / z;
+    let gx = (width as u32).div_ceil(x);
+    let gy = (height as u32).div_ceil(y);
+    let gz = (depth as u32).div_ceil(z);
     (gx, gy, gz)
 }
 

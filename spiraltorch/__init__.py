@@ -708,6 +708,29 @@ def _load_native_package() -> None:
     module.__path__ = [str(impl_init.parent), str(_DEV_SHIM_DIR)]
     module.__spec__ = spec
 
+    def _native_placeholder() -> ModuleNotFoundError:
+        return ModuleNotFoundError(
+            "spiraltorch.spiraltorch",
+            name="spiraltorch.spiraltorch",
+            path=str(impl_init.parent),
+        )
+
+    def _looks_like_native_import_failure(exc: BaseException) -> bool:
+        if not isinstance(exc, ImportError):
+            return False
+        native_names = {
+            "spiraltorch.spiraltorch",
+            "spiraltorch.spiraltorch_native",
+            "spiraltorch_native",
+        }
+        if getattr(exc, "name", None) in native_names:
+            return True
+        message = str(exc)
+        return (
+            any(name in message for name in native_names)
+            or ("spiraltorch" in message and any(token in message for token in (".so", ".pyd", "dlopen")))
+        )
+
     try:
         loader.exec_module(module)
     except ModuleNotFoundError as exc:
@@ -717,14 +740,22 @@ def _load_native_package() -> None:
             return
         raise
     except Exception as exc:  # pragma: no cover - defensive fallback
+        if not _looks_like_native_import_failure(exc):
+            raise
         warnings.warn(
             "Failed to load the native SpiralTorch bindings; falling back to the Python stub.",
             RuntimeWarning,
             stacklevel=2,
         )
-        placeholder = ModuleNotFoundError("spiraltorch", name="spiraltorch")
+        placeholder = _native_placeholder()
         _install_stub_bindings(module, placeholder)
         module.__dict__["__native_import_error__"] = exc
+        return
+
+    if module.__dict__.get("_rs") is None and "Tensor" not in module.__dict__:
+        placeholder = _native_placeholder()
+        _install_stub_bindings(module, placeholder)
+        module.__dict__["__native_import_error__"] = placeholder
 
 
 def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
@@ -2345,7 +2376,7 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             The returned buffer always contains ``self._rows * self._cols`` floating
             point values.
             """
-            if self._backend == "python":
+            if self._backend == "python" or isinstance(self._data, array):
                 return self._data
             return array("d", self._data.reshape(-1))
 

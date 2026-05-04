@@ -16,8 +16,7 @@ use st_tensor::wasm_canvas::{
 use st_tensor::{Tensor, TensorError};
 use st_vision::{
     ChronoSnapshot as PureChronoSnapshot, StreamedVolume as PureStreamedVolume,
-    ZSliceProfile as PureZSliceProfile,
-    ZSpaceStreamFrame as PureZSpaceStreamFrame,
+    ZSliceProfile as PureZSliceProfile, ZSpaceStreamFrame as PureZSpaceStreamFrame,
     ZSpaceStreamFrameAggregator as PureZSpaceStreamFrameAggregator,
     ZSpaceTelemetryReport as PureZSpaceTelemetryReport,
 };
@@ -150,7 +149,7 @@ fn chrono_summary_from_any(summary: &Bound<'_, PyAny>) -> PyResult<ChronoSummary
 }
 
 fn chrono_summary_to_dict(py: Python<'_>, summary: &ChronoSummary) -> PyResult<Py<PyDict>> {
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("frames", summary.frames)?;
     dict.set_item("duration", summary.duration)?;
     dict.set_item("latest_timestamp", summary.latest_timestamp)?;
@@ -166,7 +165,7 @@ fn chrono_summary_to_dict(py: Python<'_>, summary: &ChronoSummary) -> PyResult<P
 }
 
 fn z_slice_profile_to_dict(py: Python<'_>, profile: &PureZSliceProfile) -> PyResult<Py<PyDict>> {
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("depth", profile.depth())?;
     dict.set_item("means", profile.means().to_vec())?;
     dict.set_item("stds", profile.stds().to_vec())?;
@@ -184,7 +183,7 @@ fn zspace_telemetry_to_dict(
     py: Python<'_>,
     report: &PureZSpaceTelemetryReport,
 ) -> PyResult<Py<PyDict>> {
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("depth", report.depth())?;
     dict.set_item("mean_intensity", report.mean_intensity())?;
     dict.set_item("mean_std", report.mean_std())?;
@@ -288,7 +287,7 @@ impl PyChronoSnapshot {
     }
 
     fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         dict.set_item("timestamp", self.timestamp())?;
         dict.set_item("dt", self.dt())?;
         dict.set_item("summary", chrono_summary_to_dict(py, self.inner.summary())?)?;
@@ -393,6 +392,7 @@ impl PyZSpaceStreamFrame {
         Ok(PyStreamedVolume::from_inner(streamed))
     }
 
+    #[allow(clippy::wrong_self_convention)]
     fn into_streamed_volume(&self) -> PyResult<PyStreamedVolume> {
         let streamed = self
             .inner
@@ -403,7 +403,7 @@ impl PyZSpaceStreamFrame {
     }
 
     fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         dict.set_item("depth", self.inner.depth())?;
         let (rows, cols) = self.inner.slice_shape();
         dict.set_item("slice_shape", (rows, cols))?;
@@ -412,7 +412,7 @@ impl PyZSpaceStreamFrame {
         dict.set_item("slices", slice_rows)?;
 
         let atlas_payload = if let Some(atlas) = self.inner.atlas_frame() {
-            let atlas_dict = PyDict::new_bound(py);
+            let atlas_dict = PyDict::new(py);
             atlas_dict.set_item("timestamp", atlas.timestamp)?;
             atlas_dict.set_item("metrics", atlas.metrics.len())?;
             atlas_dict.set_item("notes", atlas.notes.len())?;
@@ -529,7 +529,7 @@ impl PyStreamedVolume {
     }
 
     fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         dict.set_item("depth", self.inner.volume.depth())?;
         dict.set_item(
             "slice_shape",
@@ -544,7 +544,7 @@ impl PyStreamedVolume {
         dict.set_item("slices", slice_rows)?;
 
         let atlas_payload = if let Some(atlas) = self.inner.atlas_frame.as_ref() {
-            let atlas_dict = PyDict::new_bound(py);
+            let atlas_dict = PyDict::new(py);
             atlas_dict.set_item("timestamp", atlas.timestamp)?;
             atlas_dict.set_item("metrics", atlas.metrics.len())?;
             atlas_dict.set_item("notes", atlas.notes.len())?;
@@ -618,7 +618,9 @@ impl PyZSpaceStreamFrameAggregator {
 
     #[pyo3(signature = (max_depth=None))]
     fn set_max_depth(&mut self, max_depth: Option<usize>) -> PyResult<()> {
-        self.inner.set_max_depth(max_depth).map_err(tensor_err_to_py)
+        self.inner
+            .set_max_depth(max_depth)
+            .map_err(tensor_err_to_py)
     }
 
     fn __len__(&self) -> usize {
@@ -639,7 +641,9 @@ impl PyZSpaceStreamFrameAggregator {
     }
 
     fn extend(&mut self, frame: &PyZSpaceStreamFrame) -> PyResult<()> {
-        self.inner.extend(frame.inner.clone()).map_err(tensor_err_to_py)
+        self.inner
+            .extend(frame.inner.clone())
+            .map_err(tensor_err_to_py)
     }
 
     fn clear(&mut self) {
@@ -691,9 +695,12 @@ impl PyZSpaceStreamFrameAggregator {
 
     #[getter]
     fn chrono_snapshot(&self) -> Option<PyChronoSnapshot> {
-        self.inner
-            .as_frame()
-            .and_then(|frame| frame.chrono_snapshot().cloned().map(PyChronoSnapshot::from_inner))
+        self.inner.as_frame().and_then(|frame| {
+            frame
+                .chrono_snapshot()
+                .cloned()
+                .map(PyChronoSnapshot::from_inner)
+        })
     }
 
     fn telemetry_report(&self, py: Python<'_>) -> PyResult<Option<Py<PyDict>>> {
@@ -894,7 +901,7 @@ impl PyCanvasTransformer {
     }
 
     fn state_dict(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         dict.set_item("width", self.width)?;
         dict.set_item("height", self.height)?;
         dict.set_item("smoothing", self.smoothing)?;
@@ -1317,7 +1324,7 @@ impl PyCanvasProjector {
             .emit_zspace_patch(coherence, tension, depth)
             .map_err(tensor_err_to_py)?;
         let relation = Py::new(py, PyTensor::from_tensor(patch.relation().clone()))?;
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         dict.set_item("relation", relation)?;
         dict.set_item("coherence", patch.coherence())?;
         dict.set_item("tension", patch.tension())?;
@@ -1339,7 +1346,7 @@ impl PyCanvasProjector {
         let tensor = Tensor::from_vec(samples, 7, flat).map_err(tensor_err_to_py)?;
         let samples_tensor = Py::new(py, PyTensor::from_tensor(tensor))?;
 
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         dict.set_item("curvature", trail.curvature())?;
         dict.set_item("width", trail.width())?;
         dict.set_item("height", trail.height())?;
@@ -1624,13 +1631,13 @@ impl PyCanvasProjector {
 
     /// Returns the current RGBA surface (without forcing a refresh).
     fn rgba<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
-        PyBytes::new_bound(py, self.inner.projector().surface().as_rgba())
+        PyBytes::new(py, self.inner.projector().surface().as_rgba())
     }
 
     /// Refreshes the projector and returns the RGBA surface as bytes.
     fn refresh_rgba<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
         match self.inner.refresh() {
-            Ok(rgba) => Ok(PyBytes::new_bound(py, rgba)),
+            Ok(rgba) => Ok(PyBytes::new(py, rgba)),
             Err(TensorError::EmptyInput(_)) => Ok(self.rgba(py)),
             Err(err) => Err(tensor_err_to_py(err)),
         }

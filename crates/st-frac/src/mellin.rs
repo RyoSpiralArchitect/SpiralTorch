@@ -267,6 +267,10 @@ impl MellinEvalPlan {
         self.z_points.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.z_points.is_empty()
+    }
+
     pub fn shape(&self) -> (usize, usize) {
         self.shape
     }
@@ -291,7 +295,7 @@ impl MellinEvalPlan {
 
         let mut values = Vec::with_capacity(self.z_points.len());
         let mut derivatives = Vec::with_capacity(self.z_points.len());
-        for (idx, (p, dpdz)) in series.into_iter().zip(d_series_dz.into_iter()).enumerate() {
+        for (idx, (p, dpdz)) in series.into_iter().zip(d_series_dz).enumerate() {
             let prefactor = self.prefactors[idx];
             let z = self.z_points[idx];
             values.push(p * prefactor);
@@ -414,7 +418,7 @@ impl MellinEvalPlan {
         if !direct_z_points.is_empty() {
             let direct =
                 crate::mellin_wgpu::evaluate_weighted_series_many_gpu(weighted, &direct_z_points)?;
-            for (idx, value) in direct_indices.into_iter().zip(direct.into_iter()) {
+            for (idx, value) in direct_indices.into_iter().zip(direct) {
                 series[idx] = value;
             }
         }
@@ -960,9 +964,8 @@ impl MellinLogGrid {
             let factor = error * prefactor.conj();
             let conj_z = z.conj();
             let mut pow_conj = ComplexScalar::new(1.0, 0.0);
-            for idx in 0..len {
-                let w = self.weights[idx];
-                grad[idx] += factor * pow_conj * ComplexScalar::new(w, 0.0);
+            for (grad_slot, &w) in grad.iter_mut().zip(self.weights.iter()).take(len) {
+                *grad_slot += factor * pow_conj * ComplexScalar::new(w, 0.0);
                 pow_conj *= conj_z;
             }
         }

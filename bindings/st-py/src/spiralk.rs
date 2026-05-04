@@ -154,7 +154,7 @@ fn spiralk_ai_err_to_py(err: AiRewriteError) -> PyErr {
 
 #[cfg(feature = "kdsl")]
 pub(crate) fn spiralk_out_to_dict(py: Python<'_>, out: &SpiralKOut) -> PyResult<PyObject> {
-    let hard = PyDict::new_bound(py);
+    let hard = PyDict::new(py);
     if let Some(flag) = out.hard.use_2ce {
         hard.set_item("use_2ce", flag)?;
     }
@@ -189,9 +189,9 @@ pub(crate) fn spiralk_out_to_dict(py: Python<'_>, out: &SpiralKOut) -> PyResult<
         hard.set_item("segments", value)?;
     }
 
-    let soft_rules = PyList::empty_bound(py);
+    let soft_rules = PyList::empty(py);
     for rule in &out.soft {
-        let rule_dict = PyDict::new_bound(py);
+        let rule_dict = PyDict::new(py);
         match rule {
             SpiralKSoftRule::U2 { val, w } => {
                 rule_dict.set_item("field", "use_2ce")?;
@@ -252,7 +252,7 @@ pub(crate) fn spiralk_out_to_dict(py: Python<'_>, out: &SpiralKOut) -> PyResult<
         soft_rules.append(rule_dict)?;
     }
 
-    let out_dict = PyDict::new_bound(py);
+    let out_dict = PyDict::new(py);
     out_dict.set_item("hard", hard)?;
     out_dict.set_item("soft", soft_rules)?;
     Ok(out_dict.into_py(py))
@@ -694,7 +694,7 @@ fn rewrite_with_ai(
     };
     let (out, script, hints) = result.map_err(spiralk_ai_err_to_py)?;
     let py_out = spiralk_out_to_dict(py, &out)?;
-    let list = PyList::empty_bound(py);
+    let list = PyList::empty(py);
     for hint in hints {
         let hint_obj = Py::new(py, PySpiralKHeuristicHint { inner: hint })?;
         list.append(hint_obj)?;
@@ -750,7 +750,7 @@ impl AiHintGenerator for PythonAiHintGenerator {
 
 #[cfg(feature = "kdsl")]
 fn extract_python_hints(value: &Bound<'_, PyAny>) -> Result<Vec<HeuristicHint>, AiRewriteError> {
-    let iterator = PyIterator::from_bound_object(value).map_err(|_| {
+    let iterator = PyIterator::from_object(value).map_err(|_| {
         AiRewriteError::Generator(
             "AI generator must return an iterable of SpiralKHeuristicHint".to_string(),
         )
@@ -1286,7 +1286,7 @@ impl PyMaxwellProjector {
 }
 
 pub(crate) fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
-    let module = PyModule::new_bound(py, "spiralk")?;
+    let module = PyModule::new(py, "spiralk")?;
     module.add_class::<PySpiralKFftPlan>()?;
     #[cfg(feature = "kdsl")]
     {

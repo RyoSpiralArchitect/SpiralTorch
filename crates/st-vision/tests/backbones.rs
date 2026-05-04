@@ -34,12 +34,14 @@ where
 
 #[test]
 fn resnet_produces_expected_shape_and_state_roundtrip() {
-    let mut config = ResNetConfig::default();
-    config.input_hw = (32, 32);
-    config.stage_channels = vec![32, 64];
-    config.block_depths = vec![1, 1];
-    config.use_max_pool = false;
-    config.global_pool = true;
+    let config = ResNetConfig {
+        input_hw: (32, 32),
+        stage_channels: vec![32, 64],
+        block_depths: vec![1, 1],
+        use_max_pool: false,
+        global_pool: true,
+        ..Default::default()
+    };
     let resnet = ResNetBackbone::new(config.clone()).unwrap();
     let input = sample_input(config.input_channels, config.input_hw, 11);
     let output = resnet.forward(&input).unwrap();
@@ -73,8 +75,9 @@ fn resnet_config_auto_selects_common_presets() {
 
 #[test]
 fn resnet_backbone_builds_from_presets() {
-    let resnet = ResNetBackbone::from_preset(ResNetPreset::ResNet34).expect("resnet34 backbone");
-    let input = sample_input(3, (224, 224), 13);
+    let resnet =
+        ResNetBackbone::from_preset(ResNetPreset::ResNet56Cifar).expect("resnet56 backbone");
+    let input = sample_input(3, (32, 32), 13);
     let output = resnet.forward(&input).unwrap();
     assert_eq!(output.shape(), (1, resnet.output_features()));
 }
@@ -105,17 +108,19 @@ fn resnet56_skip_gate_accumulates_gradients() {
 
 #[test]
 fn resnet_skip_slip_scales_learnable_gate_gradients() {
-    let mut base = ResNetConfig::default();
-    base.input_hw = (8, 8);
-    base.stage_channels = vec![8];
-    base.block_depths = vec![1];
-    base.stem_kernel = (3, 3);
-    base.stem_stride = (1, 1);
-    base.stem_padding = (1, 1);
-    base.use_max_pool = false;
-    base.global_pool = true;
-    base.skip_learnable = true;
-    base.skip_slip = None;
+    let base = ResNetConfig {
+        input_hw: (8, 8),
+        stage_channels: vec![8],
+        block_depths: vec![1],
+        stem_kernel: (3, 3),
+        stem_stride: (1, 1),
+        stem_padding: (1, 1),
+        use_max_pool: false,
+        global_pool: true,
+        skip_learnable: true,
+        skip_slip: None,
+        ..Default::default()
+    };
 
     let mut baseline = ResNetBackbone::new(base.clone()).unwrap();
     let mut slipped_cfg = base.clone();
@@ -385,15 +390,17 @@ fn skip_slip_schedule_preview_matches_formula() {
 
 #[test]
 fn vit_cls_token_shape_and_json_reload() {
-    let mut config = ViTConfig::default();
-    config.image_hw = (32, 32);
-    config.patch_size = (8, 8);
-    config.in_channels = 3;
-    config.embed_dim = 64;
-    config.depth = 2;
-    config.num_heads = 4;
-    config.mlp_dim = 128;
-    config.curvature = -0.5;
+    let config = ViTConfig {
+        image_hw: (32, 32),
+        patch_size: (8, 8),
+        in_channels: 3,
+        embed_dim: 64,
+        depth: 2,
+        num_heads: 4,
+        mlp_dim: 128,
+        curvature: -0.5,
+        ..Default::default()
+    };
     let vit = ViTBackbone::new(config.clone()).unwrap();
     let input = sample_input(config.in_channels, config.image_hw, 21);
     let output = vit.forward(&input).unwrap();
@@ -410,11 +417,13 @@ fn vit_cls_token_shape_and_json_reload() {
 
 #[test]
 fn convnext_stage_shapes_are_consistent() {
-    let mut config = ConvNeXtConfig::default();
-    config.input_hw = (32, 32);
-    config.stage_dims = vec![32, 64];
-    config.stage_depths = vec![1, 1];
-    config.patch_size = (4, 4);
+    let config = ConvNeXtConfig {
+        input_hw: (32, 32),
+        stage_dims: vec![32, 64],
+        stage_depths: vec![1, 1],
+        patch_size: (4, 4),
+        ..Default::default()
+    };
     let convnext = ConvNeXtBackbone::new(config.clone()).unwrap();
     let input = sample_input(config.input_channels, config.input_hw, 7);
     let output = convnext.forward(&input).unwrap();

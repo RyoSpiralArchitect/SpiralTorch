@@ -3,8 +3,6 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-
-
 #![cfg(feature = "golden")]
 use std::convert::Infallible;
 use std::ops::{Deref, DerefMut};
@@ -366,7 +364,7 @@ impl GoldenRuntime {
             return Ok(acc);
         }
 
-        let chunk = ((data.len() + workers - 1) / workers).max(1);
+        let chunk = data.len().div_ceil(workers).max(1);
         let mut partials = Vec::new();
         thread::scope(|scope| -> Result<(), GoldenTaskError<Infallible>> {
             let mut handles = Vec::new();

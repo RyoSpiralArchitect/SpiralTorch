@@ -18,7 +18,7 @@ use st_core::PureResult;
 use st_core::TensorError;
 
 fn plugin_event_to_py(py: Python<'_>, event: &PluginEvent) -> PyResult<PyObject> {
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();
@@ -81,26 +81,26 @@ fn plugin_event_to_py(py: Python<'_>, event: &PluginEvent) -> PyResult<PyObject>
 }
 
 fn plugin_metadata_to_py(py: Python<'_>, metadata: &PluginMetadata) -> PyResult<PyObject> {
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("id", metadata.id.clone())?;
     dict.set_item("version", metadata.version.clone())?;
     dict.set_item("name", metadata.name.clone())?;
     dict.set_item("description", metadata.description.clone())?;
     dict.set_item("author", metadata.author.clone())?;
 
-    let dependencies = PyDict::new_bound(py);
+    let dependencies = PyDict::new(py);
     for (key, value) in &metadata.dependencies {
         dependencies.set_item(key, value)?;
     }
     dict.set_item("dependencies", dependencies)?;
 
-    let capabilities = PyList::empty_bound(py);
+    let capabilities = PyList::empty(py);
     for cap in &metadata.capabilities {
         capabilities.append(cap.to_string())?;
     }
     dict.set_item("capabilities", capabilities)?;
 
-    let extra = PyDict::new_bound(py);
+    let extra = PyDict::new(py);
     for (key, value) in &metadata.metadata {
         extra.set_item(key, value)?;
     }
@@ -204,7 +204,7 @@ fn collect_strings(
         return Ok(vec![single]);
     }
 
-    let iter = PyIterator::from_bound_object(values).map_err(|_| {
+    let iter = PyIterator::from_object(values).map_err(|_| {
         PyTypeError::new_err(format!("{name} must be a string or iterable of strings"))
     })?;
     let mut out = Vec::new();
@@ -366,7 +366,7 @@ fn plugin_metadata_from_py(plugin: &Bound<'_, PyAny>) -> PyResult<PluginMetadata
             let dict = meta_obj
                 .downcast::<PyDict>()
                 .map_err(|_| PyTypeError::new_err("metadata() must return a dict-like mapping"))?;
-            return plugin_metadata_from_dict(&dict);
+            return plugin_metadata_from_dict(dict);
         }
 
         if meta_attr.is_none() {
@@ -377,7 +377,7 @@ fn plugin_metadata_from_py(plugin: &Bound<'_, PyAny>) -> PyResult<PluginMetadata
             let has_id = dict.get_item("id")?.is_some();
             let has_version = dict.get_item("version")?.is_some();
             if has_id && has_version {
-                return plugin_metadata_from_dict(&dict);
+                return plugin_metadata_from_dict(dict);
             }
         }
 
@@ -451,15 +451,15 @@ impl PythonPlugin {
         let plugin_obj = self.clone_plugin_ref(py)?;
         let plugin_obj = plugin_obj.bind(py);
 
-        if !plugin_auto_subscribe(&plugin_obj)? {
+        if !plugin_auto_subscribe(plugin_obj)? {
             return Ok(Vec::new());
         }
 
-        if !python_plugin_is_callable(&plugin_obj, "on_event")? {
+        if !python_plugin_is_callable(plugin_obj, "on_event")? {
             return Ok(Vec::new());
         }
 
-        let mut targets = match plugin_event_types(&plugin_obj)? {
+        let mut targets = match plugin_event_types(plugin_obj)? {
             Some(list) => list,
             None => vec!["*".to_string()],
         };
@@ -639,7 +639,7 @@ fn collect_event_types(event_types: &Bound<'_, PyAny>) -> PyResult<Vec<String>> 
     if let Ok(single) = event_types.extract::<String>() {
         return Ok(vec![single]);
     }
-    let iter = PyIterator::from_bound_object(event_types)
+    let iter = PyIterator::from_object(event_types)
         .map_err(|_| PyTypeError::new_err("event_types must be a string or iterable of strings"))?;
     let mut out = Vec::new();
     for item in iter {
@@ -683,7 +683,7 @@ fn subscribe_many(
 #[pyo3(signature = (subscriptions))]
 fn unsubscribe_many(subscriptions: &Bound<'_, PyAny>) -> PyResult<usize> {
     init_plugin_system().map_err(tensor_err_to_py)?;
-    let iter = PyIterator::from_bound_object(subscriptions).map_err(|_| {
+    let iter = PyIterator::from_object(subscriptions).map_err(|_| {
         PyTypeError::new_err("subscriptions must be an iterable of (event_type, id) pairs")
     })?;
     let mut removed = 0usize;
@@ -972,7 +972,7 @@ fn annotate_entrypoint_metadata(
 fn register_python_plugin(py: Python<'_>, plugin: PyObject, replace: bool) -> PyResult<String> {
     let metadata = {
         let plugin_any = plugin.bind(py);
-        plugin_metadata_from_py(&plugin_any)?
+        plugin_metadata_from_py(plugin_any)?
     };
     register_python_plugin_from_metadata(py, plugin, metadata, replace)
 }
@@ -1062,7 +1062,7 @@ fn list_config(py: Python<'_>, prefix: Option<&str>) -> PyResult<PyObject> {
         .lock()
         .map_err(|_| PyTypeError::new_err("plugin context lock was poisoned"))?;
     let items = ctx.list_config();
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     for (key, value) in items {
         if let Some(prefix) = prefix {
             if !key.starts_with(prefix) {
@@ -1248,7 +1248,7 @@ fn load_module_from_file<'py>(
     file_path: &Path,
     reload: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let sys = PyModule::import_bound(py, "sys")?;
+    let sys = PyModule::import(py, "sys")?;
     let modules_any = sys.getattr("modules")?;
     let modules: &Bound<'py, PyDict> = modules_any.downcast()?;
 
@@ -1260,7 +1260,7 @@ fn load_module_from_file<'py>(
 
     let path_string = file_path.to_string_lossy().to_string();
 
-    let importlib_util = PyModule::import_bound(py, "importlib.util")?;
+    let importlib_util = PyModule::import(py, "importlib.util")?;
     let spec = importlib_util.call_method1(
         "spec_from_file_location",
         (module_name, path_string.clone()),
@@ -1277,7 +1277,7 @@ fn load_module_from_file<'py>(
     if reload {
         // Avoid importing stale bytecode from __pycache__ when a file is edited in-place.
         // (On Windows this can happen when edits occur within the same 1-second timestamp window.)
-        let importlib_machinery = PyModule::import_bound(py, "importlib.machinery")?;
+        let importlib_machinery = PyModule::import(py, "importlib.machinery")?;
         let source_loader = importlib_machinery
             .getattr("SourceFileLoader")?
             .call1((module_name, path_string.clone()))?;
@@ -1288,7 +1288,7 @@ fn load_module_from_file<'py>(
             )));
         }
 
-        let builtins = PyModule::import_bound(py, "builtins")?;
+        let builtins = PyModule::import(py, "builtins")?;
         let code = builtins
             .getattr("compile")?
             .call1((source, path_string, "exec"))?;
@@ -1340,7 +1340,7 @@ fn collect_plugins_from_module<'py>(
             if value.is_none() {
                 continue;
             }
-            let iter = PyIterator::from_bound_object(&value).map_err(|_| {
+            let iter = PyIterator::from_object(&value).map_err(|_| {
                 PyTypeError::new_err(format!(
                     "module attribute '{name}' must be an iterable of plugins"
                 ))
@@ -1368,7 +1368,7 @@ fn collect_plugins_from_module<'py>(
             if value.is_none() {
                 return Ok(Vec::new());
             }
-            let iter = PyIterator::from_bound_object(&value).map_err(|_| {
+            let iter = PyIterator::from_object(&value).map_err(|_| {
                 PyTypeError::new_err(format!(
                     "module factory '{name}()' must return an iterable of plugins"
                 ))
@@ -1572,7 +1572,7 @@ fn dependency_graph(py: Python<'_>, internal_only: bool) -> PyResult<PyObject> {
     init_plugin_system().map_err(tensor_err_to_py)?;
 
     let graph = global_registry().dependency_graph(internal_only);
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     let mut keys: Vec<String> = graph.keys().cloned().collect();
     keys.sort();
     for key in keys {
@@ -1608,10 +1608,10 @@ fn validate_dependencies(py: Python<'_>, internal_only: bool, strict: bool) -> P
         )));
     }
 
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("ok", summary.ok)?;
 
-    let missing = PyDict::new_bound(py);
+    let missing = PyDict::new(py);
     let mut missing_keys: Vec<&String> = summary.missing.keys().collect();
     missing_keys.sort();
     for key in missing_keys {
@@ -1620,7 +1620,7 @@ fn validate_dependencies(py: Python<'_>, internal_only: bool, strict: bool) -> P
     }
     dict.set_item("missing", missing)?;
 
-    let cycles = PyList::empty_bound(py);
+    let cycles = PyList::empty(py);
     for cycle in summary.cycles {
         cycles.append(cycle)?;
     }
@@ -1643,7 +1643,7 @@ fn publish(py: Python<'_>, event_type: &str, payload: Option<PyObject>) -> PyRes
             } else if let Ok(text) = payload.extract::<String>() {
                 PluginEvent::custom(event_type, text)
             } else {
-                PluginEvent::custom(event_type, py_to_json(&payload)?)
+                PluginEvent::custom(event_type, py_to_json(payload)?)
             }
         }
     };
@@ -1683,11 +1683,11 @@ fn load_entrypoints(
 ) -> PyResult<Vec<String>> {
     init_plugin_system().map_err(tensor_err_to_py)?;
 
-    let importlib_metadata = PyModule::import_bound(py, "importlib.metadata")?;
+    let importlib_metadata = PyModule::import(py, "importlib.metadata")?;
     let entry_points = importlib_metadata.getattr("entry_points")?.call0()?;
 
     let selected = if let Ok(select) = entry_points.getattr("select") {
-        let kwargs = PyDict::new_bound(py);
+        let kwargs = PyDict::new(py);
         kwargs.set_item("group", group)?;
         select.call((), Some(&kwargs))?
     } else if let Ok(dict) = entry_points.downcast::<PyDict>() {
@@ -1705,7 +1705,7 @@ fn load_entrypoints(
         return Ok(Vec::new());
     }
 
-    let iter = PyIterator::from_bound_object(&selected).map_err(|_| {
+    let iter = PyIterator::from_object(&selected).map_err(|_| {
         PyTypeError::new_err("entry_points() result is not iterable for the selected group")
     })?;
 
@@ -1783,8 +1783,8 @@ fn load_entrypoints(
     }
 
     let mut queue = VecDeque::new();
-    for idx in 0..pending.len() {
-        if indegree[idx] == 0 {
+    for (idx, degree) in indegree.iter().enumerate().take(pending.len()) {
+        if *degree == 0 {
             queue.push_back(idx);
         }
     }
@@ -1822,9 +1822,7 @@ fn load_entrypoints(
         for &idx in order.iter().rev() {
             let id = pending[idx].metadata.id.as_str();
             if global_registry().get(id).is_some() {
-                global_registry()
-                    .unregister(id)
-                    .map_err(tensor_err_to_py)?;
+                global_registry().unregister(id).map_err(tensor_err_to_py)?;
             }
         }
     }
@@ -1845,6 +1843,7 @@ fn load_entrypoints(
 
 #[pyfunction]
 #[pyo3(signature = (path, *, recursive=true, instantiate=true, strict=false, reload=false, replace=false, module_prefix="spiraltorch_path_plugin", add_sys_path=true))]
+#[allow(clippy::too_many_arguments)]
 fn load_path(
     py: Python<'_>,
     path: &str,
@@ -1870,7 +1869,7 @@ fn load_path(
         return Ok(Vec::new());
     }
 
-    let sys = PyModule::import_bound(py, "sys")?;
+    let sys = PyModule::import(py, "sys")?;
     let sys_path_any = sys.getattr("path")?;
     let sys_path: &Bound<'_, PyList> = sys_path_any.downcast()?;
     if add_sys_path {
@@ -1899,7 +1898,7 @@ fn load_path(
     }
 
     if reload {
-        PyModule::import_bound(py, "importlib")?
+        PyModule::import(py, "importlib")?
             .getattr("invalidate_caches")?
             .call0()?;
     }
@@ -1979,8 +1978,8 @@ fn load_path(
         }
 
         let mut queue = VecDeque::new();
-        for idx in 0..pending.len() {
-            if indegree[idx] == 0 {
+        for (idx, degree) in indegree.iter().enumerate().take(pending.len()) {
+            if *degree == 0 {
                 queue.push_back(idx);
             }
         }
@@ -2018,9 +2017,7 @@ fn load_path(
             for &idx in order.iter().rev() {
                 let id = pending[idx].metadata.id.as_str();
                 if global_registry().get(id).is_some() {
-                    global_registry()
-                        .unregister(id)
-                        .map_err(tensor_err_to_py)?;
+                    global_registry().unregister(id).map_err(tensor_err_to_py)?;
                 }
             }
         }
@@ -2065,7 +2062,7 @@ fn reload_path(
 }
 
 pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
-    let module = PyModule::new_bound(py, "plugin")?;
+    let module = PyModule::new(py, "plugin")?;
     module.add(
         "__doc__",
         "SpiralTorch plugin registry + event observability",

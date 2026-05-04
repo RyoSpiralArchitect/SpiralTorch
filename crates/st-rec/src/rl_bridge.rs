@@ -223,7 +223,7 @@ impl RecBanditController {
     ) -> RecRlResult<RecBanditDecision> {
         let state = self.load_user_state(recommender, user)?;
         let recs = self.score_candidates(recommender, user, candidates)?;
-        self.make_decision_with(user, state, recs, |probs| Self::sample_action(probs))
+        self.make_decision_with(user, state, recs, Self::sample_action)
     }
 
     /// Samples a top-k slate from the recommender and draws an action from the policy.
@@ -242,7 +242,7 @@ impl RecBanditController {
         }
         let state = self.load_user_state(recommender, user)?;
         let recs = recommender.recommend_top_k(user, k, exclude)?;
-        self.make_decision_with(user, state, recs, |probs| Self::sample_action(probs))
+        self.make_decision_with(user, state, recs, Self::sample_action)
     }
 
     fn make_decision_with<F>(

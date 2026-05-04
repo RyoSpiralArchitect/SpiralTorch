@@ -36,7 +36,7 @@ fn dict_to_payloads(dict: &Bound<PyDict>) -> PyResult<HashMap<String, Vec<f32>>>
 }
 
 fn btreemap_to_dict(py: Python<'_>, map: &BTreeMap<String, f32>) -> PyResult<PyObject> {
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     for (key, value) in map {
         dict.set_item(key, *value)?;
     }
@@ -44,7 +44,7 @@ fn btreemap_to_dict(py: Python<'_>, map: &BTreeMap<String, f32>) -> PyResult<PyO
 }
 
 fn hashmap_to_dict(py: Python<'_>, map: &HashMap<String, f32>) -> PyResult<PyObject> {
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     for (key, value) in map {
         dict.set_item(key, *value)?;
     }
@@ -53,7 +53,7 @@ fn hashmap_to_dict(py: Python<'_>, map: &HashMap<String, f32>) -> PyResult<PyObj
 
 fn safety_metrics_to_py(py: Python<'_>, review: &SafetyReview) -> PyResult<PyObject> {
     let metrics = &review.metrics;
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("existence_load", metrics.existence_load)?;
     dict.set_item("chi", metrics.chi)?;
     dict.set_item("strict_mode", metrics.strict_mode)?;
@@ -62,7 +62,7 @@ fn safety_metrics_to_py(py: Python<'_>, review: &SafetyReview) -> PyResult<PyObj
         btreemap_to_dict(py, &metrics.frame_hazards)?,
     )?;
     dict.set_item("safe_radii", btreemap_to_dict(py, &metrics.safe_radii)?)?;
-    let word = PyDict::new_bound(py);
+    let word = PyDict::new(py);
     word.set_item("name", &metrics.word.name)?;
     word.set_item("definition_entropy", metrics.word.definition_entropy)?;
     word.set_item("timing_signal", metrics.word.timing_signal)?;
@@ -350,7 +350,7 @@ pub(crate) struct PyFusedFrame {
 impl PyFusedFrame {
     #[getter]
     pub fn coordinates(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         for (key, values) in &self.inner.coordinates {
             dict.set_item(key, values.clone())?;
         }
@@ -371,7 +371,7 @@ impl PyFusedFrame {
 
     #[getter]
     pub fn health(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         for (key, health) in &self.inner.health {
             let py_health = Py::new(
                 py,
@@ -489,7 +489,7 @@ impl PyEnergyReport {
 
     #[getter]
     pub fn per_channel(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         for (key, value) in &self.inner.per_channel {
             dict.set_item(key, *value)?;
         }
@@ -503,7 +503,7 @@ impl PyEnergyReport {
 
     #[getter]
     pub fn gravitational_per_channel(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         for (key, value) in &self.inner.gravitational_per_channel {
             dict.set_item(key, *value)?;
         }
@@ -739,7 +739,7 @@ impl PyRoboticsRuntime {
 
     pub fn drain_trajectory(&mut self, py: Python<'_>) -> PyResult<PyObject> {
         let steps = self.inner.drain_trajectory();
-        let list = PyList::empty_bound(py);
+        let list = PyList::empty(py);
         for step in steps {
             let py_step = Py::new(py, PyRuntimeStep { inner: step })?;
             list.append(py_step)?;
@@ -782,7 +782,7 @@ impl PyVisionFeedbackSnapshot {
 
     #[getter]
     pub fn metrics(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         for (key, value) in self.inner.metrics() {
             dict.set_item(key, value)?;
         }
@@ -1164,7 +1164,7 @@ impl PyRuntimeStep {
 
     #[getter]
     pub fn commands(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         for (key, value) in &self.inner.commands {
             dict.set_item(key, *value)?;
         }
@@ -1178,7 +1178,7 @@ impl PyRuntimeStep {
 
     #[getter]
     pub fn safety(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let list = PyList::empty_bound(py);
+        let list = PyList::empty(py);
         for review in &self.inner.safety {
             let review = Py::new(
                 py,
@@ -1193,7 +1193,7 @@ impl PyRuntimeStep {
 }
 
 pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
-    let module = PyModule::new_bound(py, "robotics")?;
+    let module = PyModule::new(py, "robotics")?;
     module.add_class::<PySensorFusionHub>()?;
     module.add_class::<PyFusedFrame>()?;
     module.add_class::<PyChannelHealth>()?;

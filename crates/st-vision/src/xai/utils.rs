@@ -95,7 +95,7 @@ pub fn normalise_unit_interval(values: &mut [f32], epsilon: f32) {
 }
 
 pub fn box_blur(tensor: &Tensor, kernel_size: usize) -> PureResult<Tensor> {
-    if kernel_size == 0 || kernel_size % 2 == 0 {
+    if kernel_size == 0 || kernel_size.is_multiple_of(2) {
         return Err(TensorError::InvalidValue {
             label: "box_blur_kernel",
         });
@@ -156,7 +156,7 @@ mod tests {
         let base = Tensor::from_vec(1, 4, vec![0.0, 0.0, 0.0, 0.0]).unwrap();
         let heatmap = Tensor::from_vec(1, 4, vec![1.0, 0.5, 0.25, 0.0]).unwrap();
         let blended = blend_heatmap(&base, &heatmap, 0.5).unwrap();
-        let expected = vec![0.5, 0.25, 0.125, 0.0];
+        let expected = [0.5, 0.25, 0.125, 0.0];
         for (value, expected) in blended.data().iter().zip(expected.iter()) {
             assert!((value - expected).abs() < 1e-6);
         }

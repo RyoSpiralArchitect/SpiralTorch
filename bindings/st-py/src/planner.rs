@@ -11,12 +11,12 @@ use st_core::backend::cuda_exec::CudaExecutor;
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 #[cfg(feature = "hip")]
 use st_core::backend::hip_exec::HipExecutor;
-#[cfg(any(feature = "cuda", feature = "hip"))]
-use st_core::backend::rankk_launch::LaunchBuffers;
 #[cfg(feature = "cuda")]
 use st_core::backend::rankk_launch::with_launch_buffers_cuda;
 #[cfg(feature = "hip")]
 use st_core::backend::rankk_launch::with_launch_buffers_hip;
+#[cfg(any(feature = "cuda", feature = "hip"))]
+use st_core::backend::rankk_launch::LaunchBuffers;
 use st_core::backend::runtime_probe::{
     build_device_report, mps_probe as core_mps_probe, resolve_backend, BackendResolution,
     DeviceReport,
@@ -386,7 +386,7 @@ fn backend_label(kind: BackendKind) -> &'static str {
 }
 
 fn caps_to_pydict(py: Python<'_>, caps: DeviceCaps) -> PyResult<Bound<'_, PyDict>> {
-    let report = PyDict::new_bound(py);
+    let report = PyDict::new(py);
     report.set_item("backend", backend_label(caps.backend))?;
     report.set_item("subgroup", caps.subgroup)?;
     report.set_item("lane_width", caps.lane_width)?;
@@ -620,7 +620,7 @@ fn probe_gpu_path(
     let non_strict_ok = non_strict_attempt.is_ok();
     let used_fallback = !strict_ok && non_strict_ok;
 
-    let report = PyDict::new_bound(py);
+    let report = PyDict::new(py);
     report.set_item("backend", backend_label(backend_kind))?;
     report.set_item("kind", kind.to_ascii_lowercase())?;
     report.set_item("rows", rows)?;
@@ -842,15 +842,15 @@ fn describe_device(
 #[pyfunction]
 fn hip_probe(py: Python<'_>) -> PyResult<PyObject> {
     let probe = hip_backend::probe();
-    let py_devices = PyList::empty_bound(py);
+    let py_devices = PyList::empty(py);
     for device in probe.devices.iter() {
-        let info = PyDict::new_bound(py);
+        let info = PyDict::new(py);
         info.set_item("id", device.id)?;
         info.set_item("name", device.name.to_string())?;
         info.set_item("multi_node", device.multi_node)?;
         py_devices.append(info)?;
     }
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     out.set_item("available", probe.available)?;
     out.set_item("initialized", probe.initialized)?;
     out.set_item("devices", py_devices)?;
@@ -865,7 +865,7 @@ fn hip_probe(py: Python<'_>) -> PyResult<PyObject> {
 fn mps_probe(py: Python<'_>) -> PyResult<PyObject> {
     let probe = core_mps_probe();
 
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     out.set_item("backend", "mps")?;
     out.set_item("status", probe.status().as_str())?;
     out.set_item("feature_enabled", probe.feature_enabled)?;
@@ -888,7 +888,7 @@ fn mps_probe(py: Python<'_>) -> PyResult<PyObject> {
         backend_label(probe.recommended_backend()),
     )?;
     out.set_item("recommendation", probe.recommendation())?;
-    out.set_item("devices", PyList::empty_bound(py))?;
+    out.set_item("devices", PyList::empty(py))?;
     out.set_item("error", probe.error())?;
     Ok(out.into_py(py))
 }

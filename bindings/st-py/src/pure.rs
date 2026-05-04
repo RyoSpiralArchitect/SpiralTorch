@@ -207,11 +207,15 @@ impl PyZBox {
     }
 
     pub fn hyperbolic_volume(&self, curvature: f32) -> PyResult<f32> {
-        self.inner.hyperbolic_volume(curvature).map_err(tensor_err_to_py)
+        self.inner
+            .hyperbolic_volume(curvature)
+            .map_err(tensor_err_to_py)
     }
 
     pub fn probability_mass(&self, curvature: f32) -> PyResult<f32> {
-        self.inner.probability_mass(curvature).map_err(tensor_err_to_py)
+        self.inner
+            .probability_mass(curvature)
+            .map_err(tensor_err_to_py)
     }
 
     fn __repr__(&self) -> String {
@@ -508,7 +512,7 @@ impl PyNonCollapseSnapshot {
     }
 
     pub(crate) fn to_pydict(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         if let Some(value) = self.coherence_entropy {
             dict.set_item("coherence_entropy", value)?;
         }

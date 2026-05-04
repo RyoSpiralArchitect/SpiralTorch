@@ -6484,7 +6484,7 @@ if callable(_native_describe_device):
                 raise
         report, _effective_backend = _call_planner_native(
             _native_describe_device,
-            backend=backend,
+            backend=_planner_effective_backend_label(backend),
             args=(),
             kwargs=dict(kwargs),
         )

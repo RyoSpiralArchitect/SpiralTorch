@@ -123,7 +123,7 @@ pub(crate) mod st_distributed {
 
         let shared_group = {
             let mut guard = GROUPS.lock().unwrap();
-            let entry = guard.entry(group.clone()).or_insert_with(Weak::new);
+            let entry = guard.entry(group.clone()).or_default();
             if let Some(existing) = entry.upgrade() {
                 existing
             } else {

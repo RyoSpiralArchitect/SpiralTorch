@@ -439,11 +439,11 @@ impl SpiralPolicyGradient {
         for (step, &ret) in self.episode.iter().zip(returns.iter()) {
             total_reward += step.reward;
             let advantage = ret - baseline;
-            for action in 0..self.action_dim {
+            for (action, bias) in bias_grad.iter_mut().enumerate().take(self.action_dim) {
                 let prob = step.probs[action];
                 let indicator = if action == step.action { 1.0 } else { 0.0 };
                 let grad_coeff = (indicator - prob) * advantage * effective_rate;
-                bias_grad[action] += grad_coeff;
+                *bias += grad_coeff;
                 for feature in 0..self.state_dim {
                     let idx = feature * self.action_dim + action;
                     weight_grad[idx] += step.state.data()[feature] * grad_coeff;

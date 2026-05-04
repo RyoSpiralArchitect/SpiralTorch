@@ -215,7 +215,7 @@ fn reliability_by_band(
             observed: (covered / count as f32).clamp(0.0, 1.0),
         });
     }
-    bins.sort_by(|a, b| a.band.cmp(&b.band));
+    bins.sort_by_key(|bin| bin.band);
     bins
 }
 
@@ -281,10 +281,7 @@ fn approx_erf(x: f32) -> f32 {
     let x = x.abs() as f64;
     let t = 1.0 / (1.0 + 0.5 * x);
     let tau = t
-        * (-x * x - 1.26551223
-            + 1.00002368 * t
-            + 0.37409196 * t * t
-            + 0.09678418 * t.powi(3)
+        * (-x * x - 1.26551223 + 1.00002368 * t + 0.37409196 * t * t + 0.09678418 * t.powi(3)
             - 0.18628806 * t.powi(4)
             + 0.27886807 * t.powi(5)
             - 1.13520398 * t.powi(6)

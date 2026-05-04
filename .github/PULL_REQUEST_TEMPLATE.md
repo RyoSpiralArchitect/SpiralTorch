@@ -4,8 +4,9 @@
 - [ ] Scope: which crates/modules are affected?
 
 ## Checklist
-- [ ] `cargo fmt` (workspace)
-- [ ] `cargo clippy -- -D warnings`
+- [ ] `cargo +nightly-2026-04-15 fmt --all -- --check`
+- [ ] `cargo clippy --workspace --all-targets`
+- [ ] `bash scripts/run_rust_clippy_strict.sh`
 - [ ] Unit tests pass (`st-core` mandatory)
 - [ ] Docs/README updated if behavior changes
 

@@ -15,6 +15,7 @@ from spiraltorch.zspace_artifacts import (
     build_zspace_downstream_hook,
     desire_step_from_downstream_hook,
     load_zspace_artifact_manifest,
+    run_desire_geometry_bias_validation,
 )
 from spiraltorch.zspace_trace import load_zspace_trace_events, write_zspace_trace_html
 
@@ -509,6 +510,59 @@ def test_desire_step_from_downstream_hook_scales_logits_and_returns_adapter() ->
     assert result["geometry_bias_metrics"]["fairness_mean"] >= 0.0
     assert result["geometry_bias_coherence"]["composite_energy"] >= 0.0
     assert result["geometry_bias_coherence"]["z_energy"] >= 0.0
+
+
+def test_run_desire_geometry_bias_validation_reports_modes() -> None:
+    class FakePipeline:
+        def __init__(self) -> None:
+            self.bias_context = "inference"
+            self.ingested: list[float] | None = None
+
+        def set_bias_context(self, context: str) -> None:
+            self.bias_context = context
+
+        def ingest_geometry_bias(self, signal, source: str = "zspace") -> None:
+            assert source == "zspace"
+            self.ingested = [float(value) for value in signal]
+
+        def step(self, logits, previous_token, concept=None, window=None):
+            assert self.ingested is not None
+            return {
+                "phase": self.bias_context,
+                "probabilities": list(logits),
+                "previous_token": previous_token,
+            }
+
+        def geometry_bias_metrics(self):
+            return {"accuracy_mean": 0.5, "fairness_mean": 0.75, "window": 1}
+
+        def geometry_bias_coherence(self):
+            return {"composite_energy": 0.25, "z_energy": 0.125}
+
+    hook = {
+        "kind": "spiraltorch.zspace_artifact_hook",
+        "top_focus": [{"name": "noncollapse.preserved_ratio"}],
+        "desire_candidate": {
+            "stability_signal": 0.9,
+            "momentum_signal": 0.1,
+            "delta_signal": 0.02,
+            "phase_hint": "integration",
+        },
+    }
+
+    report = run_desire_geometry_bias_validation(
+        FakePipeline,
+        [0.1, 0.2, 0.3],
+        1,
+        hook,
+        modes=("inference", "training"),
+    )
+
+    assert report["kind"] == "spiraltorch.desire_geometry_bias_validation"
+    assert report["ok"] is True
+    assert report["summary"]["passed"] == 2
+    assert set(report["results"]) == {"inference", "training"}
+    assert report["results"]["training"]["result"]["phase"] == "training"
 
 
 def test_desire_pipeline_geometry_bias_ingest_surfaces_metrics() -> None:

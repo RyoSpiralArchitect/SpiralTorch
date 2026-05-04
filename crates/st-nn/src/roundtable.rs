@@ -970,7 +970,6 @@ impl BlackcatModerator {
         let mut entries: Vec<_> = self
             .scoreboard
             .values()
-            .cloned()
             .map(|entry| entry.to_score())
             .collect();
         entries.sort_by(|a, b| {

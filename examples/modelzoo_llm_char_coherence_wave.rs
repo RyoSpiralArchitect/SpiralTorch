@@ -104,7 +104,7 @@ impl Vocab {
         }
         let mut symbols = Vec::with_capacity(set.len() + 1);
         symbols.push(unk);
-        symbols.extend(set.into_iter());
+        symbols.extend(set);
         Self::from_symbols(unk, symbols)
     }
 
@@ -137,6 +137,7 @@ struct CharLmMeta {
 }
 
 impl CharLmMeta {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         steps: usize,
         embed_dim: usize,
@@ -299,7 +300,7 @@ impl Args {
                 cols: args.steps,
             });
         }
-        if args.dilations.is_empty() || args.dilations.iter().any(|v| *v == 0) {
+        if args.dilations.is_empty() || args.dilations.contains(&0) {
             return Err(TensorError::EmptyInput("dilations"));
         }
         if !matches!(args.infuse_every.as_str(), "once" | "epoch" | "batch") {
@@ -411,6 +412,7 @@ fn default_run_dir() -> PathBuf {
     PathBuf::from("models/runs").join(format!("{}_{}", now.as_secs(), now.subsec_nanos()))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_model(
     vocab_size: usize,
     steps: usize,

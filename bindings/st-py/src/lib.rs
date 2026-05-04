@@ -1,6 +1,10 @@
 //! Minimal one-binary PyO3 module: `import spiraltorch`
 
 #![allow(clippy::useless_conversion)]
+// PyO3 0.24 keeps the old IntoPy/ToPyObject conversion surface as deprecated
+// shims. The rename-only deprecations are migrated; the object-return migration
+// is intentionally quarantined here instead of leaking warning noise across CI.
+#![allow(deprecated)]
 
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
@@ -108,7 +112,7 @@ mod extras {
 
     #[pyfunction]
     pub fn build_info(py: Python<'_>) -> PyResult<Py<PyDict>> {
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         dict.set_item("package", env!("CARGO_PKG_NAME"))?;
         dict.set_item("version", env!("CARGO_PKG_VERSION"))?;
         dict.set_item(
@@ -116,14 +120,14 @@ mod extras {
             if cfg!(debug_assertions) { "debug" } else { "release" },
         )?;
 
-        let target = PyDict::new_bound(py);
+        let target = PyDict::new(py);
         target.set_item("arch", std::env::consts::ARCH)?;
         target.set_item("os", std::env::consts::OS)?;
         target.set_item("family", std::env::consts::FAMILY)?;
         target.set_item("pointer_width", usize::BITS)?;
         dict.set_item("target", target)?;
 
-        let features = PyDict::new_bound(py);
+        let features = PyDict::new(py);
         features.set_item("cpu", cfg!(feature = "cpu"))?;
         features.set_item("wgpu", cfg!(feature = "wgpu"))?;
         features.set_item("wgpu-rt", cfg!(feature = "wgpu-rt"))?;
@@ -226,7 +230,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     plugin::register(py, m)?;
     ops::register_module(py, m)?;
 
-    let sot_module = PyModule::new_bound(py, "spiraltorch.sot")?;
+    let sot_module = PyModule::new(py, "spiraltorch.sot")?;
     sot::module(py, &sot_module)?;
     m.add_submodule(&sot_module)?;
     m.add("sot", sot_module.to_object(py))?;
@@ -234,21 +238,21 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     m.add("SoT3DStep", sot_module.getattr("SoT3DStep")?)?;
     m.add("MacroSummary", sot_module.getattr("MacroSummary")?)?;
 
-    let export_module = PyModule::new_bound(py, "export")?;
+    let export_module = PyModule::new(py, "export")?;
     export::register(py, &export_module)?;
     m.add_submodule(&export_module)?;
 
-    let selfsup_mod = PyModule::new_bound(py, "selfsup")?;
+    let selfsup_mod = PyModule::new(py, "selfsup")?;
     selfsup::register(py, &selfsup_mod)?;
     m.add_submodule(&selfsup_mod)?;
 
     dataset::register(py, m)?;
 
-    let linalg = PyModule::new_bound(py, "linalg")?;
+    let linalg = PyModule::new(py, "linalg")?;
     linalg.add("__doc__", "Linear algebra utilities")?;
     m.add_submodule(&linalg)?;
 
-    let ecosystem = PyModule::new_bound(py, "ecosystem")?;
+    let ecosystem = PyModule::new(py, "ecosystem")?;
     ecosystem.add("__doc__", "Integrations & ecosystem glue")?;
     m.add_submodule(&ecosystem)?;
 

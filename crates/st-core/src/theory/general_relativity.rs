@@ -1490,19 +1490,19 @@ impl RiemannTensor {
         for sigma in 0..DIM {
             for mu in 0..DIM {
                 for nu in 0..DIM {
-	                    for rho in 0..DIM {
-	                        let mut value = derivatives.partial(nu, sigma, mu, rho)
-	                            - derivatives.partial(rho, sigma, mu, nu);
-	                        let gamma_sigma = &gamma[sigma];
-	                        for (lambda, gamma_sigma_lambda) in gamma_sigma.iter().enumerate() {
-	                            let gamma_lambda = &gamma[lambda];
-	                            value += gamma_sigma_lambda[nu] * gamma_lambda[mu][rho]
-	                                - gamma_sigma_lambda[rho] * gamma_lambda[mu][nu];
-	                        }
-	                        components[sigma][mu][nu][rho] = value;
-	                    }
-	                }
-	            }
+                    for rho in 0..DIM {
+                        let mut value = derivatives.partial(nu, sigma, mu, rho)
+                            - derivatives.partial(rho, sigma, mu, nu);
+                        let gamma_sigma = &gamma[sigma];
+                        for (lambda, gamma_sigma_lambda) in gamma_sigma.iter().enumerate() {
+                            let gamma_lambda = &gamma[lambda];
+                            value += gamma_sigma_lambda[nu] * gamma_lambda[mu][rho]
+                                - gamma_sigma_lambda[rho] * gamma_lambda[mu][nu];
+                        }
+                        components[sigma][mu][nu][rho] = value;
+                    }
+                }
+            }
         }
 
         Self { components }

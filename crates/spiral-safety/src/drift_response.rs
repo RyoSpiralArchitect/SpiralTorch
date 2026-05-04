@@ -740,7 +740,7 @@ mod tests {
         let word = normative_word();
         let thresholds = default_thresholds();
         let metrics = analyse_word(&word, &thresholds);
-        let metrics_vec = vec![metrics.clone(), metrics];
+        let metrics_vec = [metrics.clone(), metrics];
         let penalty = aggregate_penalty_with(metrics_vec.iter(), 0.2);
         assert!((penalty - 2.0 * 0.989_228_55).abs() < 1e-6);
     }

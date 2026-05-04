@@ -13,7 +13,7 @@
 //! document.
 
 use serde::Serialize;
-use std::fmt;
+use std::{error::Error, fmt, str::FromStr};
 
 /// Backends tracked in the feature matrix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -50,7 +50,7 @@ impl Backend {
     }
 
     /// Parses the canonical backend label back into a [`Backend`].
-    pub fn from_str(name: &str) -> Option<Self> {
+    pub fn parse_label(name: &str) -> Option<Self> {
         Backend::ALL
             .iter()
             .copied()
@@ -65,6 +65,26 @@ impl Backend {
             Backend::Cuda => 3,
             Backend::Hip => 4,
         }
+    }
+}
+
+/// Error returned when parsing an unknown backend label.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BackendParseError;
+
+impl fmt::Display for BackendParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("unknown backend label")
+    }
+}
+
+impl Error for BackendParseError {}
+
+impl FromStr for Backend {
+    type Err = BackendParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse_label(s).ok_or(BackendParseError)
     }
 }
 
@@ -842,9 +862,9 @@ mod tests {
 
     #[test]
     fn backend_parsing_is_case_insensitive() {
-        assert_eq!(Backend::from_str("cuda"), Some(Backend::Cuda));
-        assert_eq!(Backend::from_str(" HIP / ROCM"), Some(Backend::Hip));
-        assert_eq!(Backend::from_str("unknown"), None);
+        assert_eq!("cuda".parse::<Backend>(), Ok(Backend::Cuda));
+        assert_eq!(" HIP / ROCM".parse::<Backend>(), Ok(Backend::Hip));
+        assert_eq!("unknown".parse::<Backend>(), Err(BackendParseError));
     }
 
     #[test]

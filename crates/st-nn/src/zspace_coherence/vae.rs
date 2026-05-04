@@ -143,8 +143,10 @@ impl ZSpaceVae {
         }
         let checkpoint = self.checkpoint();
         let payload = if is_json_path(path) {
-            serde_json::to_vec_pretty(&checkpoint).map_err(|err| TensorError::SerializationError {
-                message: err.to_string(),
+            serde_json::to_vec_pretty(&checkpoint).map_err(|err| {
+                TensorError::SerializationError {
+                    message: err.to_string(),
+                }
             })?
         } else {
             bincode::serialize(&checkpoint).map_err(|err| TensorError::SerializationError {
@@ -207,7 +209,7 @@ impl ZSpaceVae {
         let enc_len = checkpoint
             .latent_dim
             .checked_mul(checkpoint.input_dim)
-            .ok_or_else(|| TensorError::InvalidValue {
+            .ok_or(TensorError::InvalidValue {
                 label: "zspace_vae_checkpoint_overflow",
             })?;
         if checkpoint.encoder_mu.len() != enc_len {
@@ -225,7 +227,7 @@ impl ZSpaceVae {
         let dec_len = checkpoint
             .input_dim
             .checked_mul(checkpoint.latent_dim)
-            .ok_or_else(|| TensorError::InvalidValue {
+            .ok_or(TensorError::InvalidValue {
                 label: "zspace_vae_checkpoint_overflow",
             })?;
         if checkpoint.decoder.len() != dec_len {

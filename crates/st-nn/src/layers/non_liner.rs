@@ -157,20 +157,15 @@ impl NonLinerEllipticConfig {
 }
 
 /// Geometry applied to the affine activation outputs.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum NonLinerGeometry {
     /// Standard Euclidean geometry (no additional projection is applied).
+    #[default]
     Euclidean,
     /// Hyperbolic projection into the Z-space manifold using the provided configuration.
     Hyperbolic(NonLinerHyperbolicConfig),
     /// Elliptic projection into the Z-space manifold using the provided configuration.
     Elliptic(NonLinerEllipticConfig),
-}
-
-impl Default for NonLinerGeometry {
-    fn default() -> Self {
-        Self::Euclidean
-    }
 }
 
 impl NonLinerGeometry {

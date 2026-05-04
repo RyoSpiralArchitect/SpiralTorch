@@ -10,6 +10,7 @@ __all__ = [
     "build_zspace_downstream_hook",
     "build_desire_adapter_from_downstream_hook",
     "desire_step_from_downstream_hook",
+    "run_desire_geometry_bias_validation",
 ]
 
 
@@ -245,3 +246,167 @@ def desire_step_from_downstream_hook(
     if callable(geometry_bias_coherence) and "geometry_bias_coherence" not in payload:
         payload["geometry_bias_coherence"] = geometry_bias_coherence()
     return payload
+
+
+def _coerce_modes(modes: Sequence[str] | None) -> list[str]:
+    if modes is None:
+        return ["inference", "training"]
+    out = [str(mode) for mode in modes if str(mode)]
+    return out or ["inference"]
+
+
+def _is_finite_number(value: Any) -> bool:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(numeric)
+
+
+def _non_negative_number(value: Any) -> bool:
+    return _is_finite_number(value) and float(value) >= 0.0
+
+
+def _validate_step_payload(payload: Mapping[str, Any]) -> dict[str, bool]:
+    adapter = payload.get("downstream_adapter")
+    adapter_payload = dict(adapter) if isinstance(adapter, Mapping) else {}
+    signal = adapter_payload.get("geometry_bias_signal")
+    signal_values = list(signal) if isinstance(signal, Sequence) and not isinstance(signal, (str, bytes)) else []
+
+    checks = {
+        "adapter_kind": adapter_payload.get("kind") == "spiraltorch.desire_adapter",
+        "gain_finite": _is_finite_number(adapter_payload.get("gain")),
+        "temperature_scale_finite": _is_finite_number(adapter_payload.get("temperature_scale")),
+        "geometry_bias_signal_finite": bool(signal_values)
+        and all(_is_finite_number(value) for value in signal_values),
+        "geometry_bias_ingested": payload.get("geometry_bias_ingested") is True,
+    }
+
+    if "geometry_bias_metrics" in payload:
+        metrics = payload.get("geometry_bias_metrics")
+        metrics_payload = dict(metrics) if isinstance(metrics, Mapping) else {}
+        checks["geometry_bias_metrics_available"] = bool(metrics_payload)
+        checks["geometry_bias_metrics_non_negative"] = (
+            _non_negative_number(metrics_payload.get("accuracy_mean"))
+            and _non_negative_number(metrics_payload.get("fairness_mean"))
+        )
+
+    if "geometry_bias_coherence" in payload:
+        coherence = payload.get("geometry_bias_coherence")
+        coherence_payload = dict(coherence) if isinstance(coherence, Mapping) else {}
+        checks["geometry_bias_coherence_available"] = bool(coherence_payload)
+        checks["geometry_bias_coherence_non_negative"] = (
+            _non_negative_number(coherence_payload.get("composite_energy"))
+            and _non_negative_number(coherence_payload.get("z_energy"))
+        )
+
+    return checks
+
+
+def run_desire_geometry_bias_validation(
+    pipeline_factory: Any,
+    logits: Sequence[float],
+    previous_token: int,
+    hook_or_manifest: Mapping[str, Any] | str | Path,
+    *,
+    concept: Sequence[float] | None = None,
+    window: Sequence[tuple[int, float]] | None = None,
+    modes: Sequence[str] = ("inference", "training"),
+    base_gain: float = 1.0,
+    min_gain: float = 0.45,
+    max_gain: float = 1.8,
+    stability_weight: float = 0.45,
+    momentum_weight: float = 0.2,
+    delta_weight: float = 0.35,
+    phase_bias: Mapping[str, float] | None = None,
+) -> dict[str, Any]:
+    if not callable(pipeline_factory):
+        raise TypeError("pipeline_factory must be callable")
+
+    mode_list = _coerce_modes(modes)
+    adapter = build_desire_adapter_from_downstream_hook(
+        hook_or_manifest,
+        base_gain=base_gain,
+        min_gain=min_gain,
+        max_gain=max_gain,
+        stability_weight=stability_weight,
+        momentum_weight=momentum_weight,
+        delta_weight=delta_weight,
+        phase_bias=phase_bias,
+    )
+
+    results: dict[str, dict[str, Any]] = {}
+    failures: list[dict[str, Any]] = []
+
+    for mode in mode_list:
+        pipeline = pipeline_factory()
+        set_bias_context = getattr(pipeline, "set_bias_context", None)
+        bias_context_applied = False
+        if callable(set_bias_context):
+            set_bias_context(mode)
+            bias_context_applied = True
+
+        try:
+            payload = desire_step_from_downstream_hook(
+                pipeline,
+                logits,
+                previous_token,
+                hook_or_manifest,
+                concept=concept,
+                window=window,
+                base_gain=base_gain,
+                min_gain=min_gain,
+                max_gain=max_gain,
+                stability_weight=stability_weight,
+                momentum_weight=momentum_weight,
+                delta_weight=delta_weight,
+                phase_bias=phase_bias,
+            )
+        except Exception as exc:  # noqa: BLE001 - return a structured validation report.
+            failure = {
+                "mode": mode,
+                "error": f"{exc.__class__.__name__}: {exc}",
+            }
+            failures.append(failure)
+            results[mode] = {
+                "ok": False,
+                "passed": False,
+                "bias_context_applied": bias_context_applied,
+                "error": failure["error"],
+            }
+            continue
+
+        checks = _validate_step_payload(payload)
+        ok = all(checks.values())
+        if not ok:
+            failures.append(
+                {
+                    "mode": mode,
+                    "failed_checks": [
+                        name for name, passed in sorted(checks.items()) if not passed
+                    ],
+                }
+            )
+        results[mode] = {
+            "ok": ok,
+            "passed": ok,
+            "bias_context_applied": bias_context_applied,
+            "checks": checks,
+            "result": payload,
+        }
+
+    ok = not failures
+    return {
+        "kind": "spiraltorch.desire_geometry_bias_validation",
+        "ok": ok,
+        "passed": ok,
+        "modes": mode_list,
+        "adapter": adapter,
+        "results": results,
+        "failures": failures,
+        "summary": {
+            "total": len(mode_list),
+            "passed": sum(1 for result in results.values() if result.get("ok") is True),
+            "failed": len(failures),
+        },
+    }
