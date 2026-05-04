@@ -206,7 +206,7 @@ SpiralTorch ships under a dual-license model:
 ## Code stats
 
 <!-- STATS:START -->
-> _auto-generated: 2026-04-27 07:11 UTC_
+> _auto-generated: 2026-05-04 08:43 UTC_
 
 | Metric | Value |
 |---|---:|
