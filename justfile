@@ -10,6 +10,9 @@ clippy:
 clippy-strict list="configs/clippy_strict_packages.txt":
     bash scripts/run_rust_clippy_strict.sh "{{list}}"
 
+ci-lint list="configs/clippy_strict_packages.txt":
+    bash scripts/run_ci_lint_local.sh "{{list}}"
+
 clean:
     cargo clean
 

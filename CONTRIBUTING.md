@@ -28,10 +28,20 @@ cargo +nightly-2026-04-15 fmt --all
 # Lint
 cargo clippy --workspace --all-targets
 
+# CI-equivalent lint gate
+just ci-lint
+# or, without just:
+bash scripts/run_ci_lint_local.sh
+
 # Core build + tests
 cargo build -p st-core --release
 cargo test  -p st-core --release -- --nocapture
 ```
+
+`just ci-lint` mirrors the CI `ubuntu / lint` job: it updates the local Rust
+stable toolchain, installs the pinned nightly rustfmt, runs workspace clippy,
+and then runs the strict clippy subset. The script requires `protoc`; if a
+local `.buildenv/protoc-bin/protoc` shim exists, it is added to `PATH`.
 
 ### Windows helper script
 
