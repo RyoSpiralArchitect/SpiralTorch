@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import json
 import math
+import os
+import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 __all__ = [
     "load_zspace_artifact_manifest",
+    "build_zspace_planner_snapshot",
+    "write_zspace_experiment_artifacts",
     "build_zspace_downstream_hook",
     "build_desire_adapter_from_downstream_hook",
     "desire_step_from_downstream_hook",
@@ -33,6 +38,273 @@ def _coerce_focus_items(payload: Any) -> list[dict[str, Any]]:
     if not isinstance(payload, Sequence) or isinstance(payload, (str, bytes)):
         return []
     return [dict(item) for item in payload if isinstance(item, Mapping)]
+
+
+def _json_ready(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _json_ready(item) for key, item in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [_json_ready(item) for item in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+
+    as_dict = getattr(value, "to_dict", None)
+    if callable(as_dict):
+        try:
+            return _json_ready(as_dict())
+        except Exception:
+            pass
+
+    payload: dict[str, Any] = {}
+    for name in (
+        "kind",
+        "backend",
+        "requested_backend",
+        "effective_backend",
+        "rows",
+        "cols",
+        "k",
+        "workgroup",
+        "lanes",
+        "tile",
+        "score",
+        "algorithm",
+        "strategy",
+    ):
+        if hasattr(value, name):
+            try:
+                payload[name] = _json_ready(getattr(value, name))
+            except Exception:
+                continue
+    if payload:
+        return payload
+
+    if hasattr(value, "__dict__"):
+        public = {
+            key: item
+            for key, item in vars(value).items()
+            if isinstance(key, str) and not key.startswith("_")
+        }
+        if public:
+            return _json_ready(public)
+
+    return str(value)
+
+
+def _runtime_callable(name: str) -> Any | None:
+    module = sys.modules.get("spiraltorch")
+    if module is None:
+        return None
+    candidate = getattr(module, name, None)
+    return candidate if callable(candidate) else None
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    return int(value)
+
+
+def build_zspace_planner_snapshot(
+    *,
+    backend: str | None = "auto",
+    rows: int | None = None,
+    cols: int | None = None,
+    k: int | None = None,
+    describe_device: Any | None = None,
+    plan_topk: Any | None = None,
+    device_report: Mapping[str, Any] | None = None,
+    rank_plan: Any | None = None,
+) -> dict[str, Any]:
+    """Capture the planner/device decision that frames a Z-space experiment."""
+
+    backend_label = "auto" if backend is None else str(backend).strip().lower() or "auto"
+    rows_i = _optional_int(rows)
+    cols_i = _optional_int(cols)
+    k_i = _optional_int(k)
+    errors: list[dict[str, str]] = []
+
+    if describe_device is None:
+        describe_device = _runtime_callable("describe_device")
+    if plan_topk is None:
+        plan_topk = _runtime_callable("plan_topk")
+
+    if device_report is None and callable(describe_device):
+        try:
+            candidate = describe_device(backend_label)
+            if isinstance(candidate, Mapping):
+                device_report = candidate
+        except Exception as exc:  # noqa: BLE001 - snapshots should preserve partial evidence.
+            errors.append(
+                {
+                    "stage": "describe_device",
+                    "error": f"{exc.__class__.__name__}: {exc}",
+                }
+            )
+
+    if (
+        rank_plan is None
+        and callable(plan_topk)
+        and rows_i is not None
+        and cols_i is not None
+        and k_i is not None
+    ):
+        try:
+            rank_plan = plan_topk(rows_i, cols_i, k_i, backend=backend_label)
+        except Exception as exc:  # noqa: BLE001 - snapshots should preserve partial evidence.
+            errors.append(
+                {
+                    "stage": "plan_topk",
+                    "error": f"{exc.__class__.__name__}: {exc}",
+                }
+            )
+
+    snapshot: dict[str, Any] = {
+        "kind": "spiraltorch.zspace_planner_snapshot",
+        "backend": backend_label,
+        "available": bool(device_report is not None or rank_plan is not None),
+    }
+    if rows_i is not None or cols_i is not None or k_i is not None:
+        snapshot["shape"] = {
+            "rows": rows_i,
+            "cols": cols_i,
+            "k": k_i,
+        }
+    if device_report is not None:
+        snapshot["device_report"] = _json_ready(device_report)
+    if rank_plan is not None:
+        snapshot["rank_plan"] = _json_ready(rank_plan)
+    if errors:
+        snapshot["errors"] = errors
+    return snapshot
+
+
+def _relative_link(from_path: Path, target: Path) -> str:
+    return Path(os.path.relpath(target, start=from_path.parent)).as_posix()
+
+
+def write_zspace_experiment_artifacts(
+    trace_jsonl: str | Path,
+    *,
+    trace_html: str | Path | None = None,
+    atlas_html: str | Path | None = None,
+    manifest: str | Path | None = None,
+    title: str = "SpiralTorch Z-Space Experiment",
+    district: str = "Concourse",
+    event_type: str = "ZSpaceTrace",
+    bound: int = 256,
+    top_k: int = 12,
+    metadata: Mapping[str, Any] | None = None,
+    capture_planner: bool = True,
+    planner_backend: str | None = "auto",
+    planner_rows: int | None = None,
+    planner_cols: int | None = None,
+    planner_k: int | None = None,
+    planner_snapshot: Mapping[str, Any] | None = None,
+    describe_device: Any | None = None,
+    plan_topk: Any | None = None,
+    device_report: Mapping[str, Any] | None = None,
+    rank_plan: Any | None = None,
+) -> dict[str, Any]:
+    """Write trace, Atlas, and manifest artifacts for one observable Z-space run."""
+
+    from .zspace_atlas import zspace_trace_to_atlas_route, write_zspace_atlas_noncollapse_html
+    from .zspace_trace import write_zspace_trace_html
+
+    trace_jsonl_path = Path(trace_jsonl)
+    trace_html_path = Path(trace_html) if trace_html is not None else trace_jsonl_path.with_suffix(".html")
+    atlas_html_path = (
+        Path(atlas_html)
+        if atlas_html is not None
+        else trace_jsonl_path.with_suffix(".atlas_noncollapse.html")
+    )
+    manifest_path = (
+        Path(manifest)
+        if manifest is not None
+        else trace_jsonl_path.with_suffix(".artifacts.json")
+    )
+
+    for path in (trace_html_path, atlas_html_path, manifest_path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+    trace_related_links = {
+        "Atlas view": _relative_link(trace_html_path, atlas_html_path),
+        "Artifact manifest": _relative_link(trace_html_path, manifest_path),
+        "Trace JSONL": _relative_link(trace_html_path, trace_jsonl_path),
+    }
+    atlas_related_links = {
+        "Trace viewer": _relative_link(atlas_html_path, trace_html_path),
+        "Artifact manifest": _relative_link(atlas_html_path, manifest_path),
+        "Trace JSONL": _relative_link(atlas_html_path, trace_jsonl_path),
+    }
+
+    trace_html_out = write_zspace_trace_html(
+        trace_jsonl_path,
+        trace_html_path,
+        title=title,
+        event_type=event_type,
+        related_links=trace_related_links,
+    )
+    route = zspace_trace_to_atlas_route(
+        trace_jsonl_path,
+        district=district,
+        bound=bound,
+        event_type=event_type,
+    )
+    atlas_html_out = write_zspace_atlas_noncollapse_html(
+        route,
+        atlas_html_path,
+        title=f"{title} Atlas Non-Collapse",
+        district=district,
+        top_k=top_k,
+        related_links=atlas_related_links,
+    )
+
+    summary = route.summary()
+    perspective = route.perspective_for(district, focus_prefixes=["noncollapse."])
+    planner_payload = dict(planner_snapshot) if isinstance(planner_snapshot, Mapping) else None
+    if planner_payload is None and capture_planner:
+        planner_payload = build_zspace_planner_snapshot(
+            backend=planner_backend,
+            rows=planner_rows,
+            cols=planner_cols,
+            k=planner_k,
+            describe_device=describe_device,
+            plan_topk=plan_topk,
+            device_report=device_report,
+            rank_plan=rank_plan,
+        )
+
+    manifest_payload: dict[str, Any] = {
+        "kind": "spiraltorch.zspace_experiment_manifest",
+        "schema": "spiraltorch.zspace_experiment",
+        "schema_version": 1,
+        "title": str(title),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "trace_jsonl": str(trace_jsonl_path),
+        "trace_html": str(trace_html_out),
+        "atlas_noncollapse_html": str(atlas_html_out),
+        "artifact_manifest": str(manifest_path),
+        "district": str(district),
+        "event_type": str(event_type),
+        "summary": summary,
+        "noncollapse_perspective": perspective,
+        "views": {
+            "trace_jsonl": str(trace_jsonl_path),
+            "trace_html": str(trace_html_out),
+            "atlas_noncollapse_html": str(atlas_html_out),
+            "artifact_manifest": str(manifest_path),
+        },
+        "metadata": _json_ready(dict(metadata)) if isinstance(metadata, Mapping) else {},
+    }
+    if planner_payload is not None:
+        manifest_payload["planner_snapshot"] = _json_ready(planner_payload)
+    manifest_payload["downstream_hook"] = build_zspace_downstream_hook(manifest_payload)
+    manifest_path.write_text(
+        json.dumps(manifest_payload, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    return manifest_payload
 
 
 def _phase_hint(stage_focus: Sequence[Mapping[str, Any]]) -> str | None:

@@ -12,10 +12,12 @@ from spiraltorch.zspace_atlas import (
 )
 from spiraltorch.zspace_artifacts import (
     build_desire_adapter_from_downstream_hook,
+    build_zspace_planner_snapshot,
     build_zspace_downstream_hook,
     desire_step_from_downstream_hook,
     load_zspace_artifact_manifest,
     run_desire_geometry_bias_validation,
+    write_zspace_experiment_artifacts,
 )
 from spiraltorch.zspace_trace import load_zspace_trace_events, write_zspace_trace_html
 
@@ -427,6 +429,121 @@ def test_build_zspace_downstream_hook_extracts_desire_candidate(tmp_path) -> Non
     assert hook["desire_candidate"]["experimental"] is True
     assert hook["desire_candidate"]["phase_hint"] == "pre_discard"
     assert hook["desire_candidate"]["focus_metric"] == "noncollapse.preserved_ratio"
+
+
+def test_build_zspace_planner_snapshot_captures_device_and_plan() -> None:
+    class FakePlan:
+        kind = "topk"
+        requested_backend = "auto"
+        effective_backend = "wgpu"
+        rows = 8
+        cols = 128
+        k = 4
+        workgroup = 128
+        lanes = 32
+
+    def describe_device(backend: str):
+        assert backend == "auto"
+        return {
+            "backend": "wgpu",
+            "lane_width": 32,
+            "planner_route": "wgpu",
+        }
+
+    def plan_topk(rows: int, cols: int, k: int, *, backend: str):
+        assert (rows, cols, k, backend) == (8, 128, 4, "auto")
+        return FakePlan()
+
+    snapshot = build_zspace_planner_snapshot(
+        backend="auto",
+        rows=8,
+        cols=128,
+        k=4,
+        describe_device=describe_device,
+        plan_topk=plan_topk,
+    )
+
+    assert snapshot["kind"] == "spiraltorch.zspace_planner_snapshot"
+    assert snapshot["available"] is True
+    assert snapshot["backend"] == "auto"
+    assert snapshot["shape"] == {"rows": 8, "cols": 128, "k": 4}
+    assert snapshot["device_report"]["backend"] == "wgpu"
+    assert snapshot["rank_plan"]["kind"] == "topk"
+    assert snapshot["rank_plan"]["effective_backend"] == "wgpu"
+    assert snapshot["rank_plan"]["workgroup"] == 128
+    assert "errors" not in snapshot
+
+
+def test_write_zspace_experiment_artifacts_writes_manifest_with_planner_snapshot(
+    tmp_path,
+) -> None:
+    trace_path = tmp_path / "trace.jsonl"
+    trace_path.write_text(
+        json.dumps(
+            {
+                "schema": "spiraltorch.zspace_trace",
+                "schema_version": 1,
+                "kind": "PreDiscardApplied",
+                "step": 3,
+                "payload": {
+                    "noncollapse_card": {
+                        "stage": "pre_discard",
+                        "title": "Pre-discard retention",
+                        "summary": "2 preserved / 6 discarded",
+                        "metrics": {
+                            "preserved_ratio": 0.25,
+                            "survivor_energy_ratio": 0.81,
+                        },
+                    }
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    def describe_device(_backend: str):
+        return {"backend": "wgpu", "lane_width": 32}
+
+    def plan_topk(rows: int, cols: int, k: int, *, backend: str):
+        return {
+            "kind": "topk",
+            "requested_backend": backend,
+            "effective_backend": "wgpu",
+            "rows": rows,
+            "cols": cols,
+            "k": k,
+        }
+
+    manifest = write_zspace_experiment_artifacts(
+        trace_path,
+        trace_html=tmp_path / "trace.html",
+        atlas_html=tmp_path / "trace.atlas_noncollapse.html",
+        manifest=tmp_path / "trace.artifacts.json",
+        title="Experiment packet",
+        planner_backend="auto",
+        planner_rows=4,
+        planner_cols=64,
+        planner_k=2,
+        metadata={"run_id": "demo-run"},
+        describe_device=describe_device,
+        plan_topk=plan_topk,
+    )
+    loaded = load_zspace_artifact_manifest(tmp_path / "trace.artifacts.json")
+
+    assert (tmp_path / "trace.html").is_file()
+    assert (tmp_path / "trace.atlas_noncollapse.html").is_file()
+    assert manifest["kind"] == "spiraltorch.zspace_experiment_manifest"
+    assert manifest["schema_version"] == 1
+    assert manifest["metadata"]["run_id"] == "demo-run"
+    assert manifest["views"]["trace_jsonl"] == str(trace_path)
+    assert manifest["planner_snapshot"]["available"] is True
+    assert manifest["planner_snapshot"]["rank_plan"]["cols"] == 64
+    assert manifest["downstream_hook"]["kind"] == "spiraltorch.zspace_artifact_hook"
+    assert loaded["planner_snapshot"]["device_report"]["backend"] == "wgpu"
+    assert loaded["downstream_hook"]["views"]["artifact_manifest"] == str(
+        tmp_path / "trace.artifacts.json"
+    )
 
 
 def test_build_desire_adapter_from_downstream_hook_maps_gain_and_bias(tmp_path) -> None:

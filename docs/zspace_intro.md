@@ -89,6 +89,34 @@ instances, or the telemetry captured inside a `ZSpacePartialBundle`; everything
 is flattened and merged automatically before the posterior update so PSI health
 metrics and canvas energy stay aligned with the atlas.
 
+## Experiment artifact bundles
+
+Trace viewers are most useful when they travel with the runtime decision that
+produced them. `spiraltorch.write_zspace_experiment_artifacts(...)` writes the
+trace HTML, Atlas non-collapse HTML, downstream hook, and a manifest in one pass.
+The manifest includes a `planner_snapshot` so later analysis can see which
+device report and rank plan framed the run:
+
+```python
+import spiraltorch as st
+
+manifest = st.write_zspace_experiment_artifacts(
+    "spiraltorch_zspace_trace.jsonl",
+    title="Z-space trace with planner context",
+    planner_backend="auto",
+    planner_rows=8,
+    planner_cols=65_536,
+    planner_k=1_024,
+)
+
+print(manifest["views"]["trace_html"])
+print(manifest["planner_snapshot"]["device_report"])
+```
+
+The standalone helper `examples/zspace_trace_export_artifacts.py` uses the same
+API, so generated traces from Rust examples and Python notebooks share the same
+manifest shape.
+
 ### Importing external weights
 
 Warm-starting from other ecosystems hinges on the DLPack bridges:

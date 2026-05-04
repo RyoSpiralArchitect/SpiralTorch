@@ -14,8 +14,6 @@ from __future__ import annotations
 
 import argparse
 import importlib
-import json
-import os
 import sys
 from pathlib import Path
 
@@ -50,6 +48,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--event-type", default="ZSpaceTrace")
     parser.add_argument("--bound", type=int, default=256)
     parser.add_argument("--top-k", type=int, default=12)
+    parser.add_argument("--planner-backend", default="auto")
+    parser.add_argument("--plan-rows", type=int, default=None)
+    parser.add_argument("--plan-cols", type=int, default=None)
+    parser.add_argument("--plan-k", type=int, default=None)
+    parser.add_argument("--no-planner-snapshot", action="store_true")
     return parser.parse_args()
 
 
@@ -74,63 +77,30 @@ def main() -> None:
         else trace_jsonl.with_suffix(".artifacts.json")
     )
 
-    def rel(from_path: Path, target: Path) -> str:
-        return Path(os.path.relpath(target, start=from_path.parent)).as_posix()
-
-    trace_related_links = {
-        "Atlas view": rel(trace_html, atlas_html),
-        "Artifact manifest": rel(trace_html, manifest),
-        "Trace JSONL": rel(trace_html, trace_jsonl),
-    }
-    atlas_related_links = {
-        "Trace viewer": rel(atlas_html, trace_html),
-        "Artifact manifest": rel(atlas_html, manifest),
-        "Trace JSONL": rel(atlas_html, trace_jsonl),
-    }
-
-    trace_html_out = st.write_zspace_trace_html(
+    manifest_payload = st.write_zspace_experiment_artifacts(
         trace_jsonl,
-        trace_html,
+        trace_html=trace_html,
+        atlas_html=atlas_html,
+        manifest=manifest,
         title=args.title,
-        event_type=args.event_type,
-        related_links=trace_related_links,
-    )
-    route = st.zspace_trace_to_atlas_route(
-        trace_jsonl,
         district=args.district,
+        event_type=args.event_type,
         bound=args.bound,
-        event_type=args.event_type,
-    )
-    atlas_html_out = st.write_zspace_atlas_noncollapse_html(
-        route,
-        atlas_html,
-        title=f"{args.title} Atlas Non-Collapse",
-        district=args.district,
         top_k=args.top_k,
-        related_links=atlas_related_links,
-    )
-    summary = route.summary()
-    perspective = route.perspective_for(args.district, focus_prefixes=["noncollapse."])
-
-    manifest_payload = {
-        "trace_jsonl": str(trace_jsonl),
-        "trace_html": str(trace_html_out),
-        "atlas_noncollapse_html": str(atlas_html_out),
-        "artifact_manifest": str(manifest),
-        "district": args.district,
-        "event_type": args.event_type,
-        "summary": summary,
-        "noncollapse_perspective": perspective,
-    }
-    manifest_payload["downstream_hook"] = st.build_zspace_downstream_hook(manifest_payload)
-    manifest.write_text(
-        json.dumps(manifest_payload, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
+        capture_planner=not args.no_planner_snapshot,
+        planner_backend=args.planner_backend,
+        planner_rows=args.plan_rows,
+        planner_cols=args.plan_cols,
+        planner_k=args.plan_k,
     )
 
-    print(f"trace_html={trace_html_out}")
-    print(f"atlas_noncollapse_html={atlas_html_out}")
+    print(f"trace_html={manifest_payload['trace_html']}")
+    print(f"atlas_noncollapse_html={manifest_payload['atlas_noncollapse_html']}")
     print(f"artifact_manifest={manifest}")
+    planner_snapshot = manifest_payload.get("planner_snapshot")
+    if isinstance(planner_snapshot, dict):
+        print(f"planner_snapshot_available={planner_snapshot.get('available')}")
+    perspective = manifest_payload.get("noncollapse_perspective")
     if isinstance(perspective, dict):
         guidance = perspective.get("guidance")
         if isinstance(guidance, str) and guidance:
