@@ -217,7 +217,7 @@ pub enum PipelineVariant {
 }
 
 impl PipelineVariant {
-    fn resolve<'a>(self, pipelines: &'a Pipelines) -> (&'a ComputePipeline, PipelineVariant) {
+    fn resolve(self, pipelines: &Pipelines) -> (&ComputePipeline, PipelineVariant) {
         match self {
             PipelineVariant::Workgroup => {
                 (pipelines.workgroup.as_ref(), PipelineVariant::Workgroup)

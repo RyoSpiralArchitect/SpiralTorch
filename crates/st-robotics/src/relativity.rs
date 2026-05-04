@@ -40,9 +40,9 @@ pub struct RelativityBridge;
 
 impl RelativityBridge {
     fn validate_metric(components: [[f32; 4]; 4]) -> Result<[[f32; 4]; 4], RoboticsError> {
-        for i in 0..4 {
-            for j in 0..4 {
-                let diff = (components[i][j] - components[j][i]).abs();
+        for (i, row) in components.iter().enumerate() {
+            for (j, value) in row.iter().enumerate() {
+                let diff = (*value - components[j][i]).abs();
                 if diff > TOLERANCE {
                     return Err(RoboticsError::RelativityBridge(format!(
                         "metric tensor must be symmetric at ({i},{j}); |Δ|={diff:.3e}"
@@ -55,8 +55,8 @@ impl RelativityBridge {
                 "time-time component must be negative for Lorentzian signature".to_string(),
             ));
         }
-        for spatial in 1..4 {
-            if components[spatial][spatial] <= TOLERANCE {
+        for (spatial, row) in components.iter().enumerate().skip(1) {
+            if row[spatial] <= TOLERANCE {
                 return Err(RoboticsError::RelativityBridge(format!(
                     "spatial diagonal entry ({spatial},{spatial}) must be positive"
                 )));

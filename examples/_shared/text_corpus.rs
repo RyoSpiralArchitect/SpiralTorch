@@ -98,4 +98,3 @@ pub fn write_data_files_manifest(path: &Path, files: &[PathBuf]) -> Result<(), T
     })?;
     Ok(())
 }
-

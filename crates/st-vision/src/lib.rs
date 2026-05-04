@@ -71,7 +71,6 @@ pub mod xai;
 use std::cmp::min;
 use std::collections::VecDeque;
 use std::f32::consts::{LN_2, PI};
-use std::f32::EPSILON;
 use std::fmt;
 use std::sync::Arc;
 
@@ -672,7 +671,7 @@ impl ZSliceProfile {
     /// Shannon entropy of the energy distribution (log base 2).
     pub fn energy_entropy(&self) -> f32 {
         let total = self.total_energy();
-        if total <= EPSILON {
+        if total <= f32::EPSILON {
             return 0.0;
         }
         self.energies
@@ -1546,6 +1545,17 @@ pub struct ResonanceGenerator {
 }
 
 #[cfg(feature = "nn")]
+struct ResonanceDecodeInputs<'a> {
+    volume: &'a ZSpaceVolume,
+    projector: &'a VisionProjector,
+    chrono: Option<&'a ChronoSummary>,
+    atlas: Option<&'a AtlasFrame>,
+    previous: Option<&'a DifferentialResonance>,
+    profile: &'a ZSliceProfile,
+    latent: &'a Tensor,
+}
+
+#[cfg(feature = "nn")]
 impl ResonanceGenerator {
     /// Creates a generator that uses the default feature set per slice.
     pub fn new(name: impl Into<String>, hidden_dim: usize, steps: usize) -> PureResult<Self> {
@@ -1617,9 +1627,15 @@ impl ResonanceGenerator {
         let profile = volume.slice_profile()?;
         let encoded = self.encode(volume, projector, chrono, atlas, previous, &profile)?;
         let latent = self.rnn.forward(&encoded)?;
-        self.decode(
-            volume, projector, chrono, atlas, previous, &profile, &latent,
-        )
+        self.decode(ResonanceDecodeInputs {
+            volume,
+            projector,
+            chrono,
+            atlas,
+            previous,
+            profile: &profile,
+            latent: &latent,
+        })
     }
 
     fn encode(
@@ -1702,16 +1718,16 @@ impl ResonanceGenerator {
         Tensor::from_vec(1, buffer.len(), buffer)
     }
 
-    fn decode(
-        &self,
-        volume: &ZSpaceVolume,
-        projector: &VisionProjector,
-        chrono: Option<&ChronoSummary>,
-        atlas: Option<&AtlasFrame>,
-        previous: Option<&DifferentialResonance>,
-        profile: &ZSliceProfile,
-        latent: &Tensor,
-    ) -> PureResult<DifferentialResonance> {
+    fn decode(&self, inputs: ResonanceDecodeInputs<'_>) -> PureResult<DifferentialResonance> {
+        let ResonanceDecodeInputs {
+            volume,
+            projector,
+            chrono,
+            atlas,
+            previous,
+            profile,
+            latent,
+        } = inputs;
         let depth = volume.depth();
         let hidden = latent.data();
         if hidden.is_empty() {
@@ -2434,10 +2450,8 @@ impl VisionProjector {
                 "temporal_focus" | "z_temporal_focus" => {
                     self.temporal_focus = metric.value.clamp(0.0, 1.0);
                 }
-                "temporal_decay" | "z_temporal_decay" => {
-                    if metric.value.is_finite() {
-                        self.temporal_decay = metric.value.abs().clamp(0.05, 1.0);
-                    }
+                "temporal_decay" | "z_temporal_decay" if metric.value.is_finite() => {
+                    self.temporal_decay = metric.value.abs().clamp(0.05, 1.0);
                 }
                 _ => {}
             }
@@ -2616,7 +2630,7 @@ impl VisionProjector {
 
     fn apply_multi_view_biases(
         &self,
-        weights: &mut Vec<f32>,
+        weights: &mut [f32],
         fusion: &MultiViewFusion,
     ) -> PureResult<()> {
         if weights.len() != fusion.view_count() {
@@ -3179,6 +3193,9 @@ impl DatasetSample {
 pub trait VisionDataset: Send + Sync {
     fn descriptor(&self) -> &DatasetDescriptor;
     fn len(&self) -> usize;
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
     fn get(&self, index: usize) -> PureResult<DatasetSample>;
 }
 
@@ -3442,6 +3459,12 @@ impl fmt::Debug for TransformPipeline {
         #[cfg(feature = "wgpu")]
         debug.field("gpu_dispatcher", &self.dispatcher.is_some());
         debug.finish()
+    }
+}
+
+impl Default for TransformPipeline {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -4494,13 +4517,13 @@ impl LinearLayer {
             });
         }
         let mut output = vec![0.0f32; self.out_features];
-        for o in 0..self.out_features {
+        for (o, output_slot) in output.iter_mut().enumerate().take(self.out_features) {
             let mut acc = self.bias[o];
             let row_offset = o * self.in_features;
-            for i in 0..self.in_features {
-                acc += self.weights[row_offset + i] * input[i];
+            for (i, value) in input.iter().enumerate().take(self.in_features) {
+                acc += self.weights[row_offset + i] * *value;
             }
-            output[o] = acc;
+            *output_slot = acc;
         }
         Ok(output)
     }
@@ -4904,7 +4927,7 @@ mod tests {
         let weights = volume.resonance_weights(&resonance).unwrap();
         assert!((weights.iter().sum::<f32>() - 1.0).abs() < 1e-4);
         let projected = volume.project_resonance(&resonance).unwrap();
-        let mut expected = vec![0.0f32; 4];
+        let mut expected = [0.0f32; 4];
         for (z, weight) in weights.iter().enumerate() {
             for (idx, value) in slices[z].data().iter().enumerate() {
                 expected[idx] += value * weight;
@@ -5536,7 +5559,7 @@ mod tests {
             vec![0.25; metadata.input_channels * metadata.image_size.0 * metadata.image_size.1],
         )
         .unwrap();
-        let logits = model.forward(&[image.clone()]).unwrap();
+        let logits = model.forward(std::slice::from_ref(&image)).unwrap();
         assert_eq!(logits.shape(), (1, metadata.num_classes));
         let extractor = FeatureExtractor::new(model.clone(), FeatureStage::Stem);
         let stem = extractor.extract(&image).unwrap();

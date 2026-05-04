@@ -5,10 +5,10 @@
 //! Lightweight hooks for observing tensor operations without introducing a
 //! dependency on the higher-level plugin/event system.
 
+use serde_json::Value;
 use std::cell::Cell;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Arc, OnceLock, RwLock};
-use serde_json::Value;
 
 /// Metadata about a completed tensor operation.
 #[derive(Clone, Debug)]
@@ -36,8 +36,8 @@ pub type TensorOpMetaObserver = Arc<dyn Fn(&TensorOpMetaEvent) + Send + Sync + '
 static TENSOR_OP_META_OBSERVER: OnceLock<RwLock<Option<TensorOpMetaObserver>>> = OnceLock::new();
 
 thread_local! {
-    static IN_OBSERVER_CALLBACK: Cell<bool> = Cell::new(false);
-    static IN_META_OBSERVER_CALLBACK: Cell<bool> = Cell::new(false);
+    static IN_OBSERVER_CALLBACK: Cell<bool> = const { Cell::new(false) };
+    static IN_META_OBSERVER_CALLBACK: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Install (or clear) the global tensor operation observer.

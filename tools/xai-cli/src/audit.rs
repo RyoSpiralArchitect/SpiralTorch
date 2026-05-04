@@ -155,8 +155,10 @@ impl AuditTrail {
 }
 
 fn build_summary(events: &[AuditEvent]) -> AuditSummary {
-    let mut summary = AuditSummary::default();
-    summary.total_events = events.len();
+    let mut summary = AuditSummary {
+        total_events: events.len(),
+        ..Default::default()
+    };
     for event in events {
         *summary.stages.entry(event.stage.clone()).or_default() += 1;
     }

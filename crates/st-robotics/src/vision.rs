@@ -143,7 +143,7 @@ impl VisionFeedbackSynchronizer {
     }
 
     fn extract_sensor(&self, coordinates: &HashMap<String, Vec<f32>>) -> Option<Vec<f32>> {
-        coordinates.get(&self.channel).map(|values| values.clone())
+        coordinates.get(&self.channel).cloned()
     }
 
     fn snapshot_from_field(

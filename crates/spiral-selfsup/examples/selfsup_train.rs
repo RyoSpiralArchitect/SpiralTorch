@@ -40,10 +40,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         exporter.log_info_nce(step, &info_summary);
 
-        let mut step_metrics = StepMetrics::default();
-        step_metrics.step_time_ms = rng.gen_range(8.0..18.0);
-        step_metrics.mem_peak_mb = rng.gen_range(256.0..640.0);
-        step_metrics.retry_rate = rng.gen_range(0.0..0.05);
+        let mut step_metrics = StepMetrics {
+            step_time_ms: rng.gen_range(8.0..18.0),
+            mem_peak_mb: rng.gen_range(256.0..640.0),
+            retry_rate: rng.gen_range(0.0..0.05),
+            ..Default::default()
+        };
         for value in epoch_metrics.to_values() {
             step_metrics
                 .extra
@@ -196,7 +198,11 @@ impl TensorboardExporter {
             let step = step as i64;
             let _ = writer.write_scalar(step, "selfsup/loss", summary.loss);
             let _ = writer.write_scalar(step, "selfsup/top1_accuracy", summary.top1_accuracy);
-            let _ = writer.write_scalar(step, "selfsup/positive_margin", summary.mean_positive_margin);
+            let _ = writer.write_scalar(
+                step,
+                "selfsup/positive_margin",
+                summary.mean_positive_margin,
+            );
             let _ = writer.write_scalar(
                 step,
                 "selfsup/positive_log_prob",

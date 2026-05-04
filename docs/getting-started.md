@@ -28,6 +28,7 @@ Prerequisites:
 - Rust stable (`rustup`)
 - Cargo
 - macOS: Xcode Command Line Tools / Linux: build-essentials
+- Protobuf compiler (`protoc`) if you run the full workspace test surface, including examples
 
 ```bash
 # Clone the repository

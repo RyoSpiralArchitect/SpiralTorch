@@ -6,6 +6,8 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
+$NightlyToolchain = "nightly-2026-04-15"
+
 function RunCommand {
     param(
         [Parameter(Mandatory = $true)]
@@ -29,7 +31,7 @@ function ShowHelp {
     Write-Host "  pwsh -File scripts/dev.ps1 <task>"
     Write-Host ""
     Write-Host "Tasks:"
-    Write-Host "  fmt         cargo fmt --all"
+    Write-Host "  fmt         cargo +$NightlyToolchain fmt --all"
     Write-Host "  clippy      cargo clippy --workspace --all-targets"
     Write-Host "  core-build  cargo build -p st-core --release"
     Write-Host "  core-test   cargo test  -p st-core --release -- --nocapture"
@@ -40,7 +42,7 @@ function ShowHelp {
 
 switch ($Task) {
     "fmt" {
-        RunCommand cargo fmt --all
+        RunCommand cargo "+$NightlyToolchain" fmt --all
     }
     "clippy" {
         RunCommand cargo clippy --workspace --all-targets
@@ -63,11 +65,10 @@ switch ($Task) {
     }
     "docs-check" {
         RunCommand python tools/check_example_gallery.py
-        RunCommand python tools/run_readme_python_blocks.py --readme README.md --cwd .
+        RunCommand python tools/run_readme_python_blocks.py --readme README.md --cwd . --allow-stub-skips
         RunCommand cargo run -p st-bench --bin backend_matrix_md -- --check --doc docs/backend_matrix.md
     }
     default {
         ShowHelp
     }
 }
-

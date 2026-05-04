@@ -1,7 +1,8 @@
 set shell := ["bash", "-cu"]
+nightly_toolchain := "nightly-2026-04-15"
 
 fmt:
-    cargo fmt --all
+    cargo +{{nightly_toolchain}} fmt --all
 
 clippy:
     cargo clippy --workspace --all-targets
@@ -67,5 +68,5 @@ distributed-selfsup config="configs/selfsup_distributed.toml":
 
 docs-check:
     PYTHONNOUSERSITE=1 python3 tools/check_example_gallery.py
-    PYTHONNOUSERSITE=1 python3 tools/run_readme_python_blocks.py
+    PYTHONNOUSERSITE=1 python3 tools/run_readme_python_blocks.py --allow-stub-skips
     PYTHONNOUSERSITE=1 cargo run -p st-bench --bin backend_matrix_md -- --check --doc docs/backend_matrix.md

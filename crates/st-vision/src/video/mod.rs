@@ -99,7 +99,7 @@ pub struct ZDynamicsAnnotation {
     pub spectral_response: Vec<f32>,
 }
 
-/// Output emitted by [`VideoPipeline::next`].
+/// Output emitted by [`VideoPipeline::next_frame`].
 #[derive(Clone, Debug)]
 pub struct VideoPipelineOutput {
     /// Sequential index of the emitted frame.
@@ -152,7 +152,7 @@ impl<D: VideoDecoder> VideoPipeline<D> {
     }
 
     /// Decodes the next frame, updates temporal buffers, and emits Z-dynamics annotations.
-    pub fn next(&mut self) -> PureResult<Option<VideoPipelineOutput>> {
+    pub fn next_frame(&mut self) -> PureResult<Option<VideoPipelineOutput>> {
         let Some(decoded) = self.decoder.next_frame()? else {
             return Ok(None);
         };
@@ -266,6 +266,18 @@ impl<D: VideoDecoder> VideoPipeline<D> {
     /// Builds a digest limited to the most recent `window` frames.
     pub fn temporal_digest_window(&self, window: usize) -> TemporalDigest {
         self.stats.digest_window(window)
+    }
+}
+
+impl<D: VideoDecoder> Iterator for VideoPipeline<D> {
+    type Item = PureResult<VideoPipelineOutput>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.next_frame() {
+            Ok(Some(output)) => Some(Ok(output)),
+            Ok(None) => None,
+            Err(err) => Some(Err(err)),
+        }
     }
 }
 
@@ -709,7 +721,7 @@ mod tests {
         ];
         let decoder = SequenceDecoder::new(frames);
         let mut pipeline = VideoPipeline::new(decoder, VideoPipelineConfig::default());
-        let first = pipeline.next().unwrap().unwrap();
+        let first = pipeline.next_frame().unwrap().unwrap();
         assert_eq!(first.frame_index, 0);
         assert_eq!(first.stream.volume.depth(), 2);
         assert!(first
@@ -721,7 +733,7 @@ mod tests {
         assert_eq!(first.window_digest.frames, 1);
         assert!(pipeline.last_volume().is_some());
         assert_eq!(pipeline.atlas_timeline().len(), 1);
-        let second = pipeline.next().unwrap().unwrap();
+        let second = pipeline.next_frame().unwrap().unwrap();
         assert_eq!(second.frame_index, 1);
         assert!(second
             .atlas_frame
@@ -733,6 +745,6 @@ mod tests {
         assert!(pipeline.temporal_digest().frames >= 2);
         assert!(pipeline.temporal_digest_window(1).frames >= 1);
         assert_eq!(pipeline.atlas_timeline().len(), 2);
-        assert!(pipeline.next().unwrap().is_none());
+        assert!(pipeline.next_frame().unwrap().is_none());
     }
 }

@@ -47,9 +47,9 @@ fn colors_to_image(colors: &Tensor, height: usize, width: usize) -> Result<Image
     for (index, pixel) in source.chunks_exact(cols).enumerate() {
         let y = index / width;
         let x = index % width;
-        for channel in 0..cols {
+        for (channel, value) in pixel.iter().enumerate().take(cols) {
             let offset = ((channel * height) + y) * width + x;
-            data[offset] = pixel[channel];
+            data[offset] = *value;
         }
     }
     ImageTensor::new(3, height, width, data).map_err(ObjectiveError::from)
@@ -57,7 +57,7 @@ fn colors_to_image(colors: &Tensor, height: usize, width: usize) -> Result<Image
 
 fn clone_operations(pipeline: Option<&TransformPipeline>) -> Vec<TransformOperation> {
     pipeline
-        .map(|p| p.operations().iter().cloned().collect())
+        .map(|p| p.operations().to_vec())
         .unwrap_or_default()
 }
 

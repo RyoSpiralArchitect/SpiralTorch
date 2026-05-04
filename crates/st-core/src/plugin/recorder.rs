@@ -278,18 +278,10 @@ impl Drop for PluginEventRecorder {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct PluginEventJsonlWriterConfig {
     /// When `false`, `TensorOp` events are skipped to keep traces compact.
     pub capture_tensor_ops: bool,
-}
-
-impl Default for PluginEventJsonlWriterConfig {
-    fn default() -> Self {
-        Self {
-            capture_tensor_ops: false,
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -349,7 +341,11 @@ impl PluginEventJsonlWriter {
             };
 
             let err = match serde_json::to_writer(&mut guard.writer, &record) {
-                Ok(()) => guard.writer.write_all(b"\n").err().map(|err| err.to_string()),
+                Ok(()) => guard
+                    .writer
+                    .write_all(b"\n")
+                    .err()
+                    .map(|err| err.to_string()),
                 Err(err) => Some(err.to_string()),
             };
             if let Some(err) = err {

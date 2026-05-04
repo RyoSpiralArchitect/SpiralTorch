@@ -557,7 +557,7 @@ pub fn collapse_redistribution(
         mixed[m] = acc;
     }
 
-    for (p, m) in probability.iter_mut().zip(mixed.into_iter()) {
+    for (p, m) in probability.iter_mut().zip(mixed) {
         *p = (1.0 - mu) * *p + mu * m;
     }
     probability
@@ -1004,15 +1004,16 @@ impl ZSpace {
 
 impl From<&MaxwellZPulse> for ZSpace {
     fn from(pulse: &MaxwellZPulse) -> Self {
-        let mut signature = Vec::with_capacity(8);
-        signature.push(pulse.blocks as f64);
-        signature.push(pulse.mean);
-        signature.push(pulse.standard_error);
-        signature.push(pulse.z_score);
-        signature.push(pulse.band_energy.0 as f64);
-        signature.push(pulse.band_energy.1 as f64);
-        signature.push(pulse.band_energy.2 as f64);
-        signature.push(pulse.z_bias as f64);
+        let signature = vec![
+            pulse.blocks as f64,
+            pulse.mean,
+            pulse.standard_error,
+            pulse.z_score,
+            pulse.band_energy.0 as f64,
+            pulse.band_energy.1 as f64,
+            pulse.band_energy.2 as f64,
+            pulse.z_bias as f64,
+        ];
         Self { signature }
     }
 }

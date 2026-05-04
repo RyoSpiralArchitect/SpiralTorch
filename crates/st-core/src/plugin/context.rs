@@ -4,7 +4,7 @@
 
 //! Plugin context providing access to the runtime environment.
 
-use super::events::{PluginEventBus, EventListener};
+use super::events::{EventListener, PluginEventBus};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -104,7 +104,10 @@ impl PluginContext {
         name: impl Into<String>,
         service: T,
     ) {
-        self.services.lock().unwrap().insert(name.into(), Arc::new(service));
+        self.services
+            .lock()
+            .unwrap()
+            .insert(name.into(), Arc::new(service));
     }
 
     /// Get a service registered by another plugin.
@@ -147,7 +150,7 @@ mod tests {
     #[test]
     fn test_config_storage() {
         let ctx = PluginContext::new(PluginEventBus::new());
-        
+
         ctx.set_config("key1", "value1");
         ctx.set_config("prefix.a", "1");
         ctx.set_config("prefix.b", "2");
@@ -177,9 +180,9 @@ mod tests {
     #[test]
     fn test_service_registration() {
         let ctx = PluginContext::new(PluginEventBus::new());
-        
+
         ctx.register_service("test_service", 42i32);
-        
+
         let service = ctx.get_service::<i32>("test_service");
         assert!(service.is_some());
         assert_eq!(*service.unwrap(), 42);

@@ -4,12 +4,15 @@
 
 //! Quick smoke demo for the fused WGPU LayerNorm kernels.
 
-use st_tensor::{set_tensor_op_meta_observer, TensorOpMetaEvent};
 use st_nn::Tensor;
+use st_tensor::{set_tensor_op_meta_observer, TensorOpMetaEvent};
 use std::sync::Arc;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("wgpu_dense_available={}", st_tensor::wgpu_dense::is_available());
+    println!(
+        "wgpu_dense_available={}",
+        st_tensor::wgpu_dense::is_available()
+    );
 
     set_tensor_op_meta_observer(Some(Arc::new(|event: &TensorOpMetaEvent| {
         if event.op_name == "layer_norm" {

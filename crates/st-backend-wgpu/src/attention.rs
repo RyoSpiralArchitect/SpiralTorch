@@ -54,18 +54,13 @@ impl Params {
 }
 
 /// Supported accumulator precision for the fused kernel.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum AccumulatorPrecision {
     /// Pure 32-bit float accumulation.
+    #[default]
     F32,
     /// Half precision inputs accumulated into f32.
     F16AccF32,
-}
-
-impl Default for AccumulatorPrecision {
-    fn default() -> Self {
-        Self::F32
-    }
 }
 
 /// Errors emitted while constructing a fused attention kernel plan.
@@ -274,6 +269,12 @@ impl Plan {
         Ok(template
             .replace("{WORKGROUP_SIZE}", &self.workgroup_size.to_string())
             .replace("{MAX_HEAD_DIM}", &self.max_head_dim.to_string()))
+    }
+}
+
+impl Default for Plan {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

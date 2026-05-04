@@ -1,6 +1,8 @@
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyModule};
 use pyo3::Bound;
+#[cfg(feature = "spiral_rl")]
+use std::ffi::CString;
 
 #[cfg(feature = "spiral_rl")]
 use crate::tensor::tensor_err_to_py;
@@ -192,7 +194,7 @@ impl PyAgentConfig {
 
 #[cfg(feature = "spiral_rl")]
 fn dqn_state_dict(py: Python<'_>, agent: &DqnAgent) -> PyResult<PyObject> {
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("state_dim", agent.state_dim())?;
     dict.set_item("action_dim", agent.action_dim())?;
     dict.set_item("discount", agent.discount())?;
@@ -200,7 +202,7 @@ fn dqn_state_dict(py: Python<'_>, agent: &DqnAgent) -> PyResult<PyObject> {
     dict.set_item("epsilon", agent.epsilon())?;
     dict.set_item("table", agent.table().to_vec())?;
     if let Some(schedule) = agent.epsilon_schedule() {
-        let schedule_dict = PyDict::new_bound(py);
+        let schedule_dict = PyDict::new(py);
         let (start, end, steps) = schedule.parameters();
         schedule_dict.set_item("start", start)?;
         schedule_dict.set_item("end", end)?;
@@ -257,9 +259,10 @@ where
 
 #[cfg(feature = "spiral_rl")]
 fn warn_epsilon_deprecated(py: Python<'_>, message: &str) -> PyResult<()> {
-    let warning_type = py.get_type_bound::<PyDeprecationWarning>();
+    let warning_type = py.get_type::<PyDeprecationWarning>();
     let warning_type_any = warning_type.as_any();
-    PyErr::warn_bound(py, warning_type_any, message, 1)
+    let message = CString::new(message)?;
+    PyErr::warn(py, warning_type_any, &message, 1)
 }
 
 #[cfg(feature = "spiral_rl")]
@@ -670,7 +673,7 @@ impl PySacAgent {
 
 #[cfg(feature = "spiral_rl")]
 fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
-    let module = PyModule::new_bound(py, "spiral_rl")?;
+    let module = PyModule::new(py, "spiral_rl")?;
     module.add("__doc__", "SpiralTorch reinforcement learning agents")?;
 
     // 1) register public class names first (these names are what Python code expects)
@@ -721,7 +724,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
 
     // 6) (optional but recommended) register legacy top-level module name in sys.modules
     //    so `import spiral_rl` (old code) will find our module object.
-    let sys = PyModule::import_bound(py, "sys")?;
+    let sys = PyModule::import(py, "sys")?;
     let modules = sys.getattr("modules")?;
     modules.set_item("spiral_rl", module_obj.clone_ref(py))?;
     modules.set_item("rl", module_obj)?;
@@ -731,7 +734,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
 
 #[cfg(not(feature = "spiral_rl"))]
 fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
-    let module = PyModule::new_bound(py, "spiraltorch.spiral_rl")?;
+    let module = PyModule::new(py, "spiraltorch.spiral_rl")?;
     module.add("__doc__", "SpiralTorch reinforcement learning agents")?;
     parent.add_submodule(&module)?;
     Ok(())

@@ -20,7 +20,7 @@ _PROJECT_ROOT = _Path(__file__).resolve().parents[1]
 
 
 def _utc_timestamp() -> str:
-    return _datetime.datetime.utcnow().replace(tzinfo=_datetime.timezone.utc).isoformat()
+    return _datetime.datetime.now(_datetime.timezone.utc).isoformat()
 
 
 def _git_capture(*args: str) -> str | None:

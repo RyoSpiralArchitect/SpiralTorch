@@ -189,7 +189,7 @@ impl PyDataLoaderIter {
 #[pymethods]
 impl PyDataLoaderIter {
     /// Returns an iterator over the dataset.
-    /// 
+    ///
     /// This method implements the Python iterator protocol (__iter__).
     /// The conversion from PyRef to Py<PyDataLoaderIter> is guaranteed to succeed
     /// as it only involves reference counting, not any fallible operations.
@@ -217,7 +217,7 @@ impl PyDataLoaderIter {
 
 #[cfg(feature = "nn")]
 pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
-    let dataset = PyModule::new_bound(py, "dataset")?;
+    let dataset = PyModule::new(py, "dataset")?;
     dataset.add(
         "__doc__",
         "Datasets & loaders backed by the Rust session core.",
@@ -225,7 +225,7 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
     dataset.add_class::<PyDataset>()?;
     dataset.add_class::<PyDataLoader>()?;
     dataset.add_class::<PyDataLoaderIter>()?;
-    let exports = PyList::new_bound(py, ["Dataset", "DataLoader", "DataLoaderIterator"]);
+    let exports = PyList::new(py, ["Dataset", "DataLoader", "DataLoaderIterator"])?;
     dataset.add("__all__", exports)?;
     parent.add_submodule(&dataset)?;
     Ok(())
@@ -233,7 +233,7 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
 
 #[cfg(not(feature = "nn"))]
 pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
-    let dataset = PyModule::new_bound(py, "dataset")?;
+    let dataset = PyModule::new(py, "dataset")?;
     dataset.add(
         "__doc__",
         "Datasets & loaders (native extension unavailable in this build).",

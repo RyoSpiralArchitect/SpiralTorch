@@ -44,7 +44,7 @@ impl PyQuantizationReport {
     }
 
     fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         dict.set_item("bit_width", self.inner.bit_width)?;
         dict.set_item("observed_min", self.inner.observed_min)?;
         dict.set_item("observed_max", self.inner.observed_max)?;
@@ -95,7 +95,7 @@ impl PyStructuredPruningReport {
     }
 
     fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         dict.set_item("target_sparsity", self.inner.target_sparsity)?;
         dict.set_item("achieved_sparsity", self.inner.achieved_sparsity)?;
         dict.set_item("block_size", self.inner.block_size)?;
@@ -143,7 +143,7 @@ impl PyCompressionReport {
     }
 
     fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         dict.set_item("original_params", self.inner.original_params)?;
         dict.set_item("remaining_params", self.inner.remaining_params)?;
         dict.set_item(

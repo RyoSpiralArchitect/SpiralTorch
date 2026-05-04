@@ -16,7 +16,7 @@ use st_core::util::math::{
 use st_tensor::{DifferentialResonance, Tensor};
 
 /// Ramanujan π approximation using three iterations, exposed for lightweight consumers.
-pub const RAMANUJAN_PI_3: f64 = 3.141_592_653_589_793_238_46_f64;
+pub const RAMANUJAN_PI_3: f64 = std::f64::consts::PI;
 
 /// Configuration describing how geometric observability is converted into
 /// feedback for the learning loop.
@@ -616,7 +616,7 @@ impl GeometryFeedback {
             if pressure_ratio > 1.2 {
                 self.leech_weight = (self.leech_weight * 0.9).max(0.0);
             } else if pressure_ratio < 0.6 {
-                self.leech_weight = (self.leech_weight * 1.1).max(0.0).min(16.0);
+                self.leech_weight = (self.leech_weight * 1.1).clamp(0.0, 16.0);
             }
         }
 
@@ -674,6 +674,18 @@ impl GeometryFeedback {
     #[inline]
     pub fn normalised_pressure(&self, observed: f64) -> f64 {
         observed - self.pressure_baseline
+    }
+}
+
+impl GeometryFeedback {
+    #[cfg(feature = "kdsl")]
+    fn signal_script(signal: &ChronoLoopSignal) -> Option<String> {
+        signal.spiralk_script.clone()
+    }
+
+    #[cfg(not(feature = "kdsl"))]
+    fn signal_script(_signal: &ChronoLoopSignal) -> Option<String> {
+        None
     }
 }
 
@@ -893,17 +905,5 @@ mod tests {
         assert!(envelope.z_signal.is_some());
         assert!(envelope.loop_signal.summary.frames >= 1);
         assert!(envelope.support >= 1.0);
-    }
-}
-
-impl GeometryFeedback {
-    #[cfg(feature = "kdsl")]
-    fn signal_script(signal: &ChronoLoopSignal) -> Option<String> {
-        signal.spiralk_script.clone()
-    }
-
-    #[cfg(not(feature = "kdsl"))]
-    fn signal_script(_signal: &ChronoLoopSignal) -> Option<String> {
-        None
     }
 }

@@ -320,12 +320,14 @@ mod tests {
 
     #[test]
     fn transitions_and_cooldown() {
-        let mut cfg = CollapseConfig::default();
-        cfg.enabled = true;
-        cfg.hi = 2.0;
-        cfg.lo = 0.5;
-        cfg.warmup_steps = 0;
-        cfg.cooldown_steps = 2;
+        let cfg = CollapseConfig {
+            enabled: true,
+            hi: 2.0,
+            lo: 0.5,
+            warmup_steps: 0,
+            cooldown_steps: 2,
+            ..Default::default()
+        };
         let mut drive = CollapseDrive::new(cfg);
         assert!(matches!(drive.update(&reading(1, 0.6)), DriveCmd::None));
         assert!(matches!(
@@ -343,18 +345,20 @@ mod tests {
 
     #[test]
     fn collapse_triggers_on_trend_and_deviation() {
-        let mut cfg = CollapseConfig::default();
-        cfg.enabled = true;
-        cfg.hi = 9.0;
-        cfg.lo = -2.0;
-        cfg.warmup_steps = 0;
-        cfg.cooldown_steps = 0;
-        cfg.trend_alpha = 1.0;
-        cfg.collapse_trend_threshold = 0.5;
-        cfg.baseline_alpha = 0.5;
-        cfg.collapse_deviation_threshold = f32::INFINITY;
-        cfg.bloom_trend_threshold = f32::NEG_INFINITY;
-        cfg.bloom_deviation_threshold = f32::INFINITY;
+        let cfg = CollapseConfig {
+            enabled: true,
+            hi: 9.0,
+            lo: -2.0,
+            warmup_steps: 0,
+            cooldown_steps: 0,
+            trend_alpha: 1.0,
+            collapse_trend_threshold: 0.5,
+            baseline_alpha: 0.5,
+            collapse_deviation_threshold: f32::INFINITY,
+            bloom_trend_threshold: f32::NEG_INFINITY,
+            bloom_deviation_threshold: f32::INFINITY,
+            ..Default::default()
+        };
 
         let mut drive = CollapseDrive::new(cfg);
         assert!(matches!(drive.update(&reading(1, 0.0)), DriveCmd::None));
@@ -375,18 +379,20 @@ mod tests {
 
     #[test]
     fn bloom_triggers_on_trend_and_deviation() {
-        let mut cfg = CollapseConfig::default();
-        cfg.enabled = true;
-        cfg.hi = 9.0;
-        cfg.lo = -2.0;
-        cfg.warmup_steps = 0;
-        cfg.cooldown_steps = 0;
-        cfg.trend_alpha = 1.0;
-        cfg.collapse_trend_threshold = f32::INFINITY;
-        cfg.baseline_alpha = 0.5;
-        cfg.bloom_trend_threshold = -0.4;
-        cfg.bloom_deviation_threshold = f32::INFINITY;
-        cfg.collapse_deviation_threshold = f32::INFINITY;
+        let cfg = CollapseConfig {
+            enabled: true,
+            hi: 9.0,
+            lo: -2.0,
+            warmup_steps: 0,
+            cooldown_steps: 0,
+            trend_alpha: 1.0,
+            collapse_trend_threshold: f32::INFINITY,
+            baseline_alpha: 0.5,
+            bloom_trend_threshold: -0.4,
+            bloom_deviation_threshold: f32::INFINITY,
+            collapse_deviation_threshold: f32::INFINITY,
+            ..Default::default()
+        };
 
         let mut drive = CollapseDrive::new(cfg);
         assert!(matches!(drive.update(&reading(1, 1.0)), DriveCmd::None));
@@ -407,16 +413,18 @@ mod tests {
 
     #[test]
     fn collapse_marks_deviation_cause() {
-        let mut cfg = CollapseConfig::default();
-        cfg.enabled = true;
-        cfg.hi = 9.0;
-        cfg.lo = -2.0;
-        cfg.warmup_steps = 0;
-        cfg.cooldown_steps = 0;
-        cfg.trend_alpha = 0.5;
-        cfg.collapse_trend_threshold = f32::INFINITY;
-        cfg.baseline_alpha = 0.5;
-        cfg.collapse_deviation_threshold = 0.2;
+        let cfg = CollapseConfig {
+            enabled: true,
+            hi: 9.0,
+            lo: -2.0,
+            warmup_steps: 0,
+            cooldown_steps: 0,
+            trend_alpha: 0.5,
+            collapse_trend_threshold: f32::INFINITY,
+            baseline_alpha: 0.5,
+            collapse_deviation_threshold: 0.2,
+            ..Default::default()
+        };
         let mut drive = CollapseDrive::new(cfg);
         drive.update(&reading(1, 0.0));
         drive.update(&reading(2, 0.1));
@@ -435,16 +443,18 @@ mod tests {
 
     #[test]
     fn bloom_marks_deviation_cause() {
-        let mut cfg = CollapseConfig::default();
-        cfg.enabled = true;
-        cfg.hi = 9.0;
-        cfg.lo = -2.0;
-        cfg.warmup_steps = 0;
-        cfg.cooldown_steps = 0;
-        cfg.trend_alpha = 0.5;
-        cfg.bloom_trend_threshold = f32::NEG_INFINITY;
-        cfg.baseline_alpha = 0.5;
-        cfg.bloom_deviation_threshold = 0.15;
+        let cfg = CollapseConfig {
+            enabled: true,
+            hi: 9.0,
+            lo: -2.0,
+            warmup_steps: 0,
+            cooldown_steps: 0,
+            trend_alpha: 0.5,
+            bloom_trend_threshold: f32::NEG_INFINITY,
+            baseline_alpha: 0.5,
+            bloom_deviation_threshold: 0.15,
+            ..Default::default()
+        };
         let mut drive = CollapseDrive::new(cfg);
         drive.update(&reading(1, 0.5));
         drive.update(&reading(2, 0.3));
@@ -463,12 +473,14 @@ mod tests {
 
     #[test]
     fn diagnostics_reports_state_and_trend() {
-        let mut cfg = CollapseConfig::default();
-        cfg.enabled = true;
-        cfg.hi = 1.0;
-        cfg.lo = -1.0;
-        cfg.warmup_steps = 0;
-        cfg.trend_alpha = 1.0;
+        let cfg = CollapseConfig {
+            enabled: true,
+            hi: 1.0,
+            lo: -1.0,
+            warmup_steps: 0,
+            trend_alpha: 1.0,
+            ..Default::default()
+        };
         let cooldown_steps = cfg.cooldown_steps;
         let mut drive = CollapseDrive::new(cfg);
         assert_eq!(drive.diagnostics().state, DriveState::Warmup);

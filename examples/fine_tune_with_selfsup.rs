@@ -201,9 +201,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let scratch_logits = scratch_head.forward(&projected)?;
     let scratch_labels = argmax_rows(&scratch_logits);
 
+    let head = &manifest.downstream.recommended_head;
     println!(
-        "Loaded variant: {} (objective: {})",
-        manifest.variant, manifest.objective
+        "Loaded variant: {} / {} (objective: {})",
+        manifest.family, manifest.variant, manifest.objective
     );
     println!(
         "Compatible downstream tasks: {:?}",
@@ -218,6 +219,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         steps,
         accuracy(&scratch_labels, &labels) * 100.0
     );
+    println!(
+        "Recommended head: lr={:.4}, weight_decay={:.4}, epochs={}",
+        head.learning_rate, head.weight_decay, head.total_epochs
+    );
+    if let Some(metrics) = &manifest.metrics {
+        println!("Pretraining metrics: {metrics}");
+    }
 
     Ok(())
 }

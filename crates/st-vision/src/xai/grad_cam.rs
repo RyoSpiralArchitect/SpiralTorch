@@ -62,24 +62,24 @@ impl GradCam {
             });
         }
         let mut weights = vec![0.0f32; channels];
-        for channel in 0..channels {
+        for (channel, weight) in weights.iter_mut().enumerate().take(channels) {
             let mut sum = 0.0f32;
             for idx in 0..features {
                 sum += gradients.data()[channel * features + idx];
             }
-            weights[channel] = sum / features as f32;
+            *weight = sum / features as f32;
         }
         let mut heatmap = vec![0.0f32; spatial];
-        for idx in 0..features {
+        for (idx, slot) in heatmap.iter_mut().enumerate().take(features) {
             let mut value = 0.0f32;
-            for channel in 0..channels {
+            for (channel, weight) in weights.iter().enumerate().take(channels) {
                 let activation = activations.data()[channel * features + idx];
-                value += weights[channel] * activation;
+                value += *weight * activation;
             }
             if config.apply_relu && value < 0.0 {
                 value = 0.0;
             }
-            heatmap[idx] = value;
+            *slot = value;
         }
 
         if config.normalise {
@@ -115,7 +115,7 @@ mod tests {
         .unwrap();
         let config = GradCamConfig::new(2, 2);
         let heatmap = GradCam::attribute(&activations, &gradients, &config).unwrap();
-        let expected = vec![0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0];
+        let expected = [0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0];
         for (value, expected) in heatmap.data().iter().zip(expected.iter()) {
             assert!((value - expected).abs() < 1e-6);
         }

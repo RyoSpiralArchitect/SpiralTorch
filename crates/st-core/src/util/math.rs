@@ -247,7 +247,11 @@ pub fn spiral_softmax_hardmax_consensus(
         let geodesic = entropy * projector.ramanujan_ratio() + hardmass * GOLDEN_RATIO;
         let geodesic = if geodesic.is_finite() { geodesic } else { 0.0 };
         let enrichment = projector.enrich(geodesic.abs());
-        let enrichment = if enrichment.is_finite() { enrichment.max(0.0) } else { 0.0 };
+        let enrichment = if enrichment.is_finite() {
+            enrichment.max(0.0)
+        } else {
+            0.0
+        };
         let raw_scale = 1.0 + enrichment;
         let scale = raw_scale.clamp(0.0, f32::MAX as f64) as f32;
         total_entropy += entropy;
@@ -266,7 +270,11 @@ pub fn spiral_softmax_hardmax_consensus(
             let fused_value = (GOLDEN_RATIO_CONJUGATE as f32) * sanitized_prob
                 + (GOLDEN_RATIO_BIAS as f32) * sanitized_mask;
             let candidate = scale * fused_value;
-            fused[offset + index] = if candidate.is_finite() { candidate.max(0.0) } else { 0.0 };
+            fused[offset + index] = if candidate.is_finite() {
+                candidate.max(0.0)
+            } else {
+                0.0
+            };
         }
     }
 
@@ -291,9 +299,9 @@ pub fn spiral_softmax_hardmax_consensus(
 }
 
 #[cfg(test)]
-    mod tests {
-        use super::*;
-        use approx::assert_abs_diff_eq;
+mod tests {
+    use super::*;
+    use approx::assert_abs_diff_eq;
 
     #[test]
     fn ramanujan_cache_reuses_values() {

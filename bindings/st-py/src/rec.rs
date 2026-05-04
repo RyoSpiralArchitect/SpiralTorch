@@ -271,7 +271,7 @@ impl PyRecommender {
 
 #[cfg(feature = "rec")]
 fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
-    let module = PyModule::new_bound(py, "rec")?;
+    let module = PyModule::new(py, "rec")?;
     module.add_class::<PyQueryPlan>()?;
     module.add_class::<PyRecEpochReport>()?;
     module.add_class::<PyRecommender>()?;
@@ -300,7 +300,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     parent.add_submodule(&module)?;
     parent.add("rec", rec_module.clone_ref(py))?;
 
-    let sys = PyModule::import_bound(py, "sys")?;
+    let sys = PyModule::import(py, "sys")?;
     let modules: Bound<PyDict> = sys.getattr("modules")?.downcast_into()?;
     modules.set_item("spiraltorch.rec", rec_module.clone_ref(py))?;
     modules.set_item("rec", rec_module)?;
@@ -314,7 +314,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
 
 #[cfg(not(feature = "rec"))]
 fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
-    let module = PyModule::new_bound(py, "rec")?;
+    let module = PyModule::new(py, "rec")?;
     module.add("__doc__", "SpiralTorch recommendation toolkit")?;
     parent.add_submodule(&module)?;
     let rec_module = module.to_object(py);

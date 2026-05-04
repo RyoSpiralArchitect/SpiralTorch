@@ -98,7 +98,7 @@ impl Vocab {
         }
         let mut symbols = Vec::with_capacity(set.len() + 1);
         symbols.push(unk);
-        symbols.extend(set.into_iter());
+        symbols.extend(set);
         Self::from_symbols(unk, symbols)
     }
 

@@ -27,9 +27,9 @@ jobs:
             toolchain: stable
             run_lints: false
             run_upper_stack: true
-          - name: ubuntu / nightly
+          - name: ubuntu / lint
             os: ubuntu-latest
-            toolchain: nightly
+            toolchain: stable
             run_lints: true
             run_upper_stack: false
           - name: macos / stable
@@ -57,7 +57,9 @@ jobs:
           fi
       - name: rustfmt (workspace)
         if: matrix.run_lints
-        run: cargo fmt --all -- --check
+        run: |
+          rustup toolchain install nightly-2026-04-15 --profile minimal --component rustfmt
+          cargo +nightly-2026-04-15 fmt --all -- --check
       - name: clippy (workspace)
         if: matrix.run_lints
         run: cargo clippy --workspace --all-targets
@@ -93,9 +95,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: nightly
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - name: build tensor + wgpu
@@ -115,7 +116,6 @@ jobs:
 
   python-docs-smoke:
     name: python docs smoke (README + hello_session)
-    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -97,7 +97,7 @@ impl Default for ZSpaceGeometry {
 }
 
 /// Coupled geometry and gravity descriptors for Z-space dynamics.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ZSpaceDynamics {
     geometry: ZSpaceGeometry,
     gravity: Option<GravityField>,
@@ -114,15 +114,6 @@ impl ZSpaceDynamics {
 
     pub fn gravity(&self) -> Option<&GravityField> {
         self.gravity.as_ref()
-    }
-}
-
-impl Default for ZSpaceDynamics {
-    fn default() -> Self {
-        Self {
-            geometry: ZSpaceGeometry::default(),
-            gravity: None,
-        }
     }
 }
 

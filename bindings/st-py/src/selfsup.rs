@@ -20,7 +20,7 @@ fn info_nce(
     let result = contrastive::info_nce_loss(&anchors, &positives, temperature, normalize)
         .map_err(objective_err)?;
 
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("loss", result.loss)?;
     let mut rows = Vec::with_capacity(result.batch);
     for row in result.logits.chunks(result.batch) {
@@ -45,7 +45,7 @@ fn masked_mse(
     let result =
         masked::masked_mse_loss(&predictions, &targets, &mask_indices).map_err(objective_err)?;
 
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("loss", result.loss)?;
     dict.set_item("total_masked", result.total_masked)?;
     dict.set_item("per_example", result.per_example)?;

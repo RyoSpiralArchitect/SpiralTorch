@@ -108,7 +108,7 @@ impl LossStdTrigger {
         }
         let mut ratio = (self.ema / self.std_threshold) - 1.0;
         if self.geometry_eta > 0.0 {
-            let curvature_boost = self.geometry_curvature.tanh().abs() as f32;
+            let curvature_boost = self.geometry_curvature.tanh().abs();
             ratio *= 1.0 + self.geometry_eta * 0.5 + curvature_boost;
         }
         if ratio <= self.deadband {

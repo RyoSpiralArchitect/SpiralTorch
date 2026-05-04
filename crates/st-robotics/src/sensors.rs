@@ -37,7 +37,7 @@ struct SensorChannel {
 
 impl SensorChannel {
     fn new(dimension: usize) -> Self {
-        let channel = Self {
+        Self {
             dimension,
             bias: vec![0.0; dimension],
             scale: 1.0,
@@ -45,8 +45,7 @@ impl SensorChannel {
             optional: false,
             max_staleness: None,
             last_update: None,
-        };
-        channel
+        }
     }
 
     fn set_smoothing(&mut self, alpha: f32) -> Result<(), RoboticsError> {
@@ -318,7 +317,7 @@ mod tests {
         assert!((imu[0] - 0.2).abs() < 1e-6);
         assert!((imu[1] - 0.6).abs() < 1e-6);
         assert!((imu[2] - 0.4).abs() < 1e-6);
-        assert!(frame.health.get("imu").is_some());
+        assert!(frame.health.contains_key("imu"));
     }
 
     #[test]
@@ -334,7 +333,7 @@ mod tests {
             .unwrap();
         let value = frame.coordinates["imu"][0];
         assert!(value > 0.0 && value < 1.0);
-        assert_eq!(frame.health["imu"].stale, false);
+        assert!(!frame.health["imu"].stale);
     }
 
     #[test]

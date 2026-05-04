@@ -14,22 +14,22 @@ fn collect_tensors(py: Python<'_>, inputs: &Bound<'_, PyAny>) -> PyResult<Vec<Te
         return Ok(vec![handle.bind(py).borrow().inner.clone()]);
     }
 
-    let iter = PyIterator::from_bound_object(inputs).map_err(|_| {
+    let iter = PyIterator::from_object(inputs).map_err(|_| {
         PyTypeError::new_err("inputs must be a Tensor or an iterable of Tensor objects")
     })?;
     let mut out = Vec::new();
     for item in iter {
         let item = item?;
-        let handle: Py<PyTensor> = item.extract().map_err(|_| {
-            PyTypeError::new_err("inputs must contain only Tensor objects")
-        })?;
+        let handle: Py<PyTensor> = item
+            .extract()
+            .map_err(|_| PyTypeError::new_err("inputs must contain only Tensor objects"))?;
         out.push(handle.bind(py).borrow().inner.clone());
     }
     Ok(out)
 }
 
 fn tensors_to_pylist(py: Python<'_>, tensors: &[Tensor]) -> PyResult<PyObject> {
-    let list = PyList::empty_bound(py);
+    let list = PyList::empty(py);
     for tensor in tensors {
         list.append(Py::new(py, PyTensor::from_tensor(tensor.clone()))?)?;
     }
@@ -49,7 +49,7 @@ fn extract_output_tensors(py: Python<'_>, output: &Bound<'_, PyAny>) -> PyResult
         return Ok(tensors);
     }
 
-    let iter = PyIterator::from_bound_object(output)
+    let iter = PyIterator::from_object(output)
         .map_err(|_| PyTypeError::new_err("operator output must be a Tensor or iterable"))?;
     let mut tensors = Vec::new();
     for item in iter {
@@ -79,16 +79,15 @@ fn call_python_forward(
         for tensor in inputs {
             input_vec.push((*tensor).clone());
         }
-        let py_inputs = tensors_to_pylist(py, &input_vec).map_err(|err| {
-            TensorError::Generic(format!("failed to build input list: {err}"))
-        })?;
-        let callback = callback.lock().map_err(|_| {
-            TensorError::Generic("operator callback lock was poisoned".to_string())
-        })?;
+        let py_inputs = tensors_to_pylist(py, &input_vec)
+            .map_err(|err| TensorError::Generic(format!("failed to build input list: {err}")))?;
+        let callback = callback
+            .lock()
+            .map_err(|_| TensorError::Generic("operator callback lock was poisoned".to_string()))?;
         let result = callback
             .call1(py, (py_inputs,))
             .map_err(|err| pyerr_to_tensor(err, "operator forward"))?;
-        let output = extract_output_tensors(py, &result.bind(py))
+        let output = extract_output_tensors(py, result.bind(py))
             .map_err(|err| pyerr_to_tensor(err, "operator forward"))?;
         if expected_outputs > 0 && output.len() != expected_outputs {
             return Err(TensorError::Generic(format!(
@@ -127,13 +126,13 @@ fn call_python_backward(
             .map_err(|err| TensorError::Generic(format!("failed to build output list: {err}")))?;
         let py_grads = tensors_to_pylist(py, &grad_vec)
             .map_err(|err| TensorError::Generic(format!("failed to build grad list: {err}")))?;
-        let callback = callback.lock().map_err(|_| {
-            TensorError::Generic("operator callback lock was poisoned".to_string())
-        })?;
+        let callback = callback
+            .lock()
+            .map_err(|_| TensorError::Generic("operator callback lock was poisoned".to_string()))?;
         let result = callback
             .call1(py, (py_inputs, py_outputs, py_grads))
             .map_err(|err| pyerr_to_tensor(err, "operator backward"))?;
-        let grads = extract_output_tensors(py, &result.bind(py))
+        let grads = extract_output_tensors(py, result.bind(py))
             .map_err(|err| pyerr_to_tensor(err, "operator backward"))?;
         if expected_grads > 0 && grads.len() != expected_grads {
             return Err(TensorError::Generic(format!(
@@ -151,9 +150,9 @@ fn parse_attributes(attrs: Option<&Bound<'_, PyAny>>) -> PyResult<HashMap<String
     let Some(attrs) = attrs else {
         return Ok(map);
     };
-    let dict = attrs.downcast::<PyDict>().map_err(|_| {
-        PyTypeError::new_err("attributes must be a dict[str, str]")
-    })?;
+    let dict = attrs
+        .downcast::<PyDict>()
+        .map_err(|_| PyTypeError::new_err("attributes must be a dict[str, str]"))?;
     for (key, value) in dict.iter() {
         let key: String = key.extract()?;
         let value: String = value.extract().map_err(|_| {
@@ -204,10 +203,16 @@ fn register(
     let backward_fn = backward.map(|backward| {
         let backward_cb = Arc::new(Mutex::new(backward));
         let expected_grads = num_inputs;
-        Arc::new(move |inputs: &[&Tensor], outputs: &[&Tensor], grads: &[&Tensor]| {
-            call_python_backward(&backward_cb, inputs, outputs, grads, expected_grads)
-        })
-            as Arc<dyn Fn(&[&Tensor], &[&Tensor], &[&Tensor]) -> Result<Vec<Tensor>, TensorError> + Send + Sync>
+        Arc::new(
+            move |inputs: &[&Tensor], outputs: &[&Tensor], grads: &[&Tensor]| {
+                call_python_backward(&backward_cb, inputs, outputs, grads, expected_grads)
+            },
+        )
+            as Arc<
+                dyn Fn(&[&Tensor], &[&Tensor], &[&Tensor]) -> Result<Vec<Tensor>, TensorError>
+                    + Send
+                    + Sync,
+            >
     });
 
     let mut builder = OperatorBuilder::new(name, num_inputs, num_outputs);
@@ -242,7 +247,12 @@ fn register(
 
 #[pyfunction]
 #[pyo3(signature = (name, inputs, *, return_single=false))]
-fn execute(py: Python<'_>, name: &str, inputs: &Bound<'_, PyAny>, return_single: bool) -> PyResult<PyObject> {
+fn execute(
+    py: Python<'_>,
+    name: &str,
+    inputs: &Bound<'_, PyAny>,
+    return_single: bool,
+) -> PyResult<PyObject> {
     let tensors = collect_tensors(py, inputs)?;
     let refs: Vec<&Tensor> = tensors.iter().collect();
     let outputs = global_operator_registry()
@@ -251,7 +261,7 @@ fn execute(py: Python<'_>, name: &str, inputs: &Bound<'_, PyAny>, return_single:
     if return_single && outputs.len() == 1 {
         return Ok(Py::new(py, PyTensor::from_tensor(outputs[0].clone()))?.into_py(py));
     }
-    let list = PyList::empty_bound(py);
+    let list = PyList::empty(py);
     for output in outputs {
         list.append(Py::new(py, PyTensor::from_tensor(output))?)?;
     }
@@ -285,7 +295,7 @@ fn backward(
     if return_single && grads.len() == 1 {
         return Ok(Py::new(py, PyTensor::from_tensor(grads[0].clone()))?.into_py(py));
     }
-    let list = PyList::empty_bound(py);
+    let list = PyList::empty(py);
     for grad in grads {
         list.append(Py::new(py, PyTensor::from_tensor(grad))?)?;
     }
@@ -304,7 +314,7 @@ fn unregister(name: &str) -> bool {
 
 fn metadata_dict(py: Python<'_>, operator: &RegisteredOperator) -> PyResult<PyObject> {
     let meta = operator.metadata();
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("name", meta.signature.name.clone())?;
     dict.set_item("num_inputs", meta.signature.num_inputs)?;
     dict.set_item("num_outputs", meta.signature.num_outputs)?;
@@ -325,7 +335,7 @@ fn metadata(py: Python<'_>, name: &str) -> PyResult<PyObject> {
 }
 
 pub(crate) fn register_module(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
-    let module = PyModule::new_bound(py, "ops")?;
+    let module = PyModule::new(py, "ops")?;
     module.add("__doc__", "Custom operator registry (Python callbacks)")?;
     module.add_function(wrap_pyfunction!(register, &module)?)?;
     module.add_function(wrap_pyfunction!(execute, &module)?)?;

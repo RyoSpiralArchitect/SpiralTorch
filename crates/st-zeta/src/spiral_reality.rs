@@ -154,7 +154,7 @@ impl SatInstance {
         Self {
             n,
             clauses,
-            is_sat: (seed % 3) != 0, // Mostly UNSAT
+            is_sat: !seed.is_multiple_of(3), // Mostly UNSAT
             instance_id: seed + 1000000,
         }
     }

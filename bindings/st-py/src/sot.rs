@@ -161,10 +161,9 @@ fn pack_with_sequence(length: usize, order: usize, seeds: &[usize]) -> Vec<usize
         let mut best_score = (best as f64 - target).abs();
         for &candidate in &options[1..] {
             let score = (candidate as f64 - target).abs();
-            if score < best_score - f64::EPSILON {
-                best = candidate;
-                best_score = score;
-            } else if (score - best_score).abs() <= f64::EPSILON && candidate > best {
+            if score < best_score - f64::EPSILON
+                || ((score - best_score).abs() <= f64::EPSILON && candidate > best)
+            {
                 best = candidate;
                 best_score = score;
             }
@@ -262,8 +261,11 @@ pub(crate) fn build_plan(total_steps: usize, params: Sot3DParams) -> PyResult<Py
                         curvature_factor / radius.abs()
                     };
 
-                    macro_curvature_acc +=
-                        curvature.is_finite().then_some(curvature).unwrap_or(0.0);
+                    macro_curvature_acc += if curvature.is_finite() {
+                        curvature
+                    } else {
+                        0.0
+                    };
 
                     steps.push(Sot3DStep {
                         index: step_index,
@@ -515,7 +517,7 @@ impl PySoT3DStep {
     }
 
     fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         dict.set_item("index", self.step.index)?;
         dict.set_item("angle", self.step.angle)?;
         dict.set_item("radius", self.step.radius)?;
@@ -524,14 +526,14 @@ impl PySoT3DStep {
         dict.set_item("height", self.step.height)?;
         dict.set_item("z_track", self.step.z_track)?;
         dict.set_item("curvature", self.step.curvature)?;
-        let macro_info = PyDict::new_bound(py);
+        let macro_info = PyDict::new(py);
         macro_info.set_item("index", self.step.macro_index)?;
         macro_info.set_item("length", self.step.macro_length)?;
         macro_info.set_item("position", self.step.macro_position)?;
         macro_info.set_item("phase", self.step.macro_phase)?;
         macro_info.set_item("reflection", self.step.macro_reflection)?;
         dict.set_item("macro", macro_info)?;
-        let meso_info = PyDict::new_bound(py);
+        let meso_info = PyDict::new(py);
         meso_info.set_item("index", self.step.meso_index)?;
         meso_info.set_item("length", self.step.meso_length)?;
         meso_info.set_item("position", self.step.meso_position)?;
@@ -540,7 +542,7 @@ impl PySoT3DStep {
         meso_info.set_item("role_index", self.step.meso_role_index)?;
         meso_info.set_item("reflection", self.step.meso_reflection)?;
         dict.set_item("meso", meso_info)?;
-        let micro_info = PyDict::new_bound(py);
+        let micro_info = PyDict::new(py);
         micro_info.set_item("index", self.step.micro_index)?;
         micro_info.set_item("length", self.step.micro_length)?;
         micro_info.set_item("position", self.step.micro_position)?;
@@ -609,7 +611,7 @@ impl PyMacroSummary {
     }
 
     fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         dict.set_item("index", self.summary.index)?;
         dict.set_item("start", self.summary.start)?;
         dict.set_item("length", self.summary.length)?;
@@ -721,9 +723,7 @@ impl PySoT3DPlan {
         include_reflections: bool,
         include_roles: bool,
     ) -> Result<Tensor, st_tensor::TensorError> {
-        let cols = 11
-            + if include_roles { 2 } else { 0 }
-            + if include_reflections { 3 } else { 0 };
+        let cols = 11 + if include_roles { 2 } else { 0 } + if include_reflections { 3 } else { 0 };
         if self.steps.is_empty() {
             return Tensor::from_vec(0, cols, Vec::new());
         }

@@ -467,10 +467,7 @@ impl LatencyAlignerState {
         }
 
         if pulse.latency_ms.is_finite() && pulse.latency_ms.abs() > f32::EPSILON {
-            let entry = self
-                .lags
-                .entry(pulse.source)
-                .or_default();
+            let entry = self.lags.entry(pulse.source).or_default();
             entry.lag = pulse.latency_ms;
             entry.frames_since_update = 0;
             entry.seeded = true;

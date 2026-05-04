@@ -111,11 +111,11 @@ pub fn info_nce_loss(
 
     if normalize {
         for (idx, vec) in anchors.iter().enumerate() {
-            let norm = l2_norm(vec).max(std::f32::EPSILON);
+            let norm = l2_norm(vec).max(f32::EPSILON);
             anchor_norms[idx] = norm;
         }
         for (idx, vec) in positives.iter().enumerate() {
-            let norm = l2_norm(vec).max(std::f32::EPSILON);
+            let norm = l2_norm(vec).max(f32::EPSILON);
             positive_norms[idx] = norm;
         }
     }
@@ -177,11 +177,11 @@ pub fn info_nce_loss_tensor(
 
     if normalize {
         for (idx, chunk) in anchor_data.chunks_exact(feature_dim).enumerate() {
-            let norm = l2_norm(chunk).max(std::f32::EPSILON);
+            let norm = l2_norm(chunk).max(f32::EPSILON);
             anchor_norms[idx] = norm;
         }
         for (idx, chunk) in positive_data.chunks_exact(feature_dim).enumerate() {
-            let norm = l2_norm(chunk).max(std::f32::EPSILON);
+            let norm = l2_norm(chunk).max(f32::EPSILON);
             positive_norms[idx] = norm;
         }
     }
@@ -285,7 +285,7 @@ fn compute_logits(
         feature_dim,
         batch,
     )
-    .map_err(|message| ObjectiveError::Shape(message))?;
+    .map_err(ObjectiveError::Shape)?;
     Ok(logits)
 }
 
