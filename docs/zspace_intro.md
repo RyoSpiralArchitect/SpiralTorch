@@ -134,6 +134,26 @@ For shell workflows, `examples/zspace_experiment_cockpit.py` reads the same
 manifest and writes a static HTML cockpit that links back to the trace viewer,
 Atlas non-collapse view, JSONL trace, and original artifact manifest.
 
+When a cleanup or backend comparison produces several manifests, collect them
+into one comparison index:
+
+```python
+index = st.summarize_zspace_experiment_index(
+    ["run_a.artifacts.json", "run_b.artifacts.json"]
+)
+index_html = st.write_zspace_experiment_index_html(
+    ["run_a.artifacts.json", "run_b.artifacts.json"],
+    "zspace_experiments.index.html",
+)
+
+print(index["summary"]["planner_backends"])
+print(index_html)
+```
+
+For shell workflows, `examples/zspace_experiment_index.py` writes the same
+static index page and keeps links back to each run's trace viewer, Atlas
+non-collapse view, and artifact manifest.
+
 ### Importing external weights
 
 Warm-starting from other ecosystems hinges on the DLPack bridges:
