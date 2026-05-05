@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 import math
 import os
@@ -12,6 +13,8 @@ __all__ = [
     "load_zspace_artifact_manifest",
     "build_zspace_planner_snapshot",
     "write_zspace_experiment_artifacts",
+    "summarize_zspace_experiment_manifest",
+    "write_zspace_experiment_cockpit_html",
     "build_zspace_downstream_hook",
     "build_desire_adapter_from_downstream_hook",
     "desire_step_from_downstream_hook",
@@ -395,6 +398,490 @@ def _coerce_downstream_hook(hook_or_manifest: Mapping[str, Any] | str | Path) ->
     if isinstance(downstream, Mapping):
         return dict(downstream)
     return build_zspace_downstream_hook(payload)
+
+
+def _coerce_mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _coerce_float(value: Any, default: float = 0.0) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return default
+    return numeric if math.isfinite(numeric) else default
+
+
+def _coerce_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _views_from_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    views = _coerce_mapping(manifest.get("views"))
+    for key in (
+        "trace_jsonl",
+        "trace_html",
+        "atlas_noncollapse_html",
+        "artifact_manifest",
+    ):
+        if key in manifest and key not in views:
+            views[key] = manifest.get(key)
+    return views
+
+
+def _planner_story(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    planner = _coerce_mapping(manifest.get("planner_snapshot"))
+    device_report = _coerce_mapping(planner.get("device_report"))
+    rank_plan = _coerce_mapping(planner.get("rank_plan"))
+    shape = _coerce_mapping(planner.get("shape"))
+    requested_backend = str(
+        rank_plan.get("requested_backend")
+        or planner.get("backend")
+        or device_report.get("backend")
+        or "unknown"
+    )
+    effective_backend = str(
+        rank_plan.get("effective_backend")
+        or device_report.get("planner_surrogate_backend")
+        or device_report.get("backend")
+        or "unknown"
+    )
+    route = str(
+        device_report.get("planner_route")
+        or rank_plan.get("strategy")
+        or effective_backend
+    )
+    errors = _coerce_focus_items(planner.get("errors", []))
+
+    return {
+        "available": bool(planner.get("available", bool(device_report or rank_plan))),
+        "requested_backend": requested_backend,
+        "effective_backend": effective_backend,
+        "route": route,
+        "shape": {
+            "rows": shape.get("rows"),
+            "cols": shape.get("cols"),
+            "k": shape.get("k"),
+        },
+        "device_report": device_report,
+        "rank_plan": rank_plan,
+        "errors": errors,
+    }
+
+
+def _trim_focus(items: Sequence[Mapping[str, Any]], top_k: int) -> list[dict[str, Any]]:
+    limit = max(0, int(top_k))
+    focus = [dict(item) for item in items]
+    return focus if limit == 0 else focus[:limit]
+
+
+def _story_card(kind: str, title: str, body: str, **extra: Any) -> dict[str, Any]:
+    payload = {
+        "kind": kind,
+        "title": title,
+        "body": body,
+    }
+    payload.update(extra)
+    return payload
+
+
+def summarize_zspace_experiment_manifest(
+    manifest_or_path: Mapping[str, Any] | str | Path,
+    *,
+    top_k: int = 6,
+) -> dict[str, Any]:
+    """Summarize a Z-space experiment manifest into one portable story packet."""
+
+    manifest = _coerce_manifest(manifest_or_path)
+    hook = _coerce_downstream_hook(manifest)
+    summary = _coerce_mapping(manifest.get("summary"))
+    signals = _coerce_mapping(hook.get("signals"))
+    downstream_summary = _coerce_mapping(hook.get("summary"))
+    planner = _planner_story(manifest)
+    top_focus = _trim_focus(_coerce_focus_items(hook.get("top_focus", [])), top_k)
+    stage_focus = _trim_focus(_coerce_focus_items(hook.get("stage_focus", [])), top_k)
+    candidate = _coerce_mapping(hook.get("desire_candidate"))
+    views = _views_from_manifest(manifest)
+
+    frames = _coerce_int(summary.get("frames", downstream_summary.get("frames", 0)))
+    total_notes = _coerce_int(summary.get("total_notes", downstream_summary.get("total_notes", 0)))
+    guidance = str(
+        downstream_summary.get("guidance")
+        or candidate.get("guidance")
+        or _coerce_mapping(manifest.get("noncollapse_perspective")).get("guidance")
+        or ""
+    )
+    phase_hint = candidate.get("phase_hint")
+    focus_metric = candidate.get("focus_metric") or (top_focus[0].get("name") if top_focus else None)
+    stability = _coerce_float(signals.get("stability", candidate.get("stability_signal", 0.0)))
+    momentum = _coerce_float(signals.get("momentum", candidate.get("momentum_signal", 0.0)))
+    delta = _coerce_float(signals.get("delta", candidate.get("delta_signal", 0.0)))
+
+    title = str(manifest.get("title") or "SpiralTorch Z-Space Experiment")
+    story = [
+        _story_card(
+            "run",
+            "Run",
+            f"{title}: {frames} trace frame(s), {total_notes} Atlas note(s).",
+            frames=frames,
+            total_notes=total_notes,
+        ),
+        _story_card(
+            "planner",
+            "Planner",
+            (
+                f"{planner['requested_backend']} routed as "
+                f"{planner['effective_backend']} via {planner['route']}."
+            ),
+            requested_backend=planner["requested_backend"],
+            effective_backend=planner["effective_backend"],
+            route=planner["route"],
+            available=planner["available"],
+        ),
+        _story_card(
+            "noncollapse",
+            "Non-Collapse",
+            (
+                f"stability {stability:.3f}, momentum {momentum:+.3f}, "
+                f"delta {delta:+.3f}."
+            ),
+            stability=stability,
+            momentum=momentum,
+            delta=delta,
+            phase_hint=phase_hint,
+            focus_metric=focus_metric,
+        ),
+    ]
+    if guidance:
+        story.append(
+            _story_card(
+                "guidance",
+                "Guidance",
+                guidance,
+            )
+        )
+    if focus_metric:
+        story.append(
+            _story_card(
+                "focus",
+                "Focus",
+                f"primary focus metric: {focus_metric}",
+                focus_metric=focus_metric,
+            )
+        )
+
+    return {
+        "kind": "spiraltorch.zspace_experiment_story",
+        "schema": "spiraltorch.zspace_experiment_story",
+        "schema_version": 1,
+        "title": title,
+        "created_at": manifest.get("created_at"),
+        "artifact_manifest": manifest.get("artifact_manifest"),
+        "views": views,
+        "summary": {
+            "frames": frames,
+            "total_notes": total_notes,
+            "guidance": guidance,
+        },
+        "planner": planner,
+        "noncollapse": {
+            "signals": {
+                "coverage": _coerce_int(signals.get("coverage", 0)),
+                "mean": _coerce_float(signals.get("mean", 0.0)),
+                "latest": _coerce_float(signals.get("latest", 0.0)),
+                "delta": delta,
+                "momentum": momentum,
+                "volatility": _coerce_float(signals.get("volatility", 0.0)),
+                "stability": stability,
+            },
+            "stage_focus": stage_focus,
+            "top_focus": top_focus,
+            "phase_hint": phase_hint,
+            "focus_metric": focus_metric,
+        },
+        "downstream_hook": hook,
+        "story": story,
+    }
+
+
+def _html_escape(value: Any) -> str:
+    return html.escape("" if value is None else str(value), quote=True)
+
+
+def _format_focus_value(item: Mapping[str, Any]) -> str:
+    latest = item.get("latest")
+    try:
+        return f"{float(latest):.3f}"
+    except (TypeError, ValueError):
+        return _html_escape(latest)
+
+
+def write_zspace_experiment_cockpit_html(
+    manifest_or_path: Mapping[str, Any] | str | Path,
+    html_path: str | Path | None = None,
+    *,
+    title: str | None = None,
+    top_k: int = 6,
+) -> str:
+    """Render a compact HTML cockpit for a Z-space experiment manifest."""
+
+    story = summarize_zspace_experiment_manifest(manifest_or_path, top_k=top_k)
+    manifest_path = story.get("artifact_manifest")
+    if html_path is None:
+        if manifest_path:
+            html_path = Path(str(manifest_path)).with_suffix(".cockpit.html")
+        else:
+            html_path = Path("zspace_experiment.cockpit.html")
+    out_path = Path(html_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    page_title = str(title or story.get("title") or "SpiralTorch Z-Space Experiment")
+    story_json = json.dumps(story, ensure_ascii=True)
+    links = [
+        (label, href)
+        for label, href in (
+            ("Trace JSONL", story["views"].get("trace_jsonl")),
+            ("Trace Viewer", story["views"].get("trace_html")),
+            ("Atlas Non-Collapse", story["views"].get("atlas_noncollapse_html")),
+            ("Artifact Manifest", story["views"].get("artifact_manifest")),
+        )
+        if href
+    ]
+    link_html = "\n".join(
+        f'<a href="{_html_escape(href)}">{_html_escape(label)}</a>' for label, href in links
+    )
+    card_html = "\n".join(
+        "<section class=\"card\">"
+        f"<p>{_html_escape(card.get('title'))}</p>"
+        f"<strong>{_html_escape(card.get('body'))}</strong>"
+        "</section>"
+        for card in story.get("story", [])
+        if isinstance(card, Mapping)
+    )
+    focus_html = "\n".join(
+        "<tr>"
+        f"<td>{_html_escape(item.get('name'))}</td>"
+        f"<td>{_format_focus_value(item)}</td>"
+        f"<td>{_html_escape(item.get('coverage', ''))}</td>"
+        "</tr>"
+        for item in story["noncollapse"].get("top_focus", [])
+        if isinstance(item, Mapping)
+    )
+    stage_html = "\n".join(
+        "<tr>"
+        f"<td>{_html_escape(item.get('stage', item.get('name')))}</td>"
+        f"<td>{_format_focus_value(item)}</td>"
+        f"<td>{_html_escape(item.get('coverage', ''))}</td>"
+        "</tr>"
+        for item in story["noncollapse"].get("stage_focus", [])
+        if isinstance(item, Mapping)
+    )
+    planner = story["planner"]
+    planner_shape = planner.get("shape", {})
+    device_report = planner.get("device_report", {})
+    rank_plan = planner.get("rank_plan", {})
+
+    html_doc = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{_html_escape(page_title)}</title>
+  <style>
+    :root {{
+      color-scheme: dark;
+      --bg: #0b0f14;
+      --panel: #131923;
+      --panel-2: #192231;
+      --text: #edf4ff;
+      --muted: #9fb2c8;
+      --accent: #6ee7b7;
+      --border: rgba(255,255,255,.1);
+    }}
+    body {{
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      background: var(--bg);
+      color: var(--text);
+    }}
+    header {{
+      padding: 20px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, rgba(110,231,183,.09), rgba(0,0,0,0));
+    }}
+    h1 {{
+      margin: 0;
+      font-size: 18px;
+      letter-spacing: 0;
+    }}
+    header p, .muted {{
+      color: var(--muted);
+      font-size: 12px;
+    }}
+    nav {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }}
+    nav a {{
+      color: var(--accent);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 9px;
+      text-decoration: none;
+      background: rgba(110,231,183,.08);
+      font-size: 12px;
+    }}
+    main {{
+      display: grid;
+      grid-template-columns: minmax(260px, 360px) 1fr;
+      gap: 14px;
+      padding: 14px;
+    }}
+    section {{
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+    }}
+    h2 {{
+      margin: 0 0 10px;
+      font-size: 14px;
+      letter-spacing: 0;
+    }}
+    .cards {{
+      display: grid;
+      gap: 8px;
+    }}
+    .card {{
+      background: var(--panel-2);
+      border-radius: 8px;
+      padding: 10px;
+    }}
+    .card p {{
+      margin: 0 0 4px;
+      color: var(--muted);
+      font-size: 11px;
+    }}
+    .card strong {{
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 1.35;
+    }}
+    .grid {{
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }}
+    .kv {{
+      background: var(--panel-2);
+      border-radius: 8px;
+      padding: 8px;
+      min-width: 0;
+    }}
+    .kv span {{
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+    }}
+    .kv strong {{
+      display: block;
+      overflow-wrap: anywhere;
+      font-size: 13px;
+      margin-top: 3px;
+    }}
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }}
+    th, td {{
+      padding: 7px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      vertical-align: top;
+      overflow-wrap: anywhere;
+    }}
+    th {{
+      color: var(--muted);
+      font-weight: 600;
+    }}
+    pre {{
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      max-height: 340px;
+      overflow: auto;
+      background: var(--panel-2);
+      border-radius: 8px;
+      padding: 10px;
+      font-size: 11px;
+      color: #d8e6fb;
+    }}
+    @media (max-width: 820px) {{
+      main {{
+        grid-template-columns: 1fr;
+      }}
+      .grid {{
+        grid-template-columns: 1fr;
+      }}
+    }}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>{_html_escape(page_title)}</h1>
+    <p>{_html_escape(story.get("created_at") or "manifest story")}</p>
+    <nav>{link_html}</nav>
+  </header>
+  <main>
+    <div class="cards">
+      {card_html}
+      <section>
+        <h2>Planner Snapshot</h2>
+        <div class="grid">
+          <div class="kv"><span>requested</span><strong>{_html_escape(planner.get("requested_backend"))}</strong></div>
+          <div class="kv"><span>effective</span><strong>{_html_escape(planner.get("effective_backend"))}</strong></div>
+          <div class="kv"><span>route</span><strong>{_html_escape(planner.get("route"))}</strong></div>
+          <div class="kv"><span>shape</span><strong>{_html_escape(planner_shape)}</strong></div>
+        </div>
+      </section>
+    </div>
+    <div class="cards">
+      <section>
+        <h2>Top Focus</h2>
+        <table>
+          <thead><tr><th>metric</th><th>latest</th><th>coverage</th></tr></thead>
+          <tbody>{focus_html}</tbody>
+        </table>
+      </section>
+      <section>
+        <h2>Stage Focus</h2>
+        <table>
+          <thead><tr><th>stage</th><th>latest</th><th>coverage</th></tr></thead>
+          <tbody>{stage_html}</tbody>
+        </table>
+      </section>
+      <section>
+        <h2>Raw Planner Payload</h2>
+        <pre>{_html_escape(json.dumps({"device_report": device_report, "rank_plan": rank_plan}, indent=2, ensure_ascii=False))}</pre>
+      </section>
+      <section>
+        <h2>Story Packet</h2>
+        <pre id="story-json">{_html_escape(json.dumps(story, indent=2, ensure_ascii=False))}</pre>
+      </section>
+    </div>
+  </main>
+  <script type="application/json" id="zspace-story">{_html_escape(story_json)}</script>
+</body>
+</html>
+"""
+    out_path.write_text(html_doc, encoding="utf-8")
+    return str(out_path)
 
 
 def _clamp(value: float, low: float, high: float) -> float:

@@ -117,6 +117,23 @@ The standalone helper `examples/zspace_trace_export_artifacts.py` uses the same
 API, so generated traces from Rust examples and Python notebooks share the same
 manifest shape.
 
+Once a manifest exists, the reader side can turn it back into a compact story
+packet or a cockpit page:
+
+```python
+story = st.summarize_zspace_experiment_manifest("spiraltorch_zspace_trace.artifacts.json")
+cockpit = st.write_zspace_experiment_cockpit_html(
+    "spiraltorch_zspace_trace.artifacts.json"
+)
+
+print(story["planner"]["effective_backend"])
+print(cockpit)
+```
+
+For shell workflows, `examples/zspace_experiment_cockpit.py` reads the same
+manifest and writes a static HTML cockpit that links back to the trace viewer,
+Atlas non-collapse view, JSONL trace, and original artifact manifest.
+
 ### Importing external weights
 
 Warm-starting from other ecosystems hinges on the DLPack bridges:
