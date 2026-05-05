@@ -17,6 +17,8 @@ from spiraltorch.zspace_artifacts import (
     desire_step_from_downstream_hook,
     load_zspace_artifact_manifest,
     run_desire_geometry_bias_validation,
+    summarize_zspace_experiment_manifest,
+    write_zspace_experiment_cockpit_html,
     write_zspace_experiment_artifacts,
 )
 from spiraltorch.zspace_trace import load_zspace_trace_events, write_zspace_trace_html
@@ -544,6 +546,119 @@ def test_write_zspace_experiment_artifacts_writes_manifest_with_planner_snapshot
     assert loaded["downstream_hook"]["views"]["artifact_manifest"] == str(
         tmp_path / "trace.artifacts.json"
     )
+
+
+def test_summarize_zspace_experiment_manifest_builds_story() -> None:
+    manifest = {
+        "kind": "spiraltorch.zspace_experiment_manifest",
+        "title": "Planner-backed trace",
+        "created_at": "2026-05-05T00:00:00+00:00",
+        "views": {
+            "trace_jsonl": "/tmp/trace.jsonl",
+            "trace_html": "/tmp/trace.html",
+            "atlas_noncollapse_html": "/tmp/trace.atlas_noncollapse.html",
+            "artifact_manifest": "/tmp/trace.artifacts.json",
+        },
+        "summary": {"frames": 3, "total_notes": 7},
+        "planner_snapshot": {
+            "kind": "spiraltorch.zspace_planner_snapshot",
+            "backend": "auto",
+            "available": True,
+            "shape": {"rows": 4, "cols": 64, "k": 2},
+            "device_report": {
+                "backend": "wgpu",
+                "planner_route": "metal-via-wgpu",
+                "lane_width": 32,
+            },
+            "rank_plan": {
+                "kind": "topk",
+                "requested_backend": "auto",
+                "effective_backend": "wgpu",
+                "workgroup": 128,
+            },
+        },
+        "noncollapse_perspective": {
+            "coverage": 3,
+            "mean": 0.61,
+            "latest": 0.88,
+            "delta": 0.06,
+            "momentum": 0.24,
+            "volatility": 0.03,
+            "stability": 0.94,
+            "guidance": "lean into integration when stability is high",
+            "focus": [
+                {"name": "noncollapse.stage.integration", "latest": 1.0, "coverage": 3},
+                {"name": "noncollapse.z_bias", "latest": 0.38, "coverage": 3},
+                {"name": "noncollapse.preserved_ratio", "latest": 0.25, "coverage": 2},
+            ],
+        },
+    }
+
+    story = summarize_zspace_experiment_manifest(manifest, top_k=1)
+
+    assert story["kind"] == "spiraltorch.zspace_experiment_story"
+    assert story["title"] == "Planner-backed trace"
+    assert story["summary"]["frames"] == 3
+    assert story["planner"]["requested_backend"] == "auto"
+    assert story["planner"]["effective_backend"] == "wgpu"
+    assert story["planner"]["route"] == "metal-via-wgpu"
+    assert story["noncollapse"]["signals"]["stability"] == pytest.approx(0.94)
+    assert story["noncollapse"]["phase_hint"] == "integration"
+    assert story["noncollapse"]["focus_metric"] == "noncollapse.z_bias"
+    assert len(story["noncollapse"]["top_focus"]) == 1
+    assert story["noncollapse"]["top_focus"][0]["name"] == "noncollapse.z_bias"
+    assert any(card["kind"] == "guidance" for card in story["story"])
+
+
+def test_write_zspace_experiment_cockpit_html_renders_story_and_links(tmp_path) -> None:
+    manifest_path = tmp_path / "trace.artifacts.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "kind": "spiraltorch.zspace_experiment_manifest",
+                "title": "Cockpit packet",
+                "trace_jsonl": "trace.jsonl",
+                "trace_html": "trace.html",
+                "atlas_noncollapse_html": "trace.atlas_noncollapse.html",
+                "artifact_manifest": str(manifest_path),
+                "summary": {"frames": 2, "total_notes": 5},
+                "planner_snapshot": {
+                    "backend": "auto",
+                    "available": True,
+                    "shape": {"rows": 4, "cols": 64, "k": 2},
+                    "device_report": {"backend": "wgpu", "planner_route": "wgpu"},
+                    "rank_plan": {"effective_backend": "wgpu", "workgroup": 128},
+                },
+                "noncollapse_perspective": {
+                    "coverage": 2,
+                    "stability": 0.91,
+                    "momentum": 0.12,
+                    "delta": 0.03,
+                    "guidance": "keep the trace readable",
+                    "focus": [
+                        {"name": "noncollapse.stage.pre_discard", "latest": 1.0},
+                        {"name": "noncollapse.preserved_ratio", "latest": 0.25},
+                    ],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    html_path = write_zspace_experiment_cockpit_html(
+        manifest_path,
+        tmp_path / "trace.cockpit.html",
+    )
+    html = (tmp_path / "trace.cockpit.html").read_text(encoding="utf-8")
+
+    assert html_path.endswith("trace.cockpit.html")
+    assert "Cockpit packet" in html
+    assert "Planner Snapshot" in html
+    assert "Top Focus" in html
+    assert "noncollapse.preserved_ratio" in html
+    assert "Trace Viewer" in html
+    assert "trace.html" in html
+    assert 'id="zspace-story"' in html
 
 
 def test_build_desire_adapter_from_downstream_hook_maps_gain_and_bias(tmp_path) -> None:
