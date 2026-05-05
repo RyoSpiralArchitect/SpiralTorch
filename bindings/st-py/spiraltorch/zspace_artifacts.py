@@ -15,6 +15,8 @@ __all__ = [
     "write_zspace_experiment_artifacts",
     "summarize_zspace_experiment_manifest",
     "write_zspace_experiment_cockpit_html",
+    "summarize_zspace_experiment_index",
+    "write_zspace_experiment_index_html",
     "build_zspace_downstream_hook",
     "build_desire_adapter_from_downstream_hook",
     "desire_step_from_downstream_hook",
@@ -619,6 +621,105 @@ def _format_focus_value(item: Mapping[str, Any]) -> str:
         return _html_escape(latest)
 
 
+def _count_strings(values: Sequence[Any]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for value in values:
+        label = str(value or "unknown")
+        counts[label] = counts.get(label, 0) + 1
+    return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0])))
+
+
+def _mean_or_none(values: Sequence[float]) -> float | None:
+    finite = [float(value) for value in values if math.isfinite(float(value))]
+    if not finite:
+        return None
+    return sum(finite) / len(finite)
+
+
+def _experiment_run_digest(story: Mapping[str, Any]) -> dict[str, Any]:
+    summary = _coerce_mapping(story.get("summary"))
+    planner = _coerce_mapping(story.get("planner"))
+    noncollapse = _coerce_mapping(story.get("noncollapse"))
+    signals = _coerce_mapping(noncollapse.get("signals"))
+    views = _coerce_mapping(story.get("views"))
+
+    return {
+        "title": story.get("title") or "SpiralTorch Z-Space Experiment",
+        "created_at": story.get("created_at"),
+        "artifact_manifest": story.get("artifact_manifest") or views.get("artifact_manifest"),
+        "views": views,
+        "summary": {
+            "frames": _coerce_int(summary.get("frames", 0)),
+            "total_notes": _coerce_int(summary.get("total_notes", 0)),
+            "guidance": str(summary.get("guidance") or ""),
+        },
+        "planner": {
+            "available": bool(planner.get("available", False)),
+            "requested_backend": planner.get("requested_backend") or "unknown",
+            "effective_backend": planner.get("effective_backend") or "unknown",
+            "route": planner.get("route") or "unknown",
+            "shape": _coerce_mapping(planner.get("shape")),
+        },
+        "noncollapse": {
+            "stability": _coerce_float(signals.get("stability", 0.0)),
+            "momentum": _coerce_float(signals.get("momentum", 0.0)),
+            "delta": _coerce_float(signals.get("delta", 0.0)),
+            "phase_hint": noncollapse.get("phase_hint"),
+            "focus_metric": noncollapse.get("focus_metric") or "unknown",
+            "top_focus": _coerce_focus_items(noncollapse.get("top_focus", [])),
+        },
+    }
+
+
+def summarize_zspace_experiment_index(
+    manifests: Sequence[Mapping[str, Any] | str | Path],
+    *,
+    top_k: int = 6,
+    title: str = "SpiralTorch Z-Space Experiment Index",
+) -> dict[str, Any]:
+    """Summarize multiple Z-space experiment manifests into a comparison index."""
+
+    if isinstance(manifests, (str, bytes, Path)):
+        raise TypeError("manifests must be a sequence of manifest mappings or paths")
+
+    stories = [
+        summarize_zspace_experiment_manifest(manifest, top_k=top_k)
+        for manifest in manifests
+    ]
+    runs = [_experiment_run_digest(story) for story in stories]
+    total_frames = sum(_coerce_int(run["summary"].get("frames", 0)) for run in runs)
+    total_notes = sum(_coerce_int(run["summary"].get("total_notes", 0)) for run in runs)
+    stability_values = [
+        _coerce_float(run["noncollapse"].get("stability", 0.0))
+        for run in runs
+    ]
+
+    return {
+        "kind": "spiraltorch.zspace_experiment_index",
+        "schema": "spiraltorch.zspace_experiment_index",
+        "schema_version": 1,
+        "title": str(title),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "summary": {
+            "runs": len(runs),
+            "total_frames": total_frames,
+            "total_notes": total_notes,
+            "planner_backends": _count_strings(
+                [run["planner"].get("effective_backend") for run in runs]
+            ),
+            "planner_routes": _count_strings(
+                [run["planner"].get("route") for run in runs]
+            ),
+            "focus_metrics": _count_strings(
+                [run["noncollapse"].get("focus_metric") for run in runs]
+            ),
+            "mean_stability": _mean_or_none(stability_values),
+            "latest_stability": stability_values[-1] if stability_values else None,
+        },
+        "runs": runs,
+    }
+
+
 def write_zspace_experiment_cockpit_html(
     manifest_or_path: Mapping[str, Any] | str | Path,
     html_path: str | Path | None = None,
@@ -877,6 +978,243 @@ def write_zspace_experiment_cockpit_html(
     </div>
   </main>
   <script type="application/json" id="zspace-story">{_html_escape(story_json)}</script>
+</body>
+</html>
+"""
+    out_path.write_text(html_doc, encoding="utf-8")
+    return str(out_path)
+
+
+def _format_optional_float(value: Any) -> str:
+    if value is None:
+        return "n/a"
+    try:
+        return f"{float(value):.3f}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _index_run_links(run: Mapping[str, Any]) -> str:
+    views = _coerce_mapping(run.get("views"))
+    links = [
+        ("Cockpit", views.get("cockpit_html") or views.get("experiment_cockpit_html")),
+        ("Trace Viewer", views.get("trace_html")),
+        ("Atlas Non-Collapse", views.get("atlas_noncollapse_html")),
+        ("Manifest", run.get("artifact_manifest") or views.get("artifact_manifest")),
+    ]
+    return " ".join(
+        f'<a href="{_html_escape(href)}">{_html_escape(label)}</a>'
+        for label, href in links
+        if href
+    )
+
+
+def _format_counts(counts: Mapping[str, Any]) -> str:
+    if not counts:
+        return "n/a"
+    return ", ".join(
+        f"{label} ({_coerce_int(count)})"
+        for label, count in counts.items()
+    )
+
+
+def write_zspace_experiment_index_html(
+    manifests: Sequence[Mapping[str, Any] | str | Path],
+    html_path: str | Path | None = None,
+    *,
+    title: str = "SpiralTorch Z-Space Experiment Index",
+    top_k: int = 6,
+) -> str:
+    """Render a static HTML index comparing multiple Z-space experiment manifests."""
+
+    index = summarize_zspace_experiment_index(manifests, top_k=top_k, title=title)
+    out_path = Path(html_path) if html_path is not None else Path("zspace_experiment.index.html")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    page_title = str(index.get("title") or title)
+    summary = _coerce_mapping(index.get("summary"))
+    index_json = json.dumps(index, ensure_ascii=True)
+    stat_html = "\n".join(
+        "<section class=\"stat\">"
+        f"<span>{_html_escape(label)}</span>"
+        f"<strong>{_html_escape(value)}</strong>"
+        "</section>"
+        for label, value in (
+            ("runs", summary.get("runs", 0)),
+            ("frames", summary.get("total_frames", 0)),
+            ("notes", summary.get("total_notes", 0)),
+            ("mean stability", _format_optional_float(summary.get("mean_stability"))),
+            ("latest stability", _format_optional_float(summary.get("latest_stability"))),
+            ("backends", _format_counts(_coerce_mapping(summary.get("planner_backends")))),
+        )
+    )
+    rows_html = "\n".join(
+        "<tr>"
+        f"<td><strong>{_html_escape(run.get('title'))}</strong>"
+        f"<span>{_html_escape(run.get('created_at') or '')}</span></td>"
+        f"<td>{_html_escape(_coerce_mapping(run.get('planner')).get('effective_backend'))}"
+        f"<span>{_html_escape(_coerce_mapping(run.get('planner')).get('route'))}</span></td>"
+        f"<td>{_html_escape(_coerce_mapping(run.get('summary')).get('frames'))}</td>"
+        f"<td>{_html_escape(_coerce_mapping(run.get('summary')).get('total_notes'))}</td>"
+        f"<td>{_html_escape(_format_optional_float(_coerce_mapping(run.get('noncollapse')).get('stability')))}</td>"
+        f"<td>{_html_escape(_coerce_mapping(run.get('noncollapse')).get('focus_metric'))}</td>"
+        f"<td class=\"links\">{_index_run_links(run)}</td>"
+        "</tr>"
+        for run in index.get("runs", [])
+        if isinstance(run, Mapping)
+    )
+
+    html_doc = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{_html_escape(page_title)}</title>
+  <style>
+    :root {{
+      color-scheme: dark;
+      --bg: #0b0f14;
+      --panel: #131923;
+      --panel-2: #192231;
+      --text: #edf4ff;
+      --muted: #9fb2c8;
+      --accent: #6ee7b7;
+      --border: rgba(255,255,255,.1);
+    }}
+    body {{
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      background: var(--bg);
+      color: var(--text);
+    }}
+    header {{
+      padding: 20px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, rgba(110,231,183,.09), rgba(0,0,0,0));
+    }}
+    h1 {{
+      margin: 0;
+      font-size: 18px;
+      letter-spacing: 0;
+    }}
+    header p {{
+      color: var(--muted);
+      font-size: 12px;
+      margin: 6px 0 0;
+    }}
+    main {{
+      padding: 14px;
+      display: grid;
+      gap: 14px;
+    }}
+    .stats {{
+      display: grid;
+      grid-template-columns: repeat(6, minmax(120px, 1fr));
+      gap: 8px;
+    }}
+    .stat, section {{
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      min-width: 0;
+    }}
+    .stat span, td span {{
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      margin-top: 3px;
+    }}
+    .stat strong {{
+      display: block;
+      overflow-wrap: anywhere;
+      font-size: 14px;
+      margin-top: 4px;
+    }}
+    h2 {{
+      margin: 0 0 10px;
+      font-size: 14px;
+      letter-spacing: 0;
+    }}
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }}
+    th, td {{
+      padding: 8px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      vertical-align: top;
+      overflow-wrap: anywhere;
+    }}
+    th {{
+      color: var(--muted);
+      font-weight: 600;
+    }}
+    a {{
+      color: var(--accent);
+      text-decoration: none;
+    }}
+    .links {{
+      min-width: 190px;
+    }}
+    .links a {{
+      display: inline-block;
+      margin: 0 8px 6px 0;
+    }}
+    pre {{
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      max-height: 360px;
+      overflow: auto;
+      background: var(--panel-2);
+      border-radius: 8px;
+      padding: 10px;
+      font-size: 11px;
+      color: #d8e6fb;
+    }}
+    @media (max-width: 980px) {{
+      .stats {{
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }}
+    }}
+    @media (max-width: 680px) {{
+      .stats {{
+        grid-template-columns: 1fr;
+      }}
+      table {{
+        display: block;
+        overflow-x: auto;
+      }}
+    }}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>{_html_escape(page_title)}</h1>
+    <p>{_html_escape(index.get("created_at"))}</p>
+  </header>
+  <main>
+    <div class="stats">{stat_html}</div>
+    <section>
+      <h2>Experiment Runs</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>run</th><th>backend</th><th>frames</th><th>notes</th>
+            <th>stability</th><th>focus</th><th>links</th>
+          </tr>
+        </thead>
+        <tbody>{rows_html}</tbody>
+      </table>
+    </section>
+    <section>
+      <h2>Index Packet</h2>
+      <pre>{_html_escape(json.dumps(index, indent=2, ensure_ascii=False))}</pre>
+    </section>
+  </main>
+  <script type="application/json" id="zspace-index">{_html_escape(index_json)}</script>
 </body>
 </html>
 """

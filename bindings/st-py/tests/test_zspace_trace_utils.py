@@ -17,8 +17,10 @@ from spiraltorch.zspace_artifacts import (
     desire_step_from_downstream_hook,
     load_zspace_artifact_manifest,
     run_desire_geometry_bias_validation,
+    summarize_zspace_experiment_index,
     summarize_zspace_experiment_manifest,
     write_zspace_experiment_cockpit_html,
+    write_zspace_experiment_index_html,
     write_zspace_experiment_artifacts,
 )
 from spiraltorch.zspace_trace import load_zspace_trace_events, write_zspace_trace_html
@@ -659,6 +661,144 @@ def test_write_zspace_experiment_cockpit_html_renders_story_and_links(tmp_path) 
     assert "Trace Viewer" in html
     assert "trace.html" in html
     assert 'id="zspace-story"' in html
+
+
+def _experiment_index_manifest(
+    title: str,
+    *,
+    backend: str,
+    route: str,
+    frames: int,
+    total_notes: int,
+    stability: float,
+    momentum: float,
+    focus_metric: str,
+    artifact_manifest: str = "/tmp/trace.artifacts.json",
+) -> dict[str, object]:
+    return {
+        "kind": "spiraltorch.zspace_experiment_manifest",
+        "title": title,
+        "created_at": "2026-05-05T00:00:00+00:00",
+        "trace_jsonl": f"{title}.jsonl",
+        "trace_html": f"{title}.html",
+        "atlas_noncollapse_html": f"{title}.atlas_noncollapse.html",
+        "artifact_manifest": artifact_manifest,
+        "summary": {"frames": frames, "total_notes": total_notes},
+        "planner_snapshot": {
+            "backend": "auto",
+            "available": True,
+            "shape": {"rows": 4, "cols": 64, "k": 2},
+            "device_report": {"backend": backend, "planner_route": route},
+            "rank_plan": {"effective_backend": backend, "workgroup": 128},
+        },
+        "noncollapse_perspective": {
+            "coverage": frames,
+            "stability": stability,
+            "momentum": momentum,
+            "delta": 0.03,
+            "guidance": "compare this run against the index",
+            "focus": [
+                {"name": "noncollapse.stage.integration", "latest": 1.0},
+                {"name": focus_metric, "latest": 0.5, "coverage": frames},
+            ],
+        },
+    }
+
+
+def test_summarize_zspace_experiment_index_compares_runs() -> None:
+    index = summarize_zspace_experiment_index(
+        [
+            _experiment_index_manifest(
+                "WGPU run",
+                backend="wgpu",
+                route="metal-via-wgpu",
+                frames=3,
+                total_notes=7,
+                stability=0.9,
+                momentum=0.2,
+                focus_metric="noncollapse.z_bias",
+            ),
+            _experiment_index_manifest(
+                "CPU run",
+                backend="cpu",
+                route="cpu",
+                frames=2,
+                total_notes=5,
+                stability=0.7,
+                momentum=-0.1,
+                focus_metric="noncollapse.preserved_ratio",
+            ),
+        ],
+        title="Experiment Index",
+    )
+
+    assert index["kind"] == "spiraltorch.zspace_experiment_index"
+    assert index["title"] == "Experiment Index"
+    assert index["summary"]["runs"] == 2
+    assert index["summary"]["total_frames"] == 5
+    assert index["summary"]["total_notes"] == 12
+    assert index["summary"]["planner_backends"] == {"cpu": 1, "wgpu": 1}
+    assert index["summary"]["focus_metrics"] == {
+        "noncollapse.preserved_ratio": 1,
+        "noncollapse.z_bias": 1,
+    }
+    assert index["summary"]["mean_stability"] == pytest.approx(0.8)
+    assert index["summary"]["latest_stability"] == pytest.approx(0.7)
+    assert [run["title"] for run in index["runs"]] == ["WGPU run", "CPU run"]
+    assert index["runs"][0]["planner"]["route"] == "metal-via-wgpu"
+
+
+def test_write_zspace_experiment_index_html_renders_runs_and_links(tmp_path) -> None:
+    manifest_a = tmp_path / "wgpu.artifacts.json"
+    manifest_b = tmp_path / "cpu.artifacts.json"
+    manifest_a.write_text(
+        json.dumps(
+            _experiment_index_manifest(
+                "WGPU run",
+                backend="wgpu",
+                route="metal-via-wgpu",
+                frames=3,
+                total_notes=7,
+                stability=0.9,
+                momentum=0.2,
+                focus_metric="noncollapse.z_bias",
+                artifact_manifest=str(manifest_a),
+            )
+        ),
+        encoding="utf-8",
+    )
+    manifest_b.write_text(
+        json.dumps(
+            _experiment_index_manifest(
+                "CPU run",
+                backend="cpu",
+                route="cpu",
+                frames=2,
+                total_notes=5,
+                stability=0.7,
+                momentum=-0.1,
+                focus_metric="noncollapse.preserved_ratio",
+                artifact_manifest=str(manifest_b),
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    html_path = write_zspace_experiment_index_html(
+        [manifest_a, manifest_b],
+        tmp_path / "experiments.index.html",
+        title="Experiment Index",
+    )
+    html = (tmp_path / "experiments.index.html").read_text(encoding="utf-8")
+
+    assert html_path.endswith("experiments.index.html")
+    assert "Experiment Index" in html
+    assert "WGPU run" in html
+    assert "CPU run" in html
+    assert "Trace Viewer" in html
+    assert "metal-via-wgpu" in html
+    assert "noncollapse.preserved_ratio" in html
+    assert 'id="zspace-index"' in html
 
 
 def test_build_desire_adapter_from_downstream_hook_maps_gain_and_bias(tmp_path) -> None:
