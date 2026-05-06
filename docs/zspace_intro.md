@@ -154,6 +154,27 @@ For shell workflows, `examples/zspace_experiment_index.py` writes the same
 static index page and keeps links back to each run's trace viewer, Atlas
 non-collapse view, and artifact manifest.
 
+For a baseline-versus-candidate check, compare two manifests directly:
+
+```python
+comparison = st.compare_zspace_experiment_manifests(
+    "baseline.artifacts.json",
+    "candidate.artifacts.json",
+)
+comparison_html = st.write_zspace_experiment_comparison_html(
+    "baseline.artifacts.json",
+    "candidate.artifacts.json",
+    "candidate.comparison.html",
+)
+
+print(comparison["status"])
+print(comparison_html)
+```
+
+The companion `examples/zspace_experiment_compare.py` prints the same
+comparison status and can exit non-zero with `--fail-on-regression` when the
+candidate drops beyond the configured stability or frame thresholds.
+
 ### Importing external weights
 
 Warm-starting from other ecosystems hinges on the DLPack bridges:

@@ -17,6 +17,8 @@ __all__ = [
     "write_zspace_experiment_cockpit_html",
     "summarize_zspace_experiment_index",
     "write_zspace_experiment_index_html",
+    "compare_zspace_experiment_manifests",
+    "write_zspace_experiment_comparison_html",
     "build_zspace_downstream_hook",
     "build_desire_adapter_from_downstream_hook",
     "desire_step_from_downstream_hook",
@@ -720,6 +722,230 @@ def summarize_zspace_experiment_index(
     }
 
 
+def _comparison_check(
+    name: str,
+    status: str,
+    message: str,
+    *,
+    baseline: Any,
+    candidate: Any,
+    delta: Any | None = None,
+    threshold: Any | None = None,
+) -> dict[str, Any]:
+    payload = {
+        "name": name,
+        "status": status,
+        "message": message,
+        "baseline": baseline,
+        "candidate": candidate,
+    }
+    if delta is not None:
+        payload["delta"] = delta
+    if threshold is not None:
+        payload["threshold"] = threshold
+    return payload
+
+
+def _overall_status(checks: Sequence[Mapping[str, Any]]) -> str:
+    statuses = {str(check.get("status", "pass")) for check in checks}
+    if "fail" in statuses:
+        return "fail"
+    if "warn" in statuses:
+        return "warn"
+    return "pass"
+
+
+def _comparison_guidance(status: str) -> str:
+    if status == "fail":
+        return "candidate regressed beyond the configured comparison thresholds"
+    if status == "warn":
+        return "candidate is usable but changed planner, focus, or run-shape signals"
+    return "candidate stayed within the configured comparison thresholds"
+
+
+def compare_zspace_experiment_manifests(
+    baseline: Mapping[str, Any] | str | Path,
+    candidate: Mapping[str, Any] | str | Path,
+    *,
+    top_k: int = 6,
+    title: str | None = None,
+    warn_stability_drop: float = 0.03,
+    fail_stability_drop: float = 0.10,
+    min_frame_ratio: float = 0.80,
+    warn_on_planner_change: bool = True,
+    warn_on_focus_change: bool = True,
+) -> dict[str, Any]:
+    """Compare a candidate Z-space experiment manifest against a baseline."""
+
+    baseline_story = summarize_zspace_experiment_manifest(baseline, top_k=top_k)
+    candidate_story = summarize_zspace_experiment_manifest(candidate, top_k=top_k)
+    baseline_run = _experiment_run_digest(baseline_story)
+    candidate_run = _experiment_run_digest(candidate_story)
+
+    baseline_summary = _coerce_mapping(baseline_run.get("summary"))
+    candidate_summary = _coerce_mapping(candidate_run.get("summary"))
+    baseline_planner = _coerce_mapping(baseline_run.get("planner"))
+    candidate_planner = _coerce_mapping(candidate_run.get("planner"))
+    baseline_noncollapse = _coerce_mapping(baseline_run.get("noncollapse"))
+    candidate_noncollapse = _coerce_mapping(candidate_run.get("noncollapse"))
+
+    baseline_frames = _coerce_int(baseline_summary.get("frames", 0))
+    candidate_frames = _coerce_int(candidate_summary.get("frames", 0))
+    baseline_notes = _coerce_int(baseline_summary.get("total_notes", 0))
+    candidate_notes = _coerce_int(candidate_summary.get("total_notes", 0))
+    baseline_stability = _coerce_float(baseline_noncollapse.get("stability", 0.0))
+    candidate_stability = _coerce_float(candidate_noncollapse.get("stability", 0.0))
+    stability_delta = candidate_stability - baseline_stability
+    momentum_delta = (
+        _coerce_float(candidate_noncollapse.get("momentum", 0.0))
+        - _coerce_float(baseline_noncollapse.get("momentum", 0.0))
+    )
+    signal_delta_delta = (
+        _coerce_float(candidate_noncollapse.get("delta", 0.0))
+        - _coerce_float(baseline_noncollapse.get("delta", 0.0))
+    )
+
+    checks: list[dict[str, Any]] = []
+    fail_drop = abs(float(fail_stability_drop))
+    warn_drop = abs(float(warn_stability_drop))
+    if stability_delta <= -fail_drop:
+        stability_status = "fail"
+        stability_message = "stability dropped beyond the fail threshold"
+    elif stability_delta <= -warn_drop:
+        stability_status = "warn"
+        stability_message = "stability dropped beyond the warn threshold"
+    else:
+        stability_status = "pass"
+        stability_message = "stability stayed within threshold"
+    checks.append(
+        _comparison_check(
+            "stability",
+            stability_status,
+            stability_message,
+            baseline=baseline_stability,
+            candidate=candidate_stability,
+            delta=stability_delta,
+            threshold={"warn_drop": warn_drop, "fail_drop": fail_drop},
+        )
+    )
+
+    frame_delta = candidate_frames - baseline_frames
+    frame_ratio = (
+        candidate_frames / baseline_frames if baseline_frames > 0 else None
+    )
+    if baseline_frames > 0 and candidate_frames < baseline_frames * float(min_frame_ratio):
+        frame_status = "fail"
+        frame_message = "candidate emitted too few frames for this baseline"
+    elif candidate_frames < baseline_frames:
+        frame_status = "warn"
+        frame_message = "candidate emitted fewer frames than the baseline"
+    else:
+        frame_status = "pass"
+        frame_message = "candidate frame count stayed within threshold"
+    checks.append(
+        _comparison_check(
+            "frames",
+            frame_status,
+            frame_message,
+            baseline=baseline_frames,
+            candidate=candidate_frames,
+            delta=frame_delta,
+            threshold={"min_frame_ratio": float(min_frame_ratio)},
+        )
+    )
+
+    note_delta = candidate_notes - baseline_notes
+    checks.append(
+        _comparison_check(
+            "total_notes",
+            "warn" if candidate_notes < baseline_notes else "pass",
+            (
+                "candidate emitted fewer Atlas notes than the baseline"
+                if candidate_notes < baseline_notes
+                else "candidate note count stayed within threshold"
+            ),
+            baseline=baseline_notes,
+            candidate=candidate_notes,
+            delta=note_delta,
+        )
+    )
+
+    baseline_backend = str(baseline_planner.get("effective_backend") or "unknown")
+    candidate_backend = str(candidate_planner.get("effective_backend") or "unknown")
+    baseline_route = str(baseline_planner.get("route") or "unknown")
+    candidate_route = str(candidate_planner.get("route") or "unknown")
+    planner_changed = (
+        baseline_backend != candidate_backend or baseline_route != candidate_route
+    )
+    checks.append(
+        _comparison_check(
+            "planner",
+            "warn" if planner_changed and warn_on_planner_change else "pass",
+            (
+                "candidate changed planner backend or route"
+                if planner_changed
+                else "candidate planner route matched the baseline"
+            ),
+            baseline={"backend": baseline_backend, "route": baseline_route},
+            candidate={"backend": candidate_backend, "route": candidate_route},
+        )
+    )
+
+    baseline_focus = str(baseline_noncollapse.get("focus_metric") or "unknown")
+    candidate_focus = str(candidate_noncollapse.get("focus_metric") or "unknown")
+    focus_changed = baseline_focus != candidate_focus
+    checks.append(
+        _comparison_check(
+            "focus_metric",
+            "warn" if focus_changed and warn_on_focus_change else "pass",
+            (
+                "candidate primary focus metric changed"
+                if focus_changed
+                else "candidate primary focus metric matched the baseline"
+            ),
+            baseline=baseline_focus,
+            candidate=candidate_focus,
+        )
+    )
+
+    status = _overall_status(checks)
+    page_title = title or (
+        f"{baseline_run.get('title')} -> {candidate_run.get('title')}"
+    )
+    return {
+        "kind": "spiraltorch.zspace_experiment_comparison",
+        "schema": "spiraltorch.zspace_experiment_comparison",
+        "schema_version": 1,
+        "title": str(page_title),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "status": status,
+        "summary": {
+            "status": status,
+            "guidance": _comparison_guidance(status),
+            "baseline_title": baseline_run.get("title"),
+            "candidate_title": candidate_run.get("title"),
+            "stability_delta": stability_delta,
+            "momentum_delta": momentum_delta,
+            "signal_delta_delta": signal_delta_delta,
+            "frames_delta": frame_delta,
+            "frame_ratio": frame_ratio,
+            "total_notes_delta": note_delta,
+            "planner_changed": planner_changed,
+            "focus_metric_changed": focus_changed,
+        },
+        "thresholds": {
+            "warn_stability_drop": warn_drop,
+            "fail_stability_drop": fail_drop,
+            "min_frame_ratio": float(min_frame_ratio),
+            "warn_on_planner_change": bool(warn_on_planner_change),
+            "warn_on_focus_change": bool(warn_on_focus_change),
+        },
+        "baseline": baseline_run,
+        "candidate": candidate_run,
+        "checks": checks,
+    }
+
+
 def write_zspace_experiment_cockpit_html(
     manifest_or_path: Mapping[str, Any] | str | Path,
     html_path: str | Path | None = None,
@@ -1215,6 +1441,239 @@ def write_zspace_experiment_index_html(
     </section>
   </main>
   <script type="application/json" id="zspace-index">{_html_escape(index_json)}</script>
+</body>
+</html>
+"""
+    out_path.write_text(html_doc, encoding="utf-8")
+    return str(out_path)
+
+
+def write_zspace_experiment_comparison_html(
+    baseline: Mapping[str, Any] | str | Path,
+    candidate: Mapping[str, Any] | str | Path,
+    html_path: str | Path | None = None,
+    *,
+    title: str | None = None,
+    top_k: int = 6,
+    warn_stability_drop: float = 0.03,
+    fail_stability_drop: float = 0.10,
+    min_frame_ratio: float = 0.80,
+    warn_on_planner_change: bool = True,
+    warn_on_focus_change: bool = True,
+) -> str:
+    """Render a static HTML comparison between baseline and candidate manifests."""
+
+    comparison = compare_zspace_experiment_manifests(
+        baseline,
+        candidate,
+        top_k=top_k,
+        title=title,
+        warn_stability_drop=warn_stability_drop,
+        fail_stability_drop=fail_stability_drop,
+        min_frame_ratio=min_frame_ratio,
+        warn_on_planner_change=warn_on_planner_change,
+        warn_on_focus_change=warn_on_focus_change,
+    )
+    candidate_run = _coerce_mapping(comparison.get("candidate"))
+    candidate_manifest = candidate_run.get("artifact_manifest")
+    if html_path is None:
+        if candidate_manifest:
+            html_path = Path(str(candidate_manifest)).with_suffix(".comparison.html")
+        else:
+            html_path = Path("zspace_experiment.comparison.html")
+    out_path = Path(html_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    page_title = str(comparison.get("title") or "SpiralTorch Z-Space Comparison")
+    summary = _coerce_mapping(comparison.get("summary"))
+    baseline_run = _coerce_mapping(comparison.get("baseline"))
+    comparison_json = json.dumps(comparison, ensure_ascii=True)
+    stat_html = "\n".join(
+        "<section class=\"stat\">"
+        f"<span>{_html_escape(label)}</span>"
+        f"<strong>{_html_escape(value)}</strong>"
+        "</section>"
+        for label, value in (
+            ("status", comparison.get("status")),
+            ("stability delta", _format_optional_float(summary.get("stability_delta"))),
+            ("frames delta", summary.get("frames_delta")),
+            ("notes delta", summary.get("total_notes_delta")),
+            ("planner changed", summary.get("planner_changed")),
+            ("focus changed", summary.get("focus_metric_changed")),
+        )
+    )
+    run_html = "\n".join(
+        "<section>"
+        f"<h2>{_html_escape(label)}</h2>"
+        f"<p><strong>{_html_escape(run.get('title'))}</strong></p>"
+        f"<p class=\"muted\">{_html_escape(run.get('created_at') or '')}</p>"
+        f"<p class=\"links\">{_index_run_links(run)}</p>"
+        "</section>"
+        for label, run in (("Baseline", baseline_run), ("Candidate", candidate_run))
+    )
+    checks_html = "\n".join(
+        "<tr>"
+        f"<td>{_html_escape(check.get('name'))}</td>"
+        f"<td><strong>{_html_escape(check.get('status'))}</strong></td>"
+        f"<td>{_html_escape(check.get('baseline'))}</td>"
+        f"<td>{_html_escape(check.get('candidate'))}</td>"
+        f"<td>{_html_escape(_format_optional_float(check.get('delta')) if 'delta' in check else '')}</td>"
+        f"<td>{_html_escape(check.get('message'))}</td>"
+        "</tr>"
+        for check in comparison.get("checks", [])
+        if isinstance(check, Mapping)
+    )
+
+    html_doc = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{_html_escape(page_title)}</title>
+  <style>
+    :root {{
+      color-scheme: dark;
+      --bg: #0b0f14;
+      --panel: #131923;
+      --panel-2: #192231;
+      --text: #edf4ff;
+      --muted: #9fb2c8;
+      --accent: #6ee7b7;
+      --border: rgba(255,255,255,.1);
+    }}
+    body {{
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      background: var(--bg);
+      color: var(--text);
+    }}
+    header {{
+      padding: 20px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, rgba(110,231,183,.09), rgba(0,0,0,0));
+    }}
+    h1 {{
+      margin: 0;
+      font-size: 18px;
+      letter-spacing: 0;
+    }}
+    header p, .muted {{
+      color: var(--muted);
+      font-size: 12px;
+    }}
+    main {{
+      padding: 14px;
+      display: grid;
+      gap: 14px;
+    }}
+    .stats, .runs {{
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }}
+    .stats {{
+      grid-template-columns: repeat(6, minmax(120px, 1fr));
+    }}
+    .stat, section {{
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      min-width: 0;
+    }}
+    .stat span {{
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+    }}
+    .stat strong {{
+      display: block;
+      overflow-wrap: anywhere;
+      font-size: 14px;
+      margin-top: 4px;
+    }}
+    h2 {{
+      margin: 0 0 10px;
+      font-size: 14px;
+      letter-spacing: 0;
+    }}
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }}
+    th, td {{
+      padding: 8px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      vertical-align: top;
+      overflow-wrap: anywhere;
+    }}
+    th {{
+      color: var(--muted);
+      font-weight: 600;
+    }}
+    a {{
+      color: var(--accent);
+      text-decoration: none;
+    }}
+    .links a {{
+      display: inline-block;
+      margin: 0 8px 6px 0;
+    }}
+    pre {{
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      max-height: 360px;
+      overflow: auto;
+      background: var(--panel-2);
+      border-radius: 8px;
+      padding: 10px;
+      font-size: 11px;
+      color: #d8e6fb;
+    }}
+    @media (max-width: 980px) {{
+      .stats {{
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }}
+    }}
+    @media (max-width: 680px) {{
+      .stats, .runs {{
+        grid-template-columns: 1fr;
+      }}
+      table {{
+        display: block;
+        overflow-x: auto;
+      }}
+    }}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>{_html_escape(page_title)}</h1>
+    <p>{_html_escape(summary.get("guidance"))}</p>
+  </header>
+  <main>
+    <div class="stats">{stat_html}</div>
+    <div class="runs">{run_html}</div>
+    <section>
+      <h2>Comparison Checks</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>check</th><th>status</th><th>baseline</th><th>candidate</th>
+            <th>delta</th><th>message</th>
+          </tr>
+        </thead>
+        <tbody>{checks_html}</tbody>
+      </table>
+    </section>
+    <section>
+      <h2>Comparison Packet</h2>
+      <pre>{_html_escape(json.dumps(comparison, indent=2, ensure_ascii=False))}</pre>
+    </section>
+  </main>
+  <script type="application/json" id="zspace-comparison">{_html_escape(comparison_json)}</script>
 </body>
 </html>
 """

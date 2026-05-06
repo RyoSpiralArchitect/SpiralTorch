@@ -152,6 +152,33 @@ def write_zspace_experiment_index_html(
     top_k: int = ...,
 ) -> str: ...
 
+def compare_zspace_experiment_manifests(
+    baseline: Mapping[str, Any] | str | PathLike[str],
+    candidate: Mapping[str, Any] | str | PathLike[str],
+    *,
+    top_k: int = ...,
+    title: str | None = ...,
+    warn_stability_drop: float = ...,
+    fail_stability_drop: float = ...,
+    min_frame_ratio: float = ...,
+    warn_on_planner_change: bool = ...,
+    warn_on_focus_change: bool = ...,
+) -> Dict[str, Any]: ...
+
+def write_zspace_experiment_comparison_html(
+    baseline: Mapping[str, Any] | str | PathLike[str],
+    candidate: Mapping[str, Any] | str | PathLike[str],
+    html_path: str | PathLike[str] | None = ...,
+    *,
+    title: str | None = ...,
+    top_k: int = ...,
+    warn_stability_drop: float = ...,
+    fail_stability_drop: float = ...,
+    min_frame_ratio: float = ...,
+    warn_on_planner_change: bool = ...,
+    warn_on_focus_change: bool = ...,
+) -> str: ...
+
 def build_zspace_downstream_hook(
     manifest_or_path: Mapping[str, Any] | str,
     *,

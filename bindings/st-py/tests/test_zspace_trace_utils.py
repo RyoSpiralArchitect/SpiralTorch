@@ -12,6 +12,7 @@ from spiraltorch.zspace_atlas import (
 )
 from spiraltorch.zspace_artifacts import (
     build_desire_adapter_from_downstream_hook,
+    compare_zspace_experiment_manifests,
     build_zspace_planner_snapshot,
     build_zspace_downstream_hook,
     desire_step_from_downstream_hook,
@@ -20,6 +21,7 @@ from spiraltorch.zspace_artifacts import (
     summarize_zspace_experiment_index,
     summarize_zspace_experiment_manifest,
     write_zspace_experiment_cockpit_html,
+    write_zspace_experiment_comparison_html,
     write_zspace_experiment_index_html,
     write_zspace_experiment_artifacts,
 )
@@ -799,6 +801,100 @@ def test_write_zspace_experiment_index_html_renders_runs_and_links(tmp_path) -> 
     assert "metal-via-wgpu" in html
     assert "noncollapse.preserved_ratio" in html
     assert 'id="zspace-index"' in html
+
+
+def test_compare_zspace_experiment_manifests_flags_regression() -> None:
+    comparison = compare_zspace_experiment_manifests(
+        _experiment_index_manifest(
+            "Baseline run",
+            backend="wgpu",
+            route="metal-via-wgpu",
+            frames=10,
+            total_notes=20,
+            stability=0.95,
+            momentum=0.3,
+            focus_metric="noncollapse.z_bias",
+        ),
+        _experiment_index_manifest(
+            "Candidate run",
+            backend="cpu",
+            route="cpu",
+            frames=6,
+            total_notes=12,
+            stability=0.78,
+            momentum=0.1,
+            focus_metric="noncollapse.preserved_ratio",
+        ),
+        title="Candidate versus baseline",
+    )
+
+    checks = {check["name"]: check for check in comparison["checks"]}
+
+    assert comparison["kind"] == "spiraltorch.zspace_experiment_comparison"
+    assert comparison["title"] == "Candidate versus baseline"
+    assert comparison["status"] == "fail"
+    assert comparison["summary"]["stability_delta"] == pytest.approx(-0.17)
+    assert comparison["summary"]["frames_delta"] == -4
+    assert comparison["summary"]["planner_changed"] is True
+    assert comparison["summary"]["focus_metric_changed"] is True
+    assert checks["stability"]["status"] == "fail"
+    assert checks["frames"]["status"] == "fail"
+    assert checks["planner"]["status"] == "warn"
+    assert checks["focus_metric"]["status"] == "warn"
+
+
+def test_write_zspace_experiment_comparison_html_renders_checks_and_links(tmp_path) -> None:
+    baseline_path = tmp_path / "baseline.artifacts.json"
+    candidate_path = tmp_path / "candidate.artifacts.json"
+    baseline_path.write_text(
+        json.dumps(
+            _experiment_index_manifest(
+                "Baseline run",
+                backend="wgpu",
+                route="metal-via-wgpu",
+                frames=10,
+                total_notes=20,
+                stability=0.95,
+                momentum=0.3,
+                focus_metric="noncollapse.z_bias",
+                artifact_manifest=str(baseline_path),
+            )
+        ),
+        encoding="utf-8",
+    )
+    candidate_path.write_text(
+        json.dumps(
+            _experiment_index_manifest(
+                "Candidate run",
+                backend="cpu",
+                route="cpu",
+                frames=6,
+                total_notes=12,
+                stability=0.78,
+                momentum=0.1,
+                focus_metric="noncollapse.preserved_ratio",
+                artifact_manifest=str(candidate_path),
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    html_path = write_zspace_experiment_comparison_html(
+        baseline_path,
+        candidate_path,
+        tmp_path / "candidate.comparison.html",
+        title="Candidate versus baseline",
+    )
+    html = (tmp_path / "candidate.comparison.html").read_text(encoding="utf-8")
+
+    assert html_path.endswith("candidate.comparison.html")
+    assert "Candidate versus baseline" in html
+    assert "Baseline run" in html
+    assert "Candidate run" in html
+    assert "stability dropped beyond the fail threshold" in html
+    assert "Trace Viewer" in html
+    assert "noncollapse.preserved_ratio" in html
+    assert 'id="zspace-comparison"' in html
 
 
 def test_build_desire_adapter_from_downstream_hook_maps_gain_and_bias(tmp_path) -> None:
