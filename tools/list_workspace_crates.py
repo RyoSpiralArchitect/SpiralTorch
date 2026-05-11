@@ -79,11 +79,19 @@ def collect_workspace_crates(manifest_path: Path) -> list[WorkspaceCrate]:
     return crates
 
 
+_DESC_MAX = 50  # Maximum characters shown for description in table output
+
+
+def _truncate(s: str, max_len: int) -> str:
+    return s if len(s) <= max_len else s[: max_len - 3] + "..."
+
+
 def print_table(crates: list[WorkspaceCrate]) -> None:
     if not crates:
         print("No workspace crates found.")
         return
 
+    truncated_descs = [_truncate(c.description, _DESC_MAX) for c in crates]
     widths = {
         "name": max(len("Package"), max(len(crate.name) for crate in crates)),
         "path": max(len("Path"), max(len(crate.path) for crate in crates)),
@@ -91,6 +99,7 @@ def print_table(crates: list[WorkspaceCrate]) -> None:
         "default": len("Default"),
         "tests": len("Tests"),
         "examples": len("Examples"),
+        "description": max(len("Description"), max(len(d) for d in truncated_descs)),
     }
     print(
         f"{'Package'.ljust(widths['name'])}  "
@@ -98,7 +107,8 @@ def print_table(crates: list[WorkspaceCrate]) -> None:
         f"{'Default'.ljust(widths['default'])}  "
         f"{'Tests'.rjust(widths['tests'])}  "
         f"{'Examples'.rjust(widths['examples'])}  "
-        f"Path"
+        f"{'Path'.ljust(widths['path'])}  "
+        f"Description"
     )
     print(
         "-"
@@ -109,17 +119,19 @@ def print_table(crates: list[WorkspaceCrate]) -> None:
             + widths["tests"]
             + widths["examples"]
             + widths["path"]
-            + 12
+            + widths["description"]
+            + 14
         )
     )
-    for crate in crates:
+    for crate, desc in zip(crates, truncated_descs):
         print(
             f"{crate.name.ljust(widths['name'])}  "
             f"{crate.version.ljust(widths['version'])}  "
             f"{('yes' if crate.default_member else 'no').ljust(widths['default'])}  "
             f"{str(crate.tests).rjust(widths['tests'])}  "
             f"{str(crate.examples).rjust(widths['examples'])}  "
-            f"{crate.path}"
+            f"{crate.path.ljust(widths['path'])}  "
+            f"{desc}"
         )
 
 
