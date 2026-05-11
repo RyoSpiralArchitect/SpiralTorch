@@ -3108,11 +3108,6 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
         if _native_name not in all_exports:
             all_exports.append(_native_name)
 
-    _planner_module = getattr(module, "planner", None)
-    if isinstance(_planner_module, types.ModuleType):
-        for _planner_name in ("describe_device", "plan", "plan_topk"):
-            setattr(_planner_module, _planner_name, getattr(module, _planner_name))
-
     def _register_stub_module(name: str, *, doc: str | None = None) -> types.ModuleType:
         qualname = f"{module.__name__}.{name}"
         stub_module = types.ModuleType(qualname, doc)
@@ -3126,6 +3121,18 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
         if name not in all_exports:
             all_exports.append(name)
         return stub_module
+
+    _planner_module = getattr(module, "planner", None)
+    if not isinstance(_planner_module, types.ModuleType):
+        _planner_module = _register_stub_module(
+            "planner",
+            doc=(
+                "Planner helpers require the SpiralTorch native extension for "
+                "hardware-aware planning."
+            ),
+        )
+    for _planner_name in ("describe_device", "plan", "plan_topk"):
+        setattr(_planner_module, _planner_name, getattr(module, _planner_name))
 
     _PLACEHOLDER_MODULES = {
         "dataset": "Datasets & loaders are only available once the SpiralTorch native extension is built.",
