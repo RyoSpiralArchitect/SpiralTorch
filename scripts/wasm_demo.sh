@@ -21,7 +21,11 @@ pushd "$example_dir" >/dev/null
 
 if [[ ! -d node_modules ]]; then
   echo "[SpiralTorch] installing frontend dependencies..."
-  npm install
+  if [[ -f package-lock.json ]]; then
+    npm ci
+  else
+    npm install
+  fi
 fi
 
 case "$mode" in
@@ -45,4 +49,3 @@ case "$mode" in
     exit 2
     ;;
 esac
-

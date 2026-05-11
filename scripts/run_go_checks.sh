@@ -19,7 +19,15 @@ fi
 run_lint() {
   local lint_log="$LOG_DIR/lint.log"
   echo "Running gofmt and golangci-lint (if available)..." | tee "$lint_log"
-  find "$MODULE_DIR" -name '*.go' -print0 | xargs -0 -r gofmt -l | tee -a "$lint_log"
+  local go_files=()
+  while IFS= read -r -d '' go_file; do
+    go_files+=("$go_file")
+  done < <(find "$MODULE_DIR" -name '*.go' -print0)
+
+  if ((${#go_files[@]} > 0)); then
+    gofmt -l "${go_files[@]}" | tee -a "$lint_log"
+  fi
+
   if command -v golangci-lint >/dev/null 2>&1; then
     (cd "$MODULE_DIR" && GOFLAGS= CGO_ENABLED=0 golangci-lint run ./...) | tee -a "$lint_log"
   else
