@@ -3090,6 +3090,29 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             "`maturin develop -m bindings/st-py/Cargo.toml`) for full functionality."
         )
 
+    def _make_native_stub(feature: str):
+        def _stub(*_args, **_kwargs):
+            raise _stub_runtime_error(feature)
+
+        _stub.__name__ = feature.rsplit(".", 1)[-1].rstrip("()")
+        return _stub
+
+    for _native_name, _feature in {
+        "init_backend": "spiraltorch.init_backend()",
+        "describe_device": "spiraltorch.describe_device()",
+        "plan": "spiraltorch.plan()",
+        "plan_topk": "spiraltorch.plan_topk()",
+    }.items():
+        _native_stub = _make_native_stub(_feature)
+        setattr(module, _native_name, _native_stub)
+        if _native_name not in all_exports:
+            all_exports.append(_native_name)
+
+    _planner_module = getattr(module, "planner", None)
+    if isinstance(_planner_module, types.ModuleType):
+        for _planner_name in ("describe_device", "plan", "plan_topk"):
+            setattr(_planner_module, _planner_name, getattr(module, _planner_name))
+
     def _register_stub_module(name: str, *, doc: str | None = None) -> types.ModuleType:
         qualname = f"{module.__name__}.{name}"
         stub_module = types.ModuleType(qualname, doc)

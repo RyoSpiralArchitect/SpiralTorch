@@ -37,3 +37,8 @@ def stub_spiraltorch(monkeypatch: pytest.MonkeyPatch):
             module, ModuleNotFoundError("spiraltorch", name="spiraltorch")
         )
     return module
+
+
+@pytest.fixture
+def spiraltorch_stub(stub_spiraltorch):
+    return stub_spiraltorch
