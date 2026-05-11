@@ -4,10 +4,10 @@
 use crate::tensor::{tensor_err_to_py, PyTensor};
 #[cfg(feature = "nn")]
 use pyo3::exceptions::PyValueError;
-#[cfg(feature = "nn")]
 use pyo3::prelude::*;
 #[cfg(feature = "nn")]
 use pyo3::types::PyList;
+use pyo3::types::PyModule;
 #[cfg(feature = "nn")]
 use pyo3::PyRefMut;
 #[cfg(feature = "nn")]

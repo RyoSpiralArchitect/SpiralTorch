@@ -1,13 +1,19 @@
 use pyo3::prelude::*;
+#[cfg(feature = "selfsup")]
 use pyo3::types::PyDict;
+#[cfg(feature = "selfsup")]
 use pyo3::wrap_pyfunction;
+#[cfg(feature = "selfsup")]
 use pyo3::IntoPy;
+#[cfg(feature = "selfsup")]
 use spiral_selfsup::{contrastive, masked, ObjectiveError};
 
+#[cfg(feature = "selfsup")]
 fn objective_err(err: ObjectiveError) -> PyErr {
     pyo3::exceptions::PyValueError::new_err(err.to_string())
 }
 
+#[cfg(feature = "selfsup")]
 #[pyfunction]
 #[pyo3(signature = (anchors, positives, temperature=0.07, normalize=true))]
 fn info_nce(
@@ -34,6 +40,7 @@ fn info_nce(
     Ok(dict.into_py(py))
 }
 
+#[cfg(feature = "selfsup")]
 #[pyfunction]
 #[pyo3(signature = (predictions, targets, mask_indices))]
 fn masked_mse(
@@ -52,12 +59,23 @@ fn masked_mse(
     Ok(dict.into_py(py))
 }
 
+#[cfg(feature = "selfsup")]
 pub fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(info_nce, m)?)?;
     m.add_function(wrap_pyfunction!(masked_mse, m)?)?;
     m.add(
         "__doc__",
         "Self-supervised objectives exposed from Rust implementations.",
+    )?;
+    let _ = py;
+    Ok(())
+}
+
+#[cfg(not(feature = "selfsup"))]
+pub fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
+    m.add(
+        "__doc__",
+        "Self-supervised objectives (compiled without the 'selfsup' feature).",
     )?;
     let _ = py;
     Ok(())

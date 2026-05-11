@@ -1,5 +1,7 @@
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyModule};
+use pyo3::types::PyModule;
+#[cfg(feature = "spiral_rl")]
+use pyo3::types::{PyAny, PyDict};
 use pyo3::Bound;
 #[cfg(feature = "spiral_rl")]
 use std::ffi::CString;
