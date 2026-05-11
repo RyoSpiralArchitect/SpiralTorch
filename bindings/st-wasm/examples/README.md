@@ -32,4 +32,5 @@ python scripts/serve_wasm_demo.py bindings/st-wasm/examples/mellin-log-grid/dist
   the correct MIME type + WASM-friendly headers).
 - The wasm package is built by `scripts/build_wasm_web.sh` and synced into each example’s
   `pkg/` directory.
-
+- `scripts/wasm_demo.sh` installs example dependencies with `npm ci` when the example has a
+  `package-lock.json`, and falls back to `npm install` otherwise.

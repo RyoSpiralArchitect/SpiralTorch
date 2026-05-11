@@ -7,6 +7,12 @@ CRATE_DIR="${CRATE_DIR:-"$ROOT/bindings/st-wasm"}"
 OUT_DIR="${OUT_DIR:-"$ROOT/bindings/st-wasm/examples/pkg"}"
 EXAMPLES_DIR="${EXAMPLES_DIR:-"$ROOT/bindings/st-wasm/examples"}"
 
+if ! command -v wasm-pack >/dev/null 2>&1; then
+  echo "[SpiralTorch] error: wasm-pack was not found on PATH." >&2
+  echo "Install it with: cargo install wasm-pack" >&2
+  exit 1
+fi
+
 echo "[SpiralTorch] building spiraltorch-wasm (web) ..."
 echo "  crate:   $CRATE_DIR"
 echo "  out_dir: $OUT_DIR"

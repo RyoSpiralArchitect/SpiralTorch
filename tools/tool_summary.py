@@ -197,11 +197,27 @@ def _extract_leading_comment(path: Path) -> str | None:
             continue
         if stripped.startswith("#"):
             comment = stripped.lstrip("#").strip()
-            if comment:
+            if comment and not _is_boilerplate_comment(comment):
                 return comment
             continue
         break
     return None
+
+
+def _is_boilerplate_comment(comment: str) -> bool:
+    """Return whether *comment* is license/copyright boilerplate."""
+
+    normalized = comment.lower()
+    return (
+        normalized.startswith("!/")
+        or normalized.startswith("spdx-license-identifier:")
+        or normalized.startswith("copyright")
+        or normalized.startswith("(c)")
+        or normalized.startswith("©")
+        or normalized.startswith("part of spiraltorch")
+        or normalized.startswith("licensed under")
+        or "unauthorized derivative" in normalized
+    )
 
 
 def _extract_named_constant(module: ast.Module | None, names: set[str]) -> str | None:
@@ -551,4 +567,3 @@ def _last_modified_timestamp(path: Path) -> str | None:
 
 
 __all__ = ["ToolSummary", "collect_tool_summaries"]
-
