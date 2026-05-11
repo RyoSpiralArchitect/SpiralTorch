@@ -11,8 +11,10 @@ from typing import Any
 
 try:
     import tomllib
+    TOMLDecodeError = tomllib.TOMLDecodeError
 except ModuleNotFoundError:  # pragma: no cover - Python < 3.11 fallback
     import tomli as tomllib  # type: ignore[assignment]
+    TOMLDecodeError = tomllib.TOMLDecodeError  # type: ignore[attr-defined]
 
 
 @dataclass(frozen=True)
@@ -72,7 +74,7 @@ def collect_workspace_crates(manifest_path: Path) -> list[WorkspaceCrate]:
             )
         try:
             package_data = load_toml(package_manifest)
-        except Exception as e:
+        except (TOMLDecodeError, OSError, UnicodeDecodeError) as e:
             raise ValueError(
                 f"Failed to parse Cargo.toml for workspace member '{member}' at {package_manifest}: {e}"
             ) from e
