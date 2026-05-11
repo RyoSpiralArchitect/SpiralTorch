@@ -49,3 +49,13 @@ def test_spiral_rl_stub_agents_share_runtime_error(spiraltorch_stub):
     _assert_stub_runtime_error(lambda: agent.select_action(0))
     _assert_stub_runtime_error(lambda: agent.set_epsilon(0.5))
     _assert_stub_runtime_error(lambda: agent.state_dict())
+
+
+def test_source_checkout_native_helpers_use_stub_runtime_error(spiraltorch_stub):
+    _assert_stub_runtime_error(lambda: spiraltorch_stub.SpiralSession())
+    _assert_stub_runtime_error(
+        lambda: spiraltorch_stub.plan_topk(rows=8, cols=16, k=2)
+    )
+    _assert_stub_runtime_error(
+        lambda: spiraltorch_stub.planner.plan_topk(rows=8, cols=16, k=2)
+    )

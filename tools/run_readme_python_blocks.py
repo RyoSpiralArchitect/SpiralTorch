@@ -63,6 +63,8 @@ def _should_skip(code: str) -> bool:
 
 
 def _looks_like_stub_runtime_gap(output: str) -> bool:
+    if "NameError:" in output:
+        return False
     markers = (
         "native extension is missing",
         "stub bindings",
