@@ -83,6 +83,8 @@ _DESC_MAX = 50  # Maximum characters shown for description in table output
 
 
 def _truncate(s: str, max_len: int) -> str:
+    if max_len < 3:
+        return s[:max_len]
     return s if len(s) <= max_len else s[: max_len - 3] + "..."
 
 
