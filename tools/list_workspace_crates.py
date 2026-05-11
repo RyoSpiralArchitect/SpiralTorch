@@ -62,7 +62,20 @@ def collect_workspace_crates(manifest_path: Path) -> list[WorkspaceCrate]:
     crates: list[WorkspaceCrate] = []
     for member in members:
         package_manifest = root / member / "Cargo.toml"
-        package_data = load_toml(package_manifest)
+        if not package_manifest.exists():
+            raise FileNotFoundError(
+                f"Workspace member '{member}' has no Cargo.toml at {package_manifest}"
+            )
+        if not package_manifest.is_file():
+            raise ValueError(
+                f"Workspace member '{member}' Cargo.toml path is not a file: {package_manifest}"
+            )
+        try:
+            package_data = load_toml(package_manifest)
+        except Exception as e:
+            raise ValueError(
+                f"Failed to parse Cargo.toml for workspace member '{member}' at {package_manifest}: {e}"
+            ) from e
         package = package_data.get("package", {})
         package_dir = package_manifest.parent
         crates.append(
