@@ -662,11 +662,11 @@ dependencies = [
 
 [[package]]
 name = "cudarc"
-version = "0.11.9"
+version = "0.19.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a5bd4d1eee570c3b2ac64ed114125517dd1e541d88dd28fc259f1de4dba8d60"
+checksum = "83be2fd94791d2580692ced87ea19e9728102ce75582543b82765dbe3e884557"
 dependencies = [
- "libloading 0.8.9",
+ "libloading 0.9.0",
 ]
 
 [[package]]
@@ -676,7 +676,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b28bfe653d79bd16c77f659305b195b82bb5ce0c0eb2a4846b82ddbd77586813"
 dependencies = [
  "bitflags 2.9.4",
- "libloading 0.7.4",
+ "libloading 0.8.9",
  "winapi",
 ]
 
@@ -1883,6 +1883,16 @@ name = "libloading"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d7c4b02199fee7c5d21a5ae7d8cfa79a6ef5bb2fc834d6e9058e89c825efdc55"
+dependencies = [
+ "cfg-if",
+ "windows-link 0.2.1",
+]
+
+[[package]]
+name = "libloading"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "754ca22de805bb5744484a5b151a9e1a8e837d5dc232c2d7d8c2e3492edc8b60"
 dependencies = [
  "cfg-if",
  "windows-link 0.2.1",
