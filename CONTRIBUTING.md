@@ -36,6 +36,9 @@ bash scripts/run_ci_lint_local.sh
 # Core build + tests
 cargo build -p st-core --release
 cargo test  -p st-core --release -- --nocapture
+
+# Full workspace inventory
+python3 tools/list_workspace_crates.py
 ```
 
 `just ci-lint` mirrors the CI `ubuntu / lint` job: it updates the local Rust

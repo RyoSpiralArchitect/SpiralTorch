@@ -330,6 +330,10 @@ cargo build --workspace --release
 cargo test --workspace
 ```
 
+For the complete Cargo member inventory, including packages that are workspace
+members but not root `default-members`, see
+[`docs/development/workspace_crates.md`](docs/development/workspace_crates.md).
+
 **Per-crate**
 
 ```bash

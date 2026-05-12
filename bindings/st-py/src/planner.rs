@@ -42,6 +42,7 @@ pub(crate) struct PyRankPlan {
 }
 
 impl PyRankPlan {
+    #[cfg(feature = "nn")]
     pub(crate) fn from_plan(inner: RankPlan) -> Self {
         Self::from_plan_with_metadata(inner, None, None, None)
     }

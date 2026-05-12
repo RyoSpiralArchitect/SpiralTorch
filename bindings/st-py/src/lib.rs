@@ -22,6 +22,7 @@ mod pure;
 mod planner;
 mod spiralk;
 mod frac;
+#[cfg(feature = "nn")]
 mod psi_synchro;
 mod selfsup;
 mod text;
@@ -41,6 +42,22 @@ mod sot;
 mod dataset;
 #[cfg(feature = "robotics")]
 mod robotics;
+
+#[cfg(not(feature = "nn"))]
+mod psi_synchro {
+    use pyo3::prelude::*;
+    use pyo3::types::PyModule;
+
+    pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
+        let module = PyModule::new(py, "psi")?;
+        module.add(
+            "__doc__",
+            "Psychoid synchronization helpers (compiled without the 'nn' feature).",
+        )?;
+        parent.add_submodule(&module)?;
+        Ok(())
+    }
+}
 
 mod extras {
     use super::*;
@@ -257,6 +274,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     m.add_submodule(&ecosystem)?;
 
     // 3) __all__
+    #[allow(unused_mut)]
     let mut exports = vec![
         "Tensor",
         "from_dlpack",

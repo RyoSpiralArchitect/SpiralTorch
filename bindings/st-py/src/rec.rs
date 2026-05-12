@@ -1,6 +1,9 @@
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyModule};
+#[cfg(feature = "rec")]
+use pyo3::types::PyDict;
+use pyo3::types::PyModule;
 use pyo3::Bound;
+#[cfg(feature = "rec")]
 use std::borrow::Cow;
 
 #[cfg(feature = "rec")]
