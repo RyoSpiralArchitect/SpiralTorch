@@ -94,10 +94,14 @@ impl PluginRegistry {
 
         // Store the plugin
         let handle = PluginHandle::new(plugin);
-        self.plugins.write().unwrap().insert(plugin_id.clone(), handle);
+        self.plugins
+            .write()
+            .unwrap()
+            .insert(plugin_id.clone(), handle);
 
         // Emit event
-        self.event_bus.publish(&PluginEvent::PluginLoaded { plugin_id });
+        self.event_bus
+            .publish(&PluginEvent::PluginLoaded { plugin_id });
 
         Ok(())
     }
@@ -106,9 +110,9 @@ impl PluginRegistry {
     pub fn unregister(&self, plugin_id: &str) -> PureResult<()> {
         let handle = {
             let mut plugins = self.plugins.write().unwrap();
-            plugins.remove(plugin_id).ok_or_else(|| {
-                TensorError::Generic(format!("Plugin '{}' not found", plugin_id))
-            })?
+            plugins
+                .remove(plugin_id)
+                .ok_or_else(|| TensorError::Generic(format!("Plugin '{}' not found", plugin_id)))?
         };
 
         // Call on_unload hook
@@ -188,7 +192,8 @@ impl PluginRegistry {
         let plugin_set: HashSet<&str> = plugin_ids.iter().map(|id| id.as_str()).collect();
 
         let mut missing: HashMap<String, Vec<String>> = HashMap::new();
-        let mut internal_graph: HashMap<String, Vec<String>> = HashMap::with_capacity(plugin_ids.len());
+        let mut internal_graph: HashMap<String, Vec<String>> =
+            HashMap::with_capacity(plugin_ids.len());
 
         for plugin_id in &plugin_ids {
             let deps = graph.get(plugin_id).cloned().unwrap_or_default();
@@ -218,7 +223,11 @@ impl PluginRegistry {
         cycles.sort_by(|left, right| left.len().cmp(&right.len()).then(left.cmp(right)));
 
         let ok = missing.is_empty() && cycles.is_empty();
-        DependencyValidationSummary { ok, missing, cycles }
+        DependencyValidationSummary {
+            ok,
+            missing,
+            cycles,
+        }
     }
 
     /// Unregister a plugin and any currently registered plugins that depend on it.
@@ -227,7 +236,9 @@ impl PluginRegistry {
     pub fn unregister_safe(&self, plugin_id: &str, strict: bool) -> PureResult<Vec<String>> {
         let plugin_id = plugin_id.trim();
         if plugin_id.is_empty() {
-            return Err(TensorError::Generic("plugin_id must not be empty".to_string()));
+            return Err(TensorError::Generic(
+                "plugin_id must not be empty".to_string(),
+            ));
         }
 
         if self.get(plugin_id).is_none() {
@@ -375,11 +386,16 @@ impl PluginRegistry {
             plugin_ids.iter().map(|id| id.as_str()).collect();
         let mut indegree: HashMap<String, usize> =
             plugin_ids.iter().map(|id| (id.clone(), 0)).collect();
-        let mut edges: HashMap<String, Vec<String>> =
-            plugin_ids.iter().map(|id| (id.clone(), Vec::new())).collect();
+        let mut edges: HashMap<String, Vec<String>> = plugin_ids
+            .iter()
+            .map(|id| (id.clone(), Vec::new()))
+            .collect();
 
         for id in &plugin_ids {
-            let deps = deps_by_id.get(id).map(|deps| deps.as_slice()).unwrap_or(&[]);
+            let deps = deps_by_id
+                .get(id)
+                .map(|deps| deps.as_slice())
+                .unwrap_or(&[]);
             for dep in deps {
                 if !plugin_id_set.contains(dep.as_str()) {
                     continue;
@@ -494,68 +510,73 @@ fn detect_dependency_cycles(
         adj[src] = out;
     }
 
-    let mut state = vec![0u8; plugin_ids.len()];
-    let mut stack: Vec<usize> = Vec::new();
-    let mut positions: Vec<Option<usize>> = vec![None; plugin_ids.len()];
-    let mut cycle_keys: HashSet<String> = HashSet::new();
-    let mut cycles: Vec<Vec<String>> = Vec::new();
+    struct CycleDfs<'a> {
+        adj: &'a [Vec<usize>],
+        plugin_ids: &'a [String],
+        state: Vec<u8>,
+        stack: Vec<usize>,
+        positions: Vec<Option<usize>>,
+        cycle_keys: HashSet<String>,
+        cycles: Vec<Vec<String>>,
+    }
 
-    fn dfs(
-        node: usize,
-        adj: &[Vec<usize>],
-        plugin_ids: &[String],
-        state: &mut [u8],
-        stack: &mut Vec<usize>,
-        positions: &mut [Option<usize>],
-        cycle_keys: &mut HashSet<String>,
-        cycles: &mut Vec<Vec<String>>,
-    ) {
-        state[node] = 1;
-        positions[node] = Some(stack.len());
-        stack.push(node);
-
-        for &dep in &adj[node] {
-            match state.get(dep).copied().unwrap_or(2) {
-                0 => dfs(dep, adj, plugin_ids, state, stack, positions, cycle_keys, cycles),
-                1 => {
-                    if let Some(start) = positions.get(dep).and_then(|v| *v) {
-                        let slice = &stack[start..];
-                        let nodes: Vec<String> =
-                            slice.iter().map(|idx| plugin_ids[*idx].clone()).collect();
-                        let canon = canonical_cycle(&nodes);
-                        if !canon.is_empty() {
-                            let key = canon.join("\u{1f}");
-                            if cycle_keys.insert(key) {
-                                cycles.push(canon);
-                            }
-                        }
-                    }
-                }
-                _ => {}
+    impl<'a> CycleDfs<'a> {
+        fn new(adj: &'a [Vec<usize>], plugin_ids: &'a [String]) -> Self {
+            Self {
+                adj,
+                plugin_ids,
+                state: vec![0u8; plugin_ids.len()],
+                stack: Vec::new(),
+                positions: vec![None; plugin_ids.len()],
+                cycle_keys: HashSet::new(),
+                cycles: Vec::new(),
             }
         }
 
-        stack.pop();
-        positions[node] = None;
-        state[node] = 2;
-    }
+        fn visit(&mut self, node: usize) {
+            self.state[node] = 1;
+            self.positions[node] = Some(self.stack.len());
+            self.stack.push(node);
 
-    for idx in 0..plugin_ids.len() {
-        if state[idx] == 0 {
-            dfs(
-                idx,
-                &adj,
-                plugin_ids,
-                &mut state,
-                &mut stack,
-                &mut positions,
-                &mut cycle_keys,
-                &mut cycles,
-            );
+            for &dep in &self.adj[node] {
+                match self.state.get(dep).copied().unwrap_or(2) {
+                    0 => self.visit(dep),
+                    1 => self.record_cycle(dep),
+                    _ => {}
+                }
+            }
+
+            self.stack.pop();
+            self.positions[node] = None;
+            self.state[node] = 2;
+        }
+
+        fn record_cycle(&mut self, dep: usize) {
+            if let Some(start) = self.positions.get(dep).and_then(|v| *v) {
+                let slice = &self.stack[start..];
+                let nodes: Vec<String> = slice
+                    .iter()
+                    .map(|idx| self.plugin_ids[*idx].clone())
+                    .collect();
+                let canon = canonical_cycle(&nodes);
+                if !canon.is_empty() {
+                    let key = canon.join("\u{1f}");
+                    if self.cycle_keys.insert(key) {
+                        self.cycles.push(canon);
+                    }
+                }
+            }
         }
     }
 
-    cycles
+    let mut dfs = CycleDfs::new(&adj, plugin_ids);
+    for idx in 0..plugin_ids.len() {
+        if dfs.state[idx] == 0 {
+            dfs.visit(idx);
+        }
+    }
+
+    dfs.cycles
 }
 
 impl Default for PluginRegistry {
@@ -577,8 +598,7 @@ mod tests {
 
     impl Plugin for TestPlugin {
         fn metadata(&self) -> PluginMetadata {
-            PluginMetadata::new(&self.name, "1.0.0")
-                .with_capability(PluginCapability::Operators)
+            PluginMetadata::new(&self.name, "1.0.0").with_capability(PluginCapability::Operators)
         }
 
         fn as_any(&self) -> &dyn Any {
@@ -616,7 +636,7 @@ mod tests {
     #[test]
     fn test_find_by_capability() {
         let registry = PluginRegistry::new();
-        
+
         registry
             .register(Box::new(TestPlugin {
                 name: "plugin1".to_string(),
@@ -685,7 +705,10 @@ mod tests {
 
         registry.shutdown().unwrap();
         let unloaded = unload_log.lock().unwrap().clone();
-        assert_eq!(unloaded, vec!["b".to_string(), "c".to_string(), "a".to_string()]);
+        assert_eq!(
+            unloaded,
+            vec!["b".to_string(), "c".to_string(), "a".to_string()]
+        );
         assert!(registry.list_plugins().is_empty());
     }
 
@@ -729,7 +752,10 @@ mod tests {
             .unwrap();
 
         let graph = registry.dependency_graph(true);
-        assert_eq!(graph.get("a").cloned().unwrap_or_default(), Vec::<String>::new());
+        assert_eq!(
+            graph.get("a").cloned().unwrap_or_default(),
+            Vec::<String>::new()
+        );
         assert_eq!(
             graph.get("b").cloned().unwrap_or_default(),
             vec!["a".to_string()]
@@ -757,14 +783,14 @@ mod tests {
         let summary_cycle = registry.validate_dependency_graph(false);
         assert!(!summary_cycle.ok);
         assert!(summary_cycle.missing.is_empty());
-        assert!(summary_cycle
-            .cycles
+        assert!(summary_cycle.cycles.iter().any(|cycle| cycle
             .iter()
-            .any(|cycle| cycle.iter().cloned().collect::<std::collections::HashSet<_>>()
-                == std::collections::HashSet::from([
-                    "a".to_string(),
-                    "b".to_string()
-                ])));
+            .cloned()
+            .collect::<std::collections::HashSet<_>>(
+        ) == std::collections::HashSet::from([
+            "a".to_string(),
+            "b".to_string()
+        ])));
     }
 
     #[test]

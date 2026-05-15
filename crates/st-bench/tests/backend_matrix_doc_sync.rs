@@ -18,4 +18,3 @@ fn backend_matrix_markdown_is_in_sync() {
         "docs/backend_matrix.md is out of date; run `cargo run -p st-bench --bin backend_matrix_md -- --write --doc docs/backend_matrix.md`"
     );
 }
-

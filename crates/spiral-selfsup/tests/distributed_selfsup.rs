@@ -29,7 +29,7 @@ fn gradients_are_synchronized_via_all_reduce() {
         }));
     }
 
-    let expected = vec![
+    let expected = [
         (0..world_size).map(|r| r as f32 + 1.0).sum::<f32>() / world_size as f32,
         (0..world_size).map(|r| 0.25 * r as f32).sum::<f32>() / world_size as f32,
     ];
@@ -63,7 +63,7 @@ fn metrics_are_aggregated_across_workers() {
         }));
     }
 
-    let expected = vec![
+    let expected = [
         (0..world_size).map(|r| r as f32).sum::<f32>() / world_size as f32,
         (0..world_size).map(|r| (r * r) as f32).sum::<f32>() / world_size as f32,
     ];

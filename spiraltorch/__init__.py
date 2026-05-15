@@ -1,9 +1,38 @@
-"""Development shim for the SpiralTorch Python bindings.
+"""Source-checkout entry point for the SpiralTorch Python package.
 
-This module lets ``import spiraltorch`` succeed directly from a source
-checkout without first installing the wheel.  It delegates to the real
-package that lives under ``bindings/st-py`` and improves the error message
-when the compiled extension has not been built yet.
+When ``import spiraltorch`` runs from a working copy of this repository
+(rather than the published wheel), this module is what Python finds.
+It is *not* a thin shim — it does three distinct things:
+
+1. **Re-exec into the real package.** It loads
+   ``bindings/st-py/spiraltorch/__init__.py`` and adopts its namespace so
+   callers see the same surface as the wheel installed from PyPI.
+2. **Detect a missing native extension.** If the real package imports but
+   the compiled Rust extension (``spiraltorch_native`` /
+   ``spiraltorch.spiraltorch``) is not built, this module silently swaps
+   in a pure-Python stub (``_install_stub_bindings``) and emits a
+   ``RuntimeWarning``.
+3. **Carry the pure-Python stub itself.** The stub re-implements a usable
+   subset of the API (``Tensor`` with a tiled matmul, spiral-consensus
+   helpers, ``LabeledTensor`` / ``Axis`` machinery, etc.) so tests and
+   examples can run without the wheel. Other classes — notably
+   ``ScaleStack`` — exist only as placeholders that raise.
+
+What this means in practice:
+
+- The stub is **functional but not performance-equivalent** to the native
+  build. Any benchmark against PyTorch (e.g. ``bench_st_vs_torch.py``) is
+  only meaningful when the native extension is loaded; otherwise the
+  numbers are pure-Python loops and should not be cited.
+- If you see a ``RuntimeWarning`` mentioning the stub, the API you are
+  calling is the Python re-implementation, not the WGPU/Faer-backed one.
+
+To build and load the native bindings::
+
+    maturin develop -m bindings/st-py/Cargo.toml
+
+Users who installed the wheel from PyPI never load this file — the wheel
+ships its own ``spiraltorch/__init__.py`` from ``bindings/st-py``.
 """
 
 from __future__ import annotations
@@ -679,6 +708,29 @@ def _load_native_package() -> None:
     module.__path__ = [str(impl_init.parent), str(_DEV_SHIM_DIR)]
     module.__spec__ = spec
 
+    def _native_placeholder() -> ModuleNotFoundError:
+        return ModuleNotFoundError(
+            "spiraltorch.spiraltorch",
+            name="spiraltorch.spiraltorch",
+            path=str(impl_init.parent),
+        )
+
+    def _looks_like_native_import_failure(exc: BaseException) -> bool:
+        if not isinstance(exc, ImportError):
+            return False
+        native_names = {
+            "spiraltorch.spiraltorch",
+            "spiraltorch.spiraltorch_native",
+            "spiraltorch_native",
+        }
+        if getattr(exc, "name", None) in native_names:
+            return True
+        message = str(exc)
+        return (
+            any(name in message for name in native_names)
+            or ("spiraltorch" in message and any(token in message for token in (".so", ".pyd", "dlopen")))
+        )
+
     try:
         loader.exec_module(module)
     except ModuleNotFoundError as exc:
@@ -688,14 +740,22 @@ def _load_native_package() -> None:
             return
         raise
     except Exception as exc:  # pragma: no cover - defensive fallback
+        if not _looks_like_native_import_failure(exc):
+            raise
         warnings.warn(
             "Failed to load the native SpiralTorch bindings; falling back to the Python stub.",
             RuntimeWarning,
             stacklevel=2,
         )
-        placeholder = ModuleNotFoundError("spiraltorch", name="spiraltorch")
+        placeholder = _native_placeholder()
         _install_stub_bindings(module, placeholder)
         module.__dict__["__native_import_error__"] = exc
+        return
+
+    if module.__dict__.get("_rs") is None and "Tensor" not in module.__dict__:
+        placeholder = _native_placeholder()
+        _install_stub_bindings(module, placeholder)
+        module.__dict__["__native_import_error__"] = placeholder
 
 
 def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
@@ -2316,7 +2376,7 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             The returned buffer always contains ``self._rows * self._cols`` floating
             point values.
             """
-            if self._backend == "python":
+            if self._backend == "python" or isinstance(self._data, array):
                 return self._data
             return array("d", self._data.reshape(-1))
 
@@ -3030,6 +3090,24 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             "`maturin develop -m bindings/st-py/Cargo.toml`) for full functionality."
         )
 
+    def _make_native_stub(feature: str):
+        def _stub(*_args, **_kwargs):
+            raise _stub_runtime_error(feature)
+
+        _stub.__name__ = feature.rsplit(".", 1)[-1].rstrip("()")
+        return _stub
+
+    for _native_name, _feature in {
+        "init_backend": "spiraltorch.init_backend()",
+        "describe_device": "spiraltorch.describe_device()",
+        "plan": "spiraltorch.plan()",
+        "plan_topk": "spiraltorch.plan_topk()",
+    }.items():
+        _native_stub = _make_native_stub(_feature)
+        setattr(module, _native_name, _native_stub)
+        if _native_name not in all_exports:
+            all_exports.append(_native_name)
+
     def _register_stub_module(name: str, *, doc: str | None = None) -> types.ModuleType:
         qualname = f"{module.__name__}.{name}"
         stub_module = types.ModuleType(qualname, doc)
@@ -3043,6 +3121,18 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
         if name not in all_exports:
             all_exports.append(name)
         return stub_module
+
+    _planner_module = getattr(module, "planner", None)
+    if not isinstance(_planner_module, types.ModuleType):
+        _planner_module = _register_stub_module(
+            "planner",
+            doc=(
+                "Planner helpers require the SpiralTorch native extension for "
+                "hardware-aware planning."
+            ),
+        )
+    for _planner_name in ("describe_device", "plan", "plan_topk"):
+        setattr(_planner_module, _planner_name, getattr(module, _planner_name))
 
     _PLACEHOLDER_MODULES = {
         "dataset": "Datasets & loaders are only available once the SpiralTorch native extension is built.",

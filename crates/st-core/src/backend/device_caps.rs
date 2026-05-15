@@ -297,12 +297,10 @@ impl DeviceCaps {
             // shared memory. Stay conservative to avoid spilling.
             let approx_bytes_per_lane = 8;
             let denom = approx_bytes_per_lane.max(1) * lanes.max(1);
-            if denom > 0 {
-                let capacity = (shared / denom).max(lanes);
-                tile = tile
-                    .min(align_up(capacity, lanes).max(lanes))
-                    .max(align_up(128, lanes));
-            }
+            let capacity = (shared / denom).max(lanes);
+            tile = tile
+                .min(align_up(capacity, lanes).max(lanes))
+                .max(align_up(128, lanes));
         }
 
         let ctile_base = if cols > 65_536 {

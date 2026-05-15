@@ -7,6 +7,7 @@
 // device-specific dispatch tuning can happen without regenerating the shader.
 override WG_ROWS : u32 = 16u;
 override WG_COLS : u32 = 16u;
+override WG_TILE : u32 = 256u;
 
 struct Uniforms {
   B: u32,
@@ -23,6 +24,8 @@ struct Uniforms {
 @group(0) @binding(3) var<storage, read_write> dR_buf:      array<f32>;
 @group(0) @binding(4) var<storage, read_write> db_partials: array<f32>;
 @group(0) @binding(5) var<uniform>             U: Uniforms;
+
+var<workgroup> tile_gz: array<f32, WG_TILE>;
 
 fn gelu_prime(z: f32) -> f32 {
   let k0: f32 = 0.7978845608028654;
@@ -45,12 +48,8 @@ fn main(
   let row = base_row + lid.y;
   let col = base_col + lid.x;
 
-  var<workgroup> col_sum: array<f32, WG_COLS>;
-
-  if (lid.y == 0u && lid.x < WG_COLS) {
-    col_sum[lid.x] = 0.0;
-  }
-  workgroupBarrier();
+  let local_index = lid.y * WG_COLS + lid.x;
+  var gz_local: f32 = 0.0;
 
   if (row < U.B && col < U.O) {
     let idx = row * U.stride + col;
@@ -59,6 +58,7 @@ fn main(
 
     let gp = gelu_prime(z);
     let gz = g * gp;
+    gz_local = gz;
 
     gZ_out[idx] = gz;
 
@@ -67,19 +67,20 @@ fn main(
     } else {
       dR_buf[idx] = gz;
     }
-
-    if (lid.y == 0u) {
-      col_sum[lid.x] = col_sum[lid.x] + gz;
-    }
   }
 
+  tile_gz[local_index] = gz_local;
   workgroupBarrier();
 
   if (lid.y == 0u) {
     if (base_col + lid.x < U.O) {
+      var sum: f32 = 0.0;
+      for (var ry: u32 = 0u; ry < WG_ROWS; ry = ry + 1u) {
+        sum = sum + tile_gz[ry * WG_COLS + lid.x];
+      }
       let wg_linear = wid.y * U.num_wg_x + wid.x;
       let dst = wg_linear * WG_COLS + lid.x;
-      db_partials[dst] = col_sum[lid.x];
+      db_partials[dst] = sum;
     }
   }
 }

@@ -230,7 +230,7 @@ pub fn scale_stack_summary(stacks: &[ScaleStack]) -> ScaleStackSummary {
     for (i, lhs) in stacks.iter().enumerate() {
         for rhs in stacks.iter().skip(i + 1) {
             if let Some(similarity) = scale_stack_similarity(lhs, rhs) {
-                coherence += similarity.max(-1.0).min(1.0);
+                coherence += similarity.clamp(-1.0, 1.0);
                 comparisons += 1.0;
             }
         }
@@ -371,7 +371,7 @@ mod tests {
         )
         .unwrap();
         let similarity = scale_stack_similarity(&stack_a, &stack_b).unwrap();
-        assert!(similarity <= 1.0 && similarity >= -1.0);
+        assert!((-1.0..=1.0).contains(&similarity));
         let summary = scale_stack_summary(&[stack_a, stack_b]);
         assert!(summary.mean_profile.dominant_gate >= 0.0);
         assert!(summary.coherence >= -1.0 && summary.coherence <= 1.0);

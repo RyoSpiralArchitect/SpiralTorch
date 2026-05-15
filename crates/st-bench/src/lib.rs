@@ -122,7 +122,7 @@ mod model {
 
         /// Returns the backend with the highest mean latency, if any samples exist.
         pub fn slowest_backend(&self) -> Option<BenchmarkStats> {
-            self.latency_leaderboard().into_iter().rev().next()
+            self.latency_leaderboard().into_iter().next_back()
         }
 
         /// Returns summaries sorted by descending throughput.

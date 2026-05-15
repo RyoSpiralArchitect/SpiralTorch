@@ -682,7 +682,7 @@ fn narrative_summary(metrics: &ResonanceTemporalMetrics) -> String {
         return "Resonance geometry is quiescent; no meaningful curvature pulses detected."
             .to_string();
     }
-    let mut bands = vec![
+    let mut bands = [
         (metrics.homotopy_energy, "Above band accelerating curvature"),
         (
             metrics.functor_energy,

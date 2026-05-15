@@ -33,6 +33,7 @@ pub extern "C" fn st_cobol_new_resonator(
 }
 
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn st_cobol_free_resonator(handle: *mut ResonanceHandle) {
     if handle.is_null() {
         return;
@@ -43,6 +44,7 @@ pub extern "C" fn st_cobol_free_resonator(handle: *mut ResonanceHandle) {
 }
 
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn st_cobol_describe(
     handle: *mut ResonanceHandle,
     values: *const c_float,
@@ -75,6 +77,7 @@ pub extern "C" fn st_cobol_describe(
 }
 
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn st_cobol_free_string(ptr: *mut c_char) {
     if ptr.is_null() {
         return;

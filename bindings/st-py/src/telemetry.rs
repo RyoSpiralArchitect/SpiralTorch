@@ -379,7 +379,7 @@ impl PyAtlasFrame {
     pub fn districts(&self, py: Python<'_>) -> PyResult<Vec<Py<PyDict>>> {
         let mut out = Vec::new();
         for district in self.inner.districts() {
-            let dict = PyDict::new_bound(py);
+            let dict = PyDict::new(py);
             dict.set_item("name", district.name)?;
             dict.set_item("mean", district.mean)?;
             dict.set_item("span", district.span)?;
@@ -428,7 +428,7 @@ impl PyAtlasRoute {
 
     pub fn summary(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
         let summary = self.inner.summary();
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         dict.set_item("frames", summary.frames)?;
         dict.set_item("latest_timestamp", summary.latest_timestamp)?;
         dict.set_item("mean_loop_support", summary.mean_loop_support)?;
@@ -452,9 +452,9 @@ impl PyAtlasRoute {
         dict.set_item("total_notes", summary.total_notes)?;
         dict.set_item("latest_notes", summary.latest_notes)?;
 
-        let districts = pyo3::types::PyList::empty_bound(py);
+        let districts = pyo3::types::PyList::empty(py);
         for district in summary.districts {
-            let district_dict = PyDict::new_bound(py);
+            let district_dict = PyDict::new(py);
             district_dict.set_item("name", district.name)?;
             district_dict.set_item("coverage", district.coverage)?;
             district_dict.set_item("mean", district.mean)?;
@@ -464,9 +464,9 @@ impl PyAtlasRoute {
             district_dict.set_item("delta", district.delta)?;
             district_dict.set_item("std_dev", district.std_dev)?;
 
-            let focus = pyo3::types::PyList::empty_bound(py);
+            let focus = pyo3::types::PyList::empty(py);
             for metric in district.focus {
-                let metric_dict = PyDict::new_bound(py);
+                let metric_dict = PyDict::new(py);
                 metric_dict.set_item("name", metric.name)?;
                 metric_dict.set_item("coverage", metric.coverage)?;
                 metric_dict.set_item("mean", metric.mean)?;
@@ -481,9 +481,9 @@ impl PyAtlasRoute {
         }
         dict.set_item("districts", districts)?;
 
-        let concept_pulses = pyo3::types::PyList::empty_bound(py);
+        let concept_pulses = pyo3::types::PyList::empty(py);
         for pulse in summary.concept_pulses {
-            let pulse_dict = PyDict::new_bound(py);
+            let pulse_dict = PyDict::new(py);
             pulse_dict.set_item("term", pulse.term)?;
             pulse_dict.set_item("sense", pulse.sense.label())?;
             pulse_dict.set_item("description", pulse.sense.description())?;
@@ -514,7 +514,7 @@ impl PyAtlasRoute {
             return Ok(None);
         };
 
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         dict.set_item("district", perspective.district)?;
         dict.set_item("coverage", perspective.coverage)?;
         dict.set_item("mean", perspective.mean)?;
@@ -525,9 +525,9 @@ impl PyAtlasRoute {
         dict.set_item("stability", perspective.stability)?;
         dict.set_item("guidance", perspective.guidance)?;
 
-        let focus = pyo3::types::PyList::empty_bound(py);
+        let focus = pyo3::types::PyList::empty(py);
         for metric in perspective.focus {
-            let metric_dict = PyDict::new_bound(py);
+            let metric_dict = PyDict::new(py);
             metric_dict.set_item("name", metric.name)?;
             metric_dict.set_item("coverage", metric.coverage)?;
             metric_dict.set_item("mean", metric.mean)?;
@@ -547,7 +547,7 @@ impl PyAtlasRoute {
         let summary = self.inner.summary();
         let mut out = Vec::new();
         for beacon in summary.beacons(limit) {
-            let dict = PyDict::new_bound(py);
+            let dict = PyDict::new(py);
             dict.set_item("district", beacon.district)?;
             dict.set_item("metric", beacon.metric)?;
             dict.set_item("coverage", beacon.coverage)?;
@@ -634,7 +634,7 @@ impl PyDashboardRingIter {
 }
 
 fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
-    let module = PyModule::new_bound(py, "telemetry")?;
+    let module = PyModule::new(py, "telemetry")?;
     module.add("__doc__", "Telemetry dashboards and runtime metrics")?;
     module.add_class::<PyDashboardMetric>()?;
     module.add_class::<PyDashboardEvent>()?;

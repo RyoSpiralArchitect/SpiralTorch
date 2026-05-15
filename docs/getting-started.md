@@ -17,7 +17,7 @@ Welcome to SpiralTorch! This guide will help you get up and running with SpiralT
 ### From PyPI (Recommended for Python Users)
 
 ```bash
-pip install -U spiraltorch==0.4.6
+pip install -U spiraltorch
 ```
 
 The wheel is pre-built with `abi3` compatibility, supporting Python >= 3.8.
@@ -28,6 +28,7 @@ Prerequisites:
 - Rust stable (`rustup`)
 - Cargo
 - macOS: Xcode Command Line Tools / Linux: build-essentials
+- Protobuf compiler (`protoc`) if you run the full workspace test surface, including examples
 
 ```bash
 # Clone the repository

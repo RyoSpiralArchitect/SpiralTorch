@@ -39,6 +39,17 @@ def test_describe_device_explicit_wgpu_backend() -> None:
     assert "preferred_compaction_tile" in report
 
 
+def test_describe_device_auto_backend_uses_effective_wgpu_label() -> None:
+    st = require_native()
+
+    report = st.describe_device("auto", workgroup=300, cols=4096)
+    assert report["backend"] == "wgpu"
+    assert "lane_width" in report
+    assert "max_workgroup" in report
+    assert "subgroup" in report
+    assert "shared_mem_per_workgroup" in report
+
+
 def test_plan_explicit_wgpu_backend() -> None:
     st = require_native()
 

@@ -86,7 +86,7 @@ impl PsiComponent {
     pub fn parse_list(spec: &str) -> Result<Self, String> {
         let mut mask = PsiComponent::empty();
         for token in spec
-            .split(|c| matches!(c, ',' | '|' | ';'))
+            .split([',', '|', ';'])
             .flat_map(|segment| segment.split_whitespace())
         {
             if token.is_empty() {
@@ -144,12 +144,15 @@ impl PsiConfig {
         } else {
             4
         };
-        let mut cfg = PsiConfig::default();
-        cfg.enabled = true;
-        cfg.components =
-            PsiComponent::defaults() | PsiComponent::BAND_ENERGY | PsiComponent::POSITIVE_CURVATURE;
-        cfg.ema_alpha = ema_alpha;
-        cfg.sample_rate = sample_rate.max(1);
+        let mut cfg = PsiConfig {
+            enabled: true,
+            components: PsiComponent::defaults()
+                | PsiComponent::BAND_ENERGY
+                | PsiComponent::POSITIVE_CURVATURE,
+            ema_alpha,
+            sample_rate: sample_rate.max(1),
+            ..Default::default()
+        };
         cfg.weights.insert(PsiComponent::LOSS, 1.0);
         cfg.weights.insert(PsiComponent::GRAD_NORM, 0.35);
         cfg.weights.insert(
@@ -382,6 +385,7 @@ impl PsiSpiralAdvisory {
 
 /// Convenience helper that derives a Spiral advisory directly from the
 /// parameter tuple used in `psi_spiral_metrics`.
+#[allow(clippy::too_many_arguments)]
 pub fn psi_spiral_advisory_from_params(
     mu0: f64,
     gamma: f64,
@@ -403,6 +407,7 @@ pub fn psi_spiral_advisory_from_params(
 }
 
 /// Computes the PSI tuning prescription derived from the Spiral parameters.
+#[allow(clippy::too_many_arguments)]
 pub fn psi_spiral_tuning_from_params(
     mu0: f64,
     gamma: f64,
@@ -499,7 +504,7 @@ impl PsiMeter {
         let mut events = Vec::new();
         let mut breakdown = self.ema.clone();
 
-        if !self.cfg.enabled || (self.step as u32) % self.cfg.sample_rate != 0 {
+        if !self.cfg.enabled || !(self.step as u32).is_multiple_of(self.cfg.sample_rate) {
             let total = self
                 .cfg
                 .weights
@@ -616,24 +621,27 @@ mod tests {
         assert!(tuning.required_components.contains(PsiComponent::ACT_DRIFT));
         assert!(tuning
             .weight_increments
-            .get(&PsiComponent::ACT_DRIFT)
-            .is_some());
-        let mut cfg = PsiConfig::default();
-        cfg.enabled = true;
-        cfg.components = PsiComponent::LOSS;
+            .contains_key(&PsiComponent::ACT_DRIFT));
+        let mut cfg = PsiConfig {
+            enabled: true,
+            components: PsiComponent::LOSS,
+            ..Default::default()
+        };
         cfg.weights.insert(PsiComponent::LOSS, 1.0);
         cfg.apply_spiral_tuning(&tuning);
         assert!(cfg.components.contains(PsiComponent::ACT_DRIFT));
-        assert!(cfg.weights.get(&PsiComponent::ACT_DRIFT).is_some());
+        assert!(cfg.weights.contains_key(&PsiComponent::ACT_DRIFT));
         assert!(cfg.sample_rate >= 1);
     }
 
     #[test]
     fn ema_basic() {
-        let mut cfg = PsiConfig::default();
-        cfg.enabled = true;
-        cfg.components = PsiComponent::LOSS;
-        cfg.ema_alpha = 0.5;
+        let cfg = PsiConfig {
+            enabled: true,
+            components: PsiComponent::LOSS,
+            ema_alpha: 0.5,
+            ..Default::default()
+        };
         let mut meter = PsiMeter::new(cfg);
         let (reading, events) = meter.update(&PsiInput {
             loss: 1.0,
@@ -652,10 +660,12 @@ mod tests {
 
     #[test]
     fn threshold_cross_up_and_down() {
-        let mut cfg = PsiConfig::default();
-        cfg.enabled = true;
-        cfg.components = PsiComponent::GRAD_NORM;
-        cfg.ema_alpha = 0.5;
+        let mut cfg = PsiConfig {
+            enabled: true,
+            components: PsiComponent::GRAD_NORM,
+            ema_alpha: 0.5,
+            ..Default::default()
+        };
         cfg.thresholds
             .insert(PsiComponent::GRAD_NORM, (1.0 + 1.0f32.sqrt()).ln());
         let mut meter = PsiMeter::new(cfg);
@@ -684,10 +694,12 @@ mod tests {
 
     #[test]
     fn positive_curvature_component_tracks_metric() {
-        let mut cfg = PsiConfig::default();
-        cfg.enabled = true;
-        cfg.components = PsiComponent::POSITIVE_CURVATURE;
-        cfg.ema_alpha = 0.5;
+        let mut cfg = PsiConfig {
+            enabled: true,
+            components: PsiComponent::POSITIVE_CURVATURE,
+            ema_alpha: 0.5,
+            ..Default::default()
+        };
         cfg.weights.insert(PsiComponent::POSITIVE_CURVATURE, 1.0);
         let mut meter = PsiMeter::new(cfg);
         let (reading, _) = meter.update(&PsiInput {
@@ -725,11 +737,8 @@ mod tests {
         cfg_manual.apply_spiral_advisory(&advisory);
 
         assert!(cfg_manual.components.contains(PsiComponent::ATTN_ENTROPY));
-        assert!(cfg_manual
-            .weights
-            .get(&PsiComponent::ATTN_ENTROPY)
-            .is_some());
-        assert!(cfg_manual.thresholds.get(&PsiComponent::LOSS).is_some());
+        assert!(cfg_manual.weights.contains_key(&PsiComponent::ATTN_ENTROPY));
+        assert!(cfg_manual.thresholds.contains_key(&PsiComponent::LOSS));
         assert!(cfg_manual.sample_rate >= base_sample);
 
         let cfg_auto = PsiConfig::automated_with_spiral(hint, &advisory);
@@ -743,9 +752,11 @@ mod tests {
 
     #[test]
     fn disabled_short_circuits() {
-        let mut cfg = PsiConfig::default();
-        cfg.enabled = false;
-        cfg.components = PsiComponent::LOSS;
+        let cfg = PsiConfig {
+            enabled: false,
+            components: PsiComponent::LOSS,
+            ..Default::default()
+        };
         let mut meter = PsiMeter::new(cfg);
         let (reading, events) = meter.update(&PsiInput {
             loss: 42.0,

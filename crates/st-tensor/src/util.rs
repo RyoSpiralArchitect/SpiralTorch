@@ -13,8 +13,8 @@ use std::{
     thread,
 };
 use wgpu::{
-    Buffer, BufferDescriptor, BufferSlice, BufferUsages, CommandEncoderDescriptor, Device, MapMode,
-    Maintain, Queue,
+    Buffer, BufferDescriptor, BufferSlice, BufferUsages, CommandEncoderDescriptor, Device,
+    Maintain, MapMode, Queue,
 };
 
 fn wait_for_map(slice: &BufferSlice, device: &Device) -> Result<(), String> {

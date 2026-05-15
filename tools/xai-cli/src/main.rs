@@ -806,7 +806,7 @@ fn attach_statistics(metadata: &mut AttributionMetadata, stats: &AttributionStat
 }
 
 fn print_statistics(stats: &AttributionStatistics, metadata: &AttributionMetadata) {
-    let mut context = format!("{}", metadata.algorithm);
+    let mut context = metadata.algorithm.to_string();
     if let Some(layer) = &metadata.layer {
         context.push_str(&format!("/{layer}"));
     }

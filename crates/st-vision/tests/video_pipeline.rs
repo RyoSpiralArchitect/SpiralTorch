@@ -65,7 +65,7 @@ fn pipeline_emits_temporal_z_dynamics() {
     );
 
     let mut outputs: Vec<VideoPipelineOutput> = Vec::new();
-    while let Some(output) = pipeline.next().expect("frame") {
+    while let Some(output) = pipeline.next_frame().expect("frame") {
         outputs.push(output);
     }
 
@@ -95,7 +95,7 @@ fn pipeline_emits_temporal_z_dynamics() {
         let (rows, cols) = output.resonance_envelope.shape();
         assert_eq!(rows, 2);
         assert_eq!(cols, 4);
-        assert!(output.temporal_digest.frames >= idx + 1);
+        assert!(output.temporal_digest.frames > idx);
         assert!(output.window_digest.frames >= 1);
     }
 

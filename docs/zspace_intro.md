@@ -89,6 +89,92 @@ instances, or the telemetry captured inside a `ZSpacePartialBundle`; everything
 is flattened and merged automatically before the posterior update so PSI health
 metrics and canvas energy stay aligned with the atlas.
 
+## Experiment artifact bundles
+
+Trace viewers are most useful when they travel with the runtime decision that
+produced them. `spiraltorch.write_zspace_experiment_artifacts(...)` writes the
+trace HTML, Atlas non-collapse HTML, downstream hook, and a manifest in one pass.
+The manifest includes a `planner_snapshot` so later analysis can see which
+device report and rank plan framed the run:
+
+```python
+import spiraltorch as st
+
+manifest = st.write_zspace_experiment_artifacts(
+    "spiraltorch_zspace_trace.jsonl",
+    title="Z-space trace with planner context",
+    planner_backend="auto",
+    planner_rows=8,
+    planner_cols=65_536,
+    planner_k=1_024,
+)
+
+print(manifest["views"]["trace_html"])
+print(manifest["planner_snapshot"]["device_report"])
+```
+
+The standalone helper `examples/zspace_trace_export_artifacts.py` uses the same
+API, so generated traces from Rust examples and Python notebooks share the same
+manifest shape.
+
+Once a manifest exists, the reader side can turn it back into a compact story
+packet or a cockpit page:
+
+```python
+story = st.summarize_zspace_experiment_manifest("spiraltorch_zspace_trace.artifacts.json")
+cockpit = st.write_zspace_experiment_cockpit_html(
+    "spiraltorch_zspace_trace.artifacts.json"
+)
+
+print(story["planner"]["effective_backend"])
+print(cockpit)
+```
+
+For shell workflows, `examples/zspace_experiment_cockpit.py` reads the same
+manifest and writes a static HTML cockpit that links back to the trace viewer,
+Atlas non-collapse view, JSONL trace, and original artifact manifest.
+
+When a cleanup or backend comparison produces several manifests, collect them
+into one comparison index:
+
+```python
+index = st.summarize_zspace_experiment_index(
+    ["run_a.artifacts.json", "run_b.artifacts.json"]
+)
+index_html = st.write_zspace_experiment_index_html(
+    ["run_a.artifacts.json", "run_b.artifacts.json"],
+    "zspace_experiments.index.html",
+)
+
+print(index["summary"]["planner_backends"])
+print(index_html)
+```
+
+For shell workflows, `examples/zspace_experiment_index.py` writes the same
+static index page and keeps links back to each run's trace viewer, Atlas
+non-collapse view, and artifact manifest.
+
+For a baseline-versus-candidate check, compare two manifests directly:
+
+```python
+comparison = st.compare_zspace_experiment_manifests(
+    "baseline.artifacts.json",
+    "candidate.artifacts.json",
+)
+comparison_html = st.write_zspace_experiment_comparison_html(
+    "baseline.artifacts.json",
+    "candidate.artifacts.json",
+    "candidate.comparison.html",
+)
+
+print(comparison["status"])
+print(comparison_html)
+```
+
+The companion `examples/zspace_experiment_compare.py` prints the same
+comparison status and can exit non-zero with `--fail-on-regression` when the
+candidate drops beyond the configured stability or frame thresholds.
+
 ### Importing external weights
 
 Warm-starting from other ecosystems hinges on the DLPack bridges:

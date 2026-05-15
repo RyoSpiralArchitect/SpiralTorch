@@ -2710,9 +2710,11 @@ impl ModuleTrainer {
             return None;
         }
 
-        let mut cfg = PsiConfig::default();
-        cfg.enabled = true;
-        cfg.components = PsiComponent::defaults();
+        let mut cfg = PsiConfig {
+            enabled: true,
+            components: PsiComponent::defaults(),
+            ..Default::default()
+        };
 
         if let Ok(spec) = env::var("SPIRAL_PSI_COMPONENTS") {
             if let Ok(mask) = PsiComponent::parse_list(&spec) {

@@ -495,6 +495,7 @@ pub(crate) struct PySpectralLearningRatePolicy {
 
 #[cfg(feature = "nn")]
 impl PySpectralLearningRatePolicy {
+    #[allow(clippy::too_many_arguments)]
     fn configure(
         mut inner: RustSpectralLearningRatePolicy,
         smoothing: Option<f32>,
@@ -1927,6 +1928,7 @@ impl PyWaveRnn {
 impl PyWaveRnn {
     #[new]
     #[pyo3(signature = (name, in_channels, hidden_dim, kernel_size, curvature, temperature, *, stride=1, padding=0))]
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: &str,
         in_channels: usize,
@@ -2874,7 +2876,7 @@ impl PyZSpaceLayerNorm {
         let Some(telemetry) = self.inner()?.telemetry() else {
             return Ok(None);
         };
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         dict.set_item("batch", telemetry.batch())?;
         dict.set_item("features", telemetry.features())?;
         dict.set_item("mean", telemetry.mean().to_vec())?;
@@ -3258,7 +3260,7 @@ impl PyZSpaceBatchNorm1d {
         let Some(telemetry) = self.inner()?.telemetry() else {
             return Ok(None);
         };
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         dict.set_item("batch", telemetry.batch())?;
         dict.set_item("features", telemetry.features())?;
         dict.set_item("mean", telemetry.mean().to_vec())?;
@@ -3902,11 +3904,13 @@ impl PyRoundtableConfig {
         if top_k == 0 || mid_k == 0 || bottom_k == 0 {
             return Err(PyValueError::new_err("top_k/mid_k/bottom_k must be >= 1"));
         }
-        let mut config = RustRoundtableConfig::default();
-        config.top_k = top_k;
-        config.mid_k = mid_k;
-        config.bottom_k = bottom_k;
-        config.here_tolerance = here_tolerance.max(0.0);
+        let config = RustRoundtableConfig {
+            top_k,
+            mid_k,
+            bottom_k,
+            here_tolerance: here_tolerance.max(0.0),
+            ..Default::default()
+        };
         Ok(Self { inner: config })
     }
 
@@ -3949,6 +3953,7 @@ pub(crate) struct PySoftLogicConfig {
 impl PySoftLogicConfig {
     #[new]
     #[pyo3(signature = (*, inertia=0.65, inertia_min=0.15, inertia_drift_k=0.6, inertia_z_k=0.2, drift_gain=0.25, psi_gain=0.5, loss_gain=0.35, floor=0.25, scale_gain=0.2, region_gain=0.15, region_factor_gain=0.35, energy_equalize_gain=0.0, mean_normalize_gain=0.0, energy_equalize_auto=0.0, mean_normalize_auto=0.0))]
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         inertia: f32,
         inertia_min: f32,
@@ -4201,7 +4206,7 @@ pub(crate) struct PyNnModuleTrainer {
 #[cfg(feature = "nn")]
 fn collect_batches(py: Python<'_>, batches: &Bound<'_, PyAny>) -> PyResult<Vec<(Tensor, Tensor)>> {
     let mut out = Vec::new();
-    for item in PyIterator::from_bound_object(batches)? {
+    for item in PyIterator::from_object(batches)? {
         let item = item?;
         let (inputs, targets): (Py<PyTensor>, Py<PyTensor>) = item.extract()?;
         let input = inputs.bind(py).borrow().inner.clone();
@@ -4512,7 +4517,7 @@ fn state_dict_to_pylist(
 ) -> PyResult<PyObject> {
     let mut entries: Vec<_> = state.into_iter().collect();
     entries.sort_by(|a, b| a.0.cmp(&b.0));
-    let list = PyList::empty_bound(py);
+    let list = PyList::empty(py);
     for (name, tensor) in entries {
         list.append((name, Py::new(py, PyTensor::from_tensor(tensor))?))?;
     }
@@ -4726,7 +4731,7 @@ impl PyNnModuleTrainer {
         let metrics = self.inner.curvature_metrics();
         match metrics {
             Some(metrics) => {
-                let dict = PyDict::new_bound(py);
+                let dict = PyDict::new(py);
                 dict.set_item("raw_pressure", metrics.raw_pressure)?;
                 dict.set_item("smoothed_pressure", metrics.smoothed_pressure)?;
                 dict.set_item("curvature", metrics.curvature)?;
@@ -4740,7 +4745,7 @@ impl PyNnModuleTrainer {
     pub fn enable_spectral_learning_rate(&mut self, policy: Option<&PySpectralLearningRatePolicy>) {
         let policy = policy
             .map(|policy| policy.inner.clone())
-            .unwrap_or_else(RustSpectralLearningRatePolicy::default);
+            .unwrap_or_default();
         self.inner.enable_spectral_learning_rate(policy);
     }
 
@@ -4752,7 +4757,7 @@ impl PyNnModuleTrainer {
         let metrics = self.inner.spectral_metrics();
         match metrics {
             Some(metrics) => {
-                let dict = PyDict::new_bound(py);
+                let dict = PyDict::new(py);
                 dict.set_item("source", metrics.source.as_str())?;
                 dict.set_item("turnover", metrics.turnover)?;
                 if let Some(label) = metrics.label {
@@ -4770,7 +4775,7 @@ impl PyNnModuleTrainer {
                 }
 
                 if let Some(adjustment) = metrics.adjustment.as_ref() {
-                    let adjustment_dict = PyDict::new_bound(py);
+                    let adjustment_dict = PyDict::new(py);
                     adjustment_dict.set_item("absolute_lr_scale", adjustment.absolute_lr_scale)?;
                     adjustment_dict.set_item("sheet_index", adjustment.sheet_index)?;
                     adjustment_dict.set_item("sheet_count", adjustment.sheet_count)?;
@@ -4946,7 +4951,7 @@ fn desire_phase_label(phase: DesirePhase) -> &'static str {
 
 #[cfg(feature = "nn")]
 fn desire_weights_to_py(py: Python<'_>, weights: &DesireWeights) -> PyResult<PyObject> {
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("alpha", weights.alpha)?;
     dict.set_item("beta", weights.beta)?;
     dict.set_item("gamma", weights.gamma)?;
@@ -4992,12 +4997,12 @@ fn geometry_bias_metrics_to_py(
     py: Python<'_>,
     metrics: &GeometryBiasMetrics,
 ) -> PyResult<PyObject> {
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("accuracy_mean", metrics.accuracy_mean)?;
     dict.set_item("fairness_mean", metrics.fairness_mean)?;
     dict.set_item("window", metrics.window)?;
     if let Some(latest) = metrics.latest.as_ref() {
-        let latest_dict = PyDict::new_bound(py);
+        let latest_dict = PyDict::new(py);
         latest_dict.set_item("accuracy", latest.accuracy)?;
         latest_dict.set_item("fairness", latest.fairness)?;
         latest_dict.set_item("timestamp_ms", system_time_ms(latest.timestamp))?;
@@ -5013,7 +5018,7 @@ fn geometry_coherence_to_py(
     py: Python<'_>,
     sample: &GeometryCoherenceSample,
 ) -> PyResult<PyObject> {
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("z_energy", sample.z_energy)?;
     dict.set_item("roundtable_energy", sample.roundtable_energy)?;
     dict.set_item("composite_energy", sample.composite_energy)?;
@@ -5028,7 +5033,7 @@ fn desire_trainer_summary_to_py(
     py: Python<'_>,
     summary: &st_nn::DesireTrainerSummary,
 ) -> PyResult<PyObject> {
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("total", summary.total)?;
     dict.set_item("observation", summary.observation)?;
     dict.set_item("injection", summary.injection)?;
@@ -5053,7 +5058,7 @@ fn desire_roundtable_summary_to_py(
     py: Python<'_>,
     summary: &DesireRoundtableSummary,
 ) -> PyResult<PyObject> {
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("steps", summary.steps)?;
     dict.set_item("triggers", summary.triggers)?;
     dict.set_item("mean_entropy", summary.mean_entropy)?;
@@ -5158,7 +5163,7 @@ impl PyDesireRoundtableBridge {
         let Some(impulse) = impulse else {
             return Ok(None);
         };
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         dict.set_item(
             "multipliers",
             (
@@ -5297,6 +5302,7 @@ impl PyDesireTelemetryBundle {
 }
 
 #[cfg(feature = "nn")]
+#[allow(clippy::too_many_arguments)]
 fn build_simple_desire_automation(
     vocab_size: usize,
     concepts: usize,
@@ -5723,7 +5729,7 @@ impl PyMaxwellDesireBridge {
         let Some((hint, narrative)) = self.inner.emit(channel, &pulse) else {
             return Ok(None);
         };
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         match hint {
             ConceptHint::Window(window) => {
                 dict.set_item("window", window)?;
@@ -5922,7 +5928,7 @@ impl PyDesirePipeline {
             .step_realtime(&logits, previous_token, &concept_hint)
             .map_err(tensor_err_to_py)?;
 
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         dict.set_item("phase", desire_phase_label(step.solution.phase))?;
         dict.set_item("temperature", step.solution.temperature)?;
         dict.set_item("entropy", step.solution.entropy)?;
@@ -5936,7 +5942,7 @@ impl PyDesirePipeline {
         dict.set_item("logit_offsets", step.solution.logit_offsets.clone())?;
         dict.set_item("triggered", step.trigger.is_some())?;
         if let Some(trigger) = step.trigger.as_ref() {
-            let trig = PyDict::new_bound(py);
+            let trig = PyDict::new(py);
             trig.set_item("mean_penalty", trigger.mean_penalty)?;
             trig.set_item("mean_entropy", trigger.mean_entropy)?;
             trig.set_item("temperature", trigger.temperature)?;
@@ -8585,7 +8591,7 @@ impl PyZRelativityModule {
 
 #[cfg(feature = "nn")]
 fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
-    let module = PyModule::new_bound(py, "nn")?;
+    let module = PyModule::new(py, "nn")?;
     module.add("__doc__", "SpiralTorch neural network primitives")?;
     module.add_class::<PyIdentity>()?;
     module.add_class::<PyLinear>()?;
@@ -8858,7 +8864,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
 
 #[cfg(not(feature = "nn"))]
 fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
-    let module = PyModule::new_bound(py, "nn")?;
+    let module = PyModule::new(py, "nn")?;
     module.add("__doc__", "SpiralTorch neural network primitives")?;
     parent.add_submodule(&module)?;
     Ok(())

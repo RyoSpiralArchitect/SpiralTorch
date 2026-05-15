@@ -3,6 +3,7 @@ authors = ["Ryo ∴ SpiralArchitect <kishkavsesvit@icloud.com>"]
 name = "st-kv"
 version = "0.2.0"
 edition = "2021"
+description = "Optional Redis-backed key-value helpers for SpiralTorch"
 license = "AGPL-3.0-or-later"
 
 [features]

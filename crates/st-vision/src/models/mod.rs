@@ -25,6 +25,12 @@ pub struct ForwardAttributionHooks {
     gradients: HashMap<String, Tensor>,
 }
 
+impl Default for ForwardAttributionHooks {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ForwardAttributionHooks {
     pub fn new() -> Self {
         Self {

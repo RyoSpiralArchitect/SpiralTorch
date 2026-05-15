@@ -324,9 +324,7 @@ impl ZSpaceTraceEvent {
             ZSpaceTraceEvent::LinguisticProfileRegistered { .. } => "LinguisticProfileRegistered",
             ZSpaceTraceEvent::LinguisticProfilesCleared { .. } => "LinguisticProfilesCleared",
             ZSpaceTraceEvent::SemanticWindowDerived { .. } => "SemanticWindowDerived",
-            ZSpaceTraceEvent::SemanticDistributionDerived { .. } => {
-                "SemanticDistributionDerived"
-            }
+            ZSpaceTraceEvent::SemanticDistributionDerived { .. } => "SemanticDistributionDerived",
             ZSpaceTraceEvent::CanonicalConceptSelected { .. } => "CanonicalConceptSelected",
             ZSpaceTraceEvent::MaxwellBridgeEmitted { .. } => "MaxwellBridgeEmitted",
             ZSpaceTraceEvent::LinguisticContourEmitted { .. } => "LinguisticContourEmitted",
@@ -424,8 +422,7 @@ impl ZSpaceTraceEvent {
                 snapshot.preserved_channels = Some(telemetry.preserved);
                 snapshot.discarded_channels = Some(telemetry.discarded);
                 snapshot.pre_discard_preserved_ratio = Some(telemetry.preserved_ratio);
-                snapshot.pre_discard_survivor_energy_ratio =
-                    Some(telemetry.survivor_energy_ratio);
+                snapshot.pre_discard_survivor_energy_ratio = Some(telemetry.survivor_energy_ratio);
                 Some(snapshot)
             }
             ZSpaceTraceEvent::LanguageBridged { pulse, .. }
@@ -601,7 +598,8 @@ impl ZSpaceTraceRecorder {
 
     pub fn records(&self) -> Vec<ZSpaceTraceRecord> {
         let trace = self.snapshot();
-        trace.events
+        trace
+            .events
             .iter()
             .map(ZSpaceTraceEvent::stable_record)
             .collect()
@@ -658,10 +656,12 @@ impl ZSpaceTraceRecorder {
                 narrative: narrative.cloned(),
                 pulse: MaxwellZPulseSummary::from(pulse),
             },
-            ZSpaceSequencerStage::BackendConfigured { backend } => ZSpaceTraceEvent::BackendConfigured {
-                step,
-                backend: backend.label().to_string(),
-            },
+            ZSpaceSequencerStage::BackendConfigured { backend } => {
+                ZSpaceTraceEvent::BackendConfigured {
+                    step,
+                    backend: backend.label().to_string(),
+                }
+            }
             ZSpaceSequencerStage::LinguisticProfileRegistered { profile } => {
                 ZSpaceTraceEvent::LinguisticProfileRegistered {
                     step,
@@ -712,18 +712,22 @@ impl ZSpaceTraceRecorder {
                     contour: LinguisticContourSummary::from(contour),
                 }
             }
-            ZSpaceSequencerStage::ChannelsDescribed { coherence, reports } => ZSpaceTraceEvent::ChannelsDescribed {
-                step,
-                coherence: coherence.iter().copied().take(limit).collect(),
-                reports: reports
-                    .iter()
-                    .map(LinguisticChannelReportSummary::from)
-                    .collect(),
-            },
-            ZSpaceSequencerStage::SemanticWindowFused { concept } => ZSpaceTraceEvent::SemanticWindowFused {
-                step,
-                concept: ConceptHintSnapshot::from_hint(concept, limit),
-            },
+            ZSpaceSequencerStage::ChannelsDescribed { coherence, reports } => {
+                ZSpaceTraceEvent::ChannelsDescribed {
+                    step,
+                    coherence: coherence.iter().copied().take(limit).collect(),
+                    reports: reports
+                        .iter()
+                        .map(LinguisticChannelReportSummary::from)
+                        .collect(),
+                }
+            }
+            ZSpaceSequencerStage::SemanticWindowFused { concept } => {
+                ZSpaceTraceEvent::SemanticWindowFused {
+                    step,
+                    concept: ConceptHintSnapshot::from_hint(concept, limit),
+                }
+            }
             #[cfg(feature = "psi")]
             ZSpaceSequencerStage::PsiTelemetryPublished {
                 pulse,
@@ -803,9 +807,17 @@ pub fn coherence_relation_tensor(coherence: &[f32]) -> PureResult<Tensor> {
 
     let mut data = Vec::with_capacity(n * n);
     for &a in coherence {
-        let a = if a.is_finite() { (a / max).clamp(0.0, 1.0) } else { 0.0 };
+        let a = if a.is_finite() {
+            (a / max).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
         for &b in coherence {
-            let b = if b.is_finite() { (b / max).clamp(0.0, 1.0) } else { 0.0 };
+            let b = if b.is_finite() {
+                (b / max).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
             data.push(a * b);
         }
     }

@@ -63,7 +63,7 @@ impl ZSpaceTextVae {
         let encoder = LanguageWaveEncoder::new(curvature, temperature)?;
         let input_dim = window_chars
             .checked_mul(2)
-            .ok_or_else(|| TensorError::InvalidValue {
+            .ok_or(TensorError::InvalidValue {
                 label: "zspace_text_vae_input_dim_overflow",
             })?;
         let vae = ZSpaceVae::new(input_dim, latent_dim, seed);
@@ -160,8 +160,10 @@ impl ZSpaceTextVae {
         }
         let checkpoint = self.checkpoint();
         let payload = if is_json_path(path) {
-            serde_json::to_vec_pretty(&checkpoint).map_err(|err| TensorError::SerializationError {
-                message: err.to_string(),
+            serde_json::to_vec_pretty(&checkpoint).map_err(|err| {
+                TensorError::SerializationError {
+                    message: err.to_string(),
+                }
             })?
         } else {
             bincode::serialize(&checkpoint).map_err(|err| TensorError::SerializationError {
@@ -215,12 +217,13 @@ impl ZSpaceTextVae {
                 label: "zspace_text_vae_checkpoint_window_chars",
             });
         }
-        let input_dim = checkpoint
-            .window_chars
-            .checked_mul(2)
-            .ok_or_else(|| TensorError::InvalidValue {
-                label: "zspace_text_vae_checkpoint_input_dim_overflow",
-            })?;
+        let input_dim =
+            checkpoint
+                .window_chars
+                .checked_mul(2)
+                .ok_or(TensorError::InvalidValue {
+                    label: "zspace_text_vae_checkpoint_input_dim_overflow",
+                })?;
 
         let encoder = LanguageWaveEncoder::new(checkpoint.curvature, checkpoint.temperature)?;
         let vae = ZSpaceVae::from_checkpoint(checkpoint.vae)?;
@@ -250,7 +253,7 @@ fn fit_text_window(text: &str, window_chars: usize) -> String {
         count += 1;
     }
     if count < window_chars {
-        out.extend(std::iter::repeat(' ').take(window_chars - count));
+        out.extend(std::iter::repeat_n(' ', window_chars - count));
     }
     out
 }

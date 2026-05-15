@@ -2,6 +2,7 @@
 # so it is shipped in the published wheel (PEP 561).
 from __future__ import annotations
 
+from os import PathLike
 from typing import Any, Callable, ContextManager, Dict, Iterable, Iterator, List, Literal, Mapping, Optional, Sequence, Tuple, overload
 from types import ModuleType
 
@@ -85,6 +86,98 @@ def write_zspace_atlas_noncollapse_html(
 ) -> str: ...
 
 def load_zspace_artifact_manifest(path: str) -> Dict[str, Any]: ...
+
+def build_zspace_planner_snapshot(
+    *,
+    backend: str | None = ...,
+    rows: int | None = ...,
+    cols: int | None = ...,
+    k: int | None = ...,
+    describe_device: Any | None = ...,
+    plan_topk: Any | None = ...,
+    device_report: Mapping[str, Any] | None = ...,
+    rank_plan: Any | None = ...,
+) -> Dict[str, Any]: ...
+
+def write_zspace_experiment_artifacts(
+    trace_jsonl: str | PathLike[str],
+    *,
+    trace_html: str | PathLike[str] | None = ...,
+    atlas_html: str | PathLike[str] | None = ...,
+    manifest: str | PathLike[str] | None = ...,
+    title: str = ...,
+    district: str = ...,
+    event_type: str = ...,
+    bound: int = ...,
+    top_k: int = ...,
+    metadata: Mapping[str, Any] | None = ...,
+    capture_planner: bool = ...,
+    planner_backend: str | None = ...,
+    planner_rows: int | None = ...,
+    planner_cols: int | None = ...,
+    planner_k: int | None = ...,
+    planner_snapshot: Mapping[str, Any] | None = ...,
+    describe_device: Any | None = ...,
+    plan_topk: Any | None = ...,
+    device_report: Mapping[str, Any] | None = ...,
+    rank_plan: Any | None = ...,
+) -> Dict[str, Any]: ...
+
+def summarize_zspace_experiment_manifest(
+    manifest_or_path: Mapping[str, Any] | str | PathLike[str],
+    *,
+    top_k: int = ...,
+) -> Dict[str, Any]: ...
+
+def write_zspace_experiment_cockpit_html(
+    manifest_or_path: Mapping[str, Any] | str | PathLike[str],
+    html_path: str | PathLike[str] | None = ...,
+    *,
+    title: str | None = ...,
+    top_k: int = ...,
+) -> str: ...
+
+def summarize_zspace_experiment_index(
+    manifests: Sequence[Mapping[str, Any] | str | PathLike[str]],
+    *,
+    top_k: int = ...,
+    title: str = ...,
+) -> Dict[str, Any]: ...
+
+def write_zspace_experiment_index_html(
+    manifests: Sequence[Mapping[str, Any] | str | PathLike[str]],
+    html_path: str | PathLike[str] | None = ...,
+    *,
+    title: str = ...,
+    top_k: int = ...,
+) -> str: ...
+
+def compare_zspace_experiment_manifests(
+    baseline: Mapping[str, Any] | str | PathLike[str],
+    candidate: Mapping[str, Any] | str | PathLike[str],
+    *,
+    top_k: int = ...,
+    title: str | None = ...,
+    warn_stability_drop: float = ...,
+    fail_stability_drop: float = ...,
+    min_frame_ratio: float = ...,
+    warn_on_planner_change: bool = ...,
+    warn_on_focus_change: bool = ...,
+) -> Dict[str, Any]: ...
+
+def write_zspace_experiment_comparison_html(
+    baseline: Mapping[str, Any] | str | PathLike[str],
+    candidate: Mapping[str, Any] | str | PathLike[str],
+    html_path: str | PathLike[str] | None = ...,
+    *,
+    title: str | None = ...,
+    top_k: int = ...,
+    warn_stability_drop: float = ...,
+    fail_stability_drop: float = ...,
+    min_frame_ratio: float = ...,
+    warn_on_planner_change: bool = ...,
+    warn_on_focus_change: bool = ...,
+) -> str: ...
 
 def build_zspace_downstream_hook(
     manifest_or_path: Mapping[str, Any] | str,

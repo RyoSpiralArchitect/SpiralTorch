@@ -193,7 +193,7 @@ impl PyEllipticTelemetry {
     }
 
     fn as_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         dict.set_item("curvature_radius", self.inner.curvature_radius)?;
         dict.set_item("geodesic_radius", self.inner.geodesic_radius)?;
         dict.set_item("normalized_radius", self.inner.normalized_radius())?;

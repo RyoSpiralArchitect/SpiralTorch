@@ -272,7 +272,7 @@ pub fn fracdiff_gl_nd(
     let xv = x.view();
     let src_lanes = xv.lanes(ax);
 
-    for (mut dst, src) in dst_lanes.into_iter().zip(src_lanes.into_iter()) {
+    for (mut dst, src) in dst_lanes.into_iter().zip(src_lanes) {
         match (src.as_slice(), dst.as_slice_mut()) {
             (Some(src_slice), Some(dst_slice)) => {
                 conv1d_gl_line(src_slice, dst_slice, &coeff, pad, s);
@@ -318,7 +318,7 @@ pub fn fracdiff_gl_nd_backward(
     let gyv = gy.view();
     let src_lanes = gyv.lanes(ax);
 
-    for (mut dst, src) in dst_lanes.into_iter().zip(src_lanes.into_iter()) {
+    for (mut dst, src) in dst_lanes.into_iter().zip(src_lanes) {
         match (src.as_slice(), dst.as_slice_mut()) {
             (Some(src_slice), Some(dst_slice)) => {
                 conv1d_gl_line(src_slice, dst_slice, &coeff, pad, s);
@@ -402,8 +402,7 @@ mod tests {
 
         for col in 0..4 {
             let lane: Vec<f32> = (0..3).map(|row| x[[row, col]]).collect();
-            let expected =
-                fracdiff_gl_1d_with_coeffs(&lane, &coeff, pad, scale).unwrap();
+            let expected = fracdiff_gl_1d_with_coeffs(&lane, &coeff, pad, scale).unwrap();
             for row in 0..3 {
                 assert!((y[[row, col]] - expected[row]).abs() < 1e-6f32);
             }
@@ -438,8 +437,7 @@ mod tests {
 
         for col in 0..4 {
             let lane: Vec<f32> = (0..3).map(|row| gy[[row, col]]).collect();
-            let expected =
-                fracdiff_gl_1d_with_coeffs(&lane, &coeff, pad, scale).unwrap();
+            let expected = fracdiff_gl_1d_with_coeffs(&lane, &coeff, pad, scale).unwrap();
             for row in 0..3 {
                 assert!((gx[[row, col]] - expected[row]).abs() < 1e-6f32);
             }

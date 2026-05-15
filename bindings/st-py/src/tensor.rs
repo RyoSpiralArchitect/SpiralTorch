@@ -330,7 +330,7 @@ fn collect_iterable(any: &Bound<PyAny>, context: CollectContext) -> PyResult<Vec
         return Err(PyTypeError::new_err(context.type_error_message()));
     }
     let iter = any
-        .iter()
+        .try_iter()
         .map_err(|_| PyTypeError::new_err(context.type_error_message()))?;
     let mut out = Vec::new();
     for item in iter {
@@ -365,7 +365,7 @@ fn coerce_shape(py: Python<'_>, any: &Bound<PyAny>, label: &str) -> PyResult<(us
         )));
     }
     let mut collected = Vec::with_capacity(2);
-    for item in any.iter().map_err(|_| {
+    for item in any.try_iter().map_err(|_| {
         PyTypeError::new_err(format!("Tensor {label} must be a sequence of two integers"))
     })? {
         collected.push(item?.unbind());
@@ -386,7 +386,7 @@ fn maybe_shape(py: Python<'_>, any: &Bound<PyAny>) -> PyResult<Option<(usize, us
         return Ok(None);
     }
     let mut collected = Vec::with_capacity(2);
-    let iter = match any.iter() {
+    let iter = match any.try_iter() {
         Ok(iter) => iter,
         Err(_) => return Ok(None),
     };
@@ -455,7 +455,7 @@ fn is_row_container(any: &Bound<PyAny>) -> PyResult<bool> {
     if is_string_like(any) {
         return Ok(false);
     }
-    Ok(any.iter().is_ok())
+    Ok(any.try_iter().is_ok())
 }
 
 fn flatten_tensor_data(py: Python<'_>, data: &Bound<PyAny>) -> PyResult<(usize, usize, Vec<f32>)> {
@@ -492,11 +492,7 @@ fn flatten_tensor_data(py: Python<'_>, data: &Bound<PyAny>) -> PyResult<(usize, 
             flat.extend(normalized);
         }
         let cols = cols.unwrap_or(0);
-        let rows = if cols == 0 {
-            items.len()
-        } else {
-            flat.len() / cols
-        };
+        let rows = flat.len().checked_div(cols).unwrap_or(items.len());
         Ok((rows, cols, flat))
     } else {
         let mut flat = Vec::with_capacity(items.len());
@@ -1237,7 +1233,7 @@ impl PyTensor {
             .allow_threads(|| self.inner.row_softmax_hardmax_spiral_with_backend(backend))
             .map_err(tensor_err_to_py)?;
         let (softmax, hardmax, spiral, metrics) = report.into_parts();
-        let metrics_dict = PyDict::new_bound(py);
+        let metrics_dict = PyDict::new(py);
         metrics_dict.set_item("phi", metrics.phi)?;
         metrics_dict.set_item("phi_conjugate", metrics.phi_conjugate)?;
         metrics_dict.set_item("phi_bias", metrics.phi_bias)?;
@@ -1508,13 +1504,13 @@ fn describe_wgpu_softmax_variants(py: Python<'_>) -> PyResult<Option<Vec<PyObjec
 
     let mut out = Vec::with_capacity(snapshot.len());
     for entry in snapshot {
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         dict.set_item("key", entry.key.as_str())?;
         dict.set_item("variant", entry.variant_name())?;
         dict.set_item("score_ms", entry.score_ms)?;
         dict.set_item("samples", entry.samples)?;
         if let Some(summary) = entry.telemetry() {
-            let telemetry = PyDict::new_bound(py);
+            let telemetry = PyDict::new(py);
             telemetry.set_item("avg_tflops", summary.avg_tflops)?;
             telemetry.set_item("avg_bandwidth_gbps", summary.avg_bandwidth_gbps)?;
             telemetry.set_item("avg_occupancy", summary.avg_occupancy)?;
@@ -1522,26 +1518,26 @@ fn describe_wgpu_softmax_variants(py: Python<'_>) -> PyResult<Option<Vec<PyObjec
             dict.set_item("telemetry", telemetry)?;
         }
         if let Some(zspace) = entry.zspace() {
-            let zspace_dict = PyDict::new_bound(py);
+            let zspace_dict = PyDict::new(py);
             zspace_dict.set_item("focus", zspace.focus)?;
             zspace_dict.set_item("spiral_flux", zspace.spiral_flux)?;
             zspace_dict.set_item("leech_enrichment", zspace.leech_enrichment)?;
             zspace_dict.set_item("ramanujan_ratio", zspace.ramanujan_ratio)?;
             zspace_dict.set_item("ramanujan_delta", zspace.ramanujan_delta)?;
             zspace_dict.set_item("ramanujan_iterations", zspace.ramanujan_iterations)?;
-            let roundtable = PyDict::new_bound(py);
+            let roundtable = PyDict::new(py);
             roundtable.set_item("above", zspace.roundtable.above)?;
             roundtable.set_item("here", zspace.roundtable.here)?;
             roundtable.set_item("beneath", zspace.roundtable.beneath)?;
             roundtable.set_item("drift", zspace.roundtable.drift)?;
             zspace_dict.set_item("roundtable", roundtable)?;
-            let golden = PyDict::new_bound(py);
+            let golden = PyDict::new(py);
             golden.set_item("ratio_bias", zspace.golden.ratio_bias)?;
             golden.set_item("angle_bias_deg", zspace.golden.angle_bias_deg)?;
             golden.set_item("cooperative_weight", zspace.golden.cooperative_weight)?;
             zspace_dict.set_item("golden", golden)?;
             if let Some(projection) = entry.projection() {
-                let projection_dict = PyDict::new_bound(py);
+                let projection_dict = PyDict::new(py);
                 projection_dict.set_item("focus", projection.focus)?;
                 projection_dict.set_item("above", projection.above)?;
                 projection_dict.set_item("here", projection.here)?;
@@ -1558,7 +1554,7 @@ fn describe_wgpu_softmax_variants(py: Python<'_>) -> PyResult<Option<Vec<PyObjec
             dict.set_item("zspace", zspace_dict)?;
         }
         if let Some(bayesian) = entry.bayesian() {
-            let bayes_dict = PyDict::new_bound(py);
+            let bayes_dict = PyDict::new(py);
             bayes_dict.set_item("posterior_ms", bayesian.posterior_ms)?;
             bayes_dict.set_item("prior_ms", bayesian.prior_ms)?;
             bayes_dict.set_item("uplift_ms", bayesian.uplift_ms)?;
@@ -1568,7 +1564,7 @@ fn describe_wgpu_softmax_variants(py: Python<'_>) -> PyResult<Option<Vec<PyObjec
             dict.set_item("bayesian", bayes_dict)?;
         }
         if let Some(metropolis) = entry.metropolis() {
-            let mtm_dict = PyDict::new_bound(py);
+            let mtm_dict = PyDict::new(py);
             mtm_dict.set_item("acceptance", metropolis.acceptance)?;
             mtm_dict.set_item("expected_ms", metropolis.expected_ms)?;
             mtm_dict.set_item("tries", metropolis.tries)?;
@@ -1577,7 +1573,7 @@ fn describe_wgpu_softmax_variants(py: Python<'_>) -> PyResult<Option<Vec<PyObjec
             dict.set_item("metropolis", mtm_dict)?;
         }
         if let Some(anneal) = entry.anneal() {
-            let anneal_dict = PyDict::new_bound(py);
+            let anneal_dict = PyDict::new(py);
             anneal_dict.set_item("temperature", anneal.temperature)?;
             anneal_dict.set_item("annealed_ms", anneal.annealed_ms)?;
             anneal_dict.set_item("exploration_mass", anneal.exploration_mass)?;
@@ -1586,7 +1582,7 @@ fn describe_wgpu_softmax_variants(py: Python<'_>) -> PyResult<Option<Vec<PyObjec
             dict.set_item("anneal", anneal_dict)?;
         }
         if let Some(consensus) = entry.consensus() {
-            let consensus_dict = PyDict::new_bound(py);
+            let consensus_dict = PyDict::new(py);
             consensus_dict.set_item("consensus_ms", consensus.consensus_ms)?;
             consensus_dict.set_item("synergy", consensus.synergy)?;
             consensus_dict.set_item("z_bias", consensus.z_bias)?;
@@ -1660,7 +1656,7 @@ pub(crate) fn to_dlpack_impl(py: Python<'_>, tensor: &Tensor) -> PyResult<PyObje
 
 pub(crate) fn tensor_to_torch(py: Python<'_>, tensor: &Tensor) -> PyResult<PyObject> {
     let capsule = to_dlpack_impl(py, tensor)?;
-    let torch_dlpack = PyModule::import_bound(py, "torch.utils.dlpack").map_err(|_| {
+    let torch_dlpack = PyModule::import(py, "torch.utils.dlpack").map_err(|_| {
         PyValueError::new_err("import torch.utils.dlpack before requesting torch tensors")
     })?;
     let torch_tensor = torch_dlpack.call_method1("from_dlpack", (capsule,))?;
@@ -1699,7 +1695,7 @@ fn ensure_dlpack_capsule(py: Python<'_>, candidate: &Bound<PyAny>) -> PyResult<P
     }
 
     if let Ok(method) = candidate.getattr("__dlpack__") {
-        let kwargs = PyDict::new_bound(py);
+        let kwargs = PyDict::new(py);
         kwargs.set_item("stream", py.None())?;
         let capsule = method.call((), Some(&kwargs))?;
         unsafe {

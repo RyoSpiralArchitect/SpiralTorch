@@ -64,7 +64,7 @@ fn scale_to_tuple(scale: Option<ZScale>) -> Option<(f32, f32)> {
 }
 
 fn chrono_peak_to_py(py: Python<'_>, peak: &ChronoPeak) -> PyResult<PyObject> {
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("frequency", peak.frequency)?;
     dict.set_item("magnitude", peak.magnitude)?;
     dict.set_item("phase", peak.phase)?;
@@ -72,7 +72,7 @@ fn chrono_peak_to_py(py: Python<'_>, peak: &ChronoPeak) -> PyResult<PyObject> {
 }
 
 fn chrono_summary_to_py(py: Python<'_>, summary: &ChronoSummary) -> PyResult<PyObject> {
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("frames", summary.frames)?;
     dict.set_item("duration", summary.duration)?;
     dict.set_item("latest_timestamp", summary.latest_timestamp)?;
@@ -88,7 +88,7 @@ fn chrono_summary_to_py(py: Python<'_>, summary: &ChronoSummary) -> PyResult<PyO
 }
 
 fn chrono_harmonics_to_py(py: Python<'_>, harmonics: &ChronoHarmonics) -> PyResult<PyObject> {
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("frames", harmonics.frames)?;
     dict.set_item("duration", harmonics.duration)?;
     dict.set_item("sample_rate", harmonics.sample_rate)?;
@@ -118,7 +118,7 @@ fn concept_annotation_to_py(
     sense: ConceptSense,
     rationale: Option<&String>,
 ) -> PyResult<PyObject> {
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("term", term)?;
     dict.set_item("sense", sense.label())?;
     dict.set_item("description", sense.description())?;
@@ -131,7 +131,7 @@ fn concept_annotation_to_py(
 }
 
 fn atlas_fragment_to_py(py: Python<'_>, fragment: AtlasFragment) -> PyResult<PyObject> {
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("timestamp", fragment.timestamp)?;
     dict.set_item("loop_support", fragment.loop_support)?;
     dict.set_item("collapse_total", fragment.collapse_total)?;
@@ -147,13 +147,16 @@ fn atlas_fragment_to_py(py: Python<'_>, fragment: AtlasFragment) -> PyResult<PyO
     } else {
         dict.set_item("chrono_harmonics", py.None())?;
     }
-    dict.set_item("maintainer_status", maintainer_status_to_py(fragment.maintainer_status))?;
+    dict.set_item(
+        "maintainer_status",
+        maintainer_status_to_py(fragment.maintainer_status),
+    )?;
     dict.set_item("maintainer_diagnostic", fragment.maintainer_diagnostic)?;
     dict.set_item("suggested_max_scale", fragment.suggested_max_scale)?;
     dict.set_item("suggested_pressure", fragment.suggested_pressure)?;
-    let metrics = PyList::empty_bound(py);
+    let metrics = PyList::empty(py);
     for metric in fragment.metrics.iter() {
-        let metric_dict = PyDict::new_bound(py);
+        let metric_dict = PyDict::new(py);
         metric_dict.set_item("name", metric.name.clone())?;
         metric_dict.set_item("value", metric.value)?;
         metric_dict.set_item("district", metric.district.clone())?;
@@ -161,14 +164,10 @@ fn atlas_fragment_to_py(py: Python<'_>, fragment: AtlasFragment) -> PyResult<PyO
     }
     dict.set_item("metrics", metrics)?;
     dict.set_item("notes", fragment.notes.clone())?;
-    let concepts = PyList::empty_bound(py);
+    let concepts = PyList::empty(py);
     for concept in fragment.concepts.iter() {
-        let annotation = concept_annotation_to_py(
-            py,
-            &concept.term,
-            concept.sense,
-            concept.rationale.as_ref(),
-        )?;
+        let annotation =
+            concept_annotation_to_py(py, &concept.term, concept.sense, concept.rationale.as_ref())?;
         concepts.append(annotation)?;
     }
     dict.set_item("concepts", concepts)?;
@@ -177,10 +176,10 @@ fn atlas_fragment_to_py(py: Python<'_>, fragment: AtlasFragment) -> PyResult<PyO
 
 #[cfg(feature = "psi")]
 fn psi_reading_to_py(py: Python<'_>, reading: PsiReading) -> PyResult<PyObject> {
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("total", reading.total)?;
     dict.set_item("step", reading.step)?;
-    let breakdown = PyDict::new_bound(py);
+    let breakdown = PyDict::new(py);
     for (component, value) in reading.breakdown.iter() {
         breakdown.set_item(component.to_string(), *value)?;
     }
@@ -1368,7 +1367,7 @@ pub fn run_zspace_learning_py(
 }
 
 pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
-    let module = PyModule::new_bound(py, "psi")?;
+    let module = PyModule::new(py, "psi")?;
     module.add_class::<PyMetaMembConfig>()?;
     module.add_class::<PyCircleLockMapConfig>()?;
     module.add_class::<PyPsiTelemetryConfig>()?;

@@ -690,6 +690,14 @@ from .zspace_atlas import (
 
 from .zspace_artifacts import (
     load_zspace_artifact_manifest,
+    build_zspace_planner_snapshot,
+    write_zspace_experiment_artifacts,
+    summarize_zspace_experiment_manifest,
+    write_zspace_experiment_cockpit_html,
+    summarize_zspace_experiment_index,
+    write_zspace_experiment_index_html,
+    compare_zspace_experiment_manifests,
+    write_zspace_experiment_comparison_html,
     build_zspace_downstream_hook,
     build_desire_adapter_from_downstream_hook,
     desire_step_from_downstream_hook,
@@ -721,7 +729,12 @@ _EXTRAS = [
     "load_trainer_trace_events","summarize_trainer_trace_events","write_trainer_trace_html",
     "load_kdsl_trace_events","write_kdsl_trace_jsonl","write_kdsl_trace_html",
     "zspace_trace_to_atlas_route","zspace_trace_event_to_atlas_frame","write_zspace_atlas_noncollapse_html",
-    "load_zspace_artifact_manifest","build_zspace_downstream_hook",
+    "load_zspace_artifact_manifest","build_zspace_planner_snapshot",
+    "write_zspace_experiment_artifacts","summarize_zspace_experiment_manifest",
+    "write_zspace_experiment_cockpit_html",
+    "summarize_zspace_experiment_index","write_zspace_experiment_index_html",
+    "compare_zspace_experiment_manifests","write_zspace_experiment_comparison_html",
+    "build_zspace_downstream_hook",
     "build_desire_adapter_from_downstream_hook","desire_step_from_downstream_hook",
     "run_desire_geometry_bias_validation",
     "trainer_events_to_atlas_route","trainer_step_event_to_atlas_frame",
@@ -6497,7 +6510,7 @@ if callable(_native_describe_device):
                 raise
         report, _effective_backend = _call_planner_native(
             _native_describe_device,
-            backend=backend,
+            backend=_planner_effective_backend_label(backend),
             args=(),
             kwargs=dict(kwargs),
         )

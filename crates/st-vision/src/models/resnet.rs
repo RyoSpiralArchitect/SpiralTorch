@@ -182,15 +182,16 @@ impl Default for ResNetConfig {
 impl ResNetConfig {
     /// Builds a configuration from a canonical ResNet preset.
     pub fn from_preset(preset: ResNetPreset) -> Self {
-        let mut base = Self::default();
-        base.input_hw = preset.input_hw();
-        base.stage_channels = preset.stage_channels().to_vec();
-        base.block_depths = preset.block_depths().to_vec();
-        base.stem_kernel = preset.stem_kernel();
-        base.stem_stride = preset.stem_stride();
-        base.stem_padding = preset.stem_padding();
-        base.use_max_pool = preset.use_max_pool();
-        base
+        Self {
+            input_hw: preset.input_hw(),
+            stage_channels: preset.stage_channels().to_vec(),
+            block_depths: preset.block_depths().to_vec(),
+            stem_kernel: preset.stem_kernel(),
+            stem_stride: preset.stem_stride(),
+            stem_padding: preset.stem_padding(),
+            use_max_pool: preset.use_max_pool(),
+            ..Default::default()
+        }
     }
 
     /// Chooses a preset based on the requested network depth.
@@ -529,17 +530,17 @@ impl SkipSlipSchedule {
 enum SkipStyle {
     Identity,
     Fixed(f32),
-    Learnable(Parameter),
+    Learnable(Box<Parameter>),
 }
 
 impl SkipStyle {
     fn from_config(name: &str, skip_init: f32, skip_learnable: bool) -> PureResult<Self> {
         if skip_learnable {
             let tensor = Tensor::from_vec(1, 1, vec![skip_init])?;
-            Ok(Self::Learnable(Parameter::new(
+            Ok(Self::Learnable(Box::new(Parameter::new(
                 format!("{name}.skip_gate"),
                 tensor,
-            )))
+            ))))
         } else if (skip_init - 1.0).abs() > f32::EPSILON {
             Ok(Self::Fixed(skip_init))
         } else {
@@ -591,7 +592,7 @@ impl SkipStyle {
         visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
     ) -> PureResult<()> {
         if let SkipStyle::Learnable(param) = self {
-            visitor(param)?;
+            visitor(param.as_ref())?;
         }
         Ok(())
     }
@@ -601,7 +602,7 @@ impl SkipStyle {
         visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
     ) -> PureResult<()> {
         if let SkipStyle::Learnable(param) = self {
-            visitor(param)?;
+            visitor(param.as_mut())?;
         }
         Ok(())
     }
@@ -726,8 +727,8 @@ impl ResNetBlock {
     fn forward_impl(&self, input: &Tensor) -> PureResult<(Tensor, Tensor, Tensor, Tensor, Tensor)> {
         let residual = if let Some((down_conv, down_norm)) = &self.downsample {
             let down = down_conv.forward(input)?;
-            let down = down_norm.forward(&down)?;
-            down
+
+            down_norm.forward(&down)?
         } else {
             input.clone()
         };
@@ -1279,7 +1280,7 @@ impl SkipBridge {
                 cols: out_hw.1,
             });
         }
-        if in_hw.0 % out_hw.0 != 0 || in_hw.1 % out_hw.1 != 0 {
+        if !in_hw.0.is_multiple_of(out_hw.0) || !in_hw.1.is_multiple_of(out_hw.1) {
             return Err(TensorError::InvalidDimensions {
                 rows: in_hw.0,
                 cols: in_hw.1,

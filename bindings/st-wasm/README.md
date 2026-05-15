@@ -7,6 +7,12 @@ from your bundler's `types` field to enable editor completion and static checkin
 
 ## Building
 
+Prerequisite: install `wasm-pack` and make sure it is available on `PATH`.
+
+```bash
+cargo install wasm-pack
+```
+
 Build the WebAssembly package (and copy the bundled TypeScript declarations) with:
 
 ```bash

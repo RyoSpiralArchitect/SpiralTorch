@@ -11,19 +11,21 @@
 //! - roundtable schedule planning.
 
 use st_core::backend::device_caps::DeviceCaps;
-use st_core::plugin::{global_registry, init_plugin_system, PluginEventRecorder, PluginEventRecorderConfig};
+use st_core::plugin::{
+    global_registry, init_plugin_system, PluginEventRecorder, PluginEventRecorderConfig,
+};
 use st_core::runtime::autopilot::{AutoConfig, Autopilot};
-use st_core::runtime::blackcat::{bandit::SoftBanditMode, zmeta::ZMetaParams, BlackCatRuntime, ChoiceGroups};
+use st_core::runtime::blackcat::{
+    bandit::SoftBanditMode, zmeta::ZMetaParams, BlackCatRuntime, ChoiceGroups,
+};
 use st_nn::{Linear, MeanSquaredError, ModuleTrainer, Relu, RoundtableConfig, Sequential, Tensor};
 use std::collections::HashMap;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_plugin_system()?;
     let bus = global_registry().event_bus();
-    let recorder = PluginEventRecorder::subscribe(
-        bus.clone(),
-        PluginEventRecorderConfig { capacity: 8192 },
-    );
+    let recorder =
+        PluginEventRecorder::subscribe(bus.clone(), PluginEventRecorderConfig { capacity: 8192 });
 
     // --- Kernel fusion targets (softmax + attention) ---
     let logits = Tensor::random_uniform(4, 16, -1.0, 1.0, Some(7))?;
@@ -44,14 +46,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let groups = ChoiceGroups {
         groups: HashMap::from([
             ("wg".to_string(), vec!["128".to_string(), "256".to_string()]),
-            ("tile".to_string(), vec!["512".to_string(), "1024".to_string(), "2048".to_string()]),
+            (
+                "tile".to_string(),
+                vec!["512".to_string(), "1024".to_string(), "2048".to_string()],
+            ),
         ]),
     };
     let runtime = BlackCatRuntime::new(ZMetaParams::default(), groups, 8, SoftBanditMode::TS, None);
     let autopilot = Autopilot::new(caps, AutoConfig::default(), runtime);
 
     let mut trainer = ModuleTrainer::new(caps, -1.0, 1e-2, 1e-2).with_autopilot(autopilot);
-    let schedule = trainer.roundtable(4, 1, RoundtableConfig::default().with_top_k(1).with_mid_k(1).with_bottom_k(1));
+    let schedule = trainer.roundtable(
+        4,
+        1,
+        RoundtableConfig::default()
+            .with_top_k(1)
+            .with_mid_k(1)
+            .with_bottom_k(1),
+    );
 
     let mut model = Sequential::new();
     model.push(Linear::new("l1", 16, 8)?);
@@ -69,7 +81,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let trace_path = std::env::temp_dir().join("spiraltorch_planner_trace.jsonl");
     recorder.write_jsonl(&trace_path)?;
     println!("trace_jsonl={}", trace_path.display());
-    println!("\n--- mermaid (first 80 events) ---\n{}\n", recorder.to_mermaid_flowchart(80));
+    println!(
+        "\n--- mermaid (first 80 events) ---\n{}\n",
+        recorder.to_mermaid_flowchart(80)
+    );
 
     Ok(())
 }

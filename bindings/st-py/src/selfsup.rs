@@ -1,13 +1,19 @@
 use pyo3::prelude::*;
+#[cfg(feature = "selfsup")]
 use pyo3::types::PyDict;
+#[cfg(feature = "selfsup")]
 use pyo3::wrap_pyfunction;
+#[cfg(feature = "selfsup")]
 use pyo3::IntoPy;
+#[cfg(feature = "selfsup")]
 use spiral_selfsup::{contrastive, masked, ObjectiveError};
 
+#[cfg(feature = "selfsup")]
 fn objective_err(err: ObjectiveError) -> PyErr {
     pyo3::exceptions::PyValueError::new_err(err.to_string())
 }
 
+#[cfg(feature = "selfsup")]
 #[pyfunction]
 #[pyo3(signature = (anchors, positives, temperature=0.07, normalize=true))]
 fn info_nce(
@@ -20,7 +26,7 @@ fn info_nce(
     let result = contrastive::info_nce_loss(&anchors, &positives, temperature, normalize)
         .map_err(objective_err)?;
 
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("loss", result.loss)?;
     let mut rows = Vec::with_capacity(result.batch);
     for row in result.logits.chunks(result.batch) {
@@ -34,6 +40,7 @@ fn info_nce(
     Ok(dict.into_py(py))
 }
 
+#[cfg(feature = "selfsup")]
 #[pyfunction]
 #[pyo3(signature = (predictions, targets, mask_indices))]
 fn masked_mse(
@@ -45,19 +52,30 @@ fn masked_mse(
     let result =
         masked::masked_mse_loss(&predictions, &targets, &mask_indices).map_err(objective_err)?;
 
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("loss", result.loss)?;
     dict.set_item("total_masked", result.total_masked)?;
     dict.set_item("per_example", result.per_example)?;
     Ok(dict.into_py(py))
 }
 
+#[cfg(feature = "selfsup")]
 pub fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(info_nce, m)?)?;
     m.add_function(wrap_pyfunction!(masked_mse, m)?)?;
     m.add(
         "__doc__",
         "Self-supervised objectives exposed from Rust implementations.",
+    )?;
+    let _ = py;
+    Ok(())
+}
+
+#[cfg(not(feature = "selfsup"))]
+pub fn register(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
+    m.add(
+        "__doc__",
+        "Self-supervised objectives (compiled without the 'selfsup' feature).",
     )?;
     let _ = py;
     Ok(())

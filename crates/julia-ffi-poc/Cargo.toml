@@ -2,6 +2,7 @@
 name = "julia-ffi-poc"
 version = "0.1.0"
 edition = "2021"
+description = "Proof-of-concept crate for embedding Julia heuristics into SpiralTorch"
 license = "AGPL-3.0-or-later"
 
 [features]

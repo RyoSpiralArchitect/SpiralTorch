@@ -32,7 +32,7 @@ impl Pipelines {
     pub fn best_subgroup(&self) -> Option<&ComputePipeline> {
         self.apply_subgroup_v2
             .as_deref()
-            .or_else(|| self.apply_subgroup.as_deref())
+            .or(self.apply_subgroup.as_deref())
     }
 }
 
@@ -348,14 +348,11 @@ fn tiles_for_cols(cols: u32) -> u32 {
     if cols == 0 {
         0
     } else {
-        (cols + 255) / 256
+        cols.div_ceil(256)
     }
 }
 
-fn select_apply_pipeline<'a>(
-    pipelines: &'a Pipelines,
-    strategy: ApplyStrategy,
-) -> &'a ComputePipeline {
+fn select_apply_pipeline(pipelines: &Pipelines, strategy: ApplyStrategy) -> &ComputePipeline {
     match strategy {
         ApplyStrategy::Fallback => pipelines.apply_fallback.as_ref(),
         ApplyStrategy::Subgroup => pipelines
@@ -365,7 +362,7 @@ fn select_apply_pipeline<'a>(
         ApplyStrategy::SubgroupV2 => pipelines
             .apply_subgroup_v2
             .as_deref()
-            .or_else(|| pipelines.apply_subgroup.as_deref())
+            .or(pipelines.apply_subgroup.as_deref())
             .unwrap_or(pipelines.apply_fallback.as_ref()),
         ApplyStrategy::Auto => pipelines
             .best_subgroup()
@@ -446,54 +443,6 @@ pub struct ElementCounts {
     pub out_middlemax: u64,
     /// Number of prefix tiles stored in `prefix`.
     pub prefix: u64,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        element_counts_for_dims, tiles_for_cols, validate_geometry, DispatchValidationError,
-    };
-
-    #[test]
-    fn tiles_for_cols_rounds_up() {
-        assert_eq!(tiles_for_cols(1), 1);
-        assert_eq!(tiles_for_cols(256), 1);
-        assert_eq!(tiles_for_cols(257), 2);
-    }
-
-    #[test]
-    fn tiles_for_cols_handles_zero() {
-        assert_eq!(tiles_for_cols(0), 0);
-    }
-
-    #[test]
-    fn geometry_validation_flags_small_stride() {
-        let err = validate_geometry(256, 128).unwrap_err();
-        assert_eq!(
-            err,
-            DispatchValidationError::RowStrideTooSmall {
-                row_stride: 128,
-                cols: 256
-            }
-        );
-    }
-
-    #[test]
-    fn geometry_validation_accepts_valid_stride() {
-        assert!(validate_geometry(256, 256).is_ok());
-        assert!(validate_geometry(128, 1024).is_ok());
-    }
-
-    #[test]
-    fn element_counts_match_expected_values() {
-        let counts = element_counts_for_dims(3, 512, 2);
-        assert_eq!(counts.values, 3 * 512);
-        assert_eq!(counts.mask, 3 * 512);
-        assert_eq!(counts.out_positions, 3);
-        assert_eq!(counts.out_values, 3 * 512);
-        assert_eq!(counts.out_middlemax, 3);
-        assert_eq!(counts.prefix, 3 * 2);
-    }
 }
 
 pub struct Builder<'a> {
@@ -643,4 +592,52 @@ pub fn create_pipelines(
         builder
     };
     builder.build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        element_counts_for_dims, tiles_for_cols, validate_geometry, DispatchValidationError,
+    };
+
+    #[test]
+    fn tiles_for_cols_rounds_up() {
+        assert_eq!(tiles_for_cols(1), 1);
+        assert_eq!(tiles_for_cols(256), 1);
+        assert_eq!(tiles_for_cols(257), 2);
+    }
+
+    #[test]
+    fn tiles_for_cols_handles_zero() {
+        assert_eq!(tiles_for_cols(0), 0);
+    }
+
+    #[test]
+    fn geometry_validation_flags_small_stride() {
+        let err = validate_geometry(256, 128).unwrap_err();
+        assert_eq!(
+            err,
+            DispatchValidationError::RowStrideTooSmall {
+                row_stride: 128,
+                cols: 256
+            }
+        );
+    }
+
+    #[test]
+    fn geometry_validation_accepts_valid_stride() {
+        assert!(validate_geometry(256, 256).is_ok());
+        assert!(validate_geometry(128, 1024).is_ok());
+    }
+
+    #[test]
+    fn element_counts_match_expected_values() {
+        let counts = element_counts_for_dims(3, 512, 2);
+        assert_eq!(counts.values, 3 * 512);
+        assert_eq!(counts.mask, 3 * 512);
+        assert_eq!(counts.out_positions, 3);
+        assert_eq!(counts.out_values, 3 * 512);
+        assert_eq!(counts.out_middlemax, 3);
+        assert_eq!(counts.prefix, 3 * 2);
+    }
 }

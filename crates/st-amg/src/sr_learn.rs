@@ -69,7 +69,7 @@ fn already_present(path: &PathBuf, line: &str) -> bool {
         Ok(f) => {
             let rdr = BufReader::new(f);
             let needle = line.trim();
-            for read in rdr.lines().flatten() {
+            for read in rdr.lines().map_while(Result::ok) {
                 if read.trim() == needle {
                     return true;
                 }
@@ -210,7 +210,7 @@ pub fn on_abc_conversation(
     );
     if lb >= lb_thresh && !consensus_rules.is_empty() {
         let gain = (lb - lb_thresh).max(0.0);
-        let soft_weight = (0.15 + gain as f32).min(1.0);
+        let soft_weight = (0.15 + gain).min(1.0);
         for (idx, rule) in consensus_rules.iter().copied().enumerate() {
             let boost = soft_weight * (1.0 - (idx as f32 * 0.12));
             if boost <= 0.0 {

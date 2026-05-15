@@ -136,7 +136,7 @@ mod tests {
     fn compute_block_norms_covers_tail() {
         let data: Vec<f32> = (1..=15).map(|v| v as f32).collect();
         let mut blocks = Vec::new();
-        compute_block_norms(&data, 4, (data.len() + 3) / 4, &mut blocks);
+        compute_block_norms(&data, 4, data.len().div_ceil(4), &mut blocks);
         assert_eq!(blocks.len(), 4);
         assert_eq!(blocks[0].start, 0);
         assert_eq!(blocks[3].len, 3);

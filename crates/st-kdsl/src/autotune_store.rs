@@ -202,19 +202,19 @@ impl AutoTuneBucket {
             if entry.score < existing.score {
                 *existing = entry;
                 self.entries
-                    .sort_by(|a, b| b.updated_unix.cmp(&a.updated_unix));
+                    .sort_by_key(|entry| std::cmp::Reverse(entry.updated_unix));
                 return true;
             } else {
                 existing.updated_unix = entry.updated_unix;
                 self.entries
-                    .sort_by(|a, b| b.updated_unix.cmp(&a.updated_unix));
+                    .sort_by_key(|entry| std::cmp::Reverse(entry.updated_unix));
                 return false;
             }
         }
 
         self.entries.push(entry);
         self.entries
-            .sort_by(|a, b| b.updated_unix.cmp(&a.updated_unix));
+            .sort_by_key(|entry| std::cmp::Reverse(entry.updated_unix));
         if self.entries.len() > BUCKET_HISTORY_LIMIT {
             self.entries.truncate(BUCKET_HISTORY_LIMIT);
         }

@@ -28,7 +28,7 @@ Install frontend deps:
 
 ```bash
 cd bindings/st-wasm/examples/canvas-hypertrain
-npm install
+npm ci
 ```
 
 ## Running

@@ -252,7 +252,7 @@ impl PyContextualLagrangianGate {
 
 #[cfg(feature = "text")]
 fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
-    let module = PyModule::new_bound(py, "spiraltorch.text")?;
+    let module = PyModule::new(py, "spiraltorch.text")?;
     module.add(
         "__doc__",
         "Contextual resonance narrators and Lagrangian gates",
@@ -279,7 +279,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
 
 #[cfg(not(feature = "text"))]
 fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
-    let module = PyModule::new_bound(py, "spiraltorch.text")?;
+    let module = PyModule::new(py, "spiraltorch.text")?;
     module.add(
         "__doc__",
         "Contextual resonance narrators (compiled without the 'text' feature)",

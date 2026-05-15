@@ -275,7 +275,7 @@ pub fn assemble_pzeta(
     let denom = 8.0 * PI * PI * planck_mass * planck_mass;
     let mut spectrum = Vec::with_capacity(z_points.len());
 
-    for (idx, (h_z, eps_z)) in h_proj.into_iter().zip(eps_proj.into_iter()).enumerate() {
+    for (idx, (h_z, eps_z)) in h_proj.into_iter().zip(eps_proj).enumerate() {
         if !(h_z.re.is_finite() && h_z.im.is_finite()) {
             return Err(CosmologyError::NonFiniteProjection {
                 channel: "H",

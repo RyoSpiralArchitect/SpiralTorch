@@ -134,7 +134,7 @@ impl ZSpaceCoherenceWaveBlock {
     /// For infusion to work, the block feature dimension must be even; the method will
     /// derive a fixed-length string of `dim / 2` characters.
     pub fn infuse_text(&mut self, text: &str) -> PureResult<()> {
-        if self.dim % 2 != 0 {
+        if !self.dim.is_multiple_of(2) {
             return Err(TensorError::InvalidDimensions {
                 rows: self.dim,
                 cols: 2,
@@ -189,7 +189,10 @@ impl Module for ZSpaceCoherenceWaveBlock {
         grad_scan.add(&grad_wave)
     }
 
-    fn visit_parameters(&self, visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>) -> PureResult<()> {
+    fn visit_parameters(
+        &self,
+        visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
         self.wave.visit_parameters(visitor)?;
         self.resonator.visit_parameters(visitor)?;
         Ok(())

@@ -25,7 +25,7 @@ Reuse or redistribution **must retain the SpiralTorch name and authorship** as p
 
 - **1-minute quickstart (Python):**
   ```bash
-  pip install -U spiraltorch==0.4.6
+  pip install -U spiraltorch
 
   python - <<'PY'
   import spiraltorch as st
@@ -206,13 +206,13 @@ SpiralTorch ships under a dual-license model:
 ## Code stats
 
 <!-- STATS:START -->
-> _auto-generated: 2026-04-04 00:15 UTC_
+> _auto-generated: 2026-05-11 07:34 UTC_
 
 | Metric | Value |
 |---|---:|
-| Rust code LOC | **206,300** |
-| Rust files | 479 |
-| Total code LOC (all langs) | 266,183 |
+| Rust code LOC | **207,846** |
+| Rust files | 481 |
+| Total code LOC (all langs) | 270,554 |
 | Workspace+deps crates | 458 |
 
 <p>
@@ -280,7 +280,7 @@ tensor shims, no translation layers, and no tracebacks.
     transcripts, and ψ telemetry double as explainability artifacts, enabling
     decision-path inspection without leaving the Z-space calculus.
     
-**Current release:** `spiraltorch==0.4.6` (abi3 wheel, Python ≥3.8)  
+**Current release:** [![PyPI](https://img.shields.io/pypi/v/spiraltorch.svg?label=spiraltorch)](https://pypi.org/project/spiraltorch/) (abi3 wheel, Python ≥3.8)  
 **Targets:** CPU (always), MPS, Vulkan/DX (WGPU), CUDA, HIP/ROCm
 
 ---
@@ -288,7 +288,7 @@ tensor shims, no translation layers, and no tracebacks.
 ## Install (pip)
 
 ```bash
-pip install -U spiraltorch==0.4.6
+pip install -U spiraltorch
 ```
 
 - Wheels are **abi3**; you can use any CPython ≥ 3.8.
@@ -296,7 +296,7 @@ pip install -U spiraltorch==0.4.6
 - The published wheel is built with `wgpu,logic,kdsl` (CPU always available; WGPU activates when a compatible backend is present).
 - For macOS < 14 or other targets, build from source.
 
-### ✅ pipでできること (wheel)
+### wheel
 
 Without cloning the repo, `pip install spiraltorch` gives you:
 
@@ -329,6 +329,10 @@ cargo build --workspace --release
 # Run tests
 cargo test --workspace
 ```
+
+For the complete Cargo member inventory, including packages that are workspace
+members but not root `default-members`, see
+[`docs/development/workspace_crates.md`](docs/development/workspace_crates.md).
 
 **Per-crate**
 
@@ -2909,5 +2913,5 @@ Suggested caption: **“SpiralTorch — WGPU-first, Self-Tuning GPU Top-K (Rank-
 
 ## License
 
-**AGPL-3.0-or-later** for every crate and Python wheel. See `LICENSE`.
+**AGPL-3.0-or-later** for every crate and Python wheel. See [`LICENSE .txt`](LICENSE%20.txt).
 Unauthorized derivations will be treated as non-compliant with AGPL §13

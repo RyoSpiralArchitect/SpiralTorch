@@ -4,6 +4,8 @@
 # Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 #!/usr/bin/env python3
+"""Generate embedded Rust tuner tables from JSON tuning results."""
+
 import json
 import sys
 

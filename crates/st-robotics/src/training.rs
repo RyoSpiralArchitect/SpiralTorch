@@ -516,8 +516,7 @@ mod tests {
         builder.push_step(&step, None, false).unwrap();
         let err = builder
             .push_step(&step, None, false)
-            .err()
-            .expect("capacity violation");
+            .expect_err("capacity violation");
         if let RoboticsError::Trainer(message) = err {
             assert!(message.contains("capacity"));
         } else {

@@ -566,7 +566,7 @@ pub fn choose_with_profile(profile: &ProblemProfile) -> Choice {
     let store = Path::new(".spiraltorch/cache/autotune.json");
     if std::env::var("SPIRALTORCH_AUTOTUNE")
         .ok()
-        .map_or(true, |v| v != "0")
+        .is_none_or(|v| v != "0")
     {
         cfg = autotune_store::load_best_typed(store, &key, &context, cfg);
     }
@@ -603,7 +603,7 @@ pub fn choose_with_profile(profile: &ProblemProfile) -> Choice {
         let max_depth = 3usize;
         choice = st_logic::beam_select(
             choice,
-            |c| neighbors_amg(c),
+            neighbors_amg,
             |c| score_choice(profile, c, &soft, cfg.soft_mode, alpha),
             k,
             max_depth,

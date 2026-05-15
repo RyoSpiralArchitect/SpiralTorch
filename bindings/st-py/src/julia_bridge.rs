@@ -42,7 +42,7 @@ fn tempo_latency_score(tile: u32, slack: u32) -> PyResult<f64> {
 }
 
 pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
-    let module = PyModule::new_bound(py, "julia")?;
+    let module = PyModule::new(py, "julia")?;
     module.add("__doc__", "Julia Z-space bridge helpers")?;
     module.add_class::<PyZTigerOptim>()?;
     module.add_function(wrap_pyfunction!(tempo_latency_score, &module)?)?;

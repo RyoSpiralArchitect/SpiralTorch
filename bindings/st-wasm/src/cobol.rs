@@ -72,7 +72,7 @@ pub struct CobolNarratorPayload {
     pub coefficients: Vec<f32>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct CobolDatasetRoute {
     pub dataset: String,
     pub member: Option<String>,
@@ -106,45 +106,6 @@ pub struct CobolDatasetRoute {
     pub release_space: Option<bool>,
     pub erase_on_delete: Option<bool>,
     pub expiration_date: Option<String>,
-}
-
-impl Default for CobolDatasetRoute {
-    fn default() -> Self {
-        Self {
-            dataset: String::new(),
-            member: None,
-            disposition: None,
-            volume: None,
-            record_format: None,
-            record_length: None,
-            block_size: None,
-            data_class: None,
-            management_class: None,
-            storage_class: None,
-            space_primary: None,
-            space_secondary: None,
-            space_unit: None,
-            directory_blocks: None,
-            dataset_type: None,
-            like_dataset: None,
-            organization: None,
-            key_length: None,
-            key_offset: None,
-            control_interval_size: None,
-            share_options_cross_region: None,
-            share_options_cross_system: None,
-            reuse: None,
-            log: None,
-            unit: None,
-            unit_count: None,
-            average_record_unit: None,
-            catalog_behavior: None,
-            retention_period: None,
-            release_space: None,
-            erase_on_delete: None,
-            expiration_date: None,
-        }
-    }
 }
 
 impl Serialize for CobolDatasetRoute {
@@ -1339,7 +1300,7 @@ fn cobol_identifier(input: &str) -> String {
     }
 
     if identifier.starts_with('-') {
-        identifier.insert_str(0, "J");
+        identifier.insert(0, 'J');
     }
 
     identifier
@@ -1470,307 +1431,129 @@ impl CobolEnvelopeBuilder {
         sanitize_dataset_route(&mut self.envelope.route.dataset);
     }
 
-    pub fn set_dataset_member(&mut self, member: Option<String>) {
-        let member = member.and_then(sanitize);
-        match (self.envelope.route.dataset.as_mut(), member) {
-            (Some(route), value) => {
-                route.member = value;
+    fn set_dataset_route_value<T>(
+        &mut self,
+        value: Option<T>,
+        apply: impl FnOnce(&mut CobolDatasetRoute, Option<T>),
+    ) {
+        match value {
+            Some(value) => {
+                let route = self
+                    .envelope
+                    .route
+                    .dataset
+                    .get_or_insert_with(CobolDatasetRoute::default);
+                apply(route, Some(value));
             }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.member = Some(value);
-                self.envelope.route.dataset = Some(route);
+            None => {
+                if let Some(route) = self.envelope.route.dataset.as_mut() {
+                    apply(route, None);
+                }
             }
-            (None, None) => {}
         }
         sanitize_dataset_route(&mut self.envelope.route.dataset);
+    }
+
+    pub fn set_dataset_member(&mut self, member: Option<String>) {
+        let member = member.and_then(sanitize);
+        self.set_dataset_route_value(member, |route, value| route.member = value);
     }
 
     pub fn set_dataset_disposition(&mut self, disposition: Option<String>) {
         let disposition = disposition.and_then(sanitize);
-        match (self.envelope.route.dataset.as_mut(), disposition) {
-            (Some(route), value) => {
-                route.disposition = value;
-            }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.disposition = Some(value);
-                self.envelope.route.dataset = Some(route);
-            }
-            (None, None) => {}
-        }
-        sanitize_dataset_route(&mut self.envelope.route.dataset);
+        self.set_dataset_route_value(disposition, |route, value| route.disposition = value);
     }
 
     pub fn set_dataset_volume(&mut self, volume: Option<String>) {
         let volume = volume.and_then(sanitize);
-        match (self.envelope.route.dataset.as_mut(), volume) {
-            (Some(route), value) => {
-                route.volume = value;
-            }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.volume = Some(value);
-                self.envelope.route.dataset = Some(route);
-            }
-            (None, None) => {}
-        }
-        sanitize_dataset_route(&mut self.envelope.route.dataset);
+        self.set_dataset_route_value(volume, |route, value| route.volume = value);
     }
 
     pub fn set_dataset_record_format(&mut self, record_format: Option<String>) {
         let record_format = record_format.and_then(sanitize);
-        match (self.envelope.route.dataset.as_mut(), record_format) {
-            (Some(route), value) => {
-                route.record_format = value;
-            }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.record_format = Some(value);
-                self.envelope.route.dataset = Some(route);
-            }
-            (None, None) => {}
-        }
-        sanitize_dataset_route(&mut self.envelope.route.dataset);
+        self.set_dataset_route_value(record_format, |route, value| route.record_format = value);
     }
 
     pub fn set_dataset_record_length(&mut self, record_length: Option<u32>) {
         let record_length = sanitize_positive(record_length);
-        match (self.envelope.route.dataset.as_mut(), record_length) {
-            (Some(route), value) => {
-                route.record_length = value;
-            }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.record_length = Some(value);
-                self.envelope.route.dataset = Some(route);
-            }
-            (None, None) => {}
-        }
-        sanitize_dataset_route(&mut self.envelope.route.dataset);
+        self.set_dataset_route_value(record_length, |route, value| route.record_length = value);
     }
 
     pub fn set_dataset_block_size(&mut self, block_size: Option<u32>) {
         let block_size = sanitize_positive(block_size);
-        match (self.envelope.route.dataset.as_mut(), block_size) {
-            (Some(route), value) => {
-                route.block_size = value;
-            }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.block_size = Some(value);
-                self.envelope.route.dataset = Some(route);
-            }
-            (None, None) => {}
-        }
-        sanitize_dataset_route(&mut self.envelope.route.dataset);
+        self.set_dataset_route_value(block_size, |route, value| route.block_size = value);
     }
 
     pub fn set_dataset_data_class(&mut self, data_class: Option<String>) {
         let data_class = data_class.and_then(sanitize);
-        match (self.envelope.route.dataset.as_mut(), data_class) {
-            (Some(route), value) => {
-                route.data_class = value;
-            }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.data_class = Some(value);
-                self.envelope.route.dataset = Some(route);
-            }
-            (None, None) => {}
-        }
-        sanitize_dataset_route(&mut self.envelope.route.dataset);
+        self.set_dataset_route_value(data_class, |route, value| route.data_class = value);
     }
 
     pub fn set_dataset_management_class(&mut self, management_class: Option<String>) {
         let management_class = management_class.and_then(sanitize);
-        match (self.envelope.route.dataset.as_mut(), management_class) {
-            (Some(route), value) => {
-                route.management_class = value;
-            }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.management_class = Some(value);
-                self.envelope.route.dataset = Some(route);
-            }
-            (None, None) => {}
-        }
-        sanitize_dataset_route(&mut self.envelope.route.dataset);
+        self.set_dataset_route_value(management_class, |route, value| {
+            route.management_class = value;
+        });
     }
 
     pub fn set_dataset_storage_class(&mut self, storage_class: Option<String>) {
         let storage_class = storage_class.and_then(sanitize);
-        match (self.envelope.route.dataset.as_mut(), storage_class) {
-            (Some(route), value) => {
-                route.storage_class = value;
-            }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.storage_class = Some(value);
-                self.envelope.route.dataset = Some(route);
-            }
-            (None, None) => {}
-        }
-        sanitize_dataset_route(&mut self.envelope.route.dataset);
+        self.set_dataset_route_value(storage_class, |route, value| route.storage_class = value);
     }
 
     pub fn set_dataset_space_primary(&mut self, space_primary: Option<u32>) {
         let space_primary = sanitize_positive(space_primary);
-        match (self.envelope.route.dataset.as_mut(), space_primary) {
-            (Some(route), value) => {
-                route.space_primary = value;
-            }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.space_primary = Some(value);
-                self.envelope.route.dataset = Some(route);
-            }
-            (None, None) => {}
-        }
-        sanitize_dataset_route(&mut self.envelope.route.dataset);
+        self.set_dataset_route_value(space_primary, |route, value| route.space_primary = value);
     }
 
     pub fn set_dataset_space_secondary(&mut self, space_secondary: Option<u32>) {
         let space_secondary = sanitize_positive(space_secondary);
-        match (self.envelope.route.dataset.as_mut(), space_secondary) {
-            (Some(route), value) => {
-                route.space_secondary = value;
-            }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.space_secondary = Some(value);
-                self.envelope.route.dataset = Some(route);
-            }
-            (None, None) => {}
-        }
-        sanitize_dataset_route(&mut self.envelope.route.dataset);
+        self.set_dataset_route_value(space_secondary, |route, value| {
+            route.space_secondary = value
+        });
     }
 
     pub fn set_dataset_space_unit(&mut self, space_unit: Option<String>) {
         let space_unit = sanitize_uppercase(space_unit);
-        match (self.envelope.route.dataset.as_mut(), space_unit) {
-            (Some(route), value) => {
-                route.space_unit = value;
-            }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.space_unit = Some(value);
-                self.envelope.route.dataset = Some(route);
-            }
-            (None, None) => {}
-        }
-        sanitize_dataset_route(&mut self.envelope.route.dataset);
+        self.set_dataset_route_value(space_unit, |route, value| route.space_unit = value);
     }
 
     pub fn set_dataset_directory_blocks(&mut self, directory_blocks: Option<u32>) {
         let directory_blocks = sanitize_positive(directory_blocks);
-        match (self.envelope.route.dataset.as_mut(), directory_blocks) {
-            (Some(route), value) => {
-                route.directory_blocks = value;
-            }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.directory_blocks = Some(value);
-                self.envelope.route.dataset = Some(route);
-            }
-            (None, None) => {}
-        }
-        sanitize_dataset_route(&mut self.envelope.route.dataset);
+        self.set_dataset_route_value(directory_blocks, |route, value| {
+            route.directory_blocks = value;
+        });
     }
 
     pub fn set_dataset_type(&mut self, dataset_type: Option<String>) {
         let dataset_type = sanitize_uppercase(dataset_type);
-        match (self.envelope.route.dataset.as_mut(), dataset_type) {
-            (Some(route), value) => {
-                route.dataset_type = value;
-            }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.dataset_type = Some(value);
-                self.envelope.route.dataset = Some(route);
-            }
-            (None, None) => {}
-        }
-        sanitize_dataset_route(&mut self.envelope.route.dataset);
+        self.set_dataset_route_value(dataset_type, |route, value| route.dataset_type = value);
     }
 
     pub fn set_dataset_like(&mut self, like_dataset: Option<String>) {
         let like_dataset = like_dataset.and_then(sanitize);
-        match (self.envelope.route.dataset.as_mut(), like_dataset) {
-            (Some(route), value) => {
-                route.like_dataset = value;
-            }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.like_dataset = Some(value);
-                self.envelope.route.dataset = Some(route);
-            }
-            (None, None) => {}
-        }
-        sanitize_dataset_route(&mut self.envelope.route.dataset);
+        self.set_dataset_route_value(like_dataset, |route, value| route.like_dataset = value);
     }
 
     pub fn set_dataset_organization(&mut self, organization: Option<String>) {
         let organization = organization.and_then(sanitize);
-        match (self.envelope.route.dataset.as_mut(), organization) {
-            (Some(route), value) => {
-                route.organization = value;
-            }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.organization = Some(value);
-                self.envelope.route.dataset = Some(route);
-            }
-            (None, None) => {}
-        }
-        sanitize_dataset_route(&mut self.envelope.route.dataset);
+        self.set_dataset_route_value(organization, |route, value| route.organization = value);
     }
 
     pub fn set_dataset_key_length(&mut self, key_length: Option<u32>) {
         let key_length = sanitize_positive(key_length);
-        match (self.envelope.route.dataset.as_mut(), key_length) {
-            (Some(route), value) => {
-                route.key_length = value;
-            }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.key_length = Some(value);
-                self.envelope.route.dataset = Some(route);
-            }
-            (None, None) => {}
-        }
-        sanitize_dataset_route(&mut self.envelope.route.dataset);
+        self.set_dataset_route_value(key_length, |route, value| route.key_length = value);
     }
 
     pub fn set_dataset_key_offset(&mut self, key_offset: Option<u32>) {
-        match (self.envelope.route.dataset.as_mut(), key_offset) {
-            (Some(route), value) => {
-                route.key_offset = value;
-            }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.key_offset = Some(value);
-                self.envelope.route.dataset = Some(route);
-            }
-            (None, None) => {}
-        }
-        sanitize_dataset_route(&mut self.envelope.route.dataset);
+        self.set_dataset_route_value(key_offset, |route, value| route.key_offset = value);
     }
 
     pub fn set_dataset_control_interval_size(&mut self, control_interval_size: Option<u32>) {
         let control_interval_size = sanitize_positive(control_interval_size);
-        match (self.envelope.route.dataset.as_mut(), control_interval_size) {
-            (Some(route), value) => {
-                route.control_interval_size = value;
-            }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.control_interval_size = Some(value);
-                self.envelope.route.dataset = Some(route);
-            }
-            (None, None) => {}
-        }
-        sanitize_dataset_route(&mut self.envelope.route.dataset);
+        self.set_dataset_route_value(control_interval_size, |route, value| {
+            route.control_interval_size = value;
+        });
     }
 
     pub fn set_dataset_share_options_cross_region(
@@ -1778,21 +1561,9 @@ impl CobolEnvelopeBuilder {
         share_options_cross_region: Option<u32>,
     ) {
         let share_options_cross_region = sanitize_positive(share_options_cross_region);
-        match (
-            self.envelope.route.dataset.as_mut(),
-            share_options_cross_region,
-        ) {
-            (Some(route), value) => {
-                route.share_options_cross_region = value;
-            }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.share_options_cross_region = Some(value);
-                self.envelope.route.dataset = Some(route);
-            }
-            (None, None) => {}
-        }
-        sanitize_dataset_route(&mut self.envelope.route.dataset);
+        self.set_dataset_route_value(share_options_cross_region, |route, value| {
+            route.share_options_cross_region = value;
+        });
     }
 
     pub fn set_dataset_share_options_cross_system(
@@ -1800,177 +1571,65 @@ impl CobolEnvelopeBuilder {
         share_options_cross_system: Option<u32>,
     ) {
         let share_options_cross_system = sanitize_positive(share_options_cross_system);
-        match (
-            self.envelope.route.dataset.as_mut(),
-            share_options_cross_system,
-        ) {
-            (Some(route), value) => {
-                route.share_options_cross_system = value;
-            }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.share_options_cross_system = Some(value);
-                self.envelope.route.dataset = Some(route);
-            }
-            (None, None) => {}
-        }
-        sanitize_dataset_route(&mut self.envelope.route.dataset);
+        self.set_dataset_route_value(share_options_cross_system, |route, value| {
+            route.share_options_cross_system = value;
+        });
     }
 
     pub fn set_dataset_reuse(&mut self, reuse: Option<bool>) {
-        match (self.envelope.route.dataset.as_mut(), reuse) {
-            (Some(route), value) => {
-                route.reuse = value;
-            }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.reuse = Some(value);
-                self.envelope.route.dataset = Some(route);
-            }
-            (None, None) => {}
-        }
-        sanitize_dataset_route(&mut self.envelope.route.dataset);
+        self.set_dataset_route_value(reuse, |route, value| route.reuse = value);
     }
 
     pub fn set_dataset_log(&mut self, log: Option<bool>) {
-        match (self.envelope.route.dataset.as_mut(), log) {
-            (Some(route), value) => {
-                route.log = value;
-            }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.log = Some(value);
-                self.envelope.route.dataset = Some(route);
-            }
-            (None, None) => {}
-        }
-        sanitize_dataset_route(&mut self.envelope.route.dataset);
+        self.set_dataset_route_value(log, |route, value| route.log = value);
     }
 
     pub fn set_dataset_unit(&mut self, unit: Option<String>) {
         let unit = unit.and_then(sanitize);
-        match (self.envelope.route.dataset.as_mut(), unit) {
-            (Some(route), value) => {
-                route.unit = value;
-            }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.unit = Some(value);
-                self.envelope.route.dataset = Some(route);
-            }
-            (None, None) => {}
-        }
-        sanitize_dataset_route(&mut self.envelope.route.dataset);
+        self.set_dataset_route_value(unit, |route, value| route.unit = value);
     }
 
     pub fn set_dataset_unit_count(&mut self, unit_count: Option<u32>) {
         let unit_count = sanitize_positive(unit_count);
-        match (self.envelope.route.dataset.as_mut(), unit_count) {
-            (Some(route), value) => {
-                route.unit_count = value;
-            }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.unit_count = Some(value);
-                self.envelope.route.dataset = Some(route);
-            }
-            (None, None) => {}
-        }
-        sanitize_dataset_route(&mut self.envelope.route.dataset);
+        self.set_dataset_route_value(unit_count, |route, value| route.unit_count = value);
     }
 
     pub fn set_dataset_average_record_unit(&mut self, average_record_unit: Option<String>) {
         let average_record_unit = average_record_unit.and_then(sanitize);
-        match (self.envelope.route.dataset.as_mut(), average_record_unit) {
-            (Some(route), value) => {
-                route.average_record_unit = value;
-            }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.average_record_unit = Some(value);
-                self.envelope.route.dataset = Some(route);
-            }
-            (None, None) => {}
-        }
-        sanitize_dataset_route(&mut self.envelope.route.dataset);
+        self.set_dataset_route_value(average_record_unit, |route, value| {
+            route.average_record_unit = value;
+        });
     }
 
     pub fn set_dataset_catalog_behavior(&mut self, catalog_behavior: Option<String>) {
         let catalog_behavior = sanitize_uppercase(catalog_behavior);
-        match (self.envelope.route.dataset.as_mut(), catalog_behavior) {
-            (Some(route), value) => {
-                route.catalog_behavior = value;
-            }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.catalog_behavior = Some(value);
-                self.envelope.route.dataset = Some(route);
-            }
-            (None, None) => {}
-        }
-        sanitize_dataset_route(&mut self.envelope.route.dataset);
+        self.set_dataset_route_value(catalog_behavior, |route, value| {
+            route.catalog_behavior = value;
+        });
     }
 
     pub fn set_dataset_retention_period(&mut self, retention_period: Option<u32>) {
         let retention_period = sanitize_positive(retention_period);
-        match (self.envelope.route.dataset.as_mut(), retention_period) {
-            (Some(route), value) => {
-                route.retention_period = value;
-            }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.retention_period = Some(value);
-                self.envelope.route.dataset = Some(route);
-            }
-            (None, None) => {}
-        }
-        sanitize_dataset_route(&mut self.envelope.route.dataset);
+        self.set_dataset_route_value(retention_period, |route, value| {
+            route.retention_period = value
+        });
     }
 
     pub fn set_dataset_release_space(&mut self, release_space: Option<bool>) {
-        match (self.envelope.route.dataset.as_mut(), release_space) {
-            (Some(route), value) => {
-                route.release_space = value;
-            }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.release_space = Some(value);
-                self.envelope.route.dataset = Some(route);
-            }
-            (None, None) => {}
-        }
-        sanitize_dataset_route(&mut self.envelope.route.dataset);
+        self.set_dataset_route_value(release_space, |route, value| route.release_space = value);
     }
 
     pub fn set_dataset_erase_on_delete(&mut self, erase_on_delete: Option<bool>) {
-        match (self.envelope.route.dataset.as_mut(), erase_on_delete) {
-            (Some(route), value) => {
-                route.erase_on_delete = value;
-            }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.erase_on_delete = Some(value);
-                self.envelope.route.dataset = Some(route);
-            }
-            (None, None) => {}
-        }
-        sanitize_dataset_route(&mut self.envelope.route.dataset);
+        self.set_dataset_route_value(erase_on_delete, |route, value| {
+            route.erase_on_delete = value
+        });
     }
 
     pub fn set_dataset_expiration_date(&mut self, expiration_date: Option<String>) {
         let expiration_date = expiration_date.and_then(sanitize);
-        match (self.envelope.route.dataset.as_mut(), expiration_date) {
-            (Some(route), value) => {
-                route.expiration_date = value;
-            }
-            (None, Some(value)) => {
-                let mut route = CobolDatasetRoute::default();
-                route.expiration_date = Some(value);
-                self.envelope.route.dataset = Some(route);
-            }
-            (None, None) => {}
-        }
-        sanitize_dataset_route(&mut self.envelope.route.dataset);
+        self.set_dataset_route_value(expiration_date, |route, value| {
+            route.expiration_date = value
+        });
     }
 
     pub fn clear_route(&mut self) {

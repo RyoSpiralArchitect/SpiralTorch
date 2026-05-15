@@ -13,22 +13,38 @@ Thanks for helping improve SpiralTorch. This repo is **AGPL-3.0-or-later** licen
 ### Prerequisites
 
 - Rust (stable): `rustup show`
+- Rust nightly with rustfmt for workspace formatting:
+  `rustup toolchain install nightly-2026-04-15 --component rustfmt`
 - Python (recommended for wheel/docs tooling): 3.12+
+- Protobuf compiler (`protoc`) for `--all-targets` checks that build TensorBoard examples
 - (Optional) `just` for task shortcuts
 
 ### Common tasks (cross-platform)
 
 ```bash
 # Format
-cargo fmt --all
+cargo +nightly-2026-04-15 fmt --all
 
 # Lint
 cargo clippy --workspace --all-targets
 
+# CI-equivalent lint gate
+just ci-lint
+# or, without just:
+bash scripts/run_ci_lint_local.sh
+
 # Core build + tests
 cargo build -p st-core --release
 cargo test  -p st-core --release -- --nocapture
+
+# Full workspace inventory
+python3 tools/list_workspace_crates.py
 ```
+
+`just ci-lint` mirrors the CI `ubuntu / lint` job: it updates the local Rust
+stable toolchain, installs the pinned nightly rustfmt, runs workspace clippy,
+and then runs the strict clippy subset. The script requires `protoc`; if a
+local `.buildenv/protoc-bin/protoc` shim exists, it is added to `PATH`.
 
 ### Windows helper script
 

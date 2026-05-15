@@ -2,6 +2,7 @@
 name = "st-bench"
 version = "0.1.0"
 edition = "2021"
+description = "Benchmark and backend-matrix harnesses for SpiralTorch"
 license = "AGPL-3.0-or-later"
 publish = false
 

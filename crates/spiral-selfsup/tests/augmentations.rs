@@ -34,9 +34,9 @@ fn colors_to_image(frame: &MultiViewFrame, height: usize, width: usize) -> Image
     for (index, pixel) in source.chunks_exact(cols).enumerate() {
         let y = index / width;
         let x = index % width;
-        for channel in 0..cols {
+        for (channel, value) in pixel.iter().enumerate().take(cols) {
             let offset = ((channel * height) + y) * width + x;
-            data[offset] = pixel[channel];
+            data[offset] = *value;
         }
     }
     ImageTensor::new(3, height, width, data).unwrap()

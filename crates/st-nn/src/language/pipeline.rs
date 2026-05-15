@@ -1709,6 +1709,13 @@ pub struct DesirePsiBridge {
 }
 
 #[cfg(feature = "psi")]
+impl Default for DesirePsiBridge {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "psi")]
 impl DesirePsiBridge {
     pub fn new() -> Self {
         Self {
@@ -2958,7 +2965,7 @@ mod language_pipeline {
             let count = replay_pipeline.replay(replay).unwrap();
             assert_eq!(count, 4);
             assert_eq!(replay_pipeline.sink_count(), 1);
-            assert!(collector.len() >= 1);
+            assert!(!collector.is_empty());
         }
 
         #[test]
@@ -3087,12 +3094,7 @@ mod language_pipeline {
         fn graph_bridge_collects_consensus() {
             let automation = build_automation();
             let tracer = Arc::new(Mutex::new(GraphFlowTracer::new()));
-            let baseline = BandEnergy {
-                above: 0.4,
-                here: 0.35,
-                beneath: 0.25,
-                drift: 0.0,
-            };
+            let baseline = BandEnergy::new(0.4, 0.35, 0.25).with_drift(0.0);
             let bridge =
                 DesireGraphBridge::new(GraphConsensusBridge::new(tracer.clone()), baseline);
             let mut pipeline = DesirePipeline::builder(automation)
@@ -3260,7 +3262,7 @@ mod language_pipeline {
             let snapshot = hub::get_last_desire_step().expect("desire telemetry");
             assert!(snapshot.psi_total.unwrap_or(0.0) > 0.0);
             assert!(!snapshot.psi_breakdown.is_empty());
-            assert!(snapshot.psi_events.len() >= 1);
+            assert!(!snapshot.psi_events.is_empty());
             let summary = bridge.drain_summary().unwrap().unwrap();
             assert_eq!(summary.steps, 4);
             assert!(summary.psi_samples >= 4);
@@ -3268,7 +3270,7 @@ mod language_pipeline {
             assert!(summary.mean_entropy.is_finite());
             assert!(summary.mean_temperature.is_finite());
             assert!(summary.mean_z_signal.is_finite());
-            assert!(summary.component_means.get(&PsiComponent::LOSS).is_some());
+            assert!(summary.component_means.contains_key(&PsiComponent::LOSS));
             assert!(summary
                 .threshold_crossings
                 .contains_key(&PsiComponent::LOSS));

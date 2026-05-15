@@ -48,7 +48,7 @@ pub(crate) fn band_energy_detail_to_py(
     drift: Option<f32>,
     spectral: Option<SpectralFeatureSample>,
 ) -> PyResult<PyObject> {
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     let (above, here, beneath) = band_energy;
     let total = above.abs() + here.abs() + beneath.abs();
     let (norm_above, norm_here, norm_beneath) = if total <= f32::EPSILON {
@@ -73,7 +73,7 @@ pub(crate) fn band_energy_detail_to_py(
     dict.set_item("asymmetry", asymmetry)?;
     dict.set_item("drift", drift)?;
 
-    let normalized = PyDict::new_bound(py);
+    let normalized = PyDict::new(py);
     normalized.set_item("above", norm_above)?;
     normalized.set_item("here", norm_here)?;
     normalized.set_item("beneath", norm_beneath)?;
@@ -83,7 +83,7 @@ pub(crate) fn band_energy_detail_to_py(
         Some(spectral) => {
             let curvature_gate = (spectral.curvature / 4.0).clamp(0.0, 1.0);
             let stability = (spectral.spin.abs() * (1.0 - curvature_gate)).clamp(0.0, 1.0);
-            let spectral_dict = PyDict::new_bound(py);
+            let spectral_dict = PyDict::new(py);
             spectral_dict.set_item("sheet_index", spectral.sheet_index)?;
             spectral_dict.set_item("sheet_confidence", spectral.sheet_confidence)?;
             spectral_dict.set_item("curvature", spectral.curvature)?;
@@ -586,7 +586,7 @@ pub(crate) fn softlogic_signal(py: Python<'_>) -> PyResult<Option<PyObject>> {
         return Ok(None);
     };
 
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("psi_total", sample.psi_total)?;
     dict.set_item("weighted_loss", sample.weighted_loss)?;
     dict.set_item("band_energy", sample.band_energy)?;

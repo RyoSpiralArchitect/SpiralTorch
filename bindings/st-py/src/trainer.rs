@@ -302,7 +302,7 @@ impl PyLinearModel {
     }
 
     pub fn state_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         let weights = Py::new(py, PyTensor::from_tensor(self.inner.weights().clone()))?;
         dict.set_item("weights", weights)?;
         dict.set_item("bias", self.inner.bias().to_vec())?;

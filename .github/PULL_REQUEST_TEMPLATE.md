@@ -4,8 +4,7 @@
 - [ ] Scope: which crates/modules are affected?
 
 ## Checklist
-- [ ] `cargo fmt` (workspace)
-- [ ] `cargo clippy -- -D warnings`
+- [ ] `just ci-lint` (or `bash scripts/run_ci_lint_local.sh`)
 - [ ] Unit tests pass (`st-core` mandatory)
 - [ ] Docs/README updated if behavior changes
 

@@ -572,11 +572,15 @@ impl EllipticTelemetry {
                 super::lerp(self.rotor_transport[i], other.rotor_transport[i], clamped);
         }
         let mut curvature_tensor = [[0.0; 3]; 3];
-        for (out_row, (self_row, other_row)) in curvature_tensor
-            .iter_mut()
-            .zip(self.curvature_tensor.iter().zip(other.curvature_tensor.iter()))
-        {
-            for (out, (&a, &b)) in out_row.iter_mut().zip(self_row.iter().zip(other_row.iter())) {
+        for (out_row, (self_row, other_row)) in curvature_tensor.iter_mut().zip(
+            self.curvature_tensor
+                .iter()
+                .zip(other.curvature_tensor.iter()),
+        ) {
+            for (out, (&a, &b)) in out_row
+                .iter_mut()
+                .zip(self_row.iter().zip(other_row.iter()))
+            {
                 *out = super::lerp(a, b, clamped);
             }
         }

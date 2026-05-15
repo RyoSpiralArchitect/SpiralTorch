@@ -196,9 +196,7 @@ impl ProblemProfile {
 
     /// Categorize the matrix footprint for directional heuristics.
     pub fn aspect_class(&self) -> AspectClass {
-        if self.rows == 0 || self.cols == 0 {
-            AspectClass::Square
-        } else if self.rows == self.cols || self.aspect < 1.2 {
+        if self.rows == 0 || self.cols == 0 || self.rows == self.cols || self.aspect < 1.2 {
             AspectClass::Square
         } else if self.cols > self.rows {
             AspectClass::Wide
@@ -221,9 +219,7 @@ impl ProblemProfile {
     pub fn lane_hint(&self) -> u32 {
         let bandwidth_spread = self.bandwidth_spread();
         let bandwidth_peak = self.bandwidth_peak();
-        if bandwidth_peak >= 14_000 {
-            512
-        } else if self.bandwidth_hint >= 8_000 {
+        if bandwidth_peak >= 14_000 || self.bandwidth_hint >= 8_000 {
             512
         } else if self.bandwidth_hint <= 2_000 && self.mean_row_nnz < 12.0 {
             128
@@ -264,7 +260,7 @@ impl ProblemProfile {
         if bandwidth_spread > 0.4 {
             tile = tile.max(8_192);
         } else if bandwidth_spread < 0.25 && bandwidth_peak < 4_000 {
-            tile = tile.min(8_192).max(4_096);
+            tile = tile.clamp(4_096, 8_192);
         }
         tile
     }
@@ -298,12 +294,13 @@ pub struct ProfileBuilder {
 impl ProfileBuilder {
     /// Create a builder for the given system dimensions.
     pub fn new(rows: usize, cols: usize, subgroup: bool) -> Self {
-        let mut builder = Self::default();
-        builder.rows = rows;
-        builder.cols = cols;
-        builder.subgroup = subgroup;
-        builder.min_row_nnz = usize::MAX;
-        builder
+        Self {
+            rows,
+            cols,
+            subgroup,
+            min_row_nnz: usize::MAX,
+            ..Default::default()
+        }
     }
 
     /// Push statistics for a single row.

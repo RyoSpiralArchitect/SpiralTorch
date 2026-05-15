@@ -132,19 +132,20 @@ impl DriftSafetyPlugin {
         let phi = (1.0 - telemetry.stability).clamp(0.0, 1.0);
         let failsafe_penalty = if telemetry.failsafe { 1.0 } else { 0.0 };
 
-        let mut state = FrameState::default();
-        state.phi = phi;
-        state.c = 1.0 + channel_energy + gravitational + anomaly_hits + failsafe_penalty;
-        state.s = 1.0 + radius + anomaly_hits;
-        state.a_den = -(channel_energy + failsafe_penalty);
-        state.a_con = -(channel_energy + gravitational + anomaly_hits + failsafe_penalty);
         let base_b = 1.0 + channel_energy + anomaly_hits + failsafe_penalty;
-        state.b_den = base_b;
-        state.b_con = base_b * (1.0 + phi);
-        state.kappa = 1.0 + radius + anomaly_hits + failsafe_penalty;
-        state.kappa_slope = anomaly_hits + failsafe_penalty;
-        state.timing_scale = 1.0 + anomaly_hits;
-        state
+        FrameState {
+            phi,
+            c: 1.0 + channel_energy + gravitational + anomaly_hits + failsafe_penalty,
+            s: 1.0 + radius + anomaly_hits,
+            a_den: -(channel_energy + failsafe_penalty),
+            a_con: -(channel_energy + gravitational + anomaly_hits + failsafe_penalty),
+            b_den: base_b,
+            b_con: base_b * (1.0 + phi),
+            kappa: 1.0 + radius + anomaly_hits + failsafe_penalty,
+            kappa_slope: anomaly_hits + failsafe_penalty,
+            timing_scale: 1.0 + anomaly_hits,
+            ..Default::default()
+        }
     }
 }
 

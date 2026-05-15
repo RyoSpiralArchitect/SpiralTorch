@@ -632,8 +632,8 @@ fn quantum_measurement_from_fractal_sequence_py(
     let mut session =
         PyFractalQuantumSession::from_config(studio.config.clone(), threshold, eta_scale);
     if let Some(weight_obj) = weights {
-        let mut patch_iter = PyIterator::from_bound_object(patches)?;
-        let mut weight_iter = PyIterator::from_bound_object(weight_obj)?;
+        let mut patch_iter = PyIterator::from_object(patches)?;
+        let mut weight_iter = PyIterator::from_object(weight_obj)?;
         loop {
             let patch_next = patch_iter.next();
             let weight_next = weight_iter.next();
@@ -653,7 +653,7 @@ fn quantum_measurement_from_fractal_sequence_py(
             }
         }
     } else {
-        for patch in PyIterator::from_bound_object(patches)? {
+        for patch in PyIterator::from_object(patches)? {
             let patch = patch?;
             session.ingest_patch(&patch, 1.0);
         }
@@ -662,7 +662,7 @@ fn quantum_measurement_from_fractal_sequence_py(
 }
 
 pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
-    let module = PyModule::new_bound(py, "qr")?;
+    let module = PyModule::new(py, "qr")?;
     module.add("__doc__", "Quantum overlay helpers")?;
     module.add_class::<PyQuantumOverlayConfig>()?;
     module.add_class::<PyZResonance>()?;

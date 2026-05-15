@@ -20,14 +20,14 @@ pub fn json_to_py(py: Python<'_>, value: &JsonValue) -> PyResult<PyObject> {
         }
         JsonValue::String(v) => v.into_py(py),
         JsonValue::Array(items) => {
-            let list = PyList::empty_bound(py);
+            let list = PyList::empty(py);
             for item in items {
                 list.append(json_to_py(py, item)?)?;
             }
             list.into_py(py)
         }
         JsonValue::Object(map) => {
-            let dict = PyDict::new_bound(py);
+            let dict = PyDict::new(py);
             for (key, item) in map {
                 dict.set_item(key, json_to_py(py, item)?)?;
             }

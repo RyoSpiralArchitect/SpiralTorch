@@ -1,8 +1,8 @@
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::plugin::{global_registry, PluginEvent};
 use st_nn::{
-    EpochStats, Linear, MeanSquaredError, Module, ModuleTrainer, Relu, RoundtableConfig, Sequential,
-    Tensor,
+    EpochStats, Linear, MeanSquaredError, Module, ModuleTrainer, Relu, RoundtableConfig,
+    Sequential, Tensor,
 };
 use std::sync::Arc;
 
@@ -50,8 +50,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?;
 
     for _ in 0..3 {
-        let EpochStats { batches, average_loss, .. } =
-            trainer.train_epoch(&mut model, &mut loss, vec![(x.clone(), y.clone())], &schedule)?;
+        let EpochStats {
+            batches,
+            average_loss,
+            ..
+        } = trainer.train_epoch(
+            &mut model,
+            &mut loss,
+            vec![(x.clone(), y.clone())],
+            &schedule,
+        )?;
         println!("stats: batches={batches} avg_loss={average_loss:.6}");
     }
 

@@ -1412,6 +1412,18 @@ pub type ZSpaceSequencerLanguageOutput = (
     MaxwellZPulse,
 );
 
+#[cfg(feature = "psi")]
+pub type LanguagePsiForwardOutput = (
+    Tensor,
+    Vec<f32>,
+    ConceptHint,
+    Option<NarrativeHint>,
+    MaxwellZPulse,
+    Option<PsiReading>,
+    Vec<PsiEvent>,
+    SoftlogicZFeedback,
+);
+
 impl ZSpaceCoherenceSequencer {
     /// Creates a new Z-space coherence sequencer.
     pub fn new(
@@ -1427,15 +1439,13 @@ impl ZSpaceCoherenceSequencer {
             return Err(st_tensor::TensorError::InvalidDimensions {
                 rows: dim,
                 cols: num_heads,
-            }
-            );
+            });
         }
         if (topos.curvature() - curvature).abs() > 1e-6 {
             return Err(st_tensor::TensorError::CurvatureMismatch {
                 expected: curvature,
                 got: topos.curvature(),
-            }
-            );
+            });
         }
 
         let channel_count = (dim / 8).max(1).max(num_heads);
@@ -1509,8 +1519,7 @@ impl ZSpaceCoherenceSequencer {
             return Err(TensorError::DataLength {
                 expected: self.coherence_engine.num_channels(),
                 got: coherence_weights.len(),
-            }
-            );
+            });
         }
 
         let (rows, cols) = x.shape();
@@ -1779,16 +1788,7 @@ impl ZSpaceCoherenceSequencer {
         maxwell_bridge: &MaxwellDesireBridge,
         psi_bridge: &MaxwellPsiTelemetryBridge,
         psi_step: u64,
-    ) -> PureResult<(
-        Tensor,
-        Vec<f32>,
-        ConceptHint,
-        Option<NarrativeHint>,
-        MaxwellZPulse,
-        Option<PsiReading>,
-        Vec<PsiEvent>,
-        SoftlogicZFeedback,
-    )> {
+    ) -> PureResult<LanguagePsiForwardOutput> {
         let (aggregated, coherence, concept_hint, narrative, pulse) =
             self.forward_with_language_bridges(x, semantics, maxwell_bridge)?;
         let (feedback, psi_reading, psi_events) = psi_bridge
@@ -3344,7 +3344,7 @@ mod tests {
         let reading = reading.expect("psi reading should be available");
         assert_eq!(reading.step, 64);
         assert!(reading.total >= 0.0);
-        assert!(reading.breakdown.get(&PsiComponent::BAND_ENERGY).is_some());
+        assert!(reading.breakdown.contains_key(&PsiComponent::BAND_ENERGY));
         assert!(emitted_events.is_empty());
 
         let stored_reading = hub::get_last_psi().unwrap();

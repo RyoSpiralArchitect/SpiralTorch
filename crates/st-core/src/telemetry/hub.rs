@@ -83,7 +83,6 @@ fn psi_lock() -> &'static ReentrantMutex<()> {
 }
 
 #[cfg(feature = "psi")]
-#[must_use]
 pub fn psi_telemetry_guard() -> ReentrantMutexGuard<'static, ()> {
     psi_lock().lock()
 }
@@ -374,7 +373,7 @@ pub fn clear_last_psi() {
 
 #[cfg(feature = "psi")]
 pub fn set_last_psi_events(events: &[PsiEvent]) {
-    let events_snapshot: Vec<PsiEvent> = events.iter().cloned().collect();
+    let events_snapshot: Vec<PsiEvent> = events.to_vec();
     {
         let _guard = psi_lock().lock();
         if let Ok(mut guard) = LAST_PSI_EVENTS.write() {
@@ -475,10 +474,7 @@ pub fn set_last_psi_spiral_tuning(tuning: &PsiSpiralTuning) {
     for &component in PSI_COMPONENTS.iter() {
         if tuning.required_components.contains(component) {
             required += 1;
-            fragment.push_note(format!(
-                "psi.spiral.tuning.required:{}",
-                component.to_string()
-            ));
+            fragment.push_note(format!("psi.spiral.tuning.required:{}", component));
         }
         if let Some(delta) = tuning.weight_increments.get(&component) {
             fragment.push_metric(format!("psi.spiral.tuning.weight.{}", component), *delta);
