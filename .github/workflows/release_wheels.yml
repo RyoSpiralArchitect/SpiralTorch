@@ -68,9 +68,9 @@ jobs:
             extra_args="$extra_args --target universal2-apple-darwin"
           fi
           if [ "${{ runner.os }}" = "Linux" ]; then
-            maturin build -m bindings/st-py/Cargo.toml --release --locked --compatibility manylinux2014 --zig --features wgpu,logic,kdsl
+            maturin build -m bindings/st-py/Cargo.toml --release --locked --compatibility manylinux2014 --zig --features logic,kdsl
           else
-            maturin build -m bindings/st-py/Cargo.toml --release --locked $extra_args --features wgpu,logic,kdsl
+            maturin build -m bindings/st-py/Cargo.toml --release --locked $extra_args --features logic,kdsl
           fi
       - name: Smoke test wheel import
         shell: bash

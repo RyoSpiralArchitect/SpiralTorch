@@ -3802,6 +3802,15 @@ class _NnModuleTrainer:
         shared_mem_per_workgroup: int | None = ...,
     ) -> None: ...
 
+    @property
+    def backend(self) -> str: ...
+
+    @property
+    def requested_backend(self) -> str: ...
+
+    @property
+    def effective_backend(self) -> str: ...
+
     def roundtable(
         self,
         rows: int,

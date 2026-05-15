@@ -46,7 +46,9 @@ From the repository root:
 
 ```bash
 python -m pip install -U "maturin>=1,<2"
-maturin build -m bindings/st-py/Cargo.toml --release --locked --features wgpu,logic,kdsl
+maturin build -m bindings/st-py/Cargo.toml --release --locked --features logic,kdsl
+# CPU-only fallback:
+# maturin build -m bindings/st-py/Cargo.toml --release --locked --no-default-features --features python-default
 python -m pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
 ```
 
@@ -60,4 +62,3 @@ python -m pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch
 
 - Update docs when you change APIs or workflows.
 - Prefer ASCII for version constraints (e.g. `>= 3.8`) to avoid encoding issues across shells.
-

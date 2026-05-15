@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import types
 
 import pytest
@@ -93,7 +94,7 @@ def test_plan_accepts_mps_backend_and_exposes_surrogate_route() -> None:
 def test_init_backend_and_session_expose_mps_preflight() -> None:
     st = require_native()
 
-    assert st.init_backend("mps") is False
+    assert st.init_backend("mps") is True
 
     session = st.SpiralSession(backend="mps")
     assert session.backend == "mps"
@@ -109,6 +110,55 @@ def test_init_backend_and_session_expose_mps_preflight() -> None:
     assert report["placeholder"] is True
     assert report["available"] is False
     assert "lane_width" in report
+
+
+def test_init_backend_retains_legacy_mps_surrogate_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    st = require_native()
+    calls: list[str] = []
+
+    def _patched_init_backend(label: str) -> bool:
+        raw = "" if label is None else str(label).strip().lower()
+        calls.append(raw)
+        if raw == "mps":
+            raise ValueError("unknown backend label 'mps'")
+        return True
+
+    monkeypatch.setattr(st, "_native_init_backend", _patched_init_backend, raising=False)
+
+    assert st.init_backend("mps") is True
+    assert calls[0] == "mps"
+    assert any(label in {"wgpu", "cpu"} for label in calls[1:])
+
+
+def test_module_trainer_accepts_mps_backend_and_tracks_surrogate_route() -> None:
+    st = require_native()
+
+    trainer = st.nn.ModuleTrainer(
+        backend="mps",
+        curvature=-1.0,
+        hyper_learning_rate=1e-2,
+        fallback_learning_rate=1e-2,
+    )
+    assert trainer.backend == "mps"
+    assert trainer.requested_backend == "mps"
+    assert trainer.effective_backend in {"wgpu", "cpu"}
+
+
+def test_tensor_ops_accept_mps_backend_label() -> None:
+    st = require_native()
+
+    lhs = st.Tensor(2, 2, [1.0, 2.0, 3.0, 4.0])
+    rhs = st.Tensor(2, 2, [0.5, -1.0, 1.5, 2.0])
+
+    product = lhs.matmul(rhs, backend="mps")
+    assert product.shape() == (2, 2)
+    assert product.tolist() == [[3.5, 3.0], [7.5, 5.0]]
+
+    softmax = lhs.row_softmax(backend="mps")
+    for row in softmax.tolist():
+        assert math.isclose(sum(row), 1.0, rel_tol=1e-6, abs_tol=1e-6)
 
 
 def test_public_mps_probe_requires_matching_native_extension(monkeypatch: pytest.MonkeyPatch) -> None:

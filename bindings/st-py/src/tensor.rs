@@ -19,6 +19,70 @@ use std::ffi::{c_void, CStr};
 use std::sync::Arc;
 use tracing::warn;
 
+fn resolve_mps_matmul_backend() -> MatmulBackend {
+    match resolve_backend(BackendKind::Mps).effective_backend {
+        BackendKind::Wgpu => {
+            #[cfg(feature = "wgpu")]
+            {
+                MatmulBackend::GpuWgpu
+            }
+            #[cfg(not(feature = "wgpu"))]
+            {
+                MatmulBackend::CpuFaer
+            }
+        }
+        _ => MatmulBackend::CpuFaer,
+    }
+}
+
+fn resolve_mps_softmax_backend() -> SoftmaxBackend {
+    match resolve_backend(BackendKind::Mps).effective_backend {
+        BackendKind::Wgpu => {
+            #[cfg(feature = "wgpu")]
+            {
+                SoftmaxBackend::GpuWgpu
+            }
+            #[cfg(not(feature = "wgpu"))]
+            {
+                SoftmaxBackend::Cpu
+            }
+        }
+        _ => SoftmaxBackend::Cpu,
+    }
+}
+
+fn resolve_mps_hardmax_backend() -> HardmaxBackend {
+    match resolve_backend(BackendKind::Mps).effective_backend {
+        BackendKind::Wgpu => {
+            #[cfg(feature = "wgpu")]
+            {
+                HardmaxBackend::GpuWgpu
+            }
+            #[cfg(not(feature = "wgpu"))]
+            {
+                HardmaxBackend::Cpu
+            }
+        }
+        _ => HardmaxBackend::Cpu,
+    }
+}
+
+fn resolve_mps_attention_backend() -> AttentionBackend {
+    match resolve_backend(BackendKind::Mps).effective_backend {
+        BackendKind::Wgpu => {
+            #[cfg(feature = "wgpu")]
+            {
+                AttentionBackend::GpuWgpu
+            }
+            #[cfg(not(feature = "wgpu"))]
+            {
+                AttentionBackend::Cpu
+            }
+        }
+        _ => AttentionBackend::Cpu,
+    }
+}
+
 fn parse_backend(label: Option<&str>) -> MatmulBackend {
     match label.unwrap_or("auto") {
         "auto" => MatmulBackend::Auto,
@@ -27,6 +91,7 @@ fn parse_backend(label: Option<&str>) -> MatmulBackend {
         "simd" => MatmulBackend::CpuSimd,
         "cpu-simd" => MatmulBackend::CpuSimd,
         "naive" => MatmulBackend::CpuNaive,
+        "mps" => resolve_mps_matmul_backend(),
         #[cfg(feature = "wgpu")]
         "wgpu" => MatmulBackend::GpuWgpu,
         #[cfg(feature = "hip")]
@@ -45,6 +110,7 @@ fn parse_softmax_backend(label: Option<&str>) -> SoftmaxBackend {
     match label.unwrap_or("auto") {
         "auto" => SoftmaxBackend::Auto,
         "cpu" => SoftmaxBackend::Cpu,
+        "mps" => resolve_mps_softmax_backend(),
         #[cfg(feature = "wgpu")]
         "wgpu" => SoftmaxBackend::GpuWgpu,
         other => {
@@ -61,6 +127,7 @@ fn parse_hardmax_backend(label: Option<&str>) -> HardmaxBackend {
     match label.unwrap_or("auto") {
         "auto" => HardmaxBackend::Auto,
         "cpu" => HardmaxBackend::Cpu,
+        "mps" => resolve_mps_hardmax_backend(),
         #[cfg(feature = "wgpu")]
         "wgpu" => HardmaxBackend::GpuWgpu,
         other => {
@@ -77,6 +144,7 @@ fn parse_attention_backend(label: Option<&str>) -> AttentionBackend {
     match label.unwrap_or("auto") {
         "auto" => AttentionBackend::Auto,
         "cpu" => AttentionBackend::Cpu,
+        "mps" => resolve_mps_attention_backend(),
         #[cfg(feature = "wgpu")]
         "wgpu" => AttentionBackend::GpuWgpu,
         other => {
@@ -1239,7 +1307,10 @@ impl PyTensor {
         py: Python<'_>,
     ) -> PyResult<PyTensor> {
         let tensor = py
-            .allow_threads(|| self.inner.layer_norm_affine(&gamma.inner, &beta.inner, epsilon))
+            .allow_threads(|| {
+                self.inner
+                    .layer_norm_affine(&gamma.inner, &beta.inner, epsilon)
+            })
             .map_err(tensor_err_to_py)?;
         Ok(PyTensor { inner: tensor })
     }
@@ -1400,10 +1471,10 @@ fn cpu_simd_prepack_rhs(py: Python<'_>, rhs: &PyTensor) -> PyResult<PyCpuSimdPac
 #[pyfunction]
 fn init_backend(label: &str) -> PyResult<bool> {
     match label {
-        "mps" => {
-            let _ = resolve_backend(BackendKind::Mps);
-            Ok(false)
-        }
+        "mps" => Ok(matches!(
+            resolve_backend(BackendKind::Mps).effective_backend,
+            BackendKind::Cpu | BackendKind::Wgpu
+        )),
         #[cfg(feature = "hip")]
         "hip" => hip_backend::init()
             .map(|_| true)
@@ -1687,5 +1758,51 @@ mod tests {
             assert_eq!(device, (1, 0));
             let _ = py;
         });
+    }
+
+    #[test]
+    fn mps_backend_labels_route_through_runtime_surrogate() {
+        match resolve_backend(BackendKind::Mps).effective_backend {
+            BackendKind::Wgpu => {
+                #[cfg(feature = "wgpu")]
+                {
+                    assert!(matches!(parse_backend(Some("mps")), MatmulBackend::GpuWgpu));
+                    assert!(matches!(
+                        parse_softmax_backend(Some("mps")),
+                        SoftmaxBackend::GpuWgpu
+                    ));
+                    assert!(matches!(
+                        parse_hardmax_backend(Some("mps")),
+                        HardmaxBackend::GpuWgpu
+                    ));
+                    assert!(matches!(
+                        parse_attention_backend(Some("mps")),
+                        AttentionBackend::GpuWgpu
+                    ));
+                }
+                #[cfg(not(feature = "wgpu"))]
+                panic!("runtime probe selected wgpu without the wgpu feature");
+            }
+            _ => {
+                assert!(matches!(parse_backend(Some("mps")), MatmulBackend::CpuFaer));
+                assert!(matches!(
+                    parse_softmax_backend(Some("mps")),
+                    SoftmaxBackend::Cpu
+                ));
+                assert!(matches!(
+                    parse_hardmax_backend(Some("mps")),
+                    HardmaxBackend::Cpu
+                ));
+                assert!(matches!(
+                    parse_attention_backend(Some("mps")),
+                    AttentionBackend::Cpu
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn init_backend_reports_mps_surrogate_readiness() {
+        assert!(init_backend("mps").unwrap());
     }
 }

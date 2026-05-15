@@ -32,6 +32,8 @@ use nalgebra::DVector;
 #[cfg(feature = "nn")]
 use pyo3::types::{PyIterator, PyList};
 #[cfg(feature = "nn")]
+use st_core::backend::runtime_probe::resolve_backend;
+#[cfg(feature = "nn")]
 use st_core::config::self_rewrite::SelfRewriteCfg;
 #[cfg(feature = "nn")]
 use st_core::{
@@ -634,7 +636,9 @@ impl PySpectralLearningRatePolicy {
 
     #[getter]
     pub fn last_coherence_label(&self) -> Option<String> {
-        self.inner.last_coherence_label().map(|label| label.to_string())
+        self.inner
+            .last_coherence_label()
+            .map(|label| label.to_string())
     }
 
     pub fn set_smoothing(&mut self, smoothing: f32) {
@@ -658,10 +662,7 @@ impl PySpectralLearningRatePolicy {
     }
 
     pub fn set_stuck_turnover_threshold(&mut self, threshold: f32) {
-        self.inner = self
-            .inner
-            .clone()
-            .with_stuck_turnover_threshold(threshold);
+        self.inner = self.inner.clone().with_stuck_turnover_threshold(threshold);
     }
 
     pub fn set_coherence_gain(&mut self, gain: f32) {
@@ -2659,7 +2660,9 @@ impl PyLayerNorm {
     }
 
     pub fn apply_step(&mut self, fallback_lr: f32) -> PyResult<()> {
-        self.inner_mut()?.apply_step(fallback_lr).map_err(tensor_err_to_py)
+        self.inner_mut()?
+            .apply_step(fallback_lr)
+            .map_err(tensor_err_to_py)
     }
 
     pub fn state_dict(&self) -> PyResult<Vec<(String, PyTensor)>> {
@@ -2805,7 +2808,9 @@ impl PyZSpaceLayerNorm {
     }
 
     pub fn apply_step(&mut self, fallback_lr: f32) -> PyResult<()> {
-        self.inner_mut()?.apply_step(fallback_lr).map_err(tensor_err_to_py)
+        self.inner_mut()?
+            .apply_step(fallback_lr)
+            .map_err(tensor_err_to_py)
     }
 
     pub fn state_dict(&self) -> PyResult<Vec<(String, PyTensor)>> {
@@ -2853,7 +2858,9 @@ impl PyZSpaceLayerNorm {
     }
 
     pub fn set_projector_gain(&self, gain: f32) -> PyResult<()> {
-        self.inner()?.set_projector_gain(gain).map_err(tensor_err_to_py)
+        self.inner()?
+            .set_projector_gain(gain)
+            .map_err(tensor_err_to_py)
     }
 
     pub fn adapt_projector_gain(&self, target_radius: f32, smoothing: f32) -> PyResult<f32> {
@@ -2932,7 +2939,8 @@ impl PyBatchNorm1d {
         epsilon: f32,
         training: bool,
     ) -> PyResult<Self> {
-        let inner = BatchNorm1d::new(name, features, momentum, epsilon).map_err(tensor_err_to_py)?;
+        let inner =
+            BatchNorm1d::new(name, features, momentum, epsilon).map_err(tensor_err_to_py)?;
         if !training {
             inner.eval();
         }
@@ -3006,7 +3014,9 @@ impl PyBatchNorm1d {
     }
 
     pub fn apply_step(&mut self, fallback_lr: f32) -> PyResult<()> {
-        self.inner_mut()?.apply_step(fallback_lr).map_err(tensor_err_to_py)
+        self.inner_mut()?
+            .apply_step(fallback_lr)
+            .map_err(tensor_err_to_py)
     }
 
     pub fn state_dict(&self) -> PyResult<Vec<(String, PyTensor)>> {
@@ -3177,7 +3187,9 @@ impl PyZSpaceBatchNorm1d {
     }
 
     pub fn apply_step(&mut self, fallback_lr: f32) -> PyResult<()> {
-        self.inner_mut()?.apply_step(fallback_lr).map_err(tensor_err_to_py)
+        self.inner_mut()?
+            .apply_step(fallback_lr)
+            .map_err(tensor_err_to_py)
     }
 
     pub fn state_dict(&self) -> PyResult<Vec<(String, PyTensor)>> {
@@ -3230,7 +3242,9 @@ impl PyZSpaceBatchNorm1d {
     }
 
     pub fn set_projector_gain(&self, gain: f32) -> PyResult<()> {
-        self.inner()?.set_projector_gain(gain).map_err(tensor_err_to_py)
+        self.inner()?
+            .set_projector_gain(gain)
+            .map_err(tensor_err_to_py)
     }
 
     pub fn adapt_projector_gain(&self, target_radius: f32, smoothing: f32) -> PyResult<f32> {
@@ -4180,6 +4194,8 @@ impl PyEpochStats {
 #[pyclass(module = "spiraltorch.nn", name = "ModuleTrainer", unsendable)]
 pub(crate) struct PyNnModuleTrainer {
     inner: RustModuleTrainer,
+    requested_backend: String,
+    effective_backend: String,
 }
 
 #[cfg(feature = "nn")]
@@ -4579,8 +4595,10 @@ impl PyNnModuleTrainer {
             ));
         }
         let backend_kind = parse_backend(Some(backend))?;
+        let backend_resolution = resolve_backend(backend_kind);
+        let effective_backend = backend_resolution.effective_backend;
         let caps = build_caps(
-            backend_kind,
+            effective_backend,
             lane_width,
             subgroup,
             max_workgroup,
@@ -4593,6 +4611,8 @@ impl PyNnModuleTrainer {
                 hyper_learning_rate,
                 fallback_learning_rate,
             ),
+            requested_backend: backend_kind.as_str().to_string(),
+            effective_backend: effective_backend.as_str().to_string(),
         })
     }
 
@@ -4634,6 +4654,21 @@ impl PyNnModuleTrainer {
     }
 
     #[getter]
+    pub fn backend(&self) -> &str {
+        self.requested_backend.as_str()
+    }
+
+    #[getter]
+    pub fn requested_backend(&self) -> &str {
+        self.requested_backend.as_str()
+    }
+
+    #[getter]
+    pub fn effective_backend(&self) -> &str {
+        self.effective_backend.as_str()
+    }
+
+    #[getter]
     pub fn hyper_learning_rate(&self) -> f32 {
         self.inner.hyper_learning_rate()
     }
@@ -4663,7 +4698,9 @@ impl PyNnModuleTrainer {
         topos: Option<&PyOpenCartesianTopos>,
     ) -> PyResult<()> {
         with_module_mut(module, |module_inner| match topos {
-            Some(topos) => self.inner.prepare_with_topos(module_inner, topos.inner.clone()),
+            Some(topos) => self
+                .inner
+                .prepare_with_topos(module_inner, topos.inner.clone()),
             None => self.inner.prepare(module_inner),
         })
     }
@@ -4700,10 +4737,7 @@ impl PyNnModuleTrainer {
     }
 
     #[pyo3(signature = (policy=None))]
-    pub fn enable_spectral_learning_rate(
-        &mut self,
-        policy: Option<&PySpectralLearningRatePolicy>,
-    ) {
+    pub fn enable_spectral_learning_rate(&mut self, policy: Option<&PySpectralLearningRatePolicy>) {
         let policy = policy
             .map(|policy| policy.inner.clone())
             .unwrap_or_else(RustSpectralLearningRatePolicy::default);
@@ -4817,7 +4851,9 @@ impl PyNnModuleTrainer {
 
     #[pyo3(signature = (module, factor))]
     pub fn mul_learning_rate(&mut self, module: &Bound<PyAny>, factor: f32) -> PyResult<()> {
-        with_module_mut(module, |module_inner| self.inner.mul_learning_rate(module_inner, factor))
+        with_module_mut(module, |module_inner| {
+            self.inner.mul_learning_rate(module_inner, factor)
+        })
     }
 
     #[pyo3(signature = (text, *, every="epoch", mode="blend"))]
@@ -8830,4 +8866,25 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
 
 pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     register_impl(py, parent)
+}
+
+#[cfg(all(test, feature = "nn"))]
+mod tests {
+    use super::PyNnModuleTrainer;
+    use st_core::backend::runtime_probe::resolve_backend;
+
+    #[test]
+    fn module_trainer_routes_mps_through_surrogate_backend() {
+        let trainer = PyNnModuleTrainer::new("mps", -1.0, 1e-2, 1e-2, None, None, None, None)
+            .expect("trainer should build");
+        let resolution =
+            resolve_backend(crate::planner::parse_backend(Some("mps")).expect("mps backend"));
+
+        assert_eq!(trainer.backend(), "mps");
+        assert_eq!(trainer.requested_backend(), "mps");
+        assert_eq!(
+            trainer.effective_backend(),
+            resolution.effective_backend.as_str()
+        );
+    }
 }

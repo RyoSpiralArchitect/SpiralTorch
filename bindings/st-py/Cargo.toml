@@ -12,6 +12,10 @@ crate-type = ["cdylib"]
 
 [features]
 default = [
+    "python-default",
+    "wgpu",
+]
+python-default = [
     "extension-module",
     "psi",
     "psychoid",

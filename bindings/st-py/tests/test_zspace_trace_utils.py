@@ -15,6 +15,7 @@ from spiraltorch.zspace_artifacts import (
     build_zspace_downstream_hook,
     desire_step_from_downstream_hook,
     load_zspace_artifact_manifest,
+    run_desire_geometry_bias_validation,
 )
 from spiraltorch.zspace_trace import load_zspace_trace_events, write_zspace_trace_html
 
@@ -526,3 +527,44 @@ def test_desire_pipeline_geometry_bias_ingest_surfaces_metrics() -> None:
     assert result["geometry_bias_metrics"]["latest"]["accuracy"] >= 0.0
     assert result["geometry_bias_coherence"]["composite_energy"] > 0.0
     assert result["geometry_bias_coherence"]["timestamp_ms"] > 0
+
+
+def test_run_desire_geometry_bias_validation_compares_modes() -> None:
+    _require_native_nn()
+    hook = {
+        "kind": "spiraltorch.zspace_artifact_hook",
+        "summary": {"guidance": "keep ambiguity alive"},
+        "top_focus": [{"name": "noncollapse.preserved_ratio"}],
+        "desire_candidate": {
+            "stability_signal": 0.87,
+            "momentum_signal": 0.18,
+            "delta_signal": 0.04,
+            "phase_hint": "integration",
+            "focus_metric": "noncollapse.preserved_ratio",
+            "guidance": "keep ambiguity alive",
+        },
+    }
+
+    report = run_desire_geometry_bias_validation(
+        lambda: st.nn.DesirePipeline(vocab_size=4),
+        [0.1, 0.2, 0.3, 0.4],
+        1,
+        hook,
+    )
+
+    assert report["kind"] == "spiraltorch.desire_geometry_bias_validation"
+    mode_names = [item["mode"] for item in report["modes"]]
+    assert mode_names == ["baseline", "adapter_only", "hook_only", "fused"]
+    by_mode = {item["mode"]: item for item in report["modes"]}
+    assert by_mode["baseline"]["scaled_logits_gain"] == pytest.approx(1.0)
+    assert by_mode["baseline"]["geometry_bias_ingested"] is False
+    assert by_mode["adapter_only"]["scaled_logits_gain"] > 1.0
+    assert by_mode["adapter_only"]["geometry_bias_ingested"] is False
+    assert by_mode["adapter_only"]["geometry_bias_coherence"] is None
+    assert by_mode["hook_only"]["geometry_bias_ingested"] is True
+    assert by_mode["hook_only"]["geometry_bias_coherence"]["composite_energy"] > 0.0
+    assert by_mode["fused"]["geometry_bias_ingested"] is True
+    assert by_mode["fused"]["downstream_adapter"]["gain"] > 1.0
+    comparisons = {item["mode"]: item for item in report["comparisons"]}
+    assert set(comparisons) == {"adapter_only", "hook_only", "fused"}
+    assert comparisons["hook_only"]["coherence_delta"] > 0.0

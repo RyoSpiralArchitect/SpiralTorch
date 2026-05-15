@@ -17,19 +17,19 @@ jobs:
             macos_deployment_target: "14.0"
             universal2: true
             py: "3.12"
-            feat: "wgpu,logic,kdsl"
+            feat: "logic,kdsl"
           - os: ubuntu-22.04
             label: ubuntu-22.04
             macos_deployment_target: ""
             universal2: false
             py: "3.12"
-            feat: "wgpu,logic,kdsl"
+            feat: "logic,kdsl"
           - os: windows-2022
             label: windows-2022
             macos_deployment_target: ""
             universal2: false
             py: "3.12"
-            feat: "wgpu,logic,kdsl"
+            feat: "logic,kdsl"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
