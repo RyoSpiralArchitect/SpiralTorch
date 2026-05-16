@@ -1682,6 +1682,14 @@ class SpiralSession:
 
     def close(self) -> None: ...
 
+def trace_wgpu_first_runtime(
+    backend: str = ...,
+    *,
+    rows: int = ...,
+    cols: int = ...,
+    k: int = ...,
+) -> Dict[str, object]: ...
+
 def hypergrad(
     *shape_args: Any,
     curvature: float = ...,

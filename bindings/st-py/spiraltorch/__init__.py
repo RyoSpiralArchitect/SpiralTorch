@@ -6545,6 +6545,126 @@ def _resolve_runtime_entry(backend: str) -> tuple[str, str, _Dict[str, _Any]]:
     return "cpu", "cpu", report
 
 
+def trace_wgpu_first_runtime(
+    backend: str = "auto",
+    *,
+    rows: int = 2,
+    cols: int = 8,
+    k: int = 2,
+) -> _Dict[str, _Any]:
+    """Run a tiny WGPU-first probe and return planner plus tensor metadata.
+
+    The report intentionally requests tensor execution with the session's
+    effective backend instead of relying on tensor-level ``auto`` heuristics.
+    That keeps the trace honest about the WGPU-first session policy while still
+    surfacing any runtime fallback or accelerator failure.
+    """
+
+    rows = int(rows)
+    cols = int(cols)
+    k = int(k)
+    if rows < 1 or cols < 1:
+        raise ValueError("rows and cols must be positive")
+    if k < 1:
+        raise ValueError("k must be positive")
+    k = min(k, cols)
+
+    build_features: _Dict[str, _Any] = {}
+    build_info_fn = globals().get("build_info")
+    if callable(build_info_fn):
+        with _contextlib.suppress(Exception):
+            info = build_info_fn()
+            if isinstance(info, _Mapping):
+                features = info.get("features", {})
+                if isinstance(features, _Mapping):
+                    build_features = dict(features)
+
+    events: list[_Dict[str, _Any]] = []
+    plugin_module = globals().get("plugin")
+    subscribe = getattr(plugin_module, "subscribe", None)
+    unsubscribe = getattr(plugin_module, "unsubscribe", None)
+    subscription_id: _Any = None
+
+    def _capture_event(event: _Any) -> None:
+        if isinstance(event, _Mapping):
+            events.append(dict(event))
+        else:
+            events.append({"event": repr(event)})
+
+    if callable(subscribe):
+        with _contextlib.suppress(Exception):
+            subscription_id = subscribe("TensorOpMeta", _capture_event)
+
+    try:
+        session = SpiralSession(backend=backend)
+        effective_backend = str(session.effective_backend or "cpu")
+        report: _Dict[str, _Any] = {
+            "requested_backend": str(backend),
+            "effective_backend": effective_backend,
+            "device": str(session.device),
+            "build_features": build_features,
+            "device_preflight": dict(session.device_preflight),
+            "planner": None,
+            "tensor_operation": None,
+            "tensor_meta_events": events,
+        }
+
+        try:
+            plan_obj = plan_topk(rows=rows, cols=cols, k=k, backend=effective_backend)
+            report["planner"] = {
+                "kind": getattr(plan_obj, "kind", "topk"),
+                "requested_backend": getattr(
+                    plan_obj,
+                    "requested_backend",
+                    effective_backend,
+                ),
+                "effective_backend": getattr(
+                    plan_obj,
+                    "effective_backend",
+                    effective_backend,
+                ),
+                "rows": int(getattr(plan_obj, "rows", rows)),
+                "cols": int(getattr(plan_obj, "cols", cols)),
+                "k": int(getattr(plan_obj, "k", k)),
+                "workgroup": int(getattr(plan_obj, "workgroup", 0)),
+                "lanes": int(getattr(plan_obj, "lanes", 0)),
+            }
+        except Exception as exc:
+            report["planner"] = {"error": str(exc)}
+
+        try:
+            values = [
+                (float(idx % cols) - (cols / 2.0)) / max(float(cols), 1.0)
+                for idx in range(rows * cols)
+            ]
+            tensor = Tensor(rows, cols, values)
+            softmax = tensor.row_softmax(backend=effective_backend)
+            row_sums = [sum(float(value) for value in row) for row in softmax.tolist()]
+            report["tensor_operation"] = {
+                "op": "row_softmax",
+                "requested_backend": effective_backend,
+                "shape": tuple(softmax.shape()),
+                "row_sums": row_sums,
+                "ok": True,
+            }
+        except Exception as exc:
+            report["tensor_operation"] = {
+                "op": "row_softmax",
+                "requested_backend": effective_backend,
+                "ok": False,
+                "error": str(exc),
+            }
+
+        return report
+    finally:
+        if callable(unsubscribe) and subscription_id is not None:
+            with _contextlib.suppress(Exception):
+                unsubscribe("TensorOpMeta", subscription_id)
+
+
+_EXTRAS.append("trace_wgpu_first_runtime")
+
+
 try:
     _planner_module = globals().get("planner")
     if isinstance(_planner_module, _types.ModuleType):

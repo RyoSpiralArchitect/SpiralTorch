@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from ._native_loader import require_native, require_wgpu_runtime
@@ -132,3 +134,85 @@ def test_session_auto_falls_back_to_cpu_when_wgpu_init_fails(
     assert session.device == "cpu"
     assert session.device_preflight["backend"] == "cpu"
     assert calls == ["wgpu", "cpu"]
+
+
+def test_trace_wgpu_first_runtime_captures_session_plan_and_tensor_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    st = require_native()
+    calls: list[str] = []
+
+    def _patched_init_backend(backend: str) -> bool:
+        calls.append(str(backend))
+        return True
+
+    def _patched_describe_device(backend: str = "wgpu", **_kwargs: object):
+        return {"backend": str(backend), "lane_width": 32}
+
+    def _patched_plan_topk(*, rows: int, cols: int, k: int, backend: str):
+        return SimpleNamespace(
+            kind="topk",
+            requested_backend=backend,
+            effective_backend=backend,
+            rows=rows,
+            cols=cols,
+            k=k,
+            workgroup=128,
+            lanes=32,
+        )
+
+    class _FakeTensor:
+        def __init__(self, rows: int, cols: int, data: object) -> None:
+            self._shape = (rows, cols)
+
+        def row_softmax(self, *, backend: str):
+            assert backend == "wgpu"
+            return self
+
+        def shape(self) -> tuple[int, int]:
+            return self._shape
+
+        def tolist(self) -> list[list[float]]:
+            rows, cols = self._shape
+            value = 1.0 / float(cols)
+            return [[value] * cols for _ in range(rows)]
+
+    events: list[dict[str, object]] = []
+
+    def _subscribe(event_type: str, callback):
+        assert event_type == "TensorOpMeta"
+        event = {"type": "TensorOpMeta", "payload": {"op_name": "row_softmax"}}
+        events.append(event)
+        callback(event)
+        return 7
+
+    unsubscribed: list[tuple[str, int]] = []
+
+    def _unsubscribe(event_type: str, subscription_id: int) -> bool:
+        unsubscribed.append((event_type, subscription_id))
+        return True
+
+    monkeypatch.setattr(st, "init_backend", _patched_init_backend, raising=False)
+    monkeypatch.setattr(st, "describe_device", _patched_describe_device, raising=False)
+    monkeypatch.setattr(st, "plan_topk", _patched_plan_topk, raising=False)
+    monkeypatch.setattr(st, "Tensor", _FakeTensor, raising=False)
+    monkeypatch.setattr(
+        st,
+        "plugin",
+        SimpleNamespace(subscribe=_subscribe, unsubscribe=_unsubscribe),
+        raising=False,
+    )
+
+    report = st.trace_wgpu_first_runtime(rows=2, cols=4, k=8)
+
+    assert report["requested_backend"] == "auto"
+    assert report["effective_backend"] == "wgpu"
+    assert report["device_preflight"]["backend"] == "wgpu"
+    assert report["planner"]["k"] == 4
+    assert report["planner"]["effective_backend"] == "wgpu"
+    assert report["tensor_operation"]["requested_backend"] == "wgpu"
+    assert report["tensor_operation"]["ok"] is True
+    assert report["tensor_operation"]["row_sums"] == pytest.approx([1.0, 1.0])
+    assert report["tensor_meta_events"] == events
+    assert unsubscribed == [("TensorOpMeta", 7)]
+    assert calls == ["wgpu"]
