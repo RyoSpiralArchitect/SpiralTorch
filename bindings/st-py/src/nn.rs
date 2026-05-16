@@ -32,6 +32,8 @@ use nalgebra::DVector;
 #[cfg(feature = "nn")]
 use pyo3::types::{PyIterator, PyList};
 #[cfg(feature = "nn")]
+use st_core::backend::runtime_probe::resolve_backend;
+#[cfg(feature = "nn")]
 use st_core::config::self_rewrite::SelfRewriteCfg;
 #[cfg(feature = "nn")]
 use st_core::{
@@ -4197,6 +4199,8 @@ impl PyEpochStats {
 #[pyclass(module = "spiraltorch.nn", name = "ModuleTrainer", unsendable)]
 pub(crate) struct PyNnModuleTrainer {
     inner: RustModuleTrainer,
+    requested_backend: String,
+    effective_backend: String,
 }
 
 #[cfg(feature = "nn")]
@@ -4596,8 +4600,10 @@ impl PyNnModuleTrainer {
             ));
         }
         let backend_kind = parse_backend(Some(backend))?;
+        let backend_resolution = resolve_backend(backend_kind);
+        let effective_backend = backend_resolution.effective_backend;
         let caps = build_caps(
-            backend_kind,
+            effective_backend,
             lane_width,
             subgroup,
             max_workgroup,
@@ -4610,6 +4616,8 @@ impl PyNnModuleTrainer {
                 hyper_learning_rate,
                 fallback_learning_rate,
             ),
+            requested_backend: backend_kind.as_str().to_string(),
+            effective_backend: effective_backend.as_str().to_string(),
         })
     }
 
@@ -4648,6 +4656,21 @@ impl PyNnModuleTrainer {
     #[getter]
     pub fn curvature(&self) -> f32 {
         self.inner.curvature()
+    }
+
+    #[getter]
+    pub fn backend(&self) -> &str {
+        self.requested_backend.as_str()
+    }
+
+    #[getter]
+    pub fn requested_backend(&self) -> &str {
+        self.requested_backend.as_str()
+    }
+
+    #[getter]
+    pub fn effective_backend(&self) -> &str {
+        self.effective_backend.as_str()
     }
 
     #[getter]
@@ -8849,4 +8872,25 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
 
 pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     register_impl(py, parent)
+}
+
+#[cfg(all(test, feature = "nn"))]
+mod tests {
+    use super::PyNnModuleTrainer;
+    use st_core::backend::runtime_probe::resolve_backend;
+
+    #[test]
+    fn module_trainer_routes_mps_through_surrogate_backend() {
+        let trainer = PyNnModuleTrainer::new("mps", -1.0, 1e-2, 1e-2, None, None, None, None)
+            .expect("trainer should build");
+        let resolution =
+            resolve_backend(crate::planner::parse_backend(Some("mps")).expect("mps backend"));
+
+        assert_eq!(trainer.backend(), "mps");
+        assert_eq!(trainer.requested_backend(), "mps");
+        assert_eq!(
+            trainer.effective_backend(),
+            resolution.effective_backend.as_str()
+        );
+    }
 }

@@ -5240,7 +5240,19 @@ class SpiralSession:
         self.requested_backend = str(backend)
         self.seed = seed
         backend_label = str(backend).strip().lower()
-        if backend_label == "mps":
+        if backend_label in {"", "auto"}:
+            try:
+                init_backend("wgpu")
+            except Exception:
+                init_backend("cpu")
+                self.effective_backend = "cpu"
+                self.device = "cpu"
+                self.device_preflight = dict(describe_device("cpu"))
+            else:
+                self.effective_backend = "wgpu"
+                self.device = "wgpu"
+                self.device_preflight = dict(describe_device("wgpu"))
+        elif backend_label == "mps":
             init_backend("mps")
             effective_backend, device, report = _resolve_runtime_entry("mps")
             self.effective_backend = effective_backend
@@ -6332,6 +6344,7 @@ if callable(_native_init_backend):
         raw = str(backend).strip().lower()
         if raw == "mps":
             initialized = False
+            surrogate_initialized = False
             try:
                 initialized = bool(_native_init_backend("mps"))
             except Exception as exc:
@@ -6340,8 +6353,8 @@ if callable(_native_init_backend):
             effective_backend, _device, _report = _resolve_runtime_entry("mps")
             if effective_backend and effective_backend != "mps":
                 with _contextlib.suppress(Exception):
-                    _native_init_backend(effective_backend)
-            return initialized
+                    surrogate_initialized = bool(_native_init_backend(effective_backend))
+            return initialized or surrogate_initialized
         return bool(_native_init_backend(backend))
 
 

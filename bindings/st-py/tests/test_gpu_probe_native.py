@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from ._native_loader import require_native, require_wgpu_runtime
 
 
@@ -75,3 +77,58 @@ def test_init_backend_and_session_explicit_wgpu_backend_when_runtime_is_enabled(
     assert session.device == "wgpu"
     assert session.device_preflight["backend"] == "wgpu"
     assert "lane_width" in session.device_preflight
+
+
+def test_session_auto_prefers_wgpu_backend_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    st = require_native()
+    calls: list[str] = []
+
+    def _patched_init_backend(backend: str) -> bool:
+        calls.append(str(backend))
+        return True
+
+    def _patched_describe_device(backend: str = "wgpu", **_kwargs: object):
+        return {"backend": str(backend), "lane_width": 32}
+
+    monkeypatch.setattr(st, "init_backend", _patched_init_backend, raising=False)
+    monkeypatch.setattr(st, "describe_device", _patched_describe_device, raising=False)
+
+    session = st.SpiralSession()
+
+    assert session.backend == "auto"
+    assert session.requested_backend == "auto"
+    assert session.effective_backend == "wgpu"
+    assert session.device == "wgpu"
+    assert session.device_preflight["backend"] == "wgpu"
+    assert calls == ["wgpu"]
+
+
+def test_session_auto_falls_back_to_cpu_when_wgpu_init_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    st = require_native()
+    calls: list[str] = []
+
+    def _patched_init_backend(backend: str) -> bool:
+        raw = str(backend)
+        calls.append(raw)
+        if raw == "wgpu":
+            raise RuntimeError("wgpu unavailable")
+        return True
+
+    def _patched_describe_device(backend: str = "wgpu", **_kwargs: object):
+        return {"backend": str(backend), "lane_width": 1}
+
+    monkeypatch.setattr(st, "init_backend", _patched_init_backend, raising=False)
+    monkeypatch.setattr(st, "describe_device", _patched_describe_device, raising=False)
+
+    session = st.SpiralSession()
+
+    assert session.backend == "auto"
+    assert session.requested_backend == "auto"
+    assert session.effective_backend == "cpu"
+    assert session.device == "cpu"
+    assert session.device_preflight["backend"] == "cpu"
+    assert calls == ["wgpu", "cpu"]

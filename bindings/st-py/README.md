@@ -114,15 +114,22 @@ pip install maturin==1.*
 # - macOS 14+ (separate wheel build): export MACOSX_DEPLOYMENT_TARGET=14.0
 export MACOSX_DEPLOYMENT_TARGET=11.0
 
-# Release-equivalent (matches PyPI wheels)
-maturin build -m bindings/st-py/Cargo.toml --release --locked --features wgpu,logic,kdsl
-
-# CPU-only (no GPU backend)
+# Default binding build (WGPU-first; CPU fallback remains available)
 maturin build -m bindings/st-py/Cargo.toml --release --locked
 
-# Optional backends (toolchains required; not always CI-covered yet)
+# Release-equivalent (matches PyPI wheels: default WGPU route + logic/kdsl)
+maturin build -m bindings/st-py/Cargo.toml --release --locked --features logic,kdsl
+
+# CPU-only (drop the default WGPU route but keep the standard Python surface)
+maturin build -m bindings/st-py/Cargo.toml --release --locked --no-default-features --features python-default
+
+# Add CUDA or HIP alongside the default WGPU-first wheel
 maturin build -m bindings/st-py/Cargo.toml --release --locked --features cuda,logic,kdsl
 maturin build -m bindings/st-py/Cargo.toml --release --locked --features hip,logic,kdsl
+
+# Backend-specific builds without the default WGPU route
+maturin build -m bindings/st-py/Cargo.toml --release --locked --no-default-features --features python-default,cuda,logic,kdsl
+maturin build -m bindings/st-py/Cargo.toml --release --locked --no-default-features --features python-default,hip,logic,kdsl
 
 # Install the wheel you just built
 pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl

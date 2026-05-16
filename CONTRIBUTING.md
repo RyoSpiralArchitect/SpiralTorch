@@ -62,7 +62,9 @@ From the repository root:
 
 ```bash
 python -m pip install -U "maturin>=1,<2"
-maturin build -m bindings/st-py/Cargo.toml --release --locked --features wgpu,logic,kdsl
+maturin build -m bindings/st-py/Cargo.toml --release --locked --features logic,kdsl
+# CPU-only fallback:
+# maturin build -m bindings/st-py/Cargo.toml --release --locked --no-default-features --features python-default
 python -m pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
 ```
 

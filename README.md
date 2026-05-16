@@ -356,19 +356,26 @@ cargo build -p st-vision      # vision kernels/pipelines
 # Install maturin (once)
 python -m pip install -U "maturin>=1,<2"
 
-# Release-equivalent (matches PyPI wheels)
-maturin build -m bindings/st-py/Cargo.toml --release --locked --features wgpu,logic,kdsl
+# Default binding build (WGPU-first; CPU fallback remains available)
+maturin build -m bindings/st-py/Cargo.toml --release --locked
+
+# Release-equivalent (matches PyPI wheels: default WGPU route + logic/kdsl)
+maturin build -m bindings/st-py/Cargo.toml --release --locked --features logic,kdsl
 
 # macOS 14+ universal2 (matches macOS wheels on PyPI)
 export MACOSX_DEPLOYMENT_TARGET=14.0
-maturin build -m bindings/st-py/Cargo.toml --release --locked --target universal2-apple-darwin --features wgpu,logic,kdsl
+maturin build -m bindings/st-py/Cargo.toml --release --locked --target universal2-apple-darwin --features logic,kdsl
 
-# CPU-only (no GPU backend)
-maturin build -m bindings/st-py/Cargo.toml --release --locked
+# CPU-only (drop the default WGPU route but keep the standard Python surface)
+maturin build -m bindings/st-py/Cargo.toml --release --locked --no-default-features --features python-default
 
-# Optional backends (toolchains required; not always CI-covered yet)
+# Add CUDA or HIP alongside the default WGPU-first wheel
 maturin build -m bindings/st-py/Cargo.toml --release --locked --features cuda,logic,kdsl
 maturin build -m bindings/st-py/Cargo.toml --release --locked --features hip,logic,kdsl
+
+# Backend-specific builds without the default WGPU route
+maturin build -m bindings/st-py/Cargo.toml --release --locked --no-default-features --features python-default,cuda,logic,kdsl
+maturin build -m bindings/st-py/Cargo.toml --release --locked --no-default-features --features python-default,hip,logic,kdsl
 
 # Install the wheel you just built
 pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
@@ -736,7 +743,9 @@ print("sot:", plan.total_steps, plan.polyline()[:3])
 | **CUDA (NVIDIA)** | `export CUDA_HOME=/usr/local/cuda` then `cargo build -p st-core --features cuda` | Ensure driver & toolkit |
 | **HIP/ROCm (AMD, Linux)** | `cargo build -p st-core --features hip` | Ensure ROCm installation |
 
-**Wheel builds** mirror these with `maturin build ... --features <backend>`.
+**Wheel builds** mirror these. The default Python wheel is WGPU-first; use
+`--no-default-features --features python-default,<backend>` for backend-specific
+builds without the default WGPU route.
 
 ---
 
@@ -2858,7 +2867,8 @@ Rust and then feed the resulting curvature-aligned hints back into SpiralK.
 
 ## Safety & fallbacks
 
-- Builds **CPU-only** by default (no GPU toolchains required).
+- CPU remains **always available**, and Python wheels can drop the default WGPU
+  route with `--no-default-features --features python-default`.
 - WGPU / CUDA / HIP are **feature-gated** and degrade safely.
 - Heuristic chooser always returns a **safe** `Choice` (fills mk/tile from table or conservative defaults).
 
@@ -2896,8 +2906,8 @@ Suggested caption: **“SpiralTorch — WGPU-first, Self-Tuning GPU Top-K (Rank-
   and a working ROCm + RCCL toolchain.
 
 - **Wheels red?**  
-  First try the release-equivalent wheel build: `maturin build -m bindings/st-py/Cargo.toml --release --locked --features wgpu,logic,kdsl`.
-  If you suspect a GPU toolchain issue, build CPU-only: `maturin build -m bindings/st-py/Cargo.toml --release --locked`.
+  First try the release-equivalent wheel build: `maturin build -m bindings/st-py/Cargo.toml --release --locked --features logic,kdsl`.
+  If you suspect the default WGPU route, build CPU-only instead: `maturin build -m bindings/st-py/Cargo.toml --release --locked --no-default-features --features python-default`.
 
 ---
 
