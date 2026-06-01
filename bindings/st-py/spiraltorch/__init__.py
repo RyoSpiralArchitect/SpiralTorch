@@ -6662,7 +6662,152 @@ def trace_wgpu_first_runtime(
                 unsubscribe("TensorOpMeta", subscription_id)
 
 
-_EXTRAS.append("trace_wgpu_first_runtime")
+_WGPU_FIRST_TRACE_BACKENDS: tuple[str, ...] = ("auto", "wgpu", "mps", "cpu")
+
+
+def _normalize_wgpu_first_trace_backends(backends: _Any) -> list[str]:
+    if backends is None:
+        return list(_WGPU_FIRST_TRACE_BACKENDS)
+    if isinstance(backends, str):
+        out = [backends]
+    else:
+        try:
+            out = [str(value) for value in backends]
+        except TypeError as exc:
+            raise TypeError("backends must be a string or iterable of strings") from exc
+    normalized = [backend.strip().lower() for backend in out if backend.strip()]
+    if not normalized:
+        raise ValueError("backends must contain at least one backend label")
+    return normalized
+
+
+def trace_wgpu_first_runtime_matrix(
+    backends: _Any = _WGPU_FIRST_TRACE_BACKENDS,
+    *,
+    rows: int = 2,
+    cols: int = 8,
+    k: int = 2,
+    continue_on_error: bool = True,
+) -> _Dict[str, _Any]:
+    """Run ``trace_wgpu_first_runtime`` across several backend requests."""
+
+    rows = int(rows)
+    cols = int(cols)
+    k = int(k)
+    if rows < 1 or cols < 1:
+        raise ValueError("rows and cols must be positive")
+    if k < 1:
+        raise ValueError("k must be positive")
+    clipped_k = min(k, cols)
+
+    backend_labels = _normalize_wgpu_first_trace_backends(backends)
+    runs: list[_Dict[str, _Any]] = []
+
+    for backend in backend_labels:
+        try:
+            report = trace_wgpu_first_runtime(backend, rows=rows, cols=cols, k=k)
+        except Exception as exc:
+            if not continue_on_error:
+                raise
+            report = {
+                "requested_backend": backend,
+                "effective_backend": None,
+                "device": None,
+                "device_preflight": None,
+                "planner": None,
+                "tensor_operation": None,
+                "tensor_meta_events": [],
+                "matrix_status": "error",
+                "error": str(exc),
+            }
+        else:
+            tensor_operation = report.get("tensor_operation")
+            tensor_ok = (
+                isinstance(tensor_operation, _Mapping)
+                and bool(tensor_operation.get("ok", False))
+            )
+            planner = report.get("planner")
+            planner_ok = not (isinstance(planner, _Mapping) and "error" in planner)
+            report["matrix_status"] = "ok" if tensor_ok and planner_ok else "partial"
+        runs.append(report)
+
+    effective_counts: _Dict[str, int] = {}
+    tensor_ok_count = 0
+    errors: list[_Dict[str, _Any]] = []
+    for report in runs:
+        effective = report.get("effective_backend")
+        if effective:
+            key = str(effective)
+            effective_counts[key] = effective_counts.get(key, 0) + 1
+        tensor_operation = report.get("tensor_operation")
+        if isinstance(tensor_operation, _Mapping) and tensor_operation.get("ok") is True:
+            tensor_ok_count += 1
+        if report.get("matrix_status") == "error":
+            errors.append(
+                {
+                    "requested_backend": report.get("requested_backend"),
+                    "error": report.get("error"),
+                }
+            )
+
+    return {
+        "kind": "wgpu_first_runtime_matrix",
+        "created_at_unix": _time.time(),
+        "rows": rows,
+        "cols": cols,
+        "k": clipped_k,
+        "requested_backends": backend_labels,
+        "summary": {
+            "runs": len(runs),
+            "ok": sum(1 for report in runs if report.get("matrix_status") == "ok"),
+            "partial": sum(
+                1 for report in runs if report.get("matrix_status") == "partial"
+            ),
+            "errors": len(errors),
+            "tensor_ok": tensor_ok_count,
+            "effective_backends": effective_counts,
+        },
+        "errors": errors,
+        "runs": runs,
+    }
+
+
+def write_wgpu_first_runtime_matrix(
+    path: _Any,
+    backends: _Any = _WGPU_FIRST_TRACE_BACKENDS,
+    *,
+    rows: int = 2,
+    cols: int = 8,
+    k: int = 2,
+    continue_on_error: bool = True,
+    indent: int = 2,
+) -> _Dict[str, _Any]:
+    """Write a WGPU-first runtime matrix report as JSON and return it."""
+
+    matrix = trace_wgpu_first_runtime_matrix(
+        backends,
+        rows=rows,
+        cols=cols,
+        k=k,
+        continue_on_error=continue_on_error,
+    )
+    output_path = _pathlib.Path(_os.fspath(path))
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    matrix["artifact_path"] = str(output_path)
+    output_path.write_text(
+        _json.dumps(matrix, ensure_ascii=True, indent=int(indent), sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return matrix
+
+
+_EXTRAS.extend(
+    [
+        "trace_wgpu_first_runtime",
+        "trace_wgpu_first_runtime_matrix",
+        "write_wgpu_first_runtime_matrix",
+    ]
+)
 
 
 try:

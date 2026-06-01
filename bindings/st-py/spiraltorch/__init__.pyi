@@ -1690,6 +1690,26 @@ def trace_wgpu_first_runtime(
     k: int = ...,
 ) -> Dict[str, object]: ...
 
+def trace_wgpu_first_runtime_matrix(
+    backends: str | Iterable[str] = ...,
+    *,
+    rows: int = ...,
+    cols: int = ...,
+    k: int = ...,
+    continue_on_error: bool = ...,
+) -> Dict[str, object]: ...
+
+def write_wgpu_first_runtime_matrix(
+    path: str | PathLike[str],
+    backends: str | Iterable[str] = ...,
+    *,
+    rows: int = ...,
+    cols: int = ...,
+    k: int = ...,
+    continue_on_error: bool = ...,
+    indent: int = ...,
+) -> Dict[str, object]: ...
+
 def hypergrad(
     *shape_args: Any,
     curvature: float = ...,
@@ -5942,6 +5962,9 @@ __all__ = [
     "Tensor",
     "ModuleTrainer",
     "SpiralSession",
+    "trace_wgpu_first_runtime",
+    "trace_wgpu_first_runtime_matrix",
+    "write_wgpu_first_runtime_matrix",
     "from_dlpack",
     "to_dlpack",
     "ZSpaceBarycenter",

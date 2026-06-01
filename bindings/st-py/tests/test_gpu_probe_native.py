@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -216,3 +217,76 @@ def test_trace_wgpu_first_runtime_captures_session_plan_and_tensor_events(
     assert report["tensor_meta_events"] == events
     assert unsubscribed == [("TensorOpMeta", 7)]
     assert calls == ["wgpu"]
+
+
+def test_trace_wgpu_first_runtime_matrix_collects_backend_runs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    st = require_native()
+    calls: list[tuple[str, int, int, int]] = []
+
+    def _patched_trace(backend: str = "auto", *, rows: int, cols: int, k: int):
+        calls.append((backend, rows, cols, k))
+        if backend == "mps":
+            raise RuntimeError("mps unavailable")
+        effective = "wgpu" if backend in {"auto", "wgpu"} else "cpu"
+        return {
+            "requested_backend": backend,
+            "effective_backend": effective,
+            "device": effective,
+            "device_preflight": {"backend": effective},
+            "planner": {"effective_backend": effective},
+            "tensor_operation": {
+                "op": "row_softmax",
+                "requested_backend": effective,
+                "ok": True,
+            },
+            "tensor_meta_events": [],
+        }
+
+    monkeypatch.setattr(st, "trace_wgpu_first_runtime", _patched_trace, raising=False)
+
+    matrix = st.trace_wgpu_first_runtime_matrix(
+        ["auto", "wgpu", "mps", "cpu"],
+        rows=3,
+        cols=4,
+        k=8,
+    )
+
+    assert matrix["kind"] == "wgpu_first_runtime_matrix"
+    assert matrix["requested_backends"] == ["auto", "wgpu", "mps", "cpu"]
+    assert matrix["k"] == 4
+    assert matrix["summary"]["runs"] == 4
+    assert matrix["summary"]["ok"] == 3
+    assert matrix["summary"]["errors"] == 1
+    assert matrix["summary"]["effective_backends"] == {"wgpu": 2, "cpu": 1}
+    assert matrix["errors"] == [
+        {"requested_backend": "mps", "error": "mps unavailable"}
+    ]
+    assert [run["matrix_status"] for run in matrix["runs"]] == [
+        "ok",
+        "ok",
+        "error",
+        "ok",
+    ]
+    assert calls == [
+        ("auto", 3, 4, 8),
+        ("wgpu", 3, 4, 8),
+        ("mps", 3, 4, 8),
+        ("cpu", 3, 4, 8),
+    ]
+
+    output_path = tmp_path / "wgpu-runtime-matrix.json"
+    written = st.write_wgpu_first_runtime_matrix(
+        output_path,
+        ["auto"],
+        rows=1,
+        cols=2,
+        k=1,
+    )
+    loaded = json.loads(output_path.read_text(encoding="utf-8"))
+
+    assert written["artifact_path"] == str(output_path)
+    assert loaded["artifact_path"] == str(output_path)
+    assert loaded["summary"]["runs"] == 1
