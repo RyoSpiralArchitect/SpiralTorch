@@ -97,6 +97,10 @@ def build_zspace_planner_snapshot(
     plan_topk: Any | None = ...,
     device_report: Mapping[str, Any] | None = ...,
     rank_plan: Any | None = ...,
+    runtime_matrix: Mapping[str, Any] | None = ...,
+    capture_runtime_matrix: bool = ...,
+    trace_runtime_matrix: Any | None = ...,
+    runtime_matrix_backends: Any | None = ...,
 ) -> Dict[str, Any]: ...
 
 def write_zspace_experiment_artifacts(
@@ -121,6 +125,10 @@ def write_zspace_experiment_artifacts(
     plan_topk: Any | None = ...,
     device_report: Mapping[str, Any] | None = ...,
     rank_plan: Any | None = ...,
+    runtime_matrix: Mapping[str, Any] | None = ...,
+    capture_runtime_matrix: bool = ...,
+    trace_runtime_matrix: Any | None = ...,
+    runtime_matrix_backends: Any | None = ...,
 ) -> Dict[str, Any]: ...
 
 def summarize_zspace_experiment_manifest(
