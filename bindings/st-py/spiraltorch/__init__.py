@@ -676,8 +676,10 @@ from .trainer_trace import (
 
 from .gnn_trace import (
     load_gnn_band_replay_trace,
+    flatten_gnn_band_replay_rows,
     summarize_gnn_band_replays,
     compare_gnn_band_replay_runs,
+    write_gnn_band_replay_html,
 )
 
 from .kdsl_trace import (
@@ -733,7 +735,8 @@ _EXTRAS = [
     "hypergrad","realgrad","hypergrad_topos","encode_zspace","z_metrics",
     "load_zspace_trace_events","write_zspace_trace_html",
     "load_trainer_trace_events","summarize_trainer_trace_events","write_trainer_trace_html",
-    "load_gnn_band_replay_trace","summarize_gnn_band_replays","compare_gnn_band_replay_runs",
+    "load_gnn_band_replay_trace","flatten_gnn_band_replay_rows",
+    "summarize_gnn_band_replays","compare_gnn_band_replay_runs","write_gnn_band_replay_html",
     "load_kdsl_trace_events","write_kdsl_trace_jsonl","write_kdsl_trace_html",
     "zspace_trace_to_atlas_route","zspace_trace_event_to_atlas_frame","write_zspace_atlas_noncollapse_html",
     "load_zspace_artifact_manifest","build_zspace_planner_snapshot",

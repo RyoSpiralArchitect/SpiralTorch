@@ -32,6 +32,8 @@ def _write_trace(path: Path, *, scale: float = 1.0) -> None:
                     "gradient_l1": 0.6 * scale,
                     "gradient_l2": 0.3 * scale,
                     "gradient_rms": 0.15 * scale,
+                    "base_coefficients": [1.0, 0.5, 0.25],
+                    "step_scales": [0.9, 1.44, 0.8464],
                     "band_pass_scales": [1.0, 1.2, 0.92],
                     "effective_coefficients": [0.8, 0.72, 0.23],
                     "total_flow_energy": 1.5,
@@ -41,6 +43,8 @@ def _write_trace(path: Path, *, scale: float = 1.0) -> None:
                     "gradient_l1": 0.4 * scale,
                     "gradient_l2": 0.2 * scale,
                     "gradient_rms": 0.1 * scale,
+                    "base_coefficients": [1.0, 0.5],
+                    "step_scales": [0.88, 1.276],
                     "band_pass_scales": [1.0, 1.16],
                     "effective_coefficients": [0.7, 0.58],
                     "total_flow_energy": 1.1,
@@ -52,6 +56,8 @@ def _write_trace(path: Path, *, scale: float = 1.0) -> None:
                     "gradient_l1": 0.2 * scale,
                     "gradient_l2": 0.1 * scale,
                     "gradient_rms": 0.05 * scale,
+                    "base_coefficients": [1.0, 0.5, 0.25],
+                    "step_scales": [1.08, 0.846, 1.0],
                     "band_pass_scales": [1.08, 0.94, 1.0],
                     "effective_coefficients": [0.86, 0.47, 0.25],
                     "total_flow_energy": 0.9,
@@ -90,6 +96,28 @@ def test_summarize_gnn_band_replays_collects_band_coefficients(tmp_path) -> None
     )
 
 
+def test_flatten_gnn_band_replay_rows_expands_hops(tmp_path) -> None:
+    _ensure_torch_stub()
+    import spiraltorch as st
+
+    trace_path = tmp_path / "gnn_band_trace.json"
+    _write_trace(trace_path)
+
+    rows = st.flatten_gnn_band_replay_rows(trace_path)
+
+    assert len(rows) == 8
+    first = rows[0]
+    assert first["band"] == "above"
+    assert first["layer"] == "trainer_band_trace::layer0"
+    assert first["hop_index"] == 0
+    assert first["band_pass_scale"] == pytest.approx(1.0)
+    assert first["scale_delta"] == pytest.approx(0.0)
+    assert first["effective_coefficient"] == pytest.approx(0.8)
+    assert rows[1]["roundtable_step_scale"] == pytest.approx(
+        rows[1]["step_scale"] / rows[1]["band_pass_scale"]
+    )
+
+
 def test_compare_gnn_band_replay_runs_tracks_per_band_drift(tmp_path) -> None:
     _ensure_torch_stub()
     import spiraltorch as st
@@ -109,3 +137,21 @@ def test_compare_gnn_band_replay_runs_tracks_per_band_drift(tmp_path) -> None:
         0.2
     )
     assert comparison["bands"]["here"]["scale_delta_mean"]["count"] == pytest.approx(2.0)
+
+
+def test_write_gnn_band_replay_html_renders_dashboard(tmp_path) -> None:
+    _ensure_torch_stub()
+    import spiraltorch as st
+
+    trace_path = tmp_path / "gnn_band_trace.json"
+    html_path = tmp_path / "gnn_band_trace.html"
+    _write_trace(trace_path)
+
+    rendered = Path(st.write_gnn_band_replay_html(trace_path, html_path))
+
+    assert rendered == html_path
+    html = rendered.read_text(encoding="utf-8")
+    assert "SpiralTorch GNN Band Replay Trace" in html
+    assert "trainer_band_trace::layer0" in html
+    assert "band_pass_scale" in html
+    assert "scale_delta" in html
