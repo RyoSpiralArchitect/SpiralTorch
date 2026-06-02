@@ -6570,7 +6570,7 @@ def trace_wgpu_first_runtime(
     k = min(k, cols)
 
     build_features: _Dict[str, _Any] = {}
-    build_info_fn = globals().get("build_info")
+    build_info_fn = globals().get("build_info") or _resolve_rs_attr("build_info")
     if callable(build_info_fn):
         with _contextlib.suppress(Exception):
             info = build_info_fn()
