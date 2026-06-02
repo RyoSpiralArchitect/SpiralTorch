@@ -122,6 +122,10 @@ def build_zspace_planner_snapshot(
     plan_topk: Any | None = None,
     device_report: Mapping[str, Any] | None = None,
     rank_plan: Any | None = None,
+    runtime_matrix: Mapping[str, Any] | None = None,
+    capture_runtime_matrix: bool = False,
+    trace_runtime_matrix: Any | None = None,
+    runtime_matrix_backends: Any | None = None,
 ) -> dict[str, Any]:
     """Capture the planner/device decision that frames a Z-space experiment."""
 
@@ -135,6 +139,8 @@ def build_zspace_planner_snapshot(
         describe_device = _runtime_callable("describe_device")
     if plan_topk is None:
         plan_topk = _runtime_callable("plan_topk")
+    if trace_runtime_matrix is None:
+        trace_runtime_matrix = _runtime_callable("trace_wgpu_first_runtime_matrix")
 
     if device_report is None and callable(describe_device):
         try:
@@ -166,6 +172,29 @@ def build_zspace_planner_snapshot(
                 }
             )
 
+    if runtime_matrix is None and capture_runtime_matrix and callable(trace_runtime_matrix):
+        matrix_kwargs: dict[str, int] = {}
+        if rows_i is not None:
+            matrix_kwargs["rows"] = rows_i
+        if cols_i is not None:
+            matrix_kwargs["cols"] = cols_i
+        if k_i is not None:
+            matrix_kwargs["k"] = k_i
+        try:
+            if runtime_matrix_backends is None:
+                candidate = trace_runtime_matrix(**matrix_kwargs)
+            else:
+                candidate = trace_runtime_matrix(runtime_matrix_backends, **matrix_kwargs)
+            if isinstance(candidate, Mapping):
+                runtime_matrix = candidate
+        except Exception as exc:  # noqa: BLE001 - snapshots should preserve partial evidence.
+            errors.append(
+                {
+                    "stage": "trace_wgpu_first_runtime_matrix",
+                    "error": f"{exc.__class__.__name__}: {exc}",
+                }
+            )
+
     snapshot: dict[str, Any] = {
         "kind": "spiraltorch.zspace_planner_snapshot",
         "backend": backend_label,
@@ -181,6 +210,8 @@ def build_zspace_planner_snapshot(
         snapshot["device_report"] = _json_ready(device_report)
     if rank_plan is not None:
         snapshot["rank_plan"] = _json_ready(rank_plan)
+    if runtime_matrix is not None:
+        snapshot["runtime_matrix"] = _json_ready(runtime_matrix)
     if errors:
         snapshot["errors"] = errors
     return snapshot
@@ -212,6 +243,10 @@ def write_zspace_experiment_artifacts(
     plan_topk: Any | None = None,
     device_report: Mapping[str, Any] | None = None,
     rank_plan: Any | None = None,
+    runtime_matrix: Mapping[str, Any] | None = None,
+    capture_runtime_matrix: bool = False,
+    trace_runtime_matrix: Any | None = None,
+    runtime_matrix_backends: Any | None = None,
 ) -> dict[str, Any]:
     """Write trace, Atlas, and manifest artifacts for one observable Z-space run."""
 
@@ -280,7 +315,13 @@ def write_zspace_experiment_artifacts(
             plan_topk=plan_topk,
             device_report=device_report,
             rank_plan=rank_plan,
+            runtime_matrix=runtime_matrix,
+            capture_runtime_matrix=capture_runtime_matrix,
+            trace_runtime_matrix=trace_runtime_matrix,
+            runtime_matrix_backends=runtime_matrix_backends,
         )
+    elif planner_payload is not None and runtime_matrix is not None:
+        planner_payload.setdefault("runtime_matrix", _json_ready(runtime_matrix))
 
     manifest_payload: dict[str, Any] = {
         "kind": "spiraltorch.zspace_experiment_manifest",
@@ -441,6 +482,7 @@ def _planner_story(manifest: Mapping[str, Any]) -> dict[str, Any]:
     device_report = _coerce_mapping(planner.get("device_report"))
     rank_plan = _coerce_mapping(planner.get("rank_plan"))
     shape = _coerce_mapping(planner.get("shape"))
+    runtime_matrix = _runtime_matrix_story(planner)
     requested_backend = str(
         rank_plan.get("requested_backend")
         or planner.get("backend")
@@ -472,7 +514,31 @@ def _planner_story(manifest: Mapping[str, Any]) -> dict[str, Any]:
         },
         "device_report": device_report,
         "rank_plan": rank_plan,
+        "runtime_matrix": runtime_matrix,
         "errors": errors,
+    }
+
+
+def _runtime_matrix_story(planner: Mapping[str, Any]) -> dict[str, Any]:
+    matrix = _coerce_mapping(planner.get("runtime_matrix"))
+    summary = _coerce_mapping(matrix.get("summary"))
+    requested = matrix.get("requested_backends", [])
+    if isinstance(requested, Sequence) and not isinstance(requested, (str, bytes)):
+        requested_backends = [str(item) for item in requested]
+    elif requested:
+        requested_backends = [str(requested)]
+    else:
+        requested_backends = []
+    return {
+        "available": bool(matrix),
+        "kind": matrix.get("kind"),
+        "artifact_path": matrix.get("artifact_path"),
+        "requested_backends": requested_backends,
+        "summary": summary,
+        "effective_backends": _coerce_mapping(summary.get("effective_backends")),
+        "errors": _coerce_focus_items(matrix.get("errors", [])),
+        "runs": _coerce_focus_items(matrix.get("runs", [])),
+        "raw": matrix,
     }
 
 
@@ -559,6 +625,26 @@ def summarize_zspace_experiment_manifest(
             focus_metric=focus_metric,
         ),
     ]
+    runtime_matrix = _coerce_mapping(planner.get("runtime_matrix"))
+    runtime_summary = _coerce_mapping(runtime_matrix.get("summary"))
+    if runtime_matrix.get("available"):
+        story.append(
+            _story_card(
+                "runtime_matrix",
+                "Runtime Matrix",
+                (
+                    f"{_coerce_int(runtime_summary.get('ok', 0))} ok, "
+                    f"{_coerce_int(runtime_summary.get('partial', 0))} partial, "
+                    f"{_coerce_int(runtime_summary.get('errors', 0))} error(s); "
+                    "effective "
+                    f"{_format_counts(_coerce_mapping(runtime_summary.get('effective_backends')))}."
+                ),
+                summary=runtime_summary,
+                effective_backends=_coerce_mapping(
+                    runtime_summary.get("effective_backends")
+                ),
+            )
+        )
     if guidance:
         story.append(
             _story_card(
@@ -631,6 +717,15 @@ def _count_strings(values: Sequence[Any]) -> dict[str, int]:
     return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0])))
 
 
+def _merge_count_mappings(values: Sequence[Mapping[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for mapping in values:
+        for label, count in mapping.items():
+            key = str(label or "unknown")
+            counts[key] = counts.get(key, 0) + _coerce_int(count, 0)
+    return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0])))
+
+
 def _mean_or_none(values: Sequence[float]) -> float | None:
     finite = [float(value) for value in values if math.isfinite(float(value))]
     if not finite:
@@ -643,6 +738,8 @@ def _experiment_run_digest(story: Mapping[str, Any]) -> dict[str, Any]:
     planner = _coerce_mapping(story.get("planner"))
     noncollapse = _coerce_mapping(story.get("noncollapse"))
     signals = _coerce_mapping(noncollapse.get("signals"))
+    runtime_matrix = _coerce_mapping(planner.get("runtime_matrix"))
+    runtime_summary = _coerce_mapping(runtime_matrix.get("summary"))
     views = _coerce_mapping(story.get("views"))
 
     return {
@@ -661,6 +758,14 @@ def _experiment_run_digest(story: Mapping[str, Any]) -> dict[str, Any]:
             "effective_backend": planner.get("effective_backend") or "unknown",
             "route": planner.get("route") or "unknown",
             "shape": _coerce_mapping(planner.get("shape")),
+        },
+        "runtime_matrix": {
+            "available": bool(runtime_matrix.get("available", False)),
+            "summary": runtime_summary,
+            "effective_backends": _coerce_mapping(
+                runtime_summary.get("effective_backends")
+            ),
+            "errors": _coerce_focus_items(runtime_matrix.get("errors", [])),
         },
         "noncollapse": {
             "stability": _coerce_float(signals.get("stability", 0.0)),
@@ -711,6 +816,17 @@ def summarize_zspace_experiment_index(
             ),
             "planner_routes": _count_strings(
                 [run["planner"].get("route") for run in runs]
+            ),
+            "runtime_matrix_effective_backends": _merge_count_mappings(
+                [
+                    _coerce_mapping(
+                        _coerce_mapping(run.get("runtime_matrix")).get(
+                            "effective_backends"
+                        )
+                    )
+                    for run in runs
+                    if _coerce_mapping(run.get("runtime_matrix")).get("available")
+                ]
             ),
             "focus_metrics": _count_strings(
                 [run["noncollapse"].get("focus_metric") for run in runs]
@@ -1010,6 +1126,35 @@ def write_zspace_experiment_cockpit_html(
     planner_shape = planner.get("shape", {})
     device_report = planner.get("device_report", {})
     rank_plan = planner.get("rank_plan", {})
+    runtime_matrix = _coerce_mapping(planner.get("runtime_matrix"))
+    runtime_summary = _coerce_mapping(runtime_matrix.get("summary"))
+    runtime_matrix_section = ""
+    if runtime_matrix.get("available"):
+        runtime_rows = "\n".join(
+            "<tr>"
+            f"<td>{_html_escape(run.get('requested_backend'))}</td>"
+            f"<td>{_html_escape(run.get('effective_backend'))}</td>"
+            f"<td>{_html_escape(run.get('matrix_status'))}</td>"
+            f"<td>{_html_escape(_coerce_mapping(run.get('tensor_operation')).get('ok'))}</td>"
+            "</tr>"
+            for run in runtime_matrix.get("runs", [])
+            if isinstance(run, Mapping)
+        )
+        runtime_matrix_section = f"""
+      <section>
+        <h2>Runtime Matrix</h2>
+        <div class="grid">
+          <div class="kv"><span>ok</span><strong>{_html_escape(runtime_summary.get("ok", 0))}</strong></div>
+          <div class="kv"><span>partial</span><strong>{_html_escape(runtime_summary.get("partial", 0))}</strong></div>
+          <div class="kv"><span>errors</span><strong>{_html_escape(runtime_summary.get("errors", 0))}</strong></div>
+          <div class="kv"><span>effective</span><strong>{_html_escape(_format_counts(_coerce_mapping(runtime_summary.get("effective_backends"))))}</strong></div>
+        </div>
+        <table>
+          <thead><tr><th>requested</th><th>effective</th><th>status</th><th>tensor ok</th></tr></thead>
+          <tbody>{runtime_rows}</tbody>
+        </table>
+      </section>
+"""
 
     html_doc = f"""<!doctype html>
 <html lang="en">
@@ -1177,6 +1322,7 @@ def write_zspace_experiment_cockpit_html(
           <div class="kv"><span>shape</span><strong>{_html_escape(planner_shape)}</strong></div>
         </div>
       </section>
+      {runtime_matrix_section}
     </div>
     <div class="cards">
       <section>
@@ -1195,7 +1341,7 @@ def write_zspace_experiment_cockpit_html(
       </section>
       <section>
         <h2>Raw Planner Payload</h2>
-        <pre>{_html_escape(json.dumps({"device_report": device_report, "rank_plan": rank_plan}, indent=2, ensure_ascii=False))}</pre>
+        <pre>{_html_escape(json.dumps({"device_report": device_report, "rank_plan": rank_plan, "runtime_matrix": runtime_matrix.get("raw")}, indent=2, ensure_ascii=False))}</pre>
       </section>
       <section>
         <h2>Story Packet</h2>
@@ -1272,6 +1418,12 @@ def write_zspace_experiment_index_html(
             ("mean stability", _format_optional_float(summary.get("mean_stability"))),
             ("latest stability", _format_optional_float(summary.get("latest_stability"))),
             ("backends", _format_counts(_coerce_mapping(summary.get("planner_backends")))),
+            (
+                "runtime backends",
+                _format_counts(
+                    _coerce_mapping(summary.get("runtime_matrix_effective_backends"))
+                ),
+            ),
         )
     )
     rows_html = "\n".join(
@@ -1280,6 +1432,7 @@ def write_zspace_experiment_index_html(
         f"<span>{_html_escape(run.get('created_at') or '')}</span></td>"
         f"<td>{_html_escape(_coerce_mapping(run.get('planner')).get('effective_backend'))}"
         f"<span>{_html_escape(_coerce_mapping(run.get('planner')).get('route'))}</span></td>"
+        f"<td>{_html_escape(_format_counts(_coerce_mapping(_coerce_mapping(run.get('runtime_matrix')).get('effective_backends'))))}</td>"
         f"<td>{_html_escape(_coerce_mapping(run.get('summary')).get('frames'))}</td>"
         f"<td>{_html_escape(_coerce_mapping(run.get('summary')).get('total_notes'))}</td>"
         f"<td>{_html_escape(_format_optional_float(_coerce_mapping(run.get('noncollapse')).get('stability')))}</td>"
@@ -1335,7 +1488,7 @@ def write_zspace_experiment_index_html(
     }}
     .stats {{
       display: grid;
-      grid-template-columns: repeat(6, minmax(120px, 1fr));
+      grid-template-columns: repeat(7, minmax(120px, 1fr));
       gap: 8px;
     }}
     .stat, section {{
@@ -1428,7 +1581,7 @@ def write_zspace_experiment_index_html(
       <table>
         <thead>
           <tr>
-            <th>run</th><th>backend</th><th>frames</th><th>notes</th>
+            <th>run</th><th>backend</th><th>runtime</th><th>frames</th><th>notes</th>
             <th>stability</th><th>focus</th><th>links</th>
           </tr>
         </thead>

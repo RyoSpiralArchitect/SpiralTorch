@@ -33,6 +33,42 @@ def _require_native_nn() -> None:
         pytest.skip("native SpiralTorch nn bindings unavailable")
 
 
+def _runtime_matrix_payload(
+    effective_backends: dict[str, int] | None = None,
+) -> dict[str, object]:
+    counts = effective_backends or {"wgpu": 2, "cpu": 1}
+    runs = []
+    for backend, count in counts.items():
+        for index in range(count):
+            runs.append(
+                {
+                    "requested_backend": f"{backend}-{index}",
+                    "effective_backend": backend,
+                    "device": backend,
+                    "matrix_status": "ok",
+                    "tensor_operation": {
+                        "op": "row_softmax",
+                        "requested_backend": backend,
+                        "ok": True,
+                    },
+                }
+            )
+    return {
+        "kind": "wgpu_first_runtime_matrix",
+        "requested_backends": ["auto", "wgpu", "mps", "cpu"],
+        "summary": {
+            "runs": len(runs),
+            "ok": len(runs),
+            "partial": 0,
+            "errors": 0,
+            "tensor_ok": len(runs),
+            "effective_backends": counts,
+        },
+        "errors": [],
+        "runs": runs,
+    }
+
+
 def test_load_zspace_trace_events_flattens_stable_records(tmp_path) -> None:
     trace_path = tmp_path / "zspace_trace.jsonl"
     record = {
@@ -480,6 +516,32 @@ def test_build_zspace_planner_snapshot_captures_device_and_plan() -> None:
     assert "errors" not in snapshot
 
 
+def test_build_zspace_planner_snapshot_can_capture_runtime_matrix() -> None:
+    def trace_runtime_matrix(backends, *, rows: int, cols: int, k: int):
+        assert backends == ["auto", "mps"]
+        assert (rows, cols, k) == (8, 128, 4)
+        return _runtime_matrix_payload({"wgpu": 2, "cpu": 1})
+
+    snapshot = build_zspace_planner_snapshot(
+        backend="auto",
+        rows=8,
+        cols=128,
+        k=4,
+        device_report={"backend": "wgpu", "planner_route": "metal-via-wgpu"},
+        rank_plan={"requested_backend": "auto", "effective_backend": "wgpu"},
+        capture_runtime_matrix=True,
+        runtime_matrix_backends=["auto", "mps"],
+        trace_runtime_matrix=trace_runtime_matrix,
+    )
+
+    assert snapshot["runtime_matrix"]["kind"] == "wgpu_first_runtime_matrix"
+    assert snapshot["runtime_matrix"]["summary"]["runs"] == 3
+    assert snapshot["runtime_matrix"]["summary"]["effective_backends"] == {
+        "wgpu": 2,
+        "cpu": 1,
+    }
+
+
 def test_write_zspace_experiment_artifacts_writes_manifest_with_planner_snapshot(
     tmp_path,
 ) -> None:
@@ -534,6 +596,7 @@ def test_write_zspace_experiment_artifacts_writes_manifest_with_planner_snapshot
         metadata={"run_id": "demo-run"},
         describe_device=describe_device,
         plan_topk=plan_topk,
+        runtime_matrix=_runtime_matrix_payload({"wgpu": 2, "cpu": 1}),
     )
     loaded = load_zspace_artifact_manifest(tmp_path / "trace.artifacts.json")
 
@@ -545,8 +608,13 @@ def test_write_zspace_experiment_artifacts_writes_manifest_with_planner_snapshot
     assert manifest["views"]["trace_jsonl"] == str(trace_path)
     assert manifest["planner_snapshot"]["available"] is True
     assert manifest["planner_snapshot"]["rank_plan"]["cols"] == 64
+    assert manifest["planner_snapshot"]["runtime_matrix"]["summary"]["runs"] == 3
     assert manifest["downstream_hook"]["kind"] == "spiraltorch.zspace_artifact_hook"
     assert loaded["planner_snapshot"]["device_report"]["backend"] == "wgpu"
+    assert loaded["planner_snapshot"]["runtime_matrix"]["summary"]["effective_backends"] == {
+        "wgpu": 2,
+        "cpu": 1,
+    }
     assert loaded["downstream_hook"]["views"]["artifact_manifest"] == str(
         tmp_path / "trace.artifacts.json"
     )
@@ -580,6 +648,7 @@ def test_summarize_zspace_experiment_manifest_builds_story() -> None:
                 "effective_backend": "wgpu",
                 "workgroup": 128,
             },
+            "runtime_matrix": _runtime_matrix_payload({"wgpu": 2, "cpu": 1}),
         },
         "noncollapse_perspective": {
             "coverage": 3,
@@ -606,11 +675,17 @@ def test_summarize_zspace_experiment_manifest_builds_story() -> None:
     assert story["planner"]["requested_backend"] == "auto"
     assert story["planner"]["effective_backend"] == "wgpu"
     assert story["planner"]["route"] == "metal-via-wgpu"
+    assert story["planner"]["runtime_matrix"]["summary"]["ok"] == 3
+    assert story["planner"]["runtime_matrix"]["effective_backends"] == {
+        "wgpu": 2,
+        "cpu": 1,
+    }
     assert story["noncollapse"]["signals"]["stability"] == pytest.approx(0.94)
     assert story["noncollapse"]["phase_hint"] == "integration"
     assert story["noncollapse"]["focus_metric"] == "noncollapse.z_bias"
     assert len(story["noncollapse"]["top_focus"]) == 1
     assert story["noncollapse"]["top_focus"][0]["name"] == "noncollapse.z_bias"
+    assert any(card["kind"] == "runtime_matrix" for card in story["story"])
     assert any(card["kind"] == "guidance" for card in story["story"])
 
 
@@ -632,6 +707,7 @@ def test_write_zspace_experiment_cockpit_html_renders_story_and_links(tmp_path) 
                     "shape": {"rows": 4, "cols": 64, "k": 2},
                     "device_report": {"backend": "wgpu", "planner_route": "wgpu"},
                     "rank_plan": {"effective_backend": "wgpu", "workgroup": 128},
+                    "runtime_matrix": _runtime_matrix_payload({"wgpu": 2, "cpu": 1}),
                 },
                 "noncollapse_perspective": {
                     "coverage": 2,
@@ -658,6 +734,8 @@ def test_write_zspace_experiment_cockpit_html_renders_story_and_links(tmp_path) 
     assert html_path.endswith("trace.cockpit.html")
     assert "Cockpit packet" in html
     assert "Planner Snapshot" in html
+    assert "Runtime Matrix" in html
+    assert "wgpu (2), cpu (1)" in html
     assert "Top Focus" in html
     assert "noncollapse.preserved_ratio" in html
     assert "Trace Viewer" in html
@@ -676,7 +754,17 @@ def _experiment_index_manifest(
     momentum: float,
     focus_metric: str,
     artifact_manifest: str = "/tmp/trace.artifacts.json",
+    runtime_matrix: dict[str, object] | None = None,
 ) -> dict[str, object]:
+    planner_snapshot = {
+        "backend": "auto",
+        "available": True,
+        "shape": {"rows": 4, "cols": 64, "k": 2},
+        "device_report": {"backend": backend, "planner_route": route},
+        "rank_plan": {"effective_backend": backend, "workgroup": 128},
+    }
+    if runtime_matrix is not None:
+        planner_snapshot["runtime_matrix"] = runtime_matrix
     return {
         "kind": "spiraltorch.zspace_experiment_manifest",
         "title": title,
@@ -686,13 +774,7 @@ def _experiment_index_manifest(
         "atlas_noncollapse_html": f"{title}.atlas_noncollapse.html",
         "artifact_manifest": artifact_manifest,
         "summary": {"frames": frames, "total_notes": total_notes},
-        "planner_snapshot": {
-            "backend": "auto",
-            "available": True,
-            "shape": {"rows": 4, "cols": 64, "k": 2},
-            "device_report": {"backend": backend, "planner_route": route},
-            "rank_plan": {"effective_backend": backend, "workgroup": 128},
-        },
+        "planner_snapshot": planner_snapshot,
         "noncollapse_perspective": {
             "coverage": frames,
             "stability": stability,
@@ -719,6 +801,7 @@ def test_summarize_zspace_experiment_index_compares_runs() -> None:
                 stability=0.9,
                 momentum=0.2,
                 focus_metric="noncollapse.z_bias",
+                runtime_matrix=_runtime_matrix_payload({"wgpu": 2, "cpu": 1}),
             ),
             _experiment_index_manifest(
                 "CPU run",
@@ -729,6 +812,7 @@ def test_summarize_zspace_experiment_index_compares_runs() -> None:
                 stability=0.7,
                 momentum=-0.1,
                 focus_metric="noncollapse.preserved_ratio",
+                runtime_matrix=_runtime_matrix_payload({"cpu": 1}),
             ),
         ],
         title="Experiment Index",
@@ -740,6 +824,10 @@ def test_summarize_zspace_experiment_index_compares_runs() -> None:
     assert index["summary"]["total_frames"] == 5
     assert index["summary"]["total_notes"] == 12
     assert index["summary"]["planner_backends"] == {"cpu": 1, "wgpu": 1}
+    assert index["summary"]["runtime_matrix_effective_backends"] == {
+        "cpu": 2,
+        "wgpu": 2,
+    }
     assert index["summary"]["focus_metrics"] == {
         "noncollapse.preserved_ratio": 1,
         "noncollapse.z_bias": 1,
