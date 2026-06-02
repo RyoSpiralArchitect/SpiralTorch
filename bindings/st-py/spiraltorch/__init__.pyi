@@ -39,6 +39,16 @@ def write_trainer_trace_html(
     marker_event_type: str | None = ...,
 ) -> str: ...
 
+def load_gnn_band_replay_trace(path: str | PathLike[str]) -> Dict[str, Any]: ...
+
+def summarize_gnn_band_replays(
+    trace: str | PathLike[str] | Mapping[str, Any],
+) -> Dict[str, Any]: ...
+
+def compare_gnn_band_replay_runs(
+    traces: Iterable[str | PathLike[str] | Mapping[str, Any]],
+) -> Dict[str, Any]: ...
+
 def load_kdsl_trace_events(path: str) -> List[Dict[str, Any]]: ...
 
 def write_kdsl_trace_jsonl(
