@@ -193,10 +193,17 @@ def test_trace_wgpu_first_runtime_captures_session_plan_and_tensor_events(
         unsubscribed.append((event_type, subscription_id))
         return True
 
+    def _patched_resolve_rs_attr(candidate: str):
+        if candidate == "build_info":
+            return lambda: {"features": {"logic": True, "wgpu": True}}
+        return None
+
+    monkeypatch.delattr(st, "build_info", raising=False)
     monkeypatch.setattr(st, "init_backend", _patched_init_backend, raising=False)
     monkeypatch.setattr(st, "describe_device", _patched_describe_device, raising=False)
     monkeypatch.setattr(st, "plan_topk", _patched_plan_topk, raising=False)
     monkeypatch.setattr(st, "Tensor", _FakeTensor, raising=False)
+    monkeypatch.setattr(st, "_resolve_rs_attr", _patched_resolve_rs_attr, raising=False)
     monkeypatch.setattr(
         st,
         "plugin",
@@ -208,6 +215,7 @@ def test_trace_wgpu_first_runtime_captures_session_plan_and_tensor_events(
 
     assert report["requested_backend"] == "auto"
     assert report["effective_backend"] == "wgpu"
+    assert report["build_features"] == {"logic": True, "wgpu": True}
     assert report["device_preflight"]["backend"] == "wgpu"
     assert report["planner"]["k"] == 4
     assert report["planner"]["effective_backend"] == "wgpu"
