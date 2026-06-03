@@ -42,7 +42,7 @@ hip = ["dep:st-backend-hip"]
 [dependencies]
 # Deterministic sampling helpers for pure tensor stochastic initialisers.
 rand = { version = "0.8", default-features = false, features = ["std", "std_rng"] }
-rand_distr = { version = "0.4", default-features = false, features = ["std"] }
+rand_distr = { version = "0.6", default-features = false, features = ["std"] }
 # Fractional calculus + FFT helpers shared with the WASM canvas transformer.
 st-frac = { path = "../st-frac" }
 # Kernel DSL utilities shared with the autotuner.
