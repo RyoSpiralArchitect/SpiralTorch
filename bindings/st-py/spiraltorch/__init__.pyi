@@ -3986,6 +3986,26 @@ class _NnModuleTrainer:
         schedule: _NnRoundtableSchedule,
     ) -> _NnEpochStats: ...
 
+    def evaluate_epoch(
+        self,
+        module: object,
+        loss: object,
+        batches: Iterable[Tuple[Tensor, Tensor]],
+    ) -> _NnEpochStats: ...
+
+    def train_epochs(
+        self,
+        module: object,
+        loss: object,
+        batches: Iterable[Tuple[Tensor, Tensor]],
+        schedule: _NnRoundtableSchedule,
+        *,
+        epochs: int = ...,
+        validation_batches: Iterable[Tuple[Tensor, Tensor]] | None = ...,
+        patience: int | None = ...,
+        min_delta: float = ...,
+    ) -> Dict[str, Any]: ...
+
     @property
     def curvature(self) -> float: ...
 

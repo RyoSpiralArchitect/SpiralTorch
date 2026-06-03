@@ -80,9 +80,10 @@ use st_nn::{
     ModuleTrainer as RustModuleTrainer, NarrativeHint, NarrativeSummary, Relu, RepressionField,
     RoundtableConfig as RustRoundtableConfig, RoundtableSchedule as RustRoundtableSchedule,
     SemanticBridge, Sequential, SparseKernel, SymbolGeometry, TemperatureController,
-    TextInfusionEvery, TextInfusionMode, WaveGate, WaveRnn, ZRelativityModule, ZSpaceBatchNorm1d,
-    ZSpaceCoherenceSequencer, ZSpaceLayerNorm, ZSpaceMixer, ZSpaceTextVae, ZSpaceTraceConfig,
-    ZSpaceTraceRecorder, ZSpaceVae, ZSpaceVaeState, ZSpaceVaeStats,
+    TextInfusionEvery, TextInfusionMode, TrainingRunConfig as RustTrainingRunConfig,
+    TrainingRunReport as RustTrainingRunReport, WaveGate, WaveRnn, ZRelativityModule,
+    ZSpaceBatchNorm1d, ZSpaceCoherenceSequencer, ZSpaceLayerNorm, ZSpaceMixer, ZSpaceTextVae,
+    ZSpaceTraceConfig, ZSpaceTraceRecorder, ZSpaceVae, ZSpaceVaeState, ZSpaceVaeStats,
 };
 #[cfg(feature = "nn")]
 use st_nn::{Module, Parameter};
@@ -4196,6 +4197,53 @@ impl PyEpochStats {
 }
 
 #[cfg(feature = "nn")]
+fn epoch_stats_to_pydict(py: Python<'_>, stats: RustEpochStats) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("batches", stats.batches)?;
+    dict.set_item("total_loss", stats.total_loss)?;
+    dict.set_item("average_loss", stats.average_loss)?;
+    Ok(dict.into_py(py))
+}
+
+#[cfg(feature = "nn")]
+fn training_run_report_to_pydict(
+    py: Python<'_>,
+    report: RustTrainingRunReport,
+) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("epochs_run", report.epochs_run())?;
+    dict.set_item("best_epoch_index", report.best_epoch_index)?;
+    dict.set_item("stopped_early", report.stopped_early)?;
+    if let Some(best) = report.best_epoch() {
+        dict.set_item("best_epoch", best.epoch)?;
+        dict.set_item("best_score", best.score)?;
+    } else {
+        dict.set_item("best_epoch", py.None())?;
+        dict.set_item("best_score", py.None())?;
+    }
+
+    let history = PyList::empty(py);
+    for epoch in report.epochs {
+        let item = PyDict::new(py);
+        item.set_item("epoch", epoch.epoch)?;
+        item.set_item("train", epoch_stats_to_pydict(py, epoch.train)?)?;
+        match epoch.validation {
+            Some(validation) => {
+                item.set_item("validation", epoch_stats_to_pydict(py, validation)?)?;
+            }
+            None => {
+                item.set_item("validation", py.None())?;
+            }
+        }
+        item.set_item("score", epoch.score)?;
+        item.set_item("improved", epoch.improved)?;
+        history.append(item)?;
+    }
+    dict.set_item("history", history)?;
+    Ok(dict.into_py(py))
+}
+
+#[cfg(feature = "nn")]
 #[pyclass(module = "spiraltorch.nn", name = "ModuleTrainer", unsendable)]
 pub(crate) struct PyNnModuleTrainer {
     inner: RustModuleTrainer,
@@ -4651,6 +4699,66 @@ impl PyNnModuleTrainer {
         })?;
 
         Ok(PyEpochStats::new(stats))
+    }
+
+    #[pyo3(signature = (module, loss, batches))]
+    pub fn evaluate_epoch(
+        &mut self,
+        module: &Bound<PyAny>,
+        loss: &Bound<PyAny>,
+        batches: &Bound<PyAny>,
+    ) -> PyResult<PyEpochStats> {
+        let py = module.py();
+        let batches = collect_batches(py, batches)?;
+        let stats = with_loss_mut(loss, |loss_inner| {
+            with_module_mut(module, |module_inner| {
+                self.inner.evaluate_epoch(module_inner, loss_inner, batches)
+            })
+            .map_err(|err| TensorError::Generic(err.to_string()))
+        })?;
+
+        Ok(PyEpochStats::new(stats))
+    }
+
+    #[pyo3(signature = (module, loss, batches, schedule, *, epochs=1, validation_batches=None, patience=None, min_delta=0.0))]
+    pub fn train_epochs(
+        &mut self,
+        module: &Bound<PyAny>,
+        loss: &Bound<PyAny>,
+        batches: &Bound<PyAny>,
+        schedule: &PyRoundtableSchedule,
+        epochs: usize,
+        validation_batches: Option<&Bound<PyAny>>,
+        patience: Option<usize>,
+        min_delta: f32,
+    ) -> PyResult<PyObject> {
+        if !min_delta.is_finite() {
+            return Err(PyValueError::new_err("min_delta must be finite"));
+        }
+        let py = module.py();
+        let batches = collect_batches(py, batches)?;
+        let validation_batches = match validation_batches {
+            Some(value) => Some(collect_batches(py, value)?),
+            None => None,
+        };
+        let config = RustTrainingRunConfig::new(epochs)
+            .with_validation_patience(patience)
+            .with_min_delta(min_delta);
+        let report = with_loss_mut(loss, |loss_inner| {
+            with_module_mut(module, |module_inner| {
+                self.inner.train_epochs(
+                    module_inner,
+                    loss_inner,
+                    batches.as_slice(),
+                    validation_batches.as_deref(),
+                    &schedule.inner,
+                    config,
+                )
+            })
+            .map_err(|err| TensorError::Generic(err.to_string()))
+        })?;
+
+        training_run_report_to_pydict(py, report)
     }
 
     #[getter]

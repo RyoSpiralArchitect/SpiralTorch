@@ -4,8 +4,8 @@
 
 use st_core::backend::device_caps::DeviceCaps;
 use st_nn::{
-    load_json, save_json, EpochStats, GraphActivation, GraphContext, GraphLayerSpec,
-    MeanSquaredError, Module, ModuleTrainer, RoundtableConfig, Tensor, ZSpaceGraphNetwork,
+    load_json, save_json, GraphActivation, GraphContext, GraphLayerSpec, MeanSquaredError, Module,
+    ModuleTrainer, RoundtableConfig, Tensor, TrainingRunConfig, ZSpaceGraphNetwork,
     ZSpaceGraphNetworkBuilder,
 };
 use std::num::NonZeroUsize;
@@ -71,14 +71,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut loss = MeanSquaredError::new();
     let batches = vec![(x.clone(), target.clone())];
+    let validation = vec![(propagated.clone(), target.clone())];
 
-    for _ in 0..6 {
-        let EpochStats {
-            batches,
-            average_loss,
-            ..
-        } = trainer.train_epoch(&mut model, &mut loss, batches.clone(), &schedule)?;
-        println!("stats: batches={batches} avg_loss={average_loss:.6}");
+    let report = trainer.train_epochs(
+        &mut model,
+        &mut loss,
+        &batches,
+        Some(validation.as_slice()),
+        &schedule,
+        TrainingRunConfig::new(12)
+            .with_validation_patience(Some(3))
+            .with_min_delta(1e-5),
+    )?;
+    for epoch in &report.epochs {
+        let val_loss = epoch
+            .validation
+            .map(|stats| format!("{:.6}", stats.average_loss))
+            .unwrap_or_else(|| "n/a".to_string());
+        println!(
+            "epoch={} train_loss={:.6} val_loss={} improved={}",
+            epoch.epoch, epoch.train.average_loss, val_loss, epoch.improved
+        );
+    }
+    if let Some(best) = report.best_epoch() {
+        println!(
+            "best: epoch={} score={:.6} stopped_early={}",
+            best.epoch, best.score, report.stopped_early
+        );
     }
 
     let weights_path = Path::new("models/weights/gnn_graph_regression.json");
