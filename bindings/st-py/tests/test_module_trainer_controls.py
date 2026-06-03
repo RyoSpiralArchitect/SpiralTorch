@@ -114,6 +114,7 @@ def test_module_trainer_train_epochs_returns_history() -> None:
         validation_batches=validation,
         patience=1,
         min_delta=0.0,
+        shuffle_seed=123,
         restore_best=True,
     )
 

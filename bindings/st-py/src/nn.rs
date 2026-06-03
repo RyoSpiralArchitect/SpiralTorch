@@ -4721,7 +4721,7 @@ impl PyNnModuleTrainer {
         Ok(PyEpochStats::new(stats))
     }
 
-    #[pyo3(signature = (module, loss, batches, schedule, *, epochs=1, validation_batches=None, patience=None, min_delta=0.0, restore_best=false))]
+    #[pyo3(signature = (module, loss, batches, schedule, *, epochs=1, validation_batches=None, patience=None, min_delta=0.0, shuffle_seed=None, restore_best=false))]
     pub fn train_epochs(
         &mut self,
         module: &Bound<PyAny>,
@@ -4732,6 +4732,7 @@ impl PyNnModuleTrainer {
         validation_batches: Option<&Bound<PyAny>>,
         patience: Option<usize>,
         min_delta: f32,
+        shuffle_seed: Option<u64>,
         restore_best: bool,
     ) -> PyResult<PyObject> {
         if !min_delta.is_finite() {
@@ -4746,6 +4747,7 @@ impl PyNnModuleTrainer {
         let config = RustTrainingRunConfig::new(epochs)
             .with_validation_patience(patience)
             .with_min_delta(min_delta)
+            .with_epoch_shuffle_seed(shuffle_seed)
             .with_restore_best(restore_best);
         let report = with_loss_mut(loss, |loss_inner| {
             with_module_mut(module, |module_inner| {

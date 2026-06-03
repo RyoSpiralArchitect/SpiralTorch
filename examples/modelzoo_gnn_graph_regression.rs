@@ -82,6 +82,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         TrainingRunConfig::new(12)
             .with_validation_patience(Some(3))
             .with_min_delta(1e-5)
+            .with_epoch_shuffle_seed(Some(99))
             .with_restore_best(true),
     )?;
     for epoch in &report.epochs {

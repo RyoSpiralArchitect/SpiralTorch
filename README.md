@@ -2381,6 +2381,7 @@ fn main() -> PureResult<()> {
 
 **Features**
 - Dataset abstraction and serialization
+- Multi-epoch validation, best-state restore, and deterministic epoch reshuffling
 - Hypergrad integration for every parameter
 - Optional Realgrad accumulation via `ModuleTrainer::with_realgrad`
 - WGPU · MPS · CUDA unified backends
