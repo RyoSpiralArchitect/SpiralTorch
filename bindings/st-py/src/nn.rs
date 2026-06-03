@@ -4214,6 +4214,7 @@ fn training_run_report_to_pydict(
     dict.set_item("epochs_run", report.epochs_run())?;
     dict.set_item("best_epoch_index", report.best_epoch_index)?;
     dict.set_item("stopped_early", report.stopped_early)?;
+    dict.set_item("restored_best", report.restored_best)?;
     if let Some(best) = report.best_epoch() {
         dict.set_item("best_epoch", best.epoch)?;
         dict.set_item("best_score", best.score)?;
@@ -4720,7 +4721,7 @@ impl PyNnModuleTrainer {
         Ok(PyEpochStats::new(stats))
     }
 
-    #[pyo3(signature = (module, loss, batches, schedule, *, epochs=1, validation_batches=None, patience=None, min_delta=0.0))]
+    #[pyo3(signature = (module, loss, batches, schedule, *, epochs=1, validation_batches=None, patience=None, min_delta=0.0, restore_best=false))]
     pub fn train_epochs(
         &mut self,
         module: &Bound<PyAny>,
@@ -4731,6 +4732,7 @@ impl PyNnModuleTrainer {
         validation_batches: Option<&Bound<PyAny>>,
         patience: Option<usize>,
         min_delta: f32,
+        restore_best: bool,
     ) -> PyResult<PyObject> {
         if !min_delta.is_finite() {
             return Err(PyValueError::new_err("min_delta must be finite"));
@@ -4743,7 +4745,8 @@ impl PyNnModuleTrainer {
         };
         let config = RustTrainingRunConfig::new(epochs)
             .with_validation_patience(patience)
-            .with_min_delta(min_delta);
+            .with_min_delta(min_delta)
+            .with_restore_best(restore_best);
         let report = with_loss_mut(loss, |loss_inner| {
             with_module_mut(module, |module_inner| {
                 self.inner.train_epochs(

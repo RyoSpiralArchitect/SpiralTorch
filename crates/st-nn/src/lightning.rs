@@ -11,7 +11,7 @@ use crate::trainer::selfsup::{
     publish_selfsup_metrics, InfoNCEEpochMetrics, InfoNCELoss, SelfSupEpochReport,
     SelfSupEpochTelemetry, SelfSupObjective, SelfSupPlanReport, SelfSupStage, SelfSupStageReport,
 };
-use crate::trainer::{EpochStats, IntoBatch, ModuleTrainer};
+use crate::trainer::{EpochStats, IntoBatch, ModuleTrainer, TrainingRunConfig, TrainingRunReport};
 use crate::{Loss, Module, PureResult, Tensor};
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -582,6 +582,31 @@ impl SpiralLightning {
         Ok(results)
     }
 
+    /// Runs a validation-aware training loop using the stored trainer and schedule.
+    pub fn fit_training_run<M, L, B>(
+        &mut self,
+        module: &mut M,
+        loss: &mut L,
+        train_batches: &[B],
+        validation_batches: Option<&[B]>,
+        config: TrainingRunConfig,
+    ) -> PureResult<TrainingRunReport>
+    where
+        M: Module,
+        L: Loss,
+        B: Clone + IntoBatch,
+    {
+        self.ensure_prepared(module)?;
+        self.trainer.train_epochs(
+            module,
+            loss,
+            train_batches,
+            validation_batches,
+            &self.schedule,
+            config,
+        )
+    }
+
     /// Executes a staged training plan, reconfiguring the roundtable between stages.
     pub fn fit_plan<M, L, It>(
         &mut self,
@@ -758,6 +783,39 @@ mod tests {
             .fit_epochs(&mut model, &mut loss, vec![epoch_a, epoch_b])
             .unwrap();
         assert_eq!(reports.len(), 2);
+    }
+
+    #[test]
+    fn lightning_fit_training_run_returns_validation_report() {
+        let session = SpiralSession::builder(DeviceCaps::cpu())
+            .with_curvature(-1.0)
+            .build()
+            .unwrap();
+        let mut lightning = SpiralLightning::new(session, 1, 1);
+        let mut model = Linear::new("demo", 1, 1).unwrap();
+        let mut loss = MeanSquaredError::new();
+        let train = vec![
+            (tensor(&[0.0]), tensor(&[0.0])),
+            (tensor(&[1.0]), tensor(&[1.0])),
+        ];
+        let validation = vec![(tensor(&[0.5]), tensor(&[0.5]))];
+
+        let report = lightning
+            .fit_training_run(
+                &mut model,
+                &mut loss,
+                &train,
+                Some(validation.as_slice()),
+                TrainingRunConfig::new(3)
+                    .with_validation_patience(Some(1))
+                    .with_restore_best(true),
+            )
+            .unwrap();
+
+        assert_eq!(report.epochs_run(), 3);
+        assert!(report.best_epoch().is_some());
+        assert!(report.epochs.iter().all(|epoch| epoch.validation.is_some()));
+        assert!(report.restored_best);
     }
 
     #[test]

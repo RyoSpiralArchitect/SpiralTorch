@@ -114,10 +114,12 @@ def test_module_trainer_train_epochs_returns_history() -> None:
         validation_batches=validation,
         patience=1,
         min_delta=0.0,
+        restore_best=True,
     )
 
     assert report["epochs_run"] >= 1
     assert report["best_epoch"] is not None
+    assert report["restored_best"] is True
     assert report["best_score"] == pytest.approx(
         report["history"][report["best_epoch_index"]]["score"]
     )

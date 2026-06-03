@@ -81,7 +81,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &schedule,
         TrainingRunConfig::new(12)
             .with_validation_patience(Some(3))
-            .with_min_delta(1e-5),
+            .with_min_delta(1e-5)
+            .with_restore_best(true),
     )?;
     for epoch in &report.epochs {
         let val_loss = epoch
@@ -95,8 +96,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     if let Some(best) = report.best_epoch() {
         println!(
-            "best: epoch={} score={:.6} stopped_early={}",
-            best.epoch, best.score, report.stopped_early
+            "best: epoch={} score={:.6} stopped_early={} restored_best={}",
+            best.epoch, best.score, report.stopped_early, report.restored_best
         );
     }
 

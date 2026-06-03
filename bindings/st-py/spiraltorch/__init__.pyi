@@ -4004,6 +4004,7 @@ class _NnModuleTrainer:
         validation_batches: Iterable[Tuple[Tensor, Tensor]] | None = ...,
         patience: int | None = ...,
         min_delta: float = ...,
+        restore_best: bool = ...,
     ) -> Dict[str, Any]: ...
 
     @property

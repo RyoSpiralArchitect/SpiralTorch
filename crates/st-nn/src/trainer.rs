@@ -4403,6 +4403,7 @@ impl ModuleTrainer {
         let mut history = Vec::with_capacity(config.epochs());
         let mut best_score: Option<f32> = None;
         let mut best_epoch_index = None;
+        let mut best_state = None;
         let mut stale_epochs = 0usize;
         let mut stopped_early = false;
 
@@ -4425,6 +4426,9 @@ impl ModuleTrainer {
             if improved {
                 best_score = Some(score);
                 best_epoch_index = Some(history.len());
+                if config.restore_best() {
+                    best_state = Some(module.state_dict()?);
+                }
                 stale_epochs = 0;
             } else {
                 stale_epochs = stale_epochs.saturating_add(1);
@@ -4446,10 +4450,22 @@ impl ModuleTrainer {
             }
         }
 
+        let restored_best = if config.restore_best() {
+            if let Some(state) = best_state.as_ref() {
+                module.load_state_dict(state)?;
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
         Ok(TrainingRunReport::new(
             history,
             best_epoch_index,
             stopped_early,
+            restored_best,
         ))
     }
 
@@ -4872,6 +4888,7 @@ pub struct TrainingRunConfig {
     epochs: usize,
     validation_patience: Option<usize>,
     min_delta: f32,
+    restore_best: bool,
 }
 
 impl TrainingRunConfig {
@@ -4881,6 +4898,7 @@ impl TrainingRunConfig {
             epochs,
             validation_patience: None,
             min_delta: 0.0,
+            restore_best: false,
         }
     }
 
@@ -4893,6 +4911,12 @@ impl TrainingRunConfig {
     /// Sets the minimum score improvement required to reset patience.
     pub fn with_min_delta(mut self, min_delta: f32) -> Self {
         self.min_delta = min_delta.max(0.0);
+        self
+    }
+
+    /// Restores the best recorded parameter state before returning the report.
+    pub fn with_restore_best(mut self, restore_best: bool) -> Self {
+        self.restore_best = restore_best;
         self
     }
 
@@ -4909,6 +4933,11 @@ impl TrainingRunConfig {
     /// Returns the minimum score improvement required to count as better.
     pub fn min_delta(&self) -> f32 {
         self.min_delta
+    }
+
+    /// Returns whether the run should restore the best recorded parameter state.
+    pub fn restore_best(&self) -> bool {
+        self.restore_best
     }
 }
 
@@ -4934,6 +4963,7 @@ pub struct TrainingRunReport {
     pub epochs: Vec<TrainingEpochStats>,
     pub best_epoch_index: Option<usize>,
     pub stopped_early: bool,
+    pub restored_best: bool,
 }
 
 impl TrainingRunReport {
@@ -4942,11 +4972,13 @@ impl TrainingRunReport {
         epochs: Vec<TrainingEpochStats>,
         best_epoch_index: Option<usize>,
         stopped_early: bool,
+        restored_best: bool,
     ) -> Self {
         Self {
             epochs,
             best_epoch_index,
             stopped_early,
+            restored_best,
         }
     }
 
@@ -5440,6 +5472,7 @@ mod tests {
         assert_eq!(report.epochs_run(), 3);
         assert!(report.best_epoch_index.is_some());
         assert!(!report.stopped_early);
+        assert!(!report.restored_best);
         assert!(report.epochs.iter().all(|epoch| epoch.validation.is_some()));
         assert!(report.best_epoch().expect("best epoch").score.is_finite());
     }
@@ -5476,6 +5509,54 @@ mod tests {
         assert_eq!(report.best_epoch_index, Some(0));
         assert!(report.stopped_early);
         assert!(!report.epochs[1].improved);
+    }
+
+    #[test]
+    fn trainer_train_epochs_can_restore_best_state() {
+        let mut schedule_trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        let schedule = schedule_trainer.roundtable(1, 1, RoundtableConfig::default());
+        let batches = vec![(
+            Tensor::from_vec(1, 1, vec![1.0]).unwrap(),
+            Tensor::from_vec(1, 1, vec![0.0]).unwrap(),
+        )];
+
+        let mut expected_trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        let mut expected = FixedGradientModule::new(1.0);
+        expected_trainer.prepare(&mut expected).unwrap();
+        let mut expected_loss = ConstantLoss::new(1.0);
+        expected_trainer
+            .train_epoch(
+                &mut expected,
+                &mut expected_loss,
+                batches.clone(),
+                &schedule,
+            )
+            .unwrap();
+        let expected_state = expected.state_dict().unwrap();
+
+        let mut trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        let mut module = FixedGradientModule::new(1.0);
+        trainer.prepare(&mut module).unwrap();
+        let mut loss = ConstantLoss::new(1.0);
+        let report = trainer
+            .train_epochs(
+                &mut module,
+                &mut loss,
+                &batches,
+                Some(batches.as_slice()),
+                &schedule,
+                TrainingRunConfig::new(5)
+                    .with_validation_patience(Some(0))
+                    .with_min_delta(100.0)
+                    .with_restore_best(true),
+            )
+            .unwrap();
+
+        assert_eq!(report.epochs_run(), 2);
+        assert_eq!(report.best_epoch_index, Some(0));
+        assert!(report.stopped_early);
+        assert!(report.restored_best);
+        assert_eq!(module.state_dict().unwrap(), expected_state);
     }
 
     #[test]
