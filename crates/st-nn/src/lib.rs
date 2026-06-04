@@ -40,9 +40,9 @@ pub use gnn::{
     embed_into_biome, flows_to_canvas_tensor, flows_to_canvas_tensor_with_shape,
     fold_into_roundtable, fold_with_band_energy, AggregationReducer, GraphActivation,
     GraphConsensusBridge, GraphConsensusDigest, GraphContext, GraphContextBuilder, GraphLayerSpec,
-    GraphMonadExport, GraphNormalization, NeighborhoodAggregation, QuadBandEnergy,
+    GraphMonadExport, GraphNormalization, GraphReadout, NeighborhoodAggregation, QuadBandEnergy,
     RoundtableBandInfluence, RoundtableBandSignal, ZSpaceGraphConvolution, ZSpaceGraphNetwork,
-    ZSpaceGraphNetworkBuilder,
+    ZSpaceGraphNetworkBuilder, ZSpaceGraphRegressor,
 };
 #[cfg(feature = "golden")]
 pub use golden::{
