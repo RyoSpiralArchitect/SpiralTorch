@@ -38,11 +38,11 @@ pub use discovery::{
 };
 pub use gnn::{
     embed_into_biome, flows_to_canvas_tensor, flows_to_canvas_tensor_with_shape,
-    fold_into_roundtable, fold_with_band_energy, AggregationReducer, GraphActivation,
+    fold_into_roundtable, fold_with_band_energy, AggregationReducer, GraphActivation, GraphBatch,
     GraphConsensusBridge, GraphConsensusDigest, GraphContext, GraphContextBuilder, GraphLayerSpec,
     GraphMonadExport, GraphNormalization, GraphReadout, NeighborhoodAggregation, QuadBandEnergy,
-    RoundtableBandInfluence, RoundtableBandSignal, ZSpaceGraphConvolution, ZSpaceGraphNetwork,
-    ZSpaceGraphNetworkBuilder, ZSpaceGraphRegressor,
+    RoundtableBandInfluence, RoundtableBandSignal, ZSpaceGraphBatchRegressor,
+    ZSpaceGraphConvolution, ZSpaceGraphNetwork, ZSpaceGraphNetworkBuilder, ZSpaceGraphRegressor,
 };
 #[cfg(feature = "golden")]
 pub use golden::{
