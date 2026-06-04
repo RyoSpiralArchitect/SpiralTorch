@@ -6,7 +6,7 @@ use st_core::backend::device_caps::DeviceCaps;
 use st_nn::{
     load_json, save_json, Dataset, GraphActivation, GraphContext, GraphLayerSpec, GraphReadout,
     MeanSquaredError, Module, ModuleTrainer, RoundtableConfig, Tensor, TrainingRunConfig,
-    ZSpaceGraphNetworkBuilder, ZSpaceGraphRegressor,
+    ZSpaceGraphBatchRegressor, ZSpaceGraphNetworkBuilder,
 };
 use std::num::NonZeroUsize;
 use std::path::Path;
@@ -25,10 +25,11 @@ fn build_context(nodes: usize) -> st_nn::PureResult<GraphContext> {
 
 fn build_model(
     context: GraphContext,
+    nodes: usize,
     features: usize,
     curvature: f32,
     learning_rate: f32,
-) -> st_nn::PureResult<ZSpaceGraphRegressor> {
+) -> st_nn::PureResult<ZSpaceGraphBatchRegressor> {
     let mut builder = ZSpaceGraphNetworkBuilder::new(
         context,
         NonZeroUsize::new(features).ok_or(st_nn::TensorError::InvalidDimensions {
@@ -44,7 +45,14 @@ fn build_model(
     );
     builder.push_layer(GraphLayerSpec::new(NonZeroUsize::new(features).unwrap()));
     let network = builder.build("gnn_graph")?;
-    Ok(ZSpaceGraphRegressor::new(network, GraphReadout::Mean))
+    Ok(ZSpaceGraphBatchRegressor::new(
+        network,
+        GraphReadout::Mean,
+        NonZeroUsize::new(nodes).ok_or(st_nn::TensorError::InvalidDimensions {
+            rows: nodes,
+            cols: features,
+        })?,
+    ))
 }
 
 fn graph_sample(
@@ -79,20 +87,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = build_context(nodes)?;
     let train_samples = graph_samples(&context, nodes, features, 99, 16)?;
     let validation_samples = graph_samples(&context, nodes, features, 1_099, 4)?;
-    let reload_probe = validation_samples[0].0.clone();
+    let reload_probe = Tensor::cat_rows(
+        &validation_samples
+            .iter()
+            .take(2)
+            .map(|(input, _)| input.clone())
+            .collect::<Vec<_>>(),
+    )?;
     let train_loader = Dataset::from_vec(train_samples)
         .loader()
         .shuffle(99)
-        .batched(1)
+        .batched(4)
         .prefetch(2);
-    let validation_loader = Dataset::from_vec(validation_samples).loader().batched(1);
+    let validation_loader = Dataset::from_vec(validation_samples).loader().batched(2);
 
-    let mut model = build_model(context.clone(), features, -1.0, 0.05)?;
+    let mut model = build_model(context.clone(), nodes, features, -1.0, 0.05)?;
     model.attach_hypergrad(-1.0, 2e-2)?;
 
     let mut trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 2e-2, 2e-2);
     let schedule = trainer.roundtable(
-        1,
+        4,
         features as u32,
         RoundtableConfig::default()
             .with_top_k(1)
@@ -138,13 +152,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     save_json(&model, weights_path)?;
 
-    let mut reloaded = build_model(context, features, -1.0, 0.05)?;
+    let mut reloaded = build_model(context, nodes, features, -1.0, 0.05)?;
     load_json(&mut reloaded, weights_path)?;
     let graph_prediction = reloaded.forward(&reload_probe)?;
     println!(
-        "reloaded graph prediction shape={:?} readout={:?}",
+        "reloaded graph prediction shape={:?} readout={:?} nodes_per_graph={}",
         graph_prediction.shape(),
-        reloaded.readout()
+        reloaded.readout(),
+        reloaded.nodes_per_graph().get()
     );
 
     Ok(())

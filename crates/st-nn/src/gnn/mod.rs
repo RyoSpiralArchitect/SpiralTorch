@@ -24,7 +24,7 @@ pub use handoff::{
     fold_into_roundtable, fold_with_band_energy, GraphMonadExport, QuadBandEnergy,
 };
 pub use layer::{AggregationReducer, NeighborhoodAggregation, ZSpaceGraphConvolution};
-pub use readout::{GraphReadout, ZSpaceGraphRegressor};
+pub use readout::{GraphBatch, GraphReadout, ZSpaceGraphBatchRegressor, ZSpaceGraphRegressor};
 pub use spiralk::{GraphConsensusBridge, GraphConsensusDigest};
 pub use stack::{GraphActivation, GraphLayerSpec, ZSpaceGraphNetwork, ZSpaceGraphNetworkBuilder};
 
