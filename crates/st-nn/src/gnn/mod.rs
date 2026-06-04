@@ -12,6 +12,7 @@ use std::time::SystemTime;
 pub mod context;
 pub mod handoff;
 pub mod layer;
+pub mod readout;
 pub mod spiralk;
 pub mod stack;
 
@@ -23,6 +24,7 @@ pub use handoff::{
     fold_into_roundtable, fold_with_band_energy, GraphMonadExport, QuadBandEnergy,
 };
 pub use layer::{AggregationReducer, NeighborhoodAggregation, ZSpaceGraphConvolution};
+pub use readout::{GraphReadout, ZSpaceGraphRegressor};
 pub use spiralk::{GraphConsensusBridge, GraphConsensusDigest};
 pub use stack::{GraphActivation, GraphLayerSpec, ZSpaceGraphNetwork, ZSpaceGraphNetworkBuilder};
 

@@ -4,9 +4,9 @@
 
 use st_core::backend::device_caps::DeviceCaps;
 use st_nn::{
-    load_json, save_json, GraphActivation, GraphContext, GraphLayerSpec, MeanSquaredError, Module,
-    ModuleTrainer, RoundtableConfig, Tensor, TrainingRunConfig, ZSpaceGraphNetwork,
-    ZSpaceGraphNetworkBuilder,
+    load_json, save_json, Dataset, GraphActivation, GraphContext, GraphLayerSpec, GraphReadout,
+    MeanSquaredError, Module, ModuleTrainer, RoundtableConfig, Tensor, TrainingRunConfig,
+    ZSpaceGraphNetworkBuilder, ZSpaceGraphRegressor,
 };
 use std::num::NonZeroUsize;
 use std::path::Path;
@@ -28,7 +28,7 @@ fn build_model(
     features: usize,
     curvature: f32,
     learning_rate: f32,
-) -> st_nn::PureResult<ZSpaceGraphNetwork> {
+) -> st_nn::PureResult<ZSpaceGraphRegressor> {
     let mut builder = ZSpaceGraphNetworkBuilder::new(
         context,
         NonZeroUsize::new(features).ok_or(st_nn::TensorError::InvalidDimensions {
@@ -43,7 +43,33 @@ fn build_model(
             .with_activation(GraphActivation::Relu),
     );
     builder.push_layer(GraphLayerSpec::new(NonZeroUsize::new(features).unwrap()));
-    builder.build("gnn_graph")
+    let network = builder.build("gnn_graph")?;
+    Ok(ZSpaceGraphRegressor::new(network, GraphReadout::Mean))
+}
+
+fn graph_sample(
+    context: &GraphContext,
+    nodes: usize,
+    features: usize,
+    seed: u64,
+) -> st_nn::PureResult<(Tensor, Tensor)> {
+    let input = Tensor::random_uniform(nodes, features, -1.0, 1.0, Some(seed))?;
+    let propagated = context.propagate(&input)?;
+    let node_target = input.scale(0.25)?.add(&propagated.scale(0.75)?)?;
+    let graph_target = GraphReadout::Mean.forward(&node_target)?;
+    Ok((input, graph_target))
+}
+
+fn graph_samples(
+    context: &GraphContext,
+    nodes: usize,
+    features: usize,
+    seed: u64,
+    count: usize,
+) -> st_nn::PureResult<Vec<(Tensor, Tensor)>> {
+    (0..count)
+        .map(|idx| graph_sample(context, nodes, features, seed + idx as u64))
+        .collect()
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -51,16 +77,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let features = 3usize;
 
     let context = build_context(nodes)?;
-    let x = Tensor::random_uniform(nodes, features, -1.0, 1.0, Some(99))?;
-    let propagated = context.propagate(&x)?;
-    let target = x.scale(0.25)?.add(&propagated.scale(0.75)?)?;
+    let train_samples = graph_samples(&context, nodes, features, 99, 16)?;
+    let validation_samples = graph_samples(&context, nodes, features, 1_099, 4)?;
+    let reload_probe = validation_samples[0].0.clone();
+    let train_loader = Dataset::from_vec(train_samples)
+        .loader()
+        .shuffle(99)
+        .batched(1)
+        .prefetch(2);
+    let validation_loader = Dataset::from_vec(validation_samples).loader().batched(1);
 
     let mut model = build_model(context.clone(), features, -1.0, 0.05)?;
     model.attach_hypergrad(-1.0, 2e-2)?;
 
     let mut trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 2e-2, 2e-2);
     let schedule = trainer.roundtable(
-        nodes as u32,
+        1,
         features as u32,
         RoundtableConfig::default()
             .with_top_k(1)
@@ -70,14 +102,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let mut loss = MeanSquaredError::new();
-    let batches = vec![(x.clone(), target.clone())];
-    let validation = vec![(propagated.clone(), target.clone())];
 
-    let report = trainer.train_epochs(
+    let report = trainer.train_epochs_loader(
         &mut model,
         &mut loss,
-        &batches,
-        Some(validation.as_slice()),
+        &train_loader,
+        Some(&validation_loader),
         &schedule,
         TrainingRunConfig::new(12)
             .with_validation_patience(Some(3))
@@ -110,7 +140,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut reloaded = build_model(context, features, -1.0, 0.05)?;
     load_json(&mut reloaded, weights_path)?;
-    let _ = reloaded.forward(&x)?;
+    let graph_prediction = reloaded.forward(&reload_probe)?;
+    println!(
+        "reloaded graph prediction shape={:?} readout={:?}",
+        graph_prediction.shape(),
+        reloaded.readout()
+    );
 
     Ok(())
 }
