@@ -25,6 +25,7 @@
 pub mod selfsup;
 
 use crate::cloud::CloudTargetSummary;
+use crate::dataset::DataLoader;
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
 use crate::gnn::RoundtableBandSignal;
 #[cfg(feature = "golden")]
@@ -49,6 +50,8 @@ use crate::zspace_coherence::{
     CoherenceDiagnostics, CoherenceLabel, CoherenceObservation, ZSpaceTraceEvent,
 };
 use crate::{PureResult, Tensor, TensorError};
+use rand::rngs::StdRng;
+use rand::{seq::SliceRandom, SeedableRng};
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::backend::unison_heuristics::RankKind;
 use st_core::ecosystem::{
@@ -4343,6 +4346,184 @@ impl ModuleTrainer {
         Ok(stats)
     }
 
+    /// Evaluates an epoch without accumulating gradients or stepping parameters.
+    pub fn evaluate_epoch<M, L, I>(
+        &mut self,
+        module: &mut M,
+        loss: &mut L,
+        batches: I,
+    ) -> PureResult<EpochStats>
+    where
+        M: Module + ?Sized,
+        L: Loss + ?Sized,
+        I: IntoIterator,
+        I::Item: IntoBatch,
+    {
+        module.eval()?;
+        let result = (|| {
+            let mut total_loss = 0.0f32;
+            let mut steps = 0usize;
+            for batch in batches.into_iter() {
+                let (input, target) = batch.into_batch()?;
+                let prediction = module.forward(&input)?;
+                let loss_value = loss.forward(&prediction, &target)?;
+                total_loss += loss_value.data().iter().copied().sum::<f32>();
+                steps += 1;
+            }
+            Ok(EpochStats {
+                batches: steps,
+                total_loss,
+                average_loss: if steps == 0 {
+                    0.0
+                } else {
+                    total_loss / steps as f32
+                },
+            })
+        })();
+        let restore = module.train();
+        match (result, restore) {
+            (Ok(stats), Ok(())) => Ok(stats),
+            (Err(err), _) => Err(err),
+            (Ok(_), Err(err)) => Err(err),
+        }
+    }
+
+    /// Runs a reusable multi-epoch training loop with optional validation.
+    pub fn train_epochs<M, L, B>(
+        &mut self,
+        module: &mut M,
+        loss: &mut L,
+        train_batches: &[B],
+        validation_batches: Option<&[B]>,
+        schedule: &RoundtableSchedule,
+        config: TrainingRunConfig,
+    ) -> PureResult<TrainingRunReport>
+    where
+        M: Module + ?Sized,
+        L: Loss + ?Sized,
+        B: Clone + IntoBatch,
+    {
+        self.train_epochs_from_factory(
+            module,
+            loss,
+            |epoch_idx| batches_for_epoch(train_batches, config, epoch_idx),
+            |_| validation_batches.map(|batches| batches.to_vec()),
+            schedule,
+            config,
+        )
+    }
+
+    /// Runs a reusable multi-epoch training loop from [`DataLoader`] inputs.
+    pub fn train_epochs_loader<M, L>(
+        &mut self,
+        module: &mut M,
+        loss: &mut L,
+        train_loader: &DataLoader,
+        validation_loader: Option<&DataLoader>,
+        schedule: &RoundtableSchedule,
+        config: TrainingRunConfig,
+    ) -> PureResult<TrainingRunReport>
+    where
+        M: Module + ?Sized,
+        L: Loss + ?Sized,
+    {
+        self.train_epochs_from_factory(
+            module,
+            loss,
+            |epoch_idx| loader_for_epoch(train_loader, config, epoch_idx),
+            |_| validation_loader.cloned(),
+            schedule,
+            config,
+        )
+    }
+
+    fn train_epochs_from_factory<M, L, FT, FV, TI, VI>(
+        &mut self,
+        module: &mut M,
+        loss: &mut L,
+        mut train_batches_for_epoch: FT,
+        mut validation_batches_for_epoch: FV,
+        schedule: &RoundtableSchedule,
+        config: TrainingRunConfig,
+    ) -> PureResult<TrainingRunReport>
+    where
+        M: Module + ?Sized,
+        L: Loss + ?Sized,
+        FT: FnMut(usize) -> TI,
+        TI: IntoIterator,
+        TI::Item: IntoBatch,
+        FV: FnMut(usize) -> Option<VI>,
+        VI: IntoIterator,
+        VI::Item: IntoBatch,
+    {
+        let mut history = Vec::with_capacity(config.epochs());
+        let mut best_score: Option<f32> = None;
+        let mut best_epoch_index = None;
+        let mut best_state = None;
+        let mut stale_epochs = 0usize;
+        let mut stopped_early = false;
+
+        for epoch_idx in 0..config.epochs() {
+            let train =
+                self.train_epoch(module, loss, train_batches_for_epoch(epoch_idx), schedule)?;
+            let validation = match validation_batches_for_epoch(epoch_idx) {
+                Some(batches) => Some(self.evaluate_epoch(module, loss, batches)?),
+                None => None,
+            };
+            let score = validation
+                .as_ref()
+                .map(|stats| stats.average_loss)
+                .unwrap_or(train.average_loss);
+            let improved = score.is_finite()
+                && best_score
+                    .map(|best| score + config.min_delta() < best)
+                    .unwrap_or(true);
+            if improved {
+                best_score = Some(score);
+                best_epoch_index = Some(history.len());
+                if config.restore_best() {
+                    best_state = Some(module.state_dict()?);
+                }
+                stale_epochs = 0;
+            } else {
+                stale_epochs = stale_epochs.saturating_add(1);
+            }
+
+            history.push(TrainingEpochStats {
+                epoch: epoch_idx + 1,
+                train,
+                validation,
+                score,
+                improved,
+            });
+
+            if let Some(patience) = config.validation_patience() {
+                if stale_epochs > patience {
+                    stopped_early = true;
+                    break;
+                }
+            }
+        }
+
+        let restored_best = if config.restore_best() {
+            if let Some(state) = best_state.as_ref() {
+                module.load_state_dict(state)?;
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        Ok(TrainingRunReport::new(
+            history,
+            best_epoch_index,
+            stopped_early,
+            restored_best,
+        ))
+    }
+
     fn apply_curvature_scheduler<M: Module + ?Sized>(
         &mut self,
         module: &mut M,
@@ -4748,12 +4929,173 @@ fn plan_signature(plan: &st_core::ops::rank_entry::RankPlan, outcome: OutcomeBan
     )
 }
 
+fn epoch_shuffle_seed(config: TrainingRunConfig, epoch_index: usize) -> Option<u64> {
+    config
+        .epoch_shuffle_seed()
+        .map(|seed| seed.wrapping_add(epoch_index as u64))
+}
+
+fn batches_for_epoch<B: Clone>(
+    batches: &[B],
+    config: TrainingRunConfig,
+    epoch_index: usize,
+) -> Vec<B> {
+    let mut items = batches.to_vec();
+    if let Some(seed) = epoch_shuffle_seed(config, epoch_index) {
+        let mut rng = StdRng::seed_from_u64(seed);
+        items.shuffle(&mut rng);
+    }
+    items
+}
+
+fn loader_for_epoch(
+    loader: &DataLoader,
+    config: TrainingRunConfig,
+    epoch_index: usize,
+) -> DataLoader {
+    let loader = loader.clone();
+    match epoch_shuffle_seed(config, epoch_index) {
+        Some(seed) => loader.shuffle(seed),
+        None => loader,
+    }
+}
+
 /// Metrics captured while running [`ModuleTrainer::train_epoch`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EpochStats {
     pub batches: usize,
     pub total_loss: f32,
     pub average_loss: f32,
+}
+
+/// Configuration for running several training epochs with optional validation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TrainingRunConfig {
+    epochs: usize,
+    validation_patience: Option<usize>,
+    min_delta: f32,
+    epoch_shuffle_seed: Option<u64>,
+    restore_best: bool,
+}
+
+impl TrainingRunConfig {
+    /// Creates a multi-epoch training configuration.
+    pub fn new(epochs: usize) -> Self {
+        Self {
+            epochs,
+            validation_patience: None,
+            min_delta: 0.0,
+            epoch_shuffle_seed: None,
+            restore_best: false,
+        }
+    }
+
+    /// Sets how many non-improving epochs are tolerated before stopping.
+    pub fn with_validation_patience(mut self, patience: Option<usize>) -> Self {
+        self.validation_patience = patience;
+        self
+    }
+
+    /// Sets the minimum score improvement required to reset patience.
+    pub fn with_min_delta(mut self, min_delta: f32) -> Self {
+        self.min_delta = min_delta.max(0.0);
+        self
+    }
+
+    /// Sets the seed used to deterministically reshuffle training batches each epoch.
+    pub fn with_epoch_shuffle_seed(mut self, seed: Option<u64>) -> Self {
+        self.epoch_shuffle_seed = seed;
+        self
+    }
+
+    /// Restores the best recorded parameter state before returning the report.
+    pub fn with_restore_best(mut self, restore_best: bool) -> Self {
+        self.restore_best = restore_best;
+        self
+    }
+
+    /// Returns the number of epochs requested.
+    pub fn epochs(&self) -> usize {
+        self.epochs
+    }
+
+    /// Returns the optional early-stop patience.
+    pub fn validation_patience(&self) -> Option<usize> {
+        self.validation_patience
+    }
+
+    /// Returns the minimum score improvement required to count as better.
+    pub fn min_delta(&self) -> f32 {
+        self.min_delta
+    }
+
+    /// Returns the seed used to reshuffle training batches per epoch, when enabled.
+    pub fn epoch_shuffle_seed(&self) -> Option<u64> {
+        self.epoch_shuffle_seed
+    }
+
+    /// Returns whether the run should restore the best recorded parameter state.
+    pub fn restore_best(&self) -> bool {
+        self.restore_best
+    }
+}
+
+impl Default for TrainingRunConfig {
+    fn default() -> Self {
+        Self::new(1)
+    }
+}
+
+/// Metrics captured for one epoch inside a multi-epoch training run.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TrainingEpochStats {
+    pub epoch: usize,
+    pub train: EpochStats,
+    pub validation: Option<EpochStats>,
+    pub score: f32,
+    pub improved: bool,
+}
+
+/// Aggregated report emitted by [`ModuleTrainer::train_epochs`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct TrainingRunReport {
+    pub epochs: Vec<TrainingEpochStats>,
+    pub best_epoch_index: Option<usize>,
+    pub stopped_early: bool,
+    pub restored_best: bool,
+}
+
+impl TrainingRunReport {
+    /// Builds a report from the captured epoch history.
+    pub fn new(
+        epochs: Vec<TrainingEpochStats>,
+        best_epoch_index: Option<usize>,
+        stopped_early: bool,
+        restored_best: bool,
+    ) -> Self {
+        Self {
+            epochs,
+            best_epoch_index,
+            stopped_early,
+            restored_best,
+        }
+    }
+
+    /// Returns the best epoch, using validation loss when available.
+    pub fn best_epoch(&self) -> Option<&TrainingEpochStats> {
+        self.best_epoch_index
+            .and_then(|index| self.epochs.get(index))
+    }
+
+    /// Returns the last recorded epoch.
+    pub fn last_epoch(&self) -> Option<&TrainingEpochStats> {
+        self.epochs.last()
+    }
+
+    /// Returns the number of epochs that actually ran.
+    pub fn epochs_run(&self) -> usize {
+        self.epochs.len()
+    }
 }
 
 #[derive(Default)]
@@ -4839,6 +5181,7 @@ impl IntoBatch for PureResult<(Tensor, Tensor)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dataset::Dataset;
     use crate::gnn::{GraphActivation, GraphContext, GraphLayerSpec, ZSpaceGraphNetworkBuilder};
     use crate::language::{
         constant, warmup, ConceptHint, DesireAutomation, DesireLagrangian, DesirePipeline,
@@ -5188,6 +5531,183 @@ mod tests {
             .unwrap();
         let after = model.forward(&input).unwrap();
         assert_ne!(before.data(), after.data());
+    }
+
+    #[test]
+    fn trainer_train_epochs_tracks_validation_history() {
+        let caps = DeviceCaps::cpu();
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        let mut model = Sequential::new();
+        model.push(Linear::new("fit_lin", 2, 1).unwrap());
+        trainer.prepare(&mut model).unwrap();
+
+        let schedule = trainer.roundtable(1, 1, RoundtableConfig::default());
+        let train_batches = vec![
+            (
+                Tensor::from_vec(1, 2, vec![0.0, 1.0]).unwrap(),
+                Tensor::from_vec(1, 1, vec![1.0]).unwrap(),
+            ),
+            (
+                Tensor::from_vec(1, 2, vec![1.0, 0.0]).unwrap(),
+                Tensor::from_vec(1, 1, vec![0.0]).unwrap(),
+            ),
+        ];
+        let validation_batches = vec![(
+            Tensor::from_vec(1, 2, vec![0.5, 0.5]).unwrap(),
+            Tensor::from_vec(1, 1, vec![0.5]).unwrap(),
+        )];
+
+        let mut loss = MeanSquaredError::new();
+        let report = trainer
+            .train_epochs(
+                &mut model,
+                &mut loss,
+                &train_batches,
+                Some(validation_batches.as_slice()),
+                &schedule,
+                TrainingRunConfig::new(3),
+            )
+            .unwrap();
+
+        assert_eq!(report.epochs_run(), 3);
+        assert!(report.best_epoch_index.is_some());
+        assert!(!report.stopped_early);
+        assert!(!report.restored_best);
+        assert!(report.epochs.iter().all(|epoch| epoch.validation.is_some()));
+        assert!(report.best_epoch().expect("best epoch").score.is_finite());
+    }
+
+    #[test]
+    fn trainer_train_epochs_can_stop_on_validation_patience() {
+        let caps = DeviceCaps::cpu();
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        let mut model = Sequential::new();
+        model.push(Linear::new("early_stop_lin", 2, 1).unwrap());
+        trainer.prepare(&mut model).unwrap();
+
+        let schedule = trainer.roundtable(1, 1, RoundtableConfig::default());
+        let batches = vec![(
+            Tensor::from_vec(1, 2, vec![0.25, 0.75]).unwrap(),
+            Tensor::from_vec(1, 1, vec![0.5]).unwrap(),
+        )];
+        let mut loss = MeanSquaredError::new();
+
+        let report = trainer
+            .train_epochs(
+                &mut model,
+                &mut loss,
+                &batches,
+                Some(batches.as_slice()),
+                &schedule,
+                TrainingRunConfig::new(5)
+                    .with_validation_patience(Some(0))
+                    .with_min_delta(100.0),
+            )
+            .unwrap();
+
+        assert_eq!(report.epochs_run(), 2);
+        assert_eq!(report.best_epoch_index, Some(0));
+        assert!(report.stopped_early);
+        assert!(!report.epochs[1].improved);
+    }
+
+    #[test]
+    fn trainer_train_epochs_can_restore_best_state() {
+        let mut schedule_trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        let schedule = schedule_trainer.roundtable(1, 1, RoundtableConfig::default());
+        let batches = vec![(
+            Tensor::from_vec(1, 1, vec![1.0]).unwrap(),
+            Tensor::from_vec(1, 1, vec![0.0]).unwrap(),
+        )];
+
+        let mut expected_trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        let mut expected = FixedGradientModule::new(1.0);
+        expected_trainer.prepare(&mut expected).unwrap();
+        let mut expected_loss = ConstantLoss::new(1.0);
+        expected_trainer
+            .train_epoch(
+                &mut expected,
+                &mut expected_loss,
+                batches.clone(),
+                &schedule,
+            )
+            .unwrap();
+        let expected_state = expected.state_dict().unwrap();
+
+        let mut trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        let mut module = FixedGradientModule::new(1.0);
+        trainer.prepare(&mut module).unwrap();
+        let mut loss = ConstantLoss::new(1.0);
+        let report = trainer
+            .train_epochs(
+                &mut module,
+                &mut loss,
+                &batches,
+                Some(batches.as_slice()),
+                &schedule,
+                TrainingRunConfig::new(5)
+                    .with_validation_patience(Some(0))
+                    .with_min_delta(100.0)
+                    .with_restore_best(true),
+            )
+            .unwrap();
+
+        assert_eq!(report.epochs_run(), 2);
+        assert_eq!(report.best_epoch_index, Some(0));
+        assert!(report.stopped_early);
+        assert!(report.restored_best);
+        assert_eq!(module.state_dict().unwrap(), expected_state);
+    }
+
+    #[test]
+    fn trainer_train_epochs_loader_rebuilds_epoch_batches() {
+        let mut trainer = ModuleTrainer::new(DeviceCaps::cpu(), -1.0, 0.05, 0.01);
+        let mut model = Sequential::new();
+        model.push(Linear::new("loader_fit", 1, 1).unwrap());
+        trainer.prepare(&mut model).unwrap();
+        let schedule = trainer.roundtable(1, 1, RoundtableConfig::default());
+        let train = Dataset::from_vec(vec![
+            (
+                Tensor::from_vec(1, 1, vec![0.0]).unwrap(),
+                Tensor::from_vec(1, 1, vec![0.0]).unwrap(),
+            ),
+            (
+                Tensor::from_vec(1, 1, vec![1.0]).unwrap(),
+                Tensor::from_vec(1, 1, vec![1.0]).unwrap(),
+            ),
+            (
+                Tensor::from_vec(1, 1, vec![2.0]).unwrap(),
+                Tensor::from_vec(1, 1, vec![2.0]).unwrap(),
+            ),
+        ]);
+        let validation = Dataset::from_vec(vec![(
+            Tensor::from_vec(1, 1, vec![0.5]).unwrap(),
+            Tensor::from_vec(1, 1, vec![0.5]).unwrap(),
+        )]);
+        let train_loader = train.loader().batched(1);
+        let validation_loader = validation.loader().batched(1);
+        let mut loss = MeanSquaredError::new();
+
+        let report = trainer
+            .train_epochs_loader(
+                &mut model,
+                &mut loss,
+                &train_loader,
+                Some(&validation_loader),
+                &schedule,
+                TrainingRunConfig::new(3)
+                    .with_epoch_shuffle_seed(Some(7))
+                    .with_restore_best(true),
+            )
+            .unwrap();
+
+        assert_eq!(report.epochs_run(), 3);
+        assert!(report.restored_best);
+        assert!(report.epochs.iter().all(|epoch| epoch.train.batches == 3));
+        assert!(report
+            .epochs
+            .iter()
+            .all(|epoch| epoch.validation.map(|stats| stats.batches) == Some(1)));
     }
 
     #[test]

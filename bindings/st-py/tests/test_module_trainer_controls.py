@@ -76,6 +76,57 @@ def test_module_trainer_prepare_step_zero_and_realgrad_controls() -> None:
     assert pred_before.tolist() != pred_after.tolist()
 
 
+def test_module_trainer_train_epochs_returns_history() -> None:
+    st = _load_native()
+    if st is None:
+        pytest.skip("native SpiralTorch extension unavailable")
+
+    trainer = st.nn.ModuleTrainer(
+        backend="cpu",
+        curvature=-1.0,
+        hyper_learning_rate=1e-2,
+        fallback_learning_rate=1e-2,
+    )
+    model = st.nn.Sequential()
+    model.add(st.nn.Linear("fit_l1", 2, 1))
+    trainer.prepare(model)
+    loss = st.nn.MeanSquaredError()
+    schedule = trainer.roundtable(
+        1,
+        1,
+        st.nn.RoundtableConfig(top_k=1, mid_k=1, bottom_k=1, here_tolerance=1e-5),
+    )
+    batches = [
+        (st.Tensor.rand(1, 2, seed=101), st.Tensor.rand(1, 1, seed=102)),
+        (st.Tensor.rand(1, 2, seed=103), st.Tensor.rand(1, 1, seed=104)),
+    ]
+    validation = [(st.Tensor.rand(1, 2, seed=105), st.Tensor.rand(1, 1, seed=106))]
+
+    eval_stats = trainer.evaluate_epoch(model, loss, validation)
+    assert eval_stats.batches == 1
+
+    report = trainer.train_epochs(
+        model,
+        loss,
+        batches,
+        schedule,
+        epochs=3,
+        validation_batches=validation,
+        patience=1,
+        min_delta=0.0,
+        shuffle_seed=123,
+        restore_best=True,
+    )
+
+    assert report["epochs_run"] >= 1
+    assert report["best_epoch"] is not None
+    assert report["restored_best"] is True
+    assert report["best_score"] == pytest.approx(
+        report["history"][report["best_epoch_index"]]["score"]
+    )
+    assert all("train" in item and "validation" in item for item in report["history"])
+
+
 def test_module_trainer_curvature_scheduler_metrics_roundtrip() -> None:
     st = _load_native()
     if st is None:

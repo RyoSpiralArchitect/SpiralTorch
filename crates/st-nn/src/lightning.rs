@@ -3,7 +3,7 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-use crate::dataset::DataLoaderBatches;
+use crate::dataset::{DataLoader, DataLoaderBatches};
 use crate::highlevel::SpiralSession;
 use crate::schedule::{RoundtableConfig, RoundtableSchedule};
 #[cfg(feature = "selfsup")]
@@ -11,7 +11,7 @@ use crate::trainer::selfsup::{
     publish_selfsup_metrics, InfoNCEEpochMetrics, InfoNCELoss, SelfSupEpochReport,
     SelfSupEpochTelemetry, SelfSupObjective, SelfSupPlanReport, SelfSupStage, SelfSupStageReport,
 };
-use crate::trainer::{EpochStats, IntoBatch, ModuleTrainer};
+use crate::trainer::{EpochStats, IntoBatch, ModuleTrainer, TrainingRunConfig, TrainingRunReport};
 use crate::{Loss, Module, PureResult, Tensor};
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -582,6 +582,55 @@ impl SpiralLightning {
         Ok(results)
     }
 
+    /// Runs a validation-aware training loop using the stored trainer and schedule.
+    pub fn fit_training_run<M, L, B>(
+        &mut self,
+        module: &mut M,
+        loss: &mut L,
+        train_batches: &[B],
+        validation_batches: Option<&[B]>,
+        config: TrainingRunConfig,
+    ) -> PureResult<TrainingRunReport>
+    where
+        M: Module,
+        L: Loss,
+        B: Clone + IntoBatch,
+    {
+        self.ensure_prepared(module)?;
+        self.trainer.train_epochs(
+            module,
+            loss,
+            train_batches,
+            validation_batches,
+            &self.schedule,
+            config,
+        )
+    }
+
+    /// Runs a validation-aware training loop from reusable [`DataLoader`] inputs.
+    pub fn fit_training_loader<M, L>(
+        &mut self,
+        module: &mut M,
+        loss: &mut L,
+        train_loader: &DataLoader,
+        validation_loader: Option<&DataLoader>,
+        config: TrainingRunConfig,
+    ) -> PureResult<TrainingRunReport>
+    where
+        M: Module,
+        L: Loss,
+    {
+        self.ensure_prepared(module)?;
+        self.trainer.train_epochs_loader(
+            module,
+            loss,
+            train_loader,
+            validation_loader,
+            &self.schedule,
+            config,
+        )
+    }
+
     /// Executes a staged training plan, reconfiguring the roundtable between stages.
     pub fn fit_plan<M, L, It>(
         &mut self,
@@ -711,6 +760,7 @@ impl LightningBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dataset::Dataset;
     use crate::layers::linear::Linear;
     use crate::loss::MeanSquaredError;
     use st_core::backend::device_caps::DeviceCaps;
@@ -758,6 +808,74 @@ mod tests {
             .fit_epochs(&mut model, &mut loss, vec![epoch_a, epoch_b])
             .unwrap();
         assert_eq!(reports.len(), 2);
+    }
+
+    #[test]
+    fn lightning_fit_training_run_returns_validation_report() {
+        let session = SpiralSession::builder(DeviceCaps::cpu())
+            .with_curvature(-1.0)
+            .build()
+            .unwrap();
+        let mut lightning = SpiralLightning::new(session, 1, 1);
+        let mut model = Linear::new("demo", 1, 1).unwrap();
+        let mut loss = MeanSquaredError::new();
+        let train = vec![
+            (tensor(&[0.0]), tensor(&[0.0])),
+            (tensor(&[1.0]), tensor(&[1.0])),
+        ];
+        let validation = vec![(tensor(&[0.5]), tensor(&[0.5]))];
+
+        let report = lightning
+            .fit_training_run(
+                &mut model,
+                &mut loss,
+                &train,
+                Some(validation.as_slice()),
+                TrainingRunConfig::new(3)
+                    .with_validation_patience(Some(1))
+                    .with_restore_best(true),
+            )
+            .unwrap();
+
+        assert_eq!(report.epochs_run(), 3);
+        assert!(report.best_epoch().is_some());
+        assert!(report.epochs.iter().all(|epoch| epoch.validation.is_some()));
+        assert!(report.restored_best);
+    }
+
+    #[test]
+    fn lightning_fit_training_loader_returns_validation_report() {
+        let session = SpiralSession::builder(DeviceCaps::cpu())
+            .with_curvature(-1.0)
+            .build()
+            .unwrap();
+        let mut lightning = SpiralLightning::new(session, 1, 1);
+        let mut model = Linear::new("demo_loader", 1, 1).unwrap();
+        let mut loss = MeanSquaredError::new();
+        let train = Dataset::from_vec(vec![
+            (tensor(&[0.0]), tensor(&[0.0])),
+            (tensor(&[1.0]), tensor(&[1.0])),
+        ]);
+        let validation = Dataset::from_vec(vec![(tensor(&[0.5]), tensor(&[0.5]))]);
+        let train_loader = train.loader().batched(1);
+        let validation_loader = validation.loader().batched(1);
+
+        let report = lightning
+            .fit_training_loader(
+                &mut model,
+                &mut loss,
+                &train_loader,
+                Some(&validation_loader),
+                TrainingRunConfig::new(2)
+                    .with_epoch_shuffle_seed(Some(11))
+                    .with_restore_best(true),
+            )
+            .unwrap();
+
+        assert_eq!(report.epochs_run(), 2);
+        assert!(report.best_epoch().is_some());
+        assert!(report.restored_best);
+        assert!(report.epochs.iter().all(|epoch| epoch.train.batches == 2));
     }
 
     #[test]

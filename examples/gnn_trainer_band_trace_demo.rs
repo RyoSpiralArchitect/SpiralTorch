@@ -2,15 +2,16 @@
 // © 2025 Ryo ∴ SpiralArchitect (kishkavsesvit@icloud.com)
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 
-//! Runs a single `ModuleTrainer::train_epoch()` step and exports
-//! band-labelled GNN replay telemetry produced during `backward_bands()`.
+//! Runs a small `ModuleTrainer::train_epochs()` pass and exports band-labelled
+//! GNN replay telemetry produced during `backward_bands()`.
 
 use serde_json::{json, Value};
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::telemetry::xai::{GraphFlowTracer, GraphLayerReport, GraphRoundtableTrace};
 use st_nn::{
     EpochStats, GraphActivation, GraphContext, GraphLayerSpec, MeanSquaredError, ModuleTrainer,
-    NeighborhoodAggregation, RoundtableConfig, Tensor, ZSpaceGraphNetworkBuilder,
+    NeighborhoodAggregation, RoundtableConfig, Tensor, TrainingRunConfig,
+    ZSpaceGraphNetworkBuilder,
 };
 use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
@@ -102,6 +103,14 @@ fn signal_json(signal: &st_nn::RoundtableBandSignal) -> Value {
     })
 }
 
+fn epoch_stats_json(stats: &EpochStats) -> Value {
+    json!({
+        "batches": stats.batches,
+        "total_loss": stats.total_loss,
+        "average_loss": stats.average_loss,
+    })
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tracer = Arc::new(Mutex::new(GraphFlowTracer::new()));
     let mut builder =
@@ -131,16 +140,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .with_here_tolerance(1e-5),
     );
 
-    let dataset = vec![(
+    let train_batches = vec![(
         Tensor::from_vec(4, 2, vec![1.0, 0.25, 0.5, -0.75, -0.5, 1.0, 0.75, -0.25])?,
         Tensor::from_vec(4, 2, vec![0.2, -0.1, 0.3, 0.15, -0.15, 0.25, 0.1, -0.2])?,
     )];
+    let validation_batches = vec![(
+        Tensor::from_vec(4, 2, vec![0.75, 0.0, 0.25, -0.5, -0.25, 0.75, 0.5, -0.1])?,
+        Tensor::from_vec(4, 2, vec![0.1, -0.05, 0.22, 0.1, -0.1, 0.18, 0.08, -0.15])?,
+    )];
     let mut loss = MeanSquaredError::new();
-    let EpochStats {
-        batches,
-        average_loss,
-        ..
-    } = trainer.train_epoch(&mut model, &mut loss, dataset, &schedule)?;
+    let training = trainer.train_epochs(
+        &mut model,
+        &mut loss,
+        &train_batches,
+        Some(validation_batches.as_slice()),
+        &schedule,
+        TrainingRunConfig::new(4)
+            .with_validation_patience(Some(2))
+            .with_min_delta(1e-5)
+            .with_epoch_shuffle_seed(Some(2025))
+            .with_restore_best(true),
+    )?;
 
     let signal = trainer
         .gnn_roundtable_signal()
@@ -175,8 +195,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let payload = json!({
         "trainer": {
-            "batches": batches,
-            "average_loss": average_loss,
+            "epochs_run": training.epochs_run(),
+            "best_epoch": training.best_epoch().map(|epoch| epoch.epoch),
+            "best_score": training.best_epoch().map(|epoch| epoch.score),
+            "stopped_early": training.stopped_early,
+            "restored_best": training.restored_best,
+            "history": training.epochs.iter().map(|epoch| json!({
+                "epoch": epoch.epoch,
+                "train": epoch_stats_json(&epoch.train),
+                "validation": epoch.validation.as_ref().map(epoch_stats_json),
+                "score": epoch.score,
+                "improved": epoch.improved,
+            })).collect::<Vec<_>>(),
         },
         "signal": signal_json(&signal),
         "reports": reports.iter().map(report_json).collect::<Vec<_>>(),
@@ -188,8 +218,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("trace_json={}", trace_path.display());
     println!(
-        "trainer: batches={} average_loss={:.6}",
-        batches, average_loss
+        "trainer: epochs_run={} best_epoch={:?} best_score={:?} restored_best={}",
+        training.epochs_run(),
+        training.best_epoch().map(|epoch| epoch.epoch),
+        training.best_epoch().map(|epoch| epoch.score),
+        training.restored_best
     );
     println!(
         "signal: above={:.4} here={:.4} beneath={:.4} drift={:.4}",

@@ -39,6 +39,27 @@ def write_trainer_trace_html(
     marker_event_type: str | None = ...,
 ) -> str: ...
 
+def load_gnn_band_replay_trace(path: str | PathLike[str]) -> Dict[str, Any]: ...
+
+def flatten_gnn_band_replay_rows(
+    trace: str | PathLike[str] | Mapping[str, Any],
+) -> List[Dict[str, Any]]: ...
+
+def summarize_gnn_band_replays(
+    trace: str | PathLike[str] | Mapping[str, Any],
+) -> Dict[str, Any]: ...
+
+def compare_gnn_band_replay_runs(
+    traces: Iterable[str | PathLike[str] | Mapping[str, Any]],
+) -> Dict[str, Any]: ...
+
+def write_gnn_band_replay_html(
+    trace: str | PathLike[str] | Mapping[str, Any],
+    html_path: str | PathLike[str] | None = ...,
+    *,
+    title: str = ...,
+) -> str: ...
+
 def load_kdsl_trace_events(path: str) -> List[Dict[str, Any]]: ...
 
 def write_kdsl_trace_jsonl(
@@ -3964,6 +3985,28 @@ class _NnModuleTrainer:
         batches: Iterable[Tuple[Tensor, Tensor]],
         schedule: _NnRoundtableSchedule,
     ) -> _NnEpochStats: ...
+
+    def evaluate_epoch(
+        self,
+        module: object,
+        loss: object,
+        batches: Iterable[Tuple[Tensor, Tensor]],
+    ) -> _NnEpochStats: ...
+
+    def train_epochs(
+        self,
+        module: object,
+        loss: object,
+        batches: Iterable[Tuple[Tensor, Tensor]],
+        schedule: _NnRoundtableSchedule,
+        *,
+        epochs: int = ...,
+        validation_batches: Iterable[Tuple[Tensor, Tensor]] | None = ...,
+        patience: int | None = ...,
+        min_delta: float = ...,
+        shuffle_seed: int | None = ...,
+        restore_best: bool = ...,
+    ) -> Dict[str, Any]: ...
 
     @property
     def curvature(self) -> float: ...

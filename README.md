@@ -81,6 +81,8 @@ SpiralTorch’s “learning stack” is a set of minimal, runnable training base
 - WGPU quickstart (build + run): `bash scripts/wgpu_quickstart.sh`
 - **Vision (Conv/Pool):** `cargo run -p st-nn --example modelzoo_vision_conv_pool_classification`
 - **Vision (Python, Conv/Pool):** `PYTHONNOUSERSITE=1 python3 -S -s models/python/vision_conv_pool_classification.py`
+- **GNN (roundtable graph regression):** `cargo run -p st-nn --example modelzoo_gnn_graph_regression`
+- **GNN trace (band replay coefficients):** `cargo run -p st-nn --example gnn_trainer_band_trace_demo`
 - **Coherence (ZSpace VAE):** `cargo run -p st-nn --example modelzoo_zspace_vae_reconstruction`
 - **Coherence (Python, ZSpace VAE):** `PYTHONNOUSERSITE=1 python3 -S -s models/python/zspace_vae_reconstruction.py`
 - **Coherence (Python, Text→ZSpace VAE):** `PYTHONNOUSERSITE=1 python3 -S -s models/python/zspace_text_vae.py models/samples/spiral_corpus_en --mellin ramp`
@@ -2379,6 +2381,7 @@ fn main() -> PureResult<()> {
 
 **Features**
 - Dataset abstraction and serialization
+- Multi-epoch validation, best-state restore, and deterministic epoch reshuffling
 - Hypergrad integration for every parameter
 - Optional Realgrad accumulation via `ModuleTrainer::with_realgrad`
 - WGPU · MPS · CUDA unified backends
