@@ -222,6 +222,36 @@ impl GraphBatch {
     }
 }
 
+/// Per-graph readout telemetry captured from a row-concatenated graph batch.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GraphBatchReadoutEntry {
+    /// Index of the graph within the batch.
+    pub graph_index: usize,
+    /// Inclusive start row in the row-concatenated input tensor.
+    pub row_start: usize,
+    /// Exclusive end row in the row-concatenated input tensor.
+    pub row_end: usize,
+    /// L2 norm of the graph's node features after message passing.
+    pub node_l2: f32,
+    /// L2 norm of the graph-level prediction after readout.
+    pub prediction_l2: f32,
+}
+
+/// Summary of graph-level readout telemetry for a batched forward pass.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GraphBatchReadoutTrace {
+    /// Readout strategy used to produce the graph predictions.
+    pub readout: GraphReadout,
+    /// Number of graph segments in the batch.
+    pub graph_count: usize,
+    /// Total input rows covered by the graph batch.
+    pub total_rows: usize,
+    /// Shape of the graph-level prediction tensor.
+    pub output_shape: (usize, usize),
+    /// Per-graph readout records in batch order.
+    pub entries: Vec<GraphBatchReadoutEntry>,
+}
+
 fn tensor_rows(tensor: &Tensor, range: Range<usize>) -> PureResult<Tensor> {
     let (rows, cols) = tensor.shape();
     if range.start >= range.end || range.end > rows {
@@ -240,6 +270,10 @@ fn tensor_rows(tensor: &Tensor, range: Range<usize>) -> PureResult<Tensor> {
 
 fn tensor_row(tensor: &Tensor, row: usize) -> PureResult<Tensor> {
     tensor_rows(tensor, row..row + 1)
+}
+
+fn tensor_l2(tensor: &Tensor) -> f32 {
+    tensor.squared_l2_norm().sqrt()
 }
 
 /// Trainable graph-level regressor that wraps a node-wise graph network with a readout head.
@@ -425,19 +459,71 @@ impl ZSpaceGraphBatchRegressor {
 
     /// Runs graph-level prediction using an explicit graph batch descriptor.
     pub fn forward_batch(&self, input: &Tensor, batch: &GraphBatch) -> PureResult<Tensor> {
+        Ok(self.forward_batch_impl(input, batch, false)?.0)
+    }
+
+    /// Runs graph-level prediction while collecting per-graph readout telemetry.
+    pub fn forward_with_trace(
+        &self,
+        input: &Tensor,
+    ) -> PureResult<(Tensor, GraphBatchReadoutTrace)> {
+        let batch = self.fixed_batch_for(input)?;
+        self.forward_batch_with_trace(input, &batch)
+    }
+
+    /// Runs graph-level prediction with an explicit graph batch descriptor while tracing readout.
+    pub fn forward_batch_with_trace(
+        &self,
+        input: &Tensor,
+        batch: &GraphBatch,
+    ) -> PureResult<(Tensor, GraphBatchReadoutTrace)> {
+        let (output, trace) = self.forward_batch_impl(input, batch, true)?;
+        let trace = trace.ok_or(TensorError::InvalidValue {
+            label: "graph_batch_readout_trace",
+        })?;
+        Ok((output, trace))
+    }
+
+    fn forward_batch_impl(
+        &self,
+        input: &Tensor,
+        batch: &GraphBatch,
+        collect_trace: bool,
+    ) -> PureResult<(Tensor, Option<GraphBatchReadoutTrace>)> {
         batch.validate_tensor(input)?;
         let mut predictions = Vec::with_capacity(batch.graph_count());
+        let mut entries = collect_trace.then(|| Vec::with_capacity(batch.graph_count()));
         for graph_index in 0..batch.graph_count() {
             let segment = batch
                 .segment(graph_index)
                 .ok_or(TensorError::InvalidValue {
                     label: "graph_batch_segment",
                 })?;
+            let row_start = segment.start;
+            let row_end = segment.end;
             let graph_input = tensor_rows(input, segment)?;
             let node_features = self.network.forward(&graph_input)?;
-            predictions.push(self.readout.forward(&node_features)?);
+            let prediction = self.readout.forward(&node_features)?;
+            if let Some(entries) = entries.as_mut() {
+                entries.push(GraphBatchReadoutEntry {
+                    graph_index,
+                    row_start,
+                    row_end,
+                    node_l2: tensor_l2(&node_features),
+                    prediction_l2: tensor_l2(&prediction),
+                });
+            }
+            predictions.push(prediction);
         }
-        Tensor::cat_rows(&predictions)
+        let output = Tensor::cat_rows(&predictions)?;
+        let trace = entries.map(|entries| GraphBatchReadoutTrace {
+            readout: self.readout,
+            graph_count: batch.graph_count(),
+            total_rows: batch.total_rows(),
+            output_shape: output.shape(),
+            entries,
+        });
+        Ok((output, trace))
     }
 
     /// Backpropagates graph-level gradients using an explicit graph batch descriptor.
@@ -671,6 +757,36 @@ mod tests {
         let grad_input = model.backward(&input, &grad_graph).unwrap();
         assert_eq!(grad_input.shape(), (6, 2));
         assert!(grad_input.data().iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn graph_batch_regressor_traces_multiple_graph_readouts() {
+        let model = ZSpaceGraphBatchRegressor::new(
+            sample_network(),
+            GraphReadout::Mean,
+            NonZeroUsize::new(3).unwrap(),
+        );
+        let graph_a = Tensor::from_vec(3, 2, vec![1.0, 0.25, 0.5, -0.5, -0.25, 1.0]).unwrap();
+        let graph_b = Tensor::from_vec(3, 2, vec![-0.5, 0.75, 0.25, 0.5, 1.0, -1.0]).unwrap();
+        let input = Tensor::cat_rows(&[graph_a, graph_b]).unwrap();
+
+        let (prediction, trace) = model.forward_with_trace(&input).unwrap();
+
+        assert_eq!(prediction.shape(), (2, 2));
+        assert_eq!(trace.readout, GraphReadout::Mean);
+        assert_eq!(trace.graph_count, 2);
+        assert_eq!(trace.total_rows, 6);
+        assert_eq!(trace.output_shape, (2, 2));
+        assert_eq!(trace.entries.len(), 2);
+        assert_eq!(trace.entries[0].row_start, 0);
+        assert_eq!(trace.entries[0].row_end, 3);
+        assert_eq!(trace.entries[1].row_start, 3);
+        assert_eq!(trace.entries[1].row_end, 6);
+        assert!(trace.entries.iter().all(|entry| entry.node_l2.is_finite()));
+        assert!(trace
+            .entries
+            .iter()
+            .all(|entry| entry.prediction_l2.is_finite()));
     }
 
     #[test]

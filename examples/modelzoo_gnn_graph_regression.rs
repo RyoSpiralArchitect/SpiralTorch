@@ -154,12 +154,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut reloaded = build_model(context, nodes, features, -1.0, 0.05)?;
     load_json(&mut reloaded, weights_path)?;
-    let graph_prediction = reloaded.forward(&reload_probe)?;
+    let (graph_prediction, readout_trace) = reloaded.forward_with_trace(&reload_probe)?;
+    let first_prediction_l2 = readout_trace
+        .entries
+        .first()
+        .map(|entry| entry.prediction_l2)
+        .unwrap_or(0.0);
     println!(
-        "reloaded graph prediction shape={:?} readout={:?} nodes_per_graph={}",
+        "reloaded graph prediction shape={:?} readout={:?} nodes_per_graph={} graph_count={} first_prediction_l2={:.6}",
         graph_prediction.shape(),
         reloaded.readout(),
-        reloaded.nodes_per_graph().get()
+        reloaded.nodes_per_graph().get(),
+        readout_trace.graph_count,
+        first_prediction_l2
     );
 
     Ok(())
