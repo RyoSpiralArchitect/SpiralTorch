@@ -8,9 +8,15 @@
 
 #[path = "_shared/backend.rs"]
 mod backend;
+#[path = "_shared/char_lm_eval.rs"]
+mod char_lm_eval;
 #[path = "_shared/text_corpus.rs"]
 mod text_corpus;
 
+use char_lm_eval::{
+    evaluate_next_token, split_train_validation_tokens, write_summary, CharLmInputMode,
+    LanguageEvalMetric, TrainingSummary,
+};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
@@ -58,6 +64,11 @@ struct RunMeta {
     gen_len: usize,
     top_k: usize,
     seed: u64,
+    validation_fraction_requested: f32,
+    validation_fraction_actual: f32,
+    eval_samples: usize,
+    train_tokens: usize,
+    validation_tokens: usize,
     prompt: String,
     vocab_size: usize,
 }
@@ -67,6 +78,7 @@ struct EpochMetric {
     epoch: usize,
     batches: usize,
     average_loss: f32,
+    validation: Option<LanguageEvalMetric>,
 }
 
 #[derive(Debug, Clone)]
@@ -173,6 +185,8 @@ struct Args {
     gen_len: usize,
     top_k: usize,
     seed: u64,
+    validation_fraction: f32,
+    eval_samples: usize,
     prompt: Option<String>,
 }
 
@@ -188,7 +202,7 @@ impl Args {
         }
         if data_args.is_empty() {
             return Err(TensorError::Generic(
-                "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--prompt STR]"
+                "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--prompt STR]"
                     .to_string(),
             ));
         }
@@ -213,6 +227,8 @@ impl Args {
             gen_len: 200,
             top_k: 32,
             seed: 42,
+            validation_fraction: 0.1,
+            eval_samples: 256,
             prompt: None,
         };
 
@@ -238,10 +254,14 @@ impl Args {
                 "--gen" => args.gen_len = take_parse(&mut argv, "--gen")?,
                 "--topk" => args.top_k = take_parse(&mut argv, "--topk")?,
                 "--seed" => args.seed = take_parse(&mut argv, "--seed")?,
+                "--val-fraction" => {
+                    args.validation_fraction = take_parse(&mut argv, "--val-fraction")?
+                }
+                "--eval-samples" => args.eval_samples = take_parse(&mut argv, "--eval-samples")?,
                 "--prompt" => args.prompt = Some(take_arg(&mut argv, "--prompt")?),
                 "--help" | "-h" => {
                     return Err(TensorError::Generic(
-                        "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--prompt STR]"
+                        "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--prompt STR]"
                             .to_string(),
                     ));
                 }
@@ -267,6 +287,14 @@ impl Args {
             return Err(TensorError::InvalidDimensions {
                 rows: args.memory,
                 cols: args.steps,
+            });
+        }
+        if !args.validation_fraction.is_finite()
+            || args.validation_fraction < 0.0
+            || args.validation_fraction >= 1.0
+        {
+            return Err(TensorError::InvalidValue {
+                label: "char_lm_coherence_validation_fraction",
             });
         }
         Ok(args)
@@ -596,6 +624,13 @@ fn main() -> PureResult<()> {
             tokens.len()
         )));
     }
+    let split = split_train_validation_tokens(&tokens, steps, args.validation_fraction);
+    if split.train.len() <= steps {
+        return Err(TensorError::Generic(format!(
+            "training split too short for steps={steps}: len={}",
+            split.train.len()
+        )));
+    }
 
     let prompt = args
         .prompt
@@ -634,6 +669,11 @@ fn main() -> PureResult<()> {
         gen_len: args.gen_len,
         top_k: args.top_k,
         seed: args.seed,
+        validation_fraction_requested: args.validation_fraction,
+        validation_fraction_actual: split.actual_validation_fraction,
+        eval_samples: args.eval_samples,
+        train_tokens: split.train.len(),
+        validation_tokens: split.validation.len(),
         prompt: prompt.clone(),
         vocab_size: vocab.len(),
     };
@@ -670,11 +710,13 @@ fn main() -> PureResult<()> {
     let mut loss = CategoricalCrossEntropy::new();
 
     println!(
-        "arch=coherence_scan backend={} vocab={} files={} chars={} steps={} embed_dim={} hidden={} memory={} epochs={} batch={} lr={:.3e} curvature={} temp={} run_dir={}",
+        "arch=coherence_scan backend={} vocab={} files={} chars={} train_tokens={} validation_tokens={} steps={} embed_dim={} hidden={} memory={} epochs={} batch={} lr={:.3e} curvature={} temp={} run_dir={}",
         backend_sel.label,
         vocab.len(),
         data_files.len(),
         text.chars().count(),
+        split.train.len(),
+        split.validation.len(),
         steps,
         embed_dim,
         hidden,
@@ -687,13 +729,41 @@ fn main() -> PureResult<()> {
         run_dir.display()
     );
 
+    let initial_validation = evaluate_next_token(
+        &mut model,
+        vocab.len(),
+        CharLmInputMode::TokenIndices,
+        steps,
+        &split.validation,
+        args.eval_samples,
+    )?;
+    if let Some(validation) = initial_validation.as_ref() {
+        println!(
+            "validation[init] windows={} nll={:.6} ppl={} acc={:.2}%",
+            validation.windows,
+            validation.mean_nll,
+            validation
+                .perplexity
+                .map(|value| format!("{value:.3}"))
+                .unwrap_or_else(|| "overflow".to_string()),
+            validation.accuracy * 100.0
+        );
+    } else {
+        println!(
+            "validation[init] skipped: validation split is empty (increase data or --val-fraction)"
+        );
+    }
+
     let mut last_sample: Option<String> = None;
+    let mut last_validation = initial_validation.clone();
+    let mut best_validation_epoch = None;
+    let mut best_validation_mean_nll = None;
     for epoch in 0..args.epochs {
         let mut rng = ChaCha8Rng::seed_from_u64(args.seed.wrapping_add(epoch as u64 * 10_000));
         let mut batches = Vec::with_capacity(args.batches_per_epoch);
         for _ in 0..args.batches_per_epoch {
             batches.push(build_random_batch(
-                &tokens,
+                &split.train,
                 vocab.len(),
                 steps,
                 args.batch,
@@ -701,10 +771,28 @@ fn main() -> PureResult<()> {
             )?);
         }
         let stats = trainer.train_epoch(&mut model, &mut loss, batches, &schedule)?;
+        let validation = evaluate_next_token(
+            &mut model,
+            vocab.len(),
+            CharLmInputMode::TokenIndices,
+            steps,
+            &split.validation,
+            args.eval_samples,
+        )?;
+        if let Some(validation_metric) = validation.as_ref() {
+            if best_validation_mean_nll
+                .map(|best| validation_metric.mean_nll < best)
+                .unwrap_or(true)
+            {
+                best_validation_mean_nll = Some(validation_metric.mean_nll);
+                best_validation_epoch = Some(epoch);
+            }
+        }
         let metric = EpochMetric {
             epoch,
             batches: stats.batches,
             average_loss: stats.average_loss,
+            validation: validation.clone(),
         };
         writeln!(
             metrics_file,
@@ -731,10 +819,25 @@ fn main() -> PureResult<()> {
             },
         )?;
         last_sample = Some(sample);
-        println!(
-            "epoch[{epoch}] batches={} avg_loss={:.6}",
-            stats.batches, stats.average_loss
-        );
+        last_validation = validation.clone();
+        if let Some(validation) = validation.as_ref() {
+            println!(
+                "epoch[{epoch}] batches={} avg_loss={:.6} val_nll={:.6} val_ppl={} val_acc={:.2}%",
+                stats.batches,
+                stats.average_loss,
+                validation.mean_nll,
+                validation
+                    .perplexity
+                    .map(|value| format!("{value:.3}"))
+                    .unwrap_or_else(|| "overflow".to_string()),
+                validation.accuracy * 100.0
+            );
+        } else {
+            println!(
+                "epoch[{epoch}] batches={} avg_loss={:.6} val=skipped",
+                stats.batches, stats.average_loss
+            );
+        }
     }
 
     let meta = CharLmMeta::new(
@@ -779,6 +882,25 @@ fn main() -> PureResult<()> {
             sample
         }
     };
+
+    let final_validation = last_validation;
+    let validation_nll_delta = initial_validation
+        .as_ref()
+        .zip(final_validation.as_ref())
+        .map(|(initial, final_metric)| final_metric.mean_nll - initial.mean_nll);
+    let validation_accuracy_delta = initial_validation
+        .as_ref()
+        .zip(final_validation.as_ref())
+        .map(|(initial, final_metric)| final_metric.accuracy - initial.accuracy);
+    let summary = TrainingSummary {
+        initial_validation,
+        final_validation,
+        best_validation_epoch,
+        best_validation_mean_nll,
+        validation_nll_delta,
+        validation_accuracy_delta,
+    };
+    write_summary(&run_dir.join("summary.json"), &summary)?;
 
     println!("--- sample (prompt + gen) ---");
     println!("{sample}");

@@ -7,9 +7,15 @@
 
 #[path = "_shared/backend.rs"]
 mod backend;
+#[path = "_shared/char_lm_eval.rs"]
+mod char_lm_eval;
 #[path = "_shared/text_corpus.rs"]
 mod text_corpus;
 
+use char_lm_eval::{
+    evaluate_next_token, split_train_validation_tokens, write_summary, CharLmInputMode,
+    LanguageEvalMetric, TrainingSummary,
+};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
@@ -74,34 +80,6 @@ struct EpochMetric {
     batches: usize,
     average_loss: f32,
     validation: Option<LanguageEvalMetric>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct LanguageEvalMetric {
-    tokens: usize,
-    windows: usize,
-    mean_nll: f32,
-    perplexity: Option<f32>,
-    accuracy: f32,
-    mean_target_probability: f32,
-    mean_top_probability: f32,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct TrainingSummary {
-    initial_validation: Option<LanguageEvalMetric>,
-    final_validation: Option<LanguageEvalMetric>,
-    best_validation_epoch: Option<usize>,
-    best_validation_mean_nll: Option<f32>,
-    validation_nll_delta: Option<f32>,
-    validation_accuracy_delta: Option<f32>,
-}
-
-#[derive(Debug, Clone)]
-struct TokenSplit {
-    train: Vec<usize>,
-    validation: Vec<usize>,
-    actual_validation_fraction: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -397,34 +375,6 @@ fn encode_text(text: &str, vocab: &Vocab) -> Vec<usize> {
     text.chars().map(|ch| vocab.encode(ch)).collect()
 }
 
-fn split_train_validation_tokens(
-    tokens: &[usize],
-    steps: usize,
-    validation_fraction: f32,
-) -> TokenSplit {
-    let min_window_tokens = steps + 1;
-    if validation_fraction <= 0.0 || tokens.len() < min_window_tokens * 2 {
-        return TokenSplit {
-            train: tokens.to_vec(),
-            validation: Vec::new(),
-            actual_validation_fraction: 0.0,
-        };
-    }
-
-    let requested = (tokens.len() as f32 * validation_fraction).round() as usize;
-    let max_validation = tokens.len() - min_window_tokens;
-    let validation_len = requested.clamp(min_window_tokens, max_validation);
-    let split_at = tokens.len() - validation_len;
-    let validation = tokens[split_at..].to_vec();
-    let actual_validation_fraction = validation.len() as f32 / tokens.len() as f32;
-
-    TokenSplit {
-        train: tokens[..split_at].to_vec(),
-        validation,
-        actual_validation_fraction,
-    }
-}
-
 fn encode_context_one_hot(context: &[usize], vocab_size: usize) -> PureResult<Tensor> {
     let steps = context.len();
     let cols = vocab_size * steps;
@@ -576,103 +526,6 @@ fn generate_text(
         context.push(next);
     }
     Ok(out)
-}
-
-fn evaluate_next_token(
-    model: &mut Sequential,
-    vocab_size: usize,
-    embed_dim: Option<usize>,
-    steps: usize,
-    tokens: &[usize],
-    max_samples: usize,
-) -> PureResult<Option<LanguageEvalMetric>> {
-    if tokens.len() <= steps {
-        return Ok(None);
-    }
-    let available = tokens.len() - steps;
-    let windows = if max_samples == 0 {
-        available
-    } else {
-        available.min(max_samples)
-    };
-    if windows == 0 {
-        return Ok(None);
-    }
-
-    model.eval()?;
-    let result = (|| -> PureResult<LanguageEvalMetric> {
-        let mut nll_sum = 0.0f32;
-        let mut correct = 0usize;
-        let mut target_probability_sum = 0.0f32;
-        let mut top_probability_sum = 0.0f32;
-
-        for sample_idx in 0..windows {
-            let start = if windows <= 1 || available <= 1 {
-                0
-            } else {
-                sample_idx * (available - 1) / (windows - 1)
-            };
-            let context = &tokens[start..start + steps];
-            let target = tokens[start + steps];
-            let x = if embed_dim.is_some() {
-                encode_context_indices(context)?
-            } else {
-                encode_context_one_hot(context, vocab_size)?
-            };
-            let prediction = model.forward(&x)?;
-            if prediction.shape() != (1, vocab_size) {
-                return Err(TensorError::ShapeMismatch {
-                    left: prediction.shape(),
-                    right: (1, vocab_size),
-                });
-            }
-            let row = &prediction.data()[..vocab_size];
-            let top = argmax(row);
-            let top_probability = row[top].clamp(0.0, 1.0);
-            let target_probability = row.get(target).copied().unwrap_or(0.0).clamp(1.0e-9, 1.0);
-
-            if top == target {
-                correct += 1;
-            }
-            nll_sum += -target_probability.ln();
-            target_probability_sum += target_probability;
-            top_probability_sum += top_probability;
-        }
-
-        let mean_nll = nll_sum / windows as f32;
-        let perplexity = if mean_nll.is_finite() && mean_nll < 80.0 {
-            Some(mean_nll.exp())
-        } else {
-            None
-        };
-        Ok(LanguageEvalMetric {
-            tokens: tokens.len(),
-            windows,
-            mean_nll,
-            perplexity,
-            accuracy: correct as f32 / windows as f32,
-            mean_target_probability: target_probability_sum / windows as f32,
-            mean_top_probability: top_probability_sum / windows as f32,
-        })
-    })();
-    let restore = model.train();
-    match (result, restore) {
-        (Ok(metric), Ok(())) => Ok(Some(metric)),
-        (Err(err), _) => Err(err),
-        (Ok(_), Err(err)) => Err(err),
-    }
-}
-
-fn write_summary(path: &Path, summary: &TrainingSummary) -> PureResult<()> {
-    let writer = File::create(path).map_err(|err| TensorError::IoError {
-        message: err.to_string(),
-    })?;
-    serde_json::to_writer_pretty(writer, summary).map_err(|err| {
-        TensorError::SerializationError {
-            message: err.to_string(),
-        }
-    })?;
-    Ok(())
 }
 
 fn main() -> PureResult<()> {
@@ -911,10 +764,15 @@ fn main() -> PureResult<()> {
         run_dir.display()
     );
 
+    let eval_input_mode = if embed_dim.is_some() {
+        CharLmInputMode::TokenIndices
+    } else {
+        CharLmInputMode::OneHot
+    };
     let initial_validation = evaluate_next_token(
         &mut model,
         vocab.len(),
-        embed_dim,
+        eval_input_mode,
         steps,
         &split.validation,
         args.eval_samples,
@@ -957,7 +815,7 @@ fn main() -> PureResult<()> {
         let validation = evaluate_next_token(
             &mut model,
             vocab.len(),
-            embed_dim,
+            eval_input_mode,
             steps,
             &split.validation,
             args.eval_samples,

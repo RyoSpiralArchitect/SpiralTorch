@@ -83,6 +83,12 @@ cargo run -p st-nn --example modelzoo_llm_char_finetune -- models/samples/spiral
 
 Writes `run.json`, `metrics.jsonl`, `summary.json`, samples, and weights into the selected run directory.
 
+Compare several char-LM runs with:
+
+```bash
+PYTHONNOUSERSITE=1 python3 -S -s tools/compare_char_lm_runs.py models/runs/<baseline> models/runs/<scan> models/runs/<wave>
+```
+
 ---
 
 ### SpiralReality demo
