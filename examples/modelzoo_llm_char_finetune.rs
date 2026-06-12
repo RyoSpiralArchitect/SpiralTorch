@@ -59,6 +59,11 @@ struct RunMeta {
     gen_len: usize,
     top_k: usize,
     seed: u64,
+    validation_fraction_requested: f32,
+    validation_fraction_actual: f32,
+    eval_samples: usize,
+    train_tokens: usize,
+    validation_tokens: usize,
     prompt: String,
     vocab_size: usize,
 }
@@ -68,6 +73,35 @@ struct EpochMetric {
     epoch: usize,
     batches: usize,
     average_loss: f32,
+    validation: Option<LanguageEvalMetric>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct LanguageEvalMetric {
+    tokens: usize,
+    windows: usize,
+    mean_nll: f32,
+    perplexity: Option<f32>,
+    accuracy: f32,
+    mean_target_probability: f32,
+    mean_top_probability: f32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct TrainingSummary {
+    initial_validation: Option<LanguageEvalMetric>,
+    final_validation: Option<LanguageEvalMetric>,
+    best_validation_epoch: Option<usize>,
+    best_validation_mean_nll: Option<f32>,
+    validation_nll_delta: Option<f32>,
+    validation_accuracy_delta: Option<f32>,
+}
+
+#[derive(Debug, Clone)]
+struct TokenSplit {
+    train: Vec<usize>,
+    validation: Vec<usize>,
+    actual_validation_fraction: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -175,6 +209,8 @@ struct Args {
     gen_len: usize,
     top_k: usize,
     seed: u64,
+    validation_fraction: f32,
+    eval_samples: usize,
     prompt: Option<String>,
 }
 
@@ -190,7 +226,7 @@ impl Args {
         }
         if data_args.is_empty() {
             return Err(TensorError::Generic(
-                "usage: cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--prompt STR]"
+                "usage: cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--prompt STR]"
                     .to_string(),
             ));
         }
@@ -214,6 +250,8 @@ impl Args {
             gen_len: 200,
             top_k: 32,
             seed: 42,
+            validation_fraction: 0.1,
+            eval_samples: 256,
             prompt: None,
         };
 
@@ -238,10 +276,14 @@ impl Args {
                 "--gen" => args.gen_len = take_parse(&mut argv, "--gen")?,
                 "--topk" => args.top_k = take_parse(&mut argv, "--topk")?,
                 "--seed" => args.seed = take_parse(&mut argv, "--seed")?,
+                "--val-fraction" => {
+                    args.validation_fraction = take_parse(&mut argv, "--val-fraction")?
+                }
+                "--eval-samples" => args.eval_samples = take_parse(&mut argv, "--eval-samples")?,
                 "--prompt" => args.prompt = Some(take_arg(&mut argv, "--prompt")?),
                 "--help" | "-h" => {
                     return Err(TensorError::Generic(
-                        "usage: cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--prompt STR]"
+                        "usage: cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--prompt STR]"
                             .to_string(),
                     ));
                 }
@@ -256,6 +298,14 @@ impl Args {
         if args.steps == 0 || args.embed_dim == 0 || args.hidden == 0 || args.batch == 0 {
             return Err(TensorError::InvalidValue {
                 label: "char_lm_invalid_dims",
+            });
+        }
+        if !args.validation_fraction.is_finite()
+            || args.validation_fraction < 0.0
+            || args.validation_fraction >= 1.0
+        {
+            return Err(TensorError::InvalidValue {
+                label: "char_lm_validation_fraction",
             });
         }
         Ok(args)
@@ -345,6 +395,34 @@ fn build_model(
 
 fn encode_text(text: &str, vocab: &Vocab) -> Vec<usize> {
     text.chars().map(|ch| vocab.encode(ch)).collect()
+}
+
+fn split_train_validation_tokens(
+    tokens: &[usize],
+    steps: usize,
+    validation_fraction: f32,
+) -> TokenSplit {
+    let min_window_tokens = steps + 1;
+    if validation_fraction <= 0.0 || tokens.len() < min_window_tokens * 2 {
+        return TokenSplit {
+            train: tokens.to_vec(),
+            validation: Vec::new(),
+            actual_validation_fraction: 0.0,
+        };
+    }
+
+    let requested = (tokens.len() as f32 * validation_fraction).round() as usize;
+    let max_validation = tokens.len() - min_window_tokens;
+    let validation_len = requested.clamp(min_window_tokens, max_validation);
+    let split_at = tokens.len() - validation_len;
+    let validation = tokens[split_at..].to_vec();
+    let actual_validation_fraction = validation.len() as f32 / tokens.len() as f32;
+
+    TokenSplit {
+        train: tokens[..split_at].to_vec(),
+        validation,
+        actual_validation_fraction,
+    }
 }
 
 fn encode_context_one_hot(context: &[usize], vocab_size: usize) -> PureResult<Tensor> {
@@ -500,6 +578,103 @@ fn generate_text(
     Ok(out)
 }
 
+fn evaluate_next_token(
+    model: &mut Sequential,
+    vocab_size: usize,
+    embed_dim: Option<usize>,
+    steps: usize,
+    tokens: &[usize],
+    max_samples: usize,
+) -> PureResult<Option<LanguageEvalMetric>> {
+    if tokens.len() <= steps {
+        return Ok(None);
+    }
+    let available = tokens.len() - steps;
+    let windows = if max_samples == 0 {
+        available
+    } else {
+        available.min(max_samples)
+    };
+    if windows == 0 {
+        return Ok(None);
+    }
+
+    model.eval()?;
+    let result = (|| -> PureResult<LanguageEvalMetric> {
+        let mut nll_sum = 0.0f32;
+        let mut correct = 0usize;
+        let mut target_probability_sum = 0.0f32;
+        let mut top_probability_sum = 0.0f32;
+
+        for sample_idx in 0..windows {
+            let start = if windows <= 1 || available <= 1 {
+                0
+            } else {
+                sample_idx * (available - 1) / (windows - 1)
+            };
+            let context = &tokens[start..start + steps];
+            let target = tokens[start + steps];
+            let x = if embed_dim.is_some() {
+                encode_context_indices(context)?
+            } else {
+                encode_context_one_hot(context, vocab_size)?
+            };
+            let prediction = model.forward(&x)?;
+            if prediction.shape() != (1, vocab_size) {
+                return Err(TensorError::ShapeMismatch {
+                    left: prediction.shape(),
+                    right: (1, vocab_size),
+                });
+            }
+            let row = &prediction.data()[..vocab_size];
+            let top = argmax(row);
+            let top_probability = row[top].clamp(0.0, 1.0);
+            let target_probability = row.get(target).copied().unwrap_or(0.0).clamp(1.0e-9, 1.0);
+
+            if top == target {
+                correct += 1;
+            }
+            nll_sum += -target_probability.ln();
+            target_probability_sum += target_probability;
+            top_probability_sum += top_probability;
+        }
+
+        let mean_nll = nll_sum / windows as f32;
+        let perplexity = if mean_nll.is_finite() && mean_nll < 80.0 {
+            Some(mean_nll.exp())
+        } else {
+            None
+        };
+        Ok(LanguageEvalMetric {
+            tokens: tokens.len(),
+            windows,
+            mean_nll,
+            perplexity,
+            accuracy: correct as f32 / windows as f32,
+            mean_target_probability: target_probability_sum / windows as f32,
+            mean_top_probability: top_probability_sum / windows as f32,
+        })
+    })();
+    let restore = model.train();
+    match (result, restore) {
+        (Ok(metric), Ok(())) => Ok(Some(metric)),
+        (Err(err), _) => Err(err),
+        (Ok(_), Err(err)) => Err(err),
+    }
+}
+
+fn write_summary(path: &Path, summary: &TrainingSummary) -> PureResult<()> {
+    let writer = File::create(path).map_err(|err| TensorError::IoError {
+        message: err.to_string(),
+    })?;
+    serde_json::to_writer_pretty(writer, summary).map_err(|err| {
+        TensorError::SerializationError {
+            message: err.to_string(),
+        }
+    })?;
+    Ok(())
+}
+
 fn main() -> PureResult<()> {
     let args = Args::parse()?;
     let backend_sel = backend::parse_backend(Some(args.backend.as_str()))?;
@@ -625,6 +800,13 @@ fn main() -> PureResult<()> {
             tokens.len()
         )));
     }
+    let split = split_train_validation_tokens(&tokens, steps, args.validation_fraction);
+    if split.train.len() <= steps {
+        return Err(TensorError::Generic(format!(
+            "training split too short for steps={steps}: len={}",
+            split.train.len()
+        )));
+    }
 
     let mode = embed_dim
         .map(|dim| format!("embedding({dim})"))
@@ -671,6 +853,11 @@ fn main() -> PureResult<()> {
         gen_len: args.gen_len,
         top_k: args.top_k,
         seed: args.seed,
+        validation_fraction_requested: args.validation_fraction,
+        validation_fraction_actual: split.actual_validation_fraction,
+        eval_samples: args.eval_samples,
+        train_tokens: split.train.len(),
+        validation_tokens: split.validation.len(),
         prompt: prompt.clone(),
         vocab_size: vocab.len(),
     };
@@ -707,11 +894,13 @@ fn main() -> PureResult<()> {
     let mut loss = CategoricalCrossEntropy::new();
 
     println!(
-        "mode={mode} backend={} vocab={} files={} chars={} steps={} hidden={} epochs={} batch={} lr={:.3e} curvature={} temp={} run_dir={}",
+        "mode={mode} backend={} vocab={} files={} chars={} train_tokens={} validation_tokens={} steps={} hidden={} epochs={} batch={} lr={:.3e} curvature={} temp={} run_dir={}",
         backend_sel.label,
         vocab.len(),
         data_files.len(),
         text.chars().count(),
+        split.train.len(),
+        split.validation.len(),
         steps,
         hidden,
         args.epochs,
@@ -722,13 +911,41 @@ fn main() -> PureResult<()> {
         run_dir.display()
     );
 
+    let initial_validation = evaluate_next_token(
+        &mut model,
+        vocab.len(),
+        embed_dim,
+        steps,
+        &split.validation,
+        args.eval_samples,
+    )?;
+    if let Some(validation) = initial_validation.as_ref() {
+        println!(
+            "validation[init] windows={} nll={:.6} ppl={} acc={:.2}%",
+            validation.windows,
+            validation.mean_nll,
+            validation
+                .perplexity
+                .map(|value| format!("{value:.3}"))
+                .unwrap_or_else(|| "overflow".to_string()),
+            validation.accuracy * 100.0
+        );
+    } else {
+        println!(
+            "validation[init] skipped: validation split is empty (increase data or --val-fraction)"
+        );
+    }
+
     let mut last_sample: Option<String> = None;
+    let mut last_validation = initial_validation.clone();
+    let mut best_validation_epoch = None;
+    let mut best_validation_mean_nll = None;
     for epoch in 0..args.epochs {
         let mut rng = ChaCha8Rng::seed_from_u64(args.seed.wrapping_add(epoch as u64 * 10_000));
         let mut batches = Vec::with_capacity(args.batches_per_epoch);
         for _ in 0..args.batches_per_epoch {
             batches.push(build_random_batch(
-                &tokens,
+                &split.train,
                 vocab.len(),
                 embed_dim,
                 steps,
@@ -737,10 +954,28 @@ fn main() -> PureResult<()> {
             )?);
         }
         let stats = trainer.train_epoch(&mut model, &mut loss, batches, &schedule)?;
+        let validation = evaluate_next_token(
+            &mut model,
+            vocab.len(),
+            embed_dim,
+            steps,
+            &split.validation,
+            args.eval_samples,
+        )?;
+        if let Some(validation_metric) = validation.as_ref() {
+            if best_validation_mean_nll
+                .map(|best| validation_metric.mean_nll < best)
+                .unwrap_or(true)
+            {
+                best_validation_mean_nll = Some(validation_metric.mean_nll);
+                best_validation_epoch = Some(epoch);
+            }
+        }
         let metric = EpochMetric {
             epoch,
             batches: stats.batches,
             average_loss: stats.average_loss,
+            validation: validation.clone(),
         };
         writeln!(
             metrics_file,
@@ -768,10 +1003,25 @@ fn main() -> PureResult<()> {
             },
         )?;
         last_sample = Some(sample);
-        println!(
-            "epoch[{epoch}] batches={} avg_loss={:.6}",
-            stats.batches, stats.average_loss
-        );
+        last_validation = validation.clone();
+        if let Some(validation) = validation.as_ref() {
+            println!(
+                "epoch[{epoch}] batches={} avg_loss={:.6} val_nll={:.6} val_ppl={} val_acc={:.2}%",
+                stats.batches,
+                stats.average_loss,
+                validation.mean_nll,
+                validation
+                    .perplexity
+                    .map(|value| format!("{value:.3}"))
+                    .unwrap_or_else(|| "overflow".to_string()),
+                validation.accuracy * 100.0
+            );
+        } else {
+            println!(
+                "epoch[{epoch}] batches={} avg_loss={:.6} val=skipped",
+                stats.batches, stats.average_loss
+            );
+        }
     }
 
     let meta = CharLmMeta::new(steps, hidden, embed_dim, curvature, temperature, &vocab);
@@ -809,6 +1059,25 @@ fn main() -> PureResult<()> {
             sample
         }
     };
+
+    let final_validation = last_validation;
+    let validation_nll_delta = initial_validation
+        .as_ref()
+        .zip(final_validation.as_ref())
+        .map(|(initial, final_metric)| final_metric.mean_nll - initial.mean_nll);
+    let validation_accuracy_delta = initial_validation
+        .as_ref()
+        .zip(final_validation.as_ref())
+        .map(|(initial, final_metric)| final_metric.accuracy - initial.accuracy);
+    let summary = TrainingSummary {
+        initial_validation,
+        final_validation,
+        best_validation_epoch,
+        best_validation_mean_nll,
+        validation_nll_delta,
+        validation_accuracy_delta,
+    };
+    write_summary(&run_dir.join("summary.json"), &summary)?;
 
     println!("--- sample (prompt + gen) ---");
     println!("{sample}");

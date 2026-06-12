@@ -74,6 +74,17 @@ cargo run -p st-nn --example fine_tune_with_selfsup -- <artefact_dir>
 
 ---
 
+### Character LM fine-tuning demo
+**File:** `examples/modelzoo_llm_char_finetune.rs`
+
+```bash
+cargo run -p st-nn --example modelzoo_llm_char_finetune -- models/samples/spiral_demo_en.txt --val-fraction 0.1 --eval-samples 256
+```
+
+Writes `run.json`, `metrics.jsonl`, `summary.json`, samples, and weights into the selected run directory.
+
+---
+
 ### SpiralReality demo
 **File:** `examples/spiral_reality_demo.rs`
 
