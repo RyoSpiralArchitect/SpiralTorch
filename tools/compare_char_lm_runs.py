@@ -21,6 +21,22 @@ def read_json(path: Path) -> dict[str, Any]:
     return payload
 
 
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if not path.exists():
+        return rows
+    with path.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            payload = json.loads(stripped)
+            if not isinstance(payload, dict):
+                raise ValueError(f"expected JSON object at {path}:{line_number}")
+            rows.append(payload)
+    return rows
+
+
 def run_paths(raw: str) -> tuple[Path, Path, Path | None]:
     path = Path(raw)
     if path.is_dir():
@@ -49,7 +65,7 @@ def fmt_percent(value: float | None) -> str:
     return f"{value * 100.0:.2f}%"
 
 
-def row_for(raw: str) -> dict[str, str]:
+def row_for(raw: str) -> tuple[dict[str, str], Path]:
     run_dir, summary_path, run_path = run_paths(raw)
     summary = read_json(summary_path)
     run = read_json(run_path) if run_path is not None else {}
@@ -71,17 +87,20 @@ def row_for(raw: str) -> dict[str, str]:
     if not isinstance(delta_acc, (int, float)):
         delta_acc = None
 
-    return {
-        "run": label,
-        "arch": arch,
-        "init_nll": fmt_float(init_nll),
-        "final_nll": fmt_float(final_nll),
-        "delta_nll": fmt_float(float(delta_nll) if delta_nll is not None else None),
-        "final_ppl": fmt_float(metric_value(final, "perplexity")),
-        "final_acc": fmt_percent(metric_value(final, "accuracy")),
-        "delta_acc": fmt_percent(float(delta_acc) if delta_acc is not None else None),
-        "best_epoch": str(summary.get("best_validation_epoch", "-")),
-    }
+    return (
+        {
+            "run": label,
+            "arch": arch,
+            "init_nll": fmt_float(init_nll),
+            "final_nll": fmt_float(final_nll),
+            "delta_nll": fmt_float(float(delta_nll) if delta_nll is not None else None),
+            "final_ppl": fmt_float(metric_value(final, "perplexity")),
+            "final_acc": fmt_percent(metric_value(final, "accuracy")),
+            "delta_acc": fmt_percent(float(delta_acc) if delta_acc is not None else None),
+            "best_epoch": str(summary.get("best_validation_epoch", "-")),
+        },
+        run_dir,
+    )
 
 
 def markdown_table(rows: list[dict[str, str]]) -> str:
@@ -103,13 +122,59 @@ def markdown_table(rows: list[dict[str, str]]) -> str:
     return "\n".join(out)
 
 
+def curve_rows_for(summary_row: dict[str, str], run_dir: Path) -> list[dict[str, str]]:
+    rows = []
+    for metric in read_jsonl(run_dir / "metrics.jsonl"):
+        validation = metric.get("validation")
+        if not isinstance(validation, dict):
+            validation = None
+        rows.append(
+            {
+                "run": summary_row["run"],
+                "arch": summary_row["arch"],
+                "epoch": str(metric.get("epoch", "-")),
+                "train_loss": fmt_float(
+                    float(metric["average_loss"])
+                    if isinstance(metric.get("average_loss"), (int, float))
+                    else None
+                ),
+                "val_nll": fmt_float(metric_value(validation, "mean_nll")),
+                "val_ppl": fmt_float(metric_value(validation, "perplexity")),
+                "val_acc": fmt_percent(metric_value(validation, "accuracy")),
+            }
+        )
+    return rows
+
+
+def curve_table(rows: list[dict[str, str]]) -> str:
+    headers = ["run", "arch", "epoch", "train_loss", "val_nll", "val_ppl", "val_acc"]
+    out = ["| " + " | ".join(headers) + " |"]
+    out.append("| " + " | ".join("---" for _ in headers) + " |")
+    for row in rows:
+        out.append("| " + " | ".join(row[header] for header in headers) + " |")
+    return "\n".join(out)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Compare summary.json artifacts from char-LM model-zoo runs."
     )
+    parser.add_argument(
+        "--curves",
+        action="store_true",
+        help="also print epoch-level validation curves from metrics.jsonl",
+    )
     parser.add_argument("runs", nargs="+", help="run directories or summary.json files")
     args = parser.parse_args()
-    print(markdown_table([row_for(raw) for raw in args.runs]))
+    pairs = [row_for(raw) for raw in args.runs]
+    print(markdown_table([row for row, _ in pairs]))
+    if args.curves:
+        curve_rows: list[dict[str, str]] = []
+        for row, run_dir in pairs:
+            curve_rows.extend(curve_rows_for(row, run_dir))
+        if curve_rows:
+            print()
+            print(curve_table(curve_rows))
 
 
 if __name__ == "__main__":

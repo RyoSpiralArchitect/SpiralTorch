@@ -86,7 +86,7 @@ Writes `run.json`, `metrics.jsonl`, `summary.json`, samples, and weights into th
 Compare several char-LM runs with:
 
 ```bash
-PYTHONNOUSERSITE=1 python3 -S -s tools/compare_char_lm_runs.py models/runs/<baseline> models/runs/<scan> models/runs/<wave>
+PYTHONNOUSERSITE=1 python3 -S -s tools/compare_char_lm_runs.py --curves models/runs/<baseline> models/runs/<scan> models/runs/<wave>
 ```
 
 ---
