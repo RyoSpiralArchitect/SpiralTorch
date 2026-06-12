@@ -18,8 +18,10 @@ import spiraltorch as st
 
 import _softlogic_cli
 
-FORMAT = "st-char-lm-coherence-v1"
+FORMAT_V1 = "st-char-lm-coherence-v1"
+FORMAT_V2 = "st-char-lm-coherence-v2"
 DEFAULT_UNK = "\uFFFD"
+DEFAULT_CONTEXT_SCALE = 0.05
 
 RUN_SCHEMA = "st.modelzoo.run.v1"
 
@@ -230,12 +232,20 @@ def _build_model(
     embed_dim: int,
     hidden: int,
     memory: int,
+    context_scale: float | None,
     curvature: float,
     temperature: float,
 ) -> st.nn.Sequential:
     model = st.nn.Sequential()
     model.add(st.nn.Embedding("embed", vocab_size, embed_dim))
     model.add(st.nn.ZSpaceCoherenceScan(embed_dim, steps, memory, curvature, temperature))
+    if context_scale is not None:
+        model.add(
+            st.nn.Scaler.from_gain(
+                "scan_context_scale",
+                st.Tensor(1, embed_dim, [float(context_scale)] * embed_dim),
+            )
+        )
     model.add(st.nn.Linear("mix", embed_dim, hidden))
     model.add(st.nn.Relu())
     model.add(st.nn.Linear("head", hidden, vocab_size))
@@ -319,7 +329,7 @@ def main() -> None:
     if len(sys.argv) < 2 or sys.argv[1] in {"-h", "--help"}:
         print(
             "usage: PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_coherence_scan.py <text_or_dir> [<text_or_dir> ...] "
-            "[--load weights.json] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] [--memory N] "
+            "[--load weights.json] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--context-scale F] "
             "[--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] "
             "[--gen N] [--topk N] [--seed N] [--prompt STR] "
             "[--backend cpu|wgpu|cuda|hip|auto] "
@@ -346,6 +356,7 @@ def main() -> None:
     embed_dim = 32
     hidden = 64
     memory = 16
+    context_scale = DEFAULT_CONTEXT_SCALE
     epochs = 6
     batches_per_epoch = 24
     batch = 8
@@ -389,6 +400,8 @@ def main() -> None:
             hidden = int(next(it))
         elif flag == "--memory":
             memory = int(next(it))
+        elif flag == "--context-scale":
+            context_scale = float(next(it))
         elif flag == "--epochs":
             epochs = int(next(it))
         elif flag == "--batches":
@@ -449,6 +462,8 @@ def main() -> None:
 
     if memory > steps:
         raise ValueError(f"--memory must be <= --steps (got memory={memory}, steps={steps})")
+    if not math.isfinite(context_scale) or context_scale <= 0.0:
+        raise ValueError(f"--context-scale must be finite and > 0 (got {context_scale})")
 
     data_files = _collect_text_files(data_paths)
     if not data_files:
@@ -477,12 +492,24 @@ def main() -> None:
         meta_path = _meta_path_for_weights(load_weights)
         meta = _load_meta(meta_path)
         fmt = str(meta.get("format", ""))
-        if fmt != FORMAT:
+        if fmt not in {FORMAT_V1, FORMAT_V2}:
             raise ValueError(f"unexpected meta format: {fmt}")
+        loaded_context_scale = meta.get("context_scale")
+        if fmt == FORMAT_V2 and loaded_context_scale is None:
+            raise ValueError("meta format st-char-lm-coherence-v2 requires context_scale")
         steps = int(meta["steps"])
         embed_dim = int(meta["embed_dim"])
         hidden = int(meta["hidden"])
         memory = int(meta["memory"])
+        context_scale = (
+            float(loaded_context_scale) if loaded_context_scale is not None else None
+        )
+        if context_scale is not None and (
+            not math.isfinite(context_scale) or context_scale <= 0.0
+        ):
+            raise ValueError(
+                f"meta context_scale must be finite and > 0 (got {context_scale})"
+            )
         curvature = float(meta["curvature"])
         temperature = float(meta["temperature"])
         symbols = [str(ch) for ch in meta["symbols"]]
@@ -494,6 +521,7 @@ def main() -> None:
             embed_dim,
             hidden,
             memory,
+            context_scale,
             curvature,
             temperature,
         )
@@ -507,6 +535,7 @@ def main() -> None:
             embed_dim,
             hidden,
             memory,
+            context_scale,
             curvature,
             temperature,
         )
@@ -524,11 +553,12 @@ def main() -> None:
         "data_paths": [str(path) for path in data_paths],
         "data_file_count": len(data_files),
         "data_files_manifest": str(run_dir / "data_files.txt"),
-        "format": FORMAT,
+        "format": FORMAT_V2 if context_scale is not None else FORMAT_V1,
         "steps": steps,
         "embed_dim": embed_dim,
         "hidden": hidden,
         "memory": memory,
+        "context_scale": context_scale,
         "epochs": epochs,
         "batches_per_epoch": batches_per_epoch,
         "batch": batch,
@@ -586,7 +616,7 @@ def main() -> None:
 
     print(
         f"arch=coherence_scan vocab={vocab_size} files={len(data_files)} chars={len(text)} steps={steps} embed_dim={embed_dim} hidden={hidden} "
-        f"memory={memory} epochs={epochs} batch={batch} lr={lr:.3e} curvature={curvature} "
+        f"memory={memory} context_scale={context_scale if context_scale is not None else 'none'} epochs={epochs} batch={batch} lr={lr:.3e} curvature={curvature} "
         f"temp={temperature} backend={backend} run_dir={run_dir}"
     )
 
@@ -661,11 +691,12 @@ def main() -> None:
     st.nn.save(str(weights_path), model)
 
     meta = {
-        "format": FORMAT,
+        "format": FORMAT_V2 if context_scale is not None else FORMAT_V1,
         "steps": steps,
         "embed_dim": embed_dim,
         "hidden": hidden,
         "memory": memory,
+        "context_scale": context_scale,
         "curvature": curvature,
         "temperature": temperature,
         "unk": symbols[0],
