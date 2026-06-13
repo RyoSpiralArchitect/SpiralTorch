@@ -252,6 +252,89 @@ pub struct GraphBatchReadoutTrace {
     pub entries: Vec<GraphBatchReadoutEntry>,
 }
 
+impl GraphBatchReadoutTrace {
+    /// Compares traced graph predictions against graph-level targets.
+    pub fn compare_predictions(
+        &self,
+        prediction: &Tensor,
+        target: &Tensor,
+    ) -> PureResult<GraphBatchReadoutErrorTrace> {
+        if prediction.shape() != self.output_shape {
+            return Err(TensorError::ShapeMismatch {
+                left: prediction.shape(),
+                right: self.output_shape,
+            });
+        }
+        if target.shape() != self.output_shape {
+            return Err(TensorError::ShapeMismatch {
+                left: target.shape(),
+                right: self.output_shape,
+            });
+        }
+        if self.entries.len() != self.graph_count {
+            return Err(TensorError::InvalidValue {
+                label: "graph_batch_readout_entries",
+            });
+        }
+        let (_, cols) = prediction.shape();
+        let mut total_mse = 0.0f32;
+        let mut entries = Vec::with_capacity(self.graph_count);
+        for entry in &self.entries {
+            if entry.graph_index >= self.graph_count {
+                return Err(TensorError::InvalidValue {
+                    label: "graph_batch_readout_graph_index",
+                });
+            }
+            let prediction_row = tensor_row(prediction, entry.graph_index)?;
+            let target_row = tensor_row(target, entry.graph_index)?;
+            let residual = prediction_row.sub(&target_row)?;
+            let mean_squared_error = residual.squared_l2_norm() / cols as f32;
+            total_mse += mean_squared_error;
+            entries.push(GraphBatchReadoutErrorEntry {
+                graph_index: entry.graph_index,
+                prediction_l2: tensor_l2(&prediction_row),
+                target_l2: tensor_l2(&target_row),
+                residual_l2: tensor_l2(&residual),
+                mean_squared_error,
+            });
+        }
+        Ok(GraphBatchReadoutErrorTrace {
+            graph_count: self.graph_count,
+            output_shape: self.output_shape,
+            mean_squared_error: total_mse / self.graph_count.max(1) as f32,
+            entries,
+        })
+    }
+}
+
+/// Per-graph prediction/target comparison derived from a readout trace.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GraphBatchReadoutErrorEntry {
+    /// Index of the graph within the batch.
+    pub graph_index: usize,
+    /// L2 norm of the graph-level prediction row.
+    pub prediction_l2: f32,
+    /// L2 norm of the graph-level target row.
+    pub target_l2: f32,
+    /// L2 norm of `prediction - target`.
+    pub residual_l2: f32,
+    /// Mean squared error for this graph row.
+    pub mean_squared_error: f32,
+}
+
+/// Batch-level prediction/target comparison derived from a readout trace.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GraphBatchReadoutErrorTrace {
+    /// Number of graph segments in the comparison.
+    pub graph_count: usize,
+    /// Shape of the prediction and target tensors.
+    pub output_shape: (usize, usize),
+    /// Average per-graph mean squared error.
+    pub mean_squared_error: f32,
+    /// Per-graph prediction/target comparison records.
+    pub entries: Vec<GraphBatchReadoutErrorEntry>,
+}
+
 fn tensor_rows(tensor: &Tensor, range: Range<usize>) -> PureResult<Tensor> {
     let (rows, cols) = tensor.shape();
     if range.start >= range.end || range.end > rows {
@@ -787,6 +870,17 @@ mod tests {
             .entries
             .iter()
             .all(|entry| entry.prediction_l2.is_finite()));
+
+        let target = Tensor::from_vec(2, 2, vec![0.1, -0.2, -0.05, 0.15]).unwrap();
+        let errors = trace.compare_predictions(&prediction, &target).unwrap();
+        assert_eq!(errors.graph_count, 2);
+        assert_eq!(errors.output_shape, (2, 2));
+        assert_eq!(errors.entries.len(), 2);
+        assert!(errors.mean_squared_error.is_finite());
+        assert!(errors
+            .entries
+            .iter()
+            .all(|entry| entry.residual_l2.is_finite()));
     }
 
     #[test]

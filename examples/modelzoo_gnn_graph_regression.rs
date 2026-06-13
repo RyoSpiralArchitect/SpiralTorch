@@ -94,6 +94,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map(|(input, _)| input.clone())
             .collect::<Vec<_>>(),
     )?;
+    let reload_target = Tensor::cat_rows(
+        &validation_samples
+            .iter()
+            .take(2)
+            .map(|(_, target)| target.clone())
+            .collect::<Vec<_>>(),
+    )?;
     let train_loader = Dataset::from_vec(train_samples)
         .loader()
         .shuffle(99)
@@ -155,18 +162,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut reloaded = build_model(context, nodes, features, -1.0, 0.05)?;
     load_json(&mut reloaded, weights_path)?;
     let (graph_prediction, readout_trace) = reloaded.forward_with_trace(&reload_probe)?;
+    let error_trace = readout_trace.compare_predictions(&graph_prediction, &reload_target)?;
     let first_prediction_l2 = readout_trace
         .entries
         .first()
         .map(|entry| entry.prediction_l2)
         .unwrap_or(0.0);
+    let first_graph_mse = error_trace
+        .entries
+        .first()
+        .map(|entry| entry.mean_squared_error)
+        .unwrap_or(0.0);
     println!(
-        "reloaded graph prediction shape={:?} readout={:?} nodes_per_graph={} graph_count={} first_prediction_l2={:.6}",
+        "reloaded graph prediction shape={:?} readout={:?} nodes_per_graph={} graph_count={} first_prediction_l2={:.6} mean_mse={:.6} first_graph_mse={:.6}",
         graph_prediction.shape(),
         reloaded.readout(),
         reloaded.nodes_per_graph().get(),
         readout_trace.graph_count,
-        first_prediction_l2
+        first_prediction_l2,
+        error_trace.mean_squared_error,
+        first_graph_mse
     );
 
     Ok(())
