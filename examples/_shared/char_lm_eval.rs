@@ -3,8 +3,8 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 
 use serde::Serialize;
-use st_nn::{Linear, Module, PureResult, Tensor, TensorError};
-use std::collections::BTreeMap;
+use st_nn::{Linear, Module, Parameter, PureResult, Tensor, TensorError};
+use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::path::Path;
 
@@ -84,6 +84,18 @@ pub struct LearnabilityMetric {
     pub validation_target_probability: Option<f32>,
 }
 
+pub const HEAD_PRIOR_NONE: &str = "none";
+pub const HEAD_PRIOR_UNIGRAM: &str = "unigram";
+
+pub fn validate_head_prior(value: &str) -> PureResult<()> {
+    match value {
+        HEAD_PRIOR_NONE | HEAD_PRIOR_UNIGRAM => Ok(()),
+        _ => Err(TensorError::Generic(format!(
+            "invalid --head-prior {value}; expected {HEAD_PRIOR_NONE} or {HEAD_PRIOR_UNIGRAM}"
+        ))),
+    }
+}
+
 pub fn linear_with_weight_rms(
     name: &str,
     input_dim: usize,
@@ -114,6 +126,123 @@ pub fn linear_with_weight_rms(
         Ok(())
     })?;
     Ok(layer)
+}
+
+fn smoothed_unigram_probabilities(vocab_size: usize, train_tokens: &[usize]) -> Vec<f32> {
+    if vocab_size == 0 {
+        return Vec::new();
+    }
+    let mut counts = vec![1.0f32; vocab_size];
+    for &token in train_tokens {
+        if token < vocab_size {
+            counts[token] += 1.0;
+        }
+    }
+    let total = counts.iter().sum::<f32>().max(f32::EPSILON);
+    counts.into_iter().map(|count| count / total).collect()
+}
+
+#[derive(Debug, Clone)]
+pub struct FixedLogitPrior {
+    name: String,
+    prior: Tensor,
+}
+
+impl FixedLogitPrior {
+    pub fn from_unigram(
+        name: impl Into<String>,
+        vocab_size: usize,
+        train_tokens: &[usize],
+    ) -> PureResult<Self> {
+        let probabilities = smoothed_unigram_probabilities(vocab_size, train_tokens);
+        let values = probabilities
+            .into_iter()
+            .map(|probability| probability.clamp(1.0e-9, 1.0).ln())
+            .collect::<Vec<_>>();
+        Self::from_values(name, Tensor::from_vec(1, vocab_size, values)?)
+    }
+
+    pub fn zeros(name: impl Into<String>, vocab_size: usize) -> PureResult<Self> {
+        Self::from_values(name, Tensor::zeros(1, vocab_size)?)
+    }
+
+    fn from_values(name: impl Into<String>, prior: Tensor) -> PureResult<Self> {
+        let (rows, cols) = prior.shape();
+        if rows != 1 || cols == 0 {
+            return Err(TensorError::ShapeMismatch {
+                left: (rows, cols),
+                right: (1, cols),
+            });
+        }
+        Ok(Self {
+            name: name.into(),
+            prior,
+        })
+    }
+
+    fn key(&self) -> String {
+        format!("{}::prior", self.name)
+    }
+}
+
+impl Module for FixedLogitPrior {
+    fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+        let (rows, cols) = input.shape();
+        if self.prior.shape() != (1, cols) {
+            return Err(TensorError::ShapeMismatch {
+                left: self.prior.shape(),
+                right: (1, cols),
+            });
+        }
+        let mut output = input.clone();
+        if rows > 0 {
+            output.add_row_inplace(self.prior.data())?;
+        }
+        Ok(output)
+    }
+
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        if input.shape() != grad_output.shape() {
+            return Err(TensorError::ShapeMismatch {
+                left: input.shape(),
+                right: grad_output.shape(),
+            });
+        }
+        Ok(grad_output.clone())
+    }
+
+    fn visit_parameters(
+        &self,
+        _visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        Ok(())
+    }
+
+    fn visit_parameters_mut(
+        &mut self,
+        _visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        Ok(())
+    }
+
+    fn state_dict(&self) -> PureResult<HashMap<String, Tensor>> {
+        Ok(HashMap::from([(self.key(), self.prior.clone())]))
+    }
+
+    fn load_state_dict(&mut self, state: &HashMap<String, Tensor>) -> PureResult<()> {
+        let key = self.key();
+        let Some(value) = state.get(&key) else {
+            return Err(TensorError::MissingParameter { name: key });
+        };
+        if value.shape() != self.prior.shape() {
+            return Err(TensorError::ShapeMismatch {
+                left: value.shape(),
+                right: self.prior.shape(),
+            });
+        }
+        self.prior = value.clone();
+        Ok(())
+    }
 }
 
 pub fn split_train_validation_tokens(
@@ -276,17 +405,7 @@ pub fn evaluate_unigram_next_token(
         return Ok(None);
     }
 
-    let mut counts = vec![1.0f32; vocab_size];
-    for &token in train_tokens {
-        if token < vocab_size {
-            counts[token] += 1.0;
-        }
-    }
-    let total = counts.iter().sum::<f32>().max(f32::EPSILON);
-    let probabilities = counts
-        .into_iter()
-        .map(|count| count / total)
-        .collect::<Vec<_>>();
+    let probabilities = smoothed_unigram_probabilities(vocab_size, train_tokens);
 
     let available = validation_tokens.len() - steps;
     let windows = if max_samples == 0 {
