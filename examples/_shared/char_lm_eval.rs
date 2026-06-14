@@ -26,16 +26,20 @@ pub struct LanguageEvalMetric {
     pub mean_top_probability: f32,
     pub mean_entropy: f32,
     pub mean_normalized_entropy: f32,
+    pub mean_target_rank: f32,
+    pub mean_target_percentile: f32,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TrainingSummary {
     pub initial_validation: Option<LanguageEvalMetric>,
     pub final_validation: Option<LanguageEvalMetric>,
+    pub unigram_validation: Option<LanguageEvalMetric>,
     pub best_validation_epoch: Option<usize>,
     pub best_validation_mean_nll: Option<f32>,
     pub validation_nll_delta: Option<f32>,
     pub validation_accuracy_delta: Option<f32>,
+    pub final_vs_unigram_nll_delta: Option<f32>,
 }
 
 #[derive(Debug, Clone)]
@@ -173,6 +177,17 @@ fn argmax(values: &[f32]) -> usize {
     best
 }
 
+fn target_rank(values: &[f32], target: usize) -> usize {
+    let Some(&target_value) = values.get(target) else {
+        return values.len().max(1);
+    };
+    1 + values
+        .iter()
+        .enumerate()
+        .filter(|(idx, value)| *idx != target && value.is_finite() && **value > target_value)
+        .count()
+}
+
 fn l2(values: &[f32]) -> f32 {
     values
         .iter()
@@ -207,6 +222,121 @@ fn entropy(values: &[f32]) -> f32 {
         }
     }
     out
+}
+
+fn metric_from_sums(
+    tokens: usize,
+    windows: usize,
+    vocab_size: usize,
+    nll_sum: f32,
+    correct: usize,
+    target_probability_sum: f32,
+    top_probability_sum: f32,
+    entropy_sum: f32,
+    target_rank_sum: f32,
+) -> LanguageEvalMetric {
+    let mean_nll = nll_sum / windows as f32;
+    let perplexity = if mean_nll.is_finite() && mean_nll < 80.0 {
+        Some(mean_nll.exp())
+    } else {
+        None
+    };
+    let mean_target_rank = target_rank_sum / windows as f32;
+    LanguageEvalMetric {
+        tokens,
+        windows,
+        mean_nll,
+        perplexity,
+        accuracy: correct as f32 / windows as f32,
+        mean_target_probability: target_probability_sum / windows as f32,
+        mean_top_probability: top_probability_sum / windows as f32,
+        mean_entropy: entropy_sum / windows as f32,
+        mean_normalized_entropy: if vocab_size <= 1 {
+            0.0
+        } else {
+            (entropy_sum / windows as f32) / (vocab_size as f32).ln()
+        },
+        mean_target_rank,
+        mean_target_percentile: if vocab_size <= 1 {
+            1.0
+        } else {
+            1.0 - ((mean_target_rank - 1.0) / (vocab_size - 1) as f32)
+        },
+    }
+}
+
+pub fn evaluate_unigram_next_token(
+    vocab_size: usize,
+    steps: usize,
+    train_tokens: &[usize],
+    validation_tokens: &[usize],
+    max_samples: usize,
+) -> PureResult<Option<LanguageEvalMetric>> {
+    if validation_tokens.len() <= steps || vocab_size == 0 {
+        return Ok(None);
+    }
+
+    let mut counts = vec![1.0f32; vocab_size];
+    for &token in train_tokens {
+        if token < vocab_size {
+            counts[token] += 1.0;
+        }
+    }
+    let total = counts.iter().sum::<f32>().max(f32::EPSILON);
+    let probabilities = counts
+        .into_iter()
+        .map(|count| count / total)
+        .collect::<Vec<_>>();
+
+    let available = validation_tokens.len() - steps;
+    let windows = if max_samples == 0 {
+        available
+    } else {
+        available.min(max_samples)
+    };
+    if windows == 0 {
+        return Ok(None);
+    }
+
+    let top = argmax(&probabilities);
+    let top_probability = probabilities[top].clamp(0.0, 1.0);
+    let distribution_entropy = entropy(&probabilities);
+    let mut nll_sum = 0.0f32;
+    let mut correct = 0usize;
+    let mut target_probability_sum = 0.0f32;
+    let mut target_rank_sum = 0.0f32;
+
+    for sample_idx in 0..windows {
+        let start = if windows <= 1 || available <= 1 {
+            0
+        } else {
+            sample_idx * (available - 1) / (windows - 1)
+        };
+        let target = validation_tokens[start + steps];
+        let target_probability = probabilities
+            .get(target)
+            .copied()
+            .unwrap_or(0.0)
+            .clamp(1.0e-9, 1.0);
+        if top == target {
+            correct += 1;
+        }
+        nll_sum += -target_probability.ln();
+        target_probability_sum += target_probability;
+        target_rank_sum += target_rank(&probabilities, target) as f32;
+    }
+
+    Ok(Some(metric_from_sums(
+        validation_tokens.len(),
+        windows,
+        vocab_size,
+        nll_sum,
+        correct,
+        target_probability_sum,
+        top_probability * windows as f32,
+        distribution_entropy * windows as f32,
+        target_rank_sum,
+    )))
 }
 
 pub fn capture_parameter_snapshot<M>(model: &M) -> PureResult<ParameterSnapshot>
@@ -343,6 +473,7 @@ where
         let mut target_probability_sum = 0.0f32;
         let mut top_probability_sum = 0.0f32;
         let mut entropy_sum = 0.0f32;
+        let mut target_rank_sum = 0.0f32;
 
         for sample_idx in 0..windows {
             let start = if windows <= 1 || available <= 1 {
@@ -375,29 +506,20 @@ where
             target_probability_sum += target_probability;
             top_probability_sum += top_probability;
             entropy_sum += entropy(row);
+            target_rank_sum += target_rank(row, target) as f32;
         }
 
-        let mean_nll = nll_sum / windows as f32;
-        let perplexity = if mean_nll.is_finite() && mean_nll < 80.0 {
-            Some(mean_nll.exp())
-        } else {
-            None
-        };
-        Ok(LanguageEvalMetric {
-            tokens: tokens.len(),
+        Ok(metric_from_sums(
+            tokens.len(),
             windows,
-            mean_nll,
-            perplexity,
-            accuracy: correct as f32 / windows as f32,
-            mean_target_probability: target_probability_sum / windows as f32,
-            mean_top_probability: top_probability_sum / windows as f32,
-            mean_entropy: entropy_sum / windows as f32,
-            mean_normalized_entropy: if vocab_size <= 1 {
-                0.0
-            } else {
-                (entropy_sum / windows as f32) / (vocab_size as f32).ln()
-            },
-        })
+            vocab_size,
+            nll_sum,
+            correct,
+            target_probability_sum,
+            top_probability_sum,
+            entropy_sum,
+            target_rank_sum,
+        ))
     })();
     let restore = model.train();
     match (result, restore) {

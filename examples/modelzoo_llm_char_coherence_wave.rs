@@ -14,9 +14,9 @@ mod char_lm_eval;
 mod text_corpus;
 
 use char_lm_eval::{
-    capture_parameter_snapshot, evaluate_next_token, linear_with_weight_rms,
-    split_train_validation_tokens, summarize_learnability, write_summary, CharLmInputMode,
-    LanguageEvalMetric, LearnabilityMetric, TrainingSummary,
+    capture_parameter_snapshot, evaluate_next_token, evaluate_unigram_next_token,
+    linear_with_weight_rms, split_train_validation_tokens, summarize_learnability, write_summary,
+    CharLmInputMode, LanguageEvalMetric, LearnabilityMetric, TrainingSummary,
 };
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -915,6 +915,13 @@ fn main() -> PureResult<()> {
         &split.validation,
         args.eval_samples,
     )?;
+    let unigram_validation = evaluate_unigram_next_token(
+        vocab.len(),
+        steps,
+        &split.train,
+        &split.validation,
+        args.eval_samples,
+    )?;
     if let Some(validation) = initial_validation.as_ref() {
         println!(
             "validation[init] windows={} nll={:.6} ppl={} acc={:.2}%",
@@ -929,6 +936,19 @@ fn main() -> PureResult<()> {
     } else {
         println!(
             "validation[init] skipped: validation split is empty (increase data or --val-fraction)"
+        );
+    }
+    if let Some(validation) = unigram_validation.as_ref() {
+        println!(
+            "validation[unigram] windows={} nll={:.6} ppl={} acc={:.2}% target_rank={:.2}",
+            validation.windows,
+            validation.mean_nll,
+            validation
+                .perplexity
+                .map(|value| format!("{value:.3}"))
+                .unwrap_or_else(|| "overflow".to_string()),
+            validation.accuracy * 100.0,
+            validation.mean_target_rank
         );
     }
 
@@ -1097,13 +1117,19 @@ fn main() -> PureResult<()> {
         .as_ref()
         .zip(final_validation.as_ref())
         .map(|(initial, final_metric)| final_metric.accuracy - initial.accuracy);
+    let final_vs_unigram_nll_delta = final_validation
+        .as_ref()
+        .zip(unigram_validation.as_ref())
+        .map(|(final_metric, unigram)| final_metric.mean_nll - unigram.mean_nll);
     let summary = TrainingSummary {
         initial_validation,
         final_validation,
+        unigram_validation,
         best_validation_epoch,
         best_validation_mean_nll,
         validation_nll_delta,
         validation_accuracy_delta,
+        final_vs_unigram_nll_delta,
     };
     write_summary(&run_dir.join("summary.json"), &summary)?;
 

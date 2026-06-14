@@ -79,19 +79,26 @@ def row_for(raw: str) -> tuple[dict[str, str], Path]:
     run = read_json(run_path) if run_path is not None else {}
     initial = summary.get("initial_validation")
     final = summary.get("final_validation")
+    unigram = summary.get("unigram_validation")
     if not isinstance(initial, dict):
         initial = None
     if not isinstance(final, dict):
         final = None
+    if not isinstance(unigram, dict):
+        unigram = None
 
     label = run_dir.name or str(run_dir)
     arch = str(run.get("arch", "-"))
     init_nll = metric_value(initial, "mean_nll")
     final_nll = metric_value(final, "mean_nll")
+    unigram_nll = metric_value(unigram, "mean_nll")
     delta_nll = summary.get("validation_nll_delta")
+    final_vs_unigram = summary.get("final_vs_unigram_nll_delta")
     delta_acc = summary.get("validation_accuracy_delta")
     if not isinstance(delta_nll, (int, float)):
         delta_nll = None
+    if not isinstance(final_vs_unigram, (int, float)):
+        final_vs_unigram = None
     if not isinstance(delta_acc, (int, float)):
         delta_acc = None
 
@@ -102,9 +109,14 @@ def row_for(raw: str) -> tuple[dict[str, str], Path]:
             "init_nll": fmt_float(init_nll),
             "final_nll": fmt_float(final_nll),
             "delta_nll": fmt_float(float(delta_nll) if delta_nll is not None else None),
+            "unigram_nll": fmt_float(unigram_nll),
+            "final_vs_unigram": fmt_float(
+                float(final_vs_unigram) if final_vs_unigram is not None else None
+            ),
             "final_ppl": fmt_float(metric_value(final, "perplexity")),
             "final_acc": fmt_percent(metric_value(final, "accuracy")),
             "final_entropy": fmt_float(metric_value(final, "mean_entropy")),
+            "final_rank": fmt_float(metric_value(final, "mean_target_rank"), digits=2),
             "delta_acc": fmt_percent(float(delta_acc) if delta_acc is not None else None),
             "best_epoch": str(summary.get("best_validation_epoch", "-")),
         },
@@ -119,9 +131,12 @@ def markdown_table(rows: list[dict[str, str]]) -> str:
         "init_nll",
         "final_nll",
         "delta_nll",
+        "unigram_nll",
+        "final_vs_unigram",
         "final_ppl",
         "final_acc",
         "final_entropy",
+        "final_rank",
         "delta_acc",
         "best_epoch",
     ]
@@ -152,6 +167,7 @@ def curve_rows_for(summary_row: dict[str, str], run_dir: Path) -> list[dict[str,
                 "val_ppl": fmt_float(metric_value(validation, "perplexity")),
                 "val_acc": fmt_percent(metric_value(validation, "accuracy")),
                 "val_entropy": fmt_float(metric_value(validation, "mean_entropy")),
+                "val_rank": fmt_float(metric_value(validation, "mean_target_rank"), digits=2),
                 "update_l2": fmt_float(learnability_value(metric, "total_update_l2"), digits=6),
                 "update_ratio": fmt_float(
                     learnability_value(metric, "mean_update_to_value_l2"), digits=6
@@ -171,6 +187,7 @@ def curve_table(rows: list[dict[str, str]]) -> str:
         "val_ppl",
         "val_acc",
         "val_entropy",
+        "val_rank",
         "update_l2",
         "update_ratio",
     ]
