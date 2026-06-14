@@ -59,6 +59,29 @@ impl ZSpaceCoherenceWaveBlock {
         kernel_size: usize,
         dilations: Vec<usize>,
     ) -> PureResult<Self> {
+        Self::with_self_score_scale(
+            dim,
+            steps,
+            memory,
+            curvature,
+            temperature,
+            kernel_size,
+            dilations,
+            1.0,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_self_score_scale(
+        dim: usize,
+        steps: usize,
+        memory: usize,
+        curvature: f32,
+        temperature: f32,
+        kernel_size: usize,
+        dilations: Vec<usize>,
+        self_score_scale: f32,
+    ) -> PureResult<Self> {
         if dim == 0 || steps == 0 || memory == 0 {
             return Err(TensorError::InvalidDimensions {
                 rows: steps.max(1),
@@ -78,7 +101,14 @@ impl ZSpaceCoherenceWaveBlock {
             return Err(TensorError::EmptyInput("wave_dilations"));
         }
 
-        let scan = ZSpaceCoherenceScan::new(dim, steps, memory, curvature, temperature)?;
+        let scan = ZSpaceCoherenceScan::with_self_score_scale(
+            dim,
+            steps,
+            memory,
+            curvature,
+            temperature,
+            self_score_scale,
+        )?;
         let mut scans = Vec::with_capacity(dilations.len());
         for (idx, dilation) in dilations.into_iter().enumerate() {
             let padding = dilation.saturating_mul(kernel_size.saturating_sub(1)) / 2;

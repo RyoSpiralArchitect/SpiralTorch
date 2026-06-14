@@ -14,6 +14,7 @@ copy-pastable models that act as reference implementations for both Python and R
 - Demo corpus folder: `models/samples/spiral_corpus_en/` (multiple `.txt` files)
 - Run outputs: `models/runs/<timestamp>/` (e.g. `run.json`, `metrics.jsonl`, `samples/`, `weights.json` / `weights.bin`)
 - Rust char-LM examples also write `best_weights.json` plus `samples/best_epoch_*.txt` when validation improves; pass `--early-stop-patience N` to stop after N non-improving validation epochs.
+- Rust char-LM coherence examples default to `--self-score-scale 0.0` so the scan context is not dominated by the query token matching itself; use `1.0` for legacy self-inclusive scans.
 - Python scripts accept `--backend cpu|wgpu|cuda|hip|auto`, `--events <path>`, `--atlas`, `--desire` (applies offsets during sampling), and `--softlogic-*` tuning flags (captured in `run.json`).
 - WGPU quickstart (build + run): `bash scripts/wgpu_quickstart.sh`
 - Python: `PYTHONNOUSERSITE=1 python3 -S -s models/python/mlp_regression.py [--activation gelu --norm zspace]`
