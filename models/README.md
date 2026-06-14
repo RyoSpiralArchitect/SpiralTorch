@@ -14,6 +14,7 @@ copy-pastable models that act as reference implementations for both Python and R
 - Demo corpus folder: `models/samples/spiral_corpus_en/` (multiple `.txt` files)
 - Run outputs: `models/runs/<timestamp>/` (e.g. `run.json`, `metrics.jsonl`, `samples/`, `weights.json` / `weights.bin`)
 - Rust char-LM examples also write `best_weights.json` plus `samples/best_epoch_*.txt` when validation improves; pass `--early-stop-patience N` to stop after N non-improving validation epochs.
+- Rust char-LM examples default to `--char-feature token-bigram`, adding a trainable previous-token/current-token embedding on top of the token embedding. Use `--char-feature token` for the older token-only input; older checkpoints without this metadata load as `token`.
 - Rust char-LM examples default to `--head-prior learned-unigram`, a trainable unigram-initialized logit bias. Use `--head-prior unigram` for the old fixed prior or `--head-prior none` to test the model without a frequency prior.
 - Rust char-LM coherence examples default to `--self-score-scale 0.0` so the scan context is not dominated by the query token matching itself; use `1.0` for legacy self-inclusive scans.
 - Coherence examples also expose `--query-residual-scale` (default `1.0` for new runs, `0.0` when loading older checkpoints without metadata) so the current token embedding can stay visible beside the Z-space context.

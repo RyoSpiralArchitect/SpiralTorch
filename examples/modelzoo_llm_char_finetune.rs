@@ -14,10 +14,11 @@ mod text_corpus;
 
 use char_lm_eval::{
     capture_parameter_snapshot, evaluate_next_token_with_unigram_lift, evaluate_unigram_next_token,
-    head_prior_is_enabled, insert_head_prior, linear_with_weight_rms, residual_logit_scaler,
-    split_train_validation_tokens, summarize_learnability, validate_head_prior,
-    validate_head_residual_scale, write_summary, CharLmInputMode, LanguageEvalMetric,
-    LearnabilityMetric, TrainingSummary, DEFAULT_HEAD_RESIDUAL_SCALE, HEAD_PRIOR_LEARNED_UNIGRAM,
+    head_prior_is_enabled, insert_head_prior, linear_with_weight_rms, push_char_embedding,
+    residual_logit_scaler, split_train_validation_tokens, summarize_learnability,
+    validate_char_feature, validate_head_prior, validate_head_residual_scale, write_summary,
+    CharLmInputMode, LanguageEvalMetric, LearnabilityMetric, TrainingSummary, CHAR_FEATURE_TOKEN,
+    DEFAULT_CHAR_FEATURE, DEFAULT_HEAD_RESIDUAL_SCALE, HEAD_PRIOR_LEARNED_UNIGRAM,
 };
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -28,7 +29,7 @@ use st_core::plugin::{
 use st_nn::layers::spiral_rnn::SpiralRnn;
 use st_nn::layers::ZSpaceSoftmax;
 use st_nn::{
-    load_json, save_json, CategoricalCrossEntropy, Embedding, Module, ModuleTrainer, PureResult,
+    load_json, save_json, CategoricalCrossEntropy, Module, ModuleTrainer, PureResult,
     RoundtableConfig, Sequential, Tensor, TensorError,
 };
 use std::collections::{BTreeSet, HashMap};
@@ -43,6 +44,10 @@ const FORMAT_ID_V2: &str = "st-char-lm-v2";
 const DEFAULT_UNK: char = '\u{FFFD}';
 const RUN_SCHEMA: &str = "st.modelzoo.run.v1";
 const DEFAULT_LINEAR_WEIGHT_RMS: f32 = 0.1;
+
+fn legacy_char_feature() -> String {
+    CHAR_FEATURE_TOKEN.to_string()
+}
 
 #[derive(Debug, Clone, Serialize)]
 struct RunMeta {
@@ -60,6 +65,7 @@ struct RunMeta {
     hidden: usize,
     embed_dim: Option<usize>,
     mode: String,
+    char_feature: String,
     head_weight_rms: f32,
     head_residual_scale: Option<f32>,
     head_prior: String,
@@ -146,6 +152,8 @@ struct CharLmMeta {
     temperature: f32,
     #[serde(default)]
     embed_dim: Option<usize>,
+    #[serde(default = "legacy_char_feature")]
+    char_feature: String,
     #[serde(default)]
     head_prior: Option<String>,
     #[serde(default)]
@@ -159,6 +167,7 @@ impl CharLmMeta {
         steps: usize,
         hidden: usize,
         embed_dim: Option<usize>,
+        char_feature: Option<String>,
         head_prior: Option<String>,
         head_residual_scale: Option<f32>,
         curvature: f32,
@@ -176,6 +185,7 @@ impl CharLmMeta {
             curvature,
             temperature,
             embed_dim,
+            char_feature: char_feature.unwrap_or_else(legacy_char_feature),
             head_prior,
             head_residual_scale,
             unk: vocab.unk,
@@ -194,6 +204,7 @@ struct Args {
     events: Option<PathBuf>,
     steps: usize,
     embed_dim: usize,
+    char_feature: String,
     hidden: usize,
     head_weight_rms: f32,
     head_residual_scale: f32,
@@ -225,7 +236,7 @@ impl Args {
         }
         if data_args.is_empty() {
             return Err(TensorError::Generic(
-                "usage: cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram|learned-unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--early-stop-patience N] [--prompt STR]"
+                "usage: cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--char-feature token|token-bigram] [--hidden N] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram|learned-unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--early-stop-patience N] [--prompt STR]"
                     .to_string(),
             ));
         }
@@ -239,6 +250,7 @@ impl Args {
             events: None,
             steps: 32,
             embed_dim: 32,
+            char_feature: DEFAULT_CHAR_FEATURE.to_string(),
             hidden: 64,
             head_weight_rms: DEFAULT_LINEAR_WEIGHT_RMS,
             head_residual_scale: DEFAULT_HEAD_RESIDUAL_SCALE,
@@ -269,6 +281,7 @@ impl Args {
                 "--events" => args.events = Some(PathBuf::from(take_arg(&mut argv, "--events")?)),
                 "--steps" => args.steps = take_parse(&mut argv, "--steps")?,
                 "--embed-dim" => args.embed_dim = take_parse(&mut argv, "--embed-dim")?,
+                "--char-feature" => args.char_feature = take_arg(&mut argv, "--char-feature")?,
                 "--hidden" => args.hidden = take_parse(&mut argv, "--hidden")?,
                 "--head-rms" => args.head_weight_rms = take_parse(&mut argv, "--head-rms")?,
                 "--head-residual-scale" => {
@@ -294,7 +307,7 @@ impl Args {
                 "--prompt" => args.prompt = Some(take_arg(&mut argv, "--prompt")?),
                 "--help" | "-h" => {
                     return Err(TensorError::Generic(
-                        "usage: cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram|learned-unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--early-stop-patience N] [--prompt STR]"
+                        "usage: cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--char-feature token|token-bigram] [--hidden N] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram|learned-unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--early-stop-patience N] [--prompt STR]"
                             .to_string(),
                     ));
                 }
@@ -317,6 +330,7 @@ impl Args {
                 value: args.head_weight_rms,
             });
         }
+        validate_char_feature(&args.char_feature)?;
         validate_head_prior(&args.head_prior)?;
         validate_head_residual_scale(args.head_residual_scale)?;
         if !args.validation_fraction.is_finite()
@@ -395,6 +409,7 @@ fn default_run_dir() -> PathBuf {
 fn build_model(
     vocab_size: usize,
     embed_dim: Option<usize>,
+    char_feature: Option<&str>,
     steps: usize,
     hidden: usize,
     head_weight_rms: f32,
@@ -404,7 +419,13 @@ fn build_model(
 ) -> PureResult<Sequential> {
     let mut model = Sequential::new();
     if let Some(embed_dim) = embed_dim {
-        model.push(Embedding::new("embed", vocab_size, embed_dim)?);
+        push_char_embedding(
+            &mut model,
+            "embed",
+            vocab_size,
+            embed_dim,
+            char_feature.unwrap_or(CHAR_FEATURE_TOKEN),
+        )?;
         model.push(SpiralRnn::new("char_rnn", embed_dim, hidden, steps)?);
     } else {
         model.push(SpiralRnn::new("char_rnn", vocab_size, hidden, steps)?);
@@ -657,10 +678,14 @@ fn main() -> PureResult<()> {
                 "meta format st-char-lm-v2 requires embed_dim".to_string(),
             ));
         }
+        if meta.embed_dim.is_some() {
+            validate_char_feature(&meta.char_feature)?;
+        }
         let vocab = Vocab::from_symbols(meta.unk, meta.symbols);
         let mut model = build_model(
             vocab.len(),
             meta.embed_dim,
+            Some(meta.char_feature.as_str()),
             meta.steps,
             meta.hidden,
             args.head_weight_rms,
@@ -689,6 +714,7 @@ fn main() -> PureResult<()> {
         let model = build_model(
             vocab.len(),
             Some(args.embed_dim),
+            Some(args.char_feature.as_str()),
             args.steps,
             args.hidden,
             args.head_weight_rms,
@@ -716,6 +742,16 @@ fn main() -> PureResult<()> {
     } else {
         Some(args.embed_dim)
     };
+    let char_feature = if let Some(ref weights_path) = loaded_from {
+        let meta_path = meta_path_for_weights(weights_path);
+        let meta = read_meta(&meta_path)?;
+        meta.embed_dim.map(|_| meta.char_feature)
+    } else {
+        Some(args.char_feature.clone())
+    };
+    let char_feature_label = char_feature
+        .clone()
+        .unwrap_or_else(|| "one_hot".to_string());
 
     let mut model = model;
     if let Some(weights_path) = loaded_from.as_ref() {
@@ -760,7 +796,7 @@ fn main() -> PureResult<()> {
     model.attach_hypergrad(curvature, args.learning_rate)?;
 
     let mode = embed_dim
-        .map(|dim| format!("embedding({dim})"))
+        .map(|dim| format!("embedding({dim},{char_feature_label})"))
         .unwrap_or_else(|| "one_hot".to_string());
     let prompt = args
         .prompt
@@ -795,6 +831,7 @@ fn main() -> PureResult<()> {
         hidden,
         embed_dim,
         mode: mode.clone(),
+        char_feature: char_feature_label.clone(),
         head_weight_rms: args.head_weight_rms,
         head_residual_scale,
         head_prior: head_prior.clone(),
@@ -849,7 +886,7 @@ fn main() -> PureResult<()> {
     let mut loss = CategoricalCrossEntropy::new();
 
     println!(
-        "mode={mode} backend={} vocab={} files={} chars={} train_tokens={} validation_tokens={} steps={} hidden={} head_rms={} head_residual_scale={} head_prior={} epochs={} batch={} lr={:.3e} curvature={} temp={} run_dir={}",
+        "mode={mode} backend={} vocab={} files={} chars={} train_tokens={} validation_tokens={} steps={} hidden={} char_feature={} head_rms={} head_residual_scale={} head_prior={} epochs={} batch={} lr={:.3e} curvature={} temp={} run_dir={}",
         backend_sel.label,
         vocab.len(),
         data_files.len(),
@@ -858,6 +895,7 @@ fn main() -> PureResult<()> {
         split.validation.len(),
         steps,
         hidden,
+        char_feature_label,
         args.head_weight_rms,
         head_residual_scale
             .map(|value| format!("{value:.3}"))
@@ -932,6 +970,7 @@ fn main() -> PureResult<()> {
         steps,
         hidden,
         embed_dim,
+        char_feature,
         meta_head_prior,
         meta_head_residual_scale,
         curvature,

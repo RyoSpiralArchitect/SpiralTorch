@@ -3,7 +3,7 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 
 use serde::Serialize;
-use st_nn::{Linear, Module, Parameter, PureResult, Sequential, Tensor, TensorError};
+use st_nn::{Embedding, Linear, Module, Parameter, PureResult, Sequential, Tensor, TensorError};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
@@ -109,7 +109,35 @@ pub struct LearnabilityMetric {
 pub const HEAD_PRIOR_NONE: &str = "none";
 pub const HEAD_PRIOR_UNIGRAM: &str = "unigram";
 pub const HEAD_PRIOR_LEARNED_UNIGRAM: &str = "learned-unigram";
+pub const CHAR_FEATURE_TOKEN: &str = "token";
+pub const CHAR_FEATURE_TOKEN_BIGRAM: &str = "token-bigram";
+pub const DEFAULT_CHAR_FEATURE: &str = CHAR_FEATURE_TOKEN_BIGRAM;
 pub const DEFAULT_HEAD_RESIDUAL_SCALE: f32 = 1.0;
+
+pub fn validate_char_feature(value: &str) -> PureResult<()> {
+    match value {
+        CHAR_FEATURE_TOKEN | CHAR_FEATURE_TOKEN_BIGRAM => Ok(()),
+        _ => Err(TensorError::Generic(format!(
+            "invalid --char-feature {value}; expected {CHAR_FEATURE_TOKEN} or {CHAR_FEATURE_TOKEN_BIGRAM}"
+        ))),
+    }
+}
+
+fn token_to_index(value: f32, vocab_size: usize) -> usize {
+    if vocab_size == 0 || !value.is_finite() {
+        return 0;
+    }
+    let rounded = value.round();
+    if !rounded.is_finite() {
+        return 0;
+    }
+    let idx = rounded as isize;
+    if idx <= 0 {
+        return 0;
+    }
+    let max = vocab_size.saturating_sub(1) as isize;
+    idx.min(max) as usize
+}
 
 pub fn validate_head_prior(value: &str) -> PureResult<()> {
     match value {
@@ -122,6 +150,158 @@ pub fn validate_head_prior(value: &str) -> PureResult<()> {
 
 pub fn head_prior_is_enabled(value: &str) -> bool {
     matches!(value, HEAD_PRIOR_UNIGRAM | HEAD_PRIOR_LEARNED_UNIGRAM)
+}
+
+#[derive(Debug)]
+pub struct CharFeatureEmbedding {
+    token: Embedding,
+    bigram: Parameter,
+    vocab_size: usize,
+    embed_dim: usize,
+}
+
+impl CharFeatureEmbedding {
+    pub fn new(name: impl Into<String>, vocab_size: usize, embed_dim: usize) -> PureResult<Self> {
+        if vocab_size == 0 || embed_dim == 0 {
+            return Err(TensorError::InvalidDimensions {
+                rows: vocab_size.max(1),
+                cols: embed_dim.max(1),
+            });
+        }
+        let name = name.into();
+        let bigram_rows =
+            vocab_size
+                .checked_mul(vocab_size)
+                .ok_or(TensorError::InvalidDimensions {
+                    rows: vocab_size,
+                    cols: vocab_size,
+                })?;
+        Ok(Self {
+            token: Embedding::new(name.clone(), vocab_size, embed_dim)?,
+            bigram: Parameter::new(
+                format!("{name}::bigram_weight"),
+                Tensor::zeros(bigram_rows, embed_dim)?,
+            ),
+            vocab_size,
+            embed_dim,
+        })
+    }
+
+    fn bigram_index(&self, previous: usize, current: usize) -> usize {
+        previous * self.vocab_size + current
+    }
+}
+
+impl Module for CharFeatureEmbedding {
+    fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+        let (batch, steps) = input.shape();
+        let output_cols = steps * self.embed_dim;
+        let mut output = self.token.forward(input)?;
+        if output.shape() != (batch, output_cols) {
+            return Err(TensorError::ShapeMismatch {
+                left: output.shape(),
+                right: (batch, output_cols),
+            });
+        }
+        if batch == 0 || steps == 0 {
+            return Ok(output);
+        }
+
+        let input_data = input.data();
+        let bigram_data = self.bigram.value().data();
+        let output_data = output.data_mut();
+        for b in 0..batch {
+            let input_row = b * steps;
+            let output_row = b * output_cols;
+            let mut previous = 0usize;
+            for t in 0..steps {
+                let current = token_to_index(input_data[input_row + t], self.vocab_size);
+                let bigram_base = self.bigram_index(previous, current) * self.embed_dim;
+                let output_base = output_row + t * self.embed_dim;
+                for c in 0..self.embed_dim {
+                    output_data[output_base + c] += bigram_data[bigram_base + c];
+                }
+                previous = current;
+            }
+        }
+        Ok(output)
+    }
+
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        let (batch, steps) = input.shape();
+        let output_cols = steps * self.embed_dim;
+        if grad_output.shape() != (batch, output_cols) {
+            return Err(TensorError::ShapeMismatch {
+                left: grad_output.shape(),
+                right: (batch, output_cols),
+            });
+        }
+        let grad_input = self.token.backward(input, grad_output)?;
+        if batch == 0 || steps == 0 {
+            return Ok(grad_input);
+        }
+
+        let input_data = input.data();
+        let grad_data = grad_output.data();
+        let mut grad_bigram = vec![0.0f32; self.vocab_size * self.vocab_size * self.embed_dim];
+        for b in 0..batch {
+            let input_row = b * steps;
+            let grad_row = b * output_cols;
+            let mut previous = 0usize;
+            for t in 0..steps {
+                let current = token_to_index(input_data[input_row + t], self.vocab_size);
+                let gb_base = self.bigram_index(previous, current) * self.embed_dim;
+                let go_base = grad_row + t * self.embed_dim;
+                for c in 0..self.embed_dim {
+                    grad_bigram[gb_base + c] += grad_data[go_base + c];
+                }
+                previous = current;
+            }
+        }
+        let grad_w = Tensor::from_vec(
+            self.vocab_size * self.vocab_size,
+            self.embed_dim,
+            grad_bigram,
+        )?
+        .scale(1.0 / batch as f32)?;
+        self.bigram.accumulate_euclidean(&grad_w)?;
+        Ok(grad_input)
+    }
+
+    fn visit_parameters(
+        &self,
+        visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        self.token.visit_parameters(visitor)?;
+        visitor(&self.bigram)?;
+        Ok(())
+    }
+
+    fn visit_parameters_mut(
+        &mut self,
+        visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        self.token.visit_parameters_mut(visitor)?;
+        visitor(&mut self.bigram)?;
+        Ok(())
+    }
+}
+
+pub fn push_char_embedding(
+    model: &mut Sequential,
+    name: &str,
+    vocab_size: usize,
+    embed_dim: usize,
+    char_feature: &str,
+) -> PureResult<()> {
+    match char_feature {
+        CHAR_FEATURE_TOKEN => model.push(Embedding::new(name, vocab_size, embed_dim)?),
+        CHAR_FEATURE_TOKEN_BIGRAM => {
+            model.push(CharFeatureEmbedding::new(name, vocab_size, embed_dim)?)
+        }
+        _ => validate_char_feature(char_feature)?,
+    }
+    Ok(())
 }
 
 pub fn linear_with_weight_rms(
