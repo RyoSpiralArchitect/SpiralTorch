@@ -16,6 +16,7 @@ struct CoherenceScanCache {
     steps: usize,
     dim: usize,
     weights: Vec<f32>,
+    query_residual_scale: f32,
 }
 
 /// Temporal coherence scan that aggregates the last `memory` tokens of a
@@ -32,6 +33,7 @@ pub struct ZSpaceCoherenceScan {
     curvature: f32,
     temperature: f32,
     self_score_scale: f32,
+    query_residual_scale: f32,
     cache: RefCell<Option<CoherenceScanCache>>,
 }
 
@@ -43,7 +45,7 @@ impl ZSpaceCoherenceScan {
         curvature: f32,
         temperature: f32,
     ) -> PureResult<Self> {
-        Self::with_self_score_scale(dim, steps, memory, curvature, temperature, 1.0)
+        Self::with_output_scales(dim, steps, memory, curvature, temperature, 1.0, 0.0)
     }
 
     pub fn with_self_score_scale(
@@ -53,6 +55,27 @@ impl ZSpaceCoherenceScan {
         curvature: f32,
         temperature: f32,
         self_score_scale: f32,
+    ) -> PureResult<Self> {
+        Self::with_output_scales(
+            dim,
+            steps,
+            memory,
+            curvature,
+            temperature,
+            self_score_scale,
+            0.0,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_output_scales(
+        dim: usize,
+        steps: usize,
+        memory: usize,
+        curvature: f32,
+        temperature: f32,
+        self_score_scale: f32,
+        query_residual_scale: f32,
     ) -> PureResult<Self> {
         if dim == 0 || steps == 0 || memory == 0 {
             return Err(TensorError::InvalidDimensions {
@@ -81,6 +104,12 @@ impl ZSpaceCoherenceScan {
                 value: self_score_scale,
             });
         }
+        if query_residual_scale < 0.0 || !query_residual_scale.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "zspace_coherence_scan_query_residual_scale",
+                value: query_residual_scale,
+            });
+        }
 
         Ok(Self {
             dim,
@@ -89,6 +118,7 @@ impl ZSpaceCoherenceScan {
             curvature,
             temperature,
             self_score_scale,
+            query_residual_scale,
             cache: RefCell::new(None),
         })
     }
@@ -115,6 +145,10 @@ impl ZSpaceCoherenceScan {
 
     pub fn self_score_scale(&self) -> f32 {
         self.self_score_scale
+    }
+
+    pub fn query_residual_scale(&self) -> f32 {
+        self.query_residual_scale
     }
 
     fn coherence_order(&self) -> f32 {
@@ -216,6 +250,11 @@ impl Module for ZSpaceCoherenceScan {
                     *dst += w * src;
                 }
             }
+            if self.query_residual_scale > 0.0 {
+                for (dst, &src) in out_slice.iter_mut().zip(query.iter()) {
+                    *dst += self.query_residual_scale * src;
+                }
+            }
         }
 
         *self.cache.borrow_mut() = Some(CoherenceScanCache {
@@ -223,6 +262,7 @@ impl Module for ZSpaceCoherenceScan {
             steps: self.steps,
             dim: self.dim,
             weights,
+            query_residual_scale: self.query_residual_scale,
         });
         Ok(output)
     }
@@ -264,6 +304,15 @@ impl Module for ZSpaceCoherenceScan {
                     let gi_offset = b * expected_cols + step * cache.dim;
                     for d in 0..cache.dim {
                         gi[gi_offset + d] += w * go[go_offset + d];
+                    }
+                }
+            }
+            if cache.query_residual_scale > 0.0 {
+                for b in 0..cache.batch {
+                    let go_offset = b * cache.dim;
+                    let gi_offset = b * expected_cols + (cache.steps - 1) * cache.dim;
+                    for d in 0..cache.dim {
+                        gi[gi_offset + d] += cache.query_residual_scale * go[go_offset + d];
                     }
                 }
             }
@@ -353,5 +402,34 @@ mod tests {
         let row = out.data();
         assert!((row[0] - 2.0).abs() < 1e-4);
         assert!(row[1].abs() < 1e-4);
+    }
+
+    #[test]
+    fn coherence_scan_can_blend_query_residual() {
+        let mut scan =
+            ZSpaceCoherenceScan::with_output_scales(2, 3, 2, -1.0, 1.0, 0.0, 0.5).unwrap();
+        let input = Tensor::from_vec(
+            1,
+            6,
+            vec![
+                0.0, 0.0, //
+                2.0, 4.0, //
+                10.0, 20.0, //
+            ],
+        )
+        .unwrap();
+        let out = scan.forward(&input).unwrap();
+        assert_eq!(out.data(), &[7.0, 14.0]);
+
+        let grad_out = Tensor::from_vec(1, 2, vec![1.0, 2.0]).unwrap();
+        let grad_in = scan.backward(&input, &grad_out).unwrap();
+        assert_eq!(
+            grad_in.data(),
+            &[
+                0.0, 0.0, //
+                1.0, 2.0, //
+                0.5, 1.0, //
+            ]
+        );
     }
 }

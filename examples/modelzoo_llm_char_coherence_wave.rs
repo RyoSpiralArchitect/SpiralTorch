@@ -44,9 +44,14 @@ const DEFAULT_UNK: char = '\u{FFFD}';
 const RUN_SCHEMA: &str = "st.modelzoo.run.v1";
 const DEFAULT_LINEAR_WEIGHT_RMS: f32 = 0.1;
 const DEFAULT_SELF_SCORE_SCALE: f32 = 0.0;
+const DEFAULT_QUERY_RESIDUAL_SCALE: f32 = 1.0;
 
 fn legacy_self_score_scale() -> f32 {
     1.0
+}
+
+fn legacy_query_residual_scale() -> f32 {
+    0.0
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -68,6 +73,7 @@ struct RunMeta {
     kernel: usize,
     dilations: Vec<usize>,
     self_score_scale: f32,
+    query_residual_scale: f32,
     mix_weight_rms: f32,
     head_weight_rms: f32,
     head_residual_scale: Option<f32>,
@@ -160,6 +166,8 @@ struct CharLmMeta {
     dilations: Vec<usize>,
     #[serde(default = "legacy_self_score_scale")]
     self_score_scale: f32,
+    #[serde(default = "legacy_query_residual_scale")]
+    query_residual_scale: f32,
     #[serde(default)]
     head_prior: Option<String>,
     #[serde(default)]
@@ -180,6 +188,7 @@ impl CharLmMeta {
         kernel: usize,
         dilations: Vec<usize>,
         self_score_scale: f32,
+        query_residual_scale: f32,
         head_prior: Option<String>,
         head_residual_scale: Option<f32>,
         curvature: f32,
@@ -195,6 +204,7 @@ impl CharLmMeta {
             kernel,
             dilations,
             self_score_scale,
+            query_residual_scale,
             head_prior,
             head_residual_scale,
             curvature,
@@ -220,6 +230,7 @@ struct Args {
     kernel: usize,
     dilations: Vec<usize>,
     self_score_scale: f32,
+    query_residual_scale: f32,
     mix_weight_rms: f32,
     head_weight_rms: f32,
     head_residual_scale: f32,
@@ -254,7 +265,7 @@ impl Args {
         }
         if data_args.is_empty() {
             return Err(TensorError::Generic(
-                "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--kernel N] [--dilations 1,2,4] [--self-score-scale F] [--mix-rms F] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--early-stop-patience N] [--prompt STR] [--infuse STR] [--infuse-every once|epoch|batch] [--infuse-mode blend|separate]"
+                "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--kernel N] [--dilations 1,2,4] [--self-score-scale F] [--query-residual-scale F] [--mix-rms F] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--early-stop-patience N] [--prompt STR] [--infuse STR] [--infuse-every once|epoch|batch] [--infuse-mode blend|separate]"
                     .to_string(),
             ));
         }
@@ -273,6 +284,7 @@ impl Args {
             kernel: 3,
             dilations: vec![1, 2, 4],
             self_score_scale: DEFAULT_SELF_SCORE_SCALE,
+            query_residual_scale: DEFAULT_QUERY_RESIDUAL_SCALE,
             mix_weight_rms: DEFAULT_LINEAR_WEIGHT_RMS,
             head_weight_rms: DEFAULT_LINEAR_WEIGHT_RMS,
             head_residual_scale: DEFAULT_HEAD_RESIDUAL_SCALE,
@@ -315,6 +327,9 @@ impl Args {
                 "--self-score-scale" => {
                     args.self_score_scale = take_parse(&mut argv, "--self-score-scale")?
                 }
+                "--query-residual-scale" => {
+                    args.query_residual_scale = take_parse(&mut argv, "--query-residual-scale")?
+                }
                 "--mix-rms" => args.mix_weight_rms = take_parse(&mut argv, "--mix-rms")?,
                 "--head-rms" => args.head_weight_rms = take_parse(&mut argv, "--head-rms")?,
                 "--head-residual-scale" => {
@@ -343,7 +358,7 @@ impl Args {
                 "--infuse-mode" => args.infuse_mode = Some(take_arg(&mut argv, "--infuse-mode")?),
                 "--help" | "-h" => {
                     return Err(TensorError::Generic(
-                        "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--kernel N] [--dilations 1,2,4] [--self-score-scale F] [--mix-rms F] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--early-stop-patience N] [--prompt STR] [--infuse STR] [--infuse-every once|epoch|batch] [--infuse-mode blend|separate]"
+                        "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--kernel N] [--dilations 1,2,4] [--self-score-scale F] [--query-residual-scale F] [--mix-rms F] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--early-stop-patience N] [--prompt STR] [--infuse STR] [--infuse-every once|epoch|batch] [--infuse-mode blend|separate]"
                             .to_string(),
                     ));
                 }
@@ -376,6 +391,12 @@ impl Args {
             return Err(TensorError::NonFiniteValue {
                 label: "char_lm_coherence_wave_self_score_scale",
                 value: args.self_score_scale,
+            });
+        }
+        if args.query_residual_scale < 0.0 || !args.query_residual_scale.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "char_lm_coherence_wave_query_residual_scale",
+                value: args.query_residual_scale,
             });
         }
         if args.mix_weight_rms <= 0.0 || !args.mix_weight_rms.is_finite() {
@@ -522,6 +543,7 @@ fn build_model(
     kernel: usize,
     dilations: Vec<usize>,
     self_score_scale: f32,
+    query_residual_scale: f32,
     mix_weight_rms: f32,
     head_weight_rms: f32,
     head_residual_scale: Option<f32>,
@@ -530,7 +552,7 @@ fn build_model(
 ) -> PureResult<Sequential> {
     let mut model = Sequential::new();
     model.push(Embedding::new("embed", vocab_size, embed_dim)?);
-    model.push(ZSpaceCoherenceWaveBlock::with_self_score_scale(
+    model.push(ZSpaceCoherenceWaveBlock::with_output_scales(
         embed_dim,
         steps,
         memory,
@@ -539,6 +561,7 @@ fn build_model(
         kernel,
         dilations,
         self_score_scale,
+        query_residual_scale,
     )?);
     model.push(linear_with_weight_rms(
         "mix",
@@ -742,6 +765,7 @@ fn main() -> PureResult<()> {
         kernel,
         dilations,
         self_score_scale,
+        query_residual_scale,
         curvature,
         temperature,
         vocab,
@@ -764,6 +788,12 @@ fn main() -> PureResult<()> {
                 value: meta.self_score_scale,
             });
         }
+        if meta.query_residual_scale < 0.0 || !meta.query_residual_scale.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "char_lm_coherence_wave_meta_query_residual_scale",
+                value: meta.query_residual_scale,
+            });
+        }
         let vocab = Vocab::from_symbols(meta.unk, meta.symbols);
         let mut model = build_model(
             vocab.len(),
@@ -774,6 +804,7 @@ fn main() -> PureResult<()> {
             meta.kernel,
             meta.dilations.clone(),
             meta.self_score_scale,
+            meta.query_residual_scale,
             args.mix_weight_rms,
             args.head_weight_rms,
             meta.head_residual_scale,
@@ -794,6 +825,7 @@ fn main() -> PureResult<()> {
             meta.kernel,
             meta.dilations.clone(),
             meta.self_score_scale,
+            meta.query_residual_scale,
             meta.curvature,
             meta.temperature,
             vocab,
@@ -813,6 +845,7 @@ fn main() -> PureResult<()> {
             args.kernel,
             args.dilations.clone(),
             args.self_score_scale,
+            args.query_residual_scale,
             args.mix_weight_rms,
             args.head_weight_rms,
             Some(args.head_residual_scale),
@@ -827,6 +860,7 @@ fn main() -> PureResult<()> {
             args.kernel,
             args.dilations.clone(),
             args.self_score_scale,
+            args.query_residual_scale,
             args.curvature,
             args.temperature,
             vocab,
@@ -908,6 +942,7 @@ fn main() -> PureResult<()> {
         kernel,
         dilations: dilations.clone(),
         self_score_scale,
+        query_residual_scale,
         mix_weight_rms: args.mix_weight_rms,
         head_weight_rms: args.head_weight_rms,
         head_residual_scale,
@@ -992,7 +1027,7 @@ fn main() -> PureResult<()> {
     let mut loss = CategoricalCrossEntropy::new();
 
     println!(
-        "arch=coherence_wave backend={} vocab={} files={} chars={} train_tokens={} validation_tokens={} steps={} embed_dim={} hidden={} memory={} kernel={} dilations={:?} self_score_scale={} mix_rms={} head_rms={} head_residual_scale={} head_prior={} epochs={} batch={} lr={:.3e} curvature={} temp={} run_dir={}",
+        "arch=coherence_wave backend={} vocab={} files={} chars={} train_tokens={} validation_tokens={} steps={} embed_dim={} hidden={} memory={} kernel={} dilations={:?} self_score_scale={} query_residual_scale={} mix_rms={} head_rms={} head_residual_scale={} head_prior={} epochs={} batch={} lr={:.3e} curvature={} temp={} run_dir={}",
         backend_sel.label,
         vocab.len(),
         data_files.len(),
@@ -1006,6 +1041,7 @@ fn main() -> PureResult<()> {
         kernel,
         dilations,
         self_score_scale,
+        query_residual_scale,
         args.mix_weight_rms,
         args.head_weight_rms,
         head_residual_scale
@@ -1080,6 +1116,7 @@ fn main() -> PureResult<()> {
         kernel,
         dilations.clone(),
         self_score_scale,
+        query_residual_scale,
         meta_head_prior,
         meta_head_residual_scale,
         curvature,
