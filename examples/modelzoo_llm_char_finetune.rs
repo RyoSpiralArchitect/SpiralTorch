@@ -7,9 +7,16 @@
 
 #[path = "_shared/backend.rs"]
 mod backend;
+#[path = "_shared/char_lm_eval.rs"]
+mod char_lm_eval;
 #[path = "_shared/text_corpus.rs"]
 mod text_corpus;
 
+use char_lm_eval::{
+    capture_parameter_snapshot, evaluate_next_token, linear_with_weight_rms,
+    split_train_validation_tokens, summarize_learnability, write_summary, CharLmInputMode,
+    LanguageEvalMetric, LearnabilityMetric, TrainingSummary,
+};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
@@ -33,6 +40,7 @@ const FORMAT_ID_V1: &str = "st-char-lm-v1";
 const FORMAT_ID_V2: &str = "st-char-lm-v2";
 const DEFAULT_UNK: char = '\u{FFFD}';
 const RUN_SCHEMA: &str = "st.modelzoo.run.v1";
+const DEFAULT_LINEAR_WEIGHT_RMS: f32 = 0.1;
 
 #[derive(Debug, Clone, Serialize)]
 struct RunMeta {
@@ -50,6 +58,7 @@ struct RunMeta {
     hidden: usize,
     embed_dim: Option<usize>,
     mode: String,
+    head_weight_rms: f32,
     epochs: usize,
     batches_per_epoch: usize,
     batch: usize,
@@ -59,6 +68,11 @@ struct RunMeta {
     gen_len: usize,
     top_k: usize,
     seed: u64,
+    validation_fraction_requested: f32,
+    validation_fraction_actual: f32,
+    eval_samples: usize,
+    train_tokens: usize,
+    validation_tokens: usize,
     prompt: String,
     vocab_size: usize,
 }
@@ -68,6 +82,8 @@ struct EpochMetric {
     epoch: usize,
     batches: usize,
     average_loss: f32,
+    validation: Option<LanguageEvalMetric>,
+    learnability: LearnabilityMetric,
 }
 
 #[derive(Debug, Clone)]
@@ -166,6 +182,7 @@ struct Args {
     steps: usize,
     embed_dim: usize,
     hidden: usize,
+    head_weight_rms: f32,
     epochs: usize,
     batches_per_epoch: usize,
     batch: usize,
@@ -175,6 +192,8 @@ struct Args {
     gen_len: usize,
     top_k: usize,
     seed: u64,
+    validation_fraction: f32,
+    eval_samples: usize,
     prompt: Option<String>,
 }
 
@@ -190,7 +209,7 @@ impl Args {
         }
         if data_args.is_empty() {
             return Err(TensorError::Generic(
-                "usage: cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--prompt STR]"
+                "usage: cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--head-rms F] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--prompt STR]"
                     .to_string(),
             ));
         }
@@ -205,6 +224,7 @@ impl Args {
             steps: 32,
             embed_dim: 32,
             hidden: 64,
+            head_weight_rms: DEFAULT_LINEAR_WEIGHT_RMS,
             epochs: 6,
             batches_per_epoch: 24,
             batch: 8,
@@ -214,6 +234,8 @@ impl Args {
             gen_len: 200,
             top_k: 32,
             seed: 42,
+            validation_fraction: 0.1,
+            eval_samples: 256,
             prompt: None,
         };
 
@@ -229,6 +251,7 @@ impl Args {
                 "--steps" => args.steps = take_parse(&mut argv, "--steps")?,
                 "--embed-dim" => args.embed_dim = take_parse(&mut argv, "--embed-dim")?,
                 "--hidden" => args.hidden = take_parse(&mut argv, "--hidden")?,
+                "--head-rms" => args.head_weight_rms = take_parse(&mut argv, "--head-rms")?,
                 "--epochs" => args.epochs = take_parse(&mut argv, "--epochs")?,
                 "--batches" => args.batches_per_epoch = take_parse(&mut argv, "--batches")?,
                 "--batch" => args.batch = take_parse(&mut argv, "--batch")?,
@@ -238,10 +261,14 @@ impl Args {
                 "--gen" => args.gen_len = take_parse(&mut argv, "--gen")?,
                 "--topk" => args.top_k = take_parse(&mut argv, "--topk")?,
                 "--seed" => args.seed = take_parse(&mut argv, "--seed")?,
+                "--val-fraction" => {
+                    args.validation_fraction = take_parse(&mut argv, "--val-fraction")?
+                }
+                "--eval-samples" => args.eval_samples = take_parse(&mut argv, "--eval-samples")?,
                 "--prompt" => args.prompt = Some(take_arg(&mut argv, "--prompt")?),
                 "--help" | "-h" => {
                     return Err(TensorError::Generic(
-                        "usage: cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--prompt STR]"
+                        "usage: cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--head-rms F] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--prompt STR]"
                             .to_string(),
                     ));
                 }
@@ -256,6 +283,20 @@ impl Args {
         if args.steps == 0 || args.embed_dim == 0 || args.hidden == 0 || args.batch == 0 {
             return Err(TensorError::InvalidValue {
                 label: "char_lm_invalid_dims",
+            });
+        }
+        if args.head_weight_rms <= 0.0 || !args.head_weight_rms.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "char_lm_head_weight_rms",
+                value: args.head_weight_rms,
+            });
+        }
+        if !args.validation_fraction.is_finite()
+            || args.validation_fraction < 0.0
+            || args.validation_fraction >= 1.0
+        {
+            return Err(TensorError::InvalidValue {
+                label: "char_lm_validation_fraction",
             });
         }
         Ok(args)
@@ -328,6 +369,7 @@ fn build_model(
     embed_dim: Option<usize>,
     steps: usize,
     hidden: usize,
+    head_weight_rms: f32,
     curvature: f32,
     temperature: f32,
 ) -> PureResult<Sequential> {
@@ -338,7 +380,12 @@ fn build_model(
     } else {
         model.push(SpiralRnn::new("char_rnn", vocab_size, hidden, steps)?);
     }
-    model.push(st_nn::Linear::new("head", hidden, vocab_size)?);
+    model.push(linear_with_weight_rms(
+        "head",
+        hidden,
+        vocab_size,
+        head_weight_rms,
+    )?);
     model.push(ZSpaceSoftmax::new(curvature, temperature)?);
     Ok(model)
 }
@@ -571,6 +618,7 @@ fn main() -> PureResult<()> {
                 meta.embed_dim,
                 meta.steps,
                 meta.hidden,
+                args.head_weight_rms,
                 meta.curvature,
                 meta.temperature,
             )?;
@@ -590,6 +638,7 @@ fn main() -> PureResult<()> {
                 Some(args.embed_dim),
                 args.steps,
                 args.hidden,
+                args.head_weight_rms,
                 args.curvature,
                 args.temperature,
             )?;
@@ -623,6 +672,13 @@ fn main() -> PureResult<()> {
         return Err(TensorError::Generic(format!(
             "text too short for steps={steps}: len={}",
             tokens.len()
+        )));
+    }
+    let split = split_train_validation_tokens(&tokens, steps, args.validation_fraction);
+    if split.train.len() <= steps {
+        return Err(TensorError::Generic(format!(
+            "training split too short for steps={steps}: len={}",
+            split.train.len()
         )));
     }
 
@@ -662,6 +718,7 @@ fn main() -> PureResult<()> {
         hidden,
         embed_dim,
         mode: mode.clone(),
+        head_weight_rms: args.head_weight_rms,
         epochs: args.epochs,
         batches_per_epoch: args.batches_per_epoch,
         batch: args.batch,
@@ -671,6 +728,11 @@ fn main() -> PureResult<()> {
         gen_len: args.gen_len,
         top_k: args.top_k,
         seed: args.seed,
+        validation_fraction_requested: args.validation_fraction,
+        validation_fraction_actual: split.actual_validation_fraction,
+        eval_samples: args.eval_samples,
+        train_tokens: split.train.len(),
+        validation_tokens: split.validation.len(),
         prompt: prompt.clone(),
         vocab_size: vocab.len(),
     };
@@ -707,13 +769,16 @@ fn main() -> PureResult<()> {
     let mut loss = CategoricalCrossEntropy::new();
 
     println!(
-        "mode={mode} backend={} vocab={} files={} chars={} steps={} hidden={} epochs={} batch={} lr={:.3e} curvature={} temp={} run_dir={}",
+        "mode={mode} backend={} vocab={} files={} chars={} train_tokens={} validation_tokens={} steps={} hidden={} head_rms={} epochs={} batch={} lr={:.3e} curvature={} temp={} run_dir={}",
         backend_sel.label,
         vocab.len(),
         data_files.len(),
         text.chars().count(),
+        split.train.len(),
+        split.validation.len(),
         steps,
         hidden,
+        args.head_weight_rms,
         args.epochs,
         args.batch,
         args.learning_rate,
@@ -722,13 +787,46 @@ fn main() -> PureResult<()> {
         run_dir.display()
     );
 
+    let eval_input_mode = if embed_dim.is_some() {
+        CharLmInputMode::TokenIndices
+    } else {
+        CharLmInputMode::OneHot
+    };
+    let initial_validation = evaluate_next_token(
+        &mut model,
+        vocab.len(),
+        eval_input_mode,
+        steps,
+        &split.validation,
+        args.eval_samples,
+    )?;
+    if let Some(validation) = initial_validation.as_ref() {
+        println!(
+            "validation[init] windows={} nll={:.6} ppl={} acc={:.2}%",
+            validation.windows,
+            validation.mean_nll,
+            validation
+                .perplexity
+                .map(|value| format!("{value:.3}"))
+                .unwrap_or_else(|| "overflow".to_string()),
+            validation.accuracy * 100.0
+        );
+    } else {
+        println!(
+            "validation[init] skipped: validation split is empty (increase data or --val-fraction)"
+        );
+    }
+
     let mut last_sample: Option<String> = None;
+    let mut last_validation = initial_validation.clone();
+    let mut best_validation_epoch = None;
+    let mut best_validation_mean_nll = None;
     for epoch in 0..args.epochs {
         let mut rng = ChaCha8Rng::seed_from_u64(args.seed.wrapping_add(epoch as u64 * 10_000));
         let mut batches = Vec::with_capacity(args.batches_per_epoch);
         for _ in 0..args.batches_per_epoch {
             batches.push(build_random_batch(
-                &tokens,
+                &split.train,
                 vocab.len(),
                 embed_dim,
                 steps,
@@ -736,11 +834,37 @@ fn main() -> PureResult<()> {
                 &mut rng,
             )?);
         }
+        let before_epoch = capture_parameter_snapshot(&model)?;
         let stats = trainer.train_epoch(&mut model, &mut loss, batches, &schedule)?;
+        let validation = evaluate_next_token(
+            &mut model,
+            vocab.len(),
+            eval_input_mode,
+            steps,
+            &split.validation,
+            args.eval_samples,
+        )?;
+        if let Some(validation_metric) = validation.as_ref() {
+            if best_validation_mean_nll
+                .map(|best| validation_metric.mean_nll < best)
+                .unwrap_or(true)
+            {
+                best_validation_mean_nll = Some(validation_metric.mean_nll);
+                best_validation_epoch = Some(epoch);
+            }
+        }
+        let learnability = summarize_learnability(
+            &model,
+            Some(&before_epoch),
+            Some(stats.average_loss),
+            validation.as_ref(),
+        )?;
         let metric = EpochMetric {
             epoch,
             batches: stats.batches,
             average_loss: stats.average_loss,
+            validation: validation.clone(),
+            learnability: learnability.clone(),
         };
         writeln!(
             metrics_file,
@@ -768,10 +892,42 @@ fn main() -> PureResult<()> {
             },
         )?;
         last_sample = Some(sample);
-        println!(
-            "epoch[{epoch}] batches={} avg_loss={:.6}",
-            stats.batches, stats.average_loss
-        );
+        last_validation = validation.clone();
+        if let Some(validation) = validation.as_ref() {
+            println!(
+                "epoch[{epoch}] batches={} avg_loss={:.6} val_nll={:.6} val_ppl={} val_acc={:.2}% update_l2={} update_ratio={}",
+                stats.batches,
+                stats.average_loss,
+                validation.mean_nll,
+                validation
+                    .perplexity
+                    .map(|value| format!("{value:.3}"))
+                    .unwrap_or_else(|| "overflow".to_string()),
+                validation.accuracy * 100.0,
+                learnability
+                    .total_update_l2
+                    .map(|value| format!("{value:.6}"))
+                    .unwrap_or_else(|| "-".to_string()),
+                learnability
+                    .mean_update_to_value_l2
+                    .map(|value| format!("{value:.6}"))
+                    .unwrap_or_else(|| "-".to_string())
+            );
+        } else {
+            println!(
+                "epoch[{epoch}] batches={} avg_loss={:.6} val=skipped update_l2={} update_ratio={}",
+                stats.batches,
+                stats.average_loss,
+                learnability
+                    .total_update_l2
+                    .map(|value| format!("{value:.6}"))
+                    .unwrap_or_else(|| "-".to_string()),
+                learnability
+                    .mean_update_to_value_l2
+                    .map(|value| format!("{value:.6}"))
+                    .unwrap_or_else(|| "-".to_string())
+            );
+        }
     }
 
     let meta = CharLmMeta::new(steps, hidden, embed_dim, curvature, temperature, &vocab);
@@ -809,6 +965,25 @@ fn main() -> PureResult<()> {
             sample
         }
     };
+
+    let final_validation = last_validation;
+    let validation_nll_delta = initial_validation
+        .as_ref()
+        .zip(final_validation.as_ref())
+        .map(|(initial, final_metric)| final_metric.mean_nll - initial.mean_nll);
+    let validation_accuracy_delta = initial_validation
+        .as_ref()
+        .zip(final_validation.as_ref())
+        .map(|(initial, final_metric)| final_metric.accuracy - initial.accuracy);
+    let summary = TrainingSummary {
+        initial_validation,
+        final_validation,
+        best_validation_epoch,
+        best_validation_mean_nll,
+        validation_nll_delta,
+        validation_accuracy_delta,
+    };
+    write_summary(&run_dir.join("summary.json"), &summary)?;
 
     println!("--- sample (prompt + gen) ---");
     println!("{sample}");
