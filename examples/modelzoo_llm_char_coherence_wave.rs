@@ -15,10 +15,11 @@ mod text_corpus;
 
 use char_lm_eval::{
     capture_parameter_snapshot, evaluate_next_token_with_unigram_lift, evaluate_unigram_next_token,
-    head_prior_is_enabled, insert_head_prior, linear_with_weight_rms, residual_logit_scaler,
-    split_train_validation_tokens, summarize_learnability, validate_head_prior,
-    validate_head_residual_scale, write_summary, CharLmInputMode, LanguageEvalMetric,
-    LearnabilityMetric, TrainingSummary, DEFAULT_HEAD_RESIDUAL_SCALE, HEAD_PRIOR_LEARNED_UNIGRAM,
+    head_prior_is_enabled, insert_head_prior, linear_with_weight_rms, push_char_embedding,
+    residual_logit_scaler, split_train_validation_tokens, summarize_learnability,
+    validate_char_feature, validate_head_prior, validate_head_residual_scale, write_summary,
+    CharLmInputMode, LanguageEvalMetric, LearnabilityMetric, TrainingSummary, CHAR_FEATURE_TOKEN,
+    DEFAULT_CHAR_FEATURE, DEFAULT_HEAD_RESIDUAL_SCALE, HEAD_PRIOR_LEARNED_UNIGRAM,
 };
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -28,8 +29,8 @@ use st_core::plugin::{
 };
 use st_nn::layers::ZSpaceSoftmax;
 use st_nn::{
-    load_json, save_json, CategoricalCrossEntropy, Embedding, Module, ModuleTrainer, PureResult,
-    Relu, RoundtableConfig, Sequential, Tensor, TensorError, TextInfusionEvery, TextInfusionMode,
+    load_json, save_json, CategoricalCrossEntropy, Module, ModuleTrainer, PureResult, Relu,
+    RoundtableConfig, Sequential, Tensor, TensorError, TextInfusionEvery, TextInfusionMode,
     ZSpaceCoherenceWaveBlock,
 };
 use std::collections::{BTreeSet, HashMap};
@@ -54,6 +55,10 @@ fn legacy_query_residual_scale() -> f32 {
     0.0
 }
 
+fn legacy_char_feature() -> String {
+    CHAR_FEATURE_TOKEN.to_string()
+}
+
 #[derive(Debug, Clone, Serialize)]
 struct RunMeta {
     schema: String,
@@ -68,6 +73,7 @@ struct RunMeta {
     weights_loaded_from: Option<String>,
     steps: usize,
     embed_dim: usize,
+    char_feature: String,
     hidden: usize,
     memory: usize,
     kernel: usize,
@@ -160,6 +166,8 @@ struct CharLmMeta {
     format: String,
     steps: usize,
     embed_dim: usize,
+    #[serde(default = "legacy_char_feature")]
+    char_feature: String,
     hidden: usize,
     memory: usize,
     kernel: usize,
@@ -183,6 +191,7 @@ impl CharLmMeta {
     fn new(
         steps: usize,
         embed_dim: usize,
+        char_feature: String,
         hidden: usize,
         memory: usize,
         kernel: usize,
@@ -199,6 +208,7 @@ impl CharLmMeta {
             format: FORMAT_ID.to_string(),
             steps,
             embed_dim,
+            char_feature,
             hidden,
             memory,
             kernel,
@@ -225,6 +235,7 @@ struct Args {
     events: Option<PathBuf>,
     steps: usize,
     embed_dim: usize,
+    char_feature: String,
     hidden: usize,
     memory: usize,
     kernel: usize,
@@ -265,7 +276,7 @@ impl Args {
         }
         if data_args.is_empty() {
             return Err(TensorError::Generic(
-                "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--kernel N] [--dilations 1,2,4] [--self-score-scale F] [--query-residual-scale F] [--mix-rms F] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram|learned-unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--early-stop-patience N] [--prompt STR] [--infuse STR] [--infuse-every once|epoch|batch] [--infuse-mode blend|separate]"
+                "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--char-feature token|token-bigram] [--hidden N] [--memory N] [--kernel N] [--dilations 1,2,4] [--self-score-scale F] [--query-residual-scale F] [--mix-rms F] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram|learned-unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--early-stop-patience N] [--prompt STR] [--infuse STR] [--infuse-every once|epoch|batch] [--infuse-mode blend|separate]"
                     .to_string(),
             ));
         }
@@ -279,6 +290,7 @@ impl Args {
             events: None,
             steps: 32,
             embed_dim: 32,
+            char_feature: DEFAULT_CHAR_FEATURE.to_string(),
             hidden: 64,
             memory: 16,
             kernel: 3,
@@ -318,6 +330,7 @@ impl Args {
                 "--events" => args.events = Some(PathBuf::from(take_arg(&mut argv, "--events")?)),
                 "--steps" => args.steps = take_parse(&mut argv, "--steps")?,
                 "--embed-dim" => args.embed_dim = take_parse(&mut argv, "--embed-dim")?,
+                "--char-feature" => args.char_feature = take_arg(&mut argv, "--char-feature")?,
                 "--hidden" => args.hidden = take_parse(&mut argv, "--hidden")?,
                 "--memory" => args.memory = take_parse(&mut argv, "--memory")?,
                 "--kernel" => args.kernel = take_parse(&mut argv, "--kernel")?,
@@ -358,7 +371,7 @@ impl Args {
                 "--infuse-mode" => args.infuse_mode = Some(take_arg(&mut argv, "--infuse-mode")?),
                 "--help" | "-h" => {
                     return Err(TensorError::Generic(
-                        "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--kernel N] [--dilations 1,2,4] [--self-score-scale F] [--query-residual-scale F] [--mix-rms F] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram|learned-unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--early-stop-patience N] [--prompt STR] [--infuse STR] [--infuse-every once|epoch|batch] [--infuse-mode blend|separate]"
+                        "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--char-feature token|token-bigram] [--hidden N] [--memory N] [--kernel N] [--dilations 1,2,4] [--self-score-scale F] [--query-residual-scale F] [--mix-rms F] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram|learned-unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--early-stop-patience N] [--prompt STR] [--infuse STR] [--infuse-every once|epoch|batch] [--infuse-mode blend|separate]"
                             .to_string(),
                     ));
                 }
@@ -399,6 +412,7 @@ impl Args {
                 value: args.query_residual_scale,
             });
         }
+        validate_char_feature(&args.char_feature)?;
         if args.mix_weight_rms <= 0.0 || !args.mix_weight_rms.is_finite() {
             return Err(TensorError::NonFiniteValue {
                 label: "char_lm_coherence_wave_mix_weight_rms",
@@ -538,6 +552,7 @@ fn build_model(
     vocab_size: usize,
     steps: usize,
     embed_dim: usize,
+    char_feature: &str,
     hidden: usize,
     memory: usize,
     kernel: usize,
@@ -551,7 +566,7 @@ fn build_model(
     temperature: f32,
 ) -> PureResult<Sequential> {
     let mut model = Sequential::new();
-    model.push(Embedding::new("embed", vocab_size, embed_dim)?);
+    push_char_embedding(&mut model, "embed", vocab_size, embed_dim, char_feature)?;
     model.push(ZSpaceCoherenceWaveBlock::with_output_scales(
         embed_dim,
         steps,
@@ -760,6 +775,7 @@ fn main() -> PureResult<()> {
     let (
         steps,
         embed_dim,
+        char_feature,
         hidden,
         memory,
         kernel,
@@ -794,11 +810,13 @@ fn main() -> PureResult<()> {
                 value: meta.query_residual_scale,
             });
         }
+        validate_char_feature(&meta.char_feature)?;
         let vocab = Vocab::from_symbols(meta.unk, meta.symbols);
         let mut model = build_model(
             vocab.len(),
             meta.steps,
             meta.embed_dim,
+            meta.char_feature.as_str(),
             meta.hidden,
             meta.memory,
             meta.kernel,
@@ -819,6 +837,7 @@ fn main() -> PureResult<()> {
         (
             meta.steps,
             meta.embed_dim,
+            meta.char_feature.clone(),
             meta.hidden,
             meta.memory,
             meta.kernel,
@@ -839,6 +858,7 @@ fn main() -> PureResult<()> {
             vocab.len(),
             args.steps,
             args.embed_dim,
+            args.char_feature.as_str(),
             args.hidden,
             args.memory,
             args.kernel,
@@ -854,6 +874,7 @@ fn main() -> PureResult<()> {
         (
             args.steps,
             args.embed_dim,
+            args.char_feature.clone(),
             args.hidden,
             args.memory,
             args.kernel,
@@ -937,6 +958,7 @@ fn main() -> PureResult<()> {
             .map(|path| path.to_string_lossy().to_string()),
         steps,
         embed_dim,
+        char_feature: char_feature.clone(),
         hidden,
         memory,
         kernel,
@@ -1027,7 +1049,7 @@ fn main() -> PureResult<()> {
     let mut loss = CategoricalCrossEntropy::new();
 
     println!(
-        "arch=coherence_wave backend={} vocab={} files={} chars={} train_tokens={} validation_tokens={} steps={} embed_dim={} hidden={} memory={} kernel={} dilations={:?} self_score_scale={} query_residual_scale={} mix_rms={} head_rms={} head_residual_scale={} head_prior={} epochs={} batch={} lr={:.3e} curvature={} temp={} run_dir={}",
+        "arch=coherence_wave backend={} vocab={} files={} chars={} train_tokens={} validation_tokens={} steps={} embed_dim={} char_feature={} hidden={} memory={} kernel={} dilations={:?} self_score_scale={} query_residual_scale={} mix_rms={} head_rms={} head_residual_scale={} head_prior={} epochs={} batch={} lr={:.3e} curvature={} temp={} run_dir={}",
         backend_sel.label,
         vocab.len(),
         data_files.len(),
@@ -1036,6 +1058,7 @@ fn main() -> PureResult<()> {
         split.validation.len(),
         steps,
         embed_dim,
+        char_feature,
         hidden,
         memory,
         kernel,
@@ -1111,6 +1134,7 @@ fn main() -> PureResult<()> {
     let meta = CharLmMeta::new(
         steps,
         embed_dim,
+        char_feature.clone(),
         hidden,
         memory,
         kernel,
