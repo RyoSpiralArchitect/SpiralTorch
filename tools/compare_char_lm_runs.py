@@ -65,6 +65,14 @@ def fmt_percent(value: float | None) -> str:
     return f"{value * 100.0:.2f}%"
 
 
+def learnability_value(metric: dict[str, Any], field: str) -> float | None:
+    learnability = metric.get("learnability")
+    if not isinstance(learnability, dict):
+        return None
+    value = learnability.get(field)
+    return float(value) if isinstance(value, (int, float)) else None
+
+
 def row_for(raw: str) -> tuple[dict[str, str], Path]:
     run_dir, summary_path, run_path = run_paths(raw)
     summary = read_json(summary_path)
@@ -96,6 +104,7 @@ def row_for(raw: str) -> tuple[dict[str, str], Path]:
             "delta_nll": fmt_float(float(delta_nll) if delta_nll is not None else None),
             "final_ppl": fmt_float(metric_value(final, "perplexity")),
             "final_acc": fmt_percent(metric_value(final, "accuracy")),
+            "final_entropy": fmt_float(metric_value(final, "mean_entropy")),
             "delta_acc": fmt_percent(float(delta_acc) if delta_acc is not None else None),
             "best_epoch": str(summary.get("best_validation_epoch", "-")),
         },
@@ -112,6 +121,7 @@ def markdown_table(rows: list[dict[str, str]]) -> str:
         "delta_nll",
         "final_ppl",
         "final_acc",
+        "final_entropy",
         "delta_acc",
         "best_epoch",
     ]
@@ -141,13 +151,97 @@ def curve_rows_for(summary_row: dict[str, str], run_dir: Path) -> list[dict[str,
                 "val_nll": fmt_float(metric_value(validation, "mean_nll")),
                 "val_ppl": fmt_float(metric_value(validation, "perplexity")),
                 "val_acc": fmt_percent(metric_value(validation, "accuracy")),
+                "val_entropy": fmt_float(metric_value(validation, "mean_entropy")),
+                "update_l2": fmt_float(learnability_value(metric, "total_update_l2"), digits=6),
+                "update_ratio": fmt_float(
+                    learnability_value(metric, "mean_update_to_value_l2"), digits=6
+                ),
             }
         )
     return rows
 
 
 def curve_table(rows: list[dict[str, str]]) -> str:
-    headers = ["run", "arch", "epoch", "train_loss", "val_nll", "val_ppl", "val_acc"]
+    headers = [
+        "run",
+        "arch",
+        "epoch",
+        "train_loss",
+        "val_nll",
+        "val_ppl",
+        "val_acc",
+        "val_entropy",
+        "update_l2",
+        "update_ratio",
+    ]
+    out = ["| " + " | ".join(headers) + " |"]
+    out.append("| " + " | ".join("---" for _ in headers) + " |")
+    for row in rows:
+        out.append("| " + " | ".join(row[header] for header in headers) + " |")
+    return "\n".join(out)
+
+
+def parameter_rows_for(
+    summary_row: dict[str, str], run_dir: Path, limit: int
+) -> list[dict[str, str]]:
+    metrics = read_jsonl(run_dir / "metrics.jsonl")
+    if not metrics:
+        return []
+    metric = metrics[-1]
+    learnability = metric.get("learnability")
+    if not isinstance(learnability, dict):
+        return []
+    parameters = learnability.get("parameters")
+    if not isinstance(parameters, list):
+        return []
+
+    rows: list[dict[str, str]] = []
+    for param in parameters:
+        if not isinstance(param, dict):
+            continue
+        update_l2 = param.get("update_l2")
+        update_ratio = param.get("update_to_value_l2")
+        rows.append(
+            {
+                "run": summary_row["run"],
+                "arch": summary_row["arch"],
+                "epoch": str(metric.get("epoch", "-")),
+                "parameter": str(param.get("name", "-")),
+                "shape": f"{param.get('rows', '-')}x{param.get('cols', '-')}",
+                "value_l2": fmt_float(
+                    float(param["value_l2"])
+                    if isinstance(param.get("value_l2"), (int, float))
+                    else None,
+                    digits=6,
+                ),
+                "update_l2": fmt_float(
+                    float(update_l2) if isinstance(update_l2, (int, float)) else None,
+                    digits=6,
+                ),
+                "update_ratio": fmt_float(
+                    float(update_ratio) if isinstance(update_ratio, (int, float)) else None,
+                    digits=6,
+                ),
+            }
+        )
+    rows.sort(
+        key=lambda row: float(row["update_l2"]) if row["update_l2"] != "-" else -1.0,
+        reverse=True,
+    )
+    return rows[: max(limit, 0)]
+
+
+def parameter_table(rows: list[dict[str, str]]) -> str:
+    headers = [
+        "run",
+        "arch",
+        "epoch",
+        "parameter",
+        "shape",
+        "value_l2",
+        "update_l2",
+        "update_ratio",
+    ]
     out = ["| " + " | ".join(headers) + " |"]
     out.append("| " + " | ".join("---" for _ in headers) + " |")
     for row in rows:
@@ -164,6 +258,13 @@ def main() -> None:
         action="store_true",
         help="also print epoch-level validation curves from metrics.jsonl",
     )
+    parser.add_argument(
+        "--params",
+        type=int,
+        default=0,
+        metavar="N",
+        help="also print the top N parameter updates from the last metrics epoch",
+    )
     parser.add_argument("runs", nargs="+", help="run directories or summary.json files")
     args = parser.parse_args()
     pairs = [row_for(raw) for raw in args.runs]
@@ -175,6 +276,13 @@ def main() -> None:
         if curve_rows:
             print()
             print(curve_table(curve_rows))
+    if args.params > 0:
+        parameter_rows: list[dict[str, str]] = []
+        for row, run_dir in pairs:
+            parameter_rows.extend(parameter_rows_for(row, run_dir, args.params))
+        if parameter_rows:
+            print()
+            print(parameter_table(parameter_rows))
 
 
 if __name__ == "__main__":

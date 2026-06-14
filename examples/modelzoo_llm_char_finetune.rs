@@ -13,8 +13,9 @@ mod char_lm_eval;
 mod text_corpus;
 
 use char_lm_eval::{
-    evaluate_next_token, split_train_validation_tokens, write_summary, CharLmInputMode,
-    LanguageEvalMetric, TrainingSummary,
+    capture_parameter_snapshot, evaluate_next_token, split_train_validation_tokens,
+    summarize_learnability, write_summary, CharLmInputMode, LanguageEvalMetric, LearnabilityMetric,
+    TrainingSummary,
 };
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -80,6 +81,7 @@ struct EpochMetric {
     batches: usize,
     average_loss: f32,
     validation: Option<LanguageEvalMetric>,
+    learnability: LearnabilityMetric,
 }
 
 #[derive(Debug, Clone)]
@@ -811,6 +813,7 @@ fn main() -> PureResult<()> {
                 &mut rng,
             )?);
         }
+        let before_epoch = capture_parameter_snapshot(&model)?;
         let stats = trainer.train_epoch(&mut model, &mut loss, batches, &schedule)?;
         let validation = evaluate_next_token(
             &mut model,
@@ -829,11 +832,18 @@ fn main() -> PureResult<()> {
                 best_validation_epoch = Some(epoch);
             }
         }
+        let learnability = summarize_learnability(
+            &model,
+            Some(&before_epoch),
+            Some(stats.average_loss),
+            validation.as_ref(),
+        )?;
         let metric = EpochMetric {
             epoch,
             batches: stats.batches,
             average_loss: stats.average_loss,
             validation: validation.clone(),
+            learnability: learnability.clone(),
         };
         writeln!(
             metrics_file,
@@ -864,7 +874,7 @@ fn main() -> PureResult<()> {
         last_validation = validation.clone();
         if let Some(validation) = validation.as_ref() {
             println!(
-                "epoch[{epoch}] batches={} avg_loss={:.6} val_nll={:.6} val_ppl={} val_acc={:.2}%",
+                "epoch[{epoch}] batches={} avg_loss={:.6} val_nll={:.6} val_ppl={} val_acc={:.2}% update_l2={} update_ratio={}",
                 stats.batches,
                 stats.average_loss,
                 validation.mean_nll,
@@ -872,12 +882,29 @@ fn main() -> PureResult<()> {
                     .perplexity
                     .map(|value| format!("{value:.3}"))
                     .unwrap_or_else(|| "overflow".to_string()),
-                validation.accuracy * 100.0
+                validation.accuracy * 100.0,
+                learnability
+                    .total_update_l2
+                    .map(|value| format!("{value:.6}"))
+                    .unwrap_or_else(|| "-".to_string()),
+                learnability
+                    .mean_update_to_value_l2
+                    .map(|value| format!("{value:.6}"))
+                    .unwrap_or_else(|| "-".to_string())
             );
         } else {
             println!(
-                "epoch[{epoch}] batches={} avg_loss={:.6} val=skipped",
-                stats.batches, stats.average_loss
+                "epoch[{epoch}] batches={} avg_loss={:.6} val=skipped update_l2={} update_ratio={}",
+                stats.batches,
+                stats.average_loss,
+                learnability
+                    .total_update_l2
+                    .map(|value| format!("{value:.6}"))
+                    .unwrap_or_else(|| "-".to_string()),
+                learnability
+                    .mean_update_to_value_l2
+                    .map(|value| format!("{value:.6}"))
+                    .unwrap_or_else(|| "-".to_string())
             );
         }
     }

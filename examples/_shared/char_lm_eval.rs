@@ -4,6 +4,7 @@
 
 use serde::Serialize;
 use st_nn::{Module, PureResult, Tensor, TensorError};
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::path::Path;
 
@@ -23,6 +24,8 @@ pub struct LanguageEvalMetric {
     pub accuracy: f32,
     pub mean_target_probability: f32,
     pub mean_top_probability: f32,
+    pub mean_entropy: f32,
+    pub mean_normalized_entropy: f32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -40,6 +43,41 @@ pub struct TokenSplit {
     pub train: Vec<usize>,
     pub validation: Vec<usize>,
     pub actual_validation_fraction: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct ParameterSnapshot {
+    values: BTreeMap<String, Tensor>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ParameterLearnabilityMetric {
+    pub name: String,
+    pub rows: usize,
+    pub cols: usize,
+    pub elements: usize,
+    pub value_l2: f32,
+    pub value_rms: f32,
+    pub value_mean_abs: f32,
+    pub value_max_abs: f32,
+    pub update_l2: Option<f32>,
+    pub update_rms: Option<f32>,
+    pub update_to_value_l2: Option<f32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LearnabilityMetric {
+    pub parameters: Vec<ParameterLearnabilityMetric>,
+    pub parameter_count: usize,
+    pub total_value_l2: f32,
+    pub total_update_l2: Option<f32>,
+    pub max_update_to_value_l2: Option<f32>,
+    pub mean_update_to_value_l2: Option<f32>,
+    pub train_loss: Option<f32>,
+    pub validation_nll: Option<f32>,
+    pub validation_entropy: Option<f32>,
+    pub validation_top_probability: Option<f32>,
+    pub validation_target_probability: Option<f32>,
 }
 
 pub fn split_train_validation_tokens(
@@ -103,6 +141,145 @@ fn argmax(values: &[f32]) -> usize {
     best
 }
 
+fn l2(values: &[f32]) -> f32 {
+    values
+        .iter()
+        .map(|&value| {
+            let v = value as f64;
+            v * v
+        })
+        .sum::<f64>()
+        .sqrt() as f32
+}
+
+fn mean_abs(values: &[f32]) -> f32 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    values.iter().map(|value| value.abs()).sum::<f32>() / values.len() as f32
+}
+
+fn max_abs(values: &[f32]) -> f32 {
+    values
+        .iter()
+        .map(|value| value.abs())
+        .fold(0.0f32, f32::max)
+}
+
+fn entropy(values: &[f32]) -> f32 {
+    let mut out = 0.0f32;
+    for &value in values {
+        let probability = value.clamp(0.0, 1.0);
+        if probability > 0.0 {
+            out -= probability * probability.ln();
+        }
+    }
+    out
+}
+
+pub fn capture_parameter_snapshot<M>(model: &M) -> PureResult<ParameterSnapshot>
+where
+    M: Module + ?Sized,
+{
+    let mut values = BTreeMap::new();
+    model.visit_parameters(&mut |param| {
+        values.insert(param.name().to_string(), param.value().clone());
+        Ok(())
+    })?;
+    Ok(ParameterSnapshot { values })
+}
+
+pub fn summarize_learnability<M>(
+    model: &M,
+    before: Option<&ParameterSnapshot>,
+    train_loss: Option<f32>,
+    validation: Option<&LanguageEvalMetric>,
+) -> PureResult<LearnabilityMetric>
+where
+    M: Module + ?Sized,
+{
+    let mut parameters = Vec::new();
+    let mut total_value_sq = 0.0f64;
+    let mut total_update_sq = 0.0f64;
+    let mut update_ratios = Vec::new();
+    let mut saw_update = false;
+
+    model.visit_parameters(&mut |param| {
+        let value = param.value();
+        let (rows, cols) = value.shape();
+        let values = value.data();
+        let elements = values.len();
+        let value_l2 = l2(values);
+        total_value_sq += (value_l2 as f64) * (value_l2 as f64);
+
+        let mut update_l2 = None;
+        let mut update_rms = None;
+        let mut update_to_value_l2 = None;
+        if let Some(previous) = before.and_then(|snapshot| snapshot.values.get(param.name())) {
+            if previous.shape() == value.shape() {
+                let mut update_sq = 0.0f64;
+                for (&after, &before) in values.iter().zip(previous.data().iter()) {
+                    let delta = (after - before) as f64;
+                    update_sq += delta * delta;
+                }
+                let update = update_sq.sqrt() as f32;
+                let ratio = update / value_l2.max(1.0e-12);
+                update_l2 = Some(update);
+                update_rms = Some(if elements == 0 {
+                    0.0
+                } else {
+                    update / (elements as f32).sqrt()
+                });
+                update_to_value_l2 = Some(ratio);
+                total_update_sq += update_sq;
+                update_ratios.push(ratio);
+                saw_update = true;
+            }
+        }
+
+        parameters.push(ParameterLearnabilityMetric {
+            name: param.name().to_string(),
+            rows,
+            cols,
+            elements,
+            value_l2,
+            value_rms: if elements == 0 {
+                0.0
+            } else {
+                value_l2 / (elements as f32).sqrt()
+            },
+            value_mean_abs: mean_abs(values),
+            value_max_abs: max_abs(values),
+            update_l2,
+            update_rms,
+            update_to_value_l2,
+        });
+        Ok(())
+    })?;
+
+    let total_update_l2 = saw_update.then(|| total_update_sq.sqrt() as f32);
+    let max_update_to_value_l2 = update_ratios.iter().copied().reduce(f32::max);
+    let mean_update_to_value_l2 = if update_ratios.is_empty() {
+        None
+    } else {
+        Some(update_ratios.iter().sum::<f32>() / update_ratios.len() as f32)
+    };
+
+    Ok(LearnabilityMetric {
+        parameter_count: parameters.len(),
+        parameters,
+        total_value_l2: total_value_sq.sqrt() as f32,
+        total_update_l2,
+        max_update_to_value_l2,
+        mean_update_to_value_l2,
+        train_loss,
+        validation_nll: validation.map(|metric| metric.mean_nll),
+        validation_entropy: validation.map(|metric| metric.mean_entropy),
+        validation_top_probability: validation.map(|metric| metric.mean_top_probability),
+        validation_target_probability: validation.map(|metric| metric.mean_target_probability),
+    })
+}
+
 pub fn evaluate_next_token<M>(
     model: &mut M,
     vocab_size: usize,
@@ -133,6 +310,7 @@ where
         let mut correct = 0usize;
         let mut target_probability_sum = 0.0f32;
         let mut top_probability_sum = 0.0f32;
+        let mut entropy_sum = 0.0f32;
 
         for sample_idx in 0..windows {
             let start = if windows <= 1 || available <= 1 {
@@ -164,6 +342,7 @@ where
             nll_sum += -target_probability.ln();
             target_probability_sum += target_probability;
             top_probability_sum += top_probability;
+            entropy_sum += entropy(row);
         }
 
         let mean_nll = nll_sum / windows as f32;
@@ -180,6 +359,12 @@ where
             accuracy: correct as f32 / windows as f32,
             mean_target_probability: target_probability_sum / windows as f32,
             mean_top_probability: top_probability_sum / windows as f32,
+            mean_entropy: entropy_sum / windows as f32,
+            mean_normalized_entropy: if vocab_size <= 1 {
+                0.0
+            } else {
+                (entropy_sum / windows as f32) / (vocab_size as f32).ln()
+            },
         })
     })();
     let restore = model.train();
