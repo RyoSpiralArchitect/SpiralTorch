@@ -100,6 +100,7 @@ pub struct LearnabilityMetric {
 
 pub const HEAD_PRIOR_NONE: &str = "none";
 pub const HEAD_PRIOR_UNIGRAM: &str = "unigram";
+pub const DEFAULT_HEAD_RESIDUAL_SCALE: f32 = 1.0;
 
 pub fn validate_head_prior(value: &str) -> PureResult<()> {
     match value {
@@ -140,6 +141,70 @@ pub fn linear_with_weight_rms(
         Ok(())
     })?;
     Ok(layer)
+}
+
+pub fn validate_head_residual_scale(value: f32) -> PureResult<()> {
+    if value <= 0.0 || !value.is_finite() {
+        return Err(TensorError::NonFiniteValue {
+            label: "char_lm_head_residual_scale",
+            value,
+        });
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
+pub struct FixedLogitScale {
+    _name: String,
+    scale: f32,
+}
+
+impl FixedLogitScale {
+    pub fn new(name: impl Into<String>, scale: f32) -> PureResult<Self> {
+        validate_head_residual_scale(scale)?;
+        Ok(Self {
+            _name: name.into(),
+            scale,
+        })
+    }
+}
+
+impl Module for FixedLogitScale {
+    fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+        input.scale(self.scale)
+    }
+
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        if input.shape() != grad_output.shape() {
+            return Err(TensorError::ShapeMismatch {
+                left: input.shape(),
+                right: grad_output.shape(),
+            });
+        }
+        grad_output.scale(self.scale)
+    }
+
+    fn visit_parameters(
+        &self,
+        _visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        Ok(())
+    }
+
+    fn visit_parameters_mut(
+        &mut self,
+        _visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        Ok(())
+    }
+}
+
+pub fn residual_logit_scaler(
+    name: impl Into<String>,
+    _vocab_size: usize,
+    scale: f32,
+) -> PureResult<FixedLogitScale> {
+    FixedLogitScale::new(name, scale)
 }
 
 fn smoothed_unigram_probabilities(vocab_size: usize, train_tokens: &[usize]) -> Vec<f32> {
