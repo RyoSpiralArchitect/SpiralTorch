@@ -4,7 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use crate::module::{Module, Parameter};
-use crate::{PureResult, Tensor};
+use crate::{PureResult, Tensor, TensorError};
 use std::collections::HashMap;
 
 /// Sequential container that mirrors `nn.Sequential`.
@@ -31,6 +31,21 @@ impl Sequential {
         M: Module + 'static,
     {
         self.layers.push(Box::new(layer));
+    }
+
+    /// Inserts a new layer at the provided position.
+    pub fn insert<M>(&mut self, index: usize, layer: M) -> PureResult<()>
+    where
+        M: Module + 'static,
+    {
+        if index > self.layers.len() {
+            return Err(TensorError::InvalidDimensions {
+                rows: index,
+                cols: self.layers.len(),
+            });
+        }
+        self.layers.insert(index, Box::new(layer));
+        Ok(())
     }
 
     /// Appends a pre-boxed module to the sequence.
@@ -153,5 +168,20 @@ mod tests {
         seq.apply_step(0.01).unwrap();
         let new_output = seq.forward(&input).unwrap();
         assert_ne!(output, new_output);
+    }
+
+    #[test]
+    fn sequential_insert_places_layer_and_rejects_out_of_bounds_index() {
+        let mut seq = Sequential::new();
+        seq.push(Linear::new("head", 2, 1).unwrap());
+
+        assert!(seq.insert(2, Linear::new("bad", 1, 1).unwrap()).is_err());
+        seq.insert(0, Linear::new("project", 2, 2).unwrap())
+            .unwrap();
+
+        let input = Tensor::from_vec(1, 2, vec![0.5, -0.25]).unwrap();
+        let output = seq.forward(&input).unwrap();
+        assert_eq!(seq.len(), 2);
+        assert_eq!(output.shape(), (1, 1));
     }
 }
