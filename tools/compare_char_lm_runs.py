@@ -89,6 +89,7 @@ def row_for(raw: str) -> tuple[dict[str, str], Path]:
 
     label = run_dir.name or str(run_dir)
     arch = str(run.get("arch", "-"))
+    self_score_scale = run.get("self_score_scale")
     init_nll = metric_value(initial, "mean_nll")
     final_nll = metric_value(final, "mean_nll")
     unigram_nll = metric_value(unigram, "mean_nll")
@@ -118,6 +119,9 @@ def row_for(raw: str) -> tuple[dict[str, str], Path]:
         {
             "run": label,
             "arch": arch,
+            "self_score": fmt_float(
+                float(self_score_scale) if isinstance(self_score_scale, (int, float)) else None
+            ),
             "init_nll": fmt_float(init_nll),
             "final_nll": fmt_float(final_nll),
             "delta_nll": fmt_float(float(delta_nll) if delta_nll is not None else None),
@@ -161,6 +165,7 @@ def markdown_table(rows: list[dict[str, str]]) -> str:
     headers = [
         "run",
         "arch",
+        "self_score",
         "init_nll",
         "final_nll",
         "delta_nll",

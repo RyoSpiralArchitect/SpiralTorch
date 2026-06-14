@@ -31,6 +31,7 @@ pub struct ZSpaceCoherenceScan {
     memory: usize,
     curvature: f32,
     temperature: f32,
+    self_score_scale: f32,
     cache: RefCell<Option<CoherenceScanCache>>,
 }
 
@@ -41,6 +42,17 @@ impl ZSpaceCoherenceScan {
         memory: usize,
         curvature: f32,
         temperature: f32,
+    ) -> PureResult<Self> {
+        Self::with_self_score_scale(dim, steps, memory, curvature, temperature, 1.0)
+    }
+
+    pub fn with_self_score_scale(
+        dim: usize,
+        steps: usize,
+        memory: usize,
+        curvature: f32,
+        temperature: f32,
+        self_score_scale: f32,
     ) -> PureResult<Self> {
         if dim == 0 || steps == 0 || memory == 0 {
             return Err(TensorError::InvalidDimensions {
@@ -63,6 +75,12 @@ impl ZSpaceCoherenceScan {
                 value: temperature,
             });
         }
+        if self_score_scale < 0.0 || !self_score_scale.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "zspace_coherence_scan_self_score_scale",
+                value: self_score_scale,
+            });
+        }
 
         Ok(Self {
             dim,
@@ -70,6 +88,7 @@ impl ZSpaceCoherenceScan {
             memory,
             curvature,
             temperature,
+            self_score_scale,
             cache: RefCell::new(None),
         })
     }
@@ -94,6 +113,10 @@ impl ZSpaceCoherenceScan {
         self.temperature
     }
 
+    pub fn self_score_scale(&self) -> f32 {
+        self.self_score_scale
+    }
+
     fn coherence_order(&self) -> f32 {
         1.0 + (-self.curvature).sqrt().min(4.0)
     }
@@ -115,6 +138,17 @@ impl ZSpaceCoherenceScan {
         } else {
             0.0
         }
+    }
+
+    fn fallback_steps(&self, start_step: usize) -> Vec<usize> {
+        let query_step = self.steps - 1;
+        let mut steps = (start_step..self.steps)
+            .filter(|&step| step != query_step || self.self_score_scale > 0.0)
+            .collect::<Vec<_>>();
+        if steps.is_empty() {
+            steps.push(query_step);
+        }
+        steps
     }
 }
 
@@ -149,14 +183,18 @@ impl Module for ZSpaceCoherenceScan {
             {
                 let value_start = base + step * self.dim;
                 let value = &data[value_start..value_start + self.dim];
-                let score = self.score_pair(query, value);
+                let mut score = self.score_pair(query, value);
+                if step == self.steps - 1 {
+                    score *= self.self_score_scale;
+                }
                 *slot = score;
                 total += score;
             }
 
             if !total.is_finite() || total <= 0.0 {
-                let uniform = 1.0 / (self.memory as f32).max(1.0);
-                for step in start_step..self.steps {
+                let fallback_steps = self.fallback_steps(start_step);
+                let uniform = 1.0 / (fallback_steps.len() as f32).max(1.0);
+                for step in fallback_steps {
                     weights[b * self.steps + step] = uniform;
                 }
             } else {
@@ -296,5 +334,24 @@ mod tests {
         let row = out.data();
         assert!((row[0] - 1.0).abs() < 1e-4);
         assert!((row[1] - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn coherence_scan_can_skip_query_self_match() {
+        let scan = ZSpaceCoherenceScan::with_self_score_scale(2, 3, 2, -1.0, 1.0, 0.0).unwrap();
+        let input = Tensor::from_vec(
+            1,
+            6,
+            vec![
+                0.0, 0.0, // step0 ignored by memory=2
+                2.0, 0.0, // step1 becomes the only non-self memory item
+                10.0, 0.0, // step2 query would dominate without self-score suppression
+            ],
+        )
+        .unwrap();
+        let out = scan.forward(&input).unwrap();
+        let row = out.data();
+        assert!((row[0] - 2.0).abs() < 1e-4);
+        assert!(row[1].abs() < 1e-4);
     }
 }

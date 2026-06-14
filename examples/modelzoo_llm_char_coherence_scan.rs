@@ -44,6 +44,11 @@ const DEFAULT_UNK: char = '\u{FFFD}';
 const RUN_SCHEMA: &str = "st.modelzoo.run.v1";
 const DEFAULT_CONTEXT_SCALE: f32 = 0.05;
 const DEFAULT_LINEAR_WEIGHT_RMS: f32 = 0.1;
+const DEFAULT_SELF_SCORE_SCALE: f32 = 0.0;
+
+fn legacy_self_score_scale() -> f32 {
+    1.0
+}
 
 #[derive(Debug, Clone, Serialize)]
 struct RunMeta {
@@ -62,6 +67,7 @@ struct RunMeta {
     hidden: usize,
     memory: usize,
     context_scale: Option<f32>,
+    self_score_scale: f32,
     mix_weight_rms: f32,
     head_weight_rms: f32,
     head_residual_scale: Option<f32>,
@@ -149,6 +155,8 @@ struct CharLmMeta {
     memory: usize,
     #[serde(default)]
     context_scale: Option<f32>,
+    #[serde(default = "legacy_self_score_scale")]
+    self_score_scale: f32,
     #[serde(default)]
     head_prior: Option<String>,
     #[serde(default)]
@@ -166,6 +174,7 @@ impl CharLmMeta {
         hidden: usize,
         memory: usize,
         context_scale: Option<f32>,
+        self_score_scale: f32,
         head_prior: Option<String>,
         head_residual_scale: Option<f32>,
         curvature: f32,
@@ -183,6 +192,7 @@ impl CharLmMeta {
             hidden,
             memory,
             context_scale,
+            self_score_scale,
             head_prior,
             head_residual_scale,
             curvature,
@@ -206,6 +216,7 @@ struct Args {
     hidden: usize,
     memory: usize,
     context_scale: f32,
+    self_score_scale: f32,
     mix_weight_rms: f32,
     head_weight_rms: f32,
     head_residual_scale: f32,
@@ -237,7 +248,7 @@ impl Args {
         }
         if data_args.is_empty() {
             return Err(TensorError::Generic(
-                "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--context-scale F] [--mix-rms F] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--early-stop-patience N] [--prompt STR]"
+                "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--context-scale F] [--self-score-scale F] [--mix-rms F] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--early-stop-patience N] [--prompt STR]"
                     .to_string(),
             ));
         }
@@ -254,6 +265,7 @@ impl Args {
             hidden: 64,
             memory: 16,
             context_scale: DEFAULT_CONTEXT_SCALE,
+            self_score_scale: DEFAULT_SELF_SCORE_SCALE,
             mix_weight_rms: DEFAULT_LINEAR_WEIGHT_RMS,
             head_weight_rms: DEFAULT_LINEAR_WEIGHT_RMS,
             head_residual_scale: DEFAULT_HEAD_RESIDUAL_SCALE,
@@ -287,6 +299,9 @@ impl Args {
                 "--hidden" => args.hidden = take_parse(&mut argv, "--hidden")?,
                 "--memory" => args.memory = take_parse(&mut argv, "--memory")?,
                 "--context-scale" => args.context_scale = take_parse(&mut argv, "--context-scale")?,
+                "--self-score-scale" => {
+                    args.self_score_scale = take_parse(&mut argv, "--self-score-scale")?
+                }
                 "--mix-rms" => args.mix_weight_rms = take_parse(&mut argv, "--mix-rms")?,
                 "--head-rms" => args.head_weight_rms = take_parse(&mut argv, "--head-rms")?,
                 "--head-residual-scale" => {
@@ -312,7 +327,7 @@ impl Args {
                 "--prompt" => args.prompt = Some(take_arg(&mut argv, "--prompt")?),
                 "--help" | "-h" => {
                     return Err(TensorError::Generic(
-                        "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--context-scale F] [--mix-rms F] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--early-stop-patience N] [--prompt STR]"
+                        "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--context-scale F] [--self-score-scale F] [--mix-rms F] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--early-stop-patience N] [--prompt STR]"
                             .to_string(),
                     ));
                 }
@@ -341,6 +356,7 @@ impl Args {
             });
         }
         validate_context_scale(args.context_scale, "char_lm_coherence_context_scale")?;
+        validate_self_score_scale(args.self_score_scale)?;
         validate_context_scale(args.mix_weight_rms, "char_lm_coherence_mix_weight_rms")?;
         validate_context_scale(args.head_weight_rms, "char_lm_coherence_head_weight_rms")?;
         validate_head_residual_scale(args.head_residual_scale)?;
@@ -378,6 +394,16 @@ where
 fn validate_context_scale(value: f32, label: &'static str) -> PureResult<()> {
     if value <= 0.0 || !value.is_finite() {
         return Err(TensorError::NonFiniteValue { label, value });
+    }
+    Ok(())
+}
+
+fn validate_self_score_scale(value: f32) -> PureResult<()> {
+    if value < 0.0 || !value.is_finite() {
+        return Err(TensorError::NonFiniteValue {
+            label: "char_lm_coherence_self_score_scale",
+            value,
+        });
     }
     Ok(())
 }
@@ -432,6 +458,7 @@ fn build_model(
     hidden: usize,
     memory: usize,
     context_scale: Option<f32>,
+    self_score_scale: f32,
     mix_weight_rms: f32,
     head_weight_rms: f32,
     head_residual_scale: Option<f32>,
@@ -440,12 +467,13 @@ fn build_model(
 ) -> PureResult<Sequential> {
     let mut model = Sequential::new();
     model.push(Embedding::new("embed", vocab_size, embed_dim)?);
-    model.push(ZSpaceCoherenceScan::new(
+    model.push(ZSpaceCoherenceScan::with_self_score_scale(
         embed_dim,
         steps,
         memory,
         curvature,
         temperature,
+        self_score_scale,
     )?);
     if let Some(context_scale) = context_scale {
         model.push(Scaler::from_gain(
@@ -653,6 +681,7 @@ fn main() -> PureResult<()> {
         hidden,
         memory,
         context_scale,
+        self_score_scale,
         curvature,
         temperature,
         vocab,
@@ -677,6 +706,7 @@ fn main() -> PureResult<()> {
         if let Some(context_scale) = meta.context_scale {
             validate_context_scale(context_scale, "char_lm_coherence_meta_context_scale")?;
         }
+        validate_self_score_scale(meta.self_score_scale)?;
         let vocab = Vocab::from_symbols(meta.unk, meta.symbols);
         let mut model = build_model(
             vocab.len(),
@@ -685,6 +715,7 @@ fn main() -> PureResult<()> {
             meta.hidden,
             meta.memory,
             meta.context_scale,
+            meta.self_score_scale,
             args.mix_weight_rms,
             args.head_weight_rms,
             meta.head_residual_scale,
@@ -703,6 +734,7 @@ fn main() -> PureResult<()> {
             meta.hidden,
             meta.memory,
             meta.context_scale,
+            meta.self_score_scale,
             meta.curvature,
             meta.temperature,
             vocab,
@@ -720,6 +752,7 @@ fn main() -> PureResult<()> {
             args.hidden,
             args.memory,
             Some(args.context_scale),
+            args.self_score_scale,
             args.mix_weight_rms,
             args.head_weight_rms,
             Some(args.head_residual_scale),
@@ -732,6 +765,7 @@ fn main() -> PureResult<()> {
             args.hidden,
             args.memory,
             Some(args.context_scale),
+            args.self_score_scale,
             args.curvature,
             args.temperature,
             vocab,
@@ -815,6 +849,7 @@ fn main() -> PureResult<()> {
         hidden,
         memory,
         context_scale,
+        self_score_scale,
         mix_weight_rms: args.mix_weight_rms,
         head_weight_rms: args.head_weight_rms,
         head_residual_scale,
@@ -870,7 +905,7 @@ fn main() -> PureResult<()> {
     let mut loss = CategoricalCrossEntropy::new();
 
     println!(
-        "arch=coherence_scan backend={} vocab={} files={} chars={} train_tokens={} validation_tokens={} steps={} embed_dim={} hidden={} memory={} context_scale={} mix_rms={} head_rms={} head_residual_scale={} head_prior={} epochs={} batch={} lr={:.3e} curvature={} temp={} run_dir={}",
+        "arch=coherence_scan backend={} vocab={} files={} chars={} train_tokens={} validation_tokens={} steps={} embed_dim={} hidden={} memory={} context_scale={} self_score_scale={} mix_rms={} head_rms={} head_residual_scale={} head_prior={} epochs={} batch={} lr={:.3e} curvature={} temp={} run_dir={}",
         backend_sel.label,
         vocab.len(),
         data_files.len(),
@@ -884,6 +919,7 @@ fn main() -> PureResult<()> {
         context_scale
             .map(|value| format!("{value:.4}"))
             .unwrap_or_else(|| "none".to_string()),
+        self_score_scale,
         args.mix_weight_rms,
         args.head_weight_rms,
         head_residual_scale
@@ -956,6 +992,7 @@ fn main() -> PureResult<()> {
         hidden,
         memory,
         context_scale,
+        self_score_scale,
         meta_head_prior,
         meta_head_residual_scale,
         curvature,
