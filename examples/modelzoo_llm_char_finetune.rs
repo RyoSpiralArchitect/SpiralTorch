@@ -75,6 +75,7 @@ struct RunMeta {
     validation_fraction_requested: f32,
     validation_fraction_actual: f32,
     eval_samples: usize,
+    early_stop_patience: usize,
     train_tokens: usize,
     validation_tokens: usize,
     prompt: String,
@@ -208,6 +209,7 @@ struct Args {
     seed: u64,
     validation_fraction: f32,
     eval_samples: usize,
+    early_stop_patience: usize,
     prompt: Option<String>,
 }
 
@@ -223,7 +225,7 @@ impl Args {
         }
         if data_args.is_empty() {
             return Err(TensorError::Generic(
-                "usage: cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--prompt STR]"
+                "usage: cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--early-stop-patience N] [--prompt STR]"
                     .to_string(),
             ));
         }
@@ -252,6 +254,7 @@ impl Args {
             seed: 42,
             validation_fraction: 0.1,
             eval_samples: 256,
+            early_stop_patience: 0,
             prompt: None,
         };
 
@@ -285,10 +288,13 @@ impl Args {
                     args.validation_fraction = take_parse(&mut argv, "--val-fraction")?
                 }
                 "--eval-samples" => args.eval_samples = take_parse(&mut argv, "--eval-samples")?,
+                "--early-stop-patience" => {
+                    args.early_stop_patience = take_parse(&mut argv, "--early-stop-patience")?
+                }
                 "--prompt" => args.prompt = Some(take_arg(&mut argv, "--prompt")?),
                 "--help" | "-h" => {
                     return Err(TensorError::Generic(
-                        "usage: cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--prompt STR]"
+                        "usage: cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--early-stop-patience N] [--prompt STR]"
                             .to_string(),
                     ));
                 }
@@ -804,6 +810,7 @@ fn main() -> PureResult<()> {
         validation_fraction_requested: args.validation_fraction,
         validation_fraction_actual: split.actual_validation_fraction,
         eval_samples: args.eval_samples,
+        early_stop_patience: args.early_stop_patience,
         train_tokens: split.train.len(),
         validation_tokens: split.validation.len(),
         prompt: prompt.clone(),
@@ -915,10 +922,33 @@ fn main() -> PureResult<()> {
         );
     }
 
+    let meta_head_prior = loaded_head_prior.clone().or_else(|| {
+        (loaded_from.is_none() && args.head_prior == HEAD_PRIOR_UNIGRAM)
+            .then(|| args.head_prior.clone())
+    });
+    let meta_head_residual_scale = loaded_head_residual_scale
+        .or_else(|| loaded_from.is_none().then_some(args.head_residual_scale));
+    let meta = CharLmMeta::new(
+        steps,
+        hidden,
+        embed_dim,
+        meta_head_prior,
+        meta_head_residual_scale,
+        curvature,
+        temperature,
+        &vocab,
+    );
+
     let mut last_sample: Option<String> = None;
     let mut last_validation = initial_validation.clone();
+    let mut best_validation = None;
     let mut best_validation_epoch = None;
     let mut best_validation_mean_nll = None;
+    let mut best_checkpoint_path = None;
+    let mut best_sample_path = None;
+    let mut epochs_completed = 0usize;
+    let mut epochs_without_validation_improvement = 0usize;
+    let mut early_stopped_epoch = None;
     for epoch in 0..args.epochs {
         let mut rng = ChaCha8Rng::seed_from_u64(args.seed.wrapping_add(epoch as u64 * 10_000));
         let mut batches = Vec::with_capacity(args.batches_per_epoch);
@@ -943,13 +973,19 @@ fn main() -> PureResult<()> {
             &split.validation,
             args.eval_samples,
         )?;
+        let mut validation_is_best = false;
         if let Some(validation_metric) = validation.as_ref() {
             if best_validation_mean_nll
                 .map(|best| validation_metric.mean_nll < best)
                 .unwrap_or(true)
             {
+                best_validation = Some(validation_metric.clone());
                 best_validation_mean_nll = Some(validation_metric.mean_nll);
                 best_validation_epoch = Some(epoch);
+                validation_is_best = true;
+                epochs_without_validation_improvement = 0;
+            } else {
+                epochs_without_validation_improvement += 1;
             }
         }
         let learnability = summarize_learnability(
@@ -990,11 +1026,22 @@ fn main() -> PureResult<()> {
                 message: err.to_string(),
             },
         )?;
+        if validation_is_best {
+            let best_weights = run_dir.join("best_weights.json");
+            save_json(&model, &best_weights)?;
+            write_meta(&meta_path_for_weights(&best_weights), &meta)?;
+            let best_sample = samples_dir.join(format!("best_epoch_{epoch:03}.txt"));
+            std::fs::write(&best_sample, &sample).map_err(|err| TensorError::IoError {
+                message: err.to_string(),
+            })?;
+            best_checkpoint_path = Some(best_weights.to_string_lossy().to_string());
+            best_sample_path = Some(best_sample.to_string_lossy().to_string());
+        }
         last_sample = Some(sample);
         last_validation = validation.clone();
         if let Some(validation) = validation.as_ref() {
             println!(
-                "epoch[{epoch}] batches={} avg_loss={:.6} val_nll={:.6} val_ppl={} val_acc={:.2}% update_l2={} update_ratio={}",
+                "epoch[{epoch}] batches={} avg_loss={:.6} val_nll={:.6} val_ppl={} val_acc={:.2}% update_l2={} update_ratio={}{}",
                 stats.batches,
                 stats.average_loss,
                 validation.mean_nll,
@@ -1010,7 +1057,8 @@ fn main() -> PureResult<()> {
                 learnability
                     .mean_update_to_value_l2
                     .map(|value| format!("{value:.6}"))
-                    .unwrap_or_else(|| "-".to_string())
+                    .unwrap_or_else(|| "-".to_string()),
+                if validation_is_best { " best=checkpoint" } else { "" }
             );
         } else {
             println!(
@@ -1027,24 +1075,25 @@ fn main() -> PureResult<()> {
                     .unwrap_or_else(|| "-".to_string())
             );
         }
+        epochs_completed = epoch + 1;
+        if args.early_stop_patience > 0
+            && validation.is_some()
+            && !validation_is_best
+            && epochs_without_validation_improvement >= args.early_stop_patience
+        {
+            early_stopped_epoch = Some(epoch);
+            println!(
+                "early_stop[epoch={epoch}] patience={} best_epoch={} best_nll={:.6}",
+                args.early_stop_patience,
+                best_validation_epoch
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "-".to_string()),
+                best_validation_mean_nll.unwrap_or(f32::NAN)
+            );
+            break;
+        }
     }
 
-    let meta_head_prior = loaded_head_prior.or_else(|| {
-        (loaded_from.is_none() && args.head_prior == HEAD_PRIOR_UNIGRAM)
-            .then(|| args.head_prior.clone())
-    });
-    let meta_head_residual_scale = loaded_head_residual_scale
-        .or_else(|| loaded_from.is_none().then_some(args.head_residual_scale));
-    let meta = CharLmMeta::new(
-        steps,
-        hidden,
-        embed_dim,
-        meta_head_prior,
-        meta_head_residual_scale,
-        curvature,
-        temperature,
-        &vocab,
-    );
     let run_weights = run_dir.join("weights.json");
     save_json(&model, &run_weights)?;
     write_meta(&meta_path_for_weights(&run_weights), &meta)?;
@@ -1093,15 +1142,35 @@ fn main() -> PureResult<()> {
         .as_ref()
         .zip(unigram_validation.as_ref())
         .map(|(final_metric, unigram)| final_metric.mean_nll - unigram.mean_nll);
+    let best_validation_nll_delta = initial_validation
+        .as_ref()
+        .zip(best_validation.as_ref())
+        .map(|(initial, best_metric)| best_metric.mean_nll - initial.mean_nll);
+    let best_vs_unigram_nll_delta = best_validation
+        .as_ref()
+        .zip(unigram_validation.as_ref())
+        .map(|(best_metric, unigram)| best_metric.mean_nll - unigram.mean_nll);
+    let final_minus_best_validation_nll = final_validation
+        .as_ref()
+        .zip(best_validation.as_ref())
+        .map(|(final_metric, best_metric)| final_metric.mean_nll - best_metric.mean_nll);
     let summary = TrainingSummary {
         initial_validation,
         final_validation,
         unigram_validation,
+        best_validation,
         best_validation_epoch,
         best_validation_mean_nll,
         validation_nll_delta,
         validation_accuracy_delta,
         final_vs_unigram_nll_delta,
+        best_validation_nll_delta,
+        best_vs_unigram_nll_delta,
+        final_minus_best_validation_nll,
+        best_checkpoint_path,
+        best_sample_path,
+        epochs_completed,
+        early_stopped_epoch,
     };
     write_summary(&run_dir.join("summary.json"), &summary)?;
 
