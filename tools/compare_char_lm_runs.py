@@ -113,6 +113,16 @@ def row_for(raw: str) -> tuple[dict[str, str], Path]:
             "final_vs_unigram": fmt_float(
                 float(final_vs_unigram) if final_vs_unigram is not None else None
             ),
+            "final_logprob_lift": fmt_float(
+                metric_value(final, "mean_target_logprob_lift")
+            ),
+            "final_rank_lift": fmt_float(
+                metric_value(final, "mean_target_rank_lift"), digits=2
+            ),
+            "final_kl_unigram": fmt_float(metric_value(final, "mean_kl_to_unigram")),
+            "final_top5_overlap": fmt_percent(
+                metric_value(final, "mean_top5_overlap_with_unigram")
+            ),
             "final_ppl": fmt_float(metric_value(final, "perplexity")),
             "final_acc": fmt_percent(metric_value(final, "accuracy")),
             "final_entropy": fmt_float(metric_value(final, "mean_entropy")),
@@ -133,6 +143,10 @@ def markdown_table(rows: list[dict[str, str]]) -> str:
         "delta_nll",
         "unigram_nll",
         "final_vs_unigram",
+        "final_logprob_lift",
+        "final_rank_lift",
+        "final_kl_unigram",
+        "final_top5_overlap",
         "final_ppl",
         "final_acc",
         "final_entropy",
@@ -168,6 +182,13 @@ def curve_rows_for(summary_row: dict[str, str], run_dir: Path) -> list[dict[str,
                 "val_acc": fmt_percent(metric_value(validation, "accuracy")),
                 "val_entropy": fmt_float(metric_value(validation, "mean_entropy")),
                 "val_rank": fmt_float(metric_value(validation, "mean_target_rank"), digits=2),
+                "logprob_lift": fmt_float(
+                    metric_value(validation, "mean_target_logprob_lift")
+                ),
+                "rank_lift": fmt_float(
+                    metric_value(validation, "mean_target_rank_lift"), digits=2
+                ),
+                "kl_unigram": fmt_float(metric_value(validation, "mean_kl_to_unigram")),
                 "update_l2": fmt_float(learnability_value(metric, "total_update_l2"), digits=6),
                 "update_ratio": fmt_float(
                     learnability_value(metric, "mean_update_to_value_l2"), digits=6
@@ -188,6 +209,9 @@ def curve_table(rows: list[dict[str, str]]) -> str:
         "val_acc",
         "val_entropy",
         "val_rank",
+        "logprob_lift",
+        "rank_lift",
+        "kl_unigram",
         "update_l2",
         "update_ratio",
     ]

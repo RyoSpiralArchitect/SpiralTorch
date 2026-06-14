@@ -4,6 +4,7 @@
 
 use serde::Serialize;
 use st_nn::{Linear, Module, Parameter, PureResult, Tensor, TensorError};
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::path::Path;
@@ -28,6 +29,16 @@ pub struct LanguageEvalMetric {
     pub mean_normalized_entropy: f32,
     pub mean_target_rank: f32,
     pub mean_target_percentile: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mean_target_logprob_lift: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mean_target_probability_lift: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mean_target_rank_lift: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mean_kl_to_unigram: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mean_top5_overlap_with_unigram: Option<f32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -82,6 +93,9 @@ pub struct LearnabilityMetric {
     pub validation_entropy: Option<f32>,
     pub validation_top_probability: Option<f32>,
     pub validation_target_probability: Option<f32>,
+    pub validation_target_logprob_lift: Option<f32>,
+    pub validation_target_rank_lift: Option<f32>,
+    pub validation_kl_to_unigram: Option<f32>,
 }
 
 pub const HEAD_PRIOR_NONE: &str = "none";
@@ -317,6 +331,47 @@ fn target_rank(values: &[f32], target: usize) -> usize {
         .count()
 }
 
+fn top_k_indices(values: &[f32], k: usize) -> Vec<usize> {
+    let mut indices = (0..values.len()).collect::<Vec<_>>();
+    indices.sort_by(|&left, &right| {
+        values[right]
+            .partial_cmp(&values[left])
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| left.cmp(&right))
+    });
+    indices.truncate(k.min(indices.len()));
+    indices
+}
+
+fn top_k_overlap_ratio(left: &[f32], right: &[f32], k: usize) -> f32 {
+    let k = k.min(left.len()).min(right.len());
+    if k == 0 {
+        return 0.0;
+    }
+    let left_top = top_k_indices(left, k);
+    let right_top = top_k_indices(right, k);
+    let overlap = left_top
+        .iter()
+        .filter(|index| right_top.contains(index))
+        .count();
+    overlap as f32 / k as f32
+}
+
+fn kl_to_unigram(probabilities: &[f32], unigram_probabilities: &[f32]) -> f32 {
+    probabilities
+        .iter()
+        .zip(unigram_probabilities.iter())
+        .filter_map(|(&probability, &unigram_probability)| {
+            let probability = probability.clamp(0.0, 1.0);
+            if probability <= 0.0 {
+                return None;
+            }
+            let unigram_probability = unigram_probability.clamp(1.0e-9, 1.0);
+            Some(probability * (probability.clamp(1.0e-9, 1.0).ln() - unigram_probability.ln()))
+        })
+        .sum()
+}
+
 fn l2(values: &[f32]) -> f32 {
     values
         .iter()
@@ -353,6 +408,15 @@ fn entropy(values: &[f32]) -> f32 {
     out
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct ContextLiftSums {
+    target_logprob: f32,
+    target_probability: f32,
+    target_rank: f32,
+    kl_to_unigram: f32,
+    top5_overlap_with_unigram: f32,
+}
+
 fn metric_from_sums(
     tokens: usize,
     windows: usize,
@@ -363,6 +427,7 @@ fn metric_from_sums(
     top_probability_sum: f32,
     entropy_sum: f32,
     target_rank_sum: f32,
+    lift_sums: Option<ContextLiftSums>,
 ) -> LanguageEvalMetric {
     let mean_nll = nll_sum / windows as f32;
     let perplexity = if mean_nll.is_finite() && mean_nll < 80.0 {
@@ -391,6 +456,13 @@ fn metric_from_sums(
         } else {
             1.0 - ((mean_target_rank - 1.0) / (vocab_size - 1) as f32)
         },
+        mean_target_logprob_lift: lift_sums.map(|sums| sums.target_logprob / windows as f32),
+        mean_target_probability_lift: lift_sums
+            .map(|sums| sums.target_probability / windows as f32),
+        mean_target_rank_lift: lift_sums.map(|sums| sums.target_rank / windows as f32),
+        mean_kl_to_unigram: lift_sums.map(|sums| sums.kl_to_unigram / windows as f32),
+        mean_top5_overlap_with_unigram: lift_sums
+            .map(|sums| sums.top5_overlap_with_unigram / windows as f32),
     }
 }
 
@@ -455,6 +527,7 @@ pub fn evaluate_unigram_next_token(
         top_probability * windows as f32,
         distribution_entropy * windows as f32,
         target_rank_sum,
+        None,
     )))
 }
 
@@ -558,14 +631,65 @@ where
         validation_entropy: validation.map(|metric| metric.mean_entropy),
         validation_top_probability: validation.map(|metric| metric.mean_top_probability),
         validation_target_probability: validation.map(|metric| metric.mean_target_probability),
+        validation_target_logprob_lift: validation
+            .and_then(|metric| metric.mean_target_logprob_lift),
+        validation_target_rank_lift: validation.and_then(|metric| metric.mean_target_rank_lift),
+        validation_kl_to_unigram: validation.and_then(|metric| metric.mean_kl_to_unigram),
     })
 }
 
+#[allow(dead_code)]
 pub fn evaluate_next_token<M>(
     model: &mut M,
     vocab_size: usize,
     input_mode: CharLmInputMode,
     steps: usize,
+    tokens: &[usize],
+    max_samples: usize,
+) -> PureResult<Option<LanguageEvalMetric>>
+where
+    M: Module + ?Sized,
+{
+    evaluate_next_token_inner(
+        model,
+        vocab_size,
+        input_mode,
+        steps,
+        None,
+        tokens,
+        max_samples,
+    )
+}
+
+pub fn evaluate_next_token_with_unigram_lift<M>(
+    model: &mut M,
+    vocab_size: usize,
+    input_mode: CharLmInputMode,
+    steps: usize,
+    train_tokens: &[usize],
+    tokens: &[usize],
+    max_samples: usize,
+) -> PureResult<Option<LanguageEvalMetric>>
+where
+    M: Module + ?Sized,
+{
+    evaluate_next_token_inner(
+        model,
+        vocab_size,
+        input_mode,
+        steps,
+        Some(train_tokens),
+        tokens,
+        max_samples,
+    )
+}
+
+fn evaluate_next_token_inner<M>(
+    model: &mut M,
+    vocab_size: usize,
+    input_mode: CharLmInputMode,
+    steps: usize,
+    train_tokens: Option<&[usize]>,
     tokens: &[usize],
     max_samples: usize,
 ) -> PureResult<Option<LanguageEvalMetric>>
@@ -584,6 +708,8 @@ where
     if windows == 0 {
         return Ok(None);
     }
+    let unigram_probabilities =
+        train_tokens.map(|train_tokens| smoothed_unigram_probabilities(vocab_size, train_tokens));
 
     model.eval()?;
     let result = (|| -> PureResult<LanguageEvalMetric> {
@@ -593,6 +719,9 @@ where
         let mut top_probability_sum = 0.0f32;
         let mut entropy_sum = 0.0f32;
         let mut target_rank_sum = 0.0f32;
+        let mut lift_sums = unigram_probabilities
+            .as_ref()
+            .map(|_| ContextLiftSums::default());
 
         for sample_idx in 0..windows {
             let start = if windows <= 1 || available <= 1 {
@@ -617,6 +746,7 @@ where
             let top = argmax(row);
             let top_probability = row[top].clamp(0.0, 1.0);
             let target_probability = row.get(target).copied().unwrap_or(0.0).clamp(1.0e-9, 1.0);
+            let rank = target_rank(row, target);
 
             if top == target {
                 correct += 1;
@@ -625,7 +755,24 @@ where
             target_probability_sum += target_probability;
             top_probability_sum += top_probability;
             entropy_sum += entropy(row);
-            target_rank_sum += target_rank(row, target) as f32;
+            target_rank_sum += rank as f32;
+            if let (Some(unigram_probabilities), Some(lift_sums)) =
+                (unigram_probabilities.as_ref(), lift_sums.as_mut())
+            {
+                let unigram_target_probability = unigram_probabilities
+                    .get(target)
+                    .copied()
+                    .unwrap_or(0.0)
+                    .clamp(1.0e-9, 1.0);
+                lift_sums.target_logprob +=
+                    target_probability.ln() - unigram_target_probability.ln();
+                lift_sums.target_probability += target_probability - unigram_target_probability;
+                lift_sums.target_rank +=
+                    target_rank(unigram_probabilities, target) as f32 - rank as f32;
+                lift_sums.kl_to_unigram += kl_to_unigram(row, unigram_probabilities);
+                lift_sums.top5_overlap_with_unigram +=
+                    top_k_overlap_ratio(row, unigram_probabilities, 5);
+            }
         }
 
         Ok(metric_from_sums(
@@ -638,6 +785,7 @@ where
             top_probability_sum,
             entropy_sum,
             target_rank_sum,
+            lift_sums,
         ))
     })();
     let restore = model.train();

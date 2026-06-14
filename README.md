@@ -73,7 +73,7 @@ SpiralTorch’s “learning stack” is a set of minimal, runnable training base
 - Coherence-scan char LMs damp the scan context before the classifier head by default; use `--context-scale 0.05` to tune that initial-logit scale.
 - Rust char-LM examples scale classifier weights by RMS by default; use `--head-rms 0.1` and, for scan/wave mixers, `--mix-rms 0.1` to tune update pressure.
 - Rust char-LM examples add a fixed smoothed train-token unigram prior before the softmax by default; use `--head-prior none` to start without that prior.
-- Char-LM validation summaries include a smoothed train-token unigram baseline and target-token rank, so runs can be checked against a simple frequency prior before judging context learning.
+- Char-LM validation summaries include a smoothed train-token unigram baseline, target-token rank, and context-lift metrics (`mean_target_logprob_lift`, rank lift, KL-to-unigram), so runs can be checked against a simple frequency prior before judging context learning.
 - Compare char-LM runs: `PYTHONNOUSERSITE=1 python3 -S -s tools/compare_char_lm_runs.py --curves --params 5 models/runs/<baseline> models/runs/<scan> models/runs/<wave>`
 - **LLM (raw text, no tokenizer):** `cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text.txt> [--head-rms 0.1 --head-prior unigram] [--val-fraction 0.1 --eval-samples 256]`
 - **LLM (Python, raw text, no tokenizer):** `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_finetune.py <text_or_dir> [<text_or_dir> ...]`
