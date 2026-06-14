@@ -71,12 +71,13 @@ SpiralTorch’s “learning stack” is a set of minimal, runnable training base
 - Optional (Python): `--desire` to enable desire telemetry + apply desire offsets during sampling
 - Optional (Python): tune SoftLogic band weighting via `SPIRAL_SOFTLOGIC_*`, `--softlogic-*` flags (saved into `run.json`), or `trainer.set_softlogic_config(st.nn.SoftLogicConfig(...))`
 - Coherence-scan char LMs damp the scan context before the classifier head by default; use `--context-scale 0.05` to tune that initial-logit scale.
+- Rust char-LM examples scale classifier weights by RMS by default; use `--head-rms 0.1` and, for scan/wave mixers, `--mix-rms 0.1` to tune update pressure.
 - Compare char-LM runs: `PYTHONNOUSERSITE=1 python3 -S -s tools/compare_char_lm_runs.py --curves --params 5 models/runs/<baseline> models/runs/<scan> models/runs/<wave>`
-- **LLM (raw text, no tokenizer):** `cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text.txt> [--val-fraction 0.1 --eval-samples 256]`
+- **LLM (raw text, no tokenizer):** `cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text.txt> [--head-rms 0.1] [--val-fraction 0.1 --eval-samples 256]`
 - **LLM (Python, raw text, no tokenizer):** `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_finetune.py <text_or_dir> [<text_or_dir> ...]`
-- **LLM (coherence scan, raw text, no tokenizer):** `cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text.txt> [--context-scale 0.05] [--val-fraction 0.1 --eval-samples 256]`
+- **LLM (coherence scan, raw text, no tokenizer):** `cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text.txt> [--context-scale 0.05 --mix-rms 0.1 --head-rms 0.1] [--val-fraction 0.1 --eval-samples 256]`
 - **LLM (Python, coherence scan, raw text, no tokenizer):** `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_coherence_scan.py <text_or_dir> [<text_or_dir> ...] [--context-scale 0.05]`
-- **LLM (coherence wave, raw text, no tokenizer):** `cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text.txt> [--val-fraction 0.1 --eval-samples 256] [--infuse \"spiral\" --infuse-every batch --infuse-mode separate]`
+- **LLM (coherence wave, raw text, no tokenizer):** `cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text.txt> [--mix-rms 0.1 --head-rms 0.1] [--val-fraction 0.1 --eval-samples 256] [--infuse \"spiral\" --infuse-every batch --infuse-mode separate]`
 - **LLM (Python, coherence wave, raw text, no tokenizer):** `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_coherence_wave.py <text_or_dir> [<text_or_dir> ...] [--infuse \"spiral\" --infuse-every batch --infuse-mode separate]`
 - **LLM (Python, WaveRnn+Mixer, attentionless):** `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_wave_rnn_mixer.py <text.txt>`
 - Example (Python, desire + atlas): `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_coherence_wave.py models/samples/spiral_demo_en.txt --desire --events models/runs/demo_desire/events.jsonl --atlas --run-dir models/runs/demo_desire`

@@ -3,7 +3,7 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 
 use serde::Serialize;
-use st_nn::{Module, PureResult, Tensor, TensorError};
+use st_nn::{Linear, Module, PureResult, Tensor, TensorError};
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::path::Path;
@@ -78,6 +78,38 @@ pub struct LearnabilityMetric {
     pub validation_entropy: Option<f32>,
     pub validation_top_probability: Option<f32>,
     pub validation_target_probability: Option<f32>,
+}
+
+pub fn linear_with_weight_rms(
+    name: &str,
+    input_dim: usize,
+    output_dim: usize,
+    target_rms: f32,
+) -> PureResult<Linear> {
+    if target_rms <= 0.0 || !target_rms.is_finite() {
+        return Err(TensorError::NonFiniteValue {
+            label: "char_lm_linear_weight_rms",
+            value: target_rms,
+        });
+    }
+    let mut layer = Linear::new(name, input_dim, output_dim)?;
+    let weight_name = format!("{name}::weight");
+    layer.visit_parameters_mut(&mut |param| {
+        if param.name() != weight_name {
+            return Ok(());
+        }
+        let current = param.value().squared_l2_norm().sqrt()
+            / (param.value().data().len() as f32).sqrt().max(1.0);
+        if current <= f32::EPSILON || !current.is_finite() {
+            return Ok(());
+        }
+        let scale = target_rms / current;
+        for value in param.value_mut().data_mut() {
+            *value *= scale;
+        }
+        Ok(())
+    })?;
+    Ok(layer)
 }
 
 pub fn split_train_validation_tokens(

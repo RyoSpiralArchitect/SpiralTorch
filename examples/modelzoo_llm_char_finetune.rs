@@ -13,9 +13,9 @@ mod char_lm_eval;
 mod text_corpus;
 
 use char_lm_eval::{
-    capture_parameter_snapshot, evaluate_next_token, split_train_validation_tokens,
-    summarize_learnability, write_summary, CharLmInputMode, LanguageEvalMetric, LearnabilityMetric,
-    TrainingSummary,
+    capture_parameter_snapshot, evaluate_next_token, linear_with_weight_rms,
+    split_train_validation_tokens, summarize_learnability, write_summary, CharLmInputMode,
+    LanguageEvalMetric, LearnabilityMetric, TrainingSummary,
 };
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -40,6 +40,7 @@ const FORMAT_ID_V1: &str = "st-char-lm-v1";
 const FORMAT_ID_V2: &str = "st-char-lm-v2";
 const DEFAULT_UNK: char = '\u{FFFD}';
 const RUN_SCHEMA: &str = "st.modelzoo.run.v1";
+const DEFAULT_LINEAR_WEIGHT_RMS: f32 = 0.1;
 
 #[derive(Debug, Clone, Serialize)]
 struct RunMeta {
@@ -57,6 +58,7 @@ struct RunMeta {
     hidden: usize,
     embed_dim: Option<usize>,
     mode: String,
+    head_weight_rms: f32,
     epochs: usize,
     batches_per_epoch: usize,
     batch: usize,
@@ -180,6 +182,7 @@ struct Args {
     steps: usize,
     embed_dim: usize,
     hidden: usize,
+    head_weight_rms: f32,
     epochs: usize,
     batches_per_epoch: usize,
     batch: usize,
@@ -206,7 +209,7 @@ impl Args {
         }
         if data_args.is_empty() {
             return Err(TensorError::Generic(
-                "usage: cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--prompt STR]"
+                "usage: cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--head-rms F] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--prompt STR]"
                     .to_string(),
             ));
         }
@@ -221,6 +224,7 @@ impl Args {
             steps: 32,
             embed_dim: 32,
             hidden: 64,
+            head_weight_rms: DEFAULT_LINEAR_WEIGHT_RMS,
             epochs: 6,
             batches_per_epoch: 24,
             batch: 8,
@@ -247,6 +251,7 @@ impl Args {
                 "--steps" => args.steps = take_parse(&mut argv, "--steps")?,
                 "--embed-dim" => args.embed_dim = take_parse(&mut argv, "--embed-dim")?,
                 "--hidden" => args.hidden = take_parse(&mut argv, "--hidden")?,
+                "--head-rms" => args.head_weight_rms = take_parse(&mut argv, "--head-rms")?,
                 "--epochs" => args.epochs = take_parse(&mut argv, "--epochs")?,
                 "--batches" => args.batches_per_epoch = take_parse(&mut argv, "--batches")?,
                 "--batch" => args.batch = take_parse(&mut argv, "--batch")?,
@@ -263,7 +268,7 @@ impl Args {
                 "--prompt" => args.prompt = Some(take_arg(&mut argv, "--prompt")?),
                 "--help" | "-h" => {
                     return Err(TensorError::Generic(
-                        "usage: cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--prompt STR]"
+                        "usage: cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--head-rms F] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--prompt STR]"
                             .to_string(),
                     ));
                 }
@@ -278,6 +283,12 @@ impl Args {
         if args.steps == 0 || args.embed_dim == 0 || args.hidden == 0 || args.batch == 0 {
             return Err(TensorError::InvalidValue {
                 label: "char_lm_invalid_dims",
+            });
+        }
+        if args.head_weight_rms <= 0.0 || !args.head_weight_rms.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "char_lm_head_weight_rms",
+                value: args.head_weight_rms,
             });
         }
         if !args.validation_fraction.is_finite()
@@ -358,6 +369,7 @@ fn build_model(
     embed_dim: Option<usize>,
     steps: usize,
     hidden: usize,
+    head_weight_rms: f32,
     curvature: f32,
     temperature: f32,
 ) -> PureResult<Sequential> {
@@ -368,7 +380,12 @@ fn build_model(
     } else {
         model.push(SpiralRnn::new("char_rnn", vocab_size, hidden, steps)?);
     }
-    model.push(st_nn::Linear::new("head", hidden, vocab_size)?);
+    model.push(linear_with_weight_rms(
+        "head",
+        hidden,
+        vocab_size,
+        head_weight_rms,
+    )?);
     model.push(ZSpaceSoftmax::new(curvature, temperature)?);
     Ok(model)
 }
@@ -601,6 +618,7 @@ fn main() -> PureResult<()> {
                 meta.embed_dim,
                 meta.steps,
                 meta.hidden,
+                args.head_weight_rms,
                 meta.curvature,
                 meta.temperature,
             )?;
@@ -620,6 +638,7 @@ fn main() -> PureResult<()> {
                 Some(args.embed_dim),
                 args.steps,
                 args.hidden,
+                args.head_weight_rms,
                 args.curvature,
                 args.temperature,
             )?;
@@ -699,6 +718,7 @@ fn main() -> PureResult<()> {
         hidden,
         embed_dim,
         mode: mode.clone(),
+        head_weight_rms: args.head_weight_rms,
         epochs: args.epochs,
         batches_per_epoch: args.batches_per_epoch,
         batch: args.batch,
@@ -749,7 +769,7 @@ fn main() -> PureResult<()> {
     let mut loss = CategoricalCrossEntropy::new();
 
     println!(
-        "mode={mode} backend={} vocab={} files={} chars={} train_tokens={} validation_tokens={} steps={} hidden={} epochs={} batch={} lr={:.3e} curvature={} temp={} run_dir={}",
+        "mode={mode} backend={} vocab={} files={} chars={} train_tokens={} validation_tokens={} steps={} hidden={} head_rms={} epochs={} batch={} lr={:.3e} curvature={} temp={} run_dir={}",
         backend_sel.label,
         vocab.len(),
         data_files.len(),
@@ -758,6 +778,7 @@ fn main() -> PureResult<()> {
         split.validation.len(),
         steps,
         hidden,
+        args.head_weight_rms,
         args.epochs,
         args.batch,
         args.learning_rate,

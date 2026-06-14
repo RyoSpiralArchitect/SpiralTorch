@@ -78,10 +78,11 @@ cargo run -p st-nn --example fine_tune_with_selfsup -- <artefact_dir>
 **File:** `examples/modelzoo_llm_char_finetune.rs`
 
 ```bash
-cargo run -p st-nn --example modelzoo_llm_char_finetune -- models/samples/spiral_demo_en.txt --val-fraction 0.1 --eval-samples 256
+cargo run -p st-nn --example modelzoo_llm_char_finetune -- models/samples/spiral_demo_en.txt --head-rms 0.1 --val-fraction 0.1 --eval-samples 256
 ```
 
 Writes `run.json`, `metrics.jsonl`, `summary.json`, samples, and weights into the selected run directory.
+Rust char-LM classifier heads use RMS-scaled initialization by default; tune with `--head-rms`, and with `--mix-rms` for coherence scan/wave mixers.
 
 Compare several char-LM runs with:
 

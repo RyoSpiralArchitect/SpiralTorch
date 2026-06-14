@@ -14,9 +14,9 @@ mod char_lm_eval;
 mod text_corpus;
 
 use char_lm_eval::{
-    capture_parameter_snapshot, evaluate_next_token, split_train_validation_tokens,
-    summarize_learnability, write_summary, CharLmInputMode, LanguageEvalMetric, LearnabilityMetric,
-    TrainingSummary,
+    capture_parameter_snapshot, evaluate_next_token, linear_with_weight_rms,
+    split_train_validation_tokens, summarize_learnability, write_summary, CharLmInputMode,
+    LanguageEvalMetric, LearnabilityMetric, TrainingSummary,
 };
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -41,6 +41,7 @@ const FORMAT_ID_V2: &str = "st-char-lm-coherence-v2";
 const DEFAULT_UNK: char = '\u{FFFD}';
 const RUN_SCHEMA: &str = "st.modelzoo.run.v1";
 const DEFAULT_CONTEXT_SCALE: f32 = 0.05;
+const DEFAULT_LINEAR_WEIGHT_RMS: f32 = 0.1;
 
 #[derive(Debug, Clone, Serialize)]
 struct RunMeta {
@@ -59,6 +60,8 @@ struct RunMeta {
     hidden: usize,
     memory: usize,
     context_scale: Option<f32>,
+    mix_weight_rms: f32,
+    head_weight_rms: f32,
     epochs: usize,
     batches_per_epoch: usize,
     batch: usize,
@@ -190,6 +193,8 @@ struct Args {
     hidden: usize,
     memory: usize,
     context_scale: f32,
+    mix_weight_rms: f32,
+    head_weight_rms: f32,
     epochs: usize,
     batches_per_epoch: usize,
     batch: usize,
@@ -216,7 +221,7 @@ impl Args {
         }
         if data_args.is_empty() {
             return Err(TensorError::Generic(
-                "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--context-scale F] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--prompt STR]"
+                "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--context-scale F] [--mix-rms F] [--head-rms F] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--prompt STR]"
                     .to_string(),
             ));
         }
@@ -233,6 +238,8 @@ impl Args {
             hidden: 64,
             memory: 16,
             context_scale: DEFAULT_CONTEXT_SCALE,
+            mix_weight_rms: DEFAULT_LINEAR_WEIGHT_RMS,
+            head_weight_rms: DEFAULT_LINEAR_WEIGHT_RMS,
             epochs: 6,
             batches_per_epoch: 24,
             batch: 8,
@@ -261,6 +268,8 @@ impl Args {
                 "--hidden" => args.hidden = take_parse(&mut argv, "--hidden")?,
                 "--memory" => args.memory = take_parse(&mut argv, "--memory")?,
                 "--context-scale" => args.context_scale = take_parse(&mut argv, "--context-scale")?,
+                "--mix-rms" => args.mix_weight_rms = take_parse(&mut argv, "--mix-rms")?,
+                "--head-rms" => args.head_weight_rms = take_parse(&mut argv, "--head-rms")?,
                 "--epochs" => args.epochs = take_parse(&mut argv, "--epochs")?,
                 "--batches" => args.batches_per_epoch = take_parse(&mut argv, "--batches")?,
                 "--batch" => args.batch = take_parse(&mut argv, "--batch")?,
@@ -277,7 +286,7 @@ impl Args {
                 "--prompt" => args.prompt = Some(take_arg(&mut argv, "--prompt")?),
                 "--help" | "-h" => {
                     return Err(TensorError::Generic(
-                        "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--context-scale F] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--prompt STR]"
+                        "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--context-scale F] [--mix-rms F] [--head-rms F] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--prompt STR]"
                             .to_string(),
                     ));
                 }
@@ -306,6 +315,8 @@ impl Args {
             });
         }
         validate_context_scale(args.context_scale, "char_lm_coherence_context_scale")?;
+        validate_context_scale(args.mix_weight_rms, "char_lm_coherence_mix_weight_rms")?;
+        validate_context_scale(args.head_weight_rms, "char_lm_coherence_head_weight_rms")?;
         if !args.validation_fraction.is_finite()
             || args.validation_fraction < 0.0
             || args.validation_fraction >= 1.0
@@ -393,6 +404,8 @@ fn build_model(
     hidden: usize,
     memory: usize,
     context_scale: Option<f32>,
+    mix_weight_rms: f32,
+    head_weight_rms: f32,
     curvature: f32,
     temperature: f32,
 ) -> PureResult<Sequential> {
@@ -411,9 +424,19 @@ fn build_model(
             Tensor::from_vec(1, embed_dim, vec![context_scale; embed_dim])?,
         )?);
     }
-    model.push(st_nn::Linear::new("mix", embed_dim, hidden)?);
+    model.push(linear_with_weight_rms(
+        "mix",
+        embed_dim,
+        hidden,
+        mix_weight_rms,
+    )?);
     model.push(Relu::new());
-    model.push(st_nn::Linear::new("head", hidden, vocab_size)?);
+    model.push(linear_with_weight_rms(
+        "head",
+        hidden,
+        vocab_size,
+        head_weight_rms,
+    )?);
     model.push(ZSpaceSoftmax::new(curvature, temperature)?);
     Ok(model)
 }
@@ -624,6 +647,8 @@ fn main() -> PureResult<()> {
             meta.hidden,
             meta.memory,
             meta.context_scale,
+            args.mix_weight_rms,
+            args.head_weight_rms,
             meta.curvature,
             meta.temperature,
         )?;
@@ -648,6 +673,8 @@ fn main() -> PureResult<()> {
             args.hidden,
             args.memory,
             Some(args.context_scale),
+            args.mix_weight_rms,
+            args.head_weight_rms,
             args.curvature,
             args.temperature,
         )?;
@@ -718,6 +745,8 @@ fn main() -> PureResult<()> {
         hidden,
         memory,
         context_scale,
+        mix_weight_rms: args.mix_weight_rms,
+        head_weight_rms: args.head_weight_rms,
         epochs: args.epochs,
         batches_per_epoch: args.batches_per_epoch,
         batch: args.batch,
@@ -768,7 +797,7 @@ fn main() -> PureResult<()> {
     let mut loss = CategoricalCrossEntropy::new();
 
     println!(
-        "arch=coherence_scan backend={} vocab={} files={} chars={} train_tokens={} validation_tokens={} steps={} embed_dim={} hidden={} memory={} context_scale={} epochs={} batch={} lr={:.3e} curvature={} temp={} run_dir={}",
+        "arch=coherence_scan backend={} vocab={} files={} chars={} train_tokens={} validation_tokens={} steps={} embed_dim={} hidden={} memory={} context_scale={} mix_rms={} head_rms={} epochs={} batch={} lr={:.3e} curvature={} temp={} run_dir={}",
         backend_sel.label,
         vocab.len(),
         data_files.len(),
@@ -782,6 +811,8 @@ fn main() -> PureResult<()> {
         context_scale
             .map(|value| format!("{value:.4}"))
             .unwrap_or_else(|| "none".to_string()),
+        args.mix_weight_rms,
+        args.head_weight_rms,
         args.epochs,
         args.batch,
         args.learning_rate,
