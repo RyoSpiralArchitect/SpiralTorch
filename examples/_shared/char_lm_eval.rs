@@ -46,11 +46,19 @@ pub struct TrainingSummary {
     pub initial_validation: Option<LanguageEvalMetric>,
     pub final_validation: Option<LanguageEvalMetric>,
     pub unigram_validation: Option<LanguageEvalMetric>,
+    pub best_validation: Option<LanguageEvalMetric>,
     pub best_validation_epoch: Option<usize>,
     pub best_validation_mean_nll: Option<f32>,
     pub validation_nll_delta: Option<f32>,
     pub validation_accuracy_delta: Option<f32>,
     pub final_vs_unigram_nll_delta: Option<f32>,
+    pub best_validation_nll_delta: Option<f32>,
+    pub best_vs_unigram_nll_delta: Option<f32>,
+    pub final_minus_best_validation_nll: Option<f32>,
+    pub best_checkpoint_path: Option<String>,
+    pub best_sample_path: Option<String>,
+    pub epochs_completed: usize,
+    pub early_stopped_epoch: Option<usize>,
 }
 
 #[derive(Debug, Clone)]

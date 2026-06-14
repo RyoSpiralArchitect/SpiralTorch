@@ -94,13 +94,25 @@ def row_for(raw: str) -> tuple[dict[str, str], Path]:
     unigram_nll = metric_value(unigram, "mean_nll")
     delta_nll = summary.get("validation_nll_delta")
     final_vs_unigram = summary.get("final_vs_unigram_nll_delta")
+    best_nll = summary.get("best_validation_mean_nll")
+    best_vs_unigram = summary.get("best_vs_unigram_nll_delta")
+    final_minus_best = summary.get("final_minus_best_validation_nll")
     delta_acc = summary.get("validation_accuracy_delta")
     if not isinstance(delta_nll, (int, float)):
         delta_nll = None
     if not isinstance(final_vs_unigram, (int, float)):
         final_vs_unigram = None
+    if not isinstance(best_nll, (int, float)):
+        best_nll = None
+    if not isinstance(best_vs_unigram, (int, float)):
+        best_vs_unigram = None
+    if not isinstance(final_minus_best, (int, float)):
+        final_minus_best = None
     if not isinstance(delta_acc, (int, float)):
         delta_acc = None
+    best_checkpoint_path = summary.get("best_checkpoint_path")
+    best_checkpoint = "yes" if isinstance(best_checkpoint_path, str) and best_checkpoint_path else "-"
+    early_stopped_epoch = summary.get("early_stopped_epoch")
 
     return (
         {
@@ -129,6 +141,17 @@ def row_for(raw: str) -> tuple[dict[str, str], Path]:
             "final_rank": fmt_float(metric_value(final, "mean_target_rank"), digits=2),
             "delta_acc": fmt_percent(float(delta_acc) if delta_acc is not None else None),
             "best_epoch": str(summary.get("best_validation_epoch", "-")),
+            "best_nll": fmt_float(float(best_nll) if best_nll is not None else None),
+            "best_vs_unigram": fmt_float(
+                float(best_vs_unigram) if best_vs_unigram is not None else None
+            ),
+            "final_minus_best": fmt_float(
+                float(final_minus_best) if final_minus_best is not None else None
+            ),
+            "early_stop_epoch": str(early_stopped_epoch)
+            if isinstance(early_stopped_epoch, int)
+            else "-",
+            "best_ckpt": best_checkpoint,
         },
         run_dir,
     )
@@ -153,6 +176,11 @@ def markdown_table(rows: list[dict[str, str]]) -> str:
         "final_rank",
         "delta_acc",
         "best_epoch",
+        "best_nll",
+        "best_vs_unigram",
+        "final_minus_best",
+        "early_stop_epoch",
+        "best_ckpt",
     ]
     out = ["| " + " | ".join(headers) + " |"]
     out.append("| " + " | ".join("---" for _ in headers) + " |")
