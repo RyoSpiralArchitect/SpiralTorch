@@ -15,10 +15,10 @@ mod text_corpus;
 
 use char_lm_eval::{
     capture_parameter_snapshot, evaluate_next_token_with_unigram_lift, evaluate_unigram_next_token,
-    linear_with_weight_rms, residual_logit_scaler, split_train_validation_tokens,
-    summarize_learnability, validate_head_prior, validate_head_residual_scale, write_summary,
-    CharLmInputMode, FixedLogitPrior, LanguageEvalMetric, LearnabilityMetric, TrainingSummary,
-    DEFAULT_HEAD_RESIDUAL_SCALE, HEAD_PRIOR_UNIGRAM,
+    head_prior_is_enabled, insert_head_prior, linear_with_weight_rms, residual_logit_scaler,
+    split_train_validation_tokens, summarize_learnability, validate_head_prior,
+    validate_head_residual_scale, write_summary, CharLmInputMode, LanguageEvalMetric,
+    LearnabilityMetric, TrainingSummary, DEFAULT_HEAD_RESIDUAL_SCALE, HEAD_PRIOR_LEARNED_UNIGRAM,
 };
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -265,7 +265,7 @@ impl Args {
         }
         if data_args.is_empty() {
             return Err(TensorError::Generic(
-                "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--kernel N] [--dilations 1,2,4] [--self-score-scale F] [--query-residual-scale F] [--mix-rms F] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--early-stop-patience N] [--prompt STR] [--infuse STR] [--infuse-every once|epoch|batch] [--infuse-mode blend|separate]"
+                "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--kernel N] [--dilations 1,2,4] [--self-score-scale F] [--query-residual-scale F] [--mix-rms F] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram|learned-unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--early-stop-patience N] [--prompt STR] [--infuse STR] [--infuse-every once|epoch|batch] [--infuse-mode blend|separate]"
                     .to_string(),
             ));
         }
@@ -288,7 +288,7 @@ impl Args {
             mix_weight_rms: DEFAULT_LINEAR_WEIGHT_RMS,
             head_weight_rms: DEFAULT_LINEAR_WEIGHT_RMS,
             head_residual_scale: DEFAULT_HEAD_RESIDUAL_SCALE,
-            head_prior: HEAD_PRIOR_UNIGRAM.to_string(),
+            head_prior: HEAD_PRIOR_LEARNED_UNIGRAM.to_string(),
             epochs: 6,
             batches_per_epoch: 24,
             batch: 8,
@@ -358,7 +358,7 @@ impl Args {
                 "--infuse-mode" => args.infuse_mode = Some(take_arg(&mut argv, "--infuse-mode")?),
                 "--help" | "-h" => {
                     return Err(TensorError::Generic(
-                        "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--kernel N] [--dilations 1,2,4] [--self-score-scale F] [--query-residual-scale F] [--mix-rms F] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--early-stop-patience N] [--prompt STR] [--infuse STR] [--infuse-every once|epoch|batch] [--infuse-mode blend|separate]"
+                        "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--kernel N] [--dilations 1,2,4] [--self-score-scale F] [--query-residual-scale F] [--mix-rms F] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram|learned-unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--early-stop-patience N] [--prompt STR] [--infuse STR] [--infuse-every once|epoch|batch] [--infuse-mode blend|separate]"
                             .to_string(),
                     ));
                 }
@@ -811,9 +811,8 @@ fn main() -> PureResult<()> {
             meta.curvature,
             meta.temperature,
         )?;
-        if meta.head_prior.as_deref() == Some(HEAD_PRIOR_UNIGRAM) {
-            let index = model.len().saturating_sub(1);
-            model.insert(index, FixedLogitPrior::zeros("head_prior", vocab.len())?)?;
+        if let Some(head_prior) = meta.head_prior.as_deref() {
+            insert_head_prior(&mut model, head_prior, vocab.len(), None)?;
         }
         let head_prior = meta.head_prior.clone();
         let head_residual_scale = meta.head_residual_scale;
@@ -902,11 +901,12 @@ fn main() -> PureResult<()> {
     } else {
         Some(args.head_residual_scale)
     };
-    if loaded_from.is_none() && args.head_prior == HEAD_PRIOR_UNIGRAM {
-        let index = model.len().saturating_sub(1);
-        model.insert(
-            index,
-            FixedLogitPrior::from_unigram("head_prior", vocab.len(), &split.train)?,
+    if loaded_from.is_none() {
+        insert_head_prior(
+            &mut model,
+            &args.head_prior,
+            vocab.len(),
+            Some(&split.train),
         )?;
     }
     model.attach_hypergrad(curvature, args.learning_rate)?;
@@ -1103,7 +1103,7 @@ fn main() -> PureResult<()> {
     }
 
     let meta_head_prior = loaded_head_prior.clone().or_else(|| {
-        (loaded_from.is_none() && args.head_prior == HEAD_PRIOR_UNIGRAM)
+        (loaded_from.is_none() && head_prior_is_enabled(&args.head_prior))
             .then(|| args.head_prior.clone())
     });
     let meta_head_residual_scale = loaded_head_residual_scale

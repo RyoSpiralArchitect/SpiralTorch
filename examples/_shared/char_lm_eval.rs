@@ -3,7 +3,7 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 
 use serde::Serialize;
-use st_nn::{Linear, Module, Parameter, PureResult, Tensor, TensorError};
+use st_nn::{Linear, Module, Parameter, PureResult, Sequential, Tensor, TensorError};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
@@ -108,15 +108,20 @@ pub struct LearnabilityMetric {
 
 pub const HEAD_PRIOR_NONE: &str = "none";
 pub const HEAD_PRIOR_UNIGRAM: &str = "unigram";
+pub const HEAD_PRIOR_LEARNED_UNIGRAM: &str = "learned-unigram";
 pub const DEFAULT_HEAD_RESIDUAL_SCALE: f32 = 1.0;
 
 pub fn validate_head_prior(value: &str) -> PureResult<()> {
     match value {
-        HEAD_PRIOR_NONE | HEAD_PRIOR_UNIGRAM => Ok(()),
+        HEAD_PRIOR_NONE | HEAD_PRIOR_UNIGRAM | HEAD_PRIOR_LEARNED_UNIGRAM => Ok(()),
         _ => Err(TensorError::Generic(format!(
-            "invalid --head-prior {value}; expected {HEAD_PRIOR_NONE} or {HEAD_PRIOR_UNIGRAM}"
+            "invalid --head-prior {value}; expected {HEAD_PRIOR_NONE}, {HEAD_PRIOR_UNIGRAM}, or {HEAD_PRIOR_LEARNED_UNIGRAM}"
         ))),
     }
+}
+
+pub fn head_prior_is_enabled(value: &str) -> bool {
+    matches!(value, HEAD_PRIOR_UNIGRAM | HEAD_PRIOR_LEARNED_UNIGRAM)
 }
 
 pub fn linear_with_weight_rms(
@@ -329,6 +334,159 @@ impl Module for FixedLogitPrior {
         }
         self.prior = value.clone();
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct LearnedLogitPrior {
+    name: String,
+    base: Tensor,
+    delta: Parameter,
+}
+
+impl LearnedLogitPrior {
+    pub fn from_unigram(
+        name: impl Into<String>,
+        vocab_size: usize,
+        train_tokens: &[usize],
+    ) -> PureResult<Self> {
+        let probabilities = smoothed_unigram_probabilities(vocab_size, train_tokens);
+        let values = probabilities
+            .into_iter()
+            .map(|probability| probability.clamp(1.0e-9, 1.0).ln())
+            .collect::<Vec<_>>();
+        Self::from_values(name, Tensor::from_vec(1, vocab_size, values)?)
+    }
+
+    pub fn zeros(name: impl Into<String>, vocab_size: usize) -> PureResult<Self> {
+        Self::from_values(name, Tensor::zeros(1, vocab_size)?)
+    }
+
+    fn from_values(name: impl Into<String>, prior: Tensor) -> PureResult<Self> {
+        let (rows, cols) = prior.shape();
+        if rows != 1 || cols == 0 {
+            return Err(TensorError::ShapeMismatch {
+                left: (rows, cols),
+                right: (1, cols),
+            });
+        }
+        let name = name.into();
+        let delta = Tensor::zeros(rows, cols)?;
+        Ok(Self {
+            delta: Parameter::new(format!("{name}::delta"), delta),
+            name,
+            base: prior,
+        })
+    }
+
+    fn key(&self) -> String {
+        format!("{}::prior", self.name)
+    }
+
+    fn combined_prior(&self) -> PureResult<Tensor> {
+        self.base.add(self.delta.value())
+    }
+}
+
+impl Module for LearnedLogitPrior {
+    fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+        let (rows, cols) = input.shape();
+        if self.base.shape() != (1, cols) || self.delta.value().shape() != (1, cols) {
+            return Err(TensorError::ShapeMismatch {
+                left: self.base.shape(),
+                right: (1, cols),
+            });
+        }
+        let mut output = input.clone();
+        if rows > 0 {
+            let prior = self.combined_prior()?;
+            output.add_row_inplace(prior.data())?;
+        }
+        Ok(output)
+    }
+
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        if input.shape() != grad_output.shape() {
+            return Err(TensorError::ShapeMismatch {
+                left: input.shape(),
+                right: grad_output.shape(),
+            });
+        }
+        let (rows, cols) = grad_output.shape();
+        let summed = grad_output.sum_axis0();
+        let grad_prior = Tensor::from_vec(1, cols, summed)?.scale(1.0 / rows.max(1) as f32)?;
+        self.delta.accumulate_euclidean(&grad_prior)?;
+        Ok(grad_output.clone())
+    }
+
+    fn visit_parameters(
+        &self,
+        visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        visitor(&self.delta)?;
+        Ok(())
+    }
+
+    fn visit_parameters_mut(
+        &mut self,
+        visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        visitor(&mut self.delta)?;
+        Ok(())
+    }
+
+    fn state_dict(&self) -> PureResult<HashMap<String, Tensor>> {
+        Ok(HashMap::from([(self.key(), self.combined_prior()?)]))
+    }
+
+    fn load_state_dict(&mut self, state: &HashMap<String, Tensor>) -> PureResult<()> {
+        let key = self.key();
+        let Some(value) = state.get(&key) else {
+            return Err(TensorError::MissingParameter { name: key });
+        };
+        if value.shape() != self.base.shape() {
+            return Err(TensorError::ShapeMismatch {
+                left: value.shape(),
+                right: self.base.shape(),
+            });
+        }
+        self.base = value.clone();
+        self.delta
+            .load_value(&Tensor::zeros(value.shape().0, value.shape().1)?)?;
+        Ok(())
+    }
+}
+
+pub fn insert_head_prior(
+    model: &mut Sequential,
+    head_prior: &str,
+    vocab_size: usize,
+    train_tokens: Option<&[usize]>,
+) -> PureResult<()> {
+    let index = model.len().saturating_sub(1);
+    match head_prior {
+        HEAD_PRIOR_NONE => Ok(()),
+        HEAD_PRIOR_UNIGRAM => {
+            if let Some(tokens) = train_tokens {
+                model.insert(
+                    index,
+                    FixedLogitPrior::from_unigram("head_prior", vocab_size, tokens)?,
+                )
+            } else {
+                model.insert(index, FixedLogitPrior::zeros("head_prior", vocab_size)?)
+            }
+        }
+        HEAD_PRIOR_LEARNED_UNIGRAM => {
+            if let Some(tokens) = train_tokens {
+                model.insert(
+                    index,
+                    LearnedLogitPrior::from_unigram("head_prior", vocab_size, tokens)?,
+                )
+            } else {
+                model.insert(index, LearnedLogitPrior::zeros("head_prior", vocab_size)?)
+            }
+        }
+        _ => validate_head_prior(head_prior),
     }
 }
 
