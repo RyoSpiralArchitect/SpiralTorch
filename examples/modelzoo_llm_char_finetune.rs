@@ -14,9 +14,10 @@ mod text_corpus;
 
 use char_lm_eval::{
     capture_parameter_snapshot, evaluate_next_token_with_unigram_lift, evaluate_unigram_next_token,
-    linear_with_weight_rms, split_train_validation_tokens, summarize_learnability,
-    validate_head_prior, write_summary, CharLmInputMode, FixedLogitPrior, LanguageEvalMetric,
-    LearnabilityMetric, TrainingSummary, HEAD_PRIOR_UNIGRAM,
+    linear_with_weight_rms, residual_logit_scaler, split_train_validation_tokens,
+    summarize_learnability, validate_head_prior, validate_head_residual_scale, write_summary,
+    CharLmInputMode, FixedLogitPrior, LanguageEvalMetric, LearnabilityMetric, TrainingSummary,
+    DEFAULT_HEAD_RESIDUAL_SCALE, HEAD_PRIOR_UNIGRAM,
 };
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -60,6 +61,7 @@ struct RunMeta {
     embed_dim: Option<usize>,
     mode: String,
     head_weight_rms: f32,
+    head_residual_scale: Option<f32>,
     head_prior: String,
     epochs: usize,
     batches_per_epoch: usize,
@@ -145,6 +147,8 @@ struct CharLmMeta {
     embed_dim: Option<usize>,
     #[serde(default)]
     head_prior: Option<String>,
+    #[serde(default)]
+    head_residual_scale: Option<f32>,
     unk: char,
     symbols: Vec<char>,
 }
@@ -155,6 +159,7 @@ impl CharLmMeta {
         hidden: usize,
         embed_dim: Option<usize>,
         head_prior: Option<String>,
+        head_residual_scale: Option<f32>,
         curvature: f32,
         temperature: f32,
         vocab: &Vocab,
@@ -171,6 +176,7 @@ impl CharLmMeta {
             temperature,
             embed_dim,
             head_prior,
+            head_residual_scale,
             unk: vocab.unk,
             symbols: vocab.symbols.clone(),
         }
@@ -189,6 +195,7 @@ struct Args {
     embed_dim: usize,
     hidden: usize,
     head_weight_rms: f32,
+    head_residual_scale: f32,
     head_prior: String,
     epochs: usize,
     batches_per_epoch: usize,
@@ -216,7 +223,7 @@ impl Args {
         }
         if data_args.is_empty() {
             return Err(TensorError::Generic(
-                "usage: cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--head-rms F] [--head-prior none|unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--prompt STR]"
+                "usage: cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--prompt STR]"
                     .to_string(),
             ));
         }
@@ -232,6 +239,7 @@ impl Args {
             embed_dim: 32,
             hidden: 64,
             head_weight_rms: DEFAULT_LINEAR_WEIGHT_RMS,
+            head_residual_scale: DEFAULT_HEAD_RESIDUAL_SCALE,
             head_prior: HEAD_PRIOR_UNIGRAM.to_string(),
             epochs: 6,
             batches_per_epoch: 24,
@@ -260,6 +268,9 @@ impl Args {
                 "--embed-dim" => args.embed_dim = take_parse(&mut argv, "--embed-dim")?,
                 "--hidden" => args.hidden = take_parse(&mut argv, "--hidden")?,
                 "--head-rms" => args.head_weight_rms = take_parse(&mut argv, "--head-rms")?,
+                "--head-residual-scale" => {
+                    args.head_residual_scale = take_parse(&mut argv, "--head-residual-scale")?
+                }
                 "--head-prior" => args.head_prior = take_arg(&mut argv, "--head-prior")?,
                 "--epochs" => args.epochs = take_parse(&mut argv, "--epochs")?,
                 "--batches" => args.batches_per_epoch = take_parse(&mut argv, "--batches")?,
@@ -277,7 +288,7 @@ impl Args {
                 "--prompt" => args.prompt = Some(take_arg(&mut argv, "--prompt")?),
                 "--help" | "-h" => {
                     return Err(TensorError::Generic(
-                        "usage: cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--head-rms F] [--head-prior none|unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--prompt STR]"
+                        "usage: cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--prompt STR]"
                             .to_string(),
                     ));
                 }
@@ -301,6 +312,7 @@ impl Args {
             });
         }
         validate_head_prior(&args.head_prior)?;
+        validate_head_residual_scale(args.head_residual_scale)?;
         if !args.validation_fraction.is_finite()
             || args.validation_fraction < 0.0
             || args.validation_fraction >= 1.0
@@ -380,6 +392,7 @@ fn build_model(
     steps: usize,
     hidden: usize,
     head_weight_rms: f32,
+    head_residual_scale: Option<f32>,
     curvature: f32,
     temperature: f32,
 ) -> PureResult<Sequential> {
@@ -396,6 +409,13 @@ fn build_model(
         vocab_size,
         head_weight_rms,
     )?);
+    if let Some(scale) = head_residual_scale {
+        model.push(residual_logit_scaler(
+            "head_residual_scale",
+            vocab_size,
+            scale,
+        )?);
+    }
     model.push(ZSpaceSoftmax::new(curvature, temperature)?);
     Ok(model)
 }
@@ -607,68 +627,82 @@ fn main() -> PureResult<()> {
             backend: backend_sel.label.clone(),
         });
 
-    let (steps, hidden, curvature, temperature, vocab, model, loaded_from, loaded_head_prior) =
-        if let Some(ref weights_path) = args.load_weights {
-            let meta_path = meta_path_for_weights(weights_path);
-            let meta = read_meta(&meta_path)?;
-            if meta.format != FORMAT_ID_V1 && meta.format != FORMAT_ID_V2 {
-                return Err(TensorError::Generic(format!(
-                    "unexpected meta format: {} (expected {FORMAT_ID_V1} or {FORMAT_ID_V2})",
-                    meta.format
-                )));
-            }
-            if meta.format == FORMAT_ID_V2 && meta.embed_dim.is_none() {
-                return Err(TensorError::Generic(
-                    "meta format st-char-lm-v2 requires embed_dim".to_string(),
-                ));
-            }
-            let vocab = Vocab::from_symbols(meta.unk, meta.symbols);
-            let mut model = build_model(
-                vocab.len(),
-                meta.embed_dim,
-                meta.steps,
-                meta.hidden,
-                args.head_weight_rms,
-                meta.curvature,
-                meta.temperature,
-            )?;
-            if meta.head_prior.as_deref() == Some(HEAD_PRIOR_UNIGRAM) {
-                let index = model.len().saturating_sub(1);
-                model.insert(index, FixedLogitPrior::zeros("head_prior", vocab.len())?)?;
-            }
-            let head_prior = meta.head_prior.clone();
-            (
-                meta.steps,
-                meta.hidden,
-                meta.curvature,
-                meta.temperature,
-                vocab,
-                model,
-                Some(weights_path.clone()),
-                head_prior,
-            )
-        } else {
-            let vocab = Vocab::build_from_text(&text, DEFAULT_UNK);
-            let model = build_model(
-                vocab.len(),
-                Some(args.embed_dim),
-                args.steps,
-                args.hidden,
-                args.head_weight_rms,
-                args.curvature,
-                args.temperature,
-            )?;
-            (
-                args.steps,
-                args.hidden,
-                args.curvature,
-                args.temperature,
-                vocab,
-                model,
-                None,
-                None,
-            )
-        };
+    let (
+        steps,
+        hidden,
+        curvature,
+        temperature,
+        vocab,
+        model,
+        loaded_from,
+        loaded_head_prior,
+        loaded_head_residual_scale,
+    ) = if let Some(ref weights_path) = args.load_weights {
+        let meta_path = meta_path_for_weights(weights_path);
+        let meta = read_meta(&meta_path)?;
+        if meta.format != FORMAT_ID_V1 && meta.format != FORMAT_ID_V2 {
+            return Err(TensorError::Generic(format!(
+                "unexpected meta format: {} (expected {FORMAT_ID_V1} or {FORMAT_ID_V2})",
+                meta.format
+            )));
+        }
+        if meta.format == FORMAT_ID_V2 && meta.embed_dim.is_none() {
+            return Err(TensorError::Generic(
+                "meta format st-char-lm-v2 requires embed_dim".to_string(),
+            ));
+        }
+        let vocab = Vocab::from_symbols(meta.unk, meta.symbols);
+        let mut model = build_model(
+            vocab.len(),
+            meta.embed_dim,
+            meta.steps,
+            meta.hidden,
+            args.head_weight_rms,
+            meta.head_residual_scale,
+            meta.curvature,
+            meta.temperature,
+        )?;
+        if meta.head_prior.as_deref() == Some(HEAD_PRIOR_UNIGRAM) {
+            let index = model.len().saturating_sub(1);
+            model.insert(index, FixedLogitPrior::zeros("head_prior", vocab.len())?)?;
+        }
+        let head_prior = meta.head_prior.clone();
+        let head_residual_scale = meta.head_residual_scale;
+        (
+            meta.steps,
+            meta.hidden,
+            meta.curvature,
+            meta.temperature,
+            vocab,
+            model,
+            Some(weights_path.clone()),
+            head_prior,
+            head_residual_scale,
+        )
+    } else {
+        let vocab = Vocab::build_from_text(&text, DEFAULT_UNK);
+        let model = build_model(
+            vocab.len(),
+            Some(args.embed_dim),
+            args.steps,
+            args.hidden,
+            args.head_weight_rms,
+            Some(args.head_residual_scale),
+            args.curvature,
+            args.temperature,
+        )?;
+        (
+            args.steps,
+            args.hidden,
+            args.curvature,
+            args.temperature,
+            vocab,
+            model,
+            None,
+            None,
+            Some(args.head_residual_scale),
+        )
+    };
 
     let embed_dim = if let Some(ref weights_path) = loaded_from {
         let meta_path = meta_path_for_weights(weights_path);
@@ -704,6 +738,11 @@ fn main() -> PureResult<()> {
             .unwrap_or_else(|| "loaded".to_string())
     } else {
         args.head_prior.clone()
+    };
+    let head_residual_scale = if loaded_from.is_some() {
+        loaded_head_residual_scale
+    } else {
+        Some(args.head_residual_scale)
     };
     if loaded_from.is_none() && args.head_prior == HEAD_PRIOR_UNIGRAM {
         let index = model.len().saturating_sub(1);
@@ -751,6 +790,7 @@ fn main() -> PureResult<()> {
         embed_dim,
         mode: mode.clone(),
         head_weight_rms: args.head_weight_rms,
+        head_residual_scale,
         head_prior: head_prior.clone(),
         epochs: args.epochs,
         batches_per_epoch: args.batches_per_epoch,
@@ -802,7 +842,7 @@ fn main() -> PureResult<()> {
     let mut loss = CategoricalCrossEntropy::new();
 
     println!(
-        "mode={mode} backend={} vocab={} files={} chars={} train_tokens={} validation_tokens={} steps={} hidden={} head_rms={} head_prior={} epochs={} batch={} lr={:.3e} curvature={} temp={} run_dir={}",
+        "mode={mode} backend={} vocab={} files={} chars={} train_tokens={} validation_tokens={} steps={} hidden={} head_rms={} head_residual_scale={} head_prior={} epochs={} batch={} lr={:.3e} curvature={} temp={} run_dir={}",
         backend_sel.label,
         vocab.len(),
         data_files.len(),
@@ -812,6 +852,9 @@ fn main() -> PureResult<()> {
         steps,
         hidden,
         args.head_weight_rms,
+        head_residual_scale
+            .map(|value| format!("{value:.3}"))
+            .unwrap_or_else(|| "none".to_string()),
         head_prior,
         args.epochs,
         args.batch,
@@ -990,11 +1033,14 @@ fn main() -> PureResult<()> {
         (loaded_from.is_none() && args.head_prior == HEAD_PRIOR_UNIGRAM)
             .then(|| args.head_prior.clone())
     });
+    let meta_head_residual_scale = loaded_head_residual_scale
+        .or_else(|| loaded_from.is_none().then_some(args.head_residual_scale));
     let meta = CharLmMeta::new(
         steps,
         hidden,
         embed_dim,
         meta_head_prior,
+        meta_head_residual_scale,
         curvature,
         temperature,
         &vocab,

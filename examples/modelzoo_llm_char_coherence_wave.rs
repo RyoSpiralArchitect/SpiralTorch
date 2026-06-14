@@ -15,9 +15,10 @@ mod text_corpus;
 
 use char_lm_eval::{
     capture_parameter_snapshot, evaluate_next_token_with_unigram_lift, evaluate_unigram_next_token,
-    linear_with_weight_rms, split_train_validation_tokens, summarize_learnability,
-    validate_head_prior, write_summary, CharLmInputMode, FixedLogitPrior, LanguageEvalMetric,
-    LearnabilityMetric, TrainingSummary, HEAD_PRIOR_UNIGRAM,
+    linear_with_weight_rms, residual_logit_scaler, split_train_validation_tokens,
+    summarize_learnability, validate_head_prior, validate_head_residual_scale, write_summary,
+    CharLmInputMode, FixedLogitPrior, LanguageEvalMetric, LearnabilityMetric, TrainingSummary,
+    DEFAULT_HEAD_RESIDUAL_SCALE, HEAD_PRIOR_UNIGRAM,
 };
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -63,6 +64,7 @@ struct RunMeta {
     dilations: Vec<usize>,
     mix_weight_rms: f32,
     head_weight_rms: f32,
+    head_residual_scale: Option<f32>,
     head_prior: String,
     epochs: usize,
     batches_per_epoch: usize,
@@ -151,6 +153,8 @@ struct CharLmMeta {
     dilations: Vec<usize>,
     #[serde(default)]
     head_prior: Option<String>,
+    #[serde(default)]
+    head_residual_scale: Option<f32>,
     curvature: f32,
     temperature: f32,
     unk: char,
@@ -167,6 +171,7 @@ impl CharLmMeta {
         kernel: usize,
         dilations: Vec<usize>,
         head_prior: Option<String>,
+        head_residual_scale: Option<f32>,
         curvature: f32,
         temperature: f32,
         vocab: &Vocab,
@@ -180,6 +185,7 @@ impl CharLmMeta {
             kernel,
             dilations,
             head_prior,
+            head_residual_scale,
             curvature,
             temperature,
             unk: vocab.unk,
@@ -204,6 +210,7 @@ struct Args {
     dilations: Vec<usize>,
     mix_weight_rms: f32,
     head_weight_rms: f32,
+    head_residual_scale: f32,
     head_prior: String,
     epochs: usize,
     batches_per_epoch: usize,
@@ -234,7 +241,7 @@ impl Args {
         }
         if data_args.is_empty() {
             return Err(TensorError::Generic(
-                "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--kernel N] [--dilations 1,2,4] [--mix-rms F] [--head-rms F] [--head-prior none|unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--prompt STR] [--infuse STR] [--infuse-every once|epoch|batch] [--infuse-mode blend|separate]"
+                "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--kernel N] [--dilations 1,2,4] [--mix-rms F] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--prompt STR] [--infuse STR] [--infuse-every once|epoch|batch] [--infuse-mode blend|separate]"
                     .to_string(),
             ));
         }
@@ -254,6 +261,7 @@ impl Args {
             dilations: vec![1, 2, 4],
             mix_weight_rms: DEFAULT_LINEAR_WEIGHT_RMS,
             head_weight_rms: DEFAULT_LINEAR_WEIGHT_RMS,
+            head_residual_scale: DEFAULT_HEAD_RESIDUAL_SCALE,
             head_prior: HEAD_PRIOR_UNIGRAM.to_string(),
             epochs: 6,
             batches_per_epoch: 24,
@@ -291,6 +299,9 @@ impl Args {
                 }
                 "--mix-rms" => args.mix_weight_rms = take_parse(&mut argv, "--mix-rms")?,
                 "--head-rms" => args.head_weight_rms = take_parse(&mut argv, "--head-rms")?,
+                "--head-residual-scale" => {
+                    args.head_residual_scale = take_parse(&mut argv, "--head-residual-scale")?
+                }
                 "--head-prior" => args.head_prior = take_arg(&mut argv, "--head-prior")?,
                 "--epochs" => args.epochs = take_parse(&mut argv, "--epochs")?,
                 "--batches" => args.batches_per_epoch = take_parse(&mut argv, "--batches")?,
@@ -311,7 +322,7 @@ impl Args {
                 "--infuse-mode" => args.infuse_mode = Some(take_arg(&mut argv, "--infuse-mode")?),
                 "--help" | "-h" => {
                     return Err(TensorError::Generic(
-                        "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--kernel N] [--dilations 1,2,4] [--mix-rms F] [--head-rms F] [--head-prior none|unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--prompt STR] [--infuse STR] [--infuse-every once|epoch|batch] [--infuse-mode blend|separate]"
+                        "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--memory N] [--kernel N] [--dilations 1,2,4] [--mix-rms F] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--prompt STR] [--infuse STR] [--infuse-every once|epoch|batch] [--infuse-mode blend|separate]"
                             .to_string(),
                     ));
                 }
@@ -352,6 +363,7 @@ impl Args {
                 value: args.head_weight_rms,
             });
         }
+        validate_head_residual_scale(args.head_residual_scale)?;
         validate_head_prior(&args.head_prior)?;
         if args.dilations.is_empty() || args.dilations.contains(&0) {
             return Err(TensorError::EmptyInput("dilations"));
@@ -484,6 +496,7 @@ fn build_model(
     dilations: Vec<usize>,
     mix_weight_rms: f32,
     head_weight_rms: f32,
+    head_residual_scale: Option<f32>,
     curvature: f32,
     temperature: f32,
 ) -> PureResult<Sequential> {
@@ -511,6 +524,13 @@ fn build_model(
         vocab_size,
         head_weight_rms,
     )?);
+    if let Some(scale) = head_residual_scale {
+        model.push(residual_logit_scaler(
+            "head_residual_scale",
+            vocab_size,
+            scale,
+        )?);
+    }
     model.push(ZSpaceSoftmax::new(curvature, temperature)?);
     Ok(model)
 }
@@ -698,6 +718,7 @@ fn main() -> PureResult<()> {
         mut model,
         loaded_from,
         loaded_head_prior,
+        loaded_head_residual_scale,
     ) = if let Some(ref weights_path) = args.load_weights {
         let meta_path = meta_path_for_weights(weights_path);
         let meta = read_meta(&meta_path)?;
@@ -718,6 +739,7 @@ fn main() -> PureResult<()> {
             meta.dilations.clone(),
             args.mix_weight_rms,
             args.head_weight_rms,
+            meta.head_residual_scale,
             meta.curvature,
             meta.temperature,
         )?;
@@ -726,6 +748,7 @@ fn main() -> PureResult<()> {
             model.insert(index, FixedLogitPrior::zeros("head_prior", vocab.len())?)?;
         }
         let head_prior = meta.head_prior.clone();
+        let head_residual_scale = meta.head_residual_scale;
         (
             meta.steps,
             meta.embed_dim,
@@ -739,6 +762,7 @@ fn main() -> PureResult<()> {
             model,
             Some(weights_path.clone()),
             head_prior,
+            head_residual_scale,
         )
     } else {
         let vocab = Vocab::build_from_text(&text, DEFAULT_UNK);
@@ -752,6 +776,7 @@ fn main() -> PureResult<()> {
             args.dilations.clone(),
             args.mix_weight_rms,
             args.head_weight_rms,
+            Some(args.head_residual_scale),
             args.curvature,
             args.temperature,
         )?;
@@ -768,6 +793,7 @@ fn main() -> PureResult<()> {
             model,
             None,
             None,
+            Some(args.head_residual_scale),
         )
     };
 
@@ -796,6 +822,11 @@ fn main() -> PureResult<()> {
             .unwrap_or_else(|| "loaded".to_string())
     } else {
         args.head_prior.clone()
+    };
+    let head_residual_scale = if loaded_from.is_some() {
+        loaded_head_residual_scale
+    } else {
+        Some(args.head_residual_scale)
     };
     if loaded_from.is_none() && args.head_prior == HEAD_PRIOR_UNIGRAM {
         let index = model.len().saturating_sub(1);
@@ -838,6 +869,7 @@ fn main() -> PureResult<()> {
         dilations: dilations.clone(),
         mix_weight_rms: args.mix_weight_rms,
         head_weight_rms: args.head_weight_rms,
+        head_residual_scale,
         head_prior: head_prior.clone(),
         epochs: args.epochs,
         batches_per_epoch: args.batches_per_epoch,
@@ -918,7 +950,7 @@ fn main() -> PureResult<()> {
     let mut loss = CategoricalCrossEntropy::new();
 
     println!(
-        "arch=coherence_wave backend={} vocab={} files={} chars={} train_tokens={} validation_tokens={} steps={} embed_dim={} hidden={} memory={} kernel={} dilations={:?} mix_rms={} head_rms={} head_prior={} epochs={} batch={} lr={:.3e} curvature={} temp={} run_dir={}",
+        "arch=coherence_wave backend={} vocab={} files={} chars={} train_tokens={} validation_tokens={} steps={} embed_dim={} hidden={} memory={} kernel={} dilations={:?} mix_rms={} head_rms={} head_residual_scale={} head_prior={} epochs={} batch={} lr={:.3e} curvature={} temp={} run_dir={}",
         backend_sel.label,
         vocab.len(),
         data_files.len(),
@@ -933,6 +965,9 @@ fn main() -> PureResult<()> {
         dilations,
         args.mix_weight_rms,
         args.head_weight_rms,
+        head_residual_scale
+            .map(|value| format!("{value:.3}"))
+            .unwrap_or_else(|| "none".to_string()),
         head_prior,
         args.epochs,
         args.batch,
@@ -1104,6 +1139,8 @@ fn main() -> PureResult<()> {
         (loaded_from.is_none() && args.head_prior == HEAD_PRIOR_UNIGRAM)
             .then(|| args.head_prior.clone())
     });
+    let meta_head_residual_scale = loaded_head_residual_scale
+        .or_else(|| loaded_from.is_none().then_some(args.head_residual_scale));
     let meta = CharLmMeta::new(
         steps,
         embed_dim,
@@ -1112,6 +1149,7 @@ fn main() -> PureResult<()> {
         kernel,
         dilations.clone(),
         meta_head_prior,
+        meta_head_residual_scale,
         curvature,
         temperature,
         &vocab,
