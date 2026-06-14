@@ -13,7 +13,7 @@ mod char_lm_eval;
 mod text_corpus;
 
 use char_lm_eval::{
-    capture_parameter_snapshot, evaluate_next_token, evaluate_unigram_next_token,
+    capture_parameter_snapshot, evaluate_next_token_with_unigram_lift, evaluate_unigram_next_token,
     linear_with_weight_rms, split_train_validation_tokens, summarize_learnability,
     validate_head_prior, write_summary, CharLmInputMode, FixedLogitPrior, LanguageEvalMetric,
     LearnabilityMetric, TrainingSummary, HEAD_PRIOR_UNIGRAM,
@@ -826,11 +826,12 @@ fn main() -> PureResult<()> {
     } else {
         CharLmInputMode::OneHot
     };
-    let initial_validation = evaluate_next_token(
+    let initial_validation = evaluate_next_token_with_unigram_lift(
         &mut model,
         vocab.len(),
         eval_input_mode,
         steps,
+        &split.train,
         &split.validation,
         args.eval_samples,
     )?;
@@ -890,11 +891,12 @@ fn main() -> PureResult<()> {
         }
         let before_epoch = capture_parameter_snapshot(&model)?;
         let stats = trainer.train_epoch(&mut model, &mut loss, batches, &schedule)?;
-        let validation = evaluate_next_token(
+        let validation = evaluate_next_token_with_unigram_lift(
             &mut model,
             vocab.len(),
             eval_input_mode,
             steps,
+            &split.train,
             &split.validation,
             args.eval_samples,
         )?;

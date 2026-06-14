@@ -84,7 +84,7 @@ cargo run -p st-nn --example modelzoo_llm_char_finetune -- models/samples/spiral
 Writes `run.json`, `metrics.jsonl`, `summary.json`, samples, and weights into the selected run directory.
 Rust char-LM classifier heads use RMS-scaled initialization by default; tune with `--head-rms`, and with `--mix-rms` for coherence scan/wave mixers.
 Rust char-LM examples also add a fixed smoothed train-token unigram prior before the softmax by default; pass `--head-prior none` to start without that prior.
-Validation summaries also include a smoothed train-token unigram baseline and target-token rank, which make it easier to tell whether the model is beating frequency-only prediction or merely drifting away from uniform output.
+Validation summaries also include a smoothed train-token unigram baseline, target-token rank, and context-lift metrics, which make it easier to tell whether the model is beating frequency-only prediction or merely drifting away from uniform output.
 
 Compare several char-LM runs with:
 
