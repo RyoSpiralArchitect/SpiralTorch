@@ -5953,6 +5953,7 @@ fn embedding_util_internal(
     readback_f32(device, queue, &output_buf, output_elements)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn sequence_last_step_util_internal(
     input: &[f32],
     batch: usize,
@@ -6621,6 +6622,7 @@ pub fn dynamic_klein_gordon_forward(
     )
 }
 
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn dynamic_klein_gordon_backward(
     input: &[f32],
     grad_output: &[f32],
@@ -6778,6 +6780,7 @@ pub fn dynamic_hamilton_jacobi_backward(
     Ok((grad_input, grad_potential))
 }
 
+#[allow(clippy::type_complexity)]
 pub fn dynamic_schrodinger_forward(
     input: &[f32],
     coherence: &[f32],
@@ -6971,7 +6974,7 @@ pub fn embedding_gather(
     tokens: usize,
     embed_dim: usize,
 ) -> Result<Vec<f32>, String> {
-    if embed_dim == 0 || weights.is_empty() || weights.len() % embed_dim != 0 {
+    if embed_dim == 0 || weights.is_empty() || !weights.len().is_multiple_of(embed_dim) {
         return Err("embedding_gather weights must be a non-empty vocab x embed_dim table".into());
     }
     let vocab_size = weights.len() / embed_dim;

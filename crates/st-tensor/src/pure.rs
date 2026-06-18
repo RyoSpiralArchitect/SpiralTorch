@@ -807,6 +807,7 @@ impl Layout {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn emit_basic_tensor_op_meta<F>(
     op_name: &'static str,
     rows: usize,
@@ -853,6 +854,7 @@ fn emit_basic_tensor_op_meta<F>(
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn emit_tensor_util_cpu_op_meta<F>(
     op_name: &'static str,
     rows: usize,
@@ -890,6 +892,7 @@ fn emit_tensor_util_cpu_op_meta<F>(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn emit_cpu_tensor_op_meta<F>(
     op_name: &'static str,
     rows: usize,
@@ -950,6 +953,7 @@ fn porous_mix_value(value: f32, saturation: f32, porosity: f32) -> f32 {
 }
 
 #[cfg(feature = "wgpu")]
+#[allow(clippy::too_many_arguments)]
 fn emit_wgpu_tensor_op_meta<F>(
     op_name: &'static str,
     requested_backend: &'static str,
@@ -3822,6 +3826,7 @@ impl Tensor {
         Tensor::from_vec(self.rows, other.cols, data)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn emit_fused_matmul_meta(
         &self,
         op_name: &'static str,
@@ -5287,9 +5292,8 @@ impl Tensor {
         let mut data = aligned_with_capacity(self.len());
         for row_idx in 0..self.rows {
             let offset = row_idx * self.cols;
-            for col in 0..self.cols {
+            for (col, gain) in row.iter().copied().enumerate().take(self.cols) {
                 let value = self.data()[offset + col];
-                let gain = row[col];
                 let output = value * gain;
                 Self::validate_finite_tensor_util_value("mul_row_output", output)?;
                 data.push(output);
@@ -10729,6 +10733,8 @@ fn matmul_lhs_transpose_scaled_wgpu(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::needless_range_loop, clippy::useless_vec)]
+
     use super::*;
     use ndarray::Array2;
     use std::ffi::OsString;
@@ -12267,6 +12273,19 @@ mod tests {
                 let expected = row[c] * factor;
                 assert!((expected - wave[start + c]).abs() < 2e-5);
             }
+        }
+    }
+
+    #[test]
+    fn mul_row_cpu_backend_matches_manual_rows() {
+        let tensor = unwrap_ok(Tensor::from_vec(2, 3, vec![1.0, -2.0, 0.5, 3.0, 4.0, -1.5]));
+        let output =
+            unwrap_ok(tensor.mul_row_with_backend(&[0.5, -1.0, 2.0], TensorUtilBackend::Cpu));
+        let expected = [0.5, 2.0, 1.0, 1.5, -4.0, -3.0];
+
+        assert_eq!(output.shape(), (2, 3));
+        for (expected, actual) in expected.iter().zip(output.data()) {
+            assert!((expected - actual).abs() < 1.0e-6);
         }
     }
 

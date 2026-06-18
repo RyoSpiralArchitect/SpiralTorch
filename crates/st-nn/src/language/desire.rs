@@ -38,6 +38,8 @@ fn softmax_backend_label(backend: SoftmaxBackend) -> &'static str {
         SoftmaxBackend::Cpu => "cpu",
         #[cfg(feature = "wgpu")]
         SoftmaxBackend::GpuWgpu => "wgpu",
+        #[allow(unreachable_patterns)]
+        _ => "gpu",
     }
 }
 

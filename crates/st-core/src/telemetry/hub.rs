@@ -2322,6 +2322,7 @@ mod tests {
 
     #[test]
     fn dashboard_ring_records_frames() {
+        let _guard = atlas_test_lock().lock().unwrap();
         let baseline = snapshot_dashboard_frames(usize::MAX).len();
 
         let mut frame_a = DashboardFrame::new(SystemTime::now());
@@ -2348,6 +2349,7 @@ mod tests {
 
     #[test]
     fn dashboard_snapshot_export_emits_backend_meta() {
+        let _guard = atlas_test_lock().lock().unwrap();
         let _observer_lock = crate::telemetry::tensor_observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
