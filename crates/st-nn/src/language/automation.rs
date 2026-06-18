@@ -7,10 +7,14 @@ use super::desire::{
     DesireAvoidanceReport, DesireLagrangian, DesirePhase, DesireSolution, DesireWeights,
 };
 use super::geometry::ConceptHint;
+use crate::execution::current_tensor_util_backend_for_values;
 use crate::PureResult;
 use serde::{Deserialize, Serialize};
 use st_core::config::self_rewrite::SelfRewriteCfg;
-use st_tensor::{DesireGradientControl, DesireGradientInterpretation};
+use st_tensor::{
+    emit_tensor_op, emit_tensor_op_meta, DesireGradientControl, DesireGradientInterpretation,
+    Tensor, TensorUtilBackend,
+};
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -20,6 +24,85 @@ const INTEGRATION_MIX: f32 = 0.65;
 const EPSILON: f32 = 1e-6;
 const HISTORY_LIMIT: usize = 256;
 const TRIGGER_EXPORT: usize = 12;
+
+fn tensor_util_backend_label(backend: TensorUtilBackend) -> &'static str {
+    match backend {
+        TensorUtilBackend::Auto => "auto",
+        TensorUtilBackend::Cpu => "cpu",
+        TensorUtilBackend::GpuWgpu => "wgpu",
+    }
+}
+
+fn scale_probability_values(values: Vec<f32>, scale: f32) -> (Vec<f32>, &'static str) {
+    let backend = current_tensor_util_backend_for_values(values.len());
+    let backend_label = tensor_util_backend_label(backend);
+    if values.is_empty() {
+        return (values, backend_label);
+    }
+
+    let fallback_values = values.clone();
+    match Tensor::from_vec(1, values.len(), values)
+        .and_then(|tensor| tensor.scale_with_backend(scale, backend))
+    {
+        Ok(tensor) => (tensor.data().to_vec(), backend_label),
+        Err(_) => {
+            let mut values = fallback_values;
+            for value in &mut values {
+                *value *= scale;
+            }
+            (values, "cpu")
+        }
+    }
+}
+
+struct ProbabilitySanitise {
+    values: Vec<f32>,
+    positive_values: usize,
+    negative_values: usize,
+    non_finite_values: usize,
+    backend: &'static str,
+}
+
+fn sanitise_probability_values(values: &[f32]) -> ProbabilitySanitise {
+    let negative_values = values
+        .iter()
+        .filter(|value| value.is_finite() && **value < 0.0)
+        .count();
+    let non_finite_values = values.iter().filter(|value| !value.is_finite()).count();
+    let fallback = values
+        .iter()
+        .copied()
+        .map(|value| value.max(0.0))
+        .collect::<Vec<_>>();
+
+    if non_finite_values > 0 {
+        let positive_values = fallback.iter().filter(|value| **value > 0.0).count();
+        return ProbabilitySanitise {
+            values: fallback,
+            positive_values,
+            negative_values,
+            non_finite_values,
+            backend: "probability_cpu",
+        };
+    }
+
+    let backend = current_tensor_util_backend_for_values(values.len());
+    let backend_label = tensor_util_backend_label(backend);
+    let (sanitised, backend_label) = match Tensor::from_vec(1, values.len(), values.to_vec())
+        .and_then(|tensor| tensor.relu_with_backend(backend))
+    {
+        Ok(tensor) => (tensor.data().to_vec(), backend_label),
+        Err(_) => (fallback, "cpu"),
+    };
+    let positive_values = sanitised.iter().filter(|value| **value > 0.0).count();
+    ProbabilitySanitise {
+        values: sanitised,
+        positive_values,
+        negative_values,
+        non_finite_values,
+        backend: backend_label,
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DesireAutomatedStep {
@@ -265,14 +348,75 @@ impl DesireAutomation {
     }
 
     fn normalise(values: &mut [f32]) {
-        let sum: f32 = values.iter().copied().sum();
+        let raw_sum: f32 = values.iter().copied().sum();
+        let sanitised = sanitise_probability_values(values);
+        let sum: f32 = sanitised.values.iter().copied().sum();
+        let sanitize_backend = sanitised.backend;
+        let positive_values = sanitised.positive_values;
+        let negative_values = sanitised.negative_values;
+        let non_finite_values = sanitised.non_finite_values;
         if sum <= EPSILON {
+            for (value, sanitised) in values.iter_mut().zip(sanitised.values.into_iter()) {
+                *value = sanitised;
+            }
+            emit_tensor_op(
+                "desire_automation_vector_normalise",
+                &[values.len()],
+                &[values.len()],
+            );
+            emit_tensor_op_meta("desire_automation_vector_normalise", || {
+                serde_json::json!({
+                    "backend": "probability_cpu",
+                    "requested_backend": "auto",
+                    "kind": "language_desire_automation_vector_normalise",
+                    "sanitize_backend": sanitize_backend,
+                    "values": values.len(),
+                    "raw_sum": raw_sum,
+                    "sanitized_sum": sum,
+                    "distribution_sum": values.iter().copied().sum::<f32>(),
+                    "dominant_probability": 0.0f32,
+                    "positive_values": positive_values,
+                    "negative_values": negative_values,
+                    "non_finite_values": non_finite_values,
+                    "zero_fallback": true,
+                })
+            });
             return;
         }
-        let inv = 1.0 / sum;
-        for value in values.iter_mut() {
-            *value = value.max(0.0) * inv;
+        let (scaled, distribution_scale_backend) =
+            scale_probability_values(sanitised.values, 1.0 / sum);
+        for (value, scaled) in values.iter_mut().zip(scaled.into_iter()) {
+            *value = scaled;
         }
+        let distribution_sum = values.iter().copied().sum::<f32>();
+        let dominant_probability = values
+            .iter()
+            .copied()
+            .filter(|value| value.is_finite())
+            .fold(0.0f32, |best, value| best.max(value));
+        emit_tensor_op(
+            "desire_automation_vector_normalise",
+            &[values.len()],
+            &[values.len()],
+        );
+        emit_tensor_op_meta("desire_automation_vector_normalise", || {
+            serde_json::json!({
+                "backend": "hybrid",
+                "requested_backend": distribution_scale_backend,
+                "kind": "language_desire_automation_vector_normalise",
+                "sanitize_backend": sanitize_backend,
+                "distribution_scale_backend": distribution_scale_backend,
+                "values": values.len(),
+                "raw_sum": raw_sum,
+                "sanitized_sum": sum,
+                "distribution_sum": distribution_sum,
+                "dominant_probability": dominant_probability,
+                "positive_values": positive_values,
+                "negative_values": negative_values,
+                "non_finite_values": non_finite_values,
+                "zero_fallback": false,
+            })
+        });
     }
 }
 
@@ -283,7 +427,32 @@ mod tests {
     };
     use super::super::temperature::TemperatureController;
     use super::*;
+    #[cfg(feature = "wgpu")]
+    use crate::execution::{push_backend_policy, BackendPolicy};
+    #[cfg(feature = "wgpu")]
+    use st_core::backend::device_caps::DeviceCaps;
+    #[cfg(feature = "wgpu")]
+    use st_tensor::backend::wgpu_dense;
     use std::collections::HashSet;
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
+        static OBSERVER_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        OBSERVER_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("observer lock available")
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn restore_tensor_util_wgpu_min_values(previous: Option<String>) {
+        const KEY: &str = "SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES";
+        if let Some(value) = previous {
+            std::env::set_var(KEY, value);
+        } else {
+            std::env::remove_var(KEY);
+        }
+    }
 
     fn build_geometry() -> SymbolGeometry {
         let syn = SparseKernel::from_rows(
@@ -348,6 +517,93 @@ mod tests {
         assert!(report.tokens.len() <= 4);
         let sum: f32 = report.scores.iter().sum();
         assert!(sum >= 0.0);
+    }
+
+    #[test]
+    fn automation_vector_normalise_emits_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let mut vector = vec![0.25, 0.75, 0.0];
+        DesireAutomation::normalise(&mut vector);
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert!((vector.iter().sum::<f32>() - 1.0).abs() < 1e-6);
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "desire_automation_vector_normalise" && data["values"] == 3
+            })
+            .expect("desire_automation_vector_normalise metadata event");
+        assert_eq!(meta.1["backend"], "hybrid");
+        assert_eq!(meta.1["requested_backend"], "auto");
+        assert_eq!(
+            meta.1["kind"],
+            "language_desire_automation_vector_normalise"
+        );
+        assert_eq!(meta.1["sanitize_backend"], "auto");
+        assert_eq!(meta.1["distribution_scale_backend"], "auto");
+        assert_eq!(meta.1["positive_values"], 2);
+        assert_eq!(meta.1["zero_fallback"], false);
+        assert!((meta.1["distribution_sum"].as_f64().unwrap_or(0.0) - 1.0).abs() < 1e-6);
+        assert!(meta.1["dominant_probability"].as_f64().unwrap_or(0.0) > 0.0);
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn automation_vector_normalise_forced_wgpu_routes_sanitise() {
+        if !wgpu_dense::is_available() {
+            return;
+        }
+        let _lock = observer_lock();
+        const KEY: &str = "SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES";
+        let previous_min = std::env::var(KEY).ok();
+        std::env::set_var(KEY, "0");
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
+        let mut vector = vec![0.25, 0.75, -0.5];
+        {
+            let _guard = push_backend_policy(policy);
+            DesireAutomation::normalise(&mut vector);
+        }
+        st_tensor::set_tensor_op_meta_observer(previous);
+        restore_tensor_util_wgpu_min_values(previous_min);
+
+        assert!((vector.iter().sum::<f32>() - 1.0).abs() < 1e-6);
+        assert_eq!(vector[2], 0.0);
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "desire_automation_vector_normalise" && data["values"] == 3
+            })
+            .expect("desire_automation_vector_normalise metadata event");
+        assert_eq!(meta.1["backend"], "hybrid");
+        assert_eq!(meta.1["requested_backend"], "wgpu");
+        assert_eq!(meta.1["sanitize_backend"], "wgpu");
+        assert_eq!(meta.1["distribution_scale_backend"], "wgpu");
+        assert_eq!(meta.1["negative_values"], 1);
+        let relu = events
+            .iter()
+            .find(|(op_name, data)| *op_name == "relu" && data["requested_backend"] == "wgpu")
+            .expect("relu WGPU sanitize metadata event");
+        assert_eq!(relu.1["backend"], "wgpu_dense");
     }
 
     #[test]

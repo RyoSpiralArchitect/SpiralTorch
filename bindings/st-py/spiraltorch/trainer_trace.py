@@ -11,6 +11,457 @@ __all__ = [
     "write_trainer_trace_html",
 ]
 
+COHERENCE_REPAIR_METRIC_KEYS = (
+    "coherence_repairs_total",
+    "coherence_repaired_detected",
+    "coherence_repaired_weights_total",
+    "coherence_repaired_non_finite_weights",
+    "coherence_repaired_negative_weights",
+    "coherence_pre_discard_repairs_total",
+    "coherence_pre_discard_repaired_non_finite",
+    "coherence_pre_discard_repaired_negative",
+)
+
+TRACE_SPOTLIGHT_KEYS = (
+    "loss_weighted",
+    "loss_weighted_base",
+    "spectral_label",
+    "spectral_turnover",
+    "spectral_lr_scale",
+    "softlogic_inertia",
+    "softlogic_z",
+    "curvature_value",
+    "curvature_pressure_rel_var",
+    "batch_input_rows",
+    "batch_target_rows",
+    "batch_prediction_rows",
+    "batch_prediction_non_finite_values",
+    "batch_loss_non_finite_values",
+    "batch_grad_output_non_finite_values",
+    "batch_grad_output_l2_finite",
+    "optim_step_fallback_lr",
+    "optim_step_hyper_lr",
+    "optim_state_fallback_lr",
+    "optim_state_hyper_lr",
+    "optim_state_realgrad_enabled",
+    "optim_state_adapter_avg_energy",
+    "optim_state_adapter_avg_curvature",
+    "optim_state_adapter_avg_spin",
+    "optim_accumulator_sync_enabled",
+    "optim_accumulator_sync_world_size",
+    "optim_accumulator_sync_buffers",
+    "optim_accumulator_sync_values",
+    "optim_param_update_l2",
+    "optim_param_update_ratio_l2",
+    "optim_param_update_max_l2",
+    "optim_param_update_max_ratio_l2",
+    "optim_param_update_zero_param_ratio",
+    "coherence_repairs_total",
+    "coherence_repaired_detected",
+    "coherence_pre_discard_repairs_total",
+    "grad_values_non_finite",
+    "tensor_meta_non_finite_sentinels",
+    "tensor_ops_total",
+    "tensor_backend_wgpu",
+    "tensor_kernel_backend_wgpu_dense",
+    "tensor_backend_cpu",
+    "tensor_backend_cpu_simd",
+    "tensor_backend_f64_cpu",
+    "tensor_backend_fallbacks",
+    "tensor_backend_requested_wgpu_hits",
+    "tensor_backend_requested_wgpu_runtime_fallbacks",
+    "tensor_op_backend_matmul_scaled_wgpu",
+    "tensor_op_backend_matmul_scaled_faer",
+    "tensor_op_backend_matmul_scaled_naive",
+    "tensor_op_backend_zspace_softmax_backward_cpu",
+    "tensor_op_backend_zspace_coherence_scan_forward_wgpu",
+    "tensor_op_backend_zspace_coherence_scan_forward_cpu",
+    "tensor_op_backend_zspace_coherence_scan_backward_wgpu",
+    "tensor_op_backend_zspace_coherence_scan_backward_cpu",
+    "tensor_op_backend_psi_heatmap_distribution_summary_cpu",
+    "tensor_op_backend_zspace_semantic_distribution_semantic_cpu",
+    "tensor_op_backend_zspace_semantic_distribution_semantic_inference_semantic_cpu",
+    "tensor_op_backend_zspace_semantic_distribution_hybrid",
+    "tensor_op_backend_zspace_semantic_distribution_semantic_sparse_scan_semantic_cpu",
+    "tensor_op_backend_zspace_semantic_distribution_semantic_accumulation_wgpu",
+    "tensor_op_backend_zspace_semantic_distribution_semantic_accumulation_cpu",
+    "tensor_op_backend_zspace_semantic_distribution_distribution_scale_wgpu",
+    "tensor_op_backend_zspace_semantic_distribution_distribution_scale_cpu",
+    "tensor_op_backend_zspace_semantic_window_semantic_cpu",
+    "tensor_op_backend_zspace_semantic_window_hybrid",
+    "tensor_op_backend_zspace_semantic_window_window_energy_semantic_cpu",
+    "tensor_op_backend_zspace_semantic_window_window_energy_wgpu",
+    "tensor_op_backend_zspace_semantic_window_window_energy_cpu",
+    "tensor_op_backend_zspace_semantic_window_distribution_scale_wgpu",
+    "tensor_op_backend_zspace_semantic_window_distribution_scale_cpu",
+    "tensor_op_backend_zspace_semantic_window_semantic_control_cpu",
+    "tensor_op_backend_zspace_maxwell_pulse_summary_summary_cpu",
+    "tensor_op_backend_zspace_semantic_distribution_fusion_semantic_cpu",
+    "tensor_op_backend_zspace_semantic_distribution_fusion_hybrid",
+    "tensor_op_backend_zspace_semantic_distribution_fusion_fusion_accumulation_semantic_cpu",
+    "tensor_op_backend_zspace_semantic_distribution_fusion_fusion_accumulation_wgpu",
+    "tensor_op_backend_zspace_semantic_distribution_fusion_fusion_accumulation_cpu",
+    "tensor_op_backend_zspace_semantic_distribution_fusion_distribution_scale_wgpu",
+    "tensor_op_backend_zspace_semantic_distribution_fusion_distribution_scale_cpu",
+    "tensor_op_backend_lawvere_guard_probability_slice_control_cpu",
+    "tensor_op_backend_tensor_biome_absorb_weighted_topos_cpu",
+    "tensor_op_backend_tensor_biome_renormalise_weights_control_cpu",
+    "tensor_op_backend_tensor_biome_canopy_hybrid",
+    "tensor_op_backend_tensor_biome_canopy_accumulation_wgpu",
+    "tensor_op_backend_tensor_biome_canopy_accumulation_cpu",
+    "tensor_op_backend_tensor_biome_canopy_normalise_wgpu",
+    "tensor_op_backend_tensor_biome_canopy_normalise_cpu",
+    "tensor_op_backend_tensor_biome_canopy_rewrite_topos_cpu",
+    "tensor_op_backend_desire_automation_vector_normalise_probability_cpu",
+    "tensor_op_backend_desire_automation_vector_normalise_hybrid",
+    "tensor_op_backend_desire_automation_vector_normalise_sanitize_wgpu",
+    "tensor_op_backend_desire_automation_vector_normalise_sanitize_cpu",
+    "tensor_op_backend_desire_automation_vector_normalise_sanitize_probability_cpu",
+    "tensor_op_backend_desire_automation_vector_normalise_distribution_scale_wgpu",
+    "tensor_op_backend_desire_automation_vector_normalise_distribution_scale_cpu",
+    "tensor_op_backend_desire_softmax_probability_cpu",
+    "tensor_op_backend_desire_softmax_hybrid",
+    "tensor_op_backend_desire_softmax_softmax_wgpu",
+    "tensor_op_backend_desire_softmax_softmax_cpu",
+    "tensor_op_backend_desire_softmax_exp_wgpu",
+    "tensor_op_backend_desire_softmax_exp_probability_cpu",
+    "tensor_op_backend_desire_softmax_distribution_scale_wgpu",
+    "tensor_op_backend_desire_softmax_distribution_scale_cpu",
+    "tensor_op_backend_desire_normalise_probability_cpu",
+    "tensor_op_backend_desire_normalise_hybrid",
+    "tensor_op_backend_desire_normalise_sanitize_probability_cpu",
+    "tensor_op_backend_desire_normalise_sanitize_wgpu",
+    "tensor_op_backend_desire_normalise_sanitize_cpu",
+    "tensor_op_backend_desire_normalise_distribution_scale_wgpu",
+    "tensor_op_backend_desire_normalise_distribution_scale_cpu",
+    "tensor_op_backend_concept_diffusion_state_normalise_probability_cpu",
+    "tensor_op_backend_concept_diffusion_state_normalise_f64_cpu",
+    "tensor_op_backend_concept_diffusion_state_normalise_state_sum_f64_cpu",
+    "tensor_op_backend_concept_diffusion_state_normalise_precision_f64_cpu",
+    "tensor_op_backend_concept_diffusion_state_normalise_distribution_scale_f64_cpu",
+    "tensor_op_backend_sparse_kernel_probability_row_probability_cpu",
+    "tensor_op_backend_sparse_kernel_probability_row_hybrid",
+    "tensor_op_backend_sparse_kernel_probability_row_row_scan_probability_cpu",
+    "tensor_op_backend_sparse_kernel_probability_row_row_sum_wgpu",
+    "tensor_op_backend_sparse_kernel_probability_row_row_sum_cpu",
+    "tensor_op_backend_sparse_kernel_probability_row_distribution_scale_wgpu",
+    "tensor_op_backend_sparse_kernel_probability_row_distribution_scale_cpu",
+    "tensor_op_backend_semantic_bridge_window_distribution_semantic_cpu",
+    "tensor_op_backend_semantic_bridge_window_distribution_hybrid",
+    "tensor_op_backend_semantic_bridge_window_distribution_semantic_sparse_scan_semantic_cpu",
+    "tensor_op_backend_semantic_bridge_window_distribution_semantic_accumulation_semantic_cpu",
+    "tensor_op_backend_semantic_bridge_window_distribution_semantic_accumulation_wgpu",
+    "tensor_op_backend_semantic_bridge_window_distribution_semantic_accumulation_cpu",
+    "tensor_op_backend_semantic_bridge_window_distribution_distribution_scale_wgpu",
+    "tensor_op_backend_semantic_bridge_window_distribution_distribution_scale_cpu",
+    "tensor_op_backend_concept_hint_distribution_semantic_cpu",
+    "tensor_op_backend_concept_hint_distribution_hybrid",
+    "tensor_op_backend_concept_hint_distribution_semantic_sanitize_semantic_cpu",
+    "tensor_op_backend_concept_hint_distribution_semantic_sanitize_wgpu",
+    "tensor_op_backend_concept_hint_distribution_semantic_sanitize_cpu",
+    "tensor_op_backend_concept_hint_distribution_semantic_inference_semantic_cpu",
+    "tensor_op_backend_concept_hint_distribution_semantic_inference_semantic_bridge_window_distribution",
+    "tensor_op_backend_concept_hint_distribution_semantic_sparse_scan_semantic_cpu",
+    "tensor_op_backend_concept_hint_distribution_distribution_scale_wgpu",
+    "tensor_op_backend_concept_hint_distribution_distribution_scale_cpu",
+    "tensor_op_backend_gw_marginal_normalise_probability_cpu",
+    "tensor_op_backend_gw_marginal_normalise_hybrid",
+    "tensor_op_backend_gw_marginal_normalise_marginal_scan_probability_cpu",
+    "tensor_op_backend_gw_marginal_normalise_marginal_sum_wgpu",
+    "tensor_op_backend_gw_marginal_normalise_marginal_sum_cpu",
+    "tensor_op_backend_gw_marginal_normalise_distribution_scale_wgpu",
+    "tensor_op_backend_gw_marginal_normalise_distribution_scale_cpu",
+    "tensor_op_backend_gw_marginal_normalise_in_place_probability_cpu",
+    "tensor_op_backend_gw_marginal_normalise_in_place_hybrid",
+    "tensor_op_backend_gw_marginal_normalise_in_place_marginal_scan_probability_cpu",
+    "tensor_op_backend_gw_marginal_normalise_in_place_marginal_sum_wgpu",
+    "tensor_op_backend_gw_marginal_normalise_in_place_marginal_sum_cpu",
+    "tensor_op_backend_gw_marginal_normalise_in_place_distribution_scale_wgpu",
+    "tensor_op_backend_gw_marginal_normalise_in_place_distribution_scale_cpu",
+    "tensor_op_backend_spectral_lr_scale_optimizer_control_cpu",
+    "tensor_op_backend_zspace_optimizer_lr_scale_optimizer_control_cpu",
+    "tensor_op_backend_warmup_cosine_lr_step_optimizer_control_cpu",
+    "tensor_op_backend_wave_scan_forward_wgpu",
+    "tensor_op_backend_wave_scan_forward_cpu",
+    "tensor_op_backend_wave_scan_backward_wgpu",
+    "tensor_op_backend_wave_scan_backward_cpu",
+    "tensor_op_backend_wave_scan_stack_forward_composite",
+    "tensor_op_backend_wave_scan_stack_backward_composite",
+    "tensor_op_backend_coherence_wave_forward_composite",
+    "tensor_op_backend_coherence_wave_backward_composite",
+    "tensor_op_backend_topos_resonator_forward_composite",
+    "tensor_op_backend_topos_resonator_backward_composite",
+    "tensor_op_backend_embedding_forward_cpu",
+    "tensor_op_backend_embedding_backward_cpu",
+    "tensor_op_backend_relu_forward_cpu",
+    "tensor_op_backend_relu_backward_cpu",
+    "tensor_op_backend_relu_wgpu",
+    "tensor_op_backend_relu_cpu",
+    "tensor_op_backend_layer_norm_backward_cpu",
+    "tensor_op_backend_zspace_layer_norm_backward_cpu",
+    "tensor_op_backend_layer_norm_backward_hybrid",
+    "tensor_op_backend_zspace_layer_norm_backward_hybrid",
+    "tensor_op_backend_layer_norm_backward_input_gradient_hybrid",
+    "tensor_op_backend_zspace_layer_norm_backward_input_gradient_hybrid",
+    "tensor_op_backend_layer_norm_backward_input_gradient_wgpu",
+    "tensor_op_backend_zspace_layer_norm_backward_input_gradient_wgpu",
+    "tensor_op_backend_layer_norm_backward_input_gradient_cpu",
+    "tensor_op_backend_zspace_layer_norm_backward_input_gradient_cpu",
+    "tensor_op_backend_layer_norm_backward_input_gradient_reduction_wgpu",
+    "tensor_op_backend_zspace_layer_norm_backward_input_gradient_reduction_wgpu",
+    "tensor_op_backend_layer_norm_backward_input_gradient_reduction_cpu",
+    "tensor_op_backend_zspace_layer_norm_backward_input_gradient_reduction_cpu",
+    "tensor_op_backend_layer_norm_backward_normalization_wgpu",
+    "tensor_op_backend_zspace_layer_norm_backward_normalization_wgpu",
+    "tensor_op_backend_layer_norm_backward_normalization_cpu",
+    "tensor_op_backend_zspace_layer_norm_backward_normalization_cpu",
+    "tensor_op_backend_batch_norm_backward_cpu",
+    "tensor_op_backend_zspace_batch_norm_backward_cpu",
+    "tensor_op_backend_batch_norm_backward_hybrid",
+    "tensor_op_backend_zspace_batch_norm_backward_hybrid",
+    "tensor_op_backend_batch_norm_backward_input_gradient_wgpu",
+    "tensor_op_backend_zspace_batch_norm_backward_input_gradient_wgpu",
+    "tensor_op_backend_batch_norm_backward_input_gradient_cpu",
+    "tensor_op_backend_zspace_batch_norm_backward_input_gradient_cpu",
+    "tensor_op_backend_batch_norm_backward_input_gradient_reduction_wgpu",
+    "tensor_op_backend_zspace_batch_norm_backward_input_gradient_reduction_wgpu",
+    "tensor_op_backend_batch_norm_backward_input_gradient_reduction_cpu",
+    "tensor_op_backend_zspace_batch_norm_backward_input_gradient_reduction_cpu",
+    "tensor_op_backend_batch_norm_backward_normalization_wgpu",
+    "tensor_op_backend_zspace_batch_norm_backward_normalization_wgpu",
+    "tensor_op_backend_batch_norm_backward_normalization_cpu",
+    "tensor_op_backend_zspace_batch_norm_backward_normalization_cpu",
+    "tensor_op_backend_dropout_forward_cpu",
+    "tensor_op_backend_dropout_backward_cpu",
+    "tensor_op_backend_dropout_forward_composite",
+    "tensor_op_backend_dropout_backward_composite",
+    "tensor_op_backend_scale_wgpu",
+    "tensor_op_backend_scale_cpu",
+    "tensor_op_backend_add_wgpu",
+    "tensor_op_backend_add_cpu",
+    "tensor_op_backend_hadamard_wgpu",
+    "tensor_op_backend_hadamard_cpu",
+    "tensor_op_backend_mul_row_wgpu",
+    "tensor_op_backend_mul_row_cpu",
+    "tensor_op_backend_row_affine_wgpu",
+    "tensor_op_backend_row_affine_cpu",
+    "tensor_op_backend_add_scaled_wgpu",
+    "tensor_op_backend_add_scaled_cpu",
+    "tensor_op_backend_sub_wgpu",
+    "tensor_op_backend_sub_cpu",
+    "tensor_op_backend_sum_axis0_wgpu",
+    "tensor_op_backend_sum_axis0_cpu",
+    "tensor_op_backend_sum_axis0_scaled_wgpu",
+    "tensor_op_backend_sum_axis0_scaled_cpu",
+    "tensor_op_backend_sum_abs_wgpu",
+    "tensor_op_backend_sum_abs_cpu",
+    "tensor_op_backend_hypergrad_accumulate_wave_cpu",
+    "tensor_op_backend_hypergrad_accumulate_pair_cpu",
+    "tensor_op_backend_hypergrad_apply_update_cpu",
+    "tensor_op_backend_realgrad_accumulate_wave_cpu",
+    "tensor_op_backend_realgrad_accumulate_pair_cpu",
+    "tensor_op_backend_mean_squared_error_composite",
+    "tensor_op_backend_mse_loss_backward_cpu",
+    "tensor_op_backend_categorical_cross_entropy_backward_cpu",
+    "tensor_op_backend_focal_loss_backward_cpu",
+    "tensor_op_backend_hyperbolic_cross_entropy_backward_cpu",
+    "tensor_op_backend_contrastive_loss_backward_cpu",
+    "tensor_op_backend_triplet_loss_backward_cpu",
+    "tensor_op_backend_zrba_cov_head_forward_cpu",
+    "tensor_op_backend_zrba_cov_head_forward_hybrid",
+    "tensor_op_backend_zrba_cov_head_forward_covariance_centering_cpu",
+    "tensor_op_backend_zrba_cov_head_forward_covariance_accumulation_wgpu",
+    "tensor_op_backend_zrba_cov_head_forward_covariance_accumulation_cpu",
+    "tensor_op_backend_zrba_cov_head_forward_low_rank_projection_cpu_eigen",
+    "tensor_op_backend_zrba_cov_head_forward_psd_projection_cpu_eigen",
+    "tensor_op_backend_zrba_metric_weights_normalise_control_cpu",
+    "tensor_op_backend_zrba_workspace_softmax_summary_summary_cpu",
+    "tensor_op_backend_max_pool2d_forward_wgpu",
+    "tensor_op_backend_max_pool2d_forward_cpu",
+    "tensor_op_backend_max_pool2d_backward_wgpu",
+    "tensor_op_backend_max_pool2d_backward_cpu",
+    "tensor_op_backend_avg_pool2d_forward_wgpu",
+    "tensor_op_backend_avg_pool2d_forward_cpu",
+    "tensor_op_backend_avg_pool2d_backward_wgpu",
+    "tensor_op_backend_avg_pool2d_backward_cpu",
+    "tensor_op_backend_continuous_wavelet_forward_cpu",
+    "tensor_op_backend_continuous_wavelet_backward_cpu",
+    "tensor_op_backend_dynamic_field_klein_gordon_forward_wgpu",
+    "tensor_op_backend_dynamic_field_klein_gordon_backward_wgpu",
+    "tensor_op_backend_dynamic_field_klein_gordon_forward_cpu",
+    "tensor_op_backend_dynamic_field_klein_gordon_backward_cpu",
+    "tensor_op_backend_dynamic_field_hamilton_jacobi_forward_wgpu",
+    "tensor_op_backend_dynamic_field_hamilton_jacobi_backward_wgpu",
+    "tensor_op_backend_dynamic_field_hamilton_jacobi_forward_cpu",
+    "tensor_op_backend_dynamic_field_hamilton_jacobi_backward_cpu",
+    "tensor_op_backend_dynamic_field_stochastic_schrodinger_forward_wgpu",
+    "tensor_op_backend_dynamic_field_stochastic_schrodinger_backward_wgpu",
+    "tensor_op_backend_dynamic_field_stochastic_schrodinger_forward_cpu",
+    "tensor_op_backend_dynamic_field_stochastic_schrodinger_backward_cpu",
+    "tensor_op_backend_lstm_forward_cpu",
+    "tensor_op_backend_lstm_backward_cpu",
+    "tensor_op_backend_lstm_forward_composite",
+    "tensor_op_backend_lstm_forward_hybrid",
+    "tensor_op_backend_lstm_forward_input_projection_wgpu",
+    "tensor_op_backend_lstm_forward_bias_wgpu",
+    "tensor_op_backend_lstm_forward_recurrent_wgpu",
+    "tensor_op_backend_lstm_forward_recurrent_cpu",
+    "tensor_op_backend_lstm_forward_gate_activation_cpu",
+    "tensor_op_backend_lstm_forward_gate_activation_wgpu",
+    "tensor_op_backend_lstm_backward_hybrid",
+    "tensor_op_backend_lstm_backward_recurrent_wgpu",
+    "tensor_op_backend_lstm_backward_recurrent_cpu",
+    "tensor_op_backend_lstm_backward_gate_activation_cpu",
+    "tensor_op_backend_lstm_backward_gate_activation_wgpu",
+    "tensor_op_backend_lstm_backward_bptt_cpu",
+    "tensor_op_backend_lstm_backward_bptt_wgpu",
+    "tensor_op_backend_lstm_backward_bptt_scan_cpu",
+    "tensor_op_backend_lstm_backward_bptt_scan_wgpu",
+    "tensor_op_backend_lstm_backward_bptt_gate_derivative_cpu",
+    "tensor_op_backend_lstm_backward_bptt_gate_derivative_wgpu",
+    "tensor_op_backend_lstm_backward_bptt_cell_recurrence_cpu",
+    "tensor_op_backend_lstm_backward_bptt_cell_recurrence_wgpu",
+    "tensor_op_backend_lstm_backward_bptt_state_carry_cpu",
+    "tensor_op_backend_lstm_backward_bptt_state_carry_wgpu",
+    "tensor_op_backend_lstm_backward_input_gradient_wgpu",
+    "tensor_op_backend_lstm_backward_input_gradient_cpu",
+    "tensor_op_backend_lstm_backward_raw_parameter_gradient_hybrid",
+    "tensor_op_backend_lstm_backward_raw_parameter_gradient_cpu",
+    "tensor_op_backend_lstm_backward_parameter_gradient_reduction_wgpu",
+    "tensor_op_backend_lstm_backward_parameter_gradient_reduction_cpu",
+    "tensor_op_backend_lstm_backward_bias_gradient_wgpu",
+    "tensor_op_backend_lstm_backward_bias_gradient_cpu",
+    "tensor_op_backend_lstm_backward_parameter_gradient_scale_wgpu",
+    "tensor_op_backend_lstm_backward_parameter_gradient_scale_cpu",
+    "lstm_estimated_cpu_debt_ops",
+    "lstm_estimated_bptt_cpu_debt_ops",
+    "lstm_estimated_bptt_wgpu_ops",
+    "lstm_estimated_gate_activation_ops",
+    "lstm_estimated_gate_activation_cpu_debt_ops",
+    "lstm_estimated_gate_activation_wgpu_ops",
+    "lstm_backward_bptt_scan_shape_supported",
+    "lstm_backward_bptt_scan_runtime_requested",
+    "lstm_backward_bptt_scan_runtime_available",
+    "lstm_backward_bptt_scan_runtime_unavailable",
+    "lstm_backward_bptt_scan_elapsed_us",
+    "lstm_backward_bptt_scan_hidden_values",
+    "lstm_backward_bptt_scan_gate_values",
+    "lstm_backward_bptt_scan_cell_values",
+    "lstm_backward_bptt_scan_recurrent_weight_values",
+    "lstm_backward_bptt_scan_scratch_values",
+    "lstm_backward_bptt_scan_kernel_dispatches",
+    "lstm_backward_bptt_scan_serial_steps",
+    "lstm_backward_bptt_scan_workgroup_size",
+    "lstm_backward_bptt_scan_parallel_lanes",
+    "lstm_backward_estimated_bptt_ops_per_scan_step",
+    "lstm_forward_estimated_gate_activation_ops",
+    "lstm_forward_estimated_gate_activation_cpu_debt_ops",
+    "lstm_forward_estimated_gate_activation_wgpu_ops",
+    "lstm_backward_estimated_gate_activation_ops",
+    "lstm_backward_estimated_gate_activation_cpu_debt_ops",
+    "lstm_backward_estimated_gate_activation_wgpu_ops",
+    "lstm_backward_estimated_bptt_ops",
+    "lstm_backward_estimated_bptt_cpu_debt_ops",
+    "lstm_backward_estimated_bptt_wgpu_ops",
+    "lstm_backward_estimated_bptt_gate_derivative_ops",
+    "lstm_backward_estimated_bptt_cell_recurrence_ops",
+    "lstm_backward_estimated_bptt_state_carry_ops",
+    "lstm_backward_estimated_bptt_scan_steps",
+    "tensor_op_backend_zrelativity_module_forward_parameter_adapter",
+    "tensor_op_backend_zrelativity_module_backward_parameter_adapter",
+    "tensor_op_backend_zspace_mixer_forward_cpu",
+    "tensor_op_backend_zspace_mixer_backward_cpu",
+    "tensor_op_backend_zspace_mixer_forward_composite",
+    "tensor_op_backend_zspace_mixer_backward_composite",
+    "tensor_op_backend_wave_gate_project_wgpu",
+    "tensor_op_backend_wave_gate_project_cpu",
+    "tensor_op_backend_wave_gate_backward_wgpu",
+    "tensor_op_backend_wave_gate_backward_cpu",
+    "tensor_op_backend_zspace_projector_forward_cpu",
+    "tensor_op_backend_zspace_projector_backward_cpu",
+    "tensor_op_backend_zspace_projector_forward_composite",
+    "tensor_op_backend_scaler_forward_cpu",
+    "tensor_op_backend_scaler_backward_cpu",
+    "tensor_op_backend_scaler_forward_composite",
+    "tensor_op_backend_scaler_backward_composite",
+    "tensor_op_backend_non_liner_forward_cpu",
+    "tensor_op_backend_non_liner_backward_cpu",
+    "tensor_op_backend_non_liner_forward_composite",
+    "tensor_op_backend_non_liner_backward_composite",
+    "tensor_embedding_token_repairs_total",
+    "tensor_embedding_unique_token_indices",
+    "tensor_embedding_repeated_token_indices",
+    "tensor_embedding_non_finite_tokens",
+    "tensor_embedding_clamped_high_tokens",
+    "backend_policy_events",
+    "backend_policy_wgpu_choices",
+    "backend_policy_unison_choices",
+    "backend_policy_kdsl_env_events",
+    "backend_policy_kdsl_kv_events",
+    "backend_policy_kv_soft_events",
+    "backend_policy_wasm_tuner_events",
+    "backend_policy_tensor_util_routes",
+    "backend_policy_wgpu_last_workgroup",
+    "backend_policy_wgpu_last_lanes",
+    "backend_policy_wgpu_last_compaction_tile",
+    "backend_policy_wgpu_last_fft_radix",
+    "backend_policy_unison_last_candidate_count",
+    "backend_policy_unison_last_best_score",
+    "backend_policy_tensor_util_last_values",
+    "backend_policy_tensor_util_last_threshold",
+)
+
+BACKEND_POLICY_COUNT_KEYS = (
+    "backend_policy_events",
+    "backend_policy_wgpu_choices",
+    "backend_policy_unison_choices",
+    "backend_policy_kdsl_env_events",
+    "backend_policy_kdsl_kv_events",
+    "backend_policy_kv_soft_events",
+    "backend_policy_wasm_tuner_events",
+    "backend_policy_tensor_util_routes",
+)
+
+BACKEND_POLICY_LAST_KEYS = (
+    "backend_policy_wgpu_last_workgroup",
+    "backend_policy_wgpu_last_lanes",
+    "backend_policy_wgpu_last_compaction_tile",
+    "backend_policy_wgpu_last_fft_radix",
+    "backend_policy_wgpu_last_fft_segments",
+    "backend_policy_wgpu_last_override_count",
+    "backend_policy_unison_last_candidate_count",
+    "backend_policy_unison_last_best_score",
+    "backend_policy_unison_last_baseline_score",
+    "backend_policy_unison_last_wgpu_generated_score",
+    "backend_policy_unison_last_wgpu_generated_score_delta",
+    "backend_policy_tensor_util_last_values",
+    "backend_policy_tensor_util_last_threshold",
+)
+
+BACKEND_POLICY_STATUS_PREFIX = "backend_policy_status_"
+BACKEND_POLICY_SOURCE_PREFIX = "backend_policy_source_"
+BACKEND_POLICY_OPS = (
+    "wgpu_heuristic_choice",
+    "unison_rank_choice",
+    "kdsl_env_bridge",
+    "kdsl_kv_bridge",
+    "kv_consensus_soft_rules",
+    "wasm_tuner_choice",
+    "tensor_util_route",
+)
+
+CPU_RUNTIME_BACKENDS = {
+    "cpu",
+    "cpu_eigen",
+    "cpu_simd",
+    "f64_cpu",
+    "faer",
+    "naive",
+    "probability_cpu",
+    "semantic_cpu",
+    "topos_cpu",
+}
+
 
 def _iter_jsonl(path: Path) -> Iterable[dict[str, Any]]:
     with path.open("r", encoding="utf-8") as handle:
@@ -29,6 +480,11 @@ def _extract_payload(record: dict[str, Any], *, event_type: str) -> Any | None:
         return record.get("payload")
     if "payload" in record and record_type is None:
         return record.get("payload")
+    event = record.get("event")
+    if isinstance(event, dict) and event.get("kind") == "Custom":
+        data = event.get("data")
+        if isinstance(data, dict) and data.get("event_type") == event_type:
+            return data.get("data")
     if len(record) == 1:
         return record
     return None
@@ -73,6 +529,476 @@ def _numeric_keys(events: Iterable[dict[str, Any]]) -> list[str]:
     return sorted(keys)
 
 
+def _metric_stats(values: list[float]) -> dict[str, Any]:
+    return {
+        "first": values[0],
+        "last": values[-1],
+        "min": min(values),
+        "max": max(values),
+        "mean": sum(values) / len(values),
+        "sum": sum(values),
+        "samples": len(values),
+        "nonzero": sum(1 for value in values if value != 0.0),
+    }
+
+
+def _coherence_repair_summary(metrics: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    present = {
+        key: value
+        for key, value in metrics.items()
+        if key in COHERENCE_REPAIR_METRIC_KEYS
+    }
+    if not present:
+        return {}
+
+    total = present.get("coherence_repairs_total")
+    detected = present.get("coherence_repaired_detected")
+    pre_discard = present.get("coherence_pre_discard_repairs_total")
+    aggregate = present.get("coherence_repaired_weights_total")
+    return {
+        "keys": sorted(present),
+        "total_nonzero_steps": int(total.get("nonzero", 0)) if total else 0,
+        "max_total": float(total.get("max", 0.0)) if total else 0.0,
+        "last_total": float(total.get("last", 0.0)) if total else 0.0,
+        "detected_steps": int(detected.get("nonzero", 0)) if detected else 0,
+        "max_pre_discard_total": float(pre_discard.get("max", 0.0)) if pre_discard else 0.0,
+        "max_aggregate_total": float(aggregate.get("max", 0.0)) if aggregate else 0.0,
+    }
+
+
+def _metric_sum(metrics: dict[str, dict[str, Any]], key: str) -> float:
+    entry = metrics.get(key)
+    if not isinstance(entry, dict):
+        return 0.0
+    value = entry.get("sum")
+    return float(value) if isinstance(value, (int, float)) and math.isfinite(float(value)) else 0.0
+
+
+def _metric_last(metrics: dict[str, dict[str, Any]], key: str) -> float | None:
+    entry = metrics.get(key)
+    if not isinstance(entry, dict):
+        return None
+    value = entry.get("last")
+    if isinstance(value, (int, float)) and math.isfinite(float(value)):
+        return float(value)
+    return None
+
+
+def _prefixed_metric_sums(
+    metrics: dict[str, dict[str, Any]],
+    prefix: str,
+) -> dict[str, float]:
+    out: dict[str, float] = {}
+    for key in sorted(metrics):
+        if not key.startswith(prefix):
+            continue
+        total = _metric_sum(metrics, key)
+        if total:
+            out[key[len(prefix):]] = total
+    return out
+
+
+def _metric_fragment(value: str) -> str:
+    out = []
+    for char in value.lower():
+        if char.isalnum():
+            out.append(char)
+        elif char in {"_", "-", ".", ":", "/"}:
+            out.append("_")
+    fragment = "".join(out).strip("_")
+    while "__" in fragment:
+        fragment = fragment.replace("__", "_")
+    return fragment or "unknown"
+
+
+def _finite_number(value: Any) -> float | None:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        numeric = float(value)
+        if math.isfinite(numeric):
+            return numeric
+    return None
+
+
+def _insert_metric_value(
+    metrics: dict[str, dict[str, Any]],
+    key: str,
+    value: float,
+) -> None:
+    metrics[key] = _metric_stats([value])
+
+
+def _backend_policy_metrics_from_tensor_meta(
+    events: Iterable[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    counts: dict[str, float] = {}
+    last_values: dict[str, float] = {}
+
+    def inc(key: str, amount: float = 1.0) -> None:
+        counts[key] = counts.get(key, 0.0) + amount
+
+    for event in events:
+        op_name = event.get("op_name")
+        data = event.get("data")
+        if not isinstance(op_name, str) or op_name not in BACKEND_POLICY_OPS:
+            continue
+        if not isinstance(data, dict):
+            data = {}
+        inc("backend_policy_events")
+        if op_name == "wgpu_heuristic_choice":
+            inc("backend_policy_wgpu_choices")
+            field_map = {
+                "workgroup": "backend_policy_wgpu_last_workgroup",
+                "lanes": "backend_policy_wgpu_last_lanes",
+                "compaction_tile": "backend_policy_wgpu_last_compaction_tile",
+                "fft_radix": "backend_policy_wgpu_last_fft_radix",
+                "fft_segments": "backend_policy_wgpu_last_fft_segments",
+                "override_count": "backend_policy_wgpu_last_override_count",
+            }
+        elif op_name == "unison_rank_choice":
+            inc("backend_policy_unison_choices")
+            field_map = {
+                "candidate_count": "backend_policy_unison_last_candidate_count",
+                "best_score": "backend_policy_unison_last_best_score",
+                "baseline_score": "backend_policy_unison_last_baseline_score",
+                "wgpu_generated_score": "backend_policy_unison_last_wgpu_generated_score",
+                "wgpu_generated_score_delta": "backend_policy_unison_last_wgpu_generated_score_delta",
+            }
+        elif op_name == "kdsl_env_bridge":
+            inc("backend_policy_kdsl_env_events")
+            field_map = {}
+        elif op_name == "kdsl_kv_bridge":
+            inc("backend_policy_kdsl_kv_events")
+            field_map = {}
+        elif op_name == "kv_consensus_soft_rules":
+            inc("backend_policy_kv_soft_events")
+            field_map = {}
+        elif op_name == "wasm_tuner_choice":
+            inc("backend_policy_wasm_tuner_events")
+            field_map = {}
+        elif op_name == "tensor_util_route":
+            inc("backend_policy_tensor_util_routes")
+            field_map = {
+                "values": "backend_policy_tensor_util_last_values",
+                "threshold": "backend_policy_tensor_util_last_threshold",
+            }
+        else:
+            field_map = {}
+
+        status = data.get("status")
+        if isinstance(status, str) and status:
+            inc(f"{BACKEND_POLICY_STATUS_PREFIX}{_metric_fragment(op_name)}_{_metric_fragment(status)}")
+        source = data.get("choice_source")
+        if isinstance(source, str) and source:
+            inc(f"{BACKEND_POLICY_SOURCE_PREFIX}{_metric_fragment(op_name)}_{_metric_fragment(source)}")
+        for source_field, metric_key in field_map.items():
+            numeric = _finite_number(data.get(source_field))
+            if numeric is not None:
+                last_values[metric_key] = numeric
+
+    metrics: dict[str, dict[str, Any]] = {}
+    for key, value in counts.items():
+        _insert_metric_value(metrics, key, value)
+    for key, value in last_values.items():
+        _insert_metric_value(metrics, key, value)
+    return metrics
+
+
+def _backend_request_metrics_from_tensor_meta(
+    events: Iterable[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    counts: dict[str, float] = {}
+
+    def inc(key: str, amount: float = 1.0) -> None:
+        counts[key] = counts.get(key, 0.0) + amount
+
+    for event in events:
+        op_name = event.get("op_name")
+        data = event.get("data")
+        if not isinstance(op_name, str) or not isinstance(data, dict):
+            continue
+        requested = data.get("requested_backend")
+        backend = data.get("backend")
+        if not isinstance(requested, str) or not isinstance(backend, str):
+            continue
+        if requested != "wgpu":
+            continue
+        backend_fragment = _metric_fragment(backend)
+        op_fragment = _metric_fragment(op_name)
+        if backend == "wgpu" or backend == "wgpu_dense":
+            inc("tensor_backend_requested_wgpu_hits")
+            inc(f"tensor_op_backend_requested_wgpu_hit_{op_fragment}_{backend_fragment}")
+        elif backend in CPU_RUNTIME_BACKENDS and _is_wgpu_runtime_fallback(data):
+            inc("tensor_backend_requested_wgpu_runtime_fallbacks")
+            inc(f"tensor_op_backend_wgpu_runtime_fallback_{op_fragment}_{backend_fragment}")
+
+    metrics: dict[str, dict[str, Any]] = {}
+    for key, value in counts.items():
+        _insert_metric_value(metrics, key, value)
+    return metrics
+
+
+def _is_wgpu_runtime_fallback(data: dict[str, Any]) -> bool:
+    fallback = data.get("fallback")
+    if not isinstance(fallback, dict):
+        return False
+    if fallback.get("from") != "wgpu":
+        return False
+    if fallback.get("reason") == "runtime_unavailable":
+        return True
+    message = fallback.get("message")
+    if not isinstance(message, str):
+        return False
+    return (
+        "no suitable WGPU adapter" in message
+        or "failed to initialize WGPU" in message
+        or "WGPU backend not available" in message
+    )
+
+
+LSTM_BACKEND_FIELDS = {
+    "lstm_forward": (
+        ("backend", ""),
+        ("input_projection_backend", "input_projection"),
+        ("bias_backend", "bias"),
+        ("recurrent_backend", "recurrent"),
+        ("gate_activation_backend", "gate_activation"),
+    ),
+    "lstm_backward": (
+        ("backend", ""),
+        ("recurrent_backend", "recurrent"),
+        ("gate_activation_backend", "gate_activation"),
+        ("bptt_backend", "bptt"),
+        ("bptt_scan_backend", "bptt_scan"),
+        ("bptt_gate_derivative_backend", "bptt_gate_derivative"),
+        ("bptt_cell_recurrence_backend", "bptt_cell_recurrence"),
+        ("bptt_state_carry_backend", "bptt_state_carry"),
+        ("input_gradient_backend", "input_gradient"),
+        ("raw_parameter_gradient_backend", "raw_parameter_gradient"),
+        ("parameter_gradient_reduction_backend", "parameter_gradient_reduction"),
+        ("bias_gradient_backend", "bias_gradient"),
+        ("parameter_gradient_scale_backend", "parameter_gradient_scale"),
+    ),
+}
+
+
+def _lstm_backend_metrics_from_tensor_meta(
+    events: Iterable[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    counts: dict[str, float] = {}
+
+    def inc(key: str, amount: float = 1.0) -> None:
+        counts[key] = counts.get(key, 0.0) + amount
+
+    for event in events:
+        op_name = event.get("op_name")
+        data = event.get("data")
+        if not isinstance(op_name, str) or not isinstance(data, dict):
+            continue
+        field_specs = LSTM_BACKEND_FIELDS.get(op_name)
+        if field_specs is None:
+            continue
+        op_fragment = _metric_fragment(op_name)
+        for field, component in field_specs:
+            backend = data.get(field)
+            if not isinstance(backend, str) or not backend:
+                continue
+            backend_fragment = _metric_fragment(backend)
+            component_fragment = _metric_fragment(component) if component else ""
+            if component_fragment:
+                key = f"tensor_op_backend_{op_fragment}_{component_fragment}_{backend_fragment}"
+            else:
+                key = f"tensor_op_backend_{op_fragment}_{backend_fragment}"
+            inc(key)
+
+    metrics: dict[str, dict[str, Any]] = {}
+    for key, value in counts.items():
+        _insert_metric_value(metrics, key, value)
+    return metrics
+
+
+def _lstm_estimated_metrics_from_tensor_meta(
+    events: Iterable[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    values = {
+        "lstm_forward_estimated_gate_activation_ops": 0.0,
+        "lstm_forward_estimated_gate_activation_cpu_debt_ops": 0.0,
+        "lstm_forward_estimated_gate_activation_wgpu_ops": 0.0,
+        "lstm_backward_estimated_gate_activation_ops": 0.0,
+        "lstm_backward_estimated_gate_activation_cpu_debt_ops": 0.0,
+        "lstm_backward_estimated_gate_activation_wgpu_ops": 0.0,
+        "lstm_backward_estimated_bptt_ops": 0.0,
+        "lstm_backward_estimated_bptt_cpu_debt_ops": 0.0,
+        "lstm_backward_estimated_bptt_wgpu_ops": 0.0,
+        "lstm_backward_estimated_bptt_gate_derivative_ops": 0.0,
+        "lstm_backward_estimated_bptt_cell_recurrence_ops": 0.0,
+        "lstm_backward_estimated_bptt_state_carry_ops": 0.0,
+        "lstm_backward_estimated_bptt_scan_steps": 0.0,
+        "lstm_backward_bptt_scan_shape_supported": 0.0,
+        "lstm_backward_bptt_scan_runtime_requested": 0.0,
+        "lstm_backward_bptt_scan_runtime_available": 0.0,
+        "lstm_backward_bptt_scan_runtime_unavailable": 0.0,
+        "lstm_backward_bptt_scan_elapsed_us": 0.0,
+        "lstm_backward_bptt_scan_hidden_values": 0.0,
+        "lstm_backward_bptt_scan_gate_values": 0.0,
+        "lstm_backward_bptt_scan_cell_values": 0.0,
+        "lstm_backward_bptt_scan_recurrent_weight_values": 0.0,
+        "lstm_backward_bptt_scan_scratch_values": 0.0,
+        "lstm_backward_bptt_scan_kernel_dispatches": 0.0,
+        "lstm_backward_bptt_scan_serial_steps": 0.0,
+        "lstm_backward_bptt_scan_workgroup_size": 0.0,
+        "lstm_backward_bptt_scan_parallel_lanes": 0.0,
+        "lstm_backward_estimated_bptt_ops_per_scan_step": 0.0,
+    }
+    saw_lstm_event = False
+    for event in events:
+        op_name = event.get("op_name")
+        data = event.get("data")
+        if not isinstance(op_name, str) or not isinstance(data, dict):
+            continue
+        if op_name == "lstm_forward":
+            saw_lstm_event = True
+            value = _finite_number(data.get("estimated_gate_activation_ops"))
+            if value is not None:
+                values["lstm_forward_estimated_gate_activation_ops"] += value
+                if _metric_fragment(str(data.get("gate_activation_backend") or "cpu")) == "wgpu":
+                    values["lstm_forward_estimated_gate_activation_wgpu_ops"] += value
+                else:
+                    values["lstm_forward_estimated_gate_activation_cpu_debt_ops"] += value
+        elif op_name == "lstm_backward":
+            saw_lstm_event = True
+            field_map = {
+                "estimated_bptt_ops": "lstm_backward_estimated_bptt_ops",
+                "estimated_bptt_cpu_debt_ops": "lstm_backward_estimated_bptt_cpu_debt_ops",
+                "estimated_bptt_wgpu_ops": "lstm_backward_estimated_bptt_wgpu_ops",
+                "estimated_bptt_gate_derivative_ops": (
+                    "lstm_backward_estimated_bptt_gate_derivative_ops"
+                ),
+                "estimated_bptt_cell_recurrence_ops": (
+                    "lstm_backward_estimated_bptt_cell_recurrence_ops"
+                ),
+                "estimated_bptt_state_carry_ops": "lstm_backward_estimated_bptt_state_carry_ops",
+                "estimated_bptt_scan_steps": "lstm_backward_estimated_bptt_scan_steps",
+                "bptt_scan_elapsed_us": "lstm_backward_bptt_scan_elapsed_us",
+                "bptt_scan_hidden_values": "lstm_backward_bptt_scan_hidden_values",
+                "bptt_scan_gate_values": "lstm_backward_bptt_scan_gate_values",
+                "bptt_scan_cell_values": "lstm_backward_bptt_scan_cell_values",
+                "bptt_scan_recurrent_weight_values": (
+                    "lstm_backward_bptt_scan_recurrent_weight_values"
+                ),
+                "bptt_scan_scratch_values": "lstm_backward_bptt_scan_scratch_values",
+                "bptt_scan_kernel_dispatches": "lstm_backward_bptt_scan_kernel_dispatches",
+                "bptt_scan_serial_steps": "lstm_backward_bptt_scan_serial_steps",
+                "estimated_bptt_ops_per_scan_step": (
+                    "lstm_backward_estimated_bptt_ops_per_scan_step"
+                ),
+            }
+            for source_key, metric_key in field_map.items():
+                value = _finite_number(data.get(source_key))
+                if value is not None:
+                    values[metric_key] += value
+            last_value_field_map = {
+                "bptt_scan_workgroup_size": "lstm_backward_bptt_scan_workgroup_size",
+                "bptt_scan_parallel_lanes": "lstm_backward_bptt_scan_parallel_lanes",
+            }
+            for source_key, metric_key in last_value_field_map.items():
+                value = _finite_number(data.get(source_key))
+                if value is not None:
+                    values[metric_key] = value
+            gate_activation_ops = _finite_number(data.get("estimated_gate_activation_ops"))
+            if gate_activation_ops is not None:
+                values["lstm_backward_estimated_gate_activation_ops"] += gate_activation_ops
+                if _metric_fragment(str(data.get("gate_activation_backend") or "cpu")) == "wgpu":
+                    values["lstm_backward_estimated_gate_activation_wgpu_ops"] += (
+                        gate_activation_ops
+                    )
+                else:
+                    values["lstm_backward_estimated_gate_activation_cpu_debt_ops"] += (
+                        gate_activation_ops
+                    )
+            bptt_ops = _finite_number(data.get("estimated_bptt_ops"))
+            bptt_backend = data.get("bptt_backend") or data.get("bptt_scan_backend")
+            if bptt_ops is not None:
+                if bptt_backend == "wgpu" and data.get("estimated_bptt_wgpu_ops") is None:
+                    values["lstm_backward_estimated_bptt_wgpu_ops"] += bptt_ops
+                elif bptt_backend == "cpu" and data.get("estimated_bptt_cpu_debt_ops") is None:
+                    values["lstm_backward_estimated_bptt_cpu_debt_ops"] += bptt_ops
+            shape_supported = data.get("bptt_scan_shape_supported")
+            runtime_requested = data.get("bptt_scan_runtime_requested")
+            runtime_available = data.get("bptt_scan_runtime_available")
+            if shape_supported is True:
+                values["lstm_backward_bptt_scan_shape_supported"] += 1.0
+            if runtime_requested is True:
+                values["lstm_backward_bptt_scan_runtime_requested"] += 1.0
+            if runtime_available is True:
+                values["lstm_backward_bptt_scan_runtime_available"] += 1.0
+            if runtime_requested is True and runtime_available is False:
+                values["lstm_backward_bptt_scan_runtime_unavailable"] += 1.0
+
+    gate_activation_ops = (
+        values["lstm_forward_estimated_gate_activation_ops"]
+        + values["lstm_backward_estimated_gate_activation_ops"]
+    )
+    gate_activation_cpu_debt_ops = (
+        values["lstm_forward_estimated_gate_activation_cpu_debt_ops"]
+        + values["lstm_backward_estimated_gate_activation_cpu_debt_ops"]
+    )
+    gate_activation_wgpu_ops = (
+        values["lstm_forward_estimated_gate_activation_wgpu_ops"]
+        + values["lstm_backward_estimated_gate_activation_wgpu_ops"]
+    )
+    values["lstm_estimated_gate_activation_ops"] = gate_activation_ops
+    values["lstm_estimated_gate_activation_cpu_debt_ops"] = gate_activation_cpu_debt_ops
+    values["lstm_estimated_gate_activation_wgpu_ops"] = gate_activation_wgpu_ops
+    values["lstm_estimated_bptt_cpu_debt_ops"] = values[
+        "lstm_backward_estimated_bptt_cpu_debt_ops"
+    ]
+    values["lstm_estimated_bptt_wgpu_ops"] = values["lstm_backward_estimated_bptt_wgpu_ops"]
+    values["lstm_estimated_cpu_debt_ops"] = (
+        gate_activation_cpu_debt_ops + values["lstm_estimated_bptt_cpu_debt_ops"]
+    )
+
+    metrics: dict[str, dict[str, Any]] = {}
+    for key, value in values.items():
+        if value or saw_lstm_event:
+            _insert_metric_value(metrics, key, value)
+    return metrics
+
+
+def _backend_policy_summary(metrics: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    if not any(
+        key in metrics
+        or any(metric_key.startswith(key) for metric_key in metrics)
+        for key in (
+            "backend_policy_",
+            BACKEND_POLICY_STATUS_PREFIX,
+            BACKEND_POLICY_SOURCE_PREFIX,
+        )
+    ):
+        return {}
+
+    counts = {
+        key.removeprefix("backend_policy_"): _metric_sum(metrics, key)
+        for key in BACKEND_POLICY_COUNT_KEYS
+        if key in metrics
+    }
+    last = {
+        key.removeprefix("backend_policy_"): value
+        for key in BACKEND_POLICY_LAST_KEYS
+        for value in [_metric_last(metrics, key)]
+        if value is not None
+    }
+    status_counts = _prefixed_metric_sums(metrics, BACKEND_POLICY_STATUS_PREFIX)
+    source_counts = _prefixed_metric_sums(metrics, BACKEND_POLICY_SOURCE_PREFIX)
+    if not counts and not last and not status_counts and not source_counts:
+        return {}
+    return {
+        "counts": counts,
+        "status_counts": status_counts,
+        "source_counts": source_counts,
+        "last": last,
+    }
+
+
 def load_trainer_trace_events(
     path: str | Path,
     *,
@@ -93,6 +1019,16 @@ def load_trainer_trace_events(
     return events
 
 
+def _tensor_meta_derived_metrics(path: str | Path) -> dict[str, dict[str, Any]]:
+    tensor_meta_events = load_trainer_trace_events(path, event_type="TensorOpMeta")
+    metrics: dict[str, dict[str, Any]] = {}
+    metrics.update(_backend_policy_metrics_from_tensor_meta(tensor_meta_events))
+    metrics.update(_backend_request_metrics_from_tensor_meta(tensor_meta_events))
+    metrics.update(_lstm_backend_metrics_from_tensor_meta(tensor_meta_events))
+    metrics.update(_lstm_estimated_metrics_from_tensor_meta(tensor_meta_events))
+    return metrics
+
+
 def summarize_trainer_trace_events(
     path: str | Path,
     *,
@@ -102,17 +1038,20 @@ def summarize_trainer_trace_events(
     """Compute simple aggregates for numeric values in a trainer trace JSONL file."""
 
     events = load_trainer_trace_events(path, event_type=event_type)
+    tensor_meta_metrics = _tensor_meta_derived_metrics(path)
     if not events:
         return {
             "event_type": event_type,
             "count": 0,
             "first_step": None,
             "last_step": None,
-            "metrics": {},
+            "metrics": tensor_meta_metrics,
+            "coherence_repairs": {},
+            "backend_policy": _backend_policy_summary(tensor_meta_metrics),
         }
 
     selected_keys = list(keys) if keys is not None else _numeric_keys(events)
-    metrics: dict[str, dict[str, float]] = {}
+    metrics: dict[str, dict[str, Any]] = {}
     for key in selected_keys:
         values: list[float] = []
         for event in events:
@@ -123,13 +1062,10 @@ def summarize_trainer_trace_events(
                     values.append(numeric)
         if not values:
             continue
-        metrics[key] = {
-            "first": values[0],
-            "last": values[-1],
-            "min": min(values),
-            "max": max(values),
-            "mean": sum(values) / len(values),
-        }
+        metrics[key] = _metric_stats(values)
+
+    for key, value in tensor_meta_metrics.items():
+        metrics.setdefault(key, value)
 
     first_step = next(
         (
@@ -155,6 +1091,8 @@ def summarize_trainer_trace_events(
         "first_step": first_step,
         "last_step": last_step,
         "metrics": metrics,
+        "coherence_repairs": _coherence_repair_summary(metrics),
+        "backend_policy": _backend_policy_summary(metrics),
     }
 
 
@@ -176,6 +1114,7 @@ def write_trainer_trace_html(
     html_path = Path(html_path) if html_path is not None else trace_jsonl.with_suffix(".html")
     payload = json.dumps(events, ensure_ascii=True)
     marker_payload = json.dumps(markers, ensure_ascii=True)
+    spotlight_payload = json.dumps(TRACE_SPOTLIGHT_KEYS, ensure_ascii=True)
 
     html = f"""<!doctype html>
 <html lang="en">
@@ -367,10 +1306,12 @@ def write_trainer_trace_html(
   <script id="trace-meta" type="application/json">{json.dumps({"event_type": event_type, "marker_event_type": marker_event_type}, ensure_ascii=True)}</script>
   <script id="trace-data" type="application/json">{payload}</script>
   <script id="trace-markers" type="application/json">{marker_payload}</script>
+  <script id="trace-spotlight-keys" type="application/json">{spotlight_payload}</script>
   <script>
     const meta = JSON.parse(document.getElementById("trace-meta").textContent || "{{}}");
     const samples = JSON.parse(document.getElementById("trace-data").textContent || "[]");
     const markers = JSON.parse(document.getElementById("trace-markers").textContent || "[]");
+    const spotlightKeys = JSON.parse(document.getElementById("trace-spotlight-keys").textContent || "[]");
     const idx = document.getElementById("idx");
     const count = document.getElementById("count");
     const markerCount = document.getElementById("marker-count");
@@ -436,7 +1377,7 @@ def write_trainer_trace_html(
         const extra = (metrics && metrics.extra) ? metrics.extra : {{}};
         for (const k of Object.keys(extra)) keys.add(k);
       }}
-      for (const k of ["loss_weighted", "loss_weighted_base", "spectral_label", "spectral_turnover", "spectral_lr_scale", "softlogic_inertia", "softlogic_z", "curvature_value", "curvature_pressure_rel_var"]) {{
+      for (const k of spotlightKeys) {{
         if (samples.some(s => extractValue(s, k) !== null)) keys.add(k);
       }}
       return Array.from(keys).sort();

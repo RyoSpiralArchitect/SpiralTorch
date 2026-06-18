@@ -41,7 +41,7 @@ fn base_choice(rows: usize, cols: usize, k: usize, subgroup: bool) -> GenChoice 
 fn table() -> &'static WasmTunerTable {
     static TABLE: OnceLock<WasmTunerTable> = OnceLock::new();
     TABLE.get_or_init(|| {
-        WasmTunerTable::from_json_str(r#"[{"rows":256,"cols_min":0,"cols_max":4095,"k_max":128,"sg":true,"wg":128,"tile":512,"tile_cols":512,"radix":2,"segments":1},{"rows":512,"cols_min":4096,"cols_max":16383,"k_max":256,"sg":true,"wg":256,"tile":1024,"tile_cols":1024,"radix":4,"segments":2},{"rows":512,"cols_min":16384,"cols_max":65535,"k_max":2048,"sg":false,"wg":128,"tile":2048,"tile_cols":2048,"radix":4,"segments":4,"use_2ce":true},{"rows":1024,"cols_min":65536,"cols_max":262143,"k_max":4096,"sg":false,"wg":128,"tile":4096,"tile_cols":4096,"radix":4,"segments":4,"use_2ce":true,"mode_bottomk":2}]"#).expect("invalid tuner table")
+        WasmTunerTable::from_json_str(r#"[{"rows":0,"rows_max":255,"cols_min":0,"cols_max":4095,"k_max":128,"sg":true,"wg":64,"kl":8,"tile":128,"tile_cols":1024,"radix":4,"segments":1},{"rows":256,"cols_min":0,"cols_max":4095,"k_max":128,"sg":true,"wg":128,"tile":512,"tile_cols":512,"radix":2,"segments":1},{"rows":512,"cols_min":4096,"cols_max":16383,"k_max":256,"sg":true,"wg":256,"tile":1024,"tile_cols":1024,"radix":4,"segments":2},{"rows":512,"cols_min":16384,"cols_max":65535,"k_max":2048,"sg":false,"wg":128,"tile":2048,"tile_cols":2048,"radix":4,"segments":4,"use_2ce":true},{"rows":1024,"cols_min":65536,"cols_max":262143,"k_max":4096,"sg":false,"wg":128,"tile":4096,"tile_cols":4096,"radix":4,"segments":4,"use_2ce":true,"mode_bottomk":2}]"#).expect("invalid tuner table")
     })
 }
 

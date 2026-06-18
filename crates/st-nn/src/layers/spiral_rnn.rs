@@ -3,6 +3,10 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+use crate::execution::{
+    current_matmul_backend, current_prepacked_matmul_backend,
+    current_tensor_util_backend_for_values,
+};
 use crate::module::{Module, Parameter};
 use crate::{PureResult, Tensor, TensorError};
 use st_tensor::topos::OpenCartesianTopos;
@@ -153,6 +157,13 @@ fn broadcast_row(row: &Tensor, rows: usize) -> PureResult<Tensor> {
     Tensor::from_vec(rows, cols, data)
 }
 
+fn scale_with_current_tensor_util_backend(tensor: &Tensor, scale: f32) -> PureResult<Tensor> {
+    tensor.scale_with_backend(
+        scale,
+        current_tensor_util_backend_for_values(tensor.data().len()),
+    )
+}
+
 #[derive(Debug)]
 pub struct SpiralRnn {
     input_kernel: Parameter,
@@ -227,6 +238,7 @@ impl Module for SpiralRnn {
                 right: (batch, self.input_dim * self.steps),
             });
         }
+        self.cache.borrow_mut().take();
         let anchor_topos_owned = self.anchor.hypergrad().map(|hyper| hyper.topos().clone());
         let anchor_topos = anchor_topos_owned.as_ref();
         let mut anchor = broadcast_row(self.anchor.value(), batch)?;
@@ -247,38 +259,68 @@ impl Module for SpiralRnn {
             }
             let mut input_step = Tensor::from_vec(batch, self.input_dim, step_input)?;
             stabilise_tensor("spiral_rnn_input_step", &mut input_step, anchor_topos)?;
-            let mut input_proj = input_step.matmul_prepacked(&input_pack)?;
+            let mut input_proj = input_step
+                .matmul_prepacked_with_backend(&input_pack, current_prepacked_matmul_backend())?;
             stabilise_tensor("spiral_rnn_input_proj", &mut input_proj, anchor_topos)?;
-            let mut state_proj = state.matmul_prepacked(&state_pack)?;
+            let mut state_proj = state
+                .matmul_prepacked_with_backend(&state_pack, current_prepacked_matmul_backend())?;
             stabilise_tensor("spiral_rnn_state_proj", &mut state_proj, anchor_topos)?;
-            let mut combined = input_proj.add(&state_proj)?;
-            combined.add_row_inplace(self.bias.value().data())?;
+            let mut combined = input_proj.add_with_backend(
+                &state_proj,
+                current_tensor_util_backend_for_values(input_proj.data().len()),
+            )?;
+            combined.add_row_inplace_with_backend(
+                self.bias.value().data(),
+                current_tensor_util_backend_for_values(combined.data().len()),
+            )?;
             stabilise_tensor("spiral_rnn_combined", &mut combined, anchor_topos)?;
             let (mut drive_pre, mut reset_pre) = split_columns(&combined, self.hidden_dim)?;
             stabilise_tensor("spiral_rnn_drive_pre", &mut drive_pre, anchor_topos)?;
             stabilise_tensor("spiral_rnn_reset_pre", &mut reset_pre, anchor_topos)?;
             let mut drive_act = tanh_tensor(&drive_pre)?;
             stabilise_tensor("spiral_rnn_drive_act", &mut drive_act, anchor_topos)?;
-            let mut state_phase = state.matmul_prepacked(&phase_pack)?;
+            let mut state_phase = state
+                .matmul_prepacked_with_backend(&phase_pack, current_prepacked_matmul_backend())?;
             stabilise_tensor("spiral_rnn_state_phase", &mut state_phase, anchor_topos)?;
-            let mut gate_pre = state_phase.add(&reset_pre)?;
-            gate_pre.add_row_inplace(self.phase_bias.value().data())?;
+            let mut gate_pre = state_phase.add_with_backend(
+                &reset_pre,
+                current_tensor_util_backend_for_values(state_phase.data().len()),
+            )?;
+            gate_pre.add_row_inplace_with_backend(
+                self.phase_bias.value().data(),
+                current_tensor_util_backend_for_values(gate_pre.data().len()),
+            )?;
             stabilise_tensor("spiral_rnn_gate_pre", &mut gate_pre, anchor_topos)?;
             let mut gate = sigmoid_tensor(&gate_pre)?;
             stabilise_tensor("spiral_rnn_gate", &mut gate, anchor_topos)?;
             let mut one_minus = one_minus_tensor(&gate)?;
             stabilise_tensor("spiral_rnn_one_minus", &mut one_minus, anchor_topos)?;
-            let mut retained = state.hadamard(&gate)?;
+            let mut retained = state.hadamard_with_backend(
+                &gate,
+                current_tensor_util_backend_for_values(state.data().len()),
+            )?;
             stabilise_tensor("spiral_rnn_retained", &mut retained, anchor_topos)?;
-            let mut injected = drive_act.hadamard(&one_minus)?;
+            let mut injected = drive_act.hadamard_with_backend(
+                &one_minus,
+                current_tensor_util_backend_for_values(drive_act.data().len()),
+            )?;
             stabilise_tensor("spiral_rnn_injected", &mut injected, anchor_topos)?;
             let mut reset_tanh = tanh_tensor(&reset_pre)?;
             stabilise_tensor("spiral_rnn_reset_tanh", &mut reset_tanh, anchor_topos)?;
-            let mut anchor_mix = anchor.hadamard(&reset_tanh)?;
+            let mut anchor_mix = anchor.hadamard_with_backend(
+                &reset_tanh,
+                current_tensor_util_backend_for_values(anchor.data().len()),
+            )?;
             stabilise_tensor("spiral_rnn_anchor_mix", &mut anchor_mix, anchor_topos)?;
-            let mut new_state = retained.add(&injected)?;
+            let mut new_state = retained.add_with_backend(
+                &injected,
+                current_tensor_util_backend_for_values(retained.data().len()),
+            )?;
             stabilise_tensor("spiral_rnn_state_pre_anchor", &mut new_state, anchor_topos)?;
-            new_state.add_scaled(&anchor_mix, 1.0)?;
+            new_state = new_state.add_with_backend(
+                &anchor_mix,
+                current_tensor_util_backend_for_values(new_state.data().len()),
+            )?;
             stabilise_tensor("spiral_rnn_state_post_anchor", &mut new_state, anchor_topos)?;
             caches.push(SpiralRnnStepCache {
                 input: input_step,
@@ -306,14 +348,18 @@ impl Module for SpiralRnn {
     fn backward(&mut self, _input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
         let cache = self
             .cache
-            .borrow_mut()
-            .take()
+            .borrow()
+            .as_ref()
+            .cloned()
             .ok_or(TensorError::EmptyInput("spiral_rnn_cache"))?;
         if grad_output.shape() != (cache.batch, cache.hidden_dim) {
             return Err(TensorError::ShapeMismatch {
                 left: grad_output.shape(),
                 right: (cache.batch, cache.hidden_dim),
             });
+        }
+        if cache.batch == 0 {
+            return Tensor::zeros(cache.batch, cache.input_dim * cache.steps_count);
         }
         let anchor_topos_owned = self.anchor.hypergrad().map(|hyper| hyper.topos().clone());
         let anchor_topos = anchor_topos_owned.as_ref();
@@ -345,58 +391,83 @@ impl Module for SpiralRnn {
                 anchor_topos,
             )?;
 
-            let mut grad_state_from_retained = grad_retained.hadamard(&step.gate)?;
+            let mut grad_state_from_retained = grad_retained.hadamard_with_backend(
+                &step.gate,
+                current_tensor_util_backend_for_values(grad_retained.data().len()),
+            )?;
             stabilise_tensor(
                 "spiral_rnn_grad_state_from_retained",
                 &mut grad_state_from_retained,
                 anchor_topos,
             )?;
-            let mut grad_gate_from_retained = grad_retained.hadamard(&step.state_before)?;
+            let mut grad_gate_from_retained = grad_retained.hadamard_with_backend(
+                &step.state_before,
+                current_tensor_util_backend_for_values(grad_retained.data().len()),
+            )?;
             stabilise_tensor(
                 "spiral_rnn_grad_gate_retained",
                 &mut grad_gate_from_retained,
                 anchor_topos,
             )?;
 
-            let mut grad_drive_act = grad_injected.hadamard(&one_minus)?;
+            let mut grad_drive_act = grad_injected.hadamard_with_backend(
+                &one_minus,
+                current_tensor_util_backend_for_values(grad_injected.data().len()),
+            )?;
             stabilise_tensor(
                 "spiral_rnn_grad_drive_act",
                 &mut grad_drive_act,
                 anchor_topos,
             )?;
-            let mut grad_one_minus = grad_injected.hadamard(&step.drive_act)?;
+            let mut grad_one_minus = grad_injected.hadamard_with_backend(
+                &step.drive_act,
+                current_tensor_util_backend_for_values(grad_injected.data().len()),
+            )?;
             stabilise_tensor(
                 "spiral_rnn_grad_one_minus",
                 &mut grad_one_minus,
                 anchor_topos,
             )?;
-            let mut grad_gate_from_injected = grad_one_minus.scale(-1.0)?;
+            let mut grad_gate_from_injected =
+                scale_with_current_tensor_util_backend(&grad_one_minus, -1.0)?;
             stabilise_tensor(
                 "spiral_rnn_grad_gate_injected",
                 &mut grad_gate_from_injected,
                 anchor_topos,
             )?;
 
-            let mut grad_anchor_broadcast = grad_anchor_mix.hadamard(&step.reset_tanh)?;
+            let mut grad_anchor_broadcast = grad_anchor_mix.hadamard_with_backend(
+                &step.reset_tanh,
+                current_tensor_util_backend_for_values(grad_anchor_mix.data().len()),
+            )?;
             stabilise_tensor(
                 "spiral_rnn_grad_anchor_broadcast",
                 &mut grad_anchor_broadcast,
                 anchor_topos,
             )?;
-            let mut grad_reset_tanh = grad_anchor_mix.hadamard(&step.anchor)?;
+            let mut grad_reset_tanh = grad_anchor_mix.hadamard_with_backend(
+                &step.anchor,
+                current_tensor_util_backend_for_values(grad_anchor_mix.data().len()),
+            )?;
             stabilise_tensor(
                 "spiral_rnn_grad_reset_tanh",
                 &mut grad_reset_tanh,
                 anchor_topos,
             )?;
-            let mut grad_anchor_step =
-                Tensor::from_vec(1, self.hidden_dim, grad_anchor_broadcast.sum_axis0())?;
+            let mut grad_anchor_step = Tensor::from_vec(
+                1,
+                self.hidden_dim,
+                grad_anchor_broadcast.try_sum_axis0_with_backend(
+                    current_tensor_util_backend_for_values(grad_anchor_broadcast.data().len()),
+                )?,
+            )?;
             stabilise_tensor(
                 "spiral_rnn_grad_anchor_step",
                 &mut grad_anchor_step,
                 anchor_topos,
             )?;
-            grad_anchor.add_scaled(&grad_anchor_step, 1.0)?;
+            let backend = current_tensor_util_backend_for_values(grad_anchor.data().len());
+            grad_anchor.add_scaled_with_backend(&grad_anchor_step, 1.0, backend)?;
             stabilise_tensor(
                 "spiral_rnn_grad_anchor_total",
                 &mut grad_anchor,
@@ -408,8 +479,12 @@ impl Module for SpiralRnn {
                 for &v in step.drive_act.data() {
                     factor.push(1.0 - v * v);
                 }
-                Tensor::from_vec(step.drive_act.shape().0, step.drive_act.shape().1, factor)?
-                    .hadamard(&grad_drive_act)?
+                let drive_slope =
+                    Tensor::from_vec(step.drive_act.shape().0, step.drive_act.shape().1, factor)?;
+                drive_slope.hadamard_with_backend(
+                    &grad_drive_act,
+                    current_tensor_util_backend_for_values(drive_slope.data().len()),
+                )?
             };
             stabilise_tensor(
                 "spiral_rnn_grad_drive_pre",
@@ -422,8 +497,12 @@ impl Module for SpiralRnn {
                 for &v in step.reset_tanh.data() {
                     factor.push(1.0 - v * v);
                 }
-                Tensor::from_vec(step.reset_tanh.shape().0, step.reset_tanh.shape().1, factor)?
-                    .hadamard(&grad_reset_tanh)?
+                let reset_slope =
+                    Tensor::from_vec(step.reset_tanh.shape().0, step.reset_tanh.shape().1, factor)?;
+                reset_slope.hadamard_with_backend(
+                    &grad_reset_tanh,
+                    current_tensor_util_backend_for_values(reset_slope.data().len()),
+                )?
             };
             stabilise_tensor(
                 "spiral_rnn_grad_reset_from_anchor",
@@ -431,7 +510,10 @@ impl Module for SpiralRnn {
                 anchor_topos,
             )?;
 
-            let mut grad_gate_total = grad_gate_from_retained.add(&grad_gate_from_injected)?;
+            let mut grad_gate_total = grad_gate_from_retained.add_with_backend(
+                &grad_gate_from_injected,
+                current_tensor_util_backend_for_values(grad_gate_from_retained.data().len()),
+            )?;
             stabilise_tensor(
                 "spiral_rnn_grad_gate_total",
                 &mut grad_gate_total,
@@ -439,12 +521,21 @@ impl Module for SpiralRnn {
             )?;
             let mut grad_gate_pre = {
                 let gate = step.gate.clone();
-                let slope = gate.hadamard(&one_minus)?;
-                slope.hadamard(&grad_gate_total)?
+                let slope = gate.hadamard_with_backend(
+                    &one_minus,
+                    current_tensor_util_backend_for_values(gate.data().len()),
+                )?;
+                slope.hadamard_with_backend(
+                    &grad_gate_total,
+                    current_tensor_util_backend_for_values(slope.data().len()),
+                )?
             };
             stabilise_tensor("spiral_rnn_grad_gate_pre", &mut grad_gate_pre, anchor_topos)?;
 
-            let mut grad_reset_pre = grad_gate_pre.add(&grad_reset_from_anchor)?;
+            let mut grad_reset_pre = grad_gate_pre.add_with_backend(
+                &grad_reset_from_anchor,
+                current_tensor_util_backend_for_values(grad_gate_pre.data().len()),
+            )?;
             stabilise_tensor(
                 "spiral_rnn_grad_reset_pre",
                 &mut grad_reset_pre,
@@ -462,85 +553,114 @@ impl Module for SpiralRnn {
             let mut grad_combined = concat_columns(&grad_combined_left, &grad_combined_right)?;
             stabilise_tensor("spiral_rnn_grad_combined", &mut grad_combined, anchor_topos)?;
 
-            let mut grad_bias_step =
-                Tensor::from_vec(1, self.hidden_dim * 2, grad_combined.sum_axis0())?;
+            let mut grad_bias_step = Tensor::from_vec(
+                1,
+                self.hidden_dim * 2,
+                grad_combined.try_sum_axis0_with_backend(
+                    current_tensor_util_backend_for_values(grad_combined.data().len()),
+                )?,
+            )?;
             stabilise_tensor(
                 "spiral_rnn_grad_bias_step",
                 &mut grad_bias_step,
                 anchor_topos,
             )?;
-            grad_bias.add_scaled(&grad_bias_step, 1.0)?;
+            let backend = current_tensor_util_backend_for_values(grad_bias.data().len());
+            grad_bias.add_scaled_with_backend(&grad_bias_step, 1.0, backend)?;
             stabilise_tensor("spiral_rnn_grad_bias", &mut grad_bias, anchor_topos)?;
 
-            let mut grad_input_proj = grad_combined.matmul_prepacked(&input_pack_t)?;
+            let mut grad_input_proj = grad_combined
+                .matmul_prepacked_with_backend(&input_pack_t, current_prepacked_matmul_backend())?;
             stabilise_tensor(
                 "spiral_rnn_grad_input_proj",
                 &mut grad_input_proj,
                 anchor_topos,
             )?;
-            let mut grad_state_proj = grad_combined.matmul_prepacked(&state_pack_t)?;
+            let mut grad_state_proj = grad_combined
+                .matmul_prepacked_with_backend(&state_pack_t, current_prepacked_matmul_backend())?;
             stabilise_tensor(
                 "spiral_rnn_grad_state_proj",
                 &mut grad_state_proj,
                 anchor_topos,
             )?;
 
-            let mut grad_input_kernel_step = step.input.transpose().matmul(&grad_combined)?;
+            let mut grad_input_kernel_step = step
+                .input
+                .transpose_with_backend(current_tensor_util_backend_for_values(step.input.len()))?
+                .matmul_with_backend(&grad_combined, current_matmul_backend())?;
             stabilise_tensor(
                 "spiral_rnn_grad_input_kernel_step",
                 &mut grad_input_kernel_step,
                 anchor_topos,
             )?;
-            grad_input_kernel.add_scaled(&grad_input_kernel_step, 1.0)?;
+            let backend = current_tensor_util_backend_for_values(grad_input_kernel.data().len());
+            grad_input_kernel.add_scaled_with_backend(&grad_input_kernel_step, 1.0, backend)?;
             stabilise_tensor(
                 "spiral_rnn_grad_input_kernel",
                 &mut grad_input_kernel,
                 anchor_topos,
             )?;
 
-            let mut grad_state_kernel_step =
-                step.state_before.transpose().matmul(&grad_combined)?;
+            let mut grad_state_kernel_step = step
+                .state_before
+                .transpose_with_backend(current_tensor_util_backend_for_values(
+                    step.state_before.len(),
+                ))?
+                .matmul_with_backend(&grad_combined, current_matmul_backend())?;
             stabilise_tensor(
                 "spiral_rnn_grad_state_kernel_step",
                 &mut grad_state_kernel_step,
                 anchor_topos,
             )?;
-            grad_state_kernel.add_scaled(&grad_state_kernel_step, 1.0)?;
+            let backend = current_tensor_util_backend_for_values(grad_state_kernel.data().len());
+            grad_state_kernel.add_scaled_with_backend(&grad_state_kernel_step, 1.0, backend)?;
             stabilise_tensor(
                 "spiral_rnn_grad_state_kernel",
                 &mut grad_state_kernel,
                 anchor_topos,
             )?;
 
-            let mut grad_phase_kernel_step =
-                step.state_before.transpose().matmul(&grad_state_phase)?;
+            let mut grad_phase_kernel_step = step
+                .state_before
+                .transpose_with_backend(current_tensor_util_backend_for_values(
+                    step.state_before.len(),
+                ))?
+                .matmul_with_backend(&grad_state_phase, current_matmul_backend())?;
             stabilise_tensor(
                 "spiral_rnn_grad_phase_kernel_step",
                 &mut grad_phase_kernel_step,
                 anchor_topos,
             )?;
-            grad_phase_kernel.add_scaled(&grad_phase_kernel_step, 1.0)?;
+            let backend = current_tensor_util_backend_for_values(grad_phase_kernel.data().len());
+            grad_phase_kernel.add_scaled_with_backend(&grad_phase_kernel_step, 1.0, backend)?;
             stabilise_tensor(
                 "spiral_rnn_grad_phase_kernel",
                 &mut grad_phase_kernel,
                 anchor_topos,
             )?;
 
-            let mut grad_phase_bias_step =
-                Tensor::from_vec(1, self.hidden_dim, grad_state_phase.sum_axis0())?;
+            let mut grad_phase_bias_step = Tensor::from_vec(
+                1,
+                self.hidden_dim,
+                grad_state_phase.try_sum_axis0_with_backend(
+                    current_tensor_util_backend_for_values(grad_state_phase.data().len()),
+                )?,
+            )?;
             stabilise_tensor(
                 "spiral_rnn_grad_phase_bias_step",
                 &mut grad_phase_bias_step,
                 anchor_topos,
             )?;
-            grad_phase_bias.add_scaled(&grad_phase_bias_step, 1.0)?;
+            let backend = current_tensor_util_backend_for_values(grad_phase_bias.data().len());
+            grad_phase_bias.add_scaled_with_backend(&grad_phase_bias_step, 1.0, backend)?;
             stabilise_tensor(
                 "spiral_rnn_grad_phase_bias",
                 &mut grad_phase_bias,
                 anchor_topos,
             )?;
 
-            let mut grad_state_from_phase = grad_state_phase.matmul_prepacked(&phase_pack_t)?;
+            let mut grad_state_from_phase = grad_state_phase
+                .matmul_prepacked_with_backend(&phase_pack_t, current_prepacked_matmul_backend())?;
             stabilise_tensor(
                 "spiral_rnn_grad_state_from_phase",
                 &mut grad_state_from_phase,
@@ -548,8 +668,10 @@ impl Module for SpiralRnn {
             )?;
 
             let mut grad_state_before = grad_state_from_retained;
-            grad_state_before.add_scaled(&grad_state_proj, 1.0)?;
-            grad_state_before.add_scaled(&grad_state_from_phase, 1.0)?;
+            let backend = current_tensor_util_backend_for_values(grad_state_before.data().len());
+            grad_state_before.add_scaled_with_backend(&grad_state_proj, 1.0, backend)?;
+            let backend = current_tensor_util_backend_for_values(grad_state_before.data().len());
+            grad_state_before.add_scaled_with_backend(&grad_state_from_phase, 1.0, backend)?;
             stabilise_tensor(
                 "spiral_rnn_grad_state_before",
                 &mut grad_state_before,
@@ -574,46 +696,51 @@ impl Module for SpiralRnn {
             &mut grad_input_kernel,
             anchor_topos,
         )?;
-        self.input_kernel
-            .accumulate_euclidean(&grad_input_kernel.scale(inv_batch)?)?;
+        let grad_input_kernel =
+            scale_with_current_tensor_util_backend(&grad_input_kernel, inv_batch)?;
         stabilise_tensor(
             "spiral_rnn_grad_state_kernel_final",
             &mut grad_state_kernel,
             anchor_topos,
         )?;
-        self.state_kernel
-            .accumulate_euclidean(&grad_state_kernel.scale(inv_batch)?)?;
+        let grad_state_kernel =
+            scale_with_current_tensor_util_backend(&grad_state_kernel, inv_batch)?;
         stabilise_tensor(
             "spiral_rnn_grad_phase_kernel_final",
             &mut grad_phase_kernel,
             anchor_topos,
         )?;
-        self.phase_kernel
-            .accumulate_euclidean(&grad_phase_kernel.scale(inv_batch)?)?;
+        let grad_phase_kernel =
+            scale_with_current_tensor_util_backend(&grad_phase_kernel, inv_batch)?;
         stabilise_tensor("spiral_rnn_grad_bias_final", &mut grad_bias, anchor_topos)?;
-        self.bias
-            .accumulate_euclidean(&grad_bias.scale(inv_batch)?)?;
+        let grad_bias = scale_with_current_tensor_util_backend(&grad_bias, inv_batch)?;
         stabilise_tensor(
             "spiral_rnn_grad_phase_bias_final",
             &mut grad_phase_bias,
             anchor_topos,
         )?;
-        self.phase_bias
-            .accumulate_euclidean(&grad_phase_bias.scale(inv_batch)?)?;
+        let grad_phase_bias = scale_with_current_tensor_util_backend(&grad_phase_bias, inv_batch)?;
         stabilise_tensor(
             "spiral_rnn_grad_anchor_final",
             &mut grad_anchor,
             anchor_topos,
         )?;
-        self.anchor
-            .accumulate_euclidean(&grad_anchor.scale(inv_batch)?)?;
+        let grad_anchor = scale_with_current_tensor_util_backend(&grad_anchor, inv_batch)?;
         saturate_slice(&mut grad_input_data, anchor_topos);
         guard_slice("spiral_rnn_grad_input", &grad_input_data, anchor_topos)?;
-        Tensor::from_vec(
+        let grad_input = Tensor::from_vec(
             cache.batch,
             cache.input_dim * cache.steps_count,
             grad_input_data,
-        )
+        )?;
+        self.input_kernel.accumulate_euclidean(&grad_input_kernel)?;
+        self.state_kernel.accumulate_euclidean(&grad_state_kernel)?;
+        self.phase_kernel.accumulate_euclidean(&grad_phase_kernel)?;
+        self.bias.accumulate_euclidean(&grad_bias)?;
+        self.phase_bias.accumulate_euclidean(&grad_phase_bias)?;
+        self.anchor.accumulate_euclidean(&grad_anchor)?;
+        self.cache.borrow_mut().take();
+        Ok(grad_input)
     }
 
     fn visit_parameters(
@@ -646,6 +773,52 @@ impl Module for SpiralRnn {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "wgpu")]
+    use crate::{
+        execution::{push_backend_policy, BackendPolicy},
+        TensorError,
+    };
+    #[cfg(feature = "wgpu")]
+    use st_core::backend::device_caps::{BackendKind, DeviceCaps};
+    #[cfg(feature = "wgpu")]
+    use st_tensor::{AttentionBackend, LayerNormBackend, MatmulBackend, SoftmaxBackend};
+
+    #[cfg(feature = "wgpu")]
+    #[track_caller]
+    fn assert_tensor_close(lhs: &Tensor, rhs: &Tensor, tolerance: f32) {
+        assert_eq!(lhs.shape(), rhs.shape());
+        for (idx, (&left, &right)) in lhs.data().iter().zip(rhs.data()).enumerate() {
+            let delta = (left - right).abs();
+            assert!(
+                delta <= tolerance,
+                "tensor mismatch at {idx}: left={left} right={right} delta={delta} tolerance={tolerance}"
+            );
+        }
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn cpu_policy() -> BackendPolicy {
+        BackendPolicy::explicit(
+            DeviceCaps::cpu(),
+            MatmulBackend::CpuNaive,
+            MatmulBackend::CpuNaive,
+            LayerNormBackend::Cpu,
+            AttentionBackend::Cpu,
+            SoftmaxBackend::Cpu,
+        )
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn wgpu_policy() -> BackendPolicy {
+        BackendPolicy::explicit(
+            BackendKind::Wgpu.default_caps(),
+            MatmulBackend::GpuWgpu,
+            MatmulBackend::GpuWgpu,
+            LayerNormBackend::Cpu,
+            AttentionBackend::Cpu,
+            SoftmaxBackend::Cpu,
+        )
+    }
 
     #[test]
     fn spiral_rnn_forward_backward() {
@@ -670,5 +843,122 @@ mod tests {
         .unwrap();
         let grad_input = rnn.backward(&input, &grad_out).unwrap();
         assert_eq!(grad_input.shape(), input.shape());
+    }
+
+    #[test]
+    fn spiral_rnn_forward_rejects_non_finite_input_and_clears_stale_cache() {
+        let rnn = SpiralRnn::new("spiral", 3, 5, 2).unwrap();
+        let input = Tensor::from_vec(
+            2,
+            6,
+            vec![
+                0.1, 0.2, -0.1, 0.05, -0.03, 0.04, -0.2, 0.3, 0.4, -0.5, 0.6, -0.7,
+            ],
+        )
+        .unwrap();
+        let _ = rnn.forward(&input).unwrap();
+        assert!(rnn.cache.borrow().is_some());
+        let mut bad_input = input.clone();
+        bad_input.data_mut()[3] = f32::NAN;
+
+        let err = rnn.forward(&bad_input).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "spiral_rnn_input",
+                value,
+            } if value.is_nan()
+        ));
+        assert!(rnn.cache.borrow().is_none());
+    }
+
+    #[test]
+    fn spiral_rnn_backward_rejects_non_finite_grad_without_consuming_cache_or_updates() {
+        let mut rnn = SpiralRnn::new("spiral", 3, 5, 2).unwrap();
+        let input = Tensor::from_vec(
+            2,
+            6,
+            vec![
+                0.1, 0.2, -0.1, 0.05, -0.03, 0.04, -0.2, 0.3, 0.4, -0.5, 0.6, -0.7,
+            ],
+        )
+        .unwrap();
+        let _ = rnn.forward(&input).unwrap();
+        let mut grad_out = Tensor::from_vec(
+            2,
+            5,
+            vec![
+                0.01, -0.02, 0.03, -0.01, 0.04, -0.05, 0.02, 0.01, -0.03, 0.02,
+            ],
+        )
+        .unwrap();
+        grad_out.data_mut()[2] = f32::INFINITY;
+
+        let err = rnn.backward(&input, &grad_out).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "spiral_rnn_grad_output",
+                value,
+            } if value.is_infinite()
+        ));
+        assert!(rnn.cache.borrow().is_some());
+        assert!(rnn.input_kernel.gradient().is_none());
+        assert!(rnn.state_kernel.gradient().is_none());
+        assert!(rnn.phase_kernel.gradient().is_none());
+        assert!(rnn.bias.gradient().is_none());
+        assert!(rnn.phase_bias.gradient().is_none());
+        assert!(rnn.anchor.gradient().is_none());
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn spiral_rnn_forced_wgpu_prepacked_matches_cpu_reference_on_edge_tiles() {
+        let cpu_rnn = SpiralRnn::new("spiral", 8, 6, 3).unwrap();
+        let wgpu_rnn = SpiralRnn::new("spiral", 8, 6, 3).unwrap();
+        let input = Tensor::from_vec(
+            12,
+            24,
+            (0..288)
+                .map(|idx| ((idx as f32 * 0.053).cos() * 0.35) + ((idx % 11) as f32 * 0.004))
+                .collect(),
+        )
+        .unwrap();
+        let cpu = {
+            let _guard = push_backend_policy(cpu_policy());
+            cpu_rnn.forward(&input).unwrap()
+        };
+        let wgpu = {
+            let _guard = push_backend_policy(wgpu_policy());
+            match wgpu_rnn.forward(&input) {
+                Ok(value) => value,
+                Err(TensorError::BackendFailure { backend, .. }) if backend == "wgpu" => return,
+                Err(error) => panic!("forced WGPU SpiralRnn forward failed: {error:?}"),
+            }
+        };
+
+        assert_tensor_close(&cpu, &wgpu, 1e-4);
+    }
+
+    #[test]
+    fn spiral_rnn_empty_batch_backward_returns_empty_grad_without_updates() {
+        let mut rnn = SpiralRnn::new("spiral", 3, 5, 2).unwrap();
+        let input = Tensor::from_vec(0, 6, Vec::new()).unwrap();
+        let output = rnn.forward(&input).unwrap();
+        assert_eq!(output.shape(), (0, 5));
+        assert!(output.data().is_empty());
+
+        let grad_out = Tensor::from_vec(0, 5, Vec::new()).unwrap();
+        let grad_input = rnn.backward(&input, &grad_out).unwrap();
+        assert_eq!(grad_input.shape(), input.shape());
+        assert!(grad_input.data().is_empty());
+        assert!(rnn.input_kernel.gradient().is_none());
+        assert!(rnn.state_kernel.gradient().is_none());
+        assert!(rnn.phase_kernel.gradient().is_none());
+        assert!(rnn.bias.gradient().is_none());
+        assert!(rnn.phase_bias.gradient().is_none());
+        assert!(rnn.anchor.gradient().is_none());
     }
 }

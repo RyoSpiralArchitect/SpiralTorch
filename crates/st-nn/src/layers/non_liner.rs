@@ -3,10 +3,30 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+use crate::execution::current_tensor_util_backend_for_values;
 use crate::module::{Module, Parameter};
 use crate::{PureResult, Tensor, TensorError};
 use st_core::theory::zpulse::ZScale;
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 use std::cell::Cell;
+
+fn validate_finite_value(label: &'static str, value: f32) -> PureResult<()> {
+    if !value.is_finite() {
+        return Err(TensorError::NonFiniteValue { label, value });
+    }
+    Ok(())
+}
+
+fn validate_finite_slice(label: &'static str, values: &[f32]) -> PureResult<()> {
+    for &value in values {
+        validate_finite_value(label, value)?;
+    }
+    Ok(())
+}
+
+fn validate_finite_tensor(label: &'static str, tensor: &Tensor) -> PureResult<()> {
+    validate_finite_slice(label, tensor.data())
+}
 
 /// Supported activation families for [`NonLiner`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,6 +40,14 @@ pub enum NonLinerActivation {
 }
 
 impl NonLinerActivation {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Tanh => "tanh",
+            Self::Sigmoid => "sigmoid",
+            Self::Softsign => "softsign",
+        }
+    }
+
     fn activate(self, pre_activation: f32) -> f32 {
         match self {
             Self::Tanh => pre_activation.tanh(),
@@ -169,6 +197,14 @@ pub enum NonLinerGeometry {
 }
 
 impl NonLinerGeometry {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Euclidean => "euclidean",
+            Self::Hyperbolic(_) => "hyperbolic",
+            Self::Elliptic(_) => "elliptic",
+        }
+    }
+
     /// Convenience constructor for the hyperbolic variant.
     pub fn hyperbolic(config: NonLinerHyperbolicConfig) -> Self {
         Self::Hyperbolic(config)
@@ -221,6 +257,89 @@ impl NonLinerGeometry {
             Self::Euclidean => None,
         }
     }
+}
+
+fn emit_non_liner_meta(
+    op_name: &'static str,
+    rows: usize,
+    cols: usize,
+    backward: bool,
+    activation: NonLinerActivation,
+    geometry: NonLinerGeometry,
+    drift: Option<f32>,
+    radius: Option<f32>,
+    preactivation_backend: Option<String>,
+    broadcast_backend: Option<String>,
+    gradient_backend: Option<String>,
+    input_gradient_backend: Option<String>,
+    gradient_scale: Option<f32>,
+) {
+    let input_shape = if backward {
+        vec![rows, cols, rows, cols, 1, cols, 1, cols, 1, cols]
+    } else {
+        vec![rows, cols, 1, cols, 1, cols, 1, cols]
+    };
+    emit_tensor_op(op_name, &input_shape, &[rows, cols]);
+    emit_tensor_op_meta(op_name, || {
+        let values = rows.saturating_mul(cols);
+        let geometry_backend = if matches!(geometry, NonLinerGeometry::Euclidean) {
+            None
+        } else {
+            Some("cpu")
+        };
+        serde_json::json!({
+            "backend": "composite",
+            "requested_backend": "auto",
+            "kernel": "non_liner.scalar",
+            "kind": if backward { "activation_backward" } else { "activation_forward" },
+            "activation": activation.label(),
+            "activation_backend": "cpu",
+            "geometry": geometry.label(),
+            "geometry_backend": geometry_backend,
+            "curvature": geometry.curvature(),
+            "z_scale": geometry.z_scale().map(|scale| scale.value()),
+            "retention": geometry.retention(),
+            "rows": rows,
+            "cols": cols,
+            "values": values,
+            "output_rows": rows,
+            "output_cols": cols,
+            "output_values": values,
+            "trainable_parameters": cols.saturating_mul(3),
+            "psi_drift": drift,
+            "geometry_radius": radius,
+            "preactivation_backend": preactivation_backend,
+            "broadcast_backend": broadcast_backend,
+            "input_gradient_backend": input_gradient_backend,
+            "gradient_reduction_backend": gradient_backend,
+            "gradient_scale": gradient_scale,
+            "parameter_gradient_scale": gradient_scale,
+            "input_gradient_scale": if backward && gradient_scale.is_some() {
+                Some(1.0f32)
+            } else {
+                None
+            },
+            "estimated_activation_ops": values,
+            "estimated_geometry_ops": if matches!(geometry, NonLinerGeometry::Euclidean) {
+                0
+            } else {
+                values.saturating_mul(4)
+            },
+            "estimated_parameter_gradient_ops": if backward {
+                values.saturating_mul(6)
+            } else {
+                0
+            },
+            "estimated_total_ops": if backward {
+                values.saturating_mul(8)
+            } else if matches!(geometry, NonLinerGeometry::Euclidean) {
+                values
+            } else {
+                values.saturating_mul(5)
+            },
+            "empty": rows == 0 || cols == 0,
+        })
+    });
 }
 
 /// Trainable smooth non-linearity with learnable gain, slope, and bias terms.
@@ -302,6 +421,9 @@ impl NonLiner {
         if features == 0 {
             return Err(TensorError::InvalidDimensions { rows: 0, cols: 0 });
         }
+        validate_finite_value("non_liner_slope", slope)?;
+        validate_finite_value("non_liner_gain", gain)?;
+        validate_finite_value("non_liner_bias", bias)?;
         let name = name.into();
         let slope_tensor = Tensor::from_vec(1, features, vec![slope; features])?;
         let gain_tensor = Tensor::from_vec(1, features, vec![gain; features])?;
@@ -450,6 +572,12 @@ impl NonLiner {
         Ok(())
     }
 
+    fn validate_parameters(&self) -> PureResult<()> {
+        validate_finite_tensor("non_liner_gain", self.gain.value())?;
+        validate_finite_tensor("non_liner_slope", self.slope.value())?;
+        validate_finite_tensor("non_liner_bias", self.bias.value())
+    }
+
     fn hyperbolic_coefficients(config: &NonLinerHyperbolicConfig, norm: f32) -> (f32, f32, f32) {
         if norm <= 1.0e-6 {
             return (1.0, 0.0, 0.0);
@@ -520,201 +648,311 @@ impl NonLiner {
         (factor, derivative, target_radius)
     }
 
-    fn apply_geometry_forward(&self, rows: usize, cols: usize, data: &mut [f32]) -> Option<f32> {
+    fn apply_geometry_forward(
+        &self,
+        rows: usize,
+        cols: usize,
+        data: &mut [f32],
+    ) -> PureResult<Option<f32>> {
         match self.geometry {
-            NonLinerGeometry::Euclidean => None,
-            NonLinerGeometry::Hyperbolic(config) => {
-                if rows == 0 || cols == 0 {
-                    return Some(0.0);
-                }
-                let retention = config.retention();
-                let mix = config.mix();
-                let mut radius_sum = 0.0f32;
-                let mut counted = 0usize;
-                for row in 0..rows {
-                    let start = row * cols;
-                    let end = start + cols;
-                    let chunk = &mut data[start..end];
-                    if chunk.is_empty() {
-                        continue;
-                    }
-                    let norm_sq: f32 = chunk.iter().map(|v| v * v).sum();
-                    let norm = norm_sq.sqrt();
-                    let (factor, _, radius) = Self::hyperbolic_coefficients(&config, norm);
-                    if mix > 0.0 && norm > 1.0e-6 {
-                        for value in chunk.iter_mut() {
-                            let projected = *value * factor;
-                            *value = retention * *value + mix * projected;
-                        }
-                    }
-                    radius_sum += radius;
-                    counted += 1;
-                }
-                Some(if counted > 0 {
-                    radius_sum / counted as f32
-                } else {
-                    0.0
-                })
-            }
-            NonLinerGeometry::Elliptic(config) => {
-                if rows == 0 || cols == 0 {
-                    return Some(0.0);
-                }
-                let retention = config.retention();
-                let mix = config.mix();
-                let mut radius_sum = 0.0f32;
-                let mut counted = 0usize;
-                for row in 0..rows {
-                    let start = row * cols;
-                    let end = start + cols;
-                    let chunk = &mut data[start..end];
-                    if chunk.is_empty() {
-                        continue;
-                    }
-                    let norm_sq: f32 = chunk.iter().map(|v| v * v).sum();
-                    let norm = norm_sq.sqrt();
-                    let (factor, _, radius) = Self::elliptic_coefficients(&config, norm);
-                    if mix > 0.0 && norm > 1.0e-6 {
-                        for value in chunk.iter_mut() {
-                            let projected = *value * factor;
-                            *value = retention * *value + mix * projected;
-                        }
-                    }
-                    radius_sum += radius;
-                    counted += 1;
-                }
-                Some(if counted > 0 {
-                    radius_sum / counted as f32
-                } else {
-                    0.0
-                })
-            }
+            NonLinerGeometry::Euclidean => Ok(None),
+            NonLinerGeometry::Hyperbolic(config) => Self::apply_curved_geometry_forward(
+                rows,
+                cols,
+                data,
+                config.retention(),
+                config.mix(),
+                |norm| Self::hyperbolic_coefficients(&config, norm),
+            ),
+            NonLinerGeometry::Elliptic(config) => Self::apply_curved_geometry_forward(
+                rows,
+                cols,
+                data,
+                config.retention(),
+                config.mix(),
+                |norm| Self::elliptic_coefficients(&config, norm),
+            ),
         }
     }
 
-    fn apply_geometry_backward(&self, rows: usize, cols: usize, raw: &[f32], grad: &mut [f32]) {
-        match self.geometry {
-            NonLinerGeometry::Euclidean => {}
-            NonLinerGeometry::Hyperbolic(config) => {
-                if rows == 0 || cols == 0 {
-                    return;
-                }
-                let retention = config.retention();
-                let mix = config.mix();
-                for row in 0..rows {
-                    let start = row * cols;
-                    let end = start + cols;
-                    let raw_chunk = &raw[start..end];
-                    let grad_chunk = &mut grad[start..end];
-                    if raw_chunk.is_empty() {
-                        continue;
-                    }
-                    let norm_sq: f32 = raw_chunk.iter().map(|v| v * v).sum();
-                    let norm = norm_sq.sqrt();
-                    let (factor, derivative, _) = Self::hyperbolic_coefficients(&config, norm);
-                    if norm <= 1.0e-6 {
-                        let scaling = retention + mix;
-                        if (scaling - 1.0).abs() > f32::EPSILON {
-                            for grad_value in grad_chunk.iter_mut() {
-                                *grad_value *= scaling;
-                            }
-                        }
-                        continue;
-                    }
-                    let dot = raw_chunk
-                        .iter()
-                        .zip(grad_chunk.iter())
-                        .map(|(x, g)| x * g)
-                        .sum::<f32>();
-                    let scaling = retention + mix * factor;
-                    let correction = mix * derivative * dot / norm;
-                    for (raw_value, grad_value) in raw_chunk.iter().zip(grad_chunk.iter_mut()) {
-                        *grad_value = scaling * *grad_value + correction * *raw_value;
-                    }
+    fn apply_curved_geometry_forward<F>(
+        rows: usize,
+        cols: usize,
+        data: &mut [f32],
+        retention: f32,
+        mix: f32,
+        coefficients: F,
+    ) -> PureResult<Option<f32>>
+    where
+        F: Fn(f32) -> (f32, f32, f32),
+    {
+        if rows == 0 || cols == 0 {
+            return Ok(Some(0.0));
+        }
+
+        validate_finite_value("non_liner_geometry_retention", retention)?;
+        validate_finite_value("non_liner_geometry_mix", mix)?;
+
+        let mut radius_sum = 0.0f32;
+        let mut counted = 0usize;
+        for row in 0..rows {
+            let start = row * cols;
+            let end = start + cols;
+            let chunk = &mut data[start..end];
+            if chunk.is_empty() {
+                continue;
+            }
+
+            let mut norm_sq = 0.0f32;
+            for &value in chunk.iter() {
+                validate_finite_value("non_liner_geometry_raw", value)?;
+                let square = value * value;
+                validate_finite_value("non_liner_geometry_norm_sq", square)?;
+                norm_sq += square;
+                validate_finite_value("non_liner_geometry_norm_sq", norm_sq)?;
+            }
+            let norm = norm_sq.sqrt();
+            validate_finite_value("non_liner_geometry_norm", norm)?;
+
+            let (factor, _, radius) = coefficients(norm);
+            validate_finite_value("non_liner_geometry_factor", factor)?;
+            validate_finite_value("non_liner_geometry_radius", radius)?;
+            if mix > 0.0 && norm > 1.0e-6 {
+                for value in chunk.iter_mut() {
+                    let projected = *value * factor;
+                    validate_finite_value("non_liner_geometry_projected", projected)?;
+                    let mixed = retention * *value + mix * projected;
+                    validate_finite_value("non_liner_geometry_output", mixed)?;
+                    *value = mixed;
                 }
             }
-            NonLinerGeometry::Elliptic(config) => {
-                if rows == 0 || cols == 0 {
-                    return;
+            radius_sum += radius;
+            validate_finite_value("non_liner_geometry_radius_sum", radius_sum)?;
+            counted += 1;
+        }
+
+        let radius_mean = if counted > 0 {
+            radius_sum / counted as f32
+        } else {
+            0.0
+        };
+        validate_finite_value("non_liner_geometry_radius_mean", radius_mean)?;
+        Ok(Some(radius_mean))
+    }
+
+    fn apply_geometry_backward(
+        &self,
+        rows: usize,
+        cols: usize,
+        raw: &[f32],
+        grad: &mut [f32],
+    ) -> PureResult<()> {
+        match self.geometry {
+            NonLinerGeometry::Euclidean => Ok(()),
+            NonLinerGeometry::Hyperbolic(config) => Self::apply_curved_geometry_backward(
+                rows,
+                cols,
+                raw,
+                grad,
+                config.retention(),
+                config.mix(),
+                |norm| Self::hyperbolic_coefficients(&config, norm),
+            ),
+            NonLinerGeometry::Elliptic(config) => Self::apply_curved_geometry_backward(
+                rows,
+                cols,
+                raw,
+                grad,
+                config.retention(),
+                config.mix(),
+                |norm| Self::elliptic_coefficients(&config, norm),
+            ),
+        }
+    }
+
+    fn apply_curved_geometry_backward<F>(
+        rows: usize,
+        cols: usize,
+        raw: &[f32],
+        grad: &mut [f32],
+        retention: f32,
+        mix: f32,
+        coefficients: F,
+    ) -> PureResult<()>
+    where
+        F: Fn(f32) -> (f32, f32, f32),
+    {
+        if rows == 0 || cols == 0 {
+            return Ok(());
+        }
+
+        validate_finite_value("non_liner_geometry_backward_retention", retention)?;
+        validate_finite_value("non_liner_geometry_backward_mix", mix)?;
+
+        for row in 0..rows {
+            let start = row * cols;
+            let end = start + cols;
+            let raw_chunk = &raw[start..end];
+            let grad_chunk = &mut grad[start..end];
+            if raw_chunk.is_empty() {
+                continue;
+            }
+
+            let mut norm_sq = 0.0f32;
+            for &value in raw_chunk.iter() {
+                validate_finite_value("non_liner_geometry_backward_raw", value)?;
+                let square = value * value;
+                validate_finite_value("non_liner_geometry_backward_norm_sq", square)?;
+                norm_sq += square;
+                validate_finite_value("non_liner_geometry_backward_norm_sq", norm_sq)?;
+            }
+            validate_finite_slice("non_liner_geometry_backward_grad", grad_chunk)?;
+            let norm = norm_sq.sqrt();
+            validate_finite_value("non_liner_geometry_backward_norm", norm)?;
+
+            let (factor, derivative, _) = coefficients(norm);
+            validate_finite_value("non_liner_geometry_backward_factor", factor)?;
+            validate_finite_value("non_liner_geometry_backward_derivative", derivative)?;
+            if norm <= 1.0e-6 {
+                let scaling = retention + mix;
+                validate_finite_value("non_liner_geometry_backward_scaling", scaling)?;
+                if (scaling - 1.0).abs() > f32::EPSILON {
+                    for grad_value in grad_chunk.iter_mut() {
+                        let updated = *grad_value * scaling;
+                        validate_finite_value("non_liner_geometry_backward_output", updated)?;
+                        *grad_value = updated;
+                    }
                 }
-                let retention = config.retention();
-                let mix = config.mix();
-                for row in 0..rows {
-                    let start = row * cols;
-                    let end = start + cols;
-                    let raw_chunk = &raw[start..end];
-                    let grad_chunk = &mut grad[start..end];
-                    if raw_chunk.is_empty() {
-                        continue;
-                    }
-                    let norm_sq: f32 = raw_chunk.iter().map(|v| v * v).sum();
-                    let norm = norm_sq.sqrt();
-                    let (factor, derivative, _) = Self::elliptic_coefficients(&config, norm);
-                    if norm <= 1.0e-6 {
-                        let scaling = retention + mix;
-                        if (scaling - 1.0).abs() > f32::EPSILON {
-                            for grad_value in grad_chunk.iter_mut() {
-                                *grad_value *= scaling;
-                            }
-                        }
-                        continue;
-                    }
-                    let dot = raw_chunk
-                        .iter()
-                        .zip(grad_chunk.iter())
-                        .map(|(x, g)| x * g)
-                        .sum::<f32>();
-                    let scaling = retention + mix * factor;
-                    let correction = mix * derivative * dot / norm;
-                    for (raw_value, grad_value) in raw_chunk.iter().zip(grad_chunk.iter_mut()) {
-                        *grad_value = scaling * *grad_value + correction * *raw_value;
-                    }
-                }
+                continue;
+            }
+
+            let mut dot = 0.0f32;
+            for (&raw_value, &grad_value) in raw_chunk.iter().zip(grad_chunk.iter()) {
+                let product = raw_value * grad_value;
+                validate_finite_value("non_liner_geometry_backward_dot", product)?;
+                dot += product;
+                validate_finite_value("non_liner_geometry_backward_dot", dot)?;
+            }
+            let scaling = retention + mix * factor;
+            validate_finite_value("non_liner_geometry_backward_scaling", scaling)?;
+            let correction = mix * derivative * dot / norm;
+            validate_finite_value("non_liner_geometry_backward_correction", correction)?;
+            for (raw_value, grad_value) in raw_chunk.iter().zip(grad_chunk.iter_mut()) {
+                let updated = scaling * *grad_value + correction * *raw_value;
+                validate_finite_value("non_liner_geometry_backward_output", updated)?;
+                *grad_value = updated;
             }
         }
+        Ok(())
     }
 }
 
 impl Module for NonLiner {
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
         let (rows, cols) = input.shape();
+        validate_finite_tensor("non_liner_input", input)?;
         if cols == 0 {
-            self.last_drift.set(Some(0.0));
             let radius = match self.geometry {
                 NonLinerGeometry::Euclidean => None,
                 NonLinerGeometry::Hyperbolic(_) | NonLinerGeometry::Elliptic(_) => Some(0.0),
             };
+            let output = Tensor::zeros(rows, cols)?;
+            self.last_drift.set(Some(0.0));
             self.last_radius.set(radius);
-            return Tensor::zeros(rows, cols);
+            emit_non_liner_meta(
+                "non_liner_forward",
+                rows,
+                cols,
+                false,
+                self.activation,
+                self.geometry,
+                Some(0.0),
+                radius,
+                None,
+                None,
+                None,
+                None,
+                None,
+            );
+            return Ok(output);
         }
 
         self.ensure_parameter_shapes(cols)?;
+        self.validate_parameters()?;
+        if rows == 0 {
+            let radius = match self.geometry {
+                NonLinerGeometry::Euclidean => None,
+                NonLinerGeometry::Hyperbolic(_) | NonLinerGeometry::Elliptic(_) => Some(0.0),
+            };
+            let output = Tensor::zeros(rows, cols)?;
+            self.last_drift.set(Some(0.0));
+            self.last_radius.set(radius);
+            emit_non_liner_meta(
+                "non_liner_forward",
+                rows,
+                cols,
+                false,
+                self.activation,
+                self.geometry,
+                Some(0.0),
+                radius,
+                None,
+                None,
+                None,
+                None,
+                None,
+            );
+            return Ok(output);
+        }
 
         let gain = self.gain.value().data().to_vec();
         let slope = self.slope.value().data().to_vec();
         let bias = self.bias.value().data().to_vec();
+        let util_backend = current_tensor_util_backend_for_values(rows.saturating_mul(cols));
+        let preactivation = input.row_affine_with_backend(&slope, &bias, util_backend)?;
 
-        let mut output = Vec::with_capacity(rows * cols);
-        for chunk in input.data().chunks(cols) {
-            for (col, value) in chunk.iter().enumerate() {
-                let pre = slope[col] * *value + bias[col];
-                let activated = self.activation.activate(pre);
-                output.push(gain[col] * activated);
-            }
+        let mut activated_values = Vec::with_capacity(rows * cols);
+        for &pre in preactivation.data() {
+            validate_finite_value("non_liner_pre_activation", pre)?;
+            let activated = self.activation.activate(pre);
+            validate_finite_value("non_liner_activation", activated)?;
+            activated_values.push(activated);
         }
+        let activated = Tensor::from_vec(rows, cols, activated_values)?;
+        let output_tensor = activated.mul_row_with_backend(&gain, util_backend)?;
+        let mut output = output_tensor.data().to_vec();
 
-        let radius = self.apply_geometry_forward(rows, cols, &mut output);
-        self.last_radius.set(radius);
+        let radius = self.apply_geometry_forward(rows, cols, &mut output)?;
+        validate_finite_slice("non_liner_output", &output)?;
 
         let total = rows * cols;
-        let drift = if total == 0 {
-            0.0
-        } else {
-            output.iter().map(|v| v.abs()).sum::<f32>() / total as f32
-        };
-        self.last_drift.set(Some(drift));
+        let mut drift_sum = 0.0f32;
+        for value in output.iter() {
+            drift_sum += value.abs();
+            validate_finite_value("non_liner_drift_sum", drift_sum)?;
+        }
+        let drift = drift_sum / total as f32;
+        validate_finite_value("non_liner_drift", drift)?;
 
-        Tensor::from_vec(rows, cols, output)
+        let output = Tensor::from_vec(rows, cols, output)?;
+        self.last_radius.set(radius);
+        self.last_drift.set(Some(drift));
+        emit_non_liner_meta(
+            "non_liner_forward",
+            rows,
+            cols,
+            false,
+            self.activation,
+            self.geometry,
+            Some(drift),
+            radius,
+            Some(util_backend.to_string()),
+            Some(util_backend.to_string()),
+            None,
+            None,
+            None,
+        );
+        Ok(output)
     }
 
     fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
@@ -726,76 +964,149 @@ impl Module for NonLiner {
         }
 
         let (rows, cols) = input.shape();
+        validate_finite_tensor("non_liner_backward_input", input)?;
+        validate_finite_tensor("non_liner_backward_grad_output", grad_output)?;
         if cols == 0 {
-            return Tensor::zeros(rows, cols);
+            let output = Tensor::zeros(rows, cols)?;
+            emit_non_liner_meta(
+                "non_liner_backward",
+                rows,
+                cols,
+                true,
+                self.activation,
+                self.geometry,
+                self.last_drift.get(),
+                self.last_radius.get(),
+                None,
+                None,
+                None,
+                None,
+                None,
+            );
+            return Ok(output);
         }
 
         self.ensure_parameter_shapes(cols)?;
+        self.validate_parameters()?;
+        if rows == 0 {
+            let output = Tensor::zeros(rows, cols)?;
+            emit_non_liner_meta(
+                "non_liner_backward",
+                rows,
+                cols,
+                true,
+                self.activation,
+                self.geometry,
+                self.last_drift.get(),
+                self.last_radius.get(),
+                None,
+                None,
+                None,
+                None,
+                None,
+            );
+            return Ok(output);
+        }
 
         let gain = self.gain.value().data().to_vec();
         let slope = self.slope.value().data().to_vec();
         let bias = self.bias.value().data().to_vec();
+        let util_backend = current_tensor_util_backend_for_values(rows.saturating_mul(cols));
+        let preactivation = input.row_affine_with_backend(&slope, &bias, util_backend)?;
 
         let mut raw_outputs = vec![0.0f32; rows * cols];
+        let mut activated_values = vec![0.0; rows * cols];
         for row in 0..rows {
             let base = row * cols;
             for col in 0..cols {
                 let idx = base + col;
-                let input_value = input.data()[idx];
-                let pre = slope[col] * input_value + bias[col];
+                let pre = preactivation.data()[idx];
+                validate_finite_value("non_liner_backward_pre_activation", pre)?;
                 let activated = self.activation.activate(pre);
-                raw_outputs[idx] = gain[col] * activated;
+                validate_finite_value("non_liner_backward_activation", activated)?;
+                let raw_output = gain[col] * activated;
+                validate_finite_value("non_liner_backward_raw_output", raw_output)?;
+                activated_values[idx] = activated;
+                raw_outputs[idx] = raw_output;
             }
         }
 
         let mut grad_raw = grad_output.data().to_vec();
-        self.apply_geometry_backward(rows, cols, &raw_outputs, &mut grad_raw);
+        validate_finite_slice("non_liner_backward_grad_raw", &grad_raw)?;
+        self.apply_geometry_backward(rows, cols, &raw_outputs, &mut grad_raw)?;
+        validate_finite_slice("non_liner_backward_grad_raw", &grad_raw)?;
 
-        let mut grad_input = vec![0.0; rows * cols];
-        let mut grad_gain = vec![0.0; cols];
-        let mut grad_slope = vec![0.0; cols];
-        let mut grad_bias = vec![0.0; cols];
+        let mut delta_values = vec![0.0; rows * cols];
 
         for row in 0..rows {
             let base = row * cols;
             for col in 0..cols {
                 let idx = base + col;
-                let input_value = input.data()[idx];
-                let pre = slope[col] * input_value + bias[col];
-                let activated = self.activation.activate(pre);
+                let pre = preactivation.data()[idx];
+                validate_finite_value("non_liner_backward_pre_activation", pre)?;
+                let activated = activated_values[idx];
                 let derivative = self.activation.derivative(activated, pre);
+                validate_finite_value("non_liner_backward_derivative", derivative)?;
                 let grad = grad_raw[idx];
+                validate_finite_value("non_liner_backward_grad_raw", grad)?;
 
-                grad_gain[col] += grad * activated;
+                activated_values[idx] = activated;
                 let chain = grad * gain[col];
+                validate_finite_value("non_liner_backward_chain", chain)?;
                 let delta = chain * derivative;
-                grad_bias[col] += delta;
-                grad_slope[col] += delta * input_value;
-                grad_input[idx] = delta * slope[col];
+                validate_finite_value("non_liner_backward_delta", delta)?;
+                delta_values[idx] = delta;
             }
         }
 
-        if rows > 0 {
-            let inv_batch = 1.0 / rows as f32;
-            for value in grad_input.iter_mut() {
-                *value *= inv_batch;
-            }
-            for grad in [&mut grad_gain, &mut grad_slope, &mut grad_bias] {
-                for value in grad.iter_mut() {
-                    *value *= inv_batch;
-                }
-            }
-        }
+        let inv_batch = 1.0 / rows as f32;
+        let grad_raw_tensor = Tensor::from_vec(rows, cols, grad_raw)?;
+        let activated_tensor = Tensor::from_vec(rows, cols, activated_values)?;
+        let delta_tensor = Tensor::from_vec(rows, cols, delta_values)?;
+        let grad_input = delta_tensor.mul_row_with_backend(&slope, util_backend)?;
 
-        let gain_grad = Tensor::from_vec(1, cols, grad_gain)?;
-        let slope_grad = Tensor::from_vec(1, cols, grad_slope)?;
-        let bias_grad = Tensor::from_vec(1, cols, grad_bias)?;
+        let gain_product =
+            grad_raw_tensor.hadamard_with_backend(&activated_tensor, util_backend)?;
+        let gain_grad = Tensor::from_vec(
+            1,
+            cols,
+            gain_product.try_sum_axis0_scaled_with_backend(inv_batch, util_backend)?,
+        )?;
+        validate_finite_tensor("non_liner_gain_grad", &gain_grad)?;
+        let slope_product = delta_tensor.hadamard_with_backend(input, util_backend)?;
+        let slope_grad = Tensor::from_vec(
+            1,
+            cols,
+            slope_product.try_sum_axis0_scaled_with_backend(inv_batch, util_backend)?,
+        )?;
+        validate_finite_tensor("non_liner_slope_grad", &slope_grad)?;
+        let bias_grad = Tensor::from_vec(
+            1,
+            cols,
+            delta_tensor.try_sum_axis0_scaled_with_backend(inv_batch, util_backend)?,
+        )?;
+        validate_finite_tensor("non_liner_bias_grad", &bias_grad)?;
 
         self.gain.accumulate_euclidean(&gain_grad)?;
         self.slope.accumulate_euclidean(&slope_grad)?;
         self.bias.accumulate_euclidean(&bias_grad)?;
 
-        Tensor::from_vec(rows, cols, grad_input)
+        emit_non_liner_meta(
+            "non_liner_backward",
+            rows,
+            cols,
+            true,
+            self.activation,
+            self.geometry,
+            self.last_drift.get(),
+            self.last_radius.get(),
+            Some(util_backend.to_string()),
+            None,
+            Some(util_backend.to_string()),
+            Some(util_backend.to_string()),
+            Some(inv_batch),
+        );
+        Ok(grad_input)
     }
 
     fn visit_parameters(
@@ -826,12 +1137,32 @@ impl Module for NonLiner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "wgpu")]
+    use crate::execution::{push_backend_policy, BackendPolicy};
+    #[cfg(feature = "wgpu")]
+    use st_core::backend::device_caps::DeviceCaps;
+    #[cfg(feature = "wgpu")]
+    use st_tensor::backend::wgpu_dense;
+    use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+
+    fn observer_lock() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
 
     fn approx_eq(left: &[f32], right: &[f32]) {
         assert_eq!(left.len(), right.len());
         for (l, r) in left.iter().zip(right.iter()) {
             let diff = (l - r).abs();
             assert!(diff < 1e-5, "expected {l} ≈ {r} (diff={diff})");
+        }
+    }
+
+    fn assert_non_finite_label<T>(result: PureResult<T>, expected: &'static str) {
+        match result {
+            Err(TensorError::NonFiniteValue { label, .. }) => assert_eq!(label, expected),
+            Err(error) => panic!("expected non-finite label {expected}, got {error:?}"),
+            Ok(_) => panic!("expected non-finite label {expected}"),
         }
     }
 
@@ -851,6 +1182,37 @@ mod tests {
         let drift = layer.psi_probe().unwrap();
         let expected_drift = expected.iter().map(|v| v.abs()).sum::<f32>() / expected.len() as f32;
         assert!((drift - expected_drift).abs() < 1e-6);
+        assert!(layer.last_hyperbolic_radius().is_none());
+    }
+
+    #[test]
+    fn forward_rejects_non_finite_input_without_mutating_metrics() {
+        let config = NonLinerHyperbolicConfig::new(-0.9, ZScale::new(1.5).unwrap(), 0.2).unwrap();
+        let layer =
+            NonLiner::with_hyperbolic_init("z", 2, NonLinerActivation::Tanh, 0.8, 1.1, 0.1, config)
+                .unwrap();
+        let input = Tensor::from_vec(1, 2, vec![0.2, -0.4]).unwrap();
+        let _ = layer.forward(&input).unwrap();
+        let drift_before = layer.psi_probe();
+        let radius_before = layer.last_hyperbolic_radius();
+
+        let mut bad_input = input.clone();
+        bad_input.data_mut()[1] = f32::NAN;
+
+        assert_non_finite_label(layer.forward(&bad_input), "non_liner_input");
+        assert_eq!(layer.psi_probe(), drift_before);
+        assert_eq!(layer.last_hyperbolic_radius(), radius_before);
+    }
+
+    #[test]
+    fn forward_rejects_non_finite_parameter_without_mutating_metrics() {
+        let mut layer =
+            NonLiner::with_init("nl", 2, NonLinerActivation::Sigmoid, 0.7, 1.1, 0.05).unwrap();
+        let input = Tensor::from_vec(1, 2, vec![0.2, -0.3]).unwrap();
+        layer.gain.value_mut().data_mut()[0] = f32::NAN;
+
+        assert_non_finite_label(layer.forward(&input), "non_liner_gain");
+        assert!(layer.psi_probe().is_none());
         assert!(layer.last_hyperbolic_radius().is_none());
     }
 
@@ -889,9 +1251,6 @@ mod tests {
         }
 
         let inv_batch = 1.0 / 3.0;
-        for value in expected_grad_input.iter_mut() {
-            *value *= inv_batch;
-        }
         for grad in [&mut expected_gain, &mut expected_slope, &mut expected_bias] {
             for value in grad.iter_mut() {
                 *value *= inv_batch;
@@ -907,6 +1266,280 @@ mod tests {
         approx_eq(gain_grad.data(), &expected_gain);
         approx_eq(slope_grad.data(), &expected_slope);
         approx_eq(bias_grad.data(), &expected_bias);
+    }
+
+    #[test]
+    fn backward_rejects_non_finite_grad_without_accumulating() {
+        let mut layer =
+            NonLiner::with_init("nl", 2, NonLinerActivation::Sigmoid, 0.7, 1.1, 0.05).unwrap();
+        let input = Tensor::from_vec(1, 2, vec![0.2, -0.3]).unwrap();
+        let mut grad_output = Tensor::from_vec(1, 2, vec![0.6, -0.2]).unwrap();
+        grad_output.data_mut()[0] = f32::NAN;
+
+        assert_non_finite_label(
+            layer.backward(&input, &grad_output),
+            "non_liner_backward_grad_output",
+        );
+        assert!(layer.gain.gradient().is_none());
+        assert!(layer.slope.gradient().is_none());
+        assert!(layer.bias.gradient().is_none());
+    }
+
+    #[test]
+    fn backward_rejects_overflowing_chain_without_accumulating() {
+        let mut layer =
+            NonLiner::with_init("nl", 1, NonLinerActivation::Tanh, 1.0, f32::MAX, 0.0).unwrap();
+        let input = Tensor::from_vec(1, 1, vec![0.0]).unwrap();
+        let grad_output = Tensor::from_vec(1, 1, vec![2.0]).unwrap();
+
+        assert_non_finite_label(
+            layer.backward(&input, &grad_output),
+            "non_liner_backward_chain",
+        );
+        assert!(layer.gain.gradient().is_none());
+        assert!(layer.slope.gradient().is_none());
+        assert!(layer.bias.gradient().is_none());
+    }
+
+    #[test]
+    fn forward_backward_emit_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let mut layer =
+            NonLiner::with_init("nl", 2, NonLinerActivation::Sigmoid, 0.7, 1.1, 0.05).unwrap();
+        let input = Tensor::from_vec(2, 2, vec![0.2, -0.3, 0.5, 0.8]).unwrap();
+        let grad_output = Tensor::from_vec(2, 2, vec![0.6, -0.2, -0.4, 0.9]).unwrap();
+        let _ = layer.forward(&input).unwrap();
+        let _ = layer.backward(&input, &grad_output).unwrap();
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        let events = events.lock().unwrap();
+        let forward = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "non_liner_forward"
+                    && data["rows"] == 2
+                    && data["cols"] == 2
+                    && data["activation"] == "sigmoid"
+                    && data["geometry"] == "euclidean"
+            })
+            .expect("non liner forward metadata event");
+        assert_eq!(forward.1["backend"], "composite");
+        assert_eq!(forward.1["kind"], "activation_forward");
+        assert_eq!(forward.1["activation"], "sigmoid");
+        assert_eq!(forward.1["activation_backend"], "cpu");
+        assert_eq!(forward.1["geometry"], "euclidean");
+        assert!(forward.1["geometry_backend"].is_null());
+        assert_eq!(forward.1["preactivation_backend"], "auto");
+        assert_eq!(forward.1["broadcast_backend"], "auto");
+
+        let backward = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "non_liner_backward"
+                    && data["rows"] == 2
+                    && data["cols"] == 2
+                    && data["activation"] == "sigmoid"
+                    && data["geometry"] == "euclidean"
+            })
+            .expect("non liner backward metadata event");
+        assert_eq!(backward.1["backend"], "composite");
+        assert_eq!(backward.1["kind"], "activation_backward");
+        assert_eq!(backward.1["activation_backend"], "cpu");
+        assert_eq!(backward.1["preactivation_backend"], "auto");
+        assert_eq!(backward.1["input_gradient_backend"], "auto");
+        assert_eq!(backward.1["gradient_reduction_backend"], "auto");
+        assert_eq!(backward.1["gradient_scale"], 0.5);
+        assert_eq!(backward.1["parameter_gradient_scale"], 0.5);
+        assert_eq!(backward.1["input_gradient_scale"], 1.0);
+        assert_eq!(backward.1["trainable_parameters"], 6);
+
+        let hadamard_count = events
+            .iter()
+            .filter(|(op_name, data)| *op_name == "hadamard" && data["rows"] == 2)
+            .count();
+        let mul_row_count = events
+            .iter()
+            .filter(|(op_name, data)| *op_name == "mul_row" && data["rows"] == 2)
+            .count();
+        let row_affine_count = events
+            .iter()
+            .filter(|(op_name, data)| *op_name == "row_affine" && data["rows"] == 2)
+            .count();
+        let reduction_count = events
+            .iter()
+            .filter(|(op_name, data)| *op_name == "sum_axis0_scaled" && data["cols"] == 2)
+            .count();
+        assert!(hadamard_count >= 2);
+        assert_eq!(mul_row_count, 2);
+        assert_eq!(row_affine_count, 2);
+        assert!(reduction_count >= 3);
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn backward_forced_wgpu_uses_mul_row_and_matches_cpu_reference() {
+        if !wgpu_dense::is_available() {
+            return;
+        }
+        let _lock = observer_lock();
+        let previous_threshold = std::env::var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES").ok();
+        std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", "1");
+
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let input = Tensor::from_fn(4, 3, |row, col| {
+            ((row * 17 + col * 7) % 19) as f32 * 0.039 - 0.31
+        })
+        .unwrap();
+        let grad_output = Tensor::from_fn(4, 3, |row, col| {
+            ((row * 13 + col * 5) % 17) as f32 * 0.027 - 0.19
+        })
+        .unwrap();
+        let cpu_policy = BackendPolicy::from_device_caps(DeviceCaps::cpu());
+        let mut cpu_layer =
+            NonLiner::with_init("nl_cpu", 3, NonLinerActivation::Sigmoid, 0.8, 1.15, -0.04)
+                .unwrap();
+        let cpu_forward = {
+            let _guard = push_backend_policy(cpu_policy);
+            cpu_layer.forward(&input).unwrap()
+        };
+        let cpu_grad_input = {
+            let _guard = push_backend_policy(cpu_policy);
+            cpu_layer.backward(&input, &grad_output).unwrap()
+        };
+
+        let wgpu_policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
+        let mut wgpu_layer =
+            NonLiner::with_init("nl_wgpu", 3, NonLinerActivation::Sigmoid, 0.8, 1.15, -0.04)
+                .unwrap();
+        let (wgpu_forward, wgpu_grad_input) = {
+            let _guard = push_backend_policy(wgpu_policy);
+            (
+                wgpu_layer.forward(&input).unwrap(),
+                wgpu_layer.backward(&input, &grad_output).unwrap(),
+            )
+        };
+
+        st_tensor::set_tensor_op_meta_observer(previous);
+        match previous_threshold {
+            Some(value) => std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", value),
+            None => std::env::remove_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES"),
+        }
+
+        approx_eq(cpu_forward.data(), wgpu_forward.data());
+        approx_eq(cpu_grad_input.data(), wgpu_grad_input.data());
+
+        for (cpu_param, wgpu_param) in [
+            (
+                cpu_layer.gain.gradient().unwrap(),
+                wgpu_layer.gain.gradient().unwrap(),
+            ),
+            (
+                cpu_layer.slope.gradient().unwrap(),
+                wgpu_layer.slope.gradient().unwrap(),
+            ),
+            (
+                cpu_layer.bias.gradient().unwrap(),
+                wgpu_layer.bias.gradient().unwrap(),
+            ),
+        ] {
+            approx_eq(cpu_param.data(), wgpu_param.data());
+        }
+
+        let events = events.lock().unwrap();
+        assert!(events
+            .iter()
+            .any(|(op_name, data)| *op_name == "mul_row" && data["backend"] == "wgpu_dense"));
+        assert!(events
+            .iter()
+            .any(|(op_name, data)| *op_name == "row_affine" && data["backend"] == "wgpu_dense"));
+        assert!(events.iter().any(|(op_name, data)| {
+            *op_name == "non_liner_forward"
+                && data["backend"] == "composite"
+                && data["activation_backend"] == "cpu"
+                && data["preactivation_backend"] == "wgpu"
+                && data["broadcast_backend"] == "wgpu"
+        }));
+        assert!(events.iter().any(|(op_name, data)| {
+            *op_name == "non_liner_backward"
+                && data["backend"] == "composite"
+                && data["activation_backend"] == "cpu"
+                && data["preactivation_backend"] == "wgpu"
+                && data["input_gradient_backend"] == "wgpu"
+        }));
+    }
+
+    #[test]
+    fn backward_input_gradient_matches_numeric_gradients_without_batch_scaling() {
+        let mut layer =
+            NonLiner::with_init("nl", 2, NonLinerActivation::Sigmoid, 0.85, 1.2, -0.05).unwrap();
+        let input = Tensor::from_vec(3, 2, vec![0.15, -0.25, 0.45, 0.7, -0.6, 0.05]).unwrap();
+        let grad_output =
+            Tensor::from_vec(3, 2, vec![0.35, -0.15, -0.45, 0.55, 0.25, -0.65]).unwrap();
+
+        let grad_input = layer.backward(&input, &grad_output).unwrap();
+        let grad_output_vec = grad_output.data().to_vec();
+        let (rows, cols) = input.shape();
+        let epsilon = 1e-3;
+
+        for idx in 0..(rows * cols) {
+            let mut plus = input.clone();
+            plus.data_mut()[idx] += epsilon;
+            let out_plus = layer.forward(&plus).unwrap();
+            let loss_plus = out_plus
+                .data()
+                .iter()
+                .zip(grad_output_vec.iter())
+                .map(|(o, g)| o * g)
+                .sum::<f32>();
+
+            let mut minus = input.clone();
+            minus.data_mut()[idx] -= epsilon;
+            let out_minus = layer.forward(&minus).unwrap();
+            let loss_minus = out_minus
+                .data()
+                .iter()
+                .zip(grad_output_vec.iter())
+                .map(|(o, g)| o * g)
+                .sum::<f32>();
+
+            let numeric = (loss_plus - loss_minus) / (2.0 * epsilon);
+            assert!((numeric - grad_input.data()[idx]).abs() < 2e-3);
+        }
+    }
+
+    #[test]
+    fn backward_empty_batch_returns_empty_grad_without_parameter_updates() {
+        let mut layer =
+            NonLiner::with_init("nl", 2, NonLinerActivation::Sigmoid, 0.7, 1.1, 0.05).unwrap();
+        let input = Tensor::from_vec(0, 2, Vec::new()).unwrap();
+        let output = layer.forward(&input).unwrap();
+        assert_eq!(output.shape(), (0, 2));
+        assert!(output.data().is_empty());
+
+        let grad_output = Tensor::from_vec(0, 2, Vec::new()).unwrap();
+        let grad_input = layer.backward(&input, &grad_output).unwrap();
+        assert_eq!(grad_input.shape(), input.shape());
+        assert!(grad_input.data().is_empty());
+        assert!(layer.gain.gradient().is_none());
+        assert!(layer.slope.gradient().is_none());
+        assert!(layer.bias.gradient().is_none());
     }
 
     #[test]
@@ -961,7 +1594,6 @@ mod tests {
         let grad_input = layer.backward(&input, &grad_output).unwrap();
         let grad_output_vec = grad_output.data().to_vec();
         let (rows, cols) = input.shape();
-        let inv_rows = 1.0 / rows as f32;
         let epsilon = 1e-3;
 
         for idx in 0..(rows * cols) {
@@ -973,8 +1605,7 @@ mod tests {
                 .iter()
                 .zip(grad_output_vec.iter())
                 .map(|(o, g)| o * g)
-                .sum::<f32>()
-                * inv_rows;
+                .sum::<f32>();
 
             let mut minus = input.clone();
             minus.data_mut()[idx] -= epsilon;
@@ -984,8 +1615,7 @@ mod tests {
                 .iter()
                 .zip(grad_output_vec.iter())
                 .map(|(o, g)| o * g)
-                .sum::<f32>()
-                * inv_rows;
+                .sum::<f32>();
 
             let numeric = (loss_plus - loss_minus) / (2.0 * epsilon);
             assert!((numeric - grad_input.data()[idx]).abs() < 2e-3);
@@ -1059,7 +1689,6 @@ mod tests {
         let grad_input = layer.backward(&input, &grad_output).unwrap();
         let grad_output_vec = grad_output.data().to_vec();
         let (rows, cols) = input.shape();
-        let inv_rows = 1.0 / rows as f32;
         let epsilon = 1e-3;
 
         for idx in 0..(rows * cols) {
@@ -1071,8 +1700,7 @@ mod tests {
                 .iter()
                 .zip(grad_output_vec.iter())
                 .map(|(o, g)| o * g)
-                .sum::<f32>()
-                * inv_rows;
+                .sum::<f32>();
 
             let mut minus = input.clone();
             minus.data_mut()[idx] -= epsilon;
@@ -1082,8 +1710,7 @@ mod tests {
                 .iter()
                 .zip(grad_output_vec.iter())
                 .map(|(o, g)| o * g)
-                .sum::<f32>()
-                * inv_rows;
+                .sum::<f32>();
 
             let numeric = (loss_plus - loss_minus) / (2.0 * epsilon);
             assert!((numeric - grad_input.data()[idx]).abs() < 2e-3);

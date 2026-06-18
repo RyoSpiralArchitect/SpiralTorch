@@ -6,6 +6,10 @@
 use super::GraphContext;
 #[cfg(feature = "psi")]
 use super::PsiCoherenceAdaptor;
+use crate::execution::{
+    current_matmul_backend, current_prepacked_matmul_backend,
+    current_tensor_util_backend_for_values,
+};
 use crate::module::{Module, Parameter};
 use crate::RoundtableBandInfluence;
 use crate::{PureResult, Tensor, TensorError};
@@ -292,6 +296,12 @@ impl ZSpaceGraphConvolution {
         #[cfg(not(feature = "psi"))]
         let weights = self.aggregation.weights()?;
         let (rows, cols) = input.shape();
+        if rows != self.context.node_count() {
+            return Err(TensorError::ShapeMismatch {
+                left: input.shape(),
+                right: (self.context.node_count(), cols),
+            });
+        }
         let mut support = Tensor::zeros(rows, cols)?;
         let mut current = input.clone();
         let mut effective = Vec::with_capacity(weights.len());
@@ -317,7 +327,8 @@ impl ZSpaceGraphConvolution {
             let scale = roundtable_scale * pass_scale;
             let coeff = weight * scale;
             if coeff.abs() > f32::EPSILON {
-                support.add_scaled(&current, coeff)?;
+                let backend = current_tensor_util_backend_for_values(support.data().len());
+                support.add_scaled_with_backend(&current, coeff, backend)?;
             }
             band_pass_scales.push(pass_scale);
             step_scales.push(scale);
@@ -352,12 +363,14 @@ impl ZSpaceGraphConvolution {
         }
         for (state, &weight) in grad_states.iter_mut().zip(weights.iter()) {
             if weight.abs() > f32::EPSILON {
-                state.add_scaled(grad_support, weight)?;
+                let backend = current_tensor_util_backend_for_values(state.data().len());
+                state.add_scaled_with_backend(grad_support, weight, backend)?;
             }
         }
         for idx in (1..grad_states.len()).rev() {
             let propagated = self.context.propagate_transpose(&grad_states[idx])?;
-            grad_states[idx - 1].add_scaled(&propagated, 1.0)?;
+            let backend = current_tensor_util_backend_for_values(grad_states[idx - 1].data().len());
+            grad_states[idx - 1].add_scaled_with_backend(&propagated, 1.0, backend)?;
         }
         Ok(grad_states
             .into_iter()
@@ -374,8 +387,11 @@ impl Module for ZSpaceGraphConvolution {
             self.record_forward_flows(flows, aggregated.roundtable_trace());
         }
         let pack = self.weight.ensure_matmul_pack()?;
-        let mut out = aggregated.support().matmul_prepacked(&pack)?;
-        out.add_row_inplace(self.bias.value().data())?;
+        let out = aggregated.support().matmul_prepacked_bias_with_backend(
+            &pack,
+            self.bias.value().data(),
+            current_prepacked_matmul_backend(),
+        )?;
         Ok(out)
     }
 
@@ -389,14 +405,16 @@ impl Module for ZSpaceGraphConvolution {
         let aggregated = self.aggregate_support(input)?;
         let support = aggregated.support();
         let batch = input.shape().0 as f32;
-        let grad_w = support
-            .transpose()
-            .matmul(grad_output)?
-            .scale(1.0 / batch)?;
+        let grad_w = support.matmul_lhs_transpose_scaled_with_backend(
+            grad_output,
+            1.0 / batch,
+            current_matmul_backend(),
+        )?;
         self.weight.accumulate_euclidean(&grad_w)?;
 
-        let summed = grad_output.sum_axis0();
-        let grad_b = Tensor::from_vec(1, summed.len(), summed)?.scale(1.0 / batch)?;
+        let bias_backend = current_tensor_util_backend_for_values(grad_output.data().len());
+        let summed = grad_output.try_sum_axis0_scaled_with_backend(1.0 / batch, bias_backend)?;
+        let grad_b = Tensor::from_vec(1, summed.len(), summed)?;
         self.bias.accumulate_euclidean(&grad_b)?;
 
         if self.tracer.is_some() {
@@ -406,7 +424,8 @@ impl Module for ZSpaceGraphConvolution {
         }
 
         let pack_t = self.weight.ensure_matmul_transpose_pack()?;
-        let grad_support = grad_output.matmul_prepacked(&pack_t)?;
+        let grad_support = grad_output
+            .matmul_prepacked_with_backend(&pack_t, current_prepacked_matmul_backend())?;
         let weights = aggregated.into_weights();
         self.backpropagate_through_aggregation(&grad_support, &weights)
     }
@@ -484,24 +503,81 @@ fn build_roundtable_trace(
 pub(crate) fn band_pass_sample(
     band: RoundtableBand,
     gradient: &Tensor,
-) -> GraphRoundtableBandPassSample {
+) -> PureResult<GraphRoundtableBandPassSample> {
     let gradient_l1 = gradient.data().iter().map(|value| value.abs()).sum::<f32>();
-    let gradient_l2 = gradient.squared_l2_norm().sqrt();
+    let gradient_l2 = gradient
+        .squared_l2_norm_with_backend(current_tensor_util_backend_for_values(
+            gradient.data().len(),
+        ))?
+        .sqrt();
     let gradient_rms = gradient_l2 / (gradient.data().len().max(1) as f32).sqrt();
-    GraphRoundtableBandPassSample {
+    Ok(GraphRoundtableBandPassSample {
         band,
         gradient_l1,
         gradient_l2,
         gradient_rms,
-    }
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "wgpu")]
+    use crate::execution::{push_backend_policy, BackendPolicy};
     use crate::schedule::BandEnergy;
     use crate::RoundtableBandSignal;
+    #[cfg(feature = "wgpu")]
+    use st_core::backend::device_caps::{BackendKind, DeviceCaps};
+    #[cfg(feature = "wgpu")]
+    use st_tensor::{AttentionBackend, LayerNormBackend, MatmulBackend, SoftmaxBackend};
     use std::num::NonZeroUsize;
+
+    #[cfg(feature = "wgpu")]
+    #[track_caller]
+    fn assert_tensor_close(lhs: &Tensor, rhs: &Tensor, tolerance: f32) {
+        assert_eq!(lhs.shape(), rhs.shape());
+        for (idx, (&left, &right)) in lhs.data().iter().zip(rhs.data()).enumerate() {
+            let delta = (left - right).abs();
+            assert!(
+                delta <= tolerance,
+                "tensor mismatch at {idx}: left={left} right={right} delta={delta} tolerance={tolerance}"
+            );
+        }
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn cpu_policy() -> BackendPolicy {
+        BackendPolicy::explicit(
+            DeviceCaps::cpu(),
+            MatmulBackend::CpuNaive,
+            MatmulBackend::CpuNaive,
+            LayerNormBackend::Cpu,
+            AttentionBackend::Cpu,
+            SoftmaxBackend::Cpu,
+        )
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn wgpu_policy() -> BackendPolicy {
+        BackendPolicy::explicit(
+            BackendKind::Wgpu.default_caps(),
+            MatmulBackend::GpuWgpu,
+            MatmulBackend::GpuWgpu,
+            LayerNormBackend::Cpu,
+            AttentionBackend::Cpu,
+            SoftmaxBackend::Cpu,
+        )
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn ring_adjacency(nodes: usize) -> Tensor {
+        let mut data = vec![0.0f32; nodes * nodes];
+        for row in 0..nodes {
+            data[row * nodes + ((row + 1) % nodes)] = 1.0;
+            data[row * nodes + ((row + nodes - 1) % nodes)] = 0.5;
+        }
+        Tensor::from_vec(nodes, nodes, data).unwrap()
+    }
 
     #[test]
     fn graph_convolution_forward_runs() {
@@ -511,6 +587,48 @@ mod tests {
         let input = Tensor::from_vec(2, 3, vec![1.0, 0.0, -1.0, 0.5, 0.5, 0.5]).unwrap();
         let output = layer.forward(&input).unwrap();
         assert_eq!(output.shape(), (2, 2));
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn graph_convolution_forced_wgpu_prepacked_matches_cpu_reference_on_edge_tiles() {
+        let context = GraphContext::from_adjacency(ring_adjacency(12)).unwrap();
+        let cpu_layer =
+            ZSpaceGraphConvolution::new("gnn", context.clone(), 8, 6, -1.0, 0.05).unwrap();
+        let wgpu_layer = ZSpaceGraphConvolution::new("gnn", context, 8, 6, -1.0, 0.05).unwrap();
+        let input = Tensor::from_vec(
+            12,
+            8,
+            (0..96)
+                .map(|idx| ((idx as f32 * 0.097).sin() * 0.6) + ((idx % 7) as f32 * 0.01))
+                .collect(),
+        )
+        .unwrap();
+        let cpu = {
+            let _guard = push_backend_policy(cpu_policy());
+            cpu_layer.forward(&input).unwrap()
+        };
+        let wgpu = {
+            let _guard = push_backend_policy(wgpu_policy());
+            match wgpu_layer.forward(&input) {
+                Ok(value) => value,
+                Err(TensorError::BackendFailure { backend, .. }) if backend == "wgpu" => return,
+                Err(error) => panic!("forced WGPU GNN forward failed: {error:?}"),
+            }
+        };
+
+        assert_tensor_close(&cpu, &wgpu, 1e-4);
+    }
+
+    #[test]
+    fn graph_convolution_rejects_empty_or_mismatched_node_rows() {
+        let adjacency = Tensor::from_vec(2, 2, vec![0.0, 1.0, 1.0, 0.0]).unwrap();
+        let context = GraphContext::from_adjacency(adjacency).unwrap();
+        let layer = ZSpaceGraphConvolution::new("gnn", context, 3, 2, -1.0, 0.05).unwrap();
+        let input = Tensor::from_vec(0, 3, Vec::new()).unwrap();
+
+        let err = layer.forward(&input).unwrap_err();
+        assert!(matches!(err, TensorError::ShapeMismatch { .. }));
     }
 
     #[test]
@@ -598,7 +716,9 @@ mod tests {
         let signal = RoundtableBandSignal::new(BandEnergy::new(0.8, 0.4, 0.2), (1, 1, 1));
         layer.set_roundtable_influence(Some(RoundtableBandInfluence::from_signal(&signal)));
         let gradient = Tensor::from_vec(2, 1, vec![0.2, -0.1]).unwrap();
-        layer.set_roundtable_band_pass(Some(band_pass_sample(RoundtableBand::Here, &gradient)));
+        layer.set_roundtable_band_pass(Some(
+            band_pass_sample(RoundtableBand::Here, &gradient).unwrap(),
+        ));
         let input = Tensor::from_vec(2, 2, vec![1.0, 0.5, -0.5, 1.0]).unwrap();
 
         let _ = layer.forward(&input).unwrap();
@@ -634,8 +754,9 @@ mod tests {
         let signal = RoundtableBandSignal::new(BandEnergy::new(0.8, 0.4, 0.2), (1, 1, 1));
         layer.set_roundtable_influence(Some(RoundtableBandInfluence::from_signal(&signal)));
         let tiny_gradient = Tensor::from_vec(2, 1, vec![1.0e-6, -1.0e-6]).unwrap();
-        layer
-            .set_roundtable_band_pass(Some(band_pass_sample(RoundtableBand::Here, &tiny_gradient)));
+        layer.set_roundtable_band_pass(Some(
+            band_pass_sample(RoundtableBand::Here, &tiny_gradient).unwrap(),
+        ));
         let input = Tensor::from_vec(2, 2, vec![1.0, 0.5, -0.5, 1.0]).unwrap();
 
         let _ = layer.forward(&input).unwrap();

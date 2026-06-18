@@ -1,4 +1,6 @@
 [
+  {"rows": 0, "rows_max": 255, "cols_min": 0, "cols_max": 4095, "k_max": 128, "sg": true,
+   "wg": 64, "kl": 8, "tile": 128, "tile_cols": 1024, "radix": 4, "segments": 1},
   {"rows": 256, "cols_min": 0, "cols_max": 4095, "k_max": 128, "sg": true,
    "wg": 128, "tile": 512, "tile_cols": 512, "radix": 2, "segments": 1},
   {"rows": 512, "cols_min": 4096, "cols_max": 16383, "k_max": 256, "sg": true,

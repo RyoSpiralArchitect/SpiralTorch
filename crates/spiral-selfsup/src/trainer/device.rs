@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use super::distributed::st_distributed::{self, DistributedError};
+use st_core::distributed::{AccumulatorSyncError, AccumulatorSynchronizer};
 use thiserror::Error;
 
 /// Reduction strategy applied to distributed metrics once synchronized.
@@ -62,6 +63,21 @@ impl TrainingDevice for CpuDevice {
         _reduce: MetricReduce,
     ) -> Result<(), TrainingDeviceError> {
         Ok(())
+    }
+}
+
+impl AccumulatorSynchronizer for CpuDevice {
+    fn rank(&self) -> usize {
+        TrainingDevice::rank(self)
+    }
+
+    fn world_size(&self) -> usize {
+        TrainingDevice::world_size(self)
+    }
+
+    fn synchronize_accumulators(&self, gradients: &mut [f32]) -> Result<(), AccumulatorSyncError> {
+        TrainingDevice::synchronize_gradients(self, gradients)
+            .map_err(AccumulatorSyncError::backend)
     }
 }
 
@@ -122,10 +138,25 @@ impl TrainingDevice for DistributedDevice {
     ) -> Result<(), TrainingDeviceError> {
         st_distributed::all_reduce(&self.session, metrics)?;
         if reduce == MetricReduce::Mean {
-            let scale = 1.0 / self.world_size() as f32;
+            let scale = 1.0 / TrainingDevice::world_size(self) as f32;
             metrics.iter_mut().for_each(|value| *value *= scale);
         }
         Ok(())
+    }
+}
+
+impl AccumulatorSynchronizer for DistributedDevice {
+    fn rank(&self) -> usize {
+        TrainingDevice::rank(self)
+    }
+
+    fn world_size(&self) -> usize {
+        TrainingDevice::world_size(self)
+    }
+
+    fn synchronize_accumulators(&self, gradients: &mut [f32]) -> Result<(), AccumulatorSyncError> {
+        TrainingDevice::synchronize_gradients(self, gradients)
+            .map_err(AccumulatorSyncError::backend)
     }
 }
 

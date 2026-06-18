@@ -15,6 +15,29 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::f32::consts::{PI, SQRT_2};
 
+fn validate_finite_value(label: &'static str, value: f32) -> PureResult<()> {
+    if !value.is_finite() {
+        return Err(TensorError::NonFiniteValue { label, value });
+    }
+    Ok(())
+}
+
+fn checked_value(label: &'static str, value: f32) -> PureResult<f32> {
+    validate_finite_value(label, value)?;
+    Ok(value)
+}
+
+fn validate_finite_slice(label: &'static str, values: &[f32]) -> PureResult<()> {
+    for &value in values {
+        validate_finite_value(label, value)?;
+    }
+    Ok(())
+}
+
+fn validate_finite_tensor(label: &'static str, tensor: &Tensor) -> PureResult<()> {
+    validate_finite_slice(label, tensor.data())
+}
+
 /// Reliability bin aggregated by band.
 #[derive(Clone, Debug, Serialize)]
 pub struct ReliabilityBin {
@@ -102,7 +125,23 @@ impl ZRBAMetrics {
         if rows == 0 {
             return Err(TensorError::EmptyInput("zrba::metrics"));
         }
-        let quantile = approx_standard_normal_quantile(0.5 + pin / 2.0);
+        if cols == 0 {
+            return Err(TensorError::InvalidDimensions { rows, cols });
+        }
+        if indices.len() != rows {
+            return Err(TensorError::DataLength {
+                expected: rows,
+                got: indices.len(),
+            });
+        }
+        validate_finite_tensor("zrba_metrics_prediction", predictions)?;
+        validate_finite_tensor("zrba_metrics_variance", variances)?;
+        validate_finite_slice("zrba_metrics_target", targets)?;
+        let pin = checked_value("zrba_metrics_pin", pin)?.clamp(0.0, 1.0);
+        let quantile = checked_value(
+            "zrba_metrics_quantile",
+            approx_standard_normal_quantile(0.5 + pin / 2.0),
+        )?;
         let preds = predictions.data();
         let vars = variances.data();
         let mut coverage = 0.0f32;
@@ -118,32 +157,47 @@ impl ZRBAMetrics {
             let row_end = row_start + cols;
             let row_slice = &preds[row_start..row_end];
             let var_slice = &vars[row_start..row_end];
-            let mean = row_slice.iter().sum::<f32>() / cols as f32;
-            let variance = var_slice.iter().map(|value| value.max(1e-6)).sum::<f32>() / cols as f32;
-            let std = variance.sqrt();
-            let lower = mean - quantile * std;
-            let upper = mean + quantile * std;
-            if target >= lower && target <= upper {
-                coverage += 1.0;
+            let mut mean_sum = 0.0f32;
+            for &value in row_slice {
+                mean_sum = checked_value("zrba_metrics_row_mean", mean_sum + value)?;
             }
-            width_acc += upper - lower;
-            let diff = target - mean;
-            nll_acc += 0.5 * ((2.0 * PI * variance).ln() + diff * diff / variance);
-            let z = diff / std;
-            crps_acc += normal_crps(z, std);
+            let mean = checked_value("zrba_metrics_row_mean", mean_sum / cols as f32)?;
+            let mut variance_sum = 0.0f32;
+            for &value in var_slice {
+                let clamped = checked_value("zrba_metrics_row_variance", value.max(1e-6))?;
+                variance_sum = checked_value("zrba_metrics_row_variance", variance_sum + clamped)?;
+            }
+            let variance = checked_value("zrba_metrics_row_variance", variance_sum / cols as f32)?;
+            let std = checked_value("zrba_metrics_std", variance.sqrt())?;
+            let lower = checked_value("zrba_metrics_interval", mean - quantile * std)?;
+            let upper = checked_value("zrba_metrics_interval", mean + quantile * std)?;
+            if target >= lower && target <= upper {
+                coverage = checked_value("zrba_metrics_coverage", coverage + 1.0)?;
+            }
+            width_acc = checked_value("zrba_metrics_pinaw_sum", width_acc + (upper - lower))?;
+            let diff = checked_value("zrba_metrics_error", target - mean)?;
+            let log_term = checked_value("zrba_metrics_nll", (2.0 * PI * variance).ln())?;
+            let sq_error = checked_value("zrba_metrics_nll", diff * diff)?;
+            let nll = checked_value("zrba_metrics_nll", 0.5 * (log_term + sq_error / variance))?;
+            nll_acc = checked_value("zrba_metrics_nll_sum", nll_acc + nll)?;
+            let z = checked_value("zrba_metrics_z", diff / std)?;
+            crps_acc = checked_value("zrba_metrics_crps_sum", crps_acc + normal_crps(z, std)?)?;
             errors.push(diff.abs());
             diag_vars.push(variance);
             row_means.push(mean);
             row_variances.push(variance);
         }
-        let picp = coverage / rows as f32;
-        let pinaw = width_acc / rows as f32;
-        let nll = nll_acc / rows as f32;
-        let crps = crps_acc / rows as f32;
+        let picp = checked_value("zrba_metrics_picp", coverage / rows as f32)?;
+        let pinaw = checked_value("zrba_metrics_pinaw", width_acc / rows as f32)?;
+        let nll = checked_value("zrba_metrics_nll", nll_acc / rows as f32)?;
+        let crps = checked_value("zrba_metrics_crps", crps_acc / rows as f32)?;
         let reliability =
-            reliability_by_band(indices, targets, &row_means, &row_variances, quantile, pin);
-        let ood = spearman_rank_correlation(&errors, &diag_vars);
-        Ok(Self {
+            reliability_by_band(indices, targets, &row_means, &row_variances, quantile, pin)?;
+        let ood = checked_value(
+            "zrba_metrics_ood_spearman",
+            spearman_rank_correlation(&errors, &diag_vars),
+        )?;
+        let metrics = Self {
             pin,
             picp,
             pinaw,
@@ -151,7 +205,23 @@ impl ZRBAMetrics {
             crps,
             reliability_by_band: reliability,
             ood_spearman: ood,
-        })
+        };
+        metrics.validate()?;
+        Ok(metrics)
+    }
+
+    fn validate(&self) -> PureResult<()> {
+        validate_finite_value("zrba_metrics_pin", self.pin)?;
+        validate_finite_value("zrba_metrics_picp", self.picp)?;
+        validate_finite_value("zrba_metrics_pinaw", self.pinaw)?;
+        validate_finite_value("zrba_metrics_nll", self.nll)?;
+        validate_finite_value("zrba_metrics_crps", self.crps)?;
+        validate_finite_value("zrba_metrics_ood_spearman", self.ood_spearman)?;
+        for bin in &self.reliability_by_band {
+            validate_finite_value("zrba_metrics_reliability_expected", bin.expected)?;
+            validate_finite_value("zrba_metrics_reliability_observed", bin.observed)?;
+        }
+        Ok(())
     }
 }
 
@@ -188,19 +258,33 @@ fn reliability_by_band(
     variances: &[f32],
     quantile: f32,
     pin: f32,
-) -> Vec<ReliabilityBin> {
+) -> PureResult<Vec<ReliabilityBin>> {
+    if indices.len() != targets.len()
+        || targets.len() != means.len()
+        || means.len() != variances.len()
+    {
+        return Err(TensorError::DataLength {
+            expected: targets.len(),
+            got: indices.len(),
+        });
+    }
+    validate_finite_slice("zrba_metrics_target", targets)?;
+    validate_finite_slice("zrba_metrics_row_mean", means)?;
+    validate_finite_slice("zrba_metrics_row_variance", variances)?;
+    validate_finite_value("zrba_metrics_quantile", quantile)?;
+    validate_finite_value("zrba_metrics_pin", pin)?;
     let mut per_band: HashMap<usize, (f32, usize)> = HashMap::new();
     for ((idx, &target), (&mean, &variance)) in indices
         .iter()
         .zip(targets.iter())
         .zip(means.iter().zip(variances.iter()))
     {
-        let std = variance.max(1e-6).sqrt();
-        let lower = mean - quantile * std;
-        let upper = mean + quantile * std;
+        let std = checked_value("zrba_metrics_std", variance.max(1e-6).sqrt())?;
+        let lower = checked_value("zrba_metrics_interval", mean - quantile * std)?;
+        let upper = checked_value("zrba_metrics_interval", mean + quantile * std)?;
         let entry = per_band.entry(idx.band).or_insert((0.0, 0));
         if target >= lower && target <= upper {
-            entry.0 += 1.0;
+            entry.0 = checked_value("zrba_metrics_reliability_observed", entry.0 + 1.0)?;
         }
         entry.1 += 1;
     }
@@ -209,14 +293,19 @@ fn reliability_by_band(
         if count == 0 {
             continue;
         }
+        let observed = checked_value(
+            "zrba_metrics_reliability_observed",
+            (covered / count as f32).clamp(0.0, 1.0),
+        )?;
+        let expected = checked_value("zrba_metrics_reliability_expected", pin.clamp(0.0, 1.0))?;
         bins.push(ReliabilityBin {
             band,
-            expected: pin.clamp(0.0, 1.0),
-            observed: (covered / count as f32).clamp(0.0, 1.0),
+            expected,
+            observed,
         });
     }
     bins.sort_by_key(|bin| bin.band);
-    bins
+    Ok(bins)
 }
 
 fn approx_standard_normal_quantile(p: f32) -> f32 {
@@ -268,11 +357,20 @@ fn approx_standard_normal_quantile(p: f32) -> f32 {
     result as f32
 }
 
-fn normal_crps(z: f32, sigma: f32) -> f32 {
+fn normal_crps(z: f32, sigma: f32) -> PureResult<f32> {
+    validate_finite_value("zrba_metrics_z", z)?;
+    validate_finite_value("zrba_metrics_std", sigma)?;
     let sigma = sigma.max(1e-6);
-    let pdf = (-0.5 * z * z).exp() / (SQRT_2 * PI.sqrt());
-    let cdf = 0.5 * (1.0 + approx_erf(z / SQRT_2));
-    sigma * (z * (2.0 * cdf - 1.0) + 2.0 * pdf - 1.0 / PI.sqrt())
+    let z_sq = checked_value("zrba_metrics_crps", z * z)?;
+    let pdf = checked_value(
+        "zrba_metrics_crps",
+        (-0.5 * z_sq).exp() / (SQRT_2 * PI.sqrt()),
+    )?;
+    let cdf = checked_value("zrba_metrics_crps", 0.5 * (1.0 + approx_erf(z / SQRT_2)))?;
+    checked_value(
+        "zrba_metrics_crps",
+        sigma * (z * (2.0 * cdf - 1.0) + 2.0 * pdf - 1.0 / PI.sqrt()),
+    )
 }
 
 fn approx_erf(x: f32) -> f32 {
@@ -379,6 +477,72 @@ mod tests {
             assert!((bin.expected - 0.95).abs() < 1e-6);
             assert!(bin.observed >= 0.0 && bin.observed <= 1.0);
         }
+    }
+
+    #[test]
+    fn metrics_reject_index_length_mismatch() {
+        let preds = Tensor::from_vec(2, 1, vec![0.1, 0.2]).unwrap();
+        let vars = Tensor::from_vec(2, 1, vec![0.05, 0.04]).unwrap();
+        let targets = vec![0.0, 0.25];
+        let indices = vec![ZIndex {
+            band: 0,
+            sheet: 0,
+            echo: 0,
+        }];
+
+        let err = ZRBAMetrics::compute(&preds, &vars, &targets, 0.95, &indices).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::DataLength {
+                expected: 2,
+                got: 1,
+            }
+        ));
+    }
+
+    #[test]
+    fn metrics_reject_non_finite_target() {
+        let preds = Tensor::from_vec(1, 1, vec![0.1]).unwrap();
+        let vars = Tensor::from_vec(1, 1, vec![0.05]).unwrap();
+        let targets = vec![f32::INFINITY];
+        let indices = vec![ZIndex {
+            band: 0,
+            sheet: 0,
+            echo: 0,
+        }];
+
+        let err = ZRBAMetrics::compute(&preds, &vars, &targets, 0.95, &indices).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "zrba_metrics_target",
+                value,
+            } if value.is_infinite()
+        ));
+    }
+
+    #[test]
+    fn metrics_reject_overflowing_nll_error_square() {
+        let preds = Tensor::from_vec(1, 1, vec![1.0e20]).unwrap();
+        let vars = Tensor::from_vec(1, 1, vec![0.05]).unwrap();
+        let targets = vec![-1.0e20];
+        let indices = vec![ZIndex {
+            band: 0,
+            sheet: 0,
+            echo: 0,
+        }];
+
+        let err = ZRBAMetrics::compute(&preds, &vars, &targets, 0.95, &indices).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "zrba_metrics_nll",
+                value,
+            } if value.is_infinite()
+        ));
     }
 
     #[test]

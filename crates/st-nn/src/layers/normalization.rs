@@ -3,13 +3,349 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+use crate::execution::{
+    current_backend_policy, current_layer_norm_backend, current_tensor_util_backend_for_values,
+};
 use crate::module::{Module, Parameter};
 use crate::{PureResult, Tensor};
-use st_tensor::TensorError;
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta, TensorError, TensorUtilBackend};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
 const TANH_CLAMP: f32 = 25.0;
+
+fn current_layer_norm_requested_label() -> &'static str {
+    current_backend_policy()
+        .map(|policy| policy.layer_norm_backend_label())
+        .unwrap_or("auto")
+}
+
+fn emit_normalization_backward_meta(
+    op_name: &'static str,
+    rows: usize,
+    cols: usize,
+    requested_backend: &'static str,
+    epsilon: f32,
+    zspace: bool,
+    gradient_scale: Option<f32>,
+    input_gradient_backend: Option<String>,
+    input_gradient_reduction_backend: Option<&'static str>,
+    normalization_backend: Option<&'static str>,
+    affine_gradient_backend: Option<String>,
+) {
+    let input_gradient_axis = match op_name {
+        "batch_norm_backward" | "zspace_batch_norm_backward" => "batch",
+        "layer_norm_backward" | "zspace_layer_norm_backward" => "feature",
+        _ => "unknown",
+    };
+    let input_gradient_formula = if zspace {
+        "projected_affine_norm_vjp"
+    } else {
+        "affine_norm_vjp"
+    };
+    emit_tensor_op(op_name, &[rows, cols], &[rows, cols]);
+    emit_tensor_op_meta(op_name, || {
+        serde_json::json!({
+            "backend": "hybrid",
+            "requested_backend": requested_backend,
+            "rows": rows,
+            "cols": cols,
+            "epsilon": epsilon,
+            "input_gradient_backend": input_gradient_backend,
+            "input_gradient_axis": input_gradient_axis,
+            "input_gradient_formula": input_gradient_formula,
+            "affine_gradient_backend": affine_gradient_backend,
+            "gradient_scale": gradient_scale,
+            "parameter_gradient_scale": gradient_scale,
+            "input_gradient_scale": if gradient_scale.is_some() {
+                Some(1.0f32)
+            } else {
+                None
+            },
+            "input_gradient_reduction_backend": input_gradient_reduction_backend,
+            "normalization_backend": normalization_backend,
+            "flags": {
+                "zspace": zspace,
+                "affine": true,
+            }
+        })
+    });
+}
+
+fn tensor_util_backend_label(backend: TensorUtilBackend) -> &'static str {
+    match backend {
+        TensorUtilBackend::Auto => "auto",
+        TensorUtilBackend::Cpu => "cpu",
+        TensorUtilBackend::GpuWgpu => "wgpu",
+    }
+}
+
+fn backend_affine_gradients(
+    grad_output: &Tensor,
+    affine_input: &Tensor,
+    gradient_scale: f32,
+) -> PureResult<(Tensor, Tensor, String)> {
+    let (_, cols) = grad_output.shape();
+    let reduction_backend = current_tensor_util_backend_for_values(grad_output.data().len());
+    let grad_gamma_product = grad_output.hadamard_with_backend(affine_input, reduction_backend)?;
+    let grad_gamma = Tensor::from_vec(
+        1,
+        cols,
+        grad_gamma_product.try_sum_axis0_scaled_with_backend(gradient_scale, reduction_backend)?,
+    )?;
+    let grad_beta = Tensor::from_vec(
+        1,
+        cols,
+        grad_output.try_sum_axis0_scaled_with_backend(gradient_scale, reduction_backend)?,
+    )?;
+    Ok((
+        grad_gamma,
+        grad_beta,
+        tensor_util_backend_label(reduction_backend).to_string(),
+    ))
+}
+
+fn backend_batch_axis_stats(
+    input: &Tensor,
+    mean_label: &'static str,
+    centered_label: &'static str,
+    variance_sum_label: &'static str,
+    variance_label: &'static str,
+) -> PureResult<(Vec<f32>, Vec<f32>)> {
+    let (batch, features) = input.shape();
+    let scale = 1.0 / batch as f32;
+    let reduction_backend = current_tensor_util_backend_for_values(input.data().len());
+    let mean = input.try_sum_axis0_scaled_with_backend(scale, reduction_backend)?;
+    validate_finite_slice(mean_label, &mean)?;
+
+    let mut centered = Vec::with_capacity(input.data().len());
+    for row in 0..batch {
+        let slice = &input.data()[row * features..(row + 1) * features];
+        for (feature, &value) in slice.iter().enumerate() {
+            let centered_value = value - mean[feature];
+            validate_finite_value(centered_label, centered_value)?;
+            let squared = centered_value * centered_value;
+            validate_finite_value(variance_sum_label, squared)?;
+            centered.push(centered_value);
+        }
+    }
+    let centered = Tensor::from_vec(batch, features, centered)?;
+    let squared = centered.hadamard_with_backend(&centered, reduction_backend)?;
+    let variance = squared.try_sum_axis0_scaled_with_backend(scale, reduction_backend)?;
+    validate_finite_slice(variance_label, &variance)?;
+    Ok((mean, variance))
+}
+
+fn validate_finite_value(label: &'static str, value: f32) -> PureResult<()> {
+    if !value.is_finite() {
+        return Err(TensorError::NonFiniteValue { label, value });
+    }
+    Ok(())
+}
+
+fn checked_finite_value(label: &'static str, value: f32) -> PureResult<f32> {
+    validate_finite_value(label, value)?;
+    Ok(value)
+}
+
+fn checked_sum(label: &'static str, values: impl IntoIterator<Item = f32>) -> PureResult<f32> {
+    let mut sum = 0.0f64;
+    for value in values {
+        validate_finite_value(label, value)?;
+        sum += f64::from(value);
+    }
+    if !sum.is_finite() || sum.abs() > f64::from(f32::MAX) {
+        let value = if sum.is_sign_negative() {
+            f32::NEG_INFINITY
+        } else {
+            f32::INFINITY
+        };
+        return Err(TensorError::NonFiniteValue { label, value });
+    }
+    Ok(sum as f32)
+}
+
+fn checked_mean(label: &'static str, values: &[f32]) -> PureResult<f32> {
+    if values.is_empty() {
+        return Err(TensorError::EmptyInput(label));
+    }
+    let sum = checked_sum(label, values.iter().copied())?;
+    checked_finite_value(label, sum / values.len() as f32)
+}
+
+fn checked_projector_gain_update(
+    current_gain: f32,
+    target_radius: f32,
+    smoothing: f32,
+    radii: &[f32],
+    target_label: &'static str,
+    smoothing_label: &'static str,
+    radius_label: &'static str,
+    gain_label: &'static str,
+) -> PureResult<Option<f32>> {
+    if !target_radius.is_finite() || target_radius < 0.0 {
+        return Err(TensorError::NonFiniteValue {
+            label: target_label,
+            value: target_radius,
+        });
+    }
+    if !smoothing.is_finite() || smoothing <= 0.0 {
+        return Err(TensorError::NonFiniteValue {
+            label: smoothing_label,
+            value: smoothing,
+        });
+    }
+    validate_finite_value(gain_label, current_gain)?;
+    if radii.is_empty() {
+        return Ok(None);
+    }
+    let avg_radius = checked_mean(radius_label, radii)?;
+    let delta = smoothing * (target_radius - avg_radius);
+    validate_finite_value(gain_label, delta)?;
+    let gain = (current_gain + delta).clamp(0.0, 1.0);
+    validate_finite_value(gain_label, gain)?;
+    Ok(Some(gain))
+}
+
+fn validate_finite_slice(label: &'static str, values: &[f32]) -> PureResult<()> {
+    for &value in values {
+        validate_finite_value(label, value)?;
+    }
+    Ok(())
+}
+
+fn validate_finite_tensor(label: &'static str, tensor: &Tensor) -> PureResult<()> {
+    validate_finite_slice(label, tensor.data())
+}
+
+fn relabel_non_finite<T>(result: PureResult<T>, label: &'static str) -> PureResult<T> {
+    match result {
+        Err(TensorError::NonFiniteValue { value, .. }) => {
+            Err(TensorError::NonFiniteValue { label, value })
+        }
+        other => other,
+    }
+}
+
+fn backend_grad_normed(
+    grad_output: &Tensor,
+    gamma: &[f32],
+    jacobian: Option<&[f32]>,
+    backend: TensorUtilBackend,
+    label: &'static str,
+) -> PureResult<Tensor> {
+    let (rows, cols) = grad_output.shape();
+    let mut grad_normed =
+        relabel_non_finite(grad_output.mul_row_with_backend(gamma, backend), label)?;
+    if let Some(jacobian) = jacobian {
+        let jacobian = Tensor::from_vec(rows, cols, jacobian.to_vec())?;
+        grad_normed =
+            relabel_non_finite(grad_normed.hadamard_with_backend(&jacobian, backend), label)?;
+    }
+    validate_finite_tensor(label, &grad_normed)?;
+    Ok(grad_normed)
+}
+
+fn backend_batch_axis_input_gradient(
+    grad_normed: &Tensor,
+    normed: &Tensor,
+    inv_std: &[f32],
+    divisor: usize,
+    backend: TensorUtilBackend,
+    label: &'static str,
+) -> PureResult<Tensor> {
+    if divisor == 0 {
+        return Err(TensorError::EmptyInput(label));
+    }
+    if grad_normed.shape() != normed.shape() {
+        return Err(TensorError::ShapeMismatch {
+            left: grad_normed.shape(),
+            right: normed.shape(),
+        });
+    }
+    let (_, cols) = grad_normed.shape();
+    if inv_std.len() != cols {
+        return Err(TensorError::DataLength {
+            expected: cols,
+            got: inv_std.len(),
+        });
+    }
+    validate_finite_tensor(label, grad_normed)?;
+    validate_finite_tensor(label, normed)?;
+    validate_finite_slice(label, inv_std)?;
+    let sum_grad = relabel_non_finite(grad_normed.try_sum_axis0_with_backend(backend), label)?;
+    validate_finite_slice(label, &sum_grad)?;
+    let grad_normed_times_normed =
+        relabel_non_finite(grad_normed.hadamard_with_backend(normed, backend), label)?;
+    let sum_grad_norm = relabel_non_finite(
+        grad_normed_times_normed.try_sum_axis0_with_backend(backend),
+        label,
+    )?;
+    validate_finite_slice(label, &sum_grad_norm)?;
+    let mut correction =
+        relabel_non_finite(normed.mul_row_with_backend(&sum_grad_norm, backend), label)?;
+    relabel_non_finite(
+        correction.add_row_inplace_with_backend(&sum_grad, backend),
+        label,
+    )?;
+    let correction = relabel_non_finite(
+        correction.scale_with_backend(1.0 / divisor as f32, backend),
+        label,
+    )?;
+    let mut output = grad_normed.clone();
+    relabel_non_finite(
+        output.add_scaled_with_backend(&correction, -1.0, backend),
+        label,
+    )?;
+    let output = relabel_non_finite(output.mul_row_with_backend(inv_std, backend), label)?;
+    validate_finite_tensor(label, &output)?;
+    Ok(output)
+}
+
+fn backend_layer_axis_input_gradient(
+    grad_normed: &Tensor,
+    normed: &Tensor,
+    inv_std: &[f32],
+    backend: TensorUtilBackend,
+    label: &'static str,
+) -> PureResult<Tensor> {
+    let (rows, cols) = grad_normed.shape();
+    if inv_std.len() != rows {
+        return Err(TensorError::DataLength {
+            expected: rows,
+            got: inv_std.len(),
+        });
+    }
+    let grad_normed_t = relabel_non_finite(grad_normed.transpose_with_backend(backend), label)?;
+    let normed_t = relabel_non_finite(normed.transpose_with_backend(backend), label)?;
+    let output_t = backend_batch_axis_input_gradient(
+        &grad_normed_t,
+        &normed_t,
+        inv_std,
+        cols,
+        backend,
+        label,
+    )?;
+    let output = relabel_non_finite(output_t.transpose_with_backend(backend), label)?;
+    validate_finite_tensor(label, &output)?;
+    Ok(output)
+}
+
+fn inverse_stddev(label: &'static str, variance: &[f32], epsilon: f32) -> PureResult<Vec<f32>> {
+    let mut inv_std = Vec::with_capacity(variance.len());
+    for &value in variance {
+        validate_finite_value(label, value)?;
+        let denom = value + epsilon;
+        validate_finite_value(label, denom)?;
+        if denom <= 0.0 {
+            return Err(TensorError::InvalidValue { label });
+        }
+        let inv = denom.sqrt().recip();
+        validate_finite_value(label, inv)?;
+        inv_std.push(inv);
+    }
+    Ok(inv_std)
+}
 
 /// Layer normalisation with curvature-aware epsilon stabilisation.
 #[derive(Debug)]
@@ -405,27 +741,25 @@ impl ZSpaceBatchNorm1d {
     /// Adjusts the projector gain to steer the average radius towards the
     /// provided target. Returns the updated gain.
     pub fn adapt_projector_gain(&self, target_radius: f32, smoothing: f32) -> PureResult<f32> {
-        if !target_radius.is_finite() || target_radius < 0.0 {
-            return Err(TensorError::NonFiniteValue {
-                label: "zspace_batchnorm_target_radius",
-                value: target_radius,
-            });
-        }
-        if !smoothing.is_finite() || smoothing <= 0.0 {
-            return Err(TensorError::NonFiniteValue {
-                label: "zspace_batchnorm_smoothing",
-                value: smoothing,
-            });
-        }
         let telemetry = self.telemetry().ok_or(TensorError::InvalidValue {
             label: "zspace_batchnorm_telemetry",
         })?;
-        let avg_radius =
-            telemetry.radius().iter().copied().sum::<f32>() / telemetry.radius().len() as f32;
-        let gain =
-            (self.projector_gain.get() + smoothing * (target_radius - avg_radius)).clamp(0.0, 1.0);
-        self.projector_gain.set(gain);
-        Ok(gain)
+        let current = self.projector_gain.get();
+        if let Some(gain) = checked_projector_gain_update(
+            current,
+            target_radius,
+            smoothing,
+            telemetry.radius(),
+            "zspace_batchnorm_target_radius",
+            "zspace_batchnorm_smoothing",
+            "zspace_batchnorm_radius_mean",
+            "zspace_batchnorm_projector_gain",
+        )? {
+            self.projector_gain.set(gain);
+            Ok(gain)
+        } else {
+            Ok(current)
+        }
     }
 
     fn curvature_scale(&self) -> f32 {
@@ -440,37 +774,17 @@ impl ZSpaceBatchNorm1d {
                 right: (rows, self.features),
             });
         }
-        if rows == 0 {
-            return Err(TensorError::EmptyInput("zspace_batchnorm_input"));
-        }
         Ok(())
     }
 
-    fn compute_stats(&self, input: &Tensor) -> (Vec<f32>, Vec<f32>) {
-        let (batch, features) = input.shape();
-        let mut mean = vec![0.0f32; features];
-        for row in 0..batch {
-            let slice = &input.data()[row * features..(row + 1) * features];
-            for (idx, value) in slice.iter().enumerate() {
-                mean[idx] += *value;
-            }
-        }
-        let scale = 1.0 / batch as f32;
-        for value in mean.iter_mut() {
-            *value *= scale;
-        }
-        let mut variance = vec![0.0f32; features];
-        for row in 0..batch {
-            let slice = &input.data()[row * features..(row + 1) * features];
-            for (idx, value) in slice.iter().enumerate() {
-                let centered = *value - mean[idx];
-                variance[idx] += centered * centered;
-            }
-        }
-        for value in variance.iter_mut() {
-            *value *= scale;
-        }
-        (mean, variance)
+    fn compute_stats(&self, input: &Tensor) -> PureResult<(Vec<f32>, Vec<f32>)> {
+        backend_batch_axis_stats(
+            input,
+            "zspace_batchnorm_mean",
+            "zspace_batchnorm_centered",
+            "zspace_batchnorm_variance_sum",
+            "zspace_batchnorm_variance",
+        )
     }
 
     fn project_normed(&self, value: f32) -> (f32, f32, f32) {
@@ -599,27 +913,25 @@ impl ZSpaceLayerNorm {
 
     /// Adapts the projector gain towards the provided target radius.
     pub fn adapt_projector_gain(&self, target_radius: f32, smoothing: f32) -> PureResult<f32> {
-        if !target_radius.is_finite() || target_radius < 0.0 {
-            return Err(TensorError::NonFiniteValue {
-                label: "zspace_layernorm_target_radius",
-                value: target_radius,
-            });
-        }
-        if !smoothing.is_finite() || smoothing <= 0.0 {
-            return Err(TensorError::NonFiniteValue {
-                label: "zspace_layernorm_smoothing",
-                value: smoothing,
-            });
-        }
         let telemetry = self.telemetry().ok_or(TensorError::InvalidValue {
             label: "zspace_layernorm_telemetry",
         })?;
-        let avg_radius =
-            telemetry.radius().iter().copied().sum::<f32>() / telemetry.radius().len() as f32;
-        let gain =
-            (self.projector_gain.get() + smoothing * (target_radius - avg_radius)).clamp(0.0, 1.0);
-        self.projector_gain.set(gain);
-        Ok(gain)
+        let current = self.projector_gain.get();
+        if let Some(gain) = checked_projector_gain_update(
+            current,
+            target_radius,
+            smoothing,
+            telemetry.radius(),
+            "zspace_layernorm_target_radius",
+            "zspace_layernorm_smoothing",
+            "zspace_layernorm_radius_mean",
+            "zspace_layernorm_projector_gain",
+        )? {
+            self.projector_gain.set(gain);
+            Ok(gain)
+        } else {
+            Ok(current)
+        }
     }
 
     fn guard_input(&self, input: &Tensor) -> PureResult<()> {
@@ -629,9 +941,6 @@ impl ZSpaceLayerNorm {
                 left: (rows, cols),
                 right: (rows, self.features),
             });
-        }
-        if rows == 0 {
-            return Err(TensorError::EmptyInput("zspace_layernorm_input"));
         }
         Ok(())
     }
@@ -749,37 +1058,17 @@ impl BatchNorm1d {
                 right: (rows, self.features),
             });
         }
-        if rows == 0 {
-            return Err(TensorError::EmptyInput("batchnorm_input"));
-        }
         Ok(())
     }
 
-    fn compute_stats(&self, input: &Tensor) -> (Vec<f32>, Vec<f32>) {
-        let (batch, features) = input.shape();
-        let mut mean = vec![0.0f32; features];
-        for row in 0..batch {
-            let slice = &input.data()[row * features..(row + 1) * features];
-            for (idx, value) in slice.iter().enumerate() {
-                mean[idx] += *value;
-            }
-        }
-        let scale = 1.0 / batch as f32;
-        for value in mean.iter_mut() {
-            *value *= scale;
-        }
-        let mut variance = vec![0.0f32; features];
-        for row in 0..batch {
-            let slice = &input.data()[row * features..(row + 1) * features];
-            for (idx, value) in slice.iter().enumerate() {
-                let centered = *value - mean[idx];
-                variance[idx] += centered * centered;
-            }
-        }
-        for value in variance.iter_mut() {
-            *value *= scale;
-        }
-        (mean, variance)
+    fn compute_stats(&self, input: &Tensor) -> PureResult<(Vec<f32>, Vec<f32>)> {
+        backend_batch_axis_stats(
+            input,
+            "batchnorm_mean",
+            "batchnorm_centered",
+            "batchnorm_variance_sum",
+            "batchnorm_variance",
+        )
     }
 }
 
@@ -787,62 +1076,77 @@ impl Module for BatchNorm1d {
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
         self.guard_input(input)?;
         let (batch, features) = input.shape();
-        let mut output = Vec::with_capacity(batch * features);
+        validate_finite_tensor("batchnorm_input", input)?;
         let gamma = self.gamma.value().data();
         let beta = self.beta.value().data();
-        let (mean, variance) = if self.training.get() {
-            let (mean, variance) = self.compute_stats(input);
-            {
-                let mut running_mean = self.running_mean.borrow_mut();
-                let data = running_mean.data_mut();
-                for idx in 0..features {
-                    data[idx] = self.momentum * mean[idx] + (1.0 - self.momentum) * data[idx];
-                }
+        validate_finite_slice("batchnorm_gamma", gamma)?;
+        validate_finite_slice("batchnorm_beta", beta)?;
+        if batch == 0 {
+            *self.last_mean.borrow_mut() = Some(vec![0.0; features]);
+            *self.last_inv_std.borrow_mut() = Some(vec![0.0; features]);
+            return Tensor::zeros(batch, features);
+        }
+        let mut output = Vec::with_capacity(batch * features);
+        let training = self.training.get();
+        let mut next_running_mean = None;
+        let mut next_running_var = None;
+        let (mean, variance) = if training {
+            let (mean, variance) = self.compute_stats(input)?;
+            let current_running_mean = self.running_mean.borrow().data().to_vec();
+            let current_running_var = self.running_var.borrow().data().to_vec();
+            validate_finite_slice("batchnorm_running_mean", &current_running_mean)?;
+            validate_finite_slice("batchnorm_running_var", &current_running_var)?;
+            let mut updated_mean = current_running_mean;
+            let mut updated_var = current_running_var;
+            for idx in 0..features {
+                updated_mean[idx] =
+                    self.momentum * mean[idx] + (1.0 - self.momentum) * updated_mean[idx];
+                validate_finite_value("batchnorm_running_mean", updated_mean[idx])?;
+                updated_var[idx] =
+                    self.momentum * variance[idx] + (1.0 - self.momentum) * updated_var[idx];
+                validate_finite_value("batchnorm_running_var", updated_var[idx])?;
             }
-            {
-                let mut running_var = self.running_var.borrow_mut();
-                let data = running_var.data_mut();
-                for idx in 0..features {
-                    data[idx] = self.momentum * variance[idx] + (1.0 - self.momentum) * data[idx];
-                }
-            }
-            *self.last_mean.borrow_mut() = Some(mean.clone());
-            let inv_std: Vec<f32> = variance
-                .iter()
-                .map(|v| 1.0 / (v + self.epsilon).sqrt())
-                .collect();
-            *self.last_inv_std.borrow_mut() = Some(inv_std.clone());
+            next_running_mean = Some(updated_mean);
+            next_running_var = Some(updated_var);
             (mean, variance)
         } else {
             let running_mean = self.running_mean.borrow();
             let running_var = self.running_var.borrow();
+            validate_finite_slice("batchnorm_running_mean", running_mean.data())?;
+            validate_finite_slice("batchnorm_running_var", running_var.data())?;
             (running_mean.data().to_vec(), running_var.data().to_vec())
         };
 
-        let inv_std: Vec<f32> = if let Some(inv) = self.last_inv_std.borrow().clone() {
-            if self.training.get() {
-                inv
-            } else {
-                variance
-                    .iter()
-                    .map(|v| 1.0 / (v + self.epsilon).sqrt())
-                    .collect()
-            }
-        } else {
-            variance
-                .iter()
-                .map(|v| 1.0 / (v + self.epsilon).sqrt())
-                .collect()
-        };
+        let inv_std = inverse_stddev("batchnorm_invstd", &variance, self.epsilon)?;
 
         for row in 0..batch {
             let slice = &input.data()[row * features..(row + 1) * features];
             for feature in 0..features {
                 let normed = (slice[feature] - mean[feature]) * inv_std[feature];
-                output.push(normed * gamma[feature] + beta[feature]);
+                validate_finite_value("batchnorm_normed", normed)?;
+                let value = normed * gamma[feature] + beta[feature];
+                validate_finite_value("batchnorm_output", value)?;
+                output.push(value);
             }
         }
-        Tensor::from_vec(batch, features, output)
+        let tensor = Tensor::from_vec(batch, features, output)?;
+        if training {
+            if let Some(updated) = next_running_mean {
+                self.running_mean
+                    .borrow_mut()
+                    .data_mut()
+                    .copy_from_slice(&updated);
+            }
+            if let Some(updated) = next_running_var {
+                self.running_var
+                    .borrow_mut()
+                    .data_mut()
+                    .copy_from_slice(&updated);
+            }
+            *self.last_mean.borrow_mut() = Some(mean);
+            *self.last_inv_std.borrow_mut() = Some(inv_std);
+        }
+        Ok(tensor)
     }
 
     fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
@@ -853,12 +1157,31 @@ impl Module for BatchNorm1d {
                 right: grad_output.shape(),
             });
         }
+        validate_finite_tensor("batchnorm_backward_input", input)?;
+        validate_finite_tensor("batchnorm_backward_grad_output", grad_output)?;
         if !self.training.get() {
             return Err(TensorError::InvalidValue {
                 label: "batchnorm_backward_eval",
             });
         }
         let (batch, features) = input.shape();
+        if batch == 0 {
+            let output = Tensor::zeros(batch, features)?;
+            emit_normalization_backward_meta(
+                "batch_norm_backward",
+                batch,
+                features,
+                "auto",
+                self.epsilon,
+                false,
+                None,
+                None,
+                None,
+                None,
+                None,
+            );
+            return Ok(output);
+        }
         let mean = self
             .last_mean
             .borrow()
@@ -866,6 +1189,7 @@ impl Module for BatchNorm1d {
             .ok_or(TensorError::InvalidValue {
                 label: "batchnorm_cached_mean",
             })?;
+        validate_finite_slice("batchnorm_cached_mean", &mean)?;
         let inv_std = self
             .last_inv_std
             .borrow()
@@ -873,41 +1197,61 @@ impl Module for BatchNorm1d {
             .ok_or(TensorError::InvalidValue {
                 label: "batchnorm_cached_invstd",
             })?;
+        validate_finite_slice("batchnorm_cached_invstd", &inv_std)?;
 
-        let mut grad_input = vec![0.0f32; batch * features];
-        let mut grad_gamma = vec![0.0f32; features];
-        let mut grad_beta = vec![0.0f32; features];
         let gamma = self.gamma.value().data();
+        validate_finite_slice("batchnorm_gamma", gamma)?;
+        let input_gradient_backend =
+            current_tensor_util_backend_for_values(batch.saturating_mul(features));
+        let normed_bias = mean
+            .iter()
+            .zip(inv_std.iter())
+            .map(|(&mean, &inv)| {
+                let bias = -mean * inv;
+                validate_finite_value("batchnorm_backward_normed", bias)?;
+                Ok(bias)
+            })
+            .collect::<PureResult<Vec<_>>>()?;
+        let normed = relabel_non_finite(
+            input.row_affine_with_backend(&inv_std, &normed_bias, input_gradient_backend),
+            "batchnorm_backward_normed",
+        )?;
+        validate_finite_tensor("batchnorm_backward_normed", &normed)?;
+        let grad_normed = backend_grad_normed(
+            grad_output,
+            gamma,
+            None,
+            input_gradient_backend,
+            "batchnorm_backward_grad_normed",
+        )?;
+        let output = backend_batch_axis_input_gradient(
+            &grad_normed,
+            &normed,
+            &inv_std,
+            batch,
+            input_gradient_backend,
+            "batchnorm_backward_input_grad",
+        )?;
 
-        for feature in 0..features {
-            let mut sum_grad = 0.0f32;
-            let mut sum_grad_norm = 0.0f32;
-            for row in 0..batch {
-                let idx = row * features + feature;
-                let normed = (input.data()[idx] - mean[feature]) * inv_std[feature];
-                let g = grad_output.data()[idx];
-                let g_gamma = g * gamma[feature];
-                sum_grad += g_gamma;
-                sum_grad_norm += g_gamma * normed;
-                grad_gamma[feature] += g * normed;
-                grad_beta[feature] += g;
-            }
-            for row in 0..batch {
-                let idx = row * features + feature;
-                let normed = (input.data()[idx] - mean[feature]) * inv_std[feature];
-                let g = grad_output.data()[idx];
-                let g_gamma = g * gamma[feature];
-                let term =
-                    (batch as f32 * g_gamma - sum_grad - normed * sum_grad_norm) / batch as f32;
-                grad_input[idx] = term * inv_std[feature];
-            }
-        }
-
-        let grad_gamma = Tensor::from_vec(1, features, grad_gamma)?;
-        let grad_beta = Tensor::from_vec(1, features, grad_beta)?;
+        let gradient_scale = 1.0 / batch as f32;
+        let (grad_gamma, grad_beta, affine_gradient_backend) =
+            backend_affine_gradients(grad_output, &normed, gradient_scale)?;
         self.gamma.accumulate_euclidean(&grad_gamma)?;
         self.beta.accumulate_euclidean(&grad_beta)?;
-        Tensor::from_vec(batch, features, grad_input)
+        emit_normalization_backward_meta(
+            "batch_norm_backward",
+            batch,
+            features,
+            "auto",
+            self.epsilon,
+            false,
+            Some(gradient_scale),
+            Some(tensor_util_backend_label(input_gradient_backend).to_string()),
+            Some(tensor_util_backend_label(input_gradient_backend)),
+            Some(tensor_util_backend_label(input_gradient_backend)),
+            Some(affine_gradient_backend),
+        );
+        Ok(output)
     }
 
     fn visit_parameters(
@@ -997,67 +1341,109 @@ impl Module for ZSpaceBatchNorm1d {
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
         self.guard_input(input)?;
         let (batch, features) = input.shape();
+        validate_finite_tensor("zspace_batchnorm_input", input)?;
+        let gamma = self.gamma.value().data();
+        let beta = self.beta.value().data();
+        validate_finite_slice("zspace_batchnorm_gamma", gamma)?;
+        validate_finite_slice("zspace_batchnorm_beta", beta)?;
+        if batch == 0 {
+            let tensor = Tensor::zeros(batch, features)?;
+            self.last_batch.set(Some(batch));
+            *self.last_mean.borrow_mut() = Some(vec![0.0; features]);
+            *self.last_inv_std.borrow_mut() = Some(vec![0.0; features]);
+            *self.last_normed.borrow_mut() = Some(Vec::new());
+            *self.last_projected.borrow_mut() = Some(Vec::new());
+            *self.last_jacobian.borrow_mut() = Some(Vec::new());
+            *self.last_radius.borrow_mut() = Some(Vec::new());
+            return Ok(tensor);
+        }
         let mut output = Vec::with_capacity(batch * features);
         let mut normed_cache = vec![0.0f32; batch * features];
         let mut projected_cache = vec![0.0f32; batch * features];
         let mut jacobian_cache = vec![0.0f32; batch * features];
         let mut radius = vec![0.0f32; features];
-        let gamma = self.gamma.value().data();
-        let beta = self.beta.value().data();
-        self.last_batch.set(Some(batch));
-        let (mean, variance) = if self.training.get() {
-            let (mean, variance) = self.compute_stats(input);
-            {
-                let mut running_mean = self.running_mean.borrow_mut();
-                let data = running_mean.data_mut();
-                for idx in 0..features {
-                    data[idx] = self.momentum * mean[idx] + (1.0 - self.momentum) * data[idx];
-                }
+        let training = self.training.get();
+        let mut next_running_mean = None;
+        let mut next_running_var = None;
+        let (mean, variance) = if training {
+            let (mean, variance) = self.compute_stats(input)?;
+            let current_running_mean = self.running_mean.borrow().data().to_vec();
+            let current_running_var = self.running_var.borrow().data().to_vec();
+            validate_finite_slice("zspace_batchnorm_running_mean", &current_running_mean)?;
+            validate_finite_slice("zspace_batchnorm_running_var", &current_running_var)?;
+            let mut updated_mean = current_running_mean;
+            let mut updated_var = current_running_var;
+            for idx in 0..features {
+                updated_mean[idx] =
+                    self.momentum * mean[idx] + (1.0 - self.momentum) * updated_mean[idx];
+                validate_finite_value("zspace_batchnorm_running_mean", updated_mean[idx])?;
+                updated_var[idx] =
+                    self.momentum * variance[idx] + (1.0 - self.momentum) * updated_var[idx];
+                validate_finite_value("zspace_batchnorm_running_var", updated_var[idx])?;
             }
-            {
-                let mut running_var = self.running_var.borrow_mut();
-                let data = running_var.data_mut();
-                for idx in 0..features {
-                    data[idx] = self.momentum * variance[idx] + (1.0 - self.momentum) * data[idx];
-                }
-            }
+            next_running_mean = Some(updated_mean);
+            next_running_var = Some(updated_var);
             (mean, variance)
         } else {
             let running_mean = self.running_mean.borrow();
             let running_var = self.running_var.borrow();
+            validate_finite_slice("zspace_batchnorm_running_mean", running_mean.data())?;
+            validate_finite_slice("zspace_batchnorm_running_var", running_var.data())?;
             (running_mean.data().to_vec(), running_var.data().to_vec())
         };
 
-        let inv_std: Vec<f32> = variance
-            .iter()
-            .map(|v| 1.0 / (v + self.epsilon).sqrt())
-            .collect();
-        *self.last_mean.borrow_mut() = Some(mean.clone());
-        *self.last_inv_std.borrow_mut() = Some(inv_std.clone());
+        let inv_std = inverse_stddev("zspace_batchnorm_invstd", &variance, self.epsilon)?;
 
         for row in 0..batch {
             let slice = &input.data()[row * features..(row + 1) * features];
             for feature in 0..features {
                 let idx = row * features + feature;
                 let normed = (slice[feature] - mean[feature]) * inv_std[feature];
+                validate_finite_value("zspace_batchnorm_normed", normed)?;
                 let (projected, jacobian, feature_radius) = self.project_normed(normed);
+                validate_finite_value("zspace_batchnorm_projected", projected)?;
+                validate_finite_value("zspace_batchnorm_jacobian", jacobian)?;
+                validate_finite_value("zspace_batchnorm_radius", feature_radius)?;
                 normed_cache[idx] = normed;
                 projected_cache[idx] = projected;
                 jacobian_cache[idx] = jacobian;
                 radius[feature] += feature_radius;
-                output.push(projected * gamma[feature] + beta[feature]);
+                validate_finite_value("zspace_batchnorm_radius", radius[feature])?;
+                let value = projected * gamma[feature] + beta[feature];
+                validate_finite_value("zspace_batchnorm_output", value)?;
+                output.push(value);
             }
         }
 
         for value in radius.iter_mut() {
             *value /= batch as f32;
+            validate_finite_value("zspace_batchnorm_radius", *value)?;
         }
+
+        let tensor = Tensor::from_vec(batch, features, output)?;
+        if training {
+            if let Some(updated) = next_running_mean {
+                self.running_mean
+                    .borrow_mut()
+                    .data_mut()
+                    .copy_from_slice(&updated);
+            }
+            if let Some(updated) = next_running_var {
+                self.running_var
+                    .borrow_mut()
+                    .data_mut()
+                    .copy_from_slice(&updated);
+            }
+        }
+        self.last_batch.set(Some(batch));
+        *self.last_mean.borrow_mut() = Some(mean);
+        *self.last_inv_std.borrow_mut() = Some(inv_std);
         *self.last_radius.borrow_mut() = Some(radius);
         *self.last_normed.borrow_mut() = Some(normed_cache);
-        *self.last_projected.borrow_mut() = Some(projected_cache.clone());
+        *self.last_projected.borrow_mut() = Some(projected_cache);
         *self.last_jacobian.borrow_mut() = Some(jacobian_cache);
 
-        Tensor::from_vec(batch, features, output)
+        Ok(tensor)
     }
 
     fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
@@ -1068,17 +1454,47 @@ impl Module for ZSpaceBatchNorm1d {
                 right: grad_output.shape(),
             });
         }
+        validate_finite_tensor("zspace_batchnorm_backward_input", input)?;
+        validate_finite_tensor("zspace_batchnorm_backward_grad_output", grad_output)?;
         if !self.training.get() {
             return Err(TensorError::InvalidValue {
                 label: "zspace_batchnorm_backward_eval",
             });
         }
 
-        if self.last_mean.borrow().is_none() {
-            return Err(TensorError::InvalidValue {
+        let (batch, features) = input.shape();
+        if batch == 0 {
+            let output = Tensor::zeros(batch, features)?;
+            emit_normalization_backward_meta(
+                "zspace_batch_norm_backward",
+                batch,
+                features,
+                "auto",
+                self.epsilon,
+                true,
+                None,
+                None,
+                None,
+                None,
+                None,
+            );
+            return Ok(output);
+        }
+
+        let mean = self
+            .last_mean
+            .borrow()
+            .clone()
+            .ok_or(TensorError::InvalidValue {
                 label: "zspace_batchnorm_cached_mean",
+            })?;
+        if mean.len() != features {
+            return Err(TensorError::DataLength {
+                expected: features,
+                got: mean.len(),
             });
         }
+        validate_finite_slice("zspace_batchnorm_cached_mean", &mean)?;
         let inv_std = self
             .last_inv_std
             .borrow()
@@ -1086,6 +1502,13 @@ impl Module for ZSpaceBatchNorm1d {
             .ok_or(TensorError::InvalidValue {
                 label: "zspace_batchnorm_cached_invstd",
             })?;
+        if inv_std.len() != features {
+            return Err(TensorError::DataLength {
+                expected: features,
+                got: inv_std.len(),
+            });
+        }
+        validate_finite_slice("zspace_batchnorm_cached_invstd", &inv_std)?;
         let normed = self
             .last_normed
             .borrow()
@@ -1093,6 +1516,13 @@ impl Module for ZSpaceBatchNorm1d {
             .ok_or(TensorError::InvalidValue {
                 label: "zspace_batchnorm_cached_normed",
             })?;
+        if normed.len() != batch * features {
+            return Err(TensorError::DataLength {
+                expected: batch * features,
+                got: normed.len(),
+            });
+        }
+        validate_finite_slice("zspace_batchnorm_cached_normed", &normed)?;
         let projected = self
             .last_projected
             .borrow()
@@ -1100,6 +1530,13 @@ impl Module for ZSpaceBatchNorm1d {
             .ok_or(TensorError::InvalidValue {
                 label: "zspace_batchnorm_cached_projected",
             })?;
+        if projected.len() != batch * features {
+            return Err(TensorError::DataLength {
+                expected: batch * features,
+                got: projected.len(),
+            });
+        }
+        validate_finite_slice("zspace_batchnorm_cached_projected", &projected)?;
         let jacobian = self
             .last_jacobian
             .borrow()
@@ -1107,45 +1544,56 @@ impl Module for ZSpaceBatchNorm1d {
             .ok_or(TensorError::InvalidValue {
                 label: "zspace_batchnorm_cached_jacobian",
             })?;
-
-        let (batch, features) = input.shape();
-        let gamma = self.gamma.value().data();
-        let mut grad_input = vec![0.0f32; batch * features];
-        let mut grad_gamma = vec![0.0f32; features];
-        let mut grad_beta = vec![0.0f32; features];
-        let mut grad_normed_cache = vec![0.0f32; batch * features];
-
-        for feature in 0..features {
-            let mut sum_grad = 0.0f32;
-            let mut sum_grad_norm = 0.0f32;
-            for row in 0..batch {
-                let idx = row * features + feature;
-                let go = grad_output.data()[idx];
-                let proj = projected[idx];
-                grad_gamma[feature] += go * proj;
-                grad_beta[feature] += go;
-                let go_gamma = go * gamma[feature];
-                let grad_norm = go_gamma * jacobian[idx];
-                grad_normed_cache[idx] = grad_norm;
-                sum_grad += grad_norm;
-                sum_grad_norm += grad_norm * normed[idx];
-            }
-            let inv = inv_std[feature];
-            for row in 0..batch {
-                let idx = row * features + feature;
-                let grad_norm = grad_normed_cache[idx];
-                let term = (batch as f32 * grad_norm - sum_grad - normed[idx] * sum_grad_norm)
-                    / batch as f32;
-                grad_input[idx] = term * inv;
-            }
+        if jacobian.len() != batch * features {
+            return Err(TensorError::DataLength {
+                expected: batch * features,
+                got: jacobian.len(),
+            });
         }
+        validate_finite_slice("zspace_batchnorm_cached_jacobian", &jacobian)?;
 
-        let grad_gamma_tensor = Tensor::from_vec(1, features, grad_gamma)?;
-        let grad_beta_tensor = Tensor::from_vec(1, features, grad_beta)?;
+        let gamma = self.gamma.value().data();
+        validate_finite_slice("zspace_batchnorm_gamma", gamma)?;
+        let input_gradient_backend =
+            current_tensor_util_backend_for_values(batch.saturating_mul(features));
+        let normed = Tensor::from_vec(batch, features, normed)?;
+        let grad_normed = backend_grad_normed(
+            grad_output,
+            gamma,
+            Some(&jacobian),
+            input_gradient_backend,
+            "zspace_batchnorm_backward_grad_norm",
+        )?;
+        let output = backend_batch_axis_input_gradient(
+            &grad_normed,
+            &normed,
+            &inv_std,
+            batch,
+            input_gradient_backend,
+            "zspace_batchnorm_backward_input_grad",
+        )?;
+
+        let gradient_scale = 1.0 / batch as f32;
+        let projected = Tensor::from_vec(batch, features, projected)?;
+        let (grad_gamma_tensor, grad_beta_tensor, affine_gradient_backend) =
+            backend_affine_gradients(grad_output, &projected, gradient_scale)?;
         self.gamma.accumulate_euclidean(&grad_gamma_tensor)?;
         self.beta.accumulate_euclidean(&grad_beta_tensor)?;
 
-        Tensor::from_vec(batch, features, grad_input)
+        emit_normalization_backward_meta(
+            "zspace_batch_norm_backward",
+            batch,
+            features,
+            "auto",
+            self.epsilon,
+            true,
+            Some(gradient_scale),
+            Some(tensor_util_backend_label(input_gradient_backend).to_string()),
+            Some(tensor_util_backend_label(input_gradient_backend)),
+            Some(tensor_util_backend_label(input_gradient_backend)),
+            Some(affine_gradient_backend),
+        );
+        Ok(output)
     }
 
     fn visit_parameters(
@@ -1249,9 +1697,24 @@ impl Module for ZSpaceLayerNorm {
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
         self.guard_input(input)?;
         let (rows, features) = input.shape();
+        validate_finite_tensor("zspace_layernorm_input", input)?;
         let gamma = self.gamma.value().data();
         let beta = self.beta.value().data();
+        validate_finite_slice("zspace_layernorm_gamma", gamma)?;
+        validate_finite_slice("zspace_layernorm_beta", beta)?;
         let epsilon = self.effective_epsilon();
+        validate_finite_value("zspace_layernorm_epsilon", epsilon)?;
+        if rows == 0 {
+            let tensor = Tensor::zeros(rows, features)?;
+            self.last_batch.set(Some(rows));
+            *self.last_mean.borrow_mut() = Some(Vec::new());
+            *self.last_inv_std.borrow_mut() = Some(Vec::new());
+            *self.last_normed.borrow_mut() = Some(Vec::new());
+            *self.last_projected.borrow_mut() = Some(Vec::new());
+            *self.last_jacobian.borrow_mut() = Some(Vec::new());
+            *self.last_radius.borrow_mut() = Some(Vec::new());
+            return Ok(tensor);
+        }
         let mut output = Vec::with_capacity(rows * features);
         let mut normed_cache = vec![0.0f32; rows * features];
         let mut projected_cache = vec![0.0f32; rows * features];
@@ -1263,42 +1726,67 @@ impl Module for ZSpaceLayerNorm {
         for row in 0..rows {
             let offset = row * features;
             let slice = &input.data()[offset..offset + features];
-            let mean: f32 = slice.iter().copied().sum::<f32>() / features as f32;
-            let variance: f32 = slice
-                .iter()
-                .map(|value| {
-                    let centered = *value - mean;
-                    centered * centered
-                })
-                .sum::<f32>()
-                / features as f32;
-            let denom = (variance + epsilon).sqrt();
-            let inv = 1.0 / denom.max(f32::MIN_POSITIVE);
+            let mut mean_sum = 0.0f32;
+            for &value in slice {
+                mean_sum += value;
+                validate_finite_value("zspace_layernorm_mean_sum", mean_sum)?;
+            }
+            let mean = mean_sum / features as f32;
+            validate_finite_value("zspace_layernorm_mean", mean)?;
+            let mut variance_sum = 0.0f32;
+            for &value in slice {
+                let centered = value - mean;
+                validate_finite_value("zspace_layernorm_centered", centered)?;
+                let squared = centered * centered;
+                validate_finite_value("zspace_layernorm_variance_sum", squared)?;
+                variance_sum += squared;
+                validate_finite_value("zspace_layernorm_variance_sum", variance_sum)?;
+            }
+            let variance = variance_sum / features as f32;
+            validate_finite_value("zspace_layernorm_variance", variance)?;
+            let denom = variance + epsilon;
+            validate_finite_value("zspace_layernorm_invstd", denom)?;
+            if denom <= 0.0 {
+                return Err(TensorError::InvalidValue {
+                    label: "zspace_layernorm_invstd",
+                });
+            }
+            let inv = denom.sqrt().recip();
+            validate_finite_value("zspace_layernorm_invstd", inv)?;
             means[row] = mean;
             inv_std[row] = inv;
             let mut row_radius = 0.0f32;
             for feature in 0..features {
                 let idx = offset + feature;
                 let normed = (slice[feature] - mean) * inv;
+                validate_finite_value("zspace_layernorm_normed", normed)?;
                 let (projected, jacobian, feature_radius) = self.project_normed(normed);
+                validate_finite_value("zspace_layernorm_projected", projected)?;
+                validate_finite_value("zspace_layernorm_jacobian", jacobian)?;
+                validate_finite_value("zspace_layernorm_radius", feature_radius)?;
                 normed_cache[idx] = normed;
                 projected_cache[idx] = projected;
                 jacobian_cache[idx] = jacobian;
                 row_radius += feature_radius;
-                output.push(projected * gamma[feature] + beta[feature]);
+                validate_finite_value("zspace_layernorm_radius", row_radius)?;
+                let value = projected * gamma[feature] + beta[feature];
+                validate_finite_value("zspace_layernorm_output", value)?;
+                output.push(value);
             }
             radius[row] = row_radius / features as f32;
+            validate_finite_value("zspace_layernorm_radius", radius[row])?;
         }
 
+        let tensor = Tensor::from_vec(rows, features, output)?;
         self.last_batch.set(Some(rows));
         *self.last_mean.borrow_mut() = Some(means);
         *self.last_inv_std.borrow_mut() = Some(inv_std);
         *self.last_normed.borrow_mut() = Some(normed_cache);
-        *self.last_projected.borrow_mut() = Some(projected_cache.clone());
+        *self.last_projected.borrow_mut() = Some(projected_cache);
         *self.last_jacobian.borrow_mut() = Some(jacobian_cache);
         *self.last_radius.borrow_mut() = Some(radius);
 
-        Tensor::from_vec(rows, features, output)
+        Ok(tensor)
     }
 
     fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
@@ -1309,12 +1797,45 @@ impl Module for ZSpaceLayerNorm {
                 right: grad_output.shape(),
             });
         }
+        validate_finite_tensor("zspace_layernorm_backward_input", input)?;
+        validate_finite_tensor("zspace_layernorm_backward_grad_output", grad_output)?;
         let (rows, features) = input.shape();
+        if rows == 0 {
+            let output = Tensor::zeros(rows, features)?;
+            emit_normalization_backward_meta(
+                "zspace_layer_norm_backward",
+                rows,
+                features,
+                current_layer_norm_requested_label(),
+                self.effective_epsilon(),
+                true,
+                None,
+                None,
+                None,
+                None,
+                None,
+            );
+            return Ok(output);
+        }
         if self.last_batch.get().unwrap_or_default() != rows {
             return Err(TensorError::InvalidValue {
                 label: "zspace_layernorm_cached_batch",
             });
         }
+        let mean = self
+            .last_mean
+            .borrow()
+            .clone()
+            .ok_or(TensorError::InvalidValue {
+                label: "zspace_layernorm_cached_mean",
+            })?;
+        if mean.len() != rows {
+            return Err(TensorError::DataLength {
+                expected: rows,
+                got: mean.len(),
+            });
+        }
+        validate_finite_slice("zspace_layernorm_cached_mean", &mean)?;
         let inv_std = self
             .last_inv_std
             .borrow()
@@ -1322,6 +1843,13 @@ impl Module for ZSpaceLayerNorm {
             .ok_or(TensorError::InvalidValue {
                 label: "zspace_layernorm_cached_invstd",
             })?;
+        if inv_std.len() != rows {
+            return Err(TensorError::DataLength {
+                expected: rows,
+                got: inv_std.len(),
+            });
+        }
+        validate_finite_slice("zspace_layernorm_cached_invstd", &inv_std)?;
         let normed = self
             .last_normed
             .borrow()
@@ -1329,6 +1857,13 @@ impl Module for ZSpaceLayerNorm {
             .ok_or(TensorError::InvalidValue {
                 label: "zspace_layernorm_cached_normed",
             })?;
+        if normed.len() != rows * features {
+            return Err(TensorError::DataLength {
+                expected: rows * features,
+                got: normed.len(),
+            });
+        }
+        validate_finite_slice("zspace_layernorm_cached_normed", &normed)?;
         let projected = self
             .last_projected
             .borrow()
@@ -1336,6 +1871,13 @@ impl Module for ZSpaceLayerNorm {
             .ok_or(TensorError::InvalidValue {
                 label: "zspace_layernorm_cached_projected",
             })?;
+        if projected.len() != rows * features {
+            return Err(TensorError::DataLength {
+                expected: rows * features,
+                got: projected.len(),
+            });
+        }
+        validate_finite_slice("zspace_layernorm_cached_projected", &projected)?;
         let jacobian = self
             .last_jacobian
             .borrow()
@@ -1343,45 +1885,55 @@ impl Module for ZSpaceLayerNorm {
             .ok_or(TensorError::InvalidValue {
                 label: "zspace_layernorm_cached_jacobian",
             })?;
+        if jacobian.len() != rows * features {
+            return Err(TensorError::DataLength {
+                expected: rows * features,
+                got: jacobian.len(),
+            });
+        }
+        validate_finite_slice("zspace_layernorm_cached_jacobian", &jacobian)?;
 
         let gamma = self.gamma.value().data();
-        let mut grad_input = vec![0.0f32; rows * features];
-        let mut grad_gamma = vec![0.0f32; features];
-        let mut grad_beta = vec![0.0f32; features];
-        let mut grad_normed_cache = vec![0.0f32; rows * features];
+        validate_finite_slice("zspace_layernorm_gamma", gamma)?;
+        let input_gradient_backend =
+            current_tensor_util_backend_for_values(rows.saturating_mul(features));
+        let normed = Tensor::from_vec(rows, features, normed)?;
+        let grad_normed = backend_grad_normed(
+            grad_output,
+            gamma,
+            Some(&jacobian),
+            input_gradient_backend,
+            "zspace_layernorm_backward_grad_norm",
+        )?;
+        let output = backend_layer_axis_input_gradient(
+            &grad_normed,
+            &normed,
+            &inv_std,
+            input_gradient_backend,
+            "zspace_layernorm_backward_input_grad",
+        )?;
 
-        for (row, &inv) in inv_std.iter().enumerate() {
-            let offset = row * features;
-            let mut sum_grad = 0.0f32;
-            let mut sum_grad_norm = 0.0f32;
-            for feature in 0..features {
-                let idx = offset + feature;
-                let go = grad_output.data()[idx];
-                let proj = projected[idx];
-                grad_gamma[feature] += go * proj;
-                grad_beta[feature] += go;
-                let go_gamma = go * gamma[feature];
-                let grad_norm = go_gamma * jacobian[idx];
-                grad_normed_cache[idx] = grad_norm;
-                sum_grad += grad_norm;
-                sum_grad_norm += grad_norm * normed[idx];
-            }
-            for feature in 0..features {
-                let idx = offset + feature;
-                let grad_norm = grad_normed_cache[idx];
-                let norm_value = normed[idx];
-                let term = (features as f32 * grad_norm - sum_grad - norm_value * sum_grad_norm)
-                    / features as f32;
-                grad_input[idx] = term * inv;
-            }
-        }
-
-        let grad_gamma_tensor = Tensor::from_vec(1, features, grad_gamma)?;
-        let grad_beta_tensor = Tensor::from_vec(1, features, grad_beta)?;
+        let gradient_scale = 1.0 / rows as f32;
+        let projected = Tensor::from_vec(rows, features, projected)?;
+        let (grad_gamma_tensor, grad_beta_tensor, affine_gradient_backend) =
+            backend_affine_gradients(grad_output, &projected, gradient_scale)?;
         self.gamma.accumulate_euclidean(&grad_gamma_tensor)?;
         self.beta.accumulate_euclidean(&grad_beta_tensor)?;
 
-        Tensor::from_vec(rows, features, grad_input)
+        emit_normalization_backward_meta(
+            "zspace_layer_norm_backward",
+            rows,
+            features,
+            current_layer_norm_requested_label(),
+            self.effective_epsilon(),
+            true,
+            Some(gradient_scale),
+            Some(tensor_util_backend_label(input_gradient_backend).to_string()),
+            Some(tensor_util_backend_label(input_gradient_backend)),
+            Some(tensor_util_backend_label(input_gradient_backend)),
+            Some(affine_gradient_backend),
+        );
+        Ok(output)
     }
 
     fn visit_parameters(
@@ -1404,10 +1956,15 @@ impl Module for ZSpaceLayerNorm {
 impl Module for LayerNorm {
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
         self.guard_input(input)?;
-        input.layer_norm_affine(
+        let (rows, cols) = input.shape();
+        if rows == 0 {
+            return Tensor::zeros(rows, cols);
+        }
+        input.layer_norm_affine_with_backend(
             self.gamma.value(),
             self.beta.value(),
             self.effective_epsilon(),
+            current_layer_norm_backend(),
         )
     }
 
@@ -1421,52 +1978,102 @@ impl Module for LayerNorm {
         }
         let (rows, cols) = input.shape();
         let epsilon = self.effective_epsilon();
+        validate_finite_tensor("layernorm_backward_input", input)?;
+        validate_finite_tensor("layernorm_backward_grad_output", grad_output)?;
+        if rows == 0 {
+            let output = Tensor::zeros(rows, cols)?;
+            emit_normalization_backward_meta(
+                "layer_norm_backward",
+                rows,
+                cols,
+                current_layer_norm_requested_label(),
+                epsilon,
+                false,
+                None,
+                None,
+                None,
+                None,
+                None,
+            );
+            return Ok(output);
+        }
         let gamma = self.gamma.value().data().to_vec();
-        let mut grad_input = vec![0.0f32; rows * cols];
-        let mut grad_gamma = vec![0.0f32; cols];
-        let mut grad_beta = vec![0.0f32; cols];
+        validate_finite_slice("layernorm_gamma", &gamma)?;
+        let mut normed_values = vec![0.0f32; rows * cols];
+        let mut inv_std = vec![0.0f32; rows];
 
         for r in 0..rows {
             let offset = r * cols;
             let slice = &input.data()[offset..offset + cols];
-            let grad_slice = &grad_output.data()[offset..offset + cols];
-            let mean: f32 = slice.iter().copied().sum::<f32>() / cols as f32;
-            let variance: f32 = slice
-                .iter()
-                .map(|x| {
-                    let centered = *x - mean;
+            let mean =
+                checked_sum("layernorm_backward_mean_sum", slice.iter().copied())? / cols as f32;
+            validate_finite_value("layernorm_backward_mean", mean)?;
+            let variance_sum = checked_sum(
+                "layernorm_backward_variance_sum",
+                slice.iter().map(|&value| {
+                    let centered = value - mean;
                     centered * centered
-                })
-                .sum::<f32>()
-                / cols as f32;
-            let denom = (variance + epsilon).sqrt();
-            let inv_denom = 1.0 / denom;
-            let mut normed = vec![0.0f32; cols];
-            for c in 0..cols {
-                normed[c] = (slice[c] - mean) * inv_denom;
-                grad_gamma[c] += grad_slice[c] * normed[c];
-                grad_beta[c] += grad_slice[c];
+                }),
+            )?;
+            let variance =
+                checked_finite_value("layernorm_backward_variance", variance_sum / cols as f32)?;
+            let denom =
+                checked_finite_value("layernorm_backward_denom", (variance + epsilon).sqrt())?;
+            if denom <= 0.0 {
+                return Err(TensorError::InvalidValue {
+                    label: "layernorm_backward_denom",
+                });
             }
-            let dot_norm_grad: f32 = grad_slice
-                .iter()
-                .zip(normed.iter())
-                .map(|(g, n)| g * n)
-                .sum();
-            let sum_grad: f32 = grad_slice.iter().sum();
+            let inv_denom = checked_finite_value("layernorm_backward_inv_denom", 1.0 / denom)?;
+            inv_std[r] = inv_denom;
             for c in 0..cols {
-                let g = grad_slice[c];
-                let n = normed[c];
-                let term = (cols as f32 * g - sum_grad - n * dot_norm_grad) / cols as f32;
-                grad_input[offset + c] = term * gamma[c] * inv_denom;
+                let normed = checked_finite_value(
+                    "layernorm_backward_normed",
+                    (slice[c] - mean) * inv_denom,
+                )?;
+                normed_values[offset + c] = normed;
             }
         }
 
-        let grad_gamma_tensor = Tensor::from_vec(1, cols, grad_gamma)?;
-        let grad_beta_tensor = Tensor::from_vec(1, cols, grad_beta)?;
+        let gradient_scale = 1.0 / rows as f32;
+        validate_finite_slice("layernorm_backward_normed", &normed_values)?;
+        validate_finite_slice("layernorm_backward_inv_denom", &inv_std)?;
+        let normed = Tensor::from_vec(rows, cols, normed_values)?;
+        let input_gradient_backend =
+            current_tensor_util_backend_for_values(rows.saturating_mul(cols));
+        let grad_normed = backend_grad_normed(
+            grad_output,
+            &gamma,
+            None,
+            input_gradient_backend,
+            "layernorm_backward_grad_normed",
+        )?;
+        let output = backend_layer_axis_input_gradient(
+            &grad_normed,
+            &normed,
+            &inv_std,
+            input_gradient_backend,
+            "layernorm_backward_input_grad",
+        )?;
+        let (grad_gamma_tensor, grad_beta_tensor, affine_gradient_backend) =
+            backend_affine_gradients(grad_output, &normed, gradient_scale)?;
         self.gamma.accumulate_euclidean(&grad_gamma_tensor)?;
         self.beta.accumulate_euclidean(&grad_beta_tensor)?;
 
-        Tensor::from_vec(rows, cols, grad_input)
+        emit_normalization_backward_meta(
+            "layer_norm_backward",
+            rows,
+            cols,
+            current_layer_norm_requested_label(),
+            epsilon,
+            false,
+            Some(gradient_scale),
+            Some("hybrid".to_string()),
+            Some(tensor_util_backend_label(input_gradient_backend)),
+            Some("cpu"),
+            Some(affine_gradient_backend),
+        );
+        Ok(output)
     }
 
     fn visit_parameters(
@@ -1489,9 +2096,37 @@ impl Module for LayerNorm {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "wgpu")]
+    use crate::execution::{push_backend_policy, BackendPolicy};
+    #[cfg(feature = "wgpu")]
+    use st_core::backend::device_caps::DeviceCaps;
+    #[cfg(feature = "wgpu")]
+    use st_tensor::backend::wgpu_dense;
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
 
     fn demo_input() -> Tensor {
         Tensor::from_vec(2, 3, vec![0.5, -1.0, 1.5, 2.0, -0.5, 0.0]).unwrap()
+    }
+
+    fn assert_same_tensor(left: &Tensor, right: &Tensor) {
+        assert_eq!(left.shape(), right.shape());
+        assert_eq!(left.data(), right.data());
+    }
+
+    fn assert_close_slice(left: &[f32], right: &[f32]) {
+        assert_eq!(left.len(), right.len());
+        for (idx, (&left, &right)) in left.iter().zip(right.iter()).enumerate() {
+            let delta = (left - right).abs();
+            assert!(
+                delta <= 1.0e-6,
+                "mismatch at {idx}: left={left} right={right} delta={delta}"
+            );
+        }
     }
 
     #[test]
@@ -1532,6 +2167,366 @@ mod tests {
     }
 
     #[test]
+    fn layer_norm_backward_matches_finite_difference_with_nonuniform_gamma() {
+        let mut layer = LayerNorm::new("demo", 3, -1.0, 1e-5).unwrap();
+        layer
+            .gamma
+            .value_mut()
+            .data_mut()
+            .copy_from_slice(&[1.5, -0.75, 0.35]);
+        layer
+            .beta
+            .value_mut()
+            .data_mut()
+            .copy_from_slice(&[0.1, -0.2, 0.05]);
+        let input_values = vec![0.45, -0.8, 1.25, -0.35, 0.9, -1.1];
+        let input = Tensor::from_vec(2, 3, input_values.clone()).unwrap();
+        let grad_output = Tensor::from_vec(2, 3, vec![0.2, -0.15, 0.35, -0.25, 0.1, 0.3]).unwrap();
+
+        let grad_input = layer.backward(&input, &grad_output).unwrap();
+        let analytic = grad_input.data()[0];
+
+        let epsilon = 1.0e-3f32;
+        let loss_at = |values: Vec<f32>| {
+            let tensor = Tensor::from_vec(2, 3, values).unwrap();
+            let output = layer.forward(&tensor).unwrap();
+            output
+                .data()
+                .iter()
+                .zip(grad_output.data().iter())
+                .map(|(&value, &grad)| value * grad)
+                .sum::<f32>()
+        };
+        let mut plus = input_values.clone();
+        plus[0] += epsilon;
+        let mut minus = input_values;
+        minus[0] -= epsilon;
+        let finite_difference = (loss_at(plus) - loss_at(minus)) / (2.0 * epsilon);
+
+        assert!(
+            (analytic - finite_difference).abs() < 2.5e-3,
+            "analytic={analytic} finite_difference={finite_difference}"
+        );
+    }
+
+    #[test]
+    fn normalization_affine_gradients_are_batch_normalized() {
+        let mut ln_single = LayerNorm::new("ln", 3, -1.0, 1e-5).unwrap();
+        let input_single = Tensor::from_vec(1, 3, vec![0.45, -0.8, 1.25]).unwrap();
+        let grad_single = Tensor::from_vec(1, 3, vec![0.2, -0.15, 0.35]).unwrap();
+        let _ = ln_single.backward(&input_single, &grad_single).unwrap();
+
+        let mut ln_repeated = LayerNorm::new("ln", 3, -1.0, 1e-5).unwrap();
+        let input_repeated =
+            Tensor::from_vec(2, 3, vec![0.45, -0.8, 1.25, 0.45, -0.8, 1.25]).unwrap();
+        let grad_repeated =
+            Tensor::from_vec(2, 3, vec![0.2, -0.15, 0.35, 0.2, -0.15, 0.35]).unwrap();
+        let _ = ln_repeated
+            .backward(&input_repeated, &grad_repeated)
+            .unwrap();
+        assert_close_slice(
+            ln_single.gamma.gradient().unwrap().data(),
+            ln_repeated.gamma.gradient().unwrap().data(),
+        );
+        assert_close_slice(
+            ln_single.beta.gradient().unwrap().data(),
+            ln_repeated.beta.gradient().unwrap().data(),
+        );
+
+        let bn_input = Tensor::from_vec(2, 2, vec![0.2, -0.3, 1.0, 0.5]).unwrap();
+        let bn_grad = Tensor::from_vec(2, 2, vec![0.1, -0.2, 0.05, 0.3]).unwrap();
+        let mut bn_base = BatchNorm1d::new("bn", 2, 0.2, 1e-5).unwrap();
+        let _ = bn_base.forward(&bn_input).unwrap();
+        let _ = bn_base.backward(&bn_input, &bn_grad).unwrap();
+
+        let bn_input_repeated =
+            Tensor::from_vec(4, 2, vec![0.2, -0.3, 1.0, 0.5, 0.2, -0.3, 1.0, 0.5]).unwrap();
+        let bn_grad_repeated =
+            Tensor::from_vec(4, 2, vec![0.1, -0.2, 0.05, 0.3, 0.1, -0.2, 0.05, 0.3]).unwrap();
+        let mut bn_repeated = BatchNorm1d::new("bn", 2, 0.2, 1e-5).unwrap();
+        let _ = bn_repeated.forward(&bn_input_repeated).unwrap();
+        let _ = bn_repeated
+            .backward(&bn_input_repeated, &bn_grad_repeated)
+            .unwrap();
+        assert_close_slice(
+            bn_base.gamma.gradient().unwrap().data(),
+            bn_repeated.gamma.gradient().unwrap().data(),
+        );
+        assert_close_slice(
+            bn_base.beta.gradient().unwrap().data(),
+            bn_repeated.beta.gradient().unwrap().data(),
+        );
+
+        let mut zln_single = ZSpaceLayerNorm::new("zln", 3, -0.9, 1e-5)
+            .unwrap()
+            .with_projector_gain(0.7)
+            .unwrap();
+        let _ = zln_single.forward(&input_single).unwrap();
+        let _ = zln_single.backward(&input_single, &grad_single).unwrap();
+        let mut zln_repeated = ZSpaceLayerNorm::new("zln", 3, -0.9, 1e-5)
+            .unwrap()
+            .with_projector_gain(0.7)
+            .unwrap();
+        let _ = zln_repeated.forward(&input_repeated).unwrap();
+        let _ = zln_repeated
+            .backward(&input_repeated, &grad_repeated)
+            .unwrap();
+        assert_close_slice(
+            zln_single.gamma.gradient().unwrap().data(),
+            zln_repeated.gamma.gradient().unwrap().data(),
+        );
+        assert_close_slice(
+            zln_single.beta.gradient().unwrap().data(),
+            zln_repeated.beta.gradient().unwrap().data(),
+        );
+
+        let mut zbn_base = ZSpaceBatchNorm1d::new("zbn", 2, -0.75, 0.5, 1e-4)
+            .unwrap()
+            .with_projector_gain(0.6)
+            .unwrap();
+        let _ = zbn_base.forward(&bn_input).unwrap();
+        let _ = zbn_base.backward(&bn_input, &bn_grad).unwrap();
+        let mut zbn_repeated = ZSpaceBatchNorm1d::new("zbn", 2, -0.75, 0.5, 1e-4)
+            .unwrap()
+            .with_projector_gain(0.6)
+            .unwrap();
+        let _ = zbn_repeated.forward(&bn_input_repeated).unwrap();
+        let _ = zbn_repeated
+            .backward(&bn_input_repeated, &bn_grad_repeated)
+            .unwrap();
+        assert_close_slice(
+            zbn_base.gamma.gradient().unwrap().data(),
+            zbn_repeated.gamma.gradient().unwrap().data(),
+        );
+        assert_close_slice(
+            zbn_base.beta.gradient().unwrap().data(),
+            zbn_repeated.beta.gradient().unwrap().data(),
+        );
+    }
+
+    #[test]
+    fn layer_norm_backward_emits_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let mut layer = LayerNorm::new("demo", 3, -1.0, 1e-5).unwrap();
+        let input = demo_input();
+        let grad_output = Tensor::from_vec(2, 3, vec![0.1, -0.2, 0.3, -0.1, 0.2, -0.3]).unwrap();
+        let _ = layer.forward(&input).unwrap();
+        let _ = layer.backward(&input, &grad_output).unwrap();
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "layer_norm_backward" && data["rows"] == 2 && data["cols"] == 3
+            })
+            .expect("layer norm backward metadata event");
+        assert_eq!(meta.1["backend"], "hybrid");
+        assert_eq!(meta.1["requested_backend"], "auto");
+        assert_eq!(meta.1["input_gradient_backend"], "hybrid");
+        assert_eq!(meta.1["input_gradient_reduction_backend"], "auto");
+        assert_eq!(meta.1["normalization_backend"], "cpu");
+        assert_eq!(meta.1["input_gradient_axis"], "feature");
+        assert_eq!(meta.1["input_gradient_formula"], "affine_norm_vjp");
+        assert_eq!(meta.1["affine_gradient_backend"], "auto");
+        assert_eq!(meta.1["gradient_scale"], 0.5);
+        assert_eq!(meta.1["parameter_gradient_scale"], 0.5);
+        assert_eq!(meta.1["input_gradient_scale"], 1.0);
+        assert!(events.iter().any(|(op_name, data)| {
+            *op_name == "hadamard" && data["rows"] == 2 && data["cols"] == 3
+        }));
+        let scaled_reductions = events
+            .iter()
+            .filter(|(op_name, data)| {
+                *op_name == "sum_axis0_scaled"
+                    && data["rows"] == 2
+                    && data["cols"] == 3
+                    && data["scale"] == 0.5
+            })
+            .count();
+        assert!(
+            scaled_reductions >= 2,
+            "expected gamma and beta reductions, saw {scaled_reductions}"
+        );
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn layer_norm_forced_wgpu_routes_input_and_affine_reducers() {
+        if !wgpu_dense::is_available() {
+            return;
+        }
+        let _lock = observer_lock();
+        let previous_threshold = std::env::var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES").ok();
+        std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", "1");
+
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
+        let mut layer = LayerNorm::new("demo", 3, -1.0, 1e-5).unwrap();
+        let input = demo_input();
+        let grad_output = Tensor::from_vec(2, 3, vec![0.1, -0.2, 0.3, -0.1, 0.2, -0.3]).unwrap();
+        {
+            let _guard = push_backend_policy(policy);
+            let _ = layer.forward(&input).unwrap();
+            let _ = layer.backward(&input, &grad_output).unwrap();
+        }
+
+        st_tensor::set_tensor_op_meta_observer(previous);
+        match previous_threshold {
+            Some(value) => std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", value),
+            None => std::env::remove_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES"),
+        }
+
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "layer_norm_backward" && data["rows"] == 2 && data["cols"] == 3
+            })
+            .expect("layer norm backward metadata event");
+        assert_eq!(meta.1["backend"], "hybrid");
+        assert_eq!(meta.1["requested_backend"], "wgpu");
+        assert_eq!(meta.1["input_gradient_backend"], "hybrid");
+        assert_eq!(meta.1["input_gradient_reduction_backend"], "wgpu");
+        assert_eq!(meta.1["normalization_backend"], "cpu");
+        assert_eq!(meta.1["input_gradient_axis"], "feature");
+        assert_eq!(meta.1["input_gradient_formula"], "affine_norm_vjp");
+        assert_eq!(meta.1["affine_gradient_backend"], "wgpu");
+        assert!(events
+            .iter()
+            .any(|(op_name, data)| *op_name == "hadamard" && data["backend"] == "wgpu_dense"));
+        let scaled_wgpu_reductions = events
+            .iter()
+            .filter(|(op_name, data)| {
+                *op_name == "sum_axis0_scaled"
+                    && data["rows"] == 2
+                    && data["cols"] == 3
+                    && data["backend"] == "wgpu_dense"
+            })
+            .count();
+        assert!(
+            scaled_wgpu_reductions >= 2,
+            "expected WGPU gamma and beta reductions, saw {scaled_wgpu_reductions}"
+        );
+        assert!(events
+            .iter()
+            .any(|(op_name, data)| { *op_name == "sum_axis0" && data["backend"] == "wgpu_dense" }));
+        assert!(events
+            .iter()
+            .any(|(op_name, data)| { *op_name == "mul_row" && data["backend"] == "wgpu_dense" }));
+    }
+
+    #[test]
+    fn normalization_backward_affine_reducers_emit_tensor_utility_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let mut batch_norm = BatchNorm1d::new("bn", 2, 0.2, 1e-5).unwrap();
+        let bn_input = Tensor::from_vec(3, 2, vec![0.2, -0.3, 1.0, 0.5, -0.4, 0.9]).unwrap();
+        let bn_grad = Tensor::from_vec(3, 2, vec![0.1, -0.2, 0.05, 0.3, -0.15, 0.25]).unwrap();
+        let _ = batch_norm.forward(&bn_input).unwrap();
+        let _ = batch_norm.backward(&bn_input, &bn_grad).unwrap();
+
+        let mut zspace_batch_norm = ZSpaceBatchNorm1d::new("zbn", 2, -0.75, 0.5, 1e-4)
+            .unwrap()
+            .with_projector_gain(0.6)
+            .unwrap();
+        let zbn_input = Tensor::from_vec(2, 2, vec![0.2, -0.3, 1.0, 0.5]).unwrap();
+        let zbn_grad = Tensor::from_vec(2, 2, vec![0.1, -0.2, 0.05, 0.3]).unwrap();
+        let _ = zspace_batch_norm.forward(&zbn_input).unwrap();
+        let _ = zspace_batch_norm.backward(&zbn_input, &zbn_grad).unwrap();
+
+        let mut zspace_layer_norm = ZSpaceLayerNorm::new("zln", 3, -0.9, 1e-5)
+            .unwrap()
+            .with_projector_gain(0.7)
+            .unwrap();
+        let zln_input = Tensor::from_vec(2, 3, vec![0.45, -0.8, 1.25, -0.2, 0.4, 0.9]).unwrap();
+        let zln_grad = Tensor::from_vec(2, 3, vec![0.2, -0.15, 0.35, -0.25, 0.1, 0.3]).unwrap();
+        let _ = zspace_layer_norm.forward(&zln_input).unwrap();
+        let _ = zspace_layer_norm.backward(&zln_input, &zln_grad).unwrap();
+
+        st_tensor::set_tensor_op_meta_observer(previous);
+        let events = events.lock().unwrap();
+        for (rows, cols) in [(3, 2), (2, 2), (2, 3)] {
+            assert!(
+                events.iter().any(|(op_name, data)| {
+                    *op_name == "hadamard" && data["rows"] == rows && data["cols"] == cols
+                }),
+                "missing hadamard reducer meta for {rows}x{cols}"
+            );
+            let scaled_reductions = events
+                .iter()
+                .filter(|(op_name, data)| {
+                    *op_name == "sum_axis0_scaled" && data["rows"] == rows && data["cols"] == cols
+                })
+                .count();
+            assert!(
+                scaled_reductions >= 2,
+                "expected gamma/beta reductions for {rows}x{cols}, saw {scaled_reductions}"
+            );
+        }
+    }
+
+    #[test]
+    fn layer_norm_empty_batch_forward_backward_skips_parameter_updates() {
+        let mut layer = LayerNorm::new("demo", 3, -1.0, 1e-5).unwrap();
+        let input = Tensor::from_vec(0, 3, Vec::new()).unwrap();
+        let output = layer.forward(&input).unwrap();
+        assert_eq!(output.shape(), (0, 3));
+        assert!(output.data().is_empty());
+
+        let grad_output = Tensor::from_vec(0, 3, Vec::new()).unwrap();
+        let grad_input = layer.backward(&input, &grad_output).unwrap();
+        assert_eq!(grad_input.shape(), (0, 3));
+        assert!(grad_input.data().is_empty());
+        assert!(layer.gamma.gradient().is_none());
+        assert!(layer.beta.gradient().is_none());
+    }
+
+    #[test]
+    fn layer_norm_backward_rejects_overflow_without_accumulating() {
+        let mut layer = LayerNorm::new("ln", 3, -1.0, 1e-5).unwrap();
+        let input = Tensor::from_vec(1, 3, vec![f32::MAX, -f32::MAX, 0.0]).unwrap();
+        let grad_output = Tensor::from_vec(1, 3, vec![0.1, -0.2, 0.3]).unwrap();
+
+        let err = layer.backward(&input, &grad_output).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "layernorm_backward_variance_sum",
+                value,
+            } if value.is_infinite()
+        ));
+        assert!(layer.gamma.gradient().is_none());
+        assert!(layer.beta.gradient().is_none());
+    }
+
+    #[test]
     fn batch_norm_forward_normalises_features() {
         let layer = BatchNorm1d::new("bn", 3, 0.1, 1e-5).unwrap();
         let input = Tensor::from_vec(
@@ -1558,6 +2553,51 @@ mod tests {
             var /= 4.0;
             assert!(mean.abs() < 1e-4);
             assert!((var - 1.0).abs() < 1e-3);
+        }
+    }
+
+    #[test]
+    fn batch_norm_forward_stats_emit_tensor_utility_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let batch_norm = BatchNorm1d::new("bn", 2, 0.2, 1e-5).unwrap();
+        let bn_input = Tensor::from_vec(3, 2, vec![0.2, -0.3, 1.0, 0.5, -0.4, 0.9]).unwrap();
+        let _ = batch_norm.forward(&bn_input).unwrap();
+
+        let zspace_batch_norm = ZSpaceBatchNorm1d::new("zbn", 2, -0.75, 0.5, 1e-4)
+            .unwrap()
+            .with_projector_gain(0.6)
+            .unwrap();
+        let zbn_input = Tensor::from_vec(2, 2, vec![0.2, -0.3, 1.0, 0.5]).unwrap();
+        let _ = zspace_batch_norm.forward(&zbn_input).unwrap();
+
+        st_tensor::set_tensor_op_meta_observer(previous);
+        let events = events.lock().unwrap();
+        for (rows, cols) in [(3, 2), (2, 2)] {
+            assert!(
+                events.iter().any(|(op_name, data)| {
+                    *op_name == "hadamard" && data["rows"] == rows && data["cols"] == cols
+                }),
+                "missing variance hadamard meta for {rows}x{cols}"
+            );
+            let scaled_reductions = events
+                .iter()
+                .filter(|(op_name, data)| {
+                    *op_name == "sum_axis0_scaled" && data["rows"] == rows && data["cols"] == cols
+                })
+                .count();
+            assert!(
+                scaled_reductions >= 2,
+                "expected mean and variance reductions for {rows}x{cols}, saw {scaled_reductions}"
+            );
         }
     }
 
@@ -1645,6 +2685,153 @@ mod tests {
         for (observed, anticipated) in grad_input.data().iter().zip(expected.iter()) {
             assert!((observed - anticipated).abs() < 1e-5);
         }
+    }
+
+    #[test]
+    fn batch_norm_empty_batch_forward_backward_skips_stats_and_updates() {
+        let mut layer = BatchNorm1d::new("bn", 2, 0.2, 1e-5).unwrap();
+        let running_mean_before = layer.running_mean.borrow().clone();
+        let running_var_before = layer.running_var.borrow().clone();
+        let input = Tensor::from_vec(0, 2, Vec::new()).unwrap();
+
+        let output = layer.forward(&input).unwrap();
+        assert_eq!(output.shape(), (0, 2));
+        assert!(output.data().is_empty());
+        assert_same_tensor(&layer.running_mean.borrow(), &running_mean_before);
+        assert_same_tensor(&layer.running_var.borrow(), &running_var_before);
+
+        let grad_output = Tensor::from_vec(0, 2, Vec::new()).unwrap();
+        let grad_input = layer.backward(&input, &grad_output).unwrap();
+        assert_eq!(grad_input.shape(), (0, 2));
+        assert!(grad_input.data().is_empty());
+        assert!(layer.gamma.gradient().is_none());
+        assert!(layer.beta.gradient().is_none());
+    }
+
+    #[test]
+    fn batch_norm_rejects_non_finite_input_without_mutating_stats() {
+        let layer = BatchNorm1d::new("bn", 2, 0.2, 1e-5).unwrap();
+        let running_mean_before = layer.running_mean.borrow().clone();
+        let running_var_before = layer.running_var.borrow().clone();
+        let input = Tensor::from_vec(2, 2, vec![0.2, f32::NAN, 1.0, 0.5]).unwrap();
+
+        let err = layer.forward(&input).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "batchnorm_input",
+                value,
+            } if value.is_nan()
+        ));
+        assert_same_tensor(&layer.running_mean.borrow(), &running_mean_before);
+        assert_same_tensor(&layer.running_var.borrow(), &running_var_before);
+        assert!(layer.last_mean.borrow().is_none());
+        assert!(layer.last_inv_std.borrow().is_none());
+    }
+
+    #[test]
+    fn batch_norm_rejects_overflowing_variance_without_mutating_stats() {
+        let layer = BatchNorm1d::new("bn", 1, 0.2, 1e-5).unwrap();
+        let running_mean_before = layer.running_mean.borrow().clone();
+        let running_var_before = layer.running_var.borrow().clone();
+        let input = Tensor::from_vec(2, 1, vec![f32::MAX, -f32::MAX]).unwrap();
+
+        let err = layer.forward(&input).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "batchnorm_variance_sum",
+                value,
+            } if value.is_infinite()
+        ));
+        assert_same_tensor(&layer.running_mean.borrow(), &running_mean_before);
+        assert_same_tensor(&layer.running_var.borrow(), &running_var_before);
+        assert!(layer.last_mean.borrow().is_none());
+        assert!(layer.last_inv_std.borrow().is_none());
+    }
+
+    #[test]
+    fn batch_norm_rejects_non_finite_backward_grad_without_accumulating() {
+        let mut layer = BatchNorm1d::new("bn", 2, 0.2, 1e-5).unwrap();
+        let input = Tensor::from_vec(2, 2, vec![0.2, -0.3, 1.0, 0.5]).unwrap();
+        let _ = layer.forward(&input).unwrap();
+        let grad_output = Tensor::from_vec(2, 2, vec![0.1, f32::NAN, 0.05, 0.3]).unwrap();
+
+        let err = layer.backward(&input, &grad_output).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "batchnorm_backward_grad_output",
+                value,
+            } if value.is_nan()
+        ));
+        assert!(layer.gamma.gradient().is_none());
+        assert!(layer.beta.gradient().is_none());
+    }
+
+    #[test]
+    fn zspace_batch_norm_rejects_non_finite_input_without_mutating_state() {
+        let layer = ZSpaceBatchNorm1d::new("bnz", 2, -1.0, 0.2, 1e-5).unwrap();
+        let running_mean_before = layer.running_mean.borrow().clone();
+        let running_var_before = layer.running_var.borrow().clone();
+        let input = Tensor::from_vec(2, 2, vec![0.2, f32::NAN, 1.0, 0.5]).unwrap();
+
+        let err = layer.forward(&input).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "zspace_batchnorm_input",
+                value,
+            } if value.is_nan()
+        ));
+        assert_same_tensor(&layer.running_mean.borrow(), &running_mean_before);
+        assert_same_tensor(&layer.running_var.borrow(), &running_var_before);
+        assert!(layer.telemetry().is_none());
+    }
+
+    #[test]
+    fn zspace_batch_norm_rejects_overflowing_variance_without_mutating_state() {
+        let layer = ZSpaceBatchNorm1d::new("bnz", 1, -1.0, 0.2, 1e-5).unwrap();
+        let running_mean_before = layer.running_mean.borrow().clone();
+        let running_var_before = layer.running_var.borrow().clone();
+        let input = Tensor::from_vec(2, 1, vec![f32::MAX, -f32::MAX]).unwrap();
+
+        let err = layer.forward(&input).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "zspace_batchnorm_variance_sum",
+                value,
+            } if value.is_infinite()
+        ));
+        assert_same_tensor(&layer.running_mean.borrow(), &running_mean_before);
+        assert_same_tensor(&layer.running_var.borrow(), &running_var_before);
+        assert!(layer.telemetry().is_none());
+    }
+
+    #[test]
+    fn zspace_batch_norm_rejects_non_finite_backward_grad_without_accumulating() {
+        let mut layer = ZSpaceBatchNorm1d::new("bnz", 2, -1.0, 0.2, 1e-5).unwrap();
+        let input = Tensor::from_vec(2, 2, vec![0.2, -0.3, 1.0, 0.5]).unwrap();
+        let _ = layer.forward(&input).unwrap();
+        let grad_output = Tensor::from_vec(2, 2, vec![0.1, f32::NAN, 0.05, 0.3]).unwrap();
+
+        let err = layer.backward(&input, &grad_output).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "zspace_batchnorm_backward_grad_output",
+                value,
+            } if value.is_nan()
+        ));
+        assert!(layer.gamma.gradient().is_none());
+        assert!(layer.beta.gradient().is_none());
     }
 
     #[test]
@@ -1777,8 +2964,7 @@ mod tests {
         let _ = layer.forward(&input).unwrap();
         let before = layer.projector_gain();
         let telemetry = layer.telemetry().expect("telemetry available");
-        let avg_radius: f32 =
-            telemetry.radius().iter().copied().sum::<f32>() / telemetry.radius().len() as f32;
+        let avg_radius = checked_mean("zspace_batchnorm_radius_mean", telemetry.radius()).unwrap();
         let target = (avg_radius + 0.25).min(0.9);
         let updated = layer
             .adapt_projector_gain(target, 0.8)
@@ -1790,6 +2976,122 @@ mod tests {
         }
         assert!(updated <= 1.0);
         assert!((layer.projector_gain() - updated).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn zspace_batch_norm_rejects_bad_projector_radius_without_commit() {
+        let layer = ZSpaceBatchNorm1d::new("bnz", 2, -1.0, 0.2, 1e-5)
+            .unwrap()
+            .with_projector_gain(0.35)
+            .unwrap();
+        let input = Tensor::from_vec(2, 2, vec![0.5, -0.25, -0.75, 1.0]).unwrap();
+        let _ = layer.forward(&input).unwrap();
+        let before = layer.projector_gain();
+        *layer.last_radius.borrow_mut() = Some(vec![f32::MAX, f32::MAX]);
+
+        let err = layer.adapt_projector_gain(0.5, 0.8).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "zspace_batchnorm_radius_mean",
+                value,
+            } if value.is_infinite()
+        ));
+        assert_eq!(layer.projector_gain(), before);
+    }
+
+    #[test]
+    fn zspace_batch_norm_empty_batch_keeps_telemetry_without_updates() {
+        let mut layer = ZSpaceBatchNorm1d::new("bnz", 2, -1.0, 0.2, 1e-5)
+            .unwrap()
+            .with_projector_gain(0.4)
+            .unwrap();
+        let running_mean_before = layer.running_mean.borrow().clone();
+        let running_var_before = layer.running_var.borrow().clone();
+        let input = Tensor::from_vec(0, 2, Vec::new()).unwrap();
+
+        let output = layer.forward(&input).unwrap();
+        assert_eq!(output.shape(), (0, 2));
+        assert!(output.data().is_empty());
+        assert_same_tensor(&layer.running_mean.borrow(), &running_mean_before);
+        assert_same_tensor(&layer.running_var.borrow(), &running_var_before);
+
+        let telemetry = layer.telemetry().expect("empty telemetry available");
+        assert_eq!(telemetry.batch(), 0);
+        assert_eq!(telemetry.features(), 2);
+        assert_eq!(telemetry.mean().len(), 2);
+        assert_eq!(telemetry.inv_std().len(), 2);
+        assert!(telemetry.normed().is_empty());
+        assert!(telemetry.projected().is_empty());
+        assert!(telemetry.jacobian().is_empty());
+        assert!(telemetry.radius().is_empty());
+        let gain_before = layer.projector_gain();
+        let updated = layer.adapt_projector_gain(0.7, 0.5).unwrap();
+        assert_eq!(updated, gain_before);
+        assert_eq!(layer.projector_gain(), gain_before);
+
+        let grad_output = Tensor::from_vec(0, 2, Vec::new()).unwrap();
+        let grad_input = layer.backward(&input, &grad_output).unwrap();
+        assert_eq!(grad_input.shape(), (0, 2));
+        assert!(grad_input.data().is_empty());
+        assert!(layer.gamma.gradient().is_none());
+        assert!(layer.beta.gradient().is_none());
+    }
+
+    #[test]
+    fn zspace_layer_norm_rejects_non_finite_input_without_mutating_telemetry() {
+        let layer = ZSpaceLayerNorm::new("lnz", 3, -1.0, 1e-5).unwrap();
+        let input = Tensor::from_vec(2, 3, vec![0.2, f32::NAN, 0.4, 1.0, -0.5, 0.25]).unwrap();
+
+        let err = layer.forward(&input).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "zspace_layernorm_input",
+                value,
+            } if value.is_nan()
+        ));
+        assert!(layer.telemetry().is_none());
+    }
+
+    #[test]
+    fn zspace_layer_norm_rejects_overflowing_variance_without_mutating_telemetry() {
+        let layer = ZSpaceLayerNorm::new("lnz", 2, -1.0, 1e-5).unwrap();
+        let input = Tensor::from_vec(1, 2, vec![f32::MAX, -f32::MAX]).unwrap();
+
+        let err = layer.forward(&input).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "zspace_layernorm_variance_sum",
+                value,
+            } if value.is_infinite()
+        ));
+        assert!(layer.telemetry().is_none());
+    }
+
+    #[test]
+    fn zspace_layer_norm_rejects_non_finite_backward_grad_without_accumulating() {
+        let mut layer = ZSpaceLayerNorm::new("lnz", 3, -1.0, 1e-5).unwrap();
+        let input = Tensor::from_vec(2, 3, vec![0.2, -0.3, 0.4, 1.0, -0.5, 0.25]).unwrap();
+        let _ = layer.forward(&input).unwrap();
+        let grad_output =
+            Tensor::from_vec(2, 3, vec![0.1, f32::NAN, 0.05, 0.3, -0.2, 0.4]).unwrap();
+
+        let err = layer.backward(&input, &grad_output).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "zspace_layernorm_backward_grad_output",
+                value,
+            } if value.is_nan()
+        ));
+        assert!(layer.gamma.gradient().is_none());
+        assert!(layer.beta.gradient().is_none());
     }
 
     #[test]
@@ -1918,8 +3220,7 @@ mod tests {
         let _ = layer.forward(&input).unwrap();
         let before = layer.projector_gain();
         let telemetry = layer.telemetry().expect("telemetry available");
-        let avg_radius: f32 =
-            telemetry.radius().iter().copied().sum::<f32>() / telemetry.radius().len() as f32;
+        let avg_radius = checked_mean("zspace_layernorm_radius_mean", telemetry.radius()).unwrap();
         let target = (avg_radius + 0.3).min(0.95);
         let updated = layer
             .adapt_projector_gain(target, 0.75)
@@ -1931,5 +3232,62 @@ mod tests {
         }
         assert!(updated <= 1.0);
         assert!((layer.projector_gain() - updated).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn zspace_layer_norm_rejects_bad_projector_radius_without_commit() {
+        let layer = ZSpaceLayerNorm::new("lnz", 2, -0.8, 1e-5)
+            .unwrap()
+            .with_projector_gain(0.45)
+            .unwrap();
+        let input = Tensor::from_vec(2, 2, vec![0.5, -0.25, -0.75, 1.0]).unwrap();
+        let _ = layer.forward(&input).unwrap();
+        let before = layer.projector_gain();
+        *layer.last_radius.borrow_mut() = Some(vec![f32::MAX, f32::MAX]);
+
+        let err = layer.adapt_projector_gain(0.5, 0.75).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "zspace_layernorm_radius_mean",
+                value,
+            } if value.is_infinite()
+        ));
+        assert_eq!(layer.projector_gain(), before);
+    }
+
+    #[test]
+    fn zspace_layer_norm_empty_batch_keeps_telemetry_without_updates() {
+        let mut layer = ZSpaceLayerNorm::new("lnz", 3, -1.0, 1e-5)
+            .unwrap()
+            .with_projector_gain(0.4)
+            .unwrap();
+        let input = Tensor::from_vec(0, 3, Vec::new()).unwrap();
+
+        let output = layer.forward(&input).unwrap();
+        assert_eq!(output.shape(), (0, 3));
+        assert!(output.data().is_empty());
+
+        let telemetry = layer.telemetry().expect("empty telemetry available");
+        assert_eq!(telemetry.batch(), 0);
+        assert_eq!(telemetry.features(), 3);
+        assert!(telemetry.mean().is_empty());
+        assert!(telemetry.inv_std().is_empty());
+        assert!(telemetry.normed().is_empty());
+        assert!(telemetry.projected().is_empty());
+        assert!(telemetry.jacobian().is_empty());
+        assert!(telemetry.radius().is_empty());
+        let gain_before = layer.projector_gain();
+        let updated = layer.adapt_projector_gain(0.7, 0.5).unwrap();
+        assert_eq!(updated, gain_before);
+        assert_eq!(layer.projector_gain(), gain_before);
+
+        let grad_output = Tensor::from_vec(0, 3, Vec::new()).unwrap();
+        let grad_input = layer.backward(&input, &grad_output).unwrap();
+        assert_eq!(grad_input.shape(), (0, 3));
+        assert!(grad_input.data().is_empty());
+        assert!(layer.gamma.gradient().is_none());
+        assert!(layer.beta.gradient().is_none());
     }
 }

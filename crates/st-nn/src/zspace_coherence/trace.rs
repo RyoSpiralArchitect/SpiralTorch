@@ -64,6 +64,12 @@ pub struct PreDiscardTelemetrySummary {
     pub dominant_weight: f32,
     pub preserved_ratio: f32,
     pub survivor_energy_ratio: f32,
+    #[serde(default)]
+    pub repaired_non_finite: usize,
+    #[serde(default)]
+    pub repaired_negative: usize,
+    #[serde(default)]
+    pub repairs_total: usize,
 }
 
 impl From<&PreDiscardTelemetry> for PreDiscardTelemetrySummary {
@@ -79,6 +85,9 @@ impl From<&PreDiscardTelemetry> for PreDiscardTelemetrySummary {
             dominant_weight: telemetry.dominant_weight(),
             preserved_ratio: telemetry.preserved_ratio(),
             survivor_energy_ratio: telemetry.survivor_energy_ratio(),
+            repaired_non_finite: telemetry.repaired_non_finite(),
+            repaired_negative: telemetry.repaired_negative(),
+            repairs_total: telemetry.repairs_total(),
         }
     }
 }
@@ -93,6 +102,18 @@ pub struct CoherenceDiagnosticsSummary {
     pub z_bias: f32,
     pub preserved_channels: usize,
     pub discarded_channels: usize,
+    #[serde(default)]
+    pub repaired_non_finite_weights: usize,
+    #[serde(default)]
+    pub repaired_negative_weights: usize,
+    #[serde(default)]
+    pub repaired_weights_total: usize,
+    #[serde(default)]
+    pub pre_discard_repaired_non_finite: usize,
+    #[serde(default)]
+    pub pre_discard_repaired_negative: usize,
+    #[serde(default)]
+    pub pre_discard_repairs_total: usize,
     pub label: String,
 }
 
@@ -108,6 +129,21 @@ impl CoherenceDiagnosticsSummary {
             z_bias: diagnostics.z_bias(),
             preserved_channels: diagnostics.preserved_channels(),
             discarded_channels: diagnostics.discarded_channels(),
+            repaired_non_finite_weights: diagnostics.repaired_non_finite_weights(),
+            repaired_negative_weights: diagnostics.repaired_negative_weights(),
+            repaired_weights_total: diagnostics.repaired_weights_total(),
+            pre_discard_repaired_non_finite: diagnostics
+                .pre_discard()
+                .map(|telemetry| telemetry.repaired_non_finite())
+                .unwrap_or(0),
+            pre_discard_repaired_negative: diagnostics
+                .pre_discard()
+                .map(|telemetry| telemetry.repaired_negative())
+                .unwrap_or(0),
+            pre_discard_repairs_total: diagnostics
+                .pre_discard()
+                .map(|telemetry| telemetry.repairs_total())
+                .unwrap_or(0),
             label: label.to_string(),
         }
     }
@@ -460,6 +496,12 @@ impl ZSpaceTraceEvent {
                     "energy_ratio": diagnostics.energy_ratio,
                     "mean_coherence": diagnostics.mean_coherence,
                     "dominant_channel": diagnostics.dominant_channel,
+                    "repaired_non_finite_weights": diagnostics.repaired_non_finite_weights,
+                    "repaired_negative_weights": diagnostics.repaired_negative_weights,
+                    "repaired_weights_total": diagnostics.repaired_weights_total,
+                    "pre_discard_repaired_non_finite": diagnostics.pre_discard_repaired_non_finite,
+                    "pre_discard_repaired_negative": diagnostics.pre_discard_repaired_negative,
+                    "pre_discard_repairs_total": diagnostics.pre_discard_repairs_total,
                 }
             })),
             ZSpaceTraceEvent::LanguageBridged { pulse, .. } => Some(json!({
@@ -496,6 +538,9 @@ impl ZSpaceTraceEvent {
                     "survivor_energy_ratio": telemetry.survivor_energy_ratio,
                     "dominant_weight": telemetry.dominant_weight,
                     "used_fallback": telemetry.used_fallback,
+                    "repaired_non_finite": telemetry.repaired_non_finite,
+                    "repaired_negative": telemetry.repaired_negative,
+                    "repairs_total": telemetry.repairs_total,
                 }
             })),
             _ => None,

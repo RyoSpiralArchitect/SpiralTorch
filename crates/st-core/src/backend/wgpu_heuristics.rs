@@ -15,6 +15,7 @@ use crate::backend::wgpu_heuristics_generated as gen;
 use crate::ecosystem::{
     EcosystemRegistry, HeuristicChoiceSummary, HeuristicDecision, HeuristicSource, MetricSample,
 };
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 #[cfg(feature = "logic-learn")]
 use std::sync::Mutex;
 use std::time::SystemTime;
@@ -206,6 +207,81 @@ fn describe_midbottom_mode(mode: u8) -> &'static str {
     }
 }
 
+fn finite_meta_f32(value: f32) -> serde_json::Value {
+    serde_json::Value::from(if value.is_finite() { value as f64 } else { 0.0 })
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "WGPU heuristic metadata mirrors the finalized planner tuple"
+)]
+fn emit_wgpu_heuristic_choice_meta(
+    kind: &'static str,
+    rows: u32,
+    cols: u32,
+    k: u32,
+    subgroup: bool,
+    choice: Choice,
+    source: HeuristicSource,
+    score_hint: Option<f32>,
+    overrides: &DslOverrides,
+) {
+    let override_count = [
+        overrides.algo_topk != 0,
+        overrides.ctile != 0,
+        overrides.mode_midk != 0,
+        overrides.mode_bottomk != 0,
+        overrides.tile_cols != 0,
+        overrides.radix != 0,
+        overrides.segments != 0,
+    ]
+    .into_iter()
+    .filter(|active| *active)
+    .count();
+    emit_tensor_op(
+        "wgpu_heuristic_choice",
+        &[rows as usize, cols as usize, k as usize],
+        &[choice.wg as usize, choice.kl as usize],
+    );
+    emit_tensor_op_meta("wgpu_heuristic_choice", || {
+        serde_json::json!({
+            "kind": "st_core_wgpu_heuristic_choice",
+            "backend": "wgpu",
+            "requested_backend": "wgpu",
+            "heuristic_kind": kind,
+            "rows": rows,
+            "cols": cols,
+            "k": k,
+            "subgroup": subgroup,
+            "choice_source": source.as_str(),
+            "has_score_hint": score_hint.is_some(),
+            "score_hint": score_hint.map(finite_meta_f32).unwrap_or_else(|| 0.0.into()),
+            "use_2ce": choice.use_2ce,
+            "workgroup": choice.wg,
+            "lanes": choice.kl,
+            "channel_stride": choice.ch,
+            "algo_topk": choice.algo_topk,
+            "algo_topk_label": describe_topk_algo(choice.algo_topk),
+            "mode_midk": choice.mode_midk,
+            "mode_midk_label": describe_midbottom_mode(choice.mode_midk),
+            "mode_bottomk": choice.mode_bottomk,
+            "mode_bottomk_label": describe_midbottom_mode(choice.mode_bottomk),
+            "compaction_tile": choice.ctile,
+            "tile_cols": choice.tile_cols,
+            "fft_radix": choice.radix,
+            "fft_segments": choice.segments,
+            "override_count": override_count,
+            "override_algo_topk": overrides.algo_topk,
+            "override_mode_midk": overrides.mode_midk,
+            "override_mode_bottomk": overrides.mode_bottomk,
+            "override_ctile": overrides.ctile,
+            "override_tile_cols": overrides.tile_cols,
+            "override_radix": overrides.radix,
+            "override_segments": overrides.segments,
+        })
+    });
+}
+
 #[allow(
     clippy::too_many_arguments,
     reason = "Heuristic finalizer mirrors existing call signature for staged rollout"
@@ -215,6 +291,7 @@ fn finalize_choice(
     rows: u32,
     cols: u32,
     k: u32,
+    subgroup: bool,
     mut choice: Choice,
     source: HeuristicSource,
     score_hint: Option<f32>,
@@ -329,6 +406,9 @@ fn finalize_choice(
     }
 
     registry.record_heuristic(decision);
+    emit_wgpu_heuristic_choice_meta(
+        kind, rows, cols, k, subgroup, choice, source, score_hint, overrides,
+    );
     Some(choice)
 }
 
@@ -496,6 +576,7 @@ pub fn choose_kind(
                         rows,
                         cols,
                         k,
+                        subgroup,
                         out,
                         HeuristicSource::SoftLogic,
                         Some(score),
@@ -506,10 +587,30 @@ pub fn choose_kind(
         }
     }
     if let Some(c) = hard_dsl {
-        return finalize_choice(kind, rows, cols, k, c, HeuristicSource::HardDsl, None, &ov);
+        return finalize_choice(
+            kind,
+            rows,
+            cols,
+            k,
+            subgroup,
+            c,
+            HeuristicSource::HardDsl,
+            None,
+            &ov,
+        );
     }
     if let Some(c) = kdsl_bridge::choose_from_kv(rows, cols, k, subgroup) {
-        return finalize_choice(kind, rows, cols, k, c, HeuristicSource::KeyValue, None, &ov);
+        return finalize_choice(
+            kind,
+            rows,
+            cols,
+            k,
+            subgroup,
+            c,
+            HeuristicSource::KeyValue,
+            None,
+            &ov,
+        );
     }
     if let Some(c) = gen::choose(rows as usize, cols as usize, k as usize, subgroup) {
         return finalize_choice(
@@ -517,6 +618,7 @@ pub fn choose_kind(
             rows,
             cols,
             k,
+            subgroup,
             c,
             HeuristicSource::Generated,
             None,
@@ -529,6 +631,7 @@ pub fn choose_kind(
         rows,
         cols,
         k,
+        subgroup,
         fallback_choice,
         HeuristicSource::Fallback,
         None,
@@ -563,6 +666,27 @@ include!("wgpu_heuristics_generated.rs");
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
+    use std::sync::{Arc, Mutex};
+
+    fn with_env_var<T>(name: &str, value: Option<&str>, f: impl FnOnce() -> T) -> T {
+        let previous = std::env::var(name).ok();
+        match value {
+            Some(value) => std::env::set_var(name, value),
+            None => std::env::remove_var(name),
+        }
+
+        let result = catch_unwind(AssertUnwindSafe(f));
+        match previous {
+            Some(previous) => std::env::set_var(name, previous),
+            None => std::env::remove_var(name),
+        }
+
+        match result {
+            Ok(value) => value,
+            Err(payload) => resume_unwind(payload),
+        }
+    }
 
     #[test]
     fn emits_fft_kernel_and_hint() {
@@ -570,5 +694,46 @@ mod tests {
         assert!(wgsl.contains("@workgroup_size"));
         let hint = auto_fft_spiralk(512, 4096, 128, true).unwrap();
         assert!(hint.contains("tile_cols"));
+    }
+
+    #[test]
+    fn wgpu_heuristic_choice_emits_backend_meta() {
+        let _lock = crate::telemetry::tensor_observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let choice = with_env_var("SPIRAL_HEUR_K", None, || {
+            with_env_var("REDIS_URL", None, || {
+                choose_topk(512, 4096, 128, true).expect("choice expected")
+            })
+        });
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "wgpu_heuristic_choice"
+                    && data["kind"] == "st_core_wgpu_heuristic_choice"
+                    && data["heuristic_kind"] == "topk"
+                    && data["rows"] == 512
+                    && data["cols"] == 4096
+                    && data["k"] == 128
+            })
+            .expect("wgpu heuristic choice metadata event");
+        assert_eq!(meta.1["backend"], "wgpu");
+        assert_eq!(meta.1["requested_backend"], "wgpu");
+        assert_eq!(meta.1["subgroup"], true);
+        assert_eq!(meta.1["workgroup"], choice.wg);
+        assert_eq!(meta.1["lanes"], choice.kl);
+        assert_eq!(meta.1["use_2ce"], choice.use_2ce);
+        assert_eq!(meta.1["override_count"], 0);
+        assert!(meta.1["choice_source"].as_str().is_some());
     }
 }

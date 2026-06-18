@@ -5,7 +5,7 @@
 
 use crate::theory::zpulse::ZPulse;
 use serde::{Deserialize, Serialize};
-use st_tensor::{AmegaHypergrad, HypergradTelemetry};
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta, AmegaHypergrad, HypergradTelemetry};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -54,6 +54,8 @@ impl NonCollapseSnapshot {
     }
 
     pub fn merge_from(&mut self, other: &Self) {
+        let before_fields = self.observed_fields();
+        let incoming_fields = other.observed_fields();
         merge_option(&mut self.coherence_entropy, other.coherence_entropy);
         merge_option(&mut self.preserved_channels, other.preserved_channels);
         merge_option(&mut self.discarded_channels, other.discarded_channels);
@@ -77,6 +79,12 @@ impl NonCollapseSnapshot {
         merge_option(
             &mut self.pre_discard_survivor_energy_ratio,
             other.pre_discard_survivor_energy_ratio,
+        );
+        emit_noncollapse_snapshot_meta(
+            "noncollapse_snapshot_merge",
+            "st_core_noncollapse_snapshot_merge",
+            self,
+            &[before_fields, incoming_fields],
         );
     }
 
@@ -143,17 +151,42 @@ impl NonCollapseSnapshot {
         self.pre_discard_survivor_energy_ratio = finite_some(survivor_energy_ratio);
         self
     }
+
+    fn observed_fields(&self) -> usize {
+        usize::from(self.coherence_entropy.is_some())
+            + usize::from(self.preserved_channels.is_some())
+            + usize::from(self.discarded_channels.is_some())
+            + usize::from(self.z_bias.is_some())
+            + usize::from(self.hypergrad_penalty.is_some())
+            + usize::from(self.phase.is_some())
+            + usize::from(self.band_energy.is_some())
+            + usize::from(self.dominant_channel.is_some())
+            + usize::from(self.energy_ratio.is_some())
+            + usize::from(self.mean_coherence.is_some())
+            + usize::from(self.hypergrad_l2.is_some())
+            + usize::from(self.hypergrad_linf.is_some())
+            + usize::from(self.hypergrad_non_finite_ratio.is_some())
+            + usize::from(self.pre_discard_preserved_ratio.is_some())
+            + usize::from(self.pre_discard_survivor_energy_ratio.is_some())
+    }
 }
 
 impl From<HypergradTelemetry> for NonCollapseSnapshot {
     fn from(telemetry: HypergradTelemetry) -> Self {
         let summary = telemetry.summary();
-        Self {
+        let snapshot = Self {
             hypergrad_l2: finite_some(summary.l2()),
             hypergrad_linf: finite_some(summary.linf()),
             hypergrad_non_finite_ratio: finite_some(telemetry.non_finite_ratio()),
             ..Self::default()
-        }
+        };
+        emit_noncollapse_snapshot_meta(
+            "noncollapse_hypergrad_snapshot",
+            "st_core_noncollapse_hypergrad_snapshot",
+            &snapshot,
+            &[snapshot.observed_fields()],
+        );
+        snapshot
     }
 }
 
@@ -171,10 +204,64 @@ impl From<&AmegaHypergrad> for NonCollapseSnapshot {
 
 impl From<&ZPulse> for NonCollapseSnapshot {
     fn from(pulse: &ZPulse) -> Self {
-        Self::new()
+        let snapshot = Self::new()
             .with_z_bias(pulse.z_bias)
-            .with_band_energy(pulse.band_energy)
+            .with_band_energy(pulse.band_energy);
+        emit_noncollapse_snapshot_meta(
+            "noncollapse_zpulse_snapshot",
+            "st_core_noncollapse_zpulse_snapshot",
+            &snapshot,
+            &[snapshot.observed_fields()],
+        );
+        snapshot
     }
+}
+
+fn emit_noncollapse_snapshot_meta(
+    op_name: &'static str,
+    kind: &'static str,
+    snapshot: &NonCollapseSnapshot,
+    input_shape: &[usize],
+) {
+    let fields = snapshot.observed_fields();
+    let band_total = snapshot
+        .band_energy
+        .map(|(above, here, beneath)| above + here + beneath)
+        .unwrap_or(0.0);
+    emit_tensor_op(op_name, input_shape, &[1, fields.max(1)]);
+    emit_tensor_op_meta(op_name, || {
+        serde_json::json!({
+            "backend": "cpu",
+            "requested_backend": "auto",
+            "kind": kind,
+            "observed_fields": fields,
+            "empty": snapshot.is_empty(),
+            "phase": snapshot.phase.map(|phase| phase.as_str()).unwrap_or("none"),
+            "has_coherence": snapshot.coherence_entropy.is_some()
+                || snapshot.mean_coherence.is_some(),
+            "coherence_entropy": snapshot.coherence_entropy.unwrap_or(0.0),
+            "mean_coherence": snapshot.mean_coherence.unwrap_or(0.0),
+            "preserved_channels": snapshot.preserved_channels.unwrap_or(0),
+            "discarded_channels": snapshot.discarded_channels.unwrap_or(0),
+            "has_z_bias": snapshot.z_bias.is_some(),
+            "z_bias": snapshot.z_bias.unwrap_or(0.0),
+            "has_band_energy": snapshot.band_energy.is_some(),
+            "band_energy_total": band_total,
+            "dominant_channel": snapshot.dominant_channel.unwrap_or(usize::MAX),
+            "has_hypergrad": snapshot.hypergrad_l2.is_some()
+                || snapshot.hypergrad_linf.is_some()
+                || snapshot.hypergrad_non_finite_ratio.is_some(),
+            "hypergrad_l2": snapshot.hypergrad_l2.unwrap_or(0.0),
+            "hypergrad_linf": snapshot.hypergrad_linf.unwrap_or(0.0),
+            "hypergrad_non_finite_ratio": snapshot.hypergrad_non_finite_ratio.unwrap_or(0.0),
+            "pre_discard_preserved_ratio": snapshot
+                .pre_discard_preserved_ratio
+                .unwrap_or(0.0),
+            "pre_discard_survivor_energy_ratio": snapshot
+                .pre_discard_survivor_energy_ratio
+                .unwrap_or(0.0),
+        })
+    });
 }
 
 fn merge_option<T: Copy>(slot: &mut Option<T>, value: Option<T>) {
@@ -204,6 +291,11 @@ mod tests {
     use super::*;
     use crate::theory::zpulse::{ZScale, ZSource, ZSupport};
     use st_tensor::Tensor;
+    use std::sync::{Arc, Mutex};
+
+    fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
+        crate::telemetry::tensor_observer_lock()
+    }
 
     #[test]
     fn snapshot_merges_sparse_sources() {
@@ -255,5 +347,89 @@ mod tests {
         let snapshot = NonCollapseSnapshot::from(&pulse);
         assert_eq!(snapshot.z_bias, Some(0.25));
         assert_eq!(snapshot.band_energy, Some((0.6, 0.2, 0.1)));
+    }
+
+    #[test]
+    fn snapshots_emit_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let left = NonCollapseSnapshot::new()
+            .with_coherence_metrics(0.6, 5, 2)
+            .with_z_bias(0.2);
+        let right = NonCollapseSnapshot::new()
+            .with_band_energy((0.6, 0.2, 0.1))
+            .with_phase(NonCollapsePhase::Integration);
+        let merged = left.merged(&right);
+
+        let mut tape = AmegaHypergrad::new(-0.9, 0.05, 1, 3).unwrap();
+        let tensor = Tensor::from_vec(1, 3, vec![0.5, -0.25, 0.1]).unwrap();
+        tape.accumulate_wave(&tensor).unwrap();
+        let hypergrad = NonCollapseSnapshot::from(&tape);
+
+        let pulse = ZPulse {
+            source: ZSource::Maxwell,
+            ts: 1,
+            tempo: 0.5,
+            band_energy: (0.4, 0.3, 0.2),
+            density_fluctuation: 0.1,
+            drift: 0.3,
+            z_bias: 0.35,
+            support: ZSupport::from((0.4, 0.3, 0.2)),
+            scale: ZScale::new(2.0),
+            quality: 0.7,
+            stderr: 0.1,
+            latency_ms: 4.0,
+        };
+        let z_snapshot = NonCollapseSnapshot::from(&pulse);
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert_eq!(merged.phase, Some(NonCollapsePhase::Integration));
+        assert!(hypergrad.hypergrad_l2.unwrap_or_default() > 0.0);
+        assert_eq!(z_snapshot.z_bias, Some(0.35));
+
+        let events = events.lock().unwrap();
+        let merge = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "noncollapse_snapshot_merge"
+                    && data["phase"] == "integration"
+                    && data["has_band_energy"] == true
+            })
+            .expect("noncollapse_snapshot_merge metadata event");
+        assert_eq!(merge.1["backend"], "cpu");
+        assert_eq!(merge.1["kind"], "st_core_noncollapse_snapshot_merge");
+
+        let hypergrad_event = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "noncollapse_hypergrad_snapshot" && data["has_hypergrad"] == true
+            })
+            .expect("noncollapse_hypergrad_snapshot metadata event");
+        assert_eq!(
+            hypergrad_event.1["kind"],
+            "st_core_noncollapse_hypergrad_snapshot"
+        );
+
+        let zpulse_event = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "noncollapse_zpulse_snapshot"
+                    && data["has_z_bias"] == true
+                    && data["has_band_energy"] == true
+            })
+            .expect("noncollapse_zpulse_snapshot metadata event");
+        assert_eq!(
+            zpulse_event.1["kind"],
+            "st_core_noncollapse_zpulse_snapshot"
+        );
+        assert!(zpulse_event.1["band_energy_total"].as_f64().unwrap_or(0.0) > 0.0);
     }
 }

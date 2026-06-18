@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::runtime::blackcat::StepMetrics;
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 
 const EPS: f64 = 1e-9;
 const DEFAULT_WINDOW: usize = 32;
@@ -193,6 +194,8 @@ impl DriftDetector {
 
     pub fn observe(&mut self, features: &HashMap<String, f64>) -> Vec<AlertRecord> {
         let mut alerts = Vec::new();
+        let mut ready_features = 0usize;
+        let mut max_z_score = 0.0f64;
         for (name, value) in features {
             let window = self
                 .features
@@ -200,6 +203,12 @@ impl DriftDetector {
                 .or_insert_with(|| FeatureWindow::new(DEFAULT_WINDOW, self.warmup));
             window.update(*value);
             let z = window.z_score();
+            if window.ready() {
+                ready_features += 1;
+            }
+            if z.is_finite() {
+                max_z_score = max_z_score.max(z);
+            }
             if z.is_finite() && z >= self.z_threshold {
                 let message = format!(
                     "Feature drift detected for `{}` (z-score {:.2} ≥ {:.2})",
@@ -216,6 +225,25 @@ impl DriftDetector {
                 ));
             }
         }
+        emit_tensor_op(
+            "monitoring_drift_observe",
+            &[features.len()],
+            &[alerts.len()],
+        );
+        emit_tensor_op_meta("monitoring_drift_observe", || {
+            serde_json::json!({
+                "backend": "cpu",
+                "requested_backend": "auto",
+                "kind": "st_core_monitoring_drift_observe",
+                "features": features.len(),
+                "tracked_features": self.features.len(),
+                "ready_features": ready_features,
+                "alerts": alerts.len(),
+                "z_threshold": self.z_threshold,
+                "warmup": self.warmup,
+                "max_z_score": max_z_score,
+            })
+        });
         alerts
     }
 }
@@ -375,6 +403,7 @@ impl PerformanceMonitor {
 
     pub fn observe(&mut self, metrics: &HashMap<String, f64>, reward: f64) -> Vec<AlertRecord> {
         let mut alerts = Vec::new();
+        let mut observed_targets = 0usize;
         for (name, target) in self.targets.iter_mut() {
             let value = if name == "reward" {
                 reward
@@ -383,10 +412,36 @@ impl PerformanceMonitor {
             } else {
                 continue;
             };
+            observed_targets += 1;
             if let Some(alert) = target.update(value) {
                 alerts.push(alert);
             }
         }
+        emit_tensor_op(
+            "monitoring_performance_observe",
+            &[metrics.len() + 1],
+            &[alerts.len()],
+        );
+        emit_tensor_op_meta("monitoring_performance_observe", || {
+            let latest_values = self.latest_values();
+            let max_latest_abs = latest_values
+                .values()
+                .filter(|value| value.is_finite())
+                .map(|value| value.abs())
+                .fold(0.0f64, f64::max);
+            serde_json::json!({
+                "backend": "cpu",
+                "requested_backend": "auto",
+                "kind": "st_core_monitoring_performance_observe",
+                "metric_inputs": metrics.len(),
+                "registered_targets": self.targets.len(),
+                "observed_targets": observed_targets,
+                "latest_values": latest_values.len(),
+                "reward": reward,
+                "alerts": alerts.len(),
+                "max_latest_abs": max_latest_abs,
+            })
+        });
         alerts
     }
 
@@ -568,6 +623,26 @@ impl MonitoringHub {
             }
         }
         self.export(metrics, reward);
+        emit_tensor_op(
+            "monitoring_hub_observe",
+            &[metrics.extra.len() + 4],
+            &[alerts.len()],
+        );
+        emit_tensor_op_meta("monitoring_hub_observe", || {
+            serde_json::json!({
+                "backend": "cpu",
+                "requested_backend": "auto",
+                "kind": "st_core_monitoring_hub_observe",
+                "metric_inputs": metrics.extra.len(),
+                "alerts": alerts.len(),
+                "alert_log": self.alert_log.len(),
+                "exporters": self.exporters.len(),
+                "reward": reward,
+                "step_time_ms": metrics.step_time_ms,
+                "mem_peak_mb": metrics.mem_peak_mb,
+                "retry_rate": metrics.retry_rate,
+            })
+        });
         alerts
     }
 
@@ -635,6 +710,11 @@ impl Default for MonitoringHub {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
+
+    fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
+        crate::telemetry::tensor_observer_lock()
+    }
 
     fn build_metrics(value: f64) -> StepMetrics {
         let mut metrics = StepMetrics {
@@ -685,5 +765,74 @@ mod tests {
                 .any(|a| matches!(a.kind, AlertKind::PerformanceRegression { .. })),
             "expected performance regression alert"
         );
+    }
+
+    #[test]
+    fn monitoring_observe_emits_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let mut hub = MonitoringHub::new(2.5, 2, 2);
+        for idx in 0..4 {
+            let mut metrics = StepMetrics::default();
+            metrics.step_time_ms = 12.0 + idx as f64;
+            metrics.mem_peak_mb = 128.0;
+            metrics.retry_rate = 0.0;
+            metrics
+                .extra
+                .insert("band_here".into(), if idx < 2 { 0.5 } else { 5.0 });
+            metrics
+                .extra
+                .insert("step_loss".into(), 0.1 + idx as f64 * 0.01);
+            hub.observe(&metrics, 1.0);
+        }
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        let events = events.lock().unwrap();
+        let drift = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "monitoring_drift_observe"
+                    && data["features"] == 2
+                    && data["tracked_features"].as_u64().unwrap_or(0) >= 2
+            })
+            .expect("monitoring_drift_observe metadata event");
+        assert_eq!(drift.1["backend"], "cpu");
+        assert_eq!(drift.1["kind"], "st_core_monitoring_drift_observe");
+        assert!(drift.1["tracked_features"].as_u64().unwrap_or(0) >= 2);
+
+        let performance = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "monitoring_performance_observe"
+                    && data["metric_inputs"] == 2
+                    && data["observed_targets"].as_u64().unwrap_or(0) >= 2
+            })
+            .expect("monitoring_performance_observe metadata event");
+        assert_eq!(performance.1["backend"], "cpu");
+        assert_eq!(
+            performance.1["kind"],
+            "st_core_monitoring_performance_observe"
+        );
+        assert!(performance.1["observed_targets"].as_u64().unwrap_or(0) >= 2);
+
+        let hub = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "monitoring_hub_observe"
+                    && data["metric_inputs"] == 2
+                    && data["step_time_ms"].as_f64().unwrap_or(0.0) >= 12.0
+            })
+            .expect("monitoring_hub_observe metadata event");
+        assert_eq!(hub.1["backend"], "cpu");
+        assert_eq!(hub.1["kind"], "st_core_monitoring_hub_observe");
+        assert_eq!(hub.1["metric_inputs"], 2);
     }
 }

@@ -36,7 +36,9 @@ const FUSED_GRAD_INPUT_WGSL_TEMPLATE: &str =
 const FUSED_GELU_BACK_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/fused_gelu_back.wgsl");
 const REDUCE_DB_WGSL_TEMPLATE: &str = include_str!("../wgpu_shaders/reduce_db.wgsl");
 const LAYER_NORM_WGSL: &str = include_str!("../wgpu_shaders/layer_norm.wgsl");
+const TENSOR_UTILS_WGSL: &str = include_str!("../wgpu_shaders/tensor_utils.wgsl");
 const RAMANUJAN_PI_WGSL: &str = include_str!("../wgpu_shaders/ramanujan_pi.wgsl");
+const LSTM_BACKWARD_SCAN_WGSL: &str = include_str!("../wgpu_shaders/lstm_backward_scan.wgsl");
 const ROW_SOFTMAX_WGSL: &str =
     include_str!("../../../st-backend-wgpu/src/shaders/softmax_workgroup.wgsl");
 const ROW_SOFTMAX_SUBGROUP_WGSL: &str =
@@ -54,6 +56,8 @@ const FUSED_GELU_BACK_WG_ROWS: u32 = 16;
 const FUSED_GELU_BACK_WG_COLS: u32 = 16;
 const REDUCE_DB_WORKGROUP: u32 = 256;
 const LAYER_NORM_WORKGROUP: u32 = 256;
+const TENSOR_UTIL_WORKGROUP: u32 = 256;
+const LSTM_BACKWARD_SCAN_WORKGROUP: u32 = 64;
 
 const FLAG_USE_BIAS: u32 = 1 << 0;
 const FLAG_FUSED_RELU: u32 = 1 << 1;
@@ -61,6 +65,7 @@ const FLAG_FUSED_GELU: u32 = 1 << 2;
 const FLAG_FUSED_RESIDUAL: u32 = 1 << 3;
 const FLAG_USE_INT8: u32 = 1 << 4;
 const FLAG_USE_F16: u32 = 1 << 5;
+const FLAG_LHS_TRANSPOSE: u32 = 1 << 6;
 
 const FUSED_OP_RELU: u32 = FLAG_FUSED_RELU;
 const FUSED_OP_GELU: u32 = FLAG_FUSED_GELU;
@@ -296,67 +301,32 @@ impl TileConfig {
     }
 }
 
-fn div_ceil_usize(lhs: usize, rhs: usize) -> usize {
-    if rhs == 0 {
-        0
-    } else {
-        lhs.div_ceil(rhs)
-    }
-}
-
-fn compute_rhs_tile_meta(
-    inner: usize,
-    cols: usize,
-    tile: TileConfig,
-) -> (usize, usize, usize, usize, usize) {
-    let tile_k = tile.tile_k() as usize;
-    let tile_n = tile.tile_n() as usize;
-    let tiles_k = div_ceil_usize(inner, tile_k);
-    let tiles_n = div_ceil_usize(cols, tile_n);
-    let tile_elems = tile_k * tile_n;
-    let total_tiles = tiles_k * tiles_n;
-    let total_elems = total_tiles * tile_elems;
-    (tile_k, tile_n, tiles_k, tiles_n, total_elems)
-}
-
-fn pack_rhs_f32(packed: &PackedB, tile: TileConfig) -> (Vec<f32>, usize) {
+fn pack_rhs_f32(packed: &PackedB, _tile: TileConfig) -> (Vec<f32>, usize) {
     let inner = packed.inner();
     let cols = packed.cols();
-    let (tile_k, tile_n, tiles_k, tiles_n, total_elems) = compute_rhs_tile_meta(inner, cols, tile);
-    let mut tiled = vec![0.0f32; total_elems];
+    let mut row_major = vec![0.0f32; inner * cols];
     let slice = packed.as_slice();
     let layout = packed.layout();
 
-    for tile_n_index in 0..tiles_n {
-        for tile_k_index in 0..tiles_k {
-            let tile_offset = (tile_n_index * tiles_k + tile_k_index) * tile_k * tile_n;
-            for local_n in 0..tile_n {
-                let col = tile_n_index * tile_n + local_n;
-                for local_k in 0..tile_k {
-                    let k = tile_k_index * tile_k + local_k;
-                    let dst_index = tile_offset + local_n * tile_k + local_k;
-                    if col < cols && k < inner {
-                        let value = match layout {
-                            PackedLayout::ColMajor => slice[col * inner + k],
-                            PackedLayout::Tiled { .. } => slice[col * inner + k],
-                        };
-                        tiled[dst_index] = value;
-                    }
-                }
-            }
+    for k in 0..inner {
+        for col in 0..cols {
+            let value = match layout {
+                PackedLayout::ColMajor => slice[col * inner + k],
+                PackedLayout::Tiled { .. } => slice[col * inner + k],
+            };
+            row_major[k * cols + col] = value;
         }
     }
 
-    (tiled, total_elems)
+    let total_elems = row_major.len();
+    (row_major, total_elems)
 }
 
-fn pack_rhs_int8(packed: &PackedB, tile: TileConfig) -> (Vec<i32>, Vec<f32>, usize) {
+fn pack_rhs_int8(packed: &PackedB, _tile: TileConfig) -> (Vec<i32>, Vec<f32>, usize) {
     let inner = packed.inner();
     let cols = packed.cols();
-    let (tile_k, tile_n, tiles_k, tiles_n, total_elems) = compute_rhs_tile_meta(inner, cols, tile);
-    let mut quantized = Vec::with_capacity(total_elems.div_ceil(4));
-    let mut accumulator: u32 = 0;
-    let mut lane: u32 = 0;
+    let stride = inner.div_ceil(4);
+    let mut quantized = vec![0i32; cols * stride];
     let slice = packed.as_slice();
     let layout = packed.layout();
 
@@ -376,41 +346,29 @@ fn pack_rhs_int8(packed: &PackedB, tile: TileConfig) -> (Vec<i32>, Vec<f32>, usi
         scales[col] = if max_abs == 0.0 { 1.0 } else { max_abs / 127.0 };
     }
 
-    for tile_n_index in 0..tiles_n {
-        for tile_k_index in 0..tiles_k {
-            for local_n in 0..tile_n {
-                let col = tile_n_index * tile_n + local_n;
-                let scale = if col < cols { scales[col] } else { 1.0 };
-                let inv_scale = 1.0 / scale;
-                for local_k in 0..tile_k {
-                    let k = tile_k_index * tile_k + local_k;
-                    let mut quant = 0i32;
-                    if col < cols && k < inner {
-                        let raw = match layout {
-                            PackedLayout::ColMajor => slice[col * inner + k],
-                            PackedLayout::Tiled { .. } => slice[col * inner + k],
-                        };
-                        let scaled = (raw * inv_scale).round();
-                        let clamped = scaled.clamp(-127.0, 127.0);
-                        quant = clamped as i32;
-                    }
-                    let byte = (quant as i8) as u8 as u32;
-                    accumulator |= byte << (lane * 8);
-                    lane += 1;
-                    if lane == 4 {
-                        quantized.push(accumulator as i32);
-                        accumulator = 0;
-                        lane = 0;
-                    }
-                }
+    for col in 0..cols {
+        let inv_scale = 1.0 / scales[col];
+        for pack_idx in 0..stride {
+            let mut word = 0u32;
+            for lane in 0..4 {
+                let k = pack_idx * 4 + lane;
+                let quant = if k >= inner {
+                    0i32
+                } else {
+                    let raw = match layout {
+                        PackedLayout::ColMajor => slice[col * inner + k],
+                        PackedLayout::Tiled { .. } => slice[col * inner + k],
+                    };
+                    (raw * inv_scale).round().clamp(-127.0, 127.0) as i32
+                };
+                let byte = (quant as i8) as u8 as u32;
+                word |= byte << (lane * 8);
             }
+            quantized[col * stride + pack_idx] = word as i32;
         }
     }
 
-    if lane != 0 {
-        quantized.push(accumulator as i32);
-    }
-
+    let total_elems = cols * stride * 4;
     (quantized, scales, total_elems)
 }
 
@@ -449,6 +407,50 @@ struct GpuContext {
     reduce_db_pipeline: Arc<ComputePipeline>,
     layer_norm_layout: BindGroupLayout,
     layer_norm_pipeline: Arc<ComputePipeline>,
+    tensor_util_layout: BindGroupLayout,
+    tensor_util_scale_pipeline: Arc<ComputePipeline>,
+    tensor_util_add_pipeline: Arc<ComputePipeline>,
+    tensor_util_hadamard_pipeline: Arc<ComputePipeline>,
+    tensor_util_mul_row_pipeline: Arc<ComputePipeline>,
+    tensor_util_row_affine_pipeline: Arc<ComputePipeline>,
+    tensor_util_dynamic_klein_gordon_forward_pipeline: Arc<ComputePipeline>,
+    tensor_util_dynamic_klein_gordon_backward_pipeline: Arc<ComputePipeline>,
+    tensor_util_dynamic_hamilton_jacobi_forward_pipeline: Arc<ComputePipeline>,
+    tensor_util_dynamic_hamilton_jacobi_backward_pipeline: Arc<ComputePipeline>,
+    tensor_util_dynamic_schrodinger_forward_pipeline: Arc<ComputePipeline>,
+    tensor_util_dynamic_schrodinger_backward_pipeline: Arc<ComputePipeline>,
+    tensor_util_sequence_last_step_gather_pipeline: Arc<ComputePipeline>,
+    tensor_util_sequence_last_step_scatter_pipeline: Arc<ComputePipeline>,
+    tensor_util_zspace_coherence_scan_forward_pipeline: Arc<ComputePipeline>,
+    tensor_util_zspace_coherence_scan_backward_pipeline: Arc<ComputePipeline>,
+    tensor_util_add_scaled_pipeline: Arc<ComputePipeline>,
+    tensor_util_sub_pipeline: Arc<ComputePipeline>,
+    tensor_util_transpose_pipeline: Arc<ComputePipeline>,
+    tensor_util_embedding_gather_pipeline: Arc<ComputePipeline>,
+    tensor_util_embedding_scatter_add_pipeline: Arc<ComputePipeline>,
+    tensor_util_hypergrad_accumulate_wave_pipeline: Arc<ComputePipeline>,
+    tensor_util_relu_pipeline: Arc<ComputePipeline>,
+    tensor_util_relu_backward_pipeline: Arc<ComputePipeline>,
+    tensor_util_lstm_forward_gate_step_pipeline: Arc<ComputePipeline>,
+    tensor_util_max_pool2d_forward_pipeline: Arc<ComputePipeline>,
+    tensor_util_max_pool2d_backward_pipeline: Arc<ComputePipeline>,
+    tensor_util_avg_pool2d_forward_pipeline: Arc<ComputePipeline>,
+    tensor_util_avg_pool2d_backward_pipeline: Arc<ComputePipeline>,
+    tensor_util_sum_squares_pipeline: Arc<ComputePipeline>,
+    tensor_util_sum_abs_pipeline: Arc<ComputePipeline>,
+    tensor_util_mse_loss_forward_pipeline: Arc<ComputePipeline>,
+    tensor_util_mse_loss_backward_pipeline: Arc<ComputePipeline>,
+    tensor_util_categorical_cross_entropy_forward_pipeline: Arc<ComputePipeline>,
+    tensor_util_categorical_cross_entropy_backward_pipeline: Arc<ComputePipeline>,
+    tensor_util_hyperbolic_cross_entropy_forward_pipeline: Arc<ComputePipeline>,
+    tensor_util_hyperbolic_cross_entropy_backward_pipeline: Arc<ComputePipeline>,
+    tensor_util_zspace_softmax_backward_fixed_pipeline: Arc<ComputePipeline>,
+    tensor_util_add_row_pipeline: Arc<ComputePipeline>,
+    tensor_util_sum_axis0_pipeline: Arc<ComputePipeline>,
+    tensor_util_sum_axis0_scaled_pipeline: Arc<ComputePipeline>,
+    tensor_util_project_to_poincare_pipeline: Arc<ComputePipeline>,
+    tensor_util_wave_gate_project_pipeline: Arc<ComputePipeline>,
+    tensor_util_wave_gate_backward_pipeline: Arc<ComputePipeline>,
     fused_conv_layout: BindGroupLayout,
     fused_conv_pipeline_layout: PipelineLayout,
     fused_conv_pipelines: Mutex<HashMap<TileConfig, Arc<ComputePipeline>>>,
@@ -1097,6 +1099,137 @@ impl GpuContext {
             .map_err(|err| err.to_string())?,
         );
 
+        let tensor_util_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("st.tensor.wgpu_dense.tensor_util.layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+        let tensor_util_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("st.tensor.wgpu_dense.tensor_util.pipeline_layout"),
+                bind_group_layouts: &[&tensor_util_layout],
+                push_constant_ranges: &[],
+            });
+        let tensor_util_shader = create_wgsl_module(
+            device.as_ref(),
+            "st.tensor.wgpu_dense.tensor_util",
+            TENSOR_UTILS_WGSL,
+        )
+        .map_err(|err| err.to_string())?;
+        let tensor_util_pipeline = |entry_point: &str| -> Result<Arc<ComputePipeline>, String> {
+            create_compute_pipeline(
+                device.as_ref(),
+                &format!("st.tensor.wgpu_dense.tensor_util.{entry_point}"),
+                Some(&tensor_util_pipeline_layout),
+                &tensor_util_shader,
+                entry_point,
+            )
+            .map(Arc::new)
+            .map_err(|err| err.to_string())
+        };
+        let tensor_util_scale_pipeline = tensor_util_pipeline("scale")?;
+        let tensor_util_add_pipeline = tensor_util_pipeline("add")?;
+        let tensor_util_hadamard_pipeline = tensor_util_pipeline("hadamard")?;
+        let tensor_util_mul_row_pipeline = tensor_util_pipeline("mul_row")?;
+        let tensor_util_row_affine_pipeline = tensor_util_pipeline("row_affine")?;
+        let tensor_util_dynamic_klein_gordon_forward_pipeline =
+            tensor_util_pipeline("dynamic_klein_gordon_forward")?;
+        let tensor_util_dynamic_klein_gordon_backward_pipeline =
+            tensor_util_pipeline("dynamic_klein_gordon_backward")?;
+        let tensor_util_dynamic_hamilton_jacobi_forward_pipeline =
+            tensor_util_pipeline("dynamic_hamilton_jacobi_forward")?;
+        let tensor_util_dynamic_hamilton_jacobi_backward_pipeline =
+            tensor_util_pipeline("dynamic_hamilton_jacobi_backward")?;
+        let tensor_util_dynamic_schrodinger_forward_pipeline =
+            tensor_util_pipeline("dynamic_schrodinger_forward")?;
+        let tensor_util_dynamic_schrodinger_backward_pipeline =
+            tensor_util_pipeline("dynamic_schrodinger_backward")?;
+        let tensor_util_sequence_last_step_gather_pipeline =
+            tensor_util_pipeline("sequence_last_step_gather")?;
+        let tensor_util_sequence_last_step_scatter_pipeline =
+            tensor_util_pipeline("sequence_last_step_scatter")?;
+        let tensor_util_zspace_coherence_scan_forward_pipeline =
+            tensor_util_pipeline("zspace_coherence_scan_forward")?;
+        let tensor_util_zspace_coherence_scan_backward_pipeline =
+            tensor_util_pipeline("zspace_coherence_scan_backward")?;
+        let tensor_util_add_scaled_pipeline = tensor_util_pipeline("add_scaled")?;
+        let tensor_util_sub_pipeline = tensor_util_pipeline("sub")?;
+        let tensor_util_transpose_pipeline = tensor_util_pipeline("transpose")?;
+        let tensor_util_embedding_gather_pipeline = tensor_util_pipeline("embedding_gather")?;
+        let tensor_util_embedding_scatter_add_pipeline =
+            tensor_util_pipeline("embedding_scatter_add")?;
+        let tensor_util_hypergrad_accumulate_wave_pipeline =
+            tensor_util_pipeline("hypergrad_accumulate_wave")?;
+        let tensor_util_relu_pipeline = tensor_util_pipeline("relu")?;
+        let tensor_util_relu_backward_pipeline = tensor_util_pipeline("relu_backward")?;
+        let tensor_util_lstm_forward_gate_step_pipeline =
+            tensor_util_pipeline("lstm_forward_gate_step")?;
+        let tensor_util_max_pool2d_forward_pipeline = tensor_util_pipeline("max_pool2d_forward")?;
+        let tensor_util_max_pool2d_backward_pipeline = tensor_util_pipeline("max_pool2d_backward")?;
+        let tensor_util_avg_pool2d_forward_pipeline = tensor_util_pipeline("avg_pool2d_forward")?;
+        let tensor_util_avg_pool2d_backward_pipeline = tensor_util_pipeline("avg_pool2d_backward")?;
+        let tensor_util_sum_squares_pipeline = tensor_util_pipeline("sum_squares")?;
+        let tensor_util_sum_abs_pipeline = tensor_util_pipeline("sum_abs")?;
+        let tensor_util_mse_loss_forward_pipeline = tensor_util_pipeline("mse_loss_forward")?;
+        let tensor_util_mse_loss_backward_pipeline = tensor_util_pipeline("mse_loss_backward")?;
+        let tensor_util_categorical_cross_entropy_forward_pipeline =
+            tensor_util_pipeline("categorical_cross_entropy_forward")?;
+        let tensor_util_categorical_cross_entropy_backward_pipeline =
+            tensor_util_pipeline("categorical_cross_entropy_backward")?;
+        let tensor_util_hyperbolic_cross_entropy_forward_pipeline =
+            tensor_util_pipeline("hyperbolic_cross_entropy_forward")?;
+        let tensor_util_hyperbolic_cross_entropy_backward_pipeline =
+            tensor_util_pipeline("hyperbolic_cross_entropy_backward")?;
+        let tensor_util_zspace_softmax_backward_fixed_pipeline =
+            tensor_util_pipeline("zspace_softmax_backward_fixed")?;
+        let tensor_util_add_row_pipeline = tensor_util_pipeline("add_row")?;
+        let tensor_util_sum_axis0_pipeline = tensor_util_pipeline("sum_axis0")?;
+        let tensor_util_sum_axis0_scaled_pipeline = tensor_util_pipeline("sum_axis0_scaled")?;
+        let tensor_util_project_to_poincare_pipeline = tensor_util_pipeline("project_to_poincare")?;
+        let tensor_util_wave_gate_project_pipeline = tensor_util_pipeline("wave_gate_project")?;
+        let tensor_util_wave_gate_backward_pipeline = tensor_util_pipeline("wave_gate_backward")?;
+
         let fused_attention = {
             let shader_source = FUSED_ATTENTION_WGSL_TEMPLATE
                 .replace("{WORKGROUP_SIZE}", &FUSED_ATTENTION_WORKGROUP.to_string())
@@ -1242,6 +1375,16 @@ impl GpuContext {
                     binding: 3,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
                         min_binding_size: None,
@@ -1368,6 +1511,50 @@ impl GpuContext {
             reduce_db_pipeline,
             layer_norm_layout,
             layer_norm_pipeline,
+            tensor_util_layout,
+            tensor_util_scale_pipeline,
+            tensor_util_add_pipeline,
+            tensor_util_hadamard_pipeline,
+            tensor_util_mul_row_pipeline,
+            tensor_util_row_affine_pipeline,
+            tensor_util_dynamic_klein_gordon_forward_pipeline,
+            tensor_util_dynamic_klein_gordon_backward_pipeline,
+            tensor_util_dynamic_hamilton_jacobi_forward_pipeline,
+            tensor_util_dynamic_hamilton_jacobi_backward_pipeline,
+            tensor_util_dynamic_schrodinger_forward_pipeline,
+            tensor_util_dynamic_schrodinger_backward_pipeline,
+            tensor_util_sequence_last_step_gather_pipeline,
+            tensor_util_sequence_last_step_scatter_pipeline,
+            tensor_util_zspace_coherence_scan_forward_pipeline,
+            tensor_util_zspace_coherence_scan_backward_pipeline,
+            tensor_util_add_scaled_pipeline,
+            tensor_util_sub_pipeline,
+            tensor_util_transpose_pipeline,
+            tensor_util_embedding_gather_pipeline,
+            tensor_util_embedding_scatter_add_pipeline,
+            tensor_util_hypergrad_accumulate_wave_pipeline,
+            tensor_util_relu_pipeline,
+            tensor_util_relu_backward_pipeline,
+            tensor_util_lstm_forward_gate_step_pipeline,
+            tensor_util_max_pool2d_forward_pipeline,
+            tensor_util_max_pool2d_backward_pipeline,
+            tensor_util_avg_pool2d_forward_pipeline,
+            tensor_util_avg_pool2d_backward_pipeline,
+            tensor_util_sum_squares_pipeline,
+            tensor_util_sum_abs_pipeline,
+            tensor_util_mse_loss_forward_pipeline,
+            tensor_util_mse_loss_backward_pipeline,
+            tensor_util_categorical_cross_entropy_forward_pipeline,
+            tensor_util_categorical_cross_entropy_backward_pipeline,
+            tensor_util_hyperbolic_cross_entropy_forward_pipeline,
+            tensor_util_hyperbolic_cross_entropy_backward_pipeline,
+            tensor_util_zspace_softmax_backward_fixed_pipeline,
+            tensor_util_add_row_pipeline,
+            tensor_util_sum_axis0_pipeline,
+            tensor_util_sum_axis0_scaled_pipeline,
+            tensor_util_project_to_poincare_pipeline,
+            tensor_util_wave_gate_project_pipeline,
+            tensor_util_wave_gate_backward_pipeline,
             fused_conv_layout,
             fused_conv_pipeline_layout,
             fused_conv_pipelines: Mutex::new(HashMap::new()),
@@ -3682,6 +3869,7 @@ impl GpuContext {
         input: &Buffer,
         weights: &Buffer,
         output: &Buffer,
+        bias: &Buffer,
         params: &Buffer,
     ) -> BindGroup {
         self.device().create_bind_group(&wgpu::BindGroupDescriptor {
@@ -3702,6 +3890,10 @@ impl GpuContext {
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
+                    resource: bias.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
                     resource: params.as_entire_binding(),
                 },
             ],
@@ -3831,6 +4023,7 @@ fn instantiate_tile_template(template: &str, config: TileConfig) -> String {
 #[cfg(all(test, feature = "wgpu_dense"))]
 mod tests {
     use super::*;
+    use crate::{Tensor, Tile};
     use naga::front::wgsl::parse_str;
 
     fn assert_parses(label: &str, source: &str) {
@@ -3874,6 +4067,24 @@ mod tests {
     }
 
     #[test]
+    fn matmul_shader_keeps_edge_tile_invocations_until_final_write() {
+        let key = PipelineKey::new(
+            ScalarType::F32,
+            TileConfig::new(8, 8, 8),
+            false,
+            false,
+            false,
+            0,
+        );
+        let source = generate_matmul_shader(&key);
+
+        assert!(source
+            .contains("let in_bounds = global_row < params.rows && global_col < params.cols;"));
+        assert!(source.contains("if (in_bounds)"));
+        assert!(!source.contains("return;"));
+    }
+
+    #[test]
     fn matmul_candidate_tiles_non_empty() {
         let candidates = candidate_tiles(256, 8, 256, &[]);
         assert!(!candidates.is_empty());
@@ -3881,9 +4092,61 @@ mod tests {
     }
 
     #[test]
+    fn prepacked_f32_upload_matches_shader_row_major_contract() {
+        let rhs = Tensor::from_vec(2, 3, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
+        let packed = PackedB::from_tensor(&rhs, Tile::col_major()).unwrap();
+        let (values, total) = pack_rhs_f32(&packed, TileConfig::new(8, 8, 8));
+
+        assert_eq!(total, rhs.data().len());
+        assert_eq!(values, rhs.data());
+    }
+
+    #[test]
+    fn prepacked_int8_upload_matches_shader_column_packed_contract() {
+        let rhs = Tensor::from_vec(
+            5,
+            2,
+            vec![1.0, -2.0, 3.0, -4.0, 5.0, -6.0, 7.0, -8.0, 9.0, -10.0],
+        )
+        .unwrap();
+        let packed = PackedB::from_tensor(&rhs, Tile::col_major()).unwrap();
+        let (quantized, scales, total) = pack_rhs_int8(&packed, TileConfig::new(8, 8, 8));
+        let stride = rhs.shape().0.div_ceil(4);
+
+        assert_eq!(total, rhs.shape().1 * stride * 4);
+        assert_eq!(quantized.len(), rhs.shape().1 * stride);
+        assert_eq!(scales.len(), rhs.shape().1);
+
+        let decode =
+            |word: i32, lane: u32| -> i8 { (((word as u32) >> (lane * 8)) & 0xFF) as u8 as i8 };
+        let expected =
+            |value: f32, scale: f32| -> i8 { (value / scale).round().clamp(-127.0, 127.0) as i8 };
+
+        assert_eq!(decode(quantized[0], 0), expected(1.0, scales[0]));
+        assert_eq!(decode(quantized[0], 1), expected(3.0, scales[0]));
+        assert_eq!(decode(quantized[0], 2), expected(5.0, scales[0]));
+        assert_eq!(decode(quantized[0], 3), expected(7.0, scales[0]));
+        assert_eq!(decode(quantized[1], 0), expected(9.0, scales[0]));
+        assert_eq!(decode(quantized[stride], 0), expected(-2.0, scales[1]));
+        assert_eq!(decode(quantized[stride], 1), expected(-4.0, scales[1]));
+        assert_eq!(decode(quantized[stride], 2), expected(-6.0, scales[1]));
+        assert_eq!(decode(quantized[stride], 3), expected(-8.0, scales[1]));
+        assert_eq!(decode(quantized[stride + 1], 0), expected(-10.0, scales[1]));
+    }
+
+    #[test]
     fn fused_conv_shader_wgsl_is_valid() {
         let source = instantiate_tile_template(FUSED_CONV_WGSL_TEMPLATE, TileConfig::new(8, 8, 8));
         assert_parses("fused conv", &source);
+    }
+
+    #[test]
+    fn fused_conv_shader_keeps_edge_tile_invocations_until_final_write() {
+        let source = instantiate_tile_template(FUSED_CONV_WGSL_TEMPLATE, TileConfig::new(8, 8, 8));
+
+        assert!(source.contains("let in_bounds = row < total_rows && col < params.out_channels;"));
+        assert!(source.contains("if (in_bounds)"));
+        assert!(!source.contains("return;"));
     }
 
     #[test]
@@ -3922,6 +4185,35 @@ mod tests {
     #[test]
     fn layer_norm_shader_wgsl_is_valid() {
         assert_parses("layer norm", LAYER_NORM_WGSL);
+    }
+
+    #[test]
+    fn tensor_utils_shader_wgsl_is_valid() {
+        assert_parses("tensor utils", TENSOR_UTILS_WGSL);
+    }
+
+    #[test]
+    fn lstm_backward_scan_shader_wgsl_is_valid() {
+        assert_parses("lstm backward scan", LSTM_BACKWARD_SCAN_WGSL);
+        assert!(LSTM_BACKWARD_SCAN_WGSL
+            .contains(&format!("@workgroup_size({LSTM_BACKWARD_SCAN_WORKGROUP})")));
+        assert!(LSTM_BACKWARD_SCAN_WGSL.contains("@builtin(local_invocation_id)"));
+    }
+
+    #[test]
+    fn lstm_backward_scan_shape_support_is_runtime_free() {
+        assert!(lstm_backward_scan_shape_supported(1, 1));
+        assert!(lstm_backward_scan_shape_supported(16, 32));
+        assert!(!lstm_backward_scan_shape_supported(0, 1));
+        assert!(!lstm_backward_scan_shape_supported(1, 0));
+        assert!(!lstm_backward_scan_shape_supported(
+            (u32::MAX as usize).saturating_add(1),
+            1
+        ));
+        assert!(!lstm_backward_scan_shape_supported(
+            1,
+            (u32::MAX as usize).saturating_add(1)
+        ));
     }
 
     #[test]
@@ -3971,6 +4263,10 @@ struct MatmulUniforms {
     cols: u32,
     inner: u32,
     flags: u32,
+    output_scale: f32,
+    _pad0: f32,
+    _pad1: f32,
+    _pad2: f32,
 }
 
 #[repr(C, align(16))]
@@ -3997,6 +4293,28 @@ struct LayerNormParams {
     _pad1: f32,
     _pad2: f32,
     _pad3: f32,
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct TensorUtilParams {
+    rows: u32,
+    cols: u32,
+    values: u32,
+    flags: u32,
+    scalar: f32,
+    saturation: f32,
+    porosity: f32,
+    _pad2: f32,
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct LstmBackwardScanParams {
+    timesteps: u32,
+    hidden_dim: u32,
+    gate_width: u32,
+    _pad0: u32,
 }
 
 #[repr(C, align(16))]
@@ -5102,6 +5420,8 @@ fn dispatch_matmul(
     fused_ops_mask: u32,
     bias: Option<&Buffer>,
     residual: Option<&Buffer>,
+    lhs_transpose: bool,
+    output_scale: f32,
 ) -> Result<(), String> {
     let use_f16 = ctx.shader_f16;
     let key = PipelineKey::new(
@@ -5122,11 +5442,18 @@ fn dispatch_matmul(
     if use_f16 {
         flags |= FLAG_USE_F16;
     }
+    if lhs_transpose {
+        flags |= FLAG_LHS_TRANSPOSE;
+    }
     let params = MatmulUniforms {
         rows: rows as u32,
         cols: cols as u32,
         inner: inner as u32,
         flags,
+        output_scale,
+        _pad0: 0.0,
+        _pad1: 0.0,
+        _pad2: 0.0,
     };
     let params_buf = ctx
         .device()
@@ -5200,6 +5527,8 @@ fn dispatch_matmul_with_options(
         fused_ops_mask,
         bias,
         residual,
+        false,
+        1.0,
     )
 }
 
@@ -5296,6 +5625,2385 @@ fn allocate_output(device: &Device, label: &str, elements: usize) -> Buffer {
     })
 }
 
+fn checked_tensor_util_shape(
+    op: &'static str,
+    input: &[f32],
+    rows: usize,
+    cols: usize,
+) -> Result<(usize, u32, u32, u32), String> {
+    if rows == 0 || cols == 0 {
+        return Err(format!("{op} dimensions must be positive"));
+    }
+    let volume = rows
+        .checked_mul(cols)
+        .ok_or_else(|| format!("{op} volume exceeds usize range"))?;
+    if input.len() != volume {
+        return Err(format!(
+            "{op} input length mismatch: expected {volume} elements, got {}",
+            input.len()
+        ));
+    }
+    let rows_u32 = u32::try_from(rows).map_err(|_| format!("{op} rows exceed u32::MAX"))?;
+    let cols_u32 = u32::try_from(cols).map_err(|_| format!("{op} cols exceed u32::MAX"))?;
+    let volume_u32 = u32::try_from(volume).map_err(|_| format!("{op} volume exceeds u32::MAX"))?;
+    Ok((volume, rows_u32, cols_u32, volume_u32))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn tensor_util_internal(
+    input: &[f32],
+    aux: Option<&[f32]>,
+    rows: usize,
+    cols: usize,
+    output_elements: usize,
+    scalar: f32,
+    saturation: f32,
+    porosity: f32,
+    tolerance: f32,
+    pipeline: Arc<ComputePipeline>,
+    dispatch_x: u32,
+    label: &'static str,
+) -> Result<Vec<f32>, String> {
+    let (volume, rows_u32, cols_u32, volume_u32) =
+        checked_tensor_util_shape(label, input, rows, cols)?;
+    if output_elements == 0 {
+        return Err(format!("{label} output dimensions must be positive"));
+    }
+    if !scalar.is_finite()
+        || !saturation.is_finite()
+        || !porosity.is_finite()
+        || !tolerance.is_finite()
+    {
+        return Err(format!("{label} scalar parameters must be finite"));
+    }
+
+    let ctx = dense_context()?;
+    let device = ctx.device();
+    let queue = ctx.queue();
+    let input_buf = upload_lhs(
+        device,
+        &format!("st.tensor.wgpu_dense.{label}.input"),
+        input,
+    );
+    let aux_buf =
+        aux.map(|data| upload_lhs(device, &format!("st.tensor.wgpu_dense.{label}.aux"), data));
+    let zero_buf = if aux_buf.is_none() {
+        Some(ctx.zero_storage_buffer())
+    } else {
+        None
+    };
+    let aux_binding: &Buffer = match aux_buf.as_ref() {
+        Some(buf) => buf,
+        None => zero_buf.as_ref().expect("zero buffer").as_ref(),
+    };
+    let output_buf = allocate_output(
+        device,
+        &format!("st.tensor.wgpu_dense.{label}.output"),
+        output_elements,
+    );
+    let params = TensorUtilParams {
+        rows: rows_u32,
+        cols: cols_u32,
+        values: volume_u32,
+        flags: 0,
+        scalar,
+        saturation,
+        porosity,
+        _pad2: tolerance,
+    };
+    let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some(&format!("st.tensor.wgpu_dense.{label}.params")),
+        contents: bytemuck::bytes_of(&params),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some(&format!("st.tensor.wgpu_dense.{label}.bind_group")),
+        layout: &ctx.tensor_util_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: input_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: aux_binding.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: output_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: params_buf.as_entire_binding(),
+            },
+        ],
+    });
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some(&format!("st.tensor.wgpu_dense.{label}.encoder")),
+    });
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some(&format!("st.tensor.wgpu_dense.{label}.pass")),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(pipeline.as_ref());
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.dispatch_workgroups(dispatch_x, 1, 1);
+    }
+    queue.submit(Some(encoder.finish()));
+
+    debug_assert_eq!(volume, input.len());
+    readback_f32(device, queue, &output_buf, output_elements)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn max_pool2d_util_internal(
+    input: &[f32],
+    aux: &[f32],
+    batch: usize,
+    input_cols: usize,
+    work_items: usize,
+    output_elements: usize,
+    pipeline: Arc<ComputePipeline>,
+    label: &'static str,
+) -> Result<Vec<f32>, String> {
+    let expected = batch
+        .checked_mul(input_cols)
+        .ok_or_else(|| format!("{label} input volume exceeds usize range"))?;
+    if batch == 0 || input_cols == 0 || work_items == 0 || output_elements == 0 {
+        return Err(format!("{label} dimensions must be positive"));
+    }
+    if input.len() != expected {
+        return Err(format!(
+            "{label} input length mismatch: expected {expected} elements, got {}",
+            input.len()
+        ));
+    }
+    let rows_u32 = u32::try_from(batch).map_err(|_| format!("{label} batch exceeds u32::MAX"))?;
+    let cols_u32 =
+        u32::try_from(input_cols).map_err(|_| format!("{label} input cols exceed u32::MAX"))?;
+    let values_u32 =
+        u32::try_from(work_items).map_err(|_| format!("{label} work items exceed u32::MAX"))?;
+    let ctx = dense_context()?;
+    let device = ctx.device();
+    let queue = ctx.queue();
+    let input_buf = upload_lhs(
+        device,
+        &format!("st.tensor.wgpu_dense.{label}.input"),
+        input,
+    );
+    let aux_buf = upload_lhs(device, &format!("st.tensor.wgpu_dense.{label}.aux"), aux);
+    let output_buf = allocate_output(
+        device,
+        &format!("st.tensor.wgpu_dense.{label}.output"),
+        output_elements,
+    );
+    let params = TensorUtilParams {
+        rows: rows_u32,
+        cols: cols_u32,
+        values: values_u32,
+        flags: 0,
+        scalar: 0.0,
+        saturation: 0.0,
+        porosity: 0.0,
+        _pad2: 0.0,
+    };
+    let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some(&format!("st.tensor.wgpu_dense.{label}.params")),
+        contents: bytemuck::bytes_of(&params),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some(&format!("st.tensor.wgpu_dense.{label}.bind_group")),
+        layout: &ctx.tensor_util_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: input_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: aux_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: output_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: params_buf.as_entire_binding(),
+            },
+        ],
+    });
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some(&format!("st.tensor.wgpu_dense.{label}.encoder")),
+    });
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some(&format!("st.tensor.wgpu_dense.{label}.pass")),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(pipeline.as_ref());
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.dispatch_workgroups(values_u32.div_ceil(TENSOR_UTIL_WORKGROUP), 1, 1);
+    }
+    queue.submit(Some(encoder.finish()));
+
+    readback_f32(device, queue, &output_buf, output_elements)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn embedding_util_internal(
+    indices: &[f32],
+    aux: &[f32],
+    tokens: usize,
+    embed_dim: usize,
+    vocab_size: usize,
+    output_elements: usize,
+    pipeline: Arc<ComputePipeline>,
+    label: &'static str,
+) -> Result<Vec<f32>, String> {
+    if tokens == 0 || embed_dim == 0 || vocab_size == 0 || output_elements == 0 {
+        return Err(format!("{label} dimensions must be positive"));
+    }
+    if indices.len() != tokens {
+        return Err(format!(
+            "{label} index length mismatch: expected {tokens} elements, got {}",
+            indices.len()
+        ));
+    }
+    for &index in indices {
+        if !index.is_finite() || index < 0.0 || index >= vocab_size as f32 {
+            return Err(format!("{label} indices must be finite and pre-clamped"));
+        }
+    }
+    let tokens_u32 =
+        u32::try_from(tokens).map_err(|_| format!("{label} tokens exceed u32::MAX"))?;
+    let embed_dim_u32 =
+        u32::try_from(embed_dim).map_err(|_| format!("{label} embed_dim exceed u32::MAX"))?;
+    let vocab_size_u32 =
+        u32::try_from(vocab_size).map_err(|_| format!("{label} vocab_size exceed u32::MAX"))?;
+    let output_u32 = u32::try_from(output_elements)
+        .map_err(|_| format!("{label} output volume exceeds u32::MAX"))?;
+
+    let ctx = dense_context()?;
+    let device = ctx.device();
+    let queue = ctx.queue();
+    let index_buf = upload_lhs(
+        device,
+        &format!("st.tensor.wgpu_dense.{label}.indices"),
+        indices,
+    );
+    let aux_buf = upload_lhs(device, &format!("st.tensor.wgpu_dense.{label}.aux"), aux);
+    let output_buf = allocate_output(
+        device,
+        &format!("st.tensor.wgpu_dense.{label}.output"),
+        output_elements,
+    );
+    let params = TensorUtilParams {
+        rows: tokens_u32,
+        cols: embed_dim_u32,
+        values: output_u32,
+        flags: vocab_size_u32,
+        scalar: 0.0,
+        saturation: 0.0,
+        porosity: 0.0,
+        _pad2: 0.0,
+    };
+    let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some(&format!("st.tensor.wgpu_dense.{label}.params")),
+        contents: bytemuck::bytes_of(&params),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some(&format!("st.tensor.wgpu_dense.{label}.bind_group")),
+        layout: &ctx.tensor_util_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: index_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: aux_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: output_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: params_buf.as_entire_binding(),
+            },
+        ],
+    });
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some(&format!("st.tensor.wgpu_dense.{label}.encoder")),
+    });
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some(&format!("st.tensor.wgpu_dense.{label}.pass")),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(pipeline.as_ref());
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.dispatch_workgroups(output_u32.div_ceil(TENSOR_UTIL_WORKGROUP), 1, 1);
+    }
+    queue.submit(Some(encoder.finish()));
+    readback_f32(device, queue, &output_buf, output_elements)
+}
+
+fn sequence_last_step_util_internal(
+    input: &[f32],
+    batch: usize,
+    out_steps: usize,
+    features: usize,
+    output_elements: usize,
+    work_items: usize,
+    pipeline: Arc<ComputePipeline>,
+    label: &'static str,
+) -> Result<Vec<f32>, String> {
+    if batch == 0 || out_steps == 0 || features == 0 || output_elements == 0 || work_items == 0 {
+        return Err(format!("{label} dimensions must be positive"));
+    }
+    let batch_u32 = u32::try_from(batch).map_err(|_| format!("{label} batch exceeds u32::MAX"))?;
+    let features_u32 =
+        u32::try_from(features).map_err(|_| format!("{label} features exceed u32::MAX"))?;
+    let work_items_u32 =
+        u32::try_from(work_items).map_err(|_| format!("{label} work items exceed u32::MAX"))?;
+    let out_steps_u32 =
+        u32::try_from(out_steps).map_err(|_| format!("{label} out_steps exceed u32::MAX"))?;
+
+    let ctx = dense_context()?;
+    let device = ctx.device();
+    let queue = ctx.queue();
+    let input_buf = upload_lhs(
+        device,
+        &format!("st.tensor.wgpu_dense.{label}.input"),
+        input,
+    );
+    let output_buf = allocate_output(
+        device,
+        &format!("st.tensor.wgpu_dense.{label}.output"),
+        output_elements,
+    );
+    let params = TensorUtilParams {
+        rows: batch_u32,
+        cols: features_u32,
+        values: work_items_u32,
+        flags: out_steps_u32,
+        scalar: 0.0,
+        saturation: 0.0,
+        porosity: 0.0,
+        _pad2: 0.0,
+    };
+    let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some(&format!("st.tensor.wgpu_dense.{label}.params")),
+        contents: bytemuck::bytes_of(&params),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some(&format!("st.tensor.wgpu_dense.{label}.bind_group")),
+        layout: &ctx.tensor_util_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: input_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: ctx.zero_storage_buffer().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: output_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: params_buf.as_entire_binding(),
+            },
+        ],
+    });
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some(&format!("st.tensor.wgpu_dense.{label}.encoder")),
+    });
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some(&format!("st.tensor.wgpu_dense.{label}.pass")),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(pipeline.as_ref());
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.dispatch_workgroups(work_items_u32.div_ceil(TENSOR_UTIL_WORKGROUP), 1, 1);
+    }
+    queue.submit(Some(encoder.finish()));
+    readback_f32(device, queue, &output_buf, output_elements)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn zspace_coherence_scan_forward_internal(
+    input: &[f32],
+    batch: usize,
+    steps: usize,
+    dim: usize,
+    memory: usize,
+    output_elements: usize,
+    curvature: f32,
+    temperature: f32,
+    self_score_scale: f32,
+    query_residual_scale: f32,
+    pipeline: Arc<ComputePipeline>,
+) -> Result<Vec<f32>, String> {
+    if batch == 0 || steps == 0 || dim == 0 || memory == 0 || output_elements == 0 {
+        return Err("zspace_coherence_scan_forward dimensions must be positive".into());
+    }
+    if memory > steps {
+        return Err("zspace_coherence_scan_forward memory must not exceed steps".into());
+    }
+    if steps > u16::MAX as usize || memory > u16::MAX as usize {
+        return Err("zspace_coherence_scan_forward steps/memory exceed packed u16 range".into());
+    }
+    if !curvature.is_finite()
+        || curvature >= 0.0
+        || !temperature.is_finite()
+        || temperature <= 0.0
+        || !self_score_scale.is_finite()
+        || self_score_scale < 0.0
+        || !query_residual_scale.is_finite()
+        || query_residual_scale < 0.0
+    {
+        return Err("zspace_coherence_scan_forward parameters must be finite and valid".into());
+    }
+    let expected = batch
+        .checked_mul(steps)
+        .and_then(|value| value.checked_mul(dim))
+        .ok_or_else(|| {
+            "zspace_coherence_scan_forward input volume exceeds usize range".to_string()
+        })?;
+    if input.len() != expected {
+        return Err(format!(
+            "zspace_coherence_scan_forward input length mismatch: expected {expected} elements, got {}",
+            input.len()
+        ));
+    }
+    let batch_u32 = u32::try_from(batch)
+        .map_err(|_| "zspace_coherence_scan_forward batch exceeds u32::MAX".to_string())?;
+    let dim_u32 = u32::try_from(dim)
+        .map_err(|_| "zspace_coherence_scan_forward dim exceeds u32::MAX".to_string())?;
+    let output_u32 = u32::try_from(output_elements)
+        .map_err(|_| "zspace_coherence_scan_forward output volume exceeds u32::MAX".to_string())?;
+    let flags = (u32::try_from(steps)
+        .map_err(|_| "zspace_coherence_scan_forward steps exceeds u32::MAX".to_string())?
+        << 16)
+        | u32::try_from(memory)
+            .map_err(|_| "zspace_coherence_scan_forward memory exceeds u32::MAX".to_string())?;
+
+    let ctx = dense_context()?;
+    let device = ctx.device();
+    let queue = ctx.queue();
+    let input_buf = upload_lhs(
+        device,
+        "st.tensor.wgpu_dense.zspace_coherence_scan_forward.input",
+        input,
+    );
+    let output_buf = allocate_output(
+        device,
+        "st.tensor.wgpu_dense.zspace_coherence_scan_forward.output",
+        output_elements,
+    );
+    let params = TensorUtilParams {
+        rows: batch_u32,
+        cols: dim_u32,
+        values: output_u32,
+        flags,
+        scalar: curvature,
+        saturation: temperature,
+        porosity: self_score_scale,
+        _pad2: query_residual_scale,
+    };
+    let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.zspace_coherence_scan_forward.params"),
+        contents: bytemuck::bytes_of(&params),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("st.tensor.wgpu_dense.zspace_coherence_scan_forward.bind_group"),
+        layout: &ctx.tensor_util_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: input_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: ctx.zero_storage_buffer().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: output_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: params_buf.as_entire_binding(),
+            },
+        ],
+    });
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("st.tensor.wgpu_dense.zspace_coherence_scan_forward.encoder"),
+    });
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("st.tensor.wgpu_dense.zspace_coherence_scan_forward.pass"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(pipeline.as_ref());
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.dispatch_workgroups(output_u32.div_ceil(TENSOR_UTIL_WORKGROUP), 1, 1);
+    }
+    queue.submit(Some(encoder.finish()));
+    readback_f32(device, queue, &output_buf, output_elements)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn zspace_coherence_scan_forward(
+    input: &[f32],
+    batch: usize,
+    steps: usize,
+    dim: usize,
+    memory: usize,
+    curvature: f32,
+    temperature: f32,
+    self_score_scale: f32,
+    query_residual_scale: f32,
+) -> Result<(Vec<f32>, Vec<f32>), String> {
+    let context_values = batch.checked_mul(dim).ok_or_else(|| {
+        "zspace_coherence_scan_forward context volume exceeds usize range".to_string()
+    })?;
+    let weight_values = batch.checked_mul(steps).ok_or_else(|| {
+        "zspace_coherence_scan_forward weight volume exceeds usize range".to_string()
+    })?;
+    let output_values = context_values.checked_add(weight_values).ok_or_else(|| {
+        "zspace_coherence_scan_forward output volume exceeds usize range".to_string()
+    })?;
+    let ctx = dense_context()?;
+    let packed = zspace_coherence_scan_forward_internal(
+        input,
+        batch,
+        steps,
+        dim,
+        memory,
+        output_values,
+        curvature,
+        temperature,
+        self_score_scale,
+        query_residual_scale,
+        ctx.tensor_util_zspace_coherence_scan_forward_pipeline
+            .clone(),
+    )?;
+    Ok((
+        packed[..context_values].to_vec(),
+        packed[context_values..context_values + weight_values].to_vec(),
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn zspace_coherence_scan_backward(
+    input: &[f32],
+    grad_output: &[f32],
+    weights: &[f32],
+    batch: usize,
+    steps: usize,
+    dim: usize,
+    memory: usize,
+    curvature: f32,
+    temperature: f32,
+    self_score_scale: f32,
+    query_residual_scale: f32,
+) -> Result<Vec<f32>, String> {
+    const LABEL: &str = "zspace_coherence_scan_backward";
+    if batch == 0 || steps == 0 || dim == 0 || memory == 0 {
+        return Err(format!("{LABEL} dimensions must be positive"));
+    }
+    if memory > steps {
+        return Err(format!("{LABEL} memory must not exceed steps"));
+    }
+    if steps > u16::MAX as usize || memory > u16::MAX as usize {
+        return Err(format!("{LABEL} steps/memory exceed packed u16 range"));
+    }
+    if !curvature.is_finite()
+        || curvature >= 0.0
+        || !temperature.is_finite()
+        || temperature <= 0.0
+        || !self_score_scale.is_finite()
+        || self_score_scale < 0.0
+        || !query_residual_scale.is_finite()
+        || query_residual_scale < 0.0
+    {
+        return Err(format!("{LABEL} parameters must be finite and valid"));
+    }
+    let input_values = batch
+        .checked_mul(steps)
+        .and_then(|value| value.checked_mul(dim))
+        .ok_or_else(|| format!("{LABEL} input volume exceeds usize range"))?;
+    if input.len() != input_values {
+        return Err(format!(
+            "{LABEL} input length mismatch: expected {input_values} elements, got {}",
+            input.len()
+        ));
+    }
+    let grad_values = batch
+        .checked_mul(dim)
+        .ok_or_else(|| format!("{LABEL} grad output volume exceeds usize range"))?;
+    if grad_output.len() != grad_values {
+        return Err(format!(
+            "{LABEL} grad length mismatch: expected {grad_values} elements, got {}",
+            grad_output.len()
+        ));
+    }
+    let weight_values = batch
+        .checked_mul(steps)
+        .ok_or_else(|| format!("{LABEL} weight volume exceeds usize range"))?;
+    if weights.len() != weight_values {
+        return Err(format!(
+            "{LABEL} weight length mismatch: expected {weight_values} elements, got {}",
+            weights.len()
+        ));
+    }
+    let batch_u32 = u32::try_from(batch).map_err(|_| format!("{LABEL} batch exceeds u32::MAX"))?;
+    let dim_u32 = u32::try_from(dim).map_err(|_| format!("{LABEL} dim exceeds u32::MAX"))?;
+    let output_u32 =
+        u32::try_from(input_values).map_err(|_| format!("{LABEL} volume exceeds u32::MAX"))?;
+    let flags = (u32::try_from(steps).map_err(|_| format!("{LABEL} steps exceeds u32::MAX"))?
+        << 16)
+        | u32::try_from(memory).map_err(|_| format!("{LABEL} memory exceeds u32::MAX"))?;
+
+    let mut aux = Vec::with_capacity(grad_values + weight_values);
+    aux.extend_from_slice(grad_output);
+    aux.extend_from_slice(weights);
+
+    let ctx = dense_context()?;
+    let device = ctx.device();
+    let queue = ctx.queue();
+    let input_buf = upload_lhs(
+        device,
+        "st.tensor.wgpu_dense.zspace_coherence_scan_backward.input",
+        input,
+    );
+    let aux_buf = upload_lhs(
+        device,
+        "st.tensor.wgpu_dense.zspace_coherence_scan_backward.aux",
+        &aux,
+    );
+    let output_buf = allocate_output(
+        device,
+        "st.tensor.wgpu_dense.zspace_coherence_scan_backward.output",
+        input_values,
+    );
+    let params = TensorUtilParams {
+        rows: batch_u32,
+        cols: dim_u32,
+        values: output_u32,
+        flags,
+        scalar: curvature,
+        saturation: temperature,
+        porosity: self_score_scale,
+        _pad2: query_residual_scale,
+    };
+    let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.zspace_coherence_scan_backward.params"),
+        contents: bytemuck::bytes_of(&params),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("st.tensor.wgpu_dense.zspace_coherence_scan_backward.bind_group"),
+        layout: &ctx.tensor_util_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: input_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: aux_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: output_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: params_buf.as_entire_binding(),
+            },
+        ],
+    });
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("st.tensor.wgpu_dense.zspace_coherence_scan_backward.encoder"),
+    });
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("st.tensor.wgpu_dense.zspace_coherence_scan_backward.pass"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(
+            ctx.tensor_util_zspace_coherence_scan_backward_pipeline
+                .as_ref(),
+        );
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.dispatch_workgroups(output_u32.div_ceil(TENSOR_UTIL_WORKGROUP), 1, 1);
+    }
+    queue.submit(Some(encoder.finish()));
+    readback_f32(device, queue, &output_buf, input_values)
+}
+
+pub fn sequence_last_step_gather(
+    input: &[f32],
+    batch: usize,
+    out_steps: usize,
+    features: usize,
+) -> Result<Vec<f32>, String> {
+    if batch == 0 || out_steps == 0 || features == 0 {
+        return Err("sequence_last_step_gather dimensions must be positive".into());
+    }
+    let input_values = batch
+        .checked_mul(out_steps)
+        .and_then(|value| value.checked_mul(features))
+        .ok_or_else(|| "sequence_last_step_gather input volume exceeds usize range".to_string())?;
+    if input.len() != input_values {
+        return Err(format!(
+            "sequence_last_step_gather input length mismatch: expected {input_values} elements, got {}",
+            input.len()
+        ));
+    }
+    let output_values = batch
+        .checked_mul(features)
+        .ok_or_else(|| "sequence_last_step_gather output volume exceeds usize range".to_string())?;
+    let ctx = dense_context()?;
+    sequence_last_step_util_internal(
+        input,
+        batch,
+        out_steps,
+        features,
+        output_values,
+        output_values,
+        ctx.tensor_util_sequence_last_step_gather_pipeline.clone(),
+        "sequence_last_step_gather",
+    )
+}
+
+pub fn sequence_last_step_scatter(
+    grad_output: &[f32],
+    batch: usize,
+    out_steps: usize,
+    features: usize,
+) -> Result<Vec<f32>, String> {
+    if batch == 0 || out_steps == 0 || features == 0 {
+        return Err("sequence_last_step_scatter dimensions must be positive".into());
+    }
+    let input_values = batch
+        .checked_mul(features)
+        .ok_or_else(|| "sequence_last_step_scatter input volume exceeds usize range".to_string())?;
+    if grad_output.len() != input_values {
+        return Err(format!(
+            "sequence_last_step_scatter input length mismatch: expected {input_values} elements, got {}",
+            grad_output.len()
+        ));
+    }
+    let output_values = batch
+        .checked_mul(out_steps)
+        .and_then(|value| value.checked_mul(features))
+        .ok_or_else(|| {
+            "sequence_last_step_scatter output volume exceeds usize range".to_string()
+        })?;
+    let ctx = dense_context()?;
+    sequence_last_step_util_internal(
+        grad_output,
+        batch,
+        out_steps,
+        features,
+        output_values,
+        output_values,
+        ctx.tensor_util_sequence_last_step_scatter_pipeline.clone(),
+        "sequence_last_step_scatter",
+    )
+}
+
+pub fn scale(input: &[f32], rows: usize, cols: usize, value: f32) -> Result<Vec<f32>, String> {
+    let (volume, _rows_u32, _cols_u32, volume_u32) =
+        checked_tensor_util_shape("scale", input, rows, cols)?;
+    let ctx = dense_context()?;
+    let workgroups = volume_u32.div_ceil(TENSOR_UTIL_WORKGROUP);
+    tensor_util_internal(
+        input,
+        None,
+        rows,
+        cols,
+        volume,
+        value,
+        0.0,
+        0.0,
+        0.0,
+        ctx.tensor_util_scale_pipeline.clone(),
+        workgroups,
+        "scale",
+    )
+}
+
+pub fn add(lhs: &[f32], rhs: &[f32], rows: usize, cols: usize) -> Result<Vec<f32>, String> {
+    let (volume, _rows_u32, _cols_u32, volume_u32) =
+        checked_tensor_util_shape("add", lhs, rows, cols)?;
+    if rhs.len() != lhs.len() {
+        return Err(format!(
+            "add rhs length mismatch: expected {} elements, got {}",
+            lhs.len(),
+            rhs.len()
+        ));
+    }
+    let ctx = dense_context()?;
+    let workgroups = volume_u32.div_ceil(TENSOR_UTIL_WORKGROUP);
+    tensor_util_internal(
+        lhs,
+        Some(rhs),
+        rows,
+        cols,
+        volume,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        ctx.tensor_util_add_pipeline.clone(),
+        workgroups,
+        "add",
+    )
+}
+
+pub fn hadamard(lhs: &[f32], rhs: &[f32], rows: usize, cols: usize) -> Result<Vec<f32>, String> {
+    let (volume, _rows_u32, _cols_u32, volume_u32) =
+        checked_tensor_util_shape("hadamard", lhs, rows, cols)?;
+    if rhs.len() != lhs.len() {
+        return Err(format!(
+            "hadamard rhs length mismatch: expected {} elements, got {}",
+            lhs.len(),
+            rhs.len()
+        ));
+    }
+    let ctx = dense_context()?;
+    let workgroups = volume_u32.div_ceil(TENSOR_UTIL_WORKGROUP);
+    tensor_util_internal(
+        lhs,
+        Some(rhs),
+        rows,
+        cols,
+        volume,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        ctx.tensor_util_hadamard_pipeline.clone(),
+        workgroups,
+        "hadamard",
+    )
+}
+
+pub fn mul_row(input: &[f32], row: &[f32], rows: usize, cols: usize) -> Result<Vec<f32>, String> {
+    let (volume, _rows_u32, _cols_u32, volume_u32) =
+        checked_tensor_util_shape("mul_row", input, rows, cols)?;
+    if row.len() != cols {
+        return Err(format!(
+            "mul_row row length mismatch: expected {cols} elements, got {}",
+            row.len()
+        ));
+    }
+    let ctx = dense_context()?;
+    let workgroups = volume_u32.div_ceil(TENSOR_UTIL_WORKGROUP);
+    tensor_util_internal(
+        input,
+        Some(row),
+        rows,
+        cols,
+        volume,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        ctx.tensor_util_mul_row_pipeline.clone(),
+        workgroups,
+        "mul_row",
+    )
+}
+
+pub fn row_affine(
+    input: &[f32],
+    scale_row: &[f32],
+    bias_row: &[f32],
+    rows: usize,
+    cols: usize,
+) -> Result<Vec<f32>, String> {
+    let (volume, _rows_u32, _cols_u32, volume_u32) =
+        checked_tensor_util_shape("row_affine", input, rows, cols)?;
+    if scale_row.len() != cols {
+        return Err(format!(
+            "row_affine scale length mismatch: expected {cols} elements, got {}",
+            scale_row.len()
+        ));
+    }
+    if bias_row.len() != cols {
+        return Err(format!(
+            "row_affine bias length mismatch: expected {cols} elements, got {}",
+            bias_row.len()
+        ));
+    }
+    let mut aux = Vec::with_capacity(cols * 2);
+    aux.extend_from_slice(scale_row);
+    aux.extend_from_slice(bias_row);
+    let ctx = dense_context()?;
+    let workgroups = volume_u32.div_ceil(TENSOR_UTIL_WORKGROUP);
+    tensor_util_internal(
+        input,
+        Some(aux.as_slice()),
+        rows,
+        cols,
+        volume,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        ctx.tensor_util_row_affine_pipeline.clone(),
+        workgroups,
+        "row_affine",
+    )
+}
+
+pub fn dynamic_klein_gordon_forward(
+    input: &[f32],
+    mass: &[f32],
+    spin: &[f32],
+    rows: usize,
+    cols: usize,
+    time_step: f32,
+    damping: f32,
+) -> Result<Vec<f32>, String> {
+    let (volume, _rows_u32, _cols_u32, volume_u32) =
+        checked_tensor_util_shape("dynamic_klein_gordon_forward", input, rows, cols)?;
+    if mass.len() != cols {
+        return Err(format!(
+            "dynamic_klein_gordon_forward mass length mismatch: expected {cols} elements, got {}",
+            mass.len()
+        ));
+    }
+    if spin.len() != cols {
+        return Err(format!(
+            "dynamic_klein_gordon_forward spin length mismatch: expected {cols} elements, got {}",
+            spin.len()
+        ));
+    }
+    if !time_step.is_finite() || !damping.is_finite() {
+        return Err("dynamic_klein_gordon_forward parameters must be finite".into());
+    }
+    let mut aux = Vec::with_capacity(cols * 2);
+    aux.extend_from_slice(mass);
+    aux.extend_from_slice(spin);
+    let ctx = dense_context()?;
+    let workgroups = volume_u32.div_ceil(TENSOR_UTIL_WORKGROUP);
+    tensor_util_internal(
+        input,
+        Some(aux.as_slice()),
+        rows,
+        cols,
+        volume,
+        time_step,
+        damping,
+        0.0,
+        0.0,
+        ctx.tensor_util_dynamic_klein_gordon_forward_pipeline
+            .clone(),
+        workgroups,
+        "dynamic_klein_gordon_forward",
+    )
+}
+
+pub fn dynamic_klein_gordon_backward(
+    input: &[f32],
+    grad_output: &[f32],
+    mass: &[f32],
+    spin: &[f32],
+    rows: usize,
+    cols: usize,
+    time_step: f32,
+    damping: f32,
+) -> Result<(Vec<f32>, Vec<f32>, Vec<f32>), String> {
+    let (volume, _rows_u32, _cols_u32, volume_u32) =
+        checked_tensor_util_shape("dynamic_klein_gordon_backward", input, rows, cols)?;
+    if grad_output.len() != volume {
+        return Err(format!(
+            "dynamic_klein_gordon_backward grad length mismatch: expected {volume} elements, got {}",
+            grad_output.len()
+        ));
+    }
+    if mass.len() != cols {
+        return Err(format!(
+            "dynamic_klein_gordon_backward mass length mismatch: expected {cols} elements, got {}",
+            mass.len()
+        ));
+    }
+    if spin.len() != cols {
+        return Err(format!(
+            "dynamic_klein_gordon_backward spin length mismatch: expected {cols} elements, got {}",
+            spin.len()
+        ));
+    }
+    if !time_step.is_finite() || !damping.is_finite() {
+        return Err("dynamic_klein_gordon_backward parameters must be finite".into());
+    }
+    let mut aux = Vec::with_capacity(volume + cols * 2);
+    aux.extend_from_slice(grad_output);
+    aux.extend_from_slice(mass);
+    aux.extend_from_slice(spin);
+    let output_elements = volume
+        .checked_add(cols.checked_mul(2).ok_or_else(|| {
+            "dynamic_klein_gordon_backward output volume exceeds usize range".to_string()
+        })?)
+        .ok_or_else(|| {
+            "dynamic_klein_gordon_backward output volume exceeds usize range".to_string()
+        })?;
+    let ctx = dense_context()?;
+    let workgroups = volume_u32.div_ceil(TENSOR_UTIL_WORKGROUP);
+    let packed = tensor_util_internal(
+        input,
+        Some(aux.as_slice()),
+        rows,
+        cols,
+        output_elements,
+        time_step,
+        damping,
+        0.0,
+        0.0,
+        ctx.tensor_util_dynamic_klein_gordon_backward_pipeline
+            .clone(),
+        workgroups,
+        "dynamic_klein_gordon_backward",
+    )?;
+    let grad_input = packed[..volume].to_vec();
+    let grad_mass = packed[volume..volume + cols].to_vec();
+    let grad_spin = packed[volume + cols..volume + cols * 2].to_vec();
+    Ok((grad_input, grad_mass, grad_spin))
+}
+
+pub fn dynamic_hamilton_jacobi_forward(
+    input: &[f32],
+    potential: &[f32],
+    rows: usize,
+    cols: usize,
+    step_size: f32,
+) -> Result<Vec<f32>, String> {
+    let (volume, _rows_u32, _cols_u32, volume_u32) =
+        checked_tensor_util_shape("dynamic_hamilton_jacobi_forward", input, rows, cols)?;
+    if potential.len() != cols {
+        return Err(format!(
+            "dynamic_hamilton_jacobi_forward potential length mismatch: expected {cols} elements, got {}",
+            potential.len()
+        ));
+    }
+    if !step_size.is_finite() {
+        return Err("dynamic_hamilton_jacobi_forward step size must be finite".into());
+    }
+    let ctx = dense_context()?;
+    let workgroups = volume_u32.div_ceil(TENSOR_UTIL_WORKGROUP);
+    tensor_util_internal(
+        input,
+        Some(potential),
+        rows,
+        cols,
+        volume,
+        step_size,
+        0.0,
+        0.0,
+        0.0,
+        ctx.tensor_util_dynamic_hamilton_jacobi_forward_pipeline
+            .clone(),
+        workgroups,
+        "dynamic_hamilton_jacobi_forward",
+    )
+}
+
+pub fn dynamic_hamilton_jacobi_backward(
+    input: &[f32],
+    grad_output: &[f32],
+    potential: &[f32],
+    rows: usize,
+    cols: usize,
+    step_size: f32,
+) -> Result<(Vec<f32>, Vec<f32>), String> {
+    let (volume, _rows_u32, _cols_u32, volume_u32) =
+        checked_tensor_util_shape("dynamic_hamilton_jacobi_backward", input, rows, cols)?;
+    if grad_output.len() != volume {
+        return Err(format!(
+            "dynamic_hamilton_jacobi_backward grad length mismatch: expected {volume} elements, got {}",
+            grad_output.len()
+        ));
+    }
+    if potential.len() != cols {
+        return Err(format!(
+            "dynamic_hamilton_jacobi_backward potential length mismatch: expected {cols} elements, got {}",
+            potential.len()
+        ));
+    }
+    if !step_size.is_finite() {
+        return Err("dynamic_hamilton_jacobi_backward step size must be finite".into());
+    }
+    let mut aux = Vec::with_capacity(volume + cols);
+    aux.extend_from_slice(grad_output);
+    aux.extend_from_slice(potential);
+    let output_elements = volume.checked_add(cols).ok_or_else(|| {
+        "dynamic_hamilton_jacobi_backward output volume exceeds usize range".to_string()
+    })?;
+    let ctx = dense_context()?;
+    let workgroups = volume_u32.div_ceil(TENSOR_UTIL_WORKGROUP);
+    let packed = tensor_util_internal(
+        input,
+        Some(aux.as_slice()),
+        rows,
+        cols,
+        output_elements,
+        step_size,
+        0.0,
+        0.0,
+        0.0,
+        ctx.tensor_util_dynamic_hamilton_jacobi_backward_pipeline
+            .clone(),
+        workgroups,
+        "dynamic_hamilton_jacobi_backward",
+    )?;
+    let grad_input = packed[..volume].to_vec();
+    let grad_potential = packed[volume..volume + cols].to_vec();
+    Ok((grad_input, grad_potential))
+}
+
+pub fn dynamic_schrodinger_forward(
+    input: &[f32],
+    coherence: &[f32],
+    rows: usize,
+    cols: usize,
+    decoherence_rate: f32,
+) -> Result<(Vec<f32>, Vec<f32>, Vec<f32>), String> {
+    let (volume, _rows_u32, _cols_u32, volume_u32) =
+        checked_tensor_util_shape("dynamic_schrodinger_forward", input, rows, cols)?;
+    if coherence.len() != cols {
+        return Err(format!(
+            "dynamic_schrodinger_forward coherence length mismatch: expected {cols} elements, got {}",
+            coherence.len()
+        ));
+    }
+    if !decoherence_rate.is_finite() {
+        return Err("dynamic_schrodinger_forward decoherence rate must be finite".into());
+    }
+    let output_elements = volume.checked_mul(3).ok_or_else(|| {
+        "dynamic_schrodinger_forward output volume exceeds usize range".to_string()
+    })?;
+    let ctx = dense_context()?;
+    let workgroups = volume_u32.div_ceil(TENSOR_UTIL_WORKGROUP);
+    let packed = tensor_util_internal(
+        input,
+        Some(coherence),
+        rows,
+        cols,
+        output_elements,
+        decoherence_rate,
+        0.0,
+        0.0,
+        0.0,
+        ctx.tensor_util_dynamic_schrodinger_forward_pipeline.clone(),
+        workgroups,
+        "dynamic_schrodinger_forward",
+    )?;
+    let interference = packed[..volume].to_vec();
+    let amplitude = packed[volume..volume * 2].to_vec();
+    let decoherence = packed[volume * 2..volume * 3].to_vec();
+    Ok((interference, amplitude, decoherence))
+}
+
+pub fn dynamic_schrodinger_backward(
+    amplitude: &[f32],
+    decoherence: &[f32],
+    grad_output: &[f32],
+    coherence: &[f32],
+    rows: usize,
+    cols: usize,
+    decoherence_rate: f32,
+) -> Result<(Vec<f32>, Vec<f32>), String> {
+    let (volume, _rows_u32, _cols_u32, volume_u32) =
+        checked_tensor_util_shape("dynamic_schrodinger_backward", amplitude, rows, cols)?;
+    if decoherence.len() != volume {
+        return Err(format!(
+            "dynamic_schrodinger_backward decoherence length mismatch: expected {volume} elements, got {}",
+            decoherence.len()
+        ));
+    }
+    if grad_output.len() != volume {
+        return Err(format!(
+            "dynamic_schrodinger_backward grad length mismatch: expected {volume} elements, got {}",
+            grad_output.len()
+        ));
+    }
+    if coherence.len() != cols {
+        return Err(format!(
+            "dynamic_schrodinger_backward coherence length mismatch: expected {cols} elements, got {}",
+            coherence.len()
+        ));
+    }
+    if !decoherence_rate.is_finite() {
+        return Err("dynamic_schrodinger_backward decoherence rate must be finite".into());
+    }
+    let mut aux = Vec::with_capacity(volume * 2 + cols);
+    aux.extend_from_slice(grad_output);
+    aux.extend_from_slice(decoherence);
+    aux.extend_from_slice(coherence);
+    let output_elements = volume.checked_add(cols).ok_or_else(|| {
+        "dynamic_schrodinger_backward output volume exceeds usize range".to_string()
+    })?;
+    let ctx = dense_context()?;
+    let workgroups = volume_u32.div_ceil(TENSOR_UTIL_WORKGROUP);
+    let packed = tensor_util_internal(
+        amplitude,
+        Some(aux.as_slice()),
+        rows,
+        cols,
+        output_elements,
+        decoherence_rate,
+        0.0,
+        0.0,
+        0.0,
+        ctx.tensor_util_dynamic_schrodinger_backward_pipeline
+            .clone(),
+        workgroups,
+        "dynamic_schrodinger_backward",
+    )?;
+    let grad_input = packed[..volume].to_vec();
+    let grad_coherence = packed[volume..volume + cols].to_vec();
+    Ok((grad_input, grad_coherence))
+}
+
+pub fn add_scaled(
+    lhs: &[f32],
+    rhs: &[f32],
+    rows: usize,
+    cols: usize,
+    scale: f32,
+) -> Result<Vec<f32>, String> {
+    let (volume, _rows_u32, _cols_u32, volume_u32) =
+        checked_tensor_util_shape("add_scaled", lhs, rows, cols)?;
+    if rhs.len() != lhs.len() {
+        return Err(format!(
+            "add_scaled rhs length mismatch: expected {} elements, got {}",
+            lhs.len(),
+            rhs.len()
+        ));
+    }
+    let ctx = dense_context()?;
+    let workgroups = volume_u32.div_ceil(TENSOR_UTIL_WORKGROUP);
+    tensor_util_internal(
+        lhs,
+        Some(rhs),
+        rows,
+        cols,
+        volume,
+        scale,
+        0.0,
+        0.0,
+        0.0,
+        ctx.tensor_util_add_scaled_pipeline.clone(),
+        workgroups,
+        "add_scaled",
+    )
+}
+
+pub fn sub(lhs: &[f32], rhs: &[f32], rows: usize, cols: usize) -> Result<Vec<f32>, String> {
+    let (volume, _rows_u32, _cols_u32, volume_u32) =
+        checked_tensor_util_shape("sub", lhs, rows, cols)?;
+    if rhs.len() != lhs.len() {
+        return Err(format!(
+            "sub rhs length mismatch: expected {} elements, got {}",
+            lhs.len(),
+            rhs.len()
+        ));
+    }
+    let ctx = dense_context()?;
+    let workgroups = volume_u32.div_ceil(TENSOR_UTIL_WORKGROUP);
+    tensor_util_internal(
+        lhs,
+        Some(rhs),
+        rows,
+        cols,
+        volume,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        ctx.tensor_util_sub_pipeline.clone(),
+        workgroups,
+        "sub",
+    )
+}
+
+pub fn transpose(input: &[f32], rows: usize, cols: usize) -> Result<Vec<f32>, String> {
+    let (volume, _rows_u32, _cols_u32, volume_u32) =
+        checked_tensor_util_shape("transpose", input, rows, cols)?;
+    let ctx = dense_context()?;
+    let workgroups = volume_u32.div_ceil(TENSOR_UTIL_WORKGROUP);
+    tensor_util_internal(
+        input,
+        None,
+        rows,
+        cols,
+        volume,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        ctx.tensor_util_transpose_pipeline.clone(),
+        workgroups,
+        "transpose",
+    )
+}
+
+pub fn embedding_gather(
+    indices: &[f32],
+    weights: &[f32],
+    tokens: usize,
+    embed_dim: usize,
+) -> Result<Vec<f32>, String> {
+    if embed_dim == 0 || weights.is_empty() || weights.len() % embed_dim != 0 {
+        return Err("embedding_gather weights must be a non-empty vocab x embed_dim table".into());
+    }
+    let vocab_size = weights.len() / embed_dim;
+    let ctx = dense_context()?;
+    embedding_util_internal(
+        indices,
+        weights,
+        tokens,
+        embed_dim,
+        vocab_size,
+        tokens.saturating_mul(embed_dim),
+        ctx.tensor_util_embedding_gather_pipeline.clone(),
+        "embedding_gather",
+    )
+}
+
+pub fn embedding_scatter_add(
+    indices: &[f32],
+    grad_output: &[f32],
+    tokens: usize,
+    vocab_size: usize,
+    embed_dim: usize,
+) -> Result<Vec<f32>, String> {
+    if vocab_size == 0 || embed_dim == 0 {
+        return Err("embedding_scatter_add vocab_size and embed_dim must be positive".into());
+    }
+    let expected = tokens
+        .checked_mul(embed_dim)
+        .ok_or_else(|| "embedding_scatter_add token volume exceeds usize range".to_string())?;
+    if grad_output.len() != expected {
+        return Err(format!(
+            "embedding_scatter_add grad_output length mismatch: expected {expected}, got {}",
+            grad_output.len()
+        ));
+    }
+    let output_elements = vocab_size
+        .checked_mul(embed_dim)
+        .ok_or_else(|| "embedding_scatter_add output volume exceeds usize range".to_string())?;
+    let ctx = dense_context()?;
+    embedding_util_internal(
+        indices,
+        grad_output,
+        tokens,
+        embed_dim,
+        vocab_size,
+        output_elements,
+        ctx.tensor_util_embedding_scatter_add_pipeline.clone(),
+        "embedding_scatter_add",
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn hypergrad_accumulate_wave(
+    gradient: &[f32],
+    wave: &[f32],
+    rows: usize,
+    cols: usize,
+    curvature: f32,
+    tolerance: f32,
+    saturation: f32,
+    porosity: f32,
+) -> Result<Vec<f32>, String> {
+    let (volume, _rows_u32, _cols_u32, volume_u32) =
+        checked_tensor_util_shape("hypergrad_accumulate_wave", gradient, rows, cols)?;
+    if wave.len() != gradient.len() {
+        return Err(format!(
+            "hypergrad_accumulate_wave wave length mismatch: expected {} elements, got {}",
+            gradient.len(),
+            wave.len()
+        ));
+    }
+    if !curvature.is_finite()
+        || !tolerance.is_finite()
+        || tolerance <= 0.0
+        || !saturation.is_finite()
+        || saturation <= 0.0
+        || !porosity.is_finite()
+    {
+        return Err(
+            "hypergrad_accumulate_wave parameters must be finite and positive where required"
+                .into(),
+        );
+    }
+    let ctx = dense_context()?;
+    let workgroups = volume_u32.div_ceil(TENSOR_UTIL_WORKGROUP);
+    tensor_util_internal(
+        gradient,
+        Some(wave),
+        rows,
+        cols,
+        volume,
+        curvature,
+        saturation,
+        porosity,
+        tolerance,
+        ctx.tensor_util_hypergrad_accumulate_wave_pipeline.clone(),
+        workgroups,
+        "hypergrad_accumulate_wave",
+    )
+}
+
+pub fn relu(input: &[f32], rows: usize, cols: usize) -> Result<Vec<f32>, String> {
+    let (volume, _rows_u32, _cols_u32, volume_u32) =
+        checked_tensor_util_shape("relu", input, rows, cols)?;
+    let ctx = dense_context()?;
+    let workgroups = volume_u32.div_ceil(TENSOR_UTIL_WORKGROUP);
+    tensor_util_internal(
+        input,
+        None,
+        rows,
+        cols,
+        volume,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        ctx.tensor_util_relu_pipeline.clone(),
+        workgroups,
+        "relu",
+    )
+}
+
+pub fn relu_backward(
+    input: &[f32],
+    grad_output: &[f32],
+    rows: usize,
+    cols: usize,
+) -> Result<Vec<f32>, String> {
+    let (volume, _rows_u32, _cols_u32, volume_u32) =
+        checked_tensor_util_shape("relu_backward", input, rows, cols)?;
+    if grad_output.len() != input.len() {
+        return Err(format!(
+            "relu_backward grad length mismatch: expected {} elements, got {}",
+            input.len(),
+            grad_output.len()
+        ));
+    }
+    let ctx = dense_context()?;
+    let workgroups = volume_u32.div_ceil(TENSOR_UTIL_WORKGROUP);
+    tensor_util_internal(
+        input,
+        Some(grad_output),
+        rows,
+        cols,
+        volume,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        ctx.tensor_util_relu_backward_pipeline.clone(),
+        workgroups,
+        "relu_backward",
+    )
+}
+
+pub fn lstm_forward_gate_step(
+    gates: &[f32],
+    cell_prev: &[f32],
+    hidden_dim: usize,
+) -> Result<Vec<f32>, String> {
+    if hidden_dim == 0 {
+        return Err("lstm_forward_gate_step hidden_dim must be positive".into());
+    }
+    let gate_width = hidden_dim
+        .checked_mul(4)
+        .ok_or_else(|| "lstm_forward_gate_step gate width overflow".to_string())?;
+    if gates.len() != gate_width {
+        return Err(format!(
+            "lstm_forward_gate_step gate length mismatch: expected {gate_width}, got {}",
+            gates.len()
+        ));
+    }
+    if cell_prev.len() != hidden_dim {
+        return Err(format!(
+            "lstm_forward_gate_step cell length mismatch: expected {hidden_dim}, got {}",
+            cell_prev.len()
+        ));
+    }
+    let output_elements = hidden_dim
+        .checked_mul(6)
+        .ok_or_else(|| "lstm_forward_gate_step output volume overflow".to_string())?;
+    let hidden_dim_u32 = u32::try_from(hidden_dim)
+        .map_err(|_| "lstm_forward_gate_step hidden_dim exceeds u32::MAX".to_string())?;
+    let ctx = dense_context()?;
+    let workgroups = hidden_dim_u32.div_ceil(TENSOR_UTIL_WORKGROUP);
+    tensor_util_internal(
+        gates,
+        Some(cell_prev),
+        1,
+        gate_width,
+        output_elements,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        ctx.tensor_util_lstm_forward_gate_step_pipeline.clone(),
+        workgroups,
+        "lstm_forward_gate_step",
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn max_pool2d_config(
+    label: &'static str,
+    batch: usize,
+    channels: usize,
+    input_h: usize,
+    input_w: usize,
+    output_h: usize,
+    output_w: usize,
+    kernel_h: usize,
+    kernel_w: usize,
+    stride_h: usize,
+    stride_w: usize,
+    pad_h: usize,
+    pad_w: usize,
+) -> Result<Vec<f32>, String> {
+    for (name, value) in [
+        ("batch", batch),
+        ("channels", channels),
+        ("input_h", input_h),
+        ("input_w", input_w),
+        ("output_h", output_h),
+        ("output_w", output_w),
+        ("kernel_h", kernel_h),
+        ("kernel_w", kernel_w),
+        ("stride_h", stride_h),
+        ("stride_w", stride_w),
+    ] {
+        if value == 0 {
+            return Err(format!("{label} {name} must be positive"));
+        }
+        u32::try_from(value).map_err(|_| format!("{label} {name} exceeds u32::MAX"))?;
+    }
+    u32::try_from(pad_h).map_err(|_| format!("{label} pad_h exceeds u32::MAX"))?;
+    u32::try_from(pad_w).map_err(|_| format!("{label} pad_w exceeds u32::MAX"))?;
+    Ok(vec![
+        channels as f32,
+        input_h as f32,
+        input_w as f32,
+        output_h as f32,
+        output_w as f32,
+        kernel_h as f32,
+        kernel_w as f32,
+        stride_h as f32,
+        stride_w as f32,
+        pad_h as f32,
+        pad_w as f32,
+    ])
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn max_pool2d_forward(
+    input: &[f32],
+    batch: usize,
+    channels: usize,
+    input_h: usize,
+    input_w: usize,
+    output_h: usize,
+    output_w: usize,
+    kernel_h: usize,
+    kernel_w: usize,
+    stride_h: usize,
+    stride_w: usize,
+    pad_h: usize,
+    pad_w: usize,
+) -> Result<(Vec<f32>, Vec<usize>), String> {
+    let input_cols = channels
+        .checked_mul(input_h)
+        .and_then(|value| value.checked_mul(input_w))
+        .ok_or_else(|| "max_pool2d_forward input cols exceed usize range".to_string())?;
+    let output_values = batch
+        .checked_mul(channels)
+        .and_then(|value| value.checked_mul(output_h))
+        .and_then(|value| value.checked_mul(output_w))
+        .ok_or_else(|| "max_pool2d_forward output volume exceeds usize range".to_string())?;
+    let aux = max_pool2d_config(
+        "max_pool2d_forward",
+        batch,
+        channels,
+        input_h,
+        input_w,
+        output_h,
+        output_w,
+        kernel_h,
+        kernel_w,
+        stride_h,
+        stride_w,
+        pad_h,
+        pad_w,
+    )?;
+    let ctx = dense_context()?;
+    let packed = max_pool2d_util_internal(
+        input,
+        &aux,
+        batch,
+        input_cols,
+        output_values,
+        output_values.saturating_mul(2),
+        ctx.tensor_util_max_pool2d_forward_pipeline.clone(),
+        "max_pool2d_forward",
+    )?;
+    let (values, raw_indices) = packed.split_at(output_values);
+    let mut indices = Vec::with_capacity(raw_indices.len());
+    for &index in raw_indices {
+        if !index.is_finite() || index < 0.0 || index >= input_cols as f32 {
+            return Err("max_pool2d_forward returned invalid argmax index".into());
+        }
+        indices.push(index as usize);
+    }
+    Ok((values.to_vec(), indices))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn max_pool2d_backward(
+    input: &[f32],
+    grad_output: &[f32],
+    batch: usize,
+    channels: usize,
+    input_h: usize,
+    input_w: usize,
+    output_h: usize,
+    output_w: usize,
+    kernel_h: usize,
+    kernel_w: usize,
+    stride_h: usize,
+    stride_w: usize,
+    pad_h: usize,
+    pad_w: usize,
+) -> Result<Vec<f32>, String> {
+    let input_cols = channels
+        .checked_mul(input_h)
+        .and_then(|value| value.checked_mul(input_w))
+        .ok_or_else(|| "max_pool2d_backward input cols exceed usize range".to_string())?;
+    let input_values = batch
+        .checked_mul(input_cols)
+        .ok_or_else(|| "max_pool2d_backward input volume exceeds usize range".to_string())?;
+    let output_values = batch
+        .checked_mul(channels)
+        .and_then(|value| value.checked_mul(output_h))
+        .and_then(|value| value.checked_mul(output_w))
+        .ok_or_else(|| "max_pool2d_backward output volume exceeds usize range".to_string())?;
+    if grad_output.len() != output_values {
+        return Err(format!(
+            "max_pool2d_backward grad length mismatch: expected {output_values} elements, got {}",
+            grad_output.len()
+        ));
+    }
+    let mut aux = max_pool2d_config(
+        "max_pool2d_backward",
+        batch,
+        channels,
+        input_h,
+        input_w,
+        output_h,
+        output_w,
+        kernel_h,
+        kernel_w,
+        stride_h,
+        stride_w,
+        pad_h,
+        pad_w,
+    )?;
+    aux.extend_from_slice(grad_output);
+    let ctx = dense_context()?;
+    max_pool2d_util_internal(
+        input,
+        &aux,
+        batch,
+        input_cols,
+        input_values,
+        input_values,
+        ctx.tensor_util_max_pool2d_backward_pipeline.clone(),
+        "max_pool2d_backward",
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn avg_pool2d_forward(
+    input: &[f32],
+    batch: usize,
+    channels: usize,
+    input_h: usize,
+    input_w: usize,
+    output_h: usize,
+    output_w: usize,
+    kernel_h: usize,
+    kernel_w: usize,
+    stride_h: usize,
+    stride_w: usize,
+    pad_h: usize,
+    pad_w: usize,
+) -> Result<Vec<f32>, String> {
+    let input_cols = channels
+        .checked_mul(input_h)
+        .and_then(|value| value.checked_mul(input_w))
+        .ok_or_else(|| "avg_pool2d_forward input cols exceed usize range".to_string())?;
+    let output_values = batch
+        .checked_mul(channels)
+        .and_then(|value| value.checked_mul(output_h))
+        .and_then(|value| value.checked_mul(output_w))
+        .ok_or_else(|| "avg_pool2d_forward output volume exceeds usize range".to_string())?;
+    let aux = max_pool2d_config(
+        "avg_pool2d_forward",
+        batch,
+        channels,
+        input_h,
+        input_w,
+        output_h,
+        output_w,
+        kernel_h,
+        kernel_w,
+        stride_h,
+        stride_w,
+        pad_h,
+        pad_w,
+    )?;
+    let ctx = dense_context()?;
+    max_pool2d_util_internal(
+        input,
+        &aux,
+        batch,
+        input_cols,
+        output_values,
+        output_values,
+        ctx.tensor_util_avg_pool2d_forward_pipeline.clone(),
+        "avg_pool2d_forward",
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn avg_pool2d_backward(
+    input: &[f32],
+    grad_output: &[f32],
+    batch: usize,
+    channels: usize,
+    input_h: usize,
+    input_w: usize,
+    output_h: usize,
+    output_w: usize,
+    kernel_h: usize,
+    kernel_w: usize,
+    stride_h: usize,
+    stride_w: usize,
+    pad_h: usize,
+    pad_w: usize,
+) -> Result<Vec<f32>, String> {
+    let input_cols = channels
+        .checked_mul(input_h)
+        .and_then(|value| value.checked_mul(input_w))
+        .ok_or_else(|| "avg_pool2d_backward input cols exceed usize range".to_string())?;
+    let input_values = batch
+        .checked_mul(input_cols)
+        .ok_or_else(|| "avg_pool2d_backward input volume exceeds usize range".to_string())?;
+    let output_values = batch
+        .checked_mul(channels)
+        .and_then(|value| value.checked_mul(output_h))
+        .and_then(|value| value.checked_mul(output_w))
+        .ok_or_else(|| "avg_pool2d_backward output volume exceeds usize range".to_string())?;
+    if grad_output.len() != output_values {
+        return Err(format!(
+            "avg_pool2d_backward grad length mismatch: expected {output_values} elements, got {}",
+            grad_output.len()
+        ));
+    }
+    let mut aux = max_pool2d_config(
+        "avg_pool2d_backward",
+        batch,
+        channels,
+        input_h,
+        input_w,
+        output_h,
+        output_w,
+        kernel_h,
+        kernel_w,
+        stride_h,
+        stride_w,
+        pad_h,
+        pad_w,
+    )?;
+    aux.extend_from_slice(grad_output);
+    let ctx = dense_context()?;
+    max_pool2d_util_internal(
+        input,
+        &aux,
+        batch,
+        input_cols,
+        input_values,
+        input_values,
+        ctx.tensor_util_avg_pool2d_backward_pipeline.clone(),
+        "avg_pool2d_backward",
+    )
+}
+
+pub fn sum_squares(input: &[f32], rows: usize, cols: usize) -> Result<f32, String> {
+    let (volume, _rows_u32, _cols_u32, _volume_u32) =
+        checked_tensor_util_shape("sum_squares", input, rows, cols)?;
+    let ctx = dense_context()?;
+    let buffer = tensor_util_internal(
+        input,
+        None,
+        rows,
+        cols,
+        1,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        ctx.tensor_util_sum_squares_pipeline.clone(),
+        1,
+        "sum_squares",
+    )?;
+    debug_assert_eq!(volume, input.len());
+    buffer
+        .first()
+        .copied()
+        .ok_or_else(|| "sum_squares returned no result".to_string())
+}
+
+pub fn sum_abs(input: &[f32], rows: usize, cols: usize) -> Result<f32, String> {
+    let (volume, _rows_u32, _cols_u32, _volume_u32) =
+        checked_tensor_util_shape("sum_abs", input, rows, cols)?;
+    let ctx = dense_context()?;
+    let buffer = tensor_util_internal(
+        input,
+        None,
+        rows,
+        cols,
+        1,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        ctx.tensor_util_sum_abs_pipeline.clone(),
+        1,
+        "sum_abs",
+    )?;
+    debug_assert_eq!(volume, input.len());
+    buffer
+        .first()
+        .copied()
+        .ok_or_else(|| "sum_abs returned no result".to_string())
+}
+
+pub fn mse_loss_forward(
+    prediction: &[f32],
+    target: &[f32],
+    rows: usize,
+    cols: usize,
+) -> Result<f32, String> {
+    let _ = checked_tensor_util_shape("mse_loss_forward", prediction, rows, cols)?;
+    if target.len() != prediction.len() {
+        return Err(format!(
+            "mse_loss_forward target length mismatch: expected {} elements, got {}",
+            prediction.len(),
+            target.len()
+        ));
+    }
+    let ctx = dense_context()?;
+    let buffer = tensor_util_internal(
+        prediction,
+        Some(target),
+        rows,
+        cols,
+        1,
+        1.0 / prediction.len() as f32,
+        0.0,
+        0.0,
+        0.0,
+        ctx.tensor_util_mse_loss_forward_pipeline.clone(),
+        1,
+        "mse_loss_forward",
+    )?;
+    buffer
+        .first()
+        .copied()
+        .ok_or_else(|| "mse_loss_forward returned no result".to_string())
+}
+
+pub fn mse_loss_backward(
+    prediction: &[f32],
+    target: &[f32],
+    rows: usize,
+    cols: usize,
+) -> Result<Vec<f32>, String> {
+    let (volume, _rows_u32, _cols_u32, volume_u32) =
+        checked_tensor_util_shape("mse_loss_backward", prediction, rows, cols)?;
+    if target.len() != prediction.len() {
+        return Err(format!(
+            "mse_loss_backward target length mismatch: expected {} elements, got {}",
+            prediction.len(),
+            target.len()
+        ));
+    }
+    let ctx = dense_context()?;
+    let workgroups = volume_u32.div_ceil(TENSOR_UTIL_WORKGROUP);
+    tensor_util_internal(
+        prediction,
+        Some(target),
+        rows,
+        cols,
+        volume,
+        2.0 / prediction.len() as f32,
+        0.0,
+        0.0,
+        0.0,
+        ctx.tensor_util_mse_loss_backward_pipeline.clone(),
+        workgroups,
+        "mse_loss_backward",
+    )
+}
+
+pub fn categorical_cross_entropy_forward(
+    prediction: &[f32],
+    target: &[f32],
+    rows: usize,
+    cols: usize,
+    epsilon: f32,
+) -> Result<f32, String> {
+    let _ = checked_tensor_util_shape("categorical_cross_entropy_forward", prediction, rows, cols)?;
+    if target.len() != prediction.len() {
+        return Err(format!(
+            "categorical_cross_entropy_forward target length mismatch: expected {} elements, got {}",
+            prediction.len(),
+            target.len()
+        ));
+    }
+    if !epsilon.is_finite() || epsilon <= 0.0 {
+        return Err("categorical_cross_entropy_forward epsilon must be finite and positive".into());
+    }
+    let ctx = dense_context()?;
+    let buffer = tensor_util_internal(
+        prediction,
+        Some(target),
+        rows,
+        cols,
+        1,
+        epsilon,
+        1.0 / rows as f32,
+        0.0,
+        0.0,
+        ctx.tensor_util_categorical_cross_entropy_forward_pipeline
+            .clone(),
+        1,
+        "categorical_cross_entropy_forward",
+    )?;
+    buffer
+        .first()
+        .copied()
+        .ok_or_else(|| "categorical_cross_entropy_forward returned no result".to_string())
+}
+
+pub fn categorical_cross_entropy_backward(
+    prediction: &[f32],
+    target: &[f32],
+    rows: usize,
+    cols: usize,
+    epsilon: f32,
+) -> Result<Vec<f32>, String> {
+    let (volume, _rows_u32, _cols_u32, volume_u32) =
+        checked_tensor_util_shape("categorical_cross_entropy_backward", prediction, rows, cols)?;
+    if target.len() != prediction.len() {
+        return Err(format!(
+            "categorical_cross_entropy_backward target length mismatch: expected {} elements, got {}",
+            prediction.len(),
+            target.len()
+        ));
+    }
+    if !epsilon.is_finite() || epsilon <= 0.0 {
+        return Err(
+            "categorical_cross_entropy_backward epsilon must be finite and positive".into(),
+        );
+    }
+    let ctx = dense_context()?;
+    let workgroups = volume_u32.div_ceil(TENSOR_UTIL_WORKGROUP);
+    tensor_util_internal(
+        prediction,
+        Some(target),
+        rows,
+        cols,
+        volume,
+        epsilon,
+        1.0 / rows as f32,
+        0.0,
+        0.0,
+        ctx.tensor_util_categorical_cross_entropy_backward_pipeline
+            .clone(),
+        workgroups,
+        "categorical_cross_entropy_backward",
+    )
+}
+
+pub fn hyperbolic_cross_entropy_forward(
+    prediction: &[f32],
+    target: &[f32],
+    rows: usize,
+    cols: usize,
+    curvature: f32,
+    epsilon: f32,
+) -> Result<f32, String> {
+    let _ = checked_tensor_util_shape("hyperbolic_cross_entropy_forward", prediction, rows, cols)?;
+    if target.len() != prediction.len() {
+        return Err(format!(
+            "hyperbolic_cross_entropy_forward target length mismatch: expected {} elements, got {}",
+            prediction.len(),
+            target.len()
+        ));
+    }
+    if curvature >= 0.0 || !curvature.is_finite() {
+        return Err(
+            "hyperbolic_cross_entropy_forward curvature must be finite and negative".into(),
+        );
+    }
+    if !epsilon.is_finite() || epsilon <= 0.0 || epsilon >= 0.5 {
+        return Err("hyperbolic_cross_entropy_forward epsilon must be in (0, 0.5)".into());
+    }
+    let ctx = dense_context()?;
+    let buffer = tensor_util_internal(
+        prediction,
+        Some(target),
+        rows,
+        cols,
+        1,
+        (-curvature).sqrt(),
+        epsilon,
+        1.0 / prediction.len() as f32,
+        0.0,
+        ctx.tensor_util_hyperbolic_cross_entropy_forward_pipeline
+            .clone(),
+        1,
+        "hyperbolic_cross_entropy_forward",
+    )?;
+    buffer
+        .first()
+        .copied()
+        .ok_or_else(|| "hyperbolic_cross_entropy_forward returned no result".to_string())
+}
+
+pub fn hyperbolic_cross_entropy_backward(
+    prediction: &[f32],
+    target: &[f32],
+    rows: usize,
+    cols: usize,
+    curvature: f32,
+    epsilon: f32,
+) -> Result<Vec<f32>, String> {
+    let (volume, _rows_u32, _cols_u32, volume_u32) =
+        checked_tensor_util_shape("hyperbolic_cross_entropy_backward", prediction, rows, cols)?;
+    if target.len() != prediction.len() {
+        return Err(format!(
+            "hyperbolic_cross_entropy_backward target length mismatch: expected {} elements, got {}",
+            prediction.len(),
+            target.len()
+        ));
+    }
+    if curvature >= 0.0 || !curvature.is_finite() {
+        return Err(
+            "hyperbolic_cross_entropy_backward curvature must be finite and negative".into(),
+        );
+    }
+    if !epsilon.is_finite() || epsilon <= 0.0 || epsilon >= 0.5 {
+        return Err("hyperbolic_cross_entropy_backward epsilon must be in (0, 0.5)".into());
+    }
+    let ctx = dense_context()?;
+    let workgroups = volume_u32.div_ceil(TENSOR_UTIL_WORKGROUP);
+    tensor_util_internal(
+        prediction,
+        Some(target),
+        rows,
+        cols,
+        volume,
+        (-curvature).sqrt(),
+        epsilon,
+        1.0 / prediction.len() as f32,
+        0.0,
+        ctx.tensor_util_hyperbolic_cross_entropy_backward_pipeline
+            .clone(),
+        workgroups,
+        "hyperbolic_cross_entropy_backward",
+    )
+}
+
+pub fn zspace_softmax_backward_fixed(
+    input: &[f32],
+    grad_output: &[f32],
+    rows: usize,
+    cols: usize,
+    factor: f32,
+) -> Result<Vec<f32>, String> {
+    let (volume, rows_u32, _cols_u32, _volume_u32) =
+        checked_tensor_util_shape("zspace_softmax_backward_fixed", input, rows, cols)?;
+    if grad_output.len() != input.len() {
+        return Err(format!(
+            "zspace_softmax_backward_fixed grad length mismatch: expected {} elements, got {}",
+            input.len(),
+            grad_output.len()
+        ));
+    }
+    if !factor.is_finite() || factor <= 0.0 {
+        return Err("zspace_softmax_backward_fixed factor must be finite and positive".into());
+    }
+    let ctx = dense_context()?;
+    tensor_util_internal(
+        input,
+        Some(grad_output),
+        rows,
+        cols,
+        volume,
+        factor,
+        0.0,
+        0.0,
+        0.0,
+        ctx.tensor_util_zspace_softmax_backward_fixed_pipeline
+            .clone(),
+        rows_u32,
+        "zspace_softmax_backward_fixed",
+    )
+}
+
+pub fn add_row(input: &[f32], bias: &[f32], rows: usize, cols: usize) -> Result<Vec<f32>, String> {
+    let (volume, _rows_u32, _cols_u32, volume_u32) =
+        checked_tensor_util_shape("add_row", input, rows, cols)?;
+    if bias.len() != cols {
+        return Err(format!(
+            "add_row bias length mismatch: expected {cols} elements, got {}",
+            bias.len()
+        ));
+    }
+    let ctx = dense_context()?;
+    let workgroups = volume_u32.div_ceil(TENSOR_UTIL_WORKGROUP);
+    tensor_util_internal(
+        input,
+        Some(bias),
+        rows,
+        cols,
+        volume,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        ctx.tensor_util_add_row_pipeline.clone(),
+        workgroups,
+        "add_row",
+    )
+}
+
+pub fn sum_axis0(input: &[f32], rows: usize, cols: usize) -> Result<Vec<f32>, String> {
+    let _ = checked_tensor_util_shape("sum_axis0", input, rows, cols)?;
+    let cols_u32 = u32::try_from(cols).map_err(|_| "sum_axis0 cols exceed u32::MAX".to_string())?;
+    let ctx = dense_context()?;
+    tensor_util_internal(
+        input,
+        None,
+        rows,
+        cols,
+        cols,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        ctx.tensor_util_sum_axis0_pipeline.clone(),
+        cols_u32,
+        "sum_axis0",
+    )
+}
+
+pub fn sum_axis0_scaled(
+    input: &[f32],
+    rows: usize,
+    cols: usize,
+    scale: f32,
+) -> Result<Vec<f32>, String> {
+    let _ = checked_tensor_util_shape("sum_axis0_scaled", input, rows, cols)?;
+    let cols_u32 =
+        u32::try_from(cols).map_err(|_| "sum_axis0_scaled cols exceed u32::MAX".to_string())?;
+    let ctx = dense_context()?;
+    tensor_util_internal(
+        input,
+        None,
+        rows,
+        cols,
+        cols,
+        scale,
+        0.0,
+        0.0,
+        0.0,
+        ctx.tensor_util_sum_axis0_scaled_pipeline.clone(),
+        cols_u32,
+        "sum_axis0_scaled",
+    )
+}
+
+pub fn project_to_poincare(
+    input: &[f32],
+    rows: usize,
+    cols: usize,
+    curvature: f32,
+) -> Result<Vec<f32>, String> {
+    if curvature >= 0.0 {
+        return Err("project_to_poincare curvature must be negative".into());
+    }
+    let (volume, rows_u32, _cols_u32, _volume_u32) =
+        checked_tensor_util_shape("project_to_poincare", input, rows, cols)?;
+    let scale = (-curvature).sqrt();
+    let ctx = dense_context()?;
+    tensor_util_internal(
+        input,
+        None,
+        rows,
+        cols,
+        volume,
+        scale,
+        0.0,
+        0.0,
+        0.0,
+        ctx.tensor_util_project_to_poincare_pipeline.clone(),
+        rows_u32,
+        "project_to_poincare",
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn wave_gate_project(
+    input: &[f32],
+    gate: &[f32],
+    bias: &[f32],
+    rows: usize,
+    cols: usize,
+    curvature: f32,
+    saturation: f32,
+    porosity: f32,
+) -> Result<Vec<f32>, String> {
+    if curvature >= 0.0 {
+        return Err("wave_gate_project curvature must be negative".into());
+    }
+    if gate.len() != cols {
+        return Err(format!(
+            "wave_gate_project gate length mismatch: expected {cols} elements, got {}",
+            gate.len()
+        ));
+    }
+    if bias.len() != cols {
+        return Err(format!(
+            "wave_gate_project bias length mismatch: expected {cols} elements, got {}",
+            bias.len()
+        ));
+    }
+    let (volume, rows_u32, _cols_u32, _volume_u32) =
+        checked_tensor_util_shape("wave_gate_project", input, rows, cols)?;
+    let scale = (-curvature).sqrt();
+    let mut aux = Vec::with_capacity(cols.saturating_mul(2));
+    aux.extend_from_slice(gate);
+    aux.extend_from_slice(bias);
+    let ctx = dense_context()?;
+    tensor_util_internal(
+        input,
+        Some(&aux),
+        rows,
+        cols,
+        volume,
+        scale,
+        saturation,
+        porosity,
+        0.0,
+        ctx.tensor_util_wave_gate_project_pipeline.clone(),
+        rows_u32,
+        "wave_gate_project",
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn wave_gate_backward(
+    input: &[f32],
+    grad_output: &[f32],
+    gate: &[f32],
+    bias: &[f32],
+    rows: usize,
+    cols: usize,
+    curvature: f32,
+    saturation: f32,
+    porosity: f32,
+) -> Result<(Vec<f32>, Vec<f32>), String> {
+    if curvature >= 0.0 {
+        return Err("wave_gate_backward curvature must be negative".into());
+    }
+    if gate.len() != cols {
+        return Err(format!(
+            "wave_gate_backward gate length mismatch: expected {cols} elements, got {}",
+            gate.len()
+        ));
+    }
+    if bias.len() != cols {
+        return Err(format!(
+            "wave_gate_backward bias length mismatch: expected {cols} elements, got {}",
+            bias.len()
+        ));
+    }
+    let (volume, rows_u32, _cols_u32, _volume_u32) =
+        checked_tensor_util_shape("wave_gate_backward", input, rows, cols)?;
+    if grad_output.len() != volume {
+        return Err(format!(
+            "wave_gate_backward grad length mismatch: expected {volume} elements, got {}",
+            grad_output.len()
+        ));
+    }
+    let output_elements = volume
+        .checked_mul(2)
+        .ok_or_else(|| "wave_gate_backward output volume exceeds usize range".to_string())?;
+    let scale = (-curvature).sqrt();
+    let mut aux = Vec::with_capacity(volume.saturating_add(cols.saturating_mul(2)));
+    aux.extend_from_slice(grad_output);
+    aux.extend_from_slice(gate);
+    aux.extend_from_slice(bias);
+    let ctx = dense_context()?;
+    let packed = tensor_util_internal(
+        input,
+        Some(&aux),
+        rows,
+        cols,
+        output_elements,
+        scale,
+        saturation,
+        porosity,
+        f32::EPSILON,
+        ctx.tensor_util_wave_gate_backward_pipeline.clone(),
+        rows_u32,
+        "wave_gate_backward",
+    )?;
+    let (grad_input, grad_affine) = packed.split_at(volume);
+    Ok((grad_input.to_vec(), grad_affine.to_vec()))
+}
+
 pub fn matmul(
     a: &[f32],
     b: &[f32],
@@ -5350,6 +8058,145 @@ pub fn matmul(
         0,
         None,
         None,
+        false,
+        1.0,
+    )?;
+    queue.submit(Some(encoder.finish()));
+
+    readback_f32(device, queue, &out_buf, rows * cols)
+}
+
+pub fn matmul_scaled(
+    a: &[f32],
+    b: &[f32],
+    rows: usize,
+    inner: usize,
+    cols: usize,
+    scale: f32,
+) -> Result<Vec<f32>, String> {
+    if rows == 0 || inner == 0 || cols == 0 {
+        return Err("matrix dimensions must be positive".into());
+    }
+    if a.len() != rows * inner {
+        return Err(format!(
+            "lhs buffer length mismatch: expected {} elements, got {}",
+            rows * inner,
+            a.len()
+        ));
+    }
+    if b.len() != inner * cols {
+        return Err(format!(
+            "rhs buffer length mismatch: expected {} elements, got {}",
+            inner * cols,
+            b.len()
+        ));
+    }
+
+    let ctx = dense_context()?;
+    let device = ctx.device();
+    let queue = ctx.queue();
+
+    let lhs_buf = upload_lhs(device, "st.tensor.wgpu_dense.matmul_scaled.lhs", a);
+    let rhs_buf = upload_weights(device, b, inner, cols);
+    let out_buf = allocate_output(
+        device,
+        "st.tensor.wgpu_dense.matmul_scaled.out",
+        rows * cols,
+    );
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("st.tensor.wgpu_dense.matmul_scaled.encoder"),
+    });
+    let tile = ctx.select_tile_config(rows, inner, cols);
+    let (rhs_buffer, rhs_dtype, rhs_scales) = rhs_buf.as_binding();
+    dispatch_matmul(
+        &ctx,
+        &mut encoder,
+        &lhs_buf,
+        rhs_buffer,
+        rhs_dtype,
+        rhs_scales,
+        &out_buf,
+        rows,
+        inner,
+        cols,
+        tile,
+        false,
+        0,
+        None,
+        None,
+        false,
+        scale,
+    )?;
+    queue.submit(Some(encoder.finish()));
+
+    readback_f32(device, queue, &out_buf, rows * cols)
+}
+
+pub fn matmul_lhs_transpose_scaled(
+    lhs: &[f32],
+    rhs: &[f32],
+    lhs_rows: usize,
+    lhs_cols: usize,
+    rhs_cols: usize,
+    scale: f32,
+) -> Result<Vec<f32>, String> {
+    if lhs_rows == 0 || lhs_cols == 0 || rhs_cols == 0 {
+        return Err("matrix dimensions must be positive".into());
+    }
+    if lhs.len() != lhs_rows * lhs_cols {
+        return Err(format!(
+            "lhs buffer length mismatch: expected {} elements, got {}",
+            lhs_rows * lhs_cols,
+            lhs.len()
+        ));
+    }
+    if rhs.len() != lhs_rows * rhs_cols {
+        return Err(format!(
+            "rhs buffer length mismatch: expected {} elements, got {}",
+            lhs_rows * rhs_cols,
+            rhs.len()
+        ));
+    }
+
+    let rows = lhs_cols;
+    let inner = lhs_rows;
+    let cols = rhs_cols;
+    let ctx = dense_context()?;
+    let device = ctx.device();
+    let queue = ctx.queue();
+
+    let lhs_buf = upload_lhs(device, "st.tensor.wgpu_dense.matmul_lhs_t_scaled.lhs", lhs);
+    let rhs_buf = upload_weights(device, rhs, inner, cols);
+    let out_buf = allocate_output(
+        device,
+        "st.tensor.wgpu_dense.matmul_lhs_t_scaled.out",
+        rows * cols,
+    );
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("st.tensor.wgpu_dense.matmul_lhs_t_scaled.encoder"),
+    });
+    let tile = ctx.select_tile_config(rows, inner, cols);
+    let (rhs_buffer, rhs_dtype, rhs_scales) = rhs_buf.as_binding();
+    dispatch_matmul(
+        &ctx,
+        &mut encoder,
+        &lhs_buf,
+        rhs_buffer,
+        rhs_dtype,
+        rhs_scales,
+        &out_buf,
+        rows,
+        inner,
+        cols,
+        tile,
+        false,
+        0,
+        None,
+        None,
+        true,
+        scale,
     )?;
     queue.submit(Some(encoder.finish()));
 
@@ -5419,6 +8266,95 @@ pub fn matmul_prepacked(
         0,
         None,
         None,
+        false,
+        1.0,
+    )?;
+    queue.submit(Some(encoder.finish()));
+
+    readback_f32(device, queue, &out_buf, rows * cols)
+}
+
+pub fn matmul_prepacked_bias(
+    lhs: &[f32],
+    packed_rhs: &PackedB,
+    bias: &[f32],
+    rows: usize,
+    inner: usize,
+    cols: usize,
+) -> Result<Vec<f32>, String> {
+    if rows == 0 || inner == 0 || cols == 0 {
+        return Err("matrix dimensions must be positive".into());
+    }
+    if lhs.len() != rows * inner {
+        return Err(format!(
+            "lhs buffer length mismatch: expected {} elements, got {}",
+            rows * inner,
+            lhs.len()
+        ));
+    }
+    if packed_rhs.inner() != inner {
+        return Err("packed rhs inner dimension mismatch".into());
+    }
+    if packed_rhs.cols() != cols {
+        return Err("packed rhs column dimension mismatch".into());
+    }
+    if bias.len() != cols {
+        return Err(format!(
+            "bias length mismatch: expected {cols} elements, got {}",
+            bias.len()
+        ));
+    }
+
+    let ctx = dense_context()?;
+    let device = ctx.device();
+    let queue = ctx.queue();
+
+    let lhs_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.prepacked_bias.lhs"),
+        contents: bytemuck::cast_slice(lhs),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let bias_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.prepacked_bias.bias"),
+        contents: bytemuck::cast_slice(bias),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let out_buf = allocate_output(
+        device,
+        "st.tensor.wgpu_dense.prepacked_bias.out",
+        rows * cols,
+    );
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("st.tensor.wgpu_dense.prepacked_bias.encoder"),
+    });
+    let requested_tile = ctx.select_tile_config(rows, inner, cols);
+    let weights = ctx.rhs_from_packed(packed_rhs, requested_tile)?;
+    let tile = weights.tile();
+    let rhs_buffers = WeightBuffers {
+        buffer: weights.buffer(),
+        dtype: weights.dtype(),
+        scales: weights.scales(),
+    };
+    let (rhs_buffer, rhs_dtype, rhs_scales) = rhs_buffers.as_binding();
+    dispatch_matmul(
+        &ctx,
+        &mut encoder,
+        &lhs_buf,
+        rhs_buffer,
+        rhs_dtype,
+        rhs_scales,
+        &out_buf,
+        rows,
+        inner,
+        cols,
+        tile,
+        true,
+        0,
+        Some(&bias_buf),
+        None,
+        false,
+        1.0,
     )?;
     queue.submit(Some(encoder.finish()));
 
@@ -5603,6 +8539,8 @@ fn matmul_with_bias_activation(
         fused_mask,
         Some(&bias_buf),
         residual_buf.as_ref(),
+        false,
+        1.0,
     )?;
     queue.submit(Some(encoder.finish()));
 
@@ -6701,6 +9639,14 @@ pub fn conv_im2col_gemm(
             return Err("bias length mismatch".into());
         }
     }
+    let zero_bias;
+    let bias_data = match bias {
+        Some(values) => values,
+        None => {
+            zero_bias = vec![0.0f32; out_channels];
+            &zero_bias
+        }
+    };
 
     let ctx = dense_context()?;
     let device = ctx.device();
@@ -6743,6 +9689,11 @@ pub fn conv_im2col_gemm(
         contents: bytemuck::cast_slice(weight_t),
         usage: wgpu::BufferUsages::STORAGE,
     });
+    let bias_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.conv.bias"),
+        contents: bytemuck::cast_slice(bias_data),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
     let output_buf = allocate_output(
         device,
         "st.tensor.wgpu_dense.conv.output",
@@ -6754,8 +9705,13 @@ pub fn conv_im2col_gemm(
     });
     let tile_config = ctx.select_tile_config(rows, span, out_channels);
     let fused_pipeline = ctx.fused_conv_pipeline_for(tile_config)?;
-    let fused_bind_group =
-        ctx.fused_conv_bind_group(&input_buf, &weight_buf, &output_buf, &conv_params_buf);
+    let fused_bind_group = ctx.fused_conv_bind_group(
+        &input_buf,
+        &weight_buf,
+        &output_buf,
+        &bias_buf,
+        &conv_params_buf,
+    );
     {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("st.tensor.wgpu_dense.conv.fused_pass"),
@@ -7080,6 +10036,276 @@ pub fn conv4d_grad_input_fused(
         out_channels,
         dims: 4,
     })
+}
+
+fn lstm_scan_storage_entry(binding: u32, read_only: bool) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::COMPUTE,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Storage { read_only },
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    }
+}
+
+fn lstm_scan_uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::COMPUTE,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Uniform,
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    }
+}
+
+pub fn lstm_backward_scan_shape_supported(timesteps: usize, hidden_dim: usize) -> bool {
+    if timesteps == 0 || hidden_dim == 0 {
+        return false;
+    }
+    if timesteps > u32::MAX as usize || hidden_dim > u32::MAX as usize {
+        return false;
+    }
+    hidden_dim
+        .checked_mul(4)
+        .filter(|gate_width| *gate_width <= u32::MAX as usize)
+        .is_some()
+}
+
+pub fn lstm_backward_scan_workgroup_size() -> usize {
+    LSTM_BACKWARD_SCAN_WORKGROUP as usize
+}
+
+pub fn supports_lstm_backward_scan(timesteps: usize, hidden_dim: usize) -> bool {
+    lstm_backward_scan_shape_supported(timesteps, hidden_dim) && dense_context().is_ok()
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn lstm_backward_scan(
+    gates_i: &[f32],
+    gates_f: &[f32],
+    gates_g: &[f32],
+    gates_o: &[f32],
+    cell_states: &[f32],
+    grad_output: &[f32],
+    weight_hh_t: &[f32],
+    timesteps: usize,
+    hidden_dim: usize,
+) -> Result<Vec<f32>, String> {
+    if !lstm_backward_scan_shape_supported(timesteps, hidden_dim) {
+        return Err("lstm_backward_scan shape unsupported by WGPU helper".into());
+    }
+    if timesteps == 0 || hidden_dim == 0 {
+        return Err("lstm_backward_scan dimensions must be positive".into());
+    }
+    let gate_width = hidden_dim
+        .checked_mul(4)
+        .ok_or_else(|| "lstm_backward_scan gate width overflow".to_string())?;
+    let hidden_values = timesteps
+        .checked_mul(hidden_dim)
+        .ok_or_else(|| "lstm_backward_scan hidden volume overflow".to_string())?;
+    let gate_values = timesteps
+        .checked_mul(gate_width)
+        .ok_or_else(|| "lstm_backward_scan gate volume overflow".to_string())?;
+    let cell_values = timesteps
+        .checked_add(1)
+        .and_then(|value| value.checked_mul(hidden_dim))
+        .ok_or_else(|| "lstm_backward_scan cell volume overflow".to_string())?;
+    let recurrent_values = gate_width
+        .checked_mul(hidden_dim)
+        .ok_or_else(|| "lstm_backward_scan recurrent weight volume overflow".to_string())?;
+    if timesteps > u32::MAX as usize
+        || hidden_dim > u32::MAX as usize
+        || gate_width > u32::MAX as usize
+    {
+        return Err("lstm_backward_scan dimensions exceed u32 dispatch range".into());
+    }
+    for (label, actual, expected) in [
+        ("gates_i", gates_i.len(), hidden_values),
+        ("gates_f", gates_f.len(), hidden_values),
+        ("gates_g", gates_g.len(), hidden_values),
+        ("gates_o", gates_o.len(), hidden_values),
+        ("cell_states", cell_states.len(), cell_values),
+        ("grad_output", grad_output.len(), hidden_values),
+        ("weight_hh_t", weight_hh_t.len(), recurrent_values),
+    ] {
+        if actual != expected {
+            return Err(format!(
+                "lstm_backward_scan {label} length mismatch: expected {expected}, got {actual}"
+            ));
+        }
+    }
+
+    let ctx = dense_context()?;
+    let device = ctx.device();
+    let queue = ctx.queue();
+    let gates_i_buf = upload_lhs(device, "st.tensor.wgpu_dense.lstm_scan.gates_i", gates_i);
+    let gates_f_buf = upload_lhs(device, "st.tensor.wgpu_dense.lstm_scan.gates_f", gates_f);
+    let gates_g_buf = upload_lhs(device, "st.tensor.wgpu_dense.lstm_scan.gates_g", gates_g);
+    let gates_o_buf = upload_lhs(device, "st.tensor.wgpu_dense.lstm_scan.gates_o", gates_o);
+    let cell_states_buf = upload_lhs(
+        device,
+        "st.tensor.wgpu_dense.lstm_scan.cell_states",
+        cell_states,
+    );
+    let grad_output_buf = upload_lhs(
+        device,
+        "st.tensor.wgpu_dense.lstm_scan.grad_output",
+        grad_output,
+    );
+    let weight_hh_t_buf = upload_lhs(
+        device,
+        "st.tensor.wgpu_dense.lstm_scan.weight_hh_t",
+        weight_hh_t,
+    );
+    let gate_gradients_buf = allocate_output(
+        device,
+        "st.tensor.wgpu_dense.lstm_scan.gate_gradients",
+        gate_values,
+    );
+    let scratch_values = hidden_dim
+        .checked_mul(2)
+        .ok_or_else(|| "lstm_backward_scan scratch volume overflow".to_string())?;
+    let scratch = vec![0.0f32; scratch_values];
+    let scratch_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.lstm_scan.scratch"),
+        contents: bytemuck::cast_slice(&scratch),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+    });
+    let params = LstmBackwardScanParams {
+        timesteps: timesteps as u32,
+        hidden_dim: hidden_dim as u32,
+        gate_width: gate_width as u32,
+        _pad0: 0,
+    };
+    let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("st.tensor.wgpu_dense.lstm_scan.params"),
+        contents: bytemuck::bytes_of(&params),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
+    let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("st.tensor.wgpu_dense.lstm_scan.layout"),
+        entries: &[
+            lstm_scan_storage_entry(0, true),
+            lstm_scan_storage_entry(1, true),
+            lstm_scan_storage_entry(2, true),
+            lstm_scan_storage_entry(3, true),
+            lstm_scan_storage_entry(4, true),
+            lstm_scan_storage_entry(5, true),
+            lstm_scan_storage_entry(6, true),
+            lstm_scan_storage_entry(7, false),
+            lstm_scan_storage_entry(8, false),
+            lstm_scan_uniform_entry(9),
+        ],
+    });
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("st.tensor.wgpu_dense.lstm_scan.pipeline_layout"),
+        bind_group_layouts: &[&layout],
+        push_constant_ranges: &[],
+    });
+    let shader = create_wgsl_module(
+        device,
+        "st.tensor.wgpu_dense.lstm_scan.shader",
+        LSTM_BACKWARD_SCAN_WGSL,
+    )
+    .map_err(|err| err.to_string())?;
+    let pipeline = create_compute_pipeline(
+        device,
+        "st.tensor.wgpu_dense.lstm_scan.pipeline",
+        Some(&pipeline_layout),
+        &shader,
+        "lstm_backward_scan",
+    )
+    .map_err(|err| err.to_string())?;
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("st.tensor.wgpu_dense.lstm_scan.bind_group"),
+        layout: &layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: gates_i_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: gates_f_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: gates_g_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: gates_o_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: cell_states_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: grad_output_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: weight_hh_t_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 7,
+                resource: gate_gradients_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 8,
+                resource: scratch_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 9,
+                resource: params_buf.as_entire_binding(),
+            },
+        ],
+    });
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("st.tensor.wgpu_dense.lstm_scan.encoder"),
+    });
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("st.tensor.wgpu_dense.lstm_scan.pass"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(&pipeline);
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.dispatch_workgroups(1, 1, 1);
+    }
+    queue.submit(Some(encoder.finish()));
+
+    let gate_gradients = readback_f32(device, queue, &gate_gradients_buf, gate_values)?;
+    if let Some((idx, value)) = gate_gradients
+        .iter()
+        .copied()
+        .enumerate()
+        .find(|(_, value)| !value.is_finite())
+    {
+        return Err(format!(
+            "lstm_backward_scan produced non-finite gate gradient at {idx}: {value}"
+        ));
+    }
+    let scratch = readback_f32(device, queue, &scratch_buf, scratch_values)?;
+    if let Some((idx, value)) = scratch
+        .iter()
+        .copied()
+        .enumerate()
+        .find(|(_, value)| !value.is_finite())
+    {
+        return Err(format!(
+            "lstm_backward_scan produced non-finite recurrent scratch at {idx}: {value}"
+        ));
+    }
+    Ok(gate_gradients)
 }
 
 pub fn ramanujan_pi_gpu(iterations: usize) -> Result<f64, String> {
@@ -7488,6 +10714,8 @@ fn microbenchmark_tile(
             0,
             None,
             None,
+            false,
+            1.0,
         )?;
         ctx.queue().submit(Some(encoder.finish()));
         ctx.device().poll(wgpu::Maintain::Wait);
@@ -7516,6 +10744,8 @@ fn microbenchmark_tile(
             0,
             None,
             None,
+            false,
+            1.0,
         )?;
         let command = encoder.finish();
         let start = Instant::now();

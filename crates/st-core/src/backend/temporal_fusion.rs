@@ -8,6 +8,7 @@
 //! inside hot ranking paths.
 
 use st_frac::fft::{self, Complex32};
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 
 use super::unison_heuristics::LaneWindow;
 
@@ -36,7 +37,7 @@ impl TemporalSpectralFusion {
             compute_spectrum(&temporal)?;
         let fusion_cols = temporal.len();
         let fusion = fuse_series(&temporal, &spectral);
-        Some(Self {
+        let fusion = Self {
             temporal,
             spectral,
             fusion,
@@ -44,7 +45,9 @@ impl TemporalSpectralFusion {
             dominant_frequency,
             tempo_hint,
             spectral_energy,
-        })
+        };
+        emit_temporal_spectral_fusion_meta(&fusion, window, rows, cols, k, lanes);
+        Some(fusion)
     }
 
     /// Returns the temporal series that was analysed.
@@ -84,6 +87,50 @@ impl TemporalSpectralFusion {
     pub fn spectral_energy(&self) -> f32 {
         self.spectral_energy
     }
+}
+
+fn finite_meta_f32(value: f32) -> serde_json::Value {
+    serde_json::Value::from(if value.is_finite() { value as f64 } else { 0.0 })
+}
+
+fn emit_temporal_spectral_fusion_meta(
+    fusion: &TemporalSpectralFusion,
+    window: &LaneWindow,
+    rows: u32,
+    cols: u32,
+    k: u32,
+    lanes: u32,
+) {
+    emit_tensor_op(
+        "temporal_spectral_fusion",
+        &[fusion.temporal.len().max(1), fusion.spectral.len().max(1)],
+        &[fusion.fusion().rows().max(1), fusion.fusion().cols().max(1)],
+    );
+    emit_tensor_op_meta("temporal_spectral_fusion", || {
+        serde_json::json!({
+            "backend": "cpu",
+            "requested_backend": "auto",
+            "kind": "st_core_temporal_spectral_fusion",
+            "rows": rows,
+            "cols": cols,
+            "k": k,
+            "lanes": lanes,
+            "window_target": window.target,
+            "window_lower": window.lower,
+            "window_upper": window.upper,
+            "window_stride": window.stride,
+            "window_slack": window.slack,
+            "temporal_len": fusion.temporal.len(),
+            "spectral_len": fusion.spectral.len(),
+            "fusion_rows": fusion.fusion().rows(),
+            "fusion_cols": fusion.fusion().cols(),
+            "dominant_frequency": finite_meta_f32(fusion.dominant_frequency),
+            "tempo_hint": finite_meta_f32(fusion.tempo_hint),
+            "spectral_energy": finite_meta_f32(fusion.spectral_energy),
+            "temporal_first": finite_meta_f32(fusion.temporal.first().copied().unwrap_or(0.0)),
+            "spectral_first": finite_meta_f32(fusion.spectral.first().copied().unwrap_or(0.0)),
+        })
+    });
 }
 
 fn span_len(window: &LaneWindow) -> Option<usize> {
@@ -135,7 +182,7 @@ fn compute_spectrum(series: &[f32]) -> Option<(Vec<f32>, f32, f32, f32)> {
     let mut spectral: Vec<f32> = signal
         .iter()
         .take(half)
-        .map(|value| (value.re * value.re + value.im * value.im).sqrt())
+        .map(|value| finite_or_zero((value.re * value.re + value.im * value.im).sqrt()))
         .collect();
     if spectral.is_empty() {
         spectral.push(0.0);
@@ -144,7 +191,7 @@ fn compute_spectrum(series: &[f32]) -> Option<(Vec<f32>, f32, f32, f32)> {
     let (dominant_idx, dominant_mag) = spectral
         .iter()
         .enumerate()
-        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+        .max_by(|(_, a), (_, b)| a.total_cmp(b))
         .unwrap();
     let tempo_hint = (dominant_mag / spectral_energy).clamp(0.0, 1.0);
     spectral.truncate(MAX_HARMONICS.min(spectral.len()));
@@ -154,6 +201,14 @@ fn compute_spectrum(series: &[f32]) -> Option<(Vec<f32>, f32, f32, f32)> {
         tempo_hint,
         spectral_energy,
     ))
+}
+
+fn finite_or_zero(value: f32) -> f32 {
+    if value.is_finite() {
+        value
+    } else {
+        0.0
+    }
 }
 
 fn fuse_series(temporal: &[f32], spectral: &[f32]) -> Vec<f32> {
@@ -204,6 +259,7 @@ impl<'a> FusionGrid<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
 
     fn demo_window() -> LaneWindow {
         LaneWindow {
@@ -232,5 +288,57 @@ mod tests {
         assert!(fusion.dominant_frequency() >= 0.0);
         assert!(fusion.tempo_hint() >= 0.0);
         assert!(fusion.spectral_energy() > 0.0);
+    }
+
+    #[test]
+    fn fusion_emits_backend_meta() {
+        let _lock = crate::telemetry::tensor_observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let window = demo_window();
+        let fusion =
+            TemporalSpectralFusion::analyse(&window, 64, 4096, 48, 32).expect("fusion available");
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "temporal_spectral_fusion"
+                    && data["kind"] == "st_core_temporal_spectral_fusion"
+                    && data["rows"] == 64
+                    && data["cols"] == 4096
+                    && data["k"] == 48
+                    && data["window_target"] == 192
+                    && data["window_lower"] == 128
+                    && data["window_upper"] == 256
+            })
+            .expect("temporal spectral fusion metadata event");
+        assert_eq!(meta.1["backend"], "cpu");
+        assert_eq!(meta.1["window_target"], 192);
+        assert_eq!(meta.1["temporal_len"], fusion.temporal().len());
+        assert_eq!(meta.1["spectral_len"], fusion.spectral().len());
+        assert_eq!(meta.1["fusion_cols"], fusion.fusion().cols());
+        assert!(meta.1["spectral_energy"].as_f64().unwrap() > 0.0);
+        assert!(meta.1["tempo_hint"].as_f64().unwrap() >= 0.0);
+    }
+
+    #[test]
+    fn spectrum_handles_non_finite_samples_without_panicking() {
+        let (spectral, dominant_frequency, tempo_hint, spectral_energy) =
+            compute_spectrum(&[1.0, f32::NAN, 2.0, f32::INFINITY])
+                .expect("spectrum should tolerate non-finite samples");
+        assert!(!spectral.is_empty());
+        assert!(spectral.iter().all(|value| value.is_finite()));
+        assert!(dominant_frequency.is_finite());
+        assert!(tempo_hint.is_finite());
+        assert!(spectral_energy.is_finite());
     }
 }

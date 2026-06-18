@@ -16,6 +16,7 @@ use crate::backend::temporal_fusion::TemporalSpectralFusion;
 mod foreign;
 use crate::ops::realgrad::GradientSummary;
 use crate::telemetry::hub;
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RankKind {
@@ -418,6 +419,7 @@ struct RankScenario<'a> {
     expected_two_stage: bool,
     latency_tile_caps: Option<(u32, u32)>,
     latency: Option<LatencyCache>,
+    realgrad_summary: Option<GradientSummary>,
     cols_log2: u32,
 }
 
@@ -461,8 +463,18 @@ impl<'a> RankScenario<'a> {
             expected_two_stage,
             latency_tile_caps,
             latency,
+            realgrad_summary: None,
             cols_log2,
         }
+    }
+
+    fn with_realgrad_summary(mut self, summary: Option<GradientSummary>) -> Self {
+        self.realgrad_summary = summary.filter(|summary| summary.norm > 0.0);
+        self
+    }
+
+    fn with_current_realgrad(self) -> Self {
+        self.with_realgrad_summary(hub::get_last_realgrad().map(|pulse| pulse.gradient_summary()))
     }
 
     #[inline]
@@ -597,26 +609,23 @@ impl<'a> RankScenario<'a> {
             self.rows, self.cols, self.k, self.lanes, min_ctile, max_ctile, slack,
         );
         let baseline_window = window;
-        if let (Some(fusion), Some(pulse)) = (
+        if let (Some(fusion), Some(summary)) = (
             TemporalSpectralFusion::analyse(&window, self.rows, self.cols, self.k, self.lanes),
-            hub::get_last_realgrad(),
+            self.realgrad_summary,
         ) {
-            let summary = pulse.gradient_summary();
-            if summary.norm > 0.0 {
-                let mut tuner = AdaptiveWindowTuner::new(self.lanes);
-                window = tuner.tune(window, min_ctile, max_ctile, &fusion, Some(summary));
-                if window.slack < baseline_window.slack {
-                    let target = window.target;
-                    let lower = target
-                        .saturating_sub(baseline_window.slack)
-                        .max(window.min_lane);
-                    let upper = target
-                        .saturating_add(baseline_window.slack)
-                        .min(window.max_lane);
-                    window.lower = lower;
-                    window.upper = upper;
-                    window.slack = target.abs_diff(lower).max(target.abs_diff(upper));
-                }
+            let mut tuner = AdaptiveWindowTuner::new(self.lanes);
+            window = tuner.tune(window, min_ctile, max_ctile, &fusion, Some(summary));
+            if window.slack < baseline_window.slack {
+                let target = window.target;
+                let lower = target
+                    .saturating_sub(baseline_window.slack)
+                    .max(window.min_lane);
+                let upper = target
+                    .saturating_add(baseline_window.slack)
+                    .min(window.max_lane);
+                window.lower = lower;
+                window.upper = upper;
+                window.slack = target.abs_diff(lower).max(target.abs_diff(upper));
             }
         }
         window
@@ -1708,6 +1717,191 @@ fn convert_wgpu_choice(choice: wgpu_heuristics::Choice, subgroup: bool) -> Choic
     }
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct RankCandidateScores {
+    baseline: f32,
+    kdsl_env: Option<f32>,
+    kdsl_kv: Option<f32>,
+    wgpu_generated: Option<f32>,
+}
+
+fn emit_unison_rank_choice_meta(
+    scenario: RankScenario<'_>,
+    baseline: &Choice,
+    choice: &Choice,
+    source: &'static str,
+    best_score: f32,
+    candidate_count: usize,
+    candidate_scores: RankCandidateScores,
+) {
+    let window = choice.latency_window;
+    let baseline_window = baseline.latency_window;
+    let realgrad = scenario.realgrad_summary;
+    emit_tensor_op(
+        "unison_rank_choice",
+        &[
+            scenario.rows() as usize,
+            scenario.cols() as usize,
+            scenario.k() as usize,
+        ],
+        &[choice.wg as usize, choice.kl as usize],
+    );
+    emit_tensor_op_meta("unison_rank_choice", || {
+        let mut payload = serde_json::Map::new();
+        payload.insert("backend".into(), scenario.caps().backend.as_str().into());
+        payload.insert(
+            "requested_backend".into(),
+            scenario.caps().backend.as_str().into(),
+        );
+        payload.insert("kind".into(), "st_core_unison_rank_choice".into());
+        payload.insert("rank_kind".into(), scenario.kind().as_str().into());
+        payload.insert("rows".into(), scenario.rows().into());
+        payload.insert("cols".into(), scenario.cols().into());
+        payload.insert("k".into(), scenario.k().into());
+        payload.insert("candidate_count".into(), candidate_count.into());
+        payload.insert("choice_source".into(), source.into());
+        payload.insert("best_score".into(), (best_score as f64).into());
+        payload.insert(
+            "baseline_score".into(),
+            (candidate_scores.baseline as f64).into(),
+        );
+        payload.insert(
+            "has_kdsl_env_candidate".into(),
+            candidate_scores.kdsl_env.is_some().into(),
+        );
+        payload.insert(
+            "kdsl_env_score".into(),
+            candidate_scores
+                .kdsl_env
+                .map(|score| score as f64)
+                .unwrap_or(0.0)
+                .into(),
+        );
+        payload.insert(
+            "has_kdsl_kv_candidate".into(),
+            candidate_scores.kdsl_kv.is_some().into(),
+        );
+        payload.insert(
+            "kdsl_kv_score".into(),
+            candidate_scores
+                .kdsl_kv
+                .map(|score| score as f64)
+                .unwrap_or(0.0)
+                .into(),
+        );
+        payload.insert(
+            "has_wgpu_generated_candidate".into(),
+            candidate_scores.wgpu_generated.is_some().into(),
+        );
+        let wgpu_generated_delta = candidate_scores
+            .wgpu_generated
+            .map(|score| score - candidate_scores.baseline)
+            .unwrap_or(0.0);
+        payload.insert(
+            "wgpu_generated_score".into(),
+            candidate_scores
+                .wgpu_generated
+                .map(|score| score as f64)
+                .unwrap_or(0.0)
+                .into(),
+        );
+        payload.insert(
+            "wgpu_generated_score_delta".into(),
+            (wgpu_generated_delta as f64).into(),
+        );
+        payload.insert(
+            "wgpu_generated_ties_baseline".into(),
+            (candidate_scores.wgpu_generated.is_some() && wgpu_generated_delta.abs() <= 1e-6)
+                .into(),
+        );
+        payload.insert("low_latency".into(), scenario.low_latency().into());
+        payload.insert(
+            "expected_two_stage".into(),
+            scenario.expected_two_stage().into(),
+        );
+        payload.insert(
+            "requires_compaction".into(),
+            scenario.requires_compaction().into(),
+        );
+        payload.insert("subgroup".into(), scenario.caps().subgroup.into());
+        payload.insert("lane_width".into(), scenario.lanes().into());
+        payload.insert("max_workgroup".into(), scenario.caps().max_workgroup.into());
+        payload.insert(
+            "has_shared_mem_limit".into(),
+            scenario.caps().shared_mem_per_workgroup.is_some().into(),
+        );
+        payload.insert(
+            "shared_mem_per_workgroup".into(),
+            scenario.caps().shared_mem_per_workgroup.unwrap_or(0).into(),
+        );
+        payload.insert("has_realgrad".into(), realgrad.is_some().into());
+        payload.insert(
+            "realgrad_norm".into(),
+            realgrad
+                .map(|summary| summary.norm as f64)
+                .unwrap_or(0.0)
+                .into(),
+        );
+        payload.insert(
+            "realgrad_sparsity".into(),
+            realgrad
+                .map(|summary| summary.sparsity as f64)
+                .unwrap_or(0.0)
+                .into(),
+        );
+        payload.insert("use_2ce".into(), choice.use_2ce.into());
+        payload.insert("workgroup".into(), choice.wg.into());
+        payload.insert("lanes".into(), choice.kl.into());
+        payload.insert("channel_stride".into(), choice.ch.into());
+        payload.insert("merge_kind".into(), choice.mk.into());
+        payload.insert("merge_detail".into(), choice.mkd.into());
+        payload.insert("tile".into(), choice.tile.into());
+        payload.insert("compaction_tile".into(), choice.ctile.into());
+        payload.insert("fft_tile".into(), choice.fft_tile.into());
+        payload.insert("fft_radix".into(), choice.fft_radix.into());
+        payload.insert("fft_segments".into(), choice.fft_segments.into());
+        payload.insert("baseline_use_2ce".into(), baseline.use_2ce.into());
+        payload.insert("baseline_workgroup".into(), baseline.wg.into());
+        payload.insert("baseline_lanes".into(), baseline.kl.into());
+        payload.insert("baseline_tile".into(), baseline.tile.into());
+        payload.insert("baseline_compaction_tile".into(), baseline.ctile.into());
+        payload.insert("baseline_fft_tile".into(), baseline.fft_tile.into());
+        payload.insert("has_latency_window".into(), window.is_some().into());
+        payload.insert(
+            "latency_target".into(),
+            window.map(|window| window.target).unwrap_or(0).into(),
+        );
+        payload.insert(
+            "latency_lower".into(),
+            window.map(|window| window.lower).unwrap_or(0).into(),
+        );
+        payload.insert(
+            "latency_upper".into(),
+            window.map(|window| window.upper).unwrap_or(0).into(),
+        );
+        payload.insert(
+            "latency_slack".into(),
+            window.map(|window| window.slack).unwrap_or(0).into(),
+        );
+        payload.insert(
+            "latency_stride".into(),
+            window.map(|window| window.stride).unwrap_or(0).into(),
+        );
+        payload.insert(
+            "baseline_has_latency_window".into(),
+            baseline_window.is_some().into(),
+        );
+        payload.insert(
+            "baseline_latency_target".into(),
+            baseline_window
+                .map(|window| window.target)
+                .unwrap_or(0)
+                .into(),
+        );
+        payload.into()
+    });
+}
+
 pub fn choose_unified_rank(
     rows: u32,
     cols: u32,
@@ -1715,10 +1909,16 @@ pub fn choose_unified_rank(
     caps: DeviceCaps,
     kind: RankKind,
 ) -> Choice {
-    let scenario = RankScenario::new(rows, cols, k, &caps, kind);
+    let scenario = RankScenario::new(rows, cols, k, &caps, kind).with_current_realgrad();
     let baseline = fallback_with_scenario(scenario);
     let mut best = baseline;
     let mut best_score = score_choice(&baseline, &baseline, scenario);
+    let mut candidate_scores = RankCandidateScores {
+        baseline: best_score,
+        ..Default::default()
+    };
+    let mut best_source = "fallback";
+    let mut candidate_count = 1usize;
 
     // Hard DSL overrides from the environment.
     let (dsl_hard, _, _) = kdsl_bridge::parse_env_dsl_plus_kind(
@@ -1733,20 +1933,26 @@ pub fn choose_unified_rank(
         },
     );
     if let Some(hard) = dsl_hard {
+        candidate_count += 1;
         let refined = refine_choice(convert_wgpu_choice(hard, caps.subgroup), baseline, scenario);
         let score = score_choice(&refined, &baseline, scenario);
+        candidate_scores.kdsl_env = Some(score);
         if score > best_score {
             best = refined;
             best_score = score;
+            best_source = "kdsl_env";
         }
     }
 
     if let Some(kv) = kdsl_bridge::choose_from_kv(rows, cols, k, caps.subgroup) {
+        candidate_count += 1;
         let refined = refine_choice(convert_wgpu_choice(kv, caps.subgroup), baseline, scenario);
         let score = score_choice(&refined, &baseline, scenario);
+        candidate_scores.kdsl_kv = Some(score);
         if score > best_score {
             best = refined;
             best_score = score;
+            best_source = "kdsl_kv";
         }
     }
 
@@ -1754,20 +1960,31 @@ pub fn choose_unified_rank(
         if let Some(choice) =
             wgpu_heuristics::choose(rows as usize, cols as usize, k as usize, caps.subgroup)
         {
+            candidate_count += 1;
             let refined = refine_choice(
                 convert_wgpu_choice(choice, caps.subgroup),
                 baseline,
                 scenario,
             );
             let score = score_choice(&refined, &baseline, scenario);
+            candidate_scores.wgpu_generated = Some(score);
             if score > best_score {
                 best = refined;
                 best_score = score;
+                best_source = "wgpu_generated";
             }
         }
     }
 
-    let _ = best_score;
+    emit_unison_rank_choice_meta(
+        scenario,
+        &baseline,
+        &best,
+        best_source,
+        best_score,
+        candidate_count,
+        candidate_scores,
+    );
     best
 }
 
@@ -1775,6 +1992,7 @@ pub fn choose_unified_rank(
 mod tests {
     use super::*;
     use crate::telemetry::hub;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn tuned_latency_window_responds_to_gradient_feedback() {
@@ -1786,12 +2004,34 @@ mod tests {
         };
         hub::set_last_realgrad(&pulse);
         let caps = DeviceCaps::wgpu(32, true, 256);
-        let scenario = RankScenario::new(64, 4_096, 48, &caps, RankKind::MidK);
+        let scenario =
+            RankScenario::new(64, 4_096, 48, &caps, RankKind::MidK).with_current_realgrad();
         let (min_ctile, max_ctile) = scenario.latency_bounds().expect("latency bounds available");
         let window = scenario.latency_window(min_ctile, max_ctile);
         let baseline_slack = scenario.latency_slack().expect("latency slack available");
         assert!(window.slack >= baseline_slack);
         hub::clear_last_realgrad_for_test();
+    }
+
+    #[test]
+    fn rank_scenario_freezes_realgrad_feedback() {
+        hub::clear_last_realgrad_for_test();
+        let pulse = hub::RealGradPulse {
+            gradient_norm: 48.0,
+            gradient_sparsity: 0.2,
+            ..Default::default()
+        };
+        hub::set_last_realgrad(&pulse);
+
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let scenario =
+            RankScenario::new(64, 4_096, 48, &caps, RankKind::MidK).with_current_realgrad();
+        let (min_ctile, max_ctile) = scenario.latency_bounds().expect("latency bounds available");
+        let before = scenario.latency_window_snapshot(min_ctile, max_ctile);
+        hub::clear_last_realgrad_for_test();
+        let after = scenario.latency_window_snapshot(min_ctile, max_ctile);
+
+        assert_eq!(before, after);
     }
 
     #[derive(Default)]
@@ -1919,6 +2159,150 @@ mod tests {
         assert!(out.wg >= 128);
         assert!(out.tile >= 512);
         assert!(out.fft_tile >= 512);
+    }
+
+    #[test]
+    fn unified_rank_choice_emits_backend_meta() {
+        let _lock = crate::telemetry::tensor_observer_lock();
+        hub::clear_last_realgrad_for_test();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let out = choose_unified_rank(64, 4_096, 48, caps, RankKind::MidK);
+        st_tensor::set_tensor_op_meta_observer(previous);
+        hub::clear_last_realgrad_for_test();
+
+        assert!(out.ctile > 0);
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "unison_rank_choice"
+                    && data["kind"] == "st_core_unison_rank_choice"
+                    && data["rank_kind"] == "midk"
+                    && data["has_realgrad"] == false
+                    && data["rows"] == 64
+                    && data["cols"] == 4_096
+                    && data["k"] == 48
+            })
+            .expect("unison_rank_choice metadata event");
+        assert_eq!(meta.1["backend"], "wgpu");
+        assert_eq!(meta.1["requested_backend"], "wgpu");
+        assert_eq!(meta.1["rows"], 64);
+        assert_eq!(meta.1["cols"], 4_096);
+        assert_eq!(meta.1["k"], 48);
+        assert!(meta.1["candidate_count"].as_u64().unwrap_or(0) >= 1);
+        assert!(meta.1["baseline_score"].as_f64().is_some());
+        assert!(meta.1["has_wgpu_generated_candidate"].as_bool().is_some());
+        assert!(meta.1["wgpu_generated_score"].as_f64().is_some());
+        assert!(meta.1["low_latency"].as_bool().unwrap_or(false));
+        assert_eq!(meta.1["requires_compaction"], true);
+        assert!(meta.1["has_latency_window"].as_bool().unwrap_or(false));
+        assert!(meta.1["compaction_tile"].as_u64().unwrap_or(0) > 0);
+        assert!(meta.1["latency_target"].as_u64().unwrap_or(0) > 0);
+    }
+
+    #[test]
+    fn small_char_lm_rank_shape_has_generated_wgpu_candidate() {
+        let _lock = crate::telemetry::tensor_observer_lock();
+        hub::clear_last_realgrad_for_test();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let out = choose_unified_rank(2, 69, 1, caps, RankKind::MidK);
+        st_tensor::set_tensor_op_meta_observer(previous);
+        hub::clear_last_realgrad_for_test();
+
+        assert_eq!(out.wg, 64);
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "unison_rank_choice"
+                    && data["kind"] == "st_core_unison_rank_choice"
+                    && data["rank_kind"] == "midk"
+                    && data["rows"] == 2
+                    && data["cols"] == 69
+                    && data["k"] == 1
+            })
+            .expect("small char-lm unison metadata event");
+        assert_eq!(meta.1["has_wgpu_generated_candidate"], true);
+        assert_eq!(meta.1["candidate_count"], 2);
+        assert_eq!(meta.1["choice_source"], "fallback");
+        let baseline_score = meta.1["baseline_score"].as_f64().expect("baseline score");
+        let generated_score = meta.1["wgpu_generated_score"]
+            .as_f64()
+            .expect("generated score");
+        assert!((baseline_score - generated_score).abs() <= f64::EPSILON);
+        assert_eq!(meta.1["wgpu_generated_score_delta"], 0.0);
+        assert_eq!(meta.1["wgpu_generated_ties_baseline"], true);
+    }
+
+    #[test]
+    fn unison_rank_choice_meta_can_include_realgrad_summary() {
+        let _lock = crate::telemetry::tensor_observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let caps = DeviceCaps::wgpu(32, true, 256);
+        let scenario = RankScenario::new(64, 4_096, 48, &caps, RankKind::MidK)
+            .with_realgrad_summary(Some(GradientSummary {
+                norm: 32.0,
+                sparsity: 0.25,
+            }));
+        let baseline = fallback_with_scenario(scenario);
+        emit_unison_rank_choice_meta(
+            scenario,
+            &baseline,
+            &baseline,
+            "fallback",
+            0.5,
+            1,
+            RankCandidateScores {
+                baseline: 0.5,
+                ..Default::default()
+            },
+        );
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "unison_rank_choice"
+                    && data["kind"] == "st_core_unison_rank_choice"
+                    && data["rank_kind"] == "midk"
+                    && data["has_realgrad"] == true
+                    && data["rows"] == 64
+                    && data["cols"] == 4_096
+                    && data["k"] == 48
+            })
+            .expect("unison_rank_choice metadata event");
+        assert!(meta.1["has_realgrad"].as_bool().unwrap_or(false));
+        assert_eq!(meta.1["realgrad_norm"].as_f64(), Some(32.0));
+        assert_eq!(meta.1["realgrad_sparsity"].as_f64(), Some(0.25));
+        assert_eq!(meta.1["baseline_score"].as_f64(), Some(0.5));
+        assert_eq!(meta.1["has_kdsl_env_candidate"], false);
     }
 
     #[test]

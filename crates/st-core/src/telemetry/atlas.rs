@@ -7,6 +7,7 @@
 
 use super::chrono::{ChronoHarmonics, ChronoSummary};
 use super::maintainer::MaintainerStatus;
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -619,6 +620,7 @@ impl AtlasRoute {
             ..AtlasRouteSummary::default()
         };
         if self.frames.is_empty() {
+            emit_atlas_route_summary_meta(&summary);
             return summary;
         }
         summary.latest_timestamp = self
@@ -753,8 +755,232 @@ impl AtlasRoute {
                 .then_with(|| a.term.cmp(&b.term))
                 .then_with(|| a.sense.label().cmp(b.sense.label()))
         });
+        emit_atlas_route_summary_meta(&summary);
         summary
     }
+}
+
+fn emit_atlas_route_summary_meta(summary: &AtlasRouteSummary) {
+    emit_tensor_op(
+        "atlas_route_summary",
+        &[
+            summary.frames,
+            summary.districts.len(),
+            summary.concept_pulses.len(),
+        ],
+        &[1, summary.districts.len().max(1)],
+    );
+    emit_tensor_op_meta("atlas_route_summary", || {
+        let focus_metrics: usize = summary
+            .districts
+            .iter()
+            .map(|district| district.focus.len())
+            .sum();
+        let max_district_delta = summary
+            .districts
+            .iter()
+            .filter_map(|district| district.delta.is_finite().then_some(district.delta.abs()))
+            .fold(0.0f32, f32::max);
+        let max_focus_delta = summary
+            .districts
+            .iter()
+            .flat_map(|district| district.focus.iter())
+            .filter_map(|focus| focus.delta.is_finite().then_some(focus.delta.abs()))
+            .fold(0.0f32, f32::max);
+        let dominant_district = summary
+            .districts
+            .first()
+            .map(|district| district.name.as_str())
+            .unwrap_or("");
+        let dominant_district_coverage = summary
+            .districts
+            .first()
+            .map(|district| district.coverage)
+            .unwrap_or(0);
+        let beacon = summary.beacons(1).into_iter().next();
+        let flux = summary.flux();
+        let coherence = summary.coherence();
+        let heatmap = summary.concept_heatmap();
+        let mut payload = serde_json::Map::new();
+        payload.insert("backend".into(), serde_json::json!("cpu"));
+        payload.insert("requested_backend".into(), serde_json::json!("auto"));
+        payload.insert(
+            "kind".into(),
+            serde_json::json!("st_core_atlas_route_summary"),
+        );
+        payload.insert("frames".into(), serde_json::json!(summary.frames));
+        payload.insert(
+            "latest_timestamp".into(),
+            serde_json::json!(summary.latest_timestamp),
+        );
+        payload.insert(
+            "districts".into(),
+            serde_json::json!(summary.districts.len()),
+        );
+        payload.insert("focus_metrics".into(), serde_json::json!(focus_metrics));
+        payload.insert(
+            "dominant_district".into(),
+            serde_json::json!(dominant_district),
+        );
+        payload.insert(
+            "dominant_district_coverage".into(),
+            serde_json::json!(dominant_district_coverage),
+        );
+        payload.insert("loop_total".into(), serde_json::json!(summary.loop_total));
+        payload.insert(
+            "mean_loop_support".into(),
+            serde_json::json!(summary.mean_loop_support),
+        );
+        payload.insert("loop_std".into(), serde_json::json!(summary.loop_std));
+        payload.insert("loop_min".into(), serde_json::json!(summary.loop_min));
+        payload.insert("loop_max".into(), serde_json::json!(summary.loop_max));
+        payload.insert(
+            "loop_trend".into(),
+            serde_json::json!(summary.loop_trend.unwrap_or(0.0)),
+        );
+        payload.insert(
+            "has_loop_trend".into(),
+            serde_json::json!(summary.loop_trend.is_some()),
+        );
+        payload.insert(
+            "latest_collapse_total".into(),
+            serde_json::json!(summary.latest_collapse_total.unwrap_or(0.0)),
+        );
+        payload.insert(
+            "has_collapse_total".into(),
+            serde_json::json!(summary.latest_collapse_total.is_some()),
+        );
+        payload.insert(
+            "collapse_trend".into(),
+            serde_json::json!(summary.collapse_trend.unwrap_or(0.0)),
+        );
+        payload.insert(
+            "latest_z_signal".into(),
+            serde_json::json!(summary.latest_z_signal.unwrap_or(0.0)),
+        );
+        payload.insert(
+            "has_z_signal".into(),
+            serde_json::json!(summary.latest_z_signal.is_some()),
+        );
+        payload.insert(
+            "z_signal_trend".into(),
+            serde_json::json!(summary.z_signal_trend.unwrap_or(0.0)),
+        );
+        payload.insert(
+            "has_maintainer_status".into(),
+            serde_json::json!(summary.maintainer_status.is_some()),
+        );
+        payload.insert(
+            "maintainer_status".into(),
+            serde_json::json!(summary
+                .maintainer_status
+                .map(|status| status.as_str())
+                .unwrap_or("none")),
+        );
+        payload.insert(
+            "has_maintainer_diagnostic".into(),
+            serde_json::json!(summary.maintainer_diagnostic.is_some()),
+        );
+        payload.insert(
+            "has_suggested_max_scale".into(),
+            serde_json::json!(summary.suggested_max_scale.is_some()),
+        );
+        payload.insert(
+            "suggested_max_scale".into(),
+            serde_json::json!(summary.suggested_max_scale.unwrap_or(0.0)),
+        );
+        payload.insert(
+            "has_suggested_pressure".into(),
+            serde_json::json!(summary.suggested_pressure.is_some()),
+        );
+        payload.insert(
+            "suggested_pressure".into(),
+            serde_json::json!(summary.suggested_pressure.unwrap_or(0.0)),
+        );
+        payload.insert(
+            "has_script_hint".into(),
+            serde_json::json!(summary.script_hint.is_some()),
+        );
+        payload.insert("total_notes".into(), serde_json::json!(summary.total_notes));
+        payload.insert(
+            "latest_notes".into(),
+            serde_json::json!(summary.latest_notes.len()),
+        );
+        payload.insert(
+            "concept_pulses".into(),
+            serde_json::json!(summary.concept_pulses.len()),
+        );
+        payload.insert(
+            "concept_mentions".into(),
+            serde_json::json!(heatmap.total_mentions),
+        );
+        payload.insert(
+            "concept_terms".into(),
+            serde_json::json!(heatmap.total_terms),
+        );
+        payload.insert("coherence".into(), serde_json::json!(coherence.label()));
+        payload.insert(
+            "flux_loop_range".into(),
+            serde_json::json!(flux.as_ref().map(|flux| flux.loop_range).unwrap_or(0.0)),
+        );
+        payload.insert(
+            "flux_loop_variability".into(),
+            serde_json::json!(flux
+                .as_ref()
+                .map(|flux| flux.loop_variability)
+                .unwrap_or(0.0)),
+        );
+        payload.insert(
+            "flux_collapse_drift".into(),
+            serde_json::json!(flux.as_ref().map(|flux| flux.collapse_drift).unwrap_or(0.0)),
+        );
+        payload.insert(
+            "flux_z_signal_drift".into(),
+            serde_json::json!(flux.as_ref().map(|flux| flux.z_signal_drift).unwrap_or(0.0)),
+        );
+        payload.insert(
+            "flux_note_density".into(),
+            serde_json::json!(flux.as_ref().map(|flux| flux.note_density).unwrap_or(0.0)),
+        );
+        payload.insert(
+            "flux_concept_density".into(),
+            serde_json::json!(flux
+                .as_ref()
+                .map(|flux| flux.concept_density)
+                .unwrap_or(0.0)),
+        );
+        payload.insert(
+            "max_district_delta_abs".into(),
+            serde_json::json!(max_district_delta),
+        );
+        payload.insert(
+            "max_focus_delta_abs".into(),
+            serde_json::json!(max_focus_delta),
+        );
+        payload.insert("has_beacon".into(), serde_json::json!(beacon.is_some()));
+        payload.insert(
+            "top_beacon_district".into(),
+            serde_json::json!(beacon
+                .as_ref()
+                .map(|beacon| beacon.district.as_str())
+                .unwrap_or("")),
+        );
+        payload.insert(
+            "top_beacon_metric".into(),
+            serde_json::json!(beacon
+                .as_ref()
+                .map(|beacon| beacon.metric.as_str())
+                .unwrap_or("")),
+        );
+        payload.insert(
+            "top_beacon_intensity".into(),
+            serde_json::json!(beacon
+                .as_ref()
+                .map(|beacon| beacon.intensity)
+                .unwrap_or(0.0)),
+        );
+        serde_json::Value::Object(payload)
+    });
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1567,6 +1793,11 @@ mod frame_tests {
 #[cfg(test)]
 mod summary_tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
+
+    fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
+        crate::telemetry::tensor_observer_lock()
+    }
 
     #[test]
     fn route_summary_tracks_loop_envelope_and_notes() {
@@ -1599,6 +1830,67 @@ mod summary_tests {
             vec!["beta".to_string(), "alpha".to_string()]
         );
         assert_eq!(summary.latest_note(), Some("alpha"));
+    }
+
+    #[test]
+    fn route_summary_emits_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let mut first = AtlasFragment::new();
+        first.timestamp = Some(1.0);
+        first.loop_support = Some(1.0);
+        first.collapse_total = Some(0.25);
+        first.z_signal = Some(0.1);
+        first.push_metric_with_district("trainer.loss", 1.0, "trainer");
+        first.push_concept(ConceptAnnotation::new(
+            "qualia",
+            ConceptSense::QualiaGeneralDiscourse,
+        ));
+
+        let mut second = AtlasFragment::new();
+        second.timestamp = Some(2.0);
+        second.loop_support = Some(2.5);
+        second.collapse_total = Some(0.75);
+        second.z_signal = Some(0.4);
+        second.maintainer_status = Some(MaintainerStatus::Clamp);
+        second.suggested_max_scale = Some(2.4);
+        second.suggested_pressure = Some(0.18);
+        second.push_note("maintainer.status:clamp");
+        second.push_metric_with_district("trainer.loss", 0.6, "trainer");
+        second.push_metric_with_district("maintainer.average_drift", 0.42, "maintainer");
+
+        let mut route = AtlasRoute::new();
+        route.push_bounded(AtlasFrame::from_fragment(first).expect("frame a"), 8);
+        route.push_bounded(AtlasFrame::from_fragment(second).expect("frame b"), 8);
+        let summary = route.summary();
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert_eq!(summary.frames, 2);
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "atlas_route_summary"
+                    && data["frames"] == 2
+                    && data["has_maintainer_status"] == true
+            })
+            .expect("atlas_route_summary metadata event");
+        assert_eq!(meta.1["backend"], "cpu");
+        assert_eq!(meta.1["kind"], "st_core_atlas_route_summary");
+        assert_eq!(meta.1["districts"], 2);
+        assert_eq!(meta.1["maintainer_status"], "clamp");
+        assert_eq!(meta.1["has_suggested_max_scale"], true);
+        assert!(meta.1["concept_mentions"].as_u64().unwrap_or(0) > 0);
+        assert!(meta.1["has_beacon"].as_bool().unwrap_or(false));
+        assert!(meta.1["top_beacon_intensity"].as_f64().unwrap_or(0.0) > 0.0);
     }
 }
 

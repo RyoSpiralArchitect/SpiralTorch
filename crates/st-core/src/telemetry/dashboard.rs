@@ -4,6 +4,7 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use serde::{Deserialize, Serialize};
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 use std::collections::{BTreeMap, VecDeque};
 use std::time::{Duration, SystemTime};
 
@@ -144,10 +145,59 @@ impl DashboardRing {
     }
 
     pub fn push(&mut self, frame: DashboardFrame) {
+        let metrics = frame.metrics.len();
+        let events = frame.events.len();
+        let finite_metrics = frame
+            .metrics
+            .iter()
+            .filter(|metric| metric.value.is_finite())
+            .count();
+        let max_metric_abs = frame
+            .metrics
+            .iter()
+            .filter_map(|metric| metric.value.is_finite().then_some(metric.value.abs()))
+            .fold(0.0f64, f64::max);
+        let info_events = frame
+            .events
+            .iter()
+            .filter(|event| event.severity == EventSeverity::Info)
+            .count();
+        let warning_events = frame
+            .events
+            .iter()
+            .filter(|event| event.severity == EventSeverity::Warning)
+            .count();
+        let critical_events = frame
+            .events
+            .iter()
+            .filter(|event| event.severity == EventSeverity::Critical)
+            .count();
         if self.frames.len() == self.capacity {
             self.frames.pop_front();
         }
         self.frames.push_back(frame);
+        emit_tensor_op(
+            "dashboard_frame_ingest",
+            &[metrics, events],
+            &[self.frames.len()],
+        );
+        emit_tensor_op_meta("dashboard_frame_ingest", || {
+            serde_json::json!({
+                "backend": "cpu",
+                "requested_backend": "auto",
+                "kind": "st_core_dashboard_frame_ingest",
+                "capacity": self.capacity,
+                "retained_frames": self.frames.len(),
+                "metrics": metrics,
+                "events": events,
+                "finite_metrics": finite_metrics,
+                "nonfinite_metrics": metrics.saturating_sub(finite_metrics),
+                "max_metric_abs": max_metric_abs,
+                "info_events": info_events,
+                "warning_events": warning_events,
+                "critical_events": critical_events,
+            })
+        });
     }
 
     pub fn latest(&self) -> Option<&DashboardFrame> {
@@ -220,13 +270,62 @@ impl DashboardRing {
             .map(|(name, acc)| MetricAggregate::from_accumulator(name, acc))
             .collect();
 
-        Some(DashboardSummary {
+        let summary = DashboardSummary {
             frame_count,
             span_seconds,
             metrics,
             events,
-        })
+        };
+        emit_dashboard_summary_meta(&summary, limit);
+        Some(summary)
     }
+}
+
+fn emit_dashboard_summary_meta(summary: &DashboardSummary, requested_limit: usize) {
+    let events_total: usize = summary.events.values().copied().sum();
+    let top_metric = summary.metrics.iter().max_by(|a, b| {
+        let a_range = (a.max - a.min).abs();
+        let b_range = (b.max - b.min).abs();
+        a_range
+            .partial_cmp(&b_range)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    emit_tensor_op(
+        "dashboard_summary",
+        &[summary.frame_count, summary.metrics.len()],
+        &[1, summary.metrics.len().max(1)],
+    );
+    emit_tensor_op_meta("dashboard_summary", || {
+        serde_json::json!({
+            "backend": "cpu",
+            "requested_backend": "auto",
+            "kind": "st_core_dashboard_summary",
+            "requested_limit": requested_limit,
+            "frame_count": summary.frame_count,
+            "span_seconds": summary.span_seconds,
+            "metrics": summary.metrics.len(),
+            "events_total": events_total,
+            "info_events": summary.events.get(&EventSeverity::Info).copied().unwrap_or(0),
+            "warning_events": summary
+                .events
+                .get(&EventSeverity::Warning)
+                .copied()
+                .unwrap_or(0),
+            "critical_events": summary
+                .events
+                .get(&EventSeverity::Critical)
+                .copied()
+                .unwrap_or(0),
+            "has_top_metric": top_metric.is_some(),
+            "top_metric": top_metric.map(|metric| metric.name.as_str()).unwrap_or(""),
+            "top_metric_samples": top_metric.map(|metric| metric.samples).unwrap_or(0),
+            "top_metric_latest": top_metric.map(|metric| metric.latest).unwrap_or(0.0),
+            "top_metric_range_abs": top_metric
+                .map(|metric| (metric.max - metric.min).abs())
+                .unwrap_or(0.0),
+        })
+    });
 }
 
 /// Helper that materialises frames from streaming metric updates.
@@ -291,6 +390,11 @@ impl DashboardBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
+
+    fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
+        crate::telemetry::tensor_observer_lock()
+    }
 
     #[test]
     fn ring_retains_latest_frame() {
@@ -350,6 +454,64 @@ mod tests {
         assert_eq!(latency_latest_only.latest, 30.0);
         assert_eq!(latency_latest_only.min, 30.0);
         assert_eq!(latency_latest_only.max, 30.0);
+    }
+
+    #[test]
+    fn ring_emits_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let mut ring = DashboardRing::new(4);
+        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(2000);
+        let mut first = DashboardFrame::new(base);
+        first.push_metric(DashboardMetric::new("train.loss", 1.0));
+        ring.push(first);
+        let mut second = DashboardFrame::new(base + Duration::from_secs(1));
+        second.push_metric(DashboardMetric::new("train.loss", 0.5));
+        second.push_metric(DashboardMetric::new("train.reward", 0.25));
+        second.push_event(DashboardEvent {
+            message: "dashboard warning".to_string(),
+            severity: EventSeverity::Warning,
+        });
+        ring.push(second);
+        let summary = ring.summarize(None).expect("summary");
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert_eq!(summary.frame_count, 2);
+        let events = events.lock().unwrap();
+        let ingest = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "dashboard_frame_ingest"
+                    && data["retained_frames"] == 2
+                    && data["metrics"] == 2
+            })
+            .expect("dashboard_frame_ingest metadata event");
+        assert_eq!(ingest.1["backend"], "cpu");
+        assert_eq!(ingest.1["kind"], "st_core_dashboard_frame_ingest");
+        assert_eq!(ingest.1["warning_events"], 1);
+
+        let summary_meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "dashboard_summary"
+                    && data["frame_count"] == 2
+                    && data["metrics"] == 2
+                    && data["events_total"] == 1
+                    && data["top_metric"] == "train.loss"
+            })
+            .expect("dashboard_summary metadata event");
+        assert_eq!(summary_meta.1["backend"], "cpu");
+        assert_eq!(summary_meta.1["kind"], "st_core_dashboard_summary");
+        assert_eq!(summary_meta.1["events_total"], 1);
+        assert!(summary_meta.1["has_top_metric"].as_bool().unwrap_or(false));
     }
 
     #[test]

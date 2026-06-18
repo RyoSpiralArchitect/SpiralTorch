@@ -43,9 +43,7 @@ fn main(
     let tile_col_origin = wid.x * TILE_N;
     let row = tile_row_origin + local_m;
     let col = tile_col_origin + local_n;
-    if (row >= params.rows || col >= params.cols) {
-        return;
-    }
+    let in_bounds = row < params.rows && col < params.cols;
 
     var acc : f32 = 0.0;
     let tiles = (params.inner + TILE_K - 1u) / TILE_K;
@@ -130,8 +128,10 @@ fn main(
     workgroupBarrier();
     let bias_value = bias_tile[local_n];
 
-    let out_index = row * params.cols + col;
-    let residual_value = residual[out_index];
-    let sum = acc + bias_value + residual_value;
-    out[out_index] = gelu(sum);
+    if (in_bounds) {
+        let out_index = row * params.cols + col;
+        let residual_value = residual[out_index];
+        let sum = acc + bias_value + residual_value;
+        out[out_index] = gelu(sum);
+    }
 }

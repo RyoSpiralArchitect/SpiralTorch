@@ -4,10 +4,56 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use super::geometry::{SemanticBridge, SparseKernel};
+use crate::execution::current_tensor_util_backend_for_values;
 use crate::PureResult;
 use st_core::coop::ai::{CoopAgent, CoopProposal};
-use st_tensor::TensorError;
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta, Tensor, TensorError, TensorUtilBackend};
 use std::collections::HashSet;
+
+fn tensor_util_backend_label(backend: TensorUtilBackend) -> &'static str {
+    match backend {
+        TensorUtilBackend::Auto => "auto",
+        TensorUtilBackend::Cpu => "cpu",
+        TensorUtilBackend::GpuWgpu => "wgpu",
+    }
+}
+
+fn scale_probability_values(values: Vec<f32>, scale: f32) -> (Vec<f32>, &'static str) {
+    let backend = current_tensor_util_backend_for_values(values.len());
+    let backend_label = tensor_util_backend_label(backend);
+    if values.is_empty() {
+        return (values, backend_label);
+    }
+
+    let fallback_values = values.clone();
+    match Tensor::from_vec(1, values.len(), values)
+        .and_then(|tensor| tensor.scale_with_backend(scale, backend))
+    {
+        Ok(tensor) => (tensor.data().to_vec(), backend_label),
+        Err(_) => {
+            let mut values = fallback_values;
+            for value in &mut values {
+                *value *= scale;
+            }
+            (values, "cpu")
+        }
+    }
+}
+
+fn sum_probability_values(values: &[f32]) -> (f32, &'static str) {
+    let backend = current_tensor_util_backend_for_values(values.len());
+    let backend_label = tensor_util_backend_label(backend);
+    if values.is_empty() {
+        return (0.0, backend_label);
+    }
+
+    match Tensor::from_vec(1, values.len(), values.to_vec())
+        .and_then(|tensor| tensor.sum_abs_with_backend(backend))
+    {
+        Ok(sum) => (sum, backend_label),
+        Err(_) => (values.iter().copied().sum(), "cpu"),
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct DistanceMatrix {
@@ -87,8 +133,8 @@ impl EntropicGwSolver {
                 label: "concept marginal must match concept distance matrix",
             });
         }
-        let a_target = normalise(symbol_marginal)?;
-        let b_target = normalise(concept_marginal)?;
+        let a_target = normalise("gw_symbol_marginal", symbol_marginal)?;
+        let b_target = normalise("gw_concept_marginal", concept_marginal)?;
         let mut pi = vec![0.0f32; n * m];
         for i in 0..n {
             for j in 0..m {
@@ -135,8 +181,8 @@ impl EntropicGwSolver {
                 col_sums[j] += value;
             }
         }
-        normalise_in_place(&mut row_sums);
-        normalise_in_place(&mut col_sums);
+        normalise_in_place("gw_row_sums", &mut row_sums);
+        normalise_in_place("gw_col_sums", &mut col_sums);
 
         let bridge = SemanticBridge::new(
             log_pi_rows,
@@ -249,45 +295,138 @@ fn sinkhorn(pi: &mut [f32], kernel: &[f32], a_target: &[f32], b_target: &[f32], 
     }
 }
 
-fn normalise(weights: &[f32]) -> PureResult<Vec<f32>> {
+fn normalise(label: &'static str, weights: &[f32]) -> PureResult<Vec<f32>> {
     if weights.is_empty() {
         return Err(TensorError::InvalidValue {
             label: "marginals cannot be empty",
         });
     }
-    let mut total = 0.0f32;
     for &w in weights {
         if w < 0.0 || !w.is_finite() {
             return Err(TensorError::InvalidValue {
                 label: "marginals must be finite and non-negative",
             });
         }
-        total += w;
     }
+    let (total, marginal_sum_backend) = sum_probability_values(weights);
     if total <= f32::EPSILON {
         return Err(TensorError::InvalidValue {
             label: "marginal sum must be positive",
         });
     }
-    Ok(weights.iter().map(|w| w / total).collect())
+    let (normalised, distribution_scale_backend) =
+        scale_probability_values(weights.to_vec(), 1.0 / total);
+    let distribution_sum = normalised.iter().copied().sum::<f32>();
+    let dominant_probability = normalised
+        .iter()
+        .copied()
+        .fold(0.0f32, |best, value| best.max(value));
+    emit_tensor_op(
+        "gw_marginal_normalise",
+        &[weights.len()],
+        &[normalised.len()],
+    );
+    emit_tensor_op_meta("gw_marginal_normalise", || {
+        serde_json::json!({
+            "backend": "hybrid",
+            "requested_backend": distribution_scale_backend,
+            "kind": "gromov_wasserstein_marginal_normalise",
+            "marginal_sum_backend": marginal_sum_backend,
+            "distribution_scale_backend": distribution_scale_backend,
+            "label": label,
+            "values": weights.len(),
+            "raw_sum": total,
+            "distribution_sum": distribution_sum,
+            "dominant_probability": dominant_probability,
+            "zero_fallback": false,
+        })
+    });
+    Ok(normalised)
 }
 
-fn normalise_in_place(weights: &mut [f32]) {
-    let mut total = 0.0f32;
-    for &w in weights.iter() {
-        total += w;
-    }
+fn normalise_in_place(label: &'static str, weights: &mut [f32]) {
+    let (total, marginal_sum_backend) = sum_probability_values(weights);
     if total <= f32::EPSILON {
+        emit_tensor_op(
+            "gw_marginal_normalise_in_place",
+            &[weights.len()],
+            &[weights.len()],
+        );
+        emit_tensor_op_meta("gw_marginal_normalise_in_place", || {
+            serde_json::json!({
+                "backend": "probability_cpu",
+                "requested_backend": "auto",
+                "kind": "gromov_wasserstein_marginal_normalise_in_place",
+                "label": label,
+                "values": weights.len(),
+                "raw_sum": total,
+                "distribution_sum": weights.iter().copied().sum::<f32>(),
+                "dominant_probability": 0.0f32,
+                "zero_fallback": true,
+            })
+        });
         return;
     }
-    for value in weights.iter_mut() {
-        *value /= total;
+    let (scaled, distribution_scale_backend) =
+        scale_probability_values(weights.to_vec(), 1.0 / total);
+    for (value, scaled) in weights.iter_mut().zip(scaled.into_iter()) {
+        *value = scaled;
     }
+    let distribution_sum = weights.iter().copied().sum::<f32>();
+    let dominant_probability = weights
+        .iter()
+        .copied()
+        .fold(0.0f32, |best, value| best.max(value));
+    emit_tensor_op(
+        "gw_marginal_normalise_in_place",
+        &[weights.len()],
+        &[weights.len()],
+    );
+    emit_tensor_op_meta("gw_marginal_normalise_in_place", || {
+        serde_json::json!({
+            "backend": "hybrid",
+            "requested_backend": distribution_scale_backend,
+            "kind": "gromov_wasserstein_marginal_normalise_in_place",
+            "marginal_sum_backend": marginal_sum_backend,
+            "distribution_scale_backend": distribution_scale_backend,
+            "label": label,
+            "values": weights.len(),
+            "raw_sum": total,
+            "distribution_sum": distribution_sum,
+            "dominant_probability": dominant_probability,
+            "zero_fallback": false,
+        })
+    });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "wgpu")]
+    use crate::execution::{push_backend_policy, BackendPolicy};
+    #[cfg(feature = "wgpu")]
+    use st_core::backend::device_caps::DeviceCaps;
+    #[cfg(feature = "wgpu")]
+    use st_tensor::backend::wgpu_dense;
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
+        static OBSERVER_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        OBSERVER_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("observer lock available")
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn restore_tensor_util_wgpu_min_values(previous: Option<String>) {
+        const KEY: &str = "SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES";
+        if let Some(value) = previous {
+            std::env::set_var(KEY, value);
+        } else {
+            std::env::remove_var(KEY);
+        }
+    }
 
     #[test]
     fn gw_solver_respects_anchors() {
@@ -324,5 +463,120 @@ mod tests {
             }
         }
         assert!(anchor > other);
+    }
+
+    #[test]
+    fn gw_marginal_normalise_paths_emit_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let normalised = normalise("gw_test_marginal", &[0.25, 0.75]).unwrap();
+        let mut in_place = vec![2.0, 1.0, 1.0];
+        normalise_in_place("gw_test_in_place", &mut in_place);
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert!((normalised.iter().sum::<f32>() - 1.0).abs() < 1e-6);
+        assert!((in_place.iter().sum::<f32>() - 1.0).abs() < 1e-6);
+        let events = events.lock().unwrap();
+        let marginal = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "gw_marginal_normalise" && data["label"] == "gw_test_marginal"
+            })
+            .expect("gw_marginal_normalise metadata event");
+        assert_eq!(marginal.1["backend"], "hybrid");
+        assert_eq!(marginal.1["requested_backend"], "auto");
+        assert_eq!(marginal.1["kind"], "gromov_wasserstein_marginal_normalise");
+        assert_eq!(marginal.1["marginal_sum_backend"], "auto");
+        assert_eq!(marginal.1["distribution_scale_backend"], "auto");
+        assert_eq!(marginal.1["values"], 2);
+        assert_eq!(marginal.1["zero_fallback"], false);
+        assert!((marginal.1["distribution_sum"].as_f64().unwrap_or(0.0) - 1.0).abs() < 1e-6);
+
+        let row = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "gw_marginal_normalise_in_place" && data["label"] == "gw_test_in_place"
+            })
+            .expect("gw_marginal_normalise_in_place metadata event");
+        assert_eq!(row.1["backend"], "hybrid");
+        assert_eq!(row.1["requested_backend"], "auto");
+        assert_eq!(
+            row.1["kind"],
+            "gromov_wasserstein_marginal_normalise_in_place"
+        );
+        assert_eq!(row.1["marginal_sum_backend"], "auto");
+        assert_eq!(row.1["distribution_scale_backend"], "auto");
+        assert_eq!(row.1["values"], 3);
+        assert_eq!(row.1["zero_fallback"], false);
+        assert!((row.1["distribution_sum"].as_f64().unwrap_or(0.0) - 1.0).abs() < 1e-6);
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn gw_marginal_normalise_forced_wgpu_routes_sum() {
+        if !wgpu_dense::is_available() {
+            return;
+        }
+        let _lock = observer_lock();
+        const KEY: &str = "SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES";
+        let previous_min = std::env::var(KEY).ok();
+        std::env::set_var(KEY, "0");
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
+        let (normalised, in_place) = {
+            let _guard = push_backend_policy(policy);
+            let normalised = normalise("gw_test_marginal_wgpu", &[0.25, 0.75]).unwrap();
+            let mut in_place = vec![2.0, 1.0, 1.0];
+            normalise_in_place("gw_test_in_place_wgpu", &mut in_place);
+            (normalised, in_place)
+        };
+        st_tensor::set_tensor_op_meta_observer(previous);
+        restore_tensor_util_wgpu_min_values(previous_min);
+
+        assert!((normalised.iter().sum::<f32>() - 1.0).abs() < 1e-6);
+        assert!((in_place.iter().sum::<f32>() - 1.0).abs() < 1e-6);
+        let events = events.lock().unwrap();
+        let marginal = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "gw_marginal_normalise" && data["label"] == "gw_test_marginal_wgpu"
+            })
+            .expect("gw_marginal_normalise metadata event");
+        assert_eq!(marginal.1["backend"], "hybrid");
+        assert_eq!(marginal.1["requested_backend"], "wgpu");
+        assert_eq!(marginal.1["marginal_sum_backend"], "wgpu");
+        assert_eq!(marginal.1["distribution_scale_backend"], "wgpu");
+        let row = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "gw_marginal_normalise_in_place"
+                    && data["label"] == "gw_test_in_place_wgpu"
+            })
+            .expect("gw_marginal_normalise_in_place metadata event");
+        assert_eq!(row.1["backend"], "hybrid");
+        assert_eq!(row.1["requested_backend"], "wgpu");
+        assert_eq!(row.1["marginal_sum_backend"], "wgpu");
+        assert_eq!(row.1["distribution_scale_backend"], "wgpu");
+        let sum_abs = events
+            .iter()
+            .find(|(op_name, data)| *op_name == "sum_abs" && data["backend"] == "wgpu_dense")
+            .expect("sum_abs WGPU marginal sum metadata event");
+        assert_eq!(sum_abs.1["backend"], "wgpu_dense");
     }
 }

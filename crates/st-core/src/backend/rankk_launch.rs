@@ -12,9 +12,9 @@
 //!
 //! The helpers intentionally keep the API surface small:
 //!   * `LaunchBuffers` validates host slices (rows, cols, k) once.
-//!   * `with_launch_buffers_{cuda,hip}` installs the buffers for the duration of
+//!   * `with_launch_buffers_{cuda,hip,wgpu}` installs the buffers for the duration of
 //!     a closure so the executor can borrow them.
-//!   * `with_registered_buffers_{cuda,hip}` hands those slices to the software
+//!   * `with_registered_buffers_{cuda,hip,wgpu}` hands those slices to the software
 //!     fallbacks that emulate the GPU kernels during tests.
 
 use std::cell::RefCell;
@@ -117,6 +117,7 @@ pub struct LaunchSlices<'a> {
 thread_local! {
     static CUDA_CTX: RefCell<Option<LaunchContext>> = const { RefCell::new(None) };
     static HIP_CTX: RefCell<Option<LaunchContext>> = const { RefCell::new(None) };
+    static WGPU_CTX: RefCell<Option<LaunchContext>> = const { RefCell::new(None) };
 }
 
 pub fn with_launch_buffers_cuda<'a, F, R>(buffers: LaunchBuffers<'a>, f: F) -> R
@@ -133,6 +134,13 @@ where
     with_launch_buffers_impl(&HIP_CTX, buffers, f)
 }
 
+pub fn with_launch_buffers_wgpu<'a, F, R>(buffers: LaunchBuffers<'a>, f: F) -> R
+where
+    F: FnOnce() -> R,
+{
+    with_launch_buffers_impl(&WGPU_CTX, buffers, f)
+}
+
 pub fn with_registered_buffers_cuda<F>(f: F) -> Result<(), String>
 where
     F: FnOnce(LaunchSlices<'_>) -> Result<(), String>,
@@ -145,6 +153,13 @@ where
     F: FnOnce(LaunchSlices<'_>) -> Result<(), String>,
 {
     with_registered_buffers_impl(&HIP_CTX, f)
+}
+
+pub fn with_registered_buffers_wgpu<F>(f: F) -> Result<(), String>
+where
+    F: FnOnce(LaunchSlices<'_>) -> Result<(), String>,
+{
+    with_registered_buffers_impl(&WGPU_CTX, f)
 }
 
 fn with_launch_buffers_impl<'a, F, R>(

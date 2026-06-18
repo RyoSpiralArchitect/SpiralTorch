@@ -3,12 +3,17 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+use crate::execution::{
+    current_matmul_backend, current_prepacked_matmul_backend,
+    current_tensor_util_backend_for_values,
+};
 use crate::module::{Module, Parameter};
 use crate::schedule::GradientBands;
 use crate::{PureResult, Tensor, TensorError};
 use st_core::util::math::{ramanujan_pi, LeechProjector};
 #[cfg(feature = "wgpu")]
 use st_tensor::backend::wgpu_dense;
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta, TensorUtilBackend};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 #[cfg(feature = "wgpu")]
@@ -22,6 +27,76 @@ fn validate_positive(value: usize, _label: &str) -> PureResult<()> {
         });
     }
     Ok(())
+}
+
+fn tensor_util_backend_label(backend: TensorUtilBackend) -> &'static str {
+    match backend {
+        TensorUtilBackend::Auto => "auto",
+        TensorUtilBackend::Cpu => "cpu",
+        TensorUtilBackend::GpuWgpu => "wgpu",
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_pool2d_meta(
+    op_name: &'static str,
+    pool_kind: &'static str,
+    batch: usize,
+    channels: usize,
+    input_hw: (usize, usize),
+    output_hw: (usize, usize),
+    kernel: (usize, usize),
+    stride: (usize, usize),
+    padding: (usize, usize),
+    backward: bool,
+    backend: &'static str,
+    requested_backend: &'static str,
+    kernel_name: &'static str,
+    fallback_message: Option<&str>,
+) {
+    let input_values = batch
+        .saturating_mul(channels)
+        .saturating_mul(input_hw.0)
+        .saturating_mul(input_hw.1);
+    let output_values = batch
+        .saturating_mul(channels)
+        .saturating_mul(output_hw.0)
+        .saturating_mul(output_hw.1);
+    emit_tensor_op(
+        op_name,
+        &[batch, channels, input_hw.0, input_hw.1],
+        &[batch, channels, output_hw.0, output_hw.1],
+    );
+    emit_tensor_op_meta(op_name, || {
+        let mut data = serde_json::json!({
+            "backend": backend,
+            "requested_backend": requested_backend,
+            "kernel": kernel_name,
+            "kind": pool_kind,
+            "batch": batch,
+            "channels": channels,
+            "input_height": input_hw.0,
+            "input_width": input_hw.1,
+            "input_values": input_values,
+            "output_height": output_hw.0,
+            "output_width": output_hw.1,
+            "output_values": output_values,
+            "kernel_height": kernel.0,
+            "kernel_width": kernel.1,
+            "stride_height": stride.0,
+            "stride_width": stride.1,
+            "padding_height": padding.0,
+            "padding_width": padding.1,
+            "window_values": kernel.0.saturating_mul(kernel.1),
+            "estimated_window_ops": output_values.saturating_mul(kernel.0).saturating_mul(kernel.1),
+            "estimated_scatter_adds": if backward { output_values.saturating_mul(kernel.0).saturating_mul(kernel.1) } else { 0 },
+            "empty": batch == 0 || channels == 0 || output_hw.0 == 0 || output_hw.1 == 0,
+        });
+        if let Some(message) = fallback_message {
+            data["fallback"] = serde_json::json!({"from": "wgpu", "message": message});
+        }
+        data
+    });
 }
 
 fn kernel_span(in_channels: usize, kernel: usize) -> usize {
@@ -333,6 +408,94 @@ impl Conv1d {
         }
         Ok((numer - effective_kernel) / self.stride + 1)
     }
+
+    fn im2col(
+        &self,
+        input: &Tensor,
+        batch: usize,
+        width: usize,
+        out_width: usize,
+    ) -> PureResult<Tensor> {
+        let span = kernel_span(self.in_channels, self.kernel_size);
+        let mut columns = Tensor::zeros(batch * out_width, span)?;
+        let cols = input.shape().1;
+        {
+            let input_data = input.data();
+            let column_data = columns.data_mut();
+            for b in 0..batch {
+                let row = &input_data[b * cols..(b + 1) * cols];
+                for ow in 0..out_width {
+                    let row_index = b * out_width + ow;
+                    let offset = row_index * span;
+                    for ic in 0..self.in_channels {
+                        let channel_offset = ic * width;
+                        for k in 0..self.kernel_size {
+                            let pos = ow * self.stride + k * self.dilation;
+                            let column_index = offset + ic * self.kernel_size + k;
+                            column_data[column_index] = if pos < self.padding {
+                                0.0
+                            } else {
+                                let idx = pos - self.padding;
+                                if idx >= width {
+                                    0.0
+                                } else {
+                                    row[channel_offset + idx]
+                                }
+                            };
+                        }
+                    }
+                }
+            }
+        }
+        Ok(columns)
+    }
+
+    fn output_matrix_to_feature_tensor(
+        &self,
+        matrix: &[f32],
+        batch: usize,
+        out_width: usize,
+    ) -> PureResult<Tensor> {
+        let expected = batch * out_width * self.out_channels;
+        if matrix.len() != expected {
+            return Err(TensorError::DataLength {
+                expected,
+                got: matrix.len(),
+            });
+        }
+        let mut output = Tensor::zeros(batch, self.out_channels * out_width)?;
+        let output_cols = output.shape().1;
+        {
+            let output_data = output.data_mut();
+            for b in 0..batch {
+                let output_row = &mut output_data[b * output_cols..(b + 1) * output_cols];
+                for ow in 0..out_width {
+                    let matrix_offset = (b * out_width + ow) * self.out_channels;
+                    for oc in 0..self.out_channels {
+                        output_row[oc * out_width + ow] = matrix[matrix_offset + oc];
+                    }
+                }
+            }
+        }
+        Ok(output)
+    }
+
+    fn forward_im2col(
+        &self,
+        input: &Tensor,
+        batch: usize,
+        width: usize,
+        out_width: usize,
+    ) -> PureResult<Tensor> {
+        let patches = self.im2col(input, batch, width, out_width)?;
+        let pack_t = self.weight.ensure_matmul_transpose_pack()?;
+        let matrix = patches.matmul_prepacked_bias_with_backend(
+            &pack_t,
+            self.bias.value().data(),
+            current_prepacked_matmul_backend(),
+        )?;
+        self.output_matrix_to_feature_tensor(matrix.data(), batch, out_width)
+    }
 }
 
 impl Module for Conv1d {
@@ -340,46 +503,10 @@ impl Module for Conv1d {
         let (batch, cols) = input.shape();
         let width = self.infer_width(cols)?;
         let out_width = self.output_width(width)?;
-        let mut out = Tensor::zeros(batch, self.out_channels * out_width)?;
-        let weight = self.weight.value();
-        let bias = self.bias.value();
-        let bias_data = bias.data();
-        let weight_data = weight.data();
-        let span = kernel_span(self.in_channels, self.kernel_size);
-        let out_cols = out.shape().1;
-        {
-            let out_data = out.data_mut();
-            for b in 0..batch {
-                let row = &input.data()[b * cols..(b + 1) * cols];
-                let (start, end) = (b * out_cols, (b + 1) * out_cols);
-                let out_row = &mut out_data[start..end];
-                for oc in 0..self.out_channels {
-                    let weight_row = &weight_data[oc * span..(oc + 1) * span];
-                    let bias = bias_data[oc];
-                    for ow in 0..out_width {
-                        let mut acc = bias;
-                        for ic in 0..self.in_channels {
-                            let channel_offset = ic * width;
-                            for k in 0..self.kernel_size {
-                                let pos = ow * self.stride + k * self.dilation;
-                                if pos < self.padding {
-                                    continue;
-                                }
-                                let idx = pos - self.padding;
-                                if idx >= width {
-                                    continue;
-                                }
-                                let input_val = row[channel_offset + idx];
-                                let weight_idx = ic * self.kernel_size + k;
-                                acc += input_val * weight_row[weight_idx];
-                            }
-                        }
-                        out_row[oc * out_width + ow] = acc;
-                    }
-                }
-            }
+        if batch == 0 {
+            return Tensor::zeros(batch, self.out_channels * out_width);
         }
-        Ok(out)
+        self.forward_im2col(input, batch, width, out_width)
     }
 
     fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
@@ -391,6 +518,9 @@ impl Module for Conv1d {
                 left: grad_output.shape(),
                 right: (batch, self.out_channels * out_width),
             });
+        }
+        if batch == 0 {
+            return Tensor::zeros(batch, cols);
         }
         let span = kernel_span(self.in_channels, self.kernel_size);
         let mut grad_weight = Tensor::zeros(self.out_channels, span)?;
@@ -435,11 +565,19 @@ impl Module for Conv1d {
             }
         }
         let inv_batch = 1.0 / batch as f32;
-        for value in grad_weight.data_mut() {
+        let tensor_util_backend = current_tensor_util_backend_for_values(grad_weight.data().len());
+        let grad_weight = if matches!(tensor_util_backend, TensorUtilBackend::GpuWgpu) {
+            grad_weight.scale_with_backend(inv_batch, tensor_util_backend)?
+        } else {
+            for value in grad_weight.data_mut() {
+                *value *= inv_batch;
+            }
+            grad_weight
+        };
+        for value in &mut grad_bias {
             *value *= inv_batch;
         }
-        let mut bias_tensor = Tensor::from_vec(1, self.out_channels, grad_bias)?;
-        bias_tensor = bias_tensor.scale(inv_batch)?;
+        let bias_tensor = Tensor::from_vec(1, self.out_channels, grad_bias)?;
         self.weight.accumulate_euclidean(&grad_weight)?;
         self.bias.accumulate_euclidean(&bias_tensor)?;
         Ok(grad_input)
@@ -647,16 +785,24 @@ impl Conv2d {
         oh: usize,
         ow: usize,
     ) -> PureResult<Tensor> {
-        let grad_weight = grad_matrix.transpose().matmul(patches)?;
-        let grad_weight = grad_weight.scale(1.0 / batch as f32)?;
-        let bias_sums = grad_matrix.sum_axis0();
-        let mut bias_tensor = Tensor::from_vec(1, self.out_channels, bias_sums)?;
-        bias_tensor = bias_tensor.scale(1.0 / batch as f32)?;
+        if batch == 0 {
+            return Tensor::zeros(batch, self.in_channels * self.input_hw.0 * self.input_hw.1);
+        }
+        let grad_weight = grad_matrix.matmul_lhs_transpose_scaled_with_backend(
+            patches,
+            1.0 / batch as f32,
+            current_matmul_backend(),
+        )?;
+        let bias_backend = current_tensor_util_backend_for_values(grad_matrix.data().len());
+        let bias_sums =
+            grad_matrix.try_sum_axis0_scaled_with_backend(1.0 / batch as f32, bias_backend)?;
+        let bias_tensor = Tensor::from_vec(1, self.out_channels, bias_sums)?;
         let grad_input = if let Some(grad) = self.try_grad_input_wgpu(grad_matrix, batch, oh, ow)? {
             grad
         } else {
             let pack = self.weight.ensure_matmul_pack()?;
-            let grad_patches = grad_matrix.matmul_prepacked(&pack)?;
+            let grad_patches = grad_matrix
+                .matmul_prepacked_with_backend(&pack, current_prepacked_matmul_backend())?;
             self.col2im(&grad_patches, batch, oh, ow)?
         };
         self.weight.accumulate_euclidean(&grad_weight)?;
@@ -689,7 +835,8 @@ impl Conv2d {
                     right: (batch, self.out_channels * oh * ow),
                 });
             }
-            if grad.squared_l2_norm() == 0.0 {
+            let backend = current_tensor_util_backend_for_values(grad.data().len());
+            if grad.squared_l2_norm_with_backend(backend)? == 0.0 {
                 outputs[idx] = Some(Tensor::zeros(batch, expected_cols)?);
                 continue;
             }
@@ -761,6 +908,38 @@ impl Conv2d {
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+        Ok(output)
+    }
+
+    fn output_matrix_to_feature_tensor(
+        &self,
+        matrix: &[f32],
+        batch: usize,
+        oh: usize,
+        ow: usize,
+    ) -> PureResult<Tensor> {
+        let spatial = oh * ow;
+        let expected = batch * spatial * self.out_channels;
+        if matrix.len() != expected {
+            return Err(TensorError::DataLength {
+                expected,
+                got: matrix.len(),
+            });
+        }
+        let mut output = Tensor::zeros(batch, self.out_channels * spatial)?;
+        let output_cols = output.shape().1;
+        {
+            let output_data = output.data_mut();
+            for b in 0..batch {
+                let output_row = &mut output_data[b * output_cols..(b + 1) * output_cols];
+                for spatial_idx in 0..spatial {
+                    let matrix_offset = (b * spatial + spatial_idx) * self.out_channels;
+                    for oc in 0..self.out_channels {
+                        output_row[oc * spatial + spatial_idx] = matrix[matrix_offset + oc];
                     }
                 }
             }
@@ -1198,6 +1377,9 @@ impl Module for Conv3d {
                 right: (batch, self.out_channels * output_volume),
             });
         }
+        if batch == 0 {
+            return Tensor::zeros(batch, cols);
+        }
         let kernel_volume = self.kernel_volume()?;
         let span = self.in_channels * kernel_volume;
         let mut grad_weight = Tensor::zeros(self.out_channels, span)?;
@@ -1356,11 +1538,20 @@ impl Module for Conv3d {
             }
         }
         let inv_batch = 1.0 / batch as f32;
-        for value in grad_weight.data_mut() {
-            *value *= inv_batch;
-        }
-        let mut bias_tensor = Tensor::from_vec(1, self.out_channels, grad_bias)?;
-        bias_tensor = bias_tensor.scale(inv_batch)?;
+        let tensor_util_backend = current_tensor_util_backend_for_values(grad_weight.data().len());
+        let grad_weight = if matches!(tensor_util_backend, TensorUtilBackend::GpuWgpu) {
+            grad_weight.scale_with_backend(inv_batch, tensor_util_backend)?
+        } else {
+            for value in grad_weight.data_mut() {
+                *value *= inv_batch;
+            }
+            grad_weight
+        };
+        let bias_tensor = Tensor::from_vec(1, self.out_channels, grad_bias)?;
+        let bias_tensor = bias_tensor.scale_with_backend(
+            inv_batch,
+            current_tensor_util_backend_for_values(bias_tensor.data().len()),
+        )?;
         self.weight.accumulate_euclidean(&grad_weight)?;
         self.bias.accumulate_euclidean(&bias_tensor)?;
         Ok(grad_input)
@@ -1808,6 +1999,9 @@ impl Module for Conv4d {
                 right: (batch, self.out_channels * output_volume),
             });
         }
+        if batch == 0 {
+            return Tensor::zeros(batch, cols);
+        }
         let kernel_volume = self.kernel_volume()?;
         let span = self.in_channels * kernel_volume;
         let mut grad_weight = Tensor::zeros(self.out_channels, span)?;
@@ -2006,11 +2200,20 @@ impl Module for Conv4d {
             }
         }
         let inv_batch = 1.0 / batch as f32;
-        for value in grad_weight.data_mut() {
-            *value *= inv_batch;
-        }
-        let mut bias_tensor = Tensor::from_vec(1, self.out_channels, grad_bias)?;
-        bias_tensor = bias_tensor.scale(inv_batch)?;
+        let tensor_util_backend = current_tensor_util_backend_for_values(grad_weight.data().len());
+        let grad_weight = if matches!(tensor_util_backend, TensorUtilBackend::GpuWgpu) {
+            grad_weight.scale_with_backend(inv_batch, tensor_util_backend)?
+        } else {
+            for value in grad_weight.data_mut() {
+                *value *= inv_batch;
+            }
+            grad_weight
+        };
+        let bias_tensor = Tensor::from_vec(1, self.out_channels, grad_bias)?;
+        let bias_tensor = bias_tensor.scale_with_backend(
+            inv_batch,
+            current_tensor_util_backend_for_values(bias_tensor.data().len()),
+        )?;
         self.weight.accumulate_euclidean(&grad_weight)?;
         self.bias.accumulate_euclidean(&bias_tensor)?;
         Ok(grad_input)
@@ -2258,6 +2461,9 @@ impl Module for Conv6da {
                 right: (batch, self.out_channels * volume),
             });
         }
+        if batch == 0 {
+            return Tensor::zeros(batch, cols);
+        }
         let mut grad_weight = vec![0.0f32; self.out_channels * span];
         let mut grad_bias = vec![0.0f32; self.out_channels];
         let mut grad_input = Tensor::zeros(batch, cols)?;
@@ -2316,8 +2522,15 @@ impl Module for Conv6da {
         debug_assert!(input_rows.remainder().is_empty());
         debug_assert!(grad_rows.remainder().is_empty());
         debug_assert!(grad_input_rows.into_remainder().is_empty());
-        let grad_weight_tensor = Tensor::from_vec(self.out_channels, span, grad_weight)?;
-        let grad_bias_tensor = Tensor::from_vec(1, self.out_channels, grad_bias)?;
+        let inv_batch = 1.0 / batch as f32;
+        let tensor_util_backend = current_tensor_util_backend_for_values(grad_weight.len());
+        let grad_weight_tensor = Tensor::from_vec(self.out_channels, span, grad_weight)?
+            .scale_with_backend(inv_batch, tensor_util_backend)?;
+        let grad_bias_tensor = Tensor::from_vec(1, self.out_channels, grad_bias)?
+            .scale_with_backend(
+                inv_batch,
+                current_tensor_util_backend_for_values(self.out_channels),
+            )?;
         self.weight.accumulate_euclidean(&grad_weight_tensor)?;
         self.bias.accumulate_euclidean(&grad_bias_tensor)?;
         Ok(grad_input)
@@ -2378,9 +2591,11 @@ impl Conv2d {
                 })
             }
         };
-        contracted.add_row_inplace(bias.data())?;
-        let spatial = oh * ow;
-        contracted.reshape(batch, self.out_channels * spatial)
+        contracted.add_row_inplace_with_backend(
+            bias.data(),
+            current_tensor_util_backend_for_values(contracted.data().len()),
+        )?;
+        self.output_matrix_to_feature_tensor(contracted.data(), batch, oh, ow)
     }
 
     #[cfg(feature = "wgpu")]
@@ -2449,7 +2664,7 @@ impl Conv2d {
             Ok(buffer) => buffer,
             Err(_) => return Ok(None),
         };
-        match Tensor::from_vec(batch, self.out_channels * oh * ow, buffer) {
+        match self.output_matrix_to_feature_tensor(&buffer, batch, oh, ow) {
             Ok(tensor) => Ok(Some(tensor)),
             Err(_) => Ok(None),
         }
@@ -2593,6 +2808,63 @@ impl Module for MaxPool2d {
             });
         }
         let (oh, ow) = self.output_hw()?;
+        let output_values = batch
+            .saturating_mul(self.channels)
+            .saturating_mul(oh)
+            .saturating_mul(ow);
+        let route_backend = current_tensor_util_backend_for_values(output_values);
+        let requested_backend = tensor_util_backend_label(route_backend);
+        #[cfg(feature = "wgpu")]
+        let mut wgpu_failure: Option<String> = None;
+
+        #[cfg(feature = "wgpu")]
+        {
+            if matches!(route_backend, TensorUtilBackend::GpuWgpu) && wgpu_dense::is_available() {
+                match wgpu_dense::max_pool2d_forward(
+                    input.data(),
+                    batch,
+                    self.channels,
+                    self.input_hw.0,
+                    self.input_hw.1,
+                    oh,
+                    ow,
+                    self.kernel.0,
+                    self.kernel.1,
+                    self.stride.0,
+                    self.stride.1,
+                    self.padding.0,
+                    self.padding.1,
+                ) {
+                    Ok((values, wgpu_indices)) => {
+                        let output = Tensor::from_vec(batch, self.channels * oh * ow, values)?;
+                        let mut indices = self.last_indices.borrow_mut();
+                        indices.clear();
+                        indices.extend_from_slice(&wgpu_indices);
+                        emit_pool2d_meta(
+                            "max_pool2d_forward",
+                            "max_pool2d_forward",
+                            batch,
+                            self.channels,
+                            self.input_hw,
+                            (oh, ow),
+                            self.kernel,
+                            self.stride,
+                            self.padding,
+                            false,
+                            "wgpu_dense",
+                            requested_backend,
+                            "pool2d.max_forward_wgpu",
+                            None,
+                        );
+                        return Ok(output);
+                    }
+                    Err(message) => {
+                        wgpu_failure = Some(message);
+                    }
+                }
+            }
+        }
+
         let mut out = Tensor::zeros(batch, self.channels * oh * ow)?;
         let mut indices = self.last_indices.borrow_mut();
         indices.clear();
@@ -2639,10 +2911,35 @@ impl Module for MaxPool2d {
                 }
             }
         }
+        emit_pool2d_meta(
+            "max_pool2d_forward",
+            "max_pool2d_forward",
+            batch,
+            self.channels,
+            self.input_hw,
+            (oh, ow),
+            self.kernel,
+            self.stride,
+            self.padding,
+            false,
+            "cpu",
+            requested_backend,
+            "pool2d.scalar",
+            {
+                #[cfg(feature = "wgpu")]
+                {
+                    wgpu_failure.as_deref()
+                }
+                #[cfg(not(feature = "wgpu"))]
+                {
+                    None
+                }
+            },
+        );
         Ok(out)
     }
 
-    fn backward(&mut self, _input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
         let (batch, cols) = grad_output.shape();
         let (oh, ow) = self.output_hw()?;
         if cols != self.channels * oh * ow {
@@ -2651,6 +2948,68 @@ impl Module for MaxPool2d {
                 right: (1, self.channels * oh * ow),
             });
         }
+        let expected_input_cols = self.channels * self.input_hw.0 * self.input_hw.1;
+        if input.shape() != (batch, expected_input_cols) {
+            return Err(TensorError::ShapeMismatch {
+                left: input.shape(),
+                right: (batch, expected_input_cols),
+            });
+        }
+        let route_backend = current_tensor_util_backend_for_values(grad_output.data().len());
+        let requested_backend = tensor_util_backend_label(route_backend);
+        #[cfg(feature = "wgpu")]
+        let mut wgpu_failure: Option<String> = None;
+
+        #[cfg(feature = "wgpu")]
+        {
+            if matches!(route_backend, TensorUtilBackend::GpuWgpu) && wgpu_dense::is_available() {
+                match wgpu_dense::max_pool2d_backward(
+                    input.data(),
+                    grad_output.data(),
+                    batch,
+                    self.channels,
+                    self.input_hw.0,
+                    self.input_hw.1,
+                    oh,
+                    ow,
+                    self.kernel.0,
+                    self.kernel.1,
+                    self.stride.0,
+                    self.stride.1,
+                    self.padding.0,
+                    self.padding.1,
+                ) {
+                    Ok(values) => {
+                        let output = Tensor::from_vec(
+                            batch,
+                            self.channels * self.input_hw.0 * self.input_hw.1,
+                            values,
+                        )?;
+                        emit_pool2d_meta(
+                            "max_pool2d_backward",
+                            "max_pool2d_backward_argmax_scatter",
+                            batch,
+                            self.channels,
+                            self.input_hw,
+                            (oh, ow),
+                            self.kernel,
+                            self.stride,
+                            self.padding,
+                            true,
+                            "wgpu_dense",
+                            requested_backend,
+                            "pool2d.max_backward_wgpu",
+                            None,
+                        );
+                        return Ok(output);
+                    }
+                    Err(message) => {
+                        wgpu_failure = Some(message);
+                    }
+                }
+            }
+        }
+
         let mut grad_input =
             Tensor::zeros(batch, self.channels * self.input_hw.0 * self.input_hw.1)?;
         let indices = self.last_indices.borrow();
@@ -2667,6 +3026,31 @@ impl Module for MaxPool2d {
                 }
             }
         }
+        emit_pool2d_meta(
+            "max_pool2d_backward",
+            "max_pool2d_backward_argmax_scatter",
+            batch,
+            self.channels,
+            self.input_hw,
+            (oh, ow),
+            self.kernel,
+            self.stride,
+            self.padding,
+            true,
+            "cpu",
+            requested_backend,
+            "pool2d.scalar",
+            {
+                #[cfg(feature = "wgpu")]
+                {
+                    wgpu_failure.as_deref()
+                }
+                #[cfg(not(feature = "wgpu"))]
+                {
+                    None
+                }
+            },
+        );
         Ok(grad_input)
     }
 
@@ -2746,6 +3130,60 @@ impl Module for AvgPool2d {
             });
         }
         let (oh, ow) = self.output_hw()?;
+        let output_values = batch
+            .saturating_mul(self.channels)
+            .saturating_mul(oh)
+            .saturating_mul(ow);
+        let route_backend = current_tensor_util_backend_for_values(output_values);
+        let requested_backend = tensor_util_backend_label(route_backend);
+        #[cfg(feature = "wgpu")]
+        let mut wgpu_failure: Option<String> = None;
+
+        #[cfg(feature = "wgpu")]
+        {
+            if matches!(route_backend, TensorUtilBackend::GpuWgpu) && wgpu_dense::is_available() {
+                match wgpu_dense::avg_pool2d_forward(
+                    input.data(),
+                    batch,
+                    self.channels,
+                    self.input_hw.0,
+                    self.input_hw.1,
+                    oh,
+                    ow,
+                    self.kernel.0,
+                    self.kernel.1,
+                    self.stride.0,
+                    self.stride.1,
+                    self.padding.0,
+                    self.padding.1,
+                ) {
+                    Ok(values) => {
+                        let output = Tensor::from_vec(batch, self.channels * oh * ow, values)?;
+                        emit_pool2d_meta(
+                            "avg_pool2d_forward",
+                            "avg_pool2d_forward",
+                            batch,
+                            self.channels,
+                            self.input_hw,
+                            (oh, ow),
+                            self.kernel,
+                            self.stride,
+                            self.padding,
+                            false,
+                            "wgpu_dense",
+                            requested_backend,
+                            "pool2d.avg_forward_wgpu",
+                            None,
+                        );
+                        return Ok(output);
+                    }
+                    Err(message) => {
+                        wgpu_failure = Some(message);
+                    }
+                }
+            }
+        }
+
         let mut out = Tensor::zeros(batch, self.channels * oh * ow)?;
         let (h, w) = self.input_hw;
         let area = (self.kernel.0 * self.kernel.1) as f32;
@@ -2783,10 +3221,35 @@ impl Module for AvgPool2d {
                 }
             }
         }
+        emit_pool2d_meta(
+            "avg_pool2d_forward",
+            "avg_pool2d_forward",
+            batch,
+            self.channels,
+            self.input_hw,
+            (oh, ow),
+            self.kernel,
+            self.stride,
+            self.padding,
+            false,
+            "cpu",
+            requested_backend,
+            "pool2d.scalar",
+            {
+                #[cfg(feature = "wgpu")]
+                {
+                    wgpu_failure.as_deref()
+                }
+                #[cfg(not(feature = "wgpu"))]
+                {
+                    None
+                }
+            },
+        );
         Ok(out)
     }
 
-    fn backward(&mut self, _input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
         let (batch, cols) = grad_output.shape();
         let (oh, ow) = self.output_hw()?;
         if cols != self.channels * oh * ow {
@@ -2795,6 +3258,64 @@ impl Module for AvgPool2d {
                 right: (1, self.channels * oh * ow),
             });
         }
+        let expected_input_cols = self.channels * self.input_hw.0 * self.input_hw.1;
+        if input.shape() != (batch, expected_input_cols) {
+            return Err(TensorError::ShapeMismatch {
+                left: input.shape(),
+                right: (batch, expected_input_cols),
+            });
+        }
+        let route_backend = current_tensor_util_backend_for_values(input.data().len());
+        let requested_backend = tensor_util_backend_label(route_backend);
+        #[cfg(feature = "wgpu")]
+        let mut wgpu_failure: Option<String> = None;
+
+        #[cfg(feature = "wgpu")]
+        {
+            if matches!(route_backend, TensorUtilBackend::GpuWgpu) && wgpu_dense::is_available() {
+                match wgpu_dense::avg_pool2d_backward(
+                    input.data(),
+                    grad_output.data(),
+                    batch,
+                    self.channels,
+                    self.input_hw.0,
+                    self.input_hw.1,
+                    oh,
+                    ow,
+                    self.kernel.0,
+                    self.kernel.1,
+                    self.stride.0,
+                    self.stride.1,
+                    self.padding.0,
+                    self.padding.1,
+                ) {
+                    Ok(values) => {
+                        let output = Tensor::from_vec(batch, expected_input_cols, values)?;
+                        emit_pool2d_meta(
+                            "avg_pool2d_backward",
+                            "avg_pool2d_backward_scatter",
+                            batch,
+                            self.channels,
+                            self.input_hw,
+                            (oh, ow),
+                            self.kernel,
+                            self.stride,
+                            self.padding,
+                            true,
+                            "wgpu_dense",
+                            requested_backend,
+                            "pool2d.avg_backward_wgpu",
+                            None,
+                        );
+                        return Ok(output);
+                    }
+                    Err(message) => {
+                        wgpu_failure = Some(message);
+                    }
+                }
+            }
+        }
+
         let mut grad_input =
             Tensor::zeros(batch, self.channels * self.input_hw.0 * self.input_hw.1)?;
         let (h, w) = self.input_hw;
@@ -2832,6 +3353,31 @@ impl Module for AvgPool2d {
                 }
             }
         }
+        emit_pool2d_meta(
+            "avg_pool2d_backward",
+            "avg_pool2d_backward_scatter",
+            batch,
+            self.channels,
+            self.input_hw,
+            (oh, ow),
+            self.kernel,
+            self.stride,
+            self.padding,
+            true,
+            "cpu",
+            requested_backend,
+            "pool2d.scalar",
+            {
+                #[cfg(feature = "wgpu")]
+                {
+                    wgpu_failure.as_deref()
+                }
+                #[cfg(not(feature = "wgpu"))]
+                {
+                    None
+                }
+            },
+        );
         Ok(grad_input)
     }
 
@@ -2855,6 +3401,12 @@ mod tests {
     use super::*;
     #[cfg(feature = "wgpu")]
     use st_tensor::backend::wgpu_dense;
+    use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+
+    fn observer_lock() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
 
     #[test]
     fn conv3d_forward_matches_manual_sum() {
@@ -2912,6 +3464,31 @@ mod tests {
     }
 
     #[test]
+    fn conv3d_empty_batch_backward_returns_empty_grad_without_updates() {
+        let mut conv = Conv3d::new(
+            "conv3",
+            1,
+            1,
+            (1, 1, 1),
+            (1, 1, 1),
+            (0, 0, 0),
+            (1, 1, 1),
+            (2, 2, 2),
+        )
+        .unwrap();
+        let input = Tensor::from_vec(0, 8, Vec::new()).unwrap();
+        let output = conv.forward(&input).unwrap();
+        assert_eq!(output.shape(), (0, 8));
+
+        let grad_output = Tensor::from_vec(0, 8, Vec::new()).unwrap();
+        let grad_input = conv.backward(&input, &grad_output).unwrap();
+        assert_eq!(grad_input.shape(), input.shape());
+        assert!(grad_input.data().is_empty());
+        assert!(conv.weight.gradient().is_none());
+        assert!(conv.bias.gradient().is_none());
+    }
+
+    #[test]
     fn conv4d_forward_preserves_identity_with_unit_kernel() {
         let mut conv = Conv4d::new(
             "conv4",
@@ -2961,6 +3538,31 @@ mod tests {
         assert!((weight_grad.data()[0] - 6.0).abs() < 1e-6);
         let bias_grad = conv.bias.gradient().unwrap();
         assert!((bias_grad.data()[0] - 12.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn conv4d_empty_batch_backward_returns_empty_grad_without_updates() {
+        let mut conv = Conv4d::new(
+            "conv4",
+            1,
+            1,
+            (1, 1, 1, 1),
+            (1, 1, 1, 1),
+            (0, 0, 0, 0),
+            (1, 1, 1, 1),
+            (1, 1, 1, 2),
+        )
+        .unwrap();
+        let input = Tensor::from_vec(0, 2, Vec::new()).unwrap();
+        let output = conv.forward(&input).unwrap();
+        assert_eq!(output.shape(), (0, 2));
+
+        let grad_output = Tensor::from_vec(0, 2, Vec::new()).unwrap();
+        let grad_input = conv.backward(&input, &grad_output).unwrap();
+        assert_eq!(grad_input.shape(), input.shape());
+        assert!(grad_input.data().is_empty());
+        assert!(conv.weight.gradient().is_none());
+        assert!(conv.bias.gradient().is_none());
     }
 
     #[test]
@@ -3051,6 +3653,77 @@ mod tests {
     }
 
     #[test]
+    fn conv6da_parameter_gradients_are_batch_normalized() {
+        let mut single = Conv6da::new("conv6", 1, 1, (1, 2, 2), 24, 0.0).unwrap();
+        for value in single.weight.value_mut().data_mut() {
+            *value = 1.0;
+        }
+        single.bias.value_mut().data_mut()[0] = 0.0;
+        let input_single = Tensor::from_vec(1, 4, vec![1.0, 2.0, 3.0, 4.0]).unwrap();
+        let grad_single = Tensor::from_vec(1, 4, vec![0.5, -0.25, 0.75, -0.5]).unwrap();
+        let _ = single.backward(&input_single, &grad_single).unwrap();
+
+        let mut repeated = Conv6da::new("conv6", 1, 1, (1, 2, 2), 24, 0.0).unwrap();
+        for value in repeated.weight.value_mut().data_mut() {
+            *value = 1.0;
+        }
+        repeated.bias.value_mut().data_mut()[0] = 0.0;
+        let input_repeated =
+            Tensor::from_vec(2, 4, vec![1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0]).unwrap();
+        let grad_repeated =
+            Tensor::from_vec(2, 4, vec![0.5, -0.25, 0.75, -0.5, 0.5, -0.25, 0.75, -0.5]).unwrap();
+        let _ = repeated.backward(&input_repeated, &grad_repeated).unwrap();
+
+        let single_weight = single.weight.gradient().expect("single weight gradient");
+        let repeated_weight = repeated
+            .weight
+            .gradient()
+            .expect("repeated weight gradient");
+        let single_bias = single.bias.gradient().expect("single bias gradient");
+        let repeated_bias = repeated.bias.gradient().expect("repeated bias gradient");
+
+        for (idx, (&single_value, &repeated_value)) in single_weight
+            .data()
+            .iter()
+            .zip(repeated_weight.data().iter())
+            .enumerate()
+        {
+            let delta = (single_value - repeated_value).abs();
+            assert!(
+                delta <= 1.0e-6,
+                "weight gradient mismatch at {idx}: single={single_value} repeated={repeated_value} delta={delta}"
+            );
+        }
+        for (idx, (&single_value, &repeated_value)) in single_bias
+            .data()
+            .iter()
+            .zip(repeated_bias.data().iter())
+            .enumerate()
+        {
+            let delta = (single_value - repeated_value).abs();
+            assert!(
+                delta <= 1.0e-6,
+                "bias gradient mismatch at {idx}: single={single_value} repeated={repeated_value} delta={delta}"
+            );
+        }
+    }
+
+    #[test]
+    fn conv6da_empty_batch_backward_returns_empty_grad_without_updates() {
+        let mut conv = Conv6da::new("conv6", 1, 1, (1, 1, 1), 24, 1.0).unwrap();
+        let input = Tensor::from_vec(0, 1, Vec::new()).unwrap();
+        let output = conv.forward(&input).unwrap();
+        assert_eq!(output.shape(), (0, 1));
+
+        let grad_output = Tensor::from_vec(0, 1, Vec::new()).unwrap();
+        let grad_input = conv.backward(&input, &grad_output).unwrap();
+        assert_eq!(grad_input.shape(), input.shape());
+        assert!(grad_input.data().is_empty());
+        assert!(conv.weight.gradient().is_none());
+        assert!(conv.bias.gradient().is_none());
+    }
+
+    #[test]
     fn conv6da_accepts_custom_neighbors() {
         let offsets = [(0, 0, 0), (0, 1, 0)];
         let mut conv =
@@ -3093,6 +3766,98 @@ mod tests {
 
     #[cfg(feature = "wgpu")]
     #[test]
+    fn conv1d_forward_forced_wgpu_im2col_matches_cpu_reference_on_edge_tiles() {
+        use crate::execution::{push_backend_policy, BackendPolicy};
+        use st_core::backend::device_caps::{BackendKind, DeviceCaps};
+        use st_tensor::{AttentionBackend, LayerNormBackend, MatmulBackend, SoftmaxBackend};
+
+        let mut conv = Conv1d::new("conv_edge", 2, 5, 3, 2, 1, 1).unwrap();
+        for (idx, value) in conv.weight.value_mut().data_mut().iter_mut().enumerate() {
+            *value = ((idx as f32 * 0.151).sin() * 0.35) + ((idx % 4) as f32 * 0.017);
+        }
+        for (idx, value) in conv.bias.value_mut().data_mut().iter_mut().enumerate() {
+            *value = idx as f32 * 0.025 - 0.04;
+        }
+        let input = Tensor::from_fn(17, 2 * 17, |row, col| {
+            ((row * 37 + col * 11) % 31) as f32 * 0.021 - 0.18
+        })
+        .unwrap();
+        let cpu_policy = BackendPolicy::explicit(
+            DeviceCaps::cpu(),
+            MatmulBackend::CpuNaive,
+            MatmulBackend::CpuNaive,
+            LayerNormBackend::Cpu,
+            AttentionBackend::Cpu,
+            SoftmaxBackend::Cpu,
+        );
+        let wgpu_policy = BackendPolicy::explicit(
+            BackendKind::Wgpu.default_caps(),
+            MatmulBackend::GpuWgpu,
+            MatmulBackend::GpuWgpu,
+            LayerNormBackend::Cpu,
+            AttentionBackend::Cpu,
+            SoftmaxBackend::Cpu,
+        );
+        let cpu = {
+            let _guard = push_backend_policy(cpu_policy);
+            conv.forward(&input).unwrap()
+        };
+        let wgpu = {
+            let _guard = push_backend_policy(wgpu_policy);
+            match conv.forward(&input) {
+                Ok(value) => value,
+                Err(TensorError::BackendFailure { backend, .. }) if backend == "wgpu" => return,
+                Err(error) => panic!("forced WGPU Conv1d::forward failed: {error:?}"),
+            }
+        };
+
+        assert_eq!(cpu.shape(), wgpu.shape());
+        for (idx, (&left, &right)) in cpu.data().iter().zip(wgpu.data().iter()).enumerate() {
+            let delta = (left - right).abs();
+            assert!(
+                delta <= 1e-4,
+                "conv1d forward mismatch at {idx}: cpu={left} wgpu={right} delta={delta}"
+            );
+        }
+    }
+
+    #[test]
+    fn conv1d_empty_batch_backward_returns_empty_grad_without_updates() {
+        let mut conv = Conv1d::new("conv", 1, 1, 3, 1, 1, 1).unwrap();
+        let input = Tensor::from_vec(0, 5, Vec::new()).unwrap();
+        let output = conv.forward(&input).unwrap();
+        assert_eq!(output.shape(), (0, 5));
+
+        let grad_output = Tensor::from_vec(0, 5, Vec::new()).unwrap();
+        let grad_input = conv.backward(&input, &grad_output).unwrap();
+        assert_eq!(grad_input.shape(), input.shape());
+        assert!(grad_input.data().is_empty());
+        assert!(conv.weight.gradient().is_none());
+        assert!(conv.bias.gradient().is_none());
+    }
+
+    #[test]
+    fn conv2d_forward_uses_channel_major_layout() {
+        let mut conv =
+            Conv2d::new("conv_layout", 1, 2, (1, 1), (1, 1), (0, 0), (1, 1), (2, 2)).unwrap();
+        conv.weight
+            .value_mut()
+            .data_mut()
+            .copy_from_slice(&[1.0, 10.0]);
+        conv.bias
+            .value_mut()
+            .data_mut()
+            .copy_from_slice(&[0.0, 0.0]);
+        let input = Tensor::from_vec(1, 4, vec![1.0, 2.0, 3.0, 4.0]).unwrap();
+
+        let output = conv.forward(&input).unwrap();
+
+        assert_eq!(output.shape(), (1, 8));
+        assert_eq!(output.data(), &[1.0, 2.0, 3.0, 4.0, 10.0, 20.0, 30.0, 40.0]);
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
     fn conv2d_wgpu_matches_cpu_path() {
         if !wgpu_dense::is_available() {
             return;
@@ -3121,6 +3886,87 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn conv2d_wgpu_fused_im2col_and_grad_input_match_cpu_on_edge_tiles() {
+        if !wgpu_dense::is_available() {
+            return;
+        }
+        let mut conv = Conv2d::new(
+            "conv_edge_gpu",
+            2,
+            5,
+            (3, 2),
+            (1, 2),
+            (1, 1),
+            (1, 1),
+            (7, 5),
+        )
+        .unwrap();
+        for (idx, value) in conv.weight.value_mut().data_mut().iter_mut().enumerate() {
+            *value = ((idx as f32 * 0.137).sin() * 0.4) - ((idx % 3) as f32 * 0.02);
+        }
+        for (idx, value) in conv.bias.value_mut().data_mut().iter_mut().enumerate() {
+            *value = idx as f32 * 0.037 - 0.05;
+        }
+
+        let batch = 4;
+        let input = Tensor::from_fn(batch, 2 * 7 * 5, |row, col| {
+            ((row * 41 + col * 17) % 29) as f32 * 0.031 - 0.2
+        })
+        .unwrap();
+        let (oh, ow) = conv.output_hw().unwrap();
+
+        let cpu_forward = conv.forward_cpu(&input, batch, oh, ow).unwrap();
+        let wgpu_forward = conv
+            .try_forward_wgpu(&input, batch, oh, ow)
+            .unwrap()
+            .unwrap_or_else(|| panic!("wgpu fused im2col path unexpectedly unavailable"));
+        assert_eq!(cpu_forward.shape(), wgpu_forward.shape());
+        for (idx, (&cpu, &gpu)) in cpu_forward
+            .data()
+            .iter()
+            .zip(wgpu_forward.data().iter())
+            .enumerate()
+        {
+            let delta = (cpu - gpu).abs();
+            assert!(
+                delta < 1e-4,
+                "conv2d forward mismatch at {idx}: cpu={cpu} gpu={gpu} delta={delta}"
+            );
+        }
+
+        let grad_output = Tensor::from_fn(batch, 5 * oh * ow, |row, col| {
+            ((row * 23 + col * 19) % 31) as f32 * 0.013 - 0.12
+        })
+        .unwrap();
+        let grad_matrix = conv
+            .grad_output_to_matrix(&grad_output, batch, oh, ow)
+            .unwrap();
+        let pack = conv.weight.ensure_matmul_pack().unwrap();
+        let grad_patches = grad_matrix
+            .matmul_prepacked_with_backend(&pack, st_tensor::MatmulBackend::CpuNaive)
+            .unwrap();
+        let cpu_grad_input = conv.col2im(&grad_patches, batch, oh, ow).unwrap();
+        let wgpu_grad_input = conv
+            .try_grad_input_wgpu(&grad_matrix, batch, oh, ow)
+            .unwrap()
+            .unwrap_or_else(|| panic!("wgpu fused grad-input path unexpectedly unavailable"));
+        assert_eq!(cpu_grad_input.shape(), wgpu_grad_input.shape());
+        for (idx, (&cpu, &gpu)) in cpu_grad_input
+            .data()
+            .iter()
+            .zip(wgpu_grad_input.data().iter())
+            .enumerate()
+        {
+            let delta = (cpu - gpu).abs();
+            assert!(
+                delta < 1e-4,
+                "conv2d grad-input mismatch at {idx}: cpu={cpu} gpu={gpu} delta={delta}"
+            );
+        }
+    }
+
     #[test]
     fn max_pool_tracks_indices() {
         let pool = MaxPool2d::new(1, (2, 2), (2, 2), (0, 0), (2, 2)).unwrap();
@@ -3139,6 +3985,141 @@ mod tests {
         assert_eq!(grad_input.data(), &[0.0, 0.0, 0.0, 2.5]);
     }
 
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn avg_pool2d_forced_wgpu_matches_cpu_reference() {
+        use crate::execution::{push_backend_policy, BackendPolicy};
+        use st_core::backend::device_caps::DeviceCaps;
+
+        if !wgpu_dense::is_available() {
+            return;
+        }
+        let _lock = observer_lock();
+        let previous_threshold = std::env::var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES").ok();
+        std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", "1");
+
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let input = Tensor::from_fn(2, 2 * 4 * 5, |row, col| {
+            ((row * 43 + col * 17) % 31) as f32 * 0.037 - 0.42
+        })
+        .unwrap();
+        let cpu_policy = BackendPolicy::from_device_caps(DeviceCaps::cpu());
+        let mut cpu_pool = AvgPool2d::new(2, (2, 3), (1, 2), (1, 1), (4, 5)).unwrap();
+        let cpu_forward = {
+            let _guard = push_backend_policy(cpu_policy);
+            cpu_pool.forward(&input).unwrap()
+        };
+        let grad_output =
+            Tensor::from_fn(cpu_forward.shape().0, cpu_forward.shape().1, |row, col| {
+                ((row * 29 + col * 13) % 19) as f32 * 0.021 - 0.18
+            })
+            .unwrap();
+        let cpu_grad_input = {
+            let _guard = push_backend_policy(cpu_policy);
+            cpu_pool.backward(&input, &grad_output).unwrap()
+        };
+
+        let wgpu_policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
+        let mut wgpu_pool = AvgPool2d::new(2, (2, 3), (1, 2), (1, 1), (4, 5)).unwrap();
+        let (wgpu_forward, wgpu_grad_input) = {
+            let _guard = push_backend_policy(wgpu_policy);
+            (
+                wgpu_pool.forward(&input).unwrap(),
+                wgpu_pool.backward(&input, &grad_output).unwrap(),
+            )
+        };
+
+        st_tensor::set_tensor_op_meta_observer(previous);
+        match previous_threshold {
+            Some(value) => std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", value),
+            None => std::env::remove_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES"),
+        }
+
+        assert_eq!(cpu_forward.shape(), wgpu_forward.shape());
+        for (idx, (&cpu, &wgpu)) in cpu_forward
+            .data()
+            .iter()
+            .zip(wgpu_forward.data().iter())
+            .enumerate()
+        {
+            let delta = (cpu - wgpu).abs();
+            assert!(
+                delta <= 1e-6,
+                "avg-pool forward mismatch at {idx}: cpu={cpu} wgpu={wgpu} delta={delta}"
+            );
+        }
+        assert_eq!(cpu_grad_input.shape(), wgpu_grad_input.shape());
+        for (idx, (&cpu, &wgpu)) in cpu_grad_input
+            .data()
+            .iter()
+            .zip(wgpu_grad_input.data().iter())
+            .enumerate()
+        {
+            let delta = (cpu - wgpu).abs();
+            assert!(
+                delta <= 1e-6,
+                "avg-pool backward mismatch at {idx}: cpu={cpu} wgpu={wgpu} delta={delta}"
+            );
+        }
+
+        let events = events.lock().unwrap();
+        assert!(events.iter().any(|(op_name, data)| {
+            *op_name == "avg_pool2d_forward" && data["backend"] == "wgpu_dense"
+        }));
+        assert!(events.iter().any(|(op_name, data)| {
+            *op_name == "avg_pool2d_backward" && data["backend"] == "wgpu_dense"
+        }));
+    }
+
+    #[test]
+    fn pool2d_forward_backward_emit_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let mut max_pool = MaxPool2d::new(1, (2, 2), (2, 2), (0, 0), (2, 2)).unwrap();
+        let input = Tensor::from_vec(1, 4, vec![1.0, 2.0, 3.0, 4.0]).unwrap();
+        let max_out = max_pool.forward(&input).unwrap();
+        let _ = max_pool.backward(&input, &max_out).unwrap();
+
+        let mut avg_pool = AvgPool2d::new(1, (2, 2), (2, 2), (0, 0), (2, 2)).unwrap();
+        let avg_out = avg_pool.forward(&input).unwrap();
+        let _ = avg_pool.backward(&input, &avg_out).unwrap();
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        let events = events.lock().unwrap();
+        for (op_name, kind) in [
+            ("max_pool2d_forward", "max_pool2d_forward"),
+            ("max_pool2d_backward", "max_pool2d_backward_argmax_scatter"),
+            ("avg_pool2d_forward", "avg_pool2d_forward"),
+            ("avg_pool2d_backward", "avg_pool2d_backward_scatter"),
+        ] {
+            let event = events
+                .iter()
+                .find(|(name, data)| *name == op_name && data["kind"] == kind)
+                .unwrap_or_else(|| panic!("{op_name} metadata event"));
+            assert_eq!(event.1["backend"], "cpu");
+            assert_eq!(event.1["batch"], 1);
+            assert_eq!(event.1["channels"], 1);
+            assert_eq!(event.1["window_values"], 4);
+            assert_eq!(event.1["output_values"], 1);
+        }
+    }
+
     #[test]
     fn conv2d_backward_matches_manual_kernel11() {
         let mut conv = Conv2d::new("conv", 1, 1, (1, 1), (1, 1), (0, 0), (1, 1), (2, 2)).unwrap();
@@ -3155,6 +4136,21 @@ mod tests {
         assert!((weight_grad.data()[0] - 10.0).abs() < 1e-6);
         let bias_grad = conv.bias.gradient().unwrap();
         assert!((bias_grad.data()[0] - 4.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn conv2d_empty_batch_backward_returns_empty_grad_without_updates() {
+        let mut conv = Conv2d::new("conv", 1, 1, (1, 1), (1, 1), (0, 0), (1, 1), (2, 2)).unwrap();
+        let input = Tensor::from_vec(0, 4, Vec::new()).unwrap();
+        let output = conv.forward(&input).unwrap();
+        assert_eq!(output.shape(), (0, 4));
+
+        let grad_output = Tensor::from_vec(0, 4, Vec::new()).unwrap();
+        let grad_input = conv.backward(&input, &grad_output).unwrap();
+        assert_eq!(grad_input.shape(), input.shape());
+        assert!(grad_input.data().is_empty());
+        assert!(conv.weight.gradient().is_none());
+        assert!(conv.bias.gradient().is_none());
     }
 
     #[test]

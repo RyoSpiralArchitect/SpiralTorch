@@ -142,10 +142,7 @@ impl fmt::Display for TensorError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             TensorError::InvalidDimensions { rows, cols } => {
-                write!(
-                    f,
-                    "invalid tensor dimensions ({rows} x {cols}); both axes must be non-zero"
-                )
+                write!(f, "invalid tensor dimensions ({rows} x {cols})")
             }
             TensorError::DataLength { expected, got } => {
                 write!(f, "data length mismatch: expected {expected}, got {got}")
@@ -311,6 +308,60 @@ impl fmt::Display for MatmulBackend {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str((*self).label())
     }
+}
+
+#[cfg(any(feature = "wgpu", feature = "hip", test))]
+fn strict_gpu_path() -> bool {
+    std::env::var("SPIRALTORCH_STRICT_GPU")
+        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE"))
+        .unwrap_or(false)
+}
+
+#[cfg(any(feature = "wgpu", feature = "hip"))]
+fn strict_gpu_fallback_error(
+    backend: &'static str,
+    op: &'static str,
+    message: String,
+) -> TensorError {
+    TensorError::BackendFailure {
+        backend,
+        message: format!("{op} {backend} path failed ({message}); fallback disabled"),
+    }
+}
+
+#[cfg(feature = "wgpu")]
+fn wgpu_runtime_unavailable(message: &str) -> bool {
+    message.contains("no suitable WGPU adapter")
+        || message.contains("failed to initialize WGPU")
+        || message.contains("WGPU backend not available")
+}
+
+const WGPU_RUNTIME_FALLBACK_REASON: &str = "runtime_unavailable";
+
+fn wgpu_runtime_fallback_meta(
+    to_backend: &'static str,
+    reason: &'static str,
+    message: Option<&str>,
+) -> serde_json::Value {
+    let mut data = serde_json::Map::new();
+    data.insert("from".to_string(), serde_json::json!("wgpu"));
+    data.insert("to".to_string(), serde_json::json!(to_backend));
+    data.insert("reason".to_string(), serde_json::json!(reason));
+    if let Some(message) = message {
+        data.insert("message".to_string(), serde_json::json!(message));
+    }
+    serde_json::Value::Object(data)
+}
+
+#[cfg(feature = "wgpu")]
+fn wgpu_backend_runtime_unavailable(error: &TensorError) -> bool {
+    matches!(
+        error,
+        TensorError::BackendFailure {
+            backend: "wgpu",
+            message,
+        } if wgpu_runtime_unavailable(message)
+    )
 }
 
 /// Explicit backend selection for row-wise softmax.
@@ -571,6 +622,60 @@ impl fmt::Display for AttentionBackend {
     }
 }
 
+/// Explicit backend selection for layer normalisation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LayerNormBackend {
+    /// Allow SpiralTorch to pick the most appropriate backend.
+    Auto,
+    /// Force the pure Rust implementation.
+    Cpu,
+    /// Execute on the WGPU fused kernel when available.
+    GpuWgpu,
+}
+
+impl LayerNormBackend {
+    fn label(self) -> &'static str {
+        match self {
+            LayerNormBackend::Auto => "auto",
+            LayerNormBackend::Cpu => "cpu",
+            LayerNormBackend::GpuWgpu => "wgpu",
+        }
+    }
+}
+
+impl fmt::Display for LayerNormBackend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
+/// Explicit backend selection for small tensor utility kernels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TensorUtilBackend {
+    /// Keep the legacy tensor utility path.
+    Auto,
+    /// Force the pure Rust implementation.
+    Cpu,
+    /// Execute on WGPU utility kernels when available.
+    GpuWgpu,
+}
+
+impl TensorUtilBackend {
+    fn label(self) -> &'static str {
+        match self {
+            TensorUtilBackend::Auto => "auto",
+            TensorUtilBackend::Cpu => "cpu",
+            TensorUtilBackend::GpuWgpu => "wgpu",
+        }
+    }
+}
+
+impl fmt::Display for TensorUtilBackend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
 #[derive(Clone, Debug)]
 enum TensorBacking {
     Owned(Arc<AlignedVec>),
@@ -668,6 +773,16 @@ pub enum Layout {
 
 impl Layout {
     #[inline]
+    fn as_str(self) -> &'static str {
+        match self {
+            Layout::RowMajor => "row_major",
+            Layout::ColMajor => "col_major",
+            Layout::Tiled { .. } => "tiled",
+            Layout::Chimera { .. } => "chimera",
+        }
+    }
+
+    #[inline]
     fn expect_row_major(self, label: &'static str) -> PureResult<()> {
         if matches!(self, Layout::RowMajor) {
             Ok(())
@@ -690,6 +805,194 @@ impl Layout {
             }),
         }
     }
+}
+
+fn emit_basic_tensor_op_meta<F>(
+    op_name: &'static str,
+    rows: usize,
+    cols: usize,
+    output_rows: usize,
+    output_cols: usize,
+    layout: Layout,
+    backend: &'static str,
+    requested_backend: &'static str,
+    kernel: &'static str,
+    kind: &'static str,
+    extra: F,
+) where
+    F: FnOnce(&mut serde_json::Map<String, serde_json::Value>),
+{
+    crate::emit_tensor_op_meta(op_name, || {
+        let mut data = serde_json::Map::new();
+        data.insert("backend".to_string(), serde_json::json!(backend));
+        data.insert(
+            "requested_backend".to_string(),
+            serde_json::json!(requested_backend),
+        );
+        data.insert("kernel".to_string(), serde_json::json!(kernel));
+        data.insert("kind".to_string(), serde_json::json!(kind));
+        data.insert("rows".to_string(), serde_json::json!(rows));
+        data.insert("cols".to_string(), serde_json::json!(cols));
+        data.insert(
+            "values".to_string(),
+            serde_json::json!(rows.saturating_mul(cols)),
+        );
+        data.insert("output_rows".to_string(), serde_json::json!(output_rows));
+        data.insert("output_cols".to_string(), serde_json::json!(output_cols));
+        data.insert(
+            "output_values".to_string(),
+            serde_json::json!(output_rows.saturating_mul(output_cols)),
+        );
+        data.insert("layout".to_string(), serde_json::json!(layout.as_str()));
+        data.insert(
+            "empty".to_string(),
+            serde_json::json!(rows == 0 || cols == 0 || output_rows == 0 || output_cols == 0),
+        );
+        extra(&mut data);
+        serde_json::Value::Object(data)
+    });
+}
+
+fn emit_tensor_util_cpu_op_meta<F>(
+    op_name: &'static str,
+    rows: usize,
+    cols: usize,
+    output_rows: usize,
+    output_cols: usize,
+    layout: Layout,
+    requested_backend: &'static str,
+    kind: &'static str,
+    extra: F,
+) where
+    F: FnOnce(&mut serde_json::Map<String, serde_json::Value>),
+{
+    emit_basic_tensor_op_meta(
+        op_name,
+        rows,
+        cols,
+        output_rows,
+        output_cols,
+        layout,
+        "cpu",
+        requested_backend,
+        "scalar",
+        kind,
+        |data| {
+            extra(data);
+            #[cfg(feature = "wgpu")]
+            if requested_backend == "wgpu" && !data.contains_key("fallback") {
+                data.insert(
+                    "fallback".to_string(),
+                    wgpu_runtime_fallback_meta("cpu", WGPU_RUNTIME_FALLBACK_REASON, None),
+                );
+            }
+        },
+    );
+}
+
+fn emit_cpu_tensor_op_meta<F>(
+    op_name: &'static str,
+    rows: usize,
+    cols: usize,
+    output_rows: usize,
+    output_cols: usize,
+    layout: Layout,
+    kind: &'static str,
+    extra: F,
+) where
+    F: FnOnce(&mut serde_json::Map<String, serde_json::Value>),
+{
+    emit_tensor_util_cpu_op_meta(
+        op_name,
+        rows,
+        cols,
+        output_rows,
+        output_cols,
+        layout,
+        "auto",
+        kind,
+        extra,
+    );
+}
+
+#[cfg(feature = "wgpu")]
+fn row_l2_projection_stats(data: &[f32], rows: usize, cols: usize) -> (usize, f32) {
+    let mut nonzero_rows = 0usize;
+    let mut max_row_l2 = 0.0f32;
+    for r in 0..rows {
+        let start = r * cols;
+        let end = start + cols;
+        let norm: f32 = data[start..end].iter().map(|v| v * v).sum::<f32>().sqrt();
+        max_row_l2 = max_row_l2.max(norm);
+        if norm > 0.0 {
+            nonzero_rows = nonzero_rows.saturating_add(1);
+        }
+    }
+    (nonzero_rows, max_row_l2)
+}
+
+fn porous_mix_value(value: f32, saturation: f32, porosity: f32) -> f32 {
+    if !value.is_finite() || saturation <= 0.0 {
+        return 0.0;
+    }
+    let limit = saturation.abs();
+    let magnitude = value.abs();
+    if magnitude <= limit {
+        return value;
+    }
+    if porosity <= f32::EPSILON {
+        return value.signum() * limit;
+    }
+    let bleed = (magnitude - limit) / (magnitude + limit);
+    let absorb = (porosity * 0.25).min(1.0);
+    let softened = limit * (1.0 - absorb * bleed.min(1.0)).max(0.0);
+    value.signum() * softened
+}
+
+#[cfg(feature = "wgpu")]
+fn emit_wgpu_tensor_op_meta<F>(
+    op_name: &'static str,
+    requested_backend: &'static str,
+    rows: usize,
+    cols: usize,
+    output_rows: usize,
+    output_cols: usize,
+    layout: Layout,
+    kind: &'static str,
+    kernel: &'static str,
+    extra: F,
+) where
+    F: FnOnce(&mut serde_json::Map<String, serde_json::Value>),
+{
+    crate::emit_tensor_op_meta(op_name, || {
+        let mut data = serde_json::Map::new();
+        data.insert("backend".to_string(), serde_json::json!("wgpu_dense"));
+        data.insert(
+            "requested_backend".to_string(),
+            serde_json::json!(requested_backend),
+        );
+        data.insert("kernel".to_string(), serde_json::json!(kernel));
+        data.insert("kind".to_string(), serde_json::json!(kind));
+        data.insert("rows".to_string(), serde_json::json!(rows));
+        data.insert("cols".to_string(), serde_json::json!(cols));
+        data.insert(
+            "values".to_string(),
+            serde_json::json!(rows.saturating_mul(cols)),
+        );
+        data.insert("output_rows".to_string(), serde_json::json!(output_rows));
+        data.insert("output_cols".to_string(), serde_json::json!(output_cols));
+        data.insert(
+            "output_values".to_string(),
+            serde_json::json!(output_rows.saturating_mul(output_cols)),
+        );
+        data.insert("layout".to_string(), serde_json::json!(layout.as_str()));
+        data.insert(
+            "empty".to_string(),
+            serde_json::json!(rows == 0 || cols == 0 || output_rows == 0 || output_cols == 0),
+        );
+        extra(&mut data);
+        serde_json::Value::Object(data)
+    });
 }
 
 /// Tile configuration used when preparing packed matrices for matmul.
@@ -717,6 +1020,14 @@ pub enum PackedLayout {
 }
 
 impl PackedLayout {
+    #[inline]
+    fn as_str(self) -> &'static str {
+        match self {
+            PackedLayout::ColMajor => "col_major",
+            PackedLayout::Tiled { .. } => "tiled",
+        }
+    }
+
     fn to_dense(self) -> faer_dense::DenseLayout {
         match self {
             PackedLayout::ColMajor => faer_dense::DenseLayout::ColMajor,
@@ -815,7 +1126,7 @@ impl PackedB {
     }
 
     fn from_col_major_transpose(tensor: &Tensor, tile: Tile) -> PureResult<Self> {
-        let transposed = tensor.transpose();
+        let transposed = tensor.transpose_with_backend(TensorUtilBackend::Auto)?;
         let mut packed = PackedB::from_row_major(&transposed, tile)?;
         packed.cols = tensor.rows;
         packed.inner = tensor.cols;
@@ -873,9 +1184,6 @@ impl Tensor {
         data: AlignedVec,
         layout: Layout,
     ) -> PureResult<Self> {
-        if rows == 0 || cols == 0 {
-            return Err(TensorError::InvalidDimensions { rows, cols });
-        }
         let expected = rows * cols;
         if expected != data.len() {
             return Err(TensorError::DataLength {
@@ -968,9 +1276,6 @@ impl Tensor {
     where
         F: FnMut(usize, usize) -> f32,
     {
-        if rows == 0 || cols == 0 {
-            return Err(TensorError::InvalidDimensions { rows, cols });
-        }
         let mut data = aligned_with_capacity(rows * cols);
         for r in 0..rows {
             for c in 0..cols {
@@ -1240,9 +1545,6 @@ impl Tensor {
 
     /// Return a zero-copy view of the tensor with new row/column dimensions.
     pub fn view(&self, rows: usize, cols: usize) -> PureResult<Tensor> {
-        if rows == 0 || cols == 0 {
-            return Err(TensorError::InvalidDimensions { rows, cols });
-        }
         if rows * cols != self.len() {
             return Err(TensorError::DataLength {
                 expected: rows * cols,
@@ -1491,7 +1793,6 @@ impl Tensor {
                 right: other.shape(),
             });
         }
-
         let rows = self.rows;
         let cols = other.cols;
         let inner = self.cols;
@@ -1514,33 +1815,44 @@ impl Tensor {
         dst.layout = Layout::RowMajor;
 
         let lhs = self.data();
-        let dst_slice = dst.data_mut();
+        let mut scratch = aligned_zeroed(rows * cols);
+        let work_slice = scratch.as_mut_slice();
+        #[cfg(feature = "wgpu")]
+        let mut fallback_reason: Option<&'static str> = None;
+        #[cfg(feature = "wgpu")]
+        let mut fallback_message: Option<String> = None;
+        #[cfg(not(feature = "wgpu"))]
+        let fallback_reason: Option<&'static str> = None;
+        #[cfg(not(feature = "wgpu"))]
+        let fallback_message: Option<String> = None;
 
-        match backend {
-            MatmulBackend::Auto => self.matmul_auto_into(other, dst_slice, rows, inner, cols)?,
+        let backend_used = match backend {
+            MatmulBackend::Auto => self.matmul_auto_into(other, work_slice, rows, inner, cols)?,
             MatmulBackend::CpuSimd => {
                 if !matches!(other.layout, Layout::RowMajor) {
                     return Err(TensorError::UnsupportedLayout {
                         label: "simd matmul expects row-major rhs",
                     });
                 }
-                cpu_dense::matmul_into(dst_slice, lhs, other.data(), rows, inner, cols).map_err(
+                cpu_dense::matmul_into(work_slice, lhs, other.data(), rows, inner, cols).map_err(
                     |message| TensorError::BackendFailure {
                         backend: "cpu_simd",
                         message,
                     },
                 )?;
+                "cpu_simd"
             }
             MatmulBackend::CpuNaive => {
                 let packed = PackedB::from_tensor(other, Tile::col_major())?;
-                matmul_naive_packed_into(dst_slice, lhs, rows, inner, cols, &packed);
+                matmul_naive_packed_into(work_slice, lhs, rows, inner, cols, &packed);
+                "naive"
             }
             MatmulBackend::CpuFaer => {
                 let packed = PackedB::from_tensor(other, Tile::col_major())?;
                 let lhs_layout = self.layout.to_dense(rows, inner)?;
                 let rhs_layout = packed.layout().to_dense();
                 faer_dense::matmul_oriented_into(
-                    dst_slice,
+                    work_slice,
                     lhs,
                     lhs_layout,
                     packed.as_slice(),
@@ -1553,6 +1865,7 @@ impl Tensor {
                     backend: "faer",
                     message,
                 })?;
+                "faer"
             }
             #[cfg(feature = "wgpu")]
             MatmulBackend::GpuWgpu => {
@@ -1562,8 +1875,22 @@ impl Tensor {
                     });
                 }
                 let rhs = other.data();
-                let buffer = matmul_wgpu(lhs, rhs, rows, inner, cols)?;
-                dst_slice.copy_from_slice(&buffer);
+                match matmul_wgpu(lhs, rhs, rows, inner, cols) {
+                    Ok(buffer) => {
+                        work_slice.copy_from_slice(&buffer);
+                        "wgpu"
+                    }
+                    Err(error)
+                        if !strict_gpu_path() && wgpu_backend_runtime_unavailable(&error) =>
+                    {
+                        let packed = PackedB::from_tensor(other, Tile::col_major())?;
+                        matmul_naive_packed_into(work_slice, lhs, rows, inner, cols, &packed);
+                        fallback_reason = Some(WGPU_RUNTIME_FALLBACK_REASON);
+                        fallback_message = Some(error.to_string());
+                        "naive"
+                    }
+                    Err(error) => return Err(error),
+                }
             }
             #[cfg(feature = "hip")]
             MatmulBackend::GpuHip => {
@@ -1573,21 +1900,308 @@ impl Tensor {
                     });
                 }
                 let rhs = other.data();
-                hip_dense::matmul_into(lhs, rhs, dst_slice, rows, inner, cols).map_err(
+                hip_dense::matmul_into(lhs, rhs, work_slice, rows, inner, cols).map_err(
                     |message| TensorError::BackendFailure {
                         backend: "hip",
                         message,
                     },
                 )?;
+                "hip"
             }
-        }
+        };
+        Self::validate_finite_tensor_util_slice("matmul_output", scratch.as_slice())?;
+        dst.data_mut().copy_from_slice(scratch.as_slice());
 
         crate::emit_tensor_op(
             "matmul",
             &[self.rows, self.cols, other.rows, other.cols],
             &[rows, cols],
         );
+        crate::emit_tensor_op_meta("matmul", || {
+            serde_json::json!({
+                "backend": backend_used,
+                "requested_backend": backend.label(),
+                "rows": rows,
+                "inner": inner,
+                "cols": cols,
+                "lhs_layout": self.layout.as_str(),
+                "rhs_layout": other.layout.as_str(),
+                "fallback": fallback_reason.map(|reason| {
+                    wgpu_runtime_fallback_meta("naive", reason, fallback_message.as_deref())
+                }),
+            })
+        });
         Ok(())
+    }
+
+    /// Matrix multiply followed by a scalar multiply, fused where the backend supports it.
+    pub fn matmul_scaled_with_backend(
+        &self,
+        other: &Tensor,
+        scale: f32,
+        backend: MatmulBackend,
+    ) -> PureResult<Tensor> {
+        if self.cols != other.rows {
+            return Err(TensorError::ShapeMismatch {
+                left: self.shape(),
+                right: other.shape(),
+            });
+        }
+        Self::validate_scale_factor("matmul_scaled_factor", scale)?;
+
+        let rows = self.rows;
+        let cols = other.cols;
+        let inner = self.cols;
+        let mut tensor = Tensor::zeros(rows, cols)?;
+
+        self.layout.expect_row_major("matmul lhs")?;
+        tensor.layout.expect_row_major("matmul destination")?;
+        tensor.layout = Layout::RowMajor;
+
+        let lhs = self.data();
+        let dst_slice = tensor.data_mut();
+        #[cfg(feature = "wgpu")]
+        let mut fallback_reason: Option<&'static str> = None;
+        #[cfg(feature = "wgpu")]
+        let mut fallback_message: Option<String> = None;
+        #[cfg(not(feature = "wgpu"))]
+        let fallback_reason: Option<&'static str> = None;
+        #[cfg(not(feature = "wgpu"))]
+        let fallback_message: Option<String> = None;
+
+        let backend_used =
+            match backend {
+                MatmulBackend::Auto => {
+                    self.matmul_scaled_auto_into(other, scale, dst_slice, rows, inner, cols)?
+                }
+                MatmulBackend::CpuSimd => {
+                    if !matches!(other.layout, Layout::RowMajor) {
+                        return Err(TensorError::UnsupportedLayout {
+                            label: "simd matmul expects row-major rhs",
+                        });
+                    }
+                    cpu_dense::matmul_into(dst_slice, lhs, other.data(), rows, inner, cols)
+                        .map_err(|message| TensorError::BackendFailure {
+                            backend: "cpu_simd",
+                            message,
+                        })?;
+                    scale_inplace(dst_slice, scale);
+                    "cpu_simd"
+                }
+                MatmulBackend::CpuNaive => {
+                    let packed = PackedB::from_tensor(other, Tile::col_major())?;
+                    matmul_naive_packed_into(dst_slice, lhs, rows, inner, cols, &packed);
+                    scale_inplace(dst_slice, scale);
+                    "naive"
+                }
+                MatmulBackend::CpuFaer => {
+                    let packed = PackedB::from_tensor(other, Tile::col_major())?;
+                    let lhs_layout = self.layout.to_dense(rows, inner)?;
+                    let rhs_layout = packed.layout().to_dense();
+                    faer_dense::matmul_oriented_into(
+                        dst_slice,
+                        lhs,
+                        lhs_layout,
+                        packed.as_slice(),
+                        rhs_layout,
+                        rows,
+                        inner,
+                        cols,
+                    )
+                    .map_err(|message| TensorError::BackendFailure {
+                        backend: "faer",
+                        message,
+                    })?;
+                    scale_inplace(dst_slice, scale);
+                    "faer"
+                }
+                #[cfg(feature = "wgpu")]
+                MatmulBackend::GpuWgpu => {
+                    if !matches!(other.layout, Layout::RowMajor) {
+                        return Err(TensorError::UnsupportedLayout {
+                            label: "wgpu matmul expects row-major rhs",
+                        });
+                    }
+                    match matmul_scaled_wgpu(lhs, other.data(), rows, inner, cols, scale) {
+                        Ok(buffer) => {
+                            dst_slice.copy_from_slice(&buffer);
+                            "wgpu"
+                        }
+                        Err(error)
+                            if !strict_gpu_path() && wgpu_backend_runtime_unavailable(&error) =>
+                        {
+                            let packed = PackedB::from_tensor(other, Tile::col_major())?;
+                            matmul_naive_packed_into(dst_slice, lhs, rows, inner, cols, &packed);
+                            scale_inplace(dst_slice, scale);
+                            fallback_reason = Some(WGPU_RUNTIME_FALLBACK_REASON);
+                            fallback_message = Some(error.to_string());
+                            "naive"
+                        }
+                        Err(error) => return Err(error),
+                    }
+                }
+                #[cfg(feature = "hip")]
+                MatmulBackend::GpuHip => {
+                    if !matches!(other.layout, Layout::RowMajor) {
+                        return Err(TensorError::UnsupportedLayout {
+                            label: "hip matmul expects row-major rhs",
+                        });
+                    }
+                    hip_dense::matmul_into(lhs, other.data(), dst_slice, rows, inner, cols)
+                        .map_err(|message| TensorError::BackendFailure {
+                            backend: "hip",
+                            message,
+                        })?;
+                    scale_inplace(dst_slice, scale);
+                    "hip"
+                }
+            };
+        Self::validate_finite_tensor_util_slice("matmul_scaled_output", dst_slice)?;
+
+        crate::emit_tensor_op(
+            "matmul_scaled",
+            &[self.rows, self.cols, other.rows, other.cols],
+            &[rows, cols],
+        );
+        crate::emit_tensor_op_meta("matmul_scaled", || {
+            serde_json::json!({
+                "backend": backend_used,
+                "requested_backend": backend.label(),
+                "rows": rows,
+                "inner": inner,
+                "cols": cols,
+                "lhs_layout": self.layout.as_str(),
+                "rhs_layout": other.layout.as_str(),
+                "scale": scale,
+                "fallback": fallback_reason.map(|reason| {
+                    wgpu_runtime_fallback_meta("naive", reason, fallback_message.as_deref())
+                }),
+            })
+        });
+        Ok(tensor)
+    }
+
+    /// Computes `self.T @ other * scale` without materialising `self.T`.
+    pub fn matmul_lhs_transpose_scaled_with_backend(
+        &self,
+        other: &Tensor,
+        scale: f32,
+        backend: MatmulBackend,
+    ) -> PureResult<Tensor> {
+        if self.rows != other.rows {
+            return Err(TensorError::ShapeMismatch {
+                left: self.shape(),
+                right: other.shape(),
+            });
+        }
+        Self::validate_scale_factor("matmul_lhs_transpose_scaled_factor", scale)?;
+
+        let rows = self.cols;
+        let inner = self.rows;
+        let cols = other.cols;
+        let mut tensor = Tensor::zeros(rows, cols)?;
+
+        self.layout.expect_row_major("matmul lhs")?;
+        other.layout.expect_row_major("matmul rhs")?;
+        tensor.layout.expect_row_major("matmul destination")?;
+        tensor.layout = Layout::RowMajor;
+
+        let dst_slice = tensor.data_mut();
+        #[cfg(feature = "wgpu")]
+        let mut fallback_reason: Option<&'static str> = None;
+        #[cfg(feature = "wgpu")]
+        let mut fallback_message: Option<String> = None;
+        #[cfg(not(feature = "wgpu"))]
+        let fallback_reason: Option<&'static str> = None;
+        #[cfg(not(feature = "wgpu"))]
+        let fallback_message: Option<String> = None;
+        let backend_used = match backend {
+            MatmulBackend::Auto => self.matmul_lhs_transpose_scaled_auto_into(
+                other, scale, dst_slice, rows, inner, cols,
+            )?,
+            MatmulBackend::CpuSimd | MatmulBackend::CpuNaive | MatmulBackend::CpuFaer => {
+                matmul_lhs_transpose_scaled_naive_into(
+                    dst_slice,
+                    self.data(),
+                    other.data(),
+                    inner,
+                    rows,
+                    cols,
+                    scale,
+                );
+                "naive"
+            }
+            #[cfg(feature = "wgpu")]
+            MatmulBackend::GpuWgpu => {
+                match matmul_lhs_transpose_scaled_wgpu(
+                    self.data(),
+                    other.data(),
+                    inner,
+                    rows,
+                    cols,
+                    scale,
+                ) {
+                    Ok(buffer) => {
+                        dst_slice.copy_from_slice(&buffer);
+                        "wgpu"
+                    }
+                    Err(error)
+                        if !strict_gpu_path() && wgpu_backend_runtime_unavailable(&error) =>
+                    {
+                        matmul_lhs_transpose_scaled_naive_into(
+                            dst_slice,
+                            self.data(),
+                            other.data(),
+                            inner,
+                            rows,
+                            cols,
+                            scale,
+                        );
+                        fallback_reason = Some(WGPU_RUNTIME_FALLBACK_REASON);
+                        fallback_message = Some(error.to_string());
+                        "naive"
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            #[cfg(feature = "hip")]
+            MatmulBackend::GpuHip => {
+                matmul_lhs_transpose_scaled_naive_into(
+                    dst_slice,
+                    self.data(),
+                    other.data(),
+                    inner,
+                    rows,
+                    cols,
+                    scale,
+                );
+                "naive"
+            }
+        };
+        Self::validate_finite_tensor_util_slice("matmul_lhs_transpose_scaled_output", dst_slice)?;
+
+        crate::emit_tensor_op(
+            "matmul_lhs_transpose_scaled",
+            &[self.rows, self.cols, other.rows, other.cols],
+            &[rows, cols],
+        );
+        crate::emit_tensor_op_meta("matmul_lhs_transpose_scaled", || {
+            serde_json::json!({
+                "backend": backend_used,
+                "requested_backend": backend.label(),
+                "rows": rows,
+                "inner": inner,
+                "cols": cols,
+                "lhs_layout": self.layout.as_str(),
+                "rhs_layout": other.layout.as_str(),
+                "lhs_transpose": true,
+                "scale": scale,
+                "fallback": fallback_reason.map(|reason| {
+                    wgpu_runtime_fallback_meta("naive", reason, fallback_message.as_deref())
+                }),
+            })
+        });
+        Ok(tensor)
     }
 
     /// Matrix multiply using a prepacked right-hand side operand.
@@ -1605,6 +2219,156 @@ impl Tensor {
         let cols = packed.cols();
         let mut tensor = Tensor::zeros(rows, cols)?;
         self.matmul_prepacked_into_with_backend(packed, &mut tensor, backend)?;
+        Ok(tensor)
+    }
+
+    /// Matrix multiply against a prepacked operand followed by row-wise bias addition.
+    pub fn matmul_prepacked_bias(&self, packed: &PackedB, bias: &[f32]) -> PureResult<Tensor> {
+        self.matmul_prepacked_bias_with_backend(packed, bias, MatmulBackend::Auto)
+    }
+
+    /// Matrix multiply against a prepacked operand with fused bias where the backend supports it.
+    pub fn matmul_prepacked_bias_with_backend(
+        &self,
+        packed: &PackedB,
+        bias: &[f32],
+        backend: MatmulBackend,
+    ) -> PureResult<Tensor> {
+        if self.cols != packed.inner() {
+            return Err(TensorError::ShapeMismatch {
+                left: self.shape(),
+                right: (packed.inner(), packed.cols()),
+            });
+        }
+        if bias.len() != packed.cols() {
+            return Err(TensorError::DataLength {
+                expected: packed.cols(),
+                got: bias.len(),
+            });
+        }
+        Self::validate_finite_tensor_util_slice("matmul_prepacked_bias_bias", bias)?;
+
+        let rows = self.rows;
+        let cols = packed.cols();
+        let inner = packed.inner();
+        let mut tensor = Tensor::zeros(rows, cols)?;
+
+        self.layout.expect_row_major("matmul lhs")?;
+        tensor.layout.expect_row_major("matmul destination")?;
+        tensor.layout = Layout::RowMajor;
+
+        let lhs = self.data();
+        let dst_slice = tensor.data_mut();
+        #[cfg(feature = "wgpu")]
+        let mut fallback_reason: Option<&'static str> = None;
+        #[cfg(feature = "wgpu")]
+        let mut fallback_message: Option<String> = None;
+        #[cfg(not(feature = "wgpu"))]
+        let fallback_reason: Option<&'static str> = None;
+        #[cfg(not(feature = "wgpu"))]
+        let fallback_message: Option<String> = None;
+
+        let backend_used = match backend {
+            MatmulBackend::Auto => {
+                self.matmul_prepacked_bias_auto_into(packed, bias, dst_slice, rows, inner, cols)?
+            }
+            MatmulBackend::CpuSimd => {
+                if !matches!(packed.layout(), PackedLayout::ColMajor) {
+                    return Err(TensorError::UnsupportedLayout {
+                        label: "simd matmul expects col-major packed rhs",
+                    });
+                }
+                cpu_dense::matmul_packed_into(dst_slice, lhs, packed.as_slice(), rows, inner, cols)
+                    .map_err(|message| TensorError::BackendFailure {
+                        backend: "cpu_simd",
+                        message,
+                    })?;
+                add_bias_inplace(dst_slice, rows, cols, bias);
+                "cpu_simd"
+            }
+            MatmulBackend::CpuNaive => {
+                matmul_naive_packed_into(dst_slice, lhs, rows, inner, cols, packed);
+                add_bias_inplace(dst_slice, rows, cols, bias);
+                "naive"
+            }
+            MatmulBackend::CpuFaer => {
+                let lhs_layout = self.layout.to_dense(rows, inner)?;
+                let rhs_layout = packed.layout().to_dense();
+                faer_dense::matmul_oriented_into(
+                    dst_slice,
+                    lhs,
+                    lhs_layout,
+                    packed.as_slice(),
+                    rhs_layout,
+                    rows,
+                    inner,
+                    cols,
+                )
+                .map_err(|message| TensorError::BackendFailure {
+                    backend: "faer",
+                    message,
+                })?;
+                add_bias_inplace(dst_slice, rows, cols, bias);
+                "faer"
+            }
+            #[cfg(feature = "wgpu")]
+            MatmulBackend::GpuWgpu => {
+                match wgpu_dense::matmul_prepacked_bias(lhs, packed, bias, rows, inner, cols) {
+                    Ok(buffer) => {
+                        dst_slice.copy_from_slice(&buffer);
+                        "wgpu"
+                    }
+                    Err(message) if !strict_gpu_path() && wgpu_runtime_unavailable(&message) => {
+                        matmul_naive_packed_into(dst_slice, lhs, rows, inner, cols, packed);
+                        add_bias_inplace(dst_slice, rows, cols, bias);
+                        fallback_reason = Some(WGPU_RUNTIME_FALLBACK_REASON);
+                        fallback_message = Some(message);
+                        "naive"
+                    }
+                    Err(message) => {
+                        return Err(TensorError::BackendFailure {
+                            backend: "wgpu",
+                            message,
+                        });
+                    }
+                }
+            }
+            #[cfg(feature = "hip")]
+            MatmulBackend::GpuHip => {
+                return Err(TensorError::BackendFailure {
+                    backend: "hip",
+                    message: "hip matmul does not yet support prepacked operands".into(),
+                });
+            }
+        };
+        Self::validate_finite_tensor_util_slice("matmul_prepacked_bias_output", dst_slice)?;
+
+        crate::emit_tensor_op(
+            "matmul_prepacked_bias",
+            &[self.rows, self.cols, packed.inner(), packed.cols()],
+            &[rows, cols],
+        );
+        crate::emit_tensor_op_meta("matmul_prepacked_bias", || {
+            serde_json::json!({
+                "backend": backend_used,
+                "requested_backend": backend.label(),
+                "rows": rows,
+                "inner": inner,
+                "cols": cols,
+                "lhs_layout": self.layout.as_str(),
+                "rhs_layout": "packed",
+                "packed_layout": packed.layout().as_str(),
+                "packed_tile": {
+                    "tm": packed.tile().tm,
+                    "tn": packed.tile().tn,
+                    "tk": packed.tile().tk,
+                },
+                "fused_bias": true,
+                "fallback": fallback_reason.map(|reason| {
+                    wgpu_runtime_fallback_meta("naive", reason, fallback_message.as_deref())
+                }),
+            })
+        });
         Ok(tensor)
     }
 
@@ -1644,11 +2408,20 @@ impl Tensor {
         dst.layout = Layout::RowMajor;
 
         let lhs = self.data();
-        let dst_slice = dst.data_mut();
+        let mut scratch = aligned_zeroed(rows * cols);
+        let work_slice = scratch.as_mut_slice();
+        #[cfg(feature = "wgpu")]
+        let mut fallback_reason: Option<&'static str> = None;
+        #[cfg(feature = "wgpu")]
+        let mut fallback_message: Option<String> = None;
+        #[cfg(not(feature = "wgpu"))]
+        let fallback_reason: Option<&'static str> = None;
+        #[cfg(not(feature = "wgpu"))]
+        let fallback_message: Option<String> = None;
 
-        match backend {
+        let backend_used = match backend {
             MatmulBackend::Auto => {
-                self.matmul_prepacked_auto_into(packed, dst_slice, rows, inner, cols)?;
+                self.matmul_prepacked_auto_into(packed, work_slice, rows, inner, cols)?
             }
             MatmulBackend::CpuSimd => {
                 if !matches!(packed.layout(), PackedLayout::ColMajor) {
@@ -1656,20 +2429,29 @@ impl Tensor {
                         label: "simd matmul expects col-major packed rhs",
                     });
                 }
-                cpu_dense::matmul_packed_into(dst_slice, lhs, packed.as_slice(), rows, inner, cols)
-                    .map_err(|message| TensorError::BackendFailure {
-                        backend: "cpu_simd",
-                        message,
-                    })?;
+                cpu_dense::matmul_packed_into(
+                    work_slice,
+                    lhs,
+                    packed.as_slice(),
+                    rows,
+                    inner,
+                    cols,
+                )
+                .map_err(|message| TensorError::BackendFailure {
+                    backend: "cpu_simd",
+                    message,
+                })?;
+                "cpu_simd"
             }
             MatmulBackend::CpuNaive => {
-                matmul_naive_packed_into(dst_slice, lhs, rows, inner, cols, packed);
+                matmul_naive_packed_into(work_slice, lhs, rows, inner, cols, packed);
+                "naive"
             }
             MatmulBackend::CpuFaer => {
                 let lhs_layout = self.layout.to_dense(rows, inner)?;
                 let rhs_layout = packed.layout().to_dense();
                 faer_dense::matmul_oriented_into(
-                    dst_slice,
+                    work_slice,
                     lhs,
                     lhs_layout,
                     packed.as_slice(),
@@ -1682,12 +2464,28 @@ impl Tensor {
                     backend: "faer",
                     message,
                 })?;
+                "faer"
             }
             #[cfg(feature = "wgpu")]
             MatmulBackend::GpuWgpu => {
-                return Err(TensorError::UnsupportedLayout {
-                    label: "wgpu matmul does not accept prepacked operands",
-                });
+                match wgpu_dense::matmul_prepacked(lhs, packed, rows, inner, cols) {
+                    Ok(buffer) => {
+                        work_slice.copy_from_slice(&buffer);
+                        "wgpu"
+                    }
+                    Err(message) if !strict_gpu_path() && wgpu_runtime_unavailable(&message) => {
+                        matmul_naive_packed_into(work_slice, lhs, rows, inner, cols, packed);
+                        fallback_reason = Some(WGPU_RUNTIME_FALLBACK_REASON);
+                        fallback_message = Some(message);
+                        "naive"
+                    }
+                    Err(message) => {
+                        return Err(TensorError::BackendFailure {
+                            backend: "wgpu",
+                            message,
+                        });
+                    }
+                }
             }
             #[cfg(feature = "hip")]
             MatmulBackend::GpuHip => {
@@ -1696,13 +2494,35 @@ impl Tensor {
                     message: "hip matmul does not yet support prepacked operands".into(),
                 });
             }
-        }
+        };
+        Self::validate_finite_tensor_util_slice("matmul_prepacked_output", scratch.as_slice())?;
+        dst.data_mut().copy_from_slice(scratch.as_slice());
 
         crate::emit_tensor_op(
             "matmul_prepacked",
             &[self.rows, self.cols, packed.inner(), packed.cols()],
             &[rows, cols],
         );
+        crate::emit_tensor_op_meta("matmul_prepacked", || {
+            serde_json::json!({
+                "backend": backend_used,
+                "requested_backend": backend.label(),
+                "rows": rows,
+                "inner": inner,
+                "cols": cols,
+                "lhs_layout": self.layout.as_str(),
+                "rhs_layout": "packed",
+                "packed_layout": packed.layout().as_str(),
+                "packed_tile": {
+                    "tm": packed.tile().tm,
+                    "tn": packed.tile().tn,
+                    "tk": packed.tile().tk,
+                },
+                "fallback": fallback_reason.map(|reason| {
+                    wgpu_runtime_fallback_meta("naive", reason, fallback_message.as_deref())
+                }),
+            })
+        });
         Ok(())
     }
 
@@ -1718,17 +2538,22 @@ impl Tensor {
         rows: usize,
         inner: usize,
         cols: usize,
-    ) -> PureResult<()> {
+    ) -> PureResult<&'static str> {
         #[cfg(feature = "wgpu")]
         {
             if matches!(other.layout, Layout::RowMajor)
                 && wgpu_dense::is_available()
                 && wgpu_dense::should_use(rows, inner, cols)
             {
-                if let Ok(buffer) = wgpu_dense::matmul(self.data(), other.data(), rows, inner, cols)
-                {
-                    dst.copy_from_slice(&buffer);
-                    return Ok(());
+                match wgpu_dense::matmul(self.data(), other.data(), rows, inner, cols) {
+                    Ok(buffer) => {
+                        dst.copy_from_slice(&buffer);
+                        return Ok("wgpu");
+                    }
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error("wgpu", "matmul", message));
+                    }
+                    Err(_) => {}
                 }
             }
         }
@@ -1739,9 +2564,12 @@ impl Tensor {
                 && hip_dense::is_available()
                 && hip_dense::should_use(rows, inner, cols)
             {
-                if hip_dense::matmul_into(self.data(), other.data(), dst, rows, inner, cols).is_ok()
-                {
-                    return Ok(());
+                match hip_dense::matmul_into(self.data(), other.data(), dst, rows, inner, cols) {
+                    Ok(()) => return Ok("hip"),
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error("hip", "matmul", message));
+                    }
+                    Err(_) => {}
                 }
             }
         }
@@ -1750,12 +2578,140 @@ impl Tensor {
             if let Ok(()) =
                 cpu_dense::matmul_into(dst, self.data(), other.data(), rows, inner, cols)
             {
-                return Ok(());
+                return Ok("cpu_simd");
             }
         }
 
         let packed = PackedB::from_tensor(other, Tile::col_major())?;
         self.matmul_prepacked_auto_into(&packed, dst, rows, inner, cols)
+    }
+
+    fn matmul_scaled_auto_into(
+        &self,
+        other: &Tensor,
+        scale: f32,
+        dst: &mut [f32],
+        rows: usize,
+        inner: usize,
+        cols: usize,
+    ) -> PureResult<&'static str> {
+        #[cfg(feature = "wgpu")]
+        {
+            if matches!(other.layout, Layout::RowMajor)
+                && wgpu_dense::is_available()
+                && wgpu_dense::should_use(rows, inner, cols)
+            {
+                match wgpu_dense::matmul_scaled(self.data(), other.data(), rows, inner, cols, scale)
+                {
+                    Ok(buffer) => {
+                        dst.copy_from_slice(&buffer);
+                        return Ok("wgpu");
+                    }
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error("wgpu", "matmul_scaled", message));
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+
+        #[cfg(feature = "hip")]
+        {
+            if matches!(other.layout, Layout::RowMajor)
+                && hip_dense::is_available()
+                && hip_dense::should_use(rows, inner, cols)
+            {
+                match hip_dense::matmul_into(self.data(), other.data(), dst, rows, inner, cols) {
+                    Ok(()) => {
+                        scale_inplace(dst, scale);
+                        return Ok("hip");
+                    }
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error("hip", "matmul_scaled", message));
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+
+        if matches!(other.layout, Layout::RowMajor) && cpu_dense::should_use(rows, inner, cols) {
+            if let Ok(()) =
+                cpu_dense::matmul_into(dst, self.data(), other.data(), rows, inner, cols)
+            {
+                scale_inplace(dst, scale);
+                return Ok("cpu_simd");
+            }
+        }
+
+        if faer_dense::is_available() && faer_dense::should_use(rows, inner, cols) {
+            let packed = PackedB::from_tensor(other, Tile::col_major())?;
+            if let Ok(()) = faer_dense::matmul_oriented_into(
+                dst,
+                self.data(),
+                self.layout.to_dense(rows, inner)?,
+                packed.as_slice(),
+                packed.layout().to_dense(),
+                rows,
+                inner,
+                cols,
+            ) {
+                scale_inplace(dst, scale);
+                return Ok("faer");
+            }
+        }
+
+        let packed = PackedB::from_tensor(other, Tile::col_major())?;
+        matmul_naive_packed_into(dst, self.data(), rows, inner, cols, &packed);
+        scale_inplace(dst, scale);
+        Ok("naive")
+    }
+
+    fn matmul_lhs_transpose_scaled_auto_into(
+        &self,
+        other: &Tensor,
+        scale: f32,
+        dst: &mut [f32],
+        rows: usize,
+        inner: usize,
+        cols: usize,
+    ) -> PureResult<&'static str> {
+        #[cfg(feature = "wgpu")]
+        {
+            if wgpu_dense::is_available() && wgpu_dense::should_use(rows, inner, cols) {
+                match wgpu_dense::matmul_lhs_transpose_scaled(
+                    self.data(),
+                    other.data(),
+                    inner,
+                    rows,
+                    cols,
+                    scale,
+                ) {
+                    Ok(buffer) => {
+                        dst.copy_from_slice(&buffer);
+                        return Ok("wgpu");
+                    }
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error(
+                            "wgpu",
+                            "matmul_lhs_transpose_scaled",
+                            message,
+                        ));
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+
+        matmul_lhs_transpose_scaled_naive_into(
+            dst,
+            self.data(),
+            other.data(),
+            inner,
+            rows,
+            cols,
+            scale,
+        );
+        Ok("naive")
     }
 
     fn matmul_prepacked_auto_into(
@@ -1765,15 +2721,23 @@ impl Tensor {
         rows: usize,
         inner: usize,
         cols: usize,
-    ) -> PureResult<()> {
+    ) -> PureResult<&'static str> {
         #[cfg(feature = "wgpu")]
         {
             if wgpu_dense::is_available() && wgpu_dense::should_use(rows, inner, cols) {
-                if let Ok(buffer) =
-                    wgpu_dense::matmul_prepacked(self.data(), packed, rows, inner, cols)
-                {
-                    dst.copy_from_slice(&buffer);
-                    return Ok(());
+                match wgpu_dense::matmul_prepacked(self.data(), packed, rows, inner, cols) {
+                    Ok(buffer) => {
+                        dst.copy_from_slice(&buffer);
+                        return Ok("wgpu");
+                    }
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error(
+                            "wgpu",
+                            "matmul_prepacked",
+                            message,
+                        ));
+                    }
+                    Err(_) => {}
                 }
             }
         }
@@ -1789,12 +2753,69 @@ impl Tensor {
                 inner,
                 cols,
             ) {
-                return Ok(());
+                return Ok("faer");
             }
         }
 
         matmul_naive_packed_into(dst, self.data(), rows, inner, cols, packed);
-        Ok(())
+        Ok("naive")
+    }
+
+    fn matmul_prepacked_bias_auto_into(
+        &self,
+        packed: &PackedB,
+        bias: &[f32],
+        dst: &mut [f32],
+        rows: usize,
+        inner: usize,
+        cols: usize,
+    ) -> PureResult<&'static str> {
+        #[cfg(feature = "wgpu")]
+        {
+            if wgpu_dense::is_available() && wgpu_dense::should_use(rows, inner, cols) {
+                match wgpu_dense::matmul_prepacked_bias(
+                    self.data(),
+                    packed,
+                    bias,
+                    rows,
+                    inner,
+                    cols,
+                ) {
+                    Ok(buffer) => {
+                        dst.copy_from_slice(&buffer);
+                        return Ok("wgpu");
+                    }
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error(
+                            "wgpu",
+                            "matmul_prepacked_bias",
+                            message,
+                        ));
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+
+        if faer_dense::is_available() && faer_dense::should_use(rows, inner, cols) {
+            if let Ok(()) = faer_dense::matmul_oriented_into(
+                dst,
+                self.data(),
+                self.layout.to_dense(rows, inner)?,
+                packed.as_slice(),
+                packed.layout().to_dense(),
+                rows,
+                inner,
+                cols,
+            ) {
+                add_bias_inplace(dst, rows, cols, bias);
+                return Ok("faer");
+            }
+        }
+
+        matmul_naive_packed_into(dst, self.data(), rows, inner, cols, packed);
+        add_bias_inplace(dst, rows, cols, bias);
+        Ok("naive")
     }
 
     /// Row-wise softmax using automatic backend selection.
@@ -1806,26 +2827,36 @@ impl Tensor {
     pub fn row_softmax_with_backend(&self, backend: SoftmaxBackend) -> PureResult<Tensor> {
         let rows = self.rows;
         let cols = self.cols;
+        Self::validate_finite_tensor_util_slice("row_softmax_input", self.data())?;
 
-        let output = match backend {
-            SoftmaxBackend::Auto => self.row_softmax_auto(rows, cols),
+        let (output, backend_used, fallback_reason) = match backend {
+            SoftmaxBackend::Auto => self
+                .row_softmax_auto(rows, cols)
+                .map(|(tensor, backend)| (tensor, backend, None::<&'static str>)),
             SoftmaxBackend::Cpu => {
                 let buffer = row_softmax_cpu(self.data(), rows, cols);
                 Tensor::from_vec(rows, cols, buffer)
+                    .map(|tensor| (tensor, "cpu", None::<&'static str>))
             }
             #[cfg(feature = "wgpu")]
-            SoftmaxBackend::GpuWgpu => {
-                let data = wgpu_dense::row_softmax(self.data(), rows, cols, self.layout).map_err(
-                    |message| TensorError::BackendFailure {
-                        backend: "wgpu",
-                        message,
-                    },
-                )?;
-                Tensor::from_vec(rows, cols, data)
-            }
+            SoftmaxBackend::GpuWgpu => self.row_softmax_wgpu_or_cpu(rows, cols),
         }?;
+        Self::validate_finite_tensor_util_slice("row_softmax_output", output.data())?;
 
         crate::emit_tensor_op("row_softmax", &[rows, cols], &[rows, cols]);
+        if backend_used != "wgpu_dense" {
+            crate::emit_tensor_op_meta("row_softmax", || {
+                serde_json::json!({
+                    "backend": backend_used,
+                    "requested_backend": backend.label(),
+                    "rows": rows,
+                    "cols": cols,
+                    "layout": self.layout.as_str(),
+                    "fallback": fallback_reason
+                        .map(|reason| wgpu_runtime_fallback_meta("cpu", reason, None)),
+                })
+            });
+        }
         Ok(output)
     }
 
@@ -1841,9 +2872,12 @@ impl Tensor {
     ) -> PureResult<(Tensor, Tensor)> {
         let rows = self.rows;
         let cols = self.cols;
+        Self::validate_finite_tensor_util_slice("row_softmax_hardmax_input", self.data())?;
 
-        let output = match backend {
-            SoftmaxBackend::Auto => self.row_softmax_hardmax_auto(rows, cols),
+        let (output, backend_used, fallback_reason) = match backend {
+            SoftmaxBackend::Auto => self
+                .row_softmax_hardmax_auto(rows, cols)
+                .map(|(pair, backend)| (pair, backend, None::<&'static str>)),
             SoftmaxBackend::Cpu => {
                 let result = self.hardmax_fusion(
                     rows,
@@ -1851,21 +2885,38 @@ impl Tensor {
                     HardmaxBackend::Cpu,
                     HardmaxMode::SoftmaxAndMask,
                 )?;
+                let backend_used = result.backend;
+                let fallback_reason = result.fallback_reason;
                 self.fusion_pair_to_tensors(rows, cols, result)
+                    .map(|pair| (pair, backend_used, fallback_reason))
             }
             #[cfg(feature = "wgpu")]
             SoftmaxBackend::GpuWgpu => {
-                let result = self.hardmax_fusion(
-                    rows,
-                    cols,
-                    HardmaxBackend::GpuWgpu,
-                    HardmaxMode::SoftmaxAndMask,
-                )?;
+                let result =
+                    self.hardmax_fusion_wgpu_or_cpu(rows, cols, HardmaxMode::SoftmaxAndMask)?;
+                let backend_used = result.backend;
+                let fallback_reason = result.fallback_reason;
                 self.fusion_pair_to_tensors(rows, cols, result)
+                    .map(|pair| (pair, backend_used, fallback_reason))
             }
         }?;
+        Self::validate_finite_tensor_util_slice("row_softmax_hardmax_softmax", output.0.data())?;
+        Self::validate_finite_tensor_util_slice("row_softmax_hardmax_hardmax", output.1.data())?;
 
         crate::emit_tensor_op("row_softmax_hardmax", &[rows, cols], &[rows, cols]);
+        if backend_used != "wgpu_dense" {
+            crate::emit_tensor_op_meta("row_softmax_hardmax", || {
+                serde_json::json!({
+                    "backend": backend_used,
+                    "requested_backend": backend.label(),
+                    "rows": rows,
+                    "cols": cols,
+                    "layout": self.layout.as_str(),
+                    "fallback": fallback_reason
+                        .map(|reason| wgpu_runtime_fallback_meta("cpu", reason, None)),
+                })
+            });
+        }
         Ok(output)
     }
 
@@ -1881,9 +2932,12 @@ impl Tensor {
     ) -> PureResult<SpiralSoftmaxHardmax> {
         let rows = self.rows;
         let cols = self.cols;
+        Self::validate_finite_tensor_util_slice("row_softmax_hardmax_spiral_input", self.data())?;
 
-        let output = match backend {
-            SoftmaxBackend::Auto => self.row_softmax_hardmax_spiral_auto(rows, cols),
+        let (output, backend_used, fallback_reason) = match backend {
+            SoftmaxBackend::Auto => self
+                .row_softmax_hardmax_spiral_auto(rows, cols)
+                .map(|(spiral, backend)| (spiral, backend, None::<&'static str>)),
             SoftmaxBackend::Cpu => {
                 let result = self.hardmax_fusion(
                     rows,
@@ -1891,21 +2945,48 @@ impl Tensor {
                     HardmaxBackend::Cpu,
                     HardmaxMode::SoftmaxAndMask,
                 )?;
+                let backend_used = result.backend;
+                let fallback_reason = result.fallback_reason;
                 self.fusion_pair_to_spiral(rows, cols, result)
+                    .map(|spiral| (spiral, backend_used, fallback_reason))
             }
             #[cfg(feature = "wgpu")]
             SoftmaxBackend::GpuWgpu => {
-                let result = self.hardmax_fusion(
-                    rows,
-                    cols,
-                    HardmaxBackend::GpuWgpu,
-                    HardmaxMode::SoftmaxAndMask,
-                )?;
+                let result =
+                    self.hardmax_fusion_wgpu_or_cpu(rows, cols, HardmaxMode::SoftmaxAndMask)?;
+                let backend_used = result.backend;
+                let fallback_reason = result.fallback_reason;
                 self.fusion_pair_to_spiral(rows, cols, result)
+                    .map(|spiral| (spiral, backend_used, fallback_reason))
             }
         }?;
+        Self::validate_finite_tensor_util_slice(
+            "row_softmax_hardmax_spiral_softmax",
+            output.softmax.data(),
+        )?;
+        Self::validate_finite_tensor_util_slice(
+            "row_softmax_hardmax_spiral_hardmax",
+            output.hardmax.data(),
+        )?;
+        Self::validate_finite_tensor_util_slice(
+            "row_softmax_hardmax_spiral_spiral",
+            output.spiral.data(),
+        )?;
 
         crate::emit_tensor_op("row_softmax_hardmax_spiral", &[rows, cols], &[rows, cols]);
+        if backend_used != "wgpu_dense" {
+            crate::emit_tensor_op_meta("row_softmax_hardmax_spiral", || {
+                serde_json::json!({
+                    "backend": backend_used,
+                    "requested_backend": backend.label(),
+                    "rows": rows,
+                    "cols": cols,
+                    "layout": self.layout.as_str(),
+                    "fallback": fallback_reason
+                        .map(|reason| wgpu_runtime_fallback_meta("cpu", reason, None)),
+                })
+            });
+        }
         Ok(output)
     }
 
@@ -1918,72 +2999,146 @@ impl Tensor {
     pub fn row_hardmax_with_backend(&self, backend: HardmaxBackend) -> PureResult<Tensor> {
         let rows = self.rows;
         let cols = self.cols;
+        Self::validate_finite_tensor_util_slice("row_hardmax_input", self.data())?;
 
-        let output = match backend {
-            HardmaxBackend::Auto => self.row_hardmax_auto(rows, cols),
+        let (output, backend_used, fallback_reason) = match backend {
+            HardmaxBackend::Auto => self
+                .row_hardmax_auto(rows, cols)
+                .map(|(tensor, backend)| (tensor, backend, None::<&'static str>)),
             HardmaxBackend::Cpu => {
                 let result =
                     self.hardmax_fusion(rows, cols, HardmaxBackend::Cpu, HardmaxMode::MaskOnly)?;
+                let backend_used = result.backend;
+                let fallback_reason = result.fallback_reason;
                 Tensor::from_vec(rows, cols, result.hardmax)
+                    .map(|tensor| (tensor, backend_used, fallback_reason))
             }
             #[cfg(feature = "wgpu")]
             HardmaxBackend::GpuWgpu => {
-                let result = self.hardmax_fusion(
-                    rows,
-                    cols,
-                    HardmaxBackend::GpuWgpu,
-                    HardmaxMode::MaskOnly,
-                )?;
+                let result = self.hardmax_fusion_wgpu_or_cpu(rows, cols, HardmaxMode::MaskOnly)?;
+                let backend_used = result.backend;
+                let fallback_reason = result.fallback_reason;
                 Tensor::from_vec(rows, cols, result.hardmax)
+                    .map(|tensor| (tensor, backend_used, fallback_reason))
             }
         }?;
+        Self::validate_finite_tensor_util_slice("row_hardmax_output", output.data())?;
 
         crate::emit_tensor_op("row_hardmax", &[rows, cols], &[rows, cols]);
+        if backend_used != "wgpu_dense" {
+            crate::emit_tensor_op_meta("row_hardmax", || {
+                serde_json::json!({
+                    "backend": backend_used,
+                    "requested_backend": backend.label(),
+                    "rows": rows,
+                    "cols": cols,
+                    "layout": self.layout.as_str(),
+                    "fallback": fallback_reason
+                        .map(|reason| wgpu_runtime_fallback_meta("cpu", reason, None)),
+                })
+            });
+        }
         Ok(output)
     }
 
-    fn row_softmax_auto(&self, rows: usize, cols: usize) -> PureResult<Tensor> {
+    #[cfg(feature = "wgpu")]
+    fn row_softmax_wgpu_or_cpu(
+        &self,
+        rows: usize,
+        cols: usize,
+    ) -> PureResult<(Tensor, &'static str, Option<&'static str>)> {
+        match wgpu_dense::row_softmax(self.data(), rows, cols, self.layout) {
+            Ok(data) => {
+                Tensor::from_vec(rows, cols, data).map(|tensor| (tensor, "wgpu_dense", None))
+            }
+            Err(message) if !strict_gpu_path() && wgpu_runtime_unavailable(&message) => {
+                let buffer = row_softmax_cpu(self.data(), rows, cols);
+                Tensor::from_vec(rows, cols, buffer)
+                    .map(|tensor| (tensor, "cpu", Some(WGPU_RUNTIME_FALLBACK_REASON)))
+            }
+            Err(message) => Err(TensorError::BackendFailure {
+                backend: "wgpu",
+                message,
+            }),
+        }
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn hardmax_fusion_wgpu_or_cpu(
+        &self,
+        rows: usize,
+        cols: usize,
+        mode: HardmaxMode,
+    ) -> PureResult<HardmaxFusionResult> {
+        match self.hardmax_fusion(rows, cols, HardmaxBackend::GpuWgpu, mode) {
+            Ok(result) => Ok(result),
+            Err(error) if !strict_gpu_path() && wgpu_backend_runtime_unavailable(&error) => {
+                let mut result = self.hardmax_fusion(rows, cols, HardmaxBackend::Cpu, mode)?;
+                result.fallback_reason = Some(WGPU_RUNTIME_FALLBACK_REASON);
+                Ok(result)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn row_softmax_auto(&self, rows: usize, cols: usize) -> PureResult<(Tensor, &'static str)> {
         #[cfg(feature = "wgpu")]
         {
             if wgpu_dense::is_available() && wgpu_dense::supports_row_softmax(rows, cols) {
-                if let Ok(buffer) = wgpu_dense::row_softmax(self.data(), rows, cols, self.layout) {
-                    return Tensor::from_vec(rows, cols, buffer);
+                match wgpu_dense::row_softmax(self.data(), rows, cols, self.layout) {
+                    Ok(buffer) => {
+                        return Tensor::from_vec(rows, cols, buffer)
+                            .map(|tensor| (tensor, "wgpu_dense"));
+                    }
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error("wgpu", "row_softmax", message));
+                    }
+                    Err(_) => {}
                 }
             }
         }
 
         let buffer = row_softmax_cpu(self.data(), rows, cols);
-        Tensor::from_vec(rows, cols, buffer)
+        Tensor::from_vec(rows, cols, buffer).map(|tensor| (tensor, "cpu"))
     }
 
-    fn row_softmax_hardmax_auto(&self, rows: usize, cols: usize) -> PureResult<(Tensor, Tensor)> {
+    fn row_softmax_hardmax_auto(
+        &self,
+        rows: usize,
+        cols: usize,
+    ) -> PureResult<((Tensor, Tensor), &'static str)> {
         let result = self.hardmax_fusion(
             rows,
             cols,
             HardmaxBackend::Auto,
             HardmaxMode::SoftmaxAndMask,
         )?;
+        let backend_used = result.backend;
         self.fusion_pair_to_tensors(rows, cols, result)
+            .map(|pair| (pair, backend_used))
     }
 
     fn row_softmax_hardmax_spiral_auto(
         &self,
         rows: usize,
         cols: usize,
-    ) -> PureResult<SpiralSoftmaxHardmax> {
+    ) -> PureResult<(SpiralSoftmaxHardmax, &'static str)> {
         let result = self.hardmax_fusion(
             rows,
             cols,
             HardmaxBackend::Auto,
             HardmaxMode::SoftmaxAndMask,
         )?;
+        let backend_used = result.backend;
         self.fusion_pair_to_spiral(rows, cols, result)
+            .map(|spiral| (spiral, backend_used))
     }
 
-    fn row_hardmax_auto(&self, rows: usize, cols: usize) -> PureResult<Tensor> {
+    fn row_hardmax_auto(&self, rows: usize, cols: usize) -> PureResult<(Tensor, &'static str)> {
         let result =
             self.hardmax_fusion(rows, cols, HardmaxBackend::Auto, HardmaxMode::MaskOnly)?;
-        Tensor::from_vec(rows, cols, result.hardmax)
+        let backend_used = result.backend;
+        Tensor::from_vec(rows, cols, result.hardmax).map(|tensor| (tensor, backend_used))
     }
 
     fn hardmax_fusion(
@@ -2022,6 +3177,8 @@ impl Tensor {
         result: HardmaxFusionResult,
     ) -> PureResult<SpiralSoftmaxHardmax> {
         let HardmaxFusionResult {
+            backend: _,
+            fallback_reason: _,
             softmax,
             hardmax,
             dp_reductions,
@@ -2076,7 +3233,18 @@ impl Tensor {
         beta: &Tensor,
         epsilon: f32,
     ) -> PureResult<Tensor> {
-        self.layer_norm_affine_add_impl(None, gamma, beta, epsilon)
+        self.layer_norm_affine_with_backend(gamma, beta, epsilon, LayerNormBackend::Auto)
+    }
+
+    /// Layer normalisation with explicit backend control.
+    pub fn layer_norm_affine_with_backend(
+        &self,
+        gamma: &Tensor,
+        beta: &Tensor,
+        epsilon: f32,
+        backend: LayerNormBackend,
+    ) -> PureResult<Tensor> {
+        self.layer_norm_affine_add_impl(None, gamma, beta, epsilon, backend)
     }
 
     /// Layer normalisation over `self + residual` with affine parameters.
@@ -2087,7 +3255,25 @@ impl Tensor {
         beta: &Tensor,
         epsilon: f32,
     ) -> PureResult<Tensor> {
-        self.layer_norm_affine_add_impl(Some(residual), gamma, beta, epsilon)
+        self.layer_norm_affine_add_with_backend(
+            residual,
+            gamma,
+            beta,
+            epsilon,
+            LayerNormBackend::Auto,
+        )
+    }
+
+    /// Layer normalisation over `self + residual` with explicit backend control.
+    pub fn layer_norm_affine_add_with_backend(
+        &self,
+        residual: &Tensor,
+        gamma: &Tensor,
+        beta: &Tensor,
+        epsilon: f32,
+        backend: LayerNormBackend,
+    ) -> PureResult<Tensor> {
+        self.layer_norm_affine_add_impl(Some(residual), gamma, beta, epsilon, backend)
     }
 
     fn layer_norm_affine_add_impl(
@@ -2096,6 +3282,7 @@ impl Tensor {
         gamma: &Tensor,
         beta: &Tensor,
         epsilon: f32,
+        backend: LayerNormBackend,
     ) -> PureResult<Tensor> {
         if !epsilon.is_finite() || epsilon < 0.0 {
             return Err(TensorError::NonFiniteValue {
@@ -2105,7 +3292,7 @@ impl Tensor {
         }
 
         let (rows, cols) = self.shape();
-        if cols == 0 || rows == 0 {
+        if cols == 0 {
             return Err(TensorError::InvalidDimensions { rows, cols });
         }
         self.layout.expect_row_major("layer_norm input")?;
@@ -2124,6 +3311,9 @@ impl Tensor {
         }
         gamma.layout.expect_row_major("layer_norm gamma")?;
         beta.layout.expect_row_major("layer_norm beta")?;
+        Self::validate_finite_tensor_util_slice("layer_norm_input", self.data())?;
+        Self::validate_finite_tensor_util_slice("layer_norm_gamma", gamma.data())?;
+        Self::validate_finite_tensor_util_slice("layer_norm_beta", beta.data())?;
 
         let residual_data = if let Some(residual) = residual {
             if residual.shape() != (rows, cols) {
@@ -2133,10 +3323,30 @@ impl Tensor {
                 });
             }
             residual.layout.expect_row_major("layer_norm residual")?;
+            Self::validate_finite_tensor_util_slice("layer_norm_residual", residual.data())?;
             Some(residual.data())
         } else {
             None
         };
+
+        if rows == 0 {
+            let tensor = Tensor::zeros(rows, cols)?;
+            crate::emit_tensor_op("layer_norm", &[rows, cols], &[rows, cols]);
+            crate::emit_tensor_op_meta("layer_norm", || {
+                serde_json::json!({
+                    "backend": "cpu",
+                    "requested_backend": backend.label(),
+                    "rows": rows,
+                    "cols": cols,
+                    "epsilon": epsilon,
+                    "flags": {
+                        "use_residual": residual_data.is_some(),
+                        "empty": true,
+                    }
+                })
+            });
+            return Ok(tensor);
+        }
 
         let volume = rows
             .checked_mul(cols)
@@ -2149,65 +3359,105 @@ impl Tensor {
         let gamma_slice = gamma.data();
         let beta_slice = beta.data();
 
-        let prefer_wgpu = volume >= 4096;
-        let (tensor, backend_used): (Tensor, &'static str) = {
-            #[cfg(feature = "wgpu")]
-            {
-                let wgpu_tensor: Option<Tensor> = if prefer_wgpu
-                    && wgpu_dense::is_available()
-                    && wgpu_dense::supports_layer_norm(rows, cols)
+        let (tensor, backend_used): (Tensor, &'static str) = match backend {
+            LayerNormBackend::Auto => {
+                let prefer_wgpu = volume >= 4096;
+                #[cfg(feature = "wgpu")]
                 {
-                    let result = match residual_data {
-                        Some(residual_slice) => wgpu_dense::layer_norm_affine_add(
+                    if prefer_wgpu
+                        && wgpu_dense::is_available()
+                        && wgpu_dense::supports_layer_norm(rows, cols)
+                    {
+                        match Self::layer_norm_wgpu(
                             self.data(),
-                            residual_slice,
+                            residual_data,
                             gamma_slice,
                             beta_slice,
                             rows,
                             cols,
                             epsilon,
-                        ),
-                        None => wgpu_dense::layer_norm_affine(
-                            self.data(),
-                            gamma_slice,
-                            beta_slice,
-                            rows,
-                            cols,
-                            epsilon,
-                        ),
-                    };
-                    match result {
-                        Ok(buffer) => Some(Tensor::from_vec(rows, cols, buffer)?),
-                        Err(_) => None,
+                        ) {
+                            Ok(tensor) => (tensor, "wgpu_dense"),
+                            Err(message) if strict_gpu_path() => {
+                                return Err(strict_gpu_fallback_error(
+                                    "wgpu",
+                                    "layer_norm",
+                                    message,
+                                ));
+                            }
+                            Err(_) => (
+                                self.layer_norm_cpu(
+                                    residual_data,
+                                    gamma_slice,
+                                    beta_slice,
+                                    epsilon,
+                                )?,
+                                "cpu",
+                            ),
+                        }
+                    } else {
+                        (
+                            self.layer_norm_cpu(residual_data, gamma_slice, beta_slice, epsilon)?,
+                            "cpu",
+                        )
                     }
-                } else {
-                    None
-                };
-
-                if let Some(tensor) = wgpu_tensor {
-                    (tensor, "wgpu")
-                } else {
+                }
+                #[cfg(not(feature = "wgpu"))]
+                {
+                    let _ = prefer_wgpu;
                     (
                         self.layer_norm_cpu(residual_data, gamma_slice, beta_slice, epsilon)?,
                         "cpu",
                     )
                 }
             }
-            #[cfg(not(feature = "wgpu"))]
-            {
-                let _ = prefer_wgpu;
-                (
-                    self.layer_norm_cpu(residual_data, gamma_slice, beta_slice, epsilon)?,
-                    "cpu",
-                )
+            LayerNormBackend::Cpu => (
+                self.layer_norm_cpu(residual_data, gamma_slice, beta_slice, epsilon)?,
+                "cpu",
+            ),
+            LayerNormBackend::GpuWgpu => {
+                #[cfg(feature = "wgpu")]
+                {
+                    if !wgpu_dense::supports_layer_norm(rows, cols) {
+                        return Err(TensorError::BackendFailure {
+                            backend: "wgpu",
+                            message: format!(
+                                "layer_norm does not support shape {}x{} on the WGPU backend",
+                                rows, cols
+                            ),
+                        });
+                    }
+                    let tensor = Self::layer_norm_wgpu(
+                        self.data(),
+                        residual_data,
+                        gamma_slice,
+                        beta_slice,
+                        rows,
+                        cols,
+                        epsilon,
+                    )
+                    .map_err(|message| TensorError::BackendFailure {
+                        backend: "wgpu",
+                        message,
+                    })?;
+                    (tensor, "wgpu_dense")
+                }
+                #[cfg(not(feature = "wgpu"))]
+                {
+                    return Err(TensorError::BackendFailure {
+                        backend: "wgpu",
+                        message: "wgpu backend disabled at compile time".into(),
+                    });
+                }
             }
         };
 
         crate::emit_tensor_op("layer_norm", &[rows, cols], &[rows, cols]);
-        if backend_used != "wgpu" {
+        if backend_used != "wgpu_dense" {
             crate::emit_tensor_op_meta("layer_norm", || {
                 serde_json::json!({
                     "backend": backend_used,
+                    "requested_backend": backend.label(),
                     "rows": rows,
                     "cols": cols,
                     "epsilon": epsilon,
@@ -2218,6 +3468,33 @@ impl Tensor {
             });
         }
         Ok(tensor)
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn layer_norm_wgpu(
+        input: &[f32],
+        residual: Option<&[f32]>,
+        gamma: &[f32],
+        beta: &[f32],
+        rows: usize,
+        cols: usize,
+        epsilon: f32,
+    ) -> Result<Tensor, String> {
+        let buffer = match residual {
+            Some(residual_slice) => wgpu_dense::layer_norm_affine_add(
+                input,
+                residual_slice,
+                gamma,
+                beta,
+                rows,
+                cols,
+                epsilon,
+            ),
+            None => wgpu_dense::layer_norm_affine(input, gamma, beta, rows, cols, epsilon),
+        }?;
+        Tensor::validate_finite_tensor_util_slice("layer_norm_output", buffer.as_slice())
+            .map_err(|error| error.to_string())?;
+        Tensor::from_vec(rows, cols, buffer).map_err(|error| error.to_string())
     }
 
     fn layer_norm_cpu(
@@ -2242,20 +3519,30 @@ impl Tensor {
                 if let Some(residual) = residual {
                     v += residual[idx];
                 }
+                Self::validate_finite_tensor_util_value("layer_norm_value", v)?;
                 sum += v;
+                Self::validate_finite_tensor_util_value("layer_norm_sum", sum)?;
                 sumsq += v * v;
+                Self::validate_finite_tensor_util_value("layer_norm_sumsq", sumsq)?;
             }
             let mean = sum / cols_f;
-            let var = (sumsq / cols_f - mean * mean).max(0.0);
+            Self::validate_finite_tensor_util_value("layer_norm_mean", mean)?;
+            let raw_var = sumsq / cols_f - mean * mean;
+            Self::validate_finite_tensor_util_value("layer_norm_variance", raw_var)?;
+            let var = raw_var.max(0.0);
             let denom = (var + epsilon).sqrt();
+            Self::validate_finite_tensor_util_value("layer_norm_denom", denom)?;
             for c in 0..cols {
                 let idx = offset + c;
                 let mut v = input[idx];
                 if let Some(residual) = residual {
                     v += residual[idx];
                 }
+                Self::validate_finite_tensor_util_value("layer_norm_value", v)?;
                 let normed = (v - mean) / denom;
+                Self::validate_finite_tensor_util_value("layer_norm_normed", normed)?;
                 output[idx] = normed * gamma[c] + beta[c];
+                Self::validate_finite_tensor_util_value("layer_norm_output", output[idx])?;
             }
         }
 
@@ -2296,19 +3583,6 @@ impl Tensor {
         attn_bias: Option<&Tensor>,
         backend: AttentionBackend,
     ) -> PureResult<Tensor> {
-        if contexts == 0 || sequence == 0 {
-            return Err(TensorError::InvalidDimensions {
-                rows: contexts,
-                cols: sequence,
-            });
-        }
-        if self.cols == 0 {
-            return Err(TensorError::InvalidDimensions {
-                rows: self.rows,
-                cols: self.cols,
-            });
-        }
-
         let expected_rows =
             contexts
                 .checked_mul(sequence)
@@ -2363,12 +3637,53 @@ impl Tensor {
             None
         };
 
+        Self::validate_scale_factor("scaled_dot_attention_scale", scale)?;
+        Self::validate_finite_tensor_util_slice("scaled_dot_attention_query", self.data())?;
+        Self::validate_finite_tensor_util_slice("scaled_dot_attention_key", keys.data())?;
+        Self::validate_finite_tensor_util_slice("scaled_dot_attention_value", values.data())?;
+        if let Some(bias) = z_bias_slice {
+            Self::validate_finite_tensor_util_slice("scaled_dot_attention_z_bias", bias)?;
+        }
+        if let Some(bias) = attn_bias_slice {
+            Self::validate_finite_tensor_util_slice("scaled_dot_attention_attn_bias", bias)?;
+        }
+
         let head_dim = self.cols;
+        if expected_rows == 0 || head_dim == 0 {
+            let tensor = Tensor::zeros(expected_rows, head_dim)?;
+            crate::emit_tensor_op(
+                "scaled_dot_attention",
+                &[expected_rows, head_dim],
+                &[expected_rows, head_dim],
+            );
+            crate::emit_tensor_op_meta("scaled_dot_attention", || {
+                serde_json::json!({
+                    "backend": "cpu",
+                    "requested_backend": backend.label(),
+                    "contexts": contexts,
+                    "sequence": sequence,
+                    "head_dim": head_dim,
+                    "scale": scale,
+                    "flags": {
+                        "use_z_bias": z_bias_slice.is_some(),
+                        "use_attn_bias": attn_bias_slice.is_some(),
+                        "empty": true,
+                    }
+                })
+            });
+            return Ok(tensor);
+        }
         let queries = self.data();
         let keys_data = keys.data();
         let values_data = values.data();
 
-        let make_tensor = |buffer: Vec<f32>| Tensor::from_vec(expected_rows, head_dim, buffer);
+        let make_tensor = |buffer: Vec<f32>| {
+            Self::validate_finite_tensor_util_slice(
+                "scaled_dot_attention_output",
+                buffer.as_slice(),
+            )?;
+            Tensor::from_vec(expected_rows, head_dim, buffer)
+        };
 
         let (tensor, backend_used): (Tensor, &'static str) = match backend {
             AttentionBackend::Auto => {
@@ -2378,7 +3693,7 @@ impl Tensor {
                         if wgpu_dense::is_available()
                             && wgpu_dense::supports_fused_attention(contexts, sequence, head_dim)
                         {
-                            if let Ok(buffer) = wgpu_dense::fused_attention(
+                            match wgpu_dense::fused_attention(
                                 queries,
                                 keys_data,
                                 values_data,
@@ -2389,9 +3704,15 @@ impl Tensor {
                                 z_bias_slice,
                                 attn_bias_slice,
                             ) {
-                                Some(make_tensor(buffer)?)
-                            } else {
-                                None
+                                Ok(buffer) => Some(make_tensor(buffer)?),
+                                Err(message) if strict_gpu_path() => {
+                                    return Err(strict_gpu_fallback_error(
+                                        "wgpu",
+                                        "scaled_dot_attention",
+                                        message,
+                                    ));
+                                }
+                                Err(_) => None,
                             }
                         } else {
                             None
@@ -2404,7 +3725,7 @@ impl Tensor {
                 };
 
                 if let Some(tensor) = wgpu_tensor {
-                    Ok((tensor, "wgpu"))
+                    Ok((tensor, "wgpu_dense"))
                 } else {
                     let buffer = fused_attention_cpu(
                         queries,
@@ -2416,7 +3737,7 @@ impl Tensor {
                         scale,
                         z_bias_slice,
                         attn_bias_slice,
-                    );
+                    )?;
                     make_tensor(buffer).map(|tensor| (tensor, "cpu"))
                 }
             }
@@ -2431,7 +3752,7 @@ impl Tensor {
                     scale,
                     z_bias_slice,
                     attn_bias_slice,
-                );
+                )?;
                 make_tensor(buffer).map(|tensor| (tensor, "cpu"))
             }
             #[cfg(feature = "wgpu")]
@@ -2451,7 +3772,7 @@ impl Tensor {
                     backend: "wgpu",
                     message,
                 })?;
-                make_tensor(data).map(|tensor| (tensor, "wgpu"))
+                make_tensor(data).map(|tensor| (tensor, "wgpu_dense"))
             }
             #[cfg(not(feature = "wgpu"))]
             AttentionBackend::GpuWgpu => Err(TensorError::BackendFailure {
@@ -2465,10 +3786,11 @@ impl Tensor {
             &[expected_rows, head_dim],
             &[expected_rows, head_dim],
         );
-        if backend_used != "wgpu" {
+        if backend_used != "wgpu_dense" {
             crate::emit_tensor_op_meta("scaled_dot_attention", || {
                 serde_json::json!({
                     "backend": backend_used,
+                    "requested_backend": backend.label(),
                     "contexts": contexts,
                     "sequence": sequence,
                     "head_dim": head_dim,
@@ -2498,6 +3820,34 @@ impl Tensor {
                 message,
             })?;
         Tensor::from_vec(self.rows, other.cols, data)
+    }
+
+    fn emit_fused_matmul_meta(
+        &self,
+        op_name: &'static str,
+        other: &Tensor,
+        requested_backend: MatmulBackend,
+        backend_used: &'static str,
+        rows: usize,
+        inner: usize,
+        cols: usize,
+    ) {
+        crate::emit_tensor_op(
+            op_name,
+            &[self.rows, self.cols, other.rows, other.cols],
+            &[rows, cols],
+        );
+        crate::emit_tensor_op_meta(op_name, || {
+            serde_json::json!({
+                "backend": backend_used,
+                "requested_backend": requested_backend.label(),
+                "rows": rows,
+                "inner": inner,
+                "cols": cols,
+                "lhs_layout": self.layout.as_str(),
+                "rhs_layout": other.layout.as_str(),
+            })
+        });
     }
 
     /// Matrix multiply followed by bias addition and ReLU activation.
@@ -2557,6 +3907,7 @@ impl Tensor {
                 got: bias.len(),
             });
         }
+        Self::validate_finite_tensor_util_slice("matmul_bias_relu_bias", bias)?;
         if Arc::ptr_eq(&self.data, &dst.data) || Arc::ptr_eq(&other.data, &dst.data) {
             return Err(TensorError::InvalidValue {
                 label: "matmul_out_alias",
@@ -2566,31 +3917,35 @@ impl Tensor {
         let rows = self.rows;
         let cols = other.cols;
         let inner = self.cols;
-        let dst_slice = dst.data_mut();
+        let mut scratch = aligned_zeroed(rows * cols);
+        let work_slice = scratch.as_mut_slice();
 
-        match backend {
+        let backend_used = match backend {
             MatmulBackend::Auto => {
-                self.matmul_bias_relu_into_auto(other, bias, dst_slice, rows, inner, cols)?;
+                self.matmul_bias_relu_into_auto(other, bias, work_slice, rows, inner, cols)?
             }
             MatmulBackend::CpuSimd => {
-                cpu_dense::matmul_into(dst_slice, self.data(), other.data(), rows, inner, cols)
+                cpu_dense::matmul_into(work_slice, self.data(), other.data(), rows, inner, cols)
                     .map_err(|message| TensorError::BackendFailure {
                         backend: "cpu_simd",
                         message,
                     })?;
-                add_bias_relu_inplace(dst_slice, rows, cols, bias);
+                add_bias_relu_inplace(work_slice, rows, cols, bias);
+                "cpu_simd"
             }
             MatmulBackend::CpuNaive => {
-                matmul_naive_into(dst_slice, self.data(), other.data(), rows, inner, cols);
-                add_bias_relu_inplace(dst_slice, rows, cols, bias);
+                matmul_naive_into(work_slice, self.data(), other.data(), rows, inner, cols);
+                add_bias_relu_inplace(work_slice, rows, cols, bias);
+                "naive"
             }
             MatmulBackend::CpuFaer => {
-                faer_dense::matmul_into(dst_slice, self.data(), other.data(), rows, inner, cols)
+                faer_dense::matmul_into(work_slice, self.data(), other.data(), rows, inner, cols)
                     .map_err(|message| TensorError::BackendFailure {
-                        backend: "faer",
-                        message,
-                    })?;
-                add_bias_relu_inplace(dst_slice, rows, cols, bias);
+                    backend: "faer",
+                    message,
+                })?;
+                add_bias_relu_inplace(work_slice, rows, cols, bias);
+                "faer"
             }
             #[cfg(feature = "wgpu")]
             MatmulBackend::GpuWgpu => {
@@ -2606,19 +3961,32 @@ impl Tensor {
                     backend: "wgpu",
                     message,
                 })?;
-                dst_slice.copy_from_slice(&data);
+                work_slice.copy_from_slice(&data);
+                "wgpu"
             }
             #[cfg(feature = "hip")]
             MatmulBackend::GpuHip => {
-                hip_dense::matmul_into(self.data(), other.data(), dst_slice, rows, inner, cols)
+                hip_dense::matmul_into(self.data(), other.data(), work_slice, rows, inner, cols)
                     .map_err(|message| TensorError::BackendFailure {
                         backend: "hip",
                         message,
                     })?;
-                add_bias_relu_inplace(dst_slice, rows, cols, bias);
+                add_bias_relu_inplace(work_slice, rows, cols, bias);
+                "hip"
             }
-        }
+        };
+        Self::validate_finite_tensor_util_slice("matmul_bias_relu_output", scratch.as_slice())?;
+        dst.data_mut().copy_from_slice(scratch.as_slice());
 
+        self.emit_fused_matmul_meta(
+            "matmul_bias_relu",
+            other,
+            backend,
+            backend_used,
+            rows,
+            inner,
+            cols,
+        );
         Ok(())
     }
 
@@ -2630,15 +3998,30 @@ impl Tensor {
         rows: usize,
         inner: usize,
         cols: usize,
-    ) -> PureResult<()> {
+    ) -> PureResult<&'static str> {
         #[cfg(feature = "wgpu")]
         {
             if wgpu_dense::is_available() && wgpu_dense::should_use(rows, inner, cols) {
-                if let Ok(buffer) =
-                    wgpu_dense::matmul_bias_relu(self.data(), other.data(), bias, rows, inner, cols)
-                {
-                    dst.copy_from_slice(&buffer);
-                    return Ok(());
+                match wgpu_dense::matmul_bias_relu(
+                    self.data(),
+                    other.data(),
+                    bias,
+                    rows,
+                    inner,
+                    cols,
+                ) {
+                    Ok(buffer) => {
+                        dst.copy_from_slice(&buffer);
+                        return Ok("wgpu");
+                    }
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error(
+                            "wgpu",
+                            "matmul_bias_relu",
+                            message,
+                        ));
+                    }
+                    Err(_) => {}
                 }
             }
         }
@@ -2646,10 +4029,19 @@ impl Tensor {
         #[cfg(feature = "hip")]
         {
             if hip_dense::is_available() && hip_dense::should_use(rows, inner, cols) {
-                if hip_dense::matmul_into(self.data(), other.data(), dst, rows, inner, cols).is_ok()
-                {
-                    add_bias_relu_inplace(dst, rows, cols, bias);
-                    return Ok(());
+                match hip_dense::matmul_into(self.data(), other.data(), dst, rows, inner, cols) {
+                    Ok(()) => {
+                        add_bias_relu_inplace(dst, rows, cols, bias);
+                        return Ok("hip");
+                    }
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error(
+                            "hip",
+                            "matmul_bias_relu",
+                            message,
+                        ));
+                    }
+                    Err(_) => {}
                 }
             }
         }
@@ -2659,7 +4051,7 @@ impl Tensor {
                 cpu_dense::matmul_into(dst, self.data(), other.data(), rows, inner, cols)
             {
                 add_bias_relu_inplace(dst, rows, cols, bias);
-                return Ok(());
+                return Ok("cpu_simd");
             }
         }
 
@@ -2668,13 +4060,13 @@ impl Tensor {
                 faer_dense::matmul_into(dst, self.data(), other.data(), rows, inner, cols)
             {
                 add_bias_relu_inplace(dst, rows, cols, bias);
-                return Ok(());
+                return Ok("faer");
             }
         }
 
         matmul_naive_into(dst, self.data(), other.data(), rows, inner, cols);
         add_bias_relu_inplace(dst, rows, cols, bias);
-        Ok(())
+        Ok("naive")
     }
 
     /// Matrix multiply followed by bias addition and GELU activation.
@@ -2701,12 +4093,13 @@ impl Tensor {
                 got: bias.len(),
             });
         }
+        Self::validate_finite_tensor_util_slice("matmul_bias_gelu_bias", bias)?;
 
         let rows = self.rows;
         let cols = other.cols;
         let inner = self.cols;
 
-        let data = match backend {
+        let (data, backend_used) = match backend {
             MatmulBackend::Auto => self.matmul_bias_gelu_auto(other, bias, rows, inner, cols)?,
             MatmulBackend::CpuSimd => {
                 let mut buffer = vec![0.0; rows * cols];
@@ -2716,12 +4109,12 @@ impl Tensor {
                     message,
                 })?;
                 add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
-                buffer
+                (buffer, "cpu_simd")
             }
             MatmulBackend::CpuNaive => {
                 let mut buffer = matmul_naive(self.data(), other.data(), rows, inner, cols);
                 add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
-                buffer
+                (buffer, "naive")
             }
             MatmulBackend::CpuFaer => {
                 let mut buffer = faer_dense::matmul(self.data(), other.data(), rows, inner, cols)
@@ -2730,15 +4123,23 @@ impl Tensor {
                     message,
                 })?;
                 add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
-                buffer
+                (buffer, "faer")
             }
             #[cfg(feature = "wgpu")]
             MatmulBackend::GpuWgpu => {
-                wgpu_dense::matmul_bias_gelu(self.data(), other.data(), bias, rows, inner, cols)
-                    .map_err(|message| TensorError::BackendFailure {
-                        backend: "wgpu",
-                        message,
-                    })?
+                let buffer = wgpu_dense::matmul_bias_gelu(
+                    self.data(),
+                    other.data(),
+                    bias,
+                    rows,
+                    inner,
+                    cols,
+                )
+                .map_err(|message| TensorError::BackendFailure {
+                    backend: "wgpu",
+                    message,
+                })?;
+                (buffer, "wgpu")
             }
             #[cfg(feature = "hip")]
             MatmulBackend::GpuHip => {
@@ -2748,11 +4149,22 @@ impl Tensor {
                         message,
                     })?;
                 add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
-                buffer
+                (buffer, "hip")
             }
         };
 
-        Tensor::from_vec(rows, cols, data)
+        Self::validate_finite_tensor_util_slice("matmul_bias_gelu_output", data.as_slice())?;
+        let tensor = Tensor::from_vec(rows, cols, data)?;
+        self.emit_fused_matmul_meta(
+            "matmul_bias_gelu",
+            other,
+            backend,
+            backend_used,
+            rows,
+            inner,
+            cols,
+        );
+        Ok(tensor)
     }
 
     fn matmul_bias_gelu_auto(
@@ -2762,14 +4174,27 @@ impl Tensor {
         rows: usize,
         inner: usize,
         cols: usize,
-    ) -> PureResult<Vec<f32>> {
+    ) -> PureResult<(Vec<f32>, &'static str)> {
         #[cfg(feature = "wgpu")]
         {
             if wgpu_dense::is_available() && wgpu_dense::should_use(rows, inner, cols) {
-                if let Ok(buffer) =
-                    wgpu_dense::matmul_bias_gelu(self.data(), other.data(), bias, rows, inner, cols)
-                {
-                    return Ok(buffer);
+                match wgpu_dense::matmul_bias_gelu(
+                    self.data(),
+                    other.data(),
+                    bias,
+                    rows,
+                    inner,
+                    cols,
+                ) {
+                    Ok(buffer) => return Ok((buffer, "wgpu")),
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error(
+                            "wgpu",
+                            "matmul_bias_gelu",
+                            message,
+                        ));
+                    }
+                    Err(_) => {}
                 }
             }
         }
@@ -2777,11 +4202,19 @@ impl Tensor {
         #[cfg(feature = "hip")]
         {
             if hip_dense::is_available() && hip_dense::should_use(rows, inner, cols) {
-                if let Ok(mut buffer) =
-                    hip_dense::matmul(self.data(), other.data(), rows, inner, cols)
-                {
-                    add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
-                    return Ok(buffer);
+                match hip_dense::matmul(self.data(), other.data(), rows, inner, cols) {
+                    Ok(mut buffer) => {
+                        add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
+                        return Ok((buffer, "hip"));
+                    }
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error(
+                            "hip",
+                            "matmul_bias_gelu",
+                            message,
+                        ));
+                    }
+                    Err(_) => {}
                 }
             }
         }
@@ -2792,7 +4225,7 @@ impl Tensor {
                 .is_ok()
             {
                 add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
-                return Ok(buffer);
+                return Ok((buffer, "cpu_simd"));
             }
         }
 
@@ -2800,13 +4233,13 @@ impl Tensor {
             if let Ok(mut buffer) = faer_dense::matmul(self.data(), other.data(), rows, inner, cols)
             {
                 add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
-                return Ok(buffer);
+                return Ok((buffer, "faer"));
             }
         }
 
         let mut buffer = matmul_naive(self.data(), other.data(), rows, inner, cols);
         add_bias_gelu_inplace(&mut buffer, rows, cols, bias);
-        Ok(buffer)
+        Ok((buffer, "naive"))
     }
 
     /// Matrix multiply with bias, residual addition, and ReLU activation.
@@ -2879,12 +4312,14 @@ impl Tensor {
                 got: bias.len(),
             });
         }
+        Self::validate_finite_tensor_util_slice("matmul_bias_add_relu_bias", bias)?;
         if residual.shape() != (self.rows, other.cols) {
             return Err(TensorError::ShapeMismatch {
                 left: residual.shape(),
                 right: (self.rows, other.cols),
             });
         }
+        Self::validate_finite_tensor_util_slice("matmul_bias_add_relu_residual", residual.data())?;
         if Arc::ptr_eq(&self.data, &dst.data)
             || Arc::ptr_eq(&other.data, &dst.data)
             || Arc::ptr_eq(&residual.data, &dst.data)
@@ -2897,33 +4332,35 @@ impl Tensor {
         let rows = self.rows;
         let cols = other.cols;
         let inner = self.cols;
-        let dst_slice = dst.data_mut();
+        let mut scratch = aligned_zeroed(rows * cols);
+        let work_slice = scratch.as_mut_slice();
 
-        match backend {
-            MatmulBackend::Auto => {
-                self.matmul_bias_add_relu_into_auto(
-                    other, bias, residual, dst_slice, rows, inner, cols,
-                )?;
-            }
+        let backend_used = match backend {
+            MatmulBackend::Auto => self.matmul_bias_add_relu_into_auto(
+                other, bias, residual, work_slice, rows, inner, cols,
+            )?,
             MatmulBackend::CpuSimd => {
-                cpu_dense::matmul_into(dst_slice, self.data(), other.data(), rows, inner, cols)
+                cpu_dense::matmul_into(work_slice, self.data(), other.data(), rows, inner, cols)
                     .map_err(|message| TensorError::BackendFailure {
                         backend: "cpu_simd",
                         message,
                     })?;
-                add_bias_residual_relu_inplace(dst_slice, rows, cols, bias, residual.data());
+                add_bias_residual_relu_inplace(work_slice, rows, cols, bias, residual.data());
+                "cpu_simd"
             }
             MatmulBackend::CpuNaive => {
-                matmul_naive_into(dst_slice, self.data(), other.data(), rows, inner, cols);
-                add_bias_residual_relu_inplace(dst_slice, rows, cols, bias, residual.data());
+                matmul_naive_into(work_slice, self.data(), other.data(), rows, inner, cols);
+                add_bias_residual_relu_inplace(work_slice, rows, cols, bias, residual.data());
+                "naive"
             }
             MatmulBackend::CpuFaer => {
-                faer_dense::matmul_into(dst_slice, self.data(), other.data(), rows, inner, cols)
+                faer_dense::matmul_into(work_slice, self.data(), other.data(), rows, inner, cols)
                     .map_err(|message| TensorError::BackendFailure {
-                        backend: "faer",
-                        message,
-                    })?;
-                add_bias_residual_relu_inplace(dst_slice, rows, cols, bias, residual.data());
+                    backend: "faer",
+                    message,
+                })?;
+                add_bias_residual_relu_inplace(work_slice, rows, cols, bias, residual.data());
+                "faer"
             }
             #[cfg(feature = "wgpu")]
             MatmulBackend::GpuWgpu => {
@@ -2940,19 +4377,32 @@ impl Tensor {
                     backend: "wgpu",
                     message,
                 })?;
-                dst_slice.copy_from_slice(&data);
+                work_slice.copy_from_slice(&data);
+                "wgpu"
             }
             #[cfg(feature = "hip")]
             MatmulBackend::GpuHip => {
-                hip_dense::matmul_into(self.data(), other.data(), dst_slice, rows, inner, cols)
+                hip_dense::matmul_into(self.data(), other.data(), work_slice, rows, inner, cols)
                     .map_err(|message| TensorError::BackendFailure {
                         backend: "hip",
                         message,
                     })?;
-                add_bias_residual_relu_inplace(dst_slice, rows, cols, bias, residual.data());
+                add_bias_residual_relu_inplace(work_slice, rows, cols, bias, residual.data());
+                "hip"
             }
-        }
+        };
+        Self::validate_finite_tensor_util_slice("matmul_bias_add_relu_output", scratch.as_slice())?;
+        dst.data_mut().copy_from_slice(scratch.as_slice());
 
+        self.emit_fused_matmul_meta(
+            "matmul_bias_add_relu",
+            other,
+            backend,
+            backend_used,
+            rows,
+            inner,
+            cols,
+        );
         Ok(())
     }
 
@@ -2966,11 +4416,11 @@ impl Tensor {
         rows: usize,
         inner: usize,
         cols: usize,
-    ) -> PureResult<()> {
+    ) -> PureResult<&'static str> {
         #[cfg(feature = "wgpu")]
         {
             if wgpu_dense::is_available() && wgpu_dense::should_use(rows, inner, cols) {
-                if let Ok(buffer) = wgpu_dense::matmul_bias_add_relu(
+                match wgpu_dense::matmul_bias_add_relu(
                     self.data(),
                     other.data(),
                     bias,
@@ -2979,8 +4429,18 @@ impl Tensor {
                     inner,
                     cols,
                 ) {
-                    dst.copy_from_slice(&buffer);
-                    return Ok(());
+                    Ok(buffer) => {
+                        dst.copy_from_slice(&buffer);
+                        return Ok("wgpu");
+                    }
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error(
+                            "wgpu",
+                            "matmul_bias_add_relu",
+                            message,
+                        ));
+                    }
+                    Err(_) => {}
                 }
             }
         }
@@ -2988,10 +4448,19 @@ impl Tensor {
         #[cfg(feature = "hip")]
         {
             if hip_dense::is_available() && hip_dense::should_use(rows, inner, cols) {
-                if hip_dense::matmul_into(self.data(), other.data(), dst, rows, inner, cols).is_ok()
-                {
-                    add_bias_residual_relu_inplace(dst, rows, cols, bias, residual.data());
-                    return Ok(());
+                match hip_dense::matmul_into(self.data(), other.data(), dst, rows, inner, cols) {
+                    Ok(()) => {
+                        add_bias_residual_relu_inplace(dst, rows, cols, bias, residual.data());
+                        return Ok("hip");
+                    }
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error(
+                            "hip",
+                            "matmul_bias_add_relu",
+                            message,
+                        ));
+                    }
+                    Err(_) => {}
                 }
             }
         }
@@ -3001,7 +4470,7 @@ impl Tensor {
                 cpu_dense::matmul_into(dst, self.data(), other.data(), rows, inner, cols)
             {
                 add_bias_residual_relu_inplace(dst, rows, cols, bias, residual.data());
-                return Ok(());
+                return Ok("cpu_simd");
             }
         }
 
@@ -3010,13 +4479,13 @@ impl Tensor {
                 faer_dense::matmul_into(dst, self.data(), other.data(), rows, inner, cols)
             {
                 add_bias_residual_relu_inplace(dst, rows, cols, bias, residual.data());
-                return Ok(());
+                return Ok("faer");
             }
         }
 
         matmul_naive_into(dst, self.data(), other.data(), rows, inner, cols);
         add_bias_residual_relu_inplace(dst, rows, cols, bias, residual.data());
-        Ok(())
+        Ok("naive")
     }
 
     /// Matrix multiply with bias, residual addition, and GELU activation.
@@ -3049,18 +4518,20 @@ impl Tensor {
                 got: bias.len(),
             });
         }
+        Self::validate_finite_tensor_util_slice("matmul_bias_add_gelu_bias", bias)?;
         if residual.shape() != (self.rows, other.cols) {
             return Err(TensorError::ShapeMismatch {
                 left: residual.shape(),
                 right: (self.rows, other.cols),
             });
         }
+        Self::validate_finite_tensor_util_slice("matmul_bias_add_gelu_residual", residual.data())?;
 
         let rows = self.rows;
         let cols = other.cols;
         let inner = self.cols;
 
-        let data = match backend {
+        let (data, backend_used) = match backend {
             MatmulBackend::Auto => {
                 self.matmul_bias_add_gelu_auto(other, bias, residual, rows, inner, cols)?
             }
@@ -3072,12 +4543,12 @@ impl Tensor {
                     message,
                 })?;
                 add_bias_residual_gelu_inplace(&mut buffer, rows, cols, bias, residual.data());
-                buffer
+                (buffer, "cpu_simd")
             }
             MatmulBackend::CpuNaive => {
                 let mut buffer = matmul_naive(self.data(), other.data(), rows, inner, cols);
                 add_bias_residual_gelu_inplace(&mut buffer, rows, cols, bias, residual.data());
-                buffer
+                (buffer, "naive")
             }
             MatmulBackend::CpuFaer => {
                 let mut buffer = faer_dense::matmul(self.data(), other.data(), rows, inner, cols)
@@ -3086,22 +4557,25 @@ impl Tensor {
                     message,
                 })?;
                 add_bias_residual_gelu_inplace(&mut buffer, rows, cols, bias, residual.data());
-                buffer
+                (buffer, "faer")
             }
             #[cfg(feature = "wgpu")]
-            MatmulBackend::GpuWgpu => wgpu_dense::matmul_bias_add_gelu(
-                self.data(),
-                other.data(),
-                bias,
-                residual.data(),
-                rows,
-                inner,
-                cols,
-            )
-            .map_err(|message| TensorError::BackendFailure {
-                backend: "wgpu",
-                message,
-            })?,
+            MatmulBackend::GpuWgpu => {
+                let buffer = wgpu_dense::matmul_bias_add_gelu(
+                    self.data(),
+                    other.data(),
+                    bias,
+                    residual.data(),
+                    rows,
+                    inner,
+                    cols,
+                )
+                .map_err(|message| TensorError::BackendFailure {
+                    backend: "wgpu",
+                    message,
+                })?;
+                (buffer, "wgpu")
+            }
             #[cfg(feature = "hip")]
             MatmulBackend::GpuHip => {
                 let mut buffer = hip_dense::matmul(self.data(), other.data(), rows, inner, cols)
@@ -3110,11 +4584,22 @@ impl Tensor {
                         message,
                     })?;
                 add_bias_residual_gelu_inplace(&mut buffer, rows, cols, bias, residual.data());
-                buffer
+                (buffer, "hip")
             }
         };
 
-        Tensor::from_vec(rows, cols, data)
+        Self::validate_finite_tensor_util_slice("matmul_bias_add_gelu_output", data.as_slice())?;
+        let tensor = Tensor::from_vec(rows, cols, data)?;
+        self.emit_fused_matmul_meta(
+            "matmul_bias_add_gelu",
+            other,
+            backend,
+            backend_used,
+            rows,
+            inner,
+            cols,
+        );
+        Ok(tensor)
     }
 
     fn matmul_bias_add_gelu_auto(
@@ -3125,11 +4610,11 @@ impl Tensor {
         rows: usize,
         inner: usize,
         cols: usize,
-    ) -> PureResult<Vec<f32>> {
+    ) -> PureResult<(Vec<f32>, &'static str)> {
         #[cfg(feature = "wgpu")]
         {
             if wgpu_dense::is_available() && wgpu_dense::should_use(rows, inner, cols) {
-                if let Ok(buffer) = wgpu_dense::matmul_bias_add_gelu(
+                match wgpu_dense::matmul_bias_add_gelu(
                     self.data(),
                     other.data(),
                     bias,
@@ -3138,7 +4623,15 @@ impl Tensor {
                     inner,
                     cols,
                 ) {
-                    return Ok(buffer);
+                    Ok(buffer) => return Ok((buffer, "wgpu")),
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error(
+                            "wgpu",
+                            "matmul_bias_add_gelu",
+                            message,
+                        ));
+                    }
+                    Err(_) => {}
                 }
             }
         }
@@ -3146,11 +4639,25 @@ impl Tensor {
         #[cfg(feature = "hip")]
         {
             if hip_dense::is_available() && hip_dense::should_use(rows, inner, cols) {
-                if let Ok(mut buffer) =
-                    hip_dense::matmul(self.data(), other.data(), rows, inner, cols)
-                {
-                    add_bias_residual_gelu_inplace(&mut buffer, rows, cols, bias, residual.data());
-                    return Ok(buffer);
+                match hip_dense::matmul(self.data(), other.data(), rows, inner, cols) {
+                    Ok(mut buffer) => {
+                        add_bias_residual_gelu_inplace(
+                            &mut buffer,
+                            rows,
+                            cols,
+                            bias,
+                            residual.data(),
+                        );
+                        return Ok((buffer, "hip"));
+                    }
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error(
+                            "hip",
+                            "matmul_bias_add_gelu",
+                            message,
+                        ));
+                    }
+                    Err(_) => {}
                 }
             }
         }
@@ -3161,7 +4668,7 @@ impl Tensor {
                 .is_ok()
             {
                 add_bias_residual_gelu_inplace(&mut buffer, rows, cols, bias, residual.data());
-                return Ok(buffer);
+                return Ok((buffer, "cpu_simd"));
             }
         }
 
@@ -3169,26 +4676,89 @@ impl Tensor {
             if let Ok(mut buffer) = faer_dense::matmul(self.data(), other.data(), rows, inner, cols)
             {
                 add_bias_residual_gelu_inplace(&mut buffer, rows, cols, bias, residual.data());
-                return Ok(buffer);
+                return Ok((buffer, "faer"));
             }
         }
 
         let mut buffer = matmul_naive(self.data(), other.data(), rows, inner, cols);
         add_bias_residual_gelu_inplace(&mut buffer, rows, cols, bias, residual.data());
-        Ok(buffer)
+        Ok((buffer, "naive"))
     }
 
     /// Element-wise addition.
     pub fn add(&self, other: &Tensor) -> PureResult<Tensor> {
+        self.add_with_backend(other, TensorUtilBackend::Auto)
+    }
+
+    /// Element-wise addition with an explicit utility backend selection.
+    pub fn add_with_backend(
+        &self,
+        other: &Tensor,
+        _backend: TensorUtilBackend,
+    ) -> PureResult<Tensor> {
         if self.shape() != other.shape() {
             return Err(TensorError::ShapeMismatch {
                 left: self.shape(),
                 right: other.shape(),
             });
         }
+        #[cfg(feature = "wgpu")]
+        let mut wgpu_failure: Option<String> = None;
+
+        #[cfg(feature = "wgpu")]
+        {
+            if matches!(_backend, TensorUtilBackend::GpuWgpu)
+                && self.rows > 0
+                && self.cols > 0
+                && wgpu_dense::is_available()
+            {
+                match wgpu_dense::add(self.data(), other.data(), self.rows, self.cols) {
+                    Ok(buffer) => {
+                        for &output in &buffer {
+                            Self::validate_finite_tensor_util_value("add_output", output)?;
+                        }
+                        let output = Tensor::from_vec(self.rows, self.cols, buffer)?;
+                        crate::emit_tensor_op(
+                            "add",
+                            &[self.rows, self.cols, other.rows, other.cols],
+                            &[self.rows, self.cols],
+                        );
+                        emit_wgpu_tensor_op_meta(
+                            "add",
+                            _backend.label(),
+                            self.rows,
+                            self.cols,
+                            self.rows,
+                            self.cols,
+                            self.layout,
+                            "elementwise",
+                            "tensor_util.add",
+                            |data| {
+                                data.insert("rhs_rows".to_string(), serde_json::json!(other.rows));
+                                data.insert("rhs_cols".to_string(), serde_json::json!(other.cols));
+                                data.insert(
+                                    "rhs_layout".to_string(),
+                                    serde_json::json!(other.layout.as_str()),
+                                );
+                            },
+                        );
+                        return Ok(output);
+                    }
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error("wgpu", "add", message));
+                    }
+                    Err(message) => {
+                        wgpu_failure = Some(message);
+                    }
+                }
+            }
+        }
+
         let mut data = aligned_with_capacity(self.len());
         for (a, b) in self.data.iter().zip(other.data.iter()) {
-            data.push(a + b);
+            let output = a + b;
+            Self::validate_finite_tensor_util_value("add_output", output)?;
+            data.push(output);
         }
         let output = Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)?;
         crate::emit_tensor_op(
@@ -3196,20 +4766,112 @@ impl Tensor {
             &[self.rows, self.cols, other.rows, other.cols],
             &[self.rows, self.cols],
         );
+        emit_tensor_util_cpu_op_meta(
+            "add",
+            self.rows,
+            self.cols,
+            self.rows,
+            self.cols,
+            self.layout,
+            _backend.label(),
+            "elementwise",
+            |data| {
+                data.insert("rhs_rows".to_string(), serde_json::json!(other.rows));
+                data.insert("rhs_cols".to_string(), serde_json::json!(other.cols));
+                data.insert(
+                    "rhs_layout".to_string(),
+                    serde_json::json!(other.layout.as_str()),
+                );
+                #[cfg(feature = "wgpu")]
+                if let Some(message) = wgpu_failure.as_deref() {
+                    data.insert(
+                        "fallback".to_string(),
+                        wgpu_runtime_fallback_meta(
+                            "cpu",
+                            WGPU_RUNTIME_FALLBACK_REASON,
+                            Some(message),
+                        ),
+                    );
+                }
+            },
+        );
         Ok(output)
     }
 
     /// Element-wise subtraction.
     pub fn sub(&self, other: &Tensor) -> PureResult<Tensor> {
+        self.sub_with_backend(other, TensorUtilBackend::Auto)
+    }
+
+    /// Element-wise subtraction with an explicit utility backend selection.
+    pub fn sub_with_backend(
+        &self,
+        other: &Tensor,
+        _backend: TensorUtilBackend,
+    ) -> PureResult<Tensor> {
         if self.shape() != other.shape() {
             return Err(TensorError::ShapeMismatch {
                 left: self.shape(),
                 right: other.shape(),
             });
         }
+        #[cfg(feature = "wgpu")]
+        let mut wgpu_failure: Option<String> = None;
+
+        #[cfg(feature = "wgpu")]
+        {
+            if matches!(_backend, TensorUtilBackend::GpuWgpu)
+                && self.rows > 0
+                && self.cols > 0
+                && wgpu_dense::is_available()
+            {
+                match wgpu_dense::sub(self.data(), other.data(), self.rows, self.cols) {
+                    Ok(buffer) => {
+                        for &output in &buffer {
+                            Self::validate_finite_tensor_util_value("sub_output", output)?;
+                        }
+                        let output = Tensor::from_vec(self.rows, self.cols, buffer)?;
+                        crate::emit_tensor_op(
+                            "sub",
+                            &[self.rows, self.cols, other.rows, other.cols],
+                            &[self.rows, self.cols],
+                        );
+                        emit_wgpu_tensor_op_meta(
+                            "sub",
+                            _backend.label(),
+                            self.rows,
+                            self.cols,
+                            self.rows,
+                            self.cols,
+                            self.layout,
+                            "elementwise",
+                            "tensor_util.sub",
+                            |data| {
+                                data.insert("rhs_rows".to_string(), serde_json::json!(other.rows));
+                                data.insert("rhs_cols".to_string(), serde_json::json!(other.cols));
+                                data.insert(
+                                    "rhs_layout".to_string(),
+                                    serde_json::json!(other.layout.as_str()),
+                                );
+                            },
+                        );
+                        return Ok(output);
+                    }
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error("wgpu", "sub", message));
+                    }
+                    Err(message) => {
+                        wgpu_failure = Some(message);
+                    }
+                }
+            }
+        }
+
         let mut data = aligned_with_capacity(self.len());
         for (a, b) in self.data.iter().zip(other.data.iter()) {
-            data.push(a - b);
+            let output = a - b;
+            Self::validate_finite_tensor_util_value("sub_output", output)?;
+            data.push(output);
         }
         let output = Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)?;
         crate::emit_tensor_op(
@@ -3217,31 +4879,307 @@ impl Tensor {
             &[self.rows, self.cols, other.rows, other.cols],
             &[self.rows, self.cols],
         );
+        emit_tensor_util_cpu_op_meta(
+            "sub",
+            self.rows,
+            self.cols,
+            self.rows,
+            self.cols,
+            self.layout,
+            _backend.label(),
+            "elementwise",
+            |data| {
+                data.insert("rhs_rows".to_string(), serde_json::json!(other.rows));
+                data.insert("rhs_cols".to_string(), serde_json::json!(other.cols));
+                data.insert(
+                    "rhs_layout".to_string(),
+                    serde_json::json!(other.layout.as_str()),
+                );
+                #[cfg(feature = "wgpu")]
+                if let Some(message) = wgpu_failure.as_deref() {
+                    data.insert(
+                        "fallback".to_string(),
+                        wgpu_runtime_fallback_meta(
+                            "cpu",
+                            WGPU_RUNTIME_FALLBACK_REASON,
+                            Some(message),
+                        ),
+                    );
+                }
+            },
+        );
         Ok(output)
     }
 
     /// Returns a new tensor where every element is scaled by `value`.
     pub fn scale(&self, value: f32) -> PureResult<Tensor> {
+        self.scale_with_backend(value, TensorUtilBackend::Auto)
+    }
+
+    fn validate_finite_tensor_util_value(label: &'static str, value: f32) -> PureResult<()> {
+        if !value.is_finite() {
+            return Err(TensorError::NonFiniteValue { label, value });
+        }
+        Ok(())
+    }
+
+    fn validate_finite_tensor_util_slice(label: &'static str, values: &[f32]) -> PureResult<()> {
+        for &value in values {
+            Self::validate_finite_tensor_util_value(label, value)?;
+        }
+        Ok(())
+    }
+
+    fn validate_scale_factor(label: &'static str, scale: f32) -> PureResult<()> {
+        if !scale.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label,
+                value: scale,
+            });
+        }
+        Ok(())
+    }
+
+    fn checked_scale_output(input: f32, scale: f32) -> PureResult<f32> {
+        Self::validate_scale_factor("scale_factor", scale)?;
+        let output = input * scale;
+        Self::validate_finite_tensor_util_value("scale_output", output)?;
+        Ok(output)
+    }
+
+    fn validate_add_scaled_outputs(lhs: &[f32], rhs: &[f32], scale: f32) -> PureResult<()> {
+        Self::validate_scale_factor("add_scaled_factor", scale)?;
+        for (&a, &b) in lhs.iter().zip(rhs.iter()) {
+            let delta = scale * b;
+            Self::validate_finite_tensor_util_value("add_scaled_delta", delta)?;
+            let output = a + delta;
+            Self::validate_finite_tensor_util_value("add_scaled_output", output)?;
+        }
+        Ok(())
+    }
+
+    fn validate_add_row_outputs(
+        rows: usize,
+        cols: usize,
+        lhs: &[f32],
+        bias: &[f32],
+    ) -> PureResult<()> {
+        for &value in bias {
+            Self::validate_finite_tensor_util_value("add_row_bias", value)?;
+        }
+        for row in 0..rows {
+            let offset = row * cols;
+            for col in 0..cols {
+                let output = lhs[offset + col] + bias[col];
+                Self::validate_finite_tensor_util_value("add_row_output", output)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_mul_row_outputs(
+        rows: usize,
+        cols: usize,
+        lhs: &[f32],
+        row: &[f32],
+    ) -> PureResult<()> {
+        for &value in row {
+            Self::validate_finite_tensor_util_value("mul_row_rhs", value)?;
+        }
+        for row_idx in 0..rows {
+            let offset = row_idx * cols;
+            for col in 0..cols {
+                let output = lhs[offset + col] * row[col];
+                Self::validate_finite_tensor_util_value("mul_row_output", output)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_row_affine_outputs(
+        rows: usize,
+        cols: usize,
+        lhs: &[f32],
+        scale_row: &[f32],
+        bias_row: &[f32],
+    ) -> PureResult<()> {
+        for &value in scale_row {
+            Self::validate_finite_tensor_util_value("row_affine_scale", value)?;
+        }
+        for &value in bias_row {
+            Self::validate_finite_tensor_util_value("row_affine_bias", value)?;
+        }
+        for row_idx in 0..rows {
+            let offset = row_idx * cols;
+            for col in 0..cols {
+                let output = lhs[offset + col] * scale_row[col] + bias_row[col];
+                Self::validate_finite_tensor_util_value("row_affine_output", output)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Returns a scaled tensor with an explicit utility backend selection.
+    pub fn scale_with_backend(
+        &self,
+        value: f32,
+        _backend: TensorUtilBackend,
+    ) -> PureResult<Tensor> {
+        Self::validate_scale_factor("scale_factor", value)?;
+        #[cfg(feature = "wgpu")]
+        let mut wgpu_failure: Option<String> = None;
+
+        #[cfg(feature = "wgpu")]
+        {
+            if matches!(_backend, TensorUtilBackend::GpuWgpu)
+                && self.rows > 0
+                && self.cols > 0
+                && wgpu_dense::is_available()
+            {
+                match wgpu_dense::scale(self.data(), self.rows, self.cols, value) {
+                    Ok(buffer) => {
+                        for &output in &buffer {
+                            Self::validate_finite_tensor_util_value("scale_output", output)?;
+                        }
+                        let output = Tensor::from_vec(self.rows, self.cols, buffer)?;
+                        crate::emit_tensor_op(
+                            "scale",
+                            &[self.rows, self.cols],
+                            &[self.rows, self.cols],
+                        );
+                        emit_wgpu_tensor_op_meta(
+                            "scale",
+                            _backend.label(),
+                            self.rows,
+                            self.cols,
+                            self.rows,
+                            self.cols,
+                            self.layout,
+                            "elementwise",
+                            "tensor_util.scale",
+                            |data| {
+                                data.insert("scale".to_string(), serde_json::json!(value));
+                            },
+                        );
+                        return Ok(output);
+                    }
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error("wgpu", "scale", message));
+                    }
+                    Err(message) => {
+                        wgpu_failure = Some(message);
+                    }
+                }
+            }
+        }
+
         let mut data = aligned_with_capacity(self.len());
         for &a in self.data.iter() {
-            data.push(a * value);
+            data.push(Self::checked_scale_output(a, value)?);
         }
         let output = Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)?;
         crate::emit_tensor_op("scale", &[self.rows, self.cols], &[self.rows, self.cols]);
+        emit_tensor_util_cpu_op_meta(
+            "scale",
+            self.rows,
+            self.cols,
+            self.rows,
+            self.cols,
+            self.layout,
+            _backend.label(),
+            "elementwise",
+            |data| {
+                data.insert("scale".to_string(), serde_json::json!(value));
+                #[cfg(feature = "wgpu")]
+                if let Some(message) = wgpu_failure.as_deref() {
+                    data.insert(
+                        "fallback".to_string(),
+                        wgpu_runtime_fallback_meta(
+                            "cpu",
+                            WGPU_RUNTIME_FALLBACK_REASON,
+                            Some(message),
+                        ),
+                    );
+                }
+            },
+        );
         Ok(output)
     }
 
     /// Element-wise product (Hadamard) between two tensors of identical shape.
     pub fn hadamard(&self, other: &Tensor) -> PureResult<Tensor> {
+        self.hadamard_with_backend(other, TensorUtilBackend::Auto)
+    }
+
+    /// Element-wise product with an explicit utility backend selection.
+    pub fn hadamard_with_backend(
+        &self,
+        other: &Tensor,
+        _backend: TensorUtilBackend,
+    ) -> PureResult<Tensor> {
         if self.shape() != other.shape() {
             return Err(TensorError::ShapeMismatch {
                 left: self.shape(),
                 right: other.shape(),
             });
         }
+        #[cfg(feature = "wgpu")]
+        let mut wgpu_failure: Option<String> = None;
+
+        #[cfg(feature = "wgpu")]
+        {
+            if matches!(_backend, TensorUtilBackend::GpuWgpu)
+                && self.rows > 0
+                && self.cols > 0
+                && wgpu_dense::is_available()
+            {
+                match wgpu_dense::hadamard(self.data(), other.data(), self.rows, self.cols) {
+                    Ok(buffer) => {
+                        for &output in &buffer {
+                            Self::validate_finite_tensor_util_value("hadamard_output", output)?;
+                        }
+                        let output = Tensor::from_vec(self.rows, self.cols, buffer)?;
+                        crate::emit_tensor_op(
+                            "hadamard",
+                            &[self.rows, self.cols, other.rows, other.cols],
+                            &[self.rows, self.cols],
+                        );
+                        emit_wgpu_tensor_op_meta(
+                            "hadamard",
+                            _backend.label(),
+                            self.rows,
+                            self.cols,
+                            self.rows,
+                            self.cols,
+                            self.layout,
+                            "elementwise",
+                            "tensor_util.hadamard",
+                            |data| {
+                                data.insert("rhs_rows".to_string(), serde_json::json!(other.rows));
+                                data.insert("rhs_cols".to_string(), serde_json::json!(other.cols));
+                                data.insert(
+                                    "rhs_layout".to_string(),
+                                    serde_json::json!(other.layout.as_str()),
+                                );
+                            },
+                        );
+                        return Ok(output);
+                    }
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error("wgpu", "hadamard", message));
+                    }
+                    Err(message) => {
+                        wgpu_failure = Some(message);
+                    }
+                }
+            }
+        }
+
         let mut data = aligned_with_capacity(self.len());
         for (a, b) in self.data.iter().zip(other.data.iter()) {
-            data.push(a * b);
+            let output = a * b;
+            Self::validate_finite_tensor_util_value("hadamard_output", output)?;
+            data.push(output);
         }
         let output = Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)?;
         crate::emit_tensor_op(
@@ -3249,17 +5187,346 @@ impl Tensor {
             &[self.rows, self.cols, other.rows, other.cols],
             &[self.rows, self.cols],
         );
+        emit_tensor_util_cpu_op_meta(
+            "hadamard",
+            self.rows,
+            self.cols,
+            self.rows,
+            self.cols,
+            self.layout,
+            _backend.label(),
+            "elementwise",
+            |data| {
+                data.insert("rhs_rows".to_string(), serde_json::json!(other.rows));
+                data.insert("rhs_cols".to_string(), serde_json::json!(other.cols));
+                data.insert(
+                    "rhs_layout".to_string(),
+                    serde_json::json!(other.layout.as_str()),
+                );
+                #[cfg(feature = "wgpu")]
+                if let Some(message) = wgpu_failure.as_deref() {
+                    data.insert(
+                        "fallback".to_string(),
+                        wgpu_runtime_fallback_meta(
+                            "cpu",
+                            WGPU_RUNTIME_FALLBACK_REASON,
+                            Some(message),
+                        ),
+                    );
+                }
+            },
+        );
+        Ok(output)
+    }
+
+    /// Multiplies every tensor row by a row vector.
+    pub fn mul_row(&self, row: &[f32]) -> PureResult<Tensor> {
+        self.mul_row_with_backend(row, TensorUtilBackend::Auto)
+    }
+
+    /// Multiplies every tensor row by a row vector with an explicit utility backend.
+    pub fn mul_row_with_backend(
+        &self,
+        row: &[f32],
+        _backend: TensorUtilBackend,
+    ) -> PureResult<Tensor> {
+        if row.len() != self.cols {
+            return Err(TensorError::DataLength {
+                expected: self.cols,
+                got: row.len(),
+            });
+        }
+        Self::validate_mul_row_outputs(self.rows, self.cols, self.data(), row)?;
+        #[cfg(feature = "wgpu")]
+        let mut wgpu_failure: Option<String> = None;
+
+        #[cfg(feature = "wgpu")]
+        {
+            if matches!(_backend, TensorUtilBackend::GpuWgpu)
+                && self.rows > 0
+                && self.cols > 0
+                && wgpu_dense::is_available()
+            {
+                match wgpu_dense::mul_row(self.data(), row, self.rows, self.cols) {
+                    Ok(buffer) => {
+                        for &output in &buffer {
+                            Self::validate_finite_tensor_util_value("mul_row_output", output)?;
+                        }
+                        let output = Tensor::from_vec(self.rows, self.cols, buffer)?;
+                        crate::emit_tensor_op(
+                            "mul_row",
+                            &[self.rows, self.cols, 1, row.len()],
+                            &[self.rows, self.cols],
+                        );
+                        emit_wgpu_tensor_op_meta(
+                            "mul_row",
+                            _backend.label(),
+                            self.rows,
+                            self.cols,
+                            self.rows,
+                            self.cols,
+                            self.layout,
+                            "broadcast",
+                            "tensor_util.mul_row",
+                            |data| {
+                                data.insert("rhs_cols".to_string(), serde_json::json!(row.len()));
+                            },
+                        );
+                        return Ok(output);
+                    }
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error("wgpu", "mul_row", message));
+                    }
+                    Err(message) => {
+                        wgpu_failure = Some(message);
+                    }
+                }
+            }
+        }
+
+        let mut data = aligned_with_capacity(self.len());
+        for row_idx in 0..self.rows {
+            let offset = row_idx * self.cols;
+            for col in 0..self.cols {
+                let value = self.data()[offset + col];
+                let gain = row[col];
+                let output = value * gain;
+                Self::validate_finite_tensor_util_value("mul_row_output", output)?;
+                data.push(output);
+            }
+        }
+        let output = Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)?;
+        crate::emit_tensor_op(
+            "mul_row",
+            &[self.rows, self.cols, 1, row.len()],
+            &[self.rows, self.cols],
+        );
+        emit_tensor_util_cpu_op_meta(
+            "mul_row",
+            self.rows,
+            self.cols,
+            self.rows,
+            self.cols,
+            self.layout,
+            _backend.label(),
+            "broadcast",
+            |data| {
+                data.insert("rhs_cols".to_string(), serde_json::json!(row.len()));
+                #[cfg(feature = "wgpu")]
+                if let Some(message) = wgpu_failure.as_deref() {
+                    data.insert(
+                        "fallback".to_string(),
+                        wgpu_runtime_fallback_meta(
+                            "cpu",
+                            WGPU_RUNTIME_FALLBACK_REASON,
+                            Some(message),
+                        ),
+                    );
+                }
+            },
+        );
+        Ok(output)
+    }
+
+    /// Applies a row-wise affine transform: `output[row, col] = self[row, col] * scale[col] + bias[col]`.
+    pub fn row_affine(&self, scale_row: &[f32], bias_row: &[f32]) -> PureResult<Tensor> {
+        self.row_affine_with_backend(scale_row, bias_row, TensorUtilBackend::Auto)
+    }
+
+    /// Applies a row-wise affine transform with an explicit utility backend.
+    pub fn row_affine_with_backend(
+        &self,
+        scale_row: &[f32],
+        bias_row: &[f32],
+        _backend: TensorUtilBackend,
+    ) -> PureResult<Tensor> {
+        if scale_row.len() != self.cols {
+            return Err(TensorError::DataLength {
+                expected: self.cols,
+                got: scale_row.len(),
+            });
+        }
+        if bias_row.len() != self.cols {
+            return Err(TensorError::DataLength {
+                expected: self.cols,
+                got: bias_row.len(),
+            });
+        }
+        Self::validate_row_affine_outputs(self.rows, self.cols, self.data(), scale_row, bias_row)?;
+        #[cfg(feature = "wgpu")]
+        let mut wgpu_failure: Option<String> = None;
+
+        #[cfg(feature = "wgpu")]
+        {
+            if matches!(_backend, TensorUtilBackend::GpuWgpu)
+                && self.rows > 0
+                && self.cols > 0
+                && wgpu_dense::is_available()
+            {
+                match wgpu_dense::row_affine(self.data(), scale_row, bias_row, self.rows, self.cols)
+                {
+                    Ok(buffer) => {
+                        for &output in &buffer {
+                            Self::validate_finite_tensor_util_value("row_affine_output", output)?;
+                        }
+                        let output = Tensor::from_vec(self.rows, self.cols, buffer)?;
+                        crate::emit_tensor_op(
+                            "row_affine",
+                            &[self.rows, self.cols, 1, scale_row.len(), 1, bias_row.len()],
+                            &[self.rows, self.cols],
+                        );
+                        emit_wgpu_tensor_op_meta(
+                            "row_affine",
+                            _backend.label(),
+                            self.rows,
+                            self.cols,
+                            self.rows,
+                            self.cols,
+                            self.layout,
+                            "broadcast",
+                            "tensor_util.row_affine",
+                            |data| {
+                                data.insert(
+                                    "scale_cols".to_string(),
+                                    serde_json::json!(scale_row.len()),
+                                );
+                                data.insert(
+                                    "bias_cols".to_string(),
+                                    serde_json::json!(bias_row.len()),
+                                );
+                            },
+                        );
+                        return Ok(output);
+                    }
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error("wgpu", "row_affine", message));
+                    }
+                    Err(message) => {
+                        wgpu_failure = Some(message);
+                    }
+                }
+            }
+        }
+
+        let mut data = aligned_with_capacity(self.len());
+        for row_idx in 0..self.rows {
+            let offset = row_idx * self.cols;
+            for col in 0..self.cols {
+                let value = self.data()[offset + col];
+                let output = value * scale_row[col] + bias_row[col];
+                Self::validate_finite_tensor_util_value("row_affine_output", output)?;
+                data.push(output);
+            }
+        }
+        let output = Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)?;
+        crate::emit_tensor_op(
+            "row_affine",
+            &[self.rows, self.cols, 1, scale_row.len(), 1, bias_row.len()],
+            &[self.rows, self.cols],
+        );
+        emit_tensor_util_cpu_op_meta(
+            "row_affine",
+            self.rows,
+            self.cols,
+            self.rows,
+            self.cols,
+            self.layout,
+            _backend.label(),
+            "broadcast",
+            |data| {
+                data.insert("scale_cols".to_string(), serde_json::json!(scale_row.len()));
+                data.insert("bias_cols".to_string(), serde_json::json!(bias_row.len()));
+                #[cfg(feature = "wgpu")]
+                if let Some(message) = wgpu_failure.as_deref() {
+                    data.insert(
+                        "fallback".to_string(),
+                        wgpu_runtime_fallback_meta(
+                            "cpu",
+                            WGPU_RUNTIME_FALLBACK_REASON,
+                            Some(message),
+                        ),
+                    );
+                }
+            },
+        );
         Ok(output)
     }
 
     /// Add a scaled tensor to this tensor (`self += scale * other`).
     pub fn add_scaled(&mut self, other: &Tensor, scale: f32) -> PureResult<()> {
+        self.add_scaled_with_backend(other, scale, TensorUtilBackend::Auto)
+    }
+
+    /// Add a scaled tensor in-place with an explicit utility backend selection.
+    pub fn add_scaled_with_backend(
+        &mut self,
+        other: &Tensor,
+        scale: f32,
+        _backend: TensorUtilBackend,
+    ) -> PureResult<()> {
         if self.shape() != other.shape() {
             return Err(TensorError::ShapeMismatch {
                 left: self.shape(),
                 right: other.shape(),
             });
         }
+        Self::validate_add_scaled_outputs(self.data(), other.data(), scale)?;
+        #[cfg(feature = "wgpu")]
+        let mut wgpu_failure: Option<String> = None;
+
+        #[cfg(feature = "wgpu")]
+        {
+            if matches!(_backend, TensorUtilBackend::GpuWgpu)
+                && self.rows > 0
+                && self.cols > 0
+                && wgpu_dense::is_available()
+            {
+                let input_layout = self.layout;
+                match wgpu_dense::add_scaled(self.data(), other.data(), self.rows, self.cols, scale)
+                {
+                    Ok(buffer) => {
+                        for &output in &buffer {
+                            Self::validate_finite_tensor_util_value("add_scaled_output", output)?;
+                        }
+                        self.data = Arc::new(TensorBuffer::from_aligned(aligned_from_vec(buffer)));
+                        self.layout = Layout::RowMajor;
+                        crate::emit_tensor_op(
+                            "add_scaled",
+                            &[self.rows, self.cols, other.rows, other.cols],
+                            &[self.rows, self.cols],
+                        );
+                        emit_wgpu_tensor_op_meta(
+                            "add_scaled",
+                            _backend.label(),
+                            self.rows,
+                            self.cols,
+                            self.rows,
+                            self.cols,
+                            input_layout,
+                            "elementwise_inplace",
+                            "tensor_util.add_scaled",
+                            |data| {
+                                data.insert("rhs_rows".to_string(), serde_json::json!(other.rows));
+                                data.insert("rhs_cols".to_string(), serde_json::json!(other.cols));
+                                data.insert(
+                                    "rhs_layout".to_string(),
+                                    serde_json::json!(other.layout.as_str()),
+                                );
+                                data.insert("scale".to_string(), serde_json::json!(scale));
+                            },
+                        );
+                        return Ok(());
+                    }
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error("wgpu", "add_scaled", message));
+                    }
+                    Err(message) => {
+                        wgpu_failure = Some(message);
+                    }
+                }
+            }
+        }
+
         let data = Arc::make_mut(&mut self.data);
         for (a, b) in data.iter_mut().zip(other.data.iter()) {
             *a += scale * b;
@@ -3269,17 +5536,110 @@ impl Tensor {
             &[self.rows, self.cols, other.rows, other.cols],
             &[self.rows, self.cols],
         );
+        emit_tensor_util_cpu_op_meta(
+            "add_scaled",
+            self.rows,
+            self.cols,
+            self.rows,
+            self.cols,
+            self.layout,
+            _backend.label(),
+            "elementwise_inplace",
+            |data| {
+                data.insert("rhs_rows".to_string(), serde_json::json!(other.rows));
+                data.insert("rhs_cols".to_string(), serde_json::json!(other.cols));
+                data.insert(
+                    "rhs_layout".to_string(),
+                    serde_json::json!(other.layout.as_str()),
+                );
+                data.insert("scale".to_string(), serde_json::json!(scale));
+                #[cfg(feature = "wgpu")]
+                if let Some(message) = wgpu_failure.as_deref() {
+                    data.insert(
+                        "fallback".to_string(),
+                        wgpu_runtime_fallback_meta(
+                            "cpu",
+                            WGPU_RUNTIME_FALLBACK_REASON,
+                            Some(message),
+                        ),
+                    );
+                }
+            },
+        );
         Ok(())
     }
 
     /// Add the provided row vector to every row (`self[row] += bias`).
     pub fn add_row_inplace(&mut self, bias: &[f32]) -> PureResult<()> {
+        self.add_row_inplace_with_backend(bias, TensorUtilBackend::Auto)
+    }
+
+    /// Add a row vector in-place with an explicit utility backend selection.
+    pub fn add_row_inplace_with_backend(
+        &mut self,
+        bias: &[f32],
+        _backend: TensorUtilBackend,
+    ) -> PureResult<()> {
         if bias.len() != self.cols {
             return Err(TensorError::DataLength {
                 expected: self.cols,
                 got: bias.len(),
             });
         }
+        Self::validate_add_row_outputs(self.rows, self.cols, self.data(), bias)?;
+        #[cfg(feature = "wgpu")]
+        let mut wgpu_failure: Option<String> = None;
+
+        #[cfg(feature = "wgpu")]
+        {
+            if matches!(_backend, TensorUtilBackend::GpuWgpu)
+                && self.rows > 0
+                && self.cols > 0
+                && wgpu_dense::is_available()
+            {
+                let input_layout = self.layout;
+                match wgpu_dense::add_row(self.data(), bias, self.rows, self.cols) {
+                    Ok(buffer) => {
+                        for &output in &buffer {
+                            Self::validate_finite_tensor_util_value("add_row_output", output)?;
+                        }
+                        self.data = Arc::new(TensorBuffer::from_aligned(aligned_from_vec(buffer)));
+                        self.layout = Layout::RowMajor;
+                        crate::emit_tensor_op(
+                            "add_row_inplace",
+                            &[self.rows, self.cols, 1, bias.len()],
+                            &[self.rows, self.cols],
+                        );
+                        emit_wgpu_tensor_op_meta(
+                            "add_row_inplace",
+                            _backend.label(),
+                            self.rows,
+                            self.cols,
+                            self.rows,
+                            self.cols,
+                            input_layout,
+                            "broadcast_inplace",
+                            "tensor_util.add_row",
+                            |data| {
+                                data.insert("bias_cols".to_string(), serde_json::json!(bias.len()));
+                            },
+                        );
+                        return Ok(());
+                    }
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error(
+                            "wgpu",
+                            "add_row_inplace",
+                            message,
+                        ));
+                    }
+                    Err(message) => {
+                        wgpu_failure = Some(message);
+                    }
+                }
+            }
+        }
+
         let data = Arc::make_mut(&mut self.data);
         for r in 0..self.rows {
             let offset = r * self.cols;
@@ -3291,6 +5651,30 @@ impl Tensor {
             "add_row_inplace",
             &[self.rows, self.cols, 1, bias.len()],
             &[self.rows, self.cols],
+        );
+        emit_tensor_util_cpu_op_meta(
+            "add_row_inplace",
+            self.rows,
+            self.cols,
+            self.rows,
+            self.cols,
+            self.layout,
+            _backend.label(),
+            "broadcast_inplace",
+            |data| {
+                data.insert("bias_cols".to_string(), serde_json::json!(bias.len()));
+                #[cfg(feature = "wgpu")]
+                if let Some(message) = wgpu_failure.as_deref() {
+                    data.insert(
+                        "fallback".to_string(),
+                        wgpu_runtime_fallback_meta(
+                            "cpu",
+                            WGPU_RUNTIME_FALLBACK_REASON,
+                            Some(message),
+                        ),
+                    );
+                }
+            },
         );
         Ok(())
     }
@@ -3308,6 +5692,102 @@ impl Tensor {
             &[self.rows, self.cols],
             &[self.rows, self.cols],
         );
+        emit_cpu_tensor_op_meta(
+            "relu_inplace",
+            self.rows,
+            self.cols,
+            self.rows,
+            self.cols,
+            self.layout,
+            "activation_inplace",
+            |_| {},
+        );
+    }
+
+    /// Return a ReLU-activated tensor (`output[i] = max(self[i], 0)`).
+    pub fn relu(&self) -> PureResult<Tensor> {
+        self.relu_with_backend(TensorUtilBackend::Auto)
+    }
+
+    /// Return a ReLU-activated tensor with an explicit utility backend selection.
+    pub fn relu_with_backend(&self, _backend: TensorUtilBackend) -> PureResult<Tensor> {
+        #[cfg(feature = "wgpu")]
+        let mut wgpu_failure: Option<String> = None;
+
+        #[cfg(feature = "wgpu")]
+        {
+            if matches!(_backend, TensorUtilBackend::GpuWgpu)
+                && self.rows > 0
+                && self.cols > 0
+                && wgpu_dense::is_available()
+            {
+                match wgpu_dense::relu(self.data(), self.rows, self.cols) {
+                    Ok(buffer) => {
+                        for &output in &buffer {
+                            Self::validate_finite_tensor_util_value("relu_output", output)?;
+                        }
+                        let output = Tensor::from_vec(self.rows, self.cols, buffer)?;
+                        crate::emit_tensor_op(
+                            "relu",
+                            &[self.rows, self.cols],
+                            &[self.rows, self.cols],
+                        );
+                        emit_wgpu_tensor_op_meta(
+                            "relu",
+                            _backend.label(),
+                            self.rows,
+                            self.cols,
+                            self.rows,
+                            self.cols,
+                            self.layout,
+                            "activation",
+                            "tensor_util.relu",
+                            |_| {},
+                        );
+                        return Ok(output);
+                    }
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error("wgpu", "relu", message));
+                    }
+                    Err(message) => {
+                        wgpu_failure = Some(message);
+                    }
+                }
+            }
+        }
+
+        let mut data = aligned_with_capacity(self.len());
+        for &value in self.data.iter() {
+            let output = value.max(0.0);
+            Self::validate_finite_tensor_util_value("relu_output", output)?;
+            data.push(output);
+        }
+        let output = Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)?;
+        crate::emit_tensor_op("relu", &[self.rows, self.cols], &[self.rows, self.cols]);
+        emit_tensor_util_cpu_op_meta(
+            "relu",
+            self.rows,
+            self.cols,
+            self.rows,
+            self.cols,
+            self.layout,
+            _backend.label(),
+            "activation",
+            |_meta| {
+                #[cfg(feature = "wgpu")]
+                if let Some(message) = wgpu_failure.as_deref() {
+                    _meta.insert(
+                        "fallback".to_string(),
+                        wgpu_runtime_fallback_meta(
+                            "cpu",
+                            WGPU_RUNTIME_FALLBACK_REASON,
+                            Some(message),
+                        ),
+                    );
+                }
+            },
+        );
+        Ok(output)
     }
 
     /// Apply the GELU activation in-place (`self[i] = GELU(self[i])`).
@@ -3321,10 +5801,29 @@ impl Tensor {
             &[self.rows, self.cols],
             &[self.rows, self.cols],
         );
+        emit_cpu_tensor_op_meta(
+            "gelu_inplace",
+            self.rows,
+            self.cols,
+            self.rows,
+            self.cols,
+            self.layout,
+            "activation_inplace",
+            |_| {},
+        );
     }
 
     /// Applies the derivative of GELU to the provided gradient tensor.
     pub fn gelu_backward(&self, grad_output: &Tensor) -> PureResult<Tensor> {
+        self.gelu_backward_with_backend(grad_output, TensorUtilBackend::Auto)
+    }
+
+    /// Applies the derivative of GELU to the provided gradient tensor with explicit backend control.
+    pub fn gelu_backward_with_backend(
+        &self,
+        grad_output: &Tensor,
+        backend: TensorUtilBackend,
+    ) -> PureResult<Tensor> {
         if self.shape() != grad_output.shape() {
             return Err(TensorError::ShapeMismatch {
                 left: self.shape(),
@@ -3334,12 +5833,80 @@ impl Tensor {
         let (rows, cols) = self.shape();
 
         #[cfg(feature = "wgpu")]
-        {
-            if wgpu_dense::is_available() {
-                if let Ok(buffer) =
-                    wgpu_dense::gelu_backward(self.data(), grad_output.data(), rows, cols)
+        let mut wgpu_failure: Option<String> = None;
+
+        match backend {
+            TensorUtilBackend::Auto =>
+            {
+                #[cfg(feature = "wgpu")]
+                if wgpu_dense::is_available() {
+                    match wgpu_dense::gelu_backward(self.data(), grad_output.data(), rows, cols) {
+                        Ok(buffer) => {
+                            let output = Tensor::from_vec(rows, cols, buffer)?;
+                            crate::emit_tensor_op(
+                                "gelu_backward",
+                                &[self.rows, self.cols, grad_output.rows, grad_output.cols],
+                                &[rows, cols],
+                            );
+                            crate::emit_tensor_op_meta("gelu_backward", || {
+                                serde_json::json!({
+                                    "backend": "wgpu_dense",
+                                    "requested_backend": backend.label(),
+                                    "rows": rows,
+                                    "cols": cols,
+                                })
+                            });
+                            return Ok(output);
+                        }
+                        Err(message) if strict_gpu_path() => {
+                            return Err(strict_gpu_fallback_error(
+                                "wgpu",
+                                "gelu_backward",
+                                message,
+                            ));
+                        }
+                        Err(message) => {
+                            wgpu_failure = Some(message);
+                        }
+                    }
+                }
+            }
+            TensorUtilBackend::Cpu => {}
+            TensorUtilBackend::GpuWgpu => {
+                #[cfg(feature = "wgpu")]
                 {
-                    return Tensor::from_vec(rows, cols, buffer);
+                    match wgpu_dense::gelu_backward(self.data(), grad_output.data(), rows, cols) {
+                        Ok(buffer) => {
+                            let output = Tensor::from_vec(rows, cols, buffer)?;
+                            crate::emit_tensor_op(
+                                "gelu_backward",
+                                &[self.rows, self.cols, grad_output.rows, grad_output.cols],
+                                &[rows, cols],
+                            );
+                            crate::emit_tensor_op_meta("gelu_backward", || {
+                                serde_json::json!({
+                                    "backend": "wgpu_dense",
+                                    "requested_backend": backend.label(),
+                                    "rows": rows,
+                                    "cols": cols,
+                                })
+                            });
+                            return Ok(output);
+                        }
+                        Err(message) => {
+                            return Err(TensorError::BackendFailure {
+                                backend: "wgpu",
+                                message,
+                            });
+                        }
+                    }
+                }
+                #[cfg(not(feature = "wgpu"))]
+                {
+                    return Err(TensorError::BackendFailure {
+                        backend: "wgpu",
+                        message: "wgpu backend disabled at compile time".into(),
+                    });
                 }
             }
         }
@@ -3349,16 +5916,85 @@ impl Tensor {
             data.push(gelu_prime(*z) * g);
         }
         let output = Tensor::from_vec(rows, cols, data)?;
+        #[cfg(feature = "wgpu")]
+        let (fallback_from, fallback_message) = if let Some(message) = wgpu_failure.as_deref() {
+            (Some("wgpu"), Some(message))
+        } else {
+            (None, None)
+        };
+        #[cfg(not(feature = "wgpu"))]
+        let (fallback_from, fallback_message): (Option<&str>, Option<&str>) = (None, None);
+
         crate::emit_tensor_op(
             "gelu_backward",
             &[self.rows, self.cols, grad_output.rows, grad_output.cols],
             &[rows, cols],
         );
+        crate::emit_tensor_op_meta("gelu_backward", || {
+            serde_json::json!({
+                "backend": "cpu",
+                "requested_backend": backend.label(),
+                "rows": rows,
+                "cols": cols,
+                "fallback": {
+                    "from": fallback_from,
+                    "message": fallback_message,
+                }
+            })
+        });
         Ok(output)
     }
 
     /// Returns the transpose of the tensor.
     pub fn transpose(&self) -> Tensor {
+        self.transpose_with_backend(TensorUtilBackend::Auto)
+            .expect("CPU transpose is infallible")
+    }
+
+    /// Returns the transpose of the tensor with an explicit utility backend selection.
+    pub fn transpose_with_backend(&self, _backend: TensorUtilBackend) -> PureResult<Tensor> {
+        #[cfg(feature = "wgpu")]
+        let mut wgpu_failure: Option<String> = None;
+
+        #[cfg(feature = "wgpu")]
+        {
+            if matches!(_backend, TensorUtilBackend::GpuWgpu)
+                && self.rows > 0
+                && self.cols > 0
+                && wgpu_dense::is_available()
+            {
+                match wgpu_dense::transpose(self.data(), self.rows, self.cols) {
+                    Ok(buffer) => {
+                        let output = Tensor::from_vec(self.cols, self.rows, buffer)?;
+                        crate::emit_tensor_op(
+                            "transpose",
+                            &[self.rows, self.cols],
+                            &[output.rows, output.cols],
+                        );
+                        emit_wgpu_tensor_op_meta(
+                            "transpose",
+                            _backend.label(),
+                            self.rows,
+                            self.cols,
+                            output.rows,
+                            output.cols,
+                            self.layout,
+                            "layout",
+                            "tensor_util.transpose",
+                            |_| {},
+                        );
+                        return Ok(output);
+                    }
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error("wgpu", "transpose", message));
+                    }
+                    Err(message) => {
+                        wgpu_failure = Some(message);
+                    }
+                }
+            }
+        }
+
         let mut data = aligned_zeroed(self.len());
         for r in 0..self.rows {
             for c in 0..self.cols {
@@ -3376,14 +6012,34 @@ impl Tensor {
             &[self.rows, self.cols],
             &[output.rows, output.cols],
         );
-        output
+        emit_tensor_util_cpu_op_meta(
+            "transpose",
+            self.rows,
+            self.cols,
+            output.rows,
+            output.cols,
+            self.layout,
+            _backend.label(),
+            "layout",
+            |_data| {
+                #[cfg(feature = "wgpu")]
+                if let Some(message) = wgpu_failure.as_deref() {
+                    _data.insert(
+                        "fallback".to_string(),
+                        wgpu_runtime_fallback_meta(
+                            "cpu",
+                            WGPU_RUNTIME_FALLBACK_REASON,
+                            Some(message),
+                        ),
+                    );
+                }
+            },
+        );
+        Ok(output)
     }
 
-    /// Returns a reshaped copy of the tensor when the requested dimensions are compatible.
+    /// Returns a reshaped tensor when the requested dimensions are compatible.
     pub fn reshape(&self, rows: usize, cols: usize) -> PureResult<Tensor> {
-        if rows == 0 || cols == 0 {
-            return Err(TensorError::InvalidDimensions { rows, cols });
-        }
         if rows * cols != self.len() {
             return Err(TensorError::DataLength {
                 expected: rows * cols,
@@ -3391,18 +6047,44 @@ impl Tensor {
             });
         }
 
-        let output = if matches!(self.layout, Layout::RowMajor) {
+        let zero_copy = matches!(self.layout, Layout::RowMajor);
+        let output = if zero_copy {
             self.view(rows, cols)?
         } else {
             let row_major = self.to_layout(Layout::RowMajor)?;
             row_major.view(rows, cols)?
         };
         crate::emit_tensor_op("reshape", &[self.rows, self.cols], &[rows, cols]);
+        emit_basic_tensor_op_meta(
+            "reshape",
+            self.rows,
+            self.cols,
+            rows,
+            cols,
+            self.layout,
+            if zero_copy { "view" } else { "cpu" },
+            "auto",
+            if zero_copy { "metadata" } else { "scalar" },
+            "layout",
+            |data| {
+                data.insert("zero_copy".to_string(), serde_json::json!(zero_copy));
+            },
+        );
         Ok(output)
     }
 
     /// Returns the sum over rows for each column.
     pub fn sum_axis0(&self) -> Vec<f32> {
+        self.sum_axis0_with_backend(TensorUtilBackend::Auto)
+    }
+
+    /// Returns the sum over rows for each column with an explicit utility backend.
+    pub fn sum_axis0_with_backend(&self, _backend: TensorUtilBackend) -> Vec<f32> {
+        self.try_sum_axis0_with_backend(_backend)
+            .unwrap_or_else(|_| self.sum_axis0_unchecked())
+    }
+
+    fn sum_axis0_unchecked(&self) -> Vec<f32> {
         let mut sums = vec![0.0; self.cols];
         if self.cols == 0 {
             return sums;
@@ -3415,16 +6097,306 @@ impl Tensor {
         sums
     }
 
-    /// Returns the sum over columns for each row.
-    pub fn sum_axis1(&self) -> Vec<f32> {
-        let mut sums = vec![0.0; self.rows];
+    /// Fallible sum over rows for each column with finite-output validation.
+    pub fn try_sum_axis0(&self) -> PureResult<Vec<f32>> {
+        self.try_sum_axis0_with_backend(TensorUtilBackend::Auto)
+    }
+
+    /// Fallible sum over rows for each column with an explicit utility backend.
+    pub fn try_sum_axis0_with_backend(&self, _backend: TensorUtilBackend) -> PureResult<Vec<f32>> {
+        let mut sums = vec![0.0; self.cols];
+        #[cfg(feature = "wgpu")]
+        let mut wgpu_failure: Option<String> = None;
+        if self.cols == 0 {
+            crate::emit_tensor_op("sum_axis0", &[self.rows, self.cols], &[1, self.cols]);
+            emit_tensor_util_cpu_op_meta(
+                "sum_axis0",
+                self.rows,
+                self.cols,
+                1,
+                self.cols,
+                self.layout,
+                _backend.label(),
+                "reduction",
+                |data| {
+                    data.insert("axis".to_string(), serde_json::json!(0));
+                },
+            );
+            return Ok(sums);
+        }
+        #[cfg(feature = "wgpu")]
+        {
+            if matches!(_backend, TensorUtilBackend::GpuWgpu)
+                && self.rows > 0
+                && wgpu_dense::is_available()
+            {
+                match wgpu_dense::sum_axis0(self.data(), self.rows, self.cols) {
+                    Ok(buffer) => {
+                        for &output in &buffer {
+                            Self::validate_finite_tensor_util_value("sum_axis0_output", output)?;
+                        }
+                        crate::emit_tensor_op(
+                            "sum_axis0",
+                            &[self.rows, self.cols],
+                            &[1, self.cols],
+                        );
+                        emit_wgpu_tensor_op_meta(
+                            "sum_axis0",
+                            _backend.label(),
+                            self.rows,
+                            self.cols,
+                            1,
+                            self.cols,
+                            self.layout,
+                            "reduction",
+                            "tensor_util.sum_axis0",
+                            |data| {
+                                data.insert("axis".to_string(), serde_json::json!(0));
+                            },
+                        );
+                        return Ok(buffer);
+                    }
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error("wgpu", "sum_axis0", message));
+                    }
+                    Err(message) => {
+                        wgpu_failure = Some(message);
+                    }
+                }
+            }
+        }
+        for row in self.data().chunks(self.cols) {
+            for (sum, value) in sums.iter_mut().zip(row.iter()) {
+                Self::validate_finite_tensor_util_value("sum_axis0_input", *value)?;
+                *sum += *value;
+                Self::validate_finite_tensor_util_value("sum_axis0_output", *sum)?;
+            }
+        }
+        crate::emit_tensor_op("sum_axis0", &[self.rows, self.cols], &[1, self.cols]);
+        emit_tensor_util_cpu_op_meta(
+            "sum_axis0",
+            self.rows,
+            self.cols,
+            1,
+            self.cols,
+            self.layout,
+            _backend.label(),
+            "reduction",
+            |data| {
+                data.insert("axis".to_string(), serde_json::json!(0));
+                #[cfg(feature = "wgpu")]
+                if let Some(message) = wgpu_failure.as_deref() {
+                    data.insert(
+                        "fallback".to_string(),
+                        wgpu_runtime_fallback_meta(
+                            "cpu",
+                            WGPU_RUNTIME_FALLBACK_REASON,
+                            Some(message),
+                        ),
+                    );
+                }
+            },
+        );
+        Ok(sums)
+    }
+
+    /// Returns the sum over rows for each column multiplied by `scale`.
+    pub fn sum_axis0_scaled_with_backend(
+        &self,
+        scale: f32,
+        _backend: TensorUtilBackend,
+    ) -> Vec<f32> {
+        self.try_sum_axis0_scaled_with_backend(scale, _backend)
+            .unwrap_or_else(|_| self.sum_axis0_scaled_unchecked(scale))
+    }
+
+    fn sum_axis0_scaled_unchecked(&self, scale: f32) -> Vec<f32> {
+        let mut sums = vec![0.0; self.cols];
         if self.cols == 0 {
             return sums;
         }
-        for (slot, row) in sums.iter_mut().zip(self.data().chunks(self.cols)) {
-            *slot = row.iter().copied().sum();
+        for row in self.data().chunks(self.cols) {
+            for (sum, value) in sums.iter_mut().zip(row.iter()) {
+                *sum += *value;
+            }
+        }
+        for sum in &mut sums {
+            *sum *= scale;
         }
         sums
+    }
+
+    /// Fallible sum over rows multiplied by `scale` with finite-output validation.
+    pub fn try_sum_axis0_scaled_with_backend(
+        &self,
+        scale: f32,
+        _backend: TensorUtilBackend,
+    ) -> PureResult<Vec<f32>> {
+        Self::validate_scale_factor("sum_axis0_scaled_factor", scale)?;
+        let mut sums = vec![0.0; self.cols];
+        #[cfg(feature = "wgpu")]
+        let mut wgpu_failure: Option<String> = None;
+        if self.cols == 0 {
+            crate::emit_tensor_op("sum_axis0_scaled", &[self.rows, self.cols], &[1, self.cols]);
+            emit_tensor_util_cpu_op_meta(
+                "sum_axis0_scaled",
+                self.rows,
+                self.cols,
+                1,
+                self.cols,
+                self.layout,
+                _backend.label(),
+                "reduction",
+                |data| {
+                    data.insert("axis".to_string(), serde_json::json!(0));
+                    data.insert("scale".to_string(), serde_json::json!(scale));
+                },
+            );
+            return Ok(sums);
+        }
+        #[cfg(feature = "wgpu")]
+        {
+            if matches!(_backend, TensorUtilBackend::GpuWgpu)
+                && self.rows > 0
+                && wgpu_dense::is_available()
+            {
+                match wgpu_dense::sum_axis0_scaled(self.data(), self.rows, self.cols, scale) {
+                    Ok(buffer) => {
+                        for &output in &buffer {
+                            Self::validate_finite_tensor_util_value(
+                                "sum_axis0_scaled_output",
+                                output,
+                            )?;
+                        }
+                        crate::emit_tensor_op(
+                            "sum_axis0_scaled",
+                            &[self.rows, self.cols],
+                            &[1, self.cols],
+                        );
+                        emit_wgpu_tensor_op_meta(
+                            "sum_axis0_scaled",
+                            _backend.label(),
+                            self.rows,
+                            self.cols,
+                            1,
+                            self.cols,
+                            self.layout,
+                            "reduction",
+                            "tensor_util.sum_axis0_scaled",
+                            |data| {
+                                data.insert("axis".to_string(), serde_json::json!(0));
+                                data.insert("scale".to_string(), serde_json::json!(scale));
+                            },
+                        );
+                        return Ok(buffer);
+                    }
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error(
+                            "wgpu",
+                            "sum_axis0_scaled",
+                            message,
+                        ));
+                    }
+                    Err(message) => {
+                        wgpu_failure = Some(message);
+                    }
+                }
+            }
+        }
+        for row in self.data().chunks(self.cols) {
+            for (sum, value) in sums.iter_mut().zip(row.iter()) {
+                Self::validate_finite_tensor_util_value("sum_axis0_scaled_input", *value)?;
+                *sum += *value;
+                Self::validate_finite_tensor_util_value("sum_axis0_scaled_accumulator", *sum)?;
+            }
+        }
+        for sum in &mut sums {
+            *sum *= scale;
+            Self::validate_finite_tensor_util_value("sum_axis0_scaled_output", *sum)?;
+        }
+        crate::emit_tensor_op("sum_axis0_scaled", &[self.rows, self.cols], &[1, self.cols]);
+        emit_tensor_util_cpu_op_meta(
+            "sum_axis0_scaled",
+            self.rows,
+            self.cols,
+            1,
+            self.cols,
+            self.layout,
+            _backend.label(),
+            "reduction",
+            |data| {
+                data.insert("axis".to_string(), serde_json::json!(0));
+                data.insert("scale".to_string(), serde_json::json!(scale));
+                #[cfg(feature = "wgpu")]
+                if let Some(message) = wgpu_failure.as_deref() {
+                    data.insert(
+                        "fallback".to_string(),
+                        wgpu_runtime_fallback_meta(
+                            "cpu",
+                            WGPU_RUNTIME_FALLBACK_REASON,
+                            Some(message),
+                        ),
+                    );
+                }
+            },
+        );
+        Ok(sums)
+    }
+
+    /// Returns the sum over columns for each row.
+    pub fn sum_axis1(&self) -> Vec<f32> {
+        self.try_sum_axis1().unwrap_or_else(|_| {
+            let mut sums = vec![0.0; self.rows];
+            if self.cols == 0 {
+                return sums;
+            }
+            for (slot, row) in sums.iter_mut().zip(self.data().chunks(self.cols)) {
+                *slot = row.iter().copied().sum();
+            }
+            sums
+        })
+    }
+
+    /// Fallible sum over columns for each row with finite-output validation.
+    pub fn try_sum_axis1(&self) -> PureResult<Vec<f32>> {
+        let mut sums = vec![0.0; self.rows];
+        if self.cols == 0 {
+            crate::emit_tensor_op("sum_axis1", &[self.rows, self.cols], &[self.rows, 1]);
+            emit_cpu_tensor_op_meta(
+                "sum_axis1",
+                self.rows,
+                self.cols,
+                self.rows,
+                1,
+                self.layout,
+                "reduction",
+                |data| {
+                    data.insert("axis".to_string(), serde_json::json!(1));
+                },
+            );
+            return Ok(sums);
+        }
+        for (slot, row) in sums.iter_mut().zip(self.data().chunks(self.cols)) {
+            for &value in row {
+                Self::validate_finite_tensor_util_value("sum_axis1_input", value)?;
+                *slot += value;
+                Self::validate_finite_tensor_util_value("sum_axis1_output", *slot)?;
+            }
+        }
+        crate::emit_tensor_op("sum_axis1", &[self.rows, self.cols], &[self.rows, 1]);
+        emit_cpu_tensor_op_meta(
+            "sum_axis1",
+            self.rows,
+            self.cols,
+            self.rows,
+            1,
+            self.layout,
+            "reduction",
+            |data| {
+                data.insert("axis".to_string(), serde_json::json!(1));
+            },
+        );
+        Ok(sums)
     }
 
     /// Concatenates tensors row-wise producing a new tensor whose row count is the sum
@@ -3434,9 +6406,6 @@ impl Tensor {
             return Err(TensorError::EmptyInput("Tensor::cat_rows"));
         }
         let cols = tensors[0].cols;
-        if cols == 0 {
-            return Err(TensorError::InvalidDimensions { rows: 0, cols });
-        }
         let mut total_rows = 0usize;
         for tensor in tensors {
             if tensor.cols != cols {
@@ -3451,25 +6420,457 @@ impl Tensor {
         for tensor in tensors {
             data.extend_from_slice(tensor.data.as_slice());
         }
-        Tensor::from_aligned(total_rows, cols, data, Layout::RowMajor)
+        let output = Tensor::from_aligned(total_rows, cols, data, Layout::RowMajor)?;
+        crate::emit_tensor_op(
+            "cat_rows",
+            &[tensors.len(), total_rows, cols],
+            &[total_rows, cols],
+        );
+        emit_cpu_tensor_op_meta(
+            "cat_rows",
+            total_rows,
+            cols,
+            total_rows,
+            cols,
+            Layout::RowMajor,
+            "copy",
+            |data| {
+                data.insert("inputs".to_string(), serde_json::json!(tensors.len()));
+            },
+        );
+        Ok(output)
     }
 
     /// Computes the squared L2 norm of the tensor.
     pub fn squared_l2_norm(&self) -> f32 {
-        self.data.iter().map(|v| v * v).sum()
+        self.squared_l2_norm_cpu(TensorUtilBackend::Auto.label(), None)
+    }
+
+    fn squared_l2_norm_cpu(&self, requested_backend: &'static str, fallback: Option<&str>) -> f32 {
+        let sum_squares = self.data.iter().map(|v| v * v).sum();
+        crate::emit_tensor_op("squared_l2_norm", &[self.rows, self.cols], &[1, 1]);
+        emit_basic_tensor_op_meta(
+            "squared_l2_norm",
+            self.rows,
+            self.cols,
+            1,
+            1,
+            self.layout,
+            "cpu",
+            requested_backend,
+            "scalar",
+            "diagnostic_reduction",
+            |data| {
+                data.insert("reduction".to_string(), serde_json::json!("sum_squares"));
+                data.insert("result".to_string(), serde_json::json!(sum_squares));
+                if let Some(message) = fallback {
+                    data.insert(
+                        "fallback".to_string(),
+                        wgpu_runtime_fallback_meta(
+                            "cpu",
+                            WGPU_RUNTIME_FALLBACK_REASON,
+                            Some(message),
+                        ),
+                    );
+                }
+            },
+        );
+        sum_squares
+    }
+
+    /// Computes the squared L2 norm with an explicit utility backend.
+    pub fn squared_l2_norm_with_backend(&self, _backend: TensorUtilBackend) -> PureResult<f32> {
+        #[cfg(feature = "wgpu")]
+        let mut wgpu_failure: Option<String> = None;
+
+        #[cfg(feature = "wgpu")]
+        {
+            if matches!(_backend, TensorUtilBackend::GpuWgpu)
+                && self.rows > 0
+                && self.cols > 0
+                && wgpu_dense::is_available()
+            {
+                match wgpu_dense::sum_squares(self.data(), self.rows, self.cols) {
+                    Ok(sum_squares) => {
+                        Self::validate_finite_tensor_util_value(
+                            "squared_l2_norm_output",
+                            sum_squares,
+                        )?;
+                        crate::emit_tensor_op("squared_l2_norm", &[self.rows, self.cols], &[1, 1]);
+                        emit_wgpu_tensor_op_meta(
+                            "squared_l2_norm",
+                            _backend.label(),
+                            self.rows,
+                            self.cols,
+                            1,
+                            1,
+                            self.layout,
+                            "diagnostic_reduction",
+                            "tensor_util.sum_squares",
+                            |data| {
+                                data.insert(
+                                    "reduction".to_string(),
+                                    serde_json::json!("sum_squares"),
+                                );
+                                data.insert("result".to_string(), serde_json::json!(sum_squares));
+                            },
+                        );
+                        return Ok(sum_squares);
+                    }
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error(
+                            "wgpu",
+                            "squared_l2_norm",
+                            message,
+                        ));
+                    }
+                    Err(message) => {
+                        wgpu_failure = Some(message);
+                    }
+                }
+            }
+        }
+
+        Ok(self.squared_l2_norm_cpu(_backend.label(), {
+            #[cfg(feature = "wgpu")]
+            {
+                wgpu_failure.as_deref()
+            }
+            #[cfg(not(feature = "wgpu"))]
+            {
+                None
+            }
+        }))
+    }
+
+    /// Computes the L1 sum of absolute values.
+    pub fn sum_abs(&self) -> f32 {
+        self.sum_abs_cpu(TensorUtilBackend::Auto.label(), None)
+    }
+
+    fn sum_abs_cpu(&self, requested_backend: &'static str, fallback: Option<&str>) -> f32 {
+        let sum_abs = self.data.iter().map(|value| value.abs()).sum();
+        crate::emit_tensor_op("sum_abs", &[self.rows, self.cols], &[1, 1]);
+        emit_basic_tensor_op_meta(
+            "sum_abs",
+            self.rows,
+            self.cols,
+            1,
+            1,
+            self.layout,
+            "cpu",
+            requested_backend,
+            "scalar",
+            "diagnostic_reduction",
+            |data| {
+                data.insert("reduction".to_string(), serde_json::json!("sum_abs"));
+                data.insert("result".to_string(), serde_json::json!(sum_abs));
+                if let Some(message) = fallback {
+                    data.insert(
+                        "fallback".to_string(),
+                        wgpu_runtime_fallback_meta(
+                            "cpu",
+                            WGPU_RUNTIME_FALLBACK_REASON,
+                            Some(message),
+                        ),
+                    );
+                }
+            },
+        );
+        sum_abs
+    }
+
+    /// Computes the L1 sum of absolute values with an explicit utility backend.
+    pub fn sum_abs_with_backend(&self, _backend: TensorUtilBackend) -> PureResult<f32> {
+        #[cfg(feature = "wgpu")]
+        let mut wgpu_failure: Option<String> = None;
+
+        #[cfg(feature = "wgpu")]
+        {
+            if matches!(_backend, TensorUtilBackend::GpuWgpu)
+                && self.rows > 0
+                && self.cols > 0
+                && wgpu_dense::is_available()
+            {
+                match wgpu_dense::sum_abs(self.data(), self.rows, self.cols) {
+                    Ok(sum_abs) => {
+                        Self::validate_finite_tensor_util_value("sum_abs_output", sum_abs)?;
+                        crate::emit_tensor_op("sum_abs", &[self.rows, self.cols], &[1, 1]);
+                        emit_wgpu_tensor_op_meta(
+                            "sum_abs",
+                            _backend.label(),
+                            self.rows,
+                            self.cols,
+                            1,
+                            1,
+                            self.layout,
+                            "diagnostic_reduction",
+                            "tensor_util.sum_abs",
+                            |data| {
+                                data.insert("reduction".to_string(), serde_json::json!("sum_abs"));
+                                data.insert("result".to_string(), serde_json::json!(sum_abs));
+                            },
+                        );
+                        return Ok(sum_abs);
+                    }
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error("wgpu", "sum_abs", message));
+                    }
+                    Err(message) => {
+                        wgpu_failure = Some(message);
+                    }
+                }
+            }
+        }
+
+        Ok(self.sum_abs_cpu(_backend.label(), {
+            #[cfg(feature = "wgpu")]
+            {
+                wgpu_failure.as_deref()
+            }
+            #[cfg(not(feature = "wgpu"))]
+            {
+                None
+            }
+        }))
     }
 
     /// Projects a flattened tensor onto the Poincaré ball.
     pub fn project_to_poincare(&self, curvature: f32) -> PureResult<Tensor> {
+        self.project_to_poincare_with_backend(curvature, TensorUtilBackend::Auto)
+    }
+
+    /// Projects onto the Poincaré ball with an explicit utility backend.
+    pub fn project_to_poincare_with_backend(
+        &self,
+        curvature: f32,
+        _backend: TensorUtilBackend,
+    ) -> PureResult<Tensor> {
         if curvature >= 0.0 {
             return Err(TensorError::NonHyperbolicCurvature { curvature });
         }
         let scale = (-curvature).sqrt();
+        #[cfg(feature = "wgpu")]
+        let mut wgpu_failure: Option<String> = None;
+
+        #[cfg(feature = "wgpu")]
+        {
+            if matches!(_backend, TensorUtilBackend::GpuWgpu)
+                && self.rows > 0
+                && self.cols > 0
+                && wgpu_dense::is_available()
+            {
+                match wgpu_dense::project_to_poincare(self.data(), self.rows, self.cols, curvature)
+                {
+                    Ok(buffer) => {
+                        let output = Tensor::from_vec(self.rows, self.cols, buffer)?;
+                        let (nonzero_rows, max_row_l2) =
+                            row_l2_projection_stats(self.data(), self.rows, self.cols);
+                        crate::emit_tensor_op(
+                            "project_to_poincare",
+                            &[self.rows, self.cols],
+                            &[output.rows, output.cols],
+                        );
+                        emit_wgpu_tensor_op_meta(
+                            "project_to_poincare",
+                            _backend.label(),
+                            self.rows,
+                            self.cols,
+                            output.rows,
+                            output.cols,
+                            self.layout,
+                            "hyperbolic_projection",
+                            "tensor_util.project_to_poincare",
+                            |data| {
+                                data.insert("curvature".to_string(), serde_json::json!(curvature));
+                                data.insert("scale".to_string(), serde_json::json!(scale));
+                                data.insert(
+                                    "nonzero_rows".to_string(),
+                                    serde_json::json!(nonzero_rows),
+                                );
+                                data.insert(
+                                    "max_row_l2".to_string(),
+                                    serde_json::json!(max_row_l2),
+                                );
+                            },
+                        );
+                        return Ok(output);
+                    }
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error(
+                            "wgpu",
+                            "project_to_poincare",
+                            message,
+                        ));
+                    }
+                    Err(message) => {
+                        wgpu_failure = Some(message);
+                    }
+                }
+            }
+        }
+
         let mut data = aligned_with_capacity(self.len());
+        let mut nonzero_rows = 0usize;
+        let mut max_row_l2 = 0.0f32;
         for r in 0..self.rows {
             let start = r * self.cols;
             let end = start + self.cols;
             let chunk = &self.data[start..end];
+            let norm: f32 = chunk.iter().map(|v| v * v).sum::<f32>().sqrt();
+            max_row_l2 = max_row_l2.max(norm);
+            if norm > 0.0 {
+                nonzero_rows = nonzero_rows.saturating_add(1);
+                let clip = (norm / scale).tanh();
+                let factor = clip / norm;
+                for v in chunk {
+                    data.push(v * factor);
+                }
+            } else {
+                data.extend_from_slice(chunk);
+            }
+        }
+        let output = Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)?;
+        crate::emit_tensor_op(
+            "project_to_poincare",
+            &[self.rows, self.cols],
+            &[output.rows, output.cols],
+        );
+        emit_tensor_util_cpu_op_meta(
+            "project_to_poincare",
+            self.rows,
+            self.cols,
+            output.rows,
+            output.cols,
+            self.layout,
+            _backend.label(),
+            "hyperbolic_projection",
+            |data| {
+                data.insert("curvature".to_string(), serde_json::json!(curvature));
+                data.insert("scale".to_string(), serde_json::json!(scale));
+                data.insert("nonzero_rows".to_string(), serde_json::json!(nonzero_rows));
+                data.insert("max_row_l2".to_string(), serde_json::json!(max_row_l2));
+                #[cfg(feature = "wgpu")]
+                if let Some(message) = wgpu_failure.as_deref() {
+                    data.insert(
+                        "fallback".to_string(),
+                        wgpu_runtime_fallback_meta(
+                            "cpu",
+                            WGPU_RUNTIME_FALLBACK_REASON,
+                            Some(message),
+                        ),
+                    );
+                }
+            },
+        );
+        Ok(output)
+    }
+
+    /// Applies a row-wise affine gate and projects the result onto the Poincaré ball.
+    #[allow(clippy::too_many_arguments)]
+    pub fn wave_gate_project_with_backend(
+        &self,
+        gate: &[f32],
+        bias: &[f32],
+        curvature: f32,
+        saturation: f32,
+        porosity: f32,
+        _backend: TensorUtilBackend,
+    ) -> PureResult<Tensor> {
+        if curvature >= 0.0 {
+            return Err(TensorError::NonHyperbolicCurvature { curvature });
+        }
+        if gate.len() != self.cols {
+            return Err(TensorError::DataLength {
+                expected: self.cols,
+                got: gate.len(),
+            });
+        }
+        if bias.len() != self.cols {
+            return Err(TensorError::DataLength {
+                expected: self.cols,
+                got: bias.len(),
+            });
+        }
+        let scale = (-curvature).sqrt();
+        #[cfg(feature = "wgpu")]
+        let mut wgpu_failure: Option<String> = None;
+
+        #[cfg(feature = "wgpu")]
+        {
+            if matches!(_backend, TensorUtilBackend::GpuWgpu)
+                && self.rows > 0
+                && self.cols > 0
+                && wgpu_dense::is_available()
+            {
+                match wgpu_dense::wave_gate_project(
+                    self.data(),
+                    gate,
+                    bias,
+                    self.rows,
+                    self.cols,
+                    curvature,
+                    saturation,
+                    porosity,
+                ) {
+                    Ok(buffer) => {
+                        let output = Tensor::from_vec(self.rows, self.cols, buffer)?;
+                        crate::emit_tensor_op(
+                            "wave_gate_project",
+                            &[self.rows, self.cols, 1, gate.len(), 1, bias.len()],
+                            &[output.rows, output.cols],
+                        );
+                        emit_wgpu_tensor_op_meta(
+                            "wave_gate_project",
+                            _backend.label(),
+                            self.rows,
+                            self.cols,
+                            output.rows,
+                            output.cols,
+                            self.layout,
+                            "fused_hyperbolic_projection",
+                            "tensor_util.wave_gate_project",
+                            |data| {
+                                data.insert("curvature".to_string(), serde_json::json!(curvature));
+                                data.insert("scale".to_string(), serde_json::json!(scale));
+                                data.insert(
+                                    "saturation".to_string(),
+                                    serde_json::json!(saturation),
+                                );
+                                data.insert("porosity".to_string(), serde_json::json!(porosity));
+                                data.insert("gate_cols".to_string(), serde_json::json!(gate.len()));
+                                data.insert("bias_cols".to_string(), serde_json::json!(bias.len()));
+                            },
+                        );
+                        return Ok(output);
+                    }
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error(
+                            "wgpu",
+                            "wave_gate_project",
+                            message,
+                        ));
+                    }
+                    Err(message) => {
+                        wgpu_failure = Some(message);
+                    }
+                }
+            }
+        }
+
+        let mut gated = aligned_with_capacity(self.len());
+        for r in 0..self.rows {
+            let offset = r * self.cols;
+            for c in 0..self.cols {
+                let value = self.data[offset + c] * gate[c] + bias[c];
+                gated.push(porous_mix_value(value, saturation, porosity));
+            }
+        }
+        let mut data = aligned_with_capacity(self.len());
+        for r in 0..self.rows {
+            let start = r * self.cols;
+            let end = start + self.cols;
+            let chunk = &gated[start..end];
             let norm: f32 = chunk.iter().map(|v| v * v).sum::<f32>().sqrt();
             if norm > 0.0 {
                 let clip = (norm / scale).tanh();
@@ -3481,7 +6882,42 @@ impl Tensor {
                 data.extend_from_slice(chunk);
             }
         }
-        Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)
+        let output = Tensor::from_aligned(self.rows, self.cols, data, Layout::RowMajor)?;
+        crate::emit_tensor_op(
+            "wave_gate_project",
+            &[self.rows, self.cols, 1, gate.len(), 1, bias.len()],
+            &[output.rows, output.cols],
+        );
+        emit_tensor_util_cpu_op_meta(
+            "wave_gate_project",
+            self.rows,
+            self.cols,
+            output.rows,
+            output.cols,
+            self.layout,
+            _backend.label(),
+            "fused_hyperbolic_projection",
+            |data| {
+                data.insert("curvature".to_string(), serde_json::json!(curvature));
+                data.insert("scale".to_string(), serde_json::json!(scale));
+                data.insert("saturation".to_string(), serde_json::json!(saturation));
+                data.insert("porosity".to_string(), serde_json::json!(porosity));
+                data.insert("gate_cols".to_string(), serde_json::json!(gate.len()));
+                data.insert("bias_cols".to_string(), serde_json::json!(bias.len()));
+                #[cfg(feature = "wgpu")]
+                if let Some(message) = wgpu_failure.as_deref() {
+                    data.insert(
+                        "fallback".to_string(),
+                        wgpu_runtime_fallback_meta(
+                            "cpu",
+                            WGPU_RUNTIME_FALLBACK_REASON,
+                            Some(message),
+                        ),
+                    );
+                }
+            },
+        );
+        Ok(output)
     }
 
     /// Estimates the hyperbolic distance between two flattened tensors treated as points.
@@ -3505,24 +6941,144 @@ impl Tensor {
             sum_inner += (1.0 - pa.powi(2)) * (1.0 - pb.powi(2));
         }
         let denom = sum_inner.max(1e-6).sqrt();
-        Ok(2.0 * (1.0 + (sum_norm / denom)).acosh())
+        let distance = 2.0 * (1.0 + (sum_norm / denom)).acosh();
+        crate::emit_tensor_op(
+            "hyperbolic_distance",
+            &[self.rows, self.cols, other.rows, other.cols],
+            &[1, 1],
+        );
+        emit_cpu_tensor_op_meta(
+            "hyperbolic_distance",
+            self.rows,
+            self.cols,
+            1,
+            1,
+            self.layout,
+            "hyperbolic_distance",
+            |data| {
+                data.insert("rhs_rows".to_string(), serde_json::json!(other.rows));
+                data.insert("rhs_cols".to_string(), serde_json::json!(other.cols));
+                data.insert(
+                    "rhs_layout".to_string(),
+                    serde_json::json!(other.layout.as_str()),
+                );
+                data.insert("curvature".to_string(), serde_json::json!(curvature));
+                data.insert("scale".to_string(), serde_json::json!(scale));
+                data.insert("sum_norm".to_string(), serde_json::json!(sum_norm));
+                data.insert("sum_inner".to_string(), serde_json::json!(sum_inner));
+                data.insert("denom".to_string(), serde_json::json!(denom));
+                data.insert("distance".to_string(), serde_json::json!(distance));
+            },
+        );
+        Ok(distance)
     }
 }
 
 /// Computes the mean squared error between `predictions` and `targets`.
 pub fn mean_squared_error(predictions: &Tensor, targets: &Tensor) -> PureResult<f32> {
+    mean_squared_error_with_backend(predictions, targets, TensorUtilBackend::Auto)
+}
+
+/// Computes mean squared error with an explicit tensor utility backend for the reduction tail.
+pub fn mean_squared_error_with_backend(
+    predictions: &Tensor,
+    targets: &Tensor,
+    backend: TensorUtilBackend,
+) -> PureResult<f32> {
     if predictions.shape() != targets.shape() {
         return Err(TensorError::ShapeMismatch {
             left: predictions.shape(),
             right: targets.shape(),
         });
     }
-    let mut sum = 0.0f32;
-    for (p, t) in predictions.data().iter().zip(targets.data().iter()) {
-        let diff = p - t;
-        sum += diff * diff;
+    crate::emit_tensor_op(
+        "mean_squared_error",
+        &[
+            predictions.rows,
+            predictions.cols,
+            targets.rows,
+            targets.cols,
+        ],
+        &[1, 1],
+    );
+    emit_basic_tensor_op_meta(
+        "mean_squared_error",
+        predictions.rows,
+        predictions.cols,
+        1,
+        1,
+        predictions.layout,
+        "composite",
+        backend.label(),
+        "tensor_util.mean_squared_error",
+        "reduction",
+        |data| {
+            data.insert("rhs_rows".to_string(), serde_json::json!(targets.rows));
+            data.insert("rhs_cols".to_string(), serde_json::json!(targets.cols));
+            data.insert(
+                "rhs_layout".to_string(),
+                serde_json::json!(targets.layout.as_str()),
+            );
+            data.insert("reduction".to_string(), serde_json::json!("mean"));
+            data.insert(
+                "reduction_backend".to_string(),
+                serde_json::json!(backend.label()),
+            );
+        },
+    );
+    let values = predictions.rows.saturating_mul(predictions.cols);
+    if values == 0 {
+        return Ok(0.0);
     }
-    Ok(sum / (predictions.rows * predictions.cols) as f32)
+    Tensor::validate_finite_tensor_util_slice("mse_prediction", predictions.data())?;
+    Tensor::validate_finite_tensor_util_slice("mse_target", targets.data())?;
+    let diff =
+        relabel_tensor_non_finite(predictions.sub_with_backend(targets, backend), "mse_diff")?;
+    mean_squared_error_from_diff_labels(
+        &diff,
+        "mse_diff",
+        "mse_squared_diff",
+        "mse_column_mean",
+        "mean_squared_error",
+        backend,
+    )
+}
+
+fn relabel_tensor_non_finite<T>(result: PureResult<T>, label: &'static str) -> PureResult<T> {
+    match result {
+        Err(TensorError::NonFiniteValue { value, .. }) => {
+            Err(TensorError::NonFiniteValue { label, value })
+        }
+        other => other,
+    }
+}
+
+fn mean_squared_error_from_diff_labels(
+    diff: &Tensor,
+    diff_label: &'static str,
+    squared_label: &'static str,
+    column_mean_label: &'static str,
+    mean_label: &'static str,
+    backend: TensorUtilBackend,
+) -> PureResult<f32> {
+    let values = diff.data().len();
+    if values == 0 {
+        return Ok(0.0);
+    }
+    Tensor::validate_finite_tensor_util_slice(diff_label, diff.data())?;
+    let squared =
+        relabel_tensor_non_finite(diff.hadamard_with_backend(diff, backend), squared_label)?;
+    let column_means = relabel_tensor_non_finite(
+        squared.try_sum_axis0_scaled_with_backend(1.0 / values as f32, backend),
+        column_mean_label,
+    )?;
+    let mut mean = 0.0f32;
+    for value in column_means {
+        Tensor::validate_finite_tensor_util_value(column_mean_label, value)?;
+        mean += value;
+        Tensor::validate_finite_tensor_util_value(mean_label, mean)?;
+    }
+    Ok(mean)
 }
 
 /// A minimal fully-connected linear model.
@@ -3561,6 +7117,15 @@ impl LinearModel {
 
     /// Runs a forward pass: `inputs @ weights + bias`.
     pub fn forward(&self, inputs: &Tensor) -> PureResult<Tensor> {
+        self.forward_with_backend(inputs, MatmulBackend::Auto)
+    }
+
+    /// Runs a forward pass with an explicit matmul backend.
+    pub fn forward_with_backend(
+        &self,
+        inputs: &Tensor,
+        backend: MatmulBackend,
+    ) -> PureResult<Tensor> {
         if inputs.shape().1 != self.weights.shape().0 {
             return Err(TensorError::ShapeMismatch {
                 left: inputs.shape(),
@@ -3568,9 +7133,7 @@ impl LinearModel {
             });
         }
         let pack = self.ensure_packed_weights()?;
-        let mut out = inputs.matmul_prepacked(&pack)?;
-        out.add_row_inplace(&self.bias)?;
-        Ok(out)
+        inputs.matmul_prepacked_bias_with_backend(&pack, &self.bias, backend)
     }
 
     /// Performs a single batch of gradient descent and returns the batch loss.
@@ -3579,6 +7142,24 @@ impl LinearModel {
         inputs: &Tensor,
         targets: &Tensor,
         learning_rate: f32,
+    ) -> PureResult<f32> {
+        self.train_batch_with_backend(
+            inputs,
+            targets,
+            learning_rate,
+            MatmulBackend::Auto,
+            TensorUtilBackend::Auto,
+        )
+    }
+
+    /// Performs a single batch of gradient descent with explicit compute backends.
+    pub fn train_batch_with_backend(
+        &mut self,
+        inputs: &Tensor,
+        targets: &Tensor,
+        learning_rate: f32,
+        matmul_backend: MatmulBackend,
+        tensor_backend: TensorUtilBackend,
     ) -> PureResult<f32> {
         if inputs.shape().0 != targets.shape().0 {
             return Err(TensorError::ShapeMismatch {
@@ -3592,23 +7173,40 @@ impl LinearModel {
                 right: self.weights.shape(),
             });
         }
+        Tensor::validate_finite_tensor_util_value("linear_model_learning_rate", learning_rate)?;
         let batch_size = inputs.shape().0 as f32;
         let pack = self.ensure_packed_weights()?;
-        let mut predictions = inputs.matmul_prepacked(&pack)?;
-        predictions.add_row_inplace(&self.bias)?;
-        let diff = predictions.sub(targets)?;
-        let inputs_t = inputs.transpose();
-        let grad_w = inputs_t.matmul(&diff)?.scale(1.0 / batch_size)?;
-        let mut grad_b = diff.sum_axis0();
-        for val in grad_b.iter_mut() {
-            *val /= batch_size;
+        let predictions =
+            inputs.matmul_prepacked_bias_with_backend(&pack, &self.bias, matmul_backend)?;
+        let diff = relabel_tensor_non_finite(
+            predictions.sub_with_backend(targets, tensor_backend),
+            "linear_model_mse_diff",
+        )?;
+        let batch_loss = mean_squared_error_from_diff_with_backend(&diff, tensor_backend)?;
+        let grad_w = inputs.matmul_lhs_transpose_scaled_with_backend(
+            &diff,
+            1.0 / batch_size,
+            matmul_backend,
+        )?;
+        let grad_b = relabel_tensor_non_finite(
+            diff.try_sum_axis0_scaled_with_backend(1.0 / batch_size, tensor_backend),
+            "linear_model_bias_gradient",
+        )?;
+        for val in &grad_b {
+            Tensor::validate_finite_tensor_util_value("linear_model_bias_gradient", *val)?;
         }
-        self.weights.add_scaled(&grad_w, -learning_rate)?;
-        for (b, g) in self.bias.iter_mut().zip(grad_b.iter()) {
-            *b -= learning_rate * g;
+        let mut next_bias = self.bias.clone();
+        for (b, g) in next_bias.iter_mut().zip(grad_b.iter()) {
+            let delta = learning_rate * g;
+            Tensor::validate_finite_tensor_util_value("linear_model_bias_delta", delta)?;
+            *b -= delta;
+            Tensor::validate_finite_tensor_util_value("linear_model_bias", *b)?;
         }
+        self.weights
+            .add_scaled_with_backend(&grad_w, -learning_rate, tensor_backend)?;
+        self.bias = next_bias;
         self.packed_weights.borrow_mut().take();
-        Ok(mean_squared_error_from_diff(&diff))
+        Ok(batch_loss)
     }
 
     /// Returns a reference to the model weights.
@@ -3631,12 +7229,18 @@ impl LinearModel {
     }
 }
 
-fn mean_squared_error_from_diff(diff: &Tensor) -> f32 {
-    let mut sum = 0.0f32;
-    for v in diff.data() {
-        sum += v * v;
-    }
-    sum / (diff.rows * diff.cols) as f32
+fn mean_squared_error_from_diff_with_backend(
+    diff: &Tensor,
+    backend: TensorUtilBackend,
+) -> PureResult<f32> {
+    mean_squared_error_from_diff_labels(
+        diff,
+        "linear_model_mse_diff",
+        "linear_model_mse_squared_diff",
+        "linear_model_mse_column_mean",
+        "linear_model_mse",
+        backend,
+    )
 }
 
 /// Lightweight complex number for wave encodings without external crates.
@@ -4434,6 +8038,29 @@ impl GradientSummary {
             }
         }
     }
+}
+
+fn insert_gradient_summary_meta(
+    data: &mut serde_json::Map<String, serde_json::Value>,
+    prefix: &str,
+    summary: GradientSummary,
+) {
+    data.insert(
+        format!("{prefix}_finite_values"),
+        serde_json::json!(summary.count()),
+    );
+    data.insert(format!("{prefix}_l1"), serde_json::json!(summary.l1()));
+    data.insert(format!("{prefix}_l2"), serde_json::json!(summary.l2()));
+    data.insert(format!("{prefix}_linf"), serde_json::json!(summary.linf()));
+    data.insert(format!("{prefix}_rms"), serde_json::json!(summary.rms()));
+    data.insert(
+        format!("{prefix}_mean_abs"),
+        serde_json::json!(summary.mean_abs()),
+    );
+    data.insert(
+        format!("{prefix}_near_zero_values"),
+        serde_json::json!(summary.near_zero_count()),
+    );
 }
 
 impl Default for GradientSummary {
@@ -5307,10 +8934,10 @@ impl AmegaHypergrad {
         if rows == 0 || cols == 0 {
             return Err(TensorError::InvalidDimensions { rows, cols });
         }
-        if curvature >= 0.0 {
+        if curvature >= 0.0 || !curvature.is_finite() {
             return Err(TensorError::NonHyperbolicCurvature { curvature });
         }
-        if learning_rate <= 0.0 {
+        if learning_rate <= 0.0 || !learning_rate.is_finite() {
             return Err(TensorError::NonPositiveLearningRate {
                 rate: learning_rate,
             });
@@ -5350,10 +8977,10 @@ impl AmegaHypergrad {
         if rows == 0 || cols == 0 {
             return Err(TensorError::InvalidDimensions { rows, cols });
         }
-        if curvature >= 0.0 {
+        if curvature >= 0.0 || !curvature.is_finite() {
             return Err(TensorError::NonHyperbolicCurvature { curvature });
         }
-        if learning_rate <= 0.0 {
+        if learning_rate <= 0.0 || !learning_rate.is_finite() {
             return Err(TensorError::NonPositiveLearningRate {
                 rate: learning_rate,
             });
@@ -5750,7 +9377,10 @@ impl AmegaHypergrad {
     /// Scales the learning rate used by subsequent hyperbolic updates.
     pub fn scale_learning_rate(&mut self, factor: f32) {
         if factor.is_finite() && factor > 0.0 {
-            self.learning_rate *= factor;
+            let next = self.learning_rate * factor;
+            if next.is_finite() && next > 0.0 {
+                self.learning_rate = next;
+            }
         }
     }
 
@@ -5777,6 +9407,31 @@ impl AmegaHypergrad {
                 self.gradient[idx] = new;
             }
         }
+    }
+
+    /// Scales the accumulated gradient through a tensor utility backend before
+    /// applying the tape's topos saturation and summary accounting.
+    pub fn scale_gradient_with_backend(
+        &mut self,
+        factor: f32,
+        backend: TensorUtilBackend,
+    ) -> PureResult<()> {
+        if !factor.is_finite() {
+            self.reset();
+            return Ok(());
+        }
+        if (factor - 1.0).abs() <= f32::EPSILON {
+            return Ok(());
+        }
+        let gradient = Tensor::from_vec(self.rows, self.cols, self.gradient.clone())?;
+        let scaled = gradient.scale_with_backend(factor, backend)?;
+        let mut next_gradient = self.gradient.clone();
+        for (idx, &candidate) in scaled.data().iter().enumerate() {
+            next_gradient[idx] =
+                self.checked_saturated_gradient("hypergrad_scaled_gradient", candidate)?;
+        }
+        self.commit_gradient(next_gradient);
+        Ok(())
     }
 
     /// Rescales the gradient so its root-mean-square matches `target_rms` and
@@ -5837,6 +9492,58 @@ impl AmegaHypergrad {
         Ok(())
     }
 
+    fn checked_saturated_gradient(&self, label: &'static str, candidate: f32) -> PureResult<f32> {
+        if !candidate.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label,
+                value: candidate,
+            });
+        }
+        Ok(self.topos.saturate(candidate))
+    }
+
+    fn commit_gradient(&mut self, next_gradient: Vec<f32>) {
+        for (idx, new) in next_gradient.into_iter().enumerate() {
+            let old = self.gradient[idx];
+            self.gradient[idx] = new;
+            if old.to_bits() != new.to_bits() {
+                self.record_transition(old, new);
+            }
+        }
+    }
+
+    fn updated_weights_tensor(&self, weights: &Tensor) -> PureResult<Tensor> {
+        let tolerance = self.topos.tolerance();
+        let mut updated = weights.clone();
+        for (value, grad) in updated.data_mut().iter_mut().zip(self.gradient.iter()) {
+            let original = *value;
+            let denom = 1.0 - self.curvature * original * original;
+            let step = self.learning_rate / denom.abs().max(tolerance);
+            if !step.is_finite() {
+                return Err(TensorError::NonFiniteValue {
+                    label: "hypergrad_step",
+                    value: step,
+                });
+            }
+            let delta = step * *grad;
+            if !delta.is_finite() {
+                return Err(TensorError::NonFiniteValue {
+                    label: "hypergrad_delta",
+                    value: delta,
+                });
+            }
+            let next = original - delta;
+            if !next.is_finite() {
+                return Err(TensorError::NonFiniteValue {
+                    label: "hypergrad_update",
+                    value: next,
+                });
+            }
+            *value = self.topos.saturate(next);
+        }
+        Ok(updated)
+    }
+
     /// Clears the accumulated gradient back to zero.
     pub fn reset(&mut self) {
         for idx in 0..self.gradient.len() {
@@ -5852,21 +9559,164 @@ impl AmegaHypergrad {
     /// Accumulates a Euclidean tensor inside the hyperbolic tape using
     /// the standard conformal factor for the Poincaré ball.
     pub fn accumulate_wave(&mut self, tensor: &Tensor) -> PureResult<()> {
+        self.accumulate_wave_with_backend(tensor, TensorUtilBackend::Auto)
+    }
+
+    /// Accumulates a Euclidean tensor using an explicit tensor utility backend
+    /// for the conformal update while keeping CPU-side guards and summaries.
+    pub fn accumulate_wave_with_backend(
+        &mut self,
+        tensor: &Tensor,
+        backend: TensorUtilBackend,
+    ) -> PureResult<()> {
         self.assert_tensor_shape(tensor)?;
         self.topos.guard_tensor("hypergrad_wave", tensor)?;
         let tolerance = self.topos.tolerance();
         let values = tensor.data();
+        #[cfg(feature = "wgpu")]
+        let mut wgpu_failure: Option<String> = None;
+
+        #[cfg(feature = "wgpu")]
+        {
+            if matches!(backend, TensorUtilBackend::GpuWgpu)
+                && !values.is_empty()
+                && wgpu_dense::is_available()
+            {
+                match wgpu_dense::hypergrad_accumulate_wave(
+                    &self.gradient,
+                    values,
+                    self.rows,
+                    self.cols,
+                    self.curvature,
+                    tolerance,
+                    self.topos.saturation(),
+                    self.topos.porosity(),
+                ) {
+                    Ok(next_gradient) => {
+                        for &candidate in &next_gradient {
+                            if !candidate.is_finite() {
+                                return Err(TensorError::NonFiniteValue {
+                                    label: "hypergrad_accumulate_wave",
+                                    value: candidate,
+                                });
+                            }
+                        }
+                        self.commit_gradient(next_gradient);
+                        crate::emit_tensor_op(
+                            "hypergrad_accumulate_wave",
+                            &[tensor.rows, tensor.cols],
+                            &[self.rows, self.cols],
+                        );
+                        emit_basic_tensor_op_meta(
+                            "hypergrad_accumulate_wave",
+                            tensor.rows,
+                            tensor.cols,
+                            self.rows,
+                            self.cols,
+                            tensor.layout,
+                            "wgpu_dense",
+                            backend.label(),
+                            "hypergrad.wgpu_accumulate_wave",
+                            "gradient_tape_accumulate",
+                            |data| {
+                                data.insert(
+                                    "curvature".to_string(),
+                                    serde_json::json!(self.curvature),
+                                );
+                                data.insert(
+                                    "learning_rate".to_string(),
+                                    serde_json::json!(self.learning_rate),
+                                );
+                                data.insert("tolerance".to_string(), serde_json::json!(tolerance));
+                                data.insert(
+                                    "saturation".to_string(),
+                                    serde_json::json!(self.topos.saturation()),
+                                );
+                                data.insert(
+                                    "porosity".to_string(),
+                                    serde_json::json!(self.topos.porosity()),
+                                );
+                                data.insert(
+                                    "input_non_finite_values".to_string(),
+                                    serde_json::json!(values
+                                        .iter()
+                                        .filter(|value| !value.is_finite())
+                                        .count()),
+                                );
+                                insert_gradient_summary_meta(data, "gradient", self.summary());
+                            },
+                        );
+                        return Ok(());
+                    }
+                    Err(message) if strict_gpu_path() => {
+                        return Err(strict_gpu_fallback_error(
+                            "wgpu",
+                            "hypergrad_accumulate_wave",
+                            message,
+                        ));
+                    }
+                    Err(message) => {
+                        wgpu_failure = Some(message);
+                    }
+                }
+            }
+        }
+
+        let mut next_gradient = self.gradient.clone();
         for (idx, &value) in values.iter().enumerate() {
             let denom = 1.0 - self.curvature * value * value;
             let update = value / denom.abs().max(tolerance);
             let old = self.gradient[idx];
             let candidate = old + update;
-            let new = self.topos.saturate(candidate);
-            self.gradient[idx] = new;
-            if old.to_bits() != new.to_bits() {
-                self.record_transition(old, new);
-            }
+            next_gradient[idx] =
+                self.checked_saturated_gradient("hypergrad_accumulate_wave", candidate)?;
         }
+        self.commit_gradient(next_gradient);
+        crate::emit_tensor_op(
+            "hypergrad_accumulate_wave",
+            &[tensor.rows, tensor.cols],
+            &[self.rows, self.cols],
+        );
+        emit_basic_tensor_op_meta(
+            "hypergrad_accumulate_wave",
+            tensor.rows,
+            tensor.cols,
+            self.rows,
+            self.cols,
+            tensor.layout,
+            "cpu",
+            backend.label(),
+            "scalar",
+            "gradient_tape_accumulate",
+            |data| {
+                data.insert("curvature".to_string(), serde_json::json!(self.curvature));
+                data.insert(
+                    "learning_rate".to_string(),
+                    serde_json::json!(self.learning_rate),
+                );
+                data.insert("tolerance".to_string(), serde_json::json!(tolerance));
+                data.insert(
+                    "saturation".to_string(),
+                    serde_json::json!(self.topos.saturation()),
+                );
+                data.insert(
+                    "input_non_finite_values".to_string(),
+                    serde_json::json!(values.iter().filter(|value| !value.is_finite()).count()),
+                );
+                #[cfg(feature = "wgpu")]
+                if let Some(message) = wgpu_failure.as_deref() {
+                    data.insert(
+                        "fallback".to_string(),
+                        wgpu_runtime_fallback_meta(
+                            "cpu",
+                            WGPU_RUNTIME_FALLBACK_REASON,
+                            Some(message),
+                        ),
+                    );
+                }
+                insert_gradient_summary_meta(data, "gradient", self.summary());
+            },
+        );
         Ok(())
     }
 
@@ -5903,18 +9753,57 @@ impl AmegaHypergrad {
         self.topos.guard_tensor("hypergrad_target", target)?;
         let prediction_data = prediction.data();
         let target_data = target.data();
+        let mut next_gradient = self.gradient.clone();
         for idx in 0..self.gradient.len() {
             let delta = prediction_data[idx] - target_data[idx];
             let old = self.gradient[idx];
             let candidate = old + delta;
-            let new = self.topos.saturate(candidate);
-            if old.to_bits() != new.to_bits() {
-                self.gradient[idx] = new;
-                self.record_transition(old, new);
-            } else {
-                self.gradient[idx] = new;
-            }
+            next_gradient[idx] =
+                self.checked_saturated_gradient("hypergrad_accumulate_pair", candidate)?;
         }
+        self.commit_gradient(next_gradient);
+        crate::emit_tensor_op(
+            "hypergrad_accumulate_pair",
+            &[prediction.rows, prediction.cols, target.rows, target.cols],
+            &[self.rows, self.cols],
+        );
+        emit_cpu_tensor_op_meta(
+            "hypergrad_accumulate_pair",
+            prediction.rows,
+            prediction.cols,
+            self.rows,
+            self.cols,
+            prediction.layout,
+            "gradient_tape_accumulate",
+            |data| {
+                data.insert("curvature".to_string(), serde_json::json!(self.curvature));
+                data.insert(
+                    "learning_rate".to_string(),
+                    serde_json::json!(self.learning_rate),
+                );
+                data.insert("rhs_rows".to_string(), serde_json::json!(target.rows));
+                data.insert("rhs_cols".to_string(), serde_json::json!(target.cols));
+                data.insert(
+                    "rhs_layout".to_string(),
+                    serde_json::json!(target.layout.as_str()),
+                );
+                data.insert(
+                    "prediction_non_finite_values".to_string(),
+                    serde_json::json!(prediction_data
+                        .iter()
+                        .filter(|value| !value.is_finite())
+                        .count()),
+                );
+                data.insert(
+                    "target_non_finite_values".to_string(),
+                    serde_json::json!(target_data
+                        .iter()
+                        .filter(|value| !value.is_finite())
+                        .count()),
+                );
+                insert_gradient_summary_meta(data, "gradient", self.summary());
+            },
+        );
         Ok(())
     }
 
@@ -5922,19 +9811,55 @@ impl AmegaHypergrad {
     /// into the Poincaré ball. The gradient buffer is cleared afterwards so the
     /// tape can keep streaming samples without triggering a traceback.
     pub fn apply(&mut self, weights: &mut Tensor) -> PureResult<()> {
+        self.apply_with_backend(weights, TensorUtilBackend::Auto)
+    }
+
+    /// Applies the accumulated gradient using an explicit tensor utility backend
+    /// for the final Poincaré projection.
+    pub fn apply_with_backend(
+        &mut self,
+        weights: &mut Tensor,
+        backend: TensorUtilBackend,
+    ) -> PureResult<()> {
         self.assert_tensor_shape(weights)?;
         self.topos.guard_tensor("hypergrad_weights", weights)?;
-        let tolerance = self.topos.tolerance();
-        {
-            let data = weights.data_mut();
-            for (value, grad) in data.iter_mut().zip(self.gradient.iter()) {
-                let denom = 1.0 - self.curvature * (*value) * (*value);
-                let step = self.learning_rate / denom.abs().max(tolerance);
-                let updated = *value - step * *grad;
-                *value = self.topos.saturate(updated);
-            }
-        }
-        let projected = weights.project_to_poincare(self.curvature)?;
+        let updated_weights = self.updated_weights_tensor(weights)?;
+        crate::emit_tensor_op(
+            "hypergrad_apply_update",
+            &[weights.rows, weights.cols, self.rows, self.cols],
+            &[weights.rows, weights.cols],
+        );
+        emit_cpu_tensor_op_meta(
+            "hypergrad_apply_update",
+            weights.rows,
+            weights.cols,
+            weights.rows,
+            weights.cols,
+            weights.layout,
+            "gradient_tape_update",
+            |data| {
+                data.insert("curvature".to_string(), serde_json::json!(self.curvature));
+                data.insert(
+                    "learning_rate".to_string(),
+                    serde_json::json!(self.learning_rate),
+                );
+                data.insert(
+                    "projection_requested_backend".to_string(),
+                    serde_json::json!(backend.label()),
+                );
+                data.insert(
+                    "weight_non_finite_values".to_string(),
+                    serde_json::json!(weights
+                        .data()
+                        .iter()
+                        .filter(|value| !value.is_finite())
+                        .count()),
+                );
+                insert_gradient_summary_meta(data, "gradient", self.summary());
+            },
+        );
+        let projected =
+            updated_weights.project_to_poincare_with_backend(self.curvature, backend)?;
         *weights = projected;
         self.topos
             .guard_tensor("hypergrad_weights_post_projection", weights)?;
@@ -5995,7 +9920,10 @@ impl AmegaRealgrad {
     /// Adjust the learning rate used for subsequent updates.
     pub fn scale_learning_rate(&mut self, factor: f32) {
         if factor.is_finite() && factor > 0.0 {
-            self.learning_rate *= factor;
+            let next = self.learning_rate * factor;
+            if next.is_finite() && next > 0.0 {
+                self.learning_rate = next;
+            }
         }
     }
 
@@ -6014,6 +9942,34 @@ impl AmegaRealgrad {
         &mut self.gradient
     }
 
+    /// Scale the accumulated gradient through a tensor utility backend.
+    pub fn scale_gradient_with_backend(
+        &mut self,
+        factor: f32,
+        backend: TensorUtilBackend,
+    ) -> PureResult<()> {
+        if !factor.is_finite() {
+            return Ok(());
+        }
+        if (factor - 1.0).abs() <= f32::EPSILON {
+            return Ok(());
+        }
+        for value in self.gradient.iter().copied() {
+            let scaled = value * factor;
+            if !scaled.is_finite() {
+                return Err(TensorError::NonFiniteValue {
+                    label: "realgrad_scaled_gradient",
+                    value: scaled,
+                });
+            }
+        }
+        let gradient = Tensor::from_vec(self.rows, self.cols, self.gradient.clone())?;
+        let scaled = gradient.scale_with_backend(factor, backend)?;
+        self.gradient.clear();
+        self.gradient.extend_from_slice(scaled.data());
+        Ok(())
+    }
+
     /// Summarise the accumulated gradient using basic norm statistics.
     pub fn summary(&self) -> GradientSummary {
         GradientSummary::from_slice(&self.gradient)
@@ -6025,6 +9981,26 @@ impl AmegaRealgrad {
                 left: tensor.shape(),
                 right: (self.rows, self.cols),
             });
+        }
+        Ok(())
+    }
+
+    fn validate_update(&self, weights: &Tensor) -> PureResult<()> {
+        for (&weight, &grad) in weights.data().iter().zip(self.gradient.iter()) {
+            let delta = self.learning_rate * grad;
+            if !delta.is_finite() {
+                return Err(TensorError::NonFiniteValue {
+                    label: "realgrad_delta",
+                    value: delta,
+                });
+            }
+            let next = weight - delta;
+            if !next.is_finite() {
+                return Err(TensorError::NonFiniteValue {
+                    label: "realgrad_update",
+                    value: next,
+                });
+            }
         }
         Ok(())
     }
@@ -6042,6 +10018,35 @@ impl AmegaRealgrad {
         for (grad, value) in self.gradient.iter_mut().zip(tensor.data().iter()) {
             *grad += *value;
         }
+        crate::emit_tensor_op(
+            "realgrad_accumulate_wave",
+            &[tensor.rows, tensor.cols],
+            &[self.rows, self.cols],
+        );
+        emit_cpu_tensor_op_meta(
+            "realgrad_accumulate_wave",
+            tensor.rows,
+            tensor.cols,
+            self.rows,
+            self.cols,
+            tensor.layout,
+            "gradient_tape_accumulate",
+            |data| {
+                data.insert(
+                    "learning_rate".to_string(),
+                    serde_json::json!(self.learning_rate),
+                );
+                data.insert(
+                    "input_non_finite_values".to_string(),
+                    serde_json::json!(tensor
+                        .data()
+                        .iter()
+                        .filter(|value| !value.is_finite())
+                        .count()),
+                );
+                insert_gradient_summary_meta(data, "gradient", self.summary());
+            },
+        );
         Ok(())
     }
 
@@ -6074,15 +10079,67 @@ impl AmegaRealgrad {
         {
             *grad += pred - tgt;
         }
+        crate::emit_tensor_op(
+            "realgrad_accumulate_pair",
+            &[prediction.rows, prediction.cols, target.rows, target.cols],
+            &[self.rows, self.cols],
+        );
+        emit_cpu_tensor_op_meta(
+            "realgrad_accumulate_pair",
+            prediction.rows,
+            prediction.cols,
+            self.rows,
+            self.cols,
+            prediction.layout,
+            "gradient_tape_accumulate",
+            |data| {
+                data.insert(
+                    "learning_rate".to_string(),
+                    serde_json::json!(self.learning_rate),
+                );
+                data.insert("rhs_rows".to_string(), serde_json::json!(target.rows));
+                data.insert("rhs_cols".to_string(), serde_json::json!(target.cols));
+                data.insert(
+                    "rhs_layout".to_string(),
+                    serde_json::json!(target.layout.as_str()),
+                );
+                data.insert(
+                    "prediction_non_finite_values".to_string(),
+                    serde_json::json!(prediction
+                        .data()
+                        .iter()
+                        .filter(|value| !value.is_finite())
+                        .count()),
+                );
+                data.insert(
+                    "target_non_finite_values".to_string(),
+                    serde_json::json!(target
+                        .data()
+                        .iter()
+                        .filter(|value| !value.is_finite())
+                        .count()),
+                );
+                insert_gradient_summary_meta(data, "gradient", self.summary());
+            },
+        );
         Ok(())
     }
 
     /// Apply the accumulated gradient to the provided weights and clear it.
     pub fn apply(&mut self, weights: &mut Tensor) -> PureResult<()> {
+        self.apply_with_backend(weights, TensorUtilBackend::Auto)
+    }
+
+    /// Apply the accumulated gradient using an explicit tensor utility backend.
+    pub fn apply_with_backend(
+        &mut self,
+        weights: &mut Tensor,
+        backend: TensorUtilBackend,
+    ) -> PureResult<()> {
         self.assert_tensor_shape(weights)?;
-        for (value, grad) in weights.data_mut().iter_mut().zip(self.gradient.iter()) {
-            *value -= self.learning_rate * *grad;
-        }
+        self.validate_update(weights)?;
+        let gradient = Tensor::from_vec(self.rows, self.cols, self.gradient.clone())?;
+        weights.add_scaled_with_backend(&gradient, -self.learning_rate, backend)?;
         self.reset();
         Ok(())
     }
@@ -6162,6 +10219,30 @@ fn matmul_naive_parallel(dst: &mut [f32], lhs: &[f32], rhs: &[f32], inner: usize
     dst.par_chunks_mut(cols)
         .zip(lhs.par_chunks(inner))
         .for_each(|(dst_row, lhs_row)| matmul_row(dst_row, lhs_row, rhs, inner, cols));
+}
+
+fn matmul_lhs_transpose_scaled_naive_into(
+    dst: &mut [f32],
+    lhs: &[f32],
+    rhs: &[f32],
+    lhs_rows: usize,
+    lhs_cols: usize,
+    rhs_cols: usize,
+    scale: f32,
+) {
+    debug_assert_eq!(dst.len(), lhs_cols * rhs_cols);
+    debug_assert_eq!(lhs.len(), lhs_rows * lhs_cols);
+    debug_assert_eq!(rhs.len(), lhs_rows * rhs_cols);
+    for out_row in 0..lhs_cols {
+        let dst_offset = out_row * rhs_cols;
+        for out_col in 0..rhs_cols {
+            let mut acc = 0.0f32;
+            for k in 0..lhs_rows {
+                acc += lhs[k * lhs_cols + out_row] * rhs[k * rhs_cols + out_col];
+            }
+            dst[dst_offset + out_col] = acc * scale;
+        }
+    }
 }
 
 #[inline]
@@ -6355,7 +10436,7 @@ fn fused_attention_cpu(
     scale: f32,
     z_bias: Option<&[f32]>,
     attn_bias: Option<&[f32]>,
-) -> Vec<f32> {
+) -> PureResult<Vec<f32>> {
     let total = contexts * sequence * head_dim;
     let mut output = vec![0.0f32; total];
     let mut accum = vec![0.0f32; head_dim];
@@ -6375,14 +10456,18 @@ fn fused_attention_cpu(
                 let mut dot = 0.0f32;
                 for dim in 0..head_dim {
                     dot += queries[query_offset + dim] * keys[key_offset + dim];
+                    Tensor::validate_finite_tensor_util_value("scaled_dot_attention_dot", dot)?;
                 }
 
                 let mut logit = dot * scale;
+                Tensor::validate_finite_tensor_util_value("scaled_dot_attention_logit", logit)?;
                 if let Some(bias) = z_bias {
                     logit += bias[context_offset + key_idx];
+                    Tensor::validate_finite_tensor_util_value("scaled_dot_attention_logit", logit)?;
                 }
                 if let Some(bias) = attn_bias {
                     logit += bias[query_row * sequence + key_idx];
+                    Tensor::validate_finite_tensor_util_value("scaled_dot_attention_logit", logit)?;
                 }
 
                 let new_max = running_max.max(logit);
@@ -6393,13 +10478,20 @@ fn fused_attention_cpu(
                 };
                 let exp_curr = (logit - new_max).exp();
                 let denom = scaled_sum + exp_curr;
+                Tensor::validate_finite_tensor_util_value("scaled_dot_attention_denom", denom)?;
                 let alpha = if denom > 0.0 { scaled_sum / denom } else { 0.0 };
                 let weight = if denom > 0.0 { exp_curr / denom } else { 0.0 };
+                Tensor::validate_finite_tensor_util_value("scaled_dot_attention_weight", alpha)?;
+                Tensor::validate_finite_tensor_util_value("scaled_dot_attention_weight", weight)?;
                 running_max = new_max;
                 running_sum = denom;
 
                 for dim in 0..head_dim {
                     accum[dim] = accum[dim] * alpha + weight * values[key_offset + dim];
+                    Tensor::validate_finite_tensor_util_value(
+                        "scaled_dot_attention_accumulator",
+                        accum[dim],
+                    )?;
                 }
             }
 
@@ -6407,7 +10499,7 @@ fn fused_attention_cpu(
         }
     }
 
-    output
+    Ok(output)
 }
 
 fn cpu_row_softmax_hardmax(data: &[f32], rows: usize, cols: usize) -> (Vec<f32>, Vec<f32>) {
@@ -6480,6 +10572,25 @@ fn row_softmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
 #[allow(dead_code)]
 fn row_hardmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
     cpu_row_softmax_hardmax(data, rows, cols).1
+}
+
+fn scale_inplace(data: &mut [f32], scale: f32) {
+    for value in data {
+        *value *= scale;
+    }
+}
+
+fn add_bias_inplace(data: &mut [f32], rows: usize, cols: usize, bias: &[f32]) {
+    assert_eq!(data.len(), rows * cols);
+    assert_eq!(bias.len(), cols);
+    if cols == 0 {
+        return;
+    }
+    for row in data.chunks_mut(cols) {
+        for (value, &bias) in row.iter_mut().zip(bias.iter()) {
+            *value += bias;
+        }
+    }
 }
 
 fn add_bias_relu_inplace(data: &mut [f32], rows: usize, cols: usize, bias: &[f32]) {
@@ -6582,12 +10693,48 @@ fn matmul_wgpu(
     })
 }
 
+#[cfg(feature = "wgpu")]
+fn matmul_scaled_wgpu(
+    lhs: &[f32],
+    rhs: &[f32],
+    rows: usize,
+    inner: usize,
+    cols: usize,
+    scale: f32,
+) -> PureResult<Vec<f32>> {
+    wgpu_dense::matmul_scaled(lhs, rhs, rows, inner, cols, scale).map_err(|message| {
+        TensorError::BackendFailure {
+            backend: "wgpu",
+            message,
+        }
+    })
+}
+
+#[cfg(feature = "wgpu")]
+fn matmul_lhs_transpose_scaled_wgpu(
+    lhs: &[f32],
+    rhs: &[f32],
+    lhs_rows: usize,
+    lhs_cols: usize,
+    rhs_cols: usize,
+    scale: f32,
+) -> PureResult<Vec<f32>> {
+    wgpu_dense::matmul_lhs_transpose_scaled(lhs, rhs, lhs_rows, lhs_cols, rhs_cols, scale).map_err(
+        |message| TensorError::BackendFailure {
+            backend: "wgpu",
+            message,
+        },
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use ndarray::Array2;
+    use std::ffi::OsString;
     use std::ptr;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Mutex, OnceLock};
 
     struct DlpackTestCtx {
         drops: Arc<AtomicUsize>,
@@ -6625,6 +10772,111 @@ mod tests {
             Ok(_) => panic!("expected Err(..), got Ok(..)"),
             Err(error) => error,
         }
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[track_caller]
+    fn assert_tensor_close(lhs: &Tensor, rhs: &Tensor, tolerance: f32) {
+        assert_eq!(lhs.shape(), rhs.shape());
+        for (idx, (&left, &right)) in lhs.data().iter().zip(rhs.data()).enumerate() {
+            let delta = (left - right).abs();
+            assert!(
+                delta <= tolerance,
+                "tensor mismatch at {idx}: left={left} right={right} delta={delta} tolerance={tolerance}"
+            );
+        }
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn wgpu_unavailable(error: &TensorError) -> bool {
+        matches!(error, TensorError::BackendFailure { backend, .. } if *backend == "wgpu")
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn run_wgpu_runtime_tests() -> bool {
+        std::env::var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS")
+            .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE"))
+            .unwrap_or(false)
+    }
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        ENV_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("env lock available")
+    }
+
+    fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
+        static OBSERVER_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        OBSERVER_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("observer lock available")
+    }
+
+    struct EnvVarRestore {
+        key: &'static str,
+        previous: Option<OsString>,
+    }
+
+    impl EnvVarRestore {
+        fn capture(key: &'static str) -> Self {
+            Self {
+                key,
+                previous: std::env::var_os(key),
+            }
+        }
+    }
+
+    impl Drop for EnvVarRestore {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                unsafe { std::env::set_var(self.key, previous) };
+            } else {
+                unsafe { std::env::remove_var(self.key) };
+            }
+        }
+    }
+
+    fn with_strict_gpu_env<T>(value: Option<&str>, f: impl FnOnce() -> T) -> T {
+        let _lock = env_lock();
+        let _restore = EnvVarRestore::capture("SPIRALTORCH_STRICT_GPU");
+        if let Some(value) = value {
+            unsafe { std::env::set_var("SPIRALTORCH_STRICT_GPU", value) };
+        } else {
+            unsafe { std::env::remove_var("SPIRALTORCH_STRICT_GPU") };
+        }
+        f()
+    }
+
+    #[test]
+    fn strict_gpu_env_matches_rankk_truthy_contract() {
+        with_strict_gpu_env(None, || assert!(!strict_gpu_path()));
+        with_strict_gpu_env(Some("1"), || assert!(strict_gpu_path()));
+        with_strict_gpu_env(Some("true"), || assert!(strict_gpu_path()));
+        with_strict_gpu_env(Some("TRUE"), || assert!(strict_gpu_path()));
+        with_strict_gpu_env(Some("0"), || assert!(!strict_gpu_path()));
+        with_strict_gpu_env(Some("false"), || assert!(!strict_gpu_path()));
+        with_strict_gpu_env(Some("yes"), || assert!(!strict_gpu_path()));
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn wgpu_runtime_tests_env_is_opt_in() {
+        let _lock = env_lock();
+        let _restore = EnvVarRestore::capture("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS");
+
+        unsafe { std::env::remove_var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS") };
+        assert!(!run_wgpu_runtime_tests());
+        unsafe { std::env::set_var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS", "1") };
+        assert!(run_wgpu_runtime_tests());
+        unsafe { std::env::set_var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS", "true") };
+        assert!(run_wgpu_runtime_tests());
+        unsafe { std::env::set_var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS", "TRUE") };
+        assert!(run_wgpu_runtime_tests());
+        unsafe { std::env::set_var("SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS", "0") };
+        assert!(!run_wgpu_runtime_tests());
     }
 
     #[test]
@@ -6713,6 +10965,50 @@ mod tests {
     }
 
     #[test]
+    fn matmul_bias_relu_rejects_non_finite_bias_on_empty_output() {
+        let lhs = unwrap_ok(Tensor::from_vec(0, 1, Vec::new()));
+        let rhs = unwrap_ok(Tensor::from_vec(1, 1, vec![1.0]));
+
+        let err = unwrap_err(lhs.matmul_bias_relu_with_backend(
+            &rhs,
+            &[f32::NAN],
+            MatmulBackend::CpuNaive,
+        ));
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "matmul_bias_relu_bias",
+                value,
+            } if value.is_nan()
+        ));
+    }
+
+    #[test]
+    fn matmul_bias_relu_into_rejects_overflowing_output_without_mutating_destination() {
+        let lhs = unwrap_ok(Tensor::from_vec(1, 1, vec![f32::MAX]));
+        let rhs = unwrap_ok(Tensor::from_vec(1, 1, vec![2.0]));
+        let mut dst = unwrap_ok(Tensor::from_vec(1, 1, vec![7.0]));
+        let before = dst.clone();
+
+        let err = unwrap_err(lhs.matmul_bias_relu_into_with_backend(
+            &rhs,
+            &[0.0],
+            &mut dst,
+            MatmulBackend::CpuNaive,
+        ));
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "matmul_bias_relu_output",
+                value,
+            } if value.is_infinite()
+        ));
+        assert_eq!(dst, before);
+    }
+
+    #[test]
     fn matmul_bias_gelu_matches_scalar_pipeline() {
         let lhs = unwrap_ok(Tensor::from_vec(
             2,
@@ -6737,6 +11033,56 @@ mod tests {
         assert_eq!(fused.shape(), reference.shape());
         for (a, b) in fused.data().iter().zip(reference.data().iter()) {
             assert!((a - b).abs() < 1e-5);
+        }
+    }
+
+    #[test]
+    fn matmul_bias_gelu_rejects_overflowing_output() {
+        let lhs = unwrap_ok(Tensor::from_vec(1, 1, vec![f32::MAX]));
+        let rhs = unwrap_ok(Tensor::from_vec(1, 1, vec![2.0]));
+
+        let err =
+            unwrap_err(lhs.matmul_bias_gelu_with_backend(&rhs, &[0.0], MatmulBackend::CpuNaive));
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "matmul_bias_gelu_output",
+                value,
+            } if value.is_infinite()
+        ));
+    }
+
+    #[test]
+    fn matmul_bias_gelu_zero_axes_preserve_learning_semantics() {
+        let empty_rows = unwrap_ok(Tensor::from_vec(0, 2, Vec::new()));
+        let rhs = unwrap_ok(Tensor::from_vec(
+            2,
+            3,
+            vec![0.5, -0.25, 1.0, 1.5, 0.75, -1.0],
+        ));
+        let bias = vec![0.1, -0.05, 0.2];
+        let output = unwrap_ok(empty_rows.matmul_bias_gelu_with_backend(
+            &rhs,
+            &bias,
+            MatmulBackend::CpuNaive,
+        ));
+        assert_eq!(output.shape(), (0, 3));
+        assert!(output.data().is_empty());
+
+        let zero_inner_lhs = unwrap_ok(Tensor::from_vec(2, 0, Vec::new()));
+        let zero_inner_rhs = unwrap_ok(Tensor::from_vec(0, 3, Vec::new()));
+        let output = unwrap_ok(zero_inner_lhs.matmul_bias_gelu_with_backend(
+            &zero_inner_rhs,
+            &bias,
+            MatmulBackend::CpuNaive,
+        ));
+        assert_eq!(output.shape(), (2, 3));
+        let expected = [gelu(bias[0]), gelu(bias[1]), gelu(bias[2])];
+        for row in output.data().chunks_exact(3) {
+            for (observed, expected) in row.iter().zip(expected.iter()) {
+                assert!((observed - expected).abs() < 1.0e-6);
+            }
         }
     }
 
@@ -6777,6 +11123,78 @@ mod tests {
     }
 
     #[test]
+    fn matmul_bias_add_relu_into_rejects_overflowing_output_without_mutating_destination() {
+        let lhs = unwrap_ok(Tensor::from_vec(1, 1, vec![0.0]));
+        let rhs = unwrap_ok(Tensor::from_vec(1, 1, vec![0.0]));
+        let residual = unwrap_ok(Tensor::from_vec(1, 1, vec![f32::MAX]));
+        let mut dst = unwrap_ok(Tensor::from_vec(1, 1, vec![7.0]));
+        let before = dst.clone();
+
+        let err = unwrap_err(lhs.matmul_bias_add_relu_into_with_backend(
+            &rhs,
+            &[f32::MAX],
+            &residual,
+            &mut dst,
+            MatmulBackend::CpuNaive,
+        ));
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "matmul_bias_add_relu_output",
+                value,
+            } if value.is_infinite()
+        ));
+        assert_eq!(dst, before);
+    }
+
+    #[test]
+    fn matmul_bias_add_relu_zero_axes_preserve_residual_semantics() {
+        let empty_rows = unwrap_ok(Tensor::from_vec(0, 2, Vec::new()));
+        let rhs = unwrap_ok(Tensor::from_vec(
+            2,
+            3,
+            vec![0.5, 1.25, -0.75, -1.0, 0.75, 0.5],
+        ));
+        let bias = vec![0.2, -0.1, 0.05];
+        let empty_residual = unwrap_ok(Tensor::from_vec(0, 3, Vec::new()));
+        let output = unwrap_ok(empty_rows.matmul_bias_add_relu_with_backend(
+            &rhs,
+            &bias,
+            &empty_residual,
+            MatmulBackend::CpuNaive,
+        ));
+        assert_eq!(output.shape(), (0, 3));
+        assert!(output.data().is_empty());
+
+        let zero_inner_lhs = unwrap_ok(Tensor::from_vec(2, 0, Vec::new()));
+        let zero_inner_rhs = unwrap_ok(Tensor::from_vec(0, 3, Vec::new()));
+        let residual = unwrap_ok(Tensor::from_vec(
+            2,
+            3,
+            vec![0.1, -0.25, 0.0, -0.4, 0.5, 0.2],
+        ));
+        let output = unwrap_ok(zero_inner_lhs.matmul_bias_add_relu_with_backend(
+            &zero_inner_rhs,
+            &bias,
+            &residual,
+            MatmulBackend::CpuNaive,
+        ));
+        assert_eq!(output.shape(), (2, 3));
+        let expected = [
+            (bias[0] + 0.1f32).max(0.0),
+            (bias[1] - 0.25f32).max(0.0),
+            (bias[2] + 0.0f32).max(0.0),
+            (bias[0] - 0.4f32).max(0.0),
+            (bias[1] + 0.5f32).max(0.0),
+            (bias[2] + 0.2f32).max(0.0),
+        ];
+        for (observed, expected) in output.data().iter().zip(expected.iter()) {
+            assert!((observed - expected).abs() < 1.0e-6);
+        }
+    }
+
+    #[test]
     fn tensor_gelu_backward_matches_manual() {
         let input = unwrap_ok(Tensor::from_vec(
             2,
@@ -6798,6 +11216,62 @@ mod tests {
             let expected = gelu_prime(*z) * g;
             assert!((expected - value).abs() < 1e-6);
         }
+    }
+
+    #[test]
+    fn gelu_backward_observer_meta_reports_backend() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let input = unwrap_ok(Tensor::from_vec(1, 3, vec![-0.75, 0.0, 0.75]));
+        let grad = unwrap_ok(Tensor::from_vec(1, 3, vec![0.2, -0.5, 0.3]));
+        let _ = unwrap_ok(input.gelu_backward(&grad));
+        crate::set_tensor_op_meta_observer(previous);
+
+        let events = events.lock().unwrap();
+        let gelu_backward = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "gelu_backward" && data["rows"] == 1 && data["cols"] == 3
+            })
+            .expect("gelu backward metadata event");
+        assert_eq!(gelu_backward.1["requested_backend"], "auto");
+        assert!(gelu_backward.1["backend"].as_str().is_some());
+    }
+
+    #[test]
+    fn gelu_backward_with_cpu_backend_reports_cpu() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let input = unwrap_ok(Tensor::from_vec(1, 3, vec![-0.75, 0.0, 0.75]));
+        let grad = unwrap_ok(Tensor::from_vec(1, 3, vec![0.2, -0.5, 0.3]));
+        let _ = unwrap_ok(input.gelu_backward_with_backend(&grad, TensorUtilBackend::Cpu));
+        crate::set_tensor_op_meta_observer(previous);
+
+        let events = events.lock().unwrap();
+        let gelu_backward = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "gelu_backward" && data["rows"] == 1 && data["cols"] == 3
+            })
+            .expect("gelu backward metadata event");
+        assert_eq!(gelu_backward.1["requested_backend"], "cpu");
+        assert_eq!(gelu_backward.1["backend"], "cpu");
     }
 
     #[cfg(feature = "wgpu")]
@@ -6840,6 +11314,1061 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn wgpu_tensor_utils_match_cpu_reference_on_sequence_shapes() {
+        if !wgpu_dense::is_available() {
+            return;
+        }
+        let rows = 7;
+        let cols = 5;
+        let input: Vec<f32> = (0..rows * cols)
+            .map(|idx| ((idx as f32 * 0.137).sin() * 0.7) - ((idx % 4) as f32 * 0.03))
+            .collect();
+        let rhs: Vec<f32> = (0..rows * cols)
+            .map(|idx| ((idx as f32 * 0.071).cos() * 0.4) + ((idx % 3) as f32 * 0.02))
+            .collect();
+        let bias: Vec<f32> = (0..cols).map(|idx| idx as f32 * 0.041 - 0.08).collect();
+
+        let scaled = unwrap_ok(wgpu_dense::scale(&input, rows, cols, -0.25));
+        for (idx, value) in scaled.iter().enumerate() {
+            let expected = input[idx] * -0.25;
+            assert!((expected - value).abs() < 1e-6);
+        }
+
+        let subbed = unwrap_ok(wgpu_dense::sub(&input, &rhs, rows, cols));
+        for (idx, value) in subbed.iter().enumerate() {
+            let expected = input[idx] - rhs[idx];
+            assert!((expected - value).abs() < 1e-6);
+        }
+
+        let transposed = unwrap_ok(wgpu_dense::transpose(&input, rows, cols));
+        for r in 0..rows {
+            for c in 0..cols {
+                let expected = input[r * cols + c];
+                assert!((expected - transposed[c * rows + r]).abs() < 1e-6);
+            }
+        }
+
+        let token_indices = vec![0.0, 2.0, 1.0, 2.0, 4.0, 0.0];
+        let vocab_size = 5;
+        let embed_dim = 3;
+        let embedding_weights: Vec<f32> = (0..vocab_size * embed_dim)
+            .map(|idx| idx as f32 * 0.07 - 0.2)
+            .collect();
+        let gathered = unwrap_ok(wgpu_dense::embedding_gather(
+            &token_indices,
+            &embedding_weights,
+            token_indices.len(),
+            embed_dim,
+        ));
+        for (token_offset, &token) in token_indices.iter().enumerate() {
+            let token = token as usize;
+            for dim in 0..embed_dim {
+                let expected = embedding_weights[token * embed_dim + dim];
+                assert!((expected - gathered[token_offset * embed_dim + dim]).abs() < 1e-6);
+            }
+        }
+
+        let hidden_dim = 3;
+        let gates: Vec<f32> = (0..hidden_dim * 4)
+            .map(|idx| (idx as f32 * 0.19).sin() * 0.8 - 0.2)
+            .collect();
+        let cell_prev: Vec<f32> = (0..hidden_dim)
+            .map(|idx| (idx as f32 * 0.31).cos() * 0.3)
+            .collect();
+        let gate_step = unwrap_ok(wgpu_dense::lstm_forward_gate_step(
+            &gates, &cell_prev, hidden_dim,
+        ));
+        assert_eq!(gate_step.len(), hidden_dim * 6);
+        for unit in 0..hidden_dim {
+            let i = 1.0 / (1.0 + (-gates[unit]).exp());
+            let f = 1.0 / (1.0 + (-gates[hidden_dim + unit]).exp());
+            let g = gates[2 * hidden_dim + unit].tanh();
+            let o = 1.0 / (1.0 + (-gates[3 * hidden_dim + unit]).exp());
+            let cell = f * cell_prev[unit] + i * g;
+            let hidden = o * cell.tanh();
+            let expected = [i, f, g, o, cell, hidden];
+            for (segment, expected_value) in expected.into_iter().enumerate() {
+                let actual = gate_step[segment * hidden_dim + unit];
+                assert!((actual - expected_value).abs() < 1e-5);
+            }
+        }
+
+        let grad_output: Vec<f32> = (0..token_indices.len() * embed_dim)
+            .map(|idx| idx as f32 * 0.03 - 0.1)
+            .collect();
+        let scattered = unwrap_ok(wgpu_dense::embedding_scatter_add(
+            &token_indices,
+            &grad_output,
+            token_indices.len(),
+            vocab_size,
+            embed_dim,
+        ));
+        for vocab in 0..vocab_size {
+            for dim in 0..embed_dim {
+                let mut expected = 0.0f32;
+                for (token_offset, &token) in token_indices.iter().enumerate() {
+                    if token as usize == vocab {
+                        expected += grad_output[token_offset * embed_dim + dim];
+                    }
+                }
+                assert!((expected - scattered[vocab * embed_dim + dim]).abs() < 1e-6);
+            }
+        }
+
+        let seq_batch = 2;
+        let seq_steps = 4;
+        let seq_features = 3;
+        let seq_values: Vec<f32> = (0..seq_batch * seq_steps * seq_features)
+            .map(|idx| idx as f32 * 0.031 - 0.2)
+            .collect();
+        let last_step = unwrap_ok(wgpu_dense::sequence_last_step_gather(
+            &seq_values,
+            seq_batch,
+            seq_steps,
+            seq_features,
+        ));
+        for b in 0..seq_batch {
+            for f in 0..seq_features {
+                let expected =
+                    seq_values[b * seq_steps * seq_features + (seq_steps - 1) * seq_features + f];
+                assert!((expected - last_step[b * seq_features + f]).abs() < 1e-6);
+            }
+        }
+        let scattered_last = unwrap_ok(wgpu_dense::sequence_last_step_scatter(
+            &last_step,
+            seq_batch,
+            seq_steps,
+            seq_features,
+        ));
+        for b in 0..seq_batch {
+            for step in 0..seq_steps {
+                for f in 0..seq_features {
+                    let idx = b * seq_steps * seq_features + step * seq_features + f;
+                    let expected = if step + 1 == seq_steps {
+                        last_step[b * seq_features + f]
+                    } else {
+                        0.0
+                    };
+                    assert!((expected - scattered_last[idx]).abs() < 1e-6);
+                }
+            }
+        }
+
+        let coherence_batch = 2;
+        let coherence_steps = 4;
+        let coherence_dim = 3;
+        let coherence_memory = 3;
+        let curvature = -1.0f32;
+        let temperature = 1.0f32;
+        let self_score_scale = 0.25f32;
+        let query_residual_scale = 0.5f32;
+        let coherence_values: Vec<f32> = (0..coherence_batch * coherence_steps * coherence_dim)
+            .map(|idx| ((idx as f32 * 0.173).sin() * 0.6) - 0.15)
+            .collect();
+        let (coherence_context, coherence_weights) =
+            unwrap_ok(wgpu_dense::zspace_coherence_scan_forward(
+                &coherence_values,
+                coherence_batch,
+                coherence_steps,
+                coherence_dim,
+                coherence_memory,
+                curvature,
+                temperature,
+                self_score_scale,
+                query_residual_scale,
+            ));
+        let start_step = coherence_steps - coherence_memory;
+        let order = 1.0 + (-curvature).sqrt().min(4.0);
+        let score_pair = |query: &[f32], value: &[f32]| {
+            let mse = query
+                .iter()
+                .zip(value.iter())
+                .map(|(&q, &v)| {
+                    let diff = q - v;
+                    diff * diff
+                })
+                .sum::<f32>();
+            let dist = ((mse / coherence_dim as f32).sqrt() * (-curvature).sqrt() / temperature)
+                .max(1.0e-6);
+            let score = 1.0 / (dist.powf(order) + 1.0e-12);
+            if score.is_finite() {
+                score
+            } else {
+                0.0
+            }
+        };
+        let fallback_weight = |step: usize| {
+            if step < start_step {
+                return 0.0;
+            }
+            if self_score_scale > 0.0 {
+                return 1.0 / coherence_memory as f32;
+            }
+            if step + 1 == coherence_steps && coherence_memory > 1 {
+                return 0.0;
+            }
+            1.0 / coherence_memory.saturating_sub(1).max(1) as f32
+        };
+        for b in 0..coherence_batch {
+            let base = b * coherence_steps * coherence_dim;
+            let query_start = base + (coherence_steps - 1) * coherence_dim;
+            let query = &coherence_values[query_start..query_start + coherence_dim];
+            let mut scores = vec![0.0f32; coherence_steps];
+            let mut total = 0.0f32;
+            for step in start_step..coherence_steps {
+                let value_start = base + step * coherence_dim;
+                let value = &coherence_values[value_start..value_start + coherence_dim];
+                let mut score = score_pair(query, value);
+                if step + 1 == coherence_steps {
+                    score *= self_score_scale;
+                }
+                scores[step] = score;
+                total += score;
+            }
+            let total_valid = total.is_finite() && total > 0.0;
+            for step in 0..coherence_steps {
+                let expected = if total_valid && step >= start_step {
+                    scores[step] / total
+                } else {
+                    fallback_weight(step)
+                };
+                assert!(
+                    (expected - coherence_weights[b * coherence_steps + step]).abs() < 1e-4,
+                    "coherence weight mismatch batch={b} step={step}"
+                );
+            }
+            for dim in 0..coherence_dim {
+                let mut expected = 0.0f32;
+                for step in start_step..coherence_steps {
+                    let weight = if total_valid {
+                        scores[step] / total
+                    } else {
+                        fallback_weight(step)
+                    };
+                    expected += weight * coherence_values[base + step * coherence_dim + dim];
+                }
+                expected += query_residual_scale * query[dim];
+                assert!(
+                    (expected - coherence_context[b * coherence_dim + dim]).abs() < 1e-4,
+                    "coherence context mismatch batch={b} dim={dim}"
+                );
+            }
+        }
+
+        let coherence_grad_output: Vec<f32> = (0..coherence_batch * coherence_dim)
+            .map(|idx| idx as f32 * 0.041 - 0.19)
+            .collect();
+        let coherence_grad = unwrap_ok(wgpu_dense::zspace_coherence_scan_backward(
+            &coherence_values,
+            &coherence_grad_output,
+            &coherence_weights,
+            coherence_batch,
+            coherence_steps,
+            coherence_dim,
+            coherence_memory,
+            curvature,
+            temperature,
+            self_score_scale,
+            query_residual_scale,
+        ));
+        let score_pair_gradient_common =
+            |query: &[f32], value: &[f32], score_scale: f32| -> Option<f32> {
+                if score_scale == 0.0 {
+                    return None;
+                }
+                let mse = query
+                    .iter()
+                    .zip(value.iter())
+                    .map(|(&q, &v)| {
+                        let diff = q - v;
+                        diff * diff
+                    })
+                    .sum::<f32>();
+                let dim = coherence_dim as f32;
+                let mean = mse / dim.max(1.0);
+                if !mean.is_finite() || mean <= 0.0 {
+                    return None;
+                }
+                let sqrt_mean = mean.sqrt();
+                let alpha = (-curvature).sqrt() / temperature;
+                let unclamped_dist = sqrt_mean * alpha;
+                if !unclamped_dist.is_finite() || unclamped_dist <= 1.0e-6 {
+                    return None;
+                }
+                let dist_pow = unclamped_dist.powf(order);
+                let denom = dist_pow + 1.0e-12;
+                if !denom.is_finite() || denom <= 0.0 {
+                    return None;
+                }
+                let dscore_ddist = -order * unclamped_dist.powf(order - 1.0) / (denom * denom);
+                let common = score_scale * dscore_ddist * alpha / (dim * sqrt_mean);
+                common.is_finite().then_some(common)
+            };
+        let mut expected_grad = vec![0.0f32; coherence_values.len()];
+        for b in 0..coherence_batch {
+            let base = b * coherence_steps * coherence_dim;
+            let go_offset = b * coherence_dim;
+            for step in 0..coherence_steps {
+                let weight = coherence_weights[b * coherence_steps + step];
+                let grad_offset = base + step * coherence_dim;
+                for dim in 0..coherence_dim {
+                    expected_grad[grad_offset + dim] +=
+                        weight * coherence_grad_output[go_offset + dim];
+                }
+            }
+            let query_step = coherence_steps - 1;
+            let query_offset = base + query_step * coherence_dim;
+            for dim in 0..coherence_dim {
+                expected_grad[query_offset + dim] +=
+                    query_residual_scale * coherence_grad_output[go_offset + dim];
+            }
+
+            let query = &coherence_values[query_offset..query_offset + coherence_dim];
+            let grad_row = &coherence_grad_output[go_offset..go_offset + coherence_dim];
+            let mut scores = vec![0.0f32; coherence_steps];
+            let mut total = 0.0f32;
+            for step in start_step..coherence_steps {
+                let value_offset = base + step * coherence_dim;
+                let value = &coherence_values[value_offset..value_offset + coherence_dim];
+                let mut score = score_pair(query, value);
+                if step == query_step {
+                    score *= self_score_scale;
+                }
+                scores[step] = score;
+                total += score;
+            }
+            if total.is_finite() && total > 0.0 {
+                let mut weighted_dot = 0.0f32;
+                for step in start_step..coherence_steps {
+                    let weight = coherence_weights[b * coherence_steps + step];
+                    if weight == 0.0 {
+                        continue;
+                    }
+                    let value_offset = base + step * coherence_dim;
+                    let value = &coherence_values[value_offset..value_offset + coherence_dim];
+                    let dot = grad_row
+                        .iter()
+                        .zip(value.iter())
+                        .map(|(&grad, &src)| grad * src)
+                        .sum::<f32>();
+                    weighted_dot += weight * dot;
+                }
+
+                for step in start_step..coherence_steps {
+                    let score = scores[step];
+                    if score == 0.0 {
+                        continue;
+                    }
+                    let value_offset = base + step * coherence_dim;
+                    let value = &coherence_values[value_offset..value_offset + coherence_dim];
+                    let dot = grad_row
+                        .iter()
+                        .zip(value.iter())
+                        .map(|(&grad, &src)| grad * src)
+                        .sum::<f32>();
+                    let dloss_dscore = (dot - weighted_dot) / total;
+                    if !dloss_dscore.is_finite() || dloss_dscore == 0.0 {
+                        continue;
+                    }
+                    let score_scale = if step == query_step {
+                        self_score_scale
+                    } else {
+                        1.0
+                    };
+                    let Some(common) = score_pair_gradient_common(query, value, score_scale) else {
+                        continue;
+                    };
+                    for dim in 0..coherence_dim {
+                        let delta = query[dim] - value[dim];
+                        let contribution = dloss_dscore * common * delta;
+                        if contribution.is_finite() {
+                            expected_grad[query_offset + dim] += contribution;
+                            expected_grad[value_offset + dim] -= contribution;
+                        }
+                    }
+                }
+            }
+        }
+        for (idx, (expected, actual)) in expected_grad.iter().zip(coherence_grad.iter()).enumerate()
+        {
+            assert!(
+                (expected - actual).abs() < 2.0e-3,
+                "coherence backward mismatch idx={idx}: expected={expected}, actual={actual}"
+            );
+        }
+
+        let sum_squares = unwrap_ok(wgpu_dense::sum_squares(&input, rows, cols));
+        let expected_sum_squares = input.iter().map(|value| value * value).sum::<f32>();
+        assert!((expected_sum_squares - sum_squares).abs() < 1e-5);
+
+        let sum_abs = unwrap_ok(wgpu_dense::sum_abs(&input, rows, cols));
+        let expected_sum_abs = input.iter().map(|value| value.abs()).sum::<f32>();
+        assert!((expected_sum_abs - sum_abs).abs() < 1e-5);
+
+        let relu = unwrap_ok(wgpu_dense::relu(&input, rows, cols));
+        for (expected, actual) in input.iter().map(|value| value.max(0.0)).zip(relu.iter()) {
+            assert!((expected - actual).abs() < 1e-6);
+        }
+        let relu_backward = unwrap_ok(wgpu_dense::relu_backward(&input, &rhs, rows, cols));
+        for ((source, grad), actual) in input.iter().zip(rhs.iter()).zip(relu_backward.iter()) {
+            let expected = if *source > 0.0 { *grad } else { 0.0 };
+            assert!((expected - actual).abs() < 1e-6);
+        }
+
+        let row_gate: Vec<f32> = (0..cols).map(|idx| 0.75 + idx as f32 * 0.11).collect();
+        let mul_row = unwrap_ok(wgpu_dense::mul_row(&input, &row_gate, rows, cols));
+        for r in 0..rows {
+            for c in 0..cols {
+                let expected = input[r * cols + c] * row_gate[c];
+                assert!((expected - mul_row[r * cols + c]).abs() < 1e-6);
+            }
+        }
+        let row_bias: Vec<f32> = (0..cols).map(|idx| idx as f32 * -0.07 + 0.13).collect();
+        let row_affine = unwrap_ok(wgpu_dense::row_affine(
+            &input, &row_gate, &row_bias, rows, cols,
+        ));
+        for r in 0..rows {
+            for c in 0..cols {
+                let expected = input[r * cols + c] * row_gate[c] + row_bias[c];
+                assert!((expected - row_affine[r * cols + c]).abs() < 1e-6);
+            }
+        }
+
+        let kg_mass: Vec<f32> = (0..cols).map(|idx| 0.05 + idx as f32 * 0.017).collect();
+        let kg_spin: Vec<f32> = (0..cols)
+            .map(|idx| (idx as f32 * 0.19).sin() * 0.1)
+            .collect();
+        let kg_time_step = 0.2;
+        let kg_damping = 0.1;
+        let kg_forward = unwrap_ok(wgpu_dense::dynamic_klein_gordon_forward(
+            &input,
+            &kg_mass,
+            &kg_spin,
+            rows,
+            cols,
+            kg_time_step,
+            kg_damping,
+        ));
+        for r in 0..rows {
+            for c in 0..cols {
+                let idx = r * cols + c;
+                let wave = input[idx];
+                let amplitude = wave.tanh();
+                let kg_coeff =
+                    1.0 - kg_time_step * kg_damping - kg_time_step * kg_time_step * kg_mass[c];
+                let dirac_coeff = kg_time_step * kg_spin[c];
+                let expected = wave * kg_coeff + dirac_coeff * amplitude;
+                assert!((expected - kg_forward[idx]).abs() < 1e-6);
+            }
+        }
+        let kg_grad = unwrap_ok(wgpu_dense::dynamic_klein_gordon_backward(
+            &input,
+            &rhs,
+            &kg_mass,
+            &kg_spin,
+            rows,
+            cols,
+            kg_time_step,
+            kg_damping,
+        ));
+        for r in 0..rows {
+            for c in 0..cols {
+                let idx = r * cols + c;
+                let wave = input[idx];
+                let amplitude = wave.tanh();
+                let sech2 = 1.0 - amplitude * amplitude;
+                let kg_coeff =
+                    1.0 - kg_time_step * kg_damping - kg_time_step * kg_time_step * kg_mass[c];
+                let dirac_coeff = kg_time_step * kg_spin[c];
+                let expected = rhs[idx] * (kg_coeff + dirac_coeff * sech2);
+                assert!((expected - kg_grad.0[idx]).abs() < 1e-6);
+            }
+        }
+        for c in 0..cols {
+            let mut expected_mass = 0.0f32;
+            let mut expected_spin = 0.0f32;
+            for r in 0..rows {
+                let idx = r * cols + c;
+                expected_mass += rhs[idx] * (-kg_time_step * kg_time_step * input[idx]);
+                expected_spin += rhs[idx] * (kg_time_step * input[idx].tanh());
+            }
+            assert!((expected_mass - kg_grad.1[c]).abs() < 1e-5);
+            assert!((expected_spin - kg_grad.2[c]).abs() < 1e-5);
+        }
+
+        let hj_potential: Vec<f32> = (0..cols)
+            .map(|idx| ((idx as f32 + 1.0) * 0.13).sin().abs() + 0.1)
+            .collect();
+        let hj_step = 0.1;
+        let hj_forward = unwrap_ok(wgpu_dense::dynamic_hamilton_jacobi_forward(
+            &input,
+            &hj_potential,
+            rows,
+            cols,
+            hj_step,
+        ));
+        for r in 0..rows {
+            for c in 0..cols {
+                let idx = r * cols + c;
+                let current = input[idx];
+                let prev = if r > 0 { input[idx - cols] } else { current };
+                let next = if r + 1 < rows {
+                    input[idx + cols]
+                } else {
+                    current
+                };
+                let grad = (2.0 * current - prev - next) + hj_potential[c] * current;
+                let expected = current - hj_step * grad;
+                assert!((expected - hj_forward[idx]).abs() < 1e-6);
+            }
+        }
+        let hj_grad = unwrap_ok(wgpu_dense::dynamic_hamilton_jacobi_backward(
+            &input,
+            &rhs,
+            &hj_potential,
+            rows,
+            cols,
+            hj_step,
+        ));
+        for r in 0..rows {
+            for c in 0..cols {
+                let idx = r * cols + c;
+                let mut factor = 1.0 - hj_step * (2.0 + hj_potential[c]);
+                if rows == 1 {
+                    factor = 1.0 - hj_step * hj_potential[c];
+                } else if r == 0 || r + 1 == rows {
+                    factor = 1.0 - hj_step * (1.0 + hj_potential[c]);
+                }
+                let mut expected = rhs[idx] * factor;
+                if r > 0 {
+                    expected += rhs[idx - cols] * hj_step;
+                }
+                if r + 1 < rows {
+                    expected += rhs[idx + cols] * hj_step;
+                }
+                assert!((expected - hj_grad.0[idx]).abs() < 1e-6);
+            }
+        }
+        for c in 0..cols {
+            let mut expected = 0.0f32;
+            for r in 0..rows {
+                let idx = r * cols + c;
+                expected += -hj_step * input[idx] * rhs[idx];
+            }
+            assert!((expected - hj_grad.1[c]).abs() < 1e-5);
+        }
+
+        let sch_rate = 0.4;
+        let sch_coherence: Vec<f32> = (0..cols)
+            .map(|idx| (0.85 - idx as f32 * 0.03).max(0.1))
+            .collect();
+        let sch_forward = unwrap_ok(wgpu_dense::dynamic_schrodinger_forward(
+            &input,
+            &sch_coherence,
+            rows,
+            cols,
+            sch_rate,
+        ));
+        for r in 0..rows {
+            for c in 0..cols {
+                let idx = r * cols + c;
+                let amp = input[idx].tanh();
+                let deco = 1.0 / (1.0 + sch_rate * amp.abs());
+                let expected = amp * sch_coherence[c] * deco;
+                assert!((expected - sch_forward.0[idx]).abs() < 1e-6);
+                assert!((amp - sch_forward.1[idx]).abs() < 1e-6);
+                assert!((deco - sch_forward.2[idx]).abs() < 1e-6);
+            }
+        }
+        let sch_grad = unwrap_ok(wgpu_dense::dynamic_schrodinger_backward(
+            &sch_forward.1,
+            &sch_forward.2,
+            &rhs,
+            &sch_coherence,
+            rows,
+            cols,
+            sch_rate,
+        ));
+        for r in 0..rows {
+            for c in 0..cols {
+                let idx = r * cols + c;
+                let amp = sch_forward.1[idx];
+                let deco = sch_forward.2[idx];
+                let denom = 1.0 + sch_rate * amp.abs();
+                let sign = if amp >= 0.0 { 1.0 } else { -1.0 };
+                let d_deco_d_amp = -sch_rate * sign / (denom * denom);
+                let base = deco + amp * d_deco_d_amp;
+                let d_amp_d_input = 1.0 - amp * amp;
+                let expected = rhs[idx] * sch_coherence[c] * base * d_amp_d_input;
+                assert!((expected - sch_grad.0[idx]).abs() < 1e-6);
+            }
+        }
+        for c in 0..cols {
+            let mut expected = 0.0f32;
+            for r in 0..rows {
+                let idx = r * cols + c;
+                expected += rhs[idx] * sch_forward.1[idx] * sch_forward.2[idx];
+            }
+            assert!((expected - sch_grad.1[c]).abs() < 1e-5);
+        }
+
+        let pool_input = vec![
+            1.0, 2.0, 5.0, 4.0, 3.0, 6.0, 7.0, 8.0, 0.5, -1.0, 9.0, 2.0, 3.0, 1.5, 4.5, 0.0, 0.2,
+            -0.4, 1.1, 0.9, 2.2, 1.7, 0.3, -0.8, 1.4, 3.3, 2.8, 0.6, -1.2, 0.5, 1.8, 2.4,
+        ];
+        let (pool_values, pool_indices) = unwrap_ok(wgpu_dense::max_pool2d_forward(
+            &pool_input,
+            1,
+            2,
+            4,
+            4,
+            2,
+            2,
+            2,
+            2,
+            2,
+            2,
+            0,
+            0,
+        ));
+        let expected_pool_values = vec![6.0, 8.0, 3.0, 9.0, 2.2, 1.1, 3.3, 2.8];
+        let expected_pool_indices = vec![5, 7, 12, 10, 20, 18, 25, 26];
+        assert_eq!(pool_indices, expected_pool_indices);
+        for (expected, actual) in expected_pool_values.iter().zip(pool_values.iter()) {
+            assert!((expected - actual).abs() < 1e-6);
+        }
+        let pool_grad = vec![0.5, -0.25, 1.0, 0.75, -0.5, 0.2, 0.3, -0.1];
+        let pool_grad_input = unwrap_ok(wgpu_dense::max_pool2d_backward(
+            &pool_input,
+            &pool_grad,
+            1,
+            2,
+            4,
+            4,
+            2,
+            2,
+            2,
+            2,
+            2,
+            2,
+            0,
+            0,
+        ));
+        for (idx, actual) in pool_grad_input.iter().enumerate() {
+            let expected = expected_pool_indices
+                .iter()
+                .zip(pool_grad.iter())
+                .filter_map(|(&winner, &grad)| (winner == idx).then_some(grad))
+                .sum::<f32>();
+            assert!((expected - actual).abs() < 1e-6);
+        }
+
+        let avg_pool_values = unwrap_ok(wgpu_dense::avg_pool2d_forward(
+            &pool_input,
+            1,
+            2,
+            4,
+            4,
+            2,
+            2,
+            2,
+            2,
+            2,
+            2,
+            0,
+            0,
+        ));
+        let expected_avg_pool_values = vec![3.0, 6.0, 1.0, 3.875, 0.925, 0.375, 1.0, 1.9];
+        for (expected, actual) in expected_avg_pool_values.iter().zip(avg_pool_values.iter()) {
+            assert!((expected - actual).abs() < 1e-6);
+        }
+        let avg_pool_grad_input = unwrap_ok(wgpu_dense::avg_pool2d_backward(
+            &pool_input,
+            &pool_grad,
+            1,
+            2,
+            4,
+            4,
+            2,
+            2,
+            2,
+            2,
+            2,
+            2,
+            0,
+            0,
+        ));
+        let expected_avg_pool_grad_input = vec![
+            0.125, 0.125, -0.0625, -0.0625, 0.125, 0.125, -0.0625, -0.0625, 0.25, 0.25, 0.1875,
+            0.1875, 0.25, 0.25, 0.1875, 0.1875, -0.125, -0.125, 0.05, 0.05, -0.125, -0.125, 0.05,
+            0.05, 0.075, 0.075, -0.025, -0.025, 0.075, 0.075, -0.025, -0.025,
+        ];
+        for (expected, actual) in expected_avg_pool_grad_input
+            .iter()
+            .zip(avg_pool_grad_input.iter())
+        {
+            assert!((expected - actual).abs() < 1e-6);
+        }
+
+        let mse_prediction = vec![0.5, -0.5, 1.0, 0.25];
+        let mse_target = vec![0.0, 0.0, 1.5, -0.75];
+        let mse_loss = unwrap_ok(wgpu_dense::mse_loss_forward(
+            &mse_prediction,
+            &mse_target,
+            2,
+            2,
+        ));
+        let expected_mse = mse_prediction
+            .iter()
+            .zip(mse_target.iter())
+            .map(|(prediction, target)| {
+                let diff = *prediction - *target;
+                diff * diff
+            })
+            .sum::<f32>()
+            / mse_prediction.len() as f32;
+        assert!((expected_mse - mse_loss).abs() < 1e-6);
+        let mse_grad = unwrap_ok(wgpu_dense::mse_loss_backward(
+            &mse_prediction,
+            &mse_target,
+            2,
+            2,
+        ));
+        for ((prediction, target), actual) in mse_prediction
+            .iter()
+            .zip(mse_target.iter())
+            .zip(mse_grad.iter())
+        {
+            let expected = 2.0 * (*prediction - *target) / mse_prediction.len() as f32;
+            assert!((expected - actual).abs() < 1e-6);
+        }
+
+        let ce_prediction = vec![0.1, 0.6, 0.3, 0.8, 0.1, 0.1];
+        let ce_target = vec![0.0, 1.0, 0.0, 1.0, 0.0, 0.0];
+        let ce_loss = unwrap_ok(wgpu_dense::categorical_cross_entropy_forward(
+            &ce_prediction,
+            &ce_target,
+            2,
+            3,
+            1e-9,
+        ));
+        let expected_ce_loss = (-0.6_f32.ln() - 0.8_f32.ln()) / 2.0;
+        assert!((expected_ce_loss - ce_loss).abs() < 1e-6);
+        let ce_grad = unwrap_ok(wgpu_dense::categorical_cross_entropy_backward(
+            &ce_prediction,
+            &ce_target,
+            2,
+            3,
+            1e-9,
+        ));
+        let expected_ce_grad = vec![0.0, -1.0 / (0.6 * 2.0), 0.0, -1.0 / (0.8 * 2.0), 0.0, 0.0];
+        for (expected, actual) in expected_ce_grad.iter().zip(ce_grad.iter()) {
+            assert!((expected - actual).abs() < 1e-6);
+        }
+
+        let hce_prediction = vec![0.25, -0.5, 0.9, -1.25];
+        let hce_target = vec![1.0, 0.0, 0.75, 0.1];
+        let hce_curvature = -1.44f32;
+        let hce_epsilon = 1e-5f32;
+        let hce_scale = (-hce_curvature).sqrt();
+        let hce_loss = unwrap_ok(wgpu_dense::hyperbolic_cross_entropy_forward(
+            &hce_prediction,
+            &hce_target,
+            2,
+            2,
+            hce_curvature,
+            hce_epsilon,
+        ));
+        let stable_softplus = |value: f32| {
+            if value > 0.0 {
+                value + (-value).exp().ln_1p()
+            } else {
+                value.exp().ln_1p()
+            }
+        };
+        let expected_hce = hce_prediction
+            .iter()
+            .zip(hce_target.iter())
+            .map(|(prediction, target)| {
+                let target = target.clamp(hce_epsilon, 1.0 - hce_epsilon);
+                let scaled = prediction * hce_scale;
+                let log_sigmoid_pos = -stable_softplus(-scaled);
+                let log_sigmoid_neg = -stable_softplus(scaled);
+                -target * log_sigmoid_pos - (1.0 - target) * log_sigmoid_neg
+            })
+            .sum::<f32>()
+            / hce_prediction.len() as f32;
+        assert!((expected_hce - hce_loss).abs() < 1e-5);
+        let hce_grad = unwrap_ok(wgpu_dense::hyperbolic_cross_entropy_backward(
+            &hce_prediction,
+            &hce_target,
+            2,
+            2,
+            hce_curvature,
+            hce_epsilon,
+        ));
+        for ((prediction, target), actual) in hce_prediction
+            .iter()
+            .zip(hce_target.iter())
+            .zip(hce_grad.iter())
+        {
+            let target = target.clamp(hce_epsilon, 1.0 - hce_epsilon);
+            let scaled = prediction * hce_scale;
+            let sigmoid = if scaled >= 0.0 {
+                1.0 / (1.0 + (-scaled).exp())
+            } else {
+                let exp_value = scaled.exp();
+                exp_value / (1.0 + exp_value)
+            };
+            let expected = hce_scale * (sigmoid - target) / hce_prediction.len() as f32;
+            assert!((expected - actual).abs() < 1e-6);
+        }
+
+        let softmax_input = vec![0.2, -0.1, 0.3, 0.5, 0.0, -0.25];
+        let softmax_grad = vec![0.05, -0.02, 0.1, -0.15, 0.2, 0.03];
+        let softmax_factor = 0.75;
+        let softmax_backward = unwrap_ok(wgpu_dense::zspace_softmax_backward_fixed(
+            &softmax_input,
+            &softmax_grad,
+            2,
+            3,
+            softmax_factor,
+        ));
+        for row in 0..2 {
+            let offset = row * 3;
+            let logits = &softmax_input[offset..offset + 3];
+            let grad = &softmax_grad[offset..offset + 3];
+            let max_logit = logits
+                .iter()
+                .map(|value| value * softmax_factor)
+                .fold(f32::NEG_INFINITY, f32::max);
+            let exp_values = logits
+                .iter()
+                .map(|value| (value * softmax_factor - max_logit).exp())
+                .collect::<Vec<_>>();
+            let sum = exp_values.iter().sum::<f32>();
+            let probs = exp_values
+                .iter()
+                .map(|value| value / sum)
+                .collect::<Vec<_>>();
+            let dot = grad
+                .iter()
+                .zip(probs.iter())
+                .map(|(g, p)| g * p)
+                .sum::<f32>();
+            for col in 0..3 {
+                let expected = softmax_factor * probs[col] * (grad[col] - dot);
+                assert!((expected - softmax_backward[offset + col]).abs() < 2e-5);
+            }
+        }
+
+        let gradient: Vec<f32> = (0..rows * cols)
+            .map(|idx| idx as f32 * 0.011 - 0.2)
+            .collect();
+        let hyper_wave: Vec<f32> = (0..rows * cols)
+            .map(|idx| ((idx as f32 * 0.097).sin() * 0.5).clamp(-0.75, 0.75))
+            .collect();
+        let hyper_next = unwrap_ok(wgpu_dense::hypergrad_accumulate_wave(
+            &gradient,
+            &hyper_wave,
+            rows,
+            cols,
+            -1.0,
+            1e-6,
+            1_000_000.0,
+            0.2,
+        ));
+        for idx in 0..gradient.len() {
+            let value = hyper_wave[idx];
+            let denom = 1.0 + value * value;
+            let update = value / denom.abs().max(1e-6);
+            let expected = porous_mix_value(gradient[idx] + update, 1_000_000.0, 0.2);
+            assert!((expected - hyper_next[idx]).abs() < 1e-5);
+        }
+
+        let elementwise_added = unwrap_ok(wgpu_dense::add(&input, &rhs, rows, cols));
+        for (idx, value) in elementwise_added.iter().enumerate() {
+            let expected = input[idx] + rhs[idx];
+            assert!((expected - value).abs() < 1e-6);
+        }
+
+        let multiplied = unwrap_ok(wgpu_dense::hadamard(&input, &rhs, rows, cols));
+        for (idx, value) in multiplied.iter().enumerate() {
+            let expected = input[idx] * rhs[idx];
+            assert!((expected - value).abs() < 1e-6);
+        }
+
+        let scaled_accum = unwrap_ok(wgpu_dense::add_scaled(&input, &rhs, rows, cols, -0.25));
+        for (idx, value) in scaled_accum.iter().enumerate() {
+            let expected = input[idx] + rhs[idx] * -0.25;
+            assert!((expected - value).abs() < 1e-6);
+        }
+
+        let added = unwrap_ok(wgpu_dense::add_row(&input, &bias, rows, cols));
+        for r in 0..rows {
+            for c in 0..cols {
+                let idx = r * cols + c;
+                let expected = input[idx] + bias[c];
+                assert!((expected - added[idx]).abs() < 1e-6);
+            }
+        }
+
+        let summed = unwrap_ok(wgpu_dense::sum_axis0(&input, rows, cols));
+        for c in 0..cols {
+            let mut expected = 0.0f32;
+            for r in 0..rows {
+                expected += input[r * cols + c];
+            }
+            assert!((expected - summed[c]).abs() < 1e-5);
+        }
+
+        let summed_scaled = unwrap_ok(wgpu_dense::sum_axis0_scaled(&input, rows, cols, 0.25));
+        for c in 0..cols {
+            let mut expected = 0.0f32;
+            for r in 0..rows {
+                expected += input[r * cols + c];
+            }
+            assert!((expected * 0.25 - summed_scaled[c]).abs() < 1e-5);
+        }
+
+        let projected = unwrap_ok(wgpu_dense::project_to_poincare(&input, rows, cols, -1.0));
+        for r in 0..rows {
+            let start = r * cols;
+            let end = start + cols;
+            let row = &input[start..end];
+            let norm = row.iter().map(|value| value * value).sum::<f32>().sqrt();
+            let factor = if norm > 0.0 { norm.tanh() / norm } else { 1.0 };
+            for c in 0..cols {
+                let expected = input[start + c] * factor;
+                assert!((expected - projected[start + c]).abs() < 2e-5);
+            }
+        }
+
+        let gate: Vec<f32> = (0..cols).map(|idx| 0.2 + idx as f32 * 0.03).collect();
+        let wave_bias: Vec<f32> = (0..cols).map(|idx| idx as f32 * 0.05 - 0.1).collect();
+        let wave = unwrap_ok(wgpu_dense::wave_gate_project(
+            &input, &gate, &wave_bias, rows, cols, -1.0, 0.45, 0.2,
+        ));
+        for r in 0..rows {
+            let start = r * cols;
+            let mut row = Vec::with_capacity(cols);
+            for c in 0..cols {
+                row.push(porous_mix_value(
+                    input[start + c] * gate[c] + wave_bias[c],
+                    0.45,
+                    0.2,
+                ));
+            }
+            let norm = row.iter().map(|value| value * value).sum::<f32>().sqrt();
+            let factor = if norm > 0.0 { norm.tanh() / norm } else { 1.0 };
+            for c in 0..cols {
+                let expected = row[c] * factor;
+                assert!((expected - wave[start + c]).abs() < 2e-5);
+            }
+        }
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn tensor_utility_methods_emit_wgpu_backend_when_available() {
+        if !wgpu_dense::is_available() {
+            return;
+        }
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let tensor = unwrap_ok(Tensor::from_vec(
+            3,
+            4,
+            vec![
+                0.25, -0.5, 0.75, -1.0, 1.25, -1.5, 1.75, -2.0, 0.1, 0.2, -0.3, 0.4,
+            ],
+        ));
+        let _ = unwrap_ok(tensor.scale_with_backend(0.5, TensorUtilBackend::GpuWgpu));
+        let rhs = unwrap_ok(Tensor::from_vec(
+            3,
+            4,
+            vec![
+                -0.1, 0.2, -0.3, 0.4, -0.5, 0.6, -0.7, 0.8, 0.9, -1.0, 1.1, -1.2,
+            ],
+        ));
+        let _ = unwrap_ok(tensor.add_with_backend(&rhs, TensorUtilBackend::GpuWgpu));
+        let _ = unwrap_ok(tensor.hadamard_with_backend(&rhs, TensorUtilBackend::GpuWgpu));
+        let _ = unwrap_ok(tensor.relu_with_backend(TensorUtilBackend::GpuWgpu));
+        let _ = unwrap_ok(
+            tensor.mul_row_with_backend(&[0.2, -0.4, 0.6, -0.8], TensorUtilBackend::GpuWgpu),
+        );
+        let _ = unwrap_ok(tensor.row_affine_with_backend(
+            &[0.2, -0.4, 0.6, -0.8],
+            &[0.05, -0.1, 0.15, -0.2],
+            TensorUtilBackend::GpuWgpu,
+        ));
+        let _ = unwrap_ok(tensor.sub_with_backend(&rhs, TensorUtilBackend::GpuWgpu));
+        let _ = unwrap_ok(tensor.transpose_with_backend(TensorUtilBackend::GpuWgpu));
+        let mut accum = tensor.clone();
+        unwrap_ok(accum.add_scaled_with_backend(&rhs, -0.25, TensorUtilBackend::GpuWgpu));
+        let mut biased = tensor.clone();
+        unwrap_ok(
+            biased
+                .add_row_inplace_with_backend(&[0.1, -0.2, 0.3, -0.4], TensorUtilBackend::GpuWgpu),
+        );
+        let _ = tensor.sum_axis0_with_backend(TensorUtilBackend::GpuWgpu);
+        let _ = tensor.sum_axis0_scaled_with_backend(0.25, TensorUtilBackend::GpuWgpu);
+        let _ = unwrap_ok(tensor.squared_l2_norm_with_backend(TensorUtilBackend::GpuWgpu));
+        let _ = unwrap_ok(tensor.sum_abs_with_backend(TensorUtilBackend::GpuWgpu));
+        let _ =
+            unwrap_ok(tensor.project_to_poincare_with_backend(-1.0, TensorUtilBackend::GpuWgpu));
+        let _ = unwrap_ok(tensor.wave_gate_project_with_backend(
+            &[0.1, 0.2, 0.3, 0.4],
+            &[0.05, -0.05, 0.1, -0.1],
+            -1.0,
+            1.0,
+            0.2,
+            TensorUtilBackend::GpuWgpu,
+        ));
+        crate::set_tensor_op_meta_observer(previous);
+
+        let events = events.lock().unwrap();
+        for op_name in [
+            "scale",
+            "add",
+            "hadamard",
+            "relu",
+            "mul_row",
+            "row_affine",
+            "sub",
+            "transpose",
+            "add_scaled",
+            "add_row_inplace",
+            "sum_axis0",
+            "sum_axis0_scaled",
+            "squared_l2_norm",
+            "sum_abs",
+            "project_to_poincare",
+            "wave_gate_project",
+        ] {
+            let (_, data) = events
+                .iter()
+                .find(|(observed, _)| *observed == op_name)
+                .unwrap_or_else(|| panic!("{op_name} metadata event"));
+            assert_eq!(data["backend"], "wgpu_dense");
+            assert_eq!(data["requested_backend"], "wgpu");
+            assert!(data["kernel"]
+                .as_str()
+                .unwrap_or_default()
+                .starts_with("tensor_util."));
+        }
+    }
+
     #[test]
     fn matmul_bias_add_gelu_matches_scalar_pipeline() {
         let lhs = unwrap_ok(Tensor::from_vec(
@@ -6870,6 +12399,133 @@ mod tests {
         for (a, b) in fused.data().iter().zip(reference.data().iter()) {
             assert!((a - b).abs() < 1e-5);
         }
+    }
+
+    #[test]
+    fn matmul_bias_add_gelu_rejects_non_finite_residual() {
+        let lhs = unwrap_ok(Tensor::from_vec(1, 1, vec![0.0]));
+        let rhs = unwrap_ok(Tensor::from_vec(1, 1, vec![0.0]));
+        let residual = unwrap_ok(Tensor::from_vec(1, 1, vec![f32::NAN]));
+
+        let err = unwrap_err(lhs.matmul_bias_add_gelu_with_backend(
+            &rhs,
+            &[0.0],
+            &residual,
+            MatmulBackend::CpuNaive,
+        ));
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "matmul_bias_add_gelu_residual",
+                value,
+            } if value.is_nan()
+        ));
+    }
+
+    #[test]
+    fn matmul_bias_add_gelu_rejects_overflowing_output() {
+        let lhs = unwrap_ok(Tensor::from_vec(1, 1, vec![0.0]));
+        let rhs = unwrap_ok(Tensor::from_vec(1, 1, vec![0.0]));
+        let residual = unwrap_ok(Tensor::from_vec(1, 1, vec![f32::MAX]));
+
+        let err = unwrap_err(lhs.matmul_bias_add_gelu_with_backend(
+            &rhs,
+            &[f32::MAX],
+            &residual,
+            MatmulBackend::CpuNaive,
+        ));
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "matmul_bias_add_gelu_output",
+                value,
+            } if value.is_infinite()
+        ));
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn matmul_bias_fused_forced_wgpu_matches_cpu_reference_on_edge_tiles() {
+        let lhs = unwrap_ok(Tensor::from_vec(
+            13,
+            9,
+            (0..117)
+                .map(|idx| ((idx as f32 * 0.071).sin() * 0.8) - ((idx % 11) as f32 * 0.01))
+                .collect(),
+        ));
+        let rhs = unwrap_ok(Tensor::from_vec(
+            9,
+            7,
+            (0..63)
+                .map(|idx| ((idx as f32 * 0.113).cos() * 0.6) + ((idx % 5) as f32 * 0.02))
+                .collect(),
+        ));
+        let bias: Vec<f32> = (0..7).map(|idx| idx as f32 * 0.031 - 0.08).collect();
+        let residual = unwrap_ok(Tensor::from_vec(
+            13,
+            7,
+            (0..91)
+                .map(|idx| ((idx as f32 * 0.037).sin() * 0.15) - 0.03)
+                .collect(),
+        ));
+
+        let cpu_relu =
+            unwrap_ok(lhs.matmul_bias_relu_with_backend(&rhs, &bias, MatmulBackend::CpuNaive));
+        let wgpu_relu = match lhs.matmul_bias_relu_with_backend(&rhs, &bias, MatmulBackend::GpuWgpu)
+        {
+            Ok(value) => value,
+            Err(error) if wgpu_unavailable(&error) => return,
+            Err(error) => panic!("forced WGPU matmul_bias_relu failed: {error:?}"),
+        };
+        assert_tensor_close(&cpu_relu, &wgpu_relu, 2e-4);
+
+        let cpu_gelu =
+            unwrap_ok(lhs.matmul_bias_gelu_with_backend(&rhs, &bias, MatmulBackend::CpuNaive));
+        let wgpu_gelu = match lhs.matmul_bias_gelu_with_backend(&rhs, &bias, MatmulBackend::GpuWgpu)
+        {
+            Ok(value) => value,
+            Err(error) if wgpu_unavailable(&error) => return,
+            Err(error) => panic!("forced WGPU matmul_bias_gelu failed: {error:?}"),
+        };
+        assert_tensor_close(&cpu_gelu, &wgpu_gelu, 2e-4);
+
+        let cpu_add_relu = unwrap_ok(lhs.matmul_bias_add_relu_with_backend(
+            &rhs,
+            &bias,
+            &residual,
+            MatmulBackend::CpuNaive,
+        ));
+        let wgpu_add_relu = match lhs.matmul_bias_add_relu_with_backend(
+            &rhs,
+            &bias,
+            &residual,
+            MatmulBackend::GpuWgpu,
+        ) {
+            Ok(value) => value,
+            Err(error) if wgpu_unavailable(&error) => return,
+            Err(error) => panic!("forced WGPU matmul_bias_add_relu failed: {error:?}"),
+        };
+        assert_tensor_close(&cpu_add_relu, &wgpu_add_relu, 2e-4);
+
+        let cpu_add_gelu = unwrap_ok(lhs.matmul_bias_add_gelu_with_backend(
+            &rhs,
+            &bias,
+            &residual,
+            MatmulBackend::CpuNaive,
+        ));
+        let wgpu_add_gelu = match lhs.matmul_bias_add_gelu_with_backend(
+            &rhs,
+            &bias,
+            &residual,
+            MatmulBackend::GpuWgpu,
+        ) {
+            Ok(value) => value,
+            Err(error) if wgpu_unavailable(&error) => return,
+            Err(error) => panic!("forced WGPU matmul_bias_add_gelu failed: {error:?}"),
+        };
+        assert_tensor_close(&cpu_add_gelu, &wgpu_add_gelu, 2e-4);
     }
 
     #[test]
@@ -7051,6 +12707,873 @@ mod tests {
     }
 
     #[test]
+    fn tensor_preserves_zero_sized_axes_for_basic_shape_ops() {
+        let empty_rows = unwrap_ok(Tensor::from_vec(0, 3, Vec::new()));
+        assert_eq!(empty_rows.shape(), (0, 3));
+        assert_eq!(empty_rows.len(), 0);
+        assert!(empty_rows.is_empty());
+        assert!(empty_rows.data().is_empty());
+
+        let zero_cols = unwrap_ok(Tensor::zeros(2, 0));
+        assert_eq!(zero_cols.shape(), (2, 0));
+        assert!(zero_cols.data().is_empty());
+
+        let generated = unwrap_ok(Tensor::from_fn(0, 5, |_, _| panic!("generator not called")));
+        assert_eq!(generated.shape(), (0, 5));
+
+        let reshaped = unwrap_ok(empty_rows.reshape(3, 0));
+        assert_eq!(reshaped.shape(), (3, 0));
+        let viewed = unwrap_ok(reshaped.view(0, 3));
+        assert_eq!(viewed.shape(), (0, 3));
+
+        let transposed = empty_rows.transpose();
+        assert_eq!(transposed.shape(), (3, 0));
+        assert!(transposed.data().is_empty());
+    }
+
+    #[test]
+    fn tensor_zero_sized_axes_flow_through_basic_math() {
+        let empty_a = unwrap_ok(Tensor::from_vec(0, 3, Vec::new()));
+        let empty_b = unwrap_ok(Tensor::from_vec(0, 3, Vec::new()));
+        assert_eq!(unwrap_ok(empty_a.add(&empty_b)).shape(), (0, 3));
+        assert_eq!(unwrap_ok(empty_a.sub(&empty_b)).shape(), (0, 3));
+        assert_eq!(unwrap_ok(empty_a.scale(2.0)).shape(), (0, 3));
+        assert_eq!(unwrap_ok(mean_squared_error(&empty_a, &empty_b)), 0.0);
+        assert_eq!(unwrap_ok(empty_a.row_softmax()).shape(), (0, 3));
+        let (soft, hard) = unwrap_ok(empty_a.row_softmax_hardmax());
+        assert_eq!(soft.shape(), (0, 3));
+        assert_eq!(hard.shape(), (0, 3));
+        assert!(soft.data().is_empty());
+        assert!(hard.data().is_empty());
+        let spiral = unwrap_ok(empty_a.row_softmax_hardmax_spiral());
+        assert_eq!(spiral.softmax.shape(), (0, 3));
+        assert_eq!(spiral.hardmax.shape(), (0, 3));
+        assert_eq!(spiral.spiral.shape(), (0, 3));
+        assert_eq!(spiral.metrics.average_enrichment, 0.0);
+        assert_eq!(spiral.metrics.mean_entropy, 0.0);
+        assert_eq!(spiral.metrics.mean_hardmass, 0.0);
+        assert_eq!(spiral.metrics.spiral_coherence, 0.0);
+
+        let zero_cols = unwrap_ok(Tensor::from_vec(2, 0, Vec::new()));
+        let (soft, hard) = unwrap_ok(zero_cols.row_softmax_hardmax());
+        assert_eq!(soft.shape(), (2, 0));
+        assert_eq!(hard.shape(), (2, 0));
+        assert!(soft.data().is_empty());
+        assert!(hard.data().is_empty());
+        let spiral = unwrap_ok(zero_cols.row_softmax_hardmax_spiral());
+        assert_eq!(spiral.softmax.shape(), (2, 0));
+        assert_eq!(spiral.hardmax.shape(), (2, 0));
+        assert_eq!(spiral.spiral.shape(), (2, 0));
+        assert_eq!(spiral.metrics.average_enrichment, 0.0);
+        assert_eq!(spiral.metrics.mean_entropy, 0.0);
+        assert_eq!(spiral.metrics.mean_hardmass, 0.0);
+        assert_eq!(spiral.metrics.spiral_coherence, 0.0);
+
+        let rhs = unwrap_ok(Tensor::from_vec(3, 2, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]));
+        let product = unwrap_ok(empty_a.matmul(&rhs));
+        assert_eq!(product.shape(), (0, 2));
+        assert!(product.data().is_empty());
+
+        let lhs = unwrap_ok(Tensor::from_vec(2, 3, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]));
+        let empty_rhs = unwrap_ok(Tensor::from_vec(3, 0, Vec::new()));
+        let product = unwrap_ok(lhs.matmul(&empty_rhs));
+        assert_eq!(product.shape(), (2, 0));
+        assert!(product.data().is_empty());
+
+        let zero_inner_lhs = unwrap_ok(Tensor::from_vec(2, 0, Vec::new()));
+        let zero_inner_rhs = unwrap_ok(Tensor::from_vec(0, 3, Vec::new()));
+        let product = unwrap_ok(zero_inner_lhs.matmul(&zero_inner_rhs));
+        assert_eq!(product.shape(), (2, 3));
+        assert_eq!(product.data(), &[0.0; 6]);
+    }
+
+    #[test]
+    fn tensor_cpu_elementwise_and_reduction_meta_reports_backend() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let a = unwrap_ok(Tensor::from_vec(2, 2, vec![1.0, -2.0, 3.0, -4.0]));
+        let b = unwrap_ok(Tensor::from_vec(2, 2, vec![0.5, 1.5, -2.0, 0.25]));
+        let _ = unwrap_ok(a.add(&b));
+        let _ = unwrap_ok(a.sub(&b));
+        let _ = unwrap_ok(a.scale(0.5));
+        let _ = unwrap_ok(a.hadamard(&b));
+        let mut inplace = a.clone();
+        unwrap_ok(inplace.add_scaled(&b, -0.25));
+        unwrap_ok(inplace.add_row_inplace(&[0.1, -0.2]));
+        inplace.relu_inplace();
+        inplace.gelu_inplace();
+        let _ = inplace.transpose();
+        let _ = unwrap_ok(inplace.reshape(1, 4));
+        let _ = inplace.sum_axis0();
+        let _ = inplace.sum_axis1();
+        let _ = unwrap_ok(Tensor::cat_rows(&[a.clone(), b.clone()]));
+        let _ = unwrap_ok(mean_squared_error(&a, &b));
+        crate::set_tensor_op_meta_observer(previous);
+
+        let events = events.lock().unwrap();
+        let find = |op_name: &'static str| {
+            events
+                .iter()
+                .find(|(observed, _)| *observed == op_name)
+                .unwrap_or_else(|| panic!("{op_name} metadata event"))
+        };
+        for op_name in [
+            "add",
+            "sub",
+            "scale",
+            "hadamard",
+            "add_scaled",
+            "add_row_inplace",
+            "relu_inplace",
+            "gelu_inplace",
+            "transpose",
+            "reshape",
+            "sum_axis0",
+            "sum_axis0_scaled",
+            "sum_axis1",
+            "cat_rows",
+            "mean_squared_error",
+        ] {
+            let (_, data) = find(op_name);
+            if op_name == "reshape" {
+                assert_eq!(data["backend"], "view");
+                assert_eq!(data["kernel"], "metadata");
+                assert_eq!(data["zero_copy"], true);
+            } else if op_name == "mean_squared_error" {
+                assert_eq!(data["backend"], "composite");
+                assert_eq!(data["kernel"], "tensor_util.mean_squared_error");
+            } else {
+                assert_eq!(data["backend"], "cpu");
+                assert_eq!(data["kernel"], "scalar");
+            }
+            assert_eq!(data["requested_backend"], "auto");
+        }
+
+        let (_, scale) = find("scale");
+        assert_eq!(scale["kind"], "elementwise");
+        assert_eq!(scale["scale"], 0.5);
+        let (_, add_scaled) = find("add_scaled");
+        assert_eq!(add_scaled["kind"], "elementwise_inplace");
+        assert_eq!(add_scaled["scale"], -0.25);
+        let (_, sum_axis0) = find("sum_axis0");
+        assert_eq!(sum_axis0["kind"], "reduction");
+        assert_eq!(sum_axis0["axis"], 0);
+        assert_eq!(sum_axis0["output_rows"], 1);
+        assert_eq!(sum_axis0["output_cols"], 2);
+        let (_, sum_axis0_scaled) = find("sum_axis0_scaled");
+        assert_eq!(sum_axis0_scaled["kind"], "reduction");
+        assert_eq!(sum_axis0_scaled["axis"], 0);
+        assert_eq!(sum_axis0_scaled["scale"], 0.25);
+        let (_, cat_rows) = find("cat_rows");
+        assert_eq!(cat_rows["kind"], "copy");
+        assert_eq!(cat_rows["inputs"], 2);
+        assert_eq!(cat_rows["output_rows"], 4);
+        let (_, mse) = find("mean_squared_error");
+        assert_eq!(mse["kind"], "reduction");
+        assert_eq!(mse["reduction"], "mean");
+        assert_eq!(mse["reduction_backend"], "auto");
+        assert_eq!(mse["output_values"], 1);
+    }
+
+    #[test]
+    fn tensor_add_rejects_overflowing_output() {
+        let lhs = unwrap_ok(Tensor::from_vec(1, 1, vec![f32::MAX]));
+        let rhs = unwrap_ok(Tensor::from_vec(1, 1, vec![f32::MAX]));
+
+        let err = lhs.add(&rhs).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "add_output",
+                value,
+            } if value.is_infinite()
+        ));
+    }
+
+    #[test]
+    fn tensor_sub_rejects_overflowing_output() {
+        let lhs = unwrap_ok(Tensor::from_vec(1, 1, vec![-f32::MAX]));
+        let rhs = unwrap_ok(Tensor::from_vec(1, 1, vec![f32::MAX]));
+
+        let err = lhs.sub(&rhs).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "sub_output",
+                value,
+            } if value.is_infinite()
+        ));
+    }
+
+    #[test]
+    fn tensor_hadamard_rejects_overflowing_output() {
+        let lhs = unwrap_ok(Tensor::from_vec(1, 1, vec![2.0]));
+        let rhs = unwrap_ok(Tensor::from_vec(1, 1, vec![f32::MAX]));
+
+        let err = lhs.hadamard(&rhs).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "hadamard_output",
+                value,
+            } if value.is_infinite()
+        ));
+    }
+
+    #[test]
+    fn tensor_scale_rejects_non_finite_factor_on_empty_tensor() {
+        let tensor = unwrap_ok(Tensor::from_vec(0, 3, Vec::new()));
+        let err = tensor.scale(f32::INFINITY).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "scale_factor",
+                value,
+            } if value.is_infinite()
+        ));
+    }
+
+    #[test]
+    fn tensor_scale_rejects_overflowing_output() {
+        let tensor = unwrap_ok(Tensor::from_vec(1, 1, vec![2.0]));
+        let err = tensor.scale(f32::MAX).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "scale_output",
+                value,
+            } if value.is_infinite()
+        ));
+    }
+
+    #[test]
+    fn tensor_add_scaled_rejects_non_finite_factor_on_empty_tensor() {
+        let mut lhs = unwrap_ok(Tensor::from_vec(0, 3, Vec::new()));
+        let rhs = unwrap_ok(Tensor::from_vec(0, 3, Vec::new()));
+        let err = lhs.add_scaled(&rhs, f32::NAN).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "add_scaled_factor",
+                value,
+            } if value.is_nan()
+        ));
+    }
+
+    #[test]
+    fn tensor_add_scaled_rejects_overflowing_delta_without_mutating_lhs() {
+        let mut lhs = unwrap_ok(Tensor::zeros(1, 1));
+        let rhs = unwrap_ok(Tensor::from_vec(1, 1, vec![2.0]));
+        let before = lhs.clone();
+
+        let err = lhs.add_scaled(&rhs, f32::MAX).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "add_scaled_delta",
+                value,
+            } if value.is_infinite()
+        ));
+        assert_eq!(lhs, before);
+    }
+
+    #[test]
+    fn tensor_add_scaled_rejects_overflowing_output_without_mutating_lhs() {
+        let mut lhs = unwrap_ok(Tensor::from_vec(1, 1, vec![f32::MAX]));
+        let rhs = unwrap_ok(Tensor::from_vec(1, 1, vec![0.5]));
+        let before = lhs.clone();
+
+        let err = lhs.add_scaled(&rhs, f32::MAX).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "add_scaled_output",
+                value,
+            } if value.is_infinite()
+        ));
+        assert_eq!(lhs, before);
+    }
+
+    #[test]
+    fn tensor_add_row_rejects_non_finite_bias_on_empty_tensor() {
+        let mut tensor = unwrap_ok(Tensor::from_vec(0, 2, Vec::new()));
+        let err = tensor.add_row_inplace(&[0.0, f32::NAN]).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "add_row_bias",
+                value,
+            } if value.is_nan()
+        ));
+    }
+
+    #[test]
+    fn tensor_add_row_rejects_overflowing_output_without_mutating_lhs() {
+        let mut tensor = unwrap_ok(Tensor::from_vec(1, 2, vec![f32::MAX, 1.0]));
+        let before = tensor.clone();
+
+        let err = tensor.add_row_inplace(&[f32::MAX, 0.0]).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "add_row_output",
+                value,
+            } if value.is_infinite()
+        ));
+        assert_eq!(tensor, before);
+    }
+
+    #[test]
+    fn tensor_mean_squared_error_rejects_non_finite_prediction() {
+        let prediction = unwrap_ok(Tensor::from_vec(1, 1, vec![f32::INFINITY]));
+        let target = unwrap_ok(Tensor::zeros(1, 1));
+
+        let err = mean_squared_error(&prediction, &target).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "mse_prediction",
+                value,
+            } if value.is_infinite()
+        ));
+    }
+
+    #[test]
+    fn tensor_mean_squared_error_rejects_overflowing_square() {
+        let prediction = unwrap_ok(Tensor::from_vec(1, 1, vec![f32::MAX]));
+        let target = unwrap_ok(Tensor::zeros(1, 1));
+
+        let err = mean_squared_error(&prediction, &target).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "mse_squared_diff",
+                value,
+            } if value.is_infinite()
+        ));
+    }
+
+    #[test]
+    fn linear_model_train_batch_rejects_overflowing_loss() {
+        let mut model = unwrap_ok(LinearModel::new(1, 1));
+        let input = unwrap_ok(Tensor::zeros(1, 1));
+        let target = unwrap_ok(Tensor::from_vec(1, 1, vec![f32::MAX]));
+        let weights_before = model.weights().clone();
+        let bias_before = model.bias().to_vec();
+
+        let err = model.train_batch(&input, &target, 0.0).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "linear_model_mse_squared_diff",
+                value,
+            } if value.is_infinite()
+        ));
+        assert_eq!(*model.weights(), weights_before);
+        assert_eq!(model.bias(), bias_before.as_slice());
+    }
+
+    #[test]
+    fn linear_model_train_batch_with_backend_emits_explicit_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let inputs = unwrap_ok(Tensor::from_vec(2, 1, vec![0.0, 1.0]));
+        let targets = unwrap_ok(Tensor::from_vec(2, 1, vec![1.0, 3.0]));
+        let mut model = unwrap_ok(LinearModel::new(1, 1));
+        let loss = unwrap_ok(model.train_batch_with_backend(
+            &inputs,
+            &targets,
+            0.1,
+            MatmulBackend::CpuNaive,
+            TensorUtilBackend::Cpu,
+        ));
+        crate::set_tensor_op_meta_observer(previous);
+
+        assert!(loss.is_finite());
+        let events = events.lock().unwrap();
+        let prepacked_bias = events
+            .iter()
+            .find(|(op_name, _)| *op_name == "matmul_prepacked_bias")
+            .expect("linear model forward prepacked-bias metadata event");
+        assert_eq!(prepacked_bias.1["requested_backend"], "naive");
+        let squared = events
+            .iter()
+            .find(|(op_name, _)| *op_name == "hadamard")
+            .expect("linear model squared-diff metadata event");
+        assert_eq!(squared.1["backend"], "cpu");
+        assert_eq!(squared.1["requested_backend"], "cpu");
+        let grad_w = events
+            .iter()
+            .find(|(op_name, _)| *op_name == "matmul_lhs_transpose_scaled")
+            .expect("linear model weight-gradient metadata event");
+        assert_eq!(grad_w.1["requested_backend"], "naive");
+        let grad_b = events
+            .iter()
+            .find(|(op_name, _)| *op_name == "sum_axis0_scaled")
+            .expect("linear model bias-gradient metadata event");
+        assert_eq!(grad_b.1["backend"], "cpu");
+        assert_eq!(grad_b.1["requested_backend"], "cpu");
+        let weight_update = events
+            .iter()
+            .find(|(op_name, _)| *op_name == "add_scaled")
+            .expect("linear model weight-update metadata event");
+        assert_eq!(weight_update.1["backend"], "cpu");
+        assert_eq!(weight_update.1["requested_backend"], "cpu");
+    }
+
+    #[test]
+    fn tensor_try_sum_axis0_rejects_overflowing_output() {
+        let tensor = unwrap_ok(Tensor::from_vec(2, 1, vec![f32::MAX, f32::MAX]));
+
+        let err = tensor.try_sum_axis0().unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "sum_axis0_output",
+                value,
+            } if value.is_infinite()
+        ));
+    }
+
+    #[test]
+    fn tensor_try_sum_axis0_scaled_rejects_non_finite_factor_on_empty_tensor() {
+        let tensor = unwrap_ok(Tensor::from_vec(0, 2, Vec::new()));
+
+        let err = tensor
+            .try_sum_axis0_scaled_with_backend(f32::NAN, TensorUtilBackend::Cpu)
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "sum_axis0_scaled_factor",
+                value,
+            } if value.is_nan()
+        ));
+    }
+
+    #[test]
+    fn tensor_try_sum_axis0_scaled_rejects_overflowing_output() {
+        let tensor = unwrap_ok(Tensor::from_vec(1, 1, vec![2.0]));
+
+        let err = tensor
+            .try_sum_axis0_scaled_with_backend(f32::MAX, TensorUtilBackend::Cpu)
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "sum_axis0_scaled_output",
+                value,
+            } if value.is_infinite()
+        ));
+    }
+
+    #[test]
+    fn tensor_try_sum_axis1_rejects_overflowing_output() {
+        let tensor = unwrap_ok(Tensor::from_vec(1, 2, vec![f32::MAX, f32::MAX]));
+
+        let err = tensor.try_sum_axis1().unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "sum_axis1_output",
+                value,
+            } if value.is_infinite()
+        ));
+    }
+
+    #[test]
+    fn tensor_hyperbolic_diagnostics_meta_reports_backend() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let tensor = unwrap_ok(Tensor::from_vec(2, 2, vec![0.25, -0.5, 0.75, 0.0]));
+        let _ = tensor.squared_l2_norm();
+        let _ = tensor.sum_abs();
+        let projected = unwrap_ok(tensor.project_to_poincare(-1.0));
+        let _ = unwrap_ok(projected.hyperbolic_distance(&projected, -1.0));
+        crate::set_tensor_op_meta_observer(previous);
+
+        let events = events.lock().unwrap();
+        let find = |op_name: &'static str| {
+            events
+                .iter()
+                .find(|(observed, _)| *observed == op_name)
+                .unwrap_or_else(|| panic!("{op_name} metadata event"))
+        };
+
+        let (_, l2) = find("squared_l2_norm");
+        assert_eq!(l2["backend"], "cpu");
+        assert_eq!(l2["requested_backend"], "auto");
+        assert_eq!(l2["kind"], "diagnostic_reduction");
+        assert_eq!(l2["reduction"], "sum_squares");
+        assert_eq!(l2["output_rows"], 1);
+        assert_eq!(l2["output_cols"], 1);
+        assert!(l2["result"].as_f64().unwrap_or(0.0) > 0.0);
+
+        let (_, l1) = find("sum_abs");
+        assert_eq!(l1["backend"], "cpu");
+        assert_eq!(l1["requested_backend"], "auto");
+        assert_eq!(l1["kind"], "diagnostic_reduction");
+        assert_eq!(l1["reduction"], "sum_abs");
+        assert_eq!(l1["output_rows"], 1);
+        assert_eq!(l1["output_cols"], 1);
+        assert!(l1["result"].as_f64().unwrap_or(0.0) > 0.0);
+
+        let (_, projection) = find("project_to_poincare");
+        assert_eq!(projection["backend"], "cpu");
+        assert_eq!(projection["kind"], "hyperbolic_projection");
+        assert_eq!(projection["curvature"], -1.0);
+        assert_eq!(projection["nonzero_rows"], 2);
+        assert_eq!(projection["output_rows"], 2);
+        assert_eq!(projection["output_cols"], 2);
+        assert!(projection["max_row_l2"].as_f64().unwrap_or(0.0) > 0.0);
+
+        let (_, distance) = find("hyperbolic_distance");
+        assert_eq!(distance["backend"], "cpu");
+        assert_eq!(distance["kind"], "hyperbolic_distance");
+        assert_eq!(distance["rhs_rows"], 2);
+        assert_eq!(distance["rhs_cols"], 2);
+        assert_eq!(distance["output_values"], 1);
+        assert!(distance["distance"].as_f64().unwrap_or(-1.0) >= 0.0);
+    }
+
+    #[test]
+    fn scaled_dot_attention_zero_sequence_preserves_shape_and_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let queries = unwrap_ok(Tensor::from_vec(0, 4, Vec::new()));
+        let keys = unwrap_ok(Tensor::from_vec(0, 4, Vec::new()));
+        let values = unwrap_ok(Tensor::from_vec(0, 4, Vec::new()));
+        let z_bias = unwrap_ok(Tensor::from_vec(2, 0, Vec::new()));
+        let attn_bias = unwrap_ok(Tensor::from_vec(0, 0, Vec::new()));
+        let output = unwrap_ok(queries.scaled_dot_attention_with_backend(
+            &keys,
+            &values,
+            2,
+            0,
+            0.5,
+            Some(&z_bias),
+            Some(&attn_bias),
+            AttentionBackend::Cpu,
+        ));
+        crate::set_tensor_op_meta_observer(previous);
+
+        assert_eq!(output.shape(), (0, 4));
+        assert!(output.data().is_empty());
+        let events = events.lock().unwrap();
+        let attention = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "scaled_dot_attention"
+                    && data["contexts"] == 2
+                    && data["sequence"] == 0
+                    && data["head_dim"] == 4
+            })
+            .expect("empty scaled attention metadata event");
+        assert_eq!(attention.1["backend"], "cpu");
+        assert_eq!(attention.1["requested_backend"], "cpu");
+        assert_eq!(attention.1["flags"]["empty"], true);
+        assert_eq!(attention.1["flags"]["use_z_bias"], true);
+        assert_eq!(attention.1["flags"]["use_attn_bias"], true);
+    }
+
+    #[test]
+    fn scaled_dot_attention_zero_head_dim_preserves_shape() {
+        let queries = unwrap_ok(Tensor::from_vec(3, 0, Vec::new()));
+        let keys = unwrap_ok(Tensor::from_vec(3, 0, Vec::new()));
+        let values = unwrap_ok(Tensor::from_vec(3, 0, Vec::new()));
+
+        let output = unwrap_ok(queries.scaled_dot_attention_with_backend(
+            &keys,
+            &values,
+            1,
+            3,
+            1.0,
+            None,
+            None,
+            AttentionBackend::Auto,
+        ));
+
+        assert_eq!(output.shape(), (3, 0));
+        assert!(output.data().is_empty());
+    }
+
+    #[test]
+    fn scaled_dot_attention_rejects_non_finite_scale_on_empty_output() {
+        let queries = unwrap_ok(Tensor::from_vec(0, 4, Vec::new()));
+        let keys = unwrap_ok(Tensor::from_vec(0, 4, Vec::new()));
+        let values = unwrap_ok(Tensor::from_vec(0, 4, Vec::new()));
+
+        let err = unwrap_err(queries.scaled_dot_attention_with_backend(
+            &keys,
+            &values,
+            2,
+            0,
+            f32::NAN,
+            None,
+            None,
+            AttentionBackend::Cpu,
+        ));
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "scaled_dot_attention_scale",
+                value,
+            } if value.is_nan()
+        ));
+    }
+
+    #[test]
+    fn scaled_dot_attention_rejects_non_finite_bias_on_empty_head_dim() {
+        let queries = unwrap_ok(Tensor::from_vec(2, 0, Vec::new()));
+        let keys = unwrap_ok(Tensor::from_vec(2, 0, Vec::new()));
+        let values = unwrap_ok(Tensor::from_vec(2, 0, Vec::new()));
+        let z_bias = unwrap_ok(Tensor::from_vec(1, 2, vec![0.0, f32::NAN]));
+
+        let err = unwrap_err(queries.scaled_dot_attention_with_backend(
+            &keys,
+            &values,
+            1,
+            2,
+            1.0,
+            Some(&z_bias),
+            None,
+            AttentionBackend::Cpu,
+        ));
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "scaled_dot_attention_z_bias",
+                value,
+            } if value.is_nan()
+        ));
+    }
+
+    #[test]
+    fn scaled_dot_attention_rejects_non_finite_attention_bias() {
+        let queries = unwrap_ok(Tensor::from_vec(1, 1, vec![0.0]));
+        let keys = unwrap_ok(Tensor::from_vec(1, 1, vec![0.0]));
+        let values = unwrap_ok(Tensor::from_vec(1, 1, vec![0.0]));
+        let attn_bias = unwrap_ok(Tensor::from_vec(1, 1, vec![f32::INFINITY]));
+
+        let err = unwrap_err(queries.scaled_dot_attention_with_backend(
+            &keys,
+            &values,
+            1,
+            1,
+            1.0,
+            None,
+            Some(&attn_bias),
+            AttentionBackend::Cpu,
+        ));
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "scaled_dot_attention_attn_bias",
+                value,
+            } if value.is_infinite()
+        ));
+    }
+
+    #[test]
+    fn scaled_dot_attention_rejects_overflowing_cpu_dot_product() {
+        let queries = unwrap_ok(Tensor::from_vec(1, 1, vec![f32::MAX]));
+        let keys = unwrap_ok(Tensor::from_vec(1, 1, vec![2.0]));
+        let values = unwrap_ok(Tensor::from_vec(1, 1, vec![1.0]));
+
+        let err = unwrap_err(queries.scaled_dot_attention_with_backend(
+            &keys,
+            &values,
+            1,
+            1,
+            1.0,
+            None,
+            None,
+            AttentionBackend::Cpu,
+        ));
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "scaled_dot_attention_dot",
+                value,
+            } if value.is_infinite()
+        ));
+    }
+
+    #[test]
+    fn layer_norm_empty_rows_preserve_shape_and_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let input = unwrap_ok(Tensor::from_vec(0, 3, Vec::new()));
+        let residual = unwrap_ok(Tensor::from_vec(0, 3, Vec::new()));
+        let gamma = unwrap_ok(Tensor::from_vec(1, 3, vec![1.0, 1.0, 1.0]));
+        let beta = unwrap_ok(Tensor::zeros(1, 3));
+        let output = unwrap_ok(input.layer_norm_affine_add_with_backend(
+            &residual,
+            &gamma,
+            &beta,
+            1.0e-5,
+            LayerNormBackend::Cpu,
+        ));
+        crate::set_tensor_op_meta_observer(previous);
+
+        assert_eq!(output.shape(), (0, 3));
+        assert!(output.data().is_empty());
+        let events = events.lock().unwrap();
+        let layer_norm = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "layer_norm" && data["rows"] == 0 && data["cols"] == 3
+            })
+            .expect("empty layer_norm metadata event");
+        assert_eq!(layer_norm.1["backend"], "cpu");
+        assert_eq!(layer_norm.1["requested_backend"], "cpu");
+        assert_eq!(layer_norm.1["flags"]["empty"], true);
+        assert_eq!(layer_norm.1["flags"]["use_residual"], true);
+    }
+
+    #[test]
+    fn layer_norm_rejects_non_finite_affine_on_empty_rows() {
+        let input = unwrap_ok(Tensor::from_vec(0, 3, Vec::new()));
+        let gamma = unwrap_ok(Tensor::from_vec(1, 3, vec![1.0, f32::NAN, 1.0]));
+        let beta = unwrap_ok(Tensor::zeros(1, 3));
+
+        let err = unwrap_err(input.layer_norm_affine_with_backend(
+            &gamma,
+            &beta,
+            1.0e-5,
+            LayerNormBackend::Cpu,
+        ));
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "layer_norm_gamma",
+                value,
+            } if value.is_nan()
+        ));
+    }
+
+    #[test]
+    fn layer_norm_rejects_non_finite_residual() {
+        let input = unwrap_ok(Tensor::from_vec(1, 2, vec![0.0, 1.0]));
+        let residual = unwrap_ok(Tensor::from_vec(1, 2, vec![0.0, f32::INFINITY]));
+        let gamma = unwrap_ok(Tensor::from_vec(1, 2, vec![1.0, 1.0]));
+        let beta = unwrap_ok(Tensor::zeros(1, 2));
+
+        let err = unwrap_err(input.layer_norm_affine_add_with_backend(
+            &residual,
+            &gamma,
+            &beta,
+            1.0e-5,
+            LayerNormBackend::Cpu,
+        ));
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "layer_norm_residual",
+                value,
+            } if value.is_infinite()
+        ));
+    }
+
+    #[test]
+    fn layer_norm_rejects_overflowing_cpu_variance() {
+        let input = unwrap_ok(Tensor::from_vec(1, 2, vec![f32::MAX, -f32::MAX]));
+        let gamma = unwrap_ok(Tensor::from_vec(1, 2, vec![1.0, 1.0]));
+        let beta = unwrap_ok(Tensor::zeros(1, 2));
+
+        let err = unwrap_err(input.layer_norm_affine_with_backend(
+            &gamma,
+            &beta,
+            1.0e-5,
+            LayerNormBackend::Cpu,
+        ));
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "layer_norm_sumsq",
+                value,
+            } if value.is_infinite()
+        ));
+    }
+
+    #[test]
+    fn tensor_cat_rows_preserves_empty_batches() {
+        let empty = unwrap_ok(Tensor::from_vec(0, 3, Vec::new()));
+        let rows = unwrap_ok(Tensor::from_vec(2, 3, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]));
+        let combined = unwrap_ok(Tensor::cat_rows(&[empty.clone(), rows.clone()]));
+        assert_eq!(combined.shape(), (2, 3));
+        assert_eq!(combined.data(), rows.data());
+
+        let all_empty = unwrap_ok(Tensor::cat_rows(&[empty.clone(), empty]));
+        assert_eq!(all_empty.shape(), (0, 3));
+        assert!(all_empty.data().is_empty());
+    }
+
+    #[test]
     fn matmul_prepacked_matches_standard() {
         let lhs = unwrap_ok(Tensor::from_vec(
             4,
@@ -7071,6 +13594,616 @@ mod tests {
         let standard = unwrap_ok(lhs.matmul(&rhs));
         let prepacked = unwrap_ok(lhs.matmul_prepacked(&packed));
         assert_eq!(standard, prepacked);
+    }
+
+    #[test]
+    fn matmul_into_rejects_overflowing_output_without_mutating_destination() {
+        let lhs = unwrap_ok(Tensor::from_vec(1, 1, vec![f32::MAX]));
+        let rhs = unwrap_ok(Tensor::from_vec(1, 1, vec![2.0]));
+        let mut dst = unwrap_ok(Tensor::from_vec(1, 1, vec![7.0]));
+        let before = dst.clone();
+
+        let err = lhs
+            .matmul_into_with_backend(&rhs, &mut dst, MatmulBackend::CpuNaive)
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "matmul_output",
+                value,
+            } if value.is_infinite()
+        ));
+        assert_eq!(dst, before);
+    }
+
+    #[test]
+    fn matmul_prepacked_into_rejects_overflowing_output_without_mutating_destination() {
+        let lhs = unwrap_ok(Tensor::from_vec(1, 1, vec![f32::MAX]));
+        let rhs = unwrap_ok(Tensor::from_vec(1, 1, vec![2.0]));
+        let packed = unwrap_ok(PackedB::from_tensor(&rhs, Tile::col_major()));
+        let mut dst = unwrap_ok(Tensor::from_vec(1, 1, vec![7.0]));
+        let before = dst.clone();
+
+        let err = lhs
+            .matmul_prepacked_into_with_backend(&packed, &mut dst, MatmulBackend::CpuNaive)
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "matmul_prepacked_output",
+                value,
+            } if value.is_infinite()
+        ));
+        assert_eq!(dst, before);
+    }
+
+    #[test]
+    fn matmul_scaled_matches_standard_pipeline() {
+        let lhs = unwrap_ok(Tensor::from_vec(
+            4,
+            3,
+            vec![
+                1.0, -0.5, 2.0, 0.25, 1.5, -1.25, 0.75, 0.5, -0.75, 1.0, -1.5, 0.33,
+            ],
+        ));
+        let rhs = unwrap_ok(Tensor::from_vec(
+            3,
+            5,
+            vec![
+                0.5, -1.0, 0.25, 1.5, -0.75, 1.0, 0.5, -0.5, 0.75, -1.25, 0.66, 0.8, -0.2, 1.2,
+                -0.4,
+            ],
+        ));
+        let standard = unwrap_ok(unwrap_ok(lhs.matmul(&rhs)).scale(0.25));
+        let scaled = unwrap_ok(lhs.matmul_scaled_with_backend(&rhs, 0.25, MatmulBackend::CpuNaive));
+        assert_eq!(standard, scaled);
+    }
+
+    #[test]
+    fn matmul_lhs_transpose_scaled_matches_standard_pipeline() {
+        let lhs = unwrap_ok(Tensor::from_vec(
+            4,
+            3,
+            vec![
+                1.0, -0.5, 2.0, 0.25, 1.5, -1.25, 0.75, 0.5, -0.75, 1.0, -1.5, 0.33,
+            ],
+        ));
+        let rhs = unwrap_ok(Tensor::from_vec(
+            4,
+            5,
+            vec![
+                0.5, -1.0, 0.25, 1.5, -0.75, 1.0, 0.5, -0.5, 0.75, -1.25, 0.66, 0.8, -0.2, 1.2,
+                -0.4, 0.2, -0.1, 0.9, -0.3, 0.7,
+            ],
+        ));
+        let standard = unwrap_ok(unwrap_ok(lhs.transpose().matmul(&rhs)).scale(0.25));
+        let scaled = unwrap_ok(lhs.matmul_lhs_transpose_scaled_with_backend(
+            &rhs,
+            0.25,
+            MatmulBackend::CpuNaive,
+        ));
+        assert_eq!(standard, scaled);
+    }
+
+    #[test]
+    fn matmul_scaled_rejects_non_finite_scale_on_empty_output() {
+        let lhs = unwrap_ok(Tensor::from_vec(0, 3, Vec::new()));
+        let rhs = unwrap_ok(Tensor::from_vec(3, 2, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]));
+
+        let err = lhs
+            .matmul_scaled_with_backend(&rhs, f32::NAN, MatmulBackend::CpuNaive)
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "matmul_scaled_factor",
+                value,
+            } if value.is_nan()
+        ));
+    }
+
+    #[test]
+    fn matmul_scaled_rejects_overflowing_output() {
+        let lhs = unwrap_ok(Tensor::from_vec(1, 1, vec![f32::MAX]));
+        let rhs = unwrap_ok(Tensor::from_vec(1, 1, vec![2.0]));
+
+        let err = lhs
+            .matmul_scaled_with_backend(&rhs, 1.0, MatmulBackend::CpuNaive)
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "matmul_scaled_output",
+                value,
+            } if value.is_infinite()
+        ));
+    }
+
+    #[test]
+    fn matmul_lhs_transpose_scaled_rejects_non_finite_scale_on_empty_inner() {
+        let lhs = unwrap_ok(Tensor::from_vec(0, 3, Vec::new()));
+        let rhs = unwrap_ok(Tensor::from_vec(0, 2, Vec::new()));
+
+        let err = lhs
+            .matmul_lhs_transpose_scaled_with_backend(&rhs, f32::INFINITY, MatmulBackend::CpuNaive)
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "matmul_lhs_transpose_scaled_factor",
+                value,
+            } if value.is_infinite()
+        ));
+    }
+
+    #[test]
+    fn matmul_lhs_transpose_scaled_rejects_overflowing_output() {
+        let lhs = unwrap_ok(Tensor::from_vec(1, 1, vec![f32::MAX]));
+        let rhs = unwrap_ok(Tensor::from_vec(1, 1, vec![2.0]));
+
+        let err = lhs
+            .matmul_lhs_transpose_scaled_with_backend(&rhs, 1.0, MatmulBackend::CpuNaive)
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "matmul_lhs_transpose_scaled_output",
+                value,
+            } if value.is_infinite()
+        ));
+    }
+
+    #[test]
+    fn matmul_prepacked_bias_matches_standard_pipeline() {
+        let lhs = unwrap_ok(Tensor::from_vec(
+            4,
+            3,
+            vec![
+                1.0, -0.5, 2.0, 0.25, 1.5, -1.25, 0.75, 0.5, -0.75, 1.0, -1.5, 0.33,
+            ],
+        ));
+        let rhs = unwrap_ok(Tensor::from_vec(
+            3,
+            5,
+            vec![
+                0.5, -1.0, 0.25, 1.5, -0.75, 1.0, 0.5, -0.5, 0.75, -1.25, 0.66, 0.8, -0.2, 1.2,
+                -0.4,
+            ],
+        ));
+        let bias = vec![0.1, -0.2, 0.05, 0.3, -0.15];
+        let packed = unwrap_ok(PackedB::from_tensor(&rhs, Tile::col_major()));
+        let mut standard = unwrap_ok(lhs.matmul(&rhs));
+        unwrap_ok(standard.add_row_inplace(&bias));
+        let prepacked = unwrap_ok(lhs.matmul_prepacked_bias(&packed, &bias));
+        assert_eq!(standard, prepacked);
+    }
+
+    #[test]
+    fn matmul_prepacked_bias_rejects_non_finite_bias_on_empty_output() {
+        let lhs = unwrap_ok(Tensor::from_vec(0, 1, Vec::new()));
+        let rhs = unwrap_ok(Tensor::from_vec(1, 1, vec![1.0]));
+        let packed = unwrap_ok(PackedB::from_tensor(&rhs, Tile::col_major()));
+
+        let err = lhs
+            .matmul_prepacked_bias_with_backend(&packed, &[f32::NAN], MatmulBackend::CpuNaive)
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "matmul_prepacked_bias_bias",
+                value,
+            } if value.is_nan()
+        ));
+    }
+
+    #[test]
+    fn matmul_prepacked_bias_rejects_overflowing_output() {
+        let lhs = unwrap_ok(Tensor::from_vec(1, 1, vec![f32::MAX]));
+        let rhs = unwrap_ok(Tensor::from_vec(1, 1, vec![2.0]));
+        let packed = unwrap_ok(PackedB::from_tensor(&rhs, Tile::col_major()));
+
+        let err = lhs
+            .matmul_prepacked_bias_with_backend(&packed, &[0.0], MatmulBackend::CpuNaive)
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "matmul_prepacked_bias_output",
+                value,
+            } if value.is_infinite()
+        ));
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn matmul_prepacked_forced_wgpu_matches_cpu_reference_on_edge_tiles() {
+        let lhs = unwrap_ok(Tensor::from_vec(
+            12,
+            8,
+            (0..96)
+                .map(|idx| ((idx as f32 * 0.137).sin() * 0.7) + ((idx % 5) as f32 * 0.01))
+                .collect(),
+        ));
+        let rhs = unwrap_ok(Tensor::from_vec(
+            8,
+            6,
+            (0..48)
+                .map(|idx| ((idx as f32 * 0.173).cos() * 0.5) - ((idx % 7) as f32 * 0.015))
+                .collect(),
+        ));
+        let packed = unwrap_ok(PackedB::from_tensor(&rhs, Tile::col_major()));
+        let cpu = unwrap_ok(lhs.matmul_prepacked_with_backend(&packed, MatmulBackend::CpuNaive));
+        let wgpu = match lhs.matmul_prepacked_with_backend(&packed, MatmulBackend::GpuWgpu) {
+            Ok(value) => value,
+            Err(error) if wgpu_unavailable(&error) => return,
+            Err(error) => panic!("forced WGPU prepacked matmul failed: {error:?}"),
+        };
+
+        assert_tensor_close(&cpu, &wgpu, 1e-4);
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn matmul_scaled_forced_wgpu_matches_cpu_reference_on_edge_tiles() {
+        let lhs = unwrap_ok(Tensor::from_vec(
+            12,
+            8,
+            (0..96)
+                .map(|idx| ((idx as f32 * 0.137).sin() * 0.7) + ((idx % 5) as f32 * 0.01))
+                .collect(),
+        ));
+        let rhs = unwrap_ok(Tensor::from_vec(
+            8,
+            6,
+            (0..48)
+                .map(|idx| ((idx as f32 * 0.173).cos() * 0.5) - ((idx % 7) as f32 * 0.015))
+                .collect(),
+        ));
+        let cpu = unwrap_ok(lhs.matmul_scaled_with_backend(&rhs, 0.125, MatmulBackend::CpuNaive));
+        let wgpu = match lhs.matmul_scaled_with_backend(&rhs, 0.125, MatmulBackend::GpuWgpu) {
+            Ok(value) => value,
+            Err(error) if wgpu_unavailable(&error) => return,
+            Err(error) => panic!("forced WGPU scaled matmul failed: {error:?}"),
+        };
+
+        assert_tensor_close(&cpu, &wgpu, 1e-4);
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn matmul_lhs_transpose_scaled_forced_wgpu_matches_cpu_reference_on_edge_tiles() {
+        let lhs = unwrap_ok(Tensor::from_vec(
+            12,
+            8,
+            (0..96)
+                .map(|idx| ((idx as f32 * 0.137).sin() * 0.7) + ((idx % 5) as f32 * 0.01))
+                .collect(),
+        ));
+        let rhs = unwrap_ok(Tensor::from_vec(
+            12,
+            6,
+            (0..72)
+                .map(|idx| ((idx as f32 * 0.173).cos() * 0.5) - ((idx % 7) as f32 * 0.015))
+                .collect(),
+        ));
+        let cpu = unwrap_ok(lhs.matmul_lhs_transpose_scaled_with_backend(
+            &rhs,
+            0.125,
+            MatmulBackend::CpuNaive,
+        ));
+        let wgpu =
+            match lhs.matmul_lhs_transpose_scaled_with_backend(&rhs, 0.125, MatmulBackend::GpuWgpu)
+            {
+                Ok(value) => value,
+                Err(error) if wgpu_unavailable(&error) => return,
+                Err(error) => panic!("forced WGPU lhs-transpose scaled matmul failed: {error:?}"),
+            };
+
+        assert_tensor_close(&cpu, &wgpu, 1e-4);
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn matmul_prepacked_bias_forced_wgpu_matches_cpu_reference_on_edge_tiles() {
+        let lhs = unwrap_ok(Tensor::from_vec(
+            12,
+            8,
+            (0..96)
+                .map(|idx| ((idx as f32 * 0.137).sin() * 0.7) + ((idx % 5) as f32 * 0.01))
+                .collect(),
+        ));
+        let rhs = unwrap_ok(Tensor::from_vec(
+            8,
+            6,
+            (0..48)
+                .map(|idx| ((idx as f32 * 0.173).cos() * 0.5) - ((idx % 7) as f32 * 0.015))
+                .collect(),
+        ));
+        let bias: Vec<f32> = (0..6).map(|idx| idx as f32 * 0.021 - 0.06).collect();
+        let packed = unwrap_ok(PackedB::from_tensor(&rhs, Tile::col_major()));
+        let cpu = unwrap_ok(lhs.matmul_prepacked_bias_with_backend(
+            &packed,
+            &bias,
+            MatmulBackend::CpuNaive,
+        ));
+        let wgpu =
+            match lhs.matmul_prepacked_bias_with_backend(&packed, &bias, MatmulBackend::GpuWgpu) {
+                Ok(value) => value,
+                Err(error) if wgpu_unavailable(&error) => return,
+                Err(error) => panic!("forced WGPU prepacked bias matmul failed: {error:?}"),
+            };
+
+        assert_tensor_close(&cpu, &wgpu, 1e-4);
+    }
+
+    #[test]
+    fn wgpu_runtime_fallback_meta_reports_route_reason_and_message() {
+        let data = wgpu_runtime_fallback_meta(
+            "naive",
+            "runtime_unavailable",
+            Some("no suitable WGPU adapter found"),
+        );
+
+        assert_eq!(data["from"], "wgpu");
+        assert_eq!(data["to"], "naive");
+        assert_eq!(data["reason"], "runtime_unavailable");
+        assert_eq!(data["message"], "no suitable WGPU adapter found");
+    }
+
+    #[test]
+    fn matmul_observer_meta_reports_selected_backend() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let lhs = unwrap_ok(Tensor::from_vec(
+            4,
+            3,
+            vec![
+                1.0, -0.5, 2.0, 0.25, 1.5, -1.25, 0.75, 0.5, -0.75, 1.0, -1.5, 0.33,
+            ],
+        ));
+        let rhs = unwrap_ok(Tensor::from_vec(
+            3,
+            5,
+            vec![
+                0.5, -1.0, 0.25, 1.5, -0.75, 1.0, 0.5, -0.5, 0.75, -1.25, 0.66, 0.8, -0.2, 1.2,
+                -0.4,
+            ],
+        ));
+        let packed = unwrap_ok(PackedB::from_tensor(&rhs, Tile::col_major()));
+
+        let _ = unwrap_ok(lhs.matmul(&rhs));
+        let _ = unwrap_ok(lhs.matmul_prepacked(&packed));
+        crate::set_tensor_op_meta_observer(previous);
+
+        let events = events.lock().unwrap();
+        let matmul = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "matmul" && data["rows"] == 4 && data["inner"] == 3 && data["cols"] == 5
+            })
+            .expect("matmul metadata event");
+        assert_eq!(matmul.1["requested_backend"], "auto");
+        assert!(matmul.1["backend"].as_str().is_some());
+        assert_eq!(matmul.1["rows"], 4);
+        assert_eq!(matmul.1["inner"], 3);
+        assert_eq!(matmul.1["cols"], 5);
+
+        let prepacked = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "matmul_prepacked"
+                    && data["rows"] == 4
+                    && data["inner"] == 3
+                    && data["cols"] == 5
+            })
+            .expect("prepacked matmul metadata event");
+        assert_eq!(prepacked.1["requested_backend"], "auto");
+        assert!(prepacked.1["backend"].as_str().is_some());
+        assert_eq!(prepacked.1["rhs_layout"], "packed");
+        assert_eq!(prepacked.1["packed_layout"], "col_major");
+    }
+
+    #[test]
+    fn softmax_observer_meta_reports_cpu_backend() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let logits = unwrap_ok(Tensor::from_vec(
+            2,
+            3,
+            vec![1.0, -0.5, 0.25, 0.0, 2.0, -1.0],
+        ));
+        let _ = unwrap_ok(logits.row_softmax_with_backend(SoftmaxBackend::Cpu));
+        crate::set_tensor_op_meta_observer(previous);
+
+        let events = events.lock().unwrap();
+        let softmax = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "row_softmax"
+                    && data["rows"] == 2
+                    && data["cols"] == 3
+                    && data["backend"] == "cpu"
+            })
+            .expect("row_softmax metadata event");
+        assert_eq!(softmax.1["requested_backend"], "cpu");
+        assert_eq!(softmax.1["layout"], "row_major");
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn forced_wgpu_softmax_reports_cpu_fallback_when_runtime_missing() {
+        if !run_wgpu_runtime_tests() {
+            eprintln!(
+                "skipping runtime WGPU fallback test; set SPIRALTORCH_RUN_WGPU_RUNTIME_TESTS=1"
+            );
+            return;
+        }
+        if wgpu_dense::is_available() {
+            return;
+        }
+
+        with_strict_gpu_env(None, || {
+            let _lock = observer_lock();
+            let events = Arc::new(Mutex::new(Vec::new()));
+            let captured = events.clone();
+            let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+                captured
+                    .lock()
+                    .unwrap()
+                    .push((event.op_name, event.data.clone()));
+            })));
+
+            let logits = unwrap_ok(Tensor::from_vec(
+                2,
+                3,
+                vec![1.0, -0.5, 0.25, 0.0, 2.0, -1.0],
+            ));
+            let _ = unwrap_ok(logits.row_softmax_with_backend(SoftmaxBackend::GpuWgpu));
+            let _ = unwrap_ok(logits.row_softmax_hardmax_with_backend(SoftmaxBackend::GpuWgpu));
+            let _ = unwrap_ok(logits.row_hardmax_with_backend(HardmaxBackend::GpuWgpu));
+            crate::set_tensor_op_meta_observer(previous);
+
+            let events = events.lock().unwrap();
+            for op_name in ["row_softmax", "row_softmax_hardmax", "row_hardmax"] {
+                let event = events
+                    .iter()
+                    .find(|(observed, data)| {
+                        *observed == op_name
+                            && data["requested_backend"] == "wgpu"
+                            && data["backend"] == "cpu"
+                    })
+                    .unwrap_or_else(|| panic!("{op_name} WGPU-to-CPU fallback metadata event"));
+                assert_eq!(event.1["rows"], 2);
+                assert_eq!(event.1["cols"], 3);
+                assert_eq!(event.1["fallback"]["from"], "wgpu");
+                assert_eq!(event.1["fallback"]["to"], "cpu");
+                assert_eq!(event.1["fallback"]["reason"], WGPU_RUNTIME_FALLBACK_REASON);
+            }
+        });
+    }
+
+    #[test]
+    fn row_softmax_rejects_non_finite_logits() {
+        let logits = unwrap_ok(Tensor::from_vec(1, 3, vec![0.0, f32::NAN, 1.0]));
+
+        let err = unwrap_err(logits.row_softmax_with_backend(SoftmaxBackend::Cpu));
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "row_softmax_input",
+                value,
+            } if value.is_nan()
+        ));
+    }
+
+    #[test]
+    fn row_softmax_hardmax_rejects_non_finite_logits() {
+        let logits = unwrap_ok(Tensor::from_vec(1, 3, vec![0.0, f32::INFINITY, 1.0]));
+
+        let err = unwrap_err(logits.row_softmax_hardmax_with_backend(SoftmaxBackend::Cpu));
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "row_softmax_hardmax_input",
+                value,
+            } if value.is_infinite()
+        ));
+    }
+
+    #[test]
+    fn row_softmax_hardmax_spiral_rejects_non_finite_logits() {
+        let logits = unwrap_ok(Tensor::from_vec(1, 3, vec![0.0, f32::NEG_INFINITY, 1.0]));
+
+        let err = unwrap_err(logits.row_softmax_hardmax_spiral_with_backend(SoftmaxBackend::Cpu));
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "row_softmax_hardmax_spiral_input",
+                value,
+            } if value.is_infinite()
+        ));
+    }
+
+    #[test]
+    fn row_hardmax_rejects_non_finite_logits() {
+        let logits = unwrap_ok(Tensor::from_vec(1, 3, vec![0.0, f32::NAN, 1.0]));
+
+        let err = unwrap_err(logits.row_hardmax_with_backend(HardmaxBackend::Cpu));
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "row_hardmax_input",
+                value,
+            } if value.is_nan()
+        ));
+    }
+
+    #[test]
+    fn fused_matmul_observer_meta_reports_selected_backend() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let lhs = unwrap_ok(Tensor::from_vec(
+            2,
+            3,
+            vec![0.5, -1.0, 1.5, 0.25, 0.75, -0.5],
+        ));
+        let rhs = unwrap_ok(Tensor::from_vec(
+            3,
+            2,
+            vec![1.0, -0.75, -0.5, 0.33, 0.8, -0.2],
+        ));
+        let bias = vec![0.2, -0.1];
+        let _ = unwrap_ok(lhs.matmul_bias_gelu_with_backend(&rhs, &bias, MatmulBackend::CpuNaive));
+        crate::set_tensor_op_meta_observer(previous);
+
+        let events = events.lock().unwrap();
+        let fused = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "matmul_bias_gelu"
+                    && data["rows"] == 2
+                    && data["inner"] == 3
+                    && data["cols"] == 2
+            })
+            .expect("fused matmul metadata event");
+        assert_eq!(fused.1["backend"], "naive");
+        assert_eq!(fused.1["requested_backend"], "naive");
     }
 
     #[test]
@@ -7475,6 +14608,313 @@ mod tests {
         assert_eq!(reset.near_zero_count(), reset.count());
         assert!(reset.min().abs() <= 1e-6);
         assert!(reset.max().abs() <= 1e-6);
+    }
+
+    #[test]
+    fn gradient_tapes_scale_with_backend_preserve_summaries() {
+        let wave = unwrap_ok(Tensor::from_vec(2, 2, vec![0.5, -0.25, 1.2, -0.9]));
+        let mut hypergrad = unwrap_ok(AmegaHypergrad::new(-1.0, 0.05, 2, 2));
+        unwrap_ok(hypergrad.accumulate_wave(&wave));
+        unwrap_ok(hypergrad.scale_gradient_with_backend(0.5, TensorUtilBackend::Cpu));
+        let hyper_summary = hypergrad.summary();
+        let expected_hyper = GradientSummary::from_slice(hypergrad.gradient());
+        assert_summary_close(hyper_summary, expected_hyper);
+
+        let mut realgrad = unwrap_ok(AmegaRealgrad::new(0.05, 2, 2));
+        unwrap_ok(realgrad.accumulate_wave(&wave));
+        unwrap_ok(realgrad.scale_gradient_with_backend(0.5, TensorUtilBackend::Cpu));
+        for (scaled, original) in realgrad.gradient().iter().zip(wave.data().iter()) {
+            assert!((*scaled - original * 0.5).abs() < 1e-6);
+        }
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn hypergrad_accumulate_wave_can_emit_wgpu_backend_when_forced() {
+        if !wgpu_dense::is_available() {
+            return;
+        }
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let wave = unwrap_ok(Tensor::from_vec(
+            2,
+            3,
+            vec![0.5, -0.25, 0.75, -0.4, 0.2, 0.1],
+        ));
+        let mut tape = unwrap_ok(AmegaHypergrad::new(-1.0, 0.05, 2, 3));
+        unwrap_ok(tape.accumulate_wave_with_backend(&wave, TensorUtilBackend::GpuWgpu));
+        crate::set_tensor_op_meta_observer(previous);
+
+        let expected = GradientSummary::from_slice(tape.gradient());
+        assert_summary_close(tape.summary(), expected);
+        let events = events.lock().unwrap();
+        let (_, data) = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "hypergrad_accumulate_wave" && data["backend"] == "wgpu_dense"
+            })
+            .expect("wgpu hypergrad accumulate metadata event");
+        assert_eq!(data["requested_backend"], "wgpu");
+        assert_eq!(data["kernel"], "hypergrad.wgpu_accumulate_wave");
+        assert_eq!(data["gradient_finite_values"], 6);
+    }
+
+    #[test]
+    fn gradient_tapes_ignore_overflow_learning_rate_scale() {
+        let mut hypergrad = unwrap_ok(AmegaHypergrad::new(-1.0, f32::MAX, 1, 1));
+        hypergrad.scale_learning_rate(2.0);
+        assert_eq!(hypergrad.learning_rate(), f32::MAX);
+
+        let mut realgrad = unwrap_ok(AmegaRealgrad::new(f32::MAX, 1, 1));
+        realgrad.scale_learning_rate(2.0);
+        assert_eq!(realgrad.learning_rate(), f32::MAX);
+    }
+
+    #[test]
+    fn hypergrad_rejects_non_finite_constructor_scalars() {
+        let err = match AmegaHypergrad::new(-1.0, f32::INFINITY, 1, 1) {
+            Ok(_) => panic!("non-finite hypergrad learning rate should be rejected"),
+            Err(err) => err,
+        };
+        assert!(matches!(
+            err,
+            TensorError::NonPositiveLearningRate { rate } if rate.is_infinite()
+        ));
+
+        let err = match AmegaHypergrad::new(f32::NAN, 0.1, 1, 1) {
+            Ok(_) => panic!("non-finite hypergrad curvature should be rejected"),
+            Err(err) => err,
+        };
+        assert!(matches!(
+            err,
+            TensorError::NonHyperbolicCurvature { curvature } if curvature.is_nan()
+        ));
+    }
+
+    #[test]
+    fn hypergrad_rejects_overflowing_apply_without_mutating_state() {
+        let mut hypergrad = unwrap_ok(AmegaHypergrad::new(-1.0, f32::MAX, 1, 1));
+        hypergrad.gradient_mut()[0] = 2.0;
+        let gradient_before = hypergrad.gradient().to_vec();
+        let mut weights = unwrap_ok(Tensor::zeros(1, 1));
+        let weights_before = weights.clone();
+
+        let err = hypergrad
+            .apply_with_backend(&mut weights, TensorUtilBackend::Cpu)
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "hypergrad_delta",
+                value,
+            } if value.is_infinite()
+        ));
+        assert_eq!(weights, weights_before);
+        assert_eq!(hypergrad.gradient(), gradient_before.as_slice());
+    }
+
+    #[test]
+    fn hypergrad_rejects_overflowing_gradient_scale_without_mutating_state() {
+        let mut hypergrad = unwrap_ok(AmegaHypergrad::new(-1.0, 0.1, 1, 1));
+        hypergrad.gradient_mut()[0] = 2.0;
+        let gradient_before = hypergrad.gradient().to_vec();
+
+        let err = hypergrad
+            .scale_gradient_with_backend(f32::MAX, TensorUtilBackend::Cpu)
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "hypergrad_scaled_gradient",
+                value,
+            } if value.is_infinite()
+        ));
+        assert_eq!(hypergrad.gradient(), gradient_before.as_slice());
+    }
+
+    #[test]
+    fn hypergrad_rejects_overflowing_accumulate_pair_without_mutating_state() {
+        let mut hypergrad = unwrap_ok(AmegaHypergrad::new(-1.0, 0.1, 1, 1));
+        hypergrad.gradient_mut()[0] = f32::MAX;
+        let gradient_before = hypergrad.gradient().to_vec();
+        let prediction = unwrap_ok(Tensor::from_vec(1, 1, vec![f32::MAX]));
+        let target = unwrap_ok(Tensor::zeros(1, 1));
+
+        let err = hypergrad.accumulate_pair(&prediction, &target).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "hypergrad_accumulate_pair",
+                value,
+            } if value.is_infinite()
+        ));
+        assert_eq!(hypergrad.gradient(), gradient_before.as_slice());
+    }
+
+    #[test]
+    fn realgrad_rejects_overflowing_apply_without_mutating_state() {
+        let mut realgrad = unwrap_ok(AmegaRealgrad::new(f32::MAX, 1, 1));
+        let wave = unwrap_ok(Tensor::from_vec(1, 1, vec![2.0]));
+        unwrap_ok(realgrad.accumulate_wave(&wave));
+        let mut weights = unwrap_ok(Tensor::zeros(1, 1));
+        let weights_before = weights.clone();
+        let gradient_before = realgrad.gradient().to_vec();
+
+        let err = realgrad
+            .apply_with_backend(&mut weights, TensorUtilBackend::Cpu)
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "realgrad_delta",
+                value,
+            } if value.is_infinite()
+        ));
+        assert_eq!(weights, weights_before);
+        assert_eq!(realgrad.gradient(), gradient_before.as_slice());
+    }
+
+    #[test]
+    fn realgrad_rejects_overflowing_gradient_scale_without_mutating_state() {
+        let mut realgrad = unwrap_ok(AmegaRealgrad::new(0.1, 1, 1));
+        let wave = unwrap_ok(Tensor::from_vec(1, 1, vec![2.0]));
+        unwrap_ok(realgrad.accumulate_wave(&wave));
+        let gradient_before = realgrad.gradient().to_vec();
+
+        let err = realgrad
+            .scale_gradient_with_backend(f32::MAX, TensorUtilBackend::Cpu)
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "realgrad_scaled_gradient",
+                value,
+            } if value.is_infinite()
+        ));
+        assert_eq!(realgrad.gradient(), gradient_before.as_slice());
+    }
+
+    #[test]
+    fn realgrad_rejects_overflowing_next_weight_without_mutating_state() {
+        let mut realgrad = unwrap_ok(AmegaRealgrad::new(f32::MAX, 1, 1));
+        let wave = unwrap_ok(Tensor::from_vec(1, 1, vec![-0.5]));
+        unwrap_ok(realgrad.accumulate_wave(&wave));
+        let mut weights = unwrap_ok(Tensor::from_vec(1, 1, vec![f32::MAX]));
+        let weights_before = weights.clone();
+        let gradient_before = realgrad.gradient().to_vec();
+
+        let err = realgrad
+            .apply_with_backend(&mut weights, TensorUtilBackend::Cpu)
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "realgrad_update",
+                value,
+            } if value.is_infinite()
+        ));
+        assert_eq!(weights, weights_before);
+        assert_eq!(realgrad.gradient(), gradient_before.as_slice());
+    }
+
+    #[test]
+    fn gradient_tapes_apply_with_backend_clear_accumulators() {
+        let wave = unwrap_ok(Tensor::from_vec(1, 3, vec![0.5, -0.25, 0.75]));
+
+        let mut hypergrad = unwrap_ok(AmegaHypergrad::new(-1.0, 0.05, 1, 3));
+        unwrap_ok(hypergrad.accumulate_wave(&wave));
+        let mut hyper_weights = unwrap_ok(Tensor::zeros(1, 3));
+        unwrap_ok(hypergrad.apply_with_backend(&mut hyper_weights, TensorUtilBackend::Cpu));
+        assert!(hyper_weights.squared_l2_norm() > 0.0);
+        assert!(hypergrad.gradient().iter().all(|value| value.abs() <= 1e-6));
+
+        let mut realgrad = unwrap_ok(AmegaRealgrad::new(0.1, 1, 3));
+        unwrap_ok(realgrad.accumulate_wave(&wave));
+        let mut real_weights = unwrap_ok(Tensor::zeros(1, 3));
+        unwrap_ok(realgrad.apply_with_backend(&mut real_weights, TensorUtilBackend::Cpu));
+        for (weight, grad) in real_weights.data().iter().zip(wave.data().iter()) {
+            assert!((*weight + grad * 0.1).abs() < 1e-6);
+        }
+        assert!(realgrad.gradient().iter().all(|value| value.abs() <= 1e-6));
+    }
+
+    #[test]
+    fn gradient_tapes_emit_cpu_metadata_for_accumulate_and_update() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let wave = unwrap_ok(Tensor::from_vec(1, 3, vec![0.5, -0.25, 0.75]));
+        let prediction = unwrap_ok(Tensor::from_vec(1, 3, vec![0.6, -0.1, 0.4]));
+        let target = unwrap_ok(Tensor::from_vec(1, 3, vec![0.1, 0.2, -0.2]));
+
+        let mut hypergrad = unwrap_ok(AmegaHypergrad::new(-1.0, 0.05, 1, 3));
+        unwrap_ok(hypergrad.accumulate_wave(&wave));
+        unwrap_ok(hypergrad.accumulate_pair(&prediction, &target));
+        let mut weights = unwrap_ok(Tensor::zeros(1, 3));
+        unwrap_ok(hypergrad.apply_with_backend(&mut weights, TensorUtilBackend::Cpu));
+
+        let mut realgrad = unwrap_ok(AmegaRealgrad::new(0.1, 1, 3));
+        unwrap_ok(realgrad.accumulate_wave(&wave));
+        unwrap_ok(realgrad.accumulate_pair(&prediction, &target));
+
+        crate::set_tensor_op_meta_observer(previous);
+
+        let events = events.lock().unwrap();
+        let find = |op_name: &'static str| {
+            events
+                .iter()
+                .find(|(observed, _)| *observed == op_name)
+                .unwrap_or_else(|| panic!("{op_name} metadata event"))
+        };
+
+        let (_, hyper_wave) = find("hypergrad_accumulate_wave");
+        assert_eq!(hyper_wave["backend"], "cpu");
+        assert_eq!(hyper_wave["kind"], "gradient_tape_accumulate");
+        assert_eq!(hyper_wave["curvature"], -1.0);
+        assert_eq!(hyper_wave["gradient_finite_values"], 3);
+        assert!(hyper_wave["gradient_l2"].as_f64().unwrap_or(0.0) > 0.0);
+
+        let (_, hyper_pair) = find("hypergrad_accumulate_pair");
+        assert_eq!(hyper_pair["backend"], "cpu");
+        assert_eq!(hyper_pair["rhs_cols"], 3);
+        assert_eq!(hyper_pair["target_non_finite_values"], 0);
+
+        let (_, hyper_update) = find("hypergrad_apply_update");
+        assert_eq!(hyper_update["backend"], "cpu");
+        assert_eq!(hyper_update["kind"], "gradient_tape_update");
+        assert_eq!(hyper_update["projection_requested_backend"], "cpu");
+        assert_eq!(hyper_update["gradient_finite_values"], 3);
+
+        let (_, real_wave) = find("realgrad_accumulate_wave");
+        assert_eq!(real_wave["backend"], "cpu");
+        assert_eq!(real_wave["kind"], "gradient_tape_accumulate");
+        assert_eq!(real_wave["gradient_finite_values"], 3);
+
+        let (_, real_pair) = find("realgrad_accumulate_pair");
+        assert_eq!(real_pair["backend"], "cpu");
+        assert_eq!(real_pair["prediction_non_finite_values"], 0);
+        assert_eq!(real_pair["target_non_finite_values"], 0);
     }
 
     #[test]

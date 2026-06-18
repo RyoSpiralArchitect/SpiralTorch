@@ -3,6 +3,7 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+use crate::execution::current_tensor_util_backend_for_values;
 use crate::plan::RankPlanner;
 use crate::{PureResult, Tensor};
 use st_core::backend::unison_heuristics::Choice;
@@ -532,17 +533,24 @@ impl GradientBands {
         Tensor::from_vec(rows * 3, cols, data)
     }
 
-    /// Applies per-band scaling factors in-place.
-    pub fn scale_inplace(&mut self, above: f32, here: f32, beneath: f32) {
-        for value in self.above.data_mut() {
-            *value *= above;
-        }
-        for value in self.here.data_mut() {
-            *value *= here;
-        }
-        for value in self.beneath.data_mut() {
-            *value *= beneath;
-        }
+    /// Applies per-band scaling factors through the tensor utility backend.
+    pub fn scale_inplace(&mut self, above: f32, here: f32, beneath: f32) -> PureResult<()> {
+        let above_scaled = self.above.scale_with_backend(
+            above,
+            current_tensor_util_backend_for_values(self.above.data().len()),
+        )?;
+        let here_scaled = self.here.scale_with_backend(
+            here,
+            current_tensor_util_backend_for_values(self.here.data().len()),
+        )?;
+        let beneath_scaled = self.beneath.scale_with_backend(
+            beneath,
+            current_tensor_util_backend_for_values(self.beneath.data().len()),
+        )?;
+        self.above = above_scaled;
+        self.here = here_scaled;
+        self.beneath = beneath_scaled;
+        Ok(())
     }
 }
 
@@ -656,6 +664,34 @@ mod tests {
         assert!((energy.beneath - beneath).abs() < 1e-6);
         assert!(energy.spectral.energy > 0.0);
         assert!((0.0..=1.0).contains(&energy.spectral.sheet_confidence));
+    }
+
+    #[test]
+    fn gradient_bands_scale_inplace_is_fallible_and_commit_safe() {
+        let above = Tensor::from_vec(1, 2, vec![1.0, -2.0]).unwrap();
+        let here = Tensor::from_vec(1, 2, vec![f32::MAX, 0.5]).unwrap();
+        let beneath = Tensor::from_vec(1, 2, vec![3.0, -4.0]).unwrap();
+        let mut bands =
+            GradientBands::from_components(above.clone(), here.clone(), beneath.clone()).unwrap();
+
+        let err = bands
+            .scale_inplace(2.0, 2.0, 0.5)
+            .expect_err("overflowed band scaling should fail");
+        match err {
+            TensorError::NonFiniteValue { label, value } => {
+                assert_eq!(label, "scale_output");
+                assert!(value.is_infinite());
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+        assert_eq!(bands.above().data(), above.data());
+        assert_eq!(bands.here().data(), here.data());
+        assert_eq!(bands.beneath().data(), beneath.data());
+
+        bands.scale_inplace(2.0, 0.25, 0.5).unwrap();
+        assert_eq!(bands.above().data(), &[2.0, -4.0]);
+        assert_eq!(bands.here().data(), &[f32::MAX * 0.25, 0.125]);
+        assert_eq!(bands.beneath().data(), &[1.5, -2.0]);
     }
 
     #[cfg(feature = "psi")]

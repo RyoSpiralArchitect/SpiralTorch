@@ -6,7 +6,7 @@
 use crate::module::Module;
 use crate::PureResult;
 use st_core::ops::zspace_round::SpectralFeatureSample;
-use st_tensor::TensorError;
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta, TensorError};
 use std::f32::consts::PI;
 
 /// Trait implemented by adapters that emit local learning-rate multipliers based on
@@ -43,6 +43,23 @@ pub struct SpectralLrAdapter {
     avg_energy: f32,
 }
 
+/// Serializable summary of [`SpectralLrAdapter`] state.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpectralLrAdapterState {
+    pub sheet_hint: usize,
+    pub smoothing: f32,
+    pub curvature_target: f32,
+    pub curvature_gain: f32,
+    pub spin_gain: f32,
+    pub energy_gain: f32,
+    pub sheet_gain: f32,
+    pub min_scale: f32,
+    pub max_scale: f32,
+    pub avg_curvature: f32,
+    pub avg_spin: f32,
+    pub avg_energy: f32,
+}
+
 impl Default for SpectralLrAdapter {
     fn default() -> Self {
         Self {
@@ -76,7 +93,9 @@ impl SpectralLrAdapter {
 
     /// Synchronises the curvature target used when computing the curvature term.
     pub fn set_curvature_target(&mut self, curvature: f32) {
-        self.curvature_target = curvature;
+        if curvature.is_finite() {
+            self.curvature_target = curvature;
+        }
     }
 
     /// Clears the running averages maintained by the adapter.
@@ -84,6 +103,24 @@ impl SpectralLrAdapter {
         self.avg_curvature = 0.0;
         self.avg_spin = 0.0;
         self.avg_energy = 0.0;
+    }
+
+    /// Returns a copyable state summary suitable for traces and checkpoints.
+    pub fn state(&self) -> SpectralLrAdapterState {
+        SpectralLrAdapterState {
+            sheet_hint: self.sheet_hint,
+            smoothing: self.smoothing,
+            curvature_target: self.curvature_target,
+            curvature_gain: self.curvature_gain,
+            spin_gain: self.spin_gain,
+            energy_gain: self.energy_gain,
+            sheet_gain: self.sheet_gain,
+            min_scale: self.min_scale,
+            max_scale: self.max_scale,
+            avg_curvature: self.avg_curvature,
+            avg_spin: self.avg_spin,
+            avg_energy: self.avg_energy,
+        }
     }
 
     fn smooth(current: f32, observed: f32, alpha: f32) -> f32 {
@@ -95,28 +132,130 @@ impl SpectralLrAdapter {
     }
 }
 
+fn finite_meta_f32(value: f32) -> serde_json::Value {
+    serde_json::Value::from(if value.is_finite() { value as f64 } else { 0.0 })
+}
+
+fn optimizer_mode_label(mode: OptimizerMode) -> &'static str {
+    match mode {
+        OptimizerMode::Euclidean => "euclidean",
+        OptimizerMode::Realgrad { .. } => "realgrad",
+        OptimizerMode::Hypergrad { .. } => "hypergrad",
+    }
+}
+
+fn checked_scaled_learning_rate(rate: f32, factor: f32) -> PureResult<f32> {
+    let next = rate * factor;
+    if next <= 0.0 || !next.is_finite() {
+        return Err(TensorError::NonPositiveLearningRate { rate: next });
+    }
+    Ok(next)
+}
+
 impl LocalLearningRateAdapter for SpectralLrAdapter {
     fn sheet_hint(&self) -> usize {
         self.sheet_hint
     }
 
     fn scale_factor(&mut self, _parameter: &str, features: &SpectralFeatureSample) -> f32 {
-        self.avg_curvature = Self::smooth(self.avg_curvature, features.curvature, self.smoothing);
-        self.avg_spin = Self::smooth(self.avg_spin, features.spin, self.smoothing);
-        self.avg_energy = Self::smooth(self.avg_energy, features.energy, self.smoothing);
+        let features_finite = features.curvature.is_finite()
+            && features.spin.is_finite()
+            && features.energy.is_finite()
+            && features.sheet_confidence.is_finite();
+        let config_finite = self.smoothing.is_finite()
+            && self.curvature_target.is_finite()
+            && self.curvature_gain.is_finite()
+            && self.spin_gain.is_finite()
+            && self.energy_gain.is_finite()
+            && self.sheet_gain.is_finite()
+            && self.min_scale.is_finite()
+            && self.max_scale.is_finite()
+            && self.min_scale <= self.max_scale
+            && self.min_scale > 0.0;
+        let state_finite = self.avg_curvature.is_finite()
+            && self.avg_spin.is_finite()
+            && self.avg_energy.is_finite();
+        let candidate_avg_curvature = if features_finite && config_finite && state_finite {
+            Self::smooth(self.avg_curvature, features.curvature, self.smoothing)
+        } else {
+            self.avg_curvature
+        };
+        let candidate_avg_spin = if features_finite && config_finite && state_finite {
+            Self::smooth(self.avg_spin, features.spin, self.smoothing)
+        } else {
+            self.avg_spin
+        };
+        let candidate_avg_energy = if features_finite && config_finite && state_finite {
+            Self::smooth(self.avg_energy, features.energy, self.smoothing)
+        } else {
+            self.avg_energy
+        };
 
-        let curvature_delta = features.curvature - self.curvature_target;
+        let curvature_delta = if features_finite && config_finite {
+            features.curvature - self.curvature_target
+        } else {
+            f32::NAN
+        };
         let curvature_term = 1.0 + self.curvature_gain * curvature_delta;
         let spin_term = 1.0 + self.spin_gain * features.spin;
         let expected_conf = 1.0 / self.sheet_hint.max(1) as f32;
         let sheet_term = 1.0 + self.sheet_gain * (features.sheet_confidence - expected_conf);
-        let energy_term = 1.0 + self.energy_gain * (features.energy - self.avg_energy);
-
-        let mut scale = curvature_term * spin_term * sheet_term * energy_term;
-        if !scale.is_finite() || scale <= 0.0 {
-            scale = 1.0;
-        }
-        scale.clamp(self.min_scale, self.max_scale)
+        let energy_term = 1.0 + self.energy_gain * (features.energy - candidate_avg_energy);
+        let raw_scale = curvature_term * spin_term * sheet_term * energy_term;
+        let state_committed = features_finite
+            && config_finite
+            && state_finite
+            && candidate_avg_curvature.is_finite()
+            && candidate_avg_spin.is_finite()
+            && candidate_avg_energy.is_finite()
+            && curvature_term.is_finite()
+            && spin_term.is_finite()
+            && sheet_term.is_finite()
+            && energy_term.is_finite()
+            && raw_scale.is_finite()
+            && raw_scale > 0.0;
+        let clamped = if state_committed {
+            self.avg_curvature = candidate_avg_curvature;
+            self.avg_spin = candidate_avg_spin;
+            self.avg_energy = candidate_avg_energy;
+            raw_scale.clamp(self.min_scale, self.max_scale)
+        } else {
+            1.0
+        };
+        emit_tensor_op("spectral_lr_scale", &[1, 5], &[1, 1]);
+        emit_tensor_op_meta("spectral_lr_scale", || {
+            serde_json::json!({
+                "backend": "optimizer_control_cpu",
+                "requested_backend": "host",
+                "kind": "st_nn_spectral_lr_scale",
+                "parameter": _parameter,
+                "sheet_hint": self.sheet_hint,
+                "sheet_index": features.sheet_index,
+                "sheet_confidence": finite_meta_f32(features.sheet_confidence),
+                "expected_sheet_confidence": finite_meta_f32(expected_conf),
+                "curvature": finite_meta_f32(features.curvature),
+                "curvature_target": finite_meta_f32(self.curvature_target),
+                "curvature_delta": finite_meta_f32(curvature_delta),
+                "spin": finite_meta_f32(features.spin),
+                "energy": finite_meta_f32(features.energy),
+                "avg_curvature": finite_meta_f32(self.avg_curvature),
+                "avg_spin": finite_meta_f32(self.avg_spin),
+                "avg_energy": finite_meta_f32(self.avg_energy),
+                "features_finite": features_finite,
+                "config_finite": config_finite,
+                "state_finite": state_finite,
+                "state_committed": state_committed,
+                "curvature_term": finite_meta_f32(curvature_term),
+                "spin_term": finite_meta_f32(spin_term),
+                "sheet_term": finite_meta_f32(sheet_term),
+                "energy_term": finite_meta_f32(energy_term),
+                "raw_scale": finite_meta_f32(raw_scale),
+                "scale": finite_meta_f32(clamped),
+                "min_scale": finite_meta_f32(self.min_scale),
+                "max_scale": finite_meta_f32(self.max_scale),
+            })
+        });
+        clamped
     }
 
     fn on_global_scale(&mut self, factor: f32) {
@@ -180,6 +319,14 @@ pub struct ZSpaceOptimizer {
     adapter: Option<Box<dyn LocalLearningRateAdapter + Send>>,
 }
 
+/// Copyable optimiser state used by traces, tests, and future checkpoints.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ZSpaceOptimizerState {
+    pub fallback_learning_rate: f32,
+    pub mode: OptimizerMode,
+    pub adapter_installed: bool,
+}
+
 impl core::fmt::Debug for ZSpaceOptimizer {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("ZSpaceOptimizer")
@@ -216,6 +363,15 @@ impl ZSpaceOptimizer {
     /// Returns the fallback learning rate used when no tapes are present.
     pub fn fallback_learning_rate(&self) -> f32 {
         self.fallback_lr
+    }
+
+    /// Returns a copyable snapshot of the optimiser configuration.
+    pub fn state(&self) -> ZSpaceOptimizerState {
+        ZSpaceOptimizerState {
+            fallback_learning_rate: self.fallback_lr,
+            mode: self.mode,
+            adapter_installed: self.adapter.is_some(),
+        }
     }
 
     /// Overrides the fallback learning rate.
@@ -290,7 +446,18 @@ impl ZSpaceOptimizer {
         if factor <= 0.0 || !factor.is_finite() {
             return Err(TensorError::NonPositiveLearningRate { rate: factor });
         }
-        self.fallback_lr *= factor;
+        let before_lr = self.fallback_lr;
+        let before_mode = self.mode;
+        let adapter_installed = self.adapter.is_some();
+        let next_fallback_lr = checked_scaled_learning_rate(self.fallback_lr, factor)?;
+        let next_mode_lr = match self.mode {
+            OptimizerMode::Euclidean => None,
+            OptimizerMode::Realgrad { learning_rate }
+            | OptimizerMode::Hypergrad { learning_rate, .. } => {
+                Some(checked_scaled_learning_rate(learning_rate, factor)?)
+            }
+        };
+        self.fallback_lr = next_fallback_lr;
         module.visit_parameters_mut(&mut |param| {
             param.scale_learning_rate(factor);
             Ok(())
@@ -301,12 +468,26 @@ impl ZSpaceOptimizer {
         match &mut self.mode {
             OptimizerMode::Euclidean => {}
             OptimizerMode::Realgrad { learning_rate } => {
-                *learning_rate *= factor;
+                *learning_rate = next_mode_lr.expect("realgrad learning rate");
             }
             OptimizerMode::Hypergrad { learning_rate, .. } => {
-                *learning_rate *= factor;
+                *learning_rate = next_mode_lr.expect("hypergrad learning rate");
             }
         }
+        emit_tensor_op("zspace_optimizer_lr_scale", &[1, 1], &[1, 1]);
+        emit_tensor_op_meta("zspace_optimizer_lr_scale", || {
+            serde_json::json!({
+                "backend": "optimizer_control_cpu",
+                "requested_backend": "host",
+                "kind": "st_nn_zspace_optimizer_lr_scale",
+                "mode_before": optimizer_mode_label(before_mode),
+                "mode_after": optimizer_mode_label(self.mode),
+                "adapter_installed": adapter_installed,
+                "factor": finite_meta_f32(factor),
+                "fallback_lr_before": finite_meta_f32(before_lr),
+                "fallback_lr_after": finite_meta_f32(self.fallback_lr),
+            })
+        });
         Ok(())
     }
 }
@@ -392,6 +573,11 @@ impl WarmupCosineScheduler {
 impl LrScheduler for WarmupCosineScheduler {
     fn step(&mut self) -> f32 {
         self.step = self.step.saturating_add(1);
+        let phase = if self.warmup_steps > 0 && self.step <= self.warmup_steps {
+            "warmup"
+        } else {
+            "cosine"
+        };
         let lr = if self.warmup_steps > 0 && self.step <= self.warmup_steps {
             let progress = self.step as f32 / self.warmup_steps as f32;
             self.min_lr + (self.base_lr - self.min_lr) * progress
@@ -403,6 +589,21 @@ impl LrScheduler for WarmupCosineScheduler {
             self.min_lr + (self.base_lr - self.min_lr) * cosine
         };
         self.last_lr = lr.max(self.min_lr);
+        emit_tensor_op("warmup_cosine_lr_step", &[1, 4], &[1, 1]);
+        emit_tensor_op_meta("warmup_cosine_lr_step", || {
+            serde_json::json!({
+                "backend": "optimizer_control_cpu",
+                "requested_backend": "host",
+                "kind": "st_nn_warmup_cosine_lr_step",
+                "phase": phase,
+                "step": self.step,
+                "base_lr": finite_meta_f32(self.base_lr),
+                "min_lr": finite_meta_f32(self.min_lr),
+                "last_lr": finite_meta_f32(self.last_lr),
+                "warmup_steps": self.warmup_steps,
+                "total_steps": self.total_steps,
+            })
+        });
         self.last_lr
     }
 
@@ -425,6 +626,14 @@ mod tests {
     use super::*;
     use crate::layers::linear::Linear;
     use crate::Tensor;
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("observer lock")
+    }
 
     #[test]
     fn spectral_adapter_increases_scale_on_high_curvature() {
@@ -439,6 +648,48 @@ mod tests {
         };
         let factor = adapter.scale_factor("weight", &features);
         assert!(factor > 1.0, "expected factor > 1, got {factor}");
+    }
+
+    #[test]
+    fn spectral_adapter_emits_scale_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let mut adapter = SpectralLrAdapter::default().with_sheet_hint(4);
+        adapter.set_curvature_target(0.2);
+        let features = SpectralFeatureSample {
+            sheet_index: 2,
+            sheet_confidence: 0.75,
+            curvature: 0.8,
+            spin: 0.4,
+            energy: 0.5,
+        };
+        let factor = adapter.scale_factor("weight", &features);
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert!(factor > 1.0);
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "spectral_lr_scale"
+                    && data["kind"] == "st_nn_spectral_lr_scale"
+                    && data["parameter"] == "weight"
+            })
+            .expect("spectral lr scale metadata event");
+        assert_eq!(meta.1["backend"], "optimizer_control_cpu");
+        assert_eq!(meta.1["requested_backend"], "host");
+        assert_eq!(meta.1["sheet_hint"], 4);
+        assert_eq!(meta.1["sheet_index"], 2);
+        assert!(meta.1["scale"].as_f64().unwrap() > 1.0);
+        assert!(meta.1["curvature_term"].as_f64().unwrap() > 1.0);
     }
 
     #[test]
@@ -457,6 +708,79 @@ mod tests {
         assert_eq!(adapter.avg_curvature, 0.0);
         assert_eq!(adapter.avg_spin, 0.0);
         assert_eq!(adapter.avg_energy, 0.0);
+    }
+
+    #[test]
+    fn spectral_adapter_rejects_non_finite_features_without_poisoning_state() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let mut adapter = SpectralLrAdapter::default().with_sheet_hint(4);
+        adapter.set_curvature_target(0.25);
+        adapter.set_curvature_target(f32::NAN);
+        let warm_features = SpectralFeatureSample {
+            sheet_index: 1,
+            sheet_confidence: 0.5,
+            curvature: 0.45,
+            spin: 0.2,
+            energy: 0.4,
+        };
+        let _ = adapter.scale_factor("weight", &warm_features);
+        let before = adapter.state();
+        let bad_features = SpectralFeatureSample {
+            sheet_index: 2,
+            sheet_confidence: 0.75,
+            curvature: f32::NAN,
+            spin: 0.4,
+            energy: f32::INFINITY,
+        };
+
+        let factor = adapter.scale_factor("weight", &bad_features);
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert_eq!(factor, 1.0);
+        assert_eq!(adapter.state(), before);
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .rev()
+            .find(|(op_name, data)| {
+                *op_name == "spectral_lr_scale"
+                    && data["kind"] == "st_nn_spectral_lr_scale"
+                    && data["parameter"] == "weight"
+            })
+            .expect("spectral lr scale metadata event");
+        assert_eq!(meta.1["features_finite"], false);
+        assert_eq!(meta.1["state_committed"], false);
+        assert_eq!(meta.1["scale"], 1.0);
+    }
+
+    #[test]
+    fn spectral_adapter_state_tracks_running_features() {
+        let mut adapter = SpectralLrAdapter::default().with_sheet_hint(4);
+        adapter.set_curvature_target(0.25);
+        let features = SpectralFeatureSample {
+            sheet_index: 2,
+            sheet_confidence: 0.75,
+            curvature: 0.5,
+            spin: 0.25,
+            energy: 0.4,
+        };
+        let _ = adapter.scale_factor("weight", &features);
+
+        let state = adapter.state();
+        assert_eq!(state.sheet_hint, 4);
+        assert_eq!(state.curvature_target, 0.25);
+        assert!(state.avg_curvature > 0.0);
+        assert!(state.avg_spin > 0.0);
+        assert!(state.avg_energy > 0.0);
     }
 
     #[test]
@@ -480,6 +804,47 @@ mod tests {
     }
 
     #[test]
+    fn zspace_optimizer_rejects_overflow_lr_scale_without_mutating_state() {
+        let mut layer = Linear::new("opt_overflow", 2, 2).unwrap();
+        let mut optimizer = ZSpaceOptimizer::new(f32::MAX).unwrap();
+        optimizer.set_mode(OptimizerMode::realgrad(f32::MAX).unwrap());
+        let before = optimizer.state();
+
+        let err = optimizer.scale_learning_rate(&mut layer, 2.0).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonPositiveLearningRate { rate } if !rate.is_finite()
+        ));
+        assert_eq!(optimizer.state(), before);
+    }
+
+    #[test]
+    fn zspace_optimizer_state_tracks_mode_and_adapter() {
+        let mut optimizer = ZSpaceOptimizer::new(0.05).unwrap();
+        assert_eq!(
+            optimizer.state(),
+            ZSpaceOptimizerState {
+                fallback_learning_rate: 0.05,
+                mode: OptimizerMode::Euclidean,
+                adapter_installed: false,
+            }
+        );
+
+        optimizer.set_mode(OptimizerMode::realgrad(0.02).unwrap());
+        optimizer.set_adapter(SpectralLrAdapter::default());
+        let state = optimizer.state();
+        assert_eq!(state.fallback_learning_rate, 0.05);
+        assert_eq!(
+            state.mode,
+            OptimizerMode::Realgrad {
+                learning_rate: 0.02
+            }
+        );
+        assert!(state.adapter_installed);
+    }
+
+    #[test]
     fn warmup_scheduler_decays_learning_rate() {
         let mut layer = Linear::new("sched", 2, 2).unwrap();
         let mut optimizer = ZSpaceOptimizer::new(0.1).unwrap();
@@ -498,5 +863,56 @@ mod tests {
         assert!(lr2 >= lr3);
         scheduler.reset();
         assert!((scheduler.current_lr() - 0.01).abs() < 1e-6);
+    }
+
+    #[test]
+    fn scheduler_and_optimizer_emit_lr_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let mut layer = Linear::new("sched_meta", 2, 2).unwrap();
+        let mut optimizer = ZSpaceOptimizer::new(0.1).unwrap();
+        optimizer.set_mode(OptimizerMode::realgrad(0.05).unwrap());
+        optimizer.prepare_module(&mut layer).unwrap();
+        let mut scheduler = WarmupCosineScheduler::new(0.1, 0.01, 2, 6).unwrap();
+        let lr = scheduler
+            .step_optimizer(&mut optimizer, &mut layer)
+            .unwrap();
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert!(lr > 0.01);
+        let events = events.lock().unwrap();
+        let scheduler_meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "warmup_cosine_lr_step"
+                    && data["kind"] == "st_nn_warmup_cosine_lr_step"
+                    && data["step"] == 1
+            })
+            .expect("warmup cosine metadata event");
+        assert_eq!(scheduler_meta.1["phase"], "warmup");
+        assert_eq!(scheduler_meta.1["backend"], "optimizer_control_cpu");
+        assert_eq!(scheduler_meta.1["requested_backend"], "host");
+        assert_eq!(scheduler_meta.1["warmup_steps"], 2);
+
+        let optimizer_meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "zspace_optimizer_lr_scale"
+                    && data["kind"] == "st_nn_zspace_optimizer_lr_scale"
+                    && data["mode_after"] == "realgrad"
+            })
+            .expect("optimizer lr scale metadata event");
+        assert_eq!(optimizer_meta.1["backend"], "optimizer_control_cpu");
+        assert_eq!(optimizer_meta.1["requested_backend"], "host");
+        assert!(optimizer_meta.1["factor"].as_f64().unwrap() > 0.0);
+        assert!(optimizer_meta.1["fallback_lr_after"].as_f64().unwrap() > 0.0);
     }
 }

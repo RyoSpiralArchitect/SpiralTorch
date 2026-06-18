@@ -8,6 +8,7 @@
 //! logic.
 
 use crate::telemetry::hub::SoftlogicEllipticSample;
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 
 /// Coarse spin buckets extracted from [`SoftlogicEllipticSample`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -128,7 +129,7 @@ pub struct ZSpaceRegionDescriptor {
 impl ZSpaceRegionDescriptor {
     /// Builds a descriptor from the provided elliptic sample.
     pub fn from_elliptic(sample: &SoftlogicEllipticSample) -> Self {
-        Self {
+        let descriptor = Self {
             spin_alignment: sample.spin_alignment.clamp(-1.0, 1.0),
             normalized_radius: sample.normalized_radius.clamp(0.0, 1.0),
             curvature_radius: sample.curvature_radius.max(0.0),
@@ -136,7 +137,27 @@ impl ZSpaceRegionDescriptor {
             sheet_index: sample.sheet_index,
             sheet_count: sample.sheet_count,
             topological_sector: sample.topological_sector,
-        }
+        };
+        let key = descriptor.key();
+        emit_tensor_op("zspace_region_descriptor", &[1], &[2]);
+        emit_tensor_op_meta("zspace_region_descriptor", || {
+            serde_json::json!({
+                "backend": "cpu",
+                "requested_backend": "auto",
+                "kind": "st_core_zspace_region_descriptor",
+                "spin_alignment": descriptor.spin_alignment,
+                "normalized_radius": descriptor.normalized_radius,
+                "curvature_radius": descriptor.curvature_radius,
+                "geodesic_radius": descriptor.geodesic_radius,
+                "sheet_index": descriptor.sheet_index,
+                "sheet_count": descriptor.sheet_count,
+                "topological_sector": descriptor.topological_sector,
+                "spin_band": key.spin.label(),
+                "radius_band": key.radius.label(),
+                "region_label": key.label(),
+            })
+        });
+        descriptor
     }
 
     /// Returns the region key derived from the descriptor.
@@ -157,6 +178,11 @@ impl From<&SoftlogicEllipticSample> for ZSpaceRegionDescriptor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
+
+    fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
+        crate::telemetry::tensor_observer_lock()
+    }
 
     fn sample(spin: f32, radius: f32) -> SoftlogicEllipticSample {
         SoftlogicEllipticSample {
@@ -218,5 +244,37 @@ mod tests {
         let key = descriptor.key();
         assert_eq!(key.spin, ZSpaceSpinBand::Leading);
         assert_eq!(key.radius, ZSpaceRadiusBand::Core);
+    }
+
+    #[test]
+    fn descriptor_emits_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let descriptor = ZSpaceRegionDescriptor::from_elliptic(&sample(-0.8, 0.9));
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert_eq!(descriptor.key().spin, ZSpaceSpinBand::Trailing);
+        assert_eq!(descriptor.key().radius, ZSpaceRadiusBand::Edge);
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "zspace_region_descriptor" && data["region_label"].as_str().is_some()
+            })
+            .expect("zspace_region_descriptor metadata event");
+        assert_eq!(meta.1["backend"], "cpu");
+        assert_eq!(meta.1["requested_backend"], "auto");
+        assert_eq!(meta.1["kind"], "st_core_zspace_region_descriptor");
+        assert_eq!(meta.1["spin_band"], "spin.trailing");
+        assert_eq!(meta.1["radius_band"], "radius.edge");
+        assert_eq!(meta.1["region_label"], "spin.trailing.radius.edge");
     }
 }
