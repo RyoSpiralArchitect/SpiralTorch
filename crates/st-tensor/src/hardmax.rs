@@ -63,6 +63,8 @@ pub(crate) enum HardmaxMode {
 /// Result of executing a hardmax fusion plan.
 #[derive(Clone, Debug)]
 pub(crate) struct HardmaxFusionResult {
+    pub(crate) backend: &'static str,
+    pub(crate) fallback_reason: Option<&'static str>,
     pub(crate) softmax: Option<Vec<f32>>,
     pub(crate) hardmax: Vec<f32>,
     pub(crate) dp_reductions: usize,
@@ -152,6 +154,8 @@ impl<'a> HardmaxFusionPlan<'a> {
             parallelized,
         } = result;
         Ok(HardmaxFusionResult {
+            backend: "cpu",
+            fallback_reason: None,
             softmax,
             hardmax,
             dp_reductions,
@@ -167,7 +171,14 @@ impl<'a> HardmaxFusionPlan<'a> {
 
     #[cfg(feature = "wgpu")]
     fn execute_gpu(&self) -> PureResult<HardmaxFusionResult> {
-        if !self.gpu_supported() {
+        if !wgpu_dense::is_available() {
+            return Err(TensorError::BackendFailure {
+                backend: "wgpu",
+                message: "WGPU backend not available".to_string(),
+            });
+        }
+
+        if !self.gpu_shape_supported() {
             return Err(TensorError::BackendFailure {
                 backend: "wgpu",
                 message: format!(
@@ -187,6 +198,8 @@ impl<'a> HardmaxFusionPlan<'a> {
                         })?;
 
                 Ok(HardmaxFusionResult {
+                    backend: "wgpu_dense",
+                    fallback_reason: None,
                     softmax: Some(softmax),
                     hardmax,
                     dp_reductions: self.rows.saturating_mul(self.cols),
@@ -203,6 +216,8 @@ impl<'a> HardmaxFusionPlan<'a> {
                         })?;
 
                 Ok(HardmaxFusionResult {
+                    backend: "wgpu_dense",
+                    fallback_reason: None,
                     softmax: None,
                     hardmax,
                     dp_reductions: self.rows.saturating_mul(self.cols),
@@ -215,10 +230,11 @@ impl<'a> HardmaxFusionPlan<'a> {
 
     #[cfg(feature = "wgpu")]
     fn gpu_supported(&self) -> bool {
-        if !wgpu_dense::is_available() {
-            return false;
-        }
+        wgpu_dense::is_available() && self.gpu_shape_supported()
+    }
 
+    #[cfg(feature = "wgpu")]
+    fn gpu_shape_supported(&self) -> bool {
         match self.mode {
             HardmaxMode::SoftmaxAndMask => {
                 wgpu_dense::supports_row_softmax_hardmax(self.rows, self.cols)

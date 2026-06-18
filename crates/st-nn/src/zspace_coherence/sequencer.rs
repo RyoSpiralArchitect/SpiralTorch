@@ -14,6 +14,7 @@ use super::coherence_engine::{
     CoherenceBackend, CoherenceEngine, DomainConcept, DomainLinguisticProfile,
     LinguisticChannelReport, LinguisticContour,
 };
+use crate::execution::current_tensor_util_backend_for_values;
 use crate::{
     language::{ConceptHint, MaxwellDesireBridge, NarrativeHint, SemanticBridge},
     Module, PureResult, Tensor,
@@ -28,10 +29,71 @@ use st_core::{
     },
     theory::maxwell::MaxwellPsiTelemetryBridge,
 };
-use st_tensor::{OpenCartesianTopos, TensorError};
-use std::cmp::Ordering;
+use st_tensor::{
+    emit_tensor_op, emit_tensor_op_meta, OpenCartesianTopos, TensorError, TensorUtilBackend,
+};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard};
+
+fn tensor_util_backend_label(backend: TensorUtilBackend) -> &'static str {
+    match backend {
+        TensorUtilBackend::Auto => "auto",
+        TensorUtilBackend::Cpu => "cpu",
+        TensorUtilBackend::GpuWgpu => "wgpu",
+    }
+}
+
+fn scale_semantic_distribution(values: Vec<f32>, scale: f32) -> (Vec<f32>, &'static str) {
+    let backend = current_tensor_util_backend_for_values(values.len());
+    let backend_label = tensor_util_backend_label(backend);
+    if values.is_empty() {
+        return (values, backend_label);
+    }
+
+    let fallback_values = values.clone();
+    match Tensor::from_vec(1, values.len(), values)
+        .and_then(|tensor| tensor.scale_with_backend(scale, backend))
+    {
+        Ok(tensor) => (tensor.data().to_vec(), backend_label),
+        Err(_) => {
+            let mut values = fallback_values;
+            for value in &mut values {
+                *value *= scale;
+            }
+            (values, "cpu")
+        }
+    }
+}
+
+fn semantic_window_mean_abs_energy(
+    data: &[f32],
+    rows: usize,
+    cols: usize,
+    start: usize,
+    end: usize,
+) -> (f32, &'static str) {
+    let width = end.saturating_sub(start);
+    let samples = rows.saturating_mul(width);
+    if samples == 0 {
+        return (0.0, "host");
+    }
+
+    let mut values = Vec::with_capacity(samples);
+    for row in 0..rows {
+        let offset = row * cols;
+        values.extend_from_slice(&data[offset + start..offset + end]);
+    }
+    let fallback_sum_abs = values.iter().map(|value| value.abs()).sum::<f32>();
+    let backend = current_tensor_util_backend_for_values(values.len());
+    let backend_label = tensor_util_backend_label(backend);
+    let (sum_abs, backend_label) = match Tensor::from_vec(rows, width, values)
+        .and_then(|tensor| tensor.sum_abs_with_backend(backend))
+    {
+        Ok(sum_abs) => (sum_abs, backend_label),
+        Err(_) => (fallback_sum_abs, "cpu"),
+    };
+    (sum_abs / samples as f32, backend_label)
+}
 
 /// Identifies a stage in the Z-space sequencing pipeline for plugin callbacks.
 #[derive(Debug, Clone)]
@@ -178,6 +240,8 @@ pub struct CoherenceDiagnostics {
     normalized_weights: Vec<f32>,
     normalization: f32,
     fractional_order: f32,
+    repaired_non_finite_weights: usize,
+    repaired_negative_weights: usize,
     dominant_channel: Option<usize>,
     mean_coherence: f32,
     z_bias: f32,
@@ -299,11 +363,56 @@ pub fn is_swap_invariant(arrangement: &[f32]) -> bool {
     }
 
     let mut sorted = filtered.clone();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    sorted.sort_by(|a, b| a.total_cmp(b));
     let first = sorted[0];
     sorted
         .iter()
         .all(|value| (value - first).abs() <= (first.abs() * 1e-4).max(1e-6))
+}
+
+fn finite_nonnegative_score(value: f32) -> f32 {
+    if value.is_finite() {
+        value.max(0.0)
+    } else {
+        0.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct CoherenceRepairStats {
+    non_finite: usize,
+    negative: usize,
+}
+
+impl CoherenceRepairStats {
+    fn observe(&mut self, value: f32) {
+        if !value.is_finite() {
+            self.non_finite = self.non_finite.saturating_add(1);
+        } else if value < 0.0 {
+            self.negative = self.negative.saturating_add(1);
+        }
+    }
+}
+
+fn coherence_repair_stats(values: &[f32]) -> CoherenceRepairStats {
+    let mut stats = CoherenceRepairStats::default();
+    for &value in values {
+        stats.observe(value);
+    }
+    stats
+}
+
+fn sanitize_coherence_weights(values: &[f32]) -> (Vec<f32>, CoherenceRepairStats) {
+    let mut stats = CoherenceRepairStats::default();
+    let sanitized = values
+        .iter()
+        .copied()
+        .map(|value| {
+            stats.observe(value);
+            finite_nonnegative_score(value)
+        })
+        .collect();
+    (sanitized, stats)
 }
 
 impl CoherenceDiagnostics {
@@ -325,6 +434,22 @@ impl CoherenceDiagnostics {
     /// Fractional order used during bidirectional smoothing.
     pub fn fractional_order(&self) -> f32 {
         self.fractional_order
+    }
+
+    /// Number of non-finite coherence weights repaired before aggregation.
+    pub fn repaired_non_finite_weights(&self) -> usize {
+        self.repaired_non_finite_weights
+    }
+
+    /// Number of negative coherence weights clamped before aggregation.
+    pub fn repaired_negative_weights(&self) -> usize {
+        self.repaired_negative_weights
+    }
+
+    /// Total number of coherence weight repairs applied before aggregation.
+    pub fn repaired_weights_total(&self) -> usize {
+        self.repaired_non_finite_weights
+            .saturating_add(self.repaired_negative_weights)
     }
 
     /// Index of the dominant coherence channel, if any.
@@ -528,26 +653,17 @@ impl PreDiscardPolicy {
             ));
         }
 
+        let repair_stats = coherence_repair_stats(original);
         let mut indices: Vec<usize> = (0..weights.len()).collect();
         indices.sort_by(|lhs, rhs| {
-            original[*rhs]
-                .partial_cmp(&original[*lhs])
-                .unwrap_or(Ordering::Equal)
+            finite_nonnegative_score(original[*rhs])
+                .total_cmp(&finite_nonnegative_score(original[*lhs]))
         });
 
-        let mut dominant = original[indices[0]];
-        if !dominant.is_finite() {
-            dominant = 1e-6;
-        }
-        if dominant <= 0.0 {
-            dominant = 1e-6;
-        }
+        let dominant = finite_nonnegative_score(original[indices[0]]).max(1e-6);
         let mut survivors = vec![false; weights.len()];
         for &idx in &indices {
-            let mut weight = original[idx];
-            if !weight.is_finite() {
-                weight = 0.0;
-            }
+            let weight = finite_nonnegative_score(original[idx]);
             let tolerance = (1.0 - self.dominance_ratio).max(0.0);
             let threshold = dominant * tolerance;
             let survives_ratio = weight >= threshold;
@@ -573,20 +689,13 @@ impl PreDiscardPolicy {
         let mut discarded_energy = 0.0f32;
         for (idx, weight) in weights.iter_mut().enumerate() {
             if survivors[idx] {
-                let mut value = original[idx];
-                if !value.is_finite() {
-                    value = 0.0;
-                }
+                let value = finite_nonnegative_score(original[idx]);
                 *weight = value;
                 sum += *weight;
                 survivor_energy += value;
                 survivor_indices.push(idx);
             } else {
-                let value = if original[idx].is_finite() {
-                    original[idx]
-                } else {
-                    0.0
-                };
+                let value = finite_nonnegative_score(original[idx]);
                 discarded_energy += value;
                 *weight = 0.0;
                 discarded_indices.push(idx);
@@ -596,15 +705,16 @@ impl PreDiscardPolicy {
 
         let mut total_energy = survivor_energy + discarded_energy;
         if !total_energy.is_finite() {
-            total_energy = original
-                .iter()
-                .copied()
-                .filter(|value| value.is_finite())
-                .sum();
+            total_energy = original.iter().copied().map(finite_nonnegative_score).sum();
         }
 
         if sum <= f32::EPSILON || !sum.is_finite() {
-            weights.copy_from_slice(original);
+            let fill = if weights.is_empty() {
+                0.0
+            } else {
+                1.0 / weights.len() as f32
+            };
+            weights.fill(fill);
             let dominant_share = if total_energy.is_finite() && total_energy > f32::EPSILON {
                 (dominant / total_energy).clamp(0.0, 1.0)
             } else {
@@ -617,7 +727,8 @@ impl PreDiscardPolicy {
                     original.len(),
                     total_energy,
                     dominant_share,
-                ),
+                )
+                .with_repairs(repair_stats),
                 (0..original.len()).collect(),
                 Vec::new(),
             ));
@@ -644,7 +755,8 @@ impl PreDiscardPolicy {
                 survivor_energy,
                 discarded_energy,
                 dominant_share,
-            ),
+            )
+            .with_repairs(repair_stats),
             survivor_indices,
             discarded_indices,
         ))
@@ -1112,6 +1224,8 @@ pub struct PreDiscardTelemetry {
     survivor_energy: f32,
     discarded_energy: f32,
     dominant_weight: f32,
+    repaired_non_finite: usize,
+    repaired_negative: usize,
 }
 
 impl PreDiscardTelemetry {
@@ -1143,7 +1257,15 @@ impl PreDiscardTelemetry {
             survivor_energy,
             discarded_energy,
             dominant_weight,
+            repaired_non_finite: 0,
+            repaired_negative: 0,
         }
+    }
+
+    fn with_repairs(mut self, repairs: CoherenceRepairStats) -> Self {
+        self.repaired_non_finite = repairs.non_finite;
+        self.repaired_negative = repairs.negative;
+        self
     }
 
     fn fallback(
@@ -1238,6 +1360,22 @@ impl PreDiscardTelemetry {
     /// Returns the dominant channel's share of the total pre-discard energy.
     pub fn dominant_weight(&self) -> f32 {
         self.dominant_weight
+    }
+
+    /// Number of non-finite channel scores repaired during pre-discard.
+    pub fn repaired_non_finite(&self) -> usize {
+        self.repaired_non_finite
+    }
+
+    /// Number of negative channel scores clamped during pre-discard.
+    pub fn repaired_negative(&self) -> usize {
+        self.repaired_negative
+    }
+
+    /// Total number of channel score repairs applied during pre-discard.
+    pub fn repairs_total(&self) -> usize {
+        self.repaired_non_finite
+            .saturating_add(self.repaired_negative)
     }
 }
 
@@ -1492,7 +1630,7 @@ impl ZSpaceCoherenceSequencer {
         coherence_weights: &[f32],
         pre_discard: Option<PreDiscardTelemetry>,
     ) -> PureResult<(Tensor, CoherenceDiagnostics)> {
-        let (aggregated, normalization, fractional_order, channel_width) =
+        let (aggregated, normalization, fractional_order, channel_width, repair_stats) =
             self.compute_geometric_aggregate(x, coherence_weights)?;
 
         let diagnostics = self.build_coherence_diagnostics(
@@ -1501,6 +1639,7 @@ impl ZSpaceCoherenceSequencer {
             channel_width,
             normalization,
             fractional_order,
+            repair_stats,
             pre_discard,
         );
 
@@ -1511,7 +1650,7 @@ impl ZSpaceCoherenceSequencer {
         &self,
         x: &Tensor,
         coherence_weights: &[f32],
-    ) -> PureResult<(Tensor, f32, f32, usize)> {
+    ) -> PureResult<(Tensor, f32, f32, usize, CoherenceRepairStats)> {
         if coherence_weights.is_empty() {
             return Err(TensorError::EmptyInput("coherence_weights"));
         }
@@ -1525,7 +1664,8 @@ impl ZSpaceCoherenceSequencer {
         let (rows, cols) = x.shape();
         let mut aggregated = Tensor::zeros(rows, cols)?;
         let channel_width = cols.div_ceil(coherence_weights.len());
-        let normalization = coherence_weights.iter().copied().sum::<f32>().max(1e-6);
+        let (sanitized_weights, repair_stats) = sanitize_coherence_weights(coherence_weights);
+        let normalization = sanitized_weights.iter().copied().sum::<f32>().max(1e-6);
         let fractional_order = self.fractional_order();
         let input = x.data();
         {
@@ -1535,7 +1675,7 @@ impl ZSpaceCoherenceSequencer {
                 let row_slice = &input[row_start..row_start + cols];
                 let row_out = &mut output[row_start..row_start + cols];
                 row_out.fill(0.0);
-                for (channel, &weight) in coherence_weights.iter().enumerate() {
+                for (channel, &weight) in sanitized_weights.iter().enumerate() {
                     let start = channel * channel_width;
                     let end = ((channel + 1) * channel_width).min(cols);
                     if start >= end {
@@ -1575,12 +1715,13 @@ impl ZSpaceCoherenceSequencer {
             normalization,
             fractional_order,
             channel_width.max(1),
+            repair_stats,
         ))
     }
 
     /// Performs coherence-weighted geometric aggregation.
     pub fn geometric_aggregate(&self, x: &Tensor, coherence_weights: &[f32]) -> PureResult<Tensor> {
-        let (aggregated, _, _, _) = self.compute_geometric_aggregate(x, coherence_weights)?;
+        let (aggregated, _, _, _, _) = self.compute_geometric_aggregate(x, coherence_weights)?;
         Ok(aggregated)
     }
 
@@ -1591,6 +1732,7 @@ impl ZSpaceCoherenceSequencer {
         channel_width: usize,
         normalization: f32,
         fractional_order: f32,
+        repair_stats: CoherenceRepairStats,
         pre_discard: Option<PreDiscardTelemetry>,
     ) -> CoherenceDiagnostics {
         let channel_weights = coherence_weights.to_vec();
@@ -1616,7 +1758,7 @@ impl ZSpaceCoherenceSequencer {
             .iter()
             .enumerate()
             .filter(|(_, weight)| weight.is_finite())
-            .max_by(|(_, lhs), (_, rhs)| lhs.partial_cmp(rhs).unwrap_or(std::cmp::Ordering::Equal))
+            .max_by(|(_, lhs), (_, rhs)| lhs.total_cmp(rhs))
             .map(|(idx, _)| idx);
 
         let data = aggregated.data();
@@ -1652,6 +1794,8 @@ impl ZSpaceCoherenceSequencer {
             normalized_weights,
             normalization,
             fractional_order,
+            repaired_non_finite_weights: repair_stats.non_finite,
+            repaired_negative_weights: repair_stats.negative,
             dominant_channel,
             mean_coherence,
             z_bias,
@@ -2033,12 +2177,102 @@ impl ZSpaceCoherenceSequencer {
             tokens,
         })?;
 
-        let distribution = if window.is_empty() {
+        let (
+            distribution,
+            backend,
+            requested_backend,
+            semantic_inference_backend,
+            semantic_sparse_scan_backend,
+            semantic_accumulation_backend,
+            distribution_scale_backend,
+            inference_mode,
+            route_blocker,
+            raw_inference_total,
+            inference_contributions,
+            inference_uniform_fallback,
+        ) = if window.is_empty() {
             let concepts = semantics.concept_count().max(1);
-            vec![1.0 / concepts as f32; concepts]
+            (
+                vec![1.0 / concepts as f32; concepts],
+                "semantic_cpu",
+                "auto",
+                "uniform_cpu",
+                "none",
+                "none",
+                "none",
+                "uniform_empty_window",
+                "empty_semantic_window",
+                0.0f32,
+                0usize,
+                true,
+            )
         } else {
-            semantics.infer_from_window(&window, 1e-6)
+            let report = semantics.infer_from_window_report(&window, 1e-6);
+            (
+                report.distribution,
+                report.backend,
+                report.requested_backend,
+                "semantic_bridge_window_distribution",
+                report.semantic_sparse_scan_backend,
+                report.semantic_accumulation_backend,
+                report.distribution_scale_backend,
+                report.inference_mode,
+                report.route_blocker,
+                report.raw_total,
+                report.contributions,
+                report.uniform_fallback,
+            )
         };
+        let distribution_sum = distribution.iter().copied().sum::<f32>();
+        let dominant_probability = distribution
+            .iter()
+            .copied()
+            .fold(0.0f32, |best, value| best.max(value));
+        let entropy = -distribution
+            .iter()
+            .copied()
+            .filter(|prob| *prob > 0.0 && prob.is_finite())
+            .map(|prob| prob * prob.ln())
+            .sum::<f32>();
+        emit_tensor_op(
+            "zspace_semantic_distribution",
+            &[
+                window.len(),
+                semantics.vocab_size(),
+                semantics.concept_count(),
+            ],
+            &[1, distribution.len()],
+        );
+        emit_tensor_op_meta("zspace_semantic_distribution", || {
+            serde_json::json!({
+                "backend": backend,
+                "requested_backend": requested_backend,
+                "kind": "sequencer_semantic_distribution",
+                "semantic_window_backend": "zspace_semantic_window",
+                "semantic_inference_backend": semantic_inference_backend,
+                "semantic_sparse_scan_backend": semantic_sparse_scan_backend,
+                "semantic_accumulation_backend": semantic_accumulation_backend,
+                "distribution_scale_backend": distribution_scale_backend,
+                "inference_mode": inference_mode,
+                "route_blocker": route_blocker,
+                "source": if window.is_empty() { "uniform_fallback" } else { "window_inference" },
+                "window_len": window.len(),
+                "tokens": tokens,
+                "vocab_size": semantics.vocab_size(),
+                "concepts": semantics.concept_count(),
+                "output_cols": distribution.len(),
+                "raw_inference_total": raw_inference_total,
+                "inference_contributions": inference_contributions,
+                "distribution_sum": distribution_sum,
+                "dominant_probability": dominant_probability,
+                "entropy": entropy,
+                "empty_window": window.is_empty(),
+                "uniform_fallback": inference_uniform_fallback,
+                "estimated_window_values": window.len(),
+                "estimated_inference_values": semantics.concept_count().saturating_mul(window.len().saturating_add(1)),
+                "estimated_distribution_values": distribution.len(),
+            })
+        });
 
         self.dispatch_plugins(|| ZSpaceSequencerStage::SemanticDistributionDerived {
             window: &window,
@@ -2055,15 +2289,62 @@ impl ZSpaceCoherenceSequencer {
         tokens: usize,
     ) -> Vec<(usize, f32)> {
         if tokens == 0 || coherence.is_empty() {
+            emit_tensor_op(
+                "zspace_semantic_window",
+                &[
+                    aggregated.shape().0,
+                    aggregated.shape().1,
+                    coherence.len(),
+                    tokens,
+                ],
+                &[0, 2],
+            );
+            emit_tensor_op_meta("zspace_semantic_window", || {
+                serde_json::json!({
+                    "backend": "semantic_control_cpu",
+                    "requested_backend": "host",
+                    "kind": "sequencer_semantic_window",
+                    "rows": aggregated.shape().0,
+                    "cols": aggregated.shape().1,
+                    "coherence_channels": coherence.len(),
+                    "tokens": tokens,
+                    "window_len": 0,
+                    "empty": true,
+                    "reason": if tokens == 0 { "zero_tokens" } else { "empty_coherence" },
+                })
+            });
             return Vec::new();
         }
         let (rows, cols) = aggregated.shape();
         if cols == 0 || rows == 0 {
+            emit_tensor_op(
+                "zspace_semantic_window",
+                &[rows, cols, coherence.len(), tokens],
+                &[0, 2],
+            );
+            emit_tensor_op_meta("zspace_semantic_window", || {
+                serde_json::json!({
+                    "backend": "semantic_control_cpu",
+                    "requested_backend": "host",
+                    "kind": "sequencer_semantic_window",
+                    "rows": rows,
+                    "cols": cols,
+                    "coherence_channels": coherence.len(),
+                    "tokens": tokens,
+                    "window_len": 0,
+                    "empty": true,
+                    "reason": if rows == 0 { "zero_rows" } else { "zero_cols" },
+                })
+            });
             return Vec::new();
         }
         let token_width = cols.div_ceil(tokens);
         let channel_width = cols.div_ceil(coherence.len());
         let mut window = Vec::with_capacity(tokens);
+        let mut raw_weight_sum = 0.0f32;
+        let mut skipped_non_finite = 0usize;
+        let mut skipped_non_positive = 0usize;
+        let mut window_energy_backend = "host";
         let data = aggregated.data();
         for token in 0..tokens {
             let start = token * token_width;
@@ -2074,19 +2355,23 @@ impl ZSpaceCoherenceSequencer {
             if start >= end {
                 continue;
             }
-            let mut energy = 0.0f32;
-            for row in 0..rows {
-                let offset = row * cols;
-                for value in &data[offset + start..offset + end] {
-                    energy += value.abs();
-                }
-            }
+            let (energy, energy_backend) =
+                semantic_window_mean_abs_energy(data, rows, cols, start, end);
+            window_energy_backend = match (window_energy_backend, energy_backend) {
+                ("host", backend) => backend,
+                (current, backend) if current == backend => current,
+                _ => "mixed",
+            };
             let samples = (end - start) * rows;
             if samples == 0 {
                 continue;
             }
-            energy /= samples as f32;
-            if energy <= 0.0 || !energy.is_finite() {
+            if !energy.is_finite() {
+                skipped_non_finite = skipped_non_finite.saturating_add(1);
+                continue;
+            }
+            if energy <= 0.0 {
+                skipped_non_positive = skipped_non_positive.saturating_add(1);
                 continue;
             }
             let center = (start + end - 1) / 2;
@@ -2097,19 +2382,67 @@ impl ZSpaceCoherenceSequencer {
                 .unwrap_or(1.0 / coherence.len() as f32);
             let weight = (energy * coherence_weight).max(0.0);
             if weight > 0.0 {
+                raw_weight_sum += weight;
                 window.push((token, weight));
+            } else {
+                skipped_non_positive = skipped_non_positive.saturating_add(1);
             }
         }
         let sum: f32 = window.iter().map(|(_, weight)| *weight).sum();
+        let mut distribution_scale_backend = "host";
         if sum > 0.0 {
-            for (_, weight) in &mut window {
-                *weight = (*weight / sum).max(1e-6);
+            let weights = window.iter().map(|(_, weight)| *weight).collect::<Vec<_>>();
+            let (scaled, backend) = scale_semantic_distribution(weights, 1.0 / sum);
+            distribution_scale_backend = backend;
+            for ((_, weight), scaled) in window.iter_mut().zip(scaled.into_iter()) {
+                *weight = scaled.max(1e-6);
             }
         }
+        let backend = if sum > 0.0 { "hybrid" } else { "semantic_cpu" };
+        let requested_backend = if sum > 0.0 {
+            distribution_scale_backend
+        } else {
+            "auto"
+        };
+        let normalized_sum = window.iter().map(|(_, weight)| *weight).sum::<f32>();
+        let dominant_weight = window
+            .iter()
+            .map(|(_, weight)| *weight)
+            .fold(0.0f32, |best, value| best.max(value));
+        emit_tensor_op(
+            "zspace_semantic_window",
+            &[rows, cols, coherence.len(), tokens],
+            &[window.len(), 2],
+        );
+        emit_tensor_op_meta("zspace_semantic_window", || {
+            serde_json::json!({
+                "backend": backend,
+                "requested_backend": requested_backend,
+                "kind": "sequencer_semantic_window",
+                "window_energy_backend": window_energy_backend,
+                "window_energy_extraction_backend": "semantic_cpu",
+                "distribution_scale_backend": distribution_scale_backend,
+                "rows": rows,
+                "cols": cols,
+                "values": rows.saturating_mul(cols),
+                "coherence_channels": coherence.len(),
+                "tokens": tokens,
+                "token_width": token_width,
+                "channel_width": channel_width,
+                "window_len": window.len(),
+                "raw_weight_sum": raw_weight_sum,
+                "normalized_sum": normalized_sum,
+                "dominant_weight": dominant_weight,
+                "skipped_non_finite": skipped_non_finite,
+                "skipped_non_positive": skipped_non_positive,
+                "empty": window.is_empty(),
+            })
+        });
         window
     }
 
     fn summarise_maxwell_pulse(&self, aggregated: &Tensor, coherence: &[f32]) -> MaxwellZPulse {
+        let (rows, cols) = aggregated.shape();
         let data = aggregated.data();
         let total = data.len().max(1);
         let total_f64 = total as f64;
@@ -2142,8 +2475,32 @@ impl ZSpaceCoherenceSequencer {
         if !z_bias.is_finite() {
             z_bias = 0.0;
         }
+        emit_tensor_op(
+            "zspace_maxwell_pulse_summary",
+            &[rows, cols, coherence.len()],
+            &[1, 5],
+        );
+        emit_tensor_op_meta("zspace_maxwell_pulse_summary", || {
+            serde_json::json!({
+                "backend": "summary_cpu",
+                "requested_backend": "host",
+                "kind": "sequencer_maxwell_pulse_summary",
+                "rows": rows,
+                "cols": cols,
+                "values": rows.saturating_mul(cols),
+                "coherence_channels": coherence.len(),
+                "mean": mean,
+                "standard_error": standard_error,
+                "z_score": z_score,
+                "band_above": above,
+                "band_here": here,
+                "band_beneath": beneath,
+                "z_bias": z_bias,
+                "curvature": self.curvature,
+            })
+        });
         MaxwellZPulse {
-            blocks: aggregated.shape().0 as u64,
+            blocks: rows as u64,
             mean,
             standard_error,
             z_score,
@@ -2154,21 +2511,78 @@ impl ZSpaceCoherenceSequencer {
 
     fn fuse_distributions(lhs: &[f32], rhs: &[f32]) -> Vec<f32> {
         let len = lhs.len().max(rhs.len()).max(1);
-        let mut fused = vec![0.0f32; len];
-        for (idx, slot) in fused.iter_mut().enumerate() {
-            let a = lhs.get(idx).copied().unwrap_or(1e-6);
-            let b = rhs.get(idx).copied().unwrap_or(1e-6);
-            *slot = a.max(0.0) + b.max(0.0);
-        }
+        let lhs_values = (0..len)
+            .map(|idx| lhs.get(idx).copied().unwrap_or(1e-6).max(0.0))
+            .collect::<Vec<_>>();
+        let rhs_values = (0..len)
+            .map(|idx| rhs.get(idx).copied().unwrap_or(1e-6).max(0.0))
+            .collect::<Vec<_>>();
+        let fallback_fused = lhs_values
+            .iter()
+            .zip(rhs_values.iter())
+            .map(|(a, b)| *a + *b)
+            .collect::<Vec<_>>();
+        let accumulation_backend = current_tensor_util_backend_for_values(len);
+        let accumulation_backend_label = tensor_util_backend_label(accumulation_backend);
+        let (mut fused, fusion_accumulation_backend) = match Tensor::from_vec(1, len, lhs_values)
+            .and_then(|lhs_tensor| {
+                Tensor::from_vec(1, len, rhs_values).and_then(|rhs_tensor| {
+                    lhs_tensor.add_with_backend(&rhs_tensor, accumulation_backend)
+                })
+            }) {
+            Ok(tensor) => (tensor.data().to_vec(), accumulation_backend_label),
+            Err(_) => (fallback_fused, "cpu"),
+        };
         let sum: f32 = fused.iter().sum();
+        let uniform_fallback = sum <= 0.0 || !sum.is_finite();
+        let mut distribution_scale_backend = "host";
         if sum > 0.0 {
-            for value in &mut fused {
-                *value = (*value / sum).max(1e-6);
-            }
+            let (scaled, backend) = scale_semantic_distribution(fused, 1.0 / sum);
+            distribution_scale_backend = backend;
+            fused = scaled.into_iter().map(|value| value.max(1e-6)).collect();
         } else {
             let fill = 1.0 / len as f32;
             fused.fill(fill);
         }
+        let backend = if sum > 0.0 { "hybrid" } else { "semantic_cpu" };
+        let requested_backend = if sum > 0.0 {
+            distribution_scale_backend
+        } else {
+            "auto"
+        };
+        let fused_sum = fused.iter().copied().sum::<f32>();
+        let dominant_probability = fused
+            .iter()
+            .copied()
+            .fold(0.0f32, |best, value| best.max(value));
+        let entropy = -fused
+            .iter()
+            .copied()
+            .filter(|prob| *prob > 0.0 && prob.is_finite())
+            .map(|prob| prob * prob.ln())
+            .sum::<f32>();
+        emit_tensor_op(
+            "zspace_semantic_distribution_fusion",
+            &[lhs.len(), rhs.len()],
+            &[1, fused.len()],
+        );
+        emit_tensor_op_meta("zspace_semantic_distribution_fusion", || {
+            serde_json::json!({
+                "backend": backend,
+                "requested_backend": requested_backend,
+                "kind": "sequencer_semantic_distribution_fusion",
+                "fusion_accumulation_backend": fusion_accumulation_backend,
+                "distribution_scale_backend": distribution_scale_backend,
+                "lhs_len": lhs.len(),
+                "rhs_len": rhs.len(),
+                "output_cols": fused.len(),
+                "raw_sum": sum,
+                "distribution_sum": fused_sum,
+                "dominant_probability": dominant_probability,
+                "entropy": entropy,
+                "uniform_fallback": uniform_fallback,
+            })
+        });
         fused
     }
 
@@ -2293,9 +2707,15 @@ impl Module for ZSpaceCoherenceSequencer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "wgpu")]
+    use crate::execution::{push_backend_policy, BackendPolicy};
     use crate::language::{MaxwellDesireBridge, SemanticBridge, SparseKernel};
+    #[cfg(feature = "wgpu")]
+    use st_core::backend::device_caps::DeviceCaps;
+    #[cfg(feature = "wgpu")]
+    use st_tensor::wgpu_dense;
     use st_tensor::Tensor;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, OnceLock};
 
     fn make_diagnostics(
         coherence: Vec<f32>,
@@ -2309,10 +2729,13 @@ mod tests {
             normalized_weights: normalized,
             normalization: 1.0,
             fractional_order: 1.0,
+            repaired_non_finite_weights: 0,
+            repaired_negative_weights: 0,
             dominant_channel: coherence
                 .iter()
                 .enumerate()
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                .filter(|(_, value)| value.is_finite())
+                .max_by(|(_, a), (_, b)| a.total_cmp(b))
                 .map(|(idx, _)| idx),
             mean_coherence: mean,
             z_bias: 0.0,
@@ -2323,6 +2746,337 @@ mod tests {
             channel_reports: Vec::new(),
             pre_discard: None,
         }
+    }
+
+    fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
+        static OBSERVER_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        OBSERVER_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("observer lock available")
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn restore_tensor_util_wgpu_min_values(previous: Option<String>) {
+        const KEY: &str = "SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES";
+        if let Some(value) = previous {
+            std::env::set_var(KEY, value);
+        } else {
+            std::env::remove_var(KEY);
+        }
+    }
+
+    #[test]
+    fn semantic_window_emits_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let topos = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 256, 8192).unwrap();
+        let seq = ZSpaceCoherenceSequencer::new(6, 2, -1.0, topos).unwrap();
+        let aggregated = Tensor::from_vec(1, 6, vec![0.2, 0.4, 0.0, 0.0, 0.8, 0.6]).unwrap();
+        let window = seq.derive_semantic_window(&aggregated, &[0.25, 0.75], 3);
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert!(!window.is_empty());
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "zspace_semantic_window"
+                    && data["rows"] == 1
+                    && data["cols"] == 6
+                    && data["tokens"] == 3
+            })
+            .expect("zspace_semantic_window metadata event");
+        assert_eq!(meta.1["backend"], "hybrid");
+        assert_eq!(meta.1["requested_backend"], "auto");
+        assert_eq!(meta.1["kind"], "sequencer_semantic_window");
+        assert_eq!(meta.1["window_energy_backend"], "auto");
+        assert_eq!(meta.1["window_energy_extraction_backend"], "semantic_cpu");
+        assert_eq!(meta.1["distribution_scale_backend"], "auto");
+        assert_eq!(meta.1["coherence_channels"], 2);
+        assert_eq!(meta.1["token_width"], 2);
+        assert_eq!(meta.1["channel_width"], 3);
+        assert_eq!(meta.1["window_len"], window.len());
+        assert_eq!(meta.1["empty"], false);
+        assert!(meta.1["raw_weight_sum"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["normalized_sum"].as_f64().unwrap_or(0.0) > 0.0);
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn semantic_window_forced_wgpu_routes_energy_reduction() {
+        if !wgpu_dense::is_available() {
+            return;
+        }
+        let _lock = observer_lock();
+        const KEY: &str = "SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES";
+        let previous_min = std::env::var(KEY).ok();
+        std::env::set_var(KEY, "0");
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
+        let topos = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 256, 8192).unwrap();
+        let seq = ZSpaceCoherenceSequencer::new(6, 2, -1.0, topos).unwrap();
+        let aggregated = Tensor::from_vec(
+            2,
+            6,
+            vec![0.2, 0.4, 0.0, 0.0, 0.8, 0.6, 0.1, 0.3, 0.05, 0.05, 0.7, 0.5],
+        )
+        .unwrap();
+        let window = {
+            let _guard = push_backend_policy(policy);
+            seq.derive_semantic_window(&aggregated, &[0.25, 0.75], 3)
+        };
+        st_tensor::set_tensor_op_meta_observer(previous);
+        restore_tensor_util_wgpu_min_values(previous_min);
+
+        assert!(!window.is_empty());
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "zspace_semantic_window"
+                    && data["rows"] == 2
+                    && data["cols"] == 6
+                    && data["tokens"] == 3
+            })
+            .expect("zspace_semantic_window metadata event");
+        assert_eq!(meta.1["backend"], "hybrid");
+        assert_eq!(meta.1["requested_backend"], "wgpu");
+        assert_eq!(meta.1["window_energy_backend"], "wgpu");
+        assert_eq!(meta.1["window_energy_extraction_backend"], "semantic_cpu");
+        assert_eq!(meta.1["distribution_scale_backend"], "wgpu");
+    }
+
+    #[test]
+    fn empty_semantic_window_emits_control_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let topos = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 256, 8192).unwrap();
+        let seq = ZSpaceCoherenceSequencer::new(6, 2, -1.0, topos).unwrap();
+        let aggregated = Tensor::from_vec(1, 6, vec![0.2, 0.4, 0.0, 0.0, 0.8, 0.6]).unwrap();
+        let window = seq.derive_semantic_window(&aggregated, &[0.25, 0.75], 0);
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert!(window.is_empty());
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "zspace_semantic_window"
+                    && data["rows"] == 1
+                    && data["cols"] == 6
+                    && data["tokens"] == 0
+            })
+            .expect("empty zspace_semantic_window metadata event");
+        assert_eq!(meta.1["backend"], "semantic_control_cpu");
+        assert_eq!(meta.1["requested_backend"], "host");
+        assert_eq!(meta.1["kind"], "sequencer_semantic_window");
+        assert_eq!(meta.1["window_len"], 0);
+        assert_eq!(meta.1["empty"], true);
+        assert_eq!(meta.1["reason"], "zero_tokens");
+    }
+
+    #[test]
+    fn semantic_distribution_emits_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let topos = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 256, 8192).unwrap();
+        let seq = ZSpaceCoherenceSequencer::new(6, 2, -1.0, topos).unwrap();
+        let concept_kernel =
+            SparseKernel::from_dense(vec![vec![0.7, 0.3], vec![0.2, 0.8]], 1e-6).unwrap();
+        let semantics = SemanticBridge::from_dense(
+            vec![vec![0.8, 0.2], vec![0.2, 0.8], vec![0.4, 0.6]],
+            [(0usize, 0usize), (2, 1)],
+            1e-6,
+            concept_kernel,
+        )
+        .unwrap();
+        let aggregated = Tensor::from_vec(1, 6, vec![0.8, 0.6, 0.0, 0.0, 0.2, 0.4]).unwrap();
+        let distribution = seq
+            .derive_semantic_distribution(&aggregated, &[0.7, 0.3], &semantics)
+            .unwrap();
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert_eq!(distribution.len(), semantics.concept_count());
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "zspace_semantic_distribution"
+                    && data["concepts"] == semantics.concept_count()
+            })
+            .expect("zspace_semantic_distribution metadata event");
+        assert_eq!(meta.1["backend"], "hybrid");
+        assert_eq!(meta.1["requested_backend"], "auto");
+        assert_eq!(meta.1["kind"], "sequencer_semantic_distribution");
+        assert_eq!(meta.1["semantic_window_backend"], "zspace_semantic_window");
+        assert_eq!(
+            meta.1["semantic_inference_backend"],
+            "semantic_bridge_window_distribution"
+        );
+        assert_eq!(meta.1["semantic_sparse_scan_backend"], "semantic_cpu");
+        assert_eq!(meta.1["semantic_accumulation_backend"], "auto");
+        assert_eq!(meta.1["distribution_scale_backend"], "auto");
+        assert_eq!(
+            meta.1["inference_mode"],
+            "sparse_window_accumulate_then_scale"
+        );
+        assert_eq!(meta.1["route_blocker"], "sparse_semantic_window_scan");
+        assert_eq!(meta.1["source"], "window_inference");
+        assert_eq!(meta.1["vocab_size"], semantics.vocab_size());
+        assert_eq!(meta.1["output_cols"], distribution.len());
+        assert_eq!(meta.1["empty_window"], false);
+        assert_eq!(meta.1["uniform_fallback"], false);
+        assert!(meta.1["inference_contributions"].as_u64().unwrap_or(0) > 0);
+        assert!(meta.1["window_len"].as_u64().unwrap_or(0) > 0);
+        assert!(meta.1["distribution_sum"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["dominant_probability"].as_f64().unwrap_or(0.0) > 0.0);
+    }
+
+    #[test]
+    fn semantic_distribution_fusion_emits_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let fused = ZSpaceCoherenceSequencer::fuse_distributions(&[0.7, 0.3], &[0.2, 0.8]);
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert_eq!(fused.len(), 2);
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "zspace_semantic_distribution_fusion"
+                    && data["lhs_len"] == 2
+                    && data["rhs_len"] == 2
+            })
+            .expect("zspace_semantic_distribution_fusion metadata event");
+        assert_eq!(meta.1["backend"], "hybrid");
+        assert_eq!(meta.1["requested_backend"], "auto");
+        assert_eq!(meta.1["kind"], "sequencer_semantic_distribution_fusion");
+        assert_eq!(meta.1["fusion_accumulation_backend"], "auto");
+        assert_eq!(meta.1["distribution_scale_backend"], "auto");
+        assert_eq!(meta.1["output_cols"], 2);
+        assert_eq!(meta.1["uniform_fallback"], false);
+        assert!(meta.1["raw_sum"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["distribution_sum"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["dominant_probability"].as_f64().unwrap_or(0.0) > 0.0);
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn semantic_distribution_fusion_forced_wgpu_routes_accumulation() {
+        if !wgpu_dense::is_available() {
+            return;
+        }
+        let _lock = observer_lock();
+        const KEY: &str = "SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES";
+        let previous_min = std::env::var(KEY).ok();
+        std::env::set_var(KEY, "0");
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
+        let fused = {
+            let _guard = push_backend_policy(policy);
+            ZSpaceCoherenceSequencer::fuse_distributions(&[0.7, 0.3], &[0.2, 0.8])
+        };
+        st_tensor::set_tensor_op_meta_observer(previous);
+        restore_tensor_util_wgpu_min_values(previous_min);
+
+        assert_eq!(fused.len(), 2);
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "zspace_semantic_distribution_fusion" && data["lhs_len"] == 2
+            })
+            .expect("zspace_semantic_distribution_fusion metadata event");
+        assert_eq!(meta.1["backend"], "hybrid");
+        assert_eq!(meta.1["requested_backend"], "wgpu");
+        assert_eq!(meta.1["fusion_accumulation_backend"], "wgpu");
+        assert_eq!(meta.1["distribution_scale_backend"], "wgpu");
+    }
+
+    #[test]
+    fn maxwell_pulse_summary_emits_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let topos = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 256, 8192).unwrap();
+        let seq = ZSpaceCoherenceSequencer::new(6, 3, -1.0, topos).unwrap();
+        let aggregated = Tensor::from_vec(2, 3, vec![0.1, 0.2, 0.3, -0.1, 0.4, 0.6]).unwrap();
+        let pulse = seq.summarise_maxwell_pulse(&aggregated, &[0.2, 0.5, 0.3]);
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert_eq!(pulse.blocks, 2);
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "zspace_maxwell_pulse_summary" && data["rows"] == 2 && data["cols"] == 3
+            })
+            .expect("zspace_maxwell_pulse_summary metadata event");
+        assert_eq!(meta.1["backend"], "summary_cpu");
+        assert_eq!(meta.1["requested_backend"], "host");
+        assert_eq!(meta.1["kind"], "sequencer_maxwell_pulse_summary");
+        assert_eq!(meta.1["coherence_channels"], 3);
+        assert!((meta.1["band_above"].as_f64().unwrap_or(0.0) - 0.2).abs() < 1.0e-6);
+        assert!((meta.1["band_here"].as_f64().unwrap_or(0.0) - 0.5).abs() < 1.0e-6);
+        assert!((meta.1["band_beneath"].as_f64().unwrap_or(0.0) - 0.3).abs() < 1.0e-6);
+        assert!(meta.1["standard_error"].as_f64().unwrap_or(0.0) >= 0.0);
     }
 
     #[test]
@@ -2545,6 +3299,56 @@ mod tests {
         assert!((weights[0] - 1.0).abs() < 1e-6);
         assert_eq!(weights[1], 0.0);
         assert_eq!(weights[2], 0.0);
+    }
+
+    #[test]
+    fn pre_discard_sanitizes_non_finite_channel_scores() {
+        let policy = PreDiscardPolicy::new(0.4)
+            .unwrap()
+            .with_energy_floor(1e-3)
+            .unwrap()
+            .with_min_channels(2);
+        let mut weights = vec![f32::NAN, 0.8, f32::INFINITY, -0.5, 0.1];
+        let original = weights.clone();
+
+        let outcome = policy.apply(&mut weights, &original).unwrap();
+        let telemetry = outcome.telemetry();
+
+        assert!(weights
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0));
+        assert!((weights.iter().sum::<f32>() - 1.0).abs() < 1e-6);
+        assert!(outcome.survivors().contains(&1));
+        assert!(!outcome.survivors().contains(&0));
+        assert!(!outcome.survivors().contains(&2));
+        assert!(telemetry.total_energy().is_finite());
+        assert!(telemetry.dominant_weight().is_finite());
+        assert_eq!(telemetry.repaired_non_finite(), 2);
+        assert_eq!(telemetry.repaired_negative(), 1);
+        assert_eq!(telemetry.repairs_total(), 3);
+    }
+
+    #[test]
+    fn geometric_aggregate_sanitizes_non_finite_weights() {
+        let topos = OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 256, 8192).unwrap();
+        let seq = ZSpaceCoherenceSequencer::new(32, 4, -1.0, topos).unwrap();
+        let input =
+            Tensor::from_vec(1, 32, (0..32).map(|idx| idx as f32 / 32.0).collect()).unwrap();
+        let mut weights = vec![0.0f32; seq.maxwell_channels()];
+        weights[0] = f32::NAN;
+        weights[1] = f32::INFINITY;
+        weights[2] = -0.5;
+        weights[3] = 0.25;
+
+        let (output, diagnostics) = seq
+            .geometric_aggregate_with_diagnostics(&input, &weights, None)
+            .unwrap();
+
+        assert!(output.data().iter().all(|value| value.is_finite()));
+        assert!(output.squared_l2_norm().is_finite());
+        assert_eq!(diagnostics.repaired_non_finite_weights(), 2);
+        assert_eq!(diagnostics.repaired_negative_weights(), 1);
+        assert_eq!(diagnostics.repaired_weights_total(), 3);
     }
 
     #[test]

@@ -1,5 +1,6 @@
 use super::distributed::st_distributed::DistributedError;
 use super::{DistributedDevice, MetricReduce, TrainingDevice, TrainingDeviceError};
+use st_core::distributed::AccumulatorSynchronizer;
 use std::sync::{Arc, Barrier};
 
 #[test]
@@ -24,6 +25,25 @@ fn distributed_device_all_reduce_averages_gradients() {
 
     for gradients in results {
         assert_eq!(gradients, vec![1.5, 2.0]);
+    }
+}
+
+#[test]
+fn distributed_device_implements_accumulator_synchronizer_bridge() {
+    let world = 2;
+    let mut handles = Vec::new();
+    for rank in 0..world {
+        handles.push(std::thread::spawn(move || {
+            let device = DistributedDevice::new("accumulator-bridge-test", rank, world).unwrap();
+            let mut gradients = vec![rank as f32 + 1.0, 4.0];
+            AccumulatorSynchronizer::synchronize_accumulators(&device, &mut gradients)
+                .expect("accumulator bridge should all-reduce");
+            gradients
+        }));
+    }
+
+    for handle in handles {
+        assert_eq!(handle.join().unwrap(), vec![1.5, 4.0]);
     }
 }
 

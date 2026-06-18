@@ -27,5 +27,11 @@ pub mod temporal_fusion;
 pub mod unison_heuristics;
 pub mod wasm_tuner;
 pub mod wasm_tuner_builder;
+#[cfg(feature = "wgpu-rt")]
+pub mod wgpu_exec;
+#[cfg(feature = "wgpu-rt")]
+pub mod wgpu_frac;
 pub mod wgpu_heuristics;
 pub mod wgpu_heuristics_generated;
+#[cfg(feature = "wgpu-rt")]
+pub mod wgpu_rt;

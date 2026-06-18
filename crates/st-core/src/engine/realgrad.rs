@@ -5,9 +5,170 @@
 
 use crate::ops::realgrad::{
     RealGradConfig, RealGradKernel, RealGradProjection, RealGradTuning, SchwartzSequence,
-    TemperedRealGradProjection, TransparentGradientOpticsConfig,
+    SpectrumNorm, TemperedRealGradProjection, TransparentGradientOpticsConfig,
 };
 use crate::telemetry::hub::{set_last_realgrad, RealGradPulse};
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
+
+fn finite_meta_f32(value: f32) -> serde_json::Value {
+    serde_json::Value::from(if value.is_finite() { value as f64 } else { 0.0 })
+}
+
+fn spectrum_norm_label(norm: SpectrumNorm) -> &'static str {
+    match norm {
+        SpectrumNorm::Unitary => "unitary",
+        SpectrumNorm::Forward => "forward",
+        SpectrumNorm::Backward => "backward",
+        SpectrumNorm::EnergyPreserving => "energy_preserving",
+        SpectrumNorm::LebesgueL1 => "lebesgue_l1",
+        SpectrumNorm::Whitened => "whitened",
+    }
+}
+
+fn pulse_regime_label(pulse: &RealGradPulse) -> &'static str {
+    if !pulse.converged || !pulse.dominated {
+        "tempered_unstable"
+    } else if pulse.residual_ratio >= 0.5 {
+        "residual_dominant"
+    } else if pulse.gradient_sparsity >= 0.75 {
+        "sparse_gradient"
+    } else if pulse.transparency.is_some() {
+        "transparent_optics"
+    } else {
+        "balanced"
+    }
+}
+
+fn emit_realgrad_projection_meta(
+    config: RealGradConfig,
+    tolerance: f32,
+    ema_alpha: f32,
+    projection: &RealGradProjection,
+    tempered: Option<&TemperedRealGradProjection>,
+    pulse: &RealGradPulse,
+) {
+    let output_cols = 8usize + usize::from(pulse.transparency.is_some());
+    emit_tensor_op(
+        "realgrad_projection_pulse",
+        &[projection.realgrad.len().max(1)],
+        &[1, output_cols],
+    );
+    emit_tensor_op_meta("realgrad_projection_pulse", || {
+        let mut payload = serde_json::Map::new();
+        payload.insert("backend".into(), "cpu".into());
+        payload.insert("requested_backend".into(), "auto".into());
+        payload.insert("kind".into(), "st_core_realgrad_projection_pulse".into());
+        payload.insert("regime".into(), pulse_regime_label(pulse).into());
+        payload.insert("sample_len".into(), projection.realgrad.len().into());
+        payload.insert("z_space_len".into(), projection.z_space.len().into());
+        payload.insert("spectrum_len".into(), projection.spectrum.len().into());
+        payload.insert("residual_count".into(), projection.monad_biome.len().into());
+        payload.insert(
+            "tempered".into(),
+            tempered
+                .map(|projection| projection.iterations > 0)
+                .unwrap_or(false)
+                .into(),
+        );
+        payload.insert(
+            "tempered_iterations".into(),
+            tempered
+                .map(|projection| projection.iterations)
+                .unwrap_or(0)
+                .into(),
+        );
+        payload.insert(
+            "tempered_dominated".into(),
+            tempered
+                .map(|projection| projection.dominated)
+                .unwrap_or(true)
+                .into(),
+        );
+        payload.insert("converged".into(), pulse.converged.into());
+        payload.insert("dominated".into(), pulse.dominated.into());
+        payload.insert("iterations".into(), pulse.iterations.into());
+        payload.insert("tolerance".into(), finite_meta_f32(tolerance));
+        payload.insert("ema_alpha".into(), finite_meta_f32(ema_alpha));
+        payload.insert(
+            "lebesgue_measure".into(),
+            finite_meta_f32(pulse.lebesgue_measure),
+        );
+        payload.insert("monad_energy".into(), finite_meta_f32(pulse.monad_energy));
+        payload.insert("z_energy".into(), finite_meta_f32(pulse.z_energy));
+        payload.insert(
+            "residual_ratio".into(),
+            finite_meta_f32(pulse.residual_ratio),
+        );
+        payload.insert(
+            "lebesgue_ratio".into(),
+            finite_meta_f32(pulse.lebesgue_ratio),
+        );
+        payload.insert("ramanujan_pi".into(), finite_meta_f32(pulse.ramanujan_pi));
+        payload.insert(
+            "convergence_error".into(),
+            finite_meta_f32(pulse.convergence_error),
+        );
+        payload.insert("gradient_norm".into(), finite_meta_f32(pulse.gradient_norm));
+        payload.insert(
+            "gradient_sparsity".into(),
+            finite_meta_f32(pulse.gradient_sparsity),
+        );
+        payload.insert(
+            "rolling_gradient_norm".into(),
+            finite_meta_f32(pulse.rolling_gradient_norm),
+        );
+        payload.insert(
+            "rolling_residual_ratio".into(),
+            finite_meta_f32(pulse.rolling_residual_ratio),
+        );
+        payload.insert(
+            "config_ramanujan_iterations".into(),
+            config.ramanujan_iterations.into(),
+        );
+        payload.insert("config_z_rank".into(), config.z_rank.into());
+        payload.insert("config_z_weight".into(), config.z_weight.into());
+        payload.insert(
+            "config_residual_threshold".into(),
+            finite_meta_f32(config.residual_threshold),
+        );
+        payload.insert(
+            "config_spectrum_norm".into(),
+            spectrum_norm_label(config.spectrum_norm).into(),
+        );
+        payload.insert("optics_enabled".into(), pulse.transparency.is_some().into());
+        if let Some(summary) = pulse.transparency {
+            payload.insert(
+                "optics_transparency_gain".into(),
+                finite_meta_f32(summary.transparency_gain),
+            );
+            payload.insert(
+                "optics_mean_attenuation".into(),
+                finite_meta_f32(summary.mean_attenuation),
+            );
+            payload.insert(
+                "optics_max_attenuation".into(),
+                finite_meta_f32(summary.max_attenuation),
+            );
+            payload.insert(
+                "optics_mean_refraction".into(),
+                finite_meta_f32(summary.mean_refraction),
+            );
+            payload.insert(
+                "optics_diffusion_energy".into(),
+                finite_meta_f32(summary.diffusion_energy),
+            );
+            payload.insert(
+                "optics_phase_variation".into(),
+                finite_meta_f32(summary.phase_variation),
+            );
+            payload.insert(
+                "optics_jacobian_norm".into(),
+                finite_meta_f32(summary.jacobian_norm),
+            );
+        }
+        serde_json::Value::Object(payload)
+    });
+}
 
 /// High level driver that reuses the cached RealGrad kernel, applies adaptive tuning,
 /// and reports telemetry back into the global hub so runtimes can react to Z-space
@@ -220,6 +381,14 @@ impl RealGradEngine {
 
         self.last_pulse = Some(pulse);
         set_last_realgrad(&pulse);
+        emit_realgrad_projection_meta(
+            self.kernel.config(),
+            self.tolerance,
+            self.ema_alpha,
+            projection,
+            tempered,
+            &pulse,
+        );
     }
 }
 
@@ -248,7 +417,7 @@ pub fn project_tempered_and_calibrate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::{Arc, Mutex, OnceLock};
 
     fn telemetry_guard() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -329,6 +498,55 @@ mod tests {
         assert!(pulse.gradient_sparsity >= 0.0 && pulse.gradient_sparsity <= 1.0);
         assert!(pulse.rolling_gradient_norm >= 0.0);
         assert!(pulse.rolling_residual_ratio >= 0.0);
+    }
+
+    #[test]
+    fn engine_projection_emits_backend_meta() {
+        let _observer_lock = crate::telemetry::tensor_observer_lock();
+        let _guard = telemetry_guard();
+        crate::telemetry::hub::clear_last_realgrad_for_test();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let optics = TransparentGradientOpticsConfig {
+            refractive_index: 1.4,
+            transparency: 0.85,
+            absorption: 0.02,
+            diffusion: 0.2,
+            phase_shift: 0.05,
+        };
+        let config = RealGradConfig {
+            residual_threshold: 10.0,
+            ..RealGradConfig::default()
+        }
+        .with_optics(optics);
+        let mut engine = RealGradEngine::new(config);
+        let projection = engine.project(&[0.75, -0.3, 0.45, -0.6, 0.15]);
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert!(projection.optics_trace().is_some());
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "realgrad_projection_pulse"
+                    && data["kind"] == "st_core_realgrad_projection_pulse"
+                    && data["sample_len"] == 5
+            })
+            .expect("realgrad projection metadata event");
+        assert_eq!(meta.1["backend"], "cpu");
+        assert_eq!(meta.1["regime"], "transparent_optics");
+        assert_eq!(meta.1["optics_enabled"], true);
+        assert_eq!(meta.1["residual_count"], 0);
+        assert!(meta.1["gradient_norm"].as_f64().unwrap() > 0.0);
+        assert!(meta.1["optics_jacobian_norm"].as_f64().unwrap() > 0.0);
+        assert_eq!(meta.1["config_residual_threshold"], 10.0);
     }
 
     #[test]

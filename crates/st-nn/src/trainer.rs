@@ -26,6 +26,7 @@ pub mod selfsup;
 
 use crate::cloud::CloudTargetSummary;
 use crate::dataset::DataLoader;
+use crate::execution::{push_backend_policy, BackendPolicy};
 use crate::gnn::spiralk::{GraphConsensusBridge, GraphConsensusDigest};
 use crate::gnn::RoundtableBandSignal;
 #[cfg(feature = "golden")]
@@ -38,7 +39,7 @@ use crate::language::{
 };
 use crate::loss::Loss;
 use crate::module::Module;
-use crate::optim::{LocalLearningRateAdapter, SpectralLrAdapter};
+use crate::optim::{LocalLearningRateAdapter, SpectralLrAdapter, SpectralLrAdapterState};
 use crate::plan::RankPlanner;
 use crate::roundtable::{
     simulate_proposal_locally, BlackcatModerator, BlackcatScore, DistConfig, GlobalProposal,
@@ -52,8 +53,10 @@ use crate::zspace_coherence::{
 use crate::{PureResult, Tensor, TensorError};
 use rand::rngs::StdRng;
 use rand::{seq::SliceRandom, SeedableRng};
-use st_core::backend::device_caps::DeviceCaps;
+use serde_json::Value;
+use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
+use st_core::distributed::{AccumulatorSyncError, AccumulatorSynchronizer};
 use st_core::ecosystem::{
     CloudConnector, ConnectorEvent, DistributionSummary, EcosystemRegistry, MetricSample,
     RankPlanSummary, RoundtableConfigSummary, RoundtableSummary,
@@ -79,11 +82,32 @@ use st_core::telemetry::zspace_region::{
     ZSpaceRadiusBand, ZSpaceRegionDescriptor, ZSpaceRegionKey, ZSpaceSpinBand,
 };
 use st_core::theory::zpulse::ZScale;
-use st_tensor::{topos::OpenCartesianTopos, GradientSummary};
+use st_tensor::{
+    set_tensor_op_meta_observer, topos::OpenCartesianTopos, GradientSummary, TensorOpMetaEvent,
+    TensorOpMetaObserver,
+};
 use std::collections::HashMap;
 use std::env;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
+
+#[cfg(test)]
+fn tensor_meta_observer_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    tensor_meta_observer_lock()
+}
+
+fn tensor_meta_observer_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::OnceLock<Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[cfg(test)]
+thread_local! {
+    static STRICT_GPU_TEST_OVERRIDE: std::cell::RefCell<Option<bool>> =
+        const { std::cell::RefCell::new(None) };
+}
 
 /// Adaptive curvature controller that nudges the trainer's hyperbolic geometry
 /// towards the pressure window observed in recent gradients.
@@ -106,6 +130,8 @@ pub struct CurvatureScheduler {
     dither_period: u32,
     dither_sign: f32,
 }
+
+const CURVATURE_PRESSURE_MAX: f32 = 1.0e19;
 
 impl CurvatureScheduler {
     /// Builds a scheduler anchored to the provided curvature range and target
@@ -325,14 +351,27 @@ impl CurvatureScheduler {
     pub fn last_pressure_variance(&self) -> Option<f32> {
         let mean = self.ema_pressure?;
         let second = self.ema_pressure2?;
-        Some((second - mean * mean).max(0.0))
+        if !mean.is_finite() || !second.is_finite() {
+            return None;
+        }
+        let variance = (f64::from(second) - f64::from(mean) * f64::from(mean)).max(0.0);
+        Some(variance.min(f64::from(f32::MAX)) as f32)
     }
 
     /// Returns the estimated relative variance (var / (mean² + eps)), if available.
     pub fn last_pressure_rel_variance(&self) -> Option<f32> {
         let mean = self.ema_pressure?;
         let var = self.last_pressure_variance()?;
-        Some(var / (mean * mean + 1.0e-6))
+        if !mean.is_finite() || !var.is_finite() {
+            return None;
+        }
+        let denom = f64::from(mean) * f64::from(mean) + 1.0e-6;
+        let rel = f64::from(var) / denom;
+        if rel.is_finite() {
+            Some(rel.min(f64::from(f32::MAX)) as f32)
+        } else {
+            None
+        }
     }
 
     /// Synchronises the scheduler with an externally adjusted curvature and
@@ -429,23 +468,36 @@ impl CurvatureScheduler {
     /// Records a raw pressure observation without requiring a full gradient summary.
     pub fn observe_pressure(&mut self, raw_pressure: f32) -> CurvatureDecision {
         let raw_pressure = if raw_pressure.is_finite() {
-            raw_pressure.max(0.0)
+            raw_pressure.max(0.0).min(CURVATURE_PRESSURE_MAX)
         } else {
             0.0
         };
-        let smoothed = match self.ema_pressure {
-            Some(prev) => prev + self.alpha * (raw_pressure - prev),
+        let alpha = if self.alpha.is_finite() && self.alpha > 0.0 {
+            self.alpha.clamp(0.01, 1.0)
+        } else {
+            1.0
+        };
+        let smoothed = match self.ema_pressure.filter(|value| value.is_finite()) {
+            Some(prev) => prev + alpha * (raw_pressure - prev),
             None => raw_pressure,
-        };
+        }
+        .max(0.0)
+        .min(CURVATURE_PRESSURE_MAX);
         self.ema_pressure = Some(smoothed);
-        let raw_sq = raw_pressure * raw_pressure;
-        let smoothed_sq = match self.ema_pressure2 {
-            Some(prev) => prev + self.alpha * (raw_sq - prev),
+        let raw_sq =
+            (f64::from(raw_pressure) * f64::from(raw_pressure)).min(f64::from(f32::MAX)) as f32;
+        let smoothed_sq = match self.ema_pressure2.filter(|value| value.is_finite()) {
+            Some(prev) => prev + alpha * (raw_sq - prev),
             None => raw_sq,
-        };
+        }
+        .max(0.0)
+        .min(f32::MAX);
         self.ema_pressure2 = Some(smoothed_sq);
-        let variance = (smoothed_sq - smoothed * smoothed).max(0.0);
-        let rel_var = variance / (smoothed * smoothed + 1.0e-6);
+        let variance =
+            (f64::from(smoothed_sq) - f64::from(smoothed) * f64::from(smoothed)).max(0.0);
+        let variance = variance.min(f64::from(f32::MAX)) as f32;
+        let denom = f64::from(smoothed) * f64::from(smoothed) + 1.0e-6;
+        let rel_var = (f64::from(variance) / denom).min(f64::from(f32::MAX)) as f32;
         let error = smoothed - self.target_pressure;
         let within_band = error.abs() <= self.tolerance;
 
@@ -534,6 +586,10 @@ pub struct CoherenceSignal {
     energy_ratio: f32,
     entropy: f32,
     label: CoherenceLabel,
+    repaired_non_finite_weights: usize,
+    repaired_negative_weights: usize,
+    pre_discard_repaired_non_finite: usize,
+    pre_discard_repaired_negative: usize,
 }
 
 impl CoherenceSignal {
@@ -565,6 +621,37 @@ impl CoherenceSignal {
         self.label
     }
 
+    pub fn repaired_non_finite_weights(&self) -> usize {
+        self.repaired_non_finite_weights
+    }
+
+    pub fn repaired_negative_weights(&self) -> usize {
+        self.repaired_negative_weights
+    }
+
+    pub fn repaired_weights_total(&self) -> usize {
+        self.repaired_non_finite_weights
+            .saturating_add(self.repaired_negative_weights)
+    }
+
+    pub fn pre_discard_repaired_non_finite(&self) -> usize {
+        self.pre_discard_repaired_non_finite
+    }
+
+    pub fn pre_discard_repaired_negative(&self) -> usize {
+        self.pre_discard_repaired_negative
+    }
+
+    pub fn pre_discard_repairs_total(&self) -> usize {
+        self.pre_discard_repaired_non_finite
+            .saturating_add(self.pre_discard_repaired_negative)
+    }
+
+    pub fn repairs_total(&self) -> usize {
+        self.repaired_weights_total()
+            .saturating_add(self.pre_discard_repairs_total())
+    }
+
     fn label_from_str(label: &str) -> CoherenceLabel {
         match label.trim() {
             "symmetric_pulse" => CoherenceLabel::SymmetricPulse,
@@ -586,6 +673,10 @@ impl CoherenceSignal {
             energy_ratio: diagnostics.energy_ratio,
             entropy: diagnostics.entropy,
             label: Self::label_from_str(&diagnostics.label),
+            repaired_non_finite_weights: diagnostics.repaired_non_finite_weights,
+            repaired_negative_weights: diagnostics.repaired_negative_weights,
+            pre_discard_repaired_non_finite: diagnostics.pre_discard_repaired_non_finite,
+            pre_discard_repaired_negative: diagnostics.pre_discard_repaired_negative,
         })
     }
 }
@@ -600,6 +691,16 @@ impl From<&CoherenceDiagnostics> for CoherenceSignal {
             energy_ratio: diagnostics.energy_ratio(),
             entropy: diagnostics.coherence_entropy(),
             label: diagnostics.observation().lift_to_label(),
+            repaired_non_finite_weights: diagnostics.repaired_non_finite_weights(),
+            repaired_negative_weights: diagnostics.repaired_negative_weights(),
+            pre_discard_repaired_non_finite: diagnostics
+                .pre_discard()
+                .map(|telemetry| telemetry.repaired_non_finite())
+                .unwrap_or(0),
+            pre_discard_repaired_negative: diagnostics
+                .pre_discard()
+                .map(|telemetry| telemetry.repaired_negative())
+                .unwrap_or(0),
         }
     }
 }
@@ -657,6 +758,1563 @@ impl Drop for ZSpaceTraceCoherenceBridge {
     }
 }
 
+#[derive(Debug, Default)]
+struct TensorBackendStepTrace {
+    total: usize,
+    fallbacks: usize,
+    meta_events: usize,
+    meta_null_values: usize,
+    meta_non_finite_strings: usize,
+    by_backend: HashMap<String, usize>,
+    by_kernel_backend: HashMap<String, usize>,
+    by_op: HashMap<String, usize>,
+    by_op_backend: HashMap<String, usize>,
+    by_op_kernel_backend: HashMap<String, usize>,
+    embedding_tokens: usize,
+    embedding_unique_token_indices: usize,
+    embedding_repeated_token_indices: usize,
+    embedding_non_finite_tokens: usize,
+    embedding_rounded_tokens: usize,
+    embedding_clamped_low_tokens: usize,
+    embedding_clamped_high_tokens: usize,
+    backend_policy_events: usize,
+    backend_policy_status: HashMap<String, usize>,
+    backend_policy_source: HashMap<String, usize>,
+    backend_policy_wgpu_choices: usize,
+    backend_policy_unison_choices: usize,
+    backend_policy_kdsl_env_events: usize,
+    backend_policy_kdsl_kv_events: usize,
+    backend_policy_kv_soft_events: usize,
+    backend_policy_wasm_tuner_events: usize,
+    backend_policy_tensor_util_routes: usize,
+    backend_policy_wgpu_last_workgroup: Option<f64>,
+    backend_policy_wgpu_last_lanes: Option<f64>,
+    backend_policy_wgpu_last_compaction_tile: Option<f64>,
+    backend_policy_wgpu_last_fft_radix: Option<f64>,
+    backend_policy_wgpu_last_fft_segments: Option<f64>,
+    backend_policy_wgpu_last_override_count: Option<f64>,
+    backend_policy_unison_last_candidate_count: Option<f64>,
+    backend_policy_unison_last_best_score: Option<f64>,
+    backend_policy_unison_last_baseline_score: Option<f64>,
+    backend_policy_unison_last_wgpu_generated_score: Option<f64>,
+    backend_policy_unison_last_wgpu_generated_score_delta: Option<f64>,
+    backend_policy_tensor_util_last_values: Option<f64>,
+    backend_policy_tensor_util_last_threshold: Option<f64>,
+    lstm_forward_estimated_gate_activation_ops: usize,
+    lstm_forward_estimated_gate_activation_cpu_debt_ops: usize,
+    lstm_forward_estimated_gate_activation_wgpu_ops: usize,
+    lstm_backward_estimated_gate_activation_ops: usize,
+    lstm_backward_estimated_gate_activation_cpu_debt_ops: usize,
+    lstm_backward_estimated_gate_activation_wgpu_ops: usize,
+    lstm_backward_estimated_bptt_ops: usize,
+    lstm_backward_estimated_bptt_cpu_debt_ops: usize,
+    lstm_backward_estimated_bptt_wgpu_ops: usize,
+    lstm_backward_estimated_bptt_gate_derivative_ops: usize,
+    lstm_backward_estimated_bptt_cell_recurrence_ops: usize,
+    lstm_backward_estimated_bptt_state_carry_ops: usize,
+    lstm_backward_estimated_bptt_scan_steps: usize,
+}
+
+impl TensorBackendStepTrace {
+    fn record_sub_backend(
+        &mut self,
+        op: &str,
+        requested_backend: Option<&str>,
+        field: &'static str,
+        sub_backend: &str,
+        count_fallback: bool,
+    ) {
+        let sub_backend = backend_metric_fragment(sub_backend);
+        if sub_backend == "auto" {
+            return;
+        }
+        let field = field.strip_suffix("_backend").unwrap_or(field);
+        *self
+            .by_op_backend
+            .entry(format!("{op}_{field}_{sub_backend}"))
+            .or_default() += 1;
+        if count_fallback {
+            if let Some(requested) = requested_backend {
+                if requested != "auto"
+                    && requested != sub_backend
+                    && !is_metadata_only_backend(&sub_backend)
+                {
+                    self.fallbacks = self.fallbacks.saturating_add(1);
+                }
+            }
+        }
+    }
+
+    fn record(&mut self, event: &TensorOpMetaEvent) {
+        self.meta_events = self.meta_events.saturating_add(1);
+        let mut meta_health = TensorMetaHealth::default();
+        meta_health.record(&event.data);
+        self.meta_null_values = self
+            .meta_null_values
+            .saturating_add(meta_health.null_values);
+        self.meta_non_finite_strings = self
+            .meta_non_finite_strings
+            .saturating_add(meta_health.non_finite_strings);
+
+        self.record_backend_policy_event(event);
+
+        let Some(backend) = event.data.get("backend").and_then(|value| value.as_str()) else {
+            return;
+        };
+        let kernel_backend = metric_fragment(backend);
+        let backend = backend_metric_fragment(backend);
+        let op = metric_fragment(event.op_name);
+        self.total = self.total.saturating_add(1);
+        *self.by_backend.entry(backend.clone()).or_default() += 1;
+        *self
+            .by_kernel_backend
+            .entry(kernel_backend.clone())
+            .or_default() += 1;
+        *self.by_op.entry(op.clone()).or_default() += 1;
+        *self
+            .by_op_backend
+            .entry(format!("{op}_{backend}"))
+            .or_default() += 1;
+        *self
+            .by_op_kernel_backend
+            .entry(format!("{op}_{kernel_backend}"))
+            .or_default() += 1;
+
+        let requested_backend = event
+            .data
+            .get("requested_backend")
+            .and_then(|value| value.as_str())
+            .map(backend_metric_fragment);
+        if let Some(requested) = requested_backend.as_deref() {
+            if requested != "auto" && requested != backend && !is_metadata_only_backend(&backend) {
+                self.fallbacks = self.fallbacks.saturating_add(1);
+            }
+        }
+        for field in [
+            "input_gradient_backend",
+            "input_gradient_reduction_backend",
+            "affine_gradient_backend",
+            "normalization_backend",
+            "input_projection_backend",
+            "bias_backend",
+            "recurrent_backend",
+            "gate_activation_backend",
+            "bptt_backend",
+            "bptt_scan_backend",
+            "bptt_gate_derivative_backend",
+            "bptt_cell_recurrence_backend",
+            "bptt_state_carry_backend",
+            "raw_parameter_gradient_backend",
+            "parameter_gradient_reduction_backend",
+            "bias_gradient_backend",
+            "parameter_gradient_scale_backend",
+            "accumulation_backend",
+            "normalise_backend",
+            "rewrite_backend",
+            "softmax_backend",
+            "exp_backend",
+            "sanitize_backend",
+            "distribution_scale_backend",
+            "semantic_inference_backend",
+            "semantic_sparse_scan_backend",
+            "semantic_accumulation_backend",
+            "semantic_sanitize_backend",
+            "window_energy_backend",
+            "fusion_accumulation_backend",
+            "marginal_scan_backend",
+            "marginal_sum_backend",
+            "row_scan_backend",
+            "row_sum_backend",
+            "state_sum_backend",
+            "precision_backend",
+            "reduction_backend",
+            "covariance_centering_backend",
+            "covariance_accumulation_backend",
+            "low_rank_projection_backend",
+            "psd_projection_backend",
+        ] {
+            if let Some(sub_backend) = event.data.get(field).and_then(|value| value.as_str()) {
+                self.record_sub_backend(
+                    &op,
+                    requested_backend.as_deref(),
+                    field,
+                    sub_backend,
+                    field != "bptt_scan_backend",
+                );
+            }
+        }
+
+        if matches!(event.op_name, "embedding_forward" | "embedding_backward") {
+            self.embedding_tokens = self
+                .embedding_tokens
+                .saturating_add(meta_usize(&event.data, "tokens"));
+            self.embedding_unique_token_indices = self
+                .embedding_unique_token_indices
+                .saturating_add(meta_usize(&event.data, "unique_token_indices"));
+            self.embedding_repeated_token_indices = self
+                .embedding_repeated_token_indices
+                .saturating_add(meta_usize(&event.data, "repeated_token_indices"));
+            self.embedding_non_finite_tokens = self
+                .embedding_non_finite_tokens
+                .saturating_add(meta_usize(&event.data, "non_finite_tokens"));
+            self.embedding_rounded_tokens = self
+                .embedding_rounded_tokens
+                .saturating_add(meta_usize(&event.data, "rounded_tokens"));
+            self.embedding_clamped_low_tokens = self
+                .embedding_clamped_low_tokens
+                .saturating_add(meta_usize(&event.data, "clamped_low_tokens"));
+            self.embedding_clamped_high_tokens = self
+                .embedding_clamped_high_tokens
+                .saturating_add(meta_usize(&event.data, "clamped_high_tokens"));
+        }
+        if event.op_name == "lstm_forward" {
+            let gate_activation_ops = meta_usize(&event.data, "estimated_gate_activation_ops");
+            self.lstm_forward_estimated_gate_activation_ops = self
+                .lstm_forward_estimated_gate_activation_ops
+                .saturating_add(gate_activation_ops);
+            let gate_backend = event
+                .data
+                .get("gate_activation_backend")
+                .and_then(|value| value.as_str())
+                .map(backend_metric_fragment)
+                .unwrap_or_else(|| "cpu".to_string());
+            if gate_backend == "wgpu" {
+                self.lstm_forward_estimated_gate_activation_wgpu_ops = self
+                    .lstm_forward_estimated_gate_activation_wgpu_ops
+                    .saturating_add(gate_activation_ops);
+            } else {
+                self.lstm_forward_estimated_gate_activation_cpu_debt_ops = self
+                    .lstm_forward_estimated_gate_activation_cpu_debt_ops
+                    .saturating_add(gate_activation_ops);
+            }
+        }
+        if event.op_name == "lstm_backward" {
+            let gate_activation_ops = meta_usize(&event.data, "estimated_gate_activation_ops");
+            self.lstm_backward_estimated_gate_activation_ops = self
+                .lstm_backward_estimated_gate_activation_ops
+                .saturating_add(gate_activation_ops);
+            let gate_backend = event
+                .data
+                .get("gate_activation_backend")
+                .and_then(|value| value.as_str())
+                .map(backend_metric_fragment)
+                .unwrap_or_else(|| "cpu".to_string());
+            if gate_backend == "wgpu" {
+                self.lstm_backward_estimated_gate_activation_wgpu_ops = self
+                    .lstm_backward_estimated_gate_activation_wgpu_ops
+                    .saturating_add(gate_activation_ops);
+            } else {
+                self.lstm_backward_estimated_gate_activation_cpu_debt_ops = self
+                    .lstm_backward_estimated_gate_activation_cpu_debt_ops
+                    .saturating_add(gate_activation_ops);
+            }
+            let bptt_ops = meta_usize(&event.data, "estimated_bptt_ops");
+            self.lstm_backward_estimated_bptt_ops = self
+                .lstm_backward_estimated_bptt_ops
+                .saturating_add(bptt_ops);
+            let bptt_backend = event
+                .data
+                .get("bptt_backend")
+                .or_else(|| event.data.get("bptt_scan_backend"))
+                .and_then(|value| value.as_str())
+                .map(backend_metric_fragment);
+            let bptt_cpu_debt_ops = if event.data.get("estimated_bptt_cpu_debt_ops").is_some() {
+                meta_usize(&event.data, "estimated_bptt_cpu_debt_ops")
+            } else if bptt_backend.as_deref() == Some("cpu") {
+                bptt_ops
+            } else {
+                0
+            };
+            let bptt_wgpu_ops = if event.data.get("estimated_bptt_wgpu_ops").is_some() {
+                meta_usize(&event.data, "estimated_bptt_wgpu_ops")
+            } else if bptt_backend.as_deref() == Some("wgpu") {
+                bptt_ops
+            } else {
+                0
+            };
+            self.lstm_backward_estimated_bptt_cpu_debt_ops = self
+                .lstm_backward_estimated_bptt_cpu_debt_ops
+                .saturating_add(bptt_cpu_debt_ops);
+            self.lstm_backward_estimated_bptt_wgpu_ops = self
+                .lstm_backward_estimated_bptt_wgpu_ops
+                .saturating_add(bptt_wgpu_ops);
+            self.lstm_backward_estimated_bptt_gate_derivative_ops = self
+                .lstm_backward_estimated_bptt_gate_derivative_ops
+                .saturating_add(meta_usize(
+                    &event.data,
+                    "estimated_bptt_gate_derivative_ops",
+                ));
+            self.lstm_backward_estimated_bptt_cell_recurrence_ops = self
+                .lstm_backward_estimated_bptt_cell_recurrence_ops
+                .saturating_add(meta_usize(
+                    &event.data,
+                    "estimated_bptt_cell_recurrence_ops",
+                ));
+            self.lstm_backward_estimated_bptt_state_carry_ops = self
+                .lstm_backward_estimated_bptt_state_carry_ops
+                .saturating_add(meta_usize(&event.data, "estimated_bptt_state_carry_ops"));
+            self.lstm_backward_estimated_bptt_scan_steps = self
+                .lstm_backward_estimated_bptt_scan_steps
+                .saturating_add(meta_usize(&event.data, "estimated_bptt_scan_steps"));
+        }
+    }
+
+    fn record_backend_policy_event(&mut self, event: &TensorOpMetaEvent) {
+        let op = metric_fragment(event.op_name);
+        let tracked = matches!(
+            event.op_name,
+            "wgpu_heuristic_choice"
+                | "unison_rank_choice"
+                | "kdsl_env_bridge"
+                | "kdsl_kv_bridge"
+                | "kv_consensus_soft_rules"
+                | "wasm_tuner_choice"
+                | "backend_resolution"
+                | "backend_device_report"
+                | "temporal_spectral_fusion"
+                | "tensor_util_route"
+        );
+        if !tracked {
+            return;
+        }
+
+        self.backend_policy_events = self.backend_policy_events.saturating_add(1);
+        if let Some(status) = meta_str_fragment(&event.data, "status") {
+            *self
+                .backend_policy_status
+                .entry(format!("{op}_{status}"))
+                .or_default() += 1;
+        }
+        if let Some(source) = meta_str_fragment(&event.data, "choice_source") {
+            *self
+                .backend_policy_source
+                .entry(format!("{op}_{source}"))
+                .or_default() += 1;
+        }
+
+        match event.op_name {
+            "wgpu_heuristic_choice" => {
+                self.backend_policy_wgpu_choices =
+                    self.backend_policy_wgpu_choices.saturating_add(1);
+                self.backend_policy_wgpu_last_workgroup = meta_f64(&event.data, "workgroup");
+                self.backend_policy_wgpu_last_lanes = meta_f64(&event.data, "lanes");
+                self.backend_policy_wgpu_last_compaction_tile =
+                    meta_f64(&event.data, "compaction_tile");
+                self.backend_policy_wgpu_last_fft_radix = meta_f64(&event.data, "fft_radix");
+                self.backend_policy_wgpu_last_fft_segments = meta_f64(&event.data, "fft_segments");
+                self.backend_policy_wgpu_last_override_count =
+                    meta_f64(&event.data, "override_count");
+            }
+            "unison_rank_choice" => {
+                self.backend_policy_unison_choices =
+                    self.backend_policy_unison_choices.saturating_add(1);
+                self.backend_policy_unison_last_candidate_count =
+                    meta_f64(&event.data, "candidate_count");
+                self.backend_policy_unison_last_best_score = meta_f64(&event.data, "best_score");
+                self.backend_policy_unison_last_baseline_score =
+                    meta_f64(&event.data, "baseline_score");
+                self.backend_policy_unison_last_wgpu_generated_score =
+                    meta_f64(&event.data, "wgpu_generated_score");
+                self.backend_policy_unison_last_wgpu_generated_score_delta =
+                    meta_f64(&event.data, "wgpu_generated_score_delta");
+            }
+            "kdsl_env_bridge" => {
+                self.backend_policy_kdsl_env_events =
+                    self.backend_policy_kdsl_env_events.saturating_add(1);
+            }
+            "kdsl_kv_bridge" => {
+                self.backend_policy_kdsl_kv_events =
+                    self.backend_policy_kdsl_kv_events.saturating_add(1);
+            }
+            "kv_consensus_soft_rules" => {
+                self.backend_policy_kv_soft_events =
+                    self.backend_policy_kv_soft_events.saturating_add(1);
+            }
+            "wasm_tuner_choice" => {
+                self.backend_policy_wasm_tuner_events =
+                    self.backend_policy_wasm_tuner_events.saturating_add(1);
+            }
+            "tensor_util_route" => {
+                self.backend_policy_tensor_util_routes =
+                    self.backend_policy_tensor_util_routes.saturating_add(1);
+                self.backend_policy_tensor_util_last_values = meta_f64(&event.data, "values");
+                self.backend_policy_tensor_util_last_threshold = meta_f64(&event.data, "threshold");
+            }
+            _ => {}
+        }
+    }
+
+    fn write_extra(self, extra: &mut HashMap<String, f64>) {
+        if self.meta_events > 0 {
+            extra.insert("tensor_meta_events".to_string(), self.meta_events as f64);
+            extra.insert(
+                "tensor_meta_null_values".to_string(),
+                self.meta_null_values as f64,
+            );
+            extra.insert(
+                "tensor_meta_non_finite_strings".to_string(),
+                self.meta_non_finite_strings as f64,
+            );
+            let sentinels = self
+                .meta_null_values
+                .saturating_add(self.meta_non_finite_strings);
+            extra.insert(
+                "tensor_meta_non_finite_sentinels".to_string(),
+                sentinels as f64,
+            );
+            if sentinels > 0 {
+                extra.insert("tensor_meta_non_finite_detected".to_string(), 1.0);
+            }
+        }
+
+        if self.total > 0 {
+            extra.insert("tensor_ops_total".to_string(), self.total as f64);
+            extra.insert(
+                "tensor_backend_fallbacks".to_string(),
+                self.fallbacks as f64,
+            );
+            for (backend, count) in self.by_backend {
+                extra.insert(format!("tensor_backend_{backend}"), count as f64);
+            }
+            for (backend, count) in self.by_kernel_backend {
+                extra.insert(format!("tensor_kernel_backend_{backend}"), count as f64);
+            }
+            for (op, count) in self.by_op {
+                extra.insert(format!("tensor_op_{op}"), count as f64);
+            }
+            for (op_backend, count) in self.by_op_backend {
+                extra.insert(format!("tensor_op_backend_{op_backend}"), count as f64);
+            }
+            for (op_backend, count) in self.by_op_kernel_backend {
+                extra.insert(
+                    format!("tensor_op_kernel_backend_{op_backend}"),
+                    count as f64,
+                );
+            }
+        }
+
+        if self.embedding_tokens > 0 {
+            extra.insert(
+                "tensor_embedding_tokens".to_string(),
+                self.embedding_tokens as f64,
+            );
+            extra.insert(
+                "tensor_embedding_unique_token_indices".to_string(),
+                self.embedding_unique_token_indices as f64,
+            );
+            extra.insert(
+                "tensor_embedding_repeated_token_indices".to_string(),
+                self.embedding_repeated_token_indices as f64,
+            );
+            extra.insert(
+                "tensor_embedding_non_finite_tokens".to_string(),
+                self.embedding_non_finite_tokens as f64,
+            );
+            extra.insert(
+                "tensor_embedding_rounded_tokens".to_string(),
+                self.embedding_rounded_tokens as f64,
+            );
+            extra.insert(
+                "tensor_embedding_clamped_low_tokens".to_string(),
+                self.embedding_clamped_low_tokens as f64,
+            );
+            extra.insert(
+                "tensor_embedding_clamped_high_tokens".to_string(),
+                self.embedding_clamped_high_tokens as f64,
+            );
+            let repairs = self
+                .embedding_non_finite_tokens
+                .saturating_add(self.embedding_rounded_tokens)
+                .saturating_add(self.embedding_clamped_low_tokens)
+                .saturating_add(self.embedding_clamped_high_tokens);
+            extra.insert(
+                "tensor_embedding_token_repairs_total".to_string(),
+                repairs as f64,
+            );
+            if repairs > 0 {
+                extra.insert("tensor_embedding_token_repair_detected".to_string(), 1.0);
+            }
+        }
+
+        if self.lstm_forward_estimated_gate_activation_ops > 0
+            || self.lstm_backward_estimated_gate_activation_ops > 0
+            || self.lstm_backward_estimated_bptt_ops > 0
+        {
+            let gate_activation_ops = self
+                .lstm_forward_estimated_gate_activation_ops
+                .saturating_add(self.lstm_backward_estimated_gate_activation_ops);
+            let gate_activation_cpu_debt_ops = self
+                .lstm_forward_estimated_gate_activation_cpu_debt_ops
+                .saturating_add(self.lstm_backward_estimated_gate_activation_cpu_debt_ops);
+            let gate_activation_wgpu_ops = self
+                .lstm_forward_estimated_gate_activation_wgpu_ops
+                .saturating_add(self.lstm_backward_estimated_gate_activation_wgpu_ops);
+            let cpu_debt_ops = gate_activation_cpu_debt_ops
+                .saturating_add(self.lstm_backward_estimated_bptt_cpu_debt_ops);
+            extra.insert(
+                "lstm_estimated_gate_activation_ops".to_string(),
+                gate_activation_ops as f64,
+            );
+            extra.insert(
+                "lstm_estimated_gate_activation_cpu_debt_ops".to_string(),
+                gate_activation_cpu_debt_ops as f64,
+            );
+            extra.insert(
+                "lstm_estimated_gate_activation_wgpu_ops".to_string(),
+                gate_activation_wgpu_ops as f64,
+            );
+            extra.insert(
+                "lstm_estimated_cpu_debt_ops".to_string(),
+                cpu_debt_ops as f64,
+            );
+            extra.insert(
+                "lstm_forward_estimated_gate_activation_ops".to_string(),
+                self.lstm_forward_estimated_gate_activation_ops as f64,
+            );
+            extra.insert(
+                "lstm_forward_estimated_gate_activation_cpu_debt_ops".to_string(),
+                self.lstm_forward_estimated_gate_activation_cpu_debt_ops as f64,
+            );
+            extra.insert(
+                "lstm_forward_estimated_gate_activation_wgpu_ops".to_string(),
+                self.lstm_forward_estimated_gate_activation_wgpu_ops as f64,
+            );
+            extra.insert(
+                "lstm_backward_estimated_gate_activation_ops".to_string(),
+                self.lstm_backward_estimated_gate_activation_ops as f64,
+            );
+            extra.insert(
+                "lstm_backward_estimated_gate_activation_cpu_debt_ops".to_string(),
+                self.lstm_backward_estimated_gate_activation_cpu_debt_ops as f64,
+            );
+            extra.insert(
+                "lstm_backward_estimated_gate_activation_wgpu_ops".to_string(),
+                self.lstm_backward_estimated_gate_activation_wgpu_ops as f64,
+            );
+            extra.insert(
+                "lstm_backward_estimated_bptt_ops".to_string(),
+                self.lstm_backward_estimated_bptt_ops as f64,
+            );
+            extra.insert(
+                "lstm_estimated_bptt_cpu_debt_ops".to_string(),
+                self.lstm_backward_estimated_bptt_cpu_debt_ops as f64,
+            );
+            extra.insert(
+                "lstm_estimated_bptt_wgpu_ops".to_string(),
+                self.lstm_backward_estimated_bptt_wgpu_ops as f64,
+            );
+            extra.insert(
+                "lstm_backward_estimated_bptt_cpu_debt_ops".to_string(),
+                self.lstm_backward_estimated_bptt_cpu_debt_ops as f64,
+            );
+            extra.insert(
+                "lstm_backward_estimated_bptt_wgpu_ops".to_string(),
+                self.lstm_backward_estimated_bptt_wgpu_ops as f64,
+            );
+            extra.insert(
+                "lstm_backward_estimated_bptt_gate_derivative_ops".to_string(),
+                self.lstm_backward_estimated_bptt_gate_derivative_ops as f64,
+            );
+            extra.insert(
+                "lstm_backward_estimated_bptt_cell_recurrence_ops".to_string(),
+                self.lstm_backward_estimated_bptt_cell_recurrence_ops as f64,
+            );
+            extra.insert(
+                "lstm_backward_estimated_bptt_state_carry_ops".to_string(),
+                self.lstm_backward_estimated_bptt_state_carry_ops as f64,
+            );
+            extra.insert(
+                "lstm_backward_estimated_bptt_scan_steps".to_string(),
+                self.lstm_backward_estimated_bptt_scan_steps as f64,
+            );
+        }
+
+        if self.backend_policy_events > 0 {
+            extra.insert(
+                "backend_policy_events".to_string(),
+                self.backend_policy_events as f64,
+            );
+            extra.insert(
+                "backend_policy_wgpu_choices".to_string(),
+                self.backend_policy_wgpu_choices as f64,
+            );
+            extra.insert(
+                "backend_policy_unison_choices".to_string(),
+                self.backend_policy_unison_choices as f64,
+            );
+            extra.insert(
+                "backend_policy_kdsl_env_events".to_string(),
+                self.backend_policy_kdsl_env_events as f64,
+            );
+            extra.insert(
+                "backend_policy_kdsl_kv_events".to_string(),
+                self.backend_policy_kdsl_kv_events as f64,
+            );
+            extra.insert(
+                "backend_policy_kv_soft_events".to_string(),
+                self.backend_policy_kv_soft_events as f64,
+            );
+            extra.insert(
+                "backend_policy_wasm_tuner_events".to_string(),
+                self.backend_policy_wasm_tuner_events as f64,
+            );
+            extra.insert(
+                "backend_policy_tensor_util_routes".to_string(),
+                self.backend_policy_tensor_util_routes as f64,
+            );
+            for (status, count) in self.backend_policy_status {
+                extra.insert(format!("backend_policy_status_{status}"), count as f64);
+            }
+            for (source, count) in self.backend_policy_source {
+                extra.insert(format!("backend_policy_source_{source}"), count as f64);
+            }
+            insert_optional_extra(
+                extra,
+                "backend_policy_wgpu_last_workgroup",
+                self.backend_policy_wgpu_last_workgroup,
+            );
+            insert_optional_extra(
+                extra,
+                "backend_policy_wgpu_last_lanes",
+                self.backend_policy_wgpu_last_lanes,
+            );
+            insert_optional_extra(
+                extra,
+                "backend_policy_wgpu_last_compaction_tile",
+                self.backend_policy_wgpu_last_compaction_tile,
+            );
+            insert_optional_extra(
+                extra,
+                "backend_policy_wgpu_last_fft_radix",
+                self.backend_policy_wgpu_last_fft_radix,
+            );
+            insert_optional_extra(
+                extra,
+                "backend_policy_wgpu_last_fft_segments",
+                self.backend_policy_wgpu_last_fft_segments,
+            );
+            insert_optional_extra(
+                extra,
+                "backend_policy_wgpu_last_override_count",
+                self.backend_policy_wgpu_last_override_count,
+            );
+            insert_optional_extra(
+                extra,
+                "backend_policy_unison_last_candidate_count",
+                self.backend_policy_unison_last_candidate_count,
+            );
+            insert_optional_extra(
+                extra,
+                "backend_policy_unison_last_best_score",
+                self.backend_policy_unison_last_best_score,
+            );
+            insert_optional_extra(
+                extra,
+                "backend_policy_unison_last_baseline_score",
+                self.backend_policy_unison_last_baseline_score,
+            );
+            insert_optional_extra(
+                extra,
+                "backend_policy_unison_last_wgpu_generated_score",
+                self.backend_policy_unison_last_wgpu_generated_score,
+            );
+            insert_optional_extra(
+                extra,
+                "backend_policy_unison_last_wgpu_generated_score_delta",
+                self.backend_policy_unison_last_wgpu_generated_score_delta,
+            );
+            insert_optional_extra(
+                extra,
+                "backend_policy_tensor_util_last_values",
+                self.backend_policy_tensor_util_last_values,
+            );
+            insert_optional_extra(
+                extra,
+                "backend_policy_tensor_util_last_threshold",
+                self.backend_policy_tensor_util_last_threshold,
+            );
+        }
+    }
+
+    fn validate_expected_backend(&self, expected: BackendKind) -> PureResult<()> {
+        let expected_label = expected.as_str();
+        let kernel_total = self
+            .by_backend
+            .iter()
+            .filter(|(backend, _)| !is_metadata_only_backend(backend))
+            .map(|(_, count)| *count)
+            .sum::<usize>();
+        if kernel_total == 0 {
+            return Err(TensorError::BackendFailure {
+                backend: expected_label,
+                message: format!(
+                    "trainer requested {expected_label} with SPIRALTORCH_STRICT_GPU, but no tensor kernel backend metadata was emitted"
+                ),
+            });
+        }
+        let mismatched = self
+            .by_backend
+            .iter()
+            .filter(|(backend, _)| {
+                backend.as_str() != expected_label && !is_metadata_only_backend(backend)
+            })
+            .map(|(backend, count)| format!("{backend}:{count}"))
+            .collect::<Vec<_>>();
+        if mismatched.is_empty() {
+            return Ok(());
+        }
+        let mut observed = self
+            .by_backend
+            .iter()
+            .map(|(backend, count)| format!("{backend}:{count}"))
+            .collect::<Vec<_>>();
+        observed.sort();
+        Err(TensorError::BackendFailure {
+            backend: expected_label,
+            message: format!(
+                "trainer requested {expected_label} with SPIRALTORCH_STRICT_GPU, but tensor kernels used [{}]; mismatched [{}]",
+                observed.join(", "),
+                mismatched.join(", ")
+            ),
+        })
+    }
+}
+
+/// Tensor backend counters aggregated across one training epoch.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct EpochTensorBackendStats {
+    pub ops_total: usize,
+    pub fallbacks: usize,
+    pub meta_events: usize,
+    pub meta_non_finite_sentinels: usize,
+    pub backend_wgpu: usize,
+    pub backend_cuda: usize,
+    pub backend_hip: usize,
+    pub backend_cpu: usize,
+    pub backend_cpu_simd: usize,
+    pub backend_f64_cpu: usize,
+    pub backend_faer: usize,
+    pub backend_naive: usize,
+    pub backend_other: usize,
+    pub kernel_backend_wgpu_dense: usize,
+    pub kernel_backend_simd: usize,
+    pub kernel_backend_other: usize,
+    pub embedding_tokens: usize,
+    pub embedding_unique_token_indices: usize,
+    pub embedding_repeated_token_indices: usize,
+    pub embedding_token_repairs: usize,
+}
+
+impl EpochTensorBackendStats {
+    fn accumulate_trace(&mut self, trace: &TensorBackendStepTrace) {
+        self.ops_total = self.ops_total.saturating_add(trace.total);
+        self.fallbacks = self.fallbacks.saturating_add(trace.fallbacks);
+        self.meta_events = self.meta_events.saturating_add(trace.meta_events);
+        self.meta_non_finite_sentinels = self.meta_non_finite_sentinels.saturating_add(
+            trace
+                .meta_null_values
+                .saturating_add(trace.meta_non_finite_strings),
+        );
+        self.embedding_tokens = self.embedding_tokens.saturating_add(trace.embedding_tokens);
+        self.embedding_unique_token_indices = self
+            .embedding_unique_token_indices
+            .saturating_add(trace.embedding_unique_token_indices);
+        self.embedding_repeated_token_indices = self
+            .embedding_repeated_token_indices
+            .saturating_add(trace.embedding_repeated_token_indices);
+        self.embedding_token_repairs = self.embedding_token_repairs.saturating_add(
+            trace
+                .embedding_non_finite_tokens
+                .saturating_add(trace.embedding_rounded_tokens)
+                .saturating_add(trace.embedding_clamped_low_tokens)
+                .saturating_add(trace.embedding_clamped_high_tokens),
+        );
+        for (backend, count) in trace.by_backend.iter() {
+            match backend.as_str() {
+                "wgpu" => self.backend_wgpu = self.backend_wgpu.saturating_add(*count),
+                "cuda" => self.backend_cuda = self.backend_cuda.saturating_add(*count),
+                "hip" => self.backend_hip = self.backend_hip.saturating_add(*count),
+                "cpu" => self.backend_cpu = self.backend_cpu.saturating_add(*count),
+                "cpu_simd" => self.backend_cpu_simd = self.backend_cpu_simd.saturating_add(*count),
+                "f64_cpu" => self.backend_f64_cpu = self.backend_f64_cpu.saturating_add(*count),
+                "faer" => self.backend_faer = self.backend_faer.saturating_add(*count),
+                "naive" => self.backend_naive = self.backend_naive.saturating_add(*count),
+                _ => self.backend_other = self.backend_other.saturating_add(*count),
+            }
+        }
+        for (backend, count) in trace.by_kernel_backend.iter() {
+            match backend.as_str() {
+                "wgpu_dense" => {
+                    self.kernel_backend_wgpu_dense =
+                        self.kernel_backend_wgpu_dense.saturating_add(*count)
+                }
+                "simd" => {
+                    self.kernel_backend_simd = self.kernel_backend_simd.saturating_add(*count)
+                }
+                "wgpu" | "cuda" | "hip" | "cpu" | "cpu_simd" | "faer" | "naive" => {}
+                _ => self.kernel_backend_other = self.kernel_backend_other.saturating_add(*count),
+            }
+        }
+    }
+
+    /// Writes this summary using the same metric vocabulary as trainer traces.
+    pub fn write_extra(&self, extra: &mut HashMap<String, f64>) {
+        extra.insert("epoch_tensor_ops_total".to_string(), self.ops_total as f64);
+        extra.insert(
+            "epoch_tensor_backend_fallbacks".to_string(),
+            self.fallbacks as f64,
+        );
+        extra.insert(
+            "epoch_tensor_meta_events".to_string(),
+            self.meta_events as f64,
+        );
+        extra.insert(
+            "epoch_tensor_meta_non_finite_sentinels".to_string(),
+            self.meta_non_finite_sentinels as f64,
+        );
+        extra.insert(
+            "epoch_tensor_backend_wgpu".to_string(),
+            self.backend_wgpu as f64,
+        );
+        extra.insert(
+            "epoch_tensor_backend_cuda".to_string(),
+            self.backend_cuda as f64,
+        );
+        extra.insert(
+            "epoch_tensor_backend_hip".to_string(),
+            self.backend_hip as f64,
+        );
+        extra.insert(
+            "epoch_tensor_backend_cpu".to_string(),
+            self.backend_cpu as f64,
+        );
+        extra.insert(
+            "epoch_tensor_backend_cpu_simd".to_string(),
+            self.backend_cpu_simd as f64,
+        );
+        extra.insert(
+            "epoch_tensor_backend_f64_cpu".to_string(),
+            self.backend_f64_cpu as f64,
+        );
+        extra.insert(
+            "epoch_tensor_backend_faer".to_string(),
+            self.backend_faer as f64,
+        );
+        extra.insert(
+            "epoch_tensor_backend_naive".to_string(),
+            self.backend_naive as f64,
+        );
+        extra.insert(
+            "epoch_tensor_backend_other".to_string(),
+            self.backend_other as f64,
+        );
+        extra.insert(
+            "epoch_tensor_kernel_backend_wgpu_dense".to_string(),
+            self.kernel_backend_wgpu_dense as f64,
+        );
+        extra.insert(
+            "epoch_tensor_kernel_backend_simd".to_string(),
+            self.kernel_backend_simd as f64,
+        );
+        extra.insert(
+            "epoch_tensor_kernel_backend_other".to_string(),
+            self.kernel_backend_other as f64,
+        );
+        extra.insert(
+            "epoch_tensor_embedding_tokens".to_string(),
+            self.embedding_tokens as f64,
+        );
+        extra.insert(
+            "epoch_tensor_embedding_unique_token_indices".to_string(),
+            self.embedding_unique_token_indices as f64,
+        );
+        extra.insert(
+            "epoch_tensor_embedding_repeated_token_indices".to_string(),
+            self.embedding_repeated_token_indices as f64,
+        );
+        extra.insert(
+            "epoch_tensor_embedding_token_repairs".to_string(),
+            self.embedding_token_repairs as f64,
+        );
+    }
+}
+
+fn meta_usize(data: &Value, key: &str) -> usize {
+    data.get(key)
+        .and_then(|value| value.as_u64())
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or(0)
+}
+
+fn meta_f64(data: &Value, key: &str) -> Option<f64> {
+    data.get(key)
+        .and_then(|value| value.as_f64())
+        .filter(|value| value.is_finite())
+}
+
+fn meta_str_fragment(data: &Value, key: &str) -> Option<String> {
+    data.get(key)
+        .and_then(|value| value.as_str())
+        .map(metric_fragment)
+}
+
+fn insert_optional_extra(extra: &mut HashMap<String, f64>, key: &str, value: Option<f64>) {
+    if let Some(value) = value.filter(|value| value.is_finite()) {
+        extra.insert(key.to_string(), value);
+    }
+}
+
+fn insert_tensor_shape_extra(
+    extra: &mut HashMap<String, f64>,
+    prefix: &str,
+    shape: (usize, usize),
+) {
+    extra.insert(format!("{prefix}_rows"), shape.0 as f64);
+    extra.insert(format!("{prefix}_cols"), shape.1 as f64);
+    extra.insert(
+        format!("{prefix}_values"),
+        shape.0.saturating_mul(shape.1) as f64,
+    );
+}
+
+#[derive(Debug, Default)]
+struct ParameterValueSnapshot {
+    params: usize,
+    values: Vec<Vec<f32>>,
+}
+
+#[derive(Debug, Default)]
+struct ParameterUpdateStats {
+    params: usize,
+    values: usize,
+    before_l2_sq: f64,
+    after_l2_sq: f64,
+    delta_l1: f64,
+    delta_l2_sq: f64,
+    delta_linf: f64,
+    non_finite_values: usize,
+    active_params: usize,
+    zero_update_params: usize,
+    max_update_l2: f64,
+    max_update_l2_index: Option<usize>,
+    max_update_l2_values: usize,
+    max_update_l2_ratio: f64,
+    max_update_ratio_l2: f64,
+    max_update_ratio_index: Option<usize>,
+}
+
+impl ParameterUpdateStats {
+    fn write_extra(&self, extra: &mut HashMap<String, f64>) {
+        let before_l2 = self.before_l2_sq.sqrt();
+        let after_l2 = self.after_l2_sq.sqrt();
+        let delta_l2 = self.delta_l2_sq.sqrt();
+        let ratio = delta_l2 / before_l2.max(1.0e-12);
+        extra.insert("optim_param_update_params".to_string(), self.params as f64);
+        extra.insert("optim_param_update_values".to_string(), self.values as f64);
+        extra.insert("optim_param_l2_before".to_string(), before_l2);
+        extra.insert("optim_param_l2_after".to_string(), after_l2);
+        extra.insert("optim_param_update_l1".to_string(), self.delta_l1);
+        extra.insert("optim_param_update_l2".to_string(), delta_l2);
+        extra.insert("optim_param_update_linf".to_string(), self.delta_linf);
+        extra.insert("optim_param_update_ratio_l2".to_string(), ratio);
+        extra.insert(
+            "optim_param_update_active_params".to_string(),
+            self.active_params as f64,
+        );
+        extra.insert(
+            "optim_param_update_zero_params".to_string(),
+            self.zero_update_params as f64,
+        );
+        extra.insert(
+            "optim_param_update_zero_param_ratio".to_string(),
+            if self.params == 0 {
+                0.0
+            } else {
+                self.zero_update_params as f64 / self.params as f64
+            },
+        );
+        extra.insert("optim_param_update_max_l2".to_string(), self.max_update_l2);
+        extra.insert(
+            "optim_param_update_max_l2_values".to_string(),
+            self.max_update_l2_values as f64,
+        );
+        extra.insert(
+            "optim_param_update_max_l2_ratio".to_string(),
+            self.max_update_l2_ratio,
+        );
+        extra.insert(
+            "optim_param_update_max_ratio_l2".to_string(),
+            self.max_update_ratio_l2,
+        );
+        if let Some(index) = self.max_update_l2_index {
+            extra.insert("optim_param_update_max_l2_index".to_string(), index as f64);
+        }
+        if let Some(index) = self.max_update_ratio_index {
+            extra.insert(
+                "optim_param_update_max_ratio_index".to_string(),
+                index as f64,
+            );
+        }
+        extra.insert(
+            "optim_param_update_non_finite_values".to_string(),
+            self.non_finite_values as f64,
+        );
+        if delta_l2 > 0.0 {
+            extra.insert("optim_param_update_detected".to_string(), 1.0);
+        }
+        if self.non_finite_values > 0 {
+            extra.insert("optim_param_update_non_finite_detected".to_string(), 1.0);
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct TensorValueHealth {
+    total: usize,
+    finite: usize,
+    non_finite: usize,
+    nan: usize,
+    infinite: usize,
+    finite_l1: f64,
+    finite_l2_sq: f64,
+    finite_linf: f32,
+}
+
+impl TensorValueHealth {
+    fn from_tensor(tensor: &Tensor) -> Self {
+        let mut health = Self::default();
+        health.record_values(tensor.data());
+        health
+    }
+
+    fn record_values(&mut self, values: &[f32]) {
+        for &value in values {
+            self.total = self.total.saturating_add(1);
+            if value.is_finite() {
+                let abs = value.abs();
+                self.finite = self.finite.saturating_add(1);
+                self.finite_l1 += abs as f64;
+                self.finite_l2_sq += (value as f64) * (value as f64);
+                self.finite_linf = self.finite_linf.max(abs);
+            } else {
+                self.non_finite = self.non_finite.saturating_add(1);
+                if value.is_nan() {
+                    self.nan = self.nan.saturating_add(1);
+                } else if value.is_infinite() {
+                    self.infinite = self.infinite.saturating_add(1);
+                }
+            }
+        }
+    }
+
+    fn non_finite_ratio(&self) -> f64 {
+        if self.total == 0 {
+            0.0
+        } else {
+            self.non_finite as f64 / self.total as f64
+        }
+    }
+
+    fn write_extra(&self, extra: &mut HashMap<String, f64>, prefix: &str) {
+        if self.total == 0 {
+            return;
+        }
+        extra.insert(format!("{prefix}_values_total"), self.total as f64);
+        extra.insert(format!("{prefix}_finite_values"), self.finite as f64);
+        extra.insert(
+            format!("{prefix}_non_finite_values"),
+            self.non_finite as f64,
+        );
+        extra.insert(
+            format!("{prefix}_non_finite_ratio"),
+            self.non_finite_ratio(),
+        );
+        extra.insert(format!("{prefix}_nan_values"), self.nan as f64);
+        extra.insert(format!("{prefix}_infinite_values"), self.infinite as f64);
+        extra.insert(format!("{prefix}_l1_finite"), self.finite_l1);
+        extra.insert(format!("{prefix}_l2_finite"), self.finite_l2_sq.sqrt());
+        extra.insert(format!("{prefix}_linf_finite"), self.finite_linf as f64);
+        if self.non_finite > 0 {
+            extra.insert(format!("{prefix}_non_finite_detected"), 1.0);
+        }
+    }
+}
+
+fn capture_parameter_value_snapshot<M: Module + ?Sized>(
+    module: &M,
+) -> PureResult<ParameterValueSnapshot> {
+    let mut snapshot = ParameterValueSnapshot::default();
+    module.visit_parameters(&mut |param| {
+        snapshot.params = snapshot.params.saturating_add(1);
+        snapshot.values.push(param.value().data().to_vec());
+        Ok(())
+    })?;
+    Ok(snapshot)
+}
+
+fn collect_parameter_update_stats<M: Module + ?Sized>(
+    module: &M,
+    snapshot: &ParameterValueSnapshot,
+) -> PureResult<ParameterUpdateStats> {
+    let mut stats = ParameterUpdateStats::default();
+    let mut index = 0usize;
+    module.visit_parameters(&mut |param| {
+        let Some(before) = snapshot.values.get(index) else {
+            return Err(TensorError::ShapeMismatch {
+                left: (snapshot.values.len(), 1),
+                right: (index.saturating_add(1), 1),
+            });
+        };
+        let after = param.value().data();
+        if before.len() != after.len() {
+            return Err(TensorError::ShapeMismatch {
+                left: (before.len(), 1),
+                right: (after.len(), 1),
+            });
+        }
+        stats.params = stats.params.saturating_add(1);
+        let param_index = index;
+        let mut param_before_l2_sq = 0.0f64;
+        let mut param_delta_l2_sq = 0.0f64;
+        for (&before_value, &after_value) in before.iter().zip(after.iter()) {
+            stats.values = stats.values.saturating_add(1);
+            if before_value.is_finite() {
+                let value = before_value as f64;
+                stats.before_l2_sq += value * value;
+                param_before_l2_sq += value * value;
+            } else {
+                stats.non_finite_values = stats.non_finite_values.saturating_add(1);
+            }
+            if after_value.is_finite() {
+                let value = after_value as f64;
+                stats.after_l2_sq += value * value;
+            } else {
+                stats.non_finite_values = stats.non_finite_values.saturating_add(1);
+            }
+            let delta = after_value - before_value;
+            if delta.is_finite() {
+                let value = delta as f64;
+                stats.delta_l1 += value.abs();
+                stats.delta_l2_sq += value * value;
+                param_delta_l2_sq += value * value;
+                stats.delta_linf = stats.delta_linf.max(value.abs());
+            } else {
+                stats.non_finite_values = stats.non_finite_values.saturating_add(1);
+            }
+        }
+        let param_update_l2 = param_delta_l2_sq.sqrt();
+        let param_update_ratio_l2 = param_update_l2 / param_before_l2_sq.sqrt().max(1.0e-12);
+        if param_update_l2 > 0.0 {
+            stats.active_params = stats.active_params.saturating_add(1);
+        } else {
+            stats.zero_update_params = stats.zero_update_params.saturating_add(1);
+        }
+        if stats
+            .max_update_l2_index
+            .map(|_| param_update_l2 > stats.max_update_l2)
+            .unwrap_or(true)
+        {
+            stats.max_update_l2 = param_update_l2;
+            stats.max_update_l2_index = Some(param_index);
+            stats.max_update_l2_values = after.len();
+            stats.max_update_l2_ratio = param_update_ratio_l2;
+        }
+        if stats
+            .max_update_ratio_index
+            .map(|_| param_update_ratio_l2 > stats.max_update_ratio_l2)
+            .unwrap_or(true)
+        {
+            stats.max_update_ratio_l2 = param_update_ratio_l2;
+            stats.max_update_ratio_index = Some(param_index);
+        }
+        index = index.saturating_add(1);
+        Ok(())
+    })?;
+    if index != snapshot.params {
+        return Err(TensorError::ShapeMismatch {
+            left: (snapshot.params, 1),
+            right: (index, 1),
+        });
+    }
+    Ok(stats)
+}
+
+#[derive(Debug, Default)]
+struct TensorMetaHealth {
+    null_values: usize,
+    non_finite_strings: usize,
+}
+
+impl TensorMetaHealth {
+    fn record(&mut self, value: &Value) {
+        match value {
+            Value::Null => {
+                self.null_values = self.null_values.saturating_add(1);
+            }
+            Value::Bool(_) | Value::Number(_) => {}
+            Value::String(text) => {
+                if is_non_finite_sentinel(text) {
+                    self.non_finite_strings = self.non_finite_strings.saturating_add(1);
+                }
+            }
+            Value::Array(values) => {
+                for value in values {
+                    self.record(value);
+                }
+            }
+            Value::Object(values) => {
+                for value in values.values() {
+                    self.record(value);
+                }
+            }
+        }
+    }
+}
+
+fn is_non_finite_sentinel(text: &str) -> bool {
+    let trimmed = text.trim();
+    matches!(
+        trimmed.to_ascii_lowercase().as_str(),
+        "nan" | "+nan" | "-nan" | "inf" | "+inf" | "-inf" | "infinity" | "+infinity" | "-infinity"
+    )
+}
+
+fn validate_trainer_scalar(label: &'static str, value: f32) -> PureResult<f32> {
+    if !value.is_finite() {
+        return Err(TensorError::NonFiniteValue { label, value });
+    }
+    Ok(value)
+}
+
+fn validate_trainer_slice(label: &'static str, values: &[f32]) -> PureResult<()> {
+    for value in values.iter().copied() {
+        validate_trainer_scalar(label, value)?;
+    }
+    Ok(())
+}
+
+fn validate_trainer_tensor(label: &'static str, tensor: &Tensor) -> PureResult<()> {
+    validate_trainer_slice(label, tensor.data())
+}
+
+fn trainer_tensor_sum(label: &'static str, tensor: &Tensor) -> PureResult<f32> {
+    validate_trainer_tensor(label, tensor)?;
+    let sum = tensor
+        .data()
+        .iter()
+        .fold(0.0f64, |acc, value| acc + f64::from(*value));
+    if !sum.is_finite() || sum.abs() > f64::from(f32::MAX) {
+        let value = if sum.is_sign_negative() {
+            f32::NEG_INFINITY
+        } else {
+            f32::INFINITY
+        };
+        return Err(TensorError::NonFiniteValue { label, value });
+    }
+    Ok(sum as f32)
+}
+
+fn validate_band_energy_for_trainer(energy: &BandEnergy) -> PureResult<()> {
+    validate_trainer_scalar("trainer_band_energy_above", energy.above)?;
+    validate_trainer_scalar("trainer_band_energy_here", energy.here)?;
+    validate_trainer_scalar("trainer_band_energy_beneath", energy.beneath)?;
+    validate_trainer_scalar("trainer_band_energy_drift", energy.drift)?;
+    validate_trainer_scalar(
+        "trainer_band_spectral_sheet_confidence",
+        energy.spectral.sheet_confidence,
+    )?;
+    validate_trainer_scalar("trainer_band_spectral_curvature", energy.spectral.curvature)?;
+    validate_trainer_scalar("trainer_band_spectral_spin", energy.spectral.spin)?;
+    validate_trainer_scalar("trainer_band_spectral_energy", energy.spectral.energy)?;
+    Ok(())
+}
+
+fn validate_band_weights_for_trainer(weights: (f32, f32, f32)) -> PureResult<()> {
+    validate_trainer_scalar("trainer_band_weight_above", weights.0)?;
+    validate_trainer_scalar("trainer_band_weight_here", weights.1)?;
+    validate_trainer_scalar("trainer_band_weight_beneath", weights.2)?;
+    Ok(())
+}
+
+#[derive(Debug, Default)]
+struct GradientHealth {
+    total: usize,
+    finite: usize,
+    non_finite: usize,
+    nan: usize,
+    infinite: usize,
+    finite_l1: f64,
+    finite_l2_sq: f64,
+    finite_linf: f32,
+    first_non_finite: Option<f32>,
+}
+
+impl GradientHealth {
+    fn record_values(&mut self, values: &[f32]) {
+        for &value in values {
+            self.total = self.total.saturating_add(1);
+            if value.is_finite() {
+                let abs = value.abs();
+                self.finite = self.finite.saturating_add(1);
+                self.finite_l1 += abs as f64;
+                self.finite_l2_sq += (value as f64) * (value as f64);
+                self.finite_linf = self.finite_linf.max(abs);
+            } else {
+                self.non_finite = self.non_finite.saturating_add(1);
+                if self.first_non_finite.is_none() {
+                    self.first_non_finite = Some(value);
+                }
+                if value.is_nan() {
+                    self.nan = self.nan.saturating_add(1);
+                } else if value.is_infinite() {
+                    self.infinite = self.infinite.saturating_add(1);
+                }
+            }
+        }
+    }
+
+    fn non_finite_ratio(&self) -> f64 {
+        if self.total == 0 {
+            0.0
+        } else {
+            self.non_finite as f64 / self.total as f64
+        }
+    }
+
+    fn write_extra(&self, extra: &mut HashMap<String, f64>) {
+        if self.total == 0 {
+            return;
+        }
+        extra.insert("grad_values_total".to_string(), self.total as f64);
+        extra.insert("grad_values_finite".to_string(), self.finite as f64);
+        extra.insert("grad_values_non_finite".to_string(), self.non_finite as f64);
+        extra.insert(
+            "grad_values_non_finite_ratio".to_string(),
+            self.non_finite_ratio(),
+        );
+        extra.insert("grad_values_nan".to_string(), self.nan as f64);
+        extra.insert("grad_values_infinite".to_string(), self.infinite as f64);
+        extra.insert("grad_l1_finite".to_string(), self.finite_l1);
+        extra.insert("grad_l2_finite".to_string(), self.finite_l2_sq.sqrt());
+        extra.insert("grad_linf_finite".to_string(), self.finite_linf as f64);
+        if self.non_finite > 0 {
+            extra.insert("grad_non_finite_detected".to_string(), 1.0);
+        }
+    }
+
+    fn ensure_finite(&self, label: &'static str) -> PureResult<()> {
+        if let Some(value) = self.first_non_finite {
+            return Err(TensorError::NonFiniteValue { label, value });
+        }
+        Ok(())
+    }
+}
+
+fn write_backend_policy_extra(policy: BackendPolicy, extra: &mut HashMap<String, f64>) {
+    extra.insert(
+        format!(
+            "tensor_policy_device_{}",
+            metric_fragment(policy.device_backend_label())
+        ),
+        1.0,
+    );
+    extra.insert(
+        format!(
+            "tensor_policy_matmul_{}",
+            metric_fragment(policy.matmul_backend_label())
+        ),
+        1.0,
+    );
+    extra.insert(
+        format!(
+            "tensor_policy_prepacked_matmul_{}",
+            metric_fragment(policy.prepacked_matmul_backend_label())
+        ),
+        1.0,
+    );
+    extra.insert(
+        format!(
+            "tensor_policy_layer_norm_{}",
+            metric_fragment(policy.layer_norm_backend_label())
+        ),
+        1.0,
+    );
+    extra.insert(
+        format!(
+            "tensor_policy_attention_{}",
+            metric_fragment(policy.attention_backend_label())
+        ),
+        1.0,
+    );
+    extra.insert(
+        format!(
+            "tensor_policy_softmax_{}",
+            metric_fragment(policy.softmax_backend_label())
+        ),
+        1.0,
+    );
+}
+
+fn write_coherence_repair_extra(
+    signal: Option<&CoherenceSignal>,
+    extra: &mut HashMap<String, f64>,
+) {
+    let Some(signal) = signal else {
+        return;
+    };
+    extra.insert(
+        "coherence_repaired_non_finite_weights".to_string(),
+        signal.repaired_non_finite_weights() as f64,
+    );
+    extra.insert(
+        "coherence_repaired_negative_weights".to_string(),
+        signal.repaired_negative_weights() as f64,
+    );
+    extra.insert(
+        "coherence_repaired_weights_total".to_string(),
+        signal.repaired_weights_total() as f64,
+    );
+    extra.insert(
+        "coherence_pre_discard_repaired_non_finite".to_string(),
+        signal.pre_discard_repaired_non_finite() as f64,
+    );
+    extra.insert(
+        "coherence_pre_discard_repaired_negative".to_string(),
+        signal.pre_discard_repaired_negative() as f64,
+    );
+    extra.insert(
+        "coherence_pre_discard_repairs_total".to_string(),
+        signal.pre_discard_repairs_total() as f64,
+    );
+    extra.insert(
+        "coherence_repairs_total".to_string(),
+        signal.repairs_total() as f64,
+    );
+    if signal.repairs_total() > 0 {
+        extra.insert("coherence_repaired_detected".to_string(), 1.0);
+    }
+}
+
+struct TensorOpMetaStepCollector {
+    _observer_lock: std::sync::MutexGuard<'static, ()>,
+    trace: Arc<Mutex<TensorBackendStepTrace>>,
+    previous: Option<TensorOpMetaObserver>,
+}
+
+impl TensorOpMetaStepCollector {
+    fn install() -> Self {
+        let observer_lock = tensor_meta_observer_lock();
+        let trace = Arc::new(Mutex::new(TensorBackendStepTrace::default()));
+        let trace_capture = Arc::clone(&trace);
+        let previous_slot: Arc<Mutex<Option<TensorOpMetaObserver>>> = Arc::new(Mutex::new(None));
+        let previous_capture = Arc::clone(&previous_slot);
+        let observer: TensorOpMetaObserver = Arc::new(move |event: &TensorOpMetaEvent| {
+            trace_capture
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .record(event);
+            let previous = previous_capture
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone();
+            if let Some(previous) = previous {
+                previous(event);
+            }
+        });
+        let previous = set_tensor_op_meta_observer(Some(observer));
+        *previous_slot
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = previous.clone();
+        Self {
+            _observer_lock: observer_lock,
+            trace,
+            previous,
+        }
+    }
+
+    fn clear(&self) {
+        *self
+            .trace
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = TensorBackendStepTrace::default();
+    }
+
+    fn drain(&self) -> TensorBackendStepTrace {
+        std::mem::take(
+            &mut *self
+                .trace
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        )
+    }
+}
+
+impl Drop for TensorOpMetaStepCollector {
+    fn drop(&mut self) {
+        set_tensor_op_meta_observer(self.previous.take());
+    }
+}
+
+fn metric_fragment(label: &str) -> String {
+    let mut out = String::with_capacity(label.len());
+    let mut last_underscore = false;
+    for ch in label.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            last_underscore = false;
+        } else if !last_underscore {
+            out.push('_');
+            last_underscore = true;
+        }
+    }
+    while out.ends_with('_') {
+        out.pop();
+    }
+    if out.is_empty() {
+        "unknown".to_string()
+    } else {
+        out
+    }
+}
+
+fn backend_metric_fragment(label: &str) -> String {
+    let fragment = metric_fragment(label);
+    match fragment.as_str() {
+        "wgpu_dense" => "wgpu".to_string(),
+        "simd" => "cpu_simd".to_string(),
+        _ => fragment,
+    }
+}
+
+fn is_metadata_only_backend(label: &str) -> bool {
+    matches!(
+        label,
+        "composite" | "hybrid" | "view" | "semantic_bridge_window_distribution"
+    )
+}
+
+fn strict_gpu_path() -> bool {
+    #[cfg(test)]
+    {
+        if let Some(value) = STRICT_GPU_TEST_OVERRIDE.with(|slot| *slot.borrow()) {
+            return value;
+        }
+    }
+    std::env::var("SPIRALTORCH_STRICT_GPU")
+        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE"))
+        .unwrap_or(false)
+}
+
+fn strict_expected_tensor_backend(caps: DeviceCaps) -> Option<BackendKind> {
+    if !strict_gpu_path() {
+        return None;
+    }
+    match caps.backend {
+        BackendKind::Wgpu | BackendKind::Cuda | BackendKind::Hip => Some(caps.backend),
+        BackendKind::Mps | BackendKind::Cpu => None,
+    }
+}
+
 /// High-level orchestrator that keeps hypergrad, SpiralK, and module updates aligned.
 pub struct ModuleTrainer {
     epoch: usize,
@@ -678,6 +2336,8 @@ pub struct ModuleTrainer {
     rewrite_budget: Option<RewriteBudget>,
     softlogic: SoftLogicFlex,
     spectral_adapter: SpectralLrAdapter,
+    accumulator_synchronizer: Option<Arc<dyn AccumulatorSynchronizer>>,
+    last_accumulator_sync: TrainerAccumulatorSyncStats,
     desire_bridge: Option<DesireTrainerBridge>,
     desire_roundtable_bridge: Option<DesireRoundtableBridge>,
     last_desire_roundtable_summary: Option<DesireRoundtableSummary>,
@@ -732,6 +2392,162 @@ impl core::fmt::Debug for ModuleTrainer {
             self.fallback_learning_rate,
             self.real_learning_rate
         )
+    }
+}
+
+/// Copyable optimizer-facing trainer state for traces and future checkpoints.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TrainerOptimizerState {
+    pub epoch: usize,
+    pub curvature: f32,
+    pub hyper_learning_rate: f32,
+    pub fallback_learning_rate: f32,
+    pub real_learning_rate: Option<f32>,
+    pub grad_clip_max_norm: Option<f32>,
+    pub spectral_policy_enabled: bool,
+    pub curvature_scheduler_enabled: bool,
+    pub training_device_enabled: bool,
+    pub training_rank: usize,
+    pub training_world_size: usize,
+    pub spectral_adapter: SpectralLrAdapterState,
+}
+
+impl TrainerOptimizerState {
+    fn write_extra(&self, extra: &mut HashMap<String, f64>) {
+        extra.insert("optim_state_epoch".to_string(), self.epoch as f64);
+        extra.insert("optim_state_curvature".to_string(), self.curvature as f64);
+        extra.insert(
+            "optim_state_hyper_lr".to_string(),
+            self.hyper_learning_rate as f64,
+        );
+        extra.insert(
+            "optim_state_fallback_lr".to_string(),
+            self.fallback_learning_rate as f64,
+        );
+        extra.insert(
+            "optim_state_realgrad_enabled".to_string(),
+            if self.real_learning_rate.is_some() {
+                1.0
+            } else {
+                0.0
+            },
+        );
+        if let Some(rate) = self.real_learning_rate {
+            extra.insert("optim_state_real_lr".to_string(), rate as f64);
+        }
+        extra.insert(
+            "optim_state_grad_clip_enabled".to_string(),
+            if self.grad_clip_max_norm.is_some() {
+                1.0
+            } else {
+                0.0
+            },
+        );
+        if let Some(limit) = self.grad_clip_max_norm {
+            extra.insert("optim_state_grad_clip_max_norm".to_string(), limit as f64);
+        }
+        extra.insert(
+            "optim_state_spectral_policy_enabled".to_string(),
+            if self.spectral_policy_enabled {
+                1.0
+            } else {
+                0.0
+            },
+        );
+        extra.insert(
+            "optim_state_curvature_scheduler_enabled".to_string(),
+            if self.curvature_scheduler_enabled {
+                1.0
+            } else {
+                0.0
+            },
+        );
+        extra.insert(
+            "optim_state_training_device_enabled".to_string(),
+            if self.training_device_enabled {
+                1.0
+            } else {
+                0.0
+            },
+        );
+        extra.insert(
+            "optim_state_training_rank".to_string(),
+            self.training_rank as f64,
+        );
+        extra.insert(
+            "optim_state_training_world_size".to_string(),
+            self.training_world_size as f64,
+        );
+        extra.insert(
+            "optim_state_adapter_sheet_hint".to_string(),
+            self.spectral_adapter.sheet_hint as f64,
+        );
+        extra.insert(
+            "optim_state_adapter_curvature_target".to_string(),
+            self.spectral_adapter.curvature_target as f64,
+        );
+        extra.insert(
+            "optim_state_adapter_avg_curvature".to_string(),
+            self.spectral_adapter.avg_curvature as f64,
+        );
+        extra.insert(
+            "optim_state_adapter_avg_spin".to_string(),
+            self.spectral_adapter.avg_spin as f64,
+        );
+        extra.insert(
+            "optim_state_adapter_avg_energy".to_string(),
+            self.spectral_adapter.avg_energy as f64,
+        );
+        extra.insert(
+            "optim_state_adapter_min_scale".to_string(),
+            self.spectral_adapter.min_scale as f64,
+        );
+        extra.insert(
+            "optim_state_adapter_max_scale".to_string(),
+            self.spectral_adapter.max_scale as f64,
+        );
+    }
+}
+
+/// Summary of the most recent accumulator synchronization pass.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TrainerAccumulatorSyncStats {
+    pub enabled: bool,
+    pub rank: usize,
+    pub world_size: usize,
+    pub buffers: usize,
+    pub values: usize,
+}
+
+impl TrainerAccumulatorSyncStats {
+    fn disabled() -> Self {
+        Self {
+            enabled: false,
+            rank: 0,
+            world_size: 1,
+            buffers: 0,
+            values: 0,
+        }
+    }
+
+    fn write_extra(&self, extra: &mut HashMap<String, f64>) {
+        extra.insert(
+            "optim_accumulator_sync_enabled".to_string(),
+            if self.enabled { 1.0 } else { 0.0 },
+        );
+        extra.insert("optim_accumulator_sync_rank".to_string(), self.rank as f64);
+        extra.insert(
+            "optim_accumulator_sync_world_size".to_string(),
+            self.world_size as f64,
+        );
+        extra.insert(
+            "optim_accumulator_sync_buffers".to_string(),
+            self.buffers as f64,
+        );
+        extra.insert(
+            "optim_accumulator_sync_values".to_string(),
+            self.values as f64,
+        );
     }
 }
 
@@ -2444,6 +4260,8 @@ impl ModuleTrainer {
             rewrite_budget: None,
             softlogic: SoftLogicFlex::new(),
             spectral_adapter,
+            accumulator_synchronizer: None,
+            last_accumulator_sync: TrainerAccumulatorSyncStats::disabled(),
             desire_bridge: None,
             desire_roundtable_bridge: None,
             last_desire_roundtable_summary: None,
@@ -3259,6 +5077,57 @@ impl ModuleTrainer {
         self.fallback_learning_rate
     }
 
+    fn accumulator_synchronizer_snapshot(&self) -> (bool, usize, usize) {
+        if let Some(device) = self.accumulator_synchronizer.as_ref() {
+            return (true, device.rank(), device.world_size());
+        }
+        (false, 0, 1)
+    }
+
+    /// Returns a copyable optimizer-facing state snapshot.
+    pub fn optimizer_state(&self) -> TrainerOptimizerState {
+        let (training_device_enabled, training_rank, training_world_size) =
+            self.accumulator_synchronizer_snapshot();
+        TrainerOptimizerState {
+            epoch: self.epoch,
+            curvature: self.curvature,
+            hyper_learning_rate: self.hyper_learning_rate,
+            fallback_learning_rate: self.fallback_learning_rate,
+            real_learning_rate: self.real_learning_rate,
+            grad_clip_max_norm: self.grad_clip_max_norm,
+            spectral_policy_enabled: self.spectral_policy.is_some(),
+            curvature_scheduler_enabled: self.curvature_scheduler.is_some(),
+            training_device_enabled,
+            training_rank,
+            training_world_size,
+            spectral_adapter: self.spectral_adapter.state(),
+        }
+    }
+
+    /// Returns details for the most recent accumulator synchronization pass.
+    pub fn last_accumulator_sync(&self) -> TrainerAccumulatorSyncStats {
+        self.last_accumulator_sync
+    }
+
+    /// Installs a training device used to synchronize parameter accumulators before updates.
+    pub fn set_training_device<D>(&mut self, device: D)
+    where
+        D: AccumulatorSynchronizer + 'static,
+    {
+        self.accumulator_synchronizer = Some(Arc::new(device));
+    }
+
+    /// Installs a shared training device used to synchronize parameter accumulators before updates.
+    pub fn set_training_device_arc(&mut self, device: Arc<dyn AccumulatorSynchronizer>) {
+        self.accumulator_synchronizer = Some(device);
+    }
+
+    /// Clears any configured training device and returns to local-only updates.
+    pub fn clear_training_device(&mut self) {
+        self.accumulator_synchronizer = None;
+        self.last_accumulator_sync = TrainerAccumulatorSyncStats::disabled();
+    }
+
     /// Returns the curvature used for hypergrad preparation.
     pub fn curvature(&self) -> f32 {
         self.curvature
@@ -3373,6 +5242,7 @@ impl ModuleTrainer {
 
     /// Applies the parameter updates using either the hypergrad tape or the fallback rate.
     pub fn step<M: Module + ?Sized>(&mut self, module: &mut M) -> PureResult<()> {
+        self.synchronize_parameter_accumulators(module)?;
         if let Some(limit) = self.grad_clip_max_norm {
             self.clip_grad_global_norm(module, limit)?;
         }
@@ -3436,8 +5306,21 @@ impl ModuleTrainer {
         self.bootstrap_collapse(schedule);
         let mut total_loss = 0.0f32;
         let mut steps = 0usize;
+        let backend_policy = BackendPolicy::from_device_caps(self.planner.device_caps());
+        let strict_expected_backend = strict_expected_tensor_backend(self.planner.device_caps());
+        let trace_trainer_steps = global_registry().event_bus().has_listeners("TrainerStep");
+        let trace_parameter_updates = trace_trainer_steps;
+        let tensor_trace = Some(TensorOpMetaStepCollector::install());
+        let mut epoch_tensor_backend = EpochTensorBackendStats::default();
         for batch in batches.into_iter() {
+            if let Some(trace) = tensor_trace.as_ref() {
+                trace.clear();
+            }
             let (input, target) = batch.into_batch()?;
+            validate_trainer_tensor("trainer_batch_input", &input)?;
+            validate_trainer_tensor("trainer_batch_target", &target)?;
+            let input_shape = input.shape();
+            let target_shape = target.shape();
             let graph_adjustment = self.graph_pending.take();
             self.graph_last_hint = graph_adjustment
                 .as_ref()
@@ -3453,11 +5336,19 @@ impl ModuleTrainer {
                 let context = ap.build_context(rows as u32, cols as u32, depth, device_load, &[]);
                 let _ = ap.suggest(context);
             }
+            let _backend_policy_guard = push_backend_policy(backend_policy);
             let prediction = module.forward(&input)?;
+            validate_trainer_tensor("trainer_prediction", &prediction)?;
+            let prediction_shape = prediction.shape();
             let loss_value = loss.forward(&prediction, &target)?;
-            let step_loss = loss_value.data().iter().copied().sum::<f32>();
+            validate_trainer_tensor("trainer_loss", &loss_value)?;
+            let loss_shape = loss_value.shape();
+            let step_loss = trainer_tensor_sum("trainer_step_loss", &loss_value)?;
             let grad_output = loss.backward(&prediction, &target)?;
+            validate_trainer_tensor("trainer_grad_output", &grad_output)?;
+            let grad_output_shape = grad_output.shape();
             let mut band_energy = schedule.band_energy(&grad_output)?;
+            validate_band_energy_for_trainer(&band_energy)?;
             let baseline_band_energy = band_energy;
             let mut desire_impulse = None;
             if let Some(bridge) = self.desire_roundtable_bridge.as_ref() {
@@ -3477,12 +5368,12 @@ impl ModuleTrainer {
             if let Some(rt) = self.blackcat.as_ref() {
                 band_energy.drift = rt.frac_penalty() as f32;
             }
+            validate_band_energy_for_trainer(&band_energy)?;
             let mut roundtable_signal = RoundtableBandSignal::from_schedule(schedule, band_energy);
             if let Some(bridge) = self.gnn_roundtable_bridge.as_ref() {
                 roundtable_signal = bridge.publish(roundtable_signal.clone())?;
             }
             self.gnn_last_roundtable_signal = Some(roundtable_signal.clone());
-            module.apply_roundtable_band(&roundtable_signal)?;
             let mut bands: GradientBands = schedule.split(&grad_output)?;
             let mut weights = self.softlogic.prepare_weights(&band_energy);
             if let Some(ref impulse) = desire_impulse {
@@ -3501,6 +5392,7 @@ impl ModuleTrainer {
                 weights.1 *= override_weights.1;
                 weights.2 *= override_weights.2;
             }
+            validate_band_weights_for_trainer(weights)?;
             let mut spectral_used = false;
             let mut spectral_extra: Option<SpectralAdjustmentMetrics> = None;
             if self.pending_coherence.is_none() {
@@ -3554,11 +5446,37 @@ impl ModuleTrainer {
             if coherence_snapshot.is_some() && !spectral_used {
                 self.pending_coherence = coherence_snapshot;
             }
-            bands.scale_inplace(weights.0, weights.1, weights.2);
-            let weight_mean = (weights.0 + weights.1 + weights.2) / 3.0;
-            let weighted_loss_base = step_loss * weight_mean.max(0.0);
+            validate_band_weights_for_trainer(weights)?;
+            bands.scale_inplace(weights.0, weights.1, weights.2)?;
+            for band in bands.iter() {
+                validate_trainer_tensor("trainer_scaled_band_gradient", band)?;
+            }
+            let weight_mean = validate_trainer_scalar(
+                "trainer_band_weight_mean",
+                (weights.0 + weights.1 + weights.2) / 3.0,
+            )?;
+            let weighted_loss_base = validate_trainer_scalar(
+                "trainer_weighted_loss_base",
+                step_loss * weight_mean.max(0.0),
+            )?;
             let mut weighted_loss = weighted_loss_base;
             let mut extra = HashMap::new();
+            insert_tensor_shape_extra(&mut extra, "batch_input", input_shape);
+            insert_tensor_shape_extra(&mut extra, "batch_target", target_shape);
+            insert_tensor_shape_extra(&mut extra, "batch_prediction", prediction_shape);
+            insert_tensor_shape_extra(&mut extra, "batch_loss", loss_shape);
+            insert_tensor_shape_extra(&mut extra, "batch_grad_output", grad_output_shape);
+            if trace_trainer_steps {
+                TensorValueHealth::from_tensor(&input).write_extra(&mut extra, "batch_input");
+                TensorValueHealth::from_tensor(&target).write_extra(&mut extra, "batch_target");
+                TensorValueHealth::from_tensor(&prediction)
+                    .write_extra(&mut extra, "batch_prediction");
+                TensorValueHealth::from_tensor(&loss_value).write_extra(&mut extra, "batch_loss");
+                TensorValueHealth::from_tensor(&grad_output)
+                    .write_extra(&mut extra, "batch_grad_output");
+            }
+            write_backend_policy_extra(backend_policy, &mut extra);
+            write_coherence_repair_extra(coherence_snapshot.as_ref(), &mut extra);
             extra.insert("softlogic_w_above".to_string(), weights.0 as f64);
             extra.insert("softlogic_w_here".to_string(), weights.1 as f64);
             extra.insert("softlogic_w_beneath".to_string(), weights.2 as f64);
@@ -3739,10 +5657,32 @@ impl ModuleTrainer {
                 );
                 extra.insert("graph_layers".to_string(), digest.layer_count() as f64);
             }
-            let _ = module.backward_bands(&input, &bands)?;
+            module.apply_roundtable_band(&roundtable_signal)?;
+            let backward_result = module.backward_bands(&input, &bands);
             module.clear_roundtable_band()?;
+            if let Err(error) = backward_result {
+                self.zero(module)?;
+                return Err(error);
+            }
+            let gradient_health = Self::collect_gradient_health(module)?;
+            gradient_health.write_extra(&mut extra);
+            let gradient_error = gradient_health
+                .ensure_finite("trainer_gradient_accumulator")
+                .err();
+            if let Some(error) = gradient_error {
+                self.zero(module)?;
+                return Err(error);
+            }
             if let Some(bridge) = self.graph_bridge.as_ref() {
                 self.graph_pending = bridge.digest(&baseline_band_energy)?;
+            }
+            if let Some(trace) = tensor_trace.as_ref() {
+                let step_trace = trace.drain();
+                if let Some(expected) = strict_expected_backend {
+                    step_trace.validate_expected_backend(expected)?;
+                }
+                epoch_tensor_backend.accumulate_trace(&step_trace);
+                step_trace.write_extra(&mut extra);
             }
             #[cfg(feature = "psychoid")]
             let mut psychoid_events = 0usize;
@@ -3892,9 +5832,11 @@ impl ModuleTrainer {
                 .loss_strategy
                 .region_factor(&z_feedback, weighted_loss_base)
             {
+                validate_trainer_scalar("trainer_loss_region_factor", region_factor)?;
                 let factor = region_factor.max(0.0);
                 if factor > 0.0 {
-                    weighted_loss *= factor;
+                    weighted_loss =
+                        validate_trainer_scalar("trainer_weighted_loss", weighted_loss * factor)?;
                 }
                 extra.insert("loss_region_factor".to_string(), factor as f64);
                 extra.insert(
@@ -3926,7 +5868,8 @@ impl ModuleTrainer {
                 Some(report) => hub::set_region_loss_volatility_report(report),
                 None => hub::clear_region_loss_volatility_report(),
             }
-            total_loss += weighted_loss;
+            validate_trainer_scalar("trainer_weighted_loss", weighted_loss)?;
+            total_loss = validate_trainer_scalar("trainer_total_loss", total_loss + weighted_loss)?;
             extra.insert("loss_weighted_base".to_string(), weighted_loss_base as f64);
             let mut loop_broadcasted = false;
             if let Some(node) = self.distribution.as_mut() {
@@ -4011,7 +5954,44 @@ impl ModuleTrainer {
             } else {
                 None
             };
+            let update_snapshot = if trace_parameter_updates {
+                Some(capture_parameter_value_snapshot(module)?)
+            } else {
+                None
+            };
+            let optim_step_fallback_lr = self.fallback_learning_rate;
+            let optim_step_hyper_lr = self.hyper_learning_rate;
+            let optim_step_real_lr = self.real_learning_rate;
+            let optim_step_grad_clip = self.grad_clip_max_norm;
+            let optim_state_before_step = self.optimizer_state();
             self.step(module)?;
+            if let Some(snapshot) = update_snapshot.as_ref() {
+                collect_parameter_update_stats(module, snapshot)?.write_extra(&mut extra);
+            }
+            optim_state_before_step.write_extra(&mut extra);
+            self.last_accumulator_sync.write_extra(&mut extra);
+            extra.insert(
+                "optim_step_fallback_lr".to_string(),
+                optim_step_fallback_lr as f64,
+            );
+            extra.insert(
+                "optim_step_hyper_lr".to_string(),
+                optim_step_hyper_lr as f64,
+            );
+            extra.insert(
+                "optim_realgrad_enabled".to_string(),
+                if optim_step_real_lr.is_some() {
+                    1.0
+                } else {
+                    0.0
+                },
+            );
+            if let Some(rate) = optim_step_real_lr {
+                extra.insert("optim_step_real_lr".to_string(), rate as f64);
+            }
+            if let Some(limit) = optim_step_grad_clip {
+                extra.insert("optim_step_grad_clip_max_norm".to_string(), limit as f64);
+            }
             if let Some(summary) = curvature_summary {
                 if let Some(decision) = self.apply_curvature_scheduler(module, summary)? {
                     extra.insert(
@@ -4286,6 +6266,12 @@ impl ModuleTrainer {
                 band_energy.spectral.energy as f64,
             );
             self.last_band_energy = Some(band_energy);
+            if !step_loss.is_finite() {
+                extra.insert("step_loss_non_finite".to_string(), 1.0);
+            }
+            if !weighted_loss.is_finite() {
+                extra.insert("loss_weighted_non_finite".to_string(), 1.0);
+            }
             extra.insert("step_loss".to_string(), step_loss as f64);
             extra.insert("loss_weighted".to_string(), weighted_loss as f64);
             #[cfg(feature = "psychoid")]
@@ -4298,21 +6284,19 @@ impl ModuleTrainer {
                 retry_rate: 0.0,
                 extra,
             };
-            if bus.has_listeners("TrainerStep") {
-                bus.publish(&PluginEvent::custom(
-                    "TrainerStep",
-                    serde_json::json!({
-                        "epoch": epoch,
-                        "step": steps,
-                        "metrics": {
-                            "step_time_ms": metrics.step_time_ms,
-                            "mem_peak_mb": metrics.mem_peak_mb,
-                            "retry_rate": metrics.retry_rate,
-                            "extra": &metrics.extra,
-                        },
-                    }),
-                ));
-            }
+            bus.publish(&PluginEvent::custom(
+                "TrainerStep",
+                serde_json::json!({
+                    "epoch": epoch,
+                    "step": steps,
+                    "metrics": {
+                        "step_time_ms": metrics.step_time_ms,
+                        "mem_peak_mb": metrics.mem_peak_mb,
+                        "retry_rate": metrics.retry_rate,
+                        "extra": &metrics.extra,
+                    },
+                }),
+            ));
             if let Some(ap) = self.autopilot.as_mut() {
                 ap.report(&metrics);
             }
@@ -4336,6 +6320,7 @@ impl ModuleTrainer {
             } else {
                 total_loss / steps as f32
             },
+            tensor_backend: epoch_tensor_backend,
         };
         global_registry()
             .event_bus()
@@ -4363,21 +6348,31 @@ impl ModuleTrainer {
         let result = (|| {
             let mut total_loss = 0.0f32;
             let mut steps = 0usize;
+            let backend_policy = BackendPolicy::from_device_caps(self.planner.device_caps());
             for batch in batches.into_iter() {
                 let (input, target) = batch.into_batch()?;
+                validate_trainer_tensor("trainer_eval_input", &input)?;
+                validate_trainer_tensor("trainer_eval_target", &target)?;
+                let _backend_policy_guard = push_backend_policy(backend_policy);
                 let prediction = module.forward(&input)?;
+                validate_trainer_tensor("trainer_eval_prediction", &prediction)?;
                 let loss_value = loss.forward(&prediction, &target)?;
-                total_loss += loss_value.data().iter().copied().sum::<f32>();
+                validate_trainer_tensor("trainer_eval_loss", &loss_value)?;
+                let step_loss = trainer_tensor_sum("trainer_eval_step_loss", &loss_value)?;
+                total_loss =
+                    validate_trainer_scalar("trainer_eval_total_loss", total_loss + step_loss)?;
                 steps += 1;
             }
+            let average_loss = if steps == 0 {
+                0.0
+            } else {
+                validate_trainer_scalar("trainer_eval_average_loss", total_loss / steps as f32)?
+            };
             Ok(EpochStats {
                 batches: steps,
                 total_loss,
-                average_loss: if steps == 0 {
-                    0.0
-                } else {
-                    total_loss / steps as f32
-                },
+                average_loss,
+                tensor_backend: EpochTensorBackendStats::default(),
             })
         })();
         let restore = module.train();
@@ -4570,6 +6565,28 @@ impl ModuleTrainer {
         Ok(accumulator.finish())
     }
 
+    fn collect_gradient_health<M: Module + ?Sized>(module: &M) -> PureResult<GradientHealth> {
+        let mut health = GradientHealth::default();
+        module.visit_parameters(&mut |param| {
+            let mut accounted = false;
+            if let Some(tape) = param.hypergrad() {
+                health.record_values(tape.gradient());
+                accounted = true;
+            }
+            if let Some(tape) = param.realgrad() {
+                health.record_values(tape.gradient());
+                accounted = true;
+            }
+            if !accounted {
+                if let Some(grad) = param.gradient() {
+                    health.record_values(grad.data());
+                }
+            }
+            Ok(())
+        })?;
+        Ok(health)
+    }
+
     fn retune_hypergrads<M: Module + ?Sized>(
         module: &mut M,
         curvature: f32,
@@ -4747,15 +6764,68 @@ impl ModuleTrainer {
         if !factor.is_finite() || factor <= 0.0 {
             return Ok(());
         }
-        self.fallback_learning_rate *= factor;
-        self.hyper_learning_rate *= factor;
+        let next_fallback_learning_rate =
+            Self::checked_scaled_learning_rate(self.fallback_learning_rate, factor)?;
+        let next_hyper_learning_rate =
+            Self::checked_scaled_learning_rate(self.hyper_learning_rate, factor)?;
+        let next_real_learning_rate = self
+            .real_learning_rate
+            .map(|rate| Self::checked_scaled_learning_rate(rate, factor))
+            .transpose()?;
+        self.fallback_learning_rate = next_fallback_learning_rate;
+        self.hyper_learning_rate = next_hyper_learning_rate;
         if let Some(rate) = self.real_learning_rate.as_mut() {
-            *rate *= factor;
+            *rate = next_real_learning_rate.expect("real learning rate");
         }
+        self.spectral_adapter.on_global_scale(factor);
         module.visit_parameters_mut(&mut |param| {
             param.scale_learning_rate(factor);
             Ok(())
         })
+    }
+
+    fn checked_scaled_learning_rate(rate: f32, factor: f32) -> PureResult<f32> {
+        let next = rate * factor;
+        if next <= 0.0 || !next.is_finite() {
+            return Err(TensorError::NonPositiveLearningRate { rate: next });
+        }
+        Ok(next)
+    }
+
+    fn map_accumulator_sync_error(error: AccumulatorSyncError) -> TensorError {
+        TensorError::BackendFailure {
+            backend: "accumulator_synchronizer",
+            message: error.to_string(),
+        }
+    }
+
+    fn synchronize_parameter_accumulators<M: Module + ?Sized>(
+        &mut self,
+        module: &mut M,
+    ) -> PureResult<()> {
+        let Some(device) = self.accumulator_synchronizer.as_ref().cloned() else {
+            self.last_accumulator_sync = TrainerAccumulatorSyncStats::disabled();
+            return Ok(());
+        };
+        let mut stats = TrainerAccumulatorSyncStats {
+            enabled: true,
+            rank: device.rank(),
+            world_size: device.world_size(),
+            buffers: 0,
+            values: 0,
+        };
+        module.visit_parameters_mut(&mut |param| {
+            let buffers = param.synchronize_accumulators_with(|gradient| {
+                stats.values += gradient.len();
+                device
+                    .synchronize_accumulators(gradient)
+                    .map_err(Self::map_accumulator_sync_error)
+            })?;
+            stats.buffers += buffers;
+            Ok(())
+        })?;
+        self.last_accumulator_sync = stats;
+        Ok(())
     }
 
     #[cfg(feature = "collapse")]
@@ -4772,7 +6842,7 @@ impl ModuleTrainer {
             return Ok(());
         }
         module.visit_parameters_mut(&mut |param| {
-            param.scale_accumulators(scale);
+            param.scale_accumulators_with_backend_policy(scale)?;
             Ok(())
         })
     }
@@ -4804,19 +6874,7 @@ impl ModuleTrainer {
         module: &mut M,
         factor: f32,
     ) -> PureResult<()> {
-        if !factor.is_finite() || factor <= 0.0 {
-            return Ok(());
-        }
-        self.fallback_learning_rate *= factor;
-        self.hyper_learning_rate *= factor;
-        if let Some(rate) = self.real_learning_rate.as_mut() {
-            *rate *= factor;
-        }
-        self.spectral_adapter.on_global_scale(factor);
-        module.visit_parameters_mut(&mut |param| {
-            param.scale_learning_rate(factor);
-            Ok(())
-        })
+        self.scale_learning_rates(module, factor)
     }
 
     #[cfg(feature = "psi")]
@@ -4966,6 +7024,7 @@ pub struct EpochStats {
     pub batches: usize,
     pub total_loss: f32,
     pub average_loss: f32,
+    pub tensor_backend: EpochTensorBackendStats,
 }
 
 /// Configuration for running several training epochs with optional validation.
@@ -5207,8 +7266,37 @@ mod tests {
     use st_tensor::topos::OpenCartesianTopos;
     use std::collections::HashMap;
     use std::num::NonZeroUsize;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, OnceLock};
     use std::time::{Duration, Instant, SystemTime};
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        ENV_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("env lock available")
+    }
+
+    struct StrictGpuOverrideRestore {
+        previous: Option<bool>,
+    }
+
+    impl Drop for StrictGpuOverrideRestore {
+        fn drop(&mut self) {
+            let previous = self.previous;
+            super::STRICT_GPU_TEST_OVERRIDE.with(|slot| {
+                *slot.borrow_mut() = previous;
+            });
+        }
+    }
+
+    fn with_strict_gpu_env<T>(value: Option<&str>, f: impl FnOnce() -> T) -> T {
+        let _lock = env_lock();
+        let override_value = value.map(|value| matches!(value, "1" | "true" | "TRUE"));
+        let previous = super::STRICT_GPU_TEST_OVERRIDE.with(|slot| slot.replace(override_value));
+        let _restore = StrictGpuOverrideRestore { previous };
+        f()
+    }
 
     fn build_language_geometry() -> SymbolGeometry {
         let syn = SparseKernel::from_rows(
@@ -5299,6 +7387,49 @@ mod tests {
         }
     }
 
+    struct TrainingFlagModule {
+        training: bool,
+    }
+
+    impl TrainingFlagModule {
+        fn new() -> Self {
+            Self { training: true }
+        }
+
+        fn training(&self) -> bool {
+            self.training
+        }
+    }
+
+    impl Module for TrainingFlagModule {
+        fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+            Ok(input.clone())
+        }
+
+        fn backward(&mut self, _input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+            Ok(grad_output.clone())
+        }
+
+        fn visit_parameters(
+            &self,
+            _visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+        ) -> PureResult<()> {
+            Ok(())
+        }
+
+        fn visit_parameters_mut(
+            &mut self,
+            _visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
+        ) -> PureResult<()> {
+            Ok(())
+        }
+
+        fn set_training(&mut self, training: bool) -> PureResult<()> {
+            self.training = training;
+            Ok(())
+        }
+    }
+
     struct ConstantLoss {
         value: f32,
     }
@@ -5332,6 +7463,63 @@ mod tests {
         fn backward(&mut self, _input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
             let update = Tensor::from_vec(1, 1, vec![self.grad_value])?;
             self.param.accumulate_euclidean(&update)?;
+            Ok(grad_output.clone())
+        }
+
+        fn visit_parameters(
+            &self,
+            visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+        ) -> PureResult<()> {
+            visitor(&self.param)
+        }
+
+        fn visit_parameters_mut(
+            &mut self,
+            visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
+        ) -> PureResult<()> {
+            visitor(&mut self.param)
+        }
+    }
+
+    struct NonFiniteAccumulatorModule {
+        param: Parameter,
+        value: f32,
+    }
+
+    impl NonFiniteAccumulatorModule {
+        fn new(value: f32) -> Self {
+            Self {
+                param: Parameter::new("poison", Tensor::zeros(1, 1).unwrap()),
+                value,
+            }
+        }
+
+        fn value(&self) -> &Tensor {
+            self.param.value()
+        }
+
+        fn gradients_are_zero(&self) -> bool {
+            self.param
+                .hypergrad()
+                .map(|tape| tape.gradient().iter().all(|value| *value == 0.0))
+                .unwrap_or(false)
+        }
+    }
+
+    impl Module for NonFiniteAccumulatorModule {
+        fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+            Ok(input.clone())
+        }
+
+        fn backward(&mut self, _input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+            if let Some(tape) = self.param.hypergrad_mut() {
+                if let Some(slot) = tape.gradient_mut().first_mut() {
+                    *slot = self.value;
+                }
+            } else {
+                let update = Tensor::from_vec(1, 1, vec![self.value])?;
+                self.param.accumulate_euclidean(&update)?;
+            }
             Ok(grad_output.clone())
         }
 
@@ -5398,6 +7586,49 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct ScalingTrainingDevice {
+        factor: f32,
+        calls: Arc<Mutex<usize>>,
+        rank: usize,
+        world_size: usize,
+    }
+
+    impl ScalingTrainingDevice {
+        fn new(factor: f32, calls: Arc<Mutex<usize>>) -> Self {
+            Self {
+                factor,
+                calls,
+                rank: 1,
+                world_size: 2,
+            }
+        }
+    }
+
+    impl AccumulatorSynchronizer for ScalingTrainingDevice {
+        fn rank(&self) -> usize {
+            self.rank
+        }
+
+        fn world_size(&self) -> usize {
+            self.world_size
+        }
+
+        fn synchronize_accumulators(
+            &self,
+            gradients: &mut [f32],
+        ) -> Result<(), AccumulatorSyncError> {
+            *self
+                .calls
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) += 1;
+            for value in gradients {
+                *value *= self.factor;
+            }
+            Ok(())
+        }
+    }
+
     #[test]
     fn trainer_attaches_and_steps() {
         let caps = DeviceCaps::wgpu(32, true, 256);
@@ -5411,6 +7642,166 @@ mod tests {
         let _ = layer.backward(&input, &grad).unwrap();
         trainer.step(&mut layer).unwrap();
         assert!(trainer.planner().topk(64, 128, 32).k > 0);
+    }
+
+    #[test]
+    fn trainer_rejects_non_finite_batch_input_before_forward() {
+        let caps = DeviceCaps::cpu();
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        let mut model = Linear::new("finite_gate_input", 2, 1).unwrap();
+        trainer.prepare(&mut model).unwrap();
+        let before = model.weight().value().clone();
+        let schedule = trainer.roundtable(1, 1, RoundtableConfig::default());
+        let dataset = vec![(
+            Tensor::from_vec(1, 2, vec![f32::NAN, 1.0]).unwrap(),
+            Tensor::from_vec(1, 1, vec![0.0]).unwrap(),
+        )];
+        let mut loss = MeanSquaredError::new();
+
+        let err = trainer
+            .train_epoch(&mut model, &mut loss, dataset, &schedule)
+            .expect_err("trainer should reject non-finite batch input");
+
+        match err {
+            TensorError::NonFiniteValue { label, value } => {
+                assert_eq!(label, "trainer_batch_input");
+                assert!(value.is_nan());
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+        assert_eq!(model.weight().value().data(), before.data());
+    }
+
+    #[test]
+    fn trainer_rejects_loss_sum_overflow_before_backward() {
+        let caps = DeviceCaps::cpu();
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        let mut model = IdentityModule;
+        let schedule = trainer.roundtable(1, 2, RoundtableConfig::default());
+        let dataset = vec![(
+            Tensor::from_vec(1, 2, vec![0.0, 0.0]).unwrap(),
+            Tensor::from_vec(1, 2, vec![0.0, 0.0]).unwrap(),
+        )];
+        let mut loss = ConstantLoss::new(f32::MAX);
+
+        let err = trainer
+            .train_epoch(&mut model, &mut loss, dataset, &schedule)
+            .expect_err("trainer should reject overflowed step loss");
+
+        match err {
+            TensorError::NonFiniteValue { label, value } => {
+                assert_eq!(label, "trainer_step_loss");
+                assert!(value.is_infinite());
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn trainer_rejects_non_finite_band_weight_before_replay() {
+        let caps = DeviceCaps::cpu();
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        trainer.set_band_weights(|_| (f32::NAN, 1.0, 1.0));
+        let mut model = Linear::new("finite_gate_band", 2, 1).unwrap();
+        trainer.prepare(&mut model).unwrap();
+        let before = model.weight().value().clone();
+        let schedule = trainer.roundtable(1, 1, RoundtableConfig::default());
+        let dataset = vec![(
+            Tensor::from_vec(1, 2, vec![0.5, -0.25]).unwrap(),
+            Tensor::from_vec(1, 1, vec![0.75]).unwrap(),
+        )];
+        let mut loss = MeanSquaredError::new();
+
+        let err = trainer
+            .train_epoch(&mut model, &mut loss, dataset, &schedule)
+            .expect_err("trainer should reject non-finite band weight");
+
+        match err {
+            TensorError::NonFiniteValue { label, value } => {
+                assert_eq!(label, "trainer_band_weight_above");
+                assert!(value.is_nan());
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+        assert_eq!(model.weight().value().data(), before.data());
+    }
+
+    #[test]
+    fn trainer_rejects_non_finite_accumulator_before_optimizer_step() {
+        let caps = DeviceCaps::cpu();
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        let mut model = NonFiniteAccumulatorModule::new(f32::NAN);
+        trainer.prepare(&mut model).unwrap();
+        let before = model.value().clone();
+        let schedule = trainer.roundtable(1, 1, RoundtableConfig::default());
+        let dataset = vec![(
+            Tensor::from_vec(1, 1, vec![0.0]).unwrap(),
+            Tensor::from_vec(1, 1, vec![1.0]).unwrap(),
+        )];
+        let mut loss = MeanSquaredError::new();
+
+        let err = trainer
+            .train_epoch(&mut model, &mut loss, dataset, &schedule)
+            .expect_err("trainer should reject non-finite accumulators before stepping");
+
+        match err {
+            TensorError::NonFiniteValue { label, value } => {
+                assert_eq!(label, "trainer_gradient_accumulator");
+                assert!(value.is_nan());
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+        assert_eq!(model.value().data(), before.data());
+        assert!(model.gradients_are_zero());
+    }
+
+    #[test]
+    fn evaluate_epoch_rejects_non_finite_input_and_restores_training_mode() {
+        let caps = DeviceCaps::cpu();
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        let mut model = TrainingFlagModule::new();
+        let dataset = vec![(
+            Tensor::from_vec(1, 1, vec![f32::NAN]).unwrap(),
+            Tensor::from_vec(1, 1, vec![0.0]).unwrap(),
+        )];
+        let mut loss = MeanSquaredError::new();
+
+        let err = trainer
+            .evaluate_epoch(&mut model, &mut loss, dataset)
+            .expect_err("evaluation should reject non-finite inputs");
+
+        match err {
+            TensorError::NonFiniteValue { label, value } => {
+                assert_eq!(label, "trainer_eval_input");
+                assert!(value.is_nan());
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+        assert!(model.training());
+    }
+
+    #[test]
+    fn evaluate_epoch_rejects_loss_sum_overflow() {
+        let caps = DeviceCaps::cpu();
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        let mut model = IdentityModule;
+        let dataset = vec![(
+            Tensor::from_vec(1, 2, vec![0.0, 0.0]).unwrap(),
+            Tensor::from_vec(1, 2, vec![0.0, 0.0]).unwrap(),
+        )];
+        let mut loss = ConstantLoss::new(f32::MAX);
+
+        let err = trainer
+            .evaluate_epoch(&mut model, &mut loss, dataset)
+            .expect_err("evaluation should reject overflowed loss sums");
+
+        match err {
+            TensorError::NonFiniteValue { label, value } => {
+                assert_eq!(label, "trainer_eval_step_loss");
+                assert!(value.is_infinite());
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 
     #[test]
@@ -5494,6 +7885,110 @@ mod tests {
                 "value {value} vs expected {expected}"
             );
         }
+    }
+
+    #[test]
+    fn trainer_optimizer_state_tracks_lr_scale_and_adapter_reset() {
+        let caps = DeviceCaps::cpu();
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01).with_realgrad(0.02);
+        trainer.set_grad_clip_max_norm(0.5);
+        let mut module = SpectralGradientModule::new(vec![0.8, -0.4, 0.6, -0.2]);
+        module.accumulate();
+
+        trainer.step(&mut module).unwrap();
+        let before_scale = trainer.optimizer_state();
+        assert_eq!(before_scale.epoch, 0);
+        assert_eq!(before_scale.real_learning_rate, Some(0.02));
+        assert_eq!(before_scale.grad_clip_max_norm, Some(0.5));
+        assert!(before_scale.spectral_adapter.avg_energy > 0.0);
+
+        trainer.mul_learning_rate(&mut module, 0.5).unwrap();
+        let after_scale = trainer.optimizer_state();
+        assert!((after_scale.fallback_learning_rate - 0.005).abs() < 1e-8);
+        assert!((after_scale.hyper_learning_rate - 0.025).abs() < 1e-8);
+        assert!((after_scale.real_learning_rate.unwrap_or(0.0) - 0.01).abs() < 1e-8);
+        assert_eq!(after_scale.spectral_adapter.avg_curvature, 0.0);
+        assert_eq!(after_scale.spectral_adapter.avg_spin, 0.0);
+        assert_eq!(after_scale.spectral_adapter.avg_energy, 0.0);
+    }
+
+    #[test]
+    fn trainer_rejects_overflow_lr_scale_without_mutating_state() {
+        let caps = DeviceCaps::cpu();
+        let mut trainer =
+            ModuleTrainer::new(caps, -1.0, f32::MAX, f32::MAX).with_realgrad(f32::MAX);
+        let mut module = SpectralGradientModule::new(vec![0.8, -0.4, 0.6, -0.2]);
+        let before = trainer.optimizer_state();
+
+        let err = trainer.mul_learning_rate(&mut module, 2.0).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonPositiveLearningRate { rate } if !rate.is_finite()
+        ));
+        assert_eq!(trainer.optimizer_state(), before);
+    }
+
+    #[test]
+    fn trainer_synchronizes_accumulators_before_apply_step() {
+        let caps = DeviceCaps::cpu();
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        let calls = Arc::new(Mutex::new(0usize));
+        trainer.set_training_device(ScalingTrainingDevice::new(0.0, Arc::clone(&calls)));
+        let mut module = SpectralGradientModule::new(vec![0.8, -0.4, 0.6, -0.2]);
+        module.accumulate();
+
+        trainer.step(&mut module).unwrap();
+
+        assert_eq!(
+            *calls
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+            1
+        );
+        assert!(module.weights().data().iter().all(|value| *value == 0.0));
+        let sync = trainer.last_accumulator_sync();
+        assert!(sync.enabled);
+        assert_eq!(sync.rank, 1);
+        assert_eq!(sync.world_size, 2);
+        assert_eq!(sync.buffers, 1);
+        assert_eq!(sync.values, 4);
+        let state = trainer.optimizer_state();
+        assert!(state.training_device_enabled);
+        assert_eq!(state.training_rank, 1);
+        assert_eq!(state.training_world_size, 2);
+    }
+
+    #[test]
+    fn trainer_rejects_non_finite_synchronized_accumulator_without_updating_weights() {
+        let caps = DeviceCaps::cpu();
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        let calls = Arc::new(Mutex::new(0usize));
+        trainer.set_training_device(ScalingTrainingDevice::new(
+            f32::INFINITY,
+            Arc::clone(&calls),
+        ));
+        let mut module = SpectralGradientModule::new(vec![0.8, -0.4, 0.6, -0.2]);
+        module.accumulate();
+        let grad_before = module.param.gradient().unwrap().clone();
+
+        let err = trainer.step(&mut module).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "synchronized_accumulator",
+                value,
+            } if !value.is_finite()
+        ));
+        assert_eq!(
+            *calls
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+            1
+        );
+        assert!(module.weights().data().iter().all(|value| *value == 0.0));
+        assert_eq!(*module.param.gradient().unwrap(), grad_before);
     }
 
     #[test]
@@ -5983,6 +8478,1741 @@ mod tests {
     }
 
     #[test]
+    fn trainer_step_trace_includes_tensor_backend_counters() {
+        let bus = global_registry().event_bus().clone();
+        let events = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+        let captured = events.clone();
+        let subscription_id = bus.subscribe(
+            "TrainerStep",
+            Arc::new(move |event: &PluginEvent| {
+                if let Some(payload) = event.downcast_data::<serde_json::Value>() {
+                    captured
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .push(payload.clone());
+                }
+            }),
+        );
+
+        let caps = DeviceCaps::cpu();
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        let mut model = Linear::new("trace_linear", 2, 1).unwrap();
+        trainer.prepare(&mut model).unwrap();
+        let schedule = trainer.roundtable(2, 1, RoundtableConfig::default());
+        let dataset = vec![(
+            Tensor::from_vec(2, 2, vec![0.5, -1.0, 1.5, 0.25]).unwrap(),
+            Tensor::from_vec(2, 1, vec![0.1, -0.2]).unwrap(),
+        )];
+        let mut loss = MeanSquaredError::new();
+        let result = trainer.train_epoch(&mut model, &mut loss, dataset, &schedule);
+        let _ = bus.unsubscribe("TrainerStep", subscription_id);
+        result.unwrap();
+
+        let events = events
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let event = events
+            .iter()
+            .rev()
+            .find(|event| {
+                event
+                    .get("metrics")
+                    .and_then(|metrics| metrics.get("extra"))
+                    .and_then(|extra| extra.as_object())
+                    .is_some_and(|extra| {
+                        extra
+                            .get("tensor_op_mse_loss_forward")
+                            .and_then(|value| value.as_f64())
+                            .unwrap_or(0.0)
+                            >= 1.0
+                            && extra
+                                .get("batch_input_rows")
+                                .and_then(|value| value.as_f64())
+                                == Some(2.0)
+                            && extra
+                                .get("batch_input_values_total")
+                                .and_then(|value| value.as_f64())
+                                == Some(4.0)
+                            && extra
+                                .get("tensor_policy_device_cpu")
+                                .and_then(|value| value.as_f64())
+                                == Some(1.0)
+                    })
+            })
+            .expect("trainer step trace event for this test");
+        let extra = event
+            .get("metrics")
+            .and_then(|metrics| metrics.get("extra"))
+            .and_then(|extra| extra.as_object())
+            .expect("TrainerStep metrics.extra");
+        assert_eq!(
+            extra
+                .get("batch_input_rows")
+                .and_then(|value| value.as_f64()),
+            Some(2.0)
+        );
+        assert_eq!(
+            extra
+                .get("batch_input_cols")
+                .and_then(|value| value.as_f64()),
+            Some(2.0)
+        );
+        assert_eq!(
+            extra
+                .get("batch_input_values")
+                .and_then(|value| value.as_f64()),
+            Some(4.0)
+        );
+        assert_eq!(
+            extra
+                .get("batch_target_rows")
+                .and_then(|value| value.as_f64()),
+            Some(2.0)
+        );
+        assert_eq!(
+            extra
+                .get("batch_target_cols")
+                .and_then(|value| value.as_f64()),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("batch_prediction_rows")
+                .and_then(|value| value.as_f64()),
+            Some(2.0)
+        );
+        assert_eq!(
+            extra
+                .get("batch_prediction_cols")
+                .and_then(|value| value.as_f64()),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("batch_loss_values")
+                .and_then(|value| value.as_f64()),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("batch_grad_output_values")
+                .and_then(|value| value.as_f64()),
+            Some(2.0)
+        );
+        assert_eq!(
+            extra
+                .get("batch_input_values_total")
+                .and_then(|value| value.as_f64()),
+            Some(4.0)
+        );
+        assert_eq!(
+            extra
+                .get("batch_input_non_finite_values")
+                .and_then(|value| value.as_f64()),
+            Some(0.0)
+        );
+        assert_eq!(
+            extra
+                .get("batch_prediction_values_total")
+                .and_then(|value| value.as_f64()),
+            Some(2.0)
+        );
+        assert_eq!(
+            extra
+                .get("batch_prediction_non_finite_values")
+                .and_then(|value| value.as_f64()),
+            Some(0.0)
+        );
+        assert!(
+            extra
+                .get("batch_prediction_l2_finite")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0)
+                > 0.0
+        );
+        assert_eq!(
+            extra
+                .get("batch_loss_non_finite_values")
+                .and_then(|value| value.as_f64()),
+            Some(0.0)
+        );
+        assert!(
+            extra
+                .get("batch_grad_output_l2_finite")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0)
+                > 0.0
+        );
+        assert_eq!(
+            extra
+                .get("optim_param_update_params")
+                .and_then(|value| value.as_f64()),
+            Some(2.0)
+        );
+        assert_eq!(
+            extra
+                .get("optim_param_update_values")
+                .and_then(|value| value.as_f64()),
+            Some(3.0)
+        );
+        assert!(
+            extra
+                .get("optim_param_update_l2")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0)
+                > 0.0
+        );
+        assert!(
+            extra
+                .get("optim_param_update_ratio_l2")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0)
+                > 0.0
+        );
+        assert!(
+            extra
+                .get("optim_param_update_active_params")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0)
+                >= 1.0
+        );
+        assert!(
+            extra
+                .get("optim_param_update_zero_params")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0)
+                <= 1.0
+        );
+        assert!(
+            extra
+                .get("optim_param_update_max_l2")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0)
+                > 0.0
+        );
+        assert!(
+            extra
+                .get("optim_param_update_max_l2_ratio")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0)
+                > 0.0
+        );
+        assert!(
+            extra
+                .get("optim_param_update_max_ratio_l2")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0)
+                > 0.0
+        );
+        assert!(
+            extra
+                .get("optim_param_update_max_l2_index")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(99.0)
+                < 2.0
+        );
+        assert_eq!(
+            extra
+                .get("optim_param_update_non_finite_values")
+                .and_then(|value| value.as_f64()),
+            Some(0.0)
+        );
+        let fallback_lr = extra
+            .get("optim_step_fallback_lr")
+            .and_then(|value| value.as_f64())
+            .unwrap_or(0.0);
+        assert!((fallback_lr - 0.01).abs() < 1.0e-8);
+        let hyper_lr = extra
+            .get("optim_step_hyper_lr")
+            .and_then(|value| value.as_f64())
+            .unwrap_or(0.0);
+        assert!((hyper_lr - 0.05).abs() < 1.0e-8);
+        let state_fallback_lr = extra
+            .get("optim_state_fallback_lr")
+            .and_then(|value| value.as_f64())
+            .unwrap_or(0.0);
+        assert!((state_fallback_lr - 0.01).abs() < 1.0e-8);
+        let state_hyper_lr = extra
+            .get("optim_state_hyper_lr")
+            .and_then(|value| value.as_f64())
+            .unwrap_or(0.0);
+        assert!((state_hyper_lr - 0.05).abs() < 1.0e-8);
+        assert_eq!(
+            extra
+                .get("optim_state_realgrad_enabled")
+                .and_then(|value| value.as_f64()),
+            Some(0.0)
+        );
+        assert_eq!(
+            extra
+                .get("optim_state_adapter_sheet_hint")
+                .and_then(|value| value.as_f64()),
+            Some(8.0)
+        );
+        assert_eq!(
+            extra
+                .get("optim_accumulator_sync_enabled")
+                .and_then(|value| value.as_f64()),
+            Some(0.0)
+        );
+        assert_eq!(
+            extra
+                .get("optim_accumulator_sync_world_size")
+                .and_then(|value| value.as_f64()),
+            Some(1.0)
+        );
+        assert!(
+            extra
+                .get("tensor_ops_total")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0)
+                >= 1.0
+        );
+        assert!(
+            extra
+                .get("grad_values_total")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0)
+                > 0.0
+        );
+        assert_eq!(
+            extra
+                .get("grad_values_non_finite")
+                .and_then(|value| value.as_f64()),
+            Some(0.0)
+        );
+        assert!(
+            extra
+                .get("tensor_op_matmul_prepacked")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0)
+                >= 1.0
+        );
+        assert!(
+            extra
+                .get("tensor_op_matmul_prepacked_bias")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0)
+                >= 1.0
+        );
+        assert!(
+            extra
+                .get("tensor_op_sum_axis0_scaled")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0)
+                >= 1.0
+        );
+        assert!(
+            extra
+                .get("tensor_op_scale")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0)
+                >= 1.0
+        );
+        assert!(
+            extra
+                .get("tensor_op_add_scaled")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0)
+                >= 1.0
+        );
+        assert!(
+            extra
+                .get("tensor_op_mse_loss_forward")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0)
+                >= 1.0
+        );
+        assert!(
+            extra
+                .get("tensor_op_mse_loss_backward")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0)
+                >= 1.0
+        );
+        assert_eq!(
+            extra
+                .get("tensor_policy_device_cpu")
+                .and_then(|value| value.as_f64()),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_policy_matmul_auto")
+                .and_then(|value| value.as_f64()),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_policy_prepacked_matmul_auto")
+                .and_then(|value| value.as_f64()),
+            Some(1.0)
+        );
+        assert!(extra
+            .keys()
+            .any(|key| key.starts_with("tensor_policy_layer_norm_")));
+        assert!(extra
+            .keys()
+            .any(|key| key.starts_with("tensor_policy_attention_")));
+        assert!(extra
+            .keys()
+            .any(|key| key.starts_with("tensor_policy_softmax_")));
+        assert!(extra
+            .keys()
+            .any(|key| key.starts_with("tensor_backend_") && key != "tensor_backend_fallbacks"));
+    }
+
+    #[test]
+    fn train_epoch_returns_tensor_backend_summary_without_trace_listener() {
+        let caps = DeviceCaps::cpu();
+        let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+        let mut model = Linear::new("epoch_trace_linear", 2, 1).unwrap();
+        trainer.prepare(&mut model).unwrap();
+        let schedule = trainer.roundtable(2, 1, RoundtableConfig::default());
+        let dataset = vec![(
+            Tensor::from_vec(2, 2, vec![0.25, -0.5, 0.75, 1.0]).unwrap(),
+            Tensor::from_vec(2, 1, vec![0.0, 0.5]).unwrap(),
+        )];
+        let mut loss = MeanSquaredError::new();
+
+        let stats = trainer
+            .train_epoch(&mut model, &mut loss, dataset, &schedule)
+            .unwrap();
+
+        assert_eq!(stats.batches, 1);
+        assert!(stats.tensor_backend.ops_total >= 1);
+        assert!(stats.tensor_backend.meta_events >= stats.tensor_backend.ops_total);
+        assert_eq!(stats.tensor_backend.fallbacks, 0);
+        assert!(stats.tensor_backend.backend_cpu >= 2);
+        assert!(
+            stats.tensor_backend.backend_cpu
+                + stats.tensor_backend.backend_cpu_simd
+                + stats.tensor_backend.backend_faer
+                + stats.tensor_backend.backend_naive
+                + stats.tensor_backend.backend_wgpu
+                + stats.tensor_backend.backend_cuda
+                + stats.tensor_backend.backend_hip
+                + stats.tensor_backend.backend_other
+                >= 1
+        );
+    }
+
+    #[test]
+    fn tensor_backend_trace_counts_non_finite_metadata_sentinels() {
+        let mut trace = TensorBackendStepTrace::default();
+        trace.record(&TensorOpMetaEvent {
+            op_name: "scaled_dot_attention",
+            data: serde_json::json!({
+                "backend": "cpu",
+                "requested_backend": "auto",
+                "scale": null,
+                "kernel": {
+                    "diagnostic": "NaN",
+                    "fallbacks": ["inf", "ok"],
+                },
+            }),
+        });
+
+        let mut extra = HashMap::new();
+        trace.write_extra(&mut extra);
+        assert_eq!(extra.get("tensor_meta_events").copied(), Some(1.0));
+        assert_eq!(extra.get("tensor_meta_null_values").copied(), Some(1.0));
+        assert_eq!(
+            extra.get("tensor_meta_non_finite_strings").copied(),
+            Some(2.0)
+        );
+        assert_eq!(
+            extra.get("tensor_meta_non_finite_sentinels").copied(),
+            Some(3.0)
+        );
+        assert_eq!(
+            extra.get("tensor_meta_non_finite_detected").copied(),
+            Some(1.0)
+        );
+    }
+
+    #[test]
+    fn tensor_backend_trace_surfaces_embedding_token_repairs() {
+        let mut trace = TensorBackendStepTrace::default();
+        trace.record(&TensorOpMetaEvent {
+            op_name: "embedding_forward",
+            data: serde_json::json!({
+                "backend": "cpu",
+                "requested_backend": "auto",
+                "tokens": 5,
+                "unique_token_indices": 3,
+                "repeated_token_indices": 2,
+                "non_finite_tokens": 1,
+                "rounded_tokens": 1,
+                "clamped_low_tokens": 1,
+                "clamped_high_tokens": 0,
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "embedding_backward",
+            data: serde_json::json!({
+                "backend": "cpu",
+                "requested_backend": "auto",
+                "tokens": 5,
+                "unique_token_indices": 3,
+                "repeated_token_indices": 2,
+                "non_finite_tokens": 1,
+                "rounded_tokens": 1,
+                "clamped_low_tokens": 1,
+                "clamped_high_tokens": 1,
+            }),
+        });
+
+        let mut extra = HashMap::new();
+        trace.write_extra(&mut extra);
+        assert_eq!(extra.get("tensor_embedding_tokens").copied(), Some(10.0));
+        assert_eq!(
+            extra.get("tensor_embedding_unique_token_indices").copied(),
+            Some(6.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_embedding_repeated_token_indices")
+                .copied(),
+            Some(4.0)
+        );
+        assert_eq!(
+            extra.get("tensor_embedding_non_finite_tokens").copied(),
+            Some(2.0)
+        );
+        assert_eq!(
+            extra.get("tensor_embedding_rounded_tokens").copied(),
+            Some(2.0)
+        );
+        assert_eq!(
+            extra.get("tensor_embedding_clamped_low_tokens").copied(),
+            Some(2.0)
+        );
+        assert_eq!(
+            extra.get("tensor_embedding_clamped_high_tokens").copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra.get("tensor_embedding_token_repairs_total").copied(),
+            Some(7.0)
+        );
+        assert_eq!(
+            extra.get("tensor_embedding_token_repair_detected").copied(),
+            Some(1.0)
+        );
+    }
+
+    #[test]
+    fn tensor_backend_trace_records_coherence_measurement_fallbacks() {
+        let mut trace = TensorBackendStepTrace::default();
+        trace.record(&TensorOpMetaEvent {
+            op_name: "coherence_measure_phases",
+            data: serde_json::json!({
+                "backend": "cpu",
+                "requested_backend": "webgpu",
+                "kind": "coherence_reduction",
+                "rows": 2,
+                "cols": 128,
+                "channels": 2,
+                "accelerated_requested": true,
+            }),
+        });
+
+        let mut epoch = EpochTensorBackendStats::default();
+        epoch.accumulate_trace(&trace);
+        assert_eq!(epoch.ops_total, 1);
+        assert_eq!(epoch.backend_cpu, 1);
+        assert_eq!(epoch.fallbacks, 1);
+
+        let mut extra = HashMap::new();
+        trace.write_extra(&mut extra);
+        assert_eq!(extra.get("tensor_ops_total").copied(), Some(1.0));
+        assert_eq!(extra.get("tensor_backend_cpu").copied(), Some(1.0));
+        assert_eq!(extra.get("tensor_backend_fallbacks").copied(), Some(1.0));
+        assert_eq!(
+            extra.get("tensor_op_coherence_measure_phases").copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_coherence_measure_phases_cpu")
+                .copied(),
+            Some(1.0)
+        );
+    }
+
+    #[test]
+    fn tensor_backend_trace_surfaces_backend_policy_choices() {
+        let mut trace = TensorBackendStepTrace::default();
+        trace.record(&TensorOpMetaEvent {
+            op_name: "wgpu_heuristic_choice",
+            data: serde_json::json!({
+                "backend": "wgpu",
+                "requested_backend": "wgpu",
+                "choice_source": "generated",
+                "workgroup": 256,
+                "lanes": 32,
+                "compaction_tile": 2048,
+                "fft_radix": 4,
+                "fft_segments": 2,
+                "override_count": 1,
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "unison_rank_choice",
+            data: serde_json::json!({
+                "backend": "wgpu",
+                "requested_backend": "wgpu",
+                "choice_source": "wgpu_generated",
+                "candidate_count": 3,
+                "best_score": 0.75,
+                "baseline_score": 0.25,
+                "wgpu_generated_score": 0.75,
+                "wgpu_generated_score_delta": 0.5,
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "kdsl_env_bridge",
+            data: serde_json::json!({
+                "backend": "cpu",
+                "requested_backend": "auto",
+                "status": "feature_disabled",
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "kv_consensus_soft_rules",
+            data: serde_json::json!({
+                "backend": "cpu",
+                "requested_backend": "auto",
+                "status": "missing_url",
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "wasm_tuner_choice",
+            data: serde_json::json!({
+                "backend": "wgpu",
+                "requested_backend": "auto",
+                "status": "hit",
+            }),
+        });
+
+        let mut extra = HashMap::new();
+        trace.write_extra(&mut extra);
+        assert_eq!(extra.get("backend_policy_events").copied(), Some(5.0));
+        assert_eq!(extra.get("backend_policy_wgpu_choices").copied(), Some(1.0));
+        assert_eq!(
+            extra.get("backend_policy_unison_choices").copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra.get("backend_policy_kdsl_env_events").copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra.get("backend_policy_kv_soft_events").copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra.get("backend_policy_wasm_tuner_events").copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("backend_policy_source_wgpu_heuristic_choice_generated")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("backend_policy_source_unison_rank_choice_wgpu_generated")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("backend_policy_status_kdsl_env_bridge_feature_disabled")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("backend_policy_status_kv_consensus_soft_rules_missing_url")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("backend_policy_status_wasm_tuner_choice_hit")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra.get("backend_policy_wgpu_last_workgroup").copied(),
+            Some(256.0)
+        );
+        assert_eq!(
+            extra
+                .get("backend_policy_wgpu_last_compaction_tile")
+                .copied(),
+            Some(2048.0)
+        );
+        assert_eq!(
+            extra
+                .get("backend_policy_unison_last_candidate_count")
+                .copied(),
+            Some(3.0)
+        );
+        assert_eq!(
+            extra.get("backend_policy_unison_last_best_score").copied(),
+            Some(0.75)
+        );
+        assert_eq!(
+            extra
+                .get("backend_policy_unison_last_wgpu_generated_score_delta")
+                .copied(),
+            Some(0.5)
+        );
+    }
+
+    #[test]
+    fn tensor_backend_trace_records_backendless_tensor_util_routes_as_policy() {
+        let mut trace = TensorBackendStepTrace::default();
+        trace.record(&TensorOpMetaEvent {
+            op_name: "tensor_util_route",
+            data: serde_json::json!({
+                "requested_backend": "wgpu",
+                "selected_backend": "cpu",
+                "status": "cpu_threshold",
+                "choice_source": "threshold_guard",
+                "values": 8,
+                "threshold": 1024,
+            }),
+        });
+
+        let mut extra = HashMap::new();
+        trace.write_extra(&mut extra);
+        assert!(extra.get("tensor_ops_total").is_none());
+        assert_eq!(extra.get("backend_policy_events").copied(), Some(1.0));
+        assert_eq!(
+            extra.get("backend_policy_tensor_util_routes").copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("backend_policy_status_tensor_util_route_cpu_threshold")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("backend_policy_source_tensor_util_route_threshold_guard")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra.get("backend_policy_tensor_util_last_values").copied(),
+            Some(8.0)
+        );
+        assert_eq!(
+            extra
+                .get("backend_policy_tensor_util_last_threshold")
+                .copied(),
+            Some(1024.0)
+        );
+    }
+
+    #[test]
+    fn gradient_health_counts_non_finite_entries() {
+        let mut health = GradientHealth::default();
+        health.record_values(&[1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -2.0]);
+
+        let mut extra = HashMap::new();
+        health.write_extra(&mut extra);
+        assert_eq!(extra.get("grad_values_total").copied(), Some(5.0));
+        assert_eq!(extra.get("grad_values_finite").copied(), Some(2.0));
+        assert_eq!(extra.get("grad_values_non_finite").copied(), Some(3.0));
+        assert_eq!(extra.get("grad_values_nan").copied(), Some(1.0));
+        assert_eq!(extra.get("grad_values_infinite").copied(), Some(2.0));
+        assert_eq!(extra.get("grad_non_finite_detected").copied(), Some(1.0));
+        assert!((extra["grad_values_non_finite_ratio"] - 0.6).abs() < 1e-6);
+        assert!((extra["grad_l2_finite"] - 5.0f64.sqrt()).abs() < 1e-6);
+        assert_eq!(extra.get("grad_linf_finite").copied(), Some(2.0));
+    }
+
+    #[test]
+    fn tensor_value_health_counts_non_finite_entries() {
+        let tensor = Tensor::from_vec(
+            1,
+            5,
+            vec![1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -2.0],
+        )
+        .unwrap();
+        let health = TensorValueHealth::from_tensor(&tensor);
+
+        let mut extra = HashMap::new();
+        health.write_extra(&mut extra, "sample_tensor");
+        assert_eq!(extra.get("sample_tensor_values_total").copied(), Some(5.0));
+        assert_eq!(extra.get("sample_tensor_finite_values").copied(), Some(2.0));
+        assert_eq!(
+            extra.get("sample_tensor_non_finite_values").copied(),
+            Some(3.0)
+        );
+        assert_eq!(extra.get("sample_tensor_nan_values").copied(), Some(1.0));
+        assert_eq!(
+            extra.get("sample_tensor_infinite_values").copied(),
+            Some(2.0)
+        );
+        assert_eq!(
+            extra.get("sample_tensor_non_finite_detected").copied(),
+            Some(1.0)
+        );
+        assert!((extra["sample_tensor_non_finite_ratio"] - 0.6).abs() < 1e-6);
+        assert!((extra["sample_tensor_l2_finite"] - 5.0f64.sqrt()).abs() < 1e-6);
+        assert_eq!(extra.get("sample_tensor_linf_finite").copied(), Some(2.0));
+    }
+
+    #[test]
+    fn coherence_repair_trace_writes_trainer_extra_metrics() {
+        let signal = CoherenceSignal {
+            dominant_channel: Some(1),
+            preserved_channels: 4,
+            mean_coherence: 0.25,
+            z_bias: 0.1,
+            energy_ratio: 0.5,
+            entropy: 0.2,
+            label: CoherenceLabel::DiffuseDrift,
+            repaired_non_finite_weights: 2,
+            repaired_negative_weights: 1,
+            pre_discard_repaired_non_finite: 3,
+            pre_discard_repaired_negative: 4,
+        };
+
+        let mut extra = HashMap::new();
+        write_coherence_repair_extra(Some(&signal), &mut extra);
+
+        assert_eq!(
+            extra.get("coherence_repaired_non_finite_weights").copied(),
+            Some(2.0)
+        );
+        assert_eq!(
+            extra.get("coherence_repaired_negative_weights").copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra.get("coherence_repaired_weights_total").copied(),
+            Some(3.0)
+        );
+        assert_eq!(
+            extra
+                .get("coherence_pre_discard_repaired_non_finite")
+                .copied(),
+            Some(3.0)
+        );
+        assert_eq!(
+            extra
+                .get("coherence_pre_discard_repaired_negative")
+                .copied(),
+            Some(4.0)
+        );
+        assert_eq!(
+            extra.get("coherence_pre_discard_repairs_total").copied(),
+            Some(7.0)
+        );
+        assert_eq!(extra.get("coherence_repairs_total").copied(), Some(10.0));
+        assert_eq!(extra.get("coherence_repaired_detected").copied(), Some(1.0));
+    }
+
+    #[test]
+    fn tensor_backend_trace_records_f64_precision_cpu_backend() {
+        let mut trace = TensorBackendStepTrace::default();
+        trace.record(&TensorOpMetaEvent {
+            op_name: "concept_diffusion_state_normalise",
+            data: serde_json::json!({
+                "backend": "f64_cpu",
+                "requested_backend": "auto",
+                "precision_backend": "f64_cpu",
+                "state_sum_backend": "f64_cpu",
+            }),
+        });
+
+        let mut epoch = EpochTensorBackendStats::default();
+        epoch.accumulate_trace(&trace);
+        assert_eq!(epoch.ops_total, 1);
+        assert_eq!(epoch.backend_f64_cpu, 1);
+        assert_eq!(epoch.backend_other, 0);
+
+        let mut extra = HashMap::new();
+        trace.write_extra(&mut extra);
+        assert_eq!(extra.get("tensor_backend_f64_cpu").copied(), Some(1.0));
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_concept_diffusion_state_normalise_f64_cpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_concept_diffusion_state_normalise_precision_f64_cpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_concept_diffusion_state_normalise_state_sum_f64_cpu")
+                .copied(),
+            Some(1.0)
+        );
+    }
+
+    #[test]
+    fn tensor_backend_trace_normalizes_kernel_backend_labels() {
+        let mut trace = TensorBackendStepTrace::default();
+        trace.record(&TensorOpMetaEvent {
+            op_name: "layer_norm",
+            data: serde_json::json!({
+                "backend": "wgpu_dense",
+                "requested_backend": "auto",
+            }),
+        });
+
+        trace
+            .validate_expected_backend(BackendKind::Wgpu)
+            .expect("wgpu_dense should satisfy strict WGPU expectation");
+        let mut epoch = EpochTensorBackendStats::default();
+        epoch.accumulate_trace(&trace);
+        assert_eq!(epoch.backend_wgpu, 1);
+        assert_eq!(epoch.kernel_backend_wgpu_dense, 1);
+        let mut extra = HashMap::new();
+        trace.write_extra(&mut extra);
+        assert_eq!(extra.get("tensor_backend_wgpu").copied(), Some(1.0));
+        assert_eq!(
+            extra.get("tensor_kernel_backend_wgpu_dense").copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra.get("tensor_op_backend_layer_norm_wgpu").copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_kernel_backend_layer_norm_wgpu_dense")
+                .copied(),
+            Some(1.0)
+        );
+    }
+
+    #[test]
+    fn strict_backend_trace_ignores_metadata_only_backends_when_kernel_matches() {
+        let mut trace = TensorBackendStepTrace::default();
+        trace.record(&TensorOpMetaEvent {
+            op_name: "matmul",
+            data: serde_json::json!({
+                "backend": "wgpu",
+                "requested_backend": "wgpu",
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "graph_readout",
+            data: serde_json::json!({
+                "backend": "composite",
+                "requested_backend": "wgpu",
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "reshape",
+            data: serde_json::json!({
+                "backend": "view",
+                "requested_backend": "wgpu",
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "tensor_biome_canopy",
+            data: serde_json::json!({
+                "backend": "hybrid",
+                "requested_backend": "wgpu",
+            }),
+        });
+
+        trace
+            .validate_expected_backend(BackendKind::Wgpu)
+            .expect("metadata-only composite/view events should not fail strict WGPU");
+        let mut extra = HashMap::new();
+        trace.write_extra(&mut extra);
+        assert_eq!(extra.get("tensor_backend_wgpu").copied(), Some(1.0));
+        assert_eq!(extra.get("tensor_backend_composite").copied(), Some(1.0));
+        assert_eq!(extra.get("tensor_backend_hybrid").copied(), Some(1.0));
+        assert_eq!(extra.get("tensor_backend_view").copied(), Some(1.0));
+        assert_eq!(extra.get("tensor_backend_fallbacks").copied(), Some(0.0));
+    }
+
+    #[test]
+    fn strict_backend_trace_counts_hybrid_normalization_cpu_as_fallback() {
+        let mut trace = TensorBackendStepTrace::default();
+        trace.record(&TensorOpMetaEvent {
+            op_name: "hadamard",
+            data: serde_json::json!({
+                "backend": "wgpu_dense",
+                "requested_backend": "wgpu",
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "layer_norm_backward",
+            data: serde_json::json!({
+                "backend": "hybrid",
+                "requested_backend": "wgpu",
+                "input_gradient_backend": "hybrid",
+                "input_gradient_reduction_backend": "wgpu",
+                "normalization_backend": "cpu",
+            }),
+        });
+
+        trace
+            .validate_expected_backend(BackendKind::Wgpu)
+            .expect("hybrid metadata has WGPU kernel evidence from the affine reducer");
+        let mut extra = HashMap::new();
+        trace.write_extra(&mut extra);
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_layer_norm_backward_input_gradient_hybrid")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_layer_norm_backward_input_gradient_reduction_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_layer_norm_backward_normalization_cpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(extra.get("tensor_backend_fallbacks").copied(), Some(1.0));
+    }
+
+    #[test]
+    fn strict_backend_trace_counts_lstm_recurrent_cpu_sub_backends_as_fallbacks() {
+        let mut trace = TensorBackendStepTrace::default();
+        trace.record(&TensorOpMetaEvent {
+            op_name: "matmul",
+            data: serde_json::json!({
+                "backend": "wgpu",
+                "requested_backend": "wgpu",
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "lstm_forward",
+            data: serde_json::json!({
+                "backend": "hybrid",
+                "requested_backend": "wgpu",
+                "input_projection_backend": "wgpu",
+                "bias_backend": "wgpu",
+                "recurrent_backend": "wgpu",
+                "gate_activation_backend": "cpu",
+                "estimated_gate_activation_ops": 64,
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "lstm_backward",
+            data: serde_json::json!({
+                "backend": "hybrid",
+                "requested_backend": "wgpu",
+                "recurrent_backend": "wgpu",
+                "gate_activation_backend": "cpu",
+                "bptt_backend": "cpu",
+                "bptt_scan_backend": "cpu",
+                "bptt_gate_derivative_backend": "cpu",
+                "bptt_cell_recurrence_backend": "cpu",
+                "bptt_state_carry_backend": "cpu",
+                "input_gradient_backend": "wgpu",
+                "raw_parameter_gradient_backend": "hybrid",
+                "parameter_gradient_reduction_backend": "wgpu",
+                "bias_gradient_backend": "wgpu",
+                "parameter_gradient_scale_backend": "wgpu",
+                "estimated_gate_activation_ops": 64,
+                "estimated_bptt_ops": 112,
+                "estimated_bptt_gate_derivative_ops": 96,
+                "estimated_bptt_cell_recurrence_ops": 32,
+                "estimated_bptt_state_carry_ops": 16,
+                "estimated_bptt_scan_steps": 4,
+            }),
+        });
+
+        trace
+            .validate_expected_backend(BackendKind::Wgpu)
+            .expect("hybrid LSTM metadata has WGPU projection/scaling evidence");
+        let mut extra = HashMap::new();
+        trace.write_extra(&mut extra);
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_lstm_forward_recurrent_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_lstm_forward_gate_activation_cpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_lstm_backward_bptt_cpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_lstm_backward_bptt_scan_cpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_lstm_backward_bptt_gate_derivative_cpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_lstm_backward_bptt_cell_recurrence_cpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_lstm_backward_bptt_state_carry_cpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_lstm_backward_input_gradient_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_lstm_backward_parameter_gradient_reduction_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_lstm_backward_bias_gradient_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("lstm_forward_estimated_gate_activation_ops")
+                .copied(),
+            Some(64.0)
+        );
+        assert_eq!(
+            extra
+                .get("lstm_backward_estimated_gate_activation_ops")
+                .copied(),
+            Some(64.0)
+        );
+        assert_eq!(
+            extra
+                .get("lstm_forward_estimated_gate_activation_wgpu_ops")
+                .copied(),
+            Some(0.0)
+        );
+        assert_eq!(
+            extra
+                .get("lstm_backward_estimated_gate_activation_wgpu_ops")
+                .copied(),
+            Some(0.0)
+        );
+        assert_eq!(
+            extra.get("lstm_backward_estimated_bptt_ops").copied(),
+            Some(112.0)
+        );
+        assert_eq!(
+            extra
+                .get("lstm_backward_estimated_bptt_gate_derivative_ops")
+                .copied(),
+            Some(96.0)
+        );
+        assert_eq!(
+            extra
+                .get("lstm_backward_estimated_bptt_cell_recurrence_ops")
+                .copied(),
+            Some(32.0)
+        );
+        assert_eq!(
+            extra
+                .get("lstm_backward_estimated_bptt_state_carry_ops")
+                .copied(),
+            Some(16.0)
+        );
+        assert_eq!(
+            extra
+                .get("lstm_backward_estimated_bptt_scan_steps")
+                .copied(),
+            Some(4.0)
+        );
+        assert_eq!(
+            extra.get("lstm_estimated_gate_activation_ops").copied(),
+            Some(128.0)
+        );
+        assert_eq!(
+            extra
+                .get("lstm_estimated_gate_activation_cpu_debt_ops")
+                .copied(),
+            Some(128.0)
+        );
+        assert_eq!(
+            extra
+                .get("lstm_estimated_gate_activation_wgpu_ops")
+                .copied(),
+            Some(0.0)
+        );
+        assert_eq!(
+            extra.get("lstm_estimated_cpu_debt_ops").copied(),
+            Some(240.0)
+        );
+        assert_eq!(extra.get("tensor_backend_fallbacks").copied(), Some(6.0));
+    }
+
+    #[test]
+    fn strict_backend_trace_counts_lstm_wgpu_gate_activation_ops_as_resolved() {
+        let mut trace = TensorBackendStepTrace::default();
+        trace.record(&TensorOpMetaEvent {
+            op_name: "lstm_forward",
+            data: serde_json::json!({
+                "backend": "hybrid",
+                "requested_backend": "wgpu",
+                "input_projection_backend": "wgpu",
+                "bias_backend": "wgpu",
+                "recurrent_backend": "wgpu",
+                "gate_activation_backend": "wgpu",
+                "estimated_gate_activation_ops": 64,
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "lstm_backward",
+            data: serde_json::json!({
+                "backend": "hybrid",
+                "requested_backend": "wgpu",
+                "recurrent_backend": "wgpu",
+                "gate_activation_backend": "wgpu",
+                "bptt_backend": "wgpu",
+                "bptt_scan_backend": "wgpu",
+                "bptt_gate_derivative_backend": "wgpu",
+                "bptt_cell_recurrence_backend": "wgpu",
+                "bptt_state_carry_backend": "wgpu",
+                "input_gradient_backend": "wgpu",
+                "raw_parameter_gradient_backend": "hybrid",
+                "parameter_gradient_reduction_backend": "wgpu",
+                "bias_gradient_backend": "wgpu",
+                "parameter_gradient_scale_backend": "wgpu",
+                "estimated_gate_activation_ops": 64,
+                "estimated_bptt_ops": 112,
+                "estimated_bptt_wgpu_ops": 112,
+            }),
+        });
+
+        let mut extra = HashMap::new();
+        trace.write_extra(&mut extra);
+        assert_eq!(
+            extra
+                .get("lstm_forward_estimated_gate_activation_wgpu_ops")
+                .copied(),
+            Some(64.0)
+        );
+        assert_eq!(
+            extra
+                .get("lstm_backward_estimated_gate_activation_wgpu_ops")
+                .copied(),
+            Some(64.0)
+        );
+        assert_eq!(
+            extra
+                .get("lstm_estimated_gate_activation_wgpu_ops")
+                .copied(),
+            Some(128.0)
+        );
+        assert_eq!(
+            extra
+                .get("lstm_estimated_gate_activation_cpu_debt_ops")
+                .copied(),
+            Some(0.0)
+        );
+        assert_eq!(
+            extra.get("lstm_estimated_bptt_wgpu_ops").copied(),
+            Some(112.0)
+        );
+        assert_eq!(extra.get("lstm_estimated_cpu_debt_ops").copied(), Some(0.0));
+    }
+
+    #[test]
+    fn strict_backend_trace_counts_zrba_cpu_eigen_sub_backends_as_fallbacks() {
+        let mut trace = TensorBackendStepTrace::default();
+        trace.record(&TensorOpMetaEvent {
+            op_name: "sum_axis0_scaled",
+            data: serde_json::json!({
+                "backend": "wgpu_dense",
+                "requested_backend": "wgpu",
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "zrba_cov_head_forward",
+            data: serde_json::json!({
+                "backend": "hybrid",
+                "requested_backend": "wgpu",
+                "reduction_backend": "wgpu",
+                "covariance_centering_backend": "cpu",
+                "covariance_accumulation_backend": "wgpu",
+                "low_rank_projection_backend": "cpu_eigen",
+                "psd_projection_backend": "cpu_eigen",
+            }),
+        });
+
+        trace
+            .validate_expected_backend(BackendKind::Wgpu)
+            .expect("Z-RBA covariance reductions provide WGPU evidence");
+        let mut extra = HashMap::new();
+        trace.write_extra(&mut extra);
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_zrba_cov_head_forward_covariance_centering_cpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_zrba_cov_head_forward_covariance_accumulation_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_zrba_cov_head_forward_low_rank_projection_cpu_eigen")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_zrba_cov_head_forward_psd_projection_cpu_eigen")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(extra.get("tensor_backend_fallbacks").copied(), Some(3.0));
+    }
+
+    #[test]
+    fn strict_backend_trace_counts_topos_rewrite_sub_backend_as_fallback() {
+        let mut trace = TensorBackendStepTrace::default();
+        trace.record(&TensorOpMetaEvent {
+            op_name: "add_scaled",
+            data: serde_json::json!({
+                "backend": "wgpu_dense",
+                "requested_backend": "wgpu",
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "tensor_biome_canopy",
+            data: serde_json::json!({
+                "backend": "hybrid",
+                "requested_backend": "wgpu",
+                "accumulation_backend": "wgpu",
+                "normalise_backend": "wgpu",
+                "rewrite_backend": "topos_cpu",
+            }),
+        });
+
+        trace
+            .validate_expected_backend(BackendKind::Wgpu)
+            .expect("biome canopy tensor utility work provides WGPU evidence");
+        let mut extra = HashMap::new();
+        trace.write_extra(&mut extra);
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_tensor_biome_canopy_rewrite_topos_cpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(extra.get("tensor_backend_fallbacks").copied(), Some(1.0));
+    }
+
+    #[test]
+    fn strict_backend_trace_counts_desire_probability_sub_backends_as_wgpu() {
+        let mut trace = TensorBackendStepTrace::default();
+        trace.record(&TensorOpMetaEvent {
+            op_name: "scale",
+            data: serde_json::json!({
+                "backend": "wgpu_dense",
+                "requested_backend": "wgpu",
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "desire_softmax",
+            data: serde_json::json!({
+                "backend": "hybrid",
+                "requested_backend": "wgpu",
+                "softmax_backend": "wgpu",
+                "exp_backend": "wgpu",
+                "distribution_scale_backend": "wgpu",
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "desire_normalise",
+            data: serde_json::json!({
+                "backend": "hybrid",
+                "requested_backend": "wgpu",
+                "sanitize_backend": "wgpu",
+                "distribution_scale_backend": "wgpu",
+            }),
+        });
+
+        trace
+            .validate_expected_backend(BackendKind::Wgpu)
+            .expect("Desire probability normalisation provides WGPU scale evidence");
+        let mut extra = HashMap::new();
+        trace.write_extra(&mut extra);
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_desire_softmax_softmax_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_desire_softmax_exp_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_desire_softmax_distribution_scale_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_desire_normalise_sanitize_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_desire_normalise_distribution_scale_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(extra.get("tensor_backend_fallbacks").copied(), Some(0.0));
+    }
+
+    #[test]
+    fn strict_backend_trace_counts_semantic_tensor_util_sub_backends_as_wgpu() {
+        let mut trace = TensorBackendStepTrace::default();
+        trace.record(&TensorOpMetaEvent {
+            op_name: "scale",
+            data: serde_json::json!({
+                "backend": "wgpu_dense",
+                "requested_backend": "wgpu",
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "zspace_semantic_window",
+            data: serde_json::json!({
+                "backend": "hybrid",
+                "requested_backend": "wgpu",
+                "window_energy_backend": "wgpu",
+                "distribution_scale_backend": "wgpu",
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "zspace_semantic_distribution_fusion",
+            data: serde_json::json!({
+                "backend": "hybrid",
+                "requested_backend": "wgpu",
+                "fusion_accumulation_backend": "wgpu",
+                "distribution_scale_backend": "wgpu",
+            }),
+        });
+
+        trace
+            .validate_expected_backend(BackendKind::Wgpu)
+            .expect("semantic distribution scaling provides WGPU scale evidence");
+        let mut extra = HashMap::new();
+        trace.write_extra(&mut extra);
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_zspace_semantic_window_window_energy_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_zspace_semantic_window_distribution_scale_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_zspace_semantic_distribution_fusion_fusion_accumulation_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get(
+                    "tensor_op_backend_zspace_semantic_distribution_fusion_distribution_scale_wgpu"
+                )
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(extra.get("tensor_backend_fallbacks").copied(), Some(0.0));
+    }
+
+    #[test]
+    fn strict_backend_trace_counts_language_semantic_mixed_sub_backends() {
+        let mut trace = TensorBackendStepTrace::default();
+        trace.record(&TensorOpMetaEvent {
+            op_name: "scale",
+            data: serde_json::json!({
+                "backend": "wgpu_dense",
+                "requested_backend": "wgpu",
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "semantic_bridge_window_distribution",
+            data: serde_json::json!({
+                "backend": "hybrid",
+                "requested_backend": "wgpu",
+                "semantic_sparse_scan_backend": "semantic_cpu",
+                "semantic_accumulation_backend": "wgpu",
+                "distribution_scale_backend": "wgpu",
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "concept_hint_distribution",
+            data: serde_json::json!({
+                "backend": "hybrid",
+                "requested_backend": "wgpu",
+                "semantic_inference_backend": "semantic_bridge_window_distribution",
+                "semantic_sparse_scan_backend": "semantic_cpu",
+                "semantic_sanitize_backend": "wgpu",
+                "distribution_scale_backend": "wgpu",
+            }),
+        });
+        trace
+            .validate_expected_backend(BackendKind::Wgpu)
+            .expect("language semantic distribution scaling provides WGPU evidence");
+        let mut extra = HashMap::new();
+        trace.write_extra(&mut extra);
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_semantic_bridge_window_distribution_semantic_sparse_scan_semantic_cpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_semantic_bridge_window_distribution_semantic_accumulation_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get(
+                    "tensor_op_backend_semantic_bridge_window_distribution_distribution_scale_wgpu"
+                )
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get(
+                    "tensor_op_backend_concept_hint_distribution_semantic_sparse_scan_semantic_cpu"
+                )
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_concept_hint_distribution_semantic_inference_semantic_bridge_window_distribution")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_concept_hint_distribution_semantic_sanitize_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(extra.get("tensor_backend_fallbacks").copied(), Some(2.0));
+    }
+
+    #[test]
+    fn strict_backend_trace_counts_language_probability_sum_sub_backends_as_wgpu() {
+        let mut trace = TensorBackendStepTrace::default();
+        trace.record(&TensorOpMetaEvent {
+            op_name: "scale",
+            data: serde_json::json!({
+                "backend": "wgpu_dense",
+                "requested_backend": "wgpu",
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "desire_automation_vector_normalise",
+            data: serde_json::json!({
+                "backend": "hybrid",
+                "requested_backend": "wgpu",
+                "sanitize_backend": "wgpu",
+                "distribution_scale_backend": "wgpu",
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "gw_marginal_normalise",
+            data: serde_json::json!({
+                "backend": "hybrid",
+                "requested_backend": "wgpu",
+                "marginal_sum_backend": "wgpu",
+                "distribution_scale_backend": "wgpu",
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "gw_marginal_normalise_in_place",
+            data: serde_json::json!({
+                "backend": "hybrid",
+                "requested_backend": "wgpu",
+                "marginal_sum_backend": "wgpu",
+                "distribution_scale_backend": "wgpu",
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "sparse_kernel_probability_row",
+            data: serde_json::json!({
+                "backend": "hybrid",
+                "requested_backend": "wgpu",
+                "row_sum_backend": "wgpu",
+                "distribution_scale_backend": "wgpu",
+            }),
+        });
+
+        trace
+            .validate_expected_backend(BackendKind::Wgpu)
+            .expect("language probability distribution scaling provides WGPU evidence");
+        let mut extra = HashMap::new();
+        trace.write_extra(&mut extra);
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_desire_automation_vector_normalise_sanitize_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_desire_automation_vector_normalise_distribution_scale_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_gw_marginal_normalise_marginal_sum_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_gw_marginal_normalise_in_place_marginal_sum_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_sparse_kernel_probability_row_row_sum_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(extra.get("tensor_backend_fallbacks").copied(), Some(0.0));
+    }
+
+    #[test]
+    fn strict_backend_trace_rejects_metadata_only_without_kernel_evidence() {
+        let mut trace = TensorBackendStepTrace::default();
+        trace.record(&TensorOpMetaEvent {
+            op_name: "coherence_wave_forward",
+            data: serde_json::json!({
+                "backend": "composite",
+                "requested_backend": "wgpu",
+            }),
+        });
+
+        let err = trace
+            .validate_expected_backend(BackendKind::Wgpu)
+            .expect_err("metadata-only events are not tensor kernel evidence");
+        match err {
+            TensorError::BackendFailure { backend, message } => {
+                assert_eq!(backend, "wgpu");
+                assert!(
+                    message.contains("no tensor kernel backend metadata"),
+                    "unexpected strict GPU message: {message}"
+                );
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tensor_backend_trace_rejects_missing_metadata_under_strict_gpu() {
+        let trace = TensorBackendStepTrace::default();
+        let err = trace
+            .validate_expected_backend(BackendKind::Wgpu)
+            .expect_err("strict GPU needs tensor backend evidence");
+
+        match err {
+            TensorError::BackendFailure { backend, message } => {
+                assert_eq!(backend, "wgpu");
+                assert!(message.contains("no tensor kernel backend metadata"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn strict_gpu_trainer_rejects_cpu_tensor_backend_fallback() {
+        with_strict_gpu_env(Some("1"), || {
+            let caps = DeviceCaps::wgpu(32, true, 256);
+            let mut trainer = ModuleTrainer::new(caps, -1.0, 0.05, 0.01);
+            let mut model = Linear::new("strict_linear", 2, 1).unwrap();
+            trainer.prepare(&mut model).unwrap();
+            let before = model.weight().value().clone();
+            let schedule = trainer.roundtable(2, 1, RoundtableConfig::default());
+            let dataset = vec![(
+                Tensor::from_vec(2, 2, vec![0.5, -1.0, 1.5, 0.25]).unwrap(),
+                Tensor::from_vec(2, 1, vec![0.1, -0.2]).unwrap(),
+            )];
+            let mut loss = MeanSquaredError::new();
+            let err = trainer
+                .train_epoch(&mut model, &mut loss, dataset, &schedule)
+                .expect_err("strict GPU trainer should reject non-GPU tensor backend");
+
+            match err {
+                TensorError::BackendFailure { backend, message } => {
+                    assert_eq!(backend, "wgpu");
+                    assert!(
+                        message.contains("SPIRALTORCH_STRICT_GPU")
+                            || message.contains("wgpu")
+                            || message.contains("WGPU"),
+                        "unexpected strict GPU message: {message}"
+                    );
+                }
+                other => panic!("unexpected error: {other:?}"),
+            }
+            assert_eq!(*model.weight().value(), before);
+        });
+    }
+
+    #[test]
     fn curvature_scheduler_adjusts_curvature_and_records_metrics() {
         let caps = DeviceCaps::wgpu(8, true, 64);
         let mut trainer = ModuleTrainer::new(caps, -1.0, 0.1, 0.01);
@@ -6011,6 +10241,23 @@ mod tests {
             .expect("curvature metrics recorded");
         assert!(metrics.raw_pressure > 0.0);
         assert_eq!(metrics.curvature, trainer.curvature());
+    }
+
+    #[test]
+    fn curvature_scheduler_caps_huge_pressure_without_poisoning_state() {
+        let mut scheduler = CurvatureScheduler::new(-1.0, -2.0, -0.2, 0.01)
+            .with_step(0.2)
+            .with_smoothing(1.0);
+
+        let decision = scheduler.observe_pressure(f32::MAX);
+
+        assert!(decision.raw_pressure.is_finite());
+        assert!(decision.raw_pressure <= CURVATURE_PRESSURE_MAX);
+        assert!(decision.smoothed_pressure.is_finite());
+        assert!(scheduler.current().is_finite());
+        assert!(scheduler.last_pressure().unwrap().is_finite());
+        assert!(scheduler.last_pressure_variance().unwrap().is_finite());
+        assert!(scheduler.last_pressure_rel_variance().unwrap().is_finite());
     }
 
     #[test]

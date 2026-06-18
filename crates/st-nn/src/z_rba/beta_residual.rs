@@ -12,7 +12,27 @@ use rand_distr::{Beta, Distribution};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
+use crate::{PureResult, TensorError};
 use st_core::ops::zspace_round::SpectralFeatureSample;
+
+fn validate_finite_value(label: &'static str, value: f32) -> PureResult<()> {
+    if !value.is_finite() {
+        return Err(TensorError::NonFiniteValue { label, value });
+    }
+    Ok(())
+}
+
+fn checked_value(label: &'static str, value: f32) -> PureResult<f32> {
+    validate_finite_value(label, value)?;
+    Ok(value)
+}
+
+fn validate_finite_slice(label: &'static str, values: &[f32]) -> PureResult<()> {
+    for &value in values {
+        validate_finite_value(label, value)?;
+    }
+    Ok(())
+}
 
 /// Snapshot of the sampled gate and its parameters.
 #[derive(Clone, Debug)]
@@ -29,6 +49,16 @@ pub struct BetaGateSample {
 impl BetaGateSample {
     pub fn expected_value(&self) -> f32 {
         self.expected
+    }
+
+    fn validate(&self) -> PureResult<()> {
+        validate_finite_value("beta_gate_sample", self.sample)?;
+        validate_finite_value("beta_gate_alpha", self.alpha)?;
+        validate_finite_value("beta_gate_beta", self.beta)?;
+        validate_finite_value("beta_gate_expected", self.expected)?;
+        validate_finite_value("beta_gate_variance", self.variance)?;
+        validate_finite_slice("beta_gate_feature", &self.features)?;
+        validate_finite_value("beta_gate_applied", self.applied)
     }
 }
 
@@ -75,26 +105,45 @@ impl BetaGate {
             }
         }
         let bias = [0.1, 0.2];
+        let momentum = if config.momentum.is_finite() {
+            config.momentum.clamp(1e-4, 1.0)
+        } else {
+            BetaGateConfig::default().momentum
+        };
         Self {
             weights,
             bias,
             rng: RefCell::new(ChaCha20Rng::seed_from_u64(config.seed)),
             ema_mean: Cell::new(0.5),
             ema_var: Cell::new(0.25),
-            momentum: config.momentum.clamp(1e-4, 1.0),
+            momentum,
         }
     }
 
     pub fn forward(&self, stats: &SpectralFeatureSample, indices: &[ZIndex]) -> BetaGateSample {
+        self.try_forward(stats, indices)
+            .unwrap_or_else(|_| self.neutral_sample(stats, indices))
+    }
+
+    pub fn try_forward(
+        &self,
+        stats: &SpectralFeatureSample,
+        indices: &[ZIndex],
+    ) -> PureResult<BetaGateSample> {
         let features = self.build_features(stats, indices);
-        let [alpha_raw, beta_raw] = self.linear(&features);
-        let alpha = self.softplus(alpha_raw) + 1e-3;
-        let beta = self.softplus(beta_raw) + 1e-3;
-        let expected = alpha / (alpha + beta);
-        let variance = (alpha * beta) / ((alpha + beta).powi(2) * (alpha + beta + 1.0));
-        let sample = self.sample_beta(alpha, beta);
-        self.update_ema(expected, variance);
-        BetaGateSample {
+        validate_finite_slice("beta_gate_feature", &features)?;
+        let [alpha_raw, beta_raw] = self.linear_checked(&features)?;
+        let alpha = checked_value("beta_gate_alpha", self.softplus_checked(alpha_raw)? + 1e-3)?;
+        let beta = checked_value("beta_gate_beta", self.softplus_checked(beta_raw)? + 1e-3)?;
+        let concentration = checked_value("beta_gate_concentration", alpha + beta)?;
+        let expected = checked_value("beta_gate_expected", alpha / concentration)?;
+        let variance_denominator = checked_value(
+            "beta_gate_variance",
+            concentration.powi(2) * (concentration + 1.0),
+        )?;
+        let variance = checked_value("beta_gate_variance", (alpha * beta) / variance_denominator)?;
+        let sample = self.sample_beta_checked(alpha, beta)?;
+        let result = BetaGateSample {
             sample,
             alpha,
             beta,
@@ -102,7 +151,10 @@ impl BetaGate {
             variance,
             features,
             applied: sample,
-        }
+        };
+        result.validate()?;
+        self.update_ema_checked(expected, variance)?;
+        Ok(result)
     }
 
     pub fn ema(&self) -> (f32, f32) {
@@ -122,36 +174,75 @@ impl BetaGate {
         features
     }
 
-    fn linear(&self, features: &[f32; 7]) -> [f32; 2] {
+    fn linear_checked(&self, features: &[f32; 7]) -> PureResult<[f32; 2]> {
         let mut outputs = [0.0f32; 2];
         for (row, weights) in self.weights.iter().enumerate() {
-            let mut acc = self.bias[row];
+            let mut acc = checked_value("beta_gate_bias", self.bias[row])?;
             for (feature, weight) in features.iter().zip(weights.iter()) {
-                acc += feature * weight;
+                let product = checked_value("beta_gate_linear_product", feature * weight)?;
+                acc = checked_value("beta_gate_linear_output", acc + product)?;
             }
             outputs[row] = acc;
         }
-        outputs
+        Ok(outputs)
     }
 
-    fn softplus(&self, x: f32) -> f32 {
-        (1.0 + x.exp()).ln()
+    fn softplus_checked(&self, x: f32) -> PureResult<f32> {
+        validate_finite_value("beta_gate_softplus_input", x)?;
+        let output = if x > 0.0 {
+            x + (-x).exp().ln_1p()
+        } else {
+            x.exp().ln_1p()
+        };
+        checked_value("beta_gate_softplus", output)
     }
 
-    fn sample_beta(&self, alpha: f32, beta: f32) -> f32 {
+    fn sample_beta_checked(&self, alpha: f32, beta: f32) -> PureResult<f32> {
+        validate_finite_value("beta_gate_alpha", alpha)?;
+        validate_finite_value("beta_gate_beta", beta)?;
         let mut rng = self.rng.borrow_mut();
         let distribution =
             Beta::new(alpha as f64, beta as f64).unwrap_or_else(|_| Beta::new(1.0, 1.0).unwrap());
-        distribution.sample(&mut *rng) as f32
+        checked_value("beta_gate_sample", distribution.sample(&mut *rng) as f32)
     }
 
-    fn update_ema(&self, mean: f32, variance: f32) {
+    fn update_ema_checked(&self, mean: f32, variance: f32) -> PureResult<()> {
+        validate_finite_value("beta_gate_expected", mean)?;
+        validate_finite_value("beta_gate_variance", variance)?;
+        validate_finite_value("beta_gate_momentum", self.momentum)?;
         let ema_mean = self.ema_mean.get();
         let ema_var = self.ema_var.get();
-        let new_mean = (1.0 - self.momentum) * ema_mean + self.momentum * mean;
-        let new_var = (1.0 - self.momentum) * ema_var + self.momentum * variance;
+        validate_finite_value("beta_gate_ema_mean", ema_mean)?;
+        validate_finite_value("beta_gate_ema_var", ema_var)?;
+        let new_mean = checked_value(
+            "beta_gate_ema_mean",
+            (1.0 - self.momentum) * ema_mean + self.momentum * mean,
+        )?;
+        let new_var = checked_value(
+            "beta_gate_ema_var",
+            (1.0 - self.momentum) * ema_var + self.momentum * variance,
+        )?;
         self.ema_mean.set(new_mean);
         self.ema_var.set(new_var.max(1e-6));
+        Ok(())
+    }
+
+    fn neutral_sample(&self, stats: &SpectralFeatureSample, indices: &[ZIndex]) -> BetaGateSample {
+        let mut features = self.build_features(stats, indices);
+        for value in &mut features {
+            if !value.is_finite() {
+                *value = 0.0;
+            }
+        }
+        BetaGateSample {
+            sample: 0.5,
+            alpha: 1.0,
+            beta: 1.0,
+            expected: 0.5,
+            variance: 1.0 / 12.0,
+            features,
+            applied: 0.5,
+        }
     }
 }
 
@@ -212,5 +303,66 @@ mod tests {
         assert!((sample.applied - sample.sample).abs() <= f32::EPSILON);
         let (ema_mean, ema_var) = gate.ema();
         assert!(ema_mean > 0.0 && ema_var > 0.0);
+    }
+
+    #[test]
+    fn beta_gate_try_forward_rejects_non_finite_features_without_updating_ema() {
+        let gate = BetaGate::new(BetaGateConfig::default());
+        let before = gate.ema();
+
+        let err = gate
+            .try_forward(
+                &SpectralFeatureSample {
+                    sheet_index: 1,
+                    sheet_confidence: 0.8,
+                    curvature: f32::INFINITY,
+                    spin: 0.05,
+                    energy: 0.2,
+                },
+                &[ZIndex {
+                    band: 1,
+                    sheet: 2,
+                    echo: 3,
+                }],
+            )
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "beta_gate_feature",
+                value,
+            } if value.is_infinite()
+        ));
+        assert_eq!(gate.ema(), before);
+    }
+
+    #[test]
+    fn beta_gate_sanitizes_non_finite_momentum() {
+        let gate = BetaGate::new(BetaGateConfig {
+            momentum: f32::NAN,
+            seed: 7,
+        });
+
+        let _ = gate
+            .try_forward(
+                &SpectralFeatureSample {
+                    sheet_index: 1,
+                    sheet_confidence: 0.8,
+                    curvature: 0.1,
+                    spin: 0.05,
+                    energy: 0.2,
+                },
+                &[ZIndex {
+                    band: 1,
+                    sheet: 2,
+                    echo: 3,
+                }],
+            )
+            .unwrap();
+
+        let (ema_mean, ema_var) = gate.ema();
+        assert!(ema_mean.is_finite());
+        assert!(ema_var.is_finite());
     }
 }

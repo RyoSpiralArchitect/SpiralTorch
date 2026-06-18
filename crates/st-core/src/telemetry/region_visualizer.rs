@@ -10,6 +10,7 @@ use crate::telemetry::xai_report::{AttributionMetadata, AttributionReport};
 use crate::telemetry::zspace_region::{
     ZSpaceRadiusBand, ZSpaceRegionDescriptor, ZSpaceRegionKey, ZSpaceSpinBand,
 };
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 
 const SPIN_ORDER: [ZSpaceSpinBand; 3] = ZSpaceSpinBand::values();
 const RADIUS_ORDER: [ZSpaceRadiusBand; 3] = ZSpaceRadiusBand::values();
@@ -165,11 +166,22 @@ impl RegionHeatmapSnapshot {
 
         let mut cells_meta: Vec<Value> = Vec::with_capacity(SPIN_ORDER.len() * RADIUS_ORDER.len());
         let mut values: Vec<f32> = Vec::with_capacity(SPIN_ORDER.len() * RADIUS_ORDER.len());
+        let mut total_samples = 0u64;
+        let mut total_combined_weight = 0.0f32;
+        let mut max_combined_weight = 0.0f32;
+        let has_highlight = self.highlight.is_some();
+        let highlight_key = self
+            .highlight
+            .map(|descriptor| descriptor.key().label())
+            .unwrap_or_default();
         for spin in SPIN_ORDER.iter().copied() {
             for radius in RADIUS_ORDER.iter().copied() {
                 let key = ZSpaceRegionKey::new(spin, radius);
                 let cell = self.cell(key);
                 values.push(cell.combined_weight);
+                total_samples = total_samples.saturating_add(cell.samples as u64);
+                total_combined_weight += cell.combined_weight;
+                max_combined_weight = max_combined_weight.max(cell.combined_weight);
                 cells_meta.push(json!({
                     "key": cell.key.label(),
                     "spin": cell.key.spin.label(),
@@ -205,6 +217,37 @@ impl RegionHeatmapSnapshot {
             metadata.insert_extra_number("highlight_col", radius_index(key.radius) as f64);
         }
 
+        emit_tensor_op(
+            "zspace_region_heatmap_report",
+            &[values.len()],
+            &[SPIN_ORDER.len(), RADIUS_ORDER.len()],
+        );
+        emit_tensor_op_meta("zspace_region_heatmap_report", || {
+            serde_json::json!({
+                "backend": "cpu",
+                "requested_backend": "auto",
+                "kind": "st_core_zspace_region_heatmap_report",
+                "cells": values.len(),
+                "rows": SPIN_ORDER.len(),
+                "cols": RADIUS_ORDER.len(),
+                "default_weight": self.default_weight,
+                "global_loss_ema": self.global_loss_ema.unwrap_or(0.0),
+                "has_global_loss_ema": self.global_loss_ema.is_some(),
+                "has_highlight": has_highlight,
+                "highlight_key": highlight_key,
+                "has_condition_min_spin": self.condition_min_spin.is_some(),
+                "condition_min_spin": self.condition_min_spin.unwrap_or(0.0),
+                "has_condition_min_radius": self.condition_min_radius.is_some(),
+                "condition_min_radius": self.condition_min_radius.unwrap_or(0.0),
+                "total_samples": total_samples,
+                "mean_combined_weight": if values.is_empty() {
+                    0.0
+                } else {
+                    total_combined_weight / values.len() as f32
+                },
+                "max_combined_weight": max_combined_weight,
+            })
+        });
         AttributionReport::new(metadata, SPIN_ORDER.len(), RADIUS_ORDER.len(), values)
     }
 }
@@ -303,6 +346,11 @@ impl RegionHeatmapHistory {
 
         let mut cells_meta: Vec<Value> = Vec::with_capacity(SPIN_ORDER.len() * RADIUS_ORDER.len());
         let mut values: Vec<f32> = Vec::with_capacity(SPIN_ORDER.len() * RADIUS_ORDER.len());
+        let mut max_delta_abs = 0.0f32;
+        let mut max_relative_delta_abs = 0.0f32;
+        let mut delta_total = 0.0f32;
+        let mut positive_cells = 0usize;
+        let mut negative_cells = 0usize;
         for spin in SPIN_ORDER.iter().copied() {
             for radius in RADIUS_ORDER.iter().copied() {
                 let key = ZSpaceRegionKey::new(spin, radius);
@@ -315,6 +363,14 @@ impl RegionHeatmapHistory {
                     0.0
                 };
                 values.push(delta);
+                max_delta_abs = max_delta_abs.max(delta.abs());
+                max_relative_delta_abs = max_relative_delta_abs.max(pct.abs());
+                delta_total += delta;
+                if delta > 0.0 {
+                    positive_cells += 1;
+                } else if delta < 0.0 {
+                    negative_cells += 1;
+                }
                 cells_meta.push(json!({
                     "key": key.label(),
                     "spin": key.spin.label(),
@@ -327,6 +383,36 @@ impl RegionHeatmapHistory {
             }
         }
         metadata.insert_extra("cells", Value::Array(cells_meta));
+        let values_len = values.len();
+        emit_tensor_op(
+            "zspace_region_delta_report",
+            &[self.timeline.len(), values_len],
+            &[SPIN_ORDER.len(), RADIUS_ORDER.len()],
+        );
+        emit_tensor_op_meta("zspace_region_delta_report", || {
+            serde_json::json!({
+                "backend": "cpu",
+                "requested_backend": "auto",
+                "kind": "st_core_zspace_region_delta_report",
+                "history_window": self.timeline.len(),
+                "history_capacity": self.capacity,
+                "step_span": last.step.saturating_sub(first.step),
+                "cells": values_len,
+                "max_delta_abs": max_delta_abs,
+                "max_relative_delta_abs": max_relative_delta_abs,
+                "mean_delta": if values_len == 0 {
+                    0.0
+                } else {
+                    delta_total / values_len as f32
+                },
+                "positive_cells": positive_cells,
+                "negative_cells": negative_cells,
+                "has_global_start": first.snapshot.global_loss().is_some(),
+                "global_start": first.snapshot.global_loss().unwrap_or(0.0),
+                "has_global_end": last.snapshot.global_loss().is_some(),
+                "global_end": last.snapshot.global_loss().unwrap_or(0.0),
+            })
+        });
         Some(AttributionReport::new(
             metadata,
             SPIN_ORDER.len(),
@@ -371,6 +457,10 @@ impl RegionHeatmapHistory {
 
         let mut cells_meta: Vec<Value> = Vec::with_capacity(SPIN_ORDER.len() * RADIUS_ORDER.len());
         let mut values: Vec<f32> = Vec::with_capacity(SPIN_ORDER.len() * RADIUS_ORDER.len());
+        let mut std_total = 0.0f32;
+        let mut max_std_dev = 0.0f32;
+        let mut max_range = 0.0f32;
+        let mut active_cells = 0usize;
         for spin in SPIN_ORDER.iter().copied() {
             for radius in RADIUS_ORDER.iter().copied() {
                 let key = ZSpaceRegionKey::new(spin, radius);
@@ -397,6 +487,14 @@ impl RegionHeatmapHistory {
                 let variance = variance.max(0.0);
                 let std_dev = variance.sqrt();
                 values.push(std_dev);
+                std_total += std_dev;
+                max_std_dev = max_std_dev.max(std_dev);
+                if std_dev > 0.0 {
+                    active_cells += 1;
+                }
+                if min.is_finite() && max.is_finite() {
+                    max_range = max_range.max((max - min).abs());
+                }
                 cells_meta.push(json!({
                     "key": key.label(),
                     "spin": key.spin.label(),
@@ -410,6 +508,31 @@ impl RegionHeatmapHistory {
             }
         }
         metadata.insert_extra("cells", Value::Array(cells_meta));
+        let values_len = values.len();
+        emit_tensor_op(
+            "zspace_region_volatility_report",
+            &[self.timeline.len(), values_len],
+            &[SPIN_ORDER.len(), RADIUS_ORDER.len()],
+        );
+        emit_tensor_op_meta("zspace_region_volatility_report", || {
+            serde_json::json!({
+                "backend": "cpu",
+                "requested_backend": "auto",
+                "kind": "st_core_zspace_region_volatility_report",
+                "history_window": self.timeline.len(),
+                "history_capacity": self.capacity,
+                "step_span": last.step.saturating_sub(first.step),
+                "cells": values_len,
+                "active_cells": active_cells,
+                "mean_std_dev": if values_len == 0 {
+                    0.0
+                } else {
+                    std_total / values_len as f32
+                },
+                "max_std_dev": max_std_dev,
+                "max_weight_range": max_range,
+            })
+        });
         Some(AttributionReport::new(
             metadata,
             SPIN_ORDER.len(),
@@ -422,6 +545,30 @@ impl RegionHeatmapHistory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
+
+    fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
+        crate::telemetry::tensor_observer_lock()
+    }
+
+    fn full_snapshot(default_weight: f32, leading_edge_multiplier: f32) -> RegionHeatmapSnapshot {
+        let mut snapshot = RegionHeatmapSnapshot::new(default_weight)
+            .with_global_loss(Some(0.8))
+            .with_condition(Some(0.2), Some(0.3));
+        for spin in SPIN_ORDER.iter().copied() {
+            for radius in RADIUS_ORDER.iter().copied() {
+                let key = ZSpaceRegionKey::new(spin, radius);
+                let multiplier =
+                    if spin == ZSpaceSpinBand::Leading && radius == ZSpaceRadiusBand::Edge {
+                        leading_edge_multiplier
+                    } else {
+                        1.0
+                    };
+                snapshot.insert_cell(RegionHeatmapCell::new(key, 1.0, multiplier, 3, Some(0.5)));
+            }
+        }
+        snapshot
+    }
 
     #[test]
     fn snapshot_produces_report_with_expected_shape() {
@@ -514,5 +661,80 @@ mod tests {
             .get("cells")
             .expect("cell metadata present")
             .is_array());
+    }
+
+    #[test]
+    fn region_reports_emit_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let descriptor = ZSpaceRegionDescriptor {
+            spin_alignment: 0.9,
+            normalized_radius: 0.75,
+            curvature_radius: 1.5,
+            geodesic_radius: 0.5,
+            sheet_index: 2,
+            sheet_count: 4,
+            topological_sector: 1,
+        };
+        let snapshot = full_snapshot(1.0, 1.5).with_highlight(Some(descriptor));
+        let report = snapshot.clone().into_report();
+
+        let mut history = RegionHeatmapHistory::new(3);
+        history.push(0, full_snapshot(1.0, 1.0));
+        history.push(2, snapshot);
+        let delta = history.delta_report().expect("delta report");
+        let volatility = history.volatility_report().expect("volatility report");
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert_eq!(report.shape(), (3, 3));
+        assert_eq!(delta.shape(), (3, 3));
+        assert_eq!(volatility.shape(), (3, 3));
+
+        let events = events.lock().unwrap();
+        let heatmap = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "zspace_region_heatmap_report"
+                    && data["cells"] == 9
+                    && data["has_highlight"] == true
+                    && data["max_combined_weight"].as_f64().unwrap_or(0.0) > 1.0
+            })
+            .expect("zspace_region_heatmap_report metadata event");
+        assert_eq!(heatmap.1["backend"], "cpu");
+        assert_eq!(heatmap.1["kind"], "st_core_zspace_region_heatmap_report");
+        assert!(heatmap.1["max_combined_weight"].as_f64().unwrap_or(0.0) > 1.0);
+
+        let delta_meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "zspace_region_delta_report"
+                    && data["history_window"] == 2
+                    && data["cells"] == 9
+            })
+            .expect("zspace_region_delta_report metadata event");
+        assert_eq!(delta_meta.1["kind"], "st_core_zspace_region_delta_report");
+        assert!(delta_meta.1["max_delta_abs"].as_f64().unwrap_or(0.0) > 0.0);
+
+        let volatility_meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "zspace_region_volatility_report"
+                    && data["history_window"] == 2
+                    && data["cells"] == 9
+            })
+            .expect("zspace_region_volatility_report metadata event");
+        assert_eq!(
+            volatility_meta.1["kind"],
+            "st_core_zspace_region_volatility_report"
+        );
+        assert!(volatility_meta.1["max_std_dev"].as_f64().unwrap_or(0.0) > 0.0);
     }
 }

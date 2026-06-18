@@ -78,6 +78,10 @@ name = "modelzoo_wave_rnn_sequence"
 path = "../../examples/modelzoo_wave_rnn_sequence.rs"
 
 [[example]]
+name = "modelzoo_lstm_sequence_probe"
+path = "../../examples/modelzoo_lstm_sequence_probe.rs"
+
+[[example]]
 name = "modelzoo_gnn_graph_regression"
 path = "../../examples/modelzoo_gnn_graph_regression.rs"
 

@@ -34,6 +34,7 @@ use core::f32::consts::TAU;
 use std::collections::VecDeque;
 
 use crate::util::timewarp::{warp_axis_in_place, TemporalWarp, TemporalWarpError};
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 
 #[cfg(feature = "kdsl")]
 use st_kdsl::auto::{synthesize_program, HeuristicHint};
@@ -99,6 +100,45 @@ impl ChronoHarmonics {
         let energy_power = discrete_power_spectrum(&energy_series, bins);
         let dominant_drift = dominant_peak(&drift_power, sample_rate, count);
         let dominant_energy = dominant_peak(&energy_power, sample_rate, count);
+        let drift_power_total: f32 = drift_power.iter().copied().sum();
+        let energy_power_total: f32 = energy_power.iter().copied().sum();
+        let dominant_drift_frequency = dominant_drift
+            .as_ref()
+            .map(|peak| peak.frequency)
+            .unwrap_or(0.0);
+        let dominant_drift_magnitude = dominant_drift
+            .as_ref()
+            .map(|peak| peak.magnitude)
+            .unwrap_or(0.0);
+        let dominant_energy_frequency = dominant_energy
+            .as_ref()
+            .map(|peak| peak.frequency)
+            .unwrap_or(0.0);
+        let dominant_energy_magnitude = dominant_energy
+            .as_ref()
+            .map(|peak| peak.magnitude)
+            .unwrap_or(0.0);
+        emit_tensor_op("chrono_harmonics_summary", &[count, bins], &[2, bins]);
+        emit_tensor_op_meta("chrono_harmonics_summary", || {
+            serde_json::json!({
+                "backend": "cpu",
+                "requested_backend": "auto",
+                "kind": "st_core_chrono_harmonics_summary",
+                "frames": count,
+                "bins": bins,
+                "duration": duration,
+                "sample_rate": sample_rate,
+                "nyquist": nyquist,
+                "drift_power_total": drift_power_total,
+                "energy_power_total": energy_power_total,
+                "has_dominant_drift": dominant_drift.is_some(),
+                "dominant_drift_frequency": dominant_drift_frequency,
+                "dominant_drift_magnitude": dominant_drift_magnitude,
+                "has_dominant_energy": dominant_energy.is_some(),
+                "dominant_energy_frequency": dominant_energy_frequency,
+                "dominant_energy_magnitude": dominant_energy_magnitude,
+            })
+        });
         Some(Self {
             frames: count,
             duration,
@@ -342,7 +382,7 @@ impl ChronoSummary {
         let mean_abs_drift = sum_abs_drift / count_f32;
         let energy_var = (sum_energy_sq / count_f32) - mean_energy.powi(2);
         let drift_var = (sum_drift_sq / count_f32) - mean_drift.powi(2);
-        Some(Self {
+        let summary = Self {
             frames: count,
             duration,
             latest_timestamp,
@@ -362,7 +402,27 @@ impl ChronoSummary {
             } else {
                 0.0
             },
-        })
+        };
+        emit_tensor_op("chrono_summary", &[count, 7], &[1, 10]);
+        emit_tensor_op_meta("chrono_summary", || {
+            serde_json::json!({
+                "backend": "cpu",
+                "requested_backend": "auto",
+                "kind": "st_core_chrono_summary",
+                "frames": summary.frames,
+                "duration": summary.duration,
+                "latest_timestamp": summary.latest_timestamp,
+                "mean_drift": summary.mean_drift,
+                "mean_abs_drift": summary.mean_abs_drift,
+                "drift_std": summary.drift_std,
+                "mean_energy": summary.mean_energy,
+                "energy_std": summary.energy_std,
+                "mean_decay": summary.mean_decay,
+                "min_energy": summary.min_energy,
+                "max_energy": summary.max_energy,
+            })
+        });
+        Some(summary)
     }
 }
 
@@ -731,6 +791,28 @@ impl ResonanceTemporalMetrics {
 mod tests {
     use super::*;
     use core::f32::consts::TAU;
+    use std::sync::{Arc, Mutex};
+
+    fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
+        crate::telemetry::tensor_observer_lock()
+    }
+
+    fn frame(step: u64, drift: f32, energy: f32) -> ChronoFrame {
+        ChronoFrame {
+            step,
+            timestamp: step as f32 * 0.1,
+            dt: 0.1,
+            observed_curvature: -1.0 + drift,
+            curvature_drift: drift,
+            total_energy: energy,
+            energy_decay: -0.01,
+            homotopy_energy: energy * 0.4,
+            functor_energy: energy * 0.2,
+            recursive_energy: energy * 0.2,
+            projection_energy: energy * 0.1,
+            infinity_energy: energy * 0.1,
+        }
+    }
 
     #[test]
     fn timeline_records_and_limits_capacity() {
@@ -835,6 +917,62 @@ mod tests {
         assert!(summary.mean_abs_drift > 0.0);
         assert!(summary.drift_std >= 0.0);
         assert!(summary.min_energy <= summary.max_energy);
+    }
+
+    #[test]
+    fn summary_and_harmonics_emit_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let frames = (0..16)
+            .map(|step| {
+                let phase = TAU * step as f32 / 8.0;
+                frame(step, phase.sin() * 0.2, 1.0 + phase.cos().abs())
+            })
+            .collect::<Vec<_>>();
+        let summary = ChronoSummary::from_frames(&frames).expect("summary");
+        let harmonics = ChronoHarmonics::from_frames(&frames, 8).expect("harmonics");
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert_eq!(summary.frames, 16);
+        assert_eq!(harmonics.frames, 16);
+        let events = events.lock().unwrap();
+        let summary_meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "chrono_summary"
+                    && data["kind"] == "st_core_chrono_summary"
+                    && data["frames"] == 16
+            })
+            .expect("chrono_summary metadata event");
+        assert_eq!(summary_meta.1["backend"], "cpu");
+        assert_eq!(summary_meta.1["kind"], "st_core_chrono_summary");
+        assert_eq!(summary_meta.1["frames"], 16);
+        assert!(summary_meta.1["mean_energy"].as_f64().unwrap_or(0.0) > 0.0);
+
+        let harmonic_meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "chrono_harmonics_summary"
+                    && data["kind"] == "st_core_chrono_harmonics_summary"
+                    && data["frames"] == 16
+                    && data["bins"] == 8
+            })
+            .expect("chrono_harmonics_summary metadata event");
+        assert_eq!(harmonic_meta.1["backend"], "cpu");
+        assert_eq!(harmonic_meta.1["kind"], "st_core_chrono_harmonics_summary");
+        assert_eq!(harmonic_meta.1["frames"], 16);
+        assert_eq!(harmonic_meta.1["bins"], 8);
+        assert!(harmonic_meta.1["has_dominant_energy"]
+            .as_bool()
+            .unwrap_or(false));
     }
 
     #[test]

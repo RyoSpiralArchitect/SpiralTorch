@@ -27,8 +27,8 @@ struct CParams {
 @group(0) @binding(6) var<storage, read_write> OUTMAX: array<f32>;
 
 // ===== Shared (bank padding) =====
-var<workgroup> s_vals: array<f32, 256u + 8u>;
-var<workgroup> s_idx:  array<u32, 256u + 8u>;
+var<workgroup> s_vals: array<f32, 264u>;
+var<workgroup> s_idx:  array<u32, 264u>;
 fn pad_addr(i:u32)->u32 { return i + (i >> 5u); } // +1 per 32
 
 fn next_pow2(x:u32)->u32 {
@@ -178,7 +178,7 @@ fn topk_subgroups_bitonic_1ce(
       }
     }
     let n = next_pow2(max(1u,cand));
-    for (var i:cand; i<n; i=i+1u) {
+    for (var i: u32 = cand; i<n; i=i+1u) {
       s_vals[pad_addr(i)] = -0x1p127f; s_idx[pad_addr(i)] = 0u;
     }
   }
@@ -248,6 +248,67 @@ fn topk_workgroup_1ce(
       OUTV[r*P.k + t] = s_vals[pad_addr(bi)];
       OUTI[r*P.k + t] = s_idx[pad_addr(bi)];
       s_vals[pad_addr(bi)] = -0x1p127f;
+    }
+  }
+}
+
+fn st_rankk_less(v_a: f32, i_a: u32, v_b: f32, i_b: u32) -> bool {
+  return (v_a < v_b) || (v_a == v_b && i_a < i_b);
+}
+
+@compute @workgroup_size(256)
+fn midk_workgroup_exact_1ce(
+  @builtin(local_invocation_id)  lid: vec3<u32>,
+  @builtin(workgroup_id)         wid: vec3<u32>
+){
+  let r = wid.y;
+  if (r >= P.rows) { return; }
+
+  if (lid.x < P.cols) {
+    s_vals[pad_addr(lid.x)] = X[r * P.row_stride + lid.x];
+    s_idx[pad_addr(lid.x)] = lid.x;
+  } else {
+    s_vals[pad_addr(lid.x)] = 0x1p127f;
+    s_idx[pad_addr(lid.x)] = 0xffffffffu;
+  }
+  workgroupBarrier();
+
+  if (lid.x == 0u) {
+    let active_cols = min(P.cols, 256u);
+    for (var i: u32 = 0u; i < active_cols; i = i + 1u) {
+      var best = i;
+      for (var j: u32 = i + 1u; j < active_cols; j = j + 1u) {
+        let jv = s_vals[pad_addr(j)];
+        let ji = s_idx[pad_addr(j)];
+        let bv = s_vals[pad_addr(best)];
+        let bi = s_idx[pad_addr(best)];
+        if (st_rankk_less(jv, ji, bv, bi)) {
+          best = j;
+        }
+      }
+      if (best != i) {
+        let ai = pad_addr(i);
+        let ab = pad_addr(best);
+        let tv = s_vals[ai];
+        let ti = s_idx[ai];
+        s_vals[ai] = s_vals[ab];
+        s_idx[ai] = s_idx[ab];
+        s_vals[ab] = tv;
+        s_idx[ab] = ti;
+      }
+    }
+
+    let take = min(P.k, active_cols);
+    let start = (active_cols - take) / 2u;
+    for (var t: u32 = 0u; t < P.k; t = t + 1u) {
+      if (t < take) {
+        let src = start + t;
+        OUTV[r * P.k + t] = s_vals[pad_addr(src)];
+        OUTI[r * P.k + t] = s_idx[pad_addr(src)];
+      } else {
+        OUTV[r * P.k + t] = 0x1p127f;
+        OUTI[r * P.k + t] = 0xffffffffu;
+      }
     }
   }
 }

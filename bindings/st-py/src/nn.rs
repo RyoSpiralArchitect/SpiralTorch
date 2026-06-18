@@ -86,7 +86,7 @@ use st_nn::{
     ZSpaceTraceConfig, ZSpaceTraceRecorder, ZSpaceVae, ZSpaceVaeState, ZSpaceVaeStats,
 };
 #[cfg(feature = "nn")]
-use st_nn::{Module, Parameter};
+use st_nn::{EpochTensorBackendStats as RustEpochTensorBackendStats, Module, Parameter};
 #[cfg(feature = "nn")]
 use st_tensor::{OpenCartesianTopos, Tensor, TensorError};
 #[cfg(feature = "nn")]
@@ -4188,12 +4188,46 @@ impl PyEpochStats {
         self.inner.average_loss
     }
 
+    #[getter]
+    pub fn tensor_backend(&self, py: Python<'_>) -> PyResult<PyObject> {
+        tensor_backend_stats_to_pydict(py, self.inner.tensor_backend)
+    }
+
     fn __repr__(&self) -> String {
         format!(
-            "EpochStats(batches={}, total_loss={}, average_loss={})",
-            self.inner.batches, self.inner.total_loss, self.inner.average_loss
+            "EpochStats(batches={}, total_loss={}, average_loss={}, tensor_ops_total={})",
+            self.inner.batches,
+            self.inner.total_loss,
+            self.inner.average_loss,
+            self.inner.tensor_backend.ops_total
         )
     }
+}
+
+#[cfg(feature = "nn")]
+fn tensor_backend_stats_to_pydict(
+    py: Python<'_>,
+    stats: RustEpochTensorBackendStats,
+) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("ops_total", stats.ops_total)?;
+    dict.set_item("fallbacks", stats.fallbacks)?;
+    dict.set_item("meta_events", stats.meta_events)?;
+    dict.set_item("meta_non_finite_sentinels", stats.meta_non_finite_sentinels)?;
+    dict.set_item("backend_wgpu", stats.backend_wgpu)?;
+    dict.set_item("backend_cuda", stats.backend_cuda)?;
+    dict.set_item("backend_hip", stats.backend_hip)?;
+    dict.set_item("backend_cpu", stats.backend_cpu)?;
+    dict.set_item("backend_cpu_simd", stats.backend_cpu_simd)?;
+    dict.set_item("backend_faer", stats.backend_faer)?;
+    dict.set_item("backend_naive", stats.backend_naive)?;
+    dict.set_item("backend_other", stats.backend_other)?;
+    dict.set_item("kernel_backend_wgpu_dense", stats.kernel_backend_wgpu_dense)?;
+    dict.set_item("kernel_backend_simd", stats.kernel_backend_simd)?;
+    dict.set_item("kernel_backend_other", stats.kernel_backend_other)?;
+    dict.set_item("embedding_tokens", stats.embedding_tokens)?;
+    dict.set_item("embedding_token_repairs", stats.embedding_token_repairs)?;
+    Ok(dict.into_py(py))
 }
 
 #[cfg(feature = "nn")]
@@ -4202,6 +4236,10 @@ fn epoch_stats_to_pydict(py: Python<'_>, stats: RustEpochStats) -> PyResult<PyOb
     dict.set_item("batches", stats.batches)?;
     dict.set_item("total_loss", stats.total_loss)?;
     dict.set_item("average_loss", stats.average_loss)?;
+    dict.set_item(
+        "tensor_backend",
+        tensor_backend_stats_to_pydict(py, stats.tensor_backend)?,
+    )?;
     Ok(dict.into_py(py))
 }
 

@@ -18,9 +18,9 @@ use rand_chacha::ChaCha8Rng;
 use rand_distr::{Distribution, StandardNormal};
 use serde::Deserialize;
 use serde_json::Value;
-use st_nn::io;
 use st_nn::layers::linear::Linear;
 use st_nn::module::Module;
+use st_nn::{current_tensor_util_backend_for_values, io};
 use st_tensor::{PureResult, Tensor};
 
 #[derive(Debug, Deserialize)]
@@ -193,7 +193,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     let steps = manifest.downstream.recommended_head.warmup_epochs.max(3) as usize;
     for _ in 0..steps {
         let preds = scratch_head.forward(&projected)?;
-        let diff = preds.sub(&targets)?.scale(1.0 / samples as f32)?;
+        let diff = preds.sub_with_backend(
+            &targets,
+            current_tensor_util_backend_for_values(preds.data().len()),
+        )?;
+        let diff = diff.scale_with_backend(
+            1.0 / samples as f32,
+            current_tensor_util_backend_for_values(diff.data().len()),
+        )?;
         let _ = scratch_head.backward(&projected, &diff)?;
         scratch_head.apply_step(manifest.downstream.recommended_head.learning_rate)?;
     }

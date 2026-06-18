@@ -3279,6 +3279,7 @@ dependencies = [
  "serde",
  "spiral-config",
  "st-core",
+ "st-nn",
  "st-tensor",
  "st-vision",
  "tboard",

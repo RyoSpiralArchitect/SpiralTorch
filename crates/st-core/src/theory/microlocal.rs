@@ -20,6 +20,7 @@ use crate::theory::zpulse::{
 use crate::util::math::LeechProjector;
 use ndarray::{indices, ArrayD, ArrayViewD, Dimension, IxDyn};
 use rustc_hash::FxHashMap;
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 use statrs::function::gamma::gamma;
 use std::collections::VecDeque;
 use std::fmt;
@@ -1406,7 +1407,7 @@ impl InterfaceZConductor {
             events,
         };
 
-        InterfaceZReport {
+        let report = InterfaceZReport {
             gauge_ids,
             signatures,
             lift: self.lift.clone(),
@@ -1416,7 +1417,23 @@ impl InterfaceZConductor {
             fused_z: fused_report,
             feedback,
             budget_scale,
-        }
+        };
+        emit_microlocal_conductor_step_meta(
+            &report,
+            now,
+            mask.ndim(),
+            mask.len(),
+            c_prime.is_some(),
+            self.gauges.len(),
+            self.smoothing,
+            self.band_policy.is_some(),
+            self.budget_policy.is_some(),
+            tempo_hint.is_some(),
+            stderr_hint.is_some(),
+            self.default_tempo_hint.is_some(),
+            self.default_stderr_hint.is_some(),
+        );
+        report
     }
 
     pub fn last_fused_pulse(&self) -> InterfaceZPulse {
@@ -1461,10 +1478,242 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t.clamp(0.0, 1.0)
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct FloatStats {
+    count: usize,
+    non_finite: usize,
+    min: f32,
+    mean: f32,
+    max: f32,
+}
+
+fn finite_stats(values: impl IntoIterator<Item = f32>) -> FloatStats {
+    let mut count = 0usize;
+    let mut non_finite = 0usize;
+    let mut min = f32::INFINITY;
+    let mut max = f32::NEG_INFINITY;
+    let mut total = 0.0f64;
+    for value in values {
+        if value.is_finite() {
+            count += 1;
+            min = min.min(value);
+            max = max.max(value);
+            total += value as f64;
+        } else {
+            non_finite += 1;
+        }
+    }
+    if count == 0 {
+        FloatStats {
+            count,
+            non_finite,
+            min: 0.0,
+            mean: 0.0,
+            max: 0.0,
+        }
+    } else {
+        FloatStats {
+            count,
+            non_finite,
+            min,
+            mean: (total / count as f64) as f32,
+            max,
+        }
+    }
+}
+
+fn value_f64(value: f32) -> serde_json::Value {
+    serde_json::Value::from(if value.is_finite() { value as f64 } else { 0.0 })
+}
+
+fn insert_stats(
+    payload: &mut serde_json::Map<String, serde_json::Value>,
+    prefix: &str,
+    stats: FloatStats,
+) {
+    payload.insert(format!("{prefix}_count"), stats.count.into());
+    payload.insert(format!("{prefix}_non_finite"), stats.non_finite.into());
+    payload.insert(format!("{prefix}_min"), value_f64(stats.min));
+    payload.insert(format!("{prefix}_mean"), value_f64(stats.mean));
+    payload.insert(format!("{prefix}_max"), value_f64(stats.max));
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_microlocal_conductor_step_meta(
+    report: &InterfaceZReport,
+    step: u64,
+    mask_dim: usize,
+    mask_values: usize,
+    has_label: bool,
+    gauge_count: usize,
+    smoothing: f32,
+    has_band_policy: bool,
+    has_budget_policy: bool,
+    explicit_tempo_hint: bool,
+    explicit_stderr_hint: bool,
+    has_default_tempo_hint: bool,
+    has_default_stderr_hint: bool,
+) {
+    let pulse_count = report.pulses.len();
+    let signature_count = report.signatures.len();
+    let quality_stats = finite_stats(report.qualities.iter().copied());
+    let support_stats = finite_stats(report.pulses.iter().map(|pulse| pulse.support));
+    let drift_stats = finite_stats(report.pulses.iter().map(|pulse| pulse.drift));
+    let bias_stats = finite_stats(report.pulses.iter().map(|pulse| pulse.z_bias));
+    let stderr_stats = finite_stats(
+        report
+            .pulses
+            .iter()
+            .filter_map(|pulse| pulse.standard_error),
+    );
+    let raw_density_stats = finite_stats(
+        report
+            .signatures
+            .iter()
+            .flat_map(|signature| signature.raw_density.iter().copied()),
+    );
+    let interface_signatures = report
+        .signatures
+        .iter()
+        .filter(|signature| signature.has_interface())
+        .count();
+    let quality_zero_count = report
+        .qualities
+        .iter()
+        .filter(|quality| quality.is_finite() && **quality <= f32::EPSILON)
+        .count();
+    let (mut input_above, mut input_here, mut input_beneath) = (0.0f32, 0.0f32, 0.0f32);
+    let mut input_energy = 0.0f32;
+    let mut elliptic_pulses = 0usize;
+    for pulse in &report.pulses {
+        input_above += pulse.band_energy.0;
+        input_here += pulse.band_energy.1;
+        input_beneath += pulse.band_energy.2;
+        input_energy += pulse.total_energy();
+        if pulse.elliptic.is_some() {
+            elliptic_pulses += 1;
+        }
+    }
+    let fused_energy = report.fused_pulse.total_energy();
+    let smoothing_applied = report
+        .feedback
+        .events
+        .iter()
+        .any(|event| event == "smoothing.applied");
+    let elliptic_event_count = report
+        .feedback
+        .events
+        .iter()
+        .filter(|event| event.starts_with("elliptic."))
+        .count();
+
+    emit_tensor_op(
+        "microlocal_conductor_step",
+        &[gauge_count, mask_values],
+        &[1, pulse_count.max(1)],
+    );
+    emit_tensor_op_meta("microlocal_conductor_step", || {
+        let mut payload = serde_json::Map::new();
+        payload.insert("backend".into(), "cpu".into());
+        payload.insert("requested_backend".into(), "auto".into());
+        payload.insert("kind".into(), "st_core_microlocal_conductor_step".into());
+        payload.insert("step".into(), step.into());
+        payload.insert("mask_dim".into(), mask_dim.into());
+        payload.insert("mask_values".into(), mask_values.into());
+        payload.insert("has_label".into(), has_label.into());
+        payload.insert("gauge_count".into(), gauge_count.into());
+        payload.insert("signature_count".into(), signature_count.into());
+        payload.insert("interface_signatures".into(), interface_signatures.into());
+        payload.insert("pulse_count".into(), pulse_count.into());
+        payload.insert("has_interface".into(), report.has_interface().into());
+        payload.insert("has_band_policy".into(), has_band_policy.into());
+        payload.insert("has_budget_policy".into(), has_budget_policy.into());
+        payload.insert("smoothing".into(), value_f64(smoothing));
+        payload.insert("smoothing_applied".into(), smoothing_applied.into());
+        payload.insert("budget_scale".into(), value_f64(report.budget_scale));
+        payload.insert(
+            "budget_applied".into(),
+            (report.budget_scale < 1.0 - f32::EPSILON).into(),
+        );
+        payload.insert("explicit_tempo_hint".into(), explicit_tempo_hint.into());
+        payload.insert("explicit_stderr_hint".into(), explicit_stderr_hint.into());
+        payload.insert(
+            "has_default_tempo_hint".into(),
+            has_default_tempo_hint.into(),
+        );
+        payload.insert(
+            "has_default_stderr_hint".into(),
+            has_default_stderr_hint.into(),
+        );
+        payload.insert("quality_zero_count".into(), quality_zero_count.into());
+        payload.insert("input_band_above".into(), value_f64(input_above));
+        payload.insert("input_band_here".into(), value_f64(input_here));
+        payload.insert("input_band_beneath".into(), value_f64(input_beneath));
+        payload.insert("input_total_energy".into(), value_f64(input_energy));
+        payload.insert(
+            "fused_band_above".into(),
+            value_f64(report.fused_pulse.band_energy.0),
+        );
+        payload.insert(
+            "fused_band_here".into(),
+            value_f64(report.fused_pulse.band_energy.1),
+        );
+        payload.insert(
+            "fused_band_beneath".into(),
+            value_f64(report.fused_pulse.band_energy.2),
+        );
+        payload.insert("fused_total_energy".into(), value_f64(fused_energy));
+        payload.insert(
+            "fused_support".into(),
+            value_f64(report.fused_pulse.support),
+        );
+        payload.insert(
+            "fused_interface_cells".into(),
+            value_f64(report.fused_pulse.interface_cells),
+        );
+        payload.insert("fused_drift".into(), value_f64(report.fused_pulse.drift));
+        payload.insert("fused_z_bias".into(), value_f64(report.fused_pulse.z_bias));
+        payload.insert("fused_z".into(), value_f64(report.fused_z.z));
+        payload.insert("fused_z_support".into(), value_f64(report.fused_z.support));
+        payload.insert(
+            "fused_density_fluctuation".into(),
+            value_f64(report.fused_z.pulse.density_fluctuation),
+        );
+        payload.insert(
+            "fused_quality".into(),
+            value_f64(report.fused_z.pulse.quality),
+        );
+        payload.insert("fused_tempo".into(), value_f64(report.fused_z.pulse.tempo));
+        payload.insert(
+            "fused_stderr".into(),
+            value_f64(report.fused_z.pulse.stderr),
+        );
+        payload.insert("event_count".into(), report.feedback.events.len().into());
+        payload.insert("elliptic_event_count".into(), elliptic_event_count.into());
+        payload.insert("elliptic_pulses".into(), elliptic_pulses.into());
+        payload.insert(
+            "has_elliptic_fused".into(),
+            report.fused_pulse.elliptic.is_some().into(),
+        );
+        payload.insert(
+            "attribution_count".into(),
+            report.fused_z.attributions.len().into(),
+        );
+        insert_stats(&mut payload, "quality", quality_stats);
+        insert_stats(&mut payload, "support", support_stats);
+        insert_stats(&mut payload, "drift", drift_stats);
+        insert_stats(&mut payload, "z_bias", bias_stats);
+        insert_stats(&mut payload, "stderr", stderr_stats);
+        insert_stats(&mut payload, "raw_density", raw_density_stats);
+        payload.into()
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use ndarray::array;
+    use std::sync::{Arc, Mutex};
 
     fn assert_neutral_scale(scale: Option<ZScale>) {
         let scale = scale.expect("scale tag missing from pulse");
@@ -1606,6 +1855,61 @@ mod tests {
             .events
             .iter()
             .any(|event| event.starts_with("elliptic.")));
+    }
+
+    #[test]
+    fn conductor_step_emits_backend_meta() {
+        let _lock = crate::telemetry::tensor_observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let mask = array![[0.0, 0.0, 0.0], [0.0, 1.0, 1.0], [0.0, 1.0, 1.0]].into_dyn();
+        let c_prime = mask.mapv(|v| if v > 0.5 { 1.0 } else { -1.0 });
+        let gauge = InterfaceGauge::new(1.0, 1.0);
+        let lift = InterfaceZLift::new(&[1.0, 0.0], LeechProjector::new(24, 0.5));
+        let mut conductor = InterfaceZConductor::new(vec![gauge], lift)
+            .reinforce_positive_curvature(1.5)
+            .with_smoothing(0.5)
+            .with_budget_policy(BudgetPolicy::new(0.05));
+        let first = conductor.step(&mask, Some(&c_prime), Some(1.25), Some(0.02));
+        let second = conductor.step(&mask, Some(&c_prime), Some(1.5), Some(0.03));
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert!(first.has_interface());
+        assert!(second.has_interface());
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "microlocal_conductor_step"
+                    && data["kind"] == "st_core_microlocal_conductor_step"
+                    && data["step"] == 1
+            })
+            .expect("microlocal_conductor_step metadata event");
+        assert_eq!(meta.1["backend"], "cpu");
+        assert_eq!(meta.1["requested_backend"], "auto");
+        assert_eq!(meta.1["gauge_count"], 1);
+        assert_eq!(meta.1["signature_count"], 1);
+        assert_eq!(meta.1["pulse_count"], 1);
+        assert_eq!(meta.1["has_label"], true);
+        assert_eq!(meta.1["has_band_policy"], true);
+        assert_eq!(meta.1["has_budget_policy"], true);
+        assert_eq!(meta.1["smoothing_applied"], true);
+        assert_eq!(meta.1["explicit_tempo_hint"], true);
+        assert_eq!(meta.1["explicit_stderr_hint"], true);
+        assert!(meta.1["has_interface"].as_bool().unwrap_or(false));
+        assert!(meta.1["has_elliptic_fused"].as_bool().unwrap_or(false));
+        assert!(meta.1["elliptic_event_count"].as_u64().unwrap_or(0) > 0);
+        assert!(meta.1["quality_mean"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["fused_total_energy"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["fused_tempo"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["raw_density_count"].as_u64().unwrap_or(0) > 0);
     }
 
     #[test]

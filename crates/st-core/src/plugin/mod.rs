@@ -77,6 +77,9 @@ pub fn global_registry() -> &'static PluginRegistry {
 }
 
 fn ensure_tensor_op_bridge(bus: PluginEventBus) {
+    #[cfg(test)]
+    let _observer_lock = crate::telemetry::tensor_observer_lock();
+
     let _ = TENSOR_OP_BRIDGE.get_or_init(|| {
         let bus_ops = bus.clone();
         set_tensor_op_observer(Some(Arc::new(move |event: &TensorOpEvent| {

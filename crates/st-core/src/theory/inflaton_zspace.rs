@@ -25,6 +25,7 @@
 use std::f64::consts::PI;
 
 use num_complex::Complex64;
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 
 /// Bundles the Mellin/Z-plane evaluations of the slow-roll background
 /// together with the assembled primordial power spectrum.
@@ -75,6 +76,17 @@ impl PrimordialProjection {
         assert_eq!(len, epsilon_z.len(), "s_values/epsilon(z) length mismatch");
 
         let spectrum = assemble_primordial_spectrum(&z_points, &h_z, &epsilon_z, planck_mass);
+        emit_primordial_projection_meta(
+            log_start,
+            log_step,
+            lattice_len,
+            &s_values,
+            &z_points,
+            &h_z,
+            &epsilon_z,
+            &spectrum,
+            planck_mass,
+        );
 
         Self {
             log_start,
@@ -97,6 +109,124 @@ impl PrimordialProjection {
     pub fn is_empty(&self) -> bool {
         self.s_values.is_empty()
     }
+}
+
+fn finite_meta_f64(value: f64) -> f64 {
+    if value.is_finite() {
+        value
+    } else {
+        0.0
+    }
+}
+
+fn complex_abs_mean(values: &[Complex64]) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    values.iter().map(|value| value.norm()).sum::<f64>() / values.len() as f64
+}
+
+fn complex_abs_max(values: &[Complex64]) -> f64 {
+    values
+        .iter()
+        .map(|value| value.norm())
+        .fold(0.0f64, f64::max)
+}
+
+fn real_min(values: &[Complex64]) -> f64 {
+    values
+        .iter()
+        .map(|value| value.re)
+        .fold(f64::INFINITY, f64::min)
+}
+
+fn spectrum_stats(spectrum: &[f64]) -> (f64, f64, f64, usize) {
+    if spectrum.is_empty() {
+        return (0.0, 0.0, 0.0, 0);
+    }
+    let mut min = f64::INFINITY;
+    let mut max = f64::NEG_INFINITY;
+    let mut sum = 0.0f64;
+    let mut non_finite = 0usize;
+    for value in spectrum {
+        if value.is_finite() {
+            min = min.min(*value);
+            max = max.max(*value);
+            sum += *value;
+        } else {
+            non_finite += 1;
+        }
+    }
+    let finite_count = spectrum.len().saturating_sub(non_finite).max(1);
+    (min, max, sum / finite_count as f64, non_finite)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_primordial_projection_meta(
+    log_start: f64,
+    log_step: f64,
+    lattice_len: usize,
+    s_values: &[Complex64],
+    z_points: &[Complex64],
+    h_z: &[Complex64],
+    epsilon_z: &[Complex64],
+    spectrum: &[f64],
+    planck_mass: f64,
+) {
+    let (spectrum_min, spectrum_max, spectrum_mean, spectrum_non_finite) = spectrum_stats(spectrum);
+    let epsilon_min = real_min(epsilon_z);
+    let epsilon_clamp_count = epsilon_z.iter().filter(|value| value.re < 1e-20).count();
+
+    emit_tensor_op(
+        "inflaton_primordial_projection",
+        &[lattice_len, s_values.len()],
+        &[spectrum.len().max(1), 3],
+    );
+    emit_tensor_op_meta("inflaton_primordial_projection", || {
+        let mut payload = serde_json::Map::new();
+        payload.insert("backend".into(), "cpu".into());
+        payload.insert("requested_backend".into(), "auto".into());
+        payload.insert(
+            "kind".into(),
+            "st_core_inflaton_primordial_projection".into(),
+        );
+        payload.insert("log_start".into(), finite_meta_f64(log_start).into());
+        payload.insert("log_step".into(), finite_meta_f64(log_step).into());
+        payload.insert("lattice_len".into(), lattice_len.into());
+        payload.insert("evaluation_count".into(), s_values.len().into());
+        payload.insert("z_point_count".into(), z_points.len().into());
+        payload.insert("spectrum_count".into(), spectrum.len().into());
+        payload.insert("planck_mass".into(), finite_meta_f64(planck_mass).into());
+        payload.insert(
+            "h_abs_mean".into(),
+            finite_meta_f64(complex_abs_mean(h_z)).into(),
+        );
+        payload.insert(
+            "h_abs_max".into(),
+            finite_meta_f64(complex_abs_max(h_z)).into(),
+        );
+        payload.insert(
+            "epsilon_abs_mean".into(),
+            finite_meta_f64(complex_abs_mean(epsilon_z)).into(),
+        );
+        payload.insert(
+            "epsilon_abs_max".into(),
+            finite_meta_f64(complex_abs_max(epsilon_z)).into(),
+        );
+        payload.insert(
+            "epsilon_real_min".into(),
+            finite_meta_f64(epsilon_min).into(),
+        );
+        payload.insert("epsilon_clamp_count".into(), epsilon_clamp_count.into());
+        payload.insert("spectrum_min".into(), finite_meta_f64(spectrum_min).into());
+        payload.insert("spectrum_max".into(), finite_meta_f64(spectrum_max).into());
+        payload.insert(
+            "spectrum_mean".into(),
+            finite_meta_f64(spectrum_mean).into(),
+        );
+        payload.insert("spectrum_non_finite".into(), spectrum_non_finite.into());
+        payload.into()
+    });
 }
 
 /// Discrete sampling of the logarithmic scale factor \(\tau = \ln a\).
@@ -260,6 +390,7 @@ pub fn assemble_primordial_spectrum(
 mod tests {
     use super::*;
     use approx::assert_relative_eq;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn trapezoid_weights_sum_to_one() {
@@ -356,5 +487,60 @@ mod tests {
         assert_eq!(projection.len(), s_values.len());
         assert!(!projection.is_empty());
         assert_eq!(projection.spectrum.len(), s_values.len());
+    }
+
+    #[test]
+    fn primordial_projection_emits_backend_meta() {
+        let _lock = crate::telemetry::tensor_observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let log_start = 0.0;
+        let log_step = 0.25;
+        let lattice_len = 4;
+        let s_values = vec![Complex64::new(1.0, 0.0), Complex64::new(1.0, 0.5)];
+        let z_points: Vec<Complex64> = s_values
+            .iter()
+            .map(|s| (s * Complex64::new(log_step, 0.0)).exp())
+            .collect();
+        let h_z = vec![Complex64::new(2.0, 0.0), Complex64::new(2.5, 0.1)];
+        let epsilon_z = vec![Complex64::new(0.01, 0.0), Complex64::new(0.02, 0.0)];
+        let projection = PrimordialProjection::new(
+            log_start,
+            log_step,
+            lattice_len,
+            s_values,
+            z_points,
+            h_z,
+            epsilon_z,
+            2.435e18,
+        );
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert_eq!(projection.len(), 2);
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "inflaton_primordial_projection"
+                    && data["kind"] == "st_core_inflaton_primordial_projection"
+                    && data["lattice_len"] == 4
+                    && data["evaluation_count"] == 2
+            })
+            .expect("inflaton_primordial_projection metadata event");
+        assert_eq!(meta.1["backend"], "cpu");
+        assert_eq!(meta.1["requested_backend"], "auto");
+        assert_eq!(meta.1["spectrum_count"], 2);
+        assert_eq!(meta.1["epsilon_clamp_count"], 0);
+        assert!(meta.1["h_abs_mean"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["epsilon_abs_mean"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["spectrum_mean"].as_f64().unwrap_or(0.0) > 0.0);
+        assert_eq!(meta.1["spectrum_non_finite"], 0);
     }
 }

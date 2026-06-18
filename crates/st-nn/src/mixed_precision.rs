@@ -3,6 +3,7 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+use crate::execution::current_tensor_util_backend_for_values;
 use crate::module::Module;
 use crate::optim::ZSpaceOptimizer;
 use crate::{PureResult, Tensor};
@@ -111,9 +112,30 @@ impl GradScaler {
         loss * self.scale
     }
 
+    /// Fallible scalar-loss scaling that rejects non-finite inputs and overflow.
+    pub fn try_scale_loss(&self, loss: f32) -> PureResult<f32> {
+        if !loss.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "grad_scaler_loss",
+                value: loss,
+            });
+        }
+        let scaled = loss * self.scale;
+        if !scaled.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "grad_scaler_scaled_loss",
+                value: scaled,
+            });
+        }
+        Ok(scaled)
+    }
+
     /// Scales every element of the provided tensor by the current scale.
     pub fn scale_tensor(&self, tensor: &Tensor) -> PureResult<Tensor> {
-        tensor.scale(self.scale)
+        tensor.scale_with_backend(
+            self.scale,
+            current_tensor_util_backend_for_values(tensor.data().len()),
+        )
     }
 
     /// Applies the inverse scale to all parameter accumulators.
@@ -123,7 +145,7 @@ impl GradScaler {
         }
         let inverse = 1.0 / self.scale;
         module.visit_parameters_mut(&mut |param| {
-            param.scale_accumulators(inverse);
+            param.scale_accumulators_with_backend_policy(inverse)?;
             Ok(())
         })
     }
@@ -219,5 +241,22 @@ mod tests {
         let stepped = scaler.step(&mut optimizer, &mut layer).unwrap();
         assert!(stepped);
         assert!(scaler.scale() >= 2.0);
+    }
+
+    #[test]
+    fn grad_scaler_try_scale_loss_rejects_non_finite_scalar_overflow() {
+        let scaler = GradScaler::new(4.0, 2.0, 0.5, 2).unwrap();
+        assert_eq!(scaler.try_scale_loss(0.25).unwrap(), 1.0);
+
+        let err = scaler
+            .try_scale_loss(f32::MAX)
+            .expect_err("scalar loss scaling should reject overflow");
+        match err {
+            TensorError::NonFiniteValue { label, value } => {
+                assert_eq!(label, "grad_scaler_scaled_loss");
+                assert!(value.is_infinite());
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 }

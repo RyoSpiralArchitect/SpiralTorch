@@ -4,12 +4,17 @@ struct MatmulUniforms {
     cols: u32,
     inner: u32,
     flags: u32,
+    output_scale: f32,
+    _pad0: f32,
+    _pad1: f32,
+    _pad2: f32,
 };
 
 const FLAG_USE_BIAS: u32 = 1u << 0u;
 const FLAG_FUSED_RELU: u32 = 1u << 1u;
 const FLAG_FUSED_GELU: u32 = 1u << 2u;
 const FLAG_FUSED_RESIDUAL: u32 = 1u << 3u;
+const FLAG_LHS_TRANSPOSE: u32 = 1u << 6u;
 
 @group(0) @binding(0) var<storage, read> lhs : array<f32>;
 @group(0) @binding(1) var<storage, read> rhs_packed : {rhs_storage_type};
@@ -51,7 +56,7 @@ fn apply_fusions(acc: f32, index: u32, col: u32) -> f32 {{
     }} else if ((params.flags & FLAG_FUSED_RELU) != 0u) {{
         value = max(value, 0.0);
     }}
-    return value;
+    return value * params.output_scale;
 }}
 
 @compute @workgroup_size({workgroup_size_x}, {workgroup_size_y}, 1)
@@ -65,10 +70,7 @@ fn main(
     let local_col = lid.x;
     let global_row = tile_row + local_row;
     let global_col = tile_col + local_col;
-
-    if (global_row >= params.rows || global_col >= params.cols) {
-        return;
-    }
+    let in_bounds = global_row < params.rows && global_col < params.cols;
 
     var acc : f32 = 0.0;
     let tiles = (params.inner + TILE_K - 1u) / TILE_K;
@@ -93,7 +95,11 @@ fn main(
                 let a_k = k_base + load_k;
                 var value = 0.0;
                 if (a_row < params.rows && a_k < params.inner) {
-                    value = lhs[a_row * params.inner + a_k];
+                    if ((params.flags & FLAG_LHS_TRANSPOSE) != 0u) {{
+                        value = lhs[a_k * params.rows + a_row];
+                    }} else {{
+                        value = lhs[a_row * params.inner + a_k];
+                    }}
                 }
                 tile_a[load_row * TILE_K + load_k] = value;
                 load_k = load_k + WG_SIZE_X;
@@ -140,6 +146,8 @@ fn main(
         tile_index = tile_index + 1u;
     }
 
-    let index = global_row * params.cols + global_col;
-    out[index] = apply_fusions(acc, index, global_col);
+    if (in_bounds) {
+        let index = global_row * params.cols + global_col;
+        out[index] = apply_fusions(acc, index, global_col);
+    }
 }

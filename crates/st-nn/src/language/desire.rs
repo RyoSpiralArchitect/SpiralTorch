@@ -7,18 +7,138 @@ use super::geometry::{ConceptHint, RepressionField, SemanticBridge, SymbolGeomet
 use super::maxwell::NarrativeHint;
 use super::schrodinger::schrodinger_boost;
 use super::temperature::{entropy, TemperatureController};
+use crate::execution::{current_softmax_backend, current_tensor_util_backend_for_values};
 use crate::language::DesireGradientInterpretation;
 use crate::PureResult;
 use serde::{Deserialize, Serialize};
 use st_core::telemetry::hub;
 use st_core::telemetry::noncollapse::{NonCollapsePhase, NonCollapseSnapshot};
-use st_tensor::{DesireGradientControl, GradientSummary, TensorError};
+use st_tensor::{
+    emit_tensor_op, emit_tensor_op_meta, DesireGradientControl, GradientSummary, SoftmaxBackend,
+    Tensor, TensorError, TensorUtilBackend,
+};
 
 const REPORT_SIZE: usize = 8;
 const BIAS_UPDATE_INJECTION: f32 = 0.05;
 const BIAS_UPDATE_INTEGRATION: f32 = 0.02;
 const PHASE_EPS: f32 = 1e-4;
 const EPSILON_BASE: f32 = 1e-6;
+
+fn tensor_util_backend_label(backend: TensorUtilBackend) -> &'static str {
+    match backend {
+        TensorUtilBackend::Auto => "auto",
+        TensorUtilBackend::Cpu => "cpu",
+        TensorUtilBackend::GpuWgpu => "wgpu",
+    }
+}
+
+fn softmax_backend_label(backend: SoftmaxBackend) -> &'static str {
+    match backend {
+        SoftmaxBackend::Auto => "auto",
+        SoftmaxBackend::Cpu => "cpu",
+        #[cfg(feature = "wgpu")]
+        SoftmaxBackend::GpuWgpu => "wgpu",
+        #[allow(unreachable_patterns)]
+        _ => "gpu",
+    }
+}
+
+fn scale_probability_distribution(values: Vec<f32>, scale: f32) -> (Vec<f32>, &'static str) {
+    let backend = current_tensor_util_backend_for_values(values.len());
+    let backend_label = tensor_util_backend_label(backend);
+    if values.is_empty() {
+        return (values, backend_label);
+    }
+
+    let fallback_values = values.clone();
+    match Tensor::from_vec(1, values.len(), values)
+        .and_then(|tensor| tensor.scale_with_backend(scale, backend))
+    {
+        Ok(tensor) => (tensor.data().to_vec(), backend_label),
+        Err(_) => {
+            let mut values = fallback_values;
+            for value in &mut values {
+                *value *= scale;
+            }
+            (values, "cpu")
+        }
+    }
+}
+
+fn manual_softmax_distribution(logits: &[f32]) -> (Vec<f32>, f32, &'static str) {
+    let max = logits.iter().copied().fold(f32::MIN, f32::max);
+    let mut sum = 0.0f32;
+    let mut exps = Vec::with_capacity(logits.len());
+    for &logit in logits {
+        let val = (logit - max).exp();
+        exps.push(val);
+        sum += val;
+    }
+    let denom = sum.max(1e-6);
+    let (distribution, scale_backend) = scale_probability_distribution(exps, 1.0 / denom);
+    (distribution, sum, scale_backend)
+}
+
+fn tensor_softmax_distribution(logits: &[f32]) -> Option<(Vec<f32>, &'static str)> {
+    if logits.iter().any(|logit| !logit.is_finite()) {
+        return None;
+    }
+    let backend = current_softmax_backend();
+    let backend_label = softmax_backend_label(backend);
+    Tensor::from_vec(1, logits.len(), logits.to_vec())
+        .and_then(|tensor| tensor.row_softmax_with_backend(backend))
+        .ok()
+        .map(|tensor| (tensor.data().to_vec(), backend_label))
+}
+
+struct ProbabilitySanitise {
+    values: Vec<f32>,
+    positive_values: usize,
+    non_finite_values: usize,
+    clipped_negative: usize,
+    backend: &'static str,
+}
+
+fn sanitise_probability_values(values: &[f32]) -> ProbabilitySanitise {
+    let non_finite_values = values.iter().filter(|value| !value.is_finite()).count();
+    let clipped_negative = values
+        .iter()
+        .filter(|value| value.is_finite() && **value < 0.0)
+        .count();
+    let fallback = values
+        .iter()
+        .copied()
+        .map(|value| value.max(0.0))
+        .collect::<Vec<_>>();
+
+    if non_finite_values > 0 {
+        let positive_values = fallback.iter().filter(|value| **value > 0.0).count();
+        return ProbabilitySanitise {
+            values: fallback,
+            positive_values,
+            non_finite_values,
+            clipped_negative,
+            backend: "probability_cpu",
+        };
+    }
+
+    let backend = current_tensor_util_backend_for_values(values.len());
+    let backend_label = tensor_util_backend_label(backend);
+    let (sanitised, backend_label) = match Tensor::from_vec(1, values.len(), values.to_vec())
+        .and_then(|tensor| tensor.relu_with_backend(backend))
+    {
+        Ok(tensor) => (tensor.data().to_vec(), backend_label),
+        Err(_) => (fallback, "cpu"),
+    };
+    let positive_values = sanitised.iter().filter(|value| **value > 0.0).count();
+    ProbabilitySanitise {
+        values: sanitised,
+        positive_values,
+        non_finite_values,
+        clipped_negative,
+        backend: backend_label,
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DesireWeights {
@@ -610,28 +730,121 @@ fn stabilise(values: &mut [f32]) {
 
 fn softmax(logits: &[f32]) -> Vec<f32> {
     if logits.is_empty() {
+        emit_tensor_op("desire_softmax", &[0], &[0]);
+        emit_tensor_op_meta("desire_softmax", || {
+            serde_json::json!({
+                "backend": "probability_cpu",
+                "requested_backend": "auto",
+                "kind": "language_desire_softmax",
+                "logits": 0,
+                "finite_logits": 0,
+                "non_finite_logits": 0,
+                "exp_sum": 0.0f32,
+                "distribution_sum": 0.0f32,
+                "dominant_probability": 0.0f32,
+                "entropy": 0.0f32,
+                "empty": true,
+                "tensor_softmax": false,
+            })
+        });
         return Vec::new();
     }
-    let max = logits.iter().copied().fold(f32::MIN, f32::max);
-    let mut sum = 0.0f32;
-    let mut exps = Vec::with_capacity(logits.len());
-    for &logit in logits {
-        let val = (logit - max).exp();
-        exps.push(val);
-        sum += val;
-    }
-    exps.into_iter().map(|v| v / sum.max(1e-6)).collect()
+    let finite_logits = logits.iter().filter(|value| value.is_finite()).count();
+    let (distribution, exp_sum, normalise_backend, tensor_softmax) =
+        match tensor_softmax_distribution(logits) {
+            Some((distribution, backend)) => (distribution, None, backend, true),
+            None => {
+                let (distribution, exp_sum, backend) = manual_softmax_distribution(logits);
+                (distribution, Some(exp_sum), backend, false)
+            }
+        };
+    let distribution_sum = distribution.iter().copied().sum::<f32>();
+    let dominant_probability = distribution
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite())
+        .fold(0.0f32, |best, value| best.max(value));
+    let entropy = -distribution
+        .iter()
+        .copied()
+        .filter(|prob| *prob > 0.0 && prob.is_finite())
+        .map(|prob| prob * prob.ln())
+        .sum::<f32>();
+    emit_tensor_op("desire_softmax", &[logits.len()], &[distribution.len()]);
+    emit_tensor_op_meta("desire_softmax", || {
+        serde_json::json!({
+            "backend": "hybrid",
+            "requested_backend": normalise_backend,
+            "kind": "language_desire_softmax",
+            "softmax_backend": normalise_backend,
+            "exp_backend": if tensor_softmax { normalise_backend } else { "probability_cpu" },
+            "distribution_scale_backend": normalise_backend,
+            "logits": logits.len(),
+            "finite_logits": finite_logits,
+            "non_finite_logits": logits.len().saturating_sub(finite_logits),
+            "exp_sum": exp_sum,
+            "distribution_sum": distribution_sum,
+            "dominant_probability": dominant_probability,
+            "entropy": entropy,
+            "empty": false,
+            "tensor_softmax": tensor_softmax,
+        })
+    });
+    distribution
 }
 
 fn normalise(values: &[f32]) -> Vec<f32> {
-    let mut buffer: Vec<f32> = values.iter().map(|v| v.max(0.0)).collect();
+    let sanitised = sanitise_probability_values(values);
+    let buffer = sanitised.values;
     let sum: f32 = buffer.iter().sum();
+    let positive_values = sanitised.positive_values;
+    let non_finite_values = sanitised.non_finite_values;
+    let clipped_negative = sanitised.clipped_negative;
+    let sanitize_backend = sanitised.backend;
     if sum <= f32::EPSILON {
+        emit_tensor_op("desire_normalise", &[values.len()], &[values.len()]);
+        emit_tensor_op_meta("desire_normalise", || {
+            serde_json::json!({
+                "backend": "probability_cpu",
+                "requested_backend": "auto",
+                "kind": "language_desire_normalise",
+                "values": values.len(),
+                "positive_values": positive_values,
+                "non_finite_values": non_finite_values,
+                "clipped_negative": clipped_negative,
+                "raw_sum": sum,
+                "distribution_sum": 0.0f32,
+                "dominant_probability": 0.0f32,
+                "zero_fallback": true,
+            })
+        });
         return vec![0.0; values.len()];
     }
-    for value in &mut buffer {
-        *value /= sum;
-    }
+    let (buffer, normalise_backend) = scale_probability_distribution(buffer, 1.0 / sum);
+    let distribution_sum = buffer.iter().copied().sum::<f32>();
+    let dominant_probability = buffer
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite())
+        .fold(0.0f32, |best, value| best.max(value));
+    emit_tensor_op("desire_normalise", &[values.len()], &[buffer.len()]);
+    emit_tensor_op_meta("desire_normalise", || {
+        serde_json::json!({
+            "backend": "hybrid",
+            "requested_backend": normalise_backend,
+            "kind": "language_desire_normalise",
+            "sanitize_backend": sanitize_backend,
+            "distribution_scale_backend": normalise_backend,
+            "values": values.len(),
+            "positive_values": positive_values,
+            "non_finite_values": non_finite_values,
+            "clipped_negative": clipped_negative,
+            "raw_sum": sum,
+            "distribution_sum": distribution_sum,
+            "dominant_probability": dominant_probability,
+            "zero_fallback": false,
+        })
+    });
     buffer
 }
 
@@ -641,8 +854,33 @@ mod tests {
         ConceptHint, RepressionField, SemanticBridge, SparseKernel, SymbolGeometry,
     };
     use super::*;
+    #[cfg(feature = "wgpu")]
+    use crate::execution::{push_backend_policy, BackendPolicy};
+    #[cfg(feature = "wgpu")]
+    use st_core::backend::device_caps::DeviceCaps;
+    #[cfg(feature = "wgpu")]
+    use st_tensor::backend::wgpu_dense;
     use st_tensor::{DesireGradientInterpretation, GradientSummary};
     use std::collections::HashSet;
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
+        static OBSERVER_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        OBSERVER_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("observer lock available")
+    }
+
+    #[cfg(feature = "wgpu")]
+    fn restore_tensor_util_wgpu_min_values(previous: Option<String>) {
+        const KEY: &str = "SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES";
+        if let Some(value) = previous {
+            std::env::set_var(KEY, value);
+        } else {
+            std::env::remove_var(KEY);
+        }
+    }
 
     fn build_geometry() -> SymbolGeometry {
         let syn = SparseKernel::from_rows(
@@ -710,6 +948,142 @@ mod tests {
         let snapshot = result.noncollapse_snapshot();
         assert_eq!(snapshot.phase, Some(NonCollapsePhase::Injection));
         assert_eq!(snapshot.hypergrad_penalty, Some(result.hypergrad_penalty));
+    }
+
+    #[test]
+    fn desire_probability_paths_emit_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let distribution = softmax(&[2.0, 1.0, 0.0]);
+        let bias = normalise(&[0.0, 2.0, -1.0]);
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert!((distribution.iter().sum::<f32>() - 1.0).abs() < 1e-6);
+        assert!((bias.iter().sum::<f32>() - 1.0).abs() < 1e-6);
+        let events = events.lock().unwrap();
+        let softmax = events
+            .iter()
+            .find(|(op_name, data)| *op_name == "desire_softmax" && data["logits"] == 3)
+            .expect("desire_softmax metadata event");
+        assert_eq!(softmax.1["backend"], "hybrid");
+        assert_eq!(softmax.1["requested_backend"], "auto");
+        assert_eq!(softmax.1["kind"], "language_desire_softmax");
+        assert_eq!(softmax.1["softmax_backend"], "auto");
+        assert_eq!(softmax.1["exp_backend"], "auto");
+        assert_eq!(softmax.1["distribution_scale_backend"], "auto");
+        assert_eq!(softmax.1["finite_logits"], 3);
+        assert_eq!(softmax.1["empty"], false);
+        assert_eq!(softmax.1["tensor_softmax"], true);
+        assert!(softmax.1["distribution_sum"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(softmax.1["dominant_probability"].as_f64().unwrap_or(0.0) > 0.0);
+
+        let normalise = events
+            .iter()
+            .find(|(op_name, data)| *op_name == "desire_normalise" && data["values"] == 3)
+            .expect("desire_normalise metadata event");
+        assert_eq!(normalise.1["backend"], "hybrid");
+        assert_eq!(normalise.1["requested_backend"], "auto");
+        assert_eq!(normalise.1["kind"], "language_desire_normalise");
+        assert_eq!(normalise.1["sanitize_backend"], "auto");
+        assert_eq!(normalise.1["distribution_scale_backend"], "auto");
+        assert_eq!(normalise.1["positive_values"], 1);
+        assert_eq!(normalise.1["clipped_negative"], 1);
+        assert_eq!(normalise.1["zero_fallback"], false);
+        assert!((normalise.1["distribution_sum"].as_f64().unwrap_or(0.0) - 1.0).abs() < 1e-6);
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn desire_softmax_forced_wgpu_routes_row_softmax() {
+        if !wgpu_dense::is_available() || !wgpu_dense::supports_row_softmax(1, 3) {
+            return;
+        }
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
+        let distribution = {
+            let _guard = push_backend_policy(policy);
+            softmax(&[2.0, 1.0, 0.0])
+        };
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert!((distribution.iter().sum::<f32>() - 1.0).abs() < 1e-6);
+        let events = events.lock().unwrap();
+        let softmax = events
+            .iter()
+            .find(|(op_name, data)| *op_name == "desire_softmax" && data["logits"] == 3)
+            .expect("desire_softmax metadata event");
+        assert_eq!(softmax.1["backend"], "hybrid");
+        assert_eq!(softmax.1["requested_backend"], "wgpu");
+        assert_eq!(softmax.1["softmax_backend"], "wgpu");
+        assert_eq!(softmax.1["exp_backend"], "wgpu");
+        assert_eq!(softmax.1["distribution_scale_backend"], "wgpu");
+        assert_eq!(softmax.1["tensor_softmax"], true);
+        let row_softmax = events
+            .iter()
+            .find(|(op_name, data)| *op_name == "row_softmax" && data["backend"] == "wgpu_dense")
+            .expect("row_softmax WGPU metadata event");
+        assert_eq!(row_softmax.1["backend"], "wgpu_dense");
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn desire_normalise_forced_wgpu_routes_sanitise() {
+        if !wgpu_dense::is_available() {
+            return;
+        }
+        let _lock = observer_lock();
+        const KEY: &str = "SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES";
+        let previous_min = std::env::var(KEY).ok();
+        std::env::set_var(KEY, "0");
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
+        let bias = {
+            let _guard = push_backend_policy(policy);
+            normalise(&[0.0, 2.0, -1.0])
+        };
+        st_tensor::set_tensor_op_meta_observer(previous);
+        restore_tensor_util_wgpu_min_values(previous_min);
+
+        assert!((bias.iter().sum::<f32>() - 1.0).abs() < 1e-6);
+        let events = events.lock().unwrap();
+        let normalise = events
+            .iter()
+            .find(|(op_name, data)| *op_name == "desire_normalise" && data["values"] == 3)
+            .expect("desire_normalise metadata event");
+        assert_eq!(normalise.1["backend"], "hybrid");
+        assert_eq!(normalise.1["requested_backend"], "wgpu");
+        assert_eq!(normalise.1["sanitize_backend"], "wgpu");
+        assert_eq!(normalise.1["distribution_scale_backend"], "wgpu");
+        let relu = events
+            .iter()
+            .find(|(op_name, data)| *op_name == "relu" && data["requested_backend"] == "wgpu")
+            .expect("relu WGPU sanitize metadata event");
+        assert_eq!(relu.1["backend"], "wgpu_dense");
     }
 
     #[test]

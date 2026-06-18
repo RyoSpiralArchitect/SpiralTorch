@@ -28,6 +28,7 @@
 //! and backward pass.
 
 use crate::ops::zspace_round::RoundtableBand;
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 
 /// Records explainability artefacts emitted by GNN-style layers.
 #[derive(Debug, Default)]
@@ -51,14 +52,37 @@ impl GraphFlowTracer {
         curvature: f32,
         node_flows: Vec<NodeFlowSample>,
     ) {
+        let layer = layer.into();
+        let node_count = node_flows.len();
+        let total_energy: f32 = node_flows.iter().map(NodeFlowSample::energy).sum();
+        let max_node_energy = node_flows
+            .iter()
+            .map(NodeFlowSample::energy)
+            .filter(|energy| energy.is_finite())
+            .fold(0.0f32, f32::max);
         self.reports.push(GraphLayerReport {
-            layer: layer.into(),
+            layer: layer.clone(),
             curvature,
             node_flows,
             weight_update_magnitude: None,
             bias_update_magnitude: None,
             elliptic: None,
             roundtable: None,
+        });
+        emit_tensor_op("graph_flow_layer_begin", &[node_count], &[1, 3]);
+        emit_tensor_op_meta("graph_flow_layer_begin", || {
+            serde_json::json!({
+                "backend": "cpu",
+                "requested_backend": "auto",
+                "kind": "st_core_graph_flow_layer_begin",
+                "layer": layer,
+                "reports": self.reports.len(),
+                "nodes": node_count,
+                "curvature": if curvature.is_finite() { curvature } else { 0.0 },
+                "curvature_finite": curvature.is_finite(),
+                "total_flow_energy": total_energy,
+                "max_node_energy": max_node_energy,
+            })
         });
     }
 
@@ -73,6 +97,25 @@ impl GraphFlowTracer {
         {
             report.weight_update_magnitude = Some(weight);
             report.bias_update_magnitude = bias;
+            emit_tensor_op(
+                "graph_flow_weight_update",
+                &[report.node_flows.len()],
+                &[1, 2],
+            );
+            emit_tensor_op_meta("graph_flow_weight_update", || {
+                serde_json::json!({
+                    "backend": "cpu",
+                    "requested_backend": "auto",
+                    "kind": "st_core_graph_flow_weight_update",
+                    "layer": report.layer,
+                    "nodes": report.node_flows.len(),
+                    "weight_update_magnitude": if weight.is_finite() { weight } else { 0.0 },
+                    "weight_update_finite": weight.is_finite(),
+                    "has_bias_update": bias.is_some(),
+                    "bias_update_magnitude": bias.unwrap_or(0.0),
+                    "total_flow_energy": report.total_flow_energy(),
+                })
+            });
         }
     }
 
@@ -80,13 +123,87 @@ impl GraphFlowTracer {
     pub fn annotate_elliptic(&mut self, sample: EllipticLayerSample) {
         if let Some(report) = self.reports.last_mut() {
             report.elliptic = Some(sample);
+            emit_tensor_op(
+                "graph_flow_elliptic_annotation",
+                &[report.node_flows.len()],
+                &[1, 4],
+            );
+            emit_tensor_op_meta("graph_flow_elliptic_annotation", || {
+                serde_json::json!({
+                    "backend": "cpu",
+                    "requested_backend": "auto",
+                    "kind": "st_core_graph_flow_elliptic_annotation",
+                    "layer": report.layer,
+                    "nodes": report.node_flows.len(),
+                    "curvature_radius": sample.curvature_radius,
+                    "mean_geodesic": sample.mean_geodesic,
+                    "normalized_radius": sample.normalized_radius(),
+                    "sheet_bias": sample.sheet_bias,
+                    "spin_alignment": sample.spin_alignment,
+                })
+            });
         }
     }
 
     /// Annotates the most recent layer with roundtable-aware aggregation telemetry.
     pub fn annotate_roundtable(&mut self, sample: GraphRoundtableTrace) {
         if let Some(report) = self.reports.last_mut() {
+            let hop_count = sample.aggregation.hop_count();
+            let effective_sum: f32 = sample.aggregation.effective_coefficients.iter().sum();
+            let max_effective = sample
+                .aggregation
+                .effective_coefficients
+                .iter()
+                .copied()
+                .filter(|value| value.is_finite())
+                .fold(0.0f32, f32::max);
+            let signal = sample.signal;
+            let influence = sample.influence;
+            let has_band_pass = sample.band_pass.is_some();
+            let band_pass_band = sample
+                .band_pass
+                .as_ref()
+                .map(|pass| band_label(pass.band))
+                .unwrap_or("none");
+            let band_pass_rms = sample
+                .band_pass
+                .as_ref()
+                .map(|pass| pass.gradient_rms)
+                .unwrap_or(0.0);
             report.roundtable = Some(sample);
+            emit_tensor_op(
+                "graph_flow_roundtable_annotation",
+                &[report.node_flows.len(), hop_count],
+                &[1, hop_count.max(1)],
+            );
+            emit_tensor_op_meta("graph_flow_roundtable_annotation", || {
+                serde_json::json!({
+                    "backend": "cpu",
+                    "requested_backend": "auto",
+                    "kind": "st_core_graph_flow_roundtable_annotation",
+                    "layer": report.layer,
+                    "nodes": report.node_flows.len(),
+                    "hops": hop_count,
+                    "signal_above": signal.above,
+                    "signal_here": signal.here,
+                    "signal_beneath": signal.beneath,
+                    "signal_drift": signal.drift,
+                    "band_size_above": signal.band_sizes.0,
+                    "band_size_here": signal.band_sizes.1,
+                    "band_size_beneath": signal.band_sizes.2,
+                    "sheet_index": signal.sheet_index,
+                    "sheet_confidence": signal.sheet_confidence,
+                    "influence_above": influence.above_multiplier,
+                    "influence_here": influence.here_multiplier,
+                    "influence_beneath": influence.beneath_multiplier,
+                    "drift_bias": influence.drift_bias,
+                    "effective_coeff_sum": effective_sum,
+                    "max_effective_coeff": max_effective,
+                    "has_band_pass": has_band_pass,
+                    "band_pass_band": band_pass_band,
+                    "band_pass_rms": band_pass_rms,
+                })
+            });
         }
     }
 
@@ -105,6 +222,42 @@ impl GraphFlowTracer {
 
     /// Consumes all accumulated reports, returning them in insertion order.
     pub fn drain(&mut self) -> Vec<GraphLayerReport> {
+        let reports = self.reports.len();
+        let nodes: usize = self
+            .reports
+            .iter()
+            .map(|report| report.node_flows.len())
+            .sum();
+        let total_energy = self.total_energy();
+        let updated_layers = self
+            .reports
+            .iter()
+            .filter(|report| report.weight_update_magnitude.is_some())
+            .count();
+        let elliptic_layers = self
+            .reports
+            .iter()
+            .filter(|report| report.elliptic.is_some())
+            .count();
+        let roundtable_layers = self
+            .reports
+            .iter()
+            .filter(|report| report.roundtable.is_some())
+            .count();
+        emit_tensor_op("graph_flow_drain", &[reports, nodes], &[reports]);
+        emit_tensor_op_meta("graph_flow_drain", || {
+            serde_json::json!({
+                "backend": "cpu",
+                "requested_backend": "auto",
+                "kind": "st_core_graph_flow_drain",
+                "reports": reports,
+                "nodes": nodes,
+                "total_flow_energy": total_energy,
+                "updated_layers": updated_layers,
+                "elliptic_layers": elliptic_layers,
+                "roundtable_layers": roundtable_layers,
+            })
+        });
         core::mem::take(&mut self.reports)
     }
 }
@@ -231,9 +384,22 @@ impl NodeFlowSample {
     }
 }
 
+fn band_label(band: RoundtableBand) -> &'static str {
+    match band {
+        RoundtableBand::Above => "above",
+        RoundtableBand::Here => "here",
+        RoundtableBand::Beneath => "beneath",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
+
+    fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
+        crate::telemetry::tensor_observer_lock()
+    }
 
     #[test]
     fn tracer_records_reports() {
@@ -370,5 +536,124 @@ mod tests {
         assert_eq!(reports[1].weight_update_magnitude, Some(0.2));
         assert_eq!(reports[0].bias_update_magnitude, Some(0.3));
         assert_eq!(reports[1].bias_update_magnitude, Some(0.1));
+    }
+
+    #[test]
+    fn tracer_emits_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let mut tracer = GraphFlowTracer::new();
+        tracer.begin_layer(
+            "roundtable-layer",
+            -0.8,
+            vec![
+                NodeFlowSample {
+                    node_index: 0,
+                    incoming_weight: 0.5,
+                    aggregated_norm: 0.4,
+                },
+                NodeFlowSample {
+                    node_index: 1,
+                    incoming_weight: 1.5,
+                    aggregated_norm: 0.2,
+                },
+            ],
+        );
+        tracer.annotate_elliptic(EllipticLayerSample {
+            curvature_radius: 1.5,
+            mean_geodesic: 1.2,
+            sheet_bias: 0.4,
+            spin_alignment: 0.1,
+        });
+        tracer.annotate_roundtable(GraphRoundtableTrace {
+            signal: GraphRoundtableSignalSample {
+                above: 0.6,
+                here: 0.3,
+                beneath: 0.1,
+                drift: 0.2,
+                band_sizes: (2, 1, 1),
+                sheet_index: 1,
+                sheet_confidence: 0.8,
+                curvature: 0.5,
+                spin: 0.4,
+                energy: 0.25,
+            },
+            influence: GraphRoundtableInfluenceSample {
+                above_multiplier: 1.2,
+                here_multiplier: 0.9,
+                beneath_multiplier: 0.7,
+                drift_bias: 1.1,
+            },
+            aggregation: GraphAggregationSample {
+                base_coefficients: vec![1.0, 0.5, 0.25],
+                step_scales: vec![0.9, 1.2, 0.7],
+                band_pass_scales: vec![1.0, 1.1, 0.94],
+                effective_coefficients: vec![0.9, 0.66, 0.1645],
+            },
+            band_pass: Some(GraphRoundtableBandPassSample {
+                band: RoundtableBand::Here,
+                gradient_l1: 0.8,
+                gradient_l2: 0.5,
+                gradient_rms: 0.25,
+            }),
+        });
+        tracer.record_weight_update(0.4, Some(0.2));
+        let drained = tracer.drain();
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert_eq!(drained.len(), 1);
+        let events = events.lock().unwrap();
+        let begin = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "graph_flow_layer_begin"
+                    && data["layer"] == "roundtable-layer"
+                    && data["nodes"] == 2
+            })
+            .expect("graph_flow_layer_begin metadata event");
+        assert_eq!(begin.1["kind"], "st_core_graph_flow_layer_begin");
+
+        let roundtable = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "graph_flow_roundtable_annotation"
+                    && data["layer"] == "roundtable-layer"
+                    && data["has_band_pass"] == true
+            })
+            .expect("graph_flow_roundtable_annotation metadata event");
+        assert_eq!(
+            roundtable.1["kind"],
+            "st_core_graph_flow_roundtable_annotation"
+        );
+        assert_eq!(roundtable.1["band_pass_band"], "here");
+
+        let update = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "graph_flow_weight_update"
+                    && data["layer"] == "roundtable-layer"
+                    && data["has_bias_update"] == true
+            })
+            .expect("graph_flow_weight_update metadata event");
+        assert_eq!(update.1["kind"], "st_core_graph_flow_weight_update");
+
+        let drain = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "graph_flow_drain"
+                    && data["reports"] == 1
+                    && data["roundtable_layers"] == 1
+            })
+            .expect("graph_flow_drain metadata event");
+        assert_eq!(drain.1["kind"], "st_core_graph_flow_drain");
+        assert!(drain.1["total_flow_energy"].as_f64().unwrap_or(0.0) > 0.0);
     }
 }

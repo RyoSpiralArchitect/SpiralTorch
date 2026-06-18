@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 
 use ndarray::Array2;
 use plotters::prelude::*;
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 use thiserror::Error;
 
 /// Shared synchronisation state propagated between the in-proc components.
@@ -278,7 +279,7 @@ impl PsiSynchroMonolith {
             None
         };
 
-        Ok(PsiBranchReport {
+        let report = PsiBranchReport {
             branch,
             phi_samples,
             omega_hat: estimate.omega_hat,
@@ -289,7 +290,9 @@ impl PsiSynchroMonolith {
             heatmap: heatmap.matrix,
             best_lock: heatmap.best_lock,
             heatmap_path,
-        })
+        };
+        emit_psi_sync_branch_meta(&self.config, &report);
+        Ok(report)
     }
 
     fn sample_branch(&self, branch: &PsiBranchConfig) -> Vec<f64> {
@@ -544,9 +547,148 @@ fn gradient_color(norm: f64) -> RGBColor {
     RGBColor(r, g, b)
 }
 
+fn finite_meta_f64(value: f64) -> f64 {
+    if value.is_finite() {
+        value
+    } else {
+        0.0
+    }
+}
+
+fn finite_meta_f32(value: f32) -> f64 {
+    if value.is_finite() {
+        value as f64
+    } else {
+        0.0
+    }
+}
+
+fn heatmap_stats(heatmap: &Array2<f64>) -> (f64, f64, f64, f64) {
+    let mut sum = 0.0f64;
+    let mut peak = 0.0f64;
+    let mut count = 0usize;
+    for value in heatmap.iter().copied() {
+        if value.is_finite() && value > 0.0 {
+            sum += value;
+            peak = peak.max(value);
+            count += 1;
+        }
+    }
+    let mean = if count == 0 { 0.0 } else { sum / count as f64 };
+    let peak_ratio = if sum > 0.0 { peak / sum } else { 0.0 };
+    (sum, mean, peak, peak_ratio)
+}
+
+fn phi_stats(phi: &[f64]) -> (f64, f64, f64) {
+    if phi.is_empty() {
+        return (0.0, 0.0, 0.0);
+    }
+    let mut sum = 0.0f64;
+    let mut min = f64::INFINITY;
+    let mut max = f64::NEG_INFINITY;
+    for value in phi.iter().copied() {
+        if value.is_finite() {
+            sum += value;
+            min = min.min(value);
+            max = max.max(value);
+        }
+    }
+    let mean = sum / phi.len() as f64;
+    let span = if min.is_finite() && max.is_finite() {
+        max - min
+    } else {
+        0.0
+    };
+    let drift = phi
+        .windows(2)
+        .map(|window| wrap_unit(window[1] - window[0]).abs())
+        .sum::<f64>()
+        / phi.len().saturating_sub(1).max(1) as f64;
+    (mean, span, drift)
+}
+
+fn emit_psi_sync_branch_meta(config: &PsiSynchroConfig, report: &PsiBranchReport) {
+    let (heatmap_sum, heatmap_mean, heatmap_peak, heatmap_peak_ratio) =
+        heatmap_stats(&report.heatmap);
+    let (phi_mean, phi_span, phi_abs_drift_mean) = phi_stats(&report.phi_samples);
+    let cells = report.heatmap.len();
+
+    emit_tensor_op(
+        "psi_sync_branch",
+        &[report.phi_samples.len(), cells.max(1)],
+        &[report.lam_grid.len().max(1), report.wd_grid.len().max(1)],
+    );
+    emit_tensor_op_meta("psi_sync_branch", || {
+        let mut payload = serde_json::Map::new();
+        payload.insert("backend".into(), "cpu".into());
+        payload.insert("requested_backend".into(), "auto".into());
+        payload.insert("kind".into(), "st_core_psi_sync_branch".into());
+        payload.insert("branch_id".into(), report.branch.branch_id.clone().into());
+        payload.insert("samples".into(), report.branch.samples.into());
+        payload.insert("phi_samples".into(), report.phi_samples.len().into());
+        payload.insert("phi_mean".into(), finite_meta_f64(phi_mean).into());
+        payload.insert("phi_span".into(), finite_meta_f64(phi_span).into());
+        payload.insert(
+            "phi_abs_drift_mean".into(),
+            finite_meta_f64(phi_abs_drift_mean).into(),
+        );
+        payload.insert("gamma".into(), finite_meta_f64(report.branch.gamma).into());
+        payload.insert("lambda".into(), finite_meta_f64(report.branch.lam).into());
+        payload.insert("wd".into(), finite_meta_f64(report.branch.wd).into());
+        payload.insert(
+            "omega0".into(),
+            finite_meta_f64(report.branch.omega0).into(),
+        );
+        payload.insert(
+            "drift_coupled".into(),
+            finite_meta_f64(report.branch.drift_coupled).into(),
+        );
+        payload.insert(
+            "z_coordinate".into(),
+            finite_meta_f32(report.branch.z_coordinate).into(),
+        );
+        payload.insert("omega_hat".into(), finite_meta_f64(report.omega_hat).into());
+        payload.insert("kappa_hat".into(), finite_meta_f64(report.kappa_hat).into());
+        payload.insert("rmse".into(), finite_meta_f64(report.rmse).into());
+        payload.insert("lam_bins".into(), report.lam_grid.len().into());
+        payload.insert("wd_bins".into(), report.wd_grid.len().into());
+        payload.insert("heatmap_cells".into(), cells.into());
+        payload.insert("heatmap_sum".into(), finite_meta_f64(heatmap_sum).into());
+        payload.insert("heatmap_mean".into(), finite_meta_f64(heatmap_mean).into());
+        payload.insert("heatmap_peak".into(), finite_meta_f64(heatmap_peak).into());
+        payload.insert(
+            "heatmap_peak_ratio".into(),
+            finite_meta_f64(heatmap_peak_ratio).into(),
+        );
+        payload.insert("best_lock_p".into(), report.best_lock.p.into());
+        payload.insert("best_lock_q".into(), report.best_lock.q.into());
+        payload.insert(
+            "best_lock_error".into(),
+            finite_meta_f64(report.best_lock.error).into(),
+        );
+        payload.insert(
+            "best_lock_lambda".into(),
+            finite_meta_f64(report.best_lock.lambda).into(),
+        );
+        payload.insert(
+            "best_lock_wd".into(),
+            finite_meta_f64(report.best_lock.wd).into(),
+        );
+        payload.insert("burn".into(), config.burn.into());
+        payload.insert("sample".into(), config.sample.into());
+        payload.insert("qmax".into(), config.qmax.into());
+        payload.insert(
+            "rendered_heatmap".into(),
+            report.heatmap_path.is_some().into(),
+        );
+        payload.into()
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn kappa_identification_is_stable() {
@@ -581,5 +723,64 @@ mod tests {
             &[monolith.config.lam_range.2, monolith.config.wd_range.2]
         );
         assert!(report.best_lock.error >= 0.0);
+    }
+
+    #[test]
+    fn synchro_branch_emits_backend_meta() {
+        let _lock = crate::telemetry::tensor_observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let state = SyncState::default();
+        let config = PsiSynchroConfig {
+            lam_range: (0.1, 1.1, 8),
+            wd_range: (0.4, 1.0, 9),
+            burn: 20,
+            sample: 32,
+            qmax: 6,
+            out_dir: None,
+        };
+        let monolith = PsiSynchroMonolith::new(state.clone(), config);
+        let mut branch = PsiBranchConfig::with_state("trace", &state, 64);
+        branch.z_coordinate = 0.25;
+
+        let report = monolith
+            .synchronise_branches(&[branch])
+            .expect("branch report")
+            .pop()
+            .unwrap();
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert_eq!(report.branch.branch_id, "trace");
+        assert_eq!(report.phi_samples.len(), 64);
+
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "psi_sync_branch" && data["kind"] == "st_core_psi_sync_branch"
+            })
+            .expect("psi_sync_branch metadata event");
+        assert_eq!(meta.1["backend"], "cpu");
+        assert_eq!(meta.1["requested_backend"], "auto");
+        assert_eq!(meta.1["branch_id"], "trace");
+        assert_eq!(meta.1["samples"], 64);
+        assert_eq!(meta.1["phi_samples"], 64);
+        assert_eq!(meta.1["lam_bins"], 8);
+        assert_eq!(meta.1["wd_bins"], 9);
+        assert_eq!(meta.1["heatmap_cells"], 72);
+        assert_eq!(meta.1["qmax"], 6);
+        assert_eq!(meta.1["rendered_heatmap"], false);
+        assert!(meta.1["phi_span"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["heatmap_peak"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["heatmap_peak_ratio"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["best_lock_q"].as_i64().unwrap_or(0) >= 1);
+        assert!(meta.1["rmse"].as_f64().unwrap_or(-1.0) >= 0.0);
     }
 }

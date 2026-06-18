@@ -3,15 +3,156 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+use crate::execution::current_tensor_util_backend_for_values;
 use crate::module::Module;
-use crate::{PureResult, Tensor};
+use crate::{PureResult, Tensor, TensorError};
 use st_frac::mellin_types::{ComplexScalar, Scalar};
 use st_frac::zspace::{
     evaluate_weighted_series_many, prepare_weighted_series, trapezoidal_weights,
 };
 use st_frac::FracBackend;
-use st_tensor::{LanguageWaveEncoder, OpenCartesianTopos, RewriteMonad, TensorBiome};
+use st_tensor::{
+    emit_tensor_op, emit_tensor_op_meta, LanguageWaveEncoder, OpenCartesianTopos, RewriteMonad,
+    TensorBiome,
+};
 use thiserror::Error;
+
+fn emit_zspace_projector_meta(
+    op_name: &'static str,
+    layer_backend: &'static str,
+    rows: usize,
+    cols: usize,
+    backward: bool,
+    curvature: f32,
+    projection_backend: Option<String>,
+    projection_gradient: bool,
+    saturation_gradient: &'static str,
+) {
+    emit_tensor_op(op_name, &[rows, cols], &[rows, cols]);
+    emit_tensor_op_meta(op_name, || {
+        let values = rows.saturating_mul(cols);
+        let projection_gradient_backend = if projection_gradient {
+            Some("cpu")
+        } else {
+            None
+        };
+        let saturation_gradient_backend = if backward { Some("cpu") } else { None };
+        serde_json::json!({
+            "backend": layer_backend,
+            "requested_backend": "auto",
+            "kernel": "zspace_projector.rewrite",
+            "kind": if backward { "zspace_projector_backward" } else { "zspace_projector_forward" },
+            "rows": rows,
+            "cols": cols,
+            "values": values,
+            "output_rows": rows,
+            "output_cols": cols,
+            "output_values": values,
+            "curvature": curvature,
+            "rewrite_backend": "cpu",
+            "projection_backend": projection_backend,
+            "projection_gradient": projection_gradient,
+            "projection_gradient_backend": projection_gradient_backend,
+            "saturation_gradient": saturation_gradient,
+            "saturation_gradient_backend": saturation_gradient_backend,
+            "estimated_rewrite_values": values,
+            "estimated_projection_values": values,
+            "estimated_projection_gradient_ops": if backward { values.saturating_mul(4) } else { 0 },
+            "estimated_saturation_gradient_ops": if backward { values.saturating_mul(3) } else { 0 },
+            "empty": rows == 0 || cols == 0,
+        })
+    });
+}
+
+fn porous_saturation_backward_factor(value: f32, saturation: f32, porosity: f32) -> f32 {
+    if !value.is_finite() || saturation <= 0.0 {
+        return 0.0;
+    }
+    let limit = saturation.abs();
+    let magnitude = value.abs();
+    if magnitude <= limit {
+        return 1.0;
+    }
+    if porosity <= f32::EPSILON {
+        return 0.0;
+    }
+    let absorb = (porosity * 0.25).min(1.0);
+    let denom = magnitude + limit;
+    if denom <= f32::EPSILON {
+        return 0.0;
+    }
+    -2.0 * limit * limit * absorb / (denom * denom)
+}
+
+fn porous_saturation_backward(
+    pre_saturation: &Tensor,
+    grad_saturated: &Tensor,
+    saturation: f32,
+    porosity: f32,
+) -> PureResult<Tensor> {
+    if pre_saturation.shape() != grad_saturated.shape() {
+        return Err(TensorError::ShapeMismatch {
+            left: pre_saturation.shape(),
+            right: grad_saturated.shape(),
+        });
+    }
+    let (rows, cols) = pre_saturation.shape();
+    let data = pre_saturation
+        .data()
+        .iter()
+        .zip(grad_saturated.data().iter())
+        .map(|(&value, &grad)| {
+            grad * porous_saturation_backward_factor(value, saturation, porosity)
+        })
+        .collect();
+    Tensor::from_vec(rows, cols, data)
+}
+
+fn poincare_projection_backward(
+    preprojected: &Tensor,
+    grad_projected: &Tensor,
+    curvature: f32,
+) -> PureResult<Tensor> {
+    if preprojected.shape() != grad_projected.shape() {
+        return Err(TensorError::ShapeMismatch {
+            left: preprojected.shape(),
+            right: grad_projected.shape(),
+        });
+    }
+    if curvature >= 0.0 {
+        return Err(TensorError::NonHyperbolicCurvature { curvature });
+    }
+    let (rows, cols) = preprojected.shape();
+    let scale = (-curvature).sqrt();
+    let mut data = vec![0.0f32; rows.saturating_mul(cols)];
+    for row in 0..rows {
+        let start = row * cols;
+        let end = start + cols;
+        let x = &preprojected.data()[start..end];
+        let grad = &grad_projected.data()[start..end];
+        let norm = x.iter().map(|value| value * value).sum::<f32>().sqrt();
+        if !norm.is_finite() || norm <= f32::EPSILON {
+            let factor = if scale > 0.0 { 1.0 / scale } else { 1.0 };
+            for col in 0..cols {
+                data[start + col] = grad[col] * factor;
+            }
+            continue;
+        }
+        let tanh = (norm / scale).tanh();
+        let factor = tanh / norm;
+        let sech2 = 1.0 - tanh * tanh;
+        let radial = ((sech2 * norm / scale) - tanh) / (norm * norm * norm);
+        let dot = x
+            .iter()
+            .zip(grad.iter())
+            .map(|(&value, &grad)| value * grad)
+            .sum::<f32>();
+        for col in 0..cols {
+            data[start + col] = factor * grad[col] + radial * x[col] * dot;
+        }
+    }
+    Tensor::from_vec(rows, cols, data)
+}
 
 /// Projects Euclidean activations back into the open-cartesian Z-space manifold.
 #[derive(Clone, Debug)]
@@ -86,30 +227,75 @@ impl ZSpaceProjector {
                 got: biome.topos().curvature(),
             });
         }
-        let canopy = biome.canopy()?;
+        let (rows, cols) = biome
+            .shape()
+            .ok_or(crate::TensorError::EmptyInput("tensor_biome"))?;
+        let stacked_values = biome.len().saturating_mul(rows).saturating_mul(cols);
+        let canopy_backend = current_tensor_util_backend_for_values(stacked_values);
+        let canopy = biome.canopy_with_backend(canopy_backend)?;
         self.forward(&canopy)
     }
 }
 
 impl Module for ZSpaceProjector {
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+        let (rows, cols) = input.shape();
         self.topos
             .guard_tensor("zspace_projector_forward_in", input)?;
         let mut rewritten = input.clone();
         let monad = RewriteMonad::new(&self.topos);
         monad.rewrite_tensor("zspace_projector_forward_rewrite", &mut rewritten)?;
-        let projected = rewritten.project_to_poincare(self.topos.curvature())?;
+        let projection_backend = current_tensor_util_backend_for_values(rows.saturating_mul(cols));
+        let projected = rewritten
+            .project_to_poincare_with_backend(self.topos.curvature(), projection_backend)?;
         self.topos
             .guard_tensor("zspace_projector_forward_out", &projected)?;
+        emit_zspace_projector_meta(
+            "zspace_projector_forward",
+            "composite",
+            rows,
+            cols,
+            false,
+            self.topos.curvature(),
+            Some(projection_backend.to_string()),
+            false,
+            "forward_only",
+        );
         Ok(projected)
     }
 
-    fn backward(&mut self, _input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        if input.shape() != grad_output.shape() {
+            return Err(TensorError::ShapeMismatch {
+                left: input.shape(),
+                right: grad_output.shape(),
+            });
+        }
+        let (rows, cols) = input.shape();
         self.topos
             .guard_tensor("zspace_projector_backward_in", grad_output)?;
-        let mut grad = grad_output.clone();
         let monad = RewriteMonad::new(&self.topos);
-        monad.rewrite_tensor("zspace_projector_backward_rewrite", &mut grad)?;
+        let mut preprojected = input.clone();
+        monad.rewrite_tensor("zspace_projector_backward_rewrite", &mut preprojected)?;
+        let grad_saturated =
+            poincare_projection_backward(&preprojected, grad_output, self.topos.curvature())?;
+        let grad = porous_saturation_backward(
+            input,
+            &grad_saturated,
+            self.topos.saturation(),
+            self.topos.porosity(),
+        )?;
+        emit_zspace_projector_meta(
+            "zspace_projector_backward",
+            "cpu",
+            rows,
+            cols,
+            true,
+            self.topos.curvature(),
+            Some("cpu".to_string()),
+            true,
+            "porous_mix_exact",
+        );
         Ok(grad)
     }
 
@@ -182,9 +368,18 @@ impl StableZSpaceProjector {
 mod tests {
     use super::*;
     use st_tensor::topos::OpenCartesianTopos;
+    use std::sync::{Arc, Mutex, OnceLock};
 
     fn demo_topos() -> OpenCartesianTopos {
         OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 256, 8192).unwrap()
+    }
+
+    fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
+        static OBSERVER_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        OBSERVER_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("observer lock available")
     }
 
     #[test]
@@ -200,6 +395,140 @@ mod tests {
             Tensor::from_vec(2, 4, vec![0.2, -0.1, 0.05, -0.3, 0.4, -0.2, 0.1, -0.05]).unwrap();
         let grad_in = module.backward(&input, &grad_out).unwrap();
         assert_eq!(grad_in.shape(), grad_out.shape());
+    }
+
+    #[test]
+    fn projector_forward_emits_poincare_projection_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let topos = demo_topos();
+        let encoder = LanguageWaveEncoder::new(topos.curvature(), 0.5).unwrap();
+        let module = ZSpaceProjector::new(topos, encoder).unwrap();
+        let input = Tensor::from_vec(1, 4, vec![0.1, -0.2, 0.3, -0.4]).unwrap();
+        let output = module.forward(&input).unwrap();
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert_eq!(output.shape(), input.shape());
+        let events = events.lock().unwrap();
+        let projection = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "project_to_poincare"
+                    && data["rows"] == 1
+                    && data["cols"] == 4
+                    && data["kind"] == "hyperbolic_projection"
+            })
+            .expect("project_to_poincare metadata event");
+        assert_eq!(projection.1["backend"], "cpu");
+        assert_eq!(projection.1["requested_backend"], "auto");
+        assert_eq!(projection.1["curvature"], -1.0);
+        assert_eq!(projection.1["output_rows"], 1);
+        assert_eq!(projection.1["output_cols"], 4);
+
+        let projector = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "zspace_projector_forward"
+                    && data["rows"] == 1
+                    && data["cols"] == 4
+                    && data["kind"] == "zspace_projector_forward"
+            })
+            .expect("zspace_projector_forward metadata event");
+        assert_eq!(projector.1["backend"], "composite");
+        assert_eq!(projector.1["rewrite_backend"], "cpu");
+        assert_eq!(projector.1["projection_backend"], "auto");
+        assert_eq!(projector.1["projection_gradient"], false);
+        assert!(projector.1["projection_gradient_backend"].is_null());
+        assert_eq!(projector.1["saturation_gradient"], "forward_only");
+        assert!(projector.1["saturation_gradient_backend"].is_null());
+        assert_eq!(projector.1["curvature"], -1.0);
+    }
+
+    #[test]
+    fn projector_backward_emits_layer_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let topos = demo_topos();
+        let encoder = LanguageWaveEncoder::new(topos.curvature(), 0.5).unwrap();
+        let mut module = ZSpaceProjector::new(topos, encoder).unwrap();
+        let input = Tensor::from_vec(1, 4, vec![0.1, -0.2, 0.3, -0.4]).unwrap();
+        let grad_out = Tensor::from_vec(1, 4, vec![0.2, -0.1, 0.05, -0.3]).unwrap();
+        let grad_in = module.backward(&input, &grad_out).unwrap();
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert_eq!(grad_in.shape(), grad_out.shape());
+        let events = events.lock().unwrap();
+        let backward = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "zspace_projector_backward"
+                    && data["rows"] == 1
+                    && data["cols"] == 4
+                    && data["kind"] == "zspace_projector_backward"
+            })
+            .expect("zspace_projector_backward metadata event");
+        assert_eq!(backward.1["backend"], "cpu");
+        assert_eq!(backward.1["rewrite_backend"], "cpu");
+        assert_eq!(backward.1["projection_backend"], "cpu");
+        assert_eq!(backward.1["projection_gradient"], true);
+        assert_eq!(backward.1["projection_gradient_backend"], "cpu");
+        assert_eq!(backward.1["saturation_gradient"], "porous_mix_exact");
+        assert_eq!(backward.1["saturation_gradient_backend"], "cpu");
+        assert_eq!(backward.1["estimated_projection_values"], 4);
+        assert_eq!(backward.1["estimated_projection_gradient_ops"], 16);
+    }
+
+    #[test]
+    fn projector_backward_matches_projection_finite_difference_for_input() {
+        let topos = OpenCartesianTopos::new(-1.0, 1e-5, 0.5, 256, 8192)
+            .unwrap()
+            .with_porosity(0.8)
+            .unwrap();
+        let encoder = LanguageWaveEncoder::new(topos.curvature(), 0.5).unwrap();
+        let mut module = ZSpaceProjector::new(topos, encoder).unwrap();
+        let input_values = vec![0.9, -0.35, 0.25];
+        let input = Tensor::from_vec(1, 3, input_values.clone()).unwrap();
+        let grad_out = Tensor::from_vec(1, 3, vec![0.4, -0.25, 0.3]).unwrap();
+
+        let grad_input = module.backward(&input, &grad_out).unwrap();
+        let analytic = grad_input.data()[0];
+
+        let epsilon = 1.0e-3f32;
+        let loss_at = |values: Vec<f32>| {
+            let tensor = Tensor::from_vec(1, 3, values).unwrap();
+            let out = module.forward(&tensor).unwrap();
+            out.data()
+                .iter()
+                .zip(grad_out.data().iter())
+                .map(|(&value, &grad)| value * grad)
+                .sum::<f32>()
+        };
+        let mut plus = input_values.clone();
+        plus[0] += epsilon;
+        let mut minus = input_values;
+        minus[0] -= epsilon;
+        let finite_difference = (loss_at(plus) - loss_at(minus)) / (2.0 * epsilon);
+
+        assert!(
+            (analytic - finite_difference).abs() < 3.0e-3,
+            "analytic={analytic} finite_difference={finite_difference}"
+        );
     }
 
     #[test]
@@ -243,8 +572,41 @@ mod tests {
                 Tensor::from_vec(1, 4, vec![0.4, -0.2, 0.8, -0.6]).unwrap(),
             )
             .unwrap();
+
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
         let projector = ZSpaceProjector::new(topos, encoder).unwrap();
         let projected = projector.reimport_biome(&biome).unwrap();
+        st_tensor::set_tensor_op_meta_observer(previous);
+
         assert_eq!(projected.shape(), (1, 4));
+        let events = events.lock().unwrap();
+        let canopy = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "tensor_biome_canopy" && data["rows"] == 1 && data["cols"] == 4
+            })
+            .expect("tensor_biome_canopy metadata event");
+        assert_eq!(canopy.1["backend"], "hybrid");
+        assert_eq!(canopy.1["accumulation_backend"], "auto");
+        assert_eq!(canopy.1["normalise_backend"], "auto");
+        assert_eq!(canopy.1["rewrite_backend"], "topos_cpu");
+        assert_eq!(canopy.1["kind"], "topos_biome_canopy");
+
+        let projection = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "project_to_poincare" && data["rows"] == 1 && data["cols"] == 4
+            })
+            .expect("project_to_poincare metadata event");
+        assert_eq!(projection.1["backend"], "cpu");
+        assert_eq!(projection.1["kind"], "hyperbolic_projection");
     }
 }

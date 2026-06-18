@@ -13,11 +13,19 @@ mod char_lm_eval;
 mod text_corpus;
 
 use char_lm_eval::{
-    capture_parameter_snapshot, evaluate_next_token_with_unigram_lift, evaluate_unigram_next_token,
-    linear_with_weight_rms, residual_logit_scaler, split_train_validation_tokens,
-    summarize_learnability, validate_head_prior, validate_head_residual_scale, write_summary,
-    CharLmInputMode, FixedLogitPrior, LanguageEvalMetric, LearnabilityMetric, TrainingSummary,
-    DEFAULT_HEAD_RESIDUAL_SCALE, HEAD_PRIOR_UNIGRAM,
+    capture_parameter_snapshot, evaluate_bigram_next_token, evaluate_next_token_with_unigram_lift,
+    evaluate_unigram_next_token, head_prior_is_enabled, insert_head_prior_with_context,
+    linear_with_weight_rms, push_char_embedding, residual_logit_scaler,
+    split_train_validation_tokens, summarize_learnability, validate_bigram_rank_guard,
+    validate_bigram_rank_guard_band, validate_bigram_rank_guard_min_candidates,
+    validate_bigram_soft_guard, validate_bigram_topk_guard, validate_char_feature,
+    validate_head_prior, validate_head_residual_scale, write_summary, BigramRankGuardCoverage,
+    BigramTopKGuardTargets, BigramTopKGuardedCrossEntropy, CharLmInputMode, LanguageEvalMetric,
+    LearnabilityMetric, TrainingSummary, CHAR_FEATURE_TOKEN, DEFAULT_BIGRAM_RANK_GUARD,
+    DEFAULT_BIGRAM_RANK_GUARD_BAND, DEFAULT_BIGRAM_RANK_GUARD_MARGIN,
+    DEFAULT_BIGRAM_RANK_GUARD_MIN_CANDIDATES, DEFAULT_BIGRAM_SOFT_GUARD, DEFAULT_BIGRAM_TOPK_GUARD,
+    DEFAULT_BIGRAM_TOPK_GUARD_K, DEFAULT_CHAR_FEATURE, DEFAULT_HEAD_RESIDUAL_SCALE,
+    HEAD_PRIOR_LEARNED_UNIGRAM,
 };
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -28,8 +36,8 @@ use st_core::plugin::{
 use st_nn::layers::spiral_rnn::SpiralRnn;
 use st_nn::layers::ZSpaceSoftmax;
 use st_nn::{
-    load_json, save_json, CategoricalCrossEntropy, Embedding, Module, ModuleTrainer, PureResult,
-    RoundtableConfig, Sequential, Tensor, TensorError,
+    load_json, save_json, EpochTensorBackendStats, Lstm, Module, ModuleTrainer, Parameter,
+    PureResult, RoundtableConfig, Sequential, Tensor, TensorError,
 };
 use std::collections::{BTreeSet, HashMap};
 use std::env;
@@ -43,6 +51,17 @@ const FORMAT_ID_V2: &str = "st-char-lm-v2";
 const DEFAULT_UNK: char = '\u{FFFD}';
 const RUN_SCHEMA: &str = "st.modelzoo.run.v1";
 const DEFAULT_LINEAR_WEIGHT_RMS: f32 = 0.1;
+const RECURRENT_SPIRAL: &str = "spiral";
+const RECURRENT_LSTM: &str = "lstm";
+const USAGE: &str = "usage: cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--recurrent spiral|lstm] [--steps N] [--embed-dim N] [--char-feature token|token-bigram] [--hidden N] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram|learned-unigram|bigram|learned-bigram] [--bigram-topk-guard F] [--bigram-topk-guard-k N] [--bigram-rank-guard F] [--bigram-rank-guard-margin F] [--bigram-rank-guard-band F] [--bigram-rank-guard-min-candidates N] [--bigram-soft-guard F] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--val-start-fraction F] [--eval-samples N] [--early-stop-patience N] [--prompt STR]";
+
+fn legacy_char_feature() -> String {
+    CHAR_FEATURE_TOKEN.to_string()
+}
+
+fn legacy_recurrent() -> String {
+    RECURRENT_SPIRAL.to_string()
+}
 
 #[derive(Debug, Clone, Serialize)]
 struct RunMeta {
@@ -50,6 +69,9 @@ struct RunMeta {
     arch: String,
     backend: String,
     device_caps: backend::DeviceCapsMeta,
+    backend_runtime: backend::BackendRuntimeMeta,
+    tensor_policy: backend::TensorBackendPolicyMeta,
+    roundtable_backend_audit: backend::RoundtableBackendAudit,
     format: String,
     data_paths: Vec<String>,
     data_file_count: usize,
@@ -59,10 +81,20 @@ struct RunMeta {
     steps: usize,
     hidden: usize,
     embed_dim: Option<usize>,
+    recurrent: String,
     mode: String,
+    char_feature: String,
     head_weight_rms: f32,
     head_residual_scale: Option<f32>,
     head_prior: String,
+    bigram_topk_guard: f32,
+    bigram_topk_guard_k: usize,
+    bigram_rank_guard: f32,
+    bigram_rank_guard_margin: f32,
+    bigram_rank_guard_band: f32,
+    bigram_rank_guard_min_candidates: usize,
+    bigram_rank_guard_coverage: Option<BigramRankGuardCoverage>,
+    bigram_soft_guard: f32,
     epochs: usize,
     batches_per_epoch: usize,
     batch: usize,
@@ -74,6 +106,9 @@ struct RunMeta {
     seed: u64,
     validation_fraction_requested: f32,
     validation_fraction_actual: f32,
+    validation_start_fraction_requested: Option<f32>,
+    validation_start_fraction_actual: Option<f32>,
+    validation_start_token: Option<usize>,
     eval_samples: usize,
     early_stop_patience: usize,
     train_tokens: usize,
@@ -87,6 +122,7 @@ struct EpochMetric {
     epoch: usize,
     batches: usize,
     average_loss: f32,
+    tensor_backend: EpochTensorBackendStats,
     validation: Option<LanguageEvalMetric>,
     learnability: LearnabilityMetric,
 }
@@ -146,6 +182,10 @@ struct CharLmMeta {
     temperature: f32,
     #[serde(default)]
     embed_dim: Option<usize>,
+    #[serde(default = "legacy_char_feature")]
+    char_feature: String,
+    #[serde(default = "legacy_recurrent")]
+    recurrent: String,
     #[serde(default)]
     head_prior: Option<String>,
     #[serde(default)]
@@ -159,6 +199,8 @@ impl CharLmMeta {
         steps: usize,
         hidden: usize,
         embed_dim: Option<usize>,
+        recurrent: String,
+        char_feature: Option<String>,
         head_prior: Option<String>,
         head_residual_scale: Option<f32>,
         curvature: f32,
@@ -176,6 +218,8 @@ impl CharLmMeta {
             curvature,
             temperature,
             embed_dim,
+            recurrent,
+            char_feature: char_feature.unwrap_or_else(legacy_char_feature),
             head_prior,
             head_residual_scale,
             unk: vocab.unk,
@@ -192,12 +236,21 @@ struct Args {
     run_dir: Option<PathBuf>,
     backend: String,
     events: Option<PathBuf>,
+    recurrent: String,
     steps: usize,
     embed_dim: usize,
+    char_feature: String,
     hidden: usize,
     head_weight_rms: f32,
     head_residual_scale: f32,
     head_prior: String,
+    bigram_topk_guard: f32,
+    bigram_topk_guard_k: usize,
+    bigram_rank_guard: f32,
+    bigram_rank_guard_margin: f32,
+    bigram_rank_guard_band: f32,
+    bigram_rank_guard_min_candidates: usize,
+    bigram_soft_guard: f32,
     epochs: usize,
     batches_per_epoch: usize,
     batch: usize,
@@ -208,6 +261,7 @@ struct Args {
     top_k: usize,
     seed: u64,
     validation_fraction: f32,
+    validation_start_fraction: Option<f32>,
     eval_samples: usize,
     early_stop_patience: usize,
     prompt: Option<String>,
@@ -224,10 +278,7 @@ impl Args {
             data_args.push(argv.next().unwrap());
         }
         if data_args.is_empty() {
-            return Err(TensorError::Generic(
-                "usage: cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--early-stop-patience N] [--prompt STR]"
-                    .to_string(),
-            ));
+            return Err(TensorError::Generic(USAGE.to_string()));
         }
 
         let mut args = Self {
@@ -237,12 +288,21 @@ impl Args {
             run_dir: None,
             backend: "auto".to_string(),
             events: None,
+            recurrent: RECURRENT_SPIRAL.to_string(),
             steps: 32,
             embed_dim: 32,
+            char_feature: DEFAULT_CHAR_FEATURE.to_string(),
             hidden: 64,
             head_weight_rms: DEFAULT_LINEAR_WEIGHT_RMS,
             head_residual_scale: DEFAULT_HEAD_RESIDUAL_SCALE,
-            head_prior: HEAD_PRIOR_UNIGRAM.to_string(),
+            head_prior: HEAD_PRIOR_LEARNED_UNIGRAM.to_string(),
+            bigram_topk_guard: DEFAULT_BIGRAM_TOPK_GUARD,
+            bigram_topk_guard_k: DEFAULT_BIGRAM_TOPK_GUARD_K,
+            bigram_rank_guard: DEFAULT_BIGRAM_RANK_GUARD,
+            bigram_rank_guard_margin: DEFAULT_BIGRAM_RANK_GUARD_MARGIN,
+            bigram_rank_guard_band: DEFAULT_BIGRAM_RANK_GUARD_BAND,
+            bigram_rank_guard_min_candidates: DEFAULT_BIGRAM_RANK_GUARD_MIN_CANDIDATES,
+            bigram_soft_guard: DEFAULT_BIGRAM_SOFT_GUARD,
             epochs: 6,
             batches_per_epoch: 24,
             batch: 8,
@@ -253,6 +313,7 @@ impl Args {
             top_k: 32,
             seed: 42,
             validation_fraction: 0.1,
+            validation_start_fraction: None,
             eval_samples: 256,
             early_stop_patience: 0,
             prompt: None,
@@ -267,14 +328,39 @@ impl Args {
                 }
                 "--backend" => args.backend = take_arg(&mut argv, "--backend")?,
                 "--events" => args.events = Some(PathBuf::from(take_arg(&mut argv, "--events")?)),
+                "--recurrent" => args.recurrent = take_arg(&mut argv, "--recurrent")?,
                 "--steps" => args.steps = take_parse(&mut argv, "--steps")?,
                 "--embed-dim" => args.embed_dim = take_parse(&mut argv, "--embed-dim")?,
+                "--char-feature" => args.char_feature = take_arg(&mut argv, "--char-feature")?,
                 "--hidden" => args.hidden = take_parse(&mut argv, "--hidden")?,
                 "--head-rms" => args.head_weight_rms = take_parse(&mut argv, "--head-rms")?,
                 "--head-residual-scale" => {
                     args.head_residual_scale = take_parse(&mut argv, "--head-residual-scale")?
                 }
                 "--head-prior" => args.head_prior = take_arg(&mut argv, "--head-prior")?,
+                "--bigram-topk-guard" => {
+                    args.bigram_topk_guard = take_parse(&mut argv, "--bigram-topk-guard")?
+                }
+                "--bigram-topk-guard-k" => {
+                    args.bigram_topk_guard_k = take_parse(&mut argv, "--bigram-topk-guard-k")?
+                }
+                "--bigram-rank-guard" => {
+                    args.bigram_rank_guard = take_parse(&mut argv, "--bigram-rank-guard")?
+                }
+                "--bigram-rank-guard-margin" => {
+                    args.bigram_rank_guard_margin =
+                        take_parse(&mut argv, "--bigram-rank-guard-margin")?
+                }
+                "--bigram-rank-guard-band" => {
+                    args.bigram_rank_guard_band = take_parse(&mut argv, "--bigram-rank-guard-band")?
+                }
+                "--bigram-rank-guard-min-candidates" => {
+                    args.bigram_rank_guard_min_candidates =
+                        take_parse(&mut argv, "--bigram-rank-guard-min-candidates")?
+                }
+                "--bigram-soft-guard" => {
+                    args.bigram_soft_guard = take_parse(&mut argv, "--bigram-soft-guard")?
+                }
                 "--epochs" => args.epochs = take_parse(&mut argv, "--epochs")?,
                 "--batches" => args.batches_per_epoch = take_parse(&mut argv, "--batches")?,
                 "--batch" => args.batch = take_parse(&mut argv, "--batch")?,
@@ -287,16 +373,17 @@ impl Args {
                 "--val-fraction" => {
                     args.validation_fraction = take_parse(&mut argv, "--val-fraction")?
                 }
+                "--val-start-fraction" => {
+                    args.validation_start_fraction =
+                        Some(take_parse(&mut argv, "--val-start-fraction")?)
+                }
                 "--eval-samples" => args.eval_samples = take_parse(&mut argv, "--eval-samples")?,
                 "--early-stop-patience" => {
                     args.early_stop_patience = take_parse(&mut argv, "--early-stop-patience")?
                 }
                 "--prompt" => args.prompt = Some(take_arg(&mut argv, "--prompt")?),
                 "--help" | "-h" => {
-                    return Err(TensorError::Generic(
-                        "usage: cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--hidden N] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--eval-samples N] [--early-stop-patience N] [--prompt STR]"
-                            .to_string(),
-                    ));
+                    return Err(TensorError::Generic(USAGE.to_string()));
                 }
                 other => {
                     return Err(TensorError::Generic(format!(
@@ -317,8 +404,22 @@ impl Args {
                 value: args.head_weight_rms,
             });
         }
+        validate_char_feature(&args.char_feature)?;
+        validate_recurrent(&args.recurrent)?;
         validate_head_prior(&args.head_prior)?;
         validate_head_residual_scale(args.head_residual_scale)?;
+        validate_bigram_topk_guard(args.bigram_topk_guard, args.bigram_topk_guard_k)?;
+        validate_bigram_rank_guard(
+            args.bigram_rank_guard,
+            args.bigram_rank_guard_margin,
+            args.bigram_topk_guard_k,
+        )?;
+        validate_bigram_rank_guard_band(args.bigram_rank_guard_band)?;
+        validate_bigram_rank_guard_min_candidates(
+            args.bigram_rank_guard_min_candidates,
+            args.bigram_topk_guard_k,
+        )?;
+        validate_bigram_soft_guard(args.bigram_soft_guard)?;
         if !args.validation_fraction.is_finite()
             || args.validation_fraction < 0.0
             || args.validation_fraction >= 1.0
@@ -326,6 +427,13 @@ impl Args {
             return Err(TensorError::InvalidValue {
                 label: "char_lm_validation_fraction",
             });
+        }
+        if let Some(fraction) = args.validation_start_fraction {
+            if !fraction.is_finite() || !(0.0..=1.0).contains(&fraction) {
+                return Err(TensorError::InvalidValue {
+                    label: "char_lm_validation_start_fraction",
+                });
+            }
         }
         Ok(args)
     }
@@ -349,6 +457,15 @@ where
         .map_err(|_| TensorError::Generic(format!("invalid value for {flag}: {raw}")))
 }
 
+fn validate_recurrent(value: &str) -> PureResult<()> {
+    match value {
+        RECURRENT_SPIRAL | RECURRENT_LSTM => Ok(()),
+        _ => Err(TensorError::Generic(format!(
+            "invalid --recurrent {value}; expected {RECURRENT_SPIRAL} or {RECURRENT_LSTM}"
+        ))),
+    }
+}
+
 fn meta_path_for_weights(weights_path: &Path) -> PathBuf {
     let file_name = weights_path
         .file_name()
@@ -359,6 +476,118 @@ fn meta_path_for_weights(weights_path: &Path) -> PathBuf {
         .map(|stem| format!("{stem}.meta.json"))
         .unwrap_or_else(|| format!("{file_name}.meta.json"));
     weights_path.with_file_name(meta_file)
+}
+
+#[derive(Debug)]
+struct WindowedStatelessLstm {
+    inner: Lstm,
+    steps: usize,
+    input_dim: usize,
+    hidden: usize,
+}
+
+impl WindowedStatelessLstm {
+    fn new(
+        name: impl Into<String>,
+        steps: usize,
+        input_dim: usize,
+        hidden: usize,
+    ) -> PureResult<Self> {
+        if steps == 0 || input_dim == 0 || hidden == 0 {
+            return Err(TensorError::InvalidDimensions {
+                rows: steps,
+                cols: input_dim.max(hidden),
+            });
+        }
+        Ok(Self {
+            inner: Lstm::new(name, input_dim, hidden)?,
+            steps,
+            input_dim,
+            hidden,
+        })
+    }
+
+    fn sequence_from_row(&self, input: &Tensor, row: usize) -> PureResult<Tensor> {
+        let cols = self.steps * self.input_dim;
+        let start = row * cols;
+        let end = start + cols;
+        Tensor::from_vec(
+            self.steps,
+            self.input_dim,
+            input.data()[start..end].to_vec(),
+        )
+    }
+
+    fn validate_input(&self, input: &Tensor) -> PureResult<()> {
+        let (rows, cols) = input.shape();
+        let expected_cols = self.steps * self.input_dim;
+        if rows == 0 {
+            return Err(TensorError::EmptyInput("char_lm_lstm_window"));
+        }
+        if cols != expected_cols {
+            return Err(TensorError::ShapeMismatch {
+                left: (rows, cols),
+                right: (rows, expected_cols),
+            });
+        }
+        Ok(())
+    }
+}
+
+impl Module for WindowedStatelessLstm {
+    fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
+        self.validate_input(input)?;
+        let (batch, _) = input.shape();
+        let mut output = Vec::with_capacity(batch * self.hidden);
+        for row in 0..batch {
+            let sequence = self.sequence_from_row(input, row)?;
+            self.inner.reset_state()?;
+            let sequence_output = self.inner.forward(&sequence)?;
+            let last_start = (self.steps - 1) * self.hidden;
+            output.extend_from_slice(&sequence_output.data()[last_start..last_start + self.hidden]);
+        }
+        Tensor::from_vec(batch, self.hidden, output)
+    }
+
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        self.validate_input(input)?;
+        let (batch, cols) = input.shape();
+        if grad_output.shape() != (batch, self.hidden) {
+            return Err(TensorError::ShapeMismatch {
+                left: grad_output.shape(),
+                right: (batch, self.hidden),
+            });
+        }
+        let mut grad_input = vec![0.0f32; batch * cols];
+        for row in 0..batch {
+            let sequence = self.sequence_from_row(input, row)?;
+            self.inner.reset_state()?;
+            let _ = self.inner.forward(&sequence)?;
+            let mut grad_sequence = vec![0.0f32; self.steps * self.hidden];
+            let grad_row = &grad_output.data()[row * self.hidden..(row + 1) * self.hidden];
+            let last_start = (self.steps - 1) * self.hidden;
+            grad_sequence[last_start..last_start + self.hidden].copy_from_slice(grad_row);
+            let grad_sequence = Tensor::from_vec(self.steps, self.hidden, grad_sequence)?;
+            let sequence_grad = self.inner.backward(&sequence, &grad_sequence)?;
+            let output_start = row * cols;
+            grad_input[output_start..output_start + cols].copy_from_slice(sequence_grad.data());
+        }
+        Tensor::from_vec(batch, cols, grad_input)
+    }
+
+    fn visit_parameters(
+        &self,
+        visitor: &mut dyn FnMut(&Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        self.inner.visit_parameters(visitor)
+    }
+
+    fn visit_parameters_mut(
+        &mut self,
+        visitor: &mut dyn FnMut(&mut Parameter) -> PureResult<()>,
+    ) -> PureResult<()> {
+        self.inner.visit_parameters_mut(visitor)
+    }
 }
 
 fn read_meta(path: &Path) -> PureResult<CharLmMeta> {
@@ -395,6 +624,8 @@ fn default_run_dir() -> PathBuf {
 fn build_model(
     vocab_size: usize,
     embed_dim: Option<usize>,
+    recurrent: &str,
+    char_feature: Option<&str>,
     steps: usize,
     hidden: usize,
     head_weight_rms: f32,
@@ -402,12 +633,38 @@ fn build_model(
     curvature: f32,
     temperature: f32,
 ) -> PureResult<Sequential> {
+    validate_recurrent(recurrent)?;
     let mut model = Sequential::new();
-    if let Some(embed_dim) = embed_dim {
-        model.push(Embedding::new("embed", vocab_size, embed_dim)?);
-        model.push(SpiralRnn::new("char_rnn", embed_dim, hidden, steps)?);
+    let recurrent_input_dim = if let Some(embed_dim) = embed_dim {
+        push_char_embedding(
+            &mut model,
+            "embed",
+            vocab_size,
+            embed_dim,
+            char_feature.unwrap_or(CHAR_FEATURE_TOKEN),
+        )?;
+        embed_dim
     } else {
-        model.push(SpiralRnn::new("char_rnn", vocab_size, hidden, steps)?);
+        vocab_size
+    };
+    match recurrent {
+        RECURRENT_SPIRAL => {
+            model.push(SpiralRnn::new(
+                "char_rnn",
+                recurrent_input_dim,
+                hidden,
+                steps,
+            )?);
+        }
+        RECURRENT_LSTM => {
+            model.push(WindowedStatelessLstm::new(
+                "char_lstm",
+                steps,
+                recurrent_input_dim,
+                hidden,
+            )?);
+        }
+        _ => unreachable!("validate_recurrent already checked recurrent kind"),
     }
     model.push(linear_with_weight_rms(
         "head",
@@ -457,6 +714,7 @@ fn build_random_batch(
     embed_dim: Option<usize>,
     steps: usize,
     batch: usize,
+    bigram_guard: Option<&BigramTopKGuardTargets>,
     rng: &mut impl Rng,
 ) -> PureResult<(Tensor, Tensor)> {
     let max_start = tokens.len().saturating_sub(steps);
@@ -472,7 +730,10 @@ fn build_random_batch(
             input_cols
         },
     )?;
-    let mut y = Tensor::zeros(batch, vocab_size)?;
+    let target_cols = bigram_guard
+        .map(BigramTopKGuardTargets::target_cols)
+        .unwrap_or(vocab_size);
+    let mut y = Tensor::zeros(batch, target_cols)?;
     {
         let x_data = x.data_mut();
         let y_data = y.data_mut();
@@ -491,7 +752,10 @@ fn build_random_batch(
                 }
             }
             let target = tokens[start + steps];
-            if target < vocab_size {
+            if let Some(guard) = bigram_guard {
+                let previous = tokens[start + steps - 1];
+                guard.write_target_row(y_data, row, previous, target);
+            } else if target < vocab_size {
                 y_data[row * vocab_size + target] = 1.0;
             }
         }
@@ -586,6 +850,7 @@ fn generate_text(
 fn main() -> PureResult<()> {
     let args = Args::parse()?;
     let backend_sel = backend::parse_backend(Some(args.backend.as_str()))?;
+    let backend_runtime = backend::prepare_backend_runtime(&backend_sel)?;
     let data_files = text_corpus::collect_text_files(&args.data_paths)?;
     if data_files.is_empty() {
         return Err(TensorError::EmptyInput("char_lm_text_files"));
@@ -640,6 +905,7 @@ fn main() -> PureResult<()> {
         temperature,
         vocab,
         model,
+        recurrent,
         loaded_from,
         loaded_head_prior,
         loaded_head_residual_scale,
@@ -657,10 +923,16 @@ fn main() -> PureResult<()> {
                 "meta format st-char-lm-v2 requires embed_dim".to_string(),
             ));
         }
+        if meta.embed_dim.is_some() {
+            validate_char_feature(&meta.char_feature)?;
+        }
+        validate_recurrent(&meta.recurrent)?;
         let vocab = Vocab::from_symbols(meta.unk, meta.symbols);
         let mut model = build_model(
             vocab.len(),
             meta.embed_dim,
+            meta.recurrent.as_str(),
+            Some(meta.char_feature.as_str()),
             meta.steps,
             meta.hidden,
             args.head_weight_rms,
@@ -668,9 +940,8 @@ fn main() -> PureResult<()> {
             meta.curvature,
             meta.temperature,
         )?;
-        if meta.head_prior.as_deref() == Some(HEAD_PRIOR_UNIGRAM) {
-            let index = model.len().saturating_sub(1);
-            model.insert(index, FixedLogitPrior::zeros("head_prior", vocab.len())?)?;
+        if let Some(head_prior) = meta.head_prior.as_deref() {
+            insert_head_prior_with_context(&mut model, head_prior, vocab.len(), meta.steps, None)?;
         }
         let head_prior = meta.head_prior.clone();
         let head_residual_scale = meta.head_residual_scale;
@@ -681,6 +952,7 @@ fn main() -> PureResult<()> {
             meta.temperature,
             vocab,
             model,
+            meta.recurrent,
             Some(weights_path.clone()),
             head_prior,
             head_residual_scale,
@@ -690,6 +962,8 @@ fn main() -> PureResult<()> {
         let model = build_model(
             vocab.len(),
             Some(args.embed_dim),
+            args.recurrent.as_str(),
+            Some(args.char_feature.as_str()),
             args.steps,
             args.hidden,
             args.head_weight_rms,
@@ -704,6 +978,7 @@ fn main() -> PureResult<()> {
             args.temperature,
             vocab,
             model,
+            args.recurrent.clone(),
             None,
             None,
             Some(args.head_residual_scale),
@@ -717,6 +992,16 @@ fn main() -> PureResult<()> {
     } else {
         Some(args.embed_dim)
     };
+    let char_feature = if let Some(ref weights_path) = loaded_from {
+        let meta_path = meta_path_for_weights(weights_path);
+        let meta = read_meta(&meta_path)?;
+        meta.embed_dim.map(|_| meta.char_feature)
+    } else {
+        Some(args.char_feature.clone())
+    };
+    let char_feature_label = char_feature
+        .clone()
+        .unwrap_or_else(|| "one_hot".to_string());
 
     let mut model = model;
     if let Some(weights_path) = loaded_from.as_ref() {
@@ -730,7 +1015,12 @@ fn main() -> PureResult<()> {
             tokens.len()
         )));
     }
-    let split = split_train_validation_tokens(&tokens, steps, args.validation_fraction);
+    let split = split_train_validation_tokens(
+        &tokens,
+        steps,
+        args.validation_fraction,
+        args.validation_start_fraction,
+    );
     if split.train.len() <= steps {
         return Err(TensorError::Generic(format!(
             "training split too short for steps={steps}: len={}",
@@ -750,17 +1040,33 @@ fn main() -> PureResult<()> {
     } else {
         Some(args.head_residual_scale)
     };
-    if loaded_from.is_none() && args.head_prior == HEAD_PRIOR_UNIGRAM {
-        let index = model.len().saturating_sub(1);
-        model.insert(
-            index,
-            FixedLogitPrior::from_unigram("head_prior", vocab.len(), &split.train)?,
+    if loaded_from.is_none() {
+        insert_head_prior_with_context(
+            &mut model,
+            &args.head_prior,
+            vocab.len(),
+            steps,
+            Some(&split.train),
         )?;
     }
     model.attach_hypergrad(curvature, args.learning_rate)?;
+    let bigram_guard = BigramTopKGuardTargets::new(
+        vocab.len(),
+        &split.train,
+        args.bigram_topk_guard,
+        args.bigram_topk_guard_k,
+        args.bigram_rank_guard,
+        args.bigram_rank_guard_margin,
+        args.bigram_rank_guard_band,
+        args.bigram_rank_guard_min_candidates,
+        args.bigram_soft_guard,
+    )?;
+    let bigram_rank_guard_coverage = bigram_guard
+        .as_ref()
+        .and_then(|guard| guard.rank_coverage(&split.train));
 
     let mode = embed_dim
-        .map(|dim| format!("embedding({dim})"))
+        .map(|dim| format!("embedding({dim},{char_feature_label})"))
         .unwrap_or_else(|| "one_hot".to_string());
     let prompt = args
         .prompt
@@ -771,11 +1077,35 @@ fn main() -> PureResult<()> {
     } else {
         FORMAT_ID_V1
     };
+    let arch = if recurrent == RECURRENT_LSTM {
+        "llm_char_lstm"
+    } else {
+        "llm_char_finetune"
+    };
+
+    let mut trainer = ModuleTrainer::new(
+        backend_sel.caps,
+        curvature,
+        args.learning_rate,
+        args.learning_rate,
+    );
+    let roundtable_config = RoundtableConfig::default()
+        .with_top_k(1)
+        .with_mid_k(1)
+        .with_bottom_k(1)
+        .with_here_tolerance(1e-5);
+    let schedule = trainer.roundtable(args.batch as u32, vocab.len() as u32, roundtable_config);
+    let tensor_policy = backend::tensor_backend_policy_meta(backend_sel.caps);
+    let roundtable_backend_audit = backend::roundtable_backend_audit(backend_sel.caps, &schedule);
+
     let run_meta = RunMeta {
         schema: RUN_SCHEMA.to_string(),
-        arch: "llm_char_finetune".to_string(),
+        arch: arch.to_string(),
         backend: backend_sel.label.clone(),
         device_caps: backend_sel.caps.into(),
+        backend_runtime: backend_runtime.clone(),
+        tensor_policy: tensor_policy.clone(),
+        roundtable_backend_audit: roundtable_backend_audit.clone(),
         format: format.to_string(),
         data_paths: args
             .data_paths
@@ -794,10 +1124,20 @@ fn main() -> PureResult<()> {
         steps,
         hidden,
         embed_dim,
+        recurrent: recurrent.clone(),
         mode: mode.clone(),
+        char_feature: char_feature_label.clone(),
         head_weight_rms: args.head_weight_rms,
         head_residual_scale,
         head_prior: head_prior.clone(),
+        bigram_topk_guard: args.bigram_topk_guard,
+        bigram_topk_guard_k: args.bigram_topk_guard_k,
+        bigram_rank_guard: args.bigram_rank_guard,
+        bigram_rank_guard_margin: args.bigram_rank_guard_margin,
+        bigram_rank_guard_band: args.bigram_rank_guard_band,
+        bigram_rank_guard_min_candidates: args.bigram_rank_guard_min_candidates,
+        bigram_rank_guard_coverage,
+        bigram_soft_guard: args.bigram_soft_guard,
         epochs: args.epochs,
         batches_per_epoch: args.batches_per_epoch,
         batch: args.batch,
@@ -809,6 +1149,9 @@ fn main() -> PureResult<()> {
         seed: args.seed,
         validation_fraction_requested: args.validation_fraction,
         validation_fraction_actual: split.actual_validation_fraction,
+        validation_start_fraction_requested: args.validation_start_fraction,
+        validation_start_fraction_actual: split.validation_start_fraction_actual,
+        validation_start_token: split.validation_start_token,
         eval_samples: args.eval_samples,
         early_stop_patience: args.early_stop_patience,
         train_tokens: split.train.len(),
@@ -830,26 +1173,16 @@ fn main() -> PureResult<()> {
             message: err.to_string(),
         })?;
 
-    let mut trainer = ModuleTrainer::new(
-        backend_sel.caps,
-        curvature,
-        args.learning_rate,
-        args.learning_rate,
-    );
-    let schedule = trainer.roundtable(
-        args.batch as u32,
-        vocab.len() as u32,
-        RoundtableConfig::default()
-            .with_top_k(1)
-            .with_mid_k(1)
-            .with_bottom_k(1)
-            .with_here_tolerance(1e-5),
-    );
-
-    let mut loss = CategoricalCrossEntropy::new();
+    let mut loss = BigramTopKGuardedCrossEntropy::new(
+        args.bigram_topk_guard,
+        args.bigram_rank_guard,
+        args.bigram_rank_guard_margin,
+        args.bigram_soft_guard,
+    )?;
 
     println!(
-        "mode={mode} backend={} vocab={} files={} chars={} train_tokens={} validation_tokens={} steps={} hidden={} head_rms={} head_residual_scale={} head_prior={} epochs={} batch={} lr={:.3e} curvature={} temp={} run_dir={}",
+        "mode={mode} recurrent={} backend={} vocab={} files={} chars={} train_tokens={} validation_tokens={} steps={} hidden={} char_feature={} head_rms={} head_residual_scale={} head_prior={} bigram_topk_guard={} bigram_topk_guard_k={} bigram_rank_guard={} bigram_rank_guard_margin={} bigram_rank_guard_band={} bigram_rank_guard_min_candidates={} bigram_soft_guard={} epochs={} batch={} lr={:.3e} curvature={} temp={} run_dir={}",
+        recurrent,
         backend_sel.label,
         vocab.len(),
         data_files.len(),
@@ -858,17 +1191,42 @@ fn main() -> PureResult<()> {
         split.validation.len(),
         steps,
         hidden,
+        char_feature_label,
         args.head_weight_rms,
         head_residual_scale
             .map(|value| format!("{value:.3}"))
             .unwrap_or_else(|| "none".to_string()),
         head_prior,
+        args.bigram_topk_guard,
+        args.bigram_topk_guard_k,
+        args.bigram_rank_guard,
+        args.bigram_rank_guard_margin,
+        args.bigram_rank_guard_band,
+        args.bigram_rank_guard_min_candidates,
+        args.bigram_soft_guard,
         args.epochs,
         args.batch,
         args.learning_rate,
         curvature,
         temperature,
         run_dir.display()
+    );
+    let roundtable_statuses = roundtable_backend_audit
+        .bands
+        .iter()
+        .map(|band| format!("{}:{}", band.band, band.wgpu_exact_status))
+        .collect::<Vec<_>>()
+        .join(",");
+    println!(
+        "backend_policy matmul={} prepacked_matmul={} softmax={} tensor_util={} wgpu_rank_runtime_installed={} wgpu_rank_runtime_initialized={} roundtable_wgpu_exact_ready={} statuses={}",
+        tensor_policy.matmul_backend,
+        tensor_policy.prepacked_matmul_backend,
+        tensor_policy.softmax_backend,
+        tensor_policy.tensor_util_backend,
+        backend_runtime.wgpu_rank_runtime_context_installed,
+        backend_runtime.wgpu_rank_runtime_initialized,
+        roundtable_backend_audit.any_wgpu_exact_runtime_ready,
+        roundtable_statuses
     );
 
     let eval_input_mode = if embed_dim.is_some() {
@@ -886,6 +1244,13 @@ fn main() -> PureResult<()> {
         args.eval_samples,
     )?;
     let unigram_validation = evaluate_unigram_next_token(
+        vocab.len(),
+        steps,
+        &split.train,
+        &split.validation,
+        args.eval_samples,
+    )?;
+    let bigram_validation = evaluate_bigram_next_token(
         vocab.len(),
         steps,
         &split.train,
@@ -921,9 +1286,22 @@ fn main() -> PureResult<()> {
             validation.mean_target_rank
         );
     }
+    if let Some(validation) = bigram_validation.as_ref() {
+        println!(
+            "validation[bigram] windows={} nll={:.6} ppl={} acc={:.2}% target_rank={:.2}",
+            validation.windows,
+            validation.mean_nll,
+            validation
+                .perplexity
+                .map(|value| format!("{value:.3}"))
+                .unwrap_or_else(|| "overflow".to_string()),
+            validation.accuracy * 100.0,
+            validation.mean_target_rank
+        );
+    }
 
     let meta_head_prior = loaded_head_prior.clone().or_else(|| {
-        (loaded_from.is_none() && args.head_prior == HEAD_PRIOR_UNIGRAM)
+        (loaded_from.is_none() && head_prior_is_enabled(&args.head_prior))
             .then(|| args.head_prior.clone())
     });
     let meta_head_residual_scale = loaded_head_residual_scale
@@ -932,6 +1310,8 @@ fn main() -> PureResult<()> {
         steps,
         hidden,
         embed_dim,
+        recurrent.clone(),
+        char_feature,
         meta_head_prior,
         meta_head_residual_scale,
         curvature,
@@ -959,6 +1339,7 @@ fn main() -> PureResult<()> {
                 embed_dim,
                 steps,
                 args.batch,
+                bigram_guard.as_ref(),
                 &mut rng,
             )?);
         }
@@ -998,6 +1379,7 @@ fn main() -> PureResult<()> {
             epoch,
             batches: stats.batches,
             average_loss: stats.average_loss,
+            tensor_backend: stats.tensor_backend,
             validation: validation.clone(),
             learnability: learnability.clone(),
         };
@@ -1142,6 +1524,10 @@ fn main() -> PureResult<()> {
         .as_ref()
         .zip(unigram_validation.as_ref())
         .map(|(final_metric, unigram)| final_metric.mean_nll - unigram.mean_nll);
+    let final_vs_bigram_nll_delta = final_validation
+        .as_ref()
+        .zip(bigram_validation.as_ref())
+        .map(|(final_metric, bigram)| final_metric.mean_nll - bigram.mean_nll);
     let best_validation_nll_delta = initial_validation
         .as_ref()
         .zip(best_validation.as_ref())
@@ -1150,6 +1536,10 @@ fn main() -> PureResult<()> {
         .as_ref()
         .zip(unigram_validation.as_ref())
         .map(|(best_metric, unigram)| best_metric.mean_nll - unigram.mean_nll);
+    let best_vs_bigram_nll_delta = best_validation
+        .as_ref()
+        .zip(bigram_validation.as_ref())
+        .map(|(best_metric, bigram)| best_metric.mean_nll - bigram.mean_nll);
     let final_minus_best_validation_nll = final_validation
         .as_ref()
         .zip(best_validation.as_ref())
@@ -1158,14 +1548,17 @@ fn main() -> PureResult<()> {
         initial_validation,
         final_validation,
         unigram_validation,
+        bigram_validation,
         best_validation,
         best_validation_epoch,
         best_validation_mean_nll,
         validation_nll_delta,
         validation_accuracy_delta,
         final_vs_unigram_nll_delta,
+        final_vs_bigram_nll_delta,
         best_validation_nll_delta,
         best_vs_unigram_nll_delta,
+        best_vs_bigram_nll_delta,
         final_minus_best_validation_nll,
         best_checkpoint_path,
         best_sample_path,

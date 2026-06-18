@@ -21,6 +21,7 @@
 //  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 // ============================================================================
 
+use crate::execution::current_tensor_util_backend_for_values;
 use crate::gnn::RoundtableBandSignal;
 use crate::optim::LocalLearningRateAdapter;
 use crate::schedule::GradientBands;
@@ -168,20 +169,100 @@ impl Parameter {
         Ok(())
     }
 
+    fn validate_fallback_lr(fallback_lr: f32) -> PureResult<()> {
+        if fallback_lr <= 0.0 || !fallback_lr.is_finite() {
+            return Err(TensorError::NonPositiveLearningRate { rate: fallback_lr });
+        }
+        Ok(())
+    }
+
+    fn validate_synchronized_accumulator(values: &[f32]) -> PureResult<()> {
+        for value in values.iter().copied() {
+            if !value.is_finite() {
+                return Err(TensorError::NonFiniteValue {
+                    label: "synchronized_accumulator",
+                    value,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_scaled_accumulator(values: &[f32], factor: f32) -> PureResult<()> {
+        for value in values.iter().copied() {
+            let scaled = value * factor;
+            if !scaled.is_finite() {
+                return Err(TensorError::NonFiniteValue {
+                    label: "scaled_accumulator",
+                    value: scaled,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_fallback_update(
+        value: &Tensor,
+        gradient: &Tensor,
+        fallback_lr: f32,
+    ) -> PureResult<()> {
+        if value.shape() != gradient.shape() {
+            return Err(TensorError::ShapeMismatch {
+                left: value.shape(),
+                right: gradient.shape(),
+            });
+        }
+        for (&weight, &grad) in value.data().iter().zip(gradient.data().iter()) {
+            let delta = fallback_lr * grad;
+            if !delta.is_finite() {
+                return Err(TensorError::NonFiniteValue {
+                    label: "parameter_delta",
+                    value: delta,
+                });
+            }
+            let next = weight - delta;
+            if !next.is_finite() {
+                return Err(TensorError::NonFiniteValue {
+                    label: "parameter_update",
+                    value: next,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn synchronize_accumulator_buffer<F>(
+        gradient: &mut [f32],
+        synchronize: &mut F,
+    ) -> PureResult<()>
+    where
+        F: FnMut(&mut [f32]) -> PureResult<()>,
+    {
+        let mut synchronized = gradient.to_vec();
+        synchronize(&mut synchronized)?;
+        Self::validate_synchronized_accumulator(&synchronized)?;
+        gradient.copy_from_slice(&synchronized);
+        Ok(())
+    }
+
     /// Accumulates a Euclidean gradient update. When a hypergrad tape is
     /// attached the value is streamed through the tape, otherwise a local
     /// gradient buffer is maintained.
     pub fn accumulate_euclidean(&mut self, update: &Tensor) -> PureResult<()> {
         self.assert_shape(update)?;
         if let Some(tape) = self.hypergrad.as_mut() {
-            tape.accumulate_wave(update)?;
+            let backend = current_tensor_util_backend_for_values(update.data().len());
+            tape.accumulate_wave_with_backend(update, backend)?;
         }
         if let Some(tape) = self.realgrad.as_mut() {
             tape.accumulate_wave(update)?;
         }
         if self.hypergrad.is_none() && self.realgrad.is_none() {
             match self.gradient.as_mut() {
-                Some(existing) => existing.add_scaled(update, 1.0)?,
+                Some(existing) => {
+                    let backend = current_tensor_util_backend_for_values(existing.data().len());
+                    existing.add_scaled_with_backend(update, 1.0, backend)?;
+                }
                 None => {
                     self.gradient = Some(update.clone());
                 }
@@ -206,7 +287,10 @@ impl Parameter {
             }
             if self.hypergrad.is_none() && self.realgrad.is_none() {
                 match self.gradient.as_mut() {
-                    Some(existing) => existing.add_scaled(&tensor, 1.0)?,
+                    Some(existing) => {
+                        let backend = current_tensor_util_backend_for_values(existing.data().len());
+                        existing.add_scaled_with_backend(&tensor, 1.0, backend)?;
+                    }
                     None => {
                         self.gradient = Some(tensor);
                     }
@@ -232,7 +316,10 @@ impl Parameter {
             }
             if self.hypergrad.is_none() && self.realgrad.is_none() {
                 match self.gradient.as_mut() {
-                    Some(existing) => existing.add_scaled(&tensor, 1.0)?,
+                    Some(existing) => {
+                        let backend = current_tensor_util_backend_for_values(existing.data().len());
+                        existing.add_scaled_with_backend(&tensor, 1.0, backend)?;
+                    }
                     None => {
                         self.gradient = Some(tensor);
                     }
@@ -260,18 +347,24 @@ impl Parameter {
     /// Applies the accumulated update either via the hypergrad tape or by using
     /// the supplied fallback learning rate.
     pub fn apply_step(&mut self, fallback_lr: f32) -> PureResult<()> {
+        Self::validate_fallback_lr(fallback_lr)?;
         let mut applied = false;
         if let Some(tape) = self.hypergrad.as_mut() {
-            tape.apply(&mut self.value)?;
+            let backend = current_tensor_util_backend_for_values(self.value.data().len());
+            tape.apply_with_backend(&mut self.value, backend)?;
             applied = true;
         }
         if let Some(tape) = self.realgrad.as_mut() {
-            tape.apply(&mut self.value)?;
+            let backend = current_tensor_util_backend_for_values(self.value.data().len());
+            tape.apply_with_backend(&mut self.value, backend)?;
             applied = true;
         }
         if !applied {
             if let Some(grad) = self.gradient.as_mut() {
-                self.value.add_scaled(grad, -fallback_lr)?;
+                Self::validate_fallback_update(&self.value, grad, fallback_lr)?;
+                let backend = current_tensor_util_backend_for_values(self.value.data().len());
+                self.value
+                    .add_scaled_with_backend(grad, -fallback_lr, backend)?;
                 for value in grad.data_mut() {
                     *value = 0.0;
                 }
@@ -288,13 +381,14 @@ impl Parameter {
         fallback_lr: f32,
         adapter: Option<&mut dyn LocalLearningRateAdapter>,
     ) -> PureResult<()> {
+        Self::validate_fallback_lr(fallback_lr)?;
         if let Some(adapter) = adapter {
             if let Some(view) = self.primary_gradient_view() {
                 let hint = adapter.sheet_hint().max(1);
                 if let Some(features) = SpectralFeatureSample::from_slice(view, hint) {
                     let raw = adapter.scale_factor(self.name(), &features);
                     if raw.is_finite() && raw > 0.0 && (raw - 1.0).abs() > f32::EPSILON {
-                        self.scale_accumulators(raw);
+                        self.scale_accumulators_with_backend_policy(raw)?;
                     }
                 }
             }
@@ -323,6 +417,21 @@ impl Parameter {
         if !factor.is_finite() {
             return;
         }
+        if let Some(tape) = self.hypergrad.as_ref() {
+            if Self::validate_scaled_accumulator(tape.gradient(), factor).is_err() {
+                return;
+            }
+        }
+        if let Some(tape) = self.realgrad.as_ref() {
+            if Self::validate_scaled_accumulator(tape.gradient(), factor).is_err() {
+                return;
+            }
+        }
+        if let Some(grad) = self.gradient.as_ref() {
+            if Self::validate_scaled_accumulator(grad.data(), factor).is_err() {
+                return;
+            }
+        }
         if let Some(tape) = self.hypergrad.as_mut() {
             for grad in tape.gradient_mut() {
                 *grad *= factor;
@@ -338,6 +447,71 @@ impl Parameter {
                 *value *= factor;
             }
         }
+    }
+
+    /// Scales accumulator buffers while routing tensor-backed gradients through backend policy.
+    pub fn scale_accumulators_with_backend_policy(&mut self, factor: f32) -> PureResult<()> {
+        if !factor.is_finite() {
+            return Ok(());
+        }
+        if let Some(tape) = self.hypergrad.as_ref() {
+            Self::validate_scaled_accumulator(tape.gradient(), factor)?;
+        }
+        if let Some(tape) = self.realgrad.as_ref() {
+            Self::validate_scaled_accumulator(tape.gradient(), factor)?;
+        }
+        if let Some(grad) = self.gradient.as_ref() {
+            Self::validate_scaled_accumulator(grad.data(), factor)?;
+        }
+        if let Some(tape) = self.hypergrad.as_mut() {
+            let backend = current_tensor_util_backend_for_values(tape.gradient().len());
+            tape.scale_gradient_with_backend(factor, backend)?;
+        }
+        if let Some(tape) = self.realgrad.as_mut() {
+            let backend = current_tensor_util_backend_for_values(tape.gradient().len());
+            tape.scale_gradient_with_backend(factor, backend)?;
+        }
+        if let Some(grad) = self.gradient.as_mut() {
+            let backend = current_tensor_util_backend_for_values(grad.data().len());
+            *grad = grad.scale_with_backend(factor, backend)?;
+        }
+        Ok(())
+    }
+
+    /// Exposes accumulated gradient buffers to a synchronization callback.
+    ///
+    /// Hypergrad and realgrad tapes are synchronized independently when present.
+    /// The Euclidean fallback buffer is synchronized only when no tape is active,
+    /// matching the update path used by [`apply_step`].
+    pub fn synchronize_accumulators_with<F>(&mut self, mut synchronize: F) -> PureResult<usize>
+    where
+        F: FnMut(&mut [f32]) -> PureResult<()>,
+    {
+        let mut synchronized = 0usize;
+        if let Some(tape) = self.hypergrad.as_mut() {
+            let gradient = tape.gradient_mut();
+            if !gradient.is_empty() {
+                Self::synchronize_accumulator_buffer(gradient, &mut synchronize)?;
+                synchronized += 1;
+            }
+        }
+        if let Some(tape) = self.realgrad.as_mut() {
+            let gradient = tape.gradient_mut();
+            if !gradient.is_empty() {
+                Self::synchronize_accumulator_buffer(gradient, &mut synchronize)?;
+                synchronized += 1;
+            }
+        }
+        if self.hypergrad.is_none() && self.realgrad.is_none() {
+            if let Some(grad) = self.gradient.as_mut() {
+                let data = grad.data_mut();
+                if !data.is_empty() {
+                    Self::synchronize_accumulator_buffer(data, &mut synchronize)?;
+                    synchronized += 1;
+                }
+            }
+        }
+        Ok(synchronized)
     }
 
     /// Returns the squared L2 norm of any accumulated gradients.
@@ -449,14 +623,16 @@ pub trait Module {
         let (rows, cols) = input.shape();
         let mut total = Tensor::zeros(rows, cols)?;
         for (band, grad) in bands.iter_labeled() {
-            if grad.squared_l2_norm() == 0.0 {
+            let backend = current_tensor_util_backend_for_values(grad.data().len());
+            if grad.squared_l2_norm_with_backend(backend)? == 0.0 {
                 continue;
             }
             self.begin_backward_band_pass(band, grad)?;
             let result = self.backward(input, grad);
             self.end_backward_band_pass(band)?;
             let contribution = result?;
-            total.add_scaled(&contribution, 1.0)?;
+            let backend = current_tensor_util_backend_for_values(total.data().len());
+            total.add_scaled_with_backend(&contribution, 1.0, backend)?;
         }
         Ok(total)
     }
@@ -677,5 +853,178 @@ mod tests {
         let values = param.value().data();
         assert!((values[0] + 0.1 * 0.5 * 2.0).abs() < 1e-6);
         assert!((values[1] - 0.1 * 0.25 * 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn parameter_rejects_invalid_fallback_lr_without_mutating_accumulators() {
+        let mut param = Parameter::new("weight", Tensor::zeros(1, 2).unwrap());
+        let update = Tensor::from_vec(1, 2, vec![0.5, -0.25]).unwrap();
+        param.accumulate_euclidean(&update).unwrap();
+        let value_before = param.value().clone();
+        let grad_before = param.gradient().unwrap().clone();
+
+        let err = param.apply_step(f32::NAN).unwrap_err();
+        assert!(matches!(
+            err,
+            TensorError::NonPositiveLearningRate { rate } if rate.is_nan()
+        ));
+        assert_eq!(*param.value(), value_before);
+        assert_eq!(*param.gradient().unwrap(), grad_before);
+
+        let mut adapter = FixedAdapter { factor: 2.0 };
+        let err = param
+            .apply_step_with_adapter(-0.1, Some(&mut adapter))
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            TensorError::NonPositiveLearningRate { rate } if (rate + 0.1).abs() < f32::EPSILON
+        ));
+        assert_eq!(*param.value(), value_before);
+        assert_eq!(*param.gradient().unwrap(), grad_before);
+    }
+
+    #[test]
+    fn parameter_rejects_overflowing_fallback_delta_without_mutating_accumulators() {
+        let mut param = Parameter::new("weight", Tensor::zeros(1, 1).unwrap());
+        let update = Tensor::from_vec(1, 1, vec![2.0]).unwrap();
+        param.accumulate_euclidean(&update).unwrap();
+        let value_before = param.value().clone();
+        let grad_before = param.gradient().unwrap().clone();
+
+        let err = param.apply_step(f32::MAX).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "parameter_delta",
+                value,
+            } if value.is_infinite()
+        ));
+        assert_eq!(*param.value(), value_before);
+        assert_eq!(*param.gradient().unwrap(), grad_before);
+    }
+
+    #[test]
+    fn parameter_rejects_overflowing_fallback_update_without_mutating_accumulators() {
+        let mut param = Parameter::new("weight", Tensor::from_vec(1, 1, vec![f32::MAX]).unwrap());
+        let update = Tensor::from_vec(1, 1, vec![-0.5]).unwrap();
+        param.accumulate_euclidean(&update).unwrap();
+        let value_before = param.value().clone();
+        let grad_before = param.gradient().unwrap().clone();
+
+        let err = param.apply_step(f32::MAX).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "parameter_update",
+                value,
+            } if value.is_infinite()
+        ));
+        assert_eq!(*param.value(), value_before);
+        assert_eq!(*param.gradient().unwrap(), grad_before);
+    }
+
+    #[test]
+    fn parameter_rejects_overflowing_adapter_scale_without_mutating_accumulators() {
+        let mut param = Parameter::new("weight", Tensor::zeros(1, 1).unwrap());
+        let update = Tensor::from_vec(1, 1, vec![2.0]).unwrap();
+        param.accumulate_euclidean(&update).unwrap();
+        let value_before = param.value().clone();
+        let grad_before = param.gradient().unwrap().clone();
+        let mut adapter = FixedAdapter { factor: f32::MAX };
+
+        let err = param
+            .apply_step_with_adapter(0.1, Some(&mut adapter))
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "scaled_accumulator",
+                value,
+            } if value.is_infinite()
+        ));
+        assert_eq!(*param.value(), value_before);
+        assert_eq!(*param.gradient().unwrap(), grad_before);
+    }
+
+    #[test]
+    fn parameter_legacy_scale_accumulators_skips_overflow_without_mutating_buffer() {
+        let mut param = Parameter::new("weight", Tensor::zeros(1, 1).unwrap());
+        let update = Tensor::from_vec(1, 1, vec![2.0]).unwrap();
+        param.accumulate_euclidean(&update).unwrap();
+        let grad_before = param.gradient().unwrap().clone();
+
+        param.scale_accumulators(f32::MAX);
+
+        assert_eq!(*param.gradient().unwrap(), grad_before);
+    }
+
+    #[test]
+    fn parameter_synchronizes_euclidean_accumulator_buffer() {
+        let mut param = Parameter::new("weight", Tensor::zeros(1, 2).unwrap());
+        let update = Tensor::from_vec(1, 2, vec![0.5, -0.25]).unwrap();
+        param.accumulate_euclidean(&update).unwrap();
+
+        let buffers = param
+            .synchronize_accumulators_with(|gradient| {
+                for value in gradient {
+                    *value *= 2.0;
+                }
+                Ok(())
+            })
+            .unwrap();
+
+        assert_eq!(buffers, 1);
+        assert_eq!(param.gradient().unwrap().data(), &[1.0, -0.5]);
+    }
+
+    #[test]
+    fn parameter_rejects_non_finite_synchronized_accumulator_without_mutating_buffer() {
+        let mut param = Parameter::new("weight", Tensor::zeros(1, 2).unwrap());
+        let update = Tensor::from_vec(1, 2, vec![0.5, -0.25]).unwrap();
+        param.accumulate_euclidean(&update).unwrap();
+        let grad_before = param.gradient().unwrap().clone();
+
+        let err = param
+            .synchronize_accumulators_with(|gradient| {
+                gradient[0] = f32::INFINITY;
+                Ok(())
+            })
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "synchronized_accumulator",
+                value,
+            } if value.is_infinite()
+        ));
+        assert_eq!(*param.gradient().unwrap(), grad_before);
+    }
+
+    #[test]
+    fn parameter_synchronizes_hypergrad_and_realgrad_buffers() {
+        let mut param = Parameter::new("weight", Tensor::zeros(1, 2).unwrap());
+        param.attach_hypergrad(-1.0, 0.1).unwrap();
+        param.attach_realgrad(0.1).unwrap();
+
+        let mut calls = 0usize;
+        let buffers = param
+            .synchronize_accumulators_with(|gradient| {
+                calls += 1;
+                for value in gradient {
+                    *value = calls as f32;
+                }
+                Ok(())
+            })
+            .unwrap();
+
+        assert_eq!(buffers, 2);
+        assert_eq!(calls, 2);
+        assert_eq!(param.hypergrad().unwrap().gradient(), &[1.0, 1.0]);
+        assert_eq!(param.realgrad().unwrap().gradient(), &[2.0, 2.0]);
+        assert!(param.gradient().is_none());
     }
 }

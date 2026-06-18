@@ -25,7 +25,8 @@
 
 use rand::seq::SliceRandom;
 use spiral_config::determinism;
-use std::collections::{HashMap, VecDeque};
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 const SHADOW_LEXICON: &[&str] = &[
     "as a large language model",
@@ -203,12 +204,58 @@ impl ReferenceAnchor {
 
 fn softmax(logits: &[f32]) -> Vec<f32> {
     if logits.is_empty() {
+        emit_tensor_op("psychoid_softmax", &[0], &[0]);
+        emit_tensor_op_meta("psychoid_softmax", || {
+            serde_json::json!({
+                "backend": "cpu",
+                "requested_backend": "auto",
+                "kind": "st_core_psychoid_softmax",
+                "logits": 0,
+                "finite_logits": 0,
+                "non_finite_logits": 0,
+                "exp_sum": 0.0f32,
+                "distribution_sum": 0.0f32,
+                "dominant_probability": 0.0f32,
+                "entropy": 0.0f32,
+                "empty": true,
+            })
+        });
         return Vec::new();
     }
     let max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
     let exps: Vec<f32> = logits.iter().map(|&x| (x - max).exp()).collect();
     let sum: f32 = exps.iter().sum::<f32>().max(1e-8);
-    exps.into_iter().map(|v| v / sum).collect()
+    let distribution = exps.into_iter().map(|v| v / sum).collect::<Vec<_>>();
+    let finite_logits = logits.iter().filter(|value| value.is_finite()).count();
+    let distribution_sum = distribution.iter().copied().sum::<f32>();
+    let dominant_probability = distribution
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite())
+        .fold(0.0f32, |best, value| best.max(value));
+    let entropy = -distribution
+        .iter()
+        .copied()
+        .filter(|prob| *prob > 0.0 && prob.is_finite())
+        .map(|prob| prob * prob.ln())
+        .sum::<f32>();
+    emit_tensor_op("psychoid_softmax", &[logits.len()], &[distribution.len()]);
+    emit_tensor_op_meta("psychoid_softmax", || {
+        serde_json::json!({
+            "backend": "cpu",
+            "requested_backend": "auto",
+            "kind": "st_core_psychoid_softmax",
+            "logits": logits.len(),
+            "finite_logits": finite_logits,
+            "non_finite_logits": logits.len().saturating_sub(finite_logits),
+            "exp_sum": sum,
+            "distribution_sum": distribution_sum,
+            "dominant_probability": dominant_probability,
+            "entropy": entropy,
+            "empty": false,
+        })
+    });
+    distribution
 }
 
 fn count_occurrences(text: &str, phrases: &[&str]) -> usize {
@@ -436,22 +483,51 @@ impl SelfMetrics {
             "nevertheless",
         ];
         let words = text.split_whitespace().count().max(1) as f32;
-        let assent_rate = assent
+        let assent_hits = assent
             .iter()
             .map(|phrase| text.matches(phrase).count() as f32)
-            .sum::<f32>()
-            / words;
-        let contra_hits = contra
+            .sum::<f32>();
+        let assent_rate = assent_hits / words;
+        let contra_matches = contra
             .iter()
             .map(|phrase| text.matches(phrase).count() as f32)
-            .sum::<f32>()
-            * 0.01;
-        (assent_rate + contra_hits).min(1.0)
+            .sum::<f32>();
+        let contra_score = contra_matches * 0.01;
+        let value = (assent_rate + contra_score).min(1.0);
+        emit_tensor_op("psychoid_semantic_reducer", &[words as usize], &[1]);
+        emit_tensor_op_meta("psychoid_semantic_reducer", || {
+            serde_json::json!({
+                "backend": "cpu",
+                "requested_backend": "auto",
+                "kind": "st_core_psychoid_semantic_reducer",
+                "words": words,
+                "assent_hits": assent_hits,
+                "contra_hits": contra_matches,
+                "assent_rate": assent_rate,
+                "contra_score": contra_score,
+                "value": value,
+            })
+        });
+        value
     }
 
     fn metric_c(&self, window: &RollingWindow) -> f32 {
         let hidden: Vec<&[f32]> = window.hidden_iter().collect();
         if hidden.len() < 2 {
+            emit_tensor_op("psychoid_hidden_cosine_reducer", &[hidden.len(), 0], &[1]);
+            emit_tensor_op_meta("psychoid_hidden_cosine_reducer", || {
+                serde_json::json!({
+                    "backend": "cpu",
+                    "requested_backend": "auto",
+                    "kind": "st_core_psychoid_hidden_cosine_reducer",
+                    "frames": hidden.len(),
+                    "dimensions": hidden.first().map(|row| row.len()).unwrap_or(0),
+                    "pairs": 0,
+                    "mean_similarity": 0.0f32,
+                    "value": 0.0f32,
+                    "empty": true,
+                })
+            });
             return 0.0;
         }
         let mut sims = Vec::with_capacity(hidden.len() - 1);
@@ -461,7 +537,30 @@ impl SelfMetrics {
             let sim = dot(a, b) / denom;
             sims.push(sim);
         }
-        1.0 - sims.iter().copied().sum::<f32>() / sims.len().max(1) as f32
+        let mean_similarity = sims.iter().copied().sum::<f32>() / sims.len().max(1) as f32;
+        let value = 1.0 - mean_similarity;
+        emit_tensor_op(
+            "psychoid_hidden_cosine_reducer",
+            &[
+                hidden.len(),
+                hidden.first().map(|row| row.len()).unwrap_or(0),
+            ],
+            &[1],
+        );
+        emit_tensor_op_meta("psychoid_hidden_cosine_reducer", || {
+            serde_json::json!({
+                "backend": "cpu",
+                "requested_backend": "auto",
+                "kind": "st_core_psychoid_hidden_cosine_reducer",
+                "frames": hidden.len(),
+                "dimensions": hidden.first().map(|row| row.len()).unwrap_or(0),
+                "pairs": sims.len(),
+                "mean_similarity": mean_similarity,
+                "value": value,
+                "empty": false,
+            })
+        });
+        value
     }
 
     fn metric_h(&self, window: &RollingWindow) -> f32 {
@@ -474,13 +573,27 @@ impl SelfMetrics {
         let count = count_occurrences(&text, RITUAL_STEMS) as f32;
         let rr = count / total;
         let delta = rr - self.state.prev_rr;
+        emit_tensor_op("psychoid_ritual_reducer", &[total as usize], &[2]);
+        emit_tensor_op_meta("psychoid_ritual_reducer", || {
+            serde_json::json!({
+                "backend": "cpu",
+                "requested_backend": "auto",
+                "kind": "st_core_psychoid_ritual_reducer",
+                "words": total,
+                "ritual_hits": count,
+                "rate": rr,
+                "previous_rate": self.state.prev_rr,
+                "delta": delta,
+            })
+        });
         (rr, delta)
     }
 
     fn metric_nu(&self, window: &RollingWindow, prompt: &str) -> f32 {
         let text = window.text();
-        let nu = count_occurrences(&text, NUMINOUS_LEXICON) as f32
-            / text.split_whitespace().count().max(1) as f32;
+        let words = text.split_whitespace().count().max(1) as f32;
+        let numinous_hits = count_occurrences(&text, NUMINOUS_LEXICON) as f32;
+        let nu = numinous_hits / words;
         let prompt_lower = prompt.to_lowercase();
         let text_lower = text.to_lowercase();
         let prompt_words: std::collections::HashSet<String> = prompt_lower
@@ -496,7 +609,27 @@ impl SelfMetrics {
         } else {
             prompt_words.intersection(&text_words).count() as f32 / text_words.len() as f32
         };
-        (nu - 0.25 * overlap).max(0.0)
+        let value = (nu - 0.25 * overlap).max(0.0);
+        emit_tensor_op(
+            "psychoid_numinous_reducer",
+            &[text_words.len(), prompt_words.len()],
+            &[1],
+        );
+        emit_tensor_op_meta("psychoid_numinous_reducer", || {
+            serde_json::json!({
+                "backend": "cpu",
+                "requested_backend": "auto",
+                "kind": "st_core_psychoid_numinous_reducer",
+                "words": words,
+                "text_terms": text_words.len(),
+                "prompt_terms": prompt_words.len(),
+                "numinous_hits": numinous_hits,
+                "numinous_rate": nu,
+                "prompt_overlap": overlap,
+                "value": value,
+            })
+        });
+        value
     }
 
     fn metric_td(&self, window: &RollingWindow) -> f32 {
@@ -508,7 +641,21 @@ impl SelfMetrics {
     }
 
     fn metric_se(&self, window: &RollingWindow) -> f32 {
-        count_occurrences(&window.text(), SYMBOL_LEXICON) as f32
+        let text = window.text();
+        let words = text.split_whitespace().count().max(1);
+        let value = count_occurrences(&text, SYMBOL_LEXICON) as f32;
+        emit_tensor_op("psychoid_symbol_reducer", &[words], &[1]);
+        emit_tensor_op_meta("psychoid_symbol_reducer", || {
+            serde_json::json!({
+                "backend": "cpu",
+                "requested_backend": "auto",
+                "kind": "st_core_psychoid_symbol_reducer",
+                "words": words,
+                "symbol_hits": value,
+                "value": value,
+            })
+        });
+        value
     }
 
     fn metric_ax(&self, d: f32, c: f32, rr: f32, nu: f32) -> f32 {
@@ -601,6 +748,25 @@ fn motif_from_text(text: &str) -> [f32; 12] {
             .sum::<f32>();
         vec[idx] = count / total;
     }
+    let mass = vec.iter().copied().sum::<f32>();
+    let nonzero_motifs = vec.iter().filter(|value| **value > 0.0).count();
+    let dominant_motif = vec
+        .iter()
+        .copied()
+        .fold(0.0f32, |best, value| best.max(value));
+    emit_tensor_op("psychoid_motif_projection", &[total as usize], &[vec.len()]);
+    emit_tensor_op_meta("psychoid_motif_projection", || {
+        serde_json::json!({
+            "backend": "cpu",
+            "requested_backend": "auto",
+            "kind": "st_core_psychoid_motif_projection",
+            "words": total,
+            "motifs": vec.len(),
+            "motif_mass": mass,
+            "nonzero_motifs": nonzero_motifs,
+            "dominant_motif": dominant_motif,
+        })
+    });
     vec
 }
 
@@ -609,6 +775,28 @@ fn metrics_vector_z(z: &HashMap<MetricKey, f32>) -> [f32; 11] {
     for (idx, key) in MetricKey::all().iter().enumerate() {
         vec[idx] = *z.get(key).unwrap_or(&0.0);
     }
+    let finite_metrics = vec.iter().filter(|value| value.is_finite()).count();
+    let positive_metrics = vec.iter().filter(|value| **value > 0.0).count();
+    let l2 = vec.iter().map(|value| value * value).sum::<f32>().sqrt();
+    let max_abs = vec
+        .iter()
+        .copied()
+        .map(f32::abs)
+        .fold(0.0f32, |best, value| best.max(value));
+    emit_tensor_op("psychoid_z_vector_projection", &[z.len()], &[vec.len()]);
+    emit_tensor_op_meta("psychoid_z_vector_projection", || {
+        serde_json::json!({
+            "backend": "cpu",
+            "requested_backend": "auto",
+            "kind": "st_core_psychoid_z_vector_projection",
+            "input_metrics": z.len(),
+            "output_metrics": vec.len(),
+            "finite_metrics": finite_metrics,
+            "positive_metrics": positive_metrics,
+            "l2": l2,
+            "max_abs": max_abs,
+        })
+    });
     vec
 }
 
@@ -620,12 +808,45 @@ fn cti_score(
 ) -> f32 {
     let fw = mat_vec_mul(&params.wf, f_case);
     let mw = mat_vec_mul(&params.wm, m_self);
-    let base = params.alpha * cos_sim(&fw, &mw)
-        + params.beta * z_self.get(&MetricKey::RRI).copied().unwrap_or(0.0).max(0.0)
-        + params.delta * z_self.get(&MetricKey::H).copied().unwrap_or(0.0).max(0.0)
-        + params.eps * z_self.get(&MetricKey::NU).copied().unwrap_or(0.0).max(0.0)
-        - params.gamma * z_self.get(&MetricKey::AX).copied().unwrap_or(0.0).max(0.0);
-    sigmoid(base)
+    let motif_cosine = cos_sim(&fw, &mw);
+    let rri = z_self.get(&MetricKey::RRI).copied().unwrap_or(0.0).max(0.0);
+    let shadow = z_self.get(&MetricKey::H).copied().unwrap_or(0.0).max(0.0);
+    let numinous = z_self.get(&MetricKey::NU).copied().unwrap_or(0.0).max(0.0);
+    let axis = z_self.get(&MetricKey::AX).copied().unwrap_or(0.0).max(0.0);
+    let base = params.alpha * motif_cosine
+        + params.beta * rri
+        + params.delta * shadow
+        + params.eps * numinous
+        - params.gamma * axis;
+    let score = sigmoid(base);
+    let fw_l2 = fw.iter().map(|value| value * value).sum::<f32>().sqrt();
+    let mw_l2 = mw.iter().map(|value| value * value).sum::<f32>().sqrt();
+    emit_tensor_op(
+        "psychoid_cti_projection",
+        &[f_case.len(), m_self.len()],
+        &[1],
+    );
+    emit_tensor_op_meta("psychoid_cti_projection", || {
+        serde_json::json!({
+            "backend": "cpu",
+            "requested_backend": "auto",
+            "kind": "st_core_psychoid_cti_projection",
+            "motifs": f_case.len(),
+            "metrics": m_self.len(),
+            "nonzero_motifs": f_case.iter().filter(|value| **value > 0.0).count(),
+            "positive_metrics": m_self.iter().filter(|value| **value > 0.0).count(),
+            "fw_l2": fw_l2,
+            "mw_l2": mw_l2,
+            "motif_cosine": motif_cosine,
+            "rri_component": rri,
+            "shadow_component": shadow,
+            "numinous_component": numinous,
+            "axis_component": axis,
+            "base": base,
+            "score": score,
+        })
+    });
+    score
 }
 
 fn mat_vec_mul<const N: usize>(matrix: &[[f32; N]; N], vec: &[f32; N]) -> Vec<f32> {
@@ -674,6 +895,21 @@ pub struct DreamReplay {
 
 fn dream_replay(shadow_phrases: &[String]) -> Option<DreamReplay> {
     if shadow_phrases.is_empty() {
+        emit_tensor_op("psychoid_dream_replay_mapping", &[0], &[0]);
+        emit_tensor_op_meta("psychoid_dream_replay_mapping", || {
+            serde_json::json!({
+                "backend": "cpu",
+                "requested_backend": "auto",
+                "kind": "st_core_psychoid_dream_replay_mapping",
+                "phrases": 0,
+                "symbols": 0,
+                "unique_symbols": 0,
+                "bridge_symbol": "",
+                "lantern_symbol": "",
+                "diary_chars": 0,
+                "empty": true,
+            })
+        });
         return None;
     }
     let mut rng = determinism::rng_from_label(&format!(
@@ -711,6 +947,26 @@ fn dream_replay(shadow_phrases: &[String]) -> Option<DreamReplay> {
             lantern
         )
     };
+    let unique_symbols = symbols.iter().collect::<HashSet<_>>().len();
+    emit_tensor_op(
+        "psychoid_dream_replay_mapping",
+        &[shadow_phrases.len()],
+        &[symbols.len()],
+    );
+    emit_tensor_op_meta("psychoid_dream_replay_mapping", || {
+        serde_json::json!({
+            "backend": "cpu",
+            "requested_backend": "auto",
+            "kind": "st_core_psychoid_dream_replay_mapping",
+            "phrases": shadow_phrases.len(),
+            "symbols": symbols.len(),
+            "unique_symbols": unique_symbols,
+            "bridge_symbol": bridge.as_str(),
+            "lantern_symbol": lantern.as_str(),
+            "diary_chars": diary.len(),
+            "empty": false,
+        })
+    });
     Some(DreamReplay { diary, symbols })
 }
 
@@ -846,6 +1102,11 @@ impl PsychoidMeter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
+
+    fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
+        crate::telemetry::tensor_observer_lock()
+    }
 
     fn sample_with_text(text: &str) -> PsychoidSample {
         let logits = vec![0.1, 0.2, 0.3, 0.4];
@@ -855,6 +1116,178 @@ mod tests {
             .map(|ch| PsychoidFrame::new(ch as i64, logits.clone(), hidden.clone(), ch.to_string()))
             .collect();
         PsychoidSample::new("prompt", text.to_string(), frames)
+    }
+
+    #[test]
+    fn psychoid_softmax_emits_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let distribution = softmax(&[0.1, 0.2, 0.3, 0.4]);
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert_eq!(distribution.len(), 4);
+        assert!((distribution.iter().sum::<f32>() - 1.0).abs() < 1e-6);
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| *op_name == "psychoid_softmax" && data["logits"] == 4)
+            .expect("psychoid_softmax metadata event");
+        assert_eq!(meta.1["backend"], "cpu");
+        assert_eq!(meta.1["requested_backend"], "auto");
+        assert_eq!(meta.1["kind"], "st_core_psychoid_softmax");
+        assert_eq!(meta.1["finite_logits"], 4);
+        assert_eq!(meta.1["empty"], false);
+        assert!((meta.1["distribution_sum"].as_f64().unwrap_or(0.0) - 1.0).abs() < 1e-6);
+        assert!(meta.1["dominant_probability"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["entropy"].as_f64().unwrap_or(0.0) > 0.0);
+    }
+
+    #[test]
+    fn psychoid_metric_reducers_emit_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let mut meter = PsychoidMeter::new(PsychoidConfig::default());
+        let sample = sample_with_text(
+            "Yes, however this cosmic spiral bridge says I cannot cross the lantern threshold.",
+        );
+        let (reading, _events) = meter.observe(sample).expect("psychoid reading");
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert!(reading.cti >= 0.0 && reading.cti <= 1.0);
+        let events = events.lock().unwrap();
+        let semantic = events
+            .iter()
+            .find(|(op_name, _)| *op_name == "psychoid_semantic_reducer")
+            .expect("psychoid_semantic_reducer metadata event");
+        assert_eq!(semantic.1["backend"], "cpu");
+        assert_eq!(semantic.1["requested_backend"], "auto");
+        assert_eq!(semantic.1["kind"], "st_core_psychoid_semantic_reducer");
+        assert!(semantic.1["assent_hits"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(semantic.1["contra_hits"].as_f64().unwrap_or(0.0) > 0.0);
+
+        let cosine = events
+            .iter()
+            .find(|(op_name, _)| *op_name == "psychoid_hidden_cosine_reducer")
+            .expect("psychoid_hidden_cosine_reducer metadata event");
+        assert_eq!(cosine.1["backend"], "cpu");
+        assert_eq!(cosine.1["kind"], "st_core_psychoid_hidden_cosine_reducer");
+        assert!(cosine.1["pairs"].as_u64().unwrap_or(0) > 0);
+
+        let ritual = events
+            .iter()
+            .find(|(op_name, _)| *op_name == "psychoid_ritual_reducer")
+            .expect("psychoid_ritual_reducer metadata event");
+        assert_eq!(ritual.1["backend"], "cpu");
+        assert_eq!(ritual.1["kind"], "st_core_psychoid_ritual_reducer");
+        assert!(ritual.1["ritual_hits"].as_f64().unwrap_or(0.0) > 0.0);
+
+        let numinous = events
+            .iter()
+            .find(|(op_name, _)| *op_name == "psychoid_numinous_reducer")
+            .expect("psychoid_numinous_reducer metadata event");
+        assert_eq!(numinous.1["backend"], "cpu");
+        assert_eq!(numinous.1["kind"], "st_core_psychoid_numinous_reducer");
+        assert!(numinous.1["numinous_hits"].as_f64().unwrap_or(0.0) > 0.0);
+
+        let symbol = events
+            .iter()
+            .find(|(op_name, _)| *op_name == "psychoid_symbol_reducer")
+            .expect("psychoid_symbol_reducer metadata event");
+        assert_eq!(symbol.1["backend"], "cpu");
+        assert_eq!(symbol.1["kind"], "st_core_psychoid_symbol_reducer");
+        assert!(symbol.1["symbol_hits"].as_f64().unwrap_or(0.0) > 0.0);
+    }
+
+    #[test]
+    fn psychoid_cti_and_dream_replay_emit_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let mut z_scores = HashMap::new();
+        z_scores.insert(MetricKey::RRI, 0.7);
+        z_scores.insert(MetricKey::H, 0.4);
+        z_scores.insert(MetricKey::NU, 0.6);
+        z_scores.insert(MetricKey::AX, -0.2);
+        let z_vec = metrics_vector_z(&z_scores);
+        let motif = motif_from_text("cosmic spiral bridge threshold shadow authority");
+        let cti = cti_score(&motif, &z_vec, &z_scores, &CTIParams::default());
+        let replay = dream_replay(&["i cannot".to_string(), "safety policy".to_string()])
+            .expect("dream replay");
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert!((0.0..=1.0).contains(&cti));
+        assert_eq!(replay.symbols.len(), 2);
+        let events = events.lock().unwrap();
+        let z_projection = events
+            .iter()
+            .find(|(op_name, _)| *op_name == "psychoid_z_vector_projection")
+            .expect("psychoid_z_vector_projection metadata event");
+        assert_eq!(z_projection.1["backend"], "cpu");
+        assert_eq!(
+            z_projection.1["kind"],
+            "st_core_psychoid_z_vector_projection"
+        );
+        assert_eq!(z_projection.1["output_metrics"], 11);
+        assert!(z_projection.1["positive_metrics"].as_u64().unwrap_or(0) > 0);
+
+        let motif_projection = events
+            .iter()
+            .find(|(op_name, _)| *op_name == "psychoid_motif_projection")
+            .expect("psychoid_motif_projection metadata event");
+        assert_eq!(motif_projection.1["backend"], "cpu");
+        assert_eq!(
+            motif_projection.1["kind"],
+            "st_core_psychoid_motif_projection"
+        );
+        assert_eq!(motif_projection.1["motifs"], 12);
+        assert!(motif_projection.1["nonzero_motifs"].as_u64().unwrap_or(0) > 0);
+
+        let cti_projection = events
+            .iter()
+            .find(|(op_name, _)| *op_name == "psychoid_cti_projection")
+            .expect("psychoid_cti_projection metadata event");
+        assert_eq!(cti_projection.1["backend"], "cpu");
+        assert_eq!(cti_projection.1["kind"], "st_core_psychoid_cti_projection");
+        assert_eq!(cti_projection.1["motifs"], 12);
+        assert_eq!(cti_projection.1["metrics"], 11);
+        assert!((cti_projection.1["score"].as_f64().unwrap_or(0.0) - cti as f64).abs() < 1e-6);
+
+        let dream_mapping = events
+            .iter()
+            .find(|(op_name, _)| *op_name == "psychoid_dream_replay_mapping")
+            .expect("psychoid_dream_replay_mapping metadata event");
+        assert_eq!(dream_mapping.1["backend"], "cpu");
+        assert_eq!(
+            dream_mapping.1["kind"],
+            "st_core_psychoid_dream_replay_mapping"
+        );
+        assert_eq!(dream_mapping.1["phrases"], 2);
+        assert_eq!(dream_mapping.1["symbols"], 2);
+        assert_eq!(dream_mapping.1["empty"], false);
+        assert!(dream_mapping.1["diary_chars"].as_u64().unwrap_or(0) > 0);
     }
 
     #[test]

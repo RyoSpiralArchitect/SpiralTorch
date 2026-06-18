@@ -16,8 +16,41 @@ pub mod beta_residual;
 pub mod cov_head;
 pub mod telemetry;
 
+use crate::execution::current_tensor_util_backend_for_values;
 use crate::{PureResult, Tensor, TensorError};
 use st_core::ops::zspace_round::SpectralFeatureSample;
+
+fn validate_finite_value(label: &'static str, value: f32) -> PureResult<()> {
+    if !value.is_finite() {
+        return Err(TensorError::NonFiniteValue { label, value });
+    }
+    Ok(())
+}
+
+fn checked_value(label: &'static str, value: f32) -> PureResult<f32> {
+    validate_finite_value(label, value)?;
+    Ok(value)
+}
+
+fn validate_finite_slice(label: &'static str, values: &[f32]) -> PureResult<()> {
+    for &value in values {
+        validate_finite_value(label, value)?;
+    }
+    Ok(())
+}
+
+fn validate_finite_tensor(label: &'static str, tensor: &Tensor) -> PureResult<()> {
+    validate_finite_slice(label, tensor.data())
+}
+
+fn relabel_non_finite<T>(result: PureResult<T>, label: &'static str) -> PureResult<T> {
+    match result {
+        Err(TensorError::NonFiniteValue { value, .. }) => {
+            Err(TensorError::NonFiniteValue { label, value })
+        }
+        other => other,
+    }
+}
 
 /// Mean + diagonal variance tensor tracked alongside Z-space indices.
 #[derive(Clone, Debug)]
@@ -145,20 +178,54 @@ impl ZRBA {
         if input.is_empty() {
             return Err(TensorError::EmptyInput("zrba::forward"));
         }
+        validate_finite_tensor("zrba_input_mu", &input.mu)?;
+        validate_finite_tensor("zrba_input_sigma", &input.sigma)?;
         let attn_out: attention::ZRBFAttentionOutput = self.attn.forward(input, frame)?;
-        let mut gate = self.gate.forward(stats, &input.indices);
+        validate_finite_tensor("zrba_attention_mean", &attn_out.mean)?;
+        validate_finite_tensor("zrba_attention_variance", &attn_out.variance)?;
+        let mut gate = self.gate.try_forward(stats, &input.indices)?;
         let gate_value = if self.use_expected_gate {
             gate.expected
         } else {
             gate.sample
         };
+        validate_finite_value("zrba_gate_value", gate_value)?;
         gate.applied = gate_value;
 
-        let gated_mu = input.mu.scale(gate_value)?;
-        let mu = gated_mu.add(&attn_out.mean)?;
+        let gated_mu = relabel_non_finite(
+            input.mu.scale_with_backend(
+                gate_value,
+                current_tensor_util_backend_for_values(input.mu.data().len()),
+            ),
+            "zrba_gated_mu",
+        )?;
+        validate_finite_tensor("zrba_gated_mu", &gated_mu)?;
+        let mu = relabel_non_finite(
+            gated_mu.add_with_backend(
+                &attn_out.mean,
+                current_tensor_util_backend_for_values(gated_mu.data().len()),
+            ),
+            "zrba_output_mu",
+        )?;
+        validate_finite_tensor("zrba_output_mu", &mu)?;
 
-        let gated_sigma = input.sigma.scale(gate_value * gate_value)?;
-        let sigma = gated_sigma.add(&attn_out.variance)?;
+        let sigma_scale = checked_value("zrba_gate_variance_scale", gate_value * gate_value)?;
+        let gated_sigma = relabel_non_finite(
+            input.sigma.scale_with_backend(
+                sigma_scale,
+                current_tensor_util_backend_for_values(input.sigma.data().len()),
+            ),
+            "zrba_gated_sigma",
+        )?;
+        validate_finite_tensor("zrba_gated_sigma", &gated_sigma)?;
+        let sigma = relabel_non_finite(
+            gated_sigma.add_with_backend(
+                &attn_out.variance,
+                current_tensor_util_backend_for_values(gated_sigma.data().len()),
+            ),
+            "zrba_output_sigma",
+        )?;
+        validate_finite_tensor("zrba_output_sigma", &sigma)?;
 
         let cov_out: cov_head::CovHeadOutput = self.cov.forward(&mu, &sigma)?;
         let output = ZTensor::new(mu.clone(), sigma.clone(), input.indices.clone())?;
@@ -252,5 +319,54 @@ mod tests {
             telemetry.gate.expected_value()
         );
         assert_eq!(telemetry.gate.applied, telemetry.gate.expected);
+    }
+
+    #[test]
+    fn zrba_forward_rejects_non_finite_gate_stats() {
+        let frame = SimpleZFrame::new(3, 3, 4);
+        let indices = vec![
+            ZIndex {
+                band: 0,
+                sheet: 0,
+                echo: 0,
+            },
+            ZIndex {
+                band: 1,
+                sheet: 1,
+                echo: 2,
+            },
+        ];
+        let mu = Tensor::from_vec(2, 4, vec![0.1, 0.0, 0.2, -0.1, 0.2, 0.1, -0.2, 0.0]).unwrap();
+        let sigma =
+            Tensor::from_vec(2, 4, vec![0.05, 0.04, 0.03, 0.02, 0.05, 0.05, 0.05, 0.05]).unwrap();
+        let tensor = ZTensor::new(mu, sigma, indices).unwrap();
+        let stats = SpectralFeatureSample {
+            sheet_index: 1,
+            sheet_confidence: 0.7,
+            curvature: f32::NAN,
+            spin: 0.1,
+            energy: 0.5,
+        };
+        let zrba = ZRBA::new(ZRBAConfig {
+            d_model: 4,
+            n_heads: 2,
+            metric: ZMetricWeights::default(),
+            ard: true,
+            cov_rank: 2,
+            gate_momentum: 0.05,
+            gate_seed: 7,
+            gate_use_expected: true,
+        })
+        .unwrap();
+
+        let err = zrba.forward(&tensor, &frame, &stats).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "beta_gate_feature",
+                value,
+            } if value.is_nan()
+        ));
     }
 }

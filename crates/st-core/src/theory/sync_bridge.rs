@@ -35,6 +35,7 @@
 
 use std::borrow::Cow;
 
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 use thiserror::Error;
 
 /// I×K decision labels mirroring the appendix nomenclature.
@@ -390,7 +391,7 @@ impl SyncTheoremTrainer {
     ) -> Result<SyncStep, SyncError> {
         let batch = delta_b_sq.len();
         if batch == 0 {
-            return Ok(SyncStep {
+            let step = SyncStep {
                 log_e: Vec::new(),
                 structure_gate: Vec::new(),
                 observation_gate: Vec::new(),
@@ -399,7 +400,9 @@ impl SyncTheoremTrainer {
                 increment: Vec::new(),
                 confidence: Vec::new(),
                 effective_delta_b_sq: Vec::new(),
-            });
+            };
+            emit_sync_step_meta(&self.config, self.iteration, &step);
+            return Ok(step);
         }
 
         let epsilon = self.default_or("epsilon", epsilon, batch, self.config.epsilon_max)?;
@@ -452,7 +455,7 @@ impl SyncTheoremTrainer {
 
         self.log_e_mean = self.log_e.iter().sum::<f32>() / batch as f32;
 
-        Ok(SyncStep {
+        let step = SyncStep {
             log_e,
             structure_gate,
             observation_gate,
@@ -461,7 +464,9 @@ impl SyncTheoremTrainer {
             increment,
             confidence,
             effective_delta_b_sq,
-        })
+        };
+        emit_sync_step_meta(&self.config, self.iteration, &step);
+        Ok(step)
     }
 
     /// Run sequential steps, returning the log trajectory and the first
@@ -536,7 +541,7 @@ impl SyncTheoremTrainer {
             IKLabel::Abstain
         };
 
-        Ok(FamilyAggregation {
+        let aggregation = FamilyAggregation {
             log_e_family,
             confidence,
             structure_gate,
@@ -545,13 +550,142 @@ impl SyncTheoremTrainer {
             pair_count,
             dominant_pair,
             dominant_log_e,
+        };
+        emit_family_aggregation_meta(&self.config, policy, &aggregation);
+        Ok(aggregation)
+    }
+}
+
+fn emit_sync_step_meta(config: &SyncConfig, iteration: usize, step: &SyncStep) {
+    let batch = step.log_e.len();
+    let structure_open = step.structure_gate.iter().filter(|gate| **gate).count();
+    let observation_open = step.observation_gate.iter().filter(|gate| **gate).count();
+    let critical = step
+        .labels
+        .iter()
+        .filter(|label| **label == IKLabel::Critical)
+        .count();
+    let safe = step
+        .labels
+        .iter()
+        .filter(|label| **label == IKLabel::Safe)
+        .count();
+    let abstain = step
+        .labels
+        .iter()
+        .filter(|label| **label == IKLabel::Abstain)
+        .count();
+    let (log_e_min, log_e_mean, log_e_max) = finite_stats(&step.log_e);
+    let (_, increment_mean, increment_max) = finite_stats(&step.increment);
+    let (_, confidence_mean, confidence_max) = finite_stats(&step.confidence);
+    let (_, effective_delta_mean, effective_delta_max) = finite_stats(&step.effective_delta_b_sq);
+    emit_tensor_op("sync_theorem_step", &[batch], &[batch, 4]);
+    emit_tensor_op_meta("sync_theorem_step", || {
+        serde_json::json!({
+            "backend": "cpu",
+            "requested_backend": "auto",
+            "kind": "st_core_sync_theorem_step",
+            "batch": batch,
+            "iteration": iteration,
+            "alpha": config.alpha,
+            "tau_b": config.tau_b,
+            "epsilon_max": config.epsilon_max,
+            "cos_phi_min": config.cos_phi_min,
+            "slew_steps": config.slew_steps,
+            "threshold": config.threshold(),
+            "hitting_time_bound": step.hitting_time_bound,
+            "has_azuma_c": config.azuma_c().is_some(),
+            "azuma_c": config.azuma_c().unwrap_or(0.0),
+            "structure_open": structure_open,
+            "observation_open": observation_open,
+            "critical_labels": critical,
+            "safe_labels": safe,
+            "abstain_labels": abstain,
+            "log_e_min": log_e_min,
+            "log_e_mean": log_e_mean,
+            "log_e_max": log_e_max,
+            "increment_mean": increment_mean,
+            "increment_max": increment_max,
+            "confidence_mean": confidence_mean,
+            "confidence_max": confidence_max,
+            "effective_delta_mean": effective_delta_mean,
+            "effective_delta_max": effective_delta_max,
         })
+    });
+}
+
+fn emit_family_aggregation_meta(
+    config: &SyncConfig,
+    policy: FamilyStructurePolicy,
+    aggregation: &FamilyAggregation,
+) {
+    emit_tensor_op(
+        "sync_family_aggregation",
+        &[aggregation.pair_count],
+        &[1, 5],
+    );
+    emit_tensor_op_meta("sync_family_aggregation", || {
+        serde_json::json!({
+            "backend": "cpu",
+            "requested_backend": "auto",
+            "kind": "st_core_sync_family_aggregation",
+            "policy": family_policy_label(policy),
+            "pair_count": aggregation.pair_count,
+            "label": ik_label(aggregation.label),
+            "critical": aggregation.label == IKLabel::Critical,
+            "safe": aggregation.label == IKLabel::Safe,
+            "abstain": aggregation.label == IKLabel::Abstain,
+            "structure_gate": aggregation.structure_gate,
+            "observation_gate": aggregation.observation_gate,
+            "log_e_family": aggregation.log_e_family,
+            "confidence": aggregation.confidence,
+            "threshold": config.threshold(),
+            "alpha": config.alpha,
+            "dominant_pair": aggregation.dominant_pair.unwrap_or(usize::MAX),
+            "has_dominant_pair": aggregation.dominant_pair.is_some(),
+            "dominant_log_e": aggregation.dominant_log_e.unwrap_or(0.0),
+        })
+    });
+}
+
+fn finite_stats(values: &[f32]) -> (f32, f32, f32) {
+    let mut min = f32::INFINITY;
+    let mut max = f32::NEG_INFINITY;
+    let mut total = 0.0f64;
+    let mut count = 0usize;
+    for value in values.iter().copied().filter(|value| value.is_finite()) {
+        min = min.min(value);
+        max = max.max(value);
+        total += value as f64;
+        count += 1;
+    }
+    if count == 0 {
+        (0.0, 0.0, 0.0)
+    } else {
+        (min, (total / count as f64) as f32, max)
+    }
+}
+
+fn ik_label(label: IKLabel) -> &'static str {
+    match label {
+        IKLabel::Critical => "critical",
+        IKLabel::Safe => "safe",
+        IKLabel::Abstain => "abstain",
+    }
+}
+
+fn family_policy_label(policy: FamilyStructurePolicy) -> &'static str {
+    match policy {
+        FamilyStructurePolicy::Any => "any",
+        FamilyStructurePolicy::All => "all",
+        FamilyStructurePolicy::Majority => "majority",
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn config_validation() {
@@ -734,5 +868,73 @@ mod tests {
         assert!(aggregation.observation_gate);
         assert_eq!(aggregation.label, IKLabel::Critical);
         assert!(aggregation.confidence >= 1.0 - trainer.config().alpha);
+    }
+
+    #[test]
+    fn sync_step_and_family_emit_backend_meta() {
+        let _lock = crate::telemetry::tensor_observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let config = SyncConfig::new(0.5, 0.1, 0.0, 1.0, 0)
+            .unwrap()
+            .with_azuma_c(0.25)
+            .unwrap();
+        let mut trainer = SyncTheoremTrainer::new(config).unwrap();
+        let step = trainer
+            .step(
+                &[0.5, 0.05, 0.5],
+                Some(&[0.0, 0.0, 0.0]),
+                Some(&[1.0, 1.0, 1.0]),
+            )
+            .unwrap();
+        let family = trainer
+            .aggregate_family(&step, FamilyStructurePolicy::Any)
+            .unwrap();
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert_eq!(step.labels[0], IKLabel::Critical);
+        assert_eq!(family.label, IKLabel::Critical);
+        let events = events.lock().unwrap();
+        let step_meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "sync_theorem_step"
+                    && data["batch"] == 3
+                    && data["critical_labels"] == 2
+            })
+            .expect("sync_theorem_step metadata event");
+        assert_eq!(step_meta.1["backend"], "cpu");
+        assert_eq!(step_meta.1["kind"], "st_core_sync_theorem_step");
+        assert_eq!(step_meta.1["structure_open"], 2);
+        assert_eq!(step_meta.1["observation_open"], 2);
+        assert_eq!(step_meta.1["safe_labels"], 0);
+        assert_eq!(step_meta.1["abstain_labels"], 1);
+        assert!(step_meta.1["has_azuma_c"].as_bool().unwrap_or(false));
+        assert!(step_meta.1["confidence_max"].as_f64().unwrap_or(0.0) > 0.0);
+
+        let family_meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "sync_family_aggregation"
+                    && data["policy"] == "any"
+                    && data["label"] == "critical"
+            })
+            .expect("sync_family_aggregation metadata event");
+        assert_eq!(family_meta.1["kind"], "st_core_sync_family_aggregation");
+        assert_eq!(family_meta.1["pair_count"], 3);
+        assert!(family_meta.1["structure_gate"].as_bool().unwrap_or(false));
+        assert!(family_meta.1["observation_gate"].as_bool().unwrap_or(false));
+        assert!(family_meta.1["has_dominant_pair"]
+            .as_bool()
+            .unwrap_or(false));
+        assert!(family_meta.1["dominant_pair"].as_u64().unwrap_or(u64::MAX) < 3);
+        assert!(family_meta.1["dominant_log_e"].as_f64().unwrap_or(0.0) > 0.0);
     }
 }

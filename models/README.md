@@ -14,6 +14,8 @@ copy-pastable models that act as reference implementations for both Python and R
 - Demo corpus folder: `models/samples/spiral_corpus_en/` (multiple `.txt` files)
 - Run outputs: `models/runs/<timestamp>/` (e.g. `run.json`, `metrics.jsonl`, `samples/`, `weights.json` / `weights.bin`)
 - Rust char-LM examples also write `best_weights.json` plus `samples/best_epoch_*.txt` when validation improves; pass `--early-stop-patience N` to stop after N non-improving validation epochs.
+- Rust char-LM examples default to `--char-feature token-bigram`, adding a trainable previous-token/current-token embedding on top of the token embedding. Use `--char-feature token` for the older token-only input; older checkpoints without this metadata load as `token`.
+- Rust char-LM examples default to `--head-prior learned-unigram`, a trainable unigram-initialized logit bias. Use `--head-prior unigram` for the old fixed prior or `--head-prior none` to test the model without a frequency prior.
 - Rust char-LM coherence examples default to `--self-score-scale 0.0` so the scan context is not dominated by the query token matching itself; use `1.0` for legacy self-inclusive scans.
 - Coherence examples also expose `--query-residual-scale` (default `1.0` for new runs, `0.0` when loading older checkpoints without metadata) so the current token embedding can stay visible beside the Z-space context.
 - Python scripts accept `--backend cpu|wgpu|cuda|hip|auto`, `--events <path>`, `--atlas`, `--desire` (applies offsets during sampling), and `--softlogic-*` tuning flags (captured in `run.json`).
@@ -38,6 +40,8 @@ copy-pastable models that act as reference implementations for both Python and R
 - Rust (LLM char fine-tune): `cargo run -p st-nn --example modelzoo_llm_char_finetune -- <text.txt>`
 - Rust (LLM char coherence scan): `cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text.txt>`
 - Rust (LLM char coherence wave): `cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text.txt> [--infuse \"spiral\" --infuse-every batch --infuse-mode separate]`
+- Rust char-LM sweep smoke: `PYTHONNOUSERSITE=1 python3 -S -s tools/run_char_lm_sweep.py models/samples/spiral_corpus_en --preset smoke --architectures finetune --features token,token-bigram`
+- Rust char-LM sweep compare: `PYTHONNOUSERSITE=1 python3 -S -s tools/run_char_lm_sweep.py models/samples/spiral_corpus_en --preset small --architectures finetune,scan,wave --features token,token-bigram --head-priors learned-unigram --seeds 42,43`
 - Rust (GNN): `cargo run -p st-nn --example modelzoo_gnn_graph_regression`
 - Rust (Z-RBA telemetry): `cargo run -p st-nn --example modelzoo_zrba_telemetry`
 - Rust (Lightning + selfsup): `cargo run -p st-nn --example modelzoo_lightning_selfsup_minimal`

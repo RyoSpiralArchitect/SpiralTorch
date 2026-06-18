@@ -13,6 +13,7 @@
 //! pulling in async machinery.
 
 use rustc_hash::FxHashMap;
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 use std::{
     cmp::Ordering,
     collections::VecDeque,
@@ -703,6 +704,7 @@ impl ZConductor {
             latency.prepare(now, &mut events);
         }
 
+        let pending_before = self.pending.len();
         let mut ready = Vec::new();
         let mut retained = VecDeque::with_capacity(self.pending.len());
         while let Some(mut pulse) = self.pending.pop_front() {
@@ -828,6 +830,16 @@ impl ZConductor {
                 fused.density_fluctuation
             ));
         }
+        emit_zpulse_conductor_step_meta(
+            &self.cfg,
+            self.freq,
+            self.adaptive,
+            self.latency.as_ref(),
+            pending_before,
+            ready.len(),
+            self.pending.len(),
+            &fused,
+        );
         fused
     }
 
@@ -871,6 +883,194 @@ fn derive_quality(pulse: &ZPulse) -> f32 {
     let base = (0.4 * snr + 0.3 * support_norm + 0.3 * drift_norm).clamp(0.0, 1.0);
     let penalty = 1.0 - pulse.density_fluctuation.clamp(0.0, 1.0) * 0.2;
     (base * penalty).clamp(0.0, 1.0)
+}
+
+fn finite_meta_f32(value: f32) -> f64 {
+    if value.is_finite() {
+        value as f64
+    } else {
+        0.0
+    }
+}
+
+fn z_source_label(source: &ZSource) -> String {
+    match source {
+        ZSource::Microlocal => "microlocal".to_string(),
+        ZSource::Maxwell => "maxwell".to_string(),
+        ZSource::Graph => "graph".to_string(),
+        ZSource::Desire => "desire".to_string(),
+        ZSource::GW => "gw".to_string(),
+        ZSource::RealGrad => "realgrad".to_string(),
+        ZSource::Other(tag) => format!("other.{}", tag.to_ascii_lowercase()),
+    }
+}
+
+fn emit_zpulse_conductor_step_meta(
+    cfg: &ZConductorCfg,
+    freq: Option<ZFrequencyConfig>,
+    adaptive: Option<ZAdaptiveGainCfg>,
+    latency: Option<&LatencyAlignerState>,
+    pending_before: usize,
+    ready_count: usize,
+    retained_count: usize,
+    fused: &ZFused,
+) {
+    let latency_event_count = fused
+        .events
+        .iter()
+        .filter(|event| event.starts_with("latency."))
+        .count();
+    let flip_event_count = fused
+        .events
+        .iter()
+        .filter(|event| event.as_str() == "flip-held" || event.as_str() == "sign-flip")
+        .count();
+    let density_event_count = fused
+        .events
+        .iter()
+        .filter(|event| event.starts_with("density."))
+        .count();
+
+    let mut source_support = FxHashMap::<String, f32>::default();
+    let mut top_source = "none".to_string();
+    let mut top_support = 0.0f32;
+    for (source, support) in &fused.attributions {
+        let label = z_source_label(source);
+        let support = if support.is_finite() {
+            support.max(0.0)
+        } else {
+            0.0
+        };
+        *source_support.entry(label.clone()).or_insert(0.0) += support;
+        if support > top_support {
+            top_support = support;
+            top_source = label;
+        }
+    }
+
+    let latency_source_count = latency.map(|lat| lat.lags.len()).unwrap_or(0);
+    let (latency_abs_mean, latency_abs_max) = latency
+        .map(|lat| {
+            let mut total = 0.0f32;
+            let mut max = 0.0f32;
+            let mut count = 0usize;
+            for estimate in lat.lags.values() {
+                if estimate.lag.is_finite() {
+                    let abs = estimate.lag.abs();
+                    total += abs;
+                    max = max.max(abs);
+                    count += 1;
+                }
+            }
+            if count == 0 {
+                (0.0, 0.0)
+            } else {
+                (total / count as f32, max)
+            }
+        })
+        .unwrap_or((0.0, 0.0));
+
+    emit_tensor_op(
+        "zpulse_conductor_step",
+        &[pending_before, ready_count.max(1)],
+        &[1, fused.attributions.len().max(1)],
+    );
+    emit_tensor_op_meta("zpulse_conductor_step", || {
+        let mut payload = serde_json::Map::new();
+        payload.insert("backend".into(), "cpu".into());
+        payload.insert("requested_backend".into(), "auto".into());
+        payload.insert("kind".into(), "st_core_zpulse_conductor_step".into());
+        payload.insert("ts".into(), fused.ts.into());
+        payload.insert("pending_before".into(), pending_before.into());
+        payload.insert("ready_count".into(), ready_count.into());
+        payload.insert("retained_count".into(), retained_count.into());
+        payload.insert("event_count".into(), fused.events.len().into());
+        payload.insert("latency_event_count".into(), latency_event_count.into());
+        payload.insert("flip_event_count".into(), flip_event_count.into());
+        payload.insert("density_event_count".into(), density_event_count.into());
+        payload.insert("attribution_count".into(), fused.attributions.len().into());
+        payload.insert("top_source".into(), top_source.into());
+        payload.insert(
+            "top_source_support".into(),
+            finite_meta_f32(top_support).into(),
+        );
+        payload.insert(
+            "source_microlocal_support".into(),
+            finite_meta_f32(*source_support.get("microlocal").unwrap_or(&0.0)).into(),
+        );
+        payload.insert(
+            "source_maxwell_support".into(),
+            finite_meta_f32(*source_support.get("maxwell").unwrap_or(&0.0)).into(),
+        );
+        payload.insert(
+            "source_graph_support".into(),
+            finite_meta_f32(*source_support.get("graph").unwrap_or(&0.0)).into(),
+        );
+        payload.insert(
+            "source_desire_support".into(),
+            finite_meta_f32(*source_support.get("desire").unwrap_or(&0.0)).into(),
+        );
+        payload.insert(
+            "source_gw_support".into(),
+            finite_meta_f32(*source_support.get("gw").unwrap_or(&0.0)).into(),
+        );
+        payload.insert(
+            "source_realgrad_support".into(),
+            finite_meta_f32(*source_support.get("realgrad").unwrap_or(&0.0)).into(),
+        );
+        payload.insert("z".into(), finite_meta_f32(fused.z).into());
+        payload.insert("abs_z".into(), finite_meta_f32(fused.z.abs()).into());
+        payload.insert("support".into(), finite_meta_f32(fused.support).into());
+        payload.insert("drift".into(), finite_meta_f32(fused.drift).into());
+        payload.insert("quality".into(), finite_meta_f32(fused.quality).into());
+        payload.insert(
+            "density_fluctuation".into(),
+            finite_meta_f32(fused.density_fluctuation).into(),
+        );
+        payload.insert("alpha_fast".into(), finite_meta_f32(cfg.alpha_fast).into());
+        payload.insert("alpha_slow".into(), finite_meta_f32(cfg.alpha_slow).into());
+        payload.insert("flip_hold".into(), cfg.flip_hold.into());
+        payload.insert("slew_max".into(), finite_meta_f32(cfg.slew_max).into());
+        payload.insert("z_budget".into(), finite_meta_f32(cfg.z_budget).into());
+        payload.insert(
+            "robust_delta".into(),
+            finite_meta_f32(cfg.robust_delta).into(),
+        );
+        payload.insert("latency_align".into(), cfg.latency_align.into());
+        payload.insert("latency_configured".into(), latency.is_some().into());
+        payload.insert("latency_source_count".into(), latency_source_count.into());
+        payload.insert(
+            "latency_abs_mean".into(),
+            finite_meta_f32(latency_abs_mean).into(),
+        );
+        payload.insert(
+            "latency_abs_max".into(),
+            finite_meta_f32(latency_abs_max).into(),
+        );
+        payload.insert("frequency_configured".into(), freq.is_some().into());
+        payload.insert(
+            "frequency_smoothing".into(),
+            finite_meta_f32(freq.map(|cfg| cfg.smoothing).unwrap_or(0.0)).into(),
+        );
+        payload.insert(
+            "frequency_minimum_energy".into(),
+            finite_meta_f32(freq.map(|cfg| cfg.minimum_energy).unwrap_or(0.0)).into(),
+        );
+        payload.insert("adaptive_configured".into(), adaptive.is_some().into());
+        payload.insert(
+            "adaptive_gain_floor".into(),
+            finite_meta_f32(adaptive.map(|cfg| cfg.gain_floor).unwrap_or(0.0)).into(),
+        );
+        payload.insert(
+            "adaptive_gain_ceil".into(),
+            finite_meta_f32(adaptive.map(|cfg| cfg.gain_ceil).unwrap_or(0.0)).into(),
+        );
+        payload.insert(
+            "adaptive_responsiveness".into(),
+            finite_meta_f32(adaptive.map(|cfg| cfg.responsiveness).unwrap_or(0.0)).into(),
+        );
+        payload.into()
+    });
 }
 
 /// Registry used to poll multiple emitters and return their pending pulses.
@@ -953,6 +1153,7 @@ impl ZEmitter for DesireEmitter {
 #[cfg(test)]
 mod conductor_tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
 
     fn pulse(source: ZSource, ts: u64, drift: f32, quality: f32) -> ZPulse {
         let support = ZSupport {
@@ -1017,6 +1218,62 @@ mod conductor_tests {
         let fused = conductor.step(0);
         assert!(fused.support > 0.0);
         assert!(fused.drift.abs() <= 1.0);
+    }
+
+    #[test]
+    fn conductor_step_emits_backend_meta() {
+        let _lock = crate::telemetry::tensor_observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let mut conductor = ZConductor::new(ZConductorCfg {
+            alpha_fast: 1.0,
+            alpha_slow: 1.0,
+            ..Default::default()
+        });
+        conductor.set_frequency_config(Some(ZFrequencyConfig::new(0.25, 0.1)));
+        conductor.set_adaptive_gain_config(Some(ZAdaptiveGainCfg::new(0.2, 1.4, 0.75)));
+        conductor.ingest(pulse(ZSource::Microlocal, 10, 0.4, 1.0));
+        conductor.ingest(pulse(ZSource::Maxwell, 10, 0.8, 0.9));
+        let fused = conductor.step(10);
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert!(fused.support > 0.0);
+        assert!(fused.z > 0.0);
+
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "zpulse_conductor_step"
+                    && data["kind"] == "st_core_zpulse_conductor_step"
+                    && data["ts"] == 10
+                    && data["pending_before"] == 2
+            })
+            .expect("zpulse_conductor_step metadata event");
+        assert_eq!(meta.1["backend"], "cpu");
+        assert_eq!(meta.1["requested_backend"], "auto");
+        assert_eq!(meta.1["ts"], 10);
+        assert_eq!(meta.1["pending_before"], 2);
+        assert_eq!(meta.1["ready_count"], 2);
+        assert_eq!(meta.1["retained_count"], 0);
+        assert_eq!(meta.1["attribution_count"], 2);
+        assert_eq!(meta.1["top_source"], "maxwell");
+        assert!(meta.1["source_microlocal_support"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["source_maxwell_support"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["support"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["z"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["quality"].as_f64().unwrap_or(0.0) > 0.0);
+        assert_eq!(meta.1["frequency_configured"], true);
+        assert_eq!(meta.1["adaptive_configured"], true);
+        assert_eq!(meta.1["latency_configured"], true);
+        assert!(meta.1["latency_source_count"].as_u64().unwrap_or(0) > 0);
     }
 
     #[test]
