@@ -18,12 +18,77 @@ def _ensure_torch_stub() -> None:
 
 def _write_trace(path: Path, *, scale: float = 1.0) -> None:
     payload = {
+        "run": {"backend": "cpu", "nodes": 4, "features": 2},
         "trainer": {"batches": 1, "average_loss": 0.125 * scale},
         "signal": {
             "above": 0.8,
             "here": 0.4,
             "beneath": 0.2,
             "drift": 0.1,
+        },
+        "readout": {
+            "prediction_shape": [2, 2],
+            "trace": {
+                "readout": "mean",
+                "graph_count": 2,
+                "total_rows": 8,
+                "output_shape": [2, 2],
+                "entries": [
+                    {
+                        "graph_index": 0,
+                        "row_start": 0,
+                        "row_end": 4,
+                        "node_l2": 0.25 * scale,
+                        "prediction_l2": 0.1 * scale,
+                    },
+                    {
+                        "graph_index": 1,
+                        "row_start": 4,
+                        "row_end": 8,
+                        "node_l2": 0.5 * scale,
+                        "prediction_l2": 0.2 * scale,
+                    },
+                ],
+            },
+            "error": {
+                "graph_count": 2,
+                "output_shape": [2, 2],
+                "mean_squared_error": 0.05 * scale,
+                "entries": [
+                    {
+                        "graph_index": 0,
+                        "prediction_l2": 0.1 * scale,
+                        "target_l2": 0.3 * scale,
+                        "residual_l2": 0.2 * scale,
+                        "mean_squared_error": 0.04 * scale,
+                    },
+                    {
+                        "graph_index": 1,
+                        "prediction_l2": 0.2 * scale,
+                        "target_l2": 0.4 * scale,
+                        "residual_l2": 0.3 * scale,
+                        "mean_squared_error": 0.06 * scale,
+                    },
+                ],
+            },
+        },
+        "validation_readout": {
+            "batch_count": 2,
+            "graph_count": 4,
+            "total_rows": 16,
+            "mean_squared_error": 0.075 * scale,
+            "batches": [
+                {
+                    "batch_index": 0,
+                    "trace": {"graph_count": 2, "total_rows": 8},
+                    "error": {"graph_count": 2, "mean_squared_error": 0.05 * scale},
+                },
+                {
+                    "batch_index": 1,
+                    "trace": {"graph_count": 2, "total_rows": 8},
+                    "error": {"graph_count": 2, "mean_squared_error": 0.10 * scale},
+                },
+            ],
         },
         "band_replays": {
             "above": [
@@ -79,7 +144,18 @@ def test_summarize_gnn_band_replays_collects_band_coefficients(tmp_path) -> None
     summary = st.summarize_gnn_band_replays(payload)
 
     assert summary["count"] == 3
+    assert summary["run"]["backend"] == "cpu"
     assert summary["trainer"]["average_loss"] == pytest.approx(0.125)
+    assert summary["readout"]["trace"]["graph_count"] == 2
+    assert summary["readout"]["trace"]["entries"][0]["row_start"] == 0
+    assert summary["readout"]["trace"]["entries"][1]["row_end"] == 8
+    assert summary["readout"]["error"]["mean_squared_error"] == pytest.approx(0.05)
+    assert summary["readout"]["error"]["entries"][1]["mean_squared_error"] == pytest.approx(
+        0.06
+    )
+    assert summary["validation_readout"]["graph_count"] == 4
+    assert summary["validation_readout"]["total_rows"] == 16
+    assert summary["validation_readout"]["mean_squared_error"] == pytest.approx(0.075)
     above = summary["bands"]["above"]
     assert above["count"] == 2
     assert above["layers"] == [

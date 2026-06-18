@@ -60,6 +60,17 @@ pub fn set_tensor_op_meta_observer(
     std::mem::replace(&mut *slot, observer)
 }
 
+/// Returns whether a tensor operation metadata observer is currently installed.
+///
+/// This lets hot paths skip expensive metadata precomputation while preserving
+/// the allocation-free default path used by [`emit_tensor_op_meta`].
+pub fn tensor_op_meta_observer_installed() -> bool {
+    TENSOR_OP_META_OBSERVER
+        .get()
+        .and_then(|lock| lock.read().unwrap().as_ref().map(|_| ()))
+        .is_some()
+}
+
 /// Emit an operation event to the currently installed observer.
 ///
 /// This is a no-op unless an observer has been registered via

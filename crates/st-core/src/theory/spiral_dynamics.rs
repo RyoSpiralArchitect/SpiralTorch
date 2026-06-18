@@ -34,6 +34,7 @@
 //! re-deriving the algebra in ad-hoc scripts.
 
 use core::f64;
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 
 /// Stable logistic helper that avoids overflow for large magnitudes.
 #[inline]
@@ -489,11 +490,156 @@ pub fn psi_spiral_metrics(
     let dimensionless =
         dimensionless_parameters(mu0, gamma, omega, nu, kappa, a, tau, sigma_s, rho, lambda)?;
     let balance = audit_container_balance(kappa, a, tau, sigma_s, rho, lambda)?;
-    Some(PsiSpiralMetrics {
+    let metrics = PsiSpiralMetrics {
         hopf,
         dimensionless,
         balance,
-    })
+    };
+    emit_psi_spiral_metrics_meta(
+        mu0, gamma, omega, nu, kappa, a, tau, theta, sigma_s, rho, lambda, c_max, &metrics,
+    );
+    Some(metrics)
+}
+
+fn finite_meta_f64(value: f64) -> f64 {
+    if value.is_finite() {
+        value
+    } else {
+        0.0
+    }
+}
+
+fn hopf_regime_label(regime: HopfRegime) -> &'static str {
+    match regime {
+        HopfRegime::Supercritical => "supercritical",
+        HopfRegime::Subcritical => "subcritical",
+        HopfRegime::Degenerate => "degenerate",
+    }
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Metadata mirrors the full spiral dynamics stability tuple"
+)]
+fn emit_psi_spiral_metrics_meta(
+    mu0: f64,
+    gamma: f64,
+    omega: f64,
+    nu: f64,
+    kappa: f64,
+    a: f64,
+    tau: f64,
+    theta: f64,
+    sigma_s: f64,
+    rho: f64,
+    lambda: f64,
+    c_max: f64,
+    metrics: &PsiSpiralMetrics,
+) {
+    let hard_barrier = hard_barrier_max_c(mu0, gamma);
+    let hard_barrier_satisfied = hard_barrier_satisfied(mu0, gamma, c_max);
+    let soft_mu_eff_zero = soft_barrier_mu_eff(mu0, gamma, c_max, 0.0, 0.0);
+    let noise_bound = ito_mean_square_bound(metrics.hopf.mu_eff0, nu, 0.0);
+
+    emit_tensor_op("psi_spiral_metrics", &[1, 12], &[1, 16]);
+    emit_tensor_op_meta("psi_spiral_metrics", || {
+        let mut payload = serde_json::Map::new();
+        payload.insert("backend".into(), "cpu".into());
+        payload.insert("requested_backend".into(), "auto".into());
+        payload.insert("kind".into(), "st_core_psi_spiral_metrics".into());
+        payload.insert("mu0".into(), finite_meta_f64(mu0).into());
+        payload.insert("gamma".into(), finite_meta_f64(gamma).into());
+        payload.insert("omega".into(), finite_meta_f64(omega).into());
+        payload.insert("nu".into(), finite_meta_f64(nu).into());
+        payload.insert("kappa".into(), finite_meta_f64(kappa).into());
+        payload.insert("audit_a".into(), finite_meta_f64(a).into());
+        payload.insert("tau".into(), finite_meta_f64(tau).into());
+        payload.insert("theta".into(), finite_meta_f64(theta).into());
+        payload.insert("sigma_s".into(), finite_meta_f64(sigma_s).into());
+        payload.insert("rho".into(), finite_meta_f64(rho).into());
+        payload.insert("lambda".into(), finite_meta_f64(lambda).into());
+        payload.insert("c_max".into(), finite_meta_f64(c_max).into());
+        payload.insert(
+            "hopf_regime".into(),
+            hopf_regime_label(metrics.hopf.regime).into(),
+        );
+        payload.insert(
+            "hopf_mu_eff0".into(),
+            finite_meta_f64(metrics.hopf.mu_eff0).into(),
+        );
+        payload.insert(
+            "hopf_alpha3".into(),
+            finite_meta_f64(metrics.hopf.alpha3).into(),
+        );
+        payload.insert(
+            "hopf_center_manifold_c".into(),
+            finite_meta_f64(metrics.hopf.center_manifold_c).into(),
+        );
+        payload.insert(
+            "forcing_value".into(),
+            finite_meta_f64(metrics.hopf.forcing.value).into(),
+        );
+        payload.insert(
+            "forcing_du".into(),
+            finite_meta_f64(metrics.hopf.forcing.du).into(),
+        );
+        payload.insert(
+            "forcing_ds".into(),
+            finite_meta_f64(metrics.hopf.forcing.ds).into(),
+        );
+        payload.insert(
+            "audit_gain".into(),
+            finite_meta_f64(metrics.balance.audit_gain).into(),
+        );
+        payload.insert(
+            "container_gain".into(),
+            finite_meta_f64(metrics.balance.container_gain).into(),
+        );
+        payload.insert(
+            "balance_difference".into(),
+            finite_meta_f64(metrics.balance.difference).into(),
+        );
+        payload.insert(
+            "mu_bar".into(),
+            finite_meta_f64(metrics.dimensionless.mu_bar).into(),
+        );
+        payload.insert(
+            "gamma_bar".into(),
+            finite_meta_f64(metrics.dimensionless.gamma_bar).into(),
+        );
+        payload.insert(
+            "omega_bar".into(),
+            finite_meta_f64(metrics.dimensionless.omega_bar).into(),
+        );
+        payload.insert(
+            "audit_cluster".into(),
+            finite_meta_f64(metrics.dimensionless.audit_cluster).into(),
+        );
+        payload.insert(
+            "container_cluster".into(),
+            finite_meta_f64(metrics.dimensionless.container_cluster).into(),
+        );
+        payload.insert("has_hard_barrier".into(), hard_barrier.is_some().into());
+        payload.insert(
+            "hard_barrier_max_c".into(),
+            finite_meta_f64(hard_barrier.unwrap_or(0.0)).into(),
+        );
+        payload.insert(
+            "hard_barrier_satisfied".into(),
+            hard_barrier_satisfied.into(),
+        );
+        payload.insert(
+            "soft_mu_eff_zero".into(),
+            finite_meta_f64(soft_mu_eff_zero).into(),
+        );
+        payload.insert("stable_origin".into(), (metrics.hopf.mu_eff0 <= 0.0).into());
+        payload.insert("has_noise_free_bound".into(), noise_bound.is_some().into());
+        payload.insert(
+            "noise_free_bound".into(),
+            finite_meta_f64(noise_bound.unwrap_or(0.0)).into(),
+        );
+        payload.into()
+    });
 }
 
 /// Gershgorin lower bound on the contraction rate ε of the C-system.
@@ -529,6 +675,7 @@ pub fn contraction_with_cubic(eps_lin: f64, nu: f64, radius: f64) -> f64 {
 mod tests {
     use super::*;
     use approx::assert_abs_diff_eq;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn hard_barrier_bounds_match_design() {
@@ -655,5 +802,47 @@ mod tests {
         let ratio = params.container_cluster / params.audit_cluster;
         let expected_ratio = (0.4 * 0.5 * 1.1) / (0.6 * 0.7 * 1.3);
         assert_abs_diff_eq!(ratio, expected_ratio, epsilon = 1e-12);
+    }
+
+    #[test]
+    fn psi_spiral_metrics_emits_backend_meta() {
+        let _lock = crate::telemetry::tensor_observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let metrics =
+            psi_spiral_metrics(-0.1, 0.5, 1.2, 0.8, 0.6, 0.7, 1.2, 0.2, 0.3, 0.5, 1.1, 0.4)
+                .expect("metrics");
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert!(matches!(metrics.hopf.regime, HopfRegime::Supercritical));
+        assert!(metrics.hopf.mu_eff0 < 0.0);
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "psi_spiral_metrics"
+                    && data["kind"] == "st_core_psi_spiral_metrics"
+                    && data["c_max"] == 0.4
+            })
+            .expect("psi_spiral_metrics metadata event");
+        assert_eq!(meta.1["backend"], "cpu");
+        assert_eq!(meta.1["requested_backend"], "auto");
+        assert_eq!(meta.1["hopf_regime"], "supercritical");
+        assert_eq!(meta.1["stable_origin"], true);
+        assert_eq!(meta.1["hard_barrier_satisfied"], false);
+        assert!(meta.1["forcing_value"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["forcing_du"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["audit_gain"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["container_gain"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["balance_difference"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["audit_cluster"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["container_cluster"].as_f64().unwrap_or(0.0) > 0.0);
     }
 }

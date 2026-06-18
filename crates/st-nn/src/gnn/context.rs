@@ -3,6 +3,7 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+use crate::execution::{current_matmul_backend, current_tensor_util_backend_for_values};
 use crate::{PureResult, Tensor, TensorError};
 use st_core::telemetry::xai::NodeFlowSample;
 
@@ -63,7 +64,8 @@ impl GraphContext {
     /// Propagates features across the normalised adjacency matrix.
     pub fn propagate(&self, features: &Tensor) -> PureResult<Tensor> {
         self.validate_features(features)?;
-        self.norm_adjacency.matmul(features)
+        self.norm_adjacency
+            .matmul_with_backend(features, current_matmul_backend())
     }
 
     /// Propagates features while emitting explainability artefacts.
@@ -84,7 +86,8 @@ impl GraphContext {
                 right: (self.node_count(), features.shape().1),
             });
         }
-        self.norm_adjacency_t.matmul(features)
+        self.norm_adjacency_t
+            .matmul_with_backend(features, current_matmul_backend())
     }
 
     /// Computes explainability-friendly flow summaries for the provided features.
@@ -245,7 +248,8 @@ impl GraphContext {
         }
 
         let norm_adjacency = Tensor::from_vec(rows, cols, normalised)?;
-        let norm_adjacency_t = norm_adjacency.transpose();
+        let transpose_backend = current_tensor_util_backend_for_values(rows.saturating_mul(cols));
+        let norm_adjacency_t = norm_adjacency.transpose_with_backend(transpose_backend)?;
         let mut row_sums = vec![0.0f32; rows];
         let data = norm_adjacency.data();
         for (r, row_sum) in row_sums.iter_mut().enumerate() {
@@ -265,6 +269,15 @@ impl GraphContext {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
+        static OBSERVER_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        OBSERVER_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("observer lock available")
+    }
 
     #[test]
     fn context_normalises_adjacency() {
@@ -277,6 +290,34 @@ mod tests {
         assert_eq!(data.len(), 2);
         assert!(data[0] > 0.0);
         assert!(data[1] > 0.0);
+    }
+
+    #[test]
+    fn context_build_routes_cached_transpose_through_tensor_util_backend() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let adjacency = Tensor::from_vec(2, 2, vec![0.0, 1.0, 1.0, 0.0]).unwrap();
+        let context = GraphContext::from_adjacency(adjacency).unwrap();
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert_eq!(context.node_count(), 2);
+        let events = events.lock().unwrap();
+        let transpose = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "transpose" && data["rows"] == 2 && data["cols"] == 2
+            })
+            .expect("cached adjacency transpose metadata event");
+        assert_eq!(transpose.1["kind"], "layout");
+        assert_eq!(transpose.1["requested_backend"], "auto");
     }
 
     #[test]

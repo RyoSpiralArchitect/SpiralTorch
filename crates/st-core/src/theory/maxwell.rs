@@ -34,6 +34,7 @@ use core::f64::consts::PI;
 
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 
 #[cfg(feature = "psi")]
 use crate::telemetry::{
@@ -489,14 +490,19 @@ impl MaxwellZProjector {
     /// Projects the accumulated sequential statistic into a control pulse.
     pub fn project(&self, tracker: &SequentialZ) -> Option<MaxwellZPulse> {
         if tracker.len() < self.min_blocks {
+            emit_maxwell_z_project_meta(self, tracker, None, "min_blocks");
             return None;
         }
-        let z_score = tracker.z_stat()?;
-        if z_score.abs() < self.min_z_magnitude {
+        let Some(stderr) = tracker.standard_error() else {
+            emit_maxwell_z_project_meta(self, tracker, None, "undefined_stderr");
             return None;
-        }
-        let stderr = tracker.standard_error()?;
+        };
         let mean = tracker.mean();
+        let z_score = mean / stderr;
+        if z_score.abs() < self.min_z_magnitude {
+            emit_maxwell_z_project_meta(self, tracker, None, "min_z");
+            return None;
+        }
 
         let enriched = self.projector.enrich(z_score.abs()) as f32;
         let z_bias = if enriched > f32::EPSILON && self.bias_gain.abs() > f32::EPSILON {
@@ -518,6 +524,7 @@ impl MaxwellZProjector {
             z_bias,
         };
         self.last_pulse.replace(Some(pulse.clone()));
+        emit_maxwell_z_project_meta(self, tracker, Some(&pulse), "emitted");
         Some(pulse)
     }
 
@@ -624,6 +631,107 @@ impl CoopAgent for MaxwellZProjector {
     }
 }
 
+fn finite_f64(value: f64) -> f64 {
+    if value.is_finite() {
+        value
+    } else {
+        0.0
+    }
+}
+
+fn finite_f32(value: f32) -> f64 {
+    if value.is_finite() {
+        value as f64
+    } else {
+        0.0
+    }
+}
+
+fn maxwell_band_total(band: (f32, f32, f32)) -> f32 {
+    let total = band.0.max(0.0) + band.1.max(0.0) + band.2.max(0.0);
+    if total.is_finite() {
+        total
+    } else {
+        0.0
+    }
+}
+
+fn maxwell_zpulse_quality(pulse: &MaxwellZPulse) -> f32 {
+    let stderr = pulse.standard_error.max(0.0) as f32;
+    let snr = if stderr > 0.0 {
+        (1.0 / stderr).min(1.0)
+    } else {
+        1.0
+    };
+    (pulse.z_score.abs() as f32).tanh() * snr
+}
+
+fn emit_maxwell_z_project_meta(
+    projector: &MaxwellZProjector,
+    tracker: &SequentialZ,
+    pulse: Option<&MaxwellZPulse>,
+    gate_reason: &'static str,
+) {
+    let blocks = tracker.len();
+    let variance = tracker.variance();
+    let standard_error = tracker.standard_error();
+    let z_score = standard_error.map(|stderr| tracker.mean() / stderr);
+    let band = pulse.map(|pulse| pulse.band_energy).unwrap_or_default();
+    let emitted = pulse.is_some();
+    let band_total = maxwell_band_total(band);
+
+    emit_tensor_op("maxwell_z_project", &[blocks as usize], &[1, 8]);
+    emit_tensor_op_meta("maxwell_z_project", || {
+        let mut payload = serde_json::Map::new();
+        payload.insert("backend".into(), "cpu".into());
+        payload.insert("requested_backend".into(), "auto".into());
+        payload.insert("kind".into(), "st_core_maxwell_z_project".into());
+        payload.insert("emitted".into(), emitted.into());
+        payload.insert("gate_reason".into(), gate_reason.into());
+        payload.insert("blocks".into(), blocks.into());
+        payload.insert("min_blocks".into(), projector.min_blocks.into());
+        payload.insert(
+            "min_z_magnitude".into(),
+            finite_f64(projector.min_z_magnitude).into(),
+        );
+        payload.insert("bias_gain".into(), finite_f32(projector.bias_gain).into());
+        payload.insert("mean".into(), finite_f64(tracker.mean()).into());
+        payload.insert("has_variance".into(), variance.is_some().into());
+        payload.insert(
+            "variance".into(),
+            finite_f64(variance.unwrap_or(0.0)).into(),
+        );
+        payload.insert("has_standard_error".into(), standard_error.is_some().into());
+        payload.insert(
+            "standard_error".into(),
+            finite_f64(standard_error.unwrap_or(0.0)).into(),
+        );
+        payload.insert("has_z_score".into(), z_score.is_some().into());
+        payload.insert("z_score".into(), finite_f64(z_score.unwrap_or(0.0)).into());
+        payload.insert(
+            "z_magnitude".into(),
+            finite_f64(z_score.map(f64::abs).unwrap_or(0.0)).into(),
+        );
+        payload.insert("band_above".into(), finite_f32(band.0).into());
+        payload.insert("band_here".into(), finite_f32(band.1).into());
+        payload.insert("band_beneath".into(), finite_f32(band.2).into());
+        payload.insert("band_total".into(), finite_f32(band_total).into());
+        payload.insert(
+            "density_fluctuation".into(),
+            finite_f32(ZPulse::density_fluctuation_for(band)).into(),
+        );
+        payload.insert(
+            "z_bias".into(),
+            finite_f32(pulse.map(|pulse| pulse.z_bias).unwrap_or(0.0)).into(),
+        );
+        payload.insert(
+            "quality".into(),
+            finite_f32(pulse.map(maxwell_zpulse_quality).unwrap_or(0.0)).into(),
+        );
+        payload.into()
+    });
+}
+
 #[cfg(feature = "psi")]
 /// Publishes Maxwell pulses into the PSI telemetry bridge so the desire
 /// lagrangian can observe coded-envelope bias without bespoke glue code.
@@ -675,6 +783,7 @@ impl MaxwellPsiTelemetryBridge {
     /// Publishes the telemetry and returns the generated PSI reading alongside any events.
     pub fn publish_with_reading(&self, pulse: &MaxwellZPulse, step: u64) -> PublishedPsiTelemetry {
         let (reading, events, feedback) = self.synthesise_feedback(pulse, step);
+        emit_maxwell_psi_publish_meta(self, pulse, step, &reading, &events, &feedback);
         hub::set_last_psi(&reading);
         hub::set_last_psi_events(&events);
         hub::set_softlogic_z(feedback.clone());
@@ -743,6 +852,78 @@ impl MaxwellPsiTelemetryBridge {
 
         (reading, events, feedback)
     }
+}
+
+#[cfg(feature = "psi")]
+fn emit_maxwell_psi_publish_meta(
+    bridge: &MaxwellPsiTelemetryBridge,
+    pulse: &MaxwellZPulse,
+    step: u64,
+    reading: &PsiReading,
+    events: &[PsiEvent],
+    feedback: &SoftlogicZFeedback,
+) {
+    let band_total = maxwell_band_total(pulse.band_energy);
+    emit_tensor_op(
+        "maxwell_psi_publish",
+        &[pulse.blocks as usize],
+        &[events.len().max(1), 4],
+    );
+    emit_tensor_op_meta("maxwell_psi_publish", || {
+        let mut payload = serde_json::Map::new();
+        payload.insert("backend".into(), "cpu".into());
+        payload.insert("requested_backend".into(), "auto".into());
+        payload.insert("kind".into(), "st_core_maxwell_psi_publish".into());
+        payload.insert("step".into(), step.into());
+        payload.insert("blocks".into(), pulse.blocks.into());
+        payload.insert("mean".into(), finite_f64(pulse.mean).into());
+        payload.insert(
+            "standard_error".into(),
+            finite_f64(pulse.standard_error).into(),
+        );
+        payload.insert("z_score".into(), finite_f64(pulse.z_score).into());
+        payload.insert("z_magnitude".into(), finite_f64(pulse.magnitude()).into());
+        payload.insert("z_bias".into(), finite_f32(pulse.z_bias).into());
+        payload.insert("band_above".into(), finite_f32(pulse.band_energy.0).into());
+        payload.insert("band_here".into(), finite_f32(pulse.band_energy.1).into());
+        payload.insert(
+            "band_beneath".into(),
+            finite_f32(pulse.band_energy.2).into(),
+        );
+        payload.insert("band_total".into(), finite_f32(band_total).into());
+        payload.insert("psi_gain".into(), finite_f32(bridge.psi_gain).into());
+        payload.insert("loss_gain".into(), finite_f32(bridge.loss_gain).into());
+        payload.insert(
+            "band_threshold".into(),
+            finite_f32(bridge.band_threshold).into(),
+        );
+        payload.insert(
+            "threshold_crossed".into(),
+            (bridge.band_threshold > 0.0 && band_total >= bridge.band_threshold).into(),
+        );
+        payload.insert("event_count".into(), events.len().into());
+        payload.insert("reading_total".into(), finite_f32(reading.total).into());
+        payload.insert("reading_components".into(), reading.breakdown.len().into());
+        payload.insert(
+            "feedback_psi_total".into(),
+            finite_f32(feedback.psi_total).into(),
+        );
+        payload.insert(
+            "feedback_weighted_loss".into(),
+            finite_f32(feedback.weighted_loss).into(),
+        );
+        payload.insert(
+            "feedback_z_signal".into(),
+            finite_f32(feedback.z_signal).into(),
+        );
+        payload.insert("feedback_drift".into(), finite_f32(feedback.drift).into());
+        payload.insert("feedback_event_count".into(), feedback.events.len().into());
+        payload.insert(
+            "feedback_attribution_count".into(),
+            feedback.attributions.len().into(),
+        );
+        payload.into()
+    });
 }
 
 #[cfg(feature = "psi")]
@@ -986,6 +1167,7 @@ pub fn polarisation_slope(fingerprint: &MaxwellFingerprint, samples: usize) -> f
 mod tests {
     use super::*;
     use approx::{assert_abs_diff_eq, assert_relative_eq};
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn maxwell_fingerprint_computes_lambda() {
@@ -1098,6 +1280,68 @@ mod tests {
     }
 
     #[test]
+    fn maxwell_projector_emits_backend_meta() {
+        let _lock = crate::telemetry::tensor_observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let projector = MaxwellZProjector::new(24, 0.5)
+            .with_bias_gain(2.0)
+            .with_min_blocks(3)
+            .with_min_z(0.5);
+        let mut too_short = SequentialZ::new();
+        too_short.push(1.0);
+        assert!(projector.project(&too_short).is_none());
+
+        let mut tracker = SequentialZ::new();
+        for sample in [1.1, 0.9, 1.3, 0.8, 1.4, 1.2] {
+            tracker.push(sample);
+        }
+        let pulse = projector
+            .project(&tracker)
+            .expect("pulse should be emitted");
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert!(pulse.z_bias.abs() > 0.0);
+        let events = events.lock().unwrap();
+        let gated = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "maxwell_z_project"
+                    && data["kind"] == "st_core_maxwell_z_project"
+                    && data["gate_reason"] == "min_blocks"
+            })
+            .expect("maxwell_z_project min_blocks metadata event");
+        assert_eq!(gated.1["backend"], "cpu");
+        assert_eq!(gated.1["requested_backend"], "auto");
+        assert_eq!(gated.1["emitted"], false);
+        assert_eq!(gated.1["blocks"], 1);
+        assert_eq!(gated.1["min_blocks"], 3);
+
+        let emitted = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "maxwell_z_project"
+                    && data["kind"] == "st_core_maxwell_z_project"
+                    && data["gate_reason"] == "emitted"
+            })
+            .expect("maxwell_z_project emitted metadata event");
+        assert_eq!(emitted.1["emitted"], true);
+        assert_eq!(emitted.1["blocks"], 6);
+        assert!(emitted.1["z_magnitude"].as_f64().unwrap_or(0.0) >= 0.5);
+        assert!(emitted.1["standard_error"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(emitted.1["band_total"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(emitted.1["z_bias"].as_f64().unwrap_or(0.0).abs() > 0.0);
+        assert!(emitted.1["quality"].as_f64().unwrap_or(0.0) > 0.0);
+    }
+
+    #[test]
     fn maxwell_projector_coop_agent_adjusts_bias_gain() {
         let mut tracker = SequentialZ::new();
         for sample in [1.2, 0.95, 1.1, 0.88, 1.3, 1.05] {
@@ -1165,6 +1409,16 @@ mod tests {
         hub::clear_last_psi_events();
         hub::clear_softlogic_z();
 
+        let _observer_lock = crate::telemetry::tensor_observer_lock();
+        let meta_events = Arc::new(Mutex::new(Vec::new()));
+        let captured = meta_events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
         let (feedback, reading, events) = bridge.publish_with_reading(&pulse, 42).into_parts();
 
         let stored_feedback = hub::get_softlogic_z().expect("softlogic feedback");
@@ -1189,8 +1443,28 @@ mod tests {
         assert_eq!(stored_events.len(), events.len());
 
         let legacy_feedback = bridge.publish(&pulse, 42);
+        st_tensor::set_tensor_op_meta_observer(previous);
         assert_eq!(legacy_feedback.psi_total, feedback.psi_total);
         assert_eq!(legacy_feedback.weighted_loss, feedback.weighted_loss);
+
+        let meta_events = meta_events.lock().unwrap();
+        let meta = meta_events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "maxwell_psi_publish"
+                    && data["kind"] == "st_core_maxwell_psi_publish"
+                    && data["step"] == 42
+            })
+            .expect("maxwell_psi_publish metadata event");
+        assert_eq!(meta.1["backend"], "cpu");
+        assert_eq!(meta.1["requested_backend"], "auto");
+        assert_eq!(meta.1["blocks"], 9);
+        assert_eq!(meta.1["event_count"], events.len());
+        assert_eq!(meta.1["feedback_event_count"], events.len());
+        assert!(meta.1["threshold_crossed"].as_bool().unwrap_or(false));
+        assert!(meta.1["reading_total"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["feedback_weighted_loss"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["feedback_attribution_count"].as_u64().unwrap_or(0) > 0);
     }
 
     #[test]

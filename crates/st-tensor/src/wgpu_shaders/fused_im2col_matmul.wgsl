@@ -27,7 +27,8 @@ struct ConvGemmParams {
 @group(0) @binding(0) var<storage, read> input_tensor : array<f32>;
 @group(0) @binding(1) var<storage, read> weights : array<f32>;
 @group(0) @binding(2) var<storage, read_write> output_tensor : array<f32>;
-@group(0) @binding(3) var<uniform> params : ConvGemmParams;
+@group(0) @binding(3) var<storage, read> bias : array<f32>;
+@group(0) @binding(4) var<uniform> params : ConvGemmParams;
 
 const TILE_M : u32 = {tile_m}u;
 const TILE_N : u32 = {tile_n}u;
@@ -92,9 +93,7 @@ fn main(
     let row = tile_row_origin + local_m;
     let col = tile_col_origin + local_n;
     let total_rows = params.batch * params.out_h * params.out_w;
-    if (row >= total_rows || col >= params.out_channels) {
-        return;
-    }
+    let in_bounds = row < total_rows && col < params.out_channels;
 
     var acc : f32 = 0.0;
     let tiles = (params.span + TILE_K - 1u) / TILE_K;
@@ -143,7 +142,7 @@ fn main(
                 let global_col = tile_col_origin + tn;
                 var rhs_value : f32 = 0.0;
                 if (global_k < params.span && global_col < params.out_channels) {
-                    rhs_value = weights[global_col * params.span + global_k];
+                    rhs_value = weights[global_k * params.out_channels + global_col];
                 }
                 rhs_tile_T[tn * TILE_K + tk] = rhs_value;
                 tk = tk + TILE_M;
@@ -170,6 +169,8 @@ fn main(
         tile_index = tile_index + 1u;
     }
 
-    let out_index = row * params.out_channels + col;
-    output_tensor[out_index] = acc;
+    if (in_bounds) {
+        let out_index = row * params.out_channels + col;
+        output_tensor[out_index] = acc + bias[col];
+    }
 }

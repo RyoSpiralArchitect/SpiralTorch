@@ -8,6 +8,7 @@ use super::{
     GraphContext, NeighborhoodAggregation, RoundtableBandInfluence, RoundtableBandSignal,
     ZSpaceGraphConvolution,
 };
+use crate::execution::current_tensor_util_backend_for_values;
 use crate::layers::activation::Relu;
 use crate::module::{Module, Parameter};
 use crate::schedule::GradientBands;
@@ -321,7 +322,7 @@ impl Module for ZSpaceGraphNetwork {
         band: RoundtableBand,
         gradient: &Tensor,
     ) -> PureResult<()> {
-        let sample = band_pass_sample(band, gradient);
+        let sample = band_pass_sample(band, gradient)?;
         for layer in &mut self.layers {
             layer.conv.set_roundtable_band_pass(Some(sample.clone()));
         }
@@ -339,7 +340,8 @@ impl Module for ZSpaceGraphNetwork {
         let (rows, cols) = input.shape();
         let mut total = Tensor::zeros(rows, cols)?;
         for (band, grad) in bands.iter_labeled() {
-            if grad.squared_l2_norm() == 0.0 {
+            let backend = current_tensor_util_backend_for_values(grad.data().len());
+            if grad.squared_l2_norm_with_backend(backend)? == 0.0 {
                 continue;
             }
             self.begin_backward_band_pass(band, grad)?;
@@ -350,7 +352,8 @@ impl Module for ZSpaceGraphNetwork {
             })();
             self.end_backward_band_pass(band)?;
             let contribution = result?;
-            total.add_scaled(&contribution, 1.0)?;
+            let backend = current_tensor_util_backend_for_values(total.data().len());
+            total.add_scaled_with_backend(&contribution, 1.0, backend)?;
         }
         Ok(total)
     }

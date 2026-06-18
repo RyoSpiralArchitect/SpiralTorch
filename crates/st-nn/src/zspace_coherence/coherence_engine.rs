@@ -5,7 +5,7 @@
 //! Maxwell pulse-based coherence measurement for Z-space sequences.
 
 use crate::PureResult;
-use st_tensor::{Tensor, TensorError};
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta, Tensor, TensorError};
 use std::fmt;
 
 /// Linguistic concept used to bias coherence weighting towards external domains.
@@ -518,14 +518,54 @@ impl CoherenceEngine {
             weights.push(weight);
         }
 
-        let mut total: f32 = weights.iter().copied().sum();
-        if !total.is_finite() || total <= f32::EPSILON {
-            return Err(TensorError::NonPositiveCoherence { coherence: total });
+        let raw_total: f32 = weights.iter().copied().sum();
+        if !raw_total.is_finite() || raw_total <= f32::EPSILON {
+            return Err(TensorError::NonPositiveCoherence {
+                coherence: raw_total,
+            });
         }
-        total = total.max(1e-6);
+        let total = raw_total.max(1e-6);
         for weight in &mut weights {
             *weight /= total;
         }
+        let dominant_weight = weights
+            .iter()
+            .copied()
+            .fold(0.0f32, |best, value| best.max(value));
+        let entropy = -weights
+            .iter()
+            .copied()
+            .filter(|weight| *weight > 0.0 && weight.is_finite())
+            .map(|weight| weight * weight.ln())
+            .sum::<f32>();
+        emit_tensor_op(
+            "coherence_measure_phases",
+            &[rows, cols],
+            &[1, weights.len()],
+        );
+        emit_tensor_op_meta("coherence_measure_phases", || {
+            serde_json::json!({
+                "backend": "cpu",
+                "requested_backend": self.backend.label(),
+                "kind": "coherence_reduction",
+                "rows": rows,
+                "cols": cols,
+                "values": rows.saturating_mul(cols),
+                "dim": self.dim,
+                "channels": self.num_channels,
+                "channel_width": channel_width,
+                "output_rows": 1,
+                "output_cols": weights.len(),
+                "curvature": self.curvature,
+                "curvature_bias": curvature_bias,
+                "backend_bias": backend_bias,
+                "accelerated_requested": self.backend.is_accelerated(),
+                "linguistic_profiles": self.linguistic_profiles.len(),
+                "raw_total": raw_total,
+                "dominant_weight": dominant_weight,
+                "entropy": entropy,
+            })
+        });
 
         Ok(weights)
     }
@@ -549,6 +589,15 @@ impl CoherenceEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
+        static OBSERVER_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        OBSERVER_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("observer lock available")
+    }
 
     #[test]
     fn weights_sum_to_one_and_follow_energy() {
@@ -567,6 +616,57 @@ mod tests {
         if engine.num_channels() > 1 {
             assert!(weights[1] > weights[0]);
         }
+    }
+
+    #[test]
+    fn measure_phases_emits_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let mut engine = CoherenceEngine::new(128, -1.0).unwrap();
+        engine.set_backend(CoherenceBackend::WebGpu);
+        engine.register_linguistic_profile(
+            DomainLinguisticProfile::new(DomainConcept::Membrane)
+                .with_emphasis(1.2)
+                .unwrap(),
+        );
+        let tensor = Tensor::from_vec(
+            2,
+            128,
+            vec![0.1; 128].into_iter().chain(vec![0.3; 128]).collect(),
+        )
+        .unwrap();
+        let weights = engine.measure_phases(&tensor).unwrap();
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert_eq!(weights.len(), engine.num_channels());
+        let events = events.lock().unwrap();
+        let measure = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "coherence_measure_phases"
+                    && data["rows"] == 2
+                    && data["cols"] == 128
+                    && data["channels"] == engine.num_channels()
+            })
+            .expect("coherence_measure_phases metadata event");
+        assert_eq!(measure.1["backend"], "cpu");
+        assert_eq!(measure.1["requested_backend"], "webgpu");
+        assert_eq!(measure.1["kind"], "coherence_reduction");
+        assert_eq!(measure.1["accelerated_requested"], true);
+        assert_eq!(measure.1["linguistic_profiles"], 1);
+        assert_eq!(measure.1["output_rows"], 1);
+        assert_eq!(measure.1["output_cols"], engine.num_channels());
+        assert!(measure.1["raw_total"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(measure.1["dominant_weight"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(measure.1["entropy"].as_f64().unwrap_or(-1.0) >= 0.0);
     }
 
     #[test]

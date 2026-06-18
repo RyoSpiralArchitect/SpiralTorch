@@ -22,7 +22,7 @@
 //! The module intentionally stays allocation-light so the new guards can be used
 //! from both CPU-only and WASM environments without fighting the borrow checker.
 
-use super::{fractal::FractalPatch, PureResult, Tensor, TensorError};
+use super::{fractal::FractalPatch, PureResult, Tensor, TensorError, TensorUtilBackend};
 use core::{cmp, f64::consts::PI as PI64};
 
 const DEFAULT_MODALITY_PERMEABILITY: f32 = 0.12;
@@ -74,6 +74,14 @@ fn porous_mix(value: f32, saturation: f32, porosity: f32) -> f32 {
     let absorb = (porosity * 0.25).min(1.0);
     let softened = limit * (1.0 - absorb * bleed.min(1.0)).max(0.0);
     value.signum() * softened
+}
+
+fn tensor_util_backend_label(backend: TensorUtilBackend) -> &'static str {
+    match backend {
+        TensorUtilBackend::Auto => "auto",
+        TensorUtilBackend::Cpu => "cpu",
+        TensorUtilBackend::GpuWgpu => "wgpu",
+    }
 }
 
 /// Numerically guards the Lawvere–Tierney topology that keeps probabilistic data j-closed.
@@ -204,19 +212,43 @@ impl LawvereTierneyGuard {
             return Err(TensorError::EmptyInput(label));
         }
         let mut sum = 0.0f32;
+        let mut raw_sum = 0.0f32;
+        let mut repaired_non_finite = 0usize;
+        let mut repaired_negative = 0usize;
+        let mut clipped_saturation = 0usize;
+        let mut clipped_density_max = 0usize;
         for value in slice.iter_mut() {
-            if !value.is_finite() {
-                *value = 0.0;
+            let original = *value;
+            if original.is_finite() {
+                raw_sum += original;
+            } else {
+                repaired_non_finite = repaired_non_finite.saturating_add(1);
             }
-            *value = value.clamp(0.0, saturation).min(self.density_max);
+            let mut guarded = if original.is_finite() { original } else { 0.0 };
+            if guarded < 0.0 {
+                repaired_negative = repaired_negative.saturating_add(1);
+                guarded = 0.0;
+            }
+            if guarded > saturation {
+                clipped_saturation = clipped_saturation.saturating_add(1);
+                guarded = saturation;
+            }
+            if guarded > self.density_max {
+                clipped_density_max = clipped_density_max.saturating_add(1);
+                guarded = self.density_max;
+            }
+            *value = guarded;
             sum += *value;
         }
+        let guarded_sum = sum;
         if sum <= 0.0 {
             return Err(TensorError::NonFiniteValue { label, value: sum });
         }
+        let mut lifted_density_min = 0usize;
         for value in slice.iter_mut() {
             *value /= sum;
             if *value > 0.0 && *value < self.density_min {
+                lifted_density_min = lifted_density_min.saturating_add(1);
                 *value = self.density_min;
             }
         }
@@ -240,11 +272,13 @@ impl LawvereTierneyGuard {
         }
         let final_sum: f32 = slice.iter().sum();
         let deviation = (final_sum - 1.0).abs();
+        let mut final_rescaled = false;
         if deviation > self.mass_tolerance {
             let scale = 1.0 / final_sum;
             for value in slice.iter_mut() {
                 *value *= scale;
             }
+            final_rescaled = true;
         }
         let final_sum: f32 = slice.iter().sum();
         let deviation = (final_sum - 1.0).abs();
@@ -253,6 +287,40 @@ impl LawvereTierneyGuard {
                 label: "lawvere_tierney_probability_mass",
             });
         }
+        crate::emit_tensor_op(
+            "lawvere_guard_probability_slice",
+            &[slice.len()],
+            &[slice.len()],
+        );
+        crate::emit_tensor_op_meta("lawvere_guard_probability_slice", || {
+            serde_json::json!({
+                "backend": "control_cpu",
+                "requested_backend": "host",
+                "kind": "lawvere_tierney_probability_guard",
+                "label": label,
+                "values": slice.len(),
+                "density_min": self.density_min,
+                "density_max": self.density_max,
+                "mass_tolerance": self.mass_tolerance,
+                "saturation": saturation,
+                "raw_sum": raw_sum,
+                "guarded_sum": guarded_sum,
+                "renorm_sum": renorm_sum,
+                "final_sum": final_sum,
+                "mass_deviation": deviation,
+                "repaired_non_finite": repaired_non_finite,
+                "repaired_negative": repaired_negative,
+                "clipped_saturation": clipped_saturation,
+                "clipped_density_max": clipped_density_max,
+                "lifted_density_min": lifted_density_min,
+                "repaired_values": repaired_non_finite
+                    .saturating_add(repaired_negative)
+                    .saturating_add(clipped_saturation)
+                    .saturating_add(clipped_density_max)
+                    .saturating_add(lifted_density_min),
+                "final_rescaled": final_rescaled,
+            })
+        });
         Ok(())
     }
 }
@@ -2025,6 +2093,11 @@ impl TensorBiome {
         self.total_weight
     }
 
+    /// Common tensor shape shared by all shoots once the biome is non-empty.
+    pub fn shape(&self) -> Option<(usize, usize)> {
+        self.shape
+    }
+
     /// Returns the individual weights that were assigned to each shoot.
     pub fn weights(&self) -> &[f32] {
         &self.weights
@@ -2047,7 +2120,32 @@ impl TensorBiome {
         }
         let monad = RewriteMonad::new(&self.topos);
         monad.rewrite_tensor(label, &mut tensor)?;
-        self.push_shoot(tensor, weight)
+        let (rows, cols) = tensor.shape();
+        self.push_shoot(tensor, weight)?;
+        crate::emit_tensor_op("tensor_biome_absorb_weighted", &[rows, cols], &[self.len()]);
+        crate::emit_tensor_op_meta("tensor_biome_absorb_weighted", || {
+            serde_json::json!({
+                "backend": "topos_cpu",
+                "requested_backend": "auto",
+                "kind": "topos_biome_absorb",
+                "rewrite_backend": "topos_cpu",
+                "storage_backend": "host_vec",
+                "rewrite_mode": "guarded_in_place_tensor_rewrite",
+                "route_blocker": "open_cartesian_topos_rewrite",
+                "label": label,
+                "rows": rows,
+                "cols": cols,
+                "values": rows.saturating_mul(cols),
+                "shoots": self.len(),
+                "weight": weight,
+                "total_weight": self.total_weight,
+                "curvature": self.topos.curvature(),
+                "saturation": self.topos.saturation(),
+                "estimated_rewrite_values": rows.saturating_mul(cols),
+                "estimated_stored_values": self.len().saturating_mul(rows).saturating_mul(cols),
+            })
+        });
+        Ok(())
     }
 
     /// Absorbs a tensor produced by a monadic builder.
@@ -2129,10 +2227,43 @@ impl TensorBiome {
         if self.weights.is_empty() {
             return Err(TensorError::EmptyInput("tensor_biome_weights"));
         }
+        let before = self.weights.clone();
+        let raw_total = before.iter().copied().sum::<f32>();
         let topos = self.topos.clone();
         let monad = RewriteMonad::new(&topos);
         monad.guard_probability_slice("tensor_biome_weights", &mut self.weights)?;
         self.total_weight = self.weights.iter().sum();
+        let changed_weights = before
+            .iter()
+            .copied()
+            .zip(self.weights.iter().copied())
+            .filter(|(lhs, rhs)| (lhs - rhs).abs() > 1.0e-6)
+            .count();
+        crate::emit_tensor_op(
+            "tensor_biome_renormalise_weights",
+            &[before.len()],
+            &[self.weights.len()],
+        );
+        crate::emit_tensor_op_meta("tensor_biome_renormalise_weights", || {
+            serde_json::json!({
+                "backend": "control_cpu",
+                "requested_backend": "host",
+                "kind": "topos_biome_weight_reduction",
+                "weight_guard_backend": "lawvere_topos_cpu",
+                "reduction_backend": "host_slice_sum",
+                "guard_mode": "probability_slice_guard",
+                "route_blocker": "lawvere_tierney_probability_guard",
+                "weights": self.weights.len(),
+                "shoots": self.len(),
+                "raw_total": raw_total,
+                "total_weight": self.total_weight,
+                "changed_weights": changed_weights,
+                "curvature": self.topos.curvature(),
+                "saturation": self.topos.saturation(),
+                "estimated_guard_values": self.weights.len(),
+                "estimated_reduction_values": before.len(),
+            })
+        });
         Ok(())
     }
 
@@ -2157,6 +2288,12 @@ impl TensorBiome {
 
     /// Harvests the biome by averaging all shoots into a guarded canopy tensor.
     pub fn canopy(&self) -> PureResult<Tensor> {
+        self.canopy_with_backend(TensorUtilBackend::Auto)
+    }
+
+    /// Harvests the biome with an explicit tensor utility backend for the
+    /// accumulation and normalisation passes before the guarded topos rewrite.
+    pub fn canopy_with_backend(&self, backend: TensorUtilBackend) -> PureResult<Tensor> {
         let (rows, cols) = self.shape.ok_or(TensorError::EmptyInput("tensor_biome"))?;
         if self.is_empty() {
             return Err(TensorError::EmptyInput("tensor_biome"));
@@ -2168,11 +2305,40 @@ impl TensorBiome {
         }
         let mut acc = Tensor::zeros(rows, cols)?;
         for (shoot, &weight) in self.shoots.iter().zip(self.weights.iter()) {
-            acc.add_scaled(shoot, weight)?;
+            acc.add_scaled_with_backend(shoot, weight, backend)?;
         }
-        let mut canopy = acc.scale(1.0 / self.total_weight)?;
+        let mut canopy = acc.scale_with_backend(1.0 / self.total_weight, backend)?;
         let monad = RewriteMonad::new(&self.topos);
         monad.rewrite_tensor("tensor_biome_canopy", &mut canopy)?;
+        let tensor_util_backend = tensor_util_backend_label(backend);
+        crate::emit_tensor_op(
+            "tensor_biome_canopy",
+            &[self.len(), rows, cols],
+            &[rows, cols],
+        );
+        crate::emit_tensor_op_meta("tensor_biome_canopy", || {
+            serde_json::json!({
+                "backend": "hybrid",
+                "requested_backend": tensor_util_backend,
+                "kind": "topos_biome_canopy",
+                "accumulation_backend": tensor_util_backend,
+                "normalise_backend": tensor_util_backend,
+                "rewrite_backend": "topos_cpu",
+                "rewrite_mode": "guarded_canopy_rewrite",
+                "route_blocker": "open_cartesian_topos_rewrite_after_tensor_util_accumulation",
+                "rows": rows,
+                "cols": cols,
+                "values": rows.saturating_mul(cols),
+                "shoots": self.len(),
+                "weights": self.weights.len(),
+                "total_weight": self.total_weight,
+                "curvature": self.topos.curvature(),
+                "saturation": self.topos.saturation(),
+                "estimated_accumulation_values": self.len().saturating_mul(rows).saturating_mul(cols),
+                "estimated_normalise_values": rows.saturating_mul(cols),
+                "estimated_rewrite_values": rows.saturating_mul(cols),
+            })
+        });
         Ok(canopy)
     }
 
@@ -2304,6 +2470,7 @@ fn dot(a: &[f32], b: &[f32]) -> f32 {
 mod tests {
     use super::*;
     use crate::pure::fractal::FractalPatch;
+    use std::sync::{Arc, Mutex, OnceLock};
 
     #[track_caller]
     fn unwrap_ok<T, E: core::fmt::Debug>(result: Result<T, E>) -> T {
@@ -2323,6 +2490,14 @@ mod tests {
 
     fn demo_topos() -> OpenCartesianTopos {
         unwrap_ok(OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 64, 4096))
+    }
+
+    fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
+        static OBSERVER_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        OBSERVER_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("observer lock available")
     }
 
     #[test]
@@ -2447,6 +2622,141 @@ mod tests {
     }
 
     #[test]
+    fn biome_absorb_renormalise_and_canopy_emit_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let topos = demo_topos();
+        let mut biome = TensorBiome::new(topos);
+        unwrap_ok(biome.absorb_weighted(
+            "meta_weighted_a",
+            unwrap_ok(Tensor::from_vec(1, 2, vec![1.0, 2.0])),
+            2.0,
+        ));
+        unwrap_ok(biome.absorb_weighted(
+            "meta_weighted_b",
+            unwrap_ok(Tensor::from_vec(1, 2, vec![3.0, 4.0])),
+            3.0,
+        ));
+        unwrap_ok(biome.renormalise_weights());
+        let canopy = unwrap_ok(biome.canopy());
+        crate::set_tensor_op_meta_observer(previous);
+
+        assert_eq!(canopy.shape(), (1, 2));
+        let events = events.lock().unwrap();
+        let absorbs = events
+            .iter()
+            .filter(|(op_name, _)| *op_name == "tensor_biome_absorb_weighted")
+            .collect::<Vec<_>>();
+        assert_eq!(absorbs.len(), 2);
+        assert_eq!(absorbs[0].1["backend"], "topos_cpu");
+        assert_eq!(absorbs[0].1["kind"], "topos_biome_absorb");
+        assert_eq!(absorbs[0].1["rewrite_backend"], "topos_cpu");
+        assert_eq!(absorbs[0].1["storage_backend"], "host_vec");
+        assert_eq!(
+            absorbs[0].1["rewrite_mode"],
+            "guarded_in_place_tensor_rewrite"
+        );
+        assert_eq!(
+            absorbs[0].1["route_blocker"],
+            "open_cartesian_topos_rewrite"
+        );
+        assert_eq!(absorbs[0].1["label"], "meta_weighted_a");
+        assert_eq!(absorbs[0].1["shoots"], 1);
+        assert_eq!(absorbs[1].1["shoots"], 2);
+        assert_eq!(absorbs[1].1["estimated_stored_values"], 4);
+
+        let renorm = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "tensor_biome_renormalise_weights" && data["weights"] == 2
+            })
+            .expect("tensor_biome_renormalise_weights metadata event");
+        assert_eq!(renorm.1["backend"], "control_cpu");
+        assert_eq!(renorm.1["requested_backend"], "host");
+        assert_eq!(renorm.1["kind"], "topos_biome_weight_reduction");
+        assert_eq!(renorm.1["weight_guard_backend"], "lawvere_topos_cpu");
+        assert_eq!(renorm.1["reduction_backend"], "host_slice_sum");
+        assert_eq!(renorm.1["guard_mode"], "probability_slice_guard");
+        assert_eq!(
+            renorm.1["route_blocker"],
+            "lawvere_tierney_probability_guard"
+        );
+        assert_eq!(renorm.1["shoots"], 2);
+        assert!(renorm.1["changed_weights"].as_u64().unwrap_or(0) >= 1);
+        assert!((renorm.1["total_weight"].as_f64().unwrap_or(0.0) - 1.0).abs() < 1.0e-6);
+
+        let canopy_meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "tensor_biome_canopy" && data["rows"] == 1 && data["cols"] == 2
+            })
+            .expect("tensor_biome_canopy metadata event");
+        assert_eq!(canopy_meta.1["backend"], "hybrid");
+        assert_eq!(canopy_meta.1["kind"], "topos_biome_canopy");
+        assert_eq!(canopy_meta.1["requested_backend"], "auto");
+        assert_eq!(canopy_meta.1["accumulation_backend"], "auto");
+        assert_eq!(canopy_meta.1["normalise_backend"], "auto");
+        assert_eq!(canopy_meta.1["rewrite_backend"], "topos_cpu");
+        assert_eq!(canopy_meta.1["rewrite_mode"], "guarded_canopy_rewrite");
+        assert_eq!(
+            canopy_meta.1["route_blocker"],
+            "open_cartesian_topos_rewrite_after_tensor_util_accumulation"
+        );
+        assert_eq!(canopy_meta.1["shoots"], 2);
+        assert_eq!(canopy_meta.1["weights"], 2);
+        assert_eq!(canopy_meta.1["estimated_accumulation_values"], 4);
+        assert_eq!(canopy_meta.1["estimated_rewrite_values"], 2);
+    }
+
+    #[test]
+    fn biome_canopy_with_backend_records_explicit_tensor_util_backend() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let topos = demo_topos();
+        let mut biome = TensorBiome::new(topos);
+        unwrap_ok(biome.absorb(
+            "explicit_canopy_a",
+            unwrap_ok(Tensor::from_vec(1, 2, vec![1.0, 2.0])),
+        ));
+        unwrap_ok(biome.absorb(
+            "explicit_canopy_b",
+            unwrap_ok(Tensor::from_vec(1, 2, vec![3.0, 4.0])),
+        ));
+        let canopy = unwrap_ok(biome.canopy_with_backend(TensorUtilBackend::Cpu));
+        crate::set_tensor_op_meta_observer(previous);
+
+        assert_eq!(canopy.shape(), (1, 2));
+        let events = events.lock().unwrap();
+        let canopy_meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "tensor_biome_canopy" && data["rows"] == 1 && data["cols"] == 2
+            })
+            .expect("tensor_biome_canopy metadata event");
+        assert_eq!(canopy_meta.1["backend"], "hybrid");
+        assert_eq!(canopy_meta.1["requested_backend"], "cpu");
+        assert_eq!(canopy_meta.1["accumulation_backend"], "cpu");
+        assert_eq!(canopy_meta.1["normalise_backend"], "cpu");
+        assert_eq!(canopy_meta.1["rewrite_backend"], "topos_cpu");
+    }
+
+    #[test]
     fn biome_stack_concatenates_shoots() {
         let topos = demo_topos();
         let mut biome = TensorBiome::new(topos);
@@ -2508,6 +2818,44 @@ mod tests {
         assert!(slice.iter().all(|v| *v >= 0.0));
         let sum: f32 = slice.iter().sum();
         assert!((sum - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn topos_probability_guard_emits_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let topos = demo_topos();
+        let mut slice = vec![2.0, -1.0, f32::INFINITY, 0.5];
+        unwrap_ok(topos.guard_probability_slice("probability_guard_meta", &mut slice));
+        crate::set_tensor_op_meta_observer(previous);
+
+        assert!(slice.iter().all(|value| value.is_finite() && *value >= 0.0));
+        assert!((slice.iter().sum::<f32>() - 1.0).abs() < 1e-6);
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "lawvere_guard_probability_slice"
+                    && data["label"] == "probability_guard_meta"
+            })
+            .expect("lawvere_guard_probability_slice metadata event");
+        assert_eq!(meta.1["backend"], "control_cpu");
+        assert_eq!(meta.1["requested_backend"], "host");
+        assert_eq!(meta.1["kind"], "lawvere_tierney_probability_guard");
+        assert_eq!(meta.1["values"], 4);
+        assert_eq!(meta.1["repaired_non_finite"], 1);
+        assert_eq!(meta.1["repaired_negative"], 1);
+        assert!(meta.1["guarded_sum"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!((meta.1["final_sum"].as_f64().unwrap_or(0.0) - 1.0).abs() < 1e-6);
+        assert!(meta.1["repaired_values"].as_u64().unwrap_or(0) >= 2);
     }
 
     #[test]

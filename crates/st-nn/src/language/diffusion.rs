@@ -7,6 +7,7 @@ use super::info_geometry::InformationGeometryMetric;
 use super::maxwell::NarrativeHint;
 use crate::PureResult;
 use nalgebra::{DMatrix, DVector};
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 use std::collections::HashMap;
 
 /// Diffusion model that evolves narrative concepts across the Z-space atlas.
@@ -102,6 +103,38 @@ impl ConceptDiffusion {
         if sum > 0.0 {
             self.state /= sum;
         }
+        let distribution_sum = self.state.iter().sum::<f64>();
+        let dominant_probability = self
+            .state
+            .iter()
+            .copied()
+            .filter(|value| value.is_finite())
+            .fold(0.0f64, |best, value| best.max(value));
+        emit_tensor_op(
+            "concept_diffusion_state_normalise",
+            &[self.state.len()],
+            &[self.state.len()],
+        );
+        emit_tensor_op_meta("concept_diffusion_state_normalise", || {
+            serde_json::json!({
+                "backend": "f64_cpu",
+                "requested_backend": "auto",
+                "kind": "language_concept_diffusion_state_normalise",
+                "state_dtype": "f64",
+                "precision_backend": "f64_cpu",
+                "route_blocker": "f64_state",
+                "state_sum_backend": "f64_cpu",
+                "distribution_scale_backend": if sum > 0.0 { "f64_cpu" } else { "host" },
+                "values": self.state.len(),
+                "raw_sum": sum,
+                "distribution_sum": distribution_sum,
+                "dominant_probability": dominant_probability,
+                "positive_values": self.state.iter().filter(|value| **value > 0.0).count(),
+                "negative_values": self.state.iter().filter(|value| **value < 0.0).count(),
+                "non_finite_values": self.state.iter().filter(|value| !value.is_finite()).count(),
+                "zero_fallback": sum <= 0.0,
+            })
+        });
     }
 
     /// Returns the current state as a probability map over tags.
@@ -136,6 +169,15 @@ impl DiffusionStep {
 mod tests {
     use super::super::info_geometry::InformationGeometryMetric;
     use super::*;
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
+        static OBSERVER_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        OBSERVER_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("observer lock available")
+    }
 
     fn hint(channel: &str, tags: &[&str], intensity: f32) -> NarrativeHint {
         NarrativeHint::new(
@@ -160,5 +202,49 @@ mod tests {
         let pairs = step.as_pairs();
         assert!(pairs.iter().any(|(tag, _)| tag == "spiral"));
         assert!((step.state.iter().sum::<f64>() - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn diffusion_state_normalise_emits_backend_meta() {
+        let hints = vec![
+            hint("alpha", &["spiral", "torch"], 1.0),
+            hint("beta", &["spiral", "narrative"], 0.8),
+        ];
+        let metric = InformationGeometryMetric::from_narratives(&hints);
+        let mut diffusion = ConceptDiffusion::new(metric);
+
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        diffusion.observe(&hints[0], 0.5);
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        let sum = diffusion.state.iter().sum::<f64>();
+        assert!((sum - 1.0).abs() < 1e-6);
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "concept_diffusion_state_normalise" && data["values"].as_u64().is_some()
+            })
+            .expect("concept_diffusion_state_normalise metadata event");
+        assert_eq!(meta.1["backend"], "f64_cpu");
+        assert_eq!(meta.1["requested_backend"], "auto");
+        assert_eq!(meta.1["kind"], "language_concept_diffusion_state_normalise");
+        assert_eq!(meta.1["state_dtype"], "f64");
+        assert_eq!(meta.1["precision_backend"], "f64_cpu");
+        assert_eq!(meta.1["route_blocker"], "f64_state");
+        assert_eq!(meta.1["state_sum_backend"], "f64_cpu");
+        assert_eq!(meta.1["distribution_scale_backend"], "f64_cpu");
+        assert_eq!(meta.1["zero_fallback"], false);
+        assert!((meta.1["distribution_sum"].as_f64().unwrap_or(0.0) - 1.0).abs() < 1e-6);
+        assert!(meta.1["dominant_probability"].as_f64().unwrap_or(0.0) > 0.0);
     }
 }

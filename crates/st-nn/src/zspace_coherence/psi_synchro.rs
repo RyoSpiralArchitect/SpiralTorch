@@ -13,7 +13,6 @@
 //! channels so the components can run inside the SpiralTorch runtime without
 //! Python bindings.
 
-use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::f64::consts::PI;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -30,6 +29,15 @@ use st_core::telemetry::hub::set_last_psi;
 #[cfg(feature = "psi")]
 use st_core::telemetry::psi::{PsiComponent, PsiReading};
 use st_core::theory::zpulse::{ZPulse, ZScale, ZSource, ZSupport};
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
+
+fn finite_nonnegative_strength(value: f64) -> f64 {
+    if value.is_finite() {
+        value.max(0.0)
+    } else {
+        0.0
+    }
+}
 
 /// Per-branch dynamical parameters used to synthesise PSI samples.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -430,12 +438,10 @@ pub struct HeatmapResult {
 
 impl HeatmapResult {
     pub fn dominant_tongue(&self) -> Option<&ArnoldTongueSummary> {
-        self.tongues
-            .iter()
-            .max_by(|a, b| match a.peak_strength.partial_cmp(&b.peak_strength) {
-                Some(order) => order,
-                None => Ordering::Equal,
-            })
+        self.tongues.iter().max_by(|a, b| {
+            finite_nonnegative_strength(a.peak_strength)
+                .total_cmp(&finite_nonnegative_strength(b.peak_strength))
+        })
     }
 
     /// Computes aggregate analytics derived from the Arnold tongue matrix.
@@ -544,6 +550,39 @@ impl HeatmapResult {
             }
         }
         entropy = (entropy / normaliser).clamp(0.0, 1.0);
+
+        emit_tensor_op(
+            "psi_heatmap_distribution",
+            &[lam_bins, self.matrix[0].len()],
+            &[1, distribution.len()],
+        );
+        emit_tensor_op_meta("psi_heatmap_distribution", || {
+            serde_json::json!({
+                "backend": "summary_cpu",
+                "requested_backend": "host",
+                "kind": "psi_synchro_heatmap_distribution",
+                "branch_id": self.branch_id.as_str(),
+                "lam_bins": lam_bins,
+                "wd_bins": self.matrix[0].len(),
+                "total_energy": total_energy,
+                "leading_sum": leading_sum,
+                "central_sum": central_sum,
+                "trailing_sum": trailing_sum,
+                "leading_norm": leading_norm,
+                "central_norm": central_norm,
+                "trailing_norm": trailing_norm,
+                "dominant_lam": dominant_lam,
+                "dominant_wd": dominant_wd,
+                "peak_value": peak_value,
+                "peak_ratio": peak_ratio,
+                "bias": bias,
+                "drift": drift,
+                "quality": quality,
+                "stderr": stderr,
+                "entropy": entropy,
+                "distribution_sum": distribution.iter().copied().sum::<f32>(),
+            })
+        });
 
         Some(HeatmapAnalytics {
             total_energy,
@@ -1048,10 +1087,8 @@ impl CircleLockMap {
                             })
                             .collect();
                         tongues.sort_by(|a, b| {
-                            match b.peak_strength.partial_cmp(&a.peak_strength) {
-                                Some(order) => order,
-                                None => Ordering::Equal,
-                            }
+                            finite_nonnegative_strength(b.peak_strength)
+                                .total_cmp(&finite_nonnegative_strength(a.peak_strength))
                         });
                         bus_clone.publish(SynchroEvent::HeatmapUpdate(HeatmapResult {
                             branch_id,
@@ -1327,5 +1364,64 @@ pub fn run_zspace_learning_pass(
         golden_baseline_window,
         #[cfg(feature = "golden")]
         golden_telemetry,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::OnceLock;
+
+    fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
+        static OBSERVER_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        OBSERVER_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("observer lock available")
+    }
+
+    #[test]
+    fn heatmap_analysis_emits_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let heatmap = HeatmapResult {
+            branch_id: "psi-test".to_string(),
+            gamma: 1.3,
+            kappa_hat: 0.2,
+            lam_grid: vec![0.0, 1.0, 2.0],
+            wd_grid: vec![0.5, 1.0],
+            matrix: vec![vec![1.0, 0.5], vec![0.2, 0.3], vec![0.7, 0.1]],
+            tongues: Vec::new(),
+        };
+        let analytics = heatmap.analyse().expect("heatmap analytics");
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert!(analytics.total_energy > 0.0);
+        assert!(analytics.leading_norm > 0.0);
+        assert!(analytics.trailing_norm > 0.0);
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "psi_heatmap_distribution" && data["branch_id"] == "psi-test"
+            })
+            .expect("psi_heatmap_distribution metadata event");
+        assert_eq!(meta.1["backend"], "summary_cpu");
+        assert_eq!(meta.1["requested_backend"], "host");
+        assert_eq!(meta.1["kind"], "psi_synchro_heatmap_distribution");
+        assert_eq!(meta.1["lam_bins"], 3);
+        assert_eq!(meta.1["wd_bins"], 2);
+        assert!(meta.1["total_energy"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!((meta.1["distribution_sum"].as_f64().unwrap_or(0.0) - 1.0).abs() < 1e-6);
+        assert!(meta.1["peak_ratio"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["entropy"].as_f64().unwrap_or(0.0) >= 0.0);
     }
 }

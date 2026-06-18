@@ -33,6 +33,7 @@
 //! uses when benchmarking observation compression experiments.
 
 use core::fmt;
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 
 /// Symmetry acting on child slots of a branching process.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -275,10 +276,12 @@ impl ObservationalCoalgebra {
     /// produces the per-depth efficiency ratios `η = observed / bound`.
     pub fn assess(&mut self, observed: &[u128]) -> ObservabilityAssessment {
         if observed.is_empty() {
-            return ObservabilityAssessment {
+            let assessment = ObservabilityAssessment {
                 expected: Vec::new(),
                 efficiency: Vec::new(),
             };
+            emit_observability_assessment_meta(&self.config, observed, &assessment);
+            return assessment;
         }
         let depth = observed.len() - 1;
         let expected = self.unfold(depth);
@@ -291,10 +294,12 @@ impl ObservationalCoalgebra {
             };
             efficiency.push(eta.clamp(0.0, 1.0));
         }
-        ObservabilityAssessment {
+        let assessment = ObservabilityAssessment {
             expected,
             efficiency,
-        }
+        };
+        emit_observability_assessment_meta(&self.config, observed, &assessment);
+        assessment
     }
 }
 
@@ -305,6 +310,191 @@ pub struct ObservabilityAssessment {
     pub expected: Vec<u128>,
     /// Efficiency per depth (`η = observed / expected`).
     pub efficiency: Vec<f64>,
+}
+
+fn finite_meta_f64(value: f64) -> f64 {
+    if value.is_finite() {
+        value
+    } else {
+        0.0
+    }
+}
+
+fn u128_digits(value: u128) -> usize {
+    value.to_string().len()
+}
+
+fn u128_log10(value: u128) -> f64 {
+    if value == 0 {
+        0.0
+    } else {
+        (value as f64).log10()
+    }
+}
+
+fn color_symmetry_label(symmetry: ColorSymmetry) -> &'static str {
+    match symmetry {
+        ColorSymmetry::Trivial => "trivial",
+        ColorSymmetry::Symmetric => "symmetric",
+        ColorSymmetry::Cyclic => "cyclic",
+        ColorSymmetry::Dihedral => "dihedral",
+        ColorSymmetry::Custom { .. } => "custom",
+    }
+}
+
+fn color_invisibility_label(reason: ColorInvisibility) -> &'static str {
+    match reason {
+        ColorInvisibility::EmptyPalette => "empty_palette",
+        ColorInvisibility::IdentifiedBySymmetry => "identified_by_symmetry",
+    }
+}
+
+fn efficiency_stats(efficiency: &[f64]) -> (f64, f64, f64, f64) {
+    if efficiency.is_empty() {
+        return (0.0, 0.0, 0.0, 0.0);
+    }
+    let mut min = f64::INFINITY;
+    let mut max = f64::NEG_INFINITY;
+    let mut sum = 0.0f64;
+    for value in efficiency.iter().copied() {
+        let value = finite_meta_f64(value);
+        min = min.min(value);
+        max = max.max(value);
+        sum += value;
+    }
+    let mean = sum / efficiency.len() as f64;
+    let final_efficiency = *efficiency.last().unwrap_or(&0.0);
+    (min, max, mean, finite_meta_f64(final_efficiency))
+}
+
+fn emit_observability_assessment_meta(
+    config: &ObservabilityConfig,
+    observed: &[u128],
+    assessment: &ObservabilityAssessment,
+) {
+    let depth_count = assessment.expected.len().max(observed.len());
+    let max_depth = depth_count.saturating_sub(1);
+    let observable_root = config.observable_root_cardinality();
+    let observed_final = observed.last().copied().unwrap_or(0);
+    let expected_final = assessment.expected.last().copied().unwrap_or(0);
+    let compression_gap = expected_final.saturating_sub(observed_final);
+    let overflow_observed = observed_final > expected_final && expected_final > 0;
+    let (efficiency_min, efficiency_max, efficiency_mean, efficiency_final) =
+        efficiency_stats(&assessment.efficiency);
+    let expected_saturated = assessment.expected.iter().any(|value| *value == u128::MAX);
+
+    let (
+        color_configured,
+        color_palette_size,
+        color_symmetry,
+        color_classes,
+        singleton_observable,
+        singleton_reason,
+    ) =
+        match &config.color_action {
+            Some(action) => {
+                let verdict = action.singleton_observable();
+                let singleton_observable = verdict.unwrap_or(false);
+                let singleton_reason = verdict.err().map(color_invisibility_label).unwrap_or(
+                    if singleton_observable {
+                        "none"
+                    } else {
+                        "identified_by_symmetry"
+                    },
+                );
+                (
+                    true,
+                    action.palette_size(),
+                    color_symmetry_label(action.symmetry()),
+                    action.observable_classes(),
+                    singleton_observable,
+                    singleton_reason,
+                )
+            }
+            None => (false, 0, "none", 0, false, "none"),
+        };
+
+    emit_tensor_op(
+        "observability_assessment",
+        &[observed.len(), config.branching_factor as usize],
+        &[assessment.expected.len(), 2],
+    );
+    emit_tensor_op_meta("observability_assessment", || {
+        let mut payload = serde_json::Map::new();
+        payload.insert("backend".into(), "cpu".into());
+        payload.insert("requested_backend".into(), "auto".into());
+        payload.insert("kind".into(), "st_core_observability_assessment".into());
+        payload.insert("depth_count".into(), depth_count.into());
+        payload.insert("max_depth".into(), max_depth.into());
+        payload.insert("observed_empty".into(), observed.is_empty().into());
+        payload.insert("slot_symmetry".into(), config.slot_symmetry.label().into());
+        payload.insert("branching_factor".into(), config.branching_factor.into());
+        payload.insert(
+            "root_cardinality".into(),
+            config.root_cardinality.to_string().into(),
+        );
+        payload.insert(
+            "root_digits".into(),
+            u128_digits(config.root_cardinality).into(),
+        );
+        payload.insert(
+            "observable_root_cardinality".into(),
+            observable_root.to_string().into(),
+        );
+        payload.insert(
+            "observable_root_log10".into(),
+            finite_meta_f64(u128_log10(observable_root)).into(),
+        );
+        payload.insert("color_configured".into(), color_configured.into());
+        payload.insert("color_palette_size".into(), color_palette_size.into());
+        payload.insert("color_symmetry".into(), color_symmetry.into());
+        payload.insert(
+            "color_observable_classes".into(),
+            color_classes.to_string().into(),
+        );
+        payload.insert(
+            "color_singleton_observable".into(),
+            singleton_observable.into(),
+        );
+        payload.insert(
+            "color_singleton_invisible_reason".into(),
+            singleton_reason.into(),
+        );
+        payload.insert("observed_final".into(), observed_final.to_string().into());
+        payload.insert(
+            "observed_final_log10".into(),
+            finite_meta_f64(u128_log10(observed_final)).into(),
+        );
+        payload.insert("expected_final".into(), expected_final.to_string().into());
+        payload.insert(
+            "expected_final_log10".into(),
+            finite_meta_f64(u128_log10(expected_final)).into(),
+        );
+        payload.insert("compression_gap".into(), compression_gap.to_string().into());
+        payload.insert(
+            "compression_gap_log10".into(),
+            finite_meta_f64(u128_log10(compression_gap)).into(),
+        );
+        payload.insert("overflow_observed".into(), overflow_observed.into());
+        payload.insert("expected_saturated".into(), expected_saturated.into());
+        payload.insert(
+            "efficiency_min".into(),
+            finite_meta_f64(efficiency_min).into(),
+        );
+        payload.insert(
+            "efficiency_max".into(),
+            finite_meta_f64(efficiency_max).into(),
+        );
+        payload.insert(
+            "efficiency_mean".into(),
+            finite_meta_f64(efficiency_mean).into(),
+        );
+        payload.insert(
+            "efficiency_final".into(),
+            finite_meta_f64(efficiency_final).into(),
+        );
+        payload.into()
+    });
 }
 
 fn polya_symmetric(child_signatures: u128, branching: u32) -> u128 {
@@ -372,6 +562,7 @@ fn gcd_u32(mut a: u32, mut b: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn symmetric_branching_matches_polya_recursion() {
@@ -416,6 +607,56 @@ mod tests {
         assert!((assessment.efficiency[0] - 1.0).abs() < f64::EPSILON);
         assert!(assessment.efficiency[1] < 1.0);
         assert!(assessment.efficiency[2] < 1.0);
+    }
+
+    #[test]
+    fn assessment_emits_backend_meta() {
+        let _lock = crate::telemetry::tensor_observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let config = ObservabilityConfig::new(3, 2, SlotSymmetry::Symmetric)
+            .with_color_action(ColorAction::new(4, ColorSymmetry::Symmetric));
+        let mut coalgebra = ObservationalCoalgebra::new(config);
+        let assessment = coalgebra.assess(&[3, 12, 120]);
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert_eq!(assessment.expected.len(), 3);
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "observability_assessment"
+                    && data["kind"] == "st_core_observability_assessment"
+                    && data["branching_factor"] == 2
+                    && data["depth_count"] == 3
+                    && data["color_palette_size"] == 4
+            })
+            .expect("observability_assessment metadata event");
+        assert_eq!(meta.1["backend"], "cpu");
+        assert_eq!(meta.1["requested_backend"], "auto");
+        assert_eq!(meta.1["slot_symmetry"], "S_b");
+        assert_eq!(meta.1["branching_factor"], 2);
+        assert_eq!(meta.1["depth_count"], 3);
+        assert_eq!(meta.1["max_depth"], 2);
+        assert_eq!(meta.1["color_configured"], true);
+        assert_eq!(meta.1["color_palette_size"], 4);
+        assert_eq!(meta.1["color_symmetry"], "symmetric");
+        assert_eq!(meta.1["color_singleton_observable"], false);
+        assert_eq!(
+            meta.1["color_singleton_invisible_reason"],
+            "identified_by_symmetry"
+        );
+        assert_eq!(meta.1["observed_final"], "120");
+        assert!(meta.1["expected_final"].as_str().unwrap_or("0") != "0");
+        assert!(meta.1["compression_gap"].as_str().unwrap_or("0") != "0");
+        assert!(meta.1["efficiency_final"].as_f64().unwrap_or(0.0) < 1.0);
     }
 
     #[test]

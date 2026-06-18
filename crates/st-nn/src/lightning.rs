@@ -687,7 +687,7 @@ impl SpiralLightning {
                 let batches = epoch.into_supervised()?;
                 let stats = self.train_epoch(module, &mut loss, batches)?;
                 let results = loss.take_epoch_metrics();
-                let telemetry = InfoNCEEpochMetrics::from_batches(&results).map(|metrics| {
+                let telemetry = InfoNCEEpochMetrics::from_batches(&results)?.map(|metrics| {
                     publish_selfsup_metrics(label.as_deref(), &metrics);
                     SelfSupEpochTelemetry::InfoNCE(metrics)
                 });

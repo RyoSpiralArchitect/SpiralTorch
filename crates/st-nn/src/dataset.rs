@@ -453,6 +453,38 @@ mod tests {
     }
 
     #[test]
+    fn dataloader_preserves_zero_row_samples_in_fixed_batches() {
+        let samples = vec![
+            (
+                Tensor::from_vec(0, 2, Vec::new()).unwrap(),
+                Tensor::from_vec(0, 1, Vec::new()).unwrap(),
+            ),
+            (
+                Tensor::from_vec(1, 2, vec![1.0, 2.0]).unwrap(),
+                Tensor::from_vec(1, 1, vec![0.5]).unwrap(),
+            ),
+            (
+                Tensor::from_vec(0, 2, Vec::new()).unwrap(),
+                Tensor::from_vec(0, 1, Vec::new()).unwrap(),
+            ),
+        ];
+        let mut batches = from_vec(samples).batched(2).iter();
+
+        let first = batches.next().unwrap().unwrap();
+        assert_eq!(first.0.shape(), (1, 2));
+        assert_eq!(first.1.shape(), (1, 1));
+        assert_eq!(first.0.data(), &[1.0, 2.0]);
+        assert_eq!(first.1.data(), &[0.5]);
+
+        let second = batches.next().unwrap().unwrap();
+        assert_eq!(second.0.shape(), (0, 2));
+        assert_eq!(second.1.shape(), (0, 1));
+        assert!(second.0.data().is_empty());
+        assert!(second.1.data().is_empty());
+        assert!(batches.next().is_none());
+    }
+
+    #[test]
     fn dataset_stream_yields_all_samples() {
         let mut dataset = Dataset::new();
         dataset.push(
@@ -555,6 +587,34 @@ mod tests {
         let third = batches.next().unwrap().unwrap();
         assert_eq!(third.0.shape(), (4, 1));
         assert_eq!(third.1.shape(), (4, 1));
+        assert!(batches.next().is_none());
+    }
+
+    #[test]
+    fn dataloader_dynamic_rows_keeps_zero_row_samples_progressing() {
+        let samples = vec![
+            (
+                Tensor::from_vec(0, 2, Vec::new()).unwrap(),
+                Tensor::from_vec(0, 1, Vec::new()).unwrap(),
+            ),
+            (
+                Tensor::from_vec(1, 2, vec![1.0, 2.0]).unwrap(),
+                Tensor::from_vec(1, 1, vec![0.25]).unwrap(),
+            ),
+        ];
+        let mut batches = from_vec(samples).dynamic_batch_by_rows(1).iter();
+
+        let first = batches.next().unwrap().unwrap();
+        assert_eq!(first.0.shape(), (0, 2));
+        assert_eq!(first.1.shape(), (0, 1));
+        assert!(first.0.data().is_empty());
+        assert!(first.1.data().is_empty());
+
+        let second = batches.next().unwrap().unwrap();
+        assert_eq!(second.0.shape(), (1, 2));
+        assert_eq!(second.1.shape(), (1, 1));
+        assert_eq!(second.0.data(), &[1.0, 2.0]);
+        assert_eq!(second.1.data(), &[0.25]);
         assert!(batches.next().is_none());
     }
 

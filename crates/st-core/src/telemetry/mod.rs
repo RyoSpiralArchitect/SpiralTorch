@@ -40,3 +40,12 @@ pub mod psi;
 pub mod psychoid;
 
 pub mod xai;
+
+#[cfg(test)]
+pub(crate) fn tensor_observer_lock() -> std::sync::MutexGuard<'static, ()> {
+    static OBSERVER_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    OBSERVER_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}

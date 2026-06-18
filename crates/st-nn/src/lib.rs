@@ -12,6 +12,7 @@
 pub mod cloud;
 pub mod dataset;
 pub mod discovery;
+pub mod execution;
 pub mod gnn;
 #[cfg(feature = "golden")]
 pub mod golden;
@@ -35,6 +36,12 @@ pub mod zspace_coherence;
 pub use dataset::{from_vec as dataset_from_vec, BatchIter, DataLoader, Dataset};
 pub use discovery::{
     ModuleCategory, ModuleDiscoveryRegistry, ModuleMetadata, ModulePipelineBuilder,
+};
+pub use execution::{
+    current_attention_backend, current_backend_policy, current_layer_norm_backend,
+    current_matmul_backend, current_prepacked_matmul_backend, current_softmax_backend,
+    current_tensor_util_backend, current_tensor_util_backend_for_values, push_backend_policy,
+    BackendPolicy, BackendPolicyGuard,
 };
 pub use gnn::{
     embed_into_biome, flows_to_canvas_tensor, flows_to_canvas_tensor_with_shape,
@@ -94,8 +101,8 @@ pub use lightning::{
 pub use loss::{CategoricalCrossEntropy, HyperbolicCrossEntropy, Loss, MeanSquaredError};
 pub use module::{Module, Parameter};
 pub use optim::{
-    LocalLearningRateAdapter, LrScheduler, OptimizerMode, SpectralLrAdapter, WarmupCosineScheduler,
-    ZSpaceOptimizer,
+    LocalLearningRateAdapter, LrScheduler, OptimizerMode, SpectralLrAdapter,
+    SpectralLrAdapterState, WarmupCosineScheduler, ZSpaceOptimizer, ZSpaceOptimizerState,
 };
 pub use plan::RankPlanner;
 pub use roundtable::{
@@ -113,9 +120,9 @@ pub use trainer::selfsup::{
     SelfSupEpochTelemetry, SelfSupObjective, SelfSupPlanReport, SelfSupStage, SelfSupStageReport,
 };
 pub use trainer::{
-    EpochStats, ModuleTrainer, SoftLogicConfig, SpectralAdjustmentMetrics,
-    SpectralLearningRatePolicy, TextInfusionEvery, TextInfusionMode, TrainingEpochStats,
-    TrainingRunConfig, TrainingRunReport,
+    EpochStats, EpochTensorBackendStats, ModuleTrainer, SoftLogicConfig, SpectralAdjustmentMetrics,
+    SpectralLearningRatePolicy, TextInfusionEvery, TextInfusionMode, TrainerAccumulatorSyncStats,
+    TrainerOptimizerState, TrainingEpochStats, TrainingRunConfig, TrainingRunReport,
 };
 pub use z_rba::{
     AttentionTelemetry as ZAttentionTelemetry, BetaGate, BetaGateConfig, BetaGateSample, CovHead,

@@ -6,13 +6,63 @@
 use super::coherence_scan::ZSpaceCoherenceScan;
 use super::wave_gate::WaveGate;
 use super::wave_scan::{WaveScan, WaveScanStack};
+use crate::execution::current_tensor_util_backend_for_values;
 use crate::module::{Module, Parameter};
 use crate::{PureResult, Tensor, TensorError};
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta, TensorUtilBackend};
 use std::cell::RefCell;
 
 #[derive(Clone, Debug)]
 struct CoherenceWaveCache {
     fused_pre_gate: Tensor,
+}
+
+fn tensor_util_backend_label(backend: TensorUtilBackend) -> &'static str {
+    match backend {
+        TensorUtilBackend::Auto => "auto",
+        TensorUtilBackend::Cpu => "cpu",
+        TensorUtilBackend::GpuWgpu => "wgpu",
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_coherence_wave_meta(
+    op_name: &'static str,
+    kind: &'static str,
+    batch: usize,
+    dim: usize,
+    steps: usize,
+    memory: usize,
+    wave_branches: usize,
+    merge_backend: TensorUtilBackend,
+    backward: bool,
+) {
+    let input_values = batch.saturating_mul(dim).saturating_mul(steps);
+    let context_values = batch.saturating_mul(dim);
+    emit_tensor_op(op_name, &[batch, steps, dim], &[batch, dim]);
+    emit_tensor_op_meta(op_name, || {
+        serde_json::json!({
+            "backend": "composite",
+            "requested_backend": tensor_util_backend_label(merge_backend),
+            "merge_backend": tensor_util_backend_label(merge_backend),
+            "kernel": "coherence_wave.composite",
+            "kind": kind,
+            "batch": batch,
+            "dim": dim,
+            "steps": steps,
+            "memory": memory,
+            "wave_branches": wave_branches,
+            "input_values": input_values,
+            "context_values": context_values,
+            "scan_context_values": context_values,
+            "wave_context_values": context_values,
+            "fused_context_values": context_values,
+            "estimated_merge_values": context_values,
+            "estimated_backward_merge_values": if backward { input_values } else { 0 },
+            "backward": backward,
+            "empty": input_values == 0 || context_values == 0,
+        })
+    });
 }
 
 fn fixed_len_text(text: &str, chars: usize) -> Result<String, TensorError> {
@@ -224,11 +274,23 @@ impl Module for ZSpaceCoherenceWaveBlock {
 
         let scan_ctx = self.scan.forward(input)?;
         let wave_ctx = self.wave.forward(input)?;
-        let fused = scan_ctx.add(&wave_ctx)?;
+        let merge_backend = current_tensor_util_backend_for_values(scan_ctx.data().len());
+        let fused = scan_ctx.add_with_backend(&wave_ctx, merge_backend)?;
         let out = self.resonator.forward(&fused)?;
         *self.cache.borrow_mut() = Some(CoherenceWaveCache {
             fused_pre_gate: fused,
         });
+        emit_coherence_wave_meta(
+            "coherence_wave_forward",
+            "coherence_wave_forward_composite",
+            batch,
+            self.dim,
+            self.steps,
+            self.memory,
+            self.wave.scans().len(),
+            merge_backend,
+            false,
+        );
         Ok(out)
     }
 
@@ -243,7 +305,21 @@ impl Module for ZSpaceCoherenceWaveBlock {
             .backward(&cache.fused_pre_gate, grad_output)?;
         let grad_scan = self.scan.backward(input, &grad_fused)?;
         let grad_wave = self.wave.backward(input, &grad_fused)?;
-        grad_scan.add(&grad_wave)
+        let merge_backend = current_tensor_util_backend_for_values(grad_scan.data().len());
+        let grad_input = grad_scan.add_with_backend(&grad_wave, merge_backend)?;
+        let (batch, _) = input.shape();
+        emit_coherence_wave_meta(
+            "coherence_wave_backward",
+            "coherence_wave_backward_composite",
+            batch,
+            self.dim,
+            self.steps,
+            self.memory,
+            self.wave.scans().len(),
+            merge_backend,
+            true,
+        );
+        Ok(grad_input)
     }
 
     fn visit_parameters(
@@ -272,6 +348,12 @@ impl Module for ZSpaceCoherenceWaveBlock {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+
+    fn observer_lock() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
 
     #[test]
     fn coherence_wave_block_shapes_match() {
@@ -282,6 +364,76 @@ mod tests {
         let grad_out = Tensor::from_vec(2, 8, vec![0.01; 16]).unwrap();
         let grad_in = block.backward(&input, &grad_out).unwrap();
         assert_eq!(grad_in.shape(), input.shape());
+    }
+
+    #[test]
+    fn coherence_wave_block_emits_composite_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let mut block = ZSpaceCoherenceWaveBlock::new(6, 5, 4, -1.0, 1.0, 3, vec![1, 2]).unwrap();
+        let input = Tensor::from_vec(1, 30, vec![0.1; 30]).unwrap();
+        let out = block.forward(&input).unwrap();
+        let grad_out = Tensor::from_vec(1, 6, vec![0.01; 6]).unwrap();
+        let grad_in = block.backward(&input, &grad_out).unwrap();
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert_eq!(out.shape(), (1, 6));
+        assert_eq!(grad_in.shape(), input.shape());
+        let events = events.lock().unwrap();
+        for (op_name, kind, backward) in [
+            (
+                "coherence_wave_forward",
+                "coherence_wave_forward_composite",
+                false,
+            ),
+            (
+                "coherence_wave_backward",
+                "coherence_wave_backward_composite",
+                true,
+            ),
+        ] {
+            let event = events
+                .iter()
+                .find(|(name, data)| {
+                    *name == op_name
+                        && data["backend"] == "composite"
+                        && data["kind"] == kind
+                        && data["dim"] == 6
+                        && data["steps"] == 5
+                        && data["wave_branches"] == 2
+                })
+                .unwrap_or_else(|| panic!("{op_name} metadata event"));
+            assert_eq!(event.1["requested_backend"], "auto");
+            assert_eq!(event.1["merge_backend"], "auto");
+            assert_eq!(event.1["context_values"], 6);
+            assert_eq!(event.1["scan_context_values"], 6);
+            assert_eq!(event.1["wave_context_values"], 6);
+            assert_eq!(event.1["backward"], backward);
+        }
+        assert!(
+            events
+                .iter()
+                .any(|(name, data)| *name == "zspace_coherence_scan_forward"
+                    && data["dim"] == 6
+                    && data["steps"] == 5),
+            "coherence wave should still expose scan child metadata"
+        );
+        assert!(
+            events
+                .iter()
+                .any(|(name, data)| *name == "wave_scan_stack_forward"
+                    && data["features"] == 6
+                    && data["branch_count"] == 2),
+            "coherence wave should still expose wave stack child metadata"
+        );
     }
 
     #[test]

@@ -4,11 +4,13 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use super::{RoundtableBandSignal, ZSpaceGraphNetwork};
+use crate::execution::current_tensor_util_backend_for_values;
 use crate::module::{Module, Parameter};
 use crate::schedule::GradientBands;
 use crate::{PureResult, Tensor, TensorError};
 use st_core::backend::device_caps::DeviceCaps;
 use st_core::ops::zspace_round::RoundtableBand;
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta, TensorUtilBackend};
 use std::cell::RefCell;
 use std::num::NonZeroUsize;
 use std::ops::Range;
@@ -41,19 +43,38 @@ impl GraphReadout {
         Self::Max
     }
 
+    /// Stable label used in tensor backend traces.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Mean => "mean",
+            Self::Sum => "sum",
+            Self::Max => "max",
+        }
+    }
+
     /// Pools node embeddings into a single graph embedding.
     pub fn forward(&self, node_features: &Tensor) -> PureResult<Tensor> {
         let (rows, cols) = validate_node_features(node_features)?;
-        match self {
+        let values = rows.saturating_mul(cols);
+        let tensor_util_backend = current_tensor_util_backend_for_values(values);
+        let (output, meta_backend, kernel) = match self {
             Self::Mean => {
-                let mut data = column_sums(node_features);
-                let scale = 1.0 / rows as f32;
-                for value in &mut data {
-                    *value *= scale;
-                }
-                Tensor::from_vec(1, cols, data)
+                let data = node_features
+                    .try_sum_axis0_scaled_with_backend(1.0 / rows as f32, tensor_util_backend)?;
+                (
+                    Tensor::from_vec(1, cols, data)?,
+                    "composite",
+                    "graph_readout.mean.sum_axis0_scaled",
+                )
             }
-            Self::Sum => Tensor::from_vec(1, cols, column_sums(node_features)),
+            Self::Sum => {
+                let data = node_features.try_sum_axis0_with_backend(tensor_util_backend)?;
+                (
+                    Tensor::from_vec(1, cols, data)?,
+                    "composite",
+                    "graph_readout.sum.sum_axis0",
+                )
+            }
             Self::Max => {
                 let mut data = vec![f32::NEG_INFINITY; cols];
                 for row in 0..rows {
@@ -62,9 +83,20 @@ impl GraphReadout {
                         data[col] = data[col].max(node_features.data()[offset + col]);
                     }
                 }
-                Tensor::from_vec(1, cols, data)
+                (Tensor::from_vec(1, cols, data)?, "cpu", "scalar")
             }
-        }
+        };
+        emit_graph_readout_meta(
+            "graph_readout",
+            *self,
+            rows,
+            cols,
+            output.shape(),
+            meta_backend,
+            tensor_util_backend,
+            kernel,
+        );
+        Ok(output)
     }
 
     /// Broadcasts graph-level gradients back to node embeddings.
@@ -76,24 +108,27 @@ impl GraphReadout {
                 right: (1, cols),
             });
         }
-        let mut data = vec![0.0f32; rows * cols];
+        let values = rows.saturating_mul(cols);
+        let tensor_util_backend = current_tensor_util_backend_for_values(values);
+        let mut output = Tensor::zeros(rows, cols)?;
+        let mut meta_backend = "cpu";
+        let mut kernel = "scalar";
         match self {
             Self::Mean => {
                 let scale = 1.0 / rows as f32;
-                for row in 0..rows {
-                    let offset = row * cols;
-                    for col in 0..cols {
-                        data[offset + col] = grad_graph.data()[col] * scale;
-                    }
-                }
+                let row = grad_graph
+                    .data()
+                    .iter()
+                    .map(|value| value * scale)
+                    .collect::<Vec<_>>();
+                output.add_row_inplace_with_backend(&row, tensor_util_backend)?;
+                meta_backend = "composite";
+                kernel = "graph_readout_backward.mean.add_row";
             }
             Self::Sum => {
-                for row in 0..rows {
-                    let offset = row * cols;
-                    for col in 0..cols {
-                        data[offset + col] = grad_graph.data()[col];
-                    }
-                }
+                output.add_row_inplace_with_backend(grad_graph.data(), tensor_util_backend)?;
+                meta_backend = "composite";
+                kernel = "graph_readout_backward.sum.add_row";
             }
             Self::Max => {
                 let max_values = self.forward(node_features)?;
@@ -106,6 +141,7 @@ impl GraphReadout {
                         }
                     }
                 }
+                let data = output.data_mut();
                 for row in 0..rows {
                     let offset = row * cols;
                     for col in 0..cols {
@@ -116,8 +152,56 @@ impl GraphReadout {
                 }
             }
         }
-        Tensor::from_vec(rows, cols, data)
+        emit_graph_readout_meta(
+            "graph_readout_backward",
+            *self,
+            rows,
+            cols,
+            output.shape(),
+            meta_backend,
+            tensor_util_backend,
+            kernel,
+        );
+        Ok(output)
     }
+}
+
+fn tensor_util_backend_label(backend: TensorUtilBackend) -> &'static str {
+    match backend {
+        TensorUtilBackend::Auto => "auto",
+        TensorUtilBackend::Cpu => "cpu",
+        TensorUtilBackend::GpuWgpu => "wgpu",
+    }
+}
+
+fn emit_graph_readout_meta(
+    op_name: &'static str,
+    readout: GraphReadout,
+    node_rows: usize,
+    cols: usize,
+    output_shape: (usize, usize),
+    backend: &'static str,
+    requested_backend: TensorUtilBackend,
+    kernel: &'static str,
+) {
+    emit_tensor_op(
+        op_name,
+        &[node_rows, cols],
+        &[output_shape.0, output_shape.1],
+    );
+    emit_tensor_op_meta(op_name, || {
+        serde_json::json!({
+            "backend": backend,
+            "requested_backend": tensor_util_backend_label(requested_backend),
+            "kernel": kernel,
+            "readout": readout.as_str(),
+            "node_rows": node_rows,
+            "cols": cols,
+            "values": node_rows.saturating_mul(cols),
+            "output_rows": output_shape.0,
+            "output_cols": output_shape.1,
+        })
+    });
 }
 
 fn validate_node_features(node_features: &Tensor) -> PureResult<(usize, usize)> {
@@ -126,18 +210,6 @@ fn validate_node_features(node_features: &Tensor) -> PureResult<(usize, usize)> 
         return Err(TensorError::InvalidDimensions { rows, cols });
     }
     Ok((rows, cols))
-}
-
-fn column_sums(node_features: &Tensor) -> Vec<f32> {
-    let (rows, cols) = node_features.shape();
-    let mut data = vec![0.0f32; cols];
-    for row in 0..rows {
-        let offset = row * cols;
-        for col in 0..cols {
-            data[col] += node_features.data()[offset + col];
-        }
-    }
-    data
 }
 
 /// Row offsets describing how a row-concatenated tensor should be split into graphs.
@@ -278,6 +350,7 @@ impl GraphBatchReadoutTrace {
         }
         let (_, cols) = prediction.shape();
         let mut total_mse = 0.0f32;
+        let mut total_target_mean_square = 0.0f32;
         let mut entries = Vec::with_capacity(self.graph_count);
         for entry in &self.entries {
             if entry.graph_index >= self.graph_count {
@@ -287,21 +360,43 @@ impl GraphBatchReadoutTrace {
             }
             let prediction_row = tensor_row(prediction, entry.graph_index)?;
             let target_row = tensor_row(target, entry.graph_index)?;
-            let residual = prediction_row.sub(&target_row)?;
-            let mean_squared_error = residual.squared_l2_norm() / cols as f32;
+            let residual = prediction_row.sub_with_backend(
+                &target_row,
+                current_tensor_util_backend_for_values(prediction_row.data().len()),
+            )?;
+            let residual_l2_squared = residual.squared_l2_norm_with_backend(
+                current_tensor_util_backend_for_values(residual.data().len()),
+            )?;
+            let mean_squared_error = residual_l2_squared / cols as f32;
+            let target_l2_squared = target_row.squared_l2_norm_with_backend(
+                current_tensor_util_backend_for_values(target_row.data().len()),
+            )?;
+            let target_mean_square = target_l2_squared / cols as f32;
+            let normalized_mean_squared_error =
+                normalized_mean_squared_error(mean_squared_error, target_mean_square);
             total_mse += mean_squared_error;
+            total_target_mean_square += target_mean_square;
             entries.push(GraphBatchReadoutErrorEntry {
                 graph_index: entry.graph_index,
-                prediction_l2: tensor_l2(&prediction_row),
-                target_l2: tensor_l2(&target_row),
-                residual_l2: tensor_l2(&residual),
+                prediction_l2: tensor_l2(&prediction_row)?,
+                target_l2: target_l2_squared.sqrt(),
+                target_mean_square,
+                residual_l2: residual_l2_squared.sqrt(),
                 mean_squared_error,
+                normalized_mean_squared_error,
             });
         }
+        let mean_squared_error = total_mse / self.graph_count.max(1) as f32;
+        let target_mean_square = total_target_mean_square / self.graph_count.max(1) as f32;
         Ok(GraphBatchReadoutErrorTrace {
             graph_count: self.graph_count,
             output_shape: self.output_shape,
-            mean_squared_error: total_mse / self.graph_count.max(1) as f32,
+            mean_squared_error,
+            target_mean_square,
+            normalized_mean_squared_error: normalized_mean_squared_error(
+                mean_squared_error,
+                target_mean_square,
+            ),
             entries,
         })
     }
@@ -316,10 +411,14 @@ pub struct GraphBatchReadoutErrorEntry {
     pub prediction_l2: f32,
     /// L2 norm of the graph-level target row.
     pub target_l2: f32,
+    /// Mean square energy of the graph-level target row.
+    pub target_mean_square: f32,
     /// L2 norm of `prediction - target`.
     pub residual_l2: f32,
     /// Mean squared error for this graph row.
     pub mean_squared_error: f32,
+    /// Mean squared error normalized by target mean-square energy.
+    pub normalized_mean_squared_error: Option<f32>,
 }
 
 /// Batch-level prediction/target comparison derived from a readout trace.
@@ -331,8 +430,25 @@ pub struct GraphBatchReadoutErrorTrace {
     pub output_shape: (usize, usize),
     /// Average per-graph mean squared error.
     pub mean_squared_error: f32,
+    /// Average per-graph target mean-square energy.
+    pub target_mean_square: f32,
+    /// Average MSE normalized by average target mean-square energy.
+    pub normalized_mean_squared_error: Option<f32>,
     /// Per-graph prediction/target comparison records.
     pub entries: Vec<GraphBatchReadoutErrorEntry>,
+}
+
+fn normalized_mean_squared_error(mse: f32, target_mean_square: f32) -> Option<f32> {
+    if !mse.is_finite() || !target_mean_square.is_finite() {
+        return None;
+    }
+    if target_mean_square > f32::EPSILON {
+        return Some(mse / target_mean_square);
+    }
+    if mse.abs() <= f32::EPSILON {
+        return Some(0.0);
+    }
+    None
 }
 
 fn tensor_rows(tensor: &Tensor, range: Range<usize>) -> PureResult<Tensor> {
@@ -355,8 +471,10 @@ fn tensor_row(tensor: &Tensor, row: usize) -> PureResult<Tensor> {
     tensor_rows(tensor, row..row + 1)
 }
 
-fn tensor_l2(tensor: &Tensor) -> f32 {
-    tensor.squared_l2_norm().sqrt()
+fn tensor_l2(tensor: &Tensor) -> PureResult<f32> {
+    Ok(tensor
+        .squared_l2_norm_with_backend(current_tensor_util_backend_for_values(tensor.data().len()))?
+        .sqrt())
 }
 
 /// Trainable graph-level regressor that wraps a node-wise graph network with a readout head.
@@ -441,7 +559,8 @@ impl Module for ZSpaceGraphRegressor {
         let (rows, cols) = input.shape();
         let mut total = Tensor::zeros(rows, cols)?;
         for (band, grad) in bands.iter_labeled() {
-            if grad.squared_l2_norm() == 0.0 {
+            let backend = current_tensor_util_backend_for_values(grad.data().len());
+            if grad.squared_l2_norm_with_backend(backend)? == 0.0 {
                 continue;
             }
             self.begin_backward_band_pass(band, grad)?;
@@ -451,7 +570,8 @@ impl Module for ZSpaceGraphRegressor {
             })();
             self.end_backward_band_pass(band)?;
             let contribution = result?;
-            total.add_scaled(&contribution, 1.0)?;
+            let backend = current_tensor_util_backend_for_values(total.data().len());
+            total.add_scaled_with_backend(&contribution, 1.0, backend)?;
         }
         Ok(total)
     }
@@ -592,8 +712,8 @@ impl ZSpaceGraphBatchRegressor {
                     graph_index,
                     row_start,
                     row_end,
-                    node_l2: tensor_l2(&node_features),
-                    prediction_l2: tensor_l2(&prediction),
+                    node_l2: tensor_l2(&node_features)?,
+                    prediction_l2: tensor_l2(&prediction)?,
                 });
             }
             predictions.push(prediction);
@@ -674,14 +794,16 @@ impl Module for ZSpaceGraphBatchRegressor {
         let (rows, cols) = input.shape();
         let mut total = Tensor::zeros(rows, cols)?;
         for (band, grad) in bands.iter_labeled() {
-            if grad.squared_l2_norm() == 0.0 {
+            let backend = current_tensor_util_backend_for_values(grad.data().len());
+            if grad.squared_l2_norm_with_backend(backend)? == 0.0 {
                 continue;
             }
             self.begin_backward_band_pass(band, grad)?;
             let result = self.backward(input, grad);
             self.end_backward_band_pass(band)?;
             let contribution = result?;
-            total.add_scaled(&contribution, 1.0)?;
+            let backend = current_tensor_util_backend_for_values(total.data().len());
+            total.add_scaled_with_backend(&contribution, 1.0, backend)?;
         }
         Ok(total)
     }
@@ -730,6 +852,12 @@ mod tests {
     use crate::{Dataset, MeanSquaredError, ModuleTrainer, RoundtableConfig};
     use st_core::backend::device_caps::DeviceCaps;
     use std::num::NonZeroUsize;
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
 
     fn sample_context() -> GraphContext {
         let adjacency =
@@ -783,6 +911,62 @@ mod tests {
 
         let max_grad = GraphReadout::Max.backward(&nodes, &grad).unwrap();
         assert_eq!(max_grad.data(), &[0.0, 0.0, 0.6, -0.15, 0.0, -0.15]);
+    }
+
+    #[test]
+    fn readout_emits_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let nodes = sample_node_features();
+        let grad = Tensor::from_vec(1, 2, vec![0.6, -0.3]).unwrap();
+        let _ = GraphReadout::Mean.forward(&nodes).unwrap();
+        let _ = GraphReadout::Mean.backward(&nodes, &grad).unwrap();
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        let events = events.lock().unwrap();
+        let forward = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "graph_readout"
+                    && data["backend"] == "composite"
+                    && data["readout"] == "mean"
+                    && data["node_rows"] == 3
+                    && data["cols"] == 2
+                    && data["kernel"] == "graph_readout.mean.sum_axis0_scaled"
+            })
+            .expect("graph readout metadata event");
+        assert_eq!(forward.1["requested_backend"], "auto");
+
+        let backward = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "graph_readout_backward"
+                    && data["backend"] == "composite"
+                    && data["readout"] == "mean"
+                    && data["node_rows"] == 3
+                    && data["cols"] == 2
+                    && data["kernel"] == "graph_readout_backward.mean.add_row"
+            })
+            .expect("graph readout backward metadata event");
+        assert_eq!(backward.1["requested_backend"], "auto");
+        assert!(events
+            .iter()
+            .any(|(op_name, data)| *op_name == "sum_axis0_scaled"
+                && data["backend"] == "cpu"
+                && data["requested_backend"] == "auto"));
+        assert!(events
+            .iter()
+            .any(|(op_name, data)| *op_name == "add_row_inplace"
+                && data["backend"] == "cpu"
+                && data["requested_backend"] == "auto"));
     }
 
     #[test]
@@ -877,10 +1061,17 @@ mod tests {
         assert_eq!(errors.output_shape, (2, 2));
         assert_eq!(errors.entries.len(), 2);
         assert!(errors.mean_squared_error.is_finite());
+        assert!(errors.target_mean_square.is_finite());
+        assert!(errors.normalized_mean_squared_error.is_some());
         assert!(errors
             .entries
             .iter()
             .all(|entry| entry.residual_l2.is_finite()));
+        assert!(errors
+            .entries
+            .iter()
+            .all(|entry| entry.target_mean_square.is_finite()
+                && entry.normalized_mean_squared_error.is_some()));
     }
 
     #[test]

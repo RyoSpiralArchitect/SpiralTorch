@@ -3,9 +3,74 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
+use crate::execution::current_tensor_util_backend_for_values;
 use crate::module::{Module, Parameter};
 use crate::{PureResult, Tensor, TensorError};
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 use std::collections::HashMap;
+
+fn validate_finite_value(label: &'static str, value: f32) -> PureResult<()> {
+    if !value.is_finite() {
+        return Err(TensorError::NonFiniteValue { label, value });
+    }
+    Ok(())
+}
+
+fn validate_finite_slice(label: &'static str, values: &[f32]) -> PureResult<()> {
+    for &value in values {
+        validate_finite_value(label, value)?;
+    }
+    Ok(())
+}
+
+fn validate_finite_tensor(label: &'static str, tensor: &Tensor) -> PureResult<()> {
+    validate_finite_slice(label, tensor.data())
+}
+
+fn emit_scaler_meta(
+    op_name: &'static str,
+    rows: usize,
+    cols: usize,
+    backward: bool,
+    broadcast_backend: Option<String>,
+    gradient_reduction_backend: Option<String>,
+    gradient_scale: Option<f32>,
+) {
+    let input_shape = if backward {
+        vec![rows, cols, rows, cols, 1, cols]
+    } else {
+        vec![rows, cols, 1, cols]
+    };
+    emit_tensor_op(op_name, &input_shape, &[rows, cols]);
+    emit_tensor_op_meta(op_name, || {
+        let values = rows.saturating_mul(cols);
+        serde_json::json!({
+            "backend": "composite",
+            "requested_backend": "auto",
+            "kernel": "scaler.scalar",
+            "kind": if backward { "feature_scale_backward" } else { "feature_scale_forward" },
+            "rows": rows,
+            "cols": cols,
+            "values": values,
+            "output_rows": rows,
+            "output_cols": cols,
+            "output_values": values,
+            "gain_cols": cols,
+            "trainable_parameters": cols,
+            "broadcast_backend": broadcast_backend,
+            "gradient_reduction_backend": gradient_reduction_backend,
+            "gradient_scale": gradient_scale,
+            "estimated_broadcast_ops": values,
+            "estimated_gain_gradient_ops": if backward { values.saturating_mul(2) } else { 0 },
+            "estimated_total_ops": if backward {
+                values.saturating_mul(3)
+            } else {
+                values
+            },
+            "empty": rows == 0 || cols == 0,
+        })
+    });
+}
 
 /// Feature-wise scaling layer that learns a multiplicative gain per channel.
 #[derive(Debug)]
@@ -40,6 +105,7 @@ impl Scaler {
                 right: (1, cols),
             });
         }
+        validate_finite_tensor("scaler_gain", &gain)?;
         let baseline = gain.clone();
         Ok(Self {
             gain: Parameter::new(format!("{name}::gain"), gain),
@@ -64,13 +130,21 @@ impl Scaler {
         if rows * cols == 0 {
             return Ok(None);
         }
+        validate_finite_tensor("scaler_gain", gain)?;
+        validate_finite_tensor("scaler_baseline", &self.baseline)?;
 
         let drift = gain
             .data()
             .iter()
             .zip(self.baseline.data().iter())
-            .map(|(gain, reference)| (gain - reference).abs())
-            .collect::<Vec<_>>();
+            .map(|(gain, reference)| {
+                let delta = gain - reference;
+                validate_finite_value("scaler_psi_delta", delta)?;
+                let value = delta.abs();
+                validate_finite_value("scaler_psi_component", value)?;
+                Ok(value)
+            })
+            .collect::<PureResult<Vec<_>>>()?;
 
         Tensor::from_vec(rows, cols, drift).map(Some)
     }
@@ -82,6 +156,12 @@ impl Scaler {
     /// by `epsilon` to avoid exploding updates. After calibration the new gain
     /// becomes the reference baseline for subsequent ψ probes.
     pub fn calibrate(&mut self, samples: &Tensor, epsilon: f32) -> PureResult<()> {
+        if !epsilon.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "scaler_calibrate_epsilon",
+                value: epsilon,
+            });
+        }
         if epsilon < 0.0 {
             return Err(TensorError::InvalidValue {
                 label: "scaler_calibrate_epsilon",
@@ -100,6 +180,7 @@ impl Scaler {
         if rows == 0 {
             return Err(TensorError::InvalidDimensions { rows, cols });
         }
+        validate_finite_tensor("scaler_calibrate_samples", samples)?;
 
         let mut mean = vec![0.0f32; cols];
         let data = samples.data();
@@ -107,11 +188,13 @@ impl Scaler {
             let offset = r * cols;
             for c in 0..cols {
                 mean[c] += data[offset + c];
+                validate_finite_value("scaler_calibrate_mean_sum", mean[c])?;
             }
         }
         let inv_rows = 1.0 / rows as f32;
         for value in &mut mean {
             *value *= inv_rows;
+            validate_finite_value("scaler_calibrate_mean", *value)?;
         }
 
         let mut variance = vec![0.0f32; cols];
@@ -119,26 +202,34 @@ impl Scaler {
             let offset = r * cols;
             for c in 0..cols {
                 let diff = data[offset + c] - mean[c];
-                variance[c] += diff * diff;
+                validate_finite_value("scaler_calibrate_centered", diff)?;
+                let squared = diff * diff;
+                validate_finite_value("scaler_calibrate_variance_sum", squared)?;
+                variance[c] += squared;
+                validate_finite_value("scaler_calibrate_variance_sum", variance[c])?;
             }
         }
 
-        {
-            let gain_tensor = self.gain.value_mut();
-            let gain_data = gain_tensor.data_mut();
-            for (idx, var) in variance.iter().enumerate() {
-                let std = (var / rows as f32).sqrt();
-                let denom = std + epsilon;
-                gain_data[idx] = if denom <= f32::MIN_POSITIVE {
-                    1.0
-                } else {
-                    1.0 / denom
-                };
-            }
+        let mut next_gain = vec![0.0f32; cols];
+        for (idx, var) in variance.iter().enumerate() {
+            let averaged = *var / rows as f32;
+            validate_finite_value("scaler_calibrate_variance", averaged)?;
+            let std = averaged.sqrt();
+            validate_finite_value("scaler_calibrate_stddev", std)?;
+            let denom = std + epsilon;
+            validate_finite_value("scaler_calibrate_denom", denom)?;
+            next_gain[idx] = if denom <= f32::MIN_POSITIVE {
+                1.0
+            } else {
+                1.0 / denom
+            };
+            validate_finite_value("scaler_calibrate_gain", next_gain[idx])?;
         }
 
+        let next_gain = Tensor::from_vec(1, cols, next_gain)?;
+        self.gain.load_value(&next_gain)?;
         self.gain.zero_gradient();
-        self.baseline = self.gain.value().clone();
+        self.baseline = next_gain;
         Ok(())
     }
 }
@@ -153,15 +244,19 @@ impl Module for Scaler {
                 right: (1, cols),
             });
         }
-        let mut output = input.clone();
-        let gain_values = gain.data();
-        let out_data = output.data_mut();
-        for r in 0..rows {
-            let offset = r * cols;
-            for c in 0..cols {
-                out_data[offset + c] *= gain_values[c];
-            }
-        }
+        validate_finite_tensor("scaler_input", input)?;
+        validate_finite_tensor("scaler_gain", gain)?;
+        let broadcast_backend = current_tensor_util_backend_for_values(rows.saturating_mul(cols));
+        let output = input.mul_row_with_backend(gain.data(), broadcast_backend)?;
+        emit_scaler_meta(
+            "scaler_forward",
+            rows,
+            cols,
+            false,
+            Some(broadcast_backend.to_string()),
+            None,
+            None,
+        );
         Ok(output)
     }
 
@@ -173,30 +268,40 @@ impl Module for Scaler {
             });
         }
         let (rows, cols) = input.shape();
+        let gain_cols = self.gain.value().shape().1;
+        if cols != gain_cols {
+            return Err(TensorError::ShapeMismatch {
+                left: input.shape(),
+                right: (rows, gain_cols),
+            });
+        }
+        validate_finite_tensor("scaler_backward_input", input)?;
+        validate_finite_tensor("scaler_backward_grad_output", grad_output)?;
         let gain_values = self.gain.value().data().to_vec();
-        let mut grad_input = grad_output.clone();
-        {
-            let grad_input_data = grad_input.data_mut();
-            for r in 0..rows {
-                let offset = r * cols;
-                for c in 0..cols {
-                    grad_input_data[offset + c] *= gain_values[c];
-                }
-            }
+        validate_finite_slice("scaler_gain", &gain_values)?;
+        if rows == 0 {
+            let output = Tensor::zeros(rows, cols)?;
+            emit_scaler_meta("scaler_backward", rows, cols, true, None, None, None);
+            return Ok(output);
         }
 
-        let mut grad_gain = vec![0.0f32; cols];
-        let input_data = input.data();
-        let grad_out_data = grad_output.data();
-        for r in 0..rows {
-            let offset = r * cols;
-            for c in 0..cols {
-                grad_gain[c] += input_data[offset + c] * grad_out_data[offset + c];
-            }
-        }
-        let batch = rows as f32;
-        let grad_gain_tensor = Tensor::from_vec(1, cols, grad_gain)?.scale(1.0 / batch)?;
+        let reduction_backend = current_tensor_util_backend_for_values(rows.saturating_mul(cols));
+        let grad_input = grad_output.mul_row_with_backend(&gain_values, reduction_backend)?;
+        let grad_gain_product = input.hadamard_with_backend(grad_output, reduction_backend)?;
+        let gradient_scale = 1.0 / rows as f32;
+        let grad_gain = grad_gain_product
+            .try_sum_axis0_scaled_with_backend(gradient_scale, reduction_backend)?;
+        let grad_gain_tensor = Tensor::from_vec(1, cols, grad_gain)?;
         self.gain.accumulate_euclidean(&grad_gain_tensor)?;
+        emit_scaler_meta(
+            "scaler_backward",
+            rows,
+            cols,
+            true,
+            Some(reduction_backend.to_string()),
+            Some(reduction_backend.to_string()),
+            Some(gradient_scale),
+        );
         Ok(grad_input)
     }
 
@@ -233,6 +338,7 @@ impl Module for Scaler {
                     name: param.name().to_string(),
                 });
             };
+            validate_finite_tensor("scaler_gain", value)?;
             param.load_value(value)
         })?;
         self.baseline = self.gain.value().clone();
@@ -243,7 +349,19 @@ impl Module for Scaler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "wgpu")]
+    use crate::execution::{push_backend_policy, BackendPolicy};
+    #[cfg(feature = "wgpu")]
+    use st_core::backend::device_caps::DeviceCaps;
+    #[cfg(feature = "wgpu")]
+    use st_tensor::backend::wgpu_dense;
     use std::collections::HashMap;
+    use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+
+    fn observer_lock() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
 
     #[test]
     fn scaler_forward_scales_each_feature() {
@@ -279,6 +397,226 @@ mod tests {
     }
 
     #[test]
+    fn scaler_forward_backward_emit_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let mut layer = Scaler::new("scale", 2).unwrap();
+        let input = Tensor::from_vec(2, 2, vec![1.0, 0.5, -2.0, 1.5]).unwrap();
+        let grad_out = Tensor::from_vec(2, 2, vec![0.2, -0.4, 0.5, 0.1]).unwrap();
+        let _ = layer.forward(&input).unwrap();
+        let _ = layer.backward(&input, &grad_out).unwrap();
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        let events = events.lock().unwrap();
+        let forward = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "scaler_forward" && data["rows"] == 2 && data["cols"] == 2
+            })
+            .expect("scaler forward metadata event");
+        assert_eq!(forward.1["backend"], "composite");
+        assert_eq!(forward.1["kind"], "feature_scale_forward");
+        assert_eq!(forward.1["broadcast_backend"], "auto");
+
+        let backward = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "scaler_backward" && data["rows"] == 2 && data["cols"] == 2
+            })
+            .expect("scaler backward metadata event");
+        assert_eq!(backward.1["backend"], "composite");
+        assert_eq!(backward.1["kind"], "feature_scale_backward");
+        assert_eq!(backward.1["broadcast_backend"], "auto");
+        assert_eq!(backward.1["gradient_reduction_backend"], "auto");
+        assert_eq!(backward.1["gradient_scale"], 0.5);
+
+        let mul_row = events
+            .iter()
+            .filter(|(op_name, data)| *op_name == "mul_row" && data["rows"] == 2)
+            .count();
+        let hadamard = events
+            .iter()
+            .any(|(op_name, data)| *op_name == "hadamard" && data["rows"] == 2);
+        let reduction = events
+            .iter()
+            .any(|(op_name, data)| *op_name == "sum_axis0_scaled" && data["cols"] == 2);
+        assert_eq!(mul_row, 2);
+        assert!(hadamard);
+        assert!(reduction);
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn scaler_forced_wgpu_uses_mul_row_and_matches_cpu_reference() {
+        if !wgpu_dense::is_available() {
+            return;
+        }
+        let _lock = observer_lock();
+        let previous_threshold = std::env::var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES").ok();
+        std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", "1");
+
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let gain = Tensor::from_vec(1, 4, vec![0.75, -1.25, 0.5, 1.75]).unwrap();
+        let input = Tensor::from_fn(5, 4, |row, col| {
+            ((row * 17 + col * 5) % 19) as f32 * 0.037 - 0.28
+        })
+        .unwrap();
+        let grad_output = Tensor::from_fn(5, 4, |row, col| {
+            ((row * 11 + col * 7) % 13) as f32 * 0.029 - 0.14
+        })
+        .unwrap();
+        let cpu_policy = BackendPolicy::from_device_caps(DeviceCaps::cpu());
+        let mut cpu_layer = Scaler::from_gain("scale_cpu", gain.clone()).unwrap();
+        let cpu_forward = {
+            let _guard = push_backend_policy(cpu_policy);
+            cpu_layer.forward(&input).unwrap()
+        };
+        let cpu_grad_input = {
+            let _guard = push_backend_policy(cpu_policy);
+            cpu_layer.backward(&input, &grad_output).unwrap()
+        };
+
+        let wgpu_policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
+        let mut wgpu_layer = Scaler::from_gain("scale_wgpu", gain).unwrap();
+        let (wgpu_forward, wgpu_grad_input) = {
+            let _guard = push_backend_policy(wgpu_policy);
+            (
+                wgpu_layer.forward(&input).unwrap(),
+                wgpu_layer.backward(&input, &grad_output).unwrap(),
+            )
+        };
+
+        st_tensor::set_tensor_op_meta_observer(previous);
+        match previous_threshold {
+            Some(value) => std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", value),
+            None => std::env::remove_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES"),
+        }
+
+        assert_eq!(cpu_forward.shape(), wgpu_forward.shape());
+        for (idx, (&cpu, &wgpu)) in cpu_forward
+            .data()
+            .iter()
+            .zip(wgpu_forward.data().iter())
+            .enumerate()
+        {
+            let delta = (cpu - wgpu).abs();
+            assert!(
+                delta <= 1e-6,
+                "scaler forward mismatch at {idx}: cpu={cpu} wgpu={wgpu} delta={delta}"
+            );
+        }
+        assert_eq!(cpu_grad_input.shape(), wgpu_grad_input.shape());
+        for (idx, (&cpu, &wgpu)) in cpu_grad_input
+            .data()
+            .iter()
+            .zip(wgpu_grad_input.data().iter())
+            .enumerate()
+        {
+            let delta = (cpu - wgpu).abs();
+            assert!(
+                delta <= 1e-6,
+                "scaler backward input mismatch at {idx}: cpu={cpu} wgpu={wgpu} delta={delta}"
+            );
+        }
+
+        let cpu_gain_grad = cpu_layer.gain().gradient().unwrap();
+        let wgpu_gain_grad = wgpu_layer.gain().gradient().unwrap();
+        for (idx, (&cpu, &wgpu)) in cpu_gain_grad
+            .data()
+            .iter()
+            .zip(wgpu_gain_grad.data().iter())
+            .enumerate()
+        {
+            let delta = (cpu - wgpu).abs();
+            assert!(
+                delta <= 1e-6,
+                "scaler gain gradient mismatch at {idx}: cpu={cpu} wgpu={wgpu} delta={delta}"
+            );
+        }
+
+        let events = events.lock().unwrap();
+        assert!(events
+            .iter()
+            .any(|(op_name, data)| *op_name == "mul_row" && data["backend"] == "wgpu_dense"));
+        assert!(events.iter().any(|(op_name, data)| {
+            *op_name == "scaler_forward"
+                && data["backend"] == "composite"
+                && data["broadcast_backend"] == "wgpu"
+        }));
+        assert!(events.iter().any(|(op_name, data)| {
+            *op_name == "scaler_backward"
+                && data["backend"] == "composite"
+                && data["broadcast_backend"] == "wgpu"
+        }));
+    }
+
+    #[test]
+    fn scaler_empty_batch_backward_returns_empty_input_grad_without_gain_update() {
+        let mut layer = Scaler::new("scale", 2).unwrap();
+        let input = Tensor::from_vec(0, 2, Vec::new()).unwrap();
+        let output = layer.forward(&input).unwrap();
+        assert_eq!(output.shape(), (0, 2));
+        assert!(output.data().is_empty());
+
+        let grad_out = Tensor::from_vec(0, 2, Vec::new()).unwrap();
+        let grad_input = layer.backward(&input, &grad_out).unwrap();
+        assert_eq!(grad_input.shape(), (0, 2));
+        assert!(grad_input.data().is_empty());
+        assert!(layer.gain().gradient().is_none());
+    }
+
+    #[test]
+    fn scaler_forward_rejects_overflowing_output() {
+        let gain = Tensor::from_vec(1, 1, vec![f32::MAX]).unwrap();
+        let layer = Scaler::from_gain("scale", gain).unwrap();
+        let input = Tensor::from_vec(1, 1, vec![2.0]).unwrap();
+
+        let err = layer.forward(&input).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label,
+                value,
+            } if label == "mul_row_output" && value.is_infinite()
+        ));
+    }
+
+    #[test]
+    fn scaler_backward_rejects_non_finite_grad_without_accumulating() {
+        let mut layer = Scaler::new("scale", 2).unwrap();
+        let input = Tensor::from_vec(1, 2, vec![0.5, -0.25]).unwrap();
+        let grad_out = Tensor::from_vec(1, 2, vec![f32::NAN, 0.4]).unwrap();
+
+        let err = layer.backward(&input, &grad_out).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "scaler_backward_grad_output",
+                value,
+            } if value.is_nan()
+        ));
+        assert!(layer.gain().gradient().is_none());
+    }
+
+    #[test]
     fn scaler_from_gain_validates_shape() {
         let gain = Tensor::from_vec(1, 3, vec![1.0, 2.0, 3.0]).unwrap();
         let layer = Scaler::from_gain("scale", gain.clone()).unwrap();
@@ -287,6 +625,21 @@ mod tests {
 
         let err = Scaler::from_gain("scale", Tensor::from_vec(2, 3, vec![0.0; 6]).unwrap());
         assert!(matches!(err, Err(TensorError::ShapeMismatch { .. })));
+    }
+
+    #[test]
+    fn scaler_from_gain_rejects_non_finite_gain() {
+        let gain = Tensor::from_vec(1, 2, vec![1.0, f32::INFINITY]).unwrap();
+
+        let err = Scaler::from_gain("scale", gain).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "scaler_gain",
+                value,
+            } if value.is_infinite()
+        ));
     }
 
     #[test]
@@ -383,6 +736,48 @@ mod tests {
     }
 
     #[test]
+    fn scaler_calibrate_rejects_non_finite_samples_without_mutating_state() {
+        let mut layer = Scaler::new("scale", 2).unwrap();
+        let gain_before = layer.gain().value().clone();
+        let baseline_before = layer.baseline().clone();
+        let samples = Tensor::from_vec(2, 2, vec![1.0, f32::NAN, 2.0, 3.0]).unwrap();
+
+        let err = layer.calibrate(&samples, 1e-3).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "scaler_calibrate_samples",
+                value,
+            } if value.is_nan()
+        ));
+        assert_eq!(layer.gain().value(), &gain_before);
+        assert_eq!(layer.baseline(), &baseline_before);
+        assert!(layer.gain().gradient().is_none());
+    }
+
+    #[test]
+    fn scaler_calibrate_rejects_overflowing_variance_without_mutating_state() {
+        let mut layer = Scaler::new("scale", 1).unwrap();
+        let gain_before = layer.gain().value().clone();
+        let baseline_before = layer.baseline().clone();
+        let samples = Tensor::from_vec(2, 1, vec![f32::MAX, -f32::MAX]).unwrap();
+
+        let err = layer.calibrate(&samples, 1e-3).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "scaler_calibrate_variance_sum",
+                value,
+            } if value.is_infinite()
+        ));
+        assert_eq!(layer.gain().value(), &gain_before);
+        assert_eq!(layer.baseline(), &baseline_before);
+        assert!(layer.gain().gradient().is_none());
+    }
+
+    #[test]
     fn scaler_load_state_updates_baseline() {
         let mut layer = Scaler::new("scale", 2).unwrap();
         let mut state = HashMap::new();
@@ -391,5 +786,29 @@ mod tests {
         layer.load_state_dict(&state).unwrap();
         assert_eq!(layer.gain().value(), &gain);
         assert_eq!(layer.baseline(), &gain);
+    }
+
+    #[test]
+    fn scaler_load_state_rejects_non_finite_gain_without_mutating_baseline() {
+        let mut layer = Scaler::new("scale", 2).unwrap();
+        let gain_before = layer.gain().value().clone();
+        let baseline_before = layer.baseline().clone();
+        let mut state = HashMap::new();
+        state.insert(
+            "scale::gain".to_string(),
+            Tensor::from_vec(1, 2, vec![0.75, f32::NAN]).unwrap(),
+        );
+
+        let err = layer.load_state_dict(&state).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TensorError::NonFiniteValue {
+                label: "scaler_gain",
+                value,
+            } if value.is_nan()
+        ));
+        assert_eq!(layer.gain().value(), &gain_before);
+        assert_eq!(layer.baseline(), &baseline_before);
     }
 }

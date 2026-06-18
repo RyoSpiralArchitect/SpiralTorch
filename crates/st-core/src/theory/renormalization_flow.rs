@@ -15,6 +15,7 @@
 use num_complex::Complex32;
 use st_frac::mellin::MellinLogGrid;
 use st_frac::mellin_types::{ComplexScalar, MellinError, MellinResult};
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -242,10 +243,12 @@ impl RGFlowModel {
     /// Integrates the RG flow across the lattice using a forward Euler step.
     pub fn propagate(&self) -> RGFlowResult<RGFlowSolution> {
         if self.operators.is_empty() {
-            return Ok(RGFlowSolution {
+            let solution = RGFlowSolution {
                 lattice: self.lattice.clone(),
                 trajectories: Vec::new(),
-            });
+            };
+            emit_rg_mellin_flow_meta(self, &solution);
+            return Ok(solution);
         }
 
         let depth = self.lattice.len();
@@ -268,10 +271,12 @@ impl RGFlowModel {
             });
         }
 
-        Ok(RGFlowSolution {
+        let solution = RGFlowSolution {
             lattice: self.lattice.clone(),
             trajectories,
-        })
+        };
+        emit_rg_mellin_flow_meta(self, &solution);
+        Ok(solution)
     }
 
     /// Evaluates the beta function for the operator at the provided coupling.
@@ -349,10 +354,174 @@ impl RGFlowModel {
     }
 }
 
+fn finite_meta_f32(value: f32) -> f64 {
+    if value.is_finite() {
+        value as f64
+    } else {
+        0.0
+    }
+}
+
+fn finite_meta_f64(value: f64) -> f64 {
+    if value.is_finite() {
+        value
+    } else {
+        0.0
+    }
+}
+
+fn emit_rg_mellin_flow_meta(model: &RGFlowModel, solution: &RGFlowSolution) {
+    let operator_count = model.operators.len();
+    let resonance_count = model
+        .operators
+        .iter()
+        .filter(|operator| operator.resonance.is_some())
+        .count();
+    let nonlinear_count = model
+        .operators
+        .iter()
+        .filter(|operator| operator.nonlinear_feedback.abs() > f32::EPSILON)
+        .count();
+
+    let mut scaling_min = f32::INFINITY;
+    let mut scaling_max = f32::NEG_INFINITY;
+    let mut scaling_sum = 0.0f32;
+    let mut initial_abs_sum = 0.0f32;
+    let mut nonlinear_abs_sum = 0.0f32;
+    for operator in &model.operators {
+        scaling_min = scaling_min.min(operator.scaling_dimension);
+        scaling_max = scaling_max.max(operator.scaling_dimension);
+        scaling_sum += operator.scaling_dimension;
+        initial_abs_sum += operator.initial_coupling.abs();
+        nonlinear_abs_sum += operator.nonlinear_feedback.abs();
+    }
+    let operator_den = operator_count.max(1) as f32;
+
+    let mut final_abs_sum = 0.0f32;
+    let mut final_abs_max = 0.0f32;
+    let mut max_abs_coupling = 0.0f32;
+    let mut drift_abs_sum = 0.0f32;
+    let mut unstable_trajectory_count = 0usize;
+    for trajectory in &solution.trajectories {
+        let first = trajectory.values.first().copied().unwrap_or(0.0);
+        let final_value = trajectory.values.last().copied().unwrap_or(0.0);
+        if !trajectory.values.iter().all(|value| value.is_finite()) {
+            unstable_trajectory_count += 1;
+        }
+        final_abs_sum += final_value.abs();
+        final_abs_max = final_abs_max.max(final_value.abs());
+        drift_abs_sum += (final_value - first).abs();
+        for value in &trajectory.values {
+            if value.is_finite() {
+                max_abs_coupling = max_abs_coupling.max(value.abs());
+            }
+        }
+    }
+    let trajectory_den = solution.trajectories.len().max(1) as f32;
+
+    emit_tensor_op(
+        "rg_mellin_flow_propagate",
+        &[solution.lattice.len(), operator_count.max(1)],
+        &[
+            solution.trajectories.len().max(1),
+            solution.lattice.len().max(1),
+        ],
+    );
+    emit_tensor_op_meta("rg_mellin_flow_propagate", || {
+        let mut payload = serde_json::Map::new();
+        payload.insert("backend".into(), "cpu".into());
+        payload.insert("requested_backend".into(), "auto".into());
+        payload.insert("kind".into(), "st_core_rg_mellin_flow_propagate".into());
+        payload.insert("lattice_len".into(), solution.lattice.len().into());
+        payload.insert("operator_count".into(), operator_count.into());
+        payload.insert(
+            "trajectory_count".into(),
+            solution.trajectories.len().into(),
+        );
+        payload.insert("empty_operators".into(), model.operators.is_empty().into());
+        payload.insert("log_step".into(), finite_meta_f32(model.log_step).into());
+        payload.insert("damping".into(), finite_meta_f32(model.damping).into());
+        payload.insert("resonance_count".into(), resonance_count.into());
+        payload.insert("nonlinear_count".into(), nonlinear_count.into());
+        payload.insert(
+            "scaling_dimension_min".into(),
+            finite_meta_f32(if operator_count == 0 {
+                0.0
+            } else {
+                scaling_min
+            })
+            .into(),
+        );
+        payload.insert(
+            "scaling_dimension_max".into(),
+            finite_meta_f32(if operator_count == 0 {
+                0.0
+            } else {
+                scaling_max
+            })
+            .into(),
+        );
+        payload.insert(
+            "scaling_dimension_mean".into(),
+            finite_meta_f32(scaling_sum / operator_den).into(),
+        );
+        payload.insert(
+            "initial_abs_mean".into(),
+            finite_meta_f32(initial_abs_sum / operator_den).into(),
+        );
+        payload.insert(
+            "nonlinear_abs_mean".into(),
+            finite_meta_f32(nonlinear_abs_sum / operator_den).into(),
+        );
+        payload.insert(
+            "final_abs_mean".into(),
+            finite_meta_f32(final_abs_sum / trajectory_den).into(),
+        );
+        payload.insert(
+            "final_abs_max".into(),
+            finite_meta_f32(final_abs_max).into(),
+        );
+        payload.insert(
+            "max_abs_coupling".into(),
+            finite_meta_f32(max_abs_coupling).into(),
+        );
+        payload.insert(
+            "drift_abs_mean".into(),
+            finite_meta_f32(drift_abs_sum / trajectory_den).into(),
+        );
+        payload.insert(
+            "unstable_trajectory_count".into(),
+            unstable_trajectory_count.into(),
+        );
+        payload.insert(
+            "lattice_start".into(),
+            finite_meta_f32(solution.lattice.first().copied().unwrap_or(0.0)).into(),
+        );
+        payload.insert(
+            "lattice_end".into(),
+            finite_meta_f32(solution.lattice.last().copied().unwrap_or(0.0)).into(),
+        );
+        payload.insert(
+            "lattice_span".into(),
+            finite_meta_f64(
+                solution
+                    .lattice
+                    .last()
+                    .zip(solution.lattice.first())
+                    .map(|(last, first)| (*last - *first) as f64)
+                    .unwrap_or(0.0),
+            )
+            .into(),
+        );
+        payload.into()
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use core::f32::consts::PI;
+    use std::sync::{Arc, Mutex};
 
     fn sample_model() -> RGFlowModel {
         let mut model = RGFlowModel::new(0.0, 0.5, 6).unwrap();
@@ -400,5 +569,50 @@ mod tests {
         let traj = solution.trajectory("flow").unwrap();
         // Resonance pushes the coupling upwards at intermediate scales.
         assert!(traj.values.iter().any(|&v| v > 0.1));
+    }
+
+    #[test]
+    fn propagate_emits_backend_meta() {
+        let _lock = crate::telemetry::tensor_observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let mut model = RGFlowModel::new(0.0, 0.25, 5).unwrap();
+        model.damping = 0.1;
+        model.register_operator(RGOperator::new("scalar", 3.0, 1.0));
+        model
+            .register_operator(RGOperator::new("nonlinear", 4.2, 0.2).with_nonlinear_feedback(0.5));
+        let solution = model.propagate().unwrap();
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert_eq!(solution.lattice().len(), 5);
+        assert_eq!(solution.iter().count(), 2);
+
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "rg_mellin_flow_propagate"
+                    && data["kind"] == "st_core_rg_mellin_flow_propagate"
+                    && data["lattice_len"] == 5
+                    && data["operator_count"] == 2
+            })
+            .expect("rg_mellin_flow_propagate metadata event");
+        assert_eq!(meta.1["backend"], "cpu");
+        assert_eq!(meta.1["requested_backend"], "auto");
+        assert_eq!(meta.1["trajectory_count"], 2);
+        assert_eq!(meta.1["empty_operators"], false);
+        assert_eq!(meta.1["nonlinear_count"], 1);
+        assert_eq!(meta.1["resonance_count"], 0);
+        assert_eq!(meta.1["unstable_trajectory_count"], 0);
+        assert!(meta.1["max_abs_coupling"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["drift_abs_mean"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["lattice_span"].as_f64().unwrap_or(0.0) > 0.0);
     }
 }

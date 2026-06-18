@@ -30,6 +30,7 @@
 #[cfg(feature = "kdsl")]
 use super::chrono::ChronoLoopSignal;
 use super::chrono::{ChronoFrame, ChronoHarmonics, ChronoPeak, ChronoSummary};
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 
 /// Indicates the level of maintenance required to stabilise the session.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -170,7 +171,7 @@ impl Maintainer {
     /// Analyses the provided frames and returns a maintenance report.
     pub fn assess(&self, frames: &[ChronoFrame]) -> MaintainerReport {
         if frames.is_empty() {
-            return MaintainerReport {
+            let report = MaintainerReport {
                 status: MaintainerStatus::Dormant,
                 average_drift: 0.0,
                 mean_energy: 0.0,
@@ -183,6 +184,8 @@ impl Maintainer {
                 #[cfg(feature = "kdsl")]
                 spiralk_script: None,
             };
+            emit_maintainer_assessment_meta(frames.len(), 0, &report);
+            return report;
         }
 
         let window = self.config.window.min(frames.len());
@@ -283,7 +286,7 @@ impl Maintainer {
             }
         }
 
-        MaintainerReport {
+        let report = MaintainerReport {
             status,
             average_drift,
             mean_energy,
@@ -295,14 +298,70 @@ impl Maintainer {
             diagnostic: reasons.join("; "),
             #[cfg(feature = "kdsl")]
             spiralk_script,
-        }
+        };
+        emit_maintainer_assessment_meta(frames.len(), window, &report);
+        report
     }
+}
+
+fn emit_maintainer_assessment_meta(frames: usize, window: usize, report: &MaintainerReport) {
+    emit_tensor_op("timeline_maintainer_assessment", &[frames, window], &[1, 8]);
+    emit_tensor_op_meta("timeline_maintainer_assessment", || {
+        let drift_peak_frequency = report
+            .drift_peak
+            .as_ref()
+            .map(|peak| peak.frequency)
+            .unwrap_or(0.0);
+        let drift_peak_magnitude = report
+            .drift_peak
+            .as_ref()
+            .map(|peak| peak.magnitude)
+            .unwrap_or(0.0);
+        let energy_peak_frequency = report
+            .energy_peak
+            .as_ref()
+            .map(|peak| peak.frequency)
+            .unwrap_or(0.0);
+        let energy_peak_magnitude = report
+            .energy_peak
+            .as_ref()
+            .map(|peak| peak.magnitude)
+            .unwrap_or(0.0);
+        serde_json::json!({
+            "backend": "cpu",
+            "requested_backend": "auto",
+            "kind": "st_core_timeline_maintainer_assessment",
+            "frames": frames,
+            "window": window,
+            "status": report.status.as_str(),
+            "should_rewrite": report.should_rewrite(),
+            "average_drift": report.average_drift,
+            "mean_energy": report.mean_energy,
+            "mean_decay": report.mean_decay,
+            "has_drift_peak": report.drift_peak.is_some(),
+            "drift_peak_frequency": drift_peak_frequency,
+            "drift_peak_magnitude": drift_peak_magnitude,
+            "has_energy_peak": report.energy_peak.is_some(),
+            "energy_peak_frequency": energy_peak_frequency,
+            "energy_peak_magnitude": energy_peak_magnitude,
+            "has_suggested_max_scale": report.suggested_max_scale.is_some(),
+            "suggested_max_scale": report.suggested_max_scale.unwrap_or(0.0),
+            "has_suggested_pressure": report.suggested_pressure.is_some(),
+            "suggested_pressure": report.suggested_pressure.unwrap_or(0.0),
+            "diagnostic_chars": report.diagnostic.chars().count(),
+        })
+    });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use core::f32::consts::TAU;
+    use std::sync::{Arc, Mutex};
+
+    fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
+        crate::telemetry::tensor_observer_lock()
+    }
 
     fn frame(step: u64, drift: f32, energy: f32, decay: f32) -> ChronoFrame {
         ChronoFrame {
@@ -380,5 +439,49 @@ mod tests {
         }
         let report = maintainer.assess(&frames);
         assert!(report.drift_peak.is_some());
+    }
+
+    #[test]
+    fn maintainer_assessment_emits_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let maintainer = Maintainer::new(MaintainerConfig {
+            growth_threshold: 0.02,
+            ..MaintainerConfig::default()
+        });
+        let frames = vec![
+            frame(0, 0.05, 1.2, -0.05),
+            frame(1, 0.08, 1.4, -0.06),
+            frame(2, 0.04, 1.6, -0.07),
+        ];
+        let report = maintainer.assess(&frames);
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert!(report.should_rewrite());
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "timeline_maintainer_assessment"
+                    && data["frames"] == 3
+                    && data["status"] == "rewrite"
+            })
+            .expect("timeline_maintainer_assessment metadata event");
+        assert_eq!(meta.1["backend"], "cpu");
+        assert_eq!(meta.1["kind"], "st_core_timeline_maintainer_assessment");
+        assert_eq!(meta.1["frames"], 3);
+        assert_eq!(meta.1["window"], 3);
+        assert_eq!(meta.1["status"], "rewrite");
+        assert_eq!(meta.1["should_rewrite"], true);
+        assert!(meta.1["has_suggested_pressure"].as_bool().unwrap_or(false));
+        assert!(meta.1["diagnostic_chars"].as_u64().unwrap_or(0) > 0);
     }
 }

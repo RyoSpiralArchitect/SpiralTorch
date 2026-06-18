@@ -277,8 +277,13 @@ def summarize_gnn_band_replays(
     return {
         "count": len(entries),
         "bands": {band: _summarize_band(items) for band, items in sorted(by_band.items())},
+        "run": payload.get("run") if isinstance(payload.get("run"), Mapping) else None,
         "trainer": payload.get("trainer") if isinstance(payload.get("trainer"), Mapping) else None,
         "signal": payload.get("signal") if isinstance(payload.get("signal"), Mapping) else None,
+        "readout": payload.get("readout") if isinstance(payload.get("readout"), Mapping) else None,
+        "validation_readout": payload.get("validation_readout")
+        if isinstance(payload.get("validation_readout"), Mapping)
+        else None,
     }
 
 

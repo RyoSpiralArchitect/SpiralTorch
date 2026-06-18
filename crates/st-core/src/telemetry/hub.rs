@@ -38,6 +38,7 @@ use std::sync::{Arc, OnceLock, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 
 use crate::theory::zpulse::{ZScale, ZSource};
 
@@ -787,12 +788,45 @@ pub fn latest_dashboard_frame() -> Option<DashboardFrame> {
 /// Returns up to `limit` frames from the ring, newest first.
 pub fn snapshot_dashboard_frames(limit: usize) -> Vec<DashboardFrame> {
     if limit == 0 {
+        emit_dashboard_snapshot_export_meta(0, &[]);
         return Vec::new();
     }
-    dashboard_ring()
+    let frames = dashboard_ring()
         .read()
-        .map(|guard| guard.iter().rev().take(limit).cloned().collect())
-        .unwrap_or_default()
+        .map(|guard| guard.iter().rev().take(limit).cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    emit_dashboard_snapshot_export_meta(limit, &frames);
+    frames
+}
+
+fn emit_dashboard_snapshot_export_meta(limit: usize, frames: &[DashboardFrame]) {
+    let metrics: usize = frames.iter().map(|frame| frame.metrics.len()).sum();
+    let events: usize = frames.iter().map(|frame| frame.events.len()).sum();
+    let finite_metrics = frames
+        .iter()
+        .flat_map(|frame| frame.metrics.iter())
+        .filter(|metric| metric.value.is_finite())
+        .count();
+    let max_metric_abs = frames
+        .iter()
+        .flat_map(|frame| frame.metrics.iter())
+        .filter_map(|metric| metric.value.is_finite().then_some(metric.value.abs()))
+        .fold(0.0f64, f64::max);
+    emit_tensor_op("dashboard_snapshot_export", &[limit], &[frames.len()]);
+    emit_tensor_op_meta("dashboard_snapshot_export", || {
+        serde_json::json!({
+            "backend": "cpu",
+            "requested_backend": "auto",
+            "kind": "st_core_dashboard_snapshot_export",
+            "requested_limit": limit,
+            "returned_frames": frames.len(),
+            "metrics": metrics,
+            "events": events,
+            "finite_metrics": finite_metrics,
+            "nonfinite_metrics": metrics.saturating_sub(finite_metrics),
+            "max_metric_abs": max_metric_abs,
+        })
+    });
 }
 
 fn push_atlas_route(frame: &AtlasFrame) {
@@ -932,6 +966,12 @@ pub fn set_softlogic_z(feedback: SoftlogicZFeedback) {
 
 /// Stores the most recent region-weighted loss heatmap for explainability.
 pub fn set_region_loss_report(report: AttributionReport) {
+    emit_region_report_store_meta(
+        "region_loss_report_store",
+        "st_core_region_loss_report_store",
+        "loss",
+        &report,
+    );
     match region_report_cell().write() {
         Ok(mut guard) => {
             *guard = Some(report);
@@ -960,6 +1000,12 @@ pub fn get_region_loss_report() -> Option<AttributionReport> {
 
 /// Stores the latest region-weighted delta heatmap.
 pub fn set_region_loss_trend_report(report: AttributionReport) {
+    emit_region_report_store_meta(
+        "region_loss_trend_report_store",
+        "st_core_region_loss_trend_report_store",
+        "trend",
+        &report,
+    );
     match region_trend_report_cell().write() {
         Ok(mut guard) => {
             *guard = Some(report);
@@ -988,6 +1034,12 @@ pub fn get_region_loss_trend_report() -> Option<AttributionReport> {
 
 /// Stores the latest region volatility heatmap derived from the history window.
 pub fn set_region_loss_volatility_report(report: AttributionReport) {
+    emit_region_report_store_meta(
+        "region_loss_volatility_report_store",
+        "st_core_region_loss_volatility_report_store",
+        "volatility",
+        &report,
+    );
     match region_volatility_report_cell().write() {
         Ok(mut guard) => {
             *guard = Some(report);
@@ -1012,6 +1064,61 @@ pub fn get_region_loss_volatility_report() -> Option<AttributionReport> {
         .read()
         .ok()
         .and_then(|guard| guard.as_ref().cloned())
+}
+
+fn emit_region_report_store_meta(
+    op_name: &'static str,
+    kind: &'static str,
+    slot: &'static str,
+    report: &AttributionReport,
+) {
+    let mut finite = 0usize;
+    let mut non_finite = 0usize;
+    let mut positive = 0usize;
+    let mut negative = 0usize;
+    let mut total = 0.0f64;
+    let mut abs_total = 0.0f64;
+    let mut max_abs = 0.0f32;
+    for &value in &report.values {
+        if value.is_finite() {
+            finite += 1;
+            total += value as f64;
+            abs_total += value.abs() as f64;
+            max_abs = max_abs.max(value.abs());
+            if value > 0.0 {
+                positive += 1;
+            } else if value < 0.0 {
+                negative += 1;
+            }
+        } else {
+            non_finite += 1;
+        }
+    }
+    emit_tensor_op(op_name, &[report.rows, report.cols], &[report.values.len()]);
+    emit_tensor_op_meta(op_name, || {
+        serde_json::json!({
+            "backend": "cpu",
+            "requested_backend": "auto",
+            "kind": kind,
+            "slot": slot,
+            "algorithm": report.metadata.algorithm.as_str(),
+            "rows": report.rows,
+            "cols": report.cols,
+            "values": report.values.len(),
+            "finite_values": finite,
+            "non_finite_values": non_finite,
+            "positive_values": positive,
+            "negative_values": negative,
+            "mean_value": if finite == 0 { 0.0 } else { total / finite as f64 },
+            "mean_abs_value": if finite == 0 { 0.0 } else { abs_total / finite as f64 },
+            "max_abs_value": max_abs,
+            "has_layer": report.metadata.layer.is_some(),
+            "has_target": report.metadata.target.is_some(),
+            "has_steps": report.metadata.steps.is_some(),
+            "steps": report.metadata.steps.unwrap_or(0),
+            "extras": report.metadata.extras.len(),
+        })
+    });
 }
 
 /// Returns the latest SoftLogic Z feedback sample if one has been recorded.
@@ -1896,13 +2003,14 @@ pub fn get_collapse_pulse() -> Option<CollapsePulse> {
 mod tests {
     use super::*;
     use crate::telemetry::chrono::{ChronoHarmonics, ChronoPeak, ChronoSummary};
-    use crate::telemetry::dashboard::DashboardMetric;
+    use crate::telemetry::dashboard::{DashboardEvent, DashboardMetric, EventSeverity};
     use crate::telemetry::maintainer::MaintainerStatus;
+    use crate::telemetry::xai_report::AttributionMetadata;
     #[cfg(feature = "psi")]
     use crate::theory::spiral_dynamics::HopfRegime;
     #[cfg(feature = "psi")]
     use std::collections::HashMap;
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::{Arc, Mutex, OnceLock};
     use std::time::SystemTime;
 
     fn atlas_test_lock() -> &'static Mutex<()> {
@@ -1924,6 +2032,15 @@ mod tests {
             min_energy: 1.5,
             max_energy: 2.5,
         }
+    }
+
+    fn sample_attribution_report(algorithm: &str, values: Vec<f32>) -> AttributionReport {
+        let mut metadata = AttributionMetadata::for_algorithm(algorithm);
+        metadata.layer = Some("region.readout".to_string());
+        metadata.target = Some("loss".to_string());
+        metadata.steps = Some(4);
+        metadata.insert_extra_number("global_loss_ema", 0.25);
+        AttributionReport::new(metadata, 2, 2, values)
     }
 
     #[test]
@@ -2205,6 +2322,7 @@ mod tests {
 
     #[test]
     fn dashboard_ring_records_frames() {
+        let _guard = atlas_test_lock().lock().unwrap();
         let baseline = snapshot_dashboard_frames(usize::MAX).len();
 
         let mut frame_a = DashboardFrame::new(SystemTime::now());
@@ -2227,6 +2345,121 @@ mod tests {
         let expanded = snapshot_dashboard_frames(baseline + 2);
         assert!(expanded.len() >= baseline + 2);
         assert!(snapshot_dashboard_frames(0).is_empty());
+    }
+
+    #[test]
+    fn dashboard_snapshot_export_emits_backend_meta() {
+        let _guard = atlas_test_lock().lock().unwrap();
+        let _observer_lock = crate::telemetry::tensor_observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let mut frame = DashboardFrame::new(SystemTime::now());
+        frame.push_metric(DashboardMetric::new("dashboard.export.loss", 0.25));
+        frame.push_event(DashboardEvent {
+            message: "exported".to_string(),
+            severity: EventSeverity::Info,
+        });
+        push_dashboard_frame(frame);
+        let snapshot = snapshot_dashboard_frames(3);
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert!(!snapshot.is_empty());
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "dashboard_snapshot_export"
+                    && data["requested_limit"] == 3
+                    && data["returned_frames"].as_u64().unwrap_or(0) > 0
+            })
+            .expect("dashboard_snapshot_export metadata event");
+        assert_eq!(meta.1["backend"], "cpu");
+        assert_eq!(meta.1["kind"], "st_core_dashboard_snapshot_export");
+        assert!(meta.1["metrics"].as_u64().unwrap_or(0) > 0);
+    }
+
+    #[test]
+    fn region_report_stores_emit_backend_meta() {
+        let _guard = atlas_test_lock().lock().unwrap();
+        let _observer_lock = crate::telemetry::tensor_observer_lock();
+        clear_region_loss_report();
+        clear_region_loss_trend_report();
+        clear_region_loss_volatility_report();
+
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        set_region_loss_report(sample_attribution_report(
+            "region-loss-heatmap",
+            vec![0.1, 0.2, 0.0, 0.4],
+        ));
+        set_region_loss_trend_report(sample_attribution_report(
+            "region-loss-delta",
+            vec![0.2, -0.1, 0.0, 0.3],
+        ));
+        set_region_loss_volatility_report(sample_attribution_report(
+            "region-loss-volatility",
+            vec![0.05, 0.0, 0.1, 0.2],
+        ));
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert!(get_region_loss_report().is_some());
+        assert!(get_region_loss_trend_report().is_some());
+        assert!(get_region_loss_volatility_report().is_some());
+
+        let events = events.lock().unwrap();
+        let loss = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "region_loss_report_store"
+                    && data["slot"] == "loss"
+                    && data["algorithm"] == "region-loss-heatmap"
+            })
+            .expect("region_loss_report_store metadata event");
+        assert_eq!(loss.1["backend"], "cpu");
+        assert_eq!(loss.1["kind"], "st_core_region_loss_report_store");
+        assert_eq!(loss.1["rows"], 2);
+        assert_eq!(loss.1["cols"], 2);
+        assert_eq!(loss.1["extras"], 1);
+
+        let trend = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "region_loss_trend_report_store"
+                    && data["slot"] == "trend"
+                    && data["algorithm"] == "region-loss-delta"
+            })
+            .expect("region_loss_trend_report_store metadata event");
+        assert_eq!(trend.1["kind"], "st_core_region_loss_trend_report_store");
+        assert_eq!(trend.1["positive_values"], 2);
+        assert_eq!(trend.1["negative_values"], 1);
+
+        let volatility = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "region_loss_volatility_report_store"
+                    && data["slot"] == "volatility"
+                    && data["algorithm"] == "region-loss-volatility"
+            })
+            .expect("region_loss_volatility_report_store metadata event");
+        assert_eq!(
+            volatility.1["kind"],
+            "st_core_region_loss_volatility_report_store"
+        );
+        assert!(volatility.1["max_abs_value"].as_f64().unwrap_or(0.0) > 0.0);
     }
 
     #[test]

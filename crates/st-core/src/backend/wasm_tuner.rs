@@ -5,6 +5,7 @@
 
 use crate::backend::wgpu_heuristics::Choice;
 use serde::{Deserialize, Serialize};
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 use std::cmp::{max, min, Ordering};
 use std::fmt;
 
@@ -297,13 +298,16 @@ impl WasmTunerTable {
         k: usize,
         subgroup: bool,
     ) -> Option<Choice> {
-        self.find_index(rows, cols, k, subgroup).map(|index| {
+        let index = self.find_index(rows, cols, k, subgroup);
+        let choice = index.map(|index| {
             let mut out = base;
             if let Some(record) = self.records.get(index) {
                 record.apply(&mut out);
             }
             out
-        })
+        });
+        emit_wasm_tuner_choice_meta(self.records.len(), index, choice, rows, cols, k, subgroup);
+        choice
     }
 
     /// Find the index of the first record matching the workload parameters.
@@ -338,9 +342,65 @@ impl WasmTunerTable {
     }
 }
 
+fn emit_wasm_tuner_choice_meta(
+    records: usize,
+    index: Option<usize>,
+    choice: Option<Choice>,
+    rows: usize,
+    cols: usize,
+    k: usize,
+    subgroup: bool,
+) {
+    emit_tensor_op(
+        "wasm_tuner_choice",
+        &[rows, cols, k],
+        &[usize::from(choice.is_some()), records],
+    );
+    emit_tensor_op_meta("wasm_tuner_choice", || {
+        let choice = choice.unwrap_or(Choice {
+            use_2ce: false,
+            wg: 0,
+            kl: 0,
+            ch: 0,
+            algo_topk: 0,
+            ctile: 0,
+            mode_midk: 0,
+            mode_bottomk: 0,
+            tile_cols: 0,
+            radix: 0,
+            segments: 0,
+        });
+        serde_json::json!({
+            "kind": "st_core_wasm_tuner_choice",
+            "backend": "wgpu",
+            "requested_backend": "auto",
+            "status": if index.is_some() { "hit" } else { "miss" },
+            "rows": rows,
+            "cols": cols,
+            "k": k,
+            "subgroup": subgroup,
+            "records": records,
+            "matched": index.is_some(),
+            "record_index": index.unwrap_or(0),
+            "use_2ce": choice.use_2ce,
+            "workgroup": choice.wg,
+            "lanes": choice.kl,
+            "channel_stride": choice.ch,
+            "algo_topk": choice.algo_topk,
+            "mode_midk": choice.mode_midk,
+            "mode_bottomk": choice.mode_bottomk,
+            "compaction_tile": choice.ctile,
+            "tile_cols": choice.tile_cols,
+            "fft_radix": choice.radix,
+            "fft_segments": choice.segments,
+        })
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
 
     fn base_choice() -> Choice {
         Choice {
@@ -533,5 +593,123 @@ mod tests {
         assert_eq!(tail.tile_cols, Some(4096));
         assert!(table.remove(10).is_none());
         assert!(!table.replace(10, tail));
+    }
+
+    #[test]
+    fn choose_emits_backend_meta() {
+        let _lock = crate::telemetry::tensor_observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let table = WasmTunerTable::from_records(vec![WasmTunerRecord {
+            rows_min: Some(256),
+            rows_max: None,
+            cols_min: 0,
+            cols_max: 8192,
+            k_min: 0,
+            k_max: 128,
+            subgroup: Some(true),
+            algo_topk: Some(2),
+            ctile: Some(512),
+            wg: Some(256),
+            kl: Some(16),
+            ch: None,
+            mode_midk: None,
+            mode_bottomk: None,
+            tile_cols: Some(1024),
+            radix: Some(4),
+            segments: Some(2),
+            use_2ce: Some(true),
+        }]);
+        let choice = table
+            .choose(base_choice(), 512, 4096, 64, true)
+            .expect("tuner hit");
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert_eq!(choice.wg, 256);
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "wasm_tuner_choice"
+                    && data["kind"] == "st_core_wasm_tuner_choice"
+                    && data["rows"] == 512
+                    && data["cols"] == 4096
+                    && data["k"] == 64
+                    && data["records"] == 1
+            })
+            .expect("wasm tuner choice metadata event");
+        assert_eq!(meta.1["backend"], "wgpu");
+        assert_eq!(meta.1["status"], "hit");
+        assert_eq!(meta.1["matched"], true);
+        assert_eq!(meta.1["records"], 1);
+        assert_eq!(meta.1["record_index"], 0);
+        assert_eq!(meta.1["workgroup"], 256);
+        assert_eq!(meta.1["lanes"], 16);
+        assert_eq!(meta.1["compaction_tile"], 512);
+    }
+
+    #[test]
+    fn choose_miss_emits_backend_meta() {
+        let _lock = crate::telemetry::tensor_observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let table = WasmTunerTable::from_records(vec![WasmTunerRecord {
+            rows_min: Some(256),
+            rows_max: None,
+            cols_min: 0,
+            cols_max: 8192,
+            k_min: 0,
+            k_max: 128,
+            subgroup: Some(true),
+            algo_topk: Some(2),
+            ctile: Some(512),
+            wg: Some(256),
+            kl: Some(16),
+            ch: None,
+            mode_midk: None,
+            mode_bottomk: None,
+            tile_cols: Some(1024),
+            radix: Some(4),
+            segments: Some(2),
+            use_2ce: Some(true),
+        }]);
+        let choice = table.choose(base_choice(), 64, 16_384, 64, false);
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert!(choice.is_none());
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "wasm_tuner_choice"
+                    && data["kind"] == "st_core_wasm_tuner_choice"
+                    && data["rows"] == 64
+                    && data["cols"] == 16_384
+                    && data["k"] == 64
+                    && data["records"] == 1
+            })
+            .expect("wasm tuner miss metadata event");
+        assert_eq!(meta.1["backend"], "wgpu");
+        assert_eq!(meta.1["status"], "miss");
+        assert_eq!(meta.1["matched"], false);
+        assert_eq!(meta.1["records"], 1);
+        assert_eq!(meta.1["record_index"], 0);
+        assert_eq!(meta.1["workgroup"], 0);
+        assert_eq!(meta.1["lanes"], 0);
+        assert_eq!(meta.1["compaction_tile"], 0);
     }
 }

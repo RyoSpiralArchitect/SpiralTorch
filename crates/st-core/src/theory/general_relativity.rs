@@ -29,7 +29,7 @@ use std::f64::consts::{FRAC_1_SQRT_2, PI};
 
 use nalgebra::{DMatrix, Matrix3, Matrix4, SymmetricEigen};
 use num_complex::Complex64;
-use st_tensor::{dlpack::DLManagedTensor, PureResult, Tensor};
+use st_tensor::{dlpack::DLManagedTensor, emit_tensor_op, emit_tensor_op_meta, PureResult, Tensor};
 use thiserror::Error;
 
 const DIM: usize = 4;
@@ -924,12 +924,14 @@ impl DimensionalReduction {
             .metric()
             .effective_newton_constant(constants, internal_volume);
 
-        Ok(Self {
+        let reduction = Self {
             effective_metric,
             gauge_field: gauge_potential,
             scalar_moduli,
             effective_newton_constant,
-        })
+        };
+        emit_dimensional_reduction_meta(geometry, internal_volume, &reduction);
+        Ok(reduction)
     }
 
     /// Effective four-dimensional metric after applying the warp factor.
@@ -1113,12 +1115,14 @@ impl ZRelativityModel {
             8.0 * PI * reduction.effective_newton_constant() / constants.speed_of_light.powi(4);
         let field_equations = ZRelativityFieldEquation::new(lhs, prefactor);
 
-        Ok(Self {
+        let model = Self {
             geometry,
             base_model,
             reduction,
             field_equations,
-        })
+        };
+        emit_zrelativity_assemble_meta(&model, internal_volume, cosmological_constant);
+        Ok(model)
     }
 
     /// Exposes the block metric as a SpiralTorch tensor for downstream processing.
@@ -1158,7 +1162,7 @@ impl ZRelativityModel {
             None => None,
         };
 
-        Ok(ZRelativityTensorBundle {
+        let bundle = ZRelativityTensorBundle {
             block_metric: self.as_tensor()?,
             effective_metric: self.effective_metric_tensor()?,
             gauge_field: self.gauge_tensor()?,
@@ -1167,13 +1171,246 @@ impl ZRelativityModel {
             warp: warp_tensor,
             internal_volume_density: self.geometry.internal_volume_density() as f32,
             field_prefactor: self.field_equations.prefactor() as f32,
-        })
+        };
+        emit_zrelativity_tensor_bundle_meta(self, &bundle);
+        Ok(bundle)
     }
 
     /// Returns the learnable flags propagated from the metric construction.
     pub fn learnable_flags(&self) -> LearnableFlags {
         self.geometry.metric().learnable_flags()
     }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct MatrixAbsSummary {
+    finite: usize,
+    non_finite: usize,
+    mean_abs: f64,
+    max_abs: f64,
+    frobenius_norm: f64,
+}
+
+fn finite_or_zero(value: f64) -> f64 {
+    if value.is_finite() {
+        value
+    } else {
+        0.0
+    }
+}
+
+fn matrix_abs_summary(values: impl IntoIterator<Item = f64>) -> MatrixAbsSummary {
+    let mut finite = 0usize;
+    let mut non_finite = 0usize;
+    let mut abs_total = 0.0;
+    let mut max_abs = 0.0;
+    let mut square_total = 0.0;
+    for value in values {
+        if value.is_finite() {
+            let abs = value.abs();
+            finite += 1;
+            abs_total += abs;
+            max_abs = f64::max(max_abs, abs);
+            square_total += value * value;
+        } else {
+            non_finite += 1;
+        }
+    }
+    MatrixAbsSummary {
+        finite,
+        non_finite,
+        mean_abs: if finite == 0 {
+            0.0
+        } else {
+            abs_total / finite as f64
+        },
+        max_abs,
+        frobenius_norm: square_total.sqrt(),
+    }
+}
+
+fn dmatrix_abs_summary(matrix: &DMatrix<f64>) -> MatrixAbsSummary {
+    matrix_abs_summary(matrix.iter().copied())
+}
+
+fn matrix4_abs_summary(matrix: &Matrix4<f64>) -> MatrixAbsSummary {
+    matrix_abs_summary(matrix.iter().copied())
+}
+
+fn tensor_value_count(tensor: &Tensor) -> usize {
+    let (rows, cols) = tensor.shape();
+    rows.saturating_mul(cols)
+}
+
+fn emit_dimensional_reduction_meta(
+    geometry: &ProductGeometry,
+    internal_volume: f64,
+    reduction: &DimensionalReduction,
+) {
+    let total_dim = geometry.total_dimension();
+    let internal_dim = geometry.internal().dimension();
+    let flags = geometry.metric().learnable_flags();
+    let block = dmatrix_abs_summary(geometry.metric().block_matrix());
+    let effective = matrix4_abs_summary(reduction.effective_metric().components());
+    let gauge = dmatrix_abs_summary(reduction.gauge_field().components());
+    let scalar = dmatrix_abs_summary(reduction.scalar_moduli().components());
+    let warp_scale = geometry
+        .metric()
+        .warp()
+        .map(|warp| warp.scale())
+        .unwrap_or(1.0);
+
+    emit_tensor_op(
+        "zrelativity_dimensional_reduction",
+        &[total_dim, total_dim],
+        &[DIM + internal_dim, DIM + internal_dim],
+    );
+    emit_tensor_op_meta("zrelativity_dimensional_reduction", || {
+        serde_json::json!({
+            "backend": "cpu",
+            "requested_backend": "auto",
+            "kind": "st_core_zrelativity_dimensional_reduction",
+            "base_dim": DIM,
+            "internal_dim": internal_dim,
+            "total_dim": total_dim,
+            "spacetime_patches": geometry.spacetime().patches.len(),
+            "internal_patches": geometry.internal().patches.len(),
+            "has_warp": geometry.metric().warp().is_some(),
+            "warp_scale": finite_or_zero(warp_scale),
+            "learnable_warp": flags.warp,
+            "learnable_mixed": flags.mixed,
+            "learnable_internal": flags.internal,
+            "internal_volume": finite_or_zero(internal_volume),
+            "internal_volume_density": finite_or_zero(geometry.internal_volume_density()),
+            "effective_newton_constant": finite_or_zero(reduction.effective_newton_constant()),
+            "effective_metric_determinant": finite_or_zero(reduction.effective_metric().determinant()),
+            "effective_volume_element": finite_or_zero(
+                reduction.effective_metric().volume_element().unwrap_or(0.0)
+            ),
+            "block_finite": block.finite,
+            "block_non_finite": block.non_finite,
+            "block_abs_mean": block.mean_abs,
+            "block_abs_max": block.max_abs,
+            "block_frobenius_norm": block.frobenius_norm,
+            "effective_abs_mean": effective.mean_abs,
+            "effective_abs_max": effective.max_abs,
+            "effective_frobenius_norm": effective.frobenius_norm,
+            "gauge_abs_mean": gauge.mean_abs,
+            "gauge_abs_max": gauge.max_abs,
+            "gauge_frobenius_norm": gauge.frobenius_norm,
+            "scalar_abs_mean": scalar.mean_abs,
+            "scalar_abs_max": scalar.max_abs,
+            "scalar_frobenius_norm": scalar.frobenius_norm,
+            "scalar_volume_density": finite_or_zero(reduction.scalar_moduli().volume_density()),
+        })
+    });
+}
+
+fn emit_zrelativity_assemble_meta(
+    model: &ZRelativityModel,
+    internal_volume: f64,
+    cosmological_constant: f64,
+) {
+    let total_dim = model.geometry.total_dimension();
+    let internal_dim = model.geometry.internal().dimension();
+    let flags = model.learnable_flags();
+    let lhs = dmatrix_abs_summary(model.field_equations.lhs());
+
+    emit_tensor_op(
+        "zrelativity_model_assemble",
+        &[total_dim, total_dim],
+        &[total_dim, total_dim],
+    );
+    emit_tensor_op_meta("zrelativity_model_assemble", || {
+        serde_json::json!({
+            "backend": "cpu",
+            "requested_backend": "auto",
+            "kind": "st_core_zrelativity_model_assemble",
+            "base_dim": DIM,
+            "internal_dim": internal_dim,
+            "total_dim": total_dim,
+            "internal_volume": finite_or_zero(internal_volume),
+            "cosmological_constant": finite_or_zero(cosmological_constant),
+            "field_prefactor": finite_or_zero(model.field_equations.prefactor()),
+            "effective_newton_constant": finite_or_zero(
+                model.reduction.effective_newton_constant()
+            ),
+            "learnable_warp": flags.warp,
+            "learnable_mixed": flags.mixed,
+            "learnable_internal": flags.internal,
+            "boundary_conditions": model.base_model.boundary_conditions.len(),
+            "spacetime_patches": model.geometry.spacetime().patches.len(),
+            "internal_patches": model.geometry.internal().patches.len(),
+            "has_warp": model.geometry.metric().warp().is_some(),
+            "lhs_rows": model.field_equations.lhs().nrows(),
+            "lhs_cols": model.field_equations.lhs().ncols(),
+            "lhs_finite": lhs.finite,
+            "lhs_non_finite": lhs.non_finite,
+            "lhs_abs_mean": lhs.mean_abs,
+            "lhs_abs_max": lhs.max_abs,
+            "lhs_frobenius_norm": lhs.frobenius_norm,
+            "base_scalar_curvature": finite_or_zero(
+                model.base_model.diagnostics.scalar_curvature
+            ),
+            "base_kretschmann": finite_or_zero(model.base_model.diagnostics.kretschmann),
+            "base_ricci_square": finite_or_zero(model.base_model.diagnostics.ricci_square),
+        })
+    });
+}
+
+fn emit_zrelativity_tensor_bundle_meta(model: &ZRelativityModel, bundle: &ZRelativityTensorBundle) {
+    let total_dim = model.geometry.total_dimension();
+    let internal_dim = model.geometry.internal().dimension();
+    let flags = model.learnable_flags();
+    let block_shape = bundle.block_metric.shape();
+    let effective_shape = bundle.effective_metric.shape();
+    let gauge_shape = bundle.gauge_field.shape();
+    let scalar_shape = bundle.scalar_moduli.shape();
+    let field_shape = bundle.field_equation.shape();
+    let warp_shape = bundle.warp.as_ref().map(Tensor::shape).unwrap_or((0, 0));
+    let tensor_count = 5 + if bundle.warp.is_some() { 1 } else { 0 };
+    let total_values = tensor_value_count(&bundle.block_metric)
+        + tensor_value_count(&bundle.effective_metric)
+        + tensor_value_count(&bundle.gauge_field)
+        + tensor_value_count(&bundle.scalar_moduli)
+        + tensor_value_count(&bundle.field_equation)
+        + bundle.warp.as_ref().map(tensor_value_count).unwrap_or(0);
+
+    emit_tensor_op(
+        "zrelativity_tensor_bundle",
+        &[total_dim, total_dim],
+        &[tensor_count, total_values.max(1)],
+    );
+    emit_tensor_op_meta("zrelativity_tensor_bundle", || {
+        serde_json::json!({
+            "backend": "cpu",
+            "requested_backend": "auto",
+            "kind": "st_core_zrelativity_tensor_bundle",
+            "base_dim": DIM,
+            "internal_dim": internal_dim,
+            "total_dim": total_dim,
+            "tensor_count": tensor_count,
+            "total_values": total_values,
+            "has_warp": bundle.warp.is_some(),
+            "learnable_warp": flags.warp,
+            "learnable_mixed": flags.mixed,
+            "learnable_internal": flags.internal,
+            "internal_volume_density": finite_or_zero(bundle.internal_volume_density as f64),
+            "field_prefactor": finite_or_zero(bundle.field_prefactor as f64),
+            "block_rows": block_shape.0,
+            "block_cols": block_shape.1,
+            "effective_rows": effective_shape.0,
+            "effective_cols": effective_shape.1,
+            "gauge_rows": gauge_shape.0,
+            "gauge_cols": gauge_shape.1,
+            "scalar_rows": scalar_shape.0,
+            "scalar_cols": scalar_shape.1,
+            "field_rows": field_shape.0,
+            "field_cols": field_shape.1,
+            "warp_rows": warp_shape.0,
+            "warp_cols": warp_shape.1,
+        })
+    });
 }
 
 /// First derivatives of the metric tensor (∂_ρ g_{μν}).
@@ -2233,6 +2470,7 @@ mod tests {
     use approx::assert_relative_eq;
     use nalgebra::{DMatrix, DVector, Matrix4, Vector4};
     use num_complex::Complex64;
+    use std::sync::{Arc, Mutex};
 
     fn assign_riemann_component(
         tensor: &mut [[[[f64; DIM]; DIM]; DIM]; DIM],
@@ -2927,6 +3165,16 @@ mod tests {
         let constants = PhysicalConstants::new(6.67430e-11, 299_792_458.0);
         let internal_volume = 2.0 * PI;
 
+        let _lock = crate::telemetry::tensor_observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
         let zr_model = ZRelativityModel::assemble(
             geometry.clone(),
             base_model,
@@ -2937,6 +3185,8 @@ mod tests {
         .unwrap();
 
         let bundle = zr_model.tensor_bundle().unwrap();
+        st_tensor::set_tensor_op_meta_observer(previous);
+
         assert_eq!(
             bundle.block_metric.shape(),
             (geometry.total_dimension(), geometry.total_dimension())
@@ -2955,6 +3205,68 @@ mod tests {
         assert_relative_eq!(bundle.warp.unwrap().data()[0], 2.0_f32, epsilon = 1e-6);
         assert!(bundle.internal_volume_density > 0.0);
         assert!(bundle.field_prefactor >= 0.0);
+
+        let events = events.lock().unwrap();
+        let reduction_meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "zrelativity_dimensional_reduction"
+                    && data["internal_dim"] == 2
+                    && data["total_dim"] == 6
+                    && data["learnable_warp"] == true
+                    && data["learnable_mixed"] == true
+                    && data["learnable_internal"] == true
+            })
+            .expect("zrelativity_dimensional_reduction metadata event");
+        assert_eq!(reduction_meta.1["backend"], "cpu");
+        assert_eq!(
+            reduction_meta.1["kind"],
+            "st_core_zrelativity_dimensional_reduction"
+        );
+        assert_eq!(reduction_meta.1["total_dim"], 6);
+        assert_eq!(reduction_meta.1["learnable_warp"], true);
+        assert_eq!(reduction_meta.1["learnable_mixed"], true);
+        assert_eq!(reduction_meta.1["learnable_internal"], true);
+        assert!(reduction_meta.1["gauge_abs_max"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(
+            reduction_meta.1["scalar_volume_density"]
+                .as_f64()
+                .unwrap_or(0.0)
+                > 0.0
+        );
+
+        let assemble_meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "zrelativity_model_assemble"
+                    && data["kind"] == "st_core_zrelativity_model_assemble"
+                    && data["lhs_rows"] == 6
+                    && data["lhs_cols"] == 6
+                    && data["has_warp"] == true
+            })
+            .expect("zrelativity_model_assemble metadata event");
+        assert_eq!(assemble_meta.1["lhs_rows"], 6);
+        assert_eq!(assemble_meta.1["lhs_cols"], 6);
+        assert_eq!(assemble_meta.1["has_warp"], true);
+        assert!(assemble_meta.1["field_prefactor"].as_f64().unwrap_or(0.0) >= 0.0);
+
+        let bundle_meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "zrelativity_tensor_bundle"
+                    && data["kind"] == "st_core_zrelativity_tensor_bundle"
+                    && data["tensor_count"] == 6
+                    && data["block_rows"] == 6
+                    && data["block_cols"] == 6
+                    && data["gauge_cols"] == 2
+            })
+            .expect("zrelativity_tensor_bundle metadata event");
+        assert_eq!(bundle_meta.1["tensor_count"], 6);
+        assert_eq!(bundle_meta.1["block_rows"], 6);
+        assert_eq!(bundle_meta.1["block_cols"], 6);
+        assert_eq!(bundle_meta.1["gauge_cols"], 2);
+        assert_eq!(bundle_meta.1["has_warp"], true);
+        assert!(bundle_meta.1["total_values"].as_u64().unwrap_or(0) > 0);
     }
 
     #[test]

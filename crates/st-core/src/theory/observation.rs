@@ -25,6 +25,7 @@ use crate::theory::microlocal_bank::GaugeBank;
 use crate::theory::observability::{
     ObservabilityAssessment, ObservabilityConfig, ObservationalCoalgebra,
 };
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 
 /// Named observation counts grouped by coalgebra depth.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -213,7 +214,7 @@ impl ObservationBridge {
         let microlocal_feedback = merge_feedback(&drives);
         let pulses = pulse_summary(report, &gauges);
 
-        ObservationBridgeSnapshot {
+        let snapshot = ObservationBridgeSnapshot {
             counts,
             depth_counts,
             assessment,
@@ -222,8 +223,220 @@ impl ObservationBridge {
             softlogic_feedback: report.feedback.clone(),
             gauges,
             pulses,
-        }
+        };
+        emit_observation_bridge_snapshot_meta(&snapshot);
+        snapshot
     }
+}
+
+fn emit_observation_bridge_snapshot_meta(snapshot: &ObservationBridgeSnapshot) {
+    let efficiency_count = snapshot.assessment.efficiency.len();
+    let (efficiency_min, efficiency_max, efficiency_mean) = if efficiency_count == 0 {
+        (0.0, 0.0, 0.0)
+    } else {
+        let mut min = f64::INFINITY;
+        let mut max = 0.0f64;
+        let mut total = 0.0f64;
+        for value in snapshot.assessment.efficiency.iter().copied() {
+            let value = if value.is_finite() { value } else { 0.0 };
+            min = min.min(value);
+            max = max.max(value);
+            total += value;
+        }
+        (min, max, total / efficiency_count as f64)
+    };
+    let matched_template_gauges = snapshot
+        .gauges
+        .iter()
+        .filter(|summary| summary.matched_template)
+        .count();
+    let quality_samples = snapshot
+        .gauges
+        .iter()
+        .filter(|summary| summary.quality.is_some())
+        .count();
+    let band_total = snapshot.softlogic_feedback.band_energy.0
+        + snapshot.softlogic_feedback.band_energy.1
+        + snapshot.softlogic_feedback.band_energy.2;
+    let feedback = snapshot.microlocal_feedback.as_ref();
+    emit_tensor_op(
+        "observation_bridge_ingest",
+        &[snapshot.gauges.len(), snapshot.depth_counts.len()],
+        &[1, snapshot.depth_counts.len().max(1)],
+    );
+    emit_tensor_op_meta("observation_bridge_ingest", || {
+        let mut payload = serde_json::Map::new();
+        payload.insert("backend".into(), serde_json::json!("cpu"));
+        payload.insert("requested_backend".into(), serde_json::json!("auto"));
+        payload.insert(
+            "kind".into(),
+            serde_json::json!("st_core_observation_bridge_ingest"),
+        );
+        payload.insert(
+            "has_interface".into(),
+            serde_json::json!(snapshot.has_interface()),
+        );
+        payload.insert(
+            "total_gauges".into(),
+            serde_json::json!(u128_to_u64(snapshot.counts.total_gauges)),
+        );
+        payload.insert(
+            "active_gauges".into(),
+            serde_json::json!(u128_to_u64(snapshot.counts.active_gauges)),
+        );
+        payload.insert(
+            "inactive_gauges".into(),
+            serde_json::json!(u128_to_u64(snapshot.counts.inactive_gauges())),
+        );
+        payload.insert(
+            "active_scale_slots".into(),
+            serde_json::json!(u128_to_u64(snapshot.counts.active_scale_slots)),
+        );
+        payload.insert(
+            "matched_macro_drives".into(),
+            serde_json::json!(u128_to_u64(snapshot.counts.matched_macro_drives)),
+        );
+        payload.insert(
+            "active_pulses".into(),
+            serde_json::json!(u128_to_u64(snapshot.counts.active_pulses)),
+        );
+        payload.insert(
+            "coverage".into(),
+            serde_json::json!(snapshot.counts.coverage()),
+        );
+        payload.insert(
+            "pulse_activation_rate".into(),
+            serde_json::json!(snapshot.counts.pulse_activation_rate()),
+        );
+        payload.insert(
+            "depths".into(),
+            serde_json::json!(snapshot.depth_counts.len()),
+        );
+        payload.insert(
+            "expected_depths".into(),
+            serde_json::json!(snapshot.assessment.expected.len()),
+        );
+        payload.insert("efficiency_min".into(), serde_json::json!(efficiency_min));
+        payload.insert("efficiency_max".into(), serde_json::json!(efficiency_max));
+        payload.insert("efficiency_mean".into(), serde_json::json!(efficiency_mean));
+        payload.insert("gauges".into(), serde_json::json!(snapshot.gauges.len()));
+        payload.insert(
+            "matched_template_gauges".into(),
+            serde_json::json!(matched_template_gauges),
+        );
+        payload.insert("quality_samples".into(), serde_json::json!(quality_samples));
+        payload.insert(
+            "pulse_total".into(),
+            serde_json::json!(u128_to_u64(snapshot.pulses.total)),
+        );
+        payload.insert(
+            "pulse_active".into(),
+            serde_json::json!(u128_to_u64(snapshot.pulses.active)),
+        );
+        payload.insert(
+            "pulse_inactive".into(),
+            serde_json::json!(u128_to_u64(snapshot.pulses.inactive)),
+        );
+        payload.insert(
+            "pulse_mean_support".into(),
+            serde_json::json!(snapshot.pulses.mean_support),
+        );
+        payload.insert(
+            "pulse_max_support".into(),
+            serde_json::json!(snapshot.pulses.max_support),
+        );
+        payload.insert(
+            "pulse_mean_z_bias".into(),
+            serde_json::json!(snapshot.pulses.mean_z_bias),
+        );
+        payload.insert(
+            "softlogic_psi_total".into(),
+            serde_json::json!(snapshot.softlogic_feedback.psi_total),
+        );
+        payload.insert(
+            "softlogic_weighted_loss".into(),
+            serde_json::json!(snapshot.softlogic_feedback.weighted_loss),
+        );
+        payload.insert(
+            "softlogic_band_energy_total".into(),
+            serde_json::json!(band_total),
+        );
+        payload.insert(
+            "softlogic_drift".into(),
+            serde_json::json!(snapshot.softlogic_feedback.drift),
+        );
+        payload.insert(
+            "softlogic_z_signal".into(),
+            serde_json::json!(snapshot.softlogic_feedback.z_signal),
+        );
+        payload.insert(
+            "softlogic_events".into(),
+            serde_json::json!(snapshot.softlogic_feedback.events.len()),
+        );
+        payload.insert(
+            "softlogic_attributions".into(),
+            serde_json::json!(snapshot.softlogic_feedback.attributions.len()),
+        );
+        payload.insert(
+            "has_softlogic_scale".into(),
+            serde_json::json!(snapshot.softlogic_feedback.scale.is_some()),
+        );
+        payload.insert(
+            "has_elliptic".into(),
+            serde_json::json!(snapshot.softlogic_feedback.elliptic.is_some()),
+        );
+        payload.insert(
+            "has_microlocal_feedback".into(),
+            serde_json::json!(feedback.is_some()),
+        );
+        payload.insert(
+            "has_threshold_scale".into(),
+            serde_json::json!(feedback.and_then(|value| value.threshold_scale).is_some()),
+        );
+        payload.insert(
+            "threshold_scale".into(),
+            serde_json::json!(feedback
+                .and_then(|value| value.threshold_scale)
+                .unwrap_or(1.0)),
+        );
+        payload.insert(
+            "has_bias_gain".into(),
+            serde_json::json!(feedback.and_then(|value| value.bias_gain).is_some()),
+        );
+        payload.insert(
+            "bias_gain".into(),
+            serde_json::json!(feedback.and_then(|value| value.bias_gain).unwrap_or(0.0)),
+        );
+        payload.insert(
+            "has_smoothing".into(),
+            serde_json::json!(feedback.and_then(|value| value.smoothing).is_some()),
+        );
+        payload.insert(
+            "smoothing".into(),
+            serde_json::json!(feedback.and_then(|value| value.smoothing).unwrap_or(0.0)),
+        );
+        payload.insert(
+            "has_tempo_hint".into(),
+            serde_json::json!(feedback.and_then(|value| value.tempo_hint).is_some()),
+        );
+        payload.insert(
+            "tempo_hint".into(),
+            serde_json::json!(feedback.and_then(|value| value.tempo_hint).unwrap_or(0.0)),
+        );
+        payload.insert(
+            "has_stderr_hint".into(),
+            serde_json::json!(feedback.and_then(|value| value.stderr_hint).is_some()),
+        );
+        payload.insert(
+            "stderr_hint".into(),
+            serde_json::json!(feedback.and_then(|value| value.stderr_hint).unwrap_or(0.0)),
+        );
+        serde_json::Value::Object(payload)
+    });
+}
+
+fn u128_to_u64(value: u128) -> u64 {
+    value.min(u128::from(u64::MAX)) as u64
 }
 
 fn merge_feedback(drives: &GaugeBank<MacroDrive>) -> Option<MicrolocalFeedback> {
@@ -360,6 +573,7 @@ mod tests {
     use crate::theory::zpulse::{ZPulse, ZScale, ZSource, ZSupport};
     use crate::util::math::LeechProjector;
     use ndarray::{ArrayD, IxDyn};
+    use std::sync::{Arc, Mutex};
 
     fn sample_signature(active: bool) -> InterfaceSignature {
         let shape = IxDyn(&[1]);
@@ -515,5 +729,75 @@ mod tests {
         assert_eq!(snapshot.pulses.max_support, 0.0);
         assert_eq!(snapshot.pulses.mean_z_bias, 0.0);
         assert_eq!(snapshot.pulses.activation_rate(), 0.0);
+    }
+
+    #[test]
+    fn bridge_ingest_emits_backend_meta() {
+        let _lock = crate::telemetry::tensor_observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let config = ObservabilityConfig::new(1, 3, SlotSymmetry::Symmetric);
+        let mut templates = MacroTemplateBank::new();
+        templates.register_card(
+            "macro",
+            MacroCard::Minimal(MinimalCardConfig {
+                phase_pair: PhasePair::new("A", "B"),
+                sigma: 1.0,
+                mobility: 1.0,
+                volume: None,
+                physical_scales: None,
+            }),
+        );
+        let mut report = report_with_signature(true);
+        report.feedback.psi_total = 1.2;
+        report.feedback.weighted_loss = 0.4;
+        report.feedback.band_energy = (0.3, 0.2, 0.1);
+        report.feedback.drift = 0.05;
+        report.feedback.z_signal = 0.6;
+        report.feedback.scale = Some(ZScale::ONE);
+        report.feedback.events.push("macro-drive".to_string());
+        report
+            .feedback
+            .attributions
+            .push((ZSource::Microlocal, 1.0));
+
+        let mut bridge = ObservationBridge::with_templates(config, templates);
+        let snapshot = bridge.ingest(&report);
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert!(snapshot.has_interface());
+        assert!(snapshot.microlocal_feedback.is_some());
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "observation_bridge_ingest"
+                    && data["has_interface"] == true
+                    && data["matched_macro_drives"] == 1
+                    && data["softlogic_events"] == 1
+                    && data["softlogic_attributions"] == 1
+            })
+            .expect("observation_bridge_ingest metadata event");
+        assert_eq!(meta.1["backend"], "cpu");
+        assert_eq!(meta.1["kind"], "st_core_observation_bridge_ingest");
+        assert_eq!(meta.1["total_gauges"], 1);
+        assert_eq!(meta.1["active_gauges"], 1);
+        assert_eq!(meta.1["active_pulses"], 1);
+        assert_eq!(meta.1["matched_template_gauges"], 1);
+        assert_eq!(meta.1["pulse_total"], 1);
+        assert_eq!(meta.1["pulse_active"], 1);
+        assert!(meta.1["coverage"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["efficiency_mean"].as_f64().unwrap_or(0.0) > 0.0);
+        assert_eq!(meta.1["softlogic_events"], 1);
+        assert_eq!(meta.1["softlogic_attributions"], 1);
+        assert!(meta.1["has_softlogic_scale"].as_bool().unwrap_or(false));
+        assert!(meta.1["has_microlocal_feedback"].as_bool().unwrap_or(false));
     }
 }

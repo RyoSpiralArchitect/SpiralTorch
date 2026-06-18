@@ -14,6 +14,7 @@ use std::{cmp::Ordering, f64::consts::PI, fmt};
 
 use nalgebra as na;
 use num_complex::Complex;
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 
 use crate::theory::zpulse::{ZPulse, ZScale, ZSource, ZSupport};
 
@@ -232,7 +233,9 @@ impl SpinoTensorVector {
     /// timestamp and origin source.
     pub fn project_to_zpulse(&self, ts: u64, source: ZSource) -> Result<ZPulse, StvError> {
         let projection = self.z_projection()?;
-        Ok(projection.into_pulse(ts, source))
+        let pulse = projection.into_pulse(ts, source);
+        emit_stv_zpulse_project_meta(self.kernel(), &pulse);
+        Ok(pulse)
     }
 
     /// Computes the Z-space projection descriptors without materialising the
@@ -301,6 +304,107 @@ impl ZProjection {
             latency_ms: 0.0,
         }
     }
+}
+
+fn finite_meta_f64(value: f64) -> f64 {
+    if value.is_finite() {
+        value
+    } else {
+        0.0
+    }
+}
+
+fn finite_meta_f32(value: f32) -> f64 {
+    if value.is_finite() {
+        value as f64
+    } else {
+        0.0
+    }
+}
+
+fn z_source_label(source: &ZSource) -> String {
+    match source {
+        ZSource::Microlocal => "microlocal".to_string(),
+        ZSource::Maxwell => "maxwell".to_string(),
+        ZSource::Graph => "graph".to_string(),
+        ZSource::Desire => "desire".to_string(),
+        ZSource::GW => "gw".to_string(),
+        ZSource::RealGrad => "realgrad".to_string(),
+        ZSource::Other(tag) => format!("other.{}", tag.to_ascii_lowercase()),
+    }
+}
+
+fn causal_class_label(class: CausalClass) -> &'static str {
+    match class {
+        CausalClass::Timelike => "timelike",
+        CausalClass::Lightlike => "lightlike",
+        CausalClass::Spacelike => "spacelike",
+    }
+}
+
+fn emit_stv_zpulse_project_meta(kernel: &SpinoTensorKernel, pulse: &ZPulse) {
+    let alpha = kernel.alpha().ok();
+    let beta = kernel.beta().ok();
+    let causal_class = kernel
+        .classify(DEFAULT_TOLERANCE)
+        .map(causal_class_label)
+        .unwrap_or("unknown");
+    let band_total = pulse.total_energy();
+    let scale = pulse.scale;
+
+    emit_tensor_op("spino_tensor_zpulse_project", &[4, 3], &[1, 14]);
+    emit_tensor_op_meta("spino_tensor_zpulse_project", || {
+        let mut payload = serde_json::Map::new();
+        payload.insert("backend".into(), "cpu".into());
+        payload.insert("requested_backend".into(), "auto".into());
+        payload.insert("kind".into(), "st_core_spino_tensor_zpulse_project".into());
+        payload.insert("ts".into(), pulse.ts.into());
+        payload.insert("source".into(), z_source_label(&pulse.source).into());
+        payload.insert("causal_class".into(), causal_class.into());
+        payload.insert("s0".into(), finite_meta_f64(kernel.s0()).into());
+        payload.insert("det_d".into(), finite_meta_f64(kernel.det_d()).into());
+        payload.insert("det_t".into(), finite_meta_f64(kernel.det_t()).into());
+        payload.insert("has_alpha".into(), alpha.is_some().into());
+        payload.insert("alpha".into(), finite_meta_f64(alpha.unwrap_or(0.0)).into());
+        payload.insert("has_beta".into(), beta.is_some().into());
+        payload.insert("beta".into(), finite_meta_f64(beta.unwrap_or(0.0)).into());
+        payload.insert("tempo".into(), finite_meta_f32(pulse.tempo).into());
+        payload.insert(
+            "band_above".into(),
+            finite_meta_f32(pulse.band_energy.0).into(),
+        );
+        payload.insert(
+            "band_here".into(),
+            finite_meta_f32(pulse.band_energy.1).into(),
+        );
+        payload.insert(
+            "band_beneath".into(),
+            finite_meta_f32(pulse.band_energy.2).into(),
+        );
+        payload.insert("band_total".into(), finite_meta_f32(band_total).into());
+        payload.insert(
+            "support".into(),
+            finite_meta_f32(pulse.support.total()).into(),
+        );
+        payload.insert(
+            "density_fluctuation".into(),
+            finite_meta_f32(pulse.density_fluctuation).into(),
+        );
+        payload.insert("drift".into(), finite_meta_f32(pulse.drift).into());
+        payload.insert("z_bias".into(), finite_meta_f32(pulse.z_bias).into());
+        payload.insert("quality".into(), finite_meta_f32(pulse.quality).into());
+        payload.insert("stderr".into(), finite_meta_f32(pulse.stderr).into());
+        payload.insert("scale_present".into(), scale.is_some().into());
+        payload.insert(
+            "scale_physical_radius".into(),
+            finite_meta_f32(scale.map(|scale| scale.physical_radius).unwrap_or(0.0)).into(),
+        );
+        payload.insert(
+            "scale_log_radius".into(),
+            finite_meta_f32(scale.map(|scale| scale.log_radius).unwrap_or(0.0)).into(),
+        );
+        payload.into()
+    });
 }
 
 /// Causal classification of the kernel vector.
@@ -1102,6 +1206,7 @@ mod tests {
     use approx::assert_abs_diff_eq;
     use num_complex::Complex;
     use std::f64::consts::{FRAC_PI_3, FRAC_PI_4, TAU};
+    use std::sync::{Arc, Mutex};
 
     fn minkowski_norm_sq(v: &Vec4) -> f64 {
         v[0] * v[0] - v[1] * v[1] - v[2] * v[2] - v[3] * v[3]
@@ -1451,6 +1556,58 @@ mod tests {
         let beta = kernel.beta().unwrap();
         let expected_bias = 1.0 - beta;
         assert_abs_diff_eq!(f64::from(pulse.z_bias), expected_bias, epsilon = 1e-6);
+    }
+
+    #[test]
+    fn project_to_zpulse_emits_backend_meta() {
+        let _lock = crate::telemetry::tensor_observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let kernel = SpinoTensorKernel::new(
+            1.4,
+            diag([1.2, 0.9, 1.6]),
+            [0.2, 0.1, -0.15],
+            [0.0, 0.0, 0.5],
+        )
+        .unwrap();
+        let spinor = PauliSpinor::new([Complex::new(0.7, -0.1), Complex::new(0.4, 0.2)]).unwrap();
+        let stv = SpinoTensorVector::new(spinor, kernel);
+        let pulse = stv
+            .project_to_zpulse(128, ZSource::Graph)
+            .expect("projection succeeds");
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert_eq!(pulse.source, ZSource::Graph);
+        assert!(pulse.tempo > 0.0);
+
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "spino_tensor_zpulse_project"
+                    && data["kind"] == "st_core_spino_tensor_zpulse_project"
+                    && data["ts"] == 128
+                    && data["source"] == "graph"
+            })
+            .expect("spino_tensor_zpulse_project metadata event");
+        assert_eq!(meta.1["backend"], "cpu");
+        assert_eq!(meta.1["requested_backend"], "auto");
+        assert_eq!(meta.1["ts"], 128);
+        assert_eq!(meta.1["source"], "graph");
+        assert!(meta.1["has_beta"].as_bool().unwrap_or(false));
+        assert!(meta.1["causal_class"].as_str().unwrap_or("").len() > 0);
+        assert!(meta.1["tempo"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["band_total"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["support"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["quality"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(meta.1["scale_present"].as_bool().unwrap_or(false));
     }
 
     #[test]

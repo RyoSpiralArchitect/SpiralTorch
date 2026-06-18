@@ -4,16 +4,16 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use super::soft_logic::SoftRule;
-#[cfg(not(feature = "logic"))]
 use super::wgpu_heuristics::{Choice, DslOverrides};
-#[cfg(feature = "logic")]
+#[cfg(feature = "kdsl")]
 use super::wgpu_heuristics::{
-    Choice, DslOverrides, SOFT_NAME_ALGO, SOFT_NAME_CH, SOFT_NAME_CTILE, SOFT_NAME_KL,
-    SOFT_NAME_MODE_BOTTOMK, SOFT_NAME_MODE_MIDK, SOFT_NAME_RADIX, SOFT_NAME_SEGMENTS,
-    SOFT_NAME_TILE_COLS, SOFT_NAME_USE2CE, SOFT_NAME_WG,
+    SOFT_NAME_ALGO, SOFT_NAME_CH, SOFT_NAME_CTILE, SOFT_NAME_KL, SOFT_NAME_MODE_BOTTOMK,
+    SOFT_NAME_MODE_MIDK, SOFT_NAME_RADIX, SOFT_NAME_SEGMENTS, SOFT_NAME_TILE_COLS,
+    SOFT_NAME_USE2CE, SOFT_NAME_WG,
 };
 #[cfg(feature = "kdsl")]
 use serde::Deserialize;
+use st_tensor::{emit_tensor_op, emit_tensor_op_meta};
 
 #[cfg(feature = "kdsl")]
 #[derive(Deserialize)]
@@ -66,6 +66,119 @@ fn sweet_kc(kind: &str, k: u32) -> u32 {
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "KDSL bridge metadata mirrors the heuristic request tuple"
+)]
+fn emit_kdsl_env_bridge_meta(
+    rows: u32,
+    cols: u32,
+    k: u32,
+    subgroup: bool,
+    kind: &'static str,
+    kc: u32,
+    src: &str,
+    status: &'static str,
+    hard_present: bool,
+    soft_count: usize,
+    overrides: DslOverrides,
+) {
+    emit_tensor_op(
+        "kdsl_env_bridge",
+        &[rows as usize, cols as usize, k as usize],
+        &[usize::from(hard_present), soft_count],
+    );
+    emit_tensor_op_meta("kdsl_env_bridge", || {
+        serde_json::json!({
+            "kind": "st_core_kdsl_env_bridge",
+            "backend": "cpu",
+            "requested_backend": "auto",
+            "rows": rows,
+            "cols": cols,
+            "k": k,
+            "subgroup": subgroup,
+            "heuristic_kind": kind,
+            "kc": kc,
+            "source_present": !src.trim().is_empty(),
+            "source_len": src.trim().len(),
+            "kdsl_feature_enabled": cfg!(feature = "kdsl"),
+            "status": status,
+            "hard_present": hard_present,
+            "soft_count": soft_count,
+            "override_algo_topk": overrides.algo_topk,
+            "override_mode_midk": overrides.mode_midk,
+            "override_mode_bottomk": overrides.mode_bottomk,
+            "override_ctile": overrides.ctile,
+            "override_tile_cols": overrides.tile_cols,
+            "override_radix": overrides.radix,
+            "override_segments": overrides.segments,
+        })
+    });
+}
+
+fn kv_bridge_lg2_bucket(value: u32) -> u32 {
+    32 - (value.max(1) - 1).leading_zeros()
+}
+
+fn emit_kdsl_kv_bridge_meta(
+    rows: u32,
+    cols: u32,
+    k: u32,
+    subgroup: bool,
+    status: &'static str,
+    redis_url_present: bool,
+    choice: Option<Choice>,
+) {
+    let lg2c = kv_bridge_lg2_bucket(cols);
+    let lg2k = kv_bridge_lg2_bucket(k);
+    emit_tensor_op(
+        "kdsl_kv_bridge",
+        &[rows as usize, cols as usize, k as usize],
+        &[usize::from(choice.is_some()), lg2c as usize, lg2k as usize],
+    );
+    emit_tensor_op_meta("kdsl_kv_bridge", || {
+        let choice = choice.unwrap_or(Choice {
+            use_2ce: false,
+            wg: 0,
+            kl: 0,
+            ch: 0,
+            algo_topk: 0,
+            ctile: 0,
+            mode_midk: 0,
+            mode_bottomk: 0,
+            tile_cols: 0,
+            radix: 0,
+            segments: 0,
+        });
+        serde_json::json!({
+            "kind": "st_core_kdsl_kv_bridge",
+            "backend": "cpu",
+            "requested_backend": "auto",
+            "rows": rows,
+            "cols": cols,
+            "k": k,
+            "subgroup": subgroup,
+            "kv_feature_enabled": cfg!(feature = "kv-redis"),
+            "redis_url_present": redis_url_present,
+            "status": status,
+            "key_lg2c": lg2c,
+            "key_lg2k": lg2k,
+            "selected": status == "hit",
+            "choice_use_2ce": choice.use_2ce,
+            "choice_wg": choice.wg,
+            "choice_kl": choice.kl,
+            "choice_ch": choice.ch,
+            "choice_algo_topk": choice.algo_topk,
+            "choice_mode_midk": choice.mode_midk,
+            "choice_mode_bottomk": choice.mode_bottomk,
+            "choice_ctile": choice.ctile,
+            "choice_tile_cols": choice.tile_cols,
+            "choice_radix": choice.radix,
+            "choice_segments": choice.segments,
+        })
+    });
+}
+
 #[allow(unused_variables)]
 pub fn parse_env_dsl_plus_kind(
     rows: u32,
@@ -97,6 +210,9 @@ pub fn parse_env_dsl_plus_kind(
     #[cfg(not(feature = "kdsl"))]
     let ov = DslOverrides::default();
     if src.trim().is_empty() {
+        emit_kdsl_env_bridge_meta(
+            rows, cols, k, subgroup, kind, kc, &src, "empty", false, 0, ov,
+        );
         return (None, vec![], ov);
     }
     #[cfg(feature = "kdsl")]
@@ -121,7 +237,22 @@ pub fn parse_env_dsl_plus_kind(
         };
         let out = match st_kdsl::eval_program(&src, &ctx) {
             Ok(o) => o,
-            Err(_) => return (None, vec![], ov),
+            Err(_) => {
+                emit_kdsl_env_bridge_meta(
+                    rows,
+                    cols,
+                    k,
+                    subgroup,
+                    kind,
+                    kc,
+                    &src,
+                    "eval_error",
+                    false,
+                    0,
+                    ov,
+                );
+                return (None, vec![], ov);
+            }
         };
         let mut hard = None;
         if out.hard.use_2ce.is_some()
@@ -249,11 +380,36 @@ pub fn parse_env_dsl_plus_kind(
         if let Some(s) = out.hard.segments {
             ov.segments = s;
         }
+        emit_kdsl_env_bridge_meta(
+            rows,
+            cols,
+            k,
+            subgroup,
+            kind,
+            kc,
+            &src,
+            "evaluated",
+            hard.is_some(),
+            soft.len(),
+            ov,
+        );
         return (hard, soft, ov);
     }
     #[cfg(not(feature = "kdsl"))]
     {
-        let _ = (rows, cols, k, subgroup, kind);
+        emit_kdsl_env_bridge_meta(
+            rows,
+            cols,
+            k,
+            subgroup,
+            kind,
+            kc,
+            &src,
+            "feature_disabled",
+            false,
+            0,
+            ov,
+        );
         (None, Vec::new(), ov)
     }
 }
@@ -277,6 +433,9 @@ pub fn parse_env_dsl_plus_kind_explain(
     let kc = sweet_kc(kind, k);
     let mut ov = DslOverrides::default();
     if src.trim().is_empty() {
+        emit_kdsl_env_bridge_meta(
+            rows, cols, k, subgroup, kind, kc, &src, "empty", false, 0, ov,
+        );
         return (None, vec![], ov, None);
     }
 
@@ -300,7 +459,22 @@ pub fn parse_env_dsl_plus_kind_explain(
 
     let (out, trace) = match st_kdsl::eval_program_with_trace(&src, &ctx, max_events.max(1)) {
         Ok(result) => result,
-        Err(_) => return (None, vec![], ov, None),
+        Err(_) => {
+            emit_kdsl_env_bridge_meta(
+                rows,
+                cols,
+                k,
+                subgroup,
+                kind,
+                kc,
+                &src,
+                "eval_error",
+                false,
+                0,
+                ov,
+            );
+            return (None, vec![], ov, None);
+        }
     };
 
     let mut hard = None;
@@ -432,6 +606,20 @@ pub fn parse_env_dsl_plus_kind_explain(
         ov.segments = s;
     }
 
+    emit_kdsl_env_bridge_meta(
+        rows,
+        cols,
+        k,
+        subgroup,
+        kind,
+        kc,
+        &src,
+        "evaluated",
+        hard.is_some(),
+        soft.len(),
+        ov,
+    );
+
     (hard, soft, ov, Some(trace))
 }
 
@@ -448,50 +636,206 @@ pub fn parse_env_dsl(
 pub fn choose_from_kv(rows: u32, cols: u32, k: u32, subgroup: bool) -> Option<Choice> {
     #[cfg(not(feature = "kv-redis"))]
     {
-        let _ = (rows, cols, k, subgroup);
+        emit_kdsl_kv_bridge_meta(
+            rows,
+            cols,
+            k,
+            subgroup,
+            "feature_disabled",
+            std::env::var_os("REDIS_URL").is_some(),
+            None,
+        );
     }
     #[cfg(feature = "kv-redis")]
     {
-        let url = std::env::var("REDIS_URL").ok()?;
-        let lg2c = (32 - (cols.max(1) - 1).leading_zeros()) as u32;
-        let lg2k = (32 - (k.max(1) - 1).leading_zeros()) as u32;
+        let url = match std::env::var("REDIS_URL") {
+            Ok(url) => url,
+            Err(_) => {
+                emit_kdsl_kv_bridge_meta(rows, cols, k, subgroup, "missing_url", false, None);
+                return None;
+            }
+        };
+        let lg2c = kv_bridge_lg2_bucket(cols);
+        let lg2k = kv_bridge_lg2_bucket(k);
         let key = format!(
             "spiral:heur:v1:sg:{}:c:{}:k:{}",
             if subgroup { 1 } else { 0 },
             lg2c,
             lg2k
         );
-        if let Ok(Some(js)) = st_kv::redis_get_raw(&url, &key) {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&js) {
-                let getb = |n: &str| v.get(n).and_then(|x| x.as_bool());
-                let getu = |n: &str| v.get(n).and_then(|x| x.as_u64()).map(|u| u as u32);
-                return Some(Choice {
-                    use_2ce: getb("use_2ce").unwrap_or(false),
-                    wg: getu("wg").unwrap_or(if subgroup { 256 } else { 128 }),
-                    kl: getu("kl").unwrap_or(if k >= 64 {
-                        32
-                    } else if k >= 16 {
-                        16
-                    } else {
-                        8
-                    }),
-                    ch: getu("ch").unwrap_or(if cols > 16_384 { 8192 } else { 0 }),
-                    algo_topk: getu("algo_topk").unwrap_or(0) as u8,
-                    ctile: getu("ctile").unwrap_or(0),
-                    mode_midk: getu("mode_midk").unwrap_or(0) as u8,
-                    mode_bottomk: getu("mode_bottomk").unwrap_or(0) as u8,
-                    tile_cols: getu("tile_cols").unwrap_or(cols.max(1).div_ceil(1024) * 1024),
-                    radix: getu("radix").unwrap_or(if k.is_power_of_two() { 4 } else { 2 }),
-                    segments: getu("segments").unwrap_or(if cols > 131_072 {
-                        4
-                    } else if cols > 32_768 {
-                        2
-                    } else {
-                        1
-                    }),
-                });
+        match st_kv::redis_get_raw(&url, &key) {
+            Ok(Some(js)) => {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&js) {
+                    let getb = |n: &str| v.get(n).and_then(|x| x.as_bool());
+                    let getu = |n: &str| v.get(n).and_then(|x| x.as_u64()).map(|u| u as u32);
+                    let choice = Choice {
+                        use_2ce: getb("use_2ce").unwrap_or(false),
+                        wg: getu("wg").unwrap_or(if subgroup { 256 } else { 128 }),
+                        kl: getu("kl").unwrap_or(if k >= 64 {
+                            32
+                        } else if k >= 16 {
+                            16
+                        } else {
+                            8
+                        }),
+                        ch: getu("ch").unwrap_or(if cols > 16_384 { 8192 } else { 0 }),
+                        algo_topk: getu("algo_topk").unwrap_or(0) as u8,
+                        ctile: getu("ctile").unwrap_or(0),
+                        mode_midk: getu("mode_midk").unwrap_or(0) as u8,
+                        mode_bottomk: getu("mode_bottomk").unwrap_or(0) as u8,
+                        tile_cols: getu("tile_cols").unwrap_or(cols.max(1).div_ceil(1024) * 1024),
+                        radix: getu("radix").unwrap_or(if k.is_power_of_two() { 4 } else { 2 }),
+                        segments: getu("segments").unwrap_or(if cols > 131_072 {
+                            4
+                        } else if cols > 32_768 {
+                            2
+                        } else {
+                            1
+                        }),
+                    };
+                    emit_kdsl_kv_bridge_meta(rows, cols, k, subgroup, "hit", true, Some(choice));
+                    return Some(choice);
+                }
+                emit_kdsl_kv_bridge_meta(rows, cols, k, subgroup, "invalid_json", true, None);
+            }
+            Ok(None) => {
+                emit_kdsl_kv_bridge_meta(rows, cols, k, subgroup, "miss", true, None);
+            }
+            Err(_) => {
+                emit_kdsl_kv_bridge_meta(rows, cols, k, subgroup, "redis_error", true, None);
             }
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        ENV_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn with_env_var<T>(name: &str, value: Option<&str>, f: impl FnOnce() -> T) -> T {
+        let previous = std::env::var(name).ok();
+        match value {
+            Some(value) => std::env::set_var(name, value),
+            None => std::env::remove_var(name),
+        }
+
+        let result = catch_unwind(AssertUnwindSafe(f));
+        match previous {
+            Some(previous) => std::env::set_var(name, previous),
+            None => std::env::remove_var(name),
+        }
+
+        match result {
+            Ok(value) => value,
+            Err(payload) => resume_unwind(payload),
+        }
+    }
+
+    fn with_spiral_heur_k<T>(value: Option<&str>, f: impl FnOnce() -> T) -> T {
+        with_env_var("SPIRAL_HEUR_K", value, f)
+    }
+
+    #[test]
+    fn kdsl_env_bridge_emits_backend_meta() {
+        let _env_lock = env_lock();
+        let _observer_lock = crate::telemetry::tensor_observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let (hard, soft, overrides) = with_spiral_heur_k(Some("not valid kdsl program"), || {
+            parse_env_dsl_plus_kind(32, 4096, 128, true, "topk")
+        });
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert!(hard.is_none());
+        assert!(soft.is_empty());
+        assert_eq!(overrides.algo_topk, 0);
+
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "kdsl_env_bridge"
+                    && data["kind"] == "st_core_kdsl_env_bridge"
+                    && data["rows"] == 32
+                    && data["cols"] == 4096
+                    && data["k"] == 128
+                    && data["heuristic_kind"] == "topk"
+            })
+            .expect("kdsl env bridge metadata event");
+        assert_eq!(meta.1["backend"], "cpu");
+        assert_eq!(meta.1["requested_backend"], "auto");
+        assert_eq!(meta.1["source_present"], true);
+        assert_eq!(meta.1["source_len"], "not valid kdsl program".len());
+        assert_eq!(meta.1["kdsl_feature_enabled"], cfg!(feature = "kdsl"));
+        assert_eq!(meta.1["hard_present"], false);
+        assert_eq!(meta.1["soft_count"], 0);
+        assert_eq!(meta.1["override_algo_topk"], 0);
+        if cfg!(feature = "kdsl") {
+            assert_eq!(meta.1["status"], "eval_error");
+        } else {
+            assert_eq!(meta.1["status"], "feature_disabled");
+        }
+    }
+
+    #[test]
+    fn kdsl_kv_bridge_emits_backend_meta_without_url() {
+        let _env_lock = env_lock();
+        let _observer_lock = crate::telemetry::tensor_observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let choice = with_env_var("REDIS_URL", None, || choose_from_kv(64, 8192, 32, false));
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        assert!(choice.is_none());
+
+        let events = events.lock().unwrap();
+        let meta = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "kdsl_kv_bridge"
+                    && data["kind"] == "st_core_kdsl_kv_bridge"
+                    && data["rows"] == 64
+                    && data["cols"] == 8192
+                    && data["k"] == 32
+            })
+            .expect("kdsl kv bridge metadata event");
+        assert_eq!(meta.1["backend"], "cpu");
+        assert_eq!(meta.1["requested_backend"], "auto");
+        assert_eq!(meta.1["kv_feature_enabled"], cfg!(feature = "kv-redis"));
+        assert_eq!(meta.1["redis_url_present"], false);
+        assert_eq!(meta.1["key_lg2c"], 13);
+        assert_eq!(meta.1["key_lg2k"], 5);
+        assert_eq!(meta.1["selected"], false);
+        assert_eq!(meta.1["choice_wg"], 0);
+        if cfg!(feature = "kv-redis") {
+            assert_eq!(meta.1["status"], "missing_url");
+        } else {
+            assert_eq!(meta.1["status"], "feature_disabled");
+        }
+    }
 }
