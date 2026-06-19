@@ -79,6 +79,42 @@ TOPK_GUARD_VARIANTS = tuple(
     for variant in CORE_VARIANTS
 )
 
+RANK_BAND_BASELINE_VARIANTS = (
+    AblationVariant(
+        label="lstm_rank_band_guard",
+        description="LSTM with top-k plus fixed-band rank guard without adaptive fill.",
+        architecture="lstm",
+        bigram_topk_guard=0.1,
+        bigram_topk_guard_k=5,
+        bigram_rank_guard=0.1,
+        bigram_rank_guard_margin=0.05,
+        bigram_rank_guard_band=0.003,
+        bigram_rank_guard_min_candidates=0,
+    ),
+    AblationVariant(
+        label="scan_rank_band_guard",
+        description="Coherence scan with top-k plus fixed-band rank guard without adaptive fill.",
+        architecture="scan",
+        bigram_topk_guard=0.1,
+        bigram_topk_guard_k=5,
+        bigram_rank_guard=0.1,
+        bigram_rank_guard_margin=0.05,
+        bigram_rank_guard_band=0.003,
+        bigram_rank_guard_min_candidates=0,
+    ),
+    AblationVariant(
+        label="wave_rank_band_guard",
+        description="Coherence wave with top-k plus fixed-band rank guard without adaptive fill.",
+        architecture="wave",
+        bigram_topk_guard=0.1,
+        bigram_topk_guard_k=5,
+        bigram_rank_guard=0.1,
+        bigram_rank_guard_margin=0.05,
+        bigram_rank_guard_band=0.003,
+        bigram_rank_guard_min_candidates=0,
+    ),
+)
+
 RANK_MIN_VARIANTS = (
     AblationVariant(
         label="lstm_rank_min_guard",
@@ -118,7 +154,12 @@ RANK_MIN_VARIANTS = (
 VARIANT_SETS = {
     "core": CORE_VARIANTS,
     "guarded": (*CORE_VARIANTS, *TOPK_GUARD_VARIANTS),
-    "rank-min": (*CORE_VARIANTS, *TOPK_GUARD_VARIANTS, *RANK_MIN_VARIANTS),
+    "rank-min": (
+        *CORE_VARIANTS,
+        *TOPK_GUARD_VARIANTS,
+        *RANK_BAND_BASELINE_VARIANTS,
+        *RANK_MIN_VARIANTS,
+    ),
 }
 
 
@@ -237,6 +278,8 @@ def build_report_markdown(
     rows = []
     recommendations = []
     guard_recommendations = []
+    rank_min_stable_recommendations = []
+    rank_min_promotion_gate = {}
     route_counts = {}
     if isinstance(compare_summary, dict):
         rows = compare_summary.get("rows") if isinstance(compare_summary.get("rows"), list) else []
@@ -249,6 +292,19 @@ def build_report_markdown(
             compare_summary.get("bigram_guard_recommendations")
             if isinstance(compare_summary.get("bigram_guard_recommendations"), list)
             else []
+        )
+        rank_min_stable_recommendations = (
+            compare_summary.get("bigram_rank_min_stable_recommendations")
+            if isinstance(
+                compare_summary.get("bigram_rank_min_stable_recommendations"),
+                list,
+            )
+            else []
+        )
+        rank_min_promotion_gate = (
+            compare_summary.get("bigram_rank_min_promotion_gate")
+            if isinstance(compare_summary.get("bigram_rank_min_promotion_gate"), dict)
+            else {}
         )
         route_counts = (
             compare_summary.get("route_status_counts")
@@ -358,6 +414,41 @@ def build_report_markdown(
                 "baseline_route_status",
             ],
             guard_recommendations[: int(manifest.get("summary_limit") or 8)],
+        ),
+        "",
+        "## Rank-Min Guard Promotion Gate",
+        "",
+        md_table(
+            [
+                "decision",
+                "failed",
+                "total_rows",
+                "strict_promotions",
+                "bounded_promotions",
+                "recommendation_rows",
+                "verdict_counts",
+            ],
+            [rank_min_promotion_gate] if rank_min_promotion_gate else [],
+        ),
+        "",
+        "## Stable Rank-Min Recommendations",
+        "",
+        md_table(
+            [
+                "rank",
+                "recommendation",
+                "arch",
+                "recurrent",
+                "candidate_bigram_rank_min",
+                "baseline_bigram_rank_min",
+                "stability_verdict",
+                "seed_pairs",
+                "mean_rank_cov_filled_delta",
+                "mean_rank_cov_zero_ratio_delta",
+                "mean_final_nll_delta",
+                "mean_top5_bigram_overlap_delta_pp",
+            ],
+            rank_min_stable_recommendations[: int(manifest.get("summary_limit") or 8)],
         ),
         "",
         "## Route Status Counts",
