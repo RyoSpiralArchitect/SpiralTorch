@@ -63,6 +63,11 @@ AGGREGATE_GROUP_COLUMNS = [
     "bigram_soft_guard",
     "char_feature",
     "mode",
+    "context_scale",
+    "self_score",
+    "query_resid",
+    "wave_kernel",
+    "wave_dilations",
     "steps",
     "hidden",
     "embed_dim",
@@ -112,6 +117,7 @@ AGGREGATE_MEAN_COLUMNS = [
     "trace_update_ratio",
     "cpu_debt_ops",
     "lstm_est_cpu_debt_ops",
+    "coherence_route_debt",
     "lstm_est_gate_wgpu_ops",
     "lstm_est_bptt_wgpu_ops",
 ]
@@ -134,6 +140,15 @@ AGGREGATE_COUNT_COLUMNS = [
     "route_status",
     "lstm_scan_backend_counts",
     "lstm_scan_fallback_counts",
+    "coherence_route_status",
+    "coherence_route_status_counts",
+    "coherence_route_counts",
+]
+
+COHERENCE_ROUTE_COLUMNS = [
+    "coherence_route_status",
+    "coherence_route_counts",
+    "coherence_route_debt",
 ]
 
 TOP_AGGREGATE_COLUMNS = [
@@ -176,6 +191,10 @@ TOP_AGGREGATE_COLUMNS = [
     "route_status",
     "lstm_scan_backend_counts",
     "lstm_scan_fallback_counts",
+    "coherence_route_status",
+    "coherence_route_status_counts",
+    "coherence_route_counts",
+    "coherence_route_debt_mean",
 ]
 
 BACKEND_COLUMNS = [
@@ -1410,6 +1429,77 @@ def trace_lstm_scan_route_columns(run_dir: Path) -> dict[str, str]:
     return defaults
 
 
+def coherence_route_columns(
+    arch: str,
+    requested_backend: str,
+    learning_op_cols: dict[str, str],
+) -> dict[str, str]:
+    defaults = {key: "-" for key in COHERENCE_ROUTE_COLUMNS}
+    arch_label = arch.lower()
+    if "coherence_scan" not in arch_label and "coherence_wave" not in arch_label:
+        return defaults
+
+    scan_wgpu = sum(
+        value
+        for key in ("coherence_scan_fwd_wgpu", "coherence_scan_bwd_wgpu")
+        for value in [parse_number_cell(learning_op_cols.get(key))]
+        if value is not None
+    )
+    scan_cpu = sum(
+        value
+        for key in ("coherence_scan_fwd_cpu", "coherence_scan_bwd_cpu")
+        for value in [parse_number_cell(learning_op_cols.get(key))]
+        if value is not None
+    )
+    wave_wgpu = sum(
+        value
+        for key in ("wave_scan_fwd_wgpu", "wave_scan_bwd_wgpu")
+        for value in [parse_number_cell(learning_op_cols.get(key))]
+        if value is not None
+    )
+    wave_cpu = sum(
+        value
+        for key in ("wave_scan_fwd_cpu", "wave_scan_bwd_cpu")
+        for value in [parse_number_cell(learning_op_cols.get(key))]
+        if value is not None
+    )
+    composite = sum(
+        value
+        for key in ("coherence_wave_fwd_composite", "coherence_wave_bwd_composite")
+        for value in [parse_number_cell(learning_op_cols.get(key))]
+        if value is not None
+    )
+    wgpu_ops = scan_wgpu + wave_wgpu
+    cpu_ops = scan_cpu + wave_cpu
+    total_route_ops = wgpu_ops + cpu_ops
+    if total_route_ops <= 0 and composite <= 0:
+        return defaults
+
+    defaults["coherence_route_counts"] = (
+        f"wgpu:{fmt_float(wgpu_ops, digits=0)},"
+        f"cpu:{fmt_float(cpu_ops, digits=0)},"
+        f"composite:{fmt_float(composite, digits=0)}"
+    )
+    defaults["coherence_route_debt"] = fmt_float(cpu_ops, digits=0)
+    requested = requested_backend.lower()
+    if requested in {"wgpu", "cuda", "hip", "mps"}:
+        if cpu_ops > 0 and wgpu_ops > 0:
+            defaults["coherence_route_status"] = "coherence_route_mixed"
+        elif cpu_ops > 0:
+            defaults["coherence_route_status"] = "coherence_route_cpu"
+        elif wgpu_ops > 0:
+            defaults["coherence_route_status"] = "coherence_route_clean"
+        else:
+            defaults["coherence_route_status"] = "coherence_composite_only"
+    elif cpu_ops > 0:
+        defaults["coherence_route_status"] = "coherence_route_cpu_expected"
+    elif wgpu_ops > 0:
+        defaults["coherence_route_status"] = "coherence_route_wgpu_unrequested"
+    else:
+        defaults["coherence_route_status"] = "coherence_composite_only"
+    return defaults
+
+
 def trace_backend_residual_columns(run_dir: Path) -> dict[str, str]:
     defaults = {key: "-" for key in BACKEND_RESIDUAL_COLUMNS}
     summary = load_trainer_trace_summary(run_dir)
@@ -1746,8 +1836,11 @@ def row_for(raw: str) -> tuple[dict[str, str], Path]:
     validation_start_fraction = run.get("validation_start_fraction_requested")
     validation_start_fraction_actual = run.get("validation_start_fraction_actual")
     lr = metadata_cell(run.get("learning_rate"))
+    context_scale = run.get("context_scale")
     self_score_scale = run.get("self_score_scale")
     query_residual_scale = run.get("query_residual_scale")
+    wave_kernel = run.get("kernel")
+    wave_dilations = run.get("dilations")
     init_nll = metric_value(initial, "mean_nll")
     final_nll = metric_value(final, "mean_nll")
     unigram_nll = metric_value(unigram, "mean_nll")
@@ -1787,6 +1880,7 @@ def row_for(raw: str) -> tuple[dict[str, str], Path]:
     backend_residual_cols = trace_backend_residual_columns(run_dir)
     learning_op_cols = trace_learning_op_columns(run_dir)
     lstm_scan_route_cols = trace_lstm_scan_route_columns(run_dir)
+    coherence_route_cols = coherence_route_columns(arch, backend, learning_op_cols)
     policy_cols = trace_policy_columns(run_dir)
 
     return (
@@ -1849,6 +1943,9 @@ def row_for(raw: str) -> tuple[dict[str, str], Path]:
                 else None
             ),
             "lr": lr,
+            "context_scale": fmt_float(
+                float(context_scale) if isinstance(context_scale, (int, float)) else None
+            ),
             "self_score": fmt_float(
                 float(self_score_scale) if isinstance(self_score_scale, (int, float)) else None
             ),
@@ -1856,6 +1953,12 @@ def row_for(raw: str) -> tuple[dict[str, str], Path]:
                 float(query_residual_scale)
                 if isinstance(query_residual_scale, (int, float))
                 else None
+            ),
+            "wave_kernel": metadata_cell(wave_kernel),
+            "wave_dilations": (
+                ",".join(str(value) for value in wave_dilations)
+                if isinstance(wave_dilations, list)
+                else metadata_cell(wave_dilations)
             ),
             "init_nll": fmt_float(init_nll),
             "final_windows": fmt_float(metric_value(final, "windows"), digits=0),
@@ -1994,6 +2097,7 @@ def row_for(raw: str) -> tuple[dict[str, str], Path]:
             **backend_residual_cols,
             **learning_op_cols,
             **lstm_scan_route_cols,
+            **coherence_route_cols,
             **policy_cols,
         },
         run_dir,
@@ -2028,8 +2132,11 @@ def markdown_table(rows: list[dict[str, str]]) -> str:
         "val_start",
         "val_start_actual",
         "lr",
+        "context_scale",
         "self_score",
         "query_resid",
+        "wave_kernel",
+        "wave_dilations",
         "init_nll",
         "final_windows",
         "unigram_windows",
@@ -2109,6 +2216,8 @@ def markdown_table(rows: list[dict[str, str]]) -> str:
         headers.extend(LEARNING_OP_COLUMNS)
     if any(row.get(header, "-") != "-" for row in rows for header in LSTM_SCAN_ROUTE_COLUMNS):
         headers.extend(LSTM_SCAN_ROUTE_COLUMNS)
+    if any(row.get(header, "-") != "-" for row in rows for header in COHERENCE_ROUTE_COLUMNS):
+        headers.extend(COHERENCE_ROUTE_COLUMNS)
     if any(row.get(header, "-") != "-" for row in rows for header in TRACE_POLICY_COLUMNS):
         headers.extend(TRACE_POLICY_COLUMNS)
     out = ["| " + " | ".join(headers) + " |"]
@@ -2171,6 +2280,16 @@ def parse_count_cell(value: str | None) -> dict[str, int]:
     return counts
 
 
+def sum_count_cells(values: list[str | None]) -> str:
+    totals: dict[str, int] = {}
+    for value in values:
+        for label, count in parse_count_cell(value).items():
+            totals[label] = totals.get(label, 0) + count
+    if not totals:
+        return "-"
+    return ",".join(f"{label}:{count}" for label, count in sorted(totals.items()))
+
+
 def aggregate_route_status(row: dict[str, str]) -> str:
     scan_backends = parse_count_cell(row.get("lstm_scan_backend_counts"))
     if not scan_backends:
@@ -2189,6 +2308,26 @@ def aggregate_route_status(row: dict[str, str]) -> str:
     if len(scan_backends) > 1:
         return "scan_route_mixed"
     return "clean_route"
+
+
+def aggregate_coherence_route_status(row: dict[str, str]) -> str:
+    statuses = parse_count_cell(row.get("coherence_route_status_counts"))
+    if not statuses:
+        return "-"
+    if any(
+        status in statuses
+        for status in ("coherence_route_cpu", "coherence_route_mixed")
+    ):
+        return "coherence_route_debt"
+    if "coherence_route_clean" in statuses:
+        return "coherence_route_clean"
+    if "coherence_route_cpu_expected" in statuses:
+        return "coherence_route_cpu_expected"
+    if "coherence_route_wgpu_unrequested" in statuses:
+        return "coherence_route_wgpu_unrequested"
+    if "coherence_composite_only" in statuses:
+        return "coherence_composite_only"
+    return "coherence_route_observed"
 
 
 def aggregate_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -2254,6 +2393,22 @@ def aggregate_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
             row["lstm_scan_backend_counts"] = "-"
             row["lstm_scan_fallback_counts"] = "-"
         row["route_status"] = aggregate_route_status(row)
+        has_coherence_route = any(
+            item.get("coherence_route_status") not in (None, "-")
+            for item in group_rows
+        )
+        if has_coherence_route:
+            row["coherence_route_status_counts"] = count_label_cells(
+                [item.get("coherence_route_status") for item in group_rows]
+            )
+            row["coherence_route_counts"] = sum_count_cells(
+                [item.get("coherence_route_counts") for item in group_rows]
+            )
+            row["coherence_route_status"] = aggregate_coherence_route_status(row)
+        else:
+            row["coherence_route_status_counts"] = "-"
+            row["coherence_route_counts"] = "-"
+            row["coherence_route_status"] = "-"
         output.append(row)
     return output
 

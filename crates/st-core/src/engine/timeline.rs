@@ -1589,6 +1589,8 @@ mod tests {
             .find(|(op_name, data)| {
                 *op_name == "timeline_warp_controller_apply"
                     && data["kind"] == "st_core_timeline_warp_controller_apply"
+                    && data["signal_valid"] == false
+                    && data["state_sanitized"] == true
             })
             .expect("timeline warp metadata event");
         assert_eq!(meta.1["signal_valid"], false);

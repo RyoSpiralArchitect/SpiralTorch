@@ -173,6 +173,146 @@ RECIPES = {
             "gen": 0,
         },
     },
+    "no-prior-context-pressure": {
+        "description": (
+            "compare LSTM, SpiralRNN, scan, and wave under a no-prior "
+            "high-residual learning-pressure window"
+        ),
+        "defaults": {
+            "architectures": "finetune,lstm,scan,wave",
+            "features": "token-bigram",
+            "head_priors": "none",
+            "seeds": "7,13",
+            "steps": 32,
+            "embed_dim": 32,
+            "hidden": 64,
+            "memory": 16,
+            "head_residual_scale_values": "2,5",
+            "epoch_values": "3",
+            "batches_values": "8",
+            "batch": 4,
+            "eval_samples": 64,
+            "lr_values": "0.05",
+            "compare_summary_limit": 24,
+            "gen": 64,
+        },
+    },
+    "no-prior-coherence-budget": {
+        "description": (
+            "focus scan and wave on the no-prior pressure window with a "
+            "longer cheap-training budget"
+        ),
+        "defaults": {
+            "architectures": "scan,wave",
+            "features": "token-bigram",
+            "head_priors": "none",
+            "seeds": "7,13",
+            "steps": 32,
+            "embed_dim": 32,
+            "hidden": 64,
+            "memory": 16,
+            "head_residual_scale_values": "5",
+            "epoch_values": "8,16",
+            "batches_values": "24",
+            "batch": 4,
+            "eval_samples": 64,
+            "early_stop_patience": 4,
+            "lr_values": "0.05",
+            "compare_summary_limit": 16,
+            "extra_arg": ["--mix-rms", "1.0"],
+            "gen": 64,
+        },
+    },
+    "no-prior-coherence-shape": {
+        "description": (
+            "quickly probe scan context scaling and wave kernel/dilation "
+            "shape knobs inside the no-prior coherence pressure window"
+        ),
+        "defaults": {
+            "architectures": "scan,wave",
+            "features": "token-bigram",
+            "head_priors": "none",
+            "seeds": "7",
+            "steps": 32,
+            "embed_dim": 32,
+            "hidden": 64,
+            "memory": 16,
+            "head_residual_scale_values": "5",
+            "context_scale_values": "0.5,1,2",
+            "query_residual_scale_values": "0.5,1,2",
+            "wave_kernel_values": "3,5",
+            "wave_dilation_values": "1,2,4;1,2,4,8",
+            "epoch_values": "3",
+            "batches_values": "8",
+            "batch": 4,
+            "eval_samples": 64,
+            "early_stop_patience": 2,
+            "lr_values": "0.05",
+            "compare_summary_limit": 20,
+            "extra_arg": ["--mix-rms", "1.0"],
+            "gen": 0,
+        },
+    },
+    "no-prior-coherence-shape-confirm": {
+        "description": (
+            "confirm promising scan/wave coherence shape knobs with the "
+            "longer no-prior coherence budget"
+        ),
+        "defaults": {
+            "architectures": "scan,wave",
+            "features": "token-bigram",
+            "head_priors": "none",
+            "seeds": "7,13",
+            "steps": 32,
+            "embed_dim": 32,
+            "hidden": 64,
+            "memory": 16,
+            "head_residual_scale_values": "5",
+            "context_scale_values": "0.5,1,2",
+            "query_residual_scale_values": "0.5,1,2",
+            "wave_kernel_values": "3,5",
+            "wave_dilation_values": "1,2,4;1,2,4,8",
+            "epoch_values": "8",
+            "batches_values": "24",
+            "batch": 4,
+            "eval_samples": 64,
+            "early_stop_patience": 4,
+            "lr_values": "0.05",
+            "compare_summary_limit": 20,
+            "extra_arg": ["--mix-rms", "1.0"],
+            "gen": 64,
+        },
+    },
+    "no-prior-coherence-shape-winners": {
+        "description": (
+            "confirm the quick-probe scan and wave coherence shape winners "
+            "with the longer no-prior coherence budget"
+        ),
+        "defaults": {
+            "architectures": "scan,wave",
+            "features": "token-bigram",
+            "head_priors": "none",
+            "seeds": "7,13",
+            "steps": 32,
+            "embed_dim": 32,
+            "hidden": 64,
+            "memory": 16,
+            "head_residual_scale_values": "5",
+            "context_scale": 2,
+            "query_residual_scale": 2,
+            "wave_kernel": 3,
+            "wave_dilations": "1,2,4",
+            "epoch_values": "8,16",
+            "batches_values": "24",
+            "batch": 4,
+            "eval_samples": 64,
+            "early_stop_patience": 4,
+            "lr_values": "0.05",
+            "compare_summary_limit": 12,
+            "extra_arg": ["--mix-rms", "1.0"],
+            "gen": 64,
+        },
+    },
     "hard-rank-guard-local": {
         "description": (
             "run a focused local rank-debt guard search on the hardest "
@@ -965,6 +1105,11 @@ class SweepSettings:
     curvature: float | None
     temperature: float | None
     head_residual_scale: float | None
+    context_scale: float | None
+    self_score_scale: float | None
+    query_residual_scale: float | None
+    wave_kernel: int | None
+    wave_dilations: str | None
     backend: str
     bigram_topk_guard: float | None = None
     bigram_topk_guard_k: int | None = None
@@ -1093,6 +1238,15 @@ def float_grid_values(
     return values
 
 
+def positive_float_grid_values(
+    raw: str | None, fallback: float | None, *, label: str
+) -> list[float | None]:
+    values = float_grid_values(raw, fallback, label=label)
+    if any(value is not None and value <= 0.0 for value in values):
+        raise ValueError(f"--{label} entries must be positive finite floats")
+    return values
+
+
 def fraction_grid_values(
     raw: str | None, fallback: float | None, *, label: str
 ) -> list[float | None]:
@@ -1218,6 +1372,26 @@ def arch_schedule_manifest_rows(
     ]
 
 
+def parse_wave_dilation_values(raw: str | None, fallback: str | None) -> list[str | None]:
+    if raw is None:
+        return [fallback]
+    values = [part.strip() for part in raw.split(";") if part.strip()]
+    if not values:
+        raise ValueError("--wave-dilation-values must contain at least one dilation spec")
+    for spec in values:
+        entries = [part.strip() for part in spec.split(",") if part.strip()]
+        if not entries:
+            raise ValueError("--wave-dilation-values contains an empty dilation spec")
+        for entry in entries:
+            try:
+                value = int(entry)
+            except ValueError as exc:
+                raise ValueError(f"invalid --wave-dilation-values entry: {entry}") from exc
+            if value <= 0:
+                raise ValueError("--wave-dilation-values entries must be positive")
+    return values
+
+
 def slug(value: str) -> str:
     safe = []
     for char in value.lower():
@@ -1265,6 +1439,16 @@ def apply_recipe_defaults(args: argparse.Namespace) -> argparse.Namespace:
         "memory": None,
         "head_residual_scale": None,
         "head_residual_scale_values": None,
+        "context_scale": None,
+        "context_scale_values": None,
+        "self_score_scale": None,
+        "self_score_scale_values": None,
+        "query_residual_scale": None,
+        "query_residual_scale_values": None,
+        "wave_kernel": None,
+        "wave_kernel_values": None,
+        "wave_dilations": None,
+        "wave_dilation_values": None,
         "bigram_topk_guard": None,
         "bigram_topk_guard_values": None,
         "bigram_topk_guard_schedule": None,
@@ -1290,6 +1474,7 @@ def apply_recipe_defaults(args: argparse.Namespace) -> argparse.Namespace:
         "compare_summary_fail_on_rank_min_promotion_decision": None,
         "compare_summary_extra_compare_json": [],
         "compare_summary_merge_evidence_sources": False,
+        "extra_arg": [],
     }
     for field, value in recipe["defaults"].items():
         default = parser_defaults.get(field)
@@ -1326,6 +1511,11 @@ def settings_from_args(args: argparse.Namespace) -> SweepSettings:
         curvature=args.curvature,
         temperature=args.temperature,
         head_residual_scale=args.head_residual_scale,
+        context_scale=args.context_scale,
+        self_score_scale=args.self_score_scale,
+        query_residual_scale=args.query_residual_scale,
+        wave_kernel=args.wave_kernel,
+        wave_dilations=args.wave_dilations,
         bigram_topk_guard=args.bigram_topk_guard,
         bigram_topk_guard_k=args.bigram_topk_guard_k,
         bigram_rank_guard=args.bigram_rank_guard,
@@ -1546,6 +1736,14 @@ def build_command(
     add_optional_int(command, "--hidden", settings.hidden)
     if architecture in {"scan", "wave"}:
         add_optional_int(command, "--memory", settings.memory)
+        add_optional_float(command, "--self-score-scale", settings.self_score_scale)
+        add_optional_float(command, "--query-residual-scale", settings.query_residual_scale)
+    if architecture == "scan":
+        add_optional_float(command, "--context-scale", settings.context_scale)
+    if architecture == "wave":
+        add_optional_int(command, "--kernel", settings.wave_kernel)
+        if settings.wave_dilations is not None:
+            command.extend(["--dilations", settings.wave_dilations])
     if architecture == "lstm":
         command.extend(["--recurrent", "lstm"])
     add_optional_float(command, "--lr", settings.lr)
@@ -2107,6 +2305,63 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="comma-separated residual-logit scales; overrides --head-residual-scale",
     )
     parser.add_argument(
+        "--context-scale",
+        type=float,
+        default=None,
+        help="scan-only context gain passed to --context-scale",
+    )
+    parser.add_argument(
+        "--context-scale-values",
+        default=None,
+        help="comma-separated scan context gains; overrides --context-scale",
+    )
+    parser.add_argument(
+        "--self-score-scale",
+        type=float,
+        default=None,
+        help="scan/wave self-token coherence score scale",
+    )
+    parser.add_argument(
+        "--self-score-scale-values",
+        default=None,
+        help="comma-separated self-score scales; overrides --self-score-scale",
+    )
+    parser.add_argument(
+        "--query-residual-scale",
+        type=float,
+        default=None,
+        help="scan/wave residual query contribution scale",
+    )
+    parser.add_argument(
+        "--query-residual-scale-values",
+        default=None,
+        help="comma-separated query-residual scales; overrides --query-residual-scale",
+    )
+    parser.add_argument(
+        "--wave-kernel",
+        type=int,
+        default=None,
+        help="wave-only convolution kernel size passed to --kernel",
+    )
+    parser.add_argument(
+        "--wave-kernel-values",
+        default=None,
+        help="comma-separated wave kernel sizes; overrides --wave-kernel",
+    )
+    parser.add_argument(
+        "--wave-dilations",
+        default=None,
+        help="wave-only dilation spec passed to --dilations, for example 1,2,4",
+    )
+    parser.add_argument(
+        "--wave-dilation-values",
+        default=None,
+        help=(
+            "semicolon-separated wave dilation specs, for example "
+            "1,2,4;1,2,4,8; overrides --wave-dilations"
+        ),
+    )
+    parser.add_argument(
         "--bigram-topk-guard",
         type=float,
         default=None,
@@ -2379,6 +2634,30 @@ def main(argv: list[str]) -> int:
             settings_preview.head_residual_scale,
             label="head-residual-scale-values",
         )
+        context_scale_values = positive_float_grid_values(
+            args.context_scale_values,
+            settings_preview.context_scale,
+            label="context-scale-values",
+        )
+        self_score_scale_values = float_grid_values(
+            args.self_score_scale_values,
+            settings_preview.self_score_scale,
+            label="self-score-scale-values",
+        )
+        query_residual_scale_values = float_grid_values(
+            args.query_residual_scale_values,
+            settings_preview.query_residual_scale,
+            label="query-residual-scale-values",
+        )
+        wave_kernel_values = grid_values(
+            args.wave_kernel_values,
+            settings_preview.wave_kernel,
+            label="wave-kernel-values",
+        )
+        wave_dilation_values = parse_wave_dilation_values(
+            args.wave_dilation_values,
+            settings_preview.wave_dilations,
+        )
         bigram_topk_guard_arch_schedule = (
             parse_bigram_topk_guard_arch_schedule(
                 args.bigram_topk_guard_arch_schedule,
@@ -2498,6 +2777,22 @@ def main(argv: list[str]) -> int:
     head_residual_scale_is_explicit = (
         args.head_residual_scale is not None or args.head_residual_scale_values is not None
     )
+    context_scale_is_explicit = (
+        args.context_scale is not None or args.context_scale_values is not None
+    )
+    self_score_scale_is_explicit = (
+        args.self_score_scale is not None or args.self_score_scale_values is not None
+    )
+    query_residual_scale_is_explicit = (
+        args.query_residual_scale is not None
+        or args.query_residual_scale_values is not None
+    )
+    wave_kernel_is_explicit = (
+        args.wave_kernel is not None or args.wave_kernel_values is not None
+    )
+    wave_dilations_is_explicit = (
+        args.wave_dilations is not None or args.wave_dilation_values is not None
+    )
     bigram_guard_is_explicit = (
         args.bigram_topk_guard is not None
         or args.bigram_topk_guard_values is not None
@@ -2565,6 +2860,13 @@ def main(argv: list[str]) -> int:
         },
         "learning_rates": lr_values,
         "head_residual_scales": head_residual_scale_values,
+        "coherence_grid": {
+            "context_scales": context_scale_values,
+            "self_score_scales": self_score_scale_values,
+            "query_residual_scales": query_residual_scale_values,
+            "wave_kernels": wave_kernel_values,
+            "wave_dilations": wave_dilation_values,
+        },
         "bigram_topk_guards": (
             sorted(
                 {
@@ -2664,9 +2966,35 @@ def main(argv: list[str]) -> int:
                 return returncode
             return 1
 
-    total = (
-        len(architectures)
-        * len(features)
+    def coherence_grid_for_architecture(
+        architecture: str,
+    ) -> tuple[
+        list[float | None],
+        list[float | None],
+        list[float | None],
+        list[int | None],
+        list[str | None],
+    ]:
+        if architecture == "scan":
+            return (
+                context_scale_values,
+                self_score_scale_values,
+                query_residual_scale_values,
+                [None],
+                [None],
+            )
+        if architecture == "wave":
+            return (
+                [None],
+                self_score_scale_values,
+                query_residual_scale_values,
+                wave_kernel_values,
+                wave_dilation_values,
+            )
+        return ([None], [None], [None], [None], [None])
+
+    base_grid_count = (
+        len(features)
         * len(head_priors)
         * len(backends)
         * len(step_values)
@@ -2686,33 +3014,51 @@ def main(argv: list[str]) -> int:
         * len(bigram_soft_guard_values)
         * len(seeds)
     )
+    total = 0
+    for architecture in architectures:
+        arch_context_values, arch_self_values, arch_query_values, arch_kernel_values, arch_dilation_values = (
+            coherence_grid_for_architecture(architecture)
+        )
+        total += (
+            base_grid_count
+            * len(arch_context_values)
+            * len(arch_self_values)
+            * len(arch_query_values)
+            * len(arch_kernel_values)
+            * len(arch_dilation_values)
+        )
     manifest["planned_runs"] = total
     index = 0
     new_runs_started = 0
     run_limit_reached = False
     next_run_after_limit: dict[str, object] | None = None
-    run_space = product(
-        architectures,
-        features,
-        head_priors,
-        backends,
-        step_values,
-        embed_dim_values,
-        hidden_values,
-        epoch_values,
-        batches_values,
-        eval_samples_values,
-        val_start_values,
-        lr_values,
-        head_residual_scale_values,
-        bigram_topk_guard_values,
-        bigram_rank_guard_values,
-        bigram_rank_guard_margin_values,
-        bigram_rank_guard_band_values,
-        bigram_rank_guard_min_candidates_values,
-        bigram_soft_guard_values,
-        seeds,
+    run_spaces = (
+        product(
+            [architecture],
+            features,
+            head_priors,
+            backends,
+            step_values,
+            embed_dim_values,
+            hidden_values,
+            epoch_values,
+            batches_values,
+            eval_samples_values,
+            val_start_values,
+            lr_values,
+            head_residual_scale_values,
+            *coherence_grid_for_architecture(architecture),
+            bigram_topk_guard_values,
+            bigram_rank_guard_values,
+            bigram_rank_guard_margin_values,
+            bigram_rank_guard_band_values,
+            bigram_rank_guard_min_candidates_values,
+            bigram_soft_guard_values,
+            seeds,
+        )
+        for architecture in architectures
     )
+    run_space = (item for architecture_space in run_spaces for item in architecture_space)
     for (
         architecture,
         feature,
@@ -2727,6 +3073,11 @@ def main(argv: list[str]) -> int:
         val_start_value,
         lr_value,
         head_residual_scale_value,
+        context_scale_value,
+        self_score_scale_value,
+        query_residual_scale_value,
+        wave_kernel_value,
+        wave_dilation_value,
         bigram_topk_guard_value,
         bigram_rank_guard_value,
         bigram_rank_guard_margin_value,
@@ -2765,6 +3116,11 @@ def main(argv: list[str]) -> int:
             val_start_fraction=val_start_value,
             lr=lr_value,
             head_residual_scale=head_residual_scale_value,
+            context_scale=context_scale_value,
+            self_score_scale=self_score_scale_value,
+            query_residual_scale=query_residual_scale_value,
+            wave_kernel=wave_kernel_value,
+            wave_dilations=wave_dilation_value,
             bigram_topk_guard=effective_bigram_topk_guard_value,
             bigram_topk_guard_k=args.bigram_topk_guard_k,
             bigram_rank_guard=bigram_rank_guard_value,
@@ -2789,6 +3145,16 @@ def main(argv: list[str]) -> int:
             )
         if head_residual_scale_is_explicit:
             run_name_parts.append(float_grid_slug("headresid", head_residual_scale_value))
+        if architecture == "scan" and context_scale_is_explicit:
+            run_name_parts.append(float_grid_slug("ctx", context_scale_value))
+        if architecture in {"scan", "wave"} and self_score_scale_is_explicit:
+            run_name_parts.append(float_grid_slug("selfscore", self_score_scale_value))
+        if architecture in {"scan", "wave"} and query_residual_scale_is_explicit:
+            run_name_parts.append(float_grid_slug("queryresid", query_residual_scale_value))
+        if architecture == "wave" and wave_kernel_is_explicit:
+            run_name_parts.append(grid_slug("kernel", wave_kernel_value))
+        if architecture == "wave" and wave_dilations_is_explicit:
+            run_name_parts.append(f"dil-{slug(wave_dilation_value or 'default')}")
         if bigram_guard_is_explicit:
             run_name_parts.append(
                 float_grid_slug("biguard", effective_bigram_topk_guard_value)
@@ -2878,6 +3244,11 @@ def main(argv: list[str]) -> int:
                     "validation_start_fraction": run_settings.val_start_fraction,
                     "lr": lr_value,
                     "head_residual_scale": head_residual_scale_value,
+                    "context_scale": context_scale_value,
+                    "self_score_scale": self_score_scale_value,
+                    "query_residual_scale": query_residual_scale_value,
+                    "wave_kernel": wave_kernel_value,
+                    "wave_dilations": wave_dilation_value,
                     "bigram_topk_guard": effective_bigram_topk_guard_value,
                     "bigram_topk_guard_k": args.bigram_topk_guard_k,
                     "bigram_rank_guard": bigram_rank_guard_value,
@@ -2950,6 +3321,11 @@ def main(argv: list[str]) -> int:
             "validation_start_fraction": run_settings.val_start_fraction,
             "lr": lr_value,
             "head_residual_scale": head_residual_scale_value,
+            "context_scale": context_scale_value,
+            "self_score_scale": self_score_scale_value,
+            "query_residual_scale": query_residual_scale_value,
+            "wave_kernel": wave_kernel_value,
+            "wave_dilations": wave_dilation_value,
             "bigram_topk_guard": effective_bigram_topk_guard_value,
             "bigram_topk_guard_k": args.bigram_topk_guard_k,
             "bigram_rank_guard": bigram_rank_guard_value,
@@ -3022,6 +3398,11 @@ def main(argv: list[str]) -> int:
                         "batches": run_settings.batches,
                         "batch": run_settings.batch,
                         "head_residual_scale": head_residual_scale_value,
+                        "context_scale": context_scale_value,
+                        "self_score_scale": self_score_scale_value,
+                        "query_residual_scale": query_residual_scale_value,
+                        "wave_kernel": wave_kernel_value,
+                        "wave_dilations": wave_dilation_value,
                         "bigram_topk_guard": effective_bigram_topk_guard_value,
                         "bigram_topk_guard_k": args.bigram_topk_guard_k,
                         "bigram_rank_guard": bigram_rank_guard_value,
@@ -3195,6 +3576,9 @@ def main(argv: list[str]) -> int:
         )
         manifest["compare_summary_bigram_soft_guard_stability"] = (
             compare_summary_payload.get("bigram_soft_guard_stability")
+        )
+        manifest["compare_summary_learning_scoreboard_rows"] = (
+            compare_summary_payload.get("learning_scoreboard_rows")
         )
         manifest["compare_summary_baseline_difficulty_rows"] = (
             compare_summary_payload.get("baseline_difficulty_rows")

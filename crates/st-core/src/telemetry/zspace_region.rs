@@ -264,10 +264,17 @@ mod tests {
         assert_eq!(descriptor.key().spin, ZSpaceSpinBand::Trailing);
         assert_eq!(descriptor.key().radius, ZSpaceRadiusBand::Edge);
         let events = events.lock().unwrap();
+        let approx = |value: &serde_json::Value, expected: f64| {
+            value
+                .as_f64()
+                .is_some_and(|actual| (actual - expected).abs() < 1e-6)
+        };
         let meta = events
             .iter()
             .find(|(op_name, data)| {
-                *op_name == "zspace_region_descriptor" && data["region_label"].as_str().is_some()
+                *op_name == "zspace_region_descriptor"
+                    && approx(&data["spin_alignment"], -0.8)
+                    && approx(&data["normalized_radius"], 0.9)
             })
             .expect("zspace_region_descriptor metadata event");
         assert_eq!(meta.1["backend"], "cpu");
