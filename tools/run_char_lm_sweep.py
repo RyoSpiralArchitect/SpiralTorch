@@ -173,6 +173,56 @@ RECIPES = {
             "gen": 0,
         },
     },
+    "no-prior-context-pressure": {
+        "description": (
+            "compare LSTM, SpiralRNN, scan, and wave under a no-prior "
+            "high-residual learning-pressure window"
+        ),
+        "defaults": {
+            "architectures": "finetune,lstm,scan,wave",
+            "features": "token-bigram",
+            "head_priors": "none",
+            "seeds": "7,13",
+            "steps": 32,
+            "embed_dim": 32,
+            "hidden": 64,
+            "memory": 16,
+            "head_residual_scale_values": "2,5",
+            "epoch_values": "3",
+            "batches_values": "8",
+            "batch": 4,
+            "eval_samples": 64,
+            "lr_values": "0.05",
+            "compare_summary_limit": 24,
+            "gen": 64,
+        },
+    },
+    "no-prior-coherence-budget": {
+        "description": (
+            "focus scan and wave on the no-prior pressure window with a "
+            "longer cheap-training budget"
+        ),
+        "defaults": {
+            "architectures": "scan,wave",
+            "features": "token-bigram",
+            "head_priors": "none",
+            "seeds": "7,13",
+            "steps": 32,
+            "embed_dim": 32,
+            "hidden": 64,
+            "memory": 16,
+            "head_residual_scale_values": "5",
+            "epoch_values": "8,16",
+            "batches_values": "24",
+            "batch": 4,
+            "eval_samples": 64,
+            "early_stop_patience": 4,
+            "lr_values": "0.05",
+            "compare_summary_limit": 16,
+            "extra_arg": ["--mix-rms", "1.0"],
+            "gen": 64,
+        },
+    },
     "hard-rank-guard-local": {
         "description": (
             "run a focused local rank-debt guard search on the hardest "
@@ -1290,6 +1340,7 @@ def apply_recipe_defaults(args: argparse.Namespace) -> argparse.Namespace:
         "compare_summary_fail_on_rank_min_promotion_decision": None,
         "compare_summary_extra_compare_json": [],
         "compare_summary_merge_evidence_sources": False,
+        "extra_arg": [],
     }
     for field, value in recipe["defaults"].items():
         default = parser_defaults.get(field)
