@@ -3247,6 +3247,9 @@ def main(argv: list[str]) -> int:
         manifest["compare_summary_bigram_soft_guard_stability"] = (
             compare_summary_payload.get("bigram_soft_guard_stability")
         )
+        manifest["compare_summary_learning_scoreboard_rows"] = (
+            compare_summary_payload.get("learning_scoreboard_rows")
+        )
         manifest["compare_summary_baseline_difficulty_rows"] = (
             compare_summary_payload.get("baseline_difficulty_rows")
         )
