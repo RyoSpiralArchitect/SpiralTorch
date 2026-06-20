@@ -42,7 +42,7 @@ copy-pastable models that act as reference implementations for both Python and R
 - Rust (LLM char coherence wave): `cargo run -p st-nn --example modelzoo_llm_char_coherence_wave -- <text.txt> [--infuse \"spiral\" --infuse-every batch --infuse-mode separate]`
 - Rust char-LM sweep smoke: `PYTHONNOUSERSITE=1 python3 -S -s tools/run_char_lm_sweep.py models/samples/spiral_corpus_en --preset smoke --architectures finetune --features token,token-bigram`
 - Rust char-LM sweep compare: `PYTHONNOUSERSITE=1 python3 -S -s tools/run_char_lm_sweep.py models/samples/spiral_corpus_en --preset small --architectures finetune,scan,wave --features token,token-bigram --head-priors learned-unigram --seeds 42,43`
-- Rust char-LM ablation report: `PYTHONNOUSERSITE=1 python3 -S -s tools/run_char_lm_ablation_report.py models/samples/spiral_corpus_en --preset smoke` writes a compact benchmark report comparing LSTM, SpiralRNN, coherence scan/wave, and top-k guard variants.
+- Rust char-LM ablation report: `PYTHONNOUSERSITE=1 python3 -S -s tools/run_char_lm_ablation_report.py models/samples/spiral_corpus_en --preset smoke` writes a compact benchmark report comparing LSTM, SpiralRNN, coherence scan/wave, and top-k guard variants; use `--head-priors learned-bigram,learned-unigram,none` to repeat the plan across prior strengths.
 - Rust (GNN): `cargo run -p st-nn --example modelzoo_gnn_graph_regression`
 - Rust (Z-RBA telemetry): `cargo run -p st-nn --example modelzoo_zrba_telemetry`
 - Rust (Lightning + selfsup): `cargo run -p st-nn --example modelzoo_lightning_selfsup_minimal`

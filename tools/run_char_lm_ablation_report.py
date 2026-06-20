@@ -23,6 +23,8 @@ import run_char_lm_sweep as sweep
 
 DEFAULT_SEEDS = "7,13"
 DEFAULT_VARIANT_SET = "guarded"
+DEFAULT_HEAD_PRIORS = "learned-bigram"
+HEAD_PRIOR_CHOICES = {"none", "unigram", "learned-unigram", "bigram", "learned-bigram"}
 
 
 @dataclass(frozen=True)
@@ -45,12 +47,12 @@ class AblationVariant:
 CORE_VARIANTS = (
     AblationVariant(
         label="lstm_baseline",
-        description="Stateless batched LSTM baseline with the learned bigram prior.",
+        description="Stateless batched LSTM baseline under the configured head prior.",
         architecture="lstm",
     ),
     AblationVariant(
         label="spiral_rnn",
-        description="SpiralRNN recurrent core under the same learned bigram prior.",
+        description="SpiralRNN recurrent core under the configured head prior.",
         architecture="finetune",
     ),
     AblationVariant(
@@ -170,6 +172,32 @@ def default_run_root() -> Path:
 
 def parse_csv_int(raw: str, *, label: str) -> list[int]:
     return sweep.parse_csv_int(raw, label=label)
+
+
+def parse_head_priors(raw: str) -> list[str]:
+    head_priors = sweep.parse_csv(raw, label="head-priors")
+    unknown = sorted(set(head_priors) - HEAD_PRIOR_CHOICES)
+    if unknown:
+        expected = ",".join(sorted(HEAD_PRIOR_CHOICES))
+        raise ValueError(
+            "--head-priors contains unknown value(s): "
+            + ",".join(unknown)
+            + f" (expected {expected})"
+        )
+    return head_priors
+
+
+def variants_for_head_priors(
+    variants: tuple[AblationVariant, ...],
+    head_priors: list[str],
+) -> tuple[AblationVariant, ...]:
+    if head_priors == [DEFAULT_HEAD_PRIORS]:
+        return variants
+    return tuple(
+        replace(variant, head_prior=head_prior)
+        for head_prior in head_priors
+        for variant in variants
+    )
 
 
 def md_table(headers: list[str], rows: list[dict[str, Any]]) -> str:
@@ -496,6 +524,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--variant-set", choices=sorted(VARIANT_SETS), default=DEFAULT_VARIANT_SET)
     parser.add_argument("--preset", choices=sorted(sweep.PRESETS), default="smoke")
+    parser.add_argument(
+        "--head-priors",
+        default=DEFAULT_HEAD_PRIORS,
+        help=(
+            "comma-separated output head priors to test: "
+            "none,unigram,learned-unigram,bigram,learned-bigram"
+        ),
+    )
     parser.add_argument("--seeds", default=DEFAULT_SEEDS, help="comma-separated integer seeds")
     parser.add_argument("--backend", default=sweep.DEFAULT_BACKEND, help="auto|wgpu|cuda|hip|cpu")
     parser.add_argument("--epochs", type=int, default=None)
@@ -536,6 +572,7 @@ def main(argv: list[str]) -> int:
     args = parse_args(argv)
     try:
         seeds = parse_csv_int(args.seeds, label="seeds")
+        head_priors = parse_head_priors(args.head_priors)
         if args.backend not in {"auto", "wgpu", "cuda", "hip", "cpu"}:
             raise ValueError("--backend must be one of auto,wgpu,cuda,hip,cpu")
         if args.summary_limit < 0:
@@ -544,7 +581,7 @@ def main(argv: list[str]) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    variants = VARIANT_SETS[args.variant_set]
+    variants = variants_for_head_priors(VARIANT_SETS[args.variant_set], head_priors)
     settings = settings_from_args(args)
     run_root = args.run_root.resolve() if args.run_root else default_run_root()
     run_root.mkdir(parents=True, exist_ok=True)
@@ -563,6 +600,7 @@ def main(argv: list[str]) -> int:
         "report_path": str(report_path),
         "variant_set": args.variant_set,
         "variants": variant_rows(variants),
+        "head_priors": head_priors,
         "data_paths": [str(path) for path in args.data_paths],
         "seeds": seeds,
         "preset": args.preset,
