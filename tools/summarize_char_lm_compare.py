@@ -925,6 +925,34 @@ BASELINE_DIFFICULTY_HEADERS = [
     "route_status",
 ]
 
+LEARNING_SCOREBOARD_HEADERS = [
+    "rank",
+    "source",
+    "arch",
+    "recurrent",
+    "backend",
+    "head_prior",
+    "head_resid",
+    "char_feature",
+    "epochs",
+    "batches",
+    "batch",
+    "eval_samples",
+    "lr",
+    "runs",
+    "learning_gain",
+    "learning_status",
+    "final_nll_mean",
+    "best_nll_mean",
+    "final_minus_best",
+    "bigram_gap",
+    "bigram_gap_status",
+    "trace_step_ms_mean",
+    "cpu_debt_ops_mean",
+    "gain_per_ms",
+    "route_status",
+]
+
 DEFAULT_PAIR_BASELINE_RECURRENT = "spiral"
 DEFAULT_PAIR_CANDIDATE_RECURRENT = "lstm"
 DEFAULT_BIGRAM_GUARD_BASELINE = 0.0
@@ -4183,6 +4211,91 @@ def baseline_difficulty_rows(
     return selected
 
 
+def positive_learning_gain(delta_nll: float | None) -> float | None:
+    if delta_nll is None:
+        return None
+    return -delta_nll
+
+
+def gain_per_ms(learning_gain: float | None, trace_step_ms: float | None) -> float | None:
+    if learning_gain is None or trace_step_ms is None or trace_step_ms <= 0.0:
+        return None
+    return learning_gain / trace_step_ms
+
+
+def learning_scoreboard_rows(
+    payloads: list[tuple[str, dict[str, Any]]],
+    *,
+    limit: int,
+) -> list[dict[str, str]]:
+    candidates: list[tuple[tuple[float, ...], dict[str, str]]] = []
+    for source, payload in payloads:
+        for row in source_rows(payload):
+            delta_nll = parse_number_cell(row.get("delta_nll_mean"))
+            final_nll = parse_number_cell(row.get("final_nll_mean"))
+            best_nll = parse_number_cell(row.get("best_nll_mean"))
+            bigram_gap = parse_number_cell(row.get("final_vs_bigram_mean"))
+            trace_step_ms = parse_number_cell(row.get("trace_step_ms_mean_mean"))
+            cpu_debt = parse_number_cell(row.get("cpu_debt_ops_mean"))
+            learning_gain = positive_learning_gain(delta_nll)
+            per_ms = gain_per_ms(learning_gain, trace_step_ms)
+            if learning_gain is None and final_nll is None:
+                continue
+
+            final_minus_best = (
+                final_nll - best_nll
+                if final_nll is not None and best_nll is not None
+                else None
+            )
+            route = route_status(row)
+            summary = {
+                header: str(row.get(header, "-"))
+                for header in LEARNING_SCOREBOARD_HEADERS
+                if header
+                not in {
+                    "rank",
+                    "source",
+                    "learning_gain",
+                    "learning_status",
+                    "final_minus_best",
+                    "bigram_gap",
+                    "bigram_gap_status",
+                    "trace_step_ms_mean",
+                    "gain_per_ms",
+                    "route_status",
+                }
+            }
+            summary["source"] = source
+            summary["learning_gain"] = fmt_delta(learning_gain)
+            summary["learning_status"] = learning_status(delta_nll)
+            summary["final_minus_best"] = fmt_delta(final_minus_best)
+            summary["bigram_gap"] = fmt_delta(bigram_gap)
+            summary["bigram_gap_status"] = model_vs_bigram_status(bigram_gap)
+            summary["trace_step_ms_mean"] = fmt_delta(trace_step_ms)
+            summary["gain_per_ms"] = fmt_delta(per_ms)
+            summary["route_status"] = route
+            candidates.append(
+                (
+                    (
+                        -(per_ms if per_ms is not None else float("-inf")),
+                        -(learning_gain if learning_gain is not None else float("-inf")),
+                        bigram_gap if bigram_gap is not None else float("inf"),
+                        final_nll if final_nll is not None else float("inf"),
+                        trace_step_ms if trace_step_ms is not None else float("inf"),
+                        cpu_debt if cpu_debt is not None else float("inf"),
+                        float(route_penalty_for_row(row, route)),
+                    ),
+                    summary,
+                )
+            )
+
+    candidates.sort(key=lambda item: item[0])
+    selected = [row for _, row in candidates[: max(limit, 0)]]
+    for rank, row in enumerate(selected, start=1):
+        row["rank"] = str(rank)
+    return selected
+
+
 def summarize_rows(
     payload: dict[str, Any],
     *,
@@ -4843,6 +4956,22 @@ def baseline_difficulty_table(rows: list[dict[str, str]]) -> str:
     return "\n".join(lines)
 
 
+def learning_scoreboard_table(rows: list[dict[str, str]]) -> str:
+    lines = [
+        "| " + " | ".join(LEARNING_SCOREBOARD_HEADERS) + " |",
+        "| " + " | ".join("---" for _ in LEARNING_SCOREBOARD_HEADERS) + " |",
+    ]
+    for row in rows:
+        lines.append(
+            "| "
+            + " | ".join(
+                md_cell(row.get(header, "-")) for header in LEARNING_SCOREBOARD_HEADERS
+            )
+            + " |"
+        )
+    return "\n".join(lines)
+
+
 def markdown_report(
     rows: list[dict[str, str]],
     *,
@@ -4870,11 +4999,19 @@ def markdown_report(
     bigram_soft_guard_seed_deltas: list[dict[str, str]] | None = None,
     bigram_soft_guard_stability: list[dict[str, str]] | None = None,
     baseline_difficulty: list[dict[str, str]] | None = None,
+    learning_scoreboard: list[dict[str, str]] | None = None,
 ) -> str:
     sections = [
         "## Route Status Counts",
         route_counts_table(route_counts_report(rows, all_counts=all_counts)),
     ]
+    if learning_scoreboard:
+        sections.extend(
+            [
+                "## Learning Scoreboard",
+                learning_scoreboard_table(learning_scoreboard),
+            ]
+        )
     if paired_recommendations:
         sections.extend(
             [
@@ -5218,6 +5355,7 @@ def main(argv: list[str] | None = None) -> int:
     bigram_soft_guard_stability = bigram_soft_guard_stability_rows(
         bigram_soft_guard_seed_deltas
     )
+    learning_scoreboard = learning_scoreboard_rows(payloads, limit=args.limit)
     baseline_difficulty = baseline_difficulty_rows(payloads, limit=args.limit)
     rows = summarize_compare_payloads(
         payloads,
@@ -5265,6 +5403,7 @@ def main(argv: list[str] | None = None) -> int:
         "bigram_soft_guard_recommendations": bigram_soft_guard_recommendations,
         "bigram_soft_guard_seed_deltas": bigram_soft_guard_seed_deltas,
         "bigram_soft_guard_stability": bigram_soft_guard_stability,
+        "learning_scoreboard_rows": learning_scoreboard,
         "baseline_difficulty_rows": baseline_difficulty,
         "route_status_gate": {
             "fail_on": forbidden_statuses,
@@ -5312,6 +5451,7 @@ def main(argv: list[str] | None = None) -> int:
             bigram_soft_guard_seed_deltas=bigram_soft_guard_seed_deltas,
             bigram_soft_guard_stability=bigram_soft_guard_stability,
             baseline_difficulty=baseline_difficulty,
+            learning_scoreboard=learning_scoreboard,
         )
     )
     exit_code = 0
