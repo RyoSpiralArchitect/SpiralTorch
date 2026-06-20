@@ -225,8 +225,38 @@ RECIPES = {
     },
     "no-prior-coherence-shape": {
         "description": (
-            "probe scan context scaling and wave kernel/dilation shape knobs "
-            "inside the no-prior coherence pressure window"
+            "quickly probe scan context scaling and wave kernel/dilation "
+            "shape knobs inside the no-prior coherence pressure window"
+        ),
+        "defaults": {
+            "architectures": "scan,wave",
+            "features": "token-bigram",
+            "head_priors": "none",
+            "seeds": "7",
+            "steps": 32,
+            "embed_dim": 32,
+            "hidden": 64,
+            "memory": 16,
+            "head_residual_scale_values": "5",
+            "context_scale_values": "0.5,1,2",
+            "query_residual_scale_values": "0.5,1,2",
+            "wave_kernel_values": "3,5",
+            "wave_dilation_values": "1,2,4;1,2,4,8",
+            "epoch_values": "3",
+            "batches_values": "8",
+            "batch": 4,
+            "eval_samples": 64,
+            "early_stop_patience": 2,
+            "lr_values": "0.05",
+            "compare_summary_limit": 20,
+            "extra_arg": ["--mix-rms", "1.0"],
+            "gen": 0,
+        },
+    },
+    "no-prior-coherence-shape-confirm": {
+        "description": (
+            "confirm promising scan/wave coherence shape knobs with the "
+            "longer no-prior coherence budget"
         ),
         "defaults": {
             "architectures": "scan,wave",
