@@ -12,6 +12,14 @@ from typing import Any
 from backend_sweep_meta import md_cell
 
 
+COHERENCE_GROUP_COLUMNS = [
+    "context_scale",
+    "self_score",
+    "query_resid",
+    "wave_kernel",
+    "wave_dilations",
+]
+
 SUMMARY_HEADERS = [
     "rank",
     "source",
@@ -30,6 +38,7 @@ SUMMARY_HEADERS = [
     "bigram_soft_guard",
     "char_feature",
     "mode",
+    *COHERENCE_GROUP_COLUMNS,
     "steps",
     "hidden",
     "embed_dim",
@@ -75,6 +84,9 @@ SUMMARY_HEADERS = [
     "trace_update_ratio_mean",
     "cpu_debt_ops_mean",
     "lstm_est_cpu_debt_ops_mean",
+    "coherence_route_status",
+    "coherence_route_status_counts",
+    "coherence_route_debt_mean",
     "lstm_scan_backend_counts",
     "lstm_scan_fallback_counts",
 ]
@@ -92,6 +104,7 @@ PAIR_GROUP_COLUMNS = [
     "bigram_soft_guard",
     "char_feature",
     "mode",
+    *COHERENCE_GROUP_COLUMNS,
     "steps",
     "hidden",
     "embed_dim",
@@ -175,6 +188,7 @@ BIGRAM_GUARD_GROUP_COLUMNS = [
     "bigram_soft_guard",
     "char_feature",
     "mode",
+    *COHERENCE_GROUP_COLUMNS,
     "steps",
     "hidden",
     "embed_dim",
@@ -254,6 +268,7 @@ BIGRAM_RANK_GUARD_GROUP_COLUMNS = [
     "bigram_soft_guard",
     "char_feature",
     "mode",
+    *COHERENCE_GROUP_COLUMNS,
     "steps",
     "hidden",
     "embed_dim",
@@ -399,6 +414,7 @@ BIGRAM_RANK_BAND_GROUP_COLUMNS = [
     "bigram_soft_guard",
     "char_feature",
     "mode",
+    *COHERENCE_GROUP_COLUMNS,
     "steps",
     "hidden",
     "embed_dim",
@@ -544,6 +560,7 @@ BIGRAM_RANK_MIN_GROUP_COLUMNS = [
     "bigram_soft_guard",
     "char_feature",
     "mode",
+    *COHERENCE_GROUP_COLUMNS,
     "steps",
     "hidden",
     "embed_dim",
@@ -753,6 +770,7 @@ BIGRAM_SOFT_GUARD_GROUP_COLUMNS = [
     "bigram_rank_min",
     "char_feature",
     "mode",
+    *COHERENCE_GROUP_COLUMNS,
     "steps",
     "hidden",
     "embed_dim",
@@ -900,6 +918,7 @@ BASELINE_DIFFICULTY_HEADERS = [
     "bigram_soft_guard",
     "char_feature",
     "mode",
+    *COHERENCE_GROUP_COLUMNS,
     "steps",
     "hidden",
     "epochs",
@@ -934,6 +953,7 @@ LEARNING_SCOREBOARD_HEADERS = [
     "head_prior",
     "head_resid",
     "char_feature",
+    *COHERENCE_GROUP_COLUMNS,
     "epochs",
     "batches",
     "batch",
@@ -949,6 +969,8 @@ LEARNING_SCOREBOARD_HEADERS = [
     "bigram_gap_status",
     "trace_step_ms_mean",
     "cpu_debt_ops_mean",
+    "coherence_route_status",
+    "coherence_route_debt_mean",
     "gain_per_ms",
     "route_status",
 ]
