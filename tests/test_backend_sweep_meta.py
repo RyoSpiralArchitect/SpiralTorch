@@ -2553,6 +2553,10 @@ class BackendSweepMetaTests(unittest.TestCase):
         self.assertEqual(manifest["coherence_grid"]["query_residual_scales"], [2.0])
         self.assertEqual(manifest["coherence_grid"]["wave_kernels"], [3])
         self.assertEqual(manifest["coherence_grid"]["wave_dilations"], ["1", "1,2"])
+        self.assertEqual(
+            manifest["architecture_extra_args"],
+            {"scan": ["--mix-rms", "1.0"], "wave": ["--mix-rms", "1.0"]},
+        )
         self.assertEqual(len(manifest["runs"]), 8)
 
         lstm_runs = [run for run in manifest["runs"] if run["architecture"] == "lstm"]
@@ -2563,6 +2567,7 @@ class BackendSweepMetaTests(unittest.TestCase):
         self.assertEqual(len(wave_runs), 4)
         self.assertNotIn("--dilations", lstm_runs[0]["command"])
         self.assertNotIn("--context-scale", lstm_runs[0]["command"])
+        self.assertNotIn("--mix-rms", lstm_runs[0]["command"])
 
         scan = scan_runs[0]
         self.assertIn("ctx-2", scan["name"])
@@ -2571,10 +2576,56 @@ class BackendSweepMetaTests(unittest.TestCase):
             scan["command"][scan["command"].index("--query-residual-scale") + 1],
             "2",
         )
+        self.assertEqual(scan["command"][scan["command"].index("--mix-rms") + 1], "1.0")
 
         wave_dilations = sorted({run["wave_dilations"] for run in wave_runs})
         self.assertEqual(wave_dilations, ["1", "1,2"])
         self.assertTrue(all("--dilations" in run["command"] for run in wave_runs))
+        self.assertTrue(
+            all(
+                run["command"][run["command"].index("--mix-rms") + 1] == "1.0"
+                for run in wave_runs
+            )
+        )
+
+    def test_char_lm_sweep_architecture_extra_args_apply_to_selected_arches(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = run_char_lm_sweep.main(
+                    [
+                        "models/samples/spiral_demo_en.txt",
+                        "--run-root",
+                        str(root),
+                        "--architectures",
+                        "lstm,scan",
+                        "--features",
+                        "token-bigram",
+                        "--head-priors",
+                        "none",
+                        "--seeds",
+                        "7",
+                        "--architecture-extra-arg",
+                        "scan:--mix-rms",
+                        "--architecture-extra-arg",
+                        "scan:1.0",
+                        "--dry-run",
+                        "--no-wgpu-preflight",
+                    ]
+                )
+            manifest = json.loads((root / "sweep.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            manifest["architecture_extra_args"],
+            {"scan": ["--mix-rms", "1.0"]},
+        )
+        lstm = next(run for run in manifest["runs"] if run["architecture"] == "lstm")
+        scan = next(run for run in manifest["runs"] if run["architecture"] == "scan")
+        self.assertNotIn("--mix-rms", lstm["command"])
+        self.assertEqual(scan["command"][scan["command"].index("--mix-rms") + 1], "1.0")
 
     def test_char_lm_sweep_full_promotion_recipe_adds_rank_min_gate(
         self,

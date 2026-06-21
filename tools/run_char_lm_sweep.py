@@ -370,6 +370,10 @@ RECIPES = {
             "early_stop_patience": 4,
             "lr_values": "0.05",
             "compare_summary_limit": 16,
+            "architecture_extra_args": {
+                "scan": ["--mix-rms", "1.0"],
+                "wave": ["--mix-rms", "1.0"],
+            },
             "gen": 64,
         },
     },
@@ -1521,6 +1525,47 @@ def parse_wave_dilation_values(raw: str | None, fallback: str | None) -> list[st
     return values
 
 
+def parse_architecture_extra_args(
+    raw: object,
+    *,
+    label: str = "architecture-extra-arg",
+) -> dict[str, list[str]]:
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        result = {}
+        for architecture, values in raw.items():
+            if not isinstance(values, list):
+                raise ValueError(f"--{label} recipe values must be lists")
+            result[str(architecture)] = [str(value) for value in values]
+        return result
+    if not isinstance(raw, list):
+        raise ValueError(f"--{label} must be repeated ARCH:ARG entries")
+
+    result: dict[str, list[str]] = {}
+    for entry in raw:
+        if not isinstance(entry, str) or ":" not in entry:
+            raise ValueError(f"--{label} entries must use ARCH:ARG")
+        architecture_part, arg = entry.split(":", 1)
+        architectures = parse_csv(architecture_part, label=label)
+        if not arg:
+            raise ValueError(f"--{label} entries must include a non-empty argument")
+        for architecture in architectures:
+            result.setdefault(architecture, []).append(arg)
+    return result
+
+
+def extra_args_for_architecture(
+    common_extra_args: list[str],
+    architecture_extra_args: dict[str, list[str]],
+    architecture: str,
+) -> list[str]:
+    return [
+        *common_extra_args,
+        *architecture_extra_args.get(architecture, []),
+    ]
+
+
 def slug(value: str) -> str:
     safe = []
     for char in value.lower():
@@ -1606,6 +1651,7 @@ def apply_recipe_defaults(args: argparse.Namespace) -> argparse.Namespace:
         "compare_summary_extra_compare_json": [],
         "compare_summary_merge_evidence_sources": False,
         "extra_arg": [],
+        "architecture_extra_args": [],
     }
     for field, value in recipe["defaults"].items():
         default = parser_defaults.get(field)
@@ -2315,7 +2361,11 @@ def run_wgpu_preflight(
         head_prior=head_prior,
         seed=0,
         settings=preflight_settings,
-        extra_args=args.extra_arg,
+        extra_args=extra_args_for_architecture(
+            args.extra_arg,
+            args.architecture_extra_args,
+            architecture,
+        ),
     )
     returncode, elapsed = run_command(command, log_path, dry_run=args.dry_run)
     if returncode == 0:
@@ -2632,6 +2682,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=[],
         help="extra arg passed to every Rust example",
     )
+    parser.add_argument(
+        "--architecture-extra-arg",
+        dest="architecture_extra_args",
+        action="append",
+        default=[],
+        help=(
+            "extra arg passed only to selected architecture(s), as ARCH:ARG or "
+            "ARCH1,ARCH2:ARG; repeat for multi-token options"
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--skip-existing", action="store_true")
     parser.add_argument(
@@ -2927,6 +2987,16 @@ def main(argv: list[str]) -> int:
             label="head-priors",
         )
         validate_choices(backends, {"auto", "wgpu", "cuda", "hip", "cpu"}, label="backends")
+        architecture_extra_args = parse_architecture_extra_args(args.architecture_extra_args)
+        unknown_extra_arg_architectures = sorted(
+            set(architecture_extra_args) - set(EXAMPLES)
+        )
+        if unknown_extra_arg_architectures:
+            raise ValueError(
+                "--architecture-extra-arg uses unknown architectures: "
+                + ",".join(unknown_extra_arg_architectures)
+            )
+        args.architecture_extra_args = architecture_extra_args
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -3064,6 +3134,8 @@ def main(argv: list[str]) -> int:
         "bigram_rank_guard_bands": bigram_rank_guard_band_values,
         "bigram_rank_guard_min_candidates": bigram_rank_guard_min_candidates_values,
         "bigram_soft_guards": bigram_soft_guard_values,
+        "extra_args": list(args.extra_arg),
+        "architecture_extra_args": architecture_extra_args,
         "cargo_features": args.cargo_features,
         "no_default_features": args.no_default_features,
         "wgpu_preflight": not args.no_wgpu_preflight,
@@ -3359,6 +3431,11 @@ def main(argv: list[str]) -> int:
         run_name = "__".join(run_name_parts)
         run_dir = run_root / run_name
         log_path = run_dir / "process.log"
+        run_extra_args = extra_args_for_architecture(
+            args.extra_arg,
+            architecture_extra_args,
+            architecture,
+        )
         command = build_command(
             cargo_bin=args.cargo_bin,
             cargo_features=effective_cargo_features(args, backend),
@@ -3370,7 +3447,7 @@ def main(argv: list[str]) -> int:
             head_prior=head_prior,
             seed=seed,
             settings=run_settings,
-            extra_args=args.extra_arg,
+            extra_args=run_extra_args,
         )
         preflight_failure = preflight_failures.get(backend)
         failure_kind = None
@@ -3429,6 +3506,7 @@ def main(argv: list[str]) -> int:
                     "failure_kind": failure_kind,
                     "failure_detail": failure_detail,
                     "command": command,
+                    "extra_args": run_extra_args,
                     "preflight_failure": preflight_failure,
                 },
             )
@@ -3501,6 +3579,7 @@ def main(argv: list[str]) -> int:
             "run_dir": str(run_dir),
             "log_path": str(log_path),
             "command": command,
+            "extra_args": run_extra_args,
             "returncode": returncode,
             "elapsed_seconds": elapsed,
             "skipped": skipped,
@@ -3583,6 +3662,7 @@ def main(argv: list[str]) -> int:
                         "failure_kind": failure_kind,
                         "failure_detail": failure_detail,
                         "command": command,
+                        "extra_args": run_extra_args,
                     },
                 )
         runs.append(run_record)
