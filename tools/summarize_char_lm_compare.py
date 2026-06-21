@@ -1046,6 +1046,19 @@ ROUTE_DEBT_RECOMMENDATION_HEADERS = [
     "baseline_route_status",
 ]
 
+ROUTE_DEBT_SUMMARY_HEADERS = [
+    "decision",
+    "recommendation_rows",
+    "top_recommendation",
+    "top_candidate_wave_dilations",
+    "top_baseline_wave_dilations",
+    "top_quality_status",
+    "top_final_nll_delta",
+    "top_route_debt_ratio",
+    "top_cpu_debt_ratio",
+    "top_trace_step_ms_ratio",
+]
+
 DEFAULT_PAIR_BASELINE_RECURRENT = "spiral"
 DEFAULT_PAIR_CANDIDATE_RECURRENT = "lstm"
 DEFAULT_BIGRAM_GUARD_BASELINE = 0.0
@@ -1151,6 +1164,7 @@ SORT_METRIC_COLUMNS = {
     "final_bigram_target_rank": "final_bigram_target_rank_mean",
     "final_bigram_rank_debt": "final_bigram_rank_debt_mean",
     "final_top5_bigram_overlap": "final_top5_bigram_overlap_mean",
+    "coherence_route_debt": "coherence_route_debt_mean",
     "cpu_debt": "cpu_debt_ops_mean",
     "lstm_cpu_debt": "lstm_est_cpu_debt_ops_mean",
 }
@@ -4636,6 +4650,39 @@ def route_debt_recommendations(
     return selected
 
 
+def route_debt_recommendation_summary(
+    recommendations: list[dict[str, str]],
+) -> dict[str, str]:
+    if not recommendations:
+        return {
+            "decision": "no_route_debt_recommendation",
+            "recommendation_rows": "0",
+            "top_recommendation": "-",
+            "top_candidate_wave_dilations": "-",
+            "top_baseline_wave_dilations": "-",
+            "top_quality_status": "-",
+            "top_final_nll_delta": "-",
+            "top_route_debt_ratio": "-",
+            "top_cpu_debt_ratio": "-",
+            "top_trace_step_ms_ratio": "-",
+        }
+    top = recommendations[0]
+    return {
+        "decision": "promote_lite_wave",
+        "recommendation_rows": str(len(recommendations)),
+        "top_recommendation": str(top.get("recommendation", "-")),
+        "top_candidate_wave_dilations": str(
+            top.get("candidate_wave_dilations", "-")
+        ),
+        "top_baseline_wave_dilations": str(top.get("baseline_wave_dilations", "-")),
+        "top_quality_status": str(top.get("quality_status", "-")),
+        "top_final_nll_delta": str(top.get("final_nll_delta", "-")),
+        "top_route_debt_ratio": str(top.get("route_debt_ratio", "-")),
+        "top_cpu_debt_ratio": str(top.get("cpu_debt_ratio", "-")),
+        "top_trace_step_ms_ratio": str(top.get("trace_step_ms_ratio", "-")),
+    }
+
+
 def summarize_rows(
     payload: dict[str, Any],
     *,
@@ -5331,6 +5378,21 @@ def route_debt_recommendation_table(rows: list[dict[str, str]]) -> str:
     return "\n".join(lines)
 
 
+def route_debt_summary_table(summary: dict[str, str]) -> str:
+    return "\n".join(
+        [
+            "| " + " | ".join(ROUTE_DEBT_SUMMARY_HEADERS) + " |",
+            "| " + " | ".join("---" for _ in ROUTE_DEBT_SUMMARY_HEADERS) + " |",
+            "| "
+            + " | ".join(
+                md_cell(summary.get(header, "-"))
+                for header in ROUTE_DEBT_SUMMARY_HEADERS
+            )
+            + " |",
+        ]
+    )
+
+
 def markdown_report(
     rows: list[dict[str, str]],
     *,
@@ -5360,6 +5422,7 @@ def markdown_report(
     baseline_difficulty: list[dict[str, str]] | None = None,
     learning_scoreboard: list[dict[str, str]] | None = None,
     route_debt_recommendations: list[dict[str, str]] | None = None,
+    route_debt_summary: dict[str, str] | None = None,
 ) -> str:
     sections = [
         "## Route Status Counts",
@@ -5375,6 +5438,11 @@ def markdown_report(
     if route_debt_recommendations:
         sections.extend(
             [
+                "## Route Debt Decision",
+                route_debt_summary_table(
+                    route_debt_summary
+                    or route_debt_recommendation_summary(route_debt_recommendations)
+                ),
                 "## Route Debt Recommendations",
                 route_debt_recommendation_table(route_debt_recommendations),
             ]
@@ -5724,6 +5792,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     learning_scoreboard = learning_scoreboard_rows(payloads, limit=args.limit)
     route_debt_recs = route_debt_recommendations(payloads, limit=args.limit)
+    route_debt_summary = route_debt_recommendation_summary(route_debt_recs)
     baseline_difficulty = baseline_difficulty_rows(payloads, limit=args.limit)
     rows = summarize_compare_payloads(
         payloads,
@@ -5772,6 +5841,7 @@ def main(argv: list[str] | None = None) -> int:
         "bigram_soft_guard_seed_deltas": bigram_soft_guard_seed_deltas,
         "bigram_soft_guard_stability": bigram_soft_guard_stability,
         "learning_scoreboard_rows": learning_scoreboard,
+        "route_debt_recommendation_summary": route_debt_summary,
         "route_debt_recommendations": route_debt_recs,
         "baseline_difficulty_rows": baseline_difficulty,
         "route_status_gate": {
@@ -5822,6 +5892,7 @@ def main(argv: list[str] | None = None) -> int:
             baseline_difficulty=baseline_difficulty,
             learning_scoreboard=learning_scoreboard,
             route_debt_recommendations=route_debt_recs,
+            route_debt_summary=route_debt_summary,
         )
     )
     exit_code = 0

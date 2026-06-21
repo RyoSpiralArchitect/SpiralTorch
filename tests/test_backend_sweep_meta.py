@@ -2252,6 +2252,19 @@ class BackendSweepMetaTests(unittest.TestCase):
 
         self.assertEqual(debt_options.sort_metric, "final_bigram_rank_debt")
 
+        route_debt_args = run_char_lm_sweep.parse_args(
+            [
+                "data.txt",
+                "--compare-summary-sort-metric",
+                "coherence_route_debt",
+            ]
+        )
+        route_debt_options = run_char_lm_sweep.compare_summary_options_from_args(
+            route_debt_args
+        )
+
+        self.assertEqual(route_debt_options.sort_metric, "coherence_route_debt")
+
     def test_char_lm_sweep_compare_summary_accepts_extra_merge_inputs(self) -> None:
         args = run_char_lm_sweep.parse_args(
             [
@@ -7786,9 +7799,13 @@ class BackendSweepMetaTests(unittest.TestCase):
             [("wave/compare.json", payload)],
             limit=8,
         )
+        decision = summarize_char_lm_compare.route_debt_recommendation_summary(
+            recommendations
+        )
         report = summarize_char_lm_compare.markdown_report(
             [],
             route_debt_recommendations=recommendations,
+            route_debt_summary=decision,
         )
 
         self.assertEqual(len(recommendations), 1)
@@ -7801,6 +7818,11 @@ class BackendSweepMetaTests(unittest.TestCase):
             recommendations[0]["recommendation"],
             "quality_neutral_route_debt_lower",
         )
+        self.assertEqual(decision["decision"], "promote_lite_wave")
+        self.assertEqual(decision["recommendation_rows"], "1")
+        self.assertEqual(decision["top_candidate_wave_dilations"], "1")
+        self.assertEqual(decision["top_route_debt_ratio"], "0.5000")
+        self.assertIn("## Route Debt Decision", report)
         self.assertIn("## Route Debt Recommendations", report)
 
     def test_char_lm_compare_summary_excludes_learning_regressed_recommendation(

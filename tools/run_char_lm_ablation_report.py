@@ -305,6 +305,7 @@ def build_report_markdown(
 ) -> str:
     rows = []
     recommendations = []
+    route_debt_summary = {}
     route_debt_recommendations = []
     guard_recommendations = []
     rank_min_stable_recommendations = []
@@ -321,6 +322,11 @@ def build_report_markdown(
             compare_summary.get("route_debt_recommendations")
             if isinstance(compare_summary.get("route_debt_recommendations"), list)
             else []
+        )
+        route_debt_summary = (
+            compare_summary.get("route_debt_recommendation_summary")
+            if isinstance(compare_summary.get("route_debt_recommendation_summary"), dict)
+            else {}
         )
         guard_recommendations = (
             compare_summary.get("bigram_guard_recommendations")
@@ -412,6 +418,22 @@ def build_report_markdown(
                 "route_status",
             ],
             rows[: int(manifest.get("summary_limit") or 8)],
+        ),
+        "",
+        "## Route Debt Decision",
+        "",
+        md_table(
+            [
+                "decision",
+                "recommendation_rows",
+                "top_recommendation",
+                "top_candidate_wave_dilations",
+                "top_baseline_wave_dilations",
+                "top_route_debt_ratio",
+                "top_cpu_debt_ratio",
+                "top_trace_step_ms_ratio",
+            ],
+            [route_debt_summary] if route_debt_summary else [],
         ),
         "",
         "## Route Debt Recommendations",
@@ -834,6 +856,9 @@ def main(argv: list[str]) -> int:
         )
         manifest["compare_summary_paired_recurrent_recommendations"] = (
             compare_summary_payload.get("paired_recurrent_recommendations")
+        )
+        manifest["compare_summary_route_debt_recommendation_summary"] = (
+            compare_summary_payload.get("route_debt_recommendation_summary")
         )
         manifest["compare_summary_route_debt_recommendations"] = (
             compare_summary_payload.get("route_debt_recommendations")
