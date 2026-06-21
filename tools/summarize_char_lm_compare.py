@@ -975,6 +975,77 @@ LEARNING_SCOREBOARD_HEADERS = [
     "route_status",
 ]
 
+ROUTE_DEBT_GROUP_COLUMNS = [
+    "arch",
+    "recurrent",
+    "backend",
+    "head_prior",
+    "head_resid",
+    "bigram_guard",
+    "bigram_guard_k",
+    "bigram_rank_guard",
+    "bigram_rank_margin",
+    "bigram_rank_band",
+    "bigram_rank_min",
+    "bigram_soft_guard",
+    "char_feature",
+    "mode",
+    "context_scale",
+    "self_score",
+    "query_resid",
+    "wave_kernel",
+    "steps",
+    "hidden",
+    "embed_dim",
+    "epochs",
+    "batches",
+    "batch",
+    "eval_samples",
+    "val_start",
+    "lr",
+]
+
+ROUTE_DEBT_RECOMMENDATION_HEADERS = [
+    "rank",
+    "recommendation",
+    "source",
+    *ROUTE_DEBT_GROUP_COLUMNS,
+    "candidate_wave_dilations",
+    "baseline_wave_dilations",
+    "candidate_runs",
+    "baseline_runs",
+    "candidate_final_nll",
+    "baseline_final_nll",
+    "final_nll_delta",
+    "candidate_best_nll",
+    "baseline_best_nll",
+    "best_nll_delta",
+    "candidate_final_vs_bigram",
+    "baseline_final_vs_bigram",
+    "final_vs_bigram_delta",
+    "candidate_trace_step_ms",
+    "baseline_trace_step_ms",
+    "trace_step_ms_delta",
+    "trace_step_ms_ratio",
+    "candidate_cpu_debt",
+    "baseline_cpu_debt",
+    "cpu_debt_delta",
+    "cpu_debt_ratio",
+    "candidate_route_debt",
+    "baseline_route_debt",
+    "route_debt_delta",
+    "route_debt_ratio",
+    "quality_status",
+    "latency_status",
+    "cpu_debt_status",
+    "route_debt_status",
+    "route_debt_verdict",
+    "candidate_coherence_route_status",
+    "baseline_coherence_route_status",
+    "candidate_route_status",
+    "baseline_route_status",
+]
+
 DEFAULT_PAIR_BASELINE_RECURRENT = "spiral"
 DEFAULT_PAIR_CANDIDATE_RECURRENT = "lstm"
 DEFAULT_BIGRAM_GUARD_BASELINE = 0.0
@@ -1062,6 +1133,11 @@ RECOMMENDED_BIGRAM_RANK_MIN_STABILITY_VERDICTS = {
     "rank_min_seed_stably_improved": "stable_alignment_improved",
     "rank_min_seed_improved_or_neutral": "stable_alignment_improved_or_neutral",
     "rank_min_seed_bounded_mixed": "bounded_alignment_improved",
+}
+
+RECOMMENDED_ROUTE_DEBT_VERDICTS = {
+    "route_debt_quality_improved_lighter": "quality_improved_route_debt_lower",
+    "route_debt_quality_neutral_lighter": "quality_neutral_route_debt_lower",
 }
 
 SORT_METRIC_COLUMNS = {
@@ -1178,6 +1254,12 @@ def fmt_ratio(numerator: float | None, denominator: float | None) -> str:
     if numerator is None or denominator is None or denominator == 0.0:
         return "-"
     return f"{numerator / denominator:.4f}"
+
+
+def ratio_for_sort(numerator: float | None, denominator: float | None) -> float:
+    if numerator is None or denominator is None or denominator == 0.0:
+        return float("inf")
+    return numerator / denominator
 
 
 def classify_lower_is_better_delta(
@@ -4318,6 +4400,242 @@ def learning_scoreboard_rows(
     return selected
 
 
+def route_debt_verdict(
+    *,
+    quality_status: str,
+    latency_status: str,
+    cpu_debt_status: str,
+    route_debt_status: str,
+) -> str:
+    if quality_status == "regressed":
+        return "route_debt_quality_regressed"
+    if route_debt_status != "improved":
+        return "route_debt_not_lower"
+    if latency_status == "regressed" or cpu_debt_status == "regressed":
+        return "route_debt_lower_cost_mixed"
+    if quality_status == "improved":
+        return "route_debt_quality_improved_lighter"
+    if quality_status == "neutral":
+        return "route_debt_quality_neutral_lighter"
+    return "route_debt_inconclusive"
+
+
+def route_debt_recommendations(
+    payloads: list[tuple[str, dict[str, Any]]],
+    *,
+    limit: int,
+) -> list[dict[str, str]]:
+    candidates: list[tuple[tuple[float, ...], dict[str, str]]] = []
+    verdict_rank = {
+        "route_debt_quality_improved_lighter": 0,
+        "route_debt_quality_neutral_lighter": 1,
+    }
+    for source, payload in payloads:
+        grouped: dict[tuple[str, ...], list[dict[str, Any]]] = {}
+        for row in source_rows(payload):
+            wave_dilations = str(row.get("wave_dilations", "-"))
+            route_debt = parse_number_cell(row.get("coherence_route_debt_mean"))
+            if wave_dilations in {"", "-"} or route_debt is None:
+                continue
+            key = tuple(str(row.get(column, "-")) for column in ROUTE_DEBT_GROUP_COLUMNS)
+            grouped.setdefault(key, []).append(row)
+
+        for key, rows in sorted(grouped.items()):
+            for candidate in rows:
+                candidate_wave = str(candidate.get("wave_dilations", "-"))
+                candidate_route_debt = parse_number_cell(
+                    candidate.get("coherence_route_debt_mean")
+                )
+                if candidate_route_debt is None:
+                    continue
+                for baseline in rows:
+                    baseline_wave = str(baseline.get("wave_dilations", "-"))
+                    if baseline is candidate or baseline_wave == candidate_wave:
+                        continue
+                    baseline_route_debt = parse_number_cell(
+                        baseline.get("coherence_route_debt_mean")
+                    )
+                    if baseline_route_debt is None:
+                        continue
+
+                    route_debt_delta = candidate_route_debt - baseline_route_debt
+                    route_status_delta = classify_lower_is_better_delta(
+                        route_debt_delta
+                    )
+                    if route_status_delta != "improved":
+                        continue
+
+                    candidate_final_nll = parse_number_cell(
+                        candidate.get("final_nll_mean")
+                    )
+                    baseline_final_nll = parse_number_cell(
+                        baseline.get("final_nll_mean")
+                    )
+                    candidate_best_nll = parse_number_cell(
+                        candidate.get("best_nll_mean")
+                    )
+                    baseline_best_nll = parse_number_cell(baseline.get("best_nll_mean"))
+                    candidate_bigram = parse_number_cell(
+                        candidate.get("final_vs_bigram_mean")
+                    )
+                    baseline_bigram = parse_number_cell(
+                        baseline.get("final_vs_bigram_mean")
+                    )
+                    candidate_step_ms = parse_number_cell(
+                        candidate.get("trace_step_ms_mean_mean")
+                    )
+                    baseline_step_ms = parse_number_cell(
+                        baseline.get("trace_step_ms_mean_mean")
+                    )
+                    candidate_cpu_debt = parse_number_cell(
+                        candidate.get("cpu_debt_ops_mean")
+                    )
+                    baseline_cpu_debt = parse_number_cell(
+                        baseline.get("cpu_debt_ops_mean")
+                    )
+
+                    final_nll_delta = (
+                        candidate_final_nll - baseline_final_nll
+                        if candidate_final_nll is not None
+                        and baseline_final_nll is not None
+                        else None
+                    )
+                    best_nll_delta = (
+                        candidate_best_nll - baseline_best_nll
+                        if candidate_best_nll is not None
+                        and baseline_best_nll is not None
+                        else None
+                    )
+                    bigram_delta = (
+                        candidate_bigram - baseline_bigram
+                        if candidate_bigram is not None and baseline_bigram is not None
+                        else None
+                    )
+                    step_ms_delta = (
+                        candidate_step_ms - baseline_step_ms
+                        if candidate_step_ms is not None
+                        and baseline_step_ms is not None
+                        else None
+                    )
+                    cpu_debt_delta = (
+                        candidate_cpu_debt - baseline_cpu_debt
+                        if candidate_cpu_debt is not None
+                        and baseline_cpu_debt is not None
+                        else None
+                    )
+
+                    quality_status = combine_quality_status(
+                        classify_lower_is_better_delta(final_nll_delta),
+                        classify_lower_is_better_delta(best_nll_delta),
+                        classify_lower_is_better_delta(bigram_delta),
+                    )
+                    latency_status = classify_lower_is_better_delta(step_ms_delta)
+                    cpu_debt_status = classify_lower_is_better_delta(cpu_debt_delta)
+                    verdict = route_debt_verdict(
+                        quality_status=quality_status,
+                        latency_status=latency_status,
+                        cpu_debt_status=cpu_debt_status,
+                        route_debt_status=route_status_delta,
+                    )
+                    if verdict not in RECOMMENDED_ROUTE_DEBT_VERDICTS:
+                        continue
+
+                    row = {
+                        "source": source,
+                        **dict(zip(ROUTE_DEBT_GROUP_COLUMNS, key, strict=True)),
+                        "candidate_wave_dilations": candidate_wave,
+                        "baseline_wave_dilations": baseline_wave,
+                        "candidate_runs": str(candidate.get("runs", "-")),
+                        "baseline_runs": str(baseline.get("runs", "-")),
+                        "candidate_final_nll": str(
+                            candidate.get("final_nll_mean", "-")
+                        ),
+                        "baseline_final_nll": str(baseline.get("final_nll_mean", "-")),
+                        "final_nll_delta": fmt_delta(final_nll_delta),
+                        "candidate_best_nll": str(candidate.get("best_nll_mean", "-")),
+                        "baseline_best_nll": str(baseline.get("best_nll_mean", "-")),
+                        "best_nll_delta": fmt_delta(best_nll_delta),
+                        "candidate_final_vs_bigram": str(
+                            candidate.get("final_vs_bigram_mean", "-")
+                        ),
+                        "baseline_final_vs_bigram": str(
+                            baseline.get("final_vs_bigram_mean", "-")
+                        ),
+                        "final_vs_bigram_delta": fmt_delta(bigram_delta),
+                        "candidate_trace_step_ms": str(
+                            candidate.get("trace_step_ms_mean_mean", "-")
+                        ),
+                        "baseline_trace_step_ms": str(
+                            baseline.get("trace_step_ms_mean_mean", "-")
+                        ),
+                        "trace_step_ms_delta": fmt_delta(step_ms_delta),
+                        "trace_step_ms_ratio": fmt_ratio(
+                            candidate_step_ms, baseline_step_ms
+                        ),
+                        "candidate_cpu_debt": str(
+                            candidate.get("cpu_debt_ops_mean", "-")
+                        ),
+                        "baseline_cpu_debt": str(baseline.get("cpu_debt_ops_mean", "-")),
+                        "cpu_debt_delta": fmt_delta(cpu_debt_delta),
+                        "cpu_debt_ratio": fmt_ratio(
+                            candidate_cpu_debt, baseline_cpu_debt
+                        ),
+                        "candidate_route_debt": str(
+                            candidate.get("coherence_route_debt_mean", "-")
+                        ),
+                        "baseline_route_debt": str(
+                            baseline.get("coherence_route_debt_mean", "-")
+                        ),
+                        "route_debt_delta": fmt_delta(route_debt_delta),
+                        "route_debt_ratio": fmt_ratio(
+                            candidate_route_debt, baseline_route_debt
+                        ),
+                        "quality_status": quality_status,
+                        "latency_status": latency_status,
+                        "cpu_debt_status": cpu_debt_status,
+                        "route_debt_status": route_status_delta,
+                        "route_debt_verdict": verdict,
+                        "candidate_coherence_route_status": str(
+                            candidate.get("coherence_route_status", "-")
+                        ),
+                        "baseline_coherence_route_status": str(
+                            baseline.get("coherence_route_status", "-")
+                        ),
+                        "candidate_route_status": route_status(candidate),
+                        "baseline_route_status": route_status(baseline),
+                    }
+                    candidates.append(
+                        (
+                            (
+                                float(verdict_rank.get(verdict, 99)),
+                                ratio_for_sort(
+                                    candidate_route_debt, baseline_route_debt
+                                ),
+                                ratio_for_sort(
+                                    candidate_cpu_debt, baseline_cpu_debt
+                                ),
+                                ratio_for_sort(candidate_step_ms, baseline_step_ms),
+                                final_nll_delta
+                                if final_nll_delta is not None
+                                else float("inf"),
+                                best_nll_delta
+                                if best_nll_delta is not None
+                                else float("inf"),
+                                str(source),
+                            ),
+                            row,
+                        )
+                    )
+
+    candidates.sort(key=lambda item: item[0])
+    selected = [row for _, row in candidates[: max(limit, 0)]]
+    for rank, row in enumerate(selected, start=1):
+        row["rank"] = str(rank)
+        verdict = str(row.get("route_debt_verdict", "-"))
+        row["recommendation"] = RECOMMENDED_ROUTE_DEBT_VERDICTS.get(verdict, "-")
+    return selected
+
+
 def summarize_rows(
     payload: dict[str, Any],
     *,
@@ -4994,6 +5312,25 @@ def learning_scoreboard_table(rows: list[dict[str, str]]) -> str:
     return "\n".join(lines)
 
 
+def route_debt_recommendation_table(rows: list[dict[str, str]]) -> str:
+    lines = [
+        "| " + " | ".join(ROUTE_DEBT_RECOMMENDATION_HEADERS) + " |",
+        "| "
+        + " | ".join("---" for _ in ROUTE_DEBT_RECOMMENDATION_HEADERS)
+        + " |",
+    ]
+    for row in rows:
+        lines.append(
+            "| "
+            + " | ".join(
+                md_cell(row.get(header, "-"))
+                for header in ROUTE_DEBT_RECOMMENDATION_HEADERS
+            )
+            + " |"
+        )
+    return "\n".join(lines)
+
+
 def markdown_report(
     rows: list[dict[str, str]],
     *,
@@ -5022,6 +5359,7 @@ def markdown_report(
     bigram_soft_guard_stability: list[dict[str, str]] | None = None,
     baseline_difficulty: list[dict[str, str]] | None = None,
     learning_scoreboard: list[dict[str, str]] | None = None,
+    route_debt_recommendations: list[dict[str, str]] | None = None,
 ) -> str:
     sections = [
         "## Route Status Counts",
@@ -5032,6 +5370,13 @@ def markdown_report(
             [
                 "## Learning Scoreboard",
                 learning_scoreboard_table(learning_scoreboard),
+            ]
+        )
+    if route_debt_recommendations:
+        sections.extend(
+            [
+                "## Route Debt Recommendations",
+                route_debt_recommendation_table(route_debt_recommendations),
             ]
         )
     if paired_recommendations:
@@ -5378,6 +5723,7 @@ def main(argv: list[str] | None = None) -> int:
         bigram_soft_guard_seed_deltas
     )
     learning_scoreboard = learning_scoreboard_rows(payloads, limit=args.limit)
+    route_debt_recs = route_debt_recommendations(payloads, limit=args.limit)
     baseline_difficulty = baseline_difficulty_rows(payloads, limit=args.limit)
     rows = summarize_compare_payloads(
         payloads,
@@ -5426,6 +5772,7 @@ def main(argv: list[str] | None = None) -> int:
         "bigram_soft_guard_seed_deltas": bigram_soft_guard_seed_deltas,
         "bigram_soft_guard_stability": bigram_soft_guard_stability,
         "learning_scoreboard_rows": learning_scoreboard,
+        "route_debt_recommendations": route_debt_recs,
         "baseline_difficulty_rows": baseline_difficulty,
         "route_status_gate": {
             "fail_on": forbidden_statuses,
@@ -5474,6 +5821,7 @@ def main(argv: list[str] | None = None) -> int:
             bigram_soft_guard_stability=bigram_soft_guard_stability,
             baseline_difficulty=baseline_difficulty,
             learning_scoreboard=learning_scoreboard,
+            route_debt_recommendations=route_debt_recs,
         )
     )
     exit_code = 0

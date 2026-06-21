@@ -305,6 +305,7 @@ def build_report_markdown(
 ) -> str:
     rows = []
     recommendations = []
+    route_debt_recommendations = []
     guard_recommendations = []
     rank_min_stable_recommendations = []
     rank_min_promotion_gate = {}
@@ -314,6 +315,11 @@ def build_report_markdown(
         recommendations = (
             compare_summary.get("paired_recurrent_recommendations")
             if isinstance(compare_summary.get("paired_recurrent_recommendations"), list)
+            else []
+        )
+        route_debt_recommendations = (
+            compare_summary.get("route_debt_recommendations")
+            if isinstance(compare_summary.get("route_debt_recommendations"), list)
             else []
         )
         guard_recommendations = (
@@ -406,6 +412,26 @@ def build_report_markdown(
                 "route_status",
             ],
             rows[: int(manifest.get("summary_limit") or 8)],
+        ),
+        "",
+        "## Route Debt Recommendations",
+        "",
+        md_table(
+            [
+                "rank",
+                "recommendation",
+                "arch",
+                "recurrent",
+                "candidate_wave_dilations",
+                "baseline_wave_dilations",
+                "quality_status",
+                "route_debt_verdict",
+                "final_nll_delta",
+                "route_debt_ratio",
+                "cpu_debt_ratio",
+                "trace_step_ms_ratio",
+            ],
+            route_debt_recommendations[: int(manifest.get("summary_limit") or 8)],
         ),
         "",
         "## Recurrent Recommendations",
@@ -808,6 +834,9 @@ def main(argv: list[str]) -> int:
         )
         manifest["compare_summary_paired_recurrent_recommendations"] = (
             compare_summary_payload.get("paired_recurrent_recommendations")
+        )
+        manifest["compare_summary_route_debt_recommendations"] = (
+            compare_summary_payload.get("route_debt_recommendations")
         )
         manifest["compare_summary_bigram_guard_recommendations"] = (
             compare_summary_payload.get("bigram_guard_recommendations")

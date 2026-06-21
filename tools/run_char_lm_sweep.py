@@ -3638,6 +3638,9 @@ def main(argv: list[str]) -> int:
         manifest["compare_summary_learning_scoreboard_rows"] = (
             compare_summary_payload.get("learning_scoreboard_rows")
         )
+        manifest["compare_summary_route_debt_recommendations"] = (
+            compare_summary_payload.get("route_debt_recommendations")
+        )
         manifest["compare_summary_baseline_difficulty_rows"] = (
             compare_summary_payload.get("baseline_difficulty_rows")
         )
