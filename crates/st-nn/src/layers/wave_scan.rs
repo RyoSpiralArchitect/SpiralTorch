@@ -40,6 +40,25 @@ fn validate_finite_slice(label: &'static str, values: &[f32]) -> PureResult<()> 
     Ok(())
 }
 
+fn validate_finite_value(label: &'static str, value: f32) -> PureResult<()> {
+    if !value.is_finite() {
+        return Err(TensorError::NonFiniteValue { label, value });
+    }
+    Ok(())
+}
+
+fn scaled_tensor(input: &Tensor, scale: f32) -> PureResult<Tensor> {
+    validate_finite_value("wave_scan_stack_scale", scale)?;
+    let (rows, cols) = input.shape();
+    let data = input
+        .data()
+        .iter()
+        .map(|value| *value * scale)
+        .collect::<Vec<f32>>();
+    validate_finite_slice("wave_scan_stack_scaled_tensor", &data)?;
+    Tensor::from_vec(rows, cols, data)
+}
+
 #[cfg(feature = "wgpu")]
 fn strict_gpu_path() -> bool {
     std::env::var("SPIRALTORCH_STRICT_GPU")
@@ -68,6 +87,7 @@ fn emit_wave_scan_meta(
     route_backend: TensorUtilBackend,
     actual_backend: &'static str,
     kernel: &'static str,
+    output_gradient_scale: Option<f32>,
     fallback: Option<&str>,
 ) {
     let input_values = batch
@@ -97,6 +117,8 @@ fn emit_wave_scan_meta(
             "final_step_offset": out_steps.saturating_sub(1),
             "estimated_gather_values": if backward { 0 } else { context_values },
             "estimated_scatter_values": if backward { context_values } else { 0 },
+            "output_gradient_scale": output_gradient_scale,
+            "scaled_scatter": backward && output_gradient_scale.unwrap_or(1.0) != 1.0,
             "backward": backward,
             "empty": input_values == 0 || context_values == 0,
         });
@@ -142,8 +164,11 @@ fn emit_wave_scan_stack_meta(
             "context_values": context_values,
             "branch_values": branch_values,
             "estimated_branch_adds": branch_values,
-            "estimated_average_scales": context_values,
+            "estimated_average_scales": 0,
+            "average_fused_into_branch_adds": true,
             "estimated_backward_adds": if backward { input_values.saturating_mul(branch_count) } else { 0 },
+            "estimated_backward_gradient_scales": 0,
+            "backward_gradient_scale_fused_into_scatter": backward,
             "backward": backward,
             "empty": input_values == 0 || context_values == 0,
         })
@@ -225,6 +250,139 @@ impl WaveScan {
         }
         Ok(cols / self.in_channels)
     }
+
+    pub(crate) fn backward_with_output_scale(
+        &mut self,
+        _input: &Tensor,
+        grad_output: &Tensor,
+        output_scale: f32,
+    ) -> PureResult<Tensor> {
+        validate_finite_value("wave_scan_output_gradient_scale", output_scale)?;
+        let cache = self
+            .cache
+            .borrow_mut()
+            .take()
+            .ok_or(TensorError::EmptyInput("wave_scan_cache"))?;
+        if grad_output.shape() != (cache.batch, cache.features) {
+            return Err(TensorError::ShapeMismatch {
+                left: grad_output.shape(),
+                right: (cache.batch, cache.features),
+            });
+        }
+        validate_finite_slice("wave_scan_grad_output", grad_output.data())?;
+        let scatter_backend =
+            current_tensor_util_backend_for_values(cache.batch.saturating_mul(cache.features));
+        #[cfg(feature = "wgpu")]
+        let mut wgpu_failure: Option<String> =
+            if output_scale != 1.0 && matches!(scatter_backend, TensorUtilBackend::GpuWgpu) {
+                if strict_gpu_path() {
+                    return Err(wave_scan_wgpu_error(
+                        "wave_scan_backward",
+                        "scaled scatter has no wgpu kernel yet".to_string(),
+                    ));
+                }
+                Some("scaled scatter fused into cpu fallback".to_string())
+            } else {
+                None
+            };
+
+        #[cfg(feature = "wgpu")]
+        let maybe_grad_gate_out = if output_scale == 1.0
+            && matches!(scatter_backend, TensorUtilBackend::GpuWgpu)
+            && cache.batch > 0
+            && cache.out_steps > 0
+            && cache.features > 0
+            && wgpu_dense::is_available()
+        {
+            match wgpu_dense::sequence_last_step_scatter(
+                grad_output.data(),
+                cache.batch,
+                cache.out_steps,
+                cache.features,
+            ) {
+                Ok(buffer) => {
+                    validate_finite_slice("wave_scan_grad_gate_out", &buffer)?;
+                    Some(Tensor::from_vec(
+                        cache.batch,
+                        cache.features * cache.out_steps,
+                        buffer,
+                    )?)
+                }
+                Err(message) if strict_gpu_path() => {
+                    return Err(wave_scan_wgpu_error("wave_scan_backward", message));
+                }
+                Err(message) => {
+                    wgpu_failure = Some(message);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        #[cfg(not(feature = "wgpu"))]
+        let maybe_grad_gate_out: Option<Tensor> = None;
+
+        let (grad_gate_out, actual_backend, kernel) = if let Some(grad_gate_out) =
+            maybe_grad_gate_out
+        {
+            (
+                grad_gate_out,
+                "wgpu_dense",
+                "tensor_util.sequence_last_step_scatter",
+            )
+        } else {
+            let mut grad_gate_out = Tensor::zeros(cache.batch, cache.features * cache.out_steps)?;
+            {
+                let src = grad_output.data();
+                let dst = grad_gate_out.data_mut();
+                for b in 0..cache.batch {
+                    let src_offset = b * cache.features;
+                    let dst_offset = b * cache.features * cache.out_steps
+                        + (cache.out_steps - 1) * cache.features;
+                    for feature in 0..cache.features {
+                        dst[dst_offset + feature] = src[src_offset + feature] * output_scale;
+                    }
+                }
+            }
+            validate_finite_slice("wave_scan_grad_gate_out", grad_gate_out.data())?;
+            let kernel = if output_scale == 1.0 {
+                "wave_scan.final_step_cpu_scatter"
+            } else {
+                "wave_scan.final_step_cpu_scaled_scatter"
+            };
+            (grad_gate_out, "cpu", kernel)
+        };
+
+        let grad_gate_out = grad_gate_out.reshape(cache.batch * cache.out_steps, cache.features)?;
+        let grad_gate_in = self.gate.backward(&cache.gating_in, &grad_gate_out)?;
+        let grad_conv_out = grad_gate_in.reshape(cache.batch, cache.features * cache.out_steps)?;
+        let grad_input = self.conv.backward(&cache.input, &grad_conv_out)?;
+        emit_wave_scan_meta(
+            "wave_scan_backward",
+            "wave_scan_final_step_scatter",
+            cache.batch,
+            cache.input_steps,
+            self.in_channels,
+            cache.out_steps,
+            cache.features,
+            true,
+            scatter_backend,
+            actual_backend,
+            kernel,
+            Some(output_scale),
+            {
+                #[cfg(feature = "wgpu")]
+                {
+                    wgpu_failure.as_deref()
+                }
+                #[cfg(not(feature = "wgpu"))]
+                {
+                    None
+                }
+            },
+        );
+        Ok(grad_input)
+    }
 }
 
 impl Module for WaveScan {
@@ -297,6 +455,7 @@ impl Module for WaveScan {
                             "wgpu_dense",
                             "tensor_util.sequence_last_step_gather",
                             None,
+                            None,
                         );
                         return Ok(final_hidden);
                     }
@@ -343,6 +502,7 @@ impl Module for WaveScan {
             gather_backend,
             "cpu",
             "wave_scan.final_step_cpu_gather",
+            None,
             {
                 #[cfg(feature = "wgpu")]
                 {
@@ -357,112 +517,8 @@ impl Module for WaveScan {
         Ok(final_hidden)
     }
 
-    fn backward(&mut self, _input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
-        let cache = self
-            .cache
-            .borrow_mut()
-            .take()
-            .ok_or(TensorError::EmptyInput("wave_scan_cache"))?;
-        if grad_output.shape() != (cache.batch, cache.features) {
-            return Err(TensorError::ShapeMismatch {
-                left: grad_output.shape(),
-                right: (cache.batch, cache.features),
-            });
-        }
-        validate_finite_slice("wave_scan_grad_output", grad_output.data())?;
-        let scatter_backend =
-            current_tensor_util_backend_for_values(cache.batch.saturating_mul(cache.features));
-        #[cfg(feature = "wgpu")]
-        let mut wgpu_failure: Option<String> = None;
-
-        #[cfg(feature = "wgpu")]
-        let maybe_grad_gate_out = if matches!(scatter_backend, TensorUtilBackend::GpuWgpu)
-            && cache.batch > 0
-            && cache.out_steps > 0
-            && cache.features > 0
-            && wgpu_dense::is_available()
-        {
-            match wgpu_dense::sequence_last_step_scatter(
-                grad_output.data(),
-                cache.batch,
-                cache.out_steps,
-                cache.features,
-            ) {
-                Ok(buffer) => {
-                    validate_finite_slice("wave_scan_grad_gate_out", &buffer)?;
-                    Some(Tensor::from_vec(
-                        cache.batch,
-                        cache.features * cache.out_steps,
-                        buffer,
-                    )?)
-                }
-                Err(message) if strict_gpu_path() => {
-                    return Err(wave_scan_wgpu_error("wave_scan_backward", message));
-                }
-                Err(message) => {
-                    wgpu_failure = Some(message);
-                    None
-                }
-            }
-        } else {
-            None
-        };
-        #[cfg(not(feature = "wgpu"))]
-        let maybe_grad_gate_out: Option<Tensor> = None;
-
-        let (grad_gate_out, actual_backend, kernel) = if let Some(grad_gate_out) =
-            maybe_grad_gate_out
-        {
-            (
-                grad_gate_out,
-                "wgpu_dense",
-                "tensor_util.sequence_last_step_scatter",
-            )
-        } else {
-            let mut grad_gate_out = Tensor::zeros(cache.batch, cache.features * cache.out_steps)?;
-            {
-                let src = grad_output.data();
-                let dst = grad_gate_out.data_mut();
-                for b in 0..cache.batch {
-                    let src_offset = b * cache.features;
-                    let dst_offset = b * cache.features * cache.out_steps
-                        + (cache.out_steps - 1) * cache.features;
-                    dst[dst_offset..dst_offset + cache.features]
-                        .copy_from_slice(&src[src_offset..src_offset + cache.features]);
-                }
-            }
-            validate_finite_slice("wave_scan_grad_gate_out", grad_gate_out.data())?;
-            (grad_gate_out, "cpu", "wave_scan.final_step_cpu_scatter")
-        };
-
-        let grad_gate_out = grad_gate_out.reshape(cache.batch * cache.out_steps, cache.features)?;
-        let grad_gate_in = self.gate.backward(&cache.gating_in, &grad_gate_out)?;
-        let grad_conv_out = grad_gate_in.reshape(cache.batch, cache.features * cache.out_steps)?;
-        let grad_input = self.conv.backward(&cache.input, &grad_conv_out)?;
-        emit_wave_scan_meta(
-            "wave_scan_backward",
-            "wave_scan_final_step_scatter",
-            cache.batch,
-            cache.input_steps,
-            self.in_channels,
-            cache.out_steps,
-            cache.features,
-            true,
-            scatter_backend,
-            actual_backend,
-            kernel,
-            {
-                #[cfg(feature = "wgpu")]
-                {
-                    wgpu_failure.as_deref()
-                }
-                #[cfg(not(feature = "wgpu"))]
-                {
-                    None
-                }
-            },
-        );
-        Ok(grad_input)
+    fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
+        self.backward_with_output_scale(input, grad_output, 1.0)
     }
 
     fn visit_parameters(
@@ -526,14 +582,17 @@ impl WaveScanStack {
 impl Module for WaveScanStack {
     fn forward(&self, input: &Tensor) -> PureResult<Tensor> {
         let (batch, input_cols) = input.shape();
-        let mut sum = Tensor::zeros(batch, self.features)?;
-        let merge_backend = current_tensor_util_backend_for_values(sum.data().len());
-        for scan in &self.scans {
-            let out = scan.forward(input)?;
-            sum.add_scaled_with_backend(&out, 1.0, merge_backend)?;
-        }
         let inv = 1.0 / (self.scans.len() as f32).max(1.0);
-        let output = sum.scale_with_backend(inv, merge_backend)?;
+        let (first, rest) = self
+            .scans
+            .split_first()
+            .ok_or(TensorError::EmptyInput("wave_scan_stack"))?;
+        let mut sum = scaled_tensor(&first.forward(input)?, inv)?;
+        let merge_backend = current_tensor_util_backend_for_values(sum.data().len());
+        for scan in rest {
+            let out = scan.forward(input)?;
+            sum.add_scaled_with_backend(&out, inv, merge_backend)?;
+        }
         emit_wave_scan_stack_meta(
             "wave_scan_stack_forward",
             "wave_scan_stack_average",
@@ -544,7 +603,7 @@ impl Module for WaveScanStack {
             merge_backend,
             false,
         );
-        Ok(output)
+        Ok(sum)
     }
 
     fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
@@ -552,13 +611,15 @@ impl Module for WaveScanStack {
             return Ok(grad_output.clone());
         }
         let inv = 1.0 / (self.scans.len() as f32).max(1.0);
-        let scale_backend = current_tensor_util_backend_for_values(grad_output.data().len());
-        let grad_scaled = grad_output.scale_with_backend(inv, scale_backend)?;
         let (batch, cols) = input.shape();
-        let mut total = Tensor::zeros(batch, cols)?;
+        let (first, rest) = self
+            .scans
+            .split_first_mut()
+            .ok_or(TensorError::EmptyInput("wave_scan_stack"))?;
+        let mut total = first.backward_with_output_scale(input, grad_output, inv)?;
         let accum_backend = current_tensor_util_backend_for_values(total.data().len());
-        for scan in &mut self.scans {
-            let grad_in = scan.backward(input, &grad_scaled)?;
+        for scan in rest {
+            let grad_in = scan.backward_with_output_scale(input, grad_output, inv)?;
             total.add_scaled_with_backend(&grad_in, 1.0, accum_backend)?;
         }
         emit_wave_scan_stack_meta(
@@ -733,8 +794,20 @@ mod tests {
             assert_eq!(event.1["backend"], "composite");
             assert_eq!(event.1["context_values"], 3);
             assert_eq!(event.1["branch_values"], 6);
+            assert_eq!(event.1["estimated_average_scales"], 0);
+            assert_eq!(event.1["average_fused_into_branch_adds"], true);
             assert_eq!(event.1["backward"], backward);
         }
+        assert!(
+            events.iter().any(|(name, data)| {
+                *name == "wave_scan_backward"
+                    && data["kind"] == "wave_scan_final_step_scatter"
+                    && data["scaled_scatter"] == true
+                    && data["output_gradient_scale"] == 0.5
+                    && data["kernel"] == "wave_scan.final_step_cpu_scaled_scatter"
+            }),
+            "stack backward should fuse the branch-average scale into per-branch scatter"
+        );
     }
 
     #[cfg(feature = "wgpu")]

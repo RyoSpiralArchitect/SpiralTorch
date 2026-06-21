@@ -313,6 +313,64 @@ RECIPES = {
             "gen": 64,
         },
     },
+    "no-prior-coherence-wave-lite": {
+        "description": (
+            "quickly probe whether fewer wave dilation branches preserve "
+            "no-prior coherence quality while lowering route debt"
+        ),
+        "defaults": {
+            "architectures": "wave",
+            "features": "token-bigram",
+            "head_priors": "none",
+            "seeds": "7",
+            "steps": 32,
+            "embed_dim": 32,
+            "hidden": 64,
+            "memory": 16,
+            "head_residual_scale_values": "5",
+            "query_residual_scale": 2,
+            "wave_kernel": 3,
+            "wave_dilation_values": "1;1,2;1,2,4",
+            "epoch_values": "3",
+            "batches_values": "8",
+            "batch": 4,
+            "eval_samples": 64,
+            "early_stop_patience": 2,
+            "lr_values": "0.05",
+            "compare_summary_limit": 12,
+            "extra_arg": ["--mix-rms", "1.0"],
+            "gen": 0,
+        },
+    },
+    "no-prior-coherence-wave-lite-confirm": {
+        "description": (
+            "confirm the wave-lite branch-count tradeoff with the longer "
+            "no-prior coherence budget"
+        ),
+        "defaults": {
+            "architectures": "wave",
+            "features": "token-bigram",
+            "head_priors": "none",
+            "seeds": "7,13",
+            "steps": 32,
+            "embed_dim": 32,
+            "hidden": 64,
+            "memory": 16,
+            "head_residual_scale_values": "5",
+            "query_residual_scale": 2,
+            "wave_kernel": 3,
+            "wave_dilation_values": "1;1,2;1,2,4",
+            "epoch_values": "8",
+            "batches_values": "24",
+            "batch": 4,
+            "eval_samples": 64,
+            "early_stop_patience": 4,
+            "lr_values": "0.05",
+            "compare_summary_limit": 12,
+            "extra_arg": ["--mix-rms", "1.0"],
+            "gen": 64,
+        },
+    },
     "hard-rank-guard-local": {
         "description": (
             "run a focused local rank-debt guard search on the hardest "
