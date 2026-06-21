@@ -1048,6 +1048,8 @@ ROUTE_DEBT_RECOMMENDATION_HEADERS = [
 
 ROUTE_DEBT_SUMMARY_HEADERS = [
     "decision",
+    "failed",
+    "fail_on_decisions",
     "recommendation_rows",
     "top_recommendation",
     "top_candidate_wave_dilations",
@@ -1099,6 +1101,11 @@ VALID_RANK_MIN_PROMOTION_DECISIONS = (
     "partial_promote_needs_tuning",
     "promote",
     "promote_with_bounded_watch",
+)
+
+VALID_ROUTE_DEBT_DECISIONS = (
+    "no_route_debt_recommendation",
+    "promote_lite_wave",
 )
 
 RECOMMENDED_EFFICIENCY_VERDICTS = {
@@ -4652,10 +4659,16 @@ def route_debt_recommendations(
 
 def route_debt_recommendation_summary(
     recommendations: list[dict[str, str]],
+    *,
+    fail_on_decisions: list[str] | None = None,
 ) -> dict[str, str]:
+    forbidden_decisions = fail_on_decisions or []
     if not recommendations:
+        decision = "no_route_debt_recommendation"
         return {
-            "decision": "no_route_debt_recommendation",
+            "decision": decision,
+            "failed": str(decision in set(forbidden_decisions)).lower(),
+            "fail_on_decisions": ",".join(forbidden_decisions),
             "recommendation_rows": "0",
             "top_recommendation": "-",
             "top_candidate_wave_dilations": "-",
@@ -4667,8 +4680,11 @@ def route_debt_recommendation_summary(
             "top_trace_step_ms_ratio": "-",
         }
     top = recommendations[0]
+    decision = "promote_lite_wave"
     return {
-        "decision": "promote_lite_wave",
+        "decision": decision,
+        "failed": str(decision in set(forbidden_decisions)).lower(),
+        "fail_on_decisions": ",".join(forbidden_decisions),
         "recommendation_rows": str(len(recommendations)),
         "top_recommendation": str(top.get("recommendation", "-")),
         "top_candidate_wave_dilations": str(
@@ -5682,6 +5698,15 @@ def main(argv: list[str] | None = None) -> int:
             "may be repeated or comma-separated"
         ),
     )
+    parser.add_argument(
+        "--fail-on-route-debt-decision",
+        action="append",
+        default=[],
+        help=(
+            "fail when the route-debt recommendation summary has this decision; "
+            "may be repeated or comma-separated"
+        ),
+    )
     parser.add_argument("--json-out", type=Path, default=None)
     args = parser.parse_args(argv)
 
@@ -5727,6 +5752,18 @@ def main(argv: list[str] | None = None) -> int:
             "unknown --fail-on-rank-min-promotion-decision value(s): "
             + ", ".join(unknown_rank_min_promotion_decisions)
             + f" (expected one of {', '.join(VALID_RANK_MIN_PROMOTION_DECISIONS)})"
+        )
+    forbidden_route_debt_decisions = parse_csv_filters(
+        args.fail_on_route_debt_decision
+    )
+    unknown_route_debt_decisions = sorted(
+        set(forbidden_route_debt_decisions) - set(VALID_ROUTE_DEBT_DECISIONS)
+    )
+    if unknown_route_debt_decisions:
+        parser.error(
+            "unknown --fail-on-route-debt-decision value(s): "
+            + ", ".join(unknown_route_debt_decisions)
+            + f" (expected one of {', '.join(VALID_ROUTE_DEBT_DECISIONS)})"
         )
 
     compare_paths = resolve_compare_paths(args.compare_json, recursive=args.recursive)
@@ -5792,7 +5829,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     learning_scoreboard = learning_scoreboard_rows(payloads, limit=args.limit)
     route_debt_recs = route_debt_recommendations(payloads, limit=args.limit)
-    route_debt_summary = route_debt_recommendation_summary(route_debt_recs)
+    route_debt_summary = route_debt_recommendation_summary(
+        route_debt_recs,
+        fail_on_decisions=forbidden_route_debt_decisions,
+    )
     baseline_difficulty = baseline_difficulty_rows(payloads, limit=args.limit)
     rows = summarize_compare_payloads(
         payloads,
@@ -5925,6 +5965,13 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "rank-min promotion gate failed: "
             + str(bigram_rank_min_gate.get("decision", "-")),
+            file=sys.stderr,
+        )
+        exit_code = 1
+    if route_debt_summary.get("failed") == "true":
+        print(
+            "route-debt decision gate failed: "
+            + str(route_debt_summary.get("decision", "-")),
             file=sys.stderr,
         )
         exit_code = 1
