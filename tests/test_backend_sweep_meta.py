@@ -2238,6 +2238,7 @@ class BackendSweepMetaTests(unittest.TestCase):
         self.assertEqual(options.fail_on_paired_quality_statuses, ())
         self.assertEqual(options.fail_on_efficiency_verdicts, ())
         self.assertEqual(options.fail_on_rank_min_promotion_decisions, ())
+        self.assertEqual(options.fail_on_route_debt_decisions, ())
         self.assertEqual(options.extra_compare_paths, ())
         self.assertFalse(options.merge_evidence_sources)
 
@@ -2559,6 +2560,42 @@ class BackendSweepMetaTests(unittest.TestCase):
         options = run_char_lm_sweep.compare_summary_options_from_args(args)
 
         self.assertEqual(options.fail_on_rank_min_promotion_decisions, ("promote",))
+
+    def test_char_lm_sweep_wave_lite_confirm_recipe_adds_route_debt_gate(
+        self,
+    ) -> None:
+        args = run_char_lm_sweep.parse_args(
+            [
+                "data.txt",
+                "--recipe",
+                "no-prior-coherence-wave-lite-confirm",
+            ]
+        )
+        args = run_char_lm_sweep.apply_recipe_defaults(args)
+        options = run_char_lm_sweep.compare_summary_options_from_args(args)
+
+        self.assertEqual(
+            options.fail_on_route_debt_decisions,
+            ("no_route_debt_recommendation",),
+        )
+        self.assertEqual(options.sort_metric, "coherence_route_debt")
+
+    def test_char_lm_sweep_wave_lite_confirm_recipe_preserves_route_debt_gate_override(
+        self,
+    ) -> None:
+        args = run_char_lm_sweep.parse_args(
+            [
+                "data.txt",
+                "--recipe",
+                "no-prior-coherence-wave-lite-confirm",
+                "--compare-summary-fail-on-route-debt-decision",
+                "promote_lite_wave",
+            ]
+        )
+        args = run_char_lm_sweep.apply_recipe_defaults(args)
+        options = run_char_lm_sweep.compare_summary_options_from_args(args)
+
+        self.assertEqual(options.fail_on_route_debt_decisions, ("promote_lite_wave",))
 
     def test_char_lm_sweep_val_start_hardness_recipe_expands_probe_grid(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -5138,6 +5175,57 @@ class BackendSweepMetaTests(unittest.TestCase):
             {"scan_fallback": 1},
         )
         self.assertIn("route status gate failed", error_text)
+
+    def test_char_lm_sweep_render_compare_summary_honors_route_debt_gate_options(
+        self,
+    ) -> None:
+        payload = {
+            "schema": "st.char_lm.compare.v1",
+            "aggregate_runs": [
+                {
+                    "arch": "llm_char_wave",
+                    "recurrent": "wave",
+                    "backend": "cpu",
+                    "head_prior": "none",
+                    "final_nll_mean": "2.0000",
+                    "best_nll_mean": "2.0000",
+                    "coherence_route_debt_mean": "10.0000",
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "compare.json").write_text(json.dumps(payload), encoding="utf-8")
+            output = run_char_lm_sweep.render_compare_summary(
+                root,
+                options=run_char_lm_sweep.CompareSummaryOptions(
+                    limit=8,
+                    route_clean_only=False,
+                    prefer_clean_route=True,
+                    fail_on_route_debt_decisions=("no_route_debt_recommendation",),
+                ),
+            )
+            compare_summary = json.loads(
+                (root / "compare_summary.json").read_text(encoding="utf-8")
+            )
+            command_script_text = (root / "compare_summary_command.sh").read_text(
+                encoding="utf-8"
+            )
+            error_text = (root / "compare_summary.error.log").read_text(
+                encoding="utf-8"
+            )
+
+        self.assertIsNone(output)
+        route_debt_summary = compare_summary["route_debt_recommendation_summary"]
+        self.assertEqual(route_debt_summary["decision"], "no_route_debt_recommendation")
+        self.assertEqual(route_debt_summary["failed"], "true")
+        self.assertEqual(
+            route_debt_summary["fail_on_decisions"],
+            "no_route_debt_recommendation",
+        )
+        self.assertIn("--fail-on-route-debt-decision", command_script_text)
+        self.assertIn("route-debt decision gate failed", error_text)
 
     def test_char_lm_sweep_route_gate_failure_keeps_summary_paths_in_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -7888,6 +7976,8 @@ class BackendSweepMetaTests(unittest.TestCase):
             "quality_neutral_route_debt_lower",
         )
         self.assertEqual(decision["decision"], "promote_lite_wave")
+        self.assertEqual(decision["failed"], "false")
+        self.assertEqual(decision["fail_on_decisions"], "")
         self.assertEqual(decision["recommendation_rows"], "1")
         self.assertEqual(decision["top_candidate_wave_dilations"], "1")
         self.assertEqual(decision["top_route_debt_ratio"], "0.5000")
@@ -8033,6 +8123,48 @@ class BackendSweepMetaTests(unittest.TestCase):
         self.assertEqual(gate["failed"], "true")
         self.assertEqual(gate["fail_on_decisions"], "no_rank_min_evidence")
         self.assertIn("rank-min promotion gate failed", stderr.getvalue())
+
+    def test_char_lm_compare_summary_cli_gate_checks_route_debt_decision(self) -> None:
+        payload = {
+            "schema": "st.char_lm.compare.v1",
+            "aggregate_runs": [
+                {
+                    "arch": "llm_char_wave",
+                    "recurrent": "wave",
+                    "backend": "cpu",
+                    "head_prior": "none",
+                    "final_nll_mean": "2.0000",
+                    "best_nll_mean": "2.0000",
+                    "coherence_route_debt_mean": "10.0000",
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            compare_path = root / "compare.json"
+            json_out = root / "summary.json"
+            compare_path.write_text(json.dumps(payload), encoding="utf-8")
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                code = summarize_char_lm_compare.main(
+                    [
+                        str(compare_path),
+                        "--json-out",
+                        str(json_out),
+                        "--fail-on-route-debt-decision",
+                        "no_route_debt_recommendation",
+                    ]
+                )
+            summary = json.loads(json_out.read_text(encoding="utf-8"))
+
+        self.assertEqual(code, 1)
+        gate = summary["route_debt_recommendation_summary"]
+        self.assertEqual(gate["decision"], "no_route_debt_recommendation")
+        self.assertEqual(gate["failed"], "true")
+        self.assertEqual(gate["fail_on_decisions"], "no_route_debt_recommendation")
+        self.assertIn("route-debt decision gate failed", stderr.getvalue())
 
     def test_char_lm_compare_summary_does_not_penalize_non_lstm_no_scan_route(self) -> None:
         payload = {

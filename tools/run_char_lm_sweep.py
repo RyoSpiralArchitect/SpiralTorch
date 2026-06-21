@@ -72,6 +72,7 @@ PRESETS = {
 RANK_MIN_PROMOTION_RECIPE_FAIL_DECISIONS = (
     "no_rank_min_evidence,needs_tuning,partial_promote_needs_tuning"
 )
+ROUTE_DEBT_PROMOTION_RECIPE_FAIL_DECISIONS = "no_route_debt_recommendation"
 
 RECIPES = {
     "none": {
@@ -397,6 +398,10 @@ RECIPES = {
             "early_stop_patience": 4,
             "lr_values": "0.05",
             "compare_summary_limit": 12,
+            "compare_summary_sort_metric": "coherence_route_debt",
+            "compare_summary_fail_on_route_debt_decision": (
+                ROUTE_DEBT_PROMOTION_RECIPE_FAIL_DECISIONS
+            ),
             "extra_arg": ["--mix-rms", "1.0"],
             "gen": 64,
         },
@@ -1218,6 +1223,7 @@ class CompareSummaryOptions:
     fail_on_paired_quality_statuses: tuple[str, ...] = ()
     fail_on_efficiency_verdicts: tuple[str, ...] = ()
     fail_on_rank_min_promotion_decisions: tuple[str, ...] = ()
+    fail_on_route_debt_decisions: tuple[str, ...] = ()
     extra_compare_paths: tuple[Path, ...] = ()
     merge_evidence_sources: bool = False
     sort_metric: str = "final_nll"
@@ -1264,6 +1270,11 @@ SUMMARY_RANK_MIN_PROMOTION_DECISIONS = {
     "partial_promote_needs_tuning",
     "promote",
     "promote_with_bounded_watch",
+}
+
+SUMMARY_ROUTE_DEBT_DECISIONS = {
+    "no_route_debt_recommendation",
+    "promote_lite_wave",
 }
 
 
@@ -1562,6 +1573,7 @@ def apply_recipe_defaults(args: argparse.Namespace) -> argparse.Namespace:
         "compare_summary_limit": 8,
         "compare_summary_sort_metric": "final_nll",
         "compare_summary_fail_on_rank_min_promotion_decision": None,
+        "compare_summary_fail_on_route_debt_decision": None,
         "compare_summary_extra_compare_json": [],
         "compare_summary_merge_evidence_sources": False,
         "extra_arg": [],
@@ -1722,6 +1734,24 @@ def compare_summary_options_from_args(args: argparse.Namespace) -> CompareSummar
             + ", ".join(invalid_rank_min_promotion_decisions)
             + f" (expected {expected})"
         )
+    fail_on_route_debt_decisions = tuple(
+        parse_csv(
+            args.compare_summary_fail_on_route_debt_decision,
+            label="compare-summary-fail-on-route-debt-decision",
+        )
+        if args.compare_summary_fail_on_route_debt_decision
+        else []
+    )
+    invalid_route_debt_decisions = sorted(
+        set(fail_on_route_debt_decisions) - SUMMARY_ROUTE_DEBT_DECISIONS
+    )
+    if invalid_route_debt_decisions:
+        expected = ", ".join(sorted(SUMMARY_ROUTE_DEBT_DECISIONS))
+        raise ValueError(
+            "invalid --compare-summary-fail-on-route-debt-decision: "
+            + ", ".join(invalid_route_debt_decisions)
+            + f" (expected {expected})"
+        )
     if args.compare_summary_sort_metric not in SUMMARY_SORT_METRICS:
         expected = ", ".join(sorted(SUMMARY_SORT_METRICS))
         raise ValueError(
@@ -1737,6 +1767,7 @@ def compare_summary_options_from_args(args: argparse.Namespace) -> CompareSummar
         fail_on_paired_quality_statuses=fail_on_paired_quality_statuses,
         fail_on_efficiency_verdicts=fail_on_efficiency_verdicts,
         fail_on_rank_min_promotion_decisions=fail_on_rank_min_promotion_decisions,
+        fail_on_route_debt_decisions=fail_on_route_debt_decisions,
         extra_compare_paths=extra_compare_paths,
         merge_evidence_sources=args.compare_summary_merge_evidence_sources,
         sort_metric=args.compare_summary_sort_metric,
@@ -1749,6 +1780,7 @@ def compare_summary_has_fail_gates(options: CompareSummaryOptions) -> bool:
         or options.fail_on_paired_quality_statuses
         or options.fail_on_efficiency_verdicts
         or options.fail_on_rank_min_promotion_decisions
+        or options.fail_on_route_debt_decisions
     )
 
 
@@ -2036,6 +2068,7 @@ def default_compare_summary_options() -> CompareSummaryOptions:
         fail_on_paired_quality_statuses=(),
         fail_on_efficiency_verdicts=(),
         fail_on_rank_min_promotion_decisions=(),
+        fail_on_route_debt_decisions=(),
         extra_compare_paths=(),
         merge_evidence_sources=False,
         sort_metric="final_nll",
@@ -2077,6 +2110,8 @@ def build_compare_summary_command(
         command.extend(["--fail-on-efficiency-verdict", verdict])
     for decision in options.fail_on_rank_min_promotion_decisions:
         command.extend(["--fail-on-rank-min-promotion-decision", decision])
+    for decision in options.fail_on_route_debt_decisions:
+        command.extend(["--fail-on-route-debt-decision", decision])
     return command
 
 
@@ -2655,6 +2690,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--compare-summary-fail-on-route-debt-decision",
+        default=None,
+        help=(
+            "comma-separated route-debt recommendation decisions that should fail "
+            "summary generation"
+        ),
+    )
+    parser.add_argument(
         "--compare-summary-sort-metric",
         default="final_nll",
         help=(
@@ -3015,6 +3058,9 @@ def main(argv: list[str]) -> int:
             ),
             "fail_on_rank_min_promotion_decisions": list(
                 compare_summary_options.fail_on_rank_min_promotion_decisions
+            ),
+            "fail_on_route_debt_decisions": list(
+                compare_summary_options.fail_on_route_debt_decisions
             ),
             "extra_compare_paths": [
                 str(path) for path in compare_summary_options.extra_compare_paths
