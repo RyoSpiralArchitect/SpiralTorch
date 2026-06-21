@@ -344,6 +344,39 @@ RECIPES = {
             "gen": 96,
         },
     },
+    "no-prior-coherence-promoted-frontier": {
+        "description": (
+            "compare the scan shape winner and promoted lite wave shape on "
+            "the same promoted no-prior coherence budget"
+        ),
+        "defaults": {
+            "architectures": "scan,wave",
+            "features": "token-bigram",
+            "head_priors": "none",
+            "seeds": "7,13,23",
+            "steps": 32,
+            "embed_dim": 32,
+            "hidden": 64,
+            "memory": 16,
+            "head_residual_scale_values": "5",
+            "context_scale": 2,
+            "query_residual_scale": 2,
+            "wave_kernel": 3,
+            "wave_dilations": "1",
+            "epoch_values": "10",
+            "batches_values": "32",
+            "batch": 4,
+            "eval_samples": 64,
+            "early_stop_patience": 4,
+            "lr_values": "0.05",
+            "compare_summary_limit": 12,
+            "architecture_extra_args": {
+                "scan": ["--mix-rms", "1.0"],
+                "wave": ["--mix-rms", "1.0"],
+            },
+            "gen": 96,
+        },
+    },
     "no-prior-coherence-frontier": {
         "description": (
             "compare the no-prior LSTM baseline, scan shape winner, and lite "
