@@ -1212,6 +1212,7 @@ SUMMARY_SORT_METRICS = {
     "final_nll",
     "final_vs_bigram",
     "final_vs_unigram",
+    "coherence_route_debt",
     "lstm_cpu_debt",
 }
 
@@ -2629,8 +2630,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             "primary metric for generated compare_summary ranking: final_nll, "
             "best_nll, delta_nll, final_vs_unigram, final_vs_bigram, "
             "final_bigram_logprob_lift, final_bigram_rank_lift, "
-            "final_bigram_rank_debt, final_top5_bigram_overlap, cpu_debt, "
-            "or lstm_cpu_debt"
+            "final_bigram_rank_debt, final_top5_bigram_overlap, "
+            "coherence_route_debt, cpu_debt, or lstm_cpu_debt"
         ),
     )
     parser.set_defaults(compare_summary_prefer_clean_route=True)
@@ -3637,6 +3638,12 @@ def main(argv: list[str]) -> int:
         )
         manifest["compare_summary_learning_scoreboard_rows"] = (
             compare_summary_payload.get("learning_scoreboard_rows")
+        )
+        manifest["compare_summary_route_debt_recommendation_summary"] = (
+            compare_summary_payload.get("route_debt_recommendation_summary")
+        )
+        manifest["compare_summary_route_debt_recommendations"] = (
+            compare_summary_payload.get("route_debt_recommendations")
         )
         manifest["compare_summary_baseline_difficulty_rows"] = (
             compare_summary_payload.get("baseline_difficulty_rows")

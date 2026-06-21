@@ -2144,6 +2144,11 @@ class BackendSweepMetaTests(unittest.TestCase):
             curvature=None,
             temperature=None,
             head_residual_scale=None,
+            context_scale=None,
+            self_score_scale=None,
+            query_residual_scale=None,
+            wave_kernel=None,
+            wave_dilations=None,
             backend="cpu",
         )
 
@@ -2246,6 +2251,19 @@ class BackendSweepMetaTests(unittest.TestCase):
         debt_options = run_char_lm_sweep.compare_summary_options_from_args(debt_args)
 
         self.assertEqual(debt_options.sort_metric, "final_bigram_rank_debt")
+
+        route_debt_args = run_char_lm_sweep.parse_args(
+            [
+                "data.txt",
+                "--compare-summary-sort-metric",
+                "coherence_route_debt",
+            ]
+        )
+        route_debt_options = run_char_lm_sweep.compare_summary_options_from_args(
+            route_debt_args
+        )
+
+        self.assertEqual(route_debt_options.sort_metric, "coherence_route_debt")
 
     def test_char_lm_sweep_compare_summary_accepts_extra_merge_inputs(self) -> None:
         args = run_char_lm_sweep.parse_args(
@@ -7715,6 +7733,97 @@ class BackendSweepMetaTests(unittest.TestCase):
             "quality_neutral_cost_improved",
         )
         self.assertIn("## Paired Recurrent Recommendations", report)
+
+    def test_char_lm_compare_summary_recommends_wave_lite_route_debt(self) -> None:
+        payload = {
+            "schema": "st.char_lm.compare.v1",
+            "aggregate_runs": [
+                {
+                    "arch": "llm_char_wave",
+                    "recurrent": "wave",
+                    "backend": "cpu",
+                    "head_prior": "none",
+                    "head_resid": "5.0000",
+                    "char_feature": "token-bigram",
+                    "mode": "embedding(32,token-bigram)",
+                    "wave_kernel": "3",
+                    "wave_dilations": "1",
+                    "steps": "32",
+                    "hidden": "64",
+                    "embed_dim": "32",
+                    "epochs": "8",
+                    "batches": "24",
+                    "batch": "4",
+                    "eval_samples": "64",
+                    "lr": "0.05",
+                    "runs": "2",
+                    "final_nll_mean": "3.6698",
+                    "best_nll_mean": "3.6698",
+                    "final_vs_bigram_mean": "0.1200",
+                    "trace_step_ms_mean_mean": "189.3720",
+                    "cpu_debt_ops_mean": "114.0000",
+                    "coherence_route_status": "cpu_route",
+                    "coherence_route_debt_mean": "10.0000",
+                },
+                {
+                    "arch": "llm_char_wave",
+                    "recurrent": "wave",
+                    "backend": "cpu",
+                    "head_prior": "none",
+                    "head_resid": "5.0000",
+                    "char_feature": "token-bigram",
+                    "mode": "embedding(32,token-bigram)",
+                    "wave_kernel": "3",
+                    "wave_dilations": "1,2,4",
+                    "steps": "32",
+                    "hidden": "64",
+                    "embed_dim": "32",
+                    "epochs": "8",
+                    "batches": "24",
+                    "batch": "4",
+                    "eval_samples": "64",
+                    "lr": "0.05",
+                    "runs": "2",
+                    "final_nll_mean": "3.6698",
+                    "best_nll_mean": "3.6698",
+                    "final_vs_bigram_mean": "0.1200",
+                    "trace_step_ms_mean_mean": "306.5770",
+                    "cpu_debt_ops_mean": "172.0000",
+                    "coherence_route_status": "cpu_route",
+                    "coherence_route_debt_mean": "20.0000",
+                },
+            ],
+        }
+
+        recommendations = summarize_char_lm_compare.route_debt_recommendations(
+            [("wave/compare.json", payload)],
+            limit=8,
+        )
+        decision = summarize_char_lm_compare.route_debt_recommendation_summary(
+            recommendations
+        )
+        report = summarize_char_lm_compare.markdown_report(
+            [],
+            route_debt_recommendations=recommendations,
+            route_debt_summary=decision,
+        )
+
+        self.assertEqual(len(recommendations), 1)
+        self.assertEqual(recommendations[0]["candidate_wave_dilations"], "1")
+        self.assertEqual(recommendations[0]["baseline_wave_dilations"], "1,2,4")
+        self.assertEqual(recommendations[0]["quality_status"], "neutral")
+        self.assertEqual(recommendations[0]["route_debt_status"], "improved")
+        self.assertEqual(recommendations[0]["route_debt_ratio"], "0.5000")
+        self.assertEqual(
+            recommendations[0]["recommendation"],
+            "quality_neutral_route_debt_lower",
+        )
+        self.assertEqual(decision["decision"], "promote_lite_wave")
+        self.assertEqual(decision["recommendation_rows"], "1")
+        self.assertEqual(decision["top_candidate_wave_dilations"], "1")
+        self.assertEqual(decision["top_route_debt_ratio"], "0.5000")
+        self.assertIn("## Route Debt Decision", report)
+        self.assertIn("## Route Debt Recommendations", report)
 
     def test_char_lm_compare_summary_excludes_learning_regressed_recommendation(
         self,
