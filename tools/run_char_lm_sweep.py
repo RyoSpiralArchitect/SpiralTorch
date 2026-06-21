@@ -285,7 +285,7 @@ RECIPES = {
     },
     "no-prior-coherence-shape-winners": {
         "description": (
-            "confirm the quick-probe scan and wave coherence shape winners "
+            "confirm the quick-probe scan winner and promoted lite wave shape "
             "with the longer no-prior coherence budget"
         ),
         "defaults": {
@@ -301,7 +301,7 @@ RECIPES = {
             "context_scale": 2,
             "query_residual_scale": 2,
             "wave_kernel": 3,
-            "wave_dilations": "1,2,4",
+            "wave_dilations": "1",
             "epoch_values": "8,16",
             "batches_values": "24",
             "batch": 4,
@@ -311,6 +311,36 @@ RECIPES = {
             "compare_summary_limit": 12,
             "extra_arg": ["--mix-rms", "1.0"],
             "gen": 64,
+        },
+    },
+    "no-prior-coherence-wave-promoted": {
+        "description": (
+            "rerun the promoted lite wave shape after route-debt evidence "
+            "selects the single-dilation branch"
+        ),
+        "defaults": {
+            "architectures": "wave",
+            "features": "token-bigram",
+            "head_priors": "none",
+            "seeds": "7,13,23",
+            "steps": 32,
+            "embed_dim": 32,
+            "hidden": 64,
+            "memory": 16,
+            "head_residual_scale_values": "5",
+            "query_residual_scale": 2,
+            "wave_kernel": 3,
+            "wave_dilations": "1",
+            "epoch_values": "10",
+            "batches_values": "32",
+            "batch": 4,
+            "eval_samples": 64,
+            "early_stop_patience": 4,
+            "lr_values": "0.05",
+            "compare_summary_limit": 12,
+            "compare_summary_sort_metric": "coherence_route_debt",
+            "extra_arg": ["--mix-rms", "1.0"],
+            "gen": 96,
         },
     },
     "no-prior-coherence-wave-lite": {
@@ -1530,6 +1560,7 @@ def apply_recipe_defaults(args: argparse.Namespace) -> argparse.Namespace:
         "eval_samples": None,
         "gen": None,
         "compare_summary_limit": 8,
+        "compare_summary_sort_metric": "final_nll",
         "compare_summary_fail_on_rank_min_promotion_decision": None,
         "compare_summary_extra_compare_json": [],
         "compare_summary_merge_evidence_sources": False,
