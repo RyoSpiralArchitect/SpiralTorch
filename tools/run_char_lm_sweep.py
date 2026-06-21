@@ -344,6 +344,35 @@ RECIPES = {
             "gen": 96,
         },
     },
+    "no-prior-coherence-frontier": {
+        "description": (
+            "compare the no-prior LSTM baseline, scan shape winner, and lite "
+            "wave frontier candidates on the longer coherence budget"
+        ),
+        "defaults": {
+            "architectures": "lstm,scan,wave",
+            "features": "token-bigram",
+            "head_priors": "none",
+            "seeds": "7,13",
+            "steps": 32,
+            "embed_dim": 32,
+            "hidden": 64,
+            "memory": 16,
+            "head_residual_scale_values": "5",
+            "context_scale": 2,
+            "query_residual_scale": 2,
+            "wave_kernel": 3,
+            "wave_dilation_values": "1;1,2",
+            "epoch_values": "8",
+            "batches_values": "24",
+            "batch": 4,
+            "eval_samples": 64,
+            "early_stop_patience": 4,
+            "lr_values": "0.05",
+            "compare_summary_limit": 16,
+            "gen": 64,
+        },
+    },
     "no-prior-coherence-wave-lite": {
         "description": (
             "quickly probe whether fewer wave dilation branches preserve "

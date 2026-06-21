@@ -2522,6 +2522,60 @@ class BackendSweepMetaTests(unittest.TestCase):
         self.assertEqual(run["wave_dilations"], "1")
         self.assertEqual(run["command"][run["command"].index("--dilations") + 1], "1")
 
+    def test_char_lm_sweep_no_prior_coherence_frontier_recipe_expands_finalists(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = run_char_lm_sweep.main(
+                    [
+                        "models/samples/spiral_demo_en.txt",
+                        "--run-root",
+                        str(root),
+                        "--recipe",
+                        "no-prior-coherence-frontier",
+                        "--dry-run",
+                        "--no-wgpu-preflight",
+                    ]
+                )
+            manifest = json.loads((root / "sweep.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(code, 0)
+        self.assertEqual(manifest["recipe"], "no-prior-coherence-frontier")
+        self.assertIn("scan shape winner", manifest["recipe_description"])
+        self.assertEqual(manifest["architectures"], ["lstm", "scan", "wave"])
+        self.assertEqual(manifest["head_priors"], ["none"])
+        self.assertEqual(manifest["seeds"], [7, 13])
+        self.assertEqual(manifest["training_grid"]["epochs"], [8])
+        self.assertEqual(manifest["training_grid"]["batches"], [24])
+        self.assertEqual(manifest["coherence_grid"]["context_scales"], [2.0])
+        self.assertEqual(manifest["coherence_grid"]["query_residual_scales"], [2.0])
+        self.assertEqual(manifest["coherence_grid"]["wave_kernels"], [3])
+        self.assertEqual(manifest["coherence_grid"]["wave_dilations"], ["1", "1,2"])
+        self.assertEqual(len(manifest["runs"]), 8)
+
+        lstm_runs = [run for run in manifest["runs"] if run["architecture"] == "lstm"]
+        scan_runs = [run for run in manifest["runs"] if run["architecture"] == "scan"]
+        wave_runs = [run for run in manifest["runs"] if run["architecture"] == "wave"]
+        self.assertEqual(len(lstm_runs), 2)
+        self.assertEqual(len(scan_runs), 2)
+        self.assertEqual(len(wave_runs), 4)
+        self.assertNotIn("--dilations", lstm_runs[0]["command"])
+        self.assertNotIn("--context-scale", lstm_runs[0]["command"])
+
+        scan = scan_runs[0]
+        self.assertIn("ctx-2", scan["name"])
+        self.assertEqual(scan["command"][scan["command"].index("--context-scale") + 1], "2")
+        self.assertEqual(
+            scan["command"][scan["command"].index("--query-residual-scale") + 1],
+            "2",
+        )
+
+        wave_dilations = sorted({run["wave_dilations"] for run in wave_runs})
+        self.assertEqual(wave_dilations, ["1", "1,2"])
+        self.assertTrue(all("--dilations" in run["command"] for run in wave_runs))
+
     def test_char_lm_sweep_full_promotion_recipe_adds_rank_min_gate(
         self,
     ) -> None:
