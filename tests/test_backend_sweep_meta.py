@@ -2452,6 +2452,75 @@ class BackendSweepMetaTests(unittest.TestCase):
         self.assertEqual(args.head_priors, "bigram")
         self.assertEqual(args.bigram_topk_guard_values, "0,0.1")
 
+    def test_char_lm_sweep_shape_winners_recipe_uses_promoted_lite_wave(
+        self,
+    ) -> None:
+        args = run_char_lm_sweep.parse_args(
+            [
+                "data.txt",
+                "--recipe",
+                "no-prior-coherence-shape-winners",
+            ]
+        )
+        args = run_char_lm_sweep.apply_recipe_defaults(args)
+
+        self.assertEqual(args.architectures, "scan,wave")
+        self.assertEqual(args.context_scale, 2)
+        self.assertEqual(args.query_residual_scale, 2)
+        self.assertEqual(args.wave_kernel, 3)
+        self.assertEqual(args.wave_dilations, "1")
+
+    def test_char_lm_sweep_wave_promoted_recipe_expands_route_debt_grid(
+        self,
+    ) -> None:
+        args = run_char_lm_sweep.parse_args(
+            [
+                "data.txt",
+                "--recipe",
+                "no-prior-coherence-wave-promoted",
+            ]
+        )
+        args = run_char_lm_sweep.apply_recipe_defaults(args)
+        options = run_char_lm_sweep.compare_summary_options_from_args(args)
+
+        self.assertEqual(options.sort_metric, "coherence_route_debt")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = run_char_lm_sweep.main(
+                    [
+                        "models/samples/spiral_demo_en.txt",
+                        "--run-root",
+                        str(root),
+                        "--recipe",
+                        "no-prior-coherence-wave-promoted",
+                        "--dry-run",
+                        "--no-wgpu-preflight",
+                    ]
+                )
+            manifest = json.loads((root / "sweep.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(code, 0)
+        self.assertEqual(manifest["recipe"], "no-prior-coherence-wave-promoted")
+        self.assertIn("promoted lite wave", manifest["recipe_description"])
+        self.assertEqual(manifest["architectures"], ["wave"])
+        self.assertEqual(manifest["head_priors"], ["none"])
+        self.assertEqual(manifest["seeds"], [7, 13, 23])
+        self.assertEqual(manifest["training_grid"]["epochs"], [10])
+        self.assertEqual(manifest["training_grid"]["batches"], [32])
+        self.assertEqual(manifest["coherence_grid"]["wave_kernels"], [3])
+        self.assertEqual(manifest["coherence_grid"]["wave_dilations"], ["1"])
+        self.assertEqual(
+            manifest["recipe_defaults"]["compare_summary_sort_metric"],
+            "coherence_route_debt",
+        )
+        self.assertEqual(len(manifest["runs"]), 3)
+        run = manifest["runs"][0]
+        self.assertIn("dil-1", run["name"])
+        self.assertEqual(run["wave_dilations"], "1")
+        self.assertEqual(run["command"][run["command"].index("--dilations") + 1], "1")
+
     def test_char_lm_sweep_full_promotion_recipe_adds_rank_min_gate(
         self,
     ) -> None:
