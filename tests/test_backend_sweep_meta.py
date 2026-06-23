@@ -2522,6 +2522,48 @@ class BackendSweepMetaTests(unittest.TestCase):
         self.assertEqual(run["wave_dilations"], "1")
         self.assertEqual(run["command"][run["command"].index("--dilations") + 1], "1")
 
+    def test_char_lm_sweep_wave_long_recipe_expands_long_budget(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = run_char_lm_sweep.main(
+                    [
+                        "models/samples/spiral_demo_en.txt",
+                        "--run-root",
+                        str(root),
+                        "--recipe",
+                        "no-prior-coherence-wave-long",
+                        "--dry-run",
+                        "--no-wgpu-preflight",
+                    ]
+                )
+            manifest = json.loads((root / "sweep.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(code, 0)
+        self.assertEqual(manifest["recipe"], "no-prior-coherence-wave-long")
+        self.assertIn("longer budget", manifest["recipe_description"])
+        self.assertEqual(manifest["architectures"], ["wave"])
+        self.assertEqual(manifest["head_priors"], ["none"])
+        self.assertEqual(manifest["seeds"], [7, 13, 23])
+        self.assertEqual(manifest["training_grid"]["epochs"], [16])
+        self.assertEqual(manifest["training_grid"]["batches"], [64])
+        self.assertEqual(manifest["settings"]["eval_samples"], 128)
+        self.assertEqual(manifest["settings"]["early_stop_patience"], 6)
+        self.assertEqual(manifest["settings"]["gen"], 128)
+        self.assertEqual(manifest["coherence_grid"]["query_residual_scales"], [2.0])
+        self.assertEqual(manifest["coherence_grid"]["wave_kernels"], [3])
+        self.assertEqual(manifest["coherence_grid"]["wave_dilations"], ["1"])
+        self.assertEqual(manifest["extra_args"], ["--mix-rms", "1.0"])
+        self.assertEqual(len(manifest["runs"]), 3)
+        run = manifest["runs"][0]
+        self.assertIn("dil-1", run["name"])
+        self.assertIn("epochs-16", run["name"])
+        self.assertIn("batches-64", run["name"])
+        self.assertEqual(run["command"][run["command"].index("--dilations") + 1], "1")
+        self.assertEqual(run["command"][run["command"].index("--mix-rms") + 1], "1.0")
+
     def test_char_lm_sweep_promoted_frontier_recipe_compares_scan_and_wave(
         self,
     ) -> None:
