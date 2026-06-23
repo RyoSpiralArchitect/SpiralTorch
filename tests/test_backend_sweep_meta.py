@@ -2670,6 +2670,74 @@ class BackendSweepMetaTests(unittest.TestCase):
             )
         )
 
+    def test_char_lm_sweep_wide_frontier_recipe_compares_long_budget_finalists(
+        self,
+    ) -> None:
+        corpus_paths = [
+            "models/samples/spiral_corpus_en",
+            "models/samples/spiral_demo_en.txt",
+            "models/README.md",
+            "docs/getting-started.md",
+            "docs/example-gallery.md",
+            "docs/zspace_intro.md",
+            "bindings/st-py/README.md",
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = run_char_lm_sweep.main(
+                    [
+                        *corpus_paths,
+                        "--run-root",
+                        str(root),
+                        "--recipe",
+                        "no-prior-coherence-wide-frontier",
+                        "--dry-run",
+                        "--no-wgpu-preflight",
+                    ]
+                )
+            manifest = json.loads((root / "sweep.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(code, 0)
+        self.assertEqual(manifest["recipe"], "no-prior-coherence-wide-frontier")
+        self.assertIn("widened corpus long budget", manifest["recipe_description"])
+        self.assertEqual(manifest["data_paths"], corpus_paths)
+        self.assertEqual(manifest["architectures"], ["lstm", "scan", "wave"])
+        self.assertEqual(manifest["head_priors"], ["none"])
+        self.assertEqual(manifest["seeds"], [7, 13, 23])
+        self.assertEqual(manifest["training_grid"]["epochs"], [16])
+        self.assertEqual(manifest["training_grid"]["batches"], [64])
+        self.assertEqual(manifest["settings"]["eval_samples"], 128)
+        self.assertEqual(manifest["settings"]["early_stop_patience"], 6)
+        self.assertEqual(manifest["settings"]["gen"], 128)
+        self.assertEqual(manifest["coherence_grid"]["context_scales"], [2.0])
+        self.assertEqual(manifest["coherence_grid"]["query_residual_scales"], [2.0])
+        self.assertEqual(manifest["coherence_grid"]["wave_kernels"], [3])
+        self.assertEqual(manifest["coherence_grid"]["wave_dilations"], ["1"])
+        self.assertEqual(
+            manifest["architecture_extra_args"],
+            {"scan": ["--mix-rms", "1.0"], "wave": ["--mix-rms", "1.0"]},
+        )
+        self.assertEqual(manifest["compare_summary"]["sort_metric"], "final_vs_bigram")
+        self.assertEqual(len(manifest["runs"]), 9)
+
+        lstm_runs = [run for run in manifest["runs"] if run["architecture"] == "lstm"]
+        scan_runs = [run for run in manifest["runs"] if run["architecture"] == "scan"]
+        wave_runs = [run for run in manifest["runs"] if run["architecture"] == "wave"]
+        self.assertEqual(len(lstm_runs), 3)
+        self.assertEqual(len(scan_runs), 3)
+        self.assertEqual(len(wave_runs), 3)
+        self.assertNotIn("--context-scale", lstm_runs[0]["command"])
+        self.assertNotIn("--mix-rms", lstm_runs[0]["command"])
+        self.assertTrue(all("ctx-2" in run["name"] for run in scan_runs))
+        self.assertTrue(all("dil-1" in run["name"] for run in wave_runs))
+        self.assertTrue(
+            all(
+                run["command"][run["command"].index("--mix-rms") + 1] == "1.0"
+                for run in [*scan_runs, *wave_runs]
+            )
+        )
+
     def test_char_lm_sweep_no_prior_coherence_frontier_recipe_expands_finalists(
         self,
     ) -> None:
