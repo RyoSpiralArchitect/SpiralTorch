@@ -6,12 +6,16 @@ use st_nn::TensorError;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-const TEXT_EXT: &str = "txt";
+const TEXT_EXTENSIONS: &[&str] = &["txt", "md", "markdown"];
 
 fn is_text_file(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case(TEXT_EXT))
+        .is_some_and(|ext| {
+            TEXT_EXTENSIONS
+                .iter()
+                .any(|candidate| ext.eq_ignore_ascii_case(candidate))
+        })
 }
 
 fn walk_dir(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), TensorError> {
@@ -97,4 +101,30 @@ pub fn write_data_files_manifest(path: &Path, files: &[PathBuf]) -> Result<(), T
         message: err.to_string(),
     })?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::collect_text_files;
+
+    #[test]
+    fn collect_text_files_accepts_markdown_inputs() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let txt = dir.path().join("sample.txt");
+        let md = dir.path().join("guide.md");
+        let markdown = dir.path().join("notes.markdown");
+        let ignored = dir.path().join("image.png");
+        std::fs::write(&txt, "txt").expect("write txt");
+        std::fs::write(&md, "md").expect("write md");
+        std::fs::write(&markdown, "markdown").expect("write markdown");
+        std::fs::write(&ignored, "png").expect("write ignored");
+
+        let files = collect_text_files(&[dir.path().to_path_buf()]).expect("collect files");
+        let names: Vec<_> = files
+            .iter()
+            .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+
+        assert_eq!(names, vec!["guide.md", "notes.markdown", "sample.txt"]);
+    }
 }
