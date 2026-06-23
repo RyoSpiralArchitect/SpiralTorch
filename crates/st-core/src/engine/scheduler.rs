@@ -389,6 +389,8 @@ mod tests {
             .find(|(op_name, data)| {
                 *op_name == "scheduler_feed_density"
                     && data["kind"] == "st_core_scheduler_feed_density"
+                    && data["density_valid"] == false
+                    && data["density_sanitized"] == true
             })
             .expect("scheduler metadata event");
         assert_eq!(meta.1["density_valid"], false);
