@@ -20,9 +20,21 @@ COHERENCE_GROUP_COLUMNS = [
     "wave_dilations",
 ]
 
+DATA_GROUP_COLUMNS = [
+    "data_label",
+]
+
+DATA_MEAN_COLUMNS = [
+    "data_files_mean",
+    "train_tokens_mean",
+    "validation_tokens_mean",
+    "vocab_size_mean",
+]
+
 SUMMARY_HEADERS = [
     "rank",
     "source",
+    *DATA_GROUP_COLUMNS,
     "route_status",
     "arch",
     "recurrent",
@@ -46,6 +58,7 @@ SUMMARY_HEADERS = [
     "batches",
     "batch",
     "eval_samples",
+    *DATA_MEAN_COLUMNS,
     "val_start",
     "lr",
     "runs",
@@ -93,6 +106,7 @@ SUMMARY_HEADERS = [
 
 PAIR_GROUP_COLUMNS = [
     "backend",
+    *DATA_GROUP_COLUMNS,
     "head_prior",
     "head_resid",
     "bigram_guard",
@@ -178,6 +192,7 @@ BIGRAM_GUARD_GROUP_COLUMNS = [
     "arch",
     "recurrent",
     "backend",
+    *DATA_GROUP_COLUMNS,
     "head_prior",
     "head_resid",
     "bigram_guard_k",
@@ -258,6 +273,7 @@ BIGRAM_RANK_GUARD_GROUP_COLUMNS = [
     "arch",
     "recurrent",
     "backend",
+    *DATA_GROUP_COLUMNS,
     "head_prior",
     "head_resid",
     "bigram_guard",
@@ -404,6 +420,7 @@ BIGRAM_RANK_BAND_GROUP_COLUMNS = [
     "arch",
     "recurrent",
     "backend",
+    *DATA_GROUP_COLUMNS,
     "head_prior",
     "head_resid",
     "bigram_guard",
@@ -550,6 +567,7 @@ BIGRAM_RANK_MIN_GROUP_COLUMNS = [
     "arch",
     "recurrent",
     "backend",
+    *DATA_GROUP_COLUMNS,
     "head_prior",
     "head_resid",
     "bigram_guard",
@@ -760,6 +778,7 @@ BIGRAM_SOFT_GUARD_GROUP_COLUMNS = [
     "arch",
     "recurrent",
     "backend",
+    *DATA_GROUP_COLUMNS,
     "head_prior",
     "head_resid",
     "bigram_guard",
@@ -905,6 +924,7 @@ BIGRAM_SOFT_GUARD_STABILITY_HEADERS = [
 BASELINE_DIFFICULTY_HEADERS = [
     "rank",
     "source",
+    *DATA_GROUP_COLUMNS,
     "arch",
     "recurrent",
     "backend",
@@ -924,6 +944,7 @@ BASELINE_DIFFICULTY_HEADERS = [
     "epochs",
     "batches",
     "eval_samples",
+    *DATA_MEAN_COLUMNS,
     "val_start",
     "lr",
     "runs",
@@ -947,6 +968,7 @@ BASELINE_DIFFICULTY_HEADERS = [
 LEARNING_SCOREBOARD_HEADERS = [
     "rank",
     "source",
+    *DATA_GROUP_COLUMNS,
     "arch",
     "recurrent",
     "backend",
@@ -958,6 +980,7 @@ LEARNING_SCOREBOARD_HEADERS = [
     "batches",
     "batch",
     "eval_samples",
+    *DATA_MEAN_COLUMNS,
     "lr",
     "runs",
     "learning_gain",
@@ -979,6 +1002,7 @@ ROUTE_DEBT_GROUP_COLUMNS = [
     "arch",
     "recurrent",
     "backend",
+    *DATA_GROUP_COLUMNS,
     "head_prior",
     "head_resid",
     "bigram_guard",

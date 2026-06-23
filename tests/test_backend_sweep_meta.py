@@ -5151,6 +5151,16 @@ class BackendSweepMetaTests(unittest.TestCase):
                         "validation_start_fraction_actual": 0.5,
                         "char_feature": "token-bigram",
                         "mode": "embedding(4,token-bigram)",
+                        "data_paths": [
+                            "models/samples/spiral_corpus_en",
+                            "docs/getting-started.md",
+                            "docs/example-gallery.md",
+                            "bindings/st-py/README.md",
+                        ],
+                        "data_file_count": 7,
+                        "train_tokens": 1234,
+                        "validation_tokens": 321,
+                        "vocab_size": 42,
                     }
                 ),
                 encoding="utf-8",
@@ -5186,6 +5196,14 @@ class BackendSweepMetaTests(unittest.TestCase):
 
         self.assertEqual(row["recurrent"], "lstm")
         self.assertEqual(row["mode"], "embedding(4,token-bigram)")
+        self.assertEqual(
+            row["data_label"],
+            "spiral_corpus_en,getting-started.md,example-gallery.md,+1",
+        )
+        self.assertEqual(row["data_files"], "7")
+        self.assertEqual(row["train_tokens"], "1234")
+        self.assertEqual(row["validation_tokens"], "321")
+        self.assertEqual(row["vocab_size"], "42")
         self.assertEqual(row["head_resid"], "2.0000")
         self.assertEqual(row["bigram_guard"], "0.0500")
         self.assertEqual(row["bigram_guard_k"], "3")
@@ -5228,6 +5246,8 @@ class BackendSweepMetaTests(unittest.TestCase):
         self.assertEqual(row["final_top5_bigram_overlap_raw"], "40.00000000")
         self.assertIn("| run | arch | backend | recurrent |", table)
         self.assertIn("embedding(4,token-bigram)", table)
+        self.assertIn("data_label", table)
+        self.assertIn("train_tokens", table)
         self.assertIn("head_resid", table)
         self.assertIn("bigram_guard", table)
         self.assertIn("bigram_rank_guard", table)
@@ -5254,6 +5274,11 @@ class BackendSweepMetaTests(unittest.TestCase):
                         "head_prior": "learned-unigram",
                         "char_feature": "token-bigram",
                         "mode": "embedding(4,token-bigram)",
+                        "data_paths": ["models/samples/spiral_corpus_en"],
+                        "data_file_count": 2,
+                        "train_tokens": 100,
+                        "validation_tokens": 20,
+                        "vocab_size": 12,
                     }
                 ),
                 encoding="utf-8",
@@ -5287,6 +5312,19 @@ class BackendSweepMetaTests(unittest.TestCase):
         self.assertIsNotNone(summary_output)
         self.assertEqual(compare_json["schema"], "st.char_lm.compare.v1")
         self.assertEqual(compare_json["runs"][0]["recurrent"], "lstm")
+        self.assertEqual(compare_json["runs"][0]["data_label"], "spiral_corpus_en")
+        self.assertEqual(compare_json["runs"][0]["train_tokens"], "100")
+        self.assertEqual(
+            compare_json["aggregate_runs"][0]["data_label"], "spiral_corpus_en"
+        )
+        self.assertEqual(compare_json["aggregate_runs"][0]["data_files_mean"], "2.0000")
+        self.assertEqual(
+            compare_json["aggregate_runs"][0]["train_tokens_mean"], "100.0000"
+        )
+        self.assertEqual(
+            compare_json["aggregate_runs"][0]["validation_tokens_mean"], "20.0000"
+        )
+        self.assertEqual(compare_json["aggregate_runs"][0]["vocab_size_mean"], "12.0000")
         self.assertEqual(compare_json["runs"][0]["final_windows"], "8")
         self.assertEqual(compare_json["aggregate_runs"][0]["final_windows_mean"], "8.0000")
         self.assertEqual(compare_json["aggregate_runs"][0]["bigram_windows_mean"], "8.0000")
@@ -5298,6 +5336,8 @@ class BackendSweepMetaTests(unittest.TestCase):
         self.assertEqual(compare_json["top_aggregate_runs"][0]["arch"], "llm_char_lstm")
         self.assertEqual(compare_summary["schema"], "st.char_lm.compare_summary.v1")
         self.assertEqual(compare_summary["rows"][0]["arch"], "llm_char_lstm")
+        self.assertEqual(compare_summary["rows"][0]["data_label"], "spiral_corpus_en")
+        self.assertEqual(compare_summary["rows"][0]["train_tokens_mean"], "100.0000")
         self.assertEqual(compare_summary["rows"][0]["final_windows_mean"], "8.0000")
         self.assertEqual(compare_summary["rows"][0]["bigram_nll_mean"], "2.4000")
         self.assertEqual(compare_summary["rows"][0]["best_vs_bigram_mean"], "0.1000")
@@ -6209,6 +6249,7 @@ class BackendSweepMetaTests(unittest.TestCase):
                     "arch": "llm_char_lstm",
                     "recurrent": "lstm",
                     "backend": "cpu",
+                    "data_label": "spiral_corpus_en,docs,+2",
                     "head_prior": "learned-unigram",
                     "head_resid": "2.0000",
                     "bigram_guard": "0.0500",
@@ -6226,6 +6267,10 @@ class BackendSweepMetaTests(unittest.TestCase):
                     "batches": "8",
                     "batch": "4",
                     "eval_samples": "32",
+                    "data_files_mean": "7.0000",
+                    "train_tokens_mean": "1234.0000",
+                    "validation_tokens_mean": "321.0000",
+                    "vocab_size_mean": "42.0000",
                     "lr": "0.0200",
                     "runs": "1",
                     "rank_cov_windows_mean": "42.0000",
@@ -6266,6 +6311,11 @@ class BackendSweepMetaTests(unittest.TestCase):
         table = summarize_char_lm_compare.markdown_table(rows)
 
         self.assertEqual(rows[0]["head_prior"], "learned-unigram")
+        self.assertEqual(rows[0]["data_label"], "spiral_corpus_en,docs,+2")
+        self.assertEqual(rows[0]["data_files_mean"], "7.0000")
+        self.assertEqual(rows[0]["train_tokens_mean"], "1234.0000")
+        self.assertEqual(rows[0]["validation_tokens_mean"], "321.0000")
+        self.assertEqual(rows[0]["vocab_size_mean"], "42.0000")
         self.assertEqual(rows[0]["head_resid"], "2.0000")
         self.assertEqual(rows[0]["bigram_guard"], "0.0500")
         self.assertEqual(rows[0]["bigram_guard_k"], "3")
@@ -6293,6 +6343,8 @@ class BackendSweepMetaTests(unittest.TestCase):
         self.assertEqual(rows[0]["trace_step_ms_mean_mean"], "42.5000")
         self.assertEqual(rows[0]["trace_update_ratio_mean"], "0.0075")
         self.assertIn("head_prior", table)
+        self.assertIn("data_label", table)
+        self.assertIn("train_tokens_mean", table)
         self.assertIn("bigram_guard", table)
         self.assertIn("bigram_rank_guard", table)
         self.assertIn("bigram_rank_band", table)

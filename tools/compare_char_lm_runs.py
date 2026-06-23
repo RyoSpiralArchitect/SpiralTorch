@@ -48,10 +48,22 @@ TRACE_OPTIM_COLUMNS = [
     "trace_sync_values",
 ]
 
+DATA_GROUP_COLUMNS = [
+    "data_label",
+]
+
+DATA_MEAN_COLUMNS = [
+    "data_files",
+    "train_tokens",
+    "validation_tokens",
+    "vocab_size",
+]
+
 AGGREGATE_GROUP_COLUMNS = [
     "arch",
     "recurrent",
     "backend",
+    *DATA_GROUP_COLUMNS,
     "head_prior",
     "head_resid",
     "bigram_guard",
@@ -80,6 +92,7 @@ AGGREGATE_GROUP_COLUMNS = [
 ]
 
 AGGREGATE_MEAN_COLUMNS = [
+    *DATA_MEAN_COLUMNS,
     "val_start_actual",
     "final_windows",
     "unigram_windows",
@@ -154,6 +167,10 @@ COHERENCE_ROUTE_COLUMNS = [
 TOP_AGGREGATE_COLUMNS = [
     *AGGREGATE_GROUP_COLUMNS,
     "runs",
+    "data_files_mean",
+    "train_tokens_mean",
+    "validation_tokens_mean",
+    "vocab_size_mean",
     "val_start_actual_mean",
     "final_windows_mean",
     "unigram_windows_mean",
@@ -1758,6 +1775,22 @@ def metadata_cell(value: Any) -> str:
     return str(value)
 
 
+def data_label_for_run(run: dict[str, Any]) -> str:
+    data_paths = run.get("data_paths")
+    if not isinstance(data_paths, list):
+        return "-"
+    labels = []
+    for item in data_paths:
+        if not isinstance(item, str) or not item:
+            continue
+        labels.append(Path(item).name or item)
+    if not labels:
+        return "-"
+    if len(labels) <= 3:
+        return ",".join(labels)
+    return ",".join([*labels[:3], f"+{len(labels) - 3}"])
+
+
 def learnability_value(metric: dict[str, Any], field: str) -> float | None:
     learnability = metric.get("learnability")
     if not isinstance(learnability, dict):
@@ -1812,6 +1845,11 @@ def row_for(raw: str) -> tuple[dict[str, str], Path]:
     backend = str(run.get("backend", "-"))
     recurrent = str(run.get("recurrent", "-"))
     seed = metadata_cell(run.get("seed"))
+    data_label = data_label_for_run(run)
+    data_files = metadata_cell(run.get("data_file_count"))
+    train_tokens = metadata_cell(run.get("train_tokens"))
+    validation_tokens = metadata_cell(run.get("validation_tokens"))
+    vocab_size = metadata_cell(run.get("vocab_size"))
     head_prior = str(run.get("head_prior", "-"))
     head_residual_scale = run.get("head_residual_scale")
     bigram_topk_guard = run.get("bigram_topk_guard")
@@ -1890,6 +1928,11 @@ def row_for(raw: str) -> tuple[dict[str, str], Path]:
             "backend": backend,
             "recurrent": recurrent,
             "seed": seed,
+            "data_label": data_label,
+            "data_files": data_files,
+            "train_tokens": train_tokens,
+            "validation_tokens": validation_tokens,
+            "vocab_size": vocab_size,
             "head_prior": head_prior,
             "head_resid": fmt_float(
                 float(head_residual_scale)
@@ -2111,6 +2154,11 @@ def markdown_table(rows: list[dict[str, str]]) -> str:
         "backend",
         "recurrent",
         "seed",
+        "data_label",
+        "data_files",
+        "train_tokens",
+        "validation_tokens",
+        "vocab_size",
         "head_prior",
         "head_resid",
         "bigram_guard",
