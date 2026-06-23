@@ -344,6 +344,35 @@ RECIPES = {
             "gen": 96,
         },
     },
+    "no-prior-coherence-wave-long": {
+        "description": (
+            "rerun the promoted single-dilation wave shape with the longer "
+            "budget that improved no-prior coherence evidence"
+        ),
+        "defaults": {
+            "architectures": "wave",
+            "features": "token-bigram",
+            "head_priors": "none",
+            "seeds": "7,13,23",
+            "steps": 32,
+            "embed_dim": 32,
+            "hidden": 64,
+            "memory": 16,
+            "head_residual_scale_values": "5",
+            "query_residual_scale": 2,
+            "wave_kernel": 3,
+            "wave_dilations": "1",
+            "epoch_values": "16",
+            "batches_values": "64",
+            "batch": 4,
+            "eval_samples": 128,
+            "early_stop_patience": 6,
+            "lr_values": "0.05",
+            "compare_summary_limit": 12,
+            "extra_arg": ["--mix-rms", "1.0"],
+            "gen": 128,
+        },
+    },
     "no-prior-coherence-promoted-frontier": {
         "description": (
             "compare the scan shape winner and promoted lite wave shape on "
