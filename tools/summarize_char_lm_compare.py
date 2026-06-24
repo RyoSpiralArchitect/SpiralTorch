@@ -61,7 +61,13 @@ SUMMARY_HEADERS = [
     *DATA_MEAN_COLUMNS,
     "val_start",
     "lr",
+    "lr_schedule",
+    "lr_warmup",
+    "lr_final_scale",
+    "restored_best",
     "runs",
+    "final_lr_mean",
+    "best_lr_mean",
     "val_start_actual_mean",
     "final_windows_mean",
     "unigram_windows_mean",
@@ -128,6 +134,10 @@ PAIR_GROUP_COLUMNS = [
     "eval_samples",
     "val_start",
     "lr",
+    "lr_schedule",
+    "lr_warmup",
+    "lr_final_scale",
+    "restored_best",
 ]
 
 PAIR_DELTA_HEADERS = [
@@ -213,6 +223,9 @@ BIGRAM_GUARD_GROUP_COLUMNS = [
     "eval_samples",
     "val_start",
     "lr",
+    "lr_schedule",
+    "lr_warmup",
+    "lr_final_scale",
 ]
 
 BIGRAM_GUARD_DELTA_HEADERS = [
@@ -294,6 +307,9 @@ BIGRAM_RANK_GUARD_GROUP_COLUMNS = [
     "eval_samples",
     "val_start",
     "lr",
+    "lr_schedule",
+    "lr_warmup",
+    "lr_final_scale",
 ]
 
 BIGRAM_RANK_GUARD_DELTA_HEADERS = [
@@ -441,6 +457,9 @@ BIGRAM_RANK_BAND_GROUP_COLUMNS = [
     "eval_samples",
     "val_start",
     "lr",
+    "lr_schedule",
+    "lr_warmup",
+    "lr_final_scale",
 ]
 
 BIGRAM_RANK_BAND_DELTA_HEADERS = [
@@ -588,6 +607,9 @@ BIGRAM_RANK_MIN_GROUP_COLUMNS = [
     "eval_samples",
     "val_start",
     "lr",
+    "lr_schedule",
+    "lr_warmup",
+    "lr_final_scale",
 ]
 
 BIGRAM_RANK_MIN_DELTA_HEADERS = [
@@ -799,6 +821,9 @@ BIGRAM_SOFT_GUARD_GROUP_COLUMNS = [
     "eval_samples",
     "val_start",
     "lr",
+    "lr_schedule",
+    "lr_warmup",
+    "lr_final_scale",
 ]
 
 BIGRAM_SOFT_GUARD_DELTA_HEADERS = [
@@ -947,6 +972,11 @@ BASELINE_DIFFICULTY_HEADERS = [
     *DATA_MEAN_COLUMNS,
     "val_start",
     "lr",
+    "lr_schedule",
+    "lr_warmup",
+    "lr_final_scale",
+    "final_lr_mean",
+    "best_lr_mean",
     "runs",
     "val_start_actual_mean",
     "final_windows_mean",
@@ -982,7 +1012,13 @@ LEARNING_SCOREBOARD_HEADERS = [
     "eval_samples",
     *DATA_MEAN_COLUMNS,
     "lr",
+    "lr_schedule",
+    "lr_warmup",
+    "lr_final_scale",
+    "restored_best",
     "runs",
+    "final_lr_mean",
+    "best_lr_mean",
     "learning_gain",
     "learning_status",
     "final_nll_mean",
@@ -1027,6 +1063,9 @@ ROUTE_DEBT_GROUP_COLUMNS = [
     "eval_samples",
     "val_start",
     "lr",
+    "lr_schedule",
+    "lr_warmup",
+    "lr_final_scale",
 ]
 
 ROUTE_DEBT_RECOMMENDATION_HEADERS = [
@@ -4894,6 +4933,9 @@ def paired_recurrent_gate_failures(
         "batch",
         "eval_samples",
         "lr",
+        "lr_schedule",
+        "lr_warmup",
+        "lr_final_scale",
         "candidate_recurrent",
         "baseline_recurrent",
         "final_nll_delta",

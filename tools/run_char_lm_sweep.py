@@ -1370,6 +1370,9 @@ class SweepSettings:
     bigram_rank_guard_min_candidates: int | None = None
     bigram_soft_guard: float | None = None
     val_start_fraction: float | None = None
+    restore_best_at_end: bool = False
+    lr_warmup_epochs: int = 0
+    lr_final_scale: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -1775,6 +1778,10 @@ def apply_recipe_defaults(args: argparse.Namespace) -> argparse.Namespace:
         "compare_summary_fail_on_route_debt_decision": None,
         "compare_summary_extra_compare_json": [],
         "compare_summary_merge_evidence_sources": False,
+        "restore_best_at_end": False,
+        "lr_warmup_epochs": 0,
+        "lr_final_scale": 1.0,
+        "lr_final_scale_values": None,
         "extra_arg": [],
         "architecture_extra_args": [],
     }
@@ -1805,6 +1812,9 @@ def settings_from_args(args: argparse.Namespace) -> SweepSettings:
         val_start_fraction=args.val_start_fraction,
         gen=preset["gen"],
         early_stop_patience=preset["early_stop_patience"],
+        restore_best_at_end=args.restore_best_at_end,
+        lr_warmup_epochs=args.lr_warmup_epochs,
+        lr_final_scale=args.lr_final_scale,
         steps=args.steps,
         embed_dim=args.embed_dim,
         hidden=args.hidden,
@@ -2052,6 +2062,12 @@ def build_command(
             str(seed),
         ]
     )
+    if settings.restore_best_at_end:
+        command.append("--restore-best-at-end")
+    if settings.lr_warmup_epochs:
+        command.extend(["--lr-warmup-epochs", str(settings.lr_warmup_epochs)])
+    if not math.isclose(settings.lr_final_scale, 1.0, rel_tol=0.0, abs_tol=1.0e-12):
+        add_optional_float(command, "--lr-final-scale", settings.lr_final_scale)
     add_optional_float(command, "--val-start-fraction", settings.val_start_fraction)
     add_optional_int(command, "--steps", settings.steps)
     add_optional_int(command, "--embed-dim", settings.embed_dim)
@@ -2595,6 +2611,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--gen", type=int, default=None)
     parser.add_argument("--early-stop-patience", type=int, default=None)
+    parser.add_argument(
+        "--restore-best-at-end",
+        action="store_true",
+        help="restore the best validation checkpoint before final weights, sample, and summary",
+    )
     parser.add_argument("--steps", type=int, default=None)
     parser.add_argument("--embed-dim", type=int, default=None)
     parser.add_argument("--hidden", type=int, default=None)
@@ -2619,6 +2640,23 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--lr-values",
         default=None,
         help="comma-separated learning rates for optimizer grids; overrides --lr",
+    )
+    parser.add_argument(
+        "--lr-warmup-epochs",
+        type=int,
+        default=0,
+        help="number of initial epochs to linearly warm up to --lr",
+    )
+    parser.add_argument(
+        "--lr-final-scale",
+        type=float,
+        default=1.0,
+        help="final/base learning-rate scale for cosine decay after warmup",
+    )
+    parser.add_argument(
+        "--lr-final-scale-values",
+        default=None,
+        help="comma-separated final/base learning-rate scales for schedule grids",
     )
     parser.add_argument("--curvature", type=float, default=None)
     parser.add_argument("--temperature", type=float, default=None)
@@ -2940,6 +2978,8 @@ def main(argv: list[str]) -> int:
         )
         seeds = parse_csv_int(args.seeds, label="seeds")
         settings_preview = settings_from_args(args)
+        if settings_preview.lr_warmup_epochs < 0:
+            raise ValueError("--lr-warmup-epochs must be non-negative")
         step_values = grid_values(args.step_values, settings_preview.steps, label="step-values")
         embed_dim_values = grid_values(
             args.embed_dim_values,
@@ -2956,6 +2996,10 @@ def main(argv: list[str]) -> int:
             settings_preview.epochs,
             label="epoch-values",
         )
+        if settings_preview.lr_warmup_epochs and any(
+            epoch < settings_preview.lr_warmup_epochs for epoch in epoch_values
+        ):
+            raise ValueError("--lr-warmup-epochs cannot exceed planned epoch values")
         batches_values = grid_values(
             args.batches_values,
             settings_preview.batches,
@@ -2976,6 +3020,16 @@ def main(argv: list[str]) -> int:
             settings_preview.lr,
             label="lr-values",
         )
+        lr_final_scale_values = float_grid_values(
+            args.lr_final_scale_values,
+            settings_preview.lr_final_scale,
+            label="lr-final-scale-values",
+        )
+        if any(
+            not math.isfinite(value) or value <= 0.0 or value > 1.0
+            for value in lr_final_scale_values
+        ):
+            raise ValueError("--lr-final-scale-values must be finite and within (0, 1]")
         head_residual_scale_values = float_grid_values(
             args.head_residual_scale_values,
             settings_preview.head_residual_scale,
@@ -3182,6 +3236,16 @@ def main(argv: list[str]) -> int:
         args.val_start_fraction is not None or args.val_start_values is not None
     )
     lr_grid_is_explicit = args.lr is not None or args.lr_values is not None
+    lr_schedule_is_explicit = (
+        settings.lr_warmup_epochs > 0
+        or args.lr_final_scale_values is not None
+        or not math.isclose(
+            settings.lr_final_scale,
+            1.0,
+            rel_tol=0.0,
+            abs_tol=1.0e-12,
+        )
+    )
     run_root = args.run_root.resolve() if args.run_root else default_run_root()
     run_root.mkdir(parents=True, exist_ok=True)
 
@@ -3216,6 +3280,11 @@ def main(argv: list[str]) -> int:
             "validation_start_fractions": val_start_values,
         },
         "learning_rates": lr_values,
+        "learning_rate_schedule": {
+            "warmup_epochs": settings.lr_warmup_epochs,
+            "final_scale": settings.lr_final_scale,
+            "final_scales": lr_final_scale_values,
+        },
         "head_residual_scales": head_residual_scale_values,
         "coherence_grid": {
             "context_scales": context_scale_values,
@@ -3367,6 +3436,7 @@ def main(argv: list[str]) -> int:
         * len(eval_samples_values)
         * len(val_start_values)
         * len(lr_values)
+        * len(lr_final_scale_values)
         * len(head_residual_scale_values)
         * len(bigram_topk_guard_values)
         * len(bigram_rank_guard_values)
@@ -3408,6 +3478,7 @@ def main(argv: list[str]) -> int:
             eval_samples_values,
             val_start_values,
             lr_values,
+            lr_final_scale_values,
             head_residual_scale_values,
             *coherence_grid_for_architecture(architecture),
             bigram_topk_guard_values,
@@ -3434,6 +3505,7 @@ def main(argv: list[str]) -> int:
         eval_samples_value,
         val_start_value,
         lr_value,
+        lr_final_scale_value,
         head_residual_scale_value,
         context_scale_value,
         self_score_scale_value,
@@ -3477,6 +3549,7 @@ def main(argv: list[str]) -> int:
             ),
             val_start_fraction=val_start_value,
             lr=lr_value,
+            lr_final_scale=lr_final_scale_value,
             head_residual_scale=head_residual_scale_value,
             context_scale=context_scale_value,
             self_score_scale=self_score_scale_value,
@@ -3517,6 +3590,11 @@ def main(argv: list[str]) -> int:
             run_name_parts.append(grid_slug("kernel", wave_kernel_value))
         if architecture == "wave" and wave_dilations_is_explicit:
             run_name_parts.append(f"dil-{slug(wave_dilation_value or 'default')}")
+        if run_settings.restore_best_at_end:
+            run_name_parts.append("restore-best")
+        if lr_schedule_is_explicit:
+            run_name_parts.append(grid_slug("lrwarmup", run_settings.lr_warmup_epochs))
+            run_name_parts.append(float_grid_slug("lrfinal", run_settings.lr_final_scale))
         if bigram_guard_is_explicit:
             run_name_parts.append(
                 float_grid_slug("biguard", effective_bigram_topk_guard_value)
@@ -3610,6 +3688,8 @@ def main(argv: list[str]) -> int:
                     "eval_samples": run_settings.eval_samples,
                     "validation_start_fraction": run_settings.val_start_fraction,
                     "lr": lr_value,
+                    "lr_warmup_epochs": run_settings.lr_warmup_epochs,
+                    "lr_final_scale": run_settings.lr_final_scale,
                     "head_residual_scale": head_residual_scale_value,
                     "context_scale": context_scale_value,
                     "self_score_scale": self_score_scale_value,
@@ -3688,6 +3768,8 @@ def main(argv: list[str]) -> int:
             "eval_samples": run_settings.eval_samples,
             "validation_start_fraction": run_settings.val_start_fraction,
             "lr": lr_value,
+            "lr_warmup_epochs": run_settings.lr_warmup_epochs,
+            "lr_final_scale": run_settings.lr_final_scale,
             "head_residual_scale": head_residual_scale_value,
             "context_scale": context_scale_value,
             "self_score_scale": self_score_scale_value,

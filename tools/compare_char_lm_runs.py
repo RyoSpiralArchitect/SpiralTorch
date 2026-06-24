@@ -89,10 +89,16 @@ AGGREGATE_GROUP_COLUMNS = [
     "eval_samples",
     "val_start",
     "lr",
+    "lr_schedule",
+    "lr_warmup",
+    "lr_final_scale",
+    "restored_best",
 ]
 
 AGGREGATE_MEAN_COLUMNS = [
     *DATA_MEAN_COLUMNS,
+    "final_lr",
+    "best_lr",
     "val_start_actual",
     "final_windows",
     "unigram_windows",
@@ -1874,6 +1880,20 @@ def row_for(raw: str) -> tuple[dict[str, str], Path]:
     validation_start_fraction = run.get("validation_start_fraction_requested")
     validation_start_fraction_actual = run.get("validation_start_fraction_actual")
     lr = metadata_cell(run.get("learning_rate"))
+    lr_schedule = metadata_cell(run.get("learning_rate_schedule") or "constant")
+    lr_warmup = metadata_cell(
+        run.get("learning_rate_warmup_epochs")
+        if run.get("learning_rate_warmup_epochs") is not None
+        else 0
+    )
+    learning_rate_final_scale = run.get("learning_rate_final_scale")
+    lr_final_scale = fmt_float(
+        float(learning_rate_final_scale)
+        if isinstance(learning_rate_final_scale, (int, float))
+        else 1.0
+    )
+    final_learning_rate = summary.get("final_learning_rate")
+    best_learning_rate = summary.get("best_learning_rate")
     context_scale = run.get("context_scale")
     self_score_scale = run.get("self_score_scale")
     query_residual_scale = run.get("query_residual_scale")
@@ -1909,6 +1929,11 @@ def row_for(raw: str) -> tuple[dict[str, str], Path]:
         delta_acc = None
     best_checkpoint_path = summary.get("best_checkpoint_path")
     best_checkpoint = "yes" if isinstance(best_checkpoint_path, str) and best_checkpoint_path else "-"
+    restore_best_requested = summary.get("restore_best_at_end") is True
+    restored_best_at_end = summary.get("restored_best_at_end") is True
+    restored_best = (
+        "yes" if restored_best_at_end else ("requested" if restore_best_requested else "-")
+    )
     early_stopped_epoch = summary.get("early_stopped_epoch")
     repair_columns = trace_repair_columns(run_dir)
     timing_columns = trace_timing_columns(run_dir)
@@ -1986,6 +2011,19 @@ def row_for(raw: str) -> tuple[dict[str, str], Path]:
                 else None
             ),
             "lr": lr,
+            "lr_schedule": lr_schedule,
+            "lr_warmup": lr_warmup,
+            "lr_final_scale": lr_final_scale,
+            "final_lr": fmt_float(
+                float(final_learning_rate)
+                if isinstance(final_learning_rate, (int, float))
+                else None
+            ),
+            "best_lr": fmt_float(
+                float(best_learning_rate)
+                if isinstance(best_learning_rate, (int, float))
+                else None
+            ),
             "context_scale": fmt_float(
                 float(context_scale) if isinstance(context_scale, (int, float)) else None
             ),
@@ -2128,6 +2166,7 @@ def row_for(raw: str) -> tuple[dict[str, str], Path]:
             "final_minus_best": fmt_float(
                 float(final_minus_best) if final_minus_best is not None else None
             ),
+            "restored_best": restored_best,
             "early_stop_epoch": str(early_stopped_epoch)
             if isinstance(early_stopped_epoch, int)
             else "-",
@@ -2180,6 +2219,11 @@ def markdown_table(rows: list[dict[str, str]]) -> str:
         "val_start",
         "val_start_actual",
         "lr",
+        "lr_schedule",
+        "lr_warmup",
+        "lr_final_scale",
+        "final_lr",
+        "best_lr",
         "context_scale",
         "self_score",
         "query_resid",
@@ -2229,6 +2273,7 @@ def markdown_table(rows: list[dict[str, str]]) -> str:
         "best_vs_unigram",
         "best_vs_bigram",
         "final_minus_best",
+        "restored_best",
         "early_stop_epoch",
         "best_ckpt",
     ]

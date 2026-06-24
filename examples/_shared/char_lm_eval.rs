@@ -83,8 +83,78 @@ pub struct TrainingSummary {
     pub final_minus_best_validation_nll: Option<f32>,
     pub best_checkpoint_path: Option<String>,
     pub best_sample_path: Option<String>,
+    pub restore_best_at_end: bool,
+    pub restored_best_at_end: bool,
+    pub restored_best_checkpoint_path: Option<String>,
+    pub learning_rate_schedule: String,
+    pub learning_rate_warmup_epochs: usize,
+    pub learning_rate_final_scale: f32,
+    pub best_learning_rate: Option<f32>,
+    pub final_learning_rate: f32,
     pub epochs_completed: usize,
     pub early_stopped_epoch: Option<usize>,
+}
+
+pub fn learning_rate_schedule_label(warmup_epochs: usize, final_scale: f32) -> &'static str {
+    let decays = final_scale < 1.0 - f32::EPSILON;
+    match (warmup_epochs > 0, decays) {
+        (false, false) => "constant",
+        (true, false) => "warmup",
+        (false, true) => "cosine_decay",
+        (true, true) => "warmup_cosine",
+    }
+}
+
+pub fn scheduled_learning_rate(
+    base_rate: f32,
+    epoch: usize,
+    epochs: usize,
+    warmup_epochs: usize,
+    final_scale: f32,
+) -> f32 {
+    if epochs == 0 {
+        return base_rate;
+    }
+    if warmup_epochs > 0 && epoch < warmup_epochs {
+        let scale = (epoch + 1) as f32 / warmup_epochs as f32;
+        return base_rate * scale.clamp(f32::MIN_POSITIVE, 1.0);
+    }
+    if final_scale >= 1.0 - f32::EPSILON || epochs <= warmup_epochs {
+        return base_rate;
+    }
+
+    let decay_epochs = epochs.saturating_sub(warmup_epochs).max(1);
+    let decay_index = epoch.saturating_sub(warmup_epochs);
+    let progress = if decay_epochs <= 1 {
+        1.0
+    } else {
+        decay_index as f32 / (decay_epochs - 1) as f32
+    }
+    .clamp(0.0, 1.0);
+    let cosine = 0.5 * (1.0 + (std::f32::consts::PI * progress).cos());
+    base_rate * (final_scale + (1.0 - final_scale) * cosine)
+}
+
+pub fn validate_learning_rate_schedule(
+    base_rate: f32,
+    epochs: usize,
+    warmup_epochs: usize,
+    final_scale: f32,
+    label: &'static str,
+) -> PureResult<()> {
+    if base_rate <= 0.0 || !base_rate.is_finite() {
+        return Err(TensorError::NonPositiveLearningRate { rate: base_rate });
+    }
+    if warmup_epochs > epochs {
+        return Err(TensorError::InvalidValue { label });
+    }
+    if final_scale <= 0.0 || final_scale > 1.0 || !final_scale.is_finite() {
+        return Err(TensorError::NonFiniteValue {
+            label,
+            value: final_scale,
+        });
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
