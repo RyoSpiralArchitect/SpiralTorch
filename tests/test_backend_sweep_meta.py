@@ -2620,6 +2620,109 @@ class BackendSweepMetaTests(unittest.TestCase):
         self.assertEqual(run["command"][run["command"].index("--dilations") + 1], "1")
         self.assertEqual(run["command"][run["command"].index("--mix-rms") + 1], "1.0")
 
+    def test_char_lm_sweep_wave_capacity_scout_recipe_expands_shape_grid(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = run_char_lm_sweep.main(
+                    [
+                        "models/samples/spiral_demo_en.txt",
+                        "--run-root",
+                        str(root),
+                        "--recipe",
+                        "no-prior-coherence-wave-capacity-scout",
+                        "--dry-run",
+                        "--no-wgpu-preflight",
+                    ]
+                )
+            manifest = json.loads((root / "sweep.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(code, 0)
+        self.assertEqual(manifest["recipe"], "no-prior-coherence-wave-capacity-scout")
+        self.assertIn("widened coherence-wave capacity", manifest["recipe_description"])
+        self.assertEqual(manifest["architectures"], ["wave"])
+        self.assertEqual(manifest["seeds"], [7])
+        self.assertEqual(manifest["shape_grid"]["hidden"], [64, 96])
+        self.assertEqual(manifest["shape_grid"]["memory"], [16, 24])
+        self.assertEqual(manifest["coherence_grid"]["wave_dilations"], ["1", "1,2"])
+        self.assertEqual(manifest["learning_rates"], [0.1])
+        self.assertEqual(
+            manifest["learning_rate_schedule"],
+            {"warmup_epochs": 2, "final_scale": 0.5, "final_scales": [0.5]},
+        )
+        self.assertEqual(len(manifest["runs"]), 8)
+
+        candidate = next(
+            run
+            for run in manifest["runs"]
+            if run["hidden"] == 96 and run["memory"] == 24 and run["wave_dilations"] == "1"
+        )
+        self.assertIn("hidden-96__memory-24", candidate["name"])
+        self.assertEqual(candidate["command"][candidate["command"].index("--hidden") + 1], "96")
+        self.assertEqual(candidate["command"][candidate["command"].index("--memory") + 1], "24")
+        self.assertEqual(
+            candidate["command"][candidate["command"].index("--lr-warmup-epochs") + 1],
+            "2",
+        )
+        self.assertEqual(
+            candidate["command"][candidate["command"].index("--lr-final-scale") + 1],
+            "0.5",
+        )
+        self.assertIn("--restore-best-at-end", candidate["command"])
+
+    def test_char_lm_sweep_wave_capacity_recipe_reruns_promoted_shape(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = run_char_lm_sweep.main(
+                    [
+                        "models/samples/spiral_demo_en.txt",
+                        "--run-root",
+                        str(root),
+                        "--recipe",
+                        "no-prior-coherence-wave-capacity",
+                        "--dry-run",
+                        "--no-wgpu-preflight",
+                    ]
+                )
+            manifest = json.loads((root / "sweep.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(code, 0)
+        self.assertEqual(manifest["recipe"], "no-prior-coherence-wave-capacity")
+        self.assertIn("h96/m24", manifest["recipe_description"])
+        self.assertEqual(manifest["architectures"], ["wave"])
+        self.assertEqual(manifest["head_priors"], ["none"])
+        self.assertEqual(manifest["seeds"], [7, 13, 23])
+        self.assertEqual(manifest["shape_grid"]["steps"], [32])
+        self.assertEqual(manifest["shape_grid"]["embed_dims"], [32])
+        self.assertEqual(manifest["shape_grid"]["hidden"], [96])
+        self.assertEqual(manifest["shape_grid"]["memory"], [24])
+        self.assertEqual(manifest["head_residual_scales"], [7.0])
+        self.assertEqual(manifest["coherence_grid"]["query_residual_scales"], [2.0])
+        self.assertEqual(manifest["coherence_grid"]["wave_kernels"], [3])
+        self.assertEqual(manifest["coherence_grid"]["wave_dilations"], ["1"])
+        self.assertEqual(manifest["training_grid"]["epochs"], [16])
+        self.assertEqual(manifest["training_grid"]["batches"], [64])
+        self.assertEqual(manifest["learning_rates"], [0.1])
+        self.assertTrue(manifest["settings"]["restore_best_at_end"])
+        self.assertEqual(manifest["settings"]["lr_warmup_epochs"], 2)
+        self.assertEqual(manifest["settings"]["lr_final_scale"], 0.5)
+        self.assertEqual(manifest["extra_args"], ["--mix-rms", "1.0"])
+        self.assertEqual(len(manifest["runs"]), 3)
+
+        run = manifest["runs"][0]
+        self.assertIn("hidden-96__memory-24", run["name"])
+        self.assertIn("restore-best", run["name"])
+        self.assertEqual(run["command"][run["command"].index("--hidden") + 1], "96")
+        self.assertEqual(run["command"][run["command"].index("--memory") + 1], "24")
+        self.assertEqual(run["command"][run["command"].index("--dilations") + 1], "1")
+        self.assertEqual(run["command"][run["command"].index("--head-residual-scale") + 1], "7")
+        self.assertEqual(run["command"][run["command"].index("--lr") + 1], "0.1")
+
     def test_char_lm_sweep_promoted_frontier_recipe_compares_scan_and_wave(
         self,
     ) -> None:
@@ -5283,6 +5386,10 @@ class BackendSweepMetaTests(unittest.TestCase):
                         "validation_start_fraction_actual": 0.5,
                         "char_feature": "token-bigram",
                         "mode": "embedding(4,token-bigram)",
+                        "steps": 12,
+                        "hidden": 64,
+                        "memory": 16,
+                        "embed_dim": 32,
                         "data_paths": [
                             "models/samples/spiral_corpus_en",
                             "docs/getting-started.md",
@@ -5330,6 +5437,7 @@ class BackendSweepMetaTests(unittest.TestCase):
 
         self.assertEqual(row["recurrent"], "lstm")
         self.assertEqual(row["mode"], "embedding(4,token-bigram)")
+        self.assertEqual(row["memory"], "16")
         self.assertEqual(
             row["data_label"],
             "spiral_corpus_en,getting-started.md,example-gallery.md,+1",
@@ -5387,6 +5495,7 @@ class BackendSweepMetaTests(unittest.TestCase):
         self.assertIn("data_label", table)
         self.assertIn("train_tokens", table)
         self.assertIn("sample_quality", table)
+        self.assertIn("memory", table)
         self.assertIn("head_resid", table)
         self.assertIn("bigram_guard", table)
         self.assertIn("bigram_rank_guard", table)
@@ -8984,6 +9093,49 @@ class BackendSweepMetaTests(unittest.TestCase):
 
         self.assertEqual(len(aggregate), 2)
         self.assertEqual([row["head_resid"] for row in aggregate], ["1.0000", "2.0000"])
+
+    def test_char_lm_compare_keeps_memory_as_aggregate_key(self) -> None:
+        rows = [
+            {
+                "arch": "llm_char_coherence_wave",
+                "recurrent": "-",
+                "backend": "cpu",
+                "head_prior": "none",
+                "head_resid": "7.0000",
+                "char_feature": "token-bigram",
+                "mode": "embedding(32,token-bigram)",
+                "steps": "32",
+                "hidden": "96",
+                "memory": "16",
+                "embed_dim": "32",
+                "wave_kernel": "3",
+                "wave_dilations": "1",
+                "final_nll": "3.5000",
+                "delta_nll": "-0.1000",
+            },
+            {
+                "arch": "llm_char_coherence_wave",
+                "recurrent": "-",
+                "backend": "cpu",
+                "head_prior": "none",
+                "head_resid": "7.0000",
+                "char_feature": "token-bigram",
+                "mode": "embedding(32,token-bigram)",
+                "steps": "32",
+                "hidden": "96",
+                "memory": "24",
+                "embed_dim": "32",
+                "wave_kernel": "3",
+                "wave_dilations": "1",
+                "final_nll": "3.4000",
+                "delta_nll": "-0.2000",
+            },
+        ]
+
+        aggregate = compare_char_lm_runs.aggregate_rows(rows)
+
+        self.assertEqual(len(aggregate), 2)
+        self.assertEqual([row["memory"] for row in aggregate], ["16", "24"])
 
     def test_char_lm_compare_aggregate_hides_lstm_scan_counts_without_route(self) -> None:
         rows = [
