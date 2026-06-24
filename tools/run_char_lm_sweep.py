@@ -1411,6 +1411,9 @@ SUMMARY_SORT_METRICS = {
     "final_vs_unigram",
     "coherence_route_debt",
     "lstm_cpu_debt",
+    "sample_quality",
+    "sample_repeat_3gram_ratio",
+    "sample_symbol_ratio",
 }
 
 SUMMARY_PAIR_QUALITY_STATUSES = {"improved", "missing", "neutral", "regressed"}
@@ -1739,6 +1742,7 @@ def apply_recipe_defaults(args: argparse.Namespace) -> argparse.Namespace:
         "embed_dim": None,
         "hidden": None,
         "memory": None,
+        "memory_values": None,
         "head_residual_scale": None,
         "head_residual_scale_values": None,
         "context_scale": None,
@@ -2635,6 +2639,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="comma-separated hidden sizes for shape grids; overrides --hidden",
     )
     parser.add_argument("--memory", type=int, default=None)
+    parser.add_argument(
+        "--memory-values",
+        default=None,
+        help="comma-separated memory sizes for shape grids; overrides --memory",
+    )
     parser.add_argument("--lr", type=float, default=None)
     parser.add_argument(
         "--lr-values",
@@ -2957,6 +2966,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             "best_nll, delta_nll, final_vs_unigram, final_vs_bigram, "
             "final_bigram_logprob_lift, final_bigram_rank_lift, "
             "final_bigram_rank_debt, final_top5_bigram_overlap, "
+            "sample_quality, sample_repeat_3gram_ratio, sample_symbol_ratio, "
             "coherence_route_debt, cpu_debt, or lstm_cpu_debt"
         ),
     )
@@ -2970,6 +2980,10 @@ def main(argv: list[str]) -> int:
     try:
         args = apply_recipe_defaults(args)
         architectures = parse_csv(args.architectures, label="architectures")
+        if args.memory_values is not None and any(
+            architecture not in {"scan", "wave"} for architecture in architectures
+        ):
+            raise ValueError("--memory-values only applies to scan/wave architectures")
         features = parse_csv(args.features, label="features")
         head_priors = parse_csv(args.head_priors, label="head-priors")
         backends = parse_csv(
@@ -2990,6 +3004,11 @@ def main(argv: list[str]) -> int:
             args.hidden_values,
             settings_preview.hidden,
             label="hidden-values",
+        )
+        memory_values = grid_values(
+            args.memory_values,
+            settings_preview.memory,
+            label="memory-values",
         )
         epoch_values = grid_values(
             args.epoch_values,
@@ -3272,6 +3291,7 @@ def main(argv: list[str]) -> int:
             "steps": step_values,
             "embed_dims": embed_dim_values,
             "hidden": hidden_values,
+            "memory": memory_values,
         },
         "training_grid": {
             "epochs": epoch_values,
@@ -3431,6 +3451,7 @@ def main(argv: list[str]) -> int:
         * len(step_values)
         * len(embed_dim_values)
         * len(hidden_values)
+        * len(memory_values)
         * len(epoch_values)
         * len(batches_values)
         * len(eval_samples_values)
@@ -3473,6 +3494,7 @@ def main(argv: list[str]) -> int:
             step_values,
             embed_dim_values,
             hidden_values,
+            memory_values,
             epoch_values,
             batches_values,
             eval_samples_values,
@@ -3500,6 +3522,7 @@ def main(argv: list[str]) -> int:
         step_value,
         embed_dim_value,
         hidden_value,
+        memory_value,
         epoch_value,
         batches_value,
         eval_samples_value,
@@ -3540,6 +3563,7 @@ def main(argv: list[str]) -> int:
             steps=step_value,
             embed_dim=embed_dim_value,
             hidden=hidden_value,
+            memory=memory_value,
             epochs=epoch_value if epoch_value is not None else settings.epochs,
             batches=batches_value if batches_value is not None else settings.batches,
             eval_samples=(
@@ -3578,6 +3602,8 @@ def main(argv: list[str]) -> int:
                     grid_slug("hidden", hidden_value),
                 ]
             )
+        if args.memory_values is not None:
+            run_name_parts.append(grid_slug("memory", memory_value))
         if head_residual_scale_is_explicit:
             run_name_parts.append(float_grid_slug("headresid", head_residual_scale_value))
         if architecture == "scan" and context_scale_is_explicit:
@@ -3682,6 +3708,7 @@ def main(argv: list[str]) -> int:
                     "steps": step_value,
                     "embed_dim": embed_dim_value,
                     "hidden": hidden_value,
+                    "memory": memory_value,
                     "epochs": run_settings.epochs,
                     "batches": run_settings.batches,
                     "batch": run_settings.batch,
@@ -3762,6 +3789,7 @@ def main(argv: list[str]) -> int:
             "steps": step_value,
             "embed_dim": embed_dim_value,
             "hidden": hidden_value,
+            "memory": memory_value,
             "epochs": run_settings.epochs,
             "batches": run_settings.batches,
             "batch": run_settings.batch,
@@ -3845,6 +3873,7 @@ def main(argv: list[str]) -> int:
                         "steps": step_value,
                         "embed_dim": embed_dim_value,
                         "hidden": hidden_value,
+                        "memory": memory_value,
                         "epochs": run_settings.epochs,
                         "batches": run_settings.batches,
                         "batch": run_settings.batch,

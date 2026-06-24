@@ -68,6 +68,15 @@ SUMMARY_HEADERS = [
     "runs",
     "final_lr_mean",
     "best_lr_mean",
+    "sample_chars_mean",
+    "sample_quality_mean",
+    "sample_unique_char_ratio_mean",
+    "sample_repeat_3gram_ratio_mean",
+    "sample_long_run_max_mean",
+    "sample_alpha_ratio_mean",
+    "sample_space_ratio_mean",
+    "sample_symbol_ratio_mean",
+    "sample_source_counts",
     "val_start_actual_mean",
     "final_windows_mean",
     "unigram_windows_mean",
@@ -1234,6 +1243,9 @@ SORT_METRIC_COLUMNS = {
     "final_bigram_target_rank": "final_bigram_target_rank_mean",
     "final_bigram_rank_debt": "final_bigram_rank_debt_mean",
     "final_top5_bigram_overlap": "final_top5_bigram_overlap_mean",
+    "sample_quality": "sample_quality_mean",
+    "sample_repeat_3gram_ratio": "sample_repeat_3gram_ratio_mean",
+    "sample_symbol_ratio": "sample_symbol_ratio_mean",
     "coherence_route_debt": "coherence_route_debt_mean",
     "cpu_debt": "cpu_debt_ops_mean",
     "lstm_cpu_debt": "lstm_est_cpu_debt_ops_mean",
@@ -1242,6 +1254,7 @@ HIGHER_IS_BETTER_SORT_METRICS = {
     "final_bigram_logprob_lift",
     "final_bigram_rank_lift",
     "final_top5_bigram_overlap",
+    "sample_quality",
 }
 
 DEFAULT_SORT_METRIC = "final_nll"

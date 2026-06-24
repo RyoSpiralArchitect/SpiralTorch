@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
+from itertools import groupby
 import importlib.util
 import json
 from pathlib import Path
@@ -99,6 +100,14 @@ AGGREGATE_MEAN_COLUMNS = [
     *DATA_MEAN_COLUMNS,
     "final_lr",
     "best_lr",
+    "sample_chars",
+    "sample_quality",
+    "sample_unique_char_ratio",
+    "sample_repeat_3gram_ratio",
+    "sample_long_run_max",
+    "sample_alpha_ratio",
+    "sample_space_ratio",
+    "sample_symbol_ratio",
     "val_start_actual",
     "final_windows",
     "unigram_windows",
@@ -156,6 +165,7 @@ AGGREGATE_PERCENT_COLUMNS = [
 ]
 
 AGGREGATE_COUNT_COLUMNS = [
+    "sample_source_counts",
     "route_status",
     "lstm_scan_backend_counts",
     "lstm_scan_fallback_counts",
@@ -177,6 +187,14 @@ TOP_AGGREGATE_COLUMNS = [
     "train_tokens_mean",
     "validation_tokens_mean",
     "vocab_size_mean",
+    "sample_chars_mean",
+    "sample_quality_mean",
+    "sample_unique_char_ratio_mean",
+    "sample_repeat_3gram_ratio_mean",
+    "sample_long_run_max_mean",
+    "sample_alpha_ratio_mean",
+    "sample_space_ratio_mean",
+    "sample_symbol_ratio_mean",
     "val_start_actual_mean",
     "final_windows_mean",
     "unigram_windows_mean",
@@ -1797,6 +1815,138 @@ def data_label_for_run(run: dict[str, Any]) -> str:
     return ",".join([*labels[:3], f"+{len(labels) - 3}"])
 
 
+def clamp01(value: float) -> float:
+    return max(0.0, min(1.0, value))
+
+
+def resolve_sample_path(run_dir: Path, summary: dict[str, Any]) -> tuple[str, Path | None]:
+    restored_path = run_dir / "samples" / "restored_best.txt"
+    if summary.get("restored_best_at_end") is True and restored_path.exists():
+        return "restored_best", restored_path
+
+    best_sample_path = summary.get("best_sample_path")
+    if isinstance(best_sample_path, str) and best_sample_path:
+        path = Path(best_sample_path)
+        candidates = [path] if path.is_absolute() else [run_dir / path, path]
+        for candidate in candidates:
+            if candidate.exists():
+                return "best", candidate
+
+    samples_dir = run_dir / "samples"
+    if not samples_dir.exists():
+        return "missing", None
+    for pattern, source in (
+        ("best_epoch_*.txt", "best"),
+        ("epoch_*.txt", "latest"),
+        ("init.txt", "init"),
+    ):
+        candidates = sorted(samples_dir.glob(pattern))
+        if candidates:
+            return source, candidates[-1]
+    return "missing", None
+
+
+def strip_prompt(sample: str, prompt: Any) -> str:
+    if isinstance(prompt, str) and prompt and sample.startswith(prompt):
+        return sample[len(prompt) :].lstrip("\n")
+    return sample
+
+
+def safe_read_text(path: Path | None) -> str | None:
+    if path is None:
+        return None
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def ratio(count: int, total: int) -> float | None:
+    if total <= 0:
+        return None
+    return count / total
+
+
+def repeat_ngram_ratio(text: str, n: int = 3) -> float | None:
+    total = len(text) - n + 1
+    if total <= 0:
+        return None
+    unique = {text[index : index + n] for index in range(total)}
+    return 1.0 - (len(unique) / total)
+
+
+def longest_run(text: str) -> int | None:
+    if not text:
+        return None
+    return max(len(list(group)) for _, group in groupby(text))
+
+
+def balance_score(value: float | None, *, target: float, tolerance: float) -> float:
+    if value is None or tolerance <= 0.0:
+        return 0.0
+    return clamp01(1.0 - abs(value - target) / tolerance)
+
+
+def sample_quality_columns(run_dir: Path, summary: dict[str, Any], run: dict[str, Any]) -> dict[str, str]:
+    source, path = resolve_sample_path(run_dir, summary)
+    sample = safe_read_text(path)
+    if sample is None:
+        return {
+            "sample_source": source,
+            "sample_chars": "-",
+            "sample_quality": "-",
+            "sample_unique_char_ratio": "-",
+            "sample_repeat_3gram_ratio": "-",
+            "sample_long_run_max": "-",
+            "sample_alpha_ratio": "-",
+            "sample_space_ratio": "-",
+            "sample_symbol_ratio": "-",
+        }
+
+    generated = strip_prompt(sample, run.get("prompt"))
+    chars = len(generated)
+    unique_ratio = ratio(len(set(generated)), chars)
+    repeat_ratio = repeat_ngram_ratio(generated)
+    long_run = longest_run(generated)
+    alpha_ratio = ratio(sum(char.isalpha() for char in generated), chars)
+    space_ratio = ratio(sum(char.isspace() for char in generated), chars)
+    symbol_ratio = ratio(
+        sum(not char.isalnum() and not char.isspace() for char in generated),
+        chars,
+    )
+    length_score = clamp01(chars / 80.0)
+    diversity_score = clamp01((unique_ratio or 0.0) / 0.35)
+    repeat_score = clamp01(1.0 - ((repeat_ratio or 0.0) / 0.2))
+    run_score = (
+        0.0
+        if long_run is None
+        else clamp01(1.0 - max(0, long_run - 4) / 16.0)
+    )
+    alpha_score = balance_score(alpha_ratio, target=0.62, tolerance=0.35)
+    space_score = balance_score(space_ratio, target=0.18, tolerance=0.18)
+    symbol_score = clamp01(1.0 - ((symbol_ratio or 0.0) / 0.35))
+    quality = 100.0 * (
+        0.20 * length_score
+        + 0.18 * diversity_score
+        + 0.18 * repeat_score
+        + 0.14 * run_score
+        + 0.12 * alpha_score
+        + 0.10 * space_score
+        + 0.08 * symbol_score
+    )
+    return {
+        "sample_source": source,
+        "sample_chars": fmt_float(float(chars), digits=0),
+        "sample_quality": fmt_float(quality, digits=2),
+        "sample_unique_char_ratio": fmt_float(unique_ratio),
+        "sample_repeat_3gram_ratio": fmt_float(repeat_ratio),
+        "sample_long_run_max": fmt_float(float(long_run) if long_run is not None else None, digits=0),
+        "sample_alpha_ratio": fmt_float(alpha_ratio),
+        "sample_space_ratio": fmt_float(space_ratio),
+        "sample_symbol_ratio": fmt_float(symbol_ratio),
+    }
+
+
 def learnability_value(metric: dict[str, Any], field: str) -> float | None:
     learnability = metric.get("learnability")
     if not isinstance(learnability, dict):
@@ -1945,6 +2095,7 @@ def row_for(raw: str) -> tuple[dict[str, str], Path]:
     lstm_scan_route_cols = trace_lstm_scan_route_columns(run_dir)
     coherence_route_cols = coherence_route_columns(arch, backend, learning_op_cols)
     policy_cols = trace_policy_columns(run_dir)
+    sample_cols = sample_quality_columns(run_dir, summary, run)
 
     return (
         {
@@ -1958,6 +2109,7 @@ def row_for(raw: str) -> tuple[dict[str, str], Path]:
             "train_tokens": train_tokens,
             "validation_tokens": validation_tokens,
             "vocab_size": vocab_size,
+            **sample_cols,
             "head_prior": head_prior,
             "head_resid": fmt_float(
                 float(head_residual_scale)
@@ -2198,6 +2350,15 @@ def markdown_table(rows: list[dict[str, str]]) -> str:
         "train_tokens",
         "validation_tokens",
         "vocab_size",
+        "sample_source",
+        "sample_chars",
+        "sample_quality",
+        "sample_unique_char_ratio",
+        "sample_repeat_3gram_ratio",
+        "sample_long_run_max",
+        "sample_alpha_ratio",
+        "sample_space_ratio",
+        "sample_symbol_ratio",
         "head_prior",
         "head_resid",
         "bigram_guard",
@@ -2485,6 +2646,10 @@ def aggregate_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
         else:
             row["lstm_scan_backend_counts"] = "-"
             row["lstm_scan_fallback_counts"] = "-"
+        row["sample_source_counts"] = count_label_cells(
+            [item.get("sample_source") for item in group_rows],
+            missing_label="missing",
+        )
         row["route_status"] = aggregate_route_status(row)
         has_coherence_route = any(
             item.get("coherence_route_status") not in (None, "-")
@@ -2560,8 +2725,11 @@ def aggregate_table(rows: list[dict[str, str]]) -> str:
         *(f"{column}_mean" for column in AGGREGATE_MEAN_COLUMNS),
         *(f"{column}_mean" for column in AGGREGATE_PERCENT_COLUMNS),
     ]
-    if any(row.get(column, "-") != "-" for row in aggregate for column in AGGREGATE_COUNT_COLUMNS):
-        headers.extend(AGGREGATE_COUNT_COLUMNS)
+    headers.extend(
+        column
+        for column in AGGREGATE_COUNT_COLUMNS
+        if any(row.get(column, "-") != "-" for row in aggregate)
+    )
     out = ["## Aggregate Runs", ""]
     out.append("| " + " | ".join(headers) + " |")
     out.append("| " + " | ".join("---" for _ in headers) + " |")

@@ -4872,6 +4872,63 @@ class BackendSweepMetaTests(unittest.TestCase):
             names,
         )
 
+    def test_char_lm_sweep_memory_grid_dry_run_writes_manifest_and_names(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = run_char_lm_sweep.main(
+                    [
+                        "models/samples/spiral_demo_en.txt",
+                        "--run-root",
+                        str(root),
+                        "--architectures",
+                        "wave",
+                        "--features",
+                        "token-bigram",
+                        "--head-priors",
+                        "none",
+                        "--backends",
+                        "cpu",
+                        "--seeds",
+                        "7",
+                        "--steps",
+                        "4",
+                        "--embed-dim",
+                        "4",
+                        "--hidden",
+                        "8",
+                        "--memory-values",
+                        "8,16",
+                        "--wave-kernel",
+                        "3",
+                        "--wave-dilations",
+                        "1",
+                        "--epochs",
+                        "1",
+                        "--batches",
+                        "1",
+                        "--batch",
+                        "2",
+                        "--eval-samples",
+                        "4",
+                        "--gen",
+                        "0",
+                        "--dry-run",
+                    ]
+                )
+            manifest = json.loads((root / "sweep.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(code, 0)
+        self.assertEqual(manifest["shape_grid"]["memory"], [8, 16])
+        self.assertEqual(len(manifest["runs"]), 2)
+        names = [run["name"] for run in manifest["runs"]]
+        self.assertIn(
+            "wave__feature-token-bigram__head-none__backend-cpu__"
+            "memory-16__kernel-3__dil-1__seed-7",
+            names,
+        )
+        self.assertEqual(manifest["runs"][1]["memory"], 16)
+
     def test_char_lm_sweep_head_residual_grid_dry_run_writes_manifest_and_names(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -5187,6 +5244,13 @@ class BackendSweepMetaTests(unittest.TestCase):
     def test_char_lm_compare_surfaces_recurrent_and_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             run_dir = Path(tmp)
+            samples_dir = run_dir / "samples"
+            samples_dir.mkdir()
+            best_sample_path = samples_dir / "best_epoch_002.txt"
+            best_sample_path.write_text(
+                "Prompt\n\nhello world from SpiralTorch\n",
+                encoding="utf-8",
+            )
             (run_dir / "run.json").write_text(
                 json.dumps(
                     {
@@ -5229,6 +5293,7 @@ class BackendSweepMetaTests(unittest.TestCase):
                         "train_tokens": 1234,
                         "validation_tokens": 321,
                         "vocab_size": 42,
+                        "prompt": "Prompt\n\n",
                     }
                 ),
                 encoding="utf-8",
@@ -5254,6 +5319,7 @@ class BackendSweepMetaTests(unittest.TestCase):
                         "bigram_validation": {"windows": 12, "mean_nll": 2.4},
                         "final_vs_unigram_nll_delta": -0.2,
                         "final_vs_bigram_nll_delta": 0.1,
+                        "best_sample_path": str(best_sample_path),
                     }
                 ),
                 encoding="utf-8",
@@ -5272,6 +5338,10 @@ class BackendSweepMetaTests(unittest.TestCase):
         self.assertEqual(row["train_tokens"], "1234")
         self.assertEqual(row["validation_tokens"], "321")
         self.assertEqual(row["vocab_size"], "42")
+        self.assertEqual(row["sample_source"], "best")
+        self.assertEqual(row["sample_chars"], "29")
+        self.assertNotEqual(row["sample_quality"], "-")
+        self.assertNotEqual(row["sample_repeat_3gram_ratio"], "-")
         self.assertEqual(row["head_resid"], "2.0000")
         self.assertEqual(row["bigram_guard"], "0.0500")
         self.assertEqual(row["bigram_guard_k"], "3")
@@ -5316,6 +5386,7 @@ class BackendSweepMetaTests(unittest.TestCase):
         self.assertIn("embedding(4,token-bigram)", table)
         self.assertIn("data_label", table)
         self.assertIn("train_tokens", table)
+        self.assertIn("sample_quality", table)
         self.assertIn("head_resid", table)
         self.assertIn("bigram_guard", table)
         self.assertIn("bigram_rank_guard", table)
@@ -5400,6 +5471,8 @@ class BackendSweepMetaTests(unittest.TestCase):
         self.assertEqual(compare_json["aggregate_runs"][0]["unigram_nll_mean"], "2.7000")
         self.assertEqual(compare_json["aggregate_runs"][0]["bigram_nll_mean"], "2.4000")
         self.assertEqual(compare_json["aggregate_runs"][0]["best_vs_bigram_mean"], "0.1000")
+        self.assertEqual(compare_json["aggregate_runs"][0]["sample_quality_mean"], "-")
+        self.assertEqual(compare_json["aggregate_runs"][0]["sample_source_counts"], "missing:1")
         self.assertEqual(compare_json["aggregate_runs"][0]["route_status"], "-")
         self.assertEqual(compare_json["top_aggregate_runs"][0]["arch"], "llm_char_lstm")
         self.assertEqual(compare_summary["schema"], "st.char_lm.compare_summary.v1")
