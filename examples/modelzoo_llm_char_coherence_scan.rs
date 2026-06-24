@@ -16,14 +16,15 @@ mod text_corpus;
 use char_lm_eval::{
     capture_parameter_snapshot, evaluate_bigram_next_token, evaluate_next_token_with_unigram_lift,
     evaluate_unigram_next_token, head_prior_is_enabled, insert_head_prior_with_context,
-    linear_with_weight_rms, push_char_embedding, residual_logit_scaler,
-    split_train_validation_tokens, summarize_learnability, validate_bigram_rank_guard,
-    validate_bigram_rank_guard_band, validate_bigram_rank_guard_min_candidates,
-    validate_bigram_soft_guard, validate_bigram_topk_guard, validate_char_feature,
-    validate_head_prior, validate_head_residual_scale, write_summary, BigramRankGuardCoverage,
-    BigramTopKGuardTargets, BigramTopKGuardedCrossEntropy, CharLmInputMode, LanguageEvalMetric,
-    LearnabilityMetric, TrainingSummary, CHAR_FEATURE_TOKEN, DEFAULT_BIGRAM_RANK_GUARD,
-    DEFAULT_BIGRAM_RANK_GUARD_BAND, DEFAULT_BIGRAM_RANK_GUARD_MARGIN,
+    learning_rate_schedule_label, linear_with_weight_rms, push_char_embedding,
+    residual_logit_scaler, scheduled_learning_rate, split_train_validation_tokens,
+    summarize_learnability, validate_bigram_rank_guard, validate_bigram_rank_guard_band,
+    validate_bigram_rank_guard_min_candidates, validate_bigram_soft_guard,
+    validate_bigram_topk_guard, validate_char_feature, validate_head_prior,
+    validate_head_residual_scale, validate_learning_rate_schedule, write_summary,
+    BigramRankGuardCoverage, BigramTopKGuardTargets, BigramTopKGuardedCrossEntropy,
+    CharLmInputMode, LanguageEvalMetric, LearnabilityMetric, TrainingSummary, CHAR_FEATURE_TOKEN,
+    DEFAULT_BIGRAM_RANK_GUARD, DEFAULT_BIGRAM_RANK_GUARD_BAND, DEFAULT_BIGRAM_RANK_GUARD_MARGIN,
     DEFAULT_BIGRAM_RANK_GUARD_MIN_CANDIDATES, DEFAULT_BIGRAM_SOFT_GUARD, DEFAULT_BIGRAM_TOPK_GUARD,
     DEFAULT_BIGRAM_TOPK_GUARD_K, DEFAULT_CHAR_FEATURE, DEFAULT_HEAD_RESIDUAL_SCALE,
     HEAD_PRIOR_LEARNED_UNIGRAM,
@@ -106,6 +107,9 @@ struct RunMeta {
     batches_per_epoch: usize,
     batch: usize,
     learning_rate: f32,
+    learning_rate_schedule: String,
+    learning_rate_warmup_epochs: usize,
+    learning_rate_final_scale: f32,
     curvature: f32,
     temperature: f32,
     gen_len: usize,
@@ -118,6 +122,7 @@ struct RunMeta {
     validation_start_token: Option<usize>,
     eval_samples: usize,
     early_stop_patience: usize,
+    restore_best_at_end: bool,
     train_tokens: usize,
     validation_tokens: usize,
     prompt: String,
@@ -128,6 +133,8 @@ struct RunMeta {
 struct EpochMetric {
     epoch: usize,
     batches: usize,
+    learning_rate: f32,
+    learning_rate_scale: f32,
     average_loss: f32,
     tensor_backend: EpochTensorBackendStats,
     validation: Option<LanguageEvalMetric>,
@@ -276,6 +283,8 @@ struct Args {
     batches_per_epoch: usize,
     batch: usize,
     learning_rate: f32,
+    learning_rate_warmup_epochs: usize,
+    learning_rate_final_scale: f32,
     curvature: f32,
     temperature: f32,
     gen_len: usize,
@@ -285,6 +294,7 @@ struct Args {
     validation_start_fraction: Option<f32>,
     eval_samples: usize,
     early_stop_patience: usize,
+    restore_best_at_end: bool,
     prompt: Option<String>,
 }
 
@@ -300,7 +310,7 @@ impl Args {
         }
         if data_args.is_empty() {
             return Err(TensorError::Generic(
-                "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--char-feature token|token-bigram] [--hidden N] [--memory N] [--context-scale F] [--self-score-scale F] [--query-residual-scale F] [--mix-rms F] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram|learned-unigram|bigram|learned-bigram] [--bigram-topk-guard F] [--bigram-topk-guard-k N] [--bigram-rank-guard F] [--bigram-rank-guard-margin F] [--bigram-rank-guard-band F] [--bigram-rank-guard-min-candidates N] [--bigram-soft-guard F] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--val-start-fraction F] [--eval-samples N] [--early-stop-patience N] [--prompt STR]"
+                "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--char-feature token|token-bigram] [--hidden N] [--memory N] [--context-scale F] [--self-score-scale F] [--query-residual-scale F] [--mix-rms F] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram|learned-unigram|bigram|learned-bigram] [--bigram-topk-guard F] [--bigram-topk-guard-k N] [--bigram-rank-guard F] [--bigram-rank-guard-margin F] [--bigram-rank-guard-band F] [--bigram-rank-guard-min-candidates N] [--bigram-soft-guard F] [--epochs N] [--batches N] [--batch N] [--lr F] [--lr-warmup-epochs N] [--lr-final-scale F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--val-start-fraction F] [--eval-samples N] [--early-stop-patience N] [--restore-best-at-end] [--prompt STR]"
                     .to_string(),
             ));
         }
@@ -335,6 +345,8 @@ impl Args {
             batches_per_epoch: 24,
             batch: 8,
             learning_rate: 2e-2,
+            learning_rate_warmup_epochs: 0,
+            learning_rate_final_scale: 1.0,
             curvature: -1.0,
             temperature: 1.0,
             gen_len: 200,
@@ -344,6 +356,7 @@ impl Args {
             validation_start_fraction: None,
             eval_samples: 256,
             early_stop_patience: 0,
+            restore_best_at_end: false,
             prompt: None,
         };
 
@@ -401,6 +414,12 @@ impl Args {
                 "--batches" => args.batches_per_epoch = take_parse(&mut argv, "--batches")?,
                 "--batch" => args.batch = take_parse(&mut argv, "--batch")?,
                 "--lr" => args.learning_rate = take_parse(&mut argv, "--lr")?,
+                "--lr-warmup-epochs" => {
+                    args.learning_rate_warmup_epochs = take_parse(&mut argv, "--lr-warmup-epochs")?
+                }
+                "--lr-final-scale" => {
+                    args.learning_rate_final_scale = take_parse(&mut argv, "--lr-final-scale")?
+                }
                 "--curvature" => args.curvature = take_parse(&mut argv, "--curvature")?,
                 "--temperature" => args.temperature = take_parse(&mut argv, "--temperature")?,
                 "--gen" => args.gen_len = take_parse(&mut argv, "--gen")?,
@@ -417,10 +436,11 @@ impl Args {
                 "--early-stop-patience" => {
                     args.early_stop_patience = take_parse(&mut argv, "--early-stop-patience")?
                 }
+                "--restore-best-at-end" => args.restore_best_at_end = true,
                 "--prompt" => args.prompt = Some(take_arg(&mut argv, "--prompt")?),
                 "--help" | "-h" => {
                     return Err(TensorError::Generic(
-                        "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--char-feature token|token-bigram] [--hidden N] [--memory N] [--context-scale F] [--self-score-scale F] [--query-residual-scale F] [--mix-rms F] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram|learned-unigram|bigram|learned-bigram] [--bigram-topk-guard F] [--bigram-topk-guard-k N] [--bigram-rank-guard F] [--bigram-rank-guard-margin F] [--bigram-rank-guard-band F] [--bigram-rank-guard-min-candidates N] [--bigram-soft-guard F] [--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--val-start-fraction F] [--eval-samples N] [--early-stop-patience N] [--prompt STR]"
+                        "usage: cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text_or_dir> [<text_or_dir> ...] [--load weights.json] [--save weights.json] [--run-dir PATH] [--backend auto|wgpu|cuda|hip|cpu] [--events PATH] [--steps N] [--embed-dim N] [--char-feature token|token-bigram] [--hidden N] [--memory N] [--context-scale F] [--self-score-scale F] [--query-residual-scale F] [--mix-rms F] [--head-rms F] [--head-residual-scale F] [--head-prior none|unigram|learned-unigram|bigram|learned-bigram] [--bigram-topk-guard F] [--bigram-topk-guard-k N] [--bigram-rank-guard F] [--bigram-rank-guard-margin F] [--bigram-rank-guard-band F] [--bigram-rank-guard-min-candidates N] [--bigram-soft-guard F] [--epochs N] [--batches N] [--batch N] [--lr F] [--lr-warmup-epochs N] [--lr-final-scale F] [--curvature F] [--temperature F] [--gen N] [--topk N] [--seed N] [--val-fraction F] [--val-start-fraction F] [--eval-samples N] [--early-stop-patience N] [--restore-best-at-end] [--prompt STR]"
                             .to_string(),
                     ));
                 }
@@ -468,6 +488,13 @@ impl Args {
             args.bigram_topk_guard_k,
         )?;
         validate_bigram_soft_guard(args.bigram_soft_guard)?;
+        validate_learning_rate_schedule(
+            args.learning_rate,
+            args.epochs,
+            args.learning_rate_warmup_epochs,
+            args.learning_rate_final_scale,
+            "char_lm_coherence_scan_learning_rate_schedule",
+        )?;
         if !args.validation_fraction.is_finite()
             || args.validation_fraction < 0.0
             || args.validation_fraction >= 1.0
@@ -967,6 +994,11 @@ fn main() -> PureResult<()> {
             Some(&split.train),
         )?;
     }
+    let learning_rate_schedule = learning_rate_schedule_label(
+        args.learning_rate_warmup_epochs,
+        args.learning_rate_final_scale,
+    )
+    .to_string();
     model.attach_hypergrad(curvature, args.learning_rate)?;
     let bigram_guard = BigramTopKGuardTargets::new(
         vocab.len(),
@@ -1055,6 +1087,9 @@ fn main() -> PureResult<()> {
         batches_per_epoch: args.batches_per_epoch,
         batch: args.batch,
         learning_rate: args.learning_rate,
+        learning_rate_schedule: learning_rate_schedule.clone(),
+        learning_rate_warmup_epochs: args.learning_rate_warmup_epochs,
+        learning_rate_final_scale: args.learning_rate_final_scale,
         curvature,
         temperature,
         gen_len: args.gen_len,
@@ -1067,6 +1102,7 @@ fn main() -> PureResult<()> {
         validation_start_token: split.validation_start_token,
         eval_samples: args.eval_samples,
         early_stop_patience: args.early_stop_patience,
+        restore_best_at_end: args.restore_best_at_end,
         train_tokens: split.train.len(),
         validation_tokens: split.validation.len(),
         prompt: prompt.clone(),
@@ -1094,7 +1130,7 @@ fn main() -> PureResult<()> {
     )?;
 
     println!(
-        "arch=coherence_scan backend={} vocab={} files={} chars={} train_tokens={} validation_tokens={} steps={} embed_dim={} char_feature={} hidden={} memory={} context_scale={} self_score_scale={} query_residual_scale={} mix_rms={} head_rms={} head_residual_scale={} head_prior={} bigram_topk_guard={} bigram_topk_guard_k={} bigram_rank_guard={} bigram_rank_guard_margin={} bigram_rank_guard_band={} bigram_rank_guard_min_candidates={} bigram_soft_guard={} epochs={} batch={} lr={:.3e} curvature={} temp={} run_dir={}",
+        "arch=coherence_scan backend={} vocab={} files={} chars={} train_tokens={} validation_tokens={} steps={} embed_dim={} char_feature={} hidden={} memory={} context_scale={} self_score_scale={} query_residual_scale={} mix_rms={} head_rms={} head_residual_scale={} head_prior={} bigram_topk_guard={} bigram_topk_guard_k={} bigram_rank_guard={} bigram_rank_guard_margin={} bigram_rank_guard_band={} bigram_rank_guard_min_candidates={} bigram_soft_guard={} epochs={} batch={} lr={:.3e} lr_schedule={} lr_warmup_epochs={} lr_final_scale={} curvature={} temp={} run_dir={}",
         backend_sel.label,
         vocab.len(),
         data_files.len(),
@@ -1127,6 +1163,9 @@ fn main() -> PureResult<()> {
         args.epochs,
         args.batch,
         args.learning_rate,
+        learning_rate_schedule,
+        args.learning_rate_warmup_epochs,
+        args.learning_rate_final_scale,
         curvature,
         temperature,
         run_dir.display()
@@ -1225,12 +1264,24 @@ fn main() -> PureResult<()> {
     let mut best_validation = None;
     let mut best_validation_epoch = None;
     let mut best_validation_mean_nll = None;
+    let mut best_learning_rate = None;
     let mut best_checkpoint_path = None;
     let mut best_sample_path = None;
     let mut epochs_completed = 0usize;
     let mut epochs_without_validation_improvement = 0usize;
     let mut early_stopped_epoch = None;
+    let mut active_learning_rate = args.learning_rate;
     for epoch in 0..args.epochs {
+        let epoch_learning_rate = scheduled_learning_rate(
+            args.learning_rate,
+            epoch,
+            args.epochs,
+            args.learning_rate_warmup_epochs,
+            args.learning_rate_final_scale,
+        );
+        let lr_scale = epoch_learning_rate / active_learning_rate;
+        trainer.mul_learning_rate(&mut model, lr_scale)?;
+        active_learning_rate = epoch_learning_rate;
         let mut rng = ChaCha8Rng::seed_from_u64(args.seed.wrapping_add(epoch as u64 * 10_000));
         let mut batches = Vec::with_capacity(args.batches_per_epoch);
         for _ in 0..args.batches_per_epoch {
@@ -1263,6 +1314,7 @@ fn main() -> PureResult<()> {
                 best_validation = Some(validation_metric.clone());
                 best_validation_mean_nll = Some(validation_metric.mean_nll);
                 best_validation_epoch = Some(epoch);
+                best_learning_rate = Some(epoch_learning_rate);
                 validation_is_best = true;
                 epochs_without_validation_improvement = 0;
             } else {
@@ -1278,6 +1330,8 @@ fn main() -> PureResult<()> {
         let metric = EpochMetric {
             epoch,
             batches: stats.batches,
+            learning_rate: epoch_learning_rate,
+            learning_rate_scale: epoch_learning_rate / args.learning_rate,
             average_loss: stats.average_loss,
             tensor_backend: stats.tensor_backend,
             validation: validation.clone(),
@@ -1322,8 +1376,9 @@ fn main() -> PureResult<()> {
         last_validation = validation.clone();
         if let Some(validation) = validation.as_ref() {
             println!(
-                "epoch[{epoch}] batches={} avg_loss={:.6} val_nll={:.6} val_ppl={} val_acc={:.2}% update_l2={} update_ratio={}{}",
+                "epoch[{epoch}] batches={} lr={:.3e} avg_loss={:.6} val_nll={:.6} val_ppl={} val_acc={:.2}% update_l2={} update_ratio={}{}",
                 stats.batches,
+                epoch_learning_rate,
                 stats.average_loss,
                 validation.mean_nll,
                 validation
@@ -1343,8 +1398,9 @@ fn main() -> PureResult<()> {
             );
         } else {
             println!(
-                "epoch[{epoch}] batches={} avg_loss={:.6} val=skipped update_l2={} update_ratio={}",
+                "epoch[{epoch}] batches={} lr={:.3e} avg_loss={:.6} val=skipped update_l2={} update_ratio={}",
                 stats.batches,
+                epoch_learning_rate,
                 stats.average_loss,
                 learnability
                     .total_update_l2
@@ -1372,6 +1428,44 @@ fn main() -> PureResult<()> {
                 best_validation_mean_nll.unwrap_or(f32::NAN)
             );
             break;
+        }
+    }
+
+    let mut restored_best_at_end = false;
+    let mut restored_best_checkpoint_path = None;
+    if args.restore_best_at_end {
+        if let Some(best_path) = best_checkpoint_path.clone() {
+            load_json(&mut model, Path::new(&best_path))?;
+            last_validation = best_validation.clone();
+            let restored_sample = generate_text(
+                &model,
+                &vocab,
+                steps,
+                &prompt,
+                args.gen_len,
+                args.top_k,
+                args.seed
+                    .wrapping_add(999)
+                    .wrapping_add(best_validation_epoch.unwrap_or(0) as u64),
+            )?;
+            std::fs::write(samples_dir.join("restored_best.txt"), &restored_sample).map_err(
+                |err| TensorError::IoError {
+                    message: err.to_string(),
+                },
+            )?;
+            last_sample = Some(restored_sample);
+            restored_best_at_end = true;
+            restored_best_checkpoint_path = Some(best_path.clone());
+            println!(
+                "restore_best_at_end checkpoint={} best_epoch={} best_nll={:.6}",
+                best_path,
+                best_validation_epoch
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "-".to_string()),
+                best_validation_mean_nll.unwrap_or(f32::NAN)
+            );
+        } else {
+            println!("restore_best_at_end skipped: no validation checkpoint was recorded");
         }
     }
 
@@ -1442,6 +1536,11 @@ fn main() -> PureResult<()> {
         .as_ref()
         .zip(best_validation.as_ref())
         .map(|(final_metric, best_metric)| final_metric.mean_nll - best_metric.mean_nll);
+    let final_learning_rate = if restored_best_at_end {
+        best_learning_rate.unwrap_or(active_learning_rate)
+    } else {
+        active_learning_rate
+    };
     let summary = TrainingSummary {
         initial_validation,
         final_validation,
@@ -1460,6 +1559,14 @@ fn main() -> PureResult<()> {
         final_minus_best_validation_nll,
         best_checkpoint_path,
         best_sample_path,
+        restore_best_at_end: args.restore_best_at_end,
+        restored_best_at_end,
+        restored_best_checkpoint_path,
+        learning_rate_schedule,
+        learning_rate_warmup_epochs: args.learning_rate_warmup_epochs,
+        learning_rate_final_scale: args.learning_rate_final_scale,
+        best_learning_rate,
+        final_learning_rate,
         epochs_completed,
         early_stopped_epoch,
     };
