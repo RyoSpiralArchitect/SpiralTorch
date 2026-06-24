@@ -402,6 +402,40 @@ RECIPES = {
             "gen": 128,
         },
     },
+    "no-prior-coherence-wide-frontier": {
+        "description": (
+            "compare the no-prior LSTM baseline, scan winner, and promoted "
+            "wave on the widened corpus long budget"
+        ),
+        "defaults": {
+            "architectures": "lstm,scan,wave",
+            "features": "token-bigram",
+            "head_priors": "none",
+            "seeds": "7,13,23",
+            "steps": 32,
+            "embed_dim": 32,
+            "hidden": 64,
+            "memory": 16,
+            "head_residual_scale_values": "5",
+            "context_scale": 2,
+            "query_residual_scale": 2,
+            "wave_kernel": 3,
+            "wave_dilations": "1",
+            "epoch_values": "16",
+            "batches_values": "64",
+            "batch": 4,
+            "eval_samples": 128,
+            "early_stop_patience": 6,
+            "lr_values": "0.05",
+            "compare_summary_limit": 12,
+            "compare_summary_sort_metric": "final_vs_bigram",
+            "architecture_extra_args": {
+                "scan": ["--mix-rms", "1.0"],
+                "wave": ["--mix-rms", "1.0"],
+            },
+            "gen": 128,
+        },
+    },
     "no-prior-coherence-promoted-frontier": {
         "description": (
             "compare the scan shape winner and promoted lite wave shape on "
