@@ -57,7 +57,7 @@ def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] in {"-h", "--help"}:
         print(
             "usage: PYTHONNOUSERSITE=1 python3 -S -s models/python/zspace_vae_reconstruction.py "
-            "[--input-dim N] [--latent-dim N] [--seed N] [--steps N] [--lr F] "
+            "[--input-dim N] [--latent-dim N] [--seed N] [--steps N] [--lr F] [--kl-weight F] "
             "[--input \"0.35,-0.12,...\"] [--exponents \"1.0,0.5,...\"] "
             "[--load PATH] [--save PATH] "
             "[--events PATH] [--atlas] [--atlas-bound N] [--atlas-district NAME] "
@@ -79,6 +79,7 @@ def main() -> None:
     seed = 42
     steps = 12
     lr = 1e-2
+    kl_weight = 1e-3
 
     input_vec = [0.35, -0.12, 0.77, 0.05, -0.28, 0.44, 0.10, -0.06]
     exponents = [1.0, 0.5, 2.0, 1.25, 0.75, 1.5, 1.0, 0.9]
@@ -110,6 +111,8 @@ def main() -> None:
             steps = int(next(it))
         elif flag == "--lr":
             lr = float(next(it))
+        elif flag == "--kl-weight":
+            kl_weight = float(next(it))
         elif flag == "--input":
             input_vec = _parse_floats(str(next(it)))
         elif flag == "--exponents":
@@ -133,6 +136,8 @@ def main() -> None:
         raise ValueError("--steps must be >= 0")
     if lr <= 0.0 or not math.isfinite(lr):
         raise ValueError("--lr must be positive and finite")
+    if kl_weight < 0.0 or not math.isfinite(kl_weight):
+        raise ValueError("--kl-weight must be non-negative and finite")
 
     if len(input_vec) != input_dim:
         raise ValueError(f"--input length mismatch (expected {input_dim}, got {len(input_vec)})")
@@ -171,6 +176,7 @@ def main() -> None:
         "seed": seed,
         "steps": steps,
         "lr": lr,
+        "kl_weight": kl_weight,
         "checkpoint": {
             "load_path": str(load_path) if load_path is not None else None,
             "save_path": str(save_path),
@@ -191,7 +197,7 @@ def main() -> None:
     start_ts = time.time()
     last_recon: float | None = None
     for step in range(steps):
-        state = vae.forward(projected)
+        state = vae.train_step(projected, lr, kl_weight)
         stats = state.stats
         recon = float(stats.recon_loss)
         kl = float(stats.kl_loss)
@@ -219,9 +225,8 @@ def main() -> None:
             }
             _append_jsonl(events_path, payload)
         last_recon = recon
-        vae.refine_decoder(state, lr)
 
-    final_state = vae.forward(projected)
+    final_state = vae.forward_mean(projected)
     final_recon = [float(v) for v in final_state.reconstruction]
     final_error_norm = _l2_norm([final_recon[i] - projected[i] for i in range(len(projected))])
     vae.save(str(save_path))

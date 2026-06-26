@@ -8279,6 +8279,41 @@ impl PyZSpaceVae {
         Ok(PyZSpaceVaeState { inner: state })
     }
 
+    pub fn forward_mean(&self, input: Vec<f64>) -> PyResult<PyZSpaceVaeState> {
+        if input.len() != self.inner.input_dim() {
+            return Err(PyValueError::new_err(format!(
+                "input length mismatch (expected {}, got {})",
+                self.inner.input_dim(),
+                input.len()
+            )));
+        }
+        let vec = DVector::from_vec(input);
+        let state = self.inner.forward_mean(&vec).map_err(tensor_err_to_py)?;
+        Ok(PyZSpaceVaeState { inner: state })
+    }
+
+    #[pyo3(signature = (input, learning_rate, kl_weight=0.001))]
+    pub fn train_step(
+        &mut self,
+        input: Vec<f64>,
+        learning_rate: f64,
+        kl_weight: f64,
+    ) -> PyResult<PyZSpaceVaeState> {
+        if input.len() != self.inner.input_dim() {
+            return Err(PyValueError::new_err(format!(
+                "input length mismatch (expected {}, got {})",
+                self.inner.input_dim(),
+                input.len()
+            )));
+        }
+        let vec = DVector::from_vec(input);
+        let state = self
+            .inner
+            .train_step(&vec, learning_rate, kl_weight)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyZSpaceVaeState { inner: state })
+    }
+
     pub fn encode(&self, input: Vec<f64>) -> PyResult<(Vec<f64>, Vec<f64>)> {
         if input.len() != self.inner.input_dim() {
             return Err(PyValueError::new_err(format!(
@@ -8456,6 +8491,14 @@ impl PyZSpaceTextVae {
         Ok(PyZSpaceVaeState { inner: state })
     }
 
+    pub fn forward_mean_text(&self, text: &str) -> PyResult<PyZSpaceVaeState> {
+        let state = self
+            .inner
+            .forward_mean_text(text)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyZSpaceVaeState { inner: state })
+    }
+
     pub fn forward_text_with_mellin(
         &mut self,
         text: &str,
@@ -8464,6 +8507,18 @@ impl PyZSpaceTextVae {
         let state = self
             .inner
             .forward_text_with_mellin(text, &basis.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyZSpaceVaeState { inner: state })
+    }
+
+    pub fn forward_mean_text_with_mellin(
+        &self,
+        text: &str,
+        basis: &PyMellinBasis,
+    ) -> PyResult<PyZSpaceVaeState> {
+        let state = self
+            .inner
+            .forward_mean_text_with_mellin(text, &basis.inner)
             .map_err(tensor_err_to_py)?;
         Ok(PyZSpaceVaeState { inner: state })
     }
@@ -8480,6 +8535,73 @@ impl PyZSpaceTextVae {
         let state = self
             .inner
             .forward_encoded(&encoded)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyZSpaceVaeState { inner: state })
+    }
+
+    pub fn forward_mean_encoded(&self, encoded: Vec<f64>) -> PyResult<PyZSpaceVaeState> {
+        if encoded.len() != self.inner.input_dim() {
+            return Err(PyValueError::new_err(format!(
+                "encoded length mismatch (expected {}, got {})",
+                self.inner.input_dim(),
+                encoded.len()
+            )));
+        }
+        let encoded = DVector::from_vec(encoded);
+        let state = self
+            .inner
+            .forward_mean_encoded(&encoded)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyZSpaceVaeState { inner: state })
+    }
+
+    #[pyo3(signature = (encoded, learning_rate, kl_weight=0.001))]
+    pub fn train_encoded(
+        &mut self,
+        encoded: Vec<f64>,
+        learning_rate: f64,
+        kl_weight: f64,
+    ) -> PyResult<PyZSpaceVaeState> {
+        if encoded.len() != self.inner.input_dim() {
+            return Err(PyValueError::new_err(format!(
+                "encoded length mismatch (expected {}, got {})",
+                self.inner.input_dim(),
+                encoded.len()
+            )));
+        }
+        let encoded = DVector::from_vec(encoded);
+        let state = self
+            .inner
+            .train_encoded(&encoded, learning_rate, kl_weight)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyZSpaceVaeState { inner: state })
+    }
+
+    #[pyo3(signature = (text, learning_rate, kl_weight=0.001))]
+    pub fn train_text(
+        &mut self,
+        text: &str,
+        learning_rate: f64,
+        kl_weight: f64,
+    ) -> PyResult<PyZSpaceVaeState> {
+        let state = self
+            .inner
+            .train_text(text, learning_rate, kl_weight)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyZSpaceVaeState { inner: state })
+    }
+
+    #[pyo3(signature = (text, basis, learning_rate, kl_weight=0.001))]
+    pub fn train_text_with_mellin(
+        &mut self,
+        text: &str,
+        basis: &PyMellinBasis,
+        learning_rate: f64,
+        kl_weight: f64,
+    ) -> PyResult<PyZSpaceVaeState> {
+        let state = self
+            .inner
+            .train_text_with_mellin(text, &basis.inner, learning_rate, kl_weight)
             .map_err(tensor_err_to_py)?;
         Ok(PyZSpaceVaeState { inner: state })
     }

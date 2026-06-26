@@ -85,7 +85,7 @@ def main() -> None:
     if len(sys.argv) < 2 or sys.argv[1] in {"-h", "--help"}:
         print(
             "usage: PYTHONNOUSERSITE=1 python3 -S -s models/python/zspace_text_vae.py <text_or_dir> [<text_or_dir> ...] "
-            "[--window-chars N] [--latent-dim N] [--epochs N] [--batches N] [--lr F] "
+            "[--window-chars N] [--latent-dim N] [--epochs N] [--batches N] [--lr F] [--kl-weight F] "
             "[--curvature F] [--temperature F] [--seed N] "
             "[--mellin none|constant|ramp] [--mellin-exponent F] [--mellin-start F] [--mellin-end F] "
             "[--load PATH] [--save PATH] [--checkpoint-every N] "
@@ -117,6 +117,7 @@ def main() -> None:
     epochs = 10
     batches_per_epoch = 256
     lr = 1e-2
+    kl_weight = 1e-3
     curvature = -1.0
     temperature = 1.0
     seed = 42
@@ -154,6 +155,8 @@ def main() -> None:
             batches_per_epoch = int(next(it))
         elif flag == "--lr":
             lr = float(next(it))
+        elif flag == "--kl-weight":
+            kl_weight = float(next(it))
         elif flag == "--curvature":
             curvature = float(next(it))
         elif flag == "--temperature":
@@ -181,6 +184,8 @@ def main() -> None:
         raise ValueError("--batches must be > 0")
     if lr <= 0.0 or not math.isfinite(lr):
         raise ValueError("--lr must be positive and finite")
+    if kl_weight < 0.0 or not math.isfinite(kl_weight):
+        raise ValueError("--kl-weight must be non-negative and finite")
     if checkpoint_every < 0:
         raise ValueError("--checkpoint-every must be >= 0")
     if mellin_mode not in {"none", "constant", "ramp"}:
@@ -245,6 +250,7 @@ def main() -> None:
         "epochs": epochs,
         "batches_per_epoch": batches_per_epoch,
         "lr": lr,
+        "kl_weight": kl_weight,
         "curvature": curvature,
         "temperature": temperature,
         "seed": seed,
@@ -286,9 +292,9 @@ def main() -> None:
         for step in range(batches_per_epoch):
             window = _pick_window(text, window_chars, rng)
             if basis is None:
-                state = model.forward_text(window)
+                state = model.train_text(window, lr, kl_weight)
             else:
-                state = model.forward_text_with_mellin(window, basis)
+                state = model.train_text_with_mellin(window, basis, lr, kl_weight)
             stats = state.stats
             recon = float(stats.recon_loss)
             kl = float(stats.kl_loss)
@@ -316,7 +322,6 @@ def main() -> None:
                         },
                     },
                 )
-            model.refine_decoder(state, lr)
 
         denom = float(batches_per_epoch)
         avg_recon = recon_sum / denom

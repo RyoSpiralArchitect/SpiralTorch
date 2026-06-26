@@ -133,9 +133,24 @@ impl ZSpaceTextVae {
         Ok(self.vae.forward(encoded))
     }
 
+    pub fn forward_mean_encoded(&self, encoded: &DVector<f64>) -> PureResult<ZSpaceVaeState> {
+        if encoded.len() != self.input_dim {
+            return Err(TensorError::InvalidDimensions {
+                rows: encoded.len(),
+                cols: self.input_dim,
+            });
+        }
+        self.vae.forward_mean(encoded)
+    }
+
     pub fn forward_text(&mut self, text: &str) -> PureResult<ZSpaceVaeState> {
         let encoded = self.encode_text(text)?;
         self.forward_encoded(&encoded)
+    }
+
+    pub fn forward_mean_text(&self, text: &str) -> PureResult<ZSpaceVaeState> {
+        let encoded = self.encode_text(text)?;
+        self.forward_mean_encoded(&encoded)
     }
 
     pub fn forward_text_with_mellin(
@@ -145,6 +160,51 @@ impl ZSpaceTextVae {
     ) -> PureResult<ZSpaceVaeState> {
         let projected = self.encode_text_with_mellin(text, basis)?;
         self.forward_encoded(&projected)
+    }
+
+    pub fn forward_mean_text_with_mellin(
+        &self,
+        text: &str,
+        basis: &MellinBasis,
+    ) -> PureResult<ZSpaceVaeState> {
+        let projected = self.encode_text_with_mellin(text, basis)?;
+        self.forward_mean_encoded(&projected)
+    }
+
+    pub fn train_encoded(
+        &mut self,
+        encoded: &DVector<f64>,
+        learning_rate: f64,
+        kl_weight: f64,
+    ) -> PureResult<ZSpaceVaeState> {
+        if encoded.len() != self.input_dim {
+            return Err(TensorError::InvalidDimensions {
+                rows: encoded.len(),
+                cols: self.input_dim,
+            });
+        }
+        self.vae.train_step(encoded, learning_rate, kl_weight)
+    }
+
+    pub fn train_text(
+        &mut self,
+        text: &str,
+        learning_rate: f64,
+        kl_weight: f64,
+    ) -> PureResult<ZSpaceVaeState> {
+        let encoded = self.encode_text(text)?;
+        self.train_encoded(&encoded, learning_rate, kl_weight)
+    }
+
+    pub fn train_text_with_mellin(
+        &mut self,
+        text: &str,
+        basis: &MellinBasis,
+        learning_rate: f64,
+        kl_weight: f64,
+    ) -> PureResult<ZSpaceVaeState> {
+        let projected = self.encode_text_with_mellin(text, basis)?;
+        self.train_encoded(&projected, learning_rate, kl_weight)
     }
 
     pub fn refine_decoder(&mut self, state: &ZSpaceVaeState, learning_rate: f64) {
@@ -276,6 +336,30 @@ mod tests {
         let state = vae.forward_text("SpiralTorch").unwrap();
         assert_eq!(state.reconstruction.len(), vae.input_dim());
         assert_eq!(state.latent.len(), vae.latent_dim());
+    }
+
+    #[test]
+    fn text_vae_train_text_updates_reconstruction_path() {
+        let mut vae = ZSpaceTextVae::new(16, 4, -1.0, 1.0, 7).unwrap();
+        let before = vae
+            .forward_mean_text("SpiralTorch")
+            .unwrap()
+            .stats
+            .recon_loss;
+
+        for _ in 0..16 {
+            vae.train_text("SpiralTorch", 1e-2, 1e-3).unwrap();
+        }
+
+        let after = vae
+            .forward_mean_text("SpiralTorch")
+            .unwrap()
+            .stats
+            .recon_loss;
+        assert!(
+            after < before,
+            "expected text VAE training to reduce recon loss: before={before}, after={after}"
+        );
     }
 
     #[test]

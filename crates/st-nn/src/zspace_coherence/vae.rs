@@ -289,6 +289,50 @@ impl ZSpaceVae {
         self.latent_dim
     }
 
+    fn validate_input(&self, input: &DVector<f64>) -> PureResult<()> {
+        if input.len() != self.input_dim {
+            return Err(TensorError::InvalidDimensions {
+                rows: input.len(),
+                cols: self.input_dim,
+            });
+        }
+        for value in input.iter() {
+            if !value.is_finite() {
+                return Err(TensorError::NonFiniteValue {
+                    label: "zspace_vae_input",
+                    value: *value as f32,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn train_hyperparams(learning_rate: f64, kl_weight: f64) -> PureResult<(f64, f64)> {
+        if !learning_rate.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "zspace_vae_learning_rate",
+                value: learning_rate as f32,
+            });
+        }
+        if learning_rate <= 0.0 {
+            return Err(TensorError::NonPositiveLearningRate {
+                rate: learning_rate as f32,
+            });
+        }
+        if !kl_weight.is_finite() {
+            return Err(TensorError::NonFiniteValue {
+                label: "zspace_vae_kl_weight",
+                value: kl_weight as f32,
+            });
+        }
+        if kl_weight < 0.0 {
+            return Err(TensorError::InvalidValue {
+                label: "zspace_vae_kl_weight",
+            });
+        }
+        Ok((learning_rate, kl_weight))
+    }
+
     /// Encodes an input vector into mean and log-variance.
     pub fn encode(&self, input: &DVector<f64>) -> (DVector<f64>, DVector<f64>) {
         let mu = &self.encoder_mu * input + &self.bias_mu;
@@ -347,6 +391,78 @@ impl ZSpaceVae {
             logvar,
             stats,
         }
+    }
+
+    /// Deterministic forward pass that uses the latent mean instead of sampling.
+    ///
+    /// This is useful for evaluation and for train loops that need stable
+    /// reconstruction metrics independent of the RNG stream.
+    pub fn forward_mean(&self, input: &DVector<f64>) -> PureResult<ZSpaceVaeState> {
+        self.validate_input(input)?;
+        let (mu, logvar) = self.encode(input);
+        let latent = self.mean_latent(&mu);
+        let reconstruction = self.decode(&latent);
+        let stats = ZSpaceVaeStats::from_forward(input, &reconstruction, &mu, &logvar);
+        Ok(ZSpaceVaeState {
+            latent,
+            reconstruction,
+            mu,
+            logvar,
+            stats,
+        })
+    }
+
+    /// Performs one deterministic VAE training step.
+    ///
+    /// The update uses the latent mean for a low-variance reconstruction
+    /// gradient and applies the KL gradient to both encoder heads. The returned
+    /// state describes the pre-update pass that produced the gradients.
+    pub fn train_step(
+        &mut self,
+        input: &DVector<f64>,
+        learning_rate: f64,
+        kl_weight: f64,
+    ) -> PureResult<ZSpaceVaeState> {
+        self.validate_input(input)?;
+        let (lr, beta) = Self::train_hyperparams(learning_rate, kl_weight)?;
+
+        let (mu, logvar) = self.encode(input);
+        let latent = self.mean_latent(&mu);
+        let reconstruction = self.decode(&latent);
+        let stats = ZSpaceVaeStats::from_forward(input, &reconstruction, &mu, &logvar);
+        let state = ZSpaceVaeState {
+            latent: latent.clone(),
+            reconstruction: reconstruction.clone(),
+            mu: mu.clone(),
+            logvar: logvar.clone(),
+            stats,
+        };
+
+        let decoder_before = self.decoder.clone();
+        let recon_grad = (&reconstruction - input) * (2.0 / self.input_dim as f64);
+        let grad_decoder = &recon_grad * latent.transpose();
+        let grad_bias_decoder = recon_grad.clone();
+
+        let mut grad_mu = decoder_before.transpose() * &recon_grad;
+        let mut grad_logvar = DVector::zeros(self.latent_dim);
+        if beta > 0.0 {
+            for idx in 0..self.latent_dim {
+                grad_mu[idx] += beta * mu[idx];
+                grad_logvar[idx] = beta * 0.5 * (logvar[idx].exp() - 1.0);
+            }
+        }
+
+        let grad_encoder_mu = &grad_mu * input.transpose();
+        let grad_encoder_logvar = &grad_logvar * input.transpose();
+
+        self.decoder = (&self.decoder - grad_decoder * lr).clone_owned();
+        self.bias_decoder = (&self.bias_decoder - grad_bias_decoder * lr).clone_owned();
+        self.encoder_mu = (&self.encoder_mu - grad_encoder_mu * lr).clone_owned();
+        self.bias_mu = (&self.bias_mu - grad_mu * lr).clone_owned();
+        self.encoder_logvar = (&self.encoder_logvar - grad_encoder_logvar * lr).clone_owned();
+        self.bias_logvar = (&self.bias_logvar - grad_logvar * lr).clone_owned();
+
+        Ok(state)
     }
 
     /// Lightweight parameter update that blends the decoder toward the provided
@@ -444,6 +560,39 @@ mod tests {
         let before = vae.bias_decoder.clone();
         vae.refine_decoder(&state, 1e-2);
         assert!((&before - &vae.bias_decoder).norm() > 0.0);
+    }
+
+    #[test]
+    fn train_step_updates_encoder_and_decoder() {
+        let mut vae = ZSpaceVae::new(3, 2, 7);
+        let input = DVector::from_vec(vec![0.4, -0.2, 0.3]);
+        let before_encoder_mu = vae.encoder_mu.clone();
+        let before_encoder_logvar = vae.encoder_logvar.clone();
+        let before_decoder = vae.decoder.clone();
+
+        let state = vae.train_step(&input, 5e-2, 1e-2).unwrap();
+
+        assert_eq!(state.reconstruction.len(), 3);
+        assert!((&before_encoder_mu - &vae.encoder_mu).norm() > 0.0);
+        assert!((&before_encoder_logvar - &vae.encoder_logvar).norm() > 0.0);
+        assert!((&before_decoder - &vae.decoder).norm() > 0.0);
+    }
+
+    #[test]
+    fn train_step_reduces_deterministic_reconstruction_loss() {
+        let mut vae = ZSpaceVae::new(3, 2, 11);
+        let input = DVector::from_vec(vec![0.4, -0.2, 0.3]);
+        let before = vae.forward_mean(&input).unwrap().stats.recon_loss;
+
+        for _ in 0..64 {
+            vae.train_step(&input, 5e-2, 1e-4).unwrap();
+        }
+
+        let after = vae.forward_mean(&input).unwrap().stats.recon_loss;
+        assert!(
+            after < before,
+            "expected train_step to reduce recon loss: before={before}, after={after}"
+        );
     }
 
     #[test]
