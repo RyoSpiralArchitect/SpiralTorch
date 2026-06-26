@@ -85,7 +85,9 @@ def main() -> None:
     if len(sys.argv) < 2 or sys.argv[1] in {"-h", "--help"}:
         print(
             "usage: PYTHONNOUSERSITE=1 python3 -S -s models/python/zspace_text_vae.py <text_or_dir> [<text_or_dir> ...] "
-            "[--window-chars N] [--latent-dim N] [--epochs N] [--batches N] [--lr F] [--kl-weight F] "
+            "[--window-chars N] [--latent-dim N] [--epochs N] [--batches N] [--batch-size N] "
+            "[--lr F] [--kl-weight F] [--optimizer sgd|adam|rmsprop] [--grad-clip F] "
+            "[--val-ratio F] [--val-batches N] "
             "[--curvature F] [--temperature F] [--seed N] "
             "[--mellin none|constant|ramp] [--mellin-exponent F] [--mellin-start F] [--mellin-end F] "
             "[--load PATH] [--save PATH] [--checkpoint-every N] "
@@ -116,8 +118,17 @@ def main() -> None:
     latent_dim = 32
     epochs = 10
     batches_per_epoch = 256
+    batch_size = 8
     lr = 1e-2
     kl_weight = 1e-3
+    optimizer = "adam"
+    beta1 = 0.9
+    beta2 = 0.999
+    epsilon = 1e-8
+    rms_decay = 0.99
+    grad_clip: float | None = 5.0
+    val_ratio = 0.1
+    val_batches = 16
     curvature = -1.0
     temperature = 1.0
     seed = 42
@@ -153,10 +164,29 @@ def main() -> None:
             epochs = int(next(it))
         elif flag == "--batches":
             batches_per_epoch = int(next(it))
+        elif flag == "--batch-size":
+            batch_size = int(next(it))
         elif flag == "--lr":
             lr = float(next(it))
         elif flag == "--kl-weight":
             kl_weight = float(next(it))
+        elif flag == "--optimizer":
+            optimizer = str(next(it)).strip().lower()
+        elif flag == "--beta1":
+            beta1 = float(next(it))
+        elif flag == "--beta2":
+            beta2 = float(next(it))
+        elif flag == "--epsilon":
+            epsilon = float(next(it))
+        elif flag == "--rms-decay":
+            rms_decay = float(next(it))
+        elif flag == "--grad-clip":
+            raw_grad_clip = str(next(it)).strip().lower()
+            grad_clip = None if raw_grad_clip in {"none", "off", "0"} else float(raw_grad_clip)
+        elif flag == "--val-ratio":
+            val_ratio = float(next(it))
+        elif flag == "--val-batches":
+            val_batches = int(next(it))
         elif flag == "--curvature":
             curvature = float(next(it))
         elif flag == "--temperature":
@@ -182,10 +212,18 @@ def main() -> None:
         raise ValueError("--epochs must be >= 0")
     if batches_per_epoch <= 0:
         raise ValueError("--batches must be > 0")
+    if batch_size <= 0:
+        raise ValueError("--batch-size must be > 0")
     if lr <= 0.0 or not math.isfinite(lr):
         raise ValueError("--lr must be positive and finite")
     if kl_weight < 0.0 or not math.isfinite(kl_weight):
         raise ValueError("--kl-weight must be non-negative and finite")
+    if optimizer not in {"sgd", "adam", "rmsprop"}:
+        raise ValueError("--optimizer must be one of: sgd|adam|rmsprop")
+    if not (0.0 <= val_ratio < 1.0):
+        raise ValueError("--val-ratio must be in [0, 1)")
+    if val_batches < 0:
+        raise ValueError("--val-batches must be >= 0")
     if checkpoint_every < 0:
         raise ValueError("--checkpoint-every must be >= 0")
     if mellin_mode not in {"none", "constant", "ramp"}:
@@ -199,6 +237,13 @@ def main() -> None:
     text = "\n\n".join(part for part in text_parts if part)
     if not text:
         raise ValueError("empty text")
+    train_text = text
+    val_text = ""
+    if val_ratio > 0.0 and len(text) > window_chars:
+        split_at = int(len(text) * (1.0 - val_ratio))
+        split_at = min(max(split_at, 1), len(text) - 1)
+        train_text = text[:split_at] or text
+        val_text = text[split_at:] or text[-window_chars:]
 
     if run_dir is None:
         run_dir = _default_run_dir()
@@ -230,6 +275,14 @@ def main() -> None:
             temperature=temperature,
             seed=seed,
         )
+    model.configure_optimizer(
+        optimizer=optimizer,
+        beta1=beta1,
+        beta2=beta2,
+        epsilon=epsilon,
+        rms_decay=rms_decay,
+        grad_clip=grad_clip,
+    )
 
     basis: st.nn.MellinBasis | None = None
     if mellin_mode == "constant":
@@ -249,8 +302,24 @@ def main() -> None:
         "latent_dim": latent_dim,
         "epochs": epochs,
         "batches_per_epoch": batches_per_epoch,
+        "batch_size": batch_size,
         "lr": lr,
         "kl_weight": kl_weight,
+        "optimizer": {
+            "name": optimizer,
+            "beta1": beta1,
+            "beta2": beta2,
+            "epsilon": epsilon,
+            "rms_decay": rms_decay,
+            "grad_clip": grad_clip,
+        },
+        "validation": {
+            "ratio": val_ratio,
+            "batches": val_batches,
+            "enabled": bool(val_text and val_batches > 0),
+            "train_chars": len(train_text),
+            "val_chars": len(val_text),
+        },
         "curvature": curvature,
         "temperature": temperature,
         "seed": seed,
@@ -274,7 +343,9 @@ def main() -> None:
 
     print(
         f"files={len(data_files)} chars={len(text)} window_chars={window_chars} input_dim={model.input_dim} latent_dim={latent_dim} "
-        f"epochs={epochs} batches={batches_per_epoch} lr={lr:.3e} curvature={curvature} temp={temperature} mellin={mellin_mode} run_dir={run_dir}"
+        f"epochs={epochs} batches={batches_per_epoch} batch_size={batch_size} lr={lr:.3e} kl_weight={kl_weight:.3e} "
+        f"optimizer={optimizer} val_batches={val_batches if val_text else 0} curvature={curvature} temp={temperature} "
+        f"mellin={mellin_mode} run_dir={run_dir}"
     )
 
     metrics_path = run_dir / "metrics.jsonl"
@@ -288,20 +359,31 @@ def main() -> None:
         recon_sum = 0.0
         kl_sum = 0.0
         elbo_sum = 0.0
+        weighted_sum = 0.0
+        grad_sum = 0.0
+        clipped_grad_sum = 0.0
+        update_sum = 0.0
 
         for step in range(batches_per_epoch):
-            window = _pick_window(text, window_chars, rng)
+            windows = [_pick_window(train_text, window_chars, rng) for _ in range(batch_size)]
             if basis is None:
-                state = model.train_text(window, lr, kl_weight)
+                stats = model.train_text_batch(windows, lr, kl_weight)
             else:
-                state = model.train_text_with_mellin(window, basis, lr, kl_weight)
-            stats = state.stats
+                stats = model.train_text_batch_with_mellin(windows, basis, lr, kl_weight)
             recon = float(stats.recon_loss)
             kl = float(stats.kl_loss)
             elbo = float(stats.evidence_lower_bound)
+            weighted = float(stats.weighted_loss)
+            grad_l2 = float(stats.gradient_l2)
+            clipped_grad_l2 = float(stats.clipped_gradient_l2)
+            update_l2 = float(stats.update_l2)
             recon_sum += recon
             kl_sum += kl
             elbo_sum += elbo
+            weighted_sum += weighted
+            grad_sum += grad_l2
+            clipped_grad_sum += clipped_grad_l2
+            update_sum += update_l2
 
             if events_path is not None:
                 _append_jsonl(
@@ -317,6 +399,12 @@ def main() -> None:
                                     "recon_loss": recon,
                                     "kl_loss": kl,
                                     "elbo": elbo,
+                                    "weighted_loss": weighted,
+                                    "gradient_l2": grad_l2,
+                                    "clipped_gradient_l2": clipped_grad_l2,
+                                    "update_l2": update_l2,
+                                    "batch_size": int(stats.batch_size),
+                                    "optimizer_step": int(stats.optimizer_step),
                                 }
                             },
                         },
@@ -327,8 +415,48 @@ def main() -> None:
         avg_recon = recon_sum / denom
         avg_kl = kl_sum / denom
         avg_elbo = elbo_sum / denom
+        avg_weighted = weighted_sum / denom
+        avg_grad = grad_sum / denom
+        avg_clipped_grad = clipped_grad_sum / denom
+        avg_update = update_sum / denom
+        val_summary: dict[str, Any] | None = None
+        if val_text and val_batches > 0:
+            val_rng = random.Random(seed + 1_000_000 + epoch * 10_000)
+            val_recon_sum = 0.0
+            val_kl_sum = 0.0
+            val_elbo_sum = 0.0
+            val_weighted_sum = 0.0
+            for _ in range(val_batches):
+                val_windows = [
+                    _pick_window(val_text, window_chars, val_rng) for _ in range(batch_size)
+                ]
+                if basis is None:
+                    val_stats = model.evaluate_text_batch(val_windows, kl_weight)
+                else:
+                    val_stats = model.evaluate_text_batch_with_mellin(
+                        val_windows, basis, kl_weight
+                    )
+                val_recon_sum += float(val_stats.recon_loss)
+                val_kl_sum += float(val_stats.kl_loss)
+                val_elbo_sum += float(val_stats.evidence_lower_bound)
+                val_weighted_sum += float(val_stats.weighted_loss)
+            val_denom = float(val_batches)
+            val_summary = {
+                "avg_recon_loss": val_recon_sum / val_denom,
+                "avg_kl_loss": val_kl_sum / val_denom,
+                "avg_elbo": val_elbo_sum / val_denom,
+                "avg_weighted_loss": val_weighted_sum / val_denom,
+            }
+
+        val_txt = ""
+        if val_summary is not None:
+            val_txt = (
+                f" val_recon_loss={val_summary['avg_recon_loss']:.6f}"
+                f" val_weighted_loss={val_summary['avg_weighted_loss']:.6f}"
+            )
         print(
-            f"epoch[{epoch}] avg_recon_loss={avg_recon:.6f} avg_kl_loss={avg_kl:.6f} avg_elbo={avg_elbo:.6f}",
+            f"epoch[{epoch}] avg_recon_loss={avg_recon:.6f} avg_kl_loss={avg_kl:.6f} "
+            f"avg_weighted_loss={avg_weighted:.6f} avg_grad_l2={avg_grad:.6f} avg_update_l2={avg_update:.6f}{val_txt}",
             flush=True,
         )
         _append_jsonl(
@@ -336,17 +464,26 @@ def main() -> None:
             {
                 "epoch": epoch,
                 "batches": batches_per_epoch,
+                "batch_size": batch_size,
                 "avg_recon_loss": avg_recon,
                 "avg_kl_loss": avg_kl,
                 "avg_elbo": avg_elbo,
+                "avg_weighted_loss": avg_weighted,
+                "avg_gradient_l2": avg_grad,
+                "avg_clipped_gradient_l2": avg_clipped_grad,
+                "avg_update_l2": avg_update,
+                "validation": val_summary,
             },
         )
 
-        tracked = avg_recon + avg_kl
+        tracked = (
+            float(val_summary["avg_weighted_loss"]) if val_summary is not None else avg_weighted
+        )
         if tracked < best_metric:
             best_metric = tracked
             best_epoch = epoch
-            print(f"epoch[{epoch}] saving {save_path.name}...", flush=True)
+            tracked_name = "val_weighted_loss" if val_summary is not None else "avg_weighted_loss"
+            print(f"epoch[{epoch}] saving {save_path.name} ({tracked_name}={tracked:.6f})...", flush=True)
             model.save(str(save_path))
 
         if checkpoint_every > 0 and ((epoch + 1) % checkpoint_every == 0):

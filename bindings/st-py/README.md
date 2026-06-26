@@ -58,8 +58,8 @@ NumPy, no PyTorch, and no shim layers.
 - Attentionless sequence layers via `spiraltorch.nn`—`WaveRnn`, `WaveGate`,
   `ZSpaceMixer`, and `FeatureReorder2d` for Conv/RNN-style language baselines.
 - Coherence VAE primitives via `spiraltorch.nn`—`MellinBasis`, `ZSpaceVae`,
-  and `ZSpaceTextVae` for encoder+decoder reconstruction training loops (and
-  Atlas-ready telemetry).
+  and `ZSpaceTextVae` for encoder+decoder reconstruction training loops,
+  batch metrics, SGD/Adam/RMSProp optimizer state, and Atlas-ready telemetry.
 - Streaming dataset helpers via `spiraltorch.dataset`—build a
   shuffle/batch/prefetch pipeline entirely in Rust using the native
   `DataLoader`.

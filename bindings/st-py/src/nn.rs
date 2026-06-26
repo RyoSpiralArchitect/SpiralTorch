@@ -83,7 +83,8 @@ use st_nn::{
     TextInfusionEvery, TextInfusionMode, TrainingRunConfig as RustTrainingRunConfig,
     TrainingRunReport as RustTrainingRunReport, WaveGate, WaveRnn, ZRelativityModule,
     ZSpaceBatchNorm1d, ZSpaceCoherenceSequencer, ZSpaceLayerNorm, ZSpaceMixer, ZSpaceTextVae,
-    ZSpaceTraceConfig, ZSpaceTraceRecorder, ZSpaceVae, ZSpaceVaeState, ZSpaceVaeStats,
+    ZSpaceTraceConfig, ZSpaceTraceRecorder, ZSpaceVae, ZSpaceVaeBatchStats, ZSpaceVaeState,
+    ZSpaceVaeStats,
 };
 #[cfg(feature = "nn")]
 use st_nn::{EpochTensorBackendStats as RustEpochTensorBackendStats, Module, Parameter};
@@ -170,6 +171,29 @@ impl Spatial3d {
 #[cfg(feature = "nn")]
 fn dvector_to_vec(vector: &DVector<f64>) -> Vec<f64> {
     vector.iter().copied().collect()
+}
+
+#[cfg(feature = "nn")]
+fn py_batch_to_dvectors(
+    batch: Vec<Vec<f64>>,
+    expected_dim: usize,
+    label: &str,
+) -> PyResult<Vec<DVector<f64>>> {
+    if batch.is_empty() {
+        return Err(PyValueError::new_err(format!("{label} cannot be empty")));
+    }
+    let mut out = Vec::with_capacity(batch.len());
+    for (idx, row) in batch.into_iter().enumerate() {
+        if row.len() != expected_dim {
+            return Err(PyValueError::new_err(format!(
+                "{label}[{idx}] length mismatch (expected {}, got {})",
+                expected_dim,
+                row.len()
+            )));
+        }
+        out.push(DVector::from_vec(row));
+    }
+    Ok(out)
 }
 
 #[cfg(feature = "nn")]
@@ -8185,6 +8209,87 @@ impl PyZSpaceVaeStats {
 }
 
 #[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "ZSpaceVaeBatchStats", unsendable)]
+pub(crate) struct PyZSpaceVaeBatchStats {
+    inner: ZSpaceVaeBatchStats,
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyZSpaceVaeBatchStats {
+    #[getter]
+    pub fn batch_size(&self) -> usize {
+        self.inner.batch_size
+    }
+
+    #[getter]
+    pub fn recon_loss(&self) -> f64 {
+        self.inner.recon_loss
+    }
+
+    #[getter]
+    pub fn kl_loss(&self) -> f64 {
+        self.inner.kl_loss
+    }
+
+    #[getter]
+    pub fn evidence_lower_bound(&self) -> f64 {
+        self.inner.evidence_lower_bound
+    }
+
+    #[getter]
+    pub fn weighted_loss(&self) -> f64 {
+        self.inner.weighted_loss
+    }
+
+    #[getter]
+    pub fn kl_weight(&self) -> f64 {
+        self.inner.kl_weight
+    }
+
+    #[getter]
+    pub fn learning_rate(&self) -> f64 {
+        self.inner.learning_rate
+    }
+
+    #[getter]
+    pub fn gradient_l2(&self) -> f64 {
+        self.inner.gradient_l2
+    }
+
+    #[getter]
+    pub fn clipped_gradient_l2(&self) -> f64 {
+        self.inner.clipped_gradient_l2
+    }
+
+    #[getter]
+    pub fn update_l2(&self) -> f64 {
+        self.inner.update_l2
+    }
+
+    #[getter]
+    pub fn optimizer_step(&self) -> u64 {
+        self.inner.optimizer_step
+    }
+
+    #[getter]
+    pub fn optimizer(&self) -> String {
+        self.inner.optimizer.as_str().to_string()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "ZSpaceVaeBatchStats(batch_size={}, recon_loss={:.6}, kl_loss={:.6}, weighted_loss={:.6}, optimizer={})",
+            self.inner.batch_size,
+            self.inner.recon_loss,
+            self.inner.kl_loss,
+            self.inner.weighted_loss,
+            self.inner.optimizer.as_str()
+        )
+    }
+}
+
+#[cfg(feature = "nn")]
 #[pyclass(module = "spiraltorch.nn", name = "ZSpaceVaeState", unsendable)]
 pub(crate) struct PyZSpaceVaeState {
     inner: ZSpaceVaeState,
@@ -8266,6 +8371,35 @@ impl PyZSpaceVae {
         self.inner.latent_dim()
     }
 
+    #[getter]
+    pub fn optimizer(&self) -> String {
+        self.inner.optimizer_kind().as_str().to_string()
+    }
+
+    #[getter]
+    pub fn optimizer_step(&self) -> u64 {
+        self.inner.optimizer_step()
+    }
+
+    #[pyo3(signature = (*, optimizer="sgd", beta1=0.9, beta2=0.999, epsilon=0.00000001, rms_decay=0.99, grad_clip=None))]
+    pub fn configure_optimizer(
+        &mut self,
+        optimizer: &str,
+        beta1: f64,
+        beta2: f64,
+        epsilon: f64,
+        rms_decay: f64,
+        grad_clip: Option<f64>,
+    ) -> PyResult<()> {
+        self.inner
+            .configure_optimizer_by_name(optimizer, beta1, beta2, epsilon, rms_decay, grad_clip)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn reset_optimizer(&mut self) {
+        self.inner.reset_optimizer();
+    }
+
     pub fn forward(&mut self, input: Vec<f64>) -> PyResult<PyZSpaceVaeState> {
         if input.len() != self.inner.input_dim() {
             return Err(PyValueError::new_err(format!(
@@ -8312,6 +8446,35 @@ impl PyZSpaceVae {
             .train_step(&vec, learning_rate, kl_weight)
             .map_err(tensor_err_to_py)?;
         Ok(PyZSpaceVaeState { inner: state })
+    }
+
+    #[pyo3(signature = (batch, learning_rate, kl_weight=0.001))]
+    pub fn train_batch(
+        &mut self,
+        batch: Vec<Vec<f64>>,
+        learning_rate: f64,
+        kl_weight: f64,
+    ) -> PyResult<PyZSpaceVaeBatchStats> {
+        let batch = py_batch_to_dvectors(batch, self.inner.input_dim(), "batch")?;
+        let stats = self
+            .inner
+            .train_batch(&batch, learning_rate, kl_weight)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyZSpaceVaeBatchStats { inner: stats })
+    }
+
+    #[pyo3(signature = (batch, kl_weight=0.001))]
+    pub fn evaluate_batch(
+        &self,
+        batch: Vec<Vec<f64>>,
+        kl_weight: f64,
+    ) -> PyResult<PyZSpaceVaeBatchStats> {
+        let batch = py_batch_to_dvectors(batch, self.inner.input_dim(), "batch")?;
+        let stats = self
+            .inner
+            .evaluate_batch(&batch, kl_weight)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyZSpaceVaeBatchStats { inner: stats })
     }
 
     pub fn encode(&self, input: Vec<f64>) -> PyResult<(Vec<f64>, Vec<f64>)> {
@@ -8473,6 +8636,30 @@ impl PyZSpaceTextVae {
         self.inner.temperature()
     }
 
+    #[getter]
+    pub fn optimizer(&self) -> String {
+        self.inner.optimizer_kind().as_str().to_string()
+    }
+
+    #[pyo3(signature = (*, optimizer="sgd", beta1=0.9, beta2=0.999, epsilon=0.00000001, rms_decay=0.99, grad_clip=None))]
+    pub fn configure_optimizer(
+        &mut self,
+        optimizer: &str,
+        beta1: f64,
+        beta2: f64,
+        epsilon: f64,
+        rms_decay: f64,
+        grad_clip: Option<f64>,
+    ) -> PyResult<()> {
+        self.inner
+            .configure_optimizer_by_name(optimizer, beta1, beta2, epsilon, rms_decay, grad_clip)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn reset_optimizer(&mut self) {
+        self.inner.reset_optimizer();
+    }
+
     pub fn encode_text(&self, text: &str) -> PyResult<Vec<f64>> {
         let encoded = self.inner.encode_text(text).map_err(tensor_err_to_py)?;
         Ok(dvector_to_vec(&encoded))
@@ -8577,6 +8764,35 @@ impl PyZSpaceTextVae {
         Ok(PyZSpaceVaeState { inner: state })
     }
 
+    #[pyo3(signature = (encoded, learning_rate, kl_weight=0.001))]
+    pub fn train_encoded_batch(
+        &mut self,
+        encoded: Vec<Vec<f64>>,
+        learning_rate: f64,
+        kl_weight: f64,
+    ) -> PyResult<PyZSpaceVaeBatchStats> {
+        let encoded = py_batch_to_dvectors(encoded, self.inner.input_dim(), "encoded")?;
+        let stats = self
+            .inner
+            .train_encoded_batch(&encoded, learning_rate, kl_weight)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyZSpaceVaeBatchStats { inner: stats })
+    }
+
+    #[pyo3(signature = (encoded, kl_weight=0.001))]
+    pub fn evaluate_encoded_batch(
+        &self,
+        encoded: Vec<Vec<f64>>,
+        kl_weight: f64,
+    ) -> PyResult<PyZSpaceVaeBatchStats> {
+        let encoded = py_batch_to_dvectors(encoded, self.inner.input_dim(), "encoded")?;
+        let stats = self
+            .inner
+            .evaluate_encoded_batch(&encoded, kl_weight)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyZSpaceVaeBatchStats { inner: stats })
+    }
+
     #[pyo3(signature = (text, learning_rate, kl_weight=0.001))]
     pub fn train_text(
         &mut self,
@@ -8604,6 +8820,62 @@ impl PyZSpaceTextVae {
             .train_text_with_mellin(text, &basis.inner, learning_rate, kl_weight)
             .map_err(tensor_err_to_py)?;
         Ok(PyZSpaceVaeState { inner: state })
+    }
+
+    #[pyo3(signature = (texts, learning_rate, kl_weight=0.001))]
+    pub fn train_text_batch(
+        &mut self,
+        texts: Vec<String>,
+        learning_rate: f64,
+        kl_weight: f64,
+    ) -> PyResult<PyZSpaceVaeBatchStats> {
+        let stats = self
+            .inner
+            .train_text_batch(&texts, learning_rate, kl_weight)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyZSpaceVaeBatchStats { inner: stats })
+    }
+
+    #[pyo3(signature = (texts, basis, learning_rate, kl_weight=0.001))]
+    pub fn train_text_batch_with_mellin(
+        &mut self,
+        texts: Vec<String>,
+        basis: &PyMellinBasis,
+        learning_rate: f64,
+        kl_weight: f64,
+    ) -> PyResult<PyZSpaceVaeBatchStats> {
+        let stats = self
+            .inner
+            .train_text_batch_with_mellin(&texts, &basis.inner, learning_rate, kl_weight)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyZSpaceVaeBatchStats { inner: stats })
+    }
+
+    #[pyo3(signature = (texts, kl_weight=0.001))]
+    pub fn evaluate_text_batch(
+        &self,
+        texts: Vec<String>,
+        kl_weight: f64,
+    ) -> PyResult<PyZSpaceVaeBatchStats> {
+        let stats = self
+            .inner
+            .evaluate_text_batch(&texts, kl_weight)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyZSpaceVaeBatchStats { inner: stats })
+    }
+
+    #[pyo3(signature = (texts, basis, kl_weight=0.001))]
+    pub fn evaluate_text_batch_with_mellin(
+        &self,
+        texts: Vec<String>,
+        basis: &PyMellinBasis,
+        kl_weight: f64,
+    ) -> PyResult<PyZSpaceVaeBatchStats> {
+        let stats = self
+            .inner
+            .evaluate_text_batch_with_mellin(&texts, &basis.inner, kl_weight)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyZSpaceVaeBatchStats { inner: stats })
     }
 
     pub fn refine_decoder(&mut self, state: &PyZSpaceVaeState, learning_rate: f64) {
@@ -8936,6 +9208,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyZSpaceVae>()?;
     module.add_class::<PyZSpaceVaeState>()?;
     module.add_class::<PyZSpaceVaeStats>()?;
+    module.add_class::<PyZSpaceVaeBatchStats>()?;
     module.add_class::<PyZSpaceTextVae>()?;
     module.add_class::<PyZRelativityModule>()?;
     module.add_class::<PyCurvatureScheduler>()?;
@@ -9006,6 +9279,7 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
             "ZSpaceVae",
             "ZSpaceVaeState",
             "ZSpaceVaeStats",
+            "ZSpaceVaeBatchStats",
             "ZSpaceTextVae",
             "ZRelativityModule",
             "CurvatureScheduler",
@@ -9092,6 +9366,9 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     }
     if let Ok(vae) = module.getattr("ZSpaceVae") {
         parent.add("ZSpaceVae", vae)?;
+    }
+    if let Ok(batch_stats) = module.getattr("ZSpaceVaeBatchStats") {
+        parent.add("ZSpaceVaeBatchStats", batch_stats)?;
     }
     if let Ok(text_vae) = module.getattr("ZSpaceTextVae") {
         parent.add("ZSpaceTextVae", text_vae)?;
