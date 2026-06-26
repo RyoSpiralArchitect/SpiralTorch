@@ -109,6 +109,7 @@ SpiralTorch’s “learning stack” is a set of minimal, runnable training base
 - **Coherence (ZSpace VAE):** `cargo run -p st-nn --example modelzoo_zspace_vae_reconstruction`
 - **Coherence (Python, ZSpace VAE):** `PYTHONNOUSERSITE=1 python3 -S -s models/python/zspace_vae_reconstruction.py`
 - **Coherence (Python, Text→ZSpace VAE):** `PYTHONNOUSERSITE=1 python3 -S -s models/python/zspace_text_vae.py models/samples/spiral_corpus_en --mellin ramp`
+- **Coherence (Python, Text VAE on/off compare):** `PYTHONNOUSERSITE=1 python3 -S -s models/python/zspace_text_vae_compare.py models/samples/spiral_corpus_en --mellin ramp`
 - **Training (Lightning/selfsup):** `cargo run -p st-nn --example modelzoo_lightning_selfsup_minimal`
 
 ### 🌐 WebAssembly (WASM) demos (not a stub)
