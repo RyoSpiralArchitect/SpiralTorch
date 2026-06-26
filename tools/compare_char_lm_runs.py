@@ -83,6 +83,7 @@ AGGREGATE_GROUP_COLUMNS = [
     "wave_dilations",
     "steps",
     "hidden",
+    "memory",
     "embed_dim",
     "epochs",
     "batches",
@@ -2022,6 +2023,7 @@ def row_for(raw: str) -> tuple[dict[str, str], Path]:
     mode = str(run.get("mode", "-"))
     steps = metadata_cell(run.get("steps"))
     hidden = metadata_cell(run.get("hidden"))
+    memory = metadata_cell(run.get("memory"))
     embed_dim = metadata_cell(run.get("embed_dim"))
     epochs = metadata_cell(run.get("epochs"))
     batches = metadata_cell(run.get("batches_per_epoch"))
@@ -2147,6 +2149,7 @@ def row_for(raw: str) -> tuple[dict[str, str], Path]:
             "mode": mode,
             "steps": steps,
             "hidden": hidden,
+            "memory": memory,
             "embed_dim": embed_dim,
             "epochs": epochs,
             "batches": batches,
@@ -2372,6 +2375,7 @@ def markdown_table(rows: list[dict[str, str]]) -> str:
         "mode",
         "steps",
         "hidden",
+        "memory",
         "embed_dim",
         "epochs",
         "batches",
@@ -2693,6 +2697,7 @@ def ranked_aggregate_rows(
             row.get("recurrent", "-"),
             row.get("steps", "-"),
             row.get("hidden", "-"),
+            row.get("memory", "-"),
         )
     )
     return ranked[: max(limit, 0)]
