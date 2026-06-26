@@ -27,6 +27,7 @@ copy-pastable models that act as reference implementations for both Python and R
 - Python (Maxwell simulated Z classification): `PYTHONNOUSERSITE=1 python3 -S -s models/python/maxwell_simulated_z_classification.py --val-batches 4`
 - Python (VAE): `PYTHONNOUSERSITE=1 python3 -S -s models/python/zspace_vae_reconstruction.py`
 - Python (Text→ZSpace VAE): `PYTHONNOUSERSITE=1 python3 -S -s models/python/zspace_text_vae.py models/samples/spiral_corpus_en --mellin ramp --optimizer adam --batch-size 8 --val-batches 8`
+- Python (Text VAE on/off comparison): `PYTHONNOUSERSITE=1 python3 -S -s models/python/zspace_text_vae_compare.py models/samples/spiral_corpus_en --mellin ramp --epochs 3 --batches 24`
 - Python (LLM char fine-tune): `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_finetune.py <text_or_dir> [<text_or_dir> ...] [--desire --events runs.jsonl --atlas]`
 - Python (LLM char coherence scan): `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_coherence_scan.py <text_or_dir> [<text_or_dir> ...] [--desire --events runs.jsonl --atlas]`
 - Python (LLM char coherence wave): `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_coherence_wave.py <text_or_dir> [<text_or_dir> ...] [--infuse \"spiral\" --infuse-every batch --infuse-mode separate] [--desire --events runs.jsonl --atlas]`

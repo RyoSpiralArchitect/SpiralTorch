@@ -80,6 +80,12 @@ _ENTRY_METADATA: dict[str, dict[str, Any]] = {
         "description": "Text-conditioned Z-space VAE recipe.",
         "tags": ("vae", "text", "zspace", "generative", "multimodal"),
     },
+    "zspace_text_vae_compare": {
+        "task": "reconstruction",
+        "family": "vae",
+        "description": "Raw/off versus Z-space VAE/on text-window comparison harness.",
+        "tags": ("vae", "text", "zspace", "generative", "multimodal", "comparison"),
+    },
     "zspace_stream_online_vision": {
         "task": "classification",
         "family": "vision",
