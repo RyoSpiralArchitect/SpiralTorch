@@ -25,7 +25,7 @@ fn main() -> st_nn::PureResult<()> {
 
     let mut last_recon = None;
     for step in 0..12usize {
-        let state = vae.forward(&projected);
+        let state = vae.train_step(&projected, 1e-2, 1e-3)?;
         let recon = state.stats.recon_loss;
         let kl = state.stats.kl_loss;
         let elbo = state.stats.evidence_lower_bound;
@@ -37,10 +37,9 @@ fn main() -> st_nn::PureResult<()> {
                 .unwrap_or_else(|| "—".to_string())
         );
         last_recon = Some(recon);
-        vae.refine_decoder(&state, 1e-2);
     }
 
-    let final_state = vae.forward(&projected);
+    let final_state = vae.forward_mean(&projected)?;
     let error = (&final_state.reconstruction - &projected).norm();
     println!("final_error_norm={error:.6}");
 
