@@ -36,4 +36,7 @@ pub use trace::{
     coherence_relation_tensor, ZSpaceTrace, ZSpaceTraceConfig, ZSpaceTraceEvent, ZSpaceTraceRecord,
     ZSpaceTraceRecorder,
 };
-pub use vae::{MellinBasis, ZSpaceVae, ZSpaceVaeState, ZSpaceVaeStats};
+pub use vae::{
+    MellinBasis, ZSpaceVae, ZSpaceVaeBatchStats, ZSpaceVaeOptimizerKind, ZSpaceVaeState,
+    ZSpaceVaeStats,
+};

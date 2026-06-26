@@ -57,7 +57,8 @@ def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] in {"-h", "--help"}:
         print(
             "usage: PYTHONNOUSERSITE=1 python3 -S -s models/python/zspace_vae_reconstruction.py "
-            "[--input-dim N] [--latent-dim N] [--seed N] [--steps N] [--lr F] [--kl-weight F] "
+            "[--input-dim N] [--latent-dim N] [--seed N] [--steps N] [--batch-size N] "
+            "[--lr F] [--kl-weight F] [--optimizer sgd|adam|rmsprop] [--grad-clip F] "
             "[--input \"0.35,-0.12,...\"] [--exponents \"1.0,0.5,...\"] "
             "[--load PATH] [--save PATH] "
             "[--events PATH] [--atlas] [--atlas-bound N] [--atlas-district NAME] "
@@ -78,8 +79,15 @@ def main() -> None:
     latent_dim = 3
     seed = 42
     steps = 12
+    batch_size = 4
     lr = 1e-2
     kl_weight = 1e-3
+    optimizer = "adam"
+    beta1 = 0.9
+    beta2 = 0.999
+    epsilon = 1e-8
+    rms_decay = 0.99
+    grad_clip: float | None = 5.0
 
     input_vec = [0.35, -0.12, 0.77, 0.05, -0.28, 0.44, 0.10, -0.06]
     exponents = [1.0, 0.5, 2.0, 1.25, 0.75, 1.5, 1.0, 0.9]
@@ -109,10 +117,25 @@ def main() -> None:
             seed = int(next(it))
         elif flag == "--steps":
             steps = int(next(it))
+        elif flag == "--batch-size":
+            batch_size = int(next(it))
         elif flag == "--lr":
             lr = float(next(it))
         elif flag == "--kl-weight":
             kl_weight = float(next(it))
+        elif flag == "--optimizer":
+            optimizer = str(next(it)).strip().lower()
+        elif flag == "--beta1":
+            beta1 = float(next(it))
+        elif flag == "--beta2":
+            beta2 = float(next(it))
+        elif flag == "--epsilon":
+            epsilon = float(next(it))
+        elif flag == "--rms-decay":
+            rms_decay = float(next(it))
+        elif flag == "--grad-clip":
+            raw_grad_clip = str(next(it)).strip().lower()
+            grad_clip = None if raw_grad_clip in {"none", "off", "0"} else float(raw_grad_clip)
         elif flag == "--input":
             input_vec = _parse_floats(str(next(it)))
         elif flag == "--exponents":
@@ -134,10 +157,14 @@ def main() -> None:
         raise ValueError("--latent-dim must be > 0")
     if steps < 0:
         raise ValueError("--steps must be >= 0")
+    if batch_size <= 0:
+        raise ValueError("--batch-size must be > 0")
     if lr <= 0.0 or not math.isfinite(lr):
         raise ValueError("--lr must be positive and finite")
     if kl_weight < 0.0 or not math.isfinite(kl_weight):
         raise ValueError("--kl-weight must be non-negative and finite")
+    if optimizer not in {"sgd", "adam", "rmsprop"}:
+        raise ValueError("--optimizer must be one of: sgd|adam|rmsprop")
 
     if len(input_vec) != input_dim:
         raise ValueError(f"--input length mismatch (expected {input_dim}, got {len(input_vec)})")
@@ -166,6 +193,14 @@ def main() -> None:
             )
     else:
         vae = st.nn.ZSpaceVae(input_dim, latent_dim, seed=seed)
+    vae.configure_optimizer(
+        optimizer=optimizer,
+        beta1=beta1,
+        beta2=beta2,
+        epsilon=epsilon,
+        rms_decay=rms_decay,
+        grad_clip=grad_clip,
+    )
 
     run_meta = {
         "schema": RUN_SCHEMA,
@@ -175,8 +210,17 @@ def main() -> None:
         "latent_dim": latent_dim,
         "seed": seed,
         "steps": steps,
+        "batch_size": batch_size,
         "lr": lr,
         "kl_weight": kl_weight,
+        "optimizer": {
+            "name": optimizer,
+            "beta1": beta1,
+            "beta2": beta2,
+            "epsilon": epsilon,
+            "rms_decay": rms_decay,
+            "grad_clip": grad_clip,
+        },
         "checkpoint": {
             "load_path": str(load_path) if load_path is not None else None,
             "save_path": str(save_path),
@@ -191,21 +235,27 @@ def main() -> None:
     }
     _write_json(run_dir / "run.json", run_meta)
 
-    print(f"input_dim={input_dim} latent_dim={latent_dim} steps={steps} lr={lr:.3e} run_dir={run_dir}")
+    print(
+        f"input_dim={input_dim} latent_dim={latent_dim} steps={steps} batch_size={batch_size} "
+        f"lr={lr:.3e} kl_weight={kl_weight:.3e} optimizer={optimizer} run_dir={run_dir}"
+    )
     print(f"input_norm={_l2_norm(input_vec):.6f} projected_norm={_l2_norm(projected):.6f}")
 
     start_ts = time.time()
     last_recon: float | None = None
+    train_batch = [projected for _ in range(batch_size)]
     for step in range(steps):
-        state = vae.train_step(projected, lr, kl_weight)
-        stats = state.stats
+        stats = vae.train_batch(train_batch, lr, kl_weight)
         recon = float(stats.recon_loss)
         kl = float(stats.kl_loss)
         elbo = float(stats.evidence_lower_bound)
+        weighted = float(stats.weighted_loss)
         delta = recon - last_recon if last_recon is not None else None
         delta_txt = f"{delta:+.6f}" if delta is not None else "—"
         print(
-            f"step={step:02d} recon_loss={recon:.6f} kl_loss={kl:.6f} elbo={elbo:.6f} delta={delta_txt}"
+            f"step={step:02d} recon_loss={recon:.6f} kl_loss={kl:.6f} "
+            f"weighted_loss={weighted:.6f} grad_l2={float(stats.gradient_l2):.6f} "
+            f"update_l2={float(stats.update_l2):.6f} delta={delta_txt}"
         )
         if events_path is not None:
             payload = {
@@ -219,6 +269,12 @@ def main() -> None:
                             "recon_loss": recon,
                             "kl_loss": kl,
                             "elbo": elbo,
+                            "weighted_loss": weighted,
+                            "gradient_l2": float(stats.gradient_l2),
+                            "clipped_gradient_l2": float(stats.clipped_gradient_l2),
+                            "update_l2": float(stats.update_l2),
+                            "batch_size": int(stats.batch_size),
+                            "optimizer_step": int(stats.optimizer_step),
                         }
                     },
                 },

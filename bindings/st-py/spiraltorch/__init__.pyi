@@ -2795,6 +2795,21 @@ class ZSpaceVaeStats:
     target: List[float]
 
 
+class ZSpaceVaeBatchStats:
+    batch_size: int
+    recon_loss: float
+    kl_loss: float
+    evidence_lower_bound: float
+    weighted_loss: float
+    kl_weight: float
+    learning_rate: float
+    gradient_l2: float
+    clipped_gradient_l2: float
+    update_l2: float
+    optimizer_step: int
+    optimizer: str
+
+
 class ZSpaceVaeState:
     latent: List[float]
     reconstruction: List[float]
@@ -2811,6 +2826,17 @@ class ZSpaceVae:
 
     def save(self, path: str) -> None: ...
 
+    def configure_optimizer(
+        self,
+        *,
+        optimizer: str = ...,
+        beta1: float = ...,
+        beta2: float = ...,
+        epsilon: float = ...,
+        rms_decay: float = ...,
+        grad_clip: Optional[float] = ...,
+    ) -> None: ...
+    def reset_optimizer(self) -> None: ...
     def forward(self, input: Sequence[float]) -> ZSpaceVaeState: ...
     def forward_mean(self, input: Sequence[float]) -> ZSpaceVaeState: ...
     def train_step(
@@ -2819,6 +2845,17 @@ class ZSpaceVae:
         learning_rate: float,
         kl_weight: float = ...,
     ) -> ZSpaceVaeState: ...
+    def train_batch(
+        self,
+        batch: Sequence[Sequence[float]],
+        learning_rate: float,
+        kl_weight: float = ...,
+    ) -> ZSpaceVaeBatchStats: ...
+    def evaluate_batch(
+        self,
+        batch: Sequence[Sequence[float]],
+        kl_weight: float = ...,
+    ) -> ZSpaceVaeBatchStats: ...
 
     def encode(self, input: Sequence[float]) -> Tuple[List[float], List[float]]: ...
 
@@ -2843,6 +2880,10 @@ class ZSpaceVae:
 
     @property
     def latent_dim(self) -> int: ...
+    @property
+    def optimizer(self) -> str: ...
+    @property
+    def optimizer_step(self) -> int: ...
 
 
 class ZSpaceTextVae:
@@ -2860,6 +2901,17 @@ class ZSpaceTextVae:
     def load(path: str) -> ZSpaceTextVae: ...
 
     def save(self, path: str) -> None: ...
+    def configure_optimizer(
+        self,
+        *,
+        optimizer: str = ...,
+        beta1: float = ...,
+        beta2: float = ...,
+        epsilon: float = ...,
+        rms_decay: float = ...,
+        grad_clip: Optional[float] = ...,
+    ) -> None: ...
+    def reset_optimizer(self) -> None: ...
 
     def encode_text(self, text: str) -> List[float]: ...
     def encode_text_with_mellin(self, text: str, basis: MellinBasis) -> List[float]: ...
@@ -2879,6 +2931,17 @@ class ZSpaceTextVae:
         learning_rate: float,
         kl_weight: float = ...,
     ) -> ZSpaceVaeState: ...
+    def train_encoded_batch(
+        self,
+        encoded: Sequence[Sequence[float]],
+        learning_rate: float,
+        kl_weight: float = ...,
+    ) -> ZSpaceVaeBatchStats: ...
+    def evaluate_encoded_batch(
+        self,
+        encoded: Sequence[Sequence[float]],
+        kl_weight: float = ...,
+    ) -> ZSpaceVaeBatchStats: ...
     def train_text(
         self,
         text: str,
@@ -2892,6 +2955,30 @@ class ZSpaceTextVae:
         learning_rate: float,
         kl_weight: float = ...,
     ) -> ZSpaceVaeState: ...
+    def train_text_batch(
+        self,
+        texts: Sequence[str],
+        learning_rate: float,
+        kl_weight: float = ...,
+    ) -> ZSpaceVaeBatchStats: ...
+    def train_text_batch_with_mellin(
+        self,
+        texts: Sequence[str],
+        basis: MellinBasis,
+        learning_rate: float,
+        kl_weight: float = ...,
+    ) -> ZSpaceVaeBatchStats: ...
+    def evaluate_text_batch(
+        self,
+        texts: Sequence[str],
+        kl_weight: float = ...,
+    ) -> ZSpaceVaeBatchStats: ...
+    def evaluate_text_batch_with_mellin(
+        self,
+        texts: Sequence[str],
+        basis: MellinBasis,
+        kl_weight: float = ...,
+    ) -> ZSpaceVaeBatchStats: ...
     def refine_decoder(self, state: ZSpaceVaeState, learning_rate: float) -> None: ...
 
     @property
@@ -2908,6 +2995,8 @@ class ZSpaceTextVae:
 
     @property
     def temperature(self) -> float: ...
+    @property
+    def optimizer(self) -> str: ...
 
 
 class ZConv:
@@ -4185,6 +4274,7 @@ class _NnModule(ModuleType):
     ZSpaceVae: type[ZSpaceVae]
     ZSpaceVaeState: type[ZSpaceVaeState]
     ZSpaceVaeStats: type[ZSpaceVaeStats]
+    ZSpaceVaeBatchStats: type[ZSpaceVaeBatchStats]
     ZSpaceTextVae: type[ZSpaceTextVae]
     ZRelativityModule: type[ZRelativityModule]
     ZConv: type[ZConv]

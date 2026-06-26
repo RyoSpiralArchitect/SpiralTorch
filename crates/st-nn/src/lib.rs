@@ -140,7 +140,8 @@ pub use zspace_coherence::{
     PreDiscardPolicy, PreDiscardRegulator, PsiBranchState, PsiSynchroConfig, PsiSynchroPulse,
     PsiSynchroResult, PsiTelemetryConfig, SyncState, SynchroBus, SynchroEvent,
     ZSpaceCoherenceSequencer, ZSpaceTextVae, ZSpaceTrace, ZSpaceTraceConfig, ZSpaceTraceEvent,
-    ZSpaceTraceRecord, ZSpaceTraceRecorder, ZSpaceVae, ZSpaceVaeState, ZSpaceVaeStats,
+    ZSpaceTraceRecord, ZSpaceTraceRecorder, ZSpaceVae, ZSpaceVaeBatchStats, ZSpaceVaeOptimizerKind,
+    ZSpaceVaeState, ZSpaceVaeStats,
 };
 #[cfg(feature = "golden")]
 pub use zspace_coherence::{heatmaps_to_golden_telemetry, PsiGoldenTelemetry};

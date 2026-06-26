@@ -96,6 +96,264 @@ fn is_json_path(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Optimizer used by the Z-space VAE training helpers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ZSpaceVaeOptimizerKind {
+    Sgd,
+    Adam,
+    RmsProp,
+}
+
+impl ZSpaceVaeOptimizerKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Sgd => "sgd",
+            Self::Adam => "adam",
+            Self::RmsProp => "rmsprop",
+        }
+    }
+
+    pub fn from_label(label: &str) -> PureResult<Self> {
+        match label.trim().to_ascii_lowercase().as_str() {
+            "sgd" => Ok(Self::Sgd),
+            "adam" => Ok(Self::Adam),
+            "rmsprop" | "rms_prop" | "rms-prop" => Ok(Self::RmsProp),
+            _ => Err(TensorError::InvalidValue {
+                label: "zspace_vae_optimizer",
+            }),
+        }
+    }
+}
+
+impl Default for ZSpaceVaeOptimizerKind {
+    fn default() -> Self {
+        Self::Sgd
+    }
+}
+
+#[derive(Clone, Debug)]
+struct ZSpaceVaeGradients {
+    encoder_mu: DMatrix<f64>,
+    encoder_logvar: DMatrix<f64>,
+    decoder: DMatrix<f64>,
+    bias_mu: DVector<f64>,
+    bias_logvar: DVector<f64>,
+    bias_decoder: DVector<f64>,
+}
+
+impl ZSpaceVaeGradients {
+    fn zeros(input_dim: usize, latent_dim: usize) -> Self {
+        Self {
+            encoder_mu: DMatrix::zeros(latent_dim, input_dim),
+            encoder_logvar: DMatrix::zeros(latent_dim, input_dim),
+            decoder: DMatrix::zeros(input_dim, latent_dim),
+            bias_mu: DVector::zeros(latent_dim),
+            bias_logvar: DVector::zeros(latent_dim),
+            bias_decoder: DVector::zeros(input_dim),
+        }
+    }
+
+    fn add_scaled(&mut self, other: &Self, scale: f64) {
+        self.encoder_mu = (&self.encoder_mu + &other.encoder_mu * scale).clone_owned();
+        self.encoder_logvar = (&self.encoder_logvar + &other.encoder_logvar * scale).clone_owned();
+        self.decoder = (&self.decoder + &other.decoder * scale).clone_owned();
+        self.bias_mu = (&self.bias_mu + &other.bias_mu * scale).clone_owned();
+        self.bias_logvar = (&self.bias_logvar + &other.bias_logvar * scale).clone_owned();
+        self.bias_decoder = (&self.bias_decoder + &other.bias_decoder * scale).clone_owned();
+    }
+
+    fn scale(&mut self, factor: f64) {
+        self.encoder_mu *= factor;
+        self.encoder_logvar *= factor;
+        self.decoder *= factor;
+        self.bias_mu *= factor;
+        self.bias_logvar *= factor;
+        self.bias_decoder *= factor;
+    }
+
+    fn norm(&self) -> f64 {
+        let squared: f64 = self.encoder_mu.iter().map(|v| v * v).sum::<f64>()
+            + self.encoder_logvar.iter().map(|v| v * v).sum::<f64>()
+            + self.decoder.iter().map(|v| v * v).sum::<f64>()
+            + self.bias_mu.iter().map(|v| v * v).sum::<f64>()
+            + self.bias_logvar.iter().map(|v| v * v).sum::<f64>()
+            + self.bias_decoder.iter().map(|v| v * v).sum::<f64>();
+        squared.sqrt()
+    }
+
+    fn clip_to(&mut self, clip: Option<f64>) -> f64 {
+        let norm = self.norm();
+        if let Some(limit) = clip {
+            if norm > limit && norm > 0.0 {
+                self.scale(limit / norm);
+                return limit;
+            }
+        }
+        norm
+    }
+}
+
+#[derive(Clone, Debug)]
+struct ZSpaceVaeOptimizerState {
+    kind: ZSpaceVaeOptimizerKind,
+    step: u64,
+    beta1: f64,
+    beta2: f64,
+    epsilon: f64,
+    rms_decay: f64,
+    grad_clip: Option<f64>,
+    moment: ZSpaceVaeGradients,
+    velocity: ZSpaceVaeGradients,
+}
+
+impl ZSpaceVaeOptimizerState {
+    fn new(input_dim: usize, latent_dim: usize) -> Self {
+        Self {
+            kind: ZSpaceVaeOptimizerKind::default(),
+            step: 0,
+            beta1: 0.9,
+            beta2: 0.999,
+            epsilon: 1e-8,
+            rms_decay: 0.99,
+            grad_clip: None,
+            moment: ZSpaceVaeGradients::zeros(input_dim, latent_dim),
+            velocity: ZSpaceVaeGradients::zeros(input_dim, latent_dim),
+        }
+    }
+
+    fn configure(
+        &mut self,
+        input_dim: usize,
+        latent_dim: usize,
+        kind: ZSpaceVaeOptimizerKind,
+        beta1: f64,
+        beta2: f64,
+        epsilon: f64,
+        rms_decay: f64,
+        grad_clip: Option<f64>,
+    ) -> PureResult<()> {
+        if !(0.0..1.0).contains(&beta1) || !beta1.is_finite() {
+            return Err(TensorError::InvalidValue {
+                label: "zspace_vae_adam_beta1",
+            });
+        }
+        if !(0.0..1.0).contains(&beta2) || !beta2.is_finite() {
+            return Err(TensorError::InvalidValue {
+                label: "zspace_vae_adam_beta2",
+            });
+        }
+        if epsilon <= 0.0 || !epsilon.is_finite() {
+            return Err(TensorError::InvalidValue {
+                label: "zspace_vae_optimizer_epsilon",
+            });
+        }
+        if !(0.0..1.0).contains(&rms_decay) || !rms_decay.is_finite() {
+            return Err(TensorError::InvalidValue {
+                label: "zspace_vae_rms_decay",
+            });
+        }
+        if let Some(limit) = grad_clip {
+            if limit <= 0.0 || !limit.is_finite() {
+                return Err(TensorError::InvalidValue {
+                    label: "zspace_vae_grad_clip",
+                });
+            }
+        }
+
+        self.kind = kind;
+        self.step = 0;
+        self.beta1 = beta1;
+        self.beta2 = beta2;
+        self.epsilon = epsilon;
+        self.rms_decay = rms_decay;
+        self.grad_clip = grad_clip;
+        self.moment = ZSpaceVaeGradients::zeros(input_dim, latent_dim);
+        self.velocity = ZSpaceVaeGradients::zeros(input_dim, latent_dim);
+        Ok(())
+    }
+
+    fn reset(&mut self, input_dim: usize, latent_dim: usize) {
+        let kind = self.kind;
+        let beta1 = self.beta1;
+        let beta2 = self.beta2;
+        let epsilon = self.epsilon;
+        let rms_decay = self.rms_decay;
+        let grad_clip = self.grad_clip;
+        *self = Self::new(input_dim, latent_dim);
+        self.kind = kind;
+        self.beta1 = beta1;
+        self.beta2 = beta2;
+        self.epsilon = epsilon;
+        self.rms_decay = rms_decay;
+        self.grad_clip = grad_clip;
+    }
+}
+
+fn apply_sgd_slice(params: &mut [f64], gradients: &[f64], learning_rate: f64) -> f64 {
+    let mut squared_update = 0.0;
+    for (param, gradient) in params.iter_mut().zip(gradients.iter()) {
+        let delta = learning_rate * *gradient;
+        *param -= delta;
+        squared_update += delta * delta;
+    }
+    squared_update
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_adam_slice(
+    params: &mut [f64],
+    gradients: &[f64],
+    moments: &mut [f64],
+    velocities: &mut [f64],
+    learning_rate: f64,
+    beta1: f64,
+    beta2: f64,
+    epsilon: f64,
+    step: u64,
+) -> f64 {
+    let mut squared_update = 0.0;
+    let step = step as f64;
+    let bias_correction_m = 1.0 - beta1.powf(step);
+    let bias_correction_v = 1.0 - beta2.powf(step);
+    for (((param, gradient), moment), velocity) in params
+        .iter_mut()
+        .zip(gradients.iter())
+        .zip(moments.iter_mut())
+        .zip(velocities.iter_mut())
+    {
+        *moment = beta1 * *moment + (1.0 - beta1) * *gradient;
+        *velocity = beta2 * *velocity + (1.0 - beta2) * *gradient * *gradient;
+        let corrected_m = *moment / bias_correction_m;
+        let corrected_v = *velocity / bias_correction_v;
+        let delta = learning_rate * corrected_m / (corrected_v.sqrt() + epsilon);
+        *param -= delta;
+        squared_update += delta * delta;
+    }
+    squared_update
+}
+
+fn apply_rmsprop_slice(
+    params: &mut [f64],
+    gradients: &[f64],
+    velocities: &mut [f64],
+    learning_rate: f64,
+    decay: f64,
+    epsilon: f64,
+) -> f64 {
+    let mut squared_update = 0.0;
+    for ((param, gradient), velocity) in params
+        .iter_mut()
+        .zip(gradients.iter())
+        .zip(velocities.iter_mut())
+    {
+        *velocity = decay * *velocity + (1.0 - decay) * *gradient * *gradient;
+        let delta = learning_rate * *gradient / ((*velocity).sqrt() + epsilon);
+        *param -= delta;
+        squared_update += delta * delta;
+    }
+    squared_update
+}
+
 /// Minimal variational autoencoder tailored for Z-space telemetry.
 #[derive(Clone, Debug)]
 pub struct ZSpaceVae {
@@ -109,6 +367,7 @@ pub struct ZSpaceVae {
     bias_decoder: DVector<f64>,
     seed: u64,
     rng: StdRng,
+    optimizer: ZSpaceVaeOptimizerState,
 }
 
 impl ZSpaceVae {
@@ -120,6 +379,7 @@ impl ZSpaceVae {
         let bias_mu = DVector::zeros(latent_dim);
         let bias_logvar = DVector::from_element(latent_dim, -3.0);
         let bias_decoder = DVector::zeros(input_dim);
+        let optimizer = ZSpaceVaeOptimizerState::new(input_dim, latent_dim);
         Self {
             latent_dim,
             input_dim,
@@ -131,6 +391,7 @@ impl ZSpaceVae {
             bias_decoder,
             seed,
             rng: StdRng::seed_from_u64(seed),
+            optimizer,
         }
     }
 
@@ -278,6 +539,7 @@ impl ZSpaceVae {
             bias_decoder: DVector::from_vec(checkpoint.bias_decoder),
             seed: checkpoint.seed,
             rng: StdRng::seed_from_u64(checkpoint.seed),
+            optimizer: ZSpaceVaeOptimizerState::new(checkpoint.input_dim, checkpoint.latent_dim),
         })
     }
 
@@ -287,6 +549,52 @@ impl ZSpaceVae {
 
     pub fn latent_dim(&self) -> usize {
         self.latent_dim
+    }
+
+    pub fn optimizer_kind(&self) -> ZSpaceVaeOptimizerKind {
+        self.optimizer.kind
+    }
+
+    pub fn optimizer_step(&self) -> u64 {
+        self.optimizer.step
+    }
+
+    pub fn configure_optimizer(
+        &mut self,
+        kind: ZSpaceVaeOptimizerKind,
+        beta1: f64,
+        beta2: f64,
+        epsilon: f64,
+        rms_decay: f64,
+        grad_clip: Option<f64>,
+    ) -> PureResult<()> {
+        self.optimizer.configure(
+            self.input_dim,
+            self.latent_dim,
+            kind,
+            beta1,
+            beta2,
+            epsilon,
+            rms_decay,
+            grad_clip,
+        )
+    }
+
+    pub fn configure_optimizer_by_name(
+        &mut self,
+        optimizer: &str,
+        beta1: f64,
+        beta2: f64,
+        epsilon: f64,
+        rms_decay: f64,
+        grad_clip: Option<f64>,
+    ) -> PureResult<()> {
+        let kind = ZSpaceVaeOptimizerKind::from_label(optimizer)?;
+        self.configure_optimizer(kind, beta1, beta2, epsilon, rms_decay, grad_clip)
+    }
+
+    pub fn reset_optimizer(&mut self) {
+        self.optimizer.reset(self.input_dim, self.latent_dim);
     }
 
     fn validate_input(&self, input: &DVector<f64>) -> PureResult<()> {
@@ -331,6 +639,20 @@ impl ZSpaceVae {
             });
         }
         Ok((learning_rate, kl_weight))
+    }
+
+    fn validate_batch<'a>(
+        &self,
+        inputs: &'a [DVector<f64>],
+        label: &'static str,
+    ) -> PureResult<&'a [DVector<f64>]> {
+        if inputs.is_empty() {
+            return Err(TensorError::EmptyInput(label));
+        }
+        for input in inputs {
+            self.validate_input(input)?;
+        }
+        Ok(inputs)
     }
 
     /// Encodes an input vector into mean and log-variance.
@@ -412,6 +734,197 @@ impl ZSpaceVae {
         })
     }
 
+    fn gradients_for_input(
+        &self,
+        input: &DVector<f64>,
+        kl_weight: f64,
+    ) -> PureResult<(ZSpaceVaeState, ZSpaceVaeGradients)> {
+        self.validate_input(input)?;
+        let (mu, logvar) = self.encode(input);
+        let latent = self.mean_latent(&mu);
+        let reconstruction = self.decode(&latent);
+        let stats = ZSpaceVaeStats::from_forward(input, &reconstruction, &mu, &logvar);
+        let state = ZSpaceVaeState {
+            latent: latent.clone(),
+            reconstruction: reconstruction.clone(),
+            mu: mu.clone(),
+            logvar: logvar.clone(),
+            stats,
+        };
+
+        let recon_grad = (&reconstruction - input) * (2.0 / self.input_dim as f64);
+        let grad_decoder = &recon_grad * latent.transpose();
+        let grad_bias_decoder = recon_grad.clone();
+
+        let mut grad_mu = self.decoder.transpose() * &recon_grad;
+        let mut grad_logvar = DVector::zeros(self.latent_dim);
+        if kl_weight > 0.0 {
+            for idx in 0..self.latent_dim {
+                grad_mu[idx] += kl_weight * mu[idx];
+                grad_logvar[idx] = kl_weight * 0.5 * (logvar[idx].exp() - 1.0);
+            }
+        }
+
+        let gradients = ZSpaceVaeGradients {
+            encoder_mu: &grad_mu * input.transpose(),
+            encoder_logvar: &grad_logvar * input.transpose(),
+            decoder: grad_decoder,
+            bias_mu: grad_mu,
+            bias_logvar: grad_logvar,
+            bias_decoder: grad_bias_decoder,
+        };
+
+        Ok((state, gradients))
+    }
+
+    fn apply_gradients(&mut self, gradients: &ZSpaceVaeGradients, learning_rate: f64) -> f64 {
+        self.optimizer.step = self.optimizer.step.saturating_add(1);
+        let step = self.optimizer.step;
+        match self.optimizer.kind {
+            ZSpaceVaeOptimizerKind::Sgd => {
+                apply_sgd_slice(
+                    self.encoder_mu.as_mut_slice(),
+                    gradients.encoder_mu.as_slice(),
+                    learning_rate,
+                ) + apply_sgd_slice(
+                    self.encoder_logvar.as_mut_slice(),
+                    gradients.encoder_logvar.as_slice(),
+                    learning_rate,
+                ) + apply_sgd_slice(
+                    self.decoder.as_mut_slice(),
+                    gradients.decoder.as_slice(),
+                    learning_rate,
+                ) + apply_sgd_slice(
+                    self.bias_mu.as_mut_slice(),
+                    gradients.bias_mu.as_slice(),
+                    learning_rate,
+                ) + apply_sgd_slice(
+                    self.bias_logvar.as_mut_slice(),
+                    gradients.bias_logvar.as_slice(),
+                    learning_rate,
+                ) + apply_sgd_slice(
+                    self.bias_decoder.as_mut_slice(),
+                    gradients.bias_decoder.as_slice(),
+                    learning_rate,
+                )
+            }
+            ZSpaceVaeOptimizerKind::Adam => {
+                let beta1 = self.optimizer.beta1;
+                let beta2 = self.optimizer.beta2;
+                let epsilon = self.optimizer.epsilon;
+                apply_adam_slice(
+                    self.encoder_mu.as_mut_slice(),
+                    gradients.encoder_mu.as_slice(),
+                    self.optimizer.moment.encoder_mu.as_mut_slice(),
+                    self.optimizer.velocity.encoder_mu.as_mut_slice(),
+                    learning_rate,
+                    beta1,
+                    beta2,
+                    epsilon,
+                    step,
+                ) + apply_adam_slice(
+                    self.encoder_logvar.as_mut_slice(),
+                    gradients.encoder_logvar.as_slice(),
+                    self.optimizer.moment.encoder_logvar.as_mut_slice(),
+                    self.optimizer.velocity.encoder_logvar.as_mut_slice(),
+                    learning_rate,
+                    beta1,
+                    beta2,
+                    epsilon,
+                    step,
+                ) + apply_adam_slice(
+                    self.decoder.as_mut_slice(),
+                    gradients.decoder.as_slice(),
+                    self.optimizer.moment.decoder.as_mut_slice(),
+                    self.optimizer.velocity.decoder.as_mut_slice(),
+                    learning_rate,
+                    beta1,
+                    beta2,
+                    epsilon,
+                    step,
+                ) + apply_adam_slice(
+                    self.bias_mu.as_mut_slice(),
+                    gradients.bias_mu.as_slice(),
+                    self.optimizer.moment.bias_mu.as_mut_slice(),
+                    self.optimizer.velocity.bias_mu.as_mut_slice(),
+                    learning_rate,
+                    beta1,
+                    beta2,
+                    epsilon,
+                    step,
+                ) + apply_adam_slice(
+                    self.bias_logvar.as_mut_slice(),
+                    gradients.bias_logvar.as_slice(),
+                    self.optimizer.moment.bias_logvar.as_mut_slice(),
+                    self.optimizer.velocity.bias_logvar.as_mut_slice(),
+                    learning_rate,
+                    beta1,
+                    beta2,
+                    epsilon,
+                    step,
+                ) + apply_adam_slice(
+                    self.bias_decoder.as_mut_slice(),
+                    gradients.bias_decoder.as_slice(),
+                    self.optimizer.moment.bias_decoder.as_mut_slice(),
+                    self.optimizer.velocity.bias_decoder.as_mut_slice(),
+                    learning_rate,
+                    beta1,
+                    beta2,
+                    epsilon,
+                    step,
+                )
+            }
+            ZSpaceVaeOptimizerKind::RmsProp => {
+                let decay = self.optimizer.rms_decay;
+                let epsilon = self.optimizer.epsilon;
+                apply_rmsprop_slice(
+                    self.encoder_mu.as_mut_slice(),
+                    gradients.encoder_mu.as_slice(),
+                    self.optimizer.velocity.encoder_mu.as_mut_slice(),
+                    learning_rate,
+                    decay,
+                    epsilon,
+                ) + apply_rmsprop_slice(
+                    self.encoder_logvar.as_mut_slice(),
+                    gradients.encoder_logvar.as_slice(),
+                    self.optimizer.velocity.encoder_logvar.as_mut_slice(),
+                    learning_rate,
+                    decay,
+                    epsilon,
+                ) + apply_rmsprop_slice(
+                    self.decoder.as_mut_slice(),
+                    gradients.decoder.as_slice(),
+                    self.optimizer.velocity.decoder.as_mut_slice(),
+                    learning_rate,
+                    decay,
+                    epsilon,
+                ) + apply_rmsprop_slice(
+                    self.bias_mu.as_mut_slice(),
+                    gradients.bias_mu.as_slice(),
+                    self.optimizer.velocity.bias_mu.as_mut_slice(),
+                    learning_rate,
+                    decay,
+                    epsilon,
+                ) + apply_rmsprop_slice(
+                    self.bias_logvar.as_mut_slice(),
+                    gradients.bias_logvar.as_slice(),
+                    self.optimizer.velocity.bias_logvar.as_mut_slice(),
+                    learning_rate,
+                    decay,
+                    epsilon,
+                ) + apply_rmsprop_slice(
+                    self.bias_decoder.as_mut_slice(),
+                    gradients.bias_decoder.as_slice(),
+                    self.optimizer.velocity.bias_decoder.as_mut_slice(),
+                    learning_rate,
+                    decay,
+                    epsilon,
+                )
+            }
+        }
+        .sqrt()
+    }
+
     /// Performs one deterministic VAE training step.
     ///
     /// The update uses the latent mean for a low-variance reconstruction
@@ -426,43 +939,85 @@ impl ZSpaceVae {
         self.validate_input(input)?;
         let (lr, beta) = Self::train_hyperparams(learning_rate, kl_weight)?;
 
-        let (mu, logvar) = self.encode(input);
-        let latent = self.mean_latent(&mu);
-        let reconstruction = self.decode(&latent);
-        let stats = ZSpaceVaeStats::from_forward(input, &reconstruction, &mu, &logvar);
-        let state = ZSpaceVaeState {
-            latent: latent.clone(),
-            reconstruction: reconstruction.clone(),
-            mu: mu.clone(),
-            logvar: logvar.clone(),
-            stats,
-        };
-
-        let decoder_before = self.decoder.clone();
-        let recon_grad = (&reconstruction - input) * (2.0 / self.input_dim as f64);
-        let grad_decoder = &recon_grad * latent.transpose();
-        let grad_bias_decoder = recon_grad.clone();
-
-        let mut grad_mu = decoder_before.transpose() * &recon_grad;
-        let mut grad_logvar = DVector::zeros(self.latent_dim);
-        if beta > 0.0 {
-            for idx in 0..self.latent_dim {
-                grad_mu[idx] += beta * mu[idx];
-                grad_logvar[idx] = beta * 0.5 * (logvar[idx].exp() - 1.0);
-            }
-        }
-
-        let grad_encoder_mu = &grad_mu * input.transpose();
-        let grad_encoder_logvar = &grad_logvar * input.transpose();
-
-        self.decoder = (&self.decoder - grad_decoder * lr).clone_owned();
-        self.bias_decoder = (&self.bias_decoder - grad_bias_decoder * lr).clone_owned();
-        self.encoder_mu = (&self.encoder_mu - grad_encoder_mu * lr).clone_owned();
-        self.bias_mu = (&self.bias_mu - grad_mu * lr).clone_owned();
-        self.encoder_logvar = (&self.encoder_logvar - grad_encoder_logvar * lr).clone_owned();
-        self.bias_logvar = (&self.bias_logvar - grad_logvar * lr).clone_owned();
+        let (state, mut gradients) = self.gradients_for_input(input, beta)?;
+        gradients.clip_to(self.optimizer.grad_clip);
+        self.apply_gradients(&gradients, lr);
 
         Ok(state)
+    }
+
+    pub fn train_batch(
+        &mut self,
+        inputs: &[DVector<f64>],
+        learning_rate: f64,
+        kl_weight: f64,
+    ) -> PureResult<ZSpaceVaeBatchStats> {
+        self.validate_batch(inputs, "zspace_vae_train_batch")?;
+        let (lr, beta) = Self::train_hyperparams(learning_rate, kl_weight)?;
+        let batch_size = inputs.len();
+        let scale = 1.0 / batch_size as f64;
+
+        let mut gradients = ZSpaceVaeGradients::zeros(self.input_dim, self.latent_dim);
+        let mut recon_sum = 0.0;
+        let mut kl_sum = 0.0;
+        let mut elbo_sum = 0.0;
+        for input in inputs {
+            let (state, sample_gradients) = self.gradients_for_input(input, beta)?;
+            recon_sum += state.stats.recon_loss;
+            kl_sum += state.stats.kl_loss;
+            elbo_sum += state.stats.evidence_lower_bound;
+            gradients.add_scaled(&sample_gradients, scale);
+        }
+
+        let gradient_l2 = gradients.norm();
+        let clipped_gradient_l2 = gradients.clip_to(self.optimizer.grad_clip);
+        let update_l2 = self.apply_gradients(&gradients, lr);
+        Ok(ZSpaceVaeBatchStats::new(
+            batch_size,
+            recon_sum * scale,
+            kl_sum * scale,
+            elbo_sum * scale,
+            beta,
+            lr,
+            gradient_l2,
+            clipped_gradient_l2,
+            update_l2,
+            self.optimizer.step,
+            self.optimizer.kind,
+        ))
+    }
+
+    pub fn evaluate_batch(
+        &self,
+        inputs: &[DVector<f64>],
+        kl_weight: f64,
+    ) -> PureResult<ZSpaceVaeBatchStats> {
+        self.validate_batch(inputs, "zspace_vae_evaluate_batch")?;
+        let (_, beta) = Self::train_hyperparams(1.0, kl_weight)?;
+        let batch_size = inputs.len();
+        let scale = 1.0 / batch_size as f64;
+        let mut recon_sum = 0.0;
+        let mut kl_sum = 0.0;
+        let mut elbo_sum = 0.0;
+        for input in inputs {
+            let state = self.forward_mean(input)?;
+            recon_sum += state.stats.recon_loss;
+            kl_sum += state.stats.kl_loss;
+            elbo_sum += state.stats.evidence_lower_bound;
+        }
+        Ok(ZSpaceVaeBatchStats::new(
+            batch_size,
+            recon_sum * scale,
+            kl_sum * scale,
+            elbo_sum * scale,
+            beta,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            self.optimizer.step,
+            self.optimizer.kind,
+        ))
     }
 
     /// Lightweight parameter update that blends the decoder toward the provided
@@ -484,6 +1039,55 @@ pub struct ZSpaceVaeState {
     pub mu: DVector<f64>,
     pub logvar: DVector<f64>,
     pub stats: ZSpaceVaeStats,
+}
+
+/// Aggregated metrics for a batch training or evaluation pass.
+#[derive(Clone, Debug)]
+pub struct ZSpaceVaeBatchStats {
+    pub batch_size: usize,
+    pub recon_loss: f64,
+    pub kl_loss: f64,
+    pub evidence_lower_bound: f64,
+    pub weighted_loss: f64,
+    pub kl_weight: f64,
+    pub learning_rate: f64,
+    pub gradient_l2: f64,
+    pub clipped_gradient_l2: f64,
+    pub update_l2: f64,
+    pub optimizer_step: u64,
+    pub optimizer: ZSpaceVaeOptimizerKind,
+}
+
+impl ZSpaceVaeBatchStats {
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        batch_size: usize,
+        recon_loss: f64,
+        kl_loss: f64,
+        evidence_lower_bound: f64,
+        kl_weight: f64,
+        learning_rate: f64,
+        gradient_l2: f64,
+        clipped_gradient_l2: f64,
+        update_l2: f64,
+        optimizer_step: u64,
+        optimizer: ZSpaceVaeOptimizerKind,
+    ) -> Self {
+        Self {
+            batch_size,
+            recon_loss,
+            kl_loss,
+            evidence_lower_bound,
+            weighted_loss: recon_loss + kl_weight * kl_loss,
+            kl_weight,
+            learning_rate,
+            gradient_l2,
+            clipped_gradient_l2,
+            update_l2,
+            optimizer_step,
+            optimizer,
+        }
+    }
 }
 
 /// Loss bundle describing KL and reconstruction energy.
@@ -593,6 +1197,57 @@ mod tests {
             after < before,
             "expected train_step to reduce recon loss: before={before}, after={after}"
         );
+    }
+
+    #[test]
+    fn train_batch_with_adam_reports_and_reduces_loss() {
+        let mut vae = ZSpaceVae::new(3, 2, 19);
+        vae.configure_optimizer(
+            ZSpaceVaeOptimizerKind::Adam,
+            0.9,
+            0.999,
+            1e-8,
+            0.99,
+            Some(10.0),
+        )
+        .unwrap();
+        let batch = vec![
+            DVector::from_vec(vec![0.4, -0.2, 0.3]),
+            DVector::from_vec(vec![0.1, 0.25, -0.35]),
+        ];
+        let before = vae.evaluate_batch(&batch, 1e-4).unwrap().weighted_loss;
+
+        let mut last_stats = None;
+        for _ in 0..48 {
+            last_stats = Some(vae.train_batch(&batch, 1e-2, 1e-4).unwrap());
+        }
+
+        let stats = last_stats.unwrap();
+        let after = vae.evaluate_batch(&batch, 1e-4).unwrap().weighted_loss;
+        assert_eq!(stats.batch_size, 2);
+        assert_eq!(stats.optimizer, ZSpaceVaeOptimizerKind::Adam);
+        assert_eq!(stats.optimizer_step, 48);
+        assert!(stats.gradient_l2 > 0.0);
+        assert!(stats.clipped_gradient_l2 <= stats.gradient_l2 + 1e-12);
+        assert!(stats.update_l2 > 0.0);
+        assert!(
+            after < before,
+            "expected Adam train_batch to reduce weighted loss: before={before}, after={after}"
+        );
+    }
+
+    #[test]
+    fn optimizer_can_switch_to_rmsprop_and_reset_state() {
+        let mut vae = ZSpaceVae::new(3, 2, 23);
+        vae.configure_optimizer_by_name("rmsprop", 0.9, 0.999, 1e-8, 0.95, Some(0.25))
+            .unwrap();
+        assert_eq!(vae.optimizer_kind(), ZSpaceVaeOptimizerKind::RmsProp);
+        let batch = vec![DVector::from_vec(vec![0.4, -0.2, 0.3])];
+        let stats = vae.train_batch(&batch, 1e-2, 1e-4).unwrap();
+        assert_eq!(stats.optimizer_step, 1);
+        vae.reset_optimizer();
+        assert_eq!(vae.optimizer_kind(), ZSpaceVaeOptimizerKind::RmsProp);
+        assert_eq!(vae.optimizer_step(), 0);
     }
 
     #[test]

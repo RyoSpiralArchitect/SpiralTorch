@@ -3,7 +3,10 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-use super::vae::{MellinBasis, ZSpaceVae, ZSpaceVaeCheckpoint, ZSpaceVaeState};
+use super::vae::{
+    MellinBasis, ZSpaceVae, ZSpaceVaeBatchStats, ZSpaceVaeCheckpoint, ZSpaceVaeOptimizerKind,
+    ZSpaceVaeState,
+};
 use crate::{PureResult, TensorError};
 use nalgebra::DVector;
 use serde::{Deserialize, Serialize};
@@ -93,6 +96,40 @@ impl ZSpaceTextVae {
 
     pub fn temperature(&self) -> f32 {
         self.encoder.temperature()
+    }
+
+    pub fn optimizer_kind(&self) -> ZSpaceVaeOptimizerKind {
+        self.vae.optimizer_kind()
+    }
+
+    pub fn configure_optimizer(
+        &mut self,
+        kind: ZSpaceVaeOptimizerKind,
+        beta1: f64,
+        beta2: f64,
+        epsilon: f64,
+        rms_decay: f64,
+        grad_clip: Option<f64>,
+    ) -> PureResult<()> {
+        self.vae
+            .configure_optimizer(kind, beta1, beta2, epsilon, rms_decay, grad_clip)
+    }
+
+    pub fn configure_optimizer_by_name(
+        &mut self,
+        optimizer: &str,
+        beta1: f64,
+        beta2: f64,
+        epsilon: f64,
+        rms_decay: f64,
+        grad_clip: Option<f64>,
+    ) -> PureResult<()> {
+        self.vae
+            .configure_optimizer_by_name(optimizer, beta1, beta2, epsilon, rms_decay, grad_clip)
+    }
+
+    pub fn reset_optimizer(&mut self) {
+        self.vae.reset_optimizer();
     }
 
     pub fn encode_text(&self, text: &str) -> PureResult<DVector<f64>> {
@@ -186,6 +223,23 @@ impl ZSpaceTextVae {
         self.vae.train_step(encoded, learning_rate, kl_weight)
     }
 
+    pub fn train_encoded_batch(
+        &mut self,
+        encoded: &[DVector<f64>],
+        learning_rate: f64,
+        kl_weight: f64,
+    ) -> PureResult<ZSpaceVaeBatchStats> {
+        self.vae.train_batch(encoded, learning_rate, kl_weight)
+    }
+
+    pub fn evaluate_encoded_batch(
+        &self,
+        encoded: &[DVector<f64>],
+        kl_weight: f64,
+    ) -> PureResult<ZSpaceVaeBatchStats> {
+        self.vae.evaluate_batch(encoded, kl_weight)
+    }
+
     pub fn train_text(
         &mut self,
         text: &str,
@@ -205,6 +259,58 @@ impl ZSpaceTextVae {
     ) -> PureResult<ZSpaceVaeState> {
         let projected = self.encode_text_with_mellin(text, basis)?;
         self.train_encoded(&projected, learning_rate, kl_weight)
+    }
+
+    pub fn train_text_batch(
+        &mut self,
+        texts: &[String],
+        learning_rate: f64,
+        kl_weight: f64,
+    ) -> PureResult<ZSpaceVaeBatchStats> {
+        let mut encoded = Vec::with_capacity(texts.len());
+        for text in texts {
+            encoded.push(self.encode_text(text)?);
+        }
+        self.train_encoded_batch(&encoded, learning_rate, kl_weight)
+    }
+
+    pub fn train_text_batch_with_mellin(
+        &mut self,
+        texts: &[String],
+        basis: &MellinBasis,
+        learning_rate: f64,
+        kl_weight: f64,
+    ) -> PureResult<ZSpaceVaeBatchStats> {
+        let mut encoded = Vec::with_capacity(texts.len());
+        for text in texts {
+            encoded.push(self.encode_text_with_mellin(text, basis)?);
+        }
+        self.train_encoded_batch(&encoded, learning_rate, kl_weight)
+    }
+
+    pub fn evaluate_text_batch(
+        &self,
+        texts: &[String],
+        kl_weight: f64,
+    ) -> PureResult<ZSpaceVaeBatchStats> {
+        let mut encoded = Vec::with_capacity(texts.len());
+        for text in texts {
+            encoded.push(self.encode_text(text)?);
+        }
+        self.evaluate_encoded_batch(&encoded, kl_weight)
+    }
+
+    pub fn evaluate_text_batch_with_mellin(
+        &self,
+        texts: &[String],
+        basis: &MellinBasis,
+        kl_weight: f64,
+    ) -> PureResult<ZSpaceVaeBatchStats> {
+        let mut encoded = Vec::with_capacity(texts.len());
+        for text in texts {
+            encoded.push(self.encode_text_with_mellin(text, basis)?);
+        }
+        self.evaluate_encoded_batch(&encoded, kl_weight)
     }
 
     pub fn refine_decoder(&mut self, state: &ZSpaceVaeState, learning_rate: f64) {
@@ -359,6 +465,44 @@ mod tests {
         assert!(
             after < before,
             "expected text VAE training to reduce recon loss: before={before}, after={after}"
+        );
+    }
+
+    #[test]
+    fn text_vae_train_batch_with_mellin_reports_validation_stats() {
+        let mut vae = ZSpaceTextVae::new(16, 4, -1.0, 1.0, 7).unwrap();
+        vae.configure_optimizer_by_name("adam", 0.9, 0.999, 1e-8, 0.99, Some(5.0))
+            .unwrap();
+        let basis = MellinBasis::ramp(vae.input_dim(), 0.8, 1.2);
+        let batch = vec![
+            "SpiralTorch learns".to_string(),
+            "Z space breathes".to_string(),
+            "VAE batches align".to_string(),
+        ];
+        let before = vae
+            .evaluate_text_batch_with_mellin(&batch, &basis, 1e-4)
+            .unwrap()
+            .weighted_loss;
+
+        let mut stats = None;
+        for _ in 0..24 {
+            stats = Some(
+                vae.train_text_batch_with_mellin(&batch, &basis, 1e-2, 1e-4)
+                    .unwrap(),
+            );
+        }
+
+        let stats = stats.unwrap();
+        let after = vae
+            .evaluate_text_batch_with_mellin(&batch, &basis, 1e-4)
+            .unwrap()
+            .weighted_loss;
+        assert_eq!(stats.batch_size, 3);
+        assert_eq!(stats.optimizer, ZSpaceVaeOptimizerKind::Adam);
+        assert!(stats.gradient_l2 > 0.0);
+        assert!(
+            after < before,
+            "expected text VAE batch training to reduce weighted loss: before={before}, after={after}"
         );
     }
 
