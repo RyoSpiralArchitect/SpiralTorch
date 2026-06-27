@@ -38,6 +38,18 @@ FEATURE_CHOICES = (
 NORMALIZE_CHOICES = ("none", "vector", "blocks")
 FOLLOW_UP_VERDICTS = ("improved", "confirmed", "regressed", "unknown")
 FOLLOW_UP_CHAIN_MAX_ANCESTORS = 8
+RUN_BUDGET_KEYS = (
+    "window_chars",
+    "latent_dim",
+    "hidden",
+    "epochs",
+    "batches",
+    "batch_size",
+    "eval_samples",
+    "vae_epochs",
+    "vae_batches",
+    "vae_batch_size",
+)
 
 _TEXT_EXTS = {".txt"}
 
@@ -1205,6 +1217,9 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 f"- current_best_raw_verdict: {follow_up_result.get('current_best_raw_verdict')}",
                 f"- source_best_feature_retained: {follow_up_result.get('source_best_feature_retained')}",
                 f"- match_found: {follow_up_result.get('match_found')}",
+                f"- run_budget_shifted: {follow_up_result.get('run_budget_shifted')}",
+                "- run_budget_shift: "
+                f"{_run_budget_shift_label(follow_up_result.get('run_budget_shift'))}",
                 "",
             ]
         )
@@ -2851,6 +2866,114 @@ def _summary_features(summary: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(features))
 
 
+def _args_run_budget(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "window_chars": int(args.window_chars),
+        "latent_dim": int(args.latent_dim),
+        "hidden": int(args.hidden),
+        "epochs": int(args.epochs),
+        "batches": int(args.batches),
+        "batch_size": int(args.batch_size),
+        "eval_samples": int(args.eval_samples),
+        "vae_epochs": int(args.vae_epochs),
+        "vae_batches": int(args.vae_batches),
+        "vae_batch_size": int(args.vae_batch_size),
+    }
+
+
+def _run_budget_from_run(run: Any) -> dict[str, Any]:
+    if not isinstance(run, dict):
+        return {}
+    budget = {
+        key: run.get(key)
+        for key in RUN_BUDGET_KEYS
+        if run.get(key) is not None
+    }
+    vae = run.get("vae")
+    if isinstance(vae, dict):
+        for source_key, target_key in (
+            ("epochs", "vae_epochs"),
+            ("batches", "vae_batches"),
+            ("batch_size", "vae_batch_size"),
+        ):
+            if budget.get(target_key) is None and vae.get(source_key) is not None:
+                budget[target_key] = vae.get(source_key)
+    return budget
+
+
+def _summary_run_budget(summary: dict[str, Any]) -> dict[str, Any]:
+    budget = _run_budget_from_run(summary.get("run"))
+    missing = [key for key in RUN_BUDGET_KEYS if key not in budget]
+    if not missing:
+        return budget
+
+    seed_summaries = summary.get("seed_summaries", [])
+    if not isinstance(seed_summaries, list):
+        return budget
+    for seed_summary in seed_summaries:
+        if not isinstance(seed_summary, dict):
+            continue
+        run_dir = seed_summary.get("run_dir")
+        if run_dir is None:
+            continue
+        seed_summary_path = pathlib.Path(str(run_dir)) / "summary.json"
+        try:
+            payload = json.loads(seed_summary_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, dict):
+            nested = _summary_run_budget(payload)
+            if nested:
+                for key in missing:
+                    if key in nested and key not in budget:
+                        budget[key] = nested[key]
+                missing = [key for key in RUN_BUDGET_KEYS if key not in budget]
+                if not missing:
+                    break
+    return budget
+
+
+def _run_budget_shift(
+    source_budget: dict[str, Any] | None,
+    current_budget: dict[str, Any] | None,
+) -> dict[str, Any]:
+    source_budget = source_budget if isinstance(source_budget, dict) else {}
+    current_budget = current_budget if isinstance(current_budget, dict) else {}
+    changes = []
+    for key in RUN_BUDGET_KEYS:
+        source_value = source_budget.get(key)
+        current_value = current_budget.get(key)
+        if source_value is None or current_value is None or source_value == current_value:
+            continue
+        changes.append(
+            {
+                "key": key,
+                "source": source_value,
+                "current": current_value,
+            }
+        )
+    return {
+        "schema": "st.llm_char_vae_context.run_budget_shift.v1",
+        "changed": bool(changes),
+        "changed_keys": [str(item["key"]) for item in changes],
+        "changes": changes,
+    }
+
+
+def _run_budget_shift_label(shift: Any) -> str:
+    if not isinstance(shift, dict):
+        return "-"
+    changes = shift.get("changes", [])
+    if not isinstance(changes, list) or not changes:
+        return "-"
+    labels = []
+    for item in changes:
+        if not isinstance(item, dict):
+            continue
+        labels.append(f"{item.get('key')}:{item.get('source')}->{item.get('current')}")
+    return ", ".join(labels) if labels else "-"
+
+
 def _source_best_config(summary: dict[str, Any]) -> dict[str, Any]:
     best_config = summary.get("best_config")
     if not isinstance(best_config, dict):
@@ -2947,6 +3070,7 @@ def _apply_follow_up_defaults(
     best_config = _source_best_config(source_summary)
     source_features = _summary_features(source_summary)
     source_seeds = _summary_seeds(source_summary)
+    source_run_budget = _summary_run_budget(source_summary)
     source_chain = _follow_up_chain_source(source_summary)
     external_seed_history = _seed_csv_values(args.follow_up_used_seeds)
 
@@ -2985,6 +3109,7 @@ def _apply_follow_up_defaults(
         "source_best_config": best_config,
         "source_features": source_features,
         "source_seeds": source_seeds,
+        "source_run_budget": source_run_budget,
         "source_chain": source_chain,
         "external_seed_history": external_seed_history,
         "applied_defaults": applied_defaults,
@@ -3102,6 +3227,7 @@ def _follow_up_result(
     current_best_config: dict[str, Any] | None,
     *,
     min_nll_delta: float,
+    current_run_budget: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     if not follow_up:
         return None
@@ -3147,11 +3273,25 @@ def _follow_up_result(
         and source_feature is not None
         and evaluated.get("best_feature") == source_feature
     )
+    source_run_budget = (
+        follow_up.get("source_run_budget")
+        if isinstance(follow_up.get("source_run_budget"), dict)
+        else {}
+    )
+    current_run_budget = (
+        current_run_budget if isinstance(current_run_budget, dict) else {}
+    )
+    run_budget_shift = _run_budget_shift(source_run_budget, current_run_budget)
 
     return {
         "schema": "st.llm_char_vae_context.follow_up_result.v1",
         "source_summary_path": follow_up.get("source_summary_path"),
         "source_best_config": source_best_config,
+        "source_run_budget": source_run_budget,
+        "current_run_budget": current_run_budget,
+        "run_budget_shift": run_budget_shift,
+        "run_budget_shifted": bool(run_budget_shift.get("changed")),
+        "run_budget_shift_keys": run_budget_shift.get("changed_keys", []),
         "evaluated_config": evaluated,
         "source_feature_evaluated": source_feature_evaluated,
         "current_best_config": current_best_config,
@@ -3806,6 +3946,10 @@ def _follow_up_guidance_record(
         if reason not in reasons:
             reasons.append(reason)
 
+    run_budget_shift = follow_up_result.get("run_budget_shift")
+    if follow_up_result.get("run_budget_shifted"):
+        add_reason(f"run budget shifted: {_run_budget_shift_label(run_budget_shift)}")
+
     if gate_failed:
         action = (
             "widen_seed_confirmation_on_raw_positive_regression"
@@ -4339,10 +4483,13 @@ def main(argv: list[str] | None = None) -> int:
     root_run_dir = args.run_dir or _default_run_dir()
     root_run_dir.mkdir(parents=True, exist_ok=True)
     (root_run_dir / "command.txt").write_text(" ".join(sys.argv), encoding="utf-8")
+    run_budget = _args_run_budget(args)
     aggregate_run = {
         "schema": RUN_SCHEMA,
         "format": FORMAT,
         "arch": "llm_char_vae_context_sweep",
+        **run_budget,
+        "budget": run_budget,
         "features": features,
         "feature_normalize": normalize_modes[0] if len(normalize_modes) == 1 else None,
         "feature_normalize_modes": normalize_modes,
@@ -4481,6 +4628,7 @@ def main(argv: list[str] | None = None) -> int:
         config_summaries,
         best_config,
         min_nll_delta=float(args.min_nll_delta),
+        current_run_budget=run_budget,
     )
     if follow_up_result is not None:
         aggregate["follow_up_result"] = follow_up_result
