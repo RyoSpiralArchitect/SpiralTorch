@@ -671,6 +671,30 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
             1015,
             1017,
         ]
+        feature_family_stability = [
+            {
+                "family": "hybrid_latent",
+                "win_count": 3,
+                "near_win_count": 3,
+                "win_rate": 1.0,
+                "near_win_rate": 1.0,
+                "mean_best_nll": 4.198,
+                "mean_best_accuracy": 0.12,
+                "mean_best_nll_delta_vs_raw": -0.03,
+                "mean_rank": 1.0,
+                "mean_gap_to_winner": 0.0,
+                "member_best_counts": {
+                    "raw_latent": 2,
+                    "reconstruction_latent": 1,
+                },
+            },
+            {
+                "family": "raw",
+                "win_count": 0,
+                "near_win_count": 0,
+                "mean_best_nll_delta_vs_raw": 0.0,
+            },
+        ]
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -694,6 +718,7 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
                 summary["follow_up_chain"],
                 trajectory,
                 next_follow_up,
+                feature_family_stability,
             )
             guidance = mod._follow_up_guidance_record(
                 summary["follow_up_result"],
@@ -727,14 +752,39 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
         self.assertEqual(broadened["broadened_eval_samples"], 64)
         self.assertEqual(broadened["broadened_vae_epochs"], 4)
         self.assertEqual(broadened["broadened_vae_batches"], 8)
+        self.assertEqual(
+            broadened["focused_features"],
+            ["raw", "latent", "raw_latent", "reconstruction_latent"],
+        )
+        self.assertEqual(
+            broadened["feature_family_focus"]["family"],
+            "hybrid_latent",
+        )
+        self.assertEqual(
+            broadened["feature_family_focus"]["added_features"],
+            ["reconstruction_latent"],
+        )
+        self.assertIn(
+            "--features raw,latent,raw_latent,reconstruction_latent",
+            broadened["shell_command"],
+        )
         self.assertEqual(guidance["action"], "promote_and_broaden_after_streak")
         self.assertIs(guidance["use_next_follow_up_command"], False)
         self.assertIs(guidance["use_broadened_follow_up_command"], True)
         self.assertEqual(guidance["command_usage"], broadened["script_usage"])
+        self.assertIn(
+            "family focus: hybrid_latent wins=3 near_wins=3",
+            guidance["reasons"],
+        )
         self.assertIs(guided["enabled"], True)
         self.assertEqual(guided["default_new_seeds"], "101,103,107,109,113")
         self.assertIn("## Broadened Follow-Up Command", report)
         self.assertIn("- use_broadened_follow_up_command: True", report)
+        self.assertIn("- feature_family_focus: hybrid_latent", report)
+        self.assertIn(
+            "- features_added_for_family: reconstruction_latent",
+            report,
+        )
         self.assertIn("- guidance_action: promote_and_broaden_after_streak", report)
 
 
