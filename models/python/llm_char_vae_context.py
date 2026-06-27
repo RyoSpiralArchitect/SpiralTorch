@@ -1131,6 +1131,7 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
     follow_up_result = summary.get("follow_up_result")
     follow_up_chain = summary.get("follow_up_chain")
     follow_up_gate = summary.get("follow_up_gate")
+    follow_up_guidance = summary.get("follow_up_guidance")
     if isinstance(follow_up_result, dict):
         source_config = follow_up_result.get("source_best_config")
         evaluated_config = follow_up_result.get("evaluated_config")
@@ -1244,6 +1245,27 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 f"- fail_on_verdicts: {fail_on_text}",
                 f"- failed: {follow_up_gate.get('failed')}",
                 f"- exit_code: {follow_up_gate.get('exit_code')}",
+                "",
+            ]
+        )
+    if isinstance(follow_up_guidance, dict):
+        reasons = follow_up_guidance.get("reasons", [])
+        reasons_text = (
+            ", ".join(str(item) for item in reasons)
+            if isinstance(reasons, list)
+            else "-"
+        )
+        lines.extend(
+            [
+                "## Follow-Up Guidance",
+                "",
+                f"- action: {follow_up_guidance.get('action')}",
+                f"- promote_current_best: {follow_up_guidance.get('promote_current_best')}",
+                "- use_next_follow_up_command: "
+                f"{follow_up_guidance.get('use_next_follow_up_command')}",
+                f"- gate_failed: {follow_up_guidance.get('gate_failed')}",
+                f"- reasons: {reasons_text}",
+                f"- command_usage: `{follow_up_guidance.get('command_usage') or '-'}`",
                 "",
             ]
         )
@@ -2233,6 +2255,103 @@ def _follow_up_gate_record(
     }
 
 
+def _follow_up_guidance_record(
+    follow_up_result: dict[str, Any] | None,
+    follow_up_chain: dict[str, Any] | None,
+    follow_up_gate: dict[str, Any] | None,
+    next_follow_up: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(follow_up_result, dict):
+        return None
+
+    verdict = str(follow_up_result.get("verdict") or "unknown")
+    config_verdict = str(follow_up_result.get("config_verdict") or "unknown")
+    source_feature_verdict = str(
+        follow_up_result.get("source_feature_verdict") or "unknown"
+    )
+    source_retained = bool(follow_up_result.get("source_best_feature_retained"))
+    gate_failed = (
+        bool(follow_up_gate.get("failed"))
+        if isinstance(follow_up_gate, dict)
+        else False
+    )
+    improved_streak = (
+        int(follow_up_chain.get("improved_streak") or 0)
+        if isinstance(follow_up_chain, dict)
+        else 0
+    )
+    regressed_streak = (
+        int(follow_up_chain.get("regressed_streak") or 0)
+        if isinstance(follow_up_chain, dict)
+        else 0
+    )
+
+    source_feature_swapped = source_feature_verdict == "regressed" or not source_retained
+    config_improved_while_source_regressed = (
+        config_verdict == "improved" and source_feature_verdict == "regressed"
+    )
+    reasons: list[str] = []
+    promote_current_best = False
+    use_next_follow_up_command = False
+    action = "review_follow_up"
+
+    def add_reason(reason: str) -> None:
+        if reason not in reasons:
+            reasons.append(reason)
+
+    if gate_failed:
+        action = "stop_on_follow_up_gate"
+        add_reason(f"gate failed on verdict={verdict}")
+    elif source_feature_swapped:
+        action = "review_feature_swap_before_promotion"
+        add_reason("source best feature did not retain its role")
+        if config_improved_while_source_regressed:
+            add_reason("config improved while source feature regressed")
+    elif verdict == "improved":
+        promote_current_best = True
+        use_next_follow_up_command = isinstance(next_follow_up, dict)
+        action = (
+            "promote_and_broaden_after_streak"
+            if improved_streak >= 2
+            else "continue_fresh_seed_confirmation"
+        )
+        add_reason(f"source feature improved with streak={improved_streak}")
+    elif verdict == "confirmed":
+        promote_current_best = True
+        use_next_follow_up_command = isinstance(next_follow_up, dict)
+        action = "continue_confirmation_or_widen_seeds"
+        add_reason("source feature stayed within the confirmation band")
+    elif verdict == "regressed":
+        action = "rerun_or_audit_source_feature"
+        add_reason(f"source feature regressed with streak={regressed_streak}")
+    else:
+        action = "rerun_with_more_evidence"
+        add_reason("follow-up verdict is unknown")
+
+    if gate_failed and source_feature_swapped:
+        add_reason("source best feature did not retain its role")
+    if gate_failed and config_improved_while_source_regressed:
+        add_reason("config improved while source feature regressed")
+
+    command_usage = None
+    if use_next_follow_up_command and isinstance(next_follow_up, dict):
+        command_usage = next_follow_up.get("script_usage")
+
+    return {
+        "schema": "st.llm_char_vae_context.follow_up_guidance.v1",
+        "action": action,
+        "verdict": verdict,
+        "config_verdict": config_verdict,
+        "source_feature_verdict": source_feature_verdict,
+        "source_best_feature_retained": source_retained,
+        "promote_current_best": promote_current_best,
+        "use_next_follow_up_command": use_next_follow_up_command,
+        "gate_failed": gate_failed,
+        "reasons": reasons,
+        "command_usage": command_usage,
+    }
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -2724,6 +2843,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     )
     best_config = _best_config_summary(config_summaries)
+    next_follow_up = None
     if best_config is not None:
         aggregate["best_config"] = best_config
         aggregate["best_feature_normalize"] = best_config.get("feature_normalize")
@@ -2759,6 +2879,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     if follow_up_gate is not None:
         aggregate["follow_up_gate"] = follow_up_gate
+    follow_up_guidance = _follow_up_guidance_record(
+        follow_up_result,
+        follow_up_chain,
+        follow_up_gate,
+        next_follow_up,
+    )
+    if follow_up_guidance is not None:
+        aggregate["follow_up_guidance"] = follow_up_guidance
     _write_json(root_run_dir / "summary.json", aggregate)
     _write_text(root_run_dir / "report.md", _aggregate_report(aggregate))
     if args.json:
