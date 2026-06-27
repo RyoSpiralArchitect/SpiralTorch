@@ -27,6 +27,7 @@ FEATURE_RECONSTRUCTION = "reconstruction"
 FEATURE_LATENT = "latent"
 FEATURE_RAW_LATENT = "raw_latent"
 FEATURE_RECONSTRUCTION_LATENT = "reconstruction_latent"
+FEATURE_FAMILY_HYBRID_LATENT = "hybrid_latent"
 FEATURE_CHOICES = (
     FEATURE_RAW,
     FEATURE_RECONSTRUCTION,
@@ -163,6 +164,12 @@ def _feature_dim(model: Any, feature: str) -> int:
     if feature in {FEATURE_RAW_LATENT, FEATURE_RECONSTRUCTION_LATENT}:
         return int(model.input_dim) + int(model.latent_dim)
     raise ValueError(f"unknown feature: {feature}")
+
+
+def _feature_family(feature: str) -> str:
+    if feature in {FEATURE_RAW_LATENT, FEATURE_RECONSTRUCTION_LATENT}:
+        return FEATURE_FAMILY_HYBRID_LATENT
+    return feature
 
 
 def _build_mellin_basis(model: Any, args: argparse.Namespace) -> Any | None:
@@ -916,6 +923,18 @@ def _fmt_count_rate(count: Any, total: int) -> str:
     return f"{int(parsed)}/{total} ({_fmt_percent(parsed / float(total), 1)})"
 
 
+def _fmt_count_map(counts: Any) -> str:
+    if not isinstance(counts, dict):
+        return "-"
+    rows = []
+    for key, value in sorted(
+        counts.items(),
+        key=lambda item: (-int(item[1]), str(item[0])),
+    ):
+        rows.append(f"{key}={int(value)}")
+    return ", ".join(rows) if rows else "-"
+
+
 def _fmt_stat_mean(stats: dict[str, Any] | None, digits: int = 6) -> str:
     if not stats:
         return "-"
@@ -1034,6 +1053,20 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
             _fmt_float(item.get("mean_gap_to_winner")),
         ]
         for item in summary.get("feature_stability", [])
+    ]
+    family_rows = [
+        [
+            str(item.get("family")),
+            _fmt_float(item.get("mean_best_nll")),
+            _fmt_percent(item.get("mean_best_accuracy")),
+            _fmt_float(item.get("mean_best_nll_delta_vs_raw")),
+            _fmt_count_rate(item.get("win_count"), seed_total),
+            _fmt_count_rate(item.get("near_win_count"), seed_total),
+            _fmt_float(item.get("mean_rank"), 2),
+            _fmt_float(item.get("mean_gap_to_winner")),
+            _fmt_count_map(item.get("member_best_counts")),
+        ]
+        for item in summary.get("feature_family_stability", [])
     ]
     config_rows = []
     for item in config_summaries:
@@ -1443,6 +1476,23 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
             stability_rows,
         )
     )
+    lines.extend(["", "## Feature Family Stability", ""])
+    lines.extend(
+        _markdown_table(
+            [
+                "family",
+                "mean_best_nll",
+                "mean_best_acc",
+                "mean_delta_vs_raw",
+                "wins_or_ties",
+                "near_wins",
+                "mean_rank",
+                "mean_gap_to_winner",
+                "best_members",
+            ],
+            family_rows,
+        )
+    )
     lines.extend(["", "## Aggregate Feature Diagnostics", ""])
     lines.extend(
         _markdown_table(
@@ -1591,6 +1641,13 @@ def _aggregate_summaries(
             str(feature_result["feature"])
             for summary in summaries
             for feature_result in summary.get("features", [])
+            if feature_result.get("feature") is not None
+        }
+        | {
+            str(item["feature"])
+            for summary in summaries
+            for item in summary.get("ranking", [])
+            if item.get("feature") is not None
         }
     )
     feature_rows = []
@@ -1601,6 +1658,19 @@ def _aggregate_summaries(
             for feature_result in summary.get("features", [])
             if feature_result.get("feature") == feature
         ]
+        if not feature_results:
+            feature_results = [
+                {
+                    "feature": item.get("feature"),
+                    "best_validation": {
+                        "mean_nll": item.get("best_mean_nll"),
+                        "accuracy": item.get("best_accuracy"),
+                    },
+                }
+                for summary in summaries
+                for item in summary.get("ranking", [])
+                if item.get("feature") == feature
+            ]
         best_nlls = [
             float(feature_result["best_validation"]["mean_nll"])
             for feature_result in feature_results
@@ -1664,6 +1734,23 @@ def _aggregate_summaries(
             "gaps": [],
         }
         for feature in feature_names
+    }
+
+    def new_feature_family_stats() -> dict[str, Any]:
+        return {
+            "win_count": 0,
+            "near_win_count": 0,
+            "ranks": [],
+            "gaps": [],
+            "best_nlls": [],
+            "best_accs": [],
+            "deltas_vs_raw": [],
+            "member_best_counts": {},
+        }
+
+    family_names = sorted({_feature_family(feature) for feature in feature_names})
+    feature_family_stability_acc: dict[str, dict[str, Any]] = {
+        family: new_feature_family_stats() for family in family_names
     }
     for summary in summaries:
         entries = []
@@ -1730,6 +1817,86 @@ def _aggregate_summaries(
                 {"win_count": 0, "near_win_count": 0, "ranks": [], "gaps": []},
             )["near_win_count"] += 1
 
+        raw_entry = next((item for item in entries if item["feature"] == FEATURE_RAW), None)
+        raw_best_nll = float(raw_entry["best_nll"]) if raw_entry is not None else None
+        family_best_by_name: dict[str, dict[str, Any]] = {}
+        for item in entries:
+            family = _feature_family(str(item["feature"]))
+            current = family_best_by_name.get(family)
+            if current is None or (
+                float(item["best_nll"]),
+                str(item["feature"]),
+            ) < (
+                float(current["best_nll"]),
+                str(current["feature"]),
+            ):
+                family_best_by_name[family] = item
+        family_entries = [
+            {
+                "family": family,
+                "feature": item["feature"],
+                "best_nll": item["best_nll"],
+                "best_accuracy": item["best_accuracy"],
+                "rank": None,
+            }
+            for family, item in family_best_by_name.items()
+        ]
+        family_entries.sort(
+            key=lambda item: (
+                float(item["best_nll"]),
+                str(item["family"]),
+                str(item["feature"]),
+            )
+        )
+        family_current_rank = 0
+        family_previous_nll: float | None = None
+        for position, item in enumerate(family_entries, start=1):
+            best_nll = float(item["best_nll"])
+            if family_previous_nll is None or best_nll > family_previous_nll:
+                family_current_rank = position
+                family_previous_nll = best_nll
+            item["rank"] = family_current_rank
+        if family_entries:
+            family_best = family_entries[0]
+            family_strict_winners = [
+                str(item["family"])
+                for item in family_entries
+                if float(item["best_nll"]) - float(family_best["best_nll"]) <= 0.0
+            ]
+            family_near_winners = [
+                str(item["family"])
+                for item in family_entries
+                if float(item["best_nll"]) - float(family_best["best_nll"]) <= win_tolerance
+            ]
+            for item in family_entries:
+                family = str(item["family"])
+                stats = feature_family_stability_acc.setdefault(
+                    family,
+                    new_feature_family_stats(),
+                )
+                stats["ranks"].append(float(item["rank"]))
+                stats["gaps"].append(
+                    float(item["best_nll"]) - float(family_best["best_nll"])
+                )
+                stats["best_nlls"].append(float(item["best_nll"]))
+                if item["best_accuracy"] is not None:
+                    stats["best_accs"].append(float(item["best_accuracy"]))
+                if raw_best_nll is not None:
+                    stats["deltas_vs_raw"].append(float(item["best_nll"]) - raw_best_nll)
+                member_counts = stats["member_best_counts"]
+                member = str(item["feature"])
+                member_counts[member] = int(member_counts.get(member, 0)) + 1
+            for family in family_strict_winners:
+                feature_family_stability_acc.setdefault(
+                    family,
+                    new_feature_family_stats(),
+                )["win_count"] += 1
+            for family in family_near_winners:
+                feature_family_stability_acc.setdefault(
+                    family,
+                    new_feature_family_stats(),
+                )["near_win_count"] += 1
+
         seed_winners.append(
             {
                 "seed": summary.get("run", {}).get("seed"),
@@ -1786,6 +1953,51 @@ def _aggregate_summaries(
         )
     )
 
+    feature_family_stability = []
+    for family in family_names:
+        stats = feature_family_stability_acc.get(
+            family,
+            new_feature_family_stats(),
+        )
+        rank_stats = _metric_stats(stats.get("ranks", []))
+        gap_stats = _metric_stats(stats.get("gaps", []))
+        best_nll_stats = _metric_stats(stats.get("best_nlls", []))
+        best_acc_stats = _metric_stats(stats.get("best_accs", []))
+        delta_stats = _metric_stats(stats.get("deltas_vs_raw", []))
+        win_count = int(stats.get("win_count", 0))
+        near_win_count = int(stats.get("near_win_count", 0))
+        feature_family_stability.append(
+            {
+                "family": family,
+                "win_count": win_count,
+                "win_rate": win_count / float(seed_count) if seed_count else None,
+                "near_win_count": near_win_count,
+                "near_win_rate": near_win_count / float(seed_count) if seed_count else None,
+                "rank": rank_stats,
+                "mean_rank": rank_stats["mean"],
+                "gap_to_winner": gap_stats,
+                "mean_gap_to_winner": gap_stats["mean"],
+                "best_nll": best_nll_stats,
+                "mean_best_nll": best_nll_stats["mean"],
+                "best_accuracy": best_acc_stats,
+                "mean_best_accuracy": best_acc_stats["mean"],
+                "best_nll_delta_vs_raw": delta_stats,
+                "mean_best_nll_delta_vs_raw": delta_stats["mean"],
+                "member_best_counts": stats.get("member_best_counts", {}),
+            }
+        )
+    feature_family_stability.sort(
+        key=lambda item: (
+            -int(item.get("win_count", 0)),
+            -int(item.get("near_win_count", 0)),
+            float("inf") if item.get("mean_rank") is None else float(item["mean_rank"]),
+            float("inf")
+            if item.get("mean_gap_to_winner") is None
+            else float(item["mean_gap_to_winner"]),
+            str(item.get("family")),
+        )
+    )
+
     ranking = sorted(
         feature_rows,
         key=lambda item: (
@@ -1825,6 +2037,7 @@ def _aggregate_summaries(
         ],
         "seed_winners": seed_winners,
         "feature_stability": feature_stability,
+        "feature_family_stability": feature_family_stability,
         "win_tolerance": win_tolerance,
         "best_feature": best_feature,
         "status": status,
