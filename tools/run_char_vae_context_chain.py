@@ -297,6 +297,16 @@ def _step_record(
             "runner_up_mean_best_nll",
         ),
         "margin_to_runner_up": _value(summary, "best_config", "margin_to_runner_up"),
+        "combined_runner_up_margin_stderr": _value(
+            summary,
+            "best_config",
+            "combined_runner_up_margin_stderr",
+        ),
+        "runner_up_within_uncertainty": _value(
+            summary,
+            "best_config",
+            "runner_up_within_uncertainty",
+        ),
         "mean_best_nll_delta_vs_source": delta_vs_source,
         "source_feature_mean_best_nll_delta_vs_source": source_feature_delta_vs_source,
         "follow_up_verdict": _value(summary, "follow_up_result", "verdict"),
@@ -345,6 +355,10 @@ def _selection_step_record(step: dict[str, Any] | None) -> dict[str, Any] | None
         "runner_up_feature": step.get("runner_up_feature"),
         "runner_up_mean_best_nll": step.get("runner_up_mean_best_nll"),
         "margin_to_runner_up": step.get("margin_to_runner_up"),
+        "combined_runner_up_margin_stderr": step.get(
+            "combined_runner_up_margin_stderr"
+        ),
+        "runner_up_within_uncertainty": step.get("runner_up_within_uncertainty"),
         "mean_best_nll_delta_vs_source": step.get("mean_best_nll_delta_vs_source"),
         "follow_up_verdict": step.get("follow_up_verdict"),
         "source_best_feature_retained": step.get("source_best_feature_retained"),
@@ -430,14 +444,16 @@ def _render_report(manifest: dict[str, Any]) -> str:
         ),
         "",
         "| step | role | exit | status | best_config | mean_best_nll | "
-        "runner_up | margin | delta_vs_raw | delta_vs_source | verdict | retained | gate | "
+        "runner_up | margin | margin_stderr | within_uncertainty | "
+        "delta_vs_raw | delta_vs_source | verdict | retained | gate | "
         "trajectory | guidance | unsafe | guided |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for step in manifest.get("steps", []):
         lines.append(
             "| {index} | {role} | {exit_code} | {status} | {best_feature} | "
             "{mean_best_nll} | {runner_up_feature} | {margin_to_runner_up} | "
+            "{combined_runner_up_margin_stderr} | {runner_up_within_uncertainty} | "
             "{mean_best_nll_delta_vs_raw} | "
             "{mean_best_nll_delta_vs_source} | {follow_up_verdict} | "
             "{source_best_feature_retained} | {follow_up_gate_failed} | "
@@ -453,6 +469,12 @@ def _render_report(manifest: dict[str, Any]) -> str:
                 mean_best_nll=_fmt(step.get("mean_best_nll")),
                 runner_up_feature=_fmt(step.get("runner_up_feature")),
                 margin_to_runner_up=_fmt(step.get("margin_to_runner_up")),
+                combined_runner_up_margin_stderr=_fmt(
+                    step.get("combined_runner_up_margin_stderr")
+                ),
+                runner_up_within_uncertainty=_fmt(
+                    step.get("runner_up_within_uncertainty")
+                ),
                 mean_best_nll_delta_vs_raw=_fmt(
                     step.get("mean_best_nll_delta_vs_raw")
                 ),

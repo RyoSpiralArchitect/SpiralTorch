@@ -413,6 +413,16 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
             "best_feature": "raw_latent",
             "status": "improved",
             "run_dir": "/tmp/chain/parent",
+            "feature_summary": [
+                {
+                    "feature": "raw_latent",
+                    "best_nll": {"count": 3, "stderr": 0.0003},
+                },
+                {
+                    "feature": "reconstruction_latent",
+                    "best_nll": {"count": 3, "stderr": 0.0004},
+                },
+            ],
             "ranking": [
                 {
                     "feature": "raw_latent",
@@ -450,10 +460,22 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
 
         self.assertEqual(best_config["runner_up_feature"], "reconstruction_latent")
         self.assertAlmostEqual(best_config["margin_to_runner_up"], 0.0004)
+        self.assertAlmostEqual(best_config["mean_best_nll_stderr"], 0.0003)
+        self.assertAlmostEqual(
+            best_config["combined_runner_up_margin_stderr"],
+            0.0005,
+        )
+        self.assertIs(best_config["runner_up_within_uncertainty"], True)
         self.assertEqual(compact["runner_up_feature"], "reconstruction_latent")
         self.assertAlmostEqual(compact["margin_to_runner_up"], 0.0004)
+        self.assertAlmostEqual(
+            compact["runner_up_mean_best_nll_stderr"],
+            0.0004,
+        )
         self.assertIn("- best_config_runner_up: reconstruction_latent", report)
         self.assertIn("margin=0.000400", report)
+        self.assertIn("combined_stderr=0.000500", report)
+        self.assertIn("within_uncertainty=True", report)
 
     def test_aggregate_recovers_curve_metrics_from_legacy_history(self) -> None:
         mod = _load_module()
