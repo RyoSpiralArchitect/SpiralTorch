@@ -104,6 +104,12 @@ _ENTRY_METADATA: dict[str, dict[str, Any]] = {
         "description": "Character-level fine-tuning baseline.",
         "tags": ("llm", "text"),
     },
+    "llm_char_vae_context": {
+        "task": "language-modeling",
+        "family": "llm",
+        "description": "Character LM probe over raw/reconstruction/latent text VAE context features.",
+        "tags": ("llm", "text", "zspace", "vae", "comparison"),
+    },
     "llm_char_coherence_scan": {
         "task": "language-modeling",
         "family": "llm",
