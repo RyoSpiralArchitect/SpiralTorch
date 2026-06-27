@@ -36,6 +36,10 @@ class CharVaeContextChainTests(unittest.TestCase):
             smoke_command[smoke_command.index("--feature-normalize-modes") + 1],
             "blocks,vector",
         )
+        self.assertEqual(
+            smoke_command[smoke_command.index("--head-init") + 1],
+            "legacy",
+        )
 
         small = parser.parse_args(["models/samples/spiral_corpus_en", "--preset", "small"])
         small_command = mod._parent_command(small, Path("/tmp/small"))
@@ -59,6 +63,10 @@ class CharVaeContextChainTests(unittest.TestCase):
         self.assertEqual(
             hybrid4_command[hybrid4_command.index("--hybrid-latent-scales") + 1],
             "2.0,4.0",
+        )
+        self.assertEqual(
+            hybrid4_command[hybrid4_command.index("--head-init") + 1],
+            "xavier",
         )
         self.assertEqual(hybrid4_command[hybrid4_command.index("--epochs") + 1], "8")
         self.assertEqual(hybrid4_command[hybrid4_command.index("--batches") + 1], "16")

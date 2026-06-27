@@ -36,6 +36,7 @@ FEATURE_CHOICES = (
     FEATURE_RECONSTRUCTION_LATENT,
 )
 NORMALIZE_CHOICES = ("none", "vector", "blocks")
+HEAD_INIT_CHOICES = ("legacy", "xavier")
 FOLLOW_UP_VERDICTS = ("improved", "confirmed", "regressed", "unknown")
 FOLLOW_UP_CHAIN_MAX_ANCESTORS = 8
 RUN_BUDGET_KEYS = (
@@ -359,6 +360,62 @@ def _build_head(feature_dim: int, hidden: int, vocab_size: int, curvature: float
         model.add(st.nn.Linear("head", feature_dim, vocab_size))
     model.add(st.nn.ZSpaceSoftmax(curvature, temperature))
     return model
+
+
+def _xavier_limit(rows: int, cols: int) -> float:
+    fan_sum = max(1, int(rows) + int(cols))
+    return math.sqrt(6.0 / float(fan_sum))
+
+
+def _rescale_values_to_abs_limit(values: Iterable[float], limit: float) -> list[float]:
+    parsed = [float(value) for value in values]
+    max_abs = max((abs(value) for value in parsed), default=0.0)
+    if max_abs <= 0.0:
+        return parsed
+    scale = float(limit) / max_abs
+    return [value * scale for value in parsed]
+
+
+def _flatten_tensor_rows(tensor: Any) -> list[float]:
+    rows = tensor.tolist()
+    return [float(value) for row in rows for value in row]
+
+
+def _rescale_head_init(head: Any, mode: str) -> dict[str, Any]:
+    if mode == "legacy":
+        return {"mode": mode, "rescaled": False, "layers": []}
+    if mode != "xavier":
+        raise ValueError("--head-init must be one of: legacy|xavier")
+
+    next_state = []
+    layers = []
+    for name, tensor in head.state_dict():
+        rows, cols = tensor.shape()
+        if name.endswith("::weight"):
+            limit = _xavier_limit(int(rows), int(cols))
+            values = _flatten_tensor_rows(tensor)
+            rescaled = _rescale_values_to_abs_limit(values, limit)
+            next_state.append((name, st.Tensor(int(rows), int(cols), rescaled)))
+            layers.append(
+                {
+                    "name": name,
+                    "rows": int(rows),
+                    "cols": int(cols),
+                    "limit": float(limit),
+                    "max_abs_before": max(
+                        (abs(value) for value in values),
+                        default=0.0,
+                    ),
+                    "max_abs_after": max(
+                        (abs(value) for value in rescaled),
+                        default=0.0,
+                    ),
+                }
+            )
+        else:
+            next_state.append((name, tensor))
+    head.load_state_dict(next_state)
+    return {"mode": mode, "rescaled": True, "layers": layers}
 
 
 def _normalise_grad_clip(raw: str) -> float | None:
@@ -688,6 +745,7 @@ def _train_feature_head(
         float(args.curvature),
         float(args.temperature),
     )
+    head_init = _rescale_head_init(head, str(args.head_init))
     head.attach_hypergrad(curvature=float(args.curvature), learning_rate=float(args.lr))
     trainer = st.nn.ModuleTrainer(
         backend=str(args.backend),
@@ -822,6 +880,7 @@ def _train_feature_head(
     return {
         "feature": feature,
         "feature_dim": feature_dim,
+        "head_init": head_init,
         "initial_validation": initial_validation,
         "best_validation": best_validation,
         "best_epoch": best_epoch,
@@ -1137,6 +1196,7 @@ def _single_report(summary: dict[str, Any]) -> str:
         f"- features: {', '.join(str(item) for item in run.get('features', []))}",
         f"- feature_normalize: {run.get('feature_normalize')}",
         f"- hybrid_latent_scale: {run.get('hybrid_latent_scale')}",
+        f"- head_init: {run.get('head_init')}",
         f"- window_chars: {run.get('window_chars')}",
         f"- latent_dim: {run.get('latent_dim')}",
         f"- summary_json: `summary.json`",
@@ -1307,6 +1367,7 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
         f"- feature_normalize_modes: {', '.join(str(mode) for mode in run.get('feature_normalize_modes', [])) or '-'}",
         f"- hybrid_latent_scale: {run.get('hybrid_latent_scale')}",
         f"- hybrid_latent_scales: {', '.join(str(scale) for scale in run.get('hybrid_latent_scales', [])) or '-'}",
+        f"- head_init: {run.get('head_init')}",
         f"- min_nll_delta: {run.get('min_nll_delta')}",
         f"- follow_up_confirm_tolerance: {run.get('follow_up_confirm_tolerance')}",
         f"- win_tolerance: {run.get('win_tolerance')}",
@@ -2564,6 +2625,7 @@ def _follow_up_command_parts(
         ("--window-chars", int(args.window_chars)),
         ("--latent-dim", int(args.latent_dim)),
         ("--hidden", int(args.hidden)),
+        ("--head-init", str(args.head_init)),
         ("--epochs", int(args.epochs)),
         ("--batches", int(args.batches)),
         ("--batch-size", int(args.batch_size)),
@@ -3354,6 +3416,7 @@ def _apply_follow_up_defaults(
         argv,
         "--hybrid-latent-scales",
     )
+    explicit_head_init = _flag_present(argv, "--head-init")
     explicit_seeds = _flag_present(argv, "--seeds")
 
     applied_defaults: dict[str, Any] = {}
@@ -3368,6 +3431,17 @@ def _apply_follow_up_defaults(
         args.hybrid_latent_scale = float(best_config["hybrid_latent_scale"])
         args.hybrid_latent_scales = None
         applied_defaults["hybrid_latent_scale"] = args.hybrid_latent_scale
+    if not explicit_head_init:
+        source_run = source_summary.get("run", {})
+        source_head_init = (
+            source_run.get("head_init") if isinstance(source_run, dict) else None
+        )
+        args.head_init = (
+            str(source_head_init)
+            if source_head_init in HEAD_INIT_CHOICES
+            else "legacy"
+        )
+        applied_defaults["head_init"] = args.head_init
     if not explicit_seeds:
         args.seeds = _default_follow_up_seeds(source_summary)
         applied_defaults["seeds"] = args.seeds
@@ -3388,6 +3462,7 @@ def _apply_follow_up_defaults(
             "features": explicit_features,
             "feature_normalize": explicit_normalize,
             "hybrid_latent_scale": explicit_scale,
+            "head_init": explicit_head_init,
             "seeds": explicit_seeds,
         },
     }
@@ -4518,6 +4593,16 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--latent-dim", type=int, default=16)
     parser.add_argument("--hidden", type=int, default=64)
     parser.add_argument(
+        "--head-init",
+        choices=HEAD_INIT_CHOICES,
+        default="legacy",
+        help=(
+            "prediction-head initialization policy; xavier rescales Linear "
+            "weights to an Xavier-style max-abs limit while keeping deterministic "
+            "ordering"
+        ),
+    )
+    parser.add_argument(
         "--feature-normalize",
         choices=NORMALIZE_CHOICES,
         default="none",
@@ -4630,6 +4715,8 @@ def _validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--latent-dim must be > 0")
     if args.hidden < 0:
         raise ValueError("--hidden must be >= 0")
+    if str(args.head_init) not in HEAD_INIT_CHOICES:
+        raise ValueError("--head-init must be one of: legacy|xavier")
     if args.epochs < 0 or args.vae_epochs < 0:
         raise ValueError("--epochs and --vae-epochs must be >= 0")
     if args.batches <= 0 or args.vae_batches <= 0:
@@ -4707,7 +4794,8 @@ def _run_single(args: argparse.Namespace, features: list[str]) -> dict[str, Any]
         f"files={len(data_files)} chars={len(text)} vocab={vocab_size} "
         f"window_chars={vae.window_chars} latent_dim={vae.latent_dim} features={','.join(features)} "
         f"feature_normalize={args.feature_normalize} hybrid_latent_scale={args.hybrid_latent_scale} "
-        f"epochs={args.epochs} vae_epochs={args.vae_epochs} run_dir={run_dir}",
+        f"head_init={args.head_init} epochs={args.epochs} "
+        f"vae_epochs={args.vae_epochs} run_dir={run_dir}",
         flush=True,
     )
 
@@ -4744,6 +4832,7 @@ def _run_single(args: argparse.Namespace, features: list[str]) -> dict[str, Any]
         "feature_normalize": str(args.feature_normalize),
         "hybrid_latent_scale": float(args.hybrid_latent_scale),
         "hidden": int(args.hidden),
+        "head_init": str(args.head_init),
         "epochs": int(args.epochs),
         "batches": int(args.batches),
         "batch_size": int(args.batch_size),
@@ -4899,6 +4988,7 @@ def main(argv: list[str] | None = None) -> int:
             "features": features,
             "feature_normalize_modes": normalize_modes,
             "hybrid_latent_scales": scales,
+            "head_init": str(args.head_init),
             "seeds": seeds,
         }
 
@@ -4930,6 +5020,7 @@ def main(argv: list[str] | None = None) -> int:
         "run_count": len(normalize_modes) * len(scales) * len(seeds),
         "seeds": seeds,
         "seed_count": len(seeds),
+        "head_init": str(args.head_init),
         "min_nll_delta": float(args.min_nll_delta),
         "follow_up_confirm_tolerance": float(args.follow_up_confirm_tolerance),
         "win_tolerance": float(args.win_tolerance),
