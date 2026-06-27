@@ -514,6 +514,118 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
         self.assertEqual(guided["default_follow_up_from"], "/tmp/source/summary.json")
         self.assertEqual(guided["default_new_seeds"], "1007,1009,1011")
 
+    def test_improved_streak_generates_broadened_follow_up(self) -> None:
+        mod = _load_module()
+        parser = mod._build_parser()
+        args = parser.parse_args(
+            [
+                "models/samples/spiral_corpus_en",
+                "--epochs",
+                "2",
+                "--batches",
+                "4",
+                "--eval-samples",
+                "32",
+                "--vae-epochs",
+                "2",
+                "--vae-batches",
+                "4",
+            ]
+        )
+        summary = _summary(
+            best_feature="raw_latent",
+            nll=4.200,
+            verdict="improved",
+            config_verdict="improved",
+            source_feature_verdict="improved",
+            source_feature_raw_verdict="improved",
+            source_feature_delta_vs_raw=-0.030,
+            source_retained=True,
+            gate_failed=False,
+        )
+        summary["follow_up_chain"]["verdict_history"] = [
+            "regressed",
+            "improved",
+            "improved",
+            "improved",
+        ]
+        summary["follow_up_chain"]["latest_verdict"] = "improved"
+        summary["follow_up_chain"]["improved_streak"] = 3
+        next_follow_up = _next_follow_up()
+        next_follow_up["used_seed_history"] = [
+            7,
+            13,
+            17,
+            1013,
+            1015,
+            1017,
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            trajectory = mod._follow_up_trajectory_record(
+                root,
+                summary,
+                {
+                    "ancestors": [
+                        _ancestor(feature="raw_latent", nll=4.216, raw_delta=-0.014),
+                        _ancestor(feature="raw_latent", nll=4.204, raw_delta=-0.026),
+                    ]
+                },
+                min_nll_delta=0.0,
+            )
+            broadened = mod._broadened_follow_up_command_record(
+                args,
+                ["raw", "latent", "raw_latent"],
+                summary["best_config"],
+                root,
+                [1013, 1015, 1017],
+                summary["follow_up_chain"],
+                trajectory,
+                next_follow_up,
+            )
+            guidance = mod._follow_up_guidance_record(
+                summary["follow_up_result"],
+                summary["follow_up_chain"],
+                summary["follow_up_gate"],
+                next_follow_up,
+                trajectory,
+                None,
+                broadened,
+            )
+            guided = mod._guided_next_follow_up_command_record(
+                root,
+                guidance,
+                broadened,
+            )
+            report_summary = dict(summary)
+            report_summary["follow_up_trajectory"] = trajectory
+            report_summary["follow_up_guidance"] = guidance
+            report_summary["broadened_follow_up_command"] = broadened
+            report_summary["guided_next_follow_up_command"] = guided
+            report = mod._aggregate_report(report_summary)
+
+        self.assertEqual(
+            trajectory["trajectory_action"],
+            "confirm_trajectory_with_fresh_seeds",
+        )
+        self.assertIsNotNone(broadened)
+        self.assertEqual(broadened["default_new_seeds"], "101,103,107,109,113")
+        self.assertEqual(broadened["broadened_epochs"], 4)
+        self.assertEqual(broadened["broadened_batches"], 8)
+        self.assertEqual(broadened["broadened_eval_samples"], 64)
+        self.assertEqual(broadened["broadened_vae_epochs"], 4)
+        self.assertEqual(broadened["broadened_vae_batches"], 8)
+        self.assertEqual(guidance["action"], "promote_and_broaden_after_streak")
+        self.assertIs(guidance["use_next_follow_up_command"], False)
+        self.assertIs(guidance["use_broadened_follow_up_command"], True)
+        self.assertEqual(guidance["command_usage"], broadened["script_usage"])
+        self.assertIs(guided["enabled"], True)
+        self.assertEqual(guided["default_new_seeds"], "101,103,107,109,113")
+        self.assertIn("## Broadened Follow-Up Command", report)
+        self.assertIn("- use_broadened_follow_up_command: True", report)
+        self.assertIn("- guidance_action: promote_and_broaden_after_streak", report)
+
 
 if __name__ == "__main__":
     unittest.main()
