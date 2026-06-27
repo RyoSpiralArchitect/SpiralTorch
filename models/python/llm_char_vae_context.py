@@ -547,6 +547,139 @@ def _parse_features(raw: str) -> list[str]:
     return list(dict.fromkeys(features))
 
 
+def _parse_seeds(seed: int, raw: str | None) -> list[int]:
+    if raw is None or not raw.strip():
+        return [int(seed)]
+    seeds = []
+    for part in raw.split(","):
+        value = part.strip()
+        if not value:
+            continue
+        seeds.append(int(value))
+    if not seeds:
+        raise ValueError("--seeds must contain at least one integer seed")
+    return list(dict.fromkeys(seeds))
+
+
+def _clone_args(args: argparse.Namespace, **overrides: Any) -> argparse.Namespace:
+    values = vars(args).copy()
+    values.update(overrides)
+    return argparse.Namespace(**values)
+
+
+def _metric_stats(values: Iterable[float]) -> dict[str, Any]:
+    vals = [float(value) for value in values if value is not None and math.isfinite(float(value))]
+    if not vals:
+        return {
+            "count": 0,
+            "mean": None,
+            "stddev": None,
+            "min": None,
+            "max": None,
+        }
+    mean = sum(vals) / float(len(vals))
+    variance = sum((value - mean) ** 2 for value in vals) / float(len(vals))
+    return {
+        "count": len(vals),
+        "mean": mean,
+        "stddev": math.sqrt(variance),
+        "min": min(vals),
+        "max": max(vals),
+    }
+
+
+def _aggregate_summaries(
+    summaries: list[dict[str, Any]],
+    *,
+    min_nll_delta: float,
+) -> dict[str, Any]:
+    feature_names = sorted(
+        {
+            str(feature_result["feature"])
+            for summary in summaries
+            for feature_result in summary.get("features", [])
+        }
+    )
+    feature_rows = []
+    for feature in feature_names:
+        feature_results = [
+            feature_result
+            for summary in summaries
+            for feature_result in summary.get("features", [])
+            if feature_result.get("feature") == feature
+        ]
+        best_nlls = [
+            float(feature_result["best_validation"]["mean_nll"])
+            for feature_result in feature_results
+            if feature_result.get("best_validation", {}).get("mean_nll") is not None
+        ]
+        best_accs = [
+            float(feature_result["best_validation"]["accuracy"])
+            for feature_result in feature_results
+            if feature_result.get("best_validation", {}).get("accuracy") is not None
+        ]
+        deltas = [
+            float(summary.get("deltas", {}).get(f"{feature}_best_nll_vs_raw"))
+            for summary in summaries
+            if summary.get("deltas", {}).get(f"{feature}_best_nll_vs_raw") is not None
+        ]
+        feature_rows.append(
+            {
+                "feature": feature,
+                "runs": len(feature_results),
+                "best_nll": _metric_stats(best_nlls),
+                "best_accuracy": _metric_stats(best_accs),
+                "best_nll_delta_vs_raw": _metric_stats(deltas),
+            }
+        )
+
+    ranking = sorted(
+        feature_rows,
+        key=lambda item: (
+            float("inf")
+            if item["best_nll"]["mean"] is None
+            else float(item["best_nll"]["mean"]),
+            item["feature"],
+        ),
+    )
+    best_feature = ranking[0]["feature"] if ranking else None
+    non_raw_deltas = [
+        row
+        for row in feature_rows
+        if row["feature"] != FEATURE_RAW and row["best_nll_delta_vs_raw"]["mean"] is not None
+    ]
+    if not non_raw_deltas:
+        status = "no_raw_baseline"
+    elif any(float(row["best_nll_delta_vs_raw"]["mean"]) < -min_nll_delta for row in non_raw_deltas):
+        status = "improved"
+    elif all(float(row["best_nll_delta_vs_raw"]["mean"]) > min_nll_delta for row in non_raw_deltas):
+        status = "regression"
+    else:
+        status = "neutral"
+
+    return {
+        "feature_summary": feature_rows,
+        "ranking": [
+            {
+                "feature": item["feature"],
+                "mean_best_nll": item["best_nll"]["mean"],
+                "mean_best_accuracy": item["best_accuracy"]["mean"],
+                "mean_best_nll_delta_vs_raw": item["best_nll_delta_vs_raw"]["mean"],
+                "runs": item["runs"],
+            }
+            for item in ranking
+        ],
+        "best_feature": best_feature,
+        "status": status,
+    }
+
+
+def _seed_run_dir(root: pathlib.Path, seed: int) -> pathlib.Path:
+    if seed < 0:
+        return root / f"seed_neg_{abs(seed):06d}"
+    return root / f"seed_{seed:06d}"
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -569,6 +702,13 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--backend", default="cpu", help="cpu|wgpu|cuda|hip|auto")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--seeds", default=None, help="comma-separated seed list for sweep mode")
+    parser.add_argument(
+        "--min-nll-delta",
+        type=float,
+        default=0.0,
+        help="minimum mean NLL improvement over raw required for sweep status=improved",
+    )
     parser.add_argument("--prompt", default="SpiralTorch ")
     parser.add_argument("--gen", type=int, default=80)
     parser.add_argument("--top-k", type=int, default=16)
@@ -617,13 +757,11 @@ def _validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--gen must be >= 0")
     if args.top_k <= 0:
         raise ValueError("--top-k must be > 0")
+    if args.min_nll_delta < 0.0 or not math.isfinite(args.min_nll_delta):
+        raise ValueError("--min-nll-delta must be non-negative and finite")
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = _build_parser()
-    args = parser.parse_args(argv)
-    _validate_args(args)
-    features = _parse_features(str(args.features))
+def _run_single(args: argparse.Namespace, features: list[str]) -> dict[str, Any]:
     vae_grad_clip = _normalise_grad_clip(str(args.vae_grad_clip))
 
     data_paths = [pathlib.Path(value) for value in args.text_or_dir]
@@ -789,6 +927,101 @@ def main(argv: list[str] | None = None) -> int:
             ),
             flush=True,
         )
+    return summary
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    _validate_args(args)
+    features = _parse_features(str(args.features))
+    seeds = _parse_seeds(int(args.seed), args.seeds)
+
+    if len(seeds) == 1:
+        args.seed = seeds[0]
+        _run_single(args, features)
+        return 0
+
+    root_run_dir = args.run_dir or _default_run_dir()
+    root_run_dir.mkdir(parents=True, exist_ok=True)
+    (root_run_dir / "command.txt").write_text(" ".join(sys.argv), encoding="utf-8")
+    aggregate_run = {
+        "schema": RUN_SCHEMA,
+        "format": FORMAT,
+        "arch": "llm_char_vae_context_sweep",
+        "features": features,
+        "seeds": seeds,
+        "seed_count": len(seeds),
+        "min_nll_delta": float(args.min_nll_delta),
+        "run_dir": str(root_run_dir),
+    }
+    _write_json(root_run_dir / "run.json", aggregate_run)
+
+    summaries = []
+    runs_jsonl = root_run_dir / "runs.jsonl"
+    if runs_jsonl.exists():
+        runs_jsonl.unlink()
+    started = time.time()
+    for seed in seeds:
+        seed_dir = _seed_run_dir(root_run_dir, seed)
+        print(f"sweep_seed={seed} run_dir={seed_dir}", flush=True)
+        seed_args = _clone_args(
+            args,
+            seed=seed,
+            run_dir=seed_dir,
+            vae_save=None,
+            json=False,
+        )
+        summary = _run_single(seed_args, features)
+        summaries.append(summary)
+        _append_jsonl(
+            runs_jsonl,
+            {
+                "seed": seed,
+                "run_dir": str(seed_dir),
+                "summary_path": str(seed_dir / "summary.json"),
+                "best_feature": summary.get("best_feature"),
+                "ranking": summary.get("ranking", []),
+                "deltas": summary.get("deltas", {}),
+            },
+        )
+
+    aggregate = {
+        "schema": RUN_SCHEMA,
+        "format": FORMAT,
+        "aggregate": True,
+        "elapsed_seconds": time.time() - started,
+        "run": aggregate_run,
+        "seed_summaries": [
+            {
+                "seed": summary.get("run", {}).get("seed"),
+                "run_dir": str(_seed_run_dir(root_run_dir, int(summary.get("run", {}).get("seed", 0)))),
+                "best_feature": summary.get("best_feature"),
+                "ranking": summary.get("ranking", []),
+                "deltas": summary.get("deltas", {}),
+            }
+            for summary in summaries
+        ],
+    }
+    aggregate.update(
+        _aggregate_summaries(
+            summaries,
+            min_nll_delta=float(args.min_nll_delta),
+        )
+    )
+    _write_json(root_run_dir / "summary.json", aggregate)
+    if args.json:
+        print(json.dumps(aggregate, ensure_ascii=False, indent=2))
+
+    print(
+        "sweep_status={status} best_feature={feature} seeds={seeds} summary_json={path}".format(
+            status=aggregate["status"],
+            feature=aggregate["best_feature"],
+            seeds=",".join(str(seed) for seed in seeds),
+            path=root_run_dir / "summary.json",
+        ),
+        flush=True,
+    )
     return 0
 
 
