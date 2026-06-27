@@ -30,6 +30,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     "smoke": {
         "features": DEFAULT_FEATURES,
         "feature_normalize_modes": DEFAULT_NORMALIZE_MODES,
+        "head_init": "legacy",
         "window_chars": 20,
         "latent_dim": 5,
         "hidden": 8,
@@ -48,6 +49,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     "small": {
         "features": DEFAULT_FEATURES,
         "feature_normalize_modes": DEFAULT_NORMALIZE_MODES,
+        "head_init": "legacy",
         "window_chars": 32,
         "latent_dim": 8,
         "hidden": 16,
@@ -66,6 +68,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     "hybrid4": {
         "features": FOCUSED_HYBRID_FEATURES,
         "feature_normalize_modes": "blocks",
+        "head_init": "xavier",
         "window_chars": 32,
         "latent_dim": 8,
         "hidden": 16,
@@ -84,6 +87,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     "base": {
         "features": DEFAULT_FEATURES,
         "feature_normalize_modes": DEFAULT_NORMALIZE_MODES,
+        "head_init": "legacy",
         "window_chars": 48,
         "latent_dim": 16,
         "hidden": 32,
@@ -160,6 +164,7 @@ def _parent_command(args: argparse.Namespace, run_dir: Path) -> list[str]:
         "--hybrid-latent-scales",
         _preset_value(args, "hybrid_latent_scales"),
     )
+    _append_flag(command, "--head-init", _preset_value(args, "head_init"))
     _append_flag(command, "--seeds", _preset_value(args, "seeds"))
     _append_flag(command, "--run-dir", run_dir)
     _append_flag(command, "--follow-up-fail-on-verdict", args.follow_up_fail_on_verdict)
@@ -486,6 +491,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--features", default=None)
     parser.add_argument("--feature-normalize-modes", default=None)
     parser.add_argument("--hybrid-latent-scales", default=None)
+    parser.add_argument("--head-init", choices=("legacy", "xavier"), default=None)
     parser.add_argument("--python", default="python3")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true", help="print chain manifest JSON")

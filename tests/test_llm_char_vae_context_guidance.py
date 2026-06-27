@@ -181,10 +181,67 @@ def _seed_summary(
 
 
 class CharVaeContextGuidanceTests(unittest.TestCase):
+    def test_xavier_rescale_values_fit_requested_abs_limit(self) -> None:
+        mod = _load_module()
+
+        values = mod._rescale_values_to_abs_limit([0.1, -0.2, 0.4], 0.05)
+
+        self.assertAlmostEqual(max(abs(value) for value in values), 0.05)
+        self.assertAlmostEqual(values[0], 0.0125)
+        self.assertEqual(
+            mod._rescale_values_to_abs_limit([0.0, 0.0], 0.05),
+            [0.0, 0.0],
+        )
+
+    def test_follow_up_defaults_inherit_source_head_init(self) -> None:
+        mod = _load_module()
+        parser = mod._build_parser()
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "summary.json"
+            source.write_text(
+                json.dumps(
+                    {
+                        "status": "improved",
+                        "best_feature": "raw_latent",
+                        "best_config": {
+                            "best_feature": "raw_latent",
+                            "feature_normalize": "blocks",
+                            "hybrid_latent_scale": 4.0,
+                            "mean_best_nll": 4.1,
+                        },
+                        "run": {
+                            "features": ["raw", "raw_latent"],
+                            "seeds": [101, 103, 107],
+                            "head_init": "xavier",
+                            "window_chars": 32,
+                            "latent_dim": 8,
+                            "hidden": 16,
+                            "epochs": 8,
+                            "batches": 16,
+                            "batch_size": 4,
+                            "eval_samples": 128,
+                            "vae_epochs": 8,
+                            "vae_batches": 16,
+                            "vae_batch_size": 4,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            argv = ["models/samples/spiral_corpus_en", "--follow-up-from", str(source)]
+            args = parser.parse_args(argv)
+
+            record = mod._apply_follow_up_defaults(args, argv)
+
+        self.assertEqual(args.head_init, "xavier")
+        self.assertEqual(record["applied_defaults"]["head_init"], "xavier")
+        self.assertIs(record["user_overrides"]["head_init"], False)
+
     def test_next_follow_up_avoids_source_and_current_seed_history(self) -> None:
         mod = _load_module()
         parser = mod._build_parser()
         args = parser.parse_args(["models/samples/spiral_corpus_en"])
+        args.head_init = "xavier"
         best_config = {
             "best_feature": "raw_latent",
             "feature_normalize": "blocks",
@@ -207,6 +264,12 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
         )
 
         self.assertEqual(record["default_new_seeds"], "131,137,139")
+        self.assertEqual(
+            record["script_command"][
+                record["script_command"].index("--head-init") + 1
+            ],
+            "xavier",
+        )
         self.assertEqual(
             record["used_seed_history"],
             [101, 103, 107, 109, 113, 127],
