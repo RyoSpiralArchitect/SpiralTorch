@@ -33,6 +33,7 @@ FEATURE_CHOICES = (
     FEATURE_RAW_LATENT,
     FEATURE_RECONSTRUCTION_LATENT,
 )
+NORMALIZE_CHOICES = ("none", "vector", "blocks")
 
 _TEXT_EXTS = {".txt"}
 
@@ -827,6 +828,21 @@ def _parse_hybrid_latent_scales(default_scale: float, raw: str | None) -> list[f
     return unique
 
 
+def _parse_feature_normalize_modes(default_mode: str, raw: str | None) -> list[str]:
+    if raw is None or not raw.strip():
+        return [default_mode]
+    modes = [part.strip().lower() for part in raw.split(",") if part.strip()]
+    if not modes:
+        raise ValueError("--feature-normalize-modes must contain at least one mode")
+    unknown = [mode for mode in modes if mode not in NORMALIZE_CHOICES]
+    if unknown:
+        joined = ", ".join(NORMALIZE_CHOICES)
+        raise ValueError(
+            f"unknown --feature-normalize-modes entries {unknown}; expected comma-separated {joined}"
+        )
+    return list(dict.fromkeys(modes))
+
+
 def _clone_args(args: argparse.Namespace, **overrides: Any) -> argparse.Namespace:
     values = vars(args).copy()
     values.update(overrides)
@@ -987,10 +1003,15 @@ def _single_report(summary: dict[str, Any]) -> str:
 
 def _aggregate_report(summary: dict[str, Any]) -> str:
     run = summary.get("run", {})
-    has_scale_grid = bool(summary.get("scale_summaries"))
-    raw_seed_total = int(run.get("seed_count") or len(summary.get("seed_summaries", [])))
-    scale_count = int(run.get("scale_count") or 1)
-    seed_total = raw_seed_total * scale_count if has_scale_grid else raw_seed_total
+    config_summaries = summary.get("config_summaries") or summary.get("scale_summaries", [])
+    seed_total = len(summary.get("seed_summaries", []))
+    if not seed_total:
+        seed_count = int(run.get("seed_count") or 0)
+        config_count = int(run.get("config_count") or len(config_summaries) or 1)
+        seed_total = int(run.get("run_count") or seed_count * config_count)
+    show_normalize_column = int(run.get("normalize_count") or 1) > 1
+    show_scale_column = int(run.get("scale_count") or 1) > 1
+    best_config = summary.get("best_config") or {}
     ranking_rows = [
         [
             str(item.get("feature")),
@@ -1011,23 +1032,24 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
         ]
         for item in summary.get("feature_stability", [])
     ]
-    scale_rows = []
-    for item in summary.get("scale_summaries", []):
+    config_rows = []
+    for item in config_summaries:
         top = item.get("ranking", [{}])[0] if item.get("ranking") else {}
         stability_by_feature = {
             stability.get("feature"): stability
             for stability in item.get("feature_stability", [])
         }
         best_stability = stability_by_feature.get(item.get("best_feature"), {})
-        scale_seed_total = int(item.get("seed_count") or seed_total)
-        scale_rows.append(
+        config_seed_total = int(item.get("seed_count") or seed_total)
+        config_rows.append(
             [
+                str(item.get("feature_normalize", run.get("feature_normalize"))),
                 _fmt_float(item.get("hybrid_latent_scale"), 3),
                 str(item.get("status")),
                 str(item.get("best_feature")),
                 _fmt_float(top.get("mean_best_nll")),
                 _fmt_float(top.get("mean_best_nll_delta_vs_raw")),
-                _fmt_count_rate(best_stability.get("win_count"), scale_seed_total),
+                _fmt_count_rate(best_stability.get("win_count"), config_seed_total),
                 f"`{item.get('run_dir')}`",
             ]
         )
@@ -1045,16 +1067,25 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
             ]
         )
     winner_by_seed = {
-        (item.get("hybrid_latent_scale"), item.get("seed")): item
+        (item.get("feature_normalize"), item.get("hybrid_latent_scale"), item.get("seed")): item
         for item in summary.get("seed_winners", [])
     }
     seed_rows = []
     for item in summary.get("seed_summaries", []):
         top = item.get("ranking", [{}])[0] if item.get("ranking") else {}
-        winner = winner_by_seed.get((item.get("hybrid_latent_scale"), item.get("seed")), {})
+        winner = winner_by_seed.get(
+            (
+                item.get("feature_normalize"),
+                item.get("hybrid_latent_scale"),
+                item.get("seed"),
+            ),
+            {},
+        )
         near_winners = winner.get("near_winners", [])
         row = []
-        if has_scale_grid:
+        if show_normalize_column:
+            row.append(str(item.get("feature_normalize", "-")))
+        if show_scale_column:
             row.append(_fmt_float(item.get("hybrid_latent_scale"), 3))
         row.extend(
             [
@@ -1074,9 +1105,19 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
         "",
         f"- status: {summary.get('status')}",
         f"- best_feature: {summary.get('best_feature')}",
+        (
+            "- best_config: {feature} @ normalize={normalize} scale={scale}".format(
+                feature=best_config.get("best_feature"),
+                normalize=best_config.get("feature_normalize"),
+                scale=best_config.get("hybrid_latent_scale"),
+            )
+            if best_config
+            else "- best_config: -"
+        ),
         f"- seeds: {', '.join(str(seed) for seed in run.get('seeds', []))}",
         f"- features: {', '.join(str(item) for item in run.get('features', []))}",
         f"- feature_normalize: {run.get('feature_normalize')}",
+        f"- feature_normalize_modes: {', '.join(str(mode) for mode in run.get('feature_normalize_modes', [])) or '-'}",
         f"- hybrid_latent_scale: {run.get('hybrid_latent_scale')}",
         f"- hybrid_latent_scales: {', '.join(str(scale) for scale in run.get('hybrid_latent_scales', [])) or '-'}",
         f"- min_nll_delta: {run.get('min_nll_delta')}",
@@ -1084,12 +1125,21 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
         f"- summary_json: `summary.json`",
         "",
     ]
-    if scale_rows:
-        lines.extend(["## Hybrid Latent Scale Grid", ""])
+    if config_rows:
+        lines.extend(["## Context Config Grid", ""])
         lines.extend(
             _markdown_table(
-                ["scale", "status", "best_feature", "mean_best_nll", "mean_delta_vs_raw", "wins", "run_dir"],
-                scale_rows,
+                [
+                    "normalize",
+                    "scale",
+                    "status",
+                    "best_feature",
+                    "mean_best_nll",
+                    "mean_delta_vs_raw",
+                    "wins",
+                    "run_dir",
+                ],
+                config_rows,
             )
         )
         lines.extend(["", "## Aggregate Ranking", ""])
@@ -1125,8 +1175,10 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
         "near_winners",
         "run_dir",
     ]
-    if has_scale_grid:
+    if show_scale_column:
         seed_headers = ["scale", *seed_headers]
+    if show_normalize_column:
+        seed_headers = ["normalize", *seed_headers]
     lines.extend(
         _markdown_table(
             seed_headers,
@@ -1290,6 +1342,7 @@ def _aggregate_summaries(
         seed_winners.append(
             {
                 "seed": summary.get("run", {}).get("seed"),
+                "feature_normalize": summary.get("run", {}).get("feature_normalize"),
                 "hybrid_latent_scale": summary.get("run", {}).get("hybrid_latent_scale"),
                 "winner": best["feature"],
                 "winners": strict_winners,
@@ -1402,6 +1455,53 @@ def _scale_run_dir(root: pathlib.Path, scale: float) -> pathlib.Path:
     return root / f"scale_{_scale_slug(scale)}"
 
 
+def _normalize_run_dir(root: pathlib.Path, mode: str) -> pathlib.Path:
+    return root / f"normalize_{mode}"
+
+
+def _config_run_dir(
+    root: pathlib.Path,
+    mode: str,
+    scale: float,
+    normalize_modes: list[str],
+    scales: list[float],
+) -> pathlib.Path:
+    run_dir = root
+    if len(normalize_modes) > 1:
+        run_dir = _normalize_run_dir(run_dir, mode)
+    if len(scales) > 1:
+        run_dir = _scale_run_dir(run_dir, scale)
+    return run_dir
+
+
+def _best_config_summary(config_summaries: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not config_summaries:
+        return None
+    ranked = sorted(
+        config_summaries,
+        key=lambda item: (
+            float("inf")
+            if not item.get("ranking")
+            or item["ranking"][0].get("mean_best_nll") is None
+            else float(item["ranking"][0]["mean_best_nll"]),
+            str(item.get("feature_normalize", "")),
+            float(item.get("hybrid_latent_scale", 0.0)),
+        ),
+    )
+    best = ranked[0]
+    top = best.get("ranking", [{}])[0] if best.get("ranking") else {}
+    return {
+        "feature_normalize": best.get("feature_normalize"),
+        "hybrid_latent_scale": best.get("hybrid_latent_scale"),
+        "best_feature": best.get("best_feature"),
+        "status": best.get("status"),
+        "mean_best_nll": top.get("mean_best_nll"),
+        "mean_best_accuracy": top.get("mean_best_accuracy"),
+        "mean_best_nll_delta_vs_raw": top.get("mean_best_nll_delta_vs_raw"),
+        "run_dir": best.get("run_dir"),
+    }
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -1423,11 +1523,19 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--hidden", type=int, default=64)
     parser.add_argument(
         "--feature-normalize",
-        choices=("none", "vector", "blocks"),
+        choices=NORMALIZE_CHOICES,
         default="none",
         help=(
             "feature scaling before the prediction head; blocks normalizes hybrid "
             "raw/reconstruction and latent segments separately"
+        ),
+    )
+    parser.add_argument(
+        "--feature-normalize-modes",
+        default=None,
+        help=(
+            "comma-separated feature normalization grid; overrides --feature-normalize "
+            "when provided"
         ),
     )
     parser.add_argument(
@@ -1716,13 +1824,18 @@ def main(argv: list[str] | None = None) -> int:
     _validate_args(args)
     features = _parse_features(str(args.features))
     seeds = _parse_seeds(int(args.seed), args.seeds)
+    normalize_modes = _parse_feature_normalize_modes(
+        str(args.feature_normalize),
+        args.feature_normalize_modes,
+    )
     scales = _parse_hybrid_latent_scales(
         float(args.hybrid_latent_scale),
         args.hybrid_latent_scales,
     )
 
-    if len(seeds) == 1 and len(scales) == 1:
+    if len(seeds) == 1 and len(scales) == 1 and len(normalize_modes) == 1:
         args.seed = seeds[0]
+        args.feature_normalize = normalize_modes[0]
         args.hybrid_latent_scale = scales[0]
         _run_single(args, features)
         return 0
@@ -1735,10 +1848,14 @@ def main(argv: list[str] | None = None) -> int:
         "format": FORMAT,
         "arch": "llm_char_vae_context_sweep",
         "features": features,
-        "feature_normalize": str(args.feature_normalize),
+        "feature_normalize": normalize_modes[0] if len(normalize_modes) == 1 else None,
+        "feature_normalize_modes": normalize_modes,
+        "normalize_count": len(normalize_modes),
         "hybrid_latent_scale": scales[0] if len(scales) == 1 else None,
         "hybrid_latent_scales": scales,
         "scale_count": len(scales),
+        "config_count": len(normalize_modes) * len(scales),
+        "run_count": len(normalize_modes) * len(scales) * len(seeds),
         "seeds": seeds,
         "seed_count": len(seeds),
         "min_nll_delta": float(args.min_nll_delta),
@@ -1752,51 +1869,66 @@ def main(argv: list[str] | None = None) -> int:
     if runs_jsonl.exists():
         runs_jsonl.unlink()
     started = time.time()
-    scale_summaries = []
-    for scale in scales:
-        scale_run_dir = root_run_dir if len(scales) == 1 else _scale_run_dir(root_run_dir, scale)
-        scale_run_dir.mkdir(parents=True, exist_ok=True)
-        scale_seed_summaries = []
-        for seed in seeds:
-            seed_dir = _seed_run_dir(scale_run_dir, seed)
-            print(f"sweep_scale={scale:.6g} sweep_seed={seed} run_dir={seed_dir}", flush=True)
-            seed_args = _clone_args(
-                args,
-                seed=seed,
-                hybrid_latent_scale=scale,
-                run_dir=seed_dir,
-                vae_save=None,
-                json=False,
+    config_summaries = []
+    for mode in normalize_modes:
+        for scale in scales:
+            config_run_dir = _config_run_dir(root_run_dir, mode, scale, normalize_modes, scales)
+            config_run_dir.mkdir(parents=True, exist_ok=True)
+            config_seed_summaries = []
+            for seed in seeds:
+                seed_dir = _seed_run_dir(config_run_dir, seed)
+                print(
+                    "sweep_normalize={mode} sweep_scale={scale:.6g} "
+                    "sweep_seed={seed} run_dir={run_dir}".format(
+                        mode=mode,
+                        scale=scale,
+                        seed=seed,
+                        run_dir=seed_dir,
+                    ),
+                    flush=True,
+                )
+                seed_args = _clone_args(
+                    args,
+                    seed=seed,
+                    feature_normalize=mode,
+                    hybrid_latent_scale=scale,
+                    run_dir=seed_dir,
+                    vae_save=None,
+                    json=False,
+                )
+                summary = _run_single(seed_args, features)
+                summaries.append(summary)
+                config_seed_summaries.append(summary)
+                _append_jsonl(
+                    runs_jsonl,
+                    {
+                        "seed": seed,
+                        "feature_normalize": mode,
+                        "hybrid_latent_scale": scale,
+                        "run_dir": str(seed_dir),
+                        "summary_path": str(seed_dir / "summary.json"),
+                        "best_feature": summary.get("best_feature"),
+                        "ranking": summary.get("ranking", []),
+                        "deltas": summary.get("deltas", {}),
+                    },
+                )
+
+            config_aggregate = _aggregate_summaries(
+                config_seed_summaries,
+                min_nll_delta=float(args.min_nll_delta),
+                win_tolerance=float(args.win_tolerance),
             )
-            summary = _run_single(seed_args, features)
-            summaries.append(summary)
-            scale_seed_summaries.append(summary)
-            _append_jsonl(
-                runs_jsonl,
+            config_summaries.append(
                 {
-                    "seed": seed,
+                    "feature_normalize": mode,
                     "hybrid_latent_scale": scale,
-                    "run_dir": str(seed_dir),
-                    "summary_path": str(seed_dir / "summary.json"),
-                    "best_feature": summary.get("best_feature"),
-                    "ranking": summary.get("ranking", []),
-                    "deltas": summary.get("deltas", {}),
-                },
+                    "run_dir": str(config_run_dir),
+                    "seed_count": len(config_seed_summaries),
+                    **config_aggregate,
+                }
             )
 
-        scale_aggregate = _aggregate_summaries(
-            scale_seed_summaries,
-            min_nll_delta=float(args.min_nll_delta),
-            win_tolerance=float(args.win_tolerance),
-        )
-        scale_summaries.append(
-            {
-                "hybrid_latent_scale": scale,
-                "run_dir": str(scale_run_dir),
-                "seed_count": len(scale_seed_summaries),
-                **scale_aggregate,
-            }
-        )
+    scale_summaries = config_summaries if len(normalize_modes) == 1 else []
 
     aggregate = {
         "schema": RUN_SCHEMA,
@@ -1807,6 +1939,7 @@ def main(argv: list[str] | None = None) -> int:
         "seed_summaries": [
             {
                 "seed": summary.get("run", {}).get("seed"),
+                "feature_normalize": summary.get("run", {}).get("feature_normalize"),
                 "hybrid_latent_scale": summary.get("run", {}).get("hybrid_latent_scale"),
                 "run_dir": str(summary.get("run", {}).get("run_dir")),
                 "best_feature": summary.get("best_feature"),
@@ -1815,6 +1948,7 @@ def main(argv: list[str] | None = None) -> int:
             }
             for summary in summaries
         ],
+        "config_summaries": config_summaries,
         "scale_summaries": scale_summaries,
     }
     aggregate.update(
@@ -1824,29 +1958,32 @@ def main(argv: list[str] | None = None) -> int:
             win_tolerance=float(args.win_tolerance),
         )
     )
-    if scale_summaries:
-        scale_ranking = sorted(
-            scale_summaries,
-            key=lambda item: (
-                float("inf")
-                if not item.get("ranking")
-                or item["ranking"][0].get("mean_best_nll") is None
-                else float(item["ranking"][0]["mean_best_nll"]),
-                float(item.get("hybrid_latent_scale", 0.0)),
-            ),
-        )
-        aggregate["best_hybrid_latent_scale"] = (
-            scale_ranking[0].get("hybrid_latent_scale") if scale_ranking else None
-        )
+    best_config = _best_config_summary(config_summaries)
+    if best_config is not None:
+        aggregate["best_config"] = best_config
+        aggregate["best_feature_normalize"] = best_config.get("feature_normalize")
+        aggregate["best_hybrid_latent_scale"] = best_config.get("hybrid_latent_scale")
     _write_json(root_run_dir / "summary.json", aggregate)
     _write_text(root_run_dir / "report.md", _aggregate_report(aggregate))
     if args.json:
         print(json.dumps(aggregate, ensure_ascii=False, indent=2))
 
+    config_text = "-"
+    if best_config is not None:
+        config_text = "{feature}@normalize={normalize},scale={scale}".format(
+            feature=best_config.get("best_feature"),
+            normalize=best_config.get("feature_normalize"),
+            scale=best_config.get("hybrid_latent_scale"),
+        )
     print(
-        "sweep_status={status} best_feature={feature} scales={scales} seeds={seeds} summary_json={path}".format(
+        (
+            "sweep_status={status} best_feature={feature} best_config={config} "
+            "normalizes={normalizes} scales={scales} seeds={seeds} summary_json={path}"
+        ).format(
             status=aggregate["status"],
             feature=aggregate["best_feature"],
+            config=config_text,
+            normalizes=",".join(normalize_modes),
             scales=",".join(f"{scale:.6g}" for scale in scales),
             seeds=",".join(str(seed) for seed in seeds),
             path=root_run_dir / "summary.json",
