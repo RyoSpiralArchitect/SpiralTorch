@@ -35,6 +35,7 @@ FEATURE_CHOICES = (
     FEATURE_RECONSTRUCTION_LATENT,
 )
 NORMALIZE_CHOICES = ("none", "vector", "blocks")
+FOLLOW_UP_VERDICTS = ("improved", "confirmed", "regressed", "unknown")
 
 _TEXT_EXTS = {".txt"}
 
@@ -1128,6 +1129,8 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
     ]
     follow_up = summary.get("follow_up")
     follow_up_result = summary.get("follow_up_result")
+    follow_up_chain = summary.get("follow_up_chain")
+    follow_up_gate = summary.get("follow_up_gate")
     if isinstance(follow_up_result, dict):
         source_config = follow_up_result.get("source_best_config")
         evaluated_config = follow_up_result.get("evaluated_config")
@@ -1196,6 +1199,51 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 "",
                 f"- source: `{follow_up.get('source_summary_path')}`",
                 f"- source_best_config: {_config_label(follow_up.get('source_best_config'))}",
+                "",
+            ]
+        )
+    if isinstance(follow_up_chain, dict):
+        ancestors = follow_up_chain.get("ancestors", [])
+        verdict_history = follow_up_chain.get("verdict_history", [])
+        verdict_history_text = (
+            ", ".join(str(item) for item in verdict_history)
+            if isinstance(verdict_history, list)
+            else "-"
+        )
+        ancestors_text = (
+            ", ".join(f"`{item}`" for item in ancestors)
+            if isinstance(ancestors, list)
+            else "-"
+        )
+        lines.extend(
+            [
+                "## Follow-Up Chain",
+                "",
+                f"- generation: {follow_up_chain.get('generation')}",
+                f"- parent_summary: `{follow_up_chain.get('parent_summary_path')}`",
+                f"- latest_verdict: {follow_up_chain.get('latest_verdict')}",
+                f"- improved_streak: {follow_up_chain.get('improved_streak')}",
+                f"- regressed_streak: {follow_up_chain.get('regressed_streak')}",
+                f"- verdict_history: {verdict_history_text}",
+                f"- ancestors: {ancestors_text}",
+                "",
+            ]
+        )
+    if isinstance(follow_up_gate, dict):
+        fail_on = follow_up_gate.get("fail_on_verdicts", [])
+        fail_on_text = (
+            ", ".join(str(item) for item in fail_on)
+            if isinstance(fail_on, list)
+            else "-"
+        )
+        lines.extend(
+            [
+                "## Follow-Up Gate",
+                "",
+                f"- verdict: {follow_up_gate.get('verdict')}",
+                f"- fail_on_verdicts: {fail_on_text}",
+                f"- failed: {follow_up_gate.get('failed')}",
+                f"- exit_code: {follow_up_gate.get('exit_code')}",
                 "",
             ]
         )
@@ -1835,6 +1883,44 @@ def _default_follow_up_seeds(summary: dict[str, Any]) -> str:
     return _fresh_seed_csv(source_seeds or [42])
 
 
+def _follow_up_chain_source(summary: dict[str, Any]) -> dict[str, Any]:
+    chain = summary.get("follow_up_chain")
+    if isinstance(chain, dict):
+        generation_raw = chain.get("generation", 0)
+        try:
+            generation = max(0, int(generation_raw))
+        except (TypeError, ValueError):
+            generation = 0
+        ancestors_raw = chain.get("ancestors", [])
+        verdicts_raw = chain.get("verdict_history", [])
+        return {
+            "generation": generation,
+            "ancestors": [str(item) for item in ancestors_raw if str(item)]
+            if isinstance(ancestors_raw, list)
+            else [],
+            "verdict_history": [str(item) for item in verdicts_raw if str(item)]
+            if isinstance(verdicts_raw, list)
+            else [],
+        }
+
+    follow_up = summary.get("follow_up")
+    if isinstance(follow_up, dict):
+        parent = follow_up.get("source_summary_path")
+        result = summary.get("follow_up_result")
+        verdict = result.get("verdict") if isinstance(result, dict) else None
+        return {
+            "generation": 1,
+            "ancestors": [str(parent)] if parent is not None and str(parent) else [],
+            "verdict_history": [str(verdict)] if verdict is not None and str(verdict) else [],
+        }
+
+    return {
+        "generation": 0,
+        "ancestors": [],
+        "verdict_history": [],
+    }
+
+
 def _apply_follow_up_defaults(
     args: argparse.Namespace,
     argv: list[str],
@@ -1846,6 +1932,7 @@ def _apply_follow_up_defaults(
     best_config = _source_best_config(source_summary)
     source_features = _summary_features(source_summary)
     source_seeds = _summary_seeds(source_summary)
+    source_chain = _follow_up_chain_source(source_summary)
 
     explicit_features = _flag_present(argv, "--features")
     explicit_normalize = _flag_present(argv, "--feature-normalize") or _flag_present(
@@ -1882,6 +1969,7 @@ def _apply_follow_up_defaults(
         "source_best_config": best_config,
         "source_features": source_features,
         "source_seeds": source_seeds,
+        "source_chain": source_chain,
         "applied_defaults": applied_defaults,
         "user_overrides": {
             "features": explicit_features,
@@ -1968,6 +2056,29 @@ def _delta_verdict(delta: float | None, min_nll_delta: float) -> str:
     return "confirmed"
 
 
+def _parse_follow_up_fail_verdicts(raw: str | None) -> list[str]:
+    if raw is None or not raw.strip():
+        return []
+    verdicts = [part.strip().lower() for part in raw.split(",") if part.strip()]
+    unknown = [verdict for verdict in verdicts if verdict not in FOLLOW_UP_VERDICTS]
+    if unknown:
+        joined = ", ".join(FOLLOW_UP_VERDICTS)
+        raise ValueError(
+            f"unknown --follow-up-fail-on-verdict entries {unknown}; "
+            f"expected comma-separated {joined}"
+        )
+    return list(dict.fromkeys(verdicts))
+
+
+def _verdict_streak(verdict_history: list[str], target: str) -> int:
+    streak = 0
+    for verdict in reversed(verdict_history):
+        if verdict != target:
+            break
+        streak += 1
+    return streak
+
+
 def _follow_up_result(
     follow_up: dict[str, Any] | None,
     config_summaries: list[dict[str, Any]],
@@ -2023,6 +2134,71 @@ def _follow_up_result(
         if source_feature_verdict != "unknown"
         else config_verdict,
         "match_found": evaluated is not None,
+    }
+
+
+def _follow_up_chain_record(
+    follow_up: dict[str, Any] | None,
+    follow_up_result: dict[str, Any] | None,
+    root_run_dir: pathlib.Path,
+) -> dict[str, Any] | None:
+    if not follow_up:
+        return None
+    source_chain = follow_up.get("source_chain")
+    source_chain = source_chain if isinstance(source_chain, dict) else {}
+    try:
+        source_generation = max(0, int(source_chain.get("generation", 0)))
+    except (TypeError, ValueError):
+        source_generation = 0
+    ancestors_raw = source_chain.get("ancestors", [])
+    ancestors = (
+        [str(item) for item in ancestors_raw if str(item)]
+        if isinstance(ancestors_raw, list)
+        else []
+    )
+    parent = follow_up.get("source_summary_path")
+    if parent is not None and str(parent):
+        ancestors.append(str(parent))
+    verdicts_raw = source_chain.get("verdict_history", [])
+    verdict_history = (
+        [str(item) for item in verdicts_raw if str(item)]
+        if isinstance(verdicts_raw, list)
+        else []
+    )
+    latest_verdict = (
+        str(follow_up_result.get("verdict"))
+        if isinstance(follow_up_result, dict) and follow_up_result.get("verdict") is not None
+        else "unknown"
+    )
+    verdict_history.append(latest_verdict)
+    return {
+        "schema": "st.llm_char_vae_context.follow_up_chain.v1",
+        "generation": source_generation + 1,
+        "parent_summary_path": str(parent) if parent is not None else None,
+        "run_dir": str(root_run_dir),
+        "ancestors": ancestors,
+        "verdict_history": verdict_history,
+        "latest_verdict": latest_verdict,
+        "improved_streak": _verdict_streak(verdict_history, "improved"),
+        "regressed_streak": _verdict_streak(verdict_history, "regressed"),
+        "unknown_streak": _verdict_streak(verdict_history, "unknown"),
+    }
+
+
+def _follow_up_gate_record(
+    follow_up_result: dict[str, Any] | None,
+    fail_on_verdicts: list[str],
+) -> dict[str, Any] | None:
+    if not fail_on_verdicts or not isinstance(follow_up_result, dict):
+        return None
+    verdict = str(follow_up_result.get("verdict") or "unknown")
+    failed = verdict in set(fail_on_verdicts)
+    return {
+        "schema": "st.llm_char_vae_context.follow_up_gate.v1",
+        "verdict": verdict,
+        "fail_on_verdicts": fail_on_verdicts,
+        "failed": failed,
+        "exit_code": 1 if failed else 0,
     }
 
 
@@ -2123,6 +2299,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "previous aggregate summary.json or run directory; reuses its best context "
             "config as defaults for a fresh-seed confirmation run"
+        ),
+    )
+    parser.add_argument(
+        "--follow-up-fail-on-verdict",
+        default=None,
+        help=(
+            "comma-separated follow-up verdicts that should exit non-zero after "
+            "writing summary/report, e.g. regressed,unknown"
         ),
     )
     parser.add_argument("--json", action="store_true", help="Print summary JSON")
@@ -2367,6 +2551,9 @@ def main(argv: list[str] | None = None) -> int:
         float(args.hybrid_latent_scale),
         args.hybrid_latent_scales,
     )
+    follow_up_fail_on_verdicts = _parse_follow_up_fail_verdicts(
+        args.follow_up_fail_on_verdict,
+    )
     if follow_up is not None:
         follow_up["resolved"] = {
             "features": features,
@@ -2402,6 +2589,7 @@ def main(argv: list[str] | None = None) -> int:
         "seed_count": len(seeds),
         "min_nll_delta": float(args.min_nll_delta),
         "win_tolerance": float(args.win_tolerance),
+        "follow_up_fail_on_verdicts": follow_up_fail_on_verdicts,
         "run_dir": str(root_run_dir),
     }
     if follow_up is not None:
@@ -2527,6 +2715,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     if follow_up_result is not None:
         aggregate["follow_up_result"] = follow_up_result
+    follow_up_chain = _follow_up_chain_record(
+        follow_up,
+        follow_up_result,
+        root_run_dir,
+    )
+    if follow_up_chain is not None:
+        aggregate["follow_up_chain"] = follow_up_chain
+    follow_up_gate = _follow_up_gate_record(
+        follow_up_result,
+        follow_up_fail_on_verdicts,
+    )
+    if follow_up_gate is not None:
+        aggregate["follow_up_gate"] = follow_up_gate
     _write_json(root_run_dir / "summary.json", aggregate)
     _write_text(root_run_dir / "report.md", _aggregate_report(aggregate))
     if args.json:
@@ -2554,6 +2755,16 @@ def main(argv: list[str] | None = None) -> int:
         ),
         flush=True,
     )
+    if isinstance(follow_up_gate, dict) and follow_up_gate.get("failed"):
+        print(
+            "follow_up_gate_failed verdict={verdict} fail_on={fail_on} summary_json={path}".format(
+                verdict=follow_up_gate.get("verdict"),
+                fail_on=",".join(str(item) for item in follow_up_fail_on_verdicts),
+                path=root_run_dir / "summary.json",
+            ),
+            flush=True,
+        )
+        return int(follow_up_gate.get("exit_code") or 1)
     return 0
 
 

@@ -120,6 +120,8 @@ _ENTRY_METADATA: dict[str, dict[str, Any]] = {
             "normalize-grid",
             "follow-up",
             "replay",
+            "chain",
+            "gate",
         ),
     },
     "llm_char_coherence_scan": {
