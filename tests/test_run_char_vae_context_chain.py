@@ -32,12 +32,39 @@ class CharVaeContextChainTests(unittest.TestCase):
             smoke_command[smoke_command.index("--hybrid-latent-scales") + 1],
             "0.5,1.0",
         )
+        self.assertEqual(
+            smoke_command[smoke_command.index("--feature-normalize-modes") + 1],
+            "blocks,vector",
+        )
 
         small = parser.parse_args(["models/samples/spiral_corpus_en", "--preset", "small"])
         small_command = mod._parent_command(small, Path("/tmp/small"))
         self.assertEqual(
             small_command[small_command.index("--hybrid-latent-scales") + 1],
             "0.5,1.0,2.0,4.0",
+        )
+
+        hybrid4 = parser.parse_args(
+            ["models/samples/spiral_corpus_en", "--preset", "hybrid4"]
+        )
+        hybrid4_command = mod._parent_command(hybrid4, Path("/tmp/hybrid4"))
+        self.assertEqual(
+            hybrid4_command[hybrid4_command.index("--features") + 1],
+            "raw,latent,raw_latent,reconstruction_latent",
+        )
+        self.assertEqual(
+            hybrid4_command[hybrid4_command.index("--feature-normalize-modes") + 1],
+            "blocks",
+        )
+        self.assertEqual(
+            hybrid4_command[hybrid4_command.index("--hybrid-latent-scales") + 1],
+            "2.0,4.0",
+        )
+        self.assertEqual(hybrid4_command[hybrid4_command.index("--epochs") + 1], "8")
+        self.assertEqual(hybrid4_command[hybrid4_command.index("--batches") + 1], "16")
+        self.assertEqual(
+            hybrid4_command[hybrid4_command.index("--eval-samples") + 1],
+            "128",
         )
 
         explicit = parser.parse_args(
@@ -118,6 +145,72 @@ class CharVaeContextChainTests(unittest.TestCase):
         self.assertIn("source_feature_delta_vs_source", report)
         self.assertIn("latent@normalize=blocks,scale=0.5", report)
         self.assertIn("0.001000", report)
+
+    def test_chain_selection_retains_parent_when_follow_up_gate_stops(self) -> None:
+        mod = _load_module()
+        parent = {
+            "index": 0,
+            "role": "parent",
+            "run_dir": "/tmp/chain/parent",
+            "summary_path": "/tmp/chain/parent/summary.json",
+            "exit_code": 0,
+            "status": "improved",
+            "best_feature": "raw_latent",
+            "best_config_label": "raw_latent@normalize=blocks,scale=4.0",
+            "best_config": {
+                "best_feature": "raw_latent",
+                "feature_normalize": "blocks",
+                "hybrid_latent_scale": 4.0,
+                "mean_best_nll": 4.155,
+            },
+            "mean_best_nll": 4.155,
+            "mean_best_nll_delta_vs_raw": -0.038,
+        }
+        follow_up = {
+            "index": 1,
+            "role": "follow_up",
+            "run_dir": "/tmp/chain/follow_up_01",
+            "summary_path": "/tmp/chain/follow_up_01/summary.json",
+            "exit_code": 1,
+            "status": "improved",
+            "best_feature": "raw_latent",
+            "best_config_label": "raw_latent@normalize=blocks,scale=4.0",
+            "best_config": {
+                "best_feature": "raw_latent",
+                "feature_normalize": "blocks",
+                "hybrid_latent_scale": 4.0,
+                "mean_best_nll": 4.168,
+            },
+            "mean_best_nll": 4.168,
+            "mean_best_nll_delta_vs_raw": -0.030,
+            "mean_best_nll_delta_vs_source": 0.013,
+            "follow_up_verdict": "regressed",
+            "follow_up_gate_failed": True,
+        }
+        manifest = {
+            "schema": mod.SCHEMA,
+            "preset": "hybrid4",
+            "run_root": "/tmp/chain",
+            "steps": [parent, follow_up],
+            "stopped_reason": "follow-up 1 exited 1",
+            "allowed_gate_stop": True,
+        }
+
+        mod._refresh_chain_selection(manifest)
+        report = mod._render_report(manifest)
+
+        self.assertEqual(manifest["accepted_step"]["index"], 0)
+        self.assertEqual(
+            manifest["accepted_summary_path"],
+            "/tmp/chain/parent/summary.json",
+        )
+        self.assertEqual(manifest["best_step"]["index"], 0)
+        self.assertEqual(
+            manifest["best_summary_path"],
+            "/tmp/chain/parent/summary.json",
+        )
+        self.assertIn("accepted: raw_latent@normalize=blocks,scale=4.0", report)
+        self.assertIn("best: raw_latent@normalize=blocks,scale=4.0", report)
 
 
 if __name__ == "__main__":

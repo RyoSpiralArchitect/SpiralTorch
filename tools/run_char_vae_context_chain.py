@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import json
+import math
 import os
 import shlex
 import subprocess
@@ -18,13 +19,17 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "models" / "python" / "llm_char_vae_context.py"
 SCHEMA = "st.llm_char_vae_context.chain.v1"
 DEFAULT_FEATURES = "raw,reconstruction,latent,raw_latent,reconstruction_latent"
+FOCUSED_HYBRID_FEATURES = "raw,latent,raw_latent,reconstruction_latent"
 DEFAULT_NORMALIZE_MODES = "blocks,vector"
 DEFAULT_FAIL_ON_VERDICT = "regressed,unknown"
 SMOKE_LATENT_SCALES = "0.5,1.0"
 SCOUT_LATENT_SCALES = "0.5,1.0,2.0,4.0"
+HYBRID4_LATENT_SCALES = "2.0,4.0"
 
 PRESETS: dict[str, dict[str, Any]] = {
     "smoke": {
+        "features": DEFAULT_FEATURES,
+        "feature_normalize_modes": DEFAULT_NORMALIZE_MODES,
         "window_chars": 20,
         "latent_dim": 5,
         "hidden": 8,
@@ -41,6 +46,8 @@ PRESETS: dict[str, dict[str, Any]] = {
         "follow_up_seed_groups": "17;19",
     },
     "small": {
+        "features": DEFAULT_FEATURES,
+        "feature_normalize_modes": DEFAULT_NORMALIZE_MODES,
         "window_chars": 32,
         "latent_dim": 8,
         "hidden": 16,
@@ -56,7 +63,27 @@ PRESETS: dict[str, dict[str, Any]] = {
         "hybrid_latent_scales": SCOUT_LATENT_SCALES,
         "follow_up_seed_groups": "19,23;29,31",
     },
+    "hybrid4": {
+        "features": FOCUSED_HYBRID_FEATURES,
+        "feature_normalize_modes": "blocks",
+        "window_chars": 32,
+        "latent_dim": 8,
+        "hidden": 16,
+        "epochs": 8,
+        "batches": 16,
+        "batch_size": 4,
+        "vae_epochs": 8,
+        "vae_batches": 16,
+        "vae_batch_size": 4,
+        "eval_samples": 128,
+        "gen": 0,
+        "seeds": "2001,2003,2005",
+        "hybrid_latent_scales": HYBRID4_LATENT_SCALES,
+        "follow_up_seed_groups": "2007,2009,2011;2013,2015,2017",
+    },
     "base": {
+        "features": DEFAULT_FEATURES,
+        "feature_normalize_modes": DEFAULT_NORMALIZE_MODES,
         "window_chars": 48,
         "latent_dim": 16,
         "hidden": 32,
@@ -122,8 +149,12 @@ def _parent_command(args: argparse.Namespace, run_dir: Path) -> list[str]:
         str(SCRIPT.relative_to(ROOT)),
         *[str(path) for path in args.text_or_dir],
     ]
-    _append_flag(command, "--features", args.features)
-    _append_flag(command, "--feature-normalize-modes", args.feature_normalize_modes)
+    _append_flag(command, "--features", _preset_value(args, "features"))
+    _append_flag(
+        command,
+        "--feature-normalize-modes",
+        _preset_value(args, "feature_normalize_modes"),
+    )
     _append_flag(
         command,
         "--hybrid-latent-scales",
@@ -257,7 +288,78 @@ def _fmt(value: Any, digits: int = 6) -> str:
     return str(value)
 
 
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and math.isfinite(float(value))
+
+
+def _selection_step_record(step: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(step, dict):
+        return None
+    summary_path = step.get("summary_path")
+    if not summary_path:
+        return None
+    return {
+        "index": step.get("index"),
+        "role": step.get("role"),
+        "run_dir": step.get("run_dir"),
+        "summary_path": summary_path,
+        "status": step.get("status"),
+        "best_feature": step.get("best_feature"),
+        "best_config": step.get("best_config"),
+        "best_config_label": step.get("best_config_label") or step.get("best_feature"),
+        "mean_best_nll": step.get("mean_best_nll"),
+        "mean_best_accuracy": step.get("mean_best_accuracy"),
+        "mean_best_nll_delta_vs_raw": step.get("mean_best_nll_delta_vs_raw"),
+        "mean_best_nll_delta_vs_source": step.get("mean_best_nll_delta_vs_source"),
+        "follow_up_verdict": step.get("follow_up_verdict"),
+        "source_best_feature_retained": step.get("source_best_feature_retained"),
+        "follow_up_gate_failed": step.get("follow_up_gate_failed"),
+    }
+
+
+def _refresh_chain_selection(manifest: dict[str, Any]) -> None:
+    if manifest.get("dry_run"):
+        return
+    steps = [step for step in manifest.get("steps", []) if isinstance(step, dict)]
+    accepted: dict[str, Any] | None = None
+    for step in steps:
+        if not step.get("summary_path"):
+            continue
+        exit_code = step.get("exit_code")
+        if exit_code == 0:
+            accepted = step
+            continue
+        if step.get("follow_up_gate_failed"):
+            # A gate-stopped follow-up is evidence, not a promotion.
+            continue
+        break
+
+    scored_steps = [step for step in steps if _is_number(step.get("mean_best_nll"))]
+    best = (
+        min(scored_steps, key=lambda step: float(step["mean_best_nll"]))
+        if scored_steps
+        else None
+    )
+
+    accepted_record = _selection_step_record(accepted)
+    best_record = _selection_step_record(best)
+    if accepted_record is not None:
+        manifest["accepted_step"] = accepted_record
+        manifest["accepted_summary_path"] = accepted_record["summary_path"]
+        manifest["accepted_best_config"] = accepted_record.get("best_config")
+        manifest["accepted_best_config_label"] = accepted_record.get(
+            "best_config_label"
+        )
+    if best_record is not None:
+        manifest["best_step"] = best_record
+        manifest["best_summary_path"] = best_record["summary_path"]
+        manifest["best_config"] = best_record.get("best_config")
+        manifest["best_config_label"] = best_record.get("best_config_label")
+
+
 def _render_report(manifest: dict[str, Any]) -> str:
+    accepted = manifest.get("accepted_step")
+    best = manifest.get("best_step")
     lines = [
         "# Char VAE Context Chain Report",
         "",
@@ -266,6 +368,16 @@ def _render_report(manifest: dict[str, Any]) -> str:
         f"- run_root: `{manifest['run_root']}`",
         f"- stopped_reason: {manifest.get('stopped_reason') or '-'}",
         f"- allowed_gate_stop: {manifest.get('allowed_gate_stop') or False}",
+        "- accepted: {label} (step {index}, mean_best_nll={nll})".format(
+            label=_fmt(_value(accepted, "best_config_label")),
+            index=_fmt(_value(accepted, "index")),
+            nll=_fmt(_value(accepted, "mean_best_nll")),
+        ),
+        "- best: {label} (step {index}, mean_best_nll={nll})".format(
+            label=_fmt(_value(best, "best_config_label")),
+            index=_fmt(_value(best, "index")),
+            nll=_fmt(_value(best, "mean_best_nll")),
+        ),
         "",
         "| step | role | exit | status | best_config | mean_best_nll | "
         "delta_vs_raw | delta_vs_source | verdict | retained | gate | "
@@ -371,8 +483,8 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="return success when a follow-up gate intentionally stops promotion",
     )
-    parser.add_argument("--features", default=DEFAULT_FEATURES)
-    parser.add_argument("--feature-normalize-modes", default=DEFAULT_NORMALIZE_MODES)
+    parser.add_argument("--features", default=None)
+    parser.add_argument("--feature-normalize-modes", default=None)
     parser.add_argument("--hybrid-latent-scales", default=None)
     parser.add_argument("--python", default="python3")
     parser.add_argument("--dry-run", action="store_true")
@@ -489,6 +601,7 @@ def main(argv: list[str] | None = None) -> int:
 
     chain_path = run_root / "chain.json"
     report_path = run_root / "chain_report.md"
+    _refresh_chain_selection(manifest)
     _write_json(chain_path, manifest)
     _write_text(report_path, _render_report(manifest))
     print(f"chain_json={chain_path}")
