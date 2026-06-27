@@ -209,6 +209,7 @@ jobs:
           PYTHONNOUSERSITE: "1"
         run: |
           python -P bindings/st-py/tests/test_unittest_smoke.py
+          python -P tests/test_llm_char_vae_context_guidance.py
       - name: Run extra examples
         env:
           PYTHONNOUSERSITE: "1"
