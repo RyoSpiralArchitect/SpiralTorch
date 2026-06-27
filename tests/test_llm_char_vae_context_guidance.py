@@ -133,8 +133,22 @@ def _seed_summary(
         "raw_latent": raw_latent,
         "reconstruction_latent": reconstruction_latent,
     }
+    steps = {
+        "raw": 4,
+        "latent": 3,
+        "raw_latent": 2,
+        "reconstruction_latent": 1,
+    }
     ranking = [
-        {"feature": feature, "best_mean_nll": nll, "best_accuracy": 0.25}
+        {
+            "feature": feature,
+            "best_mean_nll": nll,
+            "best_accuracy": 0.25,
+            "best_step": steps[feature],
+            "validation_nll_mean": nll + 0.01,
+            "validation_nll_initial_minus_best": 0.10,
+            "validation_nll_final_minus_best": steps[feature] * 0.001,
+        }
         for feature, nll in sorted(scores.items(), key=lambda item: (item[1], item[0]))
     ]
     return {
@@ -145,12 +159,22 @@ def _seed_summary(
             {
                 "feature": feature,
                 "best_validation": {"mean_nll": nll, "accuracy": 0.25},
+                "best_step": steps[feature],
+                "validation_nll_mean": nll + 0.01,
+                "validation_nll_initial_minus_best": 0.10,
+                "validation_nll_final_minus_best": steps[feature] * 0.001,
             }
             for feature, nll in scores.items()
         ],
         "deltas": {
-            f"{feature}_best_nll_vs_raw": nll - raw
-            for feature, nll in scores.items()
+            **{
+                f"{feature}_best_nll_vs_raw": nll - raw
+                for feature, nll in scores.items()
+            },
+            **{
+                f"{feature}_validation_nll_mean_vs_raw": nll - raw
+                for feature, nll in scores.items()
+            },
         },
         "feature_diagnostics": {"features": {}},
     }
@@ -283,9 +307,83 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
             thin_aggregate["ranking"][0]["mean_best_nll"],
             4.0402,
         )
+        by_feature = {item["feature"]: item for item in aggregate["ranking"]}
+        self.assertAlmostEqual(by_feature["raw_latent"]["mean_best_step"], 2.0)
+        self.assertAlmostEqual(
+            by_feature["raw_latent"]["mean_validation_nll_mean_delta_vs_raw"],
+            -0.0248,
+        )
+        self.assertAlmostEqual(
+            by_feature["raw_latent"]["mean_validation_nll_final_minus_best"],
+            0.002,
+        )
         self.assertEqual(families["raw"]["win_count"], 0)
         self.assertIn("## Feature Family Stability", report)
+        self.assertIn("curve_nll", report)
         self.assertIn("| hybrid_latent | 4.040000 | 25.00% | -0.025000 | 2/2", report)
+
+    def test_aggregate_recovers_curve_metrics_from_legacy_history(self) -> None:
+        mod = _load_module()
+        summary = {
+            "run": {"seed": 1},
+            "features": [
+                {
+                    "feature": "raw",
+                    "best_epoch": 1,
+                    "initial_validation": {"mean_nll": 4.30},
+                    "best_validation": {"mean_nll": 4.10, "accuracy": 0.20},
+                    "final_validation": {"mean_nll": 4.10},
+                    "history": [
+                        {"validation": {"mean_nll": 4.20}},
+                        {"validation": {"mean_nll": 4.10}},
+                    ],
+                },
+                {
+                    "feature": "raw_latent",
+                    "best_epoch": 1,
+                    "initial_validation": {"mean_nll": 4.40},
+                    "best_validation": {"mean_nll": 4.00, "accuracy": 0.25},
+                    "final_validation": {"mean_nll": 4.00},
+                    "history": [
+                        {"validation": {"mean_nll": 4.15}},
+                        {"validation": {"mean_nll": 4.00}},
+                    ],
+                },
+            ],
+            "ranking": [
+                {"feature": "raw_latent", "best_mean_nll": 4.00, "best_accuracy": 0.25},
+                {"feature": "raw", "best_mean_nll": 4.10, "best_accuracy": 0.20},
+            ],
+            "deltas": {
+                "raw_best_nll_vs_raw": 0.0,
+                "raw_latent_best_nll_vs_raw": -0.10,
+            },
+        }
+
+        aggregate = mod._aggregate_summaries(
+            [summary],
+            min_nll_delta=0.0,
+            win_tolerance=0.0001,
+        )
+
+        by_feature = {item["feature"]: item for item in aggregate["ranking"]}
+        self.assertAlmostEqual(by_feature["raw_latent"]["mean_best_step"], 2.0)
+        self.assertAlmostEqual(
+            by_feature["raw_latent"]["mean_validation_nll_mean"],
+            (4.15 + 4.00) / 2.0,
+        )
+        self.assertAlmostEqual(
+            by_feature["raw_latent"]["mean_validation_nll_mean_delta_vs_raw"],
+            ((4.15 + 4.00) / 2.0) - ((4.20 + 4.10) / 2.0),
+        )
+        self.assertAlmostEqual(
+            by_feature["raw_latent"]["mean_validation_nll_initial_minus_best"],
+            0.40,
+        )
+        self.assertAlmostEqual(
+            by_feature["raw_latent"]["mean_validation_nll_final_minus_best"],
+            0.0,
+        )
 
     def test_follow_up_result_reports_run_budget_shift(self) -> None:
         mod = _load_module()
@@ -395,6 +493,18 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
             "eval_samples:128->256",
             mod._run_budget_shift_label(result["run_budget_shift"]),
         )
+        gate = mod._follow_up_gate_record(result, ["regressed", "unknown"])
+        self.assertIsNotNone(gate)
+        assert gate is not None
+        self.assertEqual(gate["verdict"], "regressed")
+        self.assertEqual(gate["effective_verdict"], "improved")
+        self.assertEqual(
+            gate["verdict_basis"],
+            "source_feature_raw_verdict_after_run_budget_shift",
+        )
+        self.assertIs(gate["failed"], False)
+        self.assertEqual(gate["exit_code"], 0)
+
         args = mod._build_parser().parse_args(
             [
                 "models/samples/spiral_corpus_en",

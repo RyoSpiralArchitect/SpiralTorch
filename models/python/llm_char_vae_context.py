@@ -805,13 +805,41 @@ def _train_feature_head(
     sample_path.write_text(sample, encoding="utf-8")
     weights_path = run_dir / f"head_{feature}.json"
     st.nn.save(str(weights_path), head)
+    best_nll = _finite_float(best_validation.get("mean_nll"))
+    final_validation = history[-1]["validation"] if history else initial_validation
+    final_nll = _finite_float(final_validation.get("mean_nll"))
+    initial_nll = _finite_float(initial_validation.get("mean_nll"))
+    validation_nlls = [
+        value
+        for value in (
+            _finite_float(item.get("validation", {}).get("mean_nll"))
+            for item in history
+        )
+        if value is not None
+    ]
+    if not validation_nlls and initial_nll is not None:
+        validation_nlls.append(initial_nll)
     return {
         "feature": feature,
         "feature_dim": feature_dim,
         "initial_validation": initial_validation,
         "best_validation": best_validation,
         "best_epoch": best_epoch,
-        "final_validation": history[-1]["validation"] if history else initial_validation,
+        "best_step": 0 if best_epoch is None else int(best_epoch) + 1,
+        "validation_nll_mean": (
+            sum(validation_nlls) / len(validation_nlls) if validation_nlls else None
+        ),
+        "validation_nll_initial_minus_best": (
+            initial_nll - best_nll
+            if initial_nll is not None and best_nll is not None
+            else None
+        ),
+        "validation_nll_final_minus_best": (
+            final_nll - best_nll
+            if final_nll is not None and best_nll is not None
+            else None
+        ),
+        "final_validation": final_validation,
         "history": history,
         "sample_path": str(sample_path),
         "weights_path": str(weights_path),
@@ -924,6 +952,82 @@ def _finite_float(value: Any) -> float | None:
     return parsed
 
 
+def _validation_mean_nll(validation: Any) -> float | None:
+    if not isinstance(validation, dict):
+        return None
+    return _finite_float(validation.get("mean_nll"))
+
+
+def _feature_result_validation_nlls(feature_result: dict[str, Any]) -> list[float]:
+    values: list[float] = []
+    history = feature_result.get("history", [])
+    if isinstance(history, list):
+        for item in history:
+            if not isinstance(item, dict):
+                continue
+            value = _validation_mean_nll(item.get("validation"))
+            if value is not None:
+                values.append(value)
+    if not values:
+        final = _validation_mean_nll(feature_result.get("final_validation"))
+        if final is not None:
+            values.append(final)
+    if not values:
+        initial = _validation_mean_nll(feature_result.get("initial_validation"))
+        if initial is not None:
+            values.append(initial)
+    return values
+
+
+def _feature_result_best_nll(feature_result: dict[str, Any]) -> float | None:
+    best = _validation_mean_nll(feature_result.get("best_validation"))
+    if best is not None:
+        return best
+    values = _feature_result_validation_nlls(feature_result)
+    return min(values) if values else None
+
+
+def _feature_result_final_nll(feature_result: dict[str, Any]) -> float | None:
+    final = _validation_mean_nll(feature_result.get("final_validation"))
+    if final is not None:
+        return final
+    history = feature_result.get("history", [])
+    if isinstance(history, list):
+        for item in reversed(history):
+            if not isinstance(item, dict):
+                continue
+            value = _validation_mean_nll(item.get("validation"))
+            if value is not None:
+                return value
+    return _validation_mean_nll(feature_result.get("initial_validation"))
+
+
+def _feature_result_validation_nll_mean(feature_result: dict[str, Any]) -> float | None:
+    explicit = _finite_float(feature_result.get("validation_nll_mean"))
+    if explicit is not None:
+        return explicit
+    values = _feature_result_validation_nlls(feature_result)
+    return sum(values) / len(values) if values else None
+
+
+def _feature_result_initial_minus_best(feature_result: dict[str, Any]) -> float | None:
+    explicit = _finite_float(feature_result.get("validation_nll_initial_minus_best"))
+    if explicit is not None:
+        return explicit
+    initial = _validation_mean_nll(feature_result.get("initial_validation"))
+    best = _feature_result_best_nll(feature_result)
+    return initial - best if initial is not None and best is not None else None
+
+
+def _feature_result_final_minus_best(feature_result: dict[str, Any]) -> float | None:
+    explicit = _finite_float(feature_result.get("validation_nll_final_minus_best"))
+    if explicit is not None:
+        return explicit
+    final = _feature_result_final_nll(feature_result)
+    best = _feature_result_best_nll(feature_result)
+    return final - best if final is not None and best is not None else None
+
+
 def _fmt_float(value: Any, digits: int = 6) -> str:
     if value is None:
         return "-"
@@ -1004,6 +1108,8 @@ def _single_report(summary: dict[str, Any]) -> str:
                 _fmt_percent(item.get("best_accuracy")),
                 _fmt_float(initial.get("mean_nll")),
                 _fmt_float(final.get("mean_nll")),
+                _fmt_float(result.get("validation_nll_mean")),
+                _fmt_float(result.get("validation_nll_final_minus_best")),
             ]
         )
 
@@ -1040,7 +1146,16 @@ def _single_report(summary: dict[str, Any]) -> str:
     ]
     lines.extend(
         _markdown_table(
-            ["feature", "best_epoch", "best_nll", "best_acc", "init_nll", "final_nll"],
+            [
+                "feature",
+                "best_epoch",
+                "best_nll",
+                "best_acc",
+                "init_nll",
+                "final_nll",
+                "curve_nll",
+                "final_gap",
+            ],
             ranking_rows,
         )
     )
@@ -1072,6 +1187,10 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
             _fmt_float(item.get("mean_best_nll")),
             _fmt_percent(item.get("mean_best_accuracy")),
             _fmt_float(item.get("mean_best_nll_delta_vs_raw")),
+            _fmt_float(item.get("mean_best_step"), 2),
+            _fmt_float(item.get("mean_validation_nll_mean")),
+            _fmt_float(item.get("mean_validation_nll_mean_delta_vs_raw")),
+            _fmt_float(item.get("mean_validation_nll_final_minus_best")),
             str(item.get("runs", "-")),
         ]
         for item in summary.get("ranking", [])
@@ -1443,11 +1562,15 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
             if isinstance(fail_on, list)
             else "-"
         )
+        effective_verdict = follow_up_gate.get("effective_verdict")
+        verdict_basis = follow_up_gate.get("verdict_basis")
         lines.extend(
             [
                 "## Follow-Up Gate",
                 "",
                 f"- verdict: {follow_up_gate.get('verdict')}",
+                f"- effective_verdict: {effective_verdict or follow_up_gate.get('verdict')}",
+                f"- verdict_basis: {verdict_basis or 'verdict'}",
                 f"- fail_on_verdicts: {fail_on_text}",
                 f"- failed: {follow_up_gate.get('failed')}",
                 f"- exit_code: {follow_up_gate.get('exit_code')}",
@@ -1505,7 +1628,17 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
         lines.extend(["## Aggregate Ranking", ""])
     lines.extend(
         _markdown_table(
-            ["feature", "mean_best_nll", "mean_best_acc", "mean_delta_vs_raw", "runs"],
+            [
+                "feature",
+                "mean_best_nll",
+                "mean_best_acc",
+                "mean_delta_vs_raw",
+                "mean_best_step",
+                "curve_nll",
+                "curve_delta_vs_raw",
+                "final_gap",
+                "runs",
+            ],
             ranking_rows,
         )
     )
@@ -1722,6 +1855,8 @@ def _aggregate_summaries(
             feature_results = [
                 {
                     "feature": item.get("feature"),
+                    "best_epoch": item.get("best_epoch"),
+                    "best_step": item.get("best_step"),
                     "best_validation": {
                         "mean_nll": item.get("best_mean_nll"),
                         "accuracy": item.get("best_accuracy"),
@@ -1741,11 +1876,66 @@ def _aggregate_summaries(
             for feature_result in feature_results
             if feature_result.get("best_validation", {}).get("accuracy") is not None
         ]
+        best_steps = []
+        for feature_result in feature_results:
+            best_step = _finite_float(feature_result.get("best_step"))
+            best_epoch = _finite_float(feature_result.get("best_epoch"))
+            if best_step is None and best_epoch is not None:
+                best_step = best_epoch + 1.0
+            if best_step is not None:
+                best_steps.append(best_step)
+        validation_nll_means = [
+            value
+            for value in (
+                _feature_result_validation_nll_mean(feature_result)
+                for feature_result in feature_results
+            )
+            if value is not None
+        ]
+        validation_nll_initial_gains = [
+            value
+            for value in (
+                _feature_result_initial_minus_best(feature_result)
+                for feature_result in feature_results
+            )
+            if value is not None
+        ]
+        validation_nll_final_gaps = [
+            value
+            for value in (
+                _feature_result_final_minus_best(feature_result)
+                for feature_result in feature_results
+            )
+            if value is not None
+        ]
         deltas = [
             float(summary.get("deltas", {}).get(f"{feature}_best_nll_vs_raw"))
             for summary in summaries
             if summary.get("deltas", {}).get(f"{feature}_best_nll_vs_raw") is not None
         ]
+        curve_deltas = []
+        for summary in summaries:
+            existing_delta = _finite_float(
+                summary.get("deltas", {}).get(
+                    f"{feature}_validation_nll_mean_vs_raw"
+                )
+            )
+            if existing_delta is not None:
+                curve_deltas.append(existing_delta)
+                continue
+            feature_by_name = {
+                str(item.get("feature")): item
+                for item in summary.get("features", [])
+                if isinstance(item, dict) and item.get("feature") is not None
+            }
+            raw_result = feature_by_name.get(FEATURE_RAW)
+            feature_result = feature_by_name.get(feature)
+            if raw_result is None or feature_result is None:
+                continue
+            raw_curve = _feature_result_validation_nll_mean(raw_result)
+            feature_curve = _feature_result_validation_nll_mean(feature_result)
+            if raw_curve is not None and feature_curve is not None:
+                curve_deltas.append(feature_curve - raw_curve)
         feature_rows.append(
             {
                 "feature": feature,
@@ -1753,6 +1943,15 @@ def _aggregate_summaries(
                 "best_nll": _metric_stats(best_nlls),
                 "best_accuracy": _metric_stats(best_accs),
                 "best_nll_delta_vs_raw": _metric_stats(deltas),
+                "best_step": _metric_stats(best_steps),
+                "validation_nll_mean": _metric_stats(validation_nll_means),
+                "validation_nll_initial_minus_best": _metric_stats(
+                    validation_nll_initial_gains
+                ),
+                "validation_nll_final_minus_best": _metric_stats(
+                    validation_nll_final_gaps
+                ),
+                "validation_nll_mean_delta_vs_raw": _metric_stats(curve_deltas),
             }
         )
     diagnostic_rows = []
@@ -2091,6 +2290,17 @@ def _aggregate_summaries(
                 "mean_best_nll": item["best_nll"]["mean"],
                 "mean_best_accuracy": item["best_accuracy"]["mean"],
                 "mean_best_nll_delta_vs_raw": item["best_nll_delta_vs_raw"]["mean"],
+                "mean_best_step": item["best_step"]["mean"],
+                "mean_validation_nll_mean": item["validation_nll_mean"]["mean"],
+                "mean_validation_nll_mean_delta_vs_raw": item[
+                    "validation_nll_mean_delta_vs_raw"
+                ]["mean"],
+                "mean_validation_nll_initial_minus_best": item[
+                    "validation_nll_initial_minus_best"
+                ]["mean"],
+                "mean_validation_nll_final_minus_best": item[
+                    "validation_nll_final_minus_best"
+                ]["mean"],
                 "runs": item["runs"],
             }
             for item in ranking
@@ -4042,10 +4252,25 @@ def _follow_up_gate_record(
     if not fail_on_verdicts or not isinstance(follow_up_result, dict):
         return None
     verdict = str(follow_up_result.get("verdict") or "unknown")
-    failed = verdict in set(fail_on_verdicts)
+    effective_verdict = verdict
+    verdict_basis = "verdict"
+    if follow_up_result.get("run_budget_shifted"):
+        raw_verdict = str(
+            follow_up_result.get("source_feature_raw_verdict") or "unknown"
+        )
+        if (
+            follow_up_result.get("source_best_feature_retained")
+            and raw_verdict in FOLLOW_UP_VERDICTS
+            and raw_verdict != "unknown"
+        ):
+            effective_verdict = raw_verdict
+            verdict_basis = "source_feature_raw_verdict_after_run_budget_shift"
+    failed = effective_verdict in set(fail_on_verdicts)
     return {
         "schema": "st.llm_char_vae_context.follow_up_gate.v1",
         "verdict": verdict,
+        "effective_verdict": effective_verdict,
+        "verdict_basis": verdict_basis,
         "fail_on_verdicts": fail_on_verdicts,
         "failed": failed,
         "exit_code": 1 if failed else 0,
@@ -4579,7 +4804,14 @@ def _run_single(args: argparse.Namespace, features: list[str]) -> dict[str, Any]
     best = ranked[0] if ranked else None
     raw = next((item for item in results if item["feature"] == FEATURE_RAW), None)
     raw_best_nll = (
-        None if raw is None or raw["best_validation"]["mean_nll"] is None else float(raw["best_validation"]["mean_nll"])
+        None
+        if raw is None or raw["best_validation"]["mean_nll"] is None
+        else float(raw["best_validation"]["mean_nll"])
+    )
+    raw_curve_nll = (
+        None
+        if raw is None or raw.get("validation_nll_mean") is None
+        else float(raw["validation_nll_mean"])
     )
     deltas = {}
     if raw_best_nll is not None:
@@ -4587,6 +4819,13 @@ def _run_single(args: argparse.Namespace, features: list[str]) -> dict[str, Any]
             best_nll = item["best_validation"]["mean_nll"]
             if best_nll is not None:
                 deltas[f"{item['feature']}_best_nll_vs_raw"] = float(best_nll) - raw_best_nll
+    if raw_curve_nll is not None:
+        for item in results:
+            curve_nll = item.get("validation_nll_mean")
+            if curve_nll is not None:
+                deltas[f"{item['feature']}_validation_nll_mean_vs_raw"] = (
+                    float(curve_nll) - raw_curve_nll
+                )
 
     summary = {
         "schema": RUN_SCHEMA,
@@ -4599,8 +4838,19 @@ def _run_single(args: argparse.Namespace, features: list[str]) -> dict[str, Any]
             {
                 "feature": item["feature"],
                 "best_epoch": item["best_epoch"],
+                "best_step": item["best_step"],
                 "best_mean_nll": item["best_validation"]["mean_nll"],
                 "best_accuracy": item["best_validation"]["accuracy"],
+                "validation_nll_mean": item["validation_nll_mean"],
+                "validation_nll_mean_delta_vs_raw": deltas.get(
+                    f"{item['feature']}_validation_nll_mean_vs_raw"
+                ),
+                "validation_nll_initial_minus_best": item[
+                    "validation_nll_initial_minus_best"
+                ],
+                "validation_nll_final_minus_best": item[
+                    "validation_nll_final_minus_best"
+                ],
             }
             for item in ranked
         ],
