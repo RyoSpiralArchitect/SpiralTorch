@@ -1267,6 +1267,7 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 "## Next Follow-Up Command",
                 "",
                 f"- action: {next_follow_up.get('action')}",
+                f"- default_follow_up_from: `{next_follow_up.get('default_follow_up_from')}`",
                 f"- default_new_seeds: {next_follow_up.get('default_new_seeds')}",
                 f"- script: `{next_follow_up.get('script_path')}`",
                 f"- usage: `{next_follow_up.get('script_usage')}`",
@@ -1622,6 +1623,7 @@ def _follow_up_command_parts(
     *,
     seeds_value: str,
     run_dir_value: str,
+    follow_up_from_value: str | None,
 ) -> list[str]:
     command = [
         "python3",
@@ -1636,6 +1638,7 @@ def _follow_up_command_parts(
         ("--hybrid-latent-scale", _fmt_arg_float(best_config.get("hybrid_latent_scale", 1.0))),
         ("--seeds", seeds_value),
         ("--run-dir", run_dir_value),
+        ("--follow-up-from", follow_up_from_value),
         ("--window-chars", int(args.window_chars)),
         ("--latent-dim", int(args.latent_dim)),
         ("--hidden", int(args.hidden)),
@@ -1683,6 +1686,7 @@ def _next_follow_up_command_record(
         return None
     default_new_seeds = _fresh_seed_csv(seeds)
     default_run_dir = root_run_dir / "follow_up_best_config"
+    default_follow_up_from = root_run_dir / "summary.json"
     script_path = root_run_dir / "next_follow_up_command.sh"
     literal_command = _follow_up_command_parts(
         args,
@@ -1690,6 +1694,7 @@ def _next_follow_up_command_record(
         best_config,
         seeds_value=default_new_seeds,
         run_dir_value=str(default_run_dir),
+        follow_up_from_value=str(default_follow_up_from),
     )
     shell_command = "PYTHONNOUSERSITE=1 " + shlex.join(literal_command)
     script_command = _follow_up_command_parts(
@@ -1698,6 +1703,7 @@ def _next_follow_up_command_record(
         best_config,
         seeds_value="${NEW_SEEDS}",
         run_dir_value="${NEXT_RUN_DIR}",
+        follow_up_from_value="${FOLLOW_UP_FROM}",
     )
     return {
         "schema": "st.llm_char_vae_context.next_follow_up_command.v1",
@@ -1705,11 +1711,13 @@ def _next_follow_up_command_record(
         "best_config": best_config,
         "default_new_seeds": default_new_seeds,
         "default_run_dir": str(default_run_dir),
+        "default_follow_up_from": str(default_follow_up_from),
         "script_path": str(script_path),
         "shell_command": shell_command,
         "script_command": script_command,
         "script_usage": (
-            f"NEW_SEEDS={default_new_seeds} NEXT_RUN_DIR={default_run_dir} "
+            f"FOLLOW_UP_FROM={default_follow_up_from} NEW_SEEDS={default_new_seeds} "
+            f"NEXT_RUN_DIR={default_run_dir} "
             f"bash {script_path}"
         ),
     }
@@ -1722,6 +1730,8 @@ def _script_command_line(command: list[str]) -> str:
         + " ".join(
             part.replace("'${NEW_SEEDS}'", '"${NEW_SEEDS}"').replace(
                 "'${NEXT_RUN_DIR}'", '"${NEXT_RUN_DIR}"'
+            ).replace(
+                "'${FOLLOW_UP_FROM}'", '"${FOLLOW_UP_FROM}"'
             )
             for part in quoted
         )
@@ -1734,6 +1744,7 @@ def _write_next_follow_up_script(record: dict[str, Any]) -> None:
         [
             "#!/usr/bin/env bash",
             "set -euo pipefail",
+            f"FOLLOW_UP_FROM=\"${{FOLLOW_UP_FROM:-{record['default_follow_up_from']}}}\"",
             f"NEW_SEEDS=\"${{NEW_SEEDS:-{record['default_new_seeds']}}}\"",
             f"NEXT_RUN_DIR=\"${{NEXT_RUN_DIR:-{record['default_run_dir']}}}\"",
             _script_command_line([str(part) for part in record["script_command"]]),
