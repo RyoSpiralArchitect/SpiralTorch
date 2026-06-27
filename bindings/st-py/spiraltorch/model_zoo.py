@@ -107,7 +107,7 @@ _ENTRY_METADATA: dict[str, dict[str, Any]] = {
     "llm_char_vae_context": {
         "task": "language-modeling",
         "family": "llm",
-        "description": "Character LM probe over raw, latent, reconstruction, and config-grid gated hybrid text VAE context features.",
+        "description": "Character LM probe over raw, latent, reconstruction, and follow-up config-grid gated hybrid text VAE context features.",
         "tags": (
             "llm",
             "text",
@@ -118,6 +118,7 @@ _ENTRY_METADATA: dict[str, dict[str, Any]] = {
             "gating",
             "scale-grid",
             "normalize-grid",
+            "follow-up",
         ),
     },
     "llm_char_coherence_scan": {

@@ -6,6 +6,7 @@ import json
 import math
 import pathlib
 import random
+import shlex
 import sys
 import time
 from dataclasses import dataclass
@@ -1185,6 +1186,23 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
             seed_rows,
         )
     )
+    next_follow_up = summary.get("next_follow_up_command")
+    if isinstance(next_follow_up, dict):
+        lines.extend(
+            [
+                "",
+                "## Next Follow-Up Command",
+                "",
+                f"- action: {next_follow_up.get('action')}",
+                f"- default_new_seeds: {next_follow_up.get('default_new_seeds')}",
+                f"- script: `{next_follow_up.get('script_path')}`",
+                f"- usage: `{next_follow_up.get('script_usage')}`",
+                "",
+                "```bash",
+                str(next_follow_up.get("shell_command")),
+                "```",
+            ]
+        )
     lines.append("")
     return "\n".join(lines)
 
@@ -1500,6 +1518,157 @@ def _best_config_summary(config_summaries: list[dict[str, Any]]) -> dict[str, An
         "mean_best_nll_delta_vs_raw": top.get("mean_best_nll_delta_vs_raw"),
         "run_dir": best.get("run_dir"),
     }
+
+
+def _fmt_arg_float(value: Any) -> str:
+    return f"{float(value):.8g}"
+
+
+def _fresh_seed_csv(seeds: list[int]) -> str:
+    used = set(int(seed) for seed in seeds)
+    candidates = [101, 103, 107, 109, 113, 127, 131, 137, 139, 149, 151, 157]
+    count = max(3, len(seeds))
+    fresh = [seed for seed in candidates if seed not in used][:count]
+    if len(fresh) < count:
+        cursor = 1_001
+        while len(fresh) < count:
+            if cursor not in used:
+                fresh.append(cursor)
+            cursor += 2
+    return ",".join(str(seed) for seed in fresh)
+
+
+def _append_flag(command: list[str], flag: str, value: Any) -> None:
+    command.extend([flag, str(value)])
+
+
+def _follow_up_command_parts(
+    args: argparse.Namespace,
+    features: list[str],
+    best_config: dict[str, Any],
+    *,
+    seeds_value: str,
+    run_dir_value: str,
+) -> list[str]:
+    command = [
+        "python3",
+        "-S",
+        "-s",
+        "models/python/llm_char_vae_context.py",
+        *[str(value) for value in args.text_or_dir],
+    ]
+    for flag, value in (
+        ("--features", ",".join(features)),
+        ("--feature-normalize", best_config.get("feature_normalize")),
+        ("--hybrid-latent-scale", _fmt_arg_float(best_config.get("hybrid_latent_scale", 1.0))),
+        ("--seeds", seeds_value),
+        ("--run-dir", run_dir_value),
+        ("--window-chars", int(args.window_chars)),
+        ("--latent-dim", int(args.latent_dim)),
+        ("--hidden", int(args.hidden)),
+        ("--epochs", int(args.epochs)),
+        ("--batches", int(args.batches)),
+        ("--batch-size", int(args.batch_size)),
+        ("--lr", _fmt_arg_float(args.lr)),
+        ("--eval-samples", int(args.eval_samples)),
+        ("--val-ratio", _fmt_arg_float(args.val_ratio)),
+        ("--curvature", _fmt_arg_float(args.curvature)),
+        ("--temperature", _fmt_arg_float(args.temperature)),
+        ("--backend", str(args.backend)),
+        ("--min-nll-delta", _fmt_arg_float(args.min_nll_delta)),
+        ("--win-tolerance", _fmt_arg_float(args.win_tolerance)),
+        ("--prompt", str(args.prompt)),
+        ("--gen", int(args.gen)),
+        ("--top-k", int(args.top_k)),
+        ("--vae-epochs", int(args.vae_epochs)),
+        ("--vae-batches", int(args.vae_batches)),
+        ("--vae-batch-size", int(args.vae_batch_size)),
+        ("--vae-lr", _fmt_arg_float(args.vae_lr)),
+        ("--vae-kl-weight", _fmt_arg_float(args.vae_kl_weight)),
+        ("--vae-optimizer", str(args.vae_optimizer)),
+        ("--vae-grad-clip", str(args.vae_grad_clip)),
+        ("--mellin", str(args.mellin)),
+        ("--mellin-exponent", _fmt_arg_float(args.mellin_exponent)),
+        ("--mellin-start", _fmt_arg_float(args.mellin_start)),
+        ("--mellin-end", _fmt_arg_float(args.mellin_end)),
+    ):
+        if value is not None:
+            _append_flag(command, flag, value)
+    if args.vae_load is not None:
+        _append_flag(command, "--vae-load", args.vae_load)
+    return command
+
+
+def _next_follow_up_command_record(
+    args: argparse.Namespace,
+    features: list[str],
+    best_config: dict[str, Any],
+    root_run_dir: pathlib.Path,
+    seeds: list[int],
+) -> dict[str, Any] | None:
+    if not best_config:
+        return None
+    default_new_seeds = _fresh_seed_csv(seeds)
+    default_run_dir = root_run_dir / "follow_up_best_config"
+    script_path = root_run_dir / "next_follow_up_command.sh"
+    literal_command = _follow_up_command_parts(
+        args,
+        features,
+        best_config,
+        seeds_value=default_new_seeds,
+        run_dir_value=str(default_run_dir),
+    )
+    shell_command = "PYTHONNOUSERSITE=1 " + shlex.join(literal_command)
+    script_command = _follow_up_command_parts(
+        args,
+        features,
+        best_config,
+        seeds_value="${NEW_SEEDS}",
+        run_dir_value="${NEXT_RUN_DIR}",
+    )
+    return {
+        "schema": "st.llm_char_vae_context.next_follow_up_command.v1",
+        "action": "confirm_best_config_fresh_seeds",
+        "best_config": best_config,
+        "default_new_seeds": default_new_seeds,
+        "default_run_dir": str(default_run_dir),
+        "script_path": str(script_path),
+        "shell_command": shell_command,
+        "script_command": script_command,
+        "script_usage": (
+            f"NEW_SEEDS={default_new_seeds} NEXT_RUN_DIR={default_run_dir} "
+            f"bash {script_path}"
+        ),
+    }
+
+
+def _script_command_line(command: list[str]) -> str:
+    quoted = [shlex.quote(str(part)) for part in command]
+    return (
+        "PYTHONNOUSERSITE=\"${PYTHONNOUSERSITE:-1}\" "
+        + " ".join(
+            part.replace("'${NEW_SEEDS}'", '"${NEW_SEEDS}"').replace(
+                "'${NEXT_RUN_DIR}'", '"${NEXT_RUN_DIR}"'
+            )
+            for part in quoted
+        )
+    )
+
+
+def _write_next_follow_up_script(record: dict[str, Any]) -> None:
+    script_path = pathlib.Path(str(record["script_path"]))
+    text = "\n".join(
+        [
+            "#!/usr/bin/env bash",
+            "set -euo pipefail",
+            f"NEW_SEEDS=\"${{NEW_SEEDS:-{record['default_new_seeds']}}}\"",
+            f"NEXT_RUN_DIR=\"${{NEXT_RUN_DIR:-{record['default_run_dir']}}}\"",
+            _script_command_line([str(part) for part in record["script_command"]]),
+            "",
+        ]
+    )
+    _write_text(script_path, text)
+    script_path.chmod(script_path.stat().st_mode | 0o755)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -1963,6 +2132,16 @@ def main(argv: list[str] | None = None) -> int:
         aggregate["best_config"] = best_config
         aggregate["best_feature_normalize"] = best_config.get("feature_normalize")
         aggregate["best_hybrid_latent_scale"] = best_config.get("hybrid_latent_scale")
+        next_follow_up = _next_follow_up_command_record(
+            args,
+            features,
+            best_config,
+            root_run_dir,
+            seeds,
+        )
+        if next_follow_up is not None:
+            aggregate["next_follow_up_command"] = next_follow_up
+            _write_next_follow_up_script(next_follow_up)
     _write_json(root_run_dir / "summary.json", aggregate)
     _write_text(root_run_dir / "report.md", _aggregate_report(aggregate))
     if args.json:
