@@ -18,13 +18,17 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "models" / "python" / "llm_char_vae_context.py"
 SCHEMA = "st.llm_char_vae_context.chain.v1"
 DEFAULT_FEATURES = "raw,reconstruction,latent,raw_latent,reconstruction_latent"
+FOCUSED_HYBRID_FEATURES = "raw,latent,raw_latent,reconstruction_latent"
 DEFAULT_NORMALIZE_MODES = "blocks,vector"
 DEFAULT_FAIL_ON_VERDICT = "regressed,unknown"
 SMOKE_LATENT_SCALES = "0.5,1.0"
 SCOUT_LATENT_SCALES = "0.5,1.0,2.0,4.0"
+HYBRID4_LATENT_SCALES = "2.0,4.0"
 
 PRESETS: dict[str, dict[str, Any]] = {
     "smoke": {
+        "features": DEFAULT_FEATURES,
+        "feature_normalize_modes": DEFAULT_NORMALIZE_MODES,
         "window_chars": 20,
         "latent_dim": 5,
         "hidden": 8,
@@ -41,6 +45,8 @@ PRESETS: dict[str, dict[str, Any]] = {
         "follow_up_seed_groups": "17;19",
     },
     "small": {
+        "features": DEFAULT_FEATURES,
+        "feature_normalize_modes": DEFAULT_NORMALIZE_MODES,
         "window_chars": 32,
         "latent_dim": 8,
         "hidden": 16,
@@ -56,7 +62,27 @@ PRESETS: dict[str, dict[str, Any]] = {
         "hybrid_latent_scales": SCOUT_LATENT_SCALES,
         "follow_up_seed_groups": "19,23;29,31",
     },
+    "hybrid4": {
+        "features": FOCUSED_HYBRID_FEATURES,
+        "feature_normalize_modes": "blocks",
+        "window_chars": 32,
+        "latent_dim": 8,
+        "hidden": 16,
+        "epochs": 8,
+        "batches": 16,
+        "batch_size": 4,
+        "vae_epochs": 8,
+        "vae_batches": 16,
+        "vae_batch_size": 4,
+        "eval_samples": 128,
+        "gen": 0,
+        "seeds": "2001,2003,2005",
+        "hybrid_latent_scales": HYBRID4_LATENT_SCALES,
+        "follow_up_seed_groups": "2007,2009,2011;2013,2015,2017",
+    },
     "base": {
+        "features": DEFAULT_FEATURES,
+        "feature_normalize_modes": DEFAULT_NORMALIZE_MODES,
         "window_chars": 48,
         "latent_dim": 16,
         "hidden": 32,
@@ -122,8 +148,12 @@ def _parent_command(args: argparse.Namespace, run_dir: Path) -> list[str]:
         str(SCRIPT.relative_to(ROOT)),
         *[str(path) for path in args.text_or_dir],
     ]
-    _append_flag(command, "--features", args.features)
-    _append_flag(command, "--feature-normalize-modes", args.feature_normalize_modes)
+    _append_flag(command, "--features", _preset_value(args, "features"))
+    _append_flag(
+        command,
+        "--feature-normalize-modes",
+        _preset_value(args, "feature_normalize_modes"),
+    )
     _append_flag(
         command,
         "--hybrid-latent-scales",
@@ -371,8 +401,8 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="return success when a follow-up gate intentionally stops promotion",
     )
-    parser.add_argument("--features", default=DEFAULT_FEATURES)
-    parser.add_argument("--feature-normalize-modes", default=DEFAULT_NORMALIZE_MODES)
+    parser.add_argument("--features", default=None)
+    parser.add_argument("--feature-normalize-modes", default=None)
     parser.add_argument("--hybrid-latent-scales", default=None)
     parser.add_argument("--python", default="python3")
     parser.add_argument("--dry-run", action="store_true")

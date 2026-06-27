@@ -32,12 +32,39 @@ class CharVaeContextChainTests(unittest.TestCase):
             smoke_command[smoke_command.index("--hybrid-latent-scales") + 1],
             "0.5,1.0",
         )
+        self.assertEqual(
+            smoke_command[smoke_command.index("--feature-normalize-modes") + 1],
+            "blocks,vector",
+        )
 
         small = parser.parse_args(["models/samples/spiral_corpus_en", "--preset", "small"])
         small_command = mod._parent_command(small, Path("/tmp/small"))
         self.assertEqual(
             small_command[small_command.index("--hybrid-latent-scales") + 1],
             "0.5,1.0,2.0,4.0",
+        )
+
+        hybrid4 = parser.parse_args(
+            ["models/samples/spiral_corpus_en", "--preset", "hybrid4"]
+        )
+        hybrid4_command = mod._parent_command(hybrid4, Path("/tmp/hybrid4"))
+        self.assertEqual(
+            hybrid4_command[hybrid4_command.index("--features") + 1],
+            "raw,latent,raw_latent,reconstruction_latent",
+        )
+        self.assertEqual(
+            hybrid4_command[hybrid4_command.index("--feature-normalize-modes") + 1],
+            "blocks",
+        )
+        self.assertEqual(
+            hybrid4_command[hybrid4_command.index("--hybrid-latent-scales") + 1],
+            "2.0,4.0",
+        )
+        self.assertEqual(hybrid4_command[hybrid4_command.index("--epochs") + 1], "8")
+        self.assertEqual(hybrid4_command[hybrid4_command.index("--batches") + 1], "16")
+        self.assertEqual(
+            hybrid4_command[hybrid4_command.index("--eval-samples") + 1],
+            "128",
         )
 
         explicit = parser.parse_args(
