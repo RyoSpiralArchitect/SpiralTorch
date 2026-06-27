@@ -489,6 +489,16 @@ def _render_report(manifest: dict[str, Any]) -> str:
         f"- run_root: `{manifest['run_root']}`",
         f"- stopped_reason: {manifest.get('stopped_reason') or '-'}",
         f"- allowed_gate_stop: {manifest.get('allowed_gate_stop') or False}",
+        "- follow_up_seed_groups: {source} ({groups})".format(
+            source=_fmt(manifest.get("follow_up_seed_group_source")),
+            groups=(
+                ", ".join(
+                    str(group)
+                    for group in manifest.get("planned_follow_up_seed_groups", [])
+                )
+                or "-"
+            ),
+        ),
         "- accepted: {label} (step {index}, mean_best_nll={nll})".format(
             label=_fmt(_value(accepted, "best_config_label")),
             index=_fmt(_value(accepted, "index")),

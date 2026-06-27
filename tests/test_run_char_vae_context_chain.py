@@ -185,6 +185,8 @@ class CharVaeContextChainTests(unittest.TestCase):
                     "run_root": str(run_dir.parent),
                     "steps": [step],
                     "allowed_gate_stop": True,
+                    "follow_up_seed_group_source": "preset_fallback",
+                    "planned_follow_up_seed_groups": ["17", "19"],
                 }
             )
 
@@ -216,6 +218,7 @@ class CharVaeContextChainTests(unittest.TestCase):
         self.assertIn("best runner-up within combined seed uncertainty", report)
         self.assertIn("run_seed_source", report)
         self.assertIn("command_default", report)
+        self.assertIn("- follow_up_seed_groups: preset_fallback (17, 19)", report)
         self.assertIn("source_feature_delta_vs_source", report)
         self.assertIn("latent@normalize=blocks,scale=0.5", report)
         self.assertIn("0.001000", report)
