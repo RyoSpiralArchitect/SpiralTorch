@@ -210,6 +210,7 @@ jobs:
         run: |
           python -P bindings/st-py/tests/test_unittest_smoke.py
           python -P tests/test_llm_char_vae_context_guidance.py
+          python -P tools/run_char_vae_context_chain.py models/samples/spiral_corpus_en --preset smoke --run-root /tmp/spiraltorch_char_vae_context_chain_dry --dry-run
       - name: Run extra examples
         env:
           PYTHONNOUSERSITE: "1"

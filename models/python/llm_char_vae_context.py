@@ -2894,7 +2894,9 @@ def _follow_up_guidance_record(
         else 0
     )
 
-    source_feature_swapped = source_feature_verdict == "regressed" or not source_retained
+    source_feature_needs_review = (
+        source_feature_verdict == "regressed" or not source_retained
+    )
     config_improved_while_source_regressed = (
         config_verdict == "improved" and source_feature_verdict == "regressed"
     )
@@ -2910,9 +2912,12 @@ def _follow_up_guidance_record(
     if gate_failed:
         action = "stop_on_follow_up_gate"
         add_reason(f"gate failed on verdict={verdict}")
-    elif source_feature_swapped:
+    elif source_feature_needs_review:
         action = "review_feature_swap_before_promotion"
-        add_reason("source best feature did not retain its role")
+        if not source_retained:
+            add_reason("source best feature did not retain its role")
+        if source_feature_verdict == "regressed":
+            add_reason("source best feature regressed on fresh seeds")
         if config_improved_while_source_regressed:
             add_reason("config improved while source feature regressed")
     elif verdict == "improved":
@@ -2936,8 +2941,10 @@ def _follow_up_guidance_record(
         action = "rerun_with_more_evidence"
         add_reason("follow-up verdict is unknown")
 
-    if gate_failed and source_feature_swapped:
+    if gate_failed and not source_retained:
         add_reason("source best feature did not retain its role")
+    if gate_failed and source_feature_verdict == "regressed":
+        add_reason("source best feature regressed on fresh seeds")
     if gate_failed and config_improved_while_source_regressed:
         add_reason("config improved while source feature regressed")
 
