@@ -167,6 +167,17 @@ def _value(summary: dict[str, Any] | None, *keys: str) -> Any:
     return item
 
 
+def _config_label(config: dict[str, Any] | None) -> str | None:
+    if not isinstance(config, dict):
+        return None
+    feature = config.get("best_feature")
+    normalize = config.get("feature_normalize")
+    scale = config.get("hybrid_latent_scale")
+    if feature is None:
+        return None
+    return f"{feature}@normalize={normalize},scale={scale}"
+
+
 def _step_record(
     *,
     index: int,
@@ -178,6 +189,24 @@ def _step_record(
 ) -> dict[str, Any]:
     summary = None if dry_run else _load_summary(run_dir)
     summary_path = run_dir / "summary.json"
+    best_config = _value(summary, "best_config")
+    delta_vs_raw = _value(summary, "best_config", "mean_best_nll_delta_vs_raw")
+    delta_vs_source = _value(
+        summary,
+        "follow_up_result",
+        "mean_best_nll_delta_vs_source",
+    )
+    source_feature_delta_vs_source = _value(
+        summary,
+        "follow_up_result",
+        "source_feature_mean_best_nll_delta_vs_source",
+    )
+    source_feature_retained = _value(
+        summary,
+        "follow_up_result",
+        "source_best_feature_retained",
+    )
+    gate_failed = _value(summary, "follow_up_gate", "failed")
     return {
         "index": index,
         "role": role,
@@ -189,10 +218,19 @@ def _step_record(
         "command_line": shlex.join(command),
         "status": _value(summary, "status"),
         "best_feature": _value(summary, "best_feature"),
-        "best_config": _value(summary, "best_config"),
+        "best_config": best_config,
+        "best_config_label": _config_label(
+            best_config if isinstance(best_config, dict) else None
+        ),
+        "best_config_feature": _value(summary, "best_config", "best_feature"),
         "mean_best_nll": _value(summary, "best_config", "mean_best_nll"),
         "mean_best_accuracy": _value(summary, "best_config", "mean_best_accuracy"),
+        "mean_best_nll_delta_vs_raw": delta_vs_raw,
+        "mean_best_nll_delta_vs_source": delta_vs_source,
+        "source_feature_mean_best_nll_delta_vs_source": source_feature_delta_vs_source,
         "follow_up_verdict": _value(summary, "follow_up_result", "verdict"),
+        "source_best_feature_retained": source_feature_retained,
+        "follow_up_gate_failed": gate_failed,
         "trajectory_action": _value(summary, "follow_up_trajectory", "trajectory_action"),
         "trajectory_verdict": _value(summary, "follow_up_trajectory", "trajectory_verdict"),
         "guidance_action": _value(summary, "follow_up_guidance", "action"),
@@ -221,27 +259,80 @@ def _render_report(manifest: dict[str, Any]) -> str:
         f"- stopped_reason: {manifest.get('stopped_reason') or '-'}",
         f"- allowed_gate_stop: {manifest.get('allowed_gate_stop') or False}",
         "",
-        "| step | role | exit | status | best_feature | mean_best_nll | verdict | trajectory | guidance | unsafe | guided |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| step | role | exit | status | best_config | mean_best_nll | "
+        "delta_vs_raw | delta_vs_source | verdict | retained | gate | "
+        "trajectory | guidance | unsafe | guided |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for step in manifest.get("steps", []):
         lines.append(
             "| {index} | {role} | {exit_code} | {status} | {best_feature} | "
-            "{mean_best_nll} | {follow_up_verdict} | {trajectory_action} | "
-            "{guidance_action} | {unsafe_promotion} | {guided_enabled} |".format(
+            "{mean_best_nll} | {mean_best_nll_delta_vs_raw} | "
+            "{mean_best_nll_delta_vs_source} | {follow_up_verdict} | "
+            "{source_best_feature_retained} | {follow_up_gate_failed} | "
+            "{trajectory_action} | {guidance_action} | {unsafe_promotion} | "
+            "{guided_enabled} |".format(
                 index=step.get("index"),
                 role=_fmt(step.get("role")),
                 exit_code=_fmt(step.get("exit_code")),
                 status=_fmt(step.get("status")),
-                best_feature=_fmt(step.get("best_feature")),
+                best_feature=_fmt(
+                    step.get("best_config_label") or step.get("best_feature")
+                ),
                 mean_best_nll=_fmt(step.get("mean_best_nll")),
+                mean_best_nll_delta_vs_raw=_fmt(
+                    step.get("mean_best_nll_delta_vs_raw")
+                ),
+                mean_best_nll_delta_vs_source=_fmt(
+                    step.get("mean_best_nll_delta_vs_source")
+                ),
                 follow_up_verdict=_fmt(step.get("follow_up_verdict")),
+                source_best_feature_retained=_fmt(
+                    step.get("source_best_feature_retained")
+                ),
+                follow_up_gate_failed=_fmt(step.get("follow_up_gate_failed")),
                 trajectory_action=_fmt(step.get("trajectory_action")),
                 guidance_action=_fmt(step.get("guidance_action")),
                 unsafe_promotion=_fmt(step.get("unsafe_promotion")),
                 guided_enabled=_fmt(step.get("guided_enabled")),
             )
         )
+    follow_up_steps = [
+        step for step in manifest.get("steps", []) if step.get("role") == "follow_up"
+    ]
+    if follow_up_steps:
+        lines.extend(
+            [
+                "",
+                "## Follow-Up Deltas",
+                "",
+                "Negative `delta_vs_raw` means the selected feature still beats the "
+                "raw-feature baseline; positive `delta_vs_source` means the follow-up "
+                "softened or regressed versus the source run.",
+                "",
+                "| step | best_config | delta_vs_raw | delta_vs_source | "
+                "source_feature_delta_vs_source | retained | gate | verdict |",
+                "| --- | --- | --- | --- | --- | --- | --- | --- |",
+            ]
+        )
+        for step in follow_up_steps:
+            lines.append(
+                "| {index} | {best_feature} | {delta_raw} | {delta_source} | "
+                "{source_feature_delta} | {retained} | {gate} | {verdict} |".format(
+                    index=step.get("index"),
+                    best_feature=_fmt(
+                        step.get("best_config_label") or step.get("best_feature")
+                    ),
+                    delta_raw=_fmt(step.get("mean_best_nll_delta_vs_raw")),
+                    delta_source=_fmt(step.get("mean_best_nll_delta_vs_source")),
+                    source_feature_delta=_fmt(
+                        step.get("source_feature_mean_best_nll_delta_vs_source")
+                    ),
+                    retained=_fmt(step.get("source_best_feature_retained")),
+                    gate=_fmt(step.get("follow_up_gate_failed")),
+                    verdict=_fmt(step.get("follow_up_verdict")),
+                )
+            )
     lines.extend(["", "## Commands", ""])
     for step in manifest.get("steps", []):
         lines.extend(
