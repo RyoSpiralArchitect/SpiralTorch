@@ -1316,6 +1316,8 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 "",
                 f"- action: {next_follow_up.get('action')}",
                 f"- default_follow_up_from: `{next_follow_up.get('default_follow_up_from')}`",
+                "- default_follow_up_fail_on_verdict: "
+                f"{next_follow_up.get('default_follow_up_fail_on_verdict') or '-'}",
                 f"- default_new_seeds: {next_follow_up.get('default_new_seeds')}",
                 f"- script: `{next_follow_up.get('script_path')}`",
                 f"- usage: `{next_follow_up.get('script_usage')}`",
@@ -1672,6 +1674,7 @@ def _follow_up_command_parts(
     seeds_value: str,
     run_dir_value: str,
     follow_up_from_value: str | None,
+    fail_on_verdict_value: str | None,
 ) -> list[str]:
     command = [
         "python3",
@@ -1687,6 +1690,7 @@ def _follow_up_command_parts(
         ("--seeds", seeds_value),
         ("--run-dir", run_dir_value),
         ("--follow-up-from", follow_up_from_value),
+        ("--follow-up-fail-on-verdict", fail_on_verdict_value),
         ("--window-chars", int(args.window_chars)),
         ("--latent-dim", int(args.latent_dim)),
         ("--hidden", int(args.hidden)),
@@ -1735,6 +1739,12 @@ def _next_follow_up_command_record(
     default_new_seeds = _fresh_seed_csv(seeds)
     default_run_dir = root_run_dir / "follow_up_best_config"
     default_follow_up_from = root_run_dir / "summary.json"
+    default_fail_on_verdict = (
+        str(args.follow_up_fail_on_verdict).strip()
+        if args.follow_up_fail_on_verdict is not None
+        and str(args.follow_up_fail_on_verdict).strip()
+        else None
+    )
     script_path = root_run_dir / "next_follow_up_command.sh"
     literal_command = _follow_up_command_parts(
         args,
@@ -1743,6 +1753,7 @@ def _next_follow_up_command_record(
         seeds_value=default_new_seeds,
         run_dir_value=str(default_run_dir),
         follow_up_from_value=str(default_follow_up_from),
+        fail_on_verdict_value=default_fail_on_verdict,
     )
     shell_command = "PYTHONNOUSERSITE=1 " + shlex.join(literal_command)
     script_command = _follow_up_command_parts(
@@ -1752,7 +1763,19 @@ def _next_follow_up_command_record(
         seeds_value="${NEW_SEEDS}",
         run_dir_value="${NEXT_RUN_DIR}",
         follow_up_from_value="${FOLLOW_UP_FROM}",
+        fail_on_verdict_value=(
+            "${FOLLOW_UP_FAIL_ON_VERDICT}"
+            if default_fail_on_verdict is not None
+            else None
+        ),
     )
+    script_usage = (
+        f"FOLLOW_UP_FROM={default_follow_up_from} NEW_SEEDS={default_new_seeds} "
+        f"NEXT_RUN_DIR={default_run_dir}"
+    )
+    if default_fail_on_verdict is not None:
+        script_usage += f" FOLLOW_UP_FAIL_ON_VERDICT={default_fail_on_verdict}"
+    script_usage += f" bash {script_path}"
     return {
         "schema": "st.llm_char_vae_context.next_follow_up_command.v1",
         "action": "confirm_best_config_fresh_seeds",
@@ -1760,14 +1783,11 @@ def _next_follow_up_command_record(
         "default_new_seeds": default_new_seeds,
         "default_run_dir": str(default_run_dir),
         "default_follow_up_from": str(default_follow_up_from),
+        "default_follow_up_fail_on_verdict": default_fail_on_verdict,
         "script_path": str(script_path),
         "shell_command": shell_command,
         "script_command": script_command,
-        "script_usage": (
-            f"FOLLOW_UP_FROM={default_follow_up_from} NEW_SEEDS={default_new_seeds} "
-            f"NEXT_RUN_DIR={default_run_dir} "
-            f"bash {script_path}"
-        ),
+        "script_usage": script_usage,
     }
 
 
@@ -1780,6 +1800,8 @@ def _script_command_line(command: list[str]) -> str:
                 "'${NEXT_RUN_DIR}'", '"${NEXT_RUN_DIR}"'
             ).replace(
                 "'${FOLLOW_UP_FROM}'", '"${FOLLOW_UP_FROM}"'
+            ).replace(
+                "'${FOLLOW_UP_FAIL_ON_VERDICT}'", '"${FOLLOW_UP_FAIL_ON_VERDICT}"'
             )
             for part in quoted
         )
@@ -1788,13 +1810,22 @@ def _script_command_line(command: list[str]) -> str:
 
 def _write_next_follow_up_script(record: dict[str, Any]) -> None:
     script_path = pathlib.Path(str(record["script_path"]))
+    default_fail_on_verdict = record.get("default_follow_up_fail_on_verdict")
+    env_lines = [
+        f"FOLLOW_UP_FROM=\"${{FOLLOW_UP_FROM:-{record['default_follow_up_from']}}}\"",
+        f"NEW_SEEDS=\"${{NEW_SEEDS:-{record['default_new_seeds']}}}\"",
+        f"NEXT_RUN_DIR=\"${{NEXT_RUN_DIR:-{record['default_run_dir']}}}\"",
+    ]
+    if default_fail_on_verdict is not None:
+        env_lines.append(
+            "FOLLOW_UP_FAIL_ON_VERDICT="
+            f"\"${{FOLLOW_UP_FAIL_ON_VERDICT:-{default_fail_on_verdict}}}\""
+        )
     text = "\n".join(
         [
             "#!/usr/bin/env bash",
             "set -euo pipefail",
-            f"FOLLOW_UP_FROM=\"${{FOLLOW_UP_FROM:-{record['default_follow_up_from']}}}\"",
-            f"NEW_SEEDS=\"${{NEW_SEEDS:-{record['default_new_seeds']}}}\"",
-            f"NEXT_RUN_DIR=\"${{NEXT_RUN_DIR:-{record['default_run_dir']}}}\"",
+            *env_lines,
             _script_command_line([str(part) for part in record["script_command"]]),
             "",
         ]
