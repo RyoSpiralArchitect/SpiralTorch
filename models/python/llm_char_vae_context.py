@@ -1136,6 +1136,7 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
     follow_up_gate = summary.get("follow_up_gate")
     follow_up_guidance = summary.get("follow_up_guidance")
     best_generation_follow_up = summary.get("best_generation_follow_up_command")
+    broadened_follow_up = summary.get("broadened_follow_up_command")
     if isinstance(follow_up_result, dict):
         source_config = follow_up_result.get("source_best_config")
         evaluated_config = follow_up_result.get("evaluated_config")
@@ -1401,6 +1402,8 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 f"{follow_up_guidance.get('use_next_follow_up_command')}",
                 "- use_best_generation_follow_up_command: "
                 f"{follow_up_guidance.get('use_best_generation_follow_up_command')}",
+                "- use_broadened_follow_up_command: "
+                f"{follow_up_guidance.get('use_broadened_follow_up_command')}",
                 f"- gate_failed: {follow_up_guidance.get('gate_failed')}",
                 f"- reasons: {reasons_text}",
                 f"- command_usage: `{follow_up_guidance.get('command_usage') or '-'}`",
@@ -1486,6 +1489,34 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 "",
                 "```bash",
                 str(next_follow_up.get("shell_command")),
+                "```",
+            ]
+        )
+    if isinstance(broadened_follow_up, dict):
+        lines.extend(
+            [
+                "",
+                "## Broadened Follow-Up Command",
+                "",
+                f"- action: {broadened_follow_up.get('action')}",
+                f"- default_follow_up_from: `{broadened_follow_up.get('default_follow_up_from')}`",
+                "- default_follow_up_fail_on_verdict: "
+                f"{broadened_follow_up.get('default_follow_up_fail_on_verdict') or '-'}",
+                f"- default_new_seeds: {broadened_follow_up.get('default_new_seeds')}",
+                "- used_seed_history: "
+                f"{', '.join(str(seed) for seed in broadened_follow_up.get('used_seed_history', [])) or '-'}",
+                "- broadened_epochs/batches/eval_samples: "
+                f"{broadened_follow_up.get('broadened_epochs')}/"
+                f"{broadened_follow_up.get('broadened_batches')}/"
+                f"{broadened_follow_up.get('broadened_eval_samples')}",
+                "- broadened_vae_epochs/batches: "
+                f"{broadened_follow_up.get('broadened_vae_epochs')}/"
+                f"{broadened_follow_up.get('broadened_vae_batches')}",
+                f"- script: `{broadened_follow_up.get('script_path')}`",
+                f"- usage: `{broadened_follow_up.get('script_usage')}`",
+                "",
+                "```bash",
+                str(broadened_follow_up.get("shell_command")),
                 "```",
             ]
         )
@@ -2108,6 +2139,7 @@ def _guided_next_follow_up_command_record(
         bool(
             follow_up_guidance.get("use_next_follow_up_command")
             or follow_up_guidance.get("use_best_generation_follow_up_command")
+            or follow_up_guidance.get("use_broadened_follow_up_command")
         )
         and isinstance(
             next_follow_up,
@@ -2257,6 +2289,107 @@ def _best_generation_follow_up_command_record(
         "default_run_dir": str(default_run_dir),
         "default_follow_up_from": str(default_follow_up_from),
         "default_follow_up_fail_on_verdict": default_fail_on_verdict,
+        "script_path": str(script_path),
+        "shell_command": shell_command,
+        "script_command": script_command,
+        "script_usage": script_usage,
+    }
+
+
+def _broadened_follow_up_command_record(
+    args: argparse.Namespace,
+    features: list[str],
+    best_config: dict[str, Any] | None,
+    root_run_dir: pathlib.Path,
+    seeds: list[int],
+    follow_up_chain: dict[str, Any] | None,
+    follow_up_trajectory: dict[str, Any] | None,
+    next_follow_up: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(best_config, dict):
+        return None
+    if not isinstance(follow_up_chain, dict) or not isinstance(follow_up_trajectory, dict):
+        return None
+    if int(follow_up_chain.get("improved_streak") or 0) < 2:
+        return None
+    if follow_up_trajectory.get("trajectory_action") != "confirm_trajectory_with_fresh_seeds":
+        return None
+    if follow_up_trajectory.get("unsafe_promotion"):
+        return None
+    if follow_up_trajectory.get("best_summary_path") != str(root_run_dir / "summary.json"):
+        return None
+
+    used_seeds: list[int] = []
+    if isinstance(next_follow_up, dict):
+        _append_unique_ints(used_seeds, next_follow_up.get("used_seed_history"))
+    _append_unique_ints(used_seeds, seeds)
+    default_new_seeds = _fresh_seed_csv(used_seeds or seeds, count=max(5, len(seeds) + 2))
+    used_seed_history_value = (
+        ",".join(str(seed) for seed in used_seeds) if used_seeds else None
+    )
+    default_run_dir = root_run_dir / "follow_up_broadened"
+    default_follow_up_from = root_run_dir / "summary.json"
+    default_fail_on_verdict = (
+        str(args.follow_up_fail_on_verdict).strip()
+        if args.follow_up_fail_on_verdict is not None
+        and str(args.follow_up_fail_on_verdict).strip()
+        else None
+    )
+    broadened_args = _clone_args(
+        args,
+        epochs=max(int(args.epochs) + 1, int(args.epochs) * 2),
+        batches=max(int(args.batches) + 1, int(args.batches) * 2),
+        eval_samples=max(int(args.eval_samples) + 16, int(args.eval_samples) * 2),
+        vae_epochs=max(int(args.vae_epochs) + 1, int(args.vae_epochs) * 2),
+        vae_batches=max(int(args.vae_batches) + 1, int(args.vae_batches) * 2),
+    )
+    script_path = root_run_dir / "broadened_follow_up_command.sh"
+    literal_command = _follow_up_command_parts(
+        broadened_args,
+        features,
+        best_config,
+        seeds_value=default_new_seeds,
+        run_dir_value=str(default_run_dir),
+        follow_up_from_value=str(default_follow_up_from),
+        fail_on_verdict_value=default_fail_on_verdict,
+        used_seed_history_value=used_seed_history_value,
+    )
+    shell_command = "PYTHONNOUSERSITE=1 " + shlex.join(literal_command)
+    script_command = _follow_up_command_parts(
+        broadened_args,
+        features,
+        best_config,
+        seeds_value="${NEW_SEEDS}",
+        run_dir_value="${NEXT_RUN_DIR}",
+        follow_up_from_value="${FOLLOW_UP_FROM}",
+        fail_on_verdict_value=(
+            "${FOLLOW_UP_FAIL_ON_VERDICT}"
+            if default_fail_on_verdict is not None
+            else None
+        ),
+        used_seed_history_value=used_seed_history_value,
+    )
+    script_usage = (
+        f"FOLLOW_UP_FROM={default_follow_up_from} NEW_SEEDS={default_new_seeds} "
+        f"NEXT_RUN_DIR={default_run_dir}"
+    )
+    if default_fail_on_verdict is not None:
+        script_usage += f" FOLLOW_UP_FAIL_ON_VERDICT={default_fail_on_verdict}"
+    script_usage += f" bash {script_path}"
+    return {
+        "schema": "st.llm_char_vae_context.broadened_follow_up_command.v1",
+        "action": "promote_and_broaden_after_streak",
+        "best_config": best_config,
+        "default_new_seeds": default_new_seeds,
+        "used_seed_history": used_seeds,
+        "default_run_dir": str(default_run_dir),
+        "default_follow_up_from": str(default_follow_up_from),
+        "default_follow_up_fail_on_verdict": default_fail_on_verdict,
+        "broadened_epochs": int(broadened_args.epochs),
+        "broadened_batches": int(broadened_args.batches),
+        "broadened_eval_samples": int(broadened_args.eval_samples),
+        "broadened_vae_epochs": int(broadened_args.vae_epochs),
+        "broadened_vae_batches": int(broadened_args.vae_batches),
         "script_path": str(script_path),
         "shell_command": shell_command,
         "script_command": script_command,
@@ -3303,6 +3436,7 @@ def _follow_up_guidance_record(
     next_follow_up: dict[str, Any] | None,
     follow_up_trajectory: dict[str, Any] | None = None,
     best_generation_follow_up: dict[str, Any] | None = None,
+    broadened_follow_up: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     if not isinstance(follow_up_result, dict):
         return None
@@ -3347,6 +3481,7 @@ def _follow_up_guidance_record(
     promote_current_best = False
     use_next_follow_up_command = False
     use_best_generation_follow_up_command = False
+    use_broadened_follow_up_command = False
     action = "review_follow_up"
 
     def add_reason(reason: str) -> None:
@@ -3431,11 +3566,20 @@ def _follow_up_guidance_record(
             command_usage = None
             add_reason("trajectory marked promotion unsafe")
         elif trajectory_action == "confirm_trajectory_with_fresh_seeds":
-            action = "confirm_trajectory_with_fresh_seeds"
             promote_current_best = True
-            use_next_follow_up_command = isinstance(next_follow_up, dict)
-            if use_next_follow_up_command and isinstance(next_follow_up, dict):
-                command_usage = next_follow_up.get("script_usage")
+            if (
+                local_action == "promote_and_broaden_after_streak"
+                and isinstance(broadened_follow_up, dict)
+            ):
+                action = "promote_and_broaden_after_streak"
+                use_next_follow_up_command = False
+                use_broadened_follow_up_command = True
+                command_usage = broadened_follow_up.get("script_usage")
+            else:
+                action = "confirm_trajectory_with_fresh_seeds"
+                use_next_follow_up_command = isinstance(next_follow_up, dict)
+                if use_next_follow_up_command and isinstance(next_follow_up, dict):
+                    command_usage = next_follow_up.get("script_usage")
         elif trajectory_action == "collect_more_seed_evidence":
             action = "collect_more_seed_evidence"
             use_next_follow_up_command = isinstance(next_follow_up, dict)
@@ -3486,6 +3630,7 @@ def _follow_up_guidance_record(
         "promote_current_best": promote_current_best,
         "use_next_follow_up_command": use_next_follow_up_command,
         "use_best_generation_follow_up_command": use_best_generation_follow_up_command,
+        "use_broadened_follow_up_command": use_broadened_follow_up_command,
         "gate_failed": gate_failed,
         "reasons": reasons,
         "command_usage": command_usage,
@@ -4058,6 +4203,20 @@ def main(argv: list[str] | None = None) -> int:
         aggregate["best_generation_follow_up_command"] = best_generation_follow_up
         _write_next_follow_up_script(best_generation_follow_up)
 
+    broadened_follow_up = _broadened_follow_up_command_record(
+        args,
+        features,
+        best_config,
+        root_run_dir,
+        seeds,
+        follow_up_chain,
+        follow_up_trajectory,
+        next_follow_up,
+    )
+    if broadened_follow_up is not None:
+        aggregate["broadened_follow_up_command"] = broadened_follow_up
+        _write_next_follow_up_script(broadened_follow_up)
+
     follow_up_guidance = _follow_up_guidance_record(
         follow_up_result,
         follow_up_chain,
@@ -4065,15 +4224,16 @@ def main(argv: list[str] | None = None) -> int:
         next_follow_up,
         follow_up_trajectory,
         best_generation_follow_up,
+        broadened_follow_up,
     )
     if follow_up_guidance is not None:
         aggregate["follow_up_guidance"] = follow_up_guidance
-    selected_guided_follow_up = (
-        best_generation_follow_up
-        if isinstance(follow_up_guidance, dict)
-        and follow_up_guidance.get("use_best_generation_follow_up_command")
-        else next_follow_up
-    )
+    selected_guided_follow_up = next_follow_up
+    if isinstance(follow_up_guidance, dict):
+        if follow_up_guidance.get("use_best_generation_follow_up_command"):
+            selected_guided_follow_up = best_generation_follow_up
+        elif follow_up_guidance.get("use_broadened_follow_up_command"):
+            selected_guided_follow_up = broadened_follow_up
     guided_next_follow_up = _guided_next_follow_up_command_record(
         root_run_dir,
         follow_up_guidance,
