@@ -67,6 +67,8 @@ def _summary(
     source_feature_verdict: str,
     source_retained: bool,
     gate_failed: bool,
+    source_feature_raw_verdict: str = "unknown",
+    source_feature_delta_vs_raw: float | None = None,
 ) -> dict:
     return {
         "status": "improved",
@@ -81,6 +83,8 @@ def _summary(
             "verdict": verdict,
             "config_verdict": config_verdict,
             "source_feature_verdict": source_feature_verdict,
+            "source_feature_raw_verdict": source_feature_raw_verdict,
+            "source_feature_mean_best_nll_delta_vs_raw": source_feature_delta_vs_raw,
             "source_best_feature_retained": source_retained,
         },
         "follow_up_chain": {
@@ -255,6 +259,72 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
         self.assertNotIn(
             "source best feature did not retain its role",
             guidance["reasons"],
+        )
+
+    def test_raw_positive_gate_stop_widens_seed_confirmation(self) -> None:
+        mod = _load_module()
+        summary = _summary(
+            best_feature="raw_latent",
+            nll=4.223,
+            verdict="regressed",
+            config_verdict="regressed",
+            source_feature_verdict="regressed",
+            source_feature_raw_verdict="improved",
+            source_feature_delta_vs_raw=-0.008,
+            source_retained=True,
+            gate_failed=True,
+        )
+        next_follow_up = _next_follow_up()
+        preliminary = mod._follow_up_guidance_record(
+            summary["follow_up_result"],
+            summary["follow_up_chain"],
+            summary["follow_up_gate"],
+            next_follow_up,
+        )
+        summary["follow_up_guidance"] = preliminary
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            trajectory = mod._follow_up_trajectory_record(
+                root,
+                summary,
+                {"ancestors": [_ancestor(feature="raw_latent", nll=4.216)]},
+                min_nll_delta=0.0,
+            )
+            guidance = mod._follow_up_guidance_record(
+                summary["follow_up_result"],
+                summary["follow_up_chain"],
+                summary["follow_up_gate"],
+                next_follow_up,
+                trajectory,
+            )
+            guided = mod._guided_next_follow_up_command_record(
+                root,
+                guidance,
+                next_follow_up,
+            )
+
+        self.assertEqual(
+            preliminary["action"],
+            "widen_seed_confirmation_on_raw_positive_regression",
+        )
+        self.assertEqual(
+            trajectory["trajectory_action"],
+            "widen_seed_confirmation_on_raw_positive_regression",
+        )
+        self.assertIs(trajectory["current_raw_positive"], True)
+        self.assertIs(trajectory["unsafe_promotion"], False)
+        self.assertEqual(
+            guidance["action"],
+            "widen_seed_confirmation_on_raw_positive_regression",
+        )
+        self.assertIs(guidance["promote_current_best"], False)
+        self.assertIs(guidance["use_next_follow_up_command"], True)
+        self.assertIn("source best feature remained raw-positive", guidance["reasons"])
+        self.assertIs(guided["enabled"], True)
+        self.assertEqual(
+            guided["guidance_action"],
+            "widen_seed_confirmation_on_raw_positive_regression",
         )
 
 
