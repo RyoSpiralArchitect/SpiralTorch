@@ -158,8 +158,11 @@ def _follow_up_seed_policy_record(*, explicit_seed_groups: bool) -> dict[str, An
         return {
             "schema": "st.llm_char_vae_context.chain_seed_policy.v1",
             "explicit_seed_groups": True,
-            "precedence": ["explicit_seed_group", "script_default"],
-            "reason": "--follow-up-seed-groups overrides generated command defaults",
+            "precedence": ["explicit_seed_group", "command_default", "script_default"],
+            "reason": (
+                "--follow-up-seed-groups overrides matching follow-ups; generated "
+                "default_new_seeds backfills unspecified follow-ups"
+            ),
         }
     return {
         "schema": "st.llm_char_vae_context.chain_seed_policy.v1",
@@ -194,15 +197,13 @@ def _follow_up_new_seeds(
     explicit_seed_groups: bool,
 ) -> tuple[str | None, str]:
     seed_group_index = index - 1
-    if explicit_seed_groups:
-        if seed_group_index < len(seed_groups):
-            return seed_groups[seed_group_index], "explicit_seed_group"
-        return None, "script_default"
+    if explicit_seed_groups and seed_group_index < len(seed_groups):
+        return seed_groups[seed_group_index], "explicit_seed_group"
     if isinstance(command_record, dict):
         default_new_seeds = command_record.get("default_new_seeds")
         if isinstance(default_new_seeds, str) and default_new_seeds.strip():
             return default_new_seeds.strip(), "command_default"
-    if seed_group_index < len(seed_groups):
+    if not explicit_seed_groups and seed_group_index < len(seed_groups):
         return seed_groups[seed_group_index], "preset_seed_group"
     return None, "script_default"
 
@@ -674,9 +675,9 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="CSV[;CSV...]",
         help=(
-            "explicit per-follow-up NEW_SEEDS groups; when omitted, each generated "
-            "follow-up command's tie-aware default_new_seeds wins before preset "
-            "fallback groups are used"
+            "explicit per-follow-up NEW_SEEDS groups; supplied groups override "
+            "matching follow-ups, while unspecified follow-ups still use generated "
+            "tie-aware default_new_seeds before script defaults"
         ),
     )
     parser.add_argument(

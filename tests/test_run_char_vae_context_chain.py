@@ -27,8 +27,9 @@ class CharVaeContextChainTests(unittest.TestCase):
         help_text = " ".join(mod._build_parser().format_help().split())
 
         self.assertIn("--follow-up-seed-groups", help_text)
-        self.assertIn("tie-aware default_new_seeds wins", help_text)
-        self.assertIn("preset fallback groups", help_text)
+        self.assertIn("supplied groups override matching follow-ups", help_text)
+        self.assertIn("unspecified follow-ups still use generated", help_text)
+        self.assertIn("tie-aware default_new_seeds", help_text)
 
     def test_follow_up_seed_policy_records_precedence(self) -> None:
         mod = _load_module()
@@ -43,9 +44,10 @@ class CharVaeContextChainTests(unittest.TestCase):
         self.assertIn("default_new_seeds wins", implicit["reason"])
         self.assertEqual(
             explicit["precedence"],
-            ["explicit_seed_group", "script_default"],
+            ["explicit_seed_group", "command_default", "script_default"],
         )
-        self.assertIn("overrides generated command defaults", explicit["reason"])
+        self.assertIn("overrides matching follow-ups", explicit["reason"])
+        self.assertIn("backfills unspecified follow-ups", explicit["reason"])
 
     def test_preset_latent_scale_defaults_keep_smoke_light_and_scout_small(self) -> None:
         mod = _load_module()
@@ -280,6 +282,15 @@ class CharVaeContextChainTests(unittest.TestCase):
         )
         self.assertEqual(seeds, "17")
         self.assertEqual(source, "explicit_seed_group")
+
+        seeds, source = mod._follow_up_new_seeds(
+            command_record,
+            ["17"],
+            index=2,
+            explicit_seed_groups=True,
+        )
+        self.assertEqual(seeds, "131,137,139,149,151")
+        self.assertEqual(source, "command_default")
 
         seeds, source = mod._follow_up_new_seeds(
             {},
