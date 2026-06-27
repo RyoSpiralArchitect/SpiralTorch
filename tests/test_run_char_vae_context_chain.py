@@ -176,6 +176,8 @@ class CharVaeContextChainTests(unittest.TestCase):
                 exit_code=1,
                 dry_run=False,
             )
+            step["new_seeds"] = "131,137,139,149,151"
+            step["new_seed_source"] = "command_default"
             report = mod._render_report(
                 {
                     "schema": mod.SCHEMA,
@@ -212,9 +214,60 @@ class CharVaeContextChainTests(unittest.TestCase):
         self.assertIn("next_seed_count", report)
         self.assertIn("tie_seed_boost", report)
         self.assertIn("best runner-up within combined seed uncertainty", report)
+        self.assertIn("run_seed_source", report)
+        self.assertIn("command_default", report)
         self.assertIn("source_feature_delta_vs_source", report)
         self.assertIn("latent@normalize=blocks,scale=0.5", report)
         self.assertIn("0.001000", report)
+
+    def test_follow_up_new_seeds_prefers_command_defaults_until_explicit(self) -> None:
+        mod = _load_module()
+        command_record = {
+            "default_new_seeds": "131,137,139,149,151",
+            "script_path": "/tmp/next_follow_up_command.sh",
+        }
+
+        seeds, source = mod._follow_up_new_seeds(
+            command_record,
+            ["17"],
+            index=1,
+            explicit_seed_groups=False,
+        )
+        self.assertEqual(seeds, "131,137,139,149,151")
+        self.assertEqual(source, "command_default")
+
+        seeds, source = mod._follow_up_new_seeds(
+            command_record,
+            ["17"],
+            index=1,
+            explicit_seed_groups=True,
+        )
+        self.assertEqual(seeds, "17")
+        self.assertEqual(source, "explicit_seed_group")
+
+        seeds, source = mod._follow_up_new_seeds(
+            {},
+            ["19,23"],
+            index=1,
+            explicit_seed_groups=False,
+        )
+        self.assertEqual(seeds, "19,23")
+        self.assertEqual(source, "preset_seed_group")
+
+    def test_follow_up_command_record_prefers_enabled_guided_script(self) -> None:
+        mod = _load_module()
+        summary = {
+            "next_follow_up_command": {"script_path": "/tmp/next.sh"},
+            "guided_next_follow_up_command": {
+                "enabled": True,
+                "script_path": "/tmp/guided.sh",
+            },
+        }
+
+        record, source = mod._follow_up_command_record(summary, index=2)
+
+        self.assertEqual(record["script_path"], "/tmp/guided.sh")
+        self.assertEqual(source, "guided_next_follow_up_command")
 
     def test_chain_selection_retains_parent_when_follow_up_gate_stops(self) -> None:
         mod = _load_module()

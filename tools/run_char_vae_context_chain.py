@@ -153,6 +153,41 @@ def _csv_groups(value: str | None) -> list[str]:
     return [part.strip() for part in value.split(";") if part.strip()]
 
 
+def _follow_up_command_record(
+    summary: dict[str, Any],
+    *,
+    index: int,
+) -> tuple[dict[str, Any] | None, str | None]:
+    guided = summary.get("guided_next_follow_up_command")
+    if isinstance(guided, dict) and guided.get("enabled"):
+        return guided, "guided_next_follow_up_command"
+    next_command = summary.get("next_follow_up_command")
+    if index == 1 and isinstance(next_command, dict):
+        return next_command, "next_follow_up_command"
+    return None, None
+
+
+def _follow_up_new_seeds(
+    command_record: dict[str, Any] | None,
+    seed_groups: list[str],
+    *,
+    index: int,
+    explicit_seed_groups: bool,
+) -> tuple[str | None, str]:
+    seed_group_index = index - 1
+    if explicit_seed_groups:
+        if seed_group_index < len(seed_groups):
+            return seed_groups[seed_group_index], "explicit_seed_group"
+        return None, "script_default"
+    if isinstance(command_record, dict):
+        default_new_seeds = command_record.get("default_new_seeds")
+        if isinstance(default_new_seeds, str) and default_new_seeds.strip():
+            return default_new_seeds.strip(), "command_default"
+    if seed_group_index < len(seed_groups):
+        return seed_groups[seed_group_index], "preset_seed_group"
+    return None, "script_default"
+
+
 def _append_flag(command: list[str], flag: str, value: Any) -> None:
     if value is not None:
         command.extend([flag, str(value)])
@@ -465,9 +500,10 @@ def _render_report(manifest: dict[str, Any]) -> str:
         "| step | role | exit | status | best_config | mean_best_nll | "
         "runner_up | margin | margin_stderr | within_uncertainty | "
         "next_seed_count | tie_seed_boost | seed_policy | "
+        "run_seeds | run_seed_source | "
         "delta_vs_raw | delta_vs_source | verdict | retained | gate | "
         "trajectory | guidance | unsafe | guided |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for step in manifest.get("steps", []):
         lines.append(
@@ -476,6 +512,7 @@ def _render_report(manifest: dict[str, Any]) -> str:
             "{combined_runner_up_margin_stderr} | {runner_up_within_uncertainty} | "
             "{next_default_new_seed_count} | {uncertainty_tie_seed_boost} | "
             "{seed_policy_reason} | "
+            "{new_seeds} | {new_seed_source} | "
             "{mean_best_nll_delta_vs_raw} | "
             "{mean_best_nll_delta_vs_source} | {follow_up_verdict} | "
             "{source_best_feature_retained} | {follow_up_gate_failed} | "
@@ -504,6 +541,8 @@ def _render_report(manifest: dict[str, Any]) -> str:
                     step.get("uncertainty_tie_seed_boost")
                 ),
                 seed_policy_reason=_fmt(step.get("seed_policy_reason")),
+                new_seeds=_fmt(step.get("new_seeds")),
+                new_seed_source=_fmt(step.get("new_seed_source")),
                 mean_best_nll_delta_vs_raw=_fmt(
                     step.get("mean_best_nll_delta_vs_raw")
                 ),
@@ -617,8 +656,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.follow_ups < 0:
         raise ValueError("--follow-ups must be >= 0")
     run_root = args.run_root or ROOT / "models" / "runs" / f"char_vae_context_chain_{_timestamp_slug()}"
+    explicit_seed_groups = args.follow_up_seed_groups is not None
     seed_groups = _csv_groups(
-        args.follow_up_seed_groups or PRESETS[args.preset]["follow_up_seed_groups"]
+        args.follow_up_seed_groups
+        if explicit_seed_groups
+        else PRESETS[args.preset]["follow_up_seed_groups"]
     )
 
     manifest: dict[str, Any] = {
@@ -629,6 +671,9 @@ def main(argv: list[str] | None = None) -> int:
         "allow_gate_stop": bool(args.allow_gate_stop),
         "planned_follow_ups": int(args.follow_ups),
         "planned_follow_up_seed_groups": seed_groups,
+        "follow_up_seed_group_source": (
+            "explicit" if explicit_seed_groups else "preset_fallback"
+        ),
         "steps": [],
     }
 
@@ -660,12 +705,12 @@ def main(argv: list[str] | None = None) -> int:
         if summary is None:
             manifest["stopped_reason"] = "missing summary for follow-up source"
             break
-        guided = summary.get("guided_next_follow_up_command")
-        next_command = summary.get("next_follow_up_command")
-        if isinstance(guided, dict) and guided.get("enabled"):
-            script_path = guided.get("script_path")
-        elif index == 1 and isinstance(next_command, dict):
-            script_path = next_command.get("script_path")
+        command_record, command_record_source = _follow_up_command_record(
+            summary,
+            index=index,
+        )
+        if isinstance(command_record, dict):
+            script_path = command_record.get("script_path")
         else:
             manifest["stopped_reason"] = "guided follow-up disabled"
             break
@@ -679,8 +724,14 @@ def main(argv: list[str] | None = None) -> int:
             "FOLLOW_UP_FROM": str(current_dir / "summary.json"),
             "FOLLOW_UP_FAIL_ON_VERDICT": args.follow_up_fail_on_verdict,
         }
-        if index - 1 < len(seed_groups):
-            env["NEW_SEEDS"] = seed_groups[index - 1]
+        new_seeds, new_seed_source = _follow_up_new_seeds(
+            command_record,
+            seed_groups,
+            index=index,
+            explicit_seed_groups=explicit_seed_groups,
+        )
+        if new_seeds is not None:
+            env["NEW_SEEDS"] = new_seeds
         command = ["bash", str(script_path)]
         exit_code = 0 if args.dry_run else _run_command(
             command,
@@ -695,6 +746,9 @@ def main(argv: list[str] | None = None) -> int:
             exit_code=exit_code,
             dry_run=args.dry_run,
         )
+        step["follow_up_command_source"] = command_record_source
+        step["new_seed_source"] = new_seed_source
+        step["new_seeds"] = new_seeds
         manifest["steps"].append(step)
         current_dir = follow_dir
         if exit_code != 0:
