@@ -287,6 +287,115 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
         self.assertIn("## Feature Family Stability", report)
         self.assertIn("| hybrid_latent | 4.040000 | 25.00% | -0.025000 | 2/2", report)
 
+    def test_follow_up_result_reports_run_budget_shift(self) -> None:
+        mod = _load_module()
+        source_best_config = {
+            "best_feature": "raw_latent",
+            "feature_normalize": "blocks",
+            "hybrid_latent_scale": 4.0,
+            "mean_best_nll": 4.164,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            seed_dir = Path(tmp) / "seed_001"
+            seed_dir.mkdir()
+            (seed_dir / "summary.json").write_text(
+                json.dumps(
+                    {
+                        "run": {
+                            "window_chars": 32,
+                            "latent_dim": 8,
+                            "hidden": 16,
+                            "epochs": 8,
+                            "batches": 16,
+                            "batch_size": 4,
+                            "eval_samples": 128,
+                            "vae": {
+                                "epochs": 8,
+                                "batches": 16,
+                                "batch_size": 4,
+                            },
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            source_summary = {
+                "run": {
+                    "seeds": [1],
+                    "window_chars": 32,
+                    "latent_dim": 8,
+                    "hidden": 16,
+                    "epochs": 8,
+                    "batches": 16,
+                    "batch_size": 4,
+                    "eval_samples": 128,
+                },
+                "seed_summaries": [{"run_dir": str(seed_dir)}],
+                "best_config": source_best_config,
+            }
+            source_budget = mod._summary_run_budget(source_summary)
+            self.assertEqual(source_budget["vae_epochs"], 8)
+
+        current_budget = {
+            "window_chars": 32,
+            "latent_dim": 8,
+            "hidden": 16,
+            "epochs": 16,
+            "batches": 32,
+            "batch_size": 4,
+            "eval_samples": 256,
+            "vae_epochs": 16,
+            "vae_batches": 32,
+            "vae_batch_size": 4,
+        }
+        config_summary = {
+            "feature_normalize": "blocks",
+            "hybrid_latent_scale": 4.0,
+            "best_feature": "raw_latent",
+            "status": "improved",
+            "ranking": [
+                {
+                    "feature": "raw_latent",
+                    "mean_best_nll": 4.184,
+                    "mean_best_accuracy": 0.2,
+                    "mean_best_nll_delta_vs_raw": -0.003,
+                    "runs": 9,
+                },
+                {
+                    "feature": "raw",
+                    "mean_best_nll": 4.187,
+                    "mean_best_accuracy": 0.2,
+                    "mean_best_nll_delta_vs_raw": 0.0,
+                    "runs": 9,
+                },
+            ],
+        }
+        result = mod._follow_up_result(
+            {
+                "source_summary_path": "/tmp/source/summary.json",
+                "source_best_config": source_best_config,
+                "source_run_budget": source_budget,
+            },
+            [config_summary],
+            {
+                "best_feature": "raw_latent",
+                "mean_best_nll_delta_vs_raw": -0.003,
+            },
+            min_nll_delta=0.0,
+            current_run_budget=current_budget,
+        )
+
+        self.assertEqual(result["verdict"], "regressed")
+        self.assertEqual(result["source_feature_raw_verdict"], "improved")
+        self.assertIs(result["run_budget_shifted"], True)
+        self.assertIn("eval_samples", result["run_budget_shift_keys"])
+        self.assertIn("epochs", result["run_budget_shift_keys"])
+        self.assertIn("vae_epochs", result["run_budget_shift_keys"])
+        self.assertIn(
+            "eval_samples:128->256",
+            mod._run_budget_shift_label(result["run_budget_shift"]),
+        )
+
     def test_safe_trajectory_promotes_guided_confirmation(self) -> None:
         mod = _load_module()
         summary = _summary(
