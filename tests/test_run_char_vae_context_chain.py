@@ -30,6 +30,23 @@ class CharVaeContextChainTests(unittest.TestCase):
         self.assertIn("tie-aware default_new_seeds wins", help_text)
         self.assertIn("preset fallback groups", help_text)
 
+    def test_follow_up_seed_policy_records_precedence(self) -> None:
+        mod = _load_module()
+
+        implicit = mod._follow_up_seed_policy_record(explicit_seed_groups=False)
+        explicit = mod._follow_up_seed_policy_record(explicit_seed_groups=True)
+
+        self.assertEqual(
+            implicit["precedence"],
+            ["command_default", "preset_seed_group", "script_default"],
+        )
+        self.assertIn("default_new_seeds wins", implicit["reason"])
+        self.assertEqual(
+            explicit["precedence"],
+            ["explicit_seed_group", "script_default"],
+        )
+        self.assertIn("overrides generated command defaults", explicit["reason"])
+
     def test_preset_latent_scale_defaults_keep_smoke_light_and_scout_small(self) -> None:
         mod = _load_module()
         parser = mod._build_parser()
@@ -195,6 +212,9 @@ class CharVaeContextChainTests(unittest.TestCase):
                     "allowed_gate_stop": True,
                     "follow_up_seed_group_source": "preset_fallback",
                     "planned_follow_up_seed_groups": ["17", "19"],
+                    "follow_up_seed_policy": mod._follow_up_seed_policy_record(
+                        explicit_seed_groups=False
+                    ),
                 }
             )
 
@@ -227,6 +247,11 @@ class CharVaeContextChainTests(unittest.TestCase):
         self.assertIn("run_seed_source", report)
         self.assertIn("command_default", report)
         self.assertIn("- follow_up_seed_groups: preset_fallback (17, 19)", report)
+        self.assertIn(
+            "- follow_up_seed_policy: command_default -> preset_seed_group -> "
+            "script_default",
+            report,
+        )
         self.assertIn("source_feature_delta_vs_source", report)
         self.assertIn("latent@normalize=blocks,scale=0.5", report)
         self.assertIn("0.001000", report)

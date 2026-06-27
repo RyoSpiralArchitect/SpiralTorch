@@ -153,6 +153,25 @@ def _csv_groups(value: str | None) -> list[str]:
     return [part.strip() for part in value.split(";") if part.strip()]
 
 
+def _follow_up_seed_policy_record(*, explicit_seed_groups: bool) -> dict[str, Any]:
+    if explicit_seed_groups:
+        return {
+            "schema": "st.llm_char_vae_context.chain_seed_policy.v1",
+            "explicit_seed_groups": True,
+            "precedence": ["explicit_seed_group", "script_default"],
+            "reason": "--follow-up-seed-groups overrides generated command defaults",
+        }
+    return {
+        "schema": "st.llm_char_vae_context.chain_seed_policy.v1",
+        "explicit_seed_groups": False,
+        "precedence": ["command_default", "preset_seed_group", "script_default"],
+        "reason": (
+            "generated follow-up default_new_seeds wins; preset groups only "
+            "backfill missing defaults"
+        ),
+    }
+
+
 def _follow_up_command_record(
     summary: dict[str, Any],
     *,
@@ -499,6 +518,19 @@ def _render_report(manifest: dict[str, Any]) -> str:
                 or "-"
             ),
         ),
+        "- follow_up_seed_policy: {precedence} ({reason})".format(
+            precedence=(
+                " -> ".join(
+                    str(item)
+                    for item in _value(
+                        manifest, "follow_up_seed_policy", "precedence"
+                    )
+                    or []
+                )
+                or "-"
+            ),
+            reason=_fmt(_value(manifest, "follow_up_seed_policy", "reason")),
+        ),
         "- accepted: {label} (step {index}, mean_best_nll={nll})".format(
             label=_fmt(_value(accepted, "best_config_label")),
             index=_fmt(_value(accepted, "index")),
@@ -707,6 +739,9 @@ def main(argv: list[str] | None = None) -> int:
         "planned_follow_up_seed_groups": seed_groups,
         "follow_up_seed_group_source": (
             "explicit" if explicit_seed_groups else "preset_fallback"
+        ),
+        "follow_up_seed_policy": _follow_up_seed_policy_record(
+            explicit_seed_groups=explicit_seed_groups
         ),
         "steps": [],
     }
