@@ -802,6 +802,31 @@ def _parse_seeds(seed: int, raw: str | None) -> list[int]:
     return list(dict.fromkeys(seeds))
 
 
+def _parse_hybrid_latent_scales(default_scale: float, raw: str | None) -> list[float]:
+    if raw is None or not raw.strip():
+        return [float(default_scale)]
+    scales = []
+    for part in raw.split(","):
+        value = part.strip()
+        if not value:
+            continue
+        parsed = float(value)
+        if parsed < 0.0 or not math.isfinite(parsed):
+            raise ValueError("--hybrid-latent-scales values must be non-negative and finite")
+        scales.append(parsed)
+    if not scales:
+        raise ValueError("--hybrid-latent-scales must contain at least one value")
+
+    unique: list[float] = []
+    seen: set[float] = set()
+    for scale in scales:
+        if scale in seen:
+            continue
+        seen.add(scale)
+        unique.append(scale)
+    return unique
+
+
 def _clone_args(args: argparse.Namespace, **overrides: Any) -> argparse.Namespace:
     values = vars(args).copy()
     values.update(overrides)
@@ -962,7 +987,10 @@ def _single_report(summary: dict[str, Any]) -> str:
 
 def _aggregate_report(summary: dict[str, Any]) -> str:
     run = summary.get("run", {})
-    seed_total = int(run.get("seed_count") or len(summary.get("seed_summaries", [])))
+    has_scale_grid = bool(summary.get("scale_summaries"))
+    raw_seed_total = int(run.get("seed_count") or len(summary.get("seed_summaries", [])))
+    scale_count = int(run.get("scale_count") or 1)
+    seed_total = raw_seed_total * scale_count if has_scale_grid else raw_seed_total
     ranking_rows = [
         [
             str(item.get("feature")),
@@ -983,6 +1011,26 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
         ]
         for item in summary.get("feature_stability", [])
     ]
+    scale_rows = []
+    for item in summary.get("scale_summaries", []):
+        top = item.get("ranking", [{}])[0] if item.get("ranking") else {}
+        stability_by_feature = {
+            stability.get("feature"): stability
+            for stability in item.get("feature_stability", [])
+        }
+        best_stability = stability_by_feature.get(item.get("best_feature"), {})
+        scale_seed_total = int(item.get("seed_count") or seed_total)
+        scale_rows.append(
+            [
+                _fmt_float(item.get("hybrid_latent_scale"), 3),
+                str(item.get("status")),
+                str(item.get("best_feature")),
+                _fmt_float(top.get("mean_best_nll")),
+                _fmt_float(top.get("mean_best_nll_delta_vs_raw")),
+                _fmt_count_rate(best_stability.get("win_count"), scale_seed_total),
+                f"`{item.get('run_dir')}`",
+            ]
+        )
     diagnostics_rows = []
     for item in summary.get("feature_diagnostics_summary", []):
         diagnostics_rows.append(
@@ -997,15 +1045,18 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
             ]
         )
     winner_by_seed = {
-        item.get("seed"): item
+        (item.get("hybrid_latent_scale"), item.get("seed")): item
         for item in summary.get("seed_winners", [])
     }
     seed_rows = []
     for item in summary.get("seed_summaries", []):
         top = item.get("ranking", [{}])[0] if item.get("ranking") else {}
-        winner = winner_by_seed.get(item.get("seed"), {})
+        winner = winner_by_seed.get((item.get("hybrid_latent_scale"), item.get("seed")), {})
         near_winners = winner.get("near_winners", [])
-        seed_rows.append(
+        row = []
+        if has_scale_grid:
+            row.append(_fmt_float(item.get("hybrid_latent_scale"), 3))
+        row.extend(
             [
                 str(item.get("seed")),
                 str(item.get("best_feature")),
@@ -1016,6 +1067,7 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 f"`{item.get('run_dir')}`",
             ]
         )
+        seed_rows.append(row)
 
     lines = [
         "# Char VAE Context Sweep Report",
@@ -1026,13 +1078,23 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
         f"- features: {', '.join(str(item) for item in run.get('features', []))}",
         f"- feature_normalize: {run.get('feature_normalize')}",
         f"- hybrid_latent_scale: {run.get('hybrid_latent_scale')}",
+        f"- hybrid_latent_scales: {', '.join(str(scale) for scale in run.get('hybrid_latent_scales', [])) or '-'}",
         f"- min_nll_delta: {run.get('min_nll_delta')}",
         f"- win_tolerance: {run.get('win_tolerance')}",
         f"- summary_json: `summary.json`",
         "",
-        "## Aggregate Ranking",
-        "",
     ]
+    if scale_rows:
+        lines.extend(["## Hybrid Latent Scale Grid", ""])
+        lines.extend(
+            _markdown_table(
+                ["scale", "status", "best_feature", "mean_best_nll", "mean_delta_vs_raw", "wins", "run_dir"],
+                scale_rows,
+            )
+        )
+        lines.extend(["", "## Aggregate Ranking", ""])
+    else:
+        lines.extend(["## Aggregate Ranking", ""])
     lines.extend(
         _markdown_table(
             ["feature", "mean_best_nll", "mean_best_acc", "mean_delta_vs_raw", "runs"],
@@ -1054,17 +1116,20 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
         )
     )
     lines.extend(["", "## Seed Runs", ""])
+    seed_headers = [
+        "seed",
+        "best_feature",
+        "best_nll",
+        "best_acc",
+        "runner_up_margin",
+        "near_winners",
+        "run_dir",
+    ]
+    if has_scale_grid:
+        seed_headers = ["scale", *seed_headers]
     lines.extend(
         _markdown_table(
-            [
-                "seed",
-                "best_feature",
-                "best_nll",
-                "best_acc",
-                "runner_up_margin",
-                "near_winners",
-                "run_dir",
-            ],
+            seed_headers,
             seed_rows,
         )
     )
@@ -1225,6 +1290,7 @@ def _aggregate_summaries(
         seed_winners.append(
             {
                 "seed": summary.get("run", {}).get("seed"),
+                "hybrid_latent_scale": summary.get("run", {}).get("hybrid_latent_scale"),
                 "winner": best["feature"],
                 "winners": strict_winners,
                 "near_winners": near_winners,
@@ -1327,6 +1393,15 @@ def _seed_run_dir(root: pathlib.Path, seed: int) -> pathlib.Path:
     return root / f"seed_{seed:06d}"
 
 
+def _scale_slug(scale: float) -> str:
+    text = f"{float(scale):.8g}".replace("-", "neg_").replace(".", "p")
+    return text.replace("+", "")
+
+
+def _scale_run_dir(root: pathlib.Path, scale: float) -> pathlib.Path:
+    return root / f"scale_{_scale_slug(scale)}"
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -1360,6 +1435,14 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         default=1.0,
         help="multiply the latent segment of raw_latent/reconstruction_latent features",
+    )
+    parser.add_argument(
+        "--hybrid-latent-scales",
+        default=None,
+        help=(
+            "comma-separated scale grid for the latent segment of hybrid features; "
+            "overrides --hybrid-latent-scale when provided"
+        ),
     )
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--batches", type=int, default=16)
@@ -1530,6 +1613,7 @@ def _run_single(args: argparse.Namespace, features: list[str]) -> dict[str, Any]
         "temperature": float(args.temperature),
         "backend": str(args.backend),
         "seed": int(args.seed),
+        "run_dir": str(run_dir),
         "vocab_size": vocab_size,
         "vae": {
             "load_path": str(args.vae_load) if args.vae_load is not None else None,
@@ -1632,9 +1716,14 @@ def main(argv: list[str] | None = None) -> int:
     _validate_args(args)
     features = _parse_features(str(args.features))
     seeds = _parse_seeds(int(args.seed), args.seeds)
+    scales = _parse_hybrid_latent_scales(
+        float(args.hybrid_latent_scale),
+        args.hybrid_latent_scales,
+    )
 
-    if len(seeds) == 1:
+    if len(seeds) == 1 and len(scales) == 1:
         args.seed = seeds[0]
+        args.hybrid_latent_scale = scales[0]
         _run_single(args, features)
         return 0
 
@@ -1647,7 +1736,9 @@ def main(argv: list[str] | None = None) -> int:
         "arch": "llm_char_vae_context_sweep",
         "features": features,
         "feature_normalize": str(args.feature_normalize),
-        "hybrid_latent_scale": float(args.hybrid_latent_scale),
+        "hybrid_latent_scale": scales[0] if len(scales) == 1 else None,
+        "hybrid_latent_scales": scales,
+        "scale_count": len(scales),
         "seeds": seeds,
         "seed_count": len(seeds),
         "min_nll_delta": float(args.min_nll_delta),
@@ -1661,28 +1752,50 @@ def main(argv: list[str] | None = None) -> int:
     if runs_jsonl.exists():
         runs_jsonl.unlink()
     started = time.time()
-    for seed in seeds:
-        seed_dir = _seed_run_dir(root_run_dir, seed)
-        print(f"sweep_seed={seed} run_dir={seed_dir}", flush=True)
-        seed_args = _clone_args(
-            args,
-            seed=seed,
-            run_dir=seed_dir,
-            vae_save=None,
-            json=False,
+    scale_summaries = []
+    for scale in scales:
+        scale_run_dir = root_run_dir if len(scales) == 1 else _scale_run_dir(root_run_dir, scale)
+        scale_run_dir.mkdir(parents=True, exist_ok=True)
+        scale_seed_summaries = []
+        for seed in seeds:
+            seed_dir = _seed_run_dir(scale_run_dir, seed)
+            print(f"sweep_scale={scale:.6g} sweep_seed={seed} run_dir={seed_dir}", flush=True)
+            seed_args = _clone_args(
+                args,
+                seed=seed,
+                hybrid_latent_scale=scale,
+                run_dir=seed_dir,
+                vae_save=None,
+                json=False,
+            )
+            summary = _run_single(seed_args, features)
+            summaries.append(summary)
+            scale_seed_summaries.append(summary)
+            _append_jsonl(
+                runs_jsonl,
+                {
+                    "seed": seed,
+                    "hybrid_latent_scale": scale,
+                    "run_dir": str(seed_dir),
+                    "summary_path": str(seed_dir / "summary.json"),
+                    "best_feature": summary.get("best_feature"),
+                    "ranking": summary.get("ranking", []),
+                    "deltas": summary.get("deltas", {}),
+                },
+            )
+
+        scale_aggregate = _aggregate_summaries(
+            scale_seed_summaries,
+            min_nll_delta=float(args.min_nll_delta),
+            win_tolerance=float(args.win_tolerance),
         )
-        summary = _run_single(seed_args, features)
-        summaries.append(summary)
-        _append_jsonl(
-            runs_jsonl,
+        scale_summaries.append(
             {
-                "seed": seed,
-                "run_dir": str(seed_dir),
-                "summary_path": str(seed_dir / "summary.json"),
-                "best_feature": summary.get("best_feature"),
-                "ranking": summary.get("ranking", []),
-                "deltas": summary.get("deltas", {}),
-            },
+                "hybrid_latent_scale": scale,
+                "run_dir": str(scale_run_dir),
+                "seed_count": len(scale_seed_summaries),
+                **scale_aggregate,
+            }
         )
 
     aggregate = {
@@ -1694,13 +1807,15 @@ def main(argv: list[str] | None = None) -> int:
         "seed_summaries": [
             {
                 "seed": summary.get("run", {}).get("seed"),
-                "run_dir": str(_seed_run_dir(root_run_dir, int(summary.get("run", {}).get("seed", 0)))),
+                "hybrid_latent_scale": summary.get("run", {}).get("hybrid_latent_scale"),
+                "run_dir": str(summary.get("run", {}).get("run_dir")),
                 "best_feature": summary.get("best_feature"),
                 "ranking": summary.get("ranking", []),
                 "deltas": summary.get("deltas", {}),
             }
             for summary in summaries
         ],
+        "scale_summaries": scale_summaries,
     }
     aggregate.update(
         _aggregate_summaries(
@@ -1709,15 +1824,30 @@ def main(argv: list[str] | None = None) -> int:
             win_tolerance=float(args.win_tolerance),
         )
     )
+    if scale_summaries:
+        scale_ranking = sorted(
+            scale_summaries,
+            key=lambda item: (
+                float("inf")
+                if not item.get("ranking")
+                or item["ranking"][0].get("mean_best_nll") is None
+                else float(item["ranking"][0]["mean_best_nll"]),
+                float(item.get("hybrid_latent_scale", 0.0)),
+            ),
+        )
+        aggregate["best_hybrid_latent_scale"] = (
+            scale_ranking[0].get("hybrid_latent_scale") if scale_ranking else None
+        )
     _write_json(root_run_dir / "summary.json", aggregate)
     _write_text(root_run_dir / "report.md", _aggregate_report(aggregate))
     if args.json:
         print(json.dumps(aggregate, ensure_ascii=False, indent=2))
 
     print(
-        "sweep_status={status} best_feature={feature} seeds={seeds} summary_json={path}".format(
+        "sweep_status={status} best_feature={feature} scales={scales} seeds={seeds} summary_json={path}".format(
             status=aggregate["status"],
             feature=aggregate["best_feature"],
+            scales=",".join(f"{scale:.6g}" for scale in scales),
             seeds=",".join(str(seed) for seed in seeds),
             path=root_run_dir / "summary.json",
         ),
