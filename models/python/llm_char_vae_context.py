@@ -172,6 +172,24 @@ def _feature_family(feature: str) -> str:
     return feature
 
 
+def _feature_family_members(family: str) -> list[str]:
+    if family == FEATURE_FAMILY_HYBRID_LATENT:
+        return [FEATURE_RAW_LATENT, FEATURE_RECONSTRUCTION_LATENT]
+    if family in FEATURE_CHOICES:
+        return [family]
+    return []
+
+
+def _feature_family_focused_features(features: list[str], family: str) -> list[str]:
+    focused = list(dict.fromkeys(str(feature) for feature in features))
+    if family != FEATURE_RAW and FEATURE_RAW not in focused:
+        focused.insert(0, FEATURE_RAW)
+    for feature in _feature_family_members(family):
+        if feature not in focused:
+            focused.append(feature)
+    return focused
+
+
 def _build_mellin_basis(model: Any, args: argparse.Namespace) -> Any | None:
     if args.mellin == "none":
         return None
@@ -1543,6 +1561,17 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
             ]
         )
     if isinstance(broadened_follow_up, dict):
+        family_focus = broadened_follow_up.get("feature_family_focus")
+        focus_family = (
+            family_focus.get("family")
+            if isinstance(family_focus, dict)
+            else None
+        )
+        focus_added = (
+            family_focus.get("added_features", [])
+            if isinstance(family_focus, dict)
+            else []
+        )
         lines.extend(
             [
                 "",
@@ -1555,6 +1584,11 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 f"- default_new_seeds: {broadened_follow_up.get('default_new_seeds')}",
                 "- used_seed_history: "
                 f"{', '.join(str(seed) for seed in broadened_follow_up.get('used_seed_history', [])) or '-'}",
+                f"- feature_family_focus: {focus_family or '-'}",
+                "- focused_features: "
+                f"{', '.join(str(feature) for feature in broadened_follow_up.get('focused_features', [])) or '-'}",
+                "- features_added_for_family: "
+                f"{', '.join(str(feature) for feature in focus_added) or '-'}",
                 "- broadened_epochs/batches/eval_samples: "
                 f"{broadened_follow_up.get('broadened_epochs')}/"
                 f"{broadened_follow_up.get('broadened_batches')}/"
@@ -2201,6 +2235,64 @@ def _summary_seed_history(summary: dict[str, Any]) -> list[int]:
     return used
 
 
+def _feature_family_focus_record(
+    best_config: dict[str, Any] | None,
+    feature_family_stability: list[dict[str, Any]] | None,
+    features: list[str],
+) -> dict[str, Any] | None:
+    if not isinstance(best_config, dict) or not feature_family_stability:
+        return None
+    best_feature = str(best_config.get("best_feature") or "")
+    if best_feature not in FEATURE_CHOICES:
+        return None
+    best_family = _feature_family(best_feature)
+    top_family = next(
+        (
+            item
+            for item in feature_family_stability
+            if isinstance(item, dict) and item.get("family") is not None
+        ),
+        None,
+    )
+    if not isinstance(top_family, dict) or str(top_family.get("family")) != best_family:
+        return None
+    win_count = int(top_family.get("win_count") or 0)
+    near_win_count = int(top_family.get("near_win_count") or 0)
+    if win_count <= 0 and near_win_count <= 0:
+        return None
+    mean_delta_vs_raw = _finite_float(top_family.get("mean_best_nll_delta_vs_raw"))
+    if (
+        best_family != FEATURE_RAW
+        and mean_delta_vs_raw is not None
+        and mean_delta_vs_raw >= 0.0
+    ):
+        return None
+    required_features = _feature_family_members(best_family)
+    if not required_features:
+        return None
+    focused_features = _feature_family_focused_features(features, best_family)
+    original = set(str(feature) for feature in features)
+    added_features = [feature for feature in focused_features if feature not in original]
+    return {
+        "schema": "st.llm_char_vae_context.feature_family_focus.v1",
+        "family": best_family,
+        "best_feature": best_feature,
+        "required_features": required_features,
+        "focused_features": focused_features,
+        "added_features": added_features,
+        "win_count": win_count,
+        "near_win_count": near_win_count,
+        "win_rate": top_family.get("win_rate"),
+        "near_win_rate": top_family.get("near_win_rate"),
+        "mean_best_nll": top_family.get("mean_best_nll"),
+        "mean_best_accuracy": top_family.get("mean_best_accuracy"),
+        "mean_best_nll_delta_vs_raw": top_family.get("mean_best_nll_delta_vs_raw"),
+        "mean_rank": top_family.get("mean_rank"),
+        "mean_gap_to_winner": top_family.get("mean_gap_to_winner"),
+        "member_best_counts": top_family.get("member_best_counts", {}),
+    }
+
+
 def _append_flag(command: list[str], flag: str, value: Any) -> None:
     command.extend([flag, str(value)])
 
@@ -2518,6 +2610,7 @@ def _broadened_follow_up_command_record(
     follow_up_chain: dict[str, Any] | None,
     follow_up_trajectory: dict[str, Any] | None,
     next_follow_up: dict[str, Any] | None,
+    feature_family_stability: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     if not isinstance(best_config, dict):
         return None
@@ -2556,10 +2649,20 @@ def _broadened_follow_up_command_record(
         vae_epochs=max(int(args.vae_epochs) + 1, int(args.vae_epochs) * 2),
         vae_batches=max(int(args.vae_batches) + 1, int(args.vae_batches) * 2),
     )
+    family_focus = _feature_family_focus_record(
+        best_config,
+        feature_family_stability,
+        features,
+    )
+    focused_features = (
+        list(family_focus["focused_features"])
+        if isinstance(family_focus, dict)
+        else features
+    )
     script_path = root_run_dir / "broadened_follow_up_command.sh"
     literal_command = _follow_up_command_parts(
         broadened_args,
-        features,
+        focused_features,
         best_config,
         seeds_value=default_new_seeds,
         run_dir_value=str(default_run_dir),
@@ -2570,7 +2673,7 @@ def _broadened_follow_up_command_record(
     shell_command = "PYTHONNOUSERSITE=1 " + shlex.join(literal_command)
     script_command = _follow_up_command_parts(
         broadened_args,
-        features,
+        focused_features,
         best_config,
         seeds_value="${NEW_SEEDS}",
         run_dir_value="${NEXT_RUN_DIR}",
@@ -2598,6 +2701,8 @@ def _broadened_follow_up_command_record(
         "default_run_dir": str(default_run_dir),
         "default_follow_up_from": str(default_follow_up_from),
         "default_follow_up_fail_on_verdict": default_fail_on_verdict,
+        "feature_family_focus": family_focus,
+        "focused_features": focused_features,
         "broadened_epochs": int(broadened_args.epochs),
         "broadened_batches": int(broadened_args.batches),
         "broadened_eval_samples": int(broadened_args.eval_samples),
@@ -3788,6 +3893,15 @@ def _follow_up_guidance_record(
                 use_next_follow_up_command = False
                 use_broadened_follow_up_command = True
                 command_usage = broadened_follow_up.get("script_usage")
+                family_focus = broadened_follow_up.get("feature_family_focus")
+                if isinstance(family_focus, dict):
+                    add_reason(
+                        "family focus: {family} wins={wins} near_wins={near_wins}".format(
+                            family=family_focus.get("family"),
+                            wins=family_focus.get("win_count"),
+                            near_wins=family_focus.get("near_win_count"),
+                        )
+                    )
             else:
                 action = "confirm_trajectory_with_fresh_seeds"
                 use_next_follow_up_command = isinstance(next_follow_up, dict)
@@ -4425,6 +4539,7 @@ def main(argv: list[str] | None = None) -> int:
         follow_up_chain,
         follow_up_trajectory,
         next_follow_up,
+        aggregate.get("feature_family_stability"),
     )
     if broadened_follow_up is not None:
         aggregate["broadened_follow_up_command"] = broadened_follow_up
