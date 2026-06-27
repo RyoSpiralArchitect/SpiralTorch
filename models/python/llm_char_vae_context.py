@@ -24,7 +24,15 @@ DEFAULT_UNK = "\uFFFD"
 FEATURE_RAW = "raw"
 FEATURE_RECONSTRUCTION = "reconstruction"
 FEATURE_LATENT = "latent"
-FEATURE_CHOICES = (FEATURE_RAW, FEATURE_RECONSTRUCTION, FEATURE_LATENT)
+FEATURE_RAW_LATENT = "raw_latent"
+FEATURE_RECONSTRUCTION_LATENT = "reconstruction_latent"
+FEATURE_CHOICES = (
+    FEATURE_RAW,
+    FEATURE_RECONSTRUCTION,
+    FEATURE_LATENT,
+    FEATURE_RAW_LATENT,
+    FEATURE_RECONSTRUCTION_LATENT,
+)
 
 _TEXT_EXTS = {".txt"}
 
@@ -148,6 +156,8 @@ def _feature_dim(model: Any, feature: str) -> int:
         return int(model.latent_dim)
     if feature in {FEATURE_RAW, FEATURE_RECONSTRUCTION}:
         return int(model.input_dim)
+    if feature in {FEATURE_RAW_LATENT, FEATURE_RECONSTRUCTION_LATENT}:
+        return int(model.input_dim) + int(model.latent_dim)
     raise ValueError(f"unknown feature: {feature}")
 
 
@@ -166,18 +176,28 @@ def _build_mellin_basis(model: Any, args: argparse.Namespace) -> Any | None:
 
 
 def _feature_vector(model: Any, basis: Any | None, feature: str, text: str) -> list[float]:
-    if feature == FEATURE_RAW:
+    if feature in {FEATURE_RAW, FEATURE_RAW_LATENT}:
         if basis is None:
-            values = model.encode_text(text)
+            raw_values = model.encode_text(text)
         else:
-            values = model.encode_text_with_mellin(text, basis)
-        return [float(value) for value in values]
+            raw_values = model.encode_text_with_mellin(text, basis)
+        if feature == FEATURE_RAW:
+            return [float(value) for value in raw_values]
 
     if basis is None:
         state = model.forward_mean_text(text)
     else:
         state = model.forward_mean_text_with_mellin(text, basis)
-    values = state.latent if feature == FEATURE_LATENT else state.reconstruction
+    if feature == FEATURE_LATENT:
+        values = state.latent
+    elif feature == FEATURE_RECONSTRUCTION:
+        values = state.reconstruction
+    elif feature == FEATURE_RAW_LATENT:
+        values = [*raw_values, *state.latent]
+    elif feature == FEATURE_RECONSTRUCTION_LATENT:
+        values = [*state.reconstruction, *state.latent]
+    else:
+        raise ValueError(f"unknown feature: {feature}")
     return [float(value) for value in values]
 
 
@@ -1218,7 +1238,14 @@ def _build_parser() -> argparse.ArgumentParser:
         )
     )
     parser.add_argument("text_or_dir", nargs="+", help="Input .txt file(s) or directories")
-    parser.add_argument("--features", default="raw,reconstruction,latent")
+    parser.add_argument(
+        "--features",
+        default="raw,reconstruction,latent",
+        help=(
+            "comma-separated context features: raw,reconstruction,latent,"
+            "raw_latent,reconstruction_latent"
+        ),
+    )
     parser.add_argument("--window-chars", type=int, default=64)
     parser.add_argument("--latent-dim", type=int, default=16)
     parser.add_argument("--hidden", type=int, default=64)
