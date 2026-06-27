@@ -6,6 +6,7 @@ import json
 import math
 import pathlib
 import random
+import shlex
 import sys
 import time
 from dataclasses import dataclass
@@ -24,7 +25,18 @@ DEFAULT_UNK = "\uFFFD"
 FEATURE_RAW = "raw"
 FEATURE_RECONSTRUCTION = "reconstruction"
 FEATURE_LATENT = "latent"
-FEATURE_CHOICES = (FEATURE_RAW, FEATURE_RECONSTRUCTION, FEATURE_LATENT)
+FEATURE_RAW_LATENT = "raw_latent"
+FEATURE_RECONSTRUCTION_LATENT = "reconstruction_latent"
+FEATURE_CHOICES = (
+    FEATURE_RAW,
+    FEATURE_RECONSTRUCTION,
+    FEATURE_LATENT,
+    FEATURE_RAW_LATENT,
+    FEATURE_RECONSTRUCTION_LATENT,
+)
+NORMALIZE_CHOICES = ("none", "vector", "blocks")
+FOLLOW_UP_VERDICTS = ("improved", "confirmed", "regressed", "unknown")
+FOLLOW_UP_CHAIN_MAX_ANCESTORS = 8
 
 _TEXT_EXTS = {".txt"}
 
@@ -71,6 +83,11 @@ def _write_json(path: pathlib.Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=False, indent=2)
+
+
+def _write_text(path: pathlib.Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
 def _append_jsonl(path: pathlib.Path, payload: dict[str, Any]) -> None:
@@ -143,6 +160,8 @@ def _feature_dim(model: Any, feature: str) -> int:
         return int(model.latent_dim)
     if feature in {FEATURE_RAW, FEATURE_RECONSTRUCTION}:
         return int(model.input_dim)
+    if feature in {FEATURE_RAW_LATENT, FEATURE_RECONSTRUCTION_LATENT}:
+        return int(model.input_dim) + int(model.latent_dim)
     raise ValueError(f"unknown feature: {feature}")
 
 
@@ -160,20 +179,88 @@ def _build_mellin_basis(model: Any, args: argparse.Namespace) -> Any | None:
     raise ValueError("--mellin must be one of: none|constant|ramp")
 
 
-def _feature_vector(model: Any, basis: Any | None, feature: str, text: str) -> list[float]:
-    if feature == FEATURE_RAW:
+def _l2_normalize(values: list[float], epsilon: float = 1e-12) -> list[float]:
+    norm = math.sqrt(sum(value * value for value in values))
+    if norm <= epsilon:
+        return values
+    return [value / norm for value in values]
+
+
+def _normalise_feature_values(
+    model: Any,
+    feature: str,
+    values: list[float],
+    mode: str,
+    hybrid_latent_scale: float,
+) -> list[float]:
+    if feature in {FEATURE_RAW_LATENT, FEATURE_RECONSTRUCTION_LATENT}:
+        split = int(model.input_dim)
+        base_values = values[:split]
+        latent_values = values[split:]
+    else:
+        base_values = values
+        latent_values = []
+
+    if mode == "none":
+        if latent_values:
+            return base_values + [value * hybrid_latent_scale for value in latent_values]
+        return values
+    if mode == "vector":
+        if latent_values:
+            values = base_values + [value * hybrid_latent_scale for value in latent_values]
+        return _l2_normalize(values)
+    if mode == "blocks":
+        if latent_values:
+            return _l2_normalize(base_values) + [
+                value * hybrid_latent_scale for value in _l2_normalize(latent_values)
+            ]
+        return _l2_normalize(values)
+    raise ValueError("--feature-normalize must be one of: none|vector|blocks")
+
+
+def _feature_vector(
+    model: Any,
+    basis: Any | None,
+    feature: str,
+    text: str,
+    normalize: str = "none",
+    hybrid_latent_scale: float = 1.0,
+) -> list[float]:
+    if feature in {FEATURE_RAW, FEATURE_RAW_LATENT}:
         if basis is None:
-            values = model.encode_text(text)
+            raw_values = model.encode_text(text)
         else:
-            values = model.encode_text_with_mellin(text, basis)
-        return [float(value) for value in values]
+            raw_values = model.encode_text_with_mellin(text, basis)
+        if feature == FEATURE_RAW:
+            return _normalise_feature_values(
+                model,
+                feature,
+                [float(value) for value in raw_values],
+                normalize,
+                hybrid_latent_scale,
+            )
 
     if basis is None:
         state = model.forward_mean_text(text)
     else:
         state = model.forward_mean_text_with_mellin(text, basis)
-    values = state.latent if feature == FEATURE_LATENT else state.reconstruction
-    return [float(value) for value in values]
+    if feature == FEATURE_LATENT:
+        values = state.latent
+    elif feature == FEATURE_RECONSTRUCTION:
+        values = state.reconstruction
+    elif feature == FEATURE_RAW_LATENT:
+        values = [*raw_values, *state.latent]
+    elif feature == FEATURE_RECONSTRUCTION_LATENT:
+        values = [*state.reconstruction, *state.latent]
+    else:
+        raise ValueError(f"unknown feature: {feature}")
+    return _normalise_feature_values(
+        model,
+        feature,
+        [float(value) for value in values],
+        normalize,
+        hybrid_latent_scale,
+    )
 
 
 def _feature_tensor(
@@ -181,11 +268,20 @@ def _feature_tensor(
     basis: Any | None,
     feature: str,
     samples: list[_WindowSample],
+    normalize: str = "none",
+    hybrid_latent_scale: float = 1.0,
 ) -> st.Tensor:
     dim = _feature_dim(model, feature)
     data: list[float] = []
     for sample in samples:
-        values = _feature_vector(model, basis, feature, sample.window)
+        values = _feature_vector(
+            model,
+            basis,
+            feature,
+            sample.window,
+            normalize,
+            hybrid_latent_scale,
+        )
         if len(values) != dim:
             raise ValueError(f"{feature} feature length mismatch: expected {dim}, got {len(values)}")
         data.extend(values)
@@ -196,6 +292,8 @@ def _build_batches(
     vae: Any,
     basis: Any | None,
     feature: str,
+    normalize: str,
+    hybrid_latent_scale: float,
     text: str,
     index: dict[str, int],
     vocab_size: int,
@@ -207,7 +305,10 @@ def _build_batches(
     out: list[tuple[st.Tensor, st.Tensor]] = []
     for _ in range(batches):
         samples = _sample_windows(text, window_chars, index, batch_size, rng)
-        out.append((_feature_tensor(vae, basis, feature, samples), _one_hot_targets(samples, vocab_size)))
+        out.append((
+            _feature_tensor(vae, basis, feature, samples, normalize, hybrid_latent_scale),
+            _one_hot_targets(samples, vocab_size),
+        ))
     return out
 
 
@@ -291,6 +392,28 @@ def _nll_from_prob(prob: float, epsilon: float = 1e-9) -> float:
     return -math.log(max(float(prob), epsilon))
 
 
+def _vector_norm(values: list[float]) -> float:
+    return math.sqrt(sum(float(value) * float(value) for value in values))
+
+
+def _squared_l2(left: list[float], right: list[float]) -> float:
+    return sum((float(a) - float(b)) ** 2 for a, b in zip(left, right))
+
+
+def _cosine(left: list[float], right: list[float]) -> float | None:
+    dot = 0.0
+    left_norm = 0.0
+    right_norm = 0.0
+    for a, b in zip(left, right):
+        fa = float(a)
+        fb = float(b)
+        dot += fa * fb
+        left_norm += fa * fa
+        right_norm += fb * fb
+    denom = math.sqrt(left_norm) * math.sqrt(right_norm)
+    return dot / denom if denom > 0.0 else None
+
+
 def _argmax(values: list[float]) -> int:
     best_idx = 0
     best_val = float("-inf")
@@ -321,11 +444,123 @@ def _sample_topk(values: list[float], top_k: int, rng: random.Random) -> int:
     return candidates[-1][0]
 
 
+def _feature_variance(vectors: list[list[float]], threshold: float = 1e-8) -> dict[str, Any]:
+    if not vectors:
+        return {
+            "dims": 0,
+            "variance_mean": None,
+            "variance_max": None,
+            "active_dim_fraction": None,
+            "norm_mean": None,
+        }
+    dims = min(len(vector) for vector in vectors)
+    if dims <= 0:
+        return {
+            "dims": 0,
+            "variance_mean": None,
+            "variance_max": None,
+            "active_dim_fraction": None,
+            "norm_mean": None,
+        }
+    means = [
+        sum(float(vector[idx]) for vector in vectors) / float(len(vectors))
+        for idx in range(dims)
+    ]
+    variances = []
+    for idx in range(dims):
+        variances.append(
+            sum((float(vector[idx]) - means[idx]) ** 2 for vector in vectors)
+            / float(len(vectors))
+        )
+    active = sum(1 for value in variances if value > threshold)
+    return {
+        "dims": dims,
+        "variance_mean": sum(variances) / float(dims),
+        "variance_max": max(variances) if variances else None,
+        "active_dim_fraction": active / float(dims),
+        "norm_mean": sum(_vector_norm(vector[:dims]) for vector in vectors) / float(len(vectors)),
+    }
+
+
+def _feature_diagnostics(
+    vae: Any,
+    basis: Any | None,
+    features: list[str],
+    normalize: str,
+    hybrid_latent_scale: float,
+    text: str,
+    index: dict[str, int],
+    window_chars: int,
+    samples: int,
+    seed: int,
+) -> dict[str, Any]:
+    rng = random.Random(seed)
+    windows = _sample_windows(text, window_chars, index, max(1, samples), rng)
+    vectors = {
+        feature: [
+            _feature_vector(
+                vae,
+                basis,
+                feature,
+                sample.window,
+                normalize,
+                hybrid_latent_scale,
+            )
+            for sample in windows
+        ]
+        for feature in features
+    }
+    raw_vectors = vectors.get(FEATURE_RAW)
+    diagnostics: dict[str, Any] = {}
+    for feature, feature_vectors in vectors.items():
+        item = _feature_variance(feature_vectors)
+        if raw_vectors is not None and raw_vectors and feature_vectors:
+            dims = min(
+                min(len(vector) for vector in raw_vectors),
+                min(len(vector) for vector in feature_vectors),
+            )
+            if dims == min(len(vector) for vector in raw_vectors) == min(
+                len(vector) for vector in feature_vectors
+            ):
+                sqs = [
+                    _squared_l2(raw[:dims], vector[:dims])
+                    for raw, vector in zip(raw_vectors, feature_vectors)
+                ]
+                cosines = [
+                    value
+                    for value in (
+                        _cosine(raw[:dims], vector[:dims])
+                        for raw, vector in zip(raw_vectors, feature_vectors)
+                    )
+                    if value is not None
+                ]
+                item["raw_l2_mean"] = sum(math.sqrt(value) for value in sqs) / float(len(sqs))
+                item["raw_mse_mean"] = sum(value / float(dims) for value in sqs) / float(len(sqs))
+                item["raw_cosine_mean"] = (
+                    sum(cosines) / float(len(cosines)) if cosines else None
+                )
+            else:
+                item["raw_l2_mean"] = None
+                item["raw_mse_mean"] = None
+                item["raw_cosine_mean"] = None
+        else:
+            item["raw_l2_mean"] = None
+            item["raw_mse_mean"] = None
+            item["raw_cosine_mean"] = None
+        diagnostics[feature] = item
+    return {
+        "samples": len(windows),
+        "features": diagnostics,
+    }
+
+
 def _evaluate(
     head: Any,
     vae: Any,
     basis: Any | None,
     feature: str,
+    normalize: str,
+    hybrid_latent_scale: float,
     text: str,
     index: dict[str, int],
     vocab_size: int,
@@ -343,7 +578,7 @@ def _evaluate(
         }
     rng = random.Random(seed)
     samples = _sample_windows(text, window_chars, index, eval_samples, rng)
-    x = _feature_tensor(vae, basis, feature, samples)
+    x = _feature_tensor(vae, basis, feature, samples, normalize, hybrid_latent_scale)
     probs = head.forward(x).tolist()
     nll = 0.0
     correct = 0
@@ -370,6 +605,8 @@ def _generate(
     vae: Any,
     basis: Any | None,
     feature: str,
+    normalize: str,
+    hybrid_latent_scale: float,
     symbols: list[str],
     index: dict[str, int],
     prompt: str,
@@ -387,7 +624,7 @@ def _generate(
         if len(context) < window_chars:
             context = (DEFAULT_UNK * (window_chars - len(context))) + context
         sample = _WindowSample(window=context, target=0)
-        x = _feature_tensor(vae, basis, feature, [sample])
+        x = _feature_tensor(vae, basis, feature, [sample], normalize, hybrid_latent_scale)
         probs = [float(value) for value in head.forward(x).tolist()[0]]
         next_idx = _sample_topk(probs, top_k, rng)
         out += symbols[next_idx] if 0 <= next_idx < len(symbols) else DEFAULT_UNK
@@ -436,6 +673,8 @@ def _train_feature_head(
         vae,
         basis,
         feature,
+        str(args.feature_normalize),
+        float(args.hybrid_latent_scale),
         val_text,
         index,
         vocab_size,
@@ -458,6 +697,8 @@ def _train_feature_head(
             vae,
             basis,
             feature,
+            str(args.feature_normalize),
+            float(args.hybrid_latent_scale),
             train_text,
             index,
             vocab_size,
@@ -472,6 +713,8 @@ def _train_feature_head(
             vae,
             basis,
             feature,
+            str(args.feature_normalize),
+            float(args.hybrid_latent_scale),
             val_text,
             index,
             vocab_size,
@@ -509,6 +752,8 @@ def _train_feature_head(
         vae,
         basis,
         feature,
+        str(args.feature_normalize),
+        float(args.hybrid_latent_scale),
         symbols,
         index,
         str(args.prompt),
@@ -547,6 +792,2221 @@ def _parse_features(raw: str) -> list[str]:
     return list(dict.fromkeys(features))
 
 
+def _parse_seeds(seed: int, raw: str | None) -> list[int]:
+    if raw is None or not raw.strip():
+        return [int(seed)]
+    seeds = []
+    for part in raw.split(","):
+        value = part.strip()
+        if not value:
+            continue
+        seeds.append(int(value))
+    if not seeds:
+        raise ValueError("--seeds must contain at least one integer seed")
+    return list(dict.fromkeys(seeds))
+
+
+def _parse_hybrid_latent_scales(default_scale: float, raw: str | None) -> list[float]:
+    if raw is None or not raw.strip():
+        return [float(default_scale)]
+    scales = []
+    for part in raw.split(","):
+        value = part.strip()
+        if not value:
+            continue
+        parsed = float(value)
+        if parsed < 0.0 or not math.isfinite(parsed):
+            raise ValueError("--hybrid-latent-scales values must be non-negative and finite")
+        scales.append(parsed)
+    if not scales:
+        raise ValueError("--hybrid-latent-scales must contain at least one value")
+
+    unique: list[float] = []
+    seen: set[float] = set()
+    for scale in scales:
+        if scale in seen:
+            continue
+        seen.add(scale)
+        unique.append(scale)
+    return unique
+
+
+def _parse_feature_normalize_modes(default_mode: str, raw: str | None) -> list[str]:
+    if raw is None or not raw.strip():
+        return [default_mode]
+    modes = [part.strip().lower() for part in raw.split(",") if part.strip()]
+    if not modes:
+        raise ValueError("--feature-normalize-modes must contain at least one mode")
+    unknown = [mode for mode in modes if mode not in NORMALIZE_CHOICES]
+    if unknown:
+        joined = ", ".join(NORMALIZE_CHOICES)
+        raise ValueError(
+            f"unknown --feature-normalize-modes entries {unknown}; expected comma-separated {joined}"
+        )
+    return list(dict.fromkeys(modes))
+
+
+def _clone_args(args: argparse.Namespace, **overrides: Any) -> argparse.Namespace:
+    values = vars(args).copy()
+    values.update(overrides)
+    return argparse.Namespace(**values)
+
+
+def _metric_stats(values: Iterable[float]) -> dict[str, Any]:
+    vals = [float(value) for value in values if value is not None and math.isfinite(float(value))]
+    if not vals:
+        return {
+            "count": 0,
+            "mean": None,
+            "stddev": None,
+            "min": None,
+            "max": None,
+        }
+    mean = sum(vals) / float(len(vals))
+    variance = sum((value - mean) ** 2 for value in vals) / float(len(vals))
+    return {
+        "count": len(vals),
+        "mean": mean,
+        "stddev": math.sqrt(variance),
+        "min": min(vals),
+        "max": max(vals),
+    }
+
+
+def _finite_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed):
+        return None
+    return parsed
+
+
+def _fmt_float(value: Any, digits: int = 6) -> str:
+    if value is None:
+        return "-"
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if not math.isfinite(parsed):
+        return "-"
+    return f"{parsed:.{digits}f}"
+
+
+def _fmt_percent(value: Any, digits: int = 2) -> str:
+    if value is None:
+        return "-"
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if not math.isfinite(parsed):
+        return "-"
+    return f"{parsed * 100.0:.{digits}f}%"
+
+
+def _fmt_count_rate(count: Any, total: int) -> str:
+    parsed = _finite_float(count)
+    if parsed is None or total <= 0:
+        return "-"
+    return f"{int(parsed)}/{total} ({_fmt_percent(parsed / float(total), 1)})"
+
+
+def _fmt_stat_mean(stats: dict[str, Any] | None, digits: int = 6) -> str:
+    if not stats:
+        return "-"
+    return _fmt_float(stats.get("mean"), digits)
+
+
+def _markdown_table(headers: list[str], rows: list[list[str]]) -> list[str]:
+    if not rows:
+        return ["_" + "No rows." + "_"]
+    lines = [
+        "| " + " | ".join(headers) + " |",
+        "| " + " | ".join("---" for _ in headers) + " |",
+    ]
+    lines.extend("| " + " | ".join(row) + " |" for row in rows)
+    return lines
+
+
+def _single_report(summary: dict[str, Any]) -> str:
+    run = summary.get("run", {})
+    ranking_rows = []
+    feature_results = {
+        str(item.get("feature")): item
+        for item in summary.get("features", [])
+    }
+    for item in summary.get("ranking", []):
+        feature = str(item.get("feature"))
+        result = feature_results.get(feature, {})
+        initial = result.get("initial_validation", {})
+        final = result.get("final_validation", {})
+        ranking_rows.append(
+            [
+                feature,
+                str(item.get("best_epoch") if item.get("best_epoch") is not None else "init"),
+                _fmt_float(item.get("best_mean_nll")),
+                _fmt_percent(item.get("best_accuracy")),
+                _fmt_float(initial.get("mean_nll")),
+                _fmt_float(final.get("mean_nll")),
+            ]
+        )
+
+    diagnostics_rows = []
+    diagnostics = summary.get("feature_diagnostics", {}).get("features", {})
+    for feature, item in sorted(diagnostics.items()):
+        diagnostics_rows.append(
+            [
+                str(feature),
+                str(item.get("dims", "-")),
+                _fmt_float(item.get("variance_mean")),
+                _fmt_percent(item.get("active_dim_fraction")),
+                _fmt_float(item.get("norm_mean")),
+                _fmt_float(item.get("raw_mse_mean")),
+                _fmt_float(item.get("raw_cosine_mean")),
+            ]
+        )
+
+    lines = [
+        "# Char VAE Context Report",
+        "",
+        f"- status: single-run",
+        f"- best_feature: {summary.get('best_feature')}",
+        f"- seed: {run.get('seed')}",
+        f"- features: {', '.join(str(item) for item in run.get('features', []))}",
+        f"- feature_normalize: {run.get('feature_normalize')}",
+        f"- hybrid_latent_scale: {run.get('hybrid_latent_scale')}",
+        f"- window_chars: {run.get('window_chars')}",
+        f"- latent_dim: {run.get('latent_dim')}",
+        f"- summary_json: `summary.json`",
+        "",
+        "## Ranking",
+        "",
+    ]
+    lines.extend(
+        _markdown_table(
+            ["feature", "best_epoch", "best_nll", "best_acc", "init_nll", "final_nll"],
+            ranking_rows,
+        )
+    )
+    lines.extend(["", "## Feature Diagnostics", ""])
+    lines.extend(
+        _markdown_table(
+            ["feature", "dims", "var_mean", "active_dims", "norm_mean", "raw_mse", "raw_cosine"],
+            diagnostics_rows,
+        )
+    )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _aggregate_report(summary: dict[str, Any]) -> str:
+    run = summary.get("run", {})
+    config_summaries = summary.get("config_summaries") or summary.get("scale_summaries", [])
+    seed_total = len(summary.get("seed_summaries", []))
+    if not seed_total:
+        seed_count = int(run.get("seed_count") or 0)
+        config_count = int(run.get("config_count") or len(config_summaries) or 1)
+        seed_total = int(run.get("run_count") or seed_count * config_count)
+    show_normalize_column = int(run.get("normalize_count") or 1) > 1
+    show_scale_column = int(run.get("scale_count") or 1) > 1
+    best_config = summary.get("best_config") or {}
+    ranking_rows = [
+        [
+            str(item.get("feature")),
+            _fmt_float(item.get("mean_best_nll")),
+            _fmt_percent(item.get("mean_best_accuracy")),
+            _fmt_float(item.get("mean_best_nll_delta_vs_raw")),
+            str(item.get("runs", "-")),
+        ]
+        for item in summary.get("ranking", [])
+    ]
+    stability_rows = [
+        [
+            str(item.get("feature")),
+            _fmt_count_rate(item.get("win_count"), seed_total),
+            _fmt_count_rate(item.get("near_win_count"), seed_total),
+            _fmt_float(item.get("mean_rank"), 2),
+            _fmt_float(item.get("mean_gap_to_winner")),
+        ]
+        for item in summary.get("feature_stability", [])
+    ]
+    config_rows = []
+    for item in config_summaries:
+        top = item.get("ranking", [{}])[0] if item.get("ranking") else {}
+        stability_by_feature = {
+            stability.get("feature"): stability
+            for stability in item.get("feature_stability", [])
+        }
+        best_stability = stability_by_feature.get(item.get("best_feature"), {})
+        config_seed_total = int(item.get("seed_count") or seed_total)
+        config_rows.append(
+            [
+                str(item.get("feature_normalize", run.get("feature_normalize"))),
+                _fmt_float(item.get("hybrid_latent_scale"), 3),
+                str(item.get("status")),
+                str(item.get("best_feature")),
+                _fmt_float(top.get("mean_best_nll")),
+                _fmt_float(top.get("mean_best_nll_delta_vs_raw")),
+                _fmt_count_rate(best_stability.get("win_count"), config_seed_total),
+                f"`{item.get('run_dir')}`",
+            ]
+        )
+    diagnostics_rows = []
+    for item in summary.get("feature_diagnostics_summary", []):
+        diagnostics_rows.append(
+            [
+                str(item.get("feature")),
+                _fmt_stat_mean(item.get("dims"), 2),
+                _fmt_stat_mean(item.get("variance_mean")),
+                _fmt_percent(item.get("active_dim_fraction", {}).get("mean")),
+                _fmt_stat_mean(item.get("norm_mean")),
+                _fmt_stat_mean(item.get("raw_mse_mean")),
+                _fmt_stat_mean(item.get("raw_cosine_mean")),
+            ]
+        )
+    winner_by_seed = {
+        (item.get("feature_normalize"), item.get("hybrid_latent_scale"), item.get("seed")): item
+        for item in summary.get("seed_winners", [])
+    }
+    seed_rows = []
+    for item in summary.get("seed_summaries", []):
+        top = item.get("ranking", [{}])[0] if item.get("ranking") else {}
+        winner = winner_by_seed.get(
+            (
+                item.get("feature_normalize"),
+                item.get("hybrid_latent_scale"),
+                item.get("seed"),
+            ),
+            {},
+        )
+        near_winners = winner.get("near_winners", [])
+        row = []
+        if show_normalize_column:
+            row.append(str(item.get("feature_normalize", "-")))
+        if show_scale_column:
+            row.append(_fmt_float(item.get("hybrid_latent_scale"), 3))
+        row.extend(
+            [
+                str(item.get("seed")),
+                str(item.get("best_feature")),
+                _fmt_float(top.get("best_mean_nll")),
+                _fmt_percent(top.get("best_accuracy")),
+                _fmt_float(winner.get("margin_to_runner_up")),
+                ", ".join(str(feature) for feature in near_winners) if near_winners else "-",
+                f"`{item.get('run_dir')}`",
+            ]
+        )
+        seed_rows.append(row)
+
+    lines = [
+        "# Char VAE Context Sweep Report",
+        "",
+        f"- status: {summary.get('status')}",
+        f"- best_feature: {summary.get('best_feature')}",
+        (
+            "- best_config: {feature} @ normalize={normalize} scale={scale}".format(
+                feature=best_config.get("best_feature"),
+                normalize=best_config.get("feature_normalize"),
+                scale=best_config.get("hybrid_latent_scale"),
+            )
+            if best_config
+            else "- best_config: -"
+        ),
+        f"- seeds: {', '.join(str(seed) for seed in run.get('seeds', []))}",
+        f"- features: {', '.join(str(item) for item in run.get('features', []))}",
+        f"- feature_normalize: {run.get('feature_normalize')}",
+        f"- feature_normalize_modes: {', '.join(str(mode) for mode in run.get('feature_normalize_modes', [])) or '-'}",
+        f"- hybrid_latent_scale: {run.get('hybrid_latent_scale')}",
+        f"- hybrid_latent_scales: {', '.join(str(scale) for scale in run.get('hybrid_latent_scales', [])) or '-'}",
+        f"- min_nll_delta: {run.get('min_nll_delta')}",
+        f"- win_tolerance: {run.get('win_tolerance')}",
+        f"- summary_json: `summary.json`",
+        "",
+    ]
+    follow_up = summary.get("follow_up")
+    follow_up_result = summary.get("follow_up_result")
+    follow_up_chain = summary.get("follow_up_chain")
+    follow_up_ancestors = summary.get("follow_up_ancestors")
+    follow_up_trajectory = summary.get("follow_up_trajectory")
+    follow_up_gate = summary.get("follow_up_gate")
+    follow_up_guidance = summary.get("follow_up_guidance")
+    if isinstance(follow_up_result, dict):
+        source_config = follow_up_result.get("source_best_config")
+        evaluated_config = follow_up_result.get("evaluated_config")
+        source_feature_eval = follow_up_result.get("source_feature_evaluated")
+        current_best = follow_up_result.get("current_best_config")
+        lines.extend(
+            [
+                "## Follow-Up Result",
+                "",
+                f"- source: `{follow_up_result.get('source_summary_path')}`",
+                f"- verdict: {follow_up_result.get('verdict')}",
+                f"- config_verdict: {follow_up_result.get('config_verdict')}",
+                f"- source_feature_verdict: {follow_up_result.get('source_feature_verdict')}",
+                f"- source_best_feature_retained: {follow_up_result.get('source_best_feature_retained')}",
+                f"- match_found: {follow_up_result.get('match_found')}",
+                "",
+            ]
+        )
+        lines.extend(
+            _markdown_table(
+                [
+                    "source_config",
+                    "evaluated_config",
+                    "source_feature_eval",
+                    "current_best_config",
+                    "source_nll",
+                    "evaluated_nll",
+                    "delta_vs_source",
+                    "source_feature_delta",
+                ],
+                [
+                    [
+                        _config_label(source_config if isinstance(source_config, dict) else None),
+                        _config_label(
+                            evaluated_config if isinstance(evaluated_config, dict) else None
+                        ),
+                        _config_label(
+                            source_feature_eval if isinstance(source_feature_eval, dict) else None
+                        ),
+                        _config_label(current_best if isinstance(current_best, dict) else None),
+                        _fmt_float(
+                            source_config.get("mean_best_nll")
+                            if isinstance(source_config, dict)
+                            else None
+                        ),
+                        _fmt_float(
+                            evaluated_config.get("mean_best_nll")
+                            if isinstance(evaluated_config, dict)
+                            else None
+                        ),
+                        _fmt_float(follow_up_result.get("mean_best_nll_delta_vs_source")),
+                        _fmt_float(
+                            follow_up_result.get(
+                                "source_feature_mean_best_nll_delta_vs_source"
+                            )
+                        ),
+                    ]
+                ],
+            )
+        )
+        lines.append("")
+    elif isinstance(follow_up, dict):
+        lines.extend(
+            [
+                "## Follow-Up Source",
+                "",
+                f"- source: `{follow_up.get('source_summary_path')}`",
+                f"- source_best_config: {_config_label(follow_up.get('source_best_config'))}",
+                "",
+            ]
+        )
+    if isinstance(follow_up_chain, dict):
+        ancestors = follow_up_chain.get("ancestors", [])
+        verdict_history = follow_up_chain.get("verdict_history", [])
+        verdict_history_text = (
+            ", ".join(str(item) for item in verdict_history)
+            if isinstance(verdict_history, list)
+            else "-"
+        )
+        ancestors_text = (
+            ", ".join(f"`{item}`" for item in ancestors)
+            if isinstance(ancestors, list)
+            else "-"
+        )
+        lines.extend(
+            [
+                "## Follow-Up Chain",
+                "",
+                f"- generation: {follow_up_chain.get('generation')}",
+                f"- parent_summary: `{follow_up_chain.get('parent_summary_path')}`",
+                f"- latest_verdict: {follow_up_chain.get('latest_verdict')}",
+                f"- improved_streak: {follow_up_chain.get('improved_streak')}",
+                f"- regressed_streak: {follow_up_chain.get('regressed_streak')}",
+                f"- verdict_history: {verdict_history_text}",
+                f"- ancestors: {ancestors_text}",
+                "",
+            ]
+        )
+    if isinstance(follow_up_ancestors, dict):
+        ancestor_records = follow_up_ancestors.get("ancestors", [])
+        if isinstance(ancestor_records, list) and ancestor_records:
+            lines.extend(
+                [
+                    "## Follow-Up Ancestors",
+                    "",
+                ]
+            )
+            lines.extend(
+                _markdown_table(
+                    [
+                        "generation",
+                        "summary_path",
+                        "status",
+                        "best_config",
+                        "mean_best_nll",
+                        "verdict",
+                        "guidance_action",
+                        "guided_enabled",
+                        "missing",
+                    ],
+                    [
+                        _follow_up_ancestor_row(record)
+                        for record in ancestor_records
+                        if isinstance(record, dict)
+                    ],
+                )
+            )
+            lines.append("")
+    if isinstance(follow_up_trajectory, dict):
+        verdict_counts = follow_up_trajectory.get("verdict_counts", {})
+        verdict_counts_text = (
+            ", ".join(f"{key}={value}" for key, value in verdict_counts.items())
+            if isinstance(verdict_counts, dict)
+            else "-"
+        )
+        trajectory_reasons = follow_up_trajectory.get("trajectory_reasons", [])
+        trajectory_reasons_text = (
+            ", ".join(str(reason) for reason in trajectory_reasons)
+            if isinstance(trajectory_reasons, list)
+            else "-"
+        )
+        points = follow_up_trajectory.get("points", [])
+        lines.extend(
+            [
+                "## Follow-Up Trajectory",
+                "",
+                f"- trajectory_verdict: {follow_up_trajectory.get('trajectory_verdict')}",
+                f"- trajectory_action: {follow_up_trajectory.get('trajectory_action')}",
+                f"- trajectory_reasons: {trajectory_reasons_text}",
+                f"- latest_verdict: {follow_up_trajectory.get('latest_verdict')}",
+                "- cumulative_mean_best_nll_delta: "
+                f"{_fmt_float(follow_up_trajectory.get('cumulative_mean_best_nll_delta'))}",
+                "- start_mean_best_nll: "
+                f"{_fmt_float(follow_up_trajectory.get('start_mean_best_nll'))}",
+                "- current_mean_best_nll: "
+                f"{_fmt_float(follow_up_trajectory.get('current_mean_best_nll'))}",
+                "- best_mean_best_nll: "
+                f"{_fmt_float(follow_up_trajectory.get('best_mean_best_nll'))}",
+                f"- best_generation: {follow_up_trajectory.get('best_generation')}",
+                f"- best_summary: `{follow_up_trajectory.get('best_summary_path') or '-'}`",
+                "- source_feature_tradeoff: "
+                f"{follow_up_trajectory.get('source_feature_tradeoff')}",
+                f"- best_feature_changed: {follow_up_trajectory.get('best_feature_changed')}",
+                f"- unsafe_promotion: {follow_up_trajectory.get('unsafe_promotion')}",
+                f"- verdict_counts: {verdict_counts_text}",
+                "",
+            ]
+        )
+        if isinstance(points, list) and points:
+            lines.extend(
+                _markdown_table(
+                    [
+                        "generation",
+                        "role",
+                        "best_config",
+                        "mean_best_nll",
+                        "delta_from_previous",
+                        "verdict",
+                        "guidance_action",
+                        "gate_failed",
+                    ],
+                    [
+                        _follow_up_trajectory_point_row(point)
+                        for point in points
+                        if isinstance(point, dict)
+                    ],
+                )
+            )
+            lines.append("")
+    if isinstance(follow_up_gate, dict):
+        fail_on = follow_up_gate.get("fail_on_verdicts", [])
+        fail_on_text = (
+            ", ".join(str(item) for item in fail_on)
+            if isinstance(fail_on, list)
+            else "-"
+        )
+        lines.extend(
+            [
+                "## Follow-Up Gate",
+                "",
+                f"- verdict: {follow_up_gate.get('verdict')}",
+                f"- fail_on_verdicts: {fail_on_text}",
+                f"- failed: {follow_up_gate.get('failed')}",
+                f"- exit_code: {follow_up_gate.get('exit_code')}",
+                "",
+            ]
+        )
+    if isinstance(follow_up_guidance, dict):
+        reasons = follow_up_guidance.get("reasons", [])
+        reasons_text = (
+            ", ".join(str(item) for item in reasons)
+            if isinstance(reasons, list)
+            else "-"
+        )
+        lines.extend(
+            [
+                "## Follow-Up Guidance",
+                "",
+                f"- action: {follow_up_guidance.get('action')}",
+                f"- local_action: {follow_up_guidance.get('local_action') or '-'}",
+                f"- trajectory_action: {follow_up_guidance.get('trajectory_action') or '-'}",
+                f"- trajectory_verdict: {follow_up_guidance.get('trajectory_verdict') or '-'}",
+                f"- unsafe_promotion: {follow_up_guidance.get('unsafe_promotion')}",
+                f"- promote_current_best: {follow_up_guidance.get('promote_current_best')}",
+                "- use_next_follow_up_command: "
+                f"{follow_up_guidance.get('use_next_follow_up_command')}",
+                f"- gate_failed: {follow_up_guidance.get('gate_failed')}",
+                f"- reasons: {reasons_text}",
+                f"- command_usage: `{follow_up_guidance.get('command_usage') or '-'}`",
+                "",
+            ]
+        )
+    if config_rows:
+        lines.extend(["## Context Config Grid", ""])
+        lines.extend(
+            _markdown_table(
+                [
+                    "normalize",
+                    "scale",
+                    "status",
+                    "best_feature",
+                    "mean_best_nll",
+                    "mean_delta_vs_raw",
+                    "wins",
+                    "run_dir",
+                ],
+                config_rows,
+            )
+        )
+        lines.extend(["", "## Aggregate Ranking", ""])
+    else:
+        lines.extend(["## Aggregate Ranking", ""])
+    lines.extend(
+        _markdown_table(
+            ["feature", "mean_best_nll", "mean_best_acc", "mean_delta_vs_raw", "runs"],
+            ranking_rows,
+        )
+    )
+    lines.extend(["", "## Feature Stability", ""])
+    lines.extend(
+        _markdown_table(
+            ["feature", "wins_or_ties", "near_wins", "mean_rank", "mean_gap_to_winner"],
+            stability_rows,
+        )
+    )
+    lines.extend(["", "## Aggregate Feature Diagnostics", ""])
+    lines.extend(
+        _markdown_table(
+            ["feature", "dims", "var_mean", "active_dims", "norm_mean", "raw_mse", "raw_cosine"],
+            diagnostics_rows,
+        )
+    )
+    lines.extend(["", "## Seed Runs", ""])
+    seed_headers = [
+        "seed",
+        "best_feature",
+        "best_nll",
+        "best_acc",
+        "runner_up_margin",
+        "near_winners",
+        "run_dir",
+    ]
+    if show_scale_column:
+        seed_headers = ["scale", *seed_headers]
+    if show_normalize_column:
+        seed_headers = ["normalize", *seed_headers]
+    lines.extend(
+        _markdown_table(
+            seed_headers,
+            seed_rows,
+        )
+    )
+    next_follow_up = summary.get("next_follow_up_command")
+    if isinstance(next_follow_up, dict):
+        lines.extend(
+            [
+                "",
+                "## Next Follow-Up Command",
+                "",
+                f"- action: {next_follow_up.get('action')}",
+                f"- default_follow_up_from: `{next_follow_up.get('default_follow_up_from')}`",
+                "- default_follow_up_fail_on_verdict: "
+                f"{next_follow_up.get('default_follow_up_fail_on_verdict') or '-'}",
+                f"- default_new_seeds: {next_follow_up.get('default_new_seeds')}",
+                f"- script: `{next_follow_up.get('script_path')}`",
+                f"- usage: `{next_follow_up.get('script_usage')}`",
+                "",
+                "```bash",
+                str(next_follow_up.get("shell_command")),
+                "```",
+            ]
+        )
+    guided_next_follow_up = summary.get("guided_next_follow_up_command")
+    if isinstance(guided_next_follow_up, dict):
+        reasons = guided_next_follow_up.get("reasons", [])
+        reasons_text = (
+            ", ".join(str(item) for item in reasons)
+            if isinstance(reasons, list)
+            else "-"
+        )
+        lines.extend(
+            [
+                "",
+                "## Guided Next Follow-Up Command",
+                "",
+                f"- enabled: {guided_next_follow_up.get('enabled')}",
+                f"- guidance_action: {guided_next_follow_up.get('guidance_action')}",
+                f"- trajectory_action: {guided_next_follow_up.get('trajectory_action') or '-'}",
+                f"- unsafe_promotion: {guided_next_follow_up.get('unsafe_promotion')}",
+                f"- verdict: {guided_next_follow_up.get('verdict')}",
+                f"- gate_failed: {guided_next_follow_up.get('gate_failed')}",
+                f"- reasons: {reasons_text}",
+                "- source_script: "
+                f"`{guided_next_follow_up.get('source_next_follow_up_command') or '-'}`",
+                f"- script: `{guided_next_follow_up.get('script_path') or '-'}`",
+                f"- usage: `{guided_next_follow_up.get('script_usage') or '-'}`",
+            ]
+        )
+        shell_command = guided_next_follow_up.get("shell_command")
+        if shell_command:
+            lines.extend(["", "```bash", str(shell_command), "```"])
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _aggregate_summaries(
+    summaries: list[dict[str, Any]],
+    *,
+    min_nll_delta: float,
+    win_tolerance: float,
+) -> dict[str, Any]:
+    feature_names = sorted(
+        {
+            str(feature_result["feature"])
+            for summary in summaries
+            for feature_result in summary.get("features", [])
+        }
+    )
+    feature_rows = []
+    for feature in feature_names:
+        feature_results = [
+            feature_result
+            for summary in summaries
+            for feature_result in summary.get("features", [])
+            if feature_result.get("feature") == feature
+        ]
+        best_nlls = [
+            float(feature_result["best_validation"]["mean_nll"])
+            for feature_result in feature_results
+            if feature_result.get("best_validation", {}).get("mean_nll") is not None
+        ]
+        best_accs = [
+            float(feature_result["best_validation"]["accuracy"])
+            for feature_result in feature_results
+            if feature_result.get("best_validation", {}).get("accuracy") is not None
+        ]
+        deltas = [
+            float(summary.get("deltas", {}).get(f"{feature}_best_nll_vs_raw"))
+            for summary in summaries
+            if summary.get("deltas", {}).get(f"{feature}_best_nll_vs_raw") is not None
+        ]
+        feature_rows.append(
+            {
+                "feature": feature,
+                "runs": len(feature_results),
+                "best_nll": _metric_stats(best_nlls),
+                "best_accuracy": _metric_stats(best_accs),
+                "best_nll_delta_vs_raw": _metric_stats(deltas),
+            }
+        )
+    diagnostic_rows = []
+    diagnostic_keys = (
+        "dims",
+        "variance_mean",
+        "variance_max",
+        "active_dim_fraction",
+        "norm_mean",
+        "raw_l2_mean",
+        "raw_mse_mean",
+        "raw_cosine_mean",
+    )
+    for feature in feature_names:
+        feature_diagnostics = [
+            summary.get("feature_diagnostics", {}).get("features", {}).get(feature, {})
+            for summary in summaries
+        ]
+        diagnostic_rows.append(
+            {
+                "feature": feature,
+                **{
+                    key: _metric_stats(
+                        diag.get(key)
+                        for diag in feature_diagnostics
+                        if diag.get(key) is not None
+                    )
+                    for key in diagnostic_keys
+                },
+            }
+        )
+
+    seed_winners = []
+    feature_stability_acc: dict[str, dict[str, Any]] = {
+        feature: {
+            "win_count": 0,
+            "near_win_count": 0,
+            "ranks": [],
+            "gaps": [],
+        }
+        for feature in feature_names
+    }
+    for summary in summaries:
+        entries = []
+        for item in summary.get("ranking", []):
+            feature = str(item.get("feature"))
+            best_nll = _finite_float(item.get("best_mean_nll"))
+            if best_nll is None:
+                continue
+            entries.append(
+                {
+                    "feature": feature,
+                    "best_nll": best_nll,
+                    "best_accuracy": _finite_float(item.get("best_accuracy")),
+                    "rank": None,
+                }
+            )
+        entries.sort(key=lambda item: (item["best_nll"], item["feature"]))
+        if not entries:
+            continue
+
+        current_rank = 0
+        previous_nll: float | None = None
+        for position, item in enumerate(entries, start=1):
+            best_nll = float(item["best_nll"])
+            if previous_nll is None or best_nll > previous_nll:
+                current_rank = position
+                previous_nll = best_nll
+            item["rank"] = current_rank
+
+        best = entries[0]
+        strict_winners = [
+            item["feature"]
+            for item in entries
+            if float(item["best_nll"]) - float(best["best_nll"]) <= 0.0
+        ]
+        runner_up = next(
+            (
+                item
+                for item in entries
+                if float(item["best_nll"]) - float(best["best_nll"]) > 0.0
+            ),
+            None,
+        )
+        near_winners = [
+            item["feature"]
+            for item in entries
+            if float(item["best_nll"]) - float(best["best_nll"]) <= win_tolerance
+        ]
+        for feature in strict_winners:
+            feature_stability_acc.setdefault(
+                feature,
+                {"win_count": 0, "near_win_count": 0, "ranks": [], "gaps": []},
+            )["win_count"] += 1
+        for item in entries:
+            stats = feature_stability_acc.setdefault(
+                item["feature"],
+                {"win_count": 0, "near_win_count": 0, "ranks": [], "gaps": []},
+            )
+            stats["ranks"].append(float(item["rank"]))
+            stats["gaps"].append(float(item["best_nll"]) - float(best["best_nll"]))
+        for feature in near_winners:
+            feature_stability_acc.setdefault(
+                feature,
+                {"win_count": 0, "near_win_count": 0, "ranks": [], "gaps": []},
+            )["near_win_count"] += 1
+
+        seed_winners.append(
+            {
+                "seed": summary.get("run", {}).get("seed"),
+                "feature_normalize": summary.get("run", {}).get("feature_normalize"),
+                "hybrid_latent_scale": summary.get("run", {}).get("hybrid_latent_scale"),
+                "winner": best["feature"],
+                "winners": strict_winners,
+                "near_winners": near_winners,
+                "best_nll": best["best_nll"],
+                "best_accuracy": best["best_accuracy"],
+                "runner_up": runner_up["feature"] if runner_up is not None else None,
+                "runner_up_nll": runner_up["best_nll"] if runner_up is not None else None,
+                "margin_to_runner_up": (
+                    float(runner_up["best_nll"]) - float(best["best_nll"])
+                    if runner_up is not None
+                    else None
+                ),
+            }
+        )
+
+    seed_count = len(summaries)
+    feature_stability = []
+    for feature in feature_names:
+        stats = feature_stability_acc.get(
+            feature,
+            {"win_count": 0, "near_win_count": 0, "ranks": [], "gaps": []},
+        )
+        rank_stats = _metric_stats(stats.get("ranks", []))
+        gap_stats = _metric_stats(stats.get("gaps", []))
+        win_count = int(stats.get("win_count", 0))
+        near_win_count = int(stats.get("near_win_count", 0))
+        feature_stability.append(
+            {
+                "feature": feature,
+                "win_count": win_count,
+                "win_rate": win_count / float(seed_count) if seed_count else None,
+                "near_win_count": near_win_count,
+                "near_win_rate": near_win_count / float(seed_count) if seed_count else None,
+                "rank": rank_stats,
+                "mean_rank": rank_stats["mean"],
+                "gap_to_winner": gap_stats,
+                "mean_gap_to_winner": gap_stats["mean"],
+            }
+        )
+    feature_stability.sort(
+        key=lambda item: (
+            -int(item.get("win_count", 0)),
+            -int(item.get("near_win_count", 0)),
+            float("inf") if item.get("mean_rank") is None else float(item["mean_rank"]),
+            float("inf")
+            if item.get("mean_gap_to_winner") is None
+            else float(item["mean_gap_to_winner"]),
+            str(item.get("feature")),
+        )
+    )
+
+    ranking = sorted(
+        feature_rows,
+        key=lambda item: (
+            float("inf")
+            if item["best_nll"]["mean"] is None
+            else float(item["best_nll"]["mean"]),
+            item["feature"],
+        ),
+    )
+    best_feature = ranking[0]["feature"] if ranking else None
+    non_raw_deltas = [
+        row
+        for row in feature_rows
+        if row["feature"] != FEATURE_RAW and row["best_nll_delta_vs_raw"]["mean"] is not None
+    ]
+    if not non_raw_deltas:
+        status = "no_raw_baseline"
+    elif any(float(row["best_nll_delta_vs_raw"]["mean"]) < -min_nll_delta for row in non_raw_deltas):
+        status = "improved"
+    elif all(float(row["best_nll_delta_vs_raw"]["mean"]) > min_nll_delta for row in non_raw_deltas):
+        status = "regression"
+    else:
+        status = "neutral"
+
+    return {
+        "feature_summary": feature_rows,
+        "feature_diagnostics_summary": diagnostic_rows,
+        "ranking": [
+            {
+                "feature": item["feature"],
+                "mean_best_nll": item["best_nll"]["mean"],
+                "mean_best_accuracy": item["best_accuracy"]["mean"],
+                "mean_best_nll_delta_vs_raw": item["best_nll_delta_vs_raw"]["mean"],
+                "runs": item["runs"],
+            }
+            for item in ranking
+        ],
+        "seed_winners": seed_winners,
+        "feature_stability": feature_stability,
+        "win_tolerance": win_tolerance,
+        "best_feature": best_feature,
+        "status": status,
+    }
+
+
+def _seed_run_dir(root: pathlib.Path, seed: int) -> pathlib.Path:
+    if seed < 0:
+        return root / f"seed_neg_{abs(seed):06d}"
+    return root / f"seed_{seed:06d}"
+
+
+def _scale_slug(scale: float) -> str:
+    text = f"{float(scale):.8g}".replace("-", "neg_").replace(".", "p")
+    return text.replace("+", "")
+
+
+def _scale_run_dir(root: pathlib.Path, scale: float) -> pathlib.Path:
+    return root / f"scale_{_scale_slug(scale)}"
+
+
+def _normalize_run_dir(root: pathlib.Path, mode: str) -> pathlib.Path:
+    return root / f"normalize_{mode}"
+
+
+def _config_run_dir(
+    root: pathlib.Path,
+    mode: str,
+    scale: float,
+    normalize_modes: list[str],
+    scales: list[float],
+) -> pathlib.Path:
+    run_dir = root
+    if len(normalize_modes) > 1:
+        run_dir = _normalize_run_dir(run_dir, mode)
+    if len(scales) > 1:
+        run_dir = _scale_run_dir(run_dir, scale)
+    return run_dir
+
+
+def _best_config_summary(config_summaries: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not config_summaries:
+        return None
+    ranked = sorted(
+        config_summaries,
+        key=lambda item: (
+            float("inf")
+            if not item.get("ranking")
+            or item["ranking"][0].get("mean_best_nll") is None
+            else float(item["ranking"][0]["mean_best_nll"]),
+            str(item.get("feature_normalize", "")),
+            float(item.get("hybrid_latent_scale", 0.0)),
+        ),
+    )
+    best = ranked[0]
+    top = best.get("ranking", [{}])[0] if best.get("ranking") else {}
+    return {
+        "feature_normalize": best.get("feature_normalize"),
+        "hybrid_latent_scale": best.get("hybrid_latent_scale"),
+        "best_feature": best.get("best_feature"),
+        "status": best.get("status"),
+        "mean_best_nll": top.get("mean_best_nll"),
+        "mean_best_accuracy": top.get("mean_best_accuracy"),
+        "mean_best_nll_delta_vs_raw": top.get("mean_best_nll_delta_vs_raw"),
+        "run_dir": best.get("run_dir"),
+    }
+
+
+def _fmt_arg_float(value: Any) -> str:
+    return f"{float(value):.8g}"
+
+
+def _fresh_seed_csv(seeds: list[int]) -> str:
+    used = set(int(seed) for seed in seeds)
+    candidates = [101, 103, 107, 109, 113, 127, 131, 137, 139, 149, 151, 157]
+    count = max(3, len(seeds))
+    fresh = [seed for seed in candidates if seed not in used][:count]
+    if len(fresh) < count:
+        cursor = 1_001
+        while len(fresh) < count:
+            if cursor not in used:
+                fresh.append(cursor)
+            cursor += 2
+    return ",".join(str(seed) for seed in fresh)
+
+
+def _append_flag(command: list[str], flag: str, value: Any) -> None:
+    command.extend([flag, str(value)])
+
+
+def _follow_up_command_parts(
+    args: argparse.Namespace,
+    features: list[str],
+    best_config: dict[str, Any],
+    *,
+    seeds_value: str,
+    run_dir_value: str,
+    follow_up_from_value: str | None,
+    fail_on_verdict_value: str | None,
+) -> list[str]:
+    command = [
+        "python3",
+        "-S",
+        "-s",
+        "models/python/llm_char_vae_context.py",
+        *[str(value) for value in args.text_or_dir],
+    ]
+    for flag, value in (
+        ("--features", ",".join(features)),
+        ("--feature-normalize", best_config.get("feature_normalize")),
+        ("--hybrid-latent-scale", _fmt_arg_float(best_config.get("hybrid_latent_scale", 1.0))),
+        ("--seeds", seeds_value),
+        ("--run-dir", run_dir_value),
+        ("--follow-up-from", follow_up_from_value),
+        ("--follow-up-fail-on-verdict", fail_on_verdict_value),
+        ("--window-chars", int(args.window_chars)),
+        ("--latent-dim", int(args.latent_dim)),
+        ("--hidden", int(args.hidden)),
+        ("--epochs", int(args.epochs)),
+        ("--batches", int(args.batches)),
+        ("--batch-size", int(args.batch_size)),
+        ("--lr", _fmt_arg_float(args.lr)),
+        ("--eval-samples", int(args.eval_samples)),
+        ("--val-ratio", _fmt_arg_float(args.val_ratio)),
+        ("--curvature", _fmt_arg_float(args.curvature)),
+        ("--temperature", _fmt_arg_float(args.temperature)),
+        ("--backend", str(args.backend)),
+        ("--min-nll-delta", _fmt_arg_float(args.min_nll_delta)),
+        ("--win-tolerance", _fmt_arg_float(args.win_tolerance)),
+        ("--prompt", str(args.prompt)),
+        ("--gen", int(args.gen)),
+        ("--top-k", int(args.top_k)),
+        ("--vae-epochs", int(args.vae_epochs)),
+        ("--vae-batches", int(args.vae_batches)),
+        ("--vae-batch-size", int(args.vae_batch_size)),
+        ("--vae-lr", _fmt_arg_float(args.vae_lr)),
+        ("--vae-kl-weight", _fmt_arg_float(args.vae_kl_weight)),
+        ("--vae-optimizer", str(args.vae_optimizer)),
+        ("--vae-grad-clip", str(args.vae_grad_clip)),
+        ("--mellin", str(args.mellin)),
+        ("--mellin-exponent", _fmt_arg_float(args.mellin_exponent)),
+        ("--mellin-start", _fmt_arg_float(args.mellin_start)),
+        ("--mellin-end", _fmt_arg_float(args.mellin_end)),
+    ):
+        if value is not None:
+            _append_flag(command, flag, value)
+    if args.vae_load is not None:
+        _append_flag(command, "--vae-load", args.vae_load)
+    return command
+
+
+def _next_follow_up_command_record(
+    args: argparse.Namespace,
+    features: list[str],
+    best_config: dict[str, Any],
+    root_run_dir: pathlib.Path,
+    seeds: list[int],
+) -> dict[str, Any] | None:
+    if not best_config:
+        return None
+    default_new_seeds = _fresh_seed_csv(seeds)
+    default_run_dir = root_run_dir / "follow_up_best_config"
+    default_follow_up_from = root_run_dir / "summary.json"
+    default_fail_on_verdict = (
+        str(args.follow_up_fail_on_verdict).strip()
+        if args.follow_up_fail_on_verdict is not None
+        and str(args.follow_up_fail_on_verdict).strip()
+        else None
+    )
+    script_path = root_run_dir / "next_follow_up_command.sh"
+    literal_command = _follow_up_command_parts(
+        args,
+        features,
+        best_config,
+        seeds_value=default_new_seeds,
+        run_dir_value=str(default_run_dir),
+        follow_up_from_value=str(default_follow_up_from),
+        fail_on_verdict_value=default_fail_on_verdict,
+    )
+    shell_command = "PYTHONNOUSERSITE=1 " + shlex.join(literal_command)
+    script_command = _follow_up_command_parts(
+        args,
+        features,
+        best_config,
+        seeds_value="${NEW_SEEDS}",
+        run_dir_value="${NEXT_RUN_DIR}",
+        follow_up_from_value="${FOLLOW_UP_FROM}",
+        fail_on_verdict_value=(
+            "${FOLLOW_UP_FAIL_ON_VERDICT}"
+            if default_fail_on_verdict is not None
+            else None
+        ),
+    )
+    script_usage = (
+        f"FOLLOW_UP_FROM={default_follow_up_from} NEW_SEEDS={default_new_seeds} "
+        f"NEXT_RUN_DIR={default_run_dir}"
+    )
+    if default_fail_on_verdict is not None:
+        script_usage += f" FOLLOW_UP_FAIL_ON_VERDICT={default_fail_on_verdict}"
+    script_usage += f" bash {script_path}"
+    return {
+        "schema": "st.llm_char_vae_context.next_follow_up_command.v1",
+        "action": "confirm_best_config_fresh_seeds",
+        "best_config": best_config,
+        "default_new_seeds": default_new_seeds,
+        "default_run_dir": str(default_run_dir),
+        "default_follow_up_from": str(default_follow_up_from),
+        "default_follow_up_fail_on_verdict": default_fail_on_verdict,
+        "script_path": str(script_path),
+        "shell_command": shell_command,
+        "script_command": script_command,
+        "script_usage": script_usage,
+    }
+
+
+def _guided_next_follow_up_command_record(
+    root_run_dir: pathlib.Path,
+    follow_up_guidance: dict[str, Any] | None,
+    next_follow_up: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(follow_up_guidance, dict):
+        return None
+
+    enabled = bool(follow_up_guidance.get("use_next_follow_up_command")) and isinstance(
+        next_follow_up,
+        dict,
+    )
+    reasons_raw = follow_up_guidance.get("reasons", [])
+    reasons = (
+        [str(reason) for reason in reasons_raw]
+        if isinstance(reasons_raw, list)
+        else []
+    )
+    record: dict[str, Any] = {
+        "schema": "st.llm_char_vae_context.guided_next_follow_up_command.v1",
+        "enabled": enabled,
+        "guidance_action": follow_up_guidance.get("action"),
+        "verdict": follow_up_guidance.get("verdict"),
+        "config_verdict": follow_up_guidance.get("config_verdict"),
+        "source_feature_verdict": follow_up_guidance.get("source_feature_verdict"),
+        "gate_failed": follow_up_guidance.get("gate_failed"),
+        "trajectory_action": follow_up_guidance.get("trajectory_action"),
+        "trajectory_verdict": follow_up_guidance.get("trajectory_verdict"),
+        "unsafe_promotion": follow_up_guidance.get("unsafe_promotion"),
+        "reasons": reasons,
+        "source_next_follow_up_command": (
+            next_follow_up.get("script_path") if isinstance(next_follow_up, dict) else None
+        ),
+    }
+    if not enabled or not isinstance(next_follow_up, dict):
+        record.update(
+            {
+                "script_path": None,
+                "script_usage": None,
+                "shell_command": None,
+                "script_command": None,
+            }
+        )
+        return record
+
+    script_path = root_run_dir / "guided_next_follow_up_command.sh"
+    script_usage = (
+        f"FOLLOW_UP_FROM={next_follow_up.get('default_follow_up_from')} "
+        f"NEW_SEEDS={next_follow_up.get('default_new_seeds')} "
+        f"NEXT_RUN_DIR={next_follow_up.get('default_run_dir')}"
+    )
+    fail_on_verdict = next_follow_up.get("default_follow_up_fail_on_verdict")
+    if fail_on_verdict is not None:
+        script_usage += f" FOLLOW_UP_FAIL_ON_VERDICT={fail_on_verdict}"
+    script_usage += f" bash {script_path}"
+
+    record.update(
+        {
+            "default_follow_up_from": next_follow_up.get("default_follow_up_from"),
+            "default_new_seeds": next_follow_up.get("default_new_seeds"),
+            "default_run_dir": next_follow_up.get("default_run_dir"),
+            "default_follow_up_fail_on_verdict": fail_on_verdict,
+            "script_path": str(script_path),
+            "script_usage": script_usage,
+            "shell_command": next_follow_up.get("shell_command"),
+            "script_command": next_follow_up.get("script_command"),
+        }
+    )
+    return record
+
+
+def _script_command_line(command: list[str]) -> str:
+    quoted = [shlex.quote(str(part)) for part in command]
+    return (
+        "PYTHONNOUSERSITE=\"${PYTHONNOUSERSITE:-1}\" "
+        + " ".join(
+            part.replace("'${NEW_SEEDS}'", '"${NEW_SEEDS}"').replace(
+                "'${NEXT_RUN_DIR}'", '"${NEXT_RUN_DIR}"'
+            ).replace(
+                "'${FOLLOW_UP_FROM}'", '"${FOLLOW_UP_FROM}"'
+            ).replace(
+                "'${FOLLOW_UP_FAIL_ON_VERDICT}'", '"${FOLLOW_UP_FAIL_ON_VERDICT}"'
+            )
+            for part in quoted
+        )
+    )
+
+
+def _write_next_follow_up_script(record: dict[str, Any]) -> None:
+    script_path = pathlib.Path(str(record["script_path"]))
+    default_fail_on_verdict = record.get("default_follow_up_fail_on_verdict")
+    env_lines = [
+        f"FOLLOW_UP_FROM=\"${{FOLLOW_UP_FROM:-{record['default_follow_up_from']}}}\"",
+        f"NEW_SEEDS=\"${{NEW_SEEDS:-{record['default_new_seeds']}}}\"",
+        f"NEXT_RUN_DIR=\"${{NEXT_RUN_DIR:-{record['default_run_dir']}}}\"",
+    ]
+    if default_fail_on_verdict is not None:
+        env_lines.append(
+            "FOLLOW_UP_FAIL_ON_VERDICT="
+            f"\"${{FOLLOW_UP_FAIL_ON_VERDICT:-{default_fail_on_verdict}}}\""
+        )
+    text = "\n".join(
+        [
+            "#!/usr/bin/env bash",
+            "set -euo pipefail",
+            *env_lines,
+            _script_command_line([str(part) for part in record["script_command"]]),
+            "",
+        ]
+    )
+    _write_text(script_path, text)
+    script_path.chmod(script_path.stat().st_mode | 0o755)
+
+
+def _write_guided_next_follow_up_script(record: dict[str, Any]) -> None:
+    if not record.get("enabled"):
+        return
+    script_path_raw = record.get("script_path")
+    script_command = record.get("script_command")
+    if script_path_raw is None or not isinstance(script_command, list):
+        return
+
+    script_path = pathlib.Path(str(script_path_raw))
+    default_fail_on_verdict = record.get("default_follow_up_fail_on_verdict")
+    env_lines = [
+        f"FOLLOW_UP_FROM=\"${{FOLLOW_UP_FROM:-{record['default_follow_up_from']}}}\"",
+        f"NEW_SEEDS=\"${{NEW_SEEDS:-{record['default_new_seeds']}}}\"",
+        f"NEXT_RUN_DIR=\"${{NEXT_RUN_DIR:-{record['default_run_dir']}}}\"",
+    ]
+    if default_fail_on_verdict is not None:
+        env_lines.append(
+            "FOLLOW_UP_FAIL_ON_VERDICT="
+            f"\"${{FOLLOW_UP_FAIL_ON_VERDICT:-{default_fail_on_verdict}}}\""
+        )
+    reasons = record.get("reasons", [])
+    reason_lines = (
+        [f"# Reason: {reason}" for reason in reasons]
+        if isinstance(reasons, list) and reasons
+        else ["# Reason: -"]
+    )
+    text = "\n".join(
+        [
+            "#!/usr/bin/env bash",
+            "set -euo pipefail",
+            "",
+            "# Generated by models/python/llm_char_vae_context.py.",
+            f"# Guidance action: {record.get('guidance_action') or '-'}",
+            f"# Trajectory action: {record.get('trajectory_action') or '-'}",
+            f"# Unsafe promotion: {record.get('unsafe_promotion')}",
+            f"# Verdict: {record.get('verdict') or '-'}",
+            *reason_lines,
+            "# Example:",
+            f"#   {record.get('script_usage') or f'bash {script_path}'}",
+            "",
+            *env_lines,
+            _script_command_line([str(part) for part in script_command]),
+            "",
+        ]
+    )
+    _write_text(script_path, text)
+    script_path.chmod(script_path.stat().st_mode | 0o755)
+
+
+def _flag_present(argv: list[str], flag: str) -> bool:
+    return any(part == flag or part.startswith(f"{flag}=") for part in argv)
+
+
+def _load_follow_up_summary(path: pathlib.Path) -> tuple[pathlib.Path, dict[str, Any]]:
+    candidate = path.expanduser()
+    if candidate.is_dir():
+        candidate = candidate / "summary.json"
+    payload = json.loads(candidate.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"--follow-up-from must point to a summary object: {candidate}")
+    return candidate, payload
+
+
+def _summary_seeds(summary: dict[str, Any]) -> list[int]:
+    run = summary.get("run", {})
+    raw_seeds = run.get("seeds")
+    if isinstance(raw_seeds, list):
+        seeds = []
+        for value in raw_seeds:
+            try:
+                seeds.append(int(value))
+            except (TypeError, ValueError):
+                continue
+        if seeds:
+            return list(dict.fromkeys(seeds))
+    raw_seed = run.get("seed")
+    if raw_seed is not None:
+        try:
+            return [int(raw_seed)]
+        except (TypeError, ValueError):
+            return []
+    return []
+
+
+def _summary_features(summary: dict[str, Any]) -> list[str]:
+    run = summary.get("run", {})
+    raw_features = run.get("features")
+    if not isinstance(raw_features, list):
+        return []
+    features = [str(feature) for feature in raw_features if str(feature) in FEATURE_CHOICES]
+    return list(dict.fromkeys(features))
+
+
+def _source_best_config(summary: dict[str, Any]) -> dict[str, Any]:
+    best_config = summary.get("best_config")
+    if not isinstance(best_config, dict):
+        next_follow_up = summary.get("next_follow_up_command")
+        if isinstance(next_follow_up, dict):
+            best_config = next_follow_up.get("best_config")
+    if not isinstance(best_config, dict):
+        raise ValueError("--follow-up-from summary does not contain best_config")
+
+    normalize = str(best_config.get("feature_normalize", ""))
+    if normalize not in NORMALIZE_CHOICES:
+        joined = ", ".join(NORMALIZE_CHOICES)
+        raise ValueError(
+            f"--follow-up-from best_config has invalid feature_normalize={normalize!r}; "
+            f"expected one of {joined}"
+        )
+    scale = _finite_float(best_config.get("hybrid_latent_scale"))
+    if scale is None or scale < 0.0:
+        raise ValueError("--follow-up-from best_config has invalid hybrid_latent_scale")
+
+    sanitized = dict(best_config)
+    sanitized["feature_normalize"] = normalize
+    sanitized["hybrid_latent_scale"] = scale
+    return sanitized
+
+
+def _default_follow_up_seeds(summary: dict[str, Any]) -> str:
+    next_follow_up = summary.get("next_follow_up_command")
+    if isinstance(next_follow_up, dict):
+        raw = next_follow_up.get("default_new_seeds")
+        if raw is not None and str(raw).strip():
+            return str(raw)
+    source_seeds = _summary_seeds(summary)
+    return _fresh_seed_csv(source_seeds or [42])
+
+
+def _follow_up_chain_source(summary: dict[str, Any]) -> dict[str, Any]:
+    chain = summary.get("follow_up_chain")
+    if isinstance(chain, dict):
+        generation_raw = chain.get("generation", 0)
+        try:
+            generation = max(0, int(generation_raw))
+        except (TypeError, ValueError):
+            generation = 0
+        ancestors_raw = chain.get("ancestors", [])
+        verdicts_raw = chain.get("verdict_history", [])
+        return {
+            "generation": generation,
+            "ancestors": [str(item) for item in ancestors_raw if str(item)]
+            if isinstance(ancestors_raw, list)
+            else [],
+            "verdict_history": [str(item) for item in verdicts_raw if str(item)]
+            if isinstance(verdicts_raw, list)
+            else [],
+        }
+
+    follow_up = summary.get("follow_up")
+    if isinstance(follow_up, dict):
+        parent = follow_up.get("source_summary_path")
+        result = summary.get("follow_up_result")
+        verdict = result.get("verdict") if isinstance(result, dict) else None
+        return {
+            "generation": 1,
+            "ancestors": [str(parent)] if parent is not None and str(parent) else [],
+            "verdict_history": [str(verdict)] if verdict is not None and str(verdict) else [],
+        }
+
+    return {
+        "generation": 0,
+        "ancestors": [],
+        "verdict_history": [],
+    }
+
+
+def _apply_follow_up_defaults(
+    args: argparse.Namespace,
+    argv: list[str],
+) -> dict[str, Any] | None:
+    if args.follow_up_from is None:
+        return None
+
+    source_path, source_summary = _load_follow_up_summary(args.follow_up_from)
+    best_config = _source_best_config(source_summary)
+    source_features = _summary_features(source_summary)
+    source_seeds = _summary_seeds(source_summary)
+    source_chain = _follow_up_chain_source(source_summary)
+
+    explicit_features = _flag_present(argv, "--features")
+    explicit_normalize = _flag_present(argv, "--feature-normalize") or _flag_present(
+        argv,
+        "--feature-normalize-modes",
+    )
+    explicit_scale = _flag_present(argv, "--hybrid-latent-scale") or _flag_present(
+        argv,
+        "--hybrid-latent-scales",
+    )
+    explicit_seeds = _flag_present(argv, "--seeds")
+
+    applied_defaults: dict[str, Any] = {}
+    if source_features and not explicit_features:
+        args.features = ",".join(source_features)
+        applied_defaults["features"] = args.features
+    if not explicit_normalize:
+        args.feature_normalize = best_config["feature_normalize"]
+        args.feature_normalize_modes = None
+        applied_defaults["feature_normalize"] = args.feature_normalize
+    if not explicit_scale:
+        args.hybrid_latent_scale = float(best_config["hybrid_latent_scale"])
+        args.hybrid_latent_scales = None
+        applied_defaults["hybrid_latent_scale"] = args.hybrid_latent_scale
+    if not explicit_seeds:
+        args.seeds = _default_follow_up_seeds(source_summary)
+        applied_defaults["seeds"] = args.seeds
+
+    return {
+        "schema": "st.llm_char_vae_context.follow_up.v1",
+        "source_summary_path": str(source_path),
+        "source_status": source_summary.get("status"),
+        "source_best_feature": source_summary.get("best_feature"),
+        "source_best_config": best_config,
+        "source_features": source_features,
+        "source_seeds": source_seeds,
+        "source_chain": source_chain,
+        "applied_defaults": applied_defaults,
+        "user_overrides": {
+            "features": explicit_features,
+            "feature_normalize": explicit_normalize,
+            "hybrid_latent_scale": explicit_scale,
+            "seeds": explicit_seeds,
+        },
+    }
+
+
+def _config_label(config: dict[str, Any] | None) -> str:
+    if not config:
+        return "-"
+    feature = config.get("best_feature") or config.get("feature") or "-"
+    normalize = config.get("feature_normalize", "-")
+    scale = config.get("hybrid_latent_scale", "-")
+    return f"{feature} @ normalize={normalize} scale={scale}"
+
+
+def _matching_config_summary(
+    config_summaries: list[dict[str, Any]],
+    source_best_config: dict[str, Any],
+) -> dict[str, Any] | None:
+    source_normalize = source_best_config.get("feature_normalize")
+    source_scale = _finite_float(source_best_config.get("hybrid_latent_scale"))
+    for summary in config_summaries:
+        if summary.get("feature_normalize") != source_normalize:
+            continue
+        scale = _finite_float(summary.get("hybrid_latent_scale"))
+        if source_scale is None or scale is None:
+            continue
+        if abs(scale - source_scale) <= 1e-12:
+            return summary
+    return None
+
+
+def _compact_config_summary(config: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not config:
+        return None
+    top = config.get("ranking", [{}])[0] if config.get("ranking") else {}
+    return {
+        "feature_normalize": config.get("feature_normalize"),
+        "hybrid_latent_scale": config.get("hybrid_latent_scale"),
+        "best_feature": config.get("best_feature"),
+        "status": config.get("status"),
+        "mean_best_nll": top.get("mean_best_nll"),
+        "mean_best_accuracy": top.get("mean_best_accuracy"),
+        "mean_best_nll_delta_vs_raw": top.get("mean_best_nll_delta_vs_raw"),
+        "run_dir": config.get("run_dir"),
+    }
+
+
+def _config_feature_summary(
+    config: dict[str, Any] | None,
+    feature: Any,
+) -> dict[str, Any] | None:
+    if not config or feature is None:
+        return None
+    feature_name = str(feature)
+    for row in config.get("ranking", []):
+        if row.get("feature") != feature_name:
+            continue
+        return {
+            "feature_normalize": config.get("feature_normalize"),
+            "hybrid_latent_scale": config.get("hybrid_latent_scale"),
+            "feature": feature_name,
+            "best_feature": feature_name,
+            "mean_best_nll": row.get("mean_best_nll"),
+            "mean_best_accuracy": row.get("mean_best_accuracy"),
+            "mean_best_nll_delta_vs_raw": row.get("mean_best_nll_delta_vs_raw"),
+            "runs": row.get("runs"),
+            "run_dir": config.get("run_dir"),
+        }
+    return None
+
+
+def _delta_verdict(delta: float | None, min_nll_delta: float) -> str:
+    if delta is None:
+        return "unknown"
+    if delta < -float(min_nll_delta):
+        return "improved"
+    if delta > float(min_nll_delta):
+        return "regressed"
+    return "confirmed"
+
+
+def _parse_follow_up_fail_verdicts(raw: str | None) -> list[str]:
+    if raw is None or not raw.strip():
+        return []
+    verdicts = [part.strip().lower() for part in raw.split(",") if part.strip()]
+    unknown = [verdict for verdict in verdicts if verdict not in FOLLOW_UP_VERDICTS]
+    if unknown:
+        joined = ", ".join(FOLLOW_UP_VERDICTS)
+        raise ValueError(
+            f"unknown --follow-up-fail-on-verdict entries {unknown}; "
+            f"expected comma-separated {joined}"
+        )
+    return list(dict.fromkeys(verdicts))
+
+
+def _verdict_streak(verdict_history: list[str], target: str) -> int:
+    streak = 0
+    for verdict in reversed(verdict_history):
+        if verdict != target:
+            break
+        streak += 1
+    return streak
+
+
+def _follow_up_result(
+    follow_up: dict[str, Any] | None,
+    config_summaries: list[dict[str, Any]],
+    current_best_config: dict[str, Any] | None,
+    *,
+    min_nll_delta: float,
+) -> dict[str, Any] | None:
+    if not follow_up:
+        return None
+    source_best_config = follow_up.get("source_best_config")
+    if not isinstance(source_best_config, dict):
+        return None
+    matched_config = _matching_config_summary(config_summaries, source_best_config)
+    evaluated = _compact_config_summary(matched_config)
+    source_feature_evaluated = _config_feature_summary(
+        matched_config,
+        source_best_config.get("best_feature"),
+    )
+    source_nll = _finite_float(source_best_config.get("mean_best_nll"))
+    evaluated_nll = _finite_float(evaluated.get("mean_best_nll") if evaluated else None)
+    source_feature_nll = _finite_float(
+        source_feature_evaluated.get("mean_best_nll") if source_feature_evaluated else None
+    )
+    config_delta = None
+    source_feature_delta = None
+    if source_nll is not None and evaluated_nll is not None:
+        config_delta = evaluated_nll - source_nll
+    if source_nll is not None and source_feature_nll is not None:
+        source_feature_delta = source_feature_nll - source_nll
+
+    config_verdict = _delta_verdict(config_delta, min_nll_delta)
+    source_feature_verdict = _delta_verdict(source_feature_delta, min_nll_delta)
+    source_feature = source_best_config.get("best_feature")
+    source_best_feature_retained = (
+        evaluated is not None
+        and source_feature is not None
+        and evaluated.get("best_feature") == source_feature
+    )
+
+    return {
+        "schema": "st.llm_char_vae_context.follow_up_result.v1",
+        "source_summary_path": follow_up.get("source_summary_path"),
+        "source_best_config": source_best_config,
+        "evaluated_config": evaluated,
+        "source_feature_evaluated": source_feature_evaluated,
+        "current_best_config": current_best_config,
+        "mean_best_nll_delta_vs_source": config_delta,
+        "source_feature_mean_best_nll_delta_vs_source": source_feature_delta,
+        "config_verdict": config_verdict,
+        "source_feature_verdict": source_feature_verdict,
+        "source_best_feature_retained": source_best_feature_retained,
+        "verdict": source_feature_verdict
+        if source_feature_verdict != "unknown"
+        else config_verdict,
+        "match_found": evaluated is not None,
+    }
+
+
+def _follow_up_chain_record(
+    follow_up: dict[str, Any] | None,
+    follow_up_result: dict[str, Any] | None,
+    root_run_dir: pathlib.Path,
+) -> dict[str, Any] | None:
+    if not follow_up:
+        return None
+    source_chain = follow_up.get("source_chain")
+    source_chain = source_chain if isinstance(source_chain, dict) else {}
+    try:
+        source_generation = max(0, int(source_chain.get("generation", 0)))
+    except (TypeError, ValueError):
+        source_generation = 0
+    ancestors_raw = source_chain.get("ancestors", [])
+    ancestors = (
+        [str(item) for item in ancestors_raw if str(item)]
+        if isinstance(ancestors_raw, list)
+        else []
+    )
+    parent = follow_up.get("source_summary_path")
+    if parent is not None and str(parent):
+        ancestors.append(str(parent))
+    verdicts_raw = source_chain.get("verdict_history", [])
+    verdict_history = (
+        [str(item) for item in verdicts_raw if str(item)]
+        if isinstance(verdicts_raw, list)
+        else []
+    )
+    latest_verdict = (
+        str(follow_up_result.get("verdict"))
+        if isinstance(follow_up_result, dict) and follow_up_result.get("verdict") is not None
+        else "unknown"
+    )
+    verdict_history.append(latest_verdict)
+    return {
+        "schema": "st.llm_char_vae_context.follow_up_chain.v1",
+        "generation": source_generation + 1,
+        "parent_summary_path": str(parent) if parent is not None else None,
+        "run_dir": str(root_run_dir),
+        "ancestors": ancestors,
+        "verdict_history": verdict_history,
+        "latest_verdict": latest_verdict,
+        "improved_streak": _verdict_streak(verdict_history, "improved"),
+        "regressed_streak": _verdict_streak(verdict_history, "regressed"),
+        "unknown_streak": _verdict_streak(verdict_history, "unknown"),
+    }
+
+
+def _follow_up_ancestor_record(
+    summary_path: pathlib.Path,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    run = payload.get("run")
+    run = run if isinstance(run, dict) else {}
+    chain = payload.get("follow_up_chain")
+    chain = chain if isinstance(chain, dict) else {}
+    best_config = payload.get("best_config")
+    best_config = best_config if isinstance(best_config, dict) else None
+    follow_up_result = payload.get("follow_up_result")
+    follow_up_result = follow_up_result if isinstance(follow_up_result, dict) else {}
+    follow_up_guidance = payload.get("follow_up_guidance")
+    follow_up_guidance = (
+        follow_up_guidance if isinstance(follow_up_guidance, dict) else {}
+    )
+    guided_next = payload.get("guided_next_follow_up_command")
+    guided_next = guided_next if isinstance(guided_next, dict) else {}
+    gate = payload.get("follow_up_gate")
+    gate = gate if isinstance(gate, dict) else {}
+
+    return {
+        "schema": "st.llm_char_vae_context.follow_up_ancestor.v1",
+        "summary_path": str(summary_path),
+        "run_dir": str(run.get("run_dir") or payload.get("run_dir") or "-"),
+        "generation": chain.get("generation", 0),
+        "status": payload.get("status"),
+        "best_feature": payload.get("best_feature"),
+        "best_config": best_config,
+        "mean_best_nll": best_config.get("mean_best_nll") if best_config else None,
+        "mean_best_accuracy": (
+            best_config.get("mean_best_accuracy") if best_config else None
+        ),
+        "verdict": follow_up_result.get("verdict"),
+        "config_verdict": follow_up_result.get("config_verdict"),
+        "source_feature_verdict": follow_up_result.get("source_feature_verdict"),
+        "source_best_feature_retained": follow_up_result.get(
+            "source_best_feature_retained"
+        ),
+        "guidance_action": follow_up_guidance.get("action"),
+        "guided_enabled": guided_next.get("enabled"),
+        "gate_failed": gate.get("failed"),
+    }
+
+
+def _follow_up_missing_ancestor_record(
+    summary_path: pathlib.Path,
+    error: Exception,
+) -> dict[str, Any]:
+    return {
+        "schema": "st.llm_char_vae_context.follow_up_ancestor.v1",
+        "summary_path": str(summary_path),
+        "missing": True,
+        "error": str(error),
+    }
+
+
+def _follow_up_ancestor_records(
+    follow_up_chain: dict[str, Any] | None,
+    *,
+    max_ancestors: int = FOLLOW_UP_CHAIN_MAX_ANCESTORS,
+) -> dict[str, Any] | None:
+    if not isinstance(follow_up_chain, dict):
+        return None
+    ancestors_raw = follow_up_chain.get("ancestors", [])
+    if not isinstance(ancestors_raw, list) or not ancestors_raw:
+        return None
+
+    records = []
+    seen: set[str] = set()
+    for raw_path in ancestors_raw[:max_ancestors]:
+        if raw_path is None or not str(raw_path):
+            continue
+        summary_path = pathlib.Path(str(raw_path)).expanduser()
+        summary_key = str(summary_path)
+        if summary_key in seen:
+            records.append(
+                {
+                    "schema": "st.llm_char_vae_context.follow_up_ancestor.v1",
+                    "summary_path": summary_key,
+                    "cycle_detected": True,
+                }
+            )
+            break
+        seen.add(summary_key)
+        try:
+            loaded_path, payload = _load_follow_up_summary(summary_path)
+            records.append(_follow_up_ancestor_record(loaded_path, payload))
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            records.append(_follow_up_missing_ancestor_record(summary_path, exc))
+            break
+
+    if not records:
+        return None
+    return {
+        "schema": "st.llm_char_vae_context.follow_up_ancestors.v1",
+        "ancestor_count": len(records),
+        "truncated": len(ancestors_raw) > max_ancestors,
+        "ancestors": records,
+    }
+
+
+def _follow_up_ancestor_row(record: dict[str, Any]) -> list[str]:
+    best_config = record.get("best_config")
+    guided_enabled = record.get("guided_enabled")
+    return [
+        str(record.get("generation") or "-"),
+        f"`{record.get('summary_path') or '-'}`",
+        str(record.get("status") or "-"),
+        _config_label(best_config if isinstance(best_config, dict) else None),
+        _fmt_float(record.get("mean_best_nll")),
+        str(record.get("verdict") or "-"),
+        str(record.get("guidance_action") or "-"),
+        str(guided_enabled if guided_enabled is not None else "-"),
+        "yes" if record.get("missing") else "no",
+    ]
+
+
+def _follow_up_current_trajectory_point(
+    root_run_dir: pathlib.Path,
+    summary: dict[str, Any],
+) -> dict[str, Any]:
+    chain = summary.get("follow_up_chain")
+    chain = chain if isinstance(chain, dict) else {}
+    best_config = summary.get("best_config")
+    best_config = best_config if isinstance(best_config, dict) else None
+    result = summary.get("follow_up_result")
+    result = result if isinstance(result, dict) else {}
+    guidance = summary.get("follow_up_guidance")
+    guidance = guidance if isinstance(guidance, dict) else {}
+    guided_next = summary.get("guided_next_follow_up_command")
+    guided_next = guided_next if isinstance(guided_next, dict) else {}
+    gate = summary.get("follow_up_gate")
+    gate = gate if isinstance(gate, dict) else {}
+    return {
+        "schema": "st.llm_char_vae_context.follow_up_trajectory_point.v1",
+        "role": "current",
+        "summary_path": str(root_run_dir / "summary.json"),
+        "run_dir": str(root_run_dir),
+        "generation": chain.get("generation", 0),
+        "status": summary.get("status"),
+        "best_feature": summary.get("best_feature"),
+        "best_config": best_config,
+        "mean_best_nll": best_config.get("mean_best_nll") if best_config else None,
+        "mean_best_accuracy": (
+            best_config.get("mean_best_accuracy") if best_config else None
+        ),
+        "verdict": result.get("verdict"),
+        "config_verdict": result.get("config_verdict"),
+        "source_feature_verdict": result.get("source_feature_verdict"),
+        "source_best_feature_retained": result.get("source_best_feature_retained"),
+        "guidance_action": guidance.get("action"),
+        "guided_enabled": guided_next.get("enabled"),
+        "gate_failed": gate.get("failed"),
+    }
+
+
+def _follow_up_trajectory_point_from_ancestor(
+    record: dict[str, Any],
+) -> dict[str, Any]:
+    point = dict(record)
+    point["schema"] = "st.llm_char_vae_context.follow_up_trajectory_point.v1"
+    point["role"] = "ancestor"
+    return point
+
+
+def _trajectory_best_feature(point: dict[str, Any] | None) -> str | None:
+    if not isinstance(point, dict):
+        return None
+    best_config = point.get("best_config")
+    if isinstance(best_config, dict) and best_config.get("best_feature") is not None:
+        return str(best_config.get("best_feature"))
+    if point.get("best_feature") is not None:
+        return str(point.get("best_feature"))
+    return None
+
+
+def _follow_up_trajectory_action(
+    *,
+    trajectory_verdict: str,
+    latest_verdict: str,
+    current_gate_failed: bool,
+    source_feature_tradeoff: bool,
+    best_feature_changed: bool,
+    current_is_best_generation: bool,
+) -> tuple[str, list[str]]:
+    reasons: list[str] = []
+    if current_gate_failed and source_feature_tradeoff:
+        reasons.append("overall trajectory improved while source feature regressed")
+        return "audit_feature_swap_before_promotion", reasons
+    if current_gate_failed:
+        reasons.append(f"follow-up gate failed on latest verdict={latest_verdict}")
+        return "stop_on_follow_up_gate", reasons
+    if source_feature_tradeoff:
+        reasons.append("config improved while source feature regressed")
+        return "review_feature_swap_before_promotion", reasons
+    if trajectory_verdict == "improved" and latest_verdict == "improved":
+        reasons.append("trajectory and latest follow-up both improved")
+        if current_is_best_generation:
+            reasons.append("current generation is the best NLL point")
+        if best_feature_changed:
+            reasons.append("best feature changed across the chain")
+        return "confirm_trajectory_with_fresh_seeds", reasons
+    if trajectory_verdict == "improved":
+        reasons.append("trajectory improved but latest verdict is not improved")
+        return "continue_or_audit_mixed_trajectory", reasons
+    if trajectory_verdict == "confirmed":
+        reasons.append("trajectory stayed within the confirmation band")
+        return "collect_more_seed_evidence", reasons
+    if trajectory_verdict == "regressed":
+        reasons.append("trajectory regressed relative to the first measured point")
+        return "return_to_best_generation_or_rerun", reasons
+    reasons.append("trajectory verdict is unknown")
+    return "inspect_trajectory", reasons
+
+
+def _follow_up_trajectory_record(
+    root_run_dir: pathlib.Path,
+    summary: dict[str, Any],
+    follow_up_ancestors: dict[str, Any] | None,
+    *,
+    min_nll_delta: float,
+) -> dict[str, Any] | None:
+    chain = summary.get("follow_up_chain")
+    if not isinstance(chain, dict):
+        return None
+
+    points = []
+    ancestors_raw = (
+        follow_up_ancestors.get("ancestors", [])
+        if isinstance(follow_up_ancestors, dict)
+        else []
+    )
+    if isinstance(ancestors_raw, list):
+        points.extend(
+            _follow_up_trajectory_point_from_ancestor(record)
+            for record in ancestors_raw
+            if isinstance(record, dict)
+        )
+    points.append(_follow_up_current_trajectory_point(root_run_dir, summary))
+
+    previous_nll = None
+    metric_points = []
+    for point in points:
+        nll = _finite_float(point.get("mean_best_nll"))
+        point["mean_best_nll_delta_from_previous"] = (
+            nll - previous_nll if nll is not None and previous_nll is not None else None
+        )
+        if (
+            nll is not None
+            and not point.get("missing")
+            and not point.get("cycle_detected")
+        ):
+            metric_points.append((nll, point))
+            previous_nll = nll
+
+    verdict_history = chain.get("verdict_history", [])
+    verdicts = (
+        [str(verdict) for verdict in verdict_history if str(verdict)]
+        if isinstance(verdict_history, list)
+        else []
+    )
+    verdict_counts = {verdict: verdicts.count(verdict) for verdict in FOLLOW_UP_VERDICTS}
+    latest_verdict = str(
+        chain.get("latest_verdict") or (verdicts[-1] if verdicts else "unknown")
+    )
+
+    start_nll = metric_points[0][0] if metric_points else None
+    current_nll = _finite_float(points[-1].get("mean_best_nll")) if points else None
+    cumulative_delta = (
+        current_nll - start_nll
+        if current_nll is not None and start_nll is not None
+        else None
+    )
+    best_nll = None
+    best_point: dict[str, Any] | None = None
+    if metric_points:
+        best_nll, best_point = min(metric_points, key=lambda item: item[0])
+
+    current_point = points[-1] if points else {}
+    trajectory_verdict = _delta_verdict(cumulative_delta, min_nll_delta)
+    current_gate_failed = bool(current_point.get("gate_failed"))
+    current_config_verdict = str(current_point.get("config_verdict") or "unknown")
+    current_source_feature_verdict = str(
+        current_point.get("source_feature_verdict") or "unknown"
+    )
+    current_source_retained = current_point.get("source_best_feature_retained")
+    source_feature_tradeoff = (
+        current_config_verdict == "improved"
+        and (
+            current_source_feature_verdict == "regressed"
+            or current_source_retained is False
+        )
+    )
+    start_point = metric_points[0][1] if metric_points else None
+    start_best_feature = _trajectory_best_feature(start_point)
+    current_best_feature = _trajectory_best_feature(current_point)
+    best_feature_changed = (
+        start_best_feature is not None
+        and current_best_feature is not None
+        and start_best_feature != current_best_feature
+    )
+    current_is_best_generation = (
+        best_point is current_point if best_point is not None else False
+    )
+    trajectory_action, trajectory_reasons = _follow_up_trajectory_action(
+        trajectory_verdict=trajectory_verdict,
+        latest_verdict=latest_verdict,
+        current_gate_failed=current_gate_failed,
+        source_feature_tradeoff=source_feature_tradeoff,
+        best_feature_changed=best_feature_changed,
+        current_is_best_generation=current_is_best_generation,
+    )
+    unsafe_promotion = bool(current_gate_failed or source_feature_tradeoff)
+    return {
+        "schema": "st.llm_char_vae_context.follow_up_trajectory.v1",
+        "point_count": len(points),
+        "metric_point_count": len(metric_points),
+        "generation": chain.get("generation"),
+        "latest_verdict": latest_verdict,
+        "trajectory_verdict": trajectory_verdict,
+        "trajectory_action": trajectory_action,
+        "trajectory_reasons": trajectory_reasons,
+        "verdict_counts": verdict_counts,
+        "start_mean_best_nll": start_nll,
+        "current_mean_best_nll": current_nll,
+        "cumulative_mean_best_nll_delta": cumulative_delta,
+        "best_mean_best_nll": best_nll,
+        "best_generation": best_point.get("generation") if best_point else None,
+        "best_summary_path": best_point.get("summary_path") if best_point else None,
+        "best_config": best_point.get("best_config") if best_point else None,
+        "start_best_feature": start_best_feature,
+        "current_best_feature": current_best_feature,
+        "best_feature_changed": best_feature_changed,
+        "source_feature_tradeoff": source_feature_tradeoff,
+        "unsafe_promotion": unsafe_promotion,
+        "current_guidance_action": current_point.get("guidance_action"),
+        "current_guided_enabled": current_point.get("guided_enabled"),
+        "current_gate_failed": current_point.get("gate_failed"),
+        "current_config_verdict": current_config_verdict,
+        "current_source_feature_verdict": current_source_feature_verdict,
+        "current_source_best_feature_retained": current_source_retained,
+        "points": points,
+    }
+
+
+def _follow_up_trajectory_point_row(point: dict[str, Any]) -> list[str]:
+    best_config = point.get("best_config")
+    return [
+        str(point.get("generation") or "-"),
+        str(point.get("role") or "-"),
+        _config_label(best_config if isinstance(best_config, dict) else None),
+        _fmt_float(point.get("mean_best_nll")),
+        _fmt_float(point.get("mean_best_nll_delta_from_previous")),
+        str(point.get("verdict") or "-"),
+        str(point.get("guidance_action") or "-"),
+        str(point.get("gate_failed") if point.get("gate_failed") is not None else "-"),
+    ]
+
+
+def _follow_up_gate_record(
+    follow_up_result: dict[str, Any] | None,
+    fail_on_verdicts: list[str],
+) -> dict[str, Any] | None:
+    if not fail_on_verdicts or not isinstance(follow_up_result, dict):
+        return None
+    verdict = str(follow_up_result.get("verdict") or "unknown")
+    failed = verdict in set(fail_on_verdicts)
+    return {
+        "schema": "st.llm_char_vae_context.follow_up_gate.v1",
+        "verdict": verdict,
+        "fail_on_verdicts": fail_on_verdicts,
+        "failed": failed,
+        "exit_code": 1 if failed else 0,
+    }
+
+
+def _follow_up_guidance_record(
+    follow_up_result: dict[str, Any] | None,
+    follow_up_chain: dict[str, Any] | None,
+    follow_up_gate: dict[str, Any] | None,
+    next_follow_up: dict[str, Any] | None,
+    follow_up_trajectory: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    if not isinstance(follow_up_result, dict):
+        return None
+
+    verdict = str(follow_up_result.get("verdict") or "unknown")
+    config_verdict = str(follow_up_result.get("config_verdict") or "unknown")
+    source_feature_verdict = str(
+        follow_up_result.get("source_feature_verdict") or "unknown"
+    )
+    source_retained = bool(follow_up_result.get("source_best_feature_retained"))
+    gate_failed = (
+        bool(follow_up_gate.get("failed"))
+        if isinstance(follow_up_gate, dict)
+        else False
+    )
+    improved_streak = (
+        int(follow_up_chain.get("improved_streak") or 0)
+        if isinstance(follow_up_chain, dict)
+        else 0
+    )
+    regressed_streak = (
+        int(follow_up_chain.get("regressed_streak") or 0)
+        if isinstance(follow_up_chain, dict)
+        else 0
+    )
+
+    source_feature_swapped = source_feature_verdict == "regressed" or not source_retained
+    config_improved_while_source_regressed = (
+        config_verdict == "improved" and source_feature_verdict == "regressed"
+    )
+    reasons: list[str] = []
+    promote_current_best = False
+    use_next_follow_up_command = False
+    action = "review_follow_up"
+
+    def add_reason(reason: str) -> None:
+        if reason not in reasons:
+            reasons.append(reason)
+
+    if gate_failed:
+        action = "stop_on_follow_up_gate"
+        add_reason(f"gate failed on verdict={verdict}")
+    elif source_feature_swapped:
+        action = "review_feature_swap_before_promotion"
+        add_reason("source best feature did not retain its role")
+        if config_improved_while_source_regressed:
+            add_reason("config improved while source feature regressed")
+    elif verdict == "improved":
+        promote_current_best = True
+        use_next_follow_up_command = isinstance(next_follow_up, dict)
+        action = (
+            "promote_and_broaden_after_streak"
+            if improved_streak >= 2
+            else "continue_fresh_seed_confirmation"
+        )
+        add_reason(f"source feature improved with streak={improved_streak}")
+    elif verdict == "confirmed":
+        promote_current_best = True
+        use_next_follow_up_command = isinstance(next_follow_up, dict)
+        action = "continue_confirmation_or_widen_seeds"
+        add_reason("source feature stayed within the confirmation band")
+    elif verdict == "regressed":
+        action = "rerun_or_audit_source_feature"
+        add_reason(f"source feature regressed with streak={regressed_streak}")
+    else:
+        action = "rerun_with_more_evidence"
+        add_reason("follow-up verdict is unknown")
+
+    if gate_failed and source_feature_swapped:
+        add_reason("source best feature did not retain its role")
+    if gate_failed and config_improved_while_source_regressed:
+        add_reason("config improved while source feature regressed")
+
+    command_usage = None
+    if use_next_follow_up_command and isinstance(next_follow_up, dict):
+        command_usage = next_follow_up.get("script_usage")
+
+    local_action = action
+    trajectory_action = None
+    trajectory_verdict = None
+    unsafe_promotion = None
+    trajectory_reasons: list[str] = []
+    if isinstance(follow_up_trajectory, dict):
+        trajectory_action = follow_up_trajectory.get("trajectory_action")
+        trajectory_verdict = follow_up_trajectory.get("trajectory_verdict")
+        unsafe_promotion = bool(follow_up_trajectory.get("unsafe_promotion"))
+        raw_reasons = follow_up_trajectory.get("trajectory_reasons", [])
+        if isinstance(raw_reasons, list):
+            trajectory_reasons = [str(reason) for reason in raw_reasons]
+
+        for reason in trajectory_reasons:
+            add_reason(f"trajectory: {reason}")
+
+        if unsafe_promotion:
+            action = str(trajectory_action or "audit_unsafe_trajectory")
+            promote_current_best = False
+            use_next_follow_up_command = False
+            command_usage = None
+            add_reason("trajectory marked promotion unsafe")
+        elif trajectory_action == "confirm_trajectory_with_fresh_seeds":
+            action = "confirm_trajectory_with_fresh_seeds"
+            promote_current_best = True
+            use_next_follow_up_command = isinstance(next_follow_up, dict)
+            if use_next_follow_up_command and isinstance(next_follow_up, dict):
+                command_usage = next_follow_up.get("script_usage")
+        elif trajectory_action == "collect_more_seed_evidence":
+            action = "collect_more_seed_evidence"
+            use_next_follow_up_command = isinstance(next_follow_up, dict)
+            if use_next_follow_up_command and isinstance(next_follow_up, dict):
+                command_usage = next_follow_up.get("script_usage")
+        elif trajectory_action in {
+            "return_to_best_generation_or_rerun",
+            "inspect_trajectory",
+        }:
+            action = str(trajectory_action)
+            promote_current_best = False
+            use_next_follow_up_command = False
+            command_usage = None
+
+    return {
+        "schema": "st.llm_char_vae_context.follow_up_guidance.v1",
+        "action": action,
+        "local_action": local_action,
+        "verdict": verdict,
+        "config_verdict": config_verdict,
+        "source_feature_verdict": source_feature_verdict,
+        "source_best_feature_retained": source_retained,
+        "trajectory_action": trajectory_action,
+        "trajectory_verdict": trajectory_verdict,
+        "unsafe_promotion": unsafe_promotion,
+        "trajectory_reasons": trajectory_reasons,
+        "promote_current_best": promote_current_best,
+        "use_next_follow_up_command": use_next_follow_up_command,
+        "gate_failed": gate_failed,
+        "reasons": reasons,
+        "command_usage": command_usage,
+    }
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -555,10 +3015,48 @@ def _build_parser() -> argparse.ArgumentParser:
         )
     )
     parser.add_argument("text_or_dir", nargs="+", help="Input .txt file(s) or directories")
-    parser.add_argument("--features", default="raw,reconstruction,latent")
+    parser.add_argument(
+        "--features",
+        default="raw,reconstruction,latent",
+        help=(
+            "comma-separated context features: raw,reconstruction,latent,"
+            "raw_latent,reconstruction_latent"
+        ),
+    )
     parser.add_argument("--window-chars", type=int, default=64)
     parser.add_argument("--latent-dim", type=int, default=16)
     parser.add_argument("--hidden", type=int, default=64)
+    parser.add_argument(
+        "--feature-normalize",
+        choices=NORMALIZE_CHOICES,
+        default="none",
+        help=(
+            "feature scaling before the prediction head; blocks normalizes hybrid "
+            "raw/reconstruction and latent segments separately"
+        ),
+    )
+    parser.add_argument(
+        "--feature-normalize-modes",
+        default=None,
+        help=(
+            "comma-separated feature normalization grid; overrides --feature-normalize "
+            "when provided"
+        ),
+    )
+    parser.add_argument(
+        "--hybrid-latent-scale",
+        type=float,
+        default=1.0,
+        help="multiply the latent segment of raw_latent/reconstruction_latent features",
+    )
+    parser.add_argument(
+        "--hybrid-latent-scales",
+        default=None,
+        help=(
+            "comma-separated scale grid for the latent segment of hybrid features; "
+            "overrides --hybrid-latent-scale when provided"
+        ),
+    )
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--batches", type=int, default=16)
     parser.add_argument("--batch-size", type=int, default=8)
@@ -569,6 +3067,19 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--backend", default="cpu", help="cpu|wgpu|cuda|hip|auto")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--seeds", default=None, help="comma-separated seed list for sweep mode")
+    parser.add_argument(
+        "--min-nll-delta",
+        type=float,
+        default=0.0,
+        help="minimum mean NLL improvement over raw required for sweep status=improved",
+    )
+    parser.add_argument(
+        "--win-tolerance",
+        type=float,
+        default=1e-4,
+        help="per-seed NLL tolerance for counting near-win feature ties in sweep reports",
+    )
     parser.add_argument("--prompt", default="SpiralTorch ")
     parser.add_argument("--gen", type=int, default=80)
     parser.add_argument("--top-k", type=int, default=16)
@@ -586,6 +3097,23 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mellin-start", type=float, default=0.8)
     parser.add_argument("--mellin-end", type=float, default=1.2)
     parser.add_argument("--run-dir", type=pathlib.Path, default=None)
+    parser.add_argument(
+        "--follow-up-from",
+        type=pathlib.Path,
+        default=None,
+        help=(
+            "previous aggregate summary.json or run directory; reuses its best context "
+            "config as defaults for a fresh-seed confirmation run"
+        ),
+    )
+    parser.add_argument(
+        "--follow-up-fail-on-verdict",
+        default=None,
+        help=(
+            "comma-separated follow-up verdicts that should exit non-zero after "
+            "writing summary/report, e.g. regressed,unknown"
+        ),
+    )
     parser.add_argument("--json", action="store_true", help="Print summary JSON")
     return parser
 
@@ -617,13 +3145,15 @@ def _validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--gen must be >= 0")
     if args.top_k <= 0:
         raise ValueError("--top-k must be > 0")
+    if args.min_nll_delta < 0.0 or not math.isfinite(args.min_nll_delta):
+        raise ValueError("--min-nll-delta must be non-negative and finite")
+    if args.win_tolerance < 0.0 or not math.isfinite(args.win_tolerance):
+        raise ValueError("--win-tolerance must be non-negative and finite")
+    if args.hybrid_latent_scale < 0.0 or not math.isfinite(args.hybrid_latent_scale):
+        raise ValueError("--hybrid-latent-scale must be non-negative and finite")
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = _build_parser()
-    args = parser.parse_args(argv)
-    _validate_args(args)
-    features = _parse_features(str(args.features))
+def _run_single(args: argparse.Namespace, features: list[str]) -> dict[str, Any]:
     vae_grad_clip = _normalise_grad_clip(str(args.vae_grad_clip))
 
     data_paths = [pathlib.Path(value) for value in args.text_or_dir]
@@ -666,6 +3196,7 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"files={len(data_files)} chars={len(text)} vocab={vocab_size} "
         f"window_chars={vae.window_chars} latent_dim={vae.latent_dim} features={','.join(features)} "
+        f"feature_normalize={args.feature_normalize} hybrid_latent_scale={args.hybrid_latent_scale} "
         f"epochs={args.epochs} vae_epochs={args.vae_epochs} run_dir={run_dir}",
         flush=True,
     )
@@ -674,6 +3205,18 @@ def main(argv: list[str] | None = None) -> int:
     vae_history = _train_vae(vae, basis, train_text, args)
     vae_save = args.vae_save or (run_dir / "text_vae_weights.bin")
     vae.save(str(vae_save))
+    feature_diagnostics = _feature_diagnostics(
+        vae,
+        basis,
+        features,
+        str(args.feature_normalize),
+        float(args.hybrid_latent_scale),
+        val_text,
+        index,
+        int(args.window_chars),
+        int(args.eval_samples),
+        int(args.seed) + 700_000,
+    )
 
     run_meta = {
         "schema": RUN_SCHEMA,
@@ -688,6 +3231,8 @@ def main(argv: list[str] | None = None) -> int:
         "input_dim": int(vae.input_dim),
         "latent_dim": int(vae.latent_dim),
         "features": features,
+        "feature_normalize": str(args.feature_normalize),
+        "hybrid_latent_scale": float(args.hybrid_latent_scale),
         "hidden": int(args.hidden),
         "epochs": int(args.epochs),
         "batches": int(args.batches),
@@ -698,6 +3243,7 @@ def main(argv: list[str] | None = None) -> int:
         "temperature": float(args.temperature),
         "backend": str(args.backend),
         "seed": int(args.seed),
+        "run_dir": str(run_dir),
         "vocab_size": vocab_size,
         "vae": {
             "load_path": str(args.vae_load) if args.vae_load is not None else None,
@@ -763,6 +3309,7 @@ def main(argv: list[str] | None = None) -> int:
         "elapsed_seconds": time.time() - started,
         "run": run_meta,
         "features": results,
+        "feature_diagnostics": feature_diagnostics,
         "ranking": [
             {
                 "feature": item["feature"],
@@ -776,6 +3323,7 @@ def main(argv: list[str] | None = None) -> int:
         "deltas": deltas,
     }
     _write_json(run_dir / "summary.json", summary)
+    _write_text(run_dir / "report.md", _single_report(summary))
     if args.json:
         print(json.dumps(summary, ensure_ascii=False, indent=2))
 
@@ -789,6 +3337,286 @@ def main(argv: list[str] | None = None) -> int:
             ),
             flush=True,
         )
+    return summary
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = _build_parser()
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    args = parser.parse_args(raw_argv)
+    follow_up = _apply_follow_up_defaults(args, raw_argv)
+    _validate_args(args)
+    features = _parse_features(str(args.features))
+    seeds = _parse_seeds(int(args.seed), args.seeds)
+    normalize_modes = _parse_feature_normalize_modes(
+        str(args.feature_normalize),
+        args.feature_normalize_modes,
+    )
+    scales = _parse_hybrid_latent_scales(
+        float(args.hybrid_latent_scale),
+        args.hybrid_latent_scales,
+    )
+    follow_up_fail_on_verdicts = _parse_follow_up_fail_verdicts(
+        args.follow_up_fail_on_verdict,
+    )
+    if follow_up is not None:
+        follow_up["resolved"] = {
+            "features": features,
+            "feature_normalize_modes": normalize_modes,
+            "hybrid_latent_scales": scales,
+            "seeds": seeds,
+        }
+
+    if len(seeds) == 1 and len(scales) == 1 and len(normalize_modes) == 1 and follow_up is None:
+        args.seed = seeds[0]
+        args.feature_normalize = normalize_modes[0]
+        args.hybrid_latent_scale = scales[0]
+        _run_single(args, features)
+        return 0
+
+    root_run_dir = args.run_dir or _default_run_dir()
+    root_run_dir.mkdir(parents=True, exist_ok=True)
+    (root_run_dir / "command.txt").write_text(" ".join(sys.argv), encoding="utf-8")
+    aggregate_run = {
+        "schema": RUN_SCHEMA,
+        "format": FORMAT,
+        "arch": "llm_char_vae_context_sweep",
+        "features": features,
+        "feature_normalize": normalize_modes[0] if len(normalize_modes) == 1 else None,
+        "feature_normalize_modes": normalize_modes,
+        "normalize_count": len(normalize_modes),
+        "hybrid_latent_scale": scales[0] if len(scales) == 1 else None,
+        "hybrid_latent_scales": scales,
+        "scale_count": len(scales),
+        "config_count": len(normalize_modes) * len(scales),
+        "run_count": len(normalize_modes) * len(scales) * len(seeds),
+        "seeds": seeds,
+        "seed_count": len(seeds),
+        "min_nll_delta": float(args.min_nll_delta),
+        "win_tolerance": float(args.win_tolerance),
+        "follow_up_fail_on_verdicts": follow_up_fail_on_verdicts,
+        "run_dir": str(root_run_dir),
+    }
+    if follow_up is not None:
+        aggregate_run["follow_up"] = follow_up
+    _write_json(root_run_dir / "run.json", aggregate_run)
+
+    summaries = []
+    runs_jsonl = root_run_dir / "runs.jsonl"
+    if runs_jsonl.exists():
+        runs_jsonl.unlink()
+    started = time.time()
+    config_summaries = []
+    for mode in normalize_modes:
+        for scale in scales:
+            config_run_dir = _config_run_dir(root_run_dir, mode, scale, normalize_modes, scales)
+            config_run_dir.mkdir(parents=True, exist_ok=True)
+            config_seed_summaries = []
+            for seed in seeds:
+                seed_dir = _seed_run_dir(config_run_dir, seed)
+                print(
+                    "sweep_normalize={mode} sweep_scale={scale:.6g} "
+                    "sweep_seed={seed} run_dir={run_dir}".format(
+                        mode=mode,
+                        scale=scale,
+                        seed=seed,
+                        run_dir=seed_dir,
+                    ),
+                    flush=True,
+                )
+                seed_args = _clone_args(
+                    args,
+                    seed=seed,
+                    feature_normalize=mode,
+                    hybrid_latent_scale=scale,
+                    run_dir=seed_dir,
+                    vae_save=None,
+                    json=False,
+                )
+                summary = _run_single(seed_args, features)
+                summaries.append(summary)
+                config_seed_summaries.append(summary)
+                _append_jsonl(
+                    runs_jsonl,
+                    {
+                        "seed": seed,
+                        "feature_normalize": mode,
+                        "hybrid_latent_scale": scale,
+                        "run_dir": str(seed_dir),
+                        "summary_path": str(seed_dir / "summary.json"),
+                        "best_feature": summary.get("best_feature"),
+                        "ranking": summary.get("ranking", []),
+                        "deltas": summary.get("deltas", {}),
+                    },
+                )
+
+            config_aggregate = _aggregate_summaries(
+                config_seed_summaries,
+                min_nll_delta=float(args.min_nll_delta),
+                win_tolerance=float(args.win_tolerance),
+            )
+            config_summaries.append(
+                {
+                    "feature_normalize": mode,
+                    "hybrid_latent_scale": scale,
+                    "run_dir": str(config_run_dir),
+                    "seed_count": len(config_seed_summaries),
+                    **config_aggregate,
+                }
+            )
+
+    scale_summaries = config_summaries if len(normalize_modes) == 1 else []
+
+    aggregate = {
+        "schema": RUN_SCHEMA,
+        "format": FORMAT,
+        "aggregate": True,
+        "elapsed_seconds": time.time() - started,
+        "run": aggregate_run,
+        "seed_summaries": [
+            {
+                "seed": summary.get("run", {}).get("seed"),
+                "feature_normalize": summary.get("run", {}).get("feature_normalize"),
+                "hybrid_latent_scale": summary.get("run", {}).get("hybrid_latent_scale"),
+                "run_dir": str(summary.get("run", {}).get("run_dir")),
+                "best_feature": summary.get("best_feature"),
+                "ranking": summary.get("ranking", []),
+                "deltas": summary.get("deltas", {}),
+            }
+            for summary in summaries
+        ],
+        "config_summaries": config_summaries,
+        "scale_summaries": scale_summaries,
+    }
+    if follow_up is not None:
+        aggregate["follow_up"] = follow_up
+    aggregate.update(
+        _aggregate_summaries(
+            summaries,
+            min_nll_delta=float(args.min_nll_delta),
+            win_tolerance=float(args.win_tolerance),
+        )
+    )
+    best_config = _best_config_summary(config_summaries)
+    next_follow_up = None
+    if best_config is not None:
+        aggregate["best_config"] = best_config
+        aggregate["best_feature_normalize"] = best_config.get("feature_normalize")
+        aggregate["best_hybrid_latent_scale"] = best_config.get("hybrid_latent_scale")
+        next_follow_up = _next_follow_up_command_record(
+            args,
+            features,
+            best_config,
+            root_run_dir,
+            seeds,
+        )
+        if next_follow_up is not None:
+            aggregate["next_follow_up_command"] = next_follow_up
+            _write_next_follow_up_script(next_follow_up)
+    follow_up_result = _follow_up_result(
+        follow_up,
+        config_summaries,
+        best_config,
+        min_nll_delta=float(args.min_nll_delta),
+    )
+    if follow_up_result is not None:
+        aggregate["follow_up_result"] = follow_up_result
+    follow_up_chain = _follow_up_chain_record(
+        follow_up,
+        follow_up_result,
+        root_run_dir,
+    )
+    if follow_up_chain is not None:
+        aggregate["follow_up_chain"] = follow_up_chain
+    follow_up_ancestors = _follow_up_ancestor_records(follow_up_chain)
+    if follow_up_ancestors is not None:
+        aggregate["follow_up_ancestors"] = follow_up_ancestors
+    follow_up_gate = _follow_up_gate_record(
+        follow_up_result,
+        follow_up_fail_on_verdicts,
+    )
+    if follow_up_gate is not None:
+        aggregate["follow_up_gate"] = follow_up_gate
+
+    preliminary_guidance = _follow_up_guidance_record(
+        follow_up_result,
+        follow_up_chain,
+        follow_up_gate,
+        next_follow_up,
+    )
+    if preliminary_guidance is not None:
+        aggregate["follow_up_guidance"] = preliminary_guidance
+    follow_up_trajectory = _follow_up_trajectory_record(
+        root_run_dir,
+        aggregate,
+        follow_up_ancestors,
+        min_nll_delta=float(args.min_nll_delta),
+    )
+    if follow_up_trajectory is not None:
+        aggregate["follow_up_trajectory"] = follow_up_trajectory
+
+    follow_up_guidance = _follow_up_guidance_record(
+        follow_up_result,
+        follow_up_chain,
+        follow_up_gate,
+        next_follow_up,
+        follow_up_trajectory,
+    )
+    if follow_up_guidance is not None:
+        aggregate["follow_up_guidance"] = follow_up_guidance
+    guided_next_follow_up = _guided_next_follow_up_command_record(
+        root_run_dir,
+        follow_up_guidance,
+        next_follow_up,
+    )
+    if guided_next_follow_up is not None:
+        aggregate["guided_next_follow_up_command"] = guided_next_follow_up
+        _write_guided_next_follow_up_script(guided_next_follow_up)
+    follow_up_trajectory = _follow_up_trajectory_record(
+        root_run_dir,
+        aggregate,
+        follow_up_ancestors,
+        min_nll_delta=float(args.min_nll_delta),
+    )
+    if follow_up_trajectory is not None:
+        aggregate["follow_up_trajectory"] = follow_up_trajectory
+    _write_json(root_run_dir / "summary.json", aggregate)
+    _write_text(root_run_dir / "report.md", _aggregate_report(aggregate))
+    if args.json:
+        print(json.dumps(aggregate, ensure_ascii=False, indent=2))
+
+    config_text = "-"
+    if best_config is not None:
+        config_text = "{feature}@normalize={normalize},scale={scale}".format(
+            feature=best_config.get("best_feature"),
+            normalize=best_config.get("feature_normalize"),
+            scale=best_config.get("hybrid_latent_scale"),
+        )
+    print(
+        (
+            "sweep_status={status} best_feature={feature} best_config={config} "
+            "normalizes={normalizes} scales={scales} seeds={seeds} summary_json={path}"
+        ).format(
+            status=aggregate["status"],
+            feature=aggregate["best_feature"],
+            config=config_text,
+            normalizes=",".join(normalize_modes),
+            scales=",".join(f"{scale:.6g}" for scale in scales),
+            seeds=",".join(str(seed) for seed in seeds),
+            path=root_run_dir / "summary.json",
+        ),
+        flush=True,
+    )
+    if isinstance(follow_up_gate, dict) and follow_up_gate.get("failed"):
+        print(
+            "follow_up_gate_failed verdict={verdict} fail_on={fail_on} summary_json={path}".format(
+                verdict=follow_up_gate.get("verdict"),
+                fail_on=",".join(str(item) for item in follow_up_fail_on_verdicts),
+                path=root_run_dir / "summary.json",
+            ),
+            flush=True,
+        )
+        return int(follow_up_gate.get("exit_code") or 1)
     return 0
 
 
