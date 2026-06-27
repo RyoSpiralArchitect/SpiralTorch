@@ -1126,6 +1126,79 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
         f"- summary_json: `summary.json`",
         "",
     ]
+    follow_up = summary.get("follow_up")
+    follow_up_result = summary.get("follow_up_result")
+    if isinstance(follow_up_result, dict):
+        source_config = follow_up_result.get("source_best_config")
+        evaluated_config = follow_up_result.get("evaluated_config")
+        source_feature_eval = follow_up_result.get("source_feature_evaluated")
+        current_best = follow_up_result.get("current_best_config")
+        lines.extend(
+            [
+                "## Follow-Up Result",
+                "",
+                f"- source: `{follow_up_result.get('source_summary_path')}`",
+                f"- verdict: {follow_up_result.get('verdict')}",
+                f"- config_verdict: {follow_up_result.get('config_verdict')}",
+                f"- source_feature_verdict: {follow_up_result.get('source_feature_verdict')}",
+                f"- source_best_feature_retained: {follow_up_result.get('source_best_feature_retained')}",
+                f"- match_found: {follow_up_result.get('match_found')}",
+                "",
+            ]
+        )
+        lines.extend(
+            _markdown_table(
+                [
+                    "source_config",
+                    "evaluated_config",
+                    "source_feature_eval",
+                    "current_best_config",
+                    "source_nll",
+                    "evaluated_nll",
+                    "delta_vs_source",
+                    "source_feature_delta",
+                ],
+                [
+                    [
+                        _config_label(source_config if isinstance(source_config, dict) else None),
+                        _config_label(
+                            evaluated_config if isinstance(evaluated_config, dict) else None
+                        ),
+                        _config_label(
+                            source_feature_eval if isinstance(source_feature_eval, dict) else None
+                        ),
+                        _config_label(current_best if isinstance(current_best, dict) else None),
+                        _fmt_float(
+                            source_config.get("mean_best_nll")
+                            if isinstance(source_config, dict)
+                            else None
+                        ),
+                        _fmt_float(
+                            evaluated_config.get("mean_best_nll")
+                            if isinstance(evaluated_config, dict)
+                            else None
+                        ),
+                        _fmt_float(follow_up_result.get("mean_best_nll_delta_vs_source")),
+                        _fmt_float(
+                            follow_up_result.get(
+                                "source_feature_mean_best_nll_delta_vs_source"
+                            )
+                        ),
+                    ]
+                ],
+            )
+        )
+        lines.append("")
+    elif isinstance(follow_up, dict):
+        lines.extend(
+            [
+                "## Follow-Up Source",
+                "",
+                f"- source: `{follow_up.get('source_summary_path')}`",
+                f"- source_best_config: {_config_label(follow_up.get('source_best_config'))}",
+                "",
+            ]
+        )
     if config_rows:
         lines.extend(["## Context Config Grid", ""])
         lines.extend(
@@ -1671,6 +1744,277 @@ def _write_next_follow_up_script(record: dict[str, Any]) -> None:
     script_path.chmod(script_path.stat().st_mode | 0o755)
 
 
+def _flag_present(argv: list[str], flag: str) -> bool:
+    return any(part == flag or part.startswith(f"{flag}=") for part in argv)
+
+
+def _load_follow_up_summary(path: pathlib.Path) -> tuple[pathlib.Path, dict[str, Any]]:
+    candidate = path.expanduser()
+    if candidate.is_dir():
+        candidate = candidate / "summary.json"
+    payload = json.loads(candidate.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"--follow-up-from must point to a summary object: {candidate}")
+    return candidate, payload
+
+
+def _summary_seeds(summary: dict[str, Any]) -> list[int]:
+    run = summary.get("run", {})
+    raw_seeds = run.get("seeds")
+    if isinstance(raw_seeds, list):
+        seeds = []
+        for value in raw_seeds:
+            try:
+                seeds.append(int(value))
+            except (TypeError, ValueError):
+                continue
+        if seeds:
+            return list(dict.fromkeys(seeds))
+    raw_seed = run.get("seed")
+    if raw_seed is not None:
+        try:
+            return [int(raw_seed)]
+        except (TypeError, ValueError):
+            return []
+    return []
+
+
+def _summary_features(summary: dict[str, Any]) -> list[str]:
+    run = summary.get("run", {})
+    raw_features = run.get("features")
+    if not isinstance(raw_features, list):
+        return []
+    features = [str(feature) for feature in raw_features if str(feature) in FEATURE_CHOICES]
+    return list(dict.fromkeys(features))
+
+
+def _source_best_config(summary: dict[str, Any]) -> dict[str, Any]:
+    best_config = summary.get("best_config")
+    if not isinstance(best_config, dict):
+        next_follow_up = summary.get("next_follow_up_command")
+        if isinstance(next_follow_up, dict):
+            best_config = next_follow_up.get("best_config")
+    if not isinstance(best_config, dict):
+        raise ValueError("--follow-up-from summary does not contain best_config")
+
+    normalize = str(best_config.get("feature_normalize", ""))
+    if normalize not in NORMALIZE_CHOICES:
+        joined = ", ".join(NORMALIZE_CHOICES)
+        raise ValueError(
+            f"--follow-up-from best_config has invalid feature_normalize={normalize!r}; "
+            f"expected one of {joined}"
+        )
+    scale = _finite_float(best_config.get("hybrid_latent_scale"))
+    if scale is None or scale < 0.0:
+        raise ValueError("--follow-up-from best_config has invalid hybrid_latent_scale")
+
+    sanitized = dict(best_config)
+    sanitized["feature_normalize"] = normalize
+    sanitized["hybrid_latent_scale"] = scale
+    return sanitized
+
+
+def _default_follow_up_seeds(summary: dict[str, Any]) -> str:
+    next_follow_up = summary.get("next_follow_up_command")
+    if isinstance(next_follow_up, dict):
+        raw = next_follow_up.get("default_new_seeds")
+        if raw is not None and str(raw).strip():
+            return str(raw)
+    source_seeds = _summary_seeds(summary)
+    return _fresh_seed_csv(source_seeds or [42])
+
+
+def _apply_follow_up_defaults(
+    args: argparse.Namespace,
+    argv: list[str],
+) -> dict[str, Any] | None:
+    if args.follow_up_from is None:
+        return None
+
+    source_path, source_summary = _load_follow_up_summary(args.follow_up_from)
+    best_config = _source_best_config(source_summary)
+    source_features = _summary_features(source_summary)
+    source_seeds = _summary_seeds(source_summary)
+
+    explicit_features = _flag_present(argv, "--features")
+    explicit_normalize = _flag_present(argv, "--feature-normalize") or _flag_present(
+        argv,
+        "--feature-normalize-modes",
+    )
+    explicit_scale = _flag_present(argv, "--hybrid-latent-scale") or _flag_present(
+        argv,
+        "--hybrid-latent-scales",
+    )
+    explicit_seeds = _flag_present(argv, "--seeds")
+
+    applied_defaults: dict[str, Any] = {}
+    if source_features and not explicit_features:
+        args.features = ",".join(source_features)
+        applied_defaults["features"] = args.features
+    if not explicit_normalize:
+        args.feature_normalize = best_config["feature_normalize"]
+        args.feature_normalize_modes = None
+        applied_defaults["feature_normalize"] = args.feature_normalize
+    if not explicit_scale:
+        args.hybrid_latent_scale = float(best_config["hybrid_latent_scale"])
+        args.hybrid_latent_scales = None
+        applied_defaults["hybrid_latent_scale"] = args.hybrid_latent_scale
+    if not explicit_seeds:
+        args.seeds = _default_follow_up_seeds(source_summary)
+        applied_defaults["seeds"] = args.seeds
+
+    return {
+        "schema": "st.llm_char_vae_context.follow_up.v1",
+        "source_summary_path": str(source_path),
+        "source_status": source_summary.get("status"),
+        "source_best_feature": source_summary.get("best_feature"),
+        "source_best_config": best_config,
+        "source_features": source_features,
+        "source_seeds": source_seeds,
+        "applied_defaults": applied_defaults,
+        "user_overrides": {
+            "features": explicit_features,
+            "feature_normalize": explicit_normalize,
+            "hybrid_latent_scale": explicit_scale,
+            "seeds": explicit_seeds,
+        },
+    }
+
+
+def _config_label(config: dict[str, Any] | None) -> str:
+    if not config:
+        return "-"
+    feature = config.get("best_feature") or config.get("feature") or "-"
+    normalize = config.get("feature_normalize", "-")
+    scale = config.get("hybrid_latent_scale", "-")
+    return f"{feature} @ normalize={normalize} scale={scale}"
+
+
+def _matching_config_summary(
+    config_summaries: list[dict[str, Any]],
+    source_best_config: dict[str, Any],
+) -> dict[str, Any] | None:
+    source_normalize = source_best_config.get("feature_normalize")
+    source_scale = _finite_float(source_best_config.get("hybrid_latent_scale"))
+    for summary in config_summaries:
+        if summary.get("feature_normalize") != source_normalize:
+            continue
+        scale = _finite_float(summary.get("hybrid_latent_scale"))
+        if source_scale is None or scale is None:
+            continue
+        if abs(scale - source_scale) <= 1e-12:
+            return summary
+    return None
+
+
+def _compact_config_summary(config: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not config:
+        return None
+    top = config.get("ranking", [{}])[0] if config.get("ranking") else {}
+    return {
+        "feature_normalize": config.get("feature_normalize"),
+        "hybrid_latent_scale": config.get("hybrid_latent_scale"),
+        "best_feature": config.get("best_feature"),
+        "status": config.get("status"),
+        "mean_best_nll": top.get("mean_best_nll"),
+        "mean_best_accuracy": top.get("mean_best_accuracy"),
+        "mean_best_nll_delta_vs_raw": top.get("mean_best_nll_delta_vs_raw"),
+        "run_dir": config.get("run_dir"),
+    }
+
+
+def _config_feature_summary(
+    config: dict[str, Any] | None,
+    feature: Any,
+) -> dict[str, Any] | None:
+    if not config or feature is None:
+        return None
+    feature_name = str(feature)
+    for row in config.get("ranking", []):
+        if row.get("feature") != feature_name:
+            continue
+        return {
+            "feature_normalize": config.get("feature_normalize"),
+            "hybrid_latent_scale": config.get("hybrid_latent_scale"),
+            "feature": feature_name,
+            "best_feature": feature_name,
+            "mean_best_nll": row.get("mean_best_nll"),
+            "mean_best_accuracy": row.get("mean_best_accuracy"),
+            "mean_best_nll_delta_vs_raw": row.get("mean_best_nll_delta_vs_raw"),
+            "runs": row.get("runs"),
+            "run_dir": config.get("run_dir"),
+        }
+    return None
+
+
+def _delta_verdict(delta: float | None, min_nll_delta: float) -> str:
+    if delta is None:
+        return "unknown"
+    if delta < -float(min_nll_delta):
+        return "improved"
+    if delta > float(min_nll_delta):
+        return "regressed"
+    return "confirmed"
+
+
+def _follow_up_result(
+    follow_up: dict[str, Any] | None,
+    config_summaries: list[dict[str, Any]],
+    current_best_config: dict[str, Any] | None,
+    *,
+    min_nll_delta: float,
+) -> dict[str, Any] | None:
+    if not follow_up:
+        return None
+    source_best_config = follow_up.get("source_best_config")
+    if not isinstance(source_best_config, dict):
+        return None
+    matched_config = _matching_config_summary(config_summaries, source_best_config)
+    evaluated = _compact_config_summary(matched_config)
+    source_feature_evaluated = _config_feature_summary(
+        matched_config,
+        source_best_config.get("best_feature"),
+    )
+    source_nll = _finite_float(source_best_config.get("mean_best_nll"))
+    evaluated_nll = _finite_float(evaluated.get("mean_best_nll") if evaluated else None)
+    source_feature_nll = _finite_float(
+        source_feature_evaluated.get("mean_best_nll") if source_feature_evaluated else None
+    )
+    config_delta = None
+    source_feature_delta = None
+    if source_nll is not None and evaluated_nll is not None:
+        config_delta = evaluated_nll - source_nll
+    if source_nll is not None and source_feature_nll is not None:
+        source_feature_delta = source_feature_nll - source_nll
+
+    config_verdict = _delta_verdict(config_delta, min_nll_delta)
+    source_feature_verdict = _delta_verdict(source_feature_delta, min_nll_delta)
+    source_feature = source_best_config.get("best_feature")
+    source_best_feature_retained = (
+        evaluated is not None
+        and source_feature is not None
+        and evaluated.get("best_feature") == source_feature
+    )
+
+    return {
+        "schema": "st.llm_char_vae_context.follow_up_result.v1",
+        "source_summary_path": follow_up.get("source_summary_path"),
+        "source_best_config": source_best_config,
+        "evaluated_config": evaluated,
+        "source_feature_evaluated": source_feature_evaluated,
+        "current_best_config": current_best_config,
+        "mean_best_nll_delta_vs_source": config_delta,
+        "source_feature_mean_best_nll_delta_vs_source": source_feature_delta,
+        "config_verdict": config_verdict,
+        "source_feature_verdict": source_feature_verdict,
+        "source_best_feature_retained": source_best_feature_retained,
+        "verdict": source_feature_verdict
+        if source_feature_verdict != "unknown"
+        else config_verdict,
+        "match_found": evaluated is not None,
+    }
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -1761,6 +2105,15 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mellin-start", type=float, default=0.8)
     parser.add_argument("--mellin-end", type=float, default=1.2)
     parser.add_argument("--run-dir", type=pathlib.Path, default=None)
+    parser.add_argument(
+        "--follow-up-from",
+        type=pathlib.Path,
+        default=None,
+        help=(
+            "previous aggregate summary.json or run directory; reuses its best context "
+            "config as defaults for a fresh-seed confirmation run"
+        ),
+    )
     parser.add_argument("--json", action="store_true", help="Print summary JSON")
     return parser
 
@@ -1989,7 +2342,9 @@ def _run_single(args: argparse.Namespace, features: list[str]) -> dict[str, Any]
 
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
-    args = parser.parse_args(argv)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    args = parser.parse_args(raw_argv)
+    follow_up = _apply_follow_up_defaults(args, raw_argv)
     _validate_args(args)
     features = _parse_features(str(args.features))
     seeds = _parse_seeds(int(args.seed), args.seeds)
@@ -2001,8 +2356,15 @@ def main(argv: list[str] | None = None) -> int:
         float(args.hybrid_latent_scale),
         args.hybrid_latent_scales,
     )
+    if follow_up is not None:
+        follow_up["resolved"] = {
+            "features": features,
+            "feature_normalize_modes": normalize_modes,
+            "hybrid_latent_scales": scales,
+            "seeds": seeds,
+        }
 
-    if len(seeds) == 1 and len(scales) == 1 and len(normalize_modes) == 1:
+    if len(seeds) == 1 and len(scales) == 1 and len(normalize_modes) == 1 and follow_up is None:
         args.seed = seeds[0]
         args.feature_normalize = normalize_modes[0]
         args.hybrid_latent_scale = scales[0]
@@ -2031,6 +2393,8 @@ def main(argv: list[str] | None = None) -> int:
         "win_tolerance": float(args.win_tolerance),
         "run_dir": str(root_run_dir),
     }
+    if follow_up is not None:
+        aggregate_run["follow_up"] = follow_up
     _write_json(root_run_dir / "run.json", aggregate_run)
 
     summaries = []
@@ -2120,6 +2484,8 @@ def main(argv: list[str] | None = None) -> int:
         "config_summaries": config_summaries,
         "scale_summaries": scale_summaries,
     }
+    if follow_up is not None:
+        aggregate["follow_up"] = follow_up
     aggregate.update(
         _aggregate_summaries(
             summaries,
@@ -2142,6 +2508,14 @@ def main(argv: list[str] | None = None) -> int:
         if next_follow_up is not None:
             aggregate["next_follow_up_command"] = next_follow_up
             _write_next_follow_up_script(next_follow_up)
+    follow_up_result = _follow_up_result(
+        follow_up,
+        config_summaries,
+        best_config,
+        min_nll_delta=float(args.min_nll_delta),
+    )
+    if follow_up_result is not None:
+        aggregate["follow_up_result"] = follow_up_result
     _write_json(root_run_dir / "summary.json", aggregate)
     _write_text(root_run_dir / "report.md", _aggregate_report(aggregate))
     if args.json:
